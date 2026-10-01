@@ -3,9 +3,27 @@
  * systems x′ = Ax (x(t) = e^{At} x₀) and the discretisation of continuous-time models.
  */
 
-import { dense, fromData, type Matrix, type MatrixLike, type Tensor, toFlat } from 'aifn/foundation/tensor'
+import {
+  concat,
+  definePrimitive,
+  dense,
+  fromData,
+  isTraced,
+  type Matrix,
+  type MatrixLike,
+  type Op,
+  shapeOfValue,
+  slice,
+  type Tensor,
+  toFlat,
+  type Traced,
+  transpose,
+  type Value,
+  zeros,
+} from 'aifn/foundation/tensor'
 import { NumericalError, ShapeError } from 'aifn/foundation/errors'
 import { solve } from './lu'
+import { concrete, float64Aval, kernelBatch } from './rules'
 
 type F64 = dense.F64
 const { identity, matMul, norm1, toMatrixF64 } = dense
@@ -74,26 +92,17 @@ function padeUV(A: F64, n: number, m: number, powers: F64[]): { U: F64; V: F64 }
 }
 
 /** The result of `expm`: e^A and how it was computed. */
-export type MatrixExponential = {
+export type MatrixExponential<T = Matrix> = {
   /** e^A (n×n). */
-  value: Matrix
-  /** The Padé degree used (3, 5, 7, 9 or 13). */
+  value: T
+  /** The Padé degree used (3, 5, 7, 9 or 13; NaN inside `vmap`, where it is per example). */
   degree: number
-  /** The number of squarings s: e^A = (r_m(A/2^s))^{2^s}. */
+  /** The number of squarings s: e^A = (r_m(A/2^s))^{2^s} (NaN inside `vmap`). */
   squarings: number
 }
 
-/**
- * The matrix exponential e^A = Σ A^k/k! of a real square matrix by the scaling and squaring method with Padé
- * approximants (Higham, 2005, Algorithm 2.3, as scipy's `expm`): pick the smallest Padé degree m whose accuracy bound
- * θ_m covers ‖A‖₁, or scale A by 2^{−s} until ‖A/2^s‖₁ ≤ θ₁₃ and use degree 13, solve (V − U) R = V + U, then square
- * R s times. Accurate to near machine precision relative to ‖e^A‖ for normal matrices.
- *
- * @example expm([[0, 1], [-1, 0]]).value // rotation by 1 radian: [[cos 1, sin 1], [−sin 1, cos 1]]
- */
-export function expm(a: MatrixLike): MatrixExponential {
-  const { data: A0, m: rows, n } = toMatrixF64(a, 'expm')
-  if (rows !== n) throw new ShapeError('expm', `expm: expected a square matrix, got ${rows}×${n}`)
+/** e^A of a dense row-major n×n matrix by scaling and squaring. */
+function compute(A0: F64, n: number): MatrixExponential {
   for (let i = 0; i < A0.length; i++)
     if (!Number.isFinite(A0[i])) throw new NumericalError('expm', 'expm: the matrix must be finite', 'not-finite')
   if (n === 0) return { value: fromData(new Float64Array(0), [0, 0]), degree: 3, squarings: 0 }
@@ -113,6 +122,69 @@ export function expm(a: MatrixLike): MatrixExponential {
   const B4 = matMul(B2, B2, n, n, n)
   const B6 = matMul(B4, B2, n, n, n)
   return { value: finish(A, n, 13, [B2, B4, B6], s), degree: 13, squarings: s }
+}
+
+/** A raw square matrix as dense data. */
+function squareData(a: MatrixLike, where: string): { A: F64; n: number } {
+  const { data, m: rows, n } = toMatrixF64(a, where)
+  if (rows !== n) throw new ShapeError(where, `${where}: expected a square matrix, got ${rows}×${n}`)
+  return { A: data, n }
+}
+
+/**
+ * The Fréchet derivative L(A, E) = d/dt e^{A + tE} at t = 0, as the top-right block of e^{[[A, E], [0, A]]} (Van Loan,
+ * 1978, "Computing integrals involving the matrix exponential", Theorem 1; Al-Mohy and Higham, 2009, "Computing the
+ * Fréchet derivative of the matrix exponential", §1). Written with the `expm` primitive, so it differentiates again.
+ */
+function frechet(a: Value, e: Value, n: number): Value {
+  const zero = zeros([n, n])
+  const block = concat([concat([a, e], 1), concat([zero, a], 1)], 0)
+  return slice(expmOp([block], {}), [0, n], [n, 2 * n])
+}
+
+/** Parameters of the `expm` primitive: e^A already computed for this input by the wrapper. */
+type Params = { readonly found?: Tensor }
+
+// Rules: the tangent is L(A, Ȧ) and, since L(A, ·)ᵀ = L(Aᵀ, ·) for real A, the adjoint is Ā = L(Aᵀ, Ȳ) (Al-Mohy and
+// Higham, 2009, §1; Najfeld and Havel, 1995).
+const expmOp: Op<Params> = definePrimitive<Params>({
+  id: 'numerics/linalg/expm',
+  arity: 1,
+  impl: ([a], p) => {
+    if (p.found) return p.found
+    const { A, n } = squareData(a as Tensor, 'expm')
+    return compute(A, n).value
+  },
+  vjp: (g, [a]) => [frechet(transpose(a), g, shapeOfValue(a)[0])],
+  jvp: ([t], [a]) => (t === null ? null : frechet(a, t, shapeOfValue(a)[0])),
+  batch: kernelBatch('numerics/linalg/expm'),
+  shape: ([a]) => float64Aval(a.shape),
+  doc: { summary: 'The matrix exponential e^A.' },
+  test: { rtol: 1e-4, secondOrder: true, cases: (draw) => [{ inputs: [draw([3, 3])], params: {} }] },
+})
+
+/**
+ * The matrix exponential e^A = Σ A^k/k! of a real square matrix by the scaling and squaring method with Padé
+ * approximants (Higham, 2005, Algorithm 2.3, as scipy's `expm`): pick the smallest Padé degree m whose accuracy bound
+ * θ_m covers ‖A‖₁, or scale A by 2^{−s} until ‖A/2^s‖₁ ≤ θ₁₃ and use degree 13, solve (V − U) R = V + U, then square
+ * R s times. Accurate to near machine precision relative to ‖e^A‖ for normal matrices. Differentiable in both modes
+ * through the Fréchet derivative (Van Loan's block matrix, which costs one exponential of a 2n×2n matrix).
+ *
+ * @example expm([[0, 1], [-1, 0]]).value // rotation by 1 radian: [[cos 1, sin 1], [−sin 1, cos 1]]
+ */
+export function expm(a: MatrixLike): MatrixExponential
+export function expm(a: Traced): MatrixExponential<Traced>
+export function expm(a: MatrixLike | Traced): MatrixExponential<Matrix | Traced>
+export function expm(a: MatrixLike | Traced): MatrixExponential<Matrix | Traced> {
+  if (!isTraced(a)) {
+    const { A, n } = squareData(a, 'expm')
+    return compute(A, n)
+  }
+  const raw = concrete(a)
+  if (raw === null) return { value: expmOp([a], {}) as Traced, degree: NaN, squarings: NaN }
+  const { A, n } = squareData(raw as Tensor, 'expm')
+  const r = compute(A, n)
+  return { ...r, value: expmOp([a], { found: r.value }) as Traced }
 }
 
 function finish(A: F64, n: number, m: number, powers: F64[], squarings: number): Matrix {

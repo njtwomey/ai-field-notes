@@ -6,7 +6,8 @@
 
 import type { Status } from 'aifn/foundation/contracts'
 import { lstsq } from 'aifn/numerics/linalg'
-import { dense, fromData, type Tensor } from 'aifn/foundation/tensor'
+import { sigmoid, softmax } from 'aifn/numerics/special'
+import { dense, fromData, logsumexp, matmul, type Tensor } from 'aifn/foundation/tensor'
 import { trace, type Algorithm, type Trace } from 'aifn/foundation/trace'
 import type { Decides, Expects, Fitted, Predicts, Samples, Scores, Trained } from 'aifn/learning/estimators'
 import type { Estimator, FitOptions, Supervised } from 'aifn/learning/estimators'
@@ -15,6 +16,8 @@ import { withExpectation, withSampling } from 'aifn/learning/estimators'
 import { matrixShape, targetValues } from 'aifn/learning/estimators'
 import { binomialFamily, link } from 'aifn/probability/likelihoods'
 import { irls, type IrlsState } from '../irls'
+import { defineModel } from 'aifn/learning/estimators'
+import { bool, int, real, space } from 'aifn/foundation/space'
 
 const values = dense.data
 
@@ -89,23 +92,16 @@ function evaluate(problem: SoftmaxProblem, W: Float64Array, withHessian: boolean
   const gradient = new Float64Array(P)
   const hessian = withHessian ? new Float64Array(P * P) : null
   let loss = 0
-  const eta = new Float64Array(C)
-  const prob = new Float64Array(C)
+  // η = X W [n, C]; log Σₖ e^{ηₖ} and the class probabilities softmax(η) per row.
+  const etaAll = matmul(problem.design, fromData(W, [p, C]))
+  const ETA = values(etaAll)
+  const LSE = values(logsumexp(etaAll, 1))
+  const PROB = values(softmax(etaAll))
   for (let i = 0; i < n; i++) {
-    for (let k = 0; k < C; k++) {
-      let s = 0
-      for (let a = 0; a < p; a++) s += X[i * p + a] * W[a * C + k]
-      eta[k] = s
-    }
     const yi = y[i]
+    const prob = PROB.subarray(i * C, (i + 1) * C)
     {
-      let m = -Infinity
-      for (let k = 0; k < C; k++) m = Math.max(m, eta[k])
-      let z = 0
-      for (let k = 0; k < C; k++) z += Math.exp(eta[k] - m)
-      const lse = m + Math.log(z)
-      loss += lse - eta[yi]
-      for (let k = 0; k < C; k++) prob[k] = Math.exp(eta[k] - lse)
+      loss += LSE[i] - ETA[i * C + yi]
       for (let a = 0; a < p; a++) {
         const xa = X[i * p + a]
         for (let k = 0; k < C; k++) gradient[a * C + k] += xa * (prob[k] - (k === yi ? 1 : 0))
@@ -359,7 +355,7 @@ export function logisticRegression(
         if (C === 1) {
           return bernoulliPredictive(
             fromData(
-              Float64Array.from(eta, (e) => (e >= 0 ? 1 / (1 + Math.exp(-e)) : Math.exp(e) / (1 + Math.exp(e)))),
+              Float64Array.from(eta, (e) => sigmoid(e)),
               [eta.length],
             ),
           )
@@ -406,3 +402,27 @@ export function logisticRegression(
     },
   }
 }
+
+// ── Registry ─────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+defineModel(
+  {
+    key: 'logisticRegression',
+    module: 'learning/generalised/glm',
+    name: 'Logistic regression',
+    summary:
+      'Binary or softmax logistic regression fitted by Newton steps, with a Bernoulli or categorical predictive.',
+    task: 'classification',
+    capabilities: ['forward', 'decide', 'predictive', 'expect', 'score', 'sample'],
+    hyper: space({
+      l2: real(0, 100, { default: 1, label: 'L2 penalty' }),
+      intercept: bool({ default: true }),
+      multinomial: bool(),
+      tolerance: real(1e-14, 1e-2, { default: 1e-12, scale: 'log' }),
+      maxSteps: int(1, 1000, { default: 100 }),
+    }),
+    notes: ['logistic-regression'],
+    cite: ['hastie2009'],
+  },
+  logisticRegression,
+)

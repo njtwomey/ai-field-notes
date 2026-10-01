@@ -17,6 +17,8 @@ import { fromData, type Tensor } from 'aifn/foundation/tensor'
 import { classicalCore } from '../centring'
 import { nearestNeighbours, squaredDistances } from '../neighbourhoods'
 import { mat, matrix, values, vec } from '../util'
+import { defineModel } from 'aifn/learning/estimators'
+import { int, real, space } from 'aifn/foundation/space'
 
 /** The symmetric k-nearest-neighbour graph of the rows of x, edges weighted by Euclidean distance. */
 export function neighbourGraph(x: Tensor, k: number): { graph: Graph; distances: Tensor; neighbours: number[][] } {
@@ -253,3 +255,57 @@ export function locallyLinearEmbedding(
     },
   }
 }
+
+// ── Registry ─────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+defineModel(
+  {
+    key: 'isomap',
+    module: 'unsupervised/embedding/manifold',
+    name: 'Isomap',
+    summary: 'Classical MDS of geodesic distances on a nearest-neighbour graph.',
+    task: 'embedding',
+    capabilities: [],
+    transductive: true,
+    hyper: space({ neighbours: int(2, 50, { default: 5 }), dims: int(1, 10, { default: 2 }) }),
+    notes: ['isomap'],
+    cite: ['tenenbaum2000'],
+  },
+  isomap,
+)
+
+defineModel(
+  {
+    key: 'laplacianEigenmaps',
+    module: 'unsupervised/embedding/manifold',
+    name: 'Laplacian eigenmaps',
+    summary: 'The smallest non-trivial eigenvectors of a nearest-neighbour graph Laplacian.',
+    task: 'embedding',
+    capabilities: [],
+    transductive: true,
+    hyper: space({ neighbours: int(2, 50, { default: 10 }), dims: int(1, 10, { default: 2 }) }),
+    notes: ['laplacian-eigenmaps'],
+    cite: ['belkin2003'],
+  },
+  laplacianEigenmaps,
+)
+
+defineModel(
+  {
+    key: 'locallyLinearEmbedding',
+    module: 'unsupervised/embedding/manifold',
+    name: 'Locally linear embedding',
+    summary: 'An embedding that keeps each point’s reconstruction weights from its neighbours.',
+    task: 'embedding',
+    capabilities: [],
+    transductive: true,
+    hyper: space({
+      neighbours: int(2, 50, { default: 5 }),
+      dims: int(1, 10, { default: 2 }),
+      regularisation: real(1e-6, 1, { default: 1e-3, scale: 'log' }),
+    }),
+    notes: ['locally-linear-embedding'],
+    cite: ['roweis2000'],
+  },
+  locallyLinearEmbedding,
+)

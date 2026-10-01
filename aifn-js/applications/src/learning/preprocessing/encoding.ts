@@ -5,6 +5,8 @@
 
 import { fromData, type Tensor } from 'aifn/foundation/tensor'
 import { values, type FittedTransform, type Invertible, type Transformer } from './transformer'
+import { defineModel } from 'aifn/learning/estimators'
+import { oneOf, space } from 'aifn/foundation/space'
 
 /** A category label. */
 export type Category = string | number
@@ -331,3 +333,50 @@ export function targetEncodeCrossFit(
   }
   return { encoded: fromData(out, [n, d]), model: targetEncoder({ smooth }).fit(data) }
 }
+
+// ── Registry ─────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+defineModel(
+  {
+    key: 'oneHotEncoder',
+    module: 'learning/preprocessing',
+    name: 'One-hot encoder',
+    summary: 'One indicator column per category.',
+    task: 'preprocessing',
+    capabilities: ['transform'],
+    hyper: space({ handleUnknown: oneOf(['error', 'ignore']) }),
+    notes: ['categorical-encoding'],
+    cite: ['pedregosa2011'],
+  },
+  oneHotEncoder,
+)
+
+defineModel(
+  {
+    key: 'ordinalEncoder',
+    module: 'learning/preprocessing',
+    name: 'Ordinal encoder',
+    summary: 'Each category to its integer index.',
+    task: 'preprocessing',
+    capabilities: ['transform'],
+    hyper: space({ handleUnknown: oneOf(['error', 'use-encoded-value']) }),
+    notes: ['categorical-encoding'],
+    cite: ['pedregosa2011'],
+  },
+  ordinalEncoder,
+)
+
+defineModel(
+  {
+    key: 'targetEncoder',
+    module: 'learning/preprocessing',
+    name: 'Target encoder',
+    summary: 'Each category to a shrunk mean of the target.',
+    task: 'preprocessing',
+    capabilities: ['transform'],
+    hyper: space({}),
+    notes: ['categorical-encoding'],
+    cite: ['micci2001'],
+  },
+  targetEncoder,
+)

@@ -4,8 +4,20 @@
  * Nørsett & Wanner, 1993, "Solving Ordinary Differential Equations I", §II.1).
  */
 
-import { dense, fromData } from 'aifn/foundation/tensor'
-import type { Algorithm, Scalar, Size } from 'aifn/foundation/contracts'
+import {
+  dense,
+  fromData,
+  isTensor,
+  isTraced,
+  linearCombination,
+  shapeOfValue,
+  unwrap,
+  type Tensor,
+  type Value,
+  type Vector,
+} from 'aifn/foundation/tensor'
+import type { Algorithm, Scalar, Size, VectorLike } from 'aifn/foundation/contracts'
+import { NotDifferentiableError } from 'aifn/foundation/errors'
 import type { FixedStepOptions, InitialValue, OdeState, Rhs } from './types'
 
 const { allFinite, toF64 } = dense
@@ -46,42 +58,70 @@ export const RK4: ButcherTableau = {
 /** The explicit tableaux by name. */
 export const TABLEAUX = { euler: EULER, heun: HEUN, midpoint: MIDPOINT, rk4: RK4 } as const
 
-/** Evaluates f and checks the length of its result (internal to the ode solvers). */
-export function evaluate(f: Rhs, t: Scalar, x: F64, where: string): F64 {
-  const k = toF64(f(t, fromData(x, [x.length])), where)
-  if (k.length !== x.length)
-    throw new Error(`${where}: f returned ${k.length} values for a state of length ${x.length}`)
+const lengthOf = (v: Value) =>
+  isTensor(v) && v.shape.length === 1 ? v.shape[0] : shapeOfValue(v).reduce((a, b) => a * b, 1)
+
+/**
+ * f(t, x) as a value, its length checked against x's (internal to the ode solvers). x may be traced: f written with
+ * primitives then returns a traced derivative, which is what lets `unrolled` differentiate through a solver.
+ */
+export function evaluateValue(f: Rhs, t: Scalar, x: Value, where: string): Value {
+  const out = f(t, x as Tensor)
+  // A plain array for a traced state was computed on raw values: its dependence on x is lost, and a gradient through
+  // the solver would silently be wrong.
+  if (isTraced(x) && !isTensor(out) && !isTraced(out) && typeof out !== 'number')
+    throw new NotDifferentiableError(
+      where,
+      `${where}: f returned a plain array for a traced state; write it with aifn primitives to differentiate the solution`,
+    )
+  const k: Value =
+    typeof out === 'number' || isTensor(out) || isTraced(out)
+      ? (out as Value)
+      : fromData(Float64Array.from(out as ArrayLike<number>), [(out as ArrayLike<number>).length])
+  const n = lengthOf(x)
+  if (lengthOf(k) !== n) throw new Error(`${where}: f returned ${lengthOf(k)} values for a state of length ${n}`)
   return k
 }
 
-/** The stages k_i = f(t + c_i h, x + h Σ_j a_ij k_j) of an explicit tableau; `k0` reuses a known f(t, x). */
-export function stages(f: Rhs, tab: ButcherTableau, t: number, x: F64, h: number, where: string, k0?: F64): F64[] {
-  const k: F64[] = []
+/** f(t, x) on a working array (internal to the ode solvers that compute on raw arrays). */
+export function evaluate(f: Rhs, t: Scalar, x: F64, where: string): F64 {
+  return toF64(unwrap(evaluateValue(f, t, fromData(x, [x.length]), where)) as Tensor, where)
+}
+
+/**
+ * The stages k_i = f(t + c_i h, x + h Σ_j a_ij k_j) of an explicit tableau; `k0` reuses a known f(t, x). Written with
+ * primitives, so a traced x (or an f closing over traced parameters) gives traced stages.
+ */
+export function stages(
+  f: Rhs,
+  tab: ButcherTableau,
+  t: number,
+  x: Value,
+  h: number,
+  where: string,
+  k0?: Value,
+): Value[] {
+  const k: Value[] = []
   for (let i = 0; i < tab.b.length; i++) {
-    if (i === 0 && k0) {
+    if (i === 0 && k0 !== undefined) {
       k.push(k0)
       continue
     }
-    const y = Float64Array.from(x)
-    const row = tab.a[i]
-    for (let j = 0; j < row.length; j++) {
-      const aij = row[j]
-      if (aij === 0) continue
-      for (let d = 0; d < y.length; d++) y[d] += h * aij * k[j][d]
-    }
-    k.push(evaluate(f, t + tab.c[i] * h, y, where))
+    k.push(evaluateValue(f, t + tab.c[i] * h, combine(x, h, tab.a[i], k), where))
   }
   return k
 }
 
-/** x + h Σ w_i k_i. */
-export function combine(x: F64, h: number, w: readonly number[], k: F64[]): F64 {
-  const y = Float64Array.from(x)
+/** x + h Σ w_i k_i (terms with w_i = 0 skipped), as one primitive. */
+export function combine(x: Value, h: number, w: readonly number[], k: readonly Value[]): Value {
+  const terms: Value[] = [x]
+  const coefficients = [1]
   for (let i = 0; i < w.length; i++) {
     if (w[i] === 0) continue
-    for (let d = 0; d < y.length; d++) y[d] += h * w[i] * k[i][d]
+    terms.push(k[i])
+    coefficients.push(h * w[i])
   }
-  return y
+  return terms.length === 1 ? x : linearCombination(terms, coefficients)
 }
 
 /** The initial state every solver starts from (internal to the ode solvers). */
@@ -100,6 +140,15 @@ export function initialState(x0: F64, t0: Scalar): OdeState {
   }
 }
 
+/**
+ * The initial state of a solver that steps on values (internal): a traced x₀ (differentiating the solution with
+ * respect to the initial state) is kept as the state, the rest of the state read from its primal value.
+ */
+export function initialValue(x0: VectorLike, t0: Scalar, where: string): OdeState {
+  if (!isTraced(x0)) return initialState(toF64(x0, where), t0)
+  return { ...initialState(toF64(unwrap(x0 as unknown as Value) as Tensor, where), t0), x: x0 as unknown as Vector }
+}
+
 /** The step to take from time t (internal): h, shortened so as not to pass `tEnd`. */
 export function nextStep(t: number, h: number, tEnd: number | undefined): number {
   if (tEnd === undefined) return h
@@ -116,7 +165,9 @@ export function reached(t: number, h: number, tEnd: number | undefined): boolean
 /**
  * A fixed-step explicit Runge–Kutta solver for x′ = f(t, x) from a Butcher tableau or the name of one (`'euler'`,
  * `'heun'`, `'midpoint'`, `'rk4'`). Each step costs one evaluation of f per stage; the global error is O(h^order).
- * `init` takes `{ x0, t0 }`; the run stops at `tEnd` when given. A non-finite state sets `diverged`.
+ * `init` takes `{ x0, t0 }`; the run stops at `tEnd` when given. A non-finite state sets `diverged`. The steps are
+ * written with primitives: with f written with primitives too, `unrolled` differentiates the solution with respect to
+ * x₀ and to the parameters f closes over (discretise-then-differentiate, exact for the discrete solution).
  *
  * @example run(rungeKutta((t, x) => neg(x), 'rk4', { stepSize: 0.1, tEnd: 1 }), { x0: [1] }, 100).x // ≈ e⁻¹
  */
@@ -131,18 +182,17 @@ export function rungeKutta(
   const name = tab.name
   return {
     name,
-    init: ({ x0, t0 = 0 }) => initialState(toF64(x0, name), t0),
+    init: ({ x0, t0 = 0 }) => initialValue(x0, t0, name),
     step: (s) => {
-      const x = dense.data(s.x)
       const hk = nextStep(s.time, h, tEnd)
-      const k = stages(f, tab, s.time, x, hk, name)
-      const y = combine(x, hk, tab.b, k)
-      const finite = allFinite(y)
+      const k = stages(f, tab, s.time, s.x, hk, name)
+      const y = combine(s.x, hk, tab.b, k)
+      const finite = allFinite(dense.data(unwrap(y) as Tensor))
       return {
         ...s,
         t: s.t + 1,
         time: s.time + hk,
-        x: fromData(y, [y.length]),
+        x: y as Vector,
         stepSize: hk,
         evaluations: s.evaluations + tab.b.length,
         diverged: !finite,

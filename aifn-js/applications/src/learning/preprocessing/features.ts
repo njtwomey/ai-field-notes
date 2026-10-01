@@ -8,6 +8,8 @@ import { bsplineBasis } from 'aifn/numerics/interpolate'
 import { quantile } from 'aifn/probability/stats'
 import { dense, fromData, type Tensor } from 'aifn/foundation/tensor'
 import { checkColumns, column, matrix, values, type FittedTransform, type Transformer } from './transformer'
+import { defineModel } from 'aifn/learning/estimators'
+import { bool, int, oneOf, real, space } from 'aifn/foundation/space'
 
 // ── Polynomial features ──────────────────────────────────────────────────────────────────────────────────────────────
 
@@ -248,3 +250,59 @@ export function randomFourierFeatures({
     },
   }
 }
+
+// ── Registry ─────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+defineModel(
+  {
+    key: 'polynomialFeatures',
+    module: 'learning/preprocessing',
+    name: 'Polynomial features',
+    summary: 'All monomials of the features up to a degree.',
+    task: 'preprocessing',
+    capabilities: ['transform'],
+    hyper: space({ degree: int(1, 6, { default: 2 }), interactionOnly: bool(), includeBias: bool({ default: true }) }),
+    notes: ['basis-expansions'],
+    cite: ['hastie2009'],
+  },
+  polynomialFeatures,
+)
+
+defineModel(
+  {
+    key: 'splineFeatures',
+    module: 'learning/preprocessing',
+    name: 'Spline features',
+    summary: 'A B-spline basis per feature.',
+    task: 'preprocessing',
+    capabilities: ['transform'],
+    hyper: space({
+      knots: int(2, 50, { default: 5 }),
+      degree: int(0, 5, { default: 3 }),
+      knotPlacement: oneOf(['uniform', 'quantile']),
+      extrapolation: oneOf(['constant', 'continue', 'error']),
+      includeBias: bool({ default: true }),
+    }),
+    notes: ['regression-splines', 'b-splines'],
+    cite: ['hastie2009'],
+  },
+  splineFeatures,
+)
+
+defineModel(
+  {
+    key: 'randomFourierFeatures',
+    module: 'learning/preprocessing',
+    name: 'Random Fourier features',
+    summary: 'Random cosine features whose inner products approximate an RBF kernel.',
+    task: 'preprocessing',
+    capabilities: ['transform'],
+    hyper: space({
+      components: int(1, 2000, { default: 100 }),
+      lengthscale: real(1e-2, 1e2, { default: 1, scale: 'log' }),
+    }),
+    notes: ['random-fourier-features'],
+    cite: ['rahimi2007'],
+  },
+  randomFourierFeatures,
+)

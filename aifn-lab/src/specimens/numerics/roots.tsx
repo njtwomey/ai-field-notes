@@ -7,7 +7,7 @@ export const specimens: Specimen[] = [
     title: 'Root-finding steps',
     description:
       'Bisection, regula falsi (plain and Illinois), Brent, secant and Newton on four equations: the estimate, bracket and interpolating line at each step.',
-    tags: ['trace', 'TraceView', 'bisection', 'Brent', 'secant', 'Newton', 'regula falsi'],
+    tags: ['trace', 'TracePanel', 'bisection', 'Brent', 'secant', 'Newton', 'regula falsi'],
     render: () => <RootStepsSpecimen />,
   },
   {

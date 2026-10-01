@@ -6,14 +6,34 @@ implement. What belongs here, and what belongs in `aifn-applied`, is set by `../
 
 ## Layout
 
-- `src/<module>/index.ts` is a module's public surface, imported as `aifn/<module>` (e.g. `aifn/linalg`). A module may
-  split its code into several files in its folder; only `index.ts` is public.
-- `test/<module>.test.ts` (or `test/<module>/*.test.ts`) holds its vitest tests; run them with `make test`.
-- `test/fixtures/<module>.json` holds golden values generated in Python by `test/fixtures/generate.py`
-  (`make fixtures`). Tests read fixtures; they never call Python.
-- Modules import each other only through `aifn/<module>`, never by relative path across modules, and only downwards in
-  the tier order (no cycles; `../README.md`, Layers).
+- `src/<family>/<module>/index.ts` is a module's public surface, imported as `aifn/<family>/<module>` (e.g.
+  `aifn/numerics/linalg`); `src/<family>/index.ts` is the family's common surface, and the package root `aifn`
+  (`src/index.ts`) re-exports foundation's (tensors, `grad` and friends, streams, runners) for learners. A module may
+  split its code into several files in its folder; only `index.ts` is public. Shared files at a family's root (e.g.
+  `optim/options.ts`) serve its modules.
+- `test/<family>/<module>/*.test.ts` mirrors the source tree and holds the vitest tests. Root files hold the generated
+  suites: `test/primitives.test.ts` (every registered primitive), `test/registries.ts` (loads every registry, as the
+  catalog does) and the protocol helpers (`test/protocol.ts`).
+- `test/fixtures/<family>/…json` holds golden values written in Python by `test/fixtures/generate.py` and the scripts
+  in `test/fixtures/gen/` (`make fixtures`, or `make fixtures FIXTURES="numerics/linalg …"`). Tests read fixtures;
+  they never call Python.
+- `bench/core.bench.ts` holds micro-benchmarks (`make bench`; reported, not gated).
+- Modules import each other only through `aifn/<family>/<module>`, never by relative path across modules (except a
+  family's shared files), and only downwards in the tier order (no cycles; `../README.md`, Import rules and Layers).
 - No dependency outside this repository. No React, no DOM: aifn runs in Node, in the browser and in a Web Worker.
+
+## Running
+
+| Command          | What it does                                                                                                                                                                                                     |
+| ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `make test`      | the layer lint, then vitest for core and applications (and the Python core tests)                                                                                                                                |
+| one file         | `npx vitest run --config aifn-js/core/vitest.config.ts test/numerics/linalg/lanczos.test.ts`                                                                                                                     |
+| `make bench`     | `vitest bench` over `bench/core.bench.ts`: scalar dispatch, elementwise, reductions, gradients, linear algebra, small matrices, normal draws, first-order methods and Runge–Kutta on primitives against plain JS |
+| `make fixtures`  | regenerate the golden values from Python (numpy, scipy, scikit-learn, torch, mpmath)                                                                                                                             |
+| `make catalog`   | rebuild `../generated/catalog.json` from every registry; `make catalog-check` checks it (in `make check`)                                                                                                        |
+| `make lint`      | oxlint, Prettier, the layer lint (`node scripts/aifn-layers.ts`), the name-collision lint, the note-prose wrap check and ruff                                                                                    |
+| `make lab-check` | render every lab page on the server and report any that throw                                                                                                                                                    |
+| `make lab-shots` | screenshot lab pages in headless Chrome into `.scratch/lab-shots/` (`ARGS="--only <family>/<module>"`)                                                                                                           |
 
 ## Layers
 
@@ -22,12 +42,12 @@ tiers are listed in `../modules.json`; the table is in `../README.md`, generated
 `node scripts/aifn-layers.ts` (run by `make lint` and `make test`, and so by `make check`) fails on any import that
 goes up or across a tier, on a relative import into another module's folder, and on a module missing from the file.
 
-Reading the order: numerics first (tensor, then the scalar special functions and autodiff, then linear algebra),
-randomness and geometry above them, then the protocols that use randomness (trace, stats), the solvers, probability
-and the dynamics built on the solvers, then evaluation (metrics, losses), the estimator protocol, the layers of neural
-networks, the compositions of estimators, and datasets last. Shared protocol types sit in the lowest module that all
-their users can import (e.g. `Target`, an unnormalised log-density, is in `distributions` so that `mcmc` and `vi` both
-use it without importing each other).
+Reading the order: `foundation` first (contracts, tensor with its primitives, autodiff, random, trace), then
+`numerics` (special functions, linear algebra, polynomials, quadrature, roots, implicit differentiation, geometry,
+interpolation), `graph`, then `probability`, `optim` and `systems`, then `inference`, `dynamics`, `signal` and
+`transport`, then `learning` (estimators, kernels, losses, metrics, compositions, validation), and `nn` last. Datasets
+and named models are applications. Protocol types are defined once in `aifn/foundation/contracts`, so modules that
+share one (`LogDensity` for MCMC and VI) never import each other for it.
 
 ## Style
 
@@ -40,16 +60,16 @@ use it without importing each other).
   where they apply. No silent clamping or flooring.
 - Names spell ideas out (`choleskyDecomposition` may be shortened to `cholesky`; never cryptic abbreviations).
 
-## Numbers: `aifn/tensor`
+## Numbers: `aifn/foundation/tensor`
 
 ```ts
-type DType = 'float64' | 'float32' | 'int32'
+type DType = 'bool' | 'int32' | 'float32' | 'float64' | 'complex128'
 interface Tensor {
   readonly shape: readonly number[] // [] for a scalar tensor
-  readonly strides: readonly number[] // in elements, row-major by default
+  readonly strides: readonly number[] // in elements (complex elements for complex128), row-major by default
   readonly offset: number
   readonly dtype: DType
-  readonly data: Float64Array | Float32Array | Int32Array
+  readonly data: Float64Array | Float32Array | Int32Array | Uint8Array // complex128: interleaved re, im
 }
 type Vector = Tensor // rank 1
 type Matrix = Tensor // rank 2
@@ -58,6 +78,25 @@ type Matrix = Tensor // rank 2
 - Tensors are immutable by convention: operations return new tensors (views share `data` when no copy is needed).
 - Constructors: `tensor(nested | flat, shape?)`, `zeros`, `ones`, `full`, `eye`, `arange`, `linspace`, `fromRows`.
 - Converters for the chart boundary: `toArray` (nested `number[]…`), `toRows` (`number[][]`), `toFlat` (`number[]`).
+- Dtypes mix by one promotion table (`tensor/dtype.ts`); comparisons give `bool`. Complex128 (design K §8.1):
+  `complex(re, im)`, `tensor([{ re, im }, …])`, `zeros(shape, 'complex128')`; `conj`, `realPart`/`imagPart`
+  (zero-copy float64 views), `abs` (modulus), `angle`, `expj`; arithmetic, exp/log/sqrt/pow, sum/mean/cumsum,
+  matmul/einsum and every structural primitive accept it, ordering operations throw `DTypeError`. `toFlat`
+  interleaves (re, im), `toArray` adds a trailing pair axis, `toComplexFlat`/`toComplexArray` give `{ re, im }`.
+  Autodiff treats complex values as pairs of reals (docs/aifn-autodiff.md §12).
+- Fourier (`aifn/foundation/fourier`, design K §8.2): `fft`, `ifft`, `rfft`, `irfft` are linear primitives on
+  complex128 along any axis (`{ axis, n, norm: 'backward' | 'ortho' | 'forward' }`; radix-2 or Bluestein per line, so
+  leading axes batch). Their transposes are the ℝ² adjoints (fft ↔ ifft with the dual norm; irfft's weights cₖ = 2
+  on interior bins). `dftMatrix(n)` and `dft(x)` (a matmul) are the O(n²) definition; `fftn`/`fft2`, `fftshift`,
+  `fftfreq`, `rfftfreq` are compositions or constructors; `dct`/`idct` are products with `dctMatrix(n)`.
+- Convolution (`aifn/foundation/convolution`, design K §8.3): one family. `conv(x, w, { layout, stride, dilation,
+groups, padding, flip, method })` on [N, C, ...S] × [O, C/groups, ...K] (a rank-1 signal is [1, 1, n]; `flip`
+  true = convolution, false = correlation as in nn; `method` direct | fft | overlapAdd | auto changes only the
+  kernel); `convTranspose` is its input adjoint. Three bilinear primitives (conv, convTranspose, convWeight) are each
+  other's transposes, and batch into N or into channel groups without a loop. `pad` (constant, reflect, symmetric,
+  edge, wrap) is a linear primitive. dsp `convolve`/`correlate`/`fftConvolve`/`upfirdn`, image
+  `correlate2d`/`convolve2d` (pad, then valid), nn `conv1d`/`conv2d`/`avgPool*` and stats' lagged products are
+  compositions over it.
 - Elementwise operations broadcast (NumPy rules). Reductions take `axis?: number | number[]` and `keepDims?: boolean`.
 - Performance-critical inner loops may work on `data` directly (the `dense` namespace has the shared kernels for this),
   but public functions take and return `Tensor` (or plain numbers), not raw arrays. Data arguments may also be
@@ -69,18 +108,22 @@ Every mathematical operation is defined **once**, as a primitive with its forwar
 There is no separate scalar, tensor and differentiable version of the same function.
 
 - A primitive accepts numbers, tensors and traced values: `softplus(2)` returns a number, `softplus(t)` a tensor
-  (elementwise), and inside `grad(f)` the same call records itself on the tape. Autodiff is a mode, not a parallel set
-  of functions.
+  (elementwise), and inside `grad(f)`, `jvp` or `vmap` the same call is handed to that transform's interpreter.
+  Autodiff is a mode, not a parallel set of functions.
 - Primitives are declared with `elementwise({ id, f, derivative })` (elementwise with broadcasting: a scalar rule and
   **one** derivative per argument, written with primitives, so derivatives of any order work) and
-  `definePrimitive`/`defineOp` (general, e.g. reductions and matmul, with a vjp written with primitives), all from
-  `aifn/foundation/tensor`. Derivatives are written next to the forward rule and tested against finite differences.
+  `definePrimitive`/`defineOp` (general, e.g. reductions and matmul: a vjp and a jvp written with primitives, or a
+  `transpose` for a linear primitive, plus optional batching and shape rules), all from `aifn/foundation/tensor`. Derivatives are written next to the forward rule and tested against finite differences.
 - Modules above `tensor` (e.g. `numerics/special` for erf, logΓ, softplus, sigmoid) register their functions through
   `elementwise`, so each function exists in one place and is differentiable wherever its derivative is known. A
   primitive without a derivative (e.g. a discrete sampler) says so, and differentiating through it is an error, not a
   silent zero.
-- `aifn/foundation/autodiff` supplies the tape and the `grad`, `valueAndGrad`, `jvp` and `hvp` transforms. It does
-  not redefine operations.
+- `aifn/foundation/autodiff` supplies three interpreters (reverse, forward, batch) and the transforms built on them:
+  `grad`, `valueAndGrad`, `vjp`, `jvp`, `linearize`, `hvp`, `jacobian`, `hessian`, `vmap`, `stopGradient`. It does
+  not redefine operations. Custom rules for composite functions (`customVjp`, `customJvp`, `defineCustomVjp`) and
+  `checkpoint` live there too; `aifn/foundation/trace` differentiates an `Algorithm` by its steps (`unrolled`).
+  Implicit differentiation of solvers (`implicitFixedPoint`, `implicitRoot`, and `atConvergence` for an `Algorithm`)
+  needs a linear solve, so it is `aifn/numerics/implicit`, on `aifn/numerics/linalg`'s `solve`.
 - **Shapes, not scalars, are the public surface.** Scalar kernels are internal to their module and never exported.
   Every public function of numbers accepts `Scalar | Tensor` (any rank) and broadcasts over all its arguments, so
   `erf(0.5)`, `erf(vector)` and `erf(matrix)` all work and keep their shapes. Samplers likewise take tensor-valued
@@ -203,7 +246,7 @@ reason. Code written now should follow them; existing code is brought into line 
   `options.stream`. No `() => number` sources. _Reason:_ keyed, reproducible randomness (see Randomness); an unkeyed
   function source is a door for draws that no stream accounts for.
 - **A2. Inputs and outputs.** Public numeric functions accept `number | Tensor` and broadcast. Data arguments may be
-  `VectorLike` or `MatrixLike`, defined once in `aifn/tensor`; no module defines its own input alias. Any result that
+  `VectorLike` or `MatrixLike`, defined once in `aifn/foundation/contracts`; no module defines its own input alias. Any result that
   is an array of numbers is a `Tensor` (int32 for indices, counts of items and lags); index lists passed in may be
   `number[]`. _Reason:_ one boundary relaxation instead of a dozen local ones, and one output type that every chart
   helper and every downstream function reads.
@@ -234,23 +277,34 @@ reason. Code written now should follow them; existing code is brought into line 
 
 ### Shared helpers, defined once
 
-- Inputs and inner loops: `VectorLike`, `MatrixLike` and the `dense` kernels (`dense.toF64`, `dense.toMatrixF64`,
-  `dense.dot`, `dense.matVec`, `dense.matMul`, `dense.axpy`, …) in `aifn/tensor`; indexed reads and writes `gather`,
+- Inputs and inner loops: `VectorLike`, `MatrixLike` (`aifn/foundation/contracts`, re-exported by tensor) and the
+  `dense` kernels (`dense.toF64`, `dense.toMatrixF64`, `dense.dot`, `dense.matVec`, `dense.matMul`, `dense.axpy`, …) in
+  `aifn/foundation/tensor`; indexed reads and writes `gather`,
   `scatterAdd` and `take` there too.
 - Linear algebra: `squaredDistances` and `pairwiseDistances`, `solveDense` (small systems in inner loops), the
-  general eigenproblem `eig`, `expm` and `matrixTrace` in `aifn/linalg`.
-- Elementwise functions: `xlogy`, `xlog1py`, `besselI0`, `besselI1`, `logBesselI0`, `besselRatio` in `aifn/special`;
-  `logsumexp` in `aifn/tensor` (no aliases).
-- Scalar minimisation: `minimizeScalar` (Brent, golden section) in `aifn/optim`.
+  general eigenproblem `eig`, `expm`, `matrixTrace`, and `LinearOperator` (a matrix or a function v ↦ Av) with the
+  matrix-free Lanczos eigensolver `eigsh`, in `aifn/numerics/linalg`.
+- Elementwise functions: `xlogy`, `xlog1py`, `besselI0`, `besselI1`, `logBesselI0`, `besselRatio` in
+  `aifn/numerics/special`; `logsumexp` in `aifn/foundation/tensor` (no aliases).
+- Scalar minimisation: `minimizeScalar` (Brent, golden section) in `aifn/numerics/roots`.
+- Implicit differentiation: `implicitFixedPoint`, `implicitRoot`, `atConvergence` in `aifn/numerics/implicit`.
 - Sequences and weights: `autocorrelation` and `autocovariance` (FFT for long sequences) and
-  `importanceEffectiveSampleSize` in `aifn/stats`.
-- Protocol types: `Target` (an unnormalised log-density) in `aifn/distributions`.
-- Optimisation test surfaces (`rosenbrock`, `himmelblau`, …) are data, in `aifn/datasets`.
+  `importanceEffectiveSampleSize` in `aifn/probability/stats`.
+- Protocol types: `LogDensity` (an unnormalised log-density; the old name `Target` is gone) and the other protocols in
+  `aifn/foundation/contracts`.
+- Optimisation test surfaces (`rosenbrock`, `himmelblau`, …) are data, in `aifn-applied/data/objectives`.
 
 A module that needs one of these imports it; it does not keep a private copy.
 
 ## Tests
 
+- Run them with `make test` (both packages) or one file with `npx vitest run --config aifn-js/core/vitest.config.ts
+<path>`.
+- Generated suites cover every registry entry without a hand-kept list: every primitive (values, broadcasting, dtypes,
+  vjp and jvp against finite differences and each other, batch rules, input immutability), every algorithm (the trace
+  protocol on a case keyed by its address; a new algorithm without a case fails), every distribution family (info,
+  Kolmogorov–Smirnov against its cdf, moments) and the metadata of windows, wavelets, kernels, bijectors, links,
+  likelihoods, filter designs and KL rules (`../README.md`, Registries and the catalog).
 - Each exported function has tests. Deterministic numerics are checked against Python fixtures (numpy, scipy,
   scikit-learn, torch) at stated tolerances. Stochastic code gets statistical tests (moments, KS against a reference
   cdf) with fixed streams, plus determinism tests.
@@ -260,7 +314,8 @@ A module that needs one of these imports it; it does not keep a private copy.
 ## The lab
 
 `make lab` starts `aifn-lab` (http://localhost:5190/). Each module adds specimens in
-`aifn-lab/src/specimens/<module>.tsx`, and generic views of aifn objects live in `aifn-lab/src/views/`. A specimen's
-page is `/<module>/<specimen-slug>` and a figure on it is `#<figure-id>` (the slug of its title), e.g.
-`/autodiff/a-function-and-its-derivatives#f-with-its-tangent-and-osculating-circle-and-f-f-from-grad`; `/ui-kit` shows
-every control and chart. `make lab-check` renders every page and checks paths and figure ids are unique.
+`aifn-lab/src/specimens/<family>/<module>.tsx` (figures in `_<module>/`; applications under `specimens/applied/`),
+and generic views of aifn objects live in `aifn-lab/src/views/`, registered by `kind` and drawn by `Show`. A
+specimen's page is `/<family>/<module>/<specimen-slug>` and a figure on it is `#<figure-id>` (the slug of its title),
+e.g. `/foundation/tensor/broadcasting`; `/ui-kit` shows every control and chart. `make lab-check` renders every page
+and checks paths and figure ids are unique; `make lab-shots` screenshots pages (`aifn-lab/README.md`).

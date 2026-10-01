@@ -21,16 +21,17 @@ import { FrameContext, useChartHeight, useElementSize } from '@lab/viz'
  *
  *   <Dashboard>
  *     <DashboardRow ratio={1.2}>
- *       <DashboardCell><Heatmap … /></DashboardCell>
- *       <DashboardCell><XYChart … /></DashboardCell>
+ *       <DashboardCell><Plot x={x} y={y}><Raster … /></Plot></DashboardCell>
+ *       <DashboardCell><Plot x={t} y={v}><Curve … /></Plot></DashboardCell>
  *     </DashboardRow>
  *     <DashboardRow>
  *       <DashboardCell ratio={1.4}><ContingencyTableView … /></DashboardCell>
- *       <DashboardCell aspect="square"><XYChart aspect="equal" xRange={[0, 1]} yRange={[0, 1]} … /></DashboardCell>
+ *       <DashboardCell aspect="square"><Plot x={fpr} y={tpr}><Curve … /></Plot></DashboardCell>
  *     </DashboardRow>
  *   </Dashboard>
  *
- * Charts in different cells share nothing; aligned axes are a `Subplots` concern (a Subplots grid may sit in a cell).
+ * Charts in different cells share nothing unless given the same axis model; aligned plot areas are a `Plots` concern
+ * (a Plots grid may sit in a cell).
  */
 export function Dashboard({
   children,
@@ -94,6 +95,8 @@ type CellProps = {
    * plot that would otherwise be letterboxed into a short strip. Default: the row's height.
    */
   stackAspect?: 'square' | number
+  /** The least width of a cell without `aspect`, in pixels (default 160): aspect cells shrink, and the row with them. */
+  minWidth?: number
   className?: string
 }
 
@@ -111,13 +114,15 @@ export function DashboardRow({ children, className }: RowProps) {
   // Aspect cells first take their width from the row's height; if they would not fit, they shrink together.
   const fixed = cells.map((c) => aspectOf(c.props.aspect))
   const wanted = fixed.reduce<number>((s, a) => s + (a ? a * height : 0), 0)
-  const flexible = cells.filter((_, i) => !fixed[i]).length
-  const space = width - gap * (cells.length - 1) - (flexible ? 160 * flexible : 0)
+  const flexibleWidth = cells.reduce((sum, c, i) => sum + (fixed[i] ? 0 : (c.props.minWidth ?? 160)), 0)
+  const space = width - gap * (cells.length - 1) - flexibleWidth
   const shrink = wanted > 0 && wanted > space ? Math.max(space, 0) / wanted : 1
+  // Aspect cells that would not fit shrink with the whole row, so they keep their shape and leave no empty band.
+  const rowHeight = Math.round(height * shrink)
   return (
     <div
       className={cn('flex w-full', stacked ? 'flex-col items-center' : 'flex-row', className)}
-      style={{ gap, ...(stacked ? {} : { height }) }}
+      style={{ gap, ...(stacked ? {} : { height: rowHeight }) }}
     >
       {cells.map((cell, i) => {
         const a = fixed[i]
@@ -126,8 +131,8 @@ export function DashboardRow({ children, className }: RowProps) {
             ? { width, height: Math.round(width / (a || aspectOf(cell.props.stackAspect)!)) }
             : { height }
           : a
-            ? { width: Math.round(a * height * shrink), height, flex: 'none' }
-            : { height, flex: `${cell.props.ratio ?? 1} 1 0` }
+            ? { width: Math.round(a * rowHeight), height: rowHeight, flex: 'none' }
+            : { height: rowHeight, flex: `${cell.props.ratio ?? 1} 1 0` }
         return (
           <CellFrame key={cell.key ?? i} box={box} stacked={stacked} className={cell.props.className}>
             {cell.props.children}

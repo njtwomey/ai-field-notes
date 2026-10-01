@@ -112,6 +112,7 @@ export {
   gaussianLogScore,
   intervalScore,
   logLoss,
+  logScore,
   maximumCalibrationError,
   perplexity,
   pitValues,
@@ -121,6 +122,7 @@ export {
   sweepCalibrationError,
   type BinStrategy,
   type BrierDecomposition,
+  type GaussianForecast,
   type Interval,
   type PerCase,
   type Probabilities,
@@ -154,6 +156,8 @@ export {
 } from './regression'
 export {
   dcg,
+  gainFunction,
+  positionDiscount,
   expectedReciprocalRank,
   hitRate,
   meanAveragePrecision,
@@ -239,6 +243,8 @@ export {
   macroMeanAbsoluteError,
   withinToleranceAccuracy,
   quadraticWeightedKappa,
+  rankedProbabilityScore,
+  ordinalConcordanceIndex,
 } from './ordinal'
 
 // Helpers for defining metrics outside this module (the application metrics of `aifn-applied/evaluation`): the input

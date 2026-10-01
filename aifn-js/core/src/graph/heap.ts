@@ -30,7 +30,7 @@ const before = <T>(a: HeapEntry<T>, b: HeapEntry<T>) =>
 
 /** Add `value` with `priority` (O(log n)); mutates the heap. */
 export function heapPush<T>(h: Heap<T>, value: T, priority: number): void {
-  if (Number.isNaN(priority)) throw new Error('heapPush: priority is NaN')
+  if (Number.isNaN(priority)) throw new DomainError('heapPush', 'heapPush: priority is NaN')
   const e = h.entries
   e.push({ value, priority, seq: h.pushed++ })
   let k = e.length - 1
@@ -122,3 +122,4 @@ export function unite(uf: UnionFind, a: number, b: number): boolean {
 export function unionFindCopy(uf: UnionFind): UnionFind {
   return { parent: [...uf.parent], rank: [...uf.rank], count: uf.count }
 }
+import { DomainError } from 'aifn/foundation/errors'

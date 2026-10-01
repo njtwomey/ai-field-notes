@@ -126,12 +126,15 @@ state.input.key; state.input.values.mu; state.reveal.jacobian; state.x0
   it takes space until asked for.
 - **Layers** are small components with one job and a declared extent (which feeds the fit, unless `live`):
   `Curve`, `Points`, `Bars`, `Area`, `SignedArea` (two colours about zero, reports its net area), `Histogram` (from
-  samples via `aifn/stats`, with `orient`), `Density` and `Mass` (from an `aifn/distributions` object, with `orient`),
+  samples via `aifn/probability/stats`, with `orient`), `Density` and `Mass` (from an `aifn/probability/distributions` object, with `orient`),
   `Rug`, `SupportBand`, `Vectors` (clipped), `Segments`, `Grid2d` (the heatmap raster), `Contours`, `Handle`, `Probe`,
   `Annotation`. A layer marked `live` updates by patch without redrawing.
 - `EChart.tsx` stays the only file that touches ECharts. `Plot` collects its layers' series and builds one option.
 - Hover, legends, palette slots and the tooltip are the Plot's, so every chart behaves the same.
-- The current `XYChart` becomes a thin wrapper over `Plot` for simple cases and old code, then is retired.
+- `XYChart`, `Heatmap`, `Subplots` and `ChartSize` were retired in phase 5d once the last page moved to `Plot`.
+- Legends wrap (never page), keep live layers, and stay clear of a colour bar's name; labels above the plot (x
+  handles, vertical annotations) get their own row, so nothing is clipped at the plot's edge. Panels with equal units
+  in one row or column share one plot width. `scale` on a `Plot` or `Plots` takes a share of the frame's height.
 
 ## 6. Probes: a point the reader moves, with numbers computed there
 
@@ -156,7 +159,7 @@ const probe = useProbe({ x: state.x0 })            // or { x, y } for a point on
 ## 8. Stepping and traces
 
 `Player` stays the one scrubber. A figure that steps (optimisers, graph algorithms, backprop, simplex) takes a trace
-from `aifn/trace` and a `step` from its state. `TraceView`, `GraphView` and the computation graph view read the same
+from `aifn/foundation/trace` and a `step` from its state. `TraceView`, `GraphView` and the computation graph view read the same
 `{ trace, step }`.
 
 ## 8a. Interaction performance: one scheduler, not ad-hoc debouncing
@@ -172,25 +175,39 @@ scheduler handles it:
 - **Latest wins, once per frame.** `useComputed(fn, inputs, { mode })` coalesces input changes to at most one run per
   animation frame, always on the latest inputs, and drops stale results. A run that started for an old input never
   paints over a newer one. Nothing is delayed by a timer.
-- **Modes by cost, measured, not guessed.** The scheduler times each run. Under the frame budget (about 8 ms) it runs
-  every frame. Over it, it runs as often as it can while dragging and shows the last result marked stale (a subtle
-  dimming of the derived layers only), then always runs on release. `mode: 'release'` defers to release outright;
-  `mode: 'worker'` runs in a Web Worker with cancellation (aifn is DOM-free, so algorithms move without change).
+- **Modes by cost, measured, not guessed.** The scheduler times each run. A run whose last time was under 2 ms
+  (`inline`) is computed in the render that sees the new inputs, with no second render. Under the frame budget (about
+  8 ms) it runs every frame, rendered before that frame paints. Over it, it runs as often as it can while dragging and
+  shows the last result marked stale (a subtle dimming of the derived layers only), then always runs on release.
+  `mode: 'release'` defers to release outright. The pointer listener is installed when the state module loads, so the
+  first drag after load is already seen as a drag.
+- **Worker mode.** `mode: 'worker'` runs an aifn computation in a Web Worker (aifn is DOM-free, so algorithms move
+  without change). The computation is data, not a closure: `call(address, ...args)` (`state/task.ts`) names an export
+  by its address `<module>/<export>` (a registry entry's catalog address, e.g. `inference/stochastic/hmc`, or any
+  export such as `foundation/trace/trace`), with plain arguments, tensors or nested calls. The worker
+  (`state/compute.worker.ts`) imports the module on first use, evaluates the call tree and answers by structured clone
+  (functions dropped, tensors re-branded by aifn's `revive`); `then` maps the answer on the page (cheap work such as
+  plot coordinates) and `initial` is the value until the first answer. Latest wins: one job is in flight per figure, a
+  newer task replaces the queued one, and a superseded job that runs past `cancelAfter` (200 ms) is cancelled by
+  terminating the worker. `stale` is true while a job is pending. The HMC showcase's chain runs this way: it follows a
+  dragged start live, instead of freezing until release.
 - **Incremental where aifn allows.** Traces extend instead of recomputing (`extend`), replicates reuse prefixes
   (`replicate`), so a raised iteration count or draw count costs only the new part.
 - **Redraw only what changed.** `Plot` sends ECharts a patch of the layers whose data changed. Static layers (a
   heatmap raster, contours, a density) are never resent during a drag.
 - **Measured.** `make lab-shots ARGS="--profile …"` scripts a drag and reports input-to-paint latency, dropped frames
   and redraws per move, so a page's interaction cost is a number in its review, not an impression.
-- `Slider`'s `debounceMs` and per-widget throttles are removed once the scheduler lands; the slider feeds the same
-  scheduler as a handle.
+- `Slider`'s `debounceMs` and per-widget throttles are removed; the slider feeds the same scheduler as a handle.
+- **One snapping rule.** Every input of a figure value (slider, number field, handle, URL) snaps to multiples of the
+  step (`state/step.ts`: k·step, not min + k·step, so a slider from 0.02 by 0.05 holds 0.4) and clamps to the range;
+  off-grid bounds stay reachable. Number fields show whole numbers in full (123456, not 1.23e+5).
 
 ## 9. Components: keep, break up, replace
 
 | Today                                                                                                                      | After                                                                                                  |
 | -------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
-| `XYChart` (30 props), `Heatmap`                                                                                            | `Plot` + layers; thin compatibility wrappers, then retired                                             |
-| `Subplots`/`Panel`, `ChartSize`, per-chart `aspect`, `rescaleOnChange`, `axisKey`, `holdFit`, `ViewportControls` per chart | `Plots` grid + `useAxis` (sharing, aspect, holding and toolbars in one place)                          |
+| `XYChart` (30 props), `Heatmap`                                                                                            | `Plot` + layers (retired in 5d)                                                                        |
+| `Subplots`/`Panel`, `ChartSize`, per-chart `aspect`, `rescaleOnChange`, `axisKey`, `holdFit`, `ViewportControls` per chart | `Plots` grid + `useAxis` (sharing, aspect, holding and toolbars in one place), `scale` (retired in 5d) |
 | `useParam`, `useVariants`, `useParams`, `ParamControls`, `ControlRow`                                                      | `useFigureState` + schema builders                                                                     |
 | Handles wired per page                                                                                                     | `state.handle(name)` and `Probe`                                                                       |
 | `Readout` lists                                                                                                            | `Readouts` groups, `ProbeReadout`, `Equation`                                                          |
@@ -215,5 +232,5 @@ Adopted as recommended (2026-09-30, "carry on"); revisit any on request.
 2. Axis model, `Plot`, `Plots` and the layers, with a UI-kit page per layer. Port `DistributionView` first as the test.
 3. `useFigureState`, schema builders, handles from state, URL state, reset; the `useComputed` scheduler (§8a).
 4. `useProbe`/`Probe`, `Equation`/`EquationSteps`, grouped readouts, `purpose` required.
-5. Specimen review: each page against §2, from screenshots, migrated as it is reviewed; `XYChart`/`Heatmap` retired
-   when the last user goes.
+5. Specimen review: each page against §2, from screenshots, migrated as it is reviewed (5c); component requests from
+   the review and the retirement of `XYChart`/`Heatmap`/`Subplots`/`ChartSize` and the `XView` wrappers (5d, done).

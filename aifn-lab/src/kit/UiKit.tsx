@@ -56,14 +56,14 @@ export function UiKit() {
         <ClippedVectorFigure />
       </Section>
       <Section
-        title="Heatmaps"
-        description="Cells, contours, overlays, a marker, vectors and a handle, with zoom and pan."
+        title="Rasters"
+        description="A Raster layer (sequential, diverging or categorical) under Contours, a live path, Vectors and a Handle, with zoom and pan."
       >
         <HeatmapFigure />
       </Section>
       <Section
-        title="Subplots"
-        description="Subplots and Panel: aligned plot areas, shared axes (one zoom for all), tick labels on the outer panels only, height and width ratios within the frame."
+        title="Plots grids"
+        description="Plots: aligned plot areas, axes shared by passing one axis model to several Plots (one zoom for all), tick labels on the outer panels only, height and width ratios within the frame."
       >
         <SharedXFigure />
         <SharedYFigure />
@@ -71,13 +71,13 @@ export function UiKit() {
       </Section>
       <Section
         title="Data views"
-        description="PairPlotView and ParallelCoordinatesView from @lab/views: a labelled dataset in every feature at once, classes in their categorical slots, class chips that hide a class everywhere, and brushing that filters rows across panels or axes."
+        description="PairPlotPanel and ParallelCoordinatesPanel from @lab/views: a labelled dataset in every feature at once, classes in their categorical slots, class chips that hide a class everywhere, and brushing that filters rows across panels or axes."
       >
         <DataViewsFigures />
       </Section>
       <Section
         title="Linked panels"
-        description="Charts with the same hoverGroup share the hovered x; ChartSize sets each panel's share of the frame."
+        description="Plots in one grid share the hovered x (hoverGroup) and one step axis; the grid splits the frame among them."
       >
         <LinkedFigure />
       </Section>

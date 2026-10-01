@@ -1,7 +1,8 @@
 /**
  * `aifn/probability/bijectors`: bijectors and supports: intervals (`interval`, `REALS`, `POSITIVE`, `UNIT`),
  * invertible maps with log-Jacobians (exp, log, softplus, sigmoid, affine, power, the normal CDF, chains) and
- * many-to-one maps with their branches, the ordered bijector onto increasing vectors (ordinal thresholds), for transformed distributions and constrained parameters.
+ * many-to-one maps with their branches (`bijectorRegistry` lists the bijectors and factories), the ordered bijector onto increasing vectors (ordinal thresholds), for transformed distributions and constrained parameters, and `transformLogDensity`, a log-density reparameterised
+ * through a bijector or a vector change of variables (non-centred parameterisations).
  */
 
 export {
@@ -34,3 +35,5 @@ export {
   type ManyToOneMap,
   type OrderedOptions,
 } from './maps'
+export { transformLogDensity, type Reparameterisation, type TransformedLogDensity } from './reparameterise'
+export { bijectorRegistry } from './registry'

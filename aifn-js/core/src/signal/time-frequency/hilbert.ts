@@ -4,34 +4,22 @@
  * Lond. A 454).
  */
 
-import { fromData, type Tensor } from 'aifn/foundation/tensor'
-import { complexOf, transformInPlace, type ComplexTensor } from 'aifn/foundation/fourier'
+import { copy, fromData, imagPart, mul, realPart, type Tensor } from 'aifn/foundation/tensor'
+import { fft, ifft } from 'aifn/foundation/fourier'
 import type { Scalar, Size, TimeFrequency } from 'aifn/foundation/contracts'
 import { readSamples, timeFrequency, type SignalInput } from '../signal'
 
 /**
  * The analytic signal z = x + i H{x}, as `scipy.signal.hilbert`: the FFT with negative frequencies zeroed and positive
- * ones doubled (DC and Nyquist kept once), inverted. Any length; `n` pads or truncates first. The result is a
- * `{ re, im }` pair of tensors until tensors gain the `complex128` dtype (phase 3).
+ * ones doubled (DC and Nyquist kept once), inverted. Any length; `n` pads or truncates first. complex128 [n].
  */
-export function hilbert(x: SignalInput, { n }: { n?: Size } = {}): ComplexTensor {
+export function hilbert(x: SignalInput, { n }: { n?: Size } = {}): Tensor {
   const v = readSamples(x, 'hilbert').values
   const size = n ?? v.length
-  const re = new Float64Array(size)
-  const im = new Float64Array(size)
-  re.set(v.subarray(0, Math.min(size, v.length)))
-  transformInPlace(re, im)
-  for (let k = 0; k < size; k++) {
-    const h = k === 0 || (size % 2 === 0 && k === size / 2) ? 1 : k < size / 2 ? 2 : 0
-    re[k] *= h
-    im[k] *= h
-  }
-  transformInPlace(re, im, true)
-  for (let k = 0; k < size; k++) {
-    re[k] /= size
-    im[k] /= size
-  }
-  return complexOf(re, im)
+  const h = Float64Array.from({ length: size }, (_, k) =>
+    k === 0 || (size % 2 === 0 && k === size / 2) ? 1 : k < size / 2 ? 2 : 0,
+  )
+  return ifft(mul(fft(fromData(v), { n: size }), fromData(h)))
 }
 
 /** Instantaneous amplitude, phase and frequency of a real signal. */
@@ -54,8 +42,9 @@ export interface Instantaneous {
 export function instantaneous(x: SignalInput, options: { fs?: Scalar } = {}): Instantaneous {
   const { fs } = readSamples(x, 'instantaneous', options.fs)
   const z = hilbert(x)
-  const re = z.re.data as Float64Array
-  const im = z.im.data as Float64Array
+  // Contiguous copies of the parts (realPart/imagPart are strided views of the interleaved storage).
+  const re = copy(realPart(z)).data as Float64Array
+  const im = copy(imagPart(z)).data as Float64Array
   const n = re.length
   const amp = new Float64Array(n)
   const ph = new Float64Array(n)

@@ -5,11 +5,10 @@ import { integrate } from 'aifn/numerics/quadrature'
 import { stream } from 'aifn/foundation/random'
 import { histogram } from 'aifn/probability/stats'
 import { linspace, tensor, toFlat, unwrap, type Tensor, type Value } from 'aifn/foundation/tensor'
-import { useCallback, useMemo, useState } from 'react'
-import { Choice, defineVariants, ParamControls, slider, Slider, useVariants } from '@lab/controls'
-import { ControlRow, Figure, Tex } from '@lab/layout'
-import { Toggle } from '@lab/ui/toggle'
-import { Panel, Readout, Subplots, XYChart, type Handle, type XYSeries } from '@lab/viz'
+import { useMemo, useState } from 'react'
+import { Equation, Figure, live, Tex, tex } from '@lab/layout'
+import { choice, row, slider, toggle, useFigureState, variants } from '@lab/state'
+import { Area, Bars, Curve, Handle, Plot, Plots, Points, Readout, SupportBand, useAxis } from '@lab/viz'
 import { formatValue, histogramBars } from '@lab/views'
 
 /** A Value as numbers. */
@@ -24,6 +23,8 @@ const gap = (v: number) => (Number.isFinite(v) ? v : NaN)
 const grid = (lo: number, hi: number, n: number) => toFlat(linspace(lo, hi, n))
 
 type Range = [number, number]
+/** A case's slider values. */
+type Num = Record<string, number>
 type AnyMap = D.Bijector | D.ManyToOneMap
 
 const BINS = 48
@@ -32,33 +33,36 @@ const DX = 0.04
 
 // ── Input distributions and maps ────────────────────────────────────────────────────────────────────────────────────
 
-const BASES = defineVariants({
-  normal: {
-    label: 'Normal',
-    params: { mu: slider(-2, 2, 0, { label: 'mean μ' }), sigma: slider(0.2, 2, 0.8, { label: 'sd σ' }) },
-    f: (_: number, p): Distributions.Univariate => Distributions.Normal(p.mu, p.sigma),
+const BASES = variants(
+  {
+    normal: {
+      label: 'Normal',
+      params: { mu: slider(-2, 2, 0, { label: 'mean μ' }), sigma: slider(0.2, 2, 0.8, { label: 'sd σ' }) },
+      f: (_: number, p: Num): Distributions.Univariate => Distributions.Normal(p.mu, p.sigma),
+    },
+    uniform: {
+      label: 'Uniform',
+      params: { a: slider(-2, 2, -1, { label: 'low a' }), b: slider(-1.5, 3, 1, { label: 'high b' }) },
+      f: (_: number, p: Num): Distributions.Univariate => Distributions.Uniform(p.a, p.b),
+    },
+    exponential: {
+      label: 'Exponential',
+      params: { rate: slider(0.2, 4, 1, { label: 'rate λ' }) },
+      f: (_: number, p: Num): Distributions.Univariate => Distributions.Exponential(p.rate),
+    },
+    beta: {
+      label: 'Beta',
+      params: { alpha: slider(0.3, 6, 2, { label: 'α' }), beta: slider(0.3, 6, 3, { label: 'β' }) },
+      f: (_: number, p: Num): Distributions.Univariate => Distributions.Beta(p.alpha, p.beta),
+    },
+    gamma: {
+      label: 'Gamma',
+      params: { shape: slider(0.5, 8, 2, { label: 'shape k' }), rate: slider(0.2, 4, 1, { label: 'rate λ' }) },
+      f: (_: number, p: Num): Distributions.Univariate => Distributions.Gamma(p.shape, p.rate),
+    },
   },
-  uniform: {
-    label: 'Uniform',
-    params: { a: slider(-2, 2, -1, { label: 'low a' }), b: slider(-1.5, 3, 1, { label: 'high b' }) },
-    f: (_: number, p): Distributions.Univariate => Distributions.Uniform(p.a, p.b),
-  },
-  exponential: {
-    label: 'Exponential',
-    params: { rate: slider(0.2, 4, 1, { label: 'rate λ' }) },
-    f: (_: number, p): Distributions.Univariate => Distributions.Exponential(p.rate),
-  },
-  beta: {
-    label: 'Beta',
-    params: { alpha: slider(0.3, 6, 2, { label: 'α' }), beta: slider(0.3, 6, 3, { label: 'β' }) },
-    f: (_: number, p): Distributions.Univariate => Distributions.Beta(p.alpha, p.beta),
-  },
-  gamma: {
-    label: 'Gamma',
-    params: { shape: slider(0.5, 8, 2, { label: 'shape k' }), rate: slider(0.2, 4, 1, { label: 'rate λ' }) },
-    f: (_: number, p): Distributions.Univariate => Distributions.Gamma(p.shape, p.rate),
-  },
-})
+  { label: '1 · input distribution', choiceLabel: 'distribution of X' },
+)
 
 /** Each base as TeX, from its values. */
 const BASE_TEX: Record<string, (p: Record<string, number>) => string> = {
@@ -69,29 +73,36 @@ const BASE_TEX: Record<string, (p: Record<string, number>) => string> = {
   gamma: (p) => String.raw`\mathrm{Gamma}(${texNum(p.shape)}, ${texNum(p.rate)})`,
 }
 
-const MAPS = defineVariants({
-  affine: {
-    label: 'affine a·x + b',
-    params: { a: slider(-3, 3, 1.5, { label: 'slope a' }), b: slider(-3, 3, 0, { label: 'shift b' }) },
-    f: (_: number, p): AnyMap => D.affineBijector(p.b, p.a),
+const MAPS = variants(
+  {
+    affine: {
+      label: 'affine a·x + b',
+      params: { a: slider(-3, 3, 1.5, { label: 'slope a' }), b: slider(-3, 3, 0, { label: 'shift b' }) },
+      f: (_: number, p: Num): AnyMap => D.affineBijector(p.b, p.a),
+    },
+    exp: { label: 'exp', params: {}, f: (): AnyMap => D.expBijector },
+    log: { label: 'log', params: {}, f: (): AnyMap => D.logBijector },
+    sigmoid: {
+      label: 'sigmoid σ(x / T)',
+      params: { T: slider(0.2, 3, 1, { label: 'temperature T' }) },
+      f: (_: number, p: Num): AnyMap => D.chainBijectors(D.affineBijector(0, 1 / p.T), D.sigmoidBijector),
+    },
+    tanh: { label: 'tanh', params: {}, f: (): AnyMap => D.tanhBijector },
+    softplus: { label: 'softplus', params: {}, f: (): AnyMap => D.softplusBijector },
+    power: {
+      label: 'power xᵖ',
+      params: { p: slider(-2, 3, 0.5, { label: 'power p' }) },
+      f: (_: number, p: Num): AnyMap => D.powerBijector(p.p),
+    },
+    square: { label: 'square x² (two preimages)', params: {}, f: (): AnyMap => D.squareMap },
+    probit: {
+      label: 'normal cdf Φ (probability integral transform)',
+      params: {},
+      f: (): AnyMap => D.normalCdfBijector,
+    },
   },
-  exp: { label: 'exp', params: {}, f: (): AnyMap => D.expBijector },
-  log: { label: 'log', params: {}, f: (): AnyMap => D.logBijector },
-  sigmoid: {
-    label: 'sigmoid σ(x / T)',
-    params: { T: slider(0.2, 3, 1, { label: 'temperature T' }) },
-    f: (_: number, p): AnyMap => D.chainBijectors(D.affineBijector(0, 1 / p.T), D.sigmoidBijector),
-  },
-  tanh: { label: 'tanh', params: {}, f: (): AnyMap => D.tanhBijector },
-  softplus: { label: 'softplus', params: {}, f: (): AnyMap => D.softplusBijector },
-  power: {
-    label: 'power xᵖ',
-    params: { p: slider(-2, 3, 0.5, { label: 'power p' }) },
-    f: (_: number, p): AnyMap => D.powerBijector(p.p),
-  },
-  square: { label: 'square x² (two preimages)', params: {}, f: (): AnyMap => D.squareMap },
-  probit: { label: 'normal cdf Φ (probability integral transform)', params: {}, f: (): AnyMap => D.normalCdfBijector },
-})
+  { label: '2 · map', choiceLabel: 'map g', initial: 'exp' },
+)
 
 const FORMULA: Record<string, string> = {
   affine: 'g(x) = ax + b',
@@ -156,43 +167,6 @@ const densityPeak = (curve: readonly number[], hist: readonly number[]) => {
   return 1.1 * Math.max(h, Math.min(c, 2.5 * h))
 }
 
-/**
- * The support drawn along a density axis: a thin band from end to end, with a bracket at each finite end, '[' or ']'
- * when closed and '(' or ')' when open. `u` runs along the axis and `v` across it; `swap` draws them rotated.
- */
-function supportMarks(set: D.Interval, window: Range, height: number, swap: boolean): XYSeries[] {
-  const lo = Math.max(set.lower, window[0])
-  const hi = Math.min(set.upper, window[1])
-  const serif = 0.012 * (window[1] - window[0])
-  const band = 0.035 * height
-  const tall = 0.09 * height
-  const u: number[] = []
-  const v: number[] = []
-  const push = (a: number, b: number) => {
-    u.push(a)
-    v.push(b)
-  }
-  const bracket = (at: number, inward: number, open: boolean) => {
-    if (!Number.isFinite(at)) return
-    if (open)
-      for (let k = 0; k <= 10; k++) push(at + inward * serif * (1 - Math.sin((Math.PI * k) / 10)), (tall * k) / 10)
-    else {
-      push(at + inward * serif, tall)
-      push(at, tall)
-      push(at, 0)
-      push(at + inward * serif, 0)
-    }
-    push(NaN, NaN)
-  }
-  bracket(set.lower, 1, set.lowerOpen)
-  bracket(set.upper, -1, set.upperOpen)
-  const xy = (a: number[], b: number[]) => (swap ? { x: b, y: a } : { x: a, y: b })
-  return [
-    { name: 'support', type: 'line', ...xy([lo, lo, hi, hi, lo], [0, band, band, 0, 0]), muted: true },
-    { name: 'support ends', type: 'line', ...xy(u, v), emphasis: true },
-  ]
-}
-
 // ── The figure ───────────────────────────────────────────────────────────────────────────────────────────────────────
 
 /**
@@ -202,23 +176,29 @@ function supportMarks(set: D.Interval, window: Range, height: number, swap: bool
  * from aifn: `Transformed` for bijectors, `Pushforward` for x² (a sum over both preimages).
  */
 export function TransformedSpecimen() {
-  const base = useVariants(BASES)
-  const map = useVariants(MAPS, { key: 'exp' })
-  const [size, setSize] = useState('5000')
-  const [seed, setSeed] = useState(1)
-  // Off: the naive density p_X(g⁻¹(y)) alone, which misses the histogram. On: the Jacobian-scaled p_Y, with the naive
-  // curve kept dashed so the difference shows.
-  const [jacobian, setJacobian] = useState(false)
-  const [x0Wanted, setX0] = useState(0.5)
-  const n = Number(size)
+  const state = useFigureState({
+    base: BASES,
+    map: MAPS,
+    reveal: row('3 · density of Y and draws', {
+      // Off: the naive density p_X(g⁻¹(y)) alone, which misses the histogram. On: the Jacobian-scaled p_Y, with the
+      // naive curve kept dashed so the difference shows.
+      jacobian: toggle(false, 'Jacobian scaling'),
+      size: choice([1000, 5000, 20000], 5000, { label: 'draws' }),
+      seed: slider(1, 20, 1, { step: 1, label: 'seed' }),
+    }),
+    // Placed on the chart and clamped to the input window below; a fine step so a drag is smooth on any window.
+    x0: slider(-100, 100, 0.5, { onChart: true, step: 0.0001, label: 'x₀' }),
+  })
+  const { base, map } = state
+  const { jacobian, size: n, seed } = state.reveal
 
   // The base, the map and the pushforward; a base whose support is not inside the map's domain is an aifn error.
   const setup = useMemo(() => {
     let X: Distributions.Univariate | null = null
     let g: AnyMap | null = null
     try {
-      X = base.f!(0)
-      g = map.f!(0)
+      X = (base.f as unknown as (x: number) => Distributions.Univariate)(0)
+      g = (map.f as unknown as (x: number) => AnyMap)(0)
       const Y = 'branches' in g ? Distributions.Pushforward(X, g) : Distributions.Transformed(X, g)
       const xSet = D.supportInterval(X.support)
       const ySet = D.supportInterval(Y.support)
@@ -306,7 +286,7 @@ export function TransformedSpecimen() {
   }, [setup, curves])
 
   const ready = setup.ok && xw && yw && dX && dY && curves && draws
-  const x0 = ready ? clamp(x0Wanted, Math.max(xw[0], setup.xSet.lower), Math.min(xw[1], setup.xSet.upper)) : 0
+  const x0 = ready ? clamp(state.x0, Math.max(xw[0], setup.xSet.lower), Math.min(xw[1], setup.xSet.upper)) : 0
 
   // The point x₀, its image and the interval dx around it; the slope from autodiff, log |g′| from the map.
   const probe = useMemo(() => {
@@ -322,122 +302,46 @@ export function TransformedSpecimen() {
     const slope = num(grad((x: Value) => g.forward(x))(x0))
     const branch = D.asManyToOne(g).branches.find((br) => x0 >= br.domain.lower && x0 <= br.domain.upper)
     const logJ = branch ? num(branch.logAbsDetJacobian(x0)) : NaN
+    const band = grid(a, b, 16)
+    const [yA, yB] = forward(a) <= forward(b) ? [forward(a), forward(b)] : [forward(b), forward(a)]
+    const bandY = grid(yA, yB, 16)
     return {
       a,
       b,
       ya: forward(a),
       yb: forward(b),
+      yA,
+      yB,
       y0,
       slope,
       logJ,
       branch,
+      band,
+      bandG: band.map(forward),
+      bandP: numbers(X.prob(tensor(band))).map(gap),
+      bandY,
+      bandPY: numbers(Y.prob(tensor(bandY))).map(gap),
       pX0: num(X.prob(x0)),
       pY0: num(Y.prob(y0)),
-      forward,
     }
   }, [ready, setup, xw, x0])
 
   // Dragging y₀ on the output axis moves x₀ to its preimage on the branch x₀ is on.
-  const setY0 = useCallback(
-    (y: number) => {
-      if (!probe?.branch || !setup.ok) return
-      const images = D.branchImages(setup.g, setup.xSet)
-      const piece = images.find((p) => p.branch === probe.branch) ?? images[0]
-      const yy = clamp(y, piece.image.lower, piece.image.upper)
-      const x = num(piece.branch.inverse(yy))
-      if (Number.isFinite(x)) setX0(x)
-    },
-    [probe, setup],
-  )
+  const setY0 = (y: number) => {
+    if (!probe?.branch || !setup.ok) return
+    const images = D.branchImages(setup.g, setup.xSet)
+    const piece = images.find((p) => p.branch === probe.branch) ?? images[0]
+    const yy = clamp(y, piece.image.lower, piece.image.upper)
+    const x = num(piece.branch.inverse(yy))
+    if (Number.isFinite(x)) state.set('x0', x)
+  }
 
-  const figure = useMemo(() => {
-    if (!ready || !probe) return null
-    const { hx, hy } = curves
-    const { a, b, ya, yb, y0, slope, forward } = probe
-    const ylo = yw[0]
-    const inputSeries: XYSeries[] = [
-      { name: 'draws xᵢ', type: 'bar', x: hx.centres, y: hx.heights, slot: 0, thin: true },
-      { name: 'p_X(x)', type: 'line', x: curves.xs, y: curves.pX, slot: 0 },
-    ]
-    const mapSeries: XYSeries[] = [{ name: 'y = g(x)', type: 'line', x: curves.xs, y: curves.gx, emphasis: true }]
-    // The output histogram, rotated: a step outline from the y-axis.
-    const stepX: number[] = [0]
-    const stepY: number[] = [hy.edges[0]]
-    hy.heights.forEach((h, i) => {
-      stepX.push(h, h)
-      stepY.push(hy.edges[i], hy.edges[i + 1])
-    })
-    stepX.push(0)
-    stepY.push(hy.edges[hy.edges.length - 1])
-    const outputSeries: XYSeries[] = [
-      { name: 'draws g(xᵢ)', type: 'line', x: stepX, y: stepY, slot: 1, thin: true },
-      jacobian
-        ? { name: 'p_Y(y), with the Jacobian', type: 'line', x: curves.pY, y: curves.ys, slot: 1 }
-        : { name: 'p_X(g⁻¹(y)), without the Jacobian', type: 'line', x: curves.naive, y: curves.ys, slot: 2 },
-    ]
-    if (jacobian)
-      outputSeries.push({
-        name: 'p_X(g⁻¹(y)), without the Jacobian',
-        type: 'line',
-        x: curves.naive,
-        y: curves.ys,
-        slot: 2,
-        dashed: true,
-      })
+  const xAxis = useAxis({ label: 'x', range: xw ?? undefined, key })
+  const yAxis = useAxis({ label: 'y = g(x)', range: yw ?? undefined, key })
+  const pxAxis = useAxis({ label: 'p_X(x)', range: dX ?? undefined, key })
+  const pyAxis = useAxis({ label: 'p_Y(y)', range: dY ?? undefined, key })
 
-    const band = grid(a, b, 16)
-    const arcY = band.map(forward)
-    const span = 0.12 * (xw[1] - xw[0])
-    const tangentX = [x0 - span, x0 + span]
-    const mapLive: XYSeries[] = [
-      {
-        name: 'guides',
-        type: 'line',
-        x: [a, a, NaN, b, b, NaN, a, xw[1], NaN, b, xw[1]],
-        y: [ylo, ya, NaN, ylo, yb, NaN, ya, ya, NaN, yb, yb],
-        muted: true,
-        dashed: true,
-      },
-      {
-        name: 'tangent',
-        type: 'line',
-        x: tangentX,
-        y: tangentX.map((x) => y0 + slope * (x - x0)),
-        slot: 3,
-        dashed: true,
-      },
-      { name: 'g over dx', type: 'line', x: band, y: arcY, slot: 0 },
-      { name: '(x₀, y₀)', type: 'scatter', x: [x0], y: [y0], emphasis: true },
-    ]
-    const inputLive: XYSeries[] = [
-      ...supportMarks(setup.xSet, xw, dX[1], false),
-      { name: 'P(X in dx)', type: 'area', x: band, y: numbers(setup.X.prob(tensor(band))).map(gap), slot: 0 },
-    ]
-    const [yA, yB] = ya <= yb ? [ya, yb] : [yb, ya]
-    const bandY = grid(yA, yB, 16)
-    const outputLive: XYSeries[] = [
-      ...supportMarks(setup.ySet, yw, dY[1], true),
-      {
-        name: 'dy',
-        type: 'line',
-        x: [0, dY[1], NaN, 0, dY[1]],
-        y: [yA, yA, NaN, yB, yB],
-        muted: true,
-        dashed: true,
-      },
-      { name: 'p_Y over dy', type: 'line', x: numbers(setup.Y.prob(tensor(bandY))).map(gap), y: bandY, emphasis: true },
-      { name: 'y₀', type: 'scatter', x: [gap(probe.pY0)], y: [y0], emphasis: true },
-    ]
-    return { inputSeries, mapSeries, outputSeries, mapLive, inputLive, outputLive }
-  }, [ready, probe, curves, setup, xw, yw, dX, dY, x0, jacobian])
-
-  const xHandles = useMemo((): Handle[] => [{ kind: 'x', at: x0, label: 'x₀', onDrag: setX0 }], [x0])
-  const yHandles = useMemo(
-    (): Handle[] => (probe ? [{ kind: 'y', at: probe.y0, label: 'y₀', onDrag: setY0 }] : []),
-    [probe, setY0],
-  )
-
-  // Controls: each selector with the statement of its support or its domain and codomain underneath.
+  // Each selector's statement: the support of X, the map's domain and codomain.
   const X = setup.X
   const g = setup.g
   const baseTex = X
@@ -446,101 +350,79 @@ export function TransformedSpecimen() {
   const mapTex = g
     ? String.raw`${FORMULA[map.key]}, \quad g: ${intervalTex(g.domain)} \to ${intervalTex(g.codomain)}`
     : FORMULA[map.key]
-  const specs = MAPS.specs
-  const bases = BASES.specs
-  const controls = (
-    <>
-      <ControlRow label="1 · input distribution">
-        <div className="flex flex-col gap-1">
-          <Choice
-            label="distribution of X"
-            value={base.key}
-            onChange={base.setKey}
-            options={(Object.keys(bases) as (keyof typeof bases)[]).map((k) => ({ value: k, label: bases[k].label }))}
-          />
-          <Tex className="text-sm">{baseTex}</Tex>
-        </div>
-        <ParamControls defs={bases[base.key].params} values={base.values} set={base.set} />
-      </ControlRow>
-      <ControlRow label="2 · map">
-        <div className="flex flex-col gap-1">
-          <Choice
-            label="map g"
-            value={map.key}
-            onChange={map.setKey}
-            options={(Object.keys(specs) as (keyof typeof specs)[]).map((k) => ({ value: k, label: specs[k].label }))}
-          />
-          <Tex className="text-sm">{mapTex}</Tex>
-        </div>
-        <ParamControls defs={specs[map.key].params} values={map.values} set={map.set} />
-      </ControlRow>
-      <ControlRow label="3 · density of Y and draws">
-        <div className="flex flex-col gap-1">
-          <Toggle
-            variant="outline"
-            pressed={jacobian}
-            onPressedChange={setJacobian}
-            className="w-fit aria-pressed:border-primary aria-pressed:bg-primary aria-pressed:text-primary-foreground"
-          >
-            {jacobian ? 'Jacobian scaling on' : 'Turn on Jacobian scaling'}
-          </Toggle>
-          <Tex className="text-sm">
-            {jacobian
-              ? String.raw`p_Y(y) = p_X\big(g^{-1}(y)\big)\,\Big|\tfrac{d g^{-1}}{d y}\Big|`
-              : String.raw`p_X\big(g^{-1}(y)\big) \quad \text{(no Jacobian: misses the histogram)}`}
-          </Tex>
-        </div>
-        <Choice label="draws" value={size} onChange={setSize} options={['1000', '5000', '20000']} />
-        <Slider label="seed" value={seed} min={1} max={20} step={1} onChange={setSeed} />
-      </ControlRow>
-    </>
-  )
 
   const lognormal =
     setup.ok && base.key === 'normal' && map.key === 'exp' && probe
       ? num(Distributions.LogNormal(base.values.mu as number, base.values.sigma as number).prob(probe.y0))
       : null
 
+  const ylo = yw?.[0] ?? 0
+  const xhi = xw?.[1] ?? 0
+  const span = xw ? 0.12 * (xw[1] - xw[0]) : 0
   return (
     <Figure
       id="change-of-variables"
       title="Change of variables: a density pushed through a map"
+      purpose="Pushing X through y = g(x) spreads the probability in dx over dy ≈ |g′(x)| dx, so p_Y(y) = p_X(x) / |g′(x)|: without that Jacobian factor the density misses the draws and does not integrate to 1."
+      description={
+        <span className="flex flex-wrap gap-x-6 text-base">
+          <Tex>{baseTex}</Tex>
+          <Tex>{mapTex}</Tex>
+        </span>
+      }
       defaultSize="L"
       hoverReadout={false}
-      controls={controls}
-      readouts={
-        ready && probe && integrals ? (
-          <>
-            <Readout label="support of X" value={D.formatInterval(setup.xSet)} />
-            <Readout label="support of Y = g(X)" value={D.formatInterval(setup.ySet)} />
-            <Readout label="x₀" value={formatValue(x0)} />
-            <Readout label="y₀ = g(x₀)" value={formatValue(probe.y0)} />
-            <Readout label="g′(x₀) (autodiff)" value={formatValue(probe.slope)} />
-            <Readout label="log |g′(x₀)| (log-det-Jacobian)" value={formatValue(probe.logJ)} />
-            <Readout label="stretch Δy / Δx over dx" value={formatValue((probe.yb - probe.ya) / (probe.b - probe.a))} />
-            <Readout label="p_X(x₀)" value={formatValue(probe.pX0)} />
-            <Readout label="p_X(x₀) / |g′(x₀)|" value={formatValue(probe.pX0 / Math.abs(probe.slope))} />
-            <Readout
-              label={map.key === 'square' ? 'p_Y(y₀), both preimages' : 'p_Y(y₀)'}
-              value={formatValue(probe.pY0)}
-            />
-            {lognormal !== null && <Readout label="LogNormal(μ, σ) density at y₀" value={formatValue(lognormal)} />}
-            <Readout label="∫ p_Y dy (with the Jacobian)" value={integrals.withJacobian} />
-            <Readout label="∫ p_X(g⁻¹(y)) dy (without)" value={integrals.without} />
-          </>
+      state={state}
+      equation={
+        ready && probe ? (
+          <Equation>
+            {map.key === 'square'
+              ? tex`p_Y(${live(probe.y0, { digits: 3 })}) = \sum_{x = \pm\sqrt{y}} \frac{p_X(x)}{|g'(x)|} = ${live(probe.pY0, { digits: 4, strong: true })}`
+              : tex`p_Y(${live(probe.y0, { digits: 3 })}) = \frac{p_X(${live(x0, { digits: 3 })})}{|g'(${live(x0, { digits: 3 })})|} = \frac{${live(probe.pX0, { digits: 4 })}}{${live(Math.abs(probe.slope), { digits: 4 })}} = ${live(probe.pY0, { digits: 4, strong: true })}`}
+          </Equation>
         ) : undefined
+      }
+      readouts={
+        ready && probe && integrals
+          ? {
+              supports: (
+                <>
+                  <Readout label="X" value={D.formatInterval(setup.xSet)} />
+                  <Readout label="Y = g(X)" value={D.formatInterval(setup.ySet)} />
+                </>
+              ),
+              'at x₀': (
+                <>
+                  <Readout label="g′(x₀) (autodiff)" value={formatValue(probe.slope)} />
+                  <Readout label="log |g′(x₀)| (log-det-Jacobian)" value={formatValue(probe.logJ)} />
+                  <Readout
+                    label="stretch Δy / Δx over dx"
+                    value={formatValue((probe.yb - probe.ya) / (probe.b - probe.a))}
+                  />
+                  {lognormal !== null && (
+                    <Readout label="LogNormal(μ, σ) density at y₀" value={formatValue(lognormal)} />
+                  )}
+                </>
+              ),
+              'total probability': (
+                <>
+                  <Readout label="∫ p_Y dy (with the Jacobian)" value={integrals.withJacobian} />
+                  <Readout label="∫ p_X(g⁻¹(y)) dy (without)" value={integrals.without} />
+                </>
+              ),
+            }
+          : undefined
       }
       caption={
         <>
           X is drawn along the bottom (density and histogram), the map y = g(x) in the middle, and Y = g(X) rotated on
           the right, sharing the y-axis of g. Drag x₀ on the bottom or middle panel, or y₀ on the right panel: the
-          interval dx around x₀ maps to an interval dy whose length is about |g′(x₀)| dx, and the same probability
-          spread over it gives the density p_Y(y₀) = p_X(x₀) / |g′(x₀)|. With Jacobian scaling off, the right panel
-          shows p_X(g⁻¹(y)) alone: it misses the histogram of the draws g(xᵢ), and its integral is not 1. Turned on, the
-          solid curve includes the factor and follows the histogram, with the unscaled curve kept dashed for comparison.
-          For x² every y &gt; 0 has two preimages ±√y and the density adds both terms. Supports are marked along each
-          density axis (a band, with brackets at finite ends). The axes hold while parameters move and refit when the
-          input distribution, the map or a support changes.
+          interval dx around x₀ maps to an interval dy whose length is about |g′(x₀)| dx. With Jacobian scaling off, the
+          right panel shows p_X(g⁻¹(y)) alone: it misses the histogram of the draws g(xᵢ), and its integral is not 1.
+          Turn it on and the solid curve includes the factor and follows the histogram, with the unscaled curve kept
+          dashed. For x² every y &gt; 0 has two preimages ±√y and the density adds both terms. Supports are marked along
+          each density axis. The axes hold while parameters move and refit when the input distribution, the map or a
+          support changes.
         </>
       }
     >
@@ -552,59 +434,69 @@ export function TransformedSpecimen() {
             <Tex>{String.raw`X \in ${intervalTex(D.supportInterval(X.support))}, \quad \text{but } g \text{ is defined on } ${intervalTex(g.domain)}`}</Tex>
           )}
         </div>
-      ) : figure ? (
-        <Subplots
-          rows={2}
-          cols={2}
-          sharex="col"
-          sharey="row"
-          heightRatios={[3, 2]}
-          widthRatios={[2, 1]}
-          rescaleOnChange={false}
-          axisKey={key}
-        >
-          <Panel>
-            <XYChart
-              series={figure.mapSeries}
-              live={figure.mapLive}
-              xRange={xw!}
-              yRange={yw!}
-              xLabel="x"
-              yLabel="y = g(x)"
-              handles={xHandles}
-              legend={false}
+      ) : ready && probe ? (
+        <Plots rows={2} cols={2} heights={[3, 2]} widths={[2, 1]}>
+          <Plot x={xAxis} y={yAxis}>
+            <Curve name="y = g(x)" x={curves.xs} y={curves.gx} emphasis />
+            <Curve
+              name="guides"
+              x={[probe.a, probe.a, NaN, probe.b, probe.b, NaN, probe.a, xhi, NaN, probe.b, xhi]}
+              y={[ylo, probe.ya, NaN, ylo, probe.yb, NaN, probe.ya, probe.ya, NaN, probe.yb, probe.yb]}
+              muted
+              dashed
+              live
             />
-          </Panel>
-          <Panel>
-            <XYChart
-              series={figure.outputSeries}
-              live={figure.outputLive}
-              xRange={dY!}
-              yRange={yw!}
-              xLabel="p_Y(y)"
-              handles={yHandles}
+            <Curve
+              name="tangent"
+              x={[x0 - span, x0 + span]}
+              y={[probe.y0 - probe.slope * span, probe.y0 + probe.slope * span]}
+              slot={3}
+              dashed
+              live
             />
-          </Panel>
-          <Panel>
-            <XYChart
-              series={figure.inputSeries}
-              live={figure.inputLive}
-              xRange={xw!}
-              yRange={dX!}
-              xLabel="x"
-              yLabel="p_X(x)"
-              handles={xHandles}
+            <Curve name="g over dx" x={probe.band} y={probe.bandG} slot={0} live />
+            <Points name="(x₀, y₀)" x={[x0]} y={[probe.y0]} emphasis live />
+            <Handle {...state.handle('x0', { label: 'x₀' })} />
+          </Plot>
+          <Plot x={pyAxis} y={yAxis}>
+            <Bars
+              name="draws g(xᵢ)"
+              x={curves.hy.centres}
+              y={curves.hy.heights}
+              edges={curves.hy.edges}
+              orient="y"
+              slot={1}
             />
-          </Panel>
-          <Panel>
-            <div className="flex h-full flex-col justify-center gap-2 px-3 text-sm">
-              <Tex>{String.raw`X \in ${intervalTex(setup.xSet)}`}</Tex>
-              <Tex>{String.raw`g: ${intervalTex(setup.g.domain)} \to ${intervalTex(setup.g.codomain)}`}</Tex>
-              <Tex>{String.raw`Y = g(X) \in ${intervalTex(setup.ySet)}`}</Tex>
-              <Tex className="text-muted-foreground">{String.raw`p_Y(y) = \sum_{x : g(x) = y} \frac{p_X(x)}{\lvert g'(x) \rvert}`}</Tex>
-            </div>
-          </Panel>
-        </Subplots>
+            {jacobian ? (
+              <>
+                <Curve name="p_Y(y), with the Jacobian" x={curves.pY} y={curves.ys} slot={1} />
+                <Curve name="p_X(g⁻¹(y)), without" x={curves.naive} y={curves.ys} slot={2} dashed />
+              </>
+            ) : (
+              <Curve name="p_X(g⁻¹(y)), without the Jacobian" x={curves.naive} y={curves.ys} slot={2} />
+            )}
+            <SupportBand interval={setup.ySet} orient="y" />
+            <Curve
+              name="dy"
+              x={[0, dY[1], NaN, 0, dY[1]]}
+              y={[probe.yA, probe.yA, NaN, probe.yB, probe.yB]}
+              muted
+              dashed
+              live
+            />
+            <Curve name="p_Y over dy" x={probe.bandPY} y={probe.bandY} emphasis live />
+            <Points name="y₀" x={[gap(probe.pY0)]} y={[probe.y0]} emphasis live />
+            <Handle kind="y" at={probe.y0} label="y₀" onDrag={setY0} />
+          </Plot>
+          <Plot x={xAxis} y={pxAxis}>
+            <Bars name="draws xᵢ" x={curves.hx.centres} y={curves.hx.heights} edges={curves.hx.edges} slot={0} />
+            <Curve name="p_X(x)" x={curves.xs} y={curves.pX} slot={0} />
+            <SupportBand interval={setup.xSet} />
+            <Area name="P(X in dx)" x={probe.band} y={probe.bandP} slot={0} live />
+            <Handle {...state.handle('x0', { label: 'x₀' })} />
+          </Plot>
+          <div />
+        </Plots>
       ) : null}
     </Figure>
   )

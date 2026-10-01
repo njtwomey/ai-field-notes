@@ -4,6 +4,7 @@
  * regression spline basis of Wood (2003), "Thin plate regression splines", JRSS B 65(1), used by GAMs.
  */
 
+import { DomainError, ShapeError } from 'aifn/foundation/errors'
 import type { Size } from 'aifn/foundation/contracts'
 import { eigh, solve } from 'aifn/numerics/linalg'
 import { fromData, toFlat, type Tensor } from 'aifn/foundation/tensor'
@@ -15,7 +16,7 @@ const f64 = (t: Tensor): F64 => Float64Array.from(toFlat(t))
 function points(x: Tensor): { v: F64; n: number; d: number } {
   if (x.shape.length === 1) return { v: f64(x), n: x.shape[0], d: 1 }
   if (x.shape.length === 2) return { v: f64(x), n: x.shape[0], d: x.shape[1] }
-  throw new Error('thin-plate: points must be [n] or [n, d]')
+  throw new DomainError('thinplate', 'thin-plate: points must be [n] or [n, d]')
 }
 
 /**
@@ -27,7 +28,7 @@ function eta(r: number, d: number, scaled: boolean): number {
   if (d === 2) return r === 0 ? 0 : (r * r * Math.log(r)) / (scaled ? 8 * Math.PI : 1)
   if (d === 1) return (r * r * r) / (scaled ? 12 : 1)
   if (d === 3) return scaled ? -r / (8 * Math.PI) : r
-  throw new Error(`thin-plate: dimension ${d} is not supported (1, 2 or 3)`)
+  throw new ShapeError('thinplate', `thin-plate: dimension ${d} is not supported (1, 2 or 3)`)
 }
 
 function radial(a: F64, n: number, b: F64, m: number, d: number, scaled: boolean): F64 {
@@ -71,7 +72,7 @@ export type ThinPlateSpline = {
 export function thinPlateSpline(x: Tensor, y: Tensor, { smoothing = 0 }: { smoothing?: number } = {}): ThinPlateSpline {
   const { v, n, d } = points(x)
   const Y = f64(y)
-  if (Y.length !== n) throw new Error(`thinPlateSpline: ${n} points but ${Y.length} values`)
+  if (Y.length !== n) throw new ShapeError('thinPlateSpline', `thinPlateSpline: ${n} points but ${Y.length} values`)
   const M = d + 1
   const E = radial(v, n, v, n, d, false)
   const T = affine(v, n, d)
@@ -96,7 +97,7 @@ export function thinPlateSpline(x: Tensor, y: Tensor, { smoothing = 0 }: { smoot
     smoothing,
     evaluate: (xs) => {
       const q = points(xs)
-      if (q.d !== d) throw new Error(`thinPlateSpline: fitted in ${d} dimensions, given ${q.d}`)
+      if (q.d !== d) throw new ShapeError('thinPlateSpline', `thinPlateSpline: fitted in ${d} dimensions, given ${q.d}`)
       const Es = radial(q.v, q.n, v, n, d, false)
       const Ts = affine(q.v, q.n, d)
       const out = Float64Array.from({ length: q.n }, (_, i) => {
@@ -134,7 +135,8 @@ export type ThinPlateRegressionBasis = {
 export function thinPlateRegressionBasis(x: Tensor, rank: Size): ThinPlateRegressionBasis {
   const { v, n, d } = points(x)
   const M = d + 1
-  if (!(rank > M && rank <= n)) throw new Error(`thinPlateRegressionBasis: rank must be in (${M}, ${n}]`)
+  if (!(rank > M && rank <= n))
+    throw new ShapeError('thinPlateRegressionBasis', `thinPlateRegressionBasis: rank must be in (${M}, ${n}]`)
   const E = radial(v, n, v, n, d, true)
   const { values, vectors } = eigh(fromData(E, [n, n]))
   const lam = f64(values)
@@ -182,7 +184,11 @@ export function thinPlateRegressionBasis(x: Tensor, rank: Size): ThinPlateRegres
     eigenvalues: fromData(D, [k]),
     evaluate: (xs) => {
       const p = points(xs)
-      if (p.d !== d) throw new Error(`thinPlateRegressionBasis: built in ${d} dimensions, given ${p.d}`)
+      if (p.d !== d)
+        throw new ShapeError(
+          'thinPlateRegressionBasis',
+          `thinPlateRegressionBasis: built in ${d} dimensions, given ${p.d}`,
+        )
       const Es = radial(p.v, p.n, v, n, d, true)
       const Ts = affine(p.v, p.n, d)
       const out = new Float64Array(p.n * k)

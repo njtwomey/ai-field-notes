@@ -80,6 +80,7 @@ export function SearchSpecimen() {
 
   return (
     <Figure
+      purpose="The same search with a queue goes wide, level by level; with a stack it goes deep and classifies every edge as tree, back, forward or cross."
       title="Breadth-first against depth-first search"
       defaultSize="L"
       hoverReadout={false}
@@ -151,19 +152,25 @@ export function SearchTreesSpecimen() {
   const bfsTree = useMemo(() => breadthFirstSearch(SEARCH, 0).trees[0], [])
   const dfsTree = useMemo(() => depthFirstSearch(SEARCH, 0).trees[0], [])
   const count = Math.max(bfs.steps.length, dfs.steps.length)
-  const [chosen, setStep] = useState<number | null>(null)
-  const step = chosen ?? count - 1
+  const [step, setStep] = useState(count - 1)
   const b = stateAt(bfs, step)
   const d = stateAt(dfs, step)
   return (
     <Figure
       title="The breadth-first and depth-first trees"
-      description="Each search's parent pointers form a tree over the nodes it reaches. Breadth-first reaches every node by a fewest-edge path, so its tree is as shallow as possible; depth-first follows one path as far as it goes, so its tree is deep."
+      purpose="Breadth-first reaches each node by a fewest-edge path, so its tree is as shallow as possible; depth-first follows one path as far as it goes, so its tree is deep."
       defaultSize="L"
       hoverReadout={false}
       controls={
         <div className="col-span-full">
-          <Player label="step" value={Math.min(step, count - 1)} onChange={setStep} count={count} defaultSpeed={3} />
+          <Player
+            label="step"
+            value={Math.min(step, count - 1)}
+            onChange={setStep}
+            count={count}
+            defaultSpeed={3}
+            startReason="the finished trees are the point: their shapes, shallow against deep"
+          />
         </div>
       }
       readouts={
@@ -249,6 +256,7 @@ export function KahnSpecimen() {
   const nodeState = (v: number): ElementState => (output.has(v) ? 'done' : queued.has(v) ? 'active' : 'idle')
   return (
     <Figure
+      purpose="Repeatedly output a node with no remaining incoming edges: the order that comes out puts every edge forward."
       title="Kahn's algorithm: getting dressed"
       defaultSize="L"
       hoverReadout={false}
@@ -333,6 +341,7 @@ export function TarjanSpecimen() {
   const nodeState = (v: number): ElementState => (comp[v] >= 0 ? 'done' : s.index.data[v] >= 0 ? 'active' : 'idle')
   return (
     <Figure
+      purpose="One depth-first search finds every strongly connected component: a node whose low-link equals its own index roots a component, popped off the stack."
       title="Tarjan's strongly connected components"
       defaultSize="L"
       hoverReadout={false}

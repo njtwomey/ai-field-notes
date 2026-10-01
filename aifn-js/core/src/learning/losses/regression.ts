@@ -1,7 +1,8 @@
 /**
  * Regression losses of predictions ŷ and targets y, elementwise over broadcast shapes: squared, absolute, Huber,
- * log-cosh and pinball (quantile) losses of the residual, and the negative log-likelihoods of Poisson and Gaussian
- * predictive distributions. Each names the statistic of y | x that its population minimiser estimates.
+ * log-cosh, pinball (quantile) and asymmetric squared (expectile) losses of the residual, and the negative
+ * log-likelihoods of Poisson and Gaussian predictive distributions. Each names the statistic of y | x that its
+ * population minimiser estimates.
  */
 
 import { Normal } from 'aifn/probability/distributions'
@@ -95,6 +96,32 @@ export const pinball = defineLoss(
     if (!(quantile > 0 && quantile < 1)) throw new RangeError(`pinball: quantile ${quantile} is not in (0, 1)`)
     const r = sub(constant(targets), predictions)
     return reduce(maximum(mul(quantile, r), mul(quantile - 1, r)), reduction)
+  },
+)
+
+/** Options of `expectileLoss`. */
+export type ExpectileLossOptions = ReductionOptions & {
+  /** The expectile level τ ∈ (0, 1). Default 0.5 (half the squared error). */
+  expectile?: number
+}
+
+/**
+ * The asymmetric squared loss ρ_τ(y − ŷ) = |τ − 1(y < ŷ)| (y − ŷ)² (Newey and Powell, 1987): under-predictions cost
+ * τ per squared unit and over-predictions 1 − τ, so its minimiser is the conditional τ-expectile (τ = ½: the mean).
+ */
+export const expectileLoss = defineLoss(
+  regressionInfo(
+    'expectileLoss',
+    'Asymmetric squared (expectile) loss',
+    'the conditional τ-expectile',
+    'expectile-generalised-additive-models',
+  ),
+  (predictions: Value, targets: Target, { reduction, expectile = 0.5 }: ExpectileLossOptions = {}): Value => {
+    if (!(expectile > 0 && expectile < 1))
+      throw new RangeError(`expectileLoss: expectile ${expectile} is not in (0, 1)`)
+    const r = sub(constant(targets), predictions)
+    const r2 = square(r)
+    return reduce(where(less(unwrap(r), 0), mul(1 - expectile, r2), mul(expectile, r2)), reduction)
   },
 )
 

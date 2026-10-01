@@ -29,17 +29,6 @@ export type FactorGraphViewProps = {
 const fmt = (x: number) => (Math.abs(x) >= 0.995 || x === 0 ? x.toFixed(1) : x.toFixed(2))
 const vec = (v: ArrayLike<number>) => (v.length === 2 ? fmt(v[1]) : `(${Array.from(v, fmt).join(', ')})`)
 
-/**
- * Groups a label's base before an appended instance subscript, so `\theta_d_{0}` (a double subscript, which KaTeX
- * rejects) reads `{\theta_d}_{0}`. aifn's `toFactorGraph` appends the instance index to labels that may already carry
- * a subscript (reported to aifn/inference/model); remove this once the labels arrive grouped.
- */
-function groupSubscripts(label: string | undefined): string | undefined {
-  if (!label) return label
-  const fix = (tex: string) => tex.replace(/^(.*_(?:\{[^{}]*\}|[^_{}\s]))_\{([^{}]*)\}$/, '{$1}_{$2}')
-  return label.startsWith('$') && label.endsWith('$') ? `$${fix(label.slice(1, -1))}$` : fix(label)
-}
-
 /** Keys of a record by the diagram's node names: `x<i>` for a discrete graph's variables, instance keys for a model. */
 function byName<V>(record: Readonly<Record<string | number, V>> | undefined, discrete: boolean) {
   if (!record || !discrete) return record as Readonly<Record<string, V>> | undefined
@@ -71,7 +60,6 @@ export function FactorGraphView({
       labels: byName(labels, discrete),
       highlight: highlight === undefined ? undefined : discrete ? `x${highlight}` : String(highlight),
     })
-    d.nodes = d.nodes.map((n) => ({ ...n, label: groupSubscripts(n.label) }))
     if (!state) return d
     const updated = new Map(state.updated.map((u) => [u.edge, u.to]))
     const nodes = d.nodes.map((n): DiagramNode => {

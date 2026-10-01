@@ -6,9 +6,10 @@
  */
 import { depthFirstSearch, topologicalSort } from 'aifn/graph/traversal'
 import { fromEdges } from 'aifn/graph'
+import { parseEnd } from './ends'
 import type { DiagramEdge, DiagramSpec, PlacedNode } from './types'
 
-const endId = (ref: string) => ref.split(':')[0]
+const endId = (ref: string) => parseEnd(ref).id
 
 /** Crossings between two adjacent layers, given each edge as (position above, position below). */
 function crossings(pairs: [number, number][]): number {

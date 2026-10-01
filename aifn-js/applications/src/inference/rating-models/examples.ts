@@ -1,13 +1,7 @@
 import type { Status } from 'aifn/foundation/contracts'
-import {
-  normalCdf,
-  normalQuantile,
-  truncatedNormalV,
-  truncatedNormalVDraw,
-  truncatedNormalW,
-  truncatedNormalWDraw,
-} from 'aifn/numerics/special'
-import { fromData, type Tensor } from 'aifn/foundation/tensor'
+import { normalQuantile } from 'aifn/numerics/special'
+import { fromData, tensor, type Tensor } from 'aifn/foundation/tensor'
+import { intervalTilted } from 'aifn/inference/expectation-propagation'
 import type { Algorithm } from 'aifn/foundation/trace'
 import { dist, model, type Model } from 'aifn/inference/model'
 
@@ -54,10 +48,12 @@ export interface TrueSkillUpdate {
 }
 
 /**
- * One TrueSkill update of a two-player game from player 1's side (Herbrich et al. 2007; Moser 2010, eqs. for
- * v_win, w_win, v_draw, w_draw). With σᵢ² ← σᵢ² + τ², c² = 2β² + σ₁² + σ₂², t = μ₁ − μ₂ and ε the draw margin:
- * a win gives v = v_win(t/c − ε/c), w = v(v + t/c − ε/c); μ₁ += σ₁² v/c, μ₂ −= σ₂² v/c, σᵢ² ← σᵢ²(1 − σᵢ² w/c²).
- * A loss is a win for player 2; a draw uses v_draw and w_draw on the interval |d| < ε.
+ * One TrueSkill update of a two-player game from player 1's side (Herbrich, Minka & Graepel 2007; Moser 2010). With
+ * σᵢ² ← σᵢ² + τ², the performance difference d = p₁ − p₂ has the cavity N(t, c²), t = μ₁ − μ₂, c² = 2β² + σ₁² + σ₂².
+ * The outcome is an interval factor on d: a win is d > ε, a loss d < −ε, a draw |d| < ε. Its truncated-normal moments
+ * (m̂, v̂) (`intervalTilted`) give μ₁ += σ₁²(m̂ − t)/c², μ₂ −= σ₂²(m̂ − t)/c² and σᵢ² ← σᵢ² + σᵢ⁴(v̂ − c²)/c⁴. In
+ * TrueSkill's notation v = ±(m̂ − t)/c (the sign of the outcome; + for a draw) and w = 1 − v̂/c², which are v_win,
+ * w_win of (±t − ε)/c and v_draw, w_draw of (t/c, ε/c).
  */
 export function trueSkillUpdate(
   r1: Rating,
@@ -70,53 +66,58 @@ export function trueSkillUpdate(
   const eps = options.drawMargin ?? drawMargin(TRUESKILL_DEFAULTS.drawProbability, beta)
   const var1 = r1.sd ** 2 + tau ** 2
   const var2 = r2.sd ** 2 + tau ** 2
-  const c = Math.sqrt(2 * beta * beta + var1 + var2)
+  const c2 = 2 * beta * beta + var1 + var2
+  const c = Math.sqrt(c2)
   const t = r1.mean - r2.mean
-  let v: number
-  let w: number
-  let probability: number
-  let sign = 1
-  if (outcome === 'draw') {
-    v = truncatedNormalVDraw(t / c, eps / c) as number
-    w = truncatedNormalWDraw(t / c, eps / c) as number
-    probability = (normalCdf((eps - t) / c) as number) - (normalCdf((-eps - t) / c) as number)
-  } else {
-    sign = outcome === 'win' ? 1 : -1
-    const u = (sign * t) / c - eps / c
-    v = truncatedNormalV(u) as number
-    w = truncatedNormalW(u) as number
-    probability = normalCdf(u) as number
-  }
+  const [lower, upper] = outcome === 'win' ? [eps, Infinity] : outcome === 'loss' ? [-Infinity, -eps] : [-eps, eps]
+  const d = intervalTilted(t, c2, lower, upper)
+  const shift = (d.mean - t) / c2
+  const shrink = (d.variance - c2) / (c2 * c2)
   return {
-    player1: { mean: r1.mean + (sign * var1 * v) / c, sd: Math.sqrt(var1 * (1 - (var1 / (c * c)) * w)) },
-    player2: { mean: r2.mean - (sign * var2 * v) / c, sd: Math.sqrt(var2 * (1 - (var2 / (c * c)) * w)) },
+    player1: { mean: r1.mean + var1 * shift, sd: Math.sqrt(var1 + var1 * var1 * shrink) },
+    player2: { mean: r2.mean - var2 * shift, sd: Math.sqrt(var2 + var2 * var2 * shrink) },
     c,
     t,
-    v,
-    w,
-    probability,
+    v: ((outcome === 'loss' ? -1 : 1) * (d.mean - t)) / c,
+    w: 1 - d.variance / c2,
+    probability: Math.exp(d.logZ),
   }
 }
 
 /**
- * TrueSkill's structure in the model language (Herbrich, Minka and Graepel 2007, fig. 1, with the performances
- * integrated out): a plate of P players with skills s_p ~ N(μ₀, σ₀²), and a plate of G games, each naming its winner
- * w_g and loser l_g (per-game constants) and observing y_g = 1 ~ Bernoulli(Φ((s_{w_g} − s_{l_g})/(√2 β))), the
- * probability that the winner's performance N(s_w, β²) exceeds the loser's. Draws (the margin ε, |d| < ε) have no
- * family in the model language; `trueSkillEp` handles them with its truncated-Gaussian match factor.
+ * TrueSkill in the model language (Herbrich, Minka and Graepel 2007, fig. 1): a plate of P players with skills
+ * s_p ~ N(μ₀, σ₀²), and a plate of G games, each naming its first player w_g, second player l_g and whether it was a
+ * draw δ_g ∈ {0, 1} (per-game constants). The performances are p_g ~ N(s_{w_g}, β²) and q_g ~ N(s_{l_g}, β²), their
+ * difference d_g = p_g − q_g, and the outcome is an interval on d_g: the first player won when d_g > ε, and the game
+ * was drawn when −ε < d_g < ε (bounds chosen by δ_g with `index`). Observing y_g = 1 ~ Bernoulli(𝟙(lower < d_g <
+ * upper)) states the interval, so `modelExpectationPropagation` runs TrueSkill's message passing on this graph. The
+ * draw margin ε defaults to 0 here (the win-only model of the original figure).
  */
-export function trueSkillModel(options: { mean?: number; sd?: number; beta?: number } = {}): Model {
-  const { mean = TRUESKILL_DEFAULTS.mean, sd = TRUESKILL_DEFAULTS.sd, beta = TRUESKILL_DEFAULTS.beta } = options
+export function trueSkillModel(
+  options: { mean?: number; sd?: number; beta?: number; drawMargin?: number } = {},
+): Model {
+  const {
+    mean = TRUESKILL_DEFAULTS.mean,
+    sd = TRUESKILL_DEFAULTS.sd,
+    beta = TRUESKILL_DEFAULTS.beta,
+    drawMargin: eps = 0,
+  } = options
   return model('TrueSkill', (m) => {
     const players = m.plate('players', 'P', { label: 'P', index: 'p' })
     const games = m.plate('games', 'G', { label: 'G', index: 'g' })
     const skill = players.variable('s', dist.Normal(mean, sd), { label: 's_p' })
     const winner = games.constant('w', undefined, { label: 'w_g' })
     const loser = games.constant('l', undefined, { label: 'l_g' })
-    const d = games.deterministic('d', 'difference', [skill.at(winner), skill.at(loser)], { label: 'd_g' })
-    const z = games.deterministic('z', 'product', [d, 1 / (Math.SQRT2 * beta)], { label: 'z_g' })
-    const p = games.deterministic('π', 'probit', [z], { label: '\\pi_g' })
-    games.observed('y', dist.Bernoulli(p), { label: 'y_g' })
+    const drawn = games.constant('δ', undefined, { label: '\\delta_g' })
+    const p = games.variable('p', dist.Normal(skill.at(winner), beta), { label: 'p_g' })
+    const q = games.variable('q', dist.Normal(skill.at(loser), beta), { label: 'q_g' })
+    const d = games.deterministic('d', 'difference', [p, q], { label: 'd_g' })
+    const lower = games.deterministic('lower', 'index', [tensor([eps, -eps]), drawn])
+    const upper = games.deterministic('upper', 'index', [tensor([Infinity, eps]), drawn])
+    const inside = games.deterministic('inside', 'interval', [d, lower, upper], {
+      label: '\\mathbb{1}_g',
+    })
+    games.observed('y', dist.Bernoulli(inside), { label: 'y_g' })
   })
 }
 

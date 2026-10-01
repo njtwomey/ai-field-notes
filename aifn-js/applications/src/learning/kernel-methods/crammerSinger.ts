@@ -16,6 +16,8 @@ import {
 import { argmax, fromData, type Tensor } from 'aifn/foundation/tensor'
 import { trace, type Algorithm } from 'aifn/foundation/trace'
 import { classLabels, inputs, matrix, values } from '../util'
+import { defineModel } from 'aifn/learning/estimators'
+import { bool, int, real, space } from 'aifn/foundation/space'
 
 // ── Crammer–Singer ───────────────────────────────────────────────────────────────────────────────────────────────
 
@@ -223,3 +225,25 @@ export function crammerSinger(
     },
   }
 }
+
+// ── Registry ─────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+defineModel(
+  {
+    key: 'crammerSinger',
+    module: 'learning/kernel-methods',
+    name: 'Crammer–Singer multiclass SVM',
+    summary: 'A single multiclass margin machine solved in the dual.',
+    task: 'classification',
+    capabilities: ['forward', 'decide', 'score'],
+    hyper: space({
+      C: real(1e-3, 1e3, { default: 1, scale: 'log' }),
+      intercept: bool({ default: true }),
+      tolerance: real(1e-10, 1e-2, { default: 1e-6, scale: 'log' }),
+      maxSteps: int(1, 10000, { default: 1000 }),
+    }),
+    notes: ['multiclass-support-vector-machines'],
+    cite: ['crammer2001'],
+  },
+  crammerSinger,
+)

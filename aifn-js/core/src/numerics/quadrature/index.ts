@@ -12,14 +12,7 @@
  *   `integrateMonteCarlo(s, …)`; `halton`, `sobol` sequences and randomised `quasiMonteCarlo(s, …)` (stream first).
  */
 
-export {
-  romberg,
-  simpson,
-  trapezoid,
-  trapezoidSamples,
-  type Integrand,
-  type RombergState,
-} from './rules'
+export { romberg, simpson, trapezoid, trapezoidSamples, type Integrand, type RombergState } from './rules'
 export {
   gaussHermite,
   gaussLaguerre,
@@ -52,3 +45,4 @@ export {
   type MonteCarloState,
   type MultivariateIntegrand,
 } from './multivariate'
+export { quadratureAlgorithms } from './registry'

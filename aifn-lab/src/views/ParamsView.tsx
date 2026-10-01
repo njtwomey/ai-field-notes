@@ -2,14 +2,14 @@ import { useMemo, useState } from 'react'
 import { countParams, treeLeaves } from 'aifn/foundation/pytree'
 import { norm, type Tensor } from 'aifn/foundation/tensor'
 import { Select } from '@lab/controls'
-import { Figure } from '@lab/layout'
+import { PanelSlot } from '@lab/layout'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@lab/ui/table'
 import { Readout } from '@lab/viz'
 import { formatValue } from './format'
-import type { FrameProps } from './frame'
+import { registerView } from './registry'
 import { TensorPanel } from './TensorView'
 
-export type ParamsViewProps = FrameProps & {
+export type ParamsPanelProps = {
   /** A parameter pytree (nested objects and arrays of tensors), e.g. a layer's `init(stream)`. */
   params: unknown
   /** Gradients with the same structure, to list their norms beside the parameters. */
@@ -22,7 +22,7 @@ const leafNorm = (v: Tensor | number) => (typeof v === 'number' ? Math.abs(v) : 
  * A generic view of a parameter pytree (`aifn/nn`): one row per leaf with its path, shape, size, norm and (with
  * `grads`) gradient norm, and the chosen leaf drawn by `TensorPanel`.
  */
-export function ParamsView({ params, grads, title = 'parameters', controls, readouts, ...frame }: ParamsViewProps) {
+export function ParamsPanel({ params, grads }: ParamsPanelProps) {
   const leaves = useMemo(() => treeLeaves(params), [params])
   const gradNorms = useMemo(() => {
     if (grads === undefined) return null
@@ -31,12 +31,9 @@ export function ParamsView({ params, grads, title = 'parameters', controls, read
   const [chosen, setChosen] = useState(leaves[0]?.path ?? '')
   const leaf = leaves.find((l) => l.path === chosen) ?? leaves[0]
   return (
-    <Figure
-      title={title}
-      {...frame}
-      controls={
+    <>
+      <PanelSlot slot="controls">
         <>
-          {controls}
           {leaves.length > 0 && (
             <Select
               label="tensor"
@@ -46,15 +43,11 @@ export function ParamsView({ params, grads, title = 'parameters', controls, read
             />
           )}
         </>
-      }
-      readouts={
-        <>
-          {readouts}
-          <Readout label="parameters" value={String(countParams(params))} />
-          <Readout label="tensors" value={String(leaves.length)} />
-        </>
-      }
-    >
+      </PanelSlot>
+      <PanelSlot slot="readouts">
+        <Readout label="parameters" value={String(countParams(params))} />
+        <Readout label="tensors" value={String(leaves.length)} />
+      </PanelSlot>
       <div className="grid h-full gap-4 md:grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)]">
         <div className="overflow-auto">
           <Table className="text-xs">
@@ -88,6 +81,15 @@ export function ParamsView({ params, grads, title = 'parameters', controls, read
           {leaf && typeof leaf.value !== 'number' && <TensorPanel tensor={leaf.value} name={leaf.path} />}
         </div>
       </div>
-    </Figure>
+    </>
   )
 }
+
+// A parameter pytree has no kind of its own; it is drawn when asked for by key ('params/table').
+registerView<unknown>({
+  key: 'params/table',
+  kind: 'params',
+  description: 'A parameter pytree: one row per leaf with its path, shape and norm, and the chosen leaf drawn.',
+  title: () => 'parameters',
+  render: (p) => <ParamsPanel params={p} />,
+})

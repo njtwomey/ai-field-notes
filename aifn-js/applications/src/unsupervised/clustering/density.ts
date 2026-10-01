@@ -11,8 +11,11 @@
 import type { Status } from 'aifn/foundation/contracts'
 import type { Dataset, Decides, Estimator, FitOptions, Trained, Transforms } from 'aifn/learning/estimators'
 import { fromData, type Tensor } from 'aifn/foundation/tensor'
+import { pairwiseDistances } from 'aifn/numerics/linalg'
 import { trace, type Algorithm } from 'aifn/foundation/trace'
 import { mat, matrix, pairwise, sq, vec } from './util'
+import { defineModel } from 'aifn/learning/estimators'
+import { int, oneOf, real, space } from 'aifn/foundation/space'
 
 // ── DBSCAN ───────────────────────────────────────────────────────────────────────────────────────────────────────
 
@@ -344,12 +347,62 @@ export function meanShift(params: {
       }
       const transform = (q: Tensor) => {
         const { n: rows, v: qv } = matrix(q, 'meanShift')
-        const out = new Float64Array(rows * kept.length)
-        for (let i = 0; i < rows; i++)
-          for (let j = 0; j < kept.length; j++) out[i * kept.length + j] = Math.sqrt(sq(qv, i, centres, j, d))
-        return mat(out, rows, kept.length)
+        return pairwiseDistances(mat(qv, rows, d), mat(centres, kept.length, d))
       }
       return { kind: 'model', name: 'mean-shift', centres: mat(centres, kept.length, d), training, decide, transform }
     },
   }
 }
+
+// ── Registry ─────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+defineModel(
+  {
+    key: 'dbscan',
+    module: 'unsupervised/clustering',
+    name: 'DBSCAN',
+    summary: 'Density-connected core points form clusters; the rest is noise.',
+    task: 'clustering',
+    capabilities: ['decide'],
+    hyper: space({
+      eps: real(1e-3, 10, { default: 0.5, label: 'ε', scale: 'log' }),
+      minSamples: int(1, 50, { default: 5 }),
+    }),
+    notes: ['density-based-spatial-clustering'],
+    cite: ['ester1996'],
+  },
+  dbscan,
+)
+
+defineModel(
+  {
+    key: 'optics',
+    module: 'unsupervised/clustering',
+    name: 'OPTICS',
+    summary: 'The reachability ordering of the points, from which DBSCAN clusterings at every ε can be read.',
+    task: 'clustering',
+    capabilities: [],
+    transductive: true,
+    hyper: space({ minSamples: int(1, 50, { default: 5 }) }),
+    notes: ['density-based-spatial-clustering'],
+  },
+  optics,
+)
+
+defineModel(
+  {
+    key: 'meanShift',
+    module: 'unsupervised/clustering',
+    name: 'Mean shift',
+    summary: 'Points climb a kernel density estimate to its modes, which are the clusters.',
+    task: 'clustering',
+    capabilities: ['decide', 'transform'],
+    hyper: space({
+      bandwidth: real(1e-2, 10, { default: 1, scale: 'log' }),
+      kernel: oneOf(['flat', 'gaussian']),
+      maxSteps: int(1, 1000, { default: 300 }),
+    }),
+    notes: ['density-based-spatial-clustering'],
+  },
+  meanShift,
+)

@@ -12,10 +12,12 @@ import type { Status } from 'aifn/foundation/contracts'
 import type { Decides, Estimator, FitOptions, Fitted, Scores, Trained, Transforms } from 'aifn/learning/estimators'
 import type { Dataset } from 'aifn/learning/estimators'
 import { type Stream, child, integers, stream, uniform } from 'aifn/foundation/random'
-import { pairwiseDistances } from 'aifn/numerics/linalg'
+import { pairwiseDistances, squaredDistances } from 'aifn/numerics/linalg'
 import { fromData, type Tensor } from 'aifn/foundation/tensor'
 import { trace, type Algorithm, type Trace } from 'aifn/foundation/trace'
 import { ints, mat, matrix, nearest, sq, values, vec } from './util'
+import { defineModel } from 'aifn/learning/estimators'
+import { int, oneOf, real, space } from 'aifn/foundation/space'
 
 // ── k-means++ ────────────────────────────────────────────────────────────────────────────────────────────────────
 
@@ -217,13 +219,11 @@ export interface KMeansModel
 }
 
 function centroidModel(centroids: Tensor, d: number) {
-  const c = values(centroids)
   const k = centroids.shape[0]
   const sqd = (q: Tensor) => {
     const { n: m, v, d: dq } = matrix(q, 'kmeans')
     if (dq !== d) throw new Error(`kmeans: fitted on ${d} features, given ${dq}`)
-    const out = new Float64Array(m * k)
-    for (let i = 0; i < m; i++) for (let j = 0; j < k; j++) out[i * k + j] = sq(v, i, c, j, d)
+    const out = values(squaredDistances(mat(v, m, d), centroids))
     return { out, m }
   }
   return {
@@ -553,3 +553,58 @@ export function kMedoids(params: { k: number; maxSteps?: number }): Estimator<Da
     },
   }
 }
+
+// ── Registry ─────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+defineModel(
+  {
+    key: 'kmeans',
+    module: 'unsupervised/clustering',
+    name: 'k-means',
+    summary: "Lloyd's algorithm from k-means++ seeds, best of several restarts.",
+    task: 'clustering',
+    capabilities: ['forward', 'decide', 'score', 'transform'],
+    hyper: space({
+      k: int(1, 20, { default: 3 }),
+      restarts: int(1, 50, { default: 10 }),
+      seeding: oneOf(['k-means++', 'random']),
+      maxSteps: int(1, 1000, { default: 300 }),
+      tolerance: real(0, 1, { default: 0 }),
+    }),
+    notes: ['k-means'],
+    cite: ['lloyd1982', 'arthur2007'],
+  },
+  kmeans,
+)
+
+defineModel(
+  {
+    key: 'miniBatchKMeans',
+    module: 'unsupervised/clustering',
+    name: 'Mini-batch k-means',
+    summary: 'k-means with centroid updates from random mini-batches.',
+    task: 'clustering',
+    capabilities: ['forward', 'decide', 'score', 'transform'],
+    hyper: space({
+      k: int(1, 20, { default: 3 }),
+      batchSize: int(1, 1024, { default: 64 }),
+      steps: int(1, 10000, { default: 100 }),
+    }),
+    notes: ['k-means'],
+  },
+  miniBatchKMeans,
+)
+
+defineModel(
+  {
+    key: 'kMedoids',
+    module: 'unsupervised/clustering',
+    name: 'k-medoids',
+    summary: 'Clusters represented by data points (medoids), by alternating assignment and medoid update.',
+    task: 'clustering',
+    capabilities: ['forward', 'decide', 'score', 'transform'],
+    hyper: space({ k: int(1, 20, { default: 3 }), maxSteps: int(1, 1000, { default: 100 }) }),
+    notes: ['k-means'],
+  },
+  kMedoids,
+)

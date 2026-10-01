@@ -4,11 +4,15 @@
  *
  * - Type and storage: `Tensor` (shape, strides, offset, dtype, typed-array data), `Vector`, `Matrix`, `DType`.
  * - Constructors: `tensor`, `zeros`, `ones`, `full`, `eye`, `arange`, `linspace`, `fromRows`, `scalar`, `fromData`.
- * - Converters (the chart boundary): `toArray`, `toRows`, `toFlat`, `item`.
+ * - Converters (the chart boundary): `toArray`, `toRows`, `toFlat`, `item`; complex: `toComplexFlat`,
+ *   `toComplexArray`, `complexItem`.
+ * - Dtypes (design K §3.2): `bool`, `int32`, `float32`, `float64`, `complex128` (interleaved), one promotion table
+ *   (`promoteTypes`, `weakType`) and the result rules (`resultType`). Complex numbers: `complex`, `conj`, `realPart`,
+ *   `imagPart` (zero-copy views), `angle`, `complexAbs`, `expj`; autodiff treats them as ℝ² pairs (complex.ts).
  * - Primitives (numbers, tensors and traced values alike): elementwise, structural, reductions and products.
  * - Defining primitives: `definePrimitive` and `elementwise`, registered under node-path ids (`numerics/special/erf`) in `registry`
  *   (`registry.list()`); `defineOp` is a thin wrapper over
- *   `definePrimitive`; `sumLike`; the autodiff hook: `Tape`, `withTape`, `traced`.
+ *   `definePrimitive`; `sumLike`; the transform hook: `apply`, `Tracer`, `Interpreter`, `avalOf`, `nextLevel`.
  * - Constants and tolerances: `EPS`, `SQRT_EPS`, `TINY`, `DEFAULT_TOLERANCE`. The errors are
  *   `aifn/foundation/errors`.
  * - The brand: `isTensor` checks it; `revive` re-brands tensors that crossed `structuredClone` or a worker.
@@ -18,8 +22,32 @@
  *   `dense.toMatrixF64`, `dense.dot`, `dense.matVec`, `dense.matMul`, `dense.axpy`, …). Not primitives.
  */
 
-export type { Axis, DType, NestedArray, Tensor, TensorData, TensorLike, Vector, Matrix } from './core'
-export { fromData, isContiguous, isTensor, revive, rowMajorStrides, showShape, size, type TensorBrand } from './core'
+export type { Axes, DType, NestedArray, Tensor, TensorData, TensorLike, Vector, Matrix } from './core'
+export type { ComplexNumber } from 'aifn/foundation/contracts'
+export {
+  elementWidth,
+  isComplexDType,
+  isFloatDType,
+  promoteTypes,
+  resultType,
+  weakType,
+  type ResultRule,
+} from './dtype'
+export { angle, complex, complexAbs, conj, expj, imagPart, realPart, refuseComplex } from './complex'
+export { complexKernel, joinComplex, splitComplex, type ComplexRule } from './kernels'
+export { complexPartView } from './core'
+export {
+  float64Data,
+  fromData,
+  isContiguous,
+  readonlyData,
+  isTensor,
+  revive,
+  rowMajorStrides,
+  showShape,
+  size,
+  type TensorBrand,
+} from './core'
 export { DEFAULT_TOLERANCE, EPS, EPS32, SQRT_EPS, TINY, tolerance, type Tolerance } from './numerics'
 export {
   registry,
@@ -30,10 +58,12 @@ export {
   type PrimitiveCase,
   type PrimitiveDoc,
   type PrimitiveTest,
+  type RuleSource,
 } from './registry'
 export {
   arange,
   astype,
+  complexItem,
   copy,
   eye,
   fromRows,
@@ -45,12 +75,27 @@ export {
   shapeOf,
   tensor,
   toArray,
+  toComplexArray,
+  toComplexFlat,
   toFlat,
   toRows,
   zeros,
+  type NestedComplex,
 } from './create'
 export { broadcastShapes, type SliceSpec } from './views'
-export { currentTape, isTraced, traced, unwrap, withTape, type Tape, type Traced, type Value, type Vjp } from './tape'
+export {
+  apply,
+  avalOf,
+  batchedValueError,
+  isTraced,
+  nextLevel,
+  Tracer,
+  unwrap,
+  type Aval,
+  type Interpreter,
+  type Traced,
+  type Value,
+} from './trace'
 export {
   defineOp,
   definePrimitive,
@@ -59,13 +104,21 @@ export {
   type ElementwiseSpec,
   type PrimitiveMeta,
   type PrimitiveSpec,
+  batchToFront,
+  broadcastBatch,
+  fitTo,
+  projectReal,
   sumLike,
+  zerosOf,
   type Binary,
-  type ElementwiseOptions,
   type NumberResult,
   type Op,
+  type OpBatch,
+  type OpJvp,
+  type OpTranspose,
   type OpVjp,
   type Raw,
+  type ShapeRule,
   type Result2,
   type TensorResult,
   type Ternary,
@@ -104,6 +157,7 @@ export {
   type Comparison,
 } from './elementwise'
 export {
+  batchByLoop,
   broadcastTo,
   concat,
   diag,
@@ -121,8 +175,23 @@ export {
   sumTo,
   transpose,
 } from './structure'
-export { argmax, argmin, logsumexp, max, mean, min, norm, prod, std, sum, variance, type Reduction } from './reduce'
-export { dot, einsum, matmul, outer } from './products'
+export {
+  argmax,
+  argmin,
+  cumsum,
+  logsumexp,
+  max,
+  mean,
+  min,
+  norm,
+  prod,
+  std,
+  sum,
+  variance,
+  type ArgReduction,
+  type Reduction,
+} from './reduce'
+export { dot, einsum, linearCombination, matmul, outer } from './products'
 export { allclose, equal, type CloseOptions } from './compare'
 export { gather, scatterAdd, take } from './gather'
 export type { MatrixLike, VectorLike } from './dense'

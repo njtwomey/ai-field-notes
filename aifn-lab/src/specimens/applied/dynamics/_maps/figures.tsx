@@ -15,20 +15,11 @@ import {
 } from 'aifn-applied/dynamics/maps'
 import { histogram } from 'aifn/probability/stats'
 import { toFlat, toRows } from 'aifn/foundation/tensor'
-import { useMemo, useState } from 'react'
-import { Player, Select, Slider, usePlayhead } from '@lab/controls'
-import { ControlRow, Figure } from '@lab/layout'
-import {
-  Heatmap,
-  Panel,
-  Readout,
-  Subplots,
-  XYChart,
-  formatNumber,
-  type Handle,
-  type HeatmapOverlay,
-  type XYSeries,
-} from '@lab/viz'
+import { useMemo } from 'react'
+import { Player, usePlayhead } from '@lab/controls'
+import { ControlRow, Dashboard, DashboardCell, DashboardRow, Figure } from '@lab/layout'
+import { slider, useFigureState, variants } from '@lab/state'
+import { Curve, formatNumber, Handle, Plot, Plots, Points, Raster, Readout, useAxis } from '@lab/viz'
 
 const fmt = (v: number) => formatNumber(v)
 
@@ -60,13 +51,31 @@ function visits(
 // ---------------------------------------------------------------------------------------------------------------------
 // Bifurcation diagram, cobweb and Lyapunov exponent.
 
-type Family = { value: string; label: string; make: (r: number) => Map1; range: [number, number]; initial: number }
+type Family = { label: string; make: (r: number) => Map1; range: [number, number]; initial: number }
 
-const FAMILIES: Family[] = [
-  { value: 'logistic', label: 'logistic r·x(1 − x)', make: logisticMap, range: [2.5, 4], initial: 3.56 },
-  { value: 'sine', label: 'sine r·sin(πx)', make: sineMap, range: [0.6, 1], initial: 0.87 },
-  { value: 'tent', label: 'tent μ·min(x, 1 − x)', make: tentMap, range: [1, 2], initial: 1.5 },
-]
+const FAMILIES = {
+  logistic: { label: 'logistic r·x(1 − x)', make: logisticMap, range: [2.5, 4], initial: 3.56 },
+  sine: { label: 'sine r·sin(πx)', make: sineMap, range: [0.6, 1], initial: 0.87 },
+  tent: { label: 'tent μ·min(x, 1 − x)', make: tentMap, range: [1, 2], initial: 1.5 },
+} satisfies Record<string, Family>
+type FamilyName = keyof typeof FAMILIES
+
+/** The family and its parameter, each family with its own range and remembered value. */
+const FAMILY = variants(
+  Object.fromEntries(
+    (Object.keys(FAMILIES) as FamilyName[]).map((k) => {
+      const f: Family = FAMILIES[k]
+      return [
+        k,
+        {
+          label: f.label,
+          params: { r: slider(f.range[0], f.range[1], f.initial, { label: 'parameter r', step: 0.001 }) },
+        },
+      ]
+    }),
+  ) as Record<FamilyName, { label: string; params: { r: ReturnType<typeof slider> } }>,
+  { label: '1 · family', choiceLabel: 'map' },
+)
 
 const NR = 300
 const NX = 200
@@ -76,15 +85,15 @@ const COBWEB_N = 200
 const SWEEP = 301
 
 export function BifurcationSpecimen() {
-  const [which, setWhich] = useState('logistic')
-  const family = FAMILIES.find((f) => f.value === which)!
-  const [params, setParams] = useState<Record<string, number>>(() =>
-    Object.fromEntries(FAMILIES.map((f) => [f.value, f.initial])),
-  )
-  const r = params[which]
-  const setR = (v: number) =>
-    setParams((p) => ({ ...p, [which]: Math.min(family.range[1], Math.max(family.range[0], v)) }))
-  const [x0, setX0] = useState(0.2)
+  const state = useFigureState({
+    family: FAMILY,
+    x0: slider(0, 1, 0.2, { label: 'x₀', step: 0.001, onChart: true }),
+  })
+  const which = state.family.key as FamilyName
+  const family: Family = FAMILIES[which]
+  const r = state.family.values.r as number
+  const setR = (v: number) => state.set('family.r', v)
+  const x0 = state.x0
   const [n, setN] = usePlayhead(COBWEB_N + 1)
 
   const rs = useMemo(
@@ -119,50 +128,29 @@ export function BifurcationSpecimen() {
   }, [map, x0])
   const lambda = useMemo(() => lyapunovExponent(map, 0.2345, { keep: 5000 }).exponent, [map])
   const late = useMemo(() => toFlat(orbit(map, x0, 8, { discard: 2000 })), [map, x0])
-  const graph = useMemo((): XYSeries[] => {
+  const graph = useMemo(() => {
     const xs = Array.from({ length: 201 }, (_, i) => i / 200)
-    return [
-      { name: 'f', type: 'line', x: xs, y: xs.map(map.f), slot: 0 },
-      { name: 'y = x', type: 'line', x: [0, 1], y: [0, 1], muted: true },
-    ]
+    return { x: xs, y: xs.map(map.f) }
   }, [map])
-  const lyapSeries = useMemo(
-    (): XYSeries[] => [
-      { name: 'λ(r)', type: 'line', x: rs, y: lyap, slot: 1 },
-      { name: 'zero', type: 'line', x: [rs[0], rs[rs.length - 1]], y: [0, 0], muted: true },
-    ],
-    [rs, lyap],
-  )
+  const zero = useMemo(() => ({ x: [rs[0], rs[rs.length - 1]], y: [0, 0] }), [rs])
   const shown = Math.min(web.x.length, 2 * n + 1)
   const xn = web.x[shown - 1]
-  const live = useMemo(
-    (): XYSeries[] => [
-      { name: 'cobweb', type: 'line', slot: 2, x: web.x.slice(0, shown), y: web.y.slice(0, shown) },
-      { name: 'x_n', type: 'scatter', emphasis: true, x: [xn], y: [xn] },
-    ],
-    [web, shown, xn],
-  )
-  const rHandle: Handle[] = [{ kind: 'x', at: r, onDrag: setR, label: 'r' }]
+  const webNow = { x: web.x.slice(0, shown), y: web.y.slice(0, shown) }
+  const rAxis = useAxis({ label: 'r', range: family.range, nice: false })
+  const xAxis = useAxis({ label: 'x', range: [0, 1], nice: false })
+  const lAxis = useAxis({ label: 'λ', range: [-2, 1] })
+  const cx = useAxis({ label: 'x', range: [0, 1] })
+  const cy = useAxis({ label: 'f(x)', range: [0, 1], equal: cx })
   const sweepAt = Math.round(((r - family.range[0]) / (family.range[1] - family.range[0])) * (SWEEP - 1))
   const sweepR = (k: number) => family.range[0] + ((family.range[1] - family.range[0]) * k) / (SWEEP - 1)
   return (
     <Figure
       title="Bifurcation diagram and cobweb"
-      description="Where the long-run orbit of a unimodal map lives as its parameter grows: period doubling into chaos, with windows of order. The cobweb shows the orbit at the chosen r, and the Lyapunov exponent turns positive exactly where the diagram fills in."
+      purpose="The long-run orbit of a unimodal map as its parameter grows: period doubling into chaos, with windows of order; the Lyapunov exponent turns positive where the diagram fills in."
+      state={state}
       defaultSize="XL"
       controls={
         <>
-          <ControlRow label="1 · family">
-            <Select label="map" value={which} onChange={setWhich} options={FAMILIES} />
-            <Slider
-              label="parameter r"
-              value={r}
-              min={family.range[0]}
-              max={family.range[1]}
-              step={0.001}
-              onChange={setR}
-            />
-          </ControlRow>
           <ControlRow label="2 · sweep r">
             <Player
               className="col-span-full"
@@ -176,7 +164,6 @@ export function BifurcationSpecimen() {
             />
           </ControlRow>
           <ControlRow label="3 · cobweb">
-            <Slider label="x₀" value={x0} min={0} max={1} step={0.001} onChange={setX0} />
             <Player
               className="col-span-full"
               value={n}
@@ -196,47 +183,34 @@ export function BifurcationSpecimen() {
           <Readout label="late orbit" value={late.map((v) => v.toFixed(3)).join(', ')} />
         </>
       }
-      caption="Left: the attractor for each parameter (log visit counts of 300 iterates after 400 discarded), with the Lyapunov exponent below; drag the r line on either. Play the sweep to move r across the range. Right: the graph of the map, the diagonal and the cobweb from x₀ (drag it), built one iteration at a time as the iteration plays: the vertical step to the graph is x_{n+1} = f(x_n), and the horizontal step to the diagonal makes that value the next input. For the logistic map λ = ln 2 at r = 4; the tent map has λ = ln μ for every μ > 1, so it is chaotic as soon as it is expanding."
+      caption="Left: the attractor for each parameter (log visit counts of 300 iterates after 400 discarded), with the Lyapunov exponent below; drag the r line on either (or the slider). Play the sweep to move r across the range. Right: the graph of the map, the diagonal and the cobweb from x₀ (drag it), built one iteration at a time as the iteration plays: the vertical step to the graph is x_{n+1} = f(x_n), and the horizontal step to the diagonal makes that value the next input. For the logistic map λ = ln 2 at r = 4; the tent map has λ = ln μ for every μ > 1, so it is chaotic as soon as it is expanding."
     >
-      <Subplots cols={2} widthRatios={[1.6, 1]}>
-        <Panel>
-          <Subplots rows={2} sharex heightRatios={[3, 1.2]} axisKey={which} rescaleOnChange={false}>
-            <Panel>
-              <Heatmap
-                {...diagram}
-                xLabel="r"
-                yLabel="x"
-                valueLabel="log(1 + visits)"
-                colorBar={false}
-                handles={rHandle}
-              />
-            </Panel>
-            <Panel>
-              <XYChart
-                series={lyapSeries}
-                handles={rHandle}
-                xLabel="r"
-                yLabel="λ"
-                xRange={family.range}
-                yRange={[-2, 1]}
-                legend={false}
-              />
-            </Panel>
-          </Subplots>
-        </Panel>
-        <Panel>
-          <XYChart
-            aspect="equal"
-            xRange={[0, 1]}
-            yRange={[0, 1]}
-            xLabel="x"
-            yLabel="f(x)"
-            handles={[{ kind: 'x', at: x0, onDrag: (v) => setX0(Math.min(1, Math.max(0, v))), label: 'x₀' }]}
-            series={graph}
-            live={live}
-          />
-        </Panel>
-      </Subplots>
+      <Dashboard>
+        <DashboardRow minHeight={420}>
+          <DashboardCell ratio={1.6}>
+            <Plots rows={2} heights={[3, 1.2]}>
+              <Plot x={rAxis} y={xAxis}>
+                <Raster x={diagram.x} y={diagram.y} z={diagram.z} valueLabel="log(1 + visits)" colorBar={false} />
+                <Handle kind="x" at={r} onDrag={setR} label="r" />
+              </Plot>
+              <Plot x={rAxis} y={lAxis} legend={false}>
+                <Curve name="λ(r)" x={rs} y={lyap} slot={1} />
+                <Curve name="zero" x={zero.x} y={zero.y} muted />
+                <Handle kind="x" at={r} onDrag={setR} label="r" />
+              </Plot>
+            </Plots>
+          </DashboardCell>
+          <DashboardCell aspect="square">
+            <Plot x={cx} y={cy}>
+              <Curve name="f" x={graph.x} y={graph.y} slot={0} />
+              <Curve name="y = x" x={[0, 1]} y={[0, 1]} muted />
+              <Curve name="cobweb" x={webNow.x} y={webNow.y} slot={2} live />
+              <Points name="x_n" x={[xn]} y={[xn]} emphasis live />
+              <Handle {...state.handle('x0', { label: 'x₀', axis: 'x' })} />
+            </Plot>
+          </DashboardCell>
+        </DashboardRow>
+      </Dashboard>
     </Figure>
   )
 }
@@ -245,7 +219,6 @@ export function BifurcationSpecimen() {
 // Chaotic maps of the plane.
 
 type PlaneMap = {
-  value: string
   label: string
   param: { label: string; min: number; max: number; initial: number }
   make: (p: number) => MapN
@@ -258,9 +231,8 @@ type PlaneMap = {
 const TAU = 2 * Math.PI
 /** Iterates of the first orbit revealed by the player. */
 const REVEAL = 1000
-const PLANE_MAPS: PlaneMap[] = [
-  {
-    value: 'henon',
+const PLANE_MAPS = {
+  henon: {
     label: 'Hénon map',
     param: { label: 'a (b = 0.3)', min: 1, max: 1.42, initial: 1.4 },
     make: (a) => henonMap(a, 0.3),
@@ -268,8 +240,7 @@ const PLANE_MAPS: PlaneMap[] = [
     yr: [-0.45, 0.45],
     starts: [[0.1, 0.1]],
   },
-  {
-    value: 'standard',
+  standard: {
     label: 'standard map',
     param: { label: 'K', min: 0, max: 2.5, initial: 0.97 },
     make: standardMap,
@@ -277,15 +248,30 @@ const PLANE_MAPS: PlaneMap[] = [
     yr: [0, TAU],
     starts: Array.from({ length: 40 }, (_, k) => [Math.PI + 0.01 * k, (TAU * (k + 0.5)) / 40]),
   },
-]
+} satisfies Record<string, PlaneMap>
+type PlaneName = keyof typeof PLANE_MAPS
+
+const PLANE = variants(
+  Object.fromEntries(
+    (Object.keys(PLANE_MAPS) as PlaneName[]).map((k) => {
+      const m: PlaneMap = PLANE_MAPS[k]
+      return [
+        k,
+        {
+          label: m.label,
+          params: { p: slider(m.param.min, m.param.max, m.param.initial, { label: m.param.label, step: 0.01 }) },
+        },
+      ]
+    }),
+  ) as Record<PlaneName, { label: string; params: { p: ReturnType<typeof slider> } }>,
+  { label: '1 · map', choiceLabel: 'map' },
+)
 
 export function PlaneMapSpecimen() {
-  const [which, setWhich] = useState('henon')
-  const pm = PLANE_MAPS.find((m) => m.value === which)!
-  const [params, setParams] = useState<Record<string, number>>(() =>
-    Object.fromEntries(PLANE_MAPS.map((m) => [m.value, m.param.initial])),
-  )
-  const p = params[which]
+  const state = useFigureState({ map: PLANE })
+  const which = state.map.key as PlaneName
+  const pm: PlaneMap = PLANE_MAPS[which]
+  const p = state.map.values.p as number
   const map = useMemo(() => pm.make(p), [pm, p])
   const picture = useMemo(() => {
     const per = Math.floor(30_000 / pm.starts.length)
@@ -307,30 +293,16 @@ export function PlaneMapSpecimen() {
     return { x: rows.map((q) => q[0]), y: rows.map((q) => q[1]) }
   }, [map, pm])
   const [k, setK] = usePlayhead(REVEAL + 1)
-  const overlay = useMemo(
-    (): HeatmapOverlay[] => [
-      { name: 'first orbit so far', type: 'scatter', slot: 7, x: first.x.slice(0, k + 1), y: first.y.slice(0, k + 1) },
-      { name: 'current iterate', type: 'scatter', emphasis: true, x: [first.x[k]], y: [first.y[k]] },
-    ],
-    [first, k],
-  )
+  const so = { x: first.x.slice(0, k + 1), y: first.y.slice(0, k + 1) }
+  const xa = useAxis({ label: which === 'henon' ? 'x' : 'θ', range: pm.xr, nice: false })
+  const ya = useAxis({ label: which === 'henon' ? 'y' : 'p', range: pm.yr, nice: false })
   return (
     <Figure
       title="Chaotic maps of the plane"
-      description="Orbits of the dissipative Hénon map collapse onto a fractal attractor; orbits of the area-preserving standard map keep to invariant curves until K breaks them into a chaotic sea."
+      purpose="Orbits of the dissipative Hénon map collapse onto a fractal attractor; orbits of the area-preserving standard map keep to invariant curves until K breaks them into a chaotic sea."
+      state={state}
       controls={
         <>
-          <ControlRow label="1 · map">
-            <Select label="map" value={which} onChange={setWhich} options={PLANE_MAPS} />
-            <Slider
-              label={pm.param.label}
-              value={p}
-              min={pm.param.min}
-              max={pm.param.max}
-              step={0.01}
-              onChange={(v) => setParams((s) => ({ ...s, [which]: v }))}
-            />
-          </ControlRow>
           <ControlRow label="2 · iterate">
             <Player
               className="col-span-full"
@@ -352,16 +324,18 @@ export function PlaneMapSpecimen() {
       }
       caption="Log visit counts of 30 000 iterates (one orbit for Hénon; 40 orbits started along θ = π for the standard map). Play the iteration to watch the first orbit land point by point (ink: the current iterate): the Hénon orbit falls onto the attractor within a few steps and then fills it in no visible order, while a standard-map orbit keeps to its own curve or wanders the chaotic sea. The Lyapunov spectrum comes from the QR method along the first orbit: for Hénon the sum is ln 0.3, for the standard map 0; a positive largest exponent means chaos."
     >
-      <Heatmap
-        {...picture}
-        xLabel={which === 'henon' ? 'x' : 'θ'}
-        yLabel={which === 'henon' ? 'y' : 'p'}
-        valueLabel="log(1 + visits)"
-        colorBar={false}
-        axisKey={which}
-        fillOpacity={0.6}
-        overlay={overlay}
-      />
+      <Plot x={xa} y={ya}>
+        <Raster
+          x={picture.x}
+          y={picture.y}
+          z={picture.z}
+          valueLabel="log(1 + visits)"
+          colorBar={false}
+          fillOpacity={0.6}
+        />
+        <Points name="first orbit so far" x={so.x} y={so.y} slot={7} thin live />
+        <Points name="current iterate" x={[first.x[k]]} y={[first.y[k]]} emphasis live />
+      </Plot>
     </Figure>
   )
 }

@@ -4,7 +4,7 @@
  * formulae", J. Comput. Appl. Math. 6; Hairer, Nørsett & Wanner, 1993, §II.4, as in scipy's `RK45`).
  */
 
-import { dense, fromData, type Vector } from 'aifn/foundation/tensor'
+import { dense, fromData, type Tensor, type Vector } from 'aifn/foundation/tensor'
 import type { Algorithm, Scalar } from 'aifn/foundation/contracts'
 import { combine, evaluate, initialState, stages, type ButcherTableau } from './explicit'
 import type { InitialValue, OdeState, Rhs } from './types'
@@ -74,23 +74,40 @@ function errorNorm(e: F64, x: F64, y: F64, rtol: number, atol: number): number {
 }
 
 /**
- * The starting step size of Hairer, Nørsett & Wanner (1993, §II.4, "Starting step size"): balance h so that an Euler
- * step's change and the estimated second derivative are both small relative to the tolerance. Costs one evaluation.
+ * The starting step size of Hairer, Nørsett & Wanner (1993, §II.4, "Starting step size"), as scipy's
+ * `select_initial_step`: balance h so that an Euler step's change and the estimated second derivative are both small
+ * relative to the tolerance, for a method whose local error is O(h^{order+1}). `atol` is a scalar or one per
+ * component. The result is at most the interval length and `maxStep`. Costs one evaluation. Internal to the adaptive
+ * solvers.
  */
-function startingStep(f: Rhs, t0: number, x0: F64, f0: F64, dir: number, rtol: number, atol: number, order: number) {
+export function startingStep(
+  f: Rhs,
+  t0: number,
+  x0: F64,
+  f0: F64,
+  dir: number,
+  rtol: number,
+  atol: number | ArrayLike<number>,
+  order: number,
+  where: string,
+  interval = Infinity,
+  maxStep = Infinity,
+): number {
+  if (interval === 0) return 0
+  const at = (i: number) => (typeof atol === 'number' ? atol : atol[i])
   const scaled = (v: F64) => {
     let s = 0
-    for (let i = 0; i < v.length; i++) s += (v[i] / (atol + Math.abs(x0[i]) * rtol)) ** 2
+    for (let i = 0; i < v.length; i++) s += (v[i] / (at(i) + Math.abs(x0[i]) * rtol)) ** 2
     return Math.sqrt(s / Math.max(1, v.length))
   }
   const d0 = scaled(x0)
   const d1 = scaled(f0)
-  const h0 = d0 < 1e-5 || d1 < 1e-5 ? 1e-6 : (0.01 * d0) / d1
+  const h0 = Math.min(d0 < 1e-5 || d1 < 1e-5 ? 1e-6 : (0.01 * d0) / d1, interval)
   const x1 = Float64Array.from(x0, (v, i) => v + dir * h0 * f0[i])
-  const f1 = evaluate(f, t0 + dir * h0, x1, 'dormandPrince')
+  const f1 = evaluate(f, t0 + dir * h0, x1, where)
   const d2 = scaled(Float64Array.from(f1, (v, i) => v - f0[i])) / h0
   const h1 = Math.max(d1, d2) <= 1e-15 ? Math.max(1e-6, h0 * 1e-3) : (0.01 / Math.max(d1, d2)) ** (1 / (order + 1))
-  return Math.min(100 * h0, h1)
+  return Math.min(100 * h0, h1, interval, maxStep)
 }
 
 /**
@@ -117,7 +134,7 @@ export function dormandPrince(f: Rhs, options: AdaptiveOptions): Algorithm<Initi
       let evaluations = 1
       let h = options.initialStepSize
       if (h === undefined) {
-        h = startingStep(f, t0, x, f0, dir, rtol, atol, 4)
+        h = startingStep(f, t0, x, f0, dir, rtol, atol, 4, name, Math.abs(tEnd - t0), hMax)
         evaluations++
       }
       h = dir * Math.min(Math.abs(h), hMax)
@@ -125,7 +142,6 @@ export function dormandPrince(f: Rhs, options: AdaptiveOptions): Algorithm<Initi
     },
     step: (s) => {
       const x = dense.data(s.x)
-      const k0 = dense.data(s.derivative)
       const dir = Math.sign(s.nextStepSize) || 1
       const hMin = options.minStepSize ?? 1e-12 * Math.max(1, Math.abs(s.time))
       let h = s.nextStepSize
@@ -143,10 +159,10 @@ export function dormandPrince(f: Rhs, options: AdaptiveOptions): Algorithm<Initi
             failure: 'step size underflow',
           }
         }
-        const k = stages(f, tab, s.time, x, h, name, k0)
+        const k = stages(f, tab, s.time, s.x, h, name, s.derivative)
         evaluations += tab.b.length - 1
-        const y = combine(x, h, tab.b, k)
-        const e = combine(new Float64Array(x.length), h, errW, k)
+        const y = dense.data(combine(s.x, h, tab.b, k) as Tensor)
+        const e = dense.data(combine(0, h, errW, k) as Tensor)
         const err = errorNorm(e, x, y, rtol, atol)
         if (!allFinite(y) || !Number.isFinite(err)) {
           attempts.push({ stepSize: h, error: err, accepted: false })
@@ -160,7 +176,7 @@ export function dormandPrince(f: Rhs, options: AdaptiveOptions): Algorithm<Initi
           const grow = attempts.length > 1 ? Math.min(1, factor) : factor
           const hNext = dir * Math.min(Math.abs(h * grow), hMax)
           // The last stage is evaluated at (t + h, y): first same as last.
-          const fy = k[k.length - 1]
+          const fy = k[k.length - 1] as Vector
           return {
             t: s.t + 1,
             time: s.time + h,
@@ -173,7 +189,7 @@ export function dormandPrince(f: Rhs, options: AdaptiveOptions): Algorithm<Initi
             diverged: false,
             failure: null,
             nextStepSize: hNext,
-            derivative: fromData(fy, [fy.length]),
+            derivative: fy,
             attempts,
           }
         }

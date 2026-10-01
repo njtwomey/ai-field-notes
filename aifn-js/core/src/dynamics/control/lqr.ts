@@ -7,7 +7,7 @@
  */
 
 import { eig } from 'aifn/numerics/linalg'
-import { dense, fromData, type Matrix, type Vector } from 'aifn/foundation/tensor'
+import { dense, fromData, type Matrix, type Tensor } from 'aifn/foundation/tensor'
 import { run } from 'aifn/foundation/trace'
 import type { MatrixLike, Scalar, Size } from 'aifn/foundation/contracts'
 import {
@@ -29,8 +29,8 @@ export type LqrResult = {
   P: Matrix
   /** The optimal gain: u = −Kx. */
   K: Matrix
-  /** Eigenvalues of A − BK. */
-  closedLoop: { real: Vector; imag: Vector }
+  /** Eigenvalues of A − BK, complex128 [n]. */
+  closedLoop: Tensor
   /** The relative Riccati residual at P. */
   residual: Scalar
   /** Steps the Riccati solver took. */
@@ -40,18 +40,16 @@ export type LqrResult = {
   failure: RiccatiFailure | null
 }
 
-/** The eigenvalues of A − BK, empty when anything is not finite. */
-export function closedLoopPoles(A: MatrixLike, B: MatrixLike, K: MatrixLike): { real: Vector; imag: Vector } {
+/** The eigenvalues of A − BK as a complex128 vector, empty when anything is not finite. */
+export function closedLoopPoles(A: MatrixLike, B: MatrixLike, K: MatrixLike): Tensor {
   const a = dense.toMatrixF64(A, 'closedLoop A')
   const b = dense.toMatrixF64(B, 'closedLoop B', a.m)
   const k = dense.toMatrixF64(K, 'closedLoop K', b.n, a.n)
   const acl = dense.sub(a.data, dense.matMul(b.data, k.data, a.m, b.n, a.n))
   if (!dense.allFinite(acl)) {
-    const empty = fromData(new Float64Array(0), [0])
-    return { real: empty, imag: empty }
+    return fromData(new Float64Array(0), [0], 'complex128')
   }
-  const e = eig(fromData(acl, [a.m, a.n]), { vectors: false })
-  return { real: e.real, imag: e.imag }
+  return eig(fromData(acl, [a.m, a.n]), { vectors: false }).values
 }
 
 function finishLqr(plant: StateFeedbackPlant, s: RiccatiState): LqrResult {

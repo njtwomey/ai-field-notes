@@ -4,9 +4,10 @@ import { adaBoost, gradientBoosting } from 'aifn-applied/learning/trees-and-ense
 import { costComplexityPath, decisionTree, pruneTree, treeSize } from 'aifn-applied/learning/trees-and-ensembles'
 import { grid2d } from 'aifn/numerics/geometry'
 import { toFlat, toRows, type Tensor } from 'aifn/foundation/tensor'
-import { Player, Select, Slider } from '@lab/controls'
-import { ControlRow, Figure } from '@lab/layout'
-import { ChartSize, Heatmap, Panel, Readout, Subplots, XYChart, type HeatmapOverlay, type XYSeries } from '@lab/viz'
+import { Player } from '@lab/controls'
+import { ControlRow, Dashboard, DashboardCell, DashboardRow, Figure } from '@lab/layout'
+import { choice, row, slider, useFigureState } from '@lab/state'
+import { Contours, Curve, Handle, Plot, Points, Raster, Readout, useAxis } from '@lab/viz'
 import { formatValue, TreeView } from '@lab/views'
 import { DATASET_OPTIONS, DATASETS, type DatasetName } from './data'
 
@@ -22,10 +23,17 @@ const reshape = (v: number[], ny: number, nx: number) =>
 // ── Tree growth and the split search ─────────────────────────────────────────────────────────────────────────────
 
 export function TreeGrowthSpecimen() {
-  const [dataset, setDataset] = useState<DatasetName>('blobs')
-  const [criterion, setCriterion] = useState<'gini' | 'entropy'>('gini')
-  const [depth, setDepth] = useState(4)
-  const [step, setStep] = useState(8)
+  const figure = useFigureState({
+    setup: row('1 · data and criterion', {
+      dataset: choice(DATASET_OPTIONS, 'blobs', { label: 'dataset' }),
+      criterion: choice(['gini', 'entropy'], 'gini', { label: 'impurity' }),
+      depth: slider(1, 6, 4, { label: 'maximum depth', step: 1 }),
+    }),
+  })
+  const dataset = figure.setup.dataset as DatasetName
+  const criterion = figure.setup.criterion as 'gini' | 'entropy'
+  const { depth } = figure.setup
+  const [step, setStep] = useState(0)
   const data = useMemo(() => DATASETS[dataset].make(), [dataset])
   const model = useMemo(
     () => decisionTree({ criterion, maxDepth: depth }).fit(toDataset(data.x, data.y!)),
@@ -37,35 +45,41 @@ export function TreeGrowthSpecimen() {
   const created = state.tree.nodes.length
   const cols = useMemo(() => columns(data.x), [data])
   const labels = useMemo(() => toFlat(data.y!), [data])
-  const rows = toFlat(state.rows)
+  const rows = useMemo(() => toFlat(state.rows), [state])
   const search = state.search
-  const splitSeries = useMemo((): XYSeries[] => {
-    if (!search) return []
-    return search.candidates.map((c) => ({
-      name: `split on x${'₀₁'[c.feature]}`,
-      type: 'line' as const,
-      x: toFlat(c.thresholds),
-      y: toFlat(c.decreases),
-      slot: c.feature,
-    }))
-  }, [search])
+  const splits = useMemo(
+    () =>
+      (search?.candidates ?? []).map((c) => ({
+        name: `split on x${'₀₁'[c.feature]}`,
+        x: toFlat(c.thresholds),
+        y: toFlat(c.decreases),
+        slot: c.feature,
+      })),
+    [search],
+  )
+  const here = useMemo(
+    () => ({
+      x: rows.map((i) => cols.x0[i]),
+      y: rows.map((i) => cols.x1[i]),
+      group: rows.map((i) => labels[i]),
+    }),
+    [rows, cols, labels],
+  )
+  const threshold = useAxis({ label: 'threshold' })
+  const decrease = useAxis({ label: 'impurity decrease' })
+  const ax0 = useAxis({ label: 'x₀', hold: 'initial', key: dataset })
+  const ax1 = useAxis({ label: 'x₁', hold: 'initial', key: dataset })
   const node = state.tree.nodes[state.current]
   return (
     <Figure
       title="Growing a CART tree, node by node"
-      description="Depth-first growth: each step creates one node, searches every threshold of every feature for the largest weighted impurity decrease, and either splits or stops."
+      purpose="Depth-first growth: each step creates one node, searches every threshold of every feature for the largest weighted impurity decrease, and either splits or stops."
+      state={figure}
       defaultSize="XL"
       controls={
-        <>
-          <ControlRow label="1 · data and criterion">
-            <Select label="dataset" value={dataset} onChange={setDataset} options={DATASET_OPTIONS} />
-            <Select label="impurity" value={criterion} onChange={setCriterion} options={['gini', 'entropy']} />
-            <Slider label="maximum depth" value={depth} min={1} max={6} step={1} onChange={setDepth} />
-          </ControlRow>
-          <ControlRow label="2 · growth">
-            <Player value={k} onChange={setStep} count={t.steps.length} label="node" />
-          </ControlRow>
-        </>
+        <ControlRow label="2 · growth">
+          <Player value={step} onChange={setStep} count={t.steps.length} label="node" />
+        </ControlRow>
       }
       readouts={
         <>
@@ -81,41 +95,34 @@ export function TreeGrowthSpecimen() {
       }
       caption="Nodes appear in the order they are created (preorder, left first); the current node is emphasised. The lower left panel is the split search at that node: the impurity decrease of every candidate threshold, one curve per feature, whose maximum is the split taken. The lower right panel colours the rows that reached the node by class and greys the rest."
     >
-      <div className="flex flex-col gap-2">
-        <ChartSize scale={0.5}>
-          <TreeView
-            tree={model.tree}
-            ariaLabel="The tree being grown"
-            hidden={(v) => v >= created}
-            nodeState={(v) => (v === state.current ? 'active' : 'done')}
-            shape={(v) => (model.tree.nodes[v].children.length ? 'box' : 'pill')}
-          />
-        </ChartSize>
-        <ChartSize scale={0.5}>
-          <Subplots cols={2}>
-            <Panel>
-              <XYChart series={splitSeries} xLabel="threshold" yLabel="impurity decrease" />
-            </Panel>
-            <Panel>
-              <XYChart
-                xLabel="x₀"
-                yLabel="x₁"
-                series={[
-                  { name: 'elsewhere', type: 'scatter', x: cols.x0, y: cols.x1, muted: true },
-                  {
-                    name: 'at this node',
-                    type: 'scatter',
-                    x: rows.map((i) => cols.x0[i]),
-                    y: rows.map((i) => cols.x1[i]),
-                    group: rows.map((i) => labels[i]),
-                    groupNames: data.meta.labelNames,
-                  },
-                ]}
-              />
-            </Panel>
-          </Subplots>
-        </ChartSize>
-      </div>
+      <Dashboard>
+        <DashboardRow minHeight={220}>
+          <DashboardCell>
+            <TreeView
+              tree={model.tree}
+              ariaLabel="The tree being grown"
+              hidden={(v) => v >= created}
+              nodeState={(v) => (v === state.current ? 'active' : 'done')}
+              shape={(v) => (model.tree.nodes[v].children.length ? 'box' : 'pill')}
+            />
+          </DashboardCell>
+        </DashboardRow>
+        <DashboardRow minHeight={220}>
+          <DashboardCell>
+            <Plot x={threshold} y={decrease}>
+              {splits.map((c) => (
+                <Curve key={c.name} name={c.name} x={c.x} y={c.y} slot={c.slot} />
+              ))}
+            </Plot>
+          </DashboardCell>
+          <DashboardCell>
+            <Plot x={ax0} y={ax1}>
+              <Points name="elsewhere" x={cols.x0} y={cols.x1} muted />
+              <Points name="at this node" {...here} groupNames={data.meta.labelNames} />
+            </Plot>
+          </DashboardCell>
+        </DashboardRow>
+      </Dashboard>
     </Figure>
   )
 }
@@ -126,21 +133,34 @@ export function PruningSpecimen() {
   const data = useMemo(() => DATASETS.moons.make(), [])
   const full = useMemo(() => decisionTree().fit(toDataset(data.x, data.y!)).tree, [data])
   const path = useMemo(() => costComplexityPath(full), [full])
-  const alphas = toFlat(path.alphas)
-  const impurities = toFlat(path.impurities)
+  const alphas = useMemo(() => toFlat(path.alphas), [path])
+  const impurities = useMemo(() => toFlat(path.impurities), [path])
   const leaves = toFlat(path.leaves)
-  const [alpha, setAlpha] = useState(0.01)
+  const top = alphas[alphas.length - 2] ?? 0.1
+  const figure = useFigureState({ alpha: slider(0, top * 1.1, 0.01, { label: 'α', onChart: true }) })
+  const { alpha } = figure
   const pruned = useMemo(() => pruneTree(full, alpha), [full, alpha])
   const size = treeSize(pruned)
-  const top = alphas[alphas.length - 2] ?? 0.1
+  const steps = useMemo(
+    () => ({
+      x: alphas.slice(0, -1).flatMap((a, i) => [a, alphas[i + 1]]),
+      y: impurities.slice(0, -1).flatMap((r) => [r, r]),
+    }),
+    [alphas, impurities],
+  )
+  const alphaAxis = useAxis({ label: 'α', range: [0, top * 1.2] })
+  const rAxis = useAxis({ label: 'total leaf impurity R' })
   return (
     <Figure
       title="Minimal cost-complexity pruning"
-      description="Pruning at complexity α keeps the subtree minimising R(T) + α|leaves(T)|; the weakest links go first, at the α printed on the path."
+      purpose="Pruning at complexity α keeps the subtree minimising R(T) + α|leaves(T)|; the weakest links go first, at the α printed on the path."
+      state={figure}
       defaultSize="XL"
-      controls={<Slider label="α" value={alpha} min={0} max={top * 1.1} onChange={setAlpha} />}
       readouts={
         <>
+          <Readout label="α" value={formatValue(alpha)} />
+          <Readout label="R(T_α)" value={formatValue(impurities[alphas.findLastIndex((a) => a <= alpha)] ?? NaN)} />
+          <Readout label="leaves on the path" value={leaves[alphas.findLastIndex((a) => a <= alpha)] ?? '—'} />
           <Readout label="leaves" value={size.leaves} />
           <Readout label="depth" value={size.depth} />
           <Readout label="full tree leaves" value={treeSize(full).leaves} />
@@ -148,33 +168,26 @@ export function PruningSpecimen() {
       }
       caption="Drag the α line on the path: the total leaf impurity R rises in steps as each weakest link is cut, and the tree above shrinks to match. At α = 0 the tree is the fully grown one, with pure leaves."
     >
-      <div className="flex flex-col gap-2">
-        <ChartSize scale={0.6}>
-          <TreeView
-            tree={pruned}
-            ariaLabel="The pruned tree"
-            shape={(v) => (pruned.nodes[v].children.length ? 'box' : 'pill')}
-          />
-        </ChartSize>
-        <ChartSize scale={0.4}>
-          <XYChart
-            xLabel="α"
-            xRange={[0, top * 1.2]}
-            yLabel="total leaf impurity R"
-            series={[
-              {
-                name: 'R(T_α)',
-                type: 'line',
-                x: alphas.slice(0, -1).flatMap((a, i) => [a, alphas[i + 1]]),
-                y: impurities.slice(0, -1).flatMap((r) => [r, r]),
-              },
-              { name: 'leaves', type: 'scatter', x: alphas, y: impurities, muted: true },
-            ]}
-            handles={[{ kind: 'x', at: alpha, onDrag: (a) => setAlpha(Math.max(0, a)), label: 'α' }]}
-            formatY={(v) => `${formatValue(v)} (${leaves[alphas.findLastIndex((a) => a <= alpha)] ?? ''} leaves)`}
-          />
-        </ChartSize>
-      </div>
+      <Dashboard>
+        <DashboardRow ratio={1.5} minHeight={240}>
+          <DashboardCell>
+            <TreeView
+              tree={pruned}
+              ariaLabel="The pruned tree"
+              shape={(v) => (pruned.nodes[v].children.length ? 'box' : 'pill')}
+            />
+          </DashboardCell>
+        </DashboardRow>
+        <DashboardRow minHeight={180}>
+          <DashboardCell>
+            <Plot x={alphaAxis} y={rAxis} legend={false}>
+              <Curve name="R(T_α)" x={steps.x} y={steps.y} />
+              <Points name="pruning points" x={alphas} y={impurities} muted />
+              <Handle {...figure.handle('alpha', { label: 'α' })} />
+            </Plot>
+          </DashboardCell>
+        </DashboardRow>
+      </Dashboard>
     </Figure>
   )
 }
@@ -182,9 +195,26 @@ export function PruningSpecimen() {
 // ── Boosting round by round ──────────────────────────────────────────────────────────────────────────────────────
 
 export function BoostingSpecimen() {
-  const [method, setMethod] = useState<'adaboost' | 'gradient'>('adaboost')
-  const [dataset, setDataset] = useState<DatasetName>('circles')
-  const [round, setRound] = useState(10)
+  const figure = useFigureState({
+    setup: row('1 · setup', {
+      method: choice(
+        [
+          { value: 'adaboost', label: 'AdaBoost (SAMME)' },
+          { value: 'gradient', label: 'gradient boosting (logistic)' },
+        ],
+        'adaboost',
+        { label: 'method' },
+      ),
+      dataset: choice(
+        DATASET_OPTIONS.filter((o) => o.value !== 'blobs'),
+        'circles',
+        { label: 'dataset' },
+      ),
+    }),
+  })
+  const method = figure.setup.method as 'adaboost' | 'gradient'
+  const dataset = figure.setup.dataset as DatasetName
+  const [round, setRound] = useState(0)
   const data = useMemo(() => DATASETS[dataset].make(), [dataset])
   const rounds = 80
   const ada = useMemo(() => adaBoost({ rounds }).fit(toDataset(data.x, data.y!)), [data])
@@ -221,59 +251,31 @@ export function BoostingSpecimen() {
     return reshape(K === 2 ? f : f, ny, nx)
   }, [method, ada, gb, g, r, K])
   const state = method === 'adaboost' ? ada.training.steps[Math.min(r, ada.training.steps.length - 1)] : null
-  const cols = columns(data.x)
-  const labels = toFlat(data.y!)
-  const weights = state ? toFlat(state.sampleWeights) : null
-  const heavy = weights
-    ? weights
-        .map((w, i) => [w, i])
-        .sort((a, b) => b[0] - a[0])
-        .slice(0, 15)
-        .map((p) => p[1])
-    : []
-  const overlay: HeatmapOverlay[] = [
-    { name: 'rows', type: 'scatter', x: cols.x0, y: cols.x1, group: labels, groupNames: data.meta.labelNames },
-    ...(heavy.length
-      ? [
-          {
-            name: 'heaviest weights',
-            type: 'scatter' as const,
-            x: heavy.map((i) => cols.x0[i]),
-            y: heavy.map((i) => cols.x1[i]),
-            emphasis: true,
-          },
-        ]
-      : []),
-  ]
+  const cols = useMemo(() => columns(data.x), [data])
+  const labels = useMemo(() => toFlat(data.y!), [data])
+  const heavy = useMemo(() => {
+    if (!state) return null
+    const idx = toFlat(state.sampleWeights)
+      .map((w, i) => [w, i])
+      .sort((a, b) => b[0] - a[0])
+      .slice(0, 15)
+      .map((p) => p[1])
+    return { x: idx.map((i) => cols.x0[i]), y: idx.map((i) => cols.x1[i]) }
+  }, [state, cols])
+  const field = useMemo(() => ({ x: toFlat(g.x), y: toFlat(g.y) }), [g])
+  const ax0 = useAxis({ label: 'x₀', hold: 'initial', key: dataset })
+  const ax1 = useAxis({ label: 'x₁', hold: 'initial', key: dataset, equal: ax0 })
   const loss = method === 'adaboost' ? toFlat(ada.training.series.trainingError) : toFlat(gb.training.series.loss)
   return (
     <Figure
       title="Boosting, round by round"
-      description="Each round adds one stump fitted to what the ensemble so far gets wrong: reweighted rows for AdaBoost, pseudo-residuals for gradient boosting."
+      purpose="Each round adds one stump fitted to what the ensemble so far gets wrong: reweighted rows for AdaBoost, pseudo-residuals for gradient boosting."
+      state={figure}
       defaultSize="L"
       controls={
-        <>
-          <ControlRow label="1 · setup">
-            <Select
-              label="method"
-              value={method}
-              onChange={setMethod}
-              options={[
-                { value: 'adaboost', label: 'AdaBoost (SAMME)' },
-                { value: 'gradient', label: 'gradient boosting (logistic)' },
-              ]}
-            />
-            <Select
-              label="dataset"
-              value={dataset}
-              onChange={setDataset}
-              options={DATASET_OPTIONS.filter((o) => o.value !== 'blobs')}
-            />
-          </ControlRow>
-          <ControlRow label="2 · rounds">
-            <Player value={r} onChange={setRound} count={rounds + 1} label="round" />
-          </ControlRow>
-        </>
+        <ControlRow label="2 · rounds">
+          <Player value={round} onChange={setRound} count={rounds + 1} label="round" />
+        </ControlRow>
       }
       readouts={
         <>
@@ -285,21 +287,21 @@ export function BoostingSpecimen() {
           {state && <Readout label="this stump's α" value={formatValue(state.alphas[state.alphas.length - 1])} />}
         </>
       }
-      caption="The colour is the ensemble's score after the chosen round (vote margin for AdaBoost, log-odds for gradient boosting), with its zero contour as the boundary. For AdaBoost, the ringed rows carry the most weight going into the next round: they sit where the current boundary is wrong. One stump draws one axis-aligned cut; eighty of them trace the circle."
+      caption="The colour is the ensemble's score after the chosen round (vote margin for AdaBoost, log-odds for gradient boosting), with its zero contour (ink) as the boundary. Round 0 shows the first stump. For AdaBoost, the ringed rows carry the most weight going into the next round: they sit where the current boundary is wrong. One stump draws one axis-aligned cut; eighty of them trace the circle."
     >
-      <Heatmap
-        x={toFlat(g.x)}
-        y={toFlat(g.y)}
-        z={z}
-        scale="diverging"
-        contours={{ levels: [0] }}
-        overlay={overlay}
-        equalAspect
-        xLabel="x₀"
-        yLabel="x₁"
-        valueLabel="score"
-        range={method === 'adaboost' ? [-1, 1] : [-6, 6]}
-      />
+      <Plot x={ax0} y={ax1}>
+        <Raster
+          x={field.x}
+          y={field.y}
+          z={z}
+          scale="diverging"
+          range={method === 'adaboost' ? [-1, 1] : [-6, 6]}
+          valueLabel="score"
+        />
+        <Contours x={field.x} y={field.y} z={z} levels={[0]} />
+        <Points name="rows" x={cols.x0} y={cols.x1} group={labels} groupNames={data.meta.labelNames} />
+        {heavy && <Points name="heaviest weights" x={heavy.x} y={heavy.y} emphasis />}
+      </Plot>
     </Figure>
   )
 }

@@ -15,6 +15,7 @@ import {
   normalPdf,
   normalQuantile,
   sigmoid,
+  softplus,
   xlog1py,
   xlogy,
 } from 'aifn/numerics/special'
@@ -23,6 +24,7 @@ import {
   add,
   div,
   exp,
+  expm1,
   fromData,
   full,
   log,
@@ -54,6 +56,12 @@ export interface Link {
   inverse(eta: Value): Value
   /** dμ/dη at η. */
   derivative(eta: Value): Value
+  /**
+   * True when g⁻¹ maps every finite η into the open mean space (log, logit, probit, cloglog): any finite η is a valid
+   * linear predictor, even where μ rounds to the edge of the space (σ(40) = 1 in float64). False when η itself must
+   * stay inside a range (identity, inverse, sqrt, inverse squared).
+   */
+  readonly total: boolean
 }
 
 /** 1 in the shape of v (a number, tensor or traced value). */
@@ -62,23 +70,30 @@ function onesLike(v: Value): Value {
 }
 
 const LINKS: Record<LinkName, Omit<Link, 'name'>> = {
-  identity: { link: (m) => m, inverse: (e) => e, derivative: onesLike },
-  log: { link: log, inverse: exp, derivative: exp },
-  logit: { link: logit, inverse: sigmoid, derivative: (e) => mul(sigmoid(e), sigmoid(neg(e))) },
-  probit: { link: normalQuantile, inverse: normalCdf, derivative: normalPdf },
+  identity: { link: (m) => m, inverse: (e) => e, derivative: onesLike, total: false },
+  log: { link: log, inverse: exp, derivative: exp, total: true },
+  logit: { link: logit, inverse: sigmoid, derivative: (e) => mul(sigmoid(e), sigmoid(neg(e))), total: true },
+  probit: { link: normalQuantile, inverse: normalCdf, derivative: normalPdf, total: true },
   // μ = 1 − exp(−e^η), the extreme-value (Gumbel minimum) cdf.
   cloglog: {
     link: (m) => log(neg(log(sub(1, m)))),
     inverse: (e) => sub(1, exp(neg(exp(e)))),
     derivative: (e) => exp(sub(e, exp(e))),
+    total: true,
   },
-  inverse: { link: (m) => div(1, m), inverse: (e) => div(1, e), derivative: (e) => neg(div(1, square(e))) },
+  inverse: {
+    link: (m) => div(1, m),
+    inverse: (e) => div(1, e),
+    derivative: (e) => neg(div(1, square(e))),
+    total: false,
+  },
   'inverse-squared': {
     link: (m) => div(1, square(m)),
     inverse: (e) => div(1, sqrt(e)),
     derivative: (e) => mul(-0.5, pow(e, -1.5)),
+    total: false,
   },
-  sqrt: { link: sqrt, inverse: square, derivative: (e) => mul(2, e) },
+  sqrt: { link: sqrt, inverse: square, derivative: (e) => mul(2, e), total: false },
 }
 
 /** The link function by name (McCullagh and Nelder, 1989, §2.2.2). */
@@ -105,6 +120,11 @@ export interface Family {
   readonly canonicalLink: LinkName
   /** The default link (the canonical one except for the negative binomial, whose conventional link is log). */
   readonly defaultLink: LinkName
+  /**
+   * The links the family is used with (McCullagh and Nelder, 1989, Table 2.1; R's `family` objects): each maps the
+   * family's mean space onto a range a linear predictor can reach. `checkLink` rejects any other.
+   */
+  readonly links: readonly LinkName[]
   /** φ when it is known (1 for binomial, Poisson and negative binomial); null when it is estimated. */
   readonly dispersion: Scalar | null
   /** V(μ). */
@@ -158,6 +178,7 @@ export function gaussianFamily(): Family {
     params: {},
     canonicalLink: 'identity',
     defaultLink: 'identity',
+    links: ['identity', 'log', 'inverse'],
     dispersion: null,
     variance: (mu) => onesLike(mu),
     unitDeviance: (y, mu) => square(sub(y, mu)),
@@ -188,6 +209,7 @@ export function binomialFamily(): Family {
     params: {},
     canonicalLink: 'logit',
     defaultLink: 'logit',
+    links: ['logit', 'probit', 'cloglog', 'log'],
     dispersion: 1,
     variance: (mu) => mul(mu, sub(1, mu)),
     unitDeviance: (y, mu) =>
@@ -208,6 +230,7 @@ export function poissonFamily(): Family {
     params: {},
     canonicalLink: 'log',
     defaultLink: 'log',
+    links: ['log', 'identity', 'sqrt'],
     dispersion: 1,
     variance: (mu) => mu,
     unitDeviance: (y, mu) => mul(2, sub(sub(xlogy(y, y), xlogy(y, mu)), sub(y, mu))),
@@ -232,6 +255,7 @@ export function gammaFamily(): Family {
     params: {},
     canonicalLink: 'inverse',
     defaultLink: 'inverse',
+    links: ['inverse', 'log', 'identity'],
     dispersion: null,
     variance: (mu) => square(mu),
     unitDeviance: (y, mu) => mul(2, add(neg(log(div(y, mu))), div(sub(y, mu), mu))),
@@ -254,16 +278,14 @@ export function inverseGaussianFamily(): Family {
   // With p = φ/w: −½(log(2πp y³) + (y − μ)²/(p μ² y)).
   const logProb: Family['logProb'] = (y, mu, phi, w = 1) => {
     const p = div(phi, w)
-    return mul(
-      -0.5,
-      add(log(mul(mul(2 * Math.PI, p), pow(y, 3))), div(square(sub(y, mu)), mul(mul(p, square(mu)), y))),
-    )
+    return mul(-0.5, add(log(mul(mul(2 * Math.PI, p), pow(y, 3))), div(square(sub(y, mu)), mul(mul(p, square(mu)), y))))
   }
   return {
     name: 'inverse-gaussian',
     params: {},
     canonicalLink: 'inverse-squared',
     defaultLink: 'inverse-squared',
+    links: ['inverse-squared', 'inverse', 'log', 'identity'],
     dispersion: null,
     variance: (mu) => pow(mu, 3),
     unitDeviance: (y, mu) => div(square(sub(y, mu)), mul(square(mu), y)),
@@ -299,6 +321,7 @@ export function negativeBinomialFamily(theta: Scalar): Family {
     // log(μ/(μ + θ)) is not among the named links; the conventional log link is the default.
     canonicalLink: 'log',
     defaultLink: 'log',
+    links: ['log', 'identity', 'sqrt'],
     dispersion: 1,
     variance: (mu) => add(mu, div(square(mu), theta)),
     unitDeviance: (y, mu) =>
@@ -340,6 +363,20 @@ export function family(name: FamilyName, params: { theta?: Scalar } = {}): Famil
   throw new RangeError(`family: unknown family "${name as string}"`)
 }
 
+/**
+ * The link by name or as given, checked against the family's `links`: a link outside them maps the mean space onto a
+ * range the linear predictor cannot be held to (a logit for counts, an identity for probabilities), so a fit would
+ * leave the mean space or diverge. Throws a RangeError naming the valid links.
+ */
+export function checkLink(fam: Family, chosen: LinkName | Link = fam.defaultLink, where = 'likelihood'): Link {
+  const g = typeof chosen === 'object' ? chosen : link(chosen)
+  if (!fam.links.includes(g.name))
+    throw new RangeError(
+      `${where}: the ${fam.name} family does not take the ${g.name} link; use one of ${fam.links.join(', ')}`,
+    )
+  return g
+}
+
 // ── Likelihood: family and link ──────────────────────────────────────────────────────────────────────────────────
 
 /** Options of a likelihood's functions of (y, η): the dispersion φ (default the family's, else 1) and prior weights. */
@@ -364,7 +401,12 @@ export interface Likelihood {
    * kernel (all six here).
    */
   score(y: Value, eta: Value, options?: LikelihoodOptions): Value
-  /** The unit deviance d(y, g⁻¹(η)). */
+  /**
+   * The unit deviance d(y, g⁻¹(η)), from η directly where μ would lose precision: for the binomial with the logit
+   * link, 2[y log y + (1 − y) log(1 − y) + y softplus(−η) + (1 − y) softplus(η)]; with the cloglog link,
+   * log(1 − μ) = −e^η and log μ = log(−expm1(−e^η)). Finite for every finite η, where the μ form overflows once μ
+   * rounds to 0 or 1.
+   */
   unitDeviance(y: Value, eta: Value): Value
 }
 
@@ -373,7 +415,7 @@ export interface Likelihood {
  * `likelihood(binomialFamily())` or a log-linear gamma model's `likelihood(gammaFamily(), 'log')`.
  */
 export function likelihood(fam: Family, linkName: LinkName = fam.defaultLink): Likelihood {
-  const g = link(linkName)
+  const g = checkLink(fam, linkName)
   const phiOf = (o: LikelihoodOptions) => o.dispersion ?? fam.dispersion ?? 1
   return {
     family: fam,
@@ -386,7 +428,15 @@ export function likelihood(fam: Family, linkName: LinkName = fam.defaultLink): L
       const numerator = mul(mul(o.weights ?? 1, sub(y, mu)), g.derivative(eta))
       return div(numerator, mul(phiOf(o), fam.variance(mu)))
     },
-    unitDeviance: (y, eta) => fam.unitDeviance(y, g.inverse(eta)),
+    unitDeviance: (y, eta) => {
+      if (fam.name !== 'binomial' || (g.name !== 'logit' && g.name !== 'cloglog'))
+        return fam.unitDeviance(y, g.inverse(eta))
+      const saturated = add(xlogy(y, y), xlogy(sub(1, y), sub(1, y)))
+      // −log μ and −log(1 − μ).
+      const [minusLogMu, minusLogOneMinus] =
+        g.name === 'logit' ? [softplus(neg(eta)), softplus(eta)] : [neg(log(neg(expm1(neg(exp(eta)))))), exp(eta)]
+      return mul(2, add(saturated, add(mul(y, minusLogMu), mul(sub(1, y), minusLogOneMinus))))
+    },
   }
 }
 

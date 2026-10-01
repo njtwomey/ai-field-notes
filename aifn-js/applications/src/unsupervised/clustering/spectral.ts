@@ -12,6 +12,8 @@ import { dataset } from 'aifn/learning/estimators'
 import { fromData, type Tensor } from 'aifn/foundation/tensor'
 import { kmeans } from './centroid'
 import { mat, matrix, pairwise, vec } from './util'
+import { defineModel } from 'aifn/learning/estimators'
+import { bool, int, space } from 'aifn/foundation/space'
 
 /** How affinities are built: a Gaussian (RBF) kernel of lengthscale ℓ, or a symmetric k-nearest-neighbour graph. */
 export type Affinity = { kind: 'rbf'; lengthscale: number } | { kind: 'neighbours'; k: number }
@@ -110,3 +112,25 @@ export function spectralClustering(params: {
     },
   }
 }
+
+// ── Registry ─────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+defineModel(
+  {
+    key: 'spectralClustering',
+    module: 'unsupervised/clustering',
+    name: 'Spectral clustering',
+    summary: 'k-means on the leading eigenvectors of a normalised graph Laplacian.',
+    task: 'clustering',
+    capabilities: [],
+    transductive: true,
+    hyper: space({
+      k: int(1, 20, { default: 3 }),
+      restarts: int(1, 50, { default: 10 }),
+      normaliseRows: bool({ default: true }),
+    }),
+    notes: ['spectral-clustering'],
+    cite: ['ng2002b', 'shi2000'],
+  },
+  spectralClustering,
+)

@@ -2,10 +2,10 @@ import { grad, gradCheck } from 'aifn/foundation/autodiff'
 import { entropy } from 'aifn/probability/information'
 import * as S from 'aifn/numerics/special'
 import { linspace, logsumexp, sum, tensor, toFlat, type Tensor, type Unary, type Value } from 'aifn/foundation/tensor'
-import { useMemo, useState } from 'react'
-import { Choice, Select, Slider } from '@lab/controls'
-import { Figure } from '@lab/layout'
-import { ChartSize, Readout, XYChart, type XYSeries } from '@lab/viz'
+import { useMemo } from 'react'
+import { Equation, Figure, live, tex } from '@lab/layout'
+import { choice, slider, useFigureState } from '@lab/state'
+import { Bars, Curve, Plot, Plots, Points, Readout, useAxis } from '@lab/viz'
 import { formatValue } from '@lab/views'
 
 /** n evenly spaced points from lo to hi, as numbers. */
@@ -25,47 +25,61 @@ function naiveNormalCdf(z: number): number {
 /** Replace non-finite values by NaN so lines break there instead of drawing to infinity. */
 const finite = (v: number) => (Number.isFinite(v) ? v : NaN)
 
+// ── softplus ─────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+const SOFTPLUS_X = grid(-10, 10, 201)
+const SOFTPLUS_Y = toFlat(S.softplus(linspace(-10, 10, 201)))
+
+export function SoftplusSpecimen() {
+  const x = useAxis({ label: 'x' })
+  const y = useAxis({ label: 'softplus(x)' })
+  return (
+    <Figure
+      title="softplus(x)"
+      purpose="softplus(x) = log(1 + eˣ) is evaluated as max(x, 0) + log1p(e^(−|x|)), so it stays finite and accurate where eˣ overflows or 1 + eˣ rounds to 1."
+      readouts={
+        <>
+          <Readout label="softplus(800)" value={formatValue(S.softplus(800) as number)} />
+          <Readout label="log(1 + e⁸⁰⁰) (naive)" value={formatValue(Math.log(1 + Math.exp(800)))} />
+          <Readout label="softplus(−40)" value={formatValue(S.softplus(-40) as number)} />
+          <Readout label="log(1 + e⁻⁴⁰) (naive)" value={formatValue(Math.log(1 + Math.exp(-40)))} />
+        </>
+      }
+      caption="For large x, softplus(x) ≈ x; for very negative x, softplus(x) ≈ eˣ, which the naive form loses entirely once 1 + eˣ rounds to 1."
+    >
+      <Plot x={x} y={y}>
+        <Curve name="softplus" x={SOFTPLUS_X} y={SOFTPLUS_Y} />
+      </Plot>
+    </Figure>
+  )
+}
+
+// ── Normal tail ──────────────────────────────────────────────────────────────────────────────────────────────────────
+
+const TAIL_Z = grid(-40, 0, 401)
+const ERROR_Z = grid(-8, 0, 161)
+
 export function NormalTailSpecimen() {
-  const zs = useMemo(() => grid(-40, 0, 401), [])
-  const series = useMemo((): XYSeries[] => {
+  const curves = useMemo(() => {
     const log10 = (v: number) => finite(Math.log10(v))
-    return [
-      {
-        name: 'log₁₀ Φ(z) from normalLogCdf',
-        type: 'line',
-        x: zs,
-        y: zs.map((z) => S.normalLogCdf(z) / Math.LN10),
-        slot: 0,
-      },
-      {
-        name: 'log₁₀ normalCdf(z)',
-        type: 'line',
-        x: zs,
-        y: zs.map((z) => log10(S.normalCdf(z))),
-        slot: 1,
-        dashed: true,
-      },
-      {
-        name: 'log₁₀ of the old A&S 7.1.26 Φ',
-        type: 'line',
-        x: zs,
-        y: zs.map((z) => log10(naiveNormalCdf(z))),
-        slot: 2,
-      },
-    ]
-  }, [zs])
-  const errors = useMemo((): XYSeries[] => {
-    const e = (z: number) => {
-      const exact = Math.exp(S.normalLogCdf(z))
-      const r = Math.abs(naiveNormalCdf(z) / exact - 1)
-      return r > 0 && Number.isFinite(r) ? r : NaN
+    return {
+      logCdf: TAIL_Z.map((z) => S.normalLogCdf(z) / Math.LN10),
+      cdf: TAIL_Z.map((z) => log10(S.normalCdf(z))),
+      old: TAIL_Z.map((z) => log10(naiveNormalCdf(z))),
+      error: ERROR_Z.map((z) => {
+        const r = Math.abs(naiveNormalCdf(z) / Math.exp(S.normalLogCdf(z)) - 1)
+        return r > 0 && Number.isFinite(r) ? r : NaN
+      }),
     }
-    const zs2 = grid(-8, 0, 161)
-    return [{ name: 'relative error of the old Φ', type: 'line', x: zs2, y: zs2.map(e), slot: 2 }]
   }, [])
+  const z1 = useAxis({ label: 'z' })
+  const y1 = useAxis({ label: 'log₁₀ Φ(z)' })
+  const z2 = useAxis({ label: 'z' })
+  const y2 = useAxis({ label: 'relative error', log: true })
   return (
     <Figure
       title="log₁₀ Φ(z) in the far tail, and the old Φ's relative error"
+      purpose="normalLogCdf never underflows and normalCdf keeps full relative accuracy until it underflows near z = −37.5; the old A&S 7.1.26 formula, accurate only in absolute terms, loses relative accuracy steadily in the tail."
       defaultSize="L"
       readouts={
         <>
@@ -75,42 +89,42 @@ export function NormalTailSpecimen() {
           <Readout label="Φ(−6)" value={formatValue(S.normalCdf(-6))} />
         </>
       }
+      caption="Top: log₁₀ Φ on [−40, 0]; the curves overlap wherever they are defined, and the dashed normalCdf ends where Φ underflows below the smallest double. Bottom: the old formula's relative error, from about 10⁻⁷ near 0 to about 10⁻² at z = −8: its error bound is absolute, so it says less and less about a small Φ."
     >
-      <div className="flex flex-col gap-4">
-        <ChartSize scale={0.6}>
-          <XYChart series={series} xLabel="z" yLabel="log₁₀ Φ(z)" hoverGroup="normal-tail" />
-        </ChartSize>
-        <ChartSize scale={0.4}>
-          <XYChart series={errors} xLabel="z" yLabel="relative error" yLog hoverGroup="normal-tail" />
-        </ChartSize>
-      </div>
+      <Plots rows={2} heights={[3, 2]}>
+        <Plot x={z1} y={y1}>
+          <Curve name="log₁₀ Φ(z) from normalLogCdf" x={TAIL_Z} y={curves.logCdf} slot={0} />
+          <Curve name="log₁₀ normalCdf(z)" x={TAIL_Z} y={curves.cdf} slot={1} dashed />
+          <Curve name="log₁₀ of the old A&S 7.1.26 Φ" x={TAIL_Z} y={curves.old} slot={2} />
+        </Plot>
+        <Plot x={z2} y={y2}>
+          <Curve name="relative error of the old Φ" x={ERROR_Z} y={curves.error} slot={2} />
+        </Plot>
+      </Plots>
     </Figure>
   )
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
 
+const TRUNC_T = grid(-30, 8, 381)
+
 export function TruncatedMomentsSpecimen() {
-  const ts = useMemo(() => grid(-30, 8, 381), [])
-  const series = useMemo((): XYSeries[] => {
+  const curves = useMemo(() => {
     // The same quantities from a naive ratio φ/Φ with the old Φ, which fails where Φ loses accuracy.
     const naiveV = (t: number) => S.normalPdf(t) / naiveNormalCdf(t)
-    return [
-      { name: 'v(t) + t', type: 'line', x: ts, y: ts.map((t) => S.truncatedNormalV(t) + t), slot: 0 },
-      { name: 'w(t)', type: 'line', x: ts, y: toFlat(S.truncatedNormalW(tensor(ts))), slot: 1 },
-      {
-        name: 'w(t), naive φ/Φ with the old Φ',
-        type: 'line',
-        x: ts,
-        y: ts.map((t) => finite(naiveV(t) * (naiveV(t) + t))),
-        slot: 2,
-        dashed: true,
-      },
-    ]
-  }, [ts])
+    return {
+      v: TRUNC_T.map((t) => S.truncatedNormalV(t) + t),
+      w: toFlat(S.truncatedNormalW(tensor(TRUNC_T))),
+      naive: TRUNC_T.map((t) => finite(naiveV(t) * (naiveV(t) + t))),
+    }
+  }, [])
+  const x = useAxis({ label: 't' })
+  const y = useAxis({ label: 'value', range: [-0.1, 1.2] })
   return (
     <Figure
       title="v(t) + t and w(t)"
+      purpose="The truncated-normal moment functions v = φ/Φ and w = v(v + t) come from a Mills-ratio continued fraction, so they stay smooth far into the tail where the ratio φ/Φ breaks down."
       readouts={
         <>
           <Readout label="v(−30)" value={formatValue(S.truncatedNormalV(-30))} />
@@ -119,45 +133,69 @@ export function TruncatedMomentsSpecimen() {
           <Readout label="w_draw(3, ε = 0.5)" value={formatValue(S.truncatedNormalWDraw(3, 0.5))} />
         </>
       }
+      caption="v(t) + t tends to 0 and w(t) to 1 as t → −∞ (v(t) ≈ −t there). The dashed naive w, computed from the old Φ, drifts below w from about t = −3 and blows up near t = −8. These functions update the moments in expectation propagation for probit factors (TrueSkill)."
     >
-      <XYChart series={series} xLabel="t" yRange={[-0.1, 1.2]} />
+      <Plot x={x} y={y}>
+        <Curve name="v(t) + t" x={TRUNC_T} y={curves.v} slot={0} />
+        <Curve name="w(t)" x={TRUNC_T} y={curves.w} slot={1} />
+        <Curve name="w(t), naive φ/Φ with the old Φ" x={TRUNC_T} y={curves.naive} slot={2} dashed />
+      </Plot>
     </Figure>
   )
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
+
+const GAMMA_X = grid(-4.5, 6, 1051)
 
 export function GammaFamilySpecimen() {
-  const xs = useMemo(() => grid(-4.5, 6, 1051), [])
-  const series = useMemo((): XYSeries[] => {
+  const curves = useMemo(() => {
     const clip = (v: number) => (Math.abs(v) > 12 ? NaN : v)
-    return [
-      { name: 'log |Γ(x)|', type: 'line', x: xs, y: xs.map((x) => clip(S.logGamma(x))), slot: 0 },
-      { name: 'ψ(x)', type: 'line', x: xs, y: xs.map((x) => clip(S.digamma(x))), slot: 1 },
-      { name: 'ψ₁(x)', type: 'line', x: xs, y: xs.map((x) => clip(S.trigamma(x))), slot: 2 },
-    ]
-  }, [xs])
+    return {
+      logGamma: GAMMA_X.map((x) => clip(S.logGamma(x))),
+      digamma: GAMMA_X.map((x) => clip(S.digamma(x))),
+      trigamma: GAMMA_X.map((x) => clip(S.trigamma(x))),
+    }
+  }, [])
+  const x = useAxis({ label: 'x' })
+  const y = useAxis({ label: 'value', range: [-10, 12] })
   return (
-    <Figure title="log |Γ(x)|, ψ(x) and ψ₁(x)">
-      <XYChart series={series} xLabel="x" yRange={[-10, 12]} />
+    <Figure
+      title="log |Γ(x)|, ψ(x) and ψ₁(x)"
+      purpose="ψ = (log Γ)′ and ψ₁ = ψ′ are defined across the poles of Γ at 0, −1, −2, …; negative x is reached by the reflection formula."
+      caption="Each function is cut off where |value| > 12 so the poles show as gaps. ψ increases between poles and crosses zero once in each interval; ψ₁ is positive everywhere it is defined."
+    >
+      <Plot x={x} y={y}>
+        <Curve name="log |Γ(x)|" x={GAMMA_X} y={curves.logGamma} slot={0} />
+        <Curve name="ψ(x)" x={GAMMA_X} y={curves.digamma} slot={1} />
+        <Curve name="ψ₁(x)" x={GAMMA_X} y={curves.trigamma} slot={2} />
+      </Plot>
     </Figure>
   )
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
 
+const INCOMPLETE = [
+  { value: 'gamma', label: 'P(a, x)' },
+  { value: 'beta', label: 'I_x(a, b)' },
+  { value: 'student', label: 'Student t quantile' },
+] as const
+
+const PURPOSES = {
+  gamma: 'P(a, x) is the gamma(a) cdf at x: it rises from 0 to 1 near x = a, more steeply as a grows.',
+  beta: 'I_x(a, b) is the beta(a, b) cdf at x: its shape follows where the beta density puts its mass.',
+  student:
+    'The t quantile is the inverse of the incomplete-beta t cdf: heavy tails at small ν, the normal quantile at ν = ∞.',
+}
+
 export function IncompleteGammaBetaSpecimen() {
-  const [which, setWhich] = useState<'gamma' | 'beta' | 'student'>('gamma')
-  const series = useMemo((): XYSeries[] => {
+  const state = useFigureState({ which: choice(INCOMPLETE, 'gamma', { label: 'function' }) })
+  const which = state.which
+  const curves = useMemo((): { name: string; x: number[]; y: number[] }[] => {
     if (which === 'gamma') {
       const xs = grid(0, 20, 401)
-      return [0.5, 1, 3, 10].map((a, i) => ({
-        name: `P(${a}, x)`,
-        type: 'line',
-        x: xs,
-        y: xs.map((x) => S.regularisedGammaP(a, x)),
-        slot: i,
-      }))
+      return [0.5, 1, 3, 10].map((a) => ({ name: `P(${a}, x)`, x: xs, y: xs.map((x) => S.regularisedGammaP(a, x)) }))
     }
     if (which === 'beta') {
       const xs = grid(0, 1, 401)
@@ -168,44 +206,28 @@ export function IncompleteGammaBetaSpecimen() {
           [5, 1],
           [30, 30],
         ] as const
-      ).map(([a, b], i) => ({
-        name: `I_x(${a}, ${b})`,
-        type: 'line',
-        x: xs,
-        y: xs.map((x) => S.regularisedBeta(a, b, x)),
-        slot: i,
-      }))
+      ).map(([a, b]) => ({ name: `I_x(${a}, ${b})`, x: xs, y: xs.map((x) => S.regularisedBeta(a, b, x)) }))
     }
     const ps = grid(0.001, 0.999, 400)
-    return [0.5, 1, 3, 30, Infinity].map((v, i) => ({
+    return [0.5, 1, 3, 30, Infinity].map((v) => ({
       name: `t quantile, ν = ${v === Infinity ? '∞' : v}`,
-      type: 'line',
       x: ps,
       y: ps.map((p) => finite(S.studentTQuantile(p, v))),
-      slot: i,
     }))
   }, [which])
+  const x = useAxis({ label: which === 'student' ? 'p' : 'x', key: which })
+  const y = useAxis({
+    label: which === 'student' ? 'quantile' : 'cdf',
+    range: which === 'student' ? [-8, 8] : [0, 1],
+    key: which,
+  })
   return (
-    <Figure
-      title="Regularised incomplete functions and t quantiles"
-      controls={
-        <Select
-          label="function"
-          value={which}
-          onChange={setWhich}
-          options={[
-            { value: 'gamma', label: 'P(a, x)' },
-            { value: 'beta', label: 'I_x(a, b)' },
-            { value: 'student', label: 'Student t quantile' },
-          ]}
-        />
-      }
-    >
-      <XYChart
-        series={series}
-        xLabel={which === 'student' ? 'p' : 'x'}
-        yRange={which === 'student' ? [-8, 8] : undefined}
-      />
+    <Figure title="Regularised incomplete functions and t quantiles" purpose={PURPOSES[which]} state={state}>
+      <Plot x={x} y={y}>
+        {curves.map((c, i) => (
+          <Curve key={c.name} name={c.name} x={c.x} y={c.y} slot={i} />
+        ))}
+      </Plot>
     </Figure>
   )
 }
@@ -213,45 +235,42 @@ export function IncompleteGammaBetaSpecimen() {
 // ---------------------------------------------------------------------------------------------------------------------
 
 const LOGITS = [2, 1, 0.5, -1, -3]
+const LOGIT_NAMES = LOGITS.map((l) => `x = ${l}`)
+const LOGIT_INDEX = LOGITS.map((_, i) => i)
 
 export function SoftmaxSpecimen() {
-  const [logT, setLogT] = useState(0)
-  const temperature = Math.exp(logT)
-  const series = useMemo((): XYSeries[] => {
-    const p = toFlat(S.softmax(tensor(LOGITS), { temperature }))
-    return [{ name: 'softmax(x/T)', type: 'bar', x: LOGITS.map((_, i) => i + 1), y: p }]
-  }, [temperature])
+  const state = useFigureState({
+    logT: slider(-3, 3, -0.5, {
+      label: 'log T',
+      format: (v) => `${v.toFixed(2)} (T = ${Math.exp(v).toPrecision(3)})`,
+    }),
+  })
+  const temperature = Math.exp(state.logT)
+  const p = useMemo(() => toFlat(S.softmax(tensor(LOGITS), { temperature })), [temperature])
+  const lse = logsumexp(tensor(LOGITS.map((x) => x / temperature))) as number
+  const x = useAxis({ label: 'class', categories: LOGIT_NAMES })
+  const y = useAxis({ label: 'probability', range: [0, 1] })
   return (
     <Figure
       title="softmax(x/T) of five logits"
-      controls={
-        <Slider
-          label="log T"
-          value={logT}
-          min={-3}
-          max={3}
-
-          onChange={setLogT}
-          format={(v) => `${v.toFixed(2)} (T = ${Math.exp(v).toPrecision(3)})`}
-        />
+      purpose="Dividing the logits by a temperature T sharpens softmax towards one-hot at the largest logit as T → 0 and flattens it towards uniform as T → ∞; the order never changes."
+      state={state}
+      equation={
+        <Equation>
+          {tex`p_1 = \frac{e^{x_1/T}}{\sum_j e^{x_j/T}} = \exp\Big(\frac{2}{${live(temperature, { digits: 3 })}} - ${live(lse, { digits: 4 })}\Big) = ${live(p[0], { digits: 4, strong: true })}`}
+        </Equation>
       }
       readouts={
-        <>
-          <Readout label="logSumExp(x/T)" value={formatValue(logsumexp(tensor(LOGITS.map((x) => x / temperature))))} />
-          <Readout
-            label="entropy (nats)"
-            value={formatValue(entropy(S.softmax(tensor(LOGITS), { temperature })) as number)}
-          />
-        </>
+        <Readout
+          label="entropy (nats; uniform log 5 = 1.609)"
+          value={formatValue(entropy(S.softmax(tensor(LOGITS), { temperature })) as number)}
+        />
       }
+      caption="The denominator is computed as logsumexp(x/T), so a tiny T, which makes x/T huge, never overflows. Slide log T left to concentrate the mass on x = 2, right to spread it out."
     >
-      <XYChart
-        series={series}
-        xLabel="class (logits 2, 1, 0.5, −1, −3)"
-        yLabel="probability"
-        yRange={[0, 1]}
-        integerX
-      />
+      <Plot x={x} y={y}>
+        <Bars name="softmax(x/T)" x={LOGIT_INDEX} y={p} />
+      </Plot>
     </Figure>
   )
 }
@@ -289,10 +308,12 @@ const DOMAINS = {
 } satisfies Record<string, [number, number]>
 type PrimitiveName = keyof typeof DOMAINS
 const unaries = S as unknown as Record<PrimitiveName, Unary>
+const PRIMITIVES = Object.keys(DOMAINS) as PrimitiveName[]
 
 export function DerivativeKernelsSpecimen() {
-  const [name, setName] = useState<PrimitiveName>('truncatedNormalV')
-  const { series, worst } = useMemo(() => {
+  const state = useFigureState({ name: choice(PRIMITIVES, 'truncatedNormalV', { label: 'primitive' }) })
+  const name = state.name as PrimitiveName
+  const r = useMemo(() => {
     const f = unaries[name]
     const [lo, hi] = DOMAINS[name]
     // One call on the whole grid (a tensor), and one backward sweep for f′ at every grid point: for an elementwise f,
@@ -300,31 +321,37 @@ export function DerivativeKernelsSpecimen() {
     const sumF = (v: Value) => sum(f(v))
     const derivative = grad(sumF)
     const x = linspace(lo, hi, 241)
-    const ys = toFlat(f(x))
-    const dys = toFlat(derivative(x) as Tensor)
     // gradCheck compares the tape's gradient with central differences, element by element, at interior grid points.
     const fdx = grid(lo, hi, 25).slice(1, -1)
     const check = gradCheck(sumF, tensor(fdx), { eps: 1e-5 })
-    const xs = toFlat(x)
-    const out: XYSeries[] = [
-      { name, type: 'line', x: xs, y: ys.map(finite), slot: 0 },
-      { name: `d${name}/dx (tape)`, type: 'line', x: xs, y: dys.map(finite), slot: 1 },
-      { name: 'central difference', type: 'scatter', x: fdx, y: check.entries.map((e) => e.numeric), slot: 1 },
-    ]
-    return { series: out, worst: check.maxRelError }
+    return {
+      xs: toFlat(x),
+      ys: toFlat(f(x)).map(finite),
+      dys: toFlat(derivative(x) as Tensor).map(finite),
+      fdx,
+      fdy: check.entries.map((e) => e.numeric),
+      worst: check.maxRelError,
+    }
   }, [name])
+  const x = useAxis({ label: 'x', key: name })
+  const y = useAxis({ label: 'value', key: name })
   return (
     <Figure
-      title={`${name} and its derivative`}
+      title="A primitive and its derivative"
+      purpose="Every one-argument primitive carries its derivative rule: grad of Σ f(x) over a grid tensor gives f′ at every point in one backward sweep, matching central differences."
+      description={`${name} on [${DOMAINS[name].join(', ')}]`}
       id="primitive-derivative"
-      controls={
-        <Choice label="primitive" value={name} onChange={setName} options={Object.keys(DOMAINS) as PrimitiveName[]} />
-      }
+      state={state}
       readouts={
-        <Readout label="gradCheck: largest relative gap, tape vs central difference" value={formatValue(worst)} />
+        <Readout label="gradCheck: largest relative gap, tape vs central difference" value={formatValue(r.worst)} />
       }
+      caption="The dots are central differences at 23 interior points; they sit on the tape's derivative curve. Pick another primitive to check its rule."
     >
-      <XYChart series={series} xLabel="x" />
+      <Plot x={x} y={y}>
+        <Curve name={name} x={r.xs} y={r.ys} slot={0} />
+        <Curve name={`d${name}/dx (tape)`} x={r.xs} y={r.dys} slot={1} />
+        <Points name="central difference" x={r.fdx} y={r.fdy} slot={1} />
+      </Plot>
     </Figure>
   )
 }

@@ -33,3 +33,4 @@ export {
   type LevenbergMarquardtState,
   type ResidualFunction,
 } from './leastSquares'
+export { secondOrderAlgorithms } from './registry'

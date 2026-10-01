@@ -1,34 +1,50 @@
 /** Generic views of aifn objects. Each module appends its own exports here. */
 export { formatValue } from './format'
 export { StateTree } from './StateTree'
-export { TraceView, type TraceViewProps } from './TraceView'
-export { SamplesView, type SamplesViewProps, type ReferenceMoments } from './SamplesView'
-export { TensorMeta, TensorPanel, TensorView, type TensorPanelProps, type TensorViewProps } from './TensorView'
-export type { FrameProps } from './frame'
-export { MatrixDecompositionView, type MatrixDecompositionViewProps } from './MatrixDecompositionView'
-export { ComputationGraphView, type ComputationGraphViewProps } from './ComputationGraphView'
+export { TracePanel, type TracePanelProps } from './TraceView'
+export { type ReferenceMoments, SamplesPanel, type SamplesPanelProps } from './SamplesView'
+export {
+  TensorMeta,
+  TensorPanel,
+  type TensorPanelProps,
+  TensorModePanel,
+  type TensorModePanelProps,
+} from './TensorView'
+export {
+  kindOf,
+  registeredViews,
+  registerKind,
+  registerView,
+  viewFor,
+  type ViewContext,
+  type ViewDef,
+} from './registry'
+export { QuickFigure, Show, type QuickFigureProps } from './Show'
+export { quickFigure } from './quick-figure'
+export { MatrixDecompositionPanel, type MatrixDecompositionPanelProps } from './MatrixDecompositionView'
+export { ComputationGraphPanel, type ComputationGraphPanelProps } from './ComputationGraphView'
 export { ProgramView, type ProgramViewProps } from './ProgramView'
 export { TableauView, type TableauViewProps } from './TableauView'
-export { DistributionView, type DistributionViewProps } from './DistributionView'
+export { DistributionPanel, type DistributionPanelProps } from './DistributionView'
 export { distributionRange } from './distribution-range'
-export { CurveChart, CurveView, type Curve, type CurveChartProps, type CurveViewProps } from './CurveView'
-export { FitView, type FitViewProps } from './FitView'
-export { CrossValidationView, type CrossValidationViewProps } from './CrossValidationView'
+export { CurveChart, type CurveChartProps, CurvePanel, type CurvePanelProps } from './CurveView'
+export { FitPanel, type FitPanelProps } from './FitView'
+export { CrossValidationPanel, type CrossValidationPanelProps } from './CrossValidationView'
 export { GraphView, type GraphViewProps, type PerItem } from './GraphView'
 export { TreeView, type TreeViewProps } from './TreeView'
 export { PlateView, type PlateViewProps } from './PlateView'
 export { FactorGraphView, type FactorGraphViewProps } from './FactorGraphView'
-export { ChainView, type ChainViewProps } from './ChainView'
-export { ElboView, type ElboViewProps } from './ElboView'
-export { ParamsView, type ParamsViewProps } from './ParamsView'
-export { DecisionRegionView, type DecisionRegionViewProps } from './DecisionRegionView'
-export { DendrogramView, type DendrogramViewProps } from './DendrogramView'
-export { DatasetView, type DatasetViewProps } from './DatasetView'
+export { ChainPanel, type ChainPanelProps } from './ChainView'
+export { ElboPanel, type ElboPanelProps } from './ElboView'
+export { ParamsPanel, type ParamsPanelProps } from './ParamsView'
+export { DecisionRegionPanel, type DecisionRegionPanelProps } from './DecisionRegionView'
+export { DendrogramPanel, type DendrogramPanelProps } from './DendrogramView'
+export { DatasetPanel, type DatasetPanelProps } from './DatasetView'
 export { useDatasetSeries } from './dataset-series'
 export { ContingencyTableView, type ContingencyTableViewProps } from './ContingencyTableView'
 export { useClassTable, type ClassTable, type ClassTableInput } from './class-table'
 export { ClassLegend } from './ClassLegend'
-export { PairPlotView, type PairPlotViewProps } from './PairPlotView'
-export { ParallelCoordinatesView, type ParallelCoordinatesViewProps } from './ParallelCoordinatesView'
-export { AndrewsCurvesView, type AndrewsCurvesViewProps } from './AndrewsCurvesView'
+export { PairPlotPanel, type PairPlotPanelProps } from './PairPlotView'
+export { ParallelCoordinatesPanel, type ParallelCoordinatesPanelProps } from './ParallelCoordinatesView'
+export { AndrewsCurvesPanel, type AndrewsCurvesPanelProps } from './AndrewsCurvesView'
 export { histogramBars, type HistogramBars } from './histogram'

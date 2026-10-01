@@ -1,12 +1,17 @@
 /**
  * `aifn/signal`: signal processing, as scipy.signal, pywt and PyEMD: windows, filters, spectral estimation,
  * time–frequency analysis, wavelets, statistical signal processing and decompositions. The shared layer holds the
- * signal objects: `signal` (samples with a sample rate), `spectrum`, `timeFrequency`. Children: windows, filters,
- * spectral, time-frequency, wavelets, statistical, decompositions; gap: multirate.
+ * signal objects: `signal` (samples with a sample rate), `spectrum`, `timeFrequency`, and the spectrum readers
+ * `magnitude`, `phase` and `spectrumDecibels`. Children: windows, filters,
+ * spectral, time-frequency, wavelets, statistical, multirate, decompositions.
  */
 
 export {
   isSignal,
+  magnitude,
+  phase,
+  spectrumDecibels,
+  unwrapPhase,
   sampleTimes,
   signal,
   spectrum,
@@ -18,7 +23,7 @@ export {
   type TimeFrequency,
 } from './signal'
 export { getWindow } from './windows'
-export { firwin, butter, lfilter, freqz } from './filters'
+export { firwin, butter, lfilter, sosfilt, filtfilt, freqz } from './filters'
 export { periodogram, welch } from './spectral'
 export { hilbert } from './time-frequency'
 export { dwt, idwt } from './wavelets'

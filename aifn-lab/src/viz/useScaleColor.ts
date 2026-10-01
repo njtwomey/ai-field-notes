@@ -3,7 +3,7 @@ import { interpolateColors, scaleStops } from '@lab/design/palette'
 import { useTheme } from '@lab/design/theme'
 
 /**
- * The colour at fraction t ∈ [0, 1] of a sequential or diverging scale in the current theme: the colour a Heatmap with
+ * The colour at fraction t ∈ [0, 1] of a sequential or diverging scale in the current theme: the colour a `Raster` with
  * that `scale` gives the value at t of its range. For marks that encode an ordered value, e.g. class k of K.
  */
 export function useScaleColor(scale: 'sequential' | 'diverging'): (t: number) => string {

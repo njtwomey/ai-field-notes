@@ -34,11 +34,7 @@ export function grid2d(
 }
 
 /** Evaluate f(x, y) on a grid: z[i][j] = f(x[j], y[i]), a [ny, nx] tensor (the layout of heatmaps and contours). */
-export function evaluateGrid(
-  f: (x: number, y: number) => number,
-  x: VectorLike,
-  y: VectorLike,
-): Tensor {
+export function evaluateGrid(f: (x: number, y: number) => number, x: VectorLike, y: VectorLike): Tensor {
   const xs = axis(x)
   const ys = axis(y)
   const out = new Float64Array(xs.length * ys.length)

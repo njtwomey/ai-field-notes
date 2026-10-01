@@ -1,6 +1,7 @@
 /** Plane geometry for the programming specimens: polygons of 2-D constraint sets, and lines clipped to a view box. */
 
-import type { Segment } from '@lab/viz'
+/** A line segment between two points. */
+export type Segment = { from: [number, number]; to: [number, number] }
 
 export type Pt = [number, number]
 

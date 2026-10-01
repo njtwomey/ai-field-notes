@@ -52,6 +52,8 @@ import {
   type Value,
 } from 'aifn/foundation/tensor'
 import { trace, type Trace } from 'aifn/foundation/trace'
+import { defineModel } from 'aifn/learning/estimators'
+import { bool, int, real, space } from 'aifn/foundation/space'
 
 const LOG_2PI = Math.log(2 * Math.PI)
 
@@ -553,3 +555,27 @@ export function gaussianProcessRegressor<P extends KernelParams>(
     },
   }
 }
+
+// ── Registry ─────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+defineModel(
+  {
+    key: 'gaussianProcessRegressor',
+    module: 'learning/gaussian-processes',
+    name: 'Gaussian process regression',
+    summary:
+      'Exact GP regression with optional type-II maximum-likelihood hyperparameters; the kernel is a required argument.',
+    task: 'regression',
+    capabilities: ['forward', 'decide', 'predictive', 'expect', 'sample'],
+    hyper: space({
+      noiseVariance: real(0, 10, { default: 0 }),
+      optimise: bool(),
+      fitNoise: bool({ default: true }),
+      mean: real(-10, 10, { default: 0 }),
+      restarts: int(0, 20, { default: 0 }),
+    }),
+    notes: ['gaussian-process', 'gaussian-process-hyperparameter-learning'],
+    cite: ['rasmussen2006'],
+  },
+  gaussianProcessRegressor,
+)

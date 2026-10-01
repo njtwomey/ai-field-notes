@@ -172,6 +172,7 @@ export interface TransformedPredictive extends AnyUnivariate {
   survival(y: Value): Tensor
   logSurvival(y: Value): Tensor
   quantile(p: Value): Tensor
+  isf(q: Value): Tensor
   /** E[y], by 32-point Gauss–Hermite quadrature on normal scores unless closed-form (log-normal). */
   mean(): Tensor
   variance(): Tensor
@@ -234,13 +235,12 @@ export function transformedPredictive(base: AnyUnivariate, g: TargetMap): Transf
     },
     prob: (y) => map(d.logProb(y), Math.exp),
     cdf: lower,
-    logcdf: (y) => map(lower(y), Math.log),
+    logcdf: (y) => asTensor(g.increasing ? base.logcdf(baseAt(y)) : base.logSurvival(baseAt(y))),
     survival: (y) => asTensor(g.increasing ? base.survival(baseAt(y)) : base.cdf(baseAt(y))),
-    logSurvival: (y) => map(d.survival(y), Math.log),
-    quantile(p) {
-      const q = asTensor(base.quantile(g.increasing ? p : map(tensorOf(p), (v) => 1 - v)))
-      return map(q, (v) => g.invert(v))
-    },
+    logSurvival: (y) => asTensor(g.increasing ? base.logSurvival(baseAt(y)) : base.logcdf(baseAt(y))),
+    // A decreasing g swaps the tails: the p-quantile of y is g⁻¹ of the base's inverse survival function at p.
+    quantile: (p) => map(asTensor(g.increasing ? base.quantile(p) : base.isf(p)), (v) => g.invert(v)),
+    isf: (q) => map(asTensor(g.increasing ? base.isf(q) : base.quantile(q)), (v) => g.invert(v)),
     sample: (s: Stream, options) => mapRaw(base.sample(s, options), (v) => g.invert(v)),
     mean: () => expectation(d, (y) => y),
     variance() {
@@ -293,6 +293,7 @@ export function logNormalPredictive(base: AnyUnivariate): LogNormalPredictive {
     survival: (y) => asTensor(ln.survival(y)),
     logSurvival: (y) => asTensor(ln.logSurvival(y)),
     quantile: (p) => asTensor(ln.quantile(p)),
+    isf: (q) => asTensor(ln.isf(q)),
     sample: (s: Stream, options) => ln.sample(s, options),
     mean: () => asTensor(ln.mean()),
     variance: () => asTensor(ln.variance()),

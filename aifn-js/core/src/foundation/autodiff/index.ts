@@ -1,36 +1,59 @@
 /**
- * `aifn/foundation/autodiff`: reverse-mode automatic differentiation over aifn's primitives.
+ * `aifn/foundation/autodiff`: automatic differentiation and batching as interpreters over aifn's primitives (design K
+ * §4.1).
  *
- * Every operation in aifn is a primitive with its derivative rule (`aifn/foundation/tensor`'s `definePrimitive`, `elementwise`,
- * `defineOp`). This module supplies the tape those primitives record on and the transforms built on
- * it; it defines no operations of its own. A function differentiated here is ordinary code over numbers and tensors:
- * the same `softplus`, `matmul` or `cholesky` that computes values records itself when given a traced value.
+ * Every operation in aifn is a primitive with its rules (`aifn/foundation/tensor`'s `definePrimitive`, `elementwise`,
+ * `defineOp`). This module supplies three interpreters of those primitives and the transforms built on them; it
+ * defines no operations of its own (apart from `stopGradient`). A function transformed here is ordinary code over
+ * numbers and tensors: the same `softplus`, `matmul` or `cholesky` that computes values is traced when given a tracer.
  *
- * - Transforms: `grad`, `valueAndGrad` (with `argnums`), `vjp`, `jvp`, `jacobian`, `hessian`, `hvp`, `stopGradient`.
- *   Arguments may be numbers, tensors or pytrees (nested arrays and plain objects) of them. Transforms nest:
- *   `grad(grad(f))` is a second derivative wherever the primitives involved declare `options.derivative`; a primitive
- *   whose derivative has no rule of its own makes a second derivative an error, never a silent zero.
+ * - Interpreters: `ReverseInterpreter` (records, then a backward sweep), `ForwardInterpreter` (dual numbers),
+ *   `BatchInterpreter` (a batch axis). They nest by level, as in JAX.
+ * - Transforms: `grad`, `valueAndGrad` (with `argnums`), `vjp`, `jvp`, `linearize`, `hvp`, `jacobian` (forward or
+ *   reverse), `hessian`, `vmap`, `stopGradient`. Arguments and results may be pytrees (nested arrays and plain objects).
+ *   Transforms nest in any order: `grad(grad(f))`, `jvp(grad(f))`, `vmap(grad(f))`.
+ * - Custom rules: `customVjp`, `customJvp` (composite functions with a derivative of the author's choosing),
+ *   `defineCustomVjp` (customVjp with a name, a forward rule and residuals from the output), and `checkpoint`
+ *   (recompute instead of store). Implicit differentiation (`implicitFixedPoint`, `implicitRoot`, `atConvergence`)
+ *   needs a linear solve, so it lives in `aifn/numerics/implicit`; `unrolled` is in `aifn/foundation/trace`.
  * - Checking: `gradCheck(f, x)` compares gradients with central finite differences and reports every element.
  * - Inspection: `traceGraph(f, x)` returns the recorded nodes with values and adjoints in topological order.
- *
- * Forward mode (`jvp`) is derived from reverse mode by the transpose trick rather than dual numbers, since primitives
- * carry vjp rules only; see `jvp`.
  */
 
 export { gradCheck, type GradCheckEntry, type GradCheckOptions, type GradCheckReport } from './check'
 export { traceGraph, type Graph, type GraphInput, type GraphNode } from './graph'
-export { NotDifferentiableError } from './tape'
+export { NotDifferentiableError } from 'aifn/foundation/errors'
+export { BatchInterpreter, BatchTracer, batchExamples } from './batch'
+export {
+  checkpoint,
+  customJvp,
+  customVjp,
+  defineCustomVjp,
+  refuseTraced,
+  type Cotangents,
+  type CustomVjpSpec,
+  type VjpForward,
+} from './custom'
+export { ForwardInterpreter, ForwardTracer } from './forward'
+export { ReverseInterpreter, ReverseTracer, type Backward, type TapeRecord } from './reverse'
 export {
   grad,
   hessian,
   hvp,
   jacobian,
   jvp,
+  linearize,
   stopGradient,
   valueAndGrad,
   vjp,
+  vmap,
   type GradOptions,
+  type JacobianOptions,
   type JvpResult,
+  type Lifted,
+  type Linearized,
+  type TreeOf,
   type ValueAndGrad,
   type VjpResult,
+  type VmapOptions,
 } from './transforms'

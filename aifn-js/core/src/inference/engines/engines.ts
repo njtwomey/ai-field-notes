@@ -10,6 +10,7 @@ import type { Algorithm } from 'aifn/foundation/trace'
 import { shape, type GraphShape } from 'aifn/graph/structured'
 import { beliefPropagationSteps } from 'aifn/inference/message-passing'
 import { chainSumProduct, enumerationSteps, variableEliminationSteps } from 'aifn/inference/exact'
+import { compileGaussianModel, modelExpectationPropagation } from 'aifn/inference/expectation-propagation'
 import { modelGibbs } from 'aifn/inference/stochastic'
 import {
   bipartiteGraph,
@@ -47,10 +48,21 @@ const discreteGraph = (c: InferenceContext) => {
   return d.graph
 }
 
+/** True when the model compiles for EP: linear-Gaussian latents with interval and Gaussian evidence. */
+function linearGaussian(c: InferenceContext): boolean {
+  try {
+    compileGaussianModel(c.model, c.bindings)
+    return true
+  } catch {
+    return false
+  }
+}
+
 /**
  * The built-in engines, in the order `infer` tries them: `forward-backward` (chain-shaped discrete models:
  * `chainSumProduct`), `belief-propagation` (other discrete models: exact on trees with the tree schedule, loopy with
- * flooding otherwise), and `gibbs` (anything else: `modelGibbs`). `variable-elimination` and `enumeration` run only
+ * flooding otherwise), `expectation-propagation` (linear-Gaussian models with interval and Gaussian evidence:
+ * `modelExpectationPropagation`), and `gibbs` (anything else: `modelGibbs`). `variable-elimination` and `enumeration` run only
  * when named.
  */
 export const builtInEngines: EngineTable = [
@@ -63,6 +75,11 @@ export const builtInEngines: EngineTable = [
     name: 'belief-propagation',
     matches: (c) => c.discrete() !== null,
     create: (c) => beliefPropagationSteps(discreteGraph(c)),
+  },
+  {
+    name: 'expectation-propagation',
+    matches: (c) => linearGaussian(c),
+    create: (c) => modelExpectationPropagation(c.model, c.bindings),
   },
   {
     name: 'gibbs',
@@ -107,8 +124,9 @@ export interface InferOptions {
 /**
  * Pick an inference engine for a model and data and build its algorithm. The model is tabulated as a discrete factor
  * graph when it can be (data clamped), and the shape of that graph picks the path: a chain runs forward–backward, a
- * tree exact belief propagation, any other discrete model loopy belief propagation; a model with a continuous latent
- * variable runs Gibbs sampling. Run the result with the runners of `aifn/foundation/trace`
+ * tree exact belief propagation, any other discrete model loopy belief propagation; a linear-Gaussian model with
+ * interval or Gaussian evidence runs expectation propagation; any other model with a continuous latent variable runs
+ * Gibbs sampling. Run the result with the runners of `aifn/foundation/trace`
  * (`run(inference.algorithm, undefined, n, { stream })`).
  */
 export function infer(model: Model, bindings: Bindings = {}, options: InferOptions = {}): Inference {

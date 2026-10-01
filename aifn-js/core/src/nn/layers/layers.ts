@@ -2,6 +2,8 @@
  * Layers: pairs of an initialiser and a pure forward function, `layer.init(stream)` → parameters (a pytree of tensors)
  * and `layer.apply(params, x, ctx)` → output. There is no hidden state: parameters are passed in, so `grad` of any
  * function of them differentiates through the layer, and the same parameters can be evaluated, perturbed or traced.
+ * Non-trainable state (batch norm's running statistics; torch's buffers, flax's `batch_stats` collection) is passed in
+ * the same way, in `ctx.buffers`, and a layer in training mode writes its new entry to `ctx.bufferUpdates`.
  *
  * Functional forms (`linear`, `layerNorm`, `rmsNorm`, `batchNorm`, `dropout`) are exported beside the layers, which
  * only add parameter shapes and initialisation. Every layer passes its output through `ctx.tap(path, value)` when the
@@ -60,7 +62,23 @@ export type Context = {
   tap?: (path: string, value: Value) => Value
   /** The path of the layer being applied, set by containers. */
   path?: string
+  /**
+   * The non-trainable state collection, each stateful layer's entry by its path (e.g. `{ '1': { mean, variance } }`).
+   * Read in evaluation mode; absent entries take the layer's initial values.
+   */
+  buffers?: Buffers
+  /**
+   * In training mode, stateful layers write their new entries here, by path; the caller merges them into `buffers`
+   * (`{ ...buffers, ...bufferUpdates }`). Without it, training-mode layers update nothing.
+   */
+  bufferUpdates?: Record<string, Params>
 }
+
+/**
+ * Non-trainable state by layer path: plain data, never differentiated (written from primal values, so a layer applied
+ * inside `grad` records concrete tensors).
+ */
+export type Buffers = Readonly<Record<string, Params>>
 
 /** A layer: an initialiser and a pure forward function of parameters `P`. */
 export interface Layer<P extends Params = Params> {
@@ -319,16 +337,60 @@ export function RmsNorm(features: number, { eps = 1e-6 }: { eps?: number } = {})
   }
 }
 
+/** The running statistics of `BatchNorm` (shape [C] each), its entry in `ctx.buffers`. */
+export type BatchNormBuffers = { mean: Tensor; variance: Tensor }
+
+/** Options of `BatchNorm`. */
+export type BatchNormLayerOptions = {
+  eps?: number
+  /**
+   * Weight of the new batch in the running averages, running ← (1 − m)·running + m·batch (torch's convention; flax's
+   * `momentum` is 1 − m). Default 0.1.
+   */
+  momentum?: number
+  /**
+   * Keep running statistics (default true): training mode normalises with the batch's statistics and writes updated
+   * running averages to `ctx.bufferUpdates`; evaluation normalises with `ctx.buffers` (mean 0 and variance 1 before
+   * any training). With false, every mode normalises with the batch's statistics.
+   */
+  trackRunningStats?: boolean
+}
+
 /**
- * Batch normalisation of `channels` channels with learned γ and β. It always normalises with the batch's statistics
- * (running averages for evaluation are not kept; pass fixed statistics to `batchNorm` for that).
+ * Batch normalisation of `channels` channels with learned γ and β and running statistics, as `torch.nn.BatchNorm1d`
+ * and `BatchNorm2d`: the running mean and the running unbiased variance are exponential averages of the batches seen
+ * in training, and evaluation normalises with them.
  */
-export function BatchNorm(channels: number, { eps = 1e-5 }: { eps?: number } = {}): Layer<NormParams> {
+export function BatchNorm(channels: number, options: BatchNormLayerOptions = {}): Layer<NormParams> {
+  const { eps = 1e-5, momentum = 0.1, trackRunningStats = true } = options
+  const initial = (): BatchNormBuffers => ({ mean: zeros([channels]), variance: ones([channels]) })
   return {
     kind: 'BatchNorm',
     label: `BatchNorm(${channels})`,
     init: () => ({ gamma: ones([channels]), beta: zeros([channels]) }),
-    apply: (p, x, ctx) => tap(ctx, batchNorm(x, p.gamma, p.beta, { eps })),
+    apply: (p, x, ctx) => {
+      if (!trackRunningStats) return tap(ctx, batchNorm(x, p.gamma, p.beta, { eps }))
+      const key = ctx?.path ?? ''
+      const running = (ctx?.buffers?.[key] as BatchNormBuffers | undefined) ?? initial()
+      if (!ctx?.train) return tap(ctx, batchNorm(x, p.gamma, p.beta, { eps, ...running }))
+      const shape = shapeOfValue(x)
+      if (shape.length < 2) throw new Error('BatchNorm: needs shape [N, C, ...]')
+      const axes = shape.map((_, k) => k).filter((k) => k !== 1)
+      const mu = mean(x, axes)
+      const variance = mean(square(sub(x, reshape(mu, [1, channels, ...shape.slice(2).map(() => 1)]))), axes)
+      if (ctx.bufferUpdates) {
+        // The running variance is unbiased (torch), the normalising one biased; both from the primal values.
+        const n = shape.reduce((a, b) => a * b, 1) / channels
+        const blend = (old: Tensor, batch: Value, scale: number) =>
+          unwrap(add(mul(1 - momentum, old), mul(momentum * scale, unwrap(batch)))) as Tensor
+        const next: BatchNormBuffers = {
+          mean: blend(running.mean, mu, 1),
+          variance: blend(running.variance, variance, n > 1 ? n / (n - 1) : 1),
+        }
+        ctx.bufferUpdates[key] = next
+      }
+      return tap(ctx, batchNorm(x, p.gamma, p.beta, { eps, mean: mu, variance }))
+    },
   }
 }
 

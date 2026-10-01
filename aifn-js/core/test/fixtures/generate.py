@@ -1,8 +1,11 @@
 """Write golden test values for aifn-js from Python references (numpy, scipy, scikit-learn, torch).
 
-Each module `gen/<name>.py` defines `cases() -> dict`; its result is written to `<name>.json` beside its `gen` folder.
-The generators live in both packages: `aifn-js/core/test/fixtures/gen` and `aifn-js/applications/test/fixtures/gen`.
-Run with `make fixtures` (or `uv run python aifn-js/core/test/fixtures/generate.py [name ...]`).
+Fixtures mirror the module tree (aifn-js/modules.json). The generator `gen/<node path>.py` (e.g.
+`gen/numerics/linalg.py`) defines `cases() -> dict`; its result is written to `<node path>.json` beside the `gen`
+folder (`numerics/linalg.json`), which tests load with `fixture('numerics/linalg')`. The generators live in both
+packages: `aifn-js/core/test/fixtures/gen` and `aifn-js/applications/test/fixtures/gen`. Run with `make fixtures`
+(or `uv run python aifn-js/core/test/fixtures/generate.py [name ...]`); a name is a node path (`numerics/linalg`), a
+prefix of one (`numerics`) or a last segment (`linalg`).
 """
 
 import importlib.util
@@ -37,18 +40,26 @@ def to_json(value: object) -> object:
 
 
 def main() -> None:
-    wanted = set(sys.argv[1:])
-    for path in sorted(p for d in FIXTURE_DIRS for p in (d / "gen").glob("*.py")):
-        name = path.stem
-        if name.startswith("_") or (wanted and name not in wanted):
-            continue
-        spec = importlib.util.spec_from_file_location(f"fixtures_{name}", path)
-        assert spec and spec.loader
-        module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
-        out = path.parent.parent / f"{name}.json"
-        out.write_text(json.dumps(to_json(module.cases()), indent=1) + "\n")
-        print(f"wrote {out.relative_to(ROOT)}")
+    wanted = [w.strip("/") for w in sys.argv[1:]]
+    found = False
+    for fixtures in FIXTURE_DIRS:
+        for path in sorted((fixtures / "gen").rglob("*.py")):
+            name = path.relative_to(fixtures / "gen").with_suffix("").as_posix()
+            if any(part.startswith("_") for part in name.split("/")):
+                continue
+            if wanted and not any(name == w or name.startswith(f"{w}/") or path.stem == w for w in wanted):
+                continue
+            found = True
+            spec = importlib.util.spec_from_file_location(f"fixtures_{name.replace('/', '_').replace('-', '_')}", path)
+            assert spec and spec.loader
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+            out = fixtures / f"{name}.json"
+            out.parent.mkdir(parents=True, exist_ok=True)
+            out.write_text(json.dumps(to_json(module.cases()), indent=1) + "\n")
+            print(f"wrote {out.relative_to(ROOT)}")
+    if wanted and not found:
+        sys.exit(f"no fixture generator matches {' '.join(wanted)}")
 
 
 if __name__ == "__main__":

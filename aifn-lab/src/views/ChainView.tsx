@@ -3,13 +3,13 @@ import { autocorrelation, histogram, quantile, runningMean } from 'aifn/probabil
 import { linspace, toFlat, type Tensor } from 'aifn/foundation/tensor'
 import { useMemo, useState } from 'react'
 import { Select } from '@lab/controls'
-import { Figure } from '@lab/layout'
-import { Panel, Readout, Subplots, XYChart, type XYSeries } from '@lab/viz'
+import { PanelSlot } from '@lab/layout'
+import { Bars, Curve, Plot, Plots, Readout, useAxis } from '@lab/viz'
 import { formatValue } from './format'
 import { histogramBars } from './histogram'
-import type { FrameProps } from './frame'
+import { registerView } from './registry'
 
-export type ChainViewProps = FrameProps & {
+export type ChainPanelProps = {
   /** MCMC draws: m chains × n draws × d parameters (as `sampleChains` returns), or m × n for one parameter. */
   draws: Tensor
   /** Parameter names (default x₀, x₁, …). */
@@ -26,6 +26,8 @@ export type ChainViewProps = FrameProps & {
   maxChains?: number
 }
 
+const CHAIN_TITLE = 'Chains, their histogram, autocorrelation and running means'
+
 const f3 = (v: number) => formatValue(Number(v.toPrecision(3)))
 
 /**
@@ -33,19 +35,7 @@ const f3 = (v: number) => formatValue(Number(v.toPrecision(3)))
  * target's marginal when given), each chain's autocorrelation function, and each chain's running mean. Readouts give
  * the bulk and tail ESS, the rank-normalised split R̂ and the MCSE of the mean, all from `aifn/inference/stochastic`.
  */
-export function ChainView({
-  draws,
-  names,
-  steps,
-  density,
-  means,
-  maxLag,
-  maxChains = 8,
-  title = 'Chains, their histogram, autocorrelation and running means',
-  controls,
-  readouts,
-  ...frame
-}: ChainViewProps) {
+export function ChainPanel({ draws, names, steps, density, means, maxLag, maxChains = 8 }: ChainPanelProps) {
   const [m, n, d = 1] = draws.shape
   const [k, setK] = useState(0)
   const param = Math.min(k, d - 1)
@@ -59,106 +49,90 @@ export function ChainView({
   const view = useMemo(() => {
     const xs = steps ? [...steps] : Array.from({ length: n }, (_, i) => i + 1)
     const shown = chains.slice(0, maxChains)
-    const trace: XYSeries[] = shown.map((c, j) => ({
-      name: `chain ${j}`,
-      type: 'line',
-      x: xs,
-      y: c,
-      slot: j,
-      thin: m > 1,
-    }))
     const pooled = chains.flat()
     const lo = quantile(pooled, 0.002)
     const hi = quantile(pooled, 0.998)
     const h = histogram(pooled, { bins: 50, range: [lo, hi] })
     const bars = histogramBars(h)
     const scale = (pooled.length - h.dropped) / pooled.length
-    const hist: XYSeries[] = [
-      {
-        name: 'draws',
-        type: 'bar',
-        thin: true,
-        x: bars.x,
-        y: bars.density.map((v) => v * scale),
-      },
-    ]
-    if (density) {
-      const grid = toFlat(linspace(lo, hi, 201))
-      hist.push({ name: 'target', type: 'line', x: grid, y: grid.map((x) => density(x, param)) })
-    }
+    const grid = density ? toFlat(linspace(lo, hi, 201)) : null
     const lags = Math.min(maxLag ?? 60, n - 1)
-    const acf: XYSeries[] = shown.map((c, j) => ({
-      name: `chain ${j}`,
-      type: 'line',
-      x: Array.from({ length: lags + 1 }, (_, i) => i),
-      y: toFlat(autocorrelation(c, { maxLag: lags })),
-      slot: j,
-      thin: m > 1,
-    }))
-    const running: XYSeries[] = shown.map((c, j) => ({
-      name: `chain ${j}`,
-      type: 'line',
-      x: xs,
-      y: toFlat(runningMean(c)),
-      slot: j,
-      thin: m > 1,
-    }))
-    if (means?.[param] !== undefined)
-      running.push({
-        name: 'true mean',
-        type: 'line',
-        x: [xs[0], xs[xs.length - 1]],
-        y: [means[param], means[param]],
-        emphasis: true,
-        dashed: true,
-      })
+    const lagX = Array.from({ length: lags + 1 }, (_, i) => i)
     const diag = {
       bulk: effectiveSampleSize(chains),
       tail: effectiveSampleSize(chains, { method: 'tail' }),
       rhat: splitRhat(chains),
       mcse: monteCarloStandardError(chains),
     }
-    return { trace, hist, acf, running, diag }
-  }, [chains, steps, n, m, maxChains, density, param, maxLag, means])
+    return {
+      xs,
+      shown,
+      bars: { edges: bars.edges, x: bars.x, y: bars.density.map((v) => v * scale) },
+      target: grid ? { x: grid, y: grid.map((x) => density!(x, param)) } : null,
+      acf: shown.map((c) => ({ x: lagX, y: toFlat(autocorrelation(c, { maxLag: lags })) })),
+      running: shown.map((c) => toFlat(runningMean(c))),
+      diag,
+    }
+  }, [chains, steps, n, maxChains, density, param, maxLag])
 
+  const thin = m > 1
+  const stepAxis = useAxis({ label: 'step' })
+  const valueAxis = useAxis({ label })
+  const densityValue = useAxis({ label })
+  const densityAxis = useAxis({ label: 'density' })
+  const lagAxis = useAxis({ label: 'lag' })
+  const acfAxis = useAxis({ label: 'autocorrelation' })
+  const runStepAxis = useAxis({ label: 'step' })
+  const runAxis = useAxis({ label: `running mean of ${label}` })
+  const ends = [view.xs[0], view.xs[view.xs.length - 1]]
+  const trueMean = means?.[param]
   const options = Array.from({ length: d }, (_, i) => ({ value: String(i), label: names?.[i] ?? `x${i}` }))
   return (
-    <Figure
-      title={title}
-      defaultSize="L"
-      {...frame}
-      controls={
+    <>
+      {d > 1 && (
+        <PanelSlot slot="controls">
+          <Select label="parameter" value={String(param)} onChange={(v) => setK(Number(v))} options={options} />
+        </PanelSlot>
+      )}
+      <PanelSlot slot="readouts">
         <>
-          {controls}
-          {d > 1 && (
-            <Select label="parameter" value={String(param)} onChange={(v) => setK(Number(v))} options={options} />
-          )}
-        </>
-      }
-      readouts={
-        <>
-          {readouts}
           <Readout label={`${m} × ${n} draws; bulk ESS`} value={f3(view.diag.bulk)} />
           <Readout label="tail ESS" value={f3(view.diag.tail)} />
           <Readout label="R̂ (rank-normalised split)" value={f3(view.diag.rhat)} />
           <Readout label="MCSE of the mean" value={f3(view.diag.mcse)} />
         </>
-      }
-    >
-      <Subplots rows={2} cols={2} heightRatios={[1, 1]}>
-        <Panel>
-          <XYChart series={view.trace} xLabel="step" yLabel={label} legend={false} />
-        </Panel>
-        <Panel>
-          <XYChart series={view.hist} xLabel={label} yLabel="density" />
-        </Panel>
-        <Panel>
-          <XYChart series={view.acf} xLabel="lag" yLabel="autocorrelation" legend={false} />
-        </Panel>
-        <Panel>
-          <XYChart series={view.running} xLabel="step" yLabel={`running mean of ${label}`} legend={false} />
-        </Panel>
-      </Subplots>
-    </Figure>
+      </PanelSlot>
+      <Plots rows={2} cols={2}>
+        <Plot x={stepAxis} y={valueAxis} legend={false}>
+          {view.shown.map((c, j) => (
+            <Curve key={j} name={`chain ${j}`} x={view.xs} y={c} slot={j} thin={thin} />
+          ))}
+        </Plot>
+        <Plot x={densityValue} y={densityAxis}>
+          <Bars name="draws" x={view.bars.x} y={view.bars.y} edges={view.bars.edges} />
+          {view.target && <Curve name="target" x={view.target.x} y={view.target.y} />}
+        </Plot>
+        <Plot x={lagAxis} y={acfAxis} legend={false}>
+          {view.acf.map((c, j) => (
+            <Curve key={j} name={`chain ${j}`} x={c.x} y={c.y} slot={j} thin={thin} />
+          ))}
+        </Plot>
+        <Plot x={runStepAxis} y={runAxis} legend={false}>
+          {view.running.map((y, j) => (
+            <Curve key={j} name={`chain ${j}`} x={view.xs} y={y} slot={j} thin={thin} />
+          ))}
+          {trueMean !== undefined && <Curve name="true mean" x={ends} y={[trueMean, trueMean]} emphasis dashed />}
+        </Plot>
+      </Plots>
+    </>
   )
 }
+
+// MCMC draws are a plain tensor (m × n × d); the view is drawn when asked for by key ('chains/diagnostics').
+registerView<Tensor>({
+  key: 'chains/diagnostics',
+  kind: 'chains',
+  description: 'MCMC chains: traces, pooled histogram, autocorrelation and running means, with ESS, split R̂ and MCSE.',
+  title: () => CHAIN_TITLE,
+  render: (draws) => <ChainPanel draws={draws} />,
+})

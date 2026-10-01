@@ -20,6 +20,7 @@ function pairOf(x: Data, y: Data, what: string) {
 const distanceInfo = (key: string, name: string, range: readonly [number, number] = [0, Infinity]) =>
   ({
     key,
+    stability: 'stable',
     name,
     inputs: 'vectors',
     direction: 'lower',
@@ -193,6 +194,7 @@ export function orthogonalProcrustes(
 export const procrustesDisparity = defineMetric(
   {
     key: 'procrustesDisparity',
+    stability: 'stable',
     name: 'Procrustes disparity',
     inputs: 'points',
     direction: 'lower',
@@ -279,6 +281,7 @@ export function hausdorffDistances(x: Rows, y: Rows): HausdorffDistances {
 export const hausdorffDistance = defineMetric(
   {
     key: 'hausdorffDistance',
+    stability: 'stable',
     name: 'Hausdorff distance',
     inputs: 'points',
     direction: 'lower',

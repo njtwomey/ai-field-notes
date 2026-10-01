@@ -67,6 +67,7 @@ const fairnessInfo = (key: string, name: string, direction: 'higher' | 'lower' =
   ({
     key,
     name,
+    module: 'applied/evaluation/fairness',
     inputs: 'labels',
     direction,
     range: [0, 1],

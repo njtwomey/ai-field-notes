@@ -13,12 +13,16 @@
  * difficulty of training recurrent neural networks" (gradient clipping).
  */
 
-import { add, div, mul, sqrt, square, toFlat, type Tensor } from 'aifn/foundation/tensor'
+import { add, div, mul, neg, sqrt, square, toFlat, type Tensor, type Value } from 'aifn/foundation/tensor'
 import { treeLeaves, treeMap, treeZip, zerosLike, type LeafValue, type Params } from 'aifn/foundation/pytree'
 import type { Scalar, Schedule, Size } from 'aifn/foundation/contracts'
 
-/** A step size: a constant, or a schedule t ↦ η_t read at the rule's update count t = 0, 1, 2, … */
-export type StepSize = Scalar | Schedule
+/**
+ * A step size: a constant, or a schedule t ↦ η_t read at the rule's update count t = 0, 1, 2, … A constant may be a
+ * traced value, so that the result of running a rule (e.g. `unrolled` over `gradientDescent`) can be differentiated
+ * with respect to it: a learning-rate hypergradient.
+ */
+export type StepSize = Value | Schedule
 
 /** The state of a named rule: the number of updates applied so far, and its running quantities as trees. */
 export type RuleState = {
@@ -43,8 +47,11 @@ export interface UpdateRule<S = RuleState> {
 }
 
 /** The step size at update t. */
-export const stepSizeAt = (stepSize: StepSize, t: Size): Scalar =>
+export const stepSizeAt = (stepSize: StepSize, t: Size): Value =>
   typeof stepSize === 'function' ? stepSize(t) : stepSize
+
+/** −η, staying a number for a number step size. */
+const negated = (eta: Value): Value => (typeof eta === 'number' ? -eta : neg(eta))
 
 /** Leaf arithmetic that keeps numbers as numbers and tensors as tensors. */
 const leaf = (v: unknown) => v as LeafValue & Tensor
@@ -132,17 +139,17 @@ export function sgdRule(options: SgdRuleOptions = {}): UpdateRule {
     name,
     init: (params) => ({ t: 0, slots: momentum > 0 ? { velocity: zerosLike(params) } : {} }),
     update: (grads, state, params) => {
-      const eta = stepSizeAt(stepSize, state.t)
+      const minusEta = negated(stepSizeAt(stepSize, state.t))
       const g =
         weightDecay === 0
           ? grads
           : treeZip([grads, needParams(name, params)], ([gi, p]) => add(leaf(gi), mul(weightDecay, leaf(p))))
       if (momentum === 0)
-        return { updates: treeMap(g, (gi) => mul(-eta, leaf(gi))), state: { t: state.t + 1, slots: {} } }
+        return { updates: treeMap(g, (gi) => mul(minusEta, leaf(gi))), state: { t: state.t + 1, slots: {} } }
       const velocity = treeZip([state.slots.velocity, g], ([v, gi]) => add(mul(momentum, leaf(v)), leaf(gi)))
       const direction = nesterov ? treeZip([g, velocity], ([gi, v]) => add(leaf(gi), mul(momentum, leaf(v)))) : velocity
       return {
-        updates: treeMap(direction, (d) => mul(-eta, leaf(d))),
+        updates: treeMap(direction, (d) => mul(minusEta, leaf(d))),
         state: { t: state.t + 1, slots: { velocity } },
       }
     },
@@ -167,9 +174,9 @@ export function adagradRule(options: AdaptiveRuleOptions = {}): UpdateRule {
     name: 'adagrad',
     init: (params) => ({ t: 0, slots: { sumSquares: zerosLike(params) } }),
     update: (grads, state) => {
-      const eta = stepSizeAt(stepSize, state.t)
+      const minusEta = negated(stepSizeAt(stepSize, state.t))
       const sumSquares = treeZip([state.slots.sumSquares, grads], ([G, g]) => add(leaf(G), square(leaf(g))))
-      const updates = treeZip([grads, sumSquares], ([g, G]) => div(mul(-eta, leaf(g)), add(sqrt(leaf(G)), epsilon)))
+      const updates = treeZip([grads, sumSquares], ([g, G]) => div(mul(minusEta, leaf(g)), add(sqrt(leaf(G)), epsilon)))
       return { updates, state: { t: state.t + 1, slots: { sumSquares } } }
     },
   }
@@ -191,11 +198,11 @@ export function rmspropRule(options: RmspropRuleOptions = {}): UpdateRule {
     name: 'rmsprop',
     init: (params) => ({ t: 0, slots: { meanSquare: zerosLike(params) } }),
     update: (grads, state) => {
-      const eta = stepSizeAt(stepSize, state.t)
+      const minusEta = negated(stepSizeAt(stepSize, state.t))
       const meanSquare = treeZip([state.slots.meanSquare, grads], ([s, g]) =>
         add(mul(decay, leaf(s)), mul(1 - decay, square(leaf(g)))),
       )
-      const updates = treeZip([grads, meanSquare], ([g, s]) => div(mul(-eta, leaf(g)), add(sqrt(leaf(s)), epsilon)))
+      const updates = treeZip([grads, meanSquare], ([g, s]) => div(mul(minusEta, leaf(g)), add(sqrt(leaf(s)), epsilon)))
       return { updates, state: { t: state.t + 1, slots: { meanSquare } } }
     },
   }
@@ -229,7 +236,7 @@ export function adamRule(options: AdamRuleOptions = {}): UpdateRule {
     name,
     init: (params) => ({ t: 0, slots: { firstMoment: zerosLike(params), secondMoment: zerosLike(params) } }),
     update: (grads, state, params) => {
-      const eta = stepSizeAt(stepSize, state.t)
+      const minusEta = negated(stepSizeAt(stepSize, state.t))
       const decay = weightDecay !== 0
       const g =
         decay && !decoupled
@@ -244,8 +251,10 @@ export function adamRule(options: AdamRuleOptions = {}): UpdateRule {
       const step = treeZip([m, v], ([mi, vi]) => div(div(leaf(mi), c1), add(sqrt(div(leaf(vi), c2)), epsilon)))
       const updates =
         decay && decoupled
-          ? treeZip([step, needParams(name, params)], ([s, p]) => mul(-eta, add(leaf(s), mul(weightDecay, leaf(p)))))
-          : treeMap(step, (s) => mul(-eta, leaf(s)))
+          ? treeZip([step, needParams(name, params)], ([s, p]) =>
+              mul(minusEta, add(leaf(s), mul(weightDecay, leaf(p)))),
+            )
+          : treeMap(step, (s) => mul(minusEta, leaf(s)))
       return { updates, state: { t: state.t + 1, slots: { firstMoment: m, secondMoment: v } } }
     },
   }

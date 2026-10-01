@@ -16,11 +16,11 @@ import {
   type Tensor,
   type Value,
 } from 'aifn/foundation/tensor'
-import { useMemo, useState } from 'react'
-import { Select, Slider, Switch } from '@lab/controls'
-import { Figure } from '@lab/layout'
-import { Panel, Readout, Subplots, XYChart, type Handle, type XYSeries } from '@lab/viz'
-import { formatValue, TensorView } from '@lab/views'
+import { useMemo } from 'react'
+import { Equation, Figure, live, tex } from '@lab/layout'
+import { choice, row, setting, slider, useFigureState, useProbe } from '@lab/state'
+import { Curve, Handle, Plot, Plots, Points, Probe, Readout, useAxis, Vectors } from '@lab/viz'
+import { formatValue, TensorModePanel } from '@lab/views'
 
 // ── A function and its derivatives ───────────────────────────────────────────────────────────────────────────────────
 
@@ -40,10 +40,15 @@ const FLAT = 1e-3
 /** Points on the drawn osculating circle. */
 const CIRCLE_POINTS = 128
 
+const FUNCTION_NAMES = Object.keys(FUNCTIONS) as FunctionName[]
+
 export function DerivativeSpecimen() {
-  const [name, setName] = useState<FunctionName>('x sin x')
-  const [x0, setX0] = useState(1)
-  const [equalUnits, setEqualUnits] = useState(true)
+  const state = useFigureState({
+    name: choice(FUNCTION_NAMES, 'x sin x', { label: 'f' }),
+    x0: slider(-6, 6, 2, { label: 'x₀' }),
+    equalUnits: setting(true, 'equal units'),
+  })
+  const name = state.name as FunctionName
   const { f, range } = FUNCTIONS[name]
   const { xs, ys, d1, d2, yRange } = useMemo(() => {
     const x = linspace(range[0], range[1], 241)
@@ -62,7 +67,8 @@ export function DerivativeSpecimen() {
       yRange: [lo - pad, hi + pad] as [number, number],
     }
   }, [f, range])
-  const at = Math.min(Math.max(x0, range[0]), range[1])
+  const probe = useProbe({ x: state.bind('x0'), label: 'x₀' })
+  const at = Math.min(Math.max(probe.x ?? state.x0, range[0]), range[1])
   const y0 = f(at) as number
   const p = grad(f)(at) as number
   const q = grad(grad(f))(at) as number
@@ -75,96 +81,99 @@ export function DerivativeSpecimen() {
   const radius = 1 / Math.abs(kappa)
   const centre: [number, number] = [at - (p * lift) / q, y0 + lift / q]
 
-  const series = useMemo((): XYSeries[] => [{ name, type: 'line', x: xs, y: ys, slot: 0 }], [name, xs, ys])
-  const derivatives = useMemo(
-    (): XYSeries[] => [
-      { name: 'f′ = grad(f)', type: 'line', x: xs, y: d1, slot: 1 },
-      { name: 'f″ = grad(grad(f))', type: 'line', x: xs, y: d2, slot: 2, dashed: true },
-    ],
-    [xs, d1, d2],
-  )
-  // The tangent, circle, radius and centre follow x₀; they go to the chart as live series (a patch).
+  // The tangent, circle, radius and centre follow x₀; they are live layers (a patch).
   const span = range[1] - range[0]
   const t = Array.from({ length: CIRCLE_POINTS + 1 }, (_, i) => (2 * Math.PI * i) / CIRCLE_POINTS)
-  const live: XYSeries[] = [
-    {
-      name: 'tangent at x₀',
-      type: 'line',
-      x: [at - span, at + span],
-      y: [y0 - p * span, y0 + p * span],
-      emphasis: true,
-      thin: true,
-    },
-    {
-      name: 'osculating circle',
-      type: 'line',
-      x: flat ? [] : t.map((a) => centre[0] + radius * Math.cos(a)),
-      y: flat ? [] : t.map((a) => centre[1] + radius * Math.sin(a)),
-      slot: 3,
-      thin: true,
-    },
-    {
-      name: 'osculating circle',
-      type: 'line',
-      x: flat ? [] : [at, centre[0]],
-      y: flat ? [] : [y0, centre[1]],
-      slot: 3,
-      thin: true,
-      dashed: true,
-    },
-    { name: 'osculating circle', type: 'scatter', x: flat ? [] : [centre[0]], y: flat ? [] : [centre[1]], slot: 3 },
-  ]
-  const handles: Handle[] = [{ kind: 'x', at, onDrag: setX0, label: 'x₀' }]
+  const x = useAxis({ label: 'x', range, key: name })
+  const yTop = useAxis({ label: 'f(x)', range: yRange, key: name, equal: state.equalUnits ? x : undefined })
+  const yBottom = useAxis({ label: 'derivatives', hold: 'initial', key: name })
   return (
     <Figure
       title="f with its tangent and osculating circle, and f′, f″ from grad"
+      purpose="grad(f) is f′ and grad(grad(f)) is f″, from each primitive's own derivative rule; at x₀ they fix the tangent's slope and the osculating circle's curvature."
       defaultSize="L"
-      controls={
-        <>
-          <Select label="f" value={name} onChange={setName} options={Object.keys(FUNCTIONS) as FunctionName[]} />
-          <Slider label="x₀" value={at} min={range[0]} max={range[1]} onChange={setX0} />
-          <Switch label="equal units" checked={equalUnits} onChange={setEqualUnits} />
-        </>
+      state={state}
+      equation={
+        <Equation>
+          {flat
+            ? tex`\kappa = \frac{f''(x_0)}{(1 + f'(x_0)^2)^{3/2}} = \frac{${live(q, { digits: 3 })}}{(1 + ${live(p, { digits: 3 })}^2)^{3/2}} \approx 0 \quad \text{(inflection)}`
+            : tex`\kappa = \frac{f''(x_0)}{(1 + f'(x_0)^2)^{3/2}} = \frac{${live(q, { digits: 3 })}}{(1 + ${live(p, { digits: 3 })}^2)^{3/2}} = ${live(kappa, { digits: 3, strong: true })}, \quad R = 1/|\kappa| = ${live(radius, { digits: 3 })}`}
+        </Equation>
       }
-      readouts={
-        <>
-          <Readout label="f(x₀)" value={formatValue(y0)} />
-          <Readout label="f′(x₀)" value={formatValue(p)} />
-          <Readout label="f″(x₀)" value={formatValue(q)} />
-          <Readout label="κ" value={flat ? 'inflection: κ ≈ 0' : formatValue(kappa)} />
-          <Readout label="R = 1/|κ|" value={flat ? '∞' : formatValue(radius)} />
-          <Readout label="gradCheck relative error" value={formatValue(check.maxRelError)} />
-        </>
-      }
-      caption="Drag the vertical line on either panel to move x₀. The osculating circle has radius 1/|κ| and matches the curve's value, slope and second derivative at x₀; it is hidden near an inflection, where κ ≈ 0. With equal units (the default) the top panel's height follows from f's range, so the circle is round and both axes still fit the data. Switch equal units off and the axes fit the panel: the circle is then drawn as an ellipse, which still has second-order contact with the curve stretched the same way."
+      readouts={{
+        'at x₀': (
+          <>
+            <Readout label="x₀" value={formatValue(at)} />
+            <Readout label="f(x₀)" value={formatValue(y0)} />
+            <Readout label="f′(x₀)" value={formatValue(p)} />
+            <Readout label="f″(x₀)" value={formatValue(q)} />
+          </>
+        ),
+        check: <Readout label="gradCheck relative error" value={formatValue(check.maxRelError)} />,
+      }}
+      caption="Drag the vertical line on either panel to move x₀. The osculating circle has radius 1/|κ| and matches the curve's value, slope and second derivative at x₀; it is hidden near an inflection, where κ ≈ 0. With equal units (the default) the circle is round. Switch equal units off and the axes fit the panel: the circle is then drawn as an ellipse, which still has second-order contact with the curve stretched the same way."
     >
-      <Subplots rows={2} sharex heightRatios={[2, 1]} hoverGroup>
-        <Panel aspect={equalUnits ? 'equal' : 'fit'}>
-          <XYChart
-            series={series}
-            live={live}
-            xLabel="x"
-            yLabel="f(x)"
-            xRange={range}
-            yRange={yRange}
-            handles={handles}
+      <Plots rows={2} heights={[2, 1]} hoverGroup>
+        <Plot x={x} y={yTop}>
+          <Curve name={name} x={xs} y={ys} slot={0} />
+          <Curve
+            name="tangent at x₀"
+            x={[at - span, at + span]}
+            y={[y0 - p * span, y0 + p * span]}
+            emphasis
+            thin
+            live
           />
-        </Panel>
-        <Panel>
-          <XYChart series={derivatives} xLabel="x" xRange={range} handles={handles} />
-        </Panel>
-      </Subplots>
+          <Curve
+            name="osculating circle"
+            x={flat ? [] : t.map((a) => centre[0] + radius * Math.cos(a))}
+            y={flat ? [] : t.map((a) => centre[1] + radius * Math.sin(a))}
+            slot={3}
+            thin
+            live
+          />
+          <Curve
+            name="osculating circle"
+            x={flat ? [] : [at, centre[0]]}
+            y={flat ? [] : [y0, centre[1]]}
+            slot={3}
+            thin
+            dashed
+            live
+          />
+          <Points name="osculating circle" x={flat ? [] : [centre[0]]} y={flat ? [] : [centre[1]]} slot={3} live />
+          <Probe probe={probe} at={y0} />
+        </Plot>
+        <Plot x={x} y={yBottom}>
+          <Curve name="f′ = grad(f)" x={xs} y={d1} slot={1} />
+          <Curve name="f″ = grad(grad(f))" x={xs} y={d2} slot={2} dashed />
+          <Probe probe={probe} at={p} slot={1} />
+        </Plot>
+      </Plots>
     </Figure>
   )
 }
 
 // ── Hessian-vector product on a quadratic ────────────────────────────────────────────────────────────────────────────
 
+const RING = Array.from({ length: 121 }, (_, i) => (2 * Math.PI * i) / 120)
+
 export function HvpSpecimen() {
-  const [angle, setAngle] = useState(0.5)
-  const [condition, setCondition] = useState(4)
-  const [v, setV] = useState<[number, number]>([1, 0.4])
-  const [x, setX] = useState<[number, number]>([0.3, -0.2])
+  const state = useFigureState({
+    Q: row('1 · the quadratic', {
+      angle: slider(0, Math.PI, 0.5, { label: 'rotation' }),
+      condition: slider(1, 10, 4, { label: 'condition κ' }),
+    }),
+    at: row('2 · the point x (changes nothing)', {
+      x1: slider(-2, 2, 0.3, { label: 'x₁' }),
+      x2: slider(-2, 2, -0.2, { label: 'x₂' }),
+    }),
+    vx: slider(-8, 8, 2, { onChart: true }),
+    vy: slider(-8, 8, 0.8, { onChart: true }),
+  })
+  const { angle, condition } = state.Q
+  const { x1, x2 } = state.at
+  const v: [number, number] = [state.vx, state.vy]
   // Q = R diag(κ, 1) Rᵀ, and q(x) = ½ xᵀQx, whose Hessian is Q at every x.
   const Q = useMemo(() => {
     const [c, s] = [Math.cos(angle), Math.sin(angle)]
@@ -175,58 +184,52 @@ export function HvpSpecimen() {
     return matmul(matmul(R, diag(tensor([condition, 1]))), transpose(R)) as Tensor
   }, [angle, condition])
   const q = useMemo(() => (z: Value) => mul(0.5, dot(z, matmul(Q, z))), [Q])
-  const hv = toFlat(hvp(q, tensor(x), tensor(v)) as Tensor)
+  const x = tensor([x1, x2])
+  const hv = toFlat(hvp(q, x, tensor(v)) as Tensor)
   const qv = toFlat(matmul(Q, tensor(v)))
-  const H = hessian(q)(tensor(x)) as Tensor
-  const directional = jvp(grad(q) as (z: Value) => Value, tensor(x), tensor(v)).tangent as Tensor
-  const handles: Handle[] = [{ kind: 'point', at: v, onDrag: (p) => setV(p), label: 'v' }]
-  const ring = Array.from({ length: 121 }, (_, i) => (2 * Math.PI * i) / 120)
+  const H = useMemo(() => hessian(q)(tensor([x1, x2])) as Tensor, [q, x1, x2])
+  const directional = jvp(grad(q) as (z: Value) => Value, x, tensor(v)).tangent as Tensor
   // The unit circle's image under Q, for scale.
-  const image = ring.map((t) => toFlat(matmul(Q, tensor([Math.cos(t), Math.sin(t)]))))
-  const series: XYSeries[] = [
-    {
-      name: 'Q·(unit circle)',
-      type: 'line',
-      x: image.map((p) => p[0]),
-      y: image.map((p) => p[1]),
-      slot: 0,
-      thin: true,
-    },
-  ]
+  const image = useMemo(() => {
+    const pts = RING.map((t) => toFlat(matmul(Q, tensor([Math.cos(t), Math.sin(t)]))))
+    return { x: pts.map((p) => p[0]), y: pts.map((p) => p[1]) }
+  }, [Q])
+  const xa = useAxis({ label: 'first coordinate', range: [-8, 8] })
+  const ya = useAxis({ label: 'second coordinate', range: [-8, 8], equal: xa })
   return (
     <>
       <Figure
         title="v and H·v for q(x) = ½ xᵀQx"
-        controls={
-          <>
-            <Slider label="rotation" value={angle} min={0} max={Math.PI} onChange={setAngle} />
-            <Slider label="condition κ" value={condition} min={1} max={10} onChange={setCondition} />
-            <Slider label="x₁" value={x[0]} min={-2} max={2} onChange={(a) => setX([a, x[1]])} />
-            <Slider label="x₂" value={x[1]} min={-2} max={2} onChange={(b) => setX([x[0], b])} />
-          </>
+        purpose="hvp(q, x, v) computes H·v without forming H; for a quadratic H = Q at every x, so H·v is Q·v wherever x is."
+        state={state}
+        equation={
+          <Equation>
+            {tex`\operatorname{hvp}(q, x, v) = (${live(hv[0], { digits: 4, strong: true })}, ${live(hv[1], { digits: 4, strong: true })}) \quad Q v = (${live(qv[0], { digits: 4 })}, ${live(qv[1], { digits: 4 })})`}
+          </Equation>
         }
-        readouts={
-          <>
-            <Readout label="hvp(q, x, v)" value={hv.map(formatValue).join(', ')} />
-            <Readout label="Q·v" value={qv.map(formatValue).join(', ')} />
-            <Readout label="jvp of grad q along v" value={toFlat(directional).map(formatValue).join(', ')} />
-          </>
-        }
-        caption="Drag the tip of v. The Hessian of a quadratic is Q at every x, so moving x changes nothing."
+        readouts={<Readout label="jvp of grad q along v" value={toFlat(directional).map(formatValue).join(', ')} />}
+        caption="Drag the tip of v. H·v stretches v most along Q's leading eigenvector (the long axis of Q·(unit circle)); raise κ to stretch it further. Moving x changes nothing, because a quadratic's Hessian is constant."
       >
-        <XYChart
-          series={series}
-          vectors={[
-            { from: [0, 0], to: v, slot: 1, label: 'v' },
-            { from: [0, 0], to: [hv[0], hv[1]], slot: 2, label: 'H·v' },
-          ]}
-          handles={handles}
-          xRange={[-11, 11]}
-          yRange={[-11, 11]}
-          equalAspect
-        />
+        <Plot x={xa} y={ya}>
+          <Curve name="Q·(unit circle)" x={image.x} y={image.y} slot={0} thin />
+          <Vectors
+            vectors={[
+              { from: [0, 0], to: v, slot: 1, label: 'v' },
+              { from: [0, 0], to: [hv[0], hv[1]], slot: 2, label: 'H·v' },
+            ]}
+            live
+          />
+          <Handle {...state.handle(['vx', 'vy'], { label: 'v' })} />
+        </Plot>
       </Figure>
-      <TensorView tensor={H} title="hessian(q)(x), equal to Q" initialMode="table" defaultSize="S" />
+      <Figure
+        title="hessian(q)(x), equal to Q"
+        purpose="hessian(q) differentiates grad(q) once more; for the quadratic it returns Q itself, the same at every x."
+        defaultSize="S"
+        hoverReadout={false}
+      >
+        <TensorModePanel tensor={H} initialMode="table" />
+      </Figure>
     </>
   )
 }

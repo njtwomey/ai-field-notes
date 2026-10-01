@@ -58,6 +58,8 @@ import {
   type Value,
 } from 'aifn/foundation/tensor'
 import { trace, type Trace } from 'aifn/foundation/trace'
+import { defineModel } from 'aifn/learning/estimators'
+import { bool, int, oneOf, real, space } from 'aifn/foundation/space'
 
 const LOG_2PI = Math.log(2 * Math.PI)
 
@@ -372,3 +374,26 @@ export function sparseGaussianProcessRegressor<P extends KernelParams>(
     },
   }
 }
+
+// ── Registry ─────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+defineModel(
+  {
+    key: 'sparseGaussianProcessRegressor',
+    module: 'learning/gaussian-processes',
+    name: 'Sparse Gaussian process regression',
+    summary: 'Inducing-point GP regression (VFE, FITC or DTC); the kernel is a required argument.',
+    task: 'regression',
+    capabilities: ['forward', 'decide', 'predictive', 'expect'],
+    hyper: space({
+      inducing: int(1, 500, { default: 20 }),
+      method: oneOf(['vfe', 'fitc', 'dtc', 'sor']),
+      noiseVariance: real(1e-6, 10, { default: 0.1, scale: 'log' }),
+      optimise: bool({ default: true }),
+      mean: real(-10, 10, { default: 0 }),
+    }),
+    notes: ['sparse-gaussian-processes'],
+    cite: ['titsias2009'],
+  },
+  sparseGaussianProcessRegressor,
+)

@@ -1,65 +1,78 @@
-/** Contour lines of a field sampled on a rectangular grid, by marching squares. */
-
-export type ContourSegment = [[number, number], [number, number]]
+/** Contour lines of a field sampled on a rectangular grid, as ECharts series; the marching squares are aifn's. */
+import { contourLines } from 'aifn/numerics/geometry'
+import { chrome, type Mode } from '@lab/design/palette'
+import { formatNumber } from './format'
 
 /**
- * The segments where a field crosses `level`. `z[i][j]` is the value at (x[j], y[i]), the layout Heatmap uses. Each
- * grid square whose corners straddle the level contributes one or two segments, with end points placed by linear
- * interpolation along the square's edges. Saddle squares are resolved by the value at the square's centre.
+ * Contour lines as ECharts series: one line series (polylines from `aifn/numerics/geometry` split by nulls) and one
+ * label per level. Ink by default. Static (no animation), so a redraw does not diff every contour point.
  */
-export function contourSegments(x: number[], y: number[], z: number[][], level: number): ContourSegment[] {
-  const out: ContourSegment[] = []
-  const cross = (xa: number, ya: number, za: number, xb: number, yb: number, zb: number): [number, number] => {
-    const f = za === zb ? 0.5 : (level - za) / (zb - za)
-    return [xa + f * (xb - xa), ya + f * (yb - ya)]
-  }
-  for (let i = 0; i + 1 < y.length; i++)
-    for (let j = 0; j + 1 < x.length; j++) {
-      // Corners anticlockwise from bottom-left: (j, i), (j+1, i), (j+1, i+1), (j, i+1).
-      const [x0, x1, y0, y1] = [x[j], x[j + 1], y[i], y[i + 1]]
-      const [a, b, c, d] = [z[i][j], z[i][j + 1], z[i + 1][j + 1], z[i + 1][j]]
-      const index = (a > level ? 1 : 0) | (b > level ? 2 : 0) | (c > level ? 4 : 0) | (d > level ? 8 : 0)
-      if (index === 0 || index === 15) continue
-      const bottom = () => cross(x0, y0, a, x1, y0, b)
-      const right = () => cross(x1, y0, b, x1, y1, c)
-      const top = () => cross(x0, y1, d, x1, y1, c)
-      const left = () => cross(x0, y0, a, x0, y1, d)
-      const centreAbove = (a + b + c + d) / 4 > level
-      switch (index) {
-        case 1:
-        case 14:
-          out.push([left(), bottom()])
-          break
-        case 2:
-        case 13:
-          out.push([bottom(), right()])
-          break
-        case 3:
-        case 12:
-          out.push([left(), right()])
-          break
-        case 4:
-        case 11:
-          out.push([right(), top()])
-          break
-        case 6:
-        case 9:
-          out.push([bottom(), top()])
-          break
-        case 7:
-        case 8:
-          out.push([left(), top()])
-          break
-        case 5:
-          // a and c above: joined through the centre when it is above too.
-          if (centreAbove) out.push([left(), top()], [bottom(), right()])
-          else out.push([left(), bottom()], [right(), top()])
-          break
-        case 10:
-          if (centreAbove) out.push([left(), bottom()], [right(), top()])
-          else out.push([left(), top()], [bottom(), right()])
-          break
-      }
+export function contourSeries(
+  x: readonly number[],
+  y: readonly number[],
+  field: readonly (readonly number[])[],
+  levels: readonly number[],
+  mode: Mode,
+  { id = '__contours', color, labels = true }: { id?: string; color?: string; labels?: boolean } = {},
+): Record<string, unknown>[] {
+  const { ink, surface } = chrome(mode)
+  const stroke = color ?? ink
+  const lines: (number | null)[][] = []
+  const marks: number[][] = []
+  for (const level of levels) {
+    // Joined polylines, so each level is a few runs of points rather than one null break per segment.
+    let longest: Float64Array | null = null
+    for (const line of contourLines(x, y, field, level)) {
+      const p = line.data as Float64Array
+      for (let k = 0; k < p.length; k += 2) lines.push([p[k], p[k + 1]])
+      lines.push([null, null])
+      if (!longest || p.length > longest.length) longest = p
     }
-  return out
+    // The label sits at the middle point of the level's longest line.
+    if (longest) {
+      const k = 2 * Math.floor(longest.length / 4)
+      marks.push([longest[k], longest[k + 1], level])
+    }
+  }
+  return [
+    {
+      id,
+      name: '__contours',
+      type: 'line',
+      data: lines,
+      connectNulls: false,
+      showSymbol: false,
+      silent: true,
+      clip: true,
+      lineStyle: { color: stroke, width: 1 },
+      tooltip: { show: false },
+      animation: false,
+      z: 2,
+    },
+    ...(labels
+      ? [
+          {
+            id: `${id}-labels`,
+            name: '__contour-labels',
+            type: 'scatter',
+            data: marks,
+            symbolSize: 0,
+            silent: true,
+            clip: true,
+            label: {
+              show: true,
+              formatter: (p: { value: number[] }) => formatNumber(p.value[2]),
+              color: stroke,
+              fontSize: 10,
+              backgroundColor: surface,
+              padding: [1, 3],
+              borderRadius: 2,
+            },
+            tooltip: { show: false },
+            animation: false,
+            z: 4,
+          },
+        ]
+      : []),
+  ]
 }

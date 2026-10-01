@@ -4,6 +4,7 @@
  * traversals are reproducible.
  */
 
+import { DomainError, ShapeError } from 'aifn/foundation/errors'
 import { fromData, isTensor, type Tensor } from 'aifn/foundation/tensor'
 import type { Edge, Graph } from 'aifn/foundation/contracts'
 
@@ -34,8 +35,10 @@ export const weightOf = (e: Edge): number => e.weight ?? 1
 export const isDirected = (g: Graph): boolean => g.directed !== false
 
 function check(g: Graph): void {
-  if (!Number.isInteger(g.nodes) || g.nodes < 0) throw new Error(`graph: node count ${g.nodes} is not a count`)
-  if (g.labels && g.labels.length !== g.nodes) throw new Error('graph: labels must have one entry per node')
+  if (!Number.isInteger(g.nodes) || g.nodes < 0)
+    throw new DomainError('graph', `graph: node count ${g.nodes} is not a count`)
+  if (g.labels && g.labels.length !== g.nodes)
+    throw new ShapeError('graph', 'graph: labels must have one entry per node')
   g.edges.forEach((e, k) => {
     if (
       !Number.isInteger(e.from) ||
@@ -45,8 +48,8 @@ function check(g: Graph): void {
       e.from >= g.nodes ||
       e.to >= g.nodes
     )
-      throw new Error(`graph: edge ${k} (${e.from} → ${e.to}) is outside 0…${g.nodes - 1}`)
-    if (Number.isNaN(weightOf(e))) throw new Error(`graph: edge ${k} has a NaN weight`)
+      throw new DomainError('graph', `graph: edge ${k} (${e.from} → ${e.to}) is outside 0…${g.nodes - 1}`)
+    if (Number.isNaN(weightOf(e))) throw new DomainError('graph', `graph: edge ${k} has a NaN weight`)
   })
 }
 
@@ -104,12 +107,13 @@ export function fromAdjacency(
 function readSquare(m: Tensor | readonly (readonly number[])[], where: string): number[][] {
   let rows: number[][]
   if (isTensor(m)) {
-    if (m.shape.length !== 2) throw new Error(`${where}: expected a matrix, got shape [${m.shape.join(', ')}]`)
+    if (m.shape.length !== 2)
+      throw new ShapeError(where, `${where}: expected a matrix, got shape [${m.shape.join(', ')}]`)
     rows = Array.from({ length: m.shape[0] }, (_, i) =>
       Array.from({ length: m.shape[1] }, (_, j) => m.data[m.offset + i * m.strides[0] + j * m.strides[1]]),
     )
   } else rows = m.map((r) => [...r])
-  if (rows.some((r) => r.length !== rows.length)) throw new Error(`${where}: the matrix must be square`)
+  if (rows.some((r) => r.length !== rows.length)) throw new ShapeError(where, `${where}: the matrix must be square`)
   return rows
 }
 
@@ -188,8 +192,8 @@ export function subgraph(g: Graph, nodes: readonly number[] | Tensor): Graph {
   const keep = isTensor(nodes) ? Array.from(nodes.data) : [...nodes]
   const index = new Map<number, number>()
   keep.forEach((v, i) => {
-    if (index.has(v)) throw new Error(`subgraph: node ${v} is listed twice`)
-    if (!(v >= 0 && v < g.nodes)) throw new Error(`subgraph: node ${v} is outside 0…${g.nodes - 1}`)
+    if (index.has(v)) throw new DomainError('subgraph', `subgraph: node ${v} is listed twice`)
+    if (!(v >= 0 && v < g.nodes)) throw new DomainError('subgraph', `subgraph: node ${v} is outside 0…${g.nodes - 1}`)
     index.set(v, i)
   })
   const edges = g.edges
@@ -219,7 +223,7 @@ export function path(parents: Tensor | readonly number[], target: number, root?:
   while (p(v) >= 0) {
     v = p(v)
     out.push(v)
-    if (out.length > length) throw new Error('path: the parent array has a cycle')
+    if (out.length > length) throw new DomainError('path', 'path: the parent array has a cycle')
   }
   if (root !== undefined && v !== root) return ints([])
   return ints(out.reverse())

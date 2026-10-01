@@ -6,10 +6,25 @@
  */
 
 import { normals, type Stream } from 'aifn/foundation/random'
-import { polynomialRoots } from 'aifn/numerics/polynomial'
+import { roots } from 'aifn/numerics/polynomial'
 import { normalQuantile } from 'aifn/numerics/special'
-import { eye, mean as meanOf, outer, reshape, sub, tensor, toFlat, toRows, type Vector } from 'aifn/foundation/tensor'
+import {
+  complexAbs,
+  eye,
+  fromData,
+  mean as meanOf,
+  outer,
+  reshape,
+  sub,
+  tensor,
+  toFlat,
+  toRows,
+  type Matrix,
+  type Tensor,
+  type Vector,
+} from 'aifn/foundation/tensor'
 import { kron, luFactor, luSolve } from 'aifn/numerics/linalg'
+import { filterAll, type Model } from 'aifn/inference/filtering'
 import { run, type Algorithm } from 'aifn/foundation/trace'
 import { simplexFit, type FitState } from './fit'
 import { toVec, type VectorLike } from './inputs'
@@ -34,19 +49,18 @@ const parse = (m: ArmaSpec, where: string): Parsed => ({
   mean: m.mean ?? 0,
 })
 
-/** Roots of a lag polynomial, with their moduli. */
-export type LagRoots = { real: Vector; imag: Vector; modulus: Vector; minModulus: number }
+/** Roots of a lag polynomial (complex128), with their moduli. */
+export type LagRoots = { roots: Tensor; modulus: Vector; minModulus: number }
 
 function lagRoots(c: number[]): LagRoots {
-  // c₀ + c₁z + … + c_k z^k, highest degree first for polynomialRoots; trailing zeros drop the degree.
+  // c₀ + c₁z + … + c_k z^k, highest degree first for `roots`; trailing zeros drop the degree.
   const coef = [...c]
   while (coef.length > 1 && coef[coef.length - 1] === 0) coef.pop()
-  if (coef.length <= 1) return { real: tensor([]), imag: tensor([]), modulus: tensor([]), minModulus: Infinity }
-  const r = polynomialRoots([...coef].reverse())
-  const re = toFlat(r.real)
-  const im = toFlat(r.imag)
-  const mod = re.map((v, i) => Math.hypot(v, im[i]))
-  return { real: r.real, imag: r.imag, modulus: tensor(mod), minModulus: Math.min(...mod) }
+  if (coef.length <= 1)
+    return { roots: fromData(new Float64Array(0), [0], 'complex128'), modulus: tensor([]), minModulus: Infinity }
+  const r = roots([...coef].reverse())
+  const modulus = complexAbs(r)
+  return { roots: r, modulus, minModulus: Math.min(...toFlat(modulus)) }
 }
 
 /**
@@ -64,7 +78,8 @@ export const isStationary = (ar: VectorLike): boolean => armaRoots({ ar }).ar.mi
 /** True when every root of 1 + Σ θ_j z^j lies strictly outside the unit circle. */
 export const isInvertible = (ma: VectorLike): boolean => armaRoots({ ma }).ma.minModulus > 1
 
-function psi(ar: number[], ma: number[], count: number): number[] {
+/** ψ₀ … ψ_{count−1} (shared with `sarima.ts`; any AR polynomial, stationary or not). */
+export function psi(ar: number[], ma: number[], count: number): number[] {
   const out = [1]
   for (let j = 1; j < count; j++) {
     let v = ma[j - 1] ?? 0
@@ -167,7 +182,8 @@ export function armaResiduals(x: VectorLike, model: ArmaSpec): Vector {
   return tensor(residuals(toVec(x, 'armaResiduals'), ar, ma, mean))
 }
 
-function residuals(x: number[], ar: number[], ma: number[], mean: number): number[] {
+/** Conditional residuals on arrays (shared with `sarima.ts`). */
+export function residuals(x: number[], ar: number[], ma: number[], mean: number): number[] {
   const p = ar.length
   const e = new Array<number>(x.length).fill(0)
   for (let t = p; t < x.length; t++) {
@@ -211,7 +227,8 @@ export function armaLogLikelihood(x: VectorLike, model: ArmaSpec): ArmaLikelihoo
   return exactLikelihood(toVec(x, 'armaLogLikelihood'), ar, ma, mean, model.sigma)
 }
 
-function exactLikelihood(x: number[], ar: number[], ma: number[], mean: number, sigma?: number): ArmaLikelihood {
+/** `armaLogLikelihood` on arrays (shared with `sarima.ts`). */
+export function exactLikelihood(x: number[], ar: number[], ma: number[], mean: number, sigma?: number): ArmaLikelihood {
   const n = x.length
   const r = Math.max(ar.length, ma.length + 1)
   const T: number[][] = Array.from({ length: r }, (_, i) =>
@@ -227,24 +244,24 @@ function exactLikelihood(x: number[], ar: number[], ma: number[], mean: number, 
   if (ar.length && !(armaRoots({ ar }).ar.minModulus > 1)) return bad()
   const P0 = stationaryStateCovariance(T, R)
   if (!P0) return bad()
-  let P: number[][] = P0
-  let a = new Array<number>(r).fill(0)
-  const v: number[] = []
-  const F: number[] = []
-  for (let t = 0; t < n; t++) {
-    const f = P[0][0]
-    const vt = x[t] - mean - a[0]
-    v.push(vt)
-    F.push(f)
-    // Update with the scalar observation Z α = α[0], then predict with T and R.
-    const k = P.map((row) => row[0] / f)
-    const au = a.map((ai, i) => ai + k[i] * vt)
-    const Pp = P
-    const Pu: number[][] = Pp.map((row, i) => row.map((pij, j) => pij - k[i] * Pp[0][j]))
-    a = T.map((row) => row.reduce((s, tij, j) => s + tij * au[j], 0))
-    const TP: number[][] = T.map((row) => Pu[0].map((_, j) => row.reduce((s, tik, kk) => s + tik * Pu[kk][j], 0)))
-    P = TP.map((row, i) => T.map((trow, j) => row.reduce((s, v2, kk) => s + v2 * trow[kk], 0) + R[i] * R[j]))
+  // `aifn/inference/filtering`'s Kalman filter on the Harvey form in units of σ²: observation Z α = α[0] without
+  // noise, state noise R Rᵀ. The stationary P0 satisfies T P0 Tᵀ + R Rᵀ = P0, so the filter's first prediction is
+  // the stationary start itself.
+  const harvey: Model = {
+    A: tensor(T) as Matrix,
+    C: tensor([Array.from({ length: r }, (_, i) => +(i === 0))]) as Matrix,
+    Q: tensor(R.map((ri) => R.map((rj) => ri * rj))) as Matrix,
+    R: tensor([[0]]) as Matrix,
+    m0: tensor(new Array<number>(r).fill(0)) as Vector,
+    P0: tensor(P0) as Matrix,
   }
+  const f = filterAll(
+    harvey,
+    x.map((xt) => [xt - mean]),
+  )
+  if (f.singularSteps.length) return bad()
+  const v = f.steps.map((st) => st.innovation.data[st.innovation.offset] as number)
+  const F = f.steps.map((st) => st.innovationCov.data[st.innovationCov.offset] as number)
   let sumSq = 0
   let sumLogF = 0
   for (let t = 0; t < n; t++) {
@@ -262,7 +279,7 @@ function exactLikelihood(x: number[], ar: number[], ma: number[], mean: number, 
  * (−1, 1), and the Levinson step φ_kj = φ_{k−1,j} − r_k φ_{k−1,k−j} turns them into coefficients (Jones, 1980;
  * Monahan, 1984). Negated, the same map gives invertible MA coefficients.
  */
-function fromPacf(u: number[]): number[] {
+export function fromPacf(u: number[]): number[] {
   let phi: number[] = []
   for (let k = 0; k < u.length; k++) {
     const r = Math.tanh(u[k])
@@ -272,7 +289,7 @@ function fromPacf(u: number[]): number[] {
 }
 
 /** The inverse of `fromPacf` (the backward Levinson step), with partial autocorrelations capped at ±0.99. */
-function toPacf(phi: number[]): number[] {
+export function toPacf(phi: number[]): number[] {
   let c = [...phi]
   const u = new Array<number>(phi.length)
   for (let k = phi.length; k >= 1; k--) {

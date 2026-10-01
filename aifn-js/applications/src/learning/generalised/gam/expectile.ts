@@ -10,6 +10,8 @@ import { fromData, toFlat, type Tensor } from 'aifn/foundation/tensor'
 import { trace, type Algorithm, type Trace } from 'aifn/foundation/trace'
 import type { Estimator } from 'aifn/learning/estimators'
 import { gam, type GamData, type GamModel, type GamParams } from './model'
+import { defineModel } from 'aifn/learning/estimators'
+import { int, oneOf, real, space } from 'aifn/foundation/space'
 
 /** A LAWS state. */
 export type ExpectileState = Status & {
@@ -24,6 +26,18 @@ export type ExpectileState = Status & {
   /** Share of points below the curve. */
   below: number
   converged: boolean
+  /** The smoothing parameters, total EDF and smoothing criterion (NaN when λ is fixed) of this iteration's fit. */
+  lambdas: number[]
+  edf: number
+  criterion: number
+  /** The curve on `options.grid`, when one is given, [m]. */
+  curve?: Tensor
+}
+
+/** Options of `expectileLaws` and `expectileFan`. */
+export type ExpectileLawsOptions = {
+  /** Inputs [m, d] at which every state also records its curve. */
+  grid?: Tensor
 }
 
 /** Hyperparameters of `expectileGam`. */
@@ -35,7 +49,11 @@ export type ExpectileGamParams = Omit<GamParams, 'family' | 'link'> & {
 }
 
 /** LAWS as a traceable algorithm; each step is one weighted GAM fit. */
-export function expectileLaws(params: ExpectileGamParams, data: GamData): Algorithm<void, ExpectileState> {
+export function expectileLaws(
+  params: ExpectileGamParams,
+  data: GamData,
+  options: ExpectileLawsOptions = {},
+): Algorithm<void, ExpectileState> {
   const { tau } = params
   if (!(tau > 0 && tau < 1)) throw new Error('expectileGam: τ must be in (0, 1)')
   const y = Float64Array.from(toFlat(data.y))
@@ -68,6 +86,10 @@ export function expectileLaws(params: ExpectileGamParams, data: GamData): Algori
       switched,
       below: below / n,
       converged: t > 0 && switched === 0,
+      lambdas: model.lambdas,
+      edf: model.edf,
+      criterion: model.smoothingScore.value,
+      ...(options.grid ? { curve: model.decide(options.grid) } : {}),
     }
   }
   return {
@@ -107,3 +129,47 @@ export function expectileGam(
     },
   }
 }
+
+/** Expectile curves at several levels, as plain data (for a worker): every LAWS state of each τ. */
+export type ExpectileFan = {
+  taus: number[]
+  /** Per τ, every LAWS state from iteration 0 until no point changes side (or `maxLawsSteps`). */
+  runs: ExpectileState[][]
+}
+
+/**
+ * LAWS at each τ of `taus` on the same terms and data, keeping every state (with its curve on `options.grid`): the
+ * fan of expectile curves a figure draws and plays.
+ */
+export function expectileFan(
+  params: Omit<ExpectileGamParams, 'tau'>,
+  data: GamData,
+  taus: readonly number[],
+  options: ExpectileLawsOptions = {},
+): ExpectileFan {
+  const { maxLawsSteps = 50 } = params
+  return {
+    taus: [...taus],
+    runs: taus.map((tau) => [...trace(expectileLaws({ ...params, tau }, data, options), undefined, maxLawsSteps).steps]),
+  }
+}
+
+// ── Registry ─────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+defineModel(
+  {
+    key: 'expectileGam',
+    module: 'learning/generalised/gam',
+    name: 'Expectile GAM',
+    summary: 'An additive model of the τ-expectile, fitted by iteratively reweighted least asymmetric squares.',
+    task: 'regression',
+    capabilities: ['forward', 'decide', 'predictive', 'expect', 'sample'],
+    hyper: space({
+      tau: real(0.01, 0.99, { default: 0.5, label: 'τ' }),
+      method: oneOf(['reml', 'gcv', 'fixed']),
+      maxLawsSteps: int(1, 200, { default: 50 }),
+    }),
+    notes: ['expectile-generalised-additive-models'],
+  },
+  expectileGam,
+)

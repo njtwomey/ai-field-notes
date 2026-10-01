@@ -11,7 +11,9 @@
  * --width 1440 --height 900 --dpr 2; --mobile (adds a 390 × 844 pass); --port 5191 (first port tried for its own Vite);
  * --timeout 15000 (ms to wait for a page to settle); --act '<figure-id>:drag x0 y0 x1 y1' or '<figure-id>:click x y'
  * (repeatable; coordinates are fractions of the figure's chart area, applied on every page that has that figure), or
- * '<figure-id>:press <button aria-label> [times]' (e.g. 'press First', 'press Next 20' or 'press Play' on a Player);
+ * '<figure-id>:press <button aria-label> [times]' (e.g. 'press First', 'press Next 20' or 'press Play' on a Player),
+ * or '<figure-id>:select <option label>' (opens each dropdown of the figure until one offers that option, and picks it);
+ * --restart-every 40 (pages per Chrome; a hung protocol call also restarts it and retries the page once);
  * --profile (each --act drag becomes 60 pointer moves at display rate, measured: input-to-paint, frame times, dropped
  * frames, long tasks, script/layout/style time, ECharts setOption calls and the heaviest functions by CPU self time,
  * written to profile.json with a one-line summary in profile.txt).
@@ -25,7 +27,7 @@
  * dependency). Each theme and viewport loads the lab once (the theme is written to localStorage before the app starts);
  * pages are then opened as the sidebar opens them (pushState + popstate). A page has settled when fonts are loaded,
  * every chart carries `data-chart-ready` (set by `EChart` on ECharts' 'finished' event, cleared on each redraw) and the
- * DOM and chart sizes are unchanged over consecutive frames. Chrome and Vite are always torn down, on error and Ctrl-C
+ * DOM and chart sizes are unchanged over consecutive frames, and no element is `aria-busy` (a figure waiting on a worker). Chrome and Vite are always torn down, on error and Ctrl-C
  * too; Chrome is killed with SIGKILL, as in scripts/render-check.ts.
  */
 import { spawn, type ChildProcess } from 'node:child_process'
@@ -42,7 +44,7 @@ const THEME_KEY = 'aifn-lab:theme'
 // ---------------------------------------------------------------------------------------------------------------------
 // Options
 
-type Act = { figure: string; kind: 'click' | 'drag' | 'press'; at: number[]; button?: string }
+type Act = { figure: string; kind: 'click' | 'drag' | 'press' | 'select'; at: number[]; button?: string }
 type Theme = 'light' | 'dark'
 
 const opts = {
@@ -58,12 +60,17 @@ const opts = {
   acts: [] as Act[],
   profile: false,
   sliders: true,
+  /** Pages per Chrome: a long run restarts Chrome this often (a single Chrome stalled after ~110 pages). */
+  restartEvery: 40,
 }
 
 function parseAct(spec: string): Act {
   // '<figure-id>:press <button label> [times]': clicks a button by its aria-label (e.g. a Player's Next or Play).
   const press = /^([^:]+):\s*press\s+(.+?)(?:\s+(\d+))?$/.exec(spec.trim())
   if (press) return { figure: press[1].trim(), kind: 'press', at: [Number(press[3] ?? 1)], button: press[2].trim() }
+  // '<figure-id>:select <option label>': picks that option in whichever of the figure's dropdowns offers it.
+  const choose = /^([^:]+):\s*select\s+(.+)$/.exec(spec.trim())
+  if (choose) return { figure: choose[1].trim(), kind: 'select', at: [], button: choose[2].trim() }
   const m = /^([^:]+):\s*(click|drag)\s+(.+)$/.exec(spec.trim())
   const at = m
     ? m[3]
@@ -101,6 +108,7 @@ for (let i = 0; i < argv.length; i++) {
   else if (a === '--profile') opts.profile = true
   else if (a === '--sliders') opts.sliders = true
   else if (a === '--no-sliders') opts.sliders = false
+  else if (a === '--restart-every') opts.restartEvery = Math.max(1, Number(next()))
   else if (a === '--help' || a === '-h') {
     console.log(
       'usage: node aifn-lab/screenshot.ts [--only <module|module/slug|path#figure> ...] [--theme light|dark|both]',
@@ -109,7 +117,7 @@ for (let i = 0; i < argv.length; i++) {
       '  [--width 1440] [--height 900] [--dpr 2] [--mobile] [--url http://...] [--port 5191] [--timeout ms] [--profile]',
     )
     console.log(
-      "  [--act '<figure-id>:drag x0 y0 x1 y1' | '<figure-id>:click x y'] ...   (see the header of this file)",
+      "  [--act '<figure-id>:drag x0 y0 x1 y1' | '<figure-id>:click x y' | '<figure-id>:select <option>'] ...   (see the header of this file)",
     )
     process.exit(0)
   } else opts.only.push(a)
@@ -276,7 +284,9 @@ const SETTLE = (timeout: number) => `(async () => {
   while (performance.now() - t0 < ${timeout}) {
     await frame(); await frame()
     const charts = [...document.querySelectorAll('[_echarts_instance_]')]
-    pending = charts.filter((c) => !c.hasAttribute('data-chart-ready')).length
+    // A figure waiting on a worker marks itself aria-busy; it counts as pending until the answer lands.
+    pending = charts.filter((c) => !c.hasAttribute('data-chart-ready')).length +
+      document.querySelectorAll('[aria-busy="true"]').length
     const main = document.querySelector('main')
     const sig = document.getElementsByTagName('*').length + '|' + (main ? main.scrollHeight : 0) + '|' +
       charts.map((c) => c.clientWidth + 'x' + c.clientHeight).join(',')
@@ -448,22 +458,30 @@ async function run() {
     if (!up) throw new Error(`nothing is serving ${base}/ (start it with make lab, or drop --url)`)
   }
 
-  const cdp = await Cdp.connect(await launchChrome())
-  // Chrome's own first tab: a tab opened with Target.createTarget sits in the background, where frames are throttled.
-  const { targetInfos } = await cdp.send<{ targetInfos: { targetId: string; type: string }[] }>('Target.getTargets')
-  const first = targetInfos.find((t) => t.type === 'page')
-  const targetId =
-    first?.targetId ?? (await cdp.send<{ targetId: string }>('Target.createTarget', { url: 'about:blank' })).targetId
-  const { sessionId } = await cdp.send<{ sessionId: string }>('Target.attachToTarget', { targetId, flatten: true })
-  cdp.session = sessionId
-  await cdp.send('Page.enable')
-  await cdp.send('Runtime.enable')
-  await cdp.send('Log.enable')
-  if (opts.profile) await cdp.send('Performance.enable')
+  // One Chrome and one tab at a time; `openBrowser` replaces both (the run restarts Chrome every few dozen pages).
+  let cdp!: Cdp
+  const openBrowser = async () => {
+    cdp?.close()
+    if (chrome && chrome.exitCode === null) chrome.kill('SIGKILL')
+    if (profile) rmSync(profile, { recursive: true, force: true })
+    cdp = await Cdp.connect(await launchChrome())
+    // Chrome's own first tab: a tab opened with Target.createTarget sits in the background, where frames are throttled.
+    const { targetInfos } = await cdp.send<{ targetInfos: { targetId: string; type: string }[] }>('Target.getTargets')
+    const first = targetInfos.find((t) => t.type === 'page')
+    const targetId =
+      first?.targetId ?? (await cdp.send<{ targetId: string }>('Target.createTarget', { url: 'about:blank' })).targetId
+    const { sessionId } = await cdp.send<{ sessionId: string }>('Target.attachToTarget', { targetId, flatten: true })
+    cdp.session = sessionId
+    await cdp.send('Page.enable')
+    await cdp.send('Runtime.enable')
+    await cdp.send('Log.enable')
+    if (opts.profile) await cdp.send('Performance.enable')
+    cdp.on(onConsole)
+  }
 
   // The console of the page being shot: errors and warnings, plus uncaught exceptions and failed requests.
   let log: { level: 'error' | 'warning' | 'info'; text: string }[] = []
-  cdp.on((method, p) => {
+  const onConsole: Listener = (method, p) => {
     if (method === 'Runtime.consoleAPICalled') {
       const type = p.type as string
       if (type !== 'error' && type !== 'warning' && type !== 'assert') return
@@ -488,7 +506,7 @@ async function run() {
       if ((e.level === 'error' || e.level === 'warning') && !e.url?.endsWith('/favicon.ico'))
         log.push({ level: e.level, text: `${e.text}${e.url ? ` (${e.url})` : ''}` })
     }
-  })
+  }
 
   const loaded = () =>
     new Promise<void>((resolve) => {
@@ -629,39 +647,58 @@ async function run() {
         area: a && { x: a.x, y: a.y, width: a.width, height: a.height } }
     })()`)
 
+  /** Load the lab in a theme and viewport (the theme is in localStorage before the app starts); returns every page. */
+  const openLab = async (v: Viewport, theme: Theme) => {
+    await setViewport(v)
+    await cdp.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: theme }] })
+    const { identifier } = await cdp.send<{ identifier: string }>('Page.addScriptToEvaluateOnNewDocument', {
+      source: `try { localStorage.setItem(${JSON.stringify(THEME_KEY)}, ${JSON.stringify(theme)}) } catch {}`,
+    })
+    log = []
+    const onLoad = loaded()
+    // The diagrams page draws no charts, so the app is up quickly; the pages to shoot are then opened in place.
+    await cdp.send('Page.navigate', { url: `${base}/diagrams` })
+    await Promise.race([onLoad, new Promise((r) => setTimeout(r, 60_000))])
+    const up = await cdp.eval<boolean>(
+      `new Promise((r) => { const t0 = performance.now(); const t = () => document.querySelector('nav[aria-label="Specimens"] a') ? r(true) : performance.now() - t0 > 30000 ? r(false) : setTimeout(t, 50); t() })`,
+    )
+    if (!up)
+      throw new Error(
+        `the lab did not render its index within 30 s at ${base}/diagrams` +
+          (log.length ? `; console:\n${log.map((l) => `${l.level.toUpperCase()}  ${l.text}`).join('\n')}` : ''),
+      )
+    await cdp.send('Page.removeScriptToEvaluateOnNewDocument', { identifier })
+    // The registry, as the shell lists it: the lab's own pages and every specimen under src/specimens.
+    const all = await cdp.eval<string[]>(
+      `[...document.querySelectorAll('nav[aria-label="Specimens"] a[href]')].map((a) => decodeURIComponent(a.getAttribute('href').slice(1)))`,
+    )
+    return all
+  }
+  /** A fresh Chrome with the lab loaded where the run was. */
+  const restart = async (v: Viewport, theme: Theme) => {
+    await openBrowser()
+    try {
+      await openLab(v, theme)
+    } catch (e) {
+      // A module mid-edit (another change landing while the run goes on) can fail one load: wait and load again.
+      console.log(`      reload failed (${(e as Error).message.split('\n')[0]}); retrying in 5 s`)
+      await new Promise((r) => setTimeout(r, 5000))
+      await openLab(v, theme)
+    }
+  }
+  await openBrowser()
+
   for (const v of viewports) {
     for (const theme of opts.themes) {
       const label = `${theme}${v.suffix}`
-      await setViewport(v)
-      await cdp.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: theme }] })
-      const { identifier } = await cdp.send<{ identifier: string }>('Page.addScriptToEvaluateOnNewDocument', {
-        source: `try { localStorage.setItem(${JSON.stringify(THEME_KEY)}, ${JSON.stringify(theme)}) } catch {}`,
-      })
       const tLoad = performance.now()
-      log = []
-      const onLoad = loaded()
-      // The diagrams page draws no charts, so the app is up quickly; the pages to shoot are then opened in place.
-      await cdp.send('Page.navigate', { url: `${base}/diagrams` })
-      await Promise.race([onLoad, new Promise((r) => setTimeout(r, 60_000))])
-      const up = await cdp.eval<boolean>(
-        `new Promise((r) => { const t0 = performance.now(); const t = () => document.querySelector('nav[aria-label="Specimens"] a') ? r(true) : performance.now() - t0 > 30000 ? r(false) : setTimeout(t, 50); t() })`,
-      )
-      if (!up)
-        throw new Error(
-          `the lab did not render its index within 30 s at ${base}/diagrams` +
-            (log.length ? `; console:\n${log.map((l) => `${l.level.toUpperCase()}  ${l.text}`).join('\n')}` : ''),
-        )
-      await cdp.send('Page.removeScriptToEvaluateOnNewDocument', { identifier })
-      // The registry, as the shell lists it: the lab's own pages and every specimen under src/specimens.
-      const all = await cdp.eval<string[]>(
-        `[...document.querySelectorAll('nav[aria-label="Specimens"] a[href]')].map((a) => decodeURIComponent(a.getAttribute('href').slice(1)))`,
-      )
+      const all = await openLab(v, theme)
       const targets = select(all)
       console.log(
         `\n${label}: ${targets.length} page(s), ${v.width}×${v.height} @${opts.dpr}x (app loaded in ${Math.round(performance.now() - tLoad)} ms)`,
       )
 
-      for (const target of targets) {
+      const shoot = async (target: Target) => {
         const tPage = performance.now()
         const dir = path.join(OUT, ...target.path.split('/'), label)
         rmSync(dir, { recursive: true, force: true })
@@ -698,6 +735,48 @@ async function run() {
               return ${act.at[0]}
             })()`)
             if (!pressed) log.push({ level: 'error', text: `lab-shots: no button '${act.button}' in ${act.figure}` })
+          } else if (act.kind === 'select') {
+            // Real pointer presses (the dropdowns open on pointer events, not on element.click()), one trigger at a time.
+            const fig = `main section[data-figure-id="${act.figure.replace(/"/g, '\\"')}"]`
+            const triggers = await cdp.eval<{ x: number; y: number }[]>(
+              `[...document.querySelectorAll('${fig} [role="combobox"]')].map((b) => { const r = b.getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 } })`,
+            )
+            const want = JSON.stringify(act.button)
+            let picked = false
+            for (const t of triggers) {
+              await mouse('mouseMoved', t.x, t.y)
+              await mouse('mousePressed', t.x, t.y, 1)
+              await mouse('mouseReleased', t.x, t.y)
+              const option = await cdp.eval<{ x: number; y: number } | null>(`new Promise((r) => {
+                const t0 = performance.now()
+                const look = () => {
+                  const o = [...document.querySelectorAll('[role="option"]')].find((e) => e.textContent.trim() === ${want})
+                  if (o) { o.scrollIntoView({ block: 'nearest' }); const b = o.getBoundingClientRect(); return r({ x: b.x + b.width / 2, y: b.y + b.height / 2 }) }
+                  performance.now() - t0 > 1000 ? r(null) : requestAnimationFrame(look)
+                }
+                look()
+              })`)
+              if (option) {
+                await mouse('mouseMoved', option.x, option.y)
+                await mouse('mousePressed', option.x, option.y, 1)
+                await mouse('mouseReleased', option.x, option.y)
+                picked = true
+                break
+              }
+              await cdp.send('Input.dispatchKeyEvent', {
+                type: 'keyDown',
+                key: 'Escape',
+                code: 'Escape',
+                windowsVirtualKeyCode: 27,
+              })
+              await cdp.send('Input.dispatchKeyEvent', {
+                type: 'keyUp',
+                key: 'Escape',
+                code: 'Escape',
+                windowsVirtualKeyCode: 27,
+              })
+            }
+            if (!picked) log.push({ level: 'error', text: `lab-shots: no option '${act.button}' in ${act.figure}` })
           } else if (act.kind === 'click') {
             const [x, y] = at(act.at[0], act.at[1])
             await mouse('mouseMoved', x, y)
@@ -718,7 +797,10 @@ async function run() {
               await mouse('mouseReleased', x1, y1)
             }
           }
-          log.push({ level: 'info', text: `lab-shots: applied --act ${act.figure}:${act.kind} ${act.at.join(' ')}` })
+          log.push({
+            level: 'info',
+            text: `lab-shots: applied --act ${act.figure}:${act.kind} ${act.button ?? act.at.join(' ')}`,
+          })
           await settle(`${target.path} after --act`)
         }
         // Park the pointer on the sidebar's edge, off every chart, so no tooltip shows in the capture.
@@ -857,6 +939,25 @@ async function run() {
         )
         for (const file of files) index.push(`- \`${path.relative(OUT, file)}\``)
         index.push('')
+      }
+      // A long run used to hang (Runtime.evaluate got no reply after ~110 pages): Chrome is restarted every
+      // `--restart-every` pages, and a page whose protocol call hangs is retried once in a fresh Chrome.
+      let sinceRestart = 0
+      for (const target of targets) {
+        if (++sinceRestart > opts.restartEvery) {
+          await restart(v, theme)
+          sinceRestart = 1
+        }
+        try {
+          await shoot(target)
+        } catch (e) {
+          const message = (e as Error).message
+          if (!/no reply after|connection closed|Target closed|Session with given id not found/.test(message)) throw e
+          console.log(`      ${target.path}: ${message}; restarting Chrome and retrying`)
+          await restart(v, theme)
+          sinceRestart = 1
+          await shoot(target)
+        }
       }
     }
   }

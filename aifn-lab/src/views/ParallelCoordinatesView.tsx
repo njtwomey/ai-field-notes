@@ -1,3 +1,4 @@
+import type { Dataset } from 'aifn-applied/data'
 import { useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
 import { ArrowUpDown, GripVertical } from 'lucide-react'
 import { extent, median, zScores } from 'aifn/probability/stats'
@@ -5,22 +6,21 @@ import { toFlat } from 'aifn/foundation/tensor'
 import { chrome, seriesColor } from '@lab/design/palette'
 import { useTheme } from '@lab/design/theme'
 import { Button, Select, Switch } from '@lab/controls'
-import { ControlRow, Figure } from '@lab/layout'
+import { ControlRow, PanelSlot } from '@lab/layout'
 import { cn } from '@lab/lib/utils'
 import { EChart, formatNumber, Readout, useChartHeight, useElementSize, type Range } from '@lab/viz'
 import { toggled, useClassTable, type ClassTableInput } from './class-table'
 import { ClassLegend } from './ClassLegend'
-import type { FrameProps } from './frame'
+import { registerView } from './registry'
 
-export type ParallelCoordinatesViewProps = FrameProps &
-  ClassTableInput & {
-    /** Axis scaling at first: each axis over its own range (`minmax`, default), or z-scores on one common range. */
-    scaling?: 'minmax' | 'standard'
-    /** Draw each class's per-axis medians as a bold line (default false). */
-    medians?: boolean
-    /** Rows drawn; above this a class-stratified sample is drawn and the readouts say so (default 3000). */
-    maxRows?: number
-  }
+export type ParallelCoordinatesPanelProps = ClassTableInput & {
+  /** Axis scaling at first: each axis over its own range (`minmax`, default), or z-scores on one common range. */
+  scaling?: 'minmax' | 'standard'
+  /** Draw each class's per-axis medians as a bold line (default false). */
+  medians?: boolean
+  /** Rows drawn; above this a class-stratified sample is drawn and the readouts say so (default 3000). */
+  maxRows?: number
+}
 
 /** The header strip over the axes: a draggable chip per axis with a flip button. */
 const HEADER = 30
@@ -39,7 +39,7 @@ const axisId = (j: number) => `f${j}`
  * axis, and use its arrow to flip it; the class chips hide or show a class. Lines are thin and translucent, lighter
  * the more rows there are; per-class median lines summarise each class.
  */
-export function ParallelCoordinatesView({
+export function ParallelCoordinatesPanel({
   data,
   x,
   y,
@@ -48,14 +48,7 @@ export function ParallelCoordinatesView({
   scaling: initialScaling = 'minmax',
   medians: initialMedians = false,
   maxRows = 3000,
-  title,
-  description,
-  controls,
-  readouts,
-  caption,
-  id,
-  defaultSize = 'L',
-}: ParallelCoordinatesViewProps) {
+}: ParallelCoordinatesPanelProps) {
   const table = useClassTable({ data, x, y, featureNames, labelNames }, maxRows)
   const { n, d, k, labels, columns } = table
   const { resolved: mode } = useTheme()
@@ -249,15 +242,9 @@ export function ParallelCoordinatesView({
   const brushedAxes = Object.values(areas).filter((v) => v.length).length
 
   return (
-    <Figure
-      id={id}
-      title={title ?? `Parallel coordinates: ${data?.meta.name ?? 'data'}`}
-      description={description}
-      defaultSize={defaultSize}
-      hoverReadout={false}
-      controls={
+    <>
+      <PanelSlot slot="controls">
         <>
-          {controls}
           <ControlRow label="axes">
             <Select
               label="scaling"
@@ -296,10 +283,9 @@ export function ParallelCoordinatesView({
             </ControlRow>
           )}
         </>
-      }
-      readouts={
+      </PanelSlot>
+      <PanelSlot slot="readouts">
         <>
-          {readouts}
           <Readout
             label="rows"
             value={table.total > n ? `${n} drawn of ${table.total} (stratified sample)` : String(n)}
@@ -312,12 +298,7 @@ export function ParallelCoordinatesView({
             />
           )}
         </>
-      }
-      caption={
-        caption ??
-        'Drag along an axis to brush an interval (drag again to add one; click the axis outside it to clear). Drag a chip in the header to move its axis; its arrow flips the axis.'
-      }
-    >
+      </PanelSlot>
       <div ref={box} className="flex w-full flex-col" style={{ height }}>
         <div className="relative shrink-0 select-none" style={{ height: HEADER }}>
           {order.map((j, p) => {
@@ -383,6 +364,14 @@ export function ParallelCoordinatesView({
           />
         </div>
       </div>
-    </Figure>
+    </>
   )
 }
+
+registerView<Dataset>({
+  key: 'dataset/parallel',
+  kind: 'dataset',
+  description: 'Parallel coordinates: one axis per feature and one polyline per row, coloured by class, with brushing.',
+  title: (d) => `Parallel coordinates: ${d.meta.name ?? 'data'}`,
+  render: (d) => <ParallelCoordinatesPanel data={d} />,
+})

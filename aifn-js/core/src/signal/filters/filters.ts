@@ -1,35 +1,70 @@
 /**
  * Digital filters with scipy.signal's conventions: window-method FIR design (`firwin`, Kaiser's formulas), IIR design
  * from analog prototypes by the bilinear transform (`iirfilter`, `butter`, `cheby1`, `cheby2`; Oppenheim and Schafer,
- * 2010, "Discrete-Time Signal Processing", §7.1–7.3), filtering by the transposed direct form II (`lfilter`), zero-phase
- * filtering (`filtfilt`, Gustafsson's initial conditions as in scipy), and frequency and group-delay responses.
+ * 2010, "Discrete-Time Signal Processing", §7.1–7.3), filtering (`lfilter`, `sosfilt`), zero-phase filtering
+ * (`filtfilt`, Gustafsson's initial conditions as in scipy), and frequency and group-delay responses.
  *
  * Designs return an `LtiSystem` (discrete, dt = 1/fs; dt = 1 without `fs`), and the filtering and response
  * functions take one. Frequencies: without `fs`, cutoffs are fractions of the Nyquist frequency in (0, 1), as in
  * scipy; with `fs`, they are in the same units as `fs`.
+ *
+ * Filtering is a composition over `aifn/foundation/convolution`'s `linearFilter` primitive: `lfilter`, `sosfilt`,
+ * `lfilterZi`, `sosfiltZi` and `filtfilt` accept coefficients `{ b, a }` (or sections) and samples as traced values,
+ * so they are differentiable in the IIR coefficients, the initial state and the signal, and batch along other axes.
  */
 
 import { solve } from 'aifn/numerics/linalg'
-import { dense, fromData, type Tensor } from 'aifn/foundation/tensor'
-import type { LtiSystem, Scalar, Signal, Size, Spectrum, VectorLike } from 'aifn/foundation/contracts'
-import { DomainError } from 'aifn/foundation/errors'
 import {
+  add,
   complex,
+  concat,
+  cos,
+  dense,
+  div,
+  expj,
+  eye,
+  fromData,
+  full,
+  imagPart,
+  isTensor,
+  isTraced,
+  mul,
+  neg,
+  ones,
+  outer,
+  realPart,
+  reshape,
+  shapeOfValue,
+  sin,
+  slice,
+  sqrt,
+  square,
+  stack,
+  sub,
+  sum,
+  tensor,
+  toComplexFlat,
+  zeros,
+  type SliceSpec,
+  type Tensor,
+  type Value,
+} from 'aifn/foundation/tensor'
+import type { ComplexNumber, LtiSystem, Scalar, Signal, Size, Spectrum, VectorLike } from 'aifn/foundation/contracts'
+import { DomainError, ShapeError } from 'aifn/foundation/errors'
+import { linearFilter } from 'aifn/foundation/convolution'
+import {
   convert,
-  responseAt,
+  frequencyResponse,
   toTransferFunction,
   transferFunction,
   zerosPolesGain,
-  type Complex,
   type LtiOf,
   type TransferFunctionForm,
 } from 'aifn/systems'
 import { getWindow, type WindowSpec } from 'aifn/signal/windows'
-import { readSamples, signal, spectrum, type SignalInput } from '../signal'
+import { isSignal, signal, spectrum, type SignalInput } from '../signal'
 
-type C = Complex
-const c = complex.of
-const { add: cadd, sub: csub, mul: cmul, scale: cscale, div: cdiv, sqrt: csqrt, exp: cexp, product: prod } = complex
+export { unwrapPhase } from '../signal'
 
 // ── FIR design ────────────────────────────────────────────────────────────────────────────────────────────────────
 
@@ -119,96 +154,101 @@ export function kaiserOrder(ripple: Scalar, width: Scalar): { numtaps: Size; bet
 
 // ── IIR design ────────────────────────────────────────────────────────────────────────────────────────────────────
 
-type Proto = { z: C[]; p: C[]; k: number }
+/** An analog or digital zeros–poles–gain design: complex128 zeros and poles, a real gain. */
+type Proto = { z: Tensor; p: Tensor; k: number }
 
-/** Analog Butterworth prototype (cutoff 1 rad/s), as `scipy.signal.buttap`. */
-function buttap(n: number): Proto {
-  const p = Array.from({ length: n }, (_, i) => cscale(cexp(c(0, (Math.PI * (-n + 1 + 2 * i)) / (2 * n))), -1))
-  return { z: [], p, k: 1 }
+/** The product of the entries of a complex vector (1 when empty). */
+function productOf(v: Tensor): ComplexNumber {
+  let re = 1
+  let im = 0
+  for (const z of toComplexFlat(v)) [re, im] = [re * z.re - im * z.im, re * z.im + im * z.re]
+  return { re, im }
 }
 
-/** Analog Chebyshev type I prototype with passband ripple rp dB, as `scipy.signal.cheb1ap`. */
-function cheb1ap(n: number, rp: number): Proto {
+/** Re(Π(−u) / Π(−v)): the gain factor of the frequency transformations (scipy's `lp2hp_zpk`, `lp2bs_zpk`). */
+function gainRatio(u: Tensor, v: Tensor): number {
+  const a = productOf(neg(u))
+  const b = productOf(neg(v))
+  return (a.re * b.re + a.im * b.im) / (b.re * b.re + b.im * b.im)
+}
+
+const none = (): Tensor => zeros([0], 'complex128')
+const repeat = (value: ComplexNumber, n: Size): Tensor => full([n], value, 'complex128')
+/** The angles π(−n + 1 + 2i)/(2n), i = 0 … n − 1, of the prototypes' poles. */
+const angles = (n: Size): Tensor => tensor(Array.from({ length: n }, (_, i) => (Math.PI * (-n + 1 + 2 * i)) / (2 * n)))
+
+/** Analog Butterworth prototype (cutoff 1 rad/s), as `scipy.signal.buttap`: p = −e^{iθ}. */
+function buttap(n: Size): Proto {
+  return { z: none(), p: neg(expj(angles(n))), k: 1 }
+}
+
+/** Analog Chebyshev type I prototype with passband ripple rp dB, as `scipy.signal.cheb1ap`: p = −sinh(μ + iθ). */
+function cheb1ap(n: Size, rp: number): Proto {
   const eps = Math.sqrt(10 ** (0.1 * rp) - 1)
   const mu = Math.asinh(1 / eps) / n
-  const p = Array.from({ length: n }, (_, i) => {
-    const theta = (Math.PI * (-n + 1 + 2 * i)) / (2 * n)
-    // −sinh(μ + iθ) = −(sinh μ cos θ + i cosh μ sin θ).
-    return c(-Math.sinh(mu) * Math.cos(theta), -Math.cosh(mu) * Math.sin(theta))
-  })
-  let k = prod(p.map((v) => cscale(v, -1))).re
+  const theta = angles(n)
+  const p = complex(mul(-Math.sinh(mu), cos(theta)), mul(-Math.cosh(mu), sin(theta))) as Tensor
+  let k = productOf(neg(p)).re
   if (n % 2 === 0) k /= Math.sqrt(1 + eps * eps)
-  return { z: [], p, k }
+  return { z: none(), p, k }
 }
 
 /** Analog Chebyshev type II prototype with stopband attenuation rs dB, as `scipy.signal.cheb2ap`. */
-function cheb2ap(n: number, rs: number): Proto {
+function cheb2ap(n: Size, rs: number): Proto {
   const de = 1 / Math.sqrt(10 ** (0.1 * rs) - 1)
   const mu = Math.asinh(1 / de) / n
   const ms: number[] = []
   for (let m = -n + 1; m < n; m += 2) if (n % 2 === 0 || m !== 0) ms.push(m)
   // z = −conj(i / sin(mπ/2n)) = i / sin(mπ/2n).
-  const z = ms.map((m) => c(0, 1 / Math.sin((m * Math.PI) / (2 * n))))
-  const p = Array.from({ length: n }, (_, i) => {
-    const q = cscale(cexp(c(0, (Math.PI * (-n + 1 + 2 * i)) / (2 * n))), -1)
-    return cdiv(c(1), c(Math.sinh(mu) * q.re, Math.cosh(mu) * q.im))
-  })
-  const k = cdiv(prod(p.map((v) => cscale(v, -1))), prod(z.map((v) => cscale(v, -1)))).re
-  return { z, p, k }
+  const z = complex(zeros([ms.length]), tensor(ms.map((m) => 1 / Math.sin((m * Math.PI) / (2 * n))))) as Tensor
+  const q = neg(expj(angles(n)))
+  const p = div(1, complex(mul(Math.sinh(mu), realPart(q)), mul(Math.cosh(mu), imagPart(q)))) as Tensor
+  return { z, p, k: gainRatio(p, z) }
 }
 
 function lp2lp({ z, p, k }: Proto, wo: number): Proto {
-  const degree = p.length - z.length
-  return { z: z.map((v) => cscale(v, wo)), p: p.map((v) => cscale(v, wo)), k: k * wo ** degree }
+  const degree = p.shape[0] - z.shape[0]
+  return { z: mul(z, wo), p: mul(p, wo), k: k * wo ** degree }
 }
 
 function lp2hp({ z, p, k }: Proto, wo: number): Proto {
-  const degree = p.length - z.length
-  const gain = k * cdiv(prod(z.map((v) => cscale(v, -1))), prod(p.map((v) => cscale(v, -1)))).re
-  return {
-    z: [...z.map((v) => cdiv(c(wo), v)), ...Array.from({ length: degree }, () => c(0))],
-    p: p.map((v) => cdiv(c(wo), v)),
-    k: gain,
-  }
+  const degree = p.shape[0] - z.shape[0]
+  return { z: concat([div(wo, z), repeat({ re: 0, im: 0 }, degree)]), p: div(wo, p), k: k * gainRatio(z, p) }
+}
+
+/** The two roots r·bw/2 ± √((r·bw/2)² − wo²) of each root r (band-pass), or of bw/2/r (band-stop). */
+function splitRoots(roots: Tensor, wo: number): Tensor {
+  const root = sqrt(sub(square(roots), wo * wo))
+  return concat([add(roots, root), sub(roots, root)])
 }
 
 function lp2bp({ z, p, k }: Proto, wo: number, bw: number): Proto {
-  const degree = p.length - z.length
-  const split = (roots: C[]) => {
-    const lp = roots.map((v) => cscale(v, bw / 2))
-    const root = lp.map((v) => csqrt(csub(cmul(v, v), c(wo * wo))))
-    return [...lp.map((v, i) => cadd(v, root[i])), ...lp.map((v, i) => csub(v, root[i]))]
+  const degree = p.shape[0] - z.shape[0]
+  return {
+    z: concat([splitRoots(mul(z, bw / 2), wo), repeat({ re: 0, im: 0 }, degree)]),
+    p: splitRoots(mul(p, bw / 2), wo),
+    k: k * bw ** degree,
   }
-  return { z: [...split(z), ...Array.from({ length: degree }, () => c(0))], p: split(p), k: k * bw ** degree }
 }
 
 function lp2bs({ z, p, k }: Proto, wo: number, bw: number): Proto {
-  const degree = p.length - z.length
-  const split = (roots: C[]) => {
-    const hp = roots.map((v) => cdiv(c(bw / 2), v))
-    const root = hp.map((v) => csqrt(csub(cmul(v, v), c(wo * wo))))
-    return [...hp.map((v, i) => cadd(v, root[i])), ...hp.map((v, i) => csub(v, root[i]))]
-  }
-  const gain = k * cdiv(prod(z.map((v) => cscale(v, -1))), prod(p.map((v) => cscale(v, -1)))).re
+  const degree = p.shape[0] - z.shape[0]
   return {
-    z: [
-      ...split(z),
-      ...Array.from({ length: degree }, () => c(0, wo)),
-      ...Array.from({ length: degree }, () => c(0, -wo)),
-    ],
-    p: split(p),
-    k: gain,
+    z: concat([splitRoots(div(bw / 2, z), wo), repeat({ re: 0, im: wo }, degree), repeat({ re: 0, im: -wo }, degree)]),
+    p: splitRoots(div(bw / 2, p), wo),
+    k: k * gainRatio(z, p),
   }
 }
 
 /** The bilinear transform s = 2 fs (z − 1)/(z + 1), as `scipy.signal.bilinear_zpk`. */
 function bilinear({ z, p, k }: Proto, fs: number): Proto {
-  const degree = p.length - z.length
-  const fs2 = c(2 * fs)
+  const degree = p.shape[0] - z.shape[0]
+  const fs2 = 2 * fs
+  const map = (r: Tensor) => div(add(fs2, r), sub(fs2, r))
   return {
-    z: [...z.map((v) => cdiv(cadd(fs2, v), csub(fs2, v))), ...Array.from({ length: degree }, () => c(-1))],
-    p: p.map((v) => cdiv(cadd(fs2, v), csub(fs2, v))),
-    k: k * cdiv(prod(z.map((v) => csub(fs2, v))), prod(p.map((v) => csub(fs2, v)))).re,
+    z: concat([map(z), repeat({ re: -1, im: 0 }, degree)]),
+    p: map(p),
+    k: k * gainRatio(sub(z, fs2), sub(p, fs2)),
   }
 }
 
@@ -286,163 +326,350 @@ export function cheby2(
 
 // ── Filtering ─────────────────────────────────────────────────────────────────────────────────────────────────────
 
-/** The normalised coefficients (a₀ = 1) of a discrete system, padded to a common length n. */
-function coefficients(sys: LtiSystem, where: string): { b: Float64Array; a: Float64Array; n: Size } {
-  if (sys.domain !== 'discrete') throw new DomainError(where, `${where}: the system must be discrete`)
-  const tf = toTransferFunction(sys).repr
-  const b0 = dense.data(tf.b)
-  const a0 = dense.data(tf.a)
-  if (a0.length === 0 || a0[0] === 0) throw new DomainError(where, `${where}: a[0] must be non-zero`)
-  const n = Math.max(b0.length, a0.length)
-  const b = new Float64Array(n)
-  const a = new Float64Array(n)
-  for (let i = 0; i < b0.length; i++) b[i] = b0[i] / a0[0]
-  for (let i = 0; i < a0.length; i++) a[i] = a0[i] / a0[0]
-  return { b, a, n }
+/** Filter coefficients as in scipy's `lfilter(b, a, x)`: b and a in ascending powers of z⁻¹ (numbers or traced). */
+export type FilterCoefficients = { b: Value | VectorLike; a: Value | VectorLike }
+
+/** A filter: a discrete `LtiSystem` (any representation), or coefficients `{ b, a }`. */
+export type FilterSpec = LtiSystem | FilterCoefficients
+
+/** Options for `lfilter` and `sosfilt`. */
+export type FilterOptions = {
+  /**
+   * The initial state (transposed direct form II, coefficients normalised by a₀): x's shape with max(|a|, |b|) − 1
+   * along the time axis (a vector for a vector x). For `sosfilt`, [sections, …] with 2 along the time axis. Default
+   * zeros (at rest).
+   */
+  zi?: Value | VectorLike
+  /** The time axis of the samples (default −1). */
+  axis?: number
 }
 
-function lfilterRaw(
-  b: Float64Array,
-  a: Float64Array,
-  x: Float64Array,
-  zi: Float64Array,
-): { y: Float64Array; zf: Float64Array } {
-  const n = b.length
-  const z = Float64Array.from(zi)
-  const y = new Float64Array(x.length)
-  for (let t = 0; t < x.length; t++) {
-    const xt = x[t]
-    const yt = b[0] * xt + (n > 1 ? z[0] : 0)
-    for (let i = 0; i < n - 2; i++) z[i] = b[i + 1] * xt + z[i + 1] - a[i + 1] * yt
-    if (n > 1) z[n - 2] = b[n - 1] * xt - a[n - 1] * yt
-    y[t] = yt
-  }
-  return { y, zf: z }
+/** A filtered signal and the final state (the `zi` that continues it). */
+export type Filtered<Y, Z> = { y: Y; zf: Z }
+
+const isSystem = (f: unknown): f is LtiSystem => (f as { kind?: unknown }).kind === 'lti'
+
+/** A number, array, tensor or traced value as a value (plain arrays become float64 tensors). */
+function asValue(v: Value | VectorLike): Value {
+  if (typeof v === 'number') return tensor([v])
+  return isTraced(v) || isTensor(v) ? (v as Value) : tensor(Array.from(v as ArrayLike<number>))
 }
 
-/** The sections of a second-order-sections system, each normalised to a₀ = 1; null for other forms. */
-function sections(sys: LtiSystem): { b: Float64Array; a: Float64Array }[] | null {
-  if (sys.repr.form !== 'sos') return null
-  const s = dense.data(sys.repr.sections)
-  return Array.from({ length: sys.repr.sections.shape[0] }, (_, k) => {
-    const a0 = s[6 * k + 3]
-    return {
-      b: Float64Array.from(s.subarray(6 * k, 6 * k + 3), (v) => v / a0),
-      a: Float64Array.from(s.subarray(6 * k + 3, 6 * k + 6), (v) => v / a0),
-    }
+/** A slice spec selecting `range` along `axis` of a rank-`rank` value. */
+const along = (rank: number, axis: number, range: SliceSpec): SliceSpec[] =>
+  Array.from({ length: rank }, (_, k) => (k === axis ? range : null))
+
+const reverse = (x: Value, axis: number): Value => slice(x, ...along(shapeOfValue(x).length, axis, [null, null, -1]))
+
+/** A vector reshaped to lie along `axis` of a rank-`rank` value ([1, …, n, …, 1]). */
+const alongAxis = (v: Value, rank: number, axis: number): Value =>
+  reshape(
+    v,
+    Array.from({ length: rank }, (_, k) => (k === axis ? shapeOfValue(v)[0] : 1)),
+  )
+
+/** The time axis of a rank-`rank` value, from a possibly negative `axis`. */
+function timeAxis(axis: number | undefined, rank: number, where: string): number {
+  const a = (axis ?? -1) < 0 ? rank + (axis ?? -1) : axis!
+  if (rank === 0 || a < 0 || a >= rank) throw new ShapeError(where, `${where}: axis ${axis ?? -1} out of range`)
+  return a
+}
+
+/** Samples from a `Signal` (kept for the output's metadata), a value or an array. */
+function samples(x: SignalInput | Value): { data: Value; meta?: Signal } {
+  if (isSignal(x)) return { data: x.data, meta: x }
+  return { data: asValue(x as Value | VectorLike) }
+}
+
+/** The output as a `Signal` like the input's when the input was one and the output is concrete, else as a value. */
+function wrap(y: Value, meta: Signal | undefined): Value | Signal {
+  if (!meta || !isTensor(y)) return y
+  return signal(y, {
+    fs: meta.fs,
+    t0: meta.t0,
+    ...(meta.unit !== undefined ? { unit: meta.unit } : {}),
+    ...(meta.channels !== undefined ? { channels: meta.channels } : {}),
   })
 }
 
-const output = (y: Float64Array, like: { fs: Scalar; t0: Scalar; unit?: string }): Signal =>
-  signal(fromData(y, [y.length]), { fs: like.fs, t0: like.t0, unit: like.unit })
-
-/**
- * Filters a signal through a discrete system by its difference equation a₀y[n] = Σ b_k x[n−k] − Σ_{k≥1} a_k y[n−k],
- * as `scipy.signal.lfilter` (transposed direct form II); a second-order-sections system runs as a cascade of
- * sections, as `scipy.signal.sosfilt`, which is better conditioned at high order. `zi` is the initial state (length
- * max(|a|, |b|) − 1, or 2 per section; default zeros); the final state is returned as `zf` ([sections, 2] for sos).
- * The output keeps the input's sample rate and start time.
- */
-export function lfilter(sys: LtiSystem, x: SignalInput, { zi }: { zi?: VectorLike } = {}): { y: Signal; zf: Tensor } {
-  if (sys.domain !== 'discrete') throw new DomainError('lfilter', 'lfilter: the system must be discrete')
-  const input = readSamples(x, 'lfilter')
-  const secs = sections(sys)
-  if (secs) {
-    const z = zi ? dense.toF64(zi, 'lfilter zi') : new Float64Array(2 * secs.length)
-    if (z.length !== 2 * secs.length) throw new RangeError(`lfilter: zi must have ${2 * secs.length} values`)
-    let v: Float64Array = input.values
-    const zf = new Float64Array(2 * secs.length)
-    secs.forEach((sec, k) => {
-      const out = lfilterRaw(sec.b, sec.a, v, z.subarray(2 * k, 2 * k + 2))
-      zf.set(out.zf, 2 * k)
-      v = out.y
-    })
-    return { y: output(v, input), zf: fromData(zf, [secs.length, 2]) }
+/** Transfer-function coefficients normalised by a₀ and padded to a common length K + 1. */
+function normalised(f: FilterSpec, where: string): { b: Value; a: Value; K: Size } {
+  let b: Value
+  let a: Value
+  if (isSystem(f)) {
+    if (f.domain !== 'discrete') throw new DomainError(where, `${where}: the system must be discrete`)
+    const tf = toTransferFunction(f).repr
+    b = tf.b
+    a = tf.a
+  } else {
+    b = asValue(f.b)
+    a = asValue(f.a)
   }
-  const f = coefficients(sys, 'lfilter')
-  const z = zi ? dense.toF64(zi, 'lfilter zi') : new Float64Array(f.n - 1)
-  if (z.length !== f.n - 1) throw new RangeError(`lfilter: zi must have length ${f.n - 1}`)
-  const { y, zf } = lfilterRaw(f.b, f.a, input.values, z)
-  return { y: output(y, input), zf: fromData(zf, [zf.length]) }
+  const nb = shapeOfValue(b)[0]
+  const na = shapeOfValue(a)[0]
+  if (!(na > 0 && nb > 0)) throw new ShapeError(where, `${where}: coefficients must not be empty`)
+  if (isTensor(a) && dense.data(slice(a, [0, 1]) as Tensor)[0] === 0)
+    throw new DomainError(where, `${where}: a[0] must be non-zero`)
+  const K = Math.max(nb, na) - 1
+  const pad = (v: Value, n: number) => (n < K + 1 ? concat([v, zeros([K + 1 - n])]) : v)
+  const a0 = slice(a, 0)
+  return { b: div(pad(b, nb), a0), a: div(pad(a, na), a0), K }
 }
 
-function steadyState(b: Float64Array, a: Float64Array, n: Size): Float64Array {
-  const m = n - 1
-  if (m === 0) return new Float64Array(0)
-  const M = new Float64Array(m * m)
-  for (let i = 0; i < m; i++) {
-    M[i * m + i] = 1
-    M[i * m] += a[i + 1]
-    if (i + 1 < m) M[i * m + i + 1] -= 1
+/**
+ * The final transposed-direct-form-II state after filtering x (N samples along `axis`) into y with normalised b, a
+ * (length K + 1): zfᵢ = Σₗ (b[i+1+l] x[N−1−l] − a[i+1+l] y[N−1−l]) + zi[i + N] (the last term while i + N < K).
+ */
+function finalState(b: Value, a: Value, K: Size, x: Value, y: Value, axis: number, zi: Value | null): Value {
+  const shape = shapeOfValue(x)
+  const rank = shape.length
+  const N = shape[axis]
+  if (K === 0) return zeros(shape.map((d, k) => (k === axis ? 0 : d)))
+  const parts: Value[] = []
+  for (let i = 0; i < K; i++) {
+    const L = Math.min(K - i, N)
+    let term: Value =
+      L > 0
+        ? sub(
+            sum(
+              mul(
+                alongAxis(slice(b, [i + 1, i + 1 + L]), rank, axis),
+                reverse(slice(x, ...along(rank, axis, [N - L, N])), axis),
+              ),
+              axis,
+              true,
+            ),
+            sum(
+              mul(
+                alongAxis(slice(a, [i + 1, i + 1 + L]), rank, axis),
+                reverse(slice(y, ...along(rank, axis, [N - L, N])), axis),
+              ),
+              axis,
+              true,
+            ),
+          )
+        : zeros(shape.map((d, k) => (k === axis ? 1 : d)))
+    if (zi !== null && i + N < K) term = add(term, slice(zi, ...along(rank, axis, [i + N, i + N + 1])))
+    parts.push(term)
   }
-  const rhs = Float64Array.from({ length: m }, (_, i) => b[i + 1] - a[i + 1] * b[0])
-  return dense.data(solve(fromData(M, [m, m]), fromData(rhs, [m])))
+  return concat(parts, axis)
+}
+
+/** One transfer-function filter pass on a value: y and the final state. */
+function filterValue(f: FilterSpec, x: Value, axis: number, zi: Value | null, where: string): Filtered<Value, Value> {
+  const { b, a, K } = normalised(f, where)
+  if (zi !== null) {
+    const want = shapeOfValue(x).map((d, k) => (k === axis ? K : d))
+    const got = shapeOfValue(zi)
+    if (got.length !== want.length || got.some((d, k) => d !== want[k]))
+      throw new ShapeError(where, `${where}: zi must have shape [${want.join(', ')}], got [${got.join(', ')}]`)
+  }
+  const y = linearFilter(b, a, x, zi === null || K === 0 ? { axis } : { axis, zi })
+  return { y, zf: finalState(b, a, K, x, y, axis, zi) }
+}
+
+/** The initial state for a vector x as the rank of x requires (a [K] vector zi is accepted for any rank-1 x). */
+const readState = (zi: Value | VectorLike | undefined): Value | null => (zi === undefined ? null : asValue(zi))
+
+/**
+ * Filters samples through a discrete system or coefficients `{ b, a }` by the difference equation
+ * Σₖ aₖ y[t−k] = Σₖ bₖ x[t−k] along `axis` (every other axis a separate signal), as `scipy.signal.lfilter`. A
+ * second-order-sections system runs as `sosfilt`. `zi` is the initial state (default zeros), and `zf` the final one.
+ * A `Signal` input gives a `Signal` output with the same sample rate and start time; a value input gives a value, and
+ * the whole computation is differentiable in b, a, zi and x.
+ *
+ * @example lfilter({ b: [1], a: [1, -0.9] }, [1, 0, 0]).y // 1, 0.9, 0.81
+ */
+export function lfilter(f: FilterSpec, x: Signal, options?: FilterOptions): Filtered<Signal, Tensor>
+export function lfilter(f: FilterSpec, x: Value | VectorLike, options?: FilterOptions): Filtered<Value, Value>
+export function lfilter(
+  f: FilterSpec,
+  x: SignalInput | Value,
+  options: FilterOptions = {},
+): Filtered<Value | Signal, Value> {
+  if (isSystem(f) && f.repr.form === 'sos') return sosfilt(f, x as Value, options)
+  const { data, meta } = samples(x)
+  const axis = timeAxis(options.axis, shapeOfValue(data).length, 'lfilter')
+  const { y, zf } = filterValue(f, data, axis, readState(options.zi), 'lfilter')
+  return { y: wrap(y, meta), zf }
+}
+
+/** Second-order sections [S, 6] (b₀ b₁ b₂ a₀ a₁ a₂ rows) from an sos system, a matrix or a traced value. */
+function sectionsOf(sos: LtiSystem | Value | readonly (readonly number[])[], where: string): Value {
+  if (isSystem(sos)) {
+    if (sos.repr.form !== 'sos') throw new DomainError(where, `${where}: the system is not in second-order sections`)
+    return sos.repr.sections
+  }
+  const v: Value = isTraced(sos) || isTensor(sos) ? (sos as Value) : tensor(sos as number[][])
+  const s = shapeOfValue(v)
+  if (s.length !== 2 || s[1] !== 6) throw new ShapeError(where, `${where}: sections must be [S, 6]`)
+  return v
+}
+
+/**
+ * Filters samples through a cascade of second-order sections [S, 6] (rows b₀ b₁ b₂ a₀ a₁ a₂), as
+ * `scipy.signal.sosfilt`: better conditioned than one high-order difference equation. `zi` is [S, …] with 2 along
+ * the time axis; `zf` has the same shape. Differentiable in the sections, zi and x.
+ */
+export function sosfilt(
+  sos: LtiSystem | Value | readonly (readonly number[])[],
+  x: Signal,
+  options?: FilterOptions,
+): Filtered<Signal, Tensor>
+export function sosfilt(
+  sos: LtiSystem | Value | readonly (readonly number[])[],
+  x: Value | VectorLike,
+  options?: FilterOptions,
+): Filtered<Value, Value>
+export function sosfilt(
+  sos: LtiSystem | Value | readonly (readonly number[])[],
+  x: SignalInput | Value,
+  options: FilterOptions = {},
+): Filtered<Value | Signal, Value> {
+  const S = sectionsOf(sos, 'sosfilt')
+  const { data, meta } = samples(x)
+  const axis = timeAxis(options.axis, shapeOfValue(data).length, 'sosfilt')
+  const zi = readState(options.zi)
+  const count = shapeOfValue(S)[0]
+  let v = data
+  const zfs: Value[] = []
+  for (let s = 0; s < count; s++) {
+    const row = slice(S, s)
+    const out = filterValue(
+      { b: slice(row, [0, 3]), a: slice(row, [3, 6]) },
+      v,
+      axis,
+      zi === null ? null : slice(zi, s),
+      'sosfilt',
+    )
+    zfs.push(out.zf)
+    v = out.y
+  }
+  return { y: wrap(v, meta), zf: count ? stack(zfs, 0) : zeros([0]) }
 }
 
 /**
  * The initial state of `lfilter` for a step response in steady state, as `scipy.signal.lfilter_zi`: solves
- * (I − Cᵀ) zi = b[1:] − a[1:] b₀ with C the companion matrix of a. Multiply by x[0] to start a signal without a
- * transient.
+ * (I − Cᵀ) zi = b[1:] − a[1:] b₀ with C the companion matrix of a (coefficients normalised by a₀). Multiply by x[0]
+ * to start a signal without a transient. A second-order-sections system gives `sosfiltZi`. Differentiable in b and a.
  */
-export function lfilterZi(sys: LtiSystem): Tensor {
-  const f = coefficients(sys, 'lfilterZi')
-  const zi = steadyState(f.b, f.a, f.n)
-  return fromData(zi, [zi.length])
+export function lfilterZi(f: FilterSpec): Value {
+  if (isSystem(f) && f.repr.form === 'sos') return sosfiltZi(f)
+  const { b, a, K } = normalised(f, 'lfilterZi')
+  if (K === 0) return zeros([0])
+  const aTail = slice(a, [1, K + 1])
+  const M = sub(add(eye(K), outer(aTail, tensor(Array.from({ length: K }, (_, j) => (j === 0 ? 1 : 0))))), eye(K, K, 1))
+  const rhs = sub(slice(b, [1, K + 1]), mul(aTail, slice(b, 0)))
+  return solve(M, rhs)
 }
 
 /**
- * Zero-phase filtering, as `scipy.signal.filtfilt` (Gustafsson, 1996, IEEE Trans. Signal Process. 44(4)): extend the
- * signal by `padlen` samples at each end (odd reflection by default), filter forwards and backwards with steady-state
- * initial conditions, and trim. The result has no phase shift and the squared magnitude response.
+ * Steady-state initial states [S, 2] of a section cascade for a unit step, as `scipy.signal.sosfilt_zi`: each
+ * section's `lfilterZi` scaled by the DC gain of the sections before it.
  */
-export function filtfilt(
-  sys: LtiSystem,
-  x: SignalInput,
-  options: { padtype?: 'odd' | 'even' | 'constant' | 'none'; padlen?: Size } = {},
-): Signal {
-  const f = coefficients(sys, 'filtfilt')
-  const input = readSamples(x, 'filtfilt')
-  const v = input.values
-  const padtype = options.padtype ?? 'odd'
-  const edge = padtype === 'none' ? 0 : (options.padlen ?? 3 * f.n)
-  if (edge >= v.length) throw new RangeError(`filtfilt: the signal must be longer than padlen = ${edge}`)
-  const n = v.length
-  const ext = new Float64Array(n + 2 * edge)
-  for (let i = 0; i < edge; i++) {
-    const l = v[edge - i]
-    const r = v[n - 2 - i]
-    ext[i] = padtype === 'odd' ? 2 * v[0] - l : padtype === 'even' ? l : v[0]
-    ext[edge + n + i] = padtype === 'odd' ? 2 * v[n - 1] - r : padtype === 'even' ? r : v[n - 1]
+export function sosfiltZi(sos: LtiSystem | Value | readonly (readonly number[])[]): Value {
+  const S = sectionsOf(sos, 'sosfiltZi')
+  const count = shapeOfValue(S)[0]
+  let scale: Value = 1
+  const rows: Value[] = []
+  for (let s = 0; s < count; s++) {
+    const row = slice(S, s)
+    const b = slice(row, [0, 3])
+    const a = slice(row, [3, 6])
+    rows.push(mul(scale, lfilterZi({ b, a })))
+    scale = mul(scale, div(sum(b), sum(a)))
   }
-  ext.set(v, edge)
-  const zi = steadyState(f.b, f.a, f.n)
-  const forward = lfilterRaw(
-    f.b,
-    f.a,
-    ext,
-    zi.map((z) => z * ext[0]),
-  ).y
-  forward.reverse()
-  const backward = lfilterRaw(
-    f.b,
-    f.a,
-    forward,
-    zi.map((z) => z * forward[0]),
-  ).y
-  backward.reverse()
-  return output(backward.slice(edge, edge + n), input)
+  return count ? stack(rows, 0) : zeros([0, 2])
+}
+
+/** Options for `filtfilt`. */
+export type FiltfiltOptions = {
+  /** How to extend the signal at each end: odd reflection (default), even reflection, the edge value, or none. */
+  padtype?: 'odd' | 'even' | 'constant' | 'none'
+  /** Samples added at each end. Default 3·max(|a|, |b|), or scipy's count for sections. */
+  padlen?: Size
+  /** The time axis (default −1). */
+  axis?: number
+}
+
+/**
+ * Zero-phase filtering, as `scipy.signal.filtfilt` and `sosfiltfilt` (Gustafsson, 1996, IEEE Trans. Signal Process.
+ * 44(4)): extend the signal by `padlen` samples at each end, filter forwards and backwards with steady-state initial
+ * conditions scaled by the first sample of each pass, and trim. The result has no phase shift and the squared
+ * magnitude response. A composition, so differentiable in the coefficients (or sections) and the signal.
+ */
+export function filtfilt(f: FilterSpec, x: Signal, options?: FiltfiltOptions): Signal
+export function filtfilt(f: FilterSpec, x: Value | VectorLike, options?: FiltfiltOptions): Value
+export function filtfilt(f: FilterSpec, x: SignalInput | Value, options: FiltfiltOptions = {}): Value | Signal {
+  const { data, meta } = samples(x)
+  const shape = shapeOfValue(data)
+  const rank = shape.length
+  const axis = timeAxis(options.axis, rank, 'filtfilt')
+  const n = shape[axis]
+  const sos = isSystem(f) && f.repr.form === 'sos'
+  let padlen: Size
+  if (sos) {
+    const S = sectionsOf(f as LtiSystem, 'filtfilt')
+    const count = shapeOfValue(S)[0]
+    const d = dense.data(S as Tensor)
+    let zb = 0
+    let za = 0
+    for (let s = 0; s < count; s++) {
+      if (d[6 * s + 2] === 0) zb++
+      if (d[6 * s + 5] === 0) za++
+    }
+    padlen = 3 * (2 * count + 1 - Math.min(zb, za))
+  } else padlen = 3 * (normalised(f, 'filtfilt').K + 1)
+  const padtype = options.padtype ?? 'odd'
+  const edge = padtype === 'none' ? 0 : (options.padlen ?? padlen)
+  if (edge >= n) throw new RangeError(`filtfilt: the signal must be longer than padlen = ${edge}`)
+  const at = (k: number) => slice(data, ...along(rank, axis, [k, k + 1]))
+  const x0 = at(0)
+  const xn = at(n - 1)
+  let ext = data
+  if (edge > 0) {
+    const left = reverse(slice(data, ...along(rank, axis, [1, edge + 1])), axis)
+    const right = reverse(slice(data, ...along(rank, axis, [n - 1 - edge, n - 1])), axis)
+    const block = shape.map((d, k) => (k === axis ? edge : d))
+    const [l, r] =
+      padtype === 'odd'
+        ? [sub(mul(2, x0), left), sub(mul(2, xn), right)]
+        : padtype === 'even'
+          ? [left, right]
+          : [mul(x0, ones(block)), mul(xn, ones(block))]
+    ext = concat([l, data, r], axis)
+  }
+  const zi = lfilterZi(f)
+  // The steady state for a step of height v: zi along the time axis times v (per section for a cascade).
+  const scaled = (v: Value): Value =>
+    sos
+      ? stack(
+          Array.from({ length: shapeOfValue(zi)[0] }, (_, s) => mul(alongAxis(slice(zi, s), rank, axis), v)),
+          0,
+        )
+      : mul(alongAxis(zi, rank, axis), v)
+  const pass = (v: Value): Value => {
+    const first = slice(v, ...along(rank, axis, [0, 1]))
+    return sos
+      ? sosfilt(f as LtiSystem, v, { axis, zi: scaled(first) }).y
+      : lfilter(f, v, { axis, zi: scaled(first) }).y
+  }
+  const forward = pass(ext)
+  const backward = reverse(pass(reverse(forward, axis)), axis)
+  return wrap(slice(backward, ...along(rank, axis, [edge, edge + n])), meta)
 }
 
 // ── Responses ─────────────────────────────────────────────────────────────────────────────────────────────────────
 
-function evaluate(coef: Float64Array, w: number): C {
+/** Σₖ cₖ e^{−iωk} for real coefficients c, as (re, im). */
+function evaluate(coef: Float64Array, w: number): ComplexNumber {
   let re = 0
   let im = 0
   for (let k = 0; k < coef.length; k++) {
     re += coef[k] * Math.cos(w * k)
     im -= coef[k] * Math.sin(w * k)
   }
-  return c(re, im)
+  return { re, im }
 }
 
 /** Options for `freqz` and `groupDelay`. */
@@ -463,8 +690,8 @@ export interface ResponseOptions {
 function frequencies({ n = 512, whole = false, includeNyquist = false }: ResponseOptions): Float64Array {
   const last = whole ? 2 * Math.PI : Math.PI
   const endpoint = includeNyquist && !whole
-  const div = endpoint ? n - 1 : n
-  return Float64Array.from({ length: n }, (_, i) => (last * i) / div)
+  const count = endpoint ? n - 1 : n
+  return Float64Array.from({ length: n }, (_, i) => (last * i) / count)
 }
 
 /** The axis tag, the factor from rad/sample to it, and fs. */
@@ -476,14 +703,13 @@ function axisOf(sys: LtiSystem, options: ResponseOptions): { axis: Spectrum['axi
 
 /**
  * The frequency response H(e^{iω}) of a discrete system, as `scipy.signal.freqz`: n frequencies evenly spaced on
- * [0, π) (or [0, 2π) with `whole`), evaluated in the system's own representation (`responseAt` of `aifn/systems`).
- * Returns a `Spectrum` (`quantity: 'response'`, complex values [n, 2]) with frequencies in Hz (fs = 1/dt) or
- * rad/sample.
+ * [0, π) (or [0, 2π) with `whole`), evaluated in the system's own representation (`frequencyResponse` of
+ * `aifn/systems`). Returns a `Spectrum` (`quantity: 'response'`, complex128 values [n]) with frequencies in Hz
+ * (fs = 1/dt) or rad/sample; `magnitude`, `phase` and `decibels` of `aifn/signal` read it.
  */
 export function freqz(sys: LtiSystem, options: ResponseOptions = {}): Spectrum {
   if (sys.domain !== 'discrete') throw new DomainError('freqz', 'freqz: the system must be discrete')
   const w = frequencies(options)
-  const at = responseAt(sys)
   const { axis, scale, fs } = axisOf(sys, options)
   return spectrum({
     f: fromData(
@@ -491,7 +717,7 @@ export function freqz(sys: LtiSystem, options: ResponseOptions = {}): Spectrum {
       [w.length],
     ),
     axis,
-    values: complex.toPairs(Array.from(w, (v) => at(v))),
+    values: frequencyResponse(sys, w).values,
     quantity: 'response',
     sided: options.whole ? 'two' : 'one',
     fs,
@@ -530,7 +756,8 @@ export function groupDelay(sys: LtiSystem, options: ResponseOptions = {}): Group
       singular++
       return NaN
     }
-    return cdiv(evaluate(cr, omega), den).re - (av.length - 1) + sys.delay
+    const num = evaluate(cr, omega)
+    return (num.re * den.re + num.im * den.im) / (den.re * den.re + den.im * den.im) - (av.length - 1) + sys.delay
   })
   const { axis, scale } = axisOf(sys, options)
   return {
@@ -542,23 +769,4 @@ export function groupDelay(sys: LtiSystem, options: ResponseOptions = {}): Group
     delay: fromData(delay, [w.length]),
     singular,
   }
-}
-
-/**
- * Unwraps a phase sequence so that consecutive values never jump by more than π, as `numpy.unwrap` (Itoh, 1982,
- * "Analysis of the phase unwrapping algorithm", Applied Optics 21(14)).
- */
-export function unwrapPhase(phase: VectorLike, { discont = Math.PI }: { discont?: Scalar } = {}): Tensor {
-  const p = dense.toF64(phase, 'unwrapPhase')
-  const out = Float64Array.from(p)
-  let offset = 0
-  for (let i = 1; i < p.length; i++) {
-    const d = p[i] - p[i - 1]
-    // numpy: map d into [−π, π), keeping +π for positive jumps; correct only when |d| ≥ discont.
-    let dm = ((((d + Math.PI) % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI)) - Math.PI
-    if (dm === -Math.PI && d > 0) dm = Math.PI
-    if (Math.abs(d) >= discont) offset += dm - d
-    out[i] = p[i] + offset
-  }
-  return fromData(out, [out.length])
 }

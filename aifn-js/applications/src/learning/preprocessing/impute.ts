@@ -3,6 +3,8 @@
 import { median } from 'aifn/probability/stats'
 import { fromData, type Tensor } from 'aifn/foundation/tensor'
 import { column, mapColumns, matrix, type FittedTransform, type Transformer } from './transformer'
+import { defineModel } from 'aifn/learning/estimators'
+import { oneOf, real, space } from 'aifn/foundation/space'
 
 /** A fitted simple imputer. */
 export interface SimpleImputer extends FittedTransform {
@@ -63,3 +65,23 @@ export function simpleImputer({
     },
   }
 }
+
+// ── Registry ─────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+defineModel(
+  {
+    key: 'simpleImputer',
+    module: 'learning/preprocessing',
+    name: 'Simple imputer',
+    summary: 'Fill missing values per feature with its mean, median, mode or a constant.',
+    task: 'preprocessing',
+    capabilities: ['transform'],
+    hyper: space({
+      strategy: oneOf(['mean', 'median', 'most-frequent', 'constant']),
+      fillValue: real(-100, 100, { default: 0 }),
+    }),
+    notes: ['missing-data-and-imputation'],
+    cite: ['little2019'],
+  },
+  simpleImputer,
+)

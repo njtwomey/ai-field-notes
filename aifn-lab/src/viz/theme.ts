@@ -38,12 +38,14 @@ export function baseOption(mode: Mode) {
     legend: {
       top: 0,
       right: 0,
-      type: 'scroll',
+      // Plain: a long legend wraps onto more rows (the Plot keeps room for them) rather than paging.
+      type: 'plain',
       icon: 'circle',
       itemWidth: 8,
       itemHeight: 8,
+      itemGap: 10,
+      padding: [5, 0, 5, 0],
       textStyle: { color: c.inkSecondary, fontSize: 12, fontFamily: FONT },
-      pageTextStyle: { color: c.muted },
     },
     tooltip: {
       confine: true,

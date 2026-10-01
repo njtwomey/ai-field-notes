@@ -1,5 +1,7 @@
 import { Shell, type LabPage } from '@lab/layout'
 import { DiagramsKit } from './kit/DiagramsKit'
+import { plotKitPages } from './kit/plot/pages'
+import { stateKitPages } from './kit/state/pages'
 import { UiKit } from './kit/UiKit'
 import type { Specimen } from './specimen'
 
@@ -19,6 +21,8 @@ const pages: LabPage[] = [
       'Every v2 control, chart and frame in one place: sliders, fields and choices; line, scatter, bar and heatmap charts with zoom, pan, hover and handles; figure sizing and data export; the palette in both themes.',
     render: () => <UiKit />,
   },
+  ...plotKitPages,
+  ...stateKitPages,
   {
     key: 'diagrams',
     title: 'Diagrams',

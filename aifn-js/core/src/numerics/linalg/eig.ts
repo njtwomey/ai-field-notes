@@ -7,8 +7,8 @@
  * Eigenvectors come from inverse iteration in complex arithmetic (Golub & Van Loan, 2013, §7.6.1).
  */
 
-import { dense, fromData, type Matrix, type MatrixLike, type Vector } from 'aifn/foundation/tensor'
-import { NumericalError, ShapeError } from 'aifn/foundation/errors'
+import { dense, fromData, isTraced, type MatrixLike, type Tensor } from 'aifn/foundation/tensor'
+import { NotDifferentiableError, NumericalError, ShapeError } from 'aifn/foundation/errors'
 
 const { toMatrixF64 } = dense
 
@@ -220,19 +220,19 @@ function elmhes(a: number[][], n: number): void {
   for (let i = 3; i <= n; i++) for (let j = 1; j < i - 1; j++) a[i][j] = 0
 }
 
-/** The eigenvalues and eigenvectors of a real square matrix. */
+/** The eigenvalues and eigenvectors of a real square matrix, as complex128 tensors. */
 export type Eigen = {
-  /** Real parts of the eigenvalues, sorted by real part (descending), then imaginary part (descending). */
-  real: Vector
-  /** Imaginary parts; complex eigenvalues come in adjacent conjugate pairs, the positive imaginary part first. */
-  imag: Vector
   /**
-   * Real parts of the eigenvectors, as columns (n×n): column k belongs to eigenvalue k. Each vector has unit 2-norm and
-   * its largest component real and positive. For a defective eigenvalue the columns of a repeated eigenvalue coincide.
+   * The eigenvalues, complex128 [n], sorted by real part (descending), then imaginary part (descending): complex ones
+   * come in adjacent conjugate pairs, the positive imaginary part first. `realPart`/`imagPart` give float64 views.
    */
-  vectorsReal: Matrix
-  /** Imaginary parts of the eigenvectors (zero for real eigenvalues). */
-  vectorsImag: Matrix
+  values: Tensor
+  /**
+   * The eigenvectors as columns, complex128 [n, n]: column k belongs to eigenvalue k. Each has unit 2-norm and its
+   * largest component real and positive (imaginary parts exactly 0 for a real eigenvalue). For a defective eigenvalue
+   * the columns of a repeated eigenvalue coincide. Zeros when `vectors: false`.
+   */
+  vectors: Tensor
   /** False when the QR iteration did not converge (the eigenvalues are then unreliable). */
   converged: boolean
 }
@@ -313,11 +313,19 @@ function normalise(xr: number[], xi: number[]): void {
  * The eigenvalues (and, unless `vectors: false`, eigenvectors) of a real n×n matrix A: A v = λ v. Eigenvalues come
  * from balancing, Hessenberg reduction and the Francis double-shift QR algorithm; each eigenvector from three steps of
  * inverse iteration with the shift λ perturbed by 1e-10‖A‖ so the shifted system is not exactly singular.
- * Sorted by real part, then imaginary part, both descending (so the most unstable mode comes first).
+ * Sorted by real part, then imaginary part, both descending (so the most unstable mode comes first). Not
+ * differentiable: eigenvalues and eigenvectors of a general matrix may be complex, and aifn has no rule for them; traced
+ * input throws `NotDifferentiableError` (use `eigh` for a symmetric matrix).
  *
- * @example eig([[0, 1], [-2, -3]]).real // [-1, -2]
+ * @example realPart(eig([[0, 1], [-2, -3]]).values) // [-1, -2]
  */
 export function eig(a: MatrixLike, { vectors = true }: { vectors?: boolean } = {}): Eigen {
+  if (isTraced(a as unknown)) {
+    throw new NotDifferentiableError(
+      'eig',
+      'eig: the general eigenproblem (possibly complex eigenvalues) has no derivative rule; use eigh for a symmetric matrix',
+    )
+  }
   const { data: A, m, n } = toMatrixF64(a, 'eig')
   if (m !== n) throw new ShapeError('eig', `eig: expected a square matrix, got ${m}×${n}`)
   for (let i = 0; i < A.length; i++)
@@ -359,17 +367,19 @@ export function eig(a: MatrixLike, { vectors = true }: { vectors?: boolean } = {
       }
     }
   }
+  const lambda = new Float64Array(2 * n)
+  values.forEach(([re, im], k) => {
+    lambda[2 * k] = re
+    lambda[2 * k + 1] = im
+  })
+  const v = new Float64Array(2 * n * n)
+  for (let i = 0; i < n * n; i++) {
+    v[2 * i] = vr[i]
+    v[2 * i + 1] = vi[i]
+  }
   return {
-    real: fromData(
-      Float64Array.from(values, (v) => v[0]),
-      [n],
-    ),
-    imag: fromData(
-      Float64Array.from(values, (v) => v[1]),
-      [n],
-    ),
-    vectorsReal: fromData(vr, [n, n]),
-    vectorsImag: fromData(vi, [n, n]),
+    values: fromData(lambda, [n], 'complex128'),
+    vectors: fromData(v, [n, n], 'complex128'),
     converged,
   }
 }

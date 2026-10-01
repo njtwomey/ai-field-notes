@@ -21,7 +21,10 @@ import {
   type Trained,
 } from 'aifn/learning/estimators'
 import { fromData, toFlat, type Tensor } from 'aifn/foundation/tensor'
+import { sigmoid } from 'aifn/numerics/special'
 import { trace, type Algorithm, type Trace } from 'aifn/foundation/trace'
+import { defineModel } from 'aifn/learning/estimators'
+import { int, oneOf, real, space } from 'aifn/foundation/space'
 
 type F64 = Float64Array
 
@@ -111,7 +114,7 @@ export function ebmBoosting(
         for (let i = 0; i < n; i++) {
           const b = binned[i * d + j]
           if (classify) {
-            const p = 1 / (1 + Math.exp(-f[i]))
+            const p = sigmoid(f[i])
             G[b] += p - y[i]
             H[b] += p * (1 - p)
           } else {
@@ -221,7 +224,7 @@ export function explainableBoostingMachine(params: EbmParams = {}): Estimator<Su
           edges[j * (bins + 1) + b] = alg.binning.lo[j] + ((alg.binning.hi[j] - alg.binning.lo[j]) * b) / bins
       const prob = (x: Tensor) =>
         fromData(
-          Float64Array.from(toFlat(forward(x)), (f) => 1 / (1 + Math.exp(-f))),
+          Float64Array.from(toFlat(forward(x)), (f) => sigmoid(f)),
           [x.shape[0]],
         )
       const base = {
@@ -250,3 +253,26 @@ export function explainableBoostingMachine(params: EbmParams = {}): Estimator<Su
     },
   }
 }
+
+// ── Registry ─────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+defineModel(
+  {
+    key: 'explainableBoostingMachine',
+    module: 'learning/generalised/gam',
+    name: 'Explainable boosting machine',
+    summary: 'A GAM of binned shape functions learned by cyclic gradient boosting.',
+    task: 'regression',
+    capabilities: ['forward', 'decide', 'predictive', 'expect', 'sample'],
+    hyper: space({
+      task: oneOf(['regression', 'classification']),
+      bins: int(2, 256, { default: 32 }),
+      rounds: int(1, 5000, { default: 1000 }),
+      learningRate: real(1e-3, 1, { default: 0.01, scale: 'log' }),
+      minLeaf: int(1, 100, { default: 2 }),
+    }),
+    notes: ['explainable-boosting-machines'],
+    cite: ['lou2012', 'nori2019'],
+  },
+  explainableBoostingMachine,
+)

@@ -10,6 +10,9 @@ export {
   cliffWalking,
   type MazeOptions,
   maze,
+  MAZES,
+  mazeEnvironment,
+  type MazeEnvironmentOptions,
   FROZEN_LAKE_MAPS,
   frozenLake,
 } from './gridworlds'

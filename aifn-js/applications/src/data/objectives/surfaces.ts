@@ -6,6 +6,9 @@
 
 import type { ObjectiveFn } from 'aifn/optim'
 import { dense, type Matrix, type Vector } from 'aifn/foundation/tensor'
+import type { ObjectiveInfo } from 'aifn/foundation/contracts'
+import { definer } from 'aifn/foundation/registry'
+import { int, real, space } from 'aifn/foundation/space'
 
 type F64 = dense.F64
 const { mat, toF64, vec } = dense
@@ -244,3 +247,80 @@ export function rastrigin({ A = 10, n = 2 }: { A?: number; n?: number } = {}): T
     hi: new Array<number>(n).fill(5.12),
   })
 }
+
+// ── Registry ─────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+const objective = definer<ObjectiveInfo>('objective', 'data/objectives')
+
+objective(
+  {
+    key: 'rosenbrock',
+    name: 'Rosenbrock',
+    summary: 'A curved, narrow valley with its minimum at (a, a², …): slow for gradient descent.',
+    params: space({
+      a: real(-3, 3, { default: 1 }),
+      b: real(1, 1000, { default: 100, scale: 'log' }),
+      n: int(2, 20, { default: 2 }),
+    }),
+    dim: null,
+    truth: true,
+    notes: ['gradient-descent', 'newtons-method', 'quasi-newton-methods'],
+  },
+  rosenbrock,
+)
+
+objective(
+  {
+    key: 'himmelblau',
+    name: 'Himmelblau',
+    summary: 'A two-dimensional surface with four global minima of value 0.',
+    params: space({}),
+    dim: 2,
+    truth: true,
+    notes: ['gradient-descent'],
+  },
+  himmelblau,
+)
+
+objective(
+  {
+    key: 'beale',
+    name: 'Beale',
+    summary: 'A two-dimensional surface with sharp ridges and its minimum at (3, 0.5).',
+    params: space({}),
+    dim: 2,
+    truth: true,
+    notes: ['gradient-descent'],
+  },
+  beale,
+)
+
+objective(
+  {
+    key: 'quadraticBowl',
+    name: 'Quadratic bowl',
+    summary: 'A convex quadratic with condition number κ, rotated in two dimensions.',
+    params: space({
+      condition: real(1, 1000, { default: 10, label: 'κ', scale: 'log' }),
+      n: int(1, 20, { default: 2 }),
+      angle: real(-Math.PI, Math.PI, { default: 0 }),
+    }),
+    dim: null,
+    truth: true,
+    notes: ['condition-number', 'convergence-of-gradient-descent', 'momentum-and-nesterov'],
+  },
+  quadraticBowl,
+)
+
+objective(
+  {
+    key: 'rastrigin',
+    name: 'Rastrigin',
+    summary: 'A bowl covered in a regular grid of local minima; the global minimum is 0 at the origin.',
+    params: space({ A: real(0, 50, { default: 10 }), n: int(1, 20, { default: 2 }) }),
+    dim: null,
+    truth: true,
+    notes: ['gradient-descent'],
+  },
+  rastrigin,
+)

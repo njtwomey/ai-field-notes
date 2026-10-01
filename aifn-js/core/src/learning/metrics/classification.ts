@@ -105,6 +105,7 @@ function accuracyOf(yTrue: ClassificationInput, yPred: ClassificationInput, samp
 export const accuracy = defineMetric(
   {
     key: 'accuracy',
+    stability: 'stable',
     name: 'Accuracy',
     inputs: 'labels',
     direction: 'higher',
@@ -120,6 +121,7 @@ export const accuracy = defineMetric(
 export const errorRate = defineMetric(
   {
     key: 'errorRate',
+    stability: 'stable',
     name: 'Error rate',
     inputs: 'labels',
     direction: 'lower',
@@ -139,6 +141,7 @@ export const errorRate = defineMetric(
 export const balancedAccuracy = defineMetric(
   {
     key: 'balancedAccuracy',
+    stability: 'stable',
     name: 'Balanced accuracy',
     inputs: 'labels',
     direction: 'higher',
@@ -163,7 +166,16 @@ export const balancedAccuracy = defineMetric(
 // ── Precision, recall and friends ────────────────────────────────────────────────────────────────────────────────────
 
 const averagedInfo = (key: string, name: string, note: string) =>
-  ({ key, name, inputs: 'labels', direction: 'higher', range: [0, 1], notes: [note], capability: 'decide' }) as const
+  ({
+    key,
+    name,
+    stability: 'stable',
+    inputs: 'labels',
+    direction: 'higher',
+    range: [0, 1],
+    notes: [note],
+    capability: 'decide',
+  }) as const
 
 /** Precision, TP / (TP + FP): the fraction of predicted positives that are positive (precision-recall-and-f-score). */
 export const precision = defineMetric(
@@ -282,6 +294,7 @@ export function precisionRecallFscoreSupport(
 export const matthewsCorrelation = defineMetric(
   {
     key: 'matthewsCorrelation',
+    stability: 'stable',
     name: 'Matthews correlation coefficient',
     inputs: 'labels',
     direction: 'higher',
@@ -362,6 +375,7 @@ export function kappaFromTable(table: Rows, weights: KappaWeights = 'none'): num
 export const cohensKappa = defineMetric(
   {
     key: 'cohensKappa',
+    stability: 'stable',
     name: "Cohen's κ",
     inputs: 'labels',
     direction: 'higher',
@@ -382,6 +396,7 @@ export const cohensKappa = defineMetric(
 export const hammingLoss = defineMetric(
   {
     key: 'hammingLoss',
+    stability: 'stable',
     name: 'Hamming loss',
     inputs: 'sets',
     direction: 'lower',
@@ -402,6 +417,7 @@ export const hammingLoss = defineMetric(
 export const exactMatch = defineMetric(
   {
     key: 'exactMatch',
+    stability: 'stable',
     name: 'Exact match',
     inputs: 'sets',
     direction: 'higher',
@@ -418,6 +434,7 @@ export const exactMatch = defineMetric(
 export const positiveLikelihoodRatio = defineMetric(
   {
     key: 'positiveLikelihoodRatio',
+    stability: 'stable',
     name: 'Positive likelihood ratio',
     inputs: 'labels',
     direction: 'higher',
@@ -435,6 +452,7 @@ export const positiveLikelihoodRatio = defineMetric(
 export const negativeLikelihoodRatio = defineMetric(
   {
     key: 'negativeLikelihoodRatio',
+    stability: 'stable',
     name: 'Negative likelihood ratio',
     inputs: 'labels',
     direction: 'lower',
@@ -452,6 +470,7 @@ export const negativeLikelihoodRatio = defineMetric(
 export const diagnosticOddsRatio = defineMetric(
   {
     key: 'diagnosticOddsRatio',
+    stability: 'stable',
     name: 'Diagnostic odds ratio',
     inputs: 'labels',
     direction: 'higher',

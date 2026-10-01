@@ -1,11 +1,10 @@
-import { useMemo, useState } from 'react'
+import { useMemo } from 'react'
 import { boxCox, powerTransform, splineFeatures, yeoJohnson } from 'aifn-applied/learning/preprocessing'
 import { normals, stream } from 'aifn/foundation/random'
-import { histogram } from 'aifn/probability/stats'
 import { fromData, linspace, toFlat, toRows } from 'aifn/foundation/tensor'
-import { Select, Slider } from '@lab/controls'
-import { Figure } from '@lab/layout'
-import { ChartSize, Readout, XYChart, type XYSeries } from '@lab/viz'
+import { Dashboard, DashboardCell, DashboardRow, Figure } from '@lab/layout'
+import { choice, row, slider, useFigureState } from '@lab/state'
+import { Annotation, Curve, Histogram, Plot, Readout, useAxis } from '@lab/viz'
 import { formatValue } from '@lab/views'
 
 const grid = (lo: number, hi: number, n: number) => toFlat(linspace(lo, hi, n))
@@ -16,24 +15,20 @@ function variance(v: readonly number[]): number {
   return v.reduce((a, b) => a + (b - m) ** 2, 0) / v.length
 }
 
-function bars(values: readonly number[], name: string, slot: number): XYSeries {
-  const h = histogram(values, { bins: 30 })
-  const edges = toFlat(h.edges)
-  return {
-    name,
-    type: 'bar',
-    x: edges.slice(1).map((e, i) => (edges[i] + e) / 2),
-    y: toFlat(h.density),
-    slot,
-  }
-}
-
 type Method = 'box-cox' | 'yeo-johnson'
 
 export function PowerTransformSpecimen() {
-  const [sigma, setSigma] = useState(0.8)
-  const [shift, setShift] = useState(0)
-  const [method, setMethod] = useState<Method>('box-cox')
+  const state = useFigureState({
+    data: row('1 · data', {
+      sigma: slider(0.05, 1.5, 0.8, { label: 'log-normal σ (skew)' }),
+      shift: slider(-3, 3, 0, { label: 'shift' }),
+    }),
+    transform: row('2 · transform', {
+      method: choice(['box-cox', 'yeo-johnson'] as Method[], 'box-cox', { label: 'method' }),
+    }),
+  })
+  const { sigma, shift } = state.data
+  const method = state.transform.method as Method
   const x = useMemo(
     () => toFlat(normals(stream('power'), [400])).map((z) => Math.exp(0.5 + sigma * z) + shift),
     [sigma, shift],
@@ -46,7 +41,8 @@ export function PowerTransformSpecimen() {
   const lambdas = useMemo(() => grid(-1.5, 2, 141), [])
   const profile = useMemo(() => {
     if (!usable) return []
-    // The profile log-likelihood the fit maximises (up to a constant).
+    // The profile log-likelihood the fit maximises (up to a constant). TODO(aifn): aifn's λ searches keep this
+    // function private; the lab should evaluate it from aifn (component request in phase5c-3.md).
     const jac =
       method === 'box-cox'
         ? x.reduce((a, v) => a + Math.log(v), 0)
@@ -56,20 +52,24 @@ export function PowerTransformSpecimen() {
       return (l - 1) * jac - (x.length / 2) * Math.log(variance(t))
     })
   }, [x, method, usable, lambdas])
-  const z = fitted ? toFlat(fitted.transform(fromData(Float64Array.from(x), [x.length, 1]))) : []
+  const z = useMemo(
+    () => (fitted ? toFlat(fitted.transform(fromData(Float64Array.from(x), [x.length, 1]))) : []),
+    [fitted, x],
+  )
   const lambda = fitted?.lambdas[0] ?? NaN
   const best = profile.length ? Math.max(...profile) : 0
+  const xa = useAxis({ label: 'x' })
+  const da = useAxis({ label: 'density' })
+  const za = useAxis({ label: 'transformed, standardised', range: [-4, 4] })
+  const dz = useAxis({ label: 'density', range: [0, 0.6] })
+  const la = useAxis({ label: 'λ', range: [-1.5, 2] })
+  const ll = useAxis({ label: 'log-likelihood', range: [best - 50, best + 5] })
   return (
     <Figure
+      purpose="A power transform with λ chosen by maximum likelihood makes skewed data look Gaussian: for log-normal data Box–Cox picks λ ≈ 0, the log."
       title="Power transforms with λ by maximum likelihood"
+      state={state}
       defaultSize="L"
-      controls={
-        <>
-          <Select label="method" value={method} onChange={setMethod} options={['box-cox', 'yeo-johnson']} />
-          <Slider label="log-normal σ (skew)" value={sigma} min={0.05} max={1.5} onChange={setSigma} />
-          <Slider label="shift" value={shift} min={-3} max={3} onChange={setShift} />
-        </>
-      }
       readouts={
         <>
           <Readout label="λ" value={formatValue(lambda)} />
@@ -77,31 +77,30 @@ export function PowerTransformSpecimen() {
           {!usable && <Readout label="Box–Cox" value="needs positive data: use Yeo–Johnson" />}
         </>
       }
-      caption="Draws of exp(0.5 + σZ) + shift before and after the transform (standardised), and the profile log-likelihood over λ with the maximum found by Brent's method. For log-normal data Box–Cox finds λ ≈ 0, the log. A negative shift makes Box–Cox inapplicable; Yeo–Johnson still applies."
+      caption="Top: 400 draws of exp(0.5 + σZ) + shift before and after the transform (standardised). Bottom: the profile log-likelihood over λ, with the maximum found by Brent's method (the vertical line). A negative shift makes Box–Cox inapplicable; Yeo–Johnson still applies."
     >
-      <div className="grid gap-3 md:grid-cols-2">
-        <ChartSize scale={0.6}>
-          <XYChart series={[bars(x, 'x', 0)]} xLabel="x" yLabel="density" />
-        </ChartSize>
-        <ChartSize scale={0.6}>
-          <XYChart
-            series={z.length ? [bars(z, 'transformed', 1)] : []}
-            xLabel="transformed, standardised"
-            yLabel="density"
-          />
-        </ChartSize>
-      </div>
-      <ChartSize scale={0.5}>
-        <XYChart
-          series={[
-            { name: 'profile log-likelihood', type: 'line', x: lambdas, y: profile, slot: 2 },
-            { name: 'λ̂', type: 'line', x: [lambda, lambda], y: [best - 50, best], emphasis: true },
-          ]}
-          xLabel="λ"
-          yLabel="log-likelihood"
-          yRange={[best - 50, best + 5]}
-        />
-      </ChartSize>
+      <Dashboard>
+        <DashboardRow minHeight={220}>
+          <DashboardCell>
+            <Plot x={xa} y={da}>
+              <Histogram name="x" values={x} bins={30} slot={0} />
+            </Plot>
+          </DashboardCell>
+          <DashboardCell>
+            <Plot x={za} y={dz}>
+              {z.length > 0 && <Histogram name="transformed" values={z} bins={30} slot={1} />}
+            </Plot>
+          </DashboardCell>
+        </DashboardRow>
+        <DashboardRow ratio={0.8} minHeight={200}>
+          <DashboardCell>
+            <Plot x={la} y={ll}>
+              <Curve name="profile log-likelihood" x={lambdas} y={profile} slot={2} />
+              {usable && <Annotation x={lambda} text="maximum" />}
+            </Plot>
+          </DashboardCell>
+        </DashboardRow>
+      </Dashboard>
     </Figure>
   )
 }
@@ -109,46 +108,35 @@ export function PowerTransformSpecimen() {
 type Extrapolation = 'constant' | 'continue'
 
 export function SplineBasisSpecimen() {
-  const [knots, setKnots] = useState(5)
-  const [degree, setDegree] = useState(3)
-  const [extrapolation, setExtrapolation] = useState<Extrapolation>('constant')
+  const state = useFigureState({
+    basis: row('1 · basis', {
+      knots: slider(2, 12, 5, { label: 'knots', step: 1 }),
+      degree: slider(0, 5, 3, { label: 'degree', step: 1 }),
+    }),
+    outside: row('2 · outside [0, 1]', {
+      extrapolation: choice(['constant', 'continue'] as Extrapolation[], 'constant', { label: 'extrapolation' }),
+    }),
+  })
+  const { knots, degree } = state.basis
+  const extrapolation = state.outside.extrapolation as Extrapolation
   const xs = useMemo(() => grid(-0.4, 1.4, 361), [])
-  const { series, model } = useMemo(() => {
+  const { columns, sum, model } = useMemo(() => {
     const model = splineFeatures({ knots, degree, extrapolation }).fit({ x: fromData(Float64Array.of(0, 1), [2, 1]) })
-    const B = toRows(model.transform(fromData(Float64Array.from(xs), [xs.length, 1])))
+    const B = toRows(model.transform(fromData(Float64Array.from(xs), [xs.length, 1]))) as number[][]
     const k = B[0].length
-    const series: XYSeries[] = Array.from({ length: k }, (_, j) => ({
-      name: `B${j}`,
-      type: 'line',
-      x: xs,
-      y: B.map((r) => r[j]),
-      slot: j % 8,
-    }))
-    series.push({
-      name: 'Σ B',
-      type: 'line',
-      x: xs,
-      y: B.map((r) => r.reduce((a, b) => a + b, 0)),
-      emphasis: true,
-      dashed: true,
-    })
-    return { series, model }
+    return {
+      columns: Array.from({ length: k }, (_, j) => B.map((r) => r[j])),
+      sum: B.map((r) => r.reduce((a, b) => a + b, 0)),
+      model,
+    }
   }, [knots, degree, extrapolation, xs])
+  const xa = useAxis({ label: 'x', range: [-0.4, 1.4] })
+  const ya = useAxis({ label: 'B(x)', hold: 'union', key: extrapolation })
   return (
     <Figure
+      purpose="B-spline features turn one column into knots + degree − 1 local bumps that sum to one on the training range, so a linear model on them fits a smooth curve."
       title="B-spline features"
-      controls={
-        <>
-          <Slider label="knots" value={knots} min={2} max={12} step={1} onChange={setKnots} />
-          <Slider label="degree" value={degree} min={0} max={5} step={1} onChange={setDegree} />
-          <Select
-            label="extrapolation"
-            value={extrapolation}
-            onChange={setExtrapolation}
-            options={['constant', 'continue']}
-          />
-        </>
-      }
+      state={state}
       readouts={
         <>
           <Readout label="features per column" value={model.perColumn} />
@@ -160,9 +148,14 @@ export function SplineBasisSpecimen() {
           />
         </>
       }
-      caption="splineFeatures fitted on [0, 1]: knots + degree − 1 B-splines that sum to one inside the training range. Outside it, 'constant' holds the boundary values and 'continue' extends the end polynomials."
+      caption="splineFeatures fitted on [0, 1]: each coloured curve is one feature Bⱼ(x); the dashed line is their sum. Outside the training range, 'constant' holds the boundary values and 'continue' extends the end polynomials."
     >
-      <XYChart series={series} xLabel="x" yLabel="B(x)" xRange={[-0.4, 1.4]} />
+      <Plot x={xa} y={ya} legend={false}>
+        {columns.map((c, j) => (
+          <Curve key={j} name={`B${j}`} x={xs} y={c} slot={j % 8} />
+        ))}
+        <Curve name="Σ B" x={xs} y={sum} emphasis dashed />
+      </Plot>
     </Figure>
   )
 }

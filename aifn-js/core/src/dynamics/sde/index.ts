@@ -29,3 +29,4 @@ export {
   type SdeState,
 } from './integrators'
 export { brownianMotion, geometricBrownianMotion, ornsteinUhlenbeck, type ExactSde } from './processes'
+export { sdeAlgorithms } from './registry'

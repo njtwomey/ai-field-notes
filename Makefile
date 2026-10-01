@@ -1,6 +1,6 @@
 # Common tasks. `make help` lists them.
 .DEFAULT_GOAL := help
-.PHONY: help install dev contracts assets content doctor links lint aifn-layers aifn-names format typecheck test bench check build preview clean
+.PHONY: help install dev contracts assets content doctor links lint aifn-layers aifn-names catalog catalog-check format typecheck test bench check build preview clean
 
 help: ## List targets
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  \033[36m%-10s\033[0m %s\n", $$1, $$2}'
@@ -41,6 +41,12 @@ lint: aifn-layers aifn-names ## Lint TypeScript, Python and note prose
 aifn-names: ## Check that no two aifn modules export different values under one name (allowlist in the test)
 	npx vitest run --config aifn-js/applications/vitest.config.ts test/names.test.ts
 
+catalog: ## Collect every aifn registry entry into aifn-js/generated/catalog.json and check its note, glossary and reference links
+	node scripts/aifn-catalog.ts
+
+catalog-check: ## Check that the aifn catalog is fresh and its links exist; report fixture coverage
+	node scripts/aifn-catalog.ts --check
+
 aifn-layers: ## Check aifn-js imports: core tiers, the application area DAG, core never imports applications (aifn-js/modules.json)
 	node scripts/aifn-layers.ts
 
@@ -62,7 +68,7 @@ test: aifn-layers ## Run the aifn-js tests (core and applications) and the Pytho
 bench: ## Run the aifn core micro-benchmarks (reported, not gated; not part of check)
 	npx vitest bench --run --config aifn-js/core/vitest.config.ts
 
-fixtures: ## Regenerate aifn-js golden test values from Python (FIXTURES="module ..." for some)
+fixtures: ## Regenerate aifn-js golden test values from Python (FIXTURES="numerics/linalg numerics ..." for some)
 	uv run python aifn-js/core/test/fixtures/generate.py $(FIXTURES)
 
 lab-check: ## Render every aifn lab specimen on the server and report any that throw
@@ -75,7 +81,7 @@ lab: ## Start the aifn lab (standalone explorer for aifn) → http://localhost:5
 	@echo "aifn lab → http://localhost:5190/  (pages at /<module>/<specimen>, figures at #<figure-id>; UI kit at /ui-kit)"
 	npx vite --config aifn-lab/vite.config.ts
 
-check: contracts doctor lint typecheck test ## Everything CI runs before a build
+check: contracts doctor lint typecheck test catalog-check ## Everything CI runs before a build
 	uv run mlc check
 	@# In CI the tree starts clean, so any change after regenerating means the committed contracts were stale.
 	@if [ -n "$$CI" ]; then git diff --quiet -- site/src/generated || (echo "contracts out of date: run make contracts" && exit 1); fi

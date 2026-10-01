@@ -7,6 +7,8 @@
 import { quantile } from 'aifn/probability/stats'
 import { fromData, toFlat, type Tensor } from 'aifn/foundation/tensor'
 import { column, mapColumns, matrix, type FittedTransform, type Invertible, type Transformer } from './transformer'
+import { defineModel } from 'aifn/learning/estimators'
+import { bool, space } from 'aifn/foundation/space'
 
 /** A fitted per-column affine map z = (x − center) / scale. */
 export interface AffineScaler extends FittedTransform, Invertible {
@@ -188,3 +190,65 @@ export function maxAbsScaler(): Transformer<Tensor, MaxAbsScaler> {
     },
   }
 }
+
+// ── Registry ─────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+defineModel(
+  {
+    key: 'standardScaler',
+    module: 'learning/preprocessing',
+    name: 'Standard scaler',
+    summary: 'Centre each feature and divide by its standard deviation.',
+    task: 'preprocessing',
+    capabilities: ['transform'],
+    hyper: space({ withMean: bool({ default: true }), withStd: bool({ default: true }) }),
+    notes: ['feature-scaling'],
+    cite: ['pedregosa2011'],
+  },
+  standardScaler,
+)
+
+defineModel(
+  {
+    key: 'minMaxScaler',
+    module: 'learning/preprocessing',
+    name: 'Min–max scaler',
+    summary: 'Map each feature linearly onto a range, [0, 1] by default.',
+    task: 'preprocessing',
+    capabilities: ['transform'],
+    hyper: space({}),
+    notes: ['feature-scaling'],
+    cite: ['pedregosa2011'],
+  },
+  minMaxScaler,
+)
+
+defineModel(
+  {
+    key: 'robustScaler',
+    module: 'learning/preprocessing',
+    name: 'Robust scaler',
+    summary: 'Centre each feature on its median and scale by its interquartile range.',
+    task: 'preprocessing',
+    capabilities: ['transform'],
+    hyper: space({ withCentering: bool({ default: true }), withScaling: bool({ default: true }) }),
+    notes: ['feature-scaling'],
+    cite: ['pedregosa2011'],
+  },
+  robustScaler,
+)
+
+defineModel(
+  {
+    key: 'maxAbsScaler',
+    module: 'learning/preprocessing',
+    name: 'Max-abs scaler',
+    summary: 'Divide each feature by its largest absolute value.',
+    task: 'preprocessing',
+    capabilities: ['transform'],
+    hyper: space({}),
+    notes: ['feature-scaling'],
+    cite: ['pedregosa2011'],
+  },
+  maxAbsScaler,
+)

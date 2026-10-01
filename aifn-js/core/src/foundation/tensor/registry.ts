@@ -8,27 +8,77 @@
  * registered: per-call maps (`map`, `map2`), derived derivative primitives and one-off primitives in figures.
  */
 
+import type { Raw } from 'aifn/foundation/contracts'
 import type { Tensor } from './core'
+import type { ResultRule } from './dtype'
 import { AifnError } from 'aifn/foundation/errors'
-import type { Value } from './tape'
+import type { Aval, Value } from './trace'
 
-/** An untraced value: a number or a tensor. */
-export type Raw = number | Tensor
+/** An untraced value: a number or a tensor (`aifn/foundation/contracts`' `Raw`). */
+export type { Raw }
 
 /** A general primitive applied to its inputs and parameters. */
 export type Op<P> = (inputs: readonly Value[], params: P) => Value
 
 /**
- * A general primitive's derivative rule: `vjp(cotangent, inputs, output, params)` returns one cotangent per input
- * (`null` for a zero cotangent). `params` are the primitive's non-differentiable arguments (axes, shapes, options).
+ * A primitive's reverse rule (vector–Jacobian product): `vjp(cotangent, inputs, output, params, needed)` returns one
+ * cotangent per input (`null` for a zero cotangent). `params` are the primitive's non-differentiable arguments (axes,
+ * shapes, options). `needed[i]` says whether input i is being differentiated; a rule may skip the others (returning
+ * null) and must not raise an error for them. Written with primitives, so that it can be differentiated again.
  */
-export type OpVjp<P> = (cotangent: Value, inputs: readonly Value[], output: Value, params: P) => (Value | null)[]
+export type OpVjp<P> = (
+  cotangent: Value,
+  inputs: readonly Value[],
+  output: Value,
+  params: P,
+  needed: readonly boolean[],
+) => (Value | null)[]
 
 /**
- * The dtype rule of an elementwise primitive: `same` keeps the promoted input dtype (int32 stays int32, as for
- * negation or addition); `float` gives float64 for int32 inputs (as for exp or division).
+ * A primitive's forward rule (Jacobian–vector product): `jvp(tangents, inputs, output, params)` returns the tangent of
+ * the output (same kind and shape as the output), or null for a zero tangent. `tangents[i]` is null where input i is a
+ * constant. Written with primitives, so that it can be differentiated again.
  */
-export type DTypeRule = 'same' | 'float'
+export type OpJvp<P> = (
+  tangents: readonly (Value | null)[],
+  inputs: readonly Value[],
+  output: Value,
+  params: P,
+) => Value | null
+
+/**
+ * The transpose of a primitive that is linear in input `which` (the others held fixed): the cotangent of that input
+ * (same kind and shape as it) given the output's cotangent. `inputs` holds every input's value.
+ */
+export type OpTranspose<P> = (cotangent: Value, inputs: readonly Value[], which: number, params: P) => Value | null
+
+/**
+ * A primitive's batching rule, for `vmap`: `values[i]` carries a batch axis at `axes[i]` (null when input i is not
+ * batched; at least one is), and every example is `size` long along it. Returns the batched output and the position
+ * of its batch axis. Written with primitives (values may be traced by enclosing transforms).
+ */
+export type OpBatch<P> = (
+  values: readonly Value[],
+  axes: readonly (number | null)[],
+  params: P,
+  size: number,
+) => [Value, number]
+
+/** A primitive's shape rule (abstract evaluation): the output's shape, dtype and kind from its inputs', without data. */
+export type ShapeRule<P> = (avals: readonly Aval[], params: P) => Aval
+
+/**
+ * How each rule of a primitive was obtained: written for it (`own`), derived from another of its rules (`derived`:
+ * elementwise derivatives, linearity, a transpose), or missing. A missing jvp falls back to the transpose trick on its
+ * vjp and a missing batch rule to a loop over the batch (design K §4.2), so `missing` is a gap, not an error.
+ */
+export type RuleSource = 'own' | 'derived' | 'missing'
+
+/**
+ * The result dtype rule of a primitive (design K §3.2; see `ResultRule` in dtype.ts): `same`, `float`, `bool`, `real`,
+ * `index` or `complex`, applied to the promoted input dtype.
+ */
+export type DTypeRule = ResultRule
 
 /** An interval of test inputs for one argument: uniform on [lo, hi], or integers in it when `integer`. */
 export type Domain = { readonly lo: number; readonly hi: number; readonly integer?: boolean }
@@ -49,6 +99,12 @@ export type PrimitiveTest = {
   readonly rtol?: number
   /** The derivative rule is itself differentiable, so second derivatives are checked too. */
   readonly secondOrder?: boolean
+  /**
+   * The primitive accepts complex128 inputs: the generated checks also draw complex inputs (the domain bounds the real
+   * parts, imaginary parts in [−1, 1]) and differentiate by perturbing real and imaginary parts separately (the ℝ²
+   * convention, design K §8.1). Integer-domain arguments (conditions, indices) stay real.
+   */
+  readonly complex?: boolean
 }
 
 /** Documentation of a primitive, for the lab's reference pages and the catalog. */
@@ -63,13 +119,13 @@ export type PrimitiveDoc = {
   readonly references?: readonly string[]
 }
 
-/** A registered primitive. */
+/** A primitive: an operation with its forward rule and its derivative, batching and shape rules (design K §5). */
 export interface Primitive<P = unknown> {
-  /** `module/name`, unique. */
+  /** `module/name`, unique; a bare name for a local primitive that is not registered. */
   readonly id: string
-  /** The aifn module that defines it (the part of the id before the slash). */
+  /** The aifn module that defines it (the part of the id before the slash; empty for a local primitive). */
   readonly module: string
-  /** The name recorded on tapes and used in error messages (the part of the id after the slash). */
+  /** The name used in error messages and graphs (the part of the id after the slash). */
   readonly name: string
   readonly kind: 'elementwise' | 'general'
   /** Number of inputs; `variadic` for a list (concat, einsum). */
@@ -78,9 +134,33 @@ export interface Primitive<P = unknown> {
   readonly apply: Op<P>
   /** The forward rule on untraced inputs. */
   readonly impl: (inputs: Raw[], params: P) => Raw
+  /** The reverse rule, own or derived; null when the primitive has no derivative. */
+  readonly vjp: OpVjp<P> | null
+  /** The forward rule, own or derived; null when missing (forward mode then uses the transpose trick on `vjp`). */
+  readonly jvp: OpJvp<P> | null
+  /** The transpose, for a primitive linear in some inputs; null otherwise. */
+  readonly transpose: OpTranspose<P> | null
+  /** `linear`: linear in all its inputs jointly; `multilinear`: linear in each input separately; null otherwise. */
+  readonly linear: 'linear' | 'multilinear' | null
+  /** The batching rule, own or derived; null when missing (`vmap` then loops over the batch and stacks). */
+  readonly batch: OpBatch<P> | null
+  /** The shape rule; null when missing. */
+  readonly shape: ShapeRule<P> | null
+  /**
+   * Piecewise constant (comparisons, sign, stopGradient): every derivative is zero, so the derivative transforms treat
+   * the output as a constant rather than tracing it.
+   */
+  readonly zeroDerivative: boolean
+  /** How each rule was obtained. */
+  readonly rules: {
+    readonly vjp: RuleSource
+    readonly jvp: RuleSource
+    readonly batch: RuleSource
+    readonly shape: RuleSource
+  }
   /** Which inputs have a derivative rule (none when there is no rule at all). */
   readonly differentiable: readonly boolean[] | boolean
-  /** Elementwise primitives: the result dtype of int32 inputs. */
+  /** The result dtype rule (declared by every tensor primitive; see `DTypeRule`). */
   readonly dtype?: DTypeRule
   readonly doc: PrimitiveDoc
   readonly test: PrimitiveTest

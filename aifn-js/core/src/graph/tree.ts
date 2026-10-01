@@ -32,6 +32,7 @@
  * Trees are serialisable (JSON round-trips them) and treated as immutable: every function returns new data.
  */
 
+import { DomainError, ShapeError } from 'aifn/foundation/errors'
 import type { Graph } from './graph'
 import type { Tree, TreeEdge, TreeNode } from 'aifn/foundation/contracts'
 
@@ -49,23 +50,23 @@ export interface TreeOptions<N extends object, E extends object> {
 
 function check<N extends object, E extends object>(t: Tree<N, E>, where: string): Tree<N, E> {
   const n = t.nodes.length
-  if (!(t.root >= 0 && t.root < n)) throw new Error(`${where}: root ${t.root} is not a node`)
+  if (!(t.root >= 0 && t.root < n)) throw new DomainError(where, `${where}: root ${t.root} is not a node`)
   // Every node must be reached exactly once from the root.
   const seen = new Uint8Array(n)
   const stack = [t.root]
   let count = 0
   while (stack.length) {
     const v = stack.pop()!
-    if (seen[v]) throw new Error(`${where}: node ${v} is reached twice (a cycle or a shared child)`)
+    if (seen[v]) throw new DomainError(where, `${where}: node ${v} is reached twice (a cycle or a shared child)`)
     seen[v] = 1
     count++
     for (const c of t.nodes[v].children) {
-      if (!(c >= 0 && c < n)) throw new Error(`${where}: node ${v} has an unknown child ${c}`)
-      if (t.nodes[c].parent !== v) throw new Error(`${where}: node ${c}'s parent is not ${v}`)
+      if (!(c >= 0 && c < n)) throw new DomainError(where, `${where}: node ${v} has an unknown child ${c}`)
+      if (t.nodes[c].parent !== v) throw new DomainError(where, `${where}: node ${c}'s parent is not ${v}`)
       stack.push(c)
     }
   }
-  if (count !== n) throw new Error(`${where}: ${n - count} node(s) are not reachable from the root`)
+  if (count !== n) throw new DomainError(where, `${where}: ${n - count} node(s) are not reachable from the root`)
   return t
 }
 
@@ -108,13 +109,15 @@ export function treeFromParents<N extends object = object, E extends object = ob
     return p === null || p < 0 ? null : p
   })
   const roots = parent.flatMap((p, i) => (p === null ? [i] : []))
-  if (roots.length !== 1) throw new Error(`treeFromParents: expected one root, found ${roots.length}`)
+  if (roots.length !== 1)
+    throw new ShapeError('treeFromParents', `treeFromParents: expected one root, found ${roots.length}`)
   const children: number[][] = parent.map(() => [])
   const order = options.order ? Array.from(options.order) : parent.map((_, i) => i)
   for (const i of order) {
     const p = parent[i]
     if (p === null) continue
-    if (!(p >= 0 && p < n)) throw new Error(`treeFromParents: node ${i} has an unknown parent ${p}`)
+    if (!(p >= 0 && p < n))
+      throw new DomainError('treeFromParents', `treeFromParents: node ${i} has an unknown parent ${p}`)
     children[p].push(i)
   }
   return build(parent, children, roots[0], options, 'treeFromParents')
@@ -129,8 +132,9 @@ export function treeFromChildren<N extends object = object, E extends object = o
   const parent: (number | null)[] = children.map(() => null)
   children.forEach((cs, p) =>
     cs.forEach((c) => {
-      if (!(c >= 0 && c < children.length)) throw new Error(`treeFromChildren: node ${p} has an unknown child ${c}`)
-      if (parent[c] !== null) throw new Error(`treeFromChildren: node ${c} has two parents`)
+      if (!(c >= 0 && c < children.length))
+        throw new DomainError('treeFromChildren', `treeFromChildren: node ${p} has an unknown child ${c}`)
+      if (parent[c] !== null) throw new DomainError('treeFromChildren', `treeFromChildren: node ${c} has two parents`)
       parent[c] = p
     }),
   )
@@ -284,7 +288,7 @@ export const ancestors = (tree: Tree<object, object>, id: number): number[] => p
 export function lca(tree: Tree<object, object>, a: number, b: number): number {
   const up = new Set(pathToRoot(tree, a))
   for (let v: number | null = b; v !== null; v = tree.nodes[v].parent) if (up.has(v)) return v
-  throw new Error('lca: the nodes are not in one tree')
+  throw new DomainError('lca', 'lca: the nodes are not in one tree')
 }
 
 /** The number of nodes in the subtree rooted at the node (itself included). */
@@ -334,7 +338,8 @@ export function levelOrder(tree: Tree<object, object>, id: number = tree.root): 
 export function inOrder(tree: Tree<object, object>, id: number = tree.root): number[] {
   const out: number[] = []
   const visit = (v: number) => {
-    if (tree.nodes[v].children.length > 2) throw new Error(`inOrder: node ${v} has more than two children`)
+    if (tree.nodes[v].children.length > 2)
+      throw new DomainError('inOrder', `inOrder: node ${v} has more than two children`)
     const l = leftChild(tree, v)
     const r = rightChild(tree, v)
     if (l !== null) visit(l)
@@ -500,14 +505,15 @@ export function spanningTreeOf(
 ): Tree<SpanningTreeNode, SpanningTreeEdge> {
   const start = root ?? ('parent' in input ? firstRoot(input) : 0)
   const { parent, parentEdge, order } = parentsOf(graph, input, [start])
-  if (parent[start] >= 0) throw new Error(`spanningTreeOf: vertex ${start} has a parent, so it is not a root`)
+  if (parent[start] >= 0)
+    throw new DomainError('spanningTreeOf', `spanningTreeOf: vertex ${start} has a parent, so it is not a root`)
   return treeUnder(graph, start, parent, parentEdge, order)
 }
 
 function firstRoot(input: { parent: ArrayLike<number>; order?: ArrayLike<number> }): number {
   const order = input.order ? Array.from(input.order) : Array.from({ length: input.parent.length }, (_, v) => v)
   const r = order.find((v) => input.parent[v] < 0)
-  if (r === undefined) throw new Error('spanningTreeOf: no root')
+  if (r === undefined) throw new DomainError('spanningTreeOf', 'spanningTreeOf: no root')
   return r
 }
 

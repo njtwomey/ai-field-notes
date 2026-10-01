@@ -3,6 +3,8 @@
 import { eigh } from 'aifn/numerics/linalg'
 import { fromData, type Tensor } from 'aifn/foundation/tensor'
 import { checkColumns, matrix, values, type FittedTransform, type Invertible, type Transformer } from './transformer'
+import { defineModel } from 'aifn/learning/estimators'
+import { oneOf, real, space } from 'aifn/foundation/space'
 
 /** A fitted whitening transform. */
 export interface Whitening extends FittedTransform, Invertible {
@@ -115,3 +117,19 @@ export function whitening({
     },
   }
 }
+
+// ── Registry ─────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+defineModel(
+  {
+    key: 'whitening',
+    module: 'learning/preprocessing',
+    name: 'Whitening',
+    summary: 'A linear map to identity covariance (PCA or ZCA whitening).',
+    task: 'preprocessing',
+    capabilities: ['transform'],
+    hyper: space({ method: oneOf(['pca', 'zca']), epsilon: real(0, 1, { default: 0, label: 'ε' }) }),
+    notes: ['principal-component-analysis'],
+  },
+  whitening,
+)

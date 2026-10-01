@@ -1,7 +1,8 @@
 /**
  * `aifn-applied/data/synthetic`: seeded synthetic datasets: points (blobs, moons, circles, spirals, …), regression,
- * sequences, images and recommender interactions; recipes (codec, bases) and modifiers (noise, outliers, shifts,
- * missingness).
+ * sequences, piecewise series with known changepoints, images and recommender interactions; and modifiers (noise,
+ * outliers, shifts, missingness, linear maps). Recipes, which replay generators and modifiers by key, are in
+ * `aifn-applied/data`.
  */
 
 export {
@@ -29,6 +30,14 @@ export {
   type XorOptions,
 } from './points'
 export {
+  ADDITIVE_SHAPES,
+  additiveData,
+  type AdditiveFamily,
+  type AdditiveOptions,
+  type AdditiveShape,
+} from './additive'
+export { CURVE1D_CASES, curve1d, type Curve1dCase, type Curve1dOptions } from './curves'
+export {
   friedman1,
   linearRegressionData,
   regression1d,
@@ -49,6 +58,17 @@ export {
   type SeasonalOptions,
   type TimeSeries,
 } from './sequences'
+export {
+  arRegimes,
+  meanShifts,
+  poissonShifts,
+  varianceShifts,
+  type ArRegimeOptions,
+  type MeanShiftOptions,
+  type PoissonShiftOptions,
+  type SegmentOptions,
+  type VarianceShiftOptions,
+} from './changepoints'
 export {
   clickLog,
   ratings,
@@ -83,19 +103,5 @@ export {
   type OutlierOptions,
   type PrevalenceOptions,
   type SplitOptions,
+  type TransformOptions,
 } from './modifiers'
-export {
-  RECIPE_BASES,
-  decodeRecipe,
-  describeRecipe,
-  encodeRecipe,
-  ignoredKnobs,
-  isClassificationBase,
-  parseRecipe,
-  recipe,
-  type ClassificationBase,
-  type DatasetRecipe,
-  type Json,
-  type RecipeBase,
-  type RegressionBase,
-} from './recipe'

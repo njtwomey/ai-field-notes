@@ -24,12 +24,14 @@ import {
   type Trained,
 } from 'aifn/learning/estimators'
 import { integers } from 'aifn/foundation/random'
-import { fromData, type Tensor } from 'aifn/foundation/tensor'
+import { dense, fromData, logsumexp, type Tensor } from 'aifn/foundation/tensor'
 import { trace, type Algorithm } from 'aifn/foundation/trace'
 import { sigmoid } from 'aifn/numerics/special'
 import { Normal } from 'aifn/probability/distributions'
 import { applyTree, growTree, nodeLabel, predictTree, type DecisionTree, type TreeParams } from '../tree'
 import { classLabels, inputs, matrix, probabilityModel, softmaxRows, targets, values } from '../../util'
+import { defineModel } from 'aifn/learning/estimators'
+import { int, oneOf, real, space } from 'aifn/foundation/space'
 
 // ── AdaBoost (SAMME) ─────────────────────────────────────────────────────────────────────────────────────────────
 
@@ -276,13 +278,8 @@ export function gradientBoostingSteps(problem: GradientBoostingProblem): Algorit
       for (let i = 0; i < n; i++) s += Math.max(F[i], 0) + Math.log1p(Math.exp(-Math.abs(F[i]))) - y[i] * F[i]
       return s / n
     }
-    for (let i = 0; i < n; i++) {
-      let m = -Infinity
-      for (let c = 0; c < C; c++) m = Math.max(m, F[i * C + c])
-      let z = 0
-      for (let c = 0; c < C; c++) z += Math.exp(F[i * C + c] - m)
-      s += m + Math.log(z) - F[i * C + y[i]]
-    }
+    const lse = dense.data(logsumexp(fromData(F, [n, C]), 1))
+    for (let i = 0; i < n; i++) s += lse[i] - F[i * C + y[i]]
     return s / n
   }
   const residualsOf = (F: Float64Array): Float64Array => {
@@ -499,3 +496,40 @@ export function gradientBoosting(
     },
   }
 }
+
+// ── Registry ─────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+defineModel(
+  {
+    key: 'adaBoost',
+    module: 'learning/trees-and-ensembles/boosting',
+    name: 'AdaBoost',
+    summary: 'SAMME boosting of shallow trees (stumps by default).',
+    task: 'classification',
+    capabilities: ['forward', 'decide', 'score'],
+    hyper: space({ rounds: int(1, 1000, { default: 50 }), learningRate: real(1e-3, 2, { default: 1, scale: 'log' }) }),
+    notes: ['adaboost'],
+    cite: ['freund1997'],
+  },
+  adaBoost,
+)
+
+defineModel(
+  {
+    key: 'gradientBoosting',
+    module: 'learning/trees-and-ensembles/boosting',
+    name: 'Gradient boosting',
+    summary: 'Stagewise fitting of regression trees to the negative gradient of a squared or logistic loss.',
+    task: 'regression',
+    capabilities: ['forward', 'decide', 'predictive', 'expect'],
+    hyper: space({
+      loss: oneOf(['squared', 'logistic']),
+      stages: int(1, 1000, { default: 100 }),
+      learningRate: real(1e-3, 1, { default: 0.1, scale: 'log' }),
+      subsample: real(0.1, 1, { default: 1 }),
+    }),
+    notes: ['gradient-boosting'],
+    cite: ['friedman2001'],
+  },
+  gradientBoosting,
+)

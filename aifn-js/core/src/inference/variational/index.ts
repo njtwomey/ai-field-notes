@@ -16,3 +16,4 @@ export {
   type GradientVariance,
 } from './elbo'
 export { bbvi, type BbviOptions, type BbviStart, type BbviState } from './bbvi'
+export { variationalAlgorithms } from './registry'

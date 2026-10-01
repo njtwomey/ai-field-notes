@@ -16,7 +16,7 @@ export const specimens: Specimen[] = [
     title: 'Backpropagation, node by node',
     description:
       'traceGraph records a scalar function as a graph of primitives, drawn as a factor graph twice: the forward pass computes values left to right, the mirrored backward pass pulls adjoints ∂f/∂v right to left, each edge carrying its local partial. Step through both, one operation at a time.',
-    tags: ['traceGraph', 'ComputationGraphView', 'factor graph', 'reverse mode', 'backpropagation', 'chain rule'],
+    tags: ['traceGraph', 'ComputationGraphPanel', 'factor graph', 'reverse mode', 'backpropagation', 'chain rule'],
     render: () => <BackpropSpecimen />,
   },
   {

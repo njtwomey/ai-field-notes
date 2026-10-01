@@ -1,5 +1,5 @@
 import { useState, type FocusEvent, type KeyboardEvent } from 'react'
-import { formatNumber } from '@lab/viz'
+import { formatField } from '@lab/state/step'
 
 /**
  * The editing behaviour of a typed number: while focused the field holds a draft; Enter or blur commits it (the owner
@@ -9,7 +9,7 @@ export function useNumberDraft({
   value,
   onCommit,
   step,
-  format = formatNumber,
+  format = formatField,
 }: {
   value: number
   onCommit: (v: number) => void

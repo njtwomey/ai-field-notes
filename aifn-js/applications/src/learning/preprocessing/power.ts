@@ -11,6 +11,8 @@ import {
 } from 'aifn/probability/stats'
 import { fromData, variance, type Tensor } from 'aifn/foundation/tensor'
 import { column, mapColumns, matrix, type FittedTransform, type Invertible, type Transformer } from './transformer'
+import { defineModel } from 'aifn/learning/estimators'
+import { bool, oneOf, space } from 'aifn/foundation/space'
 
 export { boxCox, boxCoxInverse, boxCoxLambda, yeoJohnson, yeoJohnsonInverse, yeoJohnsonLambda, type PowerLambda }
 
@@ -80,3 +82,19 @@ export function powerTransform({
     },
   }
 }
+
+// ── Registry ─────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+defineModel(
+  {
+    key: 'powerTransform',
+    module: 'learning/preprocessing',
+    name: 'Power transform',
+    summary: 'Box–Cox or Yeo–Johnson transform per feature with λ by maximum likelihood.',
+    task: 'preprocessing',
+    capabilities: ['transform'],
+    hyper: space({ method: oneOf(['yeo-johnson', 'box-cox']), standardize: bool({ default: true }) }),
+    notes: ['feature-scaling'],
+  },
+  powerTransform,
+)

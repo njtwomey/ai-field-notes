@@ -8,7 +8,7 @@
  */
 
 import { logBeta, regularisedGammaP, regularisedGammaQ, logGamma } from './gamma'
-import { normalCdf, normalQuantile } from './normal'
+import { normalCdf, normalLogCdf, normalQuantile } from './normal'
 
 const TINY = 1e-300
 const MAX_ITER = 100_000
@@ -70,8 +70,14 @@ export function betaDensity(a: number, b: number, x: number): number {
   return Math.exp((a - 1) * Math.log(x) + (b - 1) * Math.log1p(-x) - logBeta(a, b))
 }
 
-/** log I_x(a, b), in log space in the directly summed branch so that it does not underflow for tiny x. */
-function logRegularisedBeta(a: number, b: number, x: number): number {
+/**
+ * log I_x(a, b): in log space in the directly summed branch, so that it does not underflow for tiny x, and log1p of the
+ * complement in the mirrored branch, so that it keeps its relative accuracy where I_x ≈ 1. NaN for invalid arguments.
+ */
+export function logRegularisedBeta(a: number, b: number, x: number): number {
+  if (!(a > 0 && b > 0 && x >= 0 && x <= 1)) return NaN
+  if (x === 0) return -Infinity
+  if (x === 1) return 0
   if (x < (a + 1) / (a + b + 2)) return logBetaPrefactor(a, b, x) + Math.log(betaFraction(a, b, x) / a)
   return Math.log1p(-(Math.exp(logBetaPrefactor(b, a, 1 - x)) * betaFraction(b, a, 1 - x)) / b)
 }
@@ -158,6 +164,24 @@ export function studentTCdf(t: number, df: number): number {
   }
   const tail = x < (a + 1) / (a + 2.5) ? 0.5 * regularisedBeta(a, 0.5, x) : 0.5 - 0.5 * regularisedBeta(0.5, a, y)
   return t < 0 ? tail : 1 - tail
+}
+
+/**
+ * log of the Student t cdf with ν > 0 degrees of freedom. The lower tail is log ½ + log I_x(ν/2, ½) with
+ * x = ν/(ν + t²), in log space so that it does not underflow; the upper tail is log1p of minus the lower tail at −t.
+ */
+export function studentTLogCdf(t: number, df: number): number {
+  if (Number.isNaN(t) || !(df > 0)) return NaN
+  if (df === Infinity) return normalLogCdf(t)
+  if (t > 0) return Math.log1p(-studentTCdf(-t, df))
+  const q = Math.abs(t) / Math.sqrt(df)
+  const a = df / 2
+  // The leading term of the tail where x = r² underflows (as in studentTCdf).
+  if (q > 1e150) return -Math.LN2 - 2 * a * Math.log(q) - Math.log(a) - logBeta(a, 0.5)
+  const r = q > 1 ? 1 / q : q
+  const x = q > 1 ? (r * r) / (1 + r * r) : 1 / (1 + r * r)
+  if (x < (a + 1) / (a + 2.5)) return -Math.LN2 + logRegularisedBeta(a, 0.5, x)
+  return Math.log(studentTCdf(t, df))
 }
 
 /**

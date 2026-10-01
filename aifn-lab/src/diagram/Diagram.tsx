@@ -1,6 +1,7 @@
 import { useContext, useLayoutEffect, useMemo, useState, type CSSProperties, type ReactNode } from 'react'
 import { chrome, seriesColor, useTheme, type Mode } from '@lab/design'
 import { FrameContext, useElementSize } from '@lab/viz'
+import { parseEnd } from './ends'
 import { layeredLayout } from './layout'
 import { MathText } from './MathText'
 import type { DiagramEdge, DiagramGroup, DiagramSpec, Direction, ElementState, PlacedNode, Side, Tone } from './types'
@@ -91,11 +92,6 @@ function facing(from: Pt, to: Pt): Side {
 }
 
 const horizontal = (s: Side) => s === 'e' || s === 'w'
-
-function parseEnd(ref: string): { id: string; side?: Side } {
-  const [id, side] = ref.split(':')
-  return { id, side: side as Side | undefined }
-}
 
 type Loop = { s0: Pt; c0: Pt; c1: Pt; s1: Pt; apex: Pt; dir: Pt }
 

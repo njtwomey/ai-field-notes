@@ -1,39 +1,43 @@
+import type { Dataset } from 'aifn-applied/data'
 import { useCallback, useMemo, useState } from 'react'
 import { correlation, extent, histogram, kde } from 'aifn/probability/stats'
 import { toFlat } from 'aifn/foundation/tensor'
 import { seriesColor } from '@lab/design/palette'
 import { useTheme } from '@lab/design/theme'
 import { Button, MultiCombobox, Select, Switch } from '@lab/controls'
-import { ControlRow, Figure } from '@lab/layout'
+import { ControlRow, PanelSlot } from '@lab/layout'
 import {
+  Area,
+  AxisModel,
+  Bars,
+  Curve,
   formatNumber,
-  Panel,
+  Plot,
+  Plots,
+  Points,
   Readout,
-  Subplots,
+  Segments,
   useScaleColor,
-  XYChart,
   type PlotPointer,
   type Range,
-  type Segment,
-  type XYSeries,
+  type SegmentsProps,
 } from '@lab/viz'
 import { toggled, useClassTable, type ClassTable, type ClassTableInput } from './class-table'
 import { ClassLegend } from './ClassLegend'
-import type { FrameProps } from './frame'
+import { registerView } from './registry'
 
-export type PairPlotViewProps = FrameProps &
-  ClassTableInput & {
-    /** The features drawn first (column indices); default the first `maxFeatures`. */
-    features?: readonly number[]
-    /** The most features drawn at once (default 8); with more, a picker chooses them. */
-    maxFeatures?: number
-    /** Rows drawn; above this a class-stratified sample is drawn and the readouts say so (default 2000). */
-    maxRows?: number
-    /** The diagonal at first: per-class histograms on shared bins, or per-class KDE curves (default histogram). */
-    diagonal?: 'histogram' | 'kde'
-    /** The upper triangle at first: the mirrored scatter, or Pearson's r overall and per class (default correlation). */
-    upper?: 'scatter' | 'correlation'
-  }
+export type PairPlotPanelProps = ClassTableInput & {
+  /** The features drawn first (column indices); default the first `maxFeatures`. */
+  features?: readonly number[]
+  /** The most features drawn at once (default 8); with more, a picker chooses them. */
+  maxFeatures?: number
+  /** Rows drawn; above this a class-stratified sample is drawn and the readouts say so (default 2000). */
+  maxRows?: number
+  /** The diagonal at first: per-class histograms on shared bins, or per-class KDE curves (default histogram). */
+  diagonal?: 'histogram' | 'kde'
+  /** The upper triangle at first: the mirrored scatter, or Pearson's r overall and per class (default correlation). */
+  upper?: 'scatter' | 'correlation'
+}
 
 type Selection = { x: number; y: number; rx: Range; ry: Range }
 
@@ -48,7 +52,7 @@ const KDE_POINTS = 80
  * rows inside it: they keep their class colour in every panel and the rest fade. Hovering a point marks the same row
  * everywhere; the class chips hide or show a class in every panel.
  */
-export function PairPlotView({
+export function PairPlotPanel({
   data,
   x,
   y,
@@ -59,14 +63,7 @@ export function PairPlotView({
   maxRows = 2000,
   diagonal = 'histogram',
   upper = 'correlation',
-  title,
-  description,
-  controls,
-  readouts,
-  caption,
-  id,
-  defaultSize = 'L',
-}: PairPlotViewProps) {
+}: PairPlotPanelProps) {
   const table = useClassTable({ data, x, y, featureNames, labelNames }, maxRows)
   const { resolved: mode } = useTheme()
   const [chosen, setChosen] = useState<number[]>(() =>
@@ -102,27 +99,38 @@ export function PairPlotView({
   const edges = useMemo(() => columns.map((c) => toFlat(histogram(c, { bins: 'sturges' }).edges)), [columns])
   const spans = useMemo(() => columns.map((c) => extent(c)), [columns])
 
+  // Each feature's axis range: its drawn rows' extent, padded, fixed while classes are hidden or rows brushed.
+  const ranges = useMemo(
+    () =>
+      spans.map(([lo, hi]): Range => {
+        const pad = 0.05 * (hi - lo || 1)
+        return [lo - pad, hi + pad]
+      }),
+    [spans],
+  )
+
+  // The diagonal panels draw on their row's axis (the feature's own scale), as seaborn does: counts and densities are
+  // scaled so the tallest bar or curve of a panel reaches 90% of the axis. They are left out of hover (`live`), since
+  // their heights are not in the axis's units.
   const diagonalSeries = useMemo(
     () =>
       features.map((f) => {
         const e = edges[f]
-        const centres = Array.from({ length: e.length - 1 }, (_, b) => (e[b] + e[b + 1]) / 2)
         const width = e[1] - e[0]
         const values = (keep: (i: number) => boolean) => columns[f].filter((_, i) => keep(i))
-        const out: XYSeries[] = []
+        const out: DiagonalLayer[] = []
         // Under a brush, every shown row as a muted histogram, so the selection reads as a part of the whole.
         if (selected)
           out.push({
+            kind: 'bars',
             name: 'all shown',
-            type: 'bar',
-            x: centres,
+            x: e,
             y: toFlat(
               histogram(
                 values((i) => !!shown[i]),
                 { bins: e },
               ).counts,
             ),
-            histogram: true,
             muted: true,
           })
         for (let c = 0; c < k; c++) {
@@ -130,37 +138,31 @@ export function PairPlotView({
           const v = values((i) => labels[i] === c && !!active[i])
           const name = table.labelNames[c]
           if (diag === 'histogram')
-            out.push({
-              name,
-              type: 'bar',
-              x: centres,
-              y: toFlat(histogram(v, { bins: e }).counts),
-              histogram: true,
-              slot: c,
-            })
+            out.push({ kind: 'bars', name, x: e, y: toFlat(histogram(v, { bins: e }).counts), slot: c })
           else if (v.length > 1) {
-            // Scaled to counts per bin (density × rows × bin width), so the curves read on the histogram's axis.
+            // Counts per bin (density × rows × bin width), so the curves read like the histogram.
             const [lo, hi] = [e[0] - width, e[e.length - 1] + width]
             const at = Array.from({ length: KDE_POINTS }, (_, j) => lo + ((hi - lo) * j) / (KDE_POINTS - 1))
             const { density, degenerate } = kde(v, at)
             if (!degenerate)
-              out.push({
-                name,
-                type: 'line',
-                x: at,
-                y: toFlat(density).map((p) => p * v.length * width),
-                area: true,
-                slot: c,
-              })
+              out.push({ kind: 'area', name, x: at, y: toFlat(density).map((p) => p * v.length * width), slot: c })
           }
         }
-        return out
+        let peak = 0
+        for (const l of out) for (const h of l.y) peak = Math.max(peak, h)
+        const [lo, hi] = ranges[f]
+        const scale = peak > 0 ? (0.9 * (hi - lo)) / peak : 0
+        return {
+          base: lo,
+          top: lo + peak * scale,
+          layers: out.map((l) => ({ ...l, y: l.y.map((h) => lo + h * scale) })),
+        }
       }),
-    [features, edges, columns, selected, shown, hidden, labels, active, diag, k, table.labelNames],
+    [features, edges, columns, selected, shown, hidden, labels, active, diag, k, table.labelNames, ranges],
   )
 
   const scatterSeries = useCallback(
-    (fx: number, fy: number): XYSeries[] => {
+    (fx: number, fy: number) => {
       const pick = (keep: (i: number) => boolean) => {
         const idx: number[] = []
         for (let i = 0; i < n; i++) if (keep(i)) idx.push(i)
@@ -170,16 +172,10 @@ export function PairPlotView({
           group: idx.map((i) => labels[i]),
         }
       }
-      const out: XYSeries[] = []
-      if (selected) {
-        const rest = pick((i) => !!shown[i] && !selected[i])
-        out.push({ name: 'not selected', type: 'scatter', x: rest.x, y: rest.y, muted: true, thin: true })
-      }
-      const on = pick((i) => !!active[i])
-      out.push({ name: 'rows', type: 'scatter', ...on, groupNames: table.labelNames, thin: true })
-      return out
+      const rest = selected ? pick((i) => !!shown[i] && !selected[i]) : null
+      return { rest, on: pick((i) => !!active[i]) }
     },
-    [n, columns, labels, selected, shown, active, table.labelNames],
+    [n, columns, labels, selected, shown, active],
   )
 
   const cells = useMemo(
@@ -215,18 +211,8 @@ export function PairPlotView({
     [],
   )
 
-  const hoverLive = (fx: number, fy: number): XYSeries[] => [
-    {
-      name: 'hovered',
-      type: 'scatter',
-      x: hovered === null ? [] : [columns[fx][hovered]],
-      y: hovered === null ? [] : [columns[fy][hovered]],
-      emphasis: true,
-      thin: true,
-    },
-  ]
   // The committed brush, drawn as a rectangle on the panel it was drawn in (memoised: a new array redraws the panel).
-  const brushSegments = useMemo((): readonly Segment[] => {
+  const brushSegments = useMemo((): SegmentsProps['segments'] => {
     if (!selection) return NO_SEGMENTS
     const [[x0, x1], [y0, y1]] = [selection.rx, selection.ry]
     return [
@@ -241,22 +227,27 @@ export function PairPlotView({
 
   const m = features.length
   const renderer = n * m * m > 40000 ? 'canvas' : 'svg'
-  const axisKey = `${features.join(',')}|${diag}|${top}`
+  // One axis per feature, shared down its column (x) and across its row (y), fixed at the feature's range.
+  const axes = useMemo(
+    () =>
+      ranges.map((range, f) => ({
+        x: new AxisModel({ label: table.featureNames[f], range, zoom: false }),
+        y: new AxisModel({ label: table.featureNames[f], range, zoom: false }),
+      })),
+    [ranges, table.featureNames],
+  )
   const featureOptions = useMemo(
     () => table.featureNames.map((name, j) => ({ value: String(j), label: name })),
     [table.featureNames],
   )
+  // The bottom row also holds the x tick labels and names: a larger share keeps its plots as tall as the others'.
+  const rowHeights = useMemo(() => Array.from({ length: m }, (_, r) => (r === m - 1 ? 1.35 : 1)), [m])
   const selectedCount = selected ? selected.reduce((a, b) => a + b, 0) : null
 
   return (
-    <Figure
-      id={id}
-      title={title ?? `Pair plot: ${data?.meta.name ?? 'data'}`}
-      description={description}
-      defaultSize={defaultSize}
-      controls={
+    <>
+      <PanelSlot slot="controls">
         <>
-          {controls}
           {table.d > maxFeatures && (
             <MultiCombobox
               label={`features (up to ${maxFeatures})`}
@@ -300,10 +291,9 @@ export function PairPlotView({
             </ControlRow>
           )}
         </>
-      }
-      readouts={
+      </PanelSlot>
+      <PanelSlot slot="readouts">
         <>
-          {readouts}
           <Readout
             label="rows"
             value={table.total > n ? `${n} drawn of ${table.total} (stratified sample)` : String(n)}
@@ -319,86 +309,87 @@ export function PairPlotView({
             />
           )}
         </>
-      }
-      caption={
-        caption ??
-        'Drag a rectangle in any scatter to select the rows inside it; they keep their colour in every panel and the rest fade. A click without a drag clears it. Hover a point to mark the same row everywhere.'
-      }
-      hoverReadout={false}
-    >
-      <Subplots
-        rows={m}
-        cols={m}
-        sharex="col"
-        sharey="row"
-        dense
-        toolbar={false}
-        rescaleOnChange={false}
-        axisKey={axisKey}
-      >
+      </PanelSlot>
+      <Plots rows={m} cols={m} heights={rowHeights} toolbar={false}>
         {features.flatMap((fy, r) =>
           features.map((fx, c) => {
             const key = `${fy}-${fx}`
-            if (r === c)
+            const [xAxis, yAxis] = [axes[fx].x, axes[fy].y]
+            if (r === c) {
+              const d = diagonalSeries[r]
+              const at = hovered === null ? null : columns[fx][hovered]
               return (
-                <Panel key={key} share={{ y: false }} ticks={{ y: false }}>
-                  <XYChart
-                    series={diagonalSeries[r]}
-                    live={diagonalLive(hovered === null ? null : columns[fx][hovered], diagonalSeries[r])}
-                    xLabel={table.featureNames[fx]}
-                    yLabel={table.featureNames[fy]}
-                    zoom={false}
-                    legend={false}
+                <Plot key={key} x={xAxis} y={yAxis} legend={false}>
+                  {d.layers.map((l) =>
+                    l.kind === 'bars' ? (
+                      <Bars
+                        key={l.name}
+                        id={l.name}
+                        name={l.name}
+                        x={l.x}
+                        y={l.y}
+                        edges={l.x}
+                        base={d.base}
+                        slot={l.slot}
+                        muted={l.muted}
+                        live
+                      />
+                    ) : (
+                      <Area key={l.name} id={l.name} name={l.name} x={l.x} y={l.y} base={d.base} slot={l.slot} live />
+                    ),
+                  )}
+                  <Curve
+                    id="hovered"
+                    name="hovered"
+                    x={at === null ? NO_VALUES : [at, at]}
+                    y={at === null ? NO_VALUES : [d.base, d.top]}
+                    emphasis
+                    dashed
+                    live
                   />
-                </Panel>
+                </Plot>
               )
+            }
             const cell = cells[r * m + c]
             if (!cell)
-              return (
-                <Panel key={key}>
-                  <CorrelationCell table={table} fx={fx} fy={fy} active={active} hidden={hidden} />
-                </Panel>
-              )
+              return <CorrelationCell key={key} table={table} fx={fx} fy={fy} active={active} hidden={hidden} />
+            const { rest, on } = cell.series
             return (
-              <Panel key={key}>
-                <XYChart
-                  series={cell.series}
-                  live={hoverLive(fx, fy)}
-                  segments={brushBox(fx, fy)}
-                  xLabel={table.featureNames[fx]}
-                  yLabel={table.featureNames[fy]}
-                  zoom={false}
-                  legend={false}
-                  renderer={renderer}
-                  onBrush={onBrush(fx, fy)}
-                  onPointer={onPointer(fx, fy)}
+              <Plot
+                key={key}
+                x={xAxis}
+                y={yAxis}
+                legend={false}
+                renderer={renderer}
+                onBrush={onBrush(fx, fy)}
+                onPointer={onPointer(fx, fy)}
+              >
+                {rest && <Points id="rest" name="not selected" x={rest.x} y={rest.y} muted thin />}
+                <Points id="rows" name="rows" x={on.x} y={on.y} group={on.group} groupNames={table.labelNames} thin />
+                <Segments id="brush" segments={brushBox(fx, fy)} emphasis dashed />
+                <Points
+                  id="hovered"
+                  name="hovered"
+                  x={hovered === null ? NO_VALUES : [columns[fx][hovered]]}
+                  y={hovered === null ? NO_VALUES : [columns[fy][hovered]]}
+                  emphasis
+                  thin
+                  live
                 />
-              </Panel>
+              </Plot>
             )
           }),
         )}
-      </Subplots>
-    </Figure>
+      </Plots>
+    </>
   )
 }
 
-const NO_SEGMENTS: readonly Segment[] = []
+const NO_SEGMENTS: SegmentsProps['segments'] = []
+const NO_VALUES: number[] = []
 
-/** A dashed ink line at the hovered row's value on a diagonal panel, as tall as its tallest bar or curve. */
-function diagonalLive(at: number | null, series: readonly XYSeries[]): XYSeries[] {
-  let peak = 0
-  for (const s of series) for (const v of Array.from(s.y)) peak = Math.max(peak, v)
-  return [
-    {
-      name: 'hovered',
-      type: 'line',
-      x: at === null ? [] : [at, at],
-      y: at === null ? [] : [0, peak],
-      emphasis: true,
-      dashed: true,
-    },
-  ]
-}
+/** A diagonal panel's layer before scaling: histogram counts on bin edges (x one longer than y), or a KDE curve. */
+type DiagonalLayer = { kind: 'bars' | 'area'; name: string; x: number[]; y: number[]; slot?: number; muted?: boolean }
 
 /** Pearson's r of two features over the shown (or selected) rows: overall, then per class in its colour. */
 function CorrelationCell({
@@ -460,3 +451,11 @@ function CorrelationCell({
     </div>
   )
 }
+
+registerView<Dataset>({
+  key: 'dataset/pairs',
+  kind: 'dataset',
+  description: 'A scatter matrix: per-class histograms on the diagonal, pairwise scatters below, correlations above.',
+  title: (d) => `Pair plot: ${d.meta.name ?? 'data'}`,
+  render: (d) => <PairPlotPanel data={d} />,
+})

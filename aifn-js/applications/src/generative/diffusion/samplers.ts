@@ -20,7 +20,7 @@ import { add, mul, reshape, sub, type Tensor } from 'aifn/foundation/tensor'
 import type { Algorithm } from 'aifn/foundation/trace'
 import { rungeKutta, type Rhs } from 'aifn/dynamics/ode'
 import { predictClean, predictNoise, type NoisePredictor } from './predictor'
-import { alphaBarAt, betaAt, type ForwardSde, type NoiseSchedule } from './schedules'
+import { alphaBarAt, betaAt, stepTime, type ForwardSde, type NoiseSchedule } from './schedules'
 
 /** Where sampling starts: given points, or n fresh draws from the prior in `dimension` dimensions. */
 export type SamplerStart = { x: Tensor } | { n: number; dimension: number }
@@ -31,6 +31,12 @@ export type SamplerState = Status & {
   t: number
   /** The current noise level: a discrete step t (DDPM, DDIM; 0 is clean) or a continuous time (SDE, ODE). */
   time: number
+  /**
+   * The same level on the shared continuous axis τ ∈ [0, 1]: t/T for the discrete samplers (`stepTime`), the time
+   * itself for the continuous ones. A continuous sampler on `scheduleSde(schedule)` and a discrete one on `schedule`
+   * agree on τ.
+   */
+  tau: number
   /** The particles, shape [n, d]. */
   x: Tensor
   /** The predicted noise ε̂ at the previous point, and the clean point x̂₀ it implies (null at the start). */
@@ -40,9 +46,9 @@ export type SamplerState = Status & {
   evaluations: number
 }
 
-function start(opts: SamplerStart, s: Stream, priorStd: number, time: number): SamplerState {
+function start(opts: SamplerStart, s: Stream, priorStd: number, time: number, tau: number): SamplerState {
   const x = 'x' in opts ? opts.x : mul(normals(child(s, 'prior'), [opts.n, opts.dimension]), priorStd)
-  return { t: 0, time, x, noise: null, clean: null, evaluations: 0 }
+  return { t: 0, time, tau, x, noise: null, clean: null, evaluations: 0 }
 }
 
 /** Options of `ddpmSampler`. */
@@ -65,7 +71,7 @@ export function ddpmSampler(
 ): Algorithm<SamplerStart, SamplerState> {
   return {
     name: 'ddpm',
-    init: (opts, s) => start(opts, s, 1, schedule.steps),
+    init: (opts, s) => start(opts, s, 1, schedule.steps, 1),
     step: (st, ctx) => {
       const t = st.time
       const beta = betaAt(schedule, t)
@@ -80,6 +86,7 @@ export function ddpmSampler(
         ...st,
         t: st.t + 1,
         time: t - 1,
+        tau: stepTime(schedule, t - 1),
         x,
         noise,
         clean: predictClean(noise, st.x, Math.sqrt(ab), Math.sqrt(1 - ab)),
@@ -119,7 +126,7 @@ export function ddimSampler(
   const levels = ddimTimesteps(schedule.steps, steps)
   return {
     name: 'ddim',
-    init: (opts, s) => start(opts, s, 1, levels[0]),
+    init: (opts, s) => start(opts, s, 1, levels[0], stepTime(schedule, levels[0])),
     step: (st, ctx) => {
       const t = st.time
       const next = levels[st.t + 1]
@@ -130,7 +137,16 @@ export function ddimSampler(
       const sigma = eta * Math.sqrt((1 - abNext) / (1 - ab)) * Math.sqrt(1 - ab / abNext)
       let x = add(mul(clean, Math.sqrt(abNext)), mul(noise, Math.sqrt(Math.max(0, 1 - abNext - sigma * sigma))))
       if (sigma > 0) x = add(x, mul(normals(ctx.stream, st.x.shape), sigma))
-      return { ...st, t: st.t + 1, time: next, x, noise, clean, evaluations: st.evaluations + 1 }
+      return {
+        ...st,
+        t: st.t + 1,
+        time: next,
+        tau: stepTime(schedule, next),
+        x,
+        noise,
+        clean,
+        evaluations: st.evaluations + 1,
+      }
     },
     done: (st) => st.time <= 0,
   }
@@ -156,7 +172,7 @@ export function reverseSdeSampler(
   const h = (1 - end) / steps
   return {
     name: 'reverse-sde',
-    init: (opts, s) => start(opts, s, sde.priorStd, 1),
+    init: (opts, s) => start(opts, s, sde.priorStd, 1, 1),
     step: (st, ctx) => {
       const t = st.time
       const m = sde.meanScale(t)
@@ -172,6 +188,7 @@ export function reverseSdeSampler(
         ...st,
         t: st.t + 1,
         time,
+        tau: time,
         x,
         noise,
         clean: predictClean(noise, st.x, m, sd),
@@ -208,7 +225,7 @@ export function probabilityFlowSampler(
   }
   return {
     name: 'probability-flow',
-    init: (opts, s) => start(opts, s, sde.priorStd, 1),
+    init: (opts, s) => start(opts, s, sde.priorStd, 1, 1),
     step: (st, ctx) => {
       const t = st.time
       const shape = st.x.shape
@@ -228,7 +245,7 @@ export function probabilityFlowSampler(
       const noise = first ?? flow(st.x, t).noise
       const time = st.t + 1 === steps ? end : 1 - (st.t + 1) * h
       const clean = predictClean(noise, st.x, sde.meanScale(t), sde.std(t))
-      return { ...st, t: st.t + 1, time, x, noise, clean, evaluations: st.evaluations + solved.evaluations }
+      return { ...st, t: st.t + 1, time, tau: time, x, noise, clean, evaluations: st.evaluations + solved.evaluations }
     },
     done: (st) => st.t >= steps,
   }

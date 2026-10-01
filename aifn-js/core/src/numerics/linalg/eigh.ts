@@ -6,30 +6,56 @@
  * 1992).
  */
 
-import type { Tensor } from 'aifn/foundation/tensor'
-import { denseSquare, EPS, matrix, untraced, vector } from './dense'
+import {
+  add,
+  definePrimitive,
+  diag,
+  diagonal,
+  isTraced,
+  matmul,
+  mul,
+  type Op,
+  shapeOfValue,
+  type Tensor,
+  type TensorResult,
+  transpose,
+  type Value,
+} from 'aifn/foundation/tensor'
+import { NumericalError } from 'aifn/foundation/errors'
+import { denseSquare, EPS, matrix, positiveDefinite, vector } from './dense'
+import {
+  concrete,
+  concreteExamples,
+  exampleOf,
+  float64Aval,
+  fMatrix,
+  kernelBatch,
+  lowerAdjoint,
+  negligible,
+  pack,
+  packRaw,
+  scaleOf,
+  symmetricFromLower,
+  unpack,
+} from './rules'
 
-/** The result of `eigh`. */
-export type Eigh = {
+/** The result of `eigh` (values and vectors traced for traced input). */
+export type Eigh<T = Tensor> = {
   /** Eigenvalues in descending order. */
-  values: Tensor
+  values: T
   /**
    * Orthonormal eigenvectors as columns, column j for `values[j]`. Each is signed so that its largest-magnitude
    * component (the first of equals) is positive.
    */
-  vectors: Tensor
-  /** Number of Jacobi sweeps used. */
+  vectors: T
+  /** Number of Jacobi sweeps used (NaN inside `vmap`, where it is per example). */
   sweeps: number
   /** False when `maxSweeps` ran out before the off-diagonal mass fell below tolerance. */
   converged: boolean
 }
 
-/**
- * Eigendecomposition A = V diag(λ) Vᵀ of a symmetric matrix (only its lower triangle is read), with eigenvalues in
- * descending order and eigenvectors as the columns of V.
- */
-export function eigh(a: Tensor, { maxSweeps = 100 }: { maxSweeps?: number } = {}): Eigh {
-  untraced(a, 'eigh')
+/** The Jacobi iteration on a dense copy of A. */
+function jacobi(a: Value, maxSweeps: number): Eigh {
   const { n, a: A } = denseSquare(a, 'eigh')
   // Symmetrise from the lower triangle, as LAPACK's dsyevd with UPLO='L'.
   for (let i = 0; i < n; i++) for (let j = i + 1; j < n; j++) A[i * n + j] = A[j * n + i]
@@ -91,4 +117,97 @@ export function eigh(a: Tensor, { maxSweeps = 100 }: { maxSweeps?: number } = {}
     for (let k = 0; k < n; k++) vectors[k * n + col] = flip * V[k * n + src]
   })
   return { values: vector(values), vectors: matrix(vectors, n, n), sweeps, converged }
+}
+
+/** Parameters of the `eigh` primitive: the sweep limit, and the decomposition already found for this input. */
+type Params = { readonly maxSweeps: number; readonly found?: Eigh }
+
+/** Differentiating a decomposition that did not converge would differentiate garbage: report it. */
+function refuseUnconverged(p: Params): void {
+  if (p.found && !p.found.converged) {
+    throw new NumericalError(
+      'eigh',
+      'eigh: the Jacobi iteration did not converge, so the decomposition cannot be differentiated',
+      'not-converged',
+    )
+  }
+}
+
+// Rules (Giles, 2008, "Collected matrix derivative results", §3.1; Seeger et al., 2017, "Auto-differentiating linear
+// algebra", arXiv:1710.08717): with Ȧ the symmetric matrix of the tangent's lower triangle and P = VᵀȦV, the tangents
+// are λ̇ = diag(P) and V̇ = V(F∘P), and the adjoint is Ā = V(diag(λ̄) + F∘(VᵀV̄))Vᵀ read back through the lower
+// triangle, with Fᵢⱼ = 1/(λⱼ − λᵢ). At repeated eigenvalues F is undefined: the rules go through only when the
+// function is invariant within the degenerate subspace, and otherwise throw NumericalError ('degenerate').
+// The output is λ (n) and V (n×n) packed into one vector.
+const eighOp: Op<Params> = definePrimitive<Params>({
+  id: 'numerics/linalg/eigh',
+  arity: 1,
+  impl: ([a], p) => {
+    const e = p.found ?? jacobi(a, p.maxSweeps)
+    if (!e.converged) refuseUnconverged({ ...p, found: e })
+    return packRaw([e.values.data as Float64Array, e.vectors.data as Float64Array])
+  },
+  vjp: (g, [a], out, p) => {
+    refuseUnconverged(p)
+    const n = shapeOfValue(a)[0]
+    const [values, V] = unpack(out, [[n], [n, n]])
+    const [gValues, gV] = unpack(g, [[n], [n, n]])
+    const M = matmul(transpose(V), gV)
+    // Invariant within a degenerate pair (i, j) when the pair's λ̄ agree and M's antisymmetric part vanishes there.
+    const ms = concreteExamples(M)
+    const gls = concreteExamples(gValues)
+    const invariant =
+      ms && gls
+        ? (i: number, j: number, b: number) => {
+            const [m, gl] = [exampleOf(ms, b), exampleOf(gls, b)]
+            if (!m || !gl) return false
+            const scale = Math.max(scaleOf(m), scaleOf(gl))
+            return negligible(m[i * n + j] - m[j * n + i], scale) && negligible(gl[i] - gl[j], scale)
+          }
+        : null
+    const F = fMatrix(values, 'eigh', invariant)
+    const G = matmul(matmul(V, add(diag(gValues), mul(F, M))), transpose(V))
+    return [lowerAdjoint(G, n)]
+  },
+  jvp: ([t], [a], out, p) => {
+    if (t === null) return null
+    refuseUnconverged(p)
+    const n = shapeOfValue(a)[0]
+    const [values, V] = unpack(out, [[n], [n, n]])
+    const P = matmul(matmul(transpose(V), symmetricFromLower(t, n)), V)
+    const ps = concreteExamples(P)
+    const invariant = ps
+      ? (i: number, j: number, b: number) => {
+          const pc = exampleOf(ps, b)
+          return pc !== undefined && negligible(pc[i * n + j], scaleOf(pc))
+        }
+      : null
+    const F = fMatrix(values, 'eigh', invariant)
+    return pack([diagonal(P), matmul(V, mul(F, P))])
+  },
+  batch: kernelBatch('numerics/linalg/eigh'),
+  shape: ([a]) => float64Aval([a.shape[0] + a.shape[0] * a.shape[0]]),
+  doc: { summary: 'Eigenvalues (descending) and orthonormal eigenvectors of a symmetric matrix.' },
+  test: { rtol: 1e-4, cases: (draw) => [{ inputs: [positiveDefinite(draw, 3)], params: { maxSweeps: 100 } }] },
+})
+
+/**
+ * Eigendecomposition A = V diag(λ) Vᵀ of a symmetric matrix (only its lower triangle is read), with eigenvalues in
+ * descending order and eigenvectors as the columns of V. Differentiable in both modes (Giles, 2008): at repeated
+ * eigenvalues only functions invariant within the degenerate subspace (a sum of the repeated eigenvalues, a projector
+ * onto their subspace) have a derivative; others throw `NumericalError` ('degenerate'), as does differentiating a
+ * decomposition that did not converge ('not-converged'). Inside `vmap`, `sweeps` is NaN and an example that does not
+ * converge throws.
+ */
+export function eigh<X extends Value>(a: X, { maxSweeps = 100 }: { maxSweeps?: number } = {}): Eigh<TensorResult<X>> {
+  if (!isTraced(a)) return jacobi(a, maxSweeps) as Eigh<TensorResult<X>>
+  const found = concrete(a) === null ? undefined : jacobi(a, maxSweeps)
+  const n = shapeOfValue(a)[0]
+  const [values, vectors] = unpack(eighOp([a], { maxSweeps, found }), [[n], [n, n]])
+  return {
+    values: values as TensorResult<X>,
+    vectors: vectors as TensorResult<X>,
+    sweeps: found?.sweeps ?? NaN,
+    converged: found?.converged ?? true,
+  }
 }

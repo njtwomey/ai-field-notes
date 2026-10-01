@@ -8,13 +8,13 @@ import {
 } from 'aifn-applied/dynamics/pde'
 import { toFlat } from 'aifn/foundation/tensor'
 import { trace } from 'aifn/foundation/trace'
-import { useMemo, useState } from 'react'
-import { Player, Select, Slider, usePlayhead } from '@lab/controls'
+import { useMemo } from 'react'
+import { Player, usePlayhead } from '@lab/controls'
 import { ControlRow, Figure } from '@lab/layout'
-import { Panel, Readout, Subplots, XYChart, formatNumber, type XYSeries } from '@lab/viz'
+import { choice, row, slider, useFigureState } from '@lab/state'
+import { Curve, formatNumber, Plot, Plots, Points, Readout, useAxis } from '@lab/viz'
 
 const fmt = (v: number) => formatNumber(v)
-const NONE: XYSeries[] = []
 
 // ---------------------------------------------------------------------------------------------------------------------
 // The heat equation and its stability limit.
@@ -31,13 +31,17 @@ const SCHEMES: { value: TimeScheme; label: string }[] = [
 ]
 
 const HEAT_T = 0.1
-const HEAT_INITIAL: XYSeries[] = [
-  { name: 'u(x, 0)', type: 'line', x: HEAT_X, y: HEAT_X.map(STEP), dashed: true, muted: true },
-]
+const HEAT_U0 = HEAT_X.map(STEP)
 
 export function HeatSpecimen() {
-  const [scheme, setScheme] = useState<TimeScheme>('explicit')
-  const [r, setR] = useState(0.45)
+  const state = useFigureState({
+    setup: row('1 · scheme', {
+      scheme: choice(SCHEMES, 'explicit', { label: 'time stepping' }),
+      r: slider(0.05, 1.5, 0.45, { label: 'r = DΔt/Δx²', step: 0.01 }),
+    }),
+  })
+  const scheme = state.setup.scheme as TimeScheme
+  const { r } = state.setup
   const D = 1
   const dt = (r * dx * dx) / D
   const steps = Math.max(1, Math.round(HEAT_T / dt))
@@ -60,17 +64,15 @@ export function HeatSpecimen() {
   const [at, setAt] = usePlayhead(tr.steps.length)
   const now = tr.steps[at] as PdeState
   const u = toFlat(now.u)
-  const live: XYSeries[] = [{ name: 'u(x, t)', type: 'line', slot: 0, x: HEAT_X, y: u }]
+  const xa = useAxis({ label: 'x', range: [0, 1] })
+  const ua = useAxis({ label: 'u', range: [-0.5, 1.5] })
   return (
     <Figure
       title="The heat equation and its stability limit"
-      description="Explicit time stepping of u_t = u_xx is stable only while r = DΔt/Δx² ≤ ½; past it the finest grid oscillation grows by |1 − 4r| per step. The implicit schemes are stable at any r."
+      purpose="Explicit time stepping of u_t = u_xx is stable only while r = DΔt/Δx² ≤ ½; past it the finest grid oscillation grows by |1 − 4r| per step. The implicit schemes are stable at any r."
+      state={state}
       controls={
         <>
-          <ControlRow label="1 · scheme">
-            <Select label="time stepping" value={scheme} onChange={setScheme} options={SCHEMES} />
-            <Slider label="r = DΔt/Δx²" value={r} min={0.05} max={1.5} step={0.01} onChange={setR} />
-          </ControlRow>
           <ControlRow label="2 · time">
             <Player
               className="col-span-full"
@@ -95,7 +97,10 @@ export function HeatSpecimen() {
       }
       caption="A unit step on [0.3, 0.6] with u = 0 at both ends, on 41 points. Play to watch it diffuse up to t = 0.1. With the explicit scheme, move r past 0.5: the solution breaks into a sawtooth that grows without bound. Crank–Nicolson stays bounded but, at large r, lets the sharp edges ring for a while; implicit Euler smooths them at once."
     >
-      <XYChart series={HEAT_INITIAL} live={live} xLabel="x" yLabel="u" xRange={[0, 1]} yRange={[-0.5, 1.5]} />
+      <Plot x={xa} y={ua}>
+        <Curve name="u(x, 0)" x={HEAT_X} y={HEAT_U0} dashed muted />
+        <Curve name="u(x, t)" x={HEAT_X} y={u} slot={0} live />
+      </Plot>
     </Figure>
   )
 }
@@ -116,8 +121,13 @@ const TRANSPORT: { value: 'upwind' | 'lax-friedrichs' | 'lax-wendroff'; label: s
 const shifted = (t: number) => T_X.map((x) => PROFILE((((x - t) % 1) + 1) % 1))
 
 export function TransportSchemesSpecimen() {
-  const [nu, setNu] = useState(0.8)
-  const [periods, setPeriods] = useState(1)
+  const state = useFigureState({
+    setup: row('1 · discretisation', {
+      nu: slider(0.1, 1.2, 0.8, { label: 'Courant number ν = cΔt/Δx', step: 0.05 }),
+      periods: slider(1, 5, 1, { label: 'periods', step: 1 }),
+    }),
+  })
+  const { nu, periods } = state.setup
   const runs = useMemo(() => {
     const dt = (nu * 0.01) / 1
     const steps = Math.round(periods / dt)
@@ -134,27 +144,17 @@ export function TransportSchemesSpecimen() {
   const count = runs[0].frames.length
   const [at, setAt] = usePlayhead(count, 1)
   const now = runs[0].frames[at]
-  const live: XYSeries[] = [
-    { name: 'exact (the profile shifted by t)', type: 'line', x: T_X, y: shifted(now.time), dashed: true, muted: true },
-    ...runs.map(({ label, slot, frames }) => ({
-      name: label,
-      slot,
-      type: 'line' as const,
-      x: T_X,
-      y: toFlat(frames[Math.min(at, frames.length - 1)].u),
-    })),
-  ]
+  const exact = shifted(now.time)
   const s0 = now.stability
+  const xa = useAxis({ label: 'x', range: [0, 1] })
+  const ua = useAxis({ label: 'u', range: [-0.5, 1.5] })
   return (
     <Figure
       title="Transport schemes after whole periods"
-      description="On u_t + u_x = 0 the exact solution returns to its start after each period; upwind and Lax–Friedrichs smear it (numerical diffusion), Lax–Wendroff keeps the bump but rings behind the square edges (dispersion)."
+      purpose="On u_t + u_x = 0 the exact solution returns to its start after each period; upwind and Lax–Friedrichs smear it (numerical diffusion), Lax–Wendroff keeps the bump but rings behind the square edges (dispersion)."
+      state={state}
       controls={
         <>
-          <ControlRow label="1 · discretisation">
-            <Slider label="Courant number ν = cΔt/Δx" value={nu} min={0.1} max={1.2} step={0.05} onChange={setNu} />
-            <Slider label="periods" value={periods} min={1} max={5} step={1} onChange={setPeriods} />
-          </ControlRow>
           <ControlRow label="2 · time">
             <Player
               className="col-span-full"
@@ -178,7 +178,12 @@ export function TransportSchemesSpecimen() {
       }
       caption="A square pulse and a Gaussian bump on a periodic grid of 100 cells, moving right at speed 1. Play to watch the schemes carry it round; the player starts at the end, after whole periods, where the exact solution is the initial profile again. At ν = 1 upwind and Lax–Wendroff shift exactly one cell per step and are exact; past 1 every scheme blows up."
     >
-      <XYChart series={NONE} live={live} xLabel="x" yLabel="u" xRange={[0, 1]} yRange={[-0.5, 1.5]} />
+      <Plot x={xa} y={ua}>
+        <Curve name="exact (the profile shifted by t)" x={T_X} y={exact} dashed muted />
+        {runs.map(({ label, slot, frames }) => (
+          <Curve key={label} name={label} x={T_X} y={toFlat(frames[Math.min(at, frames.length - 1)].u)} slot={slot} />
+        ))}
+      </Plot>
     </Figure>
   )
 }
@@ -191,10 +196,13 @@ const W_X = toFlat(gridPoints(W_GRID))
 const PLUCK = (x: number) => Math.exp(-300 * (x - 0.3) ** 2)
 
 const W_T = 2
-const W_INITIAL: XYSeries[] = [{ name: 'u(x, 0)', type: 'line', x: W_X, y: W_X.map(PLUCK), dashed: true, muted: true }]
+const W_U0 = W_X.map(PLUCK)
 
 export function WaveSpecimen() {
-  const [nu, setNu] = useState(0.9)
+  const state = useFigureState({
+    setup: row('1 · discretisation', { nu: slider(0.2, 1.05, 0.9, { label: 'Courant number ν', step: 0.01 }) }),
+  })
+  const { nu } = state.setup
   const dt = nu * 0.01
   const steps = Math.round(W_T / dt)
   const run = useMemo(() => {
@@ -212,21 +220,18 @@ export function WaveSpecimen() {
   }, [dt, steps])
   const [at, setAt] = usePlayhead(run.steps.length)
   const now = run.steps[at]
-  const liveU: XYSeries[] = [{ name: 'u(x, t)', type: 'line', slot: 0, x: W_X, y: toFlat(now.u) }]
-  const liveE: XYSeries[] = [
-    { name: 'relative energy drift', type: 'line', slot: 1, x: run.t.slice(0, at + 1), y: run.drift.slice(0, at + 1) },
-    { name: 'now', type: 'scatter', emphasis: true, x: [now.time], y: [run.drift[at]] },
-  ]
+  const xa = useAxis({ label: 'x', range: [0, 1] })
+  const ua = useAxis({ label: 'u', range: [-1.1, 1.1] })
+  const ta = useAxis({ label: 't', range: [0, W_T] })
+  const ea = useAxis({ label: '(E − E₀)/E₀', range: [-run.top, run.top] })
   return (
     <Figure
       title="The wave equation by leapfrog"
-      description="A plucked string splits into two pulses moving at speed c and reflecting, inverted, from the fixed ends; leapfrog conserves the discrete energy while ν ≤ 1."
+      purpose="A plucked string splits into two pulses moving at speed c and reflecting, inverted, from the fixed ends; leapfrog conserves the discrete energy while ν ≤ 1."
+      state={state}
       defaultSize="L"
       controls={
         <>
-          <ControlRow label="1 · discretisation">
-            <Slider label="Courant number ν" value={nu} min={0.2} max={1.05} step={0.01} onChange={setNu} />
-          </ControlRow>
           <ControlRow label="2 · time">
             <Player
               className="col-span-full"
@@ -249,22 +254,16 @@ export function WaveSpecimen() {
       }
       caption="u(x, 0) a narrow bump at x = 0.3, at rest, fixed ends. Play to watch the two pulses travel, reflect and cross; below, the relative change of the discrete energy up to t. The pulses keep their shape best at ν = 1 (exact on the grid); smaller ν adds a dispersive wake; ν just above 1 blows up after a few crossings."
     >
-      <Subplots rows={2} heightRatios={[1.3, 1]}>
-        <Panel>
-          <XYChart series={W_INITIAL} live={liveU} xLabel="x" yLabel="u" xRange={[0, 1]} yRange={[-1.1, 1.1]} />
-        </Panel>
-        <Panel>
-          <XYChart
-            series={NONE}
-            live={liveE}
-            xLabel="t"
-            yLabel="(E − E₀)/E₀"
-            xRange={[0, W_T]}
-            yRange={[-run.top, run.top]}
-            legend={false}
-          />
-        </Panel>
-      </Subplots>
+      <Plots rows={2} heights={[1.3, 1]}>
+        <Plot x={xa} y={ua}>
+          <Curve name="u(x, 0)" x={W_X} y={W_U0} dashed muted />
+          <Curve name="u(x, t)" x={W_X} y={toFlat(now.u)} slot={0} live />
+        </Plot>
+        <Plot x={ta} y={ea} legend={false}>
+          <Curve name="relative energy drift" x={run.t.slice(0, at + 1)} y={run.drift.slice(0, at + 1)} slot={1} live />
+          <Points name="now" x={[now.time]} y={[run.drift[at]]} emphasis live />
+        </Plot>
+      </Plots>
     </Figure>
   )
 }

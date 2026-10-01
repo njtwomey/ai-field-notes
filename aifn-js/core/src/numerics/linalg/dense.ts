@@ -10,14 +10,13 @@ import {
   mul,
   transpose,
   isTensor,
-  isTraced,
   type Tensor,
   toFlat,
   unwrap,
   type Value,
 } from 'aifn/foundation/tensor'
 import type { MatrixLike, VectorLike } from 'aifn/foundation/contracts'
-import { NumericalError, type NumericalKind, NotDifferentiableError, ShapeError } from 'aifn/foundation/errors'
+import { NumericalError, type NumericalKind, ShapeError } from 'aifn/foundation/errors'
 
 /** Machine epsilon for float64 (defined once in `aifn/foundation/tensor`). */
 export { EPS }
@@ -61,11 +60,6 @@ export function denseSquare(x: Value, where: string): Dense {
   return d
 }
 
-/** For decompositions without a derivative rule: refuse traced input rather than silently drop the derivative. */
-export function untraced(x: Value, where: string): void {
-  if (isTraced(x)) throw new NotDifferentiableError(where, `${where}: no derivative rule; it cannot be differentiated`)
-}
-
 /**
  * A matrix argument of the matrix-equation solvers as a float64 tensor: a matrix as given, a vector (a tensor of rank
  * 1 or an array of numbers) as a column, a number or a rank-0 tensor as 1×1.
@@ -73,7 +67,8 @@ export function untraced(x: Value, where: string): void {
 export function asMatrix(a: MatrixLike | VectorLike | number, where: string): Tensor {
   if (typeof a === 'number') return fromData(Float64Array.of(a), [1, 1])
   if (isTensor(a)) {
-    if (a.shape.length > 2) throw new ShapeError(where, `${where}: expected a matrix, got shape [${a.shape.join(', ')}]`)
+    if (a.shape.length > 2)
+      throw new ShapeError(where, `${where}: expected a matrix, got shape [${a.shape.join(', ')}]`)
     const values = Float64Array.from(toFlat(a))
     if (a.shape.length === 2) return fromData(values, [a.shape[0], a.shape[1]])
     return fromData(values, [values.length, 1])

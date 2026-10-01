@@ -9,10 +9,10 @@
  */
 
 import type { MatrixLike, VectorLike } from 'aifn/foundation/contracts'
-import { ShapeError } from 'aifn/foundation/errors'
-import { fromData, isTensor, type Tensor } from './core'
+import { DTypeError, ShapeError } from 'aifn/foundation/errors'
+import { float64Data, fromData, isTensor, type Tensor } from './core'
 import { toFlat } from './create'
-import type { Value } from './tape'
+import type { Value } from './trace'
 
 // The input aliases are defined once, in `aifn/foundation/contracts`.
 export type { MatrixLike, VectorLike } from 'aifn/foundation/contracts'
@@ -26,6 +26,7 @@ export type F64 = Float64Array<ArrayBuffer>
  */
 export function toF64(v: VectorLike | Value, where: string): F64 {
   if (isTensor(v)) {
+    realOnly(v, where)
     if (v.shape.length > 1)
       throw new ShapeError(where, `${where}: expected a vector, got shape [${v.shape.join(', ')}]`)
     return Float64Array.from(toFlat(v))
@@ -41,6 +42,7 @@ export function toMatrixF64(a: MatrixLike, where: string, m?: number, n?: number
   let cols: number
   let data: F64
   if (isTensor(a)) {
+    realOnly(a, where)
     if (a.shape.length !== 2)
       throw new ShapeError(where, `${where}: expected a matrix, got shape [${a.shape.join(', ')}]`)
     ;[rows, cols] = a.shape
@@ -60,6 +62,14 @@ export function toMatrixF64(a: MatrixLike, where: string, m?: number, n?: number
   return { data, m: rows, n: cols }
 }
 
+/** The dense kernels are real: a complex tensor is a `DTypeError` rather than silently read as interleaved pairs. */
+function realOnly(t: Tensor, where: string): void {
+  if (t.dtype === 'complex128')
+    throw new DTypeError(where, `${where}: expected real values, got complex128 (take realPart, imagPart or abs)`, [
+      t.dtype,
+    ])
+}
+
 /** Wraps a working array as a rank-1 tensor (no copy: the array must not be written afterwards). */
 export const vec = (a: F64): Tensor => fromData(a, [a.length])
 
@@ -67,20 +77,12 @@ export const vec = (a: F64): Tensor => fromData(a, [a.length])
 export const mat = (a: F64, m: number, n: number): Tensor => fromData(a, [m, n])
 
 /**
- * The elements of a tensor in row-major order: its own storage when it is contiguous float64 at offset 0 (no copy), a
- * copy otherwise. Callers must not write to the result.
+ * The elements of a tensor in row-major order: a zero-copy view of its storage (`readonlyData`) when it is contiguous
+ * float64, a copy otherwise. Callers must not write to the result.
  */
 export function data(t: Tensor): F64 {
-  if (t.dtype === 'float64' && t.offset === 0 && t.data.length === t.shape.reduce((a, b) => a * b, 1)) {
-    let contiguous = true
-    let stride = 1
-    for (let d = t.shape.length - 1; d >= 0; d--) {
-      if (t.shape[d] !== 1 && t.strides[d] !== stride) contiguous = false
-      stride *= t.shape[d]
-    }
-    if (contiguous) return t.data as F64
-  }
-  return Float64Array.from(toFlat(t))
+  realOnly(t, 'dense.data')
+  return float64Data(t) as F64
 }
 
 /** Σᵢ aᵢbᵢ over the length of a. */
@@ -154,10 +156,37 @@ export function matMul(a: ArrayLike<number>, b: ArrayLike<number>, m: number, k:
   const out = new Float64Array(m * n)
   for (let i = 0; i < m; i++)
     for (let l = 0; l < k; l++) {
+      // No skip of zero entries: 0·∞ and 0·NaN must give NaN, as the matmul primitive does.
       const ail = a[i * k + l]
-      if (ail === 0) continue
       for (let j = 0; j < n; j++) out[i * n + j] += ail * b[l * n + j]
     }
+  return out
+}
+
+/** Aᵀ (n×m) of a row-major m×n matrix. */
+export function transpose(a: ArrayLike<number>, m: number, n: number): F64 {
+  const out = new Float64Array(m * n)
+  for (let i = 0; i < m; i++) for (let j = 0; j < n; j++) out[j * m + i] = a[i * n + j]
+  return out
+}
+
+/** A B Aᵀ (r×r) for a row-major A (r×c) and B (c×c): a covariance carried through a linear map. */
+export function sandwich(a: ArrayLike<number>, b: ArrayLike<number>, r: number, c: number): F64 {
+  const ab = matMul(a, b, r, c, c)
+  const out = new Float64Array(r * r)
+  for (let i = 0; i < r; i++)
+    for (let j = 0; j < r; j++) {
+      let s = 0
+      for (let l = 0; l < c; l++) s += ab[i * c + l] * a[j * c + l]
+      out[i * r + j] = s
+    }
+  return out
+}
+
+/** (A + Aᵀ)/2 of a row-major n×n matrix: removes the asymmetry rounding leaves in a covariance. */
+export function symmetrise(a: ArrayLike<number>, n: number): F64 {
+  const out = new Float64Array(n * n)
+  for (let i = 0; i < n; i++) for (let j = 0; j < n; j++) out[i * n + j] = 0.5 * (a[i * n + j] + a[j * n + i])
   return out
 }
 
@@ -167,7 +196,6 @@ export function gram(a: ArrayLike<number>, m: number, n: number): F64 {
   for (let k = 0; k < m; k++)
     for (let i = 0; i < n; i++) {
       const aki = a[k * n + i]
-      if (aki === 0) continue
       for (let j = 0; j < n; j++) out[i * n + j] += aki * a[k * n + j]
     }
   return out

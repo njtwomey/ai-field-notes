@@ -1,5 +1,6 @@
 import type { Specimen } from '../../../specimen'
 import { ForwardNoisingSpecimen, LearnedDenoiserSpecimen, ReverseSamplingSpecimen } from './_diffusion/figures'
+import { DiffusionForward, DiffusionReverse } from './_diffusion/showcase-diffusion'
 
 export const specimens: Specimen[] = [
   {
@@ -23,5 +24,18 @@ export const specimens: Specimen[] = [
     description: 'An MLP denoiser trained on a 2-D Gaussian mixture with the simple DDPM loss, then sampled with DDIM.',
     tags: ['denoiser', 'training', 'MLP', 'DDIM', 'mixture'],
     render: () => <LearnedDenoiserSpecimen />,
+  },
+  {
+    module: 'applied/generative/diffusion',
+    title: 'Showcase: diffusion in two dimensions',
+    description:
+      'A seven-component mixture noised over t with its exact score field, then sampled back by DDPM, DDIM and the probability-flow ODE from the same noise, with the particle paths played over t.',
+    tags: ['showcase', 'DDPM', 'DDIM', 'probability flow', 'score', 'VP SDE'],
+    render: () => (
+      <>
+        <DiffusionForward />
+        <DiffusionReverse />
+      </>
+    ),
   },
 ]

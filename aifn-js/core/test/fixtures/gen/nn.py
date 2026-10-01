@@ -28,6 +28,9 @@ def grads(y: torch.Tensor, rng: np.random.Generator, *xs: torch.Tensor) -> tuple
 
 def cases() -> dict[str, object]:
     rng = np.random.default_rng(3)
+    # The recurrent cells take torch's default initialisation, drawn from torch's generator: seed it, so regenerating
+    # gives the same weights (and the same goldens).
+    torch.manual_seed(3)
     out: dict[str, object] = {}
 
     # conv2d with stride, padding and dilation.
@@ -89,6 +92,36 @@ def cases() -> dict[str, object]:
     y = F.batch_norm(xt, None, None, gt, bt, training=True, eps=1e-5)
     w, (gx, gg, gb) = grads(y, rng, xt, gt, bt)
     out["batchnorm"] = {"x": x, "gamma": g, "beta": b, "y": arr(y), "w": w, "gx": gx, "ggamma": gg, "gbeta": gb}
+
+    # Batch norm running statistics: torch.nn.BatchNorm2d (momentum 0.1) on three training batches, then evaluation.
+    # Its own generator, so that the cases after it keep their draws.
+    rb = np.random.default_rng(31)
+    bn = torch.nn.BatchNorm2d(3)
+    with torch.no_grad():
+        bn.weight.copy_(torch.tensor(g))
+        bn.bias.copy_(torch.tensor(b))
+    batches = [rb.normal(loc=1.5, scale=2.0, size=(4, 3, 2, 2)) for _ in range(3)]
+    bn.train()
+    train_y = [arr(bn(torch.tensor(xb))) for xb in batches]
+    running = [arr(bn.running_mean).copy(), arr(bn.running_var).copy()]
+    bn.eval()
+    x = rb.normal(size=(2, 3, 2, 2))
+    xt = t(x)
+    y = bn(xt)
+    w, (gx, gg) = grads(y, rb, xt, bn.weight)
+    out["batchnorm_running"] = {
+        "gamma": g,
+        "beta": b,
+        "batches": batches,
+        "trainY": train_y,
+        "runningMean": running[0],
+        "runningVariance": running[1],
+        "x": x,
+        "y": arr(y),
+        "w": w,
+        "gx": gx,
+        "ggamma": gg,
+    }
 
     # Multi-head attention (self-attention, causal), with torch's in-projection split into q, k, v.
     T, d, h = 5, 8, 2
@@ -188,4 +221,12 @@ def cases() -> dict[str, object]:
         "elu": arr(F.elu(torch.tensor(x))),
         "leakyRelu": arr(F.leaky_relu(torch.tensor(x), 0.01)),
     }
+
+    # RMS norm over the last axis (Zhang & Sennrich, 2019), torch's F.rms_norm.
+    x = rng.normal(size=(3, 6))
+    g = rng.normal(size=6)
+    xt, gt = t(x), t(g)
+    y = F.rms_norm(xt, (6,), gt, eps=1e-6)
+    w, (gx, gg) = grads(y, rng, xt, gt)
+    out["rmsnorm"] = {"x": x, "gamma": g, "y": arr(y), "w": w, "gx": gx, "ggamma": gg}
     return out

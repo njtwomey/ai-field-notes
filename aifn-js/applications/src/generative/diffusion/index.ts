@@ -3,7 +3,8 @@
  *
  * - Schedules: `linearSchedule` (Ho et al.), `cosineSchedule` (Nichol & Dhariwal), `scheduleFromBetas`, each with
  *   β, α, ᾱ and SNR per step; `alphaBarAt`, `betaAt`. Continuous forward SDEs with their marginals: `vpSde`,
- *   `subVpSde`, `veSde`.
+ *   `subVpSde`, `veSde`. One time axis: `stepTime` (τ = t/T) and `timeStep`, `scheduleSde` (the VP SDE through a
+ *   discrete schedule, exact at every step) and `sdeSchedule` (a schedule read off an SDE); every sampler reports τ.
  * - The forward process: `forwardNoise` (a draw from q(x_t | x₀)), `forwardPosterior` (q(x_{t−1} | x_t, x₀)),
  *   `forwardProcess` (the Markov chain, traceable).
  * - Noise predictors ε̂(x, ᾱ), the common interface of every model: `predictNoise` and `scoreFromPredictor` for any
@@ -25,7 +26,11 @@ export {
   cosineSchedule,
   linearSchedule,
   scheduleFromBetas,
+  scheduleSde,
+  sdeSchedule,
+  stepTime,
   subVpSde,
+  timeStep,
   veSde,
   vpSde,
   type ForwardSde,

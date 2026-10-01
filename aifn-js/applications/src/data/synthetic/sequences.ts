@@ -7,6 +7,9 @@ import { normal, type Stream } from 'aifn/foundation/random'
 import { fromData, type Tensor } from 'aifn/foundation/tensor'
 import { hmm, sampleHmm } from 'aifn-applied/inference/sequence-models'
 import { checkCount, labels, matrix, vector, type DatasetMeta } from '../types'
+import type { DatasetInfo } from 'aifn/foundation/contracts'
+import { definer } from 'aifn/foundation/registry'
+import { int, real, space } from 'aifn/foundation/space'
 
 /** A discrete hidden Markov model: initial distribution (k), transition matrix (k × k) and emission matrix (k × m). */
 export interface DiscreteHmm {
@@ -140,8 +143,8 @@ function series(y: Float64Array, meta: DatasetMeta): TimeSeries {
 
 /** Options for `arSeries`. */
 export interface ArOptions {
-  /** AR coefficients a₁, …, a_p in x_t = c + Σ a_k x_{t−k} + e_t. */
-  coefficients: readonly number[]
+  /** AR coefficients a₁, …, a_p in x_t = c + Σ a_k x_{t−k} + e_t. Default [0.8]. */
+  coefficients?: readonly number[]
   n?: number
   /** Standard deviation of the driving noise e_t. Default 1. */
   sd?: number
@@ -155,8 +158,8 @@ export interface ArOptions {
  * An autoregressive AR(p) series x_t = c + Σ_k a_k x_{t−k} + e_t, e_t ~ N(0, sd²), started from zeros with a burn-in.
  * No clipping: an explosive model sets `diverged`.
  */
-export function arSeries(s: Stream, options: ArOptions): TimeSeries {
-  const { coefficients: a, n = 200, sd = 1, constant = 0, burn = 500 } = options
+export function arSeries(s: Stream, options: ArOptions = {}): TimeSeries {
+  const { coefficients: a = [0.8], n = 200, sd = 1, constant = 0, burn = 500 } = options
   checkCount(n, 'arSeries')
   const total = n + burn
   const x = new Float64Array(total)
@@ -236,3 +239,89 @@ export function randomWalk(
     key: s.key,
   })
 }
+
+// ── Registry ─────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+const dataset = definer<DatasetInfo>('dataset', 'data/synthetic')
+
+dataset(
+  {
+    key: 'casino',
+    name: 'Occasionally dishonest casino',
+    summary: 'Die rolls from a two-state hidden Markov model: a fair die and a loaded one.',
+    task: 'sequence',
+    output: 'sequence',
+    knobs: space({
+      n: int(1, 10000, { default: 300 }),
+      toLoaded: real(0, 1, { default: 0.05 }),
+      toFair: real(0, 1, { default: 0.1 }),
+      loadedSix: real(0.17, 1, { default: 0.5 }),
+    }),
+    truth: false,
+    random: true,
+    notes: ['occasionally-dishonest-casino', 'hidden-markov-model'],
+  },
+  casino,
+)
+
+dataset(
+  {
+    key: 'arSeries',
+    name: 'AR series',
+    summary: 'An autoregressive series started near stationarity (coefficients default [0.8]).',
+    task: 'sequence',
+    output: 'series',
+    knobs: space({
+      n: int(1, 100000, { default: 200 }),
+      sd: real(0.01, 10, { default: 1 }),
+      constant: real(-10, 10, { default: 0 }),
+      burn: int(0, 5000, { default: 500 }),
+    }),
+    truth: false,
+    random: true,
+    notes: ['autoregressive-model'],
+  },
+  arSeries,
+)
+
+dataset(
+  {
+    key: 'seasonalSeries',
+    name: 'Seasonal series',
+    summary: 'Level, trend and harmonic seasonality plus white or AR(1) noise.',
+    task: 'sequence',
+    output: 'series',
+    knobs: space({
+      n: int(1, 10000, { default: 120 }),
+      period: int(2, 365, { default: 12 }),
+      level: real(-10, 10, { default: 0 }),
+      trend: real(-1, 1, { default: 0.02 }),
+      noise: real(0, 5, { default: 0.3 }),
+      persistence: real(-0.99, 0.99, { default: 0 }),
+    }),
+    truth: false,
+    random: true,
+    notes: ['seasonal-autoregressive-integrated-moving-average'],
+  },
+  seasonalSeries,
+)
+
+dataset(
+  {
+    key: 'randomWalk',
+    name: 'Random walk',
+    summary: 'Cumulative Gaussian steps with an optional drift.',
+    task: 'sequence',
+    output: 'series',
+    knobs: space({
+      n: int(1, 100000, { default: 200 }),
+      sd: real(0.01, 10, { default: 1 }),
+      drift: real(-1, 1, { default: 0 }),
+      start: real(-10, 10, { default: 0 }),
+    }),
+    truth: false,
+    random: true,
+    notes: ['white-noise-and-random-walk', 'random-walk'],
+  },
+  randomWalk,
+)

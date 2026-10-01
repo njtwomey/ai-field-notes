@@ -25,12 +25,15 @@ export type Tolerance = { readonly rtol: number; readonly atol: number }
 
 /**
  * Default tolerances for comparing results of each dtype, as `torch.testing.assert_close` sets them: float64
- * rtol 1e-7, atol 1e-7; float32 rtol 1.3e-6, atol 1e-5; int32 exact.
+ * rtol 1e-7, atol 1e-7; float32 rtol 1.3e-6, atol 1e-5; int32 and bool exact; complex128 as float64 (applied to
+ * the modulus of the difference).
  */
 export const DEFAULT_TOLERANCE: Readonly<Record<DType, Tolerance>> = Object.freeze({
   float64: Object.freeze({ rtol: 1e-7, atol: 1e-7 }),
   float32: Object.freeze({ rtol: 1.3e-6, atol: 1e-5 }),
   int32: Object.freeze({ rtol: 0, atol: 0 }),
+  bool: Object.freeze({ rtol: 0, atol: 0 }),
+  complex128: Object.freeze({ rtol: 1e-7, atol: 1e-7 }),
 })
 
 /** The default tolerance for a dtype (float64 when omitted). */

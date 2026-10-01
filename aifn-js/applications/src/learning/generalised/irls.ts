@@ -10,7 +10,7 @@ import type { Status } from 'aifn/foundation/contracts'
 import { cholesky, choleskySolve, lstsq } from 'aifn/numerics/linalg'
 import { fromData, toFlat, type Tensor } from 'aifn/foundation/tensor'
 import type { Algorithm } from 'aifn/foundation/trace'
-import type { Family, Link } from 'aifn/probability/likelihoods'
+import { likelihood, type Family, type Link } from 'aifn/probability/likelihoods'
 
 /** The problem an IRLS run solves. */
 export type IrlsProblem = {
@@ -95,8 +95,13 @@ function atEta(problem: IrlsProblem, D: Dense, eta: Float64Array) {
   const mu = flat(problem.link.inverse(etaT) as Tensor)
   const d = flat(problem.link.derivative(etaT) as Tensor)
   const V = flat(problem.family.variance(vec(mu)) as Tensor)
-  const z = Float64Array.from(eta, (e, i) => e - D.o[i] + (D.y[i] - mu[i]) / d[i])
-  const W = Float64Array.from(d, (di, i) => (D.w[i] * di * di) / V[i])
+  // Where μ has rounded to the edge of the mean space (V = 0 or μ′ = 0) the observation carries no weight in this
+  // step; its z is then η itself, so it pulls on nothing.
+  const W = Float64Array.from(d, (di, i) => {
+    const v = (D.w[i] * di * di) / V[i]
+    return Number.isFinite(v) ? v : 0
+  })
+  const z = Float64Array.from(eta, (e, i) => (W[i] > 0 ? e - D.o[i] + (D.y[i] - mu[i]) / d[i] : e - D.o[i]))
   return { mu, z, W }
 }
 
@@ -154,7 +159,17 @@ function matVec(X: Float64Array, n: number, p: number, beta: Float64Array, o: Fl
 export function irls(problem: IrlsProblem): Algorithm<{ coefficients?: Tensor }, IrlsState> {
   const D = dense(problem)
   const tol = problem.tolerance ?? 1e-8
-  const devOf = (mu: Float64Array) => deviance(problem.family, problem.y, vec(mu), problem.weights)
+  // The deviance from η (stable where μ rounds to the edge of the mean space, e.g. σ(40) = 1), and validity: any
+  // finite η for a link onto the mean space, else μ inside it.
+  const lik = likelihood(problem.family, problem.link.name)
+  const devOf = (eta: Float64Array) => {
+    const d = flat(lik.unitDeviance(problem.y, vec(eta)) as Tensor)
+    let s = 0
+    for (let i = 0; i < d.length; i++) s += D.w[i] * d[i]
+    return s
+  }
+  const validAt = (eta: Float64Array, mu: Float64Array) =>
+    problem.link.total ? eta.every(Number.isFinite) : problem.family.validMean(vec(mu))
   const stateAt = (
     beta: Float64Array | null,
     eta: Float64Array,
@@ -165,7 +180,7 @@ export function irls(problem: IrlsProblem): Algorithm<{ coefficients?: Tensor },
     diverged = false,
   ): IrlsState => {
     const q = atEta(problem, D, eta)
-    const dev = devOf(q.mu)
+    const dev = devOf(eta)
     const pdev = dev + penaltyOf(D, beta)
     return {
       t,
@@ -212,16 +227,20 @@ export function irls(problem: IrlsProblem): Algorithm<{ coefficients?: Tensor },
           ).beta
       let beta = proposed
       let halvings = 0
+      let closest = Infinity
       for (; halvings <= 30; halvings++) {
         const eta = matVec(D.X, D.n, D.p, beta, D.o)
         const mu = flat(problem.link.inverse(vec(eta)) as Tensor)
-        const valid = problem.family.validMean(vec(mu))
-        const pdev = valid ? devOf(mu) + penaltyOf(D, beta) : NaN
+        const pdev = validAt(eta, mu) ? devOf(eta) + penaltyOf(D, beta) : NaN
+        if (Number.isFinite(pdev)) closest = Math.min(closest, Math.abs(pdev - state.penalisedDeviance))
         const ok = Number.isFinite(pdev) && (first || pdev <= state.penalisedDeviance * (1 + 1e-10) + 1e-12)
         if (ok) return stateAt(beta, eta, state.t + 1, halvings, singular, state.penalisedDeviance)
         beta = Float64Array.from(beta, (b, j) => (b + old[j]) / 2)
       }
-      return { ...state, t: state.t + 1, halvings, diverged: true }
+      // No step lowers the penalised deviance: at its minimum to rounding (the trials differ from it by no more than
+      // rounding), the run has converged; otherwise no valid step exists and it has diverged.
+      const atPrecision = closest <= 1e-9 * (Math.abs(state.penalisedDeviance) + 1)
+      return { ...state, t: state.t + 1, halvings, converged: atPrecision, diverged: !atPrecision }
     },
   }
 }

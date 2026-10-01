@@ -1,10 +1,10 @@
 import * as D from 'aifn/probability/distributions'
 import { fromRows, linspace, tensor, toFlat, unwrap, type Value } from 'aifn/foundation/tensor'
-import { useCallback, useMemo, useState } from 'react'
-import { Choice, Slider } from '@lab/controls'
-import { Figure } from '@lab/layout'
-import { ChartSize, Heatmap, Readout, XYChart, type Handle, type HeatmapOverlay, type XYSeries } from '@lab/viz'
-import { DistributionView, distributionRange, formatValue } from '@lab/views'
+import { useMemo } from 'react'
+import { Equation, Figure, live, tex } from '@lab/layout'
+import { row, slider, useFigureState, useProbe, variants, type SliderDef } from '@lab/state'
+import { Curve, Plot, Plots, Probe, Raster, Readout, useAxis } from '@lab/viz'
+import { DistributionPanel, distributionRange, formatValue } from '@lab/views'
 
 /** A Value as numbers. */
 const numbers = (v: Value): number[] => {
@@ -12,7 +12,6 @@ const numbers = (v: Value): number[] => {
   return typeof r === 'number' ? [r] : toFlat(r)
 }
 const num = (v: Value) => numbers(v)[0]
-const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v))
 const grid = (lo: number, hi: number, n: number) => toFlat(linspace(lo, hi, n))
 
 type ParamSpec = { label: string; min: number; max: number; value: number; step?: number }
@@ -35,7 +34,7 @@ const FAMILIES: Record<string, Family> = {
   },
   StudentT: {
     params: [
-      { label: 'df ν', min: 0.5, max: 30, value: 3 },
+      { label: 'df ν', min: 0.5, max: 30, value: 3, step: 0.1 },
       { label: 'loc μ', min: -3, max: 3, value: 0 },
       { label: 'scale σ', min: 0.2, max: 3, value: 1 },
     ],
@@ -91,7 +90,7 @@ const FAMILIES: Record<string, Family> = {
     ],
     make: (a, b) => D.Beta(a, b),
   },
-  ChiSquare: { params: [{ label: 'df k', min: 0.5, max: 30, value: 4 }], make: (k) => D.ChiSquare(k) },
+  ChiSquare: { params: [{ label: 'df k', min: 0.5, max: 30, value: 4, step: 0.1 }], make: (k) => D.ChiSquare(k) },
   Weibull: {
     params: [
       { label: 'shape k', min: 0.3, max: 6, value: 1.5 },
@@ -132,7 +131,7 @@ const FAMILIES: Record<string, Family> = {
     params: [{ label: 'temperature', min: 0.2, max: 5, value: 1 }],
     make: (t) => D.Categorical({ logits: tensor([2, 1, 0.5, 0, -1].map((v) => v / t)) }),
   },
-  Poisson: { params: [{ label: 'rate λ', min: 0.1, max: 30, value: 4 }], make: (l) => D.Poisson(l) },
+  Poisson: { params: [{ label: 'rate λ', min: 0.1, max: 30, value: 4, step: 0.1 }], make: (l) => D.Poisson(l) },
   Geometric: { params: [{ label: 'p', min: 0.05, max: 1, value: 0.3 }], make: (p) => D.Geometric(p) },
   NegativeBinomial: {
     params: [
@@ -158,20 +157,38 @@ const FAMILIES: Record<string, Family> = {
 }
 type FamilyName = keyof typeof FAMILIES
 
+/** Every family as a case of one variants field: its parameters p0, p1, … in the order `make` takes them. */
+const FAMILY_FIELD = variants(
+  Object.fromEntries(
+    Object.entries(FAMILIES).map(([name, f]) => [
+      name,
+      {
+        label: name,
+        params: Object.fromEntries(
+          f.params.map((p, i): [string, SliderDef] => [
+            `p${i}`,
+            slider(p.min, p.max, p.value, { label: p.label, ...(p.step ? { step: p.step } : {}) }),
+          ]),
+        ),
+      },
+    ]),
+  ),
+  { label: '1 · family and parameters', choiceLabel: 'family', initial: 'Gamma' },
+)
+
 export function FamiliesSpecimen() {
-  const [name, setName] = useState<FamilyName>('Gamma')
-  const [values, setValues] = useState<Record<string, number[]>>({})
+  const state = useFigureState({ family: FAMILY_FIELD })
+  const name = state.family.key as FamilyName
   const family = FAMILIES[name]
-  const current = values[name] ?? family.params.map((p) => p.value)
-  const set = (i: number) => (v: number) =>
-    setValues((all) => ({ ...all, [name]: current.map((c, j) => (j === i ? v : c)) }))
+  const values = state.family.values as Record<string, number>
+  const key = family.params.map((_, i) => values[`p${i}`]).join(',')
   const { d, error } = useMemo(() => {
     try {
-      return { d: family.make(...current), error: '' }
+      return { d: family.make(...key.split(',').map(Number)), error: '' }
     } catch (e) {
       return { d: null, error: (e as Error).message }
     }
-  }, [family, current])
+  }, [family, key])
   // Axes held per family: x from the family at its default parameters, so moving a parameter changes the curve, not
   // the axes. Choosing another family refits.
   const range = useMemo(() => {
@@ -181,59 +198,44 @@ export function FamiliesSpecimen() {
       return undefined
     }
   }, [family])
-  const controls = (
-    <>
-      <Choice
-        label="family"
-        value={name}
-        onChange={(v) => setName(v as FamilyName)}
-        options={Object.keys(FAMILIES) as FamilyName[]}
-      />
-      {family.params.map((p, i) => (
-        <Slider
-          key={`${name}-${p.label}`}
-          label={p.label}
-          value={current[i]}
-          min={p.min}
-          max={p.max}
-          step={p.step}
-          onChange={set(i)}
-        />
-      ))}
-    </>
-  )
-  if (!d)
-    return (
-      <Figure title={name} controls={controls}>
-        <div className="text-sm text-muted-foreground">{error}</div>
-      </Figure>
-    )
   return (
-    <DistributionView
+    <Figure
       id="families"
       title={`${name}: density, cdf and draws`}
-      distribution={d}
-      controls={controls}
-      range={range}
-      rescaleOnChange={false}
-      axisKey={name}
+      purpose="Each family's density (or mass), cdf, sampler and moments come from one object: the draws' histogram and empirical cdf agree with the closed forms for every parameter."
+      state={state}
       caption="The density or mass (line or points) over a histogram of 2,000 draws, the cdf against the empirical cdf of the draws, and the moments from the closed forms. The axes hold while a parameter moves (x from the family's default parameters; the density axis grows to fit any taller curve); choosing a family, or the fit button, refits."
-    />
+    >
+      {d ? (
+        <DistributionPanel distribution={d} range={range} rescaleOnChange={false} axisKey={name} />
+      ) : (
+        <div className="text-sm text-muted-foreground">{error}</div>
+      )}
+    </Figure>
   )
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
 
+const MVN_X = grid(-4, 4, 161)
+const MVN_Y = grid(-4, 6, 101)
+
 export function MultivariateNormalSpecimen() {
-  const [rho, setRho] = useState(0.7)
-  const [sd2, setSd2] = useState(1.5)
-  const [observed, setObserved] = useState(1)
-  // The query point (x₁, x₂): x₂ is the observed value being conditioned on, x₁ where the densities are read.
-  const [query, setQuery] = useState(0.5)
-  const setPoint = useCallback(([x1, x2]: [number, number]) => {
-    setQuery(clamp(x1, -4, 4))
-    setObserved(clamp(x2, -3, 5))
-  }, [])
+  const state = useFigureState({
+    joint: row('1 · the joint', {
+      rho: slider(-0.95, 0.95, 0.7, { label: 'correlation ρ' }),
+      sd2: slider(0.3, 2.5, 1.5, { label: 'sd of x₂' }),
+    }),
+    // The query point (x₁, x₂): x₂ is the observed value being conditioned on, x₁ where the densities are read.
+    query: row('2 · the query', {
+      observed: slider(-3, 5, 1, { label: 'observed x₂' }),
+      x1: slider(-4, 4, 0.5, { label: 'query x₁' }),
+    }),
+  })
+  const { rho, sd2 } = state.joint
+  const probe = useProbe({ x: state.bind('query.x1'), y: state.bind('query.observed'), label: 'x₁', yLabel: 'x₂' })
+  const query = probe.x ?? state.query.x1
+  const observed = probe.y ?? state.query.observed
   const mvn = useMemo(
     () =>
       D.MultivariateNormal(tensor([0, 1]), {
@@ -245,108 +247,78 @@ export function MultivariateNormalSpecimen() {
     [rho, sd2],
   )
   const conditional = useMemo(() => mvn.condition([1], tensor([observed])), [mvn, observed])
-  const xs = useMemo(() => grid(-4, 4, 161), [])
-  const ys = useMemo(() => grid(-4, 6, 101), [])
   const z = useMemo(() => {
     const points: number[] = []
-    for (const y of ys) for (const x of xs) points.push(x, y)
-    const p = numbers(mvn.prob(tensor(points, [xs.length * ys.length, 2])))
-    return ys.map((_, i) => xs.map((_, j) => p[i * xs.length + j]))
-  }, [mvn, xs, ys])
-  const overlay = useMemo((): HeatmapOverlay[] => {
-    // E[x₁ | x₂] = μ₁ + ρ σ₁/σ₂ (x₂ − μ₂): the line every conditional mean lies on (σ₁ = 1, μ = (0, 1)).
+    for (const y of MVN_Y) for (const x of MVN_X) points.push(x, y)
+    const p = numbers(mvn.prob(tensor(points, [MVN_X.length * MVN_Y.length, 2])))
+    return MVN_Y.map((_, i) => MVN_X.map((_, j) => p[i * MVN_X.length + j]))
+  }, [mvn])
+  // E[x₁ | x₂] = μ₁ + ρ σ₁/σ₂ (x₂ − μ₂): the line every conditional mean lies on (σ₁ = 1, μ = (0, 1)).
+  const regression = useMemo(() => {
     const slope = rho / sd2
-    return [
-      { name: `x₂ = ${formatValue(observed)}`, type: 'line', x: [-4, 4], y: [observed, observed], slot: 1 },
-      { name: 'E[x₁ | x₂]', type: 'line', x: [slope * (-4 - 1), slope * (6 - 1)], y: [-4, 6], slot: 2, thin: true },
-    ]
-  }, [observed, rho, sd2])
-  const heatmapHandles = useMemo(
-    (): Handle[] => [{ kind: 'point', at: [query, observed], label: '(x₁, x₂)', onDrag: setPoint }],
-    [query, observed, setPoint],
-  )
-  const sliceHandles = useMemo(
-    (): Handle[] => [{ kind: 'x', at: query, label: 'x₁', onDrag: (x) => setQuery(clamp(x, -4, 4)) }],
-    [query],
-  )
-  const slice = useMemo((): XYSeries[] => {
+    return { x: [slope * (-4 - 1), slope * (6 - 1)], y: [-4, 6] }
+  }, [rho, sd2])
+  const slice = useMemo(() => {
     // The conditional density against the joint density along the line x₂ = observed, renormalised numerically.
-    const points = xs.flatMap((x) => [x, observed])
-    const joint = numbers(mvn.prob(tensor(points, [xs.length, 2])))
-    const h = xs[1] - xs[0]
+    const points = MVN_X.flatMap((x) => [x, observed])
+    const joint = numbers(mvn.prob(tensor(points, [MVN_X.length, 2])))
+    const h = MVN_X[1] - MVN_X[0]
     const total = joint.reduce((a, b) => a + b, 0) * h
-    const cond = numbers(conditional.prob(tensor(xs.map((x) => [x]))))
-    return [
-      { name: 'condition([1], x₂): closed form', type: 'line', x: xs, y: cond, slot: 0 },
-      {
-        name: 'joint along x₂, renormalised',
-        type: 'line',
-        x: xs,
-        y: joint.map((v) => v / total),
-        slot: 1,
-        dashed: true,
-      },
-    ]
-  }, [mvn, conditional, xs, observed])
+    return {
+      cond: numbers(conditional.prob(tensor(MVN_X.map((x) => [x])))),
+      joint: joint.map((v) => v / total),
+    }
+  }, [mvn, conditional, observed])
   const marginal = mvn.marginal([0])
   // Densities at the query point: the joint, the marginal of the observed coordinate, and the conditional.
   const joint = num(mvn.prob(tensor([query, observed])))
   const pObserved = num(mvn.marginal([1]).prob(tensor([observed])))
   const pConditional = num(conditional.prob(tensor([query])))
+  const x = useAxis({ label: 'x₁', range: [-4, 4] })
+  const y = useAxis({ label: 'x₂', range: [-4, 6] })
+  // The conditional's peak depends on ρ only, so this range holds while the query moves and the slices are live.
+  const py = useAxis({ label: 'p(x₁ | x₂)', range: [0, 1.15 / Math.sqrt(2 * Math.PI * (1 - rho * rho))] })
   return (
     <Figure
       title="Conditioning a bivariate normal"
+      purpose="Conditioning a Gaussian on x₂ gives another Gaussian in closed form, whose density is the joint density sliced at x₂ and divided by p(x₂)."
       defaultSize="L"
-      controls={
-        <>
-          <Slider label="correlation ρ" value={rho} min={-0.95} max={0.95} onChange={setRho} />
-          <Slider label="sd of x₂" value={sd2} min={0.3} max={2.5} onChange={setSd2} />
-          <Slider label="observed x₂" value={observed} min={-3} max={5} onChange={setObserved} />
-          <Slider label="query x₁" value={query} min={-4} max={4} onChange={setQuery} />
-        </>
+      state={state}
+      equation={
+        <Equation>
+          {tex`p(x_1 \mid x_2) = \frac{p(x_1, x_2)}{p(x_2)} = \frac{${live(joint, { digits: 4 })}}{${live(pObserved, { digits: 4 })}} = ${live(pConditional, { digits: 4, strong: true })}`}
+        </Equation>
       }
-      readouts={
-        <>
-          <Readout label="query (x₁, x₂)" value={`(${formatValue(query)}, ${formatValue(observed)})`} />
-          <Readout label="joint p(x₁, x₂)" value={formatValue(joint)} />
-          <Readout label="marginal p(x₂)" value={formatValue(pObserved)} />
-          <Readout label="conditional p(x₁ | x₂)" value={formatValue(pConditional)} />
-          <Readout label="p(x₁, x₂) / p(x₂)" value={formatValue(joint / pObserved)} />
-          <Readout label="conditional mean" value={formatValue(num(conditional.mean()))} />
-          <Readout label="conditional variance" value={formatValue(num(conditional.variance()))} />
-          <Readout label="closed form 1 − ρ²" value={formatValue(1 - rho * rho)} />
-          <Readout label="marginal variance of x₁" value={formatValue(num(marginal.variance()))} />
-          <Readout label="entropy (nats)" value={formatValue(num(mvn.entropy()))} />
-        </>
-      }
-      caption="Click or drag on the heatmap to move the query point: its height is the observed x₂ being conditioned on, its position along the line is x₁, where the densities are read (x₁ can also be dragged on the lower chart). condition(indices, values) returns the Gaussian of the remaining coordinates; its density matches the joint sliced at the observed value and renormalised, so p(x₁ | x₂) = p(x₁, x₂) / p(x₂). The thin line is the regression line E[x₁ | x₂], on which every conditional mean lies."
+      readouts={{
+        conditional: (
+          <>
+            <Readout label="mean" value={formatValue(num(conditional.mean()))} />
+            <Readout label="variance" value={formatValue(num(conditional.variance()))} />
+            <Readout label="closed form 1 − ρ²" value={formatValue(1 - rho * rho)} />
+          </>
+        ),
+        joint: (
+          <>
+            <Readout label="marginal variance of x₁" value={formatValue(num(marginal.variance()))} />
+            <Readout label="entropy (nats)" value={formatValue(num(mvn.entropy()))} />
+          </>
+        ),
+      }}
+      caption="Press or drag on the heatmap to move the query point: its height is the observed x₂ being conditioned on, its position along the line is x₁, where the densities are read (x₁ can also be dragged on the lower chart). The lower chart is the closed-form conditional against the joint along the dashed line, renormalised: they coincide. The thin line is the regression line E[x₁ | x₂], on which every conditional mean lies; the conditional variance 1 − ρ² does not depend on x₂."
     >
-      <div className="flex flex-col gap-4">
-        <ChartSize scale={0.6}>
-          <Heatmap
-            x={xs}
-            y={ys}
-            z={z}
-            xLabel="x₁"
-            yLabel="x₂"
-            overlay={overlay}
-            handles={heatmapHandles}
-            valueLabel="density"
-            rescaleOnChange={false}
-            holdFit="union"
-          />
-        </ChartSize>
-        <ChartSize scale={0.4}>
-          <XYChart
-            series={slice}
-            handles={sliceHandles}
-            xLabel="x₁"
-            yLabel="p(x₁ | x₂)"
-            rescaleOnChange={false}
-            holdFit="union"
-          />
-        </ChartSize>
-      </div>
+      <Plots rows={2} heights={[3, 2]}>
+        <Plot x={x} y={y}>
+          <Raster x={MVN_X} y={MVN_Y} z={z} valueLabel="density" />
+          <Curve name="E[x₁ | x₂]" x={regression.x} y={regression.y} slot={2} thin />
+          <Curve name="conditioned on" x={[-4, 4]} y={[observed, observed]} slot={1} dashed live />
+          <Probe probe={probe} />
+        </Plot>
+        <Plot x={x} y={py}>
+          <Curve name="condition([1], x₂): closed form" x={MVN_X} y={slice.cond} slot={0} live />
+          <Curve name="joint along x₂, renormalised" x={MVN_X} y={slice.joint} slot={1} dashed live />
+          <Probe probe={{ ...probe, y: undefined }} at={pConditional} />
+        </Plot>
+      </Plots>
     </Figure>
   )
 }
@@ -354,25 +326,23 @@ export function MultivariateNormalSpecimen() {
 // ---------------------------------------------------------------------------------------------------------------------
 
 export function MixtureSpecimen() {
-  const [weight, setWeight] = useState(0.3)
-  const [gap, setGap] = useState(3)
+  const state = useFigureState({
+    weight: slider(0, 1, 0.3, { label: 'weight of component 0' }),
+    gap: slider(0, 6, 3, { label: 'separation' }),
+  })
+  const { weight, gap } = state
   const components = useMemo(() => [D.Normal(-gap / 2, 0.6), D.Normal(gap / 2, 1)], [gap])
   const mixture = useMemo(() => D.Mixture([weight, 1 - weight], components), [weight, components])
   return (
-    <DistributionView
+    <Figure
       id="mixture"
       title="A two-component normal mixture"
-      distribution={mixture}
-      range={[-6, 6]}
-      rescaleOnChange={false}
-      controls={
-        <>
-          <Slider label="weight of component 0" value={weight} min={0} max={1} onChange={setWeight} />
-          <Slider label="separation" value={gap} min={0} max={6} onChange={setGap} />
-        </>
-      }
+      purpose="A mixture's density is the weighted sum of its components' (a log-sum-exp in log space) and its cdf the weighted sum of cdfs; its quantile has no closed form and is found by bisection."
+      state={state}
       readouts={<Readout label="median (numerical quantile)" value={formatValue(num(mixture.quantile(0.5)))} />}
-      caption="logProb is a log-sum-exp over the components, the cdf the weighted sum, the quantile a bisection on the cdf; the mean and variance follow from the law of total variance. The entropy has no closed form (—)."
-    />
+      caption="Components N(−gap/2, 0.6²) and N(gap/2, 1). The mean and variance follow from the law of total variance: separating the components adds to the variance even with fixed component variances. The entropy has no closed form (—)."
+    >
+      <DistributionPanel distribution={mixture} range={[-6, 6]} rescaleOnChange={false} />
+    </Figure>
   )
 }

@@ -1,9 +1,11 @@
-import { useMemo, useState } from 'react'
+import { useMemo } from 'react'
 import { iris } from 'aifn-applied/data/real'
-import { recipe } from 'aifn-applied/data/synthetic'
-import { type Dataset } from 'aifn-applied/data'
-import { Select } from '@lab/controls'
-import { AndrewsCurvesView, PairPlotView, ParallelCoordinatesView } from '@lab/views'
+import { recipe, type Dataset } from 'aifn-applied/data'
+import { gaussians, shuffleDataset, withNuisanceFeatures } from 'aifn-applied/data/synthetic'
+import { child, stream } from 'aifn/foundation/random'
+import { Figure } from '@lab/layout'
+import { choice, useFigureState } from '@lab/state'
+import { AndrewsCurvesPanel, PairPlotPanel, ParallelCoordinatesPanel } from '@lab/views'
 
 const IRIS = iris()
 
@@ -18,14 +20,24 @@ const PAIR_DATA: Record<'iris' | 'blobs' | 'wide', Choice> = {
   },
   blobs: {
     label: 'blobs + 3 nuisance features',
-    make: () => recipe({ base: 'blobs', seed: 3, n: 450, options: { centers: 3 }, nuisance: 3, shuffle: true }),
+    make: () =>
+      recipe({
+        base: 'blobs',
+        seed: 3,
+        knobs: { n: 450, centers: 3 },
+        modifiers: [{ op: 'withNuisanceFeatures', params: { count: 3 } }, { op: 'shuffleDataset' }],
+      }),
     purpose:
       'Three blobs in x1 and x2 plus three pure-noise features: only the x1–x2 panels separate the classes, and every panel with a noise feature shows the classes on top of each other.',
   },
   wide: {
     label: '8-D Gaussians + 8 nuisance (16 features)',
-    make: () =>
-      recipe({ base: 'gaussians', seed: 5, n: 1500, options: { means: MEANS_8D }, nuisance: 8, shuffle: true }),
+    // Means in 8 dimensions are not a recipe knob, so the generator and modifiers are called directly.
+    make: () => {
+      const s = stream(5)
+      const d = gaussians(child(s, 'base'), { n: 1500, means: MEANS_8D })
+      return shuffleDataset(child(s, 'shuffle'), withNuisanceFeatures(child(s, 'nuisance'), d, { count: 8 }))
+    },
     purpose:
       'Sixteen features are too many panels: pick up to eight. Only x1–x4 carry class information; compare a pair of them with a pair of noise features.',
   },
@@ -39,30 +51,27 @@ const MEANS_8D = [
 ]
 
 export function PairPlotSpecimen() {
-  const [which, setWhich] = useState<keyof typeof PAIR_DATA>('iris')
-  const choice = PAIR_DATA[which]
-  const data = useMemo(() => choice.make(), [choice])
+  const state = useFigureState({
+    which: choice(
+      Object.entries(PAIR_DATA).map(([value, c]) => ({ value: value as keyof typeof PAIR_DATA, label: c.label })),
+      'iris',
+      { label: 'dataset' },
+    ),
+  })
+  const which = state.which
+  const data = useMemo(() => PAIR_DATA[which].make(), [which])
   return (
-    <PairPlotView
-      key={which}
+    <Figure
       id="pair-plot"
-      data={data}
       title="Pair plot"
-      description={choice.purpose}
+      purpose={PAIR_DATA[which].purpose}
+      state={state}
       defaultSize="L"
-      features={which === 'wide' ? [0, 1, 2, 3, 8, 9] : undefined}
-      controls={
-        <Select
-          label="dataset"
-          value={which}
-          onChange={setWhich}
-          options={Object.entries(PAIR_DATA).map(([value, c]) => ({
-            value: value as keyof typeof PAIR_DATA,
-            label: c.label,
-          }))}
-        />
-      }
-    />
+      hoverReadout={false}
+      caption="Per-class histograms (or KDE curves) on the diagonal, scatters below, correlations or scatters above. Drag a rectangle in any scatter to select the rows inside it; they keep their colour in every panel and the rest fade. A click without a drag clears it. Hover a point to mark the same row everywhere."
+    >
+      <PairPlotPanel key={which} data={data} features={which === 'wide' ? [0, 1, 2, 3, 8, 9] : undefined} />
+    </Figure>
   )
 }
 
@@ -77,42 +86,44 @@ const PARALLEL_DATA: Record<'iris' | 'wide', Choice> = {
 }
 
 export function ParallelCoordinatesSpecimen() {
-  const [which, setWhich] = useState<keyof typeof PARALLEL_DATA>('wide')
-  const choice = PARALLEL_DATA[which]
-  const data = useMemo(() => choice.make(), [choice])
+  const state = useFigureState({
+    which: choice(
+      Object.entries(PARALLEL_DATA).map(([value, c]) => ({
+        value: value as keyof typeof PARALLEL_DATA,
+        label: c.label,
+      })),
+      'wide',
+      { label: 'dataset' },
+    ),
+  })
+  const which = state.which
+  const data = useMemo(() => PARALLEL_DATA[which].make(), [which])
   return (
     <>
-      <ParallelCoordinatesView
-        key={which}
+      <Figure
         id="parallel-coordinates"
-        data={data}
         title="Parallel coordinates"
-        description={
+        purpose={
           which === 'wide'
-            ? '1500 rows in 16 features, three classes that differ in x1–x4 only: the class colours pull apart on the first four axes and mix on the rest. Brush an axis to follow a class across the others.'
-            : choice.purpose
+            ? 'Three classes that differ in x1–x4 only: the class colours pull apart on the first four axes and mix on the other twelve.'
+            : PARALLEL_DATA[which].purpose
         }
-        medians
+        state={state}
         defaultSize="XL"
-        controls={
-          <Select
-            label="dataset"
-            value={which}
-            onChange={setWhich}
-            options={Object.entries(PARALLEL_DATA).map(([value, c]) => ({
-              value: value as keyof typeof PARALLEL_DATA,
-              label: c.label,
-            }))}
-          />
-        }
-      />
-      <AndrewsCurvesView
+        hoverReadout={false}
+        caption={`${data.x.shape[0]} rows in ${data.x.shape[1]} features, one line per row coloured by class, with the class medians bold. Drag along an axis to brush an interval and follow a class across the others (drag again to add one; click the axis outside it to clear). Drag a chip in the header to move its axis; its arrow flips the axis.`}
+      >
+        <ParallelCoordinatesPanel key={which} data={data} medians />
+      </Figure>
+      <Figure
         id="andrews-curves"
-        data={IRIS}
         title="Andrews curves"
-        description="Each standardised Iris flower as the curve x₁/√2 + x₂ sin t + x₃ cos t + x₄ sin 2t: curves are as far apart (in L²) as the rows are, so the species form separate bands, setosa most clearly."
+        purpose="Each standardised row becomes the curve x₁/√2 + x₂ sin t + x₃ cos t + x₄ sin 2t; curves are as far apart (in L²) as the rows are, so the Iris species form separate bands, setosa most clearly."
         defaultSize="M"
-      />
+        caption="Thin lines are rows; bold lines are class means. Hover reads the class means at t."
+      >
+        <AndrewsCurvesPanel data={IRIS} />
+      </Figure>
     </>
   )
 }

@@ -83,3 +83,21 @@ export const ANSCOMBE_DATA: { readonly x: readonly (readonly number[])[]; readon
       [6.58, 5.76, 7.71, 8.84, 8.47, 7.04, 5.25, 12.5, 5.56, 7.91, 6.89],
     ],
   }
+
+/**
+ * British coal-mining disasters (explosions killing ten or more men), counts per calendar year 1851–1962: 112 years,
+ * 191 disasters. From the interval data of Jarrett (1979), "A note on the intervals between coal-mining disasters",
+ * Biometrika 66(1), 191–193 (correcting Maguire, Pearson and Wynn, 1952), as tabulated by year in Carlin, Gelfand and
+ * Smith (1992), "Hierarchical Bayesian analysis of changepoint problems", Applied Statistics 41(2), 389–405. The rate
+ * falls around 1890.
+ */
+export const COAL_MINING_DATA: readonly number[] = [
+  4, 5, 4, 0, 1, 4, 3, 4, 0, 6, 3, 3, 4, 0, 2, 6, 3, 3, 5, 4, 5, 3, 1, 4, 4, 1, 5, 5, 3, 4, 2, 5, 2, 2, 3, 4, 2, 1, 3,
+  2, 2, 1, 1, 1, 1, 3, 0, 0, 1, 0, 1, 1, 0, 0, 3, 1, 0, 3, 2, 2, 0, 1, 1, 1, 0, 1, 0, 1, 0, 0, 0, 2, 1, 0, 0, 0, 1, 1,
+  0, 2, 3, 3, 1, 1, 2, 1, 1, 1, 1, 2, 4, 2, 0, 0, 0, 1, 4, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0, 1, 0, 1,
+]
+
+// Well-log data (Ó Ruanaidh and Fitzgerald, 1996, "Numerical Bayesian Methods Applied to Signal Processing"; 4050
+// nuclear-magnetic-response readings, the mean-shift example of Adams and MacKay, 2007) is not embedded: no copy with
+// clear redistribution terms was at hand, and it is too long to embed as source. A gap until a licensed copy is
+// vendored; `meanShifts` covers the same setting synthetically.

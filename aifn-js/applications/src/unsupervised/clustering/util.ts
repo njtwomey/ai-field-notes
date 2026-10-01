@@ -5,7 +5,7 @@
 
 import { dense, fromData, type Tensor } from 'aifn/foundation/tensor'
 import { matrixShape } from 'aifn/learning/estimators'
-import { pairwiseDistances } from 'aifn/numerics/linalg'
+import { pairwiseDistances, squaredRowDistance } from 'aifn/numerics/linalg'
 
 /** The elements of `t` in row-major order as float64 (`dense.data`: shared when already dense; do not mutate). */
 export const values = (t: Tensor): Float64Array => dense.data(t)
@@ -16,15 +16,8 @@ export function matrix(x: Tensor, where: string): { n: number; d: number; v: Flo
   return { n, d, v: dense.data(x) }
 }
 
-/** Squared Euclidean distance between row i of `a` and row j of `b` (both of width d). */
-export function sq(a: Float64Array, i: number, b: Float64Array, j: number, d: number): number {
-  let s = 0
-  for (let c = 0; c < d; c++) {
-    const t = a[i * d + c] - b[j * d + c]
-    s += t * t
-  }
-  return s
-}
+/** Squared Euclidean distance between row i of `a` and row j of `b` (both of width d): linalg's row kernel. */
+export const sq = squaredRowDistance
 
 /** All pairwise Euclidean distances between the rows of x [n, d], as a flat [n, n] array (`pairwiseDistances`). */
 export function pairwise(x: Tensor): Float64Array {

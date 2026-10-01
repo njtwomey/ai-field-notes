@@ -22,6 +22,8 @@ import {
   toFlat,
   transpose,
   zeros,
+  complexAbs,
+  realPart,
   type Matrix,
   type Tensor,
 } from 'aifn/foundation/tensor'
@@ -109,10 +111,7 @@ function dareParts(d: Data, P: Tensor): { residual: Tensor; K: Tensor } | null {
 const relative = (res: Tensor, P: Tensor) => maxAbs(res) / (1 + maxAbs(P))
 
 /** A state with its flags set from `failure` (non-finite iterates diverge; other failures terminate). */
-function flagged(
-  base: Omit<RiccatiState, 'diverged' | 'terminated' | 'converged'>,
-  converged: boolean,
-): RiccatiState {
+function flagged(base: Omit<RiccatiState, 'diverged' | 'terminated' | 'converged'>, converged: boolean): RiccatiState {
   return {
     ...base,
     converged: base.failure === null && converged,
@@ -146,7 +145,7 @@ function careState(
   )
 }
 
-const maxReal = (A: Tensor) => Math.max(...toFlat(eig(A, { vectors: false }).real))
+const maxReal = (A: Tensor) => Math.max(...toFlat(realPart(eig(A, { vectors: false }).values)))
 
 /**
  * An initial stabilising gain K₀ for Kleinman's iteration by Bass's method (Armstrong, 1975, "An extension of Bass'
@@ -259,12 +258,10 @@ export function riccatiMatrixSign(prob: RiccatiProblem, options: RiccatiOptions 
 
 /** |det Z|^{1/N} for an N×N matrix, from the eigenvalue moduli (a product of moduli, taken in log space). */
 function detScaling(Z: Tensor): number {
-  const e = eig(Z, { vectors: false })
-  const re = toFlat(e.real)
-  const im = toFlat(e.imag)
+  const moduli = toFlat(complexAbs(eig(Z, { vectors: false }).values))
   let logAbs = 0
-  for (let i = 0; i < re.length; i++) logAbs += Math.log(Math.hypot(re[i], im[i]))
-  const c = Math.exp(logAbs / re.length)
+  for (let i = 0; i < moduli.length; i++) logAbs += Math.log(moduli[i])
+  const c = Math.exp(logAbs / moduli.length)
   return Number.isFinite(c) && c > 0 ? c : 1
 }
 

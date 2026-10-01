@@ -1,6 +1,6 @@
 import type { Size } from 'aifn/foundation/contracts'
-import { fromData, toFlat, type Tensor } from 'aifn/foundation/tensor'
-import { fft, ifft, nextPowerOfTwo } from 'aifn/foundation/fourier'
+import { dense, fromData, type Tensor } from 'aifn/foundation/tensor'
+import { conv, type ConvMethod } from 'aifn/foundation/convolution'
 import { toSequence, vectorOf, type Data } from './input'
 import { mean, requireNonEmpty, requireSameLength, type SampleOption } from './descriptive'
 
@@ -64,36 +64,12 @@ export function runningVariance(xData: Data, options: SampleOption = {}): Tensor
 }
 
 /**
- * Lagged products r(k) = Σₜ aₜ b_{t+k} for k = −maxLag … maxLag (index k + maxLag), by FFT with zero padding to at
- * least n + maxLag, so no circular wrap-around reaches the lags returned.
+ * Lagged products r(k) = Σₜ aₜ b_{t+k} for k = −maxLag … maxLag (index k + maxLag): the cross-correlation of b with
+ * a, zero-padded by maxLag on each side, i.e. one `conv` of the convolution family (no flip; the FFT or direct kernel).
  */
-function laggedProductsFft(a: Float64Array, b: Float64Array, maxLag: number): Float64Array {
-  const size = nextPowerOfTwo(a.length + maxLag)
-  const A = fft(a, { n: size })
-  const B = fft(b, { n: size })
-  const ar = toFlat(A.re)
-  const ai = toFlat(A.im)
-  const br = toFlat(B.re)
-  const bi = toFlat(B.im)
-  // conj(A)·B transforms to the cross-correlation Σₜ aₜ b_{t+k}.
-  const re = Float64Array.from({ length: size }, (_, i) => ar[i] * br[i] + ai[i] * bi[i])
-  const im = Float64Array.from({ length: size }, (_, i) => ar[i] * bi[i] - ai[i] * br[i])
-  const r = toFlat(ifft({ re: fromData(re, [size]), im: fromData(im, [size]) }).re)
-  return Float64Array.from({ length: 2 * maxLag + 1 }, (_, j) => {
-    const k = j - maxLag
-    return r[(k + size) % size]
-  })
-}
-
-function laggedProductsDirect(a: Float64Array, b: Float64Array, maxLag: number): Float64Array {
-  const n = a.length
-  const out = new Float64Array(2 * maxLag + 1)
-  for (let k = -maxLag; k <= maxLag; k++) {
-    let s = 0
-    for (let t = Math.max(0, -k); t < n && t + k < n; t++) s += a[t] * b[t + k]
-    out[k + maxLag] = s
-  }
-  return out
+function laggedProducts(a: Float64Array, b: Float64Array, maxLag: number, method: ConvMethod): Float64Array {
+  const r = conv(fromData(b), fromData(a), { flip: false, padding: maxLag, method }) as Tensor
+  return Float64Array.from(dense.data(r))
 }
 
 /** Options for autocovariance and cross-covariance. */
@@ -101,7 +77,7 @@ export type LagOptions = {
   /** Largest lag; default n − 1 (every lag). */
   maxLag?: Size
   /** `direct` sums each lag (O(n·maxLag)); `fft` uses an FFT (O(n log n)); `auto` (default) picks the cheaper. */
-  method?: 'direct' | 'fft' | 'auto'
+  method?: ConvMethod
   /** Divide lag k by n − k instead of n. The default (n) is the usual estimator, positive semi-definite. */
   adjusted?: boolean
   /** Subtract the mean first (default true). */
@@ -117,9 +93,7 @@ function lagged(x: ArrayLike<number>, y: ArrayLike<number>, options: LagOptions)
   const my = demean ? mean(y) : 0
   const a = Float64Array.from(x, (v) => v - mx)
   const b = Float64Array.from(y, (v) => v - my)
-  const method = options.method ?? 'auto'
-  const useFft = method === 'fft' || (method === 'auto' && maxLag > 32 && n > 64)
-  const sums = useFft ? laggedProductsFft(a, b, maxLag) : laggedProductsDirect(a, b, maxLag)
+  const sums = laggedProducts(a, b, maxLag, options.method ?? 'auto')
   for (let j = 0; j < sums.length; j++) sums[j] /= options.adjusted ? n - Math.abs(j - maxLag) : n
   return sums
 }

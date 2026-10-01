@@ -11,7 +11,9 @@
  *
  * - Every distribution has `logProb`, `prob`, `sample(s, { shape })`, `mean`, `variance` (and `covariance` for
  *   vectors), `stddev`, `entropy`, `mode`, `support`, `batchShape` and `eventShape`. Univariate ones add `cdf`,
- *   `logcdf`, `survival`, `logSurvival` and `quantile`. Draws have shape `[...shape, ...batchShape, ...eventShape]`.
+ *   `logcdf`, `survival`, `logSurvival`, `quantile` and `isf` (the inverse survival function). Each keeps its relative
+ *   accuracy in both tails: log tails never take the log of a value near 1, and upper quantiles invert the survival
+ *   function. Draws have shape `[...shape, ...batchShape, ...eventShape]`.
  * - Parameters and values may be numbers, tensors (batches broadcast, NumPy rules) or traced values: log-densities
  *   are compositions of `aifn/numerics/special` primitives, so they are differentiable in values and parameters.
  * - Exponential-family members expose `expFamily` (`naturalParams`, `sufficientStats`, `logPartition`,
@@ -19,7 +21,7 @@
  * - Parameterisations follow scipy.stats: Gaussians by mean and standard deviation, `Gamma(shape, rate)` with
  *   `GammaWithScale`, Geometric on k ≥ 1, NegativeBinomial counting failures.
  *
- * Families. Continuous: Normal, LogNormal, StudentT, Cauchy, Laplace, Logistic, Uniform, Exponential, Gamma,
+ * Families (`distributionRegistry`: every constructor with its parameter `Space`, support and structure). Continuous: Normal, LogNormal, StudentT, Cauchy, Laplace, Logistic, Uniform, Exponential, Gamma,
  * InverseGamma, Beta, ChiSquare, Weibull, Gumbel, VonMises, TruncatedNormal. Discrete: Bernoulli, Binomial,
  * Categorical, Poisson, Geometric, NegativeBinomial, Hypergeometric, DiscreteUniform. Multivariate:
  * MultivariateNormal (with `condition` and `marginal`), Dirichlet, Multinomial, Wishart. Composition: Mixture,
@@ -27,7 +29,7 @@
  * `sigmoidBijector`, `tanhBijector`, `softplusBijector`, `powerBijector`, `normalCdfBijector`, `chainBijectors`),
  * Pushforward (through a many-to-one map such as `squareMap`, summing over preimages). Maps declare their `domain` and
  * `codomain` as `Interval`s; `imageOf`, `supportInterval` and `formatInterval` work with them. Divergences: `kl`,
- * `klMonteCarlo`, `registerKl`, `hasKl`; for continuous univariate pairs without a closed form, `klNumerical`,
+ * `klMonteCarlo`, `hasKl`, and the static table of closed forms `klRegistry`; for continuous univariate pairs without a closed form, `klNumerical`,
  * `entropyNumerical`, `jensenShannonNumerical` (quadrature), `klAuto`, `entropyAuto`, `crossEntropyAuto` (closed
  * form when registered, quadrature otherwise, with the method reported), `klMonteCarloWithError` and `klIntegrand`.
  */
@@ -80,7 +82,8 @@ export {
 } from './discrete'
 export { Dirichlet, Multinomial, MultivariateNormal, Wishart, type MultivariateNormalSpread } from './multivariate'
 export { Independent, Mixture, Pushforward, Transformed } from './compose'
-export { hasKl, kl, klMonteCarlo, registerKl, type KlRule } from './kl'
+export { hasKl, kl, klMonteCarlo, klRegistry, type KlRule } from './kl'
+export { distributionRegistry } from './registry'
 export {
   crossEntropyAuto,
   entropyAuto,
@@ -95,4 +98,3 @@ export {
   type MonteCarloEstimate,
   type NumericalResult,
 } from './divergence'
-export { xlogy } from 'aifn/numerics/special'

@@ -1,31 +1,14 @@
 import { useMemo } from 'react'
-import type {
-  PrecisionRecallCurve,
-  ReliabilityDiagram,
-  RocCurve,
-  costCurve,
-  detCurve,
-  gainCurve,
-  precisionRecallGainCurve,
-} from 'aifn/learning/metrics'
+import type { Curve, CurveName } from 'aifn/foundation/contracts'
+import type { ReliabilityDiagram } from 'aifn/learning/metrics'
 import { normalQuantile } from 'aifn/numerics/special'
 import { toFlat } from 'aifn/foundation/tensor'
-import { Figure } from '@lab/layout'
-import { Panel, Readout, Subplots, XYChart, type Handle, type XYSeries } from '@lab/viz'
+import { PanelSlot } from '@lab/layout'
+import { Bars, Curve as CurveLayer, Handle, Plot, Plots, Points, Readout, useAxis } from '@lab/viz'
 import { formatValue } from './format'
-import type { FrameProps } from './frame'
+import { registerKind, registerView } from './registry'
 
-/** Every typed curve `aifn/learning/metrics` returns; each carries a `kind`. */
-export type Curve =
-  | RocCurve
-  | PrecisionRecallCurve
-  | ReliabilityDiagram
-  | ReturnType<typeof detCurve>
-  | ReturnType<typeof gainCurve>
-  | ReturnType<typeof costCurve>
-  | ReturnType<typeof precisionRecallGainCurve>
-
-export type CurveViewProps = FrameProps & {
+export type CurvePanelProps = {
   /** One curve, or several of the same kind to compare (drawn in slots 0, 1, …). */
   curve: Curve | readonly { name: string; curve: Curve }[]
   /** A highlighted operating point, in the chart's own coordinates (e.g. [FPR, TPR] on a ROC curve). */
@@ -36,14 +19,15 @@ export type CurveViewProps = FrameProps & {
  * Axis labels and fixed ranges per kind. Every kind with a range lives on the unit square: it is drawn with equal
  * units on exactly [0, 1]², so its plot area is square, the diagonal is at 45° and areas read truly.
  */
-const AXES: Record<Curve['kind'], { x: string; y: string; range?: [number, number] }> = {
+const AXES: Record<CurveName, { x: string; y: string; range?: [number, number] }> = {
   roc: { x: 'false-positive rate', y: 'true-positive rate', range: [0, 1] },
-  'precision-recall': { x: 'recall', y: 'precision', range: [0, 1] },
+  pr: { x: 'recall', y: 'precision', range: [0, 1] },
   reliability: { x: 'mean predicted probability', y: 'observed frequency', range: [0, 1] },
+  calibration: { x: 'mean predicted probability', y: 'observed frequency', range: [0, 1] },
   det: { x: 'false-positive rate (probit)', y: 'false-negative rate (probit)' },
   gain: { x: 'fraction targeted', y: 'fraction of positives captured', range: [0, 1] },
   cost: { x: 'probability cost PC(+)', y: 'normalised expected cost', range: [0, 1] },
-  'precision-recall-gain': { x: 'recall gain', y: 'precision gain', range: [0, 1] },
+  prg: { x: 'recall gain', y: 'precision gain', range: [0, 1] },
 }
 
 /** A probit axis value, clipped away from 0 and 1 so that the ends stay on the chart. */
@@ -51,48 +35,28 @@ const probit = (p: number) => normalQuantile(Math.min(0.999, Math.max(0.001, p))
 
 /** The (x, y) points of a curve, in the chart's coordinates. */
 function points(c: Curve): { x: number[]; y: number[] } {
-  switch (c.kind) {
-    case 'roc':
-      return { x: toFlat(c.fpr), y: toFlat(c.tpr) }
-    case 'precision-recall':
-      return { x: toFlat(c.recall), y: toFlat(c.precision) }
-    case 'reliability': {
-      const x = toFlat(c.meanPredicted)
-      const y = toFlat(c.observed)
-      const keep = x.map((v, i) => Number.isFinite(v) && Number.isFinite(y[i]))
-      return { x: x.filter((_, i) => keep[i]), y: y.filter((_, i) => keep[i]) }
-    }
-    case 'det':
-      return { x: toFlat(c.fpr).map(probit), y: toFlat(c.fnr).map(probit) }
-    case 'gain':
-      return { x: toFlat(c.fraction), y: toFlat(c.gain) }
-    case 'cost':
-      return { x: toFlat(c.probabilityCost), y: toFlat(c.normalisedCost) }
-    case 'precision-recall-gain':
-      return { x: toFlat(c.recallGain), y: toFlat(c.precisionGain) }
-  }
+  const x = toFlat(c.x)
+  const y = toFlat(c.y)
+  if (c.curve === 'det') return { x: x.map(probit), y: y.map(probit) }
+  // Binned curves hold NaN in empty bins.
+  const keep = x.map((v, i) => Number.isFinite(v) && Number.isFinite(y[i]))
+  return { x: x.filter((_, i) => keep[i]), y: y.filter((_, i) => keep[i]) }
 }
 
 /** The chance or ideal reference line of a kind, if it has one. */
-function reference(c: Curve): XYSeries | null {
-  switch (c.kind) {
+function reference(c: Curve): { name: string; x: number[]; y: number[] } | null {
+  switch (c.curve) {
     case 'roc':
     case 'gain':
-      return { name: 'chance', type: 'line', x: [0, 1], y: [0, 1], muted: true, dashed: true }
+      return { name: 'chance', x: [0, 1], y: [0, 1] }
     case 'reliability':
-      return { name: 'calibrated', type: 'line', x: [0, 1], y: [0, 1], muted: true, dashed: true }
-    case 'precision-recall':
-      return {
-        name: 'chance (π)',
-        type: 'line',
-        x: [0, 1],
-        y: [c.prevalence, c.prevalence],
-        muted: true,
-        dashed: true,
-      }
+    case 'calibration':
+      return { name: 'calibrated', x: [0, 1], y: [0, 1] }
+    case 'pr':
+      return c.prevalence === undefined ? null : { name: 'chance (π)', x: [0, 1], y: [c.prevalence, c.prevalence] }
     case 'cost':
       // The trivial classifiers: always negative costs PC(+), always positive 1 − PC(+).
-      return { name: 'trivial', type: 'line', x: [0, 0.5, 1], y: [0, 0.5, 0], muted: true, dashed: true }
+      return { name: 'trivial', x: [0, 0.5, 1], y: [0, 0.5, 0] }
     default:
       return null
   }
@@ -100,44 +64,52 @@ function reference(c: Curve): XYSeries | null {
 
 /** The summary number a kind reports, with its label. */
 function summary(c: Curve): [string, number] | null {
-  switch (c.kind) {
-    case 'roc':
-      return ['AUROC', c.auc]
-    case 'precision-recall':
-      return ['average precision', c.averagePrecision]
-    case 'reliability':
-      return ['ECE', c.ece]
-    case 'cost':
-      return ['area', c.area]
-    default:
-      return null
-  }
+  if (c.curve === 'reliability' && 'ece' in c) return ['ECE', (c as ReliabilityDiagram).ece]
+  if (c.area === undefined) return null
+  const label: Partial<Record<CurveName, string>> = { roc: 'AUROC', pr: 'average precision' }
+  return [label[c.curve] ?? 'area', c.area]
 }
 
-/** The curves of one kind with their reference line and an optional operating point, as chart series. */
-function useCurveSeries(
+/** The curves of one kind with their reference line and an optional faint reference curve, as Plot layers. */
+function useCurveLayers(
   list: readonly { name: string; curve: Curve }[],
-  point?: [number, number],
   slot = 0,
   extra?: { name: string; curve: Curve },
 ) {
-  const [px, py] = point ?? []
   return useMemo(() => {
-    const out: XYSeries[] = []
     const ref = list.length ? reference(list[0].curve) : null
-    if (ref) out.push(ref)
-    if (extra) {
-      const p = points(extra.curve)
-      out.push({ name: extra.name, type: 'line', x: p.x, y: p.y, muted: true })
-    }
-    list.forEach(({ name, curve }, k) => {
-      const p = points(curve)
-      out.push({ name, type: 'line', x: p.x, y: p.y, slot: slot + k, showPoints: curve.kind === 'reliability' })
-    })
-    if (px !== undefined && py !== undefined)
-      out.push({ name: 'operating point', type: 'scatter', x: [px], y: [py], emphasis: true })
-    return out
-  }, [list, px, py, slot, extra])
+    const faint = extra ? points(extra.curve) : null
+    const drawn = list.map(({ name, curve }) => ({
+      name,
+      reliability: curve.curve === 'reliability',
+      ...points(curve),
+    }))
+    return (
+      <>
+        {ref && <CurveLayer id="reference" name={ref.name} x={ref.x} y={ref.y} muted dashed />}
+        {faint && extra && <CurveLayer id="extra" name={extra.name} x={faint.x} y={faint.y} muted />}
+        {drawn.map((c, k) => (
+          <CurveLayer
+            key={c.name}
+            id={`curve${k}`}
+            name={c.name}
+            x={c.x}
+            y={c.y}
+            slot={slot + k}
+            showPoints={c.reliability}
+          />
+        ))}
+      </>
+    )
+  }, [list, slot, extra])
+}
+
+/** The two axes of a kind: fixed unit-square kinds have equal units and no zoom. */
+function useCurveAxes(kind: CurveName) {
+  const axes = AXES[kind]
+  const x = useAxis({ label: axes.x, range: axes.range, zoom: !axes.range })
+  const y = useAxis({ label: axes.y, range: axes.range, zoom: !axes.range, equal: axes.range ? x : undefined })
+  return { x, y }
 }
 
 export type CurveChartProps = {
@@ -177,45 +149,36 @@ export function CurveChart({
       return { name: s ? `${name}, ${short} ${formatValue(Number(s[1].toPrecision(3)))}` : name, curve: c }
     })
   }, [curve, summaryInLegend])
-  const series = useCurveSeries(list, undefined, slot, extra)
-  const kind = list[0]?.curve.kind ?? 'roc'
-  const axes = AXES[kind]
+  const layers = useCurveLayers(list, slot, extra)
+  const kind = list[0]?.curve.curve ?? 'roc'
+  const axes = useCurveAxes(kind)
   const [px, py] = point ?? []
-  const live = useMemo(
-    (): XYSeries[] =>
-      px !== undefined && py !== undefined && !handles
-        ? [{ name: 'operating point', type: 'scatter', x: [px], y: [py], emphasis: true }]
-        : [],
-    [px, py, handles],
-  )
   return (
-    <XYChart
-      series={series}
-      live={live}
-      handles={handles}
-      xLabel={axes.x}
-      yLabel={axes.y}
-      xRange={axes.range}
-      yRange={axes.range ?? [undefined, undefined]}
-      aspect={axes.range ? 'equal' : 'fit'}
-      zoom={!axes.range}
-      legend
-    />
+    <Plot x={axes.x} y={axes.y} legend>
+      {layers}
+      {px !== undefined && py !== undefined && !handles && (
+        <Points id="point" name="operating point" x={[px]} y={[py]} emphasis live />
+      )}
+      {handles?.map((h, i) => (
+        <Handle key={i} {...h} />
+      ))}
+    </Plot>
   )
 }
 
 /** A short name for a curve's kind, for its legend. */
 function kindName(c: Curve): string {
-  const names: Record<Curve['kind'], string> = {
+  const names: Record<CurveName, string> = {
     roc: 'ROC',
-    'precision-recall': 'PR',
+    pr: 'PR',
     reliability: 'reliability',
+    calibration: 'calibration',
     det: 'DET',
     gain: 'gain',
     cost: 'cost',
-    'precision-recall-gain': 'PRG',
+    prg: 'PRG',
   }
-  return names[c.kind]
+  return names[c.curve]
 }
 
 /**
@@ -224,24 +187,30 @@ function kindName(c: Curve): string {
  * ECE, area) as a readout. A reliability diagram adds the bin counts as a panel beneath. Several curves of one kind
  * are drawn together for comparison.
  */
-export function CurveView(props: CurveViewProps) {
+export function CurvePanel(props: CurvePanelProps) {
   const list = useMemo(
     () => ('kind' in props.curve ? [{ name: 'curve', curve: props.curve as Curve }] : [...props.curve]),
     [props.curve],
   )
-  const kind = list[0]?.curve.kind ?? 'roc'
-  const axes = AXES[kind]
-  const series = useCurveSeries(list, props.point)
-  const counts = kind === 'reliability' ? (list[0].curve as ReliabilityDiagram) : null
-  const countSeries = useMemo((): XYSeries[] => {
-    if (!counts) return []
+  const kind = list[0]?.curve.curve ?? 'roc'
+  const layers = useCurveLayers(list)
+  const axes = useCurveAxes(kind)
+  const [px, py] = props.point ?? []
+  const first = list[0]?.curve
+  const counts = first && 'counts' in first ? (first as ReliabilityDiagram) : null
+  const bins = useMemo(() => {
+    if (!counts) return null
     const e = toFlat(counts.edges)
     const c = toFlat(counts.counts)
-    return [{ name: 'cases per bin', type: 'bar', x: c.map((_, m) => (e[m] + e[m + 1]) / 2), y: c, muted: true }]
+    return { edges: e, x: c.map((_, m) => (e[m] + e[m + 1]) / 2), y: c }
   }, [counts])
+  const casesAxis = useAxis({ label: 'cases', zoom: false })
+  const point =
+    px !== undefined && py !== undefined ? (
+      <Points id="point" name="operating point" x={[px]} y={[py]} emphasis />
+    ) : null
   const readouts = (
     <>
-      {props.readouts}
       {list.map(({ name, curve }) => {
         const s = summary(curve)
         return s ? (
@@ -251,44 +220,39 @@ export function CurveView(props: CurveViewProps) {
     </>
   )
   return (
-    <Figure
-      title={props.title ?? `${kind} curve`}
-      id={props.id}
-      description={props.description}
-      controls={props.controls}
-      readouts={readouts}
-      caption={props.caption}
-      defaultSize={props.defaultSize}
-    >
-      {counts ? (
+    <>
+      <PanelSlot slot="readouts">{readouts}</PanelSlot>
+      {bins ? (
         // The counts share the diagram's probability axis, so bins line up with their points: a short strip right
         // under the square diagram. Both ranges are fixed, so neither panel has zoom controls.
-        <Subplots rows={2} sharex heightRatios={[1, 0.22]} ratiosOf="equal" toolbar={false} tight hoverGroup>
-          <Panel aspect="equal">
-            <XYChart
-              series={series}
-              xLabel={axes.x}
-              yLabel={axes.y}
-              xRange={axes.range}
-              yRange={axes.range}
-              zoom={false}
-            />
-          </Panel>
-          <Panel>
-            <XYChart series={countSeries} xLabel="predicted probability" yLabel="cases" xRange={[0, 1]} zoom={false} />
-          </Panel>
-        </Subplots>
+        <Plots rows={2} heights={[1, 0.22]} ratiosOf="equal" toolbar={false} tight hoverGroup>
+          <Plot x={axes.x} y={axes.y}>
+            {layers}
+            {point}
+          </Plot>
+          <Plot x={axes.x} y={casesAxis}>
+            <Bars name="cases per bin" x={bins.x} y={bins.y} edges={bins.edges} muted />
+          </Plot>
+        </Plots>
       ) : (
-        <XYChart
-          series={series}
-          xLabel={axes.x}
-          yLabel={axes.y}
-          xRange={axes.range}
-          yRange={axes.range ?? [undefined, undefined]}
-          aspect={axes.range ? 'equal' : 'fit'}
-          zoom={!axes.range}
-        />
+        <Plot x={axes.x} y={axes.y}>
+          {layers}
+          {point}
+        </Plot>
       )}
-    </Figure>
+    </>
   )
 }
+
+registerKind(
+  'curve',
+  (o) => typeof o === 'object' && o !== null && (o as Curve).kind === 'curve' && (o as Curve).curve in AXES,
+)
+registerView<Curve>({
+  key: 'curve/unit-square',
+  kind: 'curve',
+  description:
+    'A typed evaluation curve (ROC, PR, reliability, DET, gain, cost, PRG) with its reference line and summary number.',
+  title: (c) => `${kindName(c)} curve`,
+  render: (c) => <CurvePanel curve={c} />,
+})

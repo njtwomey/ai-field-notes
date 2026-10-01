@@ -9,7 +9,7 @@
  */
 
 import { fromData, isTensor, type Tensor } from 'aifn/foundation/tensor'
-import { rfftfreq, transformInPlace } from 'aifn/foundation/fourier'
+import { fft, irfft, rfft, rfftfreq } from 'aifn/foundation/fourier'
 import type { Scalar, Size, Spectrum, TimeFrequency } from 'aifn/foundation/contracts'
 import { windowValues, type WindowInput } from 'aifn/signal/windows'
 import { complexValues, powerUnit, readSamples, spectrum, timeFrequency, type SignalInput } from '../signal'
@@ -98,16 +98,25 @@ function segmentTransforms(x: Float64Array, o: Required<Omit<SegmentOptions, 'wi
     nfreq,
     scale,
   }
+  // Every detrended, windowed segment is one row of a [count, nfft] frame matrix, transformed along its rows at once.
+  const frames = new Float64Array(count * nfft)
   const seg = new Float64Array(nperseg)
   for (let k = 0; k < count; k++) {
     seg.set(x.subarray(k * step, k * step + nperseg))
     detrendInPlace(seg, detrend)
-    const re = new Float64Array(nfft)
-    const im = new Float64Array(nfft)
-    for (let i = 0; i < nperseg; i++) re[i] = seg[i] * win[i]
-    transformInPlace(re, im)
-    out.re.push(re.subarray(0, nfreq))
-    out.im.push(im.subarray(0, nfreq))
+    for (let i = 0; i < nperseg; i++) frames[k * nfft + i] = seg[i] * win[i]
+  }
+  if (count === 0) return out
+  const spec = fft(fromData(frames, [count, nfft])).data as Float64Array
+  for (let k = 0; k < count; k++) {
+    const re = new Float64Array(nfreq)
+    const im = new Float64Array(nfreq)
+    for (let j = 0; j < nfreq; j++) {
+      re[j] = spec[2 * (k * nfft + j)]
+      im[j] = spec[2 * (k * nfft + j) + 1]
+    }
+    out.re.push(re)
+    out.im.push(im)
   }
   return out
 }
@@ -260,7 +269,7 @@ export function spectrogram(x: SignalInput, options: SegmentOptions = {}): TimeF
  * The short-time Fourier transform, as `scipy.signal.stft`: the signal is padded with nperseg/2 zeros at both ends
  * (so the first and last segments are centred on the ends) and at the end to a whole number of steps, and each
  * windowed segment's transform is divided by the window's sum. Defaults: Hann window, 256 samples, 50% overlap, no
- * detrending. Returns a `TimeFrequency` raster with complex values [f, t, 2] (the interim complex layout).
+ * detrending. Returns a `TimeFrequency` raster with complex128 values [f, t].
  */
 export function stft(
   x: SignalInput,
@@ -455,19 +464,15 @@ export function dpss(n: Size, nw: Scalar, k: Size): Dpss {
     if (flip) for (let i = 0; i < n; i++) v[i] = -v[i]
   })
   // λ = Σ_l r[l] sin(2πWl)/(πl) over lags, with r the taper's autocorrelation (computed by FFT).
+  // r = irfft(|rfft(v, 2n)|²): the linear autocorrelation, zero-padded to 2n so the circular one does not wrap.
   const m = 2 * n
   const conc = vectors.map((v) => {
-    const re = new Float64Array(m)
-    const im = new Float64Array(m)
-    re.set(v)
-    transformInPlace(re, im)
-    for (let j = 0; j < m; j++) {
-      re[j] = re[j] * re[j] + im[j] * im[j]
-      im[j] = 0
-    }
-    transformInPlace(re, im, true)
-    let lambda = (re[0] / m) * 2 * w
-    for (let l = 1; l < n; l++) lambda += (2 * (re[l] / m) * Math.sin(2 * Math.PI * w * l)) / (Math.PI * l)
+    const spec = rfft(fromData(v), { n: m }).data as Float64Array
+    const power = new Float64Array(spec.length)
+    for (let j = 0; j < power.length; j += 2) power[j] = spec[j] * spec[j] + spec[j + 1] * spec[j + 1]
+    const r = irfft(fromData(power, [power.length / 2], 'complex128'), { n: m }).data as Float64Array
+    let lambda = r[0] * 2 * w
+    for (let l = 1; l < n; l++) lambda += (2 * r[l] * Math.sin(2 * Math.PI * w * l)) / (Math.PI * l)
     return lambda
   })
   const flat = new Float64Array(k * n)
@@ -495,13 +500,16 @@ export function multitaper(
   const tapers = dpss(n, nw, k)
   const nfreq = Math.floor(nfft / 2) + 1
   const psd = new Float64Array(nfreq)
-  for (let j = 0; j < k; j++) {
-    const re = new Float64Array(nfft)
-    const im = new Float64Array(nfft)
-    for (let i = 0; i < n; i++) re[i] = v[i] * tapers.tapers.data[j * n + i]
-    transformInPlace(re, im)
-    for (let b = 0; b < nfreq; b++) psd[b] += (re[b] * re[b] + im[b] * im[b]) / (k * fs)
-  }
+  // The k tapered copies of the signal as rows of a [k, n] matrix, transformed along the rows at once.
+  const tapered = new Float64Array(k * n)
+  for (let j = 0; j < k; j++) for (let i = 0; i < n; i++) tapered[j * n + i] = v[i] * tapers.tapers.data[j * n + i]
+  const spec = rfft(fromData(tapered, [k, n]), { n: nfft }).data as Float64Array
+  for (let j = 0; j < k; j++)
+    for (let b = 0; b < nfreq; b++) {
+      const re = spec[2 * (j * nfreq + b)]
+      const im = spec[2 * (j * nfreq + b) + 1]
+      psd[b] += (re * re + im * im) / (k * fs)
+    }
   for (let b = 1; b < nfreq; b++) if (!(nfft % 2 === 0 && b === nfft / 2)) psd[b] *= 2
   const f = rfftfreq(nfft, 1 / fs).data
   return { ...powerSpectrum(f, psd, { fs, scaling: 'density', onesided: true }, input.unit), ...tapers }

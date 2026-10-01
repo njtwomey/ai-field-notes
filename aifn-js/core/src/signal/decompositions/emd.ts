@@ -2,7 +2,8 @@
  * Empirical mode decomposition (Huang et al., 1998, Proc. R. Soc. Lond. A 454): a signal is split into intrinsic mode
  * functions (IMFs) by sifting, x = Σ imfs + residue, fastest mode first, returned as a `Decomposition`. `siftSteps` is
  * the sifting of one IMF as a traceable algorithm; `eemd` is ensemble EMD (Wu and Huang, 2009, Adv. Adapt. Data Anal.
- * 1(1)).
+ * 1(1)); `ceemdan` is complete ensemble EMD with adaptive noise (Torres, Colominas, Schlotthauer & Flandrin, 2011,
+ * ICASSP), all on the same sifting.
  */
 
 import { child, normals, type Stream } from 'aifn/foundation/random'
@@ -186,4 +187,69 @@ export function eemd(
     for (let i = 0; i < n; i++) residue[i] += d.residue[i] / trials
   }
   return decomposition('eemd', input, imfs, residue)
+}
+
+/** Options for `ceemdan`. */
+export interface CeemdanOptions {
+  /** Noise realisations I. Default 50. */
+  trials?: Size
+  /** The noise amplitude ε relative to the standard deviation of the signal (stage 1) or residue (later stages). Default 0.2. */
+  epsilon?: Scalar
+  /** Most IMFs to extract (−1 for no limit). Default −1. */
+  maxImfs?: Size
+  /** When to stop sifting one IMF. Default 10 fixed sifts, as `eemd`. */
+  rule?: StopRule
+}
+
+/**
+ * Complete ensemble EMD with adaptive noise (Torres et al., 2011). EEMD averages whole decompositions of differently
+ * noised copies, so its modes do not sum to the signal and the k-th averaged mode mixes different scales. CEEMDAN
+ * extracts one mode at a time from a shared residue instead:
+ *
+ *   IMF₁ = (1/I) Σᵢ E₁(x + β₀wᵢ),  r₁ = x − IMF₁,
+ *   IMFₖ = (1/I) Σᵢ E₁(rₖ₋₁ + βₖ₋₁ Eₖ₋₁(wᵢ)),  rₖ = rₖ₋₁ − IMFₖ,
+ *
+ * where wᵢ is unit white noise (trial i draws from `child(s, 'trial', i)`), Eⱼ(·) is the j-th mode by EMD (E₁: the
+ * first IMF by sifting, shared with `emd`), β₀ = ε σ(x) and βₖ = ε σ(rₖ). Stops when the residue has too few extrema to
+ * sift, or after `maxImfs`. By construction Σ IMFs + residue = x exactly (complete), unlike `eemd`. Returns a
+ * `Decomposition` (`method: 'ceemdan'`).
+ */
+export function ceemdan(s: Stream, x: SignalInput, options: CeemdanOptions = {}): Decomposition {
+  const { trials = 50, epsilon = 0.2, maxImfs = -1, rule = { kind: 'fixed', sifts: 10 } } = options
+  const input = readSamples(x, 'ceemdan')
+  const v = input.values
+  const n = v.length
+  const sd = (a: ArrayLike<number>) => {
+    let m = 0
+    for (let i = 0; i < a.length; i++) m += a[i] / a.length
+    let q = 0
+    for (let i = 0; i < a.length; i++) q += (a[i] - m) ** 2 / a.length
+    return Math.sqrt(q)
+  }
+  // The noise realisations and their EMD modes Eⱼ(wᵢ), computed once (a missing mode is zero).
+  const noise = Array.from({ length: trials }, (_, i) => dense.data(normals(child(s, 'trial', i), [n])))
+  const noiseModes = noise.map((w) => emdCore(w, { maxImfs, rule }).imfs)
+  const first = (y: Float64Array) => {
+    const r = sift(y, rule)
+    return r.oscillating ? r.imf : null
+  }
+  const imfs: Float64Array[] = []
+  const residue = Float64Array.from(v)
+  while (maxImfs < 0 || imfs.length < maxImfs) {
+    const k = imfs.length
+    if (first(residue) === null) break
+    const beta = epsilon * sd(residue)
+    const imf = new Float64Array(n)
+    for (let i = 0; i < trials; i++) {
+      const add = k === 0 ? noise[i] : noiseModes[i][k - 1]
+      const y = add ? residue.map((r, j) => r + beta * add[j]) : Float64Array.from(residue)
+      const e = first(y)
+      // A noisy copy with too few extrema to sift has no first mode: it contributes zero.
+      if (e) for (let j = 0; j < n; j++) imf[j] += e[j]
+    }
+    for (let j = 0; j < n; j++) imf[j] /= trials
+    imfs.push(imf)
+    for (let j = 0; j < n; j++) residue[j] -= imf[j]
+  }
+  return decomposition('ceemdan', input, imfs, residue)
 }

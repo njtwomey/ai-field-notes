@@ -22,6 +22,9 @@ import {
   gamma as gammaFunction,
   logBeta,
   logGamma,
+  logRegularisedBeta,
+  logRegularisedGammaP,
+  logRegularisedGammaQ,
   logSigmoid,
   logit,
   log1mexp,
@@ -33,10 +36,13 @@ import {
   regularisedBeta,
   regularisedBetaInverse,
   regularisedGammaP,
+  regularisedGammaPInverse,
   regularisedGammaQ,
+  regularisedGammaQInverse,
   sigmoid,
   softplus,
   studentTCdf,
+  studentTLogCdf,
   studentTQuantile,
 } from 'aifn/numerics/special'
 import {
@@ -54,7 +60,6 @@ import {
   mul,
   neg,
   pow,
-  sign,
   sqrt,
   square,
   sub,
@@ -72,6 +77,7 @@ import {
   guard,
   inverseTransform,
   locationScale,
+  logFromTails,
   LOG_2PI,
   mask,
   outside,
@@ -79,7 +85,7 @@ import {
   rawMap,
   rawOnly,
   standardCauchyCdf,
-  tan,
+  standardCauchyQuantile,
   univariate,
 } from './util'
 import { xlog1py, xlogy } from 'aifn/numerics/special'
@@ -121,6 +127,7 @@ export function Normal<M extends Value, S extends Value>(loc: M, scale: S): Univ
     survival: (x) => normalCdf(neg(z(x))),
     logSurvival: (x) => normalLogCdf(neg(z(x))),
     quantile: (p) => add(loc, mul(scale, normalQuantile(p))),
+    isf: (q) => sub(loc, mul(scale, normalQuantile(q))),
     rsample: (s, shape, scalar) => locationScale(s, shape, scalar, loc, scale),
     mean: () => atBatch(loc, scale),
     variance: () => atBatch(square(scale), loc),
@@ -178,6 +185,7 @@ export function LogNormal<M extends Value, S extends Value>(mu: M, sigma: S): Un
       return outside(ok, normalLogCdf(neg(z(x, ok))), 0)
     },
     quantile: (p) => exp(add(mu, mul(sigma, normalQuantile(p)))),
+    isf: (q) => exp(sub(mu, mul(sigma, normalQuantile(q)))),
     rsample: (s, shape, scalar) => exp(locationScale(s, shape, scalar, mu, sigma)),
     mean: () => exp(add(mu, mul(0.5, square(sigma)))),
     variance: () => mul(expm1(square(sigma)), exp(add(mul(2, mu), square(sigma)))),
@@ -219,8 +227,11 @@ export function StudentT<D extends Value, M extends Value = number, S extends Va
         mul(halfPlus, log1p(div(square(z(x)), df))),
       ),
     cdf: (x) => studentTCdf(z(x), df),
+    logcdf: (x) => studentTLogCdf(z(x), df),
     survival: (x) => studentTCdf(neg(z(x)), df),
+    logSurvival: (x) => studentTLogCdf(neg(z(x)), df),
     quantile: (p) => add(loc, mul(scale, studentTQuantile(p, df))),
+    isf: (q) => sub(loc, mul(scale, studentTQuantile(q, df))),
     sample: (s, shape) =>
       drawn(studentTDraws(s, raw(df, 'StudentT'), raw(loc, 'StudentT'), raw(scale, 'StudentT'), { shape })),
     mean: () =>
@@ -253,7 +264,7 @@ export function StudentT<D extends Value, M extends Value = number, S extends Va
 export function Cauchy<M extends Value, S extends Value>(loc: M, scale: S): Univariate<M | S> {
   check('Cauchy', 'scale', scale, positive, 'positive')
   const z = (x: Value) => div(sub(x, loc), scale)
-  const quantile = (p: Value) => add(loc, mul(scale, tan(mul(Math.PI, sub(p, 0.5)))))
+  const quantile = (p: Value) => add(loc, mul(scale, standardCauchyQuantile(p)))
   return univariate({
     name: 'Cauchy',
     params: { loc, scale },
@@ -262,6 +273,7 @@ export function Cauchy<M extends Value, S extends Value>(loc: M, scale: S): Univ
     cdf: (x) => standardCauchyCdf(z(x)),
     survival: (x) => standardCauchyCdf(neg(z(x))),
     quantile,
+    isf: (q) => sub(loc, mul(scale, standardCauchyQuantile(q))),
     rsample: (s, shape, scalar) => inverseTransform(s, shape, scalar, quantile),
     mean: () => nanAt(loc, scale),
     variance: () => nanAt(loc, scale),
@@ -277,10 +289,14 @@ export function Laplace<M extends Value, S extends Value>(loc: M, scale: S): Uni
   check('Laplace', 'scale', scale, positive, 'positive')
   const z = (x: Value) => div(sub(x, loc), scale)
   const below = (x: Value) => mask([x, loc], (v, m) => v < m)
-  const quantile = (p: Value) => {
-    const c = sub(p, 0.5)
-    return sub(loc, mul(mul(scale, sign(c)), log1p(mul(-2, abs(c)))))
+  // The standard quantile: log 2p below ½ and −log 2(1 − p) above (1 − p is exact there), so that neither tail
+  // passes through 1 − 2|p − ½|, which rounds to 0 for tiny p.
+  const standard = (p: Value) => {
+    const low = mask([p], (v) => v < 0.5)
+    const high = mask([p], (v) => !(v < 0.5))
+    return where(low, log(mul(2, guard(p, low, 0.25))), neg(log(mul(2, sub(1, guard(p, high, 0.75))))))
   }
+  const quantile = (p: Value) => add(loc, mul(scale, standard(p)))
   return univariate({
     name: 'Laplace',
     params: { loc, scale },
@@ -299,7 +315,12 @@ export function Laplace<M extends Value, S extends Value>(loc: M, scale: S): Uni
       const t = mul(0.5, exp(neg(abs(z(x)))))
       return where(below(x), sub(1, t), t)
     },
+    logSurvival: (x) => {
+      const a = abs(z(x))
+      return where(below(x), log1p(mul(-0.5, exp(neg(a)))), sub(-Math.LN2, a))
+    },
     quantile,
+    isf: (q) => sub(loc, mul(scale, standard(q))),
     rsample: (s, shape, scalar) => inverseTransform(s, shape, scalar, quantile),
     mean: () => atBatch(loc, scale),
     variance: () => atBatch(mul(2, square(scale)), loc),
@@ -328,6 +349,7 @@ export function Logistic<M extends Value, S extends Value>(loc: M, scale: S): Un
     survival: (x) => sigmoid(neg(z(x))),
     logSurvival: (x) => logSigmoid(neg(z(x))),
     quantile,
+    isf: (q) => sub(loc, mul(scale, logit(q))),
     rsample: (s, shape, scalar) => inverseTransform(s, shape, scalar, quantile),
     mean: () => atBatch(loc, scale),
     variance: () => atBatch(mul((Math.PI * Math.PI) / 3, square(scale)), loc),
@@ -351,6 +373,7 @@ export function Uniform<A extends Value, B extends Value>(low: A, high: B): Univ
     cdf: (x) => minimum(maximum(div(sub(x, low), width), 0), 1),
     survival: (x) => minimum(maximum(div(sub(high, x), width), 0), 1),
     quantile: (p) => add(low, mul(p, width)),
+    isf: (q) => sub(high, mul(q, width)),
     rsample: (s, shape, scalar) => inverseTransform(s, shape, scalar, (u) => add(low, mul(u, width))),
     mean: () => mul(0.5, add(low, high)),
     variance: () => div(square(width), 12),
@@ -377,6 +400,7 @@ export function Exponential<R extends Value>(rate: R): Univariate<R> {
     survival: (x) => exp(neg(t(x))),
     logSurvival: (x) => neg(t(x)),
     quantile: (p) => div(neg(log1p(neg(p))), rate),
+    isf: (q) => div(neg(log(q)), rate),
     rsample: (s, shape, scalar) => inverseTransform(s, shape, scalar, (u) => div(neg(log1p(neg(u))), rate)),
     mean: () => div(1, rate),
     variance: () => div(1, square(rate)),
@@ -410,7 +434,12 @@ function gammaSpec(shape: Value, rate: Value) {
       )
     },
     cdf: (x: Value) => regularisedGammaP(shape, t(x)),
+    logcdf: (x: Value) => logRegularisedGammaP(shape, t(x)),
     survival: (x: Value) => regularisedGammaQ(shape, t(x)),
+    logSurvival: (x: Value) => logRegularisedGammaQ(shape, t(x)),
+    // Above p = ½ the inverse solves Q = 1 − p, so upper quantiles keep their relative accuracy.
+    quantile: (p: Value) => div(regularisedGammaPInverse(shape, p), rate),
+    isf: (q: Value) => div(regularisedGammaQInverse(shape, q), rate),
     sample: (s: Stream, drawShape: number[]) =>
       drawn(
         gammaDraws(s, raw(shape, 'Gamma'), unwrap(div(1, raw(rate, 'Gamma'))) as number | Tensor, { shape: drawShape }),
@@ -493,15 +522,21 @@ export function InverseGamma<A extends Value, B extends Value>(shape: A, scale: 
       const ok = valid(x)
       return outside(ok, regularisedGammaQ(shape, inverse(x, ok)), 0)
     },
+    logcdf: (x) => {
+      const ok = valid(x)
+      return outside(ok, logRegularisedGammaQ(shape, inverse(x, ok)), -Infinity)
+    },
     survival: (x) => {
       const ok = valid(x)
       return outside(ok, regularisedGammaP(shape, inverse(x, ok)), 1)
     },
-    quantile: (p) => {
-      // The p-quantile of 1/X is β over the (1 − p)-quantile of Gamma(α, 1).
-      const g = Gamma(raw(shape, 'InverseGamma.quantile'), 1)
-      return div(raw(scale, 'InverseGamma.quantile'), g.quantile(sub(1, raw(p, 'InverseGamma.quantile'))))
+    logSurvival: (x) => {
+      const ok = valid(x)
+      return outside(ok, logRegularisedGammaP(shape, inverse(x, ok)), 0)
     },
+    // The p-quantile of 1/X is β over the inverse survival function of Gamma(α, 1) at p, never at 1 − p.
+    quantile: (p) => div(scale, regularisedGammaQInverse(shape, p)),
+    isf: (q) => div(scale, regularisedGammaPInverse(shape, q)),
     sample: (s, shape_) =>
       drawn(
         unwrap(
@@ -553,8 +588,19 @@ export function Beta<A extends Value, B extends Value>(a: A, b: B): Univariate<A
       return outside(ok, sub(add(xlogy(sub(a, 1), xs), xlog1py(sub(b, 1), neg(xs))), logBeta(a, b)), -Infinity)
     },
     cdf: (x) => regularisedBeta(a, b, minimum(maximum(x, 0), 1)),
+    logcdf: (x) => logRegularisedBeta(a, b, minimum(maximum(x, 0), 1)),
     survival: (x) => regularisedBeta(b, a, minimum(maximum(sub(1, x), 0), 1)),
+    // 1 − x drops a tiny x, so where the survival function is near 1 it is log1p(−cdf).
+    logSurvival: (x) => {
+      const y = minimum(maximum(sub(1, x), 0), 1)
+      return logFromTails(
+        regularisedBeta(b, a, y),
+        regularisedBeta(a, b, minimum(maximum(x, 0), 1)),
+        logRegularisedBeta(b, a, y),
+      )
+    },
     quantile: (p) => regularisedBetaInverse(a, b, p),
+    isf: (q) => sub(1, regularisedBetaInverse(b, a, q)),
     sample: (s, shape) => drawn(betaDraws(s, raw(a, 'Beta'), raw(b, 'Beta'), { shape })),
     mean: () => div(a, total),
     variance: () => div(mul(a, b), mul(square(total), add(total, 1))),
@@ -603,6 +649,7 @@ export function Weibull<K extends Value, L extends Value>(shape: K, scale: L): U
     survival: (x) => exp(neg(power(x))),
     logSurvival: (x) => neg(power(x)),
     quantile,
+    isf: (q) => mul(scale, pow(neg(log(q)), div(1, shape))),
     rsample: (s, shape_, scalar) => inverseTransform(s, shape_, scalar, quantile),
     mean: () => mul(scale, gammaFunction(add(1, div(1, shape)))),
     variance: () =>
@@ -635,7 +682,9 @@ export function Gumbel<M extends Value, S extends Value>(loc: M, scale: S): Univ
     cdf: (x) => exp(neg(exp(neg(z(x))))),
     logcdf: (x) => neg(exp(neg(z(x)))),
     survival: (x) => neg(expm1(neg(exp(neg(z(x)))))),
+    logSurvival: (x) => log1mexp(neg(exp(neg(z(x))))),
     quantile,
+    isf: (q) => sub(loc, mul(scale, log(neg(log1p(neg(q)))))),
     rsample: (s, shape, scalar) => inverseTransform(s, shape, scalar, quantile),
     mean: () => add(loc, mul(EULER_GAMMA, scale)),
     variance: () => atBatch(mul((Math.PI * Math.PI) / 6, square(scale)), loc),
@@ -750,6 +799,13 @@ export function TruncatedNormal<M extends Value, S extends Value, A extends Valu
   const z = (x: Value) => div(sub(x, loc), scale)
   const inside = (x: Value) => mask([x, low, high], (v, a, b) => v >= a && v <= b)
   const clipped = (x: Value) => div(sub(minimum(maximum(x, low), high), loc), scale)
+  const logLower = (x: Value) => sub(normalLogIntervalProbability(alpha, clipped(x)), logZ)
+  const logUpper = (x: Value) => sub(normalLogIntervalProbability(clipped(x), beta), logZ)
+  const logTail = (own: Value, other: Value) => {
+    const small = mask([own], (v) => !(v > -Math.LN2))
+    const large = mask([own], (v) => v > -Math.LN2)
+    return where(small, own, log1mexp(guard(other, large, -1)))
+  }
   // φ(t)/Z and t·φ(t)/Z at the bounds, with infinite bounds contributing 0.
   const density = (t: Value) => exp(sub(normalLogPdf(t), logZ))
   const moment = (t: Value) => {
@@ -772,10 +828,11 @@ export function TruncatedNormal<M extends Value, S extends Value, A extends Valu
       const ok = inside(x)
       return outside(ok, sub(sub(normalLogPdf(z(guard(x, ok, 0))), log(scale)), logZ), -Infinity)
     },
-    cdf: (x) => exp(sub(normalLogIntervalProbability(alpha, clipped(x)), logZ)),
-    logcdf: (x) => sub(normalLogIntervalProbability(alpha, clipped(x)), logZ),
-    survival: (x) => exp(sub(normalLogIntervalProbability(clipped(x), beta), logZ)),
-    logSurvival: (x) => sub(normalLogIntervalProbability(clipped(x), beta), logZ),
+    cdf: (x) => exp(logLower(x)),
+    // Each log tail is the difference of logs where it is at most ½, and log1p of minus the other tail above.
+    logcdf: (x) => logTail(logLower(x), logUpper(x)),
+    survival: (x) => exp(logUpper(x)),
+    logSurvival: (x) => logTail(logUpper(x), logLower(x)),
     quantile,
     sample: (s, shape) => drawnAt(inverseTransform(s, shape, false, quantile), shape),
     mean: () => add(loc, mul(scale, sub(density(alpha), density(beta)))),

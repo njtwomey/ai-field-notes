@@ -6,9 +6,17 @@
 import { normal, type Stream, child, uniform } from 'aifn/foundation/random'
 import { fromData, type Tensor } from 'aifn/foundation/tensor'
 import { checkCount, labels, matrix, type Dataset } from '../types'
+import type { DatasetInfo } from 'aifn/foundation/contracts'
+import { definer } from 'aifn/foundation/registry'
+import { int, oneOf, real, space } from 'aifn/foundation/space'
 
-/** A checkerboard of `tile`-pixel squares, `low` and `high` valued, starting with `high` at the top left. */
-export function checkerboardImage(size = 64, tile = 8, { low = 0, high = 1 } = {}): Tensor {
+/** A `size`-pixel checkerboard of `tile`-pixel squares, `low` and `high` valued, starting with `high` at the top left. */
+export function checkerboardImage({
+  size = 64,
+  tile = 8,
+  low = 0,
+  high = 1,
+}: { size?: number; tile?: number; low?: number; high?: number } = {}): Tensor {
   const out = new Float64Array(size * size)
   for (let r = 0; r < size; r++)
     for (let c = 0; c < size; c++) out[r * size + c] = (Math.floor(r / tile) + Math.floor(c / tile)) % 2 ? low : high
@@ -19,10 +27,11 @@ export function checkerboardImage(size = 64, tile = 8, { low = 0, high = 1 } = {
  * A linear ramp from 0 to 1 across the image in the direction `angle` (radians, 0 = left to right, π/2 = bottom to
  * top); `kind: 'radial'` ramps from 0 at the centre to 1 at the corners.
  */
-export function gradientImage(
+export function gradientImage({
   size = 64,
-  { angle = 0, kind = 'linear' }: { angle?: number; kind?: 'linear' | 'radial' } = {},
-): Tensor {
+  angle = 0,
+  kind = 'linear',
+}: { size?: number; angle?: number; kind?: 'linear' | 'radial' } = {}): Tensor {
   const out = new Float64Array(size * size)
   const c = (size - 1) / 2
   const [dx, dy] = [Math.cos(angle), Math.sin(angle)]
@@ -127,7 +136,7 @@ export function digits(s: Stream, options: { perClass?: number; flip?: number; n
  * Algorithms", §43): each subset of columns switched on (bars) or of rows (stripes), with the all-off and all-on
  * patterns counted once. Returns a [2^{size+1} − 2, size·size] tensor of 0s and 1s.
  */
-export function barsAndStripes(size = 4): Tensor {
+export function barsAndStripes({ size = 4 }: { size?: number } = {}): Tensor {
   const patterns: number[][] = []
   const seen = new Set<string>()
   for (const kind of ['bars', 'stripes'])
@@ -143,3 +152,104 @@ export function barsAndStripes(size = 4): Tensor {
     }
   return matrix(Float64Array.from(patterns.flat()), patterns.length, size * size)
 }
+
+// ── Registry ─────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+const dataset = definer<DatasetInfo>('dataset', 'data/synthetic')
+
+dataset(
+  {
+    key: 'checkerboardImage',
+    name: 'Checkerboard image',
+    summary: 'A greyscale checkerboard of square tiles.',
+    task: 'images',
+    output: 'image',
+    knobs: space({
+      size: int(4, 512, { default: 64 }),
+      tile: int(1, 64, { default: 8 }),
+      low: real(0, 1, { default: 0 }),
+      high: real(0, 1, { default: 1 }),
+    }),
+    truth: false,
+    random: false,
+  },
+  checkerboardImage,
+)
+
+dataset(
+  {
+    key: 'gradientImage',
+    name: 'Gradient image',
+    summary: 'A linear ramp in a direction, or a radial one from the centre.',
+    task: 'images',
+    output: 'image',
+    knobs: space({
+      size: int(4, 512, { default: 64 }),
+      angle: real(-Math.PI, Math.PI, { default: 0 }),
+      kind: oneOf(['linear', 'radial']),
+    }),
+    truth: false,
+    random: false,
+  },
+  gradientImage,
+)
+
+dataset(
+  {
+    key: 'shapesImage',
+    name: 'Shapes image',
+    summary: 'A rectangle, a disk, a triangle and a checkerboard patch on a dark background.',
+    task: 'images',
+    output: 'image',
+    knobs: space({ size: int(16, 512, { default: 64 }) }),
+    truth: false,
+    random: false,
+  },
+  shapesImage,
+)
+
+dataset(
+  {
+    key: 'digitGlyphs',
+    name: 'Digit glyphs',
+    summary: 'The ten digits of a 5 × 7 pixel font.',
+    task: 'images',
+    output: 'patterns',
+    knobs: space({}),
+    truth: false,
+    random: false,
+  },
+  digitGlyphs,
+)
+
+dataset(
+  {
+    key: 'digits',
+    name: 'Noisy digits',
+    summary: 'Copies of the 5 × 7 digit glyphs with flipped pixels and Gaussian noise, labelled by digit.',
+    task: 'images',
+    output: 'dataset',
+    knobs: space({
+      perClass: int(1, 200, { default: 20 }),
+      flip: real(0, 0.5, { default: 0.05 }),
+      noise: real(0, 1, { default: 0.1 }),
+    }),
+    truth: false,
+    random: true,
+  },
+  digits,
+)
+
+dataset(
+  {
+    key: 'barsAndStripes',
+    name: 'Bars and stripes',
+    summary: 'Every bars-and-stripes pattern on a square grid.',
+    task: 'images',
+    output: 'patterns',
+    knobs: space({ size: int(2, 6, { default: 4 }) }),
+    truth: false,
+    random: false,
+  },
+  barsAndStripes,
+)

@@ -5,13 +5,72 @@
  */
 
 import { AifnError } from 'aifn/foundation/errors'
-import type { Entry, EntryKind, Info, Stability } from 'aifn/foundation/contracts'
+import type {
+  AlgorithmInfo,
+  AlgorithmProblem,
+  BijectorInfo,
+  DistributionInfo,
+  Entry,
+  EntryKind,
+  FilterDesignInfo,
+  Info,
+  KernelInfo,
+  KlRuleInfo,
+  LikelihoodInfo,
+  LinkInfo,
+  PrimitiveInfo,
+  Stability,
+  StateRoles,
+  StatusFlag,
+  SupportName,
+  WaveletInfo,
+  WindowInfo,
+} from 'aifn/foundation/contracts'
 
-export type { Entry, EntryKind, Info, Stability }
+export type {
+  AlgorithmInfo,
+  AlgorithmProblem,
+  BijectorInfo,
+  DistributionInfo,
+  Entry,
+  EntryKind,
+  FilterDesignInfo,
+  Info,
+  KernelInfo,
+  KlRuleInfo,
+  LikelihoodInfo,
+  LinkInfo,
+  PrimitiveInfo,
+  Stability,
+  StateRoles,
+  StatusFlag,
+  SupportName,
+  WaveletInfo,
+  WindowInfo,
+}
 
 /** Attach `info` to `value` (the value itself is returned, with a frozen `info` added). */
 export function define<T extends object, I extends Info>(info: I, value: T): Entry<T, I> {
   return Object.assign(value, { info: Object.freeze({ ...info }) }) as Entry<T, I>
+}
+
+/** What a definition states: its info without `kind` and `module` (fixed by the definer), `stability` optional. */
+export type Spec<I extends Info> = Omit<I, 'kind' | 'module' | 'stability'> & { readonly stability?: Stability }
+
+/**
+ * A `define` for one kind and module, so a module's registry states only what differs per entry: `stability` defaults
+ * to `experimental`.
+ *
+ * ```ts
+ * const window = definer<WindowInfo>('window', 'signal/windows')
+ * export const hann = window({ key: 'hann', name: 'Hann', … }, (n: Size) => getWindow('hann', n))
+ * ```
+ */
+export function definer<I extends Info>(
+  kind: I['kind'],
+  module: string,
+): <T extends object>(spec: Spec<I>, value: T) => Entry<T, I> {
+  return (spec, value) => define({ stability: 'experimental', ...spec, kind, module } as unknown as I, value)
 }
 
 /** True when `x` carries registry metadata of `kind` (any kind when omitted). */

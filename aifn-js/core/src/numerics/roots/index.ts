@@ -1,7 +1,8 @@
 /**
  * `aifn/numerics/roots`: roots of nonlinear equations, every iterative method a traceable `Algorithm`: bisection,
  * regula falsi, secant, Newton and Brent for scalar equations; Newton and Broyden for systems; fixed-point iteration;
- * continuation (Newton homotopy); and the drivers `findRoot` and `solveSystem`.
+ * continuation (Newton homotopy); the drivers `findRoot` and `solveSystem`; and `minimizeScalar`, Brent's and
+ * golden-section minimisation of a function of one variable (the bracketing methods of root finding turned to minima).
  */
 
 export {
@@ -39,3 +40,5 @@ export {
   type SystemWithJacobian,
 } from './systems'
 export { findRoot, solveSystem, type RootResult, type SystemResult } from './convenience'
+export { minimizeScalar, type MinimizeScalarOptions, type MinimizeScalarResult } from './minimize'
+export { rootsAlgorithms } from './registry'

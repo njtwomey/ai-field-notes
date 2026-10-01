@@ -1,7 +1,27 @@
 # aifn: a shared library for the field notes
 
-Status: **plan for review**. Nothing here is built yet. Points that need the owner's decision are marked **[decide]**.
-Evidence for every claim about today's code is in the stage-1 survey (`.scratch/aifn/survey.md`).
+Status: **built through phase 5** (2026-10-01; §0). This document is the original plan; the target design that
+replaced parts of it is `docs/aifn-architecture.md`, and where the two differ the architecture document and
+`aifn-js/modules.json` win. Points that needed the owner's decision are marked **[decide]**. Evidence for every claim
+about the code before aifn is in the stage-1 survey (`.scratch/aifn/survey.md`).
+
+## 0. Status (2026-10-01)
+
+The phases are those of the architecture document's roadmap (§9 there).
+
+| Phase                       | Status           | What landed                                                                                                                                                                                                                                               |
+| --------------------------- | ---------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 0 Safety net and layout     | done             | `core/` and `applications/` workspaces; `aifn/foundation/contracts`, the error hierarchy and tensor brand; the primitive registry with generated tests; `make bench`; `aifn/foundation/registry`; layer and name-collision lints                          |
+| 1 One of each, one protocol | done             | the nested tree (12 core families, 124 modules; 15 application areas); the final Algorithm protocol (factories, `step(state, ctx)`, `Status`, plain-data streams); the §4 merges and capability conformance; tests mirroring the tree                     |
+| 2 Core internals            | done             | reverse, forward and batch interpreters with `vmap`; jvp, batch and shape rules on every general primitive; custom rules, `checkpoint`, implicit differentiation; linear-algebra derivatives                                                              |
+| 3 Signal spine              | done             | `complex128`; FFT primitives and the DFT matrix; the N-d `conv` family; `linearFilter`; signal, systems and `eig` on complex values                                                                                                                       |
+| 4 Catalog and Space         | done             | registries for 19 kinds in both packages (680 entries, models with declared capabilities, datasets with a recipe interpreter); `generated/catalog.json` with `make catalog` and `make catalog-check`                                                      |
+| 5 Views v2                  | done             | the lab's `Plot`, axis model and layers; figure state and URL state, probes, the `useComputed` scheduler (inline and worker), `Equation`; the view registry and `Show`; every lab page migrated and reviewed; `XYChart`, `Heatmap` and `Subplots` retired |
+| 6 Languages (`mlc` → aifn)  | waiting on owner | nothing yet: wire shapes, converters, fixtures keyed by the catalog and the `python/mlc` → `aifn-py` rename are one step, to run when the owner asks                                                                                                      |
+| 7 Coverage and hardening    | mostly done      | Python fixtures for most core modules; DSP coverage (multirate, adaptive filters, CQT, istft, VMD, CEEMDAN); ODE adjoint, adaptive BDF, sparse Lanczos; the open list is `.scratch/aifn/refinement.md` ("Open" sections)                                  |
+| 8 The site                  | waiting on owner | nothing yet: how the site reuses the lab's UI is decided first, then figures migrate by domain                                                                                                                                                            |
+
+Tests today: about 5,200 in core and 500 in applications (`make test`).
 
 ## 1. Why
 
@@ -39,8 +59,10 @@ internals, and every iterative algorithm can be stepped, scrubbed, replicated, p
 
 ## 3. Organisation: by what things do
 
-There is no "core" module. Modules are grouped into families below for documentation only; the import paths are flat
-(`aifn/linalg`, `aifn/pgm`). The families do not set the dependency order. The order is an explicit stack of tiers: a
+_Superseded in part._ The plan had flat import paths (`aifn/linalg`, `aifn/pgm`) and no core. The built library is
+two packages, `aifn` (core) and `aifn-applied` (applications), and import paths follow the nested tree
+(`aifn/numerics/linalg`, `aifn-applied/inference/sequence-models`). The family lists below are the plan's inventory of
+what each part does; module homes are in `aifn-js/modules.json` and the table that follows. The order is an explicit stack of tiers: a
 module may import only from strictly lower tiers. `scripts/aifn-layers.ts` enforces it in `make lint` (and so in
 `make check`); the source of truth is `aifn-js/modules.json`, from which this table and the README's are generated
 (`node scripts/aifn-layers.ts --write`). The 12 application modules have moved to `aifn-applied` (`aifn-js/README.md`).
@@ -52,21 +74,21 @@ module may import only from strictly lower tiers. `scripts/aifn-layers.ts` enfor
 | Tier | Family      | Modules (local tiers, low to high; * gap)                                                              | Shared             |
 | ---- | ----------- | ------------------------------------------------------------------------------------------------------ | ------------------ |
 | 0    | foundation  | contracts, errors · registry · tensor · pytree, fourier · convolution, autodiff, random · space, trace |                    |
-| 1    | numerics    | special · linalg · polynomial, quadrature, roots, geometry · interpolate                               |                    |
+| 1    | numerics    | special · linalg · polynomial, quadrature, roots, implicit, geometry · interpolate                     |                    |
 | 2    | graph       | traversal, shortest-paths, spanning-trees, structures, matrices · flows, structured, propagation       | graph, tree, heap  |
 | 3    | probability | stats, bijectors, samplers · distributions · likelihoods, information                                  |                    |
 | 3    | optim       | line-search · first-order, second-order, proximal, derivative-free, programming · minimize             | options, schedules |
 | 3    | systems     | (one module)                                                                                           |                    |
 | 4    | inference   | model · exact, message-passing, expectation-propagation, variational, stochastic, filtering · engines  |                    |
 | 4    | dynamics    | ode, sde · fields, control                                                                             |                    |
-| 4    | signal      | windows · filters, spectral, time-frequency, wavelets, statistical, multirate* · decompositions        | signal             |
+| 4    | signal      | windows · filters, spectral, time-frequency, wavelets, statistical · multirate, decompositions         | signal             |
 | 4    | transport   | (one module)                                                                                           |                    |
 | 5    | learning    | estimators, kernels · losses, metrics, compose, validate                                               |                    |
 | 6    | nn          | functional, init · layers · training                                                                   |                    |
 
 <!-- aifn-layers:end -->
 
-Consequences of the order that the family lists below do not show: `distributions` sits above `quadrature` (numerical
+In the plan's flat order (before the tree), these consequences held, which the family lists below do not show: `distributions` sits above `quadrature` (numerical
 KL) and holds the `Target` protocol that `mcmc` and `vi` share; `info` sits above `optim` and `graph` (KL projection,
 Huffman trees); `metrics` sits beside `losses` and below `estimators`, so evaluation can read metric definitions; `nn` sits above `optim` and `losses`, so it can reuse optim's update rules; `diffusion` is a learning
 module above `nn`; `datasets` is on top, so a dataset may be generated by any model, and it owns the optimisation test
@@ -502,7 +524,8 @@ A standalone app for developing and exploring aifn, separate from the site for n
 
 ## 13. Testing
 
-- vitest in `aifn-js/test`, one file per module, run by `make check`.
+- vitest in `aifn-js/core/test` and `aifn-js/applications/test`, mirroring the source tree, run by `make test` (and
+  so `make check`). Golden values come from `make fixtures` (Python scripts in each package's `test/fixtures`).
 - Python generates the test cases. An aifn-py command (`uv run aifn fixtures`) writes JSON fixtures from
   numpy, scipy, scikit-learn, statsmodels-style computations and torch, covering most modules: tensor operations and
   linear algebra; special functions and distributions; information-theoretic quantities (`scipy.stats.entropy` and
@@ -522,14 +545,14 @@ A standalone app for developing and exploring aifn, separate from the site for n
 ## 14. Stages
 
 1. **Survey.** Done (`.scratch/aifn/survey.md`).
-2. **Design.** This document, iterated with the owner until approved.
-3. **Build.** The whole of aifn-js with tests, before any figure changes, with the lab (§12) growing alongside it so
+2. **Design.** Done: this document, then `docs/aifn-architecture.md`.
+3. **Build.** Done through phase 5 (§0). The whole of aifn-js with tests, before any figure changes, with the lab (§12) growing alongside it so
    each module can be seen working as it lands. The lab's generic views are built in this stage too. Order: `tensor`, `random`, `special`,
    `linalg`, `stats`, `distributions`, `trace`, `autodiff`, `optim`, `programming`, `solve`, `quadrature`, `info`,
    `estimators`, `metrics`, `preprocess`, `compose`, `validate`, then the domains (`ep`, `pgm`, `mcmc`, `vi`, `gp`, `glm`, `smooth`, `gam`, `classify`,
    `cluster`, `embed`, `timeseries`, `dsp`, `ode`, `fields`, `pde`, `maps`, `control`, `sde`, `diffusion`, `nn`,
    `losses`, `ot`, `bandits`, `rl`), then `datasets` and `geometry`. `make check` runs the tests.
-4. **Migrate.** The lab's views and quality-of-life improvements move into the site first; then figures migrate,
+4. **Migrate.** Waiting on the owner (phases 6 and 8). The lab's views and quality-of-life improvements move into the site first; then figures migrate,
    one by one, by domain. A snapshot harness compares each figure's computed series before and
    after, within a tolerance. Known fixes (Cholesky floors, ESS, normal tails, the RNG switch) are expected
    differences and are reviewed visually. Didactic code that is itself the lesson may stay in its note, but it uses

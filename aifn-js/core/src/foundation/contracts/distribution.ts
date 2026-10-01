@@ -11,6 +11,8 @@
  */
 
 import type { Kinded } from './kinds'
+import type { Info } from './registry'
+import type { Space } from './space'
 import type { Raw, Scalar, Shape, Size, Tensor, Traced, Value, Vector, VectorLike } from './numbers'
 import type { SampleOptions, Stream } from './random'
 
@@ -126,6 +128,11 @@ export interface AnyUnivariate extends Distribution {
   logSurvival(x: Value): Value
   /** The inverse cdf: the smallest x with cdf(x) ≥ p. */
   quantile(p: Value): Value
+  /**
+   * The inverse survival function: the x with survival(x) = q (the smallest x with survival(x) ≤ q when discrete).
+   * Equal to quantile(1 − q), but accurate for tiny q, where 1 − q rounds.
+   */
+  isf(q: Value): Value
 }
 
 /** A univariate distribution whose parameters have types `P`: results have the kinds `Kind` computes. */
@@ -137,6 +144,7 @@ export interface TypedUnivariate<P extends Value> extends AnyUnivariate {
   survival<X extends Value>(x: X): Kind<P | X>
   logSurvival<X extends Value>(x: X): Kind<P | X>
   quantile<X extends Value>(p: X): Kind<P | X>
+  isf<X extends Value>(q: X): Kind<P | X>
   mean(): Kind<P>
   variance(): Kind<P>
   stddev(): Kind<P>
@@ -228,4 +236,15 @@ export type Bijector = {
   domain: Interval
   /** f(domain). */
   codomain: Interval
+}
+
+/**
+ * Registry metadata of a named log density (a test density for samplers: banana, funnel, mixtures): its parameters,
+ * its dimension (null when the dimension is a parameter) and whether its exact moments are given (`truth`).
+ */
+export interface LogDensityInfo extends Info {
+  readonly kind: 'log-density'
+  readonly params: Space
+  readonly dim: Size | null
+  readonly truth: boolean
 }

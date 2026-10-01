@@ -1,7 +1,11 @@
-/** Small real datasets, embedded: Iris, Old Faithful and Anscombe's quartet. */
+/** Small real datasets, embedded: Iris, Old Faithful, Anscombe's quartet and the coal-mining disasters. */
 
-import { ANSCOMBE_DATA, FAITHFUL_DATA, IRIS_DATA } from './embedded'
+import { fromData } from 'aifn/foundation/tensor'
+import { ANSCOMBE_DATA, COAL_MINING_DATA, FAITHFUL_DATA, IRIS_DATA } from './embedded'
 import { labels, matrix, vector, type Dataset } from '../types'
+import type { DatasetInfo } from 'aifn/foundation/contracts'
+import { definer } from 'aifn/foundation/registry'
+import { space } from 'aifn/foundation/space'
 
 /**
  * Fisher's Iris data: 150 flowers (50 each of setosa, versicolor and virginica) with four measurements in cm. x is
@@ -65,3 +69,88 @@ export function anscombe(): Dataset[] {
     },
   }))
 }
+
+/**
+ * British coal-mining disasters per year, 1851–1962 (Jarrett, 1979): x is 112 × 1 counts, t the calendar years. The
+ * classic Poisson changepoint series: the rate drops from about 3 to about 1 per year around 1890, and Adams and MacKay
+ * (2007) ran BOCPD on it with a Poisson–gamma segment model. No truth: the changepoint is what is inferred.
+ */
+export function coalMining(): Dataset {
+  const n = COAL_MINING_DATA.length
+  return {
+    kind: 'dataset',
+    x: matrix(Float64Array.from(COAL_MINING_DATA), n, 1),
+    t: fromData(Float64Array.from({ length: n }, (_, i) => 1851 + i)),
+    meta: {
+      name: 'coal-mining disasters',
+      description: 'Explosions in British coal mines that killed ten or more men, counted per year from 1851 to 1962.',
+      task: 'sequence',
+      featureNames: ['disasters'],
+      source:
+        'Jarrett (1979), "A note on the intervals between coal-mining disasters", Biometrika 66(1); yearly counts as in Carlin, Gelfand and Smith (1992), Applied Statistics 41(2)',
+      url: 'https://doi.org/10.1093/biomet/66.1.191',
+    },
+  }
+}
+
+// ── Registry ─────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+const dataset = definer<DatasetInfo>('dataset', 'data/real')
+
+dataset(
+  {
+    key: 'iris',
+    name: 'Iris',
+    summary: "Fisher's iris measurements: 150 flowers, four features, three species.",
+    task: 'classification',
+    output: 'dataset',
+    knobs: space({}),
+    truth: false,
+    random: false,
+  },
+  iris,
+)
+
+dataset(
+  {
+    key: 'oldFaithful',
+    name: 'Old Faithful',
+    summary: 'Eruption durations and waiting times of the Old Faithful geyser.',
+    task: 'clustering',
+    output: 'dataset',
+    knobs: space({}),
+    truth: false,
+    random: false,
+    notes: ['gaussian-mixture-model'],
+  },
+  oldFaithful,
+)
+
+dataset(
+  {
+    key: 'anscombe',
+    name: "Anscombe's quartet",
+    summary: 'Four small datasets with the same summary statistics and different shapes.',
+    task: 'regression',
+    output: 'datasets',
+    knobs: space({}),
+    truth: false,
+    random: false,
+    notes: ['linear-regression'],
+  },
+  anscombe,
+)
+
+dataset(
+  {
+    key: 'coalMining',
+    name: 'Coal-mining disasters',
+    summary: 'Yearly counts of British coal-mining disasters, 1851–1962.',
+    task: 'sequence',
+    output: 'dataset',
+    knobs: space({}),
+    truth: false,
+    random: false,
+  },
+  coalMining,
+)

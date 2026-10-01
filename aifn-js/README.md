@@ -62,6 +62,70 @@ lesson lives here too, written to be read, and notes show it rather than copy it
 - **How.** Move the file (`node scripts/aifn-moves.ts` rewrites importers from `moves.json`), update `modules.json`,
   move or add the fixture, and rewrite importers in the same change.
 
+## Registries and the catalog
+
+Every named variant in aifn is a registry entry: `define(info, value)` (`aifn/foundation/registry`) attaches a frozen
+`info` to the value itself and returns it, so `adam.info`, `Normal.info` and `metricRegistry.auroc.info` are the same
+kind of object. `definer(kind, module)` makes a `define` for one module, with `stability` defaulting to
+`experimental`. Each module builds its registry statically from its own namespaces with `entries(kind, …)` (no global
+`register()`), usually in a `registry.ts` beside the code, and exports the table from its index.
+
+| Kind                 | Table (core)                                                    | Kind-specific info                                                                       |
+| -------------------- | --------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
+| `distribution`       | `distributionRegistry`                                          | `params: Space` (argument order), `support`, `discrete`, `eventRank`, `expFamily`        |
+| `kl-rule`            | `klRegistry` (keyed `p\|q`; `kl` dispatches on it)              | `p`, `q` family keys                                                                     |
+| `bijector`           | `bijectorRegistry`                                              | `domain`, `codomain`, `params`, `factory`                                                |
+| `link`, `likelihood` | `linkRegistry`, `likelihoodRegistry`                            | mean space; support, canonical link, links, dispersion                                   |
+| `kernel`             | `kernelRegistry`                                                | `hyper: Space`, `stationary`                                                             |
+| `window`             | `windowRegistry` (functions of the length)                      | `params`, `mainLobeWidth` (bins), `sideLobeDb`                                           |
+| `wavelet`            | `waveletRegistry`                                               | `family`, `vanishingMoments`, `taps`, `continuous`                                       |
+| `filter-design`      | `filterDesignRegistry`                                          | `family: 'iir' \| 'fir'`, `bands`, `honours`, `params`                                   |
+| `algorithm`          | `<module>Algorithms` in each module (`firstOrderAlgorithms`, …) | `problem`, `state` roles (`iterate`, `objective`, `grad`, `stepSize`, `flags`), `random` |
+| `metric`, `loss`     | `metricRegistry`, `lossRegistry`                                | inputs, direction, range, capability; family, paired metric                              |
+| `primitive`          | the primitive table (`registry.list()` in `foundation/tensor`)  | arity, rule sources                                                                      |
+
+Applications register models, datasets, modifiers, environments, objectives and log-densities the same way (table in
+`applications/README.md`). Every entry carries `key` (its export or lookup name), `kind`, `module`, `name`,
+`stability`, and where they apply `notes`, `glossary`, `cite` (keys of `content/references.yaml`), `summary` and
+`random`. An entry's address is `<module>/<key>` (`optim/first-order/adam`); applications may prefix `applied/`.
+
+**Generated tests.** The core tests load the registries as the catalog does (`test/registries.ts`) and test every
+entry without a hand-kept list: every algorithm passes the trace protocol on a case keyed by its address and has the
+fields its state roles name (`test/foundation/trace/algorithms.test.ts`, which fails for an algorithm without a case);
+every distribution family matches its info, its cdf (Kolmogorov–Smirnov) and its moments
+(`test/probability/distributions/families.test.ts`); windows, wavelets, kernels, bijectors, links, likelihood families,
+filter designs and KL rules match their declared metadata (`test/foundation/registry/conformance.test.ts`).
+
+**The catalog.** `make catalog` (`scripts/aifn-catalog.ts`) loads every module of both packages, collects each entry
+once and writes `generated/catalog.json`: `{ counts, entries: { <kind>: [{ address, package, key, kind, module, name,
+stability, …info }] } }`, with `Space`s inlined and sorted by address. `make check` runs `make catalog-check`, which
+fails when the committed catalog is stale, an entry's module does not exist, two entries share an address, a `notes`
+slug is not a note in `content/notes`, a `glossary` key is not in `content/glossary.yaml` (or names a note the entry
+does not list), or a `cite` key is not in `content/references.yaml`. It also reports fixture coverage: stable entries
+without a reference case in the fixtures (report only for now). Today the catalog holds 680 entries of 19 kinds
+(`counts` at its top), 164 of them stable.
+
+**How a note links to aifn.** The link is declared once, on the aifn side: list the note's slug in the entry's
+`notes` (the first is the defining note), and the catalog check verifies it. Notes never list their implementations
+in frontmatter; the site computes each note's "In aifn" backlinks from the catalog's reverse index of `notes` (site
+phase). A glossary entry stays independent: an aifn entry may name its `glossary` key, and the glossary never names
+aifn keys.
+
+## Running
+
+| Command                                                         | What it does                                                                                                                                |
+| --------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| `make test`                                                     | the layer lint, then vitest for core and applications, then the Python core tests                                                           |
+| `npx vitest run --config aifn-js/<pkg>/vitest.config.ts <path>` | one package, folder or file (`<pkg>` is `core` or `applications`; paths are relative to the package, e.g. `test/numerics/linalg`)           |
+| `make bench`                                                    | core micro-benchmarks (`core/bench/core.bench.ts`): primitive dispatch, kernels, gradients, linear algebra, draws, algorithms on primitives |
+| `make fixtures`                                                 | regenerate golden values from Python for both packages (`FIXTURES="numerics/linalg …"` for some)                                            |
+| `make catalog`, `make catalog-check`                            | rebuild `generated/catalog.json`; check that it is fresh and that its links exist                                                           |
+| `make aifn-layers`, `make aifn-names`                           | the layer lint and the name-collision lint (both in `make lint`); `node scripts/aifn-layers.ts --write` regenerates the tables below        |
+| `make lab`, `make lab-check`, `make lab-shots`                  | the lab's dev server, its server-side render check, and screenshots into `.scratch/lab-shots/` (`ARGS="--only <family>/<module>"`)          |
+
+`make check` runs the lints, the tests and `make catalog-check`; `make bench`, `make lab-check` and `make lab-shots` run
+on demand.
+
 ## Layers (generated)
 
 Families import only strictly lower tiers; modules of a family import only lower local tiers of it.
@@ -73,14 +137,14 @@ Families import only strictly lower tiers; modules of a family import only lower
 | Tier | Family      | Modules (local tiers, low to high; * gap)                                                              | Shared             |
 | ---- | ----------- | ------------------------------------------------------------------------------------------------------ | ------------------ |
 | 0    | foundation  | contracts, errors · registry · tensor · pytree, fourier · convolution, autodiff, random · space, trace |                    |
-| 1    | numerics    | special · linalg · polynomial, quadrature, roots, geometry · interpolate                               |                    |
+| 1    | numerics    | special · linalg · polynomial, quadrature, roots, implicit, geometry · interpolate                     |                    |
 | 2    | graph       | traversal, shortest-paths, spanning-trees, structures, matrices · flows, structured, propagation       | graph, tree, heap  |
 | 3    | probability | stats, bijectors, samplers · distributions · likelihoods, information                                  |                    |
 | 3    | optim       | line-search · first-order, second-order, proximal, derivative-free, programming · minimize             | options, schedules |
 | 3    | systems     | (one module)                                                                                           |                    |
 | 4    | inference   | model · exact, message-passing, expectation-propagation, variational, stochastic, filtering · engines  |                    |
 | 4    | dynamics    | ode, sde · fields, control                                                                             |                    |
-| 4    | signal      | windows · filters, spectral, time-frequency, wavelets, statistical, multirate* · decompositions        | signal             |
+| 4    | signal      | windows · filters, spectral, time-frequency, wavelets, statistical · multirate, decompositions         | signal             |
 | 4    | transport   | (one module)                                                                                           |                    |
 | 5    | learning    | estimators, kernels · losses, metrics, compose, validate                                               |                    |
 | 6    | nn          | functional, init · layers · training                                                                   |                    |
@@ -95,29 +159,28 @@ An area imports core freely and the areas it depends on (transitively).
 
 <!-- Generated from aifn-js/modules.json by `node scripts/aifn-layers.ts --write`; do not edit. -->
 
-| Area         | Nodes (group/{children} [shared]; * gap)                                                                                                                                                                                                     | Depends on       | Serves topics                                                   |
-| ------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------- | --------------------------------------------------------------- |
-| learning     | generalised/{glm, gam, ordinal*} [irls, residuals, backfitting, smoothing], linear, generative-classifiers, kernel-methods, gaussian-processes, trees-and-ensembles/{bagging, boosting} [tree], neighbours, reductions, preprocessing [util] | unsupervised     | supervised-learning, learning-foundations                       |
-| unsupervised | clustering, embedding/{linear, manifold, neighbour} [neighbourhoods, centring, util]                                                                                                                                                         |                  | unsupervised-learning, anomaly-detection                        |
-| inference    | sequence-models, topic-models, rating-models, lattice-models, mixture-models, conjugate-models, classifier-models                                                                                                                            |                  | probabilistic-inference, probability, statistics                |
-| timeseries   | (one module)                                                                                                                                                                                                                                 |                  | time-series                                                     |
-| signals      | audio                                                                                                                                                                                                                                        |                  | signal-processing                                               |
-| vision       | filters                                                                                                                                                                                                                                      |                  | computer-vision                                                 |
-| dynamics     | maps, pde, nonlinear, control                                                                                                                                                                                                                |                  | maths/differential-equations, control-theory                    |
-| decisions    | bandits, reinforcement-learning/{planning, learning} [mdp]                                                                                                                                                                                   |                  | online-experimentation, reinforcement-learning, decision-making |
-| generative   | diffusion                                                                                                                                                                                                                                    | neural           | generative-models                                               |
-| neural       | architectures, ordinal*                                                                                                                                                                                                                      |                  | neural-networks, transformers, sequence-models                  |
-| retrieval    | losses                                                                                                                                                                                                                                       |                  | recommendation-and-retrieval, losses                            |
-| evaluation   | text, detection, quality, generative, fairness, beyond-accuracy                                                                                                                                                                              | algorithms       | metrics, trustworthy-machine-learning                           |
-| information  | channels, coding, projection                                                                                                                                                                                                                 |                  | probability/information-theory                                  |
-| algorithms   | dynamic-programming                                                                                                                                                                                                                          |                  | maths/optimisation, natural-language-processing                 |
-| data         | synthetic, real, objectives, targets, environments, signals [truth, sizes, types, rows]                                                                                                                                                      | every other area | (support)                                                       |
+| Area         | Nodes (group/{children} [shared]; * gap)                                                                                                                                                                                                    | Depends on       | Serves topics                                                   |
+| ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------- | --------------------------------------------------------------- |
+| learning     | generalised/{glm, gam, ordinal} [irls, residuals, backfitting, smoothing], linear, generative-classifiers, kernel-methods, gaussian-processes, trees-and-ensembles/{bagging, boosting} [tree], neighbours, reductions, preprocessing [util] | unsupervised     | supervised-learning, learning-foundations                       |
+| unsupervised | clustering, embedding/{linear, manifold, neighbour} [neighbourhoods, centring, util]                                                                                                                                                        |                  | unsupervised-learning, anomaly-detection                        |
+| inference    | sequence-models, topic-models, rating-models, lattice-models, mixture-models, conjugate-models, classifier-models                                                                                                                           |                  | probabilistic-inference, probability, statistics                |
+| timeseries   | (one module)                                                                                                                                                                                                                                |                  | time-series                                                     |
+| signals      | audio                                                                                                                                                                                                                                       |                  | signal-processing                                               |
+| vision       | filters                                                                                                                                                                                                                                     |                  | computer-vision                                                 |
+| dynamics     | maps, pde, nonlinear, control                                                                                                                                                                                                               |                  | maths/differential-equations, control-theory                    |
+| decisions    | bandits, reinforcement-learning/{planning, learning} [mdp] [rollout]                                                                                                                                                                        |                  | online-experimentation, reinforcement-learning, decision-making |
+| generative   | diffusion                                                                                                                                                                                                                                   | neural           | generative-models                                               |
+| neural       | architectures                                                                                                                                                                                                                               |                  | neural-networks, transformers, sequence-models                  |
+| retrieval    | losses                                                                                                                                                                                                                                      |                  | recommendation-and-retrieval, losses                            |
+| evaluation   | text, detection, quality, generative, fairness, beyond-accuracy                                                                                                                                                                             | algorithms       | metrics, trustworthy-machine-learning                           |
+| information  | channels, coding, projection                                                                                                                                                                                                                |                  | probability/information-theory                                  |
+| algorithms   | dynamic-programming                                                                                                                                                                                                                         |                  | maths/optimisation, natural-language-processing                 |
+| data         | synthetic, real/{fonts} [embedded, real], objectives, targets, environments, signals [truth, sizes, types, rows, define, recipe]                                                                                                            | every other area | (support)                                                       |
 
 <!-- aifn-areas:end -->
 
-## To the lab in phase 1
+## Presentation code lives in the lab
 
-Presentation helpers still in core, to move to the lab (the paper's "aifn-ui"):
-
-- `fields`: grid sampling for drawing (direction and slope fields, nullclines, level sets).
-- `geometry`: `lttb` and `minMaxDecimate` (decimation for charts).
+Presentation helpers that the design assigned to "aifn-ui" moved to the lab with the module tree
+(`aifn-lab/src/viz/drawing`): `fields.ts` samples direction and slope fields, contours, level sets and nullclines for
+drawing (on core's `aifn/dynamics/fields` grids), and `decimate.ts` holds `lttb` and `minMaxDecimate`.

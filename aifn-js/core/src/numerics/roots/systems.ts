@@ -4,6 +4,7 @@
  * parameter continuation along a homotopy.
  */
 
+import { ShapeError } from 'aifn/foundation/errors'
 import { solveDense } from 'aifn/numerics/linalg'
 import { dense, type Matrix, SQRT_EPS, type Vector } from 'aifn/foundation/tensor'
 import type { MatrixLike, Size, Status, VectorLike } from 'aifn/foundation/contracts'
@@ -57,7 +58,8 @@ function linearSolve(A: F64, b: F64, n: number): F64 | null {
 function evaluateSystem(F: SystemWithJacobian, x: F64, where: string) {
   const out = F(vec(x))
   const r = toF64(out.value, where)
-  if (r.length !== x.length) throw new Error(`${where}: F returned ${r.length} values for ${x.length} unknowns`)
+  if (r.length !== x.length)
+    throw new ShapeError(where, `${where}: F returned ${r.length} values for ${x.length} unknowns`)
   return { r, J: toMatrixF64(out.jacobian, where, x.length, x.length).data }
 }
 
@@ -269,7 +271,7 @@ export function fixedPoint(
   const name = 'fixed-point'
   const image = (x: F64) => {
     const gx = toF64(g(vec(x)), name)
-    if (gx.length !== x.length) throw new Error(`${name}: g returned ${gx.length} values for ${x.length}`)
+    if (gx.length !== x.length) throw new ShapeError(name, `${name}: g returned ${gx.length} values for ${x.length}`)
     return gx
   }
   return flagged<{ x0: VectorLike }, FixedPointState>({

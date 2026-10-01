@@ -3,10 +3,11 @@ import { discreteFactor, discreteFactorGraph, type DiscreteFactorGraph } from 'a
 import { variableElimination } from 'aifn/inference/exact'
 import { trace } from 'aifn/foundation/trace'
 import { useMemo, useState } from 'react'
-import { Player, Select } from '@lab/controls'
+import { Player } from '@lab/controls'
 import { Columns, Figure } from '@lab/layout'
+import { choice, row, useFigureState } from '@lab/state'
 import { FactorGraphView } from '@lab/views'
-import { ChartSize, Readout, XYChart, type XYSeries } from '@lab/viz'
+import { Bars, Plot, Points, Readout, useAxis } from '@lab/viz'
 
 const NAMES = ['a', 'b', 'c', 'd', 'e']
 const CARDS = [2, 2, 2, 2, 2]
@@ -38,49 +39,55 @@ function describe(s: BeliefPropagationState): string {
 
 /** Sum-product and max-product on a tree, one message per step, against the exact (max-)marginals. */
 export function TreeBpSpecimen() {
-  const [mode, setMode] = useState<'sum' | 'max'>('sum')
+  const state = useFigureState({
+    semiring: row('1 · semiring', {
+      mode: choice(
+        [
+          { value: 'sum', label: 'sum-product (marginals)' },
+          { value: 'max', label: 'max-product (MAP)' },
+        ],
+        'sum',
+        { label: 'semiring' },
+      ),
+    }),
+  })
+  const mode = state.semiring.mode as 'sum' | 'max'
   const run = useMemo(() => trace(beliefPropagationSteps(TREE, { mode, schedule: 'tree' }), undefined, 100), [mode])
-  const [step, setStep] = useState(7)
+  const [step, setStep] = useState(0)
   const s = run.steps[Math.min(step, run.steps.length - 1)]
   const exact = useMemo(() => NAMES.map((_, v) => variableElimination(TREE, [v], { mode }).marginal.data[1]), [mode])
   const x = NAMES.map((_, i) => i)
-  const series: XYSeries[] = [
-    { name: mode === 'sum' ? 'exact p(x = 1)' : 'exact max-marginal', type: 'bar', x, y: exact, slot: 0 },
-    { name: 'belief', type: 'scatter', x, y: s.beliefs.map((b) => b.data[1]), slot: 1 },
-  ]
+  const beliefs = s.beliefs.map((b) => b.data[1])
+  const variable = useAxis({ label: 'variable', categories: NAMES })
+  const p1 = useAxis({ label: 'p(x = 1)', range: [0, 1] })
   const done = step >= run.steps.length - 1
   return (
     <Figure
       title="Messages on a tree, one at a time"
-      description="The tree schedule passes messages from the leaves to a root and back; after one pass every belief is exact."
+      purpose="The tree schedule passes messages from the leaves to a root and back; after one pass every belief is exact."
       defaultSize="L"
       hoverReadout={false}
+      state={state}
       controls={
-        <>
-          <Select
-            label="semiring"
-            value={mode}
-            onChange={(m) => (setMode(m), setStep(7))}
-            options={[
-              { value: 'sum', label: 'sum-product (marginals)' },
-              { value: 'max', label: 'max-product (MAP)' },
-            ]}
-          />
-          <div className="col-span-full">
-            <Player label="message" value={step} onChange={setStep} count={run.steps.length} defaultSpeed={2} />
-          </div>
-        </>
+        <div className="col-span-full">
+          <Player label="2 · message" value={step} onChange={setStep} count={run.steps.length} defaultSpeed={2} />
+        </div>
       }
-      readouts={
-        <>
-          <Readout label="this step" value={describe(s)} />
-          <Readout label="messages sent" value={`${Math.min(step, run.steps.length - 1)} of ${run.steps.length - 1}`} />
-          {mode === 'max' && done && (
-            <Readout label="MAP (a b c d e)" value={Array.from(decodeBeliefs(s).data).join(' ')} />
-          )}
-        </>
-      }
-      caption="Each chip is the message just sent, as μ(x = 1), with its arrow showing the direction; a variable's shade and note are its current belief p(x = 1). Leaves send first. A belief is exact once every message into it has arrived: on the chart the points reach the bars when the pass back from the root is done. Max-product replaces the sums by maxima; its beliefs are max-marginals, and their argmax is the MAP assignment."
+      readouts={{
+        messages: (
+          <>
+            <Readout label="this step" value={describe(s)} />
+            <Readout
+              label="messages sent"
+              value={`${Math.min(step, run.steps.length - 1)} of ${run.steps.length - 1}`}
+            />
+            {mode === 'max' && done && (
+              <Readout label="MAP (a b c d e)" value={Array.from(decodeBeliefs(s).data).join(' ')} />
+            )}
+          </>
+        ),
+      }}
+      caption="Play from all messages uniform. Each chip is the message just sent, as μ(x = 1), with its arrow showing the direction; a variable's shade and note are its current belief p(x = 1). Leaves send first. A belief is exact once every message into it has arrived: on the chart the points reach the bars when the pass back from the root is done. Max-product replaces the sums by maxima; its beliefs are max-marginals, and their argmax is the MAP assignment."
     >
       <Columns
         widths={[3, 2]}
@@ -94,16 +101,10 @@ export function TreeBpSpecimen() {
           {
             title: mode === 'sum' ? 'beliefs against exact marginals' : 'beliefs against exact max-marginals',
             body: (
-              <ChartSize scale={0.92}>
-                <XYChart
-                  series={series}
-                  xLabel="variable (0 = a … 4 = e)"
-                  yLabel="p(x = 1)"
-                  yRange={[0, 1]}
-                  integerX
-                  formatX={(v) => NAMES[v] ?? ''}
-                />
-              </ChartSize>
+              <Plot x={variable} y={p1}>
+                <Bars name={mode === 'sum' ? 'exact p(x = 1)' : 'exact max-marginal'} x={x} y={exact} slot={0} />
+                <Points name="belief" x={x} y={beliefs} slot={1} />
+              </Plot>
             ),
           },
         ]}

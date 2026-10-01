@@ -1,9 +1,9 @@
 /**
  * Statistics on plain numeric arrays (`ArrayLike<number>`) and `aifn/probability/stats` tensors: descriptive statistics,
- * quantiles, ranks and rank correlations, histograms with an explicit bin rule, the empirical CDF, Gaussian KDE,
- * running moments, autocovariance and cross-correlation (by FFT for long sequences: the one autocorrelation in aifn),
- * resampling (bootstrap, permutation tests, and Kish's importance ESS, the one ESS of weights in aifn), and the
- * Box–Cox and Yeo–Johnson power transforms with λ by maximum likelihood.
+ * quantiles, expectiles, ranks and rank correlations, histograms with an explicit bin rule, the empirical CDF,
+ * Gaussian KDE, running moments, autocovariance and cross-correlation (by FFT for long sequences: the one autocorrelation in aifn),
+ * resampling (bootstrap, permutation tests, and Kish's importance ESS, the one ESS of weights in aifn), the
+ * Kolmogorov–Smirnov statistic and test (one and two samples, exact null laws), and the Box–Cox and Yeo–Johnson power transforms with λ by maximum likelihood.
  *
  * The plain reductions `sum`, `mean`, `min`, `max` and `variance` are `aifn/foundation/tensor`'s (one definition per
  * operation); stats adds the statistics tensor does not have, which accept arrays as well as tensors.
@@ -42,6 +42,7 @@ export {
   type QuantileMethod,
   type QuantileOptions,
 } from './quantile'
+export { expectile, expectiles, type ExpectileOptions } from './expectile'
 export { argsort, kendallTau, ranks, spearman, type TiePolicy } from './ranks'
 export { ecdf, ecdfAt, histogram, kde, kdeBandwidth, type BandwidthRule, type BinRule, type Histogram } from './density'
 export {
@@ -77,5 +78,14 @@ export {
   yeoJohnsonLambda,
   type PowerLambda,
 } from './power'
+export {
+  kolmogorovLimitSf,
+  kolmogorovSf,
+  ksStatistic,
+  ksTest,
+  type KsReference,
+  type KsStatistic,
+  type KsTest,
+} from './goodness'
 export type { AxisOption, Data } from './input'
 export { sampleAcf, samplePacf, type SampleAcf } from './acf'

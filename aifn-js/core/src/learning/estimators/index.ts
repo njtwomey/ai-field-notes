@@ -10,6 +10,8 @@
  *   `Estimator`, `FitOptions`; input checks `matrixShape`, `targetValues`.
  * - Predictives: contract `Distribution`s; `gaussianPredictive`, `bernoulliPredictive`, `categoricalPredictive`,
  *   `classProbabilities`, `expectation` (Gauss–Hermite on normal scores), `asTensor`.
+ * - Registering: `defineModel(spec, factory)` attaches a `ModelInfo` (task, capabilities, `hyper` space) to an
+ *   estimator factory; `isModelEntry`.
  * - Evaluation: `evaluate(model, data, metrics)` over registered metrics, each read by its `info.capability`.
  */
 
@@ -91,3 +93,4 @@ export {
   type ServedMetric,
 } from './evaluate'
 export { matrixShape, targetValues } from './util'
+export { defineModel, isModelEntry, type EstimatorFactory, type ModelEntry, type ModelSpec } from './define'

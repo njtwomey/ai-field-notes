@@ -6,23 +6,14 @@
  * data and a run resumed from any stored state reproduces the rest.
  */
 
-import type { Status } from 'aifn/foundation/contracts'
+import type { Agent, AgentInfo, Status } from 'aifn/foundation/contracts'
 import { type Stream, integers, uniform } from 'aifn/foundation/random'
+import { definer } from 'aifn/foundation/registry'
+import { domainSize, real, space } from 'aifn/foundation/space'
 import { fromData, type Tensor } from 'aifn/foundation/tensor'
 import type { Algorithm } from 'aifn/foundation/trace'
-import { isActive, type Outcome, type TabularMdp } from '../mdp'
+import { isActive, sampleOutcome, type TabularMdp } from '../mdp'
 import { greedyActions, policyMatrix, type PolicyInput } from '../mdp'
-
-/** Sample an outcome of action a in state s from the stream r (one uniform draw). */
-export function sampleOutcome(r: Stream, mdp: TabularMdp, s: number, a: number): Outcome {
-  const outs = mdp.outcomes[s * mdp.actions + a]
-  let u = uniform(r)
-  for (const o of outs) {
-    if (u < o.p) return o
-    u -= o.p
-  }
-  return outs[outs.length - 1]
-}
 
 /** ε-greedy action in s under Q, breaking ties uniformly at random (so an untrained agent does not always go one way). */
 function epsilonGreedyAction(Q: Float64Array, s: number, A: number, eps: number, r: Stream): number {
@@ -482,3 +473,88 @@ export function greedyPath(mdp: TabularMdp, policy: Tensor | ArrayLike<number>, 
   }
   return fromData(Int32Array.from(path))
 }
+
+// ── Q-learning as an agent ───────────────────────────────────────────────────────────────────────────────────────────
+
+/** The Q-learning agent's state: the action values (observations × actions) and the discount it learns with. */
+export interface QLearningAgentState {
+  /** Q(o, a), observations × actions. */
+  Q: Tensor
+  gamma: number
+  /** Transitions learnt from. */
+  updates: number
+}
+
+/** Options for `qLearningAgent`. */
+export interface QLearningAgentOptions {
+  /** The step size α. Default 0.5. */
+  learningRate?: number
+  /** The exploration rate ε of the ε-greedy policy. Default 0.1. */
+  epsilon?: number
+  /** The discount; default the environment's. */
+  gamma?: number
+  /** The initial action value. Default 0. */
+  initialQ?: number
+}
+
+/**
+ * Q-learning (Watkins, 1989) as an `Agent` on discrete observations and actions: `act` is ε-greedy on Q (ties broken
+ * uniformly at random) and `learn` one update Q(o, a) ← Q(o, a) + α (r + γ max_a′ Q(o′, a′) − Q(o, a)), with no
+ * bootstrap after a terminal transition (a truncated one still bootstraps). It needs no model of the environment.
+ */
+export function qLearningAgent({
+  learningRate: alpha = 0.5,
+  epsilon = 0.1,
+  gamma,
+  initialQ = 0,
+}: QLearningAgentOptions = {}): Agent<QLearningAgentState, number, number> {
+  return {
+    name: 'Q-learning',
+    init(env) {
+      const S = domainSize(env.observation)
+      const A = domainSize(env.action)
+      return { Q: fromData(new Float64Array(S * A).fill(initialQ), [S, A]), gamma: gamma ?? env.gamma, updates: 0 }
+    },
+    act(g, o, stream) {
+      const A = g.Q.shape[1]
+      const Q = g.Q.data as Float64Array
+      const scores = Q.slice(o * A, (o + 1) * A)
+      const best = Math.max(...scores)
+      const ties = scores.reduce((k, q) => k + (q === best ? 1 : 0), 0)
+      const probabilities = scores.map((q) => epsilon / A + (q === best ? (1 - epsilon) / ties : 0))
+      return { action: epsilonGreedyAction(Q, o, A, epsilon, stream), scores, probabilities }
+    },
+    learn(g, t) {
+      const A = g.Q.shape[1]
+      const Q = Float64Array.from(g.Q.data)
+      let bootstrap = 0
+      if (!t.terminated) {
+        bootstrap = -Infinity
+        for (let a = 0; a < A; a++) bootstrap = Math.max(bootstrap, Q[t.next * A + a])
+      }
+      const i = t.observation * A + t.action
+      Q[i] += alpha * (t.reward + g.gamma * bootstrap - Q[i])
+      return { Q: fromData(Q, g.Q.shape), gamma: g.gamma, updates: g.updates + 1 }
+    },
+  }
+}
+
+// ── Registry ─────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+definer<AgentInfo>('agent', 'decisions/reinforcement-learning/learning')(
+  {
+    key: 'qLearningAgent',
+    name: 'Q-learning agent',
+    summary:
+      'ε-greedy Q-learning, one TD update per transition, on any environment with discrete observations and actions.',
+    params: space({
+      learningRate: real(0.01, 1, { default: 0.5, label: 'α' }),
+      epsilon: real(0, 1, { default: 0.1, label: 'ε' }),
+      initialQ: real(-10, 10, { default: 0 }),
+    }),
+    requires: { observation: 'discrete', action: 'discrete' },
+    notes: ['q-learning'],
+    random: true,
+  },
+  qLearningAgent,
+)

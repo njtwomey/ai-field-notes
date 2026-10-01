@@ -4,23 +4,47 @@
  * and a column that is already zero below the diagonal is left alone. This matches NumPy's `np.linalg.qr`.
  */
 
-import type { Tensor } from 'aifn/foundation/tensor'
-import { dense, matrix, untraced } from './dense'
+import {
+  add,
+  concat,
+  definePrimitive,
+  isTraced,
+  matmul,
+  mul,
+  type Op,
+  shapeOfValue,
+  slice,
+  sub,
+  type Tensor,
+  type TensorResult,
+  transpose,
+  type Value,
+} from 'aifn/foundation/tensor'
+import { NotDifferentiableError, NumericalError } from 'aifn/foundation/errors'
+import { dense, EPS, matrix } from './dense'
+import {
+  concreteExamples,
+  float64Aval,
+  kernelBatch,
+  lowerMask,
+  pack,
+  packRaw,
+  scaleOf,
+  symmetricFromLower,
+  unpack,
+} from './rules'
+import { solveTriangular } from './triangular'
 
-/** The result of `qr`. */
-export type QR = {
+/** The result of `qr` (Q and R traced for traced input). */
+export type QR<T = Tensor> = {
   /** Orthonormal columns: m×k for `reduced` (k = min(m, n)), m×m for `complete`. */
-  Q: Tensor
+  Q: T
   /** Upper triangular (trapezoidal): k×n for `reduced`, m×n for `complete`. */
-  R: Tensor
+  R: T
 }
 
-/**
- * QR factorisation A = QR of an m×n matrix by Householder reflections. `mode` `reduced` (default) gives the thin
- * factors; `complete` gives a square Q.
- */
-export function qr(a: Tensor, { mode = 'reduced' }: { mode?: 'reduced' | 'complete' } = {}): QR {
-  untraced(a, 'qr')
+/** Householder QR of a dense copy of A. */
+function householder(a: Value, mode: 'reduced' | 'complete'): QR {
   const { m, n, a: r } = dense(a, 'qr')
   const k = Math.min(m, n)
   // Householder vectors v (v[0] = 1 implied by storing it explicitly) and their scalars τ, with H = I − τvvᵀ.
@@ -72,4 +96,139 @@ export function qr(a: Tensor, { mode = 'reduced' }: { mode?: 'reduced' | 'comple
   }
   const rows = mode === 'complete' ? m : k
   return { Q: matrix(q, m, cols), R: matrix(r.slice(0, rows * n), rows, n) }
+}
+
+/** X R⁻¹ for upper-triangular R. */
+const rightSolve = (x: Value, R: Value) =>
+  transpose(solveTriangular(R, transpose(x), { lower: false, transpose: true }))
+/** X R⁻ᵀ for upper-triangular R. */
+const rightSolveTransposed = (x: Value, R: Value) => transpose(solveTriangular(R, transpose(x), { lower: false }))
+
+/**
+ * A rank-deficient A (a zero diagonal entry of R) has no derivative of Q: report it rather than divide by zero, example
+ * by example inside `vmap`.
+ */
+function refuseRankDeficient(R: Value, k: number): void {
+  const examples = concreteExamples(R)
+  if (examples === null) return
+  const n = shapeOfValue(R)[1]
+  examples.forEach((r, b) => {
+    const scale = scaleOf(r)
+    for (let i = 0; i < k; i++) {
+      if (Math.abs(r[i * n + i]) <= k * EPS * scale) {
+        const which = examples.length > 1 ? ` of batch example ${b}` : ''
+        throw new NumericalError(
+          'qr',
+          `qr: the matrix${which} is rank deficient (R[${i}, ${i}] is zero), so Q has no derivative`,
+          'singular',
+        )
+      }
+    }
+  })
+}
+
+/** The tangents (Q̇, Ṙ) of a square or tall QR, A = QR with R k×k invertible, for a tangent Ȧ. */
+function jvpTall(Q: Value, R: Value, t: Value, k: number): [Value, Value] {
+  const C = matmul(transpose(Q), rightSolve(t, R))
+  const low = mul(C, lowerMask(k, false))
+  const omega = sub(low, transpose(low))
+  const dR = matmul(sub(C, omega), R)
+  const dQ = add(sub(rightSolve(t, R), matmul(Q, C)), matmul(Q, omega))
+  return [dQ, dR]
+}
+
+/** The adjoint Ā of a square or tall QR, A = QR with R k×k invertible, for cotangents (Q̄, R̄). */
+function vjpTall(Q: Value, R: Value, gQ: Value, gR: Value, k: number): Value {
+  const M = sub(matmul(R, transpose(gR)), matmul(transpose(gQ), Q))
+  return rightSolveTransposed(add(gQ, matmul(Q, symmetricFromLower(M, k))), R)
+}
+
+// Rules (Seeger et al., 2017, "Auto-differentiating linear algebra", arXiv:1710.08717; Walter and Lehmann, 2018; the
+// wide case from Liao et al., 2019, "Differentiable programming tensor networks", §B). For A = QR with k×k R
+// invertible and C = QᵀȦR⁻¹, Ω = tril(C, −1) − tril(C, −1)ᵀ:  Ṙ = (C − Ω)R and Q̇ = ȦR⁻¹ − QC + QΩ; the adjoint is
+// Ā = (Q̄ + Q·copyltu(M))R⁻ᵀ with M = RR̄ᵀ − Q̄ᵀQ and copyltu the symmetric matrix of M's lower triangle. A wide A = [X Y]
+// (X m×m) factors X = QU and gives R = [U QᵀY]: the square rule applies to X with Q̄ + YR̄_Yᵀ, and Ȳ = QR̄_Y.
+// The output is Q (m×k) and R (k×n) packed into one vector, for the reduced factorisation.
+const qrOp: Op<undefined> = definePrimitive<undefined>({
+  id: 'numerics/linalg/qr',
+  arity: 1,
+  impl: ([a]) => {
+    const f = householder(a, 'reduced')
+    return packRaw([f.Q.data as Float64Array, f.R.data as Float64Array])
+  },
+  vjp: (g, [a], out) => {
+    const [m, n] = shapeOfValue(a)
+    const k = Math.min(m, n)
+    const [Q, R] = unpack(out, [
+      [m, k],
+      [k, n],
+    ])
+    const [gQ, gR] = unpack(g, [
+      [m, k],
+      [k, n],
+    ])
+    refuseRankDeficient(R, k)
+    if (m >= n) return [vjpTall(Q, R, gQ, gR, k)]
+    const U = slice(R, null, [0, m])
+    const gU = slice(gR, null, [0, m])
+    const gRy = slice(gR, null, [m, n])
+    const Y = slice(a, null, [m, n])
+    const gX = vjpTall(Q, U, add(gQ, matmul(Y, transpose(gRy))), gU, k)
+    return [concat([gX, matmul(Q, gRy)], 1)]
+  },
+  jvp: ([t], [a], out) => {
+    if (t === null) return null
+    const [m, n] = shapeOfValue(a)
+    const k = Math.min(m, n)
+    const [Q, R] = unpack(out, [
+      [m, k],
+      [k, n],
+    ])
+    refuseRankDeficient(R, k)
+    if (m >= n) return pack(jvpTall(Q, R, t, k))
+    const [dQ, dU] = jvpTall(Q, slice(R, null, [0, m]), slice(t, null, [0, m]), k)
+    const Y = slice(a, null, [m, n])
+    const dRy = add(matmul(transpose(dQ), Y), matmul(transpose(Q), slice(t, null, [m, n])))
+    return pack([dQ, concat([dU, dRy], 1)])
+  },
+  batch: kernelBatch('numerics/linalg/qr'),
+  shape: ([a]) => {
+    const [m, n] = a.shape
+    const k = Math.min(m, n)
+    return float64Aval([m * k + k * n])
+  },
+  doc: { summary: 'The reduced QR factorisation by Householder reflections.' },
+  test: {
+    rtol: 1e-4,
+    cases: (draw) => [
+      { inputs: [draw([4, 3])], params: undefined },
+      { inputs: [draw([2, 3])], params: undefined },
+    ],
+  },
+})
+
+/**
+ * QR factorisation A = QR of an m×n matrix by Householder reflections. `mode` `reduced` (default) gives the thin
+ * factors; `complete` gives a square Q. Differentiable in both modes for the reduced factorisation of a matrix of full
+ * rank (Seeger et al., 2017); a rank-deficient A throws `NumericalError` ('singular') when differentiated. The complete
+ * factorisation of a tall matrix is not differentiable (its extra columns of Q are not unique) and refuses traced input.
+ */
+export function qr<X extends Value>(
+  a: X,
+  { mode = 'reduced' }: { mode?: 'reduced' | 'complete' } = {},
+): QR<TensorResult<X>> {
+  if (!isTraced(a)) return householder(a, mode) as QR<TensorResult<X>>
+  const [m, n] = shapeOfValue(a)
+  if (mode === 'complete' && m > n) {
+    throw new NotDifferentiableError(
+      'qr',
+      "qr: the complete factorisation of a tall matrix has no derivative (Q's extra columns are not unique); use mode 'reduced'",
+    )
+  }
+  const k = Math.min(m, n)
+  const [Q, R] = unpack(qrOp([a], undefined), [
+    [m, k],
+    [k, n],
+  ])
+  return { Q, R } as QR<TensorResult<X>>
 }

@@ -15,11 +15,15 @@ export {
   pointwiseBce,
   pointwiseSquaredError,
   rankNet,
+  warp,
+  warpRankWeight,
+  warpWeights,
   type ApproxNdcgOptions,
   type Gain,
   type LambdaOptions,
   type PairwiseHingeOptions,
   type RankNetOptions,
+  type WarpOptions,
 } from './ranking'
 export {
   contrastive,

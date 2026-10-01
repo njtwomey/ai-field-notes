@@ -10,21 +10,33 @@
  */
 
 import { AifnError, ShapeError } from 'aifn/foundation/errors'
-import { flatData, fromData, normaliseAxis, showShape, size, sizeOf, type Axis, type Tensor } from './core'
+import { flatData, fromData, normaliseAxis, promote, showShape, size, sizeOf, type Axes, type Tensor } from './core'
 import { zeros } from './create'
 import { where } from './elementwise'
 import { sumToKernel } from './kernels'
-import { defineOp, sumLike, type NumberResult, type Raw, type TensorResult } from './primitive'
-import { unwrap, type Value } from './tape'
+import {
+  batchToFront,
+  definePrimitive,
+  fitTo,
+  sumLike,
+  type NumberResult,
+  type Op,
+  type Raw,
+  type TensorResult,
+} from './primitive'
+import { avalOf, type Value } from './trace'
 import { gather, scatterAdd } from './gather'
 import { sum } from './reduce'
 import {
+  broadcastShapes,
   broadcastView,
   checkPermutation,
   concatRaw,
   flatIndex,
   permuteView,
+  resolveShape,
   reshapeView,
+  sliceShape,
   sliceView,
   squeezedAxes,
   type SliceSpec,
@@ -37,26 +49,35 @@ function asTensor(x: Raw): Tensor {
 
 /** The shape of a value (`[]` for a number). */
 export function shapeOfValue(x: Value): number[] {
-  const raw = unwrap(x)
-  return typeof raw === 'number' ? [] : [...raw.shape]
+  return [...avalOf(x).shape]
 }
 
-const reshapeOp = defineOp<readonly number[]>(
-  'foundation/tensor/reshape',
-  ([x], shape) => reshapeView(asTensor(x), shape),
-  (g, [x]) => [typeof unwrap(x) === 'number' ? sumLike(g, x) : reshape(g, shapeOfValue(x))],
-  {
-    arity: 1,
-    doc: { summary: 'The same elements with a new shape.' },
-    test: {
-      secondOrder: true,
-      cases: (draw) => [
-        { inputs: [draw([2, 3])], params: [3, 2] },
-        { inputs: [draw([2, 3])], params: [-1] },
-      ],
-    },
+// A worked example of a linear primitive (design K §4.2): the author writes the forward rule, the transpose, the shape
+// rule and the batching rule; the vjp (= transpose) and the jvp (= reshape of the tangent) are derived.
+const reshapeOp = definePrimitive<readonly number[]>({
+  id: 'foundation/tensor/reshape',
+  dtype: 'same',
+  arity: 1,
+  impl: ([x], shape) => reshapeView(asTensor(x), shape),
+  linear: 'linear',
+  // The adjoint of a reshape is the reshape back (to a number when the input was one).
+  transpose: (ct, [x]) => (avalOf(x).number ? sum(ct) : reshape(ct, avalOf(x).shape)),
+  shape: ([x], shape) => ({ shape: resolveShape(sizeOf(x.shape), shape, x.shape), dtype: x.dtype, number: false }),
+  // Each example reshapes on its own: batch axis first, then the example's new shape (its -1 resolved per example).
+  batch: ([x], [axis], shape, size) => {
+    const example = avalOf(x).shape.filter((_, k) => k !== axis)
+    return [reshape(batchToFront(x, axis ?? 0), [size, ...resolveShape(sizeOf(example), shape, example)]), 0]
   },
-)
+  doc: { summary: 'The same elements with a new shape.' },
+  test: {
+    complex: true,
+    secondOrder: true,
+    cases: (draw) => [
+      { inputs: [draw([2, 3])], params: [3, 2] },
+      { inputs: [draw([2, 3])], params: [-1] },
+    ],
+  },
+})
 
 /**
  * The same elements with a new shape; one entry may be -1 (inferred). A view when the tensor is contiguous, otherwise
@@ -71,44 +92,70 @@ export function flatten<X extends Value>(x: X): TensorResult<X> {
   return reshape(x, [-1])
 }
 
-const broadcastToOp = defineOp<readonly number[]>(
-  'foundation/tensor/broadcastTo',
-  ([x], shape) => broadcastView(asTensor(x), shape),
-  (g, [x]) => [sumLike(g, x)],
-  {
-    arity: 1,
-    doc: { summary: 'Broadcast to a shape by NumPy rules.' },
-    test: {
-      secondOrder: true,
-      cases: (draw) => [
-        { inputs: [draw([3])], params: [2, 3] },
-        { inputs: [draw([2, 1])], params: [2, 3] },
-      ],
-    },
+const broadcastToOp: Op<readonly number[]> = definePrimitive<readonly number[]>({
+  id: 'foundation/tensor/broadcastTo',
+  dtype: 'same',
+  arity: 1,
+  impl: ([x], shape) => broadcastView(asTensor(x), shape),
+  linear: 'linear',
+  // The adjoint of broadcasting sums the cotangent over the repeated axes (to a number when the input was one).
+  transpose: (ct, [x]) => sumLike(ct, x),
+  shape: ([x], shape) => {
+    broadcastShapes(x.shape, shape)
+    return { shape: [...shape], dtype: x.dtype, number: false }
   },
-)
+  // The batch axis goes first, with length-1 axes after it so the example aligns (from the right) with the target.
+  batch: ([x], [axis], shape, size) => {
+    const pad = Math.max(0, shape.length - (avalOf(x).shape.length - 1))
+    return [broadcastToOp([batchToFront(x, axis ?? 0, pad)], [size, ...shape]), 0]
+  },
+  doc: { summary: 'Broadcast to a shape by NumPy rules.' },
+  test: {
+    complex: true,
+    secondOrder: true,
+    cases: (draw) => [
+      { inputs: [draw([3])], params: [2, 3] },
+      { inputs: [draw([2, 1])], params: [2, 3] },
+    ],
+  },
+})
 
 /** `x` broadcast to `shape` by NumPy rules (a view with stride 0 along repeated axes). */
 export function broadcastTo<X extends Value>(x: X, shape: readonly number[]): TensorResult<X> {
   return broadcastToOp([x], shape) as TensorResult<X>
 }
 
-const sumToOp = defineOp<readonly number[]>(
-  'foundation/tensor/sumTo',
-  ([x], shape) => sumToKernel(asTensor(x), shape),
-  (g, [x]) => [broadcastTo(g, shapeOfValue(x))],
-  {
-    arity: 1,
-    doc: { summary: 'Sum down to a shape: the adjoint of broadcasting.' },
-    test: {
-      secondOrder: true,
-      cases: (draw) => [
-        { inputs: [draw([2, 3])], params: [3] },
-        { inputs: [draw([2, 3])], params: [2, 1] },
-      ],
-    },
+const sumToOp: Op<readonly number[]> = definePrimitive<readonly number[]>({
+  id: 'foundation/tensor/sumTo',
+  dtype: 'float',
+  arity: 1,
+  impl: ([x], shape) => sumToKernel(asTensor(x), shape),
+  linear: 'linear',
+  // The adjoint of summing down is broadcasting back up (to a number when the input was one).
+  transpose: (ct, [x]) => fitTo(ct, avalOf(x)),
+  shape: ([x], shape) => ({
+    shape: [...shape],
+    dtype: x.dtype === 'int32' || x.dtype === 'complex128' ? x.dtype : 'float64',
+    number: false,
+  }),
+  // Leading axes of an example are summed away; with the batch axis first, the target gets length-1 axes in their
+  // place (summed, kept) and a reshape drops them.
+  batch: ([x], [axis], shape, size) => {
+    const pad = avalOf(x).shape.length - 1 - shape.length
+    if (pad <= 0) return [sumToOp([batchToFront(x, axis ?? 0)], [size, ...shape]), 0]
+    const kept = sumToOp([batchToFront(x, axis ?? 0)], [size, ...new Array<number>(pad).fill(1), ...shape])
+    return [reshape(kept, [size, ...shape]), 0]
   },
-)
+  doc: { summary: 'Sum down to a shape: the adjoint of broadcasting.' },
+  test: {
+    complex: true,
+    secondOrder: true,
+    cases: (draw) => [
+      { inputs: [draw([2, 3])], params: [3] },
+      { inputs: [draw([2, 3])], params: [2, 1] },
+    ],
+  },
+})
 
 /**
  * Sum `x` down to `shape`, the adjoint of broadcasting `shape` up to `x`'s shape: leading axes are summed away and
@@ -118,21 +165,42 @@ export function sumTo<X extends Value>(x: X, shape: readonly number[]): TensorRe
   return sumToOp([x], shape) as TensorResult<X>
 }
 
-const permuteOp = defineOp<readonly number[]>(
-  'foundation/tensor/permute',
-  ([x], axes) => permuteView(asTensor(x), checkPermutation(axes, asTensor(x).shape.length)),
-  (g, [x], _y, axes) => {
-    const order = checkPermutation(axes, shapeOfValue(x).length)
-    const inverse = new Array<number>(order.length)
-    order.forEach((a, k) => (inverse[a] = k))
-    return [permute(g, inverse)]
+/** The inverse of a permutation. */
+function inversePermutation(order: readonly number[]): number[] {
+  const inverse = new Array<number>(order.length)
+  order.forEach((a, k) => (inverse[a] = k))
+  return inverse
+}
+
+const permuteOp: Op<readonly number[]> = definePrimitive<readonly number[]>({
+  id: 'foundation/tensor/permute',
+  dtype: 'same',
+  arity: 1,
+  impl: ([x], axes) => permuteView(asTensor(x), checkPermutation(axes, asTensor(x).shape.length)),
+  linear: 'linear',
+  // The adjoint of a permutation is the inverse permutation.
+  transpose: (ct, [x], _which, axes) => {
+    const aval = avalOf(x)
+    return fitTo(permute(ct, inversePermutation(checkPermutation(axes, aval.shape.length))), aval)
   },
-  {
-    arity: 1,
-    doc: { summary: 'Reorder the axes.' },
-    test: { secondOrder: true, cases: (draw) => [{ inputs: [draw([2, 3, 4])], params: [2, 0, 1] }] },
+  shape: ([x], axes) => ({
+    shape: checkPermutation(axes, x.shape.length).map((a) => x.shape[a]),
+    dtype: x.dtype,
+    number: false,
+  }),
+  // The batch axis leads the output; the example's axes keep their order after it.
+  batch: ([x], [axis], axes) => {
+    const b = axis ?? 0
+    const order = checkPermutation(axes, avalOf(x).shape.length - 1)
+    return [permuteOp([x], [b, ...order.map((a) => (a < b ? a : a + 1))]), 0]
   },
-)
+  doc: { summary: 'Reorder the axes.' },
+  test: {
+    complex: true,
+    secondOrder: true,
+    cases: (draw) => [{ inputs: [draw([2, 3, 4])], params: [2, 0, 1] }],
+  },
+})
 
 /** A view with the axes reordered: axis k of the result is axis `axes[k]` of `x`. */
 export function permute<X extends Value>(x: X, axes: readonly number[]): TensorResult<X> {
@@ -146,7 +214,7 @@ export function transpose<X extends Value>(x: X, axes?: readonly number[]): Tens
 }
 
 /** A view without axes of length 1: all of them, or only `axis` (each of which must have length 1). A reshape. */
-export function squeeze<X extends Value>(x: X, axis?: Axis): TensorResult<X> {
+export function squeeze<X extends Value>(x: X, axis?: Axes): TensorResult<X> {
   const shape = shapeOfValue(x)
   const drop = squeezedAxes(shape, axis)
   return reshape(
@@ -167,28 +235,45 @@ export function expandDims<X extends Value>(x: X, axis: number): TensorResult<X>
 
 type Scatter = { shape: readonly number[]; specs: readonly SliceSpec[] }
 
-// The adjoint of slicing: zeros of the input's shape with the cotangent written into the sliced positions.
-const scatterSliceOp = defineOp<Scatter>(
-  'foundation/tensor/scatterSlice',
-  ([g], { shape, specs }) => {
-    const out = zeros(shape)
-    const target = sliceView(out, specs)
+// The adjoint of slicing: zeros of the input's shape with the cotangent written into the sliced positions. Linear, and
+// slicing is its transpose.
+const scatterSliceOp: Op<Scatter> = definePrimitive<Scatter>({
+  id: 'foundation/tensor/scatterSlice',
+  arity: 1,
+  impl: ([g], { shape, specs }) => {
     const src = asTensor(g)
-    const values = flatData(src, 'float64')
+    const complex = src.dtype === 'complex128'
+    const out = zeros(shape, complex ? 'complex128' : 'float64')
+    const target = sliceView(out, specs)
+    const values = flatData(src, complex ? 'complex128' : 'float64')
     let k = 0
-    forEachTarget(target, (off) => (out.data[off] = values[k++]))
+    if (complex)
+      forEachTarget(target, (off) => {
+        out.data[2 * off] = values[2 * k]
+        out.data[2 * off + 1] = values[2 * k++ + 1]
+      })
+    else forEachTarget(target, (off) => (out.data[off] = values[k++]))
     return out
   },
-  (g, _inputs, _y, { specs }) => [slice(g, ...specs)],
-  {
-    arity: 1,
-    doc: { summary: 'Zeros with values written into a slice: the adjoint of slicing.' },
-    test: {
-      secondOrder: true,
-      cases: (draw) => [{ inputs: [draw([2, 3])], params: { shape: [4, 3], specs: [[0, 4, 2]] } }],
-    },
+  linear: 'linear',
+  dtype: 'float',
+  transpose: (ct, [g], _which, { specs }) => fitTo(slice(ct, ...specs), avalOf(g)),
+  shape: ([g], { shape }) => ({
+    shape: [...shape],
+    dtype: g.dtype === 'complex128' ? 'complex128' : 'float64',
+    number: false,
+  }),
+  batch: ([g], [axis], { shape, specs }, size) => [
+    scatterSliceOp([batchToFront(g, axis ?? 0)], { shape: [size, ...shape], specs: [null, ...specs] }),
+    0,
+  ],
+  doc: { summary: 'Zeros with values written into a slice: the adjoint of slicing.' },
+  test: {
+    complex: true,
+    secondOrder: true,
+    cases: (draw) => [{ inputs: [draw([2, 3])], params: { shape: [4, 3], specs: [[0, 4, 2]] } }],
   },
-)
+})
 
 /** Visit the data offsets of a view in row-major order. */
 function forEachTarget(t: Tensor, body: (off: number) => void): void {
@@ -205,23 +290,31 @@ function forEachTarget(t: Tensor, body: (off: number) => void): void {
   }
 }
 
-const sliceOp = defineOp<readonly SliceSpec[]>(
-  'foundation/tensor/slice',
-  ([x], specs) => sliceView(asTensor(x), specs),
-  (g, [x], _y, specs) => [scatterSliceOp([g], { shape: shapeOfValue(x), specs })],
-  {
-    arity: 1,
-    doc: { summary: 'Basic indexing: a view of part of a tensor.' },
-    test: {
-      secondOrder: true,
-      cases: (draw) => [
-        { inputs: [draw([4, 3])], params: [[1, 3], null] },
-        { inputs: [draw([5])], params: [[null, null, -1]] },
-        { inputs: [draw([3, 4])], params: [1] },
-      ],
-    },
+const sliceOp: Op<readonly SliceSpec[]> = definePrimitive<readonly SliceSpec[]>({
+  id: 'foundation/tensor/slice',
+  dtype: 'same',
+  arity: 1,
+  impl: ([x], specs) => sliceView(asTensor(x), specs),
+  linear: 'linear',
+  // The adjoint scatters the cotangent into zeros of the input's shape.
+  transpose: (ct, [x], _which, specs) => {
+    const aval = avalOf(x)
+    return fitTo(scatterSliceOp([ct], { shape: aval.shape, specs }), aval)
   },
-)
+  shape: ([x], specs) => ({ shape: sliceShape(x.shape, specs), dtype: x.dtype, number: false }),
+  // With the batch axis first, a leading `null` spec keeps it whole.
+  batch: ([x], [axis], specs) => [sliceOp([batchToFront(x, axis ?? 0)], [null, ...specs]), 0],
+  doc: { summary: 'Basic indexing: a view of part of a tensor.' },
+  test: {
+    complex: true,
+    secondOrder: true,
+    cases: (draw) => [
+      { inputs: [draw([4, 3])], params: [[1, 3], null] },
+      { inputs: [draw([5])], params: [[null, null, -1]] },
+      { inputs: [draw([3, 4])], params: [1] },
+    ],
+  },
+})
 
 /**
  * A view selecting part of a tensor, one spec per leading axis (missing trailing specs keep their axes whole), as
@@ -262,31 +355,47 @@ export function set<X extends Value>(x: X, index: readonly number[], value: Valu
   return where(oneHot(shapeOfValue(x), index), value, x) as TensorResult<X>
 }
 
-const concatOp = defineOp<number>(
-  'foundation/tensor/concat',
-  (xs, axis) => concatRaw(xs.map(asTensor), axis),
-  (g, xs, _y, axis) => {
-    const rank = shapeOfValue(xs[0]).length
-    const a = normaliseAxis(axis, rank, 'concat')
+const concatOp: Op<number> = definePrimitive<number>({
+  id: 'foundation/tensor/concat',
+  dtype: 'same',
+  impl: (xs, axis) => concatRaw(xs.map(asTensor), axis),
+  linear: 'linear',
+  // The adjoint in input i is the block of the cotangent that input i filled.
+  transpose: (ct, xs, which, axis) => {
+    const a = normaliseAxis(axis, shapeOfValue(xs[0]).length, 'concat')
     let start = 0
-    return xs.map((x) => {
-      const n = shapeOfValue(x)[a]
-      const specs: SliceSpec[] = Array.from({ length: a + 1 }, (_, k) => (k === a ? [start, start + n] : null))
-      start += n
-      return slice(g, ...specs)
+    for (let i = 0; i < which; i++) start += shapeOfValue(xs[i])[a]
+    const n = shapeOfValue(xs[which])[a]
+    const specs: SliceSpec[] = Array.from({ length: a + 1 }, (_, k) => (k === a ? [start, start + n] : null))
+    return slice(ct, ...specs)
+  },
+  shape: (avals, axis) => {
+    const a = normaliseAxis(axis, avals[0].shape.length, 'concat')
+    const shape = [...avals[0].shape]
+    shape[a] = avals.reduce((s, x) => s + x.shape[a], 0)
+    return { shape, dtype: avals.map((x) => x.dtype).reduce(promote), number: false }
+  },
+  // Batched inputs move their batch axis first; unbatched ones are repeated along a new first axis.
+  batch: (xs, axes, axis, size) => {
+    const rank = avalOf(xs[axes.findIndex((b) => b !== null)]).shape.length - 1
+    const a = normaliseAxis(axis, rank, 'concat')
+    const moved = xs.map((x, i) => {
+      const b = axes[i]
+      if (b !== null) return batchToFront(x, b)
+      return broadcastTo(reshape(x, [1, ...shapeOfValue(x)]), [size, ...shapeOfValue(x)])
     })
+    return [concatOp(moved, a + 1), 0]
   },
-  {
-    doc: { summary: 'Join tensors along an existing axis.' },
-    test: {
-      secondOrder: true,
-      cases: (draw) => [
-        { inputs: [draw([2, 3]), draw([1, 3])], params: 0 },
-        { inputs: [draw([2, 3]), draw([2, 2])], params: 1 },
-      ],
-    },
+  doc: { summary: 'Join tensors along an existing axis.' },
+  test: {
+    complex: true,
+    secondOrder: true,
+    cases: (draw) => [
+      { inputs: [draw([2, 3]), draw([1, 3])], params: 0 },
+      { inputs: [draw([2, 3]), draw([2, 2])], params: 1 },
+    ],
   },
-)
+})
 
 /** Join tensors along an existing axis; the other axes must match. Copies; the dtype is the common promotion. */
 export function concat(xs: readonly Tensor[], axis?: number): Tensor
@@ -335,4 +444,28 @@ export function diag<X extends Value>(v: X): TensorResult<X> {
     throw new ShapeError('diag', `diag: expected a vector, got shape ${showShape(shape)}`, [shape])
   const n = shape[0]
   return scatterAdd(v, diagonalIndices(n, n), [n, n]) as TensorResult<X>
+}
+
+/**
+ * A batching rule that loops: apply `op` to each example (index `b` of every batched input) and stack the results
+ * along a new first axis. For primitives with no cheaper rule in some cases (e.g. a convolution whose kernels are
+ * batched); it is what `vmap` does for a primitive with no rule at all, written as a rule. Examples are tensors.
+ */
+export function batchByLoop<P>(
+  op: Op<P>,
+  values: readonly Value[],
+  axes: readonly (number | null)[],
+  params: P,
+  size: number,
+): [Value, number] {
+  const outs: Value[] = []
+  for (let b = 0; b < size; b++) {
+    const args = values.map((v, i) => {
+      const axis = axes[i]
+      if (axis === null) return v
+      return slice(v, ...Array.from({ length: axis + 1 }, (_, k): SliceSpec => (k === axis ? b : null)))
+    })
+    outs.push(op(args, params))
+  }
+  return [stack(outs, 0), 0]
 }

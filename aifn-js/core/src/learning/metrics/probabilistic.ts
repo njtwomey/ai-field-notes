@@ -8,7 +8,8 @@
 import { type Stream, uniform } from 'aifn/foundation/random'
 import { normalCdf, normalLogPdf, normalPdf } from 'aifn/numerics/special'
 import { quantile } from 'aifn/probability/stats'
-import type { Tensor } from 'aifn/foundation/tensor'
+import { isTraced, type Tensor, type Value } from 'aifn/foundation/tensor'
+import type { Curve, Distribution } from 'aifn/foundation/contracts'
 import {
   binaryTruth,
   classesOf,
@@ -72,6 +73,7 @@ function probabilityRows(yTrue: Labels, probabilities: Probabilities, options: P
 export const logLoss = defineMetric(
   {
     key: 'logLoss',
+    stability: 'stable',
     name: 'Log loss',
     inputs: 'probabilities',
     direction: 'lower',
@@ -99,6 +101,7 @@ export const logLoss = defineMetric(
 export const brierScore = defineMetric(
   {
     key: 'brierScore',
+    stability: 'stable',
     name: 'Brier score',
     inputs: 'probabilities',
     direction: 'lower',
@@ -124,6 +127,7 @@ export const brierScore = defineMetric(
 export const sphericalScore = defineMetric(
   {
     key: 'sphericalScore',
+    stability: 'stable',
     name: 'Spherical score (loss)',
     inputs: 'probabilities',
     direction: 'lower',
@@ -148,21 +152,19 @@ export const sphericalScore = defineMetric(
 /** How predictions are grouped: equal-width bins on [0, 1], or equal-mass bins holding (nearly) equal counts. */
 export type BinStrategy = 'uniform' | 'quantile'
 
-/** A reliability diagram: per bin, the mean prediction against the observed frequency. Empty bins hold NaN. */
-export type ReliabilityDiagram = {
-  kind: 'reliability'
+/**
+ * A reliability diagram as a binned `Curve` (no thresholds): per bin, `x` the mean prediction p̄ₘ against `y` the
+ * observed frequency ȳₘ of the event. Empty bins hold NaN.
+ */
+export type ReliabilityDiagram = Curve<'reliability'> & {
   /** Bin edges (length M + 1). Equal-mass bins report the smallest prediction of each bin and 1 as the last edge. */
-  edges: Tensor
+  readonly edges: Tensor
   /** Cases in each bin. */
-  counts: Tensor
-  /** Mean prediction p̄ₘ in each bin. */
-  meanPredicted: Tensor
-  /** Observed frequency ȳₘ of the event in each bin. */
-  observed: Tensor
+  readonly counts: Tensor
   /** ȳₘ − p̄ₘ. */
-  gap: Tensor
+  readonly gap: Tensor
   /** The binned ECE, Σ (nₘ/n)|ȳₘ − p̄ₘ|. */
-  ece: number
+  readonly ece: number
 }
 
 /** Bin index of each prediction, and the bin edges. */
@@ -234,11 +236,12 @@ export function reliabilityDiagram(
     if (c > 0) ece += (c / s.n) * Math.abs(s.freq[m] - s.meanP[m])
   })
   return {
-    kind: 'reliability',
+    kind: 'curve',
+    curve: 'reliability',
+    x: vector(s.meanP),
+    y: vector(s.freq),
     edges: vector(s.edges),
     counts: vector(s.counts),
-    meanPredicted: vector(s.meanP),
-    observed: vector(s.freq),
     gap: vector(Float64Array.from(s.freq, (f, m) => f - s.meanP[m])),
     ece,
   }
@@ -268,6 +271,7 @@ function binaryInputs(yTrue: Labels, probabilities: Data, positive: Label | unde
 const calibrationInfo = (key: string, name: string, note = 'calibration-error') =>
   ({
     key,
+    stability: 'stable',
     name,
     inputs: 'probabilities',
     direction: 'lower',
@@ -483,20 +487,70 @@ export function brierDecomposition(
 /** A value per case, or one value shared by all cases. */
 export type PerCase = Data | number
 
-function perCase(x: PerCase, n: number, what: string): Float64Array {
+function perCase(x: PerCase | Value, n: number, what: string): Float64Array {
   if (typeof x === 'number') return new Float64Array(n).fill(x)
-  const v = values(x)
+  if (isTraced(x)) throw new Error(`metrics: ${what}: traced values are not accepted`)
+  const v = values(x as Data)
   if (v.length !== n) throw new Error(`metrics: ${what}: ${v.length} values for ${n} cases`)
   return v
 }
 
 /**
+ * A Gaussian forecast per case: means and standard deviations, or a model's predictive `Normal` distribution (the
+ * `predictive` capability, as `evaluate` passes it), batch shape [n].
+ */
+export type GaussianForecast = { mean: PerCase; sd: PerCase } | Distribution
+
+const isDistribution = (x: unknown): x is Distribution =>
+  typeof x === 'object' && x !== null && (x as { kind?: unknown }).kind === 'distribution'
+
+/** The means and standard deviations of a Gaussian forecast for n cases; a predictive must be a `Normal`. */
+function gaussianMoments(f: GaussianForecast, n: number, what: string): { mu: Float64Array; sd: Float64Array } {
+  if (isDistribution(f)) {
+    if (f.name !== 'Normal')
+      throw new Error(`metrics: ${what}: needs a Normal predictive, got ${f.name} (use logScore for any distribution)`)
+    return { mu: perCase(f.mean(), n, `${what} mean`), sd: perCase(f.stddev(), n, `${what} sd`) }
+  }
+  return { mu: perCase(f.mean, n, `${what} mean`), sd: perCase(f.sd, n, `${what} sd`) }
+}
+
+/**
+ * The log score of any predictive distribution, −(1/n) Σ log p(yᵢ) (a density for continuous predictives, a mass for
+ * discrete ones), in nats: the proper scoring rule behind log loss and the Gaussian log score (Gneiting and Raftery
+ * 2007, §4.1), read from the model's `predictive` through `logProb`. The predictive's batch is the n cases; for a
+ * categorical predictive, y holds class indices.
+ */
+export const logScore = defineMetric(
+  {
+    key: 'logScore',
+    stability: 'stable',
+    name: 'Log score',
+    inputs: 'distribution',
+    direction: 'lower',
+    range: [-Infinity, Infinity],
+    notes: ['continuous-ranked-probability-score-and-interval-scores', 'log-loss-and-brier-score'],
+    capability: 'predictive',
+  },
+  (yTrue: Data, predictive: Distribution): number => {
+    if (!isDistribution(predictive)) throw new Error('metrics: logScore: needs a predictive distribution')
+    const y = values(yTrue)
+    nonEmpty(y.length, 'logScore')
+    const lp = perCase(predictive.logProb(vector(y)), y.length, 'logScore')
+    let s = 0
+    for (let i = 0; i < y.length; i++) s -= lp[i]
+    return s / y.length
+  },
+)
+
+/**
  * The CRPS of Gaussian forecasts N(μᵢ, σᵢ²), averaged over cases (Gneiting and Raftery 2007, eq. 21): with
- * z = (y − μ)/σ, CRPS = σ(z(2Φ(z) − 1) + 2φ(z) − 1/√π). In the units of y.
+ * z = (y − μ)/σ, CRPS = σ(z(2Φ(z) − 1) + 2φ(z) − 1/√π). In the units of y. The forecast is means and sds, or a
+ * model's Normal predictive (so `evaluate` serves it).
  */
 export const crpsGaussian = defineMetric(
   {
     key: 'crpsGaussian',
+    stability: 'stable',
     name: 'CRPS (Gaussian forecast)',
     inputs: 'distribution',
     direction: 'lower',
@@ -504,11 +558,10 @@ export const crpsGaussian = defineMetric(
     notes: ['continuous-ranked-probability-score-and-interval-scores'],
     capability: 'predictive',
   },
-  (yTrue: Data, forecast: { mean: PerCase; sd: PerCase }): number => {
+  (yTrue: Data, forecast: GaussianForecast): number => {
     const y = values(yTrue)
     nonEmpty(y.length, 'crpsGaussian')
-    const mu = perCase(forecast.mean, y.length, 'crpsGaussian mean')
-    const sd = perCase(forecast.sd, y.length, 'crpsGaussian sd')
+    const { mu, sd } = gaussianMoments(forecast, y.length, 'crpsGaussian')
     let s = 0
     for (let i = 0; i < y.length; i++) {
       const z = (y[i] - mu[i]) / sd[i]
@@ -527,6 +580,7 @@ export const crpsGaussian = defineMetric(
 export const crpsEnsemble = defineMetric(
   {
     key: 'crpsEnsemble',
+    stability: 'stable',
     name: 'CRPS (ensemble forecast)',
     inputs: 'distribution',
     direction: 'lower',
@@ -560,11 +614,13 @@ export const crpsEnsemble = defineMetric(
 
 /**
  * The negative log predictive density of Gaussian forecasts, −(1/n) Σ log N(yᵢ; μᵢ, σᵢ²) (the log score, orientated
- * as a loss).
+ * as a loss). The forecast is means and sds, or a model's Normal predictive (so `evaluate` serves it); `logScore`
+ * is the same score for any predictive distribution.
  */
 export const gaussianLogScore = defineMetric(
   {
     key: 'gaussianLogScore',
+    stability: 'stable',
     name: 'Log score (Gaussian forecast)',
     inputs: 'distribution',
     direction: 'lower',
@@ -572,11 +628,10 @@ export const gaussianLogScore = defineMetric(
     notes: ['continuous-ranked-probability-score-and-interval-scores'],
     capability: 'predictive',
   },
-  (yTrue: Data, forecast: { mean: PerCase; sd: PerCase }): number => {
+  (yTrue: Data, forecast: GaussianForecast): number => {
     const y = values(yTrue)
     nonEmpty(y.length, 'gaussianLogScore')
-    const mu = perCase(forecast.mean, y.length, 'gaussianLogScore mean')
-    const sd = perCase(forecast.sd, y.length, 'gaussianLogScore sd')
+    const { mu, sd } = gaussianMoments(forecast, y.length, 'gaussianLogScore')
     let s = 0
     for (let i = 0; i < y.length; i++) s -= normalLogPdf((y[i] - mu[i]) / sd[i]) - Math.log(sd[i])
     return s / y.length
@@ -593,6 +648,7 @@ export type Interval = { lower: PerCase; upper: PerCase }
 export const intervalScore = defineMetric(
   {
     key: 'intervalScore',
+    stability: 'stable',
     name: 'Interval score',
     inputs: 'distribution',
     direction: 'lower',
@@ -620,6 +676,7 @@ export const intervalScore = defineMetric(
 export const coverage = defineMetric(
   {
     key: 'coverage',
+    stability: 'stable',
     name: 'Interval coverage',
     inputs: 'distribution',
     direction: 'higher',
@@ -678,6 +735,7 @@ export function pitValues(
 export const perplexity = defineMetric(
   {
     key: 'perplexity',
+    stability: 'stable',
     name: 'Perplexity',
     inputs: 'probabilities',
     direction: 'lower',

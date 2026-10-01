@@ -3,7 +3,7 @@ import { useId, type ReactNode } from 'react'
 import { Button } from '@lab/ui/button'
 import { ButtonGroup } from '@lab/ui/button-group'
 import { cn } from '@lab/lib/utils'
-import { formatNumber, snapToStep } from '@lab/viz'
+import { formatField, snapToStep } from '@lab/state/step'
 import { ControlLabel } from './ControlLabel'
 import type { Param } from './param'
 import { useNumberDraft } from './useNumberDraft'
@@ -34,7 +34,7 @@ export type NumberFieldProps = Common &
  * Enter or blur commits (clamped, and snapped to the step); Escape reverts; ↑ and ↓ step, × 10 with Shift.
  */
 export function NumberField(props: NumberFieldProps) {
-  const { label, format = formatNumber, disabled, className } = props
+  const { label, format = formatField, disabled, className } = props
   const value = props.param ? props.param.value : props.value
   const onChange = props.param ? props.param.set : props.onChange
   const min = (props.param ? props.param.min : props.min) ?? -Infinity

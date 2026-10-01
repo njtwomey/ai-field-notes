@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useMemo } from 'react'
 import {
   add,
   arange,
@@ -20,40 +20,52 @@ import {
   toFlat,
   transpose,
   type Tensor,
+  type Value,
 } from 'aifn/foundation/tensor'
+import { grad } from 'aifn/foundation/autodiff'
 import { sigmoid } from 'aifn/numerics/special'
-import { Select, Slider } from '@lab/controls'
-import { Figure } from '@lab/layout'
-import { Readout, XYChart } from '@lab/viz'
-import { formatValue, TensorView } from '@lab/views'
+import { Equation, Figure, live, tex } from '@lab/layout'
+import { choice, slider, useFigureState } from '@lab/state'
+import { Bars, Curve, Plot, Readout, useAxis } from '@lab/viz'
+import { formatValue, TensorModePanel } from '@lab/views'
 
 /** Broadcasting: a column [m, 1] and a row [1, n] combine into an m×n grid. */
 export function BroadcastSpecimen() {
-  const [m, setM] = useState(12)
-  const [n, setN] = useState(20)
+  const state = useFigureState({
+    m: slider(2, 30, 12, { step: 1, label: 'rows m' }),
+    n: slider(2, 40, 20, { step: 1, label: 'columns n' }),
+  })
+  const { m, n } = state
   const grid = useMemo(() => {
     const y = reshape(linspace(-1, 1, m), [m, 1])
     const x = reshape(linspace(-2, 2, n), [1, n])
     return mul(sin(mul(3, x)), cos(mul(2, y))) as Tensor
   }, [m, n])
   return (
-    <TensorView
+    <Figure
       title="sin(3x) cos(2y)"
-      description="sin(3x) · cos(2y) with x of shape [1, n] and y of shape [m, 1]."
-      tensor={grid}
-      controls={
-        <>
-          <Slider label="rows m" value={m} onChange={setM} min={2} max={30} step={1} />
-          <Slider label="columns n" value={n} onChange={setN} min={2} max={40} step={1} />
-        </>
-      }
-    />
+      purpose="A column of shape [m, 1] times a row of shape [1, n] is an [m, n] grid: each operand is repeated along its size-1 axis."
+      description="sin(3x) · cos(2y) with x of shape [1, n] on [−2, 2] and y of shape [m, 1] on [−1, 1]."
+      state={state}
+      readouts={<Readout label="shape" value={`[${m}, 1] ⊙ [1, ${n}] → [${grid.shape.join(', ')}]`} />}
+    >
+      <TensorModePanel tensor={grid} />
+    </Figure>
   )
 }
 
+const VIEWS = [
+  { value: 'base', label: 'base' },
+  { value: 'slice', label: '[1:5, ::2]' },
+  { value: 'transpose', label: 'transpose' },
+  { value: 'reversed', label: '[::-1, ::-1]' },
+  { value: 'rank3', label: 'reshape [2,3,8], permute' },
+] as const
+
 /** Views share data: slicing and permuting change only shape, strides and offset. */
 export function ViewsSpecimen() {
-  const [which, setWhich] = useState<'base' | 'slice' | 'transpose' | 'reversed' | 'rank3'>('slice')
+  const state = useFigureState({ view: choice(VIEWS, 'slice', { label: 'view' }) })
+  const which = state.view
   const base = useMemo(() => reshape(arange(48), [6, 8]), [])
   const shown = useMemo(() => {
     if (which === 'base') return base
@@ -63,72 +75,64 @@ export function ViewsSpecimen() {
     return permute(reshape(base, [2, 3, 8]), [1, 0, 2])
   }, [base, which])
   return (
-    <TensorView
+    <Figure
       title="A view of arange(48) reshaped to [6, 8]"
-      tensor={shown}
-      initialMode="table"
-      controls={
-        <Select
-          label="view"
-          value={which}
-          onChange={setWhich}
-          options={[
-            { value: 'base', label: 'base' },
-            { value: 'slice', label: '[1:5, ::2]' },
-            { value: 'transpose', label: 'transpose' },
-            { value: 'reversed', label: '[::-1, ::-1]' },
-            { value: 'rank3', label: 'reshape [2,3,8], permute' },
-          ]}
-        />
-      }
+      purpose="A slice, transpose or permutation is a view: the same 48 numbers read with another shape, strides and offset, nothing copied."
+      state={state}
       readouts={
         <>
+          <Readout label="shape" value={`[${shown.shape.join(', ')}]`} />
           <Readout label="offset" value={shown.offset} />
           <Readout label="strides" value={`[${shown.strides.join(', ')}]`} />
           <Readout label="shares data with base" value={shown.data === base.data ? 'yes' : 'no'} />
         </>
       }
-    />
+      caption="Element (i, j) of a view sits at offset + i·stride₀ + j·stride₁ in the base's data. A negative stride walks backwards; the transpose swaps the strides."
+    >
+      <TensorModePanel tensor={shown} initialMode="table" />
+    </Figure>
   )
 }
 
+const INDEX = ['x₁', 'x₂', 'x₃', 'x₄', 'x₅', 'x₆', 'x₇']
+
 /** logsumexp against the naive log Σ exp, which overflows once the values pass about 709. */
 export function LogSumExpSpecimen() {
-  const [shift, setShift] = useState(700)
+  const state = useFigureState({
+    shift: slider(-800, 800, 750, { step: 10, label: 'shift c (values c − 3 … c + 3)' }),
+  })
+  const shift = state.shift
   const x = useMemo(() => add(linspace(-3, 3, 7), shift) as Tensor, [shift])
   const stable = logsumexp(x)
   const naive = Math.log(sum(exp(x)))
+  const m = max(x) as number
   const bars = useMemo(() => {
     const p = toFlat(exp(sub(x, stable)) as Tensor)
     return { x: p.map((_, i) => i), y: p }
   }, [x, stable])
+  const xa = useAxis({ label: 'entry', categories: INDEX })
+  const ya = useAxis({ label: 'softmax', range: [0, 1] })
   return (
     <Figure
       title="softmax = exp(x − logsumexp x)"
-      controls={
-        <Slider
-          label="shift c (values c − 3 … c + 3)"
-          value={shift}
-          onChange={setShift}
-          min={-800}
-          max={800}
-          step={10}
-        />
+      purpose="Subtracting the maximum before exponentiating keeps logsumexp finite where log Σ exp overflows; softmax is unchanged by the shift."
+      state={state}
+      equation={
+        <Equation>
+          {tex`\log \sum_i e^{x_i} = m + \log \sum_i e^{x_i - m} = ${live(m, { digits: 4 })} + ${live(stable - m, { digits: 4 })} = ${live(stable, { digits: 6, strong: true })}`}
+        </Equation>
       }
       readouts={
         <>
           <Readout label="logsumexp" value={formatValue(stable)} />
           <Readout label="log Σ exp (naive)" value={formatValue(naive)} />
-          <Readout label="max" value={formatValue(max(x))} />
         </>
       }
+      caption="With the default shift the values pass 709, exp overflows to ∞ and the naive form returns ∞; logsumexp subtracts m = max x first, so every exponent is at most 0. Move the shift: the bars never change, because softmax depends only on the differences x_i − x_j."
     >
-      <XYChart
-        xLabel="index"
-        yLabel="softmax"
-        integerX
-        series={[{ name: 'softmax', type: 'bar', x: bars.x, y: bars.y }]}
-      />
+      <Plot x={xa} y={ya}>
+        <Bars name="softmax" x={bars.x} y={bars.y} />
+      </Plot>
     </Figure>
   )
 }
@@ -144,11 +148,14 @@ export function EinsumSpecimen() {
     return { batched: viaEinsum, check: diff }
   }, [])
   return (
-    <TensorView
+    <Figure
       title="einsum('bij,jk->bik', a, b)"
-      tensor={batched}
+      purpose="einsum sums over the index j that is missing from the output; with a batch index b it equals matmul broadcasting b over the [3, 5] matrix."
+      description="a has shape [2, 4, 3], b has shape [3, 5]; the result has shape [2, 4, 5], one [4, 5] matrix per batch entry."
       readouts={<Readout label="max |matmul − einsum|" value={formatValue(check)} />}
-    />
+    >
+      <TensorModePanel tensor={batched} />
+    </Figure>
   )
 }
 
@@ -158,23 +165,33 @@ const softplus = elementwise({
   f: (x) => Math.max(x, 0) + Math.log1p(Math.exp(-Math.abs(x))),
   derivative: [(x) => sigmoid(x)],
 })
+const dSoftplus = grad((x: Value) => softplus(x))
 
 /** A primitive defined once works on numbers and tensors alike. */
 export function PrimitiveSpecimen() {
   const x = useMemo(() => linspace(-6, 6, 241), [])
   const y = useMemo(() => toFlat(softplus(x)), [x])
   const xs = useMemo(() => toFlat(x), [x])
+  const dy = useMemo(() => xs.map((v) => dSoftplus(v) as number), [xs])
+  const xa = useAxis({ label: 'x' })
+  const ya = useAxis({ label: 'value' })
   return (
     <Figure
       title="softplus on a tensor"
+      purpose="One scalar rule and its derivative define softplus once: it maps a number to a number, a tensor to a tensor, and grad differentiates it."
       readouts={
         <>
           <Readout label="softplus(0) (a number)" value={formatValue(softplus(0))} />
           <Readout label="softplus(tensor) shape" value={`[${softplus(x).shape.join(', ')}]`} />
+          <Readout label="grad(softplus)(0)" value={formatValue(dSoftplus(0) as number)} />
         </>
       }
+      caption="The curve is softplus applied once to a tensor of 241 points; its derivative is grad of the same function, evaluated point by point, which is the declared derivative σ(x)."
     >
-      <XYChart xLabel="x" yLabel="softplus(x)" series={[{ name: 'softplus', type: 'line', x: xs, y }]} />
+      <Plot x={xa} y={ya}>
+        <Curve name="softplus(x)" x={xs} y={y} />
+        <Curve name="grad softplus = σ(x)" x={xs} y={dy} dashed />
+      </Plot>
     </Figure>
   )
 }

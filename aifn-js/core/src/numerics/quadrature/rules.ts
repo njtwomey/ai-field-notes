@@ -4,6 +4,7 @@
  * "Methods of Numerical Integration", 2nd ed., §2.1–2.4 and §6.3).
  */
 
+import { DomainError, ShapeError } from 'aifn/foundation/errors'
 import { fromData, toFlat, type Tensor } from 'aifn/foundation/tensor'
 import type { Scalar, Size, Status } from 'aifn/foundation/contracts'
 import type { Algorithm } from 'aifn/foundation/trace'
@@ -16,7 +17,7 @@ export type Integrand = (x: Scalar) => Scalar
  * error −(b − a)h²f″(ξ)/12.
  */
 export function trapezoid(f: Integrand, a: Scalar, b: Scalar, { n = 100 }: { n?: Size } = {}): Scalar {
-  if (!(n >= 1)) throw new Error('trapezoid: n must be at least 1')
+  if (!(n >= 1)) throw new DomainError('trapezoid', 'trapezoid: n must be at least 1')
   const h = (b - a) / n
   let s = 0.5 * (f(a) + f(b))
   for (let i = 1; i < n; i++) s += f(a + i * h)
@@ -28,7 +29,7 @@ export function trapezoid(f: Integrand, a: Scalar, b: Scalar, { n = 100 }: { n?:
  * error −(b − a)h⁴f⁽⁴⁾(ξ)/180, exact for cubics.
  */
 export function simpson(f: Integrand, a: Scalar, b: Scalar, { n = 100 }: { n?: Size } = {}): Scalar {
-  if (!(n >= 2) || n % 2 !== 0) throw new Error(`simpson: n must be even and at least 2, got ${n}`)
+  if (!(n >= 2) || n % 2 !== 0) throw new DomainError('simpson', `simpson: n must be even and at least 2, got ${n}`)
   const h = (b - a) / n
   let s = f(a) + f(b)
   for (let i = 1; i < n; i++) s += (i % 2 === 1 ? 4 : 2) * f(a + i * h)
@@ -47,7 +48,8 @@ export function trapezoidSamples(
   const ys = 'shape' in (y as object) ? toFlat(y as Tensor) : Array.from(y as ArrayLike<number>)
   const xs =
     x === undefined ? null : 'shape' in (x as object) ? toFlat(x as Tensor) : Array.from(x as ArrayLike<number>)
-  if (xs && xs.length !== ys.length) throw new Error('trapezoidSamples: x and y differ in length')
+  if (xs && xs.length !== ys.length)
+    throw new ShapeError('trapezoidSamples', 'trapezoidSamples: x and y differ in length')
   let s = 0
   for (let i = 0; i + 1 < ys.length; i++) s += (xs ? xs[i + 1] - xs[i] : dx) * 0.5 * (ys[i] + ys[i + 1])
   return s

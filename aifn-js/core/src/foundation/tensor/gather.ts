@@ -6,10 +6,11 @@
 
 import { AifnError, ShapeError } from 'aifn/foundation/errors'
 import { fromData, isContiguous, isTensor, sizeOf, type Tensor } from './core'
+import { joinComplex, splitComplex } from './kernels'
 import { toFlat } from './create'
-import { defineOp, type Op } from './primitive'
+import { batchToFront, definePrimitive, type Op } from './primitive'
 import { shapeOfValue } from './structure'
-import type { Value } from './tape'
+import type { Value } from './trace'
 
 /** Row-major float64 data of a raw value (no copy when already contiguous float64 at offset 0). */
 function f64(x: number | Tensor, where: string): Float64Array {
@@ -22,47 +23,79 @@ function f64(x: number | Tensor, where: string): Float64Array {
 
 type GatherParams = { indices: Int32Array; shape: readonly number[]; source: readonly number[] }
 
-const gatherOp: Op<GatherParams> = defineOp<GatherParams>(
-  'foundation/tensor/gather',
-  ([x], { indices, shape }) => {
-    const data = f64(x, 'gather')
-    const out = new Float64Array(indices.length)
-    for (let k = 0; k < indices.length; k++) out[k] = data[indices[k]]
-    return fromData(out, shape)
-  },
-  (g, _inputs, _y, p) => [scatterAddOp([g], p)],
-  {
-    arity: 1,
-    doc: { summary: 'Read elements at flat indices.' },
-    test: {
-      secondOrder: true,
-      cases: (draw) => [
-        { inputs: [draw([2, 3])], params: { indices: Int32Array.of(0, 5, 5, 2), shape: [2, 2], source: [2, 3] } },
-      ],
-    },
-  },
-)
+const floatOrComplex = (dtype: string) => (dtype === 'complex128' ? 'complex128' : 'float64')
 
-const scatterAddOp: Op<GatherParams> = defineOp<GatherParams>(
-  'foundation/tensor/scatterAdd',
-  ([g], { indices, source }) => {
-    const data = f64(g, 'scatterAdd')
-    const out = new Float64Array(sizeOf(source))
-    for (let k = 0; k < indices.length; k++) out[indices[k]] += data[k]
-    return fromData(out, source)
+/** Apply a real kernel to a raw value, or to the real and imaginary views of a complex one and join the results. */
+function onParts(x: number | Tensor, kernel: (part: number | Tensor) => Tensor): Tensor {
+  if (typeof x === 'number' || x.dtype !== 'complex128') return kernel(x)
+  const [re, im] = splitComplex(x)
+  return joinComplex(kernel(re), kernel(im!))
+}
+
+function gatherRaw(x: number | Tensor, { indices, shape }: GatherParams): Tensor {
+  const data = f64(x, 'gather')
+  const out = new Float64Array(indices.length)
+  for (let k = 0; k < indices.length; k++) out[k] = data[indices[k]]
+  return fromData(out, shape)
+}
+
+function scatterAddRaw(g: number | Tensor, { indices, source }: GatherParams): Tensor {
+  const data = f64(g, 'scatterAdd')
+  const out = new Float64Array(sizeOf(source))
+  for (let k = 0; k < indices.length; k++) out[indices[k]] += data[k]
+  return fromData(out, source)
+}
+
+/**
+ * The parameters of a gather or scatter over a batch of `size` examples stacked along a new first axis: example b's
+ * flat indices are shifted by b times the size of one example's source.
+ */
+function batched(p: GatherParams, size: number): GatherParams {
+  const n = p.indices.length
+  const stride = sizeOf(p.source)
+  const indices = new Int32Array(size * n)
+  for (let b = 0; b < size; b++) for (let k = 0; k < n; k++) indices[b * n + k] = p.indices[k] + b * stride
+  return { indices, shape: [size, ...p.shape], source: [size, ...p.source] }
+}
+
+// gather and scatterAdd are linear and each other's transpose, so each has derivatives of every order.
+const gatherOp: Op<GatherParams> = definePrimitive<GatherParams>({
+  id: 'foundation/tensor/gather',
+  arity: 1,
+  impl: ([x], p) => onParts(x, (part) => gatherRaw(part, p)),
+  linear: 'linear',
+  dtype: 'float',
+  transpose: (ct, _inputs, _which, p) => scatterAddOp([ct], p),
+  shape: ([x], { shape }) => ({ shape: [...shape], dtype: floatOrComplex(x.dtype), number: false }),
+  batch: ([x], [axis], p, size) => [gatherOp([batchToFront(x, axis ?? 0)], batched(p, size)), 0],
+  doc: { summary: 'Read elements at flat indices.' },
+  test: {
+    complex: true,
+    secondOrder: true,
+    cases: (draw) => [
+      { inputs: [draw([2, 3])], params: { indices: Int32Array.of(0, 5, 5, 2), shape: [2, 2], source: [2, 3] } },
+    ],
   },
-  (u, _inputs, _y, p) => [gatherOp([u], p)],
-  {
-    arity: 1,
-    doc: { summary: 'Add values into flat indices: the adjoint of gather.' },
-    test: {
-      secondOrder: true,
-      cases: (draw) => [
-        { inputs: [draw([2, 2])], params: { indices: Int32Array.of(0, 5, 5, 2), shape: [2, 2], source: [2, 3] } },
-      ],
-    },
+})
+
+const scatterAddOp: Op<GatherParams> = definePrimitive<GatherParams>({
+  id: 'foundation/tensor/scatterAdd',
+  arity: 1,
+  impl: ([g], p) => onParts(g, (part) => scatterAddRaw(part, p)),
+  linear: 'linear',
+  dtype: 'float',
+  transpose: (ct, _inputs, _which, p) => gatherOp([ct], p),
+  shape: ([g], { source }) => ({ shape: [...source], dtype: floatOrComplex(g.dtype), number: false }),
+  batch: ([g], [axis], p, size) => [scatterAddOp([batchToFront(g, axis ?? 0)], batched(p, size)), 0],
+  doc: { summary: 'Add values into flat indices: the adjoint of gather.' },
+  test: {
+    complex: true,
+    secondOrder: true,
+    cases: (draw) => [
+      { inputs: [draw([2, 2])], params: { indices: Int32Array.of(0, 5, 5, 2), shape: [2, 2], source: [2, 3] } },
+    ],
   },
-)
+})
 
 function checkIndices(indices: Int32Array, size: number, where: string): void {
   for (let k = 0; k < indices.length; k++)

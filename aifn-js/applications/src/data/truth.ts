@@ -17,12 +17,31 @@
  * float64 matrix.
  */
 
-import type { Scores, Size, Truth as TruthContract } from 'aifn/foundation/contracts'
-import { fromData, stack, type Tensor } from 'aifn/foundation/tensor'
-import { solve } from 'aifn/numerics/linalg'
+import type { Distribution, Scores, Size, Truth as TruthContract } from 'aifn/foundation/contracts'
+import { fromData, logsumexp, reshape, stack, toFlat, type Tensor } from 'aifn/foundation/tensor'
+import {
+  family as familyByName,
+  link as linkByName,
+  type FamilyName,
+  type LinkName,
+} from 'aifn/probability/likelihoods'
 import { gaussHermite } from 'aifn/numerics/quadrature'
 import { normalCdf } from 'aifn/numerics/special'
-import { Bernoulli, Categorical, MultivariateNormal, Normal, type AnyUnivariate } from 'aifn/probability/distributions'
+import {
+  Bernoulli,
+  Categorical,
+  Gamma,
+  LogNormal,
+  MultivariateNormal,
+  Normal,
+  Poisson,
+  Transformed,
+  type AnyUnivariate,
+} from 'aifn/probability/distributions'
+import { affineBijector } from 'aifn/probability/bijectors'
+import { expectiles } from 'aifn/probability/stats'
+
+const toFlatArray = (t: Tensor) => Float64Array.from(toFlat(t))
 
 /** A point, one number per feature (used inside regression functions). */
 export type Row = ArrayLike<number>
@@ -144,7 +163,358 @@ export interface RegressionTruth extends TruthContract {
   readonly model: RegressionModel
 }
 
-export type Truth = ClassificationTruth | RegressionTruth
+/** One segment of a piecewise series: indices start … end − 1, its parameters and the law of a value inside it. */
+export interface Segment {
+  /** First index of the segment. */
+  readonly start: Size
+  /** One past its last index. */
+  readonly end: Size
+  /** The generating parameters, e.g. `{ mean, sd }`, `{ rate }` or `{ coefficients, constant, sd }`. */
+  readonly params: Readonly<Record<string, number | readonly number[]>>
+  /** Mean and variance of a value in the segment (the stationary ones for an autoregression). */
+  readonly mean: number
+  readonly variance: number
+  /** Mean squared error of predicting a value from the true parameters (the innovation variance for an autoregression). */
+  readonly risk: number
+}
+
+/** What changes between segments. */
+export type ChangepointFamily = 'mean' | 'variance' | 'poisson' | 'autoregressive'
+
+/**
+ * The truth of a piecewise series: its segments and changepoints, as a model whose inputs are times t (float64 [m],
+ * integer indices). `decide` gives the segment index (int32), `predictive` the law of the value at t (normal, or
+ * Poisson for counts; the stationary marginal for an autoregression), `expect` its mean.
+ */
+export interface ChangepointTruth extends TruthContract {
+  readonly task: 'changepoint'
+  readonly name: string
+  readonly family: ChangepointFamily
+  /** Length of the series. */
+  readonly n: Size
+  /** Indices where a new segment begins (0 excluded), ascending. */
+  readonly changepoints: readonly Size[]
+  readonly segments: readonly Segment[]
+  /** The segment index at time t. */
+  segmentAt(t: number): Size
+  decide(t: Tensor): Tensor
+  predictive(t: Tensor): AnyUnivariate
+  expect(t: Tensor, f?: (y: number) => number): Tensor
+}
+
+/**
+ * The truth of a generalised additive model g(E[y | x]) = α + Σⱼ fⱼ(xⱼ) with y from an exponential-dispersion family
+ * (`additiveData`): the true partial effects fⱼ on the link scale, each centred to mean zero over xⱼ ~ U(0, 1), and the
+ * conditional law of y.
+ */
+export interface AdditiveTruth extends TruthContract {
+  readonly task: 'regression'
+  readonly name: string
+  readonly family: FamilyName
+  readonly link: LinkName
+  /** α: the mean of η over the population. */
+  readonly intercept: number
+  /** The dispersion φ (Gaussian: σ²; gamma: the squared coefficient of variation; 1 otherwise). */
+  readonly dispersion: number
+  /** Each feature's shape name. */
+  readonly shapes: readonly string[]
+  /**
+   * The true partial effect of feature j on a grid [m], centred to mean zero over U(0, 1), or over the values
+   * `centreOn` [n] when given (as a fitted GAM centres its smooths on the training data).
+   */
+  partial(j: Size, grid: Tensor, centreOn?: Tensor): Tensor
+  /** η(x) = α + Σⱼ fⱼ(xⱼ), [n]. */
+  linearPredictor(x: Tensor): Tensor
+  /** μ(x) = g⁻¹(η(x)), [n]. */
+  mean(x: Tensor): Tensor
+  /** The family's law of y at μ(x) and φ. */
+  predictive(x: Tensor): Distribution
+  decide(x: Tensor): Tensor
+  /** μ(x) without `f`; with `f`, Gaussian only (Gauss–Hermite). */
+  expect(x: Tensor, f?: (y: number) => number): Tensor
+}
+
+/** The parts of an additive truth. */
+export interface AdditiveModel {
+  family: FamilyName
+  link: LinkName
+  intercept: number
+  dispersion: number
+  /** Each feature's effect on [0, 1], already centred over U(0, 1), with its name. */
+  effects: readonly { name: string; f: (x: number) => number }[]
+}
+
+/** Build an additive truth (see `AdditiveTruth`). */
+export function additiveTruth(model: AdditiveModel): AdditiveTruth {
+  const fam = familyByName(model.family)
+  const g = linkByName(model.link)
+  const linearPredictor = (x: Tensor) => {
+    const { data, n, d } = points(x)
+    if (d !== model.effects.length) throw new Error(`additiveTruth: ${model.effects.length} features, given ${d}`)
+    return fromData(
+      Float64Array.from({ length: n }, (_, i) =>
+        model.effects.reduce((acc, e, j) => acc + e.f(data[i * d + j]), model.intercept),
+      ),
+      [n],
+    )
+  }
+  const mean = (x: Tensor) => g.inverse(linearPredictor(x)) as Tensor
+  const predictive = (x: Tensor) => fam.predictive(mean(x), model.dispersion)
+  // E[φV(μ(x))] over x ~ U(0, 1)ᵈ on a midpoint grid (12 points a side, at most 4096 points).
+  const d = model.effects.length
+  const side = Math.max(2, Math.min(12, Math.floor(4096 ** (1 / Math.max(d, 1)))))
+  const count = side ** d
+  const cells = new Float64Array(count * d)
+  for (let c = 0; c < count; c++)
+    for (let j = 0, r = c; j < d; j++, r = Math.floor(r / side)) cells[c * d + j] = ((r % side) + 0.5) / side
+  const V = toFlatArray(fam.variance(mean(fromData(cells, [count, d]))) as Tensor)
+  const bayesRisk = (model.dispersion * V.reduce((a, b) => a + b, 0)) / count
+  return {
+    kind: 'model',
+    task: 'regression',
+    name: `${model.family} additive model, ${model.link} link`,
+    family: model.family,
+    link: model.link,
+    intercept: model.intercept,
+    dispersion: model.dispersion,
+    shapes: model.effects.map((e) => e.name),
+    partial: (j, grid, centreOn) => {
+      const e = model.effects[j]
+      if (!e) throw new Error(`additiveTruth: no feature ${j}`)
+      const values = toFlatArray(grid).map(e.f)
+      let shift = 0
+      if (centreOn) {
+        const c = toFlatArray(centreOn)
+        shift = c.reduce((a, v) => a + e.f(v), 0) / c.length
+      }
+      return fromData(
+        values.map((v) => v - shift),
+        [values.length],
+      )
+    },
+    linearPredictor,
+    mean,
+    predictive,
+    decide: mean,
+    expect: (x, f) => {
+      if (!f) return mean(x)
+      if (model.family !== 'gaussian')
+        throw new Error('additiveTruth: expect(x, f) is available for the Gaussian family')
+      const { nodes, weights } = HERMITE()
+      const sd = Math.sqrt(model.dispersion)
+      return fromData(
+        toFlatArray(mean(x)).map((m) => nodes.reduce((acc, z, q) => acc + weights[q] * f(m + sd * z), 0)),
+        [x.shape[0]],
+      )
+    },
+    bayesRisk,
+  }
+}
+
+/**
+ * The truth of a one-dimensional smooth regression (`curve1d`) with x ~ U(0, 1): the mean μ(x) = g⁻¹(η(x)) and the
+ * whole law of y, so its expectiles e_τ(x) are known. A location–scale law y = μ(x) + σ(x)Z with standardised noise Z
+ * (normal, or a skewed shifted log-normal) has e_τ(x) = μ(x) + σ(x)e_τ(Z); a gamma law y = μ(x)G has e_τ(x) =
+ * μ(x)e_τ(G); Poisson and Bernoulli expectiles come from their masses at each x. Expectiles are computed numerically
+ * from the law (`expectiles` on its atoms: 4000 equally weighted quantiles, or the masses), not in closed form.
+ */
+export interface Curve1dTruth extends TruthContract {
+  readonly task: 'regression'
+  readonly name: string
+  /** The family and link the data were drawn from (location–scale noise reports `gaussian`, `identity`). */
+  readonly family: FamilyName
+  readonly link: LinkName
+  /** The law of y around its mean, for captions. */
+  readonly law: string
+  /** η(x) = g(μ(x)), [n]. */
+  linearPredictor(x: Tensor): Tensor
+  /** μ(x) = E[y | x], [n]. */
+  mean(x: Tensor): Tensor
+  /** The standard deviation of y at x, [n]. */
+  sdAt(x: Tensor): Tensor
+  /** The τ-expectile of y given x, [n], τ ∈ (0, 1). */
+  expectile(x: Tensor, tau: number): Tensor
+  /** P(y < e_τ(x)) averaged over x ~ U(0, 1): the share of the population below the true τ-expectile curve. */
+  shareBelow(tau: number): number
+  predictive(x: Tensor): Distribution
+  decide(x: Tensor): Tensor
+  /** μ(x) without `f`; with `f`, E[f(y) | x] over the law's atoms. */
+  expect(x: Tensor, f?: (y: number) => number): Tensor
+}
+
+/** How y varies around μ(x) in a `Curve1dModel`. */
+export type Curve1dLaw =
+  /** y = μ(x) + σ(x)Z, Z standardised: normal, or a log-normal with log-scale sd `skew` (default 0.75), shifted. */
+  | { kind: 'location-scale'; noise: 'normal' | 'skewed'; sd: (x: number) => number; skew?: number }
+  /** y from the exponential family at μ(x) with dispersion φ (Poisson, Bernoulli, or gamma with CV² = φ). */
+  | { kind: 'family'; dispersion: number }
+
+/** The parts of a `Curve1dTruth`. */
+export interface Curve1dModel {
+  name: string
+  family: FamilyName
+  link: LinkName
+  /** η(x) on [0, 1]; μ = g⁻¹(η). */
+  eta: (x: number) => number
+  law: Curve1dLaw
+}
+
+const ATOMS = 4000
+const levels = lazy(() => fromData(Float64Array.from({ length: ATOMS }, (_, i) => (i + 0.5) / ATOMS), [ATOMS]))
+
+/** Build a one-dimensional smooth regression truth (see `Curve1dTruth`). */
+export function curve1dTruth(model: Curve1dModel): Curve1dTruth {
+  const { law } = model
+  const g = linkByName(model.link)
+  const muAt = (x: number) => {
+    const m = g.inverse(model.eta(x))
+    return typeof m === 'number' ? m : toFlat(m as Tensor)[0]
+  }
+  const column = (x: Tensor) => toFlatArray(x)
+  const perRow = (x: Tensor, f: (v: number) => number) => {
+    const c = column(x)
+    return fromData(Float64Array.from(c, f), [c.length])
+  }
+  const skew = law.kind === 'location-scale' ? (law.skew ?? 0.75) : 0
+  // The skewed noise: Z = (V − c)/d for V ~ LogNormal(0, s), c = e^{s²/2} and d² = (e^{s²} − 1)e^{s²}.
+  const c = Math.exp((skew * skew) / 2)
+  const d = Math.sqrt((Math.exp(skew * skew) - 1) * Math.exp(skew * skew))
+  const phi = law.kind === 'family' ? law.dispersion : 1
+  // Equally weighted quantiles of the standardised noise (location–scale) or of G = y/μ (gamma); null for the
+  // discrete families, whose atoms depend on x.
+  const unit = lazy((): Float64Array | null => {
+    if (law.kind === 'location-scale') {
+      if (law.noise === 'normal') return toFlatArray(Normal(0, 1).quantile(levels()) as Tensor)
+      return toFlatArray(LogNormal(0, skew).quantile(levels()) as Tensor).map((v) => (v - c) / d)
+    }
+    if (model.family === 'gamma') return toFlatArray(Gamma(1 / phi, 1 / phi).quantile(levels()) as Tensor)
+    return null
+  })
+  const sdOf = (x: number) => {
+    const mu = muAt(x)
+    if (law.kind === 'location-scale') return law.sd(x)
+    if (model.family === 'gamma') return Math.sqrt(phi) * mu
+    if (model.family === 'poisson') return Math.sqrt(mu)
+    if (model.family === 'binomial') return Math.sqrt(mu * (1 - mu))
+    throw new Error(`curve1dTruth: no law for the ${model.family} family`)
+  }
+  /** The law of y at x as atoms with masses. */
+  const atomsAt = (x: number): { values: Float64Array; masses: Float64Array } => {
+    const mu = muAt(x)
+    const u = unit()
+    if (u) {
+      const values = law.kind === 'location-scale' ? u.map((z) => mu + law.sd(x) * z) : u.map((v) => mu * v)
+      return { values, masses: new Float64Array(u.length).fill(1 / u.length) }
+    }
+    if (model.family === 'binomial') return { values: Float64Array.of(0, 1), masses: Float64Array.of(1 - mu, mu) }
+    // Poisson: the masses up to a far tail.
+    const top = Math.ceil(mu + 12 * Math.sqrt(mu) + 20)
+    const values = Float64Array.from({ length: top + 1 }, (_, k) => k)
+    const masses = new Float64Array(top + 1)
+    let p = Math.exp(-mu)
+    for (let k = 0; k <= top; k++) {
+      masses[k] = p
+      p *= mu / (k + 1)
+    }
+    return { values, masses }
+  }
+  // The unit law's expectiles, cached per τ (location–scale and gamma: e_τ(x) = μ + σe_τ(Z) or μe_τ(G)).
+  const unitExpectile = new Map<number, number>()
+  const eUnit = (tau: number) => {
+    let e = unitExpectile.get(tau)
+    if (e === undefined) {
+      e = expectiles(unit()!, [tau])[0]
+      unitExpectile.set(tau, e)
+    }
+    return e
+  }
+  const expectileAt = (x: number, tau: number) => {
+    if (unit()) {
+      const e = eUnit(tau)
+      return law.kind === 'location-scale' ? muAt(x) + law.sd(x) * e : muAt(x) * e
+    }
+    const { values, masses } = atomsAt(x)
+    return expectiles(values, [tau], { weights: masses })[0]
+  }
+  // x ~ U(0, 1) on 200 midpoints, for population averages.
+  const GRID = Float64Array.from({ length: 200 }, (_, i) => (i + 0.5) / 200)
+  const shareBelow = (tau: number) => {
+    if (!(tau > 0 && tau < 1)) throw new RangeError(`curve1dTruth: τ = ${tau} is not in (0, 1)`)
+    const u = unit()
+    if (u) {
+      // The same at every x: P(Z < e_τ(Z)).
+      const e = eUnit(tau)
+      let below = 0
+      for (const v of u) if (v < e) below++
+      return below / u.length
+    }
+    let total = 0
+    for (const x of GRID) {
+      const e = expectileAt(x, tau)
+      const { values, masses } = atomsAt(x)
+      for (let k = 0; k < values.length; k++) if (values[k] < e) total += masses[k]
+    }
+    return total / GRID.length
+  }
+  const mean = (x: Tensor) => perRow(x, muAt)
+  const predictive = (x: Tensor): Distribution => {
+    const mu = mean(x)
+    if (law.kind === 'family') return familyByName(model.family).predictive(mu, phi)
+    const sd = perRow(x, law.sd)
+    if (law.noise === 'normal') return Normal(mu, sd)
+    // σ(x)V/d ~ LogNormal(log(σ(x)/d), s), shifted by μ(x) − σ(x)c/d.
+    const m = toFlatArray(mu)
+    const s = toFlatArray(sd)
+    const logScale = fromData(
+      Float64Array.from(s, (v) => Math.log(v / d)),
+      [s.length],
+    )
+    const shift = fromData(
+      Float64Array.from(m, (v, i) => v - (s[i] * c) / d),
+      [m.length],
+    )
+    return Transformed(LogNormal(logScale, skew), affineBijector(shift, 1))
+  }
+  let risk = 0
+  for (const x of GRID) risk += sdOf(x) ** 2 / GRID.length
+  const lawText =
+    law.kind === 'location-scale'
+      ? law.noise === 'normal'
+        ? 'normal noise'
+        : `skewed noise (a shifted log-normal, log-scale sd ${skew})`
+      : model.family === 'gamma'
+        ? `gamma, coefficient of variation ${Math.sqrt(phi).toFixed(2)}`
+        : model.family === 'poisson'
+          ? 'Poisson counts'
+          : 'Bernoulli outcomes'
+  return {
+    kind: 'model',
+    task: 'regression',
+    name: model.name,
+    family: model.family,
+    link: model.link,
+    law: lawText,
+    linearPredictor: (x) => perRow(x, model.eta),
+    mean,
+    sdAt: (x) => perRow(x, sdOf),
+    expectile: (x, tau) => perRow(x, (v) => expectileAt(v, tau)),
+    shareBelow,
+    predictive,
+    decide: mean,
+    expect: (x, f) => {
+      if (!f) return mean(x)
+      return perRow(x, (v) => {
+        const { values, masses } = atomsAt(v)
+        let acc = 0
+        for (let k = 0; k < values.length; k++) acc += masses[k] * f(values[k])
+        return acc
+      })
+    },
+    bayesRisk: risk,
+  }
+}
+
+export type Truth = ClassificationTruth | RegressionTruth | ChangepointTruth | AdditiveTruth | Curve1dTruth
 
 /** Number of reference points drawn for Monte Carlo Bayes errors. */
 export const REFERENCE_SIZE = 6000
@@ -183,16 +553,6 @@ export function classColumns(columns: readonly Tensor[]): Tensor {
 function lazy<T>(f: () => T): () => T {
   let cached: { value: T } | undefined
   return () => (cached ??= { value: f() }).value
-}
-
-/** log Σ exp over a short list (a row of class scores). */
-function logSumExpRow(a: ArrayLike<number>, from = 0, to = a.length): number {
-  let m = -Infinity
-  for (let i = from; i < to; i++) if (a[i] > m) m = a[i]
-  if (m === -Infinity) return -Infinity
-  let s = 0
-  for (let i = from; i < to; i++) s += Math.exp(a[i] - m)
-  return m + Math.log(s)
 }
 
 /** Apply the label operations to an unnormalised vector over clean classes. */
@@ -316,10 +676,8 @@ export function classificationTruth(model: ClassModel): ClassificationTruth {
     logDensity: model.logDensity,
     cleanPosterior: (x) => {
       const { a, n, k } = logJoint(model, x)
-      for (let i = 0; i < n; i++) {
-        const z = logSumExpRow(a, i * k, (i + 1) * k)
-        for (let j = 0; j < k; j++) a[i * k + j] = Math.exp(a[i * k + j] - z)
-      }
+      const z = flat(logsumexp(fromData(a, [n, k]), 1))
+      for (let i = 0; i < n; i++) for (let j = 0; j < k; j++) a[i * k + j] = Math.exp(a[i * k + j] - z[i])
       return fromData(a, [n, k])
     },
     posterior,
@@ -357,10 +715,10 @@ export function classificationTruth(model: ClassModel): ClassificationTruth {
       const { a, n, k } = logJoint(model, x)
       const out = new Float64Array(n)
       if (model.ops.length === 0) {
-        for (let i = 0; i < n; i++) {
-          const row = Array.from(a.subarray(i * k, (i + 1) * k))
-          out[i] = row[1] - logSumExpRow(row.filter((_, j) => j !== 1))
-        }
+        // log odds of class 1 against the rest: a₁ − log Σ_{j ≠ 1} exp aⱼ.
+        const rest = Float64Array.from(a, (v, i) => (i % k === 1 ? -Infinity : v))
+        const z = flat(logsumexp(fromData(rest, [n, k]), 1))
+        for (let i = 0; i < n; i++) out[i] = a[i * k + 1] - z[i]
       } else {
         const { p, k: kOut } = posteriorData(model, x)
         for (let i = 0; i < n; i++) out[i] = Math.log(p[i * kOut + 1]) - Math.log(1 - p[i * kOut + 1])
@@ -385,11 +743,6 @@ export function classificationTruth(model: ClassModel): ClassificationTruth {
 
 // ── Class-conditional densities, from the registered distributions ──────────────────────────────────────────────────
 
-/** Φ(z), the standard normal cdf. */
-export function phi(z: number): number {
-  return normalCdf(z) as number
-}
-
 const matrixOf = (rows: readonly (readonly number[])[]): Tensor =>
   fromData(Float64Array.from(rows.flat()), [rows.length, rows[0]?.length ?? 0])
 const vectorOf = (v: readonly number[]): Tensor => fromData(Float64Array.from(v), [v.length])
@@ -403,13 +756,6 @@ export function gaussianClasses(
   return (x) => classColumns(laws.map((law) => law.logProb(x) as Tensor))
 }
 
-/** Squared Mahalanobis distance (a − b)ᵀ Σ⁻¹ (a − b). */
-export function mahalanobis2(a: readonly number[], b: readonly number[], covariance: readonly (readonly number[])[]) {
-  const diff = a.map((v, i) => v - b[i])
-  const z = flat(solve(matrixOf(covariance), vectorOf(diff)))
-  return diff.reduce((s, v, i) => s + v * z[i], 0)
-}
-
 /**
  * The Bayes error of two Gaussian classes with a shared covariance at Mahalanobis distance Δ and priors (π₀, π₁). The
  * log likelihood ratio L is N(±Δ²/2, Δ²) under each class and the Bayes rule says 1 when L > t = log(π₀/π₁), so
@@ -420,7 +766,7 @@ export function twoGaussianBayesError(delta: number, priors: readonly number[]):
   if (p0 === 0 || p1 === 0) return 0
   if (delta === 0) return Math.min(p0, p1)
   const t = Math.log(p0 / p1)
-  return p1 * phi((t - (delta * delta) / 2) / delta) + p0 * phi((-t - (delta * delta) / 2) / delta)
+  return p1 * normalCdf((t - (delta * delta) / 2) / delta) + p0 * normalCdf((-t - (delta * delta) / 2) / delta)
 }
 
 /** Rows evaluated per block against the nodes of a curve density, so a block holds at most ~2¹⁸ node terms. */
@@ -453,8 +799,9 @@ export function curveLogDensity(curve: (u: number) => [number, number], sd: numb
     const block = Math.max(1, Math.floor(BLOCK_TERMS / m))
     for (let start = 0; start < n; start += block) {
       const rows = Math.min(block, n - start)
-      const terms = flat(law.logProb(fromData(data.slice(2 * start, 2 * (start + rows)), [rows, 1, 2])) as Tensor)
-      for (let i = 0; i < rows; i++) out[start + i] = logSumExpRow(terms, i * m, (i + 1) * m) - logM
+      const terms = law.logProb(fromData(data.slice(2 * start, 2 * (start + rows)), [rows, 1, 2])) as Tensor
+      const z = flat(logsumexp(reshape(terms, [rows, m]), 1))
+      for (let i = 0; i < rows; i++) out[start + i] = z[i] - logM
     }
     return fromData(out, [n])
   }
@@ -527,4 +874,72 @@ export function regressionTruth(
 /** A regression truth with some parts of its model replaced. */
 export function remodelRegression(t: RegressionTruth, edit: Partial<RegressionModel>): RegressionTruth {
   return regressionTruthOf({ ...t.model, ...edit })
+}
+
+/** The truth of a piecewise series from its segments (contiguous, covering 0 … n − 1). */
+export function changepointTruth(
+  name: string,
+  family: ChangepointFamily,
+  segments: readonly Segment[],
+): ChangepointTruth {
+  const n = segments.length ? segments[segments.length - 1].end : 0
+  segments.forEach((g, i) => {
+    if (g.start !== (i === 0 ? 0 : segments[i - 1].end) || g.end <= g.start)
+      throw new RangeError(`changepointTruth: segment ${i} (${g.start}–${g.end}) does not continue the series`)
+  })
+  const segmentAt = (t: number): Size => {
+    const i = Math.max(0, Math.min(n - 1, Math.round(t)))
+    let lo = 0
+    let hi = segments.length - 1
+    while (lo < hi) {
+      const mid = (lo + hi + 1) >> 1
+      if (segments[mid].start <= i) lo = mid
+      else hi = mid - 1
+    }
+    return lo
+  }
+  const at = (t: Tensor) => Array.from(t.data as ArrayLike<number>, (v) => segments[segmentAt(v)])
+  const flat = (t: Tensor) => fromData(Float64Array.from(t.data as ArrayLike<number>))
+  return {
+    kind: 'model',
+    task: 'changepoint',
+    name,
+    family,
+    n,
+    changepoints: segments.slice(1).map((g) => g.start),
+    segments,
+    segmentAt,
+    decide: (t) => fromData(Int32Array.from(t.data as ArrayLike<number>, segmentAt)),
+    predictive: (t) => {
+      const g = at(flat(t))
+      if (family === 'poisson') return Poisson(fromData(Float64Array.from(g, (s) => s.mean)))
+      return Normal(
+        fromData(Float64Array.from(g, (s) => s.mean)),
+        fromData(Float64Array.from(g, (s) => Math.sqrt(s.variance))),
+      )
+    },
+    expect: (t, f) => {
+      const g = at(flat(t))
+      if (!f) return fromData(Float64Array.from(g, (s) => s.mean))
+      // E[f(y)] by Gauss–Hermite quadrature under the normal law (counts: the Poisson sum up to a far tail).
+      const { nodes, weights } = HERMITE()
+      return fromData(
+        Float64Array.from(g, (s) => {
+          if (family === 'poisson') {
+            let acc = 0
+            let p = Math.exp(-s.mean)
+            const top = Math.ceil(s.mean + 12 * Math.sqrt(s.mean) + 20)
+            for (let k = 0; k <= top; k++) {
+              acc += p * f(k)
+              p *= s.mean / (k + 1)
+            }
+            return acc
+          }
+          const sd = Math.sqrt(s.variance)
+          return nodes.reduce((acc, z, q) => acc + weights[q] * f(s.mean + sd * z), 0)
+        }),
+      )
+    },
+    bayesRisk: n ? segments.reduce((acc, g) => acc + g.risk * (g.end - g.start), 0) / n : 0,
+  }
 }

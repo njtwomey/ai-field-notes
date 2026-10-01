@@ -16,6 +16,8 @@ import { dense, fromData, type Tensor } from 'aifn/foundation/tensor'
 import { run, trace, type Algorithm, type Trace } from 'aifn/foundation/trace'
 import { pairwiseDistances } from 'aifn/numerics/linalg'
 import { canonical, ints, matrix } from './util'
+import { defineModel } from 'aifn/learning/estimators'
+import { int, oneOf, space } from 'aifn/foundation/space'
 
 /** How the distance between two clusters is measured. */
 export type Linkage = 'single' | 'complete' | 'average' | 'ward'
@@ -289,3 +291,21 @@ function linkageFromTrace(t: Trace<AgglomerationState>): Tensor {
 export function linkage(x: Tensor, method: Linkage = 'ward'): Tensor {
   return run(agglomerativeSteps(x, { linkage: method }), undefined, x.shape[0]).merges
 }
+
+// ── Registry ─────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+defineModel(
+  {
+    key: 'agglomerative',
+    module: 'unsupervised/clustering',
+    name: 'Agglomerative clustering',
+    summary: 'Repeated merging of the closest clusters under a linkage, cut into flat clusters.',
+    task: 'clustering',
+    capabilities: [],
+    transductive: true,
+    hyper: space({ linkage: oneOf(['ward', 'single', 'complete', 'average']), clusters: int(1, 20, { default: 2 }) }),
+    notes: ['hierarchical-clustering'],
+    cite: ['ward1963'],
+  },
+  agglomerative,
+)

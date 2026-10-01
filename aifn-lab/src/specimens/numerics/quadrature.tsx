@@ -21,7 +21,7 @@ export const specimens: Specimen[] = [
     title: 'Adaptive Gauss–Kronrod',
     description:
       'The subdivision of globally adaptive Gauss–Kronrod 7–15, step by step, with estimated and actual error.',
-    tags: ['trace', 'TraceView', 'adaptive', 'error estimate', 'QUADPACK'],
+    tags: ['trace', 'TracePanel', 'adaptive', 'error estimate', 'QUADPACK'],
     render: () => <AdaptiveSpecimen />,
   },
   {

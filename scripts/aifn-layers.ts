@@ -40,7 +40,6 @@ type Modules = {
   applications: { package: string; areas: Area[] }
   aliases: { path: string; until: string }[]
   transitional?: { file: string; imports: string; reason: string }[]
-  testsSuspended?: boolean
 }
 
 const root = path.resolve(import.meta.dirname, '..')
@@ -258,12 +257,13 @@ for (const [key, n] of nodes) {
 
 // ── Imports ──────────────────────────────────────────────────────────────────────────────────────────────────────────
 
-function* files(dir: string): Generator<string> {
+function* files(dir: string, pattern = /\.tsx?$/): Generator<string> {
   if (!fs.existsSync(dir)) return
   for (const d of fs.readdirSync(dir, { withFileTypes: true })) {
     const p = path.join(dir, d.name)
-    if (d.isDirectory()) yield* files(p)
-    else if (/\.tsx?$/.test(d.name)) yield p
+    if (d.isDirectory()) {
+      if (d.name !== 'node_modules' && d.name !== '__pycache__') yield* files(p, pattern)
+    } else if (pattern.test(d.name)) yield p
   }
 }
 
@@ -487,13 +487,47 @@ function checkApp(file: string) {
 
 for (const file of files(coreSrc)) checkCore(file)
 for (const file of files(appsSrc)) checkApp(file)
-// Core tests: never an application. (Skipped while the tests are suspended during the tree move: modules.json
-// `testsSuspended`, TODO(tree): remove when the tests return.)
-if (!spec.testsSuspended)
-  for (const file of files(path.join(coreDir, 'test')))
-    for (const { spec, where } of imports(file))
-      if (spec.startsWith('aifn-applied'))
-        errors.push(`${where}: a core test imports the application '${spec}'; test that combination in applications`)
+// Core tests: never an application.
+for (const file of files(path.join(coreDir, 'test')))
+  for (const { spec, where } of imports(file))
+    if (spec.startsWith('aifn-applied'))
+      errors.push(`${where}: a core test imports the application '${spec}'; test that combination in applications`)
+
+// Tests mirror the tree (module-tree §5.5): a test file sits in `test/<node path>/`. Only checks of the whole package
+// sit at `test/` itself (listed here), beside shared helpers such as `fixtures.ts`. Fixtures sit in
+// `test/fixtures/<node path>.json`, their generators in `test/fixtures/gen/<node path>.py`.
+const packageTests: Record<'core' | 'apps', string[]> = {
+  core: ['primitives.test.ts', 'root.test.ts'],
+  apps: ['names.test.ts'],
+}
+for (const [pkg, dir] of [
+  ['core', coreDir],
+  ['apps', appsDir],
+] as const) {
+  const testDir = path.join(dir, 'test')
+  for (const file of files(testDir)) {
+    const rel = path.relative(testDir, path.dirname(file)).split(path.sep).join('/')
+    const where = path.relative(root, file)
+    if (rel === 'fixtures' || rel.startsWith('fixtures/')) {
+      if (/\.test\.tsx?$/.test(file)) errors.push(`${where}: a test file in fixtures/; tests sit in test/<node path>/`)
+      continue
+    }
+    if (!rel) {
+      if (/\.test\.tsx?$/.test(file) && !packageTests[pkg].includes(path.basename(file)))
+        errors.push(`${where}: a test at the package's test root; tests sit in test/<node path>/`)
+    } else if (!nodes.has(`${pkg}:${rel}`))
+      errors.push(`${where}: test folder '${rel}' is not a node of modules.json; tests mirror the tree`)
+  }
+  for (const gen of files(path.join(testDir, 'fixtures', 'gen'), /\.py$/)) {
+    const rel = path
+      .relative(path.join(testDir, 'fixtures', 'gen'), gen)
+      .replace(/\.py$/, '')
+      .split(path.sep)
+      .join('/')
+    if (!rel.split('/').some((p) => p.startsWith('_')) && !nodes.has(`${pkg}:${rel}`))
+      errors.push(`${path.relative(root, gen)}: fixture generator '${rel}' is not a node of modules.json`)
+  }
+}
 
 // ── Generated tables ─────────────────────────────────────────────────────────────────────────────────────────────────
 

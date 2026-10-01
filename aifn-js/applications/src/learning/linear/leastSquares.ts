@@ -10,6 +10,8 @@ import type { Estimator, Supervised } from 'aifn/learning/estimators'
 import { gaussianPredictive, type AnyUnivariate } from 'aifn/learning/estimators'
 import { withExpectation, withSampling } from 'aifn/learning/estimators'
 import { matrixShape, targetValues } from 'aifn/learning/estimators'
+import { defineModel } from 'aifn/learning/estimators'
+import { bool, real, space } from 'aifn/foundation/space'
 
 const values = dense.data
 
@@ -147,3 +149,20 @@ export function linearRegression(
     },
   }
 }
+
+// ── Registry ─────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+defineModel(
+  {
+    key: 'linearRegression',
+    module: 'learning/linear',
+    name: 'Linear regression',
+    summary: 'Least squares (ridge with an L2 penalty), with a Gaussian predictive.',
+    task: 'regression',
+    capabilities: ['forward', 'decide', 'predictive', 'expect', 'sample'],
+    hyper: space({ l2: real(0, 100, { default: 0, label: 'L2 penalty' }), intercept: bool({ default: true }) }),
+    notes: ['linear-regression', 'ridge-regression'],
+    cite: ['hastie2009'],
+  },
+  linearRegression,
+)

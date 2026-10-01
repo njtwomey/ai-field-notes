@@ -159,7 +159,8 @@ export function ordinalLikelihood(
         throw new RangeError(`ordinal logLik: ${classes.length} classes for a batch of ${count}`)
       }
       const indices = Int32Array.from(classes, (c, i) => {
-        if (!Number.isInteger(c) || c < 0 || c >= k) throw new RangeError(`ordinal logLik: class ${c} outside 0 … ${k - 1}`)
+        if (!Number.isInteger(c) || c < 0 || c >= k)
+          throw new RangeError(`ordinal logLik: class ${c} outside 0 … ${k - 1}`)
         return i * k + c
       })
       const picked = gather(logP, indices, batch)
@@ -179,4 +180,3 @@ function sliceLast(v: Value, start: number, stop: number): Value {
   const rank = shapeOfValue(v).length
   return slice(v, ...Array.from({ length: rank - 1 }, () => null), [start, stop])
 }
-

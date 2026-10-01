@@ -6,9 +6,10 @@ import { stateCell, type TabularMdp } from 'aifn-applied/decisions/reinforcement
 import { stream } from 'aifn/foundation/random'
 import { toFlat, type Tensor } from 'aifn/foundation/tensor'
 import { trace } from 'aifn/foundation/trace'
-import { Player, Select, Slider } from '@lab/controls'
+import { Player } from '@lab/controls'
 import { ControlRow, Figure } from '@lab/layout'
-import { Heatmap, Panel, Readout, Subplots, XYChart, type HeatmapOverlay, type Vector, type XYSeries } from '@lab/viz'
+import { choice, row, slider, useFigureState } from '@lab/state'
+import { Bars, Curve, Handle, Plot, Plots, Raster, Readout, useAxis, Vectors, type Vector } from '@lab/viz'
 
 /** The value table as heatmap rows (row y = grid row y, bottom first); walls are blank. */
 function gridRows(mdp: TabularMdp, V: Tensor): number[][] {
@@ -33,10 +34,11 @@ function arrows(mdp: TabularMdp, policy: Tensor): Vector[] {
   return out
 }
 
-function pathOverlay(mdp: TabularMdp, path: Tensor, name: string, slot: number): HeatmapOverlay {
+/** A path of states as the x and y of its cells. */
+function pathCells(mdp: TabularMdp, path: Tensor) {
   const w = mdp.grid!.width
   const cells = toFlat(path).map((s) => stateCell(w, s))
-  return { name, type: 'line', x: cells.map((c) => c[0]), y: cells.map((c) => c[1]), slot, showPoints: true }
+  return { x: cells.map((c) => c[0]), y: cells.map((c) => c[1]) }
 }
 
 const axes = (n: number) => Array.from({ length: n }, (_, i) => i)
@@ -47,11 +49,35 @@ const axes = (n: number) => Array.from({ length: n }, (_, i) => i)
 type World = 'gridworld' | 'maze' | 'frozen'
 
 export function PlanningSpecimen() {
-  const [world, setWorld] = useState<World>('gridworld')
-  const [method, setMethod] = useState<'vi' | 'pi'>('vi')
-  const [gamma, setGamma] = useState(0.9)
-  const [noise, setNoise] = useState(0.2)
-  const [stepReward, setStepReward] = useState(-0.04)
+  const state = useFigureState({
+    setup: row('1 · world', {
+      world: choice(
+        [
+          { value: 'gridworld', label: 'gridworld 4 × 3' },
+          { value: 'maze', label: 'maze' },
+          { value: 'frozen', label: 'FrozenLake 4 × 4 (slippery)' },
+        ],
+        'gridworld',
+        { label: 'world' },
+      ),
+      gamma: slider(0.5, 0.99, 0.9, { label: 'discount γ' }),
+      noise: slider(0, 0.6, 0.2, { label: 'slip probability', when: (v) => v.world !== 'frozen' }),
+      stepReward: slider(-1, 0.1, -0.04, { label: 'step reward', when: (v) => v.world === 'gridworld' }),
+    }),
+    solve: row('2 · method', {
+      method: choice(
+        [
+          { value: 'vi', label: 'value iteration' },
+          { value: 'pi', label: 'policy iteration' },
+        ],
+        'vi',
+        { label: 'method' },
+      ),
+    }),
+  })
+  const world = state.setup.world as World
+  const { gamma, noise, stepReward } = state.setup
+  const method = state.solve.method as 'vi' | 'pi'
   const mdp = useMemo(() => {
     if (world === 'gridworld') return gridworld({ gamma, noise, stepReward })
     if (world === 'frozen') return frozenLake({ gamma })
@@ -67,7 +93,7 @@ export function PlanningSpecimen() {
       })
     return trace(policyIteration(mdp), undefined, 30, { record: { changed: (s) => s.changed } })
   }, [mdp, method])
-  const [step, setStep] = useState(3)
+  const [step, setStep] = useState(0)
   const at = Math.min(step, run.steps.length - 1)
   const s = run.steps[at]
   const g = mdp.grid!
@@ -76,54 +102,35 @@ export function PlanningSpecimen() {
     const m = Math.max(1e-9, ...toFlat(run.steps[run.steps.length - 1].V).map(Math.abs))
     return [-m, m]
   }, [run])
-  const series: XYSeries[] =
-    method === 'vi'
-      ? [{ name: 'Bellman residual', type: 'line', x: Array.from(run.index), y: toFlat(run.series.residual), slot: 2 }]
-      : [
-          {
-            name: 'states whose action changed',
-            type: 'bar',
-            x: Array.from(run.index),
-            y: toFlat(run.series.changed),
-            slot: 2,
-          },
-        ]
+  const progress = useMemo(
+    () => ({
+      x: Array.from(run.index),
+      y: method === 'vi' ? toFlat(run.series.residual) : toFlat(run.series.changed),
+    }),
+    [run, method],
+  )
+  const values = useMemo(() => gridRows(mdp, s.V), [mdp, s])
+  const policyArrows = useMemo(() => arrows(mdp, s.policy), [mdp, s])
+  const gx = useMemo(() => axes(g.width), [g])
+  const gy = useMemo(() => axes(g.height), [g])
+  const xa = useAxis({ label: 'x' })
+  const ya = useAxis({ label: 'y', equal: xa })
+  const ka = useAxis({ label: method === 'vi' ? 'sweep k' : 'iteration', hold: 'initial', key: run })
+  const ra = useAxis({
+    label: method === 'vi' ? 'max |TV − V|' : 'changed',
+    log: method === 'vi',
+    hold: 'initial',
+    key: run,
+  })
   return (
     <Figure
       title="Planning on a grid: values and greedy policy per sweep"
-      description="Value iteration spreads value outwards from the rewarding cells one step per sweep, and its greedy policy settles long before the values stop changing; policy iteration evaluates each policy exactly and needs only a handful of improvements."
+      purpose="Value iteration spreads value outwards from the rewarding cells one step per sweep, and its greedy policy settles long before the values stop changing; policy iteration evaluates each policy exactly and needs only a handful of improvements."
+      state={state}
       defaultSize="L"
       controls={
         <>
-          <ControlRow label="1 · world">
-            <Select
-              label="world"
-              value={world}
-              onChange={setWorld}
-              options={[
-                { value: 'gridworld', label: 'gridworld 4 × 3' },
-                { value: 'maze', label: 'maze' },
-                { value: 'frozen', label: 'FrozenLake 4 × 4 (slippery)' },
-              ]}
-            />
-            <Slider label="discount γ" value={gamma} onChange={setGamma} min={0.5} max={0.99} />
-            {world !== 'frozen' && (
-              <Slider label="slip probability" value={noise} onChange={setNoise} min={0} max={0.6} />
-            )}
-            {world === 'gridworld' && (
-              <Slider label="step reward" value={stepReward} onChange={setStepReward} min={-1} max={0.1} />
-            )}
-          </ControlRow>
-          <ControlRow label="2 · method and sweep">
-            <Select
-              label="method"
-              value={method}
-              onChange={setMethod}
-              options={[
-                { value: 'vi', label: 'value iteration' },
-                { value: 'pi', label: 'policy iteration' },
-              ]}
-            />
+          <ControlRow label="3 · sweep">
             <Player
               label={method === 'vi' ? 'sweep' : 'iteration'}
               value={at}
@@ -144,36 +151,22 @@ export function PlanningSpecimen() {
           <Readout label="stopped" value={`${run.meta.stopped} after ${run.meta.steps}`} />
         </>
       }
-      caption="aifn/rl valueIteration and policyIteration on gridworld (exits +1 and −1), a text maze (goal +10, step −1) and FrozenLake; colour is V, arrows the greedy policy. Right: the residual per sweep (it falls at least as fast as γᵏ) or the actions changed per improvement."
+      caption="Play or drag the k line. aifn valueIteration and policyIteration on gridworld (exits +1 and −1), a text maze (goal +10, step −1) and FrozenLake; colour is V, arrows the greedy policy. Right: the residual per sweep (it falls at least as fast as γᵏ) or the actions changed per improvement."
     >
-      <Subplots cols={2} widthRatios={[1.4, 1]}>
-        <Panel>
-          <Heatmap
-            x={axes(g.width)}
-            y={axes(g.height)}
-            z={gridRows(mdp, s.V)}
-            scale="diverging"
-            range={vRange}
-            valueLabel="V(s)"
-            vectors={arrows(mdp, s.policy)}
-            equalAspect
-            rescaleOnChange={false}
-            axisKey={`${world}:${method}`}
-            holdFit="union"
-            xLabel="x"
-            yLabel="y"
-          />
-        </Panel>
-        <Panel>
-          <XYChart
-            series={series}
-            xLabel={method === 'vi' ? 'sweep k' : 'iteration'}
-            yLabel={method === 'vi' ? 'max |TV − V|' : 'changed'}
-            yLog={method === 'vi'}
-            handles={[{ kind: 'x', at, label: 'k', onDrag: (v) => setStep(Math.max(0, Math.round(v))) }]}
-          />
-        </Panel>
-      </Subplots>
+      <Plots cols={2} widths={[1.4, 1]}>
+        <Plot x={xa} y={ya}>
+          <Raster x={gx} y={gy} z={values} scale="diverging" range={vRange} valueLabel="V(s)" />
+          <Vectors vectors={policyArrows} />
+        </Plot>
+        <Plot x={ka} y={ra} legend={false}>
+          {method === 'vi' ? (
+            <Curve name="Bellman residual" x={progress.x} y={progress.y} slot={2} />
+          ) : (
+            <Bars name="states whose action changed" x={progress.x} y={progress.y} slot={2} width={0.6} />
+          )}
+          <Handle kind="x" at={at} label="k" onDrag={(v) => setStep(Math.max(0, Math.round(v)))} />
+        </Plot>
+      </Plots>
     </Figure>
   )
 }
@@ -194,8 +187,13 @@ function smooth(y: number[], w = 20): number[] {
 }
 
 export function CliffSpecimen() {
-  const [epsilon, setEpsilon] = useState(0.1)
-  const [alpha, setAlpha] = useState(0.5)
+  const state = useFigureState({
+    learning: row('1 · learning', {
+      epsilon: slider(0, 0.3, 0.1, { label: 'exploration ε' }),
+      alpha: slider(0.05, 1, 0.5, { label: 'step size α' }),
+    }),
+  })
+  const { epsilon, alpha } = state.learning
   const runs = useMemo(() => {
     const opts = { epsilon, learningRate: alpha }
     const rec = { record: { reward: (s: { rewardSum: number }) => s.rewardSum }, stream: stream('cliff') }
@@ -211,35 +209,51 @@ export function CliffSpecimen() {
   const g = CLIFF.grid!
   const qPath = greedyPath(CLIFF, q.policy)
   const sPath = greedyPath(CLIFF, s.policy)
-  const curves: XYSeries[] = [
-    { name: 'Q-learning', type: 'line', x: Array.from(runs.q.index), y: smooth(toFlat(runs.q.series.reward)), slot: 0 },
-    { name: 'SARSA', type: 'line', x: Array.from(runs.s.index), y: smooth(toFlat(runs.s.series.reward)), slot: 1 },
-  ]
-  const panel = (V: Tensor, path: Tensor, name: string, slot: number) => (
-    <Heatmap
-      x={axes(g.width)}
-      y={axes(g.height)}
-      z={gridRows(CLIFF, V).map((row, y) => row.map((v, x) => (y === 0 && x > 0 && x < g.width - 1 ? NaN : v)))}
-      valueLabel="max_a Q(s, a)"
-      overlay={[pathOverlay(CLIFF, path, `${name} greedy path`, slot)]}
-      xLabel="x"
-      yLabel="y"
-      range={[-20, 0]}
-    />
+  const curves = useMemo(
+    () => ({
+      q: { x: Array.from(runs.q.index), y: smooth(toFlat(runs.q.series.reward)) },
+      s: { x: Array.from(runs.s.index), y: smooth(toFlat(runs.s.series.reward)) },
+    }),
+    [runs],
   )
+  // The cliff (bottom row between start and goal) is left blank.
+  const valueRows = (V: Tensor) =>
+    gridRows(CLIFF, V).map((row, y) => row.map((v, x) => (y === 0 && x > 0 && x < g.width - 1 ? NaN : v)))
+  const gx = axes(g.width)
+  const gy = axes(g.height)
+  const qx = useAxis({ label: 'x' })
+  // Cells, not geometry: no equal units, so the two grids share the column's height evenly.
+  const qy = useAxis({ label: 'y' })
+  const sx = useAxis({ label: 'x' })
+  const sy = useAxis({ label: 'y' })
+  const ea = useAxis({ label: 'episode', range: [0, EPISODES] })
+  const wa = useAxis({ label: 'reward per episode', range: [-150, 0] })
+  const panel = (V: Tensor, path: Tensor, name: string, slot: number, x: typeof qx, y: typeof qy) => {
+    const p = pathCells(CLIFF, path)
+    return (
+      <Plot x={x} y={y} title={name}>
+        <Raster x={gx} y={gy} z={valueRows(V)} range={[-20, 0]} valueLabel="max_a Q(s, a)" />
+        <Curve name={`${name} greedy path`} x={p.x} y={p.y} slot={slot} showPoints />
+      </Plot>
+    )
+  }
   return (
     <Figure
       title="Q-learning against SARSA on the cliff"
-      description="Q-learning learns the values of the greedy policy and so the shortest path along the cliff edge, but its ε-greedy behaviour falls off now and then; SARSA learns the values of the policy it follows and takes the safer route, earning more per episode while exploring."
+      purpose="Q-learning learns the values of the greedy policy and so the shortest path along the cliff edge, but its ε-greedy behaviour falls off now and then; SARSA learns the values of the policy it follows and takes the safer route, earning more per episode while exploring."
+      state={state}
       defaultSize="XL"
       controls={
         <>
-          <ControlRow label="1 · learning">
-            <Slider label="exploration ε" value={epsilon} onChange={setEpsilon} min={0} max={0.3} />
-            <Slider label="step size α" value={alpha} onChange={setAlpha} min={0.05} max={1} />
-          </ControlRow>
           <ControlRow label="2 · episode">
-            <Player label="episode" value={e} onChange={setEpisode} count={EPISODES + 1} defaultSpeed={40} />
+            <Player
+              label="episode"
+              value={e}
+              onChange={setEpisode}
+              count={EPISODES + 1}
+              defaultSpeed={40}
+              startReason="The figure compares the routes the two methods have learned, which needs all 500 episodes."
+            />
           </ControlRow>
         </>
       }
@@ -265,21 +279,17 @@ export function CliffSpecimen() {
           />
         </>
       }
-      caption="aifn/rl qLearning and sarsa on cliffWalking (Sutton and Barto, Example 6.6), one episode per step, both on stream('cliff'); the cliff is the blank bottom row. Bottom: reward per episode, a 20-episode moving average."
+      caption="Drag the episode line or play. aifn qLearning and sarsa on cliffWalking (Sutton and Barto, Example 6.6), one episode per step, both on stream('cliff'); the cliff is the blank bottom row. Bottom: reward per episode, a 20-episode moving average."
     >
-      <Subplots rows={3} heightRatios={[1.5, 1.5, 1]}>
-        <Panel>{panel(q.V, qPath, 'Q-learning', 0)}</Panel>
-        <Panel>{panel(s.V, sPath, 'SARSA', 1)}</Panel>
-        <Panel>
-          <XYChart
-            series={curves}
-            xLabel="episode"
-            yLabel="reward per episode"
-            yRange={[-150, 0]}
-            handles={[{ kind: 'x', at: e, label: 'episode', onDrag: (v) => setEpisode(Math.max(0, Math.round(v))) }]}
-          />
-        </Panel>
-      </Subplots>
+      <Plots rows={3} heights={[1.5, 1.5, 1]}>
+        {panel(q.V, qPath, 'Q-learning', 0, qx, qy)}
+        {panel(s.V, sPath, 'SARSA', 1, sx, sy)}
+        <Plot x={ea} y={wa}>
+          <Curve name="Q-learning" x={curves.q.x} y={curves.q.y} slot={0} />
+          <Curve name="SARSA" x={curves.s.x} y={curves.s.y} slot={1} />
+          <Handle kind="x" at={e} label="episode" onDrag={(v) => setEpisode(Math.max(0, Math.round(v)))} />
+        </Plot>
+      </Plots>
     </Figure>
   )
 }

@@ -4,16 +4,16 @@ import { decimate, seriesComponents } from 'aifn/foundation/trace'
 import { Check, Copy } from 'lucide-react'
 import { useCallback, useId, useMemo, useState, type ReactNode } from 'react'
 import { Button, Player, Switch } from '@lab/controls'
-import { Figure } from '@lab/layout'
+import { PanelSlot } from '@lab/layout'
 import { cn } from '@lab/lib/utils'
 import { Badge } from '@lab/ui/badge'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@lab/ui/table'
-import { ChartSize, XYChart, type Handle, type XYSeries } from '@lab/viz'
+import { Curve, Handle, niceRange, Plot, useAxis, type AxisModel, type Range } from '@lab/viz'
 import { formatValue } from './format'
-import type { FrameProps } from './frame'
+import { registerView } from './registry'
 import { StateTree } from './StateTree'
 
-export type TraceViewProps<S> = FrameProps & {
+export type TracePanelProps<S> = {
   trace: Trace<S>
   /** Series plotted at first; default the first three. */
   show?: string[]
@@ -23,8 +23,11 @@ export type TraceViewProps<S> = FrameProps & {
   maxPoints?: number
   /** Components drawn per series; further components are listed but not drawn. Default 8 (the palette's slots). */
   maxComponents?: number
-  /** Start at the first kept step instead of the last. */
-  startAtFirst?: boolean
+  /**
+   * Open at the last kept step, saying why (the finished run is the point). Without it the player opens at the first
+   * kept step, as every walk-through does.
+   */
+  startReason?: string
 }
 
 /** The kept position whose step number is nearest `step` (index is ascending). */
@@ -67,23 +70,18 @@ function toJson(value: unknown): string {
  * cursor can be dragged to scrub. When the trace grows (a time-sliced or extended run) and the cursor is at the end,
  * it follows the end.
  */
-export function TraceView<S>({
+export function TracePanel<S>({
   trace,
   show,
   renderState,
   maxPoints = 1500,
   maxComponents = 8,
-  startAtFirst = false,
-  title,
-  description,
-  controls,
-  readouts,
-  ...frame
-}: TraceViewProps<S>) {
+  startReason,
+}: TracePanelProps<S>) {
   const kept = trace.index.length
   const last = kept - 1
   // The cursor is a kept position, or 'end', which follows the end of a growing (time-sliced or extended) trace.
-  const [position, setPositionRaw] = useState<number | 'end'>(startAtFirst ? 0 : 'end')
+  const [position, setPositionRaw] = useState<number | 'end'>(startReason ? 'end' : 0)
   const [logScale, setLogScale] = useState(false)
   const names = useMemo(() => Object.keys(trace.series), [trace.series])
   const [chosen, setChosen] = useState<string[]>(() => show ?? names.slice(0, 3))
@@ -107,12 +105,11 @@ export function TraceView<S>({
   // Drawing copy of the trace, decimated once per trace.
   const drawn = useMemo(() => decimate(trace, maxPoints), [trace, maxPoints])
   const drawnIndex = useMemo(() => Array.from(drawn.index), [drawn])
-  const cursor = useCallback(
-    (label: string): Handle[] => [
-      { kind: 'x', at: step, label, onDrag: (x: number) => setPosition(nearestPosition(trace.index, x)) },
-    ],
-    [step, setPosition, trace.index],
-  )
+  const onCursor = useCallback((x: number) => setPosition(nearestPosition(trace.index, x)), [setPosition, trace.index])
+  // One step axis for every chart: zoom one and all follow. Its range is whole ticks over the kept steps, so a trace
+  // that grows by a few steps keeps the axis (and the charts take the new data as a patch).
+  const stepRange = niceRange([trace.index[0] ?? 0, Math.max(trace.index[last] ?? 1, (trace.index[0] ?? 0) + 1)])
+  const stepAxis = useAxis({ label: 'step', range: stepRange })
 
   const toggleSeries = (name: string) =>
     setChosen((s) => (s.includes(name) ? s.filter((n) => n !== name) : [...s, name]))
@@ -121,13 +118,9 @@ export function TraceView<S>({
     trace.meta.stopped === 'diverged' ? 'destructive' : trace.meta.stopped === 'done' ? 'secondary' : 'outline'
 
   return (
-    <Figure
-      title={title ?? `Trace of ${trace.meta.algorithm}`}
-      defaultSize="full"
-      {...frame}
-      description={
+    <>
+      <PanelSlot slot="about">
         <span className="flex flex-col gap-1">
-          {description}
           {/* What ran and how it ended. */}
           <span className="flex flex-wrap items-center gap-x-4 gap-y-1">
             <span className="font-mono font-medium text-foreground">{trace.meta.algorithm}</span>
@@ -155,10 +148,9 @@ export function TraceView<S>({
             </span>
           </span>
         </span>
-      }
-      controls={
+      </PanelSlot>
+      <PanelSlot slot="controls">
         <>
-          {controls}
           <div className="col-span-full">
             <Player
               label={`step (of ${trace.meta.steps}; kept ${pos + 1}/${kept})`}
@@ -167,6 +159,7 @@ export function TraceView<S>({
               count={kept}
               format={(p) => `${trace.index[Math.min(last, Math.round(p))] ?? ''}`}
               defaultSpeed={30}
+              startReason={startReason}
             />
           </div>
           {/* Which series to plot. */}
@@ -192,15 +185,15 @@ export function TraceView<S>({
             </div>
           </div>
         </>
-      }
-      readouts={readouts}
-    >
-      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,26rem)]">
-        <div className="flex min-w-0 flex-col gap-4">
-          {renderState && <div>{renderState(state, { position: pos, step, trace })}</div>}
-
-          {/* Series and timing share the hovered step. */}
-          <ChartSize scale={0.5}>
+      </PanelSlot>
+      {/* The current state's picture spans the figure: a path or a fit needs the room. */}
+      {renderState && <div className="min-w-0">{renderState(state, { position: pos, step, trace })}</div>}
+      {/* Side by side only when the figure itself is wide (a container query, not the window): at size M the series
+          take the full width and the state sits under them. */}
+      <div className="@container">
+        <div className="grid gap-4 @3xl:grid-cols-[minmax(0,1fr)_minmax(0,22rem)]">
+          <div className="flex min-w-0 flex-col gap-4">
+            {/* Series and timing share the hovered step. */}
             {selected.map((name) => (
               <SeriesChart
                 key={name}
@@ -208,59 +201,71 @@ export function TraceView<S>({
                 full={trace.series[name]}
                 drawn={drawn.series[name]}
                 x={drawnIndex}
+                xAxis={stepAxis}
                 position={pos}
                 step={step}
-                handles={cursor(name)}
+                onCursor={onCursor}
                 logScale={logScale}
                 maxComponents={maxComponents}
                 hoverGroup={group}
               />
             ))}
-          </ChartSize>
 
-          <TimingPanel
-            trace={trace}
-            handles={cursor('timing')}
-            maxPoints={maxPoints}
-            logScale={logScale}
-            hoverGroup={group}
-          />
-        </div>
-
-        {/* The current state. */}
-        <section className="flex min-w-0 flex-col gap-2 lg:sticky lg:top-4 lg:max-h-[calc(100svh-2rem)] lg:self-start">
-          <div className="flex items-center gap-2 text-xs text-muted-foreground">
-            <span>
-              State at step <span className="font-mono text-foreground">{step}</span>
-            </span>
-            {previousState !== undefined && (
-              <span className="flex items-center gap-1">
-                <span className="inline-block size-2 rounded-sm bg-primary/15 ring-1 ring-primary/30" /> changed since
-                step {trace.index[pos - 1]}
-              </span>
-            )}
-            <CopyButton text={() => toJson(state)} />
-          </div>
-          <div className="min-h-0 overflow-auto rounded-lg border bg-background p-2">
-            <StateTree
-              value={state}
-              previous={previousState}
-              expanded={expanded}
-              onToggle={(path) =>
-                setExpanded((s) => {
-                  const next = new Set(s)
-                  if (next.has(path)) next.delete(path)
-                  else next.add(path)
-                  return next
-                })
-              }
+            <TimingPanel
+              trace={trace}
+              xAxis={stepAxis}
+              step={step}
+              onCursor={onCursor}
+              maxPoints={maxPoints}
+              logScale={logScale}
+              hoverGroup={group}
             />
           </div>
-        </section>
+
+          {/* The current state. */}
+          <section className="flex min-w-0 flex-col gap-2 @3xl:sticky @3xl:top-4 @3xl:max-h-[calc(100svh-2rem)] @3xl:self-start">
+            <div className="flex items-center gap-2 text-xs text-muted-foreground">
+              <span>
+                State at step <span className="font-mono text-foreground">{step}</span>
+              </span>
+              {previousState !== undefined && (
+                <span className="flex items-center gap-1">
+                  <span className="inline-block size-2 rounded-sm bg-primary/15 ring-1 ring-primary/30" /> changed since
+                  step {trace.index[pos - 1]}
+                </span>
+              )}
+              <CopyButton text={() => toJson(state)} />
+            </div>
+            <div className="min-h-0 overflow-auto rounded-lg border bg-background p-2">
+              <StateTree
+                value={state}
+                previous={previousState}
+                expanded={expanded}
+                onToggle={(path) =>
+                  setExpanded((s) => {
+                    const next = new Set(s)
+                    if (next.has(path)) next.delete(path)
+                    else next.add(path)
+                    return next
+                  })
+                }
+              />
+            </div>
+          </section>
+        </div>
       </div>
-    </Figure>
+    </>
   )
 }
+
+registerView<Trace<unknown>>({
+  key: 'trace/series',
+  kind: 'trace',
+  description:
+    'Play through the kept steps, plot any recorded series against the step, inspect the state at the step, and see the timing.',
+  title: (t) => `Trace of ${t.meta.algorithm}`,
+  render: (t) => <TracePanel trace={t} />,
+})
 
 function Num({ children }: { children: ReactNode }) {
   return <span className="font-mono text-foreground tabular-nums">{children}</span>
@@ -290,15 +295,40 @@ const formatMs = (ms: number) =>
 const formatRate = (r: number) =>
   r >= 1e6 ? `${(r / 1e6).toFixed(1)}M` : r >= 1e3 ? `${(r / 1e3).toFixed(1)}k` : r.toFixed(0)
 
-/** One recorded series against the step: one line per component, with the step cursor and the current values. */
+/** A y axis over `values` (whole ticks; whole decades on a log axis), fixed so new data moves it only by a tick. */
+function useValueAxis(label: string, extent: Range | undefined, log: boolean): AxisModel {
+  const range = extent ? niceRange(extent, log) : undefined
+  return useAxis({ label, log, range: range ? [range[0], range[1]] : undefined })
+}
+
+/** The finite extent of some arrays (positive values only for a log axis). */
+function finiteExtent(arrays: readonly ArrayLike<number>[], positive: boolean): Range | undefined {
+  let lo = Infinity
+  let hi = -Infinity
+  for (const a of arrays)
+    for (let i = 0; i < a.length; i++) {
+      const v = a[i]
+      if (!Number.isFinite(v) || (positive && v <= 0)) continue
+      if (v < lo) lo = v
+      if (v > hi) hi = v
+    }
+  return Number.isFinite(lo) ? [lo, hi] : undefined
+}
+
+/**
+ * One recorded series against the step: one line per component, with the step cursor and the current values. The
+ * lines are live layers on axes fixed to whole ticks over the data, so a new trace (a dragged start, a time-sliced run)
+ * reaches the chart as a patch rather than a full redraw.
+ */
 function SeriesChart({
   name,
   full,
   drawn,
   x,
+  xAxis,
   position,
   step,
-  handles,
+  onCursor,
   logScale,
   maxComponents,
   hoverGroup,
@@ -307,46 +337,50 @@ function SeriesChart({
   full: Tensor
   drawn: Tensor
   x: number[]
+  xAxis: AxisModel
   position: number
   step: number
-  handles: Handle[]
+  onCursor: (x: number) => void
   logScale: boolean
   maxComponents: number
   hoverGroup: string
 }) {
   const components = useMemo(() => seriesComponents(drawn), [drawn])
   const width = components.length
-  const { series, positive } = useMemo(() => {
-    const drawnComponents = components.slice(0, maxComponents)
-    const positive = drawnComponents.every((c) => c.values.every((v) => v > 0))
-    const series: XYSeries[] = drawnComponents.map((c, k) => ({
+  const { lines, positive } = useMemo(() => {
+    const shown = components.slice(0, maxComponents)
+    const positive = shown.every((c) => c.values.every((v) => v > 0))
+    // Non-finite values (a diverged run) break the axes; draw them as gaps and report them in the readout.
+    const lines = shown.map((c) => ({
       name: `${name}${c.label}`,
-      type: 'line',
-      // Non-finite values (a diverged run) break the axes; draw them as gaps and report them in the readout.
-      x,
       y: Array.from(c.values, (v) => (Number.isFinite(v) ? v : NaN)),
-      slot: k,
     }))
-    return { series, positive }
-  }, [components, maxComponents, name, x])
+    return { lines, positive }
+  }, [components, maxComponents, name])
+  const useLog = logScale && positive
+  const extent = useMemo(
+    () =>
+      finiteExtent(
+        lines.map((l) => l.y),
+        useLog,
+      ),
+    [lines, useLog],
+  )
+  const yAxis = useValueAxis(name, extent, useLog)
   // The current values come from the full series, so they are exact at any step.
   const fullValues = useMemo(() => toFlat(full), [full])
   const current = useMemo(
     () => fullValues.slice(position * width, position * width + Math.min(width, 12)).map(formatValue),
     [fullValues, position, width],
   )
-  const useLog = logScale && positive
   return (
     <div className="flex flex-col gap-1">
-      <XYChart
-        series={series}
-        xLabel="step"
-        yLabel={name}
-        yLog={useLog}
-        handles={handles}
-        hoverGroup={hoverGroup}
-        ariaLabel={`${name} against step`}
-      />
+      <Plot x={xAxis} y={yAxis} hoverGroup={hoverGroup} scale={0.5} ariaLabel={`${name} against step`}>
+        {lines.map((l, k) => (
+          <Curve key={k} id={`line${k}`} name={l.name} x={x} y={l.y} slot={k} live />
+        ))}
+        <Handle kind="x" at={step} label={name} onDrag={onCursor} />
+      </Plot>
       <div className="flex flex-wrap gap-x-3 font-mono text-xs text-muted-foreground tabular-nums">
         <span>
           {name} at {step}:
@@ -368,19 +402,23 @@ function SeriesChart({
 /** Per-step time (bucketed means for long runs) and the per-phase totals. */
 function TimingPanel<S>({
   trace,
-  handles,
+  xAxis,
+  step,
+  onCursor,
   maxPoints,
   logScale,
   hoverGroup,
 }: {
   trace: Trace<S>
-  handles: Handle[]
+  xAxis: AxisModel
+  step: number
+  onCursor: (x: number) => void
   maxPoints: number
   logScale: boolean
   hoverGroup: string
 }) {
   const { stepMs, totalMs, phases } = trace.timing
-  const series = useMemo((): XYSeries[] => {
+  const line = useMemo(() => {
     const n = stepMs.length
     const buckets = Math.min(n, maxPoints)
     const x: number[] = []
@@ -394,25 +432,21 @@ function TimingPanel<S>({
       x.push((from + to) / 2 + 0.5)
       y.push(s / (to - from))
     }
-    return [{ name: n > maxPoints ? 'ms per step (bucket mean)' : 'ms per step', type: 'line', x, y, slot: 0 }]
+    return { name: n > maxPoints ? 'ms per step (bucket mean)' : 'ms per step', x, y }
   }, [stepMs, maxPoints])
+  const positive = line.y.every((v) => v > 0)
+  const useLog = logScale && positive
+  const extent = useMemo(() => finiteExtent([line.y], useLog), [line, useLog])
+  const yAxis = useValueAxis('ms', extent && (useLog ? extent : [Math.min(0, extent[0]), extent[1]]), useLog)
   const inStep = Object.entries(phases).filter(([k]) => k !== 'init' && k !== 'record')
-  const positive = Array.from(series[0].y).every((v) => v > 0)
   return (
     <section className="flex flex-col gap-2">
       <div className="text-xs text-muted-foreground">Timing</div>
       {stepMs.length > 0 ? (
-        <ChartSize scale={0.35}>
-          <XYChart
-            series={series}
-            xLabel="step"
-            yLabel="ms"
-            yLog={logScale && positive}
-            handles={handles}
-            hoverGroup={hoverGroup}
-            ariaLabel="Time per step"
-          />
-        </ChartSize>
+        <Plot x={xAxis} y={yAxis} hoverGroup={hoverGroup} scale={0.45} ariaLabel="Time per step">
+          <Curve id="ms" name={line.name} x={line.x} y={line.y} slot={0} live />
+          <Handle kind="x" at={step} label="timing" onDrag={onCursor} />
+        </Plot>
       ) : (
         <p className="text-xs text-muted-foreground">No steps were run.</p>
       )}

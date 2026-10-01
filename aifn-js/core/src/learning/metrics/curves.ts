@@ -1,5 +1,6 @@
 /**
- * Curves of a scoring classifier over all thresholds, as typed objects that charts draw directly, and the areas and
+ * Curves of a scoring classifier over all thresholds, as the contract's `Curve` (`x`, `y`, `thresholds`, `area`,
+ * narrowed by `curve`) that charts draw directly, and the areas and
  * operating points read off them: ROC (with tie-aware AUROC, partial AUROC, the convex hull and multiclass AUROC),
  * precision–recall and average precision, DET, cost curves, cumulative gain and lift, precision–recall–gain, equal
  * error rate, Youden's J and rates at a constraint. Also the closed forms of the binormal model used by the site's
@@ -10,6 +11,7 @@ import { trapezoidSamples } from 'aifn/numerics/quadrature'
 import { normalCdf, normalPdf } from 'aifn/numerics/special'
 import { ranks } from 'aifn/probability/stats'
 import { toFlat, type Tensor } from 'aifn/foundation/tensor'
+import type { Curve } from 'aifn/foundation/contracts'
 import {
   binaryTruth,
   classesOf,
@@ -70,19 +72,15 @@ function sweep(yTrue: Labels, scores: Data, positive?: Label): Sweep {
 
 // ── ROC ──────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
-/** A ROC curve: one point per threshold, from (0, 0) at threshold +∞ to (1, 1). */
-export type RocCurve = {
-  kind: 'roc'
-  /** False-positive rate at each threshold. */
-  fpr: Tensor
-  /** True-positive rate at each threshold. */
-  tpr: Tensor
-  /** Thresholds in decreasing order; the first is +∞. */
-  thresholds: Tensor
-  /** The area under the curve (trapezoidal, equal to the tie-aware Mann–Whitney AUROC). */
-  auc: number
-  positives: number
-  negatives: number
+/**
+ * A ROC curve: `x` the false-positive rate and `y` the true-positive rate at each threshold, from (0, 0) at threshold
+ * +∞ to (1, 1); `area` is the trapezoidal AUROC, equal to the tie-aware Mann–Whitney statistic.
+ */
+export type RocCurve = Curve<'roc'> & {
+  readonly thresholds: Tensor
+  readonly area: number
+  readonly positives: number
+  readonly negatives: number
 }
 
 /**
@@ -95,11 +93,12 @@ export function rocCurve(yTrue: Labels, scores: Data, options: { positive?: Labe
   const fpr = [0, ...sw.fps.map((v) => divide(v, sw.negatives))]
   const tpr = [0, ...sw.tps.map((v) => divide(v, sw.positives))]
   return {
-    kind: 'roc',
-    fpr: vector(fpr),
-    tpr: vector(tpr),
+    kind: 'curve',
+    curve: 'roc',
+    x: vector(fpr),
+    y: vector(tpr),
     thresholds: vector([Infinity, ...sw.thresholds]),
-    auc: trapezoidSamples(tpr, fpr),
+    area: trapezoidSamples(tpr, fpr),
     positives: sw.positives,
     negatives: sw.negatives,
   }
@@ -142,6 +141,7 @@ export type AurocOptions = {
 export const auroc = defineMetric(
   {
     key: 'auroc',
+    stability: 'stable',
     name: 'Area under the ROC curve',
     inputs: 'scores',
     direction: 'higher',
@@ -198,6 +198,7 @@ export const auroc = defineMetric(
 export const partialAuroc = defineMetric(
   {
     key: 'partialAuroc',
+    stability: 'stable',
     name: 'Partial AUROC',
     inputs: 'scores',
     direction: 'higher',
@@ -209,8 +210,8 @@ export const partialAuroc = defineMetric(
     const { maxFpr } = options
     if (!(maxFpr > 0 && maxFpr <= 1)) throw new Error('metrics: partialAuroc: maxFpr must lie in (0, 1]')
     const c = rocCurve(yTrue, scores, options)
-    const fpr = c.fpr.data as Float64Array
-    const tpr = c.tpr.data as Float64Array
+    const fpr = c.x.data as Float64Array
+    const tpr = c.y.data as Float64Array
     // The first point beyond maxFpr, and the curve cut there.
     let stop = fpr.findIndex((v) => v > maxFpr)
     if (stop < 0) stop = fpr.length
@@ -230,11 +231,11 @@ export const partialAuroc = defineMetric(
 
 /**
  * The upper convex hull of a ROC curve, from (0, 0) to (1, 1) (Provost and Fawcett 2001): the operating points that
- * are optimal for some costs and class ratio.
+ * are optimal for some costs and class ratio, as a ROC `Curve` without thresholds; `area` is the hull's AUROC.
  */
-export function rocConvexHull(curve: RocCurve): { fpr: Tensor; tpr: Tensor } {
-  const fpr = curve.fpr.data as Float64Array
-  const tpr = curve.tpr.data as Float64Array
+export function rocConvexHull(curve: RocCurve): Curve<'roc'> & { readonly area: number } {
+  const fpr = curve.x.data as Float64Array
+  const tpr = curve.y.data as Float64Array
   const pts = Array.from(fpr, (x, i): [number, number] => [x, tpr[i]])
   pts.push([0, 0], [1, 1])
   pts.sort((a, b) => a[0] - b[0] || a[1] - b[1])
@@ -244,22 +245,21 @@ export function rocConvexHull(curve: RocCurve): { fpr: Tensor; tpr: Tensor } {
     while (hull.length >= 2 && cross(hull[hull.length - 2], hull[hull.length - 1], p) >= 0) hull.pop()
     hull.push(p)
   }
-  return { fpr: vector(hull.map((p) => p[0])), tpr: vector(hull.map((p) => p[1])) }
+  const x = hull.map((p) => p[0])
+  const y = hull.map((p) => p[1])
+  return { kind: 'curve', curve: 'roc', x: vector(x), y: vector(y), area: trapezoidSamples(y, x) }
 }
 
 // ── Precision–recall ─────────────────────────────────────────────────────────────────────────────────────────────────
 
-/** A precision–recall curve, from recall 0 (precision 1 by convention, threshold +∞) to recall 1. */
-export type PrecisionRecallCurve = {
-  kind: 'precision-recall'
-  precision: Tensor
-  recall: Tensor
-  /** Thresholds in decreasing order; the first is +∞. */
-  thresholds: Tensor
-  /** Average precision, Σ (Rₙ − Rₙ₋₁) Pₙ. */
-  averagePrecision: number
-  /** The fraction of positives, the curve's chance level. */
-  prevalence: number
+/**
+ * A precision–recall curve: `x` recall and `y` precision, from recall 0 (precision 1 by convention, threshold +∞) to
+ * recall 1; `area` is the average precision Σ (Rₙ − Rₙ₋₁) Pₙ and `prevalence` the curve's chance level.
+ */
+export type PrecisionRecallCurve = Curve<'pr'> & {
+  readonly thresholds: Tensor
+  readonly area: number
+  readonly prevalence: number
 }
 
 /**
@@ -278,11 +278,12 @@ export function precisionRecallCurve(
   let ap = 0
   for (let i = 1; i < recall.length; i++) ap += (recall[i] - recall[i - 1]) * precision[i]
   return {
-    kind: 'precision-recall',
-    precision: vector(precision),
-    recall: vector(recall),
+    kind: 'curve',
+    curve: 'pr',
+    x: vector(recall),
+    y: vector(precision),
     thresholds: vector([Infinity, ...sw.thresholds]),
-    averagePrecision: sw.positives > 0 ? ap : NaN,
+    area: sw.positives > 0 ? ap : NaN,
     prevalence: sw.positives / (sw.positives + sw.negatives),
   }
 }
@@ -295,6 +296,7 @@ export function precisionRecallCurve(
 export const averagePrecision = defineMetric(
   {
     key: 'averagePrecision',
+    stability: 'stable',
     name: 'Average precision',
     inputs: 'scores',
     direction: 'higher',
@@ -307,7 +309,7 @@ export const averagePrecision = defineMetric(
     scores: Data | Rows,
     options: { positive?: Label; average?: 'macro' | 'weighted'; labels?: readonly Label[] } = {},
   ): number => {
-    if (!isMatrixLike(scores)) return precisionRecallCurve(yTrue, scores as Data, options).averagePrecision
+    if (!isMatrixLike(scores)) return precisionRecallCurve(yTrue, scores as Data, options).area
     const t = labelList(yTrue)
     const S = dense(scores as Rows, 'averagePrecision scores')
     const classes = options.labels ? [...options.labels] : classesOf(t)
@@ -317,7 +319,7 @@ export const averagePrecision = defineMetric(
       const y = t.map((v) => (v === classes[k] ? 1 : 0))
       const col = Float64Array.from({ length: S.rows }, (_, i) => S.data[i * S.cols + k])
       const wk = options.average === 'weighted' ? y.reduce((a: number, b) => a + b, 0) : 1
-      s += wk * precisionRecallCurve(y, col).averagePrecision
+      s += wk * precisionRecallCurve(y, col).area
       w += wk
     }
     return s / w
@@ -326,25 +328,19 @@ export const averagePrecision = defineMetric(
 
 /** The trapezoidal area under a precision–recall curve, which overestimates it (Davis and Goadrich 2006). */
 export function precisionRecallTrapezoid(curve: PrecisionRecallCurve): number {
-  return trapezoidSamples(curve.precision, curve.recall)
+  return trapezoidSamples(curve.y, curve.x)
 }
 
 /**
  * The precision–recall–gain curve (Flach and Kull 2015): precision gain (prec − π)/((1 − π) prec) against recall gain
- * (rec − π)/((1 − π) rec), with π the prevalence, at every threshold with at least one true positive. Gains below 0
- * (worse than always-positive) are kept, so a chart can clip them.
+ * (rec − π)/((1 − π) rec), with π the prevalence, at every threshold with at least one true positive: `x` recall gain,
+ * `y` precision gain. Gains below 0 (worse than always-positive) are kept, so a chart can clip them.
  */
 export function precisionRecallGainCurve(
   yTrue: Labels,
   scores: Data,
   options: { positive?: Label } = {},
-): {
-  kind: 'precision-recall-gain'
-  precisionGain: Tensor
-  recallGain: Tensor
-  thresholds: Tensor
-  prevalence: number
-} {
+): Curve<'prg'> & { readonly thresholds: Tensor; readonly prevalence: number } {
   const sw = sweep(yTrue, scores, options.positive)
   const pi = sw.positives / (sw.positives + sw.negatives)
   const pg: number[] = []
@@ -358,9 +354,10 @@ export function precisionRecallGainCurve(
     th.push(sw.thresholds[i])
   })
   return {
-    kind: 'precision-recall-gain',
-    precisionGain: vector(pg),
-    recallGain: vector(rg),
+    kind: 'curve',
+    curve: 'prg',
+    x: vector(rg),
+    y: vector(pg),
     thresholds: vector(th),
     prevalence: pi,
   }
@@ -369,16 +366,23 @@ export function precisionRecallGainCurve(
 // ── DET, operating points ────────────────────────────────────────────────────────────────────────────────────────────
 
 /**
- * The detection error trade-off curve: false-positive rate against false-negative rate at every threshold (the ROC
- * curve with FNR = 1 − TPR). Charts usually draw both on a probit scale, `normalQuantile(rate)` from `aifn/numerics/special`.
+ * The detection error trade-off curve: `x` the false-positive rate against `y` the false-negative rate at every
+ * threshold (the ROC curve with FNR = 1 − TPR). Charts usually draw both on a probit scale, `normalQuantile(rate)` from
+ * `aifn/numerics/special`.
  */
 export function detCurve(
   yTrue: Labels,
   scores: Data,
   options: { positive?: Label } = {},
-): { kind: 'det'; fpr: Tensor; fnr: Tensor; thresholds: Tensor } {
+): Curve<'det'> & { readonly thresholds: Tensor } {
   const c = rocCurve(yTrue, scores, options)
-  return { kind: 'det', fpr: c.fpr, fnr: vector(Array.from(c.tpr.data, (v) => 1 - v)), thresholds: c.thresholds }
+  return {
+    kind: 'curve',
+    curve: 'det',
+    x: c.x,
+    y: vector(Array.from(c.y.data, (v) => 1 - v)),
+    thresholds: c.thresholds,
+  }
 }
 
 /** An operating point on a ROC curve. */
@@ -404,8 +408,8 @@ export function equalErrorRate(
   options: { positive?: Label } = {},
 ): { rate: number; threshold: number } {
   const c = rocCurve(yTrue, scores, options)
-  const fpr = c.fpr.data as Float64Array
-  const tpr = c.tpr.data as Float64Array
+  const fpr = c.x.data as Float64Array
+  const tpr = c.y.data as Float64Array
   const th = c.thresholds.data as Float64Array
   for (let i = 1; i < fpr.length; i++) {
     const d0 = 1 - tpr[i - 1] - fpr[i - 1]
@@ -423,6 +427,7 @@ export function equalErrorRate(
 export const eer = defineMetric(
   {
     key: 'eer',
+    stability: 'stable',
     name: 'Equal error rate',
     inputs: 'scores',
     direction: 'lower',
@@ -481,6 +486,7 @@ export function operatingPoint(
 export const specificityAtSensitivity = defineMetric(
   {
     key: 'specificityAtSensitivity',
+    stability: 'stable',
     name: 'Specificity at a sensitivity',
     inputs: 'scores',
     direction: 'higher',
@@ -496,6 +502,7 @@ export const specificityAtSensitivity = defineMetric(
 export const tprAtFpr = defineMetric(
   {
     key: 'tprAtFpr',
+    stability: 'stable',
     name: 'TPR at a false-positive rate',
     inputs: 'scores',
     direction: 'higher',
@@ -511,6 +518,7 @@ export const tprAtFpr = defineMetric(
 export const recallAtPrecision = defineMetric(
   {
     key: 'recallAtPrecision',
+    stability: 'stable',
     name: 'Recall at a precision',
     inputs: 'scores',
     direction: 'higher',
@@ -534,16 +542,18 @@ export function normalisedExpectedCost(fpr: number, fnr: number, probabilityCost
 
 /**
  * The cost curve of a scoring classifier (cost-curves): each ROC point is a line NE[C](PC) from (0, FPR) to (1, FNR),
- * and the classifier's cost curve is their lower envelope, sampled at `points` probability costs (default 101).
+ * and the classifier's cost curve is their lower envelope, sampled at `points` probability costs (default 101): `x` the
+ * probability cost, `y` the normalised expected cost, `area` the expected cost over uniform PC. `fpr` and `fnr` are
+ * the ROC points, one line each.
  */
 export function costCurve(
   yTrue: Labels,
   scores: Data,
   options: { positive?: Label; points?: number } = {},
-): { kind: 'cost'; probabilityCost: Tensor; normalisedCost: Tensor; fpr: Tensor; fnr: Tensor; area: number } {
+): Curve<'cost'> & { readonly area: number; readonly fpr: Tensor; readonly fnr: Tensor } {
   const c = rocCurve(yTrue, scores, options)
-  const fpr = c.fpr.data as Float64Array
-  const fnr = Float64Array.from(c.tpr.data, (v) => 1 - v)
+  const fpr = c.x.data as Float64Array
+  const fnr = Float64Array.from(c.y.data, (v) => 1 - v)
   const m = options.points ?? 101
   const pc = Float64Array.from({ length: m }, (_, i) => i / (m - 1))
   const cost = Float64Array.from(pc, (x) => {
@@ -552,10 +562,11 @@ export function costCurve(
     return best
   })
   return {
-    kind: 'cost',
-    probabilityCost: vector(pc),
-    normalisedCost: vector(cost),
-    fpr: c.fpr,
+    kind: 'curve',
+    curve: 'cost',
+    x: vector(pc),
+    y: vector(cost),
+    fpr: c.x,
     fnr: vector(fnr),
     area: trapezoidSamples(cost, pc),
   }
@@ -563,21 +574,23 @@ export function costCurve(
 
 /**
  * The cumulative gain and lift curves: targeting the top fraction q of cases by score captures a fraction gain(q) of
- * the positives, and lift(q) = gain(q)/q. One point per distinct score, preceded by (0, 0) (lift undefined there).
+ * the positives, and lift(q) = gain(q)/q. One point per distinct score, preceded by (0, 0) (lift undefined there):
+ * `x` the fraction targeted, `y` the gain.
  */
 export function gainCurve(
   yTrue: Labels,
   scores: Data,
   options: { positive?: Label } = {},
-): { kind: 'gain'; fraction: Tensor; gain: Tensor; lift: Tensor; thresholds: Tensor } {
+): Curve<'gain'> & { readonly thresholds: Tensor; readonly lift: Tensor } {
   const sw = sweep(yTrue, scores, options.positive)
   const n = sw.positives + sw.negatives
   const fraction = [0, ...sw.tps.map((tp, i) => (tp + sw.fps[i]) / n)]
   const gain = [0, ...sw.tps.map((tp) => divide(tp, sw.positives))]
   return {
-    kind: 'gain',
-    fraction: vector(fraction),
-    gain: vector(gain),
+    kind: 'curve',
+    curve: 'gain',
+    x: vector(fraction),
+    y: vector(gain),
     lift: vector(gain.map((g, i) => divide(g, fraction[i]))),
     thresholds: vector([Infinity, ...sw.thresholds]),
   }

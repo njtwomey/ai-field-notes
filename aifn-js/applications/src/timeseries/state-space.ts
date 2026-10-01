@@ -6,7 +6,6 @@ import {
   outer,
   sub,
   tensor,
-  toRows,
   transpose,
   zeros,
   type Matrix,
@@ -15,14 +14,7 @@ import {
 import type { Algorithm } from 'aifn/foundation/trace'
 import { luFactor, luSolve } from 'aifn/numerics/linalg'
 import { toSeries, type MatrixLike, type VectorLike } from './inputs'
-import {
-  filterArrays,
-  modelTensors,
-  parseModel,
-  smootherArrays,
-  type Model,
-  type StateSpaceModel,
-} from 'aifn/inference/filtering'
+import { filterAll, parseModel, smoothAll, type Model, type StateSpaceModel } from 'aifn/inference/filtering'
 
 /** X with A X = B, or null when A is singular to working precision. */
 function solveOrNull(a: Tensor, b: Tensor): Tensor | null {
@@ -51,7 +43,7 @@ export type StateSpaceEmState = {
   converged: boolean
   /** True if a covariance solve failed (the step kept the previous model). */
   diverged: boolean
-  /** Internal: the model as arrays. */
+  /** Internal: the model as parsed. */
   current: Model
 }
 
@@ -81,7 +73,7 @@ export function stateSpaceEm(
     diverged: boolean,
   ): StateSpaceEmState => ({
     t,
-    model: modelTensors(md),
+    model: md,
     logLikelihood,
     improvement,
     converged: t > 0 && Math.abs(improvement) <= tolerance * (1 + Math.abs(logLikelihood)),
@@ -90,33 +82,34 @@ export function stateSpaceEm(
   })
   return {
     name: 'state-space-em',
-    init: () => pack(start, 0, filterArrays(start, ys).logLikelihood, NaN, false),
+    init: () => pack(start, 0, filterAll(start, ys).logLikelihood, NaN, false),
     step: (s) => {
       const md = s.current
-      const n = md.A.length
-      const f = filterArrays(md, ys)
-      const sm = smootherArrays(md, f)
+      const [n] = md.A.shape
+      const [mDim] = md.C.shape
+      const f = filterAll(md, ys)
+      const sm = smoothAll(md, f)
       // Second moments E[z zᵀ] = P + m mᵀ.
-      const moment = (m: number[], P: number[][]) => add(tensor(P), outer(tensor(m), tensor(m)))
-      const Ezz = (t: number) => moment(sm.m[t], sm.P[t])
-      const prevM = (t: number) => tensor(t === 0 ? sm.m0 : sm.m[t - 1])
-      const prevEzz = (t: number) => (t === 0 ? moment(sm.m0, sm.P0) : Ezz(t - 1))
+      const moment = (m: Tensor, P: Tensor) => add(P, outer(m, m))
+      const Ezz = (t: number) => moment(sm.mean[t], sm.cov[t])
+      const prevM = (t: number) => (t === 0 ? sm.initialMean : sm.mean[t - 1])
+      const prevEzz = (t: number) => (t === 0 ? moment(sm.initialMean, sm.initialCov) : Ezz(t - 1))
       let S11: Tensor = zeros([n, n])
       let S10: Tensor = zeros([n, n])
       let S00: Tensor = zeros([n, n])
-      let Syz: Tensor = zeros([md.C.length, n])
-      let Syy: Tensor = zeros([md.C.length, md.C.length])
+      let Syz: Tensor = zeros([mDim, n])
+      let Syy: Tensor = zeros([mDim, mDim])
       for (let t = 0; t < T; t++) {
-        const mt = tensor(sm.m[t])
+        const mt = sm.mean[t]
         const yt = tensor(ys[t])
         S11 = add(S11, Ezz(t))
-        S10 = add(S10, add(tensor(sm.lag[t]), outer(mt, prevM(t))))
+        S10 = add(S10, add(sm.lag[t], outer(mt, prevM(t))))
         S00 = add(S00, prevEzz(t))
         Syz = add(Syz, outer(yt, mt))
         Syy = add(Syy, outer(yt, yt))
       }
-      let A = tensor(md.A)
-      let C = tensor(md.C)
+      let A: Tensor = md.A
+      let C: Tensor = md.C
       const next: Model = { ...md }
       let failed = false
       if (want.A) {
@@ -125,11 +118,11 @@ export function stateSpaceEm(
         if (sol) A = transpose(sol)
         else failed = true
       }
-      if (want.Q && want.A) next.Q = toRows(symmetrise(div(sub(S11, matmul(A, transpose(S10))), T)))
+      if (want.Q && want.A) next.Q = symmetrise(div(sub(S11, matmul(A, transpose(S10))), T)) as Matrix
       if (want.Q && !want.A) {
         // With A fixed the M-step for Q is E[(z_t − A z_{t−1})(…)ᵀ] averaged.
         const AS10t = matmul(A, transpose(S10))
-        next.Q = toRows(symmetrise(div(add(sub(sub(S11, AS10t), transpose(AS10t)), sandwich(A, S00)), T)))
+        next.Q = symmetrise(div(add(sub(sub(S11, AS10t), transpose(AS10t)), sandwich(A, S00)), T)) as Matrix
       }
       if (want.C) {
         const sol = solveOrNull(S11, transpose(Syz))
@@ -138,20 +131,20 @@ export function stateSpaceEm(
       }
       if (want.R) {
         const CSzy = matmul(C, transpose(Syz))
-        next.R = toRows(
+        next.R = (
           want.C
             ? symmetrise(div(sub(Syy, CSzy), T))
-            : symmetrise(div(add(sub(sub(Syy, CSzy), transpose(CSzy)), sandwich(C, S11)), T)),
-        )
+            : symmetrise(div(add(sub(sub(Syy, CSzy), transpose(CSzy)), sandwich(C, S11)), T))
+        ) as Matrix
       }
-      next.A = toRows(A)
-      next.C = toRows(C)
+      next.A = A as Matrix
+      next.C = C as Matrix
       if (want.initial) {
-        next.m0 = sm.m0
-        next.P0 = sm.P0
+        next.m0 = sm.initialMean
+        next.P0 = sm.initialCov
       }
       if (failed) return pack(md, s.t + 1, s.logLikelihood, 0, true)
-      const logLikelihood = filterArrays(next, ys).logLikelihood
+      const logLikelihood = filterAll(next, ys).logLikelihood
       return pack(next, s.t + 1, logLikelihood, logLikelihood - s.logLikelihood, false)
     },
     done: (s) => s.converged || s.diverged,

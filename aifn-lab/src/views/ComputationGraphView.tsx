@@ -3,12 +3,12 @@ import { toFlat, type Tensor } from 'aifn/foundation/tensor'
 import { useContext, useMemo, useState, type ReactNode } from 'react'
 import { Player } from '@lab/controls'
 import { Diagram, layeredLayout, type DiagramEdge, type DiagramSpec, type ElementState } from '@lab/diagram'
-import { Figure, Tex } from '@lab/layout'
+import { PanelSlot, Tex } from '@lab/layout'
 import { FrameContext, Readout } from '@lab/viz'
 import { formatValue } from './format'
-import type { FrameProps } from './frame'
+import { registerKind, registerView } from './registry'
 
-export type ComputationGraphViewProps = FrameProps & {
+export type ComputationGraphPanelProps = {
   /** A graph from `traceGraph` in `aifn/foundation/autodiff`. */
   graph: Graph
   /** The function being differentiated, as TeX, set large above the diagram, e.g. `L = \log(1 + e^{wx + b})`. */
@@ -23,8 +23,11 @@ export type ComputationGraphViewProps = FrameProps & {
   /** Controlled step (0 … count − 1; see the player); uncontrolled when omitted. */
   step?: number
   onStep?: (step: number) => void
-  /** Start at this step when uncontrolled (default: the last, everything propagated). */
-  initialStep?: number
+  /**
+   * Open at the last step (everything propagated), saying why the finished pass is the point. Without it the player
+   * opens at the first step, as every walk-through does.
+   */
+  startReason?: string
 }
 
 // ── Symbols and local rules ──────────────────────────────────────────────────────────────────────────────────────────
@@ -160,22 +163,18 @@ function phaseOf(step: number, ops: number[]): Phase {
  * adjoints v̄ = ∂output/∂v back right to left, each edge carrying its local partial. The function is set large above
  * the diagram and the current step's equation, with numbers substituted, below it.
  */
-export function ComputationGraphView({
+export function ComputationGraphPanel({
   graph,
   expression,
   outputSymbol = 'f',
   symbols: given,
   step,
   onStep,
-  initialStep,
-  title = 'Computation graph',
-  controls,
-  readouts,
-  ...frame
-}: ComputationGraphViewProps) {
+  startReason,
+}: ComputationGraphPanelProps) {
   const ops = useMemo(() => graph.nodes.filter((n) => n.op !== 'input').map((n) => n.id), [graph])
   const count = 2 * ops.length + 2
-  const [own, setOwn] = useState(initialStep ?? count - 1)
+  const [own, setOwn] = useState(startReason ? count - 1 : 0)
   const current = Math.min(Math.max(step ?? own, 0), count - 1)
   const setStep = (s: number) => (onStep ? onStep(s) : setOwn(s))
 
@@ -203,14 +202,9 @@ export function ComputationGraphView({
           : `backward ${phase.index + 1} of ${ops.length}: through ${graph.nodes[phase.op].op}`
 
   return (
-    <Figure
-      title={title}
-      defaultSize="full"
-      hoverReadout={false}
-      {...frame}
-      controls={
+    <>
+      <PanelSlot slot="controls">
         <>
-          {controls}
           <div className="col-span-full">
             <Player
               label="step (forward, then backward)"
@@ -218,17 +212,14 @@ export function ComputationGraphView({
               onChange={setStep}
               count={count}
               defaultSpeed={2}
+              startReason={startReason}
             />
           </div>
         </>
-      }
-      readouts={
-        <>
-          {readouts}
-          <Readout label="step" value={describe} />
-        </>
-      }
-    >
+      </PanelSlot>
+      <PanelSlot slot="readouts">
+        <Readout label="step" value={describe} />
+      </PanelSlot>
       <Body top={expression && <Tex display>{expression}</Tex>} bottom={<Tex display>{equation}</Tex>} lines={lines}>
         <Diagram
           spec={spec}
@@ -236,9 +227,27 @@ export function ComputationGraphView({
           ariaLabel="Factor graph of the computation: the forward pass above, the backward pass below"
         />
       </Body>
-    </Figure>
+    </>
   )
 }
+
+registerKind(
+  'computation-graph',
+  (o) =>
+    typeof o === 'object' &&
+    o !== null &&
+    Array.isArray((o as Graph).nodes) &&
+    Array.isArray((o as Graph).inputs) &&
+    typeof (o as Graph).output === 'number',
+)
+registerView<Graph>({
+  key: 'computation-graph/backprop',
+  kind: 'computation-graph',
+  description:
+    'A traced computation as a factor graph: the forward pass assigns values left to right, the backward pass carries adjoints back, step by step.',
+  title: () => 'Computation graph',
+  render: (g) => <ComputationGraphPanel graph={g} />,
+})
 
 /** The chart area: the function on top, the diagram filling the middle, the step's equation below. */
 function Body({

@@ -2,15 +2,29 @@
  * First-order methods as traceable algorithms: gradient descent (fixed, scheduled or line-searched step), heavy-ball
  * momentum, Nesterov's accelerated gradient, AdaGrad, RMSProp and Adam / AdamW. Each runs one of the pytree update
  * rules of `rules.ts` (the one definition of the method) on a single vector x with a fixed objective f, evaluating
- * f and ∇f once per step.
+ * f and ∇f once per step. The steps are written with primitives, so `unrolled` differentiates through them: with
+ * respect to x₀, to a traced step size (a learning-rate hypergradient), or to anything f closes over, when f is written
+ * with primitives too (an `Objective` through `objectiveFn`, or an `ObjectiveFn` whose value and gradient are).
  *
  * Sources: Cauchy (1847), "Méthode générale pour la résolution des systèmes d'équations simultanées"; Polyak (1964);
  * Sutskever et al. (2013); Duchi, Hazan & Singer (2011); Tieleman & Hinton (2012); Kingma & Ba (2015); Loshchilov &
  * Hutter (2019) (full titles in `rules.ts`).
  */
 
+import { NotDifferentiableError } from 'aifn/foundation/errors'
 import type { Algorithm } from 'aifn/foundation/trace'
-import { dense, type Tensor, type Vector } from 'aifn/foundation/tensor'
+import {
+  add,
+  dense,
+  fromData,
+  isTensor,
+  isTraced,
+  shapeOfValue,
+  unwrap,
+  type Tensor,
+  type Value,
+  type Vector,
+} from 'aifn/foundation/tensor'
 import type { IterateState, ObjectiveFn, Scalar, StoppingOptions } from 'aifn/foundation/contracts'
 import {
   backtrackingSearch,
@@ -19,7 +33,7 @@ import {
   type LineSearchResult,
   type StrongWolfeOptions,
 } from 'aifn/optim/line-search'
-import { divergedAt, evaluate, stopping, type StartOptions } from '../options'
+import { divergedAt, stopping, type StartOptions } from '../options'
 import {
   adagradRule,
   adamRule,
@@ -62,7 +76,48 @@ export type FirstOrderOptions = StoppingOptions & {
   stepSize?: StepSize
 }
 
-/** Runs an update rule on one vector: evaluate at x₀, then x ← x + update(∇f(x)) and re-evaluate. */
+/** A number from a value that may be traced (its primal), for the flags and the reported norms. */
+const primal = (v: Value): number => {
+  const raw = unwrap(v)
+  return typeof raw === 'number' ? raw : dense.toF64(raw, 'primal')[0]
+}
+
+/**
+ * f(x) and ∇f(x) at a point that may be traced, kept as values (so a traced x gives a traced value and gradient), with
+ * the gradient checked for length.
+ */
+function evaluateValue(f: ObjectiveFn, x: Value, n: number, where: string): { value: Value; grad: Value } {
+  const out = f(x as Vector) as { value: Value; grad?: Value | ArrayLike<number> } | number
+  if (typeof out === 'number' || out.grad === undefined)
+    throw new Error(`${where}: the objective must return { value, grad }; this method uses the gradient`)
+  const g = out.grad
+  // A plain array for a traced point was computed on raw values: the gradient's dependence on x is lost.
+  if (isTraced(x) && typeof g === 'object' && !isTensor(g) && !isTraced(g))
+    throw new NotDifferentiableError(
+      where,
+      `${where}: the objective returned a plain-array gradient for a traced point; write it with aifn primitives`,
+    )
+  const grad: Value =
+    typeof g === 'number' || isTensor(g) || !('length' in g) ? (g as Value) : fromData(Float64Array.from(g), [g.length])
+  const length = sizeOf(grad)
+  if (length !== n) throw new Error(`${where}: the gradient has length ${length}, but x has length ${n}`)
+  return { value: out.value, grad }
+}
+
+/** The number of elements of a value. */
+const sizeOf = (v: Value): number => shapeOfValue(v).reduce((a, b) => a * b, 1)
+
+/** ‖v‖₂ of the primal values. */
+const primalNorm = (v: Value): number => {
+  const raw = unwrap(v)
+  return typeof raw === 'number' ? Math.abs(raw) : norm(dense.data(raw))
+}
+
+/**
+ * Runs an update rule on one vector: evaluate at x₀, then x ← x + update(∇f(x)) and re-evaluate. Every quantity that
+ * carries x (the iterate, the value, the gradient, the update and the rule's slots) is computed with primitives; the
+ * flags and norms read primal values.
+ */
 function ruleAlgorithm(
   name: string,
   f: ObjectiveFn,
@@ -74,46 +129,48 @@ function ruleAlgorithm(
   return {
     name,
     init: ({ x0 }) => {
-      const x = toF64(x0, name)
-      const { value, grad } = evaluate(f, x, name)
-      const gradNorm = norm(grad)
-      const { slots } = rule.init(vec(x))
+      // A traced x₀ (unrolled, differentiating with respect to the start) stays traced; anything else is copied.
+      const x: Value = isTraced(x0) ? (x0 as unknown as Value) : vec(toF64(x0, name))
+      const n = sizeOf(x)
+      const { value, grad } = evaluateValue(f, x, n, name)
+      const gradNorm = primalNorm(grad)
+      const { slots } = rule.init(x as Tensor)
       return {
         t: 0,
-        x: vec(x),
-        value,
-        grad: vec(grad),
+        x: x as Vector,
+        value: value as Scalar,
+        grad: grad as Vector,
         gradNorm,
-        update: vec(new Float64Array(x.length)),
+        update: vec(new Float64Array(n)),
         stepSize: NaN,
         slots: slots as Record<string, Vector>,
         lineSearch: null,
         stalled: false,
         evaluations: 1,
         converged: gradNorm <= tolerance,
-        diverged: divergedAt(value, x, divergeAbove),
+        diverged: divergedAt(primal(value), dense.data(unwrap(x) as Tensor), divergeAbove),
       }
     },
     step: (s) => {
       const out = rule.update(s.grad, { t: s.t, slots: s.slots }, s.x)
-      const update = toF64(out.updates as Tensor, name)
-      const next = dense.axpy(1, update, data(s.x))
-      const { value, grad } = evaluate(f, next, name)
-      const gradNorm = norm(grad)
+      const update = out.updates as Value
+      const next = add(s.x, update)
+      const { value, grad } = evaluateValue(f, next, sizeOf(next), name)
+      const gradNorm = primalNorm(grad)
       return {
         t: s.t + 1,
-        x: vec(next),
-        value,
-        grad: vec(grad),
+        x: next as Vector,
+        value: value as Scalar,
+        grad: grad as Vector,
         gradNorm,
-        update: vec(update),
-        stepSize: stepSizeAt(stepSize, s.t),
+        update: update as Vector,
+        stepSize: primal(stepSizeAt(stepSize, s.t)),
         slots: out.state.slots as Record<string, Vector>,
         lineSearch: null,
         stalled: false,
         evaluations: s.evaluations + 1,
         converged: gradNorm <= tolerance,
-        diverged: divergedAt(value, next, divergeAbove),
+        diverged: divergedAt(primal(value), dense.data(unwrap(next) as Tensor), divergeAbove),
       }
     },
     done: (s) => s.stalled,
@@ -157,7 +214,7 @@ export function gradientDescent(
       const x = data(s.x)
       const g = data(s.grad)
       const p = dense.scale(-1, g)
-      const alpha0 = stepSizeAt(stepSize, s.t)
+      const alpha0 = primal(stepSizeAt(stepSize, s.t))
       const search =
         lineSearch === 'backtracking'
           ? backtrackingSearch(f, x, s.value, g, p, { ...options.lineSearchOptions, alpha0 })

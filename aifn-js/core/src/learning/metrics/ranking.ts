@@ -87,7 +87,16 @@ function countRelevant(g: Float64Array, k: number): number {
 }
 
 const rankingInfo = (key: string, name: string, note: string) =>
-  ({ key, name, inputs: 'ranking', direction: 'higher', range: [0, 1], notes: [note], capability: 'score' }) as const
+  ({
+    key,
+    name,
+    stability: 'stable',
+    inputs: 'ranking',
+    direction: 'higher',
+    range: [0, 1],
+    notes: [note],
+    capability: 'score',
+  }) as const
 
 /** Precision at k, (1/k) Σ_{i ≤ k} relᵢ; a list shorter than k counts the missing positions as not relevant. */
 export const precisionAtK = defineMetric(
@@ -189,10 +198,17 @@ export const meanReciprocalRank = defineMetric(
 /** The gain of a relevance grade: linear g, exponential 2^g − 1 (the default, as the contract fixes), or a function. */
 export type Gain = 'linear' | 'exponential' | ((grade: number) => number)
 
-function gainOf(g: Gain | undefined): (grade: number) => number {
+/**
+ * The gain function of a `Gain`: g ↦ g ('linear'), g ↦ 2^g − 1 ('exponential', the default), or the function given.
+ * DCG, nDCG and ranking losses that weight pairs by |Δ nDCG| (LambdaRank) share it.
+ */
+export function gainFunction(g: Gain | undefined): (grade: number) => number {
   if (typeof g === 'function') return g
   return g === 'linear' ? (x) => x : (x) => 2 ** x - 1
 }
+
+/** DCG's discount of a 0-based position (0 at the top): 1/log₂(position + 2). */
+export const positionDiscount = (position: number): number => 1 / Math.log2(position + 2)
 
 /** Options of DCG and nDCG. */
 export type DcgOptions = AtKOptions & {
@@ -208,7 +224,7 @@ function dcgOf({ grades, ties }: Query, k: number, gain: (g: number) => number):
   const n = Math.min(k, grades.length)
   let s = 0
   if (!ties) {
-    for (let i = 0; i < n; i++) s += gain(grades[i]) / Math.log2(i + 2)
+    for (let i = 0; i < n; i++) s += gain(grades[i]) * positionDiscount(i)
     return s
   }
   let start = 0
@@ -217,7 +233,7 @@ function dcgOf({ grades, ties }: Query, k: number, gain: (g: number) => number):
     let groupGain = 0
     while (end < grades.length && ties[end] === ties[start]) groupGain += gain(grades[end++])
     groupGain /= end - start
-    for (let i = start; i < Math.min(end, k); i++) s += groupGain / Math.log2(i + 2)
+    for (let i = start; i < Math.min(end, k); i++) s += groupGain * positionDiscount(i)
     start = end
   }
   return s
@@ -234,7 +250,7 @@ export const dcg = defineMetric(
   },
   (a: RankingInput, b?: RankingInput | DcgOptions, c?: DcgOptions): number => {
     const { queries, options } = parse(a, b, c)
-    const gain = gainOf(options.gain)
+    const gain = gainFunction(options.gain)
     return meanOverQueries(queries, (q) => dcgOf(q, options.k ?? Infinity, gain))
   },
 )
@@ -248,7 +264,7 @@ export const ndcg = defineMetric(
   rankingInfo('ndcg', 'Normalised DCG', 'normalised-discounted-cumulative-gain'),
   (a: RankingInput, b?: RankingInput | (DcgOptions & { ideal?: Data }), c?: DcgOptions & { ideal?: Data }): number => {
     const { queries, options } = parse(a, b, c)
-    const gain = gainOf(options.gain)
+    const gain = gainFunction(options.gain)
     const k = options.k ?? Infinity
     return meanOverQueries(
       queries,

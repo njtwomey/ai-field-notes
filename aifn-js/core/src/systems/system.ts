@@ -4,8 +4,8 @@
  * stability. Continuous systems act on s; discrete ones on z with sampling interval `dt`.
  *
  * Conventions (as scipy): a continuous transfer function lists b and a in descending powers of s; a discrete one in
- * ascending powers of z⁻¹, H(z) = (b₀ + b₁z⁻¹ + …)/(a₀ + a₁z⁻¹ + …). Zeros and poles are [k, 2] tensors of (re, im)
- * rows (see `complex`). Second-order sections are discrete only, [k, 6] rows b₀ b₁ b₂ a₀ a₁ a₂.
+ * ascending powers of z⁻¹, H(z) = (b₀ + b₁z⁻¹ + …)/(a₀ + a₁z⁻¹ + …). Zeros and poles are complex128 vectors.
+ * Second-order sections are discrete only, [k, 6] rows b₀ b₁ b₂ a₀ a₁ a₂.
  *
  * Sources: Kailath (1980), "Linear Systems", §2.1 (controllable canonical realisation); Oppenheim & Schafer (2010),
  * "Discrete-Time Signal Processing", 3rd ed., §5.3 and §6.3 (pole–zero form, cascades of second-order sections);
@@ -13,12 +13,18 @@
  */
 
 import { eig } from 'aifn/numerics/linalg'
-import { polynomialRoots } from 'aifn/numerics/polynomial'
-import { dense, fromData, toFlat, type Tensor } from 'aifn/foundation/tensor'
-import type { LtiSystem, MatrixLike, Representation, Scalar, Size, VectorLike } from 'aifn/foundation/contracts'
+import { complexVector, polyFromRoots, polyMul, roots, type ComplexLike } from 'aifn/numerics/polynomial'
+import { dense, fromData, toComplexFlat, toFlat, type Tensor } from 'aifn/foundation/tensor'
+import type {
+  ComplexNumber,
+  LtiSystem,
+  MatrixLike,
+  Representation,
+  Scalar,
+  Size,
+  VectorLike,
+} from 'aifn/foundation/contracts'
 import { DomainError, ShapeError } from 'aifn/foundation/errors'
-import * as complex from './complex'
-import type { Complex, ComplexLike } from './complex'
 
 // ── Types ────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
@@ -88,8 +94,8 @@ export function transferFunction(
 
 /**
  * A SISO system from its zeros, poles and gain, H = k Π(x − zᵢ)/Π(x − pⱼ) with x = s or z. Zeros and poles are
- * `ComplexLike` (real values, `{ re, im }` lists, or [k, 2] tensors); complex ones must come in conjugate pairs for the
- * system to be real.
+ * `ComplexLike` (real values, `{ re, im }` lists, or real or complex128 tensors), stored as complex128 vectors; complex
+ * ones must come in conjugate pairs for the system to be real.
  */
 export function zerosPolesGain(
   zeros: ComplexLike,
@@ -97,9 +103,9 @@ export function zerosPolesGain(
   gain: Scalar,
   options: SystemOptions = {},
 ): LtiOf<ZerosPolesGainForm> {
-  const z = complex.read(zeros, 'zerosPolesGain zeros')
-  const p = complex.read(poles, 'zerosPolesGain poles')
-  return make({ form: 'zpk', zeros: complex.toPairs(z), poles: complex.toPairs(p), gain }, options, 'zerosPolesGain')
+  const z = complexVector(zeros, 'zerosPolesGain zeros')
+  const p = complexVector(poles, 'zerosPolesGain poles')
+  return make({ form: 'zpk', zeros: z, poles: p, gain }, options, 'zerosPolesGain')
 }
 
 /** The arguments of `stateSpace`: `B` may be a vector (one input), `C` defaults to I (the state is the output). */
@@ -174,12 +180,9 @@ export function secondOrderSections(sections: MatrixLike, options: SystemOptions
 /** A SISO rational function num(x)/den(x), coefficients in descending powers of x (s, or z). */
 export type Rational = { num: number[]; den: number[] }
 
-/** The product of two polynomials (coefficient convolution). */
-export const polyMul = (a: readonly number[], b: readonly number[]) => {
-  const out = new Array(a.length + b.length - 1).fill(0)
-  a.forEach((x, i) => b.forEach((y, j) => (out[i + j] += x * y)))
-  return out
-}
+/** The product of two real coefficient lists (`aifn/numerics/polynomial`'s `polyMul`, as plain numbers). */
+export const mulCoefficients = (a: readonly number[], b: readonly number[]): number[] =>
+  toFlat(polyMul(Float64Array.from(a), Float64Array.from(b)) as Tensor)
 
 /** Discrete ascending z⁻¹ coefficients padded to equal length are descending powers of z. */
 function padEnd(b: number[], a: number[]): Rational {
@@ -196,12 +199,15 @@ export function toAscending({ num, den }: Rational): { b: number[]; a: number[] 
   return { b: [...new Array(d.length - n.length).fill(0), ...n], a: d }
 }
 
-function realPoly(roots: readonly Complex[], where: string): number[] {
-  const p = complex.polyFromRoots(roots)
-  const scale = Math.max(1, ...p.map((v) => Math.abs(v.re)))
-  if (p.some((v) => Math.abs(v.im) > 1e-9 * scale))
-    throw new DomainError(where, `${where}: complex zeros and poles must come in conjugate pairs`)
-  return p.map((v) => v.re)
+/** The real monic polynomial with the given roots (a complex128 vector, or a list); conjugate pairs required. */
+function realPoly(rs: Tensor | readonly ComplexNumber[], where: string): number[] {
+  try {
+    return toFlat(polyFromRoots(rs, { real: true }))
+  } catch (e) {
+    if (e instanceof DomainError)
+      throw new DomainError(where, `${where}: complex zeros and poles must come in conjugate pairs`)
+    throw e
+  }
 }
 
 /** Which input and output of a MIMO state-space system to take as SISO. */
@@ -216,16 +222,16 @@ export function rationalOf(sys: LtiSystem, { input = 0, output = 0 }: ChannelOpt
     return sys.domain === 'discrete' ? padEnd(b, a) : { num: b, den: a }
   }
   if (r.form === 'zpk') {
-    const num = realPoly(complex.read(r.zeros, 'zeros'), 'systems').map((v) => v * r.gain)
-    return { num, den: realPoly(complex.read(r.poles, 'poles'), 'systems') }
+    const num = realPoly(r.zeros, 'systems').map((v) => v * r.gain)
+    return { num, den: realPoly(r.poles, 'systems') }
   }
   if (r.form === 'sos') {
     const s = dense.data(r.sections)
     let num = [1]
     let den = [1]
     for (let k = 0; k < r.sections.shape[0]; k++) {
-      num = polyMul(num, Array.from(s.subarray(6 * k, 6 * k + 3)))
-      den = polyMul(den, Array.from(s.subarray(6 * k + 3, 6 * k + 6)))
+      num = mulCoefficients(num, Array.from(s.subarray(6 * k, 6 * k + 3)))
+      den = mulCoefficients(den, Array.from(s.subarray(6 * k + 3, 6 * k + 6)))
     }
     return { num, den }
   }
@@ -235,10 +241,7 @@ export function rationalOf(sys: LtiSystem, { input = 0, output = 0 }: ChannelOpt
 /** The characteristic polynomial det(xI − M) of a square matrix, from its eigenvalues. */
 function charPoly(m: dense.F64, n: Size): number[] {
   if (n === 0) return [1]
-  const e = eig(fromData(m, [n, n]), { vectors: false })
-  const re = toFlat(e.real)
-  const im = toFlat(e.imag)
-  return complex.polyFromRoots(re.map((v, k) => complex.of(v, im[k]))).map((v) => v.re)
+  return realPoly(eig(fromData(m, [n, n]), { vectors: false }).values, 'systems')
 }
 
 /**
@@ -291,12 +294,9 @@ export function toZerosPolesGain(sys: LtiSystem, channel: ChannelOptions = {}): 
   const { num, den } = rationalOf(sys, channel)
   const n = stripLeading(num)
   const d = stripLeading(den)
-  const roots = (c: number[]) => {
-    const r = polynomialRoots(c)
-    return complex.pairsOf(toFlat(r.real), toFlat(r.imag))
-  }
   const gain = n.length === 1 && n[0] === 0 ? 0 : n[0] / d[0]
-  return withRepr(sys, { form: 'zpk', zeros: gain === 0 ? complex.toPairs([]) : roots(n), poles: roots(d), gain })
+  const none = fromData(new Float64Array(0), [0], 'complex128')
+  return withRepr(sys, { form: 'zpk', zeros: gain === 0 ? none : roots(n), poles: roots(d), gain })
 }
 
 /**
@@ -330,15 +330,18 @@ export function toStateSpace(sys: LtiSystem): LtiOf<StateSpaceForm> {
   })
 }
 
-const conj = (z: Complex) => complex.of(z.re, -z.im)
-const isReal = (z: Complex, tol: number) => Math.abs(z.im) <= tol * Math.max(1, complex.abs(z))
+type Complex = ComplexNumber
+const conj = (z: Complex): Complex => ({ re: z.re, im: -z.im })
+const modulus = (z: Complex) => Math.hypot(z.re, z.im)
+const distance = (u: Complex, v: Complex) => Math.hypot(u.re - v.re, u.im - v.im)
+const isReal = (z: Complex, tol: number) => Math.abs(z.im) <= tol * Math.max(1, modulus(z))
 
 /** Splits roots into real ones and one representative (im > 0) of each conjugate pair. */
-function splitRoots(roots: Complex[], where: string): { real: Complex[]; pairs: Complex[] } {
+function splitRoots(rs: Complex[], where: string): { real: Complex[]; pairs: Complex[] } {
   const tol = 1e-9
-  const real = roots.filter((z) => isReal(z, tol)).map((z) => complex.of(z.re))
-  const upper = roots.filter((z) => !isReal(z, tol) && z.im > 0)
-  const lower = roots.filter((z) => !isReal(z, tol) && z.im < 0)
+  const real = rs.filter((z) => isReal(z, tol)).map((z) => ({ re: z.re, im: 0 }))
+  const upper = rs.filter((z) => !isReal(z, tol) && z.im > 0)
+  const lower = rs.filter((z) => !isReal(z, tol) && z.im < 0)
   if (upper.length !== lower.length)
     throw new DomainError(where, `${where}: complex zeros and poles must come in conjugate pairs`)
   return { real, pairs: upper }
@@ -355,8 +358,8 @@ export function toSecondOrderSections(sys: LtiSystem): LtiOf<SecondOrderSections
   if (sys.domain !== 'discrete') throw new DomainError(where, `${where}: second-order sections are discrete-time only`)
   if (sys.repr.form === 'sos') return sys as LtiOf<SecondOrderSectionsForm>
   const zpk = toZerosPolesGain(sys).repr
-  const zeros = complex.read(zpk.zeros, where)
-  const poles = complex.read(zpk.poles, where)
+  const zeros = toComplexFlat(zpk.zeros)
+  const poles = toComplexFlat(zpk.poles)
   if (zeros.length > poles.length) throw new DomainError(where, `${where}: more zeros than poles (not causal)`)
   const zs = splitRoots(zeros, where)
   const ps = splitRoots(poles, where)
@@ -365,8 +368,8 @@ export function toSecondOrderSections(sys: LtiSystem): LtiOf<SecondOrderSections
   const reals = [...ps.real].sort((u, v) => u.re - v.re)
   for (let k = 0; k < reals.length; k += 2) groups.push(reals.slice(k, k + 2))
   // Process the group nearest the unit circle first (it becomes the last section).
-  const distance = (g: Complex[]) => Math.min(...g.map((p) => Math.abs(1 - complex.abs(p))))
-  groups.sort((u, v) => distance(u) - distance(v))
+  const toCircle = (g: Complex[]) => Math.min(...g.map((p) => Math.abs(1 - modulus(p))))
+  groups.sort((u, v) => toCircle(u) - toCircle(v))
   let realZeros = [...zs.real]
   let pairZeros = [...zs.pairs]
   const sections: number[][] = []
@@ -376,16 +379,14 @@ export function toSecondOrderSections(sys: LtiSystem): LtiOf<SecondOrderSections
     const nearestPair = () => {
       let best = -1
       pairZeros.forEach((z, k) => {
-        if (best < 0 || complex.abs(complex.sub(z, target)) < complex.abs(complex.sub(pairZeros[best], target)))
-          best = k
+        if (best < 0 || distance(z, target) < distance(pairZeros[best], target)) best = k
       })
       return best
     }
     const nearestReal = () => {
       let best = -1
       realZeros.forEach((z, k) => {
-        if (best < 0 || complex.abs(complex.sub(z, target)) < complex.abs(complex.sub(realZeros[best], target)))
-          best = k
+        if (best < 0 || distance(z, target) < distance(realZeros[best], target)) best = k
       })
       return best
     }
@@ -427,25 +428,25 @@ export function convert(sys: LtiSystem, form: Representation['form']): LtiSystem
 
 // ── Poles, zeros, stability ──────────────────────────────────────────────────────────────────────────────────────────
 
-/** The poles of a system as a [k, 2] complex tensor: eigenvalues of A (ss), or roots of the denominator. */
+/** The poles of a system as a complex128 vector: eigenvalues of A (ss), or roots of the denominator. */
 export function poles(sys: LtiSystem): Tensor {
   const r = sys.repr
   if (r.form === 'zpk') return r.poles
-  if (r.form === 'ss') {
-    const e = eig(r.A, { vectors: false })
-    return complex.pairsOf(toFlat(e.real), toFlat(e.imag))
-  }
+  if (r.form === 'ss') return eig(r.A, { vectors: false }).values
   return toZerosPolesGain(sys).repr.poles
 }
 
-/** The zeros of a SISO system (named apart from the tensor constructor `zeros`) (or of a channel of a MIMO state-space system) as a [k, 2] complex tensor. */
+/**
+ * The zeros of a SISO system (or of a channel of a MIMO state-space system) as a complex128 vector; named apart from
+ * the tensor constructor `zeros`.
+ */
 export function systemZeros(sys: LtiSystem, channel: ChannelOptions = {}): Tensor {
   return toZerosPolesGain(sys, channel).repr.zeros
 }
 
 /** The stability verdict of a system or of a bare state matrix. */
 export type Stability = {
-  /** The poles, [k, 2] (re, im) rows. */
+  /** The poles, complex128 [k]. */
   poles: Tensor
   /**
    * Continuous: every Re λ < 0. Discrete: every |λ| < 1. Poles within 1e-12 of the boundary count as not stable
@@ -464,13 +465,10 @@ export function stability(sys: LtiSystem | MatrixLike, { discrete }: { discrete?
   const isSystem = (sys as { kind?: unknown }).kind === 'lti'
   let p: Tensor
   if (isSystem) p = poles(sys as LtiSystem)
-  else {
-    const e = eig(sys as MatrixLike, { vectors: false })
-    p = complex.pairsOf(toFlat(e.real), toFlat(e.imag))
-  }
+  else p = eig(sys as MatrixLike, { vectors: false }).values
   const disc = discrete ?? (isSystem ? (sys as LtiSystem).domain === 'discrete' : false)
-  const xs = complex.read(p, 'stability')
-  const abscissa = xs.length ? Math.max(...xs.map((z) => (disc ? complex.abs(z) : z.re))) : disc ? 0 : -Infinity
+  const xs = toComplexFlat(p)
+  const abscissa = xs.length ? Math.max(...xs.map((z) => (disc ? modulus(z) : z.re))) : disc ? 0 : -Infinity
   return { poles: p, stable: abscissa < (disc ? 1 : 0) - 1e-12, abscissa }
 }
 

@@ -2,10 +2,10 @@ import * as Channels from 'aifn-applied/information/channels'
 import { binaryEntropy } from 'aifn/numerics/special'
 import { toFlat } from 'aifn/foundation/tensor'
 import { trace } from 'aifn/foundation/trace'
-import { useMemo, useState } from 'react'
-import { Select, Slider } from '@lab/controls'
+import { useMemo } from 'react'
 import { Figure } from '@lab/layout'
-import { ChartSize, Readout, XYChart, type XYSeries } from '@lab/viz'
+import { choice, row, slider, useFigureState } from '@lab/state'
+import { Bars, Curve, Plot, Plots, Points, Readout, useAxis } from '@lab/viz'
 import { formatValue } from '@lab/views'
 
 const h2 = (p: number) => binaryEntropy(p, 2)
@@ -59,8 +59,24 @@ function channelOf(name: ChannelName, e: number): { W: number[][]; exact?: numbe
 }
 
 export function CapacitySpecimen() {
-  const [name, setName] = useState<ChannelName>('Z channel')
-  const [e, setE] = useState(0.3)
+  const state = useFigureState({
+    channel: row('channel', {
+      name: choice(
+        [
+          'binary symmetric',
+          'binary erasure',
+          'Z channel',
+          'noisy typewriter (5)',
+          'asymmetric 3 × 3',
+        ] as ChannelName[],
+        'Z channel',
+        { label: 'channel' },
+      ),
+      e: slider(0, 0.99, 0.3, { label: 'noise e' }),
+    }),
+  })
+  const name = state.channel.name as ChannelName
+  const { e } = state.channel
   const { W, exact } = useMemo(() => channelOf(name, e), [name, e])
   const run = useMemo(
     () =>
@@ -74,35 +90,26 @@ export function CapacitySpecimen() {
     [W],
   )
   const last = run.steps[run.steps.length - 1]
-  const series = useMemo((): XYSeries[] => {
-    const x = run.index
-    return [
-      { name: 'upper bound maxₓ D(W‖q)', type: 'line', x, y: toFlat(run.series.upper), slot: 0 },
-      { name: 'lower bound log Σ p e^D', type: 'line', x, y: toFlat(run.series.lower), slot: 1 },
-      { name: 'I(p; W)', type: 'line', x, y: toFlat(run.series.information), slot: 2, dashed: true },
-    ]
-  }, [run])
-  const input = useMemo(
-    (): XYSeries[] => [
-      { name: 'capacity-achieving p(x)', type: 'bar', x: W.map((_, i) => i), y: toFlat(last.input), slot: 0 },
-    ],
-    [W, last],
+  const bounds = useMemo(
+    () => ({
+      x: Array.from(run.index),
+      upper: toFlat(run.series.upper),
+      lower: toFlat(run.series.lower),
+      information: toFlat(run.series.information),
+    }),
+    [run],
   )
+  const input = useMemo(() => ({ x: W.map((_, i) => i), y: toFlat(last.input) }), [W, last])
+  const it = useAxis({ label: 'iteration', hold: 'union' })
+  const bits = useAxis({ label: 'bits', hold: 'union', key: name })
+  const sym = useAxis({ label: 'input symbol x', categories: W.map((_, i) => String(i)) })
+  const px = useAxis({ label: 'p(x)', range: [0, 1] })
   return (
     <Figure
+      purpose="Blahut–Arimoto finds a channel's capacity by alternating between the input distribution and the output it induces; an upper and a lower bound squeeze the capacity from both sides."
       title="Blahut–Arimoto: channel capacity"
+      state={state}
       defaultSize="L"
-      controls={
-        <>
-          <Select
-            label="channel"
-            value={name}
-            onChange={setName}
-            options={['binary symmetric', 'binary erasure', 'Z channel', 'noisy typewriter (5)', 'asymmetric 3 × 3']}
-          />
-          <Slider label="noise e" value={e} min={0} max={0.99} onChange={setE} />
-        </>
-      }
       readouts={
         <>
           <Readout label="capacity (bits)" value={formatValue(last.lower / Math.LN2)} />
@@ -111,16 +118,18 @@ export function CapacitySpecimen() {
           <Readout label="stopped" value={run.meta.stopped} />
         </>
       }
-      caption="Each step reweights the input by exp D(W(·|x) ‖ q); the bounds squeeze the capacity from both sides and the run stops when they meet within 10⁻¹² nats."
+      caption="Top: the bounds per iteration; bottom: the capacity-achieving input distribution. Each step reweights the input by exp D(W(·|x) ‖ q); the bounds squeeze the capacity from both sides and the run stops when they meet within 10⁻¹² nats."
     >
-      <div className="flex flex-col gap-4">
-        <ChartSize scale={0.6}>
-          <XYChart series={series} xLabel="iteration" yLabel="bits" integerX rescaleOnChange={false} holdFit="union" />
-        </ChartSize>
-        <ChartSize scale={0.4}>
-          <XYChart series={input} xLabel="input symbol x" yLabel="p(x)" integerX yRange={[0, 1]} />
-        </ChartSize>
-      </div>
+      <Plots rows={2} heights={[3, 2]}>
+        <Plot x={it} y={bits}>
+          <Curve name="upper bound maxₓ D(W‖q)" x={bounds.x} y={bounds.upper} slot={0} />
+          <Curve name="lower bound log Σ p e^D" x={bounds.x} y={bounds.lower} slot={1} />
+          <Curve name="I(p; W)" x={bounds.x} y={bounds.information} slot={2} dashed />
+        </Plot>
+        <Plot x={sym} y={px} legend={false}>
+          <Bars name="capacity-achieving p(x)" x={input.x} y={input.y} slot={0} width={0.6} />
+        </Plot>
+      </Plots>
     </Figure>
   )
 }
@@ -128,7 +137,8 @@ export function CapacitySpecimen() {
 // ── Rate–distortion ──────────────────────────────────────────────────────────────────────────────────────────────────
 
 export function RateDistortionSpecimen() {
-  const [p, setP] = useState(0.3)
+  const state = useFigureState({ p: slider(0.01, 0.5, 0.3, { label: 'source p(1)' }) })
+  const { p } = state
   const curve = useMemo(() => {
     const betas = Array.from({ length: 60 }, (_, i) => 0.05 * 1.12 ** i)
     return Channels.rateDistortionCurve(
@@ -141,17 +151,18 @@ export function RateDistortionSpecimen() {
       { base: 2 },
     )
   }, [p])
-  const series = useMemo((): XYSeries[] => {
+  const closed = useMemo(() => {
     const ds = Array.from({ length: 200 }, (_, i) => (Math.min(p, 1 - p) * i) / 199)
-    return [
-      { name: 'Blahut–Arimoto points', type: 'scatter', x: toFlat(curve.distortion), y: toFlat(curve.rate), slot: 0 },
-      { name: 'H(p) − H(D)', type: 'line', x: ds, y: ds.map((d) => h2(p) - h2(d)), slot: 1, dashed: true },
-    ]
-  }, [curve, p])
+    return { x: ds, y: ds.map((d) => h2(p) - h2(d)) }
+  }, [p])
+  const points = useMemo(() => ({ x: toFlat(curve.distortion), y: toFlat(curve.rate) }), [curve])
+  const da = useAxis({ label: 'distortion D', hold: 'union' })
+  const ra = useAxis({ label: 'rate R (bits)', range: [0, undefined], hold: 'union' })
   return (
     <Figure
+      purpose="Allowing a fraction D of bits to be wrong lowers the rate needed to describe a binary source from H(p) to H(p) − H(D); Blahut–Arimoto traces the curve point by point."
       title="Rate–distortion of a binary source under Hamming distortion"
-      controls={<Slider label="source p(1)" value={p} min={0.01} max={0.5} onChange={setP} />}
+      state={state}
       readouts={
         <>
           <Readout label="R(0) = H(p) (bits)" value={formatValue(h2(p))} />
@@ -160,14 +171,10 @@ export function RateDistortionSpecimen() {
       }
       caption="Each point is one Blahut–Arimoto run at slope −β; together they trace R(D) = H(p) − H(D) for D ≤ min(p, 1 − p)."
     >
-      <XYChart
-        series={series}
-        xLabel="distortion D"
-        yLabel="rate R (bits)"
-        yRange={[0, undefined]}
-        rescaleOnChange={false}
-        holdFit="union"
-      />
+      <Plot x={da} y={ra}>
+        <Points name="Blahut–Arimoto points" x={points.x} y={points.y} slot={0} />
+        <Curve name="H(p) − H(D)" x={closed.x} y={closed.y} slot={1} dashed />
+      </Plot>
     </Figure>
   )
 }

@@ -32,6 +32,7 @@ export {
   type CentralPath,
   type InteriorPointOptions,
   type InteriorPointState,
+  type InteriorPointStatus,
 } from './interior'
 export { linprog } from './linprog'
 export {
@@ -85,3 +86,4 @@ export {
   type HungarianPhase,
   type HungarianState,
 } from './assignment'
+export { programmingAlgorithms } from './registry'

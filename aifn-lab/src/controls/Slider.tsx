@@ -1,9 +1,10 @@
 import { ChevronLeft, ChevronRight } from 'lucide-react'
-import { useId, useRef, useState, type ReactNode } from 'react'
+import { useId, type ReactNode } from 'react'
 import { Button } from '@lab/ui/button'
 import { Slider as SliderPrimitive } from '@lab/ui/slider'
 import { cn } from '@lab/lib/utils'
-import { formatNumber, niceStep, snapToStep } from '@lab/viz'
+import { niceStep } from '@lab/viz'
+import { formatField, snapToStep } from '@lab/state/step'
 import { ControlLabel } from './ControlLabel'
 import type { Param } from './param'
 import { useNumberDraft } from './useNumberDraft'
@@ -16,8 +17,6 @@ type Common = {
   steppable?: boolean
   /** @deprecated The site's name for `steppable`; accepted so migrated code keeps working. */
   withArrows?: boolean
-  /** Delay (ms) before a drag reaches `onChange`; the thumb moves at once and release always commits. Default 0. */
-  debounceMs?: number
   disabled?: boolean
   className?: string
 }
@@ -42,7 +41,7 @@ export type SliderProps = Common &
  * × 10 with Shift). Bind it to a `useParam` with `param`, or pass value, onChange, min, max and optionally step.
  */
 export function Slider(props: SliderProps) {
-  const { label, format = formatNumber, debounceMs = 0, disabled, className } = props
+  const { label, format = formatField, disabled, className } = props
   const steppable = props.steppable ?? props.withArrows ?? true
   const value = props.param ? props.param.value : props.value
   const onChange = props.param ? props.param.set : props.onChange
@@ -56,9 +55,6 @@ export function Slider(props: SliderProps) {
     if (next !== value) onChange(next)
   }
   const field = useNumberDraft({ value, onCommit: set, step, format })
-  // While a debounced drag is in progress the thumb follows `dragging`; onChange fires after the pause or on release.
-  const [dragging, setDragging] = useState<number | null>(null)
-  const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   const first = (v: number | readonly number[]) => (Array.isArray(v) ? v[0] : (v as number))
 
   const track = (
@@ -67,23 +63,15 @@ export function Slider(props: SliderProps) {
       // An array, not a number: the shadcn wrapper renders one thumb per entry and, given a plain number, falls back to
       // [min, max], drawing a second, phantom thumb. Base UI then resolves a track press to the phantom thumb's index,
       // which has no value, and ignores the click.
-      value={[dragging ?? value]}
+      value={[value]}
       min={min}
       max={max}
       step={step}
       disabled={disabled}
-      onValueChange={(v) => {
-        const n = first(v)
-        if (debounceMs <= 0) return set(n)
-        setDragging(n)
-        clearTimeout(timer.current)
-        timer.current = setTimeout(() => set(n), debounceMs)
-      }}
-      onValueCommitted={(v) => {
-        clearTimeout(timer.current)
-        setDragging(null)
-        set(first(v))
-      }}
+      // Every move reaches `onChange` at once; expensive work derived from the value is paced by `useComputed`
+      // (DESIGN.md §8a), not by the slider.
+      onValueChange={(v) => set(first(v))}
+      onValueCommitted={(v) => set(first(v))}
     />
   )
   return (

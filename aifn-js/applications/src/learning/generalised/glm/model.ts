@@ -24,14 +24,10 @@ import { findRoot } from 'aifn/numerics/roots'
 import { digamma, normalCdf, studentTCdf } from 'aifn/numerics/special'
 import { fromData, toFlat, type Tensor } from 'aifn/foundation/tensor'
 import { run, trace, type Algorithm, type Trace } from 'aifn/foundation/trace'
-import {
-  link as linkByName,
-  negativeBinomialFamily,
-  type Family,
-  type Link,
-  type LinkName,
-} from 'aifn/probability/likelihoods'
+import { checkLink, negativeBinomialFamily, type Family, type Link, type LinkName } from 'aifn/probability/likelihoods'
 import { irls, type IrlsState } from '../irls'
+import { defineModel } from 'aifn/learning/estimators'
+import { bool, int, real, space } from 'aifn/foundation/space'
 
 /** Data for a GLM fit: inputs x [n, d], responses y [n], optional prior weights and offset [n]. */
 export type GlmData = {
@@ -134,7 +130,7 @@ function designOf(x: Tensor, intercept: boolean): { X: Float64Array; n: number; 
  */
 export function glm(params: GlmParams): Estimator<GlmData, GlmModel> {
   const { family, intercept = true, l2 = 0, tolerance = 1e-8, maxSteps = 50 } = params
-  const link = typeof params.link === 'object' ? params.link : linkByName(params.link ?? family.defaultLink)
+  const link = checkLink(family, params.link, 'glm')
   return {
     name: `glm-${family.name}-${link.name}`,
     params,
@@ -301,8 +297,12 @@ export type NegativeBinomialState = Status & {
   t: number
   /** The θ the current GLM was fitted with. */
   theta: number
-  /** The GLM at θ. */
-  model: GlmModel
+  /** The GLM's coefficients at θ. */
+  coefficients: Tensor
+  /** Its fitted means μ. */
+  fitted: Tensor
+  /** Its deviance. */
+  deviance: number
   /** |log(θ_new / θ)| of the last alternation (Infinity at the start). */
   change: number
   converged: boolean
@@ -342,19 +342,21 @@ export function negativeBinomialAlternation(
   options?: FitOptions,
 ): Algorithm<void, NegativeBinomialState> {
   const fitAt = (theta: number) => glm({ ...params, family: negativeBinomialFamily(theta) }).fit(data, options)
+  // States are plain data: they keep the GLM's coefficients, means and deviance, not the model.
+  const summary = (m: GlmModel) => ({ coefficients: m.coefficients, fitted: m.fitted, deviance: m.deviance })
   return {
     name: 'negative-binomial-alternation',
     init: () => {
       const theta = params.theta ?? 1
-      return { t: 0, theta, model: fitAt(theta), change: Infinity, converged: false }
+      return { t: 0, theta, ...summary(fitAt(theta)), change: Infinity, converged: false }
     },
     step: (s) => {
-      const next = thetaMaximumLikelihood(data.y, s.model.fitted, data.weights).theta
+      const next = thetaMaximumLikelihood(data.y, s.fitted, data.weights).theta
       const change = Math.abs(Math.log(next / s.theta))
       return {
         t: s.t + 1,
         theta: next,
-        model: fitAt(next),
+        ...summary(fitAt(next)),
         change,
         converged: change < 1e-8,
         diverged: !Number.isFinite(next),
@@ -377,9 +379,51 @@ export function negativeBinomialRegression(
     params,
     fit(data, options) {
       const alternation = trace(negativeBinomialAlternation(data, rest, options), undefined, maxAlternations, {
-        record: { theta: (s) => s.theta, deviance: (s) => s.model.deviance },
+        record: { theta: (s) => s.theta, deviance: (s) => s.deviance },
       })
-      return { ...alternation.final.model, alternation }
+      const final = glm({ ...rest, family: negativeBinomialFamily(alternation.final.theta) }).fit(data, options)
+      return { ...final, alternation }
     },
   }
 }
+
+// ── Registry ─────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+defineModel(
+  {
+    key: 'glm',
+    module: 'learning/generalised/glm',
+    name: 'Generalised linear model',
+    summary:
+      'An exponential-family response with a link, fitted by iteratively reweighted least squares; the family is a required argument.',
+    task: 'regression',
+    capabilities: ['forward', 'decide', 'predictive', 'expect', 'sample'],
+    hyper: space({
+      intercept: bool({ default: true }),
+      l2: real(0, 100, { default: 0, label: 'L2 penalty' }),
+      tolerance: real(1e-14, 1e-2, { default: 1e-8, scale: 'log' }),
+      maxSteps: int(1, 500, { default: 50 }),
+    }),
+    notes: ['generalised-linear-model', 'poisson-regression', 'gamma-and-tweedie-regression'],
+    cite: ['nelder1972'],
+  },
+  glm,
+)
+
+defineModel(
+  {
+    key: 'negativeBinomialRegression',
+    module: 'learning/generalised/glm',
+    name: 'Negative binomial regression',
+    summary: 'A log-linear count model with an estimated overdispersion θ, alternating IRLS and a θ update.',
+    task: 'regression',
+    capabilities: ['forward', 'decide', 'predictive', 'expect', 'sample'],
+    hyper: space({
+      intercept: bool({ default: true }),
+      l2: real(0, 100, { default: 0, label: 'L2 penalty' }),
+      maxAlternations: int(1, 200, { default: 25 }),
+    }),
+    notes: ['negative-binomial-and-overdispersion'],
+  },
+  negativeBinomialRegression,
+)

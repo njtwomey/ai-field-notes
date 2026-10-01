@@ -7,8 +7,10 @@
 import { logisticRegression, type LogisticRegressionModel } from './logistic'
 import { type Estimator, type Supervised } from 'aifn/learning/estimators'
 import { pinv } from 'aifn/numerics/linalg'
-import { normalCdf } from 'aifn/numerics/special'
+import { normalCdf, softmax } from 'aifn/numerics/special'
 import { fromData, toFlat, type Tensor } from 'aifn/foundation/tensor'
+import { defineModel } from 'aifn/learning/estimators'
+import { bool, int, real, space } from 'aifn/foundation/space'
 
 /** Hyperparameters of `multinomialLogisticRegression`. */
 export type MultinomialParams = {
@@ -71,10 +73,7 @@ export function multinomialLogisticRegression(
         for (let j = 0; j < d; j++) row[j] = X[i * d + j]
         if (intercept) row[d] = 1
         const eta = toFlat(model.forward(fromData(Float64Array.from(row.subarray(0, d)), [1, d])))
-        const m = Math.max(...eta)
-        const e = eta.map((v) => Math.exp(v - m))
-        const z = e.reduce((a, b) => a + b, 0)
-        const pi = e.map((v) => v / z)
+        const pi = toFlat(softmax(fromData(Float64Array.from(eta), [eta.length])))
         for (let a = 0; a < p; a++)
           for (let k = 0; k < K; k++)
             for (let b = 0; b < p; b++)
@@ -115,3 +114,24 @@ export function multinomialLogisticRegression(
     },
   }
 }
+
+// ── Registry ─────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+defineModel(
+  {
+    key: 'multinomialLogisticRegression',
+    module: 'learning/generalised/glm',
+    name: 'Multinomial logistic regression',
+    summary: 'Softmax regression with a reference class and Wald standard errors.',
+    task: 'classification',
+    capabilities: ['forward', 'decide', 'predictive', 'expect', 'score', 'sample'],
+    hyper: space({
+      l2: real(0, 100, { default: 0, label: 'L2 penalty' }),
+      intercept: bool({ default: true }),
+      reference: int(0, 20, { default: 0 }),
+    }),
+    notes: ['multinomial-logistic-regression'],
+    cite: ['hastie2009'],
+  },
+  multinomialLogisticRegression,
+)

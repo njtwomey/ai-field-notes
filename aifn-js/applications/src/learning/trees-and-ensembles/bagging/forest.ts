@@ -17,6 +17,8 @@ import { fromData, type Tensor } from 'aifn/foundation/tensor'
 import { trace, type Algorithm } from 'aifn/foundation/trace'
 import { featureImportances, growTree, predictTree, type DecisionTree, type TreeParams } from '../tree'
 import { classLabels, classPredictive, inputs, matrix, probabilityModel, values } from '../../util'
+import { defineModel } from 'aifn/learning/estimators'
+import { bool, int, space } from 'aifn/foundation/space'
 
 /** The problem a forest grows on: inputs [n, d], labels 0 … K−1, and the tree and bagging settings. */
 export interface ForestProblem {
@@ -100,7 +102,8 @@ export interface RandomForestModel
  * A random forest (Breiman, 2001): `trees` CART trees (default 100), each grown on a bootstrap sample (as integer
  * sample weights) searching a random subset of `maxFeatures` features (default `sqrt`) at every node. The predictive
  * averages the trees' leaf class shares. The growth (`forestGrowth`, one tree per step) is kept in `training`. If a
- * node's feature subset has no valid split, the node becomes a leaf (scikit-learn draws further features instead).
+ * node's feature subset has no valid split, further features are drawn until one has (as scikit-learn), so a node is a
+ * leaf for want of a split only when no feature splits it.
  */
 export function randomForest(
   params: TreeParams & { trees?: number; bootstrap?: boolean } = {},
@@ -185,3 +188,25 @@ export function randomForest(
     },
   }
 }
+
+// ── Registry ─────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+defineModel(
+  {
+    key: 'randomForest',
+    module: 'learning/trees-and-ensembles/bagging',
+    name: 'Random forest',
+    summary: 'Bagged classification trees with random feature subsets at each split.',
+    task: 'classification',
+    capabilities: ['forward', 'decide', 'predictive', 'score'],
+    hyper: space({
+      trees: int(1, 500, { default: 100 }),
+      bootstrap: bool({ default: true }),
+      maxDepth: int(1, 32, { default: 32, doc: 'The factory default is unlimited.' }),
+      minSamplesLeaf: int(1, 100, { default: 1 }),
+    }),
+    notes: ['random-forest'],
+    cite: ['breiman2001'],
+  },
+  randomForest,
+)

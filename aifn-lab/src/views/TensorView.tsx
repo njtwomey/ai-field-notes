@@ -1,11 +1,11 @@
 import { useMemo, useState } from 'react'
-import { isContiguous, size, slice, toFlat, toRows, type Tensor } from 'aifn/foundation/tensor'
+import { isContiguous, isTensor, size, slice, toFlat, toRows, type Tensor } from 'aifn/foundation/tensor'
 import { Select, Slider } from '@lab/controls'
-import { Figure } from '@lab/layout'
+import { PanelSlot } from '@lab/layout'
 import { Table, TableBody, TableCell, TableRow } from '@lab/ui/table'
-import { Heatmap, XYChart } from '@lab/viz'
+import { Bars, Curve, formatNumber, Plot, Raster, useAxis } from '@lab/viz'
 import { formatValue } from './format'
-import type { FrameProps } from './frame'
+import { registerKind, registerView } from './registry'
 
 export type TensorMode = 'chart' | 'table'
 
@@ -37,17 +37,27 @@ function MatrixHeatmap({ rows }: { rows: number[][] }) {
       signed,
     }
   }, [rows])
+  const xAxis = useAxis({ label: 'column' })
+  // Rows run down the page: the axis shows the row index, the negated y.
+  const yAxis = useAxis({ label: 'row', format: flipped })
   return (
-    <Heatmap
-      x={x}
-      y={y}
-      z={z}
-      range={range}
-      scale={signed ? 'diverging' : 'sequential'}
-      xLabel="column"
-      yLabel="−row"
-      valueLabel="value"
-    />
+    <Plot x={xAxis} y={yAxis}>
+      <Raster x={x} y={y} z={z} range={range} scale={signed ? 'diverging' : 'sequential'} valueLabel="value" />
+    </Plot>
+  )
+}
+
+const flipped = (v: number) => formatNumber(v === 0 ? 0 : -v)
+
+/** A vector against its index: bars for up to 32 values, else a line. */
+function VectorChart({ values, name }: { values: number[]; name: string }) {
+  const xs = useMemo(() => values.map((_, i) => i), [values])
+  const xAxis = useAxis({ label: 'index' })
+  const yAxis = useAxis({ label: 'value' })
+  return (
+    <Plot x={xAxis} y={yAxis} legend={false}>
+      {values.length <= 32 ? <Bars name={name} x={xs} y={values} /> : <Curve name={name} x={xs} y={values} />}
+    </Plot>
   )
 }
 
@@ -123,7 +133,6 @@ export function TensorPanel({ tensor, name, mode = 'chart' }: TensorPanelProps) 
     return toRows(slice(tensor, ...specs))
   }, [tensor, rank, index])
   const values = rows[0]
-  const xs = useMemo(() => values.map((_, i) => i), [values])
 
   return (
     <div className="flex min-w-0 flex-col gap-2">
@@ -144,12 +153,7 @@ export function TensorPanel({ tensor, name, mode = 'chart' }: TensorPanelProps) 
       ) : mode === 'table' ? (
         <ValueTable rows={rows} />
       ) : rank === 1 ? (
-        <XYChart
-          xLabel="index"
-          yLabel="value"
-          integerX
-          series={[{ name: name ?? 'value', type: values.length <= 32 ? 'bar' : 'line', x: xs, y: values }]}
-        />
+        <VectorChart values={values} name={name ?? 'value'} />
       ) : (
         <MatrixHeatmap rows={rows} />
       )}
@@ -157,28 +161,33 @@ export function TensorPanel({ tensor, name, mode = 'chart' }: TensorPanelProps) 
   )
 }
 
-export type TensorViewProps = FrameProps & {
+export type TensorModePanelProps = {
   tensor: Tensor
   /** Start with the table instead of the chart. */
   initialMode?: TensorMode
 }
 
-/** A generic view of any tensor as a whole figure: a `TensorPanel` with a chart / table choice in the controls. */
-export function TensorView({ tensor, title = 'tensor', initialMode = 'chart', controls, ...frame }: TensorViewProps) {
+/** A `TensorPanel` with its chart / table choice among the enclosing figure's controls. */
+export function TensorModePanel({ tensor, initialMode = 'chart' }: TensorModePanelProps) {
   const [mode, setMode] = useState<TensorMode>(initialMode)
   const rank = tensor.shape.length
   return (
-    <Figure
-      title={title}
-      {...frame}
-      controls={
-        <>
-          {controls}
-          {rank > 0 && <Select label="view" value={mode} onChange={setMode} options={TENSOR_MODES(rank)} />}
-        </>
-      }
-    >
+    <>
+      {rank > 0 && (
+        <PanelSlot slot="controls">
+          <Select label="view" value={mode} onChange={setMode} options={TENSOR_MODES(rank)} />
+        </PanelSlot>
+      )}
       <TensorPanel tensor={tensor} mode={mode} />
-    </Figure>
+    </>
   )
 }
+
+registerKind('tensor', isTensor)
+registerView<Tensor>({
+  key: 'tensor/values',
+  kind: 'tensor',
+  description: 'A tensor as a plot (rank 1), a heatmap (rank 2, leading axes on a slider) or a table of values.',
+  title: (t) => `tensor [${t.shape.join(', ')}]`,
+  render: (t) => <TensorModePanel tensor={t} />,
+})

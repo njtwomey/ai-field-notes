@@ -4,11 +4,12 @@
  * score, k-NN precision and recall, density and coverage, and CLIPScore.
  */
 
-import { eigh } from 'aifn/numerics/linalg'
+import { eigh, pairwiseDistances } from 'aifn/numerics/linalg'
 import type { Stream } from 'aifn/foundation/random'
 import { defineMetric, type Rows } from 'aifn/learning/metrics'
 import { denseMatrix as dense, divide, matrix, type Dense } from 'aifn/learning/metrics'
 import { child, integers } from 'aifn/foundation/random'
+import { fromData, toFlat } from 'aifn/foundation/tensor'
 
 /** Column means and the sample covariance (divisor n − 1, as `numpy.cov`) of the rows of X. */
 function moments(X: Dense): { mean: Float64Array; cov: Float64Array } {
@@ -237,17 +238,10 @@ export const inceptionScore = defineMetric(
   (probabilities: Rows): number => inceptionScoreSplits(probabilities).mean,
 )
 
-/** Distance from each row of A to each row of B (Euclidean). */
+/** Euclidean distance from each row of A to each row of B (linalg's `pairwiseDistances`), row-major [A.rows, B.rows]. */
 function distances(A: Dense, B: Dense): Float64Array {
-  const d = A.cols
-  const out = new Float64Array(A.rows * B.rows)
-  for (let i = 0; i < A.rows; i++)
-    for (let j = 0; j < B.rows; j++) {
-      let s = 0
-      for (let c = 0; c < d; c++) s += (A.data[i * d + c] - B.data[j * d + c]) ** 2
-      out[i * B.rows + j] = Math.sqrt(s)
-    }
-  return out
+  const D = pairwiseDistances(fromData(A.data, [A.rows, A.cols]), fromData(B.data, [B.rows, B.cols]))
+  return Float64Array.from(toFlat(D))
 }
 
 /** Each row's distance to its k-th nearest neighbour within its own set (itself excluded). */

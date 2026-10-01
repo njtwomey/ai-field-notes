@@ -10,13 +10,7 @@
  * - Simplex: `simplexVertices`, `barycentricToCartesian`, `cartesianToBarycentric`, `simplexGrid`.
  */
 
-export {
-  covarianceEllipse,
-  massToRadius,
-  precisionEllipse,
-  type Ellipse,
-  type EllipseOptions,
-} from './ellipse'
+export { covarianceEllipse, massToRadius, precisionEllipse, type Ellipse, type EllipseOptions } from './ellipse'
 export { convexHull, pointInPolygon, polygonArea, polygonCentroid, type Hull } from './planar'
 export { contourLevels, contourLines, contourSegments } from './contours'
 export {

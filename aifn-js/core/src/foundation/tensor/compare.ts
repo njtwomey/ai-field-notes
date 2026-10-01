@@ -1,8 +1,8 @@
 /** Whole-tensor comparisons for tests and assertions (not primitives: they return booleans). */
 
 import { flatData, type Tensor } from './core'
-import { binaryKernel } from './kernels'
-import { unwrap, type Value } from './tape'
+import { binaryKernel, complexKernel } from './kernels'
+import { unwrap, type Value } from './trace'
 
 /** Options for `allclose`. */
 export type CloseOptions = {
@@ -16,7 +16,8 @@ export type CloseOptions = {
 
 /**
  * True when |a − b| ≤ atol + rtol·|b| for every broadcast pair, as `np.allclose` (note the asymmetry: b is the
- * reference). Infinities must match exactly. Incompatible shapes are an error.
+ * reference). Infinities must match exactly. Incompatible shapes are an error. Complex values compare by the modulus
+ * of the difference (a real value against a complex one has im = 0).
  */
 export function allclose(
   a: Value,
@@ -32,6 +33,21 @@ export function allclose(
   const ra = unwrap(a)
   const rb = unwrap(b)
   if (typeof ra === 'number' && typeof rb === 'number') return close(ra, rb) === 1
+  if ([ra, rb].some((v) => typeof v !== 'number' && v.dtype === 'complex128')) {
+    const t = complexKernel(
+      [ra, rb],
+      (o, z) => {
+        const [xr, xi, yr, yi] = [z[0], z[1], z[2], z[3]]
+        if (xr !== xr || xi !== xi || yr !== yr || yi !== yi)
+          o[0] = equalNan && (xr !== xr || xi !== xi) && (yr !== yr || yi !== yi) ? 1 : 0
+        else if (xr === yr && xi === yi) o[0] = 1
+        else if (![xr, xi, yr, yi].every(Number.isFinite)) o[0] = 0
+        else o[0] = Math.hypot(xr - yr, xi - yi) <= atol + rtol * Math.hypot(yr, yi) ? 1 : 0
+      },
+      true,
+    )
+    return t.data.every((v) => v === 1)
+  }
   return binaryKernel(ra, rb, close, 'int32').data.every((v) => v === 1)
 }
 

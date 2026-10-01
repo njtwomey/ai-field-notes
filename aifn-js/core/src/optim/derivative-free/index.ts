@@ -1,6 +1,6 @@
 /**
- * `aifn/optim/derivative-free`: derivative-free methods: Nelder–Mead, CMA-ES, simulated annealing, and Brent and
- * golden-section `minimizeScalar`.
+ * `aifn/optim/derivative-free`: derivative-free methods: Nelder–Mead, CMA-ES and simulated annealing. Brent's and
+ * golden-section minimisation of one variable is `minimizeScalar` in `aifn/numerics/roots`.
  */
 
 export {
@@ -18,4 +18,4 @@ export {
   type SimulatedAnnealingOptions,
   type SimulatedAnnealingState,
 } from './stochastic'
-export { minimizeScalar, type MinimizeScalarOptions, type MinimizeScalarResult } from './scalar'
+export { derivativeFreeAlgorithms } from './registry'

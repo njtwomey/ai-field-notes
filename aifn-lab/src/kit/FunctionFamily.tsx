@@ -17,7 +17,7 @@ import {
 import { useMemo } from 'react'
 import { choice, defineVariants, slider, toggle, useParam, useVariants, VariantControls } from '@lab/controls'
 import { Figure } from '@lab/layout'
-import { formatNumber, Readout, XYChart, type Handle, type XYSeries } from '@lab/viz'
+import { Curve, formatNumber, Handle, Plot, Points, Readout, useAxis } from '@lab/viz'
 
 /**
  * The function family. Each entry is one function with its own parameters; adding a function is adding an entry.
@@ -79,29 +79,21 @@ export function FunctionFamilyFigure() {
     const xs = toFlat(x)
     const y0 = f(x0.value) as number
     const slope = grad(f)(x0.value) as number
-    const series: XYSeries[] = [
-      { name: 'f(x)', type: 'line', x: xs, y: toFlat(f(x) as Tensor), slot: 0 },
-      { name: 'f′(x) = grad(f)', type: 'line', x: xs, y: toFlat(df(x) as Tensor), slot: 1 },
-      {
-        name: 'tangent at x₀',
-        type: 'line',
-        x: [x0.value - 1, x0.value + 1],
-        y: [y0 - slope, y0 + slope],
-        slot: 2,
-        dashed: true,
-      },
-      { name: 'x₀', type: 'scatter', x: [x0.value], y: [y0], emphasis: true },
-    ]
+    const series = {
+      x: xs,
+      f: toFlat(f(x) as Tensor),
+      df: toFlat(df(x) as Tensor),
+      tangent: { x: [x0.value - 1, x0.value + 1], y: [y0 - slope, y0 + slope] },
+    }
     return { series, y0, slope }
   }, [f, x0.value])
-  const handles = useMemo(
-    (): Handle[] => [{ kind: 'x', at: x0.value, label: 'x₀', onDrag: x0.set }],
-    [x0.value, x0.set],
-  )
+  const xAxis = useAxis({ label: 'x', range: RANGE })
+  const yAxis = useAxis({ label: 'value' })
   return (
     <Figure
       title="Function family"
-      description="Pick a function; the controls change to its parameters, and each function keeps its own values when you switch away and back."
+      // TODO(5c): purpose taken from the description
+      purpose="Pick a function; the controls change to its parameters, and each function keeps its own values when you switch away and back."
       defaultSize="L"
       controls={<VariantControls variants={v} />}
       readouts={
@@ -113,7 +105,13 @@ export function FunctionFamilyFigure() {
       }
       caption="f′ comes from grad in aifn/autodiff, not a hand-written derivative. Drag the dashed x₀ line to move the tangent. Choose Softplus and set its shape to 'shifted' to reveal the shift slider. The state readout is the plain JSON a URL could hold."
     >
-      <XYChart series={series} xLabel="x" yLabel="value" xRange={RANGE} handles={handles} />
+      <Plot x={xAxis} y={yAxis}>
+        <Curve name="f(x)" x={series.x} y={series.f} slot={0} />
+        <Curve name="f′(x) = grad(f)" x={series.x} y={series.df} slot={1} />
+        <Curve name="tangent at x₀" x={series.tangent.x} y={series.tangent.y} slot={2} dashed />
+        <Points name="x₀" x={[x0.value]} y={[y0]} emphasis />
+        <Handle kind="x" at={x0.value} label="x₀" onDrag={x0.set} />
+      </Plot>
     </Figure>
   )
 }

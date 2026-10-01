@@ -1,259 +1,250 @@
 import { useMemo, useState } from 'react'
+import { additiveData } from 'aifn-applied/data/synthetic'
+import type { AdditiveTruth } from 'aifn-applied/data'
 import {
   explainableBoostingMachine,
   gam,
   gamBackfitting,
+  gamModel,
+  gamProblem,
   s,
   type SmoothingMethod,
 } from 'aifn-applied/learning/generalised/gam'
 import { dataset } from 'aifn/learning/estimators'
-import { child, normals, stream, uniform } from 'aifn/foundation/random'
-import { linspace, tensor, toFlat, toRows, type Tensor } from 'aifn/foundation/tensor'
+import { stream } from 'aifn/foundation/random'
+import { fromData, linspace, toFlat, toRows, type Tensor } from 'aifn/foundation/tensor'
 import { trace } from 'aifn/foundation/trace'
-import { Player, Select, Slider, Switch } from '@lab/controls'
-import { ControlRow, Figure } from '@lab/layout'
-import { Panel, Readout, Subplots, XYChart, type XYSeries } from '@lab/viz'
+import { Player } from '@lab/controls'
+import { ControlRow, Dashboard, DashboardCell, DashboardRow, Figure } from '@lab/layout'
+import { choice, row, slider, toggle, useFigureState } from '@lab/state'
+import { Area, Curve, Plot, Plots, Points, Readout, useAxis } from '@lab/viz'
 import { formatValue } from '@lab/views'
 
-const TRUTH = [
-  (x: number) => Math.sin(2 * Math.PI * x),
-  (x: number) => 4 * (x - 0.5) ** 2 - 1 / 3,
-  (x: number) => 0.8 * x - 0.4,
-]
 const N = 300
 const GRID = linspace(0, 1, 101)
 const GRID_X = toFlat(GRID)
 
-/** Three features uniform on [0, 1]; y = Σ fⱼ(xⱼ) + noise. */
-function additiveData(seed: string, sd = 0.4) {
-  const st = stream(seed)
-  const rows = toRows(uniform(child(st, 'x'), 0, 1, { shape: [N, 3] }) as Tensor)
-  const e = toFlat(normals(child(st, 'e'), N, 0, sd))
-  const y = rows.map((r, i) => r.reduce((acc, v, j) => acc + TRUTH[j](v), 0) + e[i])
-  return { rows, x: tensor(rows), y: tensor(y), yv: y }
+/** Three features uniform on [0, 1] from aifn's additive generator: a periodic, a parabolic and a linear effect. */
+function additive(seed: string, noise = 0.4) {
+  const d = additiveData(stream(seed), { n: N, noise, shapes: ['periodic', 'smooth', 'linear'] })
+  const rows = toRows(d.x as Tensor) as number[][]
+  const truth = d.meta!.truth as AdditiveTruth
+  const columns = [0, 1, 2].map((j) =>
+    fromData(
+      Float64Array.from(rows, (r) => r[j]),
+      [N],
+    ),
+  )
+  return {
+    rows,
+    x: d.x as Tensor,
+    y: d.y as Tensor,
+    // Each true effect centred on the data, as the fitted smooths are.
+    centred: [0, 1, 2].map((j) => toFlat(truth.partial(j, GRID, columns[j]))),
+  }
 }
 
 /** A Gaussian GAM: each partial effect with its Bayesian band, partial residuals and posterior draws. */
 export function PartialEffects() {
-  const [method, setMethod] = useState<SmoothingMethod>('reml')
-  const [k, setK] = useState(12)
-  const [showDraws, setShowDraws] = useState(false)
-  const [showResiduals, setShowResiduals] = useState(true)
-  const data = useMemo(() => additiveData('gam-partial'), [])
+  const state = useFigureState({
+    model: row('1 · model', {
+      method: choice(['reml', 'gcv', 'fixed'] as SmoothingMethod[], 'reml', { label: 'smoothing parameters by' }),
+      k: slider(5, 25, 12, { label: 'basis size k', step: 1 }),
+    }),
+    reveal: row('2 · reveal', {
+      residuals: toggle(true, 'partial residuals'),
+      draws: toggle(false, 'posterior draws'),
+      count: choice([5, 20, 50], 20, { label: 'draws', when: (v) => v.draws === true }),
+    }),
+  })
+  const method = state.model.method as SmoothingMethod
+  const { k } = state.model
+  const { residuals: showResiduals, draws: showDraws, count } = state.reveal
+  const data = useMemo(() => additive('gam-partial'), [])
   const model = useMemo(
     () => gam({ terms: [s(0, { k }), s(1, { k }), s(2, { k })], method }).fit(dataset(data.x, data.y)),
     [data, k, method],
   )
-  const panels = [0, 1, 2].map((j) => {
-    const p = model.partial(j, GRID)
-    const f = toFlat(p.fit)
-    const se = toFlat(p.se)
-    const residuals = toFlat(model.partialResiduals(j))
-    const mean = GRID_X.reduce((a, v) => a + TRUTH[j](v), 0) / GRID_X.length
-    const draws = showDraws ? toRows(model.partialDraws(stream(`gam-draws-${j}`), j, GRID, 20)) : []
-    const series: XYSeries[] = [
-      ...(showResiduals
-        ? [
-            {
-              name: 'partial residuals',
-              type: 'scatter' as const,
-              x: data.rows.map((r) => r[j]),
-              y: residuals,
-              muted: true,
-            },
-          ]
-        : []),
-      ...draws.map((d, r) => ({ name: `draw ${r + 1}`, type: 'line' as const, x: GRID_X, y: d, thin: true, slot: 1 })),
-      {
-        name: 'true effect (centred)',
-        type: 'line',
-        x: GRID_X,
-        y: GRID_X.map((v) => TRUTH[j](v) - mean),
-        slot: 2,
-        dashed: true,
-      },
-      { name: `f${j + 1}`, type: 'line', x: GRID_X, y: f, slot: 0 },
-      { name: '± 2 se', type: 'line', x: GRID_X, y: f.map((v, i) => v + 2 * se[i]), slot: 0, dashed: true },
-      { name: '± 2 se ', type: 'line', x: GRID_X, y: f.map((v, i) => v - 2 * se[i]), slot: 0, dashed: true },
-    ]
-    return series
-  })
+  const panels = useMemo(
+    () =>
+      [0, 1, 2].map((j) => {
+        const p = model.partial(j, GRID)
+        const f = toFlat(p.fit)
+        const se = toFlat(p.se)
+        return {
+          f,
+          upper: f.map((v, i) => v + 2 * se[i]),
+          lower: f.map((v, i) => v - 2 * se[i]),
+          xs: data.rows.map((r) => r[j]),
+          residuals: toFlat(model.partialResiduals(j)),
+        }
+      }),
+    [model, data],
+  )
+  const draws = useMemo(
+    () =>
+      showDraws
+        ? [0, 1, 2].map((j) => toRows(model.partialDraws(stream(`gam-draws-${j}`), j, GRID, count)) as number[][])
+        : null,
+    [model, showDraws, count],
+  )
+  const y = useAxis({ label: 'partial effect', hold: 'union' })
+  const x1 = useAxis({ label: 'x1', range: [0, 1] })
+  const x2 = useAxis({ label: 'x2', range: [0, 1] })
+  const x3 = useAxis({ label: 'x3', range: [0, 1] })
+  const xs = [x1, x2, x3]
   return (
     <Figure
       title="Partial effects with posterior bands"
-      description="An additive model splits the fit into one curve per feature; each comes with a Bayesian ± 2 se band from V_β = (XᵀX + S_λ)⁻¹σ̂²."
-      controls={
-        <>
-          <ControlRow label="Model">
-            <Select
-              label="smoothing parameters by"
-              value={method}
-              onChange={setMethod}
-              options={['reml', 'gcv', 'fixed']}
-            />
-            <Slider label="basis size k" value={k} onChange={setK} min={5} max={25} step={1} />
-          </ControlRow>
-          <ControlRow label="Reveal">
-            <Switch label="partial residuals" checked={showResiduals} onChange={setShowResiduals} />
-            <Switch label="20 posterior draws" checked={showDraws} onChange={setShowDraws} />
-          </ControlRow>
-        </>
-      }
-      readouts={
-        <>
-          {model.labels.map((l, j) => (
-            <Readout
-              key={l}
-              label={`${l}: EDF, λ`}
-              value={`${formatValue(model.termEdf[j])}, ${formatValue(model.lambdas[j])}`}
-            />
-          ))}
-          <Readout label="σ̂" value={formatValue(Math.sqrt(model.dispersion))} />
-          <Readout label="criterion evaluations" value={model.smoothingScore.evaluations} />
-        </>
-      }
-      caption="The truth is sin(2πx₁) + a parabola in x₂ + a line in x₃, each shown centred. REML and GCV give each smooth its own λ: the line gets a huge λ and about one EDF, the sine several. With 'fixed' every λ is 1. Blue: the fit and its ± 2 se band; green dashed: the truth; orange: draws. The draws show the band's meaning: plausible curves, not a pointwise envelope."
+      purpose="An additive model splits the fit into one curve per feature, each with a Bayesian ± 2 se band; REML or GCV picks a separate smoothness for each."
+      state={state}
+      readouts={{
+        'per term': (
+          <>
+            {model.labels.map((l, j) => (
+              <Readout
+                key={l}
+                label={`${l}: EDF, λ`}
+                value={`${formatValue(model.termEdf[j])}, ${formatValue(model.lambdas[j])}`}
+              />
+            ))}
+          </>
+        ),
+        model: (
+          <>
+            <Readout label="σ̂" value={formatValue(Math.sqrt(model.dispersion))} />
+            <Readout label="criterion evaluations" value={model.smoothingScore.evaluations} />
+          </>
+        ),
+      }}
+      caption="Data from aifn's additive generator: a periodic effect of x₁ (sin 2πx + ½ cos 4πx), a parabola in x₂ and a line in x₃, plus Gaussian noise with sd 0.4. REML and GCV give each smooth its own λ: the line gets a huge λ and about one EDF, the periodic term several. With 'fixed' every λ is 1. Blue: the fit and its ± 2 se band (V_β = (XᵀX + S_λ)⁻¹σ̂²); ink dashed: the true effect, centred on the data as the fit is; thin orange: posterior draws. The draws show the band's meaning: plausible curves, not a pointwise envelope."
     >
-      <Subplots rows={1} cols={3} sharey>
-        {panels.map((series, j) => (
-          <Panel key={j}>
-            <XYChart
-              series={series}
-              xLabel={`x${j + 1}`}
-              yLabel={j === 0 ? 'partial effect' : undefined}
-              legend={false}
-            />
-          </Panel>
+      <Plots cols={3}>
+        {panels.map((p, j) => (
+          <Plot key={j} x={xs[j]} y={y} legend={false}>
+            {showResiduals && <Points name="partial residuals" x={p.xs} y={p.residuals} muted thin />}
+            <Area name="± 2 se" x={GRID_X} y={p.upper} base={p.lower} slot={0} opacity={0.18} line={false} />
+            {draws?.[j].map((d, r) => (
+              <Curve key={r} name="draws" x={GRID_X} y={d} thin slot={1} />
+            ))}
+            <Curve name="true effect (centred)" x={GRID_X} y={data.centred[j]} emphasis dashed />
+            <Curve name={`f${j + 1}`} x={GRID_X} y={p.f} slot={0} />
+          </Plot>
         ))}
-      </Subplots>
+      </Plots>
     </Figure>
   )
 }
 
 /** Backfitting, sweep by sweep. */
 export function BackfittingSweeps() {
-  const [sweep, setSweep] = useState(1)
-  const data = useMemo(() => additiveData('gam-backfit', 0.3), [])
-  const run = useMemo(
-    () =>
-      trace(
-        gamBackfitting({
-          terms: [s(0, { lambda: 1 }), s(1, { lambda: 1 }), s(2, { lambda: 1 })],
-          x: data.x,
-          y: data.y,
-        }),
-        undefined,
-        30,
-      ),
+  const [sweep, setSweep] = useState(0)
+  const data = useMemo(() => additive('gam-backfit', 0.3), [])
+  const problem = useMemo(
+    () => gamProblem({ terms: [s(0), s(1), s(2)], method: 'fixed', lambda: 1 }, { x: data.x, y: data.y }),
     [data],
   )
+  const run = useMemo(() => trace(gamBackfitting(problem), undefined, 30), [problem])
   const k = Math.min(sweep, run.steps.length - 1)
   const state = run.steps[k]
-  const contributions = toRows(state.contributions)
-  const panels = [0, 1, 2].map((j) => {
-    const order = data.rows.map((r, i) => [r[j], contributions[j][i]] as const).sort((a, b) => a[0] - b[0])
-    const mean = GRID_X.reduce((a, v) => a + TRUTH[j](v), 0) / GRID_X.length
-    const series: XYSeries[] = [
-      {
-        name: 'true effect (centred)',
-        type: 'line',
-        x: GRID_X,
-        y: GRID_X.map((v) => TRUTH[j](v) - mean),
-        slot: 2,
-        dashed: true,
-      },
-      {
-        name: `f${j + 1} after sweep ${k}`,
-        type: 'line',
-        x: order.map((o) => o[0]),
-        y: order.map((o) => o[1]),
-        slot: 0,
-      },
-    ]
-    return series
-  })
-  const deviance: XYSeries[] = [
-    {
-      name: 'residual sum of squares',
-      type: 'line',
-      x: Array.from(run.index),
-      y: run.steps.map((s) => s.deviance),
-      slot: 0,
-      showPoints: true,
-    },
-    { name: 'current', type: 'scatter', x: [k], y: [state.deviance], emphasis: true },
-  ]
+  // Each term after this sweep: the model at the sweep's coefficients, on a grid.
+  const curves = useMemo(() => {
+    const model = gamModel(problem, toFlat(state.coefficients))
+    return [0, 1, 2].map((j) => toFlat(model.partial(j, GRID).fit))
+  }, [problem, state])
+  const best = problem.evaluate(problem.optimum.beta).penalisedDeviance
+  const gap = useMemo(
+    () => ({ x: Array.from(run.index), y: run.steps.map((st) => Math.max(st.penalisedDeviance - best, 1e-14)) }),
+    [run, best],
+  )
+  const now = useMemo(() => ({ x: [k], y: [gap.y[k]] }), [k, gap])
+  const y = useAxis({ label: 'partial effect', range: [-2, 1.5] })
+  const x1 = useAxis({ label: 'x1', range: [0, 1] })
+  const x2 = useAxis({ label: 'x2', range: [0, 1] })
+  const x3 = useAxis({ label: 'x3', range: [0, 1] })
+  const xs = [x1, x2, x3]
+  const sweepAxis = useAxis({ label: 'sweep', hold: 'initial' })
+  const gapAxis = useAxis({ label: 'gap to optimum', log: true, hold: 'initial' })
   return (
     <Figure
       title="Backfitting sweep by sweep"
       defaultSize="L"
-      description="Backfitting smooths each feature's partial residual in turn, holding the other curves fixed; the sweeps converge to the penalised least-squares fit."
+      purpose="Backfitting smooths each feature's partial residual in turn, holding the other curves fixed; the sweeps converge to the penalised least-squares fit."
       controls={
-        <ControlRow label="Sweeps">
+        <ControlRow label="sweeps">
           <Player value={k} onChange={setSweep} count={run.steps.length} format={(i) => `sweep ${i}`} />
         </ControlRow>
       }
       readouts={
         <>
-          <Readout label="intercept" value={formatValue(state.intercept)} />
-          <Readout label="largest change in this sweep" value={formatValue(state.change)} />
+          <Readout label="intercept" value={formatValue(state.inner.intercept)} />
+          <Readout
+            label="largest change in this sweep"
+            value={Number.isFinite(state.inner.change) ? formatValue(state.inner.change) : '—'}
+          />
+          <Readout label="penalised RSS" value={formatValue(state.penalisedDeviance)} />
           <Readout label="converged" value={String(state.converged)} />
         </>
       }
-      caption="Blue: each curve after the chosen sweep; green dashed: the centred truth. Sweep 0 starts every curve at zero. The first sweep already recovers most of each shape because the features are independent; later sweeps only trade small amounts between terms. λ = 1 for every smooth."
+      caption="Blue: each curve after the chosen sweep; ink dashed: the true effect, centred on the data. Sweep 0 starts every curve at zero. The first sweep already recovers most of each shape because the features are independent; later sweeps only trade small amounts between terms, and the penalised RSS falls to the P-IRLS optimum geometrically (bottom, log scale). λ = 1 for every smooth."
     >
-      <Subplots rows={2} cols={3} heightRatios={[2, 1]}>
-        {panels.map((series, j) => (
-          <Panel key={j}>
-            <XYChart series={series} xLabel={`x${j + 1}`} yRange={[-1.5, 1.5]} legend={false} />
-          </Panel>
-        ))}
-        <Panel>
-          <XYChart series={deviance} xLabel="sweep" yLabel="RSS" integerX />
-        </Panel>
-      </Subplots>
+      <Dashboard>
+        <DashboardRow ratio={2} minHeight={220}>
+          <DashboardCell>
+            <Plots cols={3}>
+              {curves.map((c, j) => (
+                <Plot key={j} x={xs[j]} y={y} legend={false}>
+                  <Curve name="true effect (centred)" x={GRID_X} y={data.centred[j]} emphasis dashed />
+                  <Curve name={`f${j + 1} after sweep ${k}`} x={GRID_X} y={c} slot={0} />
+                </Plot>
+              ))}
+            </Plots>
+          </DashboardCell>
+        </DashboardRow>
+        <DashboardRow minHeight={150}>
+          <DashboardCell>
+            <Plot x={sweepAxis} y={gapAxis} legend={false}>
+              <Curve name="penalised RSS − optimum" x={gap.x} y={gap.y} slot={0} showPoints />
+              <Points name="current" x={now.x} y={now.y} emphasis />
+            </Plot>
+          </DashboardCell>
+        </DashboardRow>
+      </Dashboard>
     </Figure>
   )
 }
 
 /** An explainable boosting machine's step-function shapes as rounds accumulate. */
 export function EbmShapes() {
-  const [logRounds, setLogRounds] = useState(2.5)
-  const data = useMemo(() => additiveData('gam-ebm', 0.4), [])
+  const figure = useFigureState({
+    boosting: row('boosting', { logRounds: slider(0, 3.3, 1, { label: 'log₁₀ rounds' }) }),
+  })
+  const { logRounds } = figure.boosting
+  const data = useMemo(() => additive('gam-ebm', 0.4), [])
   const rounds = Math.round(10 ** logRounds)
   const model = useMemo(
     () => explainableBoostingMachine({ rounds, learningRate: 0.02 }).fit(dataset(data.x, data.y)),
     [data, rounds],
   )
-  const edges = toRows(model.edges)
-  const shapes = toRows(model.shapes)
-  const panels = [0, 1, 2].map((j) => {
-    const xs = shapes[j].flatMap((_, b) => [edges[j][b], edges[j][b + 1]])
-    const ys = shapes[j].flatMap((v) => [v, v])
-    const mean = GRID_X.reduce((a, v) => a + TRUTH[j](v), 0) / GRID_X.length
-    const series: XYSeries[] = [
-      {
-        name: 'true effect (centred)',
-        type: 'line',
-        x: GRID_X,
-        y: GRID_X.map((v) => TRUTH[j](v) - mean),
-        slot: 2,
-        dashed: true,
-      },
-      { name: `shape ${j + 1}`, type: 'line', x: xs, y: ys, slot: 0 },
-    ]
-    return series
-  })
+  const shapes = useMemo(() => {
+    const edges = toRows(model.edges)
+    const sh = toRows(model.shapes)
+    return [0, 1, 2].map((j) => ({
+      x: sh[j].flatMap((_, b) => [edges[j][b], edges[j][b + 1]]),
+      y: sh[j].flatMap((v) => [v, v]),
+    }))
+  }, [model])
   const loss = toFlat(model.training.series.loss)
+  const y = useAxis({ label: 'shape', range: [-1.5, 1.5] })
+  const x1 = useAxis({ label: 'x1', range: [0, 1] })
+  const x2 = useAxis({ label: 'x2', range: [0, 1] })
+  const x3 = useAxis({ label: 'x3', range: [0, 1] })
+  const xs = [x1, x2, x3]
   return (
     <Figure
       title="Explainable boosting: shapes from many small trees"
-      description="An EBM adds one-split trees on binned features, one feature at a time with a small learning rate; the sum per feature is a step-function shape."
-      controls={
-        <ControlRow label="Boosting">
-          <Slider label="log₁₀ rounds" value={logRounds} onChange={setLogRounds} min={0} max={3.3} />
-        </ControlRow>
-      }
+      purpose="An EBM adds one-split trees on binned features, one feature at a time with a small learning rate; the sum per feature is a step-function shape that converges on the true effect."
+      state={figure}
       readouts={
         <>
           <Readout label="rounds" value={rounds} />
@@ -261,15 +252,16 @@ export function EbmShapes() {
           <Readout label="intercept" value={formatValue(model.intercept)} />
         </>
       }
-      caption="Blue: the learned shape; green dashed: the centred truth. After a few rounds each shape is a coarse step; after hundreds it traces the true effect with 32 bins per feature. The cyclic order keeps one feature from absorbing effects of another."
+      caption="Blue: the learned shape; ink dashed: the true effect, centred on the data. After ten rounds each shape is a coarse, shrunken step; after hundreds it traces the true effect with 32 bins per feature. The cyclic order keeps one feature from absorbing effects of another."
     >
-      <Subplots rows={1} cols={3} sharey>
-        {panels.map((series, j) => (
-          <Panel key={j}>
-            <XYChart series={series} xLabel={`x${j + 1}`} yRange={[-1.5, 1.5]} legend={false} />
-          </Panel>
+      <Plots cols={3}>
+        {shapes.map((c, j) => (
+          <Plot key={j} x={xs[j]} y={y} legend={false}>
+            <Curve name="true effect (centred)" x={GRID_X} y={data.centred[j]} emphasis dashed />
+            <Curve name={`shape ${j + 1}`} x={c.x} y={c.y} slot={0} />
+          </Plot>
         ))}
-      </Subplots>
+      </Plots>
     </Figure>
   )
 }

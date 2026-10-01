@@ -50,6 +50,8 @@ const chainFactorGraph: DiagramSpec = {
 function PlateFigure() {
   return (
     <Figure
+      // TODO(5c): state the purpose (placeholder: the title)
+      purpose="Plate notation: latent Dirichlet allocation"
       title="Plate notation: latent Dirichlet allocation"
       defaultSize="S"
       hoverReadout={false}
@@ -79,6 +81,8 @@ function FactorGraphFigure() {
   }, [target])
   return (
     <Figure
+      // TODO(5c): state the purpose (placeholder: the title)
+      purpose="A factor graph: the factors touching a variable"
       title="A factor graph: the factors touching a variable"
       defaultSize="S"
       hoverReadout={false}
@@ -165,6 +169,8 @@ function LayeredFigure() {
   }, [direction, sweeps, compact, reverse, step])
   return (
     <Figure
+      // TODO(5c): state the purpose (placeholder: the title)
+      purpose="Layered layout of a graph given as data"
       title="Layered layout of a graph given as data"
       defaultSize="M"
       hoverReadout={false}
@@ -288,6 +294,8 @@ function TreeLayoutFigure({ which }: { which: TreeKind }) {
   const path = hovered === null || hovered >= tree.nodes.length ? [] : pathToRoot(tree, hovered)
   return (
     <Figure
+      // TODO(5c): state the purpose (placeholder: the title)
+      purpose={TREE_TITLE[which]}
       title={TREE_TITLE[which]}
       defaultSize="M"
       hoverReadout={false}

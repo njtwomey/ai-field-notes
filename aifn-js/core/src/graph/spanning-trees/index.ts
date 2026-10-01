@@ -13,3 +13,4 @@ export {
   type SpanningEvent,
   type SpanningTree,
 } from './trees'
+export { spanningTreesAlgorithms } from './registry'

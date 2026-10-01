@@ -1,22 +1,27 @@
 /**
  * UMAP, simplified but faithful to McInnes, Healy and Melville (2018, "UMAP: Uniform Manifold Approximation and
- * Projection for dimension reduction", arXiv:1802.03426) and umap-learn's defaults: exact k-nearest neighbours, a
+ * Projection for dimension reduction", arXiv:1802.03426) and umap-learn's defaults: k-nearest neighbours (exact for
+ * small n, by nearest-neighbour descent above `DESCENT_ABOVE` rows), a
  * fuzzy simplicial set (local connectivity ρᵢ, bandwidths σᵢ with Σⱼ exp(−(dᵢⱼ − ρᵢ)/σᵢ) = log₂ k, fuzzy union
  * w + wᵀ − w∘wᵀ), the output curve 1/(1 + a d^(2b)) fitted to `minDist` and `spread`, and a stochastic layout: each
  * epoch samples edges by weight (edge e every 1/wₑ·max w epochs), pulls their ends together and pushes each end away
  * from `negativeSamples` random points, with a learning rate falling linearly to 0.
  *
- * Simplifications: exact neighbours (no nearest-neighbour descent), and a Laplacian-eigenmap or random start.
+ * Simplifications: random (not random-projection-tree) initial lists for the descent, and a Laplacian-eigenmap or
+ * random start.
  */
 
 import type { Dataset, Estimator, FitOptions, Trained } from 'aifn/learning/estimators'
-import { eigh } from 'aifn/numerics/linalg'
+import { eigh, eigsh } from 'aifn/numerics/linalg'
 import type { Status } from 'aifn/foundation/contracts'
-import { child, integers, uniform } from 'aifn/foundation/random'
+import { child, integers, stream, uniform, type Stream } from 'aifn/foundation/random'
 import { fromData, type Tensor } from 'aifn/foundation/tensor'
 import { trace, type Algorithm } from 'aifn/foundation/trace'
 import { squaredDistances } from '../neighbourhoods'
+import { nearestNeighbourDescent } from './nn-descent'
 import { mat, matrix, values, vec } from '../util'
+import { defineModel } from 'aifn/learning/estimators'
+import { int, oneOf, real, space } from 'aifn/foundation/space'
 
 /** The fuzzy graph of the data: per-point ρ and σ, and the symmetric membership strengths. */
 export interface FuzzyGraph {
@@ -30,21 +35,63 @@ export interface FuzzyGraph {
   edges: { from: Int32Array; to: Int32Array; weight: Float64Array }
 }
 
+/** How `fuzzyGraph` finds neighbours: exact search, nearest-neighbour descent, or `auto` (descent above 2000 rows). */
+export type NeighbourSearch = 'exact' | 'descent' | 'auto'
+
+/** Above this many rows `auto` neighbour search uses nearest-neighbour descent (umap-learn switches at 4096). */
+export const DESCENT_ABOVE = 2000
+
+/** Options of {@link fuzzyGraph}. */
+export interface FuzzyGraphOptions {
+  /** Default 'auto'. */
+  search?: NeighbourSearch
+  /** Randomness of nearest-neighbour descent (default: a fixed stream). */
+  stream?: Stream
+}
+
+/**
+ * The k nearest neighbours of each row, itself first, and their distances, flat [n·k]: exact (all pairwise distances,
+ * O(n²) memory) or by nearest-neighbour descent.
+ */
+function neighbourLists(v: Float64Array, n: number, d: number, k: number, options: FuzzyGraphOptions) {
+  const { search = 'auto' } = options
+  const nb = new Int32Array(n * k)
+  const dist = new Float64Array(n * k)
+  if (search === 'exact' || (search === 'auto' && n <= DESCENT_ABOVE) || k === 1) {
+    const D = Float64Array.from(squaredDistances(v, n, d), Math.sqrt)
+    for (let i = 0; i < n; i++) {
+      const order = Array.from({ length: n }, (_, j) => j).sort((a, b) =>
+        a === i ? -1 : b === i ? 1 : D[i * n + a] - D[i * n + b] || a - b,
+      )
+      for (let r = 0; r < k; r++) {
+        nb[i * k + r] = order[r]
+        dist[i * k + r] = D[i * n + order[r]]
+      }
+    }
+    return { nb, dist }
+  }
+  const found = nearestNeighbourDescent(v, n, d, k - 1, {
+    stream: options.stream ?? stream('nearest-neighbour-descent'),
+  })
+  for (let i = 0; i < n; i++) {
+    nb[i * k] = i
+    for (let r = 1; r < k; r++) {
+      nb[i * k + r] = found.indices[i * (k - 1) + r - 1]
+      dist[i * k + r] = found.distances[i * (k - 1) + r - 1]
+    }
+  }
+  return { nb, dist }
+}
+
 /**
  * The fuzzy simplicial set of the rows of x with `neighbours` k (default 15, itself included, as umap-learn):
- * wᵢⱼ = exp(−max(0, dᵢⱼ − ρᵢ)/σᵢ), then w + wᵀ − w∘wᵀ.
+ * wᵢⱼ = exp(−max(0, dᵢⱼ − ρᵢ)/σᵢ), then w + wᵀ − w∘wᵀ. Neighbours are exact up to `DESCENT_ABOVE` rows and found by
+ * nearest-neighbour descent beyond (`options.search`).
  */
-export function fuzzyGraph(x: Tensor, neighbours = 15): FuzzyGraph {
+export function fuzzyGraph(x: Tensor, neighbours = 15, options: FuzzyGraphOptions = {}): FuzzyGraph {
   const { n, d, v } = matrix(x, 'fuzzyGraph')
   const k = Math.min(neighbours, n)
-  const D = Float64Array.from(squaredDistances(v, n, d), Math.sqrt)
-  const nb = new Int32Array(n * k)
-  for (let i = 0; i < n; i++) {
-    const order = Array.from({ length: n }, (_, j) => j).sort((a, b) =>
-      a === i ? -1 : b === i ? 1 : D[i * n + a] - D[i * n + b] || a - b,
-    )
-    for (let r = 0; r < k; r++) nb[i * k + r] = order[r]
-  }
+  const { nb, dist } = neighbourLists(v, n, d, k, options)
   const target = Math.log2(k)
   const rho = new Float64Array(n)
   const sigma = new Float64Array(n)
@@ -52,7 +99,7 @@ export function fuzzyGraph(x: Tensor, neighbours = 15): FuzzyGraph {
   for (let i = 0; i < n; i++) {
     let first = 0
     for (let r = 1; r < k; r++) {
-      const t = D[i * n + nb[i * k + r]]
+      const t = dist[i * k + r]
       if (t > 0) {
         first = t
         break
@@ -64,7 +111,7 @@ export function fuzzyGraph(x: Tensor, neighbours = 15): FuzzyGraph {
     let s = 1
     for (let it = 0; it < 64; it++) {
       let psum = 0
-      for (let r = 1; r < k; r++) psum += Math.exp(-Math.max(0, D[i * n + nb[i * k + r]] - rho[i]) / s)
+      for (let r = 1; r < k; r++) psum += Math.exp(-Math.max(0, dist[i * k + r] - rho[i]) / s)
       if (Math.abs(psum - target) < 1e-5) break
       if (psum > target) {
         hi = s
@@ -76,11 +123,11 @@ export function fuzzyGraph(x: Tensor, neighbours = 15): FuzzyGraph {
     }
     // umap-learn floors σ at 10⁻³ of the mean neighbour distance.
     let mean = 0
-    for (let r = 1; r < k; r++) mean += D[i * n + nb[i * k + r]] / (k - 1)
+    for (let r = 1; r < k; r++) mean += dist[i * k + r] / (k - 1)
     sigma[i] = Math.max(s, 1e-3 * mean)
     for (let r = 1; r < k; r++) {
       const j = nb[i * k + r]
-      W.set(i * n + j, Math.exp(-Math.max(0, D[i * n + j] - rho[i]) / sigma[i]))
+      W.set(i * n + j, Math.exp(-Math.max(0, dist[i * k + r] - rho[i]) / sigma[i]))
     }
   }
   const from: number[] = []
@@ -153,6 +200,77 @@ export function curveParameters(minDist = 0.1, spread = 1): { a: number; b: numb
   return { a, b }
 }
 
+/** Up to this many rows UMAP's spectral start uses a dense eigendecomposition; beyond it, thick-restart Lanczos. */
+export const DENSE_SPECTRAL_UP_TO = 500
+
+/**
+ * The Laplacian eigenmap of a fuzzy graph, UMAP's spectral start: with W the symmetric edge weights and D their row
+ * sums, the eigenvectors 2 … dims + 1 of M = D^(−½) W D^(−½) by descending eigenvalue (the smallest of the normalised
+ * Laplacian I − M, skipping the trivial D^(½)1), each scaled to [0, 10], as rows [n · dims]. `method` 'lanczos' finds
+ * them with `eigsh` on the sparse product M·v (O(edges) per product, so large n stays cheap); 'dense' builds the n × n
+ * matrix and runs `eigh` (O(n³)). Each eigenvector's sign is fixed so that its entry of largest magnitude is positive,
+ * so both methods give the same layout up to rounding when the eigenvalues are distinct.
+ */
+export function spectralLayout(
+  graph: FuzzyGraph,
+  dims = 2,
+  options: { method?: 'dense' | 'lanczos' } = {},
+): Float64Array {
+  const n = graph.rho.shape[0]
+  const { from, to, weight } = graph.edges
+  const k = dims + 1
+  if (!(k < n)) throw new Error(`spectral layout: need more than ${k} rows for ${dims} dimensions`)
+  const deg = new Float64Array(n)
+  for (let e = 0; e < from.length; e++) {
+    deg[from[e]] += weight[e]
+    deg[to[e]] += weight[e]
+  }
+  const inv = Float64Array.from(deg, (d) => (d > 0 ? 1 / Math.sqrt(d) : 0))
+  // column(c)(i): component i of the eigenvector with the (c + 2)-th largest eigenvalue of M.
+  let column: (c: number) => (i: number) => number
+  if ((options.method ?? 'lanczos') === 'dense') {
+    const M = new Float64Array(n * n)
+    for (let e = 0; e < from.length; e++)
+      M[from[e] * n + to[e]] = M[to[e] * n + from[e]] = weight[e] * inv[from[e]] * inv[to[e]]
+    const V = values(eigh(fromData(M, [n, n])).vectors)
+    column = (c) => (i) => V[i * n + c + 1]
+  } else {
+    // M·v over the edge list; eigenvalues of M lie in [−1, 1] and the wanted ones are its largest.
+    const product = (v: Tensor): Float64Array => {
+      const x = values(v)
+      const out = new Float64Array(n)
+      for (let e = 0; e < from.length; e++) {
+        const i = from[e]
+        const j = to[e]
+        const m = weight[e] * inv[i] * inv[j]
+        out[i] += m * x[j]
+        out[j] += m * x[i]
+      }
+      return out
+    }
+    const r = eigsh(product, n, { k, which: 'largest', tolerance: 1e-8, start: stream('umap-spectral') })
+    const V = values(r.vectors)
+    column = (c) => (i) => V[i * k + c + 1]
+  }
+  const Y = new Float64Array(n * dims)
+  for (let c = 0; c < dims; c++) {
+    const u = column(c)
+    let lo = Infinity
+    let hi = -Infinity
+    let big = 0
+    for (let i = 0; i < n; i++) {
+      const x = u(i)
+      lo = Math.min(lo, x)
+      hi = Math.max(hi, x)
+      if (Math.abs(x) > Math.abs(big)) big = x
+    }
+    // Flip so the entry of largest magnitude is positive, then scale to [0, 10].
+    const flip = big < 0
+    for (let i = 0; i < n; i++) Y[i * dims + c] = hi > lo ? (flip ? 10 * (hi - u(i)) : 10 * (u(i) - lo)) / (hi - lo) : 0
+  }
+  return Y
+}
+
 /** One epoch of UMAP's layout. */
 export interface UmapState extends Status {
   embedding: Tensor
@@ -190,28 +308,6 @@ export function umapSteps(
   // Edges below wmax/epochs are never sampled (umap-learn drops them).
   const period = Float64Array.from(weight, (w) => (w >= wmax / epochs ? wmax / w : Infinity))
   const clip = (g: number) => Math.max(-4, Math.min(4, g))
-  const spectralStart = (): Float64Array => {
-    const W = new Float64Array(n * n)
-    for (let e = 0; e < from.length; e++) W[from[e] * n + to[e]] = W[to[e] * n + from[e]] = weight[e]
-    const deg = new Float64Array(n)
-    for (let i = 0; i < n; i++) for (let j = 0; j < n; j++) deg[i] += W[i * n + j]
-    const M = new Float64Array(n * n)
-    for (let i = 0; i < n; i++)
-      for (let j = 0; j < n; j++) M[i * n + j] = deg[i] && deg[j] ? W[i * n + j] / Math.sqrt(deg[i] * deg[j]) : 0
-    const V = eigh(fromData(M, [n, n])).vectors.data as Float64Array
-    const Y = new Float64Array(n * dims)
-    for (let c = 0; c < dims; c++) {
-      let lo = Infinity
-      let hi = -Infinity
-      for (let i = 0; i < n; i++) {
-        const u = V[i * n + c + 1]
-        lo = Math.min(lo, u)
-        hi = Math.max(hi, u)
-      }
-      for (let i = 0; i < n; i++) Y[i * dims + c] = hi > lo ? (10 * (V[i * n + c + 1] - lo)) / (hi - lo) : 0
-    }
-    return Y
-  }
   return {
     name: 'umap-layout',
     init: ({ embedding, start = 'spectral' } = {}, s) => {
@@ -220,7 +316,7 @@ export function umapSteps(
       else if (start === 'random' || n <= dims + 1) {
         const r = child(s, 'layout')
         Y = Float64Array.from({ length: n * dims }, () => 20 * uniform(r) - 10)
-      } else Y = spectralStart()
+      } else Y = spectralLayout(graph, dims, { method: n > DENSE_SPECTRAL_UP_TO ? 'lanczos' : 'dense' })
       return { embedding: mat(Y, n, dims), t: 0, alpha: learningRate, samples: 0 }
     },
     step: (state, ctx) => {
@@ -282,14 +378,27 @@ export function umap(
     spread?: number
     negativeSamples?: number
     start?: 'spectral' | 'random'
+    /** Neighbour search (default 'auto': exact up to `DESCENT_ABOVE` rows, nearest-neighbour descent beyond). */
+    search?: NeighbourSearch
   } = {},
 ): Estimator<Dataset<Tensor>, UmapModel> {
-  const { neighbours = 15, epochs = 200, start = 'spectral', minDist = 0.1, spread = 1, ...rest } = params
+  const {
+    neighbours = 15,
+    epochs = 200,
+    start = 'spectral',
+    minDist = 0.1,
+    spread = 1,
+    search = 'auto',
+    ...rest
+  } = params
   return {
     name: 'umap',
-    params: { neighbours, epochs, start, minDist, spread, ...rest },
+    params: { neighbours, epochs, start, minDist, spread, search, ...rest },
     fit({ x }, options: FitOptions = {}) {
-      const graph = fuzzyGraph(x, neighbours)
+      const graph = fuzzyGraph(x, neighbours, {
+        search,
+        ...(options.stream ? { stream: child(options.stream, 'neighbours') } : {}),
+      })
       const training = trace(umapSteps(graph, { epochs, minDist, spread, ...rest }), { start }, epochs, {
         stream: options.stream,
         every: options.trace?.every ?? 5,
@@ -300,3 +409,29 @@ export function umap(
     },
   }
 }
+
+// ── Registry ─────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+defineModel(
+  {
+    key: 'umap',
+    module: 'unsupervised/embedding/neighbour',
+    name: 'UMAP',
+    summary: 'A fuzzy nearest-neighbour graph laid out by stochastic gradient descent on a cross-entropy.',
+    task: 'embedding',
+    capabilities: [],
+    transductive: true,
+    hyper: space({
+      neighbours: int(2, 100, { default: 15 }),
+      dims: int(1, 3, { default: 2 }),
+      epochs: int(1, 2000, { default: 200 }),
+      minDist: real(0, 1, { default: 0.1 }),
+      spread: real(0.1, 5, { default: 1 }),
+      start: oneOf(['spectral', 'random']),
+      search: oneOf(['auto', 'exact', 'descent']),
+    }),
+    notes: ['uniform-manifold-approximation-and-projection'],
+    cite: ['mcinnes2018'],
+  },
+  umap,
+)

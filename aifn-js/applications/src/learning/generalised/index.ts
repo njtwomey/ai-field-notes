@@ -1,7 +1,7 @@
 /**
  * `aifn-applied/learning/generalised`: generalised models on the likelihoods of `aifn/probability/likelihoods`. The
  * shared layer holds penalised iteratively reweighted least squares (`irls`), residuals, backfitting and
- * smoothing-parameter selection (penalised fits, GCV/UBRE and REML criteria); children: glm, gam (gap: ordinal).
+ * smoothing-parameter selection (penalised fits, GCV/UBRE and REML criteria); children: glm, gam, ordinal.
  */
 
 export { deviance, irls, type IrlsProblem, type IrlsState } from './irls'
@@ -18,3 +18,4 @@ export {
 } from './smoothing'
 export { glm } from './glm'
 export { gam } from './gam'
+export { ordinalRegression } from './ordinal'

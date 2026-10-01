@@ -4,7 +4,7 @@
  */
 
 import { dct } from 'aifn/foundation/fourier'
-import { dense, fromData, type Tensor } from 'aifn/foundation/tensor'
+import { astype, fromData, type Tensor } from 'aifn/foundation/tensor'
 import { readSignal, type Signal } from 'aifn/foundation/fourier'
 import { stft } from 'aifn/signal/spectral'
 import { windowValues } from 'aifn/signal/windows'
@@ -100,9 +100,9 @@ export function mfcc(x: Signal, fs: number, options: MfccOptions = {}): Mfcc {
   const { nfft = 512, hop = nfft / 4, nMels = 26, nMfcc = 13, window = 'hann', logOffset = 1e-10 } = options
   const v = readSignal(x, 'mfcc')
   const s = stft(v, { fs, nperseg: nfft, noverlap: nfft - hop, window, boundary: false, padded: false })
-  // A complex time–frequency map: values [bins, frames, 2] holding (re, im) pairs.
+  // A complex time–frequency map: complex128 values [bins, frames], stored interleaved (re, im).
   const [nbin, frames] = s.values.shape
-  const z = dense.data(s.values)
+  const z = astype(s.values, 'complex128').data
   // stft divides by the window's sum; undo it so the power is |Σ w x e^{−iωn}|², as in the usual MFCC recipe.
   const scale = windowValues(window, nfft, true).reduce((acc, w) => acc + w, 0)
   const power = new Float64Array(frames * nbin)

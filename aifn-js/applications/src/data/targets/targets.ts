@@ -8,6 +8,7 @@
 import type { LogDensity, Value, VectorLike } from 'aifn/foundation/contracts'
 import {
   add,
+  concat,
   exp,
   fromData,
   get,
@@ -22,6 +23,10 @@ import {
 } from 'aifn/foundation/tensor'
 import { inverse } from 'aifn/numerics/linalg'
 import { MultivariateNormal, Normal } from 'aifn/probability/distributions'
+import { transformLogDensity, type TransformedLogDensity } from 'aifn/probability/bijectors'
+import type { LogDensityInfo } from 'aifn/foundation/contracts'
+import { definer } from 'aifn/foundation/registry'
+import { int, real, space } from 'aifn/foundation/space'
 
 /** A vector input as a fresh Float64Array. */
 function vec(v: Tensor | VectorLike): Float64Array {
@@ -184,3 +189,105 @@ export function funnel(options: { dim?: number; scale?: number } = {}): LogDensi
     truth: { mean: fromData(new Float64Array(dim), [dim]) },
   }
 }
+
+/**
+ * Neal's funnel in its non-centred parameterisation: θ = (v, z₁, …) with v ~ N(0, s²) and zᵢ ~ N(0, 1) independent.
+ * It is `transformLogDensity(funnel, T)` for the map T(v, z) = (v, z e^{v/2}) onto the funnel's (v, x), whose
+ * log |det J_T| = (d − 1) v/2; `toOriginal` maps a draw back to the funnel and
+ * `fromOriginal` the other way. The density is an axis-aligned Gaussian, so one step size suits it everywhere and HMC
+ * does not diverge (Papaspiliopoulos, Roberts & Sköld, 2007, "A general framework for the parametrization of
+ * hierarchical models", Statistical Science 22(1)). Default d = 2, s = 3.
+ */
+export function nonCentredFunnel(options: { dim?: number; scale?: number } = {}): TransformedLogDensity {
+  const { dim = 2, scale = 3 } = options
+  const scaleRest = (t: Value, sign: 1 | -1) =>
+    concat([slice(t, [0, 1]), mul(slice(t, [1, null]), exp(mul(0.5 * sign, get(t, 0))))])
+  const nc = transformLogDensity(funnel({ dim, scale }), {
+    name: 'non-centring',
+    forward: (u) => scaleRest(u, 1),
+    inverse: (theta) => scaleRest(theta, -1),
+    logAbsDetJacobian: (u) => mul((dim - 1) / 2, get(u, 0)),
+  })
+  return {
+    ...nc,
+    name: 'non-centred funnel',
+    // The closed form in u: the density is N(0, s²) × N(0, 1)^(d − 1).
+    grad: (theta) => {
+      const x = vec(theta)
+      const g = new Float64Array(dim)
+      g[0] = -x[0] / (scale * scale)
+      for (let i = 1; i < dim; i++) g[i] = -x[i]
+      return g
+    },
+    truth: { mean: fromData(new Float64Array(dim), [dim]) },
+  }
+}
+
+// ── Registry ─────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+const logDensity = definer<LogDensityInfo>('log-density', 'data/targets')
+
+logDensity(
+  {
+    key: 'banana',
+    name: 'Banana',
+    summary: 'A Gaussian bent into a crescent by a quadratic shift of one coordinate, with exact moments.',
+    params: space({ a: real(0.1, 5, { default: 1 }), b: real(0, 2, { default: 1 }) }),
+    dim: 2,
+    truth: true,
+    notes: ['metropolis-hastings', 'hamiltonian-monte-carlo'],
+  },
+  banana,
+)
+
+logDensity(
+  {
+    key: 'gaussianTarget',
+    name: 'Gaussian target',
+    summary: 'A multivariate Gaussian N(μ, Σ); the mean and covariance are required arguments.',
+    params: space({}),
+    dim: null,
+    truth: true,
+    notes: ['markov-chain-monte-carlo'],
+  },
+  gaussianTarget,
+)
+
+logDensity(
+  {
+    key: 'gaussianMixtureTarget',
+    name: 'Gaussian mixture target',
+    summary: 'An isotropic Gaussian mixture, a multimodal test for samplers; the means and sd are required arguments.',
+    params: space({}),
+    dim: null,
+    truth: false,
+    notes: ['markov-chain-monte-carlo'],
+  },
+  gaussianMixtureTarget,
+)
+
+logDensity(
+  {
+    key: 'funnel',
+    name: "Neal's funnel",
+    summary: 'A hierarchical funnel whose scale varies over orders of magnitude, hard for fixed-step samplers.',
+    params: space({ dim: int(2, 20, { default: 2 }), scale: real(0.5, 10, { default: 3 }) }),
+    dim: null,
+    truth: false,
+    notes: ['hamiltonian-monte-carlo', 'reparameterisation-trick'],
+  },
+  funnel,
+)
+
+logDensity(
+  {
+    key: 'nonCentredFunnel',
+    name: 'Non-centred funnel',
+    summary: 'The funnel in its non-centred parametrisation, an isotropic Gaussian, with the map back to the funnel.',
+    params: space({ dim: int(2, 20, { default: 2 }), scale: real(0.5, 10, { default: 3 }) }),
+    dim: null,
+    truth: false,
+    notes: ['hamiltonian-monte-carlo', 'reparameterisation-trick'],
+  },
+  nonCentredFunnel,
+)

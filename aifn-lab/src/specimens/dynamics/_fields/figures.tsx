@@ -12,20 +12,24 @@ import {
 import { directionField, nullclines, type Segments } from '@lab/viz/drawing/fields'
 import { limitCycle } from 'aifn-applied/dynamics/nonlinear'
 import { normals, stream } from 'aifn/foundation/random'
-import { get, mul, neg, sin, stack, sub, toFlat, toRows, type Tensor } from 'aifn/foundation/tensor'
-import { useMemo, useState } from 'react'
-import { Player, Select, Slider, Switch, usePlayhead } from '@lab/controls'
-import { ControlRow, Figure } from '@lab/layout'
+import { get, imagPart, mul, neg, realPart, sin, stack, sub, toFlat, toRows, type Tensor } from 'aifn/foundation/tensor'
+import { useMemo } from 'react'
+import { Player, usePlayhead } from '@lab/controls'
+import { Figure } from '@lab/layout'
+import { choice, row, slider, toggle, useComputed, useFigureState, variants } from '@lab/state'
 import {
-  Heatmap,
+  Curve,
+  Handle,
+  Plot,
+  Points,
+  Raster,
   Readout,
-  XYChart,
+  Segments as SegmentsLayer,
   formatNumber,
-  type Handle,
-  type HeatmapOverlay,
-  type Segment,
-  type XYSeries,
+  useAxis,
 } from '@lab/viz'
+
+type Segment = { from: [number, number]; to: [number, number] }
 
 const fmt = (v: number) => formatNumber(Math.abs(v) < 1e-12 ? 0 : v)
 
@@ -58,7 +62,7 @@ type System = {
   section?: { point: number[]; normal: number[] }
 }
 
-const SYSTEMS: System[] = [
+const SYSTEM_LIST: System[] = [
   {
     value: 'pendulum',
     label: 'damped pendulum',
@@ -115,6 +119,26 @@ const SYSTEMS: System[] = [
   },
 ]
 
+const SYSTEMS = Object.fromEntries(SYSTEM_LIST.map((s) => [s.value, s])) as Record<string, System>
+/** Each system with its own parameter and its own start x₀ (placed on the chart, moved by its handle). */
+const caseOf = (s: System) => ({
+  label: s.label,
+  params: {
+    p: slider(s.param.min, s.param.max, s.param.initial, { label: s.param.label, step: 0.01 }),
+    sx: slider(s.box[0][0], s.box[0][1], s.start[0], { onChart: true, label: 'x₀' }),
+    sy: slider(s.box[1][0], s.box[1][1], s.start[1], { onChart: true, label: 'y₀' }),
+  },
+})
+const SYSTEM = variants(
+  {
+    pendulum: caseOf(SYSTEMS.pendulum),
+    'van-der-pol': caseOf(SYSTEMS['van-der-pol']),
+    duffing: caseOf(SYSTEMS.duffing),
+    'lotka-volterra': caseOf(SYSTEMS['lotka-volterra']),
+  },
+  { label: '1 · system', choiceLabel: 'system', initial: 'duffing' },
+)
+
 /** The time a phase portrait plays over, and its frames. */
 const PORTRAIT_T = 15
 const PORTRAIT_FRAMES = 150
@@ -122,25 +146,28 @@ const PORTRAIT_FRAMES = 150
 const PATH_SUBSTEPS = 6
 
 export function PhasePortraitSpecimen() {
-  const [which, setWhich] = useState('duffing')
-  const system = SYSTEMS.find((s) => s.value === which)!
-  const [params, setParams] = useState<Record<string, number>>(() =>
-    Object.fromEntries(SYSTEMS.map((s) => [s.value, s.param.initial])),
-  )
-  const p = params[which]
-  const [starts, setStarts] = useState<Record<string, [number, number]>>(() =>
-    Object.fromEntries(SYSTEMS.map((s) => [s.value, s.start])),
-  )
-  const x0 = starts[which]
-  const [showNullclines, setShowNullclines] = useState(true)
-  const [showManifolds, setShowManifolds] = useState(true)
-  const [showCycle, setShowCycle] = useState(false)
-  const [showParticles, setShowParticles] = useState(true)
+  const state = useFigureState({
+    system: SYSTEM,
+    reveal: row('2 · reveal', {
+      showNullclines: toggle(true, 'nullclines'),
+      showManifolds: toggle(true, 'saddle manifolds'),
+      showCycle: toggle(false, 'limit cycle (Van der Pol)'),
+      showParticles: toggle(true, 'particles'),
+    }),
+  })
+  const which = state.system.key
+  const system = SYSTEMS[which]
+  const { p, sx, sy } = state.system.values
+  const x0 = useMemo((): [number, number] => [sx, sy], [sx, sy])
+  const { showNullclines, showManifolds, showParticles } = state.reveal
+  const showCycle = state.reveal.showCycle && !!system.section
   const [frame, setFrame] = usePlayhead(PORTRAIT_FRAMES + 1)
 
   const f = useMemo(() => system.field(p), [system, p])
   const box = system.box as Box
   const grid = useMemo(() => ({ x: system.box[0], y: system.box[1] }), [system])
+  const xAxis = useAxis({ label: 'x', range: system.box[0] })
+  const yAxis = useAxis({ label: 'y', range: system.box[1] })
   const arrows = useMemo<Segment[]>(() => {
     const d = directionField(f, { x: grid.x, y: grid.y, nx: 24, ny: 18 }, { scale: 0.6 })
     const a = toRows(d.start)
@@ -166,7 +193,8 @@ export function PhasePortraitSpecimen() {
     [f, x0, system, showCycle],
   )
   // The trajectory from x₀, PATH_SUBSTEPS RK4 steps per frame; it may stop early at a fixed point or the box's edge.
-  const path = useMemo(() => {
+  // 900 RK4 steps through tensor primitives: dragging x₀ recomputes it as often as a frame allows.
+  const pathRun = useComputed(() => {
     const s = streamline(f, x0, {
       t: PORTRAIT_T,
       steps: PORTRAIT_FRAMES * PATH_SUBSTEPS,
@@ -175,6 +203,7 @@ export function PhasePortraitSpecimen() {
     })
     return curve(s)
   }, [f, x0, box])
+  const path = pathRun.value
   // A cloud of particles on a grid over the box, each carried by the flow: its position at every frame.
   const particles = useMemo(() => {
     if (!showParticles) return null
@@ -200,131 +229,81 @@ export function PhasePortraitSpecimen() {
     x: cs.flatMap((c) => [...c.x, NaN]),
     y: cs.flatMap((c) => [...c.y, NaN]),
   })
-  const series = useMemo(() => {
-    const out: XYSeries[] = []
-    if (showNullclines) {
-      out.push({ name: 'ẋ = 0 nullcline', type: 'line', dashed: true, slot: 1, ...clines[0] })
-      out.push({ name: 'ẏ = 0 nullcline', type: 'line', dashed: true, slot: 2, ...clines[1] })
-    }
-    if (manifolds.length) {
-      out.push({
-        name: 'stable manifolds',
-        type: 'line',
-        slot: 3,
-        ...join(manifolds.filter((m) => m.kind === 'stable')),
-      })
-      out.push({
-        name: 'unstable manifolds',
-        type: 'line',
-        slot: 4,
-        ...join(manifolds.filter((m) => m.kind === 'unstable')),
-      })
-    }
-    if (cycle) out.push({ name: 'limit cycle', type: 'line', slot: 5, ...curve(cycle.orbit) })
-    out.push({
-      name: 'fixed points',
-      type: 'scatter',
-      emphasis: true,
-      x: fps.map((q) => toFlat(q.point)[0]),
-      y: fps.map((q) => toFlat(q.point)[1]),
-    })
-    return out
-  }, [showNullclines, clines, manifolds, cycle, fps])
+  const stable = useMemo(() => join(manifolds.filter((m) => m.kind === 'stable')), [manifolds])
+  const unstable = useMemo(() => join(manifolds.filter((m) => m.kind === 'unstable')), [manifolds])
+  const cycleCurve = useMemo(() => (cycle ? curve(cycle.orbit) : null), [cycle])
+  const fixed = useMemo(() => ({ x: fps.map((q) => toFlat(q.point)[0]), y: fps.map((q) => toFlat(q.point)[1]) }), [fps])
   // The moving parts: the particles, the trajectory so far and its head.
   const upTo = Math.min(path.x.length - 1, frame * PATH_SUBSTEPS)
   const cloud = particles?.[frame]
-  const live = useMemo(
-    (): XYSeries[] => [
-      { name: 'particles', type: 'scatter', muted: true, x: cloud?.x ?? [], y: cloud?.y ?? [] },
-      { name: 'trajectory', type: 'line', slot: 0, x: path.x.slice(0, upTo + 1), y: path.y.slice(0, upTo + 1) },
-      { name: 'x(t)', type: 'scatter', emphasis: true, x: [path.x[upTo]], y: [path.y[upTo]] },
-    ],
-    [cloud, path, upTo],
-  )
-  const clamp = (v: number, [a, b]: readonly [number, number]) => Math.min(b, Math.max(a, v))
-  const handles: Handle[] = [
-    {
-      kind: 'point',
-      at: x0,
-      label: 'x₀',
-      onDrag: ([a, b]) => setStarts((s) => ({ ...s, [which]: [clamp(a, grid.x), clamp(b, grid.y)] })),
-    },
-  ]
   const time = (k: number) => `t = ${formatNumber((PORTRAIT_T * k) / PORTRAIT_FRAMES)}`
   return (
     <Figure
       title="Phase portrait"
-      description="Fixed points, their linearisation and the nullclines organise every trajectory of a planar flow: drag the start and play the flow to watch the path and a cloud of particles follow the arrows towards an attractor."
+      purpose="Fixed points, their linearisation and the nullclines organise every trajectory of a planar flow: drag the start and play the flow to watch the path and a cloud of particles follow the arrows towards an attractor."
       defaultSize="L"
+      state={state}
       controls={
-        <>
-          <ControlRow label="1 · system">
-            <Select label="system" value={which} onChange={setWhich} options={SYSTEMS} />
-            <Slider
-              label={system.param.label}
-              value={p}
-              min={system.param.min}
-              max={system.param.max}
-              step={0.01}
-              onChange={(v) => setParams((s) => ({ ...s, [which]: v }))}
-            />
-          </ControlRow>
-          <ControlRow label="2 · reveal">
-            <Switch label="nullclines" checked={showNullclines} onChange={setShowNullclines} />
-            <Switch label="saddle manifolds" checked={showManifolds} onChange={setShowManifolds} />
-            {system.section && <Switch label="limit cycle" checked={showCycle} onChange={setShowCycle} />}
-            <Switch label="particles" checked={showParticles} onChange={setShowParticles} />
-          </ControlRow>
-          <ControlRow label="3 · time">
-            <Player
-              className="col-span-full"
-              value={frame}
-              onChange={setFrame}
-              count={PORTRAIT_FRAMES + 1}
-              format={time}
-              label="time"
-              duration={5}
-            />
-          </ControlRow>
-        </>
+        <Player
+          className="col-span-full"
+          value={frame}
+          onChange={setFrame}
+          count={PORTRAIT_FRAMES + 1}
+          format={time}
+          label="3 · time"
+          duration={5}
+        />
       }
-      readouts={
-        <>
-          <Readout label="time" value={time(frame)} />
-          {fps.map((q, k) => (
-            <Readout
-              key={k}
-              label={`(${fmt(toFlat(q.point)[0])}, ${fmt(toFlat(q.point)[1])})`}
-              value={`${q.kind}; λ = ${toFlat(q.eigen.real)
-                .map((re, i) => {
-                  const im = toFlat(q.eigen.imag)[i]
-                  return Math.abs(im) < 1e-9 ? fmt(re) : `${fmt(re)} ${im < 0 ? '−' : '+'} ${fmt(Math.abs(im))}i`
-                })
-                .join(', ')}`}
-            />
-          ))}
-          {cycle && (
-            <Readout
-              label="limit cycle"
-              value={`period ${fmt(cycle.period)}, Floquet multiplier ${fmt(cycle.multiplier)}${cycle.converged ? '' : ' (not converged)'}`}
-            />
-          )}
-        </>
-      }
+      readouts={{
+        'fixed points': (
+          <>
+            {fps.map((q, k) => (
+              <Readout
+                key={k}
+                label={`(${fmt(toFlat(q.point)[0])}, ${fmt(toFlat(q.point)[1])})`}
+                value={`${q.kind}; λ = ${toFlat(realPart(q.eigen.values))
+                  .map((re, i) => {
+                    const im = toFlat(imagPart(q.eigen.values))[i]
+                    return Math.abs(im) < 1e-9 ? fmt(re) : `${fmt(re)} ${im < 0 ? '−' : '+'} ${fmt(Math.abs(im))}i`
+                  })
+                  .join(', ')}`}
+              />
+            ))}
+          </>
+        ),
+        flow: (
+          <>
+            <Readout label="time" value={time(frame)} />
+            {cycle && (
+              <Readout
+                label="limit cycle"
+                value={`period ${fmt(cycle.period)}, Floquet multiplier ${fmt(cycle.multiplier)}${cycle.converged ? '' : ' (not converged)'}`}
+              />
+            )}
+          </>
+        ),
+      }}
       caption={`Grey ticks: the direction field. Dashed: the nullclines, where the flow is vertical (ẋ = 0) or horizontal (ẏ = 0); fixed points (ink) sit where they cross, found by Newton's method and classified by the eigenvalues of the Jacobian. Play the time: the trajectory from x₀ is drawn up to t, and 120 particles that start on a grid over the box move with the flow (by RK4) and gather on the attractors. Drag x₀ to start the trajectory elsewhere. The stable manifolds of a saddle separate the basins of attraction.`}
     >
-      <XYChart
-        series={series}
-        live={live}
-        segments={arrows}
-        handles={handles}
-        xRange={system.box[0]}
-        yRange={system.box[1]}
-        axisKey={which}
-        rescaleOnChange={false}
-        xLabel="x"
-        yLabel="y"
-      />
+      <Plot x={xAxis} y={yAxis}>
+        <SegmentsLayer segments={arrows} />
+        {showNullclines && <Curve name="ẋ = 0 nullcline" x={clines[0].x} y={clines[0].y} slot={1} dashed />}
+        {showNullclines && <Curve name="ẏ = 0 nullcline" x={clines[1].x} y={clines[1].y} slot={2} dashed />}
+        {manifolds.length > 0 && <Curve name="stable manifolds" x={stable.x} y={stable.y} slot={3} />}
+        {manifolds.length > 0 && <Curve name="unstable manifolds" x={unstable.x} y={unstable.y} slot={4} />}
+        {cycleCurve && <Curve name="limit cycle" x={cycleCurve.x} y={cycleCurve.y} slot={5} />}
+        <Points name="fixed points" x={fixed.x} y={fixed.y} emphasis />
+        {cloud && <Points name="particles" x={cloud.x} y={cloud.y} muted thin live />}
+        <Curve
+          name="trajectory"
+          x={path.x.slice(0, upTo + 1)}
+          y={path.y.slice(0, upTo + 1)}
+          slot={0}
+          stale={pathRun.stale}
+        />
+        <Points name="x(t)" x={[path.x[upTo]]} y={[path.y[upTo]]} emphasis live />
+        <Handle {...state.handle(['system.sx', 'system.sy'], { label: 'x₀' })} />
+      </Plot>
     </Figure>
   )
 }
@@ -380,8 +359,18 @@ const rho0 = (x: Tensor) => {
 }
 
 export function TransportSpecimen() {
-  const [which, setWhich] = useState('spiral')
-  const [particles, setParticles] = useState(true)
+  const state = useFigureState({
+    flow: row('1 · flow', {
+      which: choice(
+        FLOWS.map(({ value, label }) => ({ value, label })),
+        'spiral',
+        { label: 'flow' },
+      ),
+    }),
+    reveal: row('2 · reveal', { particles: toggle(true, 'particles pushed by the flow') }),
+  })
+  const which = state.flow.which
+  const particles = state.reveal.particles
   const [frame, setFrame] = usePlayhead(T_FRAMES + 1)
   const flow = FLOWS.find((f) => f.value === which)!
   const field = useMemo<VectorField>(
@@ -451,24 +440,9 @@ export function TransportSpecimen() {
   }, [])
   const grid = density.frames[frame]
   const now = cloud[frame]
-  const overlay = useMemo(
-    (): HeatmapOverlay[] => [
-      { name: 'streamlines', type: 'line', thin: true, slot: 3, ...context.streamlines },
-      { name: 'ρ₀ at 1σ and 2σ', type: 'line', thin: true, slot: 2, ...rings },
-      { name: 'path of ρ₀’s centre', type: 'line', slot: 4, ...context.centre },
-      // Drawn as the vertices of a line broken after every point: small dots that leave the density visible.
-      {
-        name: 'particles',
-        type: 'line',
-        showPoints: true,
-        thin: true,
-        slot: 7,
-        x: particles ? now.x.flatMap((v) => [v, NaN]) : [],
-        y: particles ? now.y.flatMap((v) => [v, NaN]) : [],
-      },
-    ],
-    [context, rings, now, particles],
-  )
+  const dots = useMemo(() => (particles ? { x: now.x, y: now.y } : { x: [], y: [] }), [now, particles])
+  const xAxis = useAxis({ label: 'x' })
+  const yAxis = useAxis({ label: 'y', equal: xAxis })
   // Colour by log₁₀ ρ over the two decades below the run's peak, held for the whole run: a contracting flow's peak grows
   // e^{0.6t}, so on a linear scale held to its final peak the starting density would be nearly white.
   const top = Math.log10(density.peak)
@@ -485,52 +459,41 @@ export function TransportSpecimen() {
   return (
     <Figure
       title="Transport of a density along a flow"
-      description="A density carried by x′ = f(x) changes along each trajectory at the rate −ρ ∇·f: area-preserving flows only reshape it, contracting ones concentrate it and expanding ones thin it out."
+      purpose="A density carried by x′ = f(x) changes along each trajectory at the rate −ρ ∇·f: area-preserving flows only reshape it, contracting ones concentrate it and expanding ones thin it out."
+      state={state}
       controls={
-        <>
-          <ControlRow label="1 · flow">
-            <Select label="flow" value={which} onChange={setWhich} options={FLOWS} />
-            <Switch label="particles pushed by the flow" checked={particles} onChange={setParticles} />
-          </ControlRow>
-          <ControlRow label="2 · time">
-            <Player
-              className="col-span-full"
-              value={frame}
-              onChange={setFrame}
-              count={T_FRAMES + 1}
-              format={time}
-              label="time"
-              duration={4}
+        <Player
+          className="col-span-full"
+          value={frame}
+          onChange={setFrame}
+          count={T_FRAMES + 1}
+          format={time}
+          label="3 · time"
+          duration={4}
+        />
+      }
+      readouts={{
+        'at t': (
+          <>
+            <Readout label="t" value={fmt(t)} />
+            <Readout label="mass on the grid" value={fmt(mass)} />
+            <Readout label="peak density" value={fmt(Math.max(...grid.map((r) => Math.max(...r))))} />
+            <Readout
+              label="∫₀ᵗ ∇·f ds along the particles"
+              value={finite.length ? `${fmt(Math.min(...finite))} to ${fmt(Math.max(...finite))}` : '–'}
             />
-          </ControlRow>
-        </>
-      }
-      readouts={
-        <>
-          <Readout label="t" value={fmt(t)} />
-          <Readout label="mass on the grid" value={fmt(mass)} />
-          <Readout label="peak density" value={fmt(Math.max(...grid.map((r) => Math.max(...r))))} />
-          <Readout
-            label="∫₀ᵗ ∇·f ds along the particles"
-            value={finite.length ? `${fmt(Math.min(...finite))} to ${fmt(Math.max(...finite))}` : '–'}
-          />
-        </>
-      }
-      caption="ρ(x, t) = ρ₀(φ₋ₜ(x)) · exp(−∫₀ᵗ ∇·f ds), computed by following each grid point backwards along the flow (the method of characteristics); ρ₀ is a Gaussian at (1, 0.5), its 1σ and 2σ circles drawn thin. Play the time. The spiral sink contracts areas (∇·f = −0.6), so the density rises as e^{0.6t}; the pendulum and the saddle preserve area (∇·f = 0), so the peak stays put while the blob shears or stretches; the source expands it. Colour is log₁₀ ρ over two decades below the run's peak, held over the whole run, so a stronger colour means a denser blob at any time. The particles are 120 draws from ρ₀ moved forwards by the same flow: they cover the same region as the density. Mass is conserved until the density leaves the grid."
+          </>
+        ),
+      }}
+      caption="ρ(x, t) = ρ₀(φ₋ₜ(x)) · exp(−∫₀ᵗ ∇·f ds), computed by following each grid point backwards along the flow (the method of characteristics); ρ₀ is a Gaussian at (1, 0.5), its 1σ and 2σ circles drawn thin, with streamlines of the flow and the path of ρ₀'s centre. Play the time. The spiral sink contracts areas (∇·f = −0.6), so the density rises as e^{0.6t}; the pendulum and the saddle preserve area (∇·f = 0), so the peak stays put while the blob shears or stretches; the source expands it. Colour is log₁₀ ρ over two decades below the run's peak, held over the whole run, so a stronger colour means a denser blob at any time. The particles are 120 draws from ρ₀ moved forwards by the same flow: they cover the same region as the density. Mass is conserved until the density leaves the grid."
     >
-      <Heatmap
-        x={axis}
-        y={axis}
-        z={logGrid}
-        range={range}
-        xLabel="x"
-        yLabel="y"
-        valueLabel="log₁₀ ρ"
-        equalAspect
-        axisKey={which}
-        rescaleOnChange={false}
-        overlay={overlay}
-      />
+      <Plot x={xAxis} y={yAxis}>
+        <Raster x={axis} y={axis} z={logGrid} range={range} valueLabel="log₁₀ ρ" />
+        <Curve name="streamlines" x={context.streamlines.x} y={context.streamlines.y} slot={3} thin />
+        <Curve name="ρ₀ at 1σ and 2σ" x={rings.x} y={rings.y} slot={2} thin />
+        <Curve name="path of ρ₀’s centre" x={context.centre.x} y={context.centre.y} slot={4} />
+        <Points name="particles" x={dots.x} y={dots.y} slot={7} size={4} live />
+      </Plot>
     </Figure>
   )
 }

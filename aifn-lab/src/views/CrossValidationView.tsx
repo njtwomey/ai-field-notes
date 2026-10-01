@@ -2,12 +2,12 @@ import { useMemo, useState } from 'react'
 import { toRows } from 'aifn/foundation/tensor'
 import type { CrossValidation } from 'aifn/learning/validate'
 import { Select } from '@lab/controls'
-import { Figure } from '@lab/layout'
-import { ChartSize, Heatmap, Readout, XYChart, type XYSeries } from '@lab/viz'
+import { PanelSlot } from '@lab/layout'
+import { Bars, Curve, Plot, Plots, Raster, Readout, useAxis } from '@lab/viz'
 import { formatValue } from './format'
-import type { FrameProps } from './frame'
+import { registerKind, registerView } from './registry'
 
-export type CrossValidationViewProps = FrameProps & {
+export type CrossValidationPanelProps = {
   /** The result of `crossValidate` (or the outer level of `nested`). */
   result: CrossValidation<unknown>
   /** The metric drawn first (default: the first). */
@@ -20,7 +20,7 @@ const ROLES = ['train', 'test'] as const
  * A cross-validation at a glance: the fold assignment matrix (one row per fold, one column per data row; train, test
  * or unused) above the chosen metric on each fold's test rows, with its mean and ± one standard deviation.
  */
-export function CrossValidationView({ result, metric, title, controls, readouts, ...frame }: CrossValidationViewProps) {
+export function CrossValidationPanel({ result, metric }: CrossValidationPanelProps) {
   const names = Object.keys(result.scores)
   const [chosen, setChosen] = useState(metric ?? names[0])
   const shown = names.includes(chosen) ? chosen : names[0]
@@ -33,51 +33,66 @@ export function CrossValidationView({ result, metric, title, controls, readouts,
       z: rows,
     }
   }, [result])
-  const bars = useMemo((): XYSeries[] => {
+  const bars = useMemo(() => {
     const scores = Array.from(result.scores[shown]?.data ?? [])
-    const folds = scores.map((_, f) => f + 1)
-    const mean = result.mean[shown]
-    const sd = result.std[shown]
-    const ends = [0.5, scores.length + 0.5]
-    const out: XYSeries[] = [
-      { name: shown, type: 'bar', x: folds, y: scores, slot: 1 },
-      { name: 'mean', type: 'line', x: ends, y: [mean, mean], emphasis: true },
-    ]
-    if (Number.isFinite(sd)) {
-      out.push({ name: '± 1 sd', type: 'line', x: ends, y: [mean - sd, mean - sd], muted: true, dashed: true })
-      out.push({ name: '± 1 sd', type: 'line', x: ends, y: [mean + sd, mean + sd], muted: true, dashed: true })
+    return {
+      folds: scores.map((_, f) => f),
+      scores,
+      labels: scores.map((_, f) => String(f + 1)),
+      ends: [-0.5, scores.length - 0.5],
+      mean: result.mean[shown],
+      sd: result.std[shown],
     }
-    return out
   }, [result, shown])
+  const rowAxis = useAxis({ label: 'row' })
+  const foldRows = useAxis({ label: 'fold', format: (v) => v.toFixed(0) })
+  const foldAxis = useAxis({ label: 'fold', categories: bars.labels })
+  const scoreAxis = useAxis({ label: shown })
+  const { mean, sd, ends } = bars
   return (
-    <Figure
-      title={title ?? `Cross-validation: ${result.splitter}`}
-      defaultSize="L"
-      {...frame}
-      controls={
+    <>
+      {names.length > 1 && (
+        <PanelSlot slot="controls">
+          <Select label="metric" value={shown} onChange={setChosen} options={names} />
+        </PanelSlot>
+      )}
+      <PanelSlot slot="readouts">
         <>
-          {controls}
-          {names.length > 1 && <Select label="metric" value={shown} onChange={setChosen} options={names} />}
-        </>
-      }
-      readouts={
-        <>
-          {readouts}
           <Readout label="folds" value={result.folds.length} />
           <Readout label={`mean ${shown}`} value={formatValue(result.mean[shown])} />
           <Readout label="sd over folds" value={formatValue(result.std[shown])} />
           <Readout label="direction" value={`${result.directions[shown]} is better`} />
         </>
-      }
-    >
-      <div className="flex flex-col gap-3">
-        <ChartSize scale={0.55}>
-          <Heatmap x={x} y={y} z={z} scale="categorical" categoryNames={ROLES} xLabel="row" yLabel="fold" />
-        </ChartSize>
-        <ChartSize scale={0.45}>
-          <XYChart series={bars} xLabel="fold" yLabel={shown} integerX />
-        </ChartSize>
-      </div>
-    </Figure>
+      </PanelSlot>
+      <Plots rows={2} heights={[55, 45]}>
+        <Plot x={rowAxis} y={foldRows}>
+          <Raster x={x} y={y} z={z} scale="categorical" categoryNames={ROLES} valueLabel="role" />
+        </Plot>
+        <Plot x={foldAxis} y={scoreAxis}>
+          <Bars name={shown} x={bars.folds} y={bars.scores} slot={1} />
+          <Curve name="mean" x={ends} y={[mean, mean]} emphasis />
+          {Number.isFinite(sd) && <Curve name="± 1 sd" x={ends} y={[mean - sd, mean - sd]} muted dashed />}
+          {Number.isFinite(sd) && <Curve name="± 1 sd" x={ends} y={[mean + sd, mean + sd]} muted dashed />}
+        </Plot>
+      </Plots>
+    </>
   )
 }
+
+registerKind(
+  'cross-validation',
+  (o) =>
+    typeof o === 'object' &&
+    o !== null &&
+    'assignment' in o &&
+    'scores' in o &&
+    'folds' in o &&
+    typeof (o as CrossValidation<unknown>).splitter === 'string',
+)
+registerView<CrossValidation<unknown>>({
+  key: 'cross-validation/folds',
+  kind: 'cross-validation',
+  description: 'The fold assignment matrix above a metric on each fold, with its mean and ± one standard deviation.',
+  title: (r) => `Cross-validation: ${r.splitter}`,
+  render: (r) => <CrossValidationPanel result={r} />,
+})

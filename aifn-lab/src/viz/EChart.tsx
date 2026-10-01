@@ -565,12 +565,21 @@ function handlesSeries(mode: Mode) {
 }
 
 function handlesPatch(handles: Handle[]) {
+  // An x guide's label above its top end (the Plot keeps a row for it); a y guide's inside the plot above its right
+  // end, where the right margin cannot clip it.
   return {
     id: HANDLES_ID,
     data: handles.flatMap((h) => (h.kind === 'point' ? [h.at] : [])),
     markLine: {
       data: handles.flatMap((h) =>
-        h.kind === 'point' ? [] : [{ [h.kind === 'x' ? 'xAxis' : 'yAxis']: h.at, label: { formatter: h.label ?? '' } }],
+        h.kind === 'point'
+          ? []
+          : [
+              {
+                [h.kind === 'x' ? 'xAxis' : 'yAxis']: h.at,
+                label: { formatter: h.label ?? '', position: h.kind === 'x' ? 'end' : 'insideEndTop' },
+              },
+            ],
       ),
     },
   }

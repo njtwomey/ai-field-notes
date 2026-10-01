@@ -23,3 +23,4 @@ export {
   type ProximalGradientOptions,
   type ProximalGradientState,
 } from './proximal'
+export { proximalAlgorithms } from './registry'

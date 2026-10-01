@@ -9,8 +9,10 @@
  */
 
 import {
+  add,
   eye,
   fromData,
+  isTraced,
   matmul,
   mul,
   neg,
@@ -20,14 +22,33 @@ import {
   shapeOfValue,
   type Tensor,
   type TensorResult,
+  sub,
   transpose,
   unwrap,
   definePrimitive,
+  zeros,
   type Value,
 } from 'aifn/foundation/tensor'
 import type { Index } from 'aifn/foundation/contracts'
-import { ShapeError } from 'aifn/foundation/errors'
-import { dense, denseSquare, EPS, LinAlgError, matrix, maxAbs, untraced, wellConditioned, type Dense } from './dense'
+import { AifnError, ShapeError } from 'aifn/foundation/errors'
+import { dense, denseSquare, EPS, LinAlgError, matrix, maxAbs, wellConditioned, type Dense } from './dense'
+import { matrixTrace } from './products'
+import {
+  column,
+  concrete,
+  concreteExamples,
+  exampleOf,
+  float64Aval,
+  foldColumns,
+  kernelBatch,
+  lowerMask,
+  pack,
+  packRaw,
+  scaleOf,
+  unpack,
+  upperMask,
+} from './rules'
+import { solveTriangular } from './triangular'
 
 /**
  * A matrix factored once, PA = LU, for repeated solves: `luSolve(f, b)` substitutes with it, and derivatives of the
@@ -49,12 +70,12 @@ export type LuFactor<A extends Value = Tensor> = {
   readonly singular: boolean
 }
 
-/** The result of `lu`: the factor of `luFactor` with L, U and P unpacked as matrices. */
-export type LU = LuFactor & {
+/** The result of `lu`: the factor of `luFactor` with L, U and P unpacked as matrices (L and U traced for traced A). */
+export type LU<F extends Value = Tensor> = LuFactor<F> & {
   /** Unit lower-triangular factor (n×n). */
-  readonly L: Tensor
+  readonly L: F
   /** Upper-triangular factor (n×n). */
-  readonly U: Tensor
+  readonly U: F
   /** Permutation matrix with PA = LU. */
   readonly P: Tensor
 }
@@ -90,7 +111,10 @@ export function factor({ n, a }: Dense): { perm: Int32Array; sign: 1 | -1; singu
 }
 
 /** The raw factor of a square matrix (traced input is read through its value). */
-function factorOf(a: Value, where: string): { packed: Float64Array; n: number; perm: Int32Array; sign: 1 | -1; singular: boolean } {
+function factorOf(
+  a: Value,
+  where: string,
+): { packed: Float64Array; n: number; perm: Int32Array; sign: 1 | -1; singular: boolean } {
   const d = denseSquare(a, where)
   return { ...factor(d), packed: d.a, n: d.n }
 }
@@ -107,29 +131,120 @@ export function luFactor<A extends Value>(a: A): LuFactor<A> {
   return { matrix: a, packed: matrix(packed, n, n), perm, sign, singular }
 }
 
-/**
- * LU factorisation with partial pivoting of a square matrix, unpacked: PA = LU with L unit lower-triangular, U upper
- * triangular and P the permutation matrix (for display and teaching; `luFactor` is the solver's form). Never throws
- * for singular input: `singular` reports it. Non-finite entries throw `LinAlgError`; traced input throws
- * `NotDifferentiableError` (L and U have no derivative rule; differentiate through `luSolve` instead).
- */
-export function lu(a: Tensor): LU {
-  untraced(a, 'lu')
-  const f = luFactor(a)
-  const n = f.packed.shape[0]
-  const packed = f.packed.data
+/** L (unit lower) and U (upper), n×n each, unpacked from a packed factor. */
+function unpackLU(packed: ArrayLike<number>, n: number): { L: Float64Array; U: Float64Array } {
   const L = new Float64Array(n * n)
   const U = new Float64Array(n * n)
-  const P = new Float64Array(n * n)
   for (let i = 0; i < n; i++) {
-    P[i * n + f.perm[i]] = 1
     for (let j = 0; j < n; j++) {
       if (j < i) L[i * n + j] = packed[i * n + j]
       else U[i * n + j] = packed[i * n + j]
     }
     L[i * n + i] = 1
   }
-  return { ...f, L: matrix(L, n, n), U: matrix(U, n, n), P: matrix(P, n, n) }
+  return { L, U }
+}
+
+/** The permutation matrix P of a row permutation (row i of PA is row perm[i] of A). */
+function permutationMatrix(perm: ArrayLike<number>): Tensor {
+  const n = perm.length
+  const P = new Float64Array(n * n)
+  for (let i = 0; i < n; i++) P[i * n + perm[i]] = 1
+  return matrix(P, n, n)
+}
+
+/** Parameters of the `lu` primitive: the factor of its input (computed when absent). */
+type LuParams = {
+  readonly factor?: { readonly packed: ArrayLike<number>; readonly perm: Int32Array; readonly singular: boolean }
+}
+
+/**
+ * The derivative of L and U does not exist at a singular A (U⁻¹ is needed): report it, example by example inside
+ * `vmap`. The test is the factorisation's: a pivot of U at most n·ε·max|A|.
+ */
+function refuseSingular(a: Value, U: Value, n: number): void {
+  const us = concreteExamples(U)
+  const as = concreteExamples(a)
+  if (us === null || as === null) return
+  us.forEach((u, b) => {
+    const tolerance = n * EPS * scaleOf(exampleOf(as, b) ?? [])
+    for (let i = 0; i < n; i++) {
+      if (Math.abs(u[i * n + i]) <= tolerance) {
+        const which = us.length > 1 ? ` (batch example ${b})` : ''
+        throw new LinAlgError(
+          `lu: the matrix${which} is singular to working precision, so its factor cannot be differentiated`,
+          'singular',
+        )
+      }
+    }
+  })
+}
+
+/** L, U and P (n×n each) of a packed output of the `lu` primitive (or its tangent or cotangent). */
+const parts = (v: Value, n: number): Value[] =>
+  unpack(v, [
+    [n, n],
+    [n, n],
+    [n, n],
+  ])
+
+// Rules for PA = LU with P held fixed (it is locally constant): with X = L⁻¹ P Ȧ U⁻¹, the tangents are
+// L̇ = L·tril(X, −1) and U̇ = triu(X)·U, and the adjoint is Ā = Pᵀ L⁻ᵀ (tril(LᵀL̄, −1) + triu(ŪUᵀ)) U⁻ᵀ (Giles, 2008,
+// §3.1; de Hoog, Anderssen and Lukas, 2011, "Differentiation of matrix functionals using triangular factorization").
+// The output is L, U and P packed into one vector (in that order); P is part of the output, rather than a parameter,
+// so that the rules read each example's own permutation inside `vmap`. P's tangent is zero and its cotangent ignored.
+const luOp: Op<LuParams> = definePrimitive<LuParams>({
+  id: 'numerics/linalg/lu',
+  arity: 1,
+  impl: ([a], p) => {
+    const f = p.factor ?? factorOf(a, 'lu')
+    const n = f.perm.length
+    const { L, U } = unpackLU(f.packed, n)
+    return packRaw([L, U, permutationMatrix(f.perm).data as Float64Array])
+  },
+  vjp: (g, [a], out) => {
+    const n = shapeOfValue(a)[0]
+    const [L, U, P] = parts(out, n)
+    refuseSingular(a, U, n)
+    const [gL, gU] = parts(g, n)
+    const Z = add(mul(matmul(transpose(L), gL), lowerMask(n, false)), mul(matmul(gU, transpose(U)), upperMask(n)))
+    const W = transpose(solveTriangular(U, transpose(Z), { lower: false }))
+    const LW = solveTriangular(L, W, { transpose: true, unitDiagonal: true })
+    return [matmul(transpose(P), LW)]
+  },
+  jvp: ([t], [a], out) => {
+    if (t === null) return null
+    const n = shapeOfValue(a)[0]
+    const [L, U, P] = parts(out, n)
+    refuseSingular(a, U, n)
+    const left = solveTriangular(L, matmul(P, t), { unitDiagonal: true })
+    const X = transpose(solveTriangular(U, transpose(left), { lower: false, transpose: true }))
+    return pack([matmul(L, mul(X, lowerMask(n, false))), matmul(mul(X, upperMask(n)), U), zeros([n, n])])
+  },
+  batch: kernelBatch('numerics/linalg/lu'),
+  shape: ([a]) => float64Aval([3 * a.shape[0] * a.shape[0]]),
+  doc: { summary: 'The unpacked LU factors L, U and the permutation P of PA = LU with partial pivoting.' },
+  test: { secondOrder: true, cases: (draw) => [{ inputs: [wellConditioned(draw, 3)], params: {} }] },
+})
+
+/**
+ * LU factorisation with partial pivoting of a square matrix, unpacked: PA = LU with L unit lower-triangular, U upper
+ * triangular and P the permutation matrix (for display and teaching; `luFactor` is the solver's form). Never throws
+ * for singular input: `singular` reports it. Non-finite entries throw `LinAlgError`. Differentiable in A (P is held
+ * fixed, as it is locally constant); differentiating at a singular A throws `LinAlgError` ('singular'). The wrapper is
+ * not available inside `vmap` (its permutation and flags are per example); the primitive batches.
+ */
+export function lu<A extends Value>(a: A): LU<TensorResult<A>> {
+  const f = luFactor(a)
+  const n = f.perm.length
+  const P = permutationMatrix(f.perm)
+  if (!isTraced(a)) {
+    const { L, U } = unpackLU(f.packed.data as ArrayLike<number>, n)
+    return { ...f, L: matrix(L, n, n), U: matrix(U, n, n), P } as unknown as LU<TensorResult<A>>
+  }
+  const out = luOp([a], { factor: { packed: f.packed.data as ArrayLike<number>, perm: f.perm, singular: f.singular } })
+  const [L, U] = parts(out, n)
+  return { ...f, L, U, P } as unknown as LU<TensorResult<A>>
 }
 
 /** Solve with a packed factor, in place on an n×r right-hand side whose rows are already permuted: L then U. */
@@ -190,6 +305,11 @@ type SolveParams = {
   readonly transpose: boolean
 }
 
+// Rules (Giles, 2008, §2.2.3) for op(A) X = B, op(A) = A or Aᵀ, reusing the one factor. Reverse: B̄ = op(A)⁻ᵀX̄ (the
+// other orientation) and Ā = −B̄Xᵀ (−XB̄ᵀ for Aᵀ). Forward: Ẋ = op(A)⁻¹(Ḃ − op(Ȧ)X). Linear in B, with transpose
+// B̄ = op(A)⁻ᵀX̄. Batch: an unbatched A solves every example at once with its factor, the batch folded into B's
+// columns; a batched A goes through the batched kernel, each example factoring itself (the cached factor belongs to no
+// example).
 const luSolveOp: Op<SolveParams> = definePrimitive<SolveParams>({
   id: 'numerics/linalg/luSolve',
   arity: 2,
@@ -210,13 +330,31 @@ const luSolveOp: Op<SolveParams> = definePrimitive<SolveParams>({
     }
     return isVector ? fromData(x, [n]) : matrix(x, n, r)
   },
-  vjp: (g, [a], x, p) => {
-    // B̄ = A⁻ᵀX̄ (the other orientation, same factor); Ā = −B̄Xᵀ, or −X B̄ᵀ when solving with Aᵀ.
+  vjp: (g, [a], x, p, needed) => {
     const gb = luSolveOp([a, g], { ...p, transpose: !p.transpose })
-    const column = (v: Value) => (shapeOfValue(v).length === 1 ? reshape(v, [-1, 1]) : v)
+    if (!needed[0]) return [null, gb]
     const ga = p.transpose ? matmul(column(x), transpose(column(gb))) : matmul(column(gb), transpose(column(x)))
     return [neg(ga), gb]
   },
+  jvp: ([da, db], [a], x, p) => {
+    if (da === null && db === null) return null
+    let rhs: Value | null = db
+    if (da !== null) {
+      const term = matmul(p.transpose ? transpose(da) : da, column(x))
+      const shaped = shapeOfValue(x).length === 1 ? reshape(term, [-1]) : term
+      rhs = rhs === null ? neg(shaped) : sub(rhs, shaped)
+    }
+    return luSolveOp([a, rhs as Value], p)
+  },
+  transpose: (ct, [a], which, p) => {
+    if (which !== 1) throw new AifnError('luSolve', 'luSolve: linear only in B')
+    return luSolveOp([a, ct], { ...p, transpose: !p.transpose })
+  },
+  batch: ([a, b], [axisA, axisB], p, size) =>
+    axisA === null && axisB !== null
+      ? foldColumns((rhs) => luSolveOp([a, rhs], p), b, axisB, size)
+      : kernelBatch<SolveParams>('numerics/linalg/luSolve')([a, b], [axisA, axisB], p, size),
+  shape: ([, b]) => float64Aval(b.shape),
   doc: { summary: 'Solve A X = B (or Aᵀ X = B) by substitution with the LU factor of A.' },
   test: {
     secondOrder: true,
@@ -252,7 +390,12 @@ export function luSolve<A extends Value, B extends Value>(
  * `luFactor` first to test without throwing.
  */
 export function solve<A extends Value, B extends Value>(a: A, b: B): TensorResult<A | B> {
-  return luSolveOp([a, b], paramsOf(luFactor(a))) as TensorResult<A | B>
+  return luSolveOp([a, b], factorIfConcrete(a)) as TensorResult<A | B>
+}
+
+/** The solve parameters with A's factor when A has a concrete value; inside `vmap` the impl factors per example. */
+function factorIfConcrete(a: Value, transpose = false): SolveParams {
+  return concrete(a) === null ? { transpose } : paramsOf(luFactor(a), transpose)
 }
 
 /**
@@ -261,8 +404,7 @@ export function solve<A extends Value, B extends Value>(a: A, b: B): TensorResul
  * `choleskySolve` to multiplying by an inverse.
  */
 export function inverse<A extends Value>(a: A): TensorResult<A> {
-  const f = luFactor(a)
-  return luSolveOp([a, eye(f.perm.length)], paramsOf(f)) as TensorResult<A>
+  return luSolveOp([a, eye(shapeOfValue(a)[0])], factorIfConcrete(a)) as TensorResult<A>
 }
 
 /** Sign, log |det| and det from a raw factor. */
@@ -284,53 +426,93 @@ function determinant(f: { packed: ArrayLike<number>; n: number; sign: 1 | -1 }):
   return { sign: s === 0 ? 0 : s, logAbs, det: det === 0 ? 0 : det }
 }
 
-/** Parameters of `det` and `logDet`: the factor of the input, computed when absent. */
-type DetParams = { readonly factor?: LuFactor<Value> }
+/** Parameters of `det` and `logDet`: the factor of the input (computed when absent, as in the tests and `vmap`). */
+type DetParams = { readonly factor?: SolveParams['factor'] }
 
-/** A⁻ᵀ from the factor (a transposed solve against I); throws `LinAlgError` at singular A. */
-function inverseTransposed(a: Value, p: DetParams): Value {
-  const f = p.factor ?? luFactor(unwrap(a))
-  return luSolveOp([a, eye(f.perm.length)], paramsOf({ ...f, matrix: a }, true))
+/**
+ * A⁻¹Y (or A⁻ᵀY) with the one factor, for the rules of det and logDet. At a singular A the derivative of log |det A|
+ * does not exist, and that of det A is the adjugate, which is not implemented: both are reported as `LinAlgError`
+ * ('singular') rather than returned as garbage.
+ */
+function solveForRule(a: Value, y: Value, p: DetParams, transpose: boolean, where: string): Value {
+  if (p.factor?.singular) {
+    throw new LinAlgError(
+      `${where}: the matrix is singular to working precision; the derivative there (for det, the adjugate) is not ` +
+        'implemented',
+      'singular',
+    )
+  }
+  return luSolveOp([a, y], { factor: p.factor, transpose })
 }
 
 const factorFor = (a: Value, p: DetParams, where: string) => {
-  if (p.factor) return { packed: p.factor.packed.data, n: p.factor.perm.length, sign: p.factor.sign }
+  if (p.factor) return { packed: p.factor.packed, n: p.factor.perm.length, sign: signOf(p.factor.perm) }
   return factorOf(a, where)
 }
 
+/** det P of a row permutation: ±1 by the parity of its cycles. */
+function signOf(perm: Int32Array): 1 | -1 {
+  const seen = new Uint8Array(perm.length)
+  let sign: 1 | -1 = 1
+  for (let i = 0; i < perm.length; i++) {
+    if (seen[i]) continue
+    let length = 0
+    for (let j = i; !seen[j]; j = perm[j]) {
+      seen[j] = 1
+      length++
+    }
+    if (length % 2 === 0) sign = -sign as 1 | -1
+  }
+  return sign
+}
+
+/** The parameters of det and logDet for an input: its factor when it has a concrete value. */
+function detParams(a: Value): DetParams {
+  return concrete(a) === null ? {} : { factor: paramsOf(luFactor(a)).factor }
+}
+
+// Rules (Giles, 2008, §2.2.2; Magnus and Neudecker, 2019, §8.3): for d = det A, Ā = d̄·d·A⁻ᵀ and ḋ = d·tr(A⁻¹Ȧ); for
+// log |det A|, Ā = A⁻ᵀ and the tangent is tr(A⁻¹Ȧ). Both reuse the one factor through luSolve (Ā through a transposed
+// solve against I).
 const detOp: Op<DetParams> = definePrimitive<DetParams>({
   id: 'numerics/linalg/det',
   arity: 1,
   impl: ([a], p) => determinant(factorFor(a, p, 'det')).det,
-  // At a singular A the rule throws (the adjugate form is not implemented).
-  vjp: (g, [a], d, p) => [mul(mul(g, d), inverseTransposed(a, p))],
+  vjp: (g, [a], d, p) => [mul(mul(g, d), solveForRule(a, eye(shapeOfValue(a)[0]), p, true, 'det'))],
+  jvp: ([t], [a], d, p) => (t === null ? null : mul(d, matrixTrace(solveForRule(a, t, p, false, 'det')))),
+  batch: kernelBatch('numerics/linalg/det'),
+  shape: () => float64Aval([], true),
   doc: { summary: 'The determinant of a square matrix.' },
   test: { secondOrder: true, cases: (draw) => [{ inputs: [wellConditioned(draw, 3)], params: {} }] },
 })
 
 /**
- * The determinant of a square matrix (0 for a singular one), from its LU factorisation. Its derivative d·A⁻ᵀ reuses
- * the factor; at a singular A differentiating throws `LinAlgError` ('singular').
+ * The determinant of a square matrix (0 for a singular one), from its LU factorisation. Its derivatives (d·A⁻ᵀ, and
+ * d·tr(A⁻¹Ȧ) forward) reuse the factor; at a singular A differentiating throws `LinAlgError` ('singular').
  */
 export function det<A extends Value>(a: A): NumberResult<A> {
-  return detOp([a], { factor: luFactor(a) }) as NumberResult<A>
+  return detOp([a], detParams(a)) as NumberResult<A>
 }
 
 const logDetOp: Op<DetParams> = definePrimitive<DetParams>({
   id: 'numerics/linalg/logDet',
   arity: 1,
   impl: ([a], p) => determinant(factorFor(a, p, 'logDet')).logAbs,
-  vjp: (g, [a], _y, p) => [mul(g, inverseTransposed(a, p))],
+  vjp: (g, [a], _y, p) => [mul(g, solveForRule(a, eye(shapeOfValue(a)[0]), p, true, 'logDet'))],
+  jvp: ([t], [a], _y, p) => (t === null ? null : matrixTrace(solveForRule(a, t, p, false, 'logDet'))),
+  batch: kernelBatch('numerics/linalg/logDet'),
+  shape: () => float64Aval([], true),
   doc: { summary: 'log |det A|.' },
   test: { secondOrder: true, cases: (draw) => [{ inputs: [wellConditioned(draw, 3)], params: {} }] },
 })
 
 /**
  * log |det A| for a square matrix, from its LU factorisation, without the overflow of forming det A (−∞ for a
- * singular matrix). The sign is that of `det(A)`; for a positive-definite matrix, `choleskyLogDet` is cheaper.
+ * singular matrix, where differentiating throws `LinAlgError`). The sign is that of `det(A)`; for a positive-definite
+ * matrix, `choleskyLogDet` is cheaper.
  */
 export function logDet<A extends Value>(a: A): NumberResult<A> {
-  return logDetOp([a], { factor: luFactor(a) }) as NumberResult<A>
+  return logDetOp([a], detParams(a)) as NumberResult<A>
 }
 
 /** The sign of det A (−1, 0 or 1), from its LU factorisation. */

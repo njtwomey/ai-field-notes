@@ -8,8 +8,8 @@ export const specimens: Specimen[] = [
     module: 'probability/distributions',
     title: 'Every univariate family',
     description:
-      'Pick any of the 24 univariate families and move its parameters: DistributionView draws the density or mass over a histogram of draws, the cdf against the empirical cdf, and the closed-form moments, entropy and mode.',
-    tags: ['DistributionView', 'density', 'cdf', 'quantile', 'sample', 'moments'],
+      'Pick any of the 24 univariate families and move its parameters: DistributionPanel draws the density or mass over a histogram of draws, the cdf against the empirical cdf, and the closed-form moments, entropy and mode.',
+    tags: ['DistributionPanel', 'density', 'cdf', 'quantile', 'sample', 'moments'],
     render: () => <FamiliesSpecimen />,
   },
   {

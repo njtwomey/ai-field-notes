@@ -28,17 +28,21 @@ export type Shape = readonly Size[]
 
 // ── Tensor ───────────────────────────────────────────────────────────────────────────────────────────────────────────
 
-/** Element type of a tensor's storage today. The target adds `bool` and interleaved `complex128` (see `DTypeTarget`). */
-export type DType = 'float64' | 'float32' | 'int32'
-
 /**
- * The target element types (design K §3.1): `bool` (Uint8Array) for masks and comparisons, and `complex128` stored as
- * interleaved real and imaginary parts in a Float64Array. TODO(phase 1): becomes `DType`.
+ * Element type of a tensor's storage (design K §3.1): `bool` (Uint8Array, 0 or 1) for masks and comparison results,
+ * `int32`, `float32` (storage only), `float64`, and `complex128`, stored interleaved (re, im, re, im, …) in a
+ * Float64Array. Mixing dtypes promotes by one table (`aifn/foundation/tensor`'s `promoteTypes`).
  */
-export type DTypeTarget = 'bool' | 'int32' | 'float32' | 'float64' | 'complex128'
+export type DType = 'bool' | 'int32' | 'float32' | 'float64' | 'complex128'
 
-/** The typed array that backs a tensor. */
-export type TensorData = Float64Array | Float32Array | Int32Array
+/** The typed array that backs a tensor: Float64Array for float64 and complex128 (two per element), Uint8Array for bool. */
+export type TensorData = Float64Array | Float32Array | Int32Array | Uint8Array
+
+/** A complex number as plain data: its real and imaginary parts (what the complex converters return). */
+export interface ComplexNumber {
+  readonly re: number
+  readonly im: number
+}
 
 declare const tensorBrand: unique symbol
 
@@ -59,9 +63,12 @@ export interface Tensor {
   readonly [tensorBrand]: true
   /** Length of each axis; `[]` for a scalar tensor. */
   readonly shape: Shape
-  /** Step in `data`, in elements, for a unit step along each axis. Row-major (C order) by default. */
+  /**
+   * Step in `data`, in elements, for a unit step along each axis. Row-major (C order) by default. For complex128 an
+   * element is a complex number (two doubles): element k starts at `data[2k]`.
+   */
   readonly strides: readonly number[]
-  /** Position in `data` of the element at index (0, …, 0). */
+  /** Position in `data` of the element at index (0, …, 0), in elements (complex elements for complex128). */
   readonly offset: Index
   readonly dtype: DType
   readonly data: TensorData
@@ -80,10 +87,11 @@ export type Matrix = Tensor
 export interface TensorWire {
   readonly dtype: DType
   readonly shape: Shape
+  /** Row-major values; complex128 is interleaved (re, im, re, im, …), twice as many entries as elements. */
   readonly data: readonly (number | 'nan' | 'inf' | '-inf')[]
 }
 
-// ── Traced values and the tape protocol ──────────────────────────────────────────────────────────────────────────────
+// ── Traced values ────────────────────────────────────────────────────────────────────────────────────────────────────
 
 declare const tracedBrand: unique symbol
 
@@ -93,36 +101,33 @@ declare const tracedBrand: unique symbol
  */
 export type TracedBrand = typeof tracedBrand
 
-/** A number or tensor recorded on a tape: `value` is the underlying data and `id` its node on `tape`. */
-export interface Traced<T extends Scalar | Tensor = Scalar | Tensor> {
+/**
+ * An abstract value: what is known about a value without its data (JAX's `ShapedArray`). `number` is true when the
+ * value is a JS number rather than a tensor (a number has shape `[]`, but so does a rank-0 tensor).
+ */
+export interface Aval {
+  readonly shape: Shape
+  readonly dtype: DType
+  readonly number: boolean
+}
+
+/**
+ * A value seen by a function transform (design K §4.1): a tracer of one interpreter (reverse, forward or batch), at
+ * that interpreter's `level`. Transforms nest by level: a primitive applied to tracers of several levels is handled by
+ * the highest, which treats the others as constants. `aval` is the shape and dtype of the value the traced function
+ * sees (for a batch tracer, one example's).
+ */
+export interface Traced {
   readonly [tracedBrand]: true
-  readonly value: T
-  readonly id: Index
-  readonly tape: Tape
+  readonly level: Index
+  readonly aval: Aval
 }
 
 /** An untraced value: a number or a tensor. What a primitive computes on. */
 export type Raw = Scalar | Tensor
 
-/** Anything a primitive accepts: a number, a tensor, or either of them traced. */
+/** Anything a primitive accepts: a number, a tensor, or a traced value. */
 export type Value = Scalar | Tensor | Traced
-
-/**
- * A vector–Jacobian product rule: given the cotangent of the output (same kind and shape as the output), the inputs and
- * the output, return one cotangent per input, each of the same kind and shape as its input; `null` is a zero
- * cotangent. Rules are written with primitives, so they can be traced again.
- */
-export type Vjp = (cotangent: Value, inputs: readonly Value[], output: Value) => (Value | null)[]
-
-/** Records primitive applications. Implemented by `aifn/foundation/autodiff`. */
-export interface Tape {
-  /**
-   * Record that primitive `name` mapped `inputs` (as passed, some traced) to `output` (the raw forward value), and
-   * return the traced output. `vjp` is `null` for a primitive without a derivative rule: differentiating through it
-   * must then be an error, never a silent zero.
-   */
-  record(name: string, inputs: readonly Value[], output: Raw, vjp: Vjp | null): Traced
-}
 
 // ── Inputs ───────────────────────────────────────────────────────────────────────────────────────────────────────────
 

@@ -8,7 +8,7 @@
 import { det } from 'aifn/numerics/linalg'
 import { eig, type Eigen } from 'aifn/numerics/linalg'
 import { solveSystem } from 'aifn/numerics/roots'
-import { dense, fromData, toFlat, type Matrix, type Vector } from 'aifn/foundation/tensor'
+import { dense, fromData, imagPart, realPart, toFlat, type Matrix, type Vector } from 'aifn/foundation/tensor'
 import type { MatrixLike, Scalar, Size, VectorLike } from 'aifn/foundation/contracts'
 import { gradientAt, jacobianAt, type ScalarField, type VectorField } from './calculus'
 import { streamline, type Box } from './flow'
@@ -52,8 +52,8 @@ export function classifyLinear(J: MatrixLike, { tolerance = 1e-9 }: { tolerance?
   const { data, m: n } = toMatrixF64(J, 'classifyLinear')
   if (data.length !== n * n) throw new Error('classifyLinear: expected a square matrix')
   const e = eig(fromData(Float64Array.from(data), [n, n]))
-  const re = toFlat(e.real)
-  const im = toFlat(e.imag)
+  const re = toFlat(realPart(e.values))
+  const im = toFlat(imagPart(e.values))
   let scale = 0
   for (const v of data) scale = Math.max(scale, Math.abs(v))
   const eps = tolerance * (1 + scale)
@@ -163,9 +163,9 @@ export function invariantManifolds(
   fixed: FixedPoint,
   { eps = 1e-5, t = 20, steps = 400, bounds }: { eps?: Scalar; t?: Scalar; steps?: Size; bounds?: Box } = {},
 ): Manifolds {
-  const re = toFlat(fixed.eigen.real)
-  const im = toFlat(fixed.eigen.imag)
-  const V = toFlat(fixed.eigen.vectorsReal)
+  const re = toFlat(realPart(fixed.eigen.values))
+  const im = toFlat(imagPart(fixed.eigen.values))
+  const V = toFlat(realPart(fixed.eigen.vectors))
   const n = re.length
   const x = toFlat(fixed.point)
   const out: Manifolds = { stable: [], unstable: [] }

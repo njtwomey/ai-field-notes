@@ -89,7 +89,16 @@ export function pairConfusion(
 }
 
 const partitionInfo = (key: string, name: string, note: string, range: readonly [number, number] = [0, 1]) =>
-  ({ key, name, inputs: 'partitions', direction: 'higher', range, notes: [note], capability: 'decide' }) as const
+  ({
+    key,
+    name,
+    stability: 'stable',
+    inputs: 'partitions',
+    direction: 'higher',
+    range,
+    notes: [note],
+    capability: 'decide',
+  }) as const
 
 /** The Rand index (TP + TN)/C(n, 2), the accuracy of the pairwise "together or apart" decisions (Rand 1971). */
 export const randIndex = defineMetric(
@@ -326,6 +335,7 @@ export function silhouetteSamples(x: Rows, labels: Labels): Tensor {
 export const silhouetteScore = defineMetric(
   {
     key: 'silhouetteScore',
+    stability: 'stable',
     name: 'Silhouette score',
     inputs: 'features',
     direction: 'higher',
@@ -345,6 +355,7 @@ export const silhouetteScore = defineMetric(
 export const calinskiHarabasz = defineMetric(
   {
     key: 'calinskiHarabasz',
+    stability: 'stable',
     name: 'Calinski–Harabasz index',
     inputs: 'features',
     direction: 'higher',
@@ -371,6 +382,7 @@ export const calinskiHarabasz = defineMetric(
 export const daviesBouldin = defineMetric(
   {
     key: 'daviesBouldin',
+    stability: 'stable',
     name: 'Davies–Bouldin index',
     inputs: 'features',
     direction: 'lower',
@@ -405,6 +417,7 @@ export const daviesBouldin = defineMetric(
 export const dunnIndex = defineMetric(
   {
     key: 'dunnIndex',
+    stability: 'stable',
     name: 'Dunn index',
     inputs: 'features',
     direction: 'higher',

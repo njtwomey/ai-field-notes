@@ -10,7 +10,14 @@ import type { Status } from 'aifn/foundation/contracts'
 import { dense, fromData, type Tensor } from 'aifn/foundation/tensor'
 import type { Algorithm } from 'aifn/foundation/trace'
 import { cholesky, choleskySolve } from 'aifn/numerics/linalg'
-import { gaussianFamily, link as linkByName, type Family, type Link, type LinkName } from 'aifn/probability/likelihoods'
+import {
+  checkLink,
+  gaussianFamily,
+  likelihood,
+  type Family,
+  type Link,
+  type LinkName,
+} from 'aifn/probability/likelihoods'
 
 /** The problem a backfitting run solves: one design block and one penalty per term. */
 export type BackfitProblem = {
@@ -35,19 +42,23 @@ export type BackfitState = Status & {
   intercept: number
   /** Each term's fitted values at the data, [terms, n]. */
   contributions: Tensor
+  /** Each term's coefficients βⱼ [pⱼ] (zeros at the start). */
+  coefficients: Tensor[]
   /** Linear predictor η = α + Σ fⱼ, [n]. */
   eta: Tensor
   /** Deviance at η. */
   deviance: number
   /** Largest change of a term's fitted value in this sweep. */
   change: number
+  /** Halvings of this sweep towards the previous state, to keep the mean inside the family's mean space. */
+  halvings: number
   converged: boolean
 }
 
 /** Backfitting as an `Algorithm` (no start: α begins at the weighted mean of g(μ₀), every fⱼ at 0). */
 export function backfitting(problem: BackfitProblem): Algorithm<void, BackfitState> {
   const family = problem.family ?? gaussianFamily()
-  const lk = typeof problem.link === 'object' ? problem.link : linkByName(problem.link ?? family.defaultLink)
+  const lk = checkLink(family, problem.link, 'backfitting')
   const y = dense.data(problem.y)
   const n = y.length
   const w = problem.weights ? dense.data(problem.weights) : new Float64Array(n).fill(1)
@@ -56,12 +67,20 @@ export function backfitting(problem: BackfitProblem): Algorithm<void, BackfitSta
   const sizes = problem.designs.map((B) => B.shape[1])
   const penalties = problem.penalties.map((S) => dense.data(S))
   const T = designs.length
+  // The deviance from η, stable where μ rounds to the edge of the mean space (`likelihood`).
+  const lik = likelihood(family, lk.name)
   const deviance = (eta: Float64Array) => {
-    const mu = lk.inverse(fromData(eta, [n])) as Tensor
-    const u = dense.data(family.unitDeviance(problem.y, mu) as Tensor)
+    const u = dense.data(lik.unitDeviance(problem.y, fromData(eta, [n])) as Tensor)
     return u.reduce((s, v, i) => s + w[i] * v, 0)
   }
-  const stateOf = (alpha: number, f: Float64Array, t: number, change: number, scale: number): BackfitState => {
+  const stateOf = (
+    alpha: number,
+    f: Float64Array,
+    betas: Float64Array[],
+    t: number,
+    change: number,
+    scale: number,
+  ): BackfitState => {
     const eta = new Float64Array(n).fill(alpha)
     for (let j = 0; j < T; j++) for (let i = 0; i < n; i++) eta[i] += f[j * n + i]
     const dev = deviance(eta)
@@ -69,9 +88,11 @@ export function backfitting(problem: BackfitProblem): Algorithm<void, BackfitSta
       t,
       intercept: alpha,
       contributions: fromData(f, [T, n]),
+      coefficients: betas.map((b) => fromData(b, [b.length])),
       eta: fromData(eta, [n]),
       deviance: dev,
       change,
+      halvings: 0,
       converged: t > 0 && change < tolerance * (1 + scale),
       diverged: !Number.isFinite(dev),
     }
@@ -87,7 +108,14 @@ export function backfitting(problem: BackfitProblem): Algorithm<void, BackfitSta
         alpha += w[i] * eta0[i]
         sw += w[i]
       }
-      return stateOf(alpha / sw, new Float64Array(T * n), 0, Infinity, 0)
+      return stateOf(
+        alpha / sw,
+        new Float64Array(T * n),
+        sizes.map((p) => new Float64Array(p)),
+        0,
+        Infinity,
+        0,
+      )
     },
     step: (state) => {
       const eta = dense.data(state.eta)
@@ -96,9 +124,14 @@ export function backfitting(problem: BackfitProblem): Algorithm<void, BackfitSta
       const dmu = dense.data(lk.derivative(etaT) as Tensor)
       const V = dense.data(family.variance(fromData(Float64Array.from(mu), [n])) as Tensor)
       // Working response and weights (for the Gaussian identity model, z = y and W = w).
-      const z = Float64Array.from(eta, (e, i) => e + (y[i] - mu[i]) / dmu[i])
-      const W = Float64Array.from(dmu, (g, i) => (w[i] * g * g) / V[i])
+      // An observation whose μ has rounded to the edge of the mean space carries no weight in this sweep.
+      const W = Float64Array.from(dmu, (g, i) => {
+        const v = (w[i] * g * g) / V[i]
+        return Number.isFinite(v) ? v : 0
+      })
+      const z = Float64Array.from(eta, (e, i) => (W[i] > 0 ? e + (y[i] - mu[i]) / dmu[i] : e))
       const f = Float64Array.from(dense.data(state.contributions))
+      const betas = state.coefficients.map((b) => Float64Array.from(dense.data(b)))
       let alpha = 0
       let sw = 0
       for (let i = 0; i < n; i++) {
@@ -125,7 +158,10 @@ export function backfitting(problem: BackfitProblem): Algorithm<void, BackfitSta
             for (let c = 0; c < p; c++) A[a * p + c] += v * B[i * p + c]
           }
         }
-        const beta = dense.data(choleskySolve(cholesky(fromData(A, [p, p])).L, fromData(b, [p])) as Tensor)
+        const beta = Float64Array.from(
+          dense.data(choleskySolve(cholesky(fromData(A, [p, p])).L, fromData(b, [p])) as Tensor),
+        )
+        betas[j] = beta
         for (let i = 0; i < n; i++) {
           let v = 0
           for (let a = 0; a < p; a++) v += B[i * p + a] * beta[a]
@@ -134,7 +170,25 @@ export function backfitting(problem: BackfitProblem): Algorithm<void, BackfitSta
           f[j * n + i] = v
         }
       }
-      return stateOf(alpha, f, state.t + 1, change, scale)
+      // A sweep whose η leaves the mean space (a gamma model's inverse link overshooting zero) is halved towards the
+      // previous state, as P-IRLS halves its steps; the change reported is the accepted one.
+      const old = dense.data(state.contributions)
+      const oldBetas = state.coefficients.map((q) => dense.data(q))
+      let halvings = 0
+      const invalid = () => {
+        const etaNew = new Float64Array(n).fill(alpha)
+        for (let j = 0; j < T; j++) for (let i = 0; i < n; i++) etaNew[i] += f[j * n + i]
+        const muNew = lk.inverse(fromData(etaNew, [n])) as Tensor
+        const valid = lk.total ? etaNew.every(Number.isFinite) : family.validMean(muNew)
+        return !valid || !Number.isFinite(deviance(etaNew))
+      }
+      for (; halvings < 30 && invalid(); halvings++) {
+        alpha = (alpha + state.intercept) / 2
+        for (let k = 0; k < f.length; k++) f[k] = (f[k] + old[k]) / 2
+        betas.forEach((b, j) => b.forEach((v, a) => (b[a] = (v + oldBetas[j][a]) / 2)))
+        change /= 2
+      }
+      return { ...stateOf(alpha, f, betas, state.t + 1, change, scale), halvings }
     },
   }
 }

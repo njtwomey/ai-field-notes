@@ -1,5 +1,6 @@
 import type { Specimen } from '../../../../specimen'
 import { BackfittingSweeps, EbmShapes, PartialEffects } from './_gam/figures'
+import { GamShowcase } from './_gam/showcase-gam'
 
 export const specimens: Specimen[] = [
   {
@@ -24,5 +25,13 @@ export const specimens: Specimen[] = [
       'explainableBoostingMachine: step-function shapes from cyclic boosting of one-split trees, by number of rounds.',
     tags: ['explainableBoostingMachine', 'boosting', 'shapes'],
     render: () => <EbmShapes />,
+  },
+  {
+    module: 'applied/learning/generalised/gam',
+    title: 'Showcase: interactive GAM',
+    description:
+      'additiveData from a Gaussian, binomial, Poisson or gamma GAM with any valid link; per-feature terms (P-spline, cyclic, thin plate, linear, off) with k, degree, penalty order and shape constraints; λ by REML, GCV or fixed; fitted by P-IRLS, backfitting, gradient descent, SGD, Adam or L-BFGS (gamTrainingRun in a worker) and played iteration by iteration: partial effects with bands against the truth, the basis and penalty, the response scale, the training trace against a second method, and the REML profile with a draggable λ.',
+    tags: ['showcase', 'gam', 'P-IRLS', 'backfitting', 'SGD', 'Adam', 'L-BFGS', 'REML', 'links', 'basis'],
+    render: () => <GamShowcase />,
   },
 ]

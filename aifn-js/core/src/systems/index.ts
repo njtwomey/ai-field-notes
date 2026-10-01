@@ -10,12 +10,12 @@
  *   traceable algorithm; exact between samples for held inputs), `respond`, `stepResponse`, `impulseResponse`,
  *   `initialResponse`.
  * - New systems: `discretise` (zoh, Euler, Tustin), `stateFeedback`, `series`, `parallel`, `feedback`.
- * - Complex values until `complex128`: `complex` (the [k, 2] (re, im) layout and scalar arithmetic).
+ * - Feedback design: `placePoles` (multi-input robust pole placement, Kautsky–Nichols–Van Dooren).
+ * - Zeros, poles and responses are complex128 tensors (`ComplexLike` inputs, from `aifn/numerics/polynomial`).
  */
 
 export type { LtiSystem, Representation } from 'aifn/foundation/contracts'
-export * as complex from './complex'
-export { type Complex, type ComplexLike } from './complex'
+export type { ComplexLike } from 'aifn/numerics/polynomial'
 export {
   convert,
   dimensions,
@@ -68,3 +68,5 @@ export {
   type StandardResponseOptions,
 } from './responses'
 export { discretise, feedback, parallel, series, stateFeedback, type DiscretisationMethod } from './transform'
+export { placePoles, type PlacePolesOptions, type PolePlacementResult } from './placement'
+export { systemsAlgorithms } from './registry'

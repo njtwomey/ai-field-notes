@@ -21,14 +21,17 @@ import {
   curveLogDensity,
   equalReference,
   gaussianClasses,
-  mahalanobis2,
   points,
   twoGaussianBayesError,
   type ClassModel,
   type Reference,
 } from '../truth'
 import { fromData, type Tensor } from 'aifn/foundation/tensor'
+import { mahalanobisDistance } from 'aifn/learning/metrics'
 import { MultivariateNormal, Normal } from 'aifn/probability/distributions'
+import type { DatasetInfo, ModifierInfo } from 'aifn/foundation/contracts'
+import { definer } from 'aifn/foundation/registry'
+import { int, oneOf, real, space, when } from 'aifn/foundation/space'
 
 const TAU = 2 * Math.PI
 
@@ -76,7 +79,7 @@ function gaussianModel(
   family: string,
 ): ClassModel {
   const shared = means.length === 2 && equalMatrices(covariances[0], covariances[1])
-  const delta = shared ? Math.sqrt(mahalanobis2(means[0], means[1], covariances[0])) : 0
+  const delta = shared ? mahalanobisDistance(means[0], means[1], { covariance: covariances[0] }) : 0
   return {
     classes: means.length,
     priors,
@@ -159,9 +162,15 @@ export interface BlobsOptions extends ClassSizeOptions {
   /** The box centres are drawn in, per coordinate. Default [−10, 10] (scikit-learn's `center_box`). */
   box?: readonly [number, number]
   /**
-   * The overlap knob: with a number of centres, place them on a regular polygon in the first two coordinates so that
-   * neighbouring centres are `separation` blob standard deviations apart (two centres at ±separation·sd/2 on x₁). For
-   * two blobs this is the Mahalanobis distance d′, and the Bayes error with equal classes is Φ(−d′/2).
+   * With a number of centres: `random` draws them uniformly in `box` (scikit-learn); `polygon` places them by
+   * `separation`. Default `polygon` when `separation` is given, else `random`.
+   */
+  layout?: 'random' | 'polygon'
+  /**
+   * The overlap knob of the `polygon` layout (default 4): place the centres on a regular polygon in the first two
+   * coordinates so that neighbouring centres are `separation` blob standard deviations apart (two centres at
+   * ±separation·sd/2 on x₁). For two blobs this is the Mahalanobis distance d′, and the Bayes error with equal classes
+   * is Φ(−d′/2).
    */
   separation?: number
 }
@@ -172,11 +181,13 @@ export interface BlobsOptions extends ClassSizeOptions {
  * Gaussian mixture: exact Bayes error for two blobs of equal sd, Monte Carlo otherwise.
  */
 export function blobs(s: Stream, options: BlobsOptions = {}): Dataset {
-  const { centers = 3, dim = 2, box = [-10, 10], separation } = options
+  const { centers = 3, dim = 2, box = [-10, 10] } = options
+  const layout = options.layout ?? (options.separation !== undefined ? 'polygon' : 'random')
+  const separation = options.separation ?? 4
   const sdList = typeof options.sd === 'object' ? [...options.sd] : undefined
   let centres: number[][]
   if (typeof centers === 'number') {
-    if (separation !== undefined) {
+    if (layout === 'polygon') {
       const sd = sdList ? sdList.reduce((a, b) => a + b, 0) / sdList.length : ((options.sd as number | undefined) ?? 1)
       const radius = centers > 1 ? (separation * sd) / (2 * Math.sin(Math.PI / centers)) : 0
       centres = Array.from({ length: centers }, (_, j) => {
@@ -747,8 +758,10 @@ export function checkerboard(s: Stream, options: CheckerboardOptions = {}): Data
 export interface GaussiansOptions extends ClassSizeOptions {
   /** Means, k × d. Default two classes at (−1, 0) and (1, 0). */
   means?: readonly (readonly number[])[]
-  /** Covariances, k matrices d × d. Default the identity for every class. */
+  /** Covariances, k matrices d × d. Default sd² I for every class. */
   covariances?: readonly (readonly (readonly number[])[])[]
+  /** Without `covariances`: the standard deviation of every coordinate of every class. Default 1. */
+  sd?: number
   /** Total points or one count per component. Default 300. */
   n?: Sizes
   /**
@@ -772,13 +785,14 @@ export function gaussians(s: Stream, options: GaussiansOptions = {}): Dataset {
   ).map((m) => [...m])
   const k = means.length
   const d = means[0].length
-  const covariances = options.covariances ?? means.map(() => isotropic(d, 1))
+  const covariances = options.covariances ?? means.map(() => isotropic(d, options.sd ?? 1))
   if (covariances.length !== k) throw new RangeError(`gaussians: ${covariances.length} covariances for ${k} means`)
   if (options.separation !== undefined && k > 1) {
     const pooled = isotropic(d, 0).map((row, i) => row.map((_, j) => covariances.reduce((a, c) => a + c[i][j], 0) / k))
     let closest = Infinity
     for (let a = 0; a < k; a++)
-      for (let b = a + 1; b < k; b++) closest = Math.min(closest, Math.sqrt(mahalanobis2(means[a], means[b], pooled)))
+      for (let b = a + 1; b < k; b++)
+        closest = Math.min(closest, mahalanobisDistance(means[a], means[b], { covariance: pooled }))
     if (!(closest > 0)) throw new RangeError('gaussians: separation needs distinct means')
     const centroid = means[0].map((_, c) => means.reduce((a, m) => a + m[c], 0) / k)
     const scale = options.separation / closest
@@ -988,5 +1002,234 @@ export function sCurve(s: Stream, options: ManifoldOptions = {}): Dataset {
 export function shuffleDataset(s: Stream, data: Dataset): Dataset {
   const n = data.x.shape[0]
   const out = selectRows(data, Array.from(permutation(s, n).data))
-  return { ...out, meta: { ...out.meta, recipe: appendStep(data.meta.recipe, { op: 'shuffle', params: {} }) } }
+  return { ...out, meta: { ...out.meta, recipe: appendStep(data.meta.recipe, { op: 'shuffleDataset', params: {} }) } }
 }
+
+// ── Registry ─────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+const dataset = definer<DatasetInfo>('dataset', 'data/synthetic')
+
+dataset(
+  {
+    key: 'blobs',
+    name: 'Gaussian blobs',
+    summary: 'Isotropic Gaussian blobs around random or evenly spaced centres (scikit-learn make_blobs).',
+    task: 'clustering',
+    output: 'dataset',
+    knobs: space({
+      n: int(2, 5000, { default: 300 }),
+      centers: int(1, 10, { default: 3 }),
+      sd: real(0.05, 10, { default: 1 }),
+      dim: int(1, 20, { default: 2 }),
+      layout: oneOf(['random', 'polygon']),
+      separation: real(0, 20, { default: 4, when: when('layout', 'polygon') }),
+      prevalence: real(0.01, 0.99, { default: 0.5, when: when('centers', 2) }),
+    }),
+    truth: true,
+    random: true,
+    notes: ['k-means', 'gaussian-mixture-model'],
+  },
+  blobs,
+)
+
+dataset(
+  {
+    key: 'moons',
+    name: 'Two moons',
+    summary: 'Two interleaving half circles with Gaussian noise (scikit-learn make_moons).',
+    task: 'classification',
+    output: 'dataset',
+    knobs: space({
+      n: int(2, 5000, { default: 200 }),
+      noise: real(0, 1, { default: 0.1 }),
+      spacing: oneOf(['even', 'random']),
+      prevalence: real(0.01, 0.99, { default: 0.5, doc: 'The share of class 1.' }),
+    }),
+    truth: true,
+    random: true,
+    notes: ['spectral-clustering'],
+  },
+  moons,
+)
+
+dataset(
+  {
+    key: 'circles',
+    name: 'Concentric circles',
+    summary: 'A small circle inside a large one, with Gaussian noise (scikit-learn make_circles).',
+    task: 'classification',
+    output: 'dataset',
+    knobs: space({
+      n: int(2, 5000, { default: 200 }),
+      factor: real(0.05, 0.95, { default: 0.5 }),
+      noise: real(0, 1, { default: 0.05 }),
+      prevalence: real(0.01, 0.99, { default: 0.5, doc: 'The share of class 1.' }),
+    }),
+    truth: true,
+    random: true,
+    notes: ['kernel-principal-component-analysis'],
+  },
+  circles,
+)
+
+dataset(
+  {
+    key: 'rings',
+    name: 'Rings',
+    summary: 'Concentric rings of radii 1, 2 and 3 with radial noise.',
+    task: 'clustering',
+    output: 'dataset',
+    knobs: space({ n: int(2, 5000, { default: 300 }), noise: real(0, 1, { default: 0.1 }) }),
+    truth: true,
+    random: true,
+    notes: ['spectral-clustering'],
+  },
+  rings,
+)
+
+dataset(
+  {
+    key: 'spirals',
+    name: 'Spirals',
+    summary: 'Interleaved spiral arms, one class per arm.',
+    task: 'classification',
+    output: 'dataset',
+    knobs: space({
+      n: int(2, 5000, { default: 300 }),
+      arms: int(1, 6, { default: 2 }),
+      turns: real(0.25, 5, { default: 1.5 }),
+      noise: real(0, 0.5, { default: 0.05 }),
+      prevalence: real(0.01, 0.99, { default: 0.5, when: when('arms', 2) }),
+    }),
+    truth: true,
+    random: true,
+  },
+  spirals,
+)
+
+dataset(
+  {
+    key: 'xor',
+    name: 'XOR',
+    summary: 'Opposite quadrants share a class: uniform on the square or Gaussian blobs at (±1, ±1).',
+    task: 'classification',
+    output: 'dataset',
+    knobs: space({
+      n: int(2, 5000, { default: 200 }),
+      kind: oneOf(['uniform', 'gaussian']),
+      sd: real(0.05, 2, { default: 0.4, when: when('kind', 'gaussian') }),
+      prevalence: real(0.01, 0.99, { default: 0.5, doc: 'The share of class 1.' }),
+    }),
+    truth: true,
+    random: true,
+    notes: ['multilayer-perceptron'],
+  },
+  xor,
+)
+
+dataset(
+  {
+    key: 'checkerboard',
+    name: 'Checkerboard',
+    summary: 'Points on a board of alternating tiles, the class given by the tile colour.',
+    task: 'classification',
+    output: 'dataset',
+    knobs: space({
+      n: int(2, 5000, { default: 400 }),
+      tiles: int(1, 12, { default: 4 }),
+      prevalence: real(0.01, 0.99, { default: 0.5, doc: 'The share of class 1.' }),
+    }),
+    truth: true,
+    random: true,
+    notes: ['decision-tree'],
+  },
+  checkerboard,
+)
+
+dataset(
+  {
+    key: 'gaussians',
+    name: 'Gaussian classes',
+    summary:
+      'Gaussian classes with given means and covariances; separation sets d′, the Mahalanobis distance of the closest means.',
+    task: 'clustering',
+    output: 'dataset',
+    knobs: space({
+      n: int(2, 5000, { default: 300 }),
+      sd: real(0.05, 10, { default: 1 }),
+      separation: real(0, 10, { default: 2, label: 'd′' }),
+      prevalence: real(0.01, 0.99, { default: 0.5, doc: 'The share of class 1.' }),
+    }),
+    truth: true,
+    random: true,
+    notes: ['linear-discriminant-analysis', 'bayes-decision-rule'],
+  },
+  gaussians,
+)
+
+dataset(
+  {
+    key: 'anisotropicBlobs',
+    name: 'Anisotropic blobs',
+    summary:
+      'Gaussian blobs sheared by one linear map, so the clusters are elongated (the scikit-learn k-means example).',
+    task: 'clustering',
+    output: 'dataset',
+    knobs: space({
+      n: int(2, 5000, { default: 300 }),
+      centers: int(1, 10, { default: 3 }),
+      sd: real(0.05, 10, { default: 1 }),
+    }),
+    truth: true,
+    random: true,
+    notes: ['k-means'],
+  },
+  anisotropicBlobs,
+)
+
+dataset(
+  {
+    key: 'swissRoll',
+    name: 'Swiss roll',
+    summary: 'A rolled-up rectangle in three dimensions; `t` is the position along the roll.',
+    task: 'manifold',
+    output: 'dataset',
+    knobs: space({
+      n: int(2, 5000, { default: 500 }),
+      noise: real(0, 2, { default: 0 }),
+      height: real(1, 50, { default: 21 }),
+    }),
+    truth: false,
+    random: true,
+    notes: ['isomap', 'locally-linear-embedding'],
+  },
+  swissRoll,
+)
+
+dataset(
+  {
+    key: 'sCurve',
+    name: 'S-curve',
+    summary: 'An S-shaped surface in three dimensions; `t` is the position along the S.',
+    task: 'manifold',
+    output: 'dataset',
+    knobs: space({ n: int(2, 5000, { default: 500 }), noise: real(0, 2, { default: 0 }) }),
+    truth: false,
+    random: true,
+    notes: ['locally-linear-embedding'],
+  },
+  sCurve,
+)
+
+const modifier = definer<ModifierInfo>('modifier', 'data/synthetic')
+
+modifier(
+  {
+    key: 'shuffleDataset',
+    name: 'Shuffle',
+    summary: 'Put the rows in a random order (generators group points by class).',
+    params: space({}),
+    random: true,
+  },
+  shuffleDataset,
+)

@@ -5,6 +5,7 @@
  * §4.3). The shape picks an inference path: forward–backward on a chain, exact belief propagation on a tree.
  */
 
+import { DomainError } from 'aifn/foundation/errors'
 import type { Index } from 'aifn/foundation/contracts'
 import { isDag } from 'aifn/graph/traversal'
 import { unionFind, unite } from '../heap'
@@ -142,7 +143,7 @@ export interface Blanket {
 export function markovBlanket(graph: StructuredGraph, name: string, sizes: SizeBindings = {}): Blanket {
   const g = graph.groups.length && !graph.unrolled ? unroll(graph, sizes) : graph
   const v = g.attributes.findIndex((n) => n.name === name)
-  if (v < 0) throw new RangeError(`markovBlanket: no node named ${name}`)
+  if (v < 0) throw new DomainError('markovBlanket', `markovBlanket: no node named ${name}`)
   const names = (xs: Iterable<Index>) => [...new Set(xs)].filter((i) => i !== v).map((i) => g.attributes[i].name)
   const role = (i: Index) => g.attributes[i].role
   const parentsOf = (c: Index) =>

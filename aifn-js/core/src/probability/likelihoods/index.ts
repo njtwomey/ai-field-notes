@@ -11,12 +11,15 @@
  * - Ordinal likelihoods (`ordinalLikelihood`): cumulative, continuation-ratio and adjacent-category models over a
  *   logit, probit or cloglog latent cdf, with class probabilities and log-likelihoods in η and the thresholds.
  *
+ * - `linkRegistry` and `likelihoodRegistry`: the links and families with their metadata.
+ *
  * All are compositions of primitives, so they are differentiable. The fitting machinery (IRLS, smoothing selection)
  * stays in `aifn-applied/learning/generalised`.
  */
 
 export {
   binomialFamily,
+  checkLink,
   family,
   gammaFamily,
   gaussianFamily,
@@ -33,3 +36,4 @@ export {
   type LinkName,
 } from './families'
 export { ordinalLikelihood, type OrdinalLikelihood, type OrdinalLinkName, type OrdinalModel } from './ordinal'
+export { likelihoodRegistry, linkRegistry } from './registry'

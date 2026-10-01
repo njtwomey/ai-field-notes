@@ -11,6 +11,7 @@
  */
 
 import { AifnError } from 'aifn/foundation/errors'
+import { definer, entries, type Entry, type KlRuleInfo, type Spec } from 'aifn/foundation/registry'
 import { choleskyLogDet, solveTriangular } from 'aifn/numerics/linalg'
 import type { Stream } from 'aifn/foundation/random'
 import { digamma, logBeta, logGamma, logSigmoid, logSoftmax, sigmoid } from 'aifn/numerics/special'
@@ -37,28 +38,41 @@ import { xlogy } from 'aifn/numerics/special'
 /** A closed-form KL divergence between two distributions of given families. */
 export type KlRule = (p: Distribution, q: Distribution) => Value
 
-const rules = new Map<string, KlRule>()
+const define = definer<KlRuleInfo>('kl-rule', 'probability/distributions')
+const NOTES = ['kullback-leibler-divergence']
+const CITE = ['kullback1951']
 
-/** Register a closed form for KL(p ‖ q) with p of family `pName` and q of family `qName` (replacing any earlier one). */
-export function registerKl(pName: string, qName: string, rule: KlRule): void {
-  rules.set(`${pName}|${qName}`, rule)
+/** A closed form for KL(p ‖ q) between two families of the same name (keyed `p|q`, e.g. `Normal|Normal`). */
+function rule(family: string, f: KlRule, spec: Partial<Spec<KlRuleInfo>> = {}): Entry<KlRule, KlRuleInfo> {
+  return define(
+    {
+      key: `${family}|${family}`,
+      name: `KL(${family} ‖ ${family})`,
+      p: family,
+      q: family,
+      notes: NOTES,
+      cite: CITE,
+      ...spec,
+    },
+    f,
+  )
 }
 
 /** Whether `kl` has a closed form for the pair (p's family, q's family). */
 export function hasKl(p: Distribution, q: Distribution): boolean {
-  return rules.has(`${p.name}|${q.name}`)
+  return `${p.name}|${q.name}` in klRegistry
 }
 
 /**
  * KL(p ‖ q) in nats, in closed form, with the batch shape of the broadcast batches. Pairs covered: Normal, LogNormal,
  * MultivariateNormal (unbatched), Beta, Gamma, Exponential, Poisson, Dirichlet, Categorical and Bernoulli (each with
- * itself), plus any added with `registerKl`. Other pairs throw; use `klMonteCarlo`, or `klNumerical` / `klAuto` for
+ * itself); the table is `klRegistry`. Other pairs throw; use `klMonteCarlo`, or `klNumerical` / `klAuto` for
  * continuous univariate pairs.
  */
 export function kl(p: Distribution, q: Distribution): Value {
-  const rule = rules.get(`${p.name}|${q.name}`)
-  if (!rule) throw new AifnError('kl', `kl: no closed form for ${p.name} ‖ ${q.name}; use klMonteCarlo`)
-  return rule(p, q)
+  const r = klRegistry[`${p.name}|${q.name}`]
+  if (!r) throw new AifnError('kl', `kl: no closed form for ${p.name} ‖ ${q.name}; use klMonteCarlo`)
+  return r(p, q)
 }
 
 /**
@@ -78,15 +92,15 @@ const normal: KlRule = (p, q) => {
   const [m1, s1, m2, s2] = [P(p, 'loc'), P(p, 'scale'), P(q, 'loc'), P(q, 'scale')]
   return sub(add(log(div(s2, s1)), div(add(square(s1), square(sub(m1, m2))), mul(2, square(s2)))), 0.5)
 }
-registerKl('Normal', 'Normal', normal)
+export const klNormal = rule('Normal', normal)
 // KL is invariant under the shared bijection exp, so the log-normal pair is the normal pair of the logs.
-registerKl('LogNormal', 'LogNormal', (p, q) => {
+export const klLogNormal = rule('LogNormal', (p, q) => {
   const [m1, s1, m2, s2] = [P(p, 'mu'), P(p, 'sigma'), P(q, 'mu'), P(q, 'sigma')]
   return sub(add(log(div(s2, s1)), div(add(square(s1), square(sub(m1, m2))), mul(2, square(s2)))), 0.5)
 })
 
 // Multivariate normal: ½[tr(Σ₂⁻¹Σ₁) + (μ₂ − μ₁)ᵀΣ₂⁻¹(μ₂ − μ₁) − d + log|Σ₂|/|Σ₁|], through the Cholesky factors.
-registerKl('MultivariateNormal', 'MultivariateNormal', (p, q) => {
+export const klMultivariateNormal = rule('MultivariateNormal', (p, q) => {
   const a = p as MultivariateNormal
   const b = q as MultivariateNormal
   if (a.batchShape.length > 0 || b.batchShape.length > 0) throw new AifnError('kl', 'kl: batched multivariate normals')
@@ -98,7 +112,7 @@ registerKl('MultivariateNormal', 'MultivariateNormal', (p, q) => {
 })
 
 // Beta: log B(a₂, b₂) − log B(a₁, b₁) + (a₁ − a₂)ψ(a₁) + (b₁ − b₂)ψ(b₁) + (a₂ − a₁ + b₂ − b₁)ψ(a₁ + b₁).
-registerKl('Beta', 'Beta', (p, q) => {
+export const klBeta = rule('Beta', (p, q) => {
   const [a1, b1, a2, b2] = [P(p, 'a'), P(p, 'b'), P(q, 'a'), P(q, 'b')]
   return add(
     add(sub(logBeta(a2, b2), logBeta(a1, b1)), add(mul(sub(a1, a2), digamma(a1)), mul(sub(b1, b2), digamma(b1)))),
@@ -107,7 +121,7 @@ registerKl('Beta', 'Beta', (p, q) => {
 })
 
 // Gamma (shape α, rate β): (α₁ − α₂)ψ(α₁) − log Γ(α₁) + log Γ(α₂) + α₂ log(β₁/β₂) + α₁(β₂ − β₁)/β₁.
-registerKl('Gamma', 'Gamma', (p, q) => {
+export const klGamma = rule('Gamma', (p, q) => {
   const [a1, r1, a2, r2] = [P(p, 'shape'), P(p, 'rate'), P(q, 'shape'), P(q, 'rate')]
   return add(
     add(sub(mul(sub(a1, a2), digamma(a1)), logGamma(a1)), logGamma(a2)),
@@ -116,19 +130,19 @@ registerKl('Gamma', 'Gamma', (p, q) => {
 })
 
 // Exponential: log(λ₁/λ₂) + λ₂/λ₁ − 1.
-registerKl('Exponential', 'Exponential', (p, q) => {
+export const klExponential = rule('Exponential', (p, q) => {
   const [l1, l2] = [P(p, 'rate'), P(q, 'rate')]
   return sub(add(log(div(l1, l2)), div(l2, l1)), 1)
 })
 
 // Poisson: λ₁ log(λ₁/λ₂) − λ₁ + λ₂.
-registerKl('Poisson', 'Poisson', (p, q) => {
+export const klPoisson = rule('Poisson', (p, q) => {
   const [l1, l2] = [P(p, 'rate'), P(q, 'rate')]
   return add(sub(mul(l1, log(div(l1, l2))), l1), l2)
 })
 
 // Dirichlet: log Γ(α₀) − Σ log Γ(αᵢ) − log Γ(β₀) + Σ log Γ(βᵢ) + Σ (αᵢ − βᵢ)(ψ(αᵢ) − ψ(α₀)).
-registerKl('Dirichlet', 'Dirichlet', (p, q) => {
+export const klDirichlet = rule('Dirichlet', (p, q) => {
   const [a, b] = [P(p, 'concentration'), P(q, 'concentration')]
   const a0 = sum(a, -1, true)
   const b0 = sumLast(b)
@@ -152,14 +166,14 @@ function times(x: Value, logY: Value): Value {
 }
 
 // Categorical: Σ pₖ (log pₖ − log qₖ), with 0 · log 0 = 0.
-registerKl('Categorical', 'Categorical', (p, q) => {
+export const klCategorical = rule('Categorical', (p, q) => {
   const lp = categoricalLogProbs(p)
   const w = exp(lp)
   return sumLast(sub(times(w, lp), times(w, categoricalLogProbs(q))))
 })
 
 // Bernoulli: p log(p/q) + (1 − p) log((1 − p)/(1 − q)), with 0 · log 0 = 0.
-registerKl('Bernoulli', 'Bernoulli', (p, q) => {
+export const klBernoulli = rule('Bernoulli', (p, q) => {
   const probs = (d: Distribution) => ('logits' in d.params ? sigmoid(d.params.logits) : d.params.probs)
   const logQ = (d: Distribution) => ('logits' in d.params ? logSigmoid(d.params.logits) : log(d.params.probs))
   const log1mQ = (d: Distribution) =>
@@ -168,3 +182,17 @@ registerKl('Bernoulli', 'Bernoulli', (p, q) => {
   const b = sub(1, a)
   return sub(add(xlogy(a, a), xlogy(b, b)), add(times(a, logQ(q)), times(b, log1mQ(q))))
 })
+
+/** Every closed-form KL rule, keyed `p|q` by family names. */
+export const klRegistry: Readonly<Record<string, Entry<KlRule, KlRuleInfo>>> = entries<KlRuleInfo>('kl-rule', {
+  klNormal,
+  klLogNormal,
+  klMultivariateNormal,
+  klBeta,
+  klGamma,
+  klExponential,
+  klPoisson,
+  klDirichlet,
+  klCategorical,
+  klBernoulli,
+}) as Readonly<Record<string, Entry<KlRule, KlRuleInfo>>>

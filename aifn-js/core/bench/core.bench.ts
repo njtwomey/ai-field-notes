@@ -6,8 +6,29 @@
 import { test, type TestContext } from 'vitest'
 import { grad } from 'aifn/foundation/autodiff'
 import { cholesky } from 'aifn/numerics/linalg'
+import { filterAll, kalmanStep, parseModel } from 'aifn/inference/filtering'
 import { normal, stream } from 'aifn/foundation/random'
-import { add, exp, eye, fromData, greater, matmul, mul, sin, square, sum, where, type Value } from 'aifn/foundation/tensor'
+import { run } from 'aifn/foundation/trace'
+import { adam, gradientDescent } from 'aifn/optim/first-order'
+import { rungeKutta } from 'aifn/dynamics/ode'
+import {
+  add,
+  exp,
+  eye,
+  fromData,
+  greater,
+  matmul,
+  mul,
+  sin,
+  square,
+  sum,
+  linearCombination,
+  toFlat,
+  where,
+  type Tensor,
+  type Value,
+  type Vector,
+} from 'aifn/foundation/tensor'
 
 type Fn = () => void
 
@@ -92,6 +113,34 @@ test('linear algebra', ({ bench }) =>
     ['cholesky 50×50', () => void cholesky(spd50)],
   ]))
 
+// Small fixed-size matrices in a per-step recursion: the Kalman filter as the inner loop of a likelihood (ARMA, EM).
+const harvey = parseModel(
+  {
+    A: [
+      [0.5, 1],
+      [0.2, 0],
+    ],
+    C: [[1, 0]],
+    Q: [
+      [1, 0.4],
+      [0.4, 0.16],
+    ],
+    R: 0,
+    m0: [0, 0],
+    P0: eye(2),
+  },
+  'bench',
+)
+const series = Array.from({ length: 2000 }, (_, t) => [Math.sin(0.1 * t)])
+const m2 = fromData(Float64Array.from([1, 2, 3, 4]), [2, 2])
+
+test('small matrices', ({ bench }) =>
+  group(bench, 'small matrices', [
+    ['matmul 2×2', () => void matmul(m2, m2)],
+    ['kalmanStep, 2 states', () => void kalmanStep(harvey, harvey.m0, harvey.P0, [0.3])],
+    ['filterAll, 2 states × 2000', () => void filterAll(harvey, series)],
+  ]))
+
 test('normal draws', ({ bench }) =>
   group(bench, 'normal draws', [
     ['normal(s, 0, 1), scalar', () => void normal(s, 0, 1)],
@@ -103,4 +152,58 @@ test('normal draws', ({ bench }) =>
         for (let k = 0; k < 1000; k++) out[k] = Math.random()
       },
     ],
+  ]))
+
+// Algorithms whose steps are written with primitives (so `unrolled` differentiates through them). Measured with a plain
+// timing loop on 2026-10-01, raw arrays before → primitives after: gradient descent 500 steps 3.6 → 2.3 ms, Adam
+// 6.5 → 4.8 ms, RK4 1000 steps 2.9 → 3.5 ms (one `linearCombination` per stage), Euler 1.1 → 1.1 ms.
+const quadratic10 = (x: Vector) => {
+  const a = toFlat(x)
+  let value = 0
+  const g = new Float64Array(10)
+  for (let i = 0; i < 10; i++) {
+    value += 0.5 * (i + 1) * a[i] * a[i]
+    g[i] = (i + 1) * a[i]
+  }
+  return { value, grad: fromData(g, [10]) as Vector }
+}
+const start10 = { x0: Array.from({ length: 10 }, (_, i) => Math.cos(i)) }
+const oscillator = (_t: number, x: Tensor) => {
+  const a = toFlat(x)
+  return [a[1], -a[0]]
+}
+
+const two = fromData(Float64Array.of(1, 2), [2])
+
+/** Plain-JS classical RK4 on the oscillator: the reference for the primitive-based solver. */
+function rk4Reference(steps: number, h: number): Float64Array {
+  let x = Float64Array.of(1, 0)
+  const f = (y: Float64Array) => Float64Array.of(y[1], -y[0])
+  for (let t = 0; t < steps; t++) {
+    const k1 = f(x)
+    const k2 = f(Float64Array.from(x, (v, i) => v + 0.5 * h * k1[i]))
+    const k3 = f(Float64Array.from(x, (v, i) => v + 0.5 * h * k2[i]))
+    const k4 = f(Float64Array.from(x, (v, i) => v + h * k3[i]))
+    x = Float64Array.from(x, (v, i) => v + (h / 6) * (k1[i] + 2 * k2[i] + 2 * k3[i] + k4[i]))
+  }
+  return x
+}
+
+test('algorithms on primitives', ({ bench }) =>
+  group(bench, 'first-order methods and Runge–Kutta', [
+    [
+      'gradientDescent, d = 10, 500 steps',
+      () => void run(gradientDescent(quadratic10, { stepSize: 0.05, tolerance: 0 }), start10, 500),
+    ],
+    ['adam, d = 10, 500 steps', () => void run(adam(quadratic10, { stepSize: 0.05, tolerance: 0 }), start10, 500)],
+    [
+      'rungeKutta rk4, 2 states, 1000 steps',
+      () => void run(rungeKutta(oscillator, 'rk4', { stepSize: 0.01 }), { x0: [1, 0] }, 1000),
+    ],
+    [
+      'rungeKutta euler, 2 states, 1000 steps',
+      () => void run(rungeKutta(oscillator, 'euler', { stepSize: 0.01 }), { x0: [1, 0] }, 1000),
+    ],
+    ['plain-JS RK4 reference, 1000 steps', () => void rk4Reference(1000, 0.01)],
+    ['linearCombination of three 2-vectors', () => void linearCombination([two, two, two], [1, 0.5, 0.25])],
   ]))

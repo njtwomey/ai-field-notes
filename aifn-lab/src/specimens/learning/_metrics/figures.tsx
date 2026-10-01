@@ -42,11 +42,12 @@ import {
 import { integers, normals, stream, uniform } from 'aifn/foundation/random'
 import { toFlat } from 'aifn/foundation/tensor'
 import { useMemo, useState } from 'react'
-import { Select, Slider, Switch } from '@lab/controls'
 import { Figure } from '@lab/layout'
+import { choice, row, setting, slider, useFigureState } from '@lab/state'
 import { Input } from '@lab/ui/input'
-import { Readout, XYChart, type XYSeries } from '@lab/viz'
-import { CurveView, formatValue, type Curve } from '@lab/views'
+import { Bars, Curve as CurveLayer, Handle, Plot, Plots, Points, Readout, useAxis } from '@lab/viz'
+import { CurvePanel, formatValue } from '@lab/views'
+import type { Curve } from 'aifn/foundation/contracts'
 
 /** n standard normal draws from a keyed stream, as numbers. */
 const gaussians = (key: string, n: number) => toFlat(normals(stream(key), n))
@@ -66,12 +67,25 @@ const fmt = formatValue
 
 // ---------------------------------------------------------------------------------------------------------------------
 
-type CurveKind = 'roc' | 'precision-recall' | 'det' | 'gain' | 'cost' | 'precision-recall-gain'
+const CURVE_KINDS = [
+  { value: 'roc', label: 'ROC' },
+  { value: 'pr', label: 'precision–recall' },
+  { value: 'det', label: 'DET (probit axes)' },
+  { value: 'gain', label: 'cumulative gain' },
+  { value: 'cost', label: 'cost curve' },
+  { value: 'prg', label: 'precision–recall–gain' },
+] as const
 
 export function CurveGallerySpecimen() {
-  const [kind, setKind] = useState<CurveKind>('roc')
-  const [separation, setSeparation] = useState(1.2)
-  const [prevalence, setPrevalence] = useState(0.3)
+  const state = useFigureState({
+    data: row('1 · scores', {
+      separation: slider(0, 4, 1.2, { label: 'separation d', step: 0.1 }),
+      prevalence: slider(0.02, 0.9, 0.3, { label: 'prevalence π', step: 0.01 }),
+    }),
+    view: row('2 · curve', { kind: choice(CURVE_KINDS, 'roc', { label: 'curve' }) }),
+  })
+  const { separation, prevalence } = state.data
+  const kind = state.view.kind
   const { y, scores } = useMemo(() => binormalSample(400, prevalence, separation), [prevalence, separation])
   // A weaker second model on the same cases, for comparison.
   const weaker = useMemo(() => {
@@ -83,7 +97,7 @@ export function CurveGallerySpecimen() {
       switch (kind) {
         case 'roc':
           return rocCurve(y, s)
-        case 'precision-recall':
+        case 'pr':
           return precisionRecallCurve(y, s)
         case 'det':
           return detCurve(y, s)
@@ -91,7 +105,7 @@ export function CurveGallerySpecimen() {
           return gainCurve(y, s)
         case 'cost':
           return costCurve(y, s)
-        case 'precision-recall-gain':
+        case 'prg':
           return precisionRecallGainCurve(y, s)
       }
     }
@@ -114,52 +128,51 @@ export function CurveGallerySpecimen() {
     return { d, b }
   }, [y, scores])
   return (
-    <CurveView
+    <Figure
+      purpose="One sweep over the sorted scores gives every curve; the same two classifiers look different on each, and a noisier model is dominated on all of them."
       title="Curves of two scoring classifiers"
-      curve={curves}
-      controls={
-        <>
-          <Select
-            label="curve"
-            value={kind}
-            onChange={setKind}
-            options={[
-              { value: 'roc', label: 'ROC' },
-              { value: 'precision-recall', label: 'precision–recall' },
-              { value: 'det', label: 'DET (probit axes)' },
-              { value: 'gain', label: 'cumulative gain' },
-              { value: 'cost', label: 'cost curve' },
-              { value: 'precision-recall-gain', label: 'precision–recall–gain' },
-            ]}
-          />
-          <Slider label="separation d" value={separation} min={0} max={4} step={0.1} onChange={setSeparation} />
-          <Slider label="prevalence π" value={prevalence} min={0.02} max={0.9} step={0.01} onChange={setPrevalence} />
-        </>
-      }
-      readouts={
-        <>
-          <Readout
-            label="AUROC A, DeLong 95%"
-            value={`${fmt(uncertainty.d.auroc)} [${fmt(uncertainty.d.interval[0])}, ${fmt(uncertainty.d.interval[1])}]`}
-          />
-          <Readout
-            label="bootstrap 95%"
-            value={`[${fmt(uncertainty.b.interval[0])}, ${fmt(uncertainty.b.interval[1])}]`}
-          />
-          <Readout label="AP A" value={fmt(averagePrecision(y, scores))} />
-        </>
-      }
-      caption="Every curve comes from one sweep over the sorted scores. Model B adds noise to model A's scores, so it lies below A on the ROC, PR and gain curves and above it on the DET and cost curves."
-    />
+      state={state}
+      readouts={{
+        'model A': (
+          <>
+            <Readout
+              label="AUROC A, DeLong 95%"
+              value={`${fmt(uncertainty.d.auroc)} [${fmt(uncertainty.d.interval[0])}, ${fmt(uncertainty.d.interval[1])}]`}
+            />
+            <Readout
+              label="bootstrap 95%"
+              value={`[${fmt(uncertainty.b.interval[0])}, ${fmt(uncertainty.b.interval[1])}]`}
+            />
+            <Readout label="AP A" value={fmt(averagePrecision(y, scores))} />
+          </>
+        ),
+      }}
+      caption="Every curve comes from one sweep over the sorted scores. Model B adds noise to model A's scores, so it lies below A on the ROC, PR and gain curves and above it on the DET and cost curves. Lower the prevalence: the ROC curves do not move, the PR curves fall."
+    >
+      <CurvePanel curve={curves} />
+    </Figure>
   )
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
 
 export function ReliabilitySpecimen() {
-  const [temperature, setTemperature] = useState(0.6)
-  const [bins, setBins] = useState(10)
-  const [strategy, setStrategy] = useState<'uniform' | 'quantile'>('uniform')
+  const state = useFigureState({
+    model: row('1 · model', { temperature: slider(0.2, 3, 0.6, { label: 'temperature T', step: 0.05 }) }),
+    binning: row('2 · binning', {
+      bins: slider(2, 30, 10, { label: 'bins M', step: 1 }),
+      strategy: choice(
+        [
+          { value: 'uniform', label: 'equal width' },
+          { value: 'quantile', label: 'equal mass' },
+        ],
+        'uniform',
+        { label: 'binning' },
+      ),
+    }),
+  })
+  const { temperature } = state.model
+  const { bins, strategy } = state.binning
   const n = 2000
   // True probabilities q from a logistic of a Gaussian score; labels ~ Bernoulli(q); the model reports
   // σ(logit(q)/T): T < 1 is overconfident, T > 1 underconfident.
@@ -174,39 +187,33 @@ export function ReliabilitySpecimen() {
   const diagram = useMemo(() => reliabilityDiagram(y, p, { bins, strategy }), [y, p, bins, strategy])
   const brier = useMemo(() => brierDecomposition(y, p, { bins }), [y, p, bins])
   return (
-    <CurveView
+    <Figure
+      purpose="A calibrated model's predicted probabilities match the observed frequencies, so its binned points lie on the diagonal; a temperature below 1 makes it overconfident and the curve flattens."
       title="Reliability diagram of a mis-scaled model"
-      curve={diagram}
-      controls={
-        <>
-          <Slider label="temperature T" value={temperature} min={0.2} max={3} step={0.05} onChange={setTemperature} />
-          <Slider label="bins M" value={bins} min={2} max={30} step={1} onChange={setBins} />
-          <Select
-            label="binning"
-            value={strategy}
-            onChange={setStrategy}
-            options={[
-              { value: 'uniform', label: 'equal width' },
-              { value: 'quantile', label: 'equal mass' },
-            ]}
-          />
-        </>
-      }
-      readouts={
-        <>
-          <Readout label="MCE" value={fmt(maximumCalibrationError(y, p, { bins, strategy }))} />
-          <Readout label="RMS CE" value={fmt(rmsCalibrationError(y, p, { bins, strategy }))} />
-          <Readout label="debiased CE²" value={fmt(debiasedSquaredCalibrationError(y, p, { bins, strategy }))} />
-          <Readout label="ECE (check)" value={fmt(expectedCalibrationError(y, p, { bins, strategy }))} />
-          <Readout label="log loss" value={fmt(logLoss(y, p))} />
-          <Readout label="Brier" value={fmt(brier.brier)} />
-          <Readout label="reliability" value={fmt(brier.reliability)} />
-          <Readout label="resolution" value={fmt(brier.resolution)} />
-          <Readout label="uncertainty" value={fmt(brier.uncertainty)} />
-        </>
-      }
+      state={state}
+      readouts={{
+        calibration: (
+          <>
+            <Readout label="MCE" value={fmt(maximumCalibrationError(y, p, { bins, strategy }))} />
+            <Readout label="RMS CE" value={fmt(rmsCalibrationError(y, p, { bins, strategy }))} />
+            <Readout label="debiased CE²" value={fmt(debiasedSquaredCalibrationError(y, p, { bins, strategy }))} />
+            <Readout label="ECE (check)" value={fmt(expectedCalibrationError(y, p, { bins, strategy }))} />
+          </>
+        ),
+        'Brier decomposition': (
+          <>
+            <Readout label="log loss" value={fmt(logLoss(y, p))} />
+            <Readout label="Brier" value={fmt(brier.brier)} />
+            <Readout label="reliability" value={fmt(brier.reliability)} />
+            <Readout label="resolution" value={fmt(brier.resolution)} />
+            <Readout label="uncertainty" value={fmt(brier.uncertainty)} />
+          </>
+        ),
+      }}
       caption="At T = 1 the model is calibrated and the points follow the diagonal up to sampling noise. T < 1 pushes probabilities towards 0 and 1 (overconfident, a curve flatter than the diagonal); T > 1 does the reverse. Only the reliability term of the Brier score changes with T; resolution depends on the ranking."
-    />
+    >
+      <CurvePanel curve={diagram} />
+    </Figure>
   )
 }
 
@@ -216,9 +223,16 @@ export function ReliabilitySpecimen() {
 const GRADES = [3, 3, 2, 2, 2, 1, 1, 0, 0, 0]
 
 export function RankingSpecimen() {
-  const [noise, setNoise] = useState(1)
-  const [k, setK] = useState(5)
-  const [exponential, setExponential] = useState(true)
+  const state = useFigureState({
+    ranking: row('1 · ranking', { noise: slider(0, 4, 2, { label: 'noise sd', step: 0.1 }) }),
+    metric: row('2 · metric', {
+      exponential: setting(true, 'exponential gain 2^g − 1'),
+    }),
+    k: slider(1, 10, 5, { label: 'cut-off k', step: 1, onChart: true }),
+  })
+  const { noise } = state.ranking
+  const { exponential } = state.metric
+  const k = Math.round(state.k)
   const gain = exponential ? 'exponential' : 'linear'
   // Scores are the grade plus noise; ranking by score gives the list the metrics read.
   const ranked = useMemo(() => {
@@ -227,46 +241,41 @@ export function RankingSpecimen() {
     const order = scores.map((_, i) => i).sort((a, b) => scores[b] - scores[a])
     return order.map((i) => GRADES[i])
   }, [noise])
-  const series = useMemo((): XYSeries[] => {
+  const bars = useMemo(() => {
     const g = (x: number) => (exponential ? 2 ** x - 1 : x)
-    const ranks = ranked.map((_, i) => i + 1)
-    return [
-      {
-        name: 'ideal gain / log₂(i + 1)',
-        type: 'line',
-        x: ranks,
-        y: GRADES.map((x, i) => g(x) / Math.log2(i + 2)),
-        muted: true,
-        dashed: true,
-      },
-      { name: 'gain / log₂(i + 1)', type: 'bar', x: ranks, y: ranked.map((x, i) => g(x) / Math.log2(i + 2)), slot: 0 },
-    ]
+    return {
+      ranks: ranked.map((_, i) => i + 1),
+      ideal: GRADES.map((x, i) => g(x) / Math.log2(i + 2)),
+      actual: ranked.map((x, i) => g(x) / Math.log2(i + 2)),
+    }
   }, [ranked, exponential])
+  const rank = useAxis({ label: 'rank i', range: [0.5, 10.5] })
+  const gainAxis = useAxis({ label: 'discounted gain', hold: 'union', key: exponential })
   return (
     <Figure
       title="nDCG of a noisy ranking"
-      description="Ten items with grades 0–3 are ranked by their grade plus Gaussian noise. Bars are each rank's discounted gain; the dashed line is the ideal ordering's."
-      controls={
-        <>
-          <Slider label="noise sd" value={noise} min={0} max={4} step={0.1} onChange={setNoise} />
-          <Slider label="cut-off k" value={k} min={1} max={10} step={1} onChange={setK} />
-          <Switch label="exponential gain 2^g − 1" checked={exponential} onChange={setExponential} />
-        </>
-      }
-      readouts={
-        <>
-          <Readout label="ranked grades" value={ranked.join(' ')} />
-          <Readout label={`nDCG@${k}`} value={fmt(ndcg(ranked, { k, gain }))} />
-          <Readout label={`DCG@${k}`} value={fmt(dcg(ranked, { k, gain }))} />
-          <Readout label={`P@${k}`} value={fmt(precisionAtK(ranked, { k }))} />
-          <Readout label="AP" value={fmt(meanAveragePrecision(ranked))} />
-          <Readout label="RR" value={fmt(meanReciprocalRank(ranked))} />
-          <Readout label={`ERR@${k}`} value={fmt(expectedReciprocalRank(ranked, { k, maxGrade: 3 }))} />
-        </>
-      }
-      caption="With no noise the ranking is ideal and nDCG is 1. Noise swaps items; a swap near the top costs more than one near the bottom, because the discount 1/log₂(i + 1) falls with rank. The exponential gain weights the grade-3 items more."
+      purpose="nDCG@k is the discounted gain of the top k ranks divided by the ideal ordering's: a swap near the top costs more than one near the bottom, because the discount falls with rank."
+      state={state}
+      readouts={{
+        [`at k = ${k}`]: (
+          <>
+            <Readout label="ranked grades" value={ranked.join(' ')} />
+            <Readout label={`nDCG@${k}`} value={fmt(ndcg(ranked, { k, gain }))} />
+            <Readout label={`DCG@${k}`} value={fmt(dcg(ranked, { k, gain }))} />
+            <Readout label={`P@${k}`} value={fmt(precisionAtK(ranked, { k }))} />
+            <Readout label="AP" value={fmt(meanAveragePrecision(ranked))} />
+            <Readout label="RR" value={fmt(meanReciprocalRank(ranked))} />
+            <Readout label={`ERR@${k}`} value={fmt(expectedReciprocalRank(ranked, { k, maxGrade: 3 }))} />
+          </>
+        ),
+      }}
+      caption="Ten items with grades 0–3 ranked by grade plus Gaussian noise. Bars are each rank's discounted gain; the dashed line is the ideal ordering's. With no noise the ranking is ideal and nDCG is 1. The exponential gain weights the grade-3 items more. Drag the cut-off line to set k."
     >
-      <XYChart series={series} xLabel="rank i" yLabel="discounted gain" integerX />
+      <Plot x={rank} y={gainAxis}>
+        <Bars name="gain / log₂(i + 1)" x={bars.ranks} y={bars.actual} slot={0} />
+        <CurveLayer name="ideal gain / log₂(i + 1)" x={bars.ranks} y={bars.ideal} muted dashed showPoints />
+        <Handle kind="x" at={k + 0.5} label="cut-off k" onDrag={(v) => state.set('k', Math.round(v - 0.5))} />
+      </Plot>
     </Figure>
   )
 }
@@ -302,7 +311,8 @@ function corrupt(labels: number[], fraction: number, clusters: number): number[]
 }
 
 export function ClusteringSpecimen() {
-  const [fraction, setFraction] = useState(0.3)
+  const state = useFigureState({ fraction: slider(0, 1, 0.3, { label: 'fraction reassigned', step: 0.05 }) })
+  const fraction = state.fraction
   const data = useMemo(() => blobs(), [])
   const predicted = useMemo(() => corrupt(data.labels, fraction, 3), [data, fraction])
   const sweep = useMemo(() => {
@@ -318,9 +328,8 @@ export function ClusteringSpecimen() {
         silhouette: silhouetteScore(data.x, p),
       }
     })
-    const line = (name: string, key: keyof (typeof rows)[number], slot: number): XYSeries => ({
+    const line = (name: string, key: keyof (typeof rows)[number], slot: number) => ({
       name,
-      type: 'line',
       x: fs,
       y: rows.map((r) => r[key]),
       slot,
@@ -334,54 +343,46 @@ export function ClusteringSpecimen() {
       line('silhouette', 'silhouette', 5),
     ]
   }, [data])
-  const scatter = useMemo(
-    (): XYSeries[] => [
-      {
-        name: 'points',
-        type: 'scatter',
-        x: data.x.map((p) => p[0]),
-        y: data.x.map((p) => p[1]),
-        group: predicted,
-        groupNames: ['cluster 0', 'cluster 1', 'cluster 2'],
-      },
-    ],
-    [data, predicted],
-  )
+  const xy = useMemo(() => ({ x: data.x.map((p) => p[0]), y: data.x.map((p) => p[1]) }), [data])
+  const x1 = useAxis({ label: 'x₁' })
+  const x2 = useAxis({ label: 'x₂', equal: x1 })
+  const fx = useAxis({ label: 'fraction reassigned', range: [0, 1] })
+  const sc = useAxis({ label: 'score' })
   return (
     <Figure
       title="Clustering scores for a degrading clustering"
-      description="Three blobs, with a growing fraction of points reassigned to a random cluster."
-      controls={
-        <Slider label="fraction reassigned" value={fraction} min={0} max={1} step={0.05} onChange={setFraction} />
-      }
-      readouts={
-        <>
-          <Readout label="ARI" value={fmt(adjustedRandIndex(data.labels, predicted))} />
-          <Readout label="AMI" value={fmt(adjustedMutualInformation(data.labels, predicted))} />
-          <Readout label="V-measure" value={fmt(vMeasure(data.labels, predicted))} />
-          <Readout label="Rand" value={fmt(randIndex(data.labels, predicted))} />
-          <Readout label="silhouette" value={fmt(silhouetteScore(data.x, predicted))} />
-        </>
-      }
-      caption="Drag the marker line on the right. The chance-corrected scores (ARI, AMI) fall to about 0 once the labels are random; the Rand index stays well above 0 because most pairs are apart in any clustering with three clusters."
+      purpose="Chance-corrected scores (ARI, AMI) fall to 0 as a clustering's labels become random, while the plain Rand index stays high: most pairs are apart in any three-cluster split."
+      state={state}
+      readouts={{
+        'at this fraction': (
+          <>
+            <Readout label="ARI" value={fmt(adjustedRandIndex(data.labels, predicted))} />
+            <Readout label="AMI" value={fmt(adjustedMutualInformation(data.labels, predicted))} />
+            <Readout label="V-measure" value={fmt(vMeasure(data.labels, predicted))} />
+            <Readout label="Rand" value={fmt(randIndex(data.labels, predicted))} />
+            <Readout label="silhouette" value={fmt(silhouetteScore(data.x, predicted))} />
+          </>
+        ),
+      }}
+      caption="Three blobs, with a growing fraction of points reassigned to a random cluster (left, coloured by the corrupted labels). Drag the marker line on the right. The chance-corrected scores (ARI, AMI) fall to about 0 once the labels are random; the Rand index stays well above 0 because most pairs are apart in any clustering with three clusters."
     >
-      <div className="grid h-full grid-cols-1 gap-3 md:grid-cols-2">
-        <XYChart series={scatter} xLabel="x₁" yLabel="x₂" equalAspect />
-        <XYChart
-          series={sweep}
-          xLabel="fraction reassigned"
-          yLabel="score"
-          xRange={[0, 1]}
-          handles={[
-            {
-              kind: 'x',
-              at: fraction,
-              label: 'now',
-              onDrag: (v) => setFraction(Math.round(Math.min(1, Math.max(0, v)) * 20) / 20),
-            },
-          ]}
-        />
-      </div>
+      <Plots cols={2}>
+        <Plot x={x1} y={x2} legend={false}>
+          <Points
+            name="points"
+            x={xy.x}
+            y={xy.y}
+            group={predicted}
+            groupNames={['cluster 0', 'cluster 1', 'cluster 2']}
+          />
+        </Plot>
+        <Plot x={fx} y={sc}>
+          {sweep.map((l) => (
+            <CurveLayer key={l.name} name={l.name} x={l.x} y={l.y} slot={l.slot} />
+          ))}
+          <Handle {...state.handle('fraction', { label: 'now' })} />
+        </Plot>
+      </Plots>
     </Figure>
   )
 }
@@ -407,16 +408,12 @@ export function TextSpecimen() {
       ter: translationEditRate(reference, candidate),
     }
   }, [reference, candidate])
-  const series = useMemo(
-    (): XYSeries[] => [
-      { name: 'clipped n-gram precision', type: 'bar', x: [1, 2, 3, 4], y: scores.precisions, slot: 0 },
-    ],
-    [scores],
-  )
+  const orders = useAxis({ label: 'n-gram order n', categories: ['1', '2', '3', '4'] })
+  const pn = useAxis({ label: 'pₙ', range: [0, 1] })
   return (
     <Figure
       title="Text metrics of one sentence pair"
-      description="Tokens are whitespace-separated words; chrF uses characters with spaces removed."
+      purpose="BLEU multiplies clipped n-gram precisions up to n = 4, so one missing 4-gram zeroes a sentence's BLEU while character and recall-based scores give partial credit."
       controls={
         <>
           <label className="flex flex-col gap-1.5 text-xs">
@@ -429,22 +426,30 @@ export function TextSpecimen() {
           </label>
         </>
       }
-      readouts={
-        <>
-          <Readout label="BLEU" value={fmt(scores.bleu)} />
-          <Readout label="BLEU (add-one)" value={fmt(scores.smoothed)} />
-          <Readout label="chrF₂" value={fmt(scores.chrf)} />
-          <Readout label="ROUGE-1" value={fmt(scores.rouge1)} />
-          <Readout label="ROUGE-2" value={fmt(scores.rouge2)} />
-          <Readout label="ROUGE-L" value={fmt(scores.rougeL)} />
-          <Readout label="WER" value={fmt(scores.wer)} />
-          <Readout label="CER" value={fmt(scores.cer)} />
-          <Readout label="TER" value={fmt(scores.ter)} />
-        </>
-      }
-      caption="One missing 4-gram makes sentence BLEU 0 while chrF and ROUGE give partial credit. Try reordering the candidate: TER charges one shift for a moved block, WER charges every word."
+      readouts={{
+        overlap: (
+          <>
+            <Readout label="BLEU" value={fmt(scores.bleu)} />
+            <Readout label="BLEU (add-one)" value={fmt(scores.smoothed)} />
+            <Readout label="chrF₂" value={fmt(scores.chrf)} />
+            <Readout label="ROUGE-1" value={fmt(scores.rouge1)} />
+            <Readout label="ROUGE-2" value={fmt(scores.rouge2)} />
+            <Readout label="ROUGE-L" value={fmt(scores.rougeL)} />
+          </>
+        ),
+        'edit rates': (
+          <>
+            <Readout label="WER" value={fmt(scores.wer)} />
+            <Readout label="CER" value={fmt(scores.cer)} />
+            <Readout label="TER" value={fmt(scores.ter)} />
+          </>
+        ),
+      }}
+      caption="Tokens are whitespace-separated words; chrF uses characters with spaces removed. One missing 4-gram makes sentence BLEU 0 while chrF and ROUGE give partial credit. Try reordering the candidate: TER charges one shift for a moved block, WER charges every word."
     >
-      <XYChart series={series} xLabel="n-gram order n" yLabel="pₙ" yRange={[0, 1]} integerX />
+      <Plot x={orders} y={pn}>
+        <Bars name="clipped n-gram precision" x={[0, 1, 2, 3]} y={scores.precisions} slot={0} />
+      </Plot>
     </Figure>
   )
 }

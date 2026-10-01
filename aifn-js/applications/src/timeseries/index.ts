@@ -1,6 +1,6 @@
 /**
- * `aifn-applied/timeseries`: models of one series observed in time: ARMA fitting and forecasting, GARCH, exponential
- * smoothing, classical and STL decomposition, and EM for linear-Gaussian state-space models.
+ * `aifn-applied/timeseries`: models of one series observed in time: ARMA and seasonal ARIMA fitting and forecasting,
+ * GARCH, exponential smoothing, classical and STL decomposition, and EM for linear-Gaussian state-space models.
  */
 
 export {
@@ -24,6 +24,20 @@ export {
   type Forecast,
   type LagRoots,
 } from './arma'
+export {
+  expandSarima,
+  fitSarima,
+  forecastSarima,
+  sarimaFitSteps,
+  sarimaLogLikelihood,
+  sarimaResiduals,
+  sarimaSpec,
+  simulateSarima,
+  type SarimaFit,
+  type SarimaFitOptions,
+  type SarimaSimulation,
+  type SarimaSpec,
+} from './sarima'
 export {
   classicalDecomposition,
   difference,
@@ -50,3 +64,4 @@ export {
 } from './garch'
 export type { FitState } from './fit'
 export { stateSpaceEm, type EmEstimate, type StateSpaceEmState } from './state-space'
+export { constantVelocityModel, type ConstantVelocityOptions } from './tracking'

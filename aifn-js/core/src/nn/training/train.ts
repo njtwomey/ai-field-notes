@@ -4,16 +4,18 @@
  * `aifn/optim/first-order` (`adamRule`, `sgdRule`, …; optax's gradient transformations, Babuschkin et al., 2020). The
  * state is plain data: each epoch's shuffled order is drawn from the stream of the step that starts the epoch, and
  * dropout masks from the stream of the step that evaluates the loss, so a step is a pure function of its state and
- * context, and `seek`, `extend` and replays agree exactly.
+ * context, and `seek`, `extend` and replays agree exactly. Non-trainable layer state (batch norm's running statistics,
+ * `ctx.buffers`) is part of the state too: each loss evaluation reads the previous buffers and its writes become the
+ * next ones.
  */
 
 import type { Scalar, Size, Status, StepContext } from 'aifn/foundation/contracts'
-import { valueAndGrad } from 'aifn/foundation/autodiff'
+import { valueAndGrad, type ValueAndGrad } from 'aifn/foundation/autodiff'
 import { treeLeaves, type Params } from 'aifn/foundation/pytree'
 import { child, permutation, type Stream } from 'aifn/foundation/random'
 import { fromData, norm, take, toFlat, unwrap, type Tensor, type Value } from 'aifn/foundation/tensor'
 import type { Algorithm } from 'aifn/foundation/trace'
-import type { Context } from 'aifn/nn/layers'
+import type { Buffers, Context } from 'aifn/nn/layers'
 import {
   adamRule,
   applyUpdates,
@@ -29,8 +31,8 @@ export type Batch = Record<string, Tensor>
 /** Options of `trainingLoop`. */
 export type TrainingOptions<P extends Params, B extends Batch> = {
   /**
-   * The loss of parameters on a minibatch, a number or rank-0 value. `ctx` carries `train: true` and a stream, to pass
-   * to layers (for dropout).
+   * The loss of parameters on a minibatch, a number or rank-0 value. `ctx` carries `train: true`, a stream (for
+   * dropout) and the layer buffers with a sink for their updates (for batch norm); pass it to the model's `apply`.
    */
   loss: (params: P, batch: B, ctx: Context) => Value
   /** The training set. */
@@ -56,6 +58,8 @@ export interface TrainingState<P extends Params> extends Status {
   readonly params: P
   /** The update rule's state (its step count and running moments). */
   readonly optimizer: unknown
+  /** The layers' non-trainable state after evaluating this step's loss (running statistics); `{}` when none. */
+  readonly buffers: Buffers
   /** The loss of `params` on this step's minibatch (the one the next update uses). */
   readonly loss: Scalar
   /** Its gradient with respect to the parameters. */
@@ -90,7 +94,8 @@ function examplesOf(data: Batch): Size {
 const leafNorm = (v: Tensor | number) => (typeof v === 'number' ? Math.abs(v) : norm(v))
 
 /**
- * Minibatch training of parameters on `loss`. `init` takes `{ params }` (e.g. `model.init(stream)`); step t applies
+ * Minibatch training of parameters on `loss`. `init` takes `{ params }` (e.g. `model.init(stream)`), and optionally the
+ * initial `buffers` (default `{}`: each stateful layer starts from its initial values); step t applies
  * one update from the gradient on minibatch t and evaluates the loss on minibatch t + 1. Epochs are shuffled and cut
  * into consecutive batches, so every example is used once per epoch (a short last batch is dropped). The shuffle of
  * epoch e is drawn from `child(s, 'epoch')` of the stream of the step that starts it (the init stream for epoch 0);
@@ -100,7 +105,7 @@ const leafNorm = (v: Tensor | number) => (typeof v === 'number' ? Math.abs(v) : 
  */
 export function trainingLoop<P extends Params, B extends Batch>(
   options: TrainingOptions<P, B>,
-): Algorithm<{ params: P }, TrainingState<P>> {
+): Algorithm<{ params: P; buffers?: Buffers }, TrainingState<P>> {
   const { loss, data, clipNorm, divergeAbove = 1e12 } = options
   const rule = options.optimizer ?? (adamRule({ stepSize: 0.01 }) as UpdateRule<unknown>)
   const optimizer: UpdateRule<unknown> =
@@ -108,10 +113,13 @@ export function trainingLoop<P extends Params, B extends Batch>(
   const n = examplesOf(data)
   const size = Math.min(options.batchSize ?? n, n)
   const perEpoch = Math.floor(n / size)
-  const lossAndGrad = valueAndGrad((params: P, batch: B, ctx: Context) => loss(params, batch, ctx))
+  const lossAndGrad: (params: P, batch: B, ctx: Context) => ValueAndGrad<Value, unknown> = valueAndGrad(
+    (params: P, batch: B, ctx: Context) => loss(params, batch, ctx),
+    {},
+  )
 
   /** Evaluate the loss and gradient at step t on its minibatch, drawing a new epoch order from `s` when t starts one. */
-  const evaluate = (params: P, t: Size, previous: Tensor | null, s: Stream) => {
+  const evaluate = (params: P, buffers: Buffers, t: Size, previous: Tensor | null, s: Stream) => {
     let batch = data
     let indices: Tensor | null = null
     let order: Tensor | null = null
@@ -123,14 +131,17 @@ export function trainingLoop<P extends Params, B extends Batch>(
       indices = fromData(Int32Array.from(ids), [size])
       batch = Object.fromEntries(Object.entries(data).map(([key, v]) => [key, unwrap(take(v, ids)) as Tensor])) as B
     }
-    const ctx: Context = { train: true, stream: child(s, 'dropout') }
+    const bufferUpdates: Record<string, Params> = {}
+    const ctx: Context = { train: true, stream: child(s, 'dropout'), buffers, bufferUpdates }
     const { value, grad } = lossAndGrad(params, batch, ctx)
     const grads = grad as P
     const gradNorms: Record<string, number> = {}
     for (const { path, value: g } of treeLeaves(grads)) gradNorms[path] = leafNorm(g)
-    const lossValue = typeof value === 'number' ? value : toFlat(value)[0]
+    const raw = unwrap(value)
+    const lossValue = typeof raw === 'number' ? raw : toFlat(raw)[0]
     return {
       loss: lossValue,
+      buffers: Object.keys(bufferUpdates).length ? { ...buffers, ...bufferUpdates } : buffers,
       grads,
       gradNorm: globalNorm(grads),
       gradNorms,
@@ -144,12 +155,17 @@ export function trainingLoop<P extends Params, B extends Batch>(
 
   return {
     name: `training-${rule.name}`,
-    init: ({ params }, s) => ({ t: 0, params, optimizer: optimizer.init(params), ...evaluate(params, 0, null, s) }),
+    init: ({ params, buffers = {} }, s) => ({
+      t: 0,
+      params,
+      optimizer: optimizer.init(params),
+      ...evaluate(params, buffers, 0, null, s),
+    }),
     step: (state, ctx: StepContext) => {
       const { updates, state: next } = optimizer.update(state.grads, state.optimizer, state.params)
       const params = applyUpdates(state.params, updates)
       const t = state.t + 1
-      return { t, params, optimizer: next, ...evaluate(params, t, state.order, ctx.stream) }
+      return { t, params, optimizer: next, ...evaluate(params, state.buffers, t, state.order, ctx.stream) }
     },
   }
 }

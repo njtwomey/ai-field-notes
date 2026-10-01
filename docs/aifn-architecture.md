@@ -1,4 +1,4 @@
-# aifn architecture (target, draft 1; decisions adopted)
+# aifn architecture (target, draft 1; decisions adopted; phases 0–5 built)
 
 The target design for the whole system: the numerical core, the shared objects built on it, the registries that list
 them, the view layer, the Python side and the packages. It supersedes the ad-hoc conventions that grew during the fast
@@ -11,7 +11,8 @@ Detail and evidence live in three working documents, cited by letter:
 - **C**: `.scratch/aifn/consolidation.md` (naming, collisions, capability conformance, layer order); **R**:
   `.scratch/aifn/refinement.md` (known gaps).
 
-Decisions that need the owner are collected in §10, each with a recommendation.
+Decisions that need the owner are collected in §10, each with a recommendation. What is built and what is still
+planned is in "Status (2026-10-01)" below and in a status line at the head of each section.
 
 > **Decided (2026-09-30): core and applications.** aifn-js holds two workspace packages:
 > `aifn-js/core` (package `aifn`, imported as `aifn/<module>`) and `aifn-js/applications` (package `aifn-applied`,
@@ -66,6 +67,42 @@ Decisions that need the owner are collected in §10, each with a recommendation.
 > `hmmModel`, the casino, sampling) and the linear-chain CRF live in `aifn-applied/inference/sequence-models`, and so
 > do future named chain models (factorial HMM, MEMM).
 
+## Status (2026-10-01)
+
+Phases 0–5 are built; phase 7 (coverage) is mostly done; phases 6 (languages, `mlc` → `aifn`) and 8 (the site) wait
+for the owner. Open items are in R (`.scratch/aifn/refinement.md`, "Open" sections at the top).
+
+| Section                | Built                                                                                                                                                                                                | Planned                                                                                            |
+| ---------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
+| §2 Shape of the system | aifn-js as `core/` (`aifn`, 12 families, 124 modules) and `applications/` (`aifn-applied`, 15 areas); aifn-lab                                                                                       | aifn-py; the site consuming aifn                                                                   |
+| §3 Numerical core      | brand, dtypes incl. `complex128`, promotion, errors; 134 primitives; three interpreters; custom rules; implicit differentiation; linalg rules; plain-data randomness; Algorithm/Trace; the DSP spine | a `Kernels` seam object for WASM                                                                   |
+| §4 Shared objects      | every row, typed once in `aifn/foundation/contracts`                                                                                                                                                 | `toWire`/`fromWire` converters (phase 6)                                                           |
+| §5 Registries, catalog | 19 kinds, `generated/catalog.json` (`make catalog`, `make catalog-check`)                                                                                                                            | the site's "In aifn" backlinks (phase 8); fixture coverage as a gate                               |
+| §6 View layer          | `Plot`, axis model, layers; figure state, probes, `useComputed` (inline and worker), `Equation`; view registry and `Show`; every lab page reviewed; `XYChart`, `Heatmap`, `Subplots` retired         | DSP views (spectrogram, scalogram, pole–zero, responses) and audio                                 |
+| §7 Python              | golden fixtures generated in Python (`aifn-js/*/test/fixtures`, `make fixtures`)                                                                                                                     | wire shapes, `aifn.contracts`, fixtures keyed by catalog entry, `python/mlc` → `aifn-py` (phase 6) |
+| §8 Packages and checks | layer lint, name-collision lint, catalog freshness and links, registry conformance, generated primitive tests, algorithm protocol tests, fixture-coverage report, `lab-check`, `lab-shots`           | API reports per module, docs coverage, deprecation lint, stability promotion                       |
+
+Module names and paths that changed since this document was drafted:
+
+- Implicit differentiation (`implicitFixedPoint`, `implicitRoot`, `atConvergence`) is `aifn/numerics/implicit`, on
+  `aifn/numerics/linalg`'s `solve`; it is not in `foundation/autodiff`. `unrolled` stays in `aifn/foundation/trace`.
+- Scalar minimisation (`minimizeScalar`: Brent and golden section) is in `aifn/numerics/roots`.
+- `LinearOperator` (a matrix or a function v ↦ Av) is in `aifn/numerics/linalg`, beside the matrix-free Lanczos
+  eigensolver `eigsh`.
+- Multirate processing is the module `aifn/signal/multirate` (`resamplePoly`, `decimateSignal`, `polyphase`,
+  `dftFilterBank`, and `upfirdn` from `aifn/foundation/convolution`).
+- Expectation propagation over model-language programs (Gaussian factors and interval factors, as in TrueSkill) is
+  `aifn/inference/expectation-propagation/model.ts` (`compileGaussianModel`, `modelExpectationPropagation`); `infer`
+  picks it when a model compiles.
+- Ordinal models: the likelihoods (cumulative, continuation-ratio, adjacent-category) are
+  `aifn/probability/likelihoods` (`ordinal.ts`) and the metrics (ordinal MAE, ranked probability score, C-index) are
+  `aifn/learning/metrics` (`ordinal.ts`); the models are applications, in `aifn-applied/learning/generalised/ordinal`
+  (thresholds, ordinal GLMs, deep heads) and `aifn-applied/learning/gaussian-processes/ordinal.ts`.
+- KL rules are a static table, `klRegistry` in `aifn/probability/distributions` (keyed `p|q`, read by `kl`); the
+  former `registerKl` is gone.
+- Polynomials are `aifn/numerics/polynomial` (`polynomialRoots` on the one `hqr`, in linalg's `eig`).
+- Presentation helpers (`lttb`, `minMaxDecimate`, field drawing) moved to the lab (`aifn-lab/src/viz/drawing`).
+
 ## 1. Goals and non-goals
 
 - **Stable and durable.** Public shapes are few, typed and versioned by an API report. Renames go through deprecation.
@@ -85,19 +122,22 @@ aifn-lab: the UI home (design, controls, Plot + layers, views, figures, diagram,
                                    │
                                    ▼
 aifn-js (package aifn): numerics and models, no React, no DOM ◀── generated types ── aifn-py (package aifn)
-    tier 0  tensor (+ primitives, pytrees, fourier, conv), space, registry, errors                    wire shapes,
-    tier 1  special, linalg (+ polynomials)                                                            fixtures,
-    tier 2  random, kernels                                                                            figure data,
-    tier 3  autodiff transforms (interpreters), trace, data (Dataset, Decomposition types)             examples
-    tier 4+ distributions, optim, solve, quadrature, graph, systems, stats, …  (full order: C §11, updated here)
+    tier 0  foundation (contracts, errors, registry, tensor, pytree, fourier, convolution,           wire shapes,
+            autodiff, random, space, trace)                                                          fixtures,
+    tier 1  numerics   2  graph   3  probability, optim, systems                                        figure data,
+    tier 4  inference, dynamics, signal, transport   5  learning   6  nn                                examples
+aifn-applied: 15 areas over core (learning, …, data)
 ```
 
-The tier list in the diagram above is superseded by the module tree (`.scratch/aifn/module-tree.md` §4.1, applied
+**Status:** built, except aifn-py (phase 6) and the site's use of aifn (phase 8). The tier list in the diagram above
+follows the module tree (`.scratch/aifn/module-tree.md` §4.1, applied
 2026-09-30, and moved in phase 1 when `graph` came to use `numerics/linalg`: families `foundation` 0; `numerics` 1;
 `graph` 2; `probability`, `optim`, `systems` 3; `inference`, `dynamics`, `signal`, `transport` 4; `learning` 5; `nn` 6). The layer order lives in one file,
 `aifn-js/modules.json`; a lint enforces it, and the README tables and the lab sidebar are generated from it (S §5.2).
 
 ## 3. The numerical core (K)
+
+**Status:** built (phases 0–3), except the `Kernels` seam object; the kernels are `foundation/tensor/kernels.ts`.
 
 **Tensor.** Keep the strided, plain-object, immutable `Tensor`. Add a brand (no duck typing), `bool` and interleaved
 `complex128` dtypes, one promotion table, and one error hierarchy (`ShapeError`, `DTypeError`,
@@ -105,7 +145,7 @@ The tier list in the diagram above is superseded by the module tree (`.scratch/a
 `Kernels` object is the seam where WASM could replace the CPU loops later; Workers and WebGPU take whole computations,
 not operations (K §3).
 
-**Primitives, one registry.** About 60 primitives, 30 of them non-elementwise, each declared once with `impl`, a
+**Primitives, one registry.** About 60 primitives were planned, 30 of them non-elementwise (134 are registered today), each declared once with `impl`, a
 `shape` rule, `vjp`, `jvp`, `transpose` (linear ones) and a `batch` rule, plus docs metadata (formula, note slug).
 Registering an id twice throws, so "defined once" is checked at import. Everything else is a composition. `special`'s
 functions register as elementwise primitives with **one** derivative each; today's duplicate scalar derivatives go
@@ -113,8 +153,9 @@ functions register as elementwise primitives with **one** derivative each; today
 
 **Autodiff as interpreters.** JAX's structure at teaching scale, with PyTorch's eagerness: reverse (tape), forward
 (dual) and batch interpreters nesting by level. This gives true forward mode, `vmap`, `jacobian` over pytrees, and
-honest types. Add `customVjp`/`customJvp`, `checkpoint`, implicit differentiation (`fixedPoint`, `rootOf`), unrolled
-and at-convergence differentiation of Algorithms, and linear-algebra rules (cholesky, lu, eigh, svd, qr, expm). One
+honest types. Add `customVjp`/`customJvp`, `checkpoint`, implicit differentiation (`implicitFixedPoint`, `implicitRoot`, in
+`aifn/numerics/implicit` because it needs linalg's `solve`), unrolled (`aifn/foundation/trace`) and at-convergence
+differentiation of Algorithms, the ODE adjoint (`odeAdjoint`, `aifn/dynamics/ode`), and linear-algebra rules (cholesky, lu, eigh, svd, qr, expm). One
 pytree module in tensor. The public API keeps its names (K §4).
 
 **Randomness as plain data.** Philox keys stay. `Stream` becomes `{ key, position }` with no hidden state (the
@@ -130,7 +171,7 @@ memory. An algorithm registry with serialisable refs lets a Worker rebuild and r
 `rfft`, `irfft` are primitives in tensor with transpose rules, and the DFT matrix is their definition (law-tested
 against them). One `conv`/`convTranspose`/`pad` family replaces four convolutions (dsp 1-D, dsp image, nn, stats), with
 FFT and overlap-add as methods, and multirate as strided convolution. `linearFilter` (IIR) is a differentiable
-primitive. Polynomials live in linalg with one `hqr` (K §8).
+primitive. Polynomials are `aifn/numerics/polynomial`, with one `hqr` (in linalg's `eig`) (K §8).
 
 **Robustness.** IEEE semantics in elementwise ops; flags on factorisations; one jitter ladder in `cholesky`;
 `{ atol, rtol }` tolerances; pairwise summation; differentiating a flagged result throws rather than returning a wrong
@@ -141,23 +182,32 @@ gradient (K §9).
 Every value that crosses a module, a view or a language is one of these. Each has one home, one interface, a `kind`
 brand where it can be shown, and a registry where it has named variants.
 
-| Object                                                                                                             | Home                                       | Replaces                                                                                                |
-| ------------------------------------------------------------------------------------------------------------------ | ------------------------------------------ | ------------------------------------------------------------------------------------------------------- |
-| `Space` (serialisable parameter schema: real, int, choice, bool, nested, variants; conditions as data)             | `aifn/space`, tier 0                       | five parameter descriptions: lab controls, search spaces, recipes, hyperparameters, distribution ranges |
-| `Distribution`, `LogDensity`, `Bijector`                                                                           | distributions                              | two distribution protocols; mcmc's `Target`; compose's target maps                                      |
-| `Objective` (value built from primitives, optional domain and known minimisers)                                    | optim                                      | three objective shapes; test surfaces become registered objectives                                      |
-| `Model` + capabilities (`decide`, `scores`, `predictive`, `expect`, `transform`, `sample`), declared per estimator | estimators                                 | uneven conformance (C §3); separate `probabilities` methods                                             |
-| `Dataset`, `Recipe`, truth as a `Model`                                                                            | `aifn/data` (types), datasets (generators) | two dataset types; hand-kept recipe lists; truth that re-implements densities                           |
-| `Metric`, `Loss` (functions with metadata; one capability vocabulary)                                              | registry + metrics, losses                 | two metric types and two `defineMetric`s                                                                |
-| `Kernel`, `Graph`, `Tree`, `Curve`, confusion results                                                              | kernels, graph, metrics                    | hand-kept wire mirrors                                                                                  |
-| `Signal`, `Spectrum`, `TimeFrequency`, `Filter`, `FilterBank`                                                      | dsp                                        | `Tensor \| ArrayLike` signals with no sample rate                                                       |
-| `LtiSystem` (tf, zpk, ss, sos; continuous or discrete; conversions, responses)                                     | **`aifn/systems`**, below dsp and control  | two transfer-function types and two frequency-response shapes                                           |
-| `Decomposition` (components that sum back to the signal)                                                           | `aifn/data`                                | EMD results, wavelet decompositions, STL, GAM partial effects                                           |
-| `Algorithm`, `Trace`                                                                                               | trace                                      | two algorithm forms (C N1)                                                                              |
+**Status:** built. Every type is defined once in `aifn/foundation/contracts`; the Home column gives the module that
+implements it.
+
+| Object                                                                                                             | Home                                                                    | Replaces                                                                                                |
+| ------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
+| `Space` (serialisable parameter schema: real, int, choice, bool, nested, variants; conditions as data)             | `aifn/foundation/space`                                                 | five parameter descriptions: lab controls, search spaces, recipes, hyperparameters, distribution ranges |
+| `Distribution`, `LogDensity`, `Bijector`                                                                           | `aifn/probability/{distributions,bijectors}`                            | two distribution protocols; mcmc's `Target`; compose's target maps                                      |
+| `Objective` (value built from primitives, optional domain and known minimisers)                                    | `aifn/optim`; test surfaces in `aifn-applied/data/objectives`           | three objective shapes; test surfaces become registered objectives                                      |
+| `Model` + capabilities (`decide`, `scores`, `predictive`, `expect`, `transform`, `sample`), declared per estimator | `aifn/learning/estimators` (`defineModel`)                              | uneven conformance (C §3); separate `probabilities` methods                                             |
+| `Dataset`, `Recipe`, truth as a `Model`                                                                            | contracts (types); `aifn-applied/data` (generators, recipe interpreter) | two dataset types; hand-kept recipe lists; truth that re-implements densities                           |
+| `Metric`, `Loss` (functions with metadata; one capability vocabulary)                                              | `aifn/learning/{metrics,losses}`                                        | two metric types and two `defineMetric`s                                                                |
+| `Kernel`, `Graph`, `Tree`, `Curve`, confusion results                                                              | `aifn/learning/kernels`, `aifn/graph`, `aifn/learning/metrics`          | hand-kept wire mirrors                                                                                  |
+| `Signal`, `Spectrum`, `TimeFrequency`, `Filter`, `FilterBank`                                                      | `aifn/signal` (shared `signal.ts`) and its modules                      | `Tensor \| ArrayLike` signals with no sample rate                                                       |
+| `LtiSystem` (tf, zpk, ss, sos; continuous or discrete; conversions, responses)                                     | **`aifn/systems`**, below signal and control                            | two transfer-function types and two frequency-response shapes                                           |
+| `Decomposition` (components that sum back to the signal)                                                           | contracts; `aifn/signal/decompositions`, wavelets, STL, GAM             | EMD results, wavelet decompositions, STL, GAM partial effects                                           |
+| `Algorithm`, `Trace`                                                                                               | `aifn/foundation/trace`                                                 | two algorithm forms (C N1)                                                                              |
 
 "Target" disappears as a name (it meant three things).
 
 ## 5. Registries and the catalog (S §3)
+
+**Status:** built (phase 4). Core registers primitives, distributions, KL rules (`klRegistry`), bijectors, links,
+likelihoods, kernels, windows, wavelets, filter designs, metrics, losses and algorithms (`<module>Algorithms`);
+applications register models, datasets, modifiers, environments, objectives and log-densities. Views are registered in
+the lab, not in the catalog. `catalog.json` is read by its own check today; the site's backlinks and aifn-py's fixture
+keys are planned. Details: `aifn-js/README.md`, "Registries and the catalog".
 
 One pattern, `define(info, value)`, static per module, for primitives, metrics, losses, distribution families,
 bijectors, kernels, windows, wavelets, filter designs, datasets, objectives, models, algorithms and views. `info`
@@ -168,6 +218,9 @@ docs read. Note links are declared on the aifn side; notes get computed backlink
 independent.
 
 ## 6. The view layer (S §4, lab DESIGN.md)
+
+**Status:** built (phase 5), with the page review of every lab page done and `XYChart`, `Heatmap`, `Subplots` and the
+frame-owning view wrappers retired for `Plot` (5d). Planned: the DSP views and audio playback below.
 
 Three levels, each with one job:
 
@@ -186,6 +239,10 @@ impulse and step response, filter banks, and audio playback.
 
 ## 7. Python and TypeScript (S §5)
 
+**Status:** planned (phase 6, waiting on the owner). Today the golden fixtures are generated by Python scripts inside
+aifn-js (`aifn-js/core/test/fixtures/generate.py`, `make fixtures`), and `make catalog-check` reports stable entries
+without a fixture.
+
 aifn-py complements aifn-js; it does not mirror it. Each concept has one home language:
 
 | Concept                            | Home                                          | Carried by                                                                                    |
@@ -198,6 +255,10 @@ aifn-py complements aifn-js; it does not mirror it. Each concept has one home la
 `python/mlc` becomes `aifn-py` (package `aifn`) as its own step (plan §2).
 
 ## 8. Packages and checks (S §6)
+
+**Status:** the package boundaries hold and most checks run in `make check` (layers, names, catalog, conformance,
+primitive and protocol tests); `lab-check` and `lab-shots` run on demand. Planned: API reports, docs coverage, the
+deprecation lint and promotion to `stable` (164 of 680 entries are stable).
 
 | Package                                                                 | May import                                                                   |
 | ----------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
@@ -215,20 +276,21 @@ reference tests, conforms, is documented and cited. Protocol types become stable
 
 ## 9. Roadmap
 
-One sequence merging K §11, S §8 and C §13. Phases overlap where their files do not.
+One sequence merging K §11, S §8 and C §13. Phases overlap where their files do not. What each landed:
+`docs/aifn-plan.md` §0.
 
-| Phase                           | Work                                                                                                                                                                                                                                                                                                                                                                                                                                               | Size |
-| ------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---- |
-| **0 Safety net and layout**     | aifn-js split into `core/` and `applications/` workspaces with the 12 whole application modules moved; `aifn/contracts`; error hierarchy, tensor brand, numerics constants; `definePrimitive` registry scaffold with today's `define*` as wrappers; generated primitive test suite and benchmarks against today's rules; `aifn/registry` (`define`, `Info`, kinds); `modules.json` + layer lint (WP0 has the lint); DOM lib out of aifn's tsconfig | M    |
-| **1 One of each, one protocol** | the §4 merges (Dataset, Metric, distribution protocol, LogDensity, Objective, capability vocabulary, kind brands); Algorithm protocol in its final form in one pass: factory only, `step(state, ctx)`, `Status`, plain-data streams, no Box–Muller spare, batched samplers; naming and collisions (C §1, §10); capability conformance (C §3)                                                                                                       | L    |
-| **2 Core internals**            | special with one derivative per function; structural primitives collapsed; kernel fast paths; interpreters (reverse, forward, batch), `vmap`, pytrees once; custom rules, checkpoint, implicit differentiation; linalg derivatives, single-factor cholesky, lu factor/solve                                                                                                                                                                        | L    |
-| **3 Signal spine**              | complex128; FFT primitives and the DFT matrix; the conv family; `linearFilter`; polynomials; `aifn/systems`; `Signal`, `Spectrum`, `TimeFrequency`, `Decomposition`; dsp and control moved onto them                                                                                                                                                                                                                                               | L    |
-| **4 Catalog and Space**         | `aifn/space` under the lab's param builders; registries for every kind; `catalog.json` and its checks                                                                                                                                                                                                                                                                                                                                              | L    |
-| **5 Views v2**                  | Plot, axis model and layers; figure state, probes, scheduler, `Equation`; view registry and `Show`; frame-owning views split; the page review of every lab page against DESIGN.md §2                                                                                                                                                                                                                                                               | L    |
-| **6 Languages**                 | wire shapes and converters; fixtures moved into aifn-py and keyed by the catalog; `mlc` → `aifn`                                                                                                                                                                                                                                                                                                                                                   | M    |
-| **7 Coverage and hardening**    | DSP gaps by chapter (multirate, adaptive, time–frequency, audio, spectral, wavelets; S §9); the rest of R; reference fixtures to promote modules to stable                                                                                                                                                                                                                                                                                         | L    |
-| **8 The site**                  | later: decide how the site reuses the lab's UI, then migrate figures by domain                                                                                                                                                                                                                                                                                                                                                                     | L    |
-| **Throughout**                  | API reports, deprecation lint, generated docs                                                                                                                                                                                                                                                                                                                                                                                                      | S    |
+| Phase                           | Work                                                                                                                                                                                                                                                                                                                                                                                                                                               | Size | Status                                |
+| ------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---- | ------------------------------------- |
+| **0 Safety net and layout**     | aifn-js split into `core/` and `applications/` workspaces with the 12 whole application modules moved; `aifn/contracts`; error hierarchy, tensor brand, numerics constants; `definePrimitive` registry scaffold with today's `define*` as wrappers; generated primitive test suite and benchmarks against today's rules; `aifn/registry` (`define`, `Info`, kinds); `modules.json` + layer lint (WP0 has the lint); DOM lib out of aifn's tsconfig | M    | done                                  |
+| **1 One of each, one protocol** | the §4 merges (Dataset, Metric, distribution protocol, LogDensity, Objective, capability vocabulary, kind brands); Algorithm protocol in its final form in one pass: factory only, `step(state, ctx)`, `Status`, plain-data streams, no Box–Muller spare, batched samplers; naming and collisions (C §1, §10); capability conformance (C §3)                                                                                                       | L    | done                                  |
+| **2 Core internals**            | special with one derivative per function; structural primitives collapsed; kernel fast paths; interpreters (reverse, forward, batch), `vmap`, pytrees once; custom rules, checkpoint, implicit differentiation; linalg derivatives, single-factor cholesky, lu factor/solve                                                                                                                                                                        | L    | done                                  |
+| **3 Signal spine**              | complex128; FFT primitives and the DFT matrix; the conv family; `linearFilter`; polynomials; `aifn/systems`; `Signal`, `Spectrum`, `TimeFrequency`, `Decomposition`; dsp and control moved onto them                                                                                                                                                                                                                                               | L    | done                                  |
+| **4 Catalog and Space**         | `aifn/space` under the lab's param builders; registries for every kind; `catalog.json` and its checks                                                                                                                                                                                                                                                                                                                                              | L    | done                                  |
+| **5 Views v2**                  | Plot, axis model and layers; figure state, probes, scheduler, `Equation`; view registry and `Show`; frame-owning views split; the page review of every lab page against DESIGN.md §2                                                                                                                                                                                                                                                               | L    | done                                  |
+| **6 Languages**                 | wire shapes and converters; fixtures moved into aifn-py and keyed by the catalog; `mlc` → `aifn`                                                                                                                                                                                                                                                                                                                                                   | M    | waiting on owner                      |
+| **7 Coverage and hardening**    | DSP gaps by chapter (multirate, adaptive, time–frequency, audio, spectral, wavelets; S §9); the rest of R; reference fixtures to promote modules to stable                                                                                                                                                                                                                                                                                         | L    | mostly done; open list in R           |
+| **8 The site**                  | later: decide how the site reuses the lab's UI, then migrate figures by domain                                                                                                                                                                                                                                                                                                                                                                     | L    | waiting on owner                      |
+| **Throughout**                  | API reports, deprecation lint, generated docs                                                                                                                                                                                                                                                                                                                                                                                                      | S    | checks run; API reports, docs not yet |
 
 Phase 1 replaces consolidation WP1–WP5 (their renames and conformance work, plus the Algorithm changes done once
 rather than twice). Phases 2 and 3 are internal to the core and can run beside 4 and 5.

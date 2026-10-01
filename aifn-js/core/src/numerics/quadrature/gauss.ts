@@ -9,6 +9,7 @@
  * `hermgauss`, `hermegauss` and `laggauss` return them.
  */
 
+import { DomainError } from 'aifn/foundation/errors'
 import type { Scalar, Size } from 'aifn/foundation/contracts'
 import { logGamma } from 'aifn/numerics/special'
 import { fromData, type Tensor } from 'aifn/foundation/tensor'
@@ -32,7 +33,7 @@ const rule = (nodes: number[], weights: number[]): QuadratureRule => {
 }
 
 function checkOrder(n: number, where: string) {
-  if (!Number.isInteger(n) || n < 1) throw new Error(`${where}: n must be a positive integer, got ${n}`)
+  if (!Number.isInteger(n) || n < 1) throw new DomainError(where, `${where}: n must be a positive integer, got ${n}`)
 }
 
 /**
@@ -127,7 +128,7 @@ export function gaussHermite(n: Size, { probabilists = false }: { probabilists?:
  */
 export function gaussLaguerre(n: Size, { alpha = 0 }: { alpha?: Scalar } = {}): QuadratureRule {
   checkOrder(n, 'gaussLaguerre')
-  if (!(alpha > -1)) throw new Error(`gaussLaguerre: alpha must exceed −1, got ${alpha}`)
+  if (!(alpha > -1)) throw new DomainError('gaussLaguerre', `gaussLaguerre: alpha must exceed −1, got ${alpha}`)
   const x = new Array<number>(n)
   const w = new Array<number>(n)
   let z = 0

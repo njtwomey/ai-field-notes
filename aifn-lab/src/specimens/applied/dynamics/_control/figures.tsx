@@ -2,28 +2,28 @@ import { transferFunction } from 'aifn/systems'
 import { pidLoop, type AntiWindup } from 'aifn-applied/dynamics/control'
 import { toFlat, type Tensor } from 'aifn/foundation/tensor'
 import { trace } from 'aifn/foundation/trace'
-import { useMemo, useState } from 'react'
-import { Player, Select, Slider, Switch, usePlayhead } from '@lab/controls'
+import { useMemo } from 'react'
+import { Player, usePlayhead } from '@lab/controls'
 import { ControlRow, Figure } from '@lab/layout'
-import { Panel, Readout, Subplots, XYChart, formatNumber, type Handle, type XYSeries } from '@lab/viz'
+import { choice, row, slider, toggle, useFigureState } from '@lab/state'
+import { Curve, formatNumber, Handle, Plot, Plots, Points, Readout, useAxis } from '@lab/viz'
 
 const flat = (t: Tensor) => toFlat(t)
 const fmt = (v: number) => formatNumber(v)
 
 /** Several traces as one NaN-separated line: the whole run drawn faintly behind the part played so far. */
-function ghost(name: string, t: readonly number[], ys: readonly (readonly number[])[]): XYSeries {
+function ghost(t: readonly number[], ys: readonly (readonly number[])[]) {
   const x: number[] = []
   const y: number[] = []
   for (const v of ys) {
     x.push(...t, NaN)
     y.push(...v, NaN)
   }
-  return { name, type: 'line', muted: true, x, y }
+  return { x, y }
 }
 
 /** A trace up to position i (inclusive), and its point at i. */
 const upTo = (t: readonly number[], y: readonly number[], i: number) => ({ x: t.slice(0, i + 1), y: y.slice(0, i + 1) })
-const at = (t: readonly number[], y: readonly number[], i: number) => ({ x: [t[i]], y: [y[i]] })
 const timeLabel = (t: readonly number[]) => (i: number) => `t = ${(t[i] ?? 0).toFixed(2)} s`
 
 // ── PID step response ────────────────────────────────────────────────────────────────────────────────────────────────
@@ -31,12 +31,30 @@ const timeLabel = (t: readonly number[]) => (i: number) => `t = ${(t[i] ?? 0).to
 const PLANT = transferFunction([1], [1, 3, 3, 1]) // 1/(s + 1)³
 
 export function PidSpecimen() {
-  const [kp, setKp] = useState(2)
-  const [ki, setKi] = useState(1)
-  const [kd, setKd] = useState(0.5)
-  const [limit, setLimit] = useState(true)
-  const [antiWindup, setAntiWindup] = useState<AntiWindup>('none')
-  const [setpoint, setSetpoint] = useState(1)
+  const state = useFigureState({
+    gains: row('1 · gains', {
+      kp: slider(0, 6, 2, { label: 'k_p', step: 0.05 }),
+      ki: slider(0, 3, 1, { label: 'k_i', step: 0.05 }),
+      kd: slider(0, 4, 0.5, { label: 'k_d', step: 0.05 }),
+    }),
+    actuator: row('2 · actuator', {
+      limit: toggle(true, 'limit |u| ≤ 1.2'),
+      antiWindup: choice(
+        [
+          { value: 'none', label: 'none' },
+          { value: 'clamp', label: 'conditional integration' },
+          { value: 'back-calculation', label: 'back-calculation' },
+        ],
+        'none',
+        { label: 'anti-windup' },
+      ),
+    }),
+    setpoint: slider(0.2, 1.1, 1, { onChart: true, label: 'set point' }),
+  })
+  const { kp, ki, kd } = state.gains
+  const { limit } = state.actuator
+  const antiWindup = state.actuator.antiWindup as AntiWindup
+  const { setpoint } = state
   const run = useMemo(
     () =>
       trace(
@@ -67,51 +85,22 @@ export function PidSpecimen() {
   const peak = Math.max(...y)
   const saturatedFor = run.steps.filter((s) => s.saturated).length * 0.02
   const [i, setI] = usePlayhead(t.length)
-  const output = useMemo(
-    (): XYSeries[] => [
-      { name: 'set point r', type: 'line', x: t, y: r, dashed: true, muted: true },
-      ghost('whole run', t, [y]),
-    ],
-    [t, r, y],
-  )
-  const input = useMemo((): XYSeries[] => [ghost('whole run', t, [uRaw, u])], [t, uRaw, u])
-  const liveOutput: XYSeries[] = [
-    { name: 'output y', type: 'line', slot: 0, ...upTo(t, y, i) },
-    { name: 'output y', type: 'scatter', slot: 0, ...at(t, y, i) },
-  ]
-  const liveInput: XYSeries[] = [
-    { name: 'controller output (unlimited)', type: 'line', slot: 3, dashed: true, ...upTo(t, uRaw, i) },
-    { name: 'applied u', type: 'line', slot: 2, ...upTo(t, u, i) },
-    { name: 'applied u', type: 'scatter', slot: 2, ...at(t, u, i) },
-  ]
-  const handles: Handle[] = [
-    { kind: 'y', at: setpoint, label: 'set point', onDrag: (v) => setSetpoint(Math.max(0.2, Math.min(1.1, v))) },
-  ]
+  const ghostY = useMemo(() => ghost(t, [y]), [t, y])
+  const ghostU = useMemo(() => ghost(t, [uRaw, u]), [t, uRaw, u])
+  const yNow = upTo(t, y, i)
+  const uNow = upTo(t, u, i)
+  const rawNow = upTo(t, uRaw, i)
+  const time = useAxis({ label: 't (s)' })
+  const out = useAxis({ label: 'output', hold: 'union' })
+  const inp = useAxis({ label: 'input', hold: 'union' })
   return (
     <Figure
       title="PID step response with actuator limits"
-      description="Proportional action speeds the response, integral action removes the steady-state error, derivative action damps it; when the actuator saturates the integrator winds up and overshoots unless anti-windup stops it."
+      purpose="Proportional action speeds the response, integral action removes the steady-state error, derivative action damps it; when the actuator saturates the integrator winds up and overshoots unless anti-windup stops it."
+      state={state}
       defaultSize="L"
       controls={
         <>
-          <ControlRow label="1 · gains">
-            <Slider label="k_p" value={kp} min={0} max={6} step={0.05} onChange={setKp} />
-            <Slider label="k_i" value={ki} min={0} max={3} step={0.05} onChange={setKi} />
-            <Slider label="k_d" value={kd} min={0} max={4} step={0.05} onChange={setKd} />
-          </ControlRow>
-          <ControlRow label="2 · actuator">
-            <Switch label="limit |u| ≤ 1.2" checked={limit} onChange={setLimit} />
-            <Select
-              label="anti-windup"
-              value={antiWindup}
-              onChange={setAntiWindup}
-              options={[
-                { value: 'none', label: 'none' },
-                { value: 'clamp', label: 'conditional integration' },
-                { value: 'back-calculation', label: 'back-calculation' },
-              ]}
-            />
-          </ControlRow>
           <ControlRow label="3 · time">
             <Player value={i} onChange={setI} count={t.length} duration={5} format={timeLabel(t)} label="t" />
           </ControlRow>
@@ -128,14 +117,21 @@ export function PidSpecimen() {
       }
       caption="Plant 1/(s + 1)³ under a PID controller (derivative on the measurement, filtered with T_f = 0.05 s) sampled every 0.02 s; the set point steps at t = 1 s. Play to watch the loop respond, with the whole run in grey. Drag the dashed set-point line on the top panel (up to 1.1, below the actuator's reach). With the limit on and no anti-windup, the integral keeps growing while u is pinned at 1.2, which is the overshoot; turn anti-windup on to compare."
     >
-      <Subplots rows={2} sharex heightRatios={[3, 2]} hoverGroup rescaleOnChange={false}>
-        <Panel>
-          <XYChart xLabel="t (s)" yLabel="output" handles={handles} series={output} live={liveOutput} />
-        </Panel>
-        <Panel>
-          <XYChart xLabel="t (s)" yLabel="input" series={input} live={liveInput} />
-        </Panel>
-      </Subplots>
+      <Plots rows={2} heights={[3, 2]} hoverGroup>
+        <Plot x={time} y={out}>
+          <Curve name="set point r" x={t} y={r} dashed muted />
+          <Curve name="whole run" x={ghostY.x} y={ghostY.y} muted thin />
+          <Curve name="output y" x={yNow.x} y={yNow.y} slot={0} live />
+          <Points name="y now" x={[t[i]]} y={[y[i]]} slot={0} live />
+          <Handle {...state.handle('setpoint', { label: 'r', axis: 'y' })} />
+        </Plot>
+        <Plot x={time} y={inp}>
+          <Curve name="whole run" x={ghostU.x} y={ghostU.y} muted thin />
+          <Curve name="controller output (unlimited)" x={rawNow.x} y={rawNow.y} slot={3} dashed live />
+          <Curve name="applied u" x={uNow.x} y={uNow.y} slot={2} live />
+          <Points name="u now" x={[t[i]]} y={[u[i]]} slot={2} live />
+        </Plot>
+      </Plots>
     </Figure>
   )
 }

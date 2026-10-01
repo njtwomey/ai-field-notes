@@ -15,14 +15,14 @@ import {
 } from 'aifn/dynamics/ode'
 import { toFlat, toRows, type Tensor } from 'aifn/foundation/tensor'
 import { trace, type Algorithm, type Trace } from 'aifn/foundation/trace'
-import { useMemo, useState } from 'react'
-import { Player, Select, Slider, Switch, usePlayhead } from '@lab/controls'
-import { ControlRow, Figure } from '@lab/layout'
-import { TraceView } from '@lab/views'
-import { Heatmap, Panel, Readout, Subplots, XYChart, formatNumber, type Handle, type XYSeries } from '@lab/viz'
+import { useMemo } from 'react'
+import { Player, usePlayhead } from '@lab/controls'
+import { Figure } from '@lab/layout'
+import { choice, row, setting, slider, useComputed, useFigureState } from '@lab/state'
+import { TracePanel } from '@lab/views'
+import { Contours, Curve, Handle, Plot, Plots, Points, Raster, Readout, formatNumber, useAxis } from '@lab/viz'
 
 const fmt = (v: number) => formatNumber(v)
-const NO_SERIES: XYSeries[] = []
 
 /** The index of the last entry of an ascending `ts` at or before `t` (0 if none). */
 function upTo(ts: ArrayLike<number>, t: number): number {
@@ -88,8 +88,12 @@ const STIFF_END = 6
 const STIFF_FRAMES = 240
 
 export function StiffStepsSpecimen() {
-  const [logLambda, setLogLambda] = useState(2.5)
-  const [h, setH] = useState(0.1)
+  const state = useFigureState({
+    problem: row('1 · problem', { logLambda: slider(0, 3.5, 2.5, { label: 'log₁₀ stiffness λ', step: 0.1 }) }),
+    implicit: row('2 · implicit step', { h: slider(0.02, 1, 0.1, { label: 'h (implicit Euler, BDF2)', step: 0.02 }) }),
+  })
+  const { logLambda } = state.problem
+  const { h } = state.implicit
   const [frame, setFrame] = usePlayhead(STIFF_FRAMES + 1)
   const lambda = 10 ** logLambda
   const runs = useMemo(() => {
@@ -115,97 +119,78 @@ export function StiffStepsSpecimen() {
     () => ({ x: extent([exact.y, ...runs.map((r) => r.x)]), h: decades(runs.map((r) => r.hs)) }),
     [exact, runs],
   )
-  const solution = useMemo((): XYSeries[] => [{ name: 'exact', type: 'line', ...exact, muted: true }], [exact])
   const tNow = frameTime(frame, STIFF_FRAMES, STIFF_END)
   const at = runs.map((r) => upTo(r.t, tNow + 1e-12))
-  const liveSolution: XYSeries[] = [
-    ...runs.map(({ name, slot, t, x, hs }, i) => ({
-      name,
-      slot,
-      type: 'line' as const,
-      showPoints: hs.length < 80,
-      x: t.slice(0, at[i] + 1),
-      y: x.slice(0, at[i] + 1),
-    })),
-    ...runs.map(({ name, slot, t, x }, i) => ({
-      name,
-      slot,
-      type: 'scatter' as const,
-      x: [t[at[i]]],
-      y: [x[at[i]]],
-    })),
-  ]
-  const liveSteps: XYSeries[] = runs.map(({ name, slot, t, hs }, i) => ({
-    name,
-    slot,
-    type: 'line',
-    showPoints: hs.length < 80,
-    x: t.slice(1, at[i] + 1),
-    y: hs.slice(1, at[i] + 1),
-  }))
   const dpAll = runs[0].tr.steps as AdaptiveState[]
   const dp = dpAll[at[0]]
   const rejected = dpAll.slice(1, at[0] + 1).reduce((n, s) => n + s.attempts.length - 1, 0)
+  const time = useAxis({ label: 't', range: [0, STIFF_END] })
+  const xa = useAxis({ label: 'x', range: ranges.x })
+  const ha = useAxis({ label: 'step size h', log: true, range: ranges.h })
   return (
     <Figure
       title="Step sizes on a stiff problem"
-      description="Stiffness caps an explicit method's step by stability, not accuracy: once the transient has died, Dormand–Prince still takes steps of about 3/λ, while implicit Euler and BDF2 follow the slow solution with any step."
+      purpose="Stiffness caps an explicit method's step by stability, not accuracy: once the transient has died, Dormand–Prince still takes steps of about 3/λ, while implicit Euler and BDF2 follow the slow solution with any step."
       defaultSize="L"
+      state={state}
       controls={
-        <>
-          <ControlRow label="1 · problem">
-            <Slider label="log₁₀ stiffness λ" value={logLambda} min={0} max={3.5} step={0.1} onChange={setLogLambda} />
-          </ControlRow>
-          <ControlRow label="2 · implicit step">
-            <Slider label="h (implicit Euler, BDF2)" value={h} min={0.02} max={1} step={0.02} onChange={setH} />
-          </ControlRow>
-          <ControlRow label="3 · time">
-            <Player
-              value={frame}
-              onChange={setFrame}
-              count={STIFF_FRAMES + 1}
-              duration={4}
-              label="t"
-              format={(i) => `t = ${frameTime(i, STIFF_FRAMES, STIFF_END).toFixed(3)}`}
-            />
-          </ControlRow>
-        </>
+        <Player
+          value={frame}
+          onChange={setFrame}
+          count={STIFF_FRAMES + 1}
+          duration={4}
+          label="3 · time t"
+          format={(i) => `t = ${frameTime(i, STIFF_FRAMES, STIFF_END).toFixed(3)}`}
+        />
       }
-      readouts={
-        <>
-          <Readout label="t" value={tNow.toFixed(3)} />
-          <Readout label="Dormand–Prince steps so far" value={`${dp.t} (${rejected} rejected)`} />
-          <Readout label="Dormand–Prince evaluations so far" value={dp.evaluations} />
-          <Readout label="BDF2 evaluations so far" value={runs[2].tr.steps[at[2]].evaluations} />
-          <Readout label="Dormand–Prince step now" value={at[0] > 0 ? fmt(Math.abs(dp.stepSize)) : '–'} />
-          <Readout label="stability cap 3.3/λ" value={fmt(3.3 / lambda)} />
-        </>
-      }
+      readouts={{
+        'so far': (
+          <>
+            <Readout label="t" value={tNow.toFixed(3)} />
+            <Readout label="Dormand–Prince steps" value={`${dp.t} (${rejected} rejected)`} />
+            <Readout label="Dormand–Prince evaluations" value={dp.evaluations} />
+            <Readout label="BDF2 evaluations" value={runs[2].tr.steps[at[2]].evaluations} />
+          </>
+        ),
+        'step size': (
+          <>
+            <Readout label="Dormand–Prince step now" value={at[0] > 0 ? fmt(Math.abs(dp.stepSize)) : '–'} />
+            <Readout label="stability cap 3.3/λ" value={fmt(3.3 / lambda)} />
+          </>
+        ),
+      }}
       caption="x′ = −λ(x − cos t), x(0) = 0 on [0, 6]. Play to watch the three solvers advance, each with its current point. Top: the solutions so far and the exact one (grey). Bottom: the size of every step taken so far (log scale). Dormand–Prince's steps grow through the transient and then plateau at its stability limit; raise λ and the plateau falls in proportion, and the work grows with it."
     >
-      <Subplots rows={2} sharex heightRatios={[3, 2]} hoverGroup>
-        <Panel>
-          <XYChart
-            series={solution}
-            live={liveSolution}
-            xRange={[0, STIFF_END]}
-            yRange={ranges.x}
-            xLabel="t"
-            yLabel="x"
-          />
-        </Panel>
-        <Panel>
-          <XYChart
-            series={NO_SERIES}
-            live={liveSteps}
-            xRange={[0, STIFF_END]}
-            yRange={ranges.h}
-            yLog
-            xLabel="t"
-            yLabel="step size h"
-          />
-        </Panel>
-      </Subplots>
+      <Plots rows={2} heights={[3, 2]} hoverGroup>
+        <Plot x={time} y={xa}>
+          <Curve name="exact" x={exact.x} y={exact.y} muted />
+          {runs.map(({ name, slot, t, x, hs }, i) => (
+            <Curve
+              key={name}
+              name={name}
+              x={t.slice(0, at[i] + 1)}
+              y={x.slice(0, at[i] + 1)}
+              slot={slot}
+              showPoints={hs.length < 80}
+            />
+          ))}
+          {runs.map(({ name, slot, t, x }, i) => (
+            <Points key={name} name={name} x={[t[at[i]]]} y={[x[at[i]]]} slot={slot} live />
+          ))}
+        </Plot>
+        <Plot x={time} y={ha}>
+          {runs.map(({ name, slot, t, hs }, i) => (
+            <Curve
+              key={name}
+              name={name}
+              x={t.slice(1, at[i] + 1)}
+              y={hs.slice(1, at[i] + 1)}
+              slot={slot}
+              showPoints={hs.length < 80}
+            />
+          ))}
+        </Plot>
+      </Plots>
     </Figure>
   )
 }
@@ -257,111 +242,97 @@ const ENERGY_END = 2000
 const ENERGY_FRAMES = 400
 
 export function EnergyDriftSpecimen() {
-  const [h, setH] = useState(0.5)
-  const [q0, setQ0] = useState(2)
-  const [shown, setShown] = useState<Record<EnergyMethod, boolean>>({
-    rk4: true,
-    euler: false,
-    'symplectic-euler': false,
-    leapfrog: true,
-    'velocity-verlet': false,
+  const state = useFigureState({
+    start: row('1 · start', { q0: slider(-3, 3, 2, { label: 'q₀ (rad)', step: 0.05 }) }),
+    integrators: row('2 · integrators', {
+      h: slider(0.05, 0.8, 0.5, { label: 'step h', step: 0.05 }),
+      rk4: setting(true, 'RK4'),
+      euler: setting(false, 'explicit Euler'),
+      'symplectic-euler': setting(false, 'symplectic Euler'),
+      leapfrog: setting(true, 'leapfrog'),
+      'velocity-verlet': setting(false, 'velocity Verlet'),
+    }),
   })
+  const { q0 } = state.start
+  const shown = state.integrators
+  const { h } = shown
   const [frame, setFrame] = usePlayhead(ENERGY_FRAMES + 1)
-  const runs = useMemo(
-    () => ENERGY_METHODS.filter((m) => shown[m.value]).map((m) => ({ ...m, r: energyRun(m.value, h, q0, ENERGY_END) })),
-    [h, q0, shown],
+  const key = ENERGY_METHODS.map((m) => (shown[m.value] ? 1 : 0)).join('')
+  // Up to 40 000 steps per integrator: dragging q₀ reruns as often as a frame allows, dimming the old runs meanwhile.
+  const computed = useComputed(
+    () =>
+      ENERGY_METHODS.filter((_, k) => key[k] === '1').map((m) => ({ ...m, r: energyRun(m.value, h, q0, ENERGY_END) })),
+    [h, q0, key],
   )
+  const runs = computed.value
   const driftRange = useMemo(() => extent(runs.map(({ r }) => r.error)), [runs])
   const tNow = frameTime(frame, ENERGY_FRAMES, ENERGY_END)
   const at = runs.map(({ r }) => upTo(r.t, tNow + 1e-9))
-  const phase: XYSeries[] = [
-    ...runs.map(({ label, slot, r }, i) => ({
-      name: label,
-      slot,
-      type: 'line' as const,
-      thin: true,
-      x: r.q.slice(0, at[i] + 1),
-      y: r.p.slice(0, at[i] + 1),
-    })),
-    ...runs.map(({ label, slot, r }, i) => ({
-      name: label,
-      slot,
-      type: 'scatter' as const,
-      x: [r.q[at[i]]],
-      y: [r.p[at[i]]],
-    })),
-  ]
-  const drift: XYSeries[] = runs.map(({ label, slot, r }, i) => ({
-    name: label,
-    slot,
-    type: 'line',
-    x: r.t.slice(0, at[i] + 1),
-    y: r.error.slice(0, at[i] + 1),
-  }))
-  const handles: Handle[] = [
-    { kind: 'point', at: [q0, 0], onDrag: ([q]) => setQ0(Math.max(-3, Math.min(3, q))), label: 'q₀' },
-  ]
+  const q = useAxis({ label: 'q', range: [-3.5, 3.5] })
+  const p = useAxis({ label: 'p', range: [-2.5, 2.5] })
+  const time = useAxis({ label: 't', range: [0, ENERGY_END] })
+  const e = useAxis({ label: 'H − H₀', range: driftRange })
   return (
     <Figure
       title="Energy drift on the pendulum"
-      description="A symplectic integrator keeps the pendulum's energy error bounded for ever; RK4, though more accurate per step, lets it drift steadily, so its orbit spirals inwards."
+      purpose="A symplectic integrator keeps the pendulum's energy error bounded for ever; RK4, though more accurate per step, lets it drift steadily, so its orbit spirals inwards."
       defaultSize="L"
+      state={state}
       controls={
-        <>
-          <ControlRow label="1 · start">
-            <Slider label="q₀ (rad)" value={q0} min={-3} max={3} step={0.05} onChange={setQ0} />
-          </ControlRow>
-          <ControlRow label="2 · integrators">
-            <Slider label="step h" value={h} min={0.05} max={0.8} step={0.05} onChange={setH} />
-            {ENERGY_METHODS.map((m) => (
-              <Switch
-                key={m.value}
-                label={m.label}
-                checked={shown[m.value]}
-                onChange={(v: boolean) => setShown((s) => ({ ...s, [m.value]: v }))}
-              />
-            ))}
-          </ControlRow>
-          <ControlRow label="3 · time">
-            <Player
-              value={frame}
-              onChange={setFrame}
-              count={ENERGY_FRAMES + 1}
-              duration={5}
-              label="t"
-              format={(i) => `t = ${Math.round(frameTime(i, ENERGY_FRAMES, ENERGY_END))}`}
-            />
-          </ControlRow>
-        </>
+        <Player
+          value={frame}
+          onChange={setFrame}
+          count={ENERGY_FRAMES + 1}
+          duration={5}
+          label="3 · time t"
+          format={(i) => `t = ${Math.round(frameTime(i, ENERGY_FRAMES, ENERGY_END))}`}
+        />
       }
-      readouts={runs.map(({ label, r }, i) => (
-        <Readout key={label} label={`${label}: H − H₀ at t = ${Math.round(tNow)}`} value={fmt(r.error[at[i]])} />
-      ))}
-      caption="Pendulum H = ½p² − cos q from (q₀, 0) over t ∈ [0, 2000]. Play to trace the orbits and the energy error in time. Left: the orbits so far in the phase plane, with each integrator's current point (drag q₀ along the axis). Right: H − H₀ so far. Leapfrog and velocity Verlet oscillate within O(h²); symplectic Euler within O(h); RK4 loses energy steadily; explicit Euler gains it and spirals out."
+      readouts={{
+        [`H − H₀ at t = ${Math.round(tNow)}`]: runs.map(({ label, r }, i) => (
+          <Readout key={label} label={label} value={fmt(r.error[at[i]])} />
+        )),
+      }}
+      caption="Pendulum H = ½p² − cos q from (q₀, 0) over t ∈ [0, 2000]. Play to trace the orbits and the energy error in time; the whole runs are drawn faintly behind. Left: the orbits so far in the phase plane, with each integrator's current point (drag q₀ along the axis). Right: H − H₀ so far. Leapfrog and velocity Verlet oscillate within O(h²); symplectic Euler within O(h); RK4 loses energy steadily; explicit Euler gains it and spirals out."
     >
-      <Subplots cols={2} widthRatios={[1, 1.4]}>
-        <Panel>
-          <XYChart
-            series={NO_SERIES}
-            live={phase}
-            handles={handles}
-            xLabel="q"
-            yLabel="p"
-            xRange={[-3.5, 3.5]}
-            yRange={[-2.5, 2.5]}
-          />
-        </Panel>
-        <Panel>
-          <XYChart
-            series={NO_SERIES}
-            live={drift}
-            xRange={[0, ENERGY_END]}
-            yRange={driftRange}
-            xLabel="t"
-            yLabel="H − H₀"
-          />
-        </Panel>
-      </Subplots>
+      <Plots cols={2} widths={[1, 1.4]}>
+        <Plot x={q} y={p}>
+          {/* The whole run, faint, behind the part played so far: the point shows before playing. */}
+          {runs.map(({ label, slot, r }) => (
+            <Curve key={`${label} all`} name={label} x={r.q} y={r.p} slot={slot} width={0.5} muted />
+          ))}
+          {runs.map(({ label, slot, r }, i) => (
+            <Curve
+              key={label}
+              name={label}
+              x={r.q.slice(0, at[i] + 1)}
+              y={r.p.slice(0, at[i] + 1)}
+              slot={slot}
+              thin
+              stale={computed.stale}
+            />
+          ))}
+          {runs.map(({ label, slot, r }, i) => (
+            <Points key={label} name={label} x={[r.q[at[i]]]} y={[r.p[at[i]]]} slot={slot} live />
+          ))}
+          <Handle kind="point" at={[q0, 0]} label="q₀" onDrag={([v]) => state.set('start.q0', v)} />
+        </Plot>
+        <Plot x={time} y={e}>
+          {runs.map(({ label, slot, r }) => (
+            <Curve key={`${label} all`} name={label} x={r.t} y={r.error} slot={slot} thin />
+          ))}
+          {runs.map(({ label, slot, r }, i) => (
+            <Curve
+              key={label}
+              name={label}
+              x={r.t.slice(0, at[i] + 1)}
+              y={r.error.slice(0, at[i] + 1)}
+              slot={slot}
+              stale={computed.stale}
+            />
+          ))}
+        </Plot>
+      </Plots>
     </Figure>
   )
 }
@@ -369,7 +340,8 @@ export function EnergyDriftSpecimen() {
 // ---------------------------------------------------------------------------------------------------------------------
 // 3. Stability regions.
 
-const STABILITY_METHODS: { value: string; label: string }[] = [
+const STABILITY_LEVELS = [0]
+const STABILITY_METHODS = [
   { value: 'euler', label: 'explicit Euler' },
   { value: 'heun', label: 'Heun' },
   { value: 'rk4', label: 'RK4' },
@@ -378,11 +350,16 @@ const STABILITY_METHODS: { value: string; label: string }[] = [
   { value: 'implicit-trapezoid', label: 'implicit trapezoid' },
   { value: 'bdf2', label: 'BDF2' },
   { value: 'bdf3', label: 'BDF3' },
-]
+] as const
 
 export function StabilityRegionSpecimen() {
-  const [method, setMethod] = useState('rk4')
-  const [z, setZ] = useState<[number, number]>([-2, 1.5])
+  const state = useFigureState({
+    method: row('1 · method', { method: choice(STABILITY_METHODS, 'rk4', { label: 'method' }) }),
+    zr: slider(-6, 3, -2, { onChart: true, label: 'Re z' }),
+    zi: slider(-4.5, 4.5, 1.5, { onChart: true, label: 'Im z' }),
+  })
+  const method = state.method.method
+  const z: [number, number] = [state.zr, state.zi]
   const region = useMemo(
     () => stabilityRegion(method as StabilityMethod, { real: [-6, 3], imag: [-4.5, 4.5], nx: 91, ny: 91 }),
     [method],
@@ -392,35 +369,37 @@ export function StabilityRegionSpecimen() {
     const rows = toRows(region.amplification).map((r) => r.map((v) => Math.max(-1.5, Math.min(1.5, Math.log10(v)))))
     return { x: toFlat(region.real), y: toFlat(region.imag), z: rows }
   }, [region])
-  const contours = useMemo(() => ({ levels: [0] }), [])
   const a = amplification(method as StabilityMethod, z[0], z[1])
+  const re = useAxis({ label: 'Re z' })
+  const im = useAxis({ label: 'Im z', equal: re })
   return (
     <Figure
       title="Stability regions"
-      description="A method is stable on x′ = λx when z = hλ lies where its amplification is at most 1 (blue); an explicit method's region is bounded, so a large negative λ forces a small h."
-      controls={<Select label="method" value={method} onChange={setMethod} options={STABILITY_METHODS} />}
-      readouts={
-        <>
-          <Readout label="z = hλ" value={`${fmt(z[0])} ${z[1] < 0 ? '−' : '+'} ${fmt(Math.abs(z[1]))}i`} />
-          <Readout label="amplification" value={fmt(a)} />
-          <Readout label="stable" value={a <= 1 + 1e-12 ? 'yes' : 'no'} />
-        </>
-      }
+      purpose="A method is stable on x′ = λx when z = hλ lies where its amplification is at most 1 (blue); an explicit method's region is bounded, so a large negative λ forces a small h."
+      state={state}
+      readouts={{
+        'at z': (
+          <>
+            <Readout label="z = hλ" value={`${fmt(z[0])} ${z[1] < 0 ? '−' : '+'} ${fmt(Math.abs(z[1]))}i`} />
+            <Readout label="amplification" value={fmt(a)} />
+            <Readout label="stable" value={a <= 1 + 1e-12 ? 'yes' : 'no'} />
+          </>
+        ),
+      }}
       caption="Colour: log₁₀ of the amplification |R(z)| (the largest characteristic root for BDF), clipped to ±1.5; the contour is the boundary |R| = 1. Drag z. The implicit methods contain the whole left half-plane (A-stability); BDF3 misses a sliver near the imaginary axis."
     >
-      <Heatmap
-        x={grid.x}
-        y={grid.y}
-        z={grid.z}
-        scale="diverging"
-        range={[-1.5, 1.5]}
-        contours={contours}
-        xLabel="Re z"
-        yLabel="Im z"
-        valueLabel="log₁₀ amplification"
-        equalAspect
-        handles={[{ kind: 'point', at: z, onDrag: setZ, label: 'z' }]}
-      />
+      <Plot x={re} y={im}>
+        <Raster
+          x={grid.x}
+          y={grid.y}
+          z={grid.z}
+          scale="diverging"
+          range={[-1.5, 1.5]}
+          valueLabel="log₁₀ amplification"
+        />
+        <Contours x={grid.x} y={grid.y} z={grid.z} levels={STABILITY_LEVELS} />
+        <Handle {...state.handle(['zr', 'zi'], { label: 'z' })} />
+      </Plot>
     </Figure>
   )
 }
@@ -434,7 +413,10 @@ const lotkaVolterra: Rhs = (_t, x) => {
 }
 
 export function AdaptiveTraceSpecimen() {
-  const [logTol, setLogTol] = useState(-4)
+  const state = useFigureState({
+    tolerance: row('1 · tolerance', { logTol: slider(-8, -1, -4, { label: 'log₁₀ rtol', step: 0.5 }) }),
+  })
+  const { logTol } = state.tolerance
   const tr = useMemo(
     () =>
       trace(
@@ -456,16 +438,19 @@ export function AdaptiveTraceSpecimen() {
     return { x: X.map((v) => v[0]), y: X.map((v) => v[1]) }
   }, [tr])
   return (
-    <TraceView
+    <Figure
+      purpose="An adaptive Runge–Kutta method picks each step so its error estimate meets the tolerance: steps shrink where the orbit turns fast, grow on the slow stretches, and a step that misses is retried smaller."
       title="Dormand–Prince step by step"
-      trace={tr}
-      show={['step size', 'error estimate']}
-      startAtFirst
       defaultSize="L"
-      controls={<Slider label="log₁₀ rtol" value={logTol} min={-8} max={-1} step={0.5} onChange={setLogTol} />}
+      state={state}
       caption="Lotka–Volterra from (10, 5). Play or step: each position is one accepted step, drawn as a point on the orbit so far; its state lists the attempts (rejected ones had error norm above 1). The step size shrinks where the orbit turns fast and grows along the slow stretches."
-      renderState={(s, { position }) => <AdaptiveOrbit path={path} position={position} state={s} />}
-    />
+    >
+      <TracePanel
+        trace={tr}
+        show={['step size', 'error estimate']}
+        renderState={(s, { position }) => <AdaptiveOrbit path={path} position={position} state={s} />}
+      />
+    </Figure>
   )
 }
 
@@ -479,18 +464,20 @@ function AdaptiveOrbit({
   position: number
   state: AdaptiveState
 }) {
-  const orbit = useMemo((): XYSeries[] => [{ name: 'orbit', type: 'line', ...path, muted: true }], [path])
   const x = toFlat(state.x)
-  const live: XYSeries[] = [
-    {
-      name: 'accepted steps',
-      type: 'line',
-      showPoints: true,
-      slot: 0,
-      x: path.x.slice(0, position + 1),
-      y: path.y.slice(0, position + 1),
-    },
-    { name: 'current', type: 'scatter', x: [x[0]], y: [x[1]], emphasis: true },
-  ]
-  return <XYChart xLabel="prey" yLabel="predators" series={orbit} live={live} />
+  const prey = useAxis({ label: 'prey' })
+  const predators = useAxis({ label: 'predators' })
+  return (
+    <Plot x={prey} y={predators}>
+      <Curve name="orbit" x={path.x} y={path.y} muted />
+      <Curve
+        name="accepted steps"
+        x={path.x.slice(0, position + 1)}
+        y={path.y.slice(0, position + 1)}
+        slot={0}
+        showPoints
+      />
+      <Points name="current" x={[x[0]]} y={[x[1]]} emphasis live />
+    </Plot>
+  )
 }

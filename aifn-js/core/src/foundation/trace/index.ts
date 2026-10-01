@@ -7,7 +7,8 @@
  * state; `trace` returns recorded series over the kept steps with the stored states (`keep`), timing (`timing`) and
  * metadata; `seek` returns the state at one step (from stored states when given a trace); `extend` continues a trace;
  * `live` is a generator for play loops; `timeSliced` yields partial traces for interfaces, each in O(1); `decimate`
- * thins a trace for drawing; `profile` times named phases in a step. See `aifn-js/README.md` (Traces).
+ * thins a trace for drawing; `profile` times named phases in a step. `unrolled` differentiates through an
+ * algorithm's steps (`atConvergence`, implicitly at convergence, is in `aifn/numerics/implicit`). See `aifn-js/README.md` (Traces).
  */
 
 export type {
@@ -26,3 +27,4 @@ export type {
 } from 'aifn/foundation/contracts'
 export { decimate, extend, live, now, profile, run, seek, timeSliced, trace, type RunOptions } from './runners'
 export { seriesComponents } from './series'
+export { unrolled, type UnrolledOptions } from './differentiate'

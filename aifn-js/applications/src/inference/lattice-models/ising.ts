@@ -7,7 +7,7 @@
 import type { Status } from 'aifn/foundation/contracts'
 import type { Algorithm } from 'aifn/foundation/trace'
 import { type Graph } from 'aifn/graph'
-import { latticeTemplate, shape, unroll, type GraphShape } from 'aifn/graph/structured'
+import { latticeTemplate, shape, unroll, type GraphShape, type StructuredGraph } from 'aifn/graph/structured'
 import { chainSumProduct } from 'aifn/inference/exact'
 import { beliefPropagationSteps, type BeliefPropagationOptions } from 'aifn/inference/message-passing'
 import {
@@ -19,6 +19,15 @@ import {
 } from 'aifn/inference/model'
 
 /**
+ * An Ising model: a discrete factor graph that keeps the structured graph it was declared on, when there is one, so
+ * that its shape is read from the declaration (a lattice template) rather than recovered from the factors.
+ */
+export interface IsingModel extends DiscreteFactorGraph {
+  /** The structured interaction graph (`latticeTemplate`, unrolled), or absent for a plain graph. */
+  readonly structure?: StructuredGraph
+}
+
+/**
  * A pairwise Ising model on a graph as a factor graph: spins xᵢ ∈ {−1, +1} (index 0 is −1, index 1 is +1), with
  * p(x) ∝ exp(Σ_{(i,j)} J xᵢxⱼ + Σᵢ hᵢ xᵢ). `coupling` and `field` may be numbers or per-edge / per-node arrays.
  */
@@ -26,7 +35,7 @@ export function isingModel(
   graph: Graph,
   coupling: number | ArrayLike<number>,
   field: number | ArrayLike<number>,
-): DiscreteFactorGraph {
+): IsingModel {
   const J = (k: number) => (typeof coupling === 'number' ? coupling : coupling[k])
   const h = (i: number) => (typeof field === 'number' ? field : field[i])
   const cards = new Array<number>(graph.nodes).fill(2)
@@ -52,13 +61,18 @@ export function isingLattice(
   coupling: number | ArrayLike<number>,
   field: number | ArrayLike<number>,
   options: { periodic?: boolean } = {},
-): DiscreteFactorGraph {
-  return isingModel(unroll(latticeTemplate(rows, cols, { periodic: options.periodic })), coupling, field)
+): IsingModel {
+  const structure = unroll(latticeTemplate(rows, cols, { periodic: options.periodic }))
+  return { ...isingModel(structure, coupling, field), structure }
 }
 
-/** The shape of an Ising model's interaction graph: `chain`, `tree`, `lattice` or `general`. */
-export function isingShape(model: DiscreteFactorGraph): GraphShape {
-  return shape(bipartiteGraph(model))
+/**
+ * The shape of an Ising model's interaction graph: `chain`, `tree`, `lattice` or `general`. A model built by
+ * `isingLattice` reads it from its lattice declaration (`lattice`, or `chain` / `tree` for a 1 × n strip, which the
+ * acyclic test reaches first); any other model reads it from its factor graph, where a grid reads as `general`.
+ */
+export function isingShape(model: DiscreteFactorGraph | IsingModel): GraphShape {
+  return shape('structure' in model && model.structure ? model.structure : bipartiteGraph(model))
 }
 
 /**

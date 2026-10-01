@@ -34,13 +34,17 @@ import {
   type Value,
 } from 'aifn/foundation/tensor'
 import { defineLoss, type ReductionOptions, type Target } from 'aifn/learning/losses'
+import { dcg, gainFunction, positionDiscount as discount, type Gain as MetricGain } from 'aifn/learning/metrics'
 import { expectRank, flatValues, reduce } from 'aifn/learning/losses'
+import { integers, type Stream } from 'aifn/foundation/random'
 
-/** How a relevance grade becomes a gain: `exponential` 2^rel − 1 (the default) or `linear` rel. */
-export type Gain = 'exponential' | 'linear'
+/**
+ * How a relevance grade becomes a gain: `exponential` 2^rel − 1 (the default) or `linear` rel; the two named gains
+ * of `aifn/learning/metrics`' `Gain`.
+ */
+export type Gain = Extract<MetricGain, string>
 
-const gainOf = (rel: number, gain: Gain) => (gain === 'linear' ? rel : 2 ** rel - 1)
-const discount = (position: number) => 1 / Math.log2(position + 2)
+const gainOf = (rel: number, gain: Gain) => gainFunction(gain)(rel)
 
 /** A list's scores and grades as rows: `lists` rows of `n` items, each a Float64Array. */
 type Rows = { lists: number; n: number; scores: Float64Array[]; grades: Float64Array[]; batched: boolean }
@@ -89,11 +93,12 @@ function positions(s: ArrayLike<number>): Int32Array {
   return pos
 }
 
-/** The ideal DCG of a list's grades. */
+/** The ideal DCG of a list's grades: `aifn/learning/metrics`' `dcg` of the grades sorted best first. */
 function idealDcg(grades: ArrayLike<number>, gain: Gain): number {
-  return Array.from(grades)
-    .sort((a, b) => b - a)
-    .reduce((acc, r, k) => acc + gainOf(r, gain) * discount(k), 0)
+  return dcg(
+    Float64Array.from(grades).sort((a, b) => b - a),
+    { gain },
+  )
 }
 
 const rankingInfo = (key: string, name: string, note: string, target?: string) =>
@@ -225,6 +230,88 @@ export const lambdaRank = defineLoss(
   (scores: Value, relevance: Target, { reduction, sigma = 1, gain }: RankNetOptions & LambdaOptions = {}): Value => {
     const W = lambdaWeights(scores, relevance, { gain })
     return reduce(sumPairs(mul(W, softplus(mul(-sigma, pairDifferences(scores))))), reduction)
+  },
+)
+
+/** Options of `warp` and `warpWeights`. */
+export type WarpOptions = ReductionOptions & {
+  /** The margin by which the positive should beat each negative. Default 1. */
+  margin?: number
+  /** The rank weights αₖ of L(r) = Σ_{k ≤ r} αₖ: `harmonic` αₖ = 1/k (the default) or `constant` αₖ = 1 (L(r) = r). */
+  weighting?: 'harmonic' | 'constant'
+  /**
+   * Given, each positive's rank is estimated by sampling, as WARP trains: negatives are drawn uniformly (with
+   * replacement) until one violates the margin; after N draws the rank estimate is ⌊M/N⌋. Omitted, the exact
+   * margin-violating rank is counted over all M negatives.
+   */
+  stream?: Stream
+  /** Most draws per positive when sampling (default M); a positive with no violator found contributes 0. */
+  maxDraws?: number
+}
+
+/** L(r) = Σ_{k=1}^{r} αₖ, WARP's weight of a positive with margin-violating rank r (L(0) = 0). */
+export function warpRankWeight(r: number, weighting: 'harmonic' | 'constant' = 'harmonic'): number {
+  if (weighting === 'constant') return r
+  let h = 0
+  for (let k = 1; k <= r; k++) h += 1 / k
+  return h
+}
+
+/**
+ * WARP's constant pair weights w [B, M] (or [M] for one positive), with the loss Σⱼ wᵢⱼ max(0, Δ − sᵢ + sⱼ) (Weston,
+ * Bengio & Usunier, 2011). Exact: with rᵢ = #{j : Δ + sⱼ > sᵢ} the margin-violating rank, every violator gets
+ * L(rᵢ)/rᵢ, spreading L(rᵢ) evenly over the rᵢ hinge terms. Sampled (`stream`): the first violator found, on draw N,
+ * gets L(⌊M/N⌋) and every other negative 0, a one-term estimate of the exact sum. Ties in the scores count as
+ * violations only within the margin, as the hinge does.
+ */
+export function warpWeights(positive: Value, negatives: Value, options: WarpOptions = {}): Tensor {
+  const { margin = 1, weighting = 'harmonic', stream } = options
+  const shape = expectRank(negatives, [1, 2], 'warp negatives')
+  const M = shape[shape.length - 1]
+  const B = shape.length === 2 ? shape[0] : 1
+  const sPos = flatValues(unwrap(positive))
+  const sNeg = flatValues(unwrap(negatives))
+  if (sPos.length !== B) throw new Error(`warp: ${sPos.length} positives for ${B} rows of negatives`)
+  const maxDraws = options.maxDraws ?? M
+  const w = new Float64Array(B * M)
+  for (let b = 0; b < B; b++) {
+    const violates = (j: number) => margin + sNeg[b * M + j] > sPos[b]
+    if (stream === undefined) {
+      let r = 0
+      for (let j = 0; j < M; j++) if (violates(j)) r++
+      if (r === 0) continue
+      const each = warpRankWeight(r, weighting) / r
+      for (let j = 0; j < M; j++) if (violates(j)) w[b * M + j] = each
+    } else {
+      for (let draw = 1; draw <= maxDraws; draw++) {
+        const j = integers(stream, M)
+        if (violates(j)) {
+          w[b * M + j] = warpRankWeight(Math.floor(M / draw), weighting)
+          break
+        }
+      }
+    }
+  }
+  return fromData(w, shape)
+}
+
+/**
+ * WARP, the weighted approximate-rank pairwise loss (Weston, Bengio & Usunier, 2011): for positive scores [B] and
+ * negative scores [B, M], Σⱼ wᵢⱼ max(0, Δ − sᵢ + sⱼ) with the rank weights of `warpWeights` held constant, so a
+ * positive buried under many violators gets a large update and one near the top a small one. Exact by default;
+ * pass a `stream` for WARP's sampled rank estimate.
+ */
+export const warp = defineLoss(
+  {
+    ...rankingInfo('warp', 'WARP (weighted approximate-rank pairwise)', 'pairwise-ranking-losses', 'precision at k'),
+    glossary: 'warp',
+    cite: ['weston2011wsabie'],
+  },
+  (positive: Value, negatives: Value, options: WarpOptions = {}): Value => {
+    const W = warpWeights(positive, negatives, options)
+    const pos = expectRank(negatives, [1, 2], 'warp negatives').length === 2 ? expandDims(positive, -1) : positive
+    const hinge = maximum(sub(add(options.margin ?? 1, negatives), pos), 0)
+    return reduce(sum(mul(W, hinge), -1), options.reduction)
   },
 )
 

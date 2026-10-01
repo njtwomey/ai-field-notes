@@ -30,5 +30,5 @@ export {
   type UpdateRule,
 } from './first-order'
 export { newton, lbfgs } from './second-order'
-export { nelderMead, minimizeScalar } from './derivative-free'
+export { nelderMead } from './derivative-free'
 export { linprog } from './programming'

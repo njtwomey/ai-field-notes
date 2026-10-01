@@ -5,7 +5,7 @@ import { cn } from '@lab/lib/utils'
 /**
  * Class chips for the multi-panel data views, whose panels draw no legend of their own: each chip shows the class's
  * colour and count, and a click hides or shows the class in every panel at once. Colours are the categorical slots in
- * class order, as grouped scatter series in `XYChart` use them.
+ * class order, as grouped `Points` layers use them.
  */
 export function ClassLegend({
   names,

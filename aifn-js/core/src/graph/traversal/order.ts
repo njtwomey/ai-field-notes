@@ -4,6 +4,7 @@
  * Informatica 6; CLRS §22.4), and cycle detection from a depth-first back edge.
  */
 
+import { DomainError } from 'aifn/foundation/errors'
 import type { Tensor } from 'aifn/foundation/tensor'
 import type { Status } from 'aifn/foundation/contracts'
 import { run, type Algorithm } from 'aifn/foundation/trace'
@@ -32,7 +33,7 @@ export interface KahnState extends Status {
 /** The init and step of `kahnSteps` on the whole problem; `t` is added by the factory. */
 const kahn = {
   init: (graph: Graph): Omit<KahnState, 't'> => {
-    if (!isDirected(graph)) throw new Error('kahn: topological order needs a directed graph')
+    if (!isDirected(graph)) throw new DomainError('kahn', 'kahn: topological order needs a directed graph')
     const inDegree = new Int32Array(graph.nodes)
     for (const e of graph.edges) inDegree[e.to]++
     const queue: number[] = []
@@ -123,7 +124,7 @@ export interface TopologicalOrder {
  * holds one, and `order` is partial (Kahn) or not topological (depth-first).
  */
 export function topologicalSort(graph: Graph, options: { method?: 'kahn' | 'depth-first' } = {}): TopologicalOrder {
-  if (!isDirected(graph)) throw new Error('topologicalSort: needs a directed graph')
+  if (!isDirected(graph)) throw new DomainError('topologicalSort', 'topologicalSort: needs a directed graph')
   if ((options.method ?? 'kahn') === 'kahn') {
     const s = run(kahnSteps(graph), undefined, stepBound(graph))
     return { order: s.order, cycle: s.order.shape[0] < graph.nodes ? findCycle(graph) : null }

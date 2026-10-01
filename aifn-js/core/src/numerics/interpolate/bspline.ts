@@ -5,9 +5,11 @@
  * (Wood, 2017, "Generalized Additive Models", 2nd ed., §5.3–5.6).
  */
 
+import { DomainError, ShapeError } from 'aifn/foundation/errors'
 import type { Scalar, Size } from 'aifn/foundation/contracts'
 import { cholesky, choleskySolve, inverse, kron, lstsq } from 'aifn/numerics/linalg'
 import { gaussLegendre } from 'aifn/numerics/quadrature'
+import { minimizeScalar } from 'aifn/numerics/roots'
 import { fromData, toFlat, type Tensor } from 'aifn/foundation/tensor'
 
 type F64 = Float64Array
@@ -77,8 +79,9 @@ export function bsplineBasis(
   const t = f64(knots)
   const p = degree
   const count = t.length - p - 1
-  if (count < 1) throw new Error(`bsplineBasis: ${t.length} knots are too few for degree ${p}`)
-  for (let k = 1; k < t.length; k++) if (t[k] < t[k - 1]) throw new Error('bsplineBasis: knots must be non-decreasing')
+  if (count < 1) throw new ShapeError('bsplineBasis', `bsplineBasis: ${t.length} knots are too few for degree ${p}`)
+  for (let k = 1; k < t.length; k++)
+    if (t[k] < t[k - 1]) throw new DomainError('bsplineBasis', 'bsplineBasis: knots must be non-decreasing')
   const xs = f64(x)
   const n = xs.length
   const out = new Float64Array(n * count)
@@ -118,7 +121,8 @@ export function bsplineBasis(
  * [lo, hi].
  */
 export function uniformKnots(lo: Scalar, hi: Scalar, segments: Size, degree: Size = 3): Tensor {
-  if (!(hi > lo) || !(segments >= 1)) throw new Error('uniformKnots: needs hi > lo and at least one segment')
+  if (!(hi > lo) || !(segments >= 1))
+    throw new DomainError('uniformKnots', 'uniformKnots: needs hi > lo and at least one segment')
   const h = (hi - lo) / segments
   return fromData(
     Float64Array.from({ length: segments + 2 * degree + 1 }, (_, i) => lo + (i - degree) * h),
@@ -151,7 +155,7 @@ export type BSpline = {
 export function bspline(knots: Tensor, degree: Size, coefficients: Tensor): BSpline {
   const c = f64(coefficients)
   const count = bsplineCount(knots, degree)
-  if (c.length !== count) throw new Error(`bspline: ${count} B-splines but ${c.length} coefficients`)
+  if (c.length !== count) throw new ShapeError('bspline', `bspline: ${count} B-splines but ${c.length} coefficients`)
   return {
     kind: 'bspline',
     knots,
@@ -222,7 +226,7 @@ export function leastSquaresSpline(
 
 /** The order-d difference matrix D [p − d, p]: (Dβ)ⱼ = Δᵈβⱼ = Σₐ (−1)ᵈ⁻ᵃ C(d, a) βⱼ₊ₐ. */
 export function differenceMatrix(p: Size, order: Size): Tensor {
-  if (!(order >= 0 && order < p)) throw new Error('differenceMatrix: need 0 ≤ order < p')
+  if (!(order >= 0 && order < p)) throw new ShapeError('differenceMatrix', 'differenceMatrix: need 0 ≤ order < p')
   const c = new Float64Array(order + 1)
   let binom = 1
   for (let a = 0; a <= order; a++) {
@@ -306,7 +310,8 @@ export function derivativePenalty(knots: Tensor, degree: Size, m: Size, range?: 
  * Wood, 2017, §5.3.2). x is reduced modulo the period first.
  */
 export function cyclicBsplineBasis(x: Tensor, lo: Scalar, hi: Scalar, k: Size, degree: Size = 3): Tensor {
-  if (k <= degree) throw new Error('cyclicBsplineBasis: needs more functions than the degree')
+  if (k <= degree)
+    throw new DomainError('cyclicBsplineBasis', 'cyclicBsplineBasis: needs more functions than the degree')
   const period = hi - lo
   const wrapped = Float64Array.from(toFlat(x), (v) => lo + ((((v - lo) % period) + period) % period))
   const knots = uniformKnots(lo, hi, k, degree)
@@ -322,7 +327,7 @@ export function cyclicBsplineBasis(x: Tensor, lo: Scalar, hi: Scalar, k: Size, d
 export function tensorProductBasis(A: Tensor, B: Tensor): Tensor {
   const [n, p] = A.shape
   const [m, q] = B.shape
-  if (n !== m) throw new Error(`tensorProductBasis: ${n} rows against ${m}`)
+  if (n !== m) throw new ShapeError('tensorProductBasis', `tensorProductBasis: ${n} rows against ${m}`)
   const a = f64(A)
   const b = f64(B)
   const out = new Float64Array(n * p * q)
@@ -490,7 +495,8 @@ export function psplineGcvPath(x: Tensor, y: Tensor, logLambdas: Tensor, options
 export function pspline(x: Tensor, y: Tensor, options: PSplineOptions = {}): PSplineFit {
   const s = psplineSetup(x, options)
   const Y = f64(y)
-  if (Y.length !== s.X.length) throw new Error(`pspline: ${s.X.length} x values but ${Y.length} y values`)
+  if (Y.length !== s.X.length)
+    throw new ShapeError('pspline', `pspline: ${s.X.length} x values but ${Y.length} y values`)
   let lambda = options.lambda ?? 1
   if (lambda === 'gcv') {
     const score = (l: number) => psplineAt(s.X, Y, s.w, s.knots, s.degree, s.P, 10 ** l).gcv
@@ -500,19 +506,9 @@ export function pspline(x: Tensor, y: Tensor, options: PSplineOptions = {}): PSp
       const v = score(l)
       if (v < bestScore) [best, bestScore] = [l, v]
     }
-    // Golden-section search on [best − 0.5, best + 0.5].
-    let a = best - 0.5
-    let b = best + 0.5
-    const g = (Math.sqrt(5) - 1) / 2
-    for (let it = 0; it < 40; it++) {
-      const c = b - g * (b - a)
-      const d = a + g * (b - a)
-      if (score(c) < score(d)) b = d
-      else a = c
-    }
-    lambda = 10 ** ((a + b) / 2)
+    lambda = 10 ** minimizeScalar(score, { bounds: [best - 0.5, best + 0.5], method: 'golden' }).x
   }
-  if (!(lambda >= 0)) throw new Error('pspline: λ must be ≥ 0')
+  if (!(lambda >= 0)) throw new DomainError('pspline', 'pspline: λ must be ≥ 0')
   const fit = psplineAt(s.X, Y, s.w, s.knots, s.degree, s.P, lambda)
   return { ...bspline(s.knots, s.degree, fit.coefficients), ...fit }
 }

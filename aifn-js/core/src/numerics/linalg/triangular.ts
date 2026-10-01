@@ -1,7 +1,7 @@
 /**
  * Triangular solves by forward and back substitution (Golub and Van Loan, 2013, "Matrix Computations", 4th ed.,
- * Algorithms 3.1.1–3.1.2), as a primitive with its derivative rule: for X = T⁻¹B the cotangents are
- * B̄ = T⁻ᵀX̄ and T̄ = −B̄Xᵀ restricted to T's triangle (Giles, 2008, §2.2.3).
+ * Algorithms 3.1.1–3.1.2), as a primitive with its derivative rules: for X = T⁻¹B the cotangents are
+ * B̄ = T⁻ᵀX̄ and T̄ = −B̄Xᵀ restricted to T's triangle, and the tangent is Ẋ = T⁻¹(Ḃ − ṪX) (Giles, 2008, §2.2.3).
  */
 
 import {
@@ -13,14 +13,16 @@ import {
   type Raw,
   reshape,
   shapeOfValue,
+  sub,
   type Tensor,
   type TensorResult,
   transpose,
-  unwrap,
+  avalOf,
   type Value,
 } from 'aifn/foundation/tensor'
-import { ShapeError } from 'aifn/foundation/errors'
+import { AifnError, ShapeError } from 'aifn/foundation/errors'
 import { dense, denseSquare, LinAlgError, matrix, wellConditioned } from './dense'
+import { column, float64Aval, foldColumns, kernelBatch, lowerMask, upperMask } from './rules'
 
 /** Options of `solveTriangular`. */
 export type TriangularOptions = {
@@ -53,17 +55,13 @@ export function substitute(t: Float64Array, n: number, b: Float64Array, r: numbe
   }
 }
 
-/** A mask of T's triangle (with or without its diagonal). */
-function triangleMask(n: number, lower: boolean, withDiagonal: boolean): Tensor {
-  const out = new Float64Array(n * n)
-  for (let i = 0; i < n; i++) {
-    for (let j = 0; j < n; j++) {
-      if ((lower ? j < i : j > i) || (withDiagonal && i === j)) out[i * n + j] = 1
-    }
-  }
-  return matrix(out, n, n)
-}
+/** T's triangle as read (with its diagonal unless the diagonal is taken as ones), as a constant mask. */
+const readMask = (n: number, p: Params) => (p.lower ? lowerMask(n, !p.unitDiagonal) : upperMask(n, !p.unitDiagonal))
 
+// op(T) X = B with op(T) = T or Tᵀ. Reverse: B̄ = op(T)⁻ᵀX̄ and T̄ = −B̄Xᵀ (or −XB̄ᵀ for Tᵀ), restricted to the triangle
+// read (Giles, 2008, §2.2.3). Forward: Ẋ = op(T)⁻¹(Ḃ − op(Ṫ)X) (Giles, 2008, §2.2.3). Linear in B, with transpose
+// B̄ = op(T)⁻ᵀX̄. Batch: an unbatched T solves every example at once, the batch folded into B's columns; a batched T
+// goes through the batched kernel (one impl call looping over the contiguous examples).
 const solveTriangularOp: Op<Params> = defineOp<Params>(
   'numerics/linalg/solveTriangular',
   ([t, b], p) => {
@@ -75,17 +73,37 @@ const solveTriangularOp: Op<Params> = defineOp<Params>(
     substitute(T.a, T.n, B.a, B.n, p, 'solveTriangular')
     return isVector ? reshape(matrix(B.a, B.m, B.n), [-1]) : matrix(B.a, B.m, B.n)
   },
-  (g, [t, b], x, p) => {
+  (g, [t, b], x, p, needed) => {
     const n = shapeOfValue(t)[0]
     const gb = solveTriangularOp([t, g], { ...p, transpose: !p.transpose })
-    const column = (v: Value) => (shapeOfValue(v).length === 1 ? reshape(v, [-1, 1]) : v)
-    // T̄ = −B̄ Xᵀ for T X = B, and −X B̄ᵀ for Tᵀ X = B; only T's triangle was read, so only it gets a cotangent.
+    if (!needed[0]) return [null, avalOf(b).number ? null : gb]
     const outer = p.transpose ? matmul(column(x), transpose(column(gb))) : matmul(column(gb), transpose(column(x)))
-    const gt = mul(neg(outer), triangleMask(n, p.lower, !p.unitDiagonal))
-    return [gt, typeof unwrap(b) === 'number' ? null : gb]
+    const gt = mul(neg(outer), readMask(n, p))
+    return [gt, avalOf(b).number ? null : gb]
   },
   {
     arity: 2,
+    jvp: ([dt, db], [t], x, p) => {
+      if (dt === null && db === null) return null
+      const n = shapeOfValue(t)[0]
+      let rhs: Value | null = db
+      if (dt !== null) {
+        const read = mul(dt, readMask(n, p))
+        const term = matmul(p.transpose ? transpose(read) : read, column(x))
+        const shaped = shapeOfValue(x).length === 1 ? reshape(term, [-1]) : term
+        rhs = rhs === null ? neg(shaped) : sub(rhs, shaped)
+      }
+      return solveTriangularOp([t, rhs as Value], p)
+    },
+    transpose: (ct, [t], which, p) => {
+      if (which !== 1) throw new AifnError('solveTriangular', 'solveTriangular: linear only in B')
+      return solveTriangularOp([t, ct], { ...p, transpose: !p.transpose })
+    },
+    batch: ([t, b], [at, ab], p, size) =>
+      at === null && ab !== null
+        ? foldColumns((rhs) => solveTriangularOp([t, rhs], p), b, ab, size)
+        : kernelBatch<Params>('numerics/linalg/solveTriangular')([t, b], [at, ab], p, size),
+    shape: ([, b]) => float64Aval(b.shape),
     doc: { summary: 'Solve a triangular system by substitution.' },
     test: {
       secondOrder: true,

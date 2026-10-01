@@ -10,7 +10,7 @@ import { kNearestNeighbours } from 'aifn-applied/learning/neighbours'
 import { randomForest } from 'aifn-applied/learning/trees-and-ensembles/bagging'
 import { supportVectorMachine } from 'aifn-applied/learning/kernel-methods'
 import { pipeline } from 'aifn/learning/compose'
-import { recipe, type DatasetRecipe } from 'aifn-applied/data/synthetic'
+import { recipe, type RecipeInput } from 'aifn-applied/data'
 import { type ClassificationTruth } from 'aifn-applied/data'
 import { classProbabilities, dataset, type Distribution, type Supervised } from 'aifn/learning/estimators'
 import { logisticRegression } from 'aifn-applied/learning/generalised/glm'
@@ -40,30 +40,32 @@ import { fromData, toFlat, toRows, unwrap, type Tensor } from 'aifn/foundation/t
 import { trace } from 'aifn/foundation/trace'
 import { chrome, seriesColor } from '@lab/design/palette'
 import { useTheme } from '@lab/design/theme'
-import { defineVariants, Slider, slider, useVariants, VariantControls } from '@lab/controls'
+import { Slider } from '@lab/controls'
 import { ControlRow, Dashboard, DashboardCell, DashboardRow, Figure } from '@lab/layout'
-import { Heatmap, Readout, XYChart, type Handle, type HeatmapOverlay, type PlotPointer, type XYSeries } from '@lab/viz'
+import { slider, useComputed, useFigureState, variants } from '@lab/state'
+import {
+  Bars,
+  Curve,
+  Plot,
+  Points,
+  Raster,
+  Readout,
+  useAxis,
+  Handle,
+  type Handle as HandleSpec,
+  type PlotPointer,
+} from '@lab/viz'
 import { ContingencyTableView, CurveChart, formatValue, histogramBars } from '@lab/views'
 
 // ── Data: aifn/datasets recipes, two classes, class 1 positive ─────────────────────────────────────────────────────
 
 /** A dataset recipe per base; `n` and `prevalence` are shared. Only the data are controlled, never the training. */
-const DATA = defineVariants(
+const DATA = variants(
   {
-    moons: {
-      label: 'two moons',
-      params: { noise: slider(0, 0.5, 0.25, { label: 'noise sd' }) },
-      f: (_: null, p): DatasetRecipe => ({ base: 'moons', noise: p.noise, options: { spacing: 'random' } }),
-    },
+    moons: { label: 'two moons', params: { noise: slider(0, 0.5, 0.25, { label: 'noise sd' }) } },
     blobs: {
       label: 'two Gaussian blobs',
       params: { separation: slider(0, 5, 2, { label: 'separation (blob sds)' }) },
-      f: (_: null, p): DatasetRecipe => ({
-        base: 'blobs',
-        noise: 1,
-        separation: p.separation,
-        options: { centers: 2 },
-      }),
     },
     circles: {
       label: 'two circles',
@@ -71,48 +73,51 @@ const DATA = defineVariants(
         noise: slider(0, 0.3, 0.12, { label: 'noise sd' }),
         factor: slider(0.1, 0.9, 0.5, { label: 'inner radius' }),
       },
-      f: (_: null, p): DatasetRecipe => ({ base: 'circles', noise: p.noise, options: { factor: p.factor } }),
     },
-    xor: {
-      label: 'XOR (four blobs)',
-      params: { noise: slider(0.1, 1, 0.45, { label: 'blob sd' }) },
-      f: (_: null, p): DatasetRecipe => ({ base: 'xor', noise: p.noise }),
-    },
+    xor: { label: 'XOR (four blobs)', params: { noise: slider(0.1, 1, 0.45, { label: 'blob sd' }) } },
     spirals: {
       label: 'two spirals',
       params: {
         noise: slider(0, 0.2, 0.05, { label: 'noise sd' }),
         turns: slider(0.5, 2, 1, { label: 'turns' }),
       },
-      f: (_: null, p): DatasetRecipe => ({ base: 'spirals', noise: p.noise, options: { arms: 2, turns: p.turns } }),
     },
     anisotropic: {
       label: 'anisotropic Gaussians',
       params: { separation: slider(0, 5, 2.5, { label: 'separation (blob sds)' }) },
-      f: (_: null, p): DatasetRecipe => ({
-        base: 'blobs',
-        noise: 1,
-        separation: p.separation,
-        options: { centers: 2 },
-        transform: {
-          matrix: [
-            [0.6, -0.6],
-            [-0.4, 0.8],
-          ],
-        },
-      }),
     },
     checkerboard: {
       label: 'checkerboard',
       params: { tiles: slider(2, 6, 3, { step: 1, label: 'tiles per side' }) },
-      f: (_: null, p): DatasetRecipe => ({ base: 'checkerboard', options: { tiles: p.tiles } }),
     },
   },
   {
-    n: slider(60, 600, 240, { step: 10, label: 'cases n' }),
-    prevalence: slider(0.05, 0.95, 0.3, { step: 0.05, label: 'prevalence π of class 1' }),
+    label: '1 · data',
+    choiceLabel: 'dataset',
+    shared: {
+      n: slider(60, 600, 240, { step: 10, label: 'cases n' }),
+      prevalence: slider(0.05, 0.95, 0.3, { step: 0.05, label: 'prevalence π of class 1' }),
+    },
   },
 )
+
+/** One case's values, as the recipe and fit tables read them (each reads only its own case's fields). */
+type CaseValues = Readonly<Record<string, number>>
+
+const RECIPES: Record<string, (p: CaseValues) => RecipeInput> = {
+  moons: (p) => ({ base: 'moons', knobs: { noise: p.noise, spacing: 'random' } }),
+  blobs: (p) => ({ base: 'blobs', knobs: { centers: 2, sd: 1, layout: 'polygon', separation: p.separation } }),
+  circles: (p) => ({ base: 'circles', knobs: { noise: p.noise, factor: p.factor } }),
+  xor: (p) => ({ base: 'xor', knobs: { kind: 'gaussian', sd: p.noise } }),
+  spirals: (p) => ({ base: 'spirals', knobs: { noise: p.noise, arms: 2, turns: p.turns } }),
+  anisotropic: (p) => ({
+    base: 'blobs',
+    knobs: { centers: 2, sd: 1, layout: 'polygon', separation: p.separation },
+    // The recipe's linear map: a stretch of 0.6, a shear of 1 and a rotation by −π/4 tilt and elongate the classes.
+    modifiers: [{ op: 'withTransform', params: { rotation: -Math.PI / 4, shear: 1, stretch: 0.6 } }],
+  }),
+  checkerboard: (p) => ({ base: 'checkerboard', knobs: { tiles: p.tiles } }),
+}
 
 // ── Models: fixed, characteristic settings; the score is the log-odds of class 1 (the SVM's: its margin) ──────────────
 
@@ -152,129 +157,136 @@ const logSlider = (lo: number, hi: number, initial: number, label: string) =>
  * Each model with its own hyperparameters, at characteristic defaults. The training procedure (solver, iterations,
  * learning rate, seeds) is fixed: these figures illustrate, they do not validate.
  */
-const MODELS = defineVariants({
-  logistic: {
-    label: 'logistic regression',
-    params: { l2: logSlider(-3, 2, 0, 'λ (L2)') },
-    f: (d: Fit, p): Scorer => predictive(logisticRegression({ l2: 10 ** p.l2 }).fit(d)),
-  },
-  polynomial: {
-    label: 'polynomial logistic regression',
-    params: { degree: slider(1, 6, 3, { step: 1, label: 'degree' }), l2: logSlider(-3, 2, -1, 'λ (L2)') },
-    f: (d: Fit, p): Scorer =>
-      predictive(
-        pipeline(
-          standardScaler(),
-          polynomialFeatures({ degree: p.degree, includeBias: false }),
-          logisticRegression({ l2: 10 ** p.l2 }),
-        ).fit(d),
-      ),
-  },
-  spline: {
-    label: 'spline logistic regression (additive)',
-    params: { knots: slider(3, 12, 6, { step: 1, label: 'knots per feature' }), l2: logSlider(-3, 2, -1, 'λ (L2)') },
-    f: (d: Fit, p): Scorer =>
-      predictive(
-        pipeline(
-          splineFeatures({ knots: p.knots, degree: 3, extrapolation: 'continue', includeBias: false }),
-          logisticRegression({ l2: 10 ** p.l2 }),
-        ).fit(d),
-      ),
-  },
-  knn: {
-    label: 'k-nearest neighbours',
-    params: { k: slider(1, 51, 15, { step: 1, label: 'neighbours k' }) },
-    f: (d: Fit, p): Scorer => predictive(kNearestNeighbours({ k: Math.min(p.k, d.x.shape[0]) }).fit(d)),
-  },
-  lda: {
-    label: 'linear discriminant (LDA)',
-    params: {},
-    f: (d: Fit): Scorer => predictive(linearDiscriminant().fit(d)),
-  },
-  qda: {
-    label: 'quadratic discriminant (QDA)',
-    params: {},
-    f: (d: Fit): Scorer => predictive(quadraticDiscriminant({ regularisation: 0.01 }).fit(d)),
-  },
-  bayes: { label: 'Gaussian naive Bayes', params: {}, f: (d: Fit): Scorer => predictive(gaussianNaiveBayes().fit(d)) },
-  svm: {
-    label: 'SVM, RBF kernel',
-    params: { C: slider(0.1, 20, 1, { label: 'C' }), gamma: slider(0.1, 10, 1.4, { label: 'γ (RBF)' }) },
-    f: (d: Fit, p): Scorer => {
-      // k(x, x′) = exp(−γ‖x − x′‖²), i.e. lengthscale ℓ = 1/√(2γ).
-      const kernel = rbf({ lengthscale: 1 / Math.sqrt(2 * p.gamma) })
-      const m = supportVectorMachine({ C: p.C, kernel }).fit(d)
-      return { kind: 'margin', score: (x) => Float64Array.from(toFlat(m.score(x))) }
+const MODELS = variants(
+  {
+    logistic: {
+      label: 'logistic regression',
+      params: { l2: logSlider(-3, 2, 0, 'λ (L2)') },
+    },
+    polynomial: {
+      label: 'polynomial logistic regression',
+      params: { degree: slider(1, 6, 3, { step: 1, label: 'degree' }), l2: logSlider(-3, 2, -1, 'λ (L2)') },
+    },
+    spline: {
+      label: 'spline logistic regression (additive)',
+      params: { knots: slider(3, 12, 6, { step: 1, label: 'knots per feature' }), l2: logSlider(-3, 2, -1, 'λ (L2)') },
+    },
+    knn: {
+      label: 'k-nearest neighbours',
+      params: { k: slider(1, 51, 15, { step: 1, label: 'neighbours k' }) },
+    },
+    lda: {
+      label: 'linear discriminant (LDA)',
+      params: {},
+    },
+    qda: {
+      label: 'quadratic discriminant (QDA)',
+      params: {},
+    },
+    bayes: { label: 'Gaussian naive Bayes', params: {} },
+    svm: {
+      label: 'SVM, RBF kernel',
+      params: { C: slider(0.1, 20, 1, { label: 'C' }), gamma: slider(0.1, 10, 1.4, { label: 'γ (RBF)' }) },
+    },
+    tree: {
+      label: 'decision tree',
+      params: { depth: slider(1, 12, 4, { step: 1, label: 'maximum depth' }) },
+    },
+    forest: {
+      label: 'random forest',
+      params: {
+        trees: slider(5, 100, 50, { step: 5, label: 'trees' }),
+        depth: slider(1, 12, 6, { step: 1, label: 'maximum depth' }),
+      },
+    },
+    boosting: {
+      label: 'gradient boosting',
+      params: {
+        trees: slider(5, 200, 60, { step: 5, label: 'trees' }),
+        depth: slider(1, 4, 2, { step: 1, label: 'tree depth' }),
+      },
+    },
+    gp: {
+      label: 'GP classifier (Laplace, RBF)',
+      params: { lengthscale: slider(0.1, 3, 0.6, { label: 'lengthscale ℓ' }) },
+    },
+    mlp: {
+      label: 'MLP (two tanh layers)',
+      params: {
+        width: slider(2, 32, 12, { step: 1, label: 'units per layer' }),
+        decay: logSlider(-5, -1, -4, 'weight decay'),
+      },
     },
   },
-  tree: {
-    label: 'decision tree',
-    params: { depth: slider(1, 12, 4, { step: 1, label: 'maximum depth' }) },
-    f: (d: Fit, p): Scorer => predictive(decisionTree({ maxDepth: p.depth }).fit(d)),
+  { label: '2 · model', choiceLabel: 'classifier' },
+)
+
+const FITS: Record<string, (d: Fit, p: CaseValues) => Scorer> = {
+  logistic: (d: Fit, p: CaseValues): Scorer => predictive(logisticRegression({ l2: 10 ** p.l2 }).fit(d)),
+  polynomial: (d: Fit, p: CaseValues): Scorer =>
+    predictive(
+      pipeline(
+        standardScaler(),
+        polynomialFeatures({ degree: p.degree, includeBias: false }),
+        logisticRegression({ l2: 10 ** p.l2 }),
+      ).fit(d),
+    ),
+  spline: (d: Fit, p: CaseValues): Scorer =>
+    predictive(
+      pipeline(
+        splineFeatures({ knots: p.knots, degree: 3, extrapolation: 'continue', includeBias: false }),
+        logisticRegression({ l2: 10 ** p.l2 }),
+      ).fit(d),
+    ),
+  knn: (d: Fit, p: CaseValues): Scorer => predictive(kNearestNeighbours({ k: Math.min(p.k, d.x.shape[0]) }).fit(d)),
+  lda: (d: Fit): Scorer => predictive(linearDiscriminant().fit(d)),
+  qda: (d: Fit): Scorer => predictive(quadraticDiscriminant({ regularisation: 0.01 }).fit(d)),
+  bayes: (d: Fit): Scorer => predictive(gaussianNaiveBayes().fit(d)),
+  svm: (d: Fit, p: CaseValues): Scorer => {
+    // k(x, x′) = exp(−γ‖x − x′‖²), i.e. lengthscale ℓ = 1/√(2γ).
+    const kernel = rbf({ lengthscale: 1 / Math.sqrt(2 * p.gamma) })
+    const m = supportVectorMachine({ C: p.C, kernel }).fit(d)
+    return { kind: 'margin', score: (x) => Float64Array.from(toFlat(m.score(x))) }
   },
-  forest: {
-    label: 'random forest',
-    params: {
-      trees: slider(5, 100, 50, { step: 5, label: 'trees' }),
-      depth: slider(1, 12, 6, { step: 1, label: 'maximum depth' }),
-    },
-    f: (d: Fit, p): Scorer =>
-      predictive(
-        randomForest({ trees: p.trees, maxDepth: p.depth, maxFeatures: 1 }).fit(d, {
-          stream: stream('lab/metrics/forest'),
-        }),
-      ),
+  tree: (d: Fit, p: CaseValues): Scorer => predictive(decisionTree({ maxDepth: p.depth }).fit(d)),
+  forest: (d: Fit, p: CaseValues): Scorer =>
+    predictive(
+      randomForest({ trees: p.trees, maxDepth: p.depth, maxFeatures: 1 }).fit(d, {
+        stream: stream('lab/metrics/forest'),
+      }),
+    ),
+  boosting: (d: Fit, p: CaseValues): Scorer => {
+    const m = gradientBoosting({
+      loss: 'logistic',
+      stages: p.trees,
+      learningRate: 0.2,
+      tree: { maxDepth: p.depth },
+    }).fit(d)
+    return predictive({ predictive: (x) => m.predictive!(x) })
   },
-  boosting: {
-    label: 'gradient boosting',
-    params: {
-      trees: slider(5, 200, 60, { step: 5, label: 'trees' }),
-      depth: slider(1, 4, 2, { step: 1, label: 'tree depth' }),
-    },
-    f: (d: Fit, p): Scorer => {
-      const m = gradientBoosting({
-        loss: 'logistic',
-        stages: p.trees,
-        learningRate: 0.2,
-        tree: { maxDepth: p.depth },
-      }).fit(d)
-      return predictive({ predictive: (x) => m.predictive!(x) })
-    },
+  gp: (d: Fit, p: CaseValues): Scorer =>
+    predictive(gpClassifier({ kernel: rbf({ lengthscale: p.lengthscale, variance: 4 }) }).fit(d)),
+  mlp: (d: Fit, p: CaseValues): Scorer => {
+    // Standardised inputs, 300 full-batch Adam steps on the logistic loss; only the final parameters are kept.
+    const scaler = standardScaler().fit({ x: d.x })
+    const net = Mlp([2, p.width, p.width, 1], { activation: 'tanh', init: xavierUniform() })
+    const y = fromData(Float64Array.from(toFlat(d.y)), [d.y.shape[0], 1])
+    const run = trace(
+      trainingLoop({
+        loss: (w: Params[], b: { x: Tensor; y: Tensor }) => binaryCrossEntropyWithLogits(net.apply(w, b.x), b.y),
+        data: { x: scaler.transform(d.x), y },
+        optimizer: adamRule({ stepSize: 0.03, weightDecay: 10 ** p.decay, decoupled: true }),
+      }),
+      { params: net.init(stream('lab/metrics/mlp')) },
+      300,
+      { every: 300 },
+    )
+    const w = run.steps[run.steps.length - 1].params
+    return fromProbability((x) =>
+      Float64Array.from(toFlat(unwrap(sigmoid(net.apply(w, scaler.transform(x)))) as Tensor)),
+    )
   },
-  gp: {
-    label: 'GP classifier (Laplace, RBF)',
-    params: { lengthscale: slider(0.1, 3, 0.6, { label: 'lengthscale ℓ' }) },
-    f: (d: Fit, p): Scorer =>
-      predictive(gpClassifier({ kernel: rbf({ lengthscale: p.lengthscale, variance: 4 }) }).fit(d)),
-  },
-  mlp: {
-    label: 'MLP (two tanh layers)',
-    params: {
-      width: slider(2, 32, 12, { step: 1, label: 'units per layer' }),
-      decay: logSlider(-5, -1, -4, 'weight decay'),
-    },
-    f: (d: Fit, p): Scorer => {
-      // Standardised inputs, 300 full-batch Adam steps on the logistic loss; only the final parameters are kept.
-      const scaler = standardScaler().fit({ x: d.x })
-      const net = Mlp([2, p.width, p.width, 1], { activation: 'tanh', init: xavierUniform() })
-      const y = fromData(Float64Array.from(toFlat(d.y)), [d.y.shape[0], 1])
-      const run = trace(
-        trainingLoop({
-          loss: (w: Params[], b: { x: Tensor; y: Tensor }) => binaryCrossEntropyWithLogits(net.apply(w, b.x), b.y),
-          data: { x: scaler.transform(d.x), y },
-          optimizer: adamRule({ stepSize: 0.03, weightDecay: 10 ** p.decay, decoupled: true }),
-        }),
-        { params: net.init(stream('lab/metrics/mlp')) },
-        300,
-        { every: 300 },
-      )
-      const w = run.steps[run.steps.length - 1].params
-      return fromProbability((x) =>
-        Float64Array.from(toFlat(unwrap(sigmoid(net.apply(w, scaler.transform(x)))) as Tensor)),
-      )
-    },
-  },
-})
+}
 
 // ── The dashboard ─────────────────────────────────────────────────────────────────────────────────────────────────
 
@@ -315,15 +327,17 @@ function polylines(lines: Tensor[]): { x: number[]; y: number[] } {
 }
 
 export function ClassifierDashboardSpecimen() {
-  const data = useVariants(DATA)
-  const model = useVariants(MODELS)
+  const state = useFigureState({ data: DATA, model: MODELS })
+  const data = state.data
+  const model = state.model
   const { resolved: mode } = useTheme()
-  const dp = data.params
-  const dataKey = JSON.stringify([data.key, data.state.values[data.key], dp.n, dp.prevalence])
+  const dp = data.values as unknown as CaseValues
+  const dataKey = JSON.stringify([data.key, data.values])
 
   // The data, from a recipe; the model is fitted to them and evaluated on them.
   const set = useMemo(() => {
-    const d = recipe({ ...data.f!(null), seed: 1, n: dp.n, prevalence: dp.prevalence })
+    const r = RECIPES[data.key](dp)
+    const d = recipe({ ...r, seed: 1, knobs: { ...r.knobs, n: dp.n, prevalence: dp.prevalence } })
     const truth = d.meta.truth?.task === 'classification' ? (d.meta.truth as ClassificationTruth) : null
     return { x: d.x, y: d.y!, names: d.meta.labelNames ?? ['class 0', 'class 1'], truth }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed by the data's values
@@ -331,13 +345,15 @@ export function ClassifierDashboardSpecimen() {
   const names = set.names
   const colors = useMemo(() => CLASS_SLOTS.map((s) => seriesColor(mode, s)), [mode])
 
-  // The fit: only when the data or the model change, never when the threshold moves.
-  const modelKey = JSON.stringify([model.key, model.state.values[model.key]])
-  const scorer = useMemo(
-    () => model.f!(dataset(set.x, set.y)),
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed by the model's values
+  // The fit: only when the data or the model change, never when the threshold moves. Some fits (a forest, the GP,
+  // the MLP's 300 Adam steps) take longer than a frame, so a slider drag refits on release.
+  const modelKey = JSON.stringify([model.key, model.values])
+  const fitted = useComputed(
+    () => FITS[model.key](dataset(set.x, set.y), model.values as unknown as CaseValues),
     [modelKey, set],
+    { mode: 'release' },
   )
+  const scorer = fitted.value
 
   // The feature plane: a grid over the points, scored once per fit (and by the Bayes-optimal score once per data).
   const plane = useMemo(() => {
@@ -384,7 +400,7 @@ export function ClassifierDashboardSpecimen() {
     if (!bayes) return null
     const r = rocCurve(y, bayes.scores)
     return {
-      auroc: r.auc,
+      auroc: r.area,
       roc: { name: 'Bayes-optimal', curve: r },
       pr: { name: 'Bayes-optimal', curve: precisionRecallCurve(y, bayes.scores) },
     }
@@ -428,99 +444,69 @@ export function ClassifierDashboardSpecimen() {
     return out
   }, [hover, scores, lo, binWidth])
 
-  // Feature space: points coloured (and shaped) by actual class over the score field; the boundary in ink.
-  const overlay = useMemo((): HeatmapOverlay[] => {
-    const light = chrome('light')
-    const boundary = polylines(contourLines(plane.gx, plane.gy, field, t))
-    const out: HeatmapOverlay[] = [
-      {
-        name: 'points',
-        type: 'scatter',
-        x: px,
-        y: py,
-        group: y,
-        groupNames: names,
-        colors: y.map((c) => colors[c]),
-        outline: chrome('light').surface,
-      },
-      {
-        name: '__hovered',
-        type: 'scatter',
-        x: lit.map((i) => px[i]),
-        y: lit.map((i) => py[i]),
-        emphasis: true,
-      },
-      // Black in both themes, over a pale halo so that it reads on the dark theme's wash too.
-      { name: '__boundary-halo', type: 'line', ...boundary, color: light.surface, width: 4 },
-      { name: 'boundary at t', type: 'line', ...boundary, color: light.ink, width: 2 },
-    ]
-    if (bayes)
-      out.push({
-        name: 'Bayes boundary',
-        type: 'line',
-        ...polylines(contourLines(plane.gx, plane.gy, bayes.onGrid, 0)),
-        color: chrome(mode).muted,
-        dashed: true,
-        width: 1.5,
-      })
-    return out
-  }, [plane, px, py, field, t, bayes, y, names, colors, lit, mode])
+  // Feature space: the decision boundary at t over the score field, and the Bayes-optimal boundary where known.
+  const boundary = useMemo(() => polylines(contourLines(plane.gx, plane.gy, field, t)), [plane, field, t])
+  const bayesBoundary = useMemo(
+    () => (bayes ? polylines(contourLines(plane.gx, plane.gy, bayes.onGrid, 0)) : null),
+    [plane, bayes],
+  )
+  const byClass = useMemo(
+    () =>
+      ([0, 1] as const).map((c) => {
+        const idx = y.flatMap((v, i) => (v === c ? [i] : []))
+        return { x: idx.map((i) => px[i]), y: idx.map((i) => py[i]) }
+      }),
+    [y, px, py],
+  )
+  const light = chrome('light')
 
   // Score space: each class's scores, binned on the score range; bars touch and overlap translucently.
-  const histograms = useMemo((): XYSeries[] => {
-    const bars = (c: 0 | 1): XYSeries => {
+  const histograms = useMemo(() => {
+    const bars = (c: 0 | 1) => {
       const h = histogram(
         Array.from(scores).filter((_, i) => y[i] === c),
         { bins: BINS, range },
       )
-      const b = histogramBars(h)
-      return {
-        name: `${names[c]} (${c})`,
-        type: 'bar',
-        x: b.x,
-        y: b.counts,
-        slot: CLASS_SLOTS[c],
-        histogram: true,
-      }
+      return histogramBars(h)
     }
     return [bars(0), bars(1)]
-  }, [scores, y, range, names])
+  }, [scores, y, range])
   // The hovered point's bin, in ink, as a patch.
-  const litBin = useMemo((): XYSeries[] => {
+  const litBin = useMemo(() => {
     const i = hover && 'point' in hover ? hover.point : null
-    const k = i === null ? null : Math.min(BINS - 1, Math.max(0, Math.floor((scores[i] - lo) / binWidth)))
-    return [
-      {
-        name: '__hovered-bin',
-        type: 'bar',
-        x: k === null ? [] : [lo + (k + 0.5) * binWidth],
-        y: k === null || i === null ? [] : [histograms[y[i]].y[k]],
-        emphasis: true,
-        histogram: true,
-      },
-    ]
+    if (i === null) return null
+    const k = Math.min(BINS - 1, Math.max(0, Math.floor((scores[i] - lo) / binWidth)))
+    return {
+      x: [lo + (k + 0.5) * binWidth],
+      y: [histograms[y[i]].counts[k]],
+      edges: [lo + k * binWidth, lo + (k + 1) * binWidth],
+    }
   }, [hover, scores, y, histograms, lo, binWidth])
 
   const scoreName = scorer.kind === 'log-odds' ? 'log-odds of class 1' : 'SVM margin f(x)'
+  const fx1 = useAxis({ label: 'x₁', zoom: false })
+  const fx2 = useAxis({ label: 'x₂', equal: fx1, zoom: false })
+  const sx = useAxis({ label: `score: ${scoreName}`, range, zoom: false })
+  const cy = useAxis({ label: 'cases', hold: 'initial', key: fitKey, zoom: false })
   const precisionAt = Number.isFinite(rates.precision) ? rates.precision : 1
   const fromCurve = (i: number, thresholds: Tensor) => {
     const v = toFlat(thresholds)[i]
     setT(Number.isFinite(v) ? v : range[1])
   }
-  const rocHandles: Handle[] = [
+  const rocHandles: HandleSpec[] = [
     {
       kind: 'point',
       at: [rates.falsePositiveRate, rates.recall],
       label: 't',
-      onDrag: (p) => fromCurve(nearest(toFlat(roc.fpr), toFlat(roc.tpr), p)[0], roc.thresholds),
+      onDrag: (p) => fromCurve(nearest(toFlat(roc.x), toFlat(roc.y), p)[0], roc.thresholds),
     },
   ]
-  const prHandles: Handle[] = [
+  const prHandles: HandleSpec[] = [
     {
       kind: 'point',
       at: [rates.recall, precisionAt],
       label: 't',
-      onDrag: (p) => fromCurve(nearest(toFlat(pr.recall), toFlat(pr.precision), p)[0], pr.thresholds),
+      onDrag: (p) => fromCurve(nearest(toFlat(pr.x), toFlat(pr.y), p)[0], pr.thresholds),
     },
   ]
   const group = (title: string, children: ReactNode) => (
@@ -534,16 +520,11 @@ export function ClassifierDashboardSpecimen() {
     <Figure
       id="a-threshold-its-confusion-matrix-and-the-roc-and-pr-curves"
       title="A classifier's threshold: decision boundary, contingency table, ROC and PR curves"
-      description="A classifier from aifn is fitted to a 2-D two-class dataset and scores every point. One threshold t on that score sets the decision boundary in feature space, the split of the two class histograms, the contingency table, and the operating point on the ROC and precision–recall curves."
+      purpose="One threshold t on a classifier's score sets, all at once, the decision boundary in feature space, the split of the two class histograms, the contingency table, and the operating point on the ROC and precision–recall curves."
       defaultSize="XL"
+      state={state}
       controls={
         <>
-          <ControlRow label="1 · data">
-            <VariantControls variants={data} label="dataset" />
-          </ControlRow>
-          <ControlRow label="2 · model">
-            <VariantControls variants={model} label="classifier" />
-          </ControlRow>
           <ControlRow label="3 · threshold">
             <Slider
               label={`threshold t on the ${scoreName}`}
@@ -574,8 +555,8 @@ export function ClassifierDashboardSpecimen() {
           {group(
             'ranking (every t)',
             <>
-              <Readout label="AUROC" value={fmt(roc.auc)} />
-              <Readout label="AP" value={fmt(pr.averagePrecision)} />
+              <Readout label="AUROC" value={fmt(roc.area)} />
+              <Readout label="AP" value={fmt(pr.area)} />
               {bayesCurves && <Readout label="Bayes-optimal AUROC" value={fmt(bayesCurves.auroc)} />}
             </>,
           )}
@@ -598,36 +579,52 @@ export function ClassifierDashboardSpecimen() {
       <Dashboard>
         <DashboardRow ratio={1.15} minHeight={320}>
           <DashboardCell ratio={1.2} stackAspect={0.9}>
-            <Heatmap
-              x={plane.gx}
-              y={plane.gy}
-              z={field}
-              xLabel="x₁"
-              yLabel="x₂"
-              scale="diverging"
-              range={range}
-              // The owner prefers the saturated field (full-strength diverging map with its pale midline) to a faded
-              // wash, which reads as muddy on the dark surface: do not fade it. Points carry a light outline instead.
-              valueLabel={scoreName}
-              overlay={overlay}
-              onPointer={onPlane}
-              equalAspect
-              zoom={false}
-            />
+            <Plot x={fx1} y={fx2} onPointer={onPlane} toolbar={false} legend={false}>
+              {/* The owner prefers the saturated field (full-strength diverging map with its pale midline) to a faded
+                  wash, which reads as muddy on the dark surface: do not fade it. Points carry a light ring instead. */}
+              <Raster
+                x={plane.gx}
+                y={plane.gy}
+                z={field}
+                scale="diverging"
+                range={range}
+                valueLabel={scoreName}
+                stale={fitted.stale}
+              />
+              {bayesBoundary && (
+                <Curve
+                  name="Bayes boundary"
+                  x={bayesBoundary.x}
+                  y={bayesBoundary.y}
+                  color={chrome(mode).muted}
+                  dashed
+                  width={1.5}
+                />
+              )}
+              <Points name={names[0]} x={byClass[0].x} y={byClass[0].y} slot={CLASS_SLOTS[0]} shape={0} />
+              <Points name={names[1]} x={byClass[1].x} y={byClass[1].y} slot={CLASS_SLOTS[1]} shape={1} />
+              {/* Black in both themes, over a pale halo so that it reads on the dark theme's wash too. */}
+              <Curve name="__boundary-halo" x={boundary.x} y={boundary.y} color={light.surface} width={4} silent live />
+              <Curve name="boundary at t" x={boundary.x} y={boundary.y} color={light.ink} width={2} silent live />
+              <Points name="__hovered" x={lit.map((i) => px[i])} y={lit.map((i) => py[i])} emphasis live />
+            </Plot>
           </DashboardCell>
           <DashboardCell>
-            <XYChart
-              series={histograms}
-              live={litBin}
-              xLabel={`score: ${scoreName}`}
-              yLabel="cases"
-              xRange={range}
-              rescaleOnChange={false}
-              axisKey={fitKey}
-              handles={[{ kind: 'x', at: t, label: 't', onDrag: setT }]}
-              onPointer={onHistogram}
-              zoom={false}
-            />
+            <Plot x={sx} y={cy} onPointer={onHistogram} toolbar={false}>
+              {([0, 1] as const).map((c) => (
+                <Bars
+                  key={c}
+                  name={`${names[c]} (${c})`}
+                  x={histograms[c].x}
+                  y={histograms[c].counts}
+                  edges={histograms[c].edges}
+                  slot={CLASS_SLOTS[c]}
+                  stale={fitted.stale}
+                />
+              ))}
+              {litBin && <Bars name="__hovered-bin" x={litBin.x} y={litBin.y} edges={litBin.edges} emphasis live />}
+              <Handle kind="x" at={t} label="t" onDrag={setT} />
+            </Plot>
           </DashboardCell>
         </DashboardRow>
         <DashboardRow minHeight={300}>

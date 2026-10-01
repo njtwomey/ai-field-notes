@@ -1,6 +1,6 @@
-import { eigh2 } from 'aifn/numerics/linalg'
+import { covarianceEllipse } from 'aifn/numerics/geometry'
 import { normals, stream } from 'aifn/foundation/random'
-import { toFlat, toRows, type Tensor } from 'aifn/foundation/tensor'
+import { imagPart, realPart, toFlat, toRows, type Tensor } from 'aifn/foundation/tensor'
 import {
   armaAutocorrelation,
   armaRoots,
@@ -16,35 +16,21 @@ import {
 import { kalmanFilter, rtsSmoother, simulateStateSpace } from 'aifn/inference/filtering'
 import { sampleAcf, samplePacf } from 'aifn/probability/stats'
 import { run, trace } from 'aifn/foundation/trace'
-import { useMemo, useState } from 'react'
-import { Button, Player, Select, Slider, Switch, usePlayhead } from '@lab/controls'
+import { useMemo } from 'react'
+import { Button, Player, usePlayhead } from '@lab/controls'
 import { ControlRow, Figure } from '@lab/layout'
-import { formatNumber, Panel, Readout, Subplots, XYChart, type Handle, type XYSeries } from '@lab/viz'
-import { TraceView } from '@lab/views'
+import { choice, number, row, slider, toggle, useFigureState } from '@lab/state'
+import { Area, Bars, Curve, formatNumber, Handle, Plot, Plots, Points, Readout, useAxis } from '@lab/viz'
+import { TracePanel } from '@lab/views'
 
 const flat = (t: Tensor) => toFlat(t)
 const steps = (n: number, start = 1) => Array.from({ length: n }, (_, i) => i + start)
 const fmt = (v: number) => formatNumber(v)
-const NO_SERIES: XYSeries[] = []
 
-/** The 2σ ellipse of a 2×2 covariance about a mean, from its eigendecomposition. */
-function ellipse(mean: number[], cov: number[][], k = 2, points = 40) {
-  const { values, vectors } = eigh2([
-    [cov[0][0], cov[0][1]],
-    [cov[1][0], cov[1][1]],
-  ])
-  const a = k * Math.sqrt(Math.max(values[0], 0))
-  const b = k * Math.sqrt(Math.max(values[1], 0))
-  const x: number[] = []
-  const y: number[] = []
-  for (let i = 0; i <= points; i++) {
-    const t = (2 * Math.PI * i) / points
-    const u = a * Math.cos(t)
-    const v = b * Math.sin(t)
-    x.push(mean[0] + u * vectors[0][0] + v * vectors[1][0])
-    y.push(mean[1] + u * vectors[0][1] + v * vectors[1][1])
-  }
-  return { x, y }
+/** The k-σ ellipse of a 2×2 covariance about a mean (aifn covarianceEllipse), as x and y arrays. */
+function ellipse(mean: number[], cov: number[][], k = 2) {
+  const rows = toRows(covarianceEllipse([mean[0], mean[1]], cov, { k }).points) as number[][]
+  return { x: rows.map((r) => r[0]), y: rows.map((r) => r[1]) }
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
@@ -104,9 +90,14 @@ function kalmanPhase(position: number, T: number): { t: number; phase: 'predict'
 const NONE = { x: [] as number[], y: [] as number[] }
 
 export function KalmanTrackingSpecimen() {
-  const [logQ, setLogQ] = useState(-2)
-  const [logR, setLogR] = useState(0.5)
-  const [seed, setSeed] = useState(4)
+  const state = useFigureState({
+    model: row('1 · model', {
+      logQ: slider(-4, 0, -2, { label: 'log₁₀ process noise q', step: 0.25 }),
+      logR: slider(-1, 1.5, 0.5, { label: 'log₁₀ observation noise r', step: 0.25 }),
+      seed: number(4, { min: 1, max: 20, step: 1, label: 'seed' }),
+    }),
+  })
+  const { logQ, logR, seed } = state.model
   const T = KALMAN_T
   const model = useMemo(() => constantVelocity(10 ** logQ, 10 ** logR), [logQ, logR])
   const sim = useMemo(() => simulateStateSpace(stream(seed), model, KALMAN_T), [model, seed])
@@ -132,43 +123,30 @@ export function KalmanTrackingSpecimen() {
 
   const rmse = (rows: number[][]) =>
     Math.sqrt(rows.reduce((s, r, k) => s + (r[0] - truth[k][0]) ** 2 + (r[1] - truth[k][1]) ** 2, 0) / T)
-  const series = useMemo(
-    (): XYSeries[] => [
-      { name: 'true path', type: 'line', x: truth.map((r) => r[0]), y: truth.map((r) => r[1]), slot: 0 },
-      { name: 'observations', type: 'scatter', x: obs.map((r) => r[0]), y: obs.map((r) => r[1]), muted: true },
-    ],
-    [truth, obs],
-  )
   const path = (rows: number[][]) => ({ x: rows.map((r) => r[0]), y: rows.map((r) => r[1]) })
+  const truePath = useMemo(() => path(truth), [truth])
+  const observed = useMemo(() => path(obs), [obs])
   // The filter's path: the updated estimates so far, ending at the prediction while it waits for y_t.
   const filterRows =
     phase === 'smooth' ? run.mean : [...run.mean.slice(0, t), phase === 'predict' ? run.pred[t] : run.mean[t]]
+  const filterPath = path(filterRows)
   const predicted = phase === 'smooth' ? NONE : ellipse(run.pred[t], positionCov(run.predCov, t))
   const updated = phase === 'update' ? ellipse(run.mean[t], positionCov(run.cov, t)) : NONE
   const smoothed = phase === 'smooth' ? path(run.smooth.slice(t)) : NONE
   const smoothedEllipse = phase === 'smooth' ? ellipse(run.smooth[t], positionCov(run.smoothCov, t)) : NONE
-  const live: XYSeries[] = [
-    { name: 'Kalman filter', type: 'line', slot: 1, ...path(filterRows) },
-    { name: 'Kalman filter', type: 'line', slot: 1, dashed: true, ...predicted },
-    { name: 'Kalman filter', type: 'line', slot: 1, ...updated },
-    { name: 'RTS smoother', type: 'line', slot: 2, ...smoothed },
-    { name: 'RTS smoother', type: 'line', slot: 2, ...smoothedEllipse },
-    { name: 'observations', type: 'scatter', emphasis: true, ...(phase === 'update' ? path([obs[t]]) : NONE) },
-  ]
+  const seen = phase === 'update' ? path([obs[t]]) : NONE
+  const xa = useAxis({ label: 'x', hold: 'initial', key: seed })
+  const ya = useAxis({ label: 'y', hold: 'initial', key: seed, equal: xa })
   const P = positionCov(phase === 'smooth' ? run.smoothCov : phase === 'update' ? run.cov : run.predCov, t)
   const nu = run.innovation[t]
   return (
     <Figure
       title="Kalman filter and RTS smoother"
-      description="The filter alternates a prediction from the motion model with an update from each observation; the smoother then runs back from the end and also uses the later observations, so its ellipses are smaller."
+      purpose="The filter alternates a prediction from the motion model with an update from each observation; the smoother then runs back from the end and also uses the later observations, so its ellipses are smaller."
+      state={state}
       defaultSize="L"
       controls={
         <>
-          <ControlRow label="1 · model">
-            <Slider label="log₁₀ process noise q" value={logQ} min={-4} max={0} step={0.25} onChange={setLogQ} />
-            <Slider label="log₁₀ observation noise r" value={logR} min={-1} max={1.5} step={0.25} onChange={setLogR} />
-            <Slider label="seed" value={seed} min={1} max={20} step={1} onChange={setSeed} />
-          </ControlRow>
           <ControlRow label="2 · steps">
             <Player
               value={position}
@@ -184,31 +162,38 @@ export function KalmanTrackingSpecimen() {
           </ControlRow>
         </>
       }
-      readouts={
-        <>
-          <Readout label="step" value={`${phase} at t = ${t + 1}`} />
-          <Readout label="position variance tr P" value={fmt(P[0][0] + P[1][1])} />
-          <Readout
-            label="innovation y_t − Cμ_{t|t−1}"
-            value={phase === 'update' ? `(${fmt(nu[0])}, ${fmt(nu[1])})` : '–'}
-          />
-          <Readout label="filter RMSE" value={fmt(rmse(run.mean))} />
-          <Readout label="smoother RMSE" value={fmt(rmse(run.smooth))} />
-          <Readout label="raw observation RMSE" value={fmt(rmse(obs))} />
-          <Readout label="log p(y)" value={fmt(run.filt.logLikelihood)} />
-        </>
-      }
+      readouts={{
+        'this step': (
+          <>
+            <Readout label="step" value={`${phase} at t = ${t + 1}`} />
+            <Readout label="position variance tr P" value={fmt(P[0][0] + P[1][1])} />
+            <Readout
+              label="innovation y_t − Cμ_{t|t−1}"
+              value={phase === 'update' ? `(${fmt(nu[0])}, ${fmt(nu[1])})` : '–'}
+            />
+          </>
+        ),
+        'whole run': (
+          <>
+            <Readout label="filter RMSE" value={fmt(rmse(run.mean))} />
+            <Readout label="smoother RMSE" value={fmt(rmse(run.smooth))} />
+            <Readout label="raw observation RMSE" value={fmt(rmse(obs))} />
+            <Readout label="log p(y)" value={fmt(run.filt.logLikelihood)} />
+          </>
+        ),
+      }}
       caption="A target moving with nearly constant velocity, observed with noise of variance r in each coordinate. Play or step: at each t the filter predicts the position from the motion model (dashed 2σ ellipse, which grows), then sees y_t (ink) and updates (solid ellipse, which shrinks). After t = 40 the RTS smoother runs back from the end; its ellipses are smallest in the middle of the track, where there are observations on both sides. With small q the filter trusts its motion model and smooths hard; with large q it follows the observations."
     >
-      <XYChart
-        series={series}
-        live={live}
-        xLabel="x"
-        yLabel="y"
-        aspect="equal"
-        axisKey={seed}
-        rescaleOnChange={false}
-      />
+      <Plot x={xa} y={ya}>
+        <Curve name="true path" x={truePath.x} y={truePath.y} slot={0} />
+        <Points name="observations" x={observed.x} y={observed.y} muted />
+        <Curve name="Kalman filter" x={filterPath.x} y={filterPath.y} slot={1} live />
+        <Curve name="predicted 2σ" x={predicted.x} y={predicted.y} slot={1} dashed live />
+        <Curve name="updated 2σ" x={updated.x} y={updated.y} slot={1} live />
+        <Curve name="RTS smoother" x={smoothed.x} y={smoothed.y} slot={2} live />
+        <Curve name="smoothed 2σ" x={smoothedEllipse.x} y={smoothedEllipse.y} slot={2} live />
+        <Points name="y_t" x={seen.x} y={seen.y} emphasis live />
+      </Plot>
     </Figure>
   )
 }
@@ -226,11 +211,19 @@ const CIRCLE = {
 }
 
 export function ArmaSpecimen() {
-  const [phi1, setPhi1] = useState(0.5)
-  const [phi2, setPhi2] = useState(0.3)
-  const [theta, setTheta] = useState(0)
-  const [seed, setSeed] = useState(2)
-  const [theory, setTheory] = useState(true)
+  const state = useFigureState({
+    model: row('1 · model', {
+      phi1: slider(-2, 2, 0.5, { label: 'φ₁', step: 0.01 }),
+      phi2: slider(-1, 1, 0.3, { label: 'φ₂', step: 0.01 }),
+      theta: slider(-0.95, 0.95, 0, { label: 'θ₁ (MA)', step: 0.05 }),
+    }),
+    sample: row('2 · sample and reveal', {
+      seed: number(2, { min: 1, max: 20, step: 1, label: 'seed' }),
+      theory: toggle(true, 'theoretical ACF'),
+    }),
+  })
+  const { phi1, phi2, theta } = state.model
+  const { seed, theory } = state.sample
   const lags = 24
   const n = 300
   const spec = useMemo(() => ({ ar: [phi1, phi2], ma: [theta] }), [phi1, phi2, theta])
@@ -258,49 +251,32 @@ export function ArmaSpecimen() {
     const pad = 0.05 * (hi - lo || 1)
     return [lo - pad, hi + pad]
   }, [xs])
-  const handles: Handle[] = [
-    {
-      kind: 'point',
-      at: [phi1, phi2],
-      label: '(φ₁, φ₂)',
-      onDrag: ([a, b]) => {
-        setPhi1(Math.max(-2, Math.min(2, Math.round(a * 100) / 100)))
-        setPhi2(Math.max(-1, Math.min(1, Math.round(b * 100) / 100)))
-      },
-    },
-  ]
   const band = frame ? frame.band : 0
-  const theorySeries = useMemo(
-    (): XYSeries[] =>
-      theory && stationary ? [{ name: 'theoretical ACF', type: 'line', x: lagX, y: rho.slice(1), slot: 2 }] : [],
-    [theory, stationary, rho, lagX],
-  )
-  const acfLive: XYSeries[] = [
-    { name: 'sample ACF', type: 'bar', x: frame ? lagX : [], y: frame ? frame.acf : [], slot: 0, thin: true },
-    { name: 'sample PACF', type: 'scatter', x: frame ? lagX : [], y: frame ? frame.pacf : [], slot: 1 },
-    { name: '±1.96/√t', type: 'line', x: [0.5, lags + 0.5], y: [band, band], muted: true, dashed: true },
-    { name: '±1.96/√t', type: 'line', x: [0.5, lags + 0.5], y: [-band, -band], muted: true, dashed: true },
-  ]
-  const seriesLive: XYSeries[] = [
-    { name: 'x', type: 'line', x: steps(t), y: xs.slice(0, t), slot: 0 },
-    { name: 'x', type: 'scatter', x: t ? [t] : [], y: t ? [xs[t - 1]] : [], slot: 0 },
-  ]
+  const parabola = useMemo(() => {
+    const u = steps(81, 0).map((i) => -2 + i / 20)
+    return { x: u, y: u.map((v) => -(v * v) / 4) }
+  }, [])
+  const arRoots = { x: flat(realPart(roots.ar.roots)), y: flat(imagPart(roots.ar.roots)) }
+  const maRoots = { x: flat(realPart(roots.ma.roots)), y: flat(imagPart(roots.ma.roots)) }
+  const seen = { x: steps(t), y: xs.slice(0, t) }
+  const last = t ? { x: [t], y: [xs[t - 1]] } : { x: [], y: [] }
+  const bandX = [0.5, lags + 0.5]
+  const phi1Axis = useAxis({ label: 'φ₁', range: [-2.2, 2.2] })
+  const phi2Axis = useAxis({ label: 'φ₂', range: [-1.2, 1.2] })
+  const re = useAxis({ label: 'Re z' })
+  const im = useAxis({ label: 'Im z', equal: re })
+  const time = useAxis({ label: 't', range: [0, n] })
+  const xAxis = useAxis({ label: 'x_t', range: yRange })
+  const lagAxis = useAxis({ label: 'lag', range: [0.5, lags + 0.5] })
+  const acfAxis = useAxis({ label: 'autocorrelation', range: [-1, 1] })
   return (
     <Figure
       title="ARMA processes and their autocorrelations"
-      description="Inside the triangle the AR(2) is stationary; its ACF decays and its PACF cuts off after lag 2."
+      purpose="Inside the triangle the AR(2) is stationary: both AR roots lie outside the unit circle, its ACF decays and its PACF cuts off after lag 2."
+      state={state}
       defaultSize="XL"
       controls={
         <>
-          <ControlRow label="1 · model">
-            <Slider label="φ₁" value={phi1} min={-2} max={2} step={0.01} onChange={setPhi1} />
-            <Slider label="φ₂" value={phi2} min={-1} max={1} step={0.01} onChange={setPhi2} />
-            <Slider label="θ₁ (MA)" value={theta} min={-0.95} max={0.95} step={0.05} onChange={setTheta} />
-          </ControlRow>
-          <ControlRow label="2 · sample and reveal">
-            <Slider label="seed" value={seed} min={1} max={20} step={1} onChange={setSeed} />
-            <Switch label="theoretical ACF" checked={theory} onChange={setTheory} />
-          </ControlRow>
           <ControlRow label="3 · time">
             <Player
               value={t}
@@ -323,66 +299,31 @@ export function ArmaSpecimen() {
           {sim.diverged && <Readout label="series overflowed at" value={`t = ${sim.divergedAt}`} />}
         </>
       }
-      caption="Drag the point in the (φ₁, φ₂) plane. The AR polynomial 1 − φ₁z − φ₂z² is stationary inside the triangle, where both its roots (right panel, circles) lie outside the unit circle; below the parabola φ₁² + 4φ₂ = 0 the roots are complex and the ACF oscillates. Outside the triangle the series is simulated without clipping and explodes, and no ACF is drawn. Play to watch the series unfold: the sample ACF and PACF (bottom right) are computed from the values so far, so they settle towards the theoretical ACF as t grows. Dashed lines are the ±1.96/√t white-noise band."
+      caption="Drag the point in the (φ₁, φ₂) plane (the shaded triangle is the stationary region). The AR polynomial 1 − φ₁z − φ₂z² is stationary inside the triangle, where both its roots (right panel, circles) lie outside the unit circle; below the parabola φ₁² + 4φ₂ = 0 the roots are complex and the ACF oscillates. Outside the triangle the series is simulated without clipping and explodes, and no ACF is drawn. Play to watch the series unfold: the sample ACF and PACF (bottom right) are computed from the values so far, so they settle towards the theoretical ACF as t grows. Dashed lines are the ±1.96/√t white-noise band."
     >
-      <Subplots rows={2} cols={2} heightRatios={[1, 1]}>
-        <Panel>
-          <XYChart
-            xLabel="φ₁"
-            yLabel="φ₂"
-            xRange={[-2.2, 2.2]}
-            yRange={[-1.2, 1.2]}
-            handles={handles}
-            series={[
-              { name: 'stationary region', type: 'line', x: TRIANGLE.x, y: TRIANGLE.y, muted: true },
-              {
-                name: 'complex roots below',
-                type: 'line',
-                x: steps(81, 0).map((i) => -2 + i / 20),
-                y: steps(81, 0).map((i) => -((-2 + i / 20) ** 2) / 4),
-                muted: true,
-                dashed: true,
-              },
-              { name: '(φ₁, φ₂)', type: 'scatter', x: [phi1], y: [phi2], emphasis: true },
-            ]}
-          />
-        </Panel>
-        <Panel>
-          <XYChart
-            aspect="equal"
-            xLabel="Re z"
-            yLabel="Im z"
-            series={[
-              { name: 'unit circle', type: 'line', x: CIRCLE.x, y: CIRCLE.y, muted: true },
-              { name: 'AR roots', type: 'scatter', x: flat(roots.ar.real), y: flat(roots.ar.imag), slot: 0 },
-              { name: 'MA roots', type: 'scatter', x: flat(roots.ma.real), y: flat(roots.ma.imag), slot: 1 },
-            ]}
-          />
-        </Panel>
-        <Panel>
-          <XYChart
-            xLabel="t"
-            yLabel="x_t"
-            xRange={[0, n]}
-            yRange={yRange}
-            series={NO_SERIES}
-            live={seriesLive}
-            legend={false}
-          />
-        </Panel>
-        <Panel>
-          <XYChart
-            xLabel="lag"
-            yLabel="autocorrelation"
-            integerX
-            xRange={[0.5, lags + 0.5]}
-            yRange={[-1, 1]}
-            series={theorySeries}
-            live={acfLive}
-            legend
-          />
-        </Panel>
-      </Subplots>
+      <Plots rows={2} cols={2}>
+        <Plot x={phi1Axis} y={phi2Axis}>
+          <Area name="stationary region" x={TRIANGLE.x} y={TRIANGLE.y} muted opacity={0.12} />
+          <Curve name="complex roots below" x={parabola.x} y={parabola.y} muted dashed />
+          <Handle {...state.handle(['model.phi1', 'model.phi2'], { label: '(φ₁, φ₂)' })} />
+        </Plot>
+        <Plot x={re} y={im}>
+          <Curve name="unit circle" x={CIRCLE.x} y={CIRCLE.y} muted />
+          <Points name="AR roots" x={arRoots.x} y={arRoots.y} slot={0} />
+          <Points name="MA roots" x={maRoots.x} y={maRoots.y} slot={1} />
+        </Plot>
+        <Plot x={time} y={xAxis} legend={false}>
+          <Curve name="x" x={seen.x} y={seen.y} slot={0} live />
+          <Points name="x_t" x={last.x} y={last.y} slot={0} live />
+        </Plot>
+        <Plot x={lagAxis} y={acfAxis}>
+          {theory && stationary && <Curve name="theoretical ACF" x={lagX} y={rho.slice(1)} slot={2} />}
+          <Bars name="sample ACF" x={frame ? lagX : []} y={frame ? frame.acf : []} slot={0} width={0.5} live />
+          <Points name="sample PACF" x={frame ? lagX : []} y={frame ? frame.pacf : []} slot={1} live />
+          <Curve name="±1.96/√t" x={bandX} y={[band, band]} muted dashed live />
+          <Curve name="±1.96/√t" x={bandX} y={[-band, -band]} muted dashed live />
+        </Plot>
+      </Plots>
     </Figure>
   )
 }
@@ -404,15 +345,24 @@ type Seasonality = 'additive' | 'multiplicative'
 
 /** Forecast origins from two seasons of data to the end. */
 const ORIGINS = steps(HW_N - 2 * PERIOD + 1, 2 * PERIOD)
-const HW_BACKGROUND: XYSeries[] = [{ name: 'data', type: 'line', x: steps(HW_N, 0), y: HW_DATA, muted: true }]
+const HW_T = steps(HW_N, 0)
 
 export function HoltWintersSpecimen() {
-  const [seasonal, setSeasonal] = useState<Seasonality>('multiplicative')
-  const [trend, setTrend] = useState<'additive' | 'damped'>('additive')
-  const [alpha, setAlpha] = useState(0.3)
-  const [beta, setBeta] = useState(0.1)
-  const [gamma, setGamma] = useState(0.2)
-  const [phi, setPhi] = useState(0.95)
+  const state = useFigureState({
+    structure: row('1 · structure', {
+      seasonal: choice(['multiplicative', 'additive'] as Seasonality[], 'multiplicative', { label: 'season' }),
+      trend: choice(['additive', 'damped'], 'additive', { label: 'trend' }),
+    }),
+    smoothing: row('2 · smoothing', {
+      alpha: slider(0.01, 1, 0.3, { label: 'α (level)', step: 0.01 }),
+      beta: slider(0, 1, 0.1, { label: 'β* (trend)', step: 0.01 }),
+      gamma: slider(0, 1, 0.2, { label: 'γ (season)', step: 0.01 }),
+      phi: slider(0.8, 1, 0.95, { label: 'φ (damping)', step: 0.005, when: (v) => v.trend === 'damped' }),
+    }),
+  })
+  const seasonal = state.structure.seasonal as Seasonality
+  const trend = state.structure.trend as 'additive' | 'damped'
+  const { alpha, beta, gamma, phi } = state.smoothing
   const spec = useMemo(
     () => ({ trend, seasonal, period: PERIOD, alpha, beta, gamma, phi }),
     [trend, seasonal, alpha, beta, gamma, phi],
@@ -431,34 +381,26 @@ export function HoltWintersSpecimen() {
   }, [fits])
   const fitBySse = () => {
     const best = run(exponentialSmoothingFitSteps(HW_DATA, { trend, seasonal, period: PERIOD }), undefined, 2000).params
-    setAlpha(best.alpha)
-    setBeta(best.beta ?? beta)
-    setGamma(best.gamma ?? gamma)
-    if (best.phi !== undefined) setPhi(best.phi)
+    state.set('smoothing.alpha', best.alpha)
+    state.set('smoothing.beta', best.beta ?? beta)
+    state.set('smoothing.gamma', best.gamma ?? gamma)
+    if (best.phi !== undefined) state.set('smoothing.phi', best.phi)
   }
   const future = steps(HW_H, origin)
+  const seenT = steps(origin, 0)
+  const ta = useAxis({ label: 't', range: [0, HW_N + HW_H] })
+  const ya = useAxis({ label: 'y', range: yRange })
   return (
     <Figure
       title="Holt–Winters forecasts"
-      description="Level, trend and season are updated by exponential smoothing; the forecast extends them with a widening interval."
+      purpose="Level, trend and season are updated by exponential smoothing; the forecast extends them with an interval that widens with the horizon."
+      state={state}
       defaultSize="L"
       controls={
         <>
-          <ControlRow label="1 · structure">
-            <Select label="season" value={seasonal} onChange={setSeasonal} options={['multiplicative', 'additive']} />
-            <Select label="trend" value={trend} onChange={setTrend} options={['additive', 'damped']} />
-          </ControlRow>
-          <ControlRow label="2 · smoothing">
-            <Slider label="α (level)" value={alpha} min={0.01} max={1} step={0.01} onChange={setAlpha} />
-            <Slider label="β* (trend)" value={beta} min={0} max={1} step={0.01} onChange={setBeta} />
-            <Slider label="γ (season)" value={gamma} min={0} max={1} step={0.01} onChange={setGamma} />
-            {trend === 'damped' && (
-              <Slider label="φ (damping)" value={phi} min={0.8} max={1} step={0.005} onChange={setPhi} />
-            )}
-            <Button variant="outline" size="sm" onClick={fitBySse}>
-              Fit by least squares
-            </Button>
-          </ControlRow>
+          <Button variant="outline" size="sm" onClick={fitBySse}>
+            Fit α, β*, γ by least squares
+          </Button>
           <ControlRow label="3 · forecast origin">
             <Player
               value={k}
@@ -480,31 +422,24 @@ export function HoltWintersSpecimen() {
           {fit.approximateIntervals && <Readout label="intervals" value="additive-error approximation" />}
         </>
       }
-      caption="A trending series whose seasonal swing grows with its level. The multiplicative model captures the growing swing; the additive one leaves it in the residuals, so its SSE is larger. The 95% interval widens with the horizon as the level, trend and season uncertainties accumulate. Play to move the forecast origin: the model sees only the data before it (the rest is grey), and the forecast from two seasons is poorer than from six. 'Fit by least squares' runs Nelder–Mead on the one-step SSE of the whole series."
+      caption="A trending series whose seasonal swing grows with its level. The multiplicative model captures the growing swing; the additive one leaves it in the residuals, so its SSE is larger. The 95% interval widens with the horizon as the level, trend and season uncertainties accumulate. Play to move the forecast origin: the model sees only the data before it (the rest is grey), and the forecast from two seasons is poorer than from six. 'Fit α, β*, γ by least squares' runs Nelder–Mead on the one-step SSE of the whole series."
     >
-      <XYChart
-        xLabel="t"
-        yLabel="y"
-        xRange={[0, HW_N + HW_H]}
-        yRange={yRange}
-        axisKey={`${seasonal}-${trend}`}
-        rescaleOnChange={false}
-        series={HW_BACKGROUND}
-        live={[
-          {
-            name: 'data seen',
-            type: 'line',
-            x: steps(origin, 0),
-            y: HW_DATA.slice(0, origin),
-            showPoints: true,
-            slot: 3,
-          },
-          { name: 'one-step forecasts', type: 'line', x: steps(origin, 0), y: flat(fit.fitted), slot: 0 },
-          { name: 'forecast', type: 'line', x: future, y: flat(fit.forecast), slot: 1 },
-          { name: '95% interval', type: 'line', x: future, y: flat(fit.upper), slot: 1, dashed: true },
-          { name: '95% interval', type: 'line', x: future, y: flat(fit.lower), slot: 1, dashed: true },
-        ]}
-      />
+      <Plot x={ta} y={ya}>
+        <Curve name="data" x={HW_T} y={HW_DATA} muted />
+        <Curve name="data seen" x={seenT} y={HW_DATA.slice(0, origin)} showPoints slot={3} live />
+        <Curve name="one-step forecasts" x={seenT} y={flat(fit.fitted)} slot={0} live />
+        <Area
+          name="95% interval"
+          x={future}
+          y={flat(fit.upper)}
+          base={flat(fit.lower)}
+          slot={1}
+          opacity={0.18}
+          line={false}
+          live
+        />
+        <Curve name="forecast" x={future} y={flat(fit.forecast)} slot={1} live />
+      </Plot>
     </Figure>
   )
 }
@@ -517,9 +452,14 @@ const GARCH_EVERY = 10
 const GARCH_MIN = 40
 
 export function GarchSpecimen() {
-  const [persistence, setPersistence] = useState(0.97)
-  const [alpha, setAlpha] = useState(0.1)
-  const [seed, setSeed] = useState(3)
+  const state = useFigureState({
+    model: row('1 · model', {
+      persistence: slider(0, 0.995, 0.97, { label: 'persistence α + β', step: 0.005 }),
+      alpha: slider(0, 0.3, 0.1, { label: 'α (reaction)', step: 0.01 }),
+      seed: number(3, { min: 1, max: 30, step: 1, label: 'seed' }),
+    }),
+  })
+  const { persistence, alpha, seed } = state.model
   const a = Math.min(alpha, persistence)
   const spec = useMemo(() => ({ omega: 1 - persistence, alpha: a, beta: persistence - a }), [persistence, a])
   const n = 1000
@@ -563,42 +503,20 @@ export function GarchSpecimen() {
   const m4 = seen.reduce((s, v) => s + v ** 4, 0) / Math.max(1, t)
   const lagX = steps(30)
   const x = steps(t)
-  const returnsLive: XYSeries[] = [
-    { name: 'returns', type: 'line', x, y: seen, slot: 0, thin: true },
-    { name: '±2σ_t', type: 'line', x, y: sd.slice(0, t).map((v) => 2 * v), slot: 1 },
-    { name: '±2σ_t', type: 'line', x, y: sd.slice(0, t).map((v) => -2 * v), slot: 1 },
-  ]
-  const acfLive: XYSeries[] = [
-    { name: 'ACF of r', type: 'bar', x: frame ? lagX : [], y: frame ? frame.acf : [], slot: 0, thin: true },
-    { name: 'ACF of r²', type: 'line', x: frame ? lagX : [], y: frame ? frame.acf2 : [], slot: 1, showPoints: true },
-    {
-      name: '±1.96/√t',
-      type: 'line',
-      x: [0.5, 30.5],
-      y: frame ? [frame.band, frame.band] : [],
-      muted: true,
-      dashed: true,
-    },
-  ]
+  const upper = sd.slice(0, t).map((v) => 2 * v)
+  const lower = upper.map((v) => -v)
+  const ta = useAxis({ label: 't', range: [0, n] })
+  const ra = useAxis({ label: 'r_t', range: rRange })
+  const lagAxis = useAxis({ label: 'lag', range: [0.5, 30.5] })
+  const acfAxis = useAxis({ label: 'ACF', range: acfRange })
   return (
     <Figure
       title="GARCH(1,1) volatility clustering"
-      description="Returns are uncorrelated, but their squares are not: large moves cluster, and the tails are heavier than normal."
+      purpose="Returns are uncorrelated, but their squares are not: large moves cluster, and the tails are heavier than normal."
+      state={state}
       defaultSize="L"
       controls={
         <>
-          <ControlRow label="1 · model">
-            <Slider
-              label="persistence α + β"
-              value={persistence}
-              min={0}
-              max={0.995}
-              step={0.005}
-              onChange={setPersistence}
-            />
-            <Slider label="α (reaction)" value={alpha} min={0} max={0.3} step={0.01} onChange={setAlpha} />
-            <Slider label="seed" value={seed} min={1} max={30} step={1} onChange={setSeed} />
-          </ControlRow>
           <ControlRow label="2 · time">
             <Player
               value={t}
@@ -621,31 +539,18 @@ export function GarchSpecimen() {
       }
       caption="ω = 1 − (α + β) keeps the unconditional variance at 1. The top panel shows returns with ±2σ_t; the bottom compares the autocorrelations of r_t (near zero) and r_t² (slowly decaying, at a rate set by the persistence). With α = 0 the variance is constant and both ACFs vanish. Play to watch the series unfold: the ACFs are computed from the returns so far (from 40 values), so the slow decay of the ACF of r² emerges as calm and turbulent stretches accumulate."
     >
-      <Subplots rows={2} heightRatios={[3, 2]}>
-        <Panel>
-          <XYChart
-            xLabel="t"
-            yLabel="r_t"
-            xRange={[0, n]}
-            yRange={rRange}
-            series={NO_SERIES}
-            live={returnsLive}
-            legend
-          />
-        </Panel>
-        <Panel>
-          <XYChart
-            xLabel="lag"
-            yLabel="ACF"
-            integerX
-            xRange={[0.5, 30.5]}
-            yRange={acfRange}
-            series={NO_SERIES}
-            live={acfLive}
-            legend
-          />
-        </Panel>
-      </Subplots>
+      <Plots rows={2} heights={[3, 2]}>
+        <Plot x={ta} y={ra}>
+          <Curve name="returns" x={x} y={seen} slot={0} thin live />
+          <Curve name="±2σ_t" x={x} y={upper} slot={1} live />
+          <Curve name="±2σ_t" x={x} y={lower} slot={1} live />
+        </Plot>
+        <Plot x={lagAxis} y={acfAxis}>
+          <Bars name="ACF of r" x={frame ? lagX : []} y={frame ? frame.acf : []} slot={0} width={0.5} live />
+          <Curve name="ACF of r²" x={frame ? lagX : []} y={frame ? frame.acf2 : []} slot={1} showPoints live />
+          <Curve name="±1.96/√t" x={[0.5, 30.5]} y={frame ? [frame.band, frame.band] : []} muted dashed live />
+        </Plot>
+      </Plots>
     </Figure>
   )
 }
@@ -656,8 +561,12 @@ export function GarchSpecimen() {
 const EM_TRUTH = { A: 0.95, C: 1, Q: 0.2, R: 1, m0: 0, P0: 1 }
 const EM_Y = simulateStateSpace(stream('em'), EM_TRUTH, 200).observations
 
+const EM_YS = flat(EM_Y)
+const EM_T = steps(EM_YS.length)
+
 export function EmSpecimen() {
-  const [a0, setA0] = useState(0.3)
+  const state = useFigureState({ a0: slider(-0.9, 0.99, 0.3, { label: 'starting A', step: 0.01 }) })
+  const { a0 } = state
   const t = useMemo(
     () =>
       trace(stateSpaceEm(EM_Y, { A: a0, C: 1, Q: 1, R: 3, m0: 0, P0: 1 }, { estimate: { C: false } }), undefined, 150, {
@@ -670,32 +579,30 @@ export function EmSpecimen() {
       }),
     [a0],
   )
-  const y = flat(EM_Y)
+  const ta = useAxis({ label: 't' })
+  const ya = useAxis({ label: 'y, E[z_t | y]', hold: 'initial' })
   return (
-    <TraceView
+    <Figure
       title="EM for a state-space model"
-      description="Each EM step smooths with the current model and re-estimates A, Q and R from the smoothed moments; the likelihood never falls."
-      trace={t}
-      show={['log p(y)', 'A', 'Q', 'R']}
-      startAtFirst
+      purpose="Each EM step smooths with the current model and re-estimates A, Q and R from the smoothed moments; the likelihood never falls."
+      state={state}
       defaultSize="L"
-      controls={<Slider label="starting A" value={a0} min={-0.9} max={0.99} step={0.01} onChange={setA0} />}
       caption={`200 observations of an AR(1) state (A = ${EM_TRUTH.A}, Q = ${EM_TRUTH.Q}) seen through noise of variance R = ${EM_TRUTH.R}, with C fixed at 1 (otherwise the scale of the state is not identified). Scrub the steps: the smoothed state under the current model tightens around the data as A rises towards its maximum-likelihood value.`}
-      renderState={(s) => {
-        const sm = rtsSmoother(s.current, EM_Y)
-        return (
-          <XYChart
-            xLabel="t"
-            yLabel="y, E[z_t | y]"
-            rescaleOnChange={false}
-            series={[
-              { name: 'observations', type: 'scatter', x: steps(y.length), y, muted: true },
-              { name: 'smoothed state', type: 'line', x: steps(y.length), y: flat(sm.mean), slot: 0 },
-            ]}
-          />
-        )
-      }}
-    />
+    >
+      <TracePanel
+        trace={t}
+        show={['log p(y)', 'A', 'Q', 'R']}
+        renderState={(s) => {
+          const sm = rtsSmoother(s.current, EM_Y)
+          return (
+            <Plot x={ta} y={ya}>
+              <Points name="observations" x={EM_T} y={EM_YS} muted thin />
+              <Curve name="smoothed state" x={EM_T} y={flat(sm.mean)} slot={0} />
+            </Plot>
+          )
+        }}
+      />
+    </Figure>
   )
 }
 
@@ -709,42 +616,33 @@ const STL_DATA = (() => {
 })()
 
 export function StlSpecimen() {
-  const [span, setSpan] = useState(7)
+  const state = useFigureState({ span: slider(7, 51, 7, { label: 'seasonal span (odd)', step: 2 }) })
+  const { span } = state
   const d = useMemo(() => stl(STL_DATA, 12, { seasonalSpan: span }), [span])
   const x = steps(STL_N, 0)
+  const ta = useAxis({ label: 't' })
+  const ya = useAxis({ label: 'y, trend' })
+  const sa = useAxis({ label: 'seasonal', hold: 'union' })
+  const ra = useAxis({ label: 'remainder', hold: 'union' })
   return (
     <Figure
       title="Seasonal-trend decomposition by loess"
-      description="STL splits a series into a smooth trend, a seasonal pattern that may drift, and a remainder."
-      controls={<Slider label="seasonal span (odd)" value={span} min={7} max={51} step={2} onChange={setSpan} />}
+      purpose="STL splits a series into a smooth trend, a seasonal pattern that may drift, and a remainder; the seasonal span sets how fast the pattern may drift."
+      state={state}
       caption="A slow wave plus a period-12 season plus noise. A short seasonal span lets the seasonal pattern change from year to year and absorb some noise; a long span forces it towards one fixed pattern."
     >
-      <Subplots rows={3} sharex hoverGroup>
-        <Panel>
-          <XYChart
-            xLabel="t"
-            yLabel="y, trend"
-            series={[
-              { name: 'y', type: 'line', x, y: STL_DATA, muted: true },
-              { name: 'trend', type: 'line', x, y: flat(d.trend), slot: 0 },
-            ]}
-          />
-        </Panel>
-        <Panel>
-          <XYChart
-            xLabel="t"
-            yLabel="seasonal"
-            series={[{ name: 'seasonal', type: 'line', x, y: flat(d.seasonal), slot: 1 }]}
-          />
-        </Panel>
-        <Panel>
-          <XYChart
-            xLabel="t"
-            yLabel="remainder"
-            series={[{ name: 'remainder', type: 'bar', x, y: flat(d.remainder), slot: 2 }]}
-          />
-        </Panel>
-      </Subplots>
+      <Plots rows={3} hoverGroup>
+        <Plot x={ta} y={ya}>
+          <Curve name="y" x={x} y={STL_DATA} muted />
+          <Curve name="trend" x={x} y={flat(d.trend)} slot={0} />
+        </Plot>
+        <Plot x={ta} y={sa}>
+          <Curve name="seasonal" x={x} y={flat(d.seasonal)} slot={1} />
+        </Plot>
+        <Plot x={ta} y={ra}>
+          <Bars name="remainder" x={x} y={flat(d.remainder)} slot={2} />
+        </Plot>
+      </Plots>
     </Figure>
   )
 }

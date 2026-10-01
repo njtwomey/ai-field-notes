@@ -5,6 +5,7 @@
  * Flows", §9.7). Both are traceable.
  */
 
+import { DomainError, ShapeError } from 'aifn/foundation/errors'
 import type { Tensor } from 'aifn/foundation/tensor'
 import type { Status } from 'aifn/foundation/contracts'
 import { run, type Algorithm } from 'aifn/foundation/trace'
@@ -52,9 +53,10 @@ export interface EdmondsKarpState extends Status {
 /** The init and step of `edmondsKarpSteps` on the whole problem; `t` is added by the factory. */
 const edmondsKarp = {
   init: ({ graph, source, sink }: MaxFlowOptions & { graph: Graph }): Omit<EdmondsKarpState, 't'> => {
-    if (source === sink) throw new Error('edmondsKarp: source and sink must differ')
+    if (source === sink) throw new ShapeError('edmondsKarp', 'edmondsKarp: source and sink must differ')
     const arcs = directedArcs(graph)
-    if (arcs.some((a) => a.weight < 0)) throw new Error('edmondsKarp: capacities must be non-negative')
+    if (arcs.some((a) => a.weight < 0))
+      throw new DomainError('edmondsKarp', 'edmondsKarp: capacities must be non-negative')
     const residual: number[][] = Array.from({ length: graph.nodes }, () => [])
     arcs.forEach((a, k) => {
       residual[a.from].push(k)
@@ -233,8 +235,9 @@ const successiveShortestPaths = {
   init: (network: FlowNetwork): Omit<MinCostFlowState, 't'> => {
     const V = network.nodes
     const total = network.supply.reduce((a, b) => a + b, 0)
-    if (network.supply.length !== V) throw new Error('minCostFlow: supply must have one entry per node')
-    if (Math.abs(total) > 1e-9) throw new Error('minCostFlow: supplies must sum to zero')
+    if (network.supply.length !== V)
+      throw new ShapeError('minCostFlow', 'minCostFlow: supply must have one entry per node')
+    if (Math.abs(total) > 1e-9) throw new DomainError('minCostFlow', 'minCostFlow: supplies must sum to zero')
     // Potentials: shortest distances from a virtual root over arcs with capacity (Bellman–Ford handles negative costs).
     const pi = new Float64Array(V)
     for (let pass = 0; pass < V; pass++)

@@ -3,9 +3,10 @@ import { fromEdges, heapSorted, type Graph } from 'aifn/graph'
 import { stream, uniform } from 'aifn/foundation/random'
 import { trace, type Trace } from 'aifn/foundation/trace'
 import { useMemo, useState } from 'react'
-import { Player, Slider } from '@lab/controls'
-import { Columns, Figure } from '@lab/layout'
-import { ChartSize, Heatmap, Readout } from '@lab/viz'
+import { Player } from '@lab/controls'
+import { Figure } from '@lab/layout'
+import { row, slider, useFigureState } from '@lab/state'
+import { Plot, Plots, Raster, Readout, useAxis } from '@lab/viz'
 import { Sequence } from '../_shared/common'
 import { stateAt } from '../_shared/data'
 
@@ -53,24 +54,6 @@ function grid(walls: boolean[], s: DijkstraState): number[][] {
   return YS.map((i) => code.slice((H - 1 - i) * W, (H - i) * W))
 }
 
-function Panel({ walls, s, name }: { walls: boolean[]; s: DijkstraState; name: string }) {
-  const z = useMemo(() => grid(walls, s), [walls, s])
-  return (
-    <ChartSize scale={0.8}>
-      <Heatmap
-        x={XS}
-        y={YS}
-        z={z}
-        scale="categorical"
-        categoryNames={CATEGORIES}
-        valueLabel={name}
-        equalAspect
-        zoom={false}
-      />
-    </ChartSize>
-  )
-}
-
 function queueItems(s: DijkstraState): string[] {
   return liveQueue(s)
     .slice(0, 5)
@@ -78,8 +61,13 @@ function queueItems(s: DijkstraState): string[] {
 }
 
 export function MazeSpecimen() {
-  const [seed, setSeed] = useState(3)
-  const [density, setDensity] = useState(0.28)
+  const state = useFigureState({
+    maze: row('1 · maze', {
+      seed: slider(1, 30, 3, { step: 1, label: 'maze' }),
+      density: slider(0.1, 0.4, 0.28, { step: 0.02, label: 'wall density' }),
+    }),
+  })
+  const { seed, density } = state.maze
   const { walls, graph } = useMemo(() => maze(seed, density), [seed, density])
   const traces = useMemo((): [Trace<DijkstraState>, Trace<DijkstraState>] => {
     const n = 4 * H * W
@@ -89,32 +77,46 @@ export function MazeSpecimen() {
     ]
   }, [graph])
   const count = Math.max(traces[0].steps.length, traces[1].steps.length)
-  const [step, setStep] = useState(count - 1)
+  const [step, setStep] = useState(0)
   const at = Math.min(step, count - 1)
   const d = stateAt(traces[0], at)
   const a = stateAt(traces[1], at)
+  const zd = useMemo(() => grid(walls, d), [walls, d])
+  const za = useMemo(() => grid(walls, a), [walls, a])
   const length = (s: DijkstraState) => (s.done ? s.distance.data[TARGET] : NaN)
+  const x = useAxis({ label: 'column', zoom: false })
+  const y = useAxis({ label: 'row', equal: x, zoom: false })
+  const x2 = useAxis({ label: 'column', zoom: false })
+  const y2 = useAxis({ label: 'row', equal: x2, zoom: false })
 
   return (
     <Figure
       title="Dijkstra against A* on a grid maze"
-      defaultSize="L"
+      purpose="A* adds an admissible estimate of the distance left to Dijkstra's priority, so it expands fewer cells and still finds a shortest path."
+      defaultSize="M"
       hoverReadout={false}
+      state={state}
       controls={
-        <>
-          <Slider label="maze" value={seed} onChange={setSeed} min={1} max={30} step={1} />
-          <Slider label="wall density" value={density} onChange={setDensity} min={0.1} max={0.4} step={0.02} />
-          <div className="col-span-full">
-            <Player label="expansion" value={at} onChange={setStep} count={count} defaultSpeed={12} />
-          </div>
-        </>
+        <div className="col-span-full">
+          <Player label="2 · expansion" value={at} onChange={setStep} count={count} defaultSpeed={12} />
+        </div>
       }
-      readouts={
-        <>
-          <Readout label="Dijkstra expanded" value={d.expanded} />
-          <Readout label="A* expanded" value={a.expanded} />
+      readouts={{
+        Dijkstra: (
+          <>
+            <Readout label="expanded" value={d.expanded} />
+            <Sequence label="queue" ends="least first" items={queueItems(d)} />
+          </>
+        ),
+        'A*': (
+          <>
+            <Readout label="expanded" value={a.expanded} />
+            <Sequence label="queue" ends="least first" items={queueItems(a)} />
+          </>
+        ),
+        'shortest path': (
           <Readout
-            label="shortest path"
+            label="length"
             value={
               !a.done
                 ? '…'
@@ -123,24 +125,18 @@ export function MazeSpecimen() {
                   : 'no path'
             }
           />
-        </>
-      }
-      caption="From the top-left cell to the bottom-right, moving in four directions at unit cost. Each step pops the queued cell of least priority and expands it: Dijkstra's priority is the distance so far, A*'s adds the Manhattan distance to the goal, which never overestimates. Both find a shortest path (shown once done); A* expands fewer cells. Below each grid, the front of its priority queue as (row,col) priority."
+        ),
+      }}
+      caption="From the top-left cell to the bottom-right, moving in four directions at unit cost. Each step pops the queued cell of least priority and expands it: Dijkstra's priority is the distance so far g, A*'s adds the Manhattan distance h to the goal, which never overestimates. Play to watch Dijkstra flood outwards while A* heads for the corner; both find a path of the same length (shown once done). The queues list their front entries as (row,col) priority."
     >
-      <Columns
-        panels={[
-          {
-            title: 'Dijkstra: priority g',
-            body: <Panel walls={walls} s={d} name="Dijkstra" />,
-            footer: <Sequence label="queue" ends="least first" items={queueItems(d)} />,
-          },
-          {
-            title: 'A*: priority g + Manhattan h',
-            body: <Panel walls={walls} s={a} name="A*" />,
-            footer: <Sequence label="queue" ends="least first" items={queueItems(a)} />,
-          },
-        ]}
-      />
+      <Plots cols={2}>
+        <Plot x={x} y={y} title="Dijkstra: priority g" bare>
+          <Raster x={XS} y={YS} z={zd} scale="categorical" categoryNames={CATEGORIES} valueLabel="Dijkstra" />
+        </Plot>
+        <Plot x={x2} y={y2} title="A*: priority g + Manhattan h" bare>
+          <Raster x={XS} y={YS} z={za} scale="categorical" categoryNames={CATEGORIES} valueLabel="A*" />
+        </Plot>
+      </Plots>
     </Figure>
   )
 }

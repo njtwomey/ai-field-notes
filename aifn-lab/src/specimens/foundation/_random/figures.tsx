@@ -14,18 +14,17 @@ import * as R from 'aifn/probability/samplers'
 import * as Random from 'aifn/foundation/random'
 import { correlation } from 'aifn/probability/stats'
 import { fromRows, toFlat, toRows } from 'aifn/foundation/tensor'
-import { useMemo, useState } from 'react'
-import { Select, Slider } from '@lab/controls'
+import { useMemo } from 'react'
 import { Figure } from '@lab/layout'
-import { Heatmap, Readout, XYChart, type XYSeries } from '@lab/viz'
-import { SamplesView } from '@lab/views'
+import { choice, row, slider, useFigureState, variants } from '@lab/state'
+import { Curve, Plot, Points, Raster, Readout, useAxis } from '@lab/viz'
+import { SamplesPanel } from '@lab/views'
 
 const SIZES = [
-  { value: '500', label: '500' },
-  { value: '5000', label: '5 000' },
-  { value: '50000', label: '50 000' },
+  { value: 500, label: '500' },
+  { value: 5000, label: '5 000' },
+  { value: 50000, label: '50 000' },
 ] as const
-type Size = (typeof SIZES)[number]['value']
 
 /** A sampler from aifn/random and the distribution (from aifn/distributions) its draws should follow. */
 type Continuous = {
@@ -57,97 +56,98 @@ const CONTINUOUS = {
 } satisfies Record<string, Continuous>
 type ContinuousName = keyof typeof CONTINUOUS
 
+const CONTINUOUS_NAMES = (Object.keys(CONTINUOUS) as ContinuousName[]).map((value) => ({
+  value,
+  label: CONTINUOUS[value].label,
+}))
+
 export function ContinuousSamplersSpecimen() {
-  const [name, setName] = useState<ContinuousName>('gammaSmall')
-  const [size, setSize] = useState<Size>('5000')
-  const [seed, setSeed] = useState(0)
+  const state = useFigureState({
+    name: choice(CONTINUOUS_NAMES, 'gammaSmall', { label: 'sampler' }),
+    size: choice(SIZES, 5000, { label: 'draws' }),
+    seed: slider(0, 50, 0, { step: 1, label: 'seed' }),
+  })
+  const { name, size, seed } = state
   const d: Continuous = CONTINUOUS[name]
   const samples = useMemo(() => {
     const s = Random.child(Random.stream(seed), 'samplers', name)
-    return Float64Array.from({ length: Number(size) }, () => d.draw(s))
+    return Float64Array.from({ length: size }, () => d.draw(s))
   }, [d, name, size, seed])
   const { density, cdf } = useMemo(
     () => ({ density: (x: number) => d.distribution.prob(x), cdf: (x: number) => d.distribution.cdf(x) }),
     [d],
   )
   return (
-    <SamplesView
-      title={`${d.label} draws against the density`}
-      controls={
-        <>
-          <Select
-            label="sampler"
-            value={name}
-            onChange={setName}
-            options={(Object.keys(CONTINUOUS) as ContinuousName[]).map((value) => ({
-              value,
-              label: CONTINUOUS[value].label,
-            }))}
-          />
-          <Select label="draws" value={size} onChange={setSize} options={SIZES} />
-          <Slider label="seed" value={seed} min={0} max={50} step={1} onChange={setSeed} />
-        </>
-      }
-      samples={samples}
-      density={density}
-      cdf={cdf}
-      range={d.range}
-      reference={{ mean: d.distribution.mean(), variance: d.distribution.variance() }}
-    />
+    <Figure
+      title="Draws against the density"
+      purpose="Each sampler's histogram matches its exact density, and the Kolmogorov–Smirnov distance shrinks like 1/√n as the draws grow."
+      description={`${d.label}: ${size} draws from aifn/random, under the density from aifn/distributions.`}
+      state={state}
+      caption="gamma(0.5) is the hard case: Marsaglia–Tsang needs shape ≥ 1, so a shape below 1 draws gamma(shape + 1) and multiplies by U^(1/shape); the density's pole at 0 is matched. Raise the draws to 50 000 and the KS distance falls by about √10."
+    >
+      <SamplesPanel
+        samples={samples}
+        density={density}
+        cdf={cdf}
+        range={d.range}
+        reference={{ mean: d.distribution.mean(), variance: d.distribution.variance() }}
+      />
+    </Figure>
   )
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
 
 export function DiscreteSamplersSpecimen() {
-  const [kind, setKind] = useState<'poisson' | 'binomial'>('poisson')
-  const [lambda, setLambda] = useState(12)
-  const [n, setN] = useState(40)
-  const [p, setP] = useState(0.3)
-  const [seed, setSeed] = useState(0)
+  const state = useFigureState({
+    sampler: variants(
+      {
+        poisson: {
+          label: 'Poisson',
+          params: { lambda: slider(0.2, 80, 12, { label: 'λ (inversion below 10, PTRS above)' }) },
+        },
+        binomial: {
+          label: 'binomial',
+          params: { n: slider(1, 400, 40, { step: 1, label: 'n' }), p: slider(0.01, 0.99, 0.3, { label: 'p' }) },
+        },
+      },
+      { label: '1 · sampler', choiceLabel: 'sampler' },
+    ),
+    seed: slider(0, 50, 0, { step: 1, label: 'seed' }),
+  })
+  const { sampler, seed } = state
   const samples = useMemo(() => {
-    const s = Random.child(Random.stream(seed), 'discrete', kind)
-    return Float64Array.from({ length: 5000 }, () => (kind === 'poisson' ? R.poisson(s, lambda) : R.binomial(s, n, p)))
-  }, [kind, lambda, n, p, seed])
-  const distribution = useMemo(() => (kind === 'poisson' ? Poisson(lambda) : Binomial(n, p)), [kind, lambda, n, p])
+    const s = Random.child(Random.stream(seed), 'discrete', sampler.key)
+    return Float64Array.from({ length: 5000 }, () =>
+      sampler.key === 'poisson'
+        ? R.poisson(s, sampler.values.lambda)
+        : R.binomial(s, sampler.values.n, sampler.values.p),
+    )
+  }, [sampler, seed])
+  const distribution = useMemo(
+    () => (sampler.key === 'poisson' ? Poisson(sampler.values.lambda) : Binomial(sampler.values.n, sampler.values.p)),
+    [sampler],
+  )
   const pmf = useMemo(() => (k: number) => distribution.prob(k), [distribution])
+  const title =
+    sampler.key === 'poisson'
+      ? `Poisson(${sampler.values.lambda}) draws`
+      : `binomial(${sampler.values.n}, ${sampler.values.p}) draws`
   return (
-    <SamplesView
-      kind="discrete"
-      title={kind === 'poisson' ? `Poisson(${lambda}) draws` : `binomial(${n}, ${p}) draws`}
-      controls={
-        <>
-          <Select
-            label="sampler"
-            value={kind}
-            onChange={setKind}
-            options={[
-              { value: 'poisson', label: 'Poisson' },
-              { value: 'binomial', label: 'binomial' },
-            ]}
-          />
-          {kind === 'poisson' ? (
-            <Slider
-              label="λ (inversion below 10, PTRS above)"
-              value={lambda}
-              min={0.2}
-              max={80}
-
-              onChange={setLambda}
-            />
-          ) : (
-            <>
-              <Slider label="n" value={n} min={1} max={400} step={1} onChange={setN} />
-              <Slider label="p" value={p} min={0.01} max={0.99} onChange={setP} />
-            </>
-          )}
-          <Slider label="seed" value={seed} min={0} max={50} step={1} onChange={setSeed} />
-        </>
-      }
-      samples={samples}
-      pmf={pmf}
-      reference={{ mean: distribution.mean(), variance: distribution.variance() }}
-    />
+    <Figure
+      title="Poisson and binomial draws against the mass function"
+      purpose="Relative frequencies of 5 000 integer draws match the mass function, whichever algorithm the parameters select."
+      description={title}
+      state={state}
+      caption="Poisson uses inversion (walking up the cdf) below λ = 10, where few steps are needed, and the PTRS rejection sampler above; drag λ across 10 and the frequencies stay on the mass function. Binomial uses inversion for small n·min(p, 1 − p) and the beta order-statistic recursion otherwise."
+    >
+      <SamplesPanel
+        kind="discrete"
+        samples={samples}
+        pmf={pmf}
+        reference={{ mean: distribution.mean(), variance: distribution.variance() }}
+      />
+    </Figure>
   )
 }
 
@@ -168,9 +168,20 @@ function namedStreams(seed: number): Random.Stream[] {
   ]
 }
 
+const PAIRS = [
+  { value: 'parent-child', label: 's vs s/0' },
+  { value: 'siblings', label: 's/0 vs s/1' },
+  { value: 'lag', label: 'successive draws' },
+] as const
+const STREAM_INDEX = STREAM_LABELS.map((_, i) => i)
+
 export function StreamIndependenceSpecimen() {
-  const [seed, setSeed] = useState(0)
-  const [pair, setPair] = useState<'parent-child' | 'siblings' | 'lag'>('siblings')
+  const pairState = useFigureState({
+    pair: choice(PAIRS, 'siblings', { label: 'pairs' }),
+    seed: slider(0, 50, 0, { step: 1, label: 'seed' }),
+  })
+  const corrState = useFigureState({ seed: slider(0, 50, 0, { step: 1, label: 'seed' }) })
+  const { pair, seed } = pairState
   const n = 4000
   const { x, y } = useMemo(() => {
     const s = Random.stream(seed)
@@ -184,51 +195,38 @@ export function StreamIndependenceSpecimen() {
     }
     return { x: xs, y: ys }
   }, [seed, pair])
+  const cseed = corrState.seed
   const correlations = useMemo(() => {
-    const draws = namedStreams(seed).map((t) => Float64Array.from({ length: 20000 }, () => Random.uniform(t)))
+    const draws = namedStreams(cseed).map((t) => Float64Array.from({ length: 20000 }, () => Random.uniform(t)))
     return draws.map((a) => draws.map((b) => correlation(a, b)))
-  }, [seed])
+  }, [cseed])
   const unchanged = useMemo(() => {
-    const before = Random.child(Random.stream(seed), 'chain', 1)
+    const before = Random.child(Random.stream(cseed), 'chain', 1)
     const first = [Random.uniform(before), Random.uniform(before)]
-    const parent = Random.stream(seed)
-    for (let i = 0; i < 10_000; i++) Random.randomBits(parent, 1)[0]
+    const parent = Random.stream(cseed)
+    for (let i = 0; i < 10_000; i++) Random.randomBits(parent, 1)
     const after = Random.child(parent, 'chain', 1)
     return first[0] === Random.uniform(after) && first[1] === Random.uniform(after)
-  }, [seed])
-  const idx = useMemo(() => STREAM_LABELS.map((_, i) => i), [])
+  }, [cseed])
   let worst = 0
-  correlations.forEach((row, i) => row.forEach((r, j) => i !== j && (worst = Math.max(worst, Math.abs(r)))))
+  correlations.forEach((r, i) => r.forEach((v, j) => i !== j && (worst = Math.max(worst, Math.abs(v)))))
+  const cx = useAxis({ label: 'stream', categories: STREAM_LABELS })
+  const cy = useAxis({ label: 'stream', categories: STREAM_LABELS })
   return (
     <>
-      <SamplesView
-        kind="scatter"
+      <Figure
         title="Pairs of uniforms"
-        controls={
-          <>
-            <Select
-              label="pairs"
-              value={pair}
-              onChange={setPair}
-              options={[
-                { value: 'parent-child', label: 's vs s/0' },
-                { value: 'siblings', label: 's/0 vs s/1' },
-                { value: 'lag', label: 'successive draws' },
-              ]}
-            />
-            <Slider label="seed" value={seed} min={0} max={50} step={1} onChange={setSeed} />
-          </>
-        }
-        x={x}
-        y={y}
-        xRange={[0, 1]}
-        yRange={[0, 1]}
-        xLabel="first"
-        yLabel="second"
-      />
+        purpose="Two streams derived from one seed, or successive draws of one stream, give pairs that fill the unit square evenly: no pattern links them."
+        state={pairState}
+        caption="4 000 pairs. A parent and its child, two siblings and lag-one pairs all look alike: the counter-based generator hashes each stream's key, so related names give unrelated numbers."
+      >
+        <SamplesPanel kind="scatter" x={x} y={y} xRange={[0, 1]} yRange={[0, 1]} xLabel="first" yLabel="second" />
+      </Figure>
       <Figure
         title="Correlations between six streams"
-        description={`Streams ${STREAM_LABELS.map((l, i) => `${i}: ${l}`).join(', ')}; 20 000 uniforms each, seed ${seed}.`}
+        purpose="Streams named apart are uncorrelated: every off-diagonal correlation is within sampling noise of zero, about 1/√n."
+        description="20 000 uniforms from each stream; s is stream(seed), s/k its child k."
+        state={corrState}
         readouts={
           <>
             <Readout label="largest |correlation| between distinct streams" value={worst.toFixed(4)} />
@@ -236,17 +234,18 @@ export function StreamIndependenceSpecimen() {
             <Readout label="s/chain:1 unchanged after the parent draws 10 000 words" value={unchanged ? 'yes' : 'NO'} />
           </>
         }
+        caption="The colour scale ends at ±0.05, so the diagonal (1) is saturated and anything visible off it would be a real dependence; the cells are pale. A child's numbers do not depend on how far its parent has drawn."
       >
-        <Heatmap
-          x={idx}
-          y={idx}
-          z={correlations}
-          scale="diverging"
-          range={[-0.05, 0.05]}
-          xLabel="stream"
-          yLabel="stream"
-          valueLabel="correlation"
-        />
+        <Plot x={cx} y={cy}>
+          <Raster
+            x={STREAM_INDEX}
+            y={STREAM_INDEX}
+            z={correlations}
+            scale="diverging"
+            range={[-0.05, 0.05]}
+            valueLabel="correlation"
+          />
+        </Plot>
       </Figure>
     </>
   )
@@ -254,55 +253,60 @@ export function StreamIndependenceSpecimen() {
 
 // ---------------------------------------------------------------------------------------------------------------------
 
-const TRIANGLE: XYSeries = {
-  name: 'simplex',
-  type: 'line',
-  x: [0, 1, 0.5, 0],
-  y: [0, 0, Math.sqrt(3) / 2, 0],
-  muted: true,
-}
+const TRIANGLE_X = [0, 1, 0.5, 0]
+const TRIANGLE_Y = [0, 0, Math.sqrt(3) / 2, 0]
+/** Barycentric coordinates: corners (0, 0), (1, 0) and (½, √3/2) for components 1, 2 and 3. */
+const bary = (q: readonly number[]): [number, number] => [q[1] + q[2] / 2, (q[2] * Math.sqrt(3)) / 2]
 
 export function DirichletSpecimen() {
-  const [a1, setA1] = useState(0.4)
-  const [a2, setA2] = useState(2)
-  const [a3, setA3] = useState(5)
+  const state = useFigureState({
+    alpha: row('concentrations α', {
+      a1: slider(0.02, 10, 0.4, { label: 'α₁ (bottom left)' }),
+      a2: slider(0.02, 10, 2, { label: 'α₂ (bottom right)' }),
+      a3: slider(0.02, 10, 5, { label: 'α₃ (top)' }),
+    }),
+  })
+  const { a1, a2, a3 } = state.alpha
   const { x, y } = useMemo(() => {
     const s = Random.child(Random.stream('dirichlet'), a1, a2, a3)
     // 3000 draws in one call: a [3000, 3] tensor, row i the i-th draw.
     const p = toRows(R.dirichlet(s, [a1, a2, a3], { shape: [3000] }))
-    // Barycentric coordinates: corners (0, 0), (1, 0) and (½, √3/2) for components 1, 2 and 3.
-    const xs = p.map((q) => q[1] + q[2] / 2)
-    const ys = p.map((q) => (q[2] * Math.sqrt(3)) / 2)
-    return { x: xs, y: ys }
+    const xy = p.map(bary)
+    return { x: xy.map((q) => q[0]), y: xy.map((q) => q[1]) }
   }, [a1, a2, a3])
-  const overlay = useMemo(() => [TRIANGLE], [])
+  const total = a1 + a2 + a3
+  const mean = bary([a1 / total, a2 / total, a3 / total])
+  const xa = useAxis({ label: 'barycentric x', range: [-0.05, 1.05] })
+  const ya = useAxis({ label: 'barycentric y', range: [-0.05, 0.92], equal: xa })
   return (
-    <SamplesView
-      kind="scatter"
+    <Figure
       title="Dirichlet(α) draws on the simplex"
-      controls={
-        <>
-          <Slider label="α₁ (bottom left)" value={a1} min={0.02} max={10} onChange={setA1} />
-          <Slider label="α₂ (bottom right)" value={a2} min={0.02} max={10} onChange={setA2} />
-          <Slider label="α₃ (top)" value={a3} min={0.02} max={10} onChange={setA3} />
-        </>
-      }
-      x={x}
-      y={y}
-      overlay={overlay}
-      xRange={[-0.05, 1.05]}
-      yRange={[-0.05, 0.92]}
-    />
+      purpose="Each draw is a probability vector, a point in the triangle; concentrations below 1 push draws to the edges and corners, large ones pull them to the mean α/Σα."
+      state={state}
+      readouts={<Readout label="mean α/Σα" value={`(${[a1, a2, a3].map((a) => (a / total).toFixed(3)).join(', ')})`} />}
+      caption="3 000 draws. With α₁ = 0.4 many draws hug the edge opposite corner 1 (component 1 near 0) or the corner itself. Set all three to 1 for the uniform distribution on the triangle; raise them together and the cloud tightens about the mean."
+    >
+      <Plot x={xa} y={ya}>
+        <Curve name="simplex" x={TRIANGLE_X} y={TRIANGLE_Y} muted silent />
+        <Points name="draws" x={x} y={y} thin size={3} />
+        <Points name="mean α/Σα" x={[mean[0]]} y={[mean[1]]} emphasis size={10} />
+      </Plot>
+    </Figure>
   )
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
 
 export function MultivariateNormalSpecimen() {
-  const [s1, setS1] = useState(1.5)
-  const [s2, setS2] = useState(0.7)
-  const [rho, setRho] = useState(0.6)
-  const { x, y, overlay } = useMemo(() => {
+  const state = useFigureState({
+    cov: row('covariance', {
+      s1: slider(0.2, 2.5, 1.5, { label: 'σ₁' }),
+      s2: slider(0.2, 2.5, 0.7, { label: 'σ₂' }),
+      rho: slider(-0.99, 0.99, 0.6, { label: 'ρ' }),
+    }),
+  })
+  const { s1, s2, rho } = state.cov
+  const { x, y, ex, ey, L } = useMemo(() => {
     const covariance = fromRows([
       [s1 * s1, rho * s1 * s2],
       [rho * s1 * s2, s2 * s2],
@@ -310,38 +314,36 @@ export function MultivariateNormalSpecimen() {
     // The same factor the sampler uses: L with covariance = L Lᵀ.
     const L = toRows(cholesky(covariance).L)
     // 3000 draws in one call, factoring the covariance with aifn/linalg's cholesky.
-    const draws = R.multivariateNormal(Random.stream('mvn'), [0, 0], { covariance }, { shape: [3000] })
-    const rows = toRows(draws)
-    const xs = rows.map((r) => r[0])
-    const ys = rows.map((r) => r[1])
+    const rows = toRows(R.multivariateNormal(Random.stream('mvn'), [0, 0], { covariance }, { shape: [3000] }))
     // The 2σ ellipse: L applied to a circle of radius 2.
     const t = Array.from({ length: 121 }, (_, i) => (2 * Math.PI * i) / 120)
-    const ellipse: XYSeries = {
-      name: '2σ ellipse (L · circle)',
-      type: 'line',
-      x: t.map((a) => 2 * L[0][0] * Math.cos(a)),
-      y: t.map((a) => 2 * (L[1][0] * Math.cos(a) + L[1][1] * Math.sin(a))),
-      emphasis: true,
+    return {
+      x: rows.map((r) => r[0]),
+      y: rows.map((r) => r[1]),
+      ex: t.map((a) => 2 * L[0][0] * Math.cos(a)),
+      ey: t.map((a) => 2 * (L[1][0] * Math.cos(a) + L[1][1] * Math.sin(a))),
+      L,
     }
-    return { x: xs, y: ys, overlay: [ellipse] }
   }, [s1, s2, rho])
+  const xa = useAxis({ label: 'x₁', range: [-6, 6] })
+  const ya = useAxis({ label: 'x₂', range: [-6, 6], equal: xa })
   return (
-    <SamplesView
-      kind="scatter"
+    <Figure
       title="Draws with the 2σ ellipse"
-      controls={
+      purpose="μ + L z turns independent standard normals z into draws with covariance L Lᵀ: the Cholesky factor maps the radius-2 circle onto the 2σ ellipse."
+      state={state}
+      readouts={
         <>
-          <Slider label="σ₁" value={s1} min={0.2} max={2.5} onChange={setS1} />
-          <Slider label="σ₂" value={s2} min={0.2} max={2.5} onChange={setS2} />
-          <Slider label="ρ" value={rho} min={-0.99} max={0.99} onChange={setRho} />
+          <Readout label="L" value={`[[${L[0][0].toFixed(3)}, 0], [${L[1][0].toFixed(3)}, ${L[1][1].toFixed(3)}]]`} />
         </>
       }
-      x={x}
-      y={y}
-      overlay={overlay}
-      xRange={[-6, 6]}
-      yRange={[-6, 6]}
-    />
+      caption="3 000 draws with mean 0. The ellipse is L applied to the circle of radius 2, so it holds the same share of the draws as the circle holds of standard normal pairs: 1 − e⁻² ≈ 86.5%."
+    >
+      <Plot x={xa} y={ya}>
+        <Points name="draws" x={x} y={y} thin size={3} />
+        <Curve name="2σ ellipse (L · circle)" x={ex} y={ey} emphasis />
+      </Plot>
+    </Figure>
   )
 }
 
@@ -357,31 +359,36 @@ function walk(s: Random.Stream): number[] {
   for (let i = 0; i < STEPS; i++) path.push(path[i] + z[i])
   return path
 }
+const WALK_STEPS = Array.from({ length: STEPS + 1 }, (_, i) => i)
 
 export function ReplicateSpecimen() {
-  const [n, setN] = useState(5)
+  const state = useFigureState({ n: slider(1, 60, 5, { step: 1, label: 'replicates' }) })
+  const n = state.n
   const { paths, computed } = useMemo(() => {
     const before = walkCalls
     const out = Random.replicate(n, Random.stream('walks'), walk)
     return { paths: out, computed: walkCalls - before }
   }, [n])
-  const steps = useMemo(() => Array.from({ length: STEPS + 1 }, (_, i) => i), [])
-  const series = useMemo(
-    (): XYSeries[] => paths.map((y) => ({ name: 'walks', type: 'line', x: steps, y, thin: true, slot: 0 })),
-    [paths, steps],
-  )
+  const x = useAxis({ label: 'step' })
+  const y = useAxis({ label: 'position', hold: 'union' })
   return (
     <Figure
       title="Gaussian random walks"
-      controls={<Slider label="replicates" value={n} min={1} max={60} step={1} onChange={setN} />}
+      purpose="Walk k always draws from child(stream('walks'), k), so adding replicates computes only the new walks and never changes the old ones."
+      state={state}
       readouts={
         <>
           <Readout label="walks computed on this change" value={computed} />
           <Readout label="walk k uses" value="child(stream('walks'), k)" />
         </>
       }
+      caption="Raise the replicates: the drawn walks stay where they were and 'walks computed' counts only the new ones. Lower it and raise it again: the cache returns the same walks without computing any."
     >
-      <XYChart series={series} xLabel="step" yLabel="position" />
+      <Plot x={x} y={y} legend={false}>
+        {paths.map((p, k) => (
+          <Curve key={k} name="walks" x={WALK_STEPS} y={p} thin slot={0} silent />
+        ))}
+      </Plot>
     </Figure>
   )
 }

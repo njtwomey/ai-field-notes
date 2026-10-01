@@ -5,3 +5,4 @@
 
 export { trainingLoop, type Batch, type TrainingOptions, type TrainingState } from './train'
 export { activations, inspect, type Activations, type Inspection } from './inspect'
+export { trainingAlgorithms } from './registry'

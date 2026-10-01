@@ -87,6 +87,7 @@ export function SpanningTreeSpecimen() {
 
   return (
     <Figure
+      purpose="Kruskal merges a forest by taking edges lightest first; Prim grows one tree by its lightest leaving edge. Both reach the same minimum weight."
       title="Kruskal against Prim"
       defaultSize="L"
       hoverReadout={false}

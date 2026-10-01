@@ -8,7 +8,7 @@
 import { child, uniform, type Stream } from 'aifn/foundation/random'
 import { fromData, isTensor, toFlat, type Tensor, type Vector } from 'aifn/foundation/tensor'
 import type { Scalar, Size, Status, VectorLike } from 'aifn/foundation/contracts'
-import { ShapeError } from 'aifn/foundation/errors'
+import { DomainError, ShapeError } from 'aifn/foundation/errors'
 import type { Algorithm } from 'aifn/foundation/trace'
 import { gaussLegendre, type QuadratureRule } from './gauss'
 
@@ -44,7 +44,8 @@ export function productRule(ruleX: QuadratureRule, ruleY: QuadratureRule): { poi
 
 /** Equal-panel Newton–Cotes rules as nodes and weights, for product rules. */
 function newtonCotesRule(kind: 'trapezoid' | 'simpson', n: number, a: number, b: number): QuadratureRule {
-  if (kind === 'simpson' && n % 2 !== 0) throw new Error('integrate2d: Simpson needs an even number of panels')
+  if (kind === 'simpson' && n % 2 !== 0)
+    throw new DomainError('integrate2d', 'integrate2d: Simpson needs an even number of panels')
   const h = (b - a) / n
   const nodes = Float64Array.from({ length: n + 1 }, (_, i) => a + i * h)
   const weights = Float64Array.from({ length: n + 1 }, (_, i) => {
@@ -205,7 +206,7 @@ function radicalInverse(i: number, b: number): number {
  * so it matches scipy's `qmc.Halton(d, scramble=False)`.
  */
 export function halton(n: Size, d: Size, { skip = 0 }: { skip?: Size } = {}): Tensor {
-  if (d > PRIMES.length) throw new Error(`halton: at most ${PRIMES.length} dimensions`)
+  if (d > PRIMES.length) throw new ShapeError('halton', `halton: at most ${PRIMES.length} dimensions`)
   const out = new Float64Array(n * d)
   for (let i = 0; i < n; i++) for (let j = 0; j < d; j++) out[i * d + j] = radicalInverse(i + skip, PRIMES[j])
   return fromData(out, [n, d])
@@ -266,7 +267,7 @@ function directions(dim: number): Uint32Array {
  * `qmc.Sobol(d, scramble=False)`. Balance properties hold for n a power of 2.
  */
 export function sobol(n: Size, d: Size, { skip = 0 }: { skip?: Size } = {}): Tensor {
-  if (d > SOBOL_POLY.length + 1) throw new Error(`sobol: at most ${SOBOL_POLY.length + 1} dimensions`)
+  if (d > SOBOL_POLY.length + 1) throw new ShapeError('sobol', `sobol: at most ${SOBOL_POLY.length + 1} dimensions`)
   const V = Array.from({ length: d }, (_, j) => directions(j))
   const out = new Float64Array(n * d)
   const X = new Uint32Array(d)
@@ -299,11 +300,7 @@ export function quasiMonteCarlo(
   f: MultivariateIntegrand,
   lo: VectorLike,
   hi: VectorLike,
-  {
-    n = 1024,
-    sequence = 'sobol',
-    replicates = 8,
-  }: { n?: Size; sequence?: 'sobol' | 'halton'; replicates?: Size } = {},
+  { n = 1024, sequence = 'sobol', replicates = 8 }: { n?: Size; sequence?: 'sobol' | 'halton'; replicates?: Size } = {},
 ): MonteCarloResult {
   const l = flat(lo, 'quasiMonteCarlo')
   const h = flat(hi, 'quasiMonteCarlo')

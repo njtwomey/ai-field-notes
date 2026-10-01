@@ -1,8 +1,9 @@
 /**
  * `aifn-applied/learning/kernel-methods`: kernel methods: support vector machines (SMO, Pegasos, dual coordinate
- * descent, linear SVM) and the Crammer–Singer multiclass SVM.
+ * descent, linear SVM), Platt scaling of their scores into probabilities, and the Crammer–Singer multiclass SVM.
  */
 
+export { plattScaling, type PlattOptions, type PlattScaling } from './platt'
 export {
   dualCoordinateSteps,
   dualDecision,

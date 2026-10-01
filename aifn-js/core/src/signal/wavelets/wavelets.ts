@@ -6,7 +6,7 @@
  */
 
 import { dense, fromData, type Tensor } from 'aifn/foundation/tensor'
-import { complexOf, nextPowerOfTwo, transformInPlace, type ComplexTensor } from 'aifn/foundation/fourier'
+import { fft, ifft, nextPowerOfTwo } from 'aifn/foundation/fourier'
 import type { Scalar, Signal, Size, TimeFrequency, VectorLike } from 'aifn/foundation/contracts'
 import { complexValues, readSamples, signal, timeFrequency, type SignalInput } from '../signal'
 
@@ -211,14 +211,15 @@ export function wavefun(wavelet: WaveletName = 'db2', iterations: Size = 8): { t
 }
 
 /** The Morlet wavelet ψ(t) = π^{−1/4} e^{iω₀t} e^{−t²/2} (without the small admissibility correction). */
-export function morlet(t: VectorLike, { omega0 = 6 }: { omega0?: Scalar } = {}): ComplexTensor {
+export function morlet(t: VectorLike, { omega0 = 6 }: { omega0?: Scalar } = {}): Tensor {
   const ts = dense.toF64(t, 'morlet')
   const k = Math.PI ** -0.25
-  return complexOf(
-    ts.map((v) => k * Math.cos(omega0 * v) * Math.exp((-v * v) / 2)),
-    ts.map((v) => k * Math.sin(omega0 * v) * Math.exp((-v * v) / 2)),
-    [ts.length],
-  )
+  const out = new Float64Array(2 * ts.length)
+  ts.forEach((v, i) => {
+    out[2 * i] = k * Math.cos(omega0 * v) * Math.exp((-v * v) / 2)
+    out[2 * i + 1] = k * Math.sin(omega0 * v) * Math.exp((-v * v) / 2)
+  })
+  return fromData(out, [ts.length], 'complex128')
 }
 
 /** True when the values are evenly spaced on a log scale (and not also evenly spaced linearly). */
@@ -233,7 +234,7 @@ function geometric(f: ArrayLike<number>): boolean {
 /**
  * A continuous wavelet transform: a `TimeFrequency` raster (`method: 'cwt'`; `frequencyScale` 'log' for geometric
  * frequencies) whose values are
- * the complex coefficients W(a, b) [f, t, 2] (the interim complex layout), with the scalogram's magnitude |W| and the
+ * the complex coefficients W(a, b), complex128 [f, t], with the scalogram's magnitude |W| and the
  * scales.
  */
 export type Cwt = TimeFrequency & {
@@ -256,16 +257,13 @@ export function cwt(x: SignalInput, frequencies: VectorLike, options: { fs?: Sca
   const freqs = dense.toF64(frequencies, 'cwt')
   const n = v.length
   const size = nextPowerOfTwo(2 * n)
-  const xr = new Float64Array(size)
-  const xi = new Float64Array(size)
-  xr.set(v)
-  transformInPlace(xr, xi)
+  const X = fft(fromData(Float64Array.from(v)), { n: size }).data as Float64Array
   const outRe = new Float64Array(freqs.length * n)
   const outIm = new Float64Array(freqs.length * n)
   const mag = new Float64Array(freqs.length * n)
   const scales = new Float64Array(freqs.length)
-  const re = new Float64Array(size)
-  const im = new Float64Array(size)
+  // Row r of `filtered` is the signal's spectrum times the Morlet's at scale a_r; one inverse FFT along the rows.
+  const filtered = new Float64Array(2 * freqs.length * size)
   freqs.forEach((f, row) => {
     const a = omega0 / (2 * Math.PI * f)
     scales[row] = a
@@ -273,17 +271,23 @@ export function cwt(x: SignalInput, frequencies: VectorLike, options: { fs?: Sca
       const w = (2 * Math.PI * fs * (k <= size / 2 ? k : k - size)) / size
       const psiHat = w > 0 ? Math.PI ** -0.25 * Math.sqrt(2 * Math.PI) * Math.exp(-0.5 * (a * w - omega0) ** 2) : 0
       const gain = Math.sqrt(a) * psiHat
-      re[k] = xr[k] * gain
-      im[k] = xi[k] * gain
-    }
-    transformInPlace(re, im, true)
-    const norm = size * Math.sqrt(fs)
-    for (let i = 0; i < n; i++) {
-      outRe[row * n + i] = re[i] / norm
-      outIm[row * n + i] = im[i] / norm
-      mag[row * n + i] = Math.hypot(re[i], im[i]) / norm
+      const p = 2 * (row * size + k)
+      filtered[p] = X[2 * k] * gain
+      filtered[p + 1] = X[2 * k + 1] * gain
     }
   })
+  if (freqs.length > 0) {
+    const W = ifft(fromData(filtered, [freqs.length, size], 'complex128')).data as Float64Array
+    const norm = Math.sqrt(fs)
+    for (let row = 0; row < freqs.length; row++)
+      for (let i = 0; i < n; i++) {
+        const re = W[2 * (row * size + i)]
+        const im = W[2 * (row * size + i) + 1]
+        outRe[row * n + i] = re / norm
+        outIm[row * n + i] = im / norm
+        mag[row * n + i] = Math.hypot(re, im) / norm
+      }
+  }
   return {
     ...timeFrequency({
       t: fromData(

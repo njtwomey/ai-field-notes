@@ -1,27 +1,37 @@
 /**
  * `aifn/inference/filtering`: state-space filtering: linear-Gaussian models, simulation, the Kalman filter, the
- * Rauch–Tung–Striebel smoother, the steady-state filter, and the extended and unscented Kalman filters.
+ * Rauch–Tung–Striebel smoother (both also as step-through algorithms), the steady-state filter, the extended and unscented Kalman filters, and Bayesian online
+ * changepoint detection (the run-length filter over conjugate segment models).
  */
 
 export {
   kalmanFilter,
+  kalmanFilterSteps,
+  normalisedEstimationErrorSquared,
+  normalisedInnovationSquared,
   rtsSmoother,
+  rtsSmootherSteps,
   simulateStateSpace,
   steadyStateKalman,
   type KalmanFilterResult,
+  type KalmanFilterState,
+  type RtsSmootherState,
   type SmootherResult,
   type StateSpaceModel,
 } from './kalman'
-// The working form the filter, smoother and EM (`aifn-applied/timeseries`) share: plain rows of numbers.
+// The steps the batch functions, the algorithms and EM (`aifn-applied/timeseries`) share, on tensors.
 export {
-  filterArrays,
-  modelTensors,
+  filterAll,
+  kalmanStep,
   packFilter,
   parseModel,
-  smootherArrays,
-  type FilterArrays,
+  rtsStep,
+  smoothAll,
+  type FilterRun,
+  type KalmanStep,
   type Model,
-  type SmootherArrays,
+  type SmootherStep,
+  type SmootherRun,
 } from './kalman'
 export {
   extendedKalmanFilter,
@@ -29,3 +39,29 @@ export {
   type NonlinearStateSpaceModel,
   type UnscentedOptions,
 } from './nonlinear'
+export {
+  betaBernoulli,
+  bocpd,
+  bocpdForecast,
+  bocpdInit,
+  bocpdPredictiveDensity,
+  bocpdUpdate,
+  constantHazard,
+  detectChangepoints,
+  laggedObservations,
+  mapChangepoints,
+  normalGamma,
+  normalKnownVariance,
+  poissonGamma,
+  regressionNormalGamma,
+  runLengthMass,
+  runLengthRow,
+  type BocpdOptions,
+  type BocpdState,
+  type ChangepointDetection,
+  type ConjugatePredictive,
+  type Hazard,
+  type Regressed,
+  type RunStats,
+} from './changepoint'
+export { filteringAlgorithms } from './registry'

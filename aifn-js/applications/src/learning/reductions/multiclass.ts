@@ -33,6 +33,8 @@ import { dataset } from 'aifn/learning/estimators'
 import { sigmoid } from 'aifn/numerics/special'
 import { classLabels, classPredictive, matrix, softmaxRows, values } from '../util'
 import { child, integers, uniform } from 'aifn/foundation/random'
+import { defineModel } from 'aifn/learning/estimators'
+import { oneOf, space } from 'aifn/foundation/space'
 
 /** A fitted binary model with a real-valued margin. */
 export type BinaryModel = { score?(x: Tensor): Tensor; forward?(x: Tensor): Tensor; predictive?(x: Tensor): unknown }
@@ -519,3 +521,67 @@ export function softmaxScores(scores: Tensor): Tensor {
   const [m, K] = scores.shape
   return fromData(softmaxRows(values(scores), m, K), [m, K])
 }
+
+// ── Registry ─────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+defineModel(
+  {
+    key: 'oneVersusRest',
+    module: 'learning/reductions',
+    name: 'One versus rest',
+    summary:
+      'K binary problems, each class against the rest; a predictive when the binary base has one. Capabilities declared for a logistic-regression base.',
+    task: 'classification',
+    capabilities: ['forward', 'decide', 'predictive', 'score'],
+    hyper: space({}),
+    notes: ['one-versus-rest'],
+    cite: ['allwein2000reducing'],
+  },
+  oneVersusRest,
+)
+
+defineModel(
+  {
+    key: 'oneVersusOne',
+    module: 'learning/reductions',
+    name: 'One versus one',
+    summary: 'K(K−1)/2 pairwise binary problems combined by voting.',
+    task: 'classification',
+    capabilities: ['forward', 'decide', 'score'],
+    hyper: space({}),
+    notes: ['one-versus-one'],
+    cite: ['hastie1998pairwise'],
+  },
+  oneVersusOne,
+)
+
+defineModel(
+  {
+    key: 'outputCode',
+    module: 'learning/reductions',
+    name: 'Error-correcting output codes',
+    summary:
+      'One binary problem per column of a code matrix, decoded by Hamming or loss distance; the code is a required argument.',
+    task: 'classification',
+    capabilities: ['forward', 'decide', 'score'],
+    hyper: space({ decoding: oneOf(['hamming', 'loss']) }),
+    notes: ['error-correcting-output-codes'],
+    cite: ['dietterich1995ecoc'],
+  },
+  outputCode,
+)
+
+defineModel(
+  {
+    key: 'nestedDichotomies',
+    module: 'learning/reductions',
+    name: 'Nested dichotomies',
+    summary: 'A binary tree of class splits whose branch probabilities multiply to class probabilities.',
+    task: 'classification',
+    capabilities: ['forward', 'decide', 'predictive', 'score'],
+    hyper: space({}),
+    notes: ['nested-dichotomies-and-tree-reductions'],
+    cite: ['frank2004nested'],
+  },
+  nestedDichotomies,
+)

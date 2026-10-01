@@ -27,10 +27,10 @@ function exactScheme(
   options: SdeOptions,
   update: (x: Scalar, t: Scalar, h: Scalar, dW: Scalar) => Scalar,
 ): Algorithm<SdeInitial, SdeState> {
-  return scheme(name, { drift: () => 0, diffusion: () => 0 }, options, (_p, t, x, hk, dW) => ({
-    next: Float64Array.from(dense.data(x), (v, i) => update(v, t, hk, dW[i])),
-    evaluations: 0,
-  }))
+  return scheme(name, { drift: () => 0, diffusion: () => 0 }, options, (_p, t, x, hk, dW) => {
+    const w = dense.data(dW)
+    return { next: Float64Array.from(dense.data(x), (v, i) => update(v, t, hk, w[i])), evaluations: 0 }
+  })
 }
 
 /** Standard Brownian motion scaled by σ: dX = σ dW, with X_t ~ N(x₀, σ²t). */

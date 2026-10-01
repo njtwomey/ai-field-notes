@@ -3,10 +3,11 @@ import { toFlat } from 'aifn/foundation/tensor'
 import { trace } from 'aifn/foundation/trace'
 import { mapTree, pathToRoot } from 'aifn/graph'
 import { useContext, useMemo, useState, type ReactNode } from 'react'
-import { Player, Select, Slider } from '@lab/controls'
+import { Player } from '@lab/controls'
 import type { ElementState } from '@lab/diagram'
-import { Figure } from '@lab/layout'
-import { DEFAULT_HEIGHT, FrameContext, Readout, XYChart, type XYSeries } from '@lab/viz'
+import { ControlRow, Figure } from '@lab/layout'
+import { choice, row, slider, useFigureState } from '@lab/state'
+import { Bars, Curve, DEFAULT_HEIGHT, FrameContext, Plot, Points, Readout, useAxis } from '@lab/viz'
 import { formatValue, TreeView } from '@lab/views'
 
 // ── Huffman ──────────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -26,10 +27,20 @@ type HuffmanLayout = 'code length' | 'merge order'
 
 /** The Huffman tree with its merges stepped through and a codeword path highlighted. */
 function HuffmanTreeFigure() {
-  const [k, setK] = useState(8)
-  const [s, setS] = useState(1)
-  const [layout, setLayout] = useState<HuffmanLayout>('code length')
-  const [chosen, setChosen] = useState('c')
+  const figure = useFigureState({
+    source: row('1 · source', {
+      k: slider(2, SYMBOLS.length, 8, { label: 'symbols K', step: 1 }),
+      s: slider(0, 3, 1, { label: 'Zipf exponent s' }),
+    }),
+    view: row('2 · view', {
+      layout: choice(['code length', 'merge order'] as HuffmanLayout[], 'code length', { label: 'layout' }),
+      chosen: choice(SYMBOLS.split(''), 'c', { label: 'codeword of' }),
+    }),
+  })
+  const { k, s } = figure.source
+  const layout = figure.view.layout as HuffmanLayout
+  const chosen = figure.view.chosen
+  const setChosen = (c: string) => figure.set('view.chosen', c)
   const [hovered, setHovered] = useState<number | null>(null)
   const probs = useMemo(() => zipf(k, s), [k, s])
   const run = useMemo(() => trace(Coding.huffmanSteps(probs), undefined, k), [probs, k])
@@ -38,9 +49,9 @@ function HuffmanTreeFigure() {
   const code = useMemo(() => Coding.huffmanCode(probs), [probs])
   // Merge order as a height: leaves at 0, the node made by merge m at m, so the tree grows upwards step by step.
   const byMerge = useMemo(() => mapTree(tree, (n) => ({ ...n, height: n.id < k ? 0 : n.id - k + 1 })), [tree, k])
-  const [step, setStep] = useState<number | null>(null)
+  const [step, setStep] = useState(0)
   const last = run.steps.length - 1
-  const at = Math.min(step ?? last, last)
+  const at = Math.min(step, last)
   const state = run.steps[at]
   const symbol = hovered ?? Math.max(0, Math.min(SYMBOLS.indexOf(chosen), k - 1))
   const path = useMemo(() => pathToRoot(tree, symbol), [tree, symbol])
@@ -61,29 +72,14 @@ function HuffmanTreeFigure() {
   return (
     <Figure
       title="Huffman's algorithm builds the code tree"
-      description="Each step takes the two least probable nodes off the queue and joins them under a new node whose probability is their sum; the first gets bit 0, the second bit 1. A symbol's codeword is the path from the root to its leaf."
+      purpose="Each step takes the two least probable nodes off the queue and joins them under a new node whose probability is their sum; a symbol's codeword is the path from the root to its leaf."
+      state={figure}
       defaultSize="L"
       hoverReadout={false}
       controls={
-        <>
-          <Slider label="symbols K" value={k} min={2} max={SYMBOLS.length} step={1} onChange={setK} />
-          <Slider label="Zipf exponent s" value={s} min={0} max={3} onChange={setS} />
-          <Select
-            label="layout"
-            value={layout}
-            onChange={setLayout}
-            options={['code length', 'merge order'] as HuffmanLayout[]}
-          />
-          <Select
-            label="codeword of"
-            value={SYMBOLS[Math.min(SYMBOLS.indexOf(chosen), k - 1)]}
-            onChange={setChosen}
-            options={SYMBOLS.slice(0, k).split('')}
-          />
-          <div className="col-span-full">
-            <Player label="merges" value={at} onChange={setStep} count={run.steps.length} defaultSpeed={1.5} />
-          </div>
-        </>
+        <ControlRow label="3 · merges">
+          <Player label="merges" value={at} onChange={setStep} count={run.steps.length} defaultSpeed={1.5} />
+        </ControlRow>
       }
       readouts={
         <>
@@ -148,37 +144,31 @@ function HuffmanBody({ children, footer }: { children: ReactNode; footer: ReactN
 
 /** Codeword lengths of the Huffman and Shannon–Fano codes against the ideal −log₂ p. */
 function HuffmanLengthsFigure() {
-  const [k, setK] = useState(12)
-  const [s, setS] = useState(1.2)
+  const figure = useFigureState({
+    k: slider(2, 24, 12, { label: 'symbols K', step: 1 }),
+    s: slider(0, 3, 1.2, { label: 'Zipf exponent s' }),
+  })
+  const { k, s } = figure
   const probs = useMemo(() => zipf(k, s), [k, s])
   const huffman = useMemo(() => Coding.huffmanCode(probs), [probs])
   const fano = useMemo(() => Coding.shannonFanoCode(probs), [probs])
   const shannon = useMemo(() => Coding.shannonCode(probs), [probs])
   const lengths = useMemo(
-    (): XYSeries[] => [
-      {
-        name: '−log₂ pₖ',
-        type: 'line',
-        x: probs.map((_, i) => i),
-        y: probs.map((p) => -Math.log2(p)),
-        slot: 2,
-        dashed: true,
-      },
-      { name: 'Huffman length', type: 'bar', x: probs.map((_, i) => i), y: toFlat(huffman.lengths), slot: 0 },
-      { name: 'Shannon–Fano length', type: 'scatter', x: probs.map((_, i) => i), y: toFlat(fano.lengths), slot: 1 },
-    ],
+    () => ({
+      x: probs.map((_, i) => i),
+      ideal: probs.map((p) => -Math.log2(p)),
+      huffman: toFlat(huffman.lengths),
+      fano: toFlat(fano.lengths),
+    }),
     [probs, huffman, fano],
   )
+  const ka = useAxis({ label: 'symbol k', categories: SYMBOLS.slice(0, k).split('') })
+  const ba = useAxis({ label: 'bits', hold: 'union', key: k })
   return (
     <Figure
       title="Codeword lengths against the ideal"
-      description="An optimal code gives symbol k about −log₂ pₖ bits; Huffman lengths are whole numbers near it, so H ≤ E[ℓ] < H + 1."
-      controls={
-        <>
-          <Slider label="symbols K" value={k} min={2} max={24} step={1} onChange={setK} />
-          <Slider label="Zipf exponent s" value={s} min={0} max={3} onChange={setS} />
-        </>
-      }
+      purpose="An optimal code gives symbol k about −log₂ pₖ bits; Huffman lengths are whole numbers near it, so H ≤ E[ℓ] < H + 1."
+      state={figure}
       readouts={
         <>
           <Readout label="entropy H (bits)" value={formatValue(huffman.entropy)} />
@@ -189,15 +179,11 @@ function HuffmanLengthsFigure() {
       }
       caption="pₖ ∝ 1/(k + 1)ˢ. At s = 0 every symbol is equally likely and the lengths differ by at most one bit."
     >
-      <XYChart
-        series={lengths}
-        xLabel="symbol k"
-        yLabel="bits"
-        integerX
-        rescaleOnChange={false}
-        holdFit="union"
-        axisKey={k}
-      />
+      <Plot x={ka} y={ba}>
+        <Bars name="Huffman length" x={lengths.x} y={lengths.huffman} slot={0} width={0.6} />
+        <Points name="Shannon–Fano length" x={lengths.x} y={lengths.fano} slot={1} />
+        <Curve name="−log₂ pₖ" x={lengths.x} y={lengths.ideal} slot={2} dashed />
+      </Plot>
     </Figure>
   )
 }

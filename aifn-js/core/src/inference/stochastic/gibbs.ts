@@ -1,61 +1,100 @@
 /**
- * Gibbs sampling (Geman & Geman, 1984) with systematic or random scan over user-supplied full conditionals, the
- * Gaussian full conditionals, and univariate slice sampling (Neal, 2003) as a Gibbs step for any target.
+ * Gibbs sampling (Geman & Geman, 1984) with systematic or random scan over user-supplied full conditionals, one
+ * coordinate or one block of coordinates at a time (block Gibbs), the Gaussian full conditionals of any partition, the
+ * conditional means that Rao–Blackwellised estimates average, and univariate slice sampling (Neal, 2003) as a Gibbs
+ * step for any target.
  */
 
-import { inverse } from 'aifn/numerics/linalg'
+import { cholesky, inverse, solveTriangular } from 'aifn/numerics/linalg'
 import { child, integers, normal, uniform, type Stream } from 'aifn/foundation/random'
 import { fromData, tensor, type Matrix, type Tensor, type Vector } from 'aifn/foundation/tensor'
 import type { Algorithm } from 'aifn/foundation/trace'
 import { badLogDensity } from './metropolis'
 import type { ChainStart, ChainState, LogDensity, VectorLike } from './types'
-import { allFinite, data, logDensityAt, mat, toF64, vec, type F64 } from './util'
+import { allFinite, data, logDensityAt, mat, standardNormals, toF64, vec, type F64 } from './util'
 
 /** A full conditional: a draw of coordinate i given the current point x (whose coordinate i is ignored). */
 export type Conditional = (x: Vector, s: Stream) => number
 
+/**
+ * A block of a Gibbs sampler: the coordinates B it updates, a joint draw x_B ~ π(x_B | x₋B) (the values of x at B are
+ * ignored), and optionally the conditional mean E[x_B | x₋B], which Rao–Blackwellised estimates average
+ * (`conditionalMean`).
+ */
+export type Block = {
+  readonly coordinates: readonly number[]
+  readonly draw: (x: Vector, s: Stream) => ArrayLike<number>
+  readonly mean?: (x: Vector) => ArrayLike<number>
+}
+
 /** The state of `gibbs`. `logDensity` is NaN: Gibbs never evaluates the joint. */
 export type GibbsState = ChainState & {
-  /** The path within the last step: the point before and after each coordinate update, (updates + 1)×d. */
+  /** The path within the last step: the point before and after each block update, (updates + 1)×d. */
   moves: Matrix
-  /** The coordinate updated at each move of the last step (int32). */
-  coordinates: Tensor
-  /** Coordinate updates so far. */
+  /** The block updated at each move of the last step (int32; with one conditional per coordinate, the coordinate). */
+  blocks: Tensor
+  /** Block updates so far. */
   updates: number
 }
 
 /** Options for `gibbs`. */
 export type GibbsOptions = {
-  /** `systematic` updates coordinates 0, 1, …, d − 1 in order; `random` picks each uniformly. Default systematic. */
+  /** `systematic` updates blocks 0, 1, …, b − 1 in order; `random` picks each uniformly. Default systematic. */
   scan?: 'systematic' | 'random'
-  /** Coordinate updates per step (a sweep). Default d. */
+  /** Block updates per step (a sweep). Default the number of blocks. */
   updatesPerStep?: number
 }
 
+/** Blocks from conditionals: a function at index i is the conditional of coordinate i, a block of one. */
+function asBlocks(conditionals: readonly Conditional[] | readonly Block[]): Block[] {
+  return conditionals.map((c, i) =>
+    typeof c === 'function' ? { coordinates: [i], draw: (x: Vector, s: Stream) => [(c as Conditional)(x, s)] } : c,
+  )
+}
+
+/** The dimension the blocks cover, checking every coordinate below it is updated by some block. */
+function blockDimension(blocks: readonly Block[], name: string): number {
+  const d = Math.max(-1, ...blocks.flatMap((b) => b.coordinates)) + 1
+  const covered = new Uint8Array(d)
+  for (const b of blocks) {
+    if (b.coordinates.length === 0) throw new Error(`${name}: a block has no coordinates`)
+    for (const i of b.coordinates) {
+      if (!Number.isInteger(i) || i < 0) throw new Error(`${name}: coordinate ${i} is not an index`)
+      covered[i] = 1
+    }
+  }
+  const missing = covered.indexOf(0)
+  if (missing >= 0) throw new Error(`${name}: no block updates coordinate ${missing}`)
+  return d
+}
+
 /**
- * Gibbs sampling (Geman & Geman, 1984): replace one coordinate at a time by a draw from its full conditional
- * π(xᵢ | x₋ᵢ). Each update leaves π invariant, so both scans do; the random scan is also reversible. One step is one
- * sweep of `updatesPerStep` updates, and `moves` holds the axis-parallel zig-zag it traced. Update k of step t draws
- * from `child(ctx.stream, k)`.
+ * Gibbs sampling (Geman & Geman, 1984): replace one coordinate, or one block of coordinates, at a time by a draw from
+ * its full conditional π(x_B | x₋B). Each update leaves π invariant, so both scans do; the random scan is also
+ * reversible. Pass one `Conditional` per coordinate, or `Block`s: drawing strongly correlated coordinates jointly
+ * (block Gibbs; Liu, Wong and Kong, 1994) removes the slow zig-zag of one-at-a-time updates. One step is one sweep of
+ * `updatesPerStep` updates, and `moves` holds the path it traced. Update k of step t draws from
+ * `child(ctx.stream, k)`.
  */
 export function gibbs(
-  conditionals: readonly Conditional[],
+  conditionals: readonly Conditional[] | readonly Block[],
   options: GibbsOptions = {},
 ): Algorithm<ChainStart, GibbsState> {
   const name = 'gibbs'
-  const d = conditionals.length
-  const { scan = 'systematic', updatesPerStep = d } = options
+  const blocks = asBlocks(conditionals)
+  const d = blockDimension(blocks, name)
+  const { scan = 'systematic', updatesPerStep = blocks.length } = options
   return {
     name,
     init: ({ x0 }) => {
       const x = toF64(x0, name)
-      if (x.length !== d) throw new Error(`${name}: x0 has ${x.length} values for ${d} conditionals`)
+      if (x.length !== d) throw new Error(`${name}: x0 has ${x.length} values for blocks covering ${d} coordinates`)
       return {
         t: 0,
         x: vec(x),
         logDensity: NaN,
         moves: mat(Float64Array.from(x), 1, d),
-        coordinates: fromData(new Int32Array(0), [0]),
+        blocks: fromData(new Int32Array(0), [0]),
         updates: 0,
         diverged: !allFinite(x),
       }
@@ -65,14 +104,18 @@ export function gibbs(
       let x = data(s.x)
       const moves = new Float64Array((updatesPerStep + 1) * d)
       moves.set(x, 0)
-      const coords = new Int32Array(updatesPerStep)
+      const chosen = new Int32Array(updatesPerStep)
       for (let k = 0; k < updatesPerStep; k++) {
         const u = child(draws, k)
-        const i = scan === 'random' ? integers(child(u, 'coordinate'), d) : (s.updates + k) % d
+        const j = scan === 'random' ? integers(child(u, 'coordinate'), blocks.length) : (s.updates + k) % blocks.length
+        const block = blocks[j]
+        const value = block.draw(vec(x), u)
+        if (value.length !== block.coordinates.length)
+          throw new Error(`${name}: block ${j} drew ${value.length} values for ${block.coordinates.length} coordinates`)
         const next = Float64Array.from(x)
-        next[i] = conditionals[i](vec(x), u)
+        block.coordinates.forEach((i, m) => (next[i] = value[m]))
         x = next
-        coords[k] = i
+        chosen[k] = j
         moves.set(x, (k + 1) * d)
       }
       return {
@@ -80,7 +123,7 @@ export function gibbs(
         t: s.t + 1,
         x: vec(x),
         moves: mat(moves, updatesPerStep + 1, d),
-        coordinates: fromData(coords, [updatesPerStep]),
+        blocks: fromData(chosen, [updatesPerStep]),
         updates: s.updates + updatesPerStep,
         diverged: !allFinite(x),
       }
@@ -89,24 +132,79 @@ export function gibbs(
 }
 
 /**
- * The full conditionals of N(μ, Σ): xᵢ | x₋ᵢ ~ N(μᵢ − (1/Λᵢᵢ) Σ_{j≠i} Λᵢⱼ(xⱼ − μⱼ), 1/Λᵢᵢ) with Λ = Σ⁻¹ (Bishop, 2006,
- * eq. 2.75 in precision form). For a bivariate Gaussian with correlation ρ and unit variances this is
- * x₁ | x₂ ~ N(ρx₂, 1 − ρ²): the closer |ρ| is to 1, the shorter each zig-zag step and the slower the chain.
+ * The conditional mean of every coordinate, x ↦ (E[x_B | x₋B] for each block B), from blocks that all give `mean` (a
+ * coordinate in several blocks takes the first). Averaged over a chain's draws (`raoBlackwell` in `./chains`), it is
+ * the Rao–Blackwellised estimate of E[x] (Gelfand and Smith, 1990): unbiased like the plain average, and never of
+ * larger variance for independent draws, since Var E[x_B | x₋B] ≤ Var x_B.
+ */
+export function conditionalMean(blocks: readonly Block[]): (x: Vector) => Vector {
+  const d = blockDimension(blocks, 'conditionalMean')
+  blocks.forEach((b, j) => {
+    if (!b.mean) throw new Error(`conditionalMean: block ${j} has no mean`)
+  })
+  return (x) => {
+    const out = new Float64Array(d)
+    const set = new Uint8Array(d)
+    for (const b of blocks) {
+      const m = b.mean!(x)
+      b.coordinates.forEach((i, k) => {
+        if (!set[i]) {
+          out[i] = m[k]
+          set[i] = 1
+        }
+      })
+    }
+    return vec(out)
+  }
+}
+
+/**
+ * The full conditionals of N(μ, Σ) for a partition of the coordinates into blocks (default: one block per
+ * coordinate). With Λ = Σ⁻¹, x_B | x₋B ~ N(μ_B − Λ_BB⁻¹ Λ_B,₋B (x₋B − μ₋B), Λ_BB⁻¹) (Bishop, 2006, eqs. 2.73 and 2.75
+ * in precision form); each block gives its conditional mean too. For a bivariate Gaussian with correlation ρ and unit
+ * variances the single-coordinate conditionals are x₁ | x₂ ~ N(ρx₂, 1 − ρ²): the closer |ρ| is to 1, the shorter each
+ * zig-zag step and the slower the chain, unless both coordinates share a block.
  */
 export function gaussianConditionals(
   mean: VectorLike,
   covariance: Tensor | readonly (readonly number[])[],
-): Conditional[] {
-  const mu = toF64(mean, 'gaussianConditionals')
+  partition?: readonly (readonly number[])[],
+): Block[] {
+  const name = 'gaussianConditionals'
+  const mu = toF64(mean, name)
   const d = mu.length
   const cov = Array.isArray(covariance) ? tensor(covariance as number[][]) : (covariance as Tensor)
   const P = data(inverse(cov))
-  return Array.from({ length: d }, (_, i) => (x: Vector, s: Stream) => {
-    const xs = data(x)
-    let shift = 0
-    for (let j = 0; j < d; j++) if (j !== i) shift += P[i * d + j] * (xs[j] - mu[j])
-    const precision = P[i * d + i]
-    return normal(s, mu[i] - shift / precision, 1 / Math.sqrt(precision))
+  const parts = partition ?? Array.from({ length: d }, (_, i) => [i])
+  return parts.map((B) => {
+    const nb = B.length
+    const inB = new Set(B)
+    const rest = Array.from({ length: d }, (_, i) => i).filter((i) => !inB.has(i))
+    const Pbb = new Float64Array(nb * nb)
+    B.forEach((i, a) => B.forEach((j, b) => (Pbb[a * nb + b] = P[i * d + j])))
+    const chol = cholesky(fromData(Pbb, [nb, nb]))
+    if (chol.failed) throw new Error(`${name}: the precision block [${B.join(', ')}] is not positive definite`)
+    const L = chol.L
+    const conditionalMean = (x: Vector) => {
+      const xs = data(x)
+      // Λ_BB m = Λ_B,₋B (x₋B − μ₋B), then μ_B − m.
+      const r = new Float64Array(nb)
+      B.forEach((i, a) => {
+        for (const j of rest) r[a] += P[i * d + j] * (xs[j] - mu[j])
+      })
+      const y = solveTriangular(L, fromData(r, [nb]))
+      const shift = data(solveTriangular(L, y, { transpose: true }))
+      return Float64Array.from(B, (i, a) => mu[i] - shift[a])
+    }
+    return {
+      coordinates: B,
+      mean: conditionalMean,
+      draw: (x: Vector, s: Stream) => {
+        // Λ_BB = L Lᵀ, so L⁻ᵀ z has covariance Λ_BB⁻¹.
+        const z = data(solveTriangular(L, fromData(standardNormals(s, nb), [nb]), { transpose: true }))
+        return conditionalMean(x).map((m, a) => m + z[a])
+      },
+    }
   })
 }
 

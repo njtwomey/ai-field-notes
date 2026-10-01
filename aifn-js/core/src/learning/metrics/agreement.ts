@@ -9,7 +9,16 @@ import { correlation, kendallTau, spearman } from 'aifn/probability/stats'
 import { defineMetric, dense, divide, nonEmpty, sameLength, values, type Data, type Rows } from './core'
 
 const agreementInfo = (key: string, name: string, note: string) =>
-  ({ key, name, inputs: 'values', direction: 'higher', range: [-1, 1], notes: [note], capability: 'decide' }) as const
+  ({
+    key,
+    name,
+    stability: 'stable',
+    inputs: 'values',
+    direction: 'higher',
+    range: [-1, 1],
+    notes: [note],
+    capability: 'decide',
+  }) as const
 
 /** Pearson's correlation r between targets and predictions (pearson-correlation). */
 export const pearsonCorrelation = defineMetric(
@@ -62,6 +71,7 @@ export const concordanceCorrelation = defineMetric(
 export const fleissKappa = defineMetric(
   {
     key: 'fleissKappa',
+    stability: 'stable',
     name: "Fleiss' κ",
     inputs: 'ratings',
     direction: 'higher',
@@ -105,6 +115,7 @@ export type MeasurementLevel = 'nominal' | 'ordinal' | 'interval' | 'ratio'
 export const krippendorffAlpha = defineMetric(
   {
     key: 'krippendorffAlpha',
+    stability: 'stable',
     name: "Krippendorff's α",
     inputs: 'ratings',
     direction: 'higher',
@@ -167,6 +178,7 @@ export type IccForm = 'ICC1' | 'ICC2' | 'ICC3' | 'ICC1k' | 'ICC2k' | 'ICC3k'
 export const intraclassCorrelation = defineMetric(
   {
     key: 'intraclassCorrelation',
+    stability: 'stable',
     name: 'Intraclass correlation',
     inputs: 'ratings',
     direction: 'higher',
@@ -235,7 +247,15 @@ export function chiSquareStatistic(table: Rows): { chiSquare: number; n: number;
 }
 
 const associationInfo = (key: string, name: string) =>
-  ({ key, name, inputs: 'ratings', direction: 'higher', range: [0, 1], notes: ['nominal-association'] }) as const
+  ({
+    key,
+    name,
+    stability: 'stable',
+    inputs: 'ratings',
+    direction: 'higher',
+    range: [0, 1],
+    notes: ['nominal-association'],
+  }) as const
 
 /** Cramér's V = √(χ²/(n·min(r − 1, c − 1))) of an r × c contingency table (Cramér 1946). */
 export const cramersV = defineMetric(associationInfo('cramersV', "Cramér's V"), (table: Rows): number => {

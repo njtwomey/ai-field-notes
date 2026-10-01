@@ -4,9 +4,9 @@
  */
 
 import { eig, solveDense, svd } from 'aifn/numerics/linalg'
-import { dense, fromData, toFlat, type Matrix, type Vector } from 'aifn/foundation/tensor'
+import { dense, fromData, toFlat, type Matrix, type Tensor, type Vector } from 'aifn/foundation/tensor'
 import type { Scalar } from 'aifn/foundation/contracts'
-import { polynomialFromRoots, type PoleSet } from 'aifn/numerics/polynomial'
+import { polyFromRoots, type ComplexLike } from 'aifn/numerics/polynomial'
 import type { StateFeedbackPlant } from './lqr'
 
 /** The result of `ackermann`. */
@@ -15,8 +15,8 @@ export type PolePlacement = {
   K: Matrix | null
   /** The desired characteristic polynomial [1, α₁, …, αₙ]. */
   characteristic: Vector
-  /** The eigenvalues of A − BK actually obtained (empty when K is null). */
-  closedLoop: { real: Vector; imag: Vector }
+  /** The eigenvalues of A − BK actually obtained, complex128 (empty when K is null). */
+  closedLoop: Tensor
   /** Whether the controllability matrix has full rank. */
   controllable: boolean
   /** The condition number σ_max/σ_min of the controllability matrix; large means the gain is sensitive. */
@@ -29,12 +29,12 @@ export type PolePlacement = {
  * so that u = −Kx gives eig(A − bK) = {pᵢ}. Numerically poor for large n or nearly uncontrollable pairs (it inverts
  * 𝒞): the conditioning is reported, and the achieved poles are returned for checking.
  */
-export function ackermann(plant: StateFeedbackPlant, desired: PoleSet): PolePlacement {
+export function ackermann(plant: StateFeedbackPlant, desired: ComplexLike): PolePlacement {
   const { data: A, m: n, n: nA } = dense.toMatrixF64(plant.A, 'ackermann A')
   if (n !== nA) throw new Error('ackermann: A must be square')
   const { data: b, n: inputs } = dense.toMatrixF64(plant.B, 'ackermann B', n)
   if (inputs !== 1) throw new Error('ackermann: single-input systems only')
-  const phi = polynomialFromRoots(desired)
+  const phi = polyFromRoots(desired, { real: true })
   const alpha = toFlat(phi)
   if (alpha.length !== n + 1) throw new Error(`ackermann: need ${n} poles, got ${alpha.length - 1}`)
   // 𝒞 (n×n, row-major): column j is Aʲb.
@@ -47,8 +47,8 @@ export function ackermann(plant: StateFeedbackPlant, desired: PoleSet): PolePlac
   const S = toFlat(svd(fromData(C, [n, n])).S)
   const conditioning = S[0] / S[S.length - 1]
   const rank = S.filter((s) => s > n * Number.EPSILON * S[0]).length
-  const empty = fromData(new Float64Array(0), [0])
-  const failed = { K: null, characteristic: phi, closedLoop: { real: empty, imag: empty }, controllable: false }
+  const empty = fromData(new Float64Array(0), [0], 'complex128')
+  const failed = { K: null, characteristic: phi, closedLoop: empty, controllable: false }
   if (rank < n) return { ...failed, conditioning }
   // φ(A) = Aⁿ + α₁Aⁿ⁻¹ + … + αₙI by Horner's rule.
   let P: ArrayLike<number> = new Float64Array(n * n)
@@ -67,7 +67,7 @@ export function ackermann(plant: StateFeedbackPlant, desired: PoleSet): PolePlac
   return {
     K: fromData(K, [1, n]),
     characteristic: phi,
-    closedLoop: { real: cl.real, imag: cl.imag },
+    closedLoop: cl.values,
     controllable: true,
     conditioning,
   }

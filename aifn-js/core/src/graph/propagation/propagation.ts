@@ -12,7 +12,7 @@ import {
   div,
   fromData,
   gather,
-  isTraced,
+  unwrap,
   mul,
   scatterAdd,
   shapeOfValue,
@@ -74,8 +74,7 @@ export function messageEdges(
 }
 
 const raw = (x: Value): Tensor => {
-  let v: Value = x
-  while (isTraced(v)) v = v.value
+  const v = unwrap(x)
   if (typeof v === 'number') throw new AifnError('propagate', 'propagate: messages must be a matrix')
   return v
 }

@@ -1,6 +1,7 @@
 /**
  * `linprog`: one call for a linear program, by the simplex method (Dantzig, 1951; Bland, 1977) or Mehrotra's
- * interior-point method (Mehrotra, 1992, "On the implementation of a primal-dual interior point method").
+ * interior-point method (Mehrotra, 1992, "On the implementation of a primal-dual interior point method") on the
+ * homogeneous self-dual embedding.
  */
 
 import { interiorPointSolve } from './interior'
@@ -12,7 +13,8 @@ import { simplexSolve, type LinearProgramResult, type LinprogOptions } from './s
  * `scipy.optimize.linprog`. `method` is `simplex` (default; two-phase tableau simplex with Bland's rule) or
  * `interior-point` (Mehrotra's predictor–corrector). At an optimum the result carries a duality report (duals in
  * scipy's convention, slacks, reduced costs, duality gap and complementary slackness). Infeasibility and
- * unboundedness are reported in `status`; the interior-point method reports both as `diverged`.
+ * unboundedness are reported in `status` by both methods (the interior-point method certifies them through its
+ * homogeneous self-dual embedding).
  */
 export function linprog(problem: LinearProgram, options: LinprogOptions = {}): LinearProgramResult {
   if (options.method === 'interior-point')

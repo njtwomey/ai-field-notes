@@ -1,12 +1,12 @@
 import type { ReactNode } from 'react'
+import type { ParamDefs } from '@lab/state/schema'
 import { Choice } from './Choice'
 import { ParamControls } from './ParamControls'
-import type { ParamDefs } from './params'
 import type { VariantsControl } from './variants'
 
 /**
- * The choice of variant, then the chosen variant's controls and the shared ones. Renders a fragment for the
- * surrounding `Controls` grid or a Figure's controls slot.
+ * The choice of variant, then the chosen variant's controls and the shared ones (the same controls a `variants` field
+ * of figure state draws). Renders a fragment for the surrounding `Controls` grid or a Figure's controls slot.
  */
 export function VariantControls<V extends Record<string, ParamDefs>, S extends ParamDefs, X, R>({
   variants: v,

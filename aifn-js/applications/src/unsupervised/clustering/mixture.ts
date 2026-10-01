@@ -21,10 +21,13 @@ import {
 } from 'aifn/learning/estimators'
 import { cholesky } from 'aifn/numerics/linalg'
 import { normals, type Stream, child, uniform } from 'aifn/foundation/random'
-import { fromData, type Tensor } from 'aifn/foundation/tensor'
+import { fromData, logsumexp, type Tensor } from 'aifn/foundation/tensor'
+import { softmax } from 'aifn/numerics/special'
 import { trace, type Algorithm } from 'aifn/foundation/trace'
 import { kmeansPlusPlus } from './centroid'
 import { mat, matrix, nearest, values, vec } from './util'
+import { defineModel } from 'aifn/learning/estimators'
+import { int, oneOf, real, space } from 'aifn/foundation/space'
 
 /** The shape of each component's covariance. */
 export type CovarianceType = 'full' | 'diagonal' | 'spherical'
@@ -91,16 +94,11 @@ function expectation(
   covs: Float64Array,
 ) {
   const { out, jitter } = logDensities(v, n, d, k, means, covs)
-  const resp = new Float64Array(n * k)
-  let total = 0
-  for (let i = 0; i < n; i++) {
-    let m = -Infinity
-    for (let c = 0; c < k; c++) m = Math.max(m, (out[i * k + c] += Math.log(weights[c])))
-    let s = 0
-    for (let c = 0; c < k; c++) s += resp[i * k + c] = Math.exp(out[i * k + c] - m)
-    for (let c = 0; c < k; c++) resp[i * k + c] /= s
-    total += m + Math.log(s)
-  }
+  for (let i = 0; i < n; i++) for (let c = 0; c < k; c++) out[i * k + c] += Math.log(weights[c])
+  // log p(xᵢ) = logsumexp over components of the joint; the responsibilities are its softmax.
+  const joint = fromData(out, [n, k])
+  const resp = values(softmax(joint))
+  const total = values(logsumexp(joint, 1)).reduce((a, b) => a + b, 0)
   return { resp, logLikelihood: total / n, jitter }
 }
 
@@ -269,17 +267,8 @@ export function gaussianMixture(params: {
       }
       const resp = (q: Tensor) => {
         const { out, rows } = joint(q)
-        const r = new Float64Array(rows * k)
-        const logp = new Float64Array(rows)
-        for (let i = 0; i < rows; i++) {
-          let mx = -Infinity
-          for (let j = 0; j < k; j++) mx = Math.max(mx, out[i * k + j])
-          let s = 0
-          for (let j = 0; j < k; j++) s += r[i * k + j] = Math.exp(out[i * k + j] - mx)
-          for (let j = 0; j < k; j++) r[i * k + j] /= s
-          logp[i] = mx + Math.log(s)
-        }
-        return { r, logp, rows }
+        const L = fromData(out, [rows, k])
+        return { r: values(softmax(L)), logp: values(logsumexp(L, 1)), rows }
       }
       const forward = (q: Tensor) => {
         const { out, rows } = joint(q)
@@ -341,3 +330,26 @@ export function gaussianMixture(params: {
     },
   }
 }
+
+// ── Registry ─────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+defineModel(
+  {
+    key: 'gaussianMixture',
+    module: 'unsupervised/clustering',
+    name: 'Gaussian mixture',
+    summary: 'A mixture of Gaussians fitted by EM; soft assignments are its predictive.',
+    task: 'clustering',
+    capabilities: ['forward', 'decide', 'predictive', 'score'],
+    hyper: space({
+      k: int(1, 20, { default: 3 }),
+      covariance: oneOf(['full', 'diagonal', 'spherical']),
+      regularisation: real(0, 1, { default: 1e-6 }),
+      tolerance: real(1e-10, 1, { default: 1e-3, scale: 'log' }),
+      maxSteps: int(1, 1000, { default: 100 }),
+    }),
+    notes: ['gaussian-mixture-model'],
+    cite: ['dempster1977'],
+  },
+  gaussianMixture,
+)

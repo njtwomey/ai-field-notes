@@ -2,12 +2,11 @@ import { useMemo, type ReactNode } from 'react'
 import { classProbabilities, hasPredictive, type Distribution } from 'aifn/learning/estimators'
 import { grid2d } from 'aifn/numerics/geometry'
 import { fromData, toFlat, toRows, type Tensor } from 'aifn/foundation/tensor'
-import { Figure } from '@lab/layout'
-import { Heatmap, Readout, type HeatmapOverlay, type Vec2 } from '@lab/viz'
-import type { FrameProps } from './frame'
+import { PanelSlot } from '@lab/layout'
+import { Handle, Plot, Points, Raster, Readout, useAxis, type Vec2 } from '@lab/viz'
 import { formatValue } from './format'
 
-export type DecisionRegionViewProps = FrameProps & {
+export type DecisionRegionPanelProps = {
   /** A fitted classifier on two features: anything with `decide(x [m, 2]) → labels [m]`. */
   model: { decide(x: Tensor): Tensor }
   /** Training data: inputs [n, 2] and labels [n]. */
@@ -22,8 +21,8 @@ export type DecisionRegionViewProps = FrameProps & {
   /** A query point, drawn as a handle; dragging it calls `onQuery`. */
   query?: Vec2
   onQuery?: (p: Vec2) => void
-  /** Extra marks over the regions, e.g. the query's neighbours or the support vectors. */
-  overlay?: readonly HeatmapOverlay[]
+  /** Extra layers over the regions (`Points`, `Curve`, …), e.g. the query's neighbours or the support vectors. */
+  overlay?: ReactNode
   /** Readouts about the query supplied by the specimen (shown before the generic ones). */
   queryReadouts?: ReactNode
   xLabel?: string
@@ -46,7 +45,7 @@ function padded(v: number[], pad = 0.1): [number, number] {
  * class, and an optional draggable query point with its prediction (and class probabilities when the model has a
  * predictive).
  */
-export function DecisionRegionView({
+export function DecisionRegionPanel({
   model,
   data,
   classNames,
@@ -59,11 +58,7 @@ export function DecisionRegionView({
   queryReadouts,
   xLabel = 'x₀',
   yLabel = 'x₁',
-  title,
-  controls,
-  readouts,
-  ...frame
-}: DecisionRegionViewProps) {
+}: DecisionRegionPanelProps) {
   const cols = useMemo(() => {
     const flat = toFlat(data.x)
     return { x0: flat.filter((_, i) => i % 2 === 0), x1: flat.filter((_, i) => i % 2 === 1) }
@@ -80,13 +75,8 @@ export function DecisionRegionView({
     const z = Array.from({ length: ny }, (_, i) => d.slice(i * nx, (i + 1) * nx))
     return { x: toFlat(g.x), y: toFlat(g.y), z }
   }, [model, xr, yr, resolution])
-  const marks = useMemo(
-    (): HeatmapOverlay[] => [
-      { name: 'training rows', type: 'scatter', x: cols.x0, y: cols.x1, group: labels, groupNames: names },
-      ...(overlay ?? []),
-    ],
-    [cols, labels, names, overlay],
-  )
+  const xAxis = useAxis({ label: xLabel, range: xr })
+  const yAxis = useAxis({ label: yLabel, range: yr, equal: xAxis })
   const prediction = useMemo(() => {
     if (!query) return null
     const q = fromData(Float64Array.from(query), [1, 2])
@@ -99,37 +89,30 @@ export function DecisionRegionView({
     return { label, probs }
   }, [model, query])
   return (
-    <Figure
-      title={title ?? 'Decision regions'}
-      defaultSize="L"
-      {...frame}
-      controls={controls}
-      readouts={
+    <>
+      <PanelSlot slot="readouts">
         <>
           {queryReadouts}
           {prediction && <Readout label="decide(query)" value={names[prediction.label] ?? String(prediction.label)} />}
           {prediction?.probs?.map((p, k) => (
             <Readout key={k} label={`P(${names[k] ?? k} | query)`} value={formatValue(p)} />
           ))}
-          {readouts}
         </>
-      }
-    >
-      <Heatmap
-        x={grid.x}
-        y={grid.y}
-        z={grid.z}
-        scale="categorical"
-        categoryNames={names}
-        fillOpacity={0.35}
-        overlay={marks}
-        equalAspect
-        xLabel={xLabel}
-        yLabel={yLabel}
-        valueLabel="decision"
-        handles={query && onQuery ? [{ kind: 'point', at: query, onDrag: onQuery, label: 'query' }] : undefined}
-        marker={query}
-      />
-    </Figure>
+      </PanelSlot>
+      <Plot x={xAxis} y={yAxis}>
+        <Raster
+          x={grid.x}
+          y={grid.y}
+          z={grid.z}
+          scale="categorical"
+          categoryNames={names}
+          fillOpacity={0.35}
+          valueLabel="decision"
+        />
+        <Points name="training rows" x={cols.x0} y={cols.x1} group={labels} groupNames={names} />
+        {overlay}
+        {query && onQuery && <Handle kind="point" at={query} onDrag={onQuery} label="query" />}
+      </Plot>
+    </>
   )
 }

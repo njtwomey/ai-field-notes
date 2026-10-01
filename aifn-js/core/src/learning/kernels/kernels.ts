@@ -61,7 +61,7 @@ const distanceFromSquared = elementwise({
   id: 'learning/kernels/distanceFromSquared',
   f: (u) => Math.sqrt(u),
   // 1/(2r) where u > 0 and 0 at u = 0; the guard keeps the unselected 1/(2·0) out of the result.
-  derivative: [(u, r) => where(greater(unwrap(u), 0), div(0.5, where(greater(unwrap(u), 0), r, 1)), 0)],
+  derivative: [(u, r) => where(greater(u, 0), div(0.5, where(greater(u, 0), r, 1)), 0)],
   doc: { summary: '√u with derivative 0 at u = 0, for distances inside kernels.' },
   test: { domain: { lo: 0.1, hi: 3 } },
 })
@@ -260,25 +260,38 @@ export function constant({ variance = 1 }: Partial<VarianceParams> = {}): Kernel
 /** Hyperparameters of the linear and polynomial kernels. */
 export type DotProductParams = { variance: Value; bias: Value }
 
-/** σ_b² + σ² xᵀx′ as a Gram matrix [n, m]. */
-function dotProducts(x: Value, y: Value | null, { variance, bias }: DotProductParams): Value {
+/**
+ * Hyperparameters of `linearKernel`: the weight variance σ² and, for an inhomogeneous kernel, the offset variance σ_b².
+ * A homogeneous kernel (σ_b² = 0) has no `bias` leaf, so every leaf is positive and has a finite log.
+ */
+export type LinearParams = { variance: Value } | { variance: Value; bias: Value }
+
+/** σ_b² + σ² xᵀx′ as a Gram matrix [n, m] (σ_b² = 0 without a bias). */
+function dotProducts(x: Value, y: Value | null, params: LinearParams): Value {
   const a = asRows(x)
   const b = y === null ? a : asRows(y)
-  return add(bias, mul(variance, matmul(a, transpose(b))))
+  const scaled = mul(params.variance, matmul(a, transpose(b)))
+  return 'bias' in params ? add(params.bias, scaled) : scaled
 }
 
 /** Row-wise σ_b² + σ² ‖xᵢ‖². */
-function dotDiagonal(x: Value, { variance, bias }: DotProductParams): Value {
-  return add(bias, mul(variance, sum(square(asRows(x)), 1)))
+function dotDiagonal(x: Value, params: LinearParams): Value {
+  const scaled = mul(params.variance, sum(square(asRows(x)), 1))
+  return 'bias' in params ? add(params.bias, scaled) : scaled
 }
 
 /**
  * The linear kernel σ_b² + σ² xᵀx′ (Rasmussen and Williams, 2006, §4.2.2): a GP with this kernel is Bayesian linear
- * regression with weight variance σ² and offset variance σ_b². Defaults σ² = 1, σ_b² = 0 (a positive bias is needed
- * to fit its hyperparameters in log space).
+ * regression with weight variance σ² and offset variance σ_b². Defaults σ² = 1, σ_b² = 0. A bias of exactly 0 (the
+ * default) makes the homogeneous kernel σ² xᵀx′, whose only hyperparameter is σ², so the bias stays fixed at 0 when
+ * the hyperparameters are fitted in log space; any other bias is a hyperparameter like σ².
  */
-export function linearKernel({ variance = 1, bias = 0 }: Partial<DotProductParams> = {}): Kernel<DotProductParams> {
-  const params = { variance, bias }
+export function linearKernel(params: Partial<DotProductParams> = {}): Kernel<LinearParams> {
+  const { variance = 1, bias = 0 } = params
+  return makeLinear(bias === 0 ? { variance } : { variance, bias })
+}
+
+function makeLinear(params: LinearParams): Kernel<LinearParams> {
   return {
     kind: 'kernel',
     name: 'linear',
@@ -286,7 +299,7 @@ export function linearKernel({ variance = 1, bias = 0 }: Partial<DotProductParam
     stationary: false,
     evaluate: (x, y) => dotProducts(x, y, params),
     diagonal: (x) => dotDiagonal(x, params),
-    withParams: linearKernel,
+    withParams: makeLinear,
   }
 }
 

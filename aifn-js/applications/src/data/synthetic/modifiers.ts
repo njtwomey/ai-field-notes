@@ -24,7 +24,11 @@ import {
 import { appendStep, labels, matrix, values, vector, type Dataset, type DatasetMeta } from '../types'
 import { fromData, type Tensor } from 'aifn/foundation/tensor'
 import { inverse, logDet } from 'aifn/numerics/linalg'
+import { sigmoid } from 'aifn/numerics/special'
 import { MultivariateNormal, Normal, Uniform } from 'aifn/probability/distributions'
+import type { ModifierInfo } from 'aifn/foundation/contracts'
+import { definer } from 'aifn/foundation/registry'
+import { int, oneOf, real, space, when } from 'aifn/foundation/space'
 
 /** Metadata fields a modifier sets. */
 type MetaEdit = { -readonly [K in keyof DatasetMeta]?: DatasetMeta[K] }
@@ -93,8 +97,6 @@ function columnStats(x: Float64Array, n: number, d: number): { mean: number[]; s
   return { mean, sd }
 }
 
-const sigmoid = (t: number) => 1 / (1 + Math.exp(-t))
-
 /** The intercept α with mean σ(α + zᵢ) = target, by bisection (the mean is increasing in α). */
 function calibrate(z: readonly number[], target: number): number {
   if (target <= 0) return -Infinity
@@ -139,9 +141,10 @@ function classTruth(d: Dataset): ClassificationTruth | undefined {
   return t?.task === 'classification' ? t : undefined
 }
 
+/** A Gaussian regression truth (an additive GAM truth has its own family, which these modifiers do not edit). */
 function regTruth(d: Dataset): RegressionTruth | undefined {
   const t = d.meta.truth
-  return t?.task === 'regression' ? t : undefined
+  return t?.task === 'regression' && 'noiseSd' in t ? t : undefined
 }
 
 /** A new truth from an edited model. */
@@ -203,7 +206,7 @@ export function withLabelNoise(s: Stream, d: Dataset, options: LabelNoiseOptions
   return {
     ...d,
     y: labels(out),
-    meta: step(d, 'labelNoise', 'rate' in options ? { rate: options.rate } : { matrix: m }, sentence, {
+    meta: step(d, 'withLabelNoise', 'rate' in options ? { rate: options.rate } : { matrix: m }, sentence, {
       cleanLabels: d.meta.cleanLabels ?? d.y,
       truth: t ? remodel(t, { ops: [...t.model.ops, { kind: 'noise', matrix: m }] }) : d.meta.truth,
     }),
@@ -221,6 +224,10 @@ export function flippedMask(d: Dataset): Int32Array {
 
 /** Options for `withPrevalence` and `withLabelShift`. */
 export interface PrevalenceOptions {
+  /** Two classes: the target share of class 1, in [0, 1]. */
+  prevalence?: number
+  /** Any number of classes: one target weight per class (normalised); in place of `prevalence`. */
+  weights?: readonly number[]
   /**
    * `subsample` (default): drop points of the over-represented classes, keeping as many points as the target allows.
    * `oversample`: keep every point and repeat draws (with replacement) of the under-represented classes.
@@ -242,8 +249,10 @@ function targetWeights(target: number | readonly number[], k: number, what: stri
   return target.map((v) => v / sum)
 }
 
-function resample(s: Stream, d: Dataset, target: number | readonly number[], options: PrevalenceOptions, op: string) {
+function resample(s: Stream, d: Dataset, options: PrevalenceOptions, op: string) {
   const { method = 'subsample' } = options
+  const target = options.weights ?? options.prevalence
+  if (target === undefined) throw new RangeError(`${op}: give a prevalence or class weights`)
   const y = intLabels(d, op)
   const k = classCount(d, y)
   const pi = targetWeights(target, k, op)
@@ -307,31 +316,21 @@ function resample(s: Stream, d: Dataset, target: number | readonly number[], opt
 }
 
 /**
- * Change the class balance to `target` (two classes: the share of class 1; otherwise one weight per class) by
+ * Change the class balance to `prevalence` (two classes: the share of class 1) or `weights` (one per class) by
  * resampling rows within each class, with exact counts by largest remainder. The truth becomes the posterior under
  * the new priors: P'(j | x) ∝ wⱼ P(j | x) with wⱼ = targetⱼ / prevalenceⱼ (Saerens et al., 2002, Neural Computation
  * 14(1)).
  */
-export function withPrevalence(
-  s: Stream,
-  d: Dataset,
-  target: number | readonly number[],
-  options: PrevalenceOptions = {},
-): Dataset {
-  return resample(s, d, target, options, 'prevalence')
+export function withPrevalence(s: Stream, d: Dataset, options: PrevalenceOptions): Dataset {
+  return resample(s, d, options, 'withPrevalence')
 }
 
 /**
  * Label shift, for a test split: p(y) changes while p(x | y) stays fixed. The same resampling as `withPrevalence`,
  * recorded as a shift.
  */
-export function withLabelShift(
-  s: Stream,
-  d: Dataset,
-  target: number | readonly number[],
-  options: PrevalenceOptions = {},
-): Dataset {
-  return resample(s, d, target, options, 'labelShift')
+export function withLabelShift(s: Stream, d: Dataset, options: PrevalenceOptions): Dataset {
+  return resample(s, d, options, 'withLabelShift')
 }
 
 // ── Outliers ─────────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -375,7 +374,7 @@ export function withOutliers(s: Stream, d: Dataset, options: OutlierOptions): Da
     return {
       ...d,
       y: vector(y),
-      meta: step(d, 'outliers', { fraction, scale, target }, sentence, {
+      meta: step(d, 'withOutliers', { fraction, scale, target }, sentence, {
         outliers: labels(mask),
         truth: t ? remodelRegression(t, { outlierFraction: 1 - (1 - t.outlierFraction) * (1 - eps) }) : d.meta.truth,
       }),
@@ -428,7 +427,7 @@ export function withOutliers(s: Stream, d: Dataset, options: OutlierOptions): Da
   return {
     ...d,
     x: matrix(x, n, dim),
-    meta: step(d, 'outliers', { fraction, scale, target }, sentence, { outliers: labels(mask), truth }),
+    meta: step(d, 'withOutliers', { fraction, scale, target }, sentence, { outliers: labels(mask), truth }),
   }
 }
 
@@ -522,7 +521,13 @@ export function withNuisanceFeatures(s: Stream, d: Dataset, options: NuisanceOpt
   return {
     ...d,
     x: matrix(x, n, d1),
-    meta: step(d, 'nuisance', { count, kind, scale }, `${count} uninformative ${kind} features appended.`, extra),
+    meta: step(
+      d,
+      'withNuisanceFeatures',
+      { count, kind, scale },
+      `${count} uninformative ${kind} features appended.`,
+      extra,
+    ),
   }
 }
 
@@ -554,14 +559,48 @@ function invert(a: readonly (readonly number[])[]): { inverse: number[][]; logAb
   return { inverse: Array.from({ length: d }, (_, r) => Array.from(inv.subarray(r * d, (r + 1) * d))), logAbsDet }
 }
 
+/** Options for `withTransform`: a matrix and offset, or a rotation, shear and stretch of the first two features. */
+export interface TransformOptions {
+  /** A (m × d). When given, `rotation`, `shear` and `stretch` are not used. */
+  matrix?: readonly (readonly number[])[]
+  /** b (length m). Default zero. */
+  offset?: readonly number[]
+  /** Without `matrix`: rotate the first two features by this angle (radians, anticlockwise). Default 0. */
+  rotation?: number
+  /** Without `matrix`: shear x₁ ↦ x₁ + k x₂ before the rotation. Default 0. */
+  shear?: number
+  /** Without `matrix`: scale x₁ by this factor before the shear. Default 1. */
+  stretch?: number
+}
+
+/** The matrix of a `TransformOptions`: A itself, or R(rotation) · shear · diag(stretch, 1, …) on d features. */
+function transformMatrix(options: TransformOptions, d: number): readonly (readonly number[])[] {
+  if (options.matrix) return options.matrix
+  const { rotation = 0, shear = 0, stretch = 1 } = options
+  const a: number[][] = Array.from({ length: d }, (_, r) => Array.from({ length: d }, (_, c) => (r === c ? 1 : 0)))
+  if (d < 2) {
+    if (rotation !== 0 || shear !== 0) throw new RangeError('withTransform: a rotation or shear needs two features')
+    a[0][0] = stretch
+    return a
+  }
+  const rs = rotation2d(rotation)
+  const sh = shear2d(shear)
+  // (R · S · D) restricted to the first two coordinates, D = diag(stretch, 1).
+  for (let r = 0; r < 2; r++)
+    for (let c = 0; c < 2; c++) a[r][c] = (rs[r][0] * sh[0][c] + rs[r][1] * sh[1][c]) * (c === 0 ? stretch : 1)
+  return a
+}
+
 /**
  * The affine map x ↦ A x + b applied to every row (A is m × d, b has length m; b defaults to zero): rotations,
- * scalings and shears. When A is square and invertible the truth maps along: p'(x') = p(A⁻¹(x' − b)) / |det A|, so
- * the posterior at x' is the old posterior at A⁻¹(x' − b) and the Bayes error is unchanged; otherwise the truth is
- * dropped.
+ * scalings and shears, given as a matrix or as a rotation, shear and stretch of the first two features. When A is
+ * square and invertible the truth maps along: p'(x') = p(A⁻¹(x' − b)) / |det A|, so the posterior at x' is the old
+ * posterior at A⁻¹(x' − b) and the Bayes error is unchanged; otherwise the truth is dropped.
  */
-export function withTransform(d: Dataset, a: readonly (readonly number[])[], b?: readonly number[]): Dataset {
+export function withTransform(d: Dataset, options: TransformOptions): Dataset {
   const [n, d0] = d.x.shape
+  const a = transformMatrix(options, d0)
+  const b = options.offset
   const m = a.length
   if (a.some((row) => row.length !== d0)) throw new RangeError(`withTransform: A must have ${d0} columns`)
   const offset = b ?? new Array<number>(m).fill(0)
@@ -634,7 +673,7 @@ export function withTransform(d: Dataset, a: readonly (readonly number[])[], b?:
   return {
     ...d,
     x: matrix(x, n, m),
-    meta: step(d, 'transform', { matrix: a.map((r) => [...r]), offset: [...offset] }, sentence, extra),
+    meta: step(d, 'withTransform', { matrix: a.map((r) => [...r]), offset: [...offset] }, sentence, extra),
   }
 }
 
@@ -697,7 +736,7 @@ export function withMissing(s: Stream, d: Dataset, options: MissingOptions): Dat
     x: matrix(x, n, dim),
     meta: step(
       d,
-      'missing',
+      'withMissing',
       { rate, mechanism, strength, observed },
       `${removed} entries missing ${names[mechanism]} (${mechanism.toUpperCase()}).`,
       { missing: labels(mask), complete },
@@ -777,7 +816,7 @@ export function withCovariateShift(s: Stream, d: Dataset, options: CovariateShif
     ...out,
     meta: step(
       out,
-      'covariateShift',
+      'withCovariateShift',
       { strength, direction: u, keep, alpha, mean, sd },
       `Covariate shift: ${index.length} of ${n} rows kept with probability rising along the direction (${u.map((v) => +v.toFixed(2)).join(', ')}).`,
       { truth },
@@ -796,7 +835,7 @@ export interface SplitOptions {
   /** A shift applied to the test part only: covariate shift, or a label shift to new class shares. */
   shift?:
     | { covariate: CovariateShiftOptions }
-    | { prevalence: number | readonly number[]; method?: 'subsample' | 'oversample' }
+    | (PrevalenceOptions & ({ prevalence: number } | { weights: readonly number[] }))
 }
 
 /**
@@ -841,6 +880,117 @@ export function split(s: Stream, d: Dataset, options: SplitOptions = {}): { trai
   let testPart = part(testRows, 'test')
   const shift = options.shift
   if (shift && 'covariate' in shift) testPart = withCovariateShift(child(s, 'shift'), testPart, shift.covariate)
-  else if (shift) testPart = withLabelShift(child(s, 'shift'), testPart, shift.prevalence, { method: shift.method })
+  else if (shift) testPart = withLabelShift(child(s, 'shift'), testPart, shift)
   return { train: part(trainRows, 'train'), test: testPart }
 }
+
+// ── Registry ─────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+const modifier = definer<ModifierInfo>('modifier', 'data/synthetic')
+
+modifier(
+  {
+    key: 'withLabelNoise',
+    name: 'Label noise',
+    summary: 'Flip each label to another class at random with probability `rate`.',
+    params: space({ rate: real(0, 0.5, { default: 0.1 }) }),
+    needs: 'labels',
+    random: true,
+    notes: ['label-noise-models'],
+  },
+  withLabelNoise,
+)
+
+modifier(
+  {
+    key: 'withPrevalence',
+    name: 'Prevalence',
+    summary: 'Resample within classes to a target share of class 1.',
+    params: space({ prevalence: real(0, 1, { default: 0.5 }), method: oneOf(['subsample', 'oversample']) }),
+    needs: 'labels',
+    random: true,
+    notes: ['class-imbalance'],
+  },
+  withPrevalence,
+)
+
+modifier(
+  {
+    key: 'withLabelShift',
+    name: 'Label shift',
+    summary: 'Resample within classes to new class shares, keeping p(x | y): a label shift.',
+    params: space({ prevalence: real(0, 1, { default: 0.5 }), method: oneOf(['subsample', 'oversample']) }),
+    needs: 'labels',
+    random: true,
+    notes: ['dataset-shift'],
+  },
+  withLabelShift,
+)
+
+modifier(
+  {
+    key: 'withOutliers',
+    name: 'Outliers',
+    summary: 'Replace a fraction of rows by draws from a broad Gaussian around the data mean.',
+    params: space({ fraction: real(0, 0.5, { default: 0.05 }), scale: real(1, 20, { default: 4 }) }),
+    random: true,
+    notes: ['z-score-and-robust-outlier-detection'],
+  },
+  withOutliers,
+)
+
+modifier(
+  {
+    key: 'withNuisanceFeatures',
+    name: 'Nuisance features',
+    summary: 'Append features drawn independently of everything else.',
+    params: space({ count: int(0, 50, { default: 2 }), kind: oneOf(['gaussian', 'uniform']) }),
+    random: true,
+    notes: ['curse-of-dimensionality-for-neighbours'],
+  },
+  withNuisanceFeatures,
+)
+
+modifier(
+  {
+    key: 'withMissing',
+    name: 'Missing values',
+    summary: 'Remove entries completely at random, at random given another feature, or not at random.',
+    params: space({
+      rate: real(0, 0.9, { default: 0.1 }),
+      mechanism: oneOf(['mcar', 'mar', 'mnar']),
+      strength: real(0, 10, { default: 2 }),
+      observed: int(0, 50, { default: 0, when: when('mechanism', 'mar') }),
+    }),
+    random: true,
+    notes: ['missing-data-and-imputation'],
+  },
+  withMissing,
+)
+
+modifier(
+  {
+    key: 'withCovariateShift',
+    name: 'Covariate shift',
+    summary: 'Keep rows with a probability that rises along a direction in feature space.',
+    params: space({ strength: real(0, 5, { default: 1.5 }), keep: real(0.05, 1, { default: 0.5 }) }),
+    random: true,
+    notes: ['dataset-shift', 'importance-weighting-for-covariate-shift'],
+  },
+  withCovariateShift,
+)
+
+modifier(
+  {
+    key: 'withTransform',
+    name: 'Linear map',
+    summary: 'Rotate, shear and stretch the first two features (or apply any affine map); the truth maps along.',
+    params: space({
+      rotation: real(-Math.PI, Math.PI, { default: 0, label: 'θ' }),
+      shear: real(-3, 3, { default: 0 }),
+      stretch: real(0.1, 10, { default: 1, scale: 'log' }),
+    }),
+    random: false,
+  },
+  withTransform,
+)

@@ -4,6 +4,7 @@
  * how much a node set can amplify errors (Runge's phenomenon on equispaced nodes).
  */
 
+import { DomainError, ShapeError } from 'aifn/foundation/errors'
 import type { Scalar, Size } from 'aifn/foundation/contracts'
 import { fromData, toFlat, type Tensor } from 'aifn/foundation/tensor'
 
@@ -26,12 +27,13 @@ export function interpolatingPolynomial(x: Tensor, y: Tensor): InterpolatingPoly
   const X = f64(x)
   const Y = f64(y)
   const n = X.length
-  if (Y.length !== n) throw new Error(`interpolatingPolynomial: ${n} nodes but ${Y.length} values`)
+  if (Y.length !== n)
+    throw new ShapeError('interpolatingPolynomial', `interpolatingPolynomial: ${n} nodes but ${Y.length} values`)
   const a = Float64Array.from(Y)
   for (let j = 1; j < n; j++)
     for (let i = n - 1; i >= j; i--) {
       const h = X[i] - X[i - j]
-      if (h === 0) throw new Error('interpolatingPolynomial: nodes must be distinct')
+      if (h === 0) throw new DomainError('interpolatingPolynomial', 'interpolatingPolynomial: nodes must be distinct')
       a[i] = (a[i] - a[i - 1]) / h
     }
   const w = Float64Array.from(X, (xj, j) => {

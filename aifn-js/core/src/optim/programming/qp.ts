@@ -6,7 +6,8 @@
  * SIAM J. Optimization 1(1)). Multipliers follow the Lagrangian L = ½xᵀQx + cᵀx + λᵀ(Ax − b) + νᵀ(Ex − e), λ ≥ 0.
  */
 
-import { dense, type Tensor } from 'aifn/foundation/tensor'
+import { dense, fromData, toFlat, type Tensor } from 'aifn/foundation/tensor'
+import { eigh, qr } from 'aifn/numerics/linalg'
 import type { Algorithm } from 'aifn/foundation/trace'
 import { run } from 'aifn/foundation/trace'
 import type { MatrixLike, Scalar, Size, Status, VectorLike } from 'aifn/foundation/contracts'
@@ -27,7 +28,10 @@ import { simplexSolve } from './simplex'
 
 /** A convex quadratic program: minimise ½xᵀQx + cᵀx subject to A x ≤ b and E x = e (variables otherwise free). */
 export interface QuadraticProgram {
-  /** Symmetric positive semi-definite Hessian, n × n. */
+  /**
+   * Symmetric Hessian, n × n, positive semi-definite on the null space of E (the problem is then convex). The interior
+   * point stops `nonconvex` otherwise; the active set stops `nonconvex` when a working set exposes negative curvature.
+   */
   Q: MatrixLike
   /** Linear term, length n. */
   c: VectorLike
@@ -143,8 +147,12 @@ export function kktReport(
   }
 }
 
-/** Outcome of a QP solver. */
-export type QuadraticProgramStatus = 'running' | 'optimal' | 'infeasible' | 'singular' | 'diverged'
+/**
+ * Outcome of a QP solver. `nonconvex`: Q has negative curvature where the method needs it to have none, so a stationary
+ * point need not be a minimiser. The active set checks the null space of its working set at each step; the interior
+ * point checks the null space of the equalities E before its first step.
+ */
+export type QuadraticProgramStatus = 'running' | 'optimal' | 'infeasible' | 'singular' | 'nonconvex' | 'diverged'
 
 // ---------------------------------------------------------------------------------------------------------------------
 // Primal active-set method.
@@ -191,7 +199,7 @@ export interface ActiveSetState extends Status {
 /** The Status flags of a QP solver state from its outcome. */
 const flags = (status: QuadraticProgramStatus) => ({
   converged: status === 'optimal',
-  terminated: status === 'infeasible' || status === 'singular',
+  terminated: status === 'infeasible' || status === 'singular' || status === 'nonconvex',
 })
 
 /** Rows of [E; A_W] as a dense matrix. */
@@ -219,6 +227,45 @@ function equalityQP(qp: ParsedQP, M: Mat, g: Float64Array) {
   for (let j = 0; j < n; j++) rhs[j] = -g[j]
   const { x: sol, singular } = solve(K, size, rhs)
   return { p: sol.subarray(0, n), mu: sol.subarray(n), singular }
+}
+
+/**
+ * Whether Q has negative curvature on the null space of M: the reduced Hessian ZᵀQZ (Z an orthonormal basis of that
+ * null space, from the complete QR factorisation of Mᵀ) has an eigenvalue below −`tol` relative to Q's scale. Zero
+ * curvature is left to the KKT solve, which reports it as singular. M has independent rows (the working set is kept so).
+ */
+function negativeCurvature(qp: ParsedQP, M: Mat, tol: number): boolean {
+  const n = qp.n
+  const k = M.m
+  if (k >= n) return false
+  let Z: Float64Array
+  if (k === 0) Z = Float64Array.from({ length: n * n }, (_, i) => (i % (n + 1) === 0 ? 1 : 0))
+  else {
+    const Mt = new Float64Array(n * k)
+    for (let r = 0; r < k; r++) for (let j = 0; j < n; j++) Mt[j * k + r] = M.a[r * n + j]
+    const Qf = toFlat(qr(fromData(Mt, [n, k]), { mode: 'complete' }).Q)
+    Z = new Float64Array(n * (n - k))
+    for (let i = 0; i < n; i++) for (let c = k; c < n; c++) Z[i * (n - k) + c - k] = Qf[i * n + c]
+  }
+  const r = n - k
+  const QZ = new Float64Array(n * r)
+  for (let i = 0; i < n; i++)
+    for (let c = 0; c < r; c++) {
+      let v = 0
+      for (let j = 0; j < n; j++) v += qp.Q.a[i * n + j] * Z[j * r + c]
+      QZ[i * r + c] = v
+    }
+  const H = new Float64Array(r * r)
+  for (let a = 0; a < r; a++)
+    for (let b = 0; b < r; b++) {
+      let v = 0
+      for (let i = 0; i < n; i++) v += Z[i * r + a] * QZ[i * r + b]
+      H[a * r + b] = v
+    }
+  for (let a = 0; a < r; a++)
+    for (let b = 0; b < a; b++) H[a * r + b] = H[b * r + a] = 0.5 * (H[a * r + b] + H[b * r + a])
+  const values = toFlat(eigh(fromData(H, [r, r])).values)
+  return Math.min(...values) < -tol * (1 + dense.maxAbs(qp.Q.a))
 }
 
 /** Greedily choose inequalities active at x whose rows are independent of E's and each other's. */
@@ -264,7 +311,9 @@ function feasiblePoint(qp: ParsedQP): Float64Array | null {
  * algorithm; `init` takes `{ x0? }`, a feasible start (default: a vertex found by the simplex method). Each step solves the equality-constrained QP on the working set; it then either
  * moves to its minimiser (`step`), stops at a blocking constraint and adds it (`add`), drops the inequality with the
  * most negative multiplier (`drop`), or certifies optimality (`optimal`, all multipliers ≥ 0). It needs Q positive
- * definite on the null space of each working set (e.g. Q positive definite); otherwise it stops `singular`.
+ * definite on the null space of each working set (e.g. Q positive definite). Each step checks that reduced Hessian and
+ * stops `nonconvex` when it has a negative eigenvalue (the subproblem's stationary point is then a saddle, not a
+ * minimiser), or `singular` when the KKT system cannot be solved (zero curvature).
  */
 export function activeSet(
   problem: QuadraticProgram,
@@ -312,8 +361,10 @@ export function activeSet(
       const working = Array.from(s.working.data)
       const g = matVec(qp.Q, x)
       for (let j = 0; j < qp.n; j++) g[j] += qp.c[j]
-      const { p, mu, singular } = equalityQP(qp, workingRows(qp, working), g)
+      const rows = workingRows(qp, working)
       const next = { ...s, t: s.t + 1 }
+      if (negativeCurvature(qp, rows, tol)) return { ...next, status: 'nonconvex' as const, ...flags('nonconvex') }
+      const { p, mu, singular } = equalityQP(qp, rows, g)
       if (singular) return { ...next, status: 'singular' as const, ...flags('singular') }
       const lambda = new Float64Array(qp.A.m)
       working.forEach((i, r) => (lambda[i] = mu[qp.E.m + r]))
@@ -408,6 +459,8 @@ export interface QuadraticInteriorPointState extends Status {
   objective: Scalar
   converged: boolean
   diverged: boolean
+  /** True when the run stopped without converging or diverging: Q is not convex on the null space of E. */
+  terminated: boolean
   status: QuadraticProgramStatus
   problem: ParsedQP
 }
@@ -489,7 +542,7 @@ function qpState(
   s: Float64Array,
   l: Float64Array,
   v: Float64Array,
-  extra: { sigma: Scalar; alpha: Scalar; t: Size; singular: boolean },
+  extra: { sigma: Scalar; alpha: Scalar; t: Size; singular: boolean; nonconvex?: boolean },
 ): QuadraticInteriorPointState {
   const { rd, rp, re } = qpResiduals(qp, x, s, l, v)
   const m = qp.A.m
@@ -497,9 +550,11 @@ function qpState(
   const stationarity = dense.maxAbs(rd)
   const primalResidual = Math.max(dense.maxAbs(rp), dense.maxAbs(re))
   const scale = 1 + Math.max(dense.maxAbs(qp.c), dense.maxAbs(qp.b), dense.maxAbs(qp.e), dense.maxAbs(qp.Q.a))
-  const converged = stationarity < tol * scale && primalResidual < tol * scale && mu < tol * scale
+  const nonconvex = extra.nonconvex === true
+  const converged = !nonconvex && stationarity < tol * scale && primalResidual < tol * scale && mu < tol * scale
   const diverged =
     !converged &&
+    !nonconvex &&
     (extra.singular ||
       !(Math.max(dense.maxAbs(x), dense.maxAbs(l), dense.maxAbs(v)) < 1e12) ||
       !Number.isFinite(stationarity))
@@ -518,7 +573,16 @@ function qpState(
     objective: objectiveOf(qp, x),
     converged,
     diverged,
-    status: converged ? 'optimal' : extra.singular ? 'singular' : diverged ? 'diverged' : 'running',
+    terminated: nonconvex,
+    status: nonconvex
+      ? 'nonconvex'
+      : converged
+        ? 'optimal'
+        : extra.singular
+          ? 'singular'
+          : diverged
+            ? 'diverged'
+            : 'running',
   }
 }
 
@@ -527,7 +591,10 @@ function qpState(
  * Wright, 2006, §16.6) as a traceable algorithm with no start. It starts from x = 0 with slacks and
  * multipliers of 1 (it need not be feasible) and each step is one predictor–corrector iteration; the iterates x trace a
  * path through the interior towards the optimum. The run is done when `converged`; it stops `diverged` when the
- * iterates grow without bound (an infeasible problem) or the Newton system is singular.
+ * iterates grow without bound (an infeasible problem) or the Newton system is singular. The method assumes convexity:
+ * when Q has negative curvature on the null space of E (an eigenvalue of the reduced Hessian ZᵀQZ below −tolerance
+ * relative to Q's scale) the initial state is `nonconvex` and `terminated`, and no step is taken, because the
+ * iterates could converge to a saddle or a maximiser and report it optimal. A singular positive semi-definite Q passes.
  */
 export function quadraticInteriorPoint(
   problem: QuadraticProgram,
@@ -536,6 +603,8 @@ export function quadraticInteriorPoint(
   const qp = parseQP(problem)
   const tol = options.tolerance ?? 1e-9
   const stepFraction = options.stepFraction ?? 0.99
+  // Convexity on the feasible set's directions: Q on null(E). Checked once; it does not change along the path.
+  const nonconvex = negativeCurvature(qp, qp.E, tol)
   return {
     name: 'quadratic-interior-point',
     init: () => {
@@ -544,7 +613,7 @@ export function quadraticInteriorPoint(
       const s = qp.b.map((b) => Math.max(b, 1))
       const l = new Float64Array(qp.A.m).fill(1)
       const v = new Float64Array(qp.E.m)
-      return qpState(qp, tol, x, s, l, v, { sigma: NaN, alpha: 0, t: 0, singular: false })
+      return qpState(qp, tol, x, s, l, v, { sigma: NaN, alpha: 0, t: 0, singular: false, nonconvex })
     },
     step: (st) => {
       if (st.status !== 'running') return st

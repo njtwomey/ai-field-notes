@@ -7,6 +7,7 @@
  * `scipy.sparse.csgraph` (which uses −9999).
  */
 
+import { DomainError, ShapeError } from 'aifn/foundation/errors'
 import { fromData, isTensor, type Tensor } from 'aifn/foundation/tensor'
 import type { Status } from 'aifn/foundation/contracts'
 import { run, type Algorithm } from 'aifn/foundation/trace'
@@ -98,7 +99,7 @@ function readHeuristic(o: ShortestPathProblem): Float64Array {
   if (h === undefined) return new Float64Array(V)
   if (typeof h === 'function') return Float64Array.from({ length: V }, (_, v) => h(v))
   const a = isTensor(h) ? floatsOf(h) : Float64Array.from(h)
-  if (a.length !== V) throw new Error('shortest paths: the heuristic needs one value per node')
+  if (a.length !== V) throw new ShapeError('paths', 'shortest paths: the heuristic needs one value per node')
   return a
 }
 
@@ -114,7 +115,7 @@ function bestFirst(name: string, o: ShortestPathProblem): Algorithm<void, Dijkst
     init: () => {
       const adj = adjacency(o.graph)
       if (adj.some((arcs) => arcs.some((a) => a.weight < 0)))
-        throw new Error(`${name}: edge weights must be non-negative`)
+        throw new DomainError(name, `${name}: edge weights must be non-negative`)
       const V = o.graph.nodes
       const h = readHeuristic(o)
       const d = new Float64Array(V).fill(Infinity)

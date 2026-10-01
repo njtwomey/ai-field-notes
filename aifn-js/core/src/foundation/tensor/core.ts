@@ -6,7 +6,8 @@
  */
 
 import type { Axes, DType, Tensor, TensorBrand, TensorData } from 'aifn/foundation/contracts'
-import { ShapeError } from 'aifn/foundation/errors'
+import { DTypeError, ShapeError } from 'aifn/foundation/errors'
+import { promoteTypes, weakType } from './dtype'
 
 /**
  * The tensor brand: a symbol key that only `fromData` (and the view constructor built on the same header) sets, so
@@ -19,6 +20,7 @@ export const TENSOR: TensorBrand = Symbol.for('aifn.tensor') as TensorBrand
 
 // The tensor types are defined once, in `aifn/foundation/contracts`.
 export type {
+  Axes,
   DType,
   Matrix,
   NestedArray,
@@ -29,20 +31,20 @@ export type {
   Vector,
 } from 'aifn/foundation/contracts'
 
-/** One axis or several; negative axes count from the end. TODO(phase 1): `aifn/foundation/contracts`' `Axes` under that name. */
-export type Axis = Axes
-
-/** Allocate storage of a dtype. */
+/** Allocate storage for `size` elements of a dtype (2·size doubles for complex128, interleaved re, im). */
 export function allocate(dtype: DType, size: number): TensorData {
   if (dtype === 'float64') return new Float64Array(size)
+  if (dtype === 'complex128') return new Float64Array(2 * size)
   if (dtype === 'float32') return new Float32Array(size)
+  if (dtype === 'bool') return new Uint8Array(size)
   return new Int32Array(size)
 }
 
-/** The dtype of a typed array. */
+/** The dtype a typed array holds by default (a Float64Array is float64 unless complex128 is said explicitly). */
 export function dtypeOf(data: TensorData): DType {
   if (data instanceof Float64Array) return 'float64'
   if (data instanceof Float32Array) return 'float32'
+  if (data instanceof Uint8Array) return 'bool'
   return 'int32'
 }
 
@@ -78,24 +80,55 @@ export function checkShape(shape: readonly number[], where: string): void {
 }
 
 /**
- * Wrap a typed array as a tensor without copying. `shape` defaults to `[data.length]`; strides are row-major.
+ * Wrap a typed array as a tensor without copying. `shape` defaults to all of `data` as a vector; strides are
+ * row-major. `dtype` defaults to the typed array's own (`dtypeOf`); pass `'complex128'` for a Float64Array of
+ * interleaved (re, im) pairs, which holds `data.length / 2` elements.
  *
  * The caller hands over `data`: it must not be mutated afterwards, since tensors are immutable by convention.
  */
-export function fromData(data: TensorData, shape: readonly number[] = [data.length]): Tensor {
-  checkShape(shape, 'fromData')
-  if (sizeOf(shape) !== data.length) {
-    throw new ShapeError('fromData', `fromData: ${data.length} values do not fill shape [${shape.join(', ')}]`, [shape])
+export function fromData(data: TensorData, shape?: readonly number[], dtype: DType = dtypeOf(data)): Tensor {
+  const width = dtype === 'complex128' ? 2 : 1
+  if (dtype !== dtypeOf(data) && !(dtype === 'complex128' && data instanceof Float64Array))
+    throw new DTypeError('fromData', `fromData: a ${data.constructor.name} cannot hold ${dtype}`, [dtype])
+  const dims = shape ?? [data.length / width]
+  checkShape(dims, 'fromData')
+  if (sizeOf(dims) * width !== data.length) {
+    throw new ShapeError(
+      'fromData',
+      `fromData: ${data.length} values do not fill shape [${dims.join(', ')}] of ${dtype}`,
+      [dims],
+    )
   }
-  return { [TENSOR]: true, shape: [...shape], strides: rowMajorStrides(shape), offset: 0, dtype: dtypeOf(data), data }
+  return { [TENSOR]: true, shape: [...dims], strides: rowMajorStrides(dims), offset: 0, dtype, data }
 }
 
 /**
  * A tensor header over the data of an existing tensor; used internally to build views. It is the only other place a
- * tensor is constructed, and it brands its result as `fromData` does.
+ * tensor is constructed, and it brands its result as `fromData` does. `dtype` differs from `t`'s only for the float64
+ * views of a complex tensor's parts (`complexPartView`).
  */
-export function view(t: Tensor, shape: readonly number[], strides: readonly number[], offset: number): Tensor {
-  return { [TENSOR]: true, shape: [...shape], strides: [...strides], offset, dtype: t.dtype, data: t.data }
+export function view(
+  t: Tensor,
+  shape: readonly number[],
+  strides: readonly number[],
+  offset: number,
+  dtype: DType = t.dtype,
+): Tensor {
+  return { [TENSOR]: true, shape: [...shape], strides: [...strides], offset, dtype, data: t.data }
+}
+
+/**
+ * The real (`part` 0) or imaginary (`part` 1) parts of a complex128 tensor as a float64 view of the same storage:
+ * strides doubled, offset 2o + part (design K §8.1). Zero-copy.
+ */
+export function complexPartView(z: Tensor, part: 0 | 1): Tensor {
+  return view(
+    z,
+    z.shape,
+    z.strides.map((s) => 2 * s),
+    2 * z.offset + part,
+    'float64',
+  )
 }
 
 /** True when a value is a tensor (made by `fromData` or a view of one): it carries the brand. */
@@ -111,7 +144,10 @@ function isTensorShaped(x: object): x is Omit<Tensor, typeof TENSOR> {
     Array.isArray(t.strides) &&
     typeof t.offset === 'number' &&
     typeof t.dtype === 'string' &&
-    (t.data instanceof Float64Array || t.data instanceof Float32Array || t.data instanceof Int32Array)
+    (t.data instanceof Float64Array ||
+      t.data instanceof Float32Array ||
+      t.data instanceof Int32Array ||
+      t.data instanceof Uint8Array)
   )
 }
 
@@ -124,7 +160,15 @@ export function revive<T>(x: T): T {
   if (typeof x !== 'object' || x === null || isTensor(x)) return x
   if (isTensorShaped(x)) {
     const t = x as Omit<Tensor, typeof TENSOR>
-    return view(fromData(t.data), t.shape, t.strides, t.offset) as T
+    const out: Tensor = {
+      [TENSOR]: true,
+      shape: [...t.shape],
+      strides: [...t.strides],
+      offset: t.offset,
+      dtype: t.dtype,
+      data: t.data,
+    }
+    return out as T
   }
   if (Array.isArray(x)) return x.map((v) => revive(v as unknown)) as T
   const proto = Object.getPrototypeOf(x) as unknown
@@ -148,6 +192,20 @@ export function isContiguous(t: Tensor): boolean {
   return true
 }
 
+/**
+ * A zero-copy, read-only view of a tensor's elements in row-major order (design-core §3.1 `readonly(t)`): a subarray of
+ * its storage when the tensor is contiguous (any offset), else null, so a hot loop reads a tensor without the copy
+ * `toFlat` makes and falls back to a copy itself when it gets null. complex128 views hold interleaved (re, im) pairs.
+ * Tensors are immutable: never write to the result.
+ */
+export function readonlyData(t: Tensor): TensorData | null {
+  if (!isContiguous(t)) return null
+  const w = t.dtype === 'complex128' ? 2 : 1
+  const size = t.shape.reduce((a, b) => a * b, 1)
+  if (t.offset === 0 && t.data.length === size * w) return t.data
+  return t.data.subarray(t.offset * w, (t.offset + size) * w) as TensorData
+}
+
 /** Normalise an axis (negative counts from the end) and check its range. */
 export function normaliseAxis(axis: number, rank: number, where: string): number {
   const a = axis < 0 ? axis + rank : axis
@@ -157,7 +215,7 @@ export function normaliseAxis(axis: number, rank: number, where: string): number
 }
 
 /** Normalise one or several axes; `undefined` or `null` means every axis. Duplicates are an error. */
-export function normaliseAxes(axis: Axis | null | undefined, rank: number, where: string): number[] {
+export function normaliseAxes(axis: Axes | null | undefined, rank: number, where: string): number[] {
   if (axis === undefined || axis === null) return Array.from({ length: rank }, (_, k) => k)
   const list = typeof axis === 'number' ? [axis] : [...axis]
   const out = list.map((a) => normaliseAxis(a, rank, where))
@@ -250,41 +308,48 @@ export function forEachOffset2(
   }
 }
 
-/** Copy a tensor's elements, in row-major order, into a new typed array of the given dtype. */
+/**
+ * Copy a tensor's elements, in row-major order, into a new typed array of the given dtype. Complex128 storage is
+ * interleaved (two slots per element); a real tensor converted to complex128 gets zero imaginary parts; conversion to
+ * bool maps non-zero to 1. Complex to a real dtype is a `DTypeError`: take `realPart`, `imagPart` or `abs` instead.
+ */
 export function flatData(t: Tensor, dtype: DType = t.dtype): TensorData {
   const n = size(t)
-  if (isContiguous(t) && dtype === t.dtype) return t.data.slice(t.offset, t.offset + n)
-  const out = allocate(dtype, n)
   const src = t.data
-  forEachOffset(t.shape, t.strides, t.offset, (off, k) => {
-    out[k] = src[off]
-  })
+  if (t.dtype === 'complex128') {
+    if (dtype !== 'complex128')
+      throw new DTypeError('astype', `astype: cannot convert complex128 to ${dtype}; take realPart, imagPart or abs`, [
+        t.dtype,
+        dtype,
+      ])
+    if (isContiguous(t)) return src.slice(2 * t.offset, 2 * (t.offset + n))
+    const out = new Float64Array(2 * n)
+    forEachOffset(t.shape, t.strides, t.offset, (off, k) => {
+      out[2 * k] = src[2 * off]
+      out[2 * k + 1] = src[2 * off + 1]
+    })
+    return out
+  }
+  if (isContiguous(t) && dtype === t.dtype) return src.slice(t.offset, t.offset + n)
+  const out = allocate(dtype, n)
+  if (dtype === 'complex128') forEachOffset(t.shape, t.strides, t.offset, (off, k) => (out[2 * k] = src[off]))
+  else if (dtype === 'bool') forEachOffset(t.shape, t.strides, t.offset, (off, k) => (out[k] = src[off] !== 0 ? 1 : 0))
+  else forEachOffset(t.shape, t.strides, t.offset, (off, k) => (out[k] = src[off]))
   return out
 }
 
-/** The elements in row-major order as a Float64Array; no copy when the tensor is contiguous float64 at offset 0. */
+/** The elements in row-major order as a Float64Array; no copy (`readonlyData`) when the tensor is contiguous float64. */
 export function float64Data(t: Tensor): Float64Array {
-  if (t.dtype === 'float64' && isContiguous(t) && t.offset === 0 && t.data.length === size(t)) {
-    return t.data as Float64Array
-  }
-  return flatData(t, 'float64') as Float64Array
+  if (t.dtype === 'complex128') throw new DTypeError('float64Data', 'float64Data: expected real values, got complex128')
+  const view = t.dtype === 'float64' ? readonlyData(t) : null
+  return view !== null ? (view as Float64Array) : (flatData(t, 'float64') as Float64Array)
 }
 
-/**
- * The result dtype of combining two dtypes: int32 < float32 < float64, except that int32 with float32 gives float64
- * (float32 cannot hold every int32 exactly), as in NumPy.
- */
-export function promote(a: DType, b: DType): DType {
-  if (a === b) return a
-  if (a === 'float64' || b === 'float64') return 'float64'
-  return 'float64' // int32 with float32
-}
+/** The result dtype of combining two dtypes: the promotion table of `dtype.ts` (`promoteTypes`). */
+export const promote = promoteTypes
 
-/** The dtype a plain number takes next to a tensor of dtype `other`: NumPy's "weak scalar" rule. */
-export function scalarDType(value: number, other: DType): DType {
-  if (other === 'int32') return Number.isInteger(value) ? 'int32' : 'float64'
-  return other
-}
+/** The dtype a plain number takes next to a tensor of dtype `other`: NumPy's weak scalar rule (`weakType`). */
+export const scalarDType = weakType
 
 /** Format a shape for error messages. */
 export function showShape(shape: readonly number[]): string {

@@ -14,7 +14,10 @@ import type {
   Supervised,
 } from 'aifn/learning/estimators'
 import { fromData, type Tensor } from 'aifn/foundation/tensor'
+import { rowDistance, type PairwiseMetric } from 'aifn/numerics/linalg'
 import { classLabels, inputs, matrix, probabilityModel, targets } from '../util'
+import { defineModel } from 'aifn/learning/estimators'
+import { int, oneOf, space } from 'aifn/foundation/space'
 
 /** Distances between points: Minkowski of order p (Euclidean p = 2, Manhattan p = 1) or Chebyshev (p = ∞). */
 export type Metric = 'euclidean' | 'manhattan' | 'chebyshev' | { minkowski: number }
@@ -37,21 +40,14 @@ export interface Neighbours {
   distance: Tensor
 }
 
+/** The row-pair distance of a k-NN metric: linalg's `rowDistance` (Minkowski orders map to its named metrics). */
 function distanceFn(metric: Metric): (a: Float64Array, i: number, b: Float64Array, j: number, d: number) => number {
-  const p =
-    metric === 'euclidean' ? 2 : metric === 'manhattan' ? 1 : metric === 'chebyshev' ? Infinity : metric.minkowski
+  if (typeof metric === 'string') return (a, i, b, j, d) => rowDistance(a, i, b, j, d, metric)
+  const p = metric.minkowski
   if (!(p >= 1)) throw new Error('kNearestNeighbours: the Minkowski order must be at least 1')
-  return (a, i, b, j, d) => {
-    let s = 0
-    for (let c = 0; c < d; c++) {
-      const t = Math.abs(a[i * d + c] - b[j * d + c])
-      if (p === Infinity) s = Math.max(s, t)
-      else if (p === 1) s += t
-      else if (p === 2) s += t * t
-      else s += t ** p
-    }
-    return p === Infinity || p === 1 ? s : p === 2 ? Math.sqrt(s) : s ** (1 / p)
-  }
+  const named: PairwiseMetric =
+    p === Infinity ? 'chebyshev' : p === 1 ? 'manhattan' : p === 2 ? 'euclidean' : 'minkowski'
+  return (a, i, b, j, d) => rowDistance(a, i, b, j, d, named, p)
 }
 
 /** Exhaustive k-nearest-neighbour search of the rows of `q` among the rows of `x`. */
@@ -252,3 +248,43 @@ export function kNearestNeighboursRegression(
     },
   }
 }
+
+// ── Registry ─────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+defineModel(
+  {
+    key: 'kNearestNeighbours',
+    module: 'learning/neighbours',
+    name: 'k-nearest neighbours',
+    summary: 'Majority (or distance-weighted) vote of the k nearest training points.',
+    task: 'classification',
+    capabilities: ['forward', 'decide', 'predictive', 'score'],
+    hyper: space({
+      k: int(1, 50, { default: 5 }),
+      weights: oneOf(['uniform', 'distance']),
+      metric: oneOf(['euclidean', 'manhattan', 'chebyshev']),
+    }),
+    notes: ['k-nearest-neighbours'],
+    cite: ['cover1967'],
+  },
+  kNearestNeighbours,
+)
+
+defineModel(
+  {
+    key: 'kNearestNeighboursRegression',
+    module: 'learning/neighbours',
+    name: 'k-nearest neighbours regression',
+    summary: 'The (distance-weighted) mean target of the k nearest training points.',
+    task: 'regression',
+    capabilities: ['forward', 'decide', 'expect'],
+    hyper: space({
+      k: int(1, 50, { default: 5 }),
+      weights: oneOf(['uniform', 'distance']),
+      metric: oneOf(['euclidean', 'manhattan', 'chebyshev']),
+    }),
+    notes: ['k-nearest-neighbours'],
+    cite: ['cover1967'],
+  },
+  kNearestNeighboursRegression,
+)

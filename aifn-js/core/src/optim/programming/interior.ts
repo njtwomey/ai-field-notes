@@ -1,12 +1,15 @@
 /**
  * A primal–dual interior-point method for linear programs: Mehrotra's predictor–corrector (Mehrotra, 1992, "On the
- * implementation of a primal-dual interior point method", SIAM J. Optimization 2(4)), as in Nocedal and Wright, 2006,
- * "Numerical Optimization", Algorithm 14.3, with the starting point of §14.2. It works on the standard form
- * min cᵀz s.t. Az = b, z ≥ 0 and follows the central path z∘s = μ1 towards μ = 0. Every iterate is recorded, and
- * `lpCentralPath` computes points on the exact central path for comparison.
+ * implementation of a primal-dual interior point method", SIAM J. Optimization 2(4); Nocedal and Wright, 2006,
+ * "Numerical Optimization", Algorithm 14.3) on the homogeneous self-dual embedding (Xu, Hung & Ye, 1996, "A simplified
+ * homogeneous and self-dual linear programming algorithm and its implementation", Ann. Oper. Res. 62; Andersen &
+ * Andersen, 2000), which tells an infeasible problem from an unbounded one and certifies both. It works on the
+ * standard form min cᵀz s.t. Az = b, z ≥ 0 and follows the central path z∘s = μ1 towards μ = 0. Every iterate is
+ * recorded, and `lpCentralPath` computes points on the exact central path (from Mehrotra's starting point of §14.2).
  */
 
 import { dense, type Tensor } from 'aifn/foundation/tensor'
+import { factorDense, solveFactored } from 'aifn/numerics/linalg'
 import type { Algorithm } from 'aifn/foundation/trace'
 import { run } from 'aifn/foundation/trace'
 import type { Scalar, Size, Status, VectorLike } from 'aifn/foundation/contracts'
@@ -30,17 +33,24 @@ export interface InteriorPointOptions {
   stepFraction?: Scalar
 }
 
-/** One iterate of the interior-point method. */
+/** Where the interior-point method stands: still iterating, or what the embedding has proved. */
+export type InteriorPointStatus = 'running' | 'optimal' | 'infeasible' | 'unbounded'
+
+/** One iterate of the interior-point method (on the homogeneous self-dual embedding). */
 export interface InteriorPointState extends Status {
-  /** The primal iterate in standard form, length N (strictly positive). */
+  /** The homogeneous primal iterate in standard form, length N (strictly positive); the solution estimate is z/τ. */
   z: Tensor
-  /** Dual variables of the standard-form rows, length m. */
+  /** Homogeneous dual variables of the standard-form rows, length m (estimate y/τ). */
   y: Tensor
-  /** Dual slacks (reduced costs), length N (strictly positive). */
+  /** Homogeneous dual slacks (reduced costs), length N (strictly positive; estimate s/τ). */
   s: Tensor
-  /** The primal iterate in the original variables, length n: the point drawn on the central path. */
+  /** The embedding's scale τ > 0: → a positive limit at an optimum, → 0 when the problem has none. */
+  tau: Scalar
+  /** The embedding's gap variable κ ≥ 0: → 0 at an optimum, → bᵀy − cᵀz > 0 when infeasible or unbounded. */
+  kappa: Scalar
+  /** The primal estimate z/τ in the original variables, length n: the point drawn on the central path. */
   x: Tensor
-  /** The duality measure μ = zᵀs / N. */
+  /** The duality measure μ = (zᵀs + τκ) / (N + 1). */
   mu: Scalar
   /** The centring parameter σ of the last step (Mehrotra's (μ_aff/μ)³). */
   sigma: Scalar
@@ -55,12 +65,23 @@ export interface InteriorPointState extends Status {
   gap: Scalar
   /** cᵀx of the current iterate. */
   objective: Scalar
+  /** `optimal` once converged; `infeasible` or `unbounded` once certified (the run then stops, `terminated`). */
+  status: InteriorPointStatus
+  /**
+   * The certificate when there is no optimum: for `unbounded`, a unit ray d in the original variables with cᵀd < 0
+   * along which every constraint holds; for `infeasible`, the unit Farkas vector y on the standard-form rows (Aᵀy ≤ 0,
+   * bᵀy > 0). Null otherwise.
+   */
+  certificate: Tensor | null
   converged: boolean
-  /** True when the normal equations became singular or the iterates grew without bound (infeasible or unbounded). */
+  /** True on numerical failure (singular normal equations, non-finite iterates), never for infeasibility. */
   diverged: boolean
+  terminated: boolean
   /** Rows of the standard form kept after removing linearly dependent ones. */
   rowsKept: Tensor
   standard: StandardForm
+  /** The starting point's residual norms and μ, for the relative infeasibility tests (internal). */
+  initial: { rp: Scalar; rd: Scalar; rg: Scalar; mu: Scalar }
 }
 
 /** The reduced standard form: rows made linearly independent. */
@@ -148,49 +169,6 @@ function residuals(R: Reduced, z: Float64Array, y: Float64Array, s: Float64Array
   return { rb, rc }
 }
 
-/** Assemble a state and its convergence measures. */
-function makeState(
-  base: Pick<InteriorPointState, 'standard' | 'rowsKept'>,
-  tolerance: Scalar,
-  R: Reduced,
-  z: Float64Array,
-  y: Float64Array,
-  s: Float64Array,
-  extra: Pick<InteriorPointState, 't' | 'sigma' | 'alphaPrimal' | 'alphaDual'> & { singular?: boolean },
-): InteriorPointState {
-  const { rb, rc } = residuals(R, z, y, s)
-  const primalResidual = dense.norm(rb) / (1 + dense.norm(R.b))
-  const dualResidual = dense.norm(rc) / (1 + dense.norm(R.c))
-  const cz = dense.dot(R.c, z)
-  const gap = Math.abs(cz - dense.dot(R.b, y)) / (1 + Math.abs(cz))
-  const x = toOriginal(base.standard, z)
-  const converged = primalResidual < tolerance && dualResidual < tolerance && gap < tolerance
-  const big = Math.max(dense.maxAbs(z), dense.maxAbs(y), dense.maxAbs(s))
-  const diverged =
-    !converged &&
-    (extra.singular === true || !(big < 1e12) || [primalResidual, dualResidual, gap].some((v) => !Number.isFinite(v)))
-  let objective = 0
-  for (let j = 0; j < x.length; j++) objective += base.standard.lp.c[j] * x[j]
-  return {
-    ...base,
-    sigma: extra.sigma,
-    alphaPrimal: extra.alphaPrimal,
-    alphaDual: extra.alphaDual,
-    t: extra.t,
-    z: vector(z),
-    y: vector(y),
-    s: vector(s),
-    x: vector(x),
-    mu: R.N ? dense.dot(z, s) / R.N : 0,
-    primalResidual,
-    dualResidual,
-    gap,
-    objective,
-    converged,
-    diverged,
-  }
-}
-
 /** Mehrotra's starting point (Nocedal and Wright, 2006, §14.2): least-norm z and least-squares y, shifted inside. */
 function startingPoint(R: Reduced): { z: Float64Array; y: Float64Array; s: Float64Array } {
   const ones = new Float64Array(R.N).fill(1)
@@ -224,6 +202,177 @@ function startingPoint(R: Reduced): { z: Float64Array; y: Float64Array; s: Float
   return { z, y, s }
 }
 
+/** The residual norms of the starting point and its μ, for the relative infeasibility tests. */
+type Initial = { rp: number; rd: number; rg: number; mu: number }
+
+/** Residuals of the homogeneous self-dual model at (z, y, s, τ, κ). */
+function hsdResiduals(R: Reduced, z: Float64Array, y: Float64Array, s: Float64Array, tau: number, kappa: number) {
+  const rp = Av(R, z)
+  for (let i = 0; i < R.m; i++) rp[i] = R.b[i] * tau - rp[i]
+  const rd = ATv(R, y)
+  for (let j = 0; j < R.N; j++) rd[j] = R.c[j] * tau - rd[j] - s[j]
+  const rg = dense.dot(R.c, z) - dense.dot(R.b, y) + kappa
+  const mu = (dense.dot(z, s) + tau * kappa) / (R.N + 1)
+  return { rp, rd, rg, mu }
+}
+
+/** Assemble a state: the solution estimate (z, y, s)/τ, its convergence measures and the infeasibility tests. */
+function makeState(
+  base: Pick<InteriorPointState, 'standard' | 'rowsKept'>,
+  tolerance: Scalar,
+  R: Reduced,
+  z: Float64Array,
+  y: Float64Array,
+  s: Float64Array,
+  tau: number,
+  kappa: number,
+  initial: Initial | null,
+  extra: Pick<InteriorPointState, 't' | 'sigma' | 'alphaPrimal' | 'alphaDual'> & { singular?: boolean },
+): InteriorPointState {
+  const r = hsdResiduals(R, z, y, s, tau, kappa)
+  const init = initial ?? { rp: dense.norm(r.rp), rd: dense.norm(r.rd), rg: Math.abs(r.rg), mu: r.mu }
+  const zt = dense.scale(1 / tau, z)
+  const yt = dense.scale(1 / tau, y)
+  const primalResidual = dense.norm(r.rp) / tau / (1 + dense.norm(R.b))
+  const dualResidual = dense.norm(r.rd) / tau / (1 + dense.norm(R.c))
+  const cz = dense.dot(R.c, zt)
+  const gap = Math.abs(cz - dense.dot(R.b, yt)) / (1 + Math.abs(cz))
+  const x = toOriginal(base.standard, zt)
+  const converged = primalResidual < tolerance && dualResidual < tolerance && gap < tolerance
+  // Andersen & Andersen's tests (as scipy's former `_linprog_ip`): the model's residuals or μ have shrunk while τ → 0
+  // relative to κ, so the solution of the embedding is a certificate of infeasibility rather than an optimum.
+  const rhoP = dense.norm(r.rp) / Math.max(1, init.rp)
+  const rhoD = dense.norm(r.rd) / Math.max(1, init.rd)
+  const rhoG = Math.abs(r.rg) / Math.max(1, init.rg)
+  const rhoMu = r.mu / init.mu
+  const certified =
+    !converged &&
+    ((rhoP < tolerance && rhoD < tolerance && rhoG < tolerance && tau < tolerance * Math.max(1, kappa)) ||
+      (rhoMu < tolerance && tau < tolerance * Math.min(1, kappa)))
+  const by = dense.dot(R.b, y)
+  const czRaw = dense.dot(R.c, z)
+  // κ = bᵀy − cᵀz > 0 at the limit, so one of the two certificates holds: bᵀy > 0 with Aᵀy ≤ 0 (no z ≥ 0 has Az = b)
+  // or cᵀz < 0 with Az = 0, z ≥ 0 (a ray along which the objective decreases without bound).
+  const status: InteriorPointStatus = converged
+    ? 'optimal'
+    : certified
+      ? by > 0
+        ? 'infeasible'
+        : czRaw < 0
+          ? 'unbounded'
+          : 'running'
+      : 'running'
+  let certificate: Tensor | null = null
+  if (status === 'infeasible') certificate = vector(dense.scale(1 / dense.norm(y), y))
+  if (status === 'unbounded') certificate = vector(toOriginal(base.standard, dense.scale(1 / dense.norm(z), z), false))
+  const big = Math.max(dense.maxAbs(zt), dense.maxAbs(yt))
+  const diverged =
+    status === 'running' &&
+    (extra.singular === true ||
+      !Number.isFinite(big) ||
+      [primalResidual, dualResidual, gap, tau, kappa].some((v) => !Number.isFinite(v)))
+  let objective = 0
+  for (let j = 0; j < x.length; j++) objective += base.standard.lp.c[j] * x[j]
+  return {
+    ...base,
+    sigma: extra.sigma,
+    alphaPrimal: extra.alphaPrimal,
+    alphaDual: extra.alphaDual,
+    t: extra.t,
+    z: vector(z),
+    y: vector(y),
+    s: vector(s),
+    tau,
+    kappa,
+    x: vector(x),
+    mu: r.mu,
+    primalResidual,
+    dualResidual,
+    gap,
+    objective,
+    status,
+    certificate,
+    converged,
+    diverged,
+    terminated: status === 'infeasible' || status === 'unbounded',
+    initial: init,
+  }
+}
+
+/**
+ * The Newton direction of the homogeneous self-dual model with centring γ, residual reduction η and second-order
+ * corrections (cz, cτκ), by the normal equations M = A D Aᵀ, D = Z S⁻¹, solved twice with one factorisation:
+ * M p = b + A D c and M q = η r_p + A D (η r_d − Z⁻¹ r_zs); then Δy = q + p Δτ, Δz = u + v Δτ, and Δτ from the gap row.
+ */
+function hsdDirection(
+  R: Reduced,
+  z: Float64Array,
+  s: Float64Array,
+  tau: number,
+  kappa: number,
+  r: ReturnType<typeof hsdResiduals>,
+  gamma: number,
+  eta: number,
+  corr: { zs: Float64Array | null; tk: number },
+) {
+  const { m, N } = R
+  const d = z.map((zj, j) => zj / s[j])
+  // r_zs = γμ1 − Z S 1 − corr, r_tk = γμ − τκ − corr.
+  const rzs = new Float64Array(N)
+  for (let j = 0; j < N; j++) rzs[j] = gamma * r.mu - z[j] * s[j] - (corr.zs ? corr.zs[j] : 0)
+  const rtk = gamma * r.mu - tau * kappa - corr.tk
+  const M = normalMatrix(R, d)
+  let factor = factorDense(M, m)
+  if (factor.singular) {
+    // Near the end of an infeasible run D = Z S⁻¹ spans many orders of magnitude and A D Aᵀ loses rank numerically: a
+    // tiny diagonal shift (primal regularisation, as practical codes use) keeps the direction defined.
+    let big = 0
+    for (let i = 0; i < m; i++) big = Math.max(big, M[i * m + i])
+    for (let i = 0; i < m; i++) M[i * m + i] += 1e-12 * Math.max(big, 1)
+    factor = factorDense(M, m)
+  }
+  const dc = Float64Array.from(R.c, (c, j) => d[j] * c)
+  const rhsP = Av(R, dc)
+  for (let i = 0; i < m; i++) rhsP[i] += R.b[i]
+  const w = new Float64Array(N)
+  for (let j = 0; j < N; j++) w[j] = d[j] * (eta * r.rd[j] - rzs[j] / z[j])
+  const rhsQ = Av(R, w)
+  for (let i = 0; i < m; i++) rhsQ[i] += eta * r.rp[i]
+  const p = solveFactored(factor, rhsP)
+  const q = solveFactored(factor, rhsQ)
+  if (p === null || q === null) return null
+  const Atp = ATv(R, p)
+  const Atq = ATv(R, q)
+  const u = new Float64Array(N)
+  const v = new Float64Array(N)
+  for (let j = 0; j < N; j++) {
+    u[j] = d[j] * (Atq[j] - eta * r.rd[j] + rzs[j] / z[j])
+    v[j] = d[j] * (Atp[j] - R.c[j])
+  }
+  const denom = -dense.dot(R.c, v) + dense.dot(R.b, p) + kappa / tau
+  const dtau = (eta * r.rg + dense.dot(R.c, u) - dense.dot(R.b, q) + rtk / tau) / denom
+  const dz = Float64Array.from(u, (uj, j) => uj + v[j] * dtau)
+  const dy = Float64Array.from(q, (qi, i) => qi + p[i] * dtau)
+  const ds = Float64Array.from(dz, (dzj, j) => (rzs[j] - s[j] * dzj) / z[j])
+  const dkappa = (rtk - kappa * dtau) / tau
+  if (![dtau, dkappa].every(Number.isFinite) || !dense.allFinite(dz) || !dense.allFinite(ds)) return null
+  return { dz, dy, ds, dtau, dkappa }
+}
+
+/** The largest α ≤ 1 keeping z, s, τ, κ non-negative along a direction. */
+function hsdStep(
+  z: Float64Array,
+  s: Float64Array,
+  tau: number,
+  kappa: number,
+  dir: { dz: Float64Array; ds: Float64Array; dtau: number; dkappa: number },
+): number {
+  let a = Math.min(maxStep(z, dir.dz), maxStep(s, dir.ds))
+  if (dir.dtau < 0) a = Math.min(a, -tau / dir.dtau)
+  if (dir.dkappa < 0) a = Math.min(a, -kappa / dir.dkappa)
+  return a
+}
+
 /** The reduced problem is held by the state implicitly; rebuild it from the standard form and the kept rows. */
 function reducedOf(state: InteriorPointState): Reduced {
   const sf = state.standard
@@ -234,11 +383,18 @@ function reducedOf(state: InteriorPointState): Reduced {
 }
 
 /**
- * The primal–dual interior-point method for the linear program `problem` (Mehrotra's predictor–corrector; Nocedal and
- * Wright, 2006, Algorithm 14.3) as a traceable algorithm with no start. Each step is one predictor–corrector
- * iteration; `x` records the iterate in the original variables. The run stops `converged` at an optimum and
- * `diverged` when the problem is infeasible or unbounded (the iterates grow without bound; use the simplex method to
- * tell which) or inconsistent equality constraints are found.
+ * The primal–dual interior-point method for the linear program `problem` on the homogeneous self-dual embedding (Ye,
+ * Todd & Mizuno, 1994; Xu, Hung & Ye, 1996; Andersen & Andersen, 2000, "The MOSEK interior point optimizer"), with
+ * Mehrotra's predictor–corrector, as a traceable algorithm with no start. The embedding adds τ, κ ≥ 0 and solves
+ *
+ *   Az = bτ,  Aᵀy + s = cτ,  bᵀy − cᵀz = κ,  z∘s = 0,  τκ = 0,
+ *
+ * which always has a strictly complementary solution, reached from (z, y, s, τ, κ) = (1, 0, 1, 1, 1) without a
+ * feasible start. If τ > 0 there, (z, y, s)/τ is an optimal primal–dual pair (`status: 'optimal'`). If τ = 0 then
+ * κ = bᵀy − cᵀz > 0, and y or z certifies that there is no optimum: bᵀy > 0 with Aᵀy ≤ 0 proves the primal infeasible
+ * (Farkas; `'infeasible'`), and cᵀz < 0 with Az = 0, z ≥ 0 is a ray of unbounded descent (`'unbounded'`, the ray in
+ * `certificate`). Each step is one predictor–corrector iteration with a common step length for all variables; `x` is
+ * the current estimate z/τ in the original variables. `diverged` is kept for numerical failure only.
  */
 export function linearInteriorPoint(
   problem: LinearProgram,
@@ -252,63 +408,78 @@ export function linearInteriorPoint(
     init: () => {
       const { reduced: R, inconsistent } = reduce(sf)
       const base = { standard: sf, rowsKept: intTensor(R.kept) }
-      const { z, y, s } = startingPoint(R)
-      return makeState(base, tolerance, R, z, y, s, {
+      const ones = () => new Float64Array(R.N).fill(1)
+      const state = makeState(base, tolerance, R, ones(), new Float64Array(R.m), ones(), 1, 1, null, {
         t: 0,
         sigma: NaN,
         alphaPrimal: 0,
         alphaDual: 0,
-        singular: inconsistent,
       })
+      // Equality rows that contradict each other (found while removing dependent rows) already prove infeasibility.
+      return inconsistent ? { ...state, status: 'infeasible', terminated: true } : state
     },
     step: (state) => {
-      if (state.converged || state.diverged) return state
+      if (state.status !== 'running' || state.diverged) return state
       const R = reducedOf(state)
       const z = Float64Array.from(state.z.data)
       const y = Float64Array.from(state.y.data)
       const s = Float64Array.from(state.s.data)
+      let { tau, kappa } = state
       const N = R.N
-      const { rb, rc } = residuals(R, z, y, s)
-      const mu = N ? dense.dot(z, s) / N : 0
-      // Predictor: the affine-scaling direction (σ = 0).
-      const rzs = z.map((zj, j) => zj * s[j])
-      const aff = newton(R, z, s, rb, rc, rzs)
-      const ap = maxStep(z, aff.dz)
-      const ad = maxStep(s, aff.ds)
-      let muAff = 0
-      for (let j = 0; j < N; j++) muAff += (z[j] + ap * aff.dz[j]) * (s[j] + ad * aff.ds[j])
-      muAff = N ? muAff / N : 0
-      const sigma = mu > 0 ? Math.min(1, (muAff / mu) ** 3) : 0
-      // Corrector: re-centre towards σμ and correct for the second-order term Δz_aff ∘ Δs_aff.
-      for (let j = 0; j < N; j++) rzs[j] = z[j] * s[j] + aff.dz[j] * aff.ds[j] - sigma * mu
-      const dir = newton(R, z, s, rb, rc, rzs)
-      const eta = stepFraction
-      const alphaPrimal = Math.min(1, eta * maxStep(z, dir.dz))
-      const alphaDual = Math.min(1, eta * maxStep(s, dir.ds))
+      const r = hsdResiduals(R, z, y, s, tau, kappa)
+      // Predictor: the affine-scaling direction (γ = 0, η = 1).
+      const aff = hsdDirection(R, z, s, tau, kappa, r, 0, 1, { zs: null, tk: 0 })
+      const fail = () =>
+        makeState(state, tolerance, R, z, y, s, tau, kappa, state.initial, {
+          t: state.t + 1,
+          sigma: NaN,
+          alphaPrimal: 0,
+          alphaDual: 0,
+          singular: true,
+        })
+      if (!aff) return fail()
+      const aAff = hsdStep(z, s, tau, kappa, aff)
+      let muAff = (tau + aAff * aff.dtau) * (kappa + aAff * aff.dkappa)
+      for (let j = 0; j < N; j++) muAff += (z[j] + aAff * aff.dz[j]) * (s[j] + aAff * aff.ds[j])
+      muAff /= N + 1
+      const sigma = r.mu > 0 ? Math.min(1, Math.max(0, muAff / r.mu) ** 3) : 0
+      // Corrector: centre towards σμ, reduce the residuals by 1 − σ, and correct for Δz_aff∘Δs_aff, Δτ_aff Δκ_aff.
+      const corr = { zs: Float64Array.from(aff.dz, (v, j) => v * aff.ds[j]), tk: aff.dtau * aff.dkappa }
+      const dir = hsdDirection(R, z, s, tau, kappa, r, sigma, 1 - sigma, corr)
+      if (!dir) return fail()
+      const alpha = Math.min(1, stepFraction * hsdStep(z, s, tau, kappa, dir))
       for (let j = 0; j < N; j++) {
-        z[j] += alphaPrimal * dir.dz[j]
-        s[j] += alphaDual * dir.ds[j]
+        z[j] += alpha * dir.dz[j]
+        s[j] += alpha * dir.ds[j]
       }
-      for (let i = 0; i < R.m; i++) y[i] += alphaDual * dir.dy[i]
-      return makeState(state, tolerance, R, z, y, s, {
+      for (let i = 0; i < R.m; i++) y[i] += alpha * dir.dy[i]
+      tau += alpha * dir.dtau
+      kappa += alpha * dir.dkappa
+      return makeState(state, tolerance, R, z, y, s, tau, kappa, state.initial, {
         t: state.t + 1,
         sigma,
-        alphaPrimal,
-        alphaDual,
-        singular: aff.singular || dir.singular,
+        alphaPrimal: alpha,
+        alphaDual: alpha,
       })
     },
+    done: (s) => s.status !== 'running' || s.diverged,
   }
 }
 
-/** Solve a linear program by the interior-point method (a `run` of `linearInteriorPoint`); `linprog`'s path. */
+/**
+ * Solve a linear program by the interior-point method (a `run` of `linearInteriorPoint`); `linprog`'s path. The status
+ * is `optimal`, `infeasible` or `unbounded` (certified by the embedding; `ray` holds the unbounded direction),
+ * `diverged` on numerical failure, or `limit` after `maxSteps`.
+ */
 export function interiorPointSolve(
   problem: LinearProgram,
   options: { tolerance?: Scalar; maxSteps?: Size } = {},
 ): LinearProgramResult {
   const s = run(linearInteriorPoint(problem, { tolerance: options.tolerance }), {}, options.maxSteps ?? 200)
+  if (s.status === 'infeasible' || s.status === 'unbounded')
+    return unsolved(s.standard.lp.n, s.status, s.t, 'interior-point', s.status === 'unbounded' ? s.certificate : null)
   if (!s.converged) return unsolved(s.standard.lp.n, s.diverged ? 'diverged' : 'limit', s.t, 'interior-point')
-  const duals = recoverDuals(s.standard, s.y.data, s.rowsKept.data)
+  const duals = recoverDuals(s.standard, dense.scale(1 / s.tau, s.y.data), s.rowsKept.data)
   return {
     status: 'optimal',
     x: s.x,

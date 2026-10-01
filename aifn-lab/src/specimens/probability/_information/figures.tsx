@@ -1,11 +1,10 @@
 import * as I from 'aifn/probability/information'
 import { child, normals, stream } from 'aifn/foundation/random'
 import { toFlat, unwrap, type Value } from 'aifn/foundation/tensor'
-import { useMemo, useState } from 'react'
-import { Slider } from '@lab/controls'
-import { Figure } from '@lab/layout'
-import { Readout, XYChart, type XYSeries } from '@lab/viz'
-import { formatValue } from '@lab/views'
+import { useMemo } from 'react'
+import { Equation, Figure, live, tex } from '@lab/layout'
+import { row, slider, useFigureState } from '@lab/state'
+import { Annotation, Curve, Plot, Points, useAxis } from '@lab/viz'
 
 const num = (v: Value) => {
   const r = unwrap(v)
@@ -14,35 +13,38 @@ const num = (v: Value) => {
 
 // ── Divergences ──────────────────────────────────────────────────────────────────────────────────────────────────────
 
+const QS = Array.from({ length: 199 }, (_, i) => (i + 1) / 200)
+
 export function DivergencesSpecimen() {
-  const [p, setP] = useState(0.3)
-  const qs = useMemo(() => Array.from({ length: 199 }, (_, i) => (i + 1) / 200), [])
-  const series = useMemo((): XYSeries[] => {
+  const state = useFigureState({ p: slider(0.01, 0.99, 0.3, { label: 'p' }) })
+  const p = state.p
+  const curves = useMemo(() => {
     const P = [p, 1 - p]
-    const at = (f: (q: number[]) => number) => qs.map((q) => f([q, 1 - q]))
+    const at = (f: (q: number[]) => number) => QS.map((q) => f([q, 1 - q]))
     return [
-      { name: 'KL(p ‖ q)', type: 'line', x: qs, y: at((q) => num(I.klDivergence(P, q))), slot: 0 },
-      { name: 'KL(q ‖ p)', type: 'line', x: qs, y: at((q) => num(I.klDivergence(q, P))), slot: 1 },
-      { name: 'Jensen–Shannon', type: 'line', x: qs, y: at((q) => num(I.jensenShannonDivergence(P, q))), slot: 2 },
-      { name: 'total variation', type: 'line', x: qs, y: at((q) => num(I.totalVariation(P, q))), slot: 3 },
-      { name: 'Hellinger', type: 'line', x: qs, y: at((q) => num(I.hellingerDistance(P, q))), slot: 4 },
-      {
-        name: 'Pearson χ² (fDivergence)',
-        type: 'line',
-        x: qs,
-        y: at((q) => I.fDivergence(P, q, I.fGenerators.pearsonChiSquare)),
-        slot: 5,
-        dashed: true,
-      },
+      { name: 'KL(p ‖ q)', y: at((q) => num(I.klDivergence(P, q))) },
+      { name: 'KL(q ‖ p)', y: at((q) => num(I.klDivergence(q, P))) },
+      { name: 'Jensen–Shannon', y: at((q) => num(I.jensenShannonDivergence(P, q))) },
+      { name: 'total variation', y: at((q) => num(I.totalVariation(P, q))) },
+      { name: 'Hellinger', y: at((q) => num(I.hellingerDistance(P, q))) },
+      { name: 'Pearson χ² (fDivergence)', y: at((q) => I.fDivergence(P, q, I.fGenerators.pearsonChiSquare)) },
     ]
-  }, [p, qs])
+  }, [p])
+  const x = useAxis({ label: 'q', range: [0, 1] })
+  const y = useAxis({ label: 'nats / distance', range: [0, 2] })
   return (
     <Figure
       title="Divergences between two Bernoulli distributions"
-      controls={<Slider label="p" value={p} min={0.01} max={0.99} onChange={setP} />}
-      caption="All vanish at q = p. KL is asymmetric and unbounded; Jensen–Shannon is at most log 2; total variation and Hellinger are at most 1."
+      purpose="Every divergence is zero exactly at q = p and grows as q moves away; KL is asymmetric and unbounded, while Jensen–Shannon, total variation and Hellinger stay bounded."
+      state={state}
+      caption="Bernoulli(p) against Bernoulli(q) for every q; the dotted line marks q = p. KL(p ‖ q) blows up as q nears 0 or 1 where p puts mass; Jensen–Shannon is at most log 2 ≈ 0.69; total variation and Hellinger are at most 1. The Pearson χ² is computed by the generic fDivergence."
     >
-      <XYChart series={series} xLabel="q" yLabel="nats / distance" yRange={[0, 2]} />
+      <Plot x={x} y={y}>
+        <Annotation x={p} text="q = p" dashed />
+        {curves.map((c, i) => (
+          <Curve key={c.name} name={c.name} x={QS} y={c.y} slot={i} dashed={i === 5} />
+        ))}
+      </Plot>
     </Figure>
   )
 }
@@ -50,9 +52,15 @@ export function DivergencesSpecimen() {
 // ── Mutual information from samples ──────────────────────────────────────────────────────────────────────────────────
 
 export function KsgSpecimen() {
-  const [rho, setRho] = useState(0.6)
-  const [n, setN] = useState(500)
-  const [k, setK] = useState(3)
+  const state = useFigureState({
+    data: row('1 · data', {
+      rho: slider(-0.99, 0.99, 0.6, { label: 'correlation ρ' }),
+      n: slider(50, 2000, 500, { step: 50, label: 'samples n' }),
+    }),
+    estimator: row('2 · estimator', { k: slider(1, 20, 3, { step: 1, label: 'neighbours k' }) }),
+  })
+  const { rho, n } = state.data
+  const k = state.estimator.k
   const { x, y } = useMemo(() => {
     const s = stream('ksg')
     const a = toFlat(normals(child(s, 'x'), n))
@@ -60,31 +68,24 @@ export function KsgSpecimen() {
     return { x: a, y: a.map((v, i) => rho * v + Math.sqrt(1 - rho * rho) * e[i]) }
   }, [rho, n])
   const estimate = useMemo(() => I.ksgMutualInformation(x, y, { k }), [x, y, k])
+  const exact = -0.5 * Math.log(1 - rho * rho)
+  const xa = useAxis({ label: 'x', range: [-4, 4] })
+  const ya = useAxis({ label: 'y', range: [-4, 4], equal: xa })
   return (
     <Figure
       title="Kraskov–Stögbauer–Grassberger estimate of I(X; Y)"
-      controls={
-        <>
-          <Slider label="correlation ρ" value={rho} min={-0.99} max={0.99} onChange={setRho} />
-          <Slider label="samples n" value={n} min={50} max={2000} step={50} onChange={setN} />
-          <Slider label="neighbours k" value={k} min={1} max={20} step={1} onChange={setK} />
-        </>
+      purpose="KSG estimates mutual information from distances to the k-th nearest neighbour, with no density estimate; on correlated Gaussians it tracks the closed form −½ log(1 − ρ²)."
+      state={state}
+      equation={
+        <Equation>
+          {tex`\hat I_{\mathrm{KSG}} = ${live(estimate, { digits: 4, strong: true })} \quad\text{against}\quad -\tfrac12 \log(1 - ${live(rho, { digits: 3 })}^2) = ${live(exact, { digits: 4 })} \text{ nats}`}
+        </Equation>
       }
-      readouts={
-        <>
-          <Readout label="KSG estimate (nats)" value={formatValue(estimate)} />
-          <Readout label="Gaussian −½ log(1 − ρ²)" value={formatValue(-0.5 * Math.log(1 - rho * rho))} />
-        </>
-      }
+      caption="n draws of a standard bivariate normal with correlation ρ. Raise |ρ| and the cloud thins to a line while the information grows without bound; small n or large k bias the estimate low."
     >
-      <XYChart
-        series={[{ name: 'samples', type: 'scatter', x, y, slot: 0 }]}
-        xLabel="x"
-        yLabel="y"
-        equalAspect
-        rescaleOnChange={false}
-        holdFit="union"
-      />
+      <Plot x={xa} y={ya}>
+        <Points name="samples" x={x} y={y} slot={0} thin size={4} />
+      </Plot>
     </Figure>
   )
 }

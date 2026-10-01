@@ -10,23 +10,20 @@ import {
 import { rbf } from 'aifn/learning/kernels'
 import { child, normals, stream, uniform } from 'aifn/foundation/random'
 import { argmax, linspace, tensor, toFlat, toRows, type Tensor } from 'aifn/foundation/tensor'
-import { Button, Select, Slider, Switch } from '@lab/controls'
+import { Button } from '@lab/controls'
 import { ControlRow, Figure } from '@lab/layout'
-import { Panel, Readout, Subplots, XYChart, type Handle, type XYSeries } from '@lab/viz'
+import { choice, row, slider, toggle, useFigureState } from '@lab/state'
+import { Area, Curve, Handle, Plot, Plots, Points, Readout, useAxis } from '@lab/viz'
 import { formatValue } from '@lab/views'
 
 const GRID = linspace(0, 5, 201)
 const GRID_X = toFlat(GRID)
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v))
 
-/** Mean and ±2 sd lines of a Gaussian prediction. */
-function band(name: string, mean: number[], variance: number[], slot: number): XYSeries[] {
+/** The mean and the ± 2 sd edges of a Gaussian prediction on the grid. */
+function band(mean: number[], variance: number[]) {
   const sd = variance.map(Math.sqrt)
-  return [
-    { name, type: 'line', x: GRID_X, y: mean, slot },
-    { name: '± 2 sd', type: 'line', x: GRID_X, y: mean.map((m, i) => m + 2 * sd[i]), slot, dashed: true },
-    { name: '± 2 sd ', type: 'line', x: GRID_X, y: mean.map((m, i) => m - 2 * sd[i]), slot, dashed: true },
-  ]
+  return { mean, upper: mean.map((m, i) => m + 2 * sd[i]), lower: mean.map((m, i) => m - 2 * sd[i]) }
 }
 
 const START: [number, number][] = [
@@ -39,51 +36,41 @@ const START: [number, number][] = [
 
 /** GP regression: prior and posterior draws around observations the reader drags. */
 export function PosteriorDraws() {
+  const state = useFigureState({
+    model: row('1 · kernel and noise', {
+      lengthscale: slider(0.1, 2, 0.6, { label: 'lengthscale ℓ' }),
+      noise: slider(0, 0.5, 0.01, { label: 'noise variance σ²' }),
+    }),
+    reveal: row('2 · reveal', {
+      prior: toggle(false, 'prior draws instead'),
+      count: choice([3, 5, 10, 20], 5, { label: 'draws' }),
+    }),
+  })
+  const { lengthscale, noise } = state.model
+  const { prior: showPrior, count } = state.reveal
   const [points, setPoints] = useState(START)
-  const [lengthscale, setLengthscale] = useState(0.6)
-  const [noise, setNoise] = useState(0.01)
-  const [showPrior, setShowPrior] = useState(false)
   const kernel = useMemo(() => rbf({ lengthscale, variance: 1 }), [lengthscale])
   const x = useMemo(() => tensor(points.map((p) => p[0])), [points])
   const y = useMemo(() => tensor(points.map((p) => p[1])), [points])
   const post = useMemo(() => gpPosterior(kernel, x, y, { noiseVariance: noise }), [kernel, x, y, noise])
-  const prediction = useMemo(() => post.predict(GRID), [post])
+  const prediction = useMemo(() => {
+    const p = post.predict(GRID)
+    return band(toFlat(p.mean), toFlat(p.variance))
+  }, [post])
   const draws = useMemo(
-    () => (showPrior ? samplePrior(stream('gp-draws'), kernel, GRID, 5) : post.sample(stream('gp-draws'), GRID, 5)),
-    [showPrior, kernel, post],
+    () =>
+      showPrior ? samplePrior(stream('gp-draws'), kernel, GRID, count) : post.sample(stream('gp-draws'), GRID, count),
+    [showPrior, kernel, post, count],
   )
-  const series: XYSeries[] = [
-    ...toRows(draws.draws).map((d, i) => ({
-      name: `draw ${i + 1}`,
-      type: 'line' as const,
-      x: GRID_X,
-      y: d,
-      thin: true,
-      slot: 1,
-    })),
-    ...(showPrior ? [] : band('posterior mean', toFlat(prediction.mean), toFlat(prediction.variance), 0)),
-    { name: 'observations', type: 'scatter', x: points.map((p) => p[0]), y: points.map((p) => p[1]), emphasis: true },
-  ]
-  const handles: Handle[] = points.map((p, i) => ({
-    kind: 'point',
-    at: p,
-    onDrag: ([a, b]) => setPoints((ps) => ps.map((q, j) => (j === i ? [clamp(a, 0, 5), clamp(b, -3, 3)] : q))),
-  }))
+  const drawRows = useMemo(() => toRows(draws.draws) as number[][], [draws])
+  const obs = useMemo(() => ({ x: points.map((p) => p[0]), y: points.map((p) => p[1]) }), [points])
+  const xa = useAxis({ label: 'x', range: [0, 5] })
+  const ya = useAxis({ label: 'f(x)', range: [-3, 3] })
   return (
     <Figure
       title="Prior and posterior draws"
-      description="Conditioning a GP on observations pins its draws near the data and leaves them free elsewhere; the band is the posterior mean ± 2 sd."
-      controls={
-        <>
-          <ControlRow label="Kernel and noise">
-            <Slider label="lengthscale ℓ" value={lengthscale} onChange={setLengthscale} min={0.1} max={2} />
-            <Slider label="noise variance σ²" value={noise} onChange={setNoise} min={0} max={0.5} />
-          </ControlRow>
-          <ControlRow label="Reveal">
-            <Switch label="prior draws instead" checked={showPrior} onChange={setShowPrior} />
-          </ControlRow>
-        </>
-      }
+      purpose="Conditioning a GP on observations pins its draws near the data and leaves them free elsewhere; the band is the posterior mean ± 2 sd."
+      state={state}
       readouts={
         <>
           <Readout label="log marginal likelihood" value={formatValue(post.logMarginal.value)} />
@@ -91,9 +78,36 @@ export function PosteriorDraws() {
           <Readout label="jitter for the draws" value={formatValue(draws.jitter)} />
         </>
       }
-      caption="Drag the observations. With σ² = 0 the posterior interpolates and its variance collapses at the data; with noise the draws pass near them. A short ℓ lets the mean return to the prior (0) between points. The five draws use the same normals throughout, so they move continuously."
+      caption="Drag the observations. With σ² = 0 the posterior interpolates and its variance collapses at the data; with noise the draws pass near them. A short ℓ lets the mean return to the prior (0) between points. The draws (thin lines) use the same normals throughout, so they move continuously."
     >
-      <XYChart series={series} xLabel="x" yLabel="f(x)" xRange={[0, 5]} yRange={[-3, 3]} handles={handles} />
+      <Plot x={xa} y={ya}>
+        {!showPrior && (
+          <Area
+            name="± 2 sd"
+            x={GRID_X}
+            y={prediction.upper}
+            base={prediction.lower}
+            slot={0}
+            opacity={0.18}
+            line={false}
+          />
+        )}
+        {drawRows.map((d, i) => (
+          <Curve key={i} name="draws" x={GRID_X} y={d} thin slot={1} />
+        ))}
+        {!showPrior && <Curve name="posterior mean" x={GRID_X} y={prediction.mean} slot={0} />}
+        <Points name="observations" x={obs.x} y={obs.y} emphasis />
+        {points.map((p, i) => (
+          <Handle
+            key={i}
+            kind="point"
+            at={p}
+            onDrag={([a, b]) =>
+              setPoints((ps) => ps.map((q, j): [number, number] => (j === i ? [clamp(a, 0, 5), clamp(b, -3, 3)] : q)))
+            }
+          />
+        ))}
+      </Plot>
     </Figure>
   )
 }
@@ -111,8 +125,11 @@ const LOG_ELL_X = toFlat(LOG_ELL)
 
 /** The log marginal likelihood against the lengthscale: data fit against complexity. */
 export function EvidenceOverLengthscale() {
-  const [logEll, setLogEll] = useState(-0.3)
-  const [noise, setNoise] = useState(0.04)
+  const state = useFigureState({
+    logEll: slider(-1.7, 1, -0.3, { label: 'log₁₀ ℓ', onChart: true }),
+    noise: slider(0.005, 0.5, 0.04, { label: 'noise variance σ²' }),
+  })
+  const { logEll, noise } = state
   const data = useMemo(() => sineData(14, 'gp-evidence', 0.2), [])
   const x = useMemo(() => tensor(data.x), [data])
   const y = useMemo(() => tensor(data.y), [data])
@@ -127,41 +144,24 @@ export function EvidenceOverLengthscale() {
       fit: parts.map((p) => p.dataFit as number),
       complexity: parts.map((p) => (p.complexity as number) + p.constant),
       best,
+      bestAt: { x: [LOG_ELL_X[best]], y: [value[best]] },
     }
   }, [x, y, noise])
-  const post = useMemo(
-    () => gpPosterior(rbf({ lengthscale: 10 ** logEll }), x, y, { noiseVariance: noise }).predict(GRID),
-    [logEll, x, y, noise],
-  )
+  const post = useMemo(() => {
+    const p = gpPosterior(rbf({ lengthscale: 10 ** logEll }), x, y, { noiseVariance: noise }).predict(GRID)
+    return band(toFlat(p.mean), toFlat(p.variance))
+  }, [logEll, x, y, noise])
   const lml = logMarginalLikelihood(rbf({ lengthscale: 10 ** logEll }), x, y, { noiseVariance: noise })
-  const top: XYSeries[] = [
-    { name: 'log p(y | X, ℓ)', type: 'line', x: LOG_ELL_X, y: curves.value, slot: 0 },
-    { name: 'data fit −½ yᵀK⁻¹y', type: 'line', x: LOG_ELL_X, y: curves.fit, slot: 1, dashed: true },
-    {
-      name: 'complexity −½ log|K| − (n/2) log 2π',
-      type: 'line',
-      x: LOG_ELL_X,
-      y: curves.complexity,
-      slot: 2,
-      dashed: true,
-    },
-    { name: 'maximum', type: 'scatter', x: [LOG_ELL_X[curves.best]], y: [curves.value[curves.best]], emphasis: true },
-  ]
-  const bottom: XYSeries[] = [
-    ...band('posterior mean', toFlat(post.mean), toFlat(post.variance), 0),
-    { name: 'data', type: 'scatter', x: data.x, y: data.y, muted: true },
-  ]
+  const ell = useAxis({ label: 'log₁₀ ℓ', range: [-1.7, 1] })
+  const nats = useAxis({ label: 'nats', hold: 'union', key: noise })
+  const xa = useAxis({ label: 'x', range: [0, 5] })
+  const fa = useAxis({ label: 'f(x)', range: [-2.5, 2.5] })
   return (
     <Figure
       title="Evidence against the lengthscale"
       defaultSize="L"
-      description="The log marginal likelihood trades a data-fit term, which rewards short lengthscales, against a complexity term, which penalises them; its maximum picks ℓ."
-      controls={
-        <ControlRow label="Model">
-          <Slider label="log₁₀ ℓ" value={logEll} onChange={setLogEll} min={-1.7} max={1} />
-          <Slider label="noise variance σ²" value={noise} onChange={setNoise} min={0.005} max={0.5} />
-        </ControlRow>
-      }
+      purpose="The log marginal likelihood trades a data-fit term, which rewards short lengthscales, against a complexity term, which penalises them; its maximum picks ℓ."
+      state={state}
       readouts={
         <>
           <Readout label="ℓ" value={formatValue(10 ** logEll)} />
@@ -169,21 +169,22 @@ export function EvidenceOverLengthscale() {
           <Readout label="best ℓ on the grid" value={formatValue(10 ** LOG_ELL_X[curves.best])} />
         </>
       }
-      caption="Drag the vertical line (or the slider) along log₁₀ ℓ and watch the fit below: at short ℓ the mean chases the noise, at long ℓ it flattens to a line. The marked point is the maximum over the grid. The variance is fixed at 1."
+      caption="Drag the vertical line along log₁₀ ℓ and watch the fit below: at short ℓ the mean chases the noise, at long ℓ it flattens to a line. The marked point is the maximum over the grid. The signal variance is fixed at 1."
     >
-      <Subplots rows={2} heightRatios={[1, 1]}>
-        <Panel>
-          <XYChart
-            series={top}
-            xLabel="log₁₀ ℓ"
-            yLabel="nats"
-            handles={[{ kind: 'x', at: logEll, label: 'ℓ', onDrag: (v) => setLogEll(clamp(v, -1.7, 1)) }]}
-          />
-        </Panel>
-        <Panel>
-          <XYChart series={bottom} xLabel="x" yLabel="f(x)" xRange={[0, 5]} yRange={[-2.5, 2.5]} />
-        </Panel>
-      </Subplots>
+      <Plots rows={2}>
+        <Plot x={ell} y={nats}>
+          <Curve name="log p(y | X, ℓ)" x={LOG_ELL_X} y={curves.value} slot={0} />
+          <Curve name="data fit −½ yᵀK⁻¹y" x={LOG_ELL_X} y={curves.fit} slot={1} dashed />
+          <Curve name="complexity −½ log|K| − (n/2) log 2π" x={LOG_ELL_X} y={curves.complexity} slot={2} dashed />
+          <Points name="maximum" x={curves.bestAt.x} y={curves.bestAt.y} emphasis />
+          <Handle {...state.handle('logEll', { label: 'ℓ' })} />
+        </Plot>
+        <Plot x={xa} y={fa}>
+          <Area name="± 2 sd" x={GRID_X} y={post.upper} base={post.lower} slot={0} opacity={0.18} line={false} />
+          <Curve name="posterior mean" x={GRID_X} y={post.mean} slot={0} />
+          <Points name="data" x={data.x} y={data.y} muted />
+        </Plot>
+      </Plots>
     </Figure>
   )
 }
@@ -192,9 +193,15 @@ const METHODS: SparseMethod[] = ['vfe', 'fitc', 'dtc', 'sor']
 
 /** Sparse GP regression with inducing inputs the reader drags. */
 export function SparseInducingPoints() {
-  const [method, setMethod] = useState<SparseMethod>('vfe')
+  const state = useFigureState({
+    approx: row('1 · approximation', {
+      method: choice(METHODS, 'vfe', { label: 'method' }),
+      lengthscale: slider(0.2, 1.5, 0.5, { label: 'lengthscale ℓ' }),
+    }),
+  })
+  const method = state.approx.method as SparseMethod
+  const { lengthscale } = state.approx
   const [z, setZ] = useState<number[]>([0.3, 0.8, 1.3, 1.8, 2.3])
-  const [lengthscale, setLengthscale] = useState(0.5)
   const noise = 0.04
   const data = useMemo(() => sineData(60, 'gp-sparse', 0.2), [])
   const x = useMemo(() => tensor(data.x), [data])
@@ -206,7 +213,10 @@ export function SparseInducingPoints() {
     () => sparseGp(kernel, x, y, tensor(z), { method, noiseVariance: noise }),
     [kernel, x, y, z, method],
   )
-  const prediction = useMemo(() => sparse.predict(GRID), [sparse])
+  const prediction = useMemo(() => {
+    const p = sparse.predict(GRID)
+    return band(toFlat(p.mean), toFlat(p.variance))
+  }, [sparse])
   const atZ = useMemo(() => toFlat(sparse.predict(tensor(z)).mean), [sparse, z])
   const optimise = () => {
     const fit = fitSparseGp(kernel, x, y, tensor(z), {
@@ -218,36 +228,22 @@ export function SparseInducingPoints() {
     })
     setZ(toFlat(fit.model.inducing).map((v) => clamp(v, 0, 5)))
   }
-  const series: XYSeries[] = [
-    { name: 'data', type: 'scatter', x: data.x, y: data.y, muted: true },
-    { name: 'exact GP mean', type: 'line', x: GRID_X, y: exactMean, slot: 2, dashed: true },
-    ...band(`${method.toUpperCase()} mean`, toFlat(prediction.mean), toFlat(prediction.variance), 0),
-    { name: 'inducing inputs', type: 'scatter', x: z, y: atZ, emphasis: true },
-  ]
-  const handles: Handle[] = z.map((v, i) => ({
-    kind: 'x',
-    at: v,
-    onDrag: (u) => setZ((zs) => zs.map((w, j) => (j === i ? clamp(u, 0, 5) : w))),
-  }))
+  const xa = useAxis({ label: 'x', range: [0, 5] })
+  const fa = useAxis({ label: 'f(x)', range: [-2.5, 2.5] })
   return (
     <Figure
       title="Inducing points"
-      description="A sparse GP summarises n observations through m inducing inputs; where they are decides where the approximation can follow the data."
+      purpose="A sparse GP summarises n observations through m inducing inputs; where they are decides where the approximation can follow the data."
+      state={state}
       controls={
-        <>
-          <ControlRow label="Approximation">
-            <Select label="method" value={method} onChange={setMethod} options={METHODS} />
-            <Slider label="lengthscale ℓ" value={lengthscale} onChange={setLengthscale} min={0.2} max={1.5} />
-          </ControlRow>
-          <ControlRow label="Inducing inputs">
-            <Button variant="outline" size="sm" onClick={optimise}>
-              Optimise Z (L-BFGS on the bound)
-            </Button>
-            <Button variant="outline" size="sm" onClick={() => setZ([0.5, 1.5, 2.5, 3.5, 4.5])}>
-              Spread evenly
-            </Button>
-          </ControlRow>
-        </>
+        <ControlRow label="2 · inducing inputs">
+          <Button variant="outline" size="sm" onClick={optimise}>
+            Optimise Z (L-BFGS on the bound)
+          </Button>
+          <Button variant="outline" size="sm" onClick={() => setZ([0.5, 1.5, 2.5, 3.5, 4.5])}>
+            Spread evenly
+          </Button>
+        </ControlRow>
       }
       readouts={
         <>
@@ -262,7 +258,29 @@ export function SparseInducingPoints() {
       }
       caption="Drag the vertical lines to move the five inducing inputs. Bunched on the left, the sparse mean cannot follow the data on the right, and for VFE the trace penalty shows the lost information; SoR's variance also shrinks to nothing far from Z, the others' does not. Optimise moves Z to maximise the bound."
     >
-      <XYChart series={series} xLabel="x" yLabel="f(x)" xRange={[0, 5]} yRange={[-2.5, 2.5]} handles={handles} />
+      <Plot x={xa} y={fa}>
+        <Points name="data" x={data.x} y={data.y} muted />
+        <Area
+          name="± 2 sd"
+          x={GRID_X}
+          y={prediction.upper}
+          base={prediction.lower}
+          slot={0}
+          opacity={0.18}
+          line={false}
+        />
+        <Curve name="exact GP mean" x={GRID_X} y={exactMean} slot={2} dashed />
+        <Curve name={`${method.toUpperCase()} mean`} x={GRID_X} y={prediction.mean} slot={0} />
+        <Points name="inducing inputs" x={z} y={atZ} emphasis />
+        {z.map((v, i) => (
+          <Handle
+            key={i}
+            kind="x"
+            at={v}
+            onDrag={(u) => setZ((zs) => zs.map((w, j) => (j === i ? clamp(u, 0, 5) : w)))}
+          />
+        ))}
+      </Plot>
     </Figure>
   )
 }

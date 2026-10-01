@@ -64,6 +64,20 @@ export interface ModelFactorGraph extends StructuredGraph<FactorNodeData> {
 const expand = (m: Model | ExpandedModel, b: Bindings): ExpandedModel => ('instances' in m ? m : expandModel(m, b))
 
 /**
+ * A node's TeX label with an instance's index appended as a subscript. A label that already has a subscript is grouped
+ * first, so `\theta_d` at index 0 reads `{\theta_d}_{0}` (KaTeX rejects the double subscript `\theta_d_{0}`); a label
+ * in `$…$` is handled inside the delimiters.
+ */
+export function indexedLabel(label: string, index: readonly (string | number)[]): string {
+  if (index.length === 0) return label
+  const math = label.length > 1 && label.startsWith('$') && label.endsWith('$')
+  const tex = math ? label.slice(1, -1) : label
+  const base = tex.includes('_') ? `{${tex}}` : tex
+  const out = `${base}_{${index.join(',')}}`
+  return math ? `$${out}$` : out
+}
+
+/**
  * Expand a model into its factor graph. Deterministic nodes are folded into the factors of their stochastic
  * children; an `at` reference makes the factor depend on every instance it could select, and on the selector.
  */
@@ -79,7 +93,7 @@ export function toFactorGraph(m: Model | ExpandedModel, bindings: Bindings = {})
       name: inst.key,
       role: em.fixed.has(inst.key) ? 'observed' : 'latent',
       group: inst.node.group,
-      label: inst.node.label ? `${inst.node.label}${inst.index.length ? `_{${inst.index.join(',')}}` : ''}` : inst.key,
+      label: inst.node.label ? indexedLabel(inst.node.label, inst.index) : inst.key,
       source: inst.node.name,
       index: inst.index,
       data: { key: inst.key, node: inst.node.name, cardinality: cardinalityOf(em, inst) },

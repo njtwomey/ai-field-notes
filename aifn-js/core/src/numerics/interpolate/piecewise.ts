@@ -8,6 +8,7 @@
  * Each is checked against scipy.interpolate.
  */
 
+import { DomainError, ShapeError } from 'aifn/foundation/errors'
 import type { Scalar } from 'aifn/foundation/contracts'
 import { solve } from 'aifn/numerics/linalg'
 import { fromData, toFlat, type Tensor } from 'aifn/foundation/tensor'
@@ -115,9 +116,10 @@ export function integratePiecewise(pp: PiecewisePolynomial, a: Scalar, b: Scalar
 }
 
 function checkData(x: F64, y: F64, where: string) {
-  if (x.length !== y.length) throw new Error(`${where}: ${x.length} x values but ${y.length} y values`)
-  if (x.length < 2) throw new Error(`${where}: needs at least two points`)
-  for (let i = 1; i < x.length; i++) if (!(x[i] > x[i - 1])) throw new Error(`${where}: x must be strictly increasing`)
+  if (x.length !== y.length) throw new ShapeError(where, `${where}: ${x.length} x values but ${y.length} y values`)
+  if (x.length < 2) throw new DomainError(where, `${where}: needs at least two points`)
+  for (let i = 1; i < x.length; i++)
+    if (!(x[i] > x[i - 1])) throw new DomainError(where, `${where}: x must be strictly increasing`)
 }
 
 /** The piecewise linear interpolant through (xᵢ, yᵢ), x strictly increasing. */
@@ -184,7 +186,7 @@ export function cubicSpline(
   checkData(X, Y, 'cubicSpline')
   const n = X.length - 1
   if (bc === 'periodic' && Math.abs(Y[n] - Y[0]) > 1e-12 * (1 + Math.abs(Y[0])))
-    throw new Error('cubicSpline: periodic end conditions need y[0] = y[n]')
+    throw new DomainError('cubicSpline', 'cubicSpline: periodic end conditions need y[0] = y[n]')
   const h = Float64Array.from({ length: n }, (_, i) => X[i + 1] - X[i])
   const delta = Float64Array.from({ length: n }, (_, i) => (Y[i + 1] - Y[i]) / h[i])
   if (n === 1 && (bc === 'not-a-knot' || bc === 'natural' || bc === 'periodic')) return linearInterpolant(x, y)
@@ -348,7 +350,7 @@ export function smoothingSpline(
   const X = f64(x)
   const Y = f64(y)
   checkData(X, Y, 'smoothingSpline')
-  if (!(lambda >= 0)) throw new Error('smoothingSpline: λ must be ≥ 0')
+  if (!(lambda >= 0)) throw new DomainError('smoothingSpline', 'smoothingSpline: λ must be ≥ 0')
   const n = X.length
   const w = weights ? f64(weights) : new Float64Array(n).fill(1)
   if (n < 3) return { spline: linearInterpolant(x, y), fitted: vec(Y), lambda }

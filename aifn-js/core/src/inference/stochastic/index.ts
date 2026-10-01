@@ -1,9 +1,9 @@
 /**
  * `aifn/inference/stochastic`: Monte Carlo inference: Metropolis–Hastings (random-walk, independence), Gibbs over
- * conditionals, slice sampling, Hamiltonian Monte Carlo and NUTS, MALA and SGLD, sequential Monte Carlo and the
- * particle filter, multi-chain runs and diagnostics (R̂, ESS, MCSE; the autocorrelation function is
- * `aifn/probability/stats`'s), and Gibbs sampling on discrete factor graphs (`factorGraphGibbs`) and on model
- * descriptions (`modelGibbs`, by enumeration and conjugate updates).
+ * conditionals or blocks (block Gibbs) with Rao–Blackwellised estimates, slice sampling, Hamiltonian Monte Carlo and
+ * NUTS, MALA and SGLD, sequential Monte Carlo and the particle filter, multi-chain runs and diagnostics (R̂, ESS, MCSE;
+ * the autocorrelation function is `aifn/probability/stats`'s), and Gibbs sampling on discrete factor graphs
+ * (`factorGraphGibbs`) and on model descriptions (`modelGibbs`, by enumeration and conjugate updates).
  */
 
 export {
@@ -28,19 +28,24 @@ export {
 } from './metropolis'
 export {
   bivariateGaussianConditionals,
+  conditionalMean,
   gaussianConditionals,
   gibbs,
   sliceSampler,
+  type Block,
   type Conditional,
   type GibbsOptions,
   type GibbsState,
   type SliceOptions,
   type SliceState,
 } from './gibbs'
+export { type DualAveragingOptions, type DualAveragingState } from './adaptation'
 export {
+  divergenceLimit,
   hmc,
   leapfrog,
   nuts,
+  type DivergenceThreshold,
   type HmcOptions,
   type HmcState,
   type Leapfrog,
@@ -71,7 +76,13 @@ export {
   type TemperedSmcOptions,
   type TemperedSmcState,
 } from './smc'
-export { sampleChains, type ChainsResult, type SampleChainsOptions } from './chains'
+export {
+  raoBlackwell,
+  sampleChains,
+  type ChainsResult,
+  type RaoBlackwellEstimate,
+  type SampleChainsOptions,
+} from './chains'
 export {
   effectiveSampleSize,
   integratedAutocorrelationTime,
@@ -83,3 +94,4 @@ export {
   type EssMethod,
   type RhatMethod,
 } from './diagnostics'
+export { stochasticAlgorithms } from './registry'

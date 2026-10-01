@@ -83,6 +83,20 @@ try {
         failures++
         console.error(`FAIL  ${name}: figure ids repeat within the page: ${repeated.join(', ')}`)
       }
+      // Every figure states its purpose (DESIGN.md §2.1).
+      const purposeless = [...html.matchAll(/data-figure-id="([^"]+)"[^>]*data-figure-purpose="missing"/g)].map(
+        (m) => m[1],
+      )
+      if (purposeless.length) {
+        failures++
+        console.error(`FAIL  ${name}: figures without a purpose: ${purposeless.join(', ')}`)
+      }
+      // A view never renders a Figure (design S §4.1): no figure inside another's chart area.
+      const nested = [...html.matchAll(/data-figure-id="([^"]+)"[^>]*data-figure-nested=""/g)].map((m) => m[1])
+      if (nested.length) {
+        failures++
+        console.error(`FAIL  ${name}: figures inside another figure: ${nested.join(', ')}`)
+      }
     } catch (e) {
       failures++
       console.error(`FAIL  ${name}: ${(e as Error).message.split('\n')[0]}`)
@@ -92,6 +106,12 @@ try {
   const modules = new Set<string>()
   const { UiKit } = await server.ssrLoadModule('/src/kit/UiKit.tsx')
   render('lab / UI kit', 'ui-kit', () => createElement(UiKit))
+  const { plotKitPages } = await server.ssrLoadModule('/src/kit/plot/pages.tsx')
+  for (const p of plotKitPages as { key: string; title: string; render: () => ReactNode }[])
+    render(`lab / ${p.title}`, p.key, p.render)
+  const { stateKitPages } = await server.ssrLoadModule('/src/kit/state/pages.tsx')
+  for (const p of stateKitPages as { key: string; title: string; render: () => ReactNode }[])
+    render(`lab / ${p.title}`, p.key, p.render)
   const { DiagramsKit } = await server.ssrLoadModule('/src/kit/DiagramsKit.tsx')
   render('lab / Diagrams', 'diagrams', () => createElement(DiagramsKit))
   // Specimen files mirror the module tree (`<family>/<module>.tsx`); `_`-folders and `_`-files hold shared code.

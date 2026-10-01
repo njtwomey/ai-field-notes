@@ -7,15 +7,14 @@ import type {
   Recorder,
   Size,
   Status,
-  StepContext,
   StopReason,
   Stream,
   Trace,
   TraceOptions,
 } from 'aifn/foundation/contracts'
 import { AifnError, ShapeError } from 'aifn/foundation/errors'
-import { child, stream } from 'aifn/foundation/random'
 import type { Tensor } from 'aifn/foundation/tensor'
+import { initStream, rootKey, stepContext, stopReason } from './protocol'
 import { flattenRecorded, makeSeries, seriesData } from './series'
 
 /** A monotone clock in milliseconds: `performance.now()` where it exists (browsers, workers, Node), else `Date.now()`. */
@@ -43,37 +42,8 @@ export function profile<T>(name: string, fn: () => T): T {
   }
 }
 
-// ---------------------------------------------------------------------------------------------------------------------
-// The protocol: streams come from the root key, and stopping is read from `Status`.
-
 /** Options of the runners without history: the root stream (only its key is used; default `stream(0)`). */
 export type RunOptions = { stream?: Stream }
-
-const rootKey = (s: Stream | undefined): Key => (s ?? stream(0)).key
-
-/** The stream `init` draws from: `child(root, 'init')`. */
-const initStream = (key: Key): Stream => child(key, 'init')
-
-/**
- * The context of step t: its stream is `child(root, 'step', t)`, made on first use, so a step that draws nothing
- * costs nothing.
- */
-function stepContext(key: Key, t: Size): StepContext {
-  let s: Stream | undefined
-  return {
-    t,
-    get stream() {
-      return (s ??= child(key, 'step', t))
-    },
-  }
-}
-
-/** Why stepping must stop at this state, if it must: divergence first, then convergence, termination or `done`. */
-function stopReason<S extends Status>(alg: Algorithm<never, S>, state: S): StopReason | null {
-  if (state.diverged === true) return 'diverged'
-  if (state.converged === true || state.terminated === true || alg.done?.(state)) return 'done'
-  return null
-}
 
 // ---------------------------------------------------------------------------------------------------------------------
 // Runners without history.

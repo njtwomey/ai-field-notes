@@ -11,7 +11,7 @@
  * tails and differing scales are caught; and constant or too-short chains give explicit values, not 0/0.
  */
 
-import { normalQuantile } from 'aifn/numerics/special'
+import { normalQuantile, regularisedBetaInverse } from 'aifn/numerics/special'
 import { autocovariance, quantile, ranks } from 'aifn/probability/stats'
 import { dense, fromData, isTensor, toFlat, type Tensor } from 'aifn/foundation/tensor'
 import type { F64 } from './util'
@@ -262,14 +262,43 @@ export function splitRhat(chains: Chains, options: { method?: RhatMethod } = {})
   })
 }
 
+/** Round to the nearest integer, halves to even (NumPy's `rint`). */
+function roundHalfEven(v: number): number {
+  const r = Math.round(v)
+  return Math.abs(v % 1) === 0.5 && r % 2 !== 0 ? r - 1 : r
+}
+
 /**
- * The Monte Carlo standard error of the posterior mean estimate: sd / √ESS_mean, with sd the sample standard deviation
- * of all draws and the `mean` ESS (split chains, no ranks), as in ArviZ's `mcse(method="mean")`.
+ * The Monte Carlo standard error of the estimate of the posterior mean, or of the `quantile` p when one is given.
+ * Mean: sd / √ESS_mean, with sd the sample standard deviation of all draws and the `mean` ESS (split chains, no ranks).
+ * Quantile (Vehtari et al., 2021, §4.3): the ESS of the indicator I(x ≤ q̂ₚ) on split chains gives a Beta(ESS·p + 1,
+ * ESS·(1 − p) + 1) approximation to the distribution of the empirical cdf at q̂ₚ; half the distance between the order
+ * statistics at its 15.9% and 84.1% points (±1 sd of a normal) is the standard error. Both as ArviZ's `mcse`.
  */
-export function monteCarloStandardError(chains: ArrayLike<number> | readonly ArrayLike<number>[]): number
-export function monteCarloStandardError(chains: Chains): number | Tensor
-export function monteCarloStandardError(chains: Chains): number | Tensor {
-  return perGrid(chains, 'monteCarloStandardError', (g) => Math.sqrt(sampleVariance(g.x) / essOf(split(g))))
+export function monteCarloStandardError(
+  chains: ArrayLike<number> | readonly ArrayLike<number>[],
+  options?: { quantile?: number },
+): number
+export function monteCarloStandardError(chains: Chains, options?: { quantile?: number }): number | Tensor
+export function monteCarloStandardError(chains: Chains, options: { quantile?: number } = {}): number | Tensor {
+  const p = options.quantile
+  if (p === undefined)
+    return perGrid(chains, 'monteCarloStandardError', (g) => Math.sqrt(sampleVariance(g.x) / essOf(split(g))))
+  if (!(p > 0 && p < 1)) throw new Error(`monteCarloStandardError: the quantile must lie in (0, 1), got ${p}`)
+  return perGrid(chains, 'monteCarloStandardError', (g) => {
+    const threshold = quantile(g.x, p) as number
+    const ess = essOf(split({ m: g.m, n: g.n, x: g.x.map((v) => (v <= threshold ? 1 : 0)) }))
+    if (Number.isNaN(ess)) return NaN
+    const a = ess * p + 1
+    const b = ess * (1 - p) + 1
+    const lo = regularisedBetaInverse(a, b, 0.1586553) as number
+    const hi = regularisedBetaInverse(a, b, 0.8413447) as number
+    const sorted = Float64Array.from(g.x).sort()
+    const size = sorted.length
+    const th1 = sorted[roundHalfEven(Math.max(lo * size, 0))]
+    const th2 = sorted[roundHalfEven(Math.min(hi * size, size - 1))]
+    return (th2 - th1) / 2
+  })
 }
 
 /** A summary of one parameter's draws: mean, sd, the bulk and tail ESS, R̂ and the MCSE of the mean. */

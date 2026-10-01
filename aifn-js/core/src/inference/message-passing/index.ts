@@ -21,3 +21,4 @@ export {
   type GaussianBpOptions,
   type GaussianBpState,
 } from './gaussianBp'
+export { messagePassingAlgorithms } from './registry'

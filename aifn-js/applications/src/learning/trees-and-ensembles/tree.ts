@@ -26,6 +26,8 @@ import type { Status } from 'aifn/foundation/contracts'
 import { type Stream, child, integers } from 'aifn/foundation/random'
 import { run, trace, type Algorithm, type Trace } from 'aifn/foundation/trace'
 import { classLabels, inputs, matrix, probabilityModel, targets, values } from '../util'
+import { defineModel } from 'aifn/learning/estimators'
+import { int, oneOf, real, space } from 'aifn/foundation/space'
 
 /** The impurity a split decreases: Gini or entropy (classification), squared error (regression). */
 export type Criterion = 'gini' | 'entropy' | 'squared'
@@ -353,23 +355,43 @@ function nodeValue(p: Prepared, stats: Float64Array, w: number): number[] {
   return Array.from(stats, (c) => (w > 0 ? c / w : 0))
 }
 
-/** The features searched at a node: all, or a random subset drawn from the stream of the step that creates it. */
-function featuresFor(p: Prepared, s: Stream): number[] {
+/**
+ * The order in which a node draws its features: the identity when every feature is searched, otherwise a random
+ * permutation (Fisher–Yates) from the stream of the step that creates the node. The first `maxFeatures` are the node's
+ * subset; the rest are drawn in turn only when the subset has no valid split.
+ */
+function featureOrder(p: Prepared, s: Stream): number[] {
   const all = Array.from({ length: p.d }, (_, j) => j)
   if (p.maxFeatures >= p.d) return all
   const sub = child(s, 'features')
-  for (let a = 0; a < p.maxFeatures; a++) {
+  for (let a = 0; a < p.d - 1; a++) {
     const b = a + integers(sub, p.d - a)
     ;[all[a], all[b]] = [all[b], all[a]]
   }
-  return all.slice(0, p.maxFeatures).sort((a, b) => a - b)
+  return all
+}
+
+/**
+ * The split search at a node over a random feature subset: the first `maxFeatures` features of `featureOrder`, then,
+ * while no valid split has been found, one more feature at a time, as scikit-learn does ("the search for a split does
+ * not stop until at least one valid partition of the node samples is found, even if it requires to effectively inspect
+ * more than max_features features"). A node becomes a leaf for want of a split only when no feature has one.
+ */
+function searchSubset(p: Prepared, rows: Int32Array, s: Stream): SplitSearch {
+  const order = featureOrder(p, s)
+  let k = Math.min(p.maxFeatures, p.d)
+  const subset = (m: number) => order.slice(0, m).sort((a, b) => a - b)
+  let found = search(p, rows, subset(k))
+  while (found.feature < 0 && k < p.d) found = search(p, rows, subset(++k))
+  return found
 }
 
 /**
  * CART growth as a traceable algorithm: each step pops one node from the stack, decides whether it is a leaf (depth,
  * size, purity or no split worth making) and otherwise searches its best split and pushes the right and then the left
  * child. Nodes are therefore numbered in preorder. When `maxFeatures` is below the number of features, the step that
- * creates a node draws its feature subset from the step's stream. No start.
+ * creates a node draws its feature subset from the step's stream, and draws further features when the subset has no
+ * valid split (`searchSubset`). No start.
  */
 export function treeGrowthSteps(problem: TreeProblem): Algorithm<void, TreeGrowthState> {
   const p = prepare(problem, 'treeGrowthSteps')
@@ -405,7 +427,7 @@ export function treeGrowthSteps(problem: TreeProblem): Algorithm<void, TreeGrowt
         impurity <= Number.EPSILON
       let found: SplitSearch | null = null
       if (!leaf) {
-        found = search(p, rows, featuresFor(p, ctx.stream))
+        found = searchSubset(p, rows, ctx.stream)
         leaf = found.feature < 0 || found.decrease + Number.EPSILON < p.minImpurityDecrease
       }
       const node: DecisionNode = {
@@ -779,3 +801,48 @@ export function regressionTree(
     },
   }
 }
+
+// ── Registry ─────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+defineModel(
+  {
+    key: 'decisionTree',
+    module: 'learning/trees-and-ensembles',
+    name: 'Decision tree',
+    summary: 'CART classification tree grown greedily, with cost-complexity pruning.',
+    task: 'classification',
+    capabilities: ['forward', 'decide', 'predictive', 'score'],
+    hyper: space({
+      criterion: oneOf(['gini', 'entropy']),
+      maxDepth: int(1, 32, { default: 32, doc: 'The factory default is unlimited.' }),
+      minSamplesSplit: int(2, 100, { default: 2 }),
+      minSamplesLeaf: int(1, 100, { default: 1 }),
+      minImpurityDecrease: real(0, 1, { default: 0 }),
+      pruneAlpha: real(0, 1, { default: 0, label: 'α' }),
+    }),
+    notes: ['decision-tree', 'tree-pruning'],
+    cite: ['breiman1984'],
+  },
+  decisionTree,
+)
+
+defineModel(
+  {
+    key: 'regressionTree',
+    module: 'learning/trees-and-ensembles',
+    name: 'Regression tree',
+    summary: 'CART regression tree on squared error, with cost-complexity pruning.',
+    task: 'regression',
+    capabilities: ['forward', 'decide', 'expect'],
+    hyper: space({
+      maxDepth: int(1, 32, { default: 32, doc: 'The factory default is unlimited.' }),
+      minSamplesSplit: int(2, 100, { default: 2 }),
+      minSamplesLeaf: int(1, 100, { default: 1 }),
+      minImpurityDecrease: real(0, 1, { default: 0 }),
+      pruneAlpha: real(0, 1, { default: 0, label: 'α' }),
+    }),
+    notes: ['decision-tree', 'tree-pruning'],
+    cite: ['breiman1984'],
+  },
+  regressionTree,
+)

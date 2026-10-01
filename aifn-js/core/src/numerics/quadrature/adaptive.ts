@@ -4,6 +4,7 @@
  * both traceable, plus `integrate`, which handles infinite limits by a change of variables (QUADPACK's QAGI).
  */
 
+import { DomainError } from 'aifn/foundation/errors'
 import { EPS, TINY } from 'aifn/foundation/tensor'
 import { run, type Algorithm } from 'aifn/foundation/trace'
 import type { Size, Status } from 'aifn/foundation/contracts'
@@ -192,14 +193,14 @@ export type GaussKronrodState = Status & {
 
 /**
  * Globally adaptive Gauss–Kronrod 7–15 quadrature (QUADPACK's QAG with key 1; Piessens et al., 1983): start with
- * [a, b] and, each step, bisect the interval with the largest error estimate, until the total error is at most
- * max(atol, rtol·|value|) (defaults 1.49e-8, as scipy's `quad`). `init` takes finite `{ a, b }`; use `integrate`
- * for infinite limits.
+ * [a, b] (split at `points` and into `panels` equal pieces when given) and, each step, bisect the interval with the
+ * largest error estimate, until the total error is at most max(atol, rtol·|value|) (defaults 1.49e-8, as scipy's
+ * `quad`). `init` takes finite `{ a, b, points?, panels? }`; use `integrate` for infinite limits.
  */
 export function gaussKronrod(
   f: Integrand,
   { atol = 1.49e-8, rtol = 1.49e-8 }: { atol?: number; rtol?: number } = {},
-): Algorithm<{ a: number; b: number }, GaussKronrodState> {
+): Algorithm<{ a: number; b: number; points?: readonly number[]; panels?: Size }, GaussKronrodState> {
   const summarise = (intervals: Interval[]) => {
     let value = 0
     let error = 0
@@ -216,9 +217,10 @@ export function gaussKronrod(
   }
   return {
     name: 'gauss-kronrod-15',
-    init: ({ a, b }) => {
-      const intervals = [kronrod15(f, a, b)]
-      return { t: 0, intervals, ...summarise(intervals), split: null, evaluations: 15 }
+    init: ({ a, b, points = [], panels = 1 }) => {
+      const cuts = startingCuts(a, b, points, panels)
+      const intervals = cuts.slice(1).map((hi, k) => kronrod15(f, cuts[k], hi))
+      return { t: 0, intervals, ...summarise(intervals), split: null, evaluations: 15 * intervals.length }
     },
     step: (s) => {
       let worst = 0
@@ -236,6 +238,23 @@ export function gaussKronrod(
     // Stop also when the worst interval can no longer be bisected in floating point.
     done: (s) => s.stalled,
   }
+}
+
+/**
+ * The ends of the starting intervals of [a, b]: each of `panels` equal pieces, further split at the `points` that lie
+ * strictly inside, sorted and without duplicates.
+ */
+function startingCuts(a: number, b: number, points: readonly number[], panels: Size): number[] {
+  if (!(Number.isInteger(panels) && panels >= 1))
+    throw new DomainError('integrate', `integrate: panels must be a positive integer, got ${panels}`)
+  const lo = Math.min(a, b)
+  const hi = Math.max(a, b)
+  const inner = [
+    ...Array.from({ length: panels - 1 }, (_, k) => lo + ((k + 1) * (hi - lo)) / panels),
+    ...points.filter((p) => p > lo && p < hi),
+  ]
+  const sorted = [...new Set(inner)].sort((x, y) => x - y)
+  return a <= b ? [lo, ...sorted, hi] : [hi, ...sorted.reverse(), lo]
 }
 
 /** The result of `integrate`. */
@@ -258,6 +277,14 @@ export type IntegrateOptions = {
   rtol?: number
   /** Gauss–Kronrod: at most this many subintervals (default 200). */
   maxIntervals?: Size
+  /**
+   * Gauss–Kronrod: points where f has a narrow feature, a kink or a jump, at which the range is split before the
+   * first estimate (scipy's `points`). A feature narrower than the spacing of the first rule's 15 nodes can otherwise be
+   * missed entirely: both estimates agree that f is 0 and the run stops at once.
+   */
+  points?: readonly number[]
+  /** Gauss–Kronrod: equal panels to start from (default 1). */
+  panels?: Size
   /** Romberg: at most this many halvings (default 20). */
   maxLevels?: Size
 }
@@ -266,13 +293,9 @@ export type IntegrateOptions = {
  * ∫ₐᵇ f(x) dx by globally adaptive Gauss–Kronrod 7–15, like scipy's `quad`, at most `maxIntervals` subintervals
  * (default 200), or by Romberg integration (`method: 'romberg'`, at most `maxLevels` halvings). Infinite limits are mapped to (0, 1] as in QUADPACK's QAGI: x = a + (1 − t)/t for [a, ∞),
  * x = b − (1 − t)/t for (−∞, b], and f(x) + f(−x) on [0, ∞) for (−∞, ∞). The Kronrod nodes never touch t = 0.
+ * Pass `points` for a narrow peak far from the first rule's nodes (see `IntegrateOptions`).
  */
-export function integrate(
-  f: Integrand,
-  a: number,
-  b: number,
-  options: IntegrateOptions = {},
-): IntegrationResult {
+export function integrate(f: Integrand, a: number, b: number, options: IntegrateOptions = {}): IntegrationResult {
   if (a === b) return { value: 0, error: 0, evaluations: 0, intervals: 0, converged: true }
   if (a > b) {
     const r = integrate(f, b, a, options)
@@ -298,7 +321,19 @@ export function integrate(
     const r = run(romberg(g, options), { a: lo, b: hi }, options.maxLevels ?? 20)
     return { value: r.value, error: r.error, evaluations: r.evaluations, intervals: 2 ** r.t, converged: r.converged }
   }
-  const s = run(gaussKronrod(g, options), { a: lo, b: hi }, (options.maxIntervals ?? 200) - 1)
+  // Breakpoints move with the variable: t = 1/(1 + |x − end|) on a half-line, t = 1/(1 + |x|) for the folded real line.
+  const toT = (x: number) =>
+    a === -Infinity && b === Infinity
+      ? 1 / (1 + Math.abs(x))
+      : b === Infinity
+        ? 1 / (1 + x - a)
+        : a === -Infinity
+          ? 1 / (1 + b - x)
+          : x
+  const points = (options.points ?? []).filter((x) => x > a && x < b).map(toT)
+  const panels = options.panels ?? 1
+  const start = { a: lo, b: hi, points, panels }
+  const s = run(gaussKronrod(g, options), start, Math.max(0, (options.maxIntervals ?? 200) - points.length - panels))
   return {
     value: s.value,
     error: s.error,

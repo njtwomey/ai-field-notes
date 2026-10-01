@@ -21,8 +21,9 @@ import { trace, type Algorithm, type Trace } from 'aifn/foundation/trace'
 import { useMemo, useState } from 'react'
 import { adamRule } from 'aifn/optim/first-order'
 import { ControlRow, Figure } from '@lab/layout'
-import { Player, Select, Slider } from '@lab/controls'
-import { Panel, Readout, Subplots, XYChart, formatNumber, type XYSeries } from '@lab/viz'
+import { Player } from '@lab/controls'
+import { choice, row, slider, useFigureState } from '@lab/state'
+import { Curve, Handle, Plot, Plots, Points, Readout, formatNumber, useAxis } from '@lab/viz'
 
 const fmt = (v: number) => formatNumber(v)
 
@@ -57,58 +58,42 @@ const SCHEDULES = { linear: linearSchedule(), cosine: cosineSchedule() }
 type ScheduleId = keyof typeof SCHEDULES
 const TICKS = Array.from({ length: 101 }, (_, k) => k * 10)
 
+const SCHEDULE_OPTIONS = [
+  { value: 'linear' as const, label: 'linear (Ho et al.)' },
+  { value: 'cosine' as const, label: 'cosine (Nichol & Dhariwal)' },
+]
+/** √ᾱ and √(1 − ᾱ) of both schedules over the steps, for the right-hand panel. */
+const SCALES = (Object.keys(SCHEDULES) as ScheduleId[]).map((name) => ({
+  name,
+  signal: TICKS.map((s) => Math.sqrt(alphaBarAt(SCHEDULES[name], s))),
+  noise: TICKS.map((s) => Math.sqrt(1 - alphaBarAt(SCHEDULES[name], s))),
+}))
+
 export function ForwardNoisingSpecimen() {
-  const [id, setId] = useState<ScheduleId>('linear')
-  const [k, setK] = useState(30)
+  const state = useFigureState({
+    setup: row('1 · schedule', { id: choice(SCHEDULE_OPTIONS, 'linear', { label: 'schedule' }) }),
+  })
+  const id = state.setup.id as ScheduleId
+  const [k, setK] = useState(0)
   const schedule = SCHEDULES[id]
   const t = TICKS[k]
   const ab = alphaBarAt(schedule, t)
   // The same noise draw at every t, so each point moves smoothly from its data position towards N(0, I).
-  const xt = useMemo(() => forwardNoise(stream('diffusion-eps'), DATA, ab).x, [ab])
-  const points: XYSeries[] = [{ name: 'x_t', type: 'scatter', ...columns(xt), slot: 0 }]
-  const curves = useMemo<XYSeries[]>(
-    () =>
-      (Object.keys(SCHEDULES) as ScheduleId[]).flatMap((name, slot) => [
-        {
-          name: `√ᾱ (${name})`,
-          type: 'line',
-          x: TICKS,
-          y: TICKS.map((s) => Math.sqrt(alphaBarAt(SCHEDULES[name], s))),
-          slot,
-        },
-        {
-          name: `√(1 − ᾱ) (${name})`,
-          type: 'line',
-          dashed: true,
-          x: TICKS,
-          y: TICKS.map((s) => Math.sqrt(1 - alphaBarAt(SCHEDULES[name], s))),
-          slot,
-        },
-      ]),
-    [],
-  )
+  const xt = useMemo(() => columns(forwardNoise(stream('diffusion-eps'), DATA, ab).x), [ab])
+  const x1 = useAxis({ label: 'x₁', range: RANGE })
+  const x2 = useAxis({ label: 'x₂', range: RANGE, equal: x1 })
+  const steps = useAxis({ label: 'step t', range: [0, 1000] })
+  const scale = useAxis({ label: 'scale', range: [0, 1] })
   return (
     <Figure
       title="Forward noising of a 2-D mixture"
-      description="The forward process shrinks the data by √ᾱ_t and adds noise of standard deviation √(1 − ᾱ_t), so the mixture's modes blur into one standard normal; the cosine schedule keeps more signal early and destroys it more evenly."
+      purpose="The forward process shrinks the data by √ᾱ_t and adds noise of sd √(1 − ᾱ_t), so the mixture's modes blur into one standard normal; the cosine schedule keeps more signal early."
+      state={state}
       defaultSize="L"
       controls={
-        <>
-          <ControlRow label="1 · schedule">
-            <Select
-              label="schedule"
-              value={id}
-              onChange={setId}
-              options={[
-                { value: 'linear', label: 'linear (Ho et al.)' },
-                { value: 'cosine', label: 'cosine (Nichol & Dhariwal)' },
-              ]}
-            />
-          </ControlRow>
-          <ControlRow label="2 · step">
-            <Player value={k} onChange={setK} count={TICKS.length} format={(i) => String(TICKS[i])} label="t" />
-          </ControlRow>
-        </>
+        <ControlRow label="2 · step">
+          <Player value={k} onChange={setK} count={TICKS.length} format={(i) => String(TICKS[i])} label="t" />
+        </ControlRow>
       }
       readouts={
         <>
@@ -117,24 +102,20 @@ export function ForwardNoisingSpecimen() {
           <Readout label="SNR" value={fmt(ab / (1 - ab))} />
         </>
       }
-      caption="aifn/diffusion forwardNoise of 600 mixture samples with one fixed noise draw, x_t = √ᾱ_t x₀ + √(1 − ᾱ_t) ε, T = 1000. Right: the signal and noise scales of both schedules; drag the step."
+      caption="aifn forwardNoise of 600 mixture samples with one fixed noise draw, x_t = √ᾱ_t x₀ + √(1 − ᾱ_t) ε, T = 1000. Right: the signal (solid) and noise (dashed) scales of both schedules; drag the step line or play."
     >
-      <Subplots cols={2} widthRatios={[1, 1.2]}>
-        <Panel>
-          <XYChart series={points} aspect="equal" xRange={RANGE} yRange={RANGE} xLabel="x₁" yLabel="x₂" />
-        </Panel>
-        <Panel>
-          <XYChart
-            series={curves}
-            xLabel="step t"
-            yLabel="scale"
-            yRange={[0, 1]}
-            handles={[
-              { kind: 'x', at: t, label: 't', onDrag: (x) => setK(Math.max(0, Math.min(100, Math.round(x / 10)))) },
-            ]}
-          />
-        </Panel>
-      </Subplots>
+      <Plots cols={2} widths={[1, 1.2]}>
+        <Plot x={x1} y={x2}>
+          <Points name="x_t" x={xt.x} y={xt.y} slot={0} />
+        </Plot>
+        <Plot x={steps} y={scale}>
+          {SCALES.flatMap((c, slot) => [
+            <Curve key={`${c.name}-s`} name={`√ᾱ (${c.name})`} x={TICKS} y={c.signal} slot={slot} />,
+            <Curve key={`${c.name}-n`} name={`√(1 − ᾱ) (${c.name})`} x={TICKS} y={c.noise} slot={slot} dashed />,
+          ])}
+          <Handle kind="x" at={t} label="t" onDrag={(x) => setK(Math.max(0, Math.min(100, Math.round(x / 10))))} />
+        </Plot>
+      </Plots>
     </Figure>
   )
 }
@@ -162,9 +143,14 @@ function sampled(
 const at = (run: Run, f: number) => run.trace.steps[Math.round(f * (run.trace.steps.length - 1))]
 
 export function ReverseSamplingSpecimen() {
-  const [ddimSteps, setDdimSteps] = useState(50)
-  const [odeSteps, setOdeSteps] = useState(40)
-  const [frame, setFrame] = useState(FRAMES)
+  const state = useFigureState({
+    budgets: row('1 · step budgets', {
+      ddimSteps: slider(5, 200, 50, { label: 'DDIM steps', step: 5 }),
+      odeSteps: slider(5, 100, 40, { label: 'ODE steps (RK4)', step: 5 }),
+    }),
+  })
+  const { ddimSteps, odeSteps } = state.budgets
+  const [frame, setFrame] = useState(0)
   const n = 500
   const schedule = SCHEDULES.linear
   const ddpm = useMemo(() => sampled(ddpmSampler(PREDICTOR, schedule), 1000, 'DDPM (1000 steps)', n), [schedule])
@@ -184,41 +170,45 @@ export function ReverseSamplingSpecimen() {
     [odeSteps],
   )
   const f = frame / FRAMES
-  const data = useMemo(() => ({ name: 'data', type: 'scatter' as const, muted: true, ...columns(DATA) }), [])
-  const panel = (run: Run, slot: number): XYSeries[] => {
-    const upto = run.trace.steps.slice(0, Math.round(f * (run.trace.steps.length - 1)) + 1)
-    const paths: XYSeries[] = Array.from({ length: PATHS }, (_, i) => ({
-      name: 'paths',
-      type: 'line',
-      thin: true,
-      slot,
-      x: upto.map((s) => s.x.data[2 * i] as number),
-      y: upto.map((s) => s.x.data[2 * i + 1] as number),
-    }))
-    return [data, { name: run.label, type: 'scatter', slot, ...columns(at(run, f).x) }, ...paths]
-  }
+  const data = useMemo(() => columns(DATA), [])
   const runs = [ddpm, ddim, ode]
+  const shown = runs.map((run) => {
+    const upto = run.trace.steps.slice(0, Math.round(f * (run.trace.steps.length - 1)) + 1)
+    return {
+      points: columns(at(run, f).x),
+      paths: Array.from({ length: PATHS }, (_, i) => ({
+        x: upto.map((s) => s.x.data[2 * i] as number),
+        y: upto.map((s) => s.x.data[2 * i + 1] as number),
+      })),
+    }
+  })
+  // One axis pair per panel: equal-unit panels sharing an axis come out at different sizes (phase5c-3.md request).
+  const ax = [
+    useAxis({ label: 'x₁', range: RANGE }),
+    useAxis({ label: 'x₁', range: RANGE }),
+    useAxis({ label: 'x₁', range: RANGE }),
+  ]
+  const ay = [
+    useAxis({ label: 'x₂', range: RANGE, equal: ax[0] }),
+    useAxis({ label: 'x₂', range: RANGE, equal: ax[1] }),
+    useAxis({ label: 'x₂', range: RANGE, equal: ax[2] }),
+  ]
   return (
     <Figure
       title="DDPM against DDIM against the probability-flow ODE"
-      description="All three samplers turn the same N(0, I) draws into samples of the mixture using its exact score; DDPM's paths are rough and need a thousand steps, while DDIM and the probability-flow ODE follow smooth deterministic paths in tens of steps."
+      purpose="Three samplers turn the same N(0, I) draws into mixture samples with its exact score: DDPM's paths are rough and need a thousand steps, DDIM and the probability-flow ODE follow smooth paths in tens."
+      state={state}
       defaultSize="XL"
       controls={
-        <>
-          <ControlRow label="1 · step budgets">
-            <Slider label="DDIM steps" value={ddimSteps} min={5} max={200} step={5} onChange={setDdimSteps} />
-            <Slider label="ODE steps (RK4)" value={odeSteps} min={5} max={100} step={5} onChange={setOdeSteps} />
-          </ControlRow>
-          <ControlRow label="2 · progress">
-            <Player
-              value={frame}
-              onChange={setFrame}
-              count={FRAMES + 1}
-              format={(i) => `${Math.round((100 * i) / FRAMES)}%`}
-              label="progress"
-            />
-          </ControlRow>
-        </>
+        <ControlRow label="2 · progress">
+          <Player
+            value={frame}
+            onChange={setFrame}
+            count={FRAMES + 1}
+            format={(i) => `${Math.round((100 * i) / FRAMES)}%`}
+            label="progress"
+          />
+        </ControlRow>
       }
       readouts={runs.map((r) => (
         <Readout
@@ -227,22 +217,19 @@ export function ReverseSamplingSpecimen() {
           value={String(r.trace.steps.at(-1)!.evaluations)}
         />
       ))}
-      caption={`aifn/diffusion samplers driven by mixtureNoisePredictor (no training), 500 particles from the same start, with ${PATHS} paths drawn; grey: data. The probability-flow ODE runs on the continuous VP SDE (β from 0.1 to 20), the others on the linear schedule with T = 1000.`}
+      caption={`Left to right: ${runs.map((r) => r.label).join('; ')}. aifn samplers driven by mixtureNoisePredictor (no training), 500 particles from the same start, with ${PATHS} paths drawn; grey: data. Play from 0% (the noise) to 100% (the samples). The probability-flow ODE runs on the continuous VP SDE (β from 0.1 to 20), the others on the linear schedule with T = 1000.`}
     >
-      <Subplots cols={3} sharex sharey>
+      <Plots cols={3}>
         {runs.map((r, slot) => (
-          <Panel key={r.label}>
-            <XYChart
-              series={panel(r, slot)}
-              legend={false}
-              xRange={RANGE}
-              yRange={RANGE}
-              xLabel={r.label}
-              yLabel="x₂"
-            />
-          </Panel>
+          <Plot key={r.label} x={ax[slot]} y={ay[slot]} title={r.label} legend={false}>
+            <Points name="data" x={data.x} y={data.y} muted thin />
+            <Points name={r.label} x={shown[slot].points.x} y={shown[slot].points.y} slot={slot} thin />
+            {shown[slot].paths.map((p, i) => (
+              <Curve key={i} name="paths" x={p.x} y={p.y} thin slot={slot} />
+            ))}
+          </Plot>
         ))}
-      </Subplots>
+      </Plots>
     </Figure>
   )
 }
@@ -253,8 +240,14 @@ export function ReverseSamplingSpecimen() {
 const SMALL = linearSchedule(100, { betaEnd: 0.2 })
 
 export function LearnedDenoiserSpecimen() {
-  const [steps, setSteps] = useState('800')
-  const [ddimSteps, setDdimSteps] = useState(40)
+  const state = useFigureState({
+    setup: row('1 · training and sampling', {
+      steps: choice([200, 800, 2000], 800, { label: 'training steps' }),
+      ddimSteps: slider(5, 200, 40, { label: 'DDIM steps', step: 5 }),
+    }),
+  })
+  const steps = state.setup.steps
+  const { ddimSteps } = state.setup
   const net = useMemo(() => denoiser(2, { hidden: [32, 32], frequencies: 4 }), [])
   const training = useMemo(() => {
     const n = Number(steps)
@@ -275,42 +268,31 @@ export function LearnedDenoiserSpecimen() {
     [net, params, ddimSteps],
   )
   const loss = toFlat(training.series.loss)
+  const lossCurve = useMemo(() => ({ x: Array.from(training.index), y: toFlat(training.series.loss) }), [training])
+  const sampleCols = useMemo(() => columns(samples), [samples])
+  const data = useMemo(() => columns(DATA), [])
+  const stepAxis = useAxis({ label: 'training step' })
+  const lossAxis = useAxis({ label: '‖ε − ε̂‖² per coordinate' })
+  const x1 = useAxis({ label: 'x₁', range: RANGE })
+  const x2 = useAxis({ label: 'x₂', range: RANGE, equal: x1 })
   return (
     <Figure
       title="A learned noise predictor"
-      description="A small MLP trained to predict the added noise learns the score of the data well enough that DDIM turns Gaussian draws into samples of the mixture; with a few hundred steps of training the modes are found but blurred, where the exact score gives sharp ones."
+      purpose="A small MLP trained to predict the added noise learns the data's score well enough that DDIM turns Gaussian draws into mixture samples; short training finds the modes but blurs them."
+      state={state}
       defaultSize="L"
-      controls={
-        <ControlRow label="1 · training and sampling">
-          <Select label="training steps" value={steps} onChange={setSteps} options={['200', '800', '2000']} />
-          <Slider label="DDIM steps" value={ddimSteps} min={5} max={200} step={5} onChange={setDdimSteps} />
-        </ControlRow>
-      }
       readouts={<Readout label="final loss" value={fmt(loss.at(-1)!)} />}
-      caption="aifn/diffusion denoiserTraining (Mlp 11 → 32 → 32 → 2 on x and sinusoidal features of the noise level, Adam with a decaying rate, minibatches of 128, T = 100) on the 600 mixture points of the figures above, and ddimSampler with the trained network. Left: the ε-prediction loss; right: 500 samples (colour) over the training data (grey)."
+      caption="aifn denoiserTraining (MLP 11 → 32 → 32 → 2 on x and sinusoidal features of the noise level, Adam with a decaying rate, minibatches of 128, T = 100) on the 600 mixture points of the figures above, and ddimSampler with the trained network. Left: the ε-prediction loss; right: 500 samples (colour) over the training data (grey)."
     >
-      <Subplots cols={2}>
-        <Panel>
-          <XYChart
-            series={[{ name: 'loss', type: 'line', x: Array.from(training.index), y: loss }]}
-            xLabel="training step"
-            yLabel="‖ε − ε̂‖² per coordinate"
-          />
-        </Panel>
-        <Panel>
-          <XYChart
-            series={[
-              { name: 'data', type: 'scatter', muted: true, ...columns(DATA) },
-              { name: 'samples', type: 'scatter', slot: 1, ...columns(samples) },
-            ]}
-            aspect="equal"
-            xRange={RANGE}
-            yRange={RANGE}
-            xLabel="x₁"
-            yLabel="x₂"
-          />
-        </Panel>
-      </Subplots>
+      <Plots cols={2}>
+        <Plot x={stepAxis} y={lossAxis} legend={false}>
+          <Curve name="loss" x={lossCurve.x} y={lossCurve.y} />
+        </Plot>
+        <Plot x={x1} y={x2}>
+          <Points name="data" x={data.x} y={data.y} muted thin />
+          <Points name="samples" x={sampleCols.x} y={sampleCols.y} slot={1} thin />
+        </Plot>
+      </Plots>
     </Figure>
   )
 }

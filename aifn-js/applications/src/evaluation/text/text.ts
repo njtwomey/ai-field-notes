@@ -413,6 +413,7 @@ const characters: Tokeniser = (s) => Array.from(s)
 
 const errorRateInfo = (key: string, name: string, range: readonly [number, number] = [0, Infinity]) =>
   ({
+    module: 'applied/evaluation/text',
     key,
     name,
     inputs: 'sequences',

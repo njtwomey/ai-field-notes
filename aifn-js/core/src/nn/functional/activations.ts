@@ -5,19 +5,7 @@
  */
 
 import { normalCdf, sigmoid, softplus } from 'aifn/numerics/special'
-import {
-  add,
-  elementwise,
-  expm1,
-  greater,
-  mul,
-  pow,
-  tanh,
-  unwrap,
-  where,
-  type Unary,
-  type Value,
-} from 'aifn/foundation/tensor'
+import { add, elementwise, expm1, greater, mul, pow, tanh, where, type Unary, type Value } from 'aifn/foundation/tensor'
 
 /**
  * The rectified linear unit max(0, x) (Nair & Hinton, 2010). Its derivative is 1[x > 0], taken as 0 at x = 0 (as in
@@ -26,18 +14,18 @@ import {
 export const relu: Unary = elementwise({
   id: 'nn/functional/relu',
   f: (x) => (x > 0 ? x : x === x ? 0 : NaN),
-  derivative: [(x) => greater(unwrap(x), 0)],
-  doc: { summary: 'The rectified linear unit max(0, x).', note: 'relu' },
+  derivative: [(x) => greater(x, 0)],
+  doc: { summary: 'The rectified linear unit max(0, x).', note: 'activation-functions' },
 })
 
 /** The leaky ReLU: x for x > 0 and αx otherwise (Maas, Hannun & Ng, 2013). Default α = 0.01. */
 export function leakyRelu(x: Value, slope = 0.01): Value {
-  return where(greater(unwrap(x), 0), x, mul(slope, x))
+  return where(greater(x, 0), x, mul(slope, x))
 }
 
 /** The exponential linear unit: x for x > 0 and α(eˣ − 1) otherwise (Clevert, Unterthiner & Hochreiter, 2016). */
 export function elu(x: Value, alpha = 1): Value {
-  return where(greater(unwrap(x), 0), x, mul(alpha, expm1(x)))
+  return where(greater(x, 0), x, mul(alpha, expm1(x)))
 }
 
 /**

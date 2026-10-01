@@ -14,47 +14,81 @@ import { dataset } from 'aifn/learning/estimators'
 import { glm } from 'aifn-applied/learning/generalised/glm'
 import { child, stream, uniform } from 'aifn/foundation/random'
 import { fromData, linspace, matmul, tensor, toFlat, type Tensor } from 'aifn/foundation/tensor'
-import { Player, Select, Slider } from '@lab/controls'
+import { Player } from '@lab/controls'
 import { ControlRow, Figure } from '@lab/layout'
-import { Panel, Readout, Subplots, XYChart, type XYSeries } from '@lab/viz'
+import { choice, number, useFigureState, variants } from '@lab/state'
+import { Curve, Plot, Plots, Points, Readout, useAxis } from '@lab/viz'
 import { formatValue } from '@lab/views'
 
-type Setup = { family: () => Family; links: LinkName[]; truth: (x: number) => number; dispersion: number }
+type Setup = {
+  label: string
+  family: () => Family
+  links: LinkName[]
+  truth: (x: number) => number
+  dispersion: number
+}
 
-const SETUPS: Record<string, Setup> = {
-  Gaussian: { family: gaussianFamily, links: ['identity', 'log'], truth: (x) => 1 + 0.8 * x, dispersion: 0.5 },
-  Bernoulli: {
+const SETUPS = {
+  gaussian: {
+    label: 'Gaussian',
+    family: gaussianFamily,
+    links: ['identity', 'log'],
+    truth: (x) => 1 + 0.8 * x,
+    dispersion: 0.5,
+  },
+  bernoulli: {
+    label: 'Bernoulli',
     family: binomialFamily,
     links: ['logit', 'probit', 'cloglog'],
     truth: (x) => 1 / (1 + Math.exp(-(0.3 + 1.5 * x))),
     dispersion: 1,
   },
-  Poisson: {
+  poisson: {
+    label: 'Poisson',
     family: poissonFamily,
     links: ['log', 'identity', 'sqrt'],
     truth: (x) => Math.exp(0.5 + 0.6 * x),
     dispersion: 1,
   },
   gamma: {
+    label: 'gamma',
     family: gammaFamily,
     links: ['log', 'inverse', 'identity'],
     truth: (x) => Math.exp(0.8 + 0.5 * x),
     dispersion: 0.3,
   },
-  'inverse Gaussian': {
+  inverseGaussian: {
+    label: 'inverse Gaussian',
     family: inverseGaussianFamily,
     links: ['log', 'inverse-squared'],
     truth: (x) => Math.exp(0.4 + 0.4 * x),
     dispersion: 0.2,
   },
-  'negative binomial (θ = 2)': {
+  negativeBinomial: {
+    label: 'negative binomial (θ = 2)',
     family: () => negativeBinomialFamily(2),
     links: ['log', 'sqrt'],
     truth: (x) => Math.exp(0.8 + 0.6 * x),
     dispersion: 1,
   },
-}
-const NAMES = Object.keys(SETUPS)
+} satisfies Record<string, Setup>
+type SetupName = keyof typeof SETUPS
+
+/** The family, with the links it supports (the first is the default) and the data seed every family shares. */
+const MODEL = variants(
+  Object.fromEntries(
+    (Object.keys(SETUPS) as SetupName[]).map((k) => {
+      const links = SETUPS[k].links as LinkName[]
+      return [k, { label: SETUPS[k].label, params: { link: choice(links, links[0], { label: 'link' }) } }]
+    }),
+  ) as Record<SetupName, { label: string; params: { link: ReturnType<typeof choice<LinkName>> } }>,
+  {
+    label: '1 · model',
+    choiceLabel: 'family',
+    initial: 'poisson',
+    shared: { seed: number(1, { min: 1, max: 20, step: 1, label: 'data seed' }) },
+  },
+)
 const N = 80
 const GRID = linspace(-2, 2, 101)
 const GRID_X = toFlat(GRID)
@@ -62,12 +96,12 @@ const GRID_DESIGN = fromData(Float64Array.from(GRID_X.flatMap((v) => [v, 1])), [
 
 /** One GLM per family, fitted by IRLS, stepped iteration by iteration. */
 export function IrlsSteps() {
-  const [name, setName] = useState('Poisson')
-  const setup = SETUPS[name]
-  const [linkName, setLinkName] = useState<LinkName>(setup.links[0])
-  const [step, setStep] = useState(1)
-  const [seed, setSeed] = useState(1)
-  const chosenLink = setup.links.includes(linkName) ? linkName : setup.links[0]
+  const figure = useFigureState({ model: MODEL })
+  const name = figure.model.key as SetupName
+  const setup: Setup = SETUPS[name]
+  const chosenLink = figure.model.values.link as LinkName
+  const seed = figure.model.values.seed as number
+  const [step, setStep] = useState(0)
   const data = useMemo(() => {
     const s = stream(`glm-${name}-${seed}`)
     const x = toFlat(uniform(child(s, 'x'), -2, 2, { shape: [N] }) as Tensor)
@@ -91,59 +125,29 @@ export function IrlsSteps() {
     const eta = matmul(GRID_DESIGN, state.coefficients) as Tensor
     return toFlat(link(chosenLink).inverse(eta) as Tensor)
   }, [state, chosenLink])
-  const top: XYSeries[] = [
-    { name: 'data', type: 'scatter', x: data.x, y: data.y, muted: true },
-    { name: 'true mean', type: 'line', x: GRID_X, y: GRID_X.map(setup.truth), slot: 2, dashed: true },
-    ...(curve ? [{ name: `μ after step ${k}`, type: 'line' as const, x: GRID_X, y: curve, slot: 0 }] : []),
-    ...(k === 0
-      ? [{ name: 'starting means μ₀', type: 'scatter' as const, x: data.x, y: toFlat(state.mu), slot: 0 }]
-      : []),
-  ]
+  const truth = useMemo(() => GRID_X.map(setup.truth), [setup])
+  const start = useMemo(() => (k === 0 ? toFlat(state.mu) : null), [k, state])
   // The deviance above its final value, on a log axis: the gap closes quadratically near the optimum.
-  const deviances = toFlat(model.training.series.deviance)
-  const gap = deviances.map((v) => Math.max(v - model.deviance, 1e-12))
-  const bottom: XYSeries[] = [
-    {
-      name: 'deviance − final deviance',
-      type: 'line',
-      x: Array.from(model.training.index),
-      y: gap,
-      slot: 0,
-      showPoints: true,
-    },
-    { name: 'current', type: 'scatter', x: [k], y: [gap[k]], emphasis: true },
-  ]
+  const gap = useMemo(() => {
+    const deviances = toFlat(model.training.series.deviance)
+    return { x: Array.from(model.training.index), y: deviances.map((v) => Math.max(v - model.deviance, 1e-12)) }
+  }, [model])
+  const now = useMemo(() => ({ x: [k], y: [gap.y[k]] }), [k, gap])
+  const xa = useAxis({ label: 'x' })
+  const ya = useAxis({ label: 'y, μ(x)', hold: 'initial', key: `${name}-${seed}` })
+  const stepAxis = useAxis({ label: 'IRLS step', hold: 'initial', key: model })
+  const gapAxis = useAxis({ label: 'deviance gap', log: true, hold: 'initial', key: model })
   const coef = state.coefficients ? toFlat(state.coefficients) : [NaN, NaN]
   return (
     <Figure
       title="IRLS for six families"
       defaultSize="L"
-      description="Each IRLS step is a weighted least-squares fit to the working response z = η + (y − μ)/μ′(η); a few steps take the constant start to the maximum-likelihood fit."
+      purpose="Each IRLS step is a weighted least-squares fit to the working response z = η + (y − μ)/μ′(η); a few steps take the constant start to the maximum-likelihood fit."
+      state={figure}
       controls={
-        <>
-          <ControlRow label="Model">
-            <Select
-              label="family"
-              value={name}
-              onChange={(v) => {
-                setName(v)
-                setLinkName(SETUPS[v].links[0])
-                setStep(1)
-              }}
-              options={NAMES}
-            />
-            <Select
-              label="link"
-              value={chosenLink}
-              onChange={(v) => setLinkName(v as LinkName)}
-              options={setup.links}
-            />
-            <Slider label="data seed" value={seed} onChange={setSeed} min={1} max={20} step={1} />
-          </ControlRow>
-          <ControlRow label="Iterations">
-            <Player value={k} onChange={setStep} count={steps.length} format={(i) => `step ${i}`} />
-          </ControlRow>
-        </>
+        <ControlRow label="2 · iterations">
+          <Player value={k} onChange={setStep} count={steps.length} format={(i) => `step ${i}`} />
+        </ControlRow>
       }
       readouts={
         <>
@@ -158,14 +162,18 @@ export function IrlsSteps() {
       }
       caption="Step through the iterations: step 0 is the family's starting mean, and each step refits. The canonical link converges in a handful of steps; a non-canonical one (identity for Poisson, inverse for gamma) may halve a step that would leave the mean space. The lower panel shows how far the deviance is above its final value, on a log scale; it never rises, and near the optimum the gap shrinks quadratically (the digits double each step). Gaps below 10⁻¹² are drawn at 10⁻¹²."
     >
-      <Subplots rows={2} heightRatios={[1.6, 1]}>
-        <Panel rescaleOnChange={false} axisKey={`${name}-${seed}`}>
-          <XYChart series={top} xLabel="x" yLabel="y, μ(x)" />
-        </Panel>
-        <Panel>
-          <XYChart series={bottom} xLabel="IRLS step" yLabel="deviance gap" integerX yLog />
-        </Panel>
-      </Subplots>
+      <Plots rows={2} heights={[1.6, 1]}>
+        <Plot x={xa} y={ya}>
+          <Points name="data" x={data.x} y={data.y} muted />
+          <Curve name="true mean" x={GRID_X} y={truth} slot={2} dashed />
+          {curve && <Curve name={`μ after step ${k}`} x={GRID_X} y={curve} slot={0} />}
+          {start && <Points name="starting means μ₀" x={data.x} y={start} slot={0} />}
+        </Plot>
+        <Plot x={stepAxis} y={gapAxis} legend={false}>
+          <Curve name="deviance − final deviance" x={gap.x} y={gap.y} slot={0} showPoints />
+          <Points name="current" x={now.x} y={now.y} emphasis />
+        </Plot>
+      </Plots>
     </Figure>
   )
 }

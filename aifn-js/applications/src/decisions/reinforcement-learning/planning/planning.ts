@@ -8,10 +8,10 @@ import { solve } from 'aifn/numerics/linalg'
 import type { Status } from 'aifn/foundation/contracts'
 import { fromData, type Tensor } from 'aifn/foundation/tensor'
 import type { Algorithm } from 'aifn/foundation/trace'
-import { greedyActions, isActive, policyMatrix, type PolicyInput, type TabularMdp } from '../mdp'
+import { greedyActions, isActive, policyMatrix, type MdpTables, type PolicyInput } from '../mdp'
 
 /** Q(s, a) = Σ_{s′} p (r + γ V(s′)) for every active state and action; 0 at terminal states. */
-export function qFromValues(mdp: TabularMdp, V: ArrayLike<number>): Float64Array {
+export function qFromValues(mdp: MdpTables, V: ArrayLike<number>): Float64Array {
   const { states: S, actions: A, gamma } = mdp
   const Q = new Float64Array(S * A)
   for (let s = 0; s < S; s++) {
@@ -26,12 +26,12 @@ export function qFromValues(mdp: TabularMdp, V: ArrayLike<number>): Float64Array
 }
 
 /** The greedy policy for an action-value table (states × actions), as int32 actions (−1 at terminals). */
-export function greedyPolicy(mdp: TabularMdp, Q: Tensor | ArrayLike<number>): Tensor {
+export function greedyPolicy(mdp: MdpTables, Q: Tensor | ArrayLike<number>): Tensor {
   return fromData(greedyActions(mdp, 'shape' in Q ? Q.data : Q))
 }
 
 /** V(s) = max_a Q(s, a) at active states and the terminal value elsewhere. */
-export function valuesFromQ(mdp: TabularMdp, Q: Tensor | ArrayLike<number>): Tensor {
+export function valuesFromQ(mdp: MdpTables, Q: Tensor | ArrayLike<number>): Tensor {
   const q = 'shape' in Q ? Q.data : Q
   const V = Float64Array.from(mdp.terminalValue)
   for (let s = 0; s < mdp.states; s++) {
@@ -47,7 +47,7 @@ export function valuesFromQ(mdp: TabularMdp, Q: Tensor | ArrayLike<number>): Ten
  * The exact value of a policy: solve (I − γ P_π) v = r_π over the active states, with terminal values fixed. With
  * γ = 1 a policy that never terminates makes the system singular; the result is then non-finite.
  */
-export function evaluatePolicy(mdp: TabularMdp, policy: PolicyInput): Tensor {
+export function evaluatePolicy(mdp: MdpTables, policy: PolicyInput): Tensor {
   const { states: S, actions: A, gamma } = mdp
   const pi = policyMatrix(mdp, policy)
   const active = Array.from({ length: S }, (_, s) => s).filter((s) => isActive(mdp, s))
@@ -97,7 +97,7 @@ export interface ValueState extends Status {
 
 type Backup = (Q: Float64Array, s: number) => number
 
-function valueState(mdp: TabularMdp, V: Float64Array, t: number, tolerance: number, backup: Backup): ValueState {
+function valueState(mdp: MdpTables, V: Float64Array, t: number, tolerance: number, backup: Backup): ValueState {
   const Q = qFromValues(mdp, V)
   let residual = 0
   for (let s = 0; s < mdp.states; s++)
@@ -114,7 +114,7 @@ function valueState(mdp: TabularMdp, V: Float64Array, t: number, tolerance: numb
 }
 
 /** Synchronous sweeps V_{k+1}(s) = backup(Q_k, s) over the active states, from V₀ = 0 with terminal values fixed. */
-function sweeps(mdp: TabularMdp, name: string, tolerance: number, backup: Backup): Algorithm<void, ValueState> {
+function sweeps(mdp: MdpTables, name: string, tolerance: number, backup: Backup): Algorithm<void, ValueState> {
   return {
     name,
     init: () => valueState(mdp, Float64Array.from(mdp.terminalValue), 0, tolerance, backup),
@@ -132,7 +132,7 @@ function sweeps(mdp: TabularMdp, name: string, tolerance: number, backup: Backup
  * V₀ = 0 with terminal values fixed. The residual falls at least as fast as γᵏ; done when it is below `tolerance`.
  */
 export function valueIteration(
-  mdp: TabularMdp,
+  mdp: MdpTables,
   { tolerance = 1e-10 }: { tolerance?: number } = {},
 ): Algorithm<void, ValueState> {
   const A = mdp.actions
@@ -148,7 +148,7 @@ export function valueIteration(
  * `policy` field of the state is the greedy policy with respect to V_k (the improvement step would pick it).
  */
 export function policyEvaluation(
-  mdp: TabularMdp,
+  mdp: MdpTables,
   policy: PolicyInput,
   { tolerance = 1e-10 }: { tolerance?: number } = {},
 ): Algorithm<void, ValueState> {
@@ -180,7 +180,7 @@ export interface PolicyIterationState extends Status {
  * Policy iteration (Howard, 1960): evaluate the policy exactly, then improve it greedily (keeping the current action
  * on ties), until the policy is stable. Starts from "always action 0". Converges in finitely many iterations.
  */
-export function policyIteration(mdp: TabularMdp): Algorithm<void, PolicyIterationState> {
+export function policyIteration(mdp: MdpTables): Algorithm<void, PolicyIterationState> {
   const evaluate = (policy: Int32Array, changed: number, t: number): PolicyIterationState => {
     const V = evaluatePolicy(mdp, fromData(policy))
     return {

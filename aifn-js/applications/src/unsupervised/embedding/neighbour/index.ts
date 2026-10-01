@@ -1,5 +1,6 @@
 /**
- * `aifn-applied/unsupervised/embedding/neighbour`: neighbour embeddings: t-SNE and UMAP.
+ * `aifn-applied/unsupervised/embedding/neighbour`: neighbour embeddings: t-SNE and UMAP, and approximate k-nearest
+ * neighbours by nearest-neighbour descent.
  */
 
 export {
@@ -12,4 +13,18 @@ export {
   type TsneParams,
   type TsneState,
 } from './tsne'
-export { curveParameters, fuzzyGraph, umap, umapSteps, type FuzzyGraph, type UmapModel, type UmapState } from './umap'
+export {
+  curveParameters,
+  DENSE_SPECTRAL_UP_TO,
+  DESCENT_ABOVE,
+  fuzzyGraph,
+  spectralLayout,
+  umap,
+  umapSteps,
+  type FuzzyGraph,
+  type FuzzyGraphOptions,
+  type NeighbourSearch,
+  type UmapModel,
+  type UmapState,
+} from './umap'
+export { nearestNeighbourDescent, type NearestNeighbourDescentOptions, type NeighbourLists } from './nn-descent'

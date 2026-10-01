@@ -5,6 +5,7 @@
  */
 
 import type { Kinded } from './kinds'
+import type { Info } from './registry'
 import type { Status } from './algorithm'
 import type { Index, MatrixLike, Scalar, Size, Tensor, Value, Vector, VectorLike } from './numbers'
 import type { Space } from './space'
@@ -30,6 +31,17 @@ export interface Objective<X = Tensor> extends Kinded<'objective'> {
   /** Where x may lie: a parameter space, or elementwise bounds. */
   readonly domain?: Space | { readonly lower: Tensor; readonly upper: Tensor }
   readonly truth?: { readonly minimisers: Tensor; readonly minimum: Scalar }
+}
+
+/**
+ * Registry metadata of a named objective (a test surface): its parameters, its dimension (null when the
+ * dimension is a parameter) and whether its known minimisers are given (`truth`).
+ */
+export interface ObjectiveInfo extends Info {
+  readonly kind: 'objective'
+  readonly params: Space
+  readonly dim: Size | null
+  readonly truth: boolean
 }
 
 // ── Optimiser signatures and states ──────────────────────────────────────────────────────────────────────────────────

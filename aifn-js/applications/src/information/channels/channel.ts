@@ -7,7 +7,8 @@
 
 import type { MatrixLike, Status, VectorLike } from 'aifn/foundation/contracts'
 import { run, type Algorithm } from 'aifn/foundation/trace'
-import { dense, fromData, toFlat, type Tensor } from 'aifn/foundation/tensor'
+import { dense, fromData, logsumexp, toFlat, type Tensor } from 'aifn/foundation/tensor'
+import { softmax } from 'aifn/numerics/special'
 
 function matrixOf(m: MatrixLike, where: string): { rows: number; cols: number; values: Float64Array } {
   const { data, m: rows, n: cols } = dense.toMatrixF64(m, where)
@@ -68,15 +69,12 @@ function capacityState(
   }
   let information = 0
   let upper = -Infinity
-  let m = -Infinity
   for (let x = 0; x < nx; x++) {
     information += p[x] * D[x]
-    if (p[x] > 0) m = Math.max(m, D[x])
     upper = Math.max(upper, D[x])
   }
-  let z = 0
-  for (let x = 0; x < nx; x++) z += p[x] * Math.exp(D[x] - m)
-  const lower = m + Math.log(z)
+  // The lower bound log Σₓ p(x) e^{D_x} (inputs with p(x) = 0 contribute log 0 = −∞).
+  const lower = logsumexp(logWeighted(p, D)) as number
   return {
     t,
     input: fromData(p, [nx]),
@@ -128,18 +126,17 @@ export function blahutArimotoCapacity(
   }
 }
 
+/** log p(x) + D_x as a tensor [nx]: the log weights of the reweighting p′(x) ∝ p(x) e^{D_x}. */
+function logWeighted(p: ArrayLike<number>, D: ArrayLike<number>): Tensor {
+  return fromData(
+    Float64Array.from(D, (d, x) => Math.log(p[x]) + d),
+    [D.length],
+  )
+}
+
 /** One Blahut–Arimoto reweighting p′(x) ∝ p(x) exp D_x. */
 function capacityStep(W: Float64Array, nx: number, ny: number, tolerance: number, state: CapacityState): CapacityState {
-  const p = toFlat(state.input)
-  const D = toFlat(state.divergences)
-  const m = Math.max(...D)
-  const next = new Float64Array(nx)
-  let z = 0
-  for (let x = 0; x < nx; x++) {
-    next[x] = p[x] * Math.exp(D[x] - m)
-    z += next[x]
-  }
-  for (let x = 0; x < nx; x++) next[x] /= z
+  const next = Float64Array.from(toFlat(softmax(logWeighted(toFlat(state.input), toFlat(state.divergences)))))
   return capacityState(W, nx, ny, next, tolerance, state.t + 1)
 }
 

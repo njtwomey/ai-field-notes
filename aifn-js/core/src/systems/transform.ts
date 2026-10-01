@@ -12,7 +12,7 @@ import { dense, fromData, type Tensor } from 'aifn/foundation/tensor'
 import type { LtiSystem, MatrixLike, Scalar, VectorLike } from 'aifn/foundation/contracts'
 import { DomainError, ShapeError } from 'aifn/foundation/errors'
 import {
-  polyMul,
+  mulCoefficients,
   rationalOf,
   stateSpace,
   stripLeading,
@@ -134,7 +134,11 @@ export function series(g1: LtiSystem, g2: LtiSystem): LtiOf<TransferFunctionForm
   sameDomain(g1, g2, 'series')
   const a = rationalOf(g1)
   const b = rationalOf(g2)
-  return fromRational(g1, { num: polyMul(a.num, b.num), den: polyMul(a.den, b.den) }, g1.delay + g2.delay)
+  return fromRational(
+    g1,
+    { num: mulCoefficients(a.num, b.num), den: mulCoefficients(a.den, b.den) },
+    g1.delay + g2.delay,
+  )
 }
 
 /** The parallel connection G₁ + G₂ of two SISO systems with equal delays, as a transfer function. */
@@ -143,8 +147,8 @@ export function parallel(g1: LtiSystem, g2: LtiSystem): LtiOf<TransferFunctionFo
   if (g1.delay !== g2.delay) throw new DomainError('parallel', 'parallel: the delays must be equal')
   const a = rationalOf(g1)
   const b = rationalOf(g2)
-  const num = polyAdd(polyMul(a.num, b.den), polyMul(b.num, a.den))
-  return fromRational(g1, { num, den: polyMul(a.den, b.den) }, g1.delay)
+  const num = polyAdd(mulCoefficients(a.num, b.den), mulCoefficients(b.num, a.den))
+  return fromRational(g1, { num, den: mulCoefficients(a.den, b.den) }, g1.delay)
 }
 
 /**
@@ -157,7 +161,7 @@ export function feedback(L: LtiSystem, H?: LtiSystem): LtiOf<TransferFunctionFor
   if (L.delay || h.delay) throw new DomainError('feedback', 'feedback: a loop with delay is not rational; simulate it')
   const l = rationalOf(L)
   const k = rationalOf({ ...h, delay: 0 })
-  const num = polyMul(l.num, k.den)
-  const den = polyAdd(polyMul(l.den, k.den), polyMul(l.num, k.num))
+  const num = mulCoefficients(l.num, k.den)
+  const den = polyAdd(mulCoefficients(l.den, k.den), mulCoefficients(l.num, k.num))
   return fromRational(L, { num, den }, 0)
 }

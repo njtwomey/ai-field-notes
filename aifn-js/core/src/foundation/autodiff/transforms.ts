@@ -1,67 +1,84 @@
 /**
- * The function transforms: `grad`, `valueAndGrad`, `vjp`, `jvp`, `jacobian`, `hessian`, `hvp` and `stopGradient`.
- * They follow the interface of JAX (Bradbury et al., 2018): a transform takes a function and returns a function.
+ * The function transforms: `grad`, `valueAndGrad`, `vjp`, `jvp`, `linearize`, `hvp`, `jacobian`, `hessian`, `vmap`
+ * and `stopGradient`. They follow the interface of JAX (Bradbury et al., 2018): a transform takes a function and
+ * returns a function. Each starts one interpreter (reverse, forward or batch; design K §4.1) at a fresh level, runs the
+ * function on tracers of it, and reads the answer off the tracers. Transforms nest in any order, because each
+ * interpreter treats tracers of the others as constants.
  */
 
-import { AifnError, ShapeError } from 'aifn/foundation/errors'
+import { AifnError, DTypeError, ShapeError } from 'aifn/foundation/errors'
 import {
-  add,
-  currentTape,
-  defineOp,
+  avalOf,
+  batchToFront,
+  broadcastTo,
+  definePrimitive,
+  fromData,
   isTraced,
-  mul,
   ones,
+  permute,
   reshape,
-  shapeOfValue,
-  stack,
+  slice,
   sum,
-  unwrap,
-  withTape,
-  zeros,
+  zerosOf,
+  type Aval,
   type Tensor,
   type Traced,
   type Value,
 } from 'aifn/foundation/tensor'
-import { GraphTape, sweep } from './tape'
-import { treeFlatten, treeUnflatten, zerosLike, type Flat } from 'aifn/foundation/pytree'
+import { treeFlatten, treeUnflatten, type Flat } from 'aifn/foundation/pytree'
+import { BatchInterpreter } from './batch'
+import { ForwardInterpreter } from './forward'
+import { ReverseInterpreter, type ReverseTracer } from './reverse'
 
 const count = (shape: readonly number[]) => shape.reduce((a, b) => a * b, 1)
 
-// ── Sessions: one tape per outermost transform ───────────────────────────────────────────────────────────────────────
+// ── Types ────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
 /**
- * The tape a transform records on and whether it is nested. Inside another transform (its tape is active) the
- * transform shares that tape, and its reverse sweeps record themselves so the outer transform can differentiate them.
+ * A result that may be traced (design K A10). A transform's result is raw when nothing it computes on is traced, but
+ * inside another transform (or when f closes over a traced value) it is traced by the enclosing transform. The type
+ * says so at every level: a number leaf becomes `number | Traced`, a tensor `Tensor | Traced`, and the structure of
+ * arrays and objects is kept. At the outermost level, narrow with `as` or read it through `unwrap`.
  */
-type Session = { tape: GraphTape; nested: boolean }
+export type Lifted<T> = T extends number
+  ? number | Traced
+  : T extends Tensor
+    ? Tensor | Traced
+    : T extends Traced
+      ? Value
+      : T extends readonly unknown[]
+        ? { -readonly [K in keyof T]: Lifted<T[K]> }
+        : T extends object
+          ? { -readonly [K in keyof T]: Lifted<T[K]> }
+          : T
 
-function openSession(leaves: readonly Value[]): Session {
-  const active = currentTape()
-  if (active instanceof GraphTape) return { tape: active, nested: true }
-  for (const x of leaves) if (isTraced(x) && x.tape instanceof GraphTape) return { tape: x.tape, nested: true }
-  return { tape: new GraphTape(), nested: false }
-}
+/** A tree of the structure of `T` with every leaf replaced by `L`. */
+export type TreeOf<T, L> = T extends Value
+  ? L
+  : T extends readonly unknown[]
+    ? { -readonly [K in keyof T]: TreeOf<T[K], L> }
+    : T extends object
+      ? { -readonly [K in keyof T]: TreeOf<T[K], L> }
+      : T
 
-/** The raw value of a result at the outermost level; traced values stay traced inside another transform. */
-function settle<T>(session: Session, x: T): T {
-  if (session.nested) return x
-  return (isTraced(x) ? unwrap(x) : x) as T
-}
+// ── Helpers ──────────────────────────────────────────────────────────────────────────────────────────────────────────
 
 /** Seed cotangent for a scalar output: 1, or a rank-0 tensor of ones. */
 function scalarSeed(where: string, y: Value): Value {
-  const raw = unwrap(y)
-  if (typeof raw === 'number') return 1
-  if (raw.shape.length === 0) return ones([])
+  const aval = avalOf(y)
+  if (aval.dtype === 'complex128')
+    throw new DTypeError(
+      where,
+      `${where}: the function must return a real value, not complex128 (differentiate a real loss such as ` +
+        `realPart, abs or the squared modulus of the output)`,
+      ['complex128'],
+    )
+  if (aval.number) return 1
+  if (aval.shape.length === 0) return ones([])
   throw new ShapeError(
     where,
-    `${where}: the function must return a number or a rank-0 tensor, not shape [${raw.shape.join(', ')}]`,
+    `${where}: the function must return a number or a rank-0 tensor, not shape [${aval.shape.join(', ')}]`,
   )
-}
-
-/** Replace missing cotangents by zeros of their leaf's shape. */
-function filled(cotangents: readonly (Value | null)[], leaves: readonly Value[]): Value[] {
-  return cotangents.map((g, i) => g ?? zerosLike(unwrap(leaves[i])))
 }
 
 type Argnums = number | readonly number[]
@@ -75,14 +92,14 @@ function argnumList(argnums: Argnums, n: number, where: string): number[] {
   return list
 }
 
-/** Record the arguments `argnums` as inputs on the session's tape; returns the new arguments and their flat trees. */
-function traceArgs(session: Session, args: readonly unknown[], argnums: readonly number[]) {
+/** Make the arguments `argnums` input leaves of a reverse interpreter; returns the new arguments and their trees. */
+function traceArgs(rev: ReverseInterpreter, args: readonly unknown[], argnums: readonly number[]) {
   const out = [...args]
   const flats: Flat[] = []
-  const inputs: Traced[] = []
+  const inputs: ReverseTracer[] = []
   for (const k of argnums) {
     const flat = treeFlatten(args[k], `arg${k}`)
-    const traced = flat.leaves.map((leaf, i) => session.tape.input(leaf, flat.paths[i]))
+    const traced = flat.leaves.map((leaf, i) => rev.input(leaf, flat.paths[i]))
     out[k] = treeUnflatten(flat.treedef, traced)
     flats.push(flat)
     inputs.push(...traced)
@@ -90,14 +107,19 @@ function traceArgs(session: Session, args: readonly unknown[], argnums: readonly
   return { args: out, flats, inputs }
 }
 
-/** Split a flat list of cotangents back into one tree per differentiated argument. */
-function splitCotangents(flats: readonly Flat[], cotangents: readonly Value[]): unknown[] {
+/** Split a flat list of leaves back into one tree per argument. */
+function splitLeaves(flats: readonly Flat[], leaves: readonly unknown[]): unknown[] {
   let at = 0
   return flats.map((flat) => {
-    const part = cotangents.slice(at, at + flat.leaves.length)
+    const part = leaves.slice(at, at + flat.leaves.length)
     at += flat.leaves.length
     return treeUnflatten(flat.treedef, part)
   })
+}
+
+/** Cotangents with the missing ones (outputs independent of that leaf) replaced by zeros of the leaf's kind. */
+function filled(cotangents: readonly (Value | null)[], leaves: readonly Value[]): Value[] {
+  return cotangents.map((g, i) => g ?? zerosOf(avalOf(leaves[i])))
 }
 
 // ── grad and valueAndGrad ────────────────────────────────────────────────────────────────────────────────────────────
@@ -116,43 +138,36 @@ export type ValueAndGrad<V, G> = { value: V; grad: G }
  * (default 0) in one forward and one reverse pass. f must return a number or a rank-0 tensor. Arguments may be
  * numbers, tensors or pytrees (nested arrays and objects) of them; each gradient has its argument's structure, with
  * numbers for numbers and tensors of the same shape for tensors. With `argnums` an array, `grad` is an array of
- * gradients. Inside another transform, values and gradients are traced so that the outer transform differentiates
- * them (nested `grad` gives second derivatives).
+ * gradients. Inside another transform the results are traced by it (so nested `grad` gives second derivatives).
  *
  * @example valueAndGrad((w: Value) => sum(square(w)))(tensor([1, 2])) // { value: 5, grad: [2, 4] }
  */
 export function valueAndGrad<A extends unknown[]>(
   f: (...args: A) => Value,
-): (...args: A) => ValueAndGrad<number | Tensor, A[0]>
+): (...args: A) => ValueAndGrad<Value, Lifted<A[0]>>
 export function valueAndGrad<A extends unknown[], N extends number>(
   f: (...args: A) => Value,
   options: { argnums: N },
-): (...args: A) => ValueAndGrad<number | Tensor, A[N]>
+): (...args: A) => ValueAndGrad<Value, Lifted<A[N]>>
 export function valueAndGrad<A extends unknown[]>(
   f: (...args: A) => Value,
   options: { argnums: readonly number[] },
-): (...args: A) => ValueAndGrad<number | Tensor, A[number][]>
+): (...args: A) => ValueAndGrad<Value, Lifted<A[number]>[]>
 export function valueAndGrad<A extends unknown[]>(
   f: (...args: A) => Value,
   options?: GradOptions,
-): (...args: A) => ValueAndGrad<number | Tensor, unknown>
+): (...args: A) => ValueAndGrad<Value, unknown>
 export function valueAndGrad<A extends unknown[]>(f: (...args: A) => Value, { argnums = 0 }: GradOptions = {}) {
   return (...args: A) => {
     const nums = argnumList(argnums, args.length, 'grad')
-    const session = openSession(nums.flatMap((k) => treeFlatten(args[k]).leaves))
-    const traced = traceArgs(session, args, nums)
-    const y = withTape(session.tape, () => f(...(traced.args as A)))
+    const rev = new ReverseInterpreter()
+    const traced = traceArgs(rev, args, nums)
+    const y = f(...(traced.args as A))
     const seed = scalarSeed('grad', y)
-    const { cotangents } = sweep(session.tape, y, seed, traced.inputs, { createGraph: session.nested })
-    const grads = splitCotangents(traced.flats, filled(cotangents, traced.inputs)).map((g) => settleTree(session, g))
-    return { value: settle(session, y), grad: typeof argnums === 'number' ? grads[0] : grads }
+    const { cotangents } = rev.backward([y], [seed], traced.inputs)
+    const grads = splitLeaves(traced.flats, filled(cotangents, traced.inputs))
+    return { value: rev.lower(y), grad: typeof argnums === 'number' ? grads[0] : grads }
   }
-}
-
-function settleTree(session: Session, tree: unknown): unknown {
-  if (session.nested) return tree
-  const flat = treeFlatten(tree)
-  return treeUnflatten(flat.treedef, flat.leaves.map(unwrap))
 }
 
 /**
@@ -161,163 +176,305 @@ function settleTree(session: Session, tree: unknown): unknown {
  *
  * @example grad((x: Value) => mul(x, sin(x)))(1) // sin 1 + cos 1
  */
-export function grad<A extends unknown[]>(f: (...args: A) => Value): (...args: A) => A[0]
+export function grad<A extends unknown[]>(f: (...args: A) => Value): (...args: A) => Lifted<A[0]>
 export function grad<A extends unknown[], N extends number>(
   f: (...args: A) => Value,
   options: { argnums: N },
-): (...args: A) => A[N]
+): (...args: A) => Lifted<A[N]>
 export function grad<A extends unknown[]>(
   f: (...args: A) => Value,
   options: { argnums: readonly number[] },
-): (...args: A) => A[number][]
+): (...args: A) => Lifted<A[number]>[]
 export function grad<A extends unknown[]>(f: (...args: A) => Value, options?: GradOptions): (...args: A) => unknown
 export function grad<A extends unknown[]>(f: (...args: A) => Value, options: GradOptions = {}) {
   const both = valueAndGrad(f, options)
   return (...args: A) => both(...args).grad
 }
 
-// ── vjp, jvp, jacobian, hessian, hvp ─────────────────────────────────────────────────────────────────────────────────
+// ── vjp, jvp, linearize, hvp ─────────────────────────────────────────────────────────────────────────────────────────
 
 /** The result of `vjp`: f's value and its pullback. */
-export type VjpResult<T> = {
-  value: number | Tensor
-  /** Map a cotangent of the output (same kind and shape as `value`) to one of the input (the structure of x). */
-  pullback: (cotangent: Value) => T
+export type VjpResult<X, Y> = {
+  value: Lifted<Y>
+  /** Map a cotangent of the output (the structure of `value`) to one of the input (the structure of x). */
+  pullback: (cotangent: TreeOf<Y, Value>) => Lifted<X>
 }
 
 /**
- * The value of f at x and its pullback u ↦ uᵀJ, where J is the Jacobian of f at x. x is a number, tensor or pytree;
- * f returns a number or tensor. One forward pass; each call of `pullback` is one reverse pass.
+ * The value of f at x and its pullback u ↦ uᵀJ, where J is the Jacobian of f at x. x and f(x) are numbers, tensors or
+ * pytrees of them. One forward pass, recorded; each call of `pullback` is one reverse sweep over the record.
  */
-export function vjp<T>(f: (x: T) => Value, x: T): VjpResult<T> {
-  const session = openSession(treeFlatten(x).leaves)
-  const traced = traceArgs(session, [x], [0])
-  const y = withTape(session.tape, () => f(traced.args[0] as T))
+export function vjp<X, Y>(f: (x: X) => Y, x: X): VjpResult<X, Y> {
+  const rev = new ReverseInterpreter()
+  const traced = traceArgs(rev, [x], [0])
+  const y = f(traced.args[0] as X)
+  const out = treeFlatten(y)
   return {
-    value: settle(session, y) as number | Tensor,
+    value: treeUnflatten(
+      out.treedef,
+      out.leaves.map((v) => rev.lower(v)),
+    ),
     pullback: (u) => {
-      const { cotangents } = sweep(session.tape, y, u, traced.inputs, { createGraph: session.nested })
-      return settleTree(session, splitCotangents(traced.flats, filled(cotangents, traced.inputs))[0]) as T
+      const seeds = treeFlatten(u).leaves
+      if (seeds.length !== out.leaves.length)
+        throw new ShapeError('vjp', 'vjp: the cotangent must have the structure of the output')
+      const { cotangents } = rev.backward(out.leaves, seeds, traced.inputs)
+      return splitLeaves(traced.flats, filled(cotangents, traced.inputs))[0] as Lifted<X>
     },
   }
 }
 
-/** The result of `jvp`: f's value and the directional derivative J·v. */
-export type JvpResult = { value: number | Tensor; tangent: number | Tensor }
+/** The result of `jvp`: f's value and the directional derivative J·v, both of the structure of f(x). */
+export type JvpResult<Y> = { value: Lifted<Y>; tangent: TreeOf<Y, Value> }
 
 /**
  * The value of f at x and the Jacobian–vector product J·v (the derivative of f at x in direction v), where v has the
- * structure of x and the result the shape of f(x).
- *
- * Method: aifn's primitives carry reverse-mode rules only, so forward mode is obtained by the transpose trick
- * ("forward from reverse"): the pullback u ↦ Jᵀu is linear in u, so J·v is the gradient with respect to u of
- * ⟨Jᵀu, v⟩. This costs one forward and two reverse passes, rather than the single pass of dual numbers
- * (Griewank and Walther, 2008, §3.1), and gives the same result to rounding.
+ * structure of x and the tangent that of f(x). One forward pass with dual numbers: every primitive computes its value
+ * and its tangent together.
  */
-export function jvp<T>(f: (x: T) => Value, x: T, v: T): JvpResult {
-  const session = openSession(treeFlatten(x).leaves)
-  const traced = traceArgs(session, [x], [0])
-  const y = withTape(session.tape, () => f(traced.args[0] as T))
-  const value = settle(session, y) as number | Tensor
-  if (!isTraced(y)) return { value, tangent: zerosLike(unwrap(y)) }
-  // u is a dummy cotangent: the reverse sweep with seed u records Jᵀu as a function of u.
-  const u = session.tape.input(zerosLike(unwrap(y)), 'u')
-  const { cotangents } = sweep(session.tape, y, u, traced.inputs, { createGraph: true })
+export function jvp<X, Y>(f: (x: X) => Y, x: X, v: X): JvpResult<Y> {
+  const fwd = new ForwardInterpreter()
+  const flat = treeFlatten(x)
   const directions = treeFlatten(v).leaves
-  if (directions.length !== traced.inputs.length) throw new ShapeError('jvp', 'jvp: v must have the structure of x')
-  const inner = withTape(session.tape, () => {
-    let s: Value = 0
-    cotangents.forEach((g, i) => {
-      if (g !== null) s = add(s, sum(mul(g, directions[i])))
-    })
-    return s
-  })
-  const tangent = sweep(session.tape, inner, 1, [u], { createGraph: session.nested }).cotangents[0]
-  return { value, tangent: (tangent === null ? zerosLike(unwrap(y)) : settle(session, tangent)) as number | Tensor }
-}
-
-/**
- * The Jacobian of f at x, for x a number or tensor and f returning a number or tensor: a tensor of shape
- * [...shape of f(x), ...shape of x] with entry [i, j] = ∂fᵢ/∂xⱼ (a number when both are numbers). Computed by one
- * reverse pass per output element, so it suits small outputs.
- */
-export function jacobian(f: (x: Value) => Value): (x: Value) => Value {
-  return (x) => {
-    const { value, pullback } = vjpWithSession(f, x)
-    const outShape = shapeOfValue(value)
-    const inShape = shapeOfValue(x)
-    const m = count(outShape)
-    if (outShape.length === 0) return pullback(typeof unwrap(value) === 'number' ? 1 : ones([]))
-    const rows: Value[] = []
-    for (let i = 0; i < m; i++) {
-      const e = zeros([m])
-      ;(e.data as Float64Array)[i] = 1
-      const row = pullback(reshape(e, outShape))
-      rows.push(inShape.length === 0 ? row : reshape(row, [count(inShape)]))
-    }
-    // Inside another transform the rows are traced, and stacking them records on the enclosing (active) tape.
-    return reshape(stack(rows), [...outShape, ...inShape])
-  }
-}
-
-function vjpWithSession(f: (x: Value) => Value, x: Value) {
-  const session = openSession([x])
-  const traced = traceArgs(session, [x], [0])
-  const y = withTape(session.tape, () => f(traced.args[0] as Value))
+  if (directions.length !== flat.leaves.length) throw new ShapeError('jvp', 'jvp: v must have the structure of x')
+  const seeded = flat.leaves.map((leaf, i) => fwd.seed(leaf, directions[i]))
+  const y = f(treeUnflatten(flat.treedef, seeded))
+  const out = treeFlatten(y)
   return {
-    value: y,
-    pullback: (u: Value): Value => {
-      const { cotangents } = sweep(session.tape, y, u, traced.inputs, { createGraph: session.nested })
-      return settle(session, cotangents[0] ?? zerosLike(unwrap(x)))
-    },
+    value: treeUnflatten(
+      out.treedef,
+      out.leaves.map((leaf) => fwd.primalOf(leaf)),
+    ),
+    tangent: treeUnflatten(
+      out.treedef,
+      out.leaves.map((leaf) => fwd.tangentOf(leaf) ?? zerosOf(avalOf(leaf))),
+    ),
+  }
+}
+
+/** The result of `linearize`: f's value and the linear map v ↦ J·v at x. */
+export type Linearized<X, Y> = { value: Lifted<Y>; jvp: (v: X) => TreeOf<Y, Value> }
+
+/**
+ * f's value at x and its linearisation v ↦ J·v, the best linear approximation of f near x. Each call of `jvp` is one
+ * forward pass (eager evaluation keeps no staged linear program, so the primal is recomputed alongside).
+ */
+export function linearize<X, Y>(f: (x: X) => Y, x: X): Linearized<X, Y> {
+  const out = treeFlatten(f(x))
+  return {
+    value: treeUnflatten(out.treedef, out.leaves),
+    jvp: (v) => jvp(f, x, v).tangent,
   }
 }
 
 /**
- * The Hessian of a scalar function f at x (a number or tensor): shape [...shape of x, ...shape of x], by reverse
- * over reverse (the Jacobian of the gradient). One reverse pass per element of x, so it suits small inputs.
+ * The Hessian–vector product H·v of a scalar function f at x, where v has the structure of x and so has the result:
+ * forward over reverse, the jvp of `grad(f)` in direction v (Pearlmutter, 1994). One forward-mode pass through one
+ * gradient evaluation, without forming H.
  */
-export function hessian(f: (x: Value) => Value): (x: Value) => Value {
-  return jacobian(grad(f) as (x: Value) => Value)
+export function hvp<X>(f: (x: X) => Value, x: X, v: X): TreeOf<X, Value> {
+  return jvp((y: X) => grad(f)(y) as unknown, x, v).tangent as TreeOf<X, Value>
+}
+
+// ── vmap ─────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+/** Options of `vmap`. */
+export type VmapOptions = {
+  /**
+   * The batch axis of each argument (applied to every leaf of it), or `null` for an argument shared by every example.
+   * One number applies to every argument. Default 0.
+   */
+  inAxes?: number | null | readonly (number | null)[]
+  /** Where the batch axis goes in every output leaf. Default 0. */
+  outAxes?: number
 }
 
 /**
- * The Hessian–vector product H·v of a scalar function f at x, where v has the structure of x and so has the result.
- * Computed as the gradient of x ↦ ⟨∇f(x), v⟩ (reverse over reverse; Pearlmutter, 1994), at the cost of a few
- * gradient evaluations and without forming H.
+ * `vmap(f)` runs f, written for one example, on a batch: each argument carries one more axis (`inAxes`, default the
+ * first), and every output leaf gains the batch axis at `outAxes`. Each primitive runs once on the whole batch by its
+ * batching rule (a loop over examples where it has none). Arguments and outputs may be pytrees. Nest it with the
+ * derivative transforms: `vmap(grad(loss))` gives per-example gradients.
+ *
+ * @example vmap((x: Value) => dot(x, x))(tensor([[1, 2], [3, 4]])) // [5, 25]
  */
-export function hvp<T>(f: (x: T) => Value, x: T, v: T): T {
-  const directions = treeFlatten(v).leaves
-  const inner = (y: T): Value => {
-    const g = treeFlatten(grad(f)(y)).leaves
-    if (g.length !== directions.length) throw new ShapeError('hvp', 'hvp: v must have the structure of x')
-    let s: Value = 0
-    g.forEach((gi, i) => {
-      s = add(s, sum(mul(gi, directions[i])))
+export function vmap<A extends unknown[], R>(
+  f: (...args: A) => R,
+  options: VmapOptions = {},
+): (...args: A) => TreeOf<R, Value> {
+  const { inAxes = 0, outAxes = 0 } = options
+  return (...args: A) => {
+    const axes = Array.isArray(inAxes)
+      ? (inAxes as readonly (number | null)[])
+      : args.map(() => inAxes as number | null)
+    if (axes.length !== args.length)
+      throw new ShapeError('vmap', `vmap: inAxes has ${axes.length} entries for ${args.length} arguments`)
+    let size: number | null = null
+    const flats = args.map((a) => treeFlatten(a))
+    flats.forEach((flat, k) => {
+      const axis = axes[k]
+      if (axis === null) return
+      for (const leaf of flat.leaves) {
+        const shape = avalOf(leaf).shape
+        const n = shape[axis < 0 ? shape.length + axis : axis]
+        if (n === undefined) throw new ShapeError('vmap', `vmap: argument ${k} has no axis ${axis}`)
+        if (size !== null && n !== size) throw new ShapeError('vmap', `vmap: batch sizes differ (${size} and ${n})`)
+        size = n
+      }
     })
-    return s
+    if (size === null) throw new AifnError('vmap', 'vmap: no argument is batched')
+    const batch = new BatchInterpreter(size)
+    const wrapped = args.map((a, k) => {
+      const axis = axes[k]
+      if (axis === null) return a
+      const flat = flats[k]
+      return treeUnflatten(
+        flat.treedef,
+        flat.leaves.map((leaf) => {
+          const rank = avalOf(leaf).shape.length
+          return batch.wrap(leaf, axis < 0 ? rank + axis : axis)
+        }),
+      )
+    })
+    const out = treeFlatten(f(...(wrapped as A)))
+    const n = size
+    const leaves = out.leaves.map((leaf) => {
+      // An output that does not depend on the batch is the same for every example: broadcast it.
+      const front = batch.owns(leaf)
+        ? batchToFront(leaf.value, leaf.axis)
+        : broadcastTo(leaf, [n, ...avalOf(leaf).shape])
+      return moveFront(front, outAxes)
+    })
+    return treeUnflatten(out.treedef, leaves)
   }
-  return grad(inner)(x)
+}
+
+/** Move axis 0 of `v` to position `to`. */
+function moveFront(v: Value, to: number): Value {
+  const rank = avalOf(v).shape.length
+  const at = to < 0 ? rank + to : to
+  if (at === 0) return v
+  const order = Array.from({ length: rank - 1 }, (_, k) => k + 1)
+  order.splice(at, 0, 0)
+  return permute(v, order)
+}
+
+// ── jacobian and hessian ─────────────────────────────────────────────────────────────────────────────────────────────
+
+/** Options of `jacobian`. */
+export type JacobianOptions = {
+  /**
+   * `reverse`: one pullback per output element, batched by `vmap` (suits few outputs); `forward`: one jvp per input
+   * element, batched by `vmap` (suits few inputs); `auto` (default): forward when x has no more elements than f(x).
+   */
+  mode?: 'auto' | 'forward' | 'reverse'
+}
+
+/**
+ * The Jacobian of f at x. For a single input and output leaf it is a tensor of shape [...shape of f(x), ...shape of
+ * x] with entry [i, j] = ∂fᵢ/∂xⱼ (a number when both are numbers). For pytrees it is a tree of the structure of f(x)
+ * whose leaves are trees of the structure of x (JAX's convention).
+ */
+export function jacobian<X, Y>(f: (x: X) => Y, options: JacobianOptions = {}): (x: X) => TreeOf<Y, TreeOf<X, Value>> {
+  const { mode = 'auto' } = options
+  return (x: X) => {
+    const inFlat = treeFlatten(x)
+    const inAvals = inFlat.leaves.map(avalOf)
+    const n = inAvals.reduce((s, a) => s + count(a.shape), 0)
+    if (mode === 'forward') return forwardJacobian(f, x, inFlat, inAvals, n)
+    const { value, pullback } = vjp(f, x)
+    const outFlat = treeFlatten(value)
+    const outAvals = outFlat.leaves.map(avalOf)
+    const m = outAvals.reduce((s, a) => s + count(a.shape), 0)
+    if (mode === 'auto' && n <= m) return forwardJacobian(f, x, inFlat, inAvals, n)
+    // Row block of output leaf j: the pullbacks of the basis cotangents of its elements, all at once under vmap.
+    const basis = outAvals.map((_, j) => basisBlock(outAvals, j, m))
+    const rows = vmap((u: unknown) => pullback(u as TreeOf<Y, Value>))(treeUnflatten(outFlat.treedef, basis))
+    const rowLeaves = treeFlatten(rows).leaves
+    let off = 0
+    const blocks = outAvals.map((o) => {
+      const size = count(o.shape)
+      const entries = rowLeaves.map((r, i) => entry(slice(r, [off, off + size]), o, inAvals[i], false))
+      off += size
+      return treeUnflatten(inFlat.treedef, entries)
+    })
+    return treeUnflatten(outFlat.treedef, blocks) as TreeOf<Y, TreeOf<X, Value>>
+  }
+}
+
+function forwardJacobian<X, Y>(f: (x: X) => Y, x: X, inFlat: Flat, inAvals: readonly Aval[], n: number) {
+  // Column block of input leaf i: the jvps along the basis tangents of its elements, all at once under vmap.
+  const basis = inAvals.map((_, i) => basisBlock(inAvals, i, n))
+  // One example's output avals, read inside the batch (they say which outputs are numbers).
+  let outAvals: Aval[] = []
+  const cols = vmap((t: unknown) => {
+    const tangent = jvp(f, x, t as X).tangent
+    outAvals = treeFlatten(tangent).leaves.map(avalOf)
+    return tangent
+  })(treeUnflatten(inFlat.treedef, basis))
+  const colFlat = treeFlatten(cols)
+  const blocks = colFlat.leaves.map((c, j) => {
+    const out = outAvals[j]
+    let off = 0
+    const entries = inAvals.map((a) => {
+      const size = count(a.shape)
+      const e = entry(slice(c, [off, off + size]), a, out, true)
+      off += size
+      return e
+    })
+    return treeUnflatten(inFlat.treedef, entries)
+  })
+  return treeUnflatten(colFlat.treedef, blocks) as TreeOf<Y, TreeOf<X, Value>>
+}
+
+/**
+ * The block of basis vectors for leaf `j` of a flat list of leaves with `total` elements: shape [total, ...shape of
+ * leaf j], one-hot in the rows of leaf j's own elements.
+ */
+function basisBlock(avals: readonly Aval[], j: number, total: number): Tensor {
+  let off = 0
+  for (let k = 0; k < j; k++) off += count(avals[k].shape)
+  const size = count(avals[j].shape)
+  const data = new Float64Array(total * size)
+  for (let r = 0; r < size; r++) data[(off + r) * size + r] = 1
+  return fromData(data, [total, ...avals[j].shape])
+}
+
+/**
+ * One Jacobian entry from a block of rows [size of `lead`, ...shape of `trail`] (reverse mode) or of columns [size
+ * of `lead`, ...shape of `trail`] to be transposed (forward mode): the result has shape [...out, ...in], and is a
+ * number when both the output and the input are numbers.
+ */
+function entry(block: Value, lead: Aval, trail: Aval, transposed: boolean): Value {
+  const [out, inp] = transposed ? [trail, lead] : [lead, trail]
+  let e = block
+  if (transposed) e = permute(reshape(e, [count(lead.shape), count(trail.shape)]), [1, 0])
+  if (out.number && inp.number) return sum(e)
+  return reshape(e, [...out.shape, ...inp.shape])
+}
+
+/**
+ * The Hessian of a scalar function f at x: forward over reverse (the forward-mode Jacobian of the gradient). For a
+ * single leaf x it has shape [...shape of x, ...shape of x]; for a pytree it is a tree of trees.
+ */
+export function hessian<X>(f: (x: X) => Value): (x: X) => TreeOf<X, TreeOf<X, Value>> {
+  return jacobian((y: X) => grad(f)(y) as unknown as X, { mode: 'forward' }) as (x: X) => TreeOf<X, TreeOf<X, Value>>
 }
 
 // ── stopGradient ─────────────────────────────────────────────────────────────────────────────────────────────────────
 
-const stopGradientOp = defineOp<undefined>(
-  'foundation/autodiff/stopGradient',
-  ([x]) => x,
-  () => [null],
-  {
-    arity: 1,
-    differentiable: [false],
-    doc: { summary: 'x itself, treated as a constant by every transform.' },
-    test: { cases: (draw) => [{ inputs: [draw([2, 3])] }] },
-  },
-)
+const stopGradientOp = definePrimitive<undefined>({
+  id: 'foundation/autodiff/stopGradient',
+  arity: 1,
+  impl: ([x]) => x,
+  zeroDerivative: true,
+  shape: ([x]) => x,
+  batch: ([x], [axis]) => [x, axis ?? 0],
+  differentiable: [false],
+  doc: { summary: 'x itself, treated as a constant by every derivative transform.' },
+  test: { cases: (draw) => [{ inputs: [draw([2, 3])] }] },
+})
 
-/**
- * x itself, treated as a constant by every transform: its cotangent is zero. Applies to each leaf of a pytree. It is
- * recorded on the tape (so a graph shows where gradients stop).
- */
+/** x itself, treated as a constant by every derivative transform: its derivative is zero. Applies to each leaf. */
 export function stopGradient<T>(x: T): T {
   const flat = treeFlatten(x)
   return treeUnflatten(

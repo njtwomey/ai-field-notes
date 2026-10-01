@@ -85,6 +85,12 @@ const domains: Readonly<Record<string, Domain | readonly Domain[]>> = {
   logChoose: [d(3, 6), d(0.5, 2.5)],
   regularisedGammaP: [positive, d(0.2, 4)],
   regularisedGammaQ: [positive, d(0.2, 4)],
+  logRegularisedGammaP: [positive, d(0.2, 4)],
+  logRegularisedGammaQ: [positive, d(0.2, 4)],
+  regularisedGammaPInverse: [positive, probability],
+  regularisedGammaQInverse: [positive, probability],
+  logRegularisedBeta: [positive, positive, probability],
+  studentTLogCdf: [d(-2, 2), d(1, 8)],
   regularisedBeta: [positive, positive, probability],
   regularisedBetaInverse: [positive, positive, probability],
   studentTCdf: [d(-2, 2), d(1, 8)],
@@ -133,11 +139,16 @@ const guarded = (ok: Value, x: Value, safe: number): Value => where(ok, x, safe)
 
 // ── Densities used as derivatives (compositions of the primitives below) ─────────────────────────────────────────
 
-/** The Gamma(a, 1) density x^{a−1} e^{−x} / Γ(a) at x ≥ 0 (0 below): ∂P(a, x)/∂x. */
-function gammaDensity(a: Value, x: Value): Value {
+/** log of the Gamma(a, 1) density, (a − 1) log x − x − log Γ(a), at x ≥ 0 (−∞ below). */
+function logGammaDensity(a: Value, x: Value): Value {
   const ok = greaterEqual(x, 0)
   const xs = guarded(ok, x, 1)
-  return where(ok, exp(sub(sub(xlogy(sub(a, 1), xs), xs), logGamma(a))), 0)
+  return where(ok, sub(sub(xlogy(sub(a, 1), xs), xs), logGamma(a)), -Infinity)
+}
+
+/** The Gamma(a, 1) density x^{a−1} e^{−x} / Γ(a) at x ≥ 0 (0 below): ∂P(a, x)/∂x. */
+function gammaDensity(a: Value, x: Value): Value {
+  return exp(logGammaDensity(a, x))
 }
 
 /** The χ²ₖ density at x: half the Gamma(k/2, 1) density at x/2. */
@@ -145,15 +156,20 @@ function chiSquareDensity(x: Value, k: Value): Value {
   return mul(0.5, gammaDensity(mul(0.5, k), mul(0.5, x)))
 }
 
-/** The Beta(a, b) density on [0, 1] (0 outside): ∂I_x(a, b)/∂x. */
-function betaDensity(a: Value, b: Value, x: Value): Value {
+/** log of the Beta(a, b) density on [0, 1] (−∞ outside). */
+function logBetaDensity(a: Value, b: Value, x: Value): Value {
   const ok = where(greaterEqual(x, 0), lessEqual(x, 1), 0)
   const xs = guarded(ok, x, 0.5)
-  return where(ok, exp(sub(add(xlogy(sub(a, 1), xs), xlog1py(sub(b, 1), neg(xs))), logBeta(a, b))), 0)
+  return where(ok, sub(add(xlogy(sub(a, 1), xs), xlog1py(sub(b, 1), neg(xs))), logBeta(a, b)), -Infinity)
 }
 
-/** The Student t density with ν degrees of freedom at t (the standard normal density for ν = ∞). */
-function studentTDensity(t: Value, df: Value): Value {
+/** The Beta(a, b) density on [0, 1] (0 outside): ∂I_x(a, b)/∂x. */
+function betaDensity(a: Value, b: Value, x: Value): Value {
+  return exp(logBetaDensity(a, b, x))
+}
+
+/** log of the Student t density with ν degrees of freedom at t (the standard normal's for ν = ∞). */
+function logStudentTDensity(t: Value, df: Value): Value {
   const finite = less(df, Infinity)
   const nu = guarded(finite, df, 1)
   const half = mul(0.5, nu)
@@ -162,7 +178,12 @@ function studentTDensity(t: Value, df: Value): Value {
     sub(sub(logGamma(halfPlus), logGamma(half)), mul(0.5, log(mul(Math.PI, nu)))),
     mul(halfPlus, log1p(div(square(t), nu))),
   )
-  return where(finite, exp(logDensity), normalPdf(t))
+  return where(finite, logDensity, normalLogPdf(t))
+}
+
+/** The Student t density with ν degrees of freedom at t (the standard normal density for ν = ∞). */
+function studentTDensity(t: Value, df: Value): Value {
+  return exp(logStudentTDensity(t, df))
 }
 
 // ── Error function family (erf.ts) ───────────────────────────────────────────────────────────────────────────────────
@@ -226,10 +247,24 @@ export const truncatedNormalVDraw: Binary = binary(
   null,
 )
 /**
- * One minus the variance of a standard normal truncated to [−ε − t, ε − t], elementwise over broadcast (t, ε). Not
- * differentiable.
+ * One minus the variance of a standard normal truncated to [−ε − t, ε − t], elementwise over broadcast (t, ε).
+ * Differentiable in t only.
  */
-export const truncatedNormalWDraw: Binary = binary('truncatedNormalWDraw', N.truncatedNormalWDraw, null, null)
+export const truncatedNormalWDraw: Binary = binary(
+  'truncatedNormalWDraw',
+  N.truncatedNormalWDraw,
+  (t, eps, w) => {
+    // With X truncated to [l, u] = [−ε − t, ε − t] and Z = Φ(u) − Φ(l), d/dt E f(X) = (f(l)φ(l) − f(u)φ(u))/Z − v E f(X).
+    // From f = x² and E X² = 1 − w + v², w' = (u²φ(u) − l²φ(l))/Z + v(1 + v² − 3w).
+    const u = sub(eps, t)
+    const l = neg(add(eps, t))
+    const logZ = normalLogIntervalProbability(l, u)
+    const v = truncatedNormalVDraw(t, eps)
+    const tails = sub(mul(square(u), exp(sub(normalLogPdf(u), logZ))), mul(square(l), exp(sub(normalLogPdf(l), logZ))))
+    return add(tails, mul(v, sub(add(1, square(v)), mul(3, w))))
+  },
+  null,
+)
 
 // ── Gamma family (gamma.ts) ──────────────────────────────────────────────────────────────────────────────────────────
 
@@ -284,6 +319,39 @@ export const regularisedGammaQ: Binary = binary('regularisedGammaQ', G.regularis
   neg(gammaDensity(a, x)),
 )
 
+/**
+ * log P(a, x), elementwise over broadcast (a, x): accurate where P underflows (the lower tail, summed in log space) and
+ * where P ≈ 1 (log1p of −Q). Differentiable in x (∂ log P/∂x is the Gamma(a, 1) density over P).
+ */
+export const logRegularisedGammaP: Binary = binary('logRegularisedGammaP', G.logRegularisedGammaP, null, (a, x, y) =>
+  exp(sub(logGammaDensity(a, x), y)),
+)
+/** log Q(a, x), elementwise over broadcast (a, x): accurate in the upper tail and where Q ≈ 1. Differentiable in x. */
+export const logRegularisedGammaQ: Binary = binary('logRegularisedGammaQ', G.logRegularisedGammaQ, null, (a, x, y) =>
+  neg(exp(sub(logGammaDensity(a, x), y))),
+)
+/**
+ * The inverse of P(a, x) in x, elementwise over broadcast (a, p), like scipy.special.gammaincinv: the p-quantile of
+ * Gamma(a, 1), inverting Q above p = ½ so that upper quantiles keep their accuracy. Differentiable in p
+ * (dx/dp = 1 / the Gamma(a, 1) density at x).
+ */
+export const regularisedGammaPInverse: Binary = binary(
+  'regularisedGammaPInverse',
+  G.regularisedGammaPInverse,
+  null,
+  (a, _p, y) => exp(neg(logGammaDensity(a, y))),
+)
+/**
+ * The inverse of Q(a, x) in x, elementwise over broadcast (a, q), like scipy.special.gammainccinv: the inverse survival
+ * function of Gamma(a, 1), accurate for q down to 1e-300. Differentiable in q (dx/dq = −1 / the density at x).
+ */
+export const regularisedGammaQInverse: Binary = binary(
+  'regularisedGammaQInverse',
+  G.regularisedGammaQInverse,
+  null,
+  (a, _q, y) => neg(exp(neg(logGammaDensity(a, y)))),
+)
+
 // ── Beta family and derived distribution functions (beta.ts) ─────────────────────────────────────────────────────────
 
 /**
@@ -304,8 +372,27 @@ export const regularisedBetaInverse: Ternary = ternary('regularisedBetaInverse',
   null,
   (a, b, _p, y) => div(1, betaDensity(a, b, y)),
 ])
+/**
+ * log I_x(a, b), elementwise over broadcast (a, b, x): accurate where I underflows and where I ≈ 1. Differentiable in x
+ * only (the Beta(a, b) density over I).
+ */
+export const logRegularisedBeta: Ternary = ternary('logRegularisedBeta', B.logRegularisedBeta, [
+  null,
+  null,
+  (a, b, x, y) => exp(sub(logBetaDensity(a, b, x), y)),
+])
 /** The Student t cdf, elementwise over broadcast (t, ν); ν = ∞ gives Φ. Accurate in both tails. Differentiable in t. */
 export const studentTCdf: Binary = binary('studentTCdf', B.studentTCdf, (t, df) => studentTDensity(t, df), null)
+/**
+ * log of the Student t cdf, elementwise over broadcast (t, ν): the lower tail in log space (no underflow) and log1p of
+ * the complement in the upper tail. Differentiable in t (the density over the cdf).
+ */
+export const studentTLogCdf: Binary = binary(
+  'studentTLogCdf',
+  B.studentTLogCdf,
+  (t, df, y) => exp(sub(logStudentTDensity(t, df), y)),
+  null,
+)
 /** The Student t quantile, elementwise over broadcast (p, ν). Differentiable in p. */
 export const studentTQuantile: Binary = binary(
   'studentTQuantile',

@@ -3,6 +3,7 @@
  * (seasonal-trend decomposition by loess).
  */
 
+import { median } from 'aifn/probability/stats'
 import type { Decomposition } from 'aifn/foundation/contracts'
 import { tensor, type Vector } from 'aifn/foundation/tensor'
 import { toVec, type VectorLike } from './inputs'
@@ -119,7 +120,8 @@ export function classicalDecomposition(
 
 /**
  * Local linear regression (loess, Cleveland, 1979) of values v at positions 0 … n−1 with tricube weights over the q
- * nearest positions (times robustness weights w), evaluated at position `at` (which may lie outside the data).
+ * nearest positions (times robustness weights w), evaluated at position `at` (which may lie outside the data). When
+ * every weight in the window is zero it returns the nearest value.
  */
 function loessAt(v: number[], w: number[], q: number, at: number): number {
   const n = v.length
@@ -142,7 +144,9 @@ function loessAt(v: number[], w: number[], q: number, at: number): number {
     sxx += wi * i * i
     sxy += wi * i * v[i]
   }
-  if (!(sw > 0)) return NaN
+  // Every weight in the window is zero (robustness weights can zero a whole window once the fit is nearly exact):
+  // keep the nearest value, as the Fortran stless does, rather than return NaN.
+  if (!(sw > 0)) return v[Math.max(0, Math.min(n - 1, Math.round(at)))]
   const mx = sx / sw
   const my = sy / sw
   const vxx = sxx / sw - mx * mx
@@ -189,6 +193,7 @@ export function stl(y: VectorLike, period: number, options: StlOptions = {}): Se
   if (nl % 2 === 0) nl++
   const inner = options.inner ?? 2
   const outer = options.robust ?? 0
+  const scale = ys.reduce((a, v) => Math.max(a, Math.abs(v)), 0)
   let trend = new Array<number>(n).fill(0)
   let seasonal = new Array<number>(n).fill(0)
   let weights = new Array<number>(n).fill(1)
@@ -214,11 +219,15 @@ export function stl(y: VectorLike, period: number, options: StlOptions = {}): Se
     }
     if (o < outer) {
       const r = ys.map((v, t) => Math.abs(v - trend[t] - seasonal[t]))
-      const sorted = [...r].sort((a, b) => a - b)
-      const h = 6 * (n % 2 ? sorted[(n - 1) / 2] : (sorted[n / 2 - 1] + sorted[n / 2]) / 2)
+      // h = 6 · median |remainder|, floored at a rounding-level fraction of the data's scale: once the fit is exact up
+      // to rounding, residuals of 1e-15 would otherwise set the scale and zero the weights of ordinary points.
+      const h = Math.max(6 * median(r), 1e-9 * scale)
+      // R's stl thresholds (Cleveland et al., 1990, Fortran stlrwt): weight 1 within 0.001·h, bisquare up to 0.999·h,
+      // 0 beyond. A perfect fit (h = 0) keeps every weight at 1.
       weights = r.map((v) => {
         const u = h > 0 ? v / h : 0
-        return u < 1 ? (1 - u * u) ** 2 : 0
+        if (u <= 0.001) return 1
+        return u <= 0.999 ? (1 - u * u) ** 2 : 0
       })
     }
   }

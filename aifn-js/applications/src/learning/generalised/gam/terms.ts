@@ -108,6 +108,8 @@ export type BuiltTerm = {
   readonly size: number
   /** Penalties [size, size], already mapped by Z; one smoothing parameter each. */
   readonly penalties: F64[]
+  /** The same penalties on the raw coefficients, [rawSize, rawSize] (Sₖ before the constraint: penalties = ZᵀSₖZ). */
+  readonly rawPenalties: F64[]
   /** Fixed smoothing parameters (NaN where the model selects them), one per penalty. */
   readonly fixedLambda: number[]
   /** Rows of a difference operator on the raw coefficients that a shape constraint wants ≥ 0 ([rows, rawSize]). */
@@ -262,6 +264,7 @@ function buildSmooth(
     Z,
     size,
     penalties: [congruence(S, Z, rawSize, size)],
+    rawPenalties: [S],
     fixedLambda: [spec.lambda ?? NaN],
     shape,
     byLevel,
@@ -280,6 +283,7 @@ function buildLinear(spec: Extract<TermSpec, { kind: 'linear' }>, X: F64, n: num
     Z: identity(1),
     size: 1,
     penalties: [],
+    rawPenalties: [],
     fixedLambda: [],
   }
 }
@@ -309,6 +313,7 @@ function buildFactor(spec: Extract<TermSpec, { kind: 'factor' }>, X: F64, n: num
     Z,
     size: L - 1,
     penalties: ridge ? [congruence(identity(L), Z, L, L - 1)] : [],
+    rawPenalties: ridge ? [identity(L)] : [],
     fixedLambda: ridge ? [spec.lambda!] : [],
   }
 }
@@ -341,6 +346,55 @@ function buildTensor(spec: Extract<TermSpec, { kind: 'tensor' }>, X: F64, n: num
     Z,
     size,
     penalties: [congruence(f64(S1), Z, rawSize, size), congruence(f64(S2), Z, rawSize, size)],
+    rawPenalties: [f64(S1), f64(S2)],
     fixedLambda: spec.lambda ? [...spec.lambda] : [NaN, NaN],
+  }
+}
+
+/**
+ * Rows of the feature matrix [m, d] that evaluate a term on a grid of its own feature(s): the grid ([m], or [m, 2] for
+ * a tensor) in the term's feature columns, a `by` variable set to 1 (numeric) or to the term's level (factor), every
+ * other column 0.
+ */
+export function termGridRows(term: BuiltTerm, grid: Tensor, d: number): { rows: F64; m: number } {
+  const g = f64(grid)
+  const m = grid.shape[0]
+  const width = grid.shape.length === 2 ? grid.shape[1] : 1
+  const rows = new Float64Array(m * d)
+  const spec = term.spec
+  for (let i = 0; i < m; i++) {
+    for (let k = 0; k < Math.min(width, spec.kind === 'tensor' ? 2 : 1); k++)
+      rows[i * d + term.features[k]] = g[i * width + k]
+    if (spec.kind === 'smooth' && spec.by !== undefined)
+      rows[i * d + spec.by] = term.byLevel === null || term.byLevel === undefined ? 1 : term.byLevel
+  }
+  return { rows, m }
+}
+
+/** A term's basis on a grid: the raw columns, the constrained columns (raw · Z) and the penalties. */
+export type TermBasis = {
+  /** The raw basis [m, rawSize]: B-splines, cyclic B-splines or thin-plate columns before the sum-to-zero constraint. */
+  raw: Tensor
+  /** The model-matrix columns [m, size] = raw · Z: the basis after the constraint (what the coefficients multiply). */
+  constrained: Tensor
+  /** The constraint map Z [rawSize, size]. */
+  Z: Tensor
+  /** Each penalty on the raw coefficients, [rawSize, rawSize]. */
+  rawPenalties: Tensor[]
+  /** Each penalty on the constrained coefficients, [size, size]. */
+  penalties: Tensor[]
+}
+
+/** The basis of a built term on a grid of its feature(s) ([m], or [m, 2] for a tensor); `d` is the feature count. */
+export function termBasis(term: BuiltTerm, grid: Tensor, d: number): TermBasis {
+  const { rows, m } = termGridRows(term, grid, d)
+  const raw = term.raw(rows, m, d)
+  const square = (S: F64, p: number) => fromData(S, [p, p])
+  return {
+    raw: fromData(raw, [m, term.rawSize]),
+    constrained: fromData(times(raw, m, term.rawSize, term.Z, term.size), [m, term.size]),
+    Z: fromData(term.Z, [term.rawSize, term.size]),
+    rawPenalties: term.rawPenalties.map((S) => square(S, term.rawSize)),
+    penalties: term.penalties.map((S) => square(S, term.size)),
   }
 }

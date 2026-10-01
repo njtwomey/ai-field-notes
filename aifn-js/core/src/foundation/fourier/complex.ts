@@ -1,6 +1,7 @@
 /**
- * Complex arrays as pairs of real tensors, and the private readers every dsp function uses. aifn has no complex dtype:
- * a complex signal is `{ re, im }`, two float64 tensors of the same shape.
+ * Readers of real signals for the raw-array code in `aifn/signal` and `aifn/foundation/convolution`, and `decibels`.
+ * Complex values are complex128 tensors (`aifn/foundation/tensor`): `abs`, `angle`, `realPart`, `imagPart` replace
+ * the former `{ re, im }` pair helpers.
  */
 
 import { ShapeError } from 'aifn/foundation/errors'
@@ -9,16 +10,6 @@ import type { VectorLike as Signal } from 'aifn/foundation/contracts'
 
 // Types defined once, in `aifn/foundation/contracts`.
 export type { VectorLike as Signal } from 'aifn/foundation/contracts'
-
-/** A complex array: real and imaginary parts, float64 tensors of the same shape. */
-export interface ComplexTensor {
-  re: Tensor
-  im: Tensor
-}
-
-export function isComplex(x: unknown): x is ComplexTensor {
-  return typeof x === 'object' && x !== null && 're' in x && 'im' in x && isTensor((x as ComplexTensor).re)
-}
 
 /**
  * A real signal's values as a fresh Float64Array, for the raw-array transforms (rank 1 required for tensors); `what`
@@ -33,64 +24,9 @@ export function readSignal(x: Signal, what: string): Float64Array {
   return Float64Array.from(x)
 }
 
-/** Any tensor's values (row-major) as a fresh Float64Array. */
+/** Any real tensor's values (row-major) as a fresh Float64Array. */
 export function readValues(x: Tensor | ArrayLike<number>): Float64Array {
   return isTensor(x) ? (copy(x, 'float64').data as Float64Array) : Float64Array.from(x)
-}
-
-/** Real and imaginary parts of a real or complex rank-1 input. */
-export function readComplex(x: Signal | ComplexTensor, what: string): { re: Float64Array; im: Float64Array } {
-  if (isComplex(x)) {
-    const re = readSignal(x.re, what)
-    const im = readSignal(x.im, what)
-    if (re.length !== im.length) throw new ShapeError(what, `${what}: real and imaginary parts differ in length`)
-    return { re, im }
-  }
-  const re = readSignal(x, what)
-  return { re, im: new Float64Array(re.length) }
-}
-
-/** A float64 vector tensor over `a` (no copy). */
-export function vec(a: Float64Array): Tensor {
-  return fromData(a)
-}
-
-/**
- * A complex tensor from its real and imaginary parts (no copy), of shape `shape` (default: a vector). The `{ re, im }`
- * pair is the complex convention until the `complex128` dtype lands (design K §8.1).
- */
-export function complexOf(re: Float64Array, im: Float64Array, shape?: readonly number[]): ComplexTensor {
-  return { re: fromData(re, shape ?? [re.length]), im: fromData(im, shape ?? [im.length]) }
-}
-
-/** |z| elementwise. */
-export function magnitude(z: ComplexTensor): Tensor {
-  const re = readValues(z.re)
-  const im = readValues(z.im)
-  return fromData(
-    re.map((r, i) => Math.hypot(r, im[i])),
-    z.re.shape,
-  )
-}
-
-/** arg z in (−π, π] elementwise. */
-export function phase(z: ComplexTensor): Tensor {
-  const re = readValues(z.re)
-  const im = readValues(z.im)
-  return fromData(
-    re.map((r, i) => Math.atan2(im[i], r)),
-    z.re.shape,
-  )
-}
-
-/** |z|² elementwise. */
-export function power(z: ComplexTensor): Tensor {
-  const re = readValues(z.re)
-  const im = readValues(z.im)
-  return fromData(
-    re.map((r, i) => r * r + im[i] * im[i]),
-    z.re.shape,
-  )
 }
 
 /**

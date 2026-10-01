@@ -19,12 +19,7 @@ const axis = (v: VectorLike) => Array.from(dense.toF64(v, 'contours'))
  * corners straddle the level contributes one segment, or two at a saddle; ends are placed by linear interpolation
  * along the square's edges. A corner exactly at the level counts as below it.
  */
-export function contourSegments(
-  x: VectorLike,
-  y: VectorLike,
-  z: MatrixLike,
-  level: number,
-): Tensor {
+export function contourSegments(x: VectorLike, y: VectorLike, z: MatrixLike, level: number): Tensor {
   const xs = axis(x)
   const ys = axis(y)
   const nx = xs.length
@@ -101,12 +96,7 @@ export function contourSegments(
  * The contour at `level` as polylines: segments that share an end point (to within a relative 1e-9 of the grid's
  * extent) are joined. Each line is an m × 2 tensor; a closed line repeats its first point at the end.
  */
-export function contourLines(
-  x: VectorLike,
-  y: VectorLike,
-  z: MatrixLike,
-  level: number,
-): Tensor[] {
+export function contourLines(x: VectorLike, y: VectorLike, z: MatrixLike, level: number): Tensor[] {
   const segs = contourSegments(x, y, z, level).data as Float64Array
   const count = segs.length / 4
   const xs = axis(x)

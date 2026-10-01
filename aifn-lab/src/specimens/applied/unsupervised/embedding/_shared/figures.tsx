@@ -9,17 +9,25 @@ import { pairwiseDistances } from 'aifn/numerics/linalg'
 import { stream } from 'aifn/foundation/random'
 import { fromData, toFlat, toRows, type Tensor } from 'aifn/foundation/tensor'
 import { trace } from 'aifn/foundation/trace'
-import { Player, Select, Slider } from '@lab/controls'
+import { Player } from '@lab/controls'
 import { ControlRow, Figure } from '@lab/layout'
-import { Readout, useScaleColor, XYChart, type Vec2, type Vector } from '@lab/viz'
+import { choice, row, slider, useFigureState, variants } from '@lab/state'
+import { Curve, Handle, Plot, Points, Readout, useAxis, useScaleColor, Vectors, type Vec2, type Vector } from '@lab/viz'
 import { formatValue } from '@lab/views'
 
 // ── PCA on 2-D data ─────────────────────────────────────────────────────────────────────────────────────────────
 
 export function PcaSpecimen() {
-  const [angle, setAngle] = useState(0.5)
-  const [ratio, setRatio] = useState(0.3)
-  const [query, setQuery] = useState<Vec2>([2, -1])
+  const state = useFigureState({
+    data: row('the data', {
+      angle: slider(-1.5, 1.5, 0.5, { label: 'orientation (rad)' }),
+      ratio: slider(0.05, 1, 0.3, { label: 'minor / major spread' }),
+    }),
+    qx: slider(-6, 6, 2, { onChart: true }),
+    qy: slider(-6, 6, -1, { onChart: true }),
+  })
+  const { angle, ratio } = state.data
+  const query: Vec2 = [state.qx, state.qy]
   const data = useMemo(() => {
     // A Gaussian with standard deviations 2 and 2·ratio along axes rotated by `angle`.
     const c = Math.cos(angle)
@@ -45,18 +53,18 @@ export function PcaSpecimen() {
   const q = fromData(Float64Array.from(query), [1, 2])
   const score = toFlat(one.transform(q))[0]
   const back = toFlat(one.inverseTransform(one.transform(q))) as Vec2
-  const rows = toRows(data.x)
+  const cloud = useMemo(() => {
+    const rows = toRows(data.x)
+    return { x: rows.map((r) => r[0]), y: rows.map((r) => r[1]) }
+  }, [data])
+  const x0 = useAxis({ label: 'x₀', range: [-6, 6] })
+  const x1 = useAxis({ label: 'x₁', range: [-6, 6], equal: x0 })
   return (
     <Figure
       title="PCA axes of a 2-D cloud"
-      description="The principal axes are the eigenvectors of the sample covariance, found from the SVD of the centred data; projecting onto the first keeps the most variance a single direction can."
+      purpose="The principal axes are the eigenvectors of the sample covariance, found from the SVD of the centred data; projecting onto the first keeps the most variance a single direction can."
+      state={state}
       defaultSize="L"
-      controls={
-        <ControlRow label="the data">
-          <Slider label="orientation (rad)" value={angle} min={-1.5} max={1.5} onChange={setAngle} />
-          <Slider label="minor / major spread" value={ratio} min={0.05} max={1} onChange={setRatio} />
-        </ControlRow>
-      }
       readouts={
         <>
           <Readout
@@ -74,19 +82,13 @@ export function PcaSpecimen() {
       }
       caption="Arrows run two standard deviations along each principal axis. Drag the query point: its projection onto PC1 (the one-component reconstruction) is joined to it by the segment, which is perpendicular to PC1. As the two spreads become equal the axes lose any preferred direction and the ratio tends to ½."
     >
-      <XYChart
-        aspect="equal"
-        xLabel="x₀"
-        yLabel="x₁"
-        rescaleOnChange={false}
-        series={[
-          { name: 'points', type: 'scatter', x: rows.map((r) => r[0]), y: rows.map((r) => r[1]), muted: true },
-          { name: 'projection', type: 'line', x: [query[0], back[0]], y: [query[1], back[1]], dashed: true, slot: 1 },
-          { name: 'reconstruction', type: 'scatter', x: [back[0]], y: [back[1]], slot: 1 },
-        ]}
-        vectors={vectors}
-        handles={[{ kind: 'point', at: query, onDrag: setQuery, label: 'query' }]}
-      />
+      <Plot x={x0} y={x1}>
+        <Points name="points" x={cloud.x} y={cloud.y} muted />
+        <Vectors vectors={vectors} />
+        <Curve name="projection" x={[query[0], back[0]]} y={[query[1], back[1]]} dashed slot={1} live />
+        <Points name="reconstruction" x={[back[0]]} y={[back[1]]} slot={1} live />
+        <Handle {...state.handle(['qx', 'qy'], { label: 'query' })} />
+      </Plot>
     </Figure>
   )
 }
@@ -114,37 +116,36 @@ const METHODS = {
 type MethodName = keyof typeof METHODS
 
 export function ManifoldSpecimen() {
-  const [method, setMethod] = useState<MethodName>('isomap')
+  const state = useFigureState({
+    method: choice(
+      (Object.keys(METHODS) as MethodName[]).map((value) => ({ value, label: METHODS[value].label })),
+      'isomap',
+      { label: 'method' },
+    ),
+  })
+  const method = state.method as MethodName
   const data = useMemo(() => swissRoll(stream('lab/embed/roll'), { n: 300, noise: 0.1, height: 8 }), [])
-  const y = useMemo(() => toRows(METHODS[method].run(data.x)), [method, data])
+  const y = useMemo(() => {
+    const rows = toRows(METHODS[method].run(data.x))
+    return { x: rows.map((r) => r[0]), y: rows.map((r) => r[1]) }
+  }, [method, data])
   const t = useMemo(() => toFlat(data.t!), [data])
   const colour = useScaleColor('sequential')
   const [lo, hi] = [Math.min(...t), Math.max(...t)]
-  const colours = t.map((v) => colour((v - lo) / (hi - lo)))
+  const colours = useMemo(() => t.map((v) => colour((v - lo) / (hi - lo))), [t, colour, lo, hi])
+  const z0 = useAxis({ label: 'z₀', hold: 'initial', key: method })
+  const z1 = useAxis({ label: 'z₁', hold: 'initial', key: method, equal: z0 })
   return (
     <Figure
       title="Unrolling a Swiss roll"
-      description="Every method maps the 3-D roll to the plane; the colour is the position along the roll, which a method that follows the manifold spreads out in order."
+      purpose="Every method maps the 3-D roll to the plane; the colour is the position along the roll, which a method that follows the manifold spreads out in order."
+      state={state}
       defaultSize="L"
-      controls={
-        <Select
-          label="method"
-          value={method}
-          onChange={setMethod}
-          options={(Object.keys(METHODS) as MethodName[]).map((value) => ({ value, label: METHODS[value].label }))}
-        />
-      }
       caption="Linear methods (PCA, classical and metric MDS on straight-line distances) flatten the roll onto itself and mix the colours. Isomap measures distances along the neighbour graph and unrolls it into a strip; Laplacian eigenmaps and LLE keep neighbourhoods but distort the strip's proportions."
     >
-      <XYChart
-        aspect="equal"
-        xLabel="z₀"
-        yLabel="z₁"
-        axisKey={method}
-        series={[
-          { name: 'points', type: 'scatter', x: y.map((r) => r[0]), y: y.map((r) => r[1]), pointColors: colours },
-        ]}
-      />
+      <Plot x={z0} y={z1}>
+        <Points name="points" x={y.x} y={y.y} colors={colours} />
+      </Plot>
     </Figure>
   )
 }
@@ -152,10 +153,19 @@ export function ManifoldSpecimen() {
 // ── t-SNE and UMAP, step by step ────────────────────────────────────────────────────────────────────────────────
 
 export function NeighbourEmbeddingSpecimen() {
-  const [method, setMethod] = useState<'tsne' | 'umap'>('tsne')
-  const [perplexity, setPerplexity] = useState(15)
-  const [neighbours, setNeighbours] = useState(12)
-  const [step, setStep] = useState(1000)
+  const state = useFigureState({
+    method: variants(
+      {
+        tsne: { label: 't-SNE (exact)', params: { perplexity: slider(3, 40, 15, { label: 'perplexity', step: 1 }) } },
+        umap: { label: 'UMAP', params: { neighbours: slider(3, 40, 12, { label: 'neighbours', step: 1 }) } },
+      },
+      { label: '1 · method', choiceLabel: 'method' },
+    ),
+  })
+  const method = state.method.key
+  const perplexity = state.method.key === 'tsne' ? state.method.values.perplexity : 15
+  const neighbours = state.method.key === 'umap' ? state.method.values.neighbours : 12
+  const [step, setStep] = useState(0)
   const data = useMemo(() => {
     const d = digits(stream('lab/embed/digits'), { perClass: 18, flip: 0.08, noise: 0.15 })
     const labels = toFlat(d.y!)
@@ -193,32 +203,18 @@ export function NeighbourEmbeddingSpecimen() {
   }, [method, perplexity, neighbours, data])
   const k = Math.min(Math.round(step / (method === 'tsne' ? 10 : 2)), run.steps.length - 1)
   const e = run.steps[k]
+  const layout = useMemo(() => ({ x: e.map((r) => r[0]), y: e.map((r) => r[1]) }), [e])
+  // Only relative positions matter, so the axes refit to every frame.
+  const z0 = useAxis({ label: 'z₀' })
+  const z1 = useAxis({ label: 'z₁', equal: z0 })
   return (
     <Figure
       title="t-SNE and UMAP layouts, iteration by iteration"
-      description="Both place points so that neighbours in the input stay neighbours in the plane: t-SNE by gradient descent on KL(P ‖ Q), UMAP by sampled attractive and repulsive moves on a fuzzy neighbour graph."
+      purpose="Both place points so that neighbours in the input stay neighbours in the plane: t-SNE by gradient descent on KL(P ‖ Q), UMAP by sampled attractive and repulsive moves on a fuzzy neighbour graph."
+      state={state}
       defaultSize="L"
       controls={
         <>
-          <ControlRow label="1 · method">
-            <Select
-              label="method"
-              value={method}
-              onChange={(m) => {
-                setMethod(m)
-                setStep(m === 'tsne' ? 1000 : 200)
-              }}
-              options={[
-                { value: 'tsne', label: 't-SNE (exact)' },
-                { value: 'umap', label: 'UMAP' },
-              ]}
-            />
-            {method === 'tsne' ? (
-              <Slider label="perplexity" value={perplexity} min={3} max={40} step={1} onChange={setPerplexity} />
-            ) : (
-              <Slider label="neighbours" value={neighbours} min={3} max={40} step={1} onChange={setNeighbours} />
-            )}
-          </ControlRow>
           <ControlRow label="2 · iterations">
             <Player
               value={k}
@@ -237,24 +233,17 @@ export function NeighbourEmbeddingSpecimen() {
           <Readout label="points" value={e.length} />
         </>
       }
-      caption="Noisy 5 × 7 digit glyphs (35 dimensions), classes 0 to 7, coloured by digit. t-SNE's first 250 iterations exaggerate P, which pulls clusters apart early; UMAP starts from a spectral layout and its learning rate falls to zero. Axes refit to each frame, since only relative positions matter."
+      caption="Noisy 5 × 7 digit glyphs (35 dimensions), classes 0 to 7, coloured by digit. t-SNE's first 250 iterations exaggerate P, which pulls clusters apart early; UMAP starts from a spectral layout and its learning rate falls to zero. Press play from iteration 0 (the random or spectral start); the axes refit to each frame, since only relative positions matter."
     >
-      <XYChart
-        aspect="equal"
-        xLabel="z₀"
-        yLabel="z₁"
-        legend={false}
-        series={[
-          {
-            name: 'digits',
-            type: 'scatter',
-            x: e.map((r) => r[0]),
-            y: e.map((r) => r[1]),
-            group: data.y,
-            groupNames: Array.from({ length: 8 }, (_, c) => `digit ${c}`),
-          },
-        ]}
-      />
+      <Plot x={z0} y={z1} legend={false}>
+        <Points
+          name="digits"
+          x={layout.x}
+          y={layout.y}
+          group={data.y}
+          groupNames={Array.from({ length: 8 }, (_, c) => `digit ${c}`)}
+        />
+      </Plot>
     </Figure>
   )
 }

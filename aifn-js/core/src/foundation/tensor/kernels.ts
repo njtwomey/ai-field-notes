@@ -6,6 +6,8 @@
 import { ShapeError } from 'aifn/foundation/errors'
 import {
   allocate,
+  complexPartView,
+  flatData,
   forEachOffset,
   forEachOffset2,
   fromData,
@@ -16,7 +18,7 @@ import {
   showShape,
   size,
   sizeOf,
-  type Axis,
+  type Axes,
   type DType,
   type Tensor,
 } from './core'
@@ -287,7 +289,7 @@ export type GroupReducer = (values: ArrayLike<number>, start: number, width: num
  */
 export function reduceKernel(
   x: Tensor,
-  axis: Axis | null | undefined,
+  axis: Axes | null | undefined,
   keepDims: boolean,
   fn: GroupReducer,
   dtype: DType = 'float64',
@@ -353,6 +355,10 @@ export function sumToKernel(x: Tensor, shape: readonly number[]): Tensor {
       ])
     }
   }
+  if (x.dtype === 'complex128') {
+    const [re, im] = splitComplex(x)
+    return joinComplex(sumToKernel(re, shape), sumToKernel(im!, shape))
+  }
   const summed = reduceKernel(x, axes, true, pairwiseSum, x.dtype === 'int32' ? 'int32' : 'float64')
   return fromData(summed.data, shape)
 }
@@ -362,6 +368,23 @@ export function sumToKernel(x: Tensor, shape: readonly number[]): Tensor {
  * leading (batch) axes broadcast.
  */
 export function matmulKernel(a: Tensor, b: Tensor): Tensor {
+  if (a.dtype === 'complex128' || b.dtype === 'complex128') {
+    // (Ar + iAi)(Br + iBi) = (ArBr − AiBi) + i(ArBi + AiBr), on the zero-copy float64 views of the parts.
+    const [ar, ai] = splitComplex(a)
+    const [br, bi] = splitComplex(b)
+    const re =
+      ai && bi
+        ? binaryKernel(matmulKernel(ar, br), matmulKernel(ai, bi), (x, y) => x - y, 'float64', 'sub')
+        : matmulKernel(ar, br)
+    const terms = [ai ? matmulKernel(ai, br) : null, bi ? matmulKernel(ar, bi) : null].filter((t) => t !== null)
+    const im =
+      terms.length === 2
+        ? binaryKernel(terms[0], terms[1], (x, y) => x + y, 'float64', 'add')
+        : terms.length === 1
+          ? terms[0]
+          : null
+    return joinComplex(re, im ?? binaryKernel(re, 0, (x, y) => x * y, 'float64', 'mul'))
+  }
   const ra = a.shape.length
   const rb = b.shape.length
   if (ra < 2 || rb < 2) throw new ShapeError('matmul', 'matmul: kernel needs rank ≥ 2 operands')
@@ -407,4 +430,96 @@ export function matmulKernel(a: Tensor, b: Tensor): Tensor {
     }
   }
   return fromData(out, [...batch, m, n])
+}
+
+// ── Complex kernels ──────────────────────────────────────────────────────────────────────────────────────────────────
+
+/**
+ * The real and imaginary parts of a tensor as float64 views: for complex128 the zero-copy views of its storage
+ * (`complexPartView`), for a real tensor the tensor itself and null (a zero imaginary part).
+ */
+export function splitComplex(z: Tensor): [Tensor, Tensor | null] {
+  if (z.dtype !== 'complex128') return [z, null]
+  return [complexPartView(z, 0), complexPartView(z, 1)]
+}
+
+/** A complex128 tensor from real and imaginary parts of one shape (any real dtypes, any strides). Copies. */
+export function joinComplex(re: Tensor, im: Tensor): Tensor {
+  const n = size(re)
+  const out = new Float64Array(2 * n)
+  const fr = flatData(re, 'float64')
+  const fi = flatData(im, 'float64')
+  for (let k = 0; k < n; k++) {
+    out[2 * k] = fr[k]
+    out[2 * k + 1] = fi[k]
+  }
+  return fromData(out, re.shape, 'complex128')
+}
+
+/**
+ * A complex scalar rule: `z` holds the arguments as (re, im) pairs in order (z[0], z[1] the first; a real argument
+ * has im = 0), and the rule writes the result's real part to out[0] and imaginary part to out[1].
+ */
+export type ComplexRule = (out: Float64Array, z: Float64Array) => void
+
+/**
+ * Apply a complex scalar rule elementwise to broadcast operands (tensors of any dtype, or JS numbers, which are real).
+ * The result is complex128, or float64 with `real` (the rule then writes only out[0], e.g. |z|). Operands are read in
+ * place through their broadcast strides, two slots per complex element.
+ */
+export function complexKernel(args: readonly (Tensor | number)[], rule: ComplexRule, real = false): Tensor {
+  const shape = broadcastShapes(...args.map((v) => (typeof v === 'number' ? [] : v.shape)))
+  const n = sizeOf(shape)
+  const rank = shape.length
+  const m = args.length
+  const data: ArrayLike<number>[] = []
+  const pos: number[] = []
+  const strides: (readonly number[])[] = []
+  const pair: boolean[] = []
+  for (const v of args) {
+    if (typeof v === 'number') {
+      data.push([v, 0])
+      pos.push(0)
+      strides.push(new Array<number>(rank).fill(0))
+      pair.push(true)
+    } else {
+      const b = broadcastView(v, shape)
+      data.push(v.data)
+      pos.push(b.offset)
+      strides.push(b.strides)
+      pair.push(v.dtype === 'complex128')
+    }
+  }
+  const out = new Float64Array(real ? n : 2 * n)
+  const z = new Float64Array(2 * m)
+  const r = new Float64Array(2)
+  const index = new Array<number>(rank).fill(0)
+  for (let k = 0; k < n; k++) {
+    for (let i = 0; i < m; i++) {
+      const d = data[i]
+      const o = pos[i]
+      if (pair[i]) {
+        z[2 * i] = d[2 * o]
+        z[2 * i + 1] = d[2 * o + 1]
+      } else {
+        z[2 * i] = d[o]
+        z[2 * i + 1] = 0
+      }
+    }
+    rule(r, z)
+    if (real) out[k] = r[0]
+    else {
+      out[2 * k] = r[0]
+      out[2 * k + 1] = r[1]
+    }
+    // Advance the odometer over the output's axes, moving every operand's position with it.
+    for (let a = rank - 1; a >= 0; a--) {
+      index[a]++
+      for (let i = 0; i < m; i++) pos[i] += strides[i][a]
+      if (index[a] < shape[a]) break
+      for (let i = 0; i < m; i++) pos[i] -= strides[i][a] * shape[a]
+      index[a] = 0
+    }
+  }
+  return fromData(out, shape, real ? 'float64' : 'complex128')
 }

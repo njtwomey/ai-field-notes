@@ -7,10 +7,10 @@
  * Conventions follow scipy.signal (Virtanen et al., 2020, "SciPy 1.0", Nature Methods 17).
  */
 
-import { dense, fromData, isTensor, type Tensor } from 'aifn/foundation/tensor'
+import { abs, angle, complexAbs, dense, fromData, isTensor, type Tensor } from 'aifn/foundation/tensor'
 import type { Scalar, Size, Signal, Spectrum, TimeFrequency, VectorLike } from 'aifn/foundation/contracts'
 import { ShapeError } from 'aifn/foundation/errors'
-import { complex } from 'aifn/systems'
+import { decibels } from 'aifn/foundation/fourier'
 
 export type { Signal, Spectrum, TimeFrequency } from 'aifn/foundation/contracts'
 
@@ -106,10 +106,70 @@ export function powerUnit(unit: string | undefined, density: boolean): string | 
   return density ? `${unit}²/Hz` : `${unit}²`
 }
 
-/**
- * Complex values in the interim layout (phase 3 brings `complex128`): a [...shape, 2] float64 tensor of (re, im)
- * pairs, the layout of `aifn/systems`' `complex` helpers.
- */
+/** A complex128 tensor of the given shape from its real and imaginary parts (row-major, equal lengths). */
 export function complexValues(re: ArrayLike<number>, im: ArrayLike<number>, shape: readonly Size[]): Tensor {
-  return fromData(dense.data(complex.pairsOf(re, im)), [...shape, 2])
+  if (re.length !== im.length) throw new ShapeError('complexValues', 'complexValues: parts differ in length')
+  const d = new Float64Array(2 * re.length)
+  for (let k = 0; k < re.length; k++) {
+    d[2 * k] = re[k]
+    d[2 * k + 1] = im[k]
+  }
+  return fromData(d, [...shape], 'complex128')
+}
+
+// ── Spectrum readers ─────────────────────────────────────────────────────────────────────────────────────────────
+
+const valuesOf = (s: Spectrum | Tensor): Tensor => (isTensor(s) ? s : s.values)
+
+/** |values| of a spectrum (or of a real or complex128 tensor): the modulus of a complex response or DFT. */
+export function magnitude(s: Spectrum | Tensor): Tensor {
+  const v = valuesOf(s)
+  return v.dtype === 'complex128' ? complexAbs(v) : abs(v)
+}
+
+/**
+ * The phase of a spectrum's values (or of a tensor) in radians: the principal value in (−π, π], unwrapped along the
+ * last axis of a vector with `unwrap` (as `numpy.unwrap`), in degrees with `degrees`. A real value has phase 0 or π.
+ */
+export function phase(s: Spectrum | Tensor, options: { unwrap?: boolean; degrees?: boolean } = {}): Tensor {
+  let p = angle(valuesOf(s))
+  if (options.unwrap) {
+    if (p.shape.length !== 1) throw new ShapeError('phase', 'phase: unwrap needs a vector of values')
+    p = unwrapPhase(p)
+  }
+  return options.degrees
+    ? fromData(
+        Float64Array.from(dense.toF64(p, 'phase'), (v) => (v * 180) / Math.PI),
+        p.shape,
+      )
+    : p
+}
+
+/**
+ * A spectrum in decibels, by its `quantity`: 10 log₁₀(v/reference) for powers (`psd`, `power`, `coherence`) and
+ * 20 log₁₀(|v|/reference) for amplitudes (`amplitude`, `complex`, `response`), so the power rule is never applied to
+ * an amplitude. Zero maps to −∞.
+ */
+export function spectrumDecibels(s: Spectrum, { reference = 1 }: { reference?: Scalar } = {}): Tensor {
+  const power = s.quantity === 'psd' || s.quantity === 'power' || s.quantity === 'coherence'
+  return decibels(magnitude(s), { power, reference })
+}
+
+/**
+ * Unwraps a phase sequence so that consecutive values never jump by more than π, as `numpy.unwrap` (Itoh, 1982,
+ * "Analysis of the phase unwrapping algorithm", Applied Optics 21(14)).
+ */
+export function unwrapPhase(phase: VectorLike, { discont = Math.PI }: { discont?: Scalar } = {}): Tensor {
+  const p = dense.toF64(phase, 'unwrapPhase')
+  const out = Float64Array.from(p)
+  let offset = 0
+  for (let i = 1; i < p.length; i++) {
+    const d = p[i] - p[i - 1]
+    // numpy: map d into [−π, π), keeping +π for positive jumps; correct only when |d| ≥ discont.
+    let dm = ((((d + Math.PI) % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI)) - Math.PI
+    if (dm === -Math.PI && d > 0) dm = Math.PI
+    if (Math.abs(d) >= discont) offset += dm - d
+    out[i] = p[i] + offset
+  }
+  return fromData(out, [out.length])
 }

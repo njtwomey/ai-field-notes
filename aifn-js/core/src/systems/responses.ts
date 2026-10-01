@@ -8,72 +8,95 @@
  */
 
 import { findRoot } from 'aifn/numerics/roots'
-import { dense, fromData, toFlat, type Matrix, type Vector } from 'aifn/foundation/tensor'
+import { polyval } from 'aifn/numerics/polynomial'
+import {
+  angle,
+  complex,
+  complexAbs,
+  complexItem,
+  dense,
+  div,
+  expj,
+  fromData,
+  mul,
+  slice,
+  sub,
+  tensor,
+  toFlat,
+  type Matrix,
+  type Tensor,
+  type Value,
+  type Vector,
+} from 'aifn/foundation/tensor'
 import type { Algorithm } from 'aifn/foundation/trace'
-import type { LtiSystem, Scalar, Size, Spectrum, Status, VectorLike } from 'aifn/foundation/contracts'
+import type { ComplexNumber, LtiSystem, Scalar, Size, Spectrum, Status, VectorLike } from 'aifn/foundation/contracts'
 import { DomainError } from 'aifn/foundation/errors'
-import * as complex from './complex'
-import type { Complex } from './complex'
 import { poles, rationalOf, systemZeros, toStateSpace, type ChannelOptions } from './system'
 import { discretise } from './transform'
 
 // ── Frequency response ───────────────────────────────────────────────────────────────────────────────────────────────
 
 /**
- * The response H at one frequency ω, as a function: continuous systems at s = iω (ω in rad/s), discrete ones at
- * z = e^{iω} (ω in rad/sample). Evaluated in the system's own form (products over sections or roots for sos and zpk);
- * a delay τ multiplies by e^{−iωτ}.
+ * H at the points x (complex128, any shape), in the system's own form: products over roots (zpk) or sections (sos),
+ * else the SISO rational function num(x)/den(x) by Horner's rule (`polyval`). Compositions of primitives, so
+ * differentiable in x and in traced coefficients.
  */
-export function responseAt(sys: LtiSystem, channel: ChannelOptions = {}): (w: Scalar) => Complex {
+function evaluate(sys: LtiSystem, x: Value, channel: ChannelOptions): Value {
   const r = sys.repr
-  const discrete = sys.domain === 'discrete'
-  const point = (w: Scalar): Complex => (discrete ? complex.of(Math.cos(w), Math.sin(w)) : complex.of(0, w))
-  const delay = (w: Scalar, h: Complex) =>
-    sys.delay ? complex.mul(h, complex.of(Math.cos(w * sys.delay), -Math.sin(w * sys.delay))) : h
   if (r.form === 'zpk') {
-    const z = complex.read(r.zeros, 'responseAt')
-    const p = complex.read(r.poles, 'responseAt')
-    return (w) => {
-      const x = point(w)
-      const num = complex.product(z.map((zi) => complex.sub(x, zi)))
-      const den = complex.product(p.map((pi) => complex.sub(x, pi)))
-      return delay(w, complex.scale(complex.div(num, den), r.gain))
-    }
+    let h: Value = mul(r.gain, polyval([1], x))
+    const nz = r.zeros.shape[0]
+    const np = r.poles.shape[0]
+    for (let k = 0; k < nz; k++) h = mul(h, sub(x, slice(r.zeros, k)))
+    for (let k = 0; k < np; k++) h = div(h, sub(x, slice(r.poles, k)))
+    return h
   }
   if (r.form === 'sos') {
-    const s = dense.data(r.sections)
-    const k = r.sections.shape[0]
-    return (w) => {
-      const x = point(w)
-      let h = complex.of(1)
-      for (let j = 0; j < k; j++) {
-        const num = complex.horner(s.subarray(6 * j, 6 * j + 3), x)
-        const den = complex.horner(s.subarray(6 * j + 3, 6 * j + 6), x)
-        h = complex.mul(h, complex.div(num, den))
-      }
-      return delay(w, h)
+    let h: Value = polyval([1], x)
+    for (let j = 0; j < r.sections.shape[0]; j++) {
+      const row = slice(r.sections, j)
+      h = mul(h, div(polyval(slice(row, [0, 3]), x), polyval(slice(row, [3, 6]), x)))
     }
+    return h
   }
   const { num, den } = rationalOf(sys, channel)
-  return (w) => {
-    const x = point(w)
-    return delay(w, complex.div(complex.horner(num, x), complex.horner(den, x)))
-  }
+  return div(polyval(num, x), polyval(den, x))
+}
+
+/** The evaluation points for frequencies w: iω for a continuous system, e^{iω} for a discrete one (complex128). */
+function pointsAt(sys: LtiSystem, w: Value): Value {
+  return sys.domain === 'discrete' ? expj(w) : complex(mul(0, w), w)
+}
+
+/** H(iω) or H(e^{iω}) at the frequencies w, the delay τ included as e^{−iωτ}: complex128 of w's shape. */
+function responseValues(sys: LtiSystem, w: Value, channel: ChannelOptions = {}): Value {
+  const h = evaluate(sys, pointsAt(sys, w), channel)
+  return sys.delay ? mul(h, expj(mul(-sys.delay, w))) : h
 }
 
 /**
- * The frequency response at the frequencies `w` as a `Spectrum` (`quantity: 'response'`, complex values [n, 2]):
+ * The response H at one frequency ω, as a function returning `{ re, im }`: continuous systems at s = iω (ω in rad/s),
+ * discrete ones at z = e^{iω} (ω in rad/sample). A delay τ multiplies by e^{−iωτ}. For many frequencies use
+ * `frequencyResponse`, which evaluates them in one pass.
+ */
+export function responseAt(sys: LtiSystem, channel: ChannelOptions = {}): (w: Scalar) => ComplexNumber {
+  return (w) => complexItem(responseValues(sys, tensor([w]), channel) as Tensor)
+}
+
+/**
+ * The frequency response at the frequencies `w` as a `Spectrum` (`quantity: 'response'`, complex128 values [n]):
  * H(iω) with ω in rad/s for a continuous system, H(e^{iω}) with ω in rad/sample for a discrete one (`fs` = 1/dt is
- * recorded). `freqz` in `aifn/signal/filters` gives the evenly spaced discrete grid and Hz.
+ * recorded). `freqz` in `aifn/signal/filters` gives the evenly spaced discrete grid and Hz. Magnitude, phase and dB
+ * come from `aifn/signal`'s `magnitude`, `phase` and `decibels` (or `complexAbs`/`angle` directly).
  */
 export function frequencyResponse(sys: LtiSystem, w: VectorLike, channel: ChannelOptions = {}): Spectrum {
   const ws = dense.toF64(w, 'frequencyResponse')
-  const at = responseAt(sys, channel)
-  const values = complex.toPairs(Array.from(ws, (v) => at(v)))
+  const f = fromData(ws, [ws.length])
+  const values = responseValues(sys, f, channel) as Tensor
   const discrete = sys.domain === 'discrete'
   return {
     kind: 'spectrum',
-    f: fromData(ws, [ws.length]),
+    f,
     axis: discrete ? 'rad/sample' : 'rad/s',
     values,
     quantity: 'response',
@@ -97,8 +120,7 @@ export function frequencyGrid(sys: LtiSystem, n: Size = 500): Vector {
     )
   }
   const mods: number[] = []
-  for (const roots of [poles(sys), systemZeros(sys)])
-    for (const z of complex.read(roots, 'frequencyGrid')) if (complex.abs(z) > 1e-12) mods.push(complex.abs(z))
+  for (const rs of [poles(sys), systemZeros(sys)]) for (const m of toFlat(complexAbs(rs))) if (m > 1e-12) mods.push(m)
   if (sys.delay) mods.push(1 / sys.delay)
   const lo = mods.length ? Math.log10(Math.min(...mods)) - 2 : -2
   const hi = mods.length ? Math.log10(Math.max(...mods)) + 2 : 2
@@ -127,17 +149,15 @@ export type Bode = {
  */
 export function bode(sys: LtiSystem, w?: VectorLike): Bode {
   const ws = dense.toF64(w ?? frequencyGrid(sys), 'bode')
-  const at = responseAt({ ...sys, delay: 0 })
   const n = ws.length
-  const mag = new Float64Array(n)
-  const db = new Float64Array(n)
+  const h = responseValues({ ...sys, delay: 0 }, fromData(ws, [n])) as Tensor
+  const mag = Float64Array.from(toFlat(complexAbs(h)))
+  const principal = toFlat(angle(h))
+  const db = mag.map((m) => 20 * Math.log10(m))
   const ph = new Float64Array(n)
   let prev = 0
   ws.forEach((v, i) => {
-    const h = at(v)
-    mag[i] = complex.abs(h)
-    db[i] = 20 * Math.log10(mag[i])
-    let p = (Math.atan2(h.im, h.re) * 180) / Math.PI
+    let p = (principal[i] * 180) / Math.PI
     if (i > 0) p += 360 * Math.round((prev - p) / 360)
     prev = p
     ph[i] = p - (v * sys.delay * 180) / Math.PI
@@ -181,7 +201,10 @@ export function margins(L: LtiSystem, w?: VectorLike): Margins {
   const mag = toFlat(b.magnitude)
   const phase = toFlat(b.phase)
   const at = responseAt(L)
-  const magAt = (v: number) => complex.abs(at(v))
+  const magAt = (v: number) => {
+    const h = at(v)
+    return Math.hypot(h.re, h.im)
+  }
   const phaseNear = (v: number, ref: number) => {
     const h = at(v)
     const p = (Math.atan2(h.im, h.re) * 180) / Math.PI

@@ -1,6 +1,8 @@
 /**
  * `aifn/inference/expectation-propagation`: expectation propagation: Gaussian and exponential-family message algebra,
- * tilted moments (probit, step, interval, by quadrature), `ep`, assumed density filtering and the evidence.
+ * tilted moments (probit, step, interval, by quadrature), `ep`, assumed density filtering and the evidence, and
+ * multivariate EP with rank-one sites (`multivariateExpectationPropagation`: GP classification, probit regression), and
+ * EP over linear-Gaussian models of the model language with interval and Gaussian evidence (`modelExpectationPropagation`).
  */
 
 export {
@@ -49,3 +51,12 @@ export {
   type EpState,
   type TiltedFn,
 } from './ep'
+export {
+  compileGaussianModel,
+  modelExpectationPropagation,
+  type CompiledGaussianModel,
+  type ModelEpOptions,
+  type ModelEpState,
+} from './model'
+export { multivariateExpectationPropagation, type MvEpOptions, type MvEpState } from './multivariate'
+export { expectationPropagationAlgorithms } from './registry'

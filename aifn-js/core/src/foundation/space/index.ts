@@ -6,10 +6,12 @@
  * - Dimensions: `real` (linear or log scale, optional step), `int`, `oneOf` (a choice among listed values), `bool`,
  *   `subspace` (a nested space) and `variants` (a family choice with parameters per case); `space(dims)` builds a
  *   space and `when(key, equals)` makes a dimension conditional on an earlier one.
- * - Values: `defaults(space)`, `clamp(space, values)` (fill, clip, round and snap into the space), `isDimActive`.
+ * - Values: `defaults(space)`, `clamp(space, values)` (fill, clip, round and snap into the space), `clampReport` (the
+ *   same, listing the unknown and inactive keys it dropped), `isDimActive`.
  * - Coordinates: `encode(space, values)` maps values into the unit cube [0, 1]^m (log dimensions in log space, integers
  *   and choices as equal bins) and `decode(space, u)` maps any point of the cube back, so `encodedSize` coordinates
  *   drawn uniformly decode to a uniform draw from the space. Inactive dimensions encode their defaults.
+ * - Domains of observations and actions (`Domain`): `discreteDomain`, `domainContains`, `domainSize`, `sampleDomain`.
  * - Enumeration and draws: `grid(space, { points })` (every combination, conditions respected) and `sample(s, space)`.
  *
  * The encoding follows the unit-cube convention of Bayesian-optimisation libraries (Snoek, Larochelle and Adams, 2012,
@@ -23,7 +25,8 @@ import { uniform, type Stream } from 'aifn/foundation/random'
 import { toFlat } from 'aifn/foundation/tensor'
 
 // Types defined once, in `aifn/foundation/contracts`.
-export type { Condition, Dim, DimSpec, Space } from 'aifn/foundation/contracts'
+export type { Condition, Dim, DimSpec, Domain, DomainKind, Space } from 'aifn/foundation/contracts'
+export { discreteDomain, domainContains, domainSize, sampleDomain } from './domain'
 
 // ── Values ───────────────────────────────────────────────────────────────────────────────────────────────────────────
 
@@ -68,6 +71,12 @@ export type ValuesOf<S extends Space> = {
 /** Presentation-neutral documentation any dimension may carry. */
 export type DimDoc = { readonly label?: string; readonly doc?: string; readonly when?: Condition }
 
+/**
+ * `{ when: Condition }` when a builder's options carry a condition, so that the dimension's literal type keeps it and
+ * `ValuesOf` makes its value optional.
+ */
+export type Conditioned<O> = O extends { readonly when: Condition } ? { readonly when: Condition } : unknown
+
 /** A space from its dimensions (keys in the order given, which is the order of `encode` and `grid`). */
 export function space<const D extends Readonly<Record<string, DimSpec>>>(dims: D): { readonly dims: D } {
   return { dims }
@@ -77,55 +86,72 @@ export function space<const D extends Readonly<Record<string, DimSpec>>>(dims: D
  * A real dimension on [min, max] with a default (the midpoint of the scale when omitted). `scale: 'log'` needs
  * min > 0 and spaces grids and draws evenly in log x; `step` snaps values to min + k·step.
  */
-export function real(
-  min: number,
-  max: number,
-  options: DimDoc & { default?: number; scale?: 'linear' | 'log'; step?: number; unit?: string } = {},
-): DimSpec & { readonly type: 'real' } {
+export function real<
+  const O extends DimDoc & { default?: number; scale?: 'linear' | 'log'; step?: number; unit?: string } = {},
+>(min: number, max: number, options: O = {} as O): DimSpec & { readonly type: 'real' } & Conditioned<O> {
   if (!(max >= min)) throw new DomainError('real', `real: needs min ≤ max, got [${min}, ${max}]`)
   if (options.scale === 'log' && !(min > 0)) throw new DomainError('real', 'real: a log scale needs min > 0')
   const mid = options.scale === 'log' ? Math.sqrt(min * max) : (min + max) / 2
-  return { ...options, type: 'real', min, max, default: options.default ?? mid }
+  return { ...options, type: 'real', min, max, default: options.default ?? mid } as DimSpec & {
+    readonly type: 'real'
+  } & Conditioned<O>
 }
 
 /** An integer dimension on {min, …, max} with a default (min when omitted). */
-export function int(
+export function int<const O extends DimDoc & { default?: number } = {}>(
   min: number,
   max: number,
-  options: DimDoc & { default?: number } = {},
-): DimSpec & { readonly type: 'int' } {
+  options: O = {} as O,
+): DimSpec & { readonly type: 'int' } & Conditioned<O> {
   if (!(Number.isInteger(min) && Number.isInteger(max) && max >= min))
     throw new DomainError('int', `int: needs integers min ≤ max, got [${min}, ${max}]`)
-  return { ...options, type: 'int', min, max, default: options.default ?? min }
+  return { ...options, type: 'int', min, max, default: options.default ?? min } as DimSpec & {
+    readonly type: 'int'
+  } & Conditioned<O>
 }
 
 /** A choice among listed values (strings or numbers), with a default (the first when omitted). */
-export function oneOf<const O extends readonly (string | number)[]>(
-  options: O,
-  doc: DimDoc & { default?: O[number] } = {},
-): DimSpec & { readonly type: 'choice'; readonly options: O } {
+export function oneOf<
+  const O extends readonly (string | number)[],
+  const D extends DimDoc & { default?: O[number] } = {},
+>(options: O, doc: D = {} as D): DimSpec & { readonly type: 'choice'; readonly options: O } & Conditioned<D> {
   if (options.length === 0) throw new DomainError('oneOf', 'oneOf: needs at least one option')
-  return { ...doc, type: 'choice', options, default: doc.default ?? options[0] }
+  const dim = { ...doc, type: 'choice', options, default: doc.default ?? options[0] }
+  return dim as DimSpec & { readonly type: 'choice'; readonly options: O } & Conditioned<D>
 }
 
 /** A boolean dimension, default false. */
-export function bool(options: DimDoc & { default?: boolean } = {}): DimSpec & { readonly type: 'bool' } {
-  return { ...options, type: 'bool', default: options.default ?? false }
+export function bool<const O extends DimDoc & { default?: boolean } = {}>(
+  options: O = {} as O,
+): DimSpec & { readonly type: 'bool' } & Conditioned<O> {
+  return { ...options, type: 'bool', default: options.default ?? false } as DimSpec & {
+    readonly type: 'bool'
+  } & Conditioned<O>
 }
 
-/** A nested space, e.g. a kernel's sub-kernel parameters. */
-export function subspace<const S extends Space>(of: S, doc: DimDoc = {}): DimSpec & { readonly type: 'space'; of: S } {
-  return { ...doc, type: 'space', of }
+/**
+ * A nested space, e.g. a kernel's sub-kernel parameters. (The result is not intersected with `DimSpec`, whose `of:
+ * Space` would add a string index to the literal and widen `ValuesOf`.)
+ */
+export function subspace<const S extends Space, const D extends DimDoc = {}>(
+  of: S,
+  doc: D = {} as D,
+): DimDoc & { readonly type: 'space'; readonly of: S } & Conditioned<D> {
+  return { ...doc, type: 'space', of } as DimDoc & { readonly type: 'space'; readonly of: S } & Conditioned<D>
 }
 
 /** A family choice whose cases have their own parameters, with a default case (the first when omitted). */
-export function variants<const C extends Readonly<Record<string, Space>>>(
+export function variants<
+  const C extends Readonly<Record<string, Space>>,
+  const D extends DimDoc & { default?: keyof C & string } = {},
+>(
   cases: C,
-  doc: DimDoc & { default?: keyof C & string } = {},
-): DimSpec & { readonly type: 'variants'; readonly cases: C } {
+  doc: D = {} as D,
+): DimDoc & { readonly type: 'variants'; readonly cases: C; readonly default: string } & Conditioned<D> {
   const names = Object.keys(cases)
   if (names.length === 0) throw new DomainError('variants', 'variants: needs at least one case')
-  return { ...doc, type: 'variants', cases, default: doc.default ?? names[0] }
+  const dim = { ...doc, type: 'variants', cases, default: doc.default ?? names[0] }
+  return dim as DimDoc & { readonly type: 'variants'; readonly cases: C; readonly default: string } & Conditioned<D>
 }
 
 /** The condition "dimension `key` has the value `equals`", for `DimDoc.when`. `key` must come earlier in the space. */
@@ -140,7 +166,7 @@ export function isDimActive(dim: DimSpec, values: SpaceValues): boolean {
   return dim.when === undefined || values[dim.when.key] === dim.when.equals
 }
 
-function clampDim(dim: Dim, v: unknown): SpaceValue {
+function clampDim(dim: Dim, v: unknown, dropped?: string[], path = ''): SpaceValue {
   switch (dim.type) {
     case 'real': {
       if (typeof v !== 'number' || Number.isNaN(v)) return dim.default
@@ -160,25 +186,65 @@ function clampDim(dim: Dim, v: unknown): SpaceValue {
     case 'bool':
       return typeof v === 'boolean' ? v : dim.default
     case 'space':
-      return clamp(dim.of, typeof v === 'object' && v !== null ? (v as SpaceValues) : {})
+      return clampInto(dim.of, typeof v === 'object' && v !== null ? (v as SpaceValues) : {}, dropped, `${path}.`)
     case 'variants': {
       const given = typeof v === 'object' && v !== null ? (v as Partial<VariantValue>) : {}
       const name = typeof given.case === 'string' && given.case in dim.cases ? given.case : dim.default
-      return { case: name, params: clamp(dim.cases[name], given.params ?? {}) }
+      const params = typeof given.params === 'object' && given.params !== null ? given.params : {}
+      return { case: name, params: clampInto(dim.cases[name], params, dropped, `${path}.params.`) }
     }
   }
+}
+
+/** Clamp into `space`, appending to `dropped` the path (`prefix` + key) of every unknown or inactive key given. */
+function clampInto(
+  space: Space,
+  values: Readonly<Record<string, unknown>>,
+  dropped: string[] | undefined,
+  prefix: string,
+): SpaceValues {
+  const out: Record<string, SpaceValue> = {}
+  for (const [key, dim] of Object.entries(space.dims))
+    if (isDimActive(dim, out)) out[key] = clampDim(dim, values[key], dropped, prefix + key)
+  if (dropped) for (const key of Object.keys(values)) if (!(key in out)) dropped.push(prefix + key)
+  return out
 }
 
 /**
  * The nearest point of the space to `values`: missing or invalid values take their defaults, numbers are clipped to
  * their range (integers rounded, stepped reals snapped), unknown keys and inactive dimensions are dropped.
+ * `clampReport` also says which keys were dropped.
  */
 export function clamp<S extends Space>(space: S, values: Readonly<Record<string, unknown>>): ValuesOf<S>
 export function clamp(space: Space, values: Readonly<Record<string, unknown>>): SpaceValues
 export function clamp(space: Space, values: Readonly<Record<string, unknown>>): SpaceValues {
-  const out: Record<string, SpaceValue> = {}
-  for (const [key, dim] of Object.entries(space.dims)) if (isDimActive(dim, out)) out[key] = clampDim(dim, values[key])
-  return out
+  return clampInto(space, values, undefined, '')
+}
+
+/** A clamped point and the keys `clamp` dropped. */
+export interface ClampReport<V> {
+  readonly values: V
+  /**
+   * The paths of the given keys that are unknown to the space or belong to an inactive dimension, in the order
+   * found: `key`, `outer.inner` inside a subspace, `family.params.key` inside a variant's parameters.
+   */
+  readonly dropped: readonly string[]
+}
+
+/**
+ * `clamp`, reporting what it dropped: unknown keys and keys of inactive dimensions are listed in `dropped`, so that a
+ * caller (a recipe, a URL decoder) can warn rather than ignore them silently.
+ *
+ * @example clampReport(space({ n: int(1, 9) }), { n: 3, m: 1 }).dropped // ['m']
+ */
+export function clampReport<S extends Space>(
+  space: S,
+  values: Readonly<Record<string, unknown>>,
+): ClampReport<ValuesOf<S>>
+export function clampReport(space: Space, values: Readonly<Record<string, unknown>>): ClampReport<SpaceValues>
+export function clampReport(space: Space, values: Readonly<Record<string, unknown>>): ClampReport<SpaceValues> {
+  const dropped: string[] = []
+  return { values: clampInto(space, values, dropped, ''), dropped }
 }
 
 /** Every active dimension at its default. */

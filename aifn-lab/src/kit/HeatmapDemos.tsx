@@ -1,6 +1,19 @@
 import { child, normal, stream } from 'aifn/foundation/random'
 import { useMemo, useState } from 'react'
-import { ChartSize, formatNumber, Heatmap, Readout, XYChart, type Handle, type Vec2, type XYSeries } from '@lab/viz'
+import {
+  Area,
+  Contours,
+  Curve,
+  formatNumber,
+  Handle,
+  Plot,
+  Plots,
+  Raster,
+  Readout,
+  useAxis,
+  Vectors,
+  type Vec2,
+} from '@lab/viz'
 import { Player, Select, Slider, Switch, useParam } from '@lab/controls'
 import { Figure } from '@lab/layout'
 
@@ -24,6 +37,9 @@ function gradient(x: number, y: number): Vec2 {
   }
   return [gx, gy]
 }
+
+const BUMP_NAMES = ['bump 1', 'bump 2', 'bump 3']
+const LEVELS = [0.2, 0.4, 0.6, 0.8]
 
 type Scale = 'sequential' | 'diverging' | 'categorical'
 
@@ -63,15 +79,15 @@ export function HeatmapFigure() {
   const z = fields[scale]
   const signed = scale === 'diverging'
   const bound = signed ? Math.max(...z.flat().map(Math.abs)) : 0
-  const handles = useMemo((): Handle[] => [{ kind: 'point', at: start, onDrag: setStart }], [start])
-  const overlay = useMemo(() => [{ name: 'gradient ascent', type: 'line' as const, ...path, showPoints: true }], [path])
   const [gx, gy] = gradient(...start)
   const vectors = useMemo(() => [{ from: start, to: [start[0] + gx, start[1] + gy] as Vec2 }], [start, gx, gy])
-  const levels = useMemo(() => ({ levels: [0.2, 0.4, 0.6, 0.8], field: fields.sequential }), [fields])
+  const x1 = useAxis({ label: 'x₁' })
+  const x2 = useAxis({ label: 'x₂' })
   return (
     <Figure
       title="Heatmap with overlays, contours and a draggable start"
-      description="A mixture of three bumps on a 71 × 71 grid, as a density (sequential), centred (diverging) or by dominant bump (categorical)."
+      // TODO(5c): purpose taken from the description
+      purpose="A mixture of three bumps on a 71 × 71 grid, as a density (sequential), centred (diverging) or by dominant bump (categorical)."
       defaultSize="L"
       controls={
         <>
@@ -97,23 +113,22 @@ export function HeatmapFigure() {
       }
       caption="Drag the start point anywhere on the grid: the path and the gradient arrow follow without redrawing the cells. Hover a cell for its value; zoom with the toolbar or pinch."
     >
-      <Heatmap
-        x={x}
-        y={y}
-        z={z}
-        scale={scale}
-        range={signed ? [-bound, bound] : undefined}
-        categoryNames={['bump 1', 'bump 2', 'bump 3']}
-        contours={contours ? levels : undefined}
-        overlay={overlay}
-        marker={start}
-        vectors={vectors}
-        handles={handles}
-        xLabel="x₁"
-        yLabel="x₂"
-        valueLabel={scale === 'categorical' ? 'dominant' : 'density'}
-        fillOpacity={0.9}
-      />
+      <Plot x={x1} y={x2}>
+        <Raster
+          x={x}
+          y={y}
+          z={z}
+          scale={scale}
+          range={signed ? [-bound, bound] : undefined}
+          categoryNames={BUMP_NAMES}
+          valueLabel={scale === 'categorical' ? 'dominant' : 'density'}
+          fillOpacity={0.9}
+        />
+        {contours && <Contours x={x} y={y} z={fields.sequential} levels={LEVELS} />}
+        <Curve id="path" name="gradient ascent" x={path.x} y={path.y} showPoints live />
+        <Vectors id="gradient" vectors={vectors} live />
+        <Handle kind="point" at={start} onDrag={setStart} />
+      </Plot>
     </Figure>
   )
 }
@@ -139,29 +154,17 @@ export function LinkedFigure() {
     }
     return { step, loss, w, ms }
   }, [])
-  const [position, setPosition] = useState(80)
-  const cursor = useMemo(
-    (): Handle[] => [
-      { kind: 'x', at: position, onDrag: (x: number) => setPosition(Math.round(Math.min(Math.max(x, 0), 299))) },
-    ],
-    [position],
-  )
-  const loss = useMemo(
-    (): XYSeries[] => [{ name: 'loss', type: 'line', x: trace.step, y: trace.loss, slot: 0 }],
-    [trace],
-  )
-  const weights = useMemo(
-    (): XYSeries[] => trace.w.map((y, k) => ({ name: `w${'₁₂₃'[k]}`, type: 'line', x: trace.step, y, slot: k })),
-    [trace],
-  )
-  const timing = useMemo(
-    (): XYSeries[] => [{ name: 'ms per step', type: 'area', x: trace.step, y: trace.ms, slot: 4 }],
-    [trace],
-  )
+  const [position, setPosition] = useState(0)
+  const onDrag = (x: number) => setPosition(Math.round(Math.min(Math.max(x, 0), 299)))
+  const step = useAxis({ label: 'step', zoom: false })
+  const lossAxis = useAxis({ label: 'loss', log: true, zoom: false })
+  const wAxis = useAxis({ label: 'w', zoom: false })
+  const msAxis = useAxis({ label: 'ms', zoom: false })
   return (
     <Figure
       title="Linked hover across panels"
-      description="Loss, weights and step time of a noisy descent, as a trace view would show them."
+      // TODO(5c): purpose taken from the description
+      purpose="Loss, weights and step time of a noisy descent, as a trace view would show them."
       defaultSize="L"
       controls={<Player className="col-span-full" value={position} onChange={setPosition} count={300} />}
       readouts={
@@ -170,23 +173,24 @@ export function LinkedFigure() {
           <Readout label="loss" value={formatNumber(trace.loss[position])} />
         </>
       }
-      caption="Hover any panel: the pointer moves in all three (they share a hoverGroup) and the readout above lists every panel's values at that step. Drag the dashed line in any panel, or use the player, to move the current step. Each panel is 45% of the frame's height (ChartSize)."
+      caption="Hover any panel: the pointer moves in all three (they share a hoverGroup) and the readout above lists every panel's values at that step. Drag the dashed line in any panel, or use the player, to move the current step. The three panels share one step axis in a Plots grid."
     >
-      <ChartSize scale={0.45}>
-        <div className="flex flex-col gap-2">
-          <XYChart
-            series={loss}
-            xLabel="step"
-            yLabel="loss"
-            yLog
-            hoverGroup="kit-trace"
-            handles={cursor}
-            zoom={false}
-          />
-          <XYChart series={weights} xLabel="step" yLabel="w" hoverGroup="kit-trace" handles={cursor} zoom={false} />
-          <XYChart series={timing} xLabel="step" yLabel="ms" hoverGroup="kit-trace" handles={cursor} zoom={false} />
-        </div>
-      </ChartSize>
+      <Plots rows={3} hoverGroup toolbar={false}>
+        <Plot x={step} y={lossAxis}>
+          <Curve name="loss" x={trace.step} y={trace.loss} slot={0} />
+          <Handle kind="x" at={position} onDrag={onDrag} />
+        </Plot>
+        <Plot x={step} y={wAxis}>
+          {trace.w.map((y, k) => (
+            <Curve key={k} name={`w${'₁₂₃'[k]}`} x={trace.step} y={y} slot={k} />
+          ))}
+          <Handle kind="x" at={position} onDrag={onDrag} />
+        </Plot>
+        <Plot x={step} y={msAxis}>
+          <Area name="ms per step" x={trace.step} y={trace.ms} slot={4} />
+          <Handle kind="x" at={position} onDrag={onDrag} />
+        </Plot>
+      </Plots>
     </Figure>
   )
 }

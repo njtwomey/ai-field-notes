@@ -3,7 +3,7 @@ import { exp, linspace, mul, sin, square, sum, toFlat, type Tensor, type Value }
 import { useMemo } from 'react'
 import { Slider, useParam } from '@lab/controls'
 import { Figure } from '@lab/layout'
-import { formatNumber, Panel, Readout, Subplots, XYChart, type Handle, type XYSeries } from '@lab/viz'
+import { Curve, formatNumber, Handle, Plot, Plots, Readout, useAxis } from '@lab/viz'
 
 const grid = (lo: number, hi: number, n: number) => Array.from({ length: n }, (_, i) => lo + ((hi - lo) * i) / (n - 1))
 
@@ -22,40 +22,26 @@ export function SharedXFigure() {
     const x = linspace(-4, 4, 321)
     const xs = toFlat(x)
     const df = grad((u: Value) => sum(f(u)))
-    const top: XYSeries[] = [{ name: 'f(x)', type: 'line', x: xs, y: toFlat(f(x) as Tensor), slot: 0 }]
-    const bottom: XYSeries[] = [{ name: 'f′(x)', type: 'line', x: xs, y: toFlat(df(x) as Tensor), slot: 1 }]
+    const top = { x: xs, y: toFlat(f(x) as Tensor) }
+    const bottom = { x: xs, y: toFlat(df(x) as Tensor) }
     return { top, bottom, y0: f(x0.value) as number, slope: grad(f)(x0.value) as number }
   }, [omega.value, x0.value])
-  const handles = useMemo(
-    (): Handle[] => [{ kind: 'x', at: x0.value, label: 'x₀', onDrag: x0.set }],
-    [x0.value, x0.set],
-  )
+  const xAxis = useAxis({ label: 'x' })
+  const fAxis = useAxis({ label: 'f', equal: xAxis })
+  const dfAxis = useAxis({ label: 'f′' })
   // A live tangent and a unit circle at x₀: with equal units the circle is round.
-  const tangent = useMemo((): XYSeries[] => {
+  const tangent = useMemo(() => {
     const t = Array.from({ length: 97 }, (_, k) => (2 * Math.PI * k) / 96)
-    return [
-      {
-        name: 'tangent',
-        type: 'line',
-        x: [x0.value - 1, x0.value + 1],
-        y: [y0 - slope, y0 + slope],
-        slot: 2,
-        dashed: true,
-      },
-      {
-        name: 'unit circle at x₀',
-        type: 'line',
-        x: t.map((a) => x0.value + Math.cos(a)),
-        y: t.map((a) => y0 + Math.sin(a)),
-        slot: 3,
-        thin: true,
-      },
-    ]
+    return {
+      line: { x: [x0.value - 1, x0.value + 1], y: [y0 - slope, y0 + slope] },
+      circle: { x: t.map((a) => x0.value + Math.cos(a)), y: t.map((a) => y0 + Math.sin(a)) },
+    }
   }, [x0.value, y0, slope])
   return (
     <Figure
-      title="Subplots: two rows sharing x"
-      description="f above at twice the height, f′ = grad(f) below. The plot areas share left and right edges."
+      title="Plots: two rows sharing x"
+      // TODO(5c): purpose taken from the description
+      purpose="f above at twice the height, f′ = grad(f) below. The plot areas share left and right edges."
       defaultSize="L"
       controls={
         <>
@@ -69,16 +55,20 @@ export function SharedXFigure() {
           <Readout label="f′(x₀)" value={formatNumber(slope)} />
         </>
       }
-      caption="Zoom or pan x on either panel and both move; hover either and both show the pointer. The top panel asks for equal units (Panel aspect equal): the grid sets its height from f's fitted ranges so one unit is as long on y as on x (the unit circle is round), and the bottom panel takes the rest of the frame. A very tall panel would narrow the column instead of stretching past the page. Drag x₀ in either panel."
+      caption="Zoom or pan x on either panel and both move; hover either and both show the pointer. The top panel's f axis has equal units with x (useAxis equal): the grid sets its height from f's fitted ranges so one unit is as long on y as on x (the unit circle is round), and the bottom panel takes the rest of the frame. A very tall panel would narrow the column instead of stretching past the page. Drag x₀ in either panel."
     >
-      <Subplots rows={2} sharex heightRatios={[2, 1]} hoverGroup>
-        <Panel aspect="equal">
-          <XYChart series={top} live={tangent} xLabel="x" yLabel="f" handles={handles} />
-        </Panel>
-        <Panel>
-          <XYChart series={bottom} xLabel="x" yLabel="f′" handles={handles} />
-        </Panel>
-      </Subplots>
+      <Plots rows={2} heights={[2, 1]} hoverGroup>
+        <Plot x={xAxis} y={fAxis}>
+          <Curve name="f(x)" x={top.x} y={top.y} slot={0} />
+          <Curve id="tangent" name="tangent" x={tangent.line.x} y={tangent.line.y} slot={2} dashed live />
+          <Curve id="circle" name="unit circle at x₀" x={tangent.circle.x} y={tangent.circle.y} slot={3} thin live />
+          <Handle kind="x" at={x0.value} label="x₀" onDrag={x0.set} />
+        </Plot>
+        <Plot x={xAxis} y={dfAxis}>
+          <Curve name="f′(x)" x={bottom.x} y={bottom.y} slot={1} />
+          <Handle kind="x" at={x0.value} label="x₀" onDrag={x0.set} />
+        </Plot>
+      </Plots>
     </Figure>
   )
 }
@@ -94,29 +84,37 @@ export function SharedYFigure() {
     const exponential = t.map((v) => Math.exp(-v))
     return {
       left: [
-        { name: 'normal', type: 'line', x, y: normal, slot: 0 },
-        { name: 'Laplace', type: 'line', x, y: laplace, slot: 1 },
-      ] satisfies XYSeries[],
+        { name: 'normal', x, y: normal, slot: 0 },
+        { name: 'Laplace', x, y: laplace, slot: 1 },
+      ],
       right: [
-        { name: 'gamma(2, 1)', type: 'line', x: t, y: gamma, slot: 2 },
-        { name: 'exponential(1)', type: 'line', x: t, y: exponential, slot: 3 },
-      ] satisfies XYSeries[],
+        { name: 'gamma(2, 1)', x: t, y: gamma, slot: 2 },
+        { name: 'exponential(1)', x: t, y: exponential, slot: 3 },
+      ],
     }
   }, [])
+  const xAxis = useAxis({ label: 'x' })
+  const tAxis = useAxis({ label: 't' })
+  const density = useAxis({ label: 'density' })
   return (
     <Figure
-      title="Subplots: two columns sharing y"
-      description="Densities on the real line (left) and on the positive half-line (right), on one density scale."
+      title="Plots: two columns sharing y"
+      // TODO(5c): purpose taken from the description
+      purpose="Densities on the real line (left) and on the positive half-line (right), on one density scale."
       caption="Only the left panel labels y; the plot areas share top and bottom edges. Zoom y on either and both follow."
     >
-      <Subplots cols={2} sharey widthRatios={[3, 2]}>
-        <Panel>
-          <XYChart series={series.left} xLabel="x" yLabel="density" />
-        </Panel>
-        <Panel>
-          <XYChart series={series.right} xLabel="t" yLabel="density" />
-        </Panel>
-      </Subplots>
+      <Plots cols={2} widths={[3, 2]}>
+        <Plot x={xAxis} y={density}>
+          {series.left.map((c) => (
+            <Curve key={c.name} {...c} />
+          ))}
+        </Plot>
+        <Plot x={tAxis} y={density}>
+          {series.right.map((c) => (
+            <Curve key={c.name} {...c} />
+          ))}
+        </Plot>
+      </Plots>
     </Figure>
   )
 }
@@ -127,26 +125,31 @@ export function GridFigure() {
     const a = grid(0, 2 * Math.PI, 200)
     const b = grid(0.1, 10, 200)
     return [
-      [{ name: 'sin', type: 'line', x: a, y: a.map(Math.sin), slot: 0 }],
-      [{ name: 'log', type: 'line', x: b, y: b.map((v) => Math.log(v) / 2.5), slot: 1 }],
-      [{ name: 'sin²', type: 'line', x: a, y: a.map((v) => 3 * Math.sin(v) ** 2), slot: 2 }],
-      [{ name: '1000/x', type: 'line', x: b, y: b.map((v) => 1000 / (v * v + 400)), slot: 3 }],
-    ] satisfies XYSeries[][]
+      { name: 'sin', x: a, y: a.map(Math.sin), slot: 0 },
+      { name: 'log', x: b, y: b.map((v) => Math.log(v) / 2.5), slot: 1 },
+      { name: 'sin²', x: a, y: a.map((v) => 3 * Math.sin(v) ** 2), slot: 2 },
+      { name: '1000/x', x: b, y: b.map((v) => 1000 / (v * v + 400)), slot: 3 },
+    ]
   }, [])
+  const theta = useAxis({ label: 'θ' })
+  const x = useAxis({ label: 'x (0.1 – 10)' })
+  const top = useAxis({ label: 'value' })
+  const bottom = useAxis({ label: 'value' })
   return (
     <Figure
-      title="Subplots: a 2 × 2 grid"
-      description="Columns share x (sharex 'col'), rows share y (sharey 'row'); hover is linked within the grid."
+      title="Plots: a 2 × 2 grid"
+      // TODO(5c): purpose taken from the description
+      purpose="Columns share an x axis model, rows a y axis model; hover is linked within the grid."
       defaultSize="L"
       caption="Every column has its own x range and every row its own y range. Tick labels appear only on the bottom row and the left column. The bottom-right panel's y labels differ in width from the bottom-left's, but plot edges still line up."
     >
-      <Subplots rows={2} cols={2} sharex="col" sharey="row" hoverGroup>
-        {cells.map((series, i) => (
-          <Panel key={i}>
-            <XYChart series={series} xLabel={i % 2 ? 'x (0.1 – 10)' : 'θ'} yLabel="value" />
-          </Panel>
+      <Plots rows={2} cols={2} hoverGroup>
+        {cells.map((c, i) => (
+          <Plot key={i} x={i % 2 ? x : theta} y={i < 2 ? top : bottom} legend={false}>
+            <Curve {...c} />
+          </Plot>
         ))}
-      </Subplots>
+      </Plots>
     </Figure>
   )
 }

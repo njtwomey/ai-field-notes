@@ -39,6 +39,7 @@ export {
   type SurrogateName,
 } from './classification'
 export {
+  expectileLoss,
   gaussianNll,
   huber,
   logCosh,
@@ -46,6 +47,7 @@ export {
   meanSquaredErrorLoss,
   pinball,
   poissonNll,
+  type ExpectileLossOptions,
   type GaussianNllOptions,
   type HuberOptions,
   type PinballOptions,

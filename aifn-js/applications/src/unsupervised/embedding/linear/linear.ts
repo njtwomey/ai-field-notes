@@ -19,6 +19,8 @@ import { trace, type Algorithm } from 'aifn/foundation/trace'
 import { classicalCore } from '../centring'
 import { squaredDistances } from '../neighbourhoods'
 import { mat, matrix, square, values, vec } from '../util'
+import { defineModel } from 'aifn/learning/estimators'
+import { bool, int, oneOf, space } from 'aifn/foundation/space'
 
 // ── PCA ──────────────────────────────────────────────────────────────────────────────────────────────────────────
 
@@ -334,3 +336,55 @@ export function metricMds(
     },
   }
 }
+
+// ── Registry ─────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+defineModel(
+  {
+    key: 'pca',
+    module: 'unsupervised/embedding/linear',
+    name: 'Principal component analysis',
+    summary: 'Projection onto the directions of largest variance.',
+    task: 'embedding',
+    capabilities: ['transform'],
+    hyper: space({ components: int(1, 50, { default: 2 }), whiten: bool() }),
+    notes: ['principal-component-analysis'],
+    cite: ['pearson1901'],
+  },
+  pca,
+)
+
+defineModel(
+  {
+    key: 'kernelPca',
+    module: 'unsupervised/embedding/linear',
+    name: 'Kernel PCA',
+    summary: 'PCA in the feature space of a kernel (RBF by default).',
+    task: 'embedding',
+    capabilities: ['transform'],
+    hyper: space({ components: int(1, 50, { default: 2 }) }),
+    notes: ['kernel-principal-component-analysis'],
+    cite: ['scholkopf1998'],
+  },
+  kernelPca,
+)
+
+defineModel(
+  {
+    key: 'metricMds',
+    module: 'unsupervised/embedding/linear',
+    name: 'Metric multidimensional scaling',
+    summary: 'An embedding whose distances match the data distances, by SMACOF stress majorisation.',
+    task: 'embedding',
+    capabilities: [],
+    transductive: true,
+    hyper: space({
+      dims: int(1, 10, { default: 2 }),
+      start: oneOf(['classical', 'random']),
+      maxSteps: int(1, 1000, { default: 300 }),
+    }),
+    notes: ['multidimensional-scaling'],
+    cite: ['kruskal1964'],
+  },
+  metricMds,
+)

@@ -3,14 +3,14 @@ import type { Distribution, Multivariate, Univariate } from 'aifn/probability/di
 import { stream } from 'aifn/foundation/random'
 import { histogram } from 'aifn/probability/stats'
 import { reshape, tensor, toFlat, unwrap, type Tensor, type Value } from 'aifn/foundation/tensor'
-import { Figure } from '@lab/layout'
-import { Heatmap, Panel, Readout, Subplots, XYChart, type HeatmapOverlay, type XYSeries } from '@lab/viz'
+import { PanelSlot } from '@lab/layout'
+import { Bars, Curve, Plot, Plots, Points, Raster, Readout, useAxis } from '@lab/viz'
 import { distributionRange } from './distribution-range'
 import { formatValue } from './format'
 import { histogramBars } from './histogram'
-import type { FrameProps } from './frame'
+import { registerKind, registerView } from './registry'
 
-export type DistributionViewProps = FrameProps & {
+export type DistributionPanelProps = {
   /** A univariate distribution (a batch draws one curve per member, up to eight), or a bivariate one (event [2]). */
   distribution: Distribution
   /** The x range (univariate) or [lo, hi] for both axes (bivariate); default from the quantiles or the moments. */
@@ -48,6 +48,8 @@ function attempt(f: () => unknown): string {
   }
 }
 
+/** Tick labels at integers only, for a discrete variable. */
+
 /** Non-finite values become gaps in lines. */
 const gap = (v: number) => (Number.isFinite(v) ? v : NaN)
 
@@ -57,39 +59,51 @@ const gap = (v: number) => (Number.isFinite(v) ? v : NaN)
  * Kolmogorov–Smirnov distance of the draws. A batch draws one curve per member. Bivariate (event shape [2]): the
  * density as a heatmap with draws over it, and the mean and covariance. Quantities with no closed form show '—'.
  */
-export function DistributionView(props: DistributionViewProps) {
+export function DistributionPanel(props: DistributionPanelProps) {
   const d = props.distribution
   if (d.eventShape.length === 1 && d.eventShape[0] === 2 && d.batchShape.length === 0)
-    return <BivariateView {...props} distribution={d as Multivariate} />
+    return <BivariatePanel {...props} distribution={d as Multivariate} />
   if (d.eventShape.length !== 0) {
     return (
-      <Figure title={props.title ?? d.name} description={props.description} caption={props.caption}>
-        <div className="text-sm text-muted-foreground">
-          DistributionView draws univariate and bivariate distributions; this one has event shape [
-          {d.eventShape.join(', ')}].
-        </div>
-      </Figure>
+      <div className="text-sm text-muted-foreground">
+        DistributionPanel draws univariate and bivariate distributions; this one has event shape [
+        {d.eventShape.join(', ')}].
+      </div>
     )
   }
-  return <UnivariateView {...props} distribution={d as Univariate} />
+  return <UnivariatePanel {...props} distribution={d as Univariate} />
 }
 
-function UnivariateView({
+/** The default title of a distribution's figure: its name and parameters. */
+const titleOf = (d: Distribution) =>
+  d.eventShape.length === 0 ? `${d.name} (${Object.keys(d.params).join(', ')})` : d.name
+
+const isDistribution = (o: unknown): o is Distribution =>
+  typeof o === 'object' &&
+  o !== null &&
+  typeof (o as Distribution).prob === 'function' &&
+  typeof (o as Distribution).sample === 'function' &&
+  Array.isArray((o as Distribution).eventShape)
+
+registerKind('distribution', isDistribution)
+registerView<Distribution>({
+  key: 'distribution/density',
+  kind: 'distribution',
+  description:
+    'The density or mass with a histogram of draws, the cdf against the empirical cdf, and the moments (univariate); the density as a heatmap with draws (bivariate).',
+  title: titleOf,
+  render: (d) => <DistributionPanel distribution={d} />,
+})
+
+function UnivariatePanel({
   distribution: d,
   range,
   samples = 2000,
   seed = 1,
   xLabel = 'x',
-  title,
-  description,
-  controls,
-  readouts,
-  caption,
-  defaultSize = 'L',
-  id,
   rescaleOnChange = true,
   axisKey,
-}: DistributionViewProps & { distribution: Univariate }) {
+}: DistributionPanelProps & { distribution: Univariate }) {
   const batch = d.batchShape
   const members = batch.reduce((a, b) => a * b, 1)
   const shown = Math.min(members, 8)
@@ -124,78 +138,46 @@ function UnivariateView({
       dist = Math.max(dist, Math.abs((i + 1) / sorted.length - cdf[i]), Math.abs(i / sorted.length - cdf[i]))
     return dist
   }, [d, draws])
-  const density = useMemo((): XYSeries[] => {
-    const out: XYSeries[] = []
-    if (draws) {
-      if (d.discrete) {
-        const counts = new Map<number, number>()
-        for (const v of draws) counts.set(v, (counts.get(v) ?? 0) + 1)
-        out.push({
-          name: 'draws (frequency)',
-          type: 'bar',
-          x: xs,
-          y: xs.map((k) => (counts.get(k) ?? 0) / draws.length),
-          muted: true,
-        })
-      } else {
-        const h = histogram(draws, { bins: 60, range: [lo, hi] })
-        out.push({
-          name: 'draws (density)',
-          type: 'bar',
-          x: histogramBars(h).x,
-          y: toFlat(h.density),
-          muted: true,
-        })
-      }
+  const bars = useMemo(() => {
+    if (!draws) return null
+    if (d.discrete) {
+      const counts = new Map<number, number>()
+      for (const v of draws) counts.set(v, (counts.get(v) ?? 0) + 1)
+      return { name: 'draws (frequency)', x: xs, y: xs.map((k) => (counts.get(k) ?? 0) / draws.length) }
     }
-    curves.density.forEach((y, m) =>
-      out.push({
-        name: shown > 1 ? `member ${m}` : d.discrete ? 'mass' : 'density',
-        type: d.discrete ? 'scatter' : 'line',
-        x: xs,
-        y,
-        slot: m,
-      }),
-    )
-    return out
-  }, [curves, draws, d.discrete, xs, lo, hi, shown])
-  const cdf = useMemo((): XYSeries[] => {
-    const out: XYSeries[] = curves.cdf.map((y, m) => ({
-      name: shown > 1 ? `member ${m}` : 'cdf',
-      type: 'line',
-      x: xs,
-      y,
-      slot: m,
-    }))
-    if (draws) {
-      const sorted = Float64Array.from(draws).sort()
-      const step = Math.max(1, Math.floor(sorted.length / 400))
-      const ex: number[] = []
-      const ey: number[] = []
-      for (let i = 0; i < sorted.length; i += step) {
-        ex.push(sorted[i])
-        ey.push((i + 1) / sorted.length)
-      }
-      out.push({ name: 'empirical cdf', type: 'line', x: ex, y: ey, dashed: true, slot: 1 })
+    const h = histogram(draws, { bins: 60, range: [lo, hi] })
+    const b = histogramBars(h)
+    return { name: 'draws (density)', x: b.x, y: toFlat(h.density), edges: b.edges }
+  }, [draws, d.discrete, xs, lo, hi])
+  const empirical = useMemo(() => {
+    if (!draws) return null
+    const sorted = Float64Array.from(draws).sort()
+    const step = Math.max(1, Math.floor(sorted.length / 400))
+    const ex: number[] = []
+    const ey: number[] = []
+    for (let i = 0; i < sorted.length; i += step) {
+      ex.push(sorted[i])
+      ey.push((i + 1) / sorted.length)
     }
-    return out
-  }, [curves, draws, xs, shown])
+    return { x: ex, y: ey }
+  }, [draws])
+  const xAxis = useAxis({ label: xLabel, range: [lo, hi], integer: d.discrete })
+  const densityAxis = useAxis({
+    label: d.discrete ? 'probability' : 'density',
+    hold: rescaleOnChange ? undefined : 'union',
+    key: axisKey,
+  })
+  const cdfAxis = useAxis({ label: 'cdf', range: [0, 1] })
+  const memberName = (m: number, own: string) => (shown > 1 ? `member ${m}` : own)
   const support = d.support
   const supportText =
     'lower' in support
       ? `${support.type} [${attempt(() => support.lower)}; ${attempt(() => support.upper)}]`
       : support.type
   return (
-    <Figure
-      id={id}
-      title={title ?? `${d.name} (${Object.keys(d.params).join(', ')})`}
-      description={description}
-      controls={controls}
-      defaultSize={defaultSize}
-      caption={caption}
-      readouts={
+    <>
+      <PanelSlot slot="readouts">
         <>
-          {readouts}
           <Readout label="mean" value={attempt(() => d.mean())} />
           <Readout label="variance" value={attempt(() => d.variance())} />
           <Readout label="sd" value={attempt(() => d.stddev())} />
@@ -210,27 +192,30 @@ function UnivariateView({
             />
           )}
         </>
-      }
-    >
-      <Subplots rows={2} sharex heightRatios={[55, 45]} hoverGroup rescaleOnChange={rescaleOnChange} axisKey={axisKey}>
-        <Panel holdFit="union">
-          <XYChart
-            series={density}
-            xLabel={xLabel}
-            yLabel={d.discrete ? 'probability' : 'density'}
-            xRange={[lo, hi]}
-            integerX={d.discrete}
-          />
-        </Panel>
-        <Panel>
-          <XYChart series={cdf} xLabel={xLabel} yLabel="cdf" xRange={[lo, hi]} yRange={[0, 1]} />
-        </Panel>
-      </Subplots>
-    </Figure>
+      </PanelSlot>
+      <Plots rows={2} heights={[55, 45]} hoverGroup>
+        <Plot x={xAxis} y={densityAxis}>
+          {bars && <Bars name={bars.name} x={bars.x} y={bars.y} edges={bars.edges} muted />}
+          {curves.density.map((y, m) =>
+            d.discrete ? (
+              <Points key={m} name={memberName(m, 'mass')} x={xs} y={y} slot={m} />
+            ) : (
+              <Curve key={m} name={memberName(m, 'density')} x={xs} y={y} slot={m} />
+            ),
+          )}
+        </Plot>
+        <Plot x={xAxis} y={cdfAxis}>
+          {curves.cdf.map((y, m) => (
+            <Curve key={m} name={memberName(m, 'cdf')} x={xs} y={y} slot={m} />
+          ))}
+          {empirical && <Curve name="empirical cdf" x={empirical.x} y={empirical.y} dashed slot={1} />}
+        </Plot>
+      </Plots>
+    </>
   )
 }
 
-function BivariateView({
+function BivariatePanel({
   distribution: d,
   range,
   yRange,
@@ -238,14 +223,7 @@ function BivariateView({
   seed = 1,
   xLabel = 'x₁',
   yLabel = 'x₂',
-  title,
-  description,
-  controls,
-  readouts,
-  caption,
-  defaultSize = 'L',
-  id,
-}: DistributionViewProps & { distribution: Multivariate }) {
+}: DistributionPanelProps & { distribution: Multivariate }) {
   const [xr, yr] = useMemo((): [[number, number], [number, number]] => {
     if (range && yRange) return [range, yRange]
     try {
@@ -266,38 +244,36 @@ function BivariateView({
     const z = gy.map((_, i) => gx.map((_, j) => gap(p[i * n + j])))
     return { gx, gy, z }
   }, [d, xr, yr])
-  const overlay = useMemo((): HeatmapOverlay[] => {
-    if (samples <= 0) return []
+  const draws = useMemo(() => {
+    if (samples <= 0) return null
     const flat = numbers(d.sample(stream(seed), { shape: [samples] }))
-    return [
-      {
-        name: 'draws',
-        type: 'scatter',
-        x: flat.filter((_, i) => i % 2 === 0),
-        y: flat.filter((_, i) => i % 2 === 1),
-        slot: 1,
-      },
-    ]
-  }, [d, samples, seed])
+    // Only the draws inside the grid, so the axes end at the density's edges.
+    const x: number[] = []
+    const y: number[] = []
+    for (let i = 0; i + 1 < flat.length; i += 2) {
+      const [a, b] = [flat[i], flat[i + 1]]
+      if (a < xr[0] || a > xr[1] || b < yr[0] || b > yr[1]) continue
+      x.push(a)
+      y.push(b)
+    }
+    return { x, y }
+  }, [d, samples, seed, xr, yr])
+  const xAxis = useAxis({ label: xLabel })
+  const yAxis = useAxis({ label: yLabel, equal: xAxis })
   return (
-    <Figure
-      id={id}
-      title={title ?? d.name}
-      description={description}
-      controls={controls}
-      defaultSize={defaultSize}
-      caption={caption}
-      readouts={
+    <>
+      <PanelSlot slot="readouts">
         <>
-          {readouts}
           <Readout label="mean" value={attempt(() => d.mean())} />
           <Readout label="covariance" value={attempt(() => d.covariance())} />
           <Readout label="entropy (nats)" value={attempt(() => d.entropy())} />
           <Readout label="batch × event" value={`[${d.batchShape.join(', ')}] × [${d.eventShape.join(', ')}]`} />
         </>
-      }
-    >
-      <Heatmap x={gx} y={gy} z={z} xLabel={xLabel} yLabel={yLabel} overlay={overlay} valueLabel="density" equalAspect />
-    </Figure>
+      </PanelSlot>
+      <Plot x={xAxis} y={yAxis}>
+        <Raster x={gx} y={gy} z={z} valueLabel="density" />
+        {draws && <Points name="draws" x={draws.x} y={draws.y} slot={1} thin />}
+      </Plot>
+    </>
   )
 }

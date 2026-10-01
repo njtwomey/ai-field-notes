@@ -7,11 +7,12 @@ import type { Tensor, Vector } from 'aifn/foundation/tensor'
 import { run, type Algorithm } from 'aifn/foundation/trace'
 import type { RunOptions, StartOptions } from '../options'
 import { strongWolfeSearch, type LineSearchResult, type StrongWolfeOptions } from 'aifn/optim/line-search'
-import type { IterateState, MatrixLike, ObjectiveFn, StoppingOptions, VectorLike } from 'aifn/foundation/contracts'
+import type { IterateState, ObjectiveFn, StoppingOptions, VectorLike } from 'aifn/foundation/contracts'
 import { DEFAULT_DIVERGE, DEFAULT_TOLERANCE, divergedAt, evaluate } from '../options'
 import { dense } from 'aifn/foundation/tensor'
+import { operatorOf, type LinearOperator } from 'aifn/numerics/linalg'
 
-const { axpy, data, dot, matVec, norm, scale, sub, toF64, toMatrixF64, vec } = dense
+const { axpy, data, dot, norm, scale, sub, toF64, vec } = dense
 type F64 = dense.F64
 
 /** Which β the nonlinear method uses. */
@@ -128,9 +129,6 @@ export function conjugateGradient(
 // ---------------------------------------------------------------------------------------------------------------------
 // Linear conjugate gradients.
 
-/** A symmetric positive definite operator: a matrix, or a function returning A·v. */
-export type LinearOperator = MatrixLike | ((v: Vector) => VectorLike)
-
 /** The state of `linearConjugateGradient`. */
 export type LinearConjugateGradientState = {
   t: number
@@ -159,13 +157,6 @@ export type LinearConjugateGradientOptions = {
   tolerance?: number
 }
 
-/** A·v on working arrays. */
-function operator(A: LinearOperator, n: number): (v: F64) => F64 {
-  if (typeof A === 'function') return (v) => toF64(A(vec(v)), 'linearConjugateGradient')
-  const { data: a } = toMatrixF64(A as MatrixLike, 'linearConjugateGradient', n, n)
-  return (v) => matVec(a, v, n, n)
-}
-
 /**
  * Conjugate gradients for Ax = b with A symmetric positive definite (Hestenes & Stiefel, 1952; Nocedal & Wright,
  * Algorithm 5.2): at most n steps in exact arithmetic, with the error in the A-norm reduced at the rate
@@ -179,7 +170,7 @@ export function linearConjugateGradient(
 ): Algorithm<{ x0?: VectorLike }, LinearConjugateGradientState> {
   const bb = toF64(b, 'linearConjugateGradient')
   const n = bb.length
-  const apply = operator(A, n)
+  const apply = operatorOf(A, n, 'linearConjugateGradient')
   const bNorm = norm(bb)
   const tol = (options.tolerance ?? 1e-10) * (bNorm > 0 ? bNorm : 1)
   const quadratic = (x: F64, Ax: F64) => 0.5 * dot(x, Ax) - dot(bb, x)

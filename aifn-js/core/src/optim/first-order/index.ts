@@ -51,7 +51,6 @@ export {
   type ConjugateGradientVariant,
   type LinearConjugateGradientOptions,
   type LinearConjugateGradientState,
-  type LinearOperator,
 } from './conjugateGradient'
 export {
   coordinateDescent,
@@ -59,3 +58,4 @@ export {
   type CoordinateDescentState,
   type CoordinateRule,
 } from './coordinateDescent'
+export { firstOrderAlgorithms } from './registry'

@@ -1,6 +1,9 @@
 /**
  * The perceptron (Rosenblatt, 1958): a linear classifier trained one example at a time, updating only on mistakes.
- * Novikoff's (1962) theorem bounds the number of mistakes on separable data by (R/γ)².
+ * Novikoff's (1962) theorem bounds the number of mistakes on separable data by (R/γ)². The averaged perceptron
+ * (Freund and Schapire, 1999, "Large margin classification using the perceptron algorithm", Machine Learning 37)
+ * predicts with the mean of the weight vectors over every example visited, which is far less sensitive to the last
+ * few updates on data that are not separable.
  */
 
 import type { Status } from 'aifn/foundation/contracts'
@@ -9,6 +12,8 @@ import { permutation, type Stream } from 'aifn/foundation/random'
 import { dense, fromData, type Tensor } from 'aifn/foundation/tensor'
 import { trace, type Algorithm, type Trace } from 'aifn/foundation/trace'
 import { classLabels, inputs, matrix, vec } from '../util'
+import { defineModel } from 'aifn/learning/estimators'
+import { bool, int, real, space } from 'aifn/foundation/space'
 
 /** The problem a perceptron run solves: inputs [n, d] and labels ±1. */
 export interface PerceptronProblem {
@@ -27,6 +32,9 @@ export interface PerceptronState extends Status {
   t: number
   weights: Tensor
   bias: number
+  /** The mean of the weights and bias after each of the t steps so far (the averaged perceptron); the start at t = 0. */
+  averageWeights: Tensor
+  averageBias: number
   /** The example visited in this step (−1 at the start), its margin y(w·x + b) before the update, and whether it updated. */
   example: number
   margin: number
@@ -69,6 +77,8 @@ export function perceptronSteps(
       t: 0,
       weights: weights ?? fromData(new Float64Array(d), [d]),
       bias,
+      averageWeights: weights ?? fromData(new Float64Array(d), [d]),
+      averageBias: bias,
       example: -1,
       margin: NaN,
       updated: false,
@@ -93,10 +103,16 @@ export function perceptronSteps(
       }
       const epochMistakes = state.epochMistakes + (updated ? 1 : 0)
       const last = state.position === n - 1
+      // Running means: avg_t = avg_{t−1} + (w_t − avg_{t−1})/t.
+      const t = state.t + 1
+      const avg = Float64Array.from(state.averageWeights.data as Float64Array)
+      for (let j = 0; j < d; j++) avg[j] += (w[j] - avg[j]) / t
       return {
-        t: state.t + 1,
+        t,
         weights: fromData(w, [d]),
         bias,
+        averageWeights: fromData(avg, [d]),
+        averageBias: state.averageBias + (bias - state.averageBias) / t,
         example: i,
         margin,
         updated,
@@ -117,8 +133,10 @@ export interface PerceptronModel
   readonly kind: 'model'
   /** The model's name. */
   readonly name: 'perceptron'
+  /** The weights and bias it predicts with: the final ones, or their averages with `average`. */
   readonly weights: Tensor
   readonly bias: number
+  readonly averaged: boolean
   readonly mistakes: number
   readonly epochs: number
   readonly converged: boolean
@@ -126,15 +144,16 @@ export interface PerceptronModel
 
 /**
  * The perceptron for labels 0/1 (mapped to ∓1): at most `epochs` passes (default 100), stopping after a pass without
- * mistakes. `score` is w·x + b [m]; `decide` is 1 where it is positive. With `shuffle`, `fit` needs a stream.
+ * mistakes. `score` is w·x + b [m]; `decide` is 1 where it is positive. With `average`, w and b are the averaged
+ * perceptron's means over every step. With `shuffle`, `fit` needs a stream.
  */
 export function perceptron(
-  params: { epochs?: number; learningRate?: number; intercept?: boolean; shuffle?: boolean } = {},
+  params: { epochs?: number; learningRate?: number; intercept?: boolean; shuffle?: boolean; average?: boolean } = {},
 ): Estimator<Supervised<Tensor, Tensor>, PerceptronModel> {
-  const { epochs = 100, learningRate = 1, intercept = true, shuffle = false } = params
+  const { epochs = 100, learningRate = 1, intercept = true, shuffle = false, average = false } = params
   return {
     name: 'perceptron',
-    params: { epochs, learningRate, intercept, shuffle },
+    params: { epochs, learningRate, intercept, shuffle, average },
     fit({ x, y }, options: FitOptions = {}) {
       const { n, d } = matrix(x, 'perceptron')
       const { y: labels, k } = classLabels(y, n, 'perceptron')
@@ -151,12 +170,14 @@ export function perceptron(
         },
       })
       const final = training.final
-      const w = final.weights.data as Float64Array
+      const weights = average ? final.averageWeights : final.weights
+      const bias = average ? final.averageBias : final.bias
+      const w = weights.data as Float64Array
       const score = (q: Tensor) => {
         const { n: m, v } = inputs(q, d, 'perceptron')
         const out = new Float64Array(m)
         for (let i = 0; i < m; i++) {
-          let s = final.bias
+          let s = bias
           for (let j = 0; j < d; j++) s += w[j] * v[i * d + j]
           out[i] = s
         }
@@ -165,8 +186,9 @@ export function perceptron(
       return {
         kind: 'model',
         name: 'perceptron',
-        weights: final.weights,
-        bias: final.bias,
+        weights,
+        bias,
+        averaged: average,
         mistakes: final.mistakes,
         epochs: final.epoch,
         converged: final.converged,
@@ -182,3 +204,26 @@ export function perceptron(
     },
   }
 }
+
+// ── Registry ─────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+defineModel(
+  {
+    key: 'perceptron',
+    module: 'learning/linear',
+    name: 'Perceptron',
+    summary: "Rosenblatt's perceptron for two classes, trained by mistake-driven updates.",
+    task: 'classification',
+    capabilities: ['forward', 'decide', 'score'],
+    hyper: space({
+      epochs: int(1, 1000, { default: 100 }),
+      learningRate: real(1e-3, 10, { default: 1, scale: 'log' }),
+      intercept: bool({ default: true }),
+      shuffle: bool(),
+      average: bool(),
+    }),
+    notes: ['perceptron'],
+    cite: ['rosenblatt1958'],
+  },
+  perceptron,
+)

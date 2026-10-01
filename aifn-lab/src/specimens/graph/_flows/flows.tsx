@@ -48,6 +48,7 @@ export function MaxFlowSpecimen() {
 
   return (
     <Figure
+      purpose="The flow grows along shortest augmenting paths until none is left; the nodes the last search reaches then cut off saturated edges whose capacities sum to the flow."
       title="Edmonds–Karp: augmenting paths and the minimum cut"
       defaultSize="L"
       hoverReadout={false}

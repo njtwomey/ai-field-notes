@@ -6,6 +6,9 @@
 import { aliasSample, aliasTable, normal, type Stream, child, uniform } from 'aifn/foundation/random'
 import { fromData, type Tensor } from 'aifn/foundation/tensor'
 import { checkCount, labels, matrix, vector, type DatasetMeta } from '../types'
+import type { DatasetInfo } from 'aifn/foundation/contracts'
+import { definer } from 'aifn/foundation/registry'
+import { int, oneOf, real, space } from 'aifn/foundation/space'
 
 /**
  * Zipf popularity weights p_i ∝ i^{−s} for items i = 1, …, n (normalised to sum to one): the long-tailed popularity of
@@ -238,3 +241,67 @@ export function clickLog(s: Stream, options: ClickLogOptions = {}): ClickLog {
     },
   }
 }
+
+// ── Registry ─────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+const dataset = definer<DatasetInfo>('dataset', 'data/synthetic')
+
+dataset(
+  {
+    key: 'zipfCatalogue',
+    name: 'Zipf catalogue',
+    summary: 'Item popularity following a Zipf law, with interactions drawn from it.',
+    task: 'recommendation',
+    output: 'catalogue',
+    knobs: space({
+      items: int(1, 100000, { default: 1000 }),
+      exponent: real(0, 3, { default: 1 }),
+      n: int(1, 1000000, { default: 10000 }),
+    }),
+    truth: false,
+    random: true,
+  },
+  zipfCatalogue,
+)
+
+dataset(
+  {
+    key: 'ratings',
+    name: 'Low-rank ratings',
+    summary: 'A partly observed user × item rating matrix from a low-rank taste model, rounded to a 1–5 scale.',
+    task: 'recommendation',
+    output: 'ratings',
+    knobs: space({
+      users: int(1, 500, { default: 12 }),
+      items: int(1, 500, { default: 16 }),
+      rank: int(1, 10, { default: 2 }),
+      observed: real(0.01, 1, { default: 0.45 }),
+      testShare: real(0, 0.9, { default: 0.25 }),
+      noise: real(0, 3, { default: 0.3 }),
+    }),
+    truth: false,
+    random: true,
+    notes: ['alternating-least-squares'],
+  },
+  ratings,
+)
+
+dataset(
+  {
+    key: 'clickLog',
+    name: 'Click log',
+    summary: 'Logged rankings and clicks under a position-bias or cascade click model.',
+    task: 'recommendation',
+    output: 'clicks',
+    knobs: space({
+      sessions: int(1, 100000, { default: 200 }),
+      model: oneOf(['position', 'cascade']),
+      eta: real(0, 5, { default: 1 }),
+      rankerNoise: real(0, 2, { default: 0.1 }),
+    }),
+    truth: false,
+    random: true,
+    notes: ['click-models'],
+  },
+  clickLog,
+)

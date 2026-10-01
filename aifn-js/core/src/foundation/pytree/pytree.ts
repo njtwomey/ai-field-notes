@@ -13,7 +13,17 @@
  * - A `TreeDef` is plain data (structured-cloneable), so a structure can cross to a worker and be rebuilt there.
  */
 
-import { fromData, isTensor, isTraced, reshape, toFlat, unwrap, zeros, type Tensor } from 'aifn/foundation/tensor'
+import {
+  avalOf,
+  fromData,
+  isTensor,
+  isTraced,
+  reshape,
+  toFlat,
+  unwrap,
+  zeros,
+  type Tensor,
+} from 'aifn/foundation/tensor'
 import type { Raw, Scalar, Shape, Size, Value } from 'aifn/foundation/contracts'
 import { ShapeError } from 'aifn/foundation/errors'
 
@@ -161,17 +171,14 @@ export function treeMap<T, V extends Value = LeafValue>(tree: T, f: (leaf: V, pa
 /** A tree of zeros with the structure of `tree`: 0 for a number leaf, `zeros(shape)` for a tensor (or traced) leaf. */
 export function zerosLike<T>(tree: T): T {
   return treeMap<T, Value>(tree, (leaf) => {
-    const v = unwrap(leaf)
-    return typeof v === 'number' ? 0 : zeros(v.shape)
+    const aval = avalOf(leaf)
+    return aval.number ? 0 : zeros(aval.shape)
   })
 }
 
 /** The number of scalar entries in a tree's leaves (a number counts 1, a tensor its size). */
 export function countParams(tree: unknown): Size {
-  return treeFlatten(tree).leaves.reduce<number>((n, leaf) => {
-    const v = unwrap(leaf)
-    return n + (typeof v === 'number' ? 1 : v.shape.reduce((a, b) => a * b, 1))
-  }, 0)
+  return treeFlatten(tree).leaves.reduce<number>((n, leaf) => n + avalOf(leaf).shape.reduce((a, b) => a * b, 1), 0)
 }
 
 /** A tree read as one flat vector, and the map back (JAX's `ravel_pytree`). */

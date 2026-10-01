@@ -7,7 +7,7 @@
 
 import { valueAndGrad } from 'aifn/foundation/autodiff'
 import type { Stream } from 'aifn/foundation/random'
-import { dense, isTensor, toFlat, type Tensor } from 'aifn/foundation/tensor'
+import { dense, isTensor, isTraced, toFlat, type Tensor } from 'aifn/foundation/tensor'
 import type {
   Evaluation,
   Objective,
@@ -44,6 +44,8 @@ export function stopping(options: StoppingOptions): Required<StoppingOptions> {
 
 const scalarOf = (v: unknown, where: string): Scalar => {
   if (typeof v === 'number') return v
+  // A traced value (an objective evaluated inside a transform, e.g. under `unrolled`) passes through.
+  if (isTraced(v)) return v as unknown as Scalar
   if (isTensor(v) && v.shape.reduce((a, b) => a * b, 1) === 1) return toFlat(v)[0]
   throw new Error(`${where}: the objective must return a scalar`)
 }

@@ -1,8 +1,3 @@
-import { softplus } from 'aifn/numerics/special'
-import { linspace, toFlat } from 'aifn/foundation/tensor'
-import { Figure } from '@lab/layout'
-import { XYChart } from '@lab/viz'
-
 import type { Specimen } from '../../specimen'
 import {
   DerivativeKernelsSpecimen,
@@ -10,10 +5,9 @@ import {
   IncompleteGammaBetaSpecimen,
   NormalTailSpecimen,
   SoftmaxSpecimen,
+  SoftplusSpecimen,
   TruncatedMomentsSpecimen,
 } from './_special/figures'
-
-const xs = linspace(-10, 10, 201)
 
 export const specimens: Specimen[] = [
   {
@@ -21,21 +15,13 @@ export const specimens: Specimen[] = [
     title: 'softplus',
     description: 'log(1 + eˣ), computed without overflow for large |x|.',
     tags: ['stable forms'],
-    render: () => (
-      <Figure title="softplus(x)">
-        <XYChart
-          xLabel="x"
-          yLabel="softplus(x)"
-          series={[{ name: 'softplus', type: 'line', x: toFlat(xs), y: toFlat(softplus(xs)) }]}
-        />
-      </Figure>
-    ),
+    render: () => <SoftplusSpecimen />,
   },
   {
     module: 'numerics/special',
     title: 'Normal cdf in the far tail',
     description:
-      'log₁₀ Φ(z) to z = −40: normalLogCdf never underflows and normalCdf keeps relative accuracy to its underflow near −37.5, while the old A&S 7.1.26 form is noise below about −5.',
+      'log₁₀ Φ(z) to z = −40: normalLogCdf never underflows and normalCdf keeps relative accuracy to its underflow near −37.5, while the old A&S 7.1.26 form loses relative accuracy in the tail.',
     tags: ['normal', 'erfc', 'tail accuracy', 'log cdf'],
     render: () => <NormalTailSpecimen />,
   },

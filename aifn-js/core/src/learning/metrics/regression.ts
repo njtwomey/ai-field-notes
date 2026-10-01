@@ -34,6 +34,7 @@ function meanLoss(yTrue: Data, yPred: Data, o: RegressionOptions, what: string, 
 const errorInfo = (key: string, name: string, note: string) =>
   ({
     key,
+    stability: 'stable',
     name,
     inputs: 'values',
     direction: 'lower',
@@ -126,6 +127,7 @@ function sums(yTrue: Data, yPred: Data, o: RegressionOptions, what: string) {
 export const r2Score = defineMetric(
   {
     key: 'r2Score',
+    stability: 'stable',
     name: 'Coefficient of determination R²',
     inputs: 'values',
     direction: 'higher',
@@ -143,6 +145,7 @@ export const r2Score = defineMetric(
 export const explainedVariance = defineMetric(
   {
     key: 'explainedVariance',
+    stability: 'stable',
     name: 'Explained variance',
     inputs: 'values',
     direction: 'higher',
@@ -160,6 +163,7 @@ export const explainedVariance = defineMetric(
 export const adjustedR2Score = defineMetric(
   {
     key: 'adjustedR2Score',
+    stability: 'stable',
     name: 'Adjusted R²',
     inputs: 'values',
     direction: 'higher',

@@ -25,9 +25,10 @@ const leaves = (prefix: string, list: readonly AppNode[]): string[] =>
       : [`${prefix}/${n.group}`, ...leaves(`${prefix}/${n.group}`, n.children)],
   )
 
-// TODO(phase 1): resolve each (consolidation §1.3 and §10) and remove it from this list.
+// Names allowed to collide (none: every collision was resolved in phase 1).
 const ALLOWED: readonly string[] = []
 
+// Importing every module of both packages takes several seconds when it runs alongside the rest of the suite.
 it('no two aifn modules export different values under one name', async () => {
   const modules = [
     // Every node: family and group indexes hold shared layers (and re-export their children's values unchanged).
@@ -61,4 +62,4 @@ it('no two aifn modules export different values under one name', async () => {
     ALLOWED.filter((n) => !names.includes(n)),
     'resolved collisions to remove from ALLOWED',
   ).toEqual([])
-})
+}, 60_000)

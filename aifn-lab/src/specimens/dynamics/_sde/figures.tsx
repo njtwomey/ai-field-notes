@@ -14,11 +14,11 @@ import {
 import { histogram } from 'aifn/probability/stats'
 import { mul, sub, toFlat, toRows } from 'aifn/foundation/tensor'
 import { run, trace, type Algorithm } from 'aifn/foundation/trace'
-import { useMemo, useState } from 'react'
-import { Player, Select, Slider, Switch, usePlayhead } from '@lab/controls'
-import { ControlRow, Figure } from '@lab/layout'
-import { histogramBars } from '@lab/views'
-import { Panel, Readout, Subplots, XYChart, formatNumber, type XYSeries } from '@lab/viz'
+import { useMemo } from 'react'
+import { Player, usePlayhead } from '@lab/controls'
+import { Figure } from '@lab/layout'
+import { choice, row, slider, toggle, useComputed, useFigureState } from '@lab/state'
+import { Curve, Histogram, Plot, Plots, Points, Readout, formatNumber, useAxis } from '@lab/viz'
 
 const fmt = (v: number) => formatNumber(v)
 
@@ -80,51 +80,53 @@ const SCHEMES: {
   { value: 'milstein', label: 'Milstein', make: milstein },
   { value: 'stochastic-runge-kutta', label: 'stochastic Runge–Kutta', make: stochasticRungeKutta },
 ]
-const COUNTS = [10, 50, 200, 1000, 3000].map((n) => ({ value: String(n), label: `${n} paths` }))
+const COUNTS = [10, 50, 200, 1000, 3000].map((n) => ({ value: n, label: `${n} paths` }))
 
-const NONE: XYSeries[] = []
 const BINS = 40
 const DRAWN = 300
 
-/** A histogram as a sideways step outline: x is the density, y runs through the bin edges. */
-function sidewaysHistogram(values: ArrayLike<number>, range: [number, number]) {
-  const h = histogramBars(histogram(Array.from(values), { bins: BINS, range }))
-  const e = h.edges
-  const x: number[] = [0]
-  const y: number[] = [e[0]]
-  for (let i = 0; i < BINS; i++) {
-    x.push(h.density[i], h.density[i])
-    y.push(e[i], e[i + 1])
-  }
-  x.push(0)
-  y.push(e[BINS])
-  return { x, y }
-}
-
 export function PathCloudSpecimen() {
-  const [which, setWhich] = useState('double-well')
-  const [scheme, setScheme] = useState<SchemeName>('euler-maruyama')
-  const [count, setCount] = useState('200')
-  const [h, setH] = useState(0.02)
-  const [showDensity, setShowDensity] = useState(true)
+  const state = useFigureState({
+    process: row('1 · process', {
+      which: choice(
+        PROCESSES.map(({ value, label }) => ({ value, label })),
+        'double-well',
+        { label: 'SDE' },
+      ),
+    }),
+    simulation: row('2 · simulation', {
+      scheme: choice(
+        SCHEMES.map(({ value, label }) => ({ value, label })),
+        'euler-maruyama',
+        { label: 'scheme' },
+      ),
+      n: choice(COUNTS, 200, { label: 'paths' }),
+      h: slider(0.002, 0.2, 0.02, { label: 'step h', step: 0.002 }),
+    }),
+    reveal: row('3 · reveal', { showDensity: toggle(true, 'Fokker–Planck density') }),
+  })
+  const which = state.process.which
+  const scheme: SchemeName = state.simulation.scheme
+  const { n, h } = state.simulation
+  const showDensity = state.reveal.showDensity
   const proc = PROCESSES.find((p) => p.value === which)!
   const make = SCHEMES.find((s) => s.value === scheme)!.make
-  const n = Number(count)
-  const tr = useMemo(
-    () =>
-      trace(make(proc.sde, { stepSize: h, tEnd: proc.tEnd }), { x0: proc.x0, paths: n }, 100_000, {
+  // Thousands of paths at small h take longer than a frame: a slider drag reruns on release.
+  const sim = useComputed(
+    () => {
+      const tr = trace(make(proc.sde, { stepSize: h, tEnd: proc.tEnd }), { x0: proc.x0, paths: n }, 100_000, {
         stream: stream('path-cloud'),
         every: Math.max(1, Math.round(proc.tEnd / h / 150)),
         stopOnNonFinite: false,
-      }),
+      })
+      // The paths as rows per kept step.
+      const { times, values } = paths(tr)
+      return { tr, cloud: { t: toFlat(times), rows: toRows(values) } }
+    },
     [make, proc, h, n],
+    { mode: 'release' },
   )
-  // The paths as rows per kept step, and the sideways histogram of the cloud at every kept step.
-  const cloud = useMemo(() => {
-    const { times, values } = paths(tr)
-    const rows = toRows(values)
-    return { t: toFlat(times), rows, hist: rows.map((r) => sidewaysHistogram(r, proc.range)) }
-  }, [tr, proc])
+  const { tr, cloud } = sim.value
   const grid = useMemo(() => ({ a: proc.range[0], b: proc.range[1], n: 161 }), [proc])
   const fp = useMemo(() => {
     if (!showDensity) return null
@@ -153,16 +155,10 @@ export function PathCloudSpecimen() {
       return j
     })
   }, [fp, cloud])
-  // The density axis: 1.2 × the larger peak at the final time, so the narrow start is clipped.
-  const densityTop = useMemo(() => {
-    const hist = cloud.hist.at(-1)!
-    const peak = Math.max(...hist.x, ...(fp ? fp.u.at(-1)! : []))
-    return 1.2 * (Number.isFinite(peak) && peak > 0 ? peak : 1)
-  }, [cloud, fp])
 
   const [at, setAt] = usePlayhead(cloud.t.length)
   const shown = Math.min(n, DRAWN)
-  const growing = useMemo((): XYSeries[] => {
+  const growing = useMemo(() => {
     const x: number[] = []
     const y: number[] = []
     for (let i = 0; i < shown; i++) {
@@ -174,78 +170,60 @@ export function PathCloudSpecimen() {
       y.push(NaN)
     }
     const now = cloud.rows[at].slice(0, shown)
-    return [
-      { name: 'paths', type: 'line', thin: true, slot: 0, x, y },
-      { name: 'now', type: 'scatter', slot: 0, x: now.map(() => cloud.t[at]), y: now },
-    ]
+    return { x, y, nowX: now.map(() => cloud.t[at]), nowY: now }
   }, [cloud, at, shown])
-  const side: XYSeries[] = [
-    { name: `histogram of X(t)`, type: 'line', slot: 0, ...cloud.hist[at] },
-    ...(fp && fpAt
-      ? [{ name: 'Fokker–Planck density', type: 'line' as const, slot: 1, x: fp.u[fpAt[at]], y: fp.x }]
-      : []),
-  ]
   const now = tr.steps[at]
   const values = cloud.rows[at]
   const mean = values.reduce((a, v) => a + v, 0) / values.length
   const sd = Math.sqrt(values.reduce((a, v) => a + (v - mean) ** 2, 0) / values.length)
+  const t = useAxis({ label: 't', range: [0, proc.tEnd] })
+  const xAxis = useAxis({ label: 'X', range: proc.range })
+  // The density axis: 1.2 × the larger peak at the final time, so the narrow start is clipped.
+  const densityTop = useMemo(() => {
+    const last = toFlat(histogram(Array.from(cloud.rows.at(-1)!), { bins: BINS, range: proc.range }).density)
+    const peak = Math.max(...last, ...(fp ? fp.u.at(-1)! : []))
+    return 1.2 * (Number.isFinite(peak) && peak > 0 ? peak : 1)
+  }, [cloud, fp, proc])
+  const dens = useAxis({ label: 'density', range: [0, densityTop] })
   return (
     <Figure
       title="Path clouds and their density"
-      description="Many sample paths of an SDE drawn thin show its law spreading in time; the histogram of their values at each time matches the density from the Fokker–Planck equation."
+      purpose="Many sample paths of an SDE drawn thin show its law spreading in time; the histogram of their values at each time matches the density from the Fokker–Planck equation."
       defaultSize="L"
+      state={state}
       controls={
-        <>
-          <ControlRow label="1 · process">
-            <Select label="SDE" value={which} onChange={setWhich} options={PROCESSES} />
-          </ControlRow>
-          <ControlRow label="2 · simulation">
-            <Select label="scheme" value={scheme} onChange={setScheme} options={SCHEMES} />
-            <Select label="paths" value={count} onChange={setCount} options={COUNTS} />
-            <Slider label="step h" value={h} min={0.002} max={0.2} step={0.002} onChange={setH} />
-          </ControlRow>
-          <ControlRow label="3 · reveal">
-            <Switch label="Fokker–Planck density" checked={showDensity} onChange={setShowDensity} />
-          </ControlRow>
-          <ControlRow label="4 · time">
-            <Player
-              className="col-span-full"
-              value={at}
-              onChange={setAt}
-              count={cloud.t.length}
-              duration={5}
-              label="t"
-              format={(i) => fmt(cloud.t[i])}
-            />
-          </ControlRow>
-        </>
+        <Player
+          className="col-span-full"
+          value={at}
+          onChange={setAt}
+          count={cloud.t.length}
+          duration={5}
+          label="4 · time t"
+          format={(i) => fmt(cloud.t[i])}
+        />
       }
-      readouts={
-        <>
-          <Readout label="steps so far" value={now.t} />
-          <Readout label="mean, sd of X(t)" value={`${fmt(mean)}, ${fmt(sd)}`} />
-          <Readout label="non-finite paths" value={now.nonFinite} />
-          {fp && fpAt && <Readout label="density mass" value={fmt(fp.mass[fpAt[at]])} />}
-        </>
-      }
+      readouts={{
+        'at t': (
+          <>
+            <Readout label="steps so far" value={now.t} />
+            <Readout label="mean, sd of X(t)" value={`${fmt(mean)}, ${fmt(sd)}`} />
+            <Readout label="non-finite paths" value={now.nonFinite} />
+            {fp && fpAt && <Readout label="density mass" value={fmt(fp.mass[fpAt[at]])} />}
+          </>
+        ),
+      }}
       caption="Play to grow the paths from x₀. Left: up to 300 of the paths, each thin, drawn up to t, with their current values marked. Paths share keyed streams, so raising the count adds paths without changing the ones drawn. Right, on the same X axis: the histogram of all the paths' values at t, and the density at t from aifn/pde's conservative Fokker–Planck solver started from a narrow bump at x₀. The density axis is set by the final time, so the narrow start is clipped. In the double well the cloud splits between the two wells at ±1."
     >
-      <Subplots cols={2} widthRatios={[2, 1]} sharey>
-        <Panel>
-          <XYChart
-            series={NONE}
-            live={growing}
-            xLabel="t"
-            yLabel="X"
-            xRange={[0, proc.tEnd]}
-            yRange={proc.range}
-            legend={false}
-          />
-        </Panel>
-        <Panel>
-          <XYChart series={NONE} live={side} xLabel="density" yLabel="X" xRange={[0, densityTop]} yRange={proc.range} />
-        </Panel>
-      </Subplots>
+      <Plots cols={2} widths={[2, 1]}>
+        <Plot x={t} y={xAxis} legend={false}>
+          <Curve name="paths" x={growing.x} y={growing.y} slot={0} thin silent live stale={sim.stale} />
+          <Points name="now" x={growing.nowX} y={growing.nowY} slot={0} thin live />
+        </Plot>
+        <Plot x={dens} y={xAxis}>
+          <Histogram name="histogram of X(t)" values={values} bins={BINS} range={proc.range} orient="y" slot={0} />
+          {fp && fpAt && <Curve name="Fokker–Planck density" x={fp.u[fpAt[at]]} y={fp.x} slot={1} />}
+        </Plot>
+      </Plots>
     </Figure>
   )
 }
@@ -256,72 +234,69 @@ export function PathCloudSpecimen() {
 const STEPS = [0.2, 0.1, 0.05, 0.025, 0.0125]
 
 export function ConvergenceSpecimen() {
-  const [sigma, setSigma] = useState(0.8)
-  const results = useMemo(() => {
-    const gbm = geometricBrownianMotion({ mu: 1, sigma })
-    const T = 1
-    const opts = { x0: 1, paths: 3000 }
-    return SCHEMES.map((sch, slot) => {
-      const strong: number[] = []
-      const weak: number[] = []
-      for (const h of STEPS) {
-        const approx = toFlat(run(sch.make(gbm.sde, { stepSize: h, tEnd: T }), opts, 1e5, { stream: stream('conv') }).x)
-        const exact = toFlat(run(gbm.exact({ stepSize: h, tEnd: T }), opts, 1e5, { stream: stream('conv') }).x)
-        strong.push(approx.reduce((a, v, i) => a + Math.abs(v - exact[i]), 0) / approx.length)
-        // The exact paths share the scheme's increments, so their mean cancels most of the Monte Carlo noise
-        // (a control variate): E[X_h(1)] − E[X(1)] ≈ mean(X_h(1) − X(1)).
-        weak.push(Math.abs(approx.reduce((a, v, i) => a + v - exact[i], 0) / approx.length))
-      }
-      return { ...sch, slot, strong, weak }
-    })
-  }, [sigma])
-  const ref = (order: number, c: number) => STEPS.map((h) => c * h ** order)
-  const strongSeries: XYSeries[] = [
-    ...results.map(({ label, slot, strong }) => ({
-      name: label,
-      slot,
-      type: 'line' as const,
-      showPoints: true,
-      x: STEPS,
-      y: strong,
-    })),
-    {
-      name: 'slope ½',
-      type: 'line',
-      dashed: true,
-      muted: true,
-      x: STEPS,
-      y: ref(0.5, results[0].strong[0] / Math.sqrt(STEPS[0])),
+  const state = useFigureState({
+    process: row('1 · process', { sigma: slider(0.1, 1.5, 0.8, { label: 'volatility σ', step: 0.05 }) }),
+  })
+  const { sigma } = state.process
+  // 3 schemes × 5 step sizes × 3000 paths: rerun on release.
+  const computed = useComputed(
+    () => {
+      const gbm = geometricBrownianMotion({ mu: 1, sigma })
+      const T = 1
+      const opts = { x0: 1, paths: 3000 }
+      return SCHEMES.map((sch, slot) => {
+        const strong: number[] = []
+        const weak: number[] = []
+        for (const h of STEPS) {
+          const approx = toFlat(
+            run(sch.make(gbm.sde, { stepSize: h, tEnd: T }), opts, 1e5, { stream: stream('conv') }).x,
+          )
+          const exact = toFlat(run(gbm.exact({ stepSize: h, tEnd: T }), opts, 1e5, { stream: stream('conv') }).x)
+          strong.push(approx.reduce((a, v, i) => a + Math.abs(v - exact[i]), 0) / approx.length)
+          // The exact paths share the scheme's increments, so their mean cancels most of the Monte Carlo noise
+          // (a control variate): E[X_h(1)] − E[X(1)] ≈ mean(X_h(1) − X(1)).
+          weak.push(Math.abs(approx.reduce((a, v, i) => a + v - exact[i], 0) / approx.length))
+        }
+        return { ...sch, slot, strong, weak }
+      })
     },
-    { name: 'slope 1', type: 'line', dashed: true, muted: true, x: STEPS, y: ref(1, results[1].strong[0] / STEPS[0]) },
-  ]
-  const weakSeries: XYSeries[] = results.map(({ label, slot, weak }) => ({
-    name: label,
-    slot,
-    type: 'line',
-    showPoints: true,
-    x: STEPS,
-    y: weak,
-  }))
+    [sigma],
+    { mode: 'release' },
+  )
+  const results = computed.value
+  const ref = (order: number, c: number) => STEPS.map((h) => c * h ** order)
+  const half = ref(0.5, results[0].strong[0] / Math.sqrt(STEPS[0]))
+  const one = ref(1, results[1].strong[0] / STEPS[0])
+  const hx = useAxis({ label: 'h', log: true })
+  const se = useAxis({ label: 'strong error', log: true })
+  const we = useAxis({ label: 'weak error', log: true })
   const slope = (y: number[]) => Math.log(y[0] / y[y.length - 1]) / Math.log(STEPS[0] / STEPS[STEPS.length - 1])
   return (
     <Figure
       title="Strong and weak orders of convergence"
-      description="Euler–Maruyama's paths converge at order ½ in h but its means at order 1; Milstein's Itô correction and Platen's derivative-free scheme raise the pathwise order to 1."
-      controls={<Slider label="volatility σ" value={sigma} min={0.1} max={1.5} step={0.05} onChange={setSigma} />}
-      readouts={results.map(({ label, strong, weak }) => (
-        <Readout key={label} label={label} value={`strong ${fmt(slope(strong))}, weak ${fmt(slope(weak))}`} />
-      ))}
+      purpose="Euler–Maruyama's paths converge at order ½ in h but its means at order 1; Milstein's Itô correction and Platen's derivative-free scheme raise the pathwise order to 1."
+      state={state}
+      readouts={{
+        'fitted slopes': results.map(({ label, strong, weak }) => (
+          <Readout key={label} label={label} value={`strong ${fmt(slope(strong))}, weak ${fmt(slope(weak))}`} />
+        )),
+      }}
       caption="Geometric Brownian motion dX = X dt + σX dW on [0, 1], 3000 paths. Strong error: mean |X_h(1) − X(1)| against the exact solution driven by the same Brownian increments. Weak error: |mean(X_h(1) − X(1))| over the same coupled paths, which estimates the bias E[X_h(1)] − e¹ with far less Monte Carlo noise than comparing the mean with e¹."
     >
-      <Subplots cols={2}>
-        <Panel>
-          <XYChart series={strongSeries} xLog yLog xLabel="h" yLabel="strong error" />
-        </Panel>
-        <Panel>
-          <XYChart series={weakSeries} xLog yLog xLabel="h" yLabel="weak error" />
-        </Panel>
-      </Subplots>
+      <Plots cols={2} hoverGroup>
+        <Plot x={hx} y={se}>
+          {results.map(({ label, slot, strong }) => (
+            <Curve key={label} name={label} x={STEPS} y={strong} slot={slot} showPoints stale={computed.stale} />
+          ))}
+          <Curve name="slope ½" x={STEPS} y={half} dashed muted />
+          <Curve name="slope 1" x={STEPS} y={one} dashed muted />
+        </Plot>
+        <Plot x={hx} y={we}>
+          {results.map(({ label, slot, weak }) => (
+            <Curve key={label} name={label} x={STEPS} y={weak} slot={slot} showPoints stale={computed.stale} />
+          ))}
+        </Plot>
+      </Plots>
     </Figure>
   )
 }

@@ -3,7 +3,21 @@ import { normalCdf } from 'aifn/numerics/special'
 import { useMemo, useState } from 'react'
 import { NumberField, Slider, Switch, useParam } from '@lab/controls'
 import { Figure, Tex } from '@lab/layout'
-import { formatNumber, Readout, XYChart, type Handle, type Segment, type Vec2, type XYSeries } from '@lab/viz'
+import {
+  Area,
+  Bars,
+  Curve,
+  formatNumber,
+  Handle,
+  Plot,
+  Points,
+  Readout,
+  Segments,
+  useAxis,
+  Vectors,
+  type SegmentsProps,
+  type Vec2,
+} from '@lab/viz'
 
 const grid = (lo: number, hi: number, n: number) => Array.from({ length: n }, (_, i) => lo + ((hi - lo) * i) / (n - 1))
 
@@ -19,17 +33,16 @@ export function DerivativeFigure() {
     const x = grid(-4, 4, 401)
     const fd = x.map((v) => (f(v + h) - f(v - h)) / (2 * h))
     const exact = x.map(df)
-    const series: XYSeries[] = [
-      { name: 'f(x)', type: 'line', x, y: x.map(f), slot: 0 },
-      { name: 'f′(x), exact', type: 'line', x, y: exact, slot: 1 },
-      { name: 'central difference', type: 'line', x, y: fd, slot: 2, dashed: true },
-    ]
+    const series = { x, f: x.map(f), exact, fd }
     return { series, worst: Math.max(...exact.map((v, i) => Math.abs(v - fd[i]))) }
   }, [omega.value, width.value, logH.value])
+  const xAxis = useAxis({ label: 'x' })
+  const yAxis = useAxis({ label: 'value' })
   return (
     <Figure
       title="Derivatives: hover to read every curve"
-      description={
+      // TODO(5c): purpose taken from the description
+      purpose={
         <>
           <Tex>{String.raw`f(x) = \sin(\omega x)\,e^{-x^2/2s^2}`}</Tex>, its exact derivative and a central difference
           with step <Tex>h</Tex>.
@@ -46,10 +59,16 @@ export function DerivativeFigure() {
       readouts={<Readout label="max |f′ − difference|" value={formatNumber(worst)} />}
       caption="Hover the chart: a pointer line follows the cursor, each curve's nearest point is marked, and the tooltip and the readout below list all three values at that x. Raise h to watch the difference drift from the exact derivative."
     >
-      <XYChart series={series} xLabel="x" yLabel="value" />
+      <Plot x={xAxis} y={yAxis}>
+        <Curve name="f(x)" x={series.x} y={series.f} slot={0} />
+        <Curve name="f′(x), exact" x={series.x} y={series.exact} slot={1} />
+        <Curve name="central difference" x={series.x} y={series.fd} slot={2} dashed />
+      </Plot>
     </Figure>
   )
 }
+
+const CLUSTERS = ['cluster 1', 'cluster 2', 'cluster 3']
 
 /** Three seeded clusters; the centroids are draggable handles, and points take the colour of their nearest centroid. */
 export function ClusterFigure() {
@@ -78,7 +97,7 @@ export function ClusterFigure() {
     })
     return { x, y }
   }, [seed, spread.value])
-  const { series, wcss } = useMemo(() => {
+  const { group, wcss } = useMemo(() => {
     const nearest = points.x.map((px, i) => {
       const d = centroids.map(([cx, cy]) => (px - cx) ** 2 + (points.y[i] - cy) ** 2)
       const k = d.indexOf(Math.min(...d))
@@ -86,31 +105,15 @@ export function ClusterFigure() {
     })
     const group = nearest.map((n) => n.k)
     const wcss = nearest.reduce((sum, n) => sum + n.d, 0)
-    const series: XYSeries[] = [
-      { name: 'points', type: 'scatter', ...points, group, groupNames: ['cluster 1', 'cluster 2', 'cluster 3'] },
-      {
-        name: 'centroids',
-        type: 'scatter',
-        x: centroids.map((c) => c[0]),
-        y: centroids.map((c) => c[1]),
-        emphasis: true,
-      },
-    ]
-    return { series, wcss }
+    return { group, wcss }
   }, [points, centroids])
-  const handles = useMemo(
-    (): Handle[] =>
-      centroids.map((at, k) => ({
-        kind: 'point',
-        at,
-        onDrag: (p: Vec2) => setCentroids((cs) => cs.map((c, j) => (j === k ? p : c))),
-      })),
-    [centroids],
-  )
+  const x1 = useAxis({ label: 'x₁' })
+  const x2 = useAxis({ label: 'x₂', equal: x1 })
   return (
     <Figure
       title="Scatter groups with draggable centroids"
-      description="Groups get a fixed slot and a marker shape; centroids are emphasised in ink and are handles."
+      // TODO(5c): purpose taken from the description
+      purpose="Groups get a fixed slot and a marker shape; centroids are emphasised in ink and are handles."
       controls={
         <>
           <Slider label="spread" param={spread} />
@@ -120,7 +123,17 @@ export function ClusterFigure() {
       readouts={<Readout label="within-cluster sum of squares" value={formatNumber(wcss)} />}
       caption="Drag a centroid (the nearest one within reach is grabbed): points recolour by their nearest centroid. Equal aspect: the chart keeps its frame's size and widens one axis so a unit is the same length on both."
     >
-      <XYChart series={series} xLabel="x₁" yLabel="x₂" equalAspect handles={handles} />
+      <Plot x={x1} y={x2}>
+        <Points name="points" x={points.x} y={points.y} group={group} groupNames={CLUSTERS} />
+        {centroids.map((at, k) => (
+          <Handle
+            key={k}
+            kind="point"
+            at={at}
+            onDrag={(p: Vec2) => setCentroids((cs) => cs.map((c, j) => (j === k ? p : c)))}
+          />
+        ))}
+      </Plot>
     </Figure>
   )
 }
@@ -144,21 +157,24 @@ export function HistogramFigure() {
     const x = grid(-4, 4, 321)
     const pdf = (v: number) => Math.exp((-v * v) / 2) / Math.sqrt(2 * Math.PI)
     const tail = x.filter((v) => v >= threshold.value)
-    const series: XYSeries[] = [
-      { name: 'histogram', type: 'bar', x: centres, y: counts.map((c) => c / (draws.length * width)), slot: 0 },
-      { name: 'tail P(X ≥ t)', type: 'area', x: tail, y: tail.map(pdf), slot: 1 },
-      { name: 'normal density', type: 'line', x, y: x.map(pdf), emphasis: true, dashed: true },
-    ]
+    const series = {
+      centres,
+      edges,
+      heights: counts.map((c) => c / (draws.length * width)),
+      tail,
+      tailY: tail.map(pdf),
+      x,
+      pdf: x.map(pdf),
+    }
     return { series, empirical: draws.filter((d) => d >= threshold.value).length / draws.length }
   }, [draws, threshold.value])
-  const handles = useMemo(
-    (): Handle[] => [{ kind: 'x', at: threshold.value, label: 't', onDrag: threshold.set }],
-    [threshold.value, threshold.set],
-  )
+  const xAxis = useAxis({ label: 'x', range: [-4, 4] })
+  const yAxis = useAxis({ label: 'density' })
   return (
     <Figure
       title="Histogram, density and a draggable threshold"
-      description="4000 standard normal draws (aifn/random, seeded), their histogram, the density and the tail beyond t."
+      // TODO(5c): purpose taken from the description
+      purpose="4000 standard normal draws (aifn/random, seeded), their histogram, the density and the tail beyond t."
       controls={<Slider label="threshold t" param={threshold} />}
       readouts={
         <>
@@ -168,7 +184,12 @@ export function HistogramFigure() {
       }
       caption="Drag the dashed line or use the slider: both write the same parameter. The tooltip lists the bar, the tail and the density at the hovered x."
     >
-      <XYChart series={series} xLabel="x" yLabel="density" xRange={[-4, 4]} handles={handles} />
+      <Plot x={xAxis} y={yAxis}>
+        <Bars name="histogram" x={series.centres} y={series.heights} edges={series.edges} slot={0} />
+        <Area name="tail P(X ≥ t)" x={series.tail} y={series.tailY} slot={1} />
+        <Curve name="normal density" x={series.x} y={series.pdf} emphasis dashed />
+        <Handle kind="x" at={threshold.value} label="t" onDrag={threshold.set} />
+      </Plot>
     </Figure>
   )
 }
@@ -177,24 +198,26 @@ export function HistogramFigure() {
 export function LogFigure() {
   const [xLog, setXLog] = useState(false)
   const [yLog, setYLog] = useState(true)
-  const series = useMemo((): XYSeries[] => {
+  const series = useMemo(() => {
     const t = Array.from({ length: 2000 }, (_, i) => i + 1)
     const s = stream('loss')
     return [0.002, 0.01, 0.05].map((rate, k) => {
       const c = child(s, k)
       return {
         name: `learning rate ${rate}`,
-        type: 'line',
         x: t,
         y: t.map((i) => (10 * Math.exp(-rate * i) + 1e-4 / rate) * Math.exp(0.15 * normal(c, 0, 1))),
         slot: k,
       }
     })
   }, [])
+  const xAxis = useAxis({ label: 'iteration', log: xLog })
+  const yAxis = useAxis({ label: 'loss', log: yLog })
   return (
     <Figure
       title="Log axes: zoom and pan in log space"
-      description="Three loss curves falling over several orders of magnitude."
+      // TODO(5c): purpose taken from the description
+      purpose="Three loss curves falling over several orders of magnitude."
       controls={
         <>
           <Switch label="log x" checked={xLog} onChange={setXLog} />
@@ -203,10 +226,16 @@ export function LogFigure() {
       }
       caption="Use the toolbar: per-axis pan (arrows), zoom out and in (− +), typed ranges, and for both axes zoom and fit. Pinch or Ctrl/⌘-scroll over the plot zooms about the pointer. On a log axis a zoom keeps decades proportional."
     >
-      <XYChart series={series} xLabel="iteration" yLabel="loss" xLog={xLog} yLog={yLog} />
+      <Plot x={xAxis} y={yAxis}>
+        {series.map((c) => (
+          <Curve key={c.name} name={c.name} x={c.x} y={c.y} slot={c.slot} />
+        ))}
+      </Plot>
     </Figure>
   )
 }
+
+const SIDES = ['w·x < 0', 'w·x ≥ 0']
 
 /** Arrows and segments with equal aspect: a draggable normal vector and each point's distance to its boundary. */
 export function VectorFigure() {
@@ -223,37 +252,25 @@ export function VectorFigure() {
     const norm = Math.hypot(wx, wy) || 1
     const [ux, uy] = [wx / norm, wy / norm]
     // The boundary w·x = 0 runs along (−uy, ux); each segment drops a point onto it.
-    const segments: Segment[] = points.map(([px, py]) => {
+    const segments: SegmentsProps['segments'] = points.map(([px, py]) => {
       const d = px * ux + py * uy
       return { from: [px, py], to: [px - d * ux, py - d * uy] }
     })
     const side = points.map(([px, py]) => (px * ux + py * uy >= 0 ? 1 : 0))
-    const series: XYSeries[] = [
-      {
-        name: 'boundary w·x = 0',
-        type: 'line',
-        x: [-4 * -uy, 4 * -uy],
-        y: [-4 * ux, 4 * ux],
-        muted: true,
-        dashed: true,
-      },
-      {
-        name: 'points',
-        type: 'scatter',
-        x: points.map((p) => p[0]),
-        y: points.map((p) => p[1]),
-        group: side,
-        groupNames: ['w·x < 0', 'w·x ≥ 0'],
-      },
-    ]
+    const series = {
+      boundary: { x: [-4 * -uy, 4 * -uy], y: [-4 * ux, 4 * ux] },
+      points: { x: points.map((p) => p[0]), y: points.map((p) => p[1]), group: side },
+    }
     return { series, segments, angle: (Math.atan2(wy, wx) * 180) / Math.PI }
   }, [tip, points])
-  const handles = useMemo((): Handle[] => [{ kind: 'point', at: tip, label: 'w', onDrag: setTip }], [tip])
   const vectors = useMemo(() => [{ from: [0, 0] as Vec2, to: tip, label: 'w' }], [tip])
+  const x1 = useAxis({ label: 'x₁', range: [-4, 4] })
+  const x2 = useAxis({ label: 'x₂', range: [-4, 4], equal: x1 })
   return (
     <Figure
       title="Vectors, segments and equal aspect"
-      description="A weight vector w, its boundary, and each point's perpendicular drop onto it."
+      // TODO(5c): purpose taken from the description
+      purpose="A weight vector w, its boundary, and each point's perpendicular drop onto it."
       readouts={
         <>
           <Readout label="angle of w" value={`${formatNumber(angle)}°`} />
@@ -263,20 +280,18 @@ export function VectorFigure() {
       caption="Drag the tip of w. With equal aspect the arrow stays perpendicular to the boundary whatever the frame's shape."
       defaultSize="S"
     >
-      <XYChart
-        series={series}
-        segments={segments}
-        vectors={vectors}
-        handles={handles}
-        xRange={[-4, 4]}
-        yRange={[-4, 4]}
-        equalAspect
-        xLabel="x₁"
-        yLabel="x₂"
-      />
+      <Plot x={x1} y={x2}>
+        <Curve name="boundary w·x = 0" x={series.boundary.x} y={series.boundary.y} muted dashed />
+        <Segments segments={segments} />
+        <Points name="points" {...series.points} groupNames={SIDES} />
+        <Vectors vectors={vectors} />
+        <Handle kind="point" at={tip} label="w" onDrag={setTip} />
+      </Plot>
     </Figure>
   )
 }
+
+const ORIGIN = [0]
 
 /** A vector that can run off the plot: its shaft is clipped at the edge, with a chevron in place of the arrowhead. */
 export function ClippedVectorFigure() {
@@ -293,12 +308,13 @@ export function ClippedVectorFigure() {
       { from: base, to: turned, slot: 1, label: 'v⊥' },
     ]
   }, [base, length.value, angle.value])
-  const handles = useMemo((): Handle[] => [{ kind: 'point', at: base, label: 'base', onDrag: setBase }], [base])
-  const series = useMemo((): XYSeries[] => [{ name: 'base', type: 'scatter', x: [0], y: [0], muted: true }], [])
+  const x1 = useAxis({ label: 'x₁', range: [-3, 3] })
+  const x2 = useAxis({ label: 'x₂', range: [-3, 3], equal: x1 })
   return (
     <Figure
       title="Vectors that leave the plot"
-      description="Axes fixed to [−3, 3]; lengthen the vectors or drag their base until the tips leave the box."
+      // TODO(5c): purpose taken from the description
+      purpose="Axes fixed to [−3, 3]; lengthen the vectors or drag their base until the tips leave the box."
       defaultSize="S"
       controls={
         <>
@@ -308,16 +324,11 @@ export function ClippedVectorFigure() {
       }
       caption="A tip outside the box is cut at the edge: the shaft ends there with a small chevron pointing the way the vector goes, and the label moves to that point. Zoom in (the toolbar or a pinch) to clip further; a vector wholly outside draws nothing."
     >
-      <XYChart
-        series={series}
-        vectors={vectors}
-        handles={handles}
-        xRange={[-3, 3]}
-        yRange={[-3, 3]}
-        equalAspect
-        xLabel="x₁"
-        yLabel="x₂"
-      />
+      <Plot x={x1} y={x2}>
+        <Points name="origin" x={ORIGIN} y={ORIGIN} muted />
+        <Vectors vectors={vectors} />
+        <Handle kind="point" at={base} label="base" onDrag={setBase} />
+      </Plot>
     </Figure>
   )
 }

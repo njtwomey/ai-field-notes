@@ -1,4 +1,6 @@
 import {
+  mdpEnvironment,
+  type MdpEnvironment,
   type TabularMdp,
   type CellKind,
   cellState,
@@ -7,6 +9,9 @@ import {
   type Outcome,
   GRID_ACTION_NAMES,
 } from 'aifn-applied/decisions/reinforcement-learning'
+import type { EnvironmentInfo } from 'aifn/foundation/contracts'
+import { definer } from 'aifn/foundation/registry'
+import { bool, int, oneOf, real, space } from 'aifn/foundation/space'
 
 interface GridSpec {
   name: string
@@ -213,6 +218,35 @@ export function maze(rows: readonly string[], options: MazeOptions = {}): Tabula
   })
 }
 
+/** Built-in maze layouts, top row first (`#` wall, `S` start, `G` goal, `T` trap). */
+export const MAZES: Record<'small' | 'classic' | 'traps', readonly string[]> = {
+  small: ['.....', '.###.', '.#G#.', '.#.#.', 'S....'],
+  classic: ['.....#...G', '.###.#.##.', '.#...#....', '.#.####.#.', '.#......#.', 'S..####...'],
+  traps: ['S..T....', '.#.#.##.', '.#...T..', '.####.#.', '......#G'],
+}
+
+/** Options for `mazeEnvironment`. */
+export interface MazeEnvironmentOptions extends MazeOptions {
+  /** A built-in layout or rows of text. Default `small`. */
+  layout?: keyof typeof MAZES | readonly string[]
+  /** The longest episode before truncation. Default 4 × the number of cells. */
+  horizon?: number
+}
+
+/**
+ * A maze as an `Environment` (docs/aifn-environments.md): the observation is the agent's cell index and the action one
+ * of four moves (up, right, down, left); reaching the goal ends the episode (`terminated`), and the rollout truncates it
+ * at `horizon`. Its `model` is the maze's transition table (for value iteration) and its `render` the grid.
+ */
+export function mazeEnvironment({
+  layout = 'small',
+  horizon,
+  ...options
+}: MazeEnvironmentOptions = {}): MdpEnvironment {
+  const mdp = maze(typeof layout === 'string' ? MAZES[layout] : layout, options)
+  return mdpEnvironment(mdp, horizon === undefined ? {} : { horizon })
+}
+
 /** The FrozenLake maps of Gymnasium. */
 export const FROZEN_LAKE_MAPS: Record<'4x4' | '8x8', readonly string[]> = {
   '4x4': ['SFFF', 'FHFH', 'FFFH', 'HFFG'],
@@ -258,3 +292,92 @@ export function frozenLake({
     terminalKinds: ['goal', 'hole'],
   })
 }
+
+// ── Registry ─────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+const environment = definer<EnvironmentInfo>('environment', 'data/environments')
+
+environment(
+  {
+    key: 'gridworld',
+    name: 'Gridworld',
+    summary: 'A grid of cells with walls and terminal rewards, where moves slip sideways with probability `noise`.',
+    family: 'mdp',
+    params: space({
+      width: int(2, 20, { default: 4 }),
+      height: int(2, 20, { default: 3 }),
+      noise: real(0, 1, { default: 0.2 }),
+      stepReward: real(-1, 1, { default: 0 }),
+      gamma: real(0, 1, { default: 0.9, label: 'γ' }),
+    }),
+    notes: ['markov-decision-process', 'value-iteration', 'policy-iteration'],
+  },
+  gridworld,
+)
+
+environment(
+  {
+    key: 'cliffWalking',
+    name: 'Cliff walking',
+    summary: 'A start and a goal along the edge of a cliff that sends the agent back to the start at a large cost.',
+    family: 'mdp',
+    params: space({
+      width: int(3, 30, { default: 12 }),
+      height: int(2, 20, { default: 4 }),
+      gamma: real(0, 1, { default: 1, label: 'γ' }),
+    }),
+    notes: ['q-learning', 'sarsa'],
+  },
+  cliffWalking,
+)
+
+environment(
+  {
+    key: 'maze',
+    name: 'Maze',
+    summary:
+      'A maze drawn as rows of characters (start, goal, walls, traps), with optional slip; the rows are required.',
+    family: 'mdp',
+    params: space({ slip: real(0, 1, { default: 0 }), gamma: real(0, 1, { default: 0.95, label: 'γ' }) }),
+    notes: ['solving-a-maze'],
+  },
+  maze,
+)
+
+environment(
+  {
+    key: 'mazeEnvironment',
+    name: 'Maze environment',
+    summary:
+      'A maze on the environment protocol: cell-index observations, four moves, a tabular model and a grid render.',
+    family: 'mdp',
+    params: space({
+      layout: oneOf(['small', 'classic', 'traps']),
+      slip: real(0, 1, { default: 0 }),
+      gamma: real(0, 1, { default: 0.95, label: 'γ' }),
+      horizon: int(1, 10000, { default: 100 }),
+    }),
+    observation: 'discrete',
+    action: 'discrete',
+    capabilities: ['model', 'render'],
+    notes: ['solving-a-maze', 'q-learning'],
+  },
+  mazeEnvironment,
+)
+
+environment(
+  {
+    key: 'frozenLake',
+    name: 'FrozenLake',
+    summary:
+      'Gymnasium’s FrozenLake: cross the ice to the goal without falling through a hole, on slippery ice or not.',
+    family: 'mdp',
+    params: space({
+      map: oneOf(['4x4', '8x8']),
+      slippery: bool({ default: true }),
+      gamma: real(0, 1, { default: 0.99, label: 'γ' }),
+    }),
+    notes: ['markov-decision-process', 'value-iteration'],
+  },
+  frozenLake,
+)

@@ -7,7 +7,7 @@ export const specimens: Specimen[] = [
     title: 'Heavy-ball descent, traced',
     description:
       'A traced run of gradient descent with momentum on an ill-conditioned quadratic: scrub or play the steps, drag the step cursor on any chart, and inspect the state and the per-phase timing.',
-    tags: ['trace', 'TraceView', 'optimisation', 'profile'],
+    tags: ['trace', 'TracePanel', 'optimisation', 'profile'],
     render: () => <MomentumSpecimen />,
   },
   {

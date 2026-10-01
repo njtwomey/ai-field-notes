@@ -16,11 +16,15 @@
 
 import type { Status } from 'aifn/foundation/contracts'
 import type { Decides, Estimator, FitOptions, Fitted, Scores, Supervised, Trained } from 'aifn/learning/estimators'
+import { bernoulliPredictive, type AnyUnivariate } from 'aifn/learning/estimators'
 import { integers, permutation } from 'aifn/foundation/random'
 import { fromData, type Tensor } from 'aifn/foundation/tensor'
 import { trace, type Algorithm, type Trace } from 'aifn/foundation/trace'
 import { gram, rbf, type Kernel } from 'aifn/learning/kernels'
 import { classLabels, inputs, matrix, values } from '../util'
+import { plattScaling, type PlattScaling } from './platt'
+import { defineModel } from 'aifn/learning/estimators'
+import { bool, int, oneOf, real, space } from 'aifn/foundation/space'
 
 /** Q_ii ≤ 0 is replaced by this (LIBSVM's τ), so a degenerate pair still moves. */
 const TAU = 1e-12
@@ -305,12 +309,18 @@ export interface SupportVectorMachineModel
   readonly steps: number
   readonly converged: boolean
   readonly gap: number
+  /** With `probability`: Platt's sigmoid fitted to the training decision values (null otherwise). */
+  readonly platt: PlattScaling | null
+  /** With `probability`: the Bernoulli law of y with P(y = 1 | x) from Platt's sigmoid of f(x). */
+  readonly predictive?: (x: Tensor) => AnyUnivariate
 }
 
 /**
  * The soft-margin kernel SVM for labels 0/1 (mapped to −1/+1), solved by `smoSteps` from α = 0. `score` and `forward`
  * give the decision function f(x) = Σₜ αₜ yₜ k(xₜ, x) + b [m]; `decide` is 1 where f(x) > 0. The run is kept in
- * `training`.
+ * `training`. With `probability`, Platt scaling (`plattScaling`) is fitted to the decision values of the training
+ * rows and `predictive` gives P(y = 1 | x); LIBSVM fits it on cross-validated decision values instead, which are less
+ * optimistic than training ones.
  */
 export function supportVectorMachine(
   params: {
@@ -319,13 +329,21 @@ export function supportVectorMachine(
     tolerance?: number
     maxSteps?: number
     selection?: SmoProblem['selection']
+    probability?: boolean
   } = {},
 ): Estimator<Supervised<Tensor, Tensor>, SupportVectorMachineModel> {
-  const { C = 1, kernel = rbf({ lengthscale: 1 }), tolerance = 1e-3, maxSteps = 100000, selection } = params
+  const {
+    C = 1,
+    kernel = rbf({ lengthscale: 1 }),
+    tolerance = 1e-3,
+    maxSteps = 100000,
+    selection,
+    probability = false,
+  } = params
   if (!(C > 0)) throw new Error('supportVectorMachine: C must be positive')
   return {
     name: 'support-vector-machine',
-    params: { C, kernel, tolerance, maxSteps, selection },
+    params: { C, kernel, tolerance, maxSteps, selection, probability },
     fit({ x, y }, options: FitOptions = {}) {
       const { n, d, v } = matrix(x, 'supportVectorMachine')
       const { y: labels, k } = classLabels(y, n, 'supportVectorMachine')
@@ -369,9 +387,12 @@ export function supportVectorMachine(
         for (let r = 0; r < sv.length; r++) for (let i = 0; i < m; i++) out[i] += coef[r] * Kq[r * m + i]
         return fromData(out, [m])
       }
+      const platt = probability ? plattScaling(score(x), fromData(signs, [n])) : null
       return {
         kind: 'model',
         name: 'support-vector-machine',
+        platt,
+        ...(platt ? { predictive: (q: Tensor) => bernoulliPredictive(platt.probability(score(q))) } : {}),
         kernel,
         C,
         alpha: final.alpha,
@@ -640,3 +661,45 @@ export function linearSvm(
     },
   }
 }
+
+// ── Registry ─────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+defineModel(
+  {
+    key: 'supportVectorMachine',
+    module: 'learning/kernel-methods',
+    name: 'Support vector machine',
+    summary: 'The soft-margin kernel SVM solved by SMO (kernel default: RBF with lengthscale 1).',
+    task: 'classification',
+    capabilities: ['forward', 'decide', 'score'],
+    hyper: space({
+      C: real(1e-3, 1e3, { default: 1, scale: 'log' }),
+      tolerance: real(1e-8, 1e-1, { default: 1e-3, scale: 'log' }),
+      maxSteps: int(1, 100000, { default: 100000 }),
+      probability: bool(),
+    }),
+    notes: ['support-vector-machine', 'kernel-support-vector-machine', 'solving-support-vector-machines'],
+    cite: ['cortes1995', 'platt1998'],
+  },
+  supportVectorMachine,
+)
+
+defineModel(
+  {
+    key: 'linearSvm',
+    module: 'learning/kernel-methods',
+    name: 'Linear SVM',
+    summary: 'The soft-margin linear SVM by dual coordinate descent or Pegasos.',
+    task: 'classification',
+    capabilities: ['forward', 'decide', 'score'],
+    hyper: space({
+      C: real(1e-3, 1e3, { default: 1, scale: 'log' }),
+      method: oneOf(['dual-coordinate-descent', 'pegasos']),
+      intercept: bool({ default: true }),
+      tolerance: real(1e-10, 1e-2, { default: 1e-6, scale: 'log' }),
+    }),
+    notes: ['support-vector-machine', 'solving-support-vector-machines'],
+    cite: ['cortes1995'],
+  },
+  linearSvm,
+)

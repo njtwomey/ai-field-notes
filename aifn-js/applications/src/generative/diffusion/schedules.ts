@@ -105,6 +105,8 @@ export function betaAt(schedule: NoiseSchedule, t: number): number {
  */
 export type ForwardSde = {
   readonly kind: 'vp' | 'subVp' | 've'
+  /** The discrete schedule this SDE interpolates (`scheduleSde`), when it came from one. */
+  readonly schedule?: NoiseSchedule
   /** The drift coefficient f(t) (the drift is f(t)·x). */
   drift(t: number): number
   /** The diffusion coefficient g(t). */
@@ -166,4 +168,79 @@ export function veSde({ sigmaMin = 0.01, sigmaMax = 50 }: { sigmaMin?: number; s
     std: sigma,
     priorStd: sigmaMax,
   }
+}
+
+// ── One time axis: discrete steps and SDE time ──────────────────────────────────────────────────────────────────────
+
+/**
+ * The continuous time τ = t/T ∈ [0, 1] of discrete step t = 0 … T. Every sampler reports this axis as `tau`, so a
+ * DDPM or DDIM run on a schedule and a continuous run on `scheduleSde(schedule)` are plotted against the same time.
+ */
+export function stepTime(schedule: NoiseSchedule, t: number): number {
+  if (!Number.isInteger(t) || t < 0 || t > schedule.steps)
+    throw new RangeError(`step ${t} is not in 0 … ${schedule.steps}`)
+  return t / schedule.steps
+}
+
+/** The discrete step nearest to time τ ∈ [0, 1] (the inverse of `stepTime` on the grid). */
+export function timeStep(schedule: NoiseSchedule, tau: number): number {
+  if (!(tau >= 0 && tau <= 1)) throw new RangeError(`time ${tau} is not in [0, 1]`)
+  return Math.round(tau * schedule.steps)
+}
+
+/**
+ * The variance-preserving SDE that passes through a discrete schedule: at τ = t/T its marginal is exactly the
+ * schedule's, m(τ)² = ᾱₜ and s(τ)² = 1 − ᾱₜ, with log ᾱ linear in τ between steps. Its rate is piecewise constant,
+ * β(τ) = −T log αₜ on ((t − 1)/T, t/T], so f = −β/2 and g = √β, and β(τ)/T ≈ βₜ for small βₜ: the continuous limit
+ * of DDPM (Song et al., 2021, appendix B) taken on the schedule itself rather than on a separately parameterised
+ * β(t). DDPM, DDIM and probability-flow sampling on `scheduleSde(schedule)` therefore share one time axis and one
+ * marginal at every step.
+ */
+export function scheduleSde(schedule: NoiseSchedule): ForwardSde {
+  const T = schedule.steps
+  // logAb[t] = log ᾱₜ with logAb[0] = 0; rate[t − 1] = −T log αₜ.
+  const logAb = new Float64Array(T + 1)
+  const rate = new Float64Array(T)
+  for (let t = 1; t <= T; t++) {
+    const logAlpha = Math.log1p(-schedule.betas.data[t - 1])
+    logAb[t] = logAb[t - 1] + logAlpha
+    rate[t - 1] = -T * logAlpha
+  }
+  const cell = (tau: number) => Math.min(T, Math.max(1, Math.ceil(tau * T - 1e-12)))
+  const logAlphaBar = (tau: number) => {
+    const u = Math.min(1, Math.max(0, tau)) * T
+    const t = cell(u / T)
+    return logAb[t - 1] + (u - (t - 1)) * (logAb[t] - logAb[t - 1])
+  }
+  const beta = (tau: number) => rate[cell(tau) - 1]
+  return {
+    kind: 'vp',
+    schedule,
+    drift: (tau) => -0.5 * beta(tau),
+    diffusion: (tau) => Math.sqrt(beta(tau)),
+    meanScale: (tau) => Math.exp(0.5 * logAlphaBar(tau)),
+    std: (tau) => Math.sqrt(-Math.expm1(logAlphaBar(tau))),
+    priorStd: 1,
+  }
+}
+
+/**
+ * A discrete schedule of T steps read off a forward SDE at τ = t/T: ᾱₜ = m²/(m² + s²), the signal level at which the
+ * VP noise predictor sees the SDE's marginal (see `predictNoise`), and βₜ = 1 − ᾱₜ/ᾱₜ₋₁ with ᾱ₀ = 1. For the VP SDE
+ * ᾱₜ = m(t/T)², so `sdeSchedule(vpSde(), 1000)` is close to `linearSchedule(1000)`; `sdeSchedule(scheduleSde(s),
+ * s.steps)` gives back `s`.
+ */
+export function sdeSchedule(sde: ForwardSde, steps: number): NoiseSchedule {
+  if (!Number.isInteger(steps) || steps < 1)
+    throw new RangeError(`sdeSchedule: steps = ${steps} is not a positive integer`)
+  const betas = new Float64Array(steps)
+  let prev = 1
+  for (let t = 1; t <= steps; t++) {
+    const m = sde.meanScale(t / steps)
+    const sd = sde.std(t / steps)
+    const ab = (m * m) / (m * m + sd * sd)
+    betas[t - 1] = 1 - ab / prev
+    prev = ab
+  }
+  return scheduleFromBetas(betas, 'custom')
 }

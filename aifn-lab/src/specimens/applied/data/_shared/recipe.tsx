@@ -1,82 +1,99 @@
-import { useMemo, useState } from 'react'
+import { useMemo } from 'react'
 import {
+  datasetRegistry,
   describeRecipe,
-  flippedMask,
+  modifierRegistry,
   recipe,
-  type ClassificationBase,
-  type DatasetRecipe,
-  type MissingMechanism,
-} from 'aifn-applied/data/synthetic'
-import { type ClassificationTruth } from 'aifn-applied/data'
+  recipeBases,
+  recipeOps,
+  type ClassificationTruth,
+  type RecipeInput,
+} from 'aifn-applied/data'
+import { flippedMask } from 'aifn-applied/data/synthetic'
 import { grid2d } from 'aifn/numerics/geometry'
+import { type SpaceValues } from 'aifn/foundation/space'
 import { fromData, toFlat } from 'aifn/foundation/tensor'
-import { Button, Select, Slider, Switch } from '@lab/controls'
-import { ControlRow, Figure } from '@lab/layout'
-import { Heatmap, Panel, Readout, Subplots, XYChart, type HeatmapOverlay, type XYSeries } from '@lab/viz'
+import { Figure } from '@lab/layout'
+import { fromSpace, number, row, toggle, useFigureState, variants, type AnyValues, type ParamDefs } from '@lab/state'
+import { Contours, Plot, Plots, Points, Raster, Readout, useAxis } from '@lab/viz'
 
-// Every base is made binary here, so prevalence and the posterior P(y = 1 | x) apply to all of them.
-const BASES: Record<
-  ClassificationBase,
-  {
-    label: string
-    knob?: { label: string; range: [number, number]; value: number }
-    options?: DatasetRecipe['options']
-  }
-> = {
-  moons: { label: 'moons', knob: { label: 'noise sd', range: [0.02, 0.6], value: 0.25 } },
-  circles: { label: 'circles', knob: { label: 'noise sd', range: [0.02, 0.4], value: 0.12 } },
-  blobs: { label: 'blobs', knob: { label: 'blob sd', range: [0.2, 3], value: 1 }, options: { centers: 2 } },
-  gaussians: { label: 'Gaussians', knob: { label: 'class sd', range: [0.2, 3], value: 1 } },
-  xor: { label: 'XOR (Gaussian)', knob: { label: 'blob sd', range: [0.1, 1.2], value: 0.5 } },
-  spirals: { label: 'spirals', knob: { label: 'noise sd', range: [0.01, 0.2], value: 0.06 } },
-  rings: { label: 'rings', knob: { label: 'radial sd', range: [0.02, 0.6], value: 0.2 }, options: { radii: [1, 2] } },
-  checkerboard: { label: 'checkerboard', options: { tiles: 3 } },
-}
-
-const SEPARABLE = new Set<ClassificationBase>(['blobs', 'gaussians'])
-const MECHANISMS: { value: MissingMechanism; label: string }[] = [
-  { value: 'mcar', label: 'MCAR' },
-  { value: 'mar', label: 'MAR (on x₁)' },
-  { value: 'mnar', label: 'MNAR' },
-]
+// Every labelled point-set generator of the registry; its knobs and the modifiers' parameters come from their spaces.
+const BASES = recipeBases.filter((k) => {
+  const { random, task } = datasetRegistry[k].info
+  return random === true && (task === 'classification' || task === 'clustering')
+})
 
 const pct = (v: number) => `${Math.round(100 * v)}%`
 
-export function RecipeSpecimen() {
-  const [base, setBase] = useState<ClassificationBase>('moons')
-  const [n, setN] = useState(400)
-  const [knobs, setKnobs] = useState<Partial<Record<ClassificationBase, number>>>({})
-  const [seed, setSeed] = useState(0)
-  const [prevalence, setPrevalence] = useState(0.3)
-  const [separation, setSeparation] = useState(2.5)
-  const [labelNoise, setLabelNoise] = useState(0.05)
-  const [outliers, setOutliers] = useState(0)
-  const [nuisance, setNuisance] = useState(0)
-  const [missing, setMissing] = useState(0)
-  const [mechanism, setMechanism] = useState<MissingMechanism>('mcar')
-  const [showTruth, setShowTruth] = useState(true)
-  const b = BASES[base]
-  const knob = b.knob ? (knobs[base] ?? b.knob.value) : undefined
+/** The base generator: one case per registered generator, its knobs from the registry's space. */
+const BASE = variants(
+  Object.fromEntries(BASES.map((k) => [k, { label: k, params: fromSpace(datasetRegistry[k].info.knobs) }])),
+  {
+    shared: { seed: number(0, { min: 0, step: 1, label: 'seed' }) },
+    initial: 'moons',
+    label: '1 · base',
+    choiceLabel: 'generator',
+  },
+)
 
-  const spec = useMemo<DatasetRecipe>(
-    () => ({
-      base,
-      seed,
-      n,
-      prevalence,
-      ...(knob !== undefined && { noise: knob }),
-      ...(SEPARABLE.has(base) && { separation }),
-      ...(b.options && { options: b.options }),
-      ...(labelNoise > 0 && { labelNoise }),
-      ...(outliers > 0 && { outliers }),
-      ...(nuisance > 0 && { nuisance }),
-      ...(missing > 0 && { missing: { rate: missing, mechanism } }),
-    }),
-    [base, seed, n, prevalence, knob, separation, b, labelNoise, outliers, nuisance, missing, mechanism],
-  )
-  const data = useMemo(() => recipe(spec), [spec])
-  const truth = data.meta.truth as ClassificationTruth | undefined
+const opName = (op: string) => modifierRegistry[op].info.name.toLowerCase()
+
+/** Which modifiers apply: one revealing toggle each, in the order they are applied. */
+const MODS = row(
+  '2 · modifiers',
+  Object.fromEntries(recipeOps.map((op) => [op, toggle(op === 'withLabelNoise', opName(op))])) as ParamDefs,
+)
+
+/** The parameters of each modifier, from the registry's space: a row shown only while that modifier applies. */
+const MOD_PARAMS: ParamDefs = Object.fromEntries(
+  recipeOps
+    .map((op) => [op, fromSpace(modifierRegistry[op].info.params)] as const)
+    .filter(([, fields]) => Object.keys(fields).length > 0)
+    .map(([op, fields]) => [
+      op,
+      {
+        ...row(`2 · ${opName(op)}`, fields),
+        when: (v: AnyValues) => (v.mods as Record<string, boolean> | undefined)?.[op] === true,
+      },
+    ]),
+)
+
+const SCHEMA = {
+  base: BASE,
+  mods: MODS,
+  ...MOD_PARAMS,
+  show: row('3 · reveal', { truth: toggle(true, 'Bayes posterior and boundary') }),
+} as const
+
+/**
+ * The recipe the figure's values describe, as JSON, so the dataset is rebuilt only when a value changes, not when an
+ * object is new.
+ */
+function recipeKey(values: Readonly<Record<string, unknown>>): string {
+  const base = values.base as { key: string; values: SpaceValues }
+  const { seed, ...knobs } = base.values
+  const applied = values.mods as Record<string, boolean>
+  return JSON.stringify({
+    base: base.key,
+    seed: Number(seed),
+    knobs,
+    modifiers: recipeOps
+      .filter((op) => applied[op] === true)
+      .map((op) => ({ op, params: (values[op] ?? {}) as SpaceValues })),
+  })
+}
+
+export function RecipeSpecimen() {
+  const state = useFigureState(SCHEMA)
+  const showTruth = (state.show as { truth: boolean }).truth
+  const specKey = recipeKey(state.values as Readonly<Record<string, unknown>>)
+  const spec = JSON.parse(specKey) as RecipeInput
+  // oxlint-disable-next-line react/preserve-manual-memoization -- keyed by a string; the compiler cannot see that
+  const data = useMemo(() => recipe(JSON.parse(specKey) as RecipeInput), [specKey])
   const [rows, d] = data.x.shape
+  const classes = data.meta.labelNames?.length ?? 1 + Math.max(...toFlat(data.y!))
+  // The field shows P(y = 1 | x), which is the whole posterior only with two classes.
+  const truth = classes === 2 ? (data.meta.truth as ClassificationTruth | undefined) : undefined
 
   // Points at their complete positions (before missing values), split into the groups the chart marks.
   const view = useMemo(() => {
@@ -96,7 +113,17 @@ export function RecipeSpecimen() {
       return [lo - m, hi + m]
     }
     const range = (v: number[]) => pad(Math.min(...v), Math.max(...v))
-    return { px, py, y, shown, flips, holes, xr: range(px), yr: range(py), full }
+    const at = (idx: number[]) => ({ x: idx.map((i) => px[i]), y: idx.map((i) => py[i]) })
+    return {
+      px,
+      y,
+      shown: { ...at(shown), group: shown.map((i) => y[i]) },
+      flips: at(flips),
+      holes: at(holes),
+      xr: range(px),
+      yr: range(py),
+      full,
+    }
   }, [data, rows, d])
 
   const field = useMemo(() => grid2d(view.xr, view.yr, 70), [view])
@@ -115,170 +142,98 @@ export function RecipeSpecimen() {
   }, [truth, showTruth, field, d])
 
   const names = useMemo(() => data.meta.labelNames ?? ['class 0', 'class 1'], [data])
-  const at = (idx: number[]) => ({ x: idx.map((i) => view.px[i]), y: idx.map((i) => view.py[i]) })
-  const overlay: HeatmapOverlay[] = [
-    { name: 'points', type: 'scatter', ...at(view.shown), group: view.shown.map((i) => view.y[i]), groupNames: names },
-    ...(view.flips.length
-      ? [{ name: 'label flipped', type: 'scatter' as const, ...at(view.flips), emphasis: true }]
-      : []),
-    ...(view.holes.length ? [{ name: 'x₁ or x₂ missing', type: 'scatter' as const, ...at(view.holes), slot: 4 }] : []),
-  ]
-  const axisKey = `${base}:${n}:${seed}:${outliers > 0}`
+  const nuisanceMod = spec.modifiers?.find((m) => m.op === 'withNuisanceFeatures')
+  const nuisance = nuisanceMod ? Number(nuisanceMod.params?.count ?? 0) : 0
+  const outliers = spec.modifiers?.some((m) => m.op === 'withOutliers') === true
+  const axisKey = `${spec.base}:${rows}:${spec.seed}:${outliers}`
 
   // Side panels: a nuisance feature against x₁, and the missingness mask.
-  const pair: XYSeries[] = useMemo(() => {
-    if (nuisance === 0) return []
-    const extra = view.px.map((_, i) => view.full[i * d + d - nuisance])
-    return [{ name: 'points', type: 'scatter', x: view.px, y: extra, group: view.y, groupNames: names }]
-  }, [nuisance, view, d, names])
-  const maskRows = useMemo(() => {
+  const pair = useMemo(
+    () => (nuisance === 0 ? undefined : view.px.map((_, i) => view.full[i * d + d - nuisance])),
+    [nuisance, view, d],
+  )
+  const mask = useMemo(() => {
     if (!data.meta.missing) return undefined
     const m = toFlat(data.meta.missing)
-    return Array.from({ length: rows }, (_, i) => m.slice(i * d, (i + 1) * d))
+    return {
+      z: Array.from({ length: rows }, (_, i) => m.slice(i * d, (i + 1) * d)),
+      x: Array.from({ length: d }, (_, j) => j + 1),
+      y: Array.from({ length: rows }, (_, i) => i),
+    }
   }, [data, rows, d])
 
-  const counts = [0, 1].map((j) => view.y.filter((v) => v === j).length)
-  const flippedCount = view.flips.length
-  const panels = 1 + (pair.length ? 1 : 0) + (maskRows ? 1 : 0)
+  const counts = Array.from({ length: classes }, (_, j) => view.y.filter((v) => v === j).length)
+  const panels = 1 + (pair ? 1 : 0) + (mask ? 1 : 0)
+  const fx = useMemo(() => toFlat(field.x), [field])
+  const fy = useMemo(() => toFlat(field.y), [field])
 
-  const main = posterior ? (
-    <Heatmap
-      x={toFlat(field.x)}
-      y={toFlat(field.y)}
-      z={posterior}
-      scale="diverging"
-      range={[0, 1]}
-      fillOpacity={0.55}
-      contours={{ levels: [0.5] }}
-      overlay={overlay}
-      valueLabel="P(y = 1 | x)"
-      xLabel={data.meta.featureNames[0]}
-      yLabel={data.meta.featureNames[1]}
-      axisKey={axisKey}
-    />
-  ) : (
-    <XYChart
-      series={overlay.map((o): XYSeries => ({
-        name: o.name,
-        type: 'scatter',
-        x: Array.from(o.x),
-        y: Array.from(o.y),
-        group: o.group ? Array.from(o.group) : undefined,
-        groupNames: o.groupNames,
-        emphasis: o.emphasis,
-        slot: o.slot,
-      }))}
-      xLabel={data.meta.featureNames[0]}
-      yLabel={data.meta.featureNames[1]}
-      aspect="equal"
-      axisKey={axisKey}
-    />
-  )
+  const x = useAxis({ label: data.meta.featureNames[0], hold: 'initial', key: axisKey })
+  const y = useAxis({ label: data.meta.featureNames[1], hold: 'initial', key: axisKey, equal: x })
+  const yPair = useAxis({ label: data.meta.featureNames[d - 1], hold: 'initial', key: `${axisKey}:${nuisance}` })
+  const mx = useAxis({ label: 'feature' })
+  const my = useAxis({ label: 'row' })
 
   return (
     <Figure
       title="Dataset recipe"
-      description="A dataset built from plain parameters: a base generator, its class balance and overlap, label noise and extras. Where the process has a closed form the Bayes posterior P(y = 1 | x) is known, so the Bayes-optimal boundary (the 0.5 contour) and the Bayes error come with the data."
+      purpose="A dataset is plain data: a registered generator and its knobs, then modifiers in order; where the process has a closed form the Bayes boundary and Bayes error come with it."
+      state={state}
       defaultSize="L"
-      controls={
-        <>
-          <ControlRow label="1 · base">
-            <Select
-              label="generator"
-              value={base}
-              onChange={setBase}
-              options={(Object.keys(BASES) as ClassificationBase[]).map((k) => ({ value: k, label: BASES[k].label }))}
+      readouts={{
+        classes: (
+          <>
+            {counts.map((c, j) => (
+              <Readout key={j} label={names[j] ?? `class ${j}`} value={`${c} (${pct(c / rows)})`} />
+            ))}
+          </>
+        ),
+        recipe: (
+          <>
+            <Readout label="flipped" value={view.flips.x.length} />
+            <Readout label="features" value={d} />
+            <Readout label="ignored knobs" value={data.meta.ignored?.length ? data.meta.ignored.join(', ') : 'none'} />
+            <Readout
+              label="Bayes error"
+              value={
+                truth
+                  ? `${truth.bayesError.toFixed(3)}${truth.bayesErrorMethod === 'monte carlo' ? ` ± ${truth.bayesErrorSe.toFixed(3)} (MC)` : ' (exact)'}`
+                  : '—'
+              }
             />
-            <Slider label="points n" value={n} onChange={(v) => setN(Math.round(v))} min={50} max={2000} step={10} />
-            {b.knob && knob !== undefined && (
-              <Slider
-                label={b.knob.label}
-                value={knob}
-                onChange={(v) => setKnobs((m) => ({ ...m, [base]: v }))}
-                min={b.knob.range[0]}
-                max={b.knob.range[1]}
-              />
-            )}
-            <Button variant="outline" size="sm" onClick={() => setSeed((s) => s + 1)}>
-              new seed
-            </Button>
-          </ControlRow>
-          <ControlRow label="2 · classes">
-            <Slider label="prevalence of class 1" value={prevalence} onChange={setPrevalence} min={0.05} max={0.95} />
-            <Slider
-              label="separation d′"
-              value={separation}
-              onChange={setSeparation}
-              min={0}
-              max={6}
-              disabled={!SEPARABLE.has(base)}
-            />
-            <Slider label="label noise" value={labelNoise} onChange={setLabelNoise} min={0} max={0.45} />
-          </ControlRow>
-          <ControlRow label="3 · extras">
-            <Slider label="outliers" value={outliers} onChange={setOutliers} min={0} max={0.2} />
-            <Slider
-              label="nuisance features"
-              value={nuisance}
-              onChange={(v) => setNuisance(Math.round(v))}
-              min={0}
-              max={5}
-              step={1}
-            />
-            <Slider label="missing rate" value={missing} onChange={setMissing} min={0} max={0.5} />
-            <Select label="mechanism" value={mechanism} onChange={setMechanism} options={MECHANISMS} />
-          </ControlRow>
-          <ControlRow label="4 · show">
-            <Switch label="Bayes posterior and boundary" checked={showTruth} onChange={setShowTruth} />
-          </ControlRow>
-        </>
-      }
-      readouts={
-        <>
-          <Readout label={names[0]} value={counts[0]} />
-          <Readout label={names[1]} value={`${counts[1]} (${pct(counts[1] / rows)})`} />
-          <Readout label="flipped" value={flippedCount} />
-          <Readout label="features" value={d} />
-          <Readout label="ignored knobs" value={data.meta.ignored?.length ? data.meta.ignored.join(', ') : 'none'} />
-          <Readout
-            label="Bayes error"
-            value={
-              truth
-                ? `${truth.bayesError.toFixed(3)}${truth.bayesErrorMethod === 'monte carlo' ? ` ± ${truth.bayesErrorSe.toFixed(3)} (MC)` : ' (exact)'}`
-                : '—'
-            }
-          />
-        </>
-      }
-      caption={`${describeRecipe(spec)}. ${data.meta.description} Ink diamonds mark flipped labels.${nuisance ? ' The pair plot shows x₁ against the last nuisance feature, which carries no information about y.' : ''}${maskRows ? ' The mask shows missing entries (rows × features).' : ''}`}
+          </>
+        ),
+      }}
+      caption={`${describeRecipe(spec)}. ${data.meta.description} Every control comes from the registry's parameter spaces. ${posterior ? 'The field is the Bayes posterior P(y = 1 | x) (pale at ½); the ink line is its 0.5 contour, the Bayes-optimal boundary. ' : ''}Ink diamonds mark flipped labels.${nuisance ? ' The second panel shows x₁ against the last nuisance feature, which carries no information about y.' : ''}${mask ? ' The mask shows missing entries (rows × features).' : ''}`}
     >
-      <Subplots cols={panels} widthRatios={panels > 1 ? [2, ...new Array<number>(panels - 1).fill(1)] : undefined}>
-        <Panel>{main}</Panel>
-        {pair.length > 0 && (
-          <Panel>
-            <XYChart
-              series={pair}
-              xLabel={data.meta.featureNames[0]}
-              yLabel={data.meta.featureNames[d - 1]}
-              axisKey={axisKey}
-            />
-          </Panel>
-        )}
-        {maskRows && (
-          <Panel>
-            <Heatmap
-              x={Array.from({ length: d }, (_, j) => j + 1)}
-              y={Array.from({ length: rows }, (_, i) => i)}
-              z={maskRows}
+      <Plots cols={panels} widths={panels > 1 ? [2, ...new Array<number>(panels - 1).fill(1)] : undefined}>
+        <Plot x={x} y={y}>
+          {posterior && (
+            <Raster
+              x={fx}
+              y={fy}
+              z={posterior}
+              scale="diverging"
               range={[0, 1]}
-              colorBar={false}
-              valueLabel="missing"
-              xLabel="feature"
-              yLabel="row"
+              fillOpacity={0.85}
+              valueLabel="P(y = 1 | x)"
             />
-          </Panel>
+          )}
+          {posterior && <Contours x={fx} y={fy} z={posterior} levels={[0.5]} />}
+          <Points name="points" {...view.shown} groupNames={names} />
+          {view.flips.x.length > 0 && <Points name="label flipped" {...view.flips} emphasis />}
+          {view.holes.x.length > 0 && <Points name="x₁ or x₂ missing" {...view.holes} slot={4} />}
+        </Plot>
+        {pair && (
+          <Plot x={x} y={yPair}>
+            <Points name="points" x={view.px} y={pair} group={view.y} groupNames={names} />
+          </Plot>
         )}
-      </Subplots>
+        {mask && (
+          <Plot x={mx} y={my}>
+            <Raster x={mask.x} y={mask.y} z={mask.z} range={[0, 1]} colorBar={false} valueLabel="missing" />
+          </Plot>
+        )}
+      </Plots>
     </Figure>
   )
 }

@@ -57,15 +57,16 @@ function logPseudoDeterminant(S: F64, P: number, rank: number): number {
   return s
 }
 
-/** One penalised fit at fixed λ, with everything the scores and inference need. */
-export type PenalisedFit = {
-  training: Trace<IrlsState>
-  final: IrlsState
-  beta: F64
-  /** H = XᵀWX + S_λ (+ shape penalty) and its inverse. */
+/**
+ * The quantities inference needs at coefficients β with working weights W: H = XᵀWX + S, its inverse and
+ * log-determinant, the effective degrees of freedom tr(H⁻¹XᵀWX) and their diagonal, and the penalty βᵀSβ (Wood, 2017,
+ * §6.1.2). At a P-IRLS optimum these are the fit's; at any other β (a step of another fitter) they describe that β.
+ */
+export type PenalisedInference = {
+  /** H = XᵀWX + S (+ shape penalty) and its inverse. */
   H: F64
   Hinv: F64
-  /** XᵀWX at the fit. */
+  /** XᵀWX at β. */
   XtWX: F64
   edf: number
   /** diag(H⁻¹XᵀWX), [P]: per-coefficient EDF. */
@@ -76,7 +77,53 @@ export type PenalisedFit = {
   jitter: number
 }
 
-/** Penalised IRLS at the penalty S (`irls` with P-IRLS's tolerance 1e-10), warm-started from `start` when given. */
+/** H, H⁻¹, the EDF and the penalty at β with working weights W [n] (see `PenalisedInference`). */
+export function penalisedInference(
+  A: PenalisedDesign,
+  W: ArrayLike<number>,
+  S: F64,
+  beta: ArrayLike<number>,
+): PenalisedInference {
+  const { P, n, X } = A
+  const XtWX = new Float64Array(P * P)
+  for (let i = 0; i < n; i++) {
+    const wi = W[i]
+    if (wi === 0) continue
+    for (let a = 0; a < P; a++) {
+      const xa = X[i * P + a] * wi
+      if (xa === 0) continue
+      for (let b = 0; b <= a; b++) XtWX[a * P + b] += xa * X[i * P + b]
+    }
+  }
+  for (let a = 0; a < P; a++) for (let b = a + 1; b < P; b++) XtWX[a * P + b] = XtWX[b * P + a]
+  const H = Float64Array.from(XtWX, (v, k) => v + S[k])
+  // Overlapping null spaces (e.g. a linear term inside a tensor smooth's) make H singular: jitter is added and
+  // reported.
+  const c = cholesky(fromData(H, [P, P]))
+  let logDetH = 0
+  const L = dense.data(c.L)
+  for (let i = 0; i < P; i++) logDetH += 2 * Math.log(L[i * P + i])
+  const eye = new Float64Array(P * P)
+  for (let i = 0; i < P; i++) eye[i * P + i] = 1
+  const Hinv = Float64Array.from(dense.data(choleskySolve(c.L, fromData(eye, [P, P])) as Tensor))
+  const edfDiag = new Float64Array(P)
+  for (let a = 0; a < P; a++) for (let b = 0; b < P; b++) edfDiag[a] += Hinv[a * P + b] * XtWX[b * P + a]
+  let penalty = 0
+  for (let a = 0; a < P; a++) for (let b = 0; b < P; b++) penalty += beta[a] * S[a * P + b] * beta[b]
+  return { H, Hinv, XtWX, edf: edfDiag.reduce((a, b) => a + b, 0), edfDiag, penalty, logDetH, jitter: c.jitter }
+}
+
+/** One penalised fit at fixed λ, with everything the scores and inference need. */
+export type PenalisedFit = PenalisedInference & {
+  training: Trace<IrlsState>
+  final: IrlsState
+  beta: F64
+}
+
+/**
+ * Penalised IRLS at the penalty S (`irls` with tolerance 1e-12 on the penalised deviance, so that β is accurate to
+ * about 1e-7 even where Fisher scoring converges only linearly), warm-started from `start` when given.
+ */
 export function penalisedFit(
   A: PenalisedDesign,
   data: PenalisedData,
@@ -94,7 +141,7 @@ export function penalisedFit(
     weights: data.weights,
     offset: data.offset,
     penalty: fromData(S, [A.P, A.P]),
-    tolerance: 1e-10,
+    tolerance: 1e-12,
   }
   const training = trace(irls(problem), start ? { coefficients: fromData(start, [start.length]) } : {}, maxSteps, {
     record: { deviance: (s) => s.deviance, penalisedDeviance: (s) => s.penalisedDeviance },
@@ -102,42 +149,7 @@ export function penalisedFit(
   const final = training.final
   if (!final.coefficients) throw new Error('penalisedFit: P-IRLS took no step')
   const beta = Float64Array.from(dense.data(final.coefficients))
-  const W = dense.data(final.workingWeights)
-  const { P, n, X } = A
-  const XtWX = new Float64Array(P * P)
-  for (let i = 0; i < n; i++)
-    for (let a = 0; a < P; a++) {
-      const xa = X[i * P + a] * W[i]
-      if (xa === 0) continue
-      for (let b = 0; b < P; b++) XtWX[a * P + b] += xa * X[i * P + b]
-    }
-  const H = Float64Array.from(XtWX, (v, k) => v + S[k])
-  // Overlapping null spaces (e.g. a linear term inside a tensor smooth's) make H singular: jitter is added and
-  // reported.
-  const c = cholesky(fromData(H, [P, P]))
-  let logDetH = 0
-  const L = dense.data(c.L)
-  for (let i = 0; i < P; i++) logDetH += 2 * Math.log(L[i * P + i])
-  const eye = new Float64Array(P * P)
-  for (let i = 0; i < P; i++) eye[i * P + i] = 1
-  const Hinv = Float64Array.from(dense.data(choleskySolve(c.L, fromData(eye, [P, P])) as Tensor))
-  const edfDiag = new Float64Array(P)
-  for (let a = 0; a < P; a++) for (let b = 0; b < P; b++) edfDiag[a] += Hinv[a * P + b] * XtWX[b * P + a]
-  let penalty = 0
-  for (let a = 0; a < P; a++) for (let b = 0; b < P; b++) penalty += beta[a] * S[a * P + b] * beta[b]
-  return {
-    training,
-    final,
-    beta,
-    H,
-    Hinv,
-    XtWX,
-    edf: edfDiag.reduce((a, b) => a + b, 0),
-    edfDiag,
-    penalty,
-    logDetH,
-    jitter: c.jitter,
-  }
+  return { training, final, beta, ...penalisedInference(A, dense.data(final.workingWeights), S, beta) }
 }
 
 /**

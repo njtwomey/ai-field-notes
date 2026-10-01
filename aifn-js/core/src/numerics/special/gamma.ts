@@ -7,9 +7,11 @@
  * otherwise cancel (log B, log (n choose k), the incomplete gamma prefactor). Smaller x are shifted up by the recurrence
  * Γ(x + 1) = xΓ(x); negative x use the reflection formula Γ(x)Γ(1 − x) = π / sin πx. ψ and ψ⁽ⁿ⁾ use the same shift
  * and their asymptotic series (A&S 6.3.18, 6.4.11). P and Q use the power series and continued fraction of Press et
- * al., Numerical Recipes, 3rd ed., §6.2.
+ * al., Numerical Recipes, 3rd ed., §6.2; log P and log Q sum the same series in log space, so neither underflows in its
+ * own tail. The inverses solve log P = log p (or log Q = log q above the median) by safeguarded Newton steps in log x.
  */
 
+import { normalQuantile } from './normal'
 import { log1pmx } from './stable'
 
 const HALF_LOG_2PI = 0.5 * Math.log(2 * Math.PI)
@@ -259,4 +261,96 @@ export function gammaDensity(a: number, x: number): number {
   if (x < 0) return 0
   if (x === 0) return a === 1 ? 1 : a < 1 ? Infinity : 0
   return Math.exp(logGammaPrefactor(a, x)) / x
+}
+
+/**
+ * log P(a, x). The lower tail is summed in log space (the prefactor's logarithm plus the series' logarithm), so it
+ * keeps its relative accuracy where P underflows; above the series' range it is log1p(−Q), accurate where P ≈ 1.
+ */
+export function logRegularisedGammaP(a: number, x: number): number {
+  if (!(a > 0 && x >= 0)) return NaN
+  if (x === 0) return -Infinity
+  if (x === Infinity) return 0
+  if (x < a + 1) return logGammaPrefactor(a, x) + Math.log(gammaSeries(a, x))
+  return Math.log1p(-Math.exp(logGammaPrefactor(a, x)) * gammaFraction(a, x))
+}
+
+/** log Q(a, x): the upper tail in log space (the continued fraction's logarithm), and log1p(−P) below it. */
+export function logRegularisedGammaQ(a: number, x: number): number {
+  if (!(a > 0 && x >= 0)) return NaN
+  if (x === 0) return 0
+  if (x === Infinity) return -Infinity
+  if (x < a + 1) return Math.log1p(-Math.exp(logGammaPrefactor(a, x)) * gammaSeries(a, x))
+  return logGammaPrefactor(a, x) + Math.log(gammaFraction(a, x))
+}
+
+/**
+ * The x with P(a, x) = p, for a > 0 and p in [0, 1] (scipy.special.gammaincinv): the p-quantile of Gamma(a, 1).
+ * Above p = ½ it solves Q(a, x) = 1 − p instead (1 − p is exact there), so upper quantiles keep their relative
+ * accuracy. NaN for invalid arguments.
+ */
+export function regularisedGammaPInverse(a: number, p: number): number {
+  if (!(a > 0 && p >= 0 && p <= 1)) return NaN
+  if (p === 0) return 0
+  if (p === 1) return Infinity
+  return p <= 0.5 ? gammaInverse(a, Math.log(p), false) : gammaInverse(a, Math.log1p(-p), true)
+}
+
+/**
+ * The x with Q(a, x) = q, for a > 0 and q in [0, 1] (scipy.special.gammainccinv): the inverse survival function of
+ * Gamma(a, 1). Relative accuracy about 1e-14 for q down to the smallest normal double.
+ */
+export function regularisedGammaQInverse(a: number, q: number): number {
+  if (!(a > 0 && q >= 0 && q <= 1)) return NaN
+  if (q === 0) return Infinity
+  if (q === 1) return 0
+  return q <= 0.5 ? gammaInverse(a, Math.log(q), true) : gammaInverse(a, Math.log1p(-q), false)
+}
+
+/**
+ * Solve log P(a, x) = logTarget (or log Q when `upper`) by Newton's method in s = log x, where both tails are close
+ * to linear: log P ≈ a s − log Γ(a + 1) as x → 0, and log Q ≈ −eˢ for large x. d log P/ds = x·density/P and
+ * d log Q/ds = −x·density/Q, with x·density = the prefactor xᵃ e^{−x}/Γ(a). Every step stays inside a bracket of the
+ * root; a step that would leave it bisects (or moves by one unit of s while the bracket is open on that side). The
+ * start is Wilson and Hilferty's cube-root normal approximation, or the lower tail's leading term for small a.
+ */
+function gammaInverse(a: number, logTarget: number, upper: boolean): number {
+  const logF = upper ? logRegularisedGammaQ : logRegularisedGammaP
+  // The standard normal deviate at the same probability: z for P = p, −z for Q = q.
+  const zTail = normalQuantile(Math.exp(logTarget))
+  const z = upper ? -zTail : zTail
+  const cube = 1 - 1 / (9 * a) + z / (3 * Math.sqrt(a))
+  let s: number
+  if (a >= 1 && cube > 0) s = Math.log(a) + 3 * Math.log(cube)
+  else if (!upper) s = (logTarget + logGamma(a + 1)) / a
+  else s = Math.log(Math.max(1, -logTarget - logGamma(a)))
+  if (!Number.isFinite(s)) s = Math.log(a)
+  let lo = -Infinity
+  let hi = Infinity
+  for (let i = 0; i < 300; i++) {
+    const x = Math.exp(s)
+    const value = logF(a, x)
+    const g = value - logTarget
+    if (g === 0) return x
+    // P increases and Q decreases in x: the root lies above s when log P is short, or log Q is long.
+    if (upper ? g > 0 : g < 0) lo = s
+    else hi = s
+    const slope = (upper ? -1 : 1) * Math.exp(logGammaPrefactor(a, x) - value)
+    let next = s - g / slope
+    if (!(next > lo && next < hi) || !Number.isFinite(next)) {
+      if (Number.isFinite(lo) && Number.isFinite(hi)) next = 0.5 * (lo + hi)
+      else next = Number.isFinite(lo) ? lo + 1 : hi - 1
+    }
+    // Newton converges quadratically: once a step is below 1e-10 in log x, one more step reaches rounding level.
+    if (Math.abs(next - s) < 1e-10) {
+      const x2 = Math.exp(next)
+      const v2 = logF(a, x2)
+      const slope2 = (upper ? -1 : 1) * Math.exp(logGammaPrefactor(a, x2) - v2)
+      const last = next - (v2 - logTarget) / slope2
+      return Math.exp(Number.isFinite(last) ? last : next)
+    }
+    if (Number.isFinite(lo) && Number.isFinite(hi) && hi - lo < 1e-15 * Math.max(1, Math.abs(s))) return Math.exp(next)
+    s = next
+  }
+  return Math.exp(s)
 }

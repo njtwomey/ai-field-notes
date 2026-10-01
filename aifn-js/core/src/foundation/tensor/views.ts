@@ -19,7 +19,7 @@ import {
   size,
   sizeOf,
   view,
-  type Axis,
+  type Axes,
   type Tensor,
 } from './core'
 
@@ -48,15 +48,31 @@ export type SliceSpec = number | null | readonly [start?: number | null, stop?: 
 
 /** A view selecting part of a tensor, as NumPy basic indexing. */
 export function sliceView(t: Tensor, specs: readonly SliceSpec[]): Tensor {
-  if (specs.length > t.shape.length)
-    throw new ShapeError('slice', `slice: ${specs.length} specs for rank ${t.shape.length}`)
+  const g = sliceGeometry(t.shape, t.strides, t.offset, specs)
+  return view(t, g.shape, g.strides, g.offset)
+}
+
+/** The shape of a slice of a tensor of shape `shape` (for shape rules). */
+export function sliceShape(shape: readonly number[], specs: readonly SliceSpec[]): number[] {
+  return sliceGeometry(shape, new Array<number>(shape.length).fill(0), 0, specs).shape
+}
+
+/** The shape, strides and offset of a slice of a layout. */
+function sliceGeometry(
+  inShape: readonly number[],
+  inStrides: readonly number[],
+  inOffset: number,
+  specs: readonly SliceSpec[],
+): { shape: number[]; strides: number[]; offset: number } {
+  if (specs.length > inShape.length)
+    throw new ShapeError('slice', `slice: ${specs.length} specs for rank ${inShape.length}`)
   const shape: number[] = []
   const strides: number[] = []
-  let offset = t.offset
-  for (let axis = 0; axis < t.shape.length; axis++) {
+  let offset = inOffset
+  for (let axis = 0; axis < inShape.length; axis++) {
     const spec = axis < specs.length ? specs[axis] : null
-    const n = t.shape[axis]
-    const stride = t.strides[axis]
+    const n = inShape[axis]
+    const stride = inStrides[axis]
     if (typeof spec === 'number') {
       const i = spec < 0 ? spec + n : spec
       if (!Number.isInteger(i) || i < 0 || i >= n) {
@@ -81,7 +97,7 @@ export function sliceView(t: Tensor, specs: readonly SliceSpec[]): Tensor {
     shape.push(length)
     strides.push(stride * step)
   }
-  return view(t, shape, strides, offset)
+  return { shape, strides, offset }
 }
 
 /** Resolve a target shape with at most one -1 entry for `n` elements. */
@@ -122,7 +138,7 @@ export function reshapeView(t: Tensor, shape: readonly number[]): Tensor {
     const nonUnit = t.shape.filter((d) => d !== 1)
     if (target.filter((d) => d !== 1).every((d, k) => d === nonUnit[k])) return view(t, target, strides, t.offset)
   }
-  return fromData(flatData(t), target)
+  return fromData(flatData(t), target, t.dtype)
 }
 
 /** Check a permutation of the axes of a rank-`rank` tensor and normalise negative entries. */
@@ -145,7 +161,7 @@ export function permuteView(t: Tensor, order: readonly number[]): Tensor {
 }
 
 /** The axes `squeeze` removes: every axis of length 1, or the listed ones (which must have length 1). */
-export function squeezedAxes(shape: readonly number[], axis: Axis | undefined): number[] {
+export function squeezedAxes(shape: readonly number[], axis: Axes | undefined): number[] {
   const drop =
     axis === undefined ? shape.flatMap((d, k) => (d === 1 ? [k] : [])) : normaliseAxes(axis, shape.length, 'squeeze')
   for (const k of drop)
@@ -175,14 +191,21 @@ export function concatRaw(ts: readonly Tensor[], axis: number): Tensor {
   const outStrides = rowMajorStrides(shape)
   let start = 0
   for (const t of ts) {
-    // Copy t into the block of the output that begins at `start` along axis a.
+    // Copy t into the block of the output that begins at `start` along axis a (two slots per complex element; a real
+    // input into a complex output leaves the imaginary parts zero).
     const src = t.data
-    forEachOffset2(t.shape, outStrides, start * outStrides[a], t.strides, t.offset, (dst, s) => {
-      out[dst] = src[s]
-    })
+    const at = start * outStrides[a]
+    if (dtype !== 'complex128')
+      forEachOffset2(t.shape, outStrides, at, t.strides, t.offset, (dst, s) => (out[dst] = src[s]))
+    else if (t.dtype === 'complex128')
+      forEachOffset2(t.shape, outStrides, at, t.strides, t.offset, (dst, s) => {
+        out[2 * dst] = src[2 * s]
+        out[2 * dst + 1] = src[2 * s + 1]
+      })
+    else forEachOffset2(t.shape, outStrides, at, t.strides, t.offset, (dst, s) => (out[2 * dst] = src[s]))
     start += t.shape[a]
   }
-  return fromData(out, shape)
+  return fromData(out, shape, dtype)
 }
 
 /**

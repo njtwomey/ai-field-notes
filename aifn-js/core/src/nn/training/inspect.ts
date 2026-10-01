@@ -57,9 +57,10 @@ export function inspect<P extends Params>(
     lossOf(layer.apply(p, x, { ...ctx, tap: (path, v) => (path in pr ? add(v, pr[path]) : v) }))
   const { value, grad } = valueAndGrad(f, { argnums: [0, 1] })(params, probes)
   const [paramGrads, activationGrads] = grad as [P, Record<string, Tensor | number>]
+  const loss = unwrap(value)
   return {
     ...first,
-    loss: typeof value === 'number' ? value : toFlat(value)[0],
+    loss: typeof loss === 'number' ? loss : toFlat(loss)[0],
     activationGrads,
     paramGrads,
   }

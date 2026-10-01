@@ -6,7 +6,21 @@
 
 import { grad } from 'aifn/foundation/autodiff'
 import { normals, type Stream } from 'aifn/foundation/random'
-import { dense, fromData, isTensor, sum, toFlat, type Matrix, type Tensor, type Value } from 'aifn/foundation/tensor'
+import {
+  add,
+  dense,
+  fromData,
+  isTensor,
+  isTraced,
+  mul,
+  shapeOfValue,
+  sum,
+  toFlat,
+  unwrap,
+  type Matrix,
+  type Tensor,
+  type Value,
+} from 'aifn/foundation/tensor'
 import type { Algorithm, Index, Scalar, Shape, Size, Status, Trace } from 'aifn/foundation/contracts'
 
 type F64 = dense.F64
@@ -97,7 +111,8 @@ export function increments(s: Stream, shape: Shape, stepSize: Scalar): Tensor {
   return fromData(Float64Array.from(toFlat(normals(s, [...shape], 0, Math.sqrt(Math.abs(stepSize))))), [...shape])
 }
 
-type Update = (sde: Sde, t: Scalar, x: Tensor, h: Scalar, dW: F64) => { next: F64; evaluations: Size }
+/** One step: the next states as raw values, or as a value (possibly traced) for a scheme written with primitives. */
+type Update = (sde: Sde, t: Scalar, x: Tensor, h: Scalar, dW: Tensor) => { next: F64 | Value; evaluations: Size }
 
 /** A scheme from its one-step update (shared with the exact solutions in `processes.ts`; internal). */
 export function scheme(
@@ -112,20 +127,26 @@ export function scheme(
     init: (opts) => initial(opts),
     step: (s, ctx) => {
       const hk = tEnd !== undefined && tEnd - s.time < h ? tEnd - s.time : h
-      const dW = increments(ctx.stream, s.x.shape, hk)
-      const { next, evaluations } = update(sde, s.time, s.x, hk, dense.data(dW))
+      // A traced state (under `unrolled`) has no `shape` field of its own.
+      const shape = shapeOfValue(s.x)
+      const dW = increments(ctx.stream, shape, hk)
+      const { next, evaluations } = update(sde, s.time, s.x, hk, dW)
+      const x = next instanceof Float64Array ? fromData(next, shape) : (next as Tensor)
+      const values = next instanceof Float64Array ? next : toFlat(unwrap(x) as Tensor)
+      if (values.length !== dense.data(dW).length)
+        throw new Error(`${name}: the update gave ${values.length} values for ${dense.data(dW).length} states`)
       let nonFinite = 0
-      for (const v of next) if (!Number.isFinite(v)) nonFinite++
+      for (const v of values) if (!Number.isFinite(v)) nonFinite++
       return {
         ...s,
         t: s.t + 1,
         time: s.time + hk,
-        x: fromData(next, s.x.shape),
+        x,
         stepSize: hk,
         dW,
         evaluations: s.evaluations + evaluations,
         nonFinite,
-        diverged: nonFinite === next.length,
+        diverged: nonFinite === values.length,
       }
     },
     done: (s) => tEnd !== undefined && s.time >= tEnd - 1e-12 * Math.max(1, Math.abs(tEnd)),
@@ -136,14 +157,22 @@ export function scheme(
  * The Euler–Maruyama scheme X_{n+1} = X_n + a(t_n, X_n) h + b(t_n, X_n) ΔW_n with ΔW_n ~ N(0, h): strong order ½
  * (pathwise error O(h^½)) and weak order 1 (error in expectations O(h)). `init` takes `{ x0, paths, t0 }`; step t
  * draws its increments from the runner's step stream. A path that becomes non-finite is counted in `nonFinite`; the run is `diverged` only when all have.
+ * The step is written with primitives: with a drift and diffusion written with primitives too, `unrolled` differentiates
+ * the paths with respect to the parameters they close over (the pathwise, reparameterised gradient: the increments are
+ * fixed by the stream, so each path is a smooth function of the parameters).
  */
 export function eulerMaruyama(sde: Sde, options: SdeOptions): Algorithm<SdeInitial, SdeState> {
-  return scheme('euler-maruyama', sde, options, (p, t, x, h, dW) => {
-    const a = cloud(p.drift(t, x), x.shape, 'drift')
-    const b = cloud(p.diffusion(t, x), x.shape, 'diffusion')
-    const xs = dense.data(x)
-    return { next: Float64Array.from(xs, (v, i) => v + a[i] * h + b[i] * dW[i]), evaluations: 1 }
-  })
+  return scheme('euler-maruyama', sde, options, (p, t, x, h, dW) => ({
+    next: add(x, add(mul(asValue(p.drift(t, x), x, 'drift'), h), mul(asValue(p.diffusion(t, x), x, 'diffusion'), dW))),
+    evaluations: 1,
+  }))
+}
+
+/** A drift or diffusion as a value that broadcasts against the states x (a plain array becomes a tensor of x's shape). */
+function asValue(v: Value, x: Tensor, where: string): Value {
+  if (typeof v === 'number' || isTensor(v) || isTraced(v)) return v
+  const shape = shapeOfValue(x)
+  return fromData(cloud(v, shape, where), shape)
 }
 
 /**
@@ -154,7 +183,8 @@ export function milstein(sde: Sde, options: SdeOptions): Algorithm<SdeInitial, S
   const db =
     sde.diffusionDerivative ??
     ((t: Scalar, x: Tensor) => grad((y: Value) => sum(sde.diffusion(t, y as Tensor) as Tensor) as Value)(x) as Value)
-  return scheme('milstein', sde, options, (p, t, x, h, dW) => {
+  return scheme('milstein', sde, options, (p, t, x, h, increments) => {
+    const dW = dense.data(increments)
     const a = cloud(p.drift(t, x), x.shape, 'drift')
     const b = cloud(p.diffusion(t, x), x.shape, 'diffusion')
     const bp = cloud(db(t, x), x.shape, 'diffusionDerivative')
@@ -172,7 +202,8 @@ export function milstein(sde: Sde, options: SdeOptions): Algorithm<SdeInitial, S
  * Milstein's b′ by a finite difference, so the diffusion need not be differentiable.
  */
 export function stochasticRungeKutta(sde: Sde, options: SdeOptions): Algorithm<SdeInitial, SdeState> {
-  return scheme('stochastic-runge-kutta', sde, options, (p, t, x, h, dW) => {
+  return scheme('stochastic-runge-kutta', sde, options, (p, t, x, h, increments) => {
+    const dW = dense.data(increments)
     const a = cloud(p.drift(t, x), x.shape, 'drift')
     const b = cloud(p.diffusion(t, x), x.shape, 'diffusion')
     const xs = dense.data(x)

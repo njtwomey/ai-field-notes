@@ -1,8 +1,10 @@
-import { Check, Copy, Link2 } from 'lucide-react'
+import { Check, Copy, Link2, RotateCcw } from 'lucide-react'
 import {
   Component,
+  createContext,
   useCallback,
   useContext,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -12,8 +14,11 @@ import {
 import { Button } from '@lab/ui/button'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@lab/ui/select'
 import { cn } from '@lab/lib/utils'
-import { FrameContext, Readout, Readouts, type FrameContextValue, type HoverInfo } from '@lab/viz'
+import { FrameContext, Readout, ReadoutGroup, Readouts, type FrameContextValue, type HoverInfo } from '@lab/viz'
+import { FigureControls } from '@lab/controls/ParamControls'
+import type { FigureState } from '@lab/state/useFigureState'
 import { Controls } from './Controls'
+import { FrameSlotsContext, type FrameSlots } from './slots-context'
 import { useFigureId } from './figure-ids'
 import { FIGURE_SIZES, FigureScope, type FigureSize } from './figure-size'
 
@@ -54,12 +59,32 @@ export type FigureProps = {
    * made unique within the page.
    */
   id?: string
-  /** One or two sentences under the title: what the figure shows. */
+  /**
+   * The figure's one point, in one line under the title (DESIGN.md §2.1), e.g. "KL divergence is the expected
+   * log-ratio, so its value is the net signed area under p log(p/q)". Required: `make lab-check` fails a figure
+   * without one (a `ReactNode` can still be empty).
+   */
+  purpose: ReactNode
+  /** Further detail under the purpose: what the figure shows. */
   description?: ReactNode
-  /** Parameter controls, in a responsive grid above the chart area. */
+  /**
+   * The figure's state (`useFigureState`): its control rows are drawn above the chart area, a reset button joins the
+   * header, and its non-default values are kept in the URL next to the figure's anchor.
+   */
+  // oxlint-disable-next-line typescript/no-explicit-any -- any schema; the figure reads only the untyped API
+  state?: FigureState<any>
+  /** Parameter controls placed by hand, after the state's rows, in a responsive grid above the chart area. */
   controls?: ReactNode
-  /** Readouts under the chart area (use `Readout` from @lab/viz). */
-  readouts?: ReactNode
+  /**
+   * The equation band (DESIGN.md §7), shown only when given: a large `Equation` (or `EquationSteps`) with the figure's
+   * live values, between the controls and the charts.
+   */
+  equation?: ReactNode
+  /**
+   * Readouts under the chart area (`Readout` from @lab/viz): a list, or labelled groups as a record
+   * (`{ 'at x₀': <>…</>, totals: <>…</> }`).
+   */
+  readouts?: ReactNode | Readonly<Record<string, ReactNode>>
   /** What to change and what to watch, under everything. */
   caption?: ReactNode
   /**
@@ -84,8 +109,11 @@ export type FigureProps = {
 export function Figure({
   title,
   id,
+  purpose,
   description,
+  state,
   controls,
+  equation,
   readouts,
   caption,
   data,
@@ -95,7 +123,10 @@ export function Figure({
   className,
 }: FigureProps) {
   const scope = useContext(FigureScope)
+  const nested = useContext(InsideFigure)
   const figureId = useFigureId(title, id)
+  const attach = state?.attach
+  useLayoutEffect(() => attach?.(figureId), [attach, figureId])
   const key = storageKey(scope, figureId)
   // The size is read once per key; `stored` stays null until the reader changes it.
   const [stored, setStored] = useState<{ key: string; size: Stored | null }>(() => ({ key, size: readSize(key) }))
@@ -136,10 +167,21 @@ export function Figure({
     return { title, charts: drawn }
   }
 
+  const groups = isGroups(readouts) ? readouts : null
+  // Slots that views inside fill with their own controls, readouts and a line about their object.
+  const [about, setAbout] = useState<HTMLElement | null>(null)
+  const [viewControls, setViewControls] = useState<HTMLElement | null>(null)
+  const [viewReadouts, setViewReadouts] = useState<HTMLElement | null>(null)
+  const slots = useMemo<FrameSlots>(
+    () => ({ about, controls: viewControls, readouts: viewReadouts }),
+    [about, viewControls, viewReadouts],
+  )
   return (
     <section
       id={figureId}
       data-figure-id={figureId}
+      data-figure-purpose={purpose ? undefined : 'missing'}
+      data-figure-nested={nested ? '' : undefined}
       // Every part keeps its natural height (shrink-0): the chart area never overlaps the readouts or the caption.
       className={cn(
         'flex shrink-0 scroll-mt-16 flex-col gap-4 rounded-xl border bg-card p-4 text-card-foreground ring-ring/60 transition-shadow duration-500 *:shrink-0 data-highlight:ring-2',
@@ -149,27 +191,75 @@ export function Figure({
       <header className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2">
         <div className="min-w-0 space-y-1">
           <AnchorTitle id={figureId}>{title}</AnchorTitle>
+          {purpose && <p className="max-w-prose text-sm text-foreground/90">{purpose}</p>}
           {description && <p className="max-w-prose text-xs text-muted-foreground">{description}</p>}
+          <div ref={setAbout} className="max-w-prose text-xs text-muted-foreground empty:hidden" />
         </div>
         <div className="flex items-center gap-1.5">
+          {state && <ResetButton disabled={state.isDefault} onClick={state.reset} />}
           <SizePicker size={size} onChange={choose} />
           <CopyData data={exportData} />
         </div>
       </header>
-      {controls && <Controls>{controls}</Controls>}
-      <FrameContext.Provider value={frame}>
-        <ChartArea width={box.width} height={box.height} onResize={choose}>
-          <FigureBoundary>{children}</FigureBoundary>
-        </ChartArea>
-      </FrameContext.Provider>
-      {(readouts || hoverReadout) && (
-        <div className="flex flex-col gap-1.5">
-          {readouts && <Readouts>{readouts}</Readouts>}
-          {hoverReadout && <HoverReadout hover={hover} />}
-        </div>
+      {(state || controls) && (
+        <Controls>
+          {state && <FigureControls state={state} />}
+          {controls}
+        </Controls>
       )}
+      <div
+        ref={setViewControls}
+        className="grid grid-cols-[repeat(auto-fill,minmax(14rem,1fr))] items-end gap-x-6 gap-y-4 *:w-full *:max-w-none empty:hidden"
+      />
+      {equation && <div className="overflow-x-auto rounded-lg bg-muted/40 px-4 py-3">{equation}</div>}
+      <InsideFigure.Provider value={true}>
+        <FrameSlotsContext.Provider value={slots}>
+          <FrameContext.Provider value={frame}>
+            <ChartArea width={box.width} height={box.height} onResize={choose}>
+              <FigureBoundary>{children}</FigureBoundary>
+            </ChartArea>
+          </FrameContext.Provider>
+        </FrameSlotsContext.Provider>
+      </InsideFigure.Provider>
+      <div className="flex flex-col gap-1.5">
+        {groups ? (
+          <div className="flex flex-wrap gap-x-8 gap-y-2">
+            {Object.entries(groups).map(([label, body]) => (
+              <ReadoutGroup key={label} label={label}>
+                {body}
+              </ReadoutGroup>
+            ))}
+          </div>
+        ) : (
+          !!readouts && <Readouts>{readouts as ReactNode}</Readouts>
+        )}
+        <div ref={setViewReadouts} className="flex flex-wrap gap-x-5 gap-y-1 text-xs empty:hidden" />
+        {hoverReadout && <HoverReadout hover={hover} />}
+      </div>
       {caption && <p className="max-w-prose text-xs text-muted-foreground">{caption}</p>}
     </section>
+  )
+}
+
+/** True inside a Figure's chart area: a Figure there is a view that should have been a panel (design S §4.1). */
+const InsideFigure = createContext(false)
+
+/** Readouts given as labelled groups (a plain record, not a React node). */
+const isGroups = (r: FigureProps['readouts']): r is Readonly<Record<string, ReactNode>> =>
+  typeof r === 'object' && r !== null && !Array.isArray(r) && !('$$typeof' in r) && !(Symbol.iterator in r)
+
+function ResetButton({ disabled, onClick }: { disabled: boolean; onClick: () => void }) {
+  return (
+    <Button
+      variant="ghost"
+      size="icon-sm"
+      aria-label="Reset the figure's parameters"
+      title="Reset the figure's parameters"
+      disabled={disabled}
+      onClick={onClick}
+    >
+      <RotateCcw />
+    </Button>
   )
 }
 

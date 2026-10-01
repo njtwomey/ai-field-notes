@@ -10,9 +10,11 @@
  */
 
 import type { AnyUnivariate, Decides, Estimator, Fitted, Predicts, Scores, Supervised } from 'aifn/learning/estimators'
-import { cholesky, eigh } from 'aifn/numerics/linalg'
-import { fromData, type Tensor } from 'aifn/foundation/tensor'
+import { cholesky, eigh, solveTriangular } from 'aifn/numerics/linalg'
+import { dense, fromData, square, sum, type Tensor } from 'aifn/foundation/tensor'
 import { classLabels, inputs, mat, matrix, probabilityModel, softmaxRows, vec } from '../util'
+import { defineModel } from 'aifn/learning/estimators'
+import { real, space } from 'aifn/foundation/space'
 
 /** A fitted generative classifier: joint log-likelihoods as its head, a categorical predictive. */
 export interface GenerativeClassifier
@@ -247,20 +249,17 @@ function factorCovariance(cov: Float64Array, d: number) {
   const l = Float64Array.from(L.data as Float64Array)
   let logDet = 0
   for (let j = 0; j < d; j++) logDet += 2 * Math.log(l[j * d + j])
-  return { l, logDet, jitter, failed }
+  return { L, logDet, jitter, failed }
 }
 
-/** ‖L⁻¹ r‖² by forward substitution (the squared Mahalanobis distance when LLᵀ = Σ). */
-function mahalanobis(l: Float64Array, d: number, r: Float64Array): number {
-  const z = new Float64Array(d)
-  let s = 0
-  for (let i = 0; i < d; i++) {
-    let t = r[i]
-    for (let k = 0; k < i; k++) t -= l[i * d + k] * z[k]
-    z[i] = t / l[i * d + i]
-    s += z[i] * z[i]
-  }
-  return s
+/**
+ * ‖L⁻¹(xᵢ − μ)‖² for every row xᵢ of q (m × d, flat), by `solveTriangular`: the squared Mahalanobis distances to μ
+ * when LLᵀ = Σ. Returns [m].
+ */
+function mahalanobisRows(L: Tensor, q: Float64Array, m: number, d: number, mean: Float64Array): Float64Array {
+  const res = new Float64Array(d * m) // column i is xᵢ − μ
+  for (let i = 0; i < m; i++) for (let j = 0; j < d; j++) res[j * m + i] = q[i * d + j] - mean[j]
+  return dense.data(sum(square(solveTriangular(L, fromData(res, [d, m]))), 0))
 }
 
 /** A fitted linear or quadratic discriminant analysis. */
@@ -334,15 +333,13 @@ export function linearDiscriminant(
       const prior = Float64Array.from(logPrior, Math.exp)
       const centre = new Float64Array(d)
       for (let c = 0; c < K; c++) for (let j = 0; j < d; j++) centre[j] += prior[c] * means[c * d + j]
+      // Columns √π_k (μ_k − μ̄), then L⁻¹ of them: Zᵀ [d, K].
+      const D = new Float64Array(d * K)
+      for (let c = 0; c < K; c++)
+        for (let i = 0; i < d; i++) D[i * K + c] = Math.sqrt(prior[c]) * (means[c * d + i] - centre[i])
+      const Zt = dense.data(solveTriangular(f.L, fromData(D, [d, K])))
       const Z = new Float64Array(K * d) // rows: √π_k L⁻¹(μ_k − μ̄)
-      for (let c = 0; c < K; c++) {
-        for (let i = 0; i < d; i++) {
-          let t = means[c * d + i] - centre[i]
-          for (let k = 0; k < i; k++) t -= f.l[i * d + k] * Z[c * d + k]
-          Z[c * d + i] = t / f.l[i * d + i]
-        }
-      }
-      for (let c = 0; c < K; c++) for (let i = 0; i < d; i++) Z[c * d + i] *= Math.sqrt(prior[c])
+      for (let c = 0; c < K; c++) for (let i = 0; i < d; i++) Z[c * d + i] = Zt[i * K + c]
       const B = new Float64Array(d * d)
       for (let c = 0; c < K; c++)
         for (let a = 0; a < d; a++) for (let b = 0; b < d; b++) B[a * d + b] += Z[c * d + a] * Z[c * d + b]
@@ -352,24 +349,16 @@ export function linearDiscriminant(
       const lambda = e.values.data as Float64Array
       let lambdaTotal = 0
       for (let j = 0; j < d; j++) lambdaTotal += Math.max(lambda[j], 0)
-      const W = new Float64Array(d * r)
-      for (let col = 0; col < r; col++) {
-        // Back-substitute Lᵀ w = u.
-        for (let i = d - 1; i >= 0; i--) {
-          let t = U[i * d + col]
-          for (let k = i + 1; k < d; k++) t -= f.l[k * d + i] * W[k * r + col]
-          W[i * r + col] = t / f.l[i * d + i]
-        }
-      }
+      // w = L⁻ᵀ u for the first r eigenvectors.
+      const Ur = new Float64Array(d * r)
+      for (let i = 0; i < d; i++) for (let col = 0; col < r; col++) Ur[i * r + col] = U[i * d + col]
+      const W = dense.data(solveTriangular(f.L, fromData(Ur, [d, r]), { transpose: true }))
       const head = (q: Tensor) => {
         const { n: m, v: qv } = inputs(q, d, 'linearDiscriminant')
         const out = new Float64Array(m * K)
-        const res = new Float64Array(d)
-        for (let i = 0; i < m; i++) {
-          for (let c = 0; c < K; c++) {
-            for (let j = 0; j < d; j++) res[j] = qv[i * d + j] - means[c * d + j]
-            out[i * K + c] = logPrior[c] - 0.5 * mahalanobis(f.l, d, res)
-          }
+        for (let c = 0; c < K; c++) {
+          const r2 = mahalanobisRows(f.L, qv, m, d, means.subarray(c * d, (c + 1) * d))
+          for (let i = 0; i < m; i++) out[i * K + c] = logPrior[c] - 0.5 * r2[i]
         }
         return out
       }
@@ -443,12 +432,9 @@ export function quadraticDiscriminant(
       const head = (q: Tensor) => {
         const { n: m, v: qv } = inputs(q, d, 'quadraticDiscriminant')
         const out = new Float64Array(m * K)
-        const res = new Float64Array(d)
-        for (let i = 0; i < m; i++) {
-          for (let c = 0; c < K; c++) {
-            for (let j = 0; j < d; j++) res[j] = qv[i * d + j] - means[c * d + j]
-            out[i * K + c] = logPrior[c] - 0.5 * factors[c].logDet - 0.5 * mahalanobis(factors[c].l, d, res)
-          }
+        for (let c = 0; c < K; c++) {
+          const r2 = mahalanobisRows(factors[c].L, qv, m, d, means.subarray(c * d, (c + 1) * d))
+          for (let i = 0; i < m; i++) out[i * K + c] = logPrior[c] - 0.5 * factors[c].logDet - 0.5 * r2[i]
         }
         return out
       }
@@ -465,3 +451,80 @@ export function quadraticDiscriminant(
     },
   }
 }
+
+// ── Registry ─────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+defineModel(
+  {
+    key: 'gaussianNaiveBayes',
+    module: 'learning/generative-classifiers',
+    name: 'Gaussian naive Bayes',
+    summary: 'Class-conditional independent Gaussians per feature.',
+    task: 'classification',
+    capabilities: ['forward', 'decide', 'predictive', 'score'],
+    hyper: space({ varianceSmoothing: real(1e-12, 1e-3, { default: 1e-9, scale: 'log' }) }),
+    notes: ['naive-bayes'],
+    cite: ['hastie2009'],
+  },
+  gaussianNaiveBayes,
+)
+
+defineModel(
+  {
+    key: 'multinomialNaiveBayes',
+    module: 'learning/generative-classifiers',
+    name: 'Multinomial naive Bayes',
+    summary: 'Class-conditional multinomial counts with additive smoothing.',
+    task: 'classification',
+    capabilities: ['forward', 'decide', 'predictive', 'score'],
+    hyper: space({ alpha: real(0, 10, { default: 1, label: 'α' }) }),
+    notes: ['naive-bayes'],
+    cite: ['manning2008'],
+  },
+  multinomialNaiveBayes,
+)
+
+defineModel(
+  {
+    key: 'bernoulliNaiveBayes',
+    module: 'learning/generative-classifiers',
+    name: 'Bernoulli naive Bayes',
+    summary: 'Class-conditional independent binary features with additive smoothing.',
+    task: 'classification',
+    capabilities: ['forward', 'decide', 'predictive', 'score'],
+    hyper: space({ alpha: real(0, 10, { default: 1, label: 'α' }), binarize: real(-10, 10, { default: 0 }) }),
+    notes: ['naive-bayes'],
+    cite: ['manning2008'],
+  },
+  bernoulliNaiveBayes,
+)
+
+defineModel(
+  {
+    key: 'linearDiscriminant',
+    module: 'learning/generative-classifiers',
+    name: 'Linear discriminant analysis',
+    summary: 'Gaussian classes with a shared covariance; also projects onto the discriminant directions.',
+    task: 'classification',
+    capabilities: ['forward', 'decide', 'predictive', 'score', 'transform'],
+    hyper: space({ shrinkage: real(0, 1, { default: 0 }) }),
+    notes: ['linear-discriminant-analysis'],
+    cite: ['hastie2009'],
+  },
+  linearDiscriminant,
+)
+
+defineModel(
+  {
+    key: 'quadraticDiscriminant',
+    module: 'learning/generative-classifiers',
+    name: 'Quadratic discriminant analysis',
+    summary: 'Gaussian classes, each with its own covariance.',
+    task: 'classification',
+    capabilities: ['forward', 'decide', 'predictive', 'score'],
+    hyper: space({ regularisation: real(0, 1, { default: 0 }) }),
+    notes: ['quadratic-discriminant-analysis'],
+    cite: ['hastie2009'],
+  },
+  quadraticDiscriminant,
+)

@@ -4,9 +4,9 @@
  * the backward pass node by node.
  */
 
-import { isTraced, ones, unwrap, withTape, type Tensor, type Value } from 'aifn/foundation/tensor'
+import { ones, unwrap, type Tensor, type Value } from 'aifn/foundation/tensor'
 import { ShapeError } from 'aifn/foundation/errors'
-import { GraphTape, pullback, sweep } from './tape'
+import { ReverseInterpreter } from './reverse'
 import { treeFlatten, treeUnflatten, zerosLike } from 'aifn/foundation/pytree'
 
 /**
@@ -56,42 +56,44 @@ export type Graph = {
  * path to the output has no derivative rule.
  */
 export function traceGraph<T>(f: (x: T) => Value, x: T): Graph {
-  const tape = new GraphTape()
+  const rev = new ReverseInterpreter()
   const flat = treeFlatten(x, 'x')
-  const inputs = flat.leaves.map((leaf, i) => tape.input(unwrap(leaf), flat.paths[i]))
-  const y = withTape(tape, () => f(treeUnflatten(flat.treedef, inputs) as T))
+  const inputs = flat.leaves.map((leaf, i) => rev.input(unwrap(leaf), flat.paths[i]))
+  const y = f(treeUnflatten(flat.treedef, inputs) as T)
   const raw = unwrap(y)
   if (typeof raw !== 'number' && raw.shape.length !== 0)
     throw new ShapeError('traceGraph', 'traceGraph: f must return a scalar')
   const seed = typeof raw === 'number' ? 1 : ones([])
-  const { cotangents, all } = sweep(tape, y, seed, inputs, { createGraph: false, keepAll: true })
-  const nodes: GraphNode[] = tape.nodes.map((node, id) => {
+  const { cotangents, all } = rev.backward([y], [seed], inputs, true)
+  const raws = (vs: (Value | null)[]) => vs.map((v) => (v === null ? null : unwrap(v)))
+  const nodes: GraphNode[] = rev.records.map((record, id) => {
     const adjoint = all.get(id)
     const adj = adjoint === undefined ? null : unwrap(adjoint)
-    const scalar = typeof node.output === 'number' || node.output.shape.length === 0
+    const output = unwrap(record.output)
+    const scalar = typeof output === 'number' || output.shape.length === 0
+    const rule = record.primitive?.vjp ?? null
     // Inspection only: each rule runs again, once for the local partials and once for the messages.
-    const partials =
-      scalar && node.vjp !== null ? pullback(tape, id, typeof node.output === 'number' ? 1 : ones([])) : null
-    const messages = adj !== null && node.vjp !== null ? pullback(tape, id, adj) : null
+    const partials = scalar && rule !== null ? raws(rev.pullback(id, typeof output === 'number' ? 1 : ones([]))) : null
+    const messages = adj !== null && rule !== null ? raws(rev.pullback(id, adj)) : null
     return {
       id,
-      op: node.op,
-      ...(node.label === undefined ? {} : { label: node.label }),
-      inputs: node.inputs.map((v, i) =>
-        isTraced(v) && v.tape === tape
-          ? { node: v.id, partial: partials?.[i] ?? null, message: messages?.[i] ?? null }
+      op: record.primitive?.name ?? 'input',
+      ...(record.label === undefined ? {} : { label: record.label }),
+      inputs: record.inputs.map((v, i) =>
+        record.sources[i] >= 0
+          ? { node: record.sources[i], partial: partials?.[i] ?? null, message: messages?.[i] ?? null }
           : { constant: unwrap(v) },
       ),
-      value: node.output,
+      value: output,
       adjoint: adj,
-      differentiable: node.leaf || node.vjp !== null,
+      differentiable: record.primitive === null || rule !== null,
     }
   })
   const grads = cotangents.map((g, i) => (g === null ? zerosLike(unwrap(flat.leaves[i])) : unwrap(g)))
   return {
     nodes,
-    inputs: inputs.map((t) => t.id),
-    output: isTraced(y) && y.tape === tape ? y.id : -1,
+    inputs: inputs.map((t) => t.record),
+    output: rev.owns(y) ? y.record : -1,
     value: raw,
     grad: treeUnflatten(flat.treedef, grads),
   }

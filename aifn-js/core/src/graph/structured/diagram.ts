@@ -5,6 +5,7 @@
  * edges with arrows and undirected ones without. aifn emits the data; the lab draws it.
  */
 
+import { DomainError } from 'aifn/foundation/errors'
 import type { Index } from 'aifn/foundation/contracts'
 import { groupChain, groupSizes } from './build'
 import { markovBlanket } from './shape'
@@ -97,7 +98,7 @@ export function toDiagram(graph: StructuredGraph, options: DiagramOptions = {}):
   let state: ((i: Index) => 'idle' | 'active' | 'done') | null = null
   if (options.highlight !== undefined) {
     const centre = at.findIndex((n) => n.name === options.highlight)
-    if (centre < 0) throw new RangeError(`toDiagram: no node named ${options.highlight}`)
+    if (centre < 0) throw new DomainError('toDiagram', `toDiagram: no node named ${options.highlight}`)
     const blanket = new Set(markovBlanket({ ...g, unrolled: true }, options.highlight).blanket)
     const touching = new Set(
       g.edges.flatMap((e) =>

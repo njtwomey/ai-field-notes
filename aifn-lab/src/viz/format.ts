@@ -38,11 +38,3 @@ export function stepDecimals(step: number): number {
   if (exp) return Number(exp[1]) + (text.split('e')[0].split('.')[1]?.length ?? 0)
   return text.split('.')[1]?.length ?? 0
 }
-
-/** `v` clamped to [min, max] and snapped to the grid min + k·step, without floating-point noise. */
-export function snapToStep(v: number, min: number, max: number, step: number): number {
-  const clamped = Math.min(Math.max(v, min), max)
-  if (!(step > 0)) return clamped
-  const snapped = min + Math.round((clamped - min) / step) * step
-  return Number(Math.min(Math.max(snapped, min), max).toFixed(Math.min(stepDecimals(step) + 2, 20)))
-}

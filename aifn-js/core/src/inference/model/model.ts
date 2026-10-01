@@ -107,10 +107,17 @@ export interface DistSpec {
 
 /**
  * Deterministic links: `sum` (Σ args), `difference` (a − b), `product` (Π args), `linear` (w · x + b for a constant
- * weight vector w, a vector node x and an optional bias), `probit` (Φ(a)), `logistic` (σ(a)), `exp`, and `index`
- * (table[i, j, …]: a conditional probability table indexed by the values of discrete parents).
+ * weight vector w, a vector node x and an optional bias), `probit` (Φ(a)), `logistic` (σ(a)), `exp`, `index`
+ * (table[i, j, …]: a conditional probability table indexed by the values of discrete parents), and `interval`
+ * (𝟙(lower < x < upper) for args [x, lower, upper]; either bound may be ±∞).
+ *
+ * An interval states a constraint (a truncation) when an observed `Bernoulli` of it is 1: the node then contributes
+ * log 𝟙(lower < x < upper) to the joint density, and expectation propagation over the model
+ * (`modelExpectationPropagation` of `aifn/inference/expectation-propagation`) treats it as an interval factor with
+ * truncated-normal moments. An observed 0 states the complement, which is an interval only when one bound is infinite.
  */
-export type DeterministicOp = 'sum' | 'difference' | 'product' | 'linear' | 'probit' | 'logistic' | 'exp' | 'index'
+export type DeterministicOp =
+  'sum' | 'difference' | 'product' | 'linear' | 'probit' | 'logistic' | 'exp' | 'index' | 'interval'
 
 /**
  * What a model node carries: its conditional distribution (`dist`; for a chain variable, the one at t = 0, with `next`
@@ -219,18 +226,17 @@ export function model(name: string, build: (m: ModelBuilder) => void): Model {
   const groups: Group[] = []
   const sizes: string[] = []
   const names = new Set<string>()
-  const handle = (node: string, lag?: number): NodeHandle => ({
-    kind: 'ref',
-    node,
-    ...(lag ? { lag } : {}),
-    at: (selector) => ({
-      kind: 'ref',
-      node,
-      ...(lag ? { lag } : {}),
+  // A handle is stored as a plain reference wherever it is passed as an argument, so `at` is not enumerable: the
+  // model stays plain data (structuredClone and JSON copy the reference and drop the method).
+  const handle = (node: string, lag?: number): NodeHandle => {
+    const ref: NodeRef = { kind: 'ref', node, ...(lag ? { lag } : {}) }
+    const at = (selector: NodeRef): NodeRef => ({
+      ...ref,
       select: selector.node,
       ...(selector.lag ? { selectLag: selector.lag } : {}),
-    }),
-  })
+    })
+    return Object.defineProperty(ref, 'at', { value: at, enumerable: false }) as NodeHandle
+  }
   const add = (node: ModelNode, options: NodeOptions): NodeHandle => {
     if (names.has(node.name)) throw new Error(`model: duplicate node ${node.name}`)
     if (options.next) {
@@ -536,6 +542,14 @@ export function evaluateOp(op: DeterministicOp, values: readonly NodeValue[]): N
       return sigmoid(values[0]) as NodeValue
     case 'exp':
       return exp(values[0]) as NodeValue
+    case 'interval': {
+      const [x, lower, upper] = values.map((v) => {
+        if (typeof v === 'number') return v
+        if (v.shape.reduce((a, b) => a * b, 1) !== 1) throw new Error('model: interval takes scalar arguments')
+        return toFlat(v)[0]
+      })
+      return lower < x && x < upper ? 1 : 0
+    }
     case 'index': {
       const table = values[0]
       if (typeof table === 'number') throw new Error('model: index needs a table')

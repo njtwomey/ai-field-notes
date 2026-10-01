@@ -17,6 +17,7 @@
  *   marginal likelihood gradient.
  * - Hyperparameters are a pytree (`k.params`, walked by `aifn/foundation/pytree`); `logParams(k)` and
  *   `kernelFromLog(k, θ)` move them to and from log space for fitting.
+ * - `kernelRegistry`: every kernel factory with its hyperparameter `Space` and stationarity.
  * - Helpers: `asRows`, `scaledSquaredDistances`, `scaledDistances`.
  */
 
@@ -46,9 +47,11 @@ export {
   type DotProductParams,
   type Kernel,
   type KernelParams,
+  type LinearParams,
   type MaternNu,
   type PeriodicParams,
   type RationalQuadraticParams,
   type StationaryParams,
   type VarianceParams,
 } from './kernels'
+export { kernelRegistry } from './registry'

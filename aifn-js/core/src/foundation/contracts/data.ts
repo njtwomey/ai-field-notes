@@ -44,8 +44,15 @@ export interface Recipe {
  * risk any predictor can reach.
  */
 export interface Truth<X = Tensor> extends Model, Decides<X>, Predicts<X, Distribution>, Expects<X> {
-  readonly task: 'classification' | 'regression'
-  /** The Bayes error (classification) or Bayes risk under squared loss (regression). */
+  /**
+   * `changepoint`: a piecewise series whose inputs are times; `decide` gives the segment, `predictive` and `expect`
+   * the law and mean of the value at each time.
+   */
+  readonly task: 'classification' | 'regression' | 'changepoint'
+  /**
+   * The Bayes error (classification), the Bayes risk under squared loss (regression), or the mean squared error of
+   * predicting each value from its segment's true parameters (changepoint).
+   */
   readonly bayesRisk: number
 }
 
@@ -81,11 +88,35 @@ export interface Dataset<X extends Features = Features, Y = Tensor> extends Kind
   readonly meta?: DatasetMeta
 }
 
-/** Registry metadata of a dataset generator: its task, knobs and whether it has a truth. */
+/**
+ * What a dataset generator returns: a `Dataset` (the only form a recipe can start from), several (`datasets`), a
+ * sequence with hidden states, a series, an image tensor, a set of binary patterns, ratings, a click log or a
+ * catalogue.
+ */
+export type DatasetOutput =
+  'dataset' | 'datasets' | 'sequence' | 'series' | 'image' | 'patterns' | 'ratings' | 'clicks' | 'catalogue'
+
+/**
+ * Registry metadata of a dataset generator: its task, its knobs (the scalar options, with the generator's defaults),
+ * whether its datasets carry a truth, and what it returns. A generator with `random: true` is called `(s, knobs)`,
+ * any other `(knobs)`.
+ */
 export interface DatasetInfo extends Info {
+  readonly kind: 'dataset'
   readonly task: DatasetMeta['task']
   readonly knobs: Space
   readonly truth: boolean
+  readonly output: DatasetOutput
+}
+
+/**
+ * Registry metadata of a dataset modifier, called `(s, dataset, params)`: its parameters, and what it needs of the
+ * dataset (`labels`: integer class labels in `y`; a recipe skips it, and reports it, on data without them).
+ */
+export interface ModifierInfo extends Info {
+  readonly kind: 'modifier'
+  readonly params: Space
+  readonly needs?: 'labels'
 }
 
 /** A dataset on the wire; the truth, which holds functions, stays behind (its recipe rebuilds it). */

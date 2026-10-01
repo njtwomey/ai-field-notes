@@ -9,6 +9,7 @@ import type { Algorithm, Scalar, Size, StopReason, Trace, VectorLike } from 'aif
 import { dormandPrince } from './adaptive'
 import { withEvents, type EventHit, type OdeEvent } from './events'
 import { rungeKutta } from './explicit'
+import { adaptiveBdf } from './variable-bdf'
 import { bdf, implicitEuler, implicitTrapezoid } from './implicit'
 import type { InitialValue, JacobianOption, OdeState, Rhs } from './types'
 
@@ -19,6 +20,7 @@ export type OdeMethod =
   | 'midpoint'
   | 'rk4'
   | 'dormand-prince'
+  | 'bdf'
   | 'implicit-euler'
   | 'implicit-trapezoid'
   | 'bdf1'
@@ -31,9 +33,9 @@ export type SolveIvpOptions = {
   method?: OdeMethod
   /** The step size of a fixed-step method. Default (t₁ − t₀)/100. */
   stepSize?: Scalar
-  /** Relative tolerance of the adaptive method. */
+  /** Relative tolerance of the adaptive methods (`'dormand-prince'`, `'bdf'`). */
   rtol?: Scalar
-  /** Absolute tolerance of the adaptive method. */
+  /** Absolute tolerance of the adaptive methods (one per component for `'bdf'`). */
   atol?: Scalar
   /** The Jacobian option of the implicit methods. */
   jacobian?: JacobianOption
@@ -74,6 +76,8 @@ export function solverFor(f: Rhs, t1: Scalar, t0: Scalar, options: SolveIvpOptio
   switch (method) {
     case 'dormand-prince':
       return dormandPrince(f, { tEnd: t1, rtol, atol })
+    case 'bdf':
+      return adaptiveBdf(f, { tEnd: t1, rtol, atol, jacobian })
     case 'implicit-euler':
       return implicitEuler(f, { stepSize: h, tEnd: t1, jacobian })
     case 'implicit-trapezoid':

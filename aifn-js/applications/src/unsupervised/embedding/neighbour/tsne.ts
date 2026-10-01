@@ -12,6 +12,8 @@ import { type Tensor } from 'aifn/foundation/tensor'
 import { trace, type Algorithm } from 'aifn/foundation/trace'
 import { squaredDistances } from '../neighbourhoods'
 import { mat, matrix, square, values, vec } from '../util'
+import { defineModel } from 'aifn/learning/estimators'
+import { int, real, space } from 'aifn/foundation/space'
 
 /** The per-point calibration of the input affinities. */
 export interface PerplexityCalibration {
@@ -257,3 +259,27 @@ export function tsne(
     },
   }
 }
+
+// ── Registry ─────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+defineModel(
+  {
+    key: 'tsne',
+    module: 'unsupervised/embedding/neighbour',
+    name: 't-SNE',
+    summary:
+      'Matching Gaussian neighbour probabilities with Student-t ones in the embedding, by gradient descent on their KL divergence.',
+    task: 'embedding',
+    capabilities: [],
+    transductive: true,
+    hyper: space({
+      perplexity: real(2, 100, { default: 30 }),
+      iterations: int(10, 5000, { default: 1000 }),
+      dims: int(1, 3, { default: 2 }),
+      earlyExaggeration: real(1, 50, { default: 12 }),
+    }),
+    notes: ['t-distributed-stochastic-neighbour-embedding'],
+    cite: ['vandermaaten2008'],
+  },
+  tsne,
+)

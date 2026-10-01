@@ -297,8 +297,6 @@ export function correlation(xs: Data, ys: Data): number {
   return Math.max(-1, Math.min(1, sxy / Math.sqrt(sxx * syy)))
 }
 
-// TODO(consolidation): return a Tensor, as every other array result of stats does. Deferred while the lab's
-// pair-plot, parallel-coordinates and Andrews-curve views (built concurrently) index the result as an array.
 /**
  * z-scores (xᵢ − x̄) / s as a rank-1 tensor, with s the population standard deviation by default (`scipy.stats.zscore`, `ddof=0`). All
  * values are NaN when the data are constant (0/0), as in scipy; `standardise` reports that case with a flag.

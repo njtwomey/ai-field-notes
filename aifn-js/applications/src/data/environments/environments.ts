@@ -8,6 +8,9 @@
 import type { BanditEnvironment } from 'aifn-applied/decisions/bandits'
 import { normal, uniform } from 'aifn/foundation/random'
 import { isTensor, toFlat, type Tensor } from 'aifn/foundation/tensor'
+import type { EnvironmentInfo } from 'aifn/foundation/contracts'
+import { definer } from 'aifn/foundation/registry'
+import { int, oneOf, real, space } from 'aifn/foundation/space'
 
 const read = (v: Tensor | readonly number[]) => (isTensor(v) ? toFlat(v) : [...v])
 
@@ -97,3 +100,47 @@ export function linearBandit(options: LinearBanditOptions): BanditEnvironment {
     bounded: false,
   }
 }
+
+// ── Registry ─────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+const environment = definer<EnvironmentInfo>('environment', 'data/environments')
+
+environment(
+  {
+    key: 'bernoulliBandit',
+    name: 'Bernoulli bandit',
+    summary: 'Arms paying 1 with their mean probability, else 0; the means are a required argument.',
+    family: 'bandit',
+    params: space({}),
+    notes: ['multi-armed-bandit', 'thompson-sampling'],
+  },
+  bernoulliBandit,
+)
+
+environment(
+  {
+    key: 'gaussianBandit',
+    name: 'Gaussian bandit',
+    summary: 'Arms paying Gaussian rewards around their means; the means are a required argument.',
+    family: 'bandit',
+    params: space({}),
+    notes: ['multi-armed-bandit', 'upper-confidence-bound-algorithm'],
+  },
+  gaussianBandit,
+)
+
+environment(
+  {
+    key: 'linearBandit',
+    name: 'Linear bandit',
+    summary: 'Arms are feature vectors whose mean reward is linear in an unknown θ*; θ* is a required option.',
+    family: 'bandit',
+    params: space({
+      arms: int(2, 50, { default: 5 }),
+      mode: oneOf(['fixed', 'random']),
+      noise: real(0, 3, { default: 0.3 }),
+    }),
+    notes: ['contextual-bandit', 'linucb', 'linear-thompson-sampling'],
+  },
+  linearBandit,
+)

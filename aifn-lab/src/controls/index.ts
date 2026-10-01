@@ -16,13 +16,17 @@ export {
   number,
   choice,
   toggle,
+  setting,
+  row,
+  variants,
+  when,
   type ParamDef,
   type ParamDefs,
   type ParamValue,
   type Values,
   type ValueOf,
 } from './params'
-export { ParamControls, type ParamControlsProps } from './ParamControls'
+export { FigureControls, LeafControl, ParamControls, type ParamControlsProps } from './ParamControls'
 export {
   defineVariants,
   useVariants,

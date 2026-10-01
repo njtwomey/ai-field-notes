@@ -3,6 +3,9 @@
 import { normal, type Stream, child, uniform } from 'aifn/foundation/random'
 import { regressionTruth } from '../truth'
 import { checkCount, type Dataset, generatorRecipe, matrix, vector } from '../types'
+import type { DatasetInfo } from 'aifn/foundation/contracts'
+import { definer } from 'aifn/foundation/registry'
+import { int, oneOf, real, space } from 'aifn/foundation/space'
 
 /** The named 1-D regression functions. */
 export type RegressionFunction = 'sine' | 'linear' | 'cubic' | 'step' | 'sinc' | 'bump' | 'doppler'
@@ -147,7 +150,7 @@ export function linearRegressionData(
         for (let j = 0; j < d; j++) v += r[j] * w[j]
         return v
       }, noise),
-      recipe: generatorRecipe('linearRegression', s.key, { n, weights: Array.from(w), bias, noise, correlation }),
+      recipe: generatorRecipe('linearRegressionData', s.key, { n, weights: Array.from(w), bias, noise, correlation }),
       name: 'linear regression',
       description: `${n} points from y = xᵀw + ${bias} + ε with ${d} features, w = (${Array.from(w, (v) => v.toFixed(2)).join(', ')}) and noise sd ${noise}.`,
       task: 'regression',
@@ -199,3 +202,67 @@ export function friedman1(s: Stream, options: { n?: number; d?: number; noise?: 
     },
   }
 }
+
+// ── Registry ─────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+const dataset = definer<DatasetInfo>('dataset', 'data/synthetic')
+
+dataset(
+  {
+    key: 'regression1d',
+    name: 'One-dimensional regression',
+    summary: 'y = f(x) + noise for a named function f of one input.',
+    task: 'regression',
+    output: 'dataset',
+    knobs: space({
+      n: int(2, 5000, { default: 50 }),
+      fn: oneOf(['sine', 'linear', 'cubic', 'step', 'sinc', 'bump', 'doppler']),
+      noise: real(0, 2, { default: 0.2 }),
+      spacing: oneOf(['random', 'even']),
+      heteroscedastic: real(0, 10, { default: 0 }),
+    }),
+    truth: true,
+    random: true,
+    notes: ['local-regression', 'regression-splines'],
+  },
+  regression1d,
+)
+
+dataset(
+  {
+    key: 'linearRegressionData',
+    name: 'Linear regression data',
+    summary: 'A linear model with Gaussian noise and AR(1)-correlated features.',
+    task: 'regression',
+    output: 'dataset',
+    knobs: space({
+      n: int(2, 5000, { default: 100 }),
+      d: int(1, 50, { default: 3 }),
+      bias: real(-10, 10, { default: 0 }),
+      noise: real(0, 5, { default: 0.5 }),
+      correlation: real(-0.99, 0.99, { default: 0 }),
+    }),
+    truth: true,
+    random: true,
+    notes: ['linear-regression'],
+  },
+  linearRegressionData,
+)
+
+dataset(
+  {
+    key: 'friedman1',
+    name: 'Friedman #1',
+    summary: "Friedman's first benchmark: a nonlinear function of five uniform inputs plus uninformative ones.",
+    task: 'regression',
+    output: 'dataset',
+    knobs: space({
+      n: int(2, 5000, { default: 200 }),
+      d: int(5, 50, { default: 10 }),
+      noise: real(0, 5, { default: 1 }),
+    }),
+    truth: true,
+    random: true,
+  },
+  friedman1,
+)

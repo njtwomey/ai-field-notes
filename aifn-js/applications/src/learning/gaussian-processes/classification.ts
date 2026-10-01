@@ -1,9 +1,12 @@
 /**
- * Binary Gaussian-process classification by the Laplace approximation: Newton's method for the posterior mode of the
- * latent function (a traceable `Algorithm`), the approximate log marginal likelihood, and predictive probabilities.
+ * Binary Gaussian-process classification by the Laplace approximation or by expectation propagation
+ * (`./classification-ep`): Newton's method for the posterior mode of the latent function (a traceable `Algorithm`),
+ * the approximate log marginal likelihood and its gradient in the hyperparameters, type-II maximum likelihood by
+ * L-BFGS, and predictive probabilities.
  *
  * Rasmussen and Williams (2006), "Gaussian Processes for Machine Learning", Algorithms 3.1 (mode finding, the stable
- * form with B = I + W^½KW^½) and 3.2 (predictions), and eq. 3.32 (the approximate log marginal likelihood).
+ * form with B = I + W^½KW^½), 3.2 (predictions) and 5.1 (the evidence gradient), and eq. 3.32 (the approximate log
+ * marginal likelihood).
  */
 
 import { Bernoulli, type Univariate } from 'aifn/probability/distributions'
@@ -21,13 +24,20 @@ import {
   type Samples,
   type Scores,
   type Supervised,
-  type Trained,
 } from 'aifn/learning/estimators'
-import { asRows, gram, kernelDiagonal, type Kernel, type KernelParams } from 'aifn/learning/kernels'
+import { asRows, gram, kernelDiagonal, kernelFromLog, type Kernel, type KernelParams } from 'aifn/learning/kernels'
+import { lbfgs, type LbfgsState } from 'aifn/optim/second-order'
+import { customVjp, valueAndGrad } from 'aifn/foundation/autodiff'
+import { ravel } from 'aifn/foundation/pytree'
+import { epWeights, gpEp, gpEpEvidence, stableFactor, type GpEpOptions } from './classification-ep'
+import type { MvEpState } from 'aifn/inference/expectation-propagation'
+import { kernelLogVector } from './regression'
 import { cholesky, solveTriangular } from 'aifn/numerics/linalg'
 import { normalCdf, normalLogCdf, normalPdf, sigmoid, softplus } from 'aifn/numerics/special'
-import { fromData, matmul, toFlat, type Tensor } from 'aifn/foundation/tensor'
-import { trace, type Algorithm, type Trace } from 'aifn/foundation/trace'
+import { fromData, matmul, mul, toFlat, type Tensor, type Value } from 'aifn/foundation/tensor'
+import { run, trace, type Algorithm, type Trace } from 'aifn/foundation/trace'
+import { defineModel } from 'aifn/learning/estimators'
+import { int, oneOf, space } from 'aifn/foundation/space'
 
 /** The link from latent f to P(y = 1 | f): logistic σ(f) or probit Φ(f). */
 export type ClassificationLikelihood = 'logistic' | 'probit'
@@ -74,21 +84,30 @@ export type LaplaceState = Status & {
   converged: boolean
 }
 
+/**
+ * A factorised likelihood for the Laplace approximation: at latent values f [n], log p(y | f), its gradient and the
+ * negative Hessian diagonal W (non-negative for a log-concave likelihood).
+ */
+export type LaplaceTerms = (f: Float64Array) => { logLik: number; grad: Float64Array; W: Float64Array }
+
 /** The problem a Laplace mode search solves. */
 export type LaplaceProblem = {
   K: Tensor
-  /** Labels 0 or 1, [n]. */
+  /** Labels, [n]: 0 or 1 for the named binary likelihoods; whatever `likelihood` reads when it is a function. */
   labels: Tensor
-  likelihood: ClassificationLikelihood
+  /** A binary link by name, or any factorised log-concave likelihood (e.g. the ordinal one of `./ordinal`). */
+  likelihood: ClassificationLikelihood | LaplaceTerms
   /** Stop when Ψ rises by less than this (default 1e-10, as scikit-learn). */
   tolerance?: number
 }
 
 /** Quantities at f: W, B's factor and the approximate log marginal likelihood. */
-function at(problem: LaplaceProblem, f: Float64Array) {
-  const t = Float64Array.from(toFlat(problem.labels))
+export function laplaceAt(problem: LaplaceProblem, f: Float64Array) {
   const n = f.length
-  const { logLik, grad, W } = likelihoodTerms(problem.likelihood, t, f)
+  const { logLik, grad, W } =
+    typeof problem.likelihood === 'function'
+      ? problem.likelihood(f)
+      : likelihoodTerms(problem.likelihood, Float64Array.from(toFlat(problem.labels)), f)
   const sW = W.map(Math.sqrt)
   const K = Float64Array.from(toFlat(problem.K))
   const B = new Float64Array(n * n)
@@ -111,7 +130,7 @@ export function laplaceMode(problem: LaplaceProblem): Algorithm<{ f?: Tensor }, 
   const tol = problem.tolerance ?? 1e-10
   const n = problem.K.shape[0]
   const stateAt = (f: Float64Array, a: Float64Array, t: number, previous: number): LaplaceState => {
-    const q = at(problem, f)
+    const q = laplaceAt(problem, f)
     let fa = 0
     for (let i = 0; i < n; i++) fa += f[i] * a[i]
     const objective = q.logLik - 0.5 * fa
@@ -139,7 +158,7 @@ export function laplaceMode(problem: LaplaceProblem): Algorithm<{ f?: Tensor }, 
     },
     step: (state) => {
       const f = Float64Array.from(toFlat(state.f))
-      const q = at(problem, f)
+      const q = laplaceAt(problem, f)
       const b = Float64Array.from(f, (fi, i) => q.W[i] * fi + q.grad[i])
       // W^½ K b
       const Kb = new Float64Array(n)
@@ -161,17 +180,110 @@ export function laplaceMode(problem: LaplaceProblem): Algorithm<{ f?: Tensor }, 
   }
 }
 
-/** Options of `gpClassifier`. */
-export type GpClassifierParams<P extends KernelParams = KernelParams> = {
-  kernel: Kernel<P>
+/** ∂³ log p(y | f)/∂f³ elementwise, for the implicit term of the Laplace evidence gradient. */
+function thirdDerivative(likelihood: ClassificationLikelihood, t: Float64Array, f: Float64Array): Float64Array {
+  return Float64Array.from(f, (fi, i) => {
+    const y = 2 * t[i] - 1
+    if (likelihood === 'logistic') {
+      const p = sigmoid(fi)
+      return -p * (1 - p) * (1 - 2 * p)
+    }
+    // r = N(z)/Φ(z), z = yf: r' = −zr − r², r'' = −r − zr' − 2rr', and ∂³ log Φ(yf)/∂f³ = y r''(z).
+    const z = y * fi
+    const r = Math.exp(Math.log(normalPdf(z)) - normalLogCdf(z))
+    const r1 = -z * r - r * r
+    return y * (-r - z * r1 - 2 * r * r1)
+  })
+}
+
+/** Options of `laplaceEvidence`. */
+export type LaplaceEvidenceOptions = {
   likelihood?: ClassificationLikelihood
   /** Most Newton steps (default 100). */
   maxSteps?: number
-  /** Newton convergence tolerance on Ψ (default 1e-10). */
+  /** Newton tolerance on Ψ (default 1e-10). */
   tolerance?: number
 }
 
-/** A fitted Laplace GP classifier. */
+/**
+ * The Laplace log marginal likelihood (R&W eq. 3.32) as a differentiable function of the Gram matrix K (labels 0 and
+ * 1). The mode f̂ depends on K, so the reverse rule adds the implicit term of Rasmussen and Williams (2006),
+ * Algorithm 5.1: with a = ∇log p(y | f̂), R = W^½ B⁻¹ W^½ and s₂ = ∂ log q/∂f̂ = −½ diag((K⁻¹ + W)⁻¹) ∂W/∂f̂
+ * = ½ diag((K⁻¹ + W)⁻¹) ∇³log p(y | f̂), ∂ log q(y | X)/∂K = ½ aaᵀ − ½ R + sym(u aᵀ) with u = (I − RK) s₂ (the
+ * mode moves by (I + KW)⁻¹ ∂K a). Checked against finite differences. Successive calls start Newton from the
+ * previous mode.
+ */
+export function laplaceEvidence(labels: Tensor, options: LaplaceEvidenceOptions = {}): (K: Value) => Value {
+  const { likelihood = 'logistic', maxSteps = 100, tolerance = 1e-10 } = options
+  const t = Float64Array.from(toFlat(labels))
+  let warm: Tensor | null = null
+  const solve = (K: Tensor) => {
+    const problem: LaplaceProblem = { K, labels, likelihood, tolerance }
+    let final = run(laplaceMode(problem), warm ? { f: warm } : {}, maxSteps)
+    if (!Number.isFinite(final.logMarginal) && warm) final = run(laplaceMode(problem), {}, maxSteps)
+    if (Number.isFinite(final.logMarginal)) warm = final.f
+    return { final, problem }
+  }
+  const gradient = (problem: LaplaceProblem, final: LaplaceState): Tensor => {
+    const f = Float64Array.from(toFlat(final.f))
+    const n = f.length
+    const q = laplaceAt(problem, f)
+    const factor = stableFactor(q.K, q.sW)
+    const R = factor.R()
+    // diag((K⁻¹ + W)⁻¹) = diag(K) − colsum(C²), C = L⁻¹ W^½ K.
+    const SK = new Float64Array(n * n)
+    for (let i = 0; i < n; i++) for (let j = 0; j < n; j++) SK[i * n + j] = q.sW[i] * q.K[i * n + j]
+    const C = factor.forward(SK, n)
+    const d3 = thirdDerivative(likelihood, t, f)
+    const s2 = new Float64Array(n)
+    for (let j = 0; j < n; j++) {
+      let c2 = 0
+      for (let k = 0; k < n; k++) c2 += C[k * n + j] ** 2
+      s2[j] = 0.5 * (q.K[j * n + j] - c2) * d3[j]
+    }
+    // u = s₂ − R K s₂.
+    const Ks2 = new Float64Array(n)
+    for (let i = 0; i < n; i++) for (let j = 0; j < n; j++) Ks2[i] += q.K[i * n + j] * s2[j]
+    const u = Float64Array.from(s2)
+    for (let i = 0; i < n; i++) for (let j = 0; j < n; j++) u[i] -= R[i * n + j] * Ks2[j]
+    const a = q.grad
+    const G = new Float64Array(n * n)
+    for (let i = 0; i < n; i++)
+      for (let j = 0; j < n; j++)
+        G[i * n + j] = 0.5 * a[i] * a[j] - 0.5 * R[i * n + j] + 0.5 * (u[i] * a[j] + a[i] * u[j])
+    return fromData(G, [n, n])
+  }
+  return customVjp(
+    (K: Value) => solve(K as Tensor).final.logMarginal as Value,
+    (K: Value) => {
+      const { final, problem } = solve(K as Tensor)
+      return { out: final.logMarginal as Value, residuals: gradient(problem, final) }
+    },
+    (G: Tensor, cot: Value) => [mul(cot, G)],
+  )
+}
+
+// ── The estimator ────────────────────────────────────────────────────────────────────────────────────────────────
+
+/** How the non-Gaussian posterior is approximated: Laplace (mode and curvature) or EP (moment matching, probit). */
+export type GpClassificationMethod = 'laplace' | 'ep'
+
+/** Options of `gpClassifier`. */
+export type GpClassifierParams<P extends KernelParams = KernelParams> = {
+  kernel: Kernel<P>
+  /** Default 'laplace'. */
+  method?: GpClassificationMethod
+  /** Default logistic for Laplace; EP supports the probit link only (and defaults to it). */
+  likelihood?: ClassificationLikelihood
+  /** Most Newton steps for Laplace (default 100), most sweeps for EP (default 100). */
+  maxSteps?: number
+  /** Newton convergence tolerance on Ψ (default 1e-10), or EP's site-change tolerance (default 1e-8). */
+  tolerance?: number
+  /** EP damping in [0, 1) (default 0). */
+  damping?: number
+}
+
+/** A fitted GP classifier. */
 export interface GpClassifierModel<P extends KernelParams = KernelParams>
   extends
     Fitted<Tensor, Tensor>,
@@ -179,38 +291,48 @@ export interface GpClassifierModel<P extends KernelParams = KernelParams>
     Decides<Tensor, Tensor>,
     Predicts<Tensor, Univariate<Tensor>>,
     Expects<Tensor>,
-    Samples<Tensor, Tensor>,
-    Trained<LaplaceState> {
+    Samples<Tensor, Tensor> {
   readonly kind: 'model'
   /** The model's name. */
   readonly name: 'gp-classifier'
   readonly kernel: Kernel<P>
+  readonly method: GpClassificationMethod
   readonly likelihood: ClassificationLikelihood
-  /** The posterior mode f̂ at the training inputs, [n]. */
+  /** The posterior mean of f at the training inputs, [n]: the mode f̂ for Laplace, μ for EP. */
   readonly mode: Tensor
-  /** The Laplace approximation to log p(y | X). */
+  /** The approximate log p(y | X): Laplace's eq. 3.32 or EP's eq. 3.65. */
   readonly logMarginal: number
   readonly converged: boolean
+  /** The Newton run (Laplace) or the site updates (EP). */
+  readonly training: Trace<LaplaceState> | Trace<MvEpState>
   /** Mean and variance of the approximate latent posterior q(f* | y) at xs. */
   latent(xs: Tensor): { mean: Tensor; variance: Tensor }
 }
 
+function ruleForExpectation() {
+  // 32-point Gauss–Hermite (probabilists') rule, weights normalised to sum to 1: E[g(Z)], Z ~ N(0, 1).
+  const rule = gaussHermite(32, { probabilists: true })
+  const nodes = toFlat(rule.nodes)
+  const raw = toFlat(rule.weights)
+  const total = raw.reduce((a, b) => a + b, 0)
+  return { nodes, weights: raw.map((w) => w / total) }
+}
+
 /**
- * Binary GP classification (labels 0 and 1) by the Laplace approximation. Capabilities: `forward` and `score` (the
- * latent mean E_q[f*]), `predictive` (Bernoulli with π* = ∫ σ(f) q(f*) df*, exact Φ(μ/√(1 + v)) for the probit link
- * and 32-point Gauss–Hermite quadrature for the logistic one; R&W eq. 3.25 and Algorithm 3.2), `decide` (π* > ½),
- * `expect`, `sample`. The Newton run is kept in `training`.
+ * Binary GP classification (labels 0 and 1) by the Laplace approximation (R&W Algorithms 3.1–3.2) or by EP with the
+ * probit link (Algorithms 3.5–3.6). Either way q(f | y) is Gaussian, and the latent predictive is k*ᵀα and
+ * k** − vᵀv with v = L⁻¹ S k*, S = W^½ (Laplace) or S̃^½ (EP). Capabilities: `forward` and `score` (the latent mean),
+ * `predictive` (Bernoulli with π* = ∫ σ(f) q(f*) df*, exact Φ(μ/√(1 + v)) for the probit link and 32-point
+ * Gauss–Hermite quadrature for the logistic one; R&W eq. 3.25), `decide` (π* > ½), `expect`, `sample`.
  */
 export function gpClassifier<P extends KernelParams>(
   params: GpClassifierParams<P>,
 ): Estimator<Supervised<Tensor, Tensor>, GpClassifierModel<P>> {
-  const { kernel, likelihood = 'logistic', maxSteps = 100, tolerance = 1e-10 } = params
-  // 32-point Gauss–Hermite (probabilists') rule, weights normalised to sum to 1: E[g(Z)], Z ~ N(0, 1).
-  const rule = gaussHermite(32, { probabilists: true })
-  const nodes = toFlat(rule.nodes)
-  const ruleWeights = toFlat(rule.weights)
-  const total = ruleWeights.reduce((a, b) => a + b, 0)
-  const weights = ruleWeights.map((w) => w / total)
+  const { kernel, method = 'laplace' } = params
+  const likelihood = params.likelihood ?? (method === 'ep' ? 'probit' : 'logistic')
+  if (method === 'ep' && likelihood !== 'probit') throw new Error('gpClassifier: EP supports the probit link only')
+  const maxSteps = params.maxSteps ?? 100
+  const { nodes, weights } = ruleForExpectation()
   return {
     name: 'gp-classifier',
     params,
@@ -221,28 +343,58 @@ export function gpClassifier<P extends KernelParams>(
       if (t.length !== n) throw new Error(`gpClassifier: ${n} inputs but ${t.length} labels`)
       if (!t.every((v) => v === 0 || v === 1)) throw new Error('gpClassifier: labels must be 0 or 1')
       const K = gram(kernel, X) as Tensor
-      const problem: LaplaceProblem = { K, labels: fromData(t, [n]), likelihood, tolerance }
-      const training: Trace<LaplaceState> = trace(laplaceMode(problem), {}, maxSteps, {
-        every: options.trace?.every ?? 1,
-        record: { objective: (s) => s.objective, logMarginal: (s) => s.logMarginal },
-      })
-      const final = training.final
-      const f = Float64Array.from(toFlat(final.f))
-      const q = at(problem, f)
+      const labels = fromData(t, [n])
+      let alpha: Float64Array, s: Float64Array, factor: ReturnType<typeof stableFactor>
+      let fitted: {
+        mode: Tensor
+        logMarginal: number
+        converged: boolean
+        training: Trace<LaplaceState> | Trace<MvEpState>
+      }
+      if (method === 'laplace') {
+        const problem: LaplaceProblem = { K, labels, likelihood, tolerance: params.tolerance ?? 1e-10 }
+        const training: Trace<LaplaceState> = trace(laplaceMode(problem), {}, maxSteps, {
+          every: options.trace?.every ?? 1,
+          record: { objective: (st) => st.objective, logMarginal: (st) => st.logMarginal },
+        })
+        const final = training.final
+        const q = laplaceAt(problem, Float64Array.from(toFlat(final.f)))
+        alpha = q.grad
+        s = q.sW
+        factor = stableFactor(q.K, s)
+        fitted = { mode: final.f, logMarginal: final.logMarginal, converged: final.converged, training }
+      } else {
+        const alg = gpEp({ K, labels, tolerance: params.tolerance ?? 1e-8, damping: params.damping })
+        const training: Trace<MvEpState> = trace(alg, {}, maxSteps * n, {
+          every: options.trace?.every ?? n,
+          keep: 'none',
+          record: { logMarginal: (st) => st.logEvidence, change: (st) => st.change },
+        })
+        const final = training.final
+        const w = epWeights(
+          Float64Array.from(toFlat(K)),
+          Float64Array.from(toFlat(final.sitePrecision)),
+          Float64Array.from(toFlat(final.siteShift)),
+        )
+        alpha = w.alpha
+        s = w.s
+        factor = w.factor
+        fitted = { mode: final.mean, logMarginal: final.logEvidence, converged: final.converged, training }
+      }
       const latent = (xs: Tensor) => {
         const S = asRows(xs) as Tensor
         const Ks = gram(kernel, X, S) as Tensor // [n, m]
-        const mean = matmul(fromData(q.grad, [n]), Ks) as Tensor
+        const mean = matmul(fromData(alpha, [n]), Ks) as Tensor
         const m = S.shape[0]
         const ks = Float64Array.from(toFlat(Ks))
         const scaled = new Float64Array(n * m)
-        for (let i = 0; i < n; i++) for (let j = 0; j < m; j++) scaled[i * m + j] = q.sW[i] * ks[i * m + j]
-        const V = toFlat(solveTriangular(q.L, fromData(scaled, [n, m])) as Tensor)
+        for (let i = 0; i < n; i++) for (let j = 0; j < m; j++) scaled[i * m + j] = s[i] * ks[i * m + j]
+        const V = factor.forward(scaled, m)
         const kss = toFlat(kernelDiagonal(kernel, S) as Tensor)
         const variance = Float64Array.from(kss, (k, j) => {
-          let s = 0
-          for (let i = 0; i < n; i++) s += V[i * m + j] ** 2
-          return Math.max(k - s, 0)
+          let acc = 0
+          for (let i = 0; i < n; i++) acc += V[i * m + j] ** 2
+          return Math.max(k - acc, 0)
         })
         return { mean, variance: fromData(variance, [m]) }
       }
@@ -253,9 +405,9 @@ export function gpClassifier<P extends KernelParams>(
         return fromData(
           Float64Array.from(mu, (m, j) => {
             if (likelihood === 'probit') return normalCdf(m / Math.sqrt(1 + v[j]))
-            let s = 0
-            for (let k = 0; k < nodes.length; k++) s += weights[k] * sigmoid(m + Math.sqrt(v[j]) * nodes[k])
-            return s
+            let acc = 0
+            for (let k = 0; k < nodes.length; k++) acc += weights[k] * sigmoid(m + Math.sqrt(v[j]) * nodes[k])
+            return acc
           }),
           [mu.length],
         )
@@ -265,11 +417,9 @@ export function gpClassifier<P extends KernelParams>(
         kind: 'model' as const,
         name: 'gp-classifier' as const,
         kernel,
+        method,
         likelihood,
-        mode: final.f,
-        logMarginal: final.logMarginal,
-        converged: final.converged,
-        training,
+        ...fitted,
         latent,
         forward,
         score: forward,
@@ -284,3 +434,188 @@ export function gpClassifier<P extends KernelParams>(
     },
   }
 }
+
+// ── Hyperparameters ──────────────────────────────────────────────────────────────────────────────────────────────
+
+/** Options of the evidence functions and the fit. */
+export type GpClassifierEvidenceOptions = {
+  /** Default 'laplace'. */
+  method?: GpClassificationMethod
+  /** Default logistic for Laplace, probit for EP (the only link EP supports). */
+  likelihood?: ClassificationLikelihood
+  /** Most Newton steps (Laplace, default 100) or sweeps (EP, default 100). */
+  maxSteps?: number
+}
+
+function evidenceFor(labels: Tensor, options: GpClassifierEvidenceOptions): (K: Value) => Value {
+  const { method = 'laplace', maxSteps = 100 } = options
+  const likelihood = options.likelihood ?? (method === 'ep' ? 'probit' : 'logistic')
+  if (method === 'ep') {
+    if (likelihood !== 'probit') throw new Error('gpClassifier: EP supports the probit link only')
+    return gpEpEvidence(labels, { maxSweeps: maxSteps, tolerance: 1e-10 })
+  }
+  return laplaceEvidence(labels, { likelihood, maxSteps })
+}
+
+const labelsOf = (y: Tensor, n: number) => fromData(Float64Array.from(toFlat(y)), [n])
+
+/**
+ * The Laplace approximation to log p(y | X, θ) for a kernel (R&W eq. 3.32): Newton's method to the mode, then
+ * Ψ(f̂) − ½ log|B|. Labels 0 and 1.
+ */
+export function laplaceLogMarginal(
+  kernel: Kernel,
+  x: Tensor,
+  y: Tensor,
+  { likelihood = 'logistic', maxSteps = 100 }: { likelihood?: ClassificationLikelihood; maxSteps?: number } = {},
+): number {
+  const X = asRows(x) as Tensor
+  const n = X.shape[0]
+  const K = gram(kernel, X) as Tensor
+  return run(laplaceMode({ K, labels: labelsOf(y, n), likelihood }), {}, maxSteps).logMarginal
+}
+
+/** EP's approximation to log p(y | X, θ) for a kernel with the probit link (R&W eq. 3.65). Labels 0 and 1. */
+export function gpEpLogMarginal(kernel: Kernel, x: Tensor, y: Tensor, options: GpEpOptions = {}): number {
+  const X = asRows(x) as Tensor
+  const n = X.shape[0]
+  const K = gram(kernel, X) as Tensor
+  return run(
+    gpEp({ K, labels: labelsOf(y, n), tolerance: options.tolerance, damping: options.damping }),
+    {},
+    (options.maxSweeps ?? 100) * n,
+  ).logEvidence
+}
+
+/** The approximate log evidence and its gradient in the kernel's hyperparameters. */
+export type GpClassifierEvidenceGradient<P extends KernelParams = KernelParams> = {
+  value: number
+  /** ∂/∂θ for each hyperparameter, shaped like `kernel.params`. */
+  kernel: P
+  /** The hyperparameters' names, in the order of `logGradient`. */
+  names: string[]
+  /** ∂/∂ log θ for every hyperparameter. */
+  logGradient: Float64Array
+}
+
+/**
+ * The Laplace or EP log evidence and its gradient in the kernel's hyperparameters: reverse-mode differentiation
+ * through the Gram matrix, with the evidence's own rule in K (`laplaceEvidence`, `gpEpEvidence`).
+ */
+export function gpClassifierEvidenceGradient<P extends KernelParams>(
+  kernel: Kernel<P>,
+  x: Tensor,
+  y: Tensor,
+  options: GpClassifierEvidenceOptions = {},
+): GpClassifierEvidenceGradient<P> {
+  const X = asRows(x) as Tensor
+  const evidence = evidenceFor(labelsOf(y, X.shape[0]), options)
+  const lv = kernelLogVector(kernel)
+  const { value, grad } = valueAndGrad((tree: P) => evidence(gram(kernelFromLog(kernel, tree), X)))(
+    lv.unravel(lv.vector),
+  )
+  const logGradient = Float64Array.from(ravel(grad as P).vector)
+  const params = ravel(kernel.params)
+  return {
+    value: value as number,
+    kernel: params.unravel(Float64Array.from(params.vector, (theta, i) => logGradient[i] / theta)),
+    names: lv.names,
+    logGradient,
+  }
+}
+
+/** Options of `fitGpClassifier`. */
+export type FitGpClassifierOptions = GpClassifierEvidenceOptions & {
+  /** Most L-BFGS steps (default 100). */
+  maxIterations?: number
+  /** L-BFGS gradient tolerance (default 1e-5). */
+  tolerance?: number
+  /**
+   * The sd of an optional Gaussian hyperprior on each log hyperparameter, centred on its starting value: the fit
+   * then maximises log q(y | X, θ) + log p(log θ). Useful on near-separable data, where the evidence keeps rising
+   * with the signal variance. Default none.
+   */
+  logPriorScale?: number
+}
+
+/** The result of `fitGpClassifier`. */
+export type GpClassifierFit<P extends KernelParams = KernelParams> = {
+  kernel: Kernel<P>
+  /** The approximate log evidence at the fitted hyperparameters (without the hyperprior). */
+  logMarginal: number
+  /** The L-BFGS run over log hyperparameters; `value` is the negated objective, with `logMarginal` recorded. */
+  training: Trace<LbfgsState>
+  /** The hyperparameters' names, in the order of `training`'s `x` (log space). */
+  names: string[]
+  converged: boolean
+}
+
+/**
+ * Type-II maximum likelihood for GP classification: maximise the Laplace or EP log evidence over the kernel's
+ * hyperparameters in log space by L-BFGS (R&W §5.5.1 and §5.5.2), with gradients from `valueAndGrad` through the
+ * Gram matrix and the evidence's rule in K (the implicit dependence of the Laplace mode on θ, R&W Algorithm 5.1; the
+ * EP fixed point, eq. 5.27). The run is a trace, so the path can be played step by step.
+ */
+export function fitGpClassifier<P extends KernelParams>(
+  kernel: Kernel<P>,
+  x: Tensor,
+  y: Tensor,
+  options: FitGpClassifierOptions = {},
+): GpClassifierFit<P> {
+  const { maxIterations = 100, tolerance = 1e-5, logPriorScale } = options
+  const X = asRows(x) as Tensor
+  const evidence = evidenceFor(labelsOf(y, X.shape[0]), options)
+  const lv = kernelLogVector(kernel)
+  const centre = Float64Array.from(lv.vector)
+  const negative = valueAndGrad((tree: P) => mul(-1, evidence(gram(kernelFromLog(kernel, tree), X))))
+  const logMarginals = new Map<string, number>()
+  const objective = (theta: Tensor) => {
+    const th = toFlat(theta)
+    const k = th.length
+    try {
+      const { value, grad } = negative(lv.unravel(th))
+      let v = value as number
+      if (!Number.isFinite(v)) return { value: Infinity, grad: fromData(new Float64Array(k), [k]) }
+      logMarginals.set(Array.from(th).join(','), -v)
+      const g = Float64Array.from(ravel(grad as P).vector)
+      if (logPriorScale !== undefined) {
+        const s2 = logPriorScale * logPriorScale
+        for (let i = 0; i < k; i++) {
+          v += (0.5 * (th[i] - centre[i]) ** 2) / s2
+          g[i] += (th[i] - centre[i]) / s2
+        }
+      }
+      return { value: v, grad: fromData(g, [k]) }
+    } catch {
+      return { value: Infinity, grad: fromData(new Float64Array(k), [k]) }
+    }
+  }
+  const training = trace(lbfgs(objective, { tolerance }), { x0: fromData(centre, [centre.length]) }, maxIterations, {
+    record: { logMarginal: (s: LbfgsState) => logMarginals.get(Array.from(toFlat(s.x)).join(',')) ?? NaN },
+  })
+  const final = training.final
+  return {
+    kernel: kernelFromLog(kernel, lv.unravel(toFlat(final.x))),
+    logMarginal: logMarginals.get(Array.from(toFlat(final.x)).join(',')) ?? -final.value,
+    training,
+    names: lv.names,
+    converged: final.converged,
+  }
+}
+
+// ── Registry ─────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+defineModel(
+  {
+    key: 'gpClassifier',
+    module: 'learning/gaussian-processes',
+    name: 'Gaussian process classifier',
+    summary: 'Binary GP classification by the Laplace approximation or EP; the kernel is a required argument.',
+    task: 'classification',
+    capabilities: ['forward', 'decide', 'predictive', 'expect', 'score', 'sample'],
+    hyper: space({ method: oneOf(['laplace', 'ep']), maxSteps: int(1, 1000, { default: 100 }) }),
+    notes: ['gaussian-process-classification', 'expectation-propagation-gaussian-process-classification'],
+    cite: ['rasmussen2006'],
+  },
+  gpClassifier,
+)
