@@ -310,6 +310,34 @@ export function gamModel(problem: GamProblem, coefficients: ArrayLike<number>, t
 }
 
 /**
+ * The linear predictor η(x) = x̃ᵀβ̂ at new inputs x [m, d] with its pointwise standard error √(x̃ᵀV_βx̃), the intercept's
+ * uncertainty included (Wood, 2017, §6.10); g⁻¹ of η ± 2 se is the usual band on the response scale. [m] each.
+ */
+export function gamLinkBand(model: GamModel, x: Tensor): PartialEffect {
+  const A = model.problem.design
+  const Xd = gamDesignAt(A, x)
+  const m = x.shape[0]
+  const P = A.P
+  const beta = f64(model.coefficients)
+  const V = f64(model.covariance)
+  const fit = new Float64Array(m)
+  const se = new Float64Array(m)
+  for (let i = 0; i < m; i++) {
+    let f = 0
+    let v = 0
+    for (let a = 0; a < P; a++) {
+      const xa = Xd[i * P + a]
+      if (xa === 0) continue
+      f += xa * beta[a]
+      for (let b = 0; b < P; b++) v += xa * V[a * P + b] * Xd[i * P + b]
+    }
+    fit[i] = f
+    se[i] = Math.sqrt(Math.max(v, 0))
+  }
+  return { fit: vec(fit), se: vec(se) }
+}
+
+/**
  * A generalised additive model: `gam({ terms: [s(0), s(1, { k: 20 }), linearTerm(2)], family: poissonFamily() })`.
  * Fitting builds the penalised problem (`gamProblem`: design, λ by REML/GCV or fixed, shape constraints) and returns
  * the model at its P-IRLS optimum, kept in `training`. Capabilities: `forward` (η), `decide` and `expect` (μ),

@@ -54,7 +54,15 @@ export {
   type GamGradientOptions,
   type GamSgdOptions,
 } from './fitters'
-export { gam, gamModel, type GamModel, type GamParams, type GamTermBasis, type PartialEffect } from './model'
+export {
+  gam,
+  gamLinkBand,
+  gamModel,
+  type GamModel,
+  type GamParams,
+  type GamTermBasis,
+  type PartialEffect,
+} from './model'
 export {
   expectileFan,
   expectileGam,
@@ -64,4 +72,12 @@ export {
   type ExpectileLawsOptions,
   type ExpectileState,
 } from './expectile'
+export {
+  expectileProblem,
+  expectileTrainingRun,
+  type ExpectileFitMethod,
+  type ExpectileFitState,
+  type ExpectileRunRequest,
+  type ExpectileTrainingRun,
+} from './expectile-training'
 export { ebmBoosting, explainableBoostingMachine, type EbmModel, type EbmParams, type EbmState } from './ebm'

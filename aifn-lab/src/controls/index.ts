@@ -40,3 +40,4 @@ export type { Option, Options } from './options'
 // Buttons come straight from the shadcn primitives; re-exported so figures need one import for their controls.
 export { Button } from '@lab/ui/button'
 export { ButtonGroup, ButtonGroupSeparator, ButtonGroupText } from '@lab/ui/button-group'
+export { CodeEditor, type CodeEditorProps, type CodeError } from './CodeEditor'

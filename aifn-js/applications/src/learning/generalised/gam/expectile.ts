@@ -21,6 +21,8 @@ export type ExpectileState = Status & {
   weights: Tensor
   /** The curve at the data, [n]. */
   fitted: Tensor
+  /** This iteration's coefficients β [P]. */
+  coefficients: Tensor
   /** Points whose side of the curve (and so weight) differs from the weights this fit used. */
   switched: number
   /** Share of points below the curve. */
@@ -83,6 +85,7 @@ export function expectileLaws(
       t,
       weights: fromData(w, [n]),
       fitted: model.fitted,
+      coefficients: model.coefficients,
       switched,
       below: below / n,
       converged: t > 0 && switched === 0,
@@ -150,7 +153,9 @@ export function expectileFan(
   const { maxLawsSteps = 50 } = params
   return {
     taus: [...taus],
-    runs: taus.map((tau) => [...trace(expectileLaws({ ...params, tau }, data, options), undefined, maxLawsSteps).steps]),
+    runs: taus.map((tau) => [
+      ...trace(expectileLaws({ ...params, tau }, data, options), undefined, maxLawsSteps).steps,
+    ]),
   }
 }
 

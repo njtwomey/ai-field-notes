@@ -85,6 +85,7 @@ module may import only from strictly lower tiers. `scripts/aifn-layers.ts` enfor
 | 4    | transport   | (one module)                                                                                           |                    |
 | 5    | learning    | estimators, kernels · losses, metrics, compose, validate                                               |                    |
 | 6    | nn          | functional, init · layers · training                                                                   |                    |
+| 7    | interpreter | (one module)                                                                                           |                    |
 
 <!-- aifn-layers:end -->
 

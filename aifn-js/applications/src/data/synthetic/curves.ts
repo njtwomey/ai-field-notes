@@ -79,10 +79,7 @@ export function curve1d(s: Stream, options: Curve1dOptions = {}): Dataset {
     ? {
         kind: 'location-scale',
         noise: noiseShape,
-        sd:
-          which === 'sine'
-            ? (x) => noise * (1 + h * Math.sin(1.5 * Math.PI * x) ** 2)
-            : (x) => noise * (1 + h * x),
+        sd: which === 'sine' ? (x) => noise * (1 + h * Math.sin(1.5 * Math.PI * x) ** 2) : (x) => noise * (1 + h * x),
       }
     : { kind: 'family', dispersion: which === 'gamma' ? noise * noise : 1 }
   const truth = curve1dTruth({ name: `curve1d ${which}`, family: spec.family, link: spec.link, eta: spec.eta, law })

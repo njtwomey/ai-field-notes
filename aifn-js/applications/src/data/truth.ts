@@ -360,7 +360,12 @@ export interface Curve1dModel {
 }
 
 const ATOMS = 4000
-const levels = lazy(() => fromData(Float64Array.from({ length: ATOMS }, (_, i) => (i + 0.5) / ATOMS), [ATOMS]))
+const levels = lazy(() =>
+  fromData(
+    Float64Array.from({ length: ATOMS }, (_, i) => (i + 0.5) / ATOMS),
+    [ATOMS],
+  ),
+)
 
 /** Build a one-dimensional smooth regression truth (see `Curve1dTruth`). */
 export function curve1dTruth(model: Curve1dModel): Curve1dTruth {

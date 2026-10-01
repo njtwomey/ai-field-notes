@@ -221,15 +221,6 @@ const SCHEMA = {
       2,
       { label: 'basis and slice of' },
     ),
-    basis: choice(
-      [
-        { value: 'raw', label: 'raw basis' },
-        { value: 'constrained', label: 'after sum-to-zero' },
-        { value: 'weighted', label: 'coefficient-weighted' },
-      ],
-      'raw',
-      { label: 'basis view' },
-    ),
     trace: choice(
       [
         { value: 'gap', label: 'J − J*' },
@@ -399,7 +390,6 @@ function GamFigureImpl(props: FigureProps) {
     props
   const view = state.view as {
     term: number
-    basis: 'raw' | 'constrained' | 'weighted'
     trace: 'gap' | 'grad'
     residuals: boolean
   }
@@ -482,23 +472,19 @@ function GamFigureImpl(props: FigureProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed by the term and data, not by the coefficients
   }, [termKey, hasModel])
   const basisWeighted = useMemo(() => {
-    if (!model || !basisFixed || view.basis !== 'weighted') return null
+    if (!model || !basisFixed) return null
     const b = model.basis(basisTerm, GRID)
     return { lines: columnsOf(b.weighted), sum: toFlat(b.sum) }
-  }, [model, basisFixed, basisTerm, view.basis])
+  }, [model, basisFixed, basisTerm])
   const basis = useMemo(
     () =>
       basisFixed && {
         ...basisFixed,
-        lines:
-          view.basis === 'raw'
-            ? basisFixed.raw
-            : view.basis === 'constrained'
-              ? basisFixed.constrained
-              : (basisWeighted?.lines ?? []),
+        // Always the columns weighted by the played iteration's coefficients, and their sum: the term itself.
+        lines: basisWeighted?.lines ?? [],
         sum: basisWeighted?.sum ?? null,
       },
-    [basisFixed, basisWeighted, view.basis],
+    [basisFixed, basisWeighted],
   )
 
   // The response scale along feature j, the other features at ½: the fit at this step and the truth.
@@ -630,13 +616,12 @@ function GamFigureImpl(props: FigureProps) {
           </>
         ),
       }}
-      caption={`${dataset.meta!.description} Top: each term's partial effect at the played iteration with ± 2 se (from H = XᵀWX + S_λ at that β), the partial residuals, and the true effect (ink, dashed) centred on the data as the fit is. Middle: the basis of the chosen feature (raw B-splines, the columns after the sum-to-zero constraint, or the raw columns weighted by their coefficients, whose sum is the term), its penalty matrix, and the response scale along that feature with the others at ½. Bottom: the training trace for the chosen method and the compared one (each at its default settings), and the ${smoothingMethod === 'gcv' ? 'GCV/UBRE' : 'REML'} criterion for one common λ; with “fixed λ” drag the λ line on it. Gradient descent and SGD take steps in units of 1/L for the curvature L of J at the optimum: above 2 they diverge.`}
+      caption={`${dataset.meta!.description} Top: each term's partial effect at the played iteration with ± 2 se (from H = XᵀWX + S_λ at that β), the partial residuals, and the true effect (ink, dashed) centred on the data as the fit is. Middle: the chosen feature's basis columns weighted by their coefficients at the played iteration (thin), whose sum is the term (bold), its penalty matrix, and the response scale along that feature with the others at ½. Bottom: the training trace for the chosen method and the compared one (each at its default settings), and the ${smoothingMethod === 'gcv' ? 'GCV/UBRE' : 'REML'} criterion for one common λ; with “fixed λ” drag the λ line on it. Gradient descent and SGD take steps in units of 1/L for the curvature L of J at the optimum: above 2 they diverge.`}
     >
       <GamCharts
         effects={effects}
         basis={basis}
         j={j}
-        basisView={view.basis}
         step={current?.t ?? 0}
         residuals={view.residuals}
         slice={slice}
@@ -673,6 +658,8 @@ type ChartsProps = {
   }[]
   basis: {
     lines: number[][]
+    /** The raw B-spline columns, drawn faintly under the weighted ones. */
+    raw: number[][]
     sum: number[] | null
     penalty: number[][]
     index: number[]
@@ -680,7 +667,6 @@ type ChartsProps = {
     size: number
   } | null
   j: number
-  basisView: 'raw' | 'constrained' | 'weighted'
   /** The played iteration (the weighted basis is that iteration's). */
   step: number
   residuals: boolean
@@ -709,7 +695,7 @@ type ChartsProps = {
  */
 const GamCharts = memo(function GamCharts(props: ChartsProps) {
   const { effects, basis, j, residuals, slice, y, traces, marker, count, stale, dataKey, smoothingMethod } = props
-  const view = { basis: props.basisView, trace: props.traceKind }
+  const view = { trace: props.traceKind }
   // ── Axes: held per data and family; refit when the entity changes, not when a parameter moves. ───────────────────
   const effectAxis = useAxis({ label: 'fⱼ (link scale)', hold: 'initial', key: dataKey })
   const xAxes = [
@@ -718,7 +704,21 @@ const GamCharts = memo(function GamCharts(props: ChartsProps) {
     useAxis({ label: 'x₃', range: [0, 1] }),
   ]
   const basisX = useAxis({ label: FEATURE_LABELS[j], range: [0, 1] })
-  const basisY = useAxis({ label: 'basis value', hold: 'union', key: `${dataKey}|${j}|${view.basis}` })
+  // The columns are live layers, which an axis does not fit to, so the range comes from the curves shown: the
+  // weighted columns and their sum reach far beyond the raw basis's [0, 1]. Held as a union while the fit plays.
+  const basisRange = useMemo<[number, number]>(() => {
+    const all = [...(basis?.lines.flat() ?? []), ...(basis?.sum ?? [])]
+    if (!all.length) return [0, 1]
+    const [lo, hi] = [Math.min(...all), Math.max(...all)]
+    const pad = 0.06 * (hi - lo || 1)
+    return [lo - pad, hi + pad]
+  }, [basis])
+  const basisY = useAxis({
+    label: 'basis value',
+    range: basisRange,
+    hold: 'union',
+    key: `${dataKey}|${j}`,
+  })
   const penaltyX = useAxis({ label: '', nice: false, key: `${j}|${basis?.rawSize}` })
   const penaltyY = useAxis({ label: '', nice: false, key: `${j}|${basis?.rawSize}` })
   const responseX = useAxis({ label: `${FEATURE_LABELS[j]} (others at ½)`, range: [0, 1] })
@@ -776,16 +776,14 @@ const GamCharts = memo(function GamCharts(props: ChartsProps) {
             title={
               !basis
                 ? `basis of ${FEATURE_LABELS[j]}: not a smooth`
-                : view.basis === 'weighted'
-                  ? `${FEATURE_LABELS[j]}: columns × β at iteration ${props.step}${props.step === 0 ? ' (β = 0: press play)' : ''}`
-                  : `basis of ${FEATURE_LABELS[j]} (${view.basis === 'constrained' ? basis.size : basis.rawSize} columns)`
+                : `${FEATURE_LABELS[j]}: basis columns × β at iteration ${props.step}${props.step === 0 ? ' (β = 0: press play)' : ''}`
             }
             legend={false}
           >
             {basis?.lines.map((c, i) => (
               <Curve key={i} name={`column ${i + 1}`} x={GRID_X} y={c} slot={j} thin live />
             ))}
-            {basis?.sum && view.basis === 'weighted' && <Curve name="sum: fⱼ" x={GRID_X} y={basis.sum} emphasis live />}
+            {basis?.sum && <Curve name="sum: fⱼ" x={GRID_X} y={basis.sum} emphasis live />}
           </Plot>
         </DashboardCell>
         <DashboardCell aspect="square">

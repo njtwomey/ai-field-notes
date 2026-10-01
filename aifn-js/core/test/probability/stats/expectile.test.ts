@@ -52,7 +52,9 @@ describe('expectile', () => {
 
 describe('expectileLoss', () => {
   it('weights under-predictions by τ and over-predictions by 1 − τ', () => {
-    const loss = toFlat(expectileLoss(fromData(new Float64Array(2), [2]), [2, -1], { expectile: 0.9, reduction: 'none' }) as Tensor)
+    const loss = toFlat(
+      expectileLoss(fromData(new Float64Array(2), [2]), [2, -1], { expectile: 0.9, reduction: 'none' }) as Tensor,
+    )
     expect(loss[0]).toBeCloseTo(0.9 * 4, 12)
     expect(loss[1]).toBeCloseTo(0.1 * 1, 12)
   })
