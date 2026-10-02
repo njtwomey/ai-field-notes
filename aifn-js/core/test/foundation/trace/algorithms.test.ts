@@ -165,7 +165,15 @@ import {
   quadraticInteriorPoint,
   simplex,
 } from 'aifn/optim/programming'
-import { fista, ista, projectBox, projectedGradient, proximalGradient, proxL1 } from 'aifn/optim/proximal'
+import {
+  alternatingProjectionsSteps,
+  fista,
+  ista,
+  projectBox,
+  projectedGradient,
+  proximalGradient,
+  proxL1,
+} from 'aifn/optim/proximal'
 import { bfgs, gaussNewton, lbfgs, levenbergMarquardt, newton, owlqn, trustRegion } from 'aifn/optim/second-order'
 import { siftSteps, vmdSteps } from 'aifn/signal/decompositions'
 import { lms, nlms, rls } from 'aifn/signal/statistical'
@@ -889,6 +897,8 @@ const CASES: Record<string, () => Case> = {
     at(fista(lasso, proxL1(1), { stepSize: 0.5, backtracking: true }), { x0: [0, 0, 0] }, 8),
   'optim/proximal/projectedGradient': () =>
     at(projectedGradient(lasso, projectBox(0, 1), { stepSize: 0.5 }), { x0: [0.5, 0.5, 0.5] }, 8),
+  'optim/proximal/alternatingProjectionsSteps': () =>
+    at(alternatingProjectionsSteps([projectBox(0, 1)]), { x0: [2, -1] }, 4),
   'optim/second-order/newton': () => at(newton(rosen.objective, { hessian: rosen.hessian }), fromRosen),
   'optim/second-order/trustRegion': () => at(trustRegion(rosen.objective, { hessian: rosen.hessian }), fromRosen),
   'optim/second-order/bfgs': () => at(bfgs(rosen.objective), fromRosen),
