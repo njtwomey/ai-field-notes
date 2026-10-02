@@ -1,6 +1,6 @@
 import { Interactive } from 'aifn-render'
-import { Diagram } from '@/components/diagram/Diagram'
-import { gru } from '@/components/diagram/specs/recurrent'
+import { Diagram } from 'aifn-render'
+import { gru } from 'aifn-render'
 
 /** One step of a GRU */
 export function GruCellDiagram() {

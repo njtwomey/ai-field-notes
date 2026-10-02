@@ -1,8 +1,8 @@
 import { useMemo, useState } from 'react'
 import { Interactive, ParamSlider, Readout } from 'aifn-render'
-import { MathText } from '@/components/content/MathText'
-import { Diagram } from '@/components/diagram/Diagram'
-import type { DiagramEdge, DiagramNode, DiagramSpec } from '@/components/diagram/types'
+import { MathText } from 'aifn-render'
+import { Diagram } from 'aifn-render'
+import type { DiagramEdge, DiagramNode, DiagramSpec } from 'aifn-render'
 
 /** A tree-shaped factor graph: variables x1..x4, pairwise factors a, b, c and unary factors on x1 and x3. */
 const VARS: Record<string, [number, number]> = { x1: [0, 0], x2: [3.2, 0], x3: [6.4, 0], x4: [3.2, 3] }

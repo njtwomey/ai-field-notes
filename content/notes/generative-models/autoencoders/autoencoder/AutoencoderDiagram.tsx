@@ -1,6 +1,6 @@
 import { Interactive } from 'aifn-render'
-import { Diagram } from '@/components/diagram/Diagram'
-import { autoencoder } from '@/components/diagram/specs/generative'
+import { Diagram } from 'aifn-render'
+import { autoencoder } from 'aifn-render'
 
 /** An autoencoder */
 export function AutoencoderDiagram() {

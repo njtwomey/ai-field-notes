@@ -1,5 +1,5 @@
-import { factor, link, variable } from '@/components/diagram/components'
-import type { DiagramSpec } from '@/components/diagram/types'
+import { factor, link, variable } from 'aifn-render'
+import type { DiagramSpec } from 'aifn-render'
 import { StepGraph, type GraphStep } from '../_shared/StepGraph'
 
 const line = (a: string, b: string, label?: string) =>

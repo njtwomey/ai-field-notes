@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
 import { Interactive, ParamChoice, Readout, XYChart, formatNumber, type XYSeries } from 'aifn-render'
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
-import { Textarea } from '@/components/ui/textarea'
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from 'aifn-render'
+import { Textarea } from 'aifn-render'
 import { cn } from '@/lib/utils'
 import { bleu, chrf, errorRates, rougeL, rougeN, tokens } from './text'
 

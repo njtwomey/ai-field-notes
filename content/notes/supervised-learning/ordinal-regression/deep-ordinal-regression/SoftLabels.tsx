@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { MathText } from '@/components/content/MathText'
+import { MathText } from 'aifn-render'
 import { Interactive, ParamChoice, ParamSlider, Readout, XYChart, formatNumber, type XYSeries } from 'aifn-render'
 import { useClassColors } from '../_shared/classColor'
 

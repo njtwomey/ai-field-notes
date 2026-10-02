@@ -1,6 +1,6 @@
-import { Diagram } from '@/components/diagram/Diagram'
-import { link, variable } from '@/components/diagram/components'
-import type { DiagramEdge, DiagramNode, DiagramSpec } from '@/components/diagram/types'
+import { Diagram } from 'aifn-render'
+import { link, variable } from 'aifn-render'
+import type { DiagramEdge, DiagramNode, DiagramSpec } from 'aifn-render'
 import { Interactive } from 'aifn-render'
 
 /* ----------------------------------------------------------------------------------------------------------------- */

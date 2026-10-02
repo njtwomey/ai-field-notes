@@ -1,5 +1,5 @@
 import { useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
-import { useTheme } from '@/components/theme-provider'
+import { useTheme } from 'aifn-render'
 import {
   Interactive,
   ParamButton,

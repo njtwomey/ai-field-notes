@@ -1,6 +1,6 @@
-import { MathText } from '@/components/content/MathText'
-import { Diagram } from '@/components/diagram/Diagram'
-import { lda } from '@/components/diagram/specs/graphical'
+import { MathText } from 'aifn-render'
+import { Diagram } from 'aifn-render'
+import { lda } from 'aifn-render'
 import { Interactive } from 'aifn-render'
 
 /** LDA in plate notation: documents d contain word positions n; topics k sit on their own plate. */

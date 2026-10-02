@@ -1,6 +1,6 @@
 import { Minus, Plus } from 'lucide-react'
 import { useMemo, useState } from 'react'
-import { Button } from '@/components/ui/button'
+import { Button } from 'aifn-render'
 import {
   Interactive,
   ParamButton,

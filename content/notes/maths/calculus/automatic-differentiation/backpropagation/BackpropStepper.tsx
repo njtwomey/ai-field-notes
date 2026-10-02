@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { Interactive, ParamSlider, Readout, StepControls, formatNumber } from 'aifn-render'
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from 'aifn-render'
 import { cn } from '@/lib/utils'
 
 type Node = { name: string; expr: string; value: number; local: string; adjoint: number; adjointExpr: string }

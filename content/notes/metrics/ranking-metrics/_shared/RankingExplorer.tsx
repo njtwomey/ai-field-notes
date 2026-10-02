@@ -1,6 +1,6 @@
 import { ArrowDown, ArrowUp, Minus, Plus } from 'lucide-react'
 import { useState } from 'react'
-import { Button } from '@/components/ui/button'
+import { Button } from 'aifn-render'
 import { Interactive, ParamButton, ParamSlider, Readout, XYChart, formatNumber, useParam } from 'aifn-render'
 import { averagePrecision, isRelevant, ndcg, precisionAt, recallAt, reciprocalRank } from './ranking'
 

@@ -1,6 +1,6 @@
 import { Interactive } from 'aifn-render'
-import { Diagram } from '@/components/diagram/Diagram'
-import { lstm } from '@/components/diagram/specs/recurrent'
+import { Diagram } from 'aifn-render'
+import { lstm } from 'aifn-render'
 
 /** One step of an LSTM */
 export function LstmCellDiagram() {

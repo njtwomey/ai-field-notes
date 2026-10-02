@@ -1,7 +1,7 @@
-import { MathText } from '@/components/content/MathText'
-import { Diagram } from '@/components/diagram/Diagram'
-import { factor, link, variable } from '@/components/diagram/components'
-import type { DiagramSpec } from '@/components/diagram/types'
+import { MathText } from 'aifn-render'
+import { Diagram } from 'aifn-render'
+import { factor, link, variable } from 'aifn-render'
+import type { DiagramSpec } from 'aifn-render'
 import { Interactive } from 'aifn-render'
 
 const line = (a: string, b: string) => link(a, b, false)

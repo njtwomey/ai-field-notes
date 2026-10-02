@@ -1,6 +1,6 @@
-import { Diagram } from '@/components/diagram/Diagram'
-import { factor, link, variable } from '@/components/diagram/components'
-import type { DiagramNode, DiagramSpec } from '@/components/diagram/types'
+import { Diagram } from 'aifn-render'
+import { factor, link, variable } from 'aifn-render'
+import type { DiagramNode, DiagramSpec } from 'aifn-render'
 import { Interactive } from 'aifn-render'
 
 const PLAYERS = [0, 1, 2, 3]

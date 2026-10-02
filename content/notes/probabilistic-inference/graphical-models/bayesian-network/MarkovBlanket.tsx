@@ -1,6 +1,6 @@
 import { useState } from 'react'
-import { Diagram } from '@/components/diagram/Diagram'
-import { link, variable } from '@/components/diagram/components'
+import { Diagram } from 'aifn-render'
+import { link, variable } from 'aifn-render'
 import { Interactive, ParamChoice, Readout } from 'aifn-render'
 
 const NODES = [

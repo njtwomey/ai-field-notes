@@ -1,7 +1,7 @@
 import { Interactive } from 'aifn-render'
-import { Diagram } from '@/components/diagram/Diagram'
-import { op } from '@/components/diagram/components'
-import type { DiagramSpec } from '@/components/diagram/types'
+import { Diagram } from 'aifn-render'
+import { op } from 'aifn-render'
+import type { DiagramSpec } from 'aifn-render'
 
 const L = 1.6
 const R = 4.8

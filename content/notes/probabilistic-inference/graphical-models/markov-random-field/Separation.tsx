@@ -1,7 +1,7 @@
 import { useState } from 'react'
-import { MathText } from '@/components/content/MathText'
-import { Diagram } from '@/components/diagram/Diagram'
-import { link, variable } from '@/components/diagram/components'
+import { MathText } from 'aifn-render'
+import { Diagram } from 'aifn-render'
+import { link, variable } from 'aifn-render'
 import { Interactive, ParamChoice, Readout } from 'aifn-render'
 
 type Vertex = { id: string; label: string; x: number; y: number }

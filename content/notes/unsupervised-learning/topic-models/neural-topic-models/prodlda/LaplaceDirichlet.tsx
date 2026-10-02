@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { MathText } from '@/components/content/MathText'
+import { MathText } from 'aifn-render'
 import { Heatmap, Interactive, ParamChoice, ParamSlider, ParamSwitch, Readout, formatNumber } from 'aifn-render'
 import type { HeatmapOverlay } from 'aifn-render'
 import { linspace } from '@/lib/math'

@@ -1,5 +1,5 @@
 import { useMemo } from 'react'
-import { MathText } from '@/components/content/MathText'
+import { MathText } from 'aifn-render'
 import {
   Interactive,
   ParamSlider,

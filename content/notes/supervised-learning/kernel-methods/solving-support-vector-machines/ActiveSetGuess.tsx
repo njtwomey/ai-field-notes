@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from 'aifn-render'
 import { Interactive, ParamButton, ParamChoice, Readout, XYChart } from 'aifn-render'
 import { BOX, Y_RANGE, exact, slackSeries, svmSeries } from './plot'
 import { C0, X, Y, activeSet, type Status } from './solver'

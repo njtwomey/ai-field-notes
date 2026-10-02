@@ -1,6 +1,6 @@
 import { Interactive } from 'aifn-render'
-import { Diagram } from '@/components/diagram/Diagram'
-import { vae } from '@/components/diagram/specs/generative'
+import { Diagram } from 'aifn-render'
+import { vae } from 'aifn-render'
 
 /** A variational autoencoder */
 export function VaeDiagram() {

@@ -1,6 +1,6 @@
 import { Interactive } from 'aifn-render'
-import { Diagram } from '@/components/diagram/Diagram'
-import type { DiagramSpec } from '@/components/diagram/types'
+import { Diagram } from 'aifn-render'
+import type { DiagramSpec } from 'aifn-render'
 
 // The hierarchical "community" multi-class Bayes point machine of Diethe, Twomey and Flach (2015, 2016), drawn as a
 // directed graphical model with plates. Hyperparameters are shown as small nodes.

@@ -1,6 +1,6 @@
-import { MathText } from '@/components/content/MathText'
-import { Diagram } from '@/components/diagram/Diagram'
-import type { DiagramEdge, DiagramNode, DiagramSpec } from '@/components/diagram/types'
+import { MathText } from 'aifn-render'
+import { Diagram } from 'aifn-render'
+import type { DiagramEdge, DiagramNode, DiagramSpec } from 'aifn-render'
 import { Interactive } from 'aifn-render'
 
 type Column = { id: string; title: string; models: string[]; tone: number }

@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
 import { Interactive, ParamChoice, ParamSwitch, Readout, formatNumber } from 'aifn-render'
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
-import { Textarea } from '@/components/ui/textarea'
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from 'aifn-render'
+import { Textarea } from 'aifn-render'
 import { cn } from '@/lib/utils'
 import { NEGATIONS, STOP_WORDS, counts, lemmatise, ngrams, normalise, porterStem, tokenise } from './text'
 

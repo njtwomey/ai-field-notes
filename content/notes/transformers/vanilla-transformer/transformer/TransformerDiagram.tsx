@@ -1,6 +1,6 @@
 import { Interactive } from 'aifn-render'
-import { Diagram } from '@/components/diagram/Diagram'
-import { transformer } from '@/components/diagram/specs/transformer'
+import { Diagram } from 'aifn-render'
+import { transformer } from 'aifn-render'
 
 /** The encoder–decoder transformer */
 export function TransformerDiagram() {

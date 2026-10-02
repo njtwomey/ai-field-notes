@@ -1,6 +1,6 @@
 import { useMemo } from 'react'
-import { Diagram } from '@/components/diagram/Diagram'
-import type { DiagramSpec } from '@/components/diagram/types'
+import { Diagram } from 'aifn-render'
+import type { DiagramSpec } from 'aifn-render'
 import { Interactive, ParamSlider, Readout, XYChart, formatNumber, useParam, type XYSeries } from 'aifn-render'
 import { rng } from '@/lib/math'
 

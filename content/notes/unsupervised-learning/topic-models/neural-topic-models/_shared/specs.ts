@@ -1,6 +1,6 @@
 /** Architecture diagrams shared by the neural topic model notes. Style follows the VAE spec in specs/generative.ts. */
-import { merge, op, projector, reparam } from '@/components/diagram/components'
-import type { DiagramEdge, DiagramNode, DiagramSpec } from '@/components/diagram/types'
+import { merge, op, projector, reparam } from 'aifn-render'
+import type { DiagramEdge, DiagramNode, DiagramSpec } from 'aifn-render'
 
 export type NtmInput = 'bow' | 'combined' | 'contextual'
 export type NtmDecoder = 'nvdm' | 'mixture' | 'product' | 'etm'

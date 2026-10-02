@@ -10,7 +10,7 @@ import {
   type Handle,
   type XYSeries,
 } from 'aifn-render'
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from 'aifn-render'
 import type { KnotPath, LarsPaths as Paths } from '@/generated/contracts'
 import { useFigure } from '@/lib/generated'
 import { cn } from '@/lib/utils'

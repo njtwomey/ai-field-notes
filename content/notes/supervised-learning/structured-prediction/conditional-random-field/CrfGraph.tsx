@@ -1,8 +1,8 @@
 import { useState } from 'react'
-import { MathText } from '@/components/content/MathText'
-import { Diagram } from '@/components/diagram/Diagram'
-import { link, variable } from '@/components/diagram/components'
-import type { DiagramSpec } from '@/components/diagram/types'
+import { MathText } from 'aifn-render'
+import { Diagram } from 'aifn-render'
+import { link, variable } from 'aifn-render'
+import type { DiagramSpec } from 'aifn-render'
 import { Interactive, ParamSwitch } from 'aifn-render'
 import { at, chainEnds, labelNodes, potentialChain } from '../_shared/chain-graph'
 

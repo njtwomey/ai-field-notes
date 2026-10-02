@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
 import { Interactive, ParamChoice, Readout } from 'aifn-render'
-import { Input } from '@/components/ui/input'
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
+import { Input } from 'aifn-render'
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from 'aifn-render'
 import { cvForm, measure, porterStem, type PorterStep } from '../_shared/text'
 
 const PRESETS = ['generalizations', 'oscillators', 'filing', 'hopping', 'argument', 'relational', 'university'] as const

@@ -1,6 +1,6 @@
 import { Interactive } from 'aifn-render'
-import { Diagram } from '@/components/diagram/Diagram'
-import type { DiagramSpec } from '@/components/diagram/types'
+import { Diagram } from 'aifn-render'
+import type { DiagramSpec } from 'aifn-render'
 
 const stage = (id: string, x: number, label: string, tone: number, h = 1.3) => ({
   id,

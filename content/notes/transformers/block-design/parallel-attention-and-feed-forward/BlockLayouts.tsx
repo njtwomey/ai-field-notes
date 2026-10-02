@@ -1,7 +1,7 @@
 import { Interactive } from 'aifn-render'
-import { Diagram } from '@/components/diagram/Diagram'
-import { op } from '@/components/diagram/components'
-import type { DiagramNode, DiagramSpec } from '@/components/diagram/types'
+import { Diagram } from 'aifn-render'
+import { op } from 'aifn-render'
+import type { DiagramNode, DiagramSpec } from 'aifn-render'
 
 const box = (id: string, x: number, y: number, label: string, tone: number, w = 2.3): DiagramNode => ({
   id,

@@ -1,6 +1,6 @@
-import { MathText } from '@/components/content/MathText'
-import { Diagram } from '@/components/diagram/Diagram'
-import type { DiagramSpec } from '@/components/diagram/types'
+import { MathText } from 'aifn-render'
+import { Diagram } from 'aifn-render'
+import type { DiagramSpec } from 'aifn-render'
 import { Interactive } from 'aifn-render'
 
 /** A graphical model in plate notation, framed like every other figure; the caption may contain `$…$` maths. */

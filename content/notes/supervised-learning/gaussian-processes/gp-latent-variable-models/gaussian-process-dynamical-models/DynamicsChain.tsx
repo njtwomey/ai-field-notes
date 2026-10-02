@@ -1,5 +1,5 @@
-import { Diagram } from '@/components/diagram/Diagram'
-import type { DiagramSpec } from '@/components/diagram/types'
+import { Diagram } from 'aifn-render'
+import type { DiagramSpec } from 'aifn-render'
 import { Interactive } from 'aifn-render'
 
 const T = ['1', '2', '3', 'T']

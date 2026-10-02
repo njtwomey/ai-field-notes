@@ -1,6 +1,6 @@
 import { Interactive } from 'aifn-render'
-import { Diagram } from '@/components/diagram/Diagram'
-import type { DiagramNode, DiagramSpec } from '@/components/diagram/types'
+import { Diagram } from 'aifn-render'
+import type { DiagramNode, DiagramSpec } from 'aifn-render'
 
 /** Columns of the patch tokens; the class token sits at x = 0.4. */
 const PATCH: [string, number, string][] = [

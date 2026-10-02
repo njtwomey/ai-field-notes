@@ -1,4 +1,4 @@
-import { Diagram } from '@/components/diagram/Diagram'
+import { Diagram } from 'aifn-render'
 import { Interactive } from 'aifn-render'
 import { bertopicSpec } from '../_shared/specs'
 

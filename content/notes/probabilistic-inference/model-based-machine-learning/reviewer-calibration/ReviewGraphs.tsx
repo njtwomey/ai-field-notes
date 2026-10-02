@@ -1,6 +1,6 @@
-import { Diagram } from '@/components/diagram/Diagram'
-import { factor, link, variable } from '@/components/diagram/components'
-import type { DiagramSpec } from '@/components/diagram/types'
+import { Diagram } from 'aifn-render'
+import { factor, link, variable } from 'aifn-render'
+import type { DiagramSpec } from 'aifn-render'
 import { Interactive } from 'aifn-render'
 import { StepGraph, type GraphStep } from '../_shared/StepGraph'
 

@@ -2,8 +2,8 @@
  * Plate diagrams for topic models applied beyond text, drawn in the style of the shared `lda` spec: hyperparameters are
  * small circles, observed variables are shaded, and plates are labelled bottom-right with their size.
  */
-import { link, variable } from '@/components/diagram/components'
-import type { DiagramGroup, DiagramSpec } from '@/components/diagram/types'
+import { link, variable } from 'aifn-render'
+import type { DiagramGroup, DiagramSpec } from 'aifn-render'
 
 const hyper = (id: string, x: number, y: number, label: string) =>
   variable(id, x, y, label, { w: 0.7, h: 0.7, small: true })

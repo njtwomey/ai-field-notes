@@ -1,8 +1,8 @@
 import { useMemo, useState } from 'react'
-import { MathText } from '@/components/content/MathText'
-import { Diagram } from '@/components/diagram/Diagram'
-import { link, variable } from '@/components/diagram/components'
-import type { DiagramEdge, DiagramSpec } from '@/components/diagram/types'
+import { MathText } from 'aifn-render'
+import { Diagram } from 'aifn-render'
+import { link, variable } from 'aifn-render'
+import type { DiagramEdge, DiagramSpec } from 'aifn-render'
 import { Interactive, ParamChoice, Readout, StepControls } from 'aifn-render'
 
 /** The worked example's 16 training rows: class c, then features x1..x4. */

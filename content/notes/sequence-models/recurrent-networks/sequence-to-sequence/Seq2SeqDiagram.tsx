@@ -1,6 +1,6 @@
 import { Interactive } from 'aifn-render'
-import { Diagram } from '@/components/diagram/Diagram'
-import type { DiagramSpec } from '@/components/diagram/types'
+import { Diagram } from 'aifn-render'
+import type { DiagramSpec } from 'aifn-render'
 
 const state = (id: string, x: number, label: string, tone: number) => ({ id, x, y: 2, w: 1.1, h: 0.75, label, tone })
 const token = (id: string, x: number, y: number, label: string) => ({ id, x, y, shape: 'text' as const, label })

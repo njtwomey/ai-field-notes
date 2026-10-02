@@ -1,5 +1,5 @@
-import { factor, link, variable } from '@/components/diagram/components'
-import type { DiagramEdge, DiagramNode, DiagramSpec } from '@/components/diagram/types'
+import { factor, link, variable } from 'aifn-render'
+import type { DiagramEdge, DiagramNode, DiagramSpec } from 'aifn-render'
 import { StepGraph, type GraphStep } from '../_shared/StepGraph'
 
 const AGES = [1, 3, 5, 8]

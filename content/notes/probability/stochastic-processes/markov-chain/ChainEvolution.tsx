@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
-import { MathText } from '@/components/content/MathText'
-import { Diagram } from '@/components/diagram/Diagram'
-import type { DiagramEdge, DiagramSpec, Side } from '@/components/diagram/types'
+import { MathText } from 'aifn-render'
+import { Diagram } from 'aifn-render'
+import type { DiagramEdge, DiagramSpec, Side } from 'aifn-render'
 import {
   Interactive,
   ParamChoice,

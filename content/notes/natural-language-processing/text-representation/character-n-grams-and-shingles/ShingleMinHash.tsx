@@ -9,7 +9,7 @@ import {
   formatNumber,
   type XYSeries,
 } from 'aifn-render'
-import { Textarea } from '@/components/ui/textarea'
+import { Textarea } from 'aifn-render'
 import { rng } from '@/lib/math'
 import { jaccard, minhash, shingles } from '../_shared/text'
 

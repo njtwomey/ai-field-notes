@@ -1,7 +1,7 @@
 import { useMemo } from 'react'
-import { MathText } from '@/components/content/MathText'
-import { Diagram } from '@/components/diagram/Diagram'
-import type { DiagramNode, DiagramSpec } from '@/components/diagram/types'
+import { MathText } from 'aifn-render'
+import { Diagram } from 'aifn-render'
+import type { DiagramNode, DiagramSpec } from 'aifn-render'
 import { Interactive, ParamSlider, useParam } from 'aifn-render'
 
 /** One assumption: the node and group ids it adds (or removes), and a sentence saying what it assumes. */
@@ -32,8 +32,8 @@ export function StepGraph({
   const step = useParam(steps.length - 1, { min: 0, max: steps.length - 1, step: 1 })
 
   const anchors = useMemo((): DiagramNode[] => {
-    const xs = spec.nodes.map((n) => n.x)
-    const ys = spec.nodes.map((n) => n.y)
+    const xs = spec.nodes.map((n) => n.x ?? 0)
+    const ys = spec.nodes.map((n) => n.y ?? 0)
     const corner = (id: string, x: number, y: number): DiagramNode => ({
       id,
       x,

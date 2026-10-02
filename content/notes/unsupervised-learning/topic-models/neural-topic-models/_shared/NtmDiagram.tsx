@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
-import { MathText } from '@/components/content/MathText'
-import { Diagram } from '@/components/diagram/Diagram'
+import { MathText } from 'aifn-render'
+import { Diagram } from 'aifn-render'
 import { Interactive, ParamChoice } from 'aifn-render'
 import { ntmSpec, type NtmDecoder, type NtmInput } from './specs'
 

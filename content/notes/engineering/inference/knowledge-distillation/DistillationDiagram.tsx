@@ -1,6 +1,6 @@
 import { Interactive } from 'aifn-render'
-import { Diagram } from '@/components/diagram/Diagram'
-import type { DiagramNode, DiagramSpec } from '@/components/diagram/types'
+import { Diagram } from 'aifn-render'
+import type { DiagramNode, DiagramSpec } from 'aifn-render'
 
 const soft = (id: string, x: number, y: number, label: string): DiagramNode => ({
   id,

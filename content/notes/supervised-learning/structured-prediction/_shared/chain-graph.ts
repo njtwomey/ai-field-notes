@@ -2,8 +2,8 @@
  * Diagram parts for a stretch of a linear chain, positions n - 1, n and n + 1, in the notation of
  * Twomey, Diethe & Flach (2016): labels y_n, observations x_n, node potentials ψ_n and edge potentials Ψ_n.
  */
-import { factor, link, variable } from '@/components/diagram/components'
-import type { DiagramEdge, DiagramNode } from '@/components/diagram/types'
+import { factor, link, variable } from 'aifn-render'
+import type { DiagramEdge, DiagramNode } from 'aifn-render'
 
 export const POSITIONS = ['n-1', 'n', 'n+1'] as const
 const STEP = 2

@@ -1,6 +1,6 @@
 import { useMemo, type ReactNode } from 'react'
 import { ParamSlider, XYChart, formatNumber, useParam, type Handle, type XYSeries } from 'aifn-render'
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from 'aifn-render'
 import type { CoefficientPath } from '@/generated/contracts'
 import { cn } from '@/lib/utils'
 import { featureStyle, nearest } from './features'

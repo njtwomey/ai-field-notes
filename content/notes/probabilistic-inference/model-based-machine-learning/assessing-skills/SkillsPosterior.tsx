@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
-import { Diagram } from '@/components/diagram/Diagram'
-import { factor, link, variable } from '@/components/diagram/components'
-import type { DiagramEdge, DiagramNode, DiagramSpec } from '@/components/diagram/types'
+import { Diagram } from 'aifn-render'
+import { factor, link, variable } from 'aifn-render'
+import type { DiagramEdge, DiagramNode, DiagramSpec } from 'aifn-render'
 import {
   Interactive,
   ParamSlider,

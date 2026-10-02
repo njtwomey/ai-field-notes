@@ -1,6 +1,6 @@
 import { Interactive } from 'aifn-render'
-import { Diagram } from '@/components/diagram/Diagram'
-import type { DiagramEdge, DiagramSpec } from '@/components/diagram/types'
+import { Diagram } from 'aifn-render'
+import type { DiagramEdge, DiagramSpec } from 'aifn-render'
 
 const model = (id: string, x: number, y: number, label: string, tone: number | 'neutral') => ({
   id,

@@ -1,6 +1,6 @@
 import { Interactive } from 'aifn-render'
-import { Diagram } from '@/components/diagram/Diagram'
-import type { DiagramSpec } from '@/components/diagram/types'
+import { Diagram } from 'aifn-render'
+import type { DiagramSpec } from 'aifn-render'
 
 const term = (id: string, y: number, label: string) => ({ id, x: 4.8, y, w: 1.7, h: 0.8, label, tone: 0 })
 

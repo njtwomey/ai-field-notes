@@ -1,8 +1,8 @@
 import { useMemo } from 'react'
-import { MathText } from '@/components/content/MathText'
-import { Diagram } from '@/components/diagram/Diagram'
-import { link, variable } from '@/components/diagram/components'
-import type { DiagramEdge, DiagramNode } from '@/components/diagram/types'
+import { MathText } from 'aifn-render'
+import { Diagram } from 'aifn-render'
+import { link, variable } from 'aifn-render'
+import type { DiagramEdge, DiagramNode } from 'aifn-render'
 import { Interactive, ParamSlider, Readout, XYChart, useParam } from 'aifn-render'
 import { rng } from '@/lib/math'
 

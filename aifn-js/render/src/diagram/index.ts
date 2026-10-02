@@ -23,3 +23,5 @@ export type {
   Side,
   Tone,
 } from './types'
+export * from './specs'
+export * as diagramSpecs from './specs'

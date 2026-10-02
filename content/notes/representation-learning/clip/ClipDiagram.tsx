@@ -1,6 +1,6 @@
 import { Interactive } from 'aifn-render'
-import { Diagram } from '@/components/diagram/Diagram'
-import type { DiagramNode, DiagramSpec } from '@/components/diagram/types'
+import { Diagram } from 'aifn-render'
+import type { DiagramNode, DiagramSpec } from 'aifn-render'
 
 const IDX = ['1', '2', '3', 'N']
 const COL = [4, 5, 6, 7]

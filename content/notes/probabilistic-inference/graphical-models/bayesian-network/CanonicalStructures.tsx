@@ -1,7 +1,7 @@
 import { useState } from 'react'
-import { Diagram } from '@/components/diagram/Diagram'
-import { link, variable } from '@/components/diagram/components'
-import type { DiagramEdge, DiagramSpec } from '@/components/diagram/types'
+import { Diagram } from 'aifn-render'
+import { link, variable } from 'aifn-render'
+import type { DiagramEdge, DiagramSpec } from 'aifn-render'
 import { Interactive, ParamSwitch, Readout } from 'aifn-render'
 
 type Structure = { name: string; edges: DiagramEdge[]; blockedWhenObserved: boolean }

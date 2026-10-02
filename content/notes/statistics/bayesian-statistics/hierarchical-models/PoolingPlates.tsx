@@ -1,6 +1,6 @@
 import { Interactive } from 'aifn-render'
-import { Diagram } from '@/components/diagram/Diagram'
-import type { DiagramEdge, DiagramGroup, DiagramNode, DiagramSpec } from '@/components/diagram/types'
+import { Diagram } from 'aifn-render'
+import type { DiagramEdge, DiagramGroup, DiagramNode, DiagramSpec } from 'aifn-render'
 
 const v = (id: string, x: number, y: number, label: string, extra: Partial<DiagramNode> = {}): DiagramNode => ({
   id,
