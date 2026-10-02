@@ -18,6 +18,7 @@ function checkImports(): number {
   const root = import.meta.dirname
   const src = path.join(root, 'src')
   const legacy = path.join(src, 'legacy')
+  const renderRoot = path.resolve(root, '..', 'render')
   const files = (readdirSync(src, { recursive: true }) as string[])
     .filter((f) => /\.(ts|tsx|js|jsx|mts|css)$/.test(f))
     .map((f) => path.join(src, f))
@@ -31,8 +32,11 @@ function checkImports(): number {
       const where = `${path.relative(root, file)}:${line}`
       const target = spec.startsWith('.') ? path.resolve(path.dirname(file), spec) : null
       const inLegacy = target !== null && (target === legacy || target.startsWith(legacy + path.sep))
+      const inRender = target !== null && (target === renderRoot || target.startsWith(renderRoot + path.sep))
       if (inLegacy && existsSync(legacy)) {
         console.warn(`WARN  ${where}: imports src/legacy ('${spec}'); migrate to v2 (src/MIGRATION.md)`)
+      } else if (inRender) {
+        // Allowed: lab depends on workspace package aifn-render
       } else if (/^(@\/|site\/|content\/)/.test(spec)) {
         errors++
         console.error(`FAIL  ${where}: imports '${spec}'; the lab may import aifn, packages and @lab/… only`)
