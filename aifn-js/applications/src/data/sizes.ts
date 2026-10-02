@@ -4,6 +4,7 @@
  */
 
 import { checkCount } from './types'
+import { DomainError, ShapeError } from 'aifn/foundation/errors'
 
 /** A total number of points, or one count per class. */
 export type ClassSizes = number | readonly number[]
@@ -32,7 +33,10 @@ export function classCounts(n: number, weights: readonly number[]): number[] {
   checkCount(n, 'classCounts')
   const total = weights.reduce((a, b) => a + b, 0)
   if (!(total > 0) || weights.some((w) => !(w >= 0)))
-    throw new RangeError(`classCounts: weights must be non-negative with a positive sum, got [${weights.join(', ')}]`)
+    throw new DomainError(
+      'classCounts',
+      `classCounts: weights must be non-negative with a positive sum, got [${weights.join(', ')}]`,
+    )
   const quotas = weights.map((w) => (n * w) / total)
   const counts = quotas.map(Math.floor)
   let left = n - counts.reduce((a, b) => a + b, 0)
@@ -45,18 +49,18 @@ export function classCounts(n: number, weights: readonly number[]): number[] {
 export function classWeightsOf(options: ClassSizeOptions, k: number, what: string): number[] {
   const { prevalence, classWeights } = options
   if (prevalence !== undefined && classWeights !== undefined)
-    throw new RangeError(`${what}: give prevalence or classWeights, not both`)
+    throw new DomainError(what, `${what}: give prevalence or classWeights, not both`)
   if (prevalence !== undefined) {
-    if (k !== 2) throw new RangeError(`${what}: prevalence needs two classes (use classWeights for ${k})`)
-    if (!(prevalence >= 0 && prevalence <= 1)) throw new RangeError(`${what}: prevalence must be in [0, 1]`)
+    if (k !== 2) throw new DomainError(what, `${what}: prevalence needs two classes (use classWeights for ${k})`)
+    if (!(prevalence >= 0 && prevalence <= 1)) throw new DomainError(what, `${what}: prevalence must be in [0, 1]`)
     return [1 - prevalence, prevalence]
   }
   if (classWeights !== undefined) {
     if (classWeights.length !== k)
-      throw new RangeError(`${what}: ${classWeights.length} class weights for ${k} classes`)
+      throw new ShapeError(what, `${what}: ${classWeights.length} class weights for ${k} classes`)
     const total = classWeights.reduce((a, b) => a + b, 0)
     if (!(total > 0) || classWeights.some((w) => !(w >= 0)))
-      throw new RangeError(`${what}: class weights must be non-negative with a positive sum`)
+      throw new DomainError(what, `${what}: class weights must be non-negative with a positive sum`)
     return classWeights.map((w) => w / total)
   }
   return Array<number>(k).fill(1 / k)
@@ -75,8 +79,8 @@ export function resolveClassSizes(
   const n = options.n ?? defaultN
   if (typeof n !== 'number') {
     if (options.prevalence !== undefined || options.classWeights !== undefined)
-      throw new RangeError(`${what}: give per-class counts or proportions, not both`)
-    if (n.length !== k) throw new RangeError(`${what}: ${n.length} sizes for ${k} classes`)
+      throw new DomainError(what, `${what}: give per-class counts or proportions, not both`)
+    if (n.length !== k) throw new ShapeError(what, `${what}: ${n.length} sizes for ${k} classes`)
     n.forEach((v) => checkCount(v, what))
     const total = n.reduce((a, b) => a + b, 0)
     return { sizes: [...n], priors: n.map((v) => (total > 0 ? v / total : 1 / k)), controlled: true }

@@ -8,6 +8,7 @@ import { autocovariance } from 'aifn/probability/stats'
 import { dense, fromData, type Tensor, type Vector } from 'aifn/foundation/tensor'
 import type { Scalar, Size } from 'aifn/foundation/contracts'
 import { isSignal, type SignalInput } from '../signal'
+import { DomainError } from 'aifn/foundation/errors'
 
 /** A vector argument as a Float64Array, through tensor's dense kernels (§4.3 #8: no private matrix helpers). */
 const toVec = (v: SignalInput, where: string): number[] => Array.from(dense.toF64(isSignal(v) ? v.data : v, where))
@@ -55,7 +56,7 @@ export function yuleWalker(
 export function burg(x: SignalInput, order: Size, { demean = true }: { demean?: boolean } = {}): AutoregressiveFit {
   const xs = toVec(x, 'burg')
   const n = xs.length
-  if (order >= n) throw new Error(`burg: order ${order} needs more than ${n} values`)
+  if (order >= n) throw new DomainError('burg', `burg: order ${order} needs more than ${n} values`)
   const mean = demean ? meanOf(xs) : 0
   let f = xs.map((v) => v - mean)
   let b = [...f]

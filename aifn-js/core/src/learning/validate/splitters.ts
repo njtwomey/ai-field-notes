@@ -7,6 +7,7 @@
 import { rowCount, type Column, type Dataset, type Features } from 'aifn/learning/estimators'
 import { child, permutation, shuffle, type Stream } from 'aifn/foundation/random'
 import { fromData, toFlat, type Tensor } from 'aifn/foundation/tensor'
+import { DomainError, ShapeError } from 'aifn/foundation/errors'
 
 /** What a splitter reads: the number of rows, and labels (stratified) or groups (grouped) where it needs them. */
 export interface SplitInput {
@@ -46,7 +47,7 @@ function inputOf(data: SplitInput | Dataset<Features, Column>): SplitInput {
 
 function labelsOf(c: Column, n: number, what: string): (string | number)[] {
   const out = Array.isArray(c) ? Array.from(c) : toFlat(c as Tensor)
-  if (out.length !== n) throw new Error(`splitter: ${out.length} ${what} for ${n} rows`)
+  if (out.length !== n) throw new ShapeError('splitter', `splitter: ${out.length} ${what} for ${n} rows`)
   return out
 }
 
@@ -71,12 +72,12 @@ function foldSizes(n: number, k: number): number[] {
 }
 
 function checkK(k: number, n: number, name: string) {
-  if (!(Number.isInteger(k) && k >= 2)) throw new Error(`${name}: k must be a whole number ≥ 2`)
-  if (k > n) throw new Error(`${name}: k = ${k} folds for ${n} rows`)
+  if (!(Number.isInteger(k) && k >= 2)) throw new DomainError(name, `${name}: k must be a whole number ≥ 2`)
+  if (k > n) throw new DomainError(name, `${name}: k = ${k} folds for ${n} rows`)
 }
 
 function needStream(s: Stream | undefined, name: string): Stream {
-  if (!s) throw new Error(`${name}: a shuffled split needs a stream`)
+  if (!s) throw new DomainError(name, `${name}: a shuffled split needs a stream`)
   return s
 }
 
@@ -121,7 +122,7 @@ export function stratifiedKFold({
     randomised: shuffled,
     split(data, s) {
       const { n, y } = inputOf(data)
-      if (!y) throw new Error('stratifiedKFold: needs labels y')
+      if (!y) throw new DomainError('stratifiedKFold', 'stratifiedKFold: needs labels y')
       checkK(k, n, 'stratifiedKFold')
       const labels = labelsOf(y, n, 'labels')
       // Encode classes by order of first appearance.
@@ -133,7 +134,8 @@ export function stratifiedKFold({
       const classes = code.size
       const counts = new Int32Array(classes)
       for (const c of encoded) counts[c]++
-      if (Math.max(...counts) < k) throw new Error(`stratifiedKFold: no class has ${k} members`)
+      if (Math.max(...counts) < k)
+        throw new DomainError('stratifiedKFold', `stratifiedKFold: no class has ${k} members`)
       // allocation[f][c]: rows of class c tested in fold f, from dealing the sorted codes round-robin.
       const order = Int32Array.from(encoded).sort()
       const allocation = Array.from({ length: k }, () => new Int32Array(classes))
@@ -163,7 +165,7 @@ export function groupKFold({ k = 5 }: { k?: number } = {}): Splitter {
     randomised: false,
     split(data) {
       const { n, groups } = inputOf(data)
-      if (!groups) throw new Error('groupKFold: needs groups')
+      if (!groups) throw new DomainError('groupKFold', 'groupKFold: needs groups')
       const labels = labelsOf(groups, n, 'group labels')
       const unique = Array.from(new Set(labels)).sort((a, b) =>
         typeof a === 'number' && typeof b === 'number'
@@ -174,7 +176,7 @@ export function groupKFold({ k = 5 }: { k?: number } = {}): Splitter {
               ? 1
               : 0,
       )
-      if (unique.length < k) throw new Error(`groupKFold: ${unique.length} groups for ${k} folds`)
+      if (unique.length < k) throw new DomainError('groupKFold', `groupKFold: ${unique.length} groups for ${k} folds`)
       const index = new Map(unique.map((g, j) => [g, j]))
       const sizes = new Int32Array(unique.length)
       for (const g of labels) sizes[index.get(g)!]++
@@ -202,7 +204,7 @@ export function leaveOneOut(): Splitter {
     randomised: false,
     split(data) {
       const { n } = inputOf(data)
-      if (n < 2) throw new Error('leaveOneOut: needs at least two rows')
+      if (n < 2) throw new DomainError('leaveOneOut', 'leaveOneOut: needs at least two rows')
       return fromTestFolds(
         Int32Array.from({ length: n }, (_, i) => i),
         n,
@@ -243,7 +245,8 @@ export function shuffleSplit({
       const stream = needStream(s, 'shuffleSplit')
       const nTest = testSize < 1 ? Math.ceil(testSize * n) : testSize
       const nTrain = trainSize === undefined ? n - nTest : trainSize < 1 ? Math.floor(trainSize * n) : trainSize
-      if (nTest + nTrain > n || nTest < 1 || nTrain < 1) throw new Error('shuffleSplit: sizes do not fit the rows')
+      if (nTest + nTrain > n || nTest < 1 || nTrain < 1)
+        throw new DomainError('shuffleSplit', 'shuffleSplit: sizes do not fit the rows')
       return Array.from({ length: splits }, (_, r) => {
         const p = Array.from(permutation(child(stream, 'split', r), n).data)
         return { test: sorted(p.slice(0, nTest)), train: sorted(p.slice(nTest, nTest + nTrain)) }
@@ -271,7 +274,7 @@ export function expandingWindow({
       const size = testSize ?? Math.floor(n / (splits + 1))
       const firstTest = n - splits * size
       if (size < 1 || firstTest - gap < 1)
-        throw new Error(`expandingWindow: ${n} rows are too few for ${splits} splits`)
+        throw new DomainError('expandingWindow', `expandingWindow: ${n} rows are too few for ${splits} splits`)
       return Array.from({ length: splits }, (_, f) => {
         const start = firstTest + f * size
         const trainEnd = start - gap
@@ -315,7 +318,8 @@ export function rollingOrigin({
           test: fromData(Int32Array.from({ length: horizon }, (_, i) => origin + gap + i)),
         })
       }
-      if (out.length === 0) throw new Error(`rollingOrigin: ${n} rows are too few for a window of ${window}`)
+      if (out.length === 0)
+        throw new DomainError('rollingOrigin', `rollingOrigin: ${n} rows are too few for a window of ${window}`)
       return out
     },
   }

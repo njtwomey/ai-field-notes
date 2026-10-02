@@ -5,6 +5,7 @@
 import { useMemo, useState } from 'react'
 import type { Params } from 'aifn/foundation/pytree'
 import { mdnModel, type MdnCheckpoint, type MdnModel, type MdnSnapshot } from 'aifn-applied/learning/mixture-density'
+import type { TrainingMethod } from 'aifn/nn/training'
 import { call, type Task } from '@lab/state'
 
 /** Slots: the squared-error network is slot 0 everywhere, the MDN slot 1 (its second mode slot 2). */
@@ -17,7 +18,8 @@ export type RunSettings = {
   dataSeed: number
   components: number
   hidden: number[]
-  stepSize: number
+  /** Adam (default) or full-batch L-BFGS, for both networks. */
+  method: TrainingMethod
   steps: number
   seed: number
 }
@@ -28,7 +30,7 @@ export const runTask = (s: RunSettings): Task<MdnSnapshot> =>
     data: call(`applied/data/synthetic/${s.generator}`, call('foundation/random/stream', s.dataSeed), s.knobs),
     components: s.components,
     hidden: s.hidden,
-    stepSize: s.stepSize,
+    method: s.method,
     steps: s.steps,
     every: Math.max(1, Math.round(s.steps / 50)),
     seed: s.seed,

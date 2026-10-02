@@ -32,13 +32,14 @@ import { Linear, linear, rmsNorm, tap, type Layer, type LinearParams, type NormP
 import { appendKvCache, appendLatentCache, trimKvCache, type KvCache, type LatentCache } from './cache'
 import { continuePositions, positionMask, positionRange } from './masks'
 import { applyRope, type RopeOptions } from './positions'
+import { DomainError } from 'aifn/foundation/errors'
 
 /**
  * Logit soft-capping c·tanh(x/c) (Gemma Team, 2024): smooth, odd, ≈ x for |x| ≪ c, and bounded by ±c, so no score can
  * grow without limit and saturate the softmax.
  */
 export function softCap(x: Value, cap: number): Value {
-  if (!(cap > 0)) throw new RangeError(`softCap: the cap ${cap} must be positive`)
+  if (!(cap > 0)) throw new DomainError('softCap', `softCap: the cap ${cap} must be positive`)
   return mul(cap, tanh(mul(1 / cap, x)))
 }
 
@@ -211,7 +212,8 @@ export function multiHeadAttention(
 ): CachedAttentionResult {
   const { heads } = options
   const kvHeads = options.kvHeads ?? heads
-  if (heads % kvHeads !== 0) throw new Error(`multiHeadAttention: ${kvHeads} key–value heads do not divide ${heads}`)
+  if (heads % kvHeads !== 0)
+    throw new DomainError('multiHeadAttention', `multiHeadAttention: ${kvHeads} key–value heads do not divide ${heads}`)
   let q = splitHeads(linear(xq, params.query.weight, params.query.bias), heads)
   let k = splitHeads(linear(xkv, params.key.weight, params.key.bias), kvHeads)
   const v = splitHeads(linear(xkv, params.value.weight, params.value.bias), kvHeads)
@@ -272,8 +274,10 @@ export type MultiHeadLayerOptions = MultiHeadOptions & {
 export function MultiHeadAttention(dModel: Size, options: MultiHeadLayerOptions): Layer<MultiHeadAttentionParams> {
   const { heads, kvHeads = heads, qkNorm = false, projectionBias = true } = options
   const headDim = options.headDim ?? dModel / heads
-  if (!Number.isInteger(headDim)) throw new Error(`MultiHeadAttention: ${heads} heads do not divide ${dModel}`)
-  if (heads % kvHeads !== 0) throw new Error(`MultiHeadAttention: ${kvHeads} key–value heads do not divide ${heads}`)
+  if (!Number.isInteger(headDim))
+    throw new DomainError('MultiHeadAttention', `MultiHeadAttention: ${heads} heads do not divide ${dModel}`)
+  if (heads % kvHeads !== 0)
+    throw new DomainError('MultiHeadAttention', `MultiHeadAttention: ${kvHeads} key–value heads do not divide ${heads}`)
   const proj = (i: Size, o: Size) =>
     Linear(i, o, { init: xavierUniform(), biasInit: zerosInit(), bias: projectionBias })
   const query = proj(dModel, heads * headDim)

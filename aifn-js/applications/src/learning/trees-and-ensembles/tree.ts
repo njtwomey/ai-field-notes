@@ -28,6 +28,7 @@ import { run, trace, type Algorithm, type Trace } from 'aifn/foundation/trace'
 import { classLabels, inputs, matrix, probabilityModel, targets, values } from '../util'
 import { defineModel } from 'aifn/learning/estimators'
 import { int, oneOf, real, space } from 'aifn/foundation/space'
+import { DomainError, ShapeError } from 'aifn/foundation/errors'
 
 /** The impurity a split decreases: Gini or entropy (classification), squared error (regression). */
 export type Criterion = 'gini' | 'entropy' | 'squared'
@@ -228,24 +229,24 @@ interface Prepared {
 }
 
 function prepare(problem: TreeProblem, where: string): Prepared {
-  if (problem.x.shape.length !== 2) throw new Error(`${where}: expected x of shape [n, d]`)
+  if (problem.x.shape.length !== 2) throw new ShapeError(where, `${where}: expected x of shape [n, d]`)
   const [n, d] = problem.x.shape
   const x = values(problem.x)
   const y = values(problem.y)
-  if (y.length !== n) throw new Error(`${where}: ${n} rows but ${y.length} targets`)
+  if (y.length !== n) throw new ShapeError(where, `${where}: ${n} rows but ${y.length} targets`)
   const w = problem.weights ? values(problem.weights) : new Float64Array(n).fill(1)
   let totalWeight = 0
   for (const u of w) totalWeight += u
   const p = problem.params ?? {}
   const criterion = p.criterion ?? (problem.task === 'classification' ? 'gini' : 'squared')
   if ((criterion === 'squared') !== (problem.task === 'regression')) {
-    throw new Error(`${where}: criterion ${criterion} does not fit a ${problem.task} tree`)
+    throw new DomainError(where, `${where}: criterion ${criterion} does not fit a ${problem.task} tree`)
   }
   let K = 1
   if (problem.task === 'classification') {
     let top = 0
     for (const v of y) {
-      if (!(Number.isInteger(v) && v >= 0)) throw new Error(`${where}: labels must be integers 0 … K−1`)
+      if (!(Number.isInteger(v) && v >= 0)) throw new DomainError(where, `${where}: labels must be integers 0 … K−1`)
       top = Math.max(top, v + 1)
     }
     K = Math.max(problem.classes ?? 0, top, 2)
@@ -633,7 +634,7 @@ function descend(tree: DecisionTree, v: ArrayLike<number>, i: number, d: number,
 /** The leaf each row of x [m, d] reaches, int32 [m]. */
 export function applyTree(tree: DecisionTree, x: Tensor, options: DescentOptions = {}): Tensor {
   if (x.shape.length !== 2 || x.shape[1] !== tree.features) {
-    throw new Error(`applyTree: expected x of shape [m, ${tree.features}]`)
+    throw new ShapeError('applyTree', `applyTree: expected x of shape [m, ${tree.features}]`)
   }
   const [m, d] = x.shape
   const v = values(x)
@@ -661,7 +662,8 @@ export interface DecisionPath {
 
 /** The decision path of one point (its d feature values) from the root to the leaf it reaches. */
 export function decisionPath(tree: DecisionTree, point: ArrayLike<number>, options: DescentOptions = {}): DecisionPath {
-  if (point.length !== tree.features) throw new Error(`decisionPath: expected ${tree.features} features`)
+  if (point.length !== tree.features)
+    throw new ShapeError('decisionPath', `decisionPath: expected ${tree.features} features`)
   return descend(tree, point, 0, tree.features, options.within)
 }
 

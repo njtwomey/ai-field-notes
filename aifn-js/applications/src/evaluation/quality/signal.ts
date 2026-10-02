@@ -6,6 +6,7 @@
 import { fromData, type Tensor } from 'aifn/foundation/tensor'
 import { defineMetric, type Data, type Metric, type Rows } from 'aifn/learning/metrics'
 import { denseMatrix as dense, divide, isMatrixLike, sameLength, metricValues as values } from 'aifn/learning/metrics'
+import { DomainError, ShapeError } from 'aifn/foundation/errors'
 
 /** An image: a height × width matrix (rank-2 tensor or rows), or flat row-major data with `width` given. */
 export type Image = Data | Rows
@@ -17,7 +18,8 @@ function image(x: Image, width: number | undefined, what: string): { h: number; 
   }
   const data = values(x as Data)
   const w = width ?? Math.round(Math.sqrt(data.length))
-  if (data.length % w !== 0) throw new Error(`metrics: ${what}: ${data.length} pixels do not fill rows of ${w}`)
+  if (data.length % w !== 0)
+    throw new ShapeError('metrics', `metrics: ${what}: ${data.length} pixels do not fill rows of ${w}`)
   return { h: data.length / w, w, data }
 }
 
@@ -70,7 +72,7 @@ export type SsimOptions = {
 export function ssimMap(reference: Image, distorted: Image, options: SsimOptions): { map: Tensor; mean: number } {
   const x = image(reference, options.width, 'ssim')
   const y = image(distorted, options.width, 'ssim')
-  if (x.h !== y.h || x.w !== y.w) throw new Error('metrics: ssim: images differ in shape')
+  if (x.h !== y.h || x.w !== y.w) throw new ShapeError('metrics', 'metrics: ssim: images differ in shape')
   const gaussian = options.window === 'gaussian'
   const size = gaussian ? 11 : (options.windowSize ?? 7)
   const half = (size - 1) / 2
@@ -138,7 +140,8 @@ export const ssim = defineMetric(
 function bands(reference: Rows, estimate: Rows, what: string) {
   const R = dense(reference, what)
   const E = dense(estimate, what)
-  if (R.rows !== E.rows || R.cols !== E.cols) throw new Error(`metrics: ${what}: images differ in shape`)
+  if (R.rows !== E.rows || R.cols !== E.cols)
+    throw new ShapeError('metrics', `metrics: ${what}: images differ in shape`)
   return { R, E, n: R.rows, K: R.cols }
 }
 
@@ -332,9 +335,13 @@ export function permutationInvariantScore(
   const R = dense(references, 'permutationInvariantScore')
   const E = dense(estimates, 'permutationInvariantScore')
   const S = R.rows
-  if (E.rows !== S || E.cols !== R.cols) throw new Error('metrics: permutationInvariantScore: shapes differ')
+  if (E.rows !== S || E.cols !== R.cols)
+    throw new ShapeError('metrics', 'metrics: permutationInvariantScore: shapes differ')
   if (S > 8)
-    throw new Error('metrics: permutationInvariantScore enumerates S! permutations; use an assignment solver for S > 8')
+    throw new DomainError(
+      'metrics',
+      'metrics: permutationInvariantScore enumerates S! permutations; use an assignment solver for S > 8',
+    )
   const T = R.cols
   const m = new Float64Array(S * S)
   for (let j = 0; j < S; j++)

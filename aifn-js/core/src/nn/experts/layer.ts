@@ -17,6 +17,7 @@ import { softplus } from 'aifn/numerics/special'
 import { zerosInit } from 'aifn/nn/init'
 import { childContext, Linear, linear, tap, type Context, type Layer, type LinearParams } from 'aifn/nn/layers'
 import { route, type Routing, type RoutingOptions } from './routing'
+import { DomainError } from 'aifn/foundation/errors'
 
 /** Parameters of `MixtureOfExperts`: the router, the noise map of a noisy gate, and each expert's parameters. */
 export type MixtureOfExpertsParams = { router: LinearParams; noise?: LinearParams; experts: Params[] }
@@ -54,7 +55,7 @@ export function MixtureOfExperts(
   options: MixtureOfExpertsOptions = {},
 ): MixtureOfExpertsLayer {
   const N = experts.length
-  if (N < 1) throw new Error('MixtureOfExperts: needs at least one expert')
+  if (N < 1) throw new DomainError('MixtureOfExperts', 'MixtureOfExperts: needs at least one expert')
   const { zeroRouter = false, ...routing } = options
   const noisy = routing.gate === 'noisy-top-k'
   const router = Linear(inFeatures, N, zeroRouter ? { init: zerosInit() } : {})

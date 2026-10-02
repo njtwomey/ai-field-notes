@@ -1,5 +1,6 @@
 /**
- * `CodeEditor`: a JavaScript editor (CodeMirror 6) for programs run by `aifn/interpreter`.
+ * `CodeEditor`: a code editor (CodeMirror 6), JavaScript for programs run by `aifn/interpreter` or Prolog for
+ * `aifn/logic` (`language="prolog"`: highlighting, brackets and error marks only).
  *
  * - Highlighting, indentation and bracket handling from `@codemirror/lang-javascript`; colours from Tailwind classes,
  *   so they follow the lab's light and dark themes.
@@ -46,6 +47,7 @@ import {
   type PreludeEntry,
 } from 'aifn/interpreter'
 import { cn } from '@lab/lib/utils'
+import { prologLanguage } from './prolog-language'
 
 /** An error to mark: a message and, when known, a 1-based line and column. */
 export type CodeError = { message: string; line?: number; column?: number }
@@ -53,8 +55,10 @@ export type CodeError = { message: string; line?: number; column?: number }
 export type CodeEditorProps = {
   value: string
   onChange?: (value: string) => void
-  /** The names the program can call: completion and hover docs come from it. */
-  prelude: Prelude
+  /** Default `javascript`. */
+  language?: 'javascript' | 'prolog'
+  /** The names a JavaScript program can call: completion and hover docs come from it. */
+  prelude?: Prelude
   /** Errors to mark (e.g. the last run's). */
   errors?: readonly CodeError[]
   /** Called on Mod-Enter. */
@@ -76,6 +80,9 @@ const highlighter = tagHighlighter([
   { tag: [t.function(t.variableName), t.function(t.propertyName)], class: 'text-sky-700 dark:text-sky-300' },
   { tag: t.definition(t.variableName), class: 'text-foreground font-medium' },
   { tag: [t.operator, t.punctuation, t.bracket], class: 'text-muted-foreground' },
+  // Prolog: variables, functors.
+  { tag: t.typeName, class: 'text-sky-700 dark:text-sky-300' },
+  { tag: t.propertyName, class: 'text-foreground font-medium' },
 ])
 
 const theme = EditorView.theme({
@@ -262,6 +269,7 @@ export function CodeEditor({
   value,
   onChange,
   prelude,
+  language = 'javascript',
   errors = [],
   onRun,
   label = 'Code',
@@ -284,10 +292,17 @@ export function CodeEditor({
       indentOnInput(),
       bracketMatching(),
       closeBrackets(),
-      javascript(),
+      ...(language === 'prolog'
+        ? [prologLanguage]
+        : [
+            javascript(),
+            autocompletion({
+              override: [...(prelude ? [preludeCompletions(prelude)] : []), localCompletionSource],
+              icons: false,
+            }),
+            ...(prelude ? [preludeHover(prelude)] : []),
+          ]),
       syntaxHighlighting(highlighter),
-      autocompletion({ override: [preludeCompletions(prelude), localCompletionSource], icons: false }),
-      preludeHover(prelude),
       lintGutter(),
       keymap.of([
         { key: 'Mod-Enter', run: () => (live.current.onRun?.(), true) },
@@ -314,7 +329,7 @@ export function CodeEditor({
     }
     // The editor is built once per prelude; `value` and `errors` are pushed in by the effects below.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [prelude, label])
+  }, [prelude, label, language])
 
   useEffect(() => {
     const v = view.current

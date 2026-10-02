@@ -14,6 +14,7 @@ import { squaredDistances } from '../neighbourhoods'
 import { mat, matrix, square, values, vec } from '../util'
 import { defineModel } from 'aifn/learning/estimators'
 import { int, real, space } from 'aifn/foundation/space'
+import { DomainError } from 'aifn/foundation/errors'
 
 /** The per-point calibration of the input affinities. */
 export interface PerplexityCalibration {
@@ -36,7 +37,8 @@ export interface PerplexityCalibration {
  */
 export function perplexityCalibration(squared: Tensor, perplexity: number): PerplexityCalibration {
   const { n, v: D2 } = square(squared, 'perplexityCalibration')
-  if (!(perplexity > 0 && perplexity < n)) throw new Error('perplexityCalibration: perplexity must lie in (0, n)')
+  if (!(perplexity > 0 && perplexity < n))
+    throw new DomainError('perplexityCalibration', 'perplexityCalibration: perplexity must lie in (0, n)')
   const target = Math.log(perplexity)
   const P = new Float64Array(n * n)
   const betas = new Float64Array(n)

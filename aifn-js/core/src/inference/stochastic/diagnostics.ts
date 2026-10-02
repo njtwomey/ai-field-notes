@@ -15,6 +15,7 @@ import { normalQuantile, regularisedBetaInverse } from 'aifn/numerics/special'
 import { autocovariance, quantile, ranks } from 'aifn/probability/stats'
 import { dense, fromData, isTensor, toFlat, type Tensor } from 'aifn/foundation/tensor'
 import type { F64 } from './util'
+import { DomainError, ShapeError } from 'aifn/foundation/errors'
 
 /**
  * MCMC draws: one chain (a vector or array), several chains of equal length (an m×n matrix or m arrays), or an
@@ -40,7 +41,7 @@ function toGrids(chains: Chains, where: string): { grids: Grid[]; perParameter: 
       })
       return { grids, perParameter: true }
     }
-    throw new Error(`${where}: expected draws of rank 1, 2 or 3, got shape [${shape.join(', ')}]`)
+    throw new ShapeError(where, `${where}: expected draws of rank 1, 2 or 3, got shape [${shape.join(', ')}]`)
   }
   const list = chains as ArrayLike<number> | readonly ArrayLike<number>[]
   if (list.length > 0 && typeof list[0] !== 'number') {
@@ -48,7 +49,7 @@ function toGrids(chains: Chains, where: string): { grids: Grid[]; perParameter: 
     const n = rows[0].length
     const x = new Float64Array(rows.length * n)
     rows.forEach((r, i) => {
-      if (r.length !== n) throw new Error(`${where}: chains must have equal lengths`)
+      if (r.length !== n) throw new ShapeError(where, `${where}: chains must have equal lengths`)
       x.set(Array.from(r), i * n)
     })
     return { grids: [{ m: rows.length, n, x }], perParameter: false }
@@ -284,7 +285,11 @@ export function monteCarloStandardError(chains: Chains, options: { quantile?: nu
   const p = options.quantile
   if (p === undefined)
     return perGrid(chains, 'monteCarloStandardError', (g) => Math.sqrt(sampleVariance(g.x) / essOf(split(g))))
-  if (!(p > 0 && p < 1)) throw new Error(`monteCarloStandardError: the quantile must lie in (0, 1), got ${p}`)
+  if (!(p > 0 && p < 1))
+    throw new DomainError(
+      'monteCarloStandardError',
+      `monteCarloStandardError: the quantile must lie in (0, 1), got ${p}`,
+    )
   return perGrid(chains, 'monteCarloStandardError', (g) => {
     const threshold = quantile(g.x, p) as number
     const ess = essOf(split({ m: g.m, n: g.n, x: g.x.map((v) => (v <= threshold ? 1 : 0)) }))
@@ -314,7 +319,7 @@ export type ChainSummary = {
 /** `mean`, `sd`, `essBulk`, `essTail`, `rhat` and `mcse` of one parameter's chains (m×n or one chain). */
 export function summarise(chains: ArrayLike<number> | readonly ArrayLike<number>[] | Tensor): ChainSummary {
   const { grids } = toGrids(chains, 'summarise')
-  if (grids.length !== 1) throw new Error('summarise: pass one parameter (rank ≤ 2)')
+  if (grids.length !== 1) throw new DomainError('summarise', 'summarise: pass one parameter (rank ≤ 2)')
   const g = grids[0]
   return {
     mean: meanOf(g.x),

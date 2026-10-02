@@ -8,6 +8,7 @@ import { hungarian, linprog } from 'aifn/optim/programming'
 import { copy, dense, fromData, isTensor, type Tensor } from 'aifn/foundation/tensor'
 import { run, type Algorithm } from 'aifn/foundation/trace'
 import type { Scalar, Size, Status, VectorLike, VectorLike as WeightsInput } from 'aifn/foundation/contracts'
+import { DomainError, ShapeError } from 'aifn/foundation/errors'
 
 // Types defined once, in `aifn/foundation/contracts`.
 export type { VectorLike as WeightsInput } from 'aifn/foundation/contracts'
@@ -23,7 +24,7 @@ export function readPoints(x: PointsInput, what: string): { v: Float64Array; n: 
     const v = copy(x, 'float64').data as Float64Array
     if (x.shape.length === 1) return { v, n: x.shape[0], d: 1 }
     if (x.shape.length === 2) return { v, n: x.shape[0], d: x.shape[1] }
-    throw new Error(`${what}: points must be rank 1 or 2`)
+    throw new ShapeError(what, `${what}: points must be rank 1 or 2`)
   }
   if (x.length === 0) return { v: new Float64Array(0), n: 0, d: 1 }
   if (typeof x[0] === 'number') return { v: Float64Array.from(x as readonly number[]), n: x.length, d: 1 }
@@ -60,7 +61,7 @@ export function costMatrix(
 ): Tensor {
   const X = readPoints(x, 'costMatrix')
   const Y = readPoints(y, 'costMatrix')
-  if (X.d !== Y.d) throw new Error(`costMatrix: points of dimension ${X.d} and ${Y.d}`)
+  if (X.d !== Y.d) throw new ShapeError('costMatrix', `costMatrix: points of dimension ${X.d} and ${Y.d}`)
   const out = new Float64Array(X.n * Y.n)
   for (let i = 0; i < X.n; i++)
     for (let j = 0; j < Y.n; j++) {
@@ -107,7 +108,8 @@ export function exactTransport(a: WeightsInput, b: WeightsInput, cost: CostInput
   const C = readCost(cost, n, m, 'exactTransport')
   const ta = av.reduce((s, v) => s + v, 0)
   const tb = bv.reduce((s, v) => s + v, 0)
-  if (Math.abs(ta - tb) > 1e-9 * Math.max(1, ta)) throw new RangeError(`exactTransport: masses ${ta} and ${tb} differ`)
+  if (Math.abs(ta - tb) > 1e-9 * Math.max(1, ta))
+    throw new ShapeError('exactTransport', `exactTransport: masses ${ta} and ${tb} differ`)
   if (n === m && isUniform(av, n) && isUniform(bv, m)) {
     const r = hungarian(fromData(C, [n, m]))
     const plan = new Float64Array(n * m)
@@ -216,7 +218,8 @@ function summarise(
       P[i * m + j] = p
       row += p
       cost += p * C[i * m + j]
-      if (p > 0) kl += p * Math.log(p / ab) - p + ab
+      // Generalised KL(P ‖ a⊗b) = Σ p log(p/ab) − p + ab: the p log p terms vanish at p = 0, the + ab term does not.
+      kl += (p > 0 ? p * Math.log(p / ab) - p : 0) + ab
     }
     err += Math.abs(row - a[i])
   }
@@ -249,7 +252,7 @@ export function sinkhornSteps(
   cost: CostInput,
   { epsilon, tolerance = 1e-9 }: SinkhornOptions,
 ): Algorithm<SinkhornStart, SinkhornState> {
-  if (!(epsilon > 0)) throw new RangeError('sinkhorn: epsilon must be positive')
+  if (!(epsilon > 0)) throw new DomainError('sinkhorn', 'sinkhorn: epsilon must be positive')
   const av = readVector(a, 'sinkhorn a')
   const bv = readVector(b, 'sinkhorn b')
   const n = av.length
@@ -261,7 +264,7 @@ export function sinkhornSteps(
     name: 'sinkhorn',
     init: ({ g } = {}) => {
       const g0 = g === undefined ? new Float64Array(m) : readVector(g, 'sinkhorn g')
-      if (g0.length !== m) throw new RangeError(`sinkhorn: g must have length ${m}`)
+      if (g0.length !== m) throw new ShapeError('sinkhorn', `sinkhorn: g must have length ${m}`)
       return summarise(problem, 0, new Float64Array(n), g0)
     },
     step: (s) => {

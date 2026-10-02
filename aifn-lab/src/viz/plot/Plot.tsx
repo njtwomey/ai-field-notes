@@ -283,9 +283,14 @@ export function Plot({
   const axesKey = `${x.id}:${x.options.label}:${x.log}|${y.id}:${y.options.label}:${y.log}`
   const outputs = entries.map((e) => {
     const extraKey = (e.def.axes?.(e.props) ?? []).map((a) => a?.getVersion() ?? '').join(',')
-    const ctxKey = [mode, e.slot, axesKey, extraKey, e.def.needsBox ? boxKey : '', e.def.needsPlot ? plotKey : ''].join(
-      '|',
-    )
+    const ctxKey = [
+      mode,
+      e.slot,
+      axesKey,
+      extraKey,
+      flagFor(e.def.needsBox, e.props) ? boxKey : '',
+      flagFor(e.def.needsPlot, e.props) ? plotKey : '',
+    ].join('|')
     const hit = memo.builds.get(e.key)
     if (hit && hit.def === e.def && hit.ctxKey === ctxKey && shallowEqual(hit.props, e.props)) return hit.out
     const built = e.def.build(e.props, { ...ctxBase(e), box: plotBox, plot })
@@ -404,6 +409,7 @@ export function Plot({
               formatter: (p: {
                 seriesId?: string
                 seriesName: string
+                name?: string
                 value: unknown
                 marker: string
                 dataIndex: number
@@ -411,7 +417,11 @@ export function Plot({
                 const own = p.seriesId ? tooltips[p.seriesId] : undefined
                 if (own) return own(p)
                 const v = Array.isArray(p.value) ? (p.value as number[]) : []
-                return `${p.marker}${escapeHtml(p.seriesName)}<br/>(${escapeHtml(fx(v[0]))}, ${escapeHtml(fy(v[1]))})`
+                // A labelled point (Points' `labels`) names itself first.
+                const head = p.name
+                  ? `<b>${escapeHtml(p.name)}</b> · ${escapeHtml(p.seriesName)}`
+                  : escapeHtml(p.seriesName)
+                return `${p.marker}${head}<br/>(${escapeHtml(fx(v[0]))}, ${escapeHtml(fy(v[1]))})`
               },
             },
         xAxis: {
@@ -722,4 +732,9 @@ function logInterval(r: Range, pixels: number, which: 'x' | 'y'): number {
   const decades = Math.log10(r[1] / r[0])
   const fit = Math.max(2, Math.floor(pixels / (which === 'y' ? 20 : 44)))
   return Math.max(1, Math.ceil(decades / fit))
+}
+
+/** A layer definition's `needsBox`/`needsPlot`, which may depend on the layer's props. */
+function flagFor(flag: boolean | ((props: CommonProps) => boolean) | undefined, props: CommonProps): boolean {
+  return typeof flag === 'function' ? flag(props) : !!flag
 }

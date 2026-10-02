@@ -1,22 +1,15 @@
-import { moons, shapesImage, spirals, xor } from 'aifn-applied/data/synthetic'
-import { type Dataset } from 'aifn-applied/data'
+import { shapesImage } from 'aifn-applied/data/synthetic'
+import { comparisonModel, type ComparisonSnapshot } from 'aifn-applied/neural/full-batch'
 import { accuracy } from 'aifn/learning/metrics'
-import { trainingLoop } from 'aifn/nn/training'
-import { adamRule } from 'aifn/optim/first-order'
 import { conv2d, convOutputSize, maxPool2d, relu } from 'aifn/nn/functional'
-import { Mlp } from 'aifn/nn/layers'
 import { MultiHeadAttention, scaledDotProductAttention } from 'aifn/nn/attention'
-import { xavierUniform } from 'aifn/nn/init'
-import { type Params } from 'aifn/foundation/pytree'
-import { binaryCrossEntropyWithLogits } from 'aifn/learning/losses'
 import { stream } from 'aifn/foundation/random'
 import { sigmoid } from 'aifn/numerics/special'
 import { fromData, fromRows, tensor, toFlat, toRows, unwrap, type Tensor } from 'aifn/foundation/tensor'
-import { trace } from 'aifn/foundation/trace'
 import { useMemo, useState } from 'react'
 import { Figure } from '@lab/layout'
 import { Player } from '@lab/controls'
-import { choice, row, setting, slider, toggle, useComputed, useFigureState } from '@lab/state'
+import { call, choice, int, row, setting, slider, toggle, useFigureState, type Task } from '@lab/state'
 import {
   Annotation,
   Bars,
@@ -31,7 +24,15 @@ import {
   formatNumber,
   useAxis,
 } from '@lab/viz'
-import { ParamsPanel } from '@lab/views'
+import {
+  CLASSIFICATION_CASES,
+  datasetChoice,
+  optimiserField,
+  ParamsPanel,
+  TrainControls,
+  useTrainedRun,
+  type DatasetValue,
+} from '@lab/views'
 
 const fmt = (v: number) => formatNumber(v)
 const raw = (v: unknown) => unwrap(v as Tensor) as Tensor
@@ -39,21 +40,13 @@ const raw = (v: unknown) => unwrap(v as Tensor) as Tensor
 // ---------------------------------------------------------------------------------------------------------------------
 // 1. An MLP learning a decision surface.
 
-type DataId = 'spirals' | 'xor' | 'moons'
-const DATASETS: { value: DataId; label: string }[] = [
-  { value: 'spirals', label: 'two spirals' },
-  { value: 'xor', label: 'XOR' },
-  { value: 'moons', label: 'moons' },
-]
-
-function datasetOf(id: DataId): Dataset {
-  const s = stream(`nn-data-${id}`)
-  if (id === 'spirals') return spirals(s, { n: 200, turns: 1.25, noise: 0.04 })
-  if (id === 'moons') return moons(s, { n: 200, noise: 0.12 })
-  return xor(s, { n: 200 })
-}
-
-const STEPS = 600
+/** The 2-d classification sets, from `aifn-applied/data`'s registered generators. */
+const MLP_DATA = datasetChoice({
+  spirals: { label: 'two spirals', n: 200, noise: 0.04, knobs: { arms: 2, turns: 1.25 } },
+  xor: CLASSIFICATION_CASES.xor,
+  moons: { label: 'two moons', n: 200, noise: 0.12 },
+  circles: CLASSIFICATION_CASES.circles,
+})
 const GRID = 45
 
 /** Evenly spaced grid coordinates spanning the data with a margin. */
@@ -69,63 +62,97 @@ function gridAxes(x: Tensor) {
   return { gx: span(0), gy: span(1) }
 }
 
+type MlpSettings = {
+  data: DatasetValue
+  width: number
+  optimiser: { key: string; values: Record<string, unknown> }
+  steps: number
+  seed: number
+}
+
+const mlpDataSeed = (d: DatasetValue) => `nn-data-${d.key}`
+
+/** The worker run: aifn-applied `fullBatchComparison` with the one chosen optimiser (Adam on the whole set, or L-BFGS). */
+function mlpTask(s: MlpSettings): Task<ComparisonSnapshot> {
+  const lbfgs = s.optimiser.key === 'lbfgs'
+  return call<ComparisonSnapshot>(
+    'applied/neural/full-batch/fullBatchComparison',
+    MLP_DATA.task(s.data, mlpDataSeed(s.data)),
+    {
+      task: 'classification',
+      network: { width: s.width, depth: 2, activation: 'tanh' },
+      optimisers: [lbfgs ? 'lbfgs' : 'adam'],
+      iterations: s.steps,
+      ...(lbfgs
+        ? { memory: Number(s.optimiser.values.memory) }
+        : { adamStep: Number(s.optimiser.values.stepSize), batchSize: Number(s.data.values.n) }),
+      seed: s.seed,
+      checkpoints: 120,
+    },
+  )
+}
+
 export function MlpTrainingSpecimen() {
   const state = useFigureState({
-    setup: row('1 · data and network', {
-      dataId: choice(DATASETS, 'spirals', { label: 'data' }),
-      width: slider(2, 32, 16, { label: 'hidden units per layer', step: 1 }),
-      lr: slider(0.005, 0.1, 0.03, { label: 'Adam learning rate', step: 0.005 }),
+    data: MLP_DATA.field({ label: '1 · data', initial: 'spirals' }),
+    setup: row('2 · network and training', {
+      width: int(16, { ge: 2, le: 64, suggestions: [4, 8, 16, 32], label: 'hidden units per layer' }),
+      steps: int(600, { ge: 1, suggestions: [200, 600, 1500], label: 'steps' }),
+      seed: int(0, { ge: 0, le: 9999, label: 'initialisation seed' }),
     }),
+    optimiser: optimiserField({ label: '3 · optimiser', stepSize: 0.03, suggestions: [0.01, 0.03, 0.1] }),
+    show: row('4 · show', { boundary: toggle(true, 'decision boundary (P = 0.5)') }),
   })
-  const { dataId, width, lr } = state.setup
-  const data = useMemo(() => datasetOf(dataId), [dataId])
+  const settings: MlpSettings = {
+    data: { key: state.data.key, values: { ...state.data.values } },
+    width: state.setup.width,
+    optimiser: { key: state.optimiser.key, values: { ...state.optimiser.values } },
+    steps: state.setup.steps,
+    seed: state.setup.seed,
+  }
+  const trained = useTrainedRun(settings, mlpTask)
+  const snap = trained.run.value
+  const shown = trained.trained ?? settings
+  const shownKey = MLP_DATA.key(shown.data)
+  // oxlint-disable-next-line react-hooks/exhaustive-deps -- the key changes exactly when the dataset does
+  const data = useMemo(() => MLP_DATA.make(shown.data, mlpDataSeed(shown.data)), [shownKey])
   const labels = useMemo(() => toFlat(data.y!), [data])
-  const model = useMemo(() => Mlp([2, width, width, 1], { activation: 'tanh', init: xavierUniform() }), [width])
-  // 600 Adam steps: run once the slider is released, not on every pointer move.
-  const run = useComputed(
-    () => {
-      const y = fromData(Float64Array.from(labels), [labels.length, 1])
-      const alg = trainingLoop({
-        loss: (p: Params[], b: { x: Tensor; y: Tensor }) => binaryCrossEntropyWithLogits(model.apply(p, b.x), b.y),
-        data: { x: data.x, y },
-        optimizer: adamRule({ stepSize: lr }),
-      })
-      const tr = trace(alg, { params: model.init(stream('nn-init')) }, STEPS, {
-        every: 10,
-        record: { loss: (s) => s.loss, 'gradient norm': (s) => s.gradNorm },
-      })
-      return { tr, model, loss: toFlat(tr.series.loss) }
-    },
-    [model, data, labels, lr],
-    { mode: 'release' },
-  )
-  const { tr, loss } = run.value
-  const net = run.value.model
-  const [position, setPosition] = useState(0)
-  const pos = Math.min(position, tr.steps.length - 1)
-  const at = tr.steps[pos]
+  const fit = snap?.runs[0]
+  const shots = fit?.checkpoints ?? []
+  // A new run opens at step 0.
+  const [picked, setPicked] = useState<{ run: unknown; index: number } | null>(null)
+  const pos = Math.min(picked && picked.run === trained.trained ? picked.index : 0, Math.max(0, shots.length - 1))
+  const setPosition = (index: number) => setPicked({ run: trained.trained, index })
+  const shot = shots[pos]
+  const network = snap?.network
+  const net = useMemo(() => (network ? comparisonModel(network) : null), [network])
+  const params = useMemo(() => (net && shot ? net.unravel(shot.theta) : null), [net, shot])
   const { gx, gy } = useMemo(() => gridAxes(data.x), [data])
   const gridPoints = useMemo(() => fromRows(gy.flatMap((y) => gx.map((x) => [x, y]))), [gx, gy])
   const surface = useMemo(() => {
-    const p = toFlat(raw(sigmoid(net.apply(at.params, gridPoints))))
+    if (!net || !params) return null
+    const p = toFlat(raw(sigmoid(net.model.apply(params, gridPoints))))
     return gy.map((_, i) => p.slice(i * GRID, (i + 1) * GRID))
-  }, [net, at, gridPoints, gy])
+  }, [net, params, gridPoints, gy])
   const trainAccuracy = useMemo(() => {
-    const p = toFlat(raw(net.apply(at.params, data.x)))
+    if (!net || !params) return NaN
+    const p = toFlat(raw(net.model.apply(params, data.x)))
     return accuracy(
       labels,
       p.map((z) => (z > 0 ? 1 : 0)),
     )
-  }, [net, at, data, labels])
+  }, [net, params, data, labels])
   const points = useMemo(() => {
     const rows = toRows(data.x)
     return { x: rows.map((r) => r[0]), y: rows.map((r) => r[1]) }
   }, [data])
-  const steps = tr.index
+  const at = shot && fit ? fit.iteration.indexOf(shot.iteration) : -1
+  const runKey = trained.trained
   const x1 = useAxis({ label: 'x₁' })
   const x2 = useAxis({ label: 'x₂', equal: x1 })
-  const stepAxis = useAxis({ label: 'step', range: [0, STEPS] })
-  const lossAxis = useAxis({ label: 'loss', log: true, hold: 'union', key: `${dataId}${width}` })
+  const stepAxis = useAxis({ label: 'step', range: [0, shown.steps], key: runKey, integer: true })
+  const lossAxis = useAxis({ label: 'loss', log: true, hold: 'union', key: runKey })
+  const lbfgs = shown.optimiser.key === 'lbfgs'
   return (
     <>
       <Figure
@@ -134,55 +161,80 @@ export function MlpTrainingSpecimen() {
         defaultSize="L"
         state={state}
         controls={
-          <Player
-            value={pos}
-            onChange={setPosition}
-            count={tr.steps.length}
-            format={(k) => String(tr.index[k])}
-            label="2 · training step"
-          />
+          <>
+            <TrainControls
+              run={trained as never}
+              progress={snap ? snap.done / Math.max(1, snap.total) : 0}
+              progressText={snap ? `${snap.done} / ${snap.total} steps` : 'not trained'}
+            />
+            {shots.length > 0 && (
+              <Player
+                value={pos}
+                onChange={setPosition}
+                count={shots.length}
+                format={(k) => String(shots[k]?.iteration ?? 0)}
+                label="5 · training step"
+              />
+            )}
+          </>
         }
         readouts={{
           'at this step': (
             <>
-              <Readout label="step" value={String(tr.index[pos])} />
-              <Readout label="loss" value={fmt(at.loss)} />
-              <Readout label="training accuracy" value={fmt(trainAccuracy)} />
-              <Readout label="gradient norm" value={fmt(at.gradNorm)} />
+              <Readout label="step" value={shot ? String(shot.iteration) : '—'} />
+              <Readout label="loss" value={at >= 0 ? fmt(fit!.loss[at]) : '—'} />
+              <Readout label="training accuracy" value={Number.isFinite(trainAccuracy) ? fmt(trainAccuracy) : '—'} />
+              <Readout label="gradient norm" value={at >= 0 ? fmt(fit!.gradNorm[at]) : '—'} />
+              <Readout label="stopped" value={fit?.stop ?? '—'} />
             </>
           ),
         }}
-        caption={`Mlp(2 → ${width} → ${width} → 1) with tanh units, trained by full-batch Adam on binary cross-entropy (aifn/nn training, aifn/learning/losses). Colour: P(class 1) over the plane at the chosen step (pale at 0.5, the boundary). Right: the loss against the step; play from the initial network or drag the vertical line. Markers: circles class 0, squares class 1.`}
+        caption={`Mlp(2 → ${shown.width} → ${shown.width} → 1) with tanh units on binary cross-entropy, trained in the worker by aifn-applied fullBatchComparison: ${lbfgs ? 'full-batch L-BFGS (core fullBatchTraining; each step a line-searched quasi-Newton step on the whole set)' : 'Adam with every point in each batch'}. Press Train; the player opens at the initial network. Colour: P(class 1) over the plane at the chosen step, pale at 0.5; with the decision boundary on, the ink line is its 0.5 contour. Right: the loss against the step; play or drag the vertical line. Markers: circles class 0, squares class 1.`}
       >
         <Plots cols={2} widths={[1.2, 1]}>
           <Plot x={x1} y={x2}>
-            <Raster
-              x={gx}
-              y={gy}
-              z={surface}
-              scale="diverging"
-              range={[0, 1]}
-              valueLabel="P(class 1)"
-              stale={run.stale}
-            />
+            {surface && (
+              <Raster
+                x={gx}
+                y={gy}
+                z={surface}
+                scale="diverging"
+                range={[0, 1]}
+                valueLabel="P(class 1)"
+                stale={trained.stale}
+                boundary={state.show.boundary ? 0.5 : false}
+              />
+            )}
             <Points name="data" x={points.x} y={points.y} group={labels} groupNames={['class 0', 'class 1']} />
           </Plot>
           <Plot x={stepAxis} y={lossAxis}>
-            <Curve name="training loss" x={steps} y={loss} stale={run.stale} />
-            <Handle
-              kind="x"
-              at={steps[pos]}
-              label="step"
-              onDrag={(x) => setPosition(Math.max(0, Math.min(tr.steps.length - 1, Math.round(x / 10))))}
-            />
+            {fit && <Curve name="training loss" x={fit.iteration} y={fit.loss} stale={trained.stale} />}
+            {shot && (
+              <Handle
+                kind="x"
+                at={shot.iteration}
+                label="step"
+                onDrag={(x) => {
+                  let best = 0
+                  shots.forEach((c, i) => {
+                    if (Math.abs(c.iteration - x) < Math.abs(shots[best].iteration - x)) best = i
+                  })
+                  setPosition(best)
+                }}
+              />
+            )}
           </Plot>
         </Plots>
       </Figure>
       <Figure
         title="The network's parameters at the chosen step"
-        purpose="Every parameter tensor of the MLP with its shape, norm and gradient norm at the step chosen above; pick one to see its values."
+        purpose="Every parameter tensor of the MLP with its shape and norm at the step chosen above; pick one to see its values."
       >
-        <ParamsPanel params={at.params} grads={at.grads} />
+        {params ? (
+          <ParamsPanel params={params} />
+        ) : (
+          <p className="text-sm text-muted-foreground">Train the network above.</p>
+        )}
       </Figure>
     </>
   )

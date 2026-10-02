@@ -23,6 +23,7 @@ import { int, oneOf, real, space } from 'aifn/foundation/space'
 import { fromData, toFlat, type Tensor } from 'aifn/foundation/tensor'
 import { rfft } from 'aifn/foundation/fourier'
 import { labels, matrix, type Dataset, type DatasetMeta } from '../types'
+import { DomainError, ShapeError } from 'aifn/foundation/errors'
 
 // ── Sequence tasks ───────────────────────────────────────────────────────────────────────────────────────────────────
 
@@ -58,7 +59,7 @@ export type SequenceTaskName = (typeof SEQUENCE_TASKS)[number]
 export function encodeSequence(text: string): number[] {
   return [...text].map((c) => {
     const id = ID.get(c)
-    if (id === undefined) throw new RangeError(`encodeSequence: '${c}' is not in the vocabulary`)
+    if (id === undefined) throw new DomainError('encodeSequence', `encodeSequence: '${c}' is not in the vocabulary`)
     return id
   })
 }
@@ -85,7 +86,8 @@ function answerOf(task: SequenceTaskName, prompt: string): string {
       const stack: string[] = []
       for (const c of prompt) {
         if (c === '(' || c === '[') stack.push(c === '(' ? ')' : ']')
-        else if (stack.pop() !== c) throw new RangeError(`sequenceTasks: '${prompt}' is not a balanced prefix`)
+        else if (stack.pop() !== c)
+          throw new DomainError('sequenceTasks', `sequenceTasks: '${prompt}' is not a balanced prefix`)
       }
       return stack.reverse().join('')
     }
@@ -97,7 +99,8 @@ function answerOf(task: SequenceTaskName, prompt: string): string {
       // The prompt is distinct symbols then a query among them: the answer is the symbol after the query's first use.
       const query = prompt.at(-1)!
       const at = prompt.indexOf(query)
-      if (at < 0 || at >= prompt.length - 2) throw new RangeError(`sequenceTasks: '${prompt}' has no answer`)
+      if (at < 0 || at >= prompt.length - 2)
+        throw new DomainError('sequenceTasks', `sequenceTasks: '${prompt}' has no answer`)
       return prompt[at + 1]
     }
   }
@@ -274,12 +277,18 @@ function rows(drawn: { prompts: string[]; answers: string[]; lengths: number[] }
 export function sequenceTasks(s: Stream, options: SequenceTaskOptions = {}): SequenceTaskData {
   const { task = 'reverse', n = 2000, testN = 200, minLength = 2, maxLength = 6, symbols = 8 } = options
   const testLength = options.testLength ?? maxLength
-  if (!SEQUENCE_TASKS.includes(task)) throw new RangeError(`sequenceTasks: unknown task '${task}'`)
-  if (!(minLength >= 1 && maxLength >= minLength)) throw new RangeError('sequenceTasks: need 1 ≤ minLength ≤ maxLength')
-  if (task === 'induction' && minLength < 3) throw new RangeError('sequenceTasks: induction needs minLength ≥ 3')
+  if (!SEQUENCE_TASKS.includes(task)) throw new DomainError('sequenceTasks', `sequenceTasks: unknown task '${task}'`)
+  if (!(minLength >= 1 && maxLength >= minLength))
+    throw new DomainError('sequenceTasks', 'sequenceTasks: need 1 ≤ minLength ≤ maxLength')
+  if (task === 'induction' && minLength < 3)
+    throw new DomainError('sequenceTasks', 'sequenceTasks: induction needs minLength ≥ 3')
   if (task === 'induction' && testLength > LETTERS.length)
-    throw new RangeError(`sequenceTasks: induction draws distinct letters, so lengths are at most ${LETTERS.length}`)
-  if (!(symbols >= 2 && symbols <= LETTERS.length)) throw new RangeError('sequenceTasks: symbols must be in 2–8')
+    throw new DomainError(
+      'sequenceTasks',
+      `sequenceTasks: induction draws distinct letters, so lengths are at most ${LETTERS.length}`,
+    )
+  if (!(symbols >= 2 && symbols <= LETTERS.length))
+    throw new DomainError('sequenceTasks', 'sequenceTasks: symbols must be in 2–8')
   const testRange: [Size, Size] = testLength > maxLength ? [maxLength + 1, testLength] : [minLength, maxLength]
   const train = examples(child(s, 'train'), task, n, [minLength, maxLength], symbols)
   const test = examples(child(s, 'test'), task, testN, testRange, symbols)
@@ -397,7 +406,7 @@ export function modularTruth(op: ModularOperation, p: Size): ModularTruth {
     fourierBasis: fromData(basis, [p, p]),
     spectrum: (table) => {
       const [rowsN, d] = table.shape
-      if (rowsN !== p) throw new RangeError(`spectrum: the table has ${rowsN} rows, not p = ${p}`)
+      if (rowsN !== p) throw new ShapeError('spectrum', `spectrum: the table has ${rowsN} rows, not p = ${p}`)
       const v = toFlat(table)
       const power = new Float64Array(half + 1)
       for (let j = 0; j < d; j++) {
@@ -442,10 +451,14 @@ export interface ModularArithmeticOptions {
  */
 export function modularArithmetic(s: Stream, options: ModularArithmeticOptions = {}): ModularArithmeticData {
   const { p = 31, op = '+', fraction = 0.5 } = options
-  if (!(Number.isInteger(p) && p >= 2)) throw new RangeError(`modularArithmetic: p must be an integer ≥ 2, got ${p}`)
-  if (!MODULAR_OPERATIONS.includes(op)) throw new RangeError(`modularArithmetic: unknown operation '${op}'`)
-  if (op === '/' && !isPrime(p)) throw new RangeError(`modularArithmetic: division needs a prime p, got ${p}`)
-  if (!(fraction > 0 && fraction < 1)) throw new RangeError('modularArithmetic: fraction must be in (0, 1)')
+  if (!(Number.isInteger(p) && p >= 2))
+    throw new DomainError('modularArithmetic', `modularArithmetic: p must be an integer ≥ 2, got ${p}`)
+  if (!MODULAR_OPERATIONS.includes(op))
+    throw new DomainError('modularArithmetic', `modularArithmetic: unknown operation '${op}'`)
+  if (op === '/' && !isPrime(p))
+    throw new DomainError('modularArithmetic', `modularArithmetic: division needs a prime p, got ${p}`)
+  if (!(fraction > 0 && fraction < 1))
+    throw new DomainError('modularArithmetic', 'modularArithmetic: fraction must be in (0, 1)')
   const pairs: [number, number][] = []
   for (let a = 0; a < p; a++) for (let b = op === '/' ? 1 : 0; b < p; b++) pairs.push([a, b])
   const truth = modularTruth(op, p)

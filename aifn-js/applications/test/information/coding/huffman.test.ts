@@ -5,6 +5,7 @@
  * codes, source extensions, and encoding and decoding.
  */
 import { describe, expect, it } from 'vitest'
+import { DomainError } from 'aifn/foundation/errors'
 import { pathToRoot } from 'aifn/graph'
 import { toFlat } from 'aifn/foundation/tensor'
 import { trace } from 'aifn/foundation/trace'
@@ -124,7 +125,7 @@ describe('canonical codes, extensions, encoding', () => {
     expect(canonicalCode([2, 1, 3, 3])).toEqual(['10', '0', '110', '111'])
     expect(canonicalCode([2, 2, 2, 3, 3])).toEqual(['00', '01', '10', '110', '111'])
     expect(canonicalCode([1, 1, 2, 2, 2], 3)).toEqual(['0', '1', '20', '21', '22'])
-    expect(() => canonicalCode([1, 1, 1])).toThrow(RangeError)
+    expect(() => canonicalCode([1, 1, 1])).toThrow(DomainError)
     for (const [name, { p }] of Object.entries(ref)) {
       const code = huffmanCode(p)
       const canonical = canonicalCode(code.lengths)

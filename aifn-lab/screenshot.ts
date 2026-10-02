@@ -12,7 +12,11 @@
  * --timeout 15000 (ms to wait for a page to settle); --act '<figure-id>:drag x0 y0 x1 y1' or '<figure-id>:click x y'
  * (repeatable; coordinates are fractions of the figure's chart area, applied on every page that has that figure), or
  * '<figure-id>:press <button aria-label> [times]' (e.g. 'press First', 'press Next 20' or 'press Play' on a Player),
- * or '<figure-id>:select <option label>' (opens each dropdown of the figure until one offers that option, and picks it);
+ * or '<figure-id>:select <option label>' (opens each dropdown of the figure until one offers that option, and picks it),
+ * or '<figure-id>:hover x y' (moves the pointer there and leaves it: the figure's and the page's captures show the hover
+ * state, e.g. a tooltip or a hover guide), or '<figure-id>:click node <id | label>' / 'hover node <id | label>' (a Diagram
+ * or TreeView node of the figure, by node id (a TreeView's node index), else its label exactly, else the first label containing the text; e.g.
+ * 'click node 7' pins a tree node). The last hover act holds for the captures; a later click or drag ends it;
  * --restart-every 40 (pages per Chrome; a hung protocol call also restarts it and retries the page once);
  * --profile (each --act drag becomes 60 pointer moves at display rate, measured: input-to-paint, frame times, dropped
  * frames, long tasks, script/layout/style time, ECharts setOption calls and the heaviest functions by CPU self time,
@@ -44,7 +48,14 @@ const THEME_KEY = 'aifn-lab:theme'
 // ---------------------------------------------------------------------------------------------------------------------
 // Options
 
-type Act = { figure: string; kind: 'click' | 'drag' | 'press' | 'select'; at: number[]; button?: string }
+/** `node`: a Diagram or TreeView node of the figure (by node id or label) instead of a point given as fractions. */
+type Act = {
+  figure: string
+  kind: 'click' | 'drag' | 'press' | 'select' | 'hover'
+  at: number[]
+  button?: string
+  node?: string
+}
 type Theme = 'light' | 'dark'
 
 const opts = {
@@ -71,7 +82,10 @@ function parseAct(spec: string): Act {
   // '<figure-id>:select <option label>': picks that option in whichever of the figure's dropdowns offers it.
   const choose = /^([^:]+):\s*select\s+(.+)$/.exec(spec.trim())
   if (choose) return { figure: choose[1].trim(), kind: 'select', at: [], button: choose[2].trim() }
-  const m = /^([^:]+):\s*(click|drag)\s+(.+)$/.exec(spec.trim())
+  // '<figure-id>:click node <id | label>' or 'hover node …': a Diagram or TreeView node.
+  const node = /^([^:]+):\s*(click|hover)\s+node\s+(.+)$/.exec(spec.trim())
+  if (node) return { figure: node[1].trim(), kind: node[2] as Act['kind'], at: [], node: node[3].trim() }
+  const m = /^([^:]+):\s*(click|drag|hover)\s+(.+)$/.exec(spec.trim())
   const at = m
     ? m[3]
         .trim()
@@ -80,7 +94,10 @@ function parseAct(spec: string): Act {
     : []
   const want = m?.[2] === 'drag' ? 4 : 2
   if (!m || at.length !== want || at.some((v) => !Number.isFinite(v)))
-    throw new Error(`bad --act '${spec}': use '<figure-id>:drag x0 y0 x1 y1' or '<figure-id>:click x y' (fractions)`)
+    throw new Error(
+      `bad --act '${spec}': use '<figure-id>:drag x0 y0 x1 y1', '<figure-id>:click x y', '<figure-id>:hover x y' ` +
+        `(fractions), '<figure-id>:click node <id|label>' or '<figure-id>:hover node <id|label>'`,
+    )
   return { figure: m[1].trim(), kind: m[2] as Act['kind'], at }
 }
 
@@ -117,7 +134,11 @@ for (let i = 0; i < argv.length; i++) {
       '  [--width 1440] [--height 900] [--dpr 2] [--mobile] [--url http://...] [--port 5191] [--timeout ms] [--profile]',
     )
     console.log(
-      "  [--act '<figure-id>:drag x0 y0 x1 y1' | '<figure-id>:click x y' | '<figure-id>:select <option>'] ...   (see the header of this file)",
+      "  [--act '<fig>:drag x0 y0 x1 y1' | '<fig>:click x y' | '<fig>:hover x y' | '<fig>:click node <id|label>'",
+    )
+    console.log("         | '<fig>:hover node <id|label>' | '<fig>:press <button> [n]' | '<fig>:select <option>'] ...")
+    console.log(
+      '  hover acts leave the pointer in place for the captures; x y are fractions of the chart area (see the file header)',
     )
     process.exit(0)
   } else opts.only.push(a)
@@ -295,7 +316,12 @@ const SETTLE = (timeout: number) => `(async () => {
     last = sig
     await sleep(60)
   }
-  return { ok: false, pending, ms: performance.now() - t0 }
+  // Which figures hold the charts that never settled, so the warning names them.
+  const where = [...document.querySelectorAll('[_echarts_instance_]:not([data-chart-ready])')].map((c) => {
+    const f = c.closest('section[data-figure-id]')
+    return f ? f.getAttribute('data-figure-id') : '?'
+  })
+  return { ok: false, pending, where: [...new Set(where)], ms: performance.now() - t0 }
 })()`
 
 type Inspect = {
@@ -522,11 +548,16 @@ async function run() {
     })
 
   const settle = async (what: string) => {
-    const r = await cdp.eval<{ ok: boolean; pending?: number; ms: number }>(SETTLE(opts.timeout), opts.timeout + 10_000)
+    const r = await cdp.eval<{ ok: boolean; pending?: number; where?: string[]; ms: number }>(
+      SETTLE(opts.timeout),
+      opts.timeout + 10_000,
+    )
     if (!r.ok)
       log.push({
         level: 'warning',
-        text: `lab-shots: ${what} did not settle in ${opts.timeout} ms (${r.pending} charts still animating)`,
+        text:
+          `lab-shots: ${what} did not settle in ${opts.timeout} ms (${r.pending} charts still animating` +
+          `${r.where?.length ? `, in ${r.where.join(', ')}` : ''})`,
       })
     return r
   }
@@ -647,6 +678,71 @@ async function run() {
         area: a && { x: a.x, y: a.y, width: a.width, height: a.height } }
     })()`)
 
+  /**
+   * Where an act points, in window pixels: a Diagram/TreeView node's centre (`act.node`), or fractions of the figure's
+   * chart area. `scroll` brings the figure into view first; without it the page is measured where it is (a capture of
+   * the full page, the window grown to the content).
+   */
+  const locate = async (act: Act, scroll: boolean): Promise<readonly [number, number] | null> => {
+    const fig = `main section[data-figure-id="${act.figure.replace(/"/g, '\\"')}"]`
+    if (act.node !== undefined)
+      return cdp.eval<[number, number] | null>(`(async () => {
+        const f = document.querySelector(${JSON.stringify(fig)})
+        if (!f) return null
+        if (${scroll}) {
+          f.scrollIntoView({ block: 'start', behavior: 'instant' })
+          await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)))
+        }
+        const want = ${JSON.stringify(act.node)}
+        const nodes = [...f.querySelectorAll('[data-node-id]')]
+        const label = (e) => e.getAttribute('data-node-label') ?? ''
+        // A TreeView's diagram ids are 't<index>': a bare number matches the node index too.
+        const id = (e) => e.getAttribute('data-node-id') ?? ''
+        const n = nodes.find((e) => id(e) === want) ??
+          (/^\\d+$/.test(want) ? nodes.find((e) => id(e).replace(/^\\D+/, '') === want) : undefined) ??
+          nodes.find((e) => label(e) === want) ??
+          nodes.find((e) => label(e).toLowerCase().includes(want.toLowerCase()))
+        if (!n) return null
+        // Diagram nodes move with a transition (a step of a player): wait until the node holds still.
+        const frame = () => new Promise((r) => requestAnimationFrame(() => r()))
+        const settleRect = async () => {
+          let b = n.getBoundingClientRect(), still = 0
+          for (let i = 0; i < 120 && still < 3; i++) {
+            await frame()
+            const c = n.getBoundingClientRect()
+            still = c.x === b.x && c.y === b.y && c.width === b.width ? still + 1 : 0
+            b = c
+          }
+          return b
+        }
+        let b = await settleRect()
+        // A node below the window (a tall figure revealed from its top) is scrolled to, or the press would miss it.
+        if (b.y < 0 || b.y + b.height > innerHeight || b.x < 0 || b.x + b.width > innerWidth) {
+          n.scrollIntoView({ block: 'center', inline: 'center', behavior: 'instant' })
+          b = await settleRect()
+        }
+        const x = b.x + b.width / 2, y = b.y + b.height / 2
+        // What a press there lands on: an element over the node (a label) would swallow it.
+        const hit = document.elementFromPoint(x, y)
+        if (hit && !n.contains(hit)) console.warn('lab-shots: node ' + want + ' is covered at its centre by ' + hit.tagName + '.' + (hit.getAttribute('class') ?? ''))
+        return [x, y]
+      })()`)
+    const box = scroll
+      ? await reveal(act.figure)
+      : await cdp.eval<{ area: DOMRect | null; x: number; y: number; width: number; height: number } | null>(`(() => {
+          const f = document.querySelector(${JSON.stringify(fig)})
+          if (!f) return null
+          const b = f.getBoundingClientRect()
+          const sep = f.querySelector('[role=separator][aria-label="Resize figure"]')
+          const a = sep ? sep.parentElement.getBoundingClientRect() : null
+          return { x: b.x, y: b.y, width: b.width, height: b.height,
+            area: a && { x: a.x, y: a.y, width: a.width, height: a.height } }
+        })()`)
+    if (!box) return null
+    const area = box.area ?? box
+    return [area.x + act.at[0] * area.width, area.y + act.at[1] * area.height]
+  }
+
   /** Load the lab in a theme and viewport (the theme is in localStorage before the app starts); returns every page. */
   const openLab = async (v: Viewport, theme: Theme) => {
     await setViewport(v)
@@ -718,9 +814,12 @@ async function run() {
         await settle(target.path)
 
         const profiles: Profile[] = []
+        // The last hover act: the pointer goes back to it before each capture that shows its figure.
+        let hovering: Act | undefined
         for (const act of opts.acts) {
           const box = await reveal(act.figure)
           if (!box) continue
+          if (act.kind !== 'press' && act.kind !== 'select') hovering = undefined
           const area = box.area ?? box
           const at = (fx: number, fy: number) => [area.x + fx * area.width, area.y + fy * area.height] as const
           if (act.kind === 'press') {
@@ -777,11 +876,27 @@ async function run() {
               })
             }
             if (!picked) log.push({ level: 'error', text: `lab-shots: no option '${act.button}' in ${act.figure}` })
-          } else if (act.kind === 'click') {
-            const [x, y] = at(act.at[0], act.at[1])
+          } else if (act.kind === 'click' || act.kind === 'hover') {
+            const point = await locate(act, false)
+            if (!point) {
+              log.push({ level: 'error', text: `lab-shots: no node '${act.node}' in ${act.figure}` })
+              continue
+            }
+            let [x, y] = point
             await mouse('mouseMoved', x, y)
-            await mouse('mousePressed', x, y, 1)
-            await mouse('mouseReleased', x, y)
+            // Let the page answer the hover (a re-render) before pressing, as a reader's hand would.
+            await new Promise((r) => setTimeout(r, 120))
+            if (act.kind === 'click') {
+              // Hovering may change the page above the target (a readout that grows): find it again before pressing.
+              const again = await locate(act, false)
+              if (again && (again[0] !== x || again[1] !== y)) {
+                ;[x, y] = again
+                await mouse('mouseMoved', x, y)
+              }
+              await mouse('mousePressed', x, y, 1)
+              await new Promise((r) => setTimeout(r, 60))
+              await mouse('mouseReleased', x, y)
+            } else hovering = act
           } else {
             const [x0, y0] = at(act.at[0], act.at[1])
             const [x1, y1] = at(act.at[2], act.at[3])
@@ -799,12 +914,20 @@ async function run() {
           }
           log.push({
             level: 'info',
-            text: `lab-shots: applied --act ${act.figure}:${act.kind} ${act.button ?? act.at.join(' ')}`,
+            text: `lab-shots: applied --act ${act.figure}:${act.kind} ${act.button ?? (act.node !== undefined ? `node ${act.node}` : act.at.join(' '))}`,
           })
           await settle(`${target.path} after --act`)
         }
-        // Park the pointer on the sidebar's edge, off every chart, so no tooltip shows in the capture.
-        await mouse('mouseMoved', 1, v.height - 1)
+        // Park the pointer on the sidebar's edge, off every chart, so no tooltip shows in the capture; a hover act puts it
+        // back on its target before each capture that shows it.
+        const park = () => mouse('mouseMoved', 1, v.height - 1)
+        const rehover = async (what: string) => {
+          const point = hovering && (await locate(hovering, false))
+          if (!point) return park()
+          await mouse('mouseMoved', point[0], point[1])
+          await settle(what)
+        }
+        await park()
 
         const info = await cdp.eval<Inspect>(INSPECT)
         const problems: string[] = []
@@ -833,6 +956,8 @@ async function run() {
             await settle(`${target.path}#${f.id}`)
             box = (await reveal(f.id)) ?? box
           }
+          if (hovering?.figure === f.id) await rehover(`${target.path}#${f.id} (hover)`)
+          else await park()
           const file = path.join(dir, `${f.id}.png`)
           await capture(file, { x: box.x, y: box.y, width: box.width, height: box.height })
           files.push(file)
@@ -854,6 +979,7 @@ async function run() {
             await settle(`${target.path} (full page)`)
             want = Math.ceil((await cdp.eval<Inspect>(INSPECT)).scrollHeight)
           }
+          if (hovering) await rehover(`${target.path} (full page, hover)`)
           const file = path.join(dir, 'page.png')
           await capture(file)
           files.unshift(file)

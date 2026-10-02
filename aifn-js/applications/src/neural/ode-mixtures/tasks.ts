@@ -5,6 +5,7 @@
 
 import { fromData, toFlat, type Tensor } from 'aifn/foundation/tensor'
 import type { SvfmRunData } from './run'
+import { ShapeError } from 'aifn/foundation/errors'
 
 /** The fields of a dataset a run reads. */
 export type DatasetLike = { x: Tensor; y?: Tensor }
@@ -40,7 +41,7 @@ export type WalkTaskOptions = {
 export function walkTask(d: DatasetLike, options: WalkTaskOptions = {}): SvfmRunData {
   const [n, cols] = d.x.shape
   const M = (cols - 1) / 2
-  if (!Number.isInteger(M) || M < 2) throw new RangeError('walkTask: expected rows x₀, y₀, …, hour')
+  if (!Number.isInteger(M) || M < 2) throw new ShapeError('walkTask', 'walkTask: expected rows x₀, y₀, …, hour')
   const a = toFlat(d.x)
   const paths = new Float64Array(n * M * 2)
   const starts = new Float64Array(n * 2)

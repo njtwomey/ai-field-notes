@@ -2,4 +2,5 @@
  * `aifn-applied/data/real`: small embedded real datasets.
  */
 
-export { anscombe, coalMining, iris, oldFaithful } from './real'
+export { anscombe, coalMining, iris, karateClub, oldFaithful, type GraphDataset } from './real'
+export { titanic } from './titanic'

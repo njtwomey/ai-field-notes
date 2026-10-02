@@ -220,10 +220,21 @@ export function vjp<X, Y>(f: (x: X) => Y, x: X): VjpResult<X, Y> {
       const seeds = treeFlatten(u).leaves
       if (seeds.length !== out.leaves.length)
         throw new ShapeError('vjp', 'vjp: the cotangent must have the structure of the output')
+      sameShapes('vjp', 'the cotangent', out.leaves, seeds)
       const { cotangents } = rev.backward(out.leaves, seeds, traced.inputs)
       return splitLeaves(traced.flats, filled(cotangents, traced.inputs))[0] as Lifted<X>
     },
   }
+}
+
+/** Throw unless each direction leaf has the shape of its primal leaf (a number never stands for a whole vector). */
+function sameShapes(where: string, what: string, primals: readonly Value[], directions: readonly Value[]): void {
+  primals.forEach((p, i) => {
+    const a = avalOf(p).shape
+    const b = avalOf(directions[i]).shape
+    if (a.length !== b.length || a.some((d, k) => d !== b[k]))
+      throw new ShapeError(where, `${where}: ${what} leaf ${i} has shape [${b.join(', ')}], expected [${a.join(', ')}]`)
+  })
 }
 
 /** The result of `jvp`: f's value and the directional derivative J·v, both of the structure of f(x). */
@@ -239,6 +250,7 @@ export function jvp<X, Y>(f: (x: X) => Y, x: X, v: X): JvpResult<Y> {
   const flat = treeFlatten(x)
   const directions = treeFlatten(v).leaves
   if (directions.length !== flat.leaves.length) throw new ShapeError('jvp', 'jvp: v must have the structure of x')
+  sameShapes('jvp', 'the tangent', flat.leaves, directions)
   const seeded = flat.leaves.map((leaf, i) => fwd.seed(leaf, directions[i]))
   const y = f(treeUnflatten(flat.treedef, seeded))
   const out = treeFlatten(y)
@@ -383,11 +395,15 @@ export function jacobian<X, Y>(f: (x: X) => Y, options: JacobianOptions = {}): (
     const inAvals = inFlat.leaves.map(avalOf)
     const n = inAvals.reduce((s, a) => s + count(a.shape), 0)
     if (mode === 'forward') return forwardJacobian(f, x, inFlat, inAvals, n)
+    if (mode === 'auto') {
+      // The output size decides; read it from a plain evaluation, which records no tape for the forward case.
+      const m0 = treeFlatten(f(x)).leaves.reduce((s: number, v) => s + count(avalOf(v as Value).shape), 0)
+      if (n <= m0) return forwardJacobian(f, x, inFlat, inAvals, n)
+    }
     const { value, pullback } = vjp(f, x)
     const outFlat = treeFlatten(value)
     const outAvals = outFlat.leaves.map(avalOf)
     const m = outAvals.reduce((s, a) => s + count(a.shape), 0)
-    if (mode === 'auto' && n <= m) return forwardJacobian(f, x, inFlat, inAvals, n)
     // Row block of output leaf j: the pullbacks of the basis cotangents of its elements, all at once under vmap.
     const basis = outAvals.map((_, j) => basisBlock(outAvals, j, m))
     const rows = vmap((u: unknown) => pullback(u as TreeOf<Y, Value>))(treeUnflatten(outFlat.treedef, basis))

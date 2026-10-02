@@ -21,6 +21,7 @@ import {
   type Rows,
 } from './core'
 import { kappaFromTable } from './classification'
+import { DomainError, ShapeError } from 'aifn/foundation/errors'
 
 // ── Ordinal ──────────────────────────────────────────────────────────────────────────────────────────────────────────
 
@@ -33,7 +34,8 @@ function ordinalIndices(yTrue: Labels, yPred: Labels, labels?: readonly Label[])
   const classes = labels ? [...labels] : classesOf(t, p)
   const ti = encodeLabels(t, classes)
   const pi = encodeLabels(p, classes)
-  if (ti.includes(-1) || pi.includes(-1)) throw new Error('metrics: ordinal metric: a label is missing from `labels`')
+  if (ti.includes(-1) || pi.includes(-1))
+    throw new DomainError('metrics', 'metrics: ordinal metric: a label is missing from `labels`')
   return { ti, pi, classes }
 }
 
@@ -136,10 +138,10 @@ export const quadraticWeightedKappa = defineMetric(
 /** Class indices 0 … K − 1 of the truth in the ordinal order `labels` (default the sorted labels). */
 function truthIndex(yTrue: Labels, labels: readonly Label[] | undefined, what: string) {
   const t = labelList(yTrue)
-  if (t.length === 0) throw new Error(`metrics: ${what}: no cases`)
+  if (t.length === 0) throw new DomainError('metrics', `metrics: ${what}: no cases`)
   const classes = labels ? [...labels] : classesOf(t)
   const index = encodeLabels(t, classes)
-  if (index.includes(-1)) throw new Error(`metrics: ${what}: a label is missing from \`labels\``)
+  if (index.includes(-1)) throw new DomainError('metrics', `metrics: ${what}: a label is missing from \`labels\``)
   return { index, classes }
 }
 
@@ -167,10 +169,14 @@ export const rankedProbabilityScore = defineMetric(
     const P = dense(probabilities, 'rankedProbabilityScore probabilities')
     const n = index.length
     const K = P.cols
-    if (P.rows !== n) throw new Error(`metrics: rankedProbabilityScore: ${P.rows} probability rows for ${n} cases`)
+    if (P.rows !== n)
+      throw new ShapeError('metrics', `metrics: rankedProbabilityScore: ${P.rows} probability rows for ${n} cases`)
     if (K !== classes.length)
-      throw new Error(`metrics: rankedProbabilityScore: ${K} probability columns for ${classes.length} classes`)
-    if (K < 2) throw new Error('metrics: rankedProbabilityScore: needs at least two classes')
+      throw new ShapeError(
+        'metrics',
+        `metrics: rankedProbabilityScore: ${K} probability columns for ${classes.length} classes`,
+      )
+    if (K < 2) throw new DomainError('metrics', 'metrics: rankedProbabilityScore: needs at least two classes')
     let s = 0
     for (let i = 0; i < n; i++) {
       let Q = 0
@@ -237,7 +243,8 @@ export const ordinalConcordanceIndex = defineMetric(
     let same = 0
     for (let c = 0; c < K; c++) same += counts[c] * counts[c]
     const pairs = (n * n - same) / 2
-    if (pairs === 0) throw new Error('metrics: ordinalConcordanceIndex: needs cases of at least two classes')
+    if (pairs === 0)
+      throw new DomainError('metrics', 'metrics: ordinalConcordanceIndex: needs cases of at least two classes')
     return concordant / pairs
   },
 )

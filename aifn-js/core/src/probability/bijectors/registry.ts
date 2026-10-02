@@ -101,6 +101,22 @@ bijector(
   maps.orderedBijector,
 )
 
+bijector(
+  {
+    key: 'affineCouplingBijector',
+    name: 'affine coupling',
+    summary:
+      'Masked coordinates pass through and condition a scale and shift of the rest: a triangular Jacobian (RealNVP, NICE).',
+    domain: 'real-vector',
+    codomain: 'real-vector',
+    params: none,
+    factory: true,
+    notes: ['normalising-flow', 'change-of-variables'],
+    cite: ['dinh2017', 'dinh2015'],
+  },
+  maps.affineCouplingBijector,
+)
+
 /** Every bijector and bijector factory, keyed by export name. */
 export const bijectorRegistry: Readonly<Record<string, Entry<object, BijectorInfo>>> = entries<BijectorInfo>(
   'bijector',

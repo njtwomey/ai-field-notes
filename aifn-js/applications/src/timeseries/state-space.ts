@@ -15,6 +15,7 @@ import type { Algorithm } from 'aifn/foundation/trace'
 import { luFactor, luSolve } from 'aifn/numerics/linalg'
 import { toSeries, type MatrixLike, type VectorLike } from './inputs'
 import { filterAll, parseModel, smoothAll, type Model, type StateSpaceModel } from 'aifn/inference/filtering'
+import { DomainError } from 'aifn/foundation/errors'
 
 /** X with A X = B, or null when A is singular to working precision. */
 function solveOrNull(a: Tensor, b: Tensor): Tensor | null {
@@ -61,7 +62,7 @@ export function stateSpaceEm(
 ): Algorithm<void, StateSpaceEmState> {
   const ys = toSeries(y, 'stateSpaceEm')
   if (ys.some((r) => r.some((v) => !Number.isFinite(v))))
-    throw new Error('stateSpaceEm: observations must be finite (no missing values)')
+    throw new DomainError('stateSpaceEm', 'stateSpaceEm: observations must be finite (no missing values)')
   const want = { A: true, C: true, Q: true, R: true, initial: true, ...estimate }
   const start = parseModel(model, 'stateSpaceEm')
   const T = ys.length

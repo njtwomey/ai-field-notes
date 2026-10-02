@@ -64,4 +64,5 @@ export {
   type Regressed,
   type RunStats,
 } from './changepoint'
+export { trackingMetrics, type TrackingMetrics, type TrackingOptions } from './tracking'
 export { filteringAlgorithms, filteringFunctions } from './registry'

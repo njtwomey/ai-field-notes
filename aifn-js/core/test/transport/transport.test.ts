@@ -154,3 +154,27 @@ describe('Gromov–Wasserstein', () => {
     checkProtocol(alg, undefined, { steps: 6, record: { loss: (s) => s.loss } })
   })
 })
+
+describe('against POT (Python Optimal Transport)', () => {
+  const P = F.pot as {
+    sinkhorn: { a: number[]; b: number[]; cost: number[][]; eps: number; emd: number; plan: number[][] }[]
+    gromov: { cx: number[][]; cy: number[][]; eps: number; plan: number[][]; exactLoss: number }
+  }
+  it.each(P.sinkhorn.map((c) => [`${c.a.length}×${c.b.length}, ε = ${c.eps}`, c] as const))(
+    'exact cost (ot.emd2) and the converged entropic plan (ot.sinkhorn), %s',
+    (_, c) => {
+      expect(exactTransport(c.a, c.b, c.cost).cost).toBeCloseTo(c.emd, 10)
+      const s = sinkhorn(c.a, c.b, c.cost, { epsilon: c.eps, tolerance: 1e-14, maxSteps: 100000 })
+      close(Array.from(toFlat(s.plan)), c.plan.flat(), 1e-10)
+    },
+  )
+  it('entropic Gromov–Wasserstein reaches the plan of ot.gromov (its ε is twice aifn’s)', () => {
+    const G = P.gromov
+    const n = G.cx.length
+    const r = gromovWasserstein(
+      { cx: G.cx, cy: G.cy, a: uniformWeights(n), b: uniformWeights(n) },
+      { epsilon: G.eps, maxSteps: 1000, innerSteps: 5000, tolerance: 1e-12 },
+    )
+    close(Array.from(toFlat(r.plan)), G.plan.flat(), 1e-6)
+  })
+})

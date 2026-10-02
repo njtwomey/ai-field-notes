@@ -22,6 +22,7 @@ import {
   type CellKind,
   type TabularMdp,
 } from '../mdp'
+import { DomainError } from 'aifn/foundation/errors'
 
 // ── A finite MDP as an environment ───────────────────────────────────────────────────────────────────────────────────
 
@@ -65,9 +66,9 @@ export function mdpEnvironment(
     horizon,
     reset: () => ({ state: mdp.start, observation: mdp.start }),
     step(s, a, stream) {
-      if (!isActive(mdp, s)) throw new RangeError(`${mdp.name}: step from terminal state ${s}`)
+      if (!isActive(mdp, s)) throw new DomainError(mdp.name, `${mdp.name}: step from terminal state ${s}`)
       if (mdp.outcomes[s * mdp.actions + a].length === 0)
-        throw new RangeError(`${mdp.name}: action ${a} is not legal in state ${s}`)
+        throw new DomainError(mdp.name, `${mdp.name}: action ${a} is not legal in state ${s}`)
       const o = sampleOutcome(stream, mdp, s, a)
       const terminated = !isActive(mdp, o.next)
       const reward = o.reward + (terminated ? mdp.gamma * mdp.terminalValue[o.next] : 0)

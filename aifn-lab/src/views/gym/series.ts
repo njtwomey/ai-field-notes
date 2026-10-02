@@ -14,7 +14,7 @@ const field = (k: string) => (s: unknown) => (s as Record<string, number>)[k]
 /** The state series per `render.kind`; kinds without an entry plot actions only. */
 export const GYM_SERIES: Record<string, readonly StateSeries[]> = {
   pendulum: [
-    { name: 'θ (rad, wrapped)', value: (s) => wrapAngle(field('theta')(s)) },
+    { name: 'θ (rad)', value: (s) => wrapAngle(field('theta')(s)) },
     { name: 'θ̇ (rad/s)', value: field('thetaDot') },
   ],
   cartpole: [

@@ -24,7 +24,9 @@ import {
 } from 'aifn/optim/first-order'
 import { exponentialDecay, inverseSqrtDecay, inverseTimeDecay } from 'aifn/optim'
 import { stream } from 'aifn/foundation/random'
-import { tensor, toFlat, type Tensor } from 'aifn/foundation/tensor'
+import { mul, sum, tensor, toFlat, type Tensor, type Value } from 'aifn/foundation/tensor'
+import { grad } from 'aifn/foundation/autodiff'
+import type { Params } from 'aifn/foundation/pytree'
 import { run, trace } from 'aifn/foundation/trace'
 import { fixture } from '../../fixtures'
 import type { Algorithm } from 'aifn/foundation/contracts'
@@ -116,6 +118,20 @@ describe('pytree update rules match torch.optim', () => {
     const out = chained.update(g, chained.init(g)).updates as { a: Tensor; b: number }
     close(toFlat(out.a), [-1.2, 0], 1e-15)
     expect(out.b).toBeCloseTo(-1.6, 15)
+  })
+
+  it('clipByGlobalNorm differentiates with traced gradients (review maths 16)', () => {
+    // f(s) = Σ clip(s·v): clipped, the sum is c·Σv/‖v‖, constant in s, so f′ = 0; below the threshold f′ = Σv.
+    const v = [3, 4]
+    const clip = clipByGlobalNorm(1)
+    const f = (s: Value) => {
+      // Inside grad the leaf is traced, which `Params` (concrete trees) does not name.
+      const g = { a: mul(s, tensor(v)) } as unknown as Params
+      return sum((clip.update(g, clip.init(g)).updates as { a: Value }).a)
+    }
+    expect(grad(f)(2) as number).toBeCloseTo(0, 14)
+    expect(grad(f)(0.1) as number).toBeCloseTo(7, 14)
+    expect(f(2) as number).toBeCloseTo(7 / 5, 14)
   })
 
   it('clipByGlobalNorm scales huge gradients to the bound, not to 0 (review regression: ‖g‖² overflowed)', () => {

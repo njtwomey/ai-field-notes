@@ -15,6 +15,7 @@ import { softmax } from 'aifn/numerics/special'
 import { adamRule, type UpdateRule } from 'aifn/optim/first-order'
 import { knownDensity, mixtureLogDensityOf, squareGrid } from '../densities'
 import { classifier, classifierScore, jemTraining, classifierLogits, uniformBox, type Classifier } from './jem'
+import { DomainError } from 'aifn/foundation/errors'
 
 /** A labelled dataset as the run reads it, with the class densities in `meta.truth.model` when known. */
 export type JemData = {
@@ -151,7 +152,7 @@ export function* jemRun(
   } = options
   const noise = options.langevinNoise ?? Math.sqrt(2 * langevinStepSize)
   const xs = rows(data.x)
-  if (!data.y || !test.y) throw new Error('jemRun: the training and test data need labels')
+  if (!data.y || !test.y) throw new DomainError('jemRun', 'jemRun: the training and test data need labels')
   const trainY = data.y
   const labels = Int32Array.from(toFlat(trainY))
   const K = labels.reduce((m, v) => Math.max(m, v + 1), 0)

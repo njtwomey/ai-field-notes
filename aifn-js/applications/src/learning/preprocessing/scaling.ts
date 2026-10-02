@@ -9,6 +9,7 @@ import { fromData, toFlat, type Tensor } from 'aifn/foundation/tensor'
 import { column, mapColumns, matrix, type FittedTransform, type Invertible, type Transformer } from './transformer'
 import { defineModel } from 'aifn/learning/estimators'
 import { bool, space } from 'aifn/foundation/space'
+import { DomainError } from 'aifn/foundation/errors'
 
 /** A fitted per-column affine map z = (x − center) / scale. */
 export interface AffineScaler extends FittedTransform, Invertible {
@@ -103,7 +104,7 @@ export function minMaxScaler({ range = [0, 1] }: { range?: readonly [number, num
   MinMaxScaler
 > {
   const [a, b] = range
-  if (!(b > a)) throw new Error('minMaxScaler: range must be increasing')
+  if (!(b > a)) throw new DomainError('minMaxScaler', 'minMaxScaler: range must be increasing')
   return {
     name: 'min-max-scaler',
     params: { range },

@@ -1,7 +1,7 @@
 /** The registry of `aifn-applied/unsupervised/embedding/neighbour`: t-SNE and UMAP as traceable algorithms. */
 
 import { definer, entries, type AlgorithmInfo, type Entry, type FunctionInfo } from 'aifn/foundation/registry'
-import * as nnDescent from './nn-descent'
+import * as pacmap from './pacmap'
 import * as tsne from './tsne'
 import * as umap from './umap'
 
@@ -62,28 +62,38 @@ fn(
   },
   umap.spectralLayout,
 )
-fn(
+
+const PACMAP = ['pacmap-trimap-and-largevis']
+algorithm(
   {
-    key: 'nearestNeighbourDescent',
-    name: 'NN-descent',
-    summary: 'Approximate k-nearest-neighbour graph by local joins of neighbours of neighbours.',
-    role: 'solver',
+    key: 'pacmapSteps',
+    name: 'PaCMAP',
+    summary: 'Adam steps on neighbour, mid-near and further pairs with loss weights that change in three phases.',
+    problem: 'objective',
+    state: { iterate: 'embedding', objective: 'loss', flags: ['diverged'] },
     random: true,
-    notes: ['graph-based-approximate-nearest-neighbours', ...UMAP],
+    notes: PACMAP,
+    cite: ['wang2021b'],
   },
-  nnDescent.nearestNeighbourDescent,
+  pacmap.pacmapSteps,
 )
+fn(
+  { key: 'pacmapPairs', name: 'PaCMAP pairs', role: 'construction', random: true, notes: PACMAP, cite: ['wang2021b'] },
+  pacmap.pacmapPairs,
+)
+fn({ key: 'pacmapWeights', name: 'PaCMAP phase weights', role: 'property', notes: PACMAP }, pacmap.pacmapWeights)
 
 /** The algorithms of the module, keyed by factory name. */
 export const neighbourEmbeddingAlgorithms: Table<AlgorithmInfo> = entries<AlgorithmInfo>(
   'algorithm',
   tsne,
   umap,
+  pacmap,
 ) as Table<AlgorithmInfo>
 /** The functions of the module, keyed by name. */
 export const neighbourEmbeddingFunctions: Table<FunctionInfo> = entries<FunctionInfo>(
   'function',
   tsne,
   umap,
-  nnDescent,
+  pacmap,
 ) as Table<FunctionInfo>

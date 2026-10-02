@@ -46,6 +46,7 @@ import {
   type PoolOptions,
 } from 'aifn/nn/functional'
 import type { Params } from 'aifn/foundation/pytree'
+import { DomainError, ShapeError } from 'aifn/foundation/errors'
 
 // ── The layer protocol ───────────────────────────────────────────────────────────────────────────────────────────────
 
@@ -301,7 +302,7 @@ export type BatchNormOptions = {
 export function batchNorm(x: Value, gamma?: Value, beta?: Value, options: BatchNormOptions = {}): Value {
   const { eps = 1e-5 } = options
   const shape = shapeOfValue(x)
-  if (shape.length < 2) throw new Error('batchNorm: needs shape [N, C, ...]')
+  if (shape.length < 2) throw new ShapeError('batchNorm', 'batchNorm: needs shape [N, C, ...]')
   const axes = shape.map((_, k) => k).filter((k) => k !== 1)
   const channel = [1, shape[1], ...shape.slice(2).map(() => 1)]
   const at = (v: Value) => reshape(v, channel)
@@ -374,7 +375,7 @@ export function BatchNorm(channels: number, options: BatchNormLayerOptions = {})
       const running = (ctx?.buffers?.[key] as BatchNormBuffers | undefined) ?? initial()
       if (!ctx?.train) return tap(ctx, batchNorm(x, p.gamma, p.beta, { eps, ...running }))
       const shape = shapeOfValue(x)
-      if (shape.length < 2) throw new Error('BatchNorm: needs shape [N, C, ...]')
+      if (shape.length < 2) throw new ShapeError('BatchNorm', 'BatchNorm: needs shape [N, C, ...]')
       const axes = shape.map((_, k) => k).filter((k) => k !== 1)
       const mu = mean(x, axes)
       const variance = mean(square(sub(x, reshape(mu, [1, channels, ...shape.slice(2).map(() => 1)]))), axes)
@@ -402,7 +403,7 @@ export function BatchNorm(channels: number, options: BatchNormLayerOptions = {})
  * through kept elements only.
  */
 export function dropout(s: Stream, x: Value, p: number): Value {
-  if (!(p >= 0 && p < 1)) throw new RangeError(`dropout: p = ${p} is not in [0, 1)`)
+  if (!(p >= 0 && p < 1)) throw new DomainError('dropout', `dropout: p = ${p} is not in [0, 1)`)
   if (p === 0) return x
   const mask: Tensor = bernoulli(s, 1 - p, { shape: shapeOfValue(x) })
   return mul(x, div(mask, 1 - p))
@@ -416,7 +417,7 @@ export function Dropout(p: number): Layer<Empty> {
     init: () => EMPTY,
     apply: (_params, x, ctx) => {
       if (!ctx?.train || p === 0) return tap(ctx, x)
-      if (!ctx.stream) throw new Error('Dropout: training needs ctx.stream')
+      if (!ctx.stream) throw new DomainError('Dropout', 'Dropout: training needs ctx.stream')
       return tap(ctx, dropout(child(ctx.stream, 'dropout', ctx.path ?? ''), x, p))
     },
   }
@@ -459,7 +460,7 @@ export type MlpOptions = {
  */
 export function Mlp(sizes: readonly number[], options: MlpOptions = {}): Layer<Params[]> {
   const { activation = 'relu', outputActivation = 'identity', init = heUniform(), dropout: p = 0 } = options
-  if (sizes.length < 2) throw new Error('Mlp: needs at least an input and an output size')
+  if (sizes.length < 2) throw new DomainError('Mlp', 'Mlp: needs at least an input and an output size')
   const layers: Layer<Params>[] = []
   for (let k = 0; k + 1 < sizes.length; k++) {
     layers.push(Linear(sizes[k], sizes[k + 1], { init }))

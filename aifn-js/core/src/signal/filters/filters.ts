@@ -102,12 +102,12 @@ export function firwin(
   const nyq = (options.fs ?? 2) / 2
   const edges = (typeof cutoff === 'number' ? [cutoff] : [...cutoff]).map((f) => f / nyq)
   if (edges.some((f) => !(f > 0 && f < 1)))
-    throw new RangeError('firwin: cutoffs must lie strictly between 0 and Nyquist')
+    throw new DomainError('firwin', 'firwin: cutoffs must lie strictly between 0 and Nyquist')
   const pz = options.passZero ?? true
   const passZero = pz === true || pz === 'lowpass' || pz === 'bandstop'
   const passNyquist = (edges.length % 2 === 1) !== passZero
   if (passNyquist && numtaps % 2 === 0)
-    throw new RangeError('firwin: a filter that passes the Nyquist frequency needs an odd number of taps')
+    throw new DomainError('firwin', 'firwin: a filter that passes the Nyquist frequency needs an odd number of taps')
   const bands = [...(passZero ? [0] : []), ...edges, ...(passNyquist ? [1] : [])]
   const alpha = (numtaps - 1) / 2
   const h = new Float64Array(numtaps)
@@ -150,7 +150,7 @@ export function kaiserAttenuation(numtaps: Size, width: Scalar): Scalar {
  */
 export function kaiserOrder(ripple: Scalar, width: Scalar): { numtaps: Size; beta: Scalar } {
   const a = Math.abs(ripple)
-  if (a < 8) throw new RangeError('kaiserOrder: the attenuation must be at least 8 dB')
+  if (a < 8) throw new DomainError('kaiserOrder', 'kaiserOrder: the attenuation must be at least 8 dB')
   return { numtaps: Math.ceil((a - 7.95) / 2.285 / (Math.PI * width) + 1), beta: kaiserBeta(a) }
 }
 
@@ -243,7 +243,7 @@ function ellipap(n: Size, rp: number, rs: number): Proto {
     return { z: none(), p: complexVector([{ re: p, im: 0 }]), k: -p }
   }
   const m1 = epsSq / pow10m1(rs)
-  if (!(m1 > 0)) throw new RangeError('ellip: the stopband attenuation is too large for double precision')
+  if (!(m1 > 0)) throw new DomainError('ellip', 'ellip: the stopband attenuation is too large for double precision')
   const m = ellipdeg(n, m1)
   const capk = ellipk(m)
   const zs: ComplexNumber[] = []
@@ -391,10 +391,12 @@ export function iirfilter(n: Size, wn: Scalar | readonly [Scalar, Scalar], optio
   const nyq = (options.fs ?? 2) / 2
   const edges = (typeof wn === 'number' ? [wn] : [...wn]).map((f) => f / nyq)
   if (edges.some((f) => !(f > 0 && f < 1)))
-    throw new RangeError('iirfilter: edges must lie strictly between 0 and Nyquist')
+    throw new DomainError('iirfilter', 'iirfilter: edges must lie strictly between 0 and Nyquist')
   const two = btype === 'bandpass' || btype === 'bandstop'
-  if (two !== (edges.length === 2)) throw new RangeError(`iirfilter: ${btype} needs ${two ? 'two edges' : 'one edge'}`)
-  if (!(Number.isInteger(n) && n >= 1)) throw new RangeError('iirfilter: the order must be a positive integer')
+  if (two !== (edges.length === 2))
+    throw new DomainError('iirfilter', `iirfilter: ${btype} needs ${two ? 'two edges' : 'one edge'}`)
+  if (!(Number.isInteger(n) && n >= 1))
+    throw new DomainError('iirfilter', 'iirfilter: the order must be a positive integer')
   const proto0: Record<NonNullable<IirOptions['ftype']>, () => Proto> = {
     butter: () => buttap(n),
     cheby1: () => cheb1ap(n, rp),
@@ -766,7 +768,7 @@ export function filtfilt(f: FilterSpec, x: SignalInput | Value, options: Filtfil
   } else padlen = 3 * (normalised(f, 'filtfilt').K + 1)
   const padtype = options.padtype ?? 'odd'
   const edge = padtype === 'none' ? 0 : (options.padlen ?? padlen)
-  if (edge >= n) throw new RangeError(`filtfilt: the signal must be longer than padlen = ${edge}`)
+  if (edge >= n) throw new DomainError('filtfilt', `filtfilt: the signal must be longer than padlen = ${edge}`)
   const at = (k: number) => slice(data, ...along(rank, axis, [k, k + 1]))
   const x0 = at(0)
   const xn = at(n - 1)

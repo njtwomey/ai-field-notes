@@ -18,6 +18,7 @@ import {
   type Value,
 } from 'aifn/foundation/tensor'
 import type { Scalar, VectorLike } from 'aifn/foundation/contracts'
+import { DomainError, ShapeError } from 'aifn/foundation/errors'
 
 /**
  * A vector field f: ℝⁿ → ℝⁿ. Written with `aifn/foundation/tensor` primitives, it can be differentiated by
@@ -37,7 +38,8 @@ const asInput = (x: VectorLike): Tensor => {
 export function jacobianAt(f: VectorField, x: VectorLike): Matrix {
   const J = jacobian((y: Value) => f(y as Tensor) as Value)(asInput(x)) as Tensor
   const n = J.shape[0]
-  if (J.shape.length !== 2 || J.shape[1] !== n) throw new Error('jacobianAt: the field must map ℝⁿ to ℝⁿ')
+  if (J.shape.length !== 2 || J.shape[1] !== n)
+    throw new DomainError('jacobianAt', 'jacobianAt: the field must map ℝⁿ to ℝⁿ')
   return fromData(Float64Array.from(toFlat(J)), [n, n])
 }
 
@@ -61,7 +63,7 @@ export function curl(f: VectorField, x: VectorLike): Scalar | Tensor {
     const d = (i: number, j: number) => J[i * 3 + j]
     return fromData(Float64Array.of(d(2, 1) - d(1, 2), d(0, 2) - d(2, 0), d(1, 0) - d(0, 1)), [3])
   }
-  throw new Error('curl: defined for fields on ℝ² and ℝ³')
+  throw new DomainError('curl', 'curl: defined for fields on ℝ² and ℝ³')
 }
 
 /** The gradient ∇V(x) of a scalar field (length n). */
@@ -89,7 +91,8 @@ export function hamiltonianField(H: ScalarField): VectorField {
     const dH = g(x) as Value
     const n = shapeOfValue(dH)[0]
     const d = n / 2
-    if (!Number.isInteger(d)) throw new Error('hamiltonianField: the phase space must have even dimension')
+    if (!Number.isInteger(d))
+      throw new ShapeError('hamiltonianField', 'hamiltonianField: the phase space must have even dimension')
     return concat([slice(dH, [d, n]) as Value, neg(slice(dH, [0, d]) as Value)]) as Tensor
   }
 }

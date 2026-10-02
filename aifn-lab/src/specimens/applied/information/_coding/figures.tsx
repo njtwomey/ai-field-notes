@@ -25,7 +25,7 @@ import { Player, StatusText } from '@lab/controls'
 import { SLOTS, useTheme, type Mode } from '@lab/design'
 import { Diagram, type DiagramEdge, type DiagramNode, type DiagramSpec } from '@lab/diagram'
 import { Dashboard, DashboardCell, DashboardRow, Figure } from '@lab/layout'
-import { choice, row, slider, useFigureState, when } from '@lab/state'
+import { choice, pinField, row, slider, useFigureState, usePinned, when } from '@lab/state'
 import { Button } from '@lab/ui/button'
 import { Input } from '@lab/ui/input'
 import { cn } from '@lab/lib/utils'
@@ -463,7 +463,7 @@ function HuffmanBuildFigure() {
       arity: choice(ARITY_OPTIONS, 2, { label: 'code alphabet D' }),
       ties: choice(TIE_OPTIONS, 'minimum-variance', { label: 'ties' }),
     }),
-    pin: slider(-1, 7, -1, { step: 1, onChart: true }),
+    pin: pinField(),
   })
   const { name, k, s, q } = figure.source
   const arity = figure.code.arity as number
@@ -483,10 +483,11 @@ function HuffmanBuildFigure() {
   const last = steps.length - 1
   const t = Math.min(step, last)
   const state = steps[t]
-  const [hover, setHover] = useState<number | null>(null)
-  const pinned = figure.pin >= 0 && figure.pin < K ? figure.pin : null
-  const focus = hover ?? pinned
-  const togglePin = (v: number) => figure.set('pin', pinned === v ? -1 : v)
+  // Hover a symbol to preview its codeword, click to pin it (again or Escape: unpin); the pin is kept in the link.
+  const pins = usePinned(figure.pin, (v) => figure.set('pin', v), { valid: (v) => v < K })
+  const { pinned, focus } = pins
+  const setHover = pins.hover
+  const togglePin = pins.toggle
 
   const layouts = useMemo(() => steps.map(forestLayout), [steps])
   // One frame for the whole run, so the drawing keeps its scale from the first step to the last.
@@ -548,11 +549,11 @@ function HuffmanBuildFigure() {
           {source.note}. Step 0 is the queue: one leaf per symbol, least probable on the left. Play or step through the
           merges: the popped subtrees drop under their new parent (drawn heavier), edges carry the digits, and the
           parent takes its sorted place in the queue row. Leaves keep their symbol&apos;s colour in the tree, the table,
-          the bit string and the next figure. Click a leaf (or a pin in the table) to pin its codeword path; hover a
-          table row or a codeword in the message to highlight its leaf. The ties rule changes which equal-weight nodes
-          merge first: with .4 .2 .2 .1 .1, minimum variance gives lengths 2 2 2 3 3 (variance .16) and merged-first 1 2
-          3 4 4 (variance 1.36), at the same E[ℓ] = 2.2. Canonical codewords keep each length and number the codewords
-          in order of (length, symbol), so a decoder needs only the lengths.
+          the bit string and the next figure. Click a leaf (or a pin in the table) to pin its codeword path (click again
+          or press Escape to unpin); hover a table row or a codeword in the message to highlight its leaf. The ties rule
+          changes which equal-weight nodes merge first: with .4 .2 .2 .1 .1, minimum variance gives lengths 2 2 2 3 3
+          (variance .16) and merged-first 1 2 3 4 4 (variance 1.36), at the same E[ℓ] = 2.2. Canonical codewords keep
+          each length and number the codewords in order of (length, symbol), so a decoder needs only the lengths.
         </>
       }
     >

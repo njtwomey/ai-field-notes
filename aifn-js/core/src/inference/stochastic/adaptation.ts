@@ -14,6 +14,7 @@
  */
 
 import type { Size } from 'aifn/foundation/contracts'
+import { DomainError } from 'aifn/foundation/errors'
 
 /** Options of dual-averaging step-size adaptation. Defaults are Stan's (and Hoffman & Gelman's, except δ). */
 export type DualAveragingOptions = {
@@ -50,15 +51,17 @@ export function resolveDualAveraging(
   name: string,
 ): Resolved | null {
   if (!(stepSize > 0 && Number.isFinite(stepSize)))
-    throw new Error(`${name}: the step size must be positive and finite, got ${stepSize}`)
+    throw new DomainError(name, `${name}: the step size must be positive and finite, got ${stepSize}`)
   if (!options) return null
   const { warmup, targetAcceptance: delta = 0.8, gamma = 0.05, t0 = 10, kappa = 0.75 } = options
   if (!(Number.isInteger(warmup) && warmup >= 0))
-    throw new Error(`${name}: adapt.warmup must be a non-negative integer, got ${warmup}`)
-  if (!(delta > 0 && delta < 1)) throw new Error(`${name}: adapt.targetAcceptance must lie in (0, 1), got ${delta}`)
-  if (!(gamma > 0)) throw new Error(`${name}: adapt.gamma must be positive, got ${gamma}`)
-  if (!(t0 >= 0)) throw new Error(`${name}: adapt.t0 must be non-negative, got ${t0}`)
-  if (!(kappa > 0.5 && kappa <= 1)) throw new Error(`${name}: adapt.kappa must lie in (0.5, 1], got ${kappa}`)
+    throw new DomainError(name, `${name}: adapt.warmup must be a non-negative integer, got ${warmup}`)
+  if (!(delta > 0 && delta < 1))
+    throw new DomainError(name, `${name}: adapt.targetAcceptance must lie in (0, 1), got ${delta}`)
+  if (!(gamma > 0)) throw new DomainError(name, `${name}: adapt.gamma must be positive, got ${gamma}`)
+  if (!(t0 >= 0)) throw new DomainError(name, `${name}: adapt.t0 must be non-negative, got ${t0}`)
+  if (!(kappa > 0.5 && kappa <= 1))
+    throw new DomainError(name, `${name}: adapt.kappa must lie in (0.5, 1], got ${kappa}`)
   return { warmup, delta, gamma, t0, kappa, mu: Math.log(10 * stepSize) }
 }
 

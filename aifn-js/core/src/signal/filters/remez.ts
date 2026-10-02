@@ -7,7 +7,7 @@
 
 import { fromData, type Tensor } from 'aifn/foundation/tensor'
 import type { Scalar, Size } from 'aifn/foundation/contracts'
-import { NumericalError } from 'aifn/foundation/errors'
+import { DomainError, NumericalError } from 'aifn/foundation/errors'
 import { transferFunction, type LtiOf, type TransferFunctionForm } from 'aifn/systems'
 
 /** Options for `remez`. */
@@ -46,13 +46,15 @@ export function remez(
 ): RemezResult {
   const { fs = 1, gridDensity = 16, maxiter = 40 } = options
   const weight = options.weight ?? desired.map(() => 1)
-  if (!(Number.isInteger(numtaps) && numtaps >= 3)) throw new RangeError('remez: numtaps must be an integer ≥ 3')
+  if (!(Number.isInteger(numtaps) && numtaps >= 3))
+    throw new DomainError('remez', 'remez: numtaps must be an integer ≥ 3')
   if (bands.length % 2 || bands.length / 2 !== desired.length || weight.length !== desired.length)
-    throw new RangeError('remez: bands must be edge pairs, with one desired gain and one weight per band')
+    throw new DomainError('remez', 'remez: bands must be edge pairs, with one desired gain and one weight per band')
   const edges = bands.map((f) => f / fs)
   for (let i = 1; i < edges.length; i++)
-    if (!(edges[i] >= edges[i - 1])) throw new RangeError('remez: band edges must increase')
-  if (edges[0] < 0 || edges[edges.length - 1] > 0.5) throw new RangeError('remez: band edges must lie in [0, fs/2]')
+    if (!(edges[i] >= edges[i - 1])) throw new DomainError('remez', 'remez: band edges must increase')
+  if (edges[0] < 0 || edges[edges.length - 1] > 0.5)
+    throw new DomainError('remez', 'remez: band edges must lie in [0, fs/2]')
   const odd = numtaps % 2 === 1
   const r = odd ? (numtaps + 1) / 2 : numtaps / 2
   // Type II: A(ω) = cos(ω/2) P(ω), so P approximates D / cos(ω/2) with weight W cos(ω/2); ω = π is left out.
@@ -80,7 +82,7 @@ export function remez(
     }
   }
   const G = grid.length
-  if (G < r + 1) throw new RangeError('remez: the bands are too narrow for this many taps')
+  if (G < r + 1) throw new DomainError('remez', 'remez: the bands are too narrow for this many taps')
   const x = grid.map((f) => Math.cos(2 * Math.PI * f))
   // Initial extremal set: r + 1 grid points spread evenly.
   let ext = Array.from({ length: r + 1 }, (_, i) => Math.floor((i * (G - 1)) / r))

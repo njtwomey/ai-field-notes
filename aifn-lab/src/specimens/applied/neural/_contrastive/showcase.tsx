@@ -103,7 +103,7 @@ const SCHEMA = {
   }),
   model: row('2 · encoders and loss', {
     dim: choice([2, 3, 8], 2, { label: 'embedding dimension d' }),
-    batchSize: choice([4, 8, 16, 32, 64, 128], 32, { label: 'batch size (B − 1 negatives)' }),
+    batchSize: int(32, { ge: 2, le: 512, suggestions: [4, 8, 16, 32, 64, 128], label: 'batch size (B − 1 negatives)' }),
     temperature: choice(TEMPERATURES, 'learned', { label: 'temperature τ' }),
     steps: int(1000, { label: 'Adam steps', ge: 10, le: 5000, suggestions: [300, 1000, 2000] }),
     seed: int(1, { label: 'seed', ge: 0, le: 9999 }),

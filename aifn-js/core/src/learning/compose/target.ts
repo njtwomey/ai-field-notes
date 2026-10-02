@@ -25,6 +25,7 @@ import {
 } from 'aifn/learning/estimators'
 import { LogNormal, type Univariate } from 'aifn/probability/distributions'
 import { boxCoxLambda, yeoJohnsonLambda } from 'aifn/probability/stats'
+import { DomainError } from 'aifn/foundation/errors'
 
 const values = (t: Tensor): Float64Array => dense.data(t)
 
@@ -66,7 +67,7 @@ export function log1pTarget(): TargetMap {
 
 /** z = (y − shift) / scale, with scale ≠ 0 (decreasing when negative). */
 export function affineTarget(shift: number, scale: number): TargetMap {
-  if (scale === 0) throw new Error('affineTarget: scale must be non-zero')
+  if (scale === 0) throw new DomainError('affineTarget', 'affineTarget: scale must be non-zero')
   return {
     name: 'affine',
     apply: (y) => (y - shift) / scale,
@@ -279,7 +280,8 @@ export interface LogNormalPredictive extends TransformedPredictive {
  */
 export function logNormalPredictive(base: AnyUnivariate): LogNormalPredictive {
   const { loc, scale } = base.params
-  if (loc === undefined || scale === undefined) throw new Error('logNormalPredictive: the base needs loc and scale')
+  if (loc === undefined || scale === undefined)
+    throw new DomainError('logNormalPredictive', 'logNormalPredictive: the base needs loc and scale')
   const ln = LogNormal(asTensor(loc), asTensor(scale))
   return {
     ...transformedPredictive(base, logTarget()),
@@ -308,7 +310,8 @@ export function logNormalPredictive(base: AnyUnivariate): LogNormalPredictive {
  * transformed distribution for any other univariate law.
  */
 export function pushForward(d: Distribution, g: TargetMap): TransformedPredictive {
-  if (!isUnivariate(d)) throw new Error(`pushForward: ${d.name} is not univariate with a quantile function`)
+  if (!isUnivariate(d))
+    throw new DomainError('pushForward', `pushForward: ${d.name} is not univariate with a quantile function`)
   if (g.name === 'log' && d.name === 'Normal' && d.params.loc !== undefined && d.params.scale !== undefined) {
     return logNormalPredictive(d)
   }
@@ -352,7 +355,11 @@ export function transformTarget<X extends Features, M extends object>(
       const y = values(data.y)
       const z = Float64Array.from(y, (v) => g.apply(v))
       const bad = z.findIndex((v) => !Number.isFinite(v))
-      if (bad >= 0) throw new Error(`transformTarget: target ${y[bad]} is outside the domain of the ${g.name} map`)
+      if (bad >= 0)
+        throw new DomainError(
+          'transformTarget',
+          `transformTarget: target ${y[bad]} is outside the domain of the ${g.name} map`,
+        )
       const inner = regressor.fit({ ...data, y: fromData(z, data.y.shape) }, options) as M & Record<string, unknown>
       const out: Record<string, unknown> = { kind: 'model', composition: 'transform-target', regressor: inner, map: g }
       if (typeof inner.forward === 'function') out.forward = (x: X) => (inner.forward as (x: X) => Tensor)(x)

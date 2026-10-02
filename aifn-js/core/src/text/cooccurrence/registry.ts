@@ -2,6 +2,7 @@
 
 import { definer, entries, type Entry, type FunctionInfo } from 'aifn/foundation/registry'
 import * as c from './cooccurrence'
+import * as coherence from './coherence'
 import * as svd from './svd'
 
 const fn = definer<FunctionInfo>('function', 'text/cooccurrence')
@@ -70,7 +71,19 @@ fn(
   svd.truncatedSvd,
 )
 
+fn(
+  {
+    key: 'topicCoherence',
+    name: 'Topic coherence (NPMI, UMass)',
+    role: 'estimator',
+    summary: 'How often each topic’s top words co-occur in documents: mean pairwise NPMI, or the UMass log ratio.',
+    notes: ['topic-model-evaluation'],
+    cite: ['bouma2009npmi', 'lau2014coherence', 'mimno2011coherence', 'roder2015coherence'],
+  },
+  coherence.topicCoherence,
+)
+
 /** The functions of the module, keyed by name. */
-export const cooccurrenceFunctions = entries<FunctionInfo>('function', c, svd) as Readonly<
+export const cooccurrenceFunctions = entries<FunctionInfo>('function', c, svd, coherence) as Readonly<
   Record<string, Entry<(...args: never[]) => unknown, FunctionInfo>>
 >

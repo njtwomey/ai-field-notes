@@ -1,5 +1,6 @@
 /**
- * MinHash (Broder 1997; Broder et al. 2000) and locality-sensitive hashing by banding (Indyk & Motwani 1998; Leskovec,
+ * MinHash (Broder 1997; Broder et al. 2000), the locality-sensitive family for sets; its signatures are banded into
+ * candidate pairs by `aifn/numerics/neighbours` (`lshBands`, `lshCandidates`; Indyk & Motwani 1998; Leskovec,
  * Rajaraman & Ullman, ch. 3). For a random hash h, P[min h(A) = min h(B)] = J(A, B), the Jaccard similarity, so the
  * share of k independent hashes whose minima agree is an unbiased estimate of J with variance J(1 − J)/k. Banding cuts
  * a k = b·r signature into b bands of r rows; two sets become a candidate pair when any band agrees, which happens with
@@ -10,7 +11,7 @@
  */
 
 import { DomainError } from 'aifn/foundation/errors'
-import { dense, fromData, type MatrixLike, type Tensor, type VectorLike } from 'aifn/foundation/tensor'
+import { dense, fromData, type Tensor, type VectorLike } from 'aifn/foundation/tensor'
 import { murmurHash3 } from './hashing'
 
 /** The signature value of an empty set: above every 32-bit hash. */
@@ -75,71 +76,4 @@ export function minHashStandardError(similarity: number, hashes: number): number
   if (!(similarity >= 0 && similarity <= 1) || !(hashes >= 1))
     throw new DomainError('minHashStandardError', 'minHashStandardError: need J in [0, 1] and k ≥ 1')
   return Math.sqrt((similarity * (1 - similarity)) / hashes)
-}
-
-/** Banding of a signature: `bands` b and `rows` r per band, using the first b·r positions. */
-export interface Banding {
-  bands: number
-  rows: number
-}
-
-function checkBanding({ bands, rows }: Banding, length: number, op: string): void {
-  if (!(Number.isInteger(bands) && bands >= 1 && Number.isInteger(rows) && rows >= 1))
-    throw new DomainError(op, `${op}: bands and rows must be positive integers`)
-  if (bands * rows > length)
-    throw new DomainError(
-      op,
-      `${op}: ${bands} bands × ${rows} rows need ${bands * rows} hashes, the signature has ${length}`,
-    )
-}
-
-/** The bucket key of each band of a signature: band index and its r values, as strings (length b). */
-export function lshBands(signature: VectorLike, banding: Banding): string[] {
-  const s = dense.toF64(signature, 'lshBands')
-  checkBanding(banding, s.length, 'lshBands')
-  const { bands, rows } = banding
-  return Array.from({ length: bands }, (_, b) => `${b}:${Array.from(s.subarray(b * rows, (b + 1) * rows)).join(',')}`)
-}
-
-/**
- * The candidate pairs of LSH banding over the rows of a signature matrix (N × k): every pair i < j that shares the
- * bucket of at least one band, with the number of bands they share, in order of (i, j).
- */
-export function lshCandidates(signatures: MatrixLike, banding: Banding): { i: number; j: number; bands: number }[] {
-  const { data, m, n } = dense.toMatrixF64(signatures, 'lshCandidates')
-  checkBanding(banding, n, 'lshCandidates')
-  const shared = new Map<number, number>()
-  for (let b = 0; b < banding.bands; b++) {
-    const buckets = new Map<string, number[]>()
-    for (let i = 0; i < m; i++) {
-      const at = i * n + b * banding.rows
-      const key = Array.from(data.subarray(at, at + banding.rows)).join(',')
-      const list = buckets.get(key)
-      if (list) list.push(i)
-      else buckets.set(key, [i])
-    }
-    for (const list of buckets.values())
-      for (let p = 0; p < list.length; p++)
-        for (let q = p + 1; q < list.length; q++) {
-          const key = list[p] * m + list[q]
-          shared.set(key, (shared.get(key) ?? 0) + 1)
-        }
-  }
-  return [...shared.entries()]
-    .sort((a, b) => a[0] - b[0])
-    .map(([key, bands]) => ({ i: Math.floor(key / m), j: key % m, bands }))
-}
-
-/** The probability 1 − (1 − sʳ)ᵇ that two sets of Jaccard similarity s become a candidate pair under b bands of r rows. */
-export function lshProbability(similarity: number, banding: Banding): number {
-  if (!(similarity >= 0 && similarity <= 1))
-    throw new DomainError('lshProbability', 'lshProbability: the similarity must be in [0, 1]')
-  checkBanding(banding, Infinity, 'lshProbability')
-  return 1 - (1 - similarity ** banding.rows) ** banding.bands
-}
-
-/** The similarity (1/b)^{1/r} near which the S-curve of b bands of r rows is steepest: the banding's threshold. */
-export function lshThreshold(banding: Banding): number {
-  checkBanding(banding, Infinity, 'lshThreshold')
-  return (1 / banding.bands) ** (1 / banding.rows)
 }

@@ -1,7 +1,7 @@
 /**
  * `aifn/numerics`: numerical methods, as scipy.special, scipy.linalg, numpy.polynomial, scipy.integrate, scipy.optimize root finding,
  * scipy.interpolate and scipy.spatial. Children: special, linalg, polynomial, quadrature, roots, implicit,
- * geometry, interpolate.
+ * geometry, interpolate, neighbours, factorisation, robust.
  */
 
 export { erf, logGamma, normalCdf, sigmoid, softplus } from './special'

@@ -42,6 +42,7 @@ import {
   type Value,
 } from 'aifn/foundation/tensor'
 import type { Bijector, Interval, Scalar, Support } from 'aifn/foundation/contracts'
+import { DomainError, ShapeError } from 'aifn/foundation/errors'
 
 // Types defined once, in `aifn/foundation/contracts`.
 export type { Interval, Bijector } from 'aifn/foundation/contracts'
@@ -92,7 +93,10 @@ export function supportInterval(support: Support): Interval {
       upperOpen: !!open.upperOpen || !Number.isFinite(upper),
     }
   }
-  throw new RangeError(`supportInterval: a ${support.type} support is not an interval of the real line`)
+  throw new DomainError(
+    'supportInterval',
+    `supportInterval: a ${support.type} support is not an interval of the real line`,
+  )
 }
 
 /** An interval as a `Support`: ℝ as `real`, anything else as `interval` with its open ends marked. */
@@ -236,7 +240,7 @@ export const normalCdfBijector: Bijector = {
 /** y = loc + scale · x, for a non-zero scale (a number, so that the direction is known). */
 export function affineBijector(loc: Value, scale: number): Bijector {
   if (!(scale !== 0 && Number.isFinite(scale)))
-    throw new RangeError('affineBijector: scale must be finite and non-zero')
+    throw new DomainError('affineBijector', 'affineBijector: scale must be finite and non-zero')
   return {
     name: 'affine',
     forward: (x) => add(loc, mul(scale, x)),
@@ -253,7 +257,8 @@ export function affineBijector(loc: Value, scale: number): Bijector {
  * log |p| + (p − 1) log x.
  */
 export function powerBijector(p: number): Bijector {
-  if (!(p !== 0 && Number.isFinite(p))) throw new RangeError('powerBijector: the power must be finite and non-zero')
+  if (!(p !== 0 && Number.isFinite(p)))
+    throw new DomainError('powerBijector', 'powerBijector: the power must be finite and non-zero')
   return {
     name: `power ${p}`,
     forward: (x) => pow(x, p),
@@ -273,7 +278,7 @@ export function powerBijector(p: number): Bijector {
  * @example chainBijectors(affineBijector(0, 1 / T), sigmoidBijector) // y = σ(x / T), a sigmoid with temperature T
  */
 export function chainBijectors(...bijectors: Bijector[]): Bijector {
-  if (bijectors.length === 0) throw new RangeError('chainBijectors: needs at least one bijector')
+  if (bijectors.length === 0) throw new DomainError('chainBijectors', 'chainBijectors: needs at least one bijector')
   let codomain = bijectors[0].codomain
   for (const b of bijectors.slice(1)) codomain = imageOf(b, codomain, { where: 'chainBijectors' })
   return {
@@ -336,7 +341,8 @@ export function orderedBijector({ gap = 'exp' }: OrderedOptions = {}): Bijector 
   const logDerivative = gap === 'exp' ? (x: Value) => x : logSigmoid
   const width = (v: Value, where: string) => {
     const shape = shapeOfValue(v)
-    if (shape.length === 0) throw new RangeError(`orderedBijector: ${where} needs a vector (rank ≥ 1)`)
+    if (shape.length === 0)
+      throw new ShapeError('orderedBijector', `orderedBijector: ${where} needs a vector (rank ≥ 1)`)
     return shape[shape.length - 1]
   }
   return {
@@ -358,6 +364,70 @@ export function orderedBijector({ gap = 'exp' }: OrderedOptions = {}): Bijector 
       const k = width(x, 'logAbsDetJacobian')
       if (k === 1) return sum(mul(0, x), -1)
       return sum(logDerivative(lastAxis(x, 1, k)), -1)
+    },
+    increasing: true,
+    domain: REALS,
+    codomain: REALS,
+  }
+}
+
+/** What a coupling layer's conditioner returns for the kept coordinates: a shift t and (affine coupling) a log-scale s. */
+export type CouplingParameters = { shift: Value; logScale?: Value }
+
+/**
+ * The affine coupling bijector of RealNVP (Dinh, Sohl-Dickstein and Bengio, 2017), along the last axis: with a 0/1
+ * `mask` m of length D, the coordinates where m = 1 pass through, and the others are scaled and shifted by functions
+ * of them, y = m ⊙ x + (1 − m) ⊙ (x ⊙ exp s + t) with (s, t) = conditioner(m ⊙ x). The Jacobian is triangular, so
+ * log |det J| = Σ (1 − m) ⊙ s; the inverse needs no inverse of the conditioner, x = m ⊙ y + (1 − m) ⊙ (y − t) ⊙ exp(−s),
+ * because m ⊙ y = m ⊙ x. Without a log-scale the layer is NICE's additive coupling (Dinh, Krueger and Bengio, 2015),
+ * with log |det J| = 0. The conditioner is any function of values (a neural network's apply, closed over its
+ * parameters), so the map is differentiable in x and in the conditioner's parameters; it may return outputs of any
+ * value on the masked coordinates, which are ignored. Works on one vector [D] or a batch [n, D].
+ *
+ * @example affineCouplingBijector([1, 0], (xm) => ({ shift: xm, logScale: mul(0, xm) })) // y = (x₁, x₂ + x₁)
+ */
+export function affineCouplingBijector(
+  mask: readonly number[],
+  conditioner: (masked: Value) => CouplingParameters,
+): Bijector & { readonly eventRank: 1 } {
+  const m = fromData(Float64Array.from(mask), [mask.length])
+  const free = fromData(
+    Float64Array.from(mask, (v) => 1 - v),
+    [mask.length],
+  )
+  const check = (v: Value, where: string) => {
+    const shape = shapeOfValue(v)
+    if (shape.length === 0 || shape[shape.length - 1] !== mask.length)
+      throw new ShapeError(
+        'affineCouplingBijector',
+        `affineCouplingBijector: ${where} needs a last axis of length ${mask.length}`,
+      )
+  }
+  const params = (kept: Value) => {
+    const { shift, logScale } = conditioner(kept)
+    return { shift: mul(free, shift), logScale: logScale === undefined ? null : mul(free, logScale) }
+  }
+  return {
+    name: 'affine coupling',
+    eventRank: 1,
+    forward: (x) => {
+      check(x, 'forward')
+      const kept = mul(m, x)
+      const { shift, logScale } = params(kept)
+      const moved = logScale === null ? mul(free, x) : mul(mul(free, x), exp(logScale))
+      return add(kept, add(moved, shift))
+    },
+    inverse: (y) => {
+      check(y, 'inverse')
+      const kept = mul(m, y)
+      const { shift, logScale } = params(kept)
+      const moved = mul(free, sub(y, shift))
+      return add(kept, logScale === null ? moved : mul(moved, exp(neg(logScale))))
+    },
+    logAbsDetJacobian: (x) => {
+      check(x, 'logAbsDetJacobian')
+      const { logScale } = params(mul(m, x))
+      return sum(logScale === null ? mul(0, x) : logScale, -1)
     },
     increasing: true,
     domain: REALS,
@@ -443,7 +513,7 @@ function monotoneImage(forward: (x: Value) => Value, increasing: boolean, x: Int
 
 /**
  * The image f(x) of an interval under a bijector or a many-to-one map (the hull of its branches' images). Throws a
- * RangeError naming `where` when `x` is not inside the map's domain (see `intervalInside` for `endpoints`).
+ * `DomainError` naming `where` when `x` is not inside the map's domain (see `intervalInside` for `endpoints`).
  *
  * @example imageOf(sigmoidBijector, REALS) // (0, 1)
  * @example imageOf(affineBijector(0, -2), interval(0, 1)) // [−2, 0]: a negative scale flips the ends
@@ -455,7 +525,8 @@ export function imageOf(
   { where = 'imageOf', endpoints = 'ignore' }: { where?: string; endpoints?: 'ignore' | 'strict' } = {},
 ): Interval {
   if (!intervalInside(x, map.domain, { endpoints }))
-    throw new RangeError(
+    throw new DomainError(
+      where,
       `${where}: ${formatInterval(x)} is not inside the domain ${formatInterval(map.domain)} of ${map.name}`,
     )
   return hull(branchImages(map, x).map((p) => p.image))

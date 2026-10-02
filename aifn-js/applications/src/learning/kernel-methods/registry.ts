@@ -1,8 +1,7 @@
-/** The registry of `aifn-applied/learning/kernel-methods`: SVM solvers as traceable algorithms, and Platt scaling. */
+/** The registry of `aifn-applied/learning/kernel-methods`: SVM solvers as traceable algorithms. */
 
 import { definer, entries, type AlgorithmInfo, type Entry, type FunctionInfo } from 'aifn/foundation/registry'
 import * as crammerSinger from './crammerSinger'
-import * as platt from './platt'
 import * as svm from './svm'
 
 type Table<I extends AlgorithmInfo | FunctionInfo> = Readonly<Record<string, Entry<(...args: never[]) => unknown, I>>>
@@ -65,17 +64,6 @@ fn(
   },
   svm.dualDecision,
 )
-fn(
-  {
-    key: 'plattScaling',
-    name: 'Platt scaling',
-    summary: 'A sigmoid fitted to scores by maximum likelihood, with Platt’s smoothed targets.',
-    role: 'fit',
-    notes: ['support-vector-machine'],
-    cite: ['platt1999'],
-  },
-  platt.plattScaling,
-)
 
 /** The algorithms of the module, keyed by factory name. */
 export const kernelMethodsAlgorithms: Table<AlgorithmInfo> = entries<AlgorithmInfo>(
@@ -84,8 +72,4 @@ export const kernelMethodsAlgorithms: Table<AlgorithmInfo> = entries<AlgorithmIn
   crammerSinger,
 ) as Table<AlgorithmInfo>
 /** The functions of the module, keyed by name. */
-export const kernelMethodsFunctions: Table<FunctionInfo> = entries<FunctionInfo>(
-  'function',
-  svm,
-  platt,
-) as Table<FunctionInfo>
+export const kernelMethodsFunctions: Table<FunctionInfo> = entries<FunctionInfo>('function', svm) as Table<FunctionInfo>

@@ -24,6 +24,7 @@ import {
   type Labels,
   type Rows,
 } from './core'
+import { DomainError, ShapeError } from 'aifn/foundation/errors'
 
 /** A confusion matrix: `matrix[j][k]` counts cases of true class `classes[j]` predicted as `classes[k]`. */
 export type ConfusionMatrix = {
@@ -361,7 +362,10 @@ export function tallies(
     const t = dense(yTrue as Rows, 'multi-label truth')
     const p = dense(yPred as Rows, 'multi-label prediction')
     if (t.rows !== p.rows || t.cols !== p.cols)
-      throw new Error(`metrics: multi-label inputs have shapes ${t.rows}×${t.cols} and ${p.rows}×${p.cols}`)
+      throw new ShapeError(
+        'metrics',
+        `metrics: multi-label inputs have shapes ${t.rows}×${t.cols} and ${p.rows}×${p.cols}`,
+      )
     const L = t.cols
     const w = caseWeights(options.sampleWeight, t.rows, 'multi-label metric')
     const tp = new Float64Array(L)
@@ -428,8 +432,9 @@ export function averaged(stat: CountStatistic, t: Tallies, options: AverageOptio
   const sum = (a: Float64Array) => a.reduce((s, v) => s + v, 0)
   switch (average) {
     case 'binary': {
-      if (t.multilabel) throw new Error("metrics: 'binary' averaging needs single-label input")
-      if (K > 2) throw new Error(`metrics: 'binary' averaging needs two classes, got ${K}; choose an average`)
+      if (t.multilabel) throw new DomainError('metrics', "metrics: 'binary' averaging needs single-label input")
+      if (K > 2)
+        throw new DomainError('metrics', `metrics: 'binary' averaging needs two classes, got ${K}; choose an average`)
       const pos = positiveOf(t.classes, options.positive)
       const k = t.classes.findIndex((c) => compareLabels(c, pos) === 0)
       if (k < 0) return stat(0, 0, 0, t.n, zero)
@@ -450,7 +455,7 @@ export function averaged(stat: CountStatistic, t: Tallies, options: AverageOptio
       return divide(s, w)
     }
     case 'samples': {
-      if (!t.cases) throw new Error("metrics: 'samples' averaging needs multi-label input")
+      if (!t.cases) throw new DomainError('metrics', "metrics: 'samples' averaging needs multi-label input")
       const c = t.cases
       let s = 0
       for (let i = 0; i < t.n; i++) s += stat(c.tp[i], c.fp[i], c.fn[i], c.tn[i], zero)

@@ -8,10 +8,6 @@ import { toFlat, toRows } from 'aifn/foundation/tensor'
 import {
   characterShingles,
   jaccardSimilarity,
-  lshBands,
-  lshCandidates,
-  lshProbability,
-  lshThreshold,
   minHashSignature,
   minHashSignatures,
   minHashSimilarity,
@@ -19,6 +15,7 @@ import {
   oneHotTokens,
   wordShingles,
 } from 'aifn/text/features'
+import { lshBands, lshCandidates, lshProbability, lshThreshold } from 'aifn/numerics/neighbours'
 import { buildVocabulary } from 'aifn/text/vocabulary'
 import { fixture } from '../../fixtures'
 

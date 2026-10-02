@@ -18,6 +18,7 @@ import {
   uniformKnots,
 } from 'aifn/numerics/interpolate'
 import { fromData, toFlat, type Tensor } from 'aifn/foundation/tensor'
+import { DomainError } from 'aifn/foundation/errors'
 
 type F64 = Float64Array
 const f64 = (t: Tensor): F64 => Float64Array.from(toFlat(t))
@@ -165,7 +166,7 @@ export function times(A: F64, m: number, r: number, B: F64, q: number): F64 {
 }
 
 function column(X: F64, m: number, d: number, j: number): F64 {
-  if (j < 0 || j >= d) throw new Error(`gam: feature ${j} out of range (${d} features)`)
+  if (j < 0 || j >= d) throw new DomainError('gam', `gam: feature ${j} out of range (${d} features)`)
   return Float64Array.from({ length: m }, (_, i) => X[i * d + j])
 }
 
@@ -248,7 +249,7 @@ function buildSmooth(
   const size = centred ? rawSize - 1 : rawSize
   let shape: BuiltTerm['shape']
   if (spec.constraint) {
-    if (spec.basis !== 'pspline') throw new Error('gam: shape constraints need a P-spline basis')
+    if (spec.basis !== 'pspline') throw new DomainError('gam', 'gam: shape constraints need a P-spline basis')
     const ord = spec.constraint === 'increasing' || spec.constraint === 'decreasing' ? 1 : 2
     const sign = spec.constraint === 'decreasing' || spec.constraint === 'concave' ? -1 : 1
     const D = f64(differenceMatrix(rawSize, ord)).map((v) => sign * v)
@@ -291,13 +292,13 @@ function buildLinear(spec: Extract<TermSpec, { kind: 'linear' }>, X: F64, n: num
 function buildFactor(spec: Extract<TermSpec, { kind: 'factor' }>, X: F64, n: number, d: number): BuiltTerm {
   const levels = [...new Set(column(X, n, d, spec.feature))].sort((a, b) => a - b)
   const L = levels.length
-  if (L < 2) throw new Error(`gam: factor x${spec.feature} has fewer than two levels`)
+  if (L < 2) throw new DomainError('gam', `gam: factor x${spec.feature} has fewer than two levels`)
   const raw = (Xm: F64, m: number, dm: number) => {
     const v = column(Xm, m, dm, spec.feature)
     const B = new Float64Array(m * L)
     v.forEach((u, i) => {
       const j = levels.indexOf(u)
-      if (j < 0) throw new Error(`gam: level ${u} of x${spec.feature} was not in the training data`)
+      if (j < 0) throw new DomainError('gam', `gam: level ${u} of x${spec.feature} was not in the training data`)
       B[i * L + j] = 1
     })
     return B

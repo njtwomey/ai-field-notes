@@ -35,6 +35,7 @@ import {
   type NodeRef,
   type NodeValue,
 } from 'aifn/inference/model'
+import { DomainError } from 'aifn/foundation/errors'
 
 // ── Gibbs on a discrete factor graph ────────────────────────────────────────────────────────────────────────────────
 
@@ -209,11 +210,11 @@ function classify(em: ExpandedModel, inst: Instance, children: readonly string[]
   if (cardinalityOf(em, inst) !== null) return 'enumerate'
   const family = distOf(inst).family
   const rule = CONJUGATE[family]
-  if (!rule) throw new Error(`gibbs: no conjugate conditional for ${inst.key} (${family})`)
+  if (!rule) throw new DomainError('gibbs', `gibbs: no conjugate conditional for ${inst.key} (${family})`)
   for (const { inst: child, hits } of directChildren(em, inst.key, children)) {
     const want = rule[distOf(child).family]
     if (want === undefined || hits.length !== 1 || hits[0].i !== want)
-      throw new Error(`gibbs: ${child.key} is not a conjugate child of ${inst.key} (${family})`)
+      throw new DomainError('gibbs', `gibbs: ${child.key} is not a conjugate child of ${inst.key} (${family})`)
   }
   return KIND[family]
 }

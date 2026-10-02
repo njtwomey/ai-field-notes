@@ -6,8 +6,8 @@
  */
 
 import { AifnError, DomainError, ShapeError } from 'aifn/foundation/errors'
-import { categorical as categoricalDraws, child, type Stream } from 'aifn/foundation/random'
-import { logAddExp } from 'aifn/numerics/special'
+import { categorical as categoricalDraws, child, units, type Stream } from 'aifn/foundation/random'
+import { logAddExp, logSigmoid, sigmoid } from 'aifn/numerics/special'
 import {
   add,
   broadcastShapes,
@@ -20,6 +20,7 @@ import {
   get,
   isTensor,
   log,
+  log1p,
   mul,
   shapeOfValue,
   slice,
@@ -148,6 +149,76 @@ export function Mixture(weights: Value | readonly number[], components: readonly
     entropy: noClosedForm('Mixture.entropy'),
     mode: noClosedForm('Mixture.mode'),
   })
+}
+
+// ── ZeroInflated ─────────────────────────────────────────────────────────────────────────────────────────────────────
+
+/**
+ * A zero-inflated discrete distribution (Lambert, 1992): with probability π the outcome is a structural zero, otherwise
+ * it is drawn from `base`, so P(0) = π + (1 − π) p(0) and P(k) = (1 − π) p(k) for k ≠ 0. π is a probability or `{ logits
+ * }` (stable near 0 and 1: log π = log σ(η)); it may be a batch, broadcast against the base's batch. `logProb` is
+ * differentiable in π and in the base's parameters; with π = 0 it is the base's. The mean is (1 − π)μ and the variance
+ * (1 − π)(σ² + πμ²). Draws pick structural zeros on stream `child(s, 'structural')` and base draws on
+ * `child(s, 'base')`. The base must be discrete with 0 in its support (a zero-inflated Poisson, negative binomial or
+ * Bernoulli).
+ */
+export function ZeroInflated(pi: Value | { logits: Value }, base: Univariate): Univariate {
+  if (!base.discrete) throw new DomainError('ZeroInflated', 'ZeroInflated: the base must be discrete')
+  const [lo, hi] = supportBounds(base.support)
+  if (extreme(lo, 'min') > 0 || extreme(hi, 'max') < 0)
+    throw new DomainError('ZeroInflated', 'ZeroInflated: 0 must be in the support of the base')
+  const fromLogits = typeof pi === 'object' && pi !== null && 'logits' in pi
+  const logits: Value | null = fromLogits ? (pi as { logits: Value }).logits : null
+  const probs: Value = logits !== null ? sigmoid(logits) : (pi as Value)
+  if (logits === null) check('ZeroInflated', 'π', probs, (x) => x >= 0 && x <= 1, 'in [0, 1]')
+  const logPi = logits !== null ? logSigmoid(logits) : log(probs)
+  const logKeep = logits !== null ? logSigmoid(mul(-1, logits)) : log1p(mul(-1, probs))
+  const keep = sub(1, probs)
+  const isZero = (x: Value) => mask([x], (v) => v === 0)
+  const atLeastZero = (x: Value) => mask([x], (v) => v >= 0)
+  const support: Support = base.support
+  const cdf = (x: Value) => add(mul(keep, base.cdf(x)), mul(probs, atLeastZero(x)))
+  const params: Record<string, Value> = logits !== null ? { logits } : { pi: probs }
+  for (const [name, v] of Object.entries(base.params)) params[`base.${name}`] = v
+  const batchShape = broadcastShapes(shapeOfValue(probs), base.batchShape)
+  return univariate<Value>({
+    name: 'ZeroInflated',
+    params,
+    batchShape,
+    support,
+    discrete: true,
+    logProb: (x) => {
+      const nonZero = add(logKeep, base.logProb(x))
+      return where(isZero(x), logAddExp(logPi, add(logKeep, base.logProb(0))), nonZero)
+    },
+    cdf,
+    survival: (x) => add(mul(keep, base.survival(x)), mul(probs, sub(1, atLeastZero(x)))),
+    quantile: (p) => invertCdf('ZeroInflated', cdf, p, batchShape, support, true),
+    sample: (s: Stream, shape: number[]) => {
+      const p = toFlat(broadcastTo(fromData(Float64Array.from(flatOf(probs)), shapeOfValue(probs)), shape))
+      const u = units(child(s, 'structural'), p.length)
+      const draws = toFlat(
+        broadcastTo(
+          base.sample(child(s, 'base'), { shape: shape.slice(0, shape.length - base.batchShape.length) }) as Tensor,
+          shape,
+        ),
+      )
+      return fromData(
+        Float64Array.from(draws, (d, i) => (u[i] < p[i] ? 0 : d)),
+        shape,
+      )
+    },
+    mean: () => mul(keep, base.mean()),
+    variance: () => mul(keep, add(base.variance(), mul(probs, square(base.mean())))),
+    entropy: noClosedForm('ZeroInflated.entropy'),
+    mode: noClosedForm('ZeroInflated.mode'),
+  })
+}
+
+/** The raw values of a parameter as a flat array (a number gives one value). */
+function flatOf(v: Value): Float64Array {
+  const r = raw(v, 'ZeroInflated.sample')
+  return typeof r === 'number' ? Float64Array.of(r) : Float64Array.from(toFlat(r))
 }
 
 // ── Independent ──────────────────────────────────────────────────────────────────────────────────────────────────────

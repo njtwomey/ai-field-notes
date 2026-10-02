@@ -71,6 +71,7 @@ import {
   type StructuredGraph,
   type StructuredNode,
 } from 'aifn/graph/structured'
+import { DomainError } from 'aifn/foundation/errors'
 
 // Types defined once, in `aifn/foundation/contracts`.
 export type { Raw as NodeValue } from 'aifn/foundation/contracts'
@@ -238,10 +239,11 @@ export function model(name: string, build: (m: ModelBuilder) => void): Model {
     return Object.defineProperty(ref, 'at', { value: at, enumerable: false }) as NodeHandle
   }
   const add = (node: ModelNode, options: NodeOptions): NodeHandle => {
-    if (names.has(node.name)) throw new Error(`model: duplicate node ${node.name}`)
+    if (names.has(node.name)) throw new DomainError('model', `model: duplicate node ${node.name}`)
     if (options.next) {
       const g = groups.find((q) => q.name === node.group)
-      if (g?.kind !== 'chain') throw new Error(`model: ${node.name} has a next conditional outside a chain`)
+      if (g?.kind !== 'chain')
+        throw new DomainError('model', `model: ${node.name} has a next conditional outside a chain`)
       node = { ...node, data: { ...node.data, next: options.next(handle(node.name, 1)) } }
     }
     for (const a of nodeArgs(node)) {
@@ -252,10 +254,12 @@ export function model(name: string, build: (m: ModelBuilder) => void): Model {
       ] as const) {
         if (r === undefined) continue
         if (lag) {
-          if (r !== node.name && !names.has(r)) throw new Error(`model: ${node.name} refers to undeclared node ${r}`)
+          if (r !== node.name && !names.has(r))
+            throw new DomainError('model', `model: ${node.name} refers to undeclared node ${r}`)
           const rg = r === node.name ? node.group : nodes.find((q) => q.name === r)!.group
-          if (rg !== node.group) throw new Error(`model: ${node.name} reads the previous ${r} outside its chain`)
-        } else if (!names.has(r)) throw new Error(`model: ${node.name} refers to undeclared node ${r}`)
+          if (rg !== node.group)
+            throw new DomainError('model', `model: ${node.name} reads the previous ${r} outside its chain`)
+        } else if (!names.has(r)) throw new DomainError('model', `model: ${node.name} refers to undeclared node ${r}`)
       }
     }
     names.add(node.name)
@@ -268,7 +272,7 @@ export function model(name: string, build: (m: ModelBuilder) => void): Model {
   const label = (o: NodeOptions) => (o.label === undefined ? {} : { label: o.label })
   const scope = (group: string | null): ModelScope => {
     const nest = (kind: 'plate' | 'chain', n: string, size: Size | string | SizeRef, o: GroupOptions): ModelScope => {
-      if (groups.some((p) => p.name === n)) throw new Error(`model: duplicate plate ${n}`)
+      if (groups.some((p) => p.name === n)) throw new DomainError('model', `model: duplicate plate ${n}`)
       const s = typeof size === 'object' ? size.name : size
       if (typeof s === 'string') sizeName(s)
       groups.push({
@@ -353,9 +357,10 @@ function pick(v: Nested | undefined, index: readonly Index[], what: string): Nod
   if (v === undefined) return undefined
   let cur: Nested = isTensor(v) && index.length ? (toArray(v as Tensor) as Nested) : v
   for (const i of index) {
-    if (!Array.isArray(cur)) throw new Error(`expandModel: ${what} is not nested deeply enough`)
+    if (!Array.isArray(cur)) throw new DomainError('expandModel', `expandModel: ${what} is not nested deeply enough`)
     cur = (cur as readonly Nested[])[i]
-    if (cur === undefined) throw new Error(`expandModel: ${what} has no entry at index ${index.join(',')}`)
+    if (cur === undefined)
+      throw new DomainError('expandModel', `expandModel: ${what} has no entry at index ${index.join(',')}`)
   }
   return toValue(cur)
 }
@@ -380,7 +385,7 @@ function modelSizes(m: Model, b: Bindings): SizeBindings {
       if (Array.isArray(cur)) return cur.length
       if (isTensor(cur)) return (cur as Tensor).shape[0]
     }
-    throw new Error(`expandModel: size ${spec} is not bound`)
+    throw new DomainError('expandModel', `expandModel: size ${spec} is not bound`)
   }
 }
 
@@ -402,7 +407,7 @@ export function expandModel(m: Model, bindings: Bindings = {}): ExpandedModel {
     if (node.role === 'parameter') {
       const v =
         pick(bindings.constants?.[node.name], index, node.name) ?? pick(node.data?.value as Nested, index, node.name)
-      if (v === undefined) throw new Error(`expandModel: constant ${node.name} has no value`)
+      if (v === undefined) throw new DomainError('expandModel', `expandModel: constant ${node.name} has no value`)
       fixed.set(inst.key, v)
     } else if (node.role === 'observed') {
       const v = pick(bindings.data?.[node.name], index, node.name)
@@ -420,7 +425,7 @@ export type Env = (key: string) => NodeValue
 /** The conditional of a stochastic instance: `next` at t ≥ 1 of a chain, else `dist`. */
 export function distOf(inst: Instance): DistSpec {
   const d = inst.node.data
-  if (!d?.dist) throw new Error(`model: ${inst.key} has no distribution`)
+  if (!d?.dist) throw new DomainError('model', `model: ${inst.key} has no distribution`)
   return d.next && inst.index[inst.index.length - 1] >= 1 ? d.next : d.dist
 }
 
@@ -428,7 +433,7 @@ export function distOf(inst: Instance): DistSpec {
 function laggedKey(inst: Instance, node: string, lag: number): string {
   const index = [...inst.index]
   index[index.length - 1] -= lag
-  if (index[index.length - 1] < 0) throw new Error(`model: ${inst.key} has no previous ${node}`)
+  if (index[index.length - 1] < 0) throw new DomainError('model', `model: ${inst.key} has no previous ${node}`)
   return instanceKey(node, index)
 }
 
@@ -467,12 +472,15 @@ export function resolveRef(
       choose: (env) => candidates[Math.round(env(selector) as number)],
     }
   }
-  throw new Error(`model: ${inst.node.name} cannot refer to ${ref.node} across plates without .at(selector)`)
+  throw new DomainError(
+    'model',
+    `model: ${inst.node.name} cannot refer to ${ref.node} across plates without .at(selector)`,
+  )
 }
 
 /** Index the first axis of a value: an entry of a vector, a row of a matrix (e.g. a CPT row for a Categorical). */
 function indexValue(v: NodeValue, i: number): NodeValue {
-  if (typeof v === 'number') throw new Error('model: .at on a scalar node')
+  if (typeof v === 'number') throw new DomainError('model', 'model: .at on a scalar node')
   const flat = toFlat(v)
   if (v.shape.length === 1) return flat[i]
   const rest = v.shape.slice(1)
@@ -488,7 +496,7 @@ export function argValue(em: ExpandedModel, inst: Instance, arg: Arg, env: Env):
   if (typeof arg === 'number') return arg
   if (isSize(arg)) {
     const s = em.bindings.sizes?.[arg.name]
-    if (typeof s !== 'number') throw new Error(`model: size ${arg.name} must be a number here`)
+    if (typeof s !== 'number') throw new DomainError('model', `model: size ${arg.name} must be a number here`)
     return s
   }
   if (isRef(arg)) {
@@ -545,14 +553,15 @@ export function evaluateOp(op: DeterministicOp, values: readonly NodeValue[]): N
     case 'interval': {
       const [x, lower, upper] = values.map((v) => {
         if (typeof v === 'number') return v
-        if (v.shape.reduce((a, b) => a * b, 1) !== 1) throw new Error('model: interval takes scalar arguments')
+        if (v.shape.reduce((a, b) => a * b, 1) !== 1)
+          throw new DomainError('model', 'model: interval takes scalar arguments')
         return toFlat(v)[0]
       })
       return lower < x && x < upper ? 1 : 0
     }
     case 'index': {
       const table = values[0]
-      if (typeof table === 'number') throw new Error('model: index needs a table')
+      if (typeof table === 'number') throw new DomainError('model', 'model: index needs a table')
       const flat = toFlat(table)
       const k = values.length - 1
       let offset = 0
@@ -589,13 +598,13 @@ export function environment(
     const v = get(key) ?? em.fixed.get(key)
     if (v !== undefined) return v
     const inst = em.byKey.get(key)
-    if (!inst) throw new Error(`model: unknown instance ${key}`)
+    if (!inst) throw new DomainError('model', `model: unknown instance ${key}`)
     if (inst.node.role === 'deterministic')
       return evaluateOp(
         inst.node.data!.op!,
         inst.node.data!.args!.map((a) => argValue(em, inst, a, env)),
       )
-    throw new Error(`model: no value for ${key}`)
+    throw new DomainError('model', `model: no value for ${key}`)
   }
   return env
 }
@@ -678,7 +687,7 @@ export function dependencyMaps(em: ExpandedModel): { parents: Map<string, string
 export function modelMarkovBlanket(m: Model | ExpandedModel, key: string, bindings: Bindings = {}): Blanket {
   const em = 'instances' in m ? m : expandModel(m, bindings)
   const { parents, children } = dependencyMaps(em)
-  if (!parents.has(key)) throw new Error(`markovBlanket: ${key} is not a stochastic instance`)
+  if (!parents.has(key)) throw new DomainError('markovBlanket', `markovBlanket: ${key} is not a stochastic instance`)
   const ch = children.get(key) ?? []
   const co = [...new Set(ch.flatMap((c) => parents.get(c)!).filter((p) => p !== key))]
   const ps = parents.get(key)!

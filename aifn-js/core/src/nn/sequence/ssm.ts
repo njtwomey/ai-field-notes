@@ -20,7 +20,6 @@ import {
   exp,
   expandDims,
   expm1,
-  eye,
   fromData,
   gather,
   less,
@@ -39,41 +38,7 @@ import {
   type Tensor,
   type Value,
 } from 'aifn/foundation/tensor'
-import { expm, solve } from 'aifn/numerics/linalg'
-
-/** Discretisation rules: zero-order hold (exact for inputs held over each step), bilinear (Tustin), forward Euler. */
-export type SsmDiscretisation = 'zoh' | 'bilinear' | 'euler'
-
-/** A discrete state-space system x_k = Ā x_{k−1} + B̄ u_k. */
-export type DiscreteSsm = { A: Value; B: Value }
-
-/**
- * The discretisation of x′ = A x + B u with step Δ (A [N, N], B [N, M]):
- *
- * - `zoh`: Ā = e^{ΔA}, B̄ = ∫₀^Δ e^{sA} ds B, both read from one exponential exp(Δ[[A, B], [0, 0]]) = [[Ā, B̄], [0, I]]
- *   (Van Loan, 1978), so A need not be invertible;
- * - `bilinear` (Tustin, as S4): Ā = (I − ΔA/2)⁻¹(I + ΔA/2), B̄ = (I − ΔA/2)⁻¹ΔB, which maps the stable half-plane onto
- *   the unit disc;
- * - `euler`: Ā = I + ΔA, B̄ = ΔB.
- *
- * Differentiable in A, B and Δ (through `expm` and `solve`). The dense, non-differentiable twin for control systems is
- * `aifn/systems` `discretise`.
- */
-export function discretiseSsm(A: Value, B: Value, step: Value, method: SsmDiscretisation = 'zoh'): DiscreteSsm {
-  const [n] = shapeOfValue(A)
-  const m = shapeOfValue(B)[1]
-  const I = eye(n)
-  if (method === 'euler') return { A: add(I, mul(step, A)), B: mul(step, B) }
-  if (method === 'bilinear') {
-    const half = mul(0.5, mul(step, A))
-    const left = sub(I, half)
-    return { A: solve(left, add(I, half)), B: solve(left, mul(step, B)) }
-  }
-  const top = concat([A, B], 1)
-  const block = mul(step, concat([top, zeros([m, n + m])], 0))
-  const E = expm(block as never).value as Value
-  return { A: slice(E, [0, n], [0, n]), B: slice(E, [0, n], [n, n + m]) }
-}
+import type { DiscreteSsm, SsmDiscretisation } from 'aifn/systems'
 
 /**
  * Elementwise discretisation of a diagonal system (S4D, Mamba): a, b and Δ broadcast together; with `zoh`

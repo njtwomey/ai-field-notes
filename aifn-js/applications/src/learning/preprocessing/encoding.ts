@@ -7,6 +7,7 @@ import { fromData, type Tensor } from 'aifn/foundation/tensor'
 import { values, type FittedTransform, type Invertible, type Transformer } from './transformer'
 import { defineModel } from 'aifn/learning/estimators'
 import { oneOf, space } from 'aifn/foundation/space'
+import { DomainError, ShapeError } from 'aifn/foundation/errors'
 
 /** A category label. */
 export type Category = string | number
@@ -25,7 +26,7 @@ function isTensor(x: CategoricalInput): x is Tensor {
 /** Split categorical input into columns of labels. */
 function columnsOf(x: CategoricalInput, where: string): Columns {
   if (!isTensor(x)) return { n: x.length, d: 1, columns: [Array.from(x)], list: true }
-  if (x.shape.length > 2) throw new Error(`${where}: expected [n] or [n, d], got [${x.shape.join(', ')}]`)
+  if (x.shape.length > 2) throw new ShapeError(where, `${where}: expected [n] or [n, d], got [${x.shape.join(', ')}]`)
   const n = x.shape[0]
   const d = x.shape.length === 1 ? 1 : x.shape[1]
   const v = values(x)
@@ -37,7 +38,7 @@ function sortedUnique(c: readonly Category[]): Category[] {
   const unique = Array.from(new Set(c))
   const numeric = unique.every((v) => typeof v === 'number')
   if (!numeric && unique.some((v) => typeof v === 'number'))
-    throw new Error('encoder: a column mixes numbers and strings')
+    throw new DomainError('encoder', 'encoder: a column mixes numbers and strings')
   return numeric
     ? (unique as number[]).sort((a, b) => a - b)
     : (unique as string[]).sort((a, b) => (a < b ? -1 : a > b ? 1 : 0))
@@ -110,14 +111,17 @@ export function oneHotEncoder({
         transform(input) {
           const { n, d, columns } = columnsOf(input, 'oneHotEncoder.transform')
           if (d !== categories.length)
-            throw new Error(`oneHotEncoder: fitted on ${categories.length} columns, given ${d}`)
+            throw new ShapeError('oneHotEncoder', `oneHotEncoder: fitted on ${categories.length} columns, given ${d}`)
           const out = new Float64Array(n * width)
           for (let j = 0; j < d; j++) {
             for (let i = 0; i < n; i++) {
               const k = lookup[j].get(columns[j][i])
               if (k === undefined) {
                 if (handleUnknown === 'error')
-                  throw new Error(`oneHotEncoder: unknown category ${columns[j][i]} in column ${j}`)
+                  throw new DomainError(
+                    'oneHotEncoder',
+                    `oneHotEncoder: unknown category ${columns[j][i]} in column ${j}`,
+                  )
                 continue
               }
               if (k === dropped[j]) continue
@@ -185,13 +189,16 @@ export function ordinalEncoder({
         transform(input) {
           const { n, d, columns } = columnsOf(input, 'ordinalEncoder.transform')
           if (d !== categories.length)
-            throw new Error(`ordinalEncoder: fitted on ${categories.length} columns, given ${d}`)
+            throw new ShapeError('ordinalEncoder', `ordinalEncoder: fitted on ${categories.length} columns, given ${d}`)
           const out = new Float64Array(n * d)
           for (let j = 0; j < d; j++) {
             for (let i = 0; i < n; i++) {
               const k = lookup[j].get(columns[j][i])
               if (k === undefined && handleUnknown === 'error') {
-                throw new Error(`ordinalEncoder: unknown category ${columns[j][i]} in column ${j}`)
+                throw new DomainError(
+                  'ordinalEncoder',
+                  `ordinalEncoder: unknown category ${columns[j][i]} in column ${j}`,
+                )
               }
               out[i * d + j] = k ?? unknownValue
             }
@@ -242,10 +249,11 @@ export function targetEncoder({ smooth = 'auto' }: { smooth?: number | 'auto' } 
     name: 'target-encoder',
     params: { smooth },
     fit({ x, y }) {
-      if (!y) throw new Error('targetEncoder: needs targets y')
+      if (!y) throw new DomainError('targetEncoder', 'targetEncoder: needs targets y')
       const target = values(y)
       const fitted = columnsOf(x, 'targetEncoder')
-      if (target.length !== fitted.n) throw new Error('targetEncoder: x and y have different numbers of rows')
+      if (target.length !== fitted.n)
+        throw new ShapeError('targetEncoder', 'targetEncoder: x and y have different numbers of rows')
       const n = fitted.n
       let yMean = 0
       for (const v of target) yMean += v / n
@@ -286,7 +294,7 @@ export function targetEncoder({ smooth = 'auto' }: { smooth?: number | 'auto' } 
         transform(input) {
           const { n: m, d, columns } = columnsOf(input, 'targetEncoder.transform')
           if (d !== categories.length)
-            throw new Error(`targetEncoder: fitted on ${categories.length} columns, given ${d}`)
+            throw new ShapeError('targetEncoder', `targetEncoder: fitted on ${categories.length} columns, given ${d}`)
           const out = new Float64Array(m * d)
           for (let j = 0; j < d; j++) {
             for (let i = 0; i < m; i++) {
@@ -311,7 +319,8 @@ export function targetEncodeCrossFit(
   { smooth = 'auto', folds = 5 }: { smooth?: number | 'auto'; folds?: number } = {},
 ): { encoded: Tensor; model: TargetEncoder } {
   const { n, d, columns, list } = columnsOf(data.x, 'targetEncodeCrossFit')
-  if (folds < 2 || folds > n) throw new Error('targetEncodeCrossFit: folds must be in [2, n]')
+  if (folds < 2 || folds > n)
+    throw new DomainError('targetEncodeCrossFit', 'targetEncodeCrossFit: folds must be in [2, n]')
   const y = values(data.y)
   const out = new Float64Array(n * d)
   let start = 0

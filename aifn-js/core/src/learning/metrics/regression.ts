@@ -6,6 +6,7 @@
 
 import { median } from 'aifn/probability/stats'
 import { caseWeights, defineMetric, divide, nonEmpty, sameLength, values, weightedMeanOf, type Data } from './core'
+import { DomainError } from 'aifn/foundation/errors'
 
 /** Options shared by the regression metrics. */
 export type RegressionOptions = {
@@ -306,7 +307,8 @@ export const weightedMeanAbsolutePercentageError = defineMetric(
 /** The in-sample seasonal-naive scale Σ_{t>m} |yₜ − yₜ₋ₘ|^power / (T − m). */
 function naiveScale(train: Data, season: number, power: 1 | 2): number {
   const y = values(train)
-  if (y.length <= season) throw new Error(`metrics: the training series needs more than ${season} values`)
+  if (y.length <= season)
+    throw new DomainError('metrics', `metrics: the training series needs more than ${season} values`)
   let s = 0
   for (let t = season; t < y.length; t++) s += Math.abs(y[t] - y[t - season]) ** power
   return s / (y.length - season)

@@ -17,6 +17,7 @@ import { int, oneOf, real, space } from 'aifn/foundation/space'
 import { fromData, type Tensor } from 'aifn/foundation/tensor'
 import { regimeTruth, type RegimeModel, type Row } from '../truth'
 import { checkCount, generatorRecipe, labels, matrix, vector, type Dataset } from '../types'
+import { DomainError } from 'aifn/foundation/errors'
 
 /** A dataset with the regime that generated each row. */
 export type RegimeDataset = Dataset & {
@@ -107,7 +108,7 @@ export interface PiecewiseLinearOptions {
 export function piecewiseLinear(s: Stream, options: PiecewiseLinearOptions = {}): RegimeDataset {
   const { n = 200, pieces = 3, noise = 0.15, jump = 1 } = options
   checkCount(n, 'piecewiseLinear')
-  if (!(pieces >= 1)) throw new RangeError('piecewiseLinear: needs at least one piece')
+  if (!(pieces >= 1)) throw new DomainError('piecewiseLinear', 'piecewiseLinear: needs at least one piece')
   const K = pieces
   const breaks = Array.from({ length: K + 1 }, (_, j) => -3 + (6 * j) / K)
   const ls = child(s, 'lines')
@@ -278,7 +279,7 @@ export interface RegressionMixtureOptions {
 export function regressionMixture(s: Stream, options: RegressionMixtureOptions = {}): RegimeDataset {
   const { n = 300, regimes = 2, noise = 0.2, overlap = 1 } = options
   checkCount(n, 'regressionMixture')
-  if (!(overlap > 0)) throw new RangeError('regressionMixture: overlap must be positive')
+  if (!(overlap > 0)) throw new DomainError('regressionMixture', 'regressionMixture: overlap must be positive')
   const K = regimes
   const ls = child(s, 'lines')
   const lines = Array.from({ length: K }, (_, k) => ({

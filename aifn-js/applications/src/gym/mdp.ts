@@ -12,6 +12,7 @@
 import type { Outcome, TabularModel } from 'aifn/foundation/contracts'
 import { uniform, type Stream } from 'aifn/foundation/random'
 import type { Tensor } from 'aifn/foundation/tensor'
+import { ShapeError } from 'aifn/foundation/errors'
 
 export type { Outcome } from 'aifn/foundation/contracts'
 
@@ -167,7 +168,7 @@ export function policyMatrix(mdp: MdpTables, policy: PolicyInput): Float64Array 
   const { states: S, actions: A } = mdp
   const v = 'shape' in policy ? Array.from(policy.data) : [...policy]
   if (v.length === S * A) return Float64Array.from(v)
-  if (v.length !== S) throw new Error(`policy: expected ${S} actions or ${S} × ${A} probabilities`)
+  if (v.length !== S) throw new ShapeError('policy', `policy: expected ${S} actions or ${S} × ${A} probabilities`)
   const pi = new Float64Array(S * A)
   for (let s = 0; s < S; s++) if (isActive(mdp, s) && v[s] >= 0) pi[s * A + v[s]] = 1
   return pi

@@ -15,7 +15,7 @@ export function TrainingCurves({
   onStep: (step: number) => void
   runKey: unknown
 }) {
-  const stepAxis = useAxis({ label: 'Adam step', range: [0, snap?.steps ?? 1], key: snap?.steps, integer: true })
+  const stepAxis = useAxis({ label: 'step', range: [0, snap?.steps ?? 1], key: snap?.steps, integer: true })
   const nllAxis = useAxis({ label: 'NLL per point', hold: 'union', key: runKey })
   const mseAxis = useAxis({ label: 'squared error', hold: 'union', key: runKey, log: true })
   const h = snap?.history

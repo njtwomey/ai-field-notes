@@ -16,6 +16,7 @@ import {
 import { cholesky, solveTriangular } from 'aifn/numerics/linalg'
 import { fromData, mul, toFlat, type Matrix, type Tensor, type Value, type Vector } from 'aifn/foundation/tensor'
 import { run, type Algorithm } from 'aifn/foundation/trace'
+import { DomainError } from 'aifn/foundation/errors'
 
 /**
  * The factor of B = I + S K S with S = diag(s), and R = S B⁻¹ S. Laplace uses s = √W, EP s = √τ̃. Returns L (lower,
@@ -84,7 +85,7 @@ export function gpEp(
 ): Algorithm<{ sitePrecision?: Tensor; siteShift?: Tensor } | void, MvEpState> {
   const n = problem.K.shape[0]
   const y = toFlat(problem.labels)
-  if (!y.every((v) => v === 0 || v === 1)) throw new Error('gpEp: labels must be 0 or 1')
+  if (!y.every((v) => v === 0 || v === 1)) throw new DomainError('gpEp', 'gpEp: labels must be 0 or 1')
   const sign = Float64Array.from(y, (v) => 2 * v - 1)
   const alg = multivariateExpectationPropagation({
     prior: { mean: fromData(new Float64Array(n), [n]) as Vector, covariance: problem.K as Matrix },

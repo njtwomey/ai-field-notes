@@ -26,9 +26,11 @@ import {
   Multinomial,
   MultivariateNormal,
   Normal,
+  Poisson,
   Pushforward,
   Transformed,
   Wishart,
+  ZeroInflated,
 } from 'aifn/probability/distributions'
 import { address, entriesOf } from '../../registries'
 
@@ -56,6 +58,7 @@ const BUILD: Record<string, () => Distribution> = {
   Independent: () => Independent(Normal(tensor([0, 1]), 1)),
   Transformed: () => Transformed(Normal(0, 0.5), expBijector),
   Pushforward: () => Pushforward(Normal(0, 1), squareMap),
+  ZeroInflated: () => ZeroInflated(0.3, Poisson(3)),
 }
 
 /** Defaults whose fourth moment is infinite, so the sample variance does not settle. */

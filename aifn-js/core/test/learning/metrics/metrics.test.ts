@@ -366,6 +366,9 @@ describe('ranking', () => {
     expect(recallAtK(list, { k: 10, totalRelevant: 5 })).toBeCloseTo(0.8, 12)
     expect(rPrecision(list, { totalRelevant: 5 })).toBeCloseTo(0.6, 12)
     expect(meanAveragePrecision(list, { totalRelevant: 5 })).toBeCloseTo(0.598, 3)
+    // AP@2 of a perfect top 2 with R = 3: 2/3 by R, 1 by min(R, k).
+    expect(meanAveragePrecision([1, 1, 0, 1], { k: 2 })).toBeCloseTo(2 / 3, 14)
+    expect(meanAveragePrecision([1, 1, 0, 1], { k: 2, normaliser: 'cutoff' })).toBe(1)
     const firsts = [
       [1, 0, 0],
       [0, 0, 1],

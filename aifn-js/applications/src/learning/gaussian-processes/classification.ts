@@ -38,6 +38,7 @@ import { fromData, matmul, mul, toFlat, type Tensor, type Value } from 'aifn/fou
 import { run, trace, type Algorithm, type Trace } from 'aifn/foundation/trace'
 import { defineModel } from 'aifn/learning/estimators'
 import { int, oneOf, space } from 'aifn/foundation/space'
+import { DomainError, ShapeError } from 'aifn/foundation/errors'
 
 /** The link from latent f to P(y = 1 | f): logistic σ(f) or probit Φ(f). */
 export type ClassificationLikelihood = 'logistic' | 'probit'
@@ -330,7 +331,8 @@ export function gpClassifier<P extends KernelParams>(
 ): Estimator<Supervised<Tensor, Tensor>, GpClassifierModel<P>> {
   const { kernel, method = 'laplace' } = params
   const likelihood = params.likelihood ?? (method === 'ep' ? 'probit' : 'logistic')
-  if (method === 'ep' && likelihood !== 'probit') throw new Error('gpClassifier: EP supports the probit link only')
+  if (method === 'ep' && likelihood !== 'probit')
+    throw new DomainError('gpClassifier', 'gpClassifier: EP supports the probit link only')
   const maxSteps = params.maxSteps ?? 100
   const { nodes, weights } = ruleForExpectation()
   return {
@@ -340,8 +342,9 @@ export function gpClassifier<P extends KernelParams>(
       const X = asRows(x) as Tensor
       const n = X.shape[0]
       const t = Float64Array.from(toFlat(y))
-      if (t.length !== n) throw new Error(`gpClassifier: ${n} inputs but ${t.length} labels`)
-      if (!t.every((v) => v === 0 || v === 1)) throw new Error('gpClassifier: labels must be 0 or 1')
+      if (t.length !== n) throw new ShapeError('gpClassifier', `gpClassifier: ${n} inputs but ${t.length} labels`)
+      if (!t.every((v) => v === 0 || v === 1))
+        throw new DomainError('gpClassifier', 'gpClassifier: labels must be 0 or 1')
       const K = gram(kernel, X) as Tensor
       const labels = fromData(t, [n])
       let alpha: Float64Array, s: Float64Array, factor: ReturnType<typeof stableFactor>
@@ -451,7 +454,7 @@ function evidenceFor(labels: Tensor, options: GpClassifierEvidenceOptions): (K: 
   const { method = 'laplace', maxSteps = 100 } = options
   const likelihood = options.likelihood ?? (method === 'ep' ? 'probit' : 'logistic')
   if (method === 'ep') {
-    if (likelihood !== 'probit') throw new Error('gpClassifier: EP supports the probit link only')
+    if (likelihood !== 'probit') throw new DomainError('gpClassifier', 'gpClassifier: EP supports the probit link only')
     return gpEpEvidence(labels, { maxSweeps: maxSteps, tolerance: 1e-10 })
   }
   return laplaceEvidence(labels, { likelihood, maxSteps })

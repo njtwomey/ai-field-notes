@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { DomainError } from 'aifn/foundation/errors'
 import { cellState, type TabularMdp } from 'aifn-applied/gym'
 import {
   FROZEN_LAKE_MAPS,
@@ -49,7 +50,7 @@ describe('bandit environments', () => {
     expect(sums[0] / 4000).toBeCloseTo(0.2, 1)
     expect(sums[1] / 4000).toBeCloseTo(0.7, 1)
     expect(pay(env, 2, 0, 1)).toBe(pay(env, 2, 0, 1))
-    expect(() => bernoulliBandit({ means: [1.2] })).toThrow(RangeError)
+    expect(() => bernoulliBandit({ means: [1.2] })).toThrow(DomainError)
   })
 
   it('Gaussian arms have the stated means and sds', () => {

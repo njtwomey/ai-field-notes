@@ -5,6 +5,7 @@
  */
 
 import { definer, entries, type AlgorithmInfo, type Entry, type FunctionInfo } from 'aifn/foundation/registry'
+import * as alternating from './alternating'
 import * as proximal from './proximal'
 
 const algorithm = definer<AlgorithmInfo>('algorithm', 'optim/proximal')
@@ -53,10 +54,22 @@ algorithm(
   },
   proximal.projectedGradient,
 )
+algorithm(
+  {
+    key: 'alternatingProjectionsSteps',
+    name: 'Alternating projections',
+    summary: 'Cycle through the projections onto convex sets until the point stops moving: a point of their intersection.',
+    problem: 'system',
+    state: { iterate: 'x', flags: ['converged'] },
+    notes: ['label-propagation-for-label-proportions'],
+    cite: ['boyd2003'],
+  },
+  alternating.alternatingProjectionsSteps,
+)
 
 /** Every algorithm of the module, keyed by factory name. */
 export const proximalAlgorithms: Readonly<Record<string, Entry<(...args: never[]) => unknown, AlgorithmInfo>>> =
-  entries<AlgorithmInfo>('algorithm', proximal) as Readonly<
+  entries<AlgorithmInfo>('algorithm', proximal, alternating) as Readonly<
     Record<string, Entry<(...args: never[]) => unknown, AlgorithmInfo>>
   >
 
@@ -77,6 +90,38 @@ fn(
     notes: [...PROX, 'sampling-the-simplex'],
   },
   proximal.projectSimplex,
+)
+fn(
+  {
+    key: 'projectSimplexRows',
+    name: 'Projection of each row onto the simplex',
+    summary: 'Project every row of a matrix of class scores onto the probability simplex.',
+    role: 'transform',
+    notes: [...PROX, 'label-propagation-for-label-proportions'],
+  },
+  proximal.projectSimplexRows,
+)
+fn(
+  {
+    key: 'projectGroupSums',
+    name: 'Projection onto fixed group sums',
+    summary: 'Shift each disjoint group of coordinates by a common amount so the group sums to its target.',
+    role: 'transform',
+    notes: [...PROX, 'label-propagation-for-label-proportions'],
+  },
+  alternating.projectGroupSums,
+)
+fn(
+  {
+    key: 'alternatingProjections',
+    name: 'Alternating projections (run)',
+    tex: 'x \\leftarrow P_m(\\cdots P_2(P_1(x)))',
+    summary: 'A point in the intersection of convex sets; with Dykstra’s corrections, the projection onto it.',
+    role: 'solver',
+    notes: ['label-propagation-for-label-proportions'],
+    cite: ['boyd2003'],
+  },
+  alternating.alternatingProjections,
 )
 fn({ key: 'proxZero', name: 'Proximal operator of zero (identity)', role: 'transform', notes: PROX }, proximal.proxZero)
 fn(
@@ -118,6 +163,6 @@ fn(
 
 /** The functions of the module, keyed by name. */
 export const proximalFunctions: Readonly<Record<string, Entry<(...args: never[]) => unknown, FunctionInfo>>> =
-  entries<FunctionInfo>('function', proximal) as Readonly<
+  entries<FunctionInfo>('function', proximal, alternating) as Readonly<
     Record<string, Entry<(...args: never[]) => unknown, FunctionInfo>>
   >

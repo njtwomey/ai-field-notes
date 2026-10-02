@@ -1,7 +1,8 @@
 /**
  * `aifn/nn/layers`: layers as parameter trees with a forward function (after torch.nn.modules): `Linear`, `Embedding`,
  * convolutions and pools, `LayerNorm`, `RmsNorm`, `BatchNorm`, `Dropout`, `Sequential`, `Mlp`, `Residual`, and RNN, GRU
- * and LSTM cells, and the ODE block (`OdeBlock`, a neural ODE layer). Attention is `aifn/nn/attention`.
+ * and LSTM cells, the ODE block (`OdeBlock`, a neural ODE layer), and multiple-instance pooling (`MilPooling`: embedding,
+ * attention, instance, additive and conjunctive, after MILLET). Attention is `aifn/nn/attention`.
  */
 
 export {
@@ -52,6 +53,14 @@ export {
   type RecurrentState,
   type Unrolled,
 } from './recurrent'
+export {
+  MIL_POOLING_KINDS,
+  milPool,
+  MilPooling,
+  type MilPooled,
+  type MilPoolingKind,
+  type MilPoolingParams,
+} from './mil'
 export { OdeBlock, type OdeBlockLayer, type OdeBlockOptions } from './ode'
 
 // For writing layers: record an activation (`tap`) and name a sub-layer's context (`childContext`).

@@ -12,6 +12,7 @@ import { strongWolfeSearch, type LineSearchResult, type StrongWolfeOptions } fro
 import type { IterateState, ObjectiveFn, StoppingOptions } from 'aifn/foundation/contracts'
 import { DEFAULT_DIVERGE, DEFAULT_TOLERANCE, divergedAt, evaluate } from '../options'
 import { dense } from 'aifn/foundation/tensor'
+import { DomainError } from 'aifn/foundation/errors'
 
 const { axpy, data, dot, mat, matVec, norm, scale, sub, toF64, vec } = dense
 type F64 = dense.F64
@@ -338,7 +339,7 @@ export function owlqn(f: ObjectiveFn, options: OwlqnOptions = {}): Algorithm<Sta
     maxBacktracks = 50,
   } = options
   const name = 'owlqn'
-  if (!(l1 >= 0)) throw new RangeError(`${name}: l1 must be ≥ 0, got ${l1}`)
+  if (!(l1 >= 0)) throw new DomainError(name, `${name}: l1 must be ≥ 0, got ${l1}`)
   const total = (value: number, x: ArrayLike<number>) => value + (l1 > 0 ? l1 * l1Norm(x) : 0)
   return {
     name,

@@ -11,7 +11,8 @@ import { toFlat, unwrap, type Tensor, type Value } from 'aifn/foundation/tensor'
 import type { Algorithm } from 'aifn/foundation/trace'
 import { adjustedRandIndex } from 'aifn/learning/metrics'
 import { routingStatistics } from 'aifn/nn/experts'
-import { trainingLoop, type TrainingState } from 'aifn/nn/training'
+import type { Context } from 'aifn/nn/layers'
+import { methodTraining, trainingLoop, type TrainingState } from 'aifn/nn/training'
 import { adamRule } from 'aifn/optim/first-order'
 import { moeEm, type MoeData } from './em'
 import {
@@ -57,9 +58,14 @@ export type MoeRunOptions = Omit<MoeConfig, 'inputs' | 'task'> & {
   /** Inputs [T, d], targets [T], and optionally the true regime of each row (int [T]), for the agreement curve. */
   data: MoeData & { regime?: Tensor }
   task: 'regression' | 'classification'
-  /** `em` (linear experts, dense gate, mixture objective) or `adam` (default). */
-  method?: 'em' | 'adam'
-  /** Steps: EM iterations or Adam updates (default 40 for EM, 600 for Adam). */
+  /**
+   * `em` (linear experts, dense gate, mixture objective), `adam` (default) or `lbfgs` (full batch, the gate without
+   * noise: L-BFGS needs one deterministic objective).
+   */
+  method?: 'em' | 'adam' | 'lbfgs'
+  /** L-BFGS's memory m (default 10). */
+  memory?: Size
+  /** Steps: EM iterations, Adam updates or L-BFGS iterations (default 40 for EM, 600 otherwise). */
   steps?: Size
   /** Keep the parameters every this many steps for the player (default steps/60, at least 1). */
   every?: Size
@@ -103,7 +109,7 @@ export type MoeSnapshot = {
   readonly step: Size
   readonly steps: Size
   readonly done: boolean
-  readonly method: 'em' | 'adam'
+  readonly method: 'em' | 'adam' | 'lbfgs'
   readonly spec: MoeSpec
   readonly history: MoeHistory
   /** Parameters at step 0, every `every` steps and at the last step. */
@@ -124,6 +130,7 @@ export function* mixtureOfExpertsRun(options: MoeRunOptions): Generator<MoeSnaps
     data,
     task,
     method = 'adam',
+    memory,
     seed = 'moe',
     stepSize,
     batchSize,
@@ -178,9 +185,11 @@ export function* mixtureOfExpertsRun(options: MoeRunOptions): Generator<MoeSnaps
       history.agreement.push(adjustedRandIndex(regime, assignment))
     } else history.agreement.push(NaN)
   }
+  // A run that stops early (converged L-BFGS) reports its last step as the total.
+  let total = steps
   const snapshot = (t: Size, done: boolean): MoeSnapshot => ({
     step: t,
-    steps,
+    steps: total,
     done,
     method,
     spec: model.spec,
@@ -219,7 +228,15 @@ export function* mixtureOfExpertsRun(options: MoeRunOptions): Generator<MoeSnaps
     }
     return
   }
-  const alg = moeTraining(model, data, { stepSize, batchSize, aux: { balance, importance, z } })
+  const aux = { balance, importance, z }
+  // Adam's loss takes the layers' context (the noisy gate's stream); L-BFGS's sees none, so its gate is noiseless.
+  const alg = methodTraining(
+    (p: MoeParams, b: { x: Tensor; y: Tensor }, ctx?: Context) => moeLoss(model, p, b.x, b.y, aux, ctx).total,
+    { x: data.x, y: data.y },
+    method === 'lbfgs'
+      ? { method: 'lbfgs', memory }
+      : { method: 'adam', stepSize: stepSize ?? 0.03, batchSize, clipNorm: 10 },
+  )
   let state = alg.init(start, child(root, 'init'))
   record(0, state.params)
   checkpoints.push({ step: 0, params: state.params })
@@ -231,6 +248,14 @@ export function* mixtureOfExpertsRun(options: MoeRunOptions): Generator<MoeSnaps
       checkpoints.push({ step: k, params: state.params })
       yield snapshot(k, k === steps)
     }
-    if (state.diverged) break
+    if (state.diverged || state.stopped) {
+      total = k
+      if (k % every !== 0 && k !== steps) {
+        if (k % recordEvery !== 0) record(k, state.params)
+        checkpoints.push({ step: k, params: state.params })
+        yield snapshot(k, true)
+      }
+      break
+    }
   }
 }

@@ -11,6 +11,7 @@ import type { DatasetInfo, Key } from 'aifn/foundation/contracts'
 import { definer } from 'aifn/foundation/registry'
 import { int, oneOf, real, space } from 'aifn/foundation/space'
 import { checkCount, generatorRecipe, labels, matrix, type Recipe } from '../types'
+import { DomainError } from 'aifn/foundation/errors'
 
 // ── The paired-views shape ───────────────────────────────────────────────────────────────────────────────────────────
 
@@ -173,9 +174,10 @@ export function pairedShapes(s: Stream, options: PairedShapesOptions = {}): Pair
     include = 'seen',
   } = options
   checkCount(n, 'pairedShapes')
-  if (!(Number.isInteger(size) && size >= 4)) throw new RangeError(`pairedShapes: size must be an integer ≥ 4`)
+  if (!(Number.isInteger(size) && size >= 4))
+    throw new DomainError('pairedShapes', `pairedShapes: size must be an integer ≥ 4`)
   if (!(Number.isInteger(heldOut) && heldOut >= 0 && heldOut <= HOLD_ORDER.length))
-    throw new RangeError(`pairedShapes: heldOut must be an integer in 0 … ${HOLD_ORDER.length}`)
+    throw new DomainError('pairedShapes', `pairedShapes: heldOut must be an integer in 0 … ${HOLD_ORDER.length}`)
   const combos = combinations()
   const held = HOLD_ORDER.slice(0, heldOut)
   const isHeld = (c: readonly number[]) => held.some(([sh, co]) => c[0] === sh && c[2] === co)
@@ -183,7 +185,7 @@ export function pairedShapes(s: Stream, options: PairedShapesOptions = {}): Pair
   const pool = combos
     .map((_, k) => k)
     .filter((k) => (include === 'all' ? true : include === 'heldOut' ? isHeld(combos[k]) : !isHeld(combos[k])))
-  if (pool.length === 0) throw new RangeError('pairedShapes: no combinations to draw (heldOut is 0)')
+  if (pool.length === 0) throw new DomainError('pairedShapes', 'pairedShapes: no combinations to draw (heldOut is 0)')
 
   const C = PAIRED_COLOURS.length
   const dA = C * size * size

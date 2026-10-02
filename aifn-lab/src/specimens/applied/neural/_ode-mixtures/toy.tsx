@@ -365,7 +365,7 @@ export function SvfmToyShowcase() {
             branch, and stochastic VFs spread along one direction (scaling). Top right:{' '}
             {oneD
               ? 'the predictive density at the grid time shown, averaged over the points (the targets as ticks)'
-              : 'P(class 1) over the inputs (as figs. 8–9)'}
+              : 'P(class 1) over the inputs (as figs. 8–9), its 0.5 contour in ink while the decision contours are on'}
             . Bottom: the component posterior π(t) along the pinned path (click a point on the flow to pin it) and the
             regions where each component is the most probable at t₀ (π(t₀), the pick-and-stick choice), with thin ink
             lines on the boundaries where the most probable component changes (the level-0 contours of πₖ − max over j ≠
@@ -417,6 +417,7 @@ export function SvfmToyShowcase() {
                     range={[0, 1]}
                     valueLabel="P(class 1)"
                     fillOpacity={0.7}
+                    boundary={contours ? 0.5 : false}
                   />
                 )}
                 {data2d && (
@@ -488,7 +489,11 @@ export function SvfmToyShowcase() {
             onChange={(v) => setComponent(Number(v))}
             options={Array.from({ length: K }, (_, i) => ({ value: String(i), label: `component ${i + 1}` }))}
           />
-          <Switch label="decision contours (argmax boundaries of π(t₀))" checked={contours} onChange={setContours} />
+          <Switch
+            label="decision contours (argmax boundaries of π(t₀), P(class 1) = 0.5)"
+            checked={contours}
+            onChange={setContours}
+          />
         </div>
         {slider}
         <Player

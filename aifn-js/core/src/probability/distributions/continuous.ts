@@ -771,6 +771,81 @@ export function Gumbel<M extends Value, S extends Value>(loc: M, scale: S): Univ
   })
 }
 
+// ── Generalised Pareto ───────────────────────────────────────────────────────────────────────────────────────────────
+
+/**
+ * The generalised Pareto distribution with shape ξ, location μ and scale σ > 0 (scipy's genpareto(ξ, μ, σ)): the law of
+ * exceedances over a high threshold (Pickands, 1975; Balkema and de Haan, 1974). With z = (x − μ)/σ the survival
+ * function is (1 + ξz)^{−1/ξ}, and e^{−z} at ξ = 0 (the exponential). ξ > 0 gives a Pareto-like heavy tail, ξ < 0 a
+ * bounded support up to μ − σ/ξ. The mean exists for ξ < 1, the variance for ξ < ½ (∞ beyond).
+ */
+export function GeneralisedPareto<C extends Value, M extends Value, S extends Value>(
+  shape: C,
+  loc: M,
+  scale: S,
+): Univariate<C | M | S> {
+  check('GeneralisedPareto', 'scale', scale, positive, 'positive')
+  check('GeneralisedPareto', 'shape', shape, finite, 'finite')
+  const zero = mask([shape], (c) => c === 0)
+  // ξ with its zeros replaced, so the unused branch of ξ = 0 stays finite.
+  const safeShape = guard(
+    shape,
+    mask([shape], (c) => c !== 0),
+    1,
+  )
+  const lowerOk = (x: Value) => mask([x, loc], (v, m) => v >= m)
+  const upperOk = (x: Value) => mask([x, shape, loc, scale], (v, c, m, s) => c >= 0 || v <= m - s / c)
+  const inside = (x: Value) => mask([x, shape, loc, scale], (v, c, m, s) => v >= m && (c >= 0 || v <= m - s / c))
+  const z = (x: Value) => div(sub(x, loc), scale)
+  // t(z) = log(1 + ξz)/ξ (z at ξ = 0) is −log S(x); arguments outside the support are moved into it.
+  const t = (x: Value) => {
+    const zs = guard(z(x), inside(x), 0)
+    return where(zero, zs, div(log1p(mul(safeShape, zs)), safeShape))
+  }
+  // The inverse of t: x = μ + σ·(e^{ξL} − 1)/ξ (μ + σL at ξ = 0) for L = −log S.
+  const fromTail = (L: Value) => add(loc, mul(scale, where(zero, L, div(expm1(mul(safeShape, L)), safeShape))))
+  const quantile = (p: Value) => fromTail(neg(log1p(neg(p))))
+  // Below μ the cdf is 0; above the upper end (ξ < 0) it is 1.
+  const piecewise = (x: Value, expr: Value, below: number, above: number) =>
+    outside(lowerOk(x), outside(upperOk(x), expr, above), below)
+  return univariate({
+    name: 'GeneralisedPareto',
+    params: { shape, loc, scale },
+    support: {
+      type: 'interval',
+      lower: loc,
+      upper: where(
+        mask([shape], (c) => c < 0),
+        sub(loc, div(scale, safeShape)),
+        Infinity,
+      ),
+    },
+    logProb: (x) => {
+      const ok = inside(x)
+      const zs = guard(z(x), ok, 0)
+      return outside(ok, neg(add(add(log(scale), t(x)), log1p(mul(shape, zs)))), -Infinity)
+    },
+    cdf: (x) => piecewise(x, neg(expm1(neg(t(x)))), 0, 1),
+    logcdf: (x) => piecewise(x, log1mexp(neg(t(x))), -Infinity, 0),
+    survival: (x) => piecewise(x, exp(neg(t(x))), 1, 0),
+    logSurvival: (x) => piecewise(x, neg(t(x)), 0, -Infinity),
+    quantile,
+    isf: (q) => fromTail(neg(log(q))),
+    rsample: (s, drawShape, scalar) => inverseTransform(s, drawShape, scalar, quantile),
+    mean: () => {
+      const ok = mask([shape], (c) => c < 1)
+      return where(ok, add(loc, div(scale, sub(1, guard(shape, ok, 0)))), Infinity)
+    },
+    variance: () => {
+      const ok = mask([shape], (c) => c < 0.5)
+      const c = guard(shape, ok, 0)
+      return where(ok, div(square(scale), mul(square(sub(1, c)), sub(1, mul(2, c)))), Infinity)
+    },
+    entropy: () => add(add(log(scale), shape), atBatch(1, loc)),
+    mode: () => atBatch(loc, shape, scale),
+  })
+}
+
 // ── Von Mises ────────────────────────────────────────────────────────────────────────────────────────────────────────
 
 /** ∫_{−π}^{z} e^{κ(cos t − 1)} dt by composite Simpson's rule, with enough panels to resolve the peak's width 1/√κ. */

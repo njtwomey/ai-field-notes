@@ -32,6 +32,7 @@ import { logSoftmax } from 'aifn/numerics/special'
 import { minimize } from 'aifn/optim/minimize'
 import type { LinearParams } from 'aifn/nn/layers'
 import { expertLogLikelihood, moeForward, moeLoss, type MoeModel, type MoeParams } from './model'
+import { DomainError, NumericalError } from 'aifn/foundation/errors'
 
 /** Training data: inputs [T, d] and targets [T] (floats, or 0/1 labels). */
 export type MoeData = { x: Tensor; y: Tensor }
@@ -124,7 +125,8 @@ function refitExpert(
       }
     }
     const sol = solveDense(A, b, D)
-    if (!sol.x) throw new Error('moeEm: an expert’s weighted normal equations are singular')
+    if (!sol.x)
+      throw new NumericalError('moeEm', 'moeEm: an expert’s weighted normal equations are singular', 'singular')
     return Array.from(sol.x)
   }
   let w = w0
@@ -216,7 +218,7 @@ export function moeEm(
   options: MoeEmOptions = {},
 ): Algorithm<{ params: MoeParams }, MoeEmState> {
   const why = emApplies(model)
-  if (why) throw new Error(`moeEm: ${why}`)
+  if (why) throw new DomainError('moeEm', `moeEm: ${why}`)
   const opts: Required<MoeEmOptions> = { gateSteps: 20, newtonSteps: 3, ridge: 1e-6, minVariance: 1e-6, ...options }
   const N = model.spec.experts
   const state = (t: Size, params: MoeParams): MoeEmState => {

@@ -14,7 +14,6 @@ import {
   BahdanauAttention,
   causalConvolution,
   discretiseDiagonal,
-  discretiseSsm,
   gradientsThroughTime,
   hippoLegS,
   linearAttention,
@@ -29,6 +28,7 @@ import {
   type LuongParams,
   type LuongScore,
 } from 'aifn/nn/sequence'
+import { discretiseSsm } from 'aifn/systems'
 import { fixture } from '../../fixtures'
 
 type Nested = number | Nested[]

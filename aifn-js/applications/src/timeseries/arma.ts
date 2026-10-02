@@ -28,6 +28,7 @@ import { filterAll, type Model } from 'aifn/inference/filtering'
 import { run, type Algorithm } from 'aifn/foundation/trace'
 import { simplexFit, type FitState } from './fit'
 import { toVec, type VectorLike } from './inputs'
+import { DomainError } from 'aifn/foundation/errors'
 
 /** An ARMA model. Omitted parts are empty (no AR or MA terms), σ = 1 and μ = 0. */
 export type ArmaSpec = {
@@ -106,7 +107,8 @@ export function psiWeights(model: ArmaSpec, J: number): Vector {
 export function armaAutocovariance(model: ArmaSpec, maxLag: number): Vector {
   const { ar, ma, sigma } = parse(model, 'armaAutocovariance')
   const roots = armaRoots(model).ar
-  if (!(roots.minModulus > 1)) throw new Error('armaAutocovariance: the AR polynomial is not stationary')
+  if (!(roots.minModulus > 1))
+    throw new DomainError('armaAutocovariance', 'armaAutocovariance: the AR polynomial is not stationary')
   // Enough terms that ρ^J < 1e-17 for the slowest root modulus ρ⁻¹ = minModulus.
   const decay = Number.isFinite(roots.minModulus) ? Math.log(1e-17) / -Math.log(roots.minModulus) : 0
   const J = Math.min(Math.ceil(decay) + ma.length + 50, 200000)

@@ -247,52 +247,6 @@ fn(
   },
   minhash.minHashStandardError,
 )
-fn(
-  {
-    key: 'lshBands',
-    name: 'LSH band keys',
-    role: 'transform',
-    summary: 'The bucket key of each of b bands of r signature rows.',
-    notes: LSH,
-    cite: ['indyk1998'],
-  },
-  minhash.lshBands,
-)
-fn(
-  {
-    key: 'lshCandidates',
-    name: 'LSH candidate pairs',
-    role: 'transform',
-    summary: 'The pairs of signatures that agree on at least one band.',
-    notes: LSH,
-    cite: ['indyk1998', 'broder1997'],
-  },
-  minhash.lshCandidates,
-)
-fn(
-  {
-    key: 'lshProbability',
-    name: 'LSH banding S-curve',
-    tex: '1 - (1 - s^r)^b',
-    role: 'property',
-    summary: 'The probability that a pair of Jaccard similarity s becomes a candidate under b bands of r rows.',
-    notes: LSH,
-    cite: ['indyk1998'],
-  },
-  minhash.lshProbability,
-)
-fn(
-  {
-    key: 'lshThreshold',
-    name: 'LSH banding threshold',
-    tex: '(1/b)^{1/r}',
-    role: 'property',
-    summary: 'The similarity near which the banding S-curve is steepest.',
-    notes: LSH,
-  },
-  minhash.lshThreshold,
-)
-
 const TEMPLATES = ['conditional-random-field', 'sequence-labelling']
 
 fn(

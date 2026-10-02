@@ -11,6 +11,7 @@ import type { Algorithm } from 'aifn/foundation/trace'
 import { run } from 'aifn/foundation/trace'
 import type { MatrixLike, Scalar, Size, Status } from 'aifn/foundation/contracts'
 import { intTensor, matrix, readMatrix, vector } from './input'
+import { DomainError } from 'aifn/foundation/errors'
 
 /** A step of Munkres' algorithm. */
 export type HungarianPhase =
@@ -79,7 +80,7 @@ export function hungarianSteps(cost: MatrixLike, options: HungarianOptions = {})
   const rowsIn = 'shape' in cost ? cost.shape[0] : cost.length
   const colsIn = 'shape' in cost ? cost.shape[1] : rowsIn ? cost[0].length : 0
   const C = readMatrix(cost, 'hungarian: cost', colsIn)
-  for (const v of C.a) if (!Number.isFinite(v)) throw new Error('hungarian: costs must be finite')
+  for (const v of C.a) if (!Number.isFinite(v)) throw new DomainError('hungarian', 'hungarian: costs must be finite')
   const transposed = C.m > C.n
   const k = Math.min(C.m, C.n)
   const l = Math.max(C.m, C.n)

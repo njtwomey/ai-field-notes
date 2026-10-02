@@ -11,6 +11,7 @@ import { mul, type Value } from 'aifn/foundation/tensor'
 import { activationFn, type Activation } from 'aifn/nn/functional'
 import { xavierUniform } from 'aifn/nn/init'
 import { Linear, linear, tap, type Context, type Layer, type LinearParams } from 'aifn/nn/layers'
+import { DomainError } from 'aifn/foundation/errors'
 
 /** The kinds of feed-forward layer: a plain two-layer network or a gated one. */
 export type FeedForwardKind = 'mlp' | 'swiglu' | 'geglu' | 'reglu'
@@ -42,7 +43,7 @@ export function feedForward(
   const up = linear(x, params.up.weight, params.up.bias)
   const hidden = (h: Value) => tap(ctx, h, 'hidden')
   if (kind === 'mlp') return linear(hidden(activationFn(activation)(up)), params.down.weight, params.down.bias)
-  if (!params.gate) throw new Error(`feedForward: a ${kind} layer needs gate parameters`)
+  if (!params.gate) throw new DomainError('feedForward', `feedForward: a ${kind} layer needs gate parameters`)
   const gate = activationFn(gateActivation[kind])(linear(x, params.gate.weight, params.gate.bias))
   return linear(hidden(mul(gate, up)), params.down.weight, params.down.bias)
 }

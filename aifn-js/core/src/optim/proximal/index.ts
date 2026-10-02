@@ -1,6 +1,7 @@
 /**
  * `aifn/optim/proximal`: proximal and projected methods: ISTA, FISTA, projected gradient, proximal operators (L1, L2,
- * squared L2, box, non-negative) and projections (ball, box, simplex, non-negative orthant).
+ * squared L2, box, non-negative) and projections (ball, box, simplex, non-negative orthant, fixed group sums); alternating projections onto an
+ * intersection of convex sets (with Dykstra's correction).
  */
 
 export {
@@ -10,6 +11,7 @@ export {
   projectBox,
   projectNonnegative,
   projectSimplex,
+  projectSimplexRows,
   projectedGradient,
   proximalGradient,
   proxBox,
@@ -23,4 +25,13 @@ export {
   type ProximalGradientOptions,
   type ProximalGradientState,
 } from './proximal'
+export {
+  alternatingProjections,
+  alternatingProjectionsSteps,
+  projectGroupSums,
+  type AlternatingProjectionsOptions,
+  type AlternatingProjectionsResult,
+  type AlternatingProjectionsState,
+  type Projection,
+} from './alternating'
 export { proximalAlgorithms, proximalFunctions } from './registry'

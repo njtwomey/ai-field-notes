@@ -9,11 +9,12 @@ import { normals, type Stream } from 'aifn/foundation/random'
 import type { Scalar, Size } from 'aifn/foundation/contracts'
 import { fromData, toFlat, type Tensor } from 'aifn/foundation/tensor'
 import { readPoints, readVector, type PointsInput, type WeightsInput } from './discrete'
+import { ShapeError } from 'aifn/foundation/errors'
 
 function sortedWithWeights(values: Float64Array, weights?: Float64Array): { x: number[]; w: number[] } {
   const n = values.length
   const w = weights ?? new Float64Array(n).fill(1)
-  if (w.length !== n) throw new Error('wasserstein1d: weights must match the values')
+  if (w.length !== n) throw new ShapeError('wasserstein1d', 'wasserstein1d: weights must match the values')
   const total = w.reduce((s, v) => s + v, 0)
   const order = Array.from({ length: n }, (_, i) => i).sort((i, j) => values[i] - values[j])
   return { x: order.map((i) => values[i]), w: order.map((i) => w[i] / total) }
@@ -118,7 +119,7 @@ export function slicedWasserstein(
   const { projections = 50, p = 2 } = options
   const X = readPoints(x, 'slicedWasserstein')
   const Y = readPoints(y, 'slicedWasserstein')
-  if (X.d !== Y.d) throw new Error('slicedWasserstein: point sets differ in dimension')
+  if (X.d !== Y.d) throw new ShapeError('slicedWasserstein', 'slicedWasserstein: point sets differ in dimension')
   const d = X.d
   // One block of standard normals, normalised row by row: uniform directions on the sphere.
   const dirs = Float64Array.from(toFlat(normals(s, [projections, d])))

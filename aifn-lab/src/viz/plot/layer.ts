@@ -109,10 +109,10 @@ export type LayerDef<P> = {
   margins?: (props: P, ctx: LayerContext) => { right?: number; top?: number; labelRow?: number }
   /** The names the layer puts in the legend (default its `name`, if any). */
   legend?: (props: P) => string[]
-  /** The layer is rebuilt when the drawn ranges change (clipping, pixel-anchored marks). */
-  needsBox?: boolean
-  /** The layer is rebuilt when the plot area's pixel size changes (a raster's resolution). */
-  needsPlot?: boolean
+  /** The layer is rebuilt when the drawn ranges change (clipping, pixel-anchored marks); may depend on its props. */
+  needsBox?: boolean | ((props: P) => boolean)
+  /** The layer is rebuilt when the plot area's pixel size changes (a raster's resolution); may depend on its props. */
+  needsPlot?: boolean | ((props: P) => boolean)
   /** The layer covers the plot area (a raster): the Plot draws no grid lines across it. */
   covers?: boolean
   /** Live by default (sent as a patch, never widening the axes), e.g. a probe the reader moves. */

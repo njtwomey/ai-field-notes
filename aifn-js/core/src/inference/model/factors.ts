@@ -9,6 +9,7 @@
 
 import { shape, structuredGraph, type StructuredGraph } from 'aifn/graph/structured'
 import { fromData, toFlat, type Tensor } from 'aifn/foundation/tensor'
+import { DomainError, ShapeError } from 'aifn/foundation/errors'
 
 /** A potential over a few discrete variables; `table` has shape `scope.map((v) => cardinalities[v])`. */
 export interface DiscreteFactor {
@@ -88,9 +89,47 @@ export function discreteFactor(
   } else {
     data = 'shape' in values ? Float64Array.from(toFlat(values)) : Float64Array.from(values)
   }
-  if (data.length !== n) throw new RangeError(`discreteFactor: ${data.length} values for a table of ${n}`)
-  for (const v of data) if (!(v >= 0)) throw new RangeError(`discreteFactor: potential ${v} is not non-negative`)
+  if (data.length !== n)
+    throw new ShapeError('discreteFactor', `discreteFactor: ${data.length} values for a table of ${n}`)
+  for (const v of data)
+    if (!(v >= 0)) throw new DomainError('discreteFactor', `discreteFactor: potential ${v} is not non-negative`)
   return { scope: [...scope], table: fromData(data, shape), ...(name === undefined ? {} : { name }) }
+}
+
+/**
+ * A gate (Minka and Winn, 2008): a selector variable c with K values switches between K factors, so the gated factor is
+ * φ(c = k, x) = fₖ(x) over c and the union of the cases' scopes (a case's potential is constant along variables it does
+ * not touch). A gate makes mixtures, model selection and context-specific independence explicit in the factor graph,
+ * and message passing through it is the usual sum–product. With `selector` given as an evidence-free variable, the
+ * marginal of c is the posterior probability of each case.
+ */
+export function gateFactor(
+  selector: number,
+  cases: readonly DiscreteFactor[],
+  cardinalities: readonly number[],
+  name?: string,
+): DiscreteFactor {
+  if (cases.length !== cardinalities[selector])
+    throw new ShapeError(
+      'gateFactor',
+      `gateFactor: ${cases.length} cases for a selector with ${cardinalities[selector]} values`,
+    )
+  const others = [...new Set(cases.flatMap((f) => f.scope))].sort((a, b) => a - b)
+  if (others.includes(selector))
+    throw new DomainError('gateFactor', 'gateFactor: a case may not depend on its own selector')
+  const scope = [selector, ...others]
+  const tables = cases.map((f) => ({ f, data: valuesOf(f.table), strides: stridesOf(f.table.shape) }))
+  return discreteFactor(
+    scope,
+    cardinalities,
+    (a) => {
+      const { f, data, strides } = tables[a[0]]
+      let flat = 0
+      f.scope.forEach((v, i) => (flat += a[1 + others.indexOf(v)] * strides[i]))
+      return data[flat]
+    },
+    name ?? 'gate',
+  )
 }
 
 /** Check a factor graph's scopes and table shapes; returns it unchanged. */
@@ -101,13 +140,16 @@ export function discreteFactorGraph(
 ): DiscreteFactorGraph {
   factors.forEach((f, k) => {
     f.scope.forEach((v, i) => {
-      if (!(v >= 0 && v < cardinalities.length)) throw new RangeError(`factor ${k}: variable ${v} is out of range`)
+      if (!(v >= 0 && v < cardinalities.length))
+        throw new DomainError(`factor ${k}`, `factor ${k}: variable ${v} is out of range`)
       if (f.table.shape[i] !== cardinalities[v])
-        throw new RangeError(
+        throw new ShapeError(
+          `factor ${k}`,
           `factor ${k}: axis ${i} has size ${f.table.shape[i]}, variable ${v} has ${cardinalities[v]}`,
         )
     })
-    if (new Set(f.scope).size !== f.scope.length) throw new RangeError(`factor ${k}: repeated variable in scope`)
+    if (new Set(f.scope).size !== f.scope.length)
+      throw new DomainError(`factor ${k}`, `factor ${k}: repeated variable in scope`)
   })
   return { cardinalities: [...cardinalities], factors, ...(names ? { names: [...names] } : {}) }
 }

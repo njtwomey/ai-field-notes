@@ -43,6 +43,7 @@ import {
   type NodeValue,
 } from 'aifn/inference/model'
 import { intervalTilted } from './tilted'
+import { DomainError } from 'aifn/foundation/errors'
 
 /** An affine form Σ coefficients[k]·z_k + constant over latent indices. */
 type Affine = { terms: Map<number, number>; constant: number }
@@ -67,7 +68,7 @@ export interface CompiledGaussianModel {
 }
 
 const fail = (what: string): never => {
-  throw new Error(`modelExpectationPropagation: ${what}`)
+  throw new DomainError('modelExpectationPropagation', `modelExpectationPropagation: ${what}`)
 }
 
 const isRef = (a: Arg): a is NodeRef => typeof a === 'object' && a !== null && 'kind' in a && a.kind === 'ref'
@@ -253,7 +254,8 @@ export function modelExpectationPropagation(
 ): Algorithm<void, ModelEpState> {
   const { keys, priorPrecision, priorShift, factors } = compileGaussianModel(m, bindings)
   const damping = options.damping ?? 0
-  if (!(damping >= 0 && damping < 1)) throw new RangeError('modelExpectationPropagation: damping must be in [0, 1)')
+  if (!(damping >= 0 && damping < 1))
+    throw new DomainError('modelExpectationPropagation', 'modelExpectationPropagation: damping must be in [0, 1)')
   const tolerance = options.tolerance ?? 1e-8
   const offsets: number[] = []
   let sites = 0

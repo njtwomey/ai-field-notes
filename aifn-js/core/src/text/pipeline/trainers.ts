@@ -17,6 +17,7 @@ import {
 } from 'aifn/text/subword'
 import { bpeStage, characterStage, unigramStage, wordLevelStage, wordPieceStage, type TokeniserModel } from './models'
 import { preTokenCounts, tokeniser, type Tokeniser, type UntrainedTokeniser } from './tokeniser'
+import { DomainError } from 'aifn/foundation/errors'
 
 /** What to train and its options. */
 export type Trainer =
@@ -120,7 +121,7 @@ export function trainingSteps(
       }) as Algorithm<void, TrainerState>
     }
     default:
-      throw new Error(`trainingSteps: ${trainer.type} has no step-through training`)
+      throw new DomainError('trainingSteps', `trainingSteps: ${trainer.type} has no step-through training`)
   }
 }
 
@@ -143,7 +144,7 @@ export function trainedModel(trainer: Trainer, state: TrainerState): TokeniserMo
     case 'unigram':
       return unigramStage(state as UnigramLmState, { specials, unknown, byteFallback: trainer.byteFallback ?? false })
     default:
-      throw new Error(`trainedModel: ${trainer.type} has no training state`)
+      throw new DomainError('trainedModel', `trainedModel: ${trainer.type} has no training state`)
   }
 }
 

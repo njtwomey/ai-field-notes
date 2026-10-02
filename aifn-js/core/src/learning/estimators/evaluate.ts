@@ -20,6 +20,7 @@ import type {
 } from 'aifn/foundation/contracts'
 import { dense, fromData, type Tensor } from 'aifn/foundation/tensor'
 import { classProbabilities } from './distribution'
+import { DomainError } from 'aifn/foundation/errors'
 
 /**
  * A metric `evaluate` can serve: a function of the targets and one model output, carrying registry metadata that
@@ -46,7 +47,7 @@ export type Outputs = Partial<Record<MetricCapability, Tensor | Distribution>>
 /** The output of `model` for `capability` on inputs x. */
 export function outputFor(model: unknown, capability: MetricCapability, x: unknown): Tensor | Distribution {
   const f = (model as Record<string, ((x: unknown) => Tensor | Distribution) | undefined>)[capability]
-  if (typeof f !== 'function') throw new Error(`evaluate: the model has no ${capability}`)
+  if (typeof f !== 'function') throw new DomainError('evaluate', `evaluate: the model has no ${capability}`)
   return f.call(model, x)
 }
 
@@ -77,7 +78,8 @@ export function score(metrics: readonly ServedMetric[], y: unknown, out: Outputs
   const result: Record<string, number> = {}
   for (const m of metrics) {
     const output = out[m.info.capability]
-    if (output === undefined) throw new Error(`evaluate: no ${m.info.capability} output for ${m.info.key}`)
+    if (output === undefined)
+      throw new DomainError('evaluate', `evaluate: no ${m.info.capability} output for ${m.info.key}`)
     result[m.info.key] = (m as unknown as (y: unknown, p: unknown) => number)(y, metricInput(m, output))
   }
   return result

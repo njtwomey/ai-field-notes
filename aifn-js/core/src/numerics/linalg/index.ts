@@ -8,7 +8,7 @@
  *   uses).
  * - Solves and functions: `solveTriangular`, `choleskySolve`, `luSolve`, `solve`, `inverse`, `det`, `logDet`,
  *   `choleskyLogDet`, `pinv`, `lstsq`, `kron`, `matrixTrace`, `normFrobenius`, `conditionNumber`, `expm` (Padé,
- *   scaling and squaring). Solvers throw `LinAlgError` for a singular system.
+ *   scaling and squaring), `symmetricInverseSqrt` (S^{−1/2} of a symmetric positive-definite matrix, by `eigh`). Solvers throw `LinAlgError` for a singular system.
  * - Matrix equations: `lyapunov` (continuous Lyapunov or discrete Stein); the algebraic Riccati equations as traceable
  *   algorithms, `kleinmanIteration` and `riccatiMatrixSign` (CARE), `riccatiRecursion` and `riccatiDoubling` (DARE);
  *   the Toeplitz Yule–Walker system by `levinsonDurbin`.
@@ -40,6 +40,7 @@ export { cholesky, choleskyLogDet, choleskySolve, type Cholesky, type CholeskyOp
 export { det, inverse, logDet, lu, luFactor, luSolve, signDet, solve, type LU, type LuFactor } from './lu'
 export { householderSteps, qr, type HouseholderState, type QR } from './qr'
 export { eigh, type Eigh } from './eigh'
+export { symmetricInverseSqrt, type InverseSqrtOptions } from './inverseSqrt'
 export { conditionNumber, lstsq, pinv, svd, type LeastSquares, type SVD } from './svd'
 export { kron, matrixTrace, normFrobenius } from './products'
 export { eig, type Eigen } from './eig'

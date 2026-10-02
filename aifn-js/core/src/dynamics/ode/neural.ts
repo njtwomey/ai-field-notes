@@ -14,7 +14,7 @@
  *   Frobenius norm ‖εᵀ∂f/∂x‖² (RNODE).
  */
 
-import { NumericalError } from 'aifn/foundation/errors'
+import { DomainError, NumericalError, ShapeError } from 'aifn/foundation/errors'
 import { normals, units, type Stream } from 'aifn/foundation/random'
 import { vjp, jvp } from 'aifn/foundation/autodiff'
 import {
@@ -100,11 +100,12 @@ export function odeFlow(
     checkpoints = 1,
     onSolve,
   } = options
-  if (times.length < 2) throw new Error('odeFlow: needs at least two times')
+  if (times.length < 2) throw new DomainError('odeFlow', 'odeFlow: needs at least two times')
   for (let i = 1; i < times.length; i++)
     if (!(Number.isFinite(times[i]) && times[i] !== times[i - 1]))
-      throw new Error('odeFlow: the times must be finite and distinct')
-  if (!(stepSize > 0 && Number.isFinite(stepSize))) throw new Error('odeFlow: stepSize must be positive')
+      throw new DomainError('odeFlow', 'odeFlow: the times must be finite and distinct')
+  if (!(stepSize > 0 && Number.isFinite(stepSize)))
+    throw new DomainError('odeFlow', 'odeFlow: stepSize must be positive')
   const name = 'odeFlow'
 
   return (x0, params) => {
@@ -193,10 +194,10 @@ export type JacobianTrace = {
 export function jacobianTrace(f: (x: Value) => Value, x: Value, options: JacobianTraceOptions = {}): JacobianTrace {
   const { estimator = 'exact', probe, probeProduct = false } = options
   const shape = shapeOfValue(x)
-  if (shape.length !== 2) throw new Error('jacobianTrace: x must be a batch [B, d]')
+  if (shape.length !== 2) throw new ShapeError('jacobianTrace', 'jacobianTrace: x must be a batch [B, d]')
   const [b, d] = shape
   if ((estimator === 'hutchinson' || probeProduct) && probe === undefined)
-    throw new Error('jacobianTrace: the Hutchinson estimate and the probe product need a probe')
+    throw new DomainError('jacobianTrace', 'jacobianTrace: the Hutchinson estimate and the probe product need a probe')
   const productOf = () => {
     const { value, pullback } = vjp(f, x)
     return { value: value as Value, product: pullback(probe as never) as Value }
@@ -270,13 +271,18 @@ export function augmentedDynamics(
 ): AugmentedDynamics {
   const { dim: d, logDensity = null, kinetic = false, jacobianFrobenius = false, probe } = options
   const extras = (logDensity ? 1 : 0) + (kinetic ? 1 : 0) + (jacobianFrobenius ? 1 : 0)
-  if (extras === 0) throw new Error('augmentedDynamics: nothing to integrate besides x (use f itself)')
+  if (extras === 0)
+    throw new DomainError('augmentedDynamics', 'augmentedDynamics: nothing to integrate besides x (use f itself)')
   if ((logDensity === 'hutchinson' || jacobianFrobenius) && probe === undefined)
-    throw new Error('augmentedDynamics: the Hutchinson estimate and the Frobenius regulariser need a probe')
+    throw new DomainError(
+      'augmentedDynamics',
+      'augmentedDynamics: the Hutchinson estimate and the Frobenius regulariser need a probe',
+    )
   const rowsOf = (z: Value) => {
     const total = shapeOfValue(z).reduce((a, b) => a * b, 1)
     const b = total / (d + extras)
-    if (!Number.isInteger(b)) throw new Error('augmentedDynamics: the state does not split into rows')
+    if (!Number.isInteger(b))
+      throw new ShapeError('augmentedDynamics', 'augmentedDynamics: the state does not split into rows')
     return b
   }
   const unpack = (z: Value): AugmentedParts => {

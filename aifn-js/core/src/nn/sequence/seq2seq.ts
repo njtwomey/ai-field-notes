@@ -24,6 +24,7 @@ import {
 } from 'aifn/foundation/tensor'
 import { xavierUniform } from 'aifn/nn/init'
 import { Linear, linear, type LinearParams } from 'aifn/nn/layers'
+import { ShapeError } from 'aifn/foundation/errors'
 
 /** The context vector [..., d_v] and the attention weights over the source positions [..., T]. */
 export type AlignmentResult = { context: Value; weights: Value; scores: Value }
@@ -91,7 +92,10 @@ export function LuongAttention(
   hidden: Size = queryDim,
 ): SequenceAttention<LuongParams> {
   if (score === 'dot' && queryDim !== keyDim)
-    throw new Error(`LuongAttention: dot scores need equal widths, got ${queryDim} and ${keyDim}`)
+    throw new ShapeError(
+      'LuongAttention',
+      `LuongAttention: dot scores need equal widths, got ${queryDim} and ${keyDim}`,
+    )
   const general = Linear(keyDim, queryDim, { bias: false, init: xavierUniform() })
   const cat = Linear(queryDim + keyDim, hidden, { bias: false, init: xavierUniform() })
   const v = Linear(hidden, 1, { bias: false, init: xavierUniform() })

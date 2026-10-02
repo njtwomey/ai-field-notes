@@ -18,6 +18,7 @@ import { rowDistance, type PairwiseMetric } from 'aifn/numerics/linalg'
 import { classLabels, inputs, matrix, probabilityModel, targets } from '../util'
 import { defineModel } from 'aifn/learning/estimators'
 import { int, oneOf, space } from 'aifn/foundation/space'
+import { DomainError } from 'aifn/foundation/errors'
 
 /** Distances between points: Minkowski of order p (Euclidean p = 2, Manhattan p = 1) or Chebyshev (p = ∞). */
 export type Metric = 'euclidean' | 'manhattan' | 'chebyshev' | { minkowski: number }
@@ -44,7 +45,8 @@ export interface Neighbours {
 function distanceFn(metric: Metric): (a: Float64Array, i: number, b: Float64Array, j: number, d: number) => number {
   if (typeof metric === 'string') return (a, i, b, j, d) => rowDistance(a, i, b, j, d, metric)
   const p = metric.minkowski
-  if (!(p >= 1)) throw new Error('kNearestNeighbours: the Minkowski order must be at least 1')
+  if (!(p >= 1))
+    throw new DomainError('kNearestNeighbours', 'kNearestNeighbours: the Minkowski order must be at least 1')
   const named: PairwiseMetric =
     p === Infinity ? 'chebyshev' : p === 1 ? 'manhattan' : p === 2 ? 'euclidean' : 'minkowski'
   return (a, i, b, j, d) => rowDistance(a, i, b, j, d, named, p)
@@ -119,13 +121,14 @@ export function kNearestNeighbours(
   params: NeighboursParams = {},
 ): Estimator<Supervised<Tensor, Tensor>, NeighboursClassifier> {
   const { k = 5, weights = 'uniform', metric = 'euclidean' } = params
-  if (!(Number.isInteger(k) && k >= 1)) throw new Error('kNearestNeighbours: k must be a positive integer')
+  if (!(Number.isInteger(k) && k >= 1))
+    throw new DomainError('kNearestNeighbours', 'kNearestNeighbours: k must be a positive integer')
   return {
     name: 'k-nearest-neighbours',
     params: { k, weights, metric },
     fit({ x, y }) {
       const { n, d, v } = matrix(x, 'kNearestNeighbours')
-      if (k > n) throw new Error(`kNearestNeighbours: k = ${k} but only ${n} training rows`)
+      if (k > n) throw new DomainError('kNearestNeighbours', `kNearestNeighbours: k = ${k} but only ${n} training rows`)
       const { y: labels, k: K } = classLabels(y, n, 'kNearestNeighbours')
       const neighbours = (q: Tensor) => {
         const { n: m, v: qv } = inputs(q, d, 'kNearestNeighbours')
@@ -191,7 +194,11 @@ export function kNearestNeighboursRegression(
     params: { k, weights, metric },
     fit({ x, y }) {
       const { n, d, v } = matrix(x, 'kNearestNeighboursRegression')
-      if (k > n) throw new Error(`kNearestNeighboursRegression: k = ${k} but only ${n} training rows`)
+      if (k > n)
+        throw new DomainError(
+          'kNearestNeighboursRegression',
+          `kNearestNeighboursRegression: k = ${k} but only ${n} training rows`,
+        )
       const t = targets(y, n, 'kNearestNeighboursRegression')
       const moments = (q: Tensor) => {
         const { n: m, v: qv } = inputs(q, d, 'kNearestNeighboursRegression')

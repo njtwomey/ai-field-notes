@@ -36,6 +36,7 @@ import { trace, type Algorithm, type Trace } from 'aifn/foundation/trace'
 import { gram, rbf, type Kernel, type StationaryParams } from 'aifn/learning/kernels'
 import { cholesky, choleskyLogDet, eigh, solveTriangular } from 'aifn/numerics/linalg'
 import { lbfgs, type LbfgsState } from 'aifn/optim/second-order'
+import { DomainError, ShapeError } from 'aifn/foundation/errors'
 
 const LOG_2PI = Math.log(2 * Math.PI)
 
@@ -115,9 +116,10 @@ export function gplvmProblem(y: Tensor, options: GplvmOptions = {}): GplvmProble
     prior = true,
     kernel: makeKernel = rbf,
   } = options
-  if (y.shape.length !== 2) throw new RangeError(`gplvm: y must be [N, D], got [${y.shape.join(', ')}]`)
+  if (y.shape.length !== 2) throw new ShapeError('gplvm', `gplvm: y must be [N, D], got [${y.shape.join(', ')}]`)
   const [n, d] = y.shape
-  if (!(Number.isInteger(q) && q >= 1 && q < n)) throw new RangeError(`gplvm: latentDim must be in 1 … N − 1, got ${q}`)
+  if (!(Number.isInteger(q) && q >= 1 && q < n))
+    throw new DomainError('gplvm', `gplvm: latentDim must be in 1 … N − 1, got ${q}`)
   const raw = toFlat(y)
   const mean = new Float64Array(d)
   for (let i = 0; i < n; i++) for (let j = 0; j < d; j++) mean[j] += raw[i * d + j] / n
@@ -144,7 +146,8 @@ export function gplvmProblem(y: Tensor, options: GplvmOptions = {}): GplvmProble
     for (let j = 0; j < q; j++) theta0[i * q + j] = (V[i * n + j] * Math.sqrt(Math.max(lam[j], 0))) / sd1
   theta0[n * q] = Math.log(lengthscale)
   theta0[n * q + 1] = Math.log(signalVariance)
-  if (!(noiseVariance > noiseFloor)) throw new RangeError('gplvm: the starting noise variance must exceed the floor')
+  if (!(noiseVariance > noiseFloor))
+    throw new DomainError('gplvm', 'gplvm: the starting noise variance must exceed the floor')
   theta0[n * q + 2] = Math.log(noiseVariance - noiseFloor)
 
   const eye = identity(n)

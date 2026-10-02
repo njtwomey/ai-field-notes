@@ -36,6 +36,7 @@ import {
 import { sigmoid } from 'aifn/numerics/special'
 import { binomialFamily, link } from 'aifn/probability/likelihoods'
 import { irls } from '../irls'
+import { DomainError, ShapeError } from 'aifn/foundation/errors'
 
 /** A fitted binary classifier of the decomposition: P(y > k | x) for rows x [m, d]. */
 type Exceedance = (x: Tensor) => Float64Array
@@ -150,11 +151,12 @@ export function binaryDecomposition(
     fit({ x, y }, options: FitOptions = {}) {
       const [n, d] = matrixShape(x, 'binaryDecomposition')
       const t = targetValues(y, 'binaryDecomposition')
-      if (t.length !== n) throw new Error(`binaryDecomposition: ${n} inputs but ${t.length} labels`)
+      if (t.length !== n)
+        throw new ShapeError('binaryDecomposition', `binaryDecomposition: ${n} inputs but ${t.length} labels`)
       if (!t.every((v) => Number.isInteger(v) && v >= 0))
-        throw new Error('binaryDecomposition: labels must be class indices 0, 1, …')
+        throw new DomainError('binaryDecomposition', 'binaryDecomposition: labels must be class indices 0, 1, …')
       const K = params.classes ?? Math.max(...t) + 1
-      if (K < 2) throw new Error('binaryDecomposition: needs at least two classes')
+      if (K < 2) throw new DomainError('binaryDecomposition', 'binaryDecomposition: needs at least two classes')
       const X = Float64Array.from(dense.data(x))
       const classifiers: Exceedance[] = Array.from({ length: K - 1 }, (_, k) => {
         const target = Float64Array.from(t, (v) => (v > k ? 1 : 0))

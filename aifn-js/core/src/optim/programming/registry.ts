@@ -9,6 +9,7 @@ import * as linprog from './linprog'
 import * as lp from './lp'
 import * as assignment from './assignment'
 import * as dp from './dp'
+import * as sequences from './sequences'
 import * as interior from './interior'
 import * as milp from './milp'
 import * as qp from './qp'
@@ -19,6 +20,7 @@ const algorithm = definer<AlgorithmInfo>('algorithm', 'optim/programming')
 algorithm(
   {
     key: 'simplex',
+    stability: 'stable',
     name: 'Simplex method',
     problem: 'linear-program',
     state: { iterate: 'x', objective: 'objective', flags: ['converged', 'terminated'] },
@@ -29,6 +31,7 @@ algorithm(
 algorithm(
   {
     key: 'linearInteriorPoint',
+    stability: 'stable',
     name: 'Interior point (LP)',
     problem: 'linear-program',
     state: { iterate: 'x', objective: 'objective', flags: ['converged', 'diverged', 'terminated'] },
@@ -40,6 +43,7 @@ algorithm(
 algorithm(
   {
     key: 'activeSet',
+    stability: 'stable',
     name: 'Active set (QP)',
     problem: 'quadratic-program',
     state: { iterate: 'x', objective: 'objective', flags: ['converged', 'diverged', 'terminated'] },
@@ -51,6 +55,7 @@ algorithm(
 algorithm(
   {
     key: 'quadraticInteriorPoint',
+    stability: 'stable',
     name: 'Interior point (QP)',
     problem: 'quadratic-program',
     state: { iterate: 'x', objective: 'objective', flags: ['converged', 'diverged', 'terminated'] },
@@ -62,6 +67,7 @@ algorithm(
 algorithm(
   {
     key: 'boxQuadraticProgram',
+    stability: 'stable',
     name: 'Box-constrained QP',
     problem: 'quadratic-program',
     state: { iterate: 'x', objective: 'objective', grad: 'grad', flags: ['converged', 'diverged', 'terminated'] },
@@ -72,6 +78,7 @@ algorithm(
 algorithm(
   {
     key: 'branchAndBound',
+    stability: 'stable',
     name: 'Branch and bound',
     problem: 'integer-program',
     state: { iterate: 'incumbent', objective: 'incumbentValue', flags: ['converged', 'terminated'] },
@@ -81,6 +88,7 @@ algorithm(
 algorithm(
   {
     key: 'gomory',
+    stability: 'stable',
     name: 'Gomory cutting planes',
     problem: 'integer-program',
     state: { iterate: 'x', objective: 'objective', flags: ['converged', 'terminated'] },
@@ -90,6 +98,7 @@ algorithm(
 algorithm(
   {
     key: 'hungarianSteps',
+    stability: 'stable',
     name: 'Hungarian algorithm',
     problem: 'assignment',
     state: { flags: ['converged'] },
@@ -100,6 +109,7 @@ algorithm(
 algorithm(
   {
     key: 'dynamicProgram',
+    stability: 'stable',
     name: 'Dynamic programming',
     problem: 'dynamic-program',
     state: { iterate: 'table', flags: ['converged'] },
@@ -191,8 +201,48 @@ fn(
   assignment.hungarian,
 )
 
+fn(
+  { key: 'lcsProgram', name: 'Longest common subsequence as a dynamic program', role: 'construction' },
+  sequences.lcsProgram,
+)
+fn(
+  { key: 'lcs', name: 'Longest common subsequence', role: 'solver', stability: 'stable', notes: ['rouge'] },
+  sequences.lcs,
+)
+fn(
+  {
+    key: 'editDistanceProgram',
+    name: 'Edit distance as a dynamic program',
+    role: 'construction',
+    notes: ['word-and-character-error-rates'],
+  },
+  sequences.editDistanceProgram,
+)
+fn(
+  {
+    key: 'editDistance',
+    name: 'Levenshtein edit distance',
+    role: 'solver',
+    stability: 'stable',
+    notes: ['word-and-character-error-rates'],
+  },
+  sequences.editDistance,
+)
+fn(
+  { key: 'alignmentProgram', name: 'Sequence alignment as a dynamic program', role: 'construction' },
+  sequences.alignmentProgram,
+)
+fn(
+  { key: 'needlemanWunsch', name: 'Needleman–Wunsch global alignment', role: 'solver', stability: 'stable' },
+  sequences.needlemanWunsch,
+)
+fn(
+  { key: 'smithWaterman', name: 'Smith–Waterman local alignment', role: 'solver', stability: 'stable' },
+  sequences.smithWaterman,
+)
+
 /** The functions of the module, keyed by name. */
 export const programmingFunctions: Readonly<Record<string, Entry<(...args: never[]) => unknown, FunctionInfo>>> =
-  entries<FunctionInfo>('function', linprog, simplex, interior, lp, qp, milp, assignment, dp) as Readonly<
+  entries<FunctionInfo>('function', linprog, simplex, interior, lp, qp, milp, assignment, dp, sequences) as Readonly<
     Record<string, Entry<(...args: never[]) => unknown, FunctionInfo>>
   >

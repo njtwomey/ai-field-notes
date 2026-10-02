@@ -10,6 +10,7 @@ import type { Vector } from 'aifn/foundation/tensor'
 import type { ObjectiveFn, VectorLike } from 'aifn/foundation/contracts'
 import { evaluate } from '../options'
 import { dense } from 'aifn/foundation/tensor'
+import { ShapeError } from 'aifn/foundation/errors'
 
 const { axpy, dot, toF64, vec } = dense
 type F64 = dense.F64
@@ -229,7 +230,7 @@ function start(
 ) {
   const x0 = toF64(x, where)
   const p = toF64(direction, where)
-  if (p.length !== x0.length) throw new Error(`${where}: direction and x differ in length`)
+  if (p.length !== x0.length) throw new ShapeError(where, `${where}: direction and x differ in length`)
   let value = at.value
   let grad = at.grad === undefined ? undefined : toF64(at.grad, where)
   if (value === undefined || grad === undefined) {

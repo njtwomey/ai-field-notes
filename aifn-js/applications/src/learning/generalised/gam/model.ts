@@ -33,6 +33,7 @@ import { termBasis, termGridRows, times, type BuiltTerm, type TermSpec } from '.
 import { gamDesignAt, gamProblem, type GamData, type GamProblem, type GamSpec, type SmoothingMethod } from './problem'
 import { defineModel } from 'aifn/learning/estimators'
 import { int, oneOf, real, space } from 'aifn/foundation/space'
+import { DomainError, ShapeError } from 'aifn/foundation/errors'
 
 export type { GamData, SmoothingMethod } from './problem'
 
@@ -135,7 +136,7 @@ export function gamModel(problem: GamProblem, coefficients: ArrayLike<number>, t
   const { family, link: lk, data } = problem
   const n = A.n
   const beta = Float64Array.from(coefficients)
-  if (beta.length !== A.P) throw new Error(`gamModel: ${beta.length} coefficients for ${A.P} columns`)
+  if (beta.length !== A.P) throw new ShapeError('gamModel', `gamModel: ${beta.length} coefficients for ${A.P} columns`)
   const ev = problem.evaluate(beta)
   const { W } = problem.working(beta)
   const inf = penalisedInference(A, W, problem.penalty, beta)
@@ -165,7 +166,7 @@ export function gamModel(problem: GamProblem, coefficients: ArrayLike<number>, t
   // A term's block of the design on a grid of its own feature(s).
   const termGrid = (j: number, grid: Tensor): { B: F64; m: number } => {
     const t = A.terms[j]
-    if (!t) throw new Error(`gam: no term ${j}`)
+    if (!t) throw new DomainError('gam', `gam: no term ${j}`)
     const { rows, m } = termGridRows(t, grid, A.d)
     return { B: times(t.raw(rows, m, A.d), m, t.rawSize, t.Z, t.size), m }
   }
@@ -196,7 +197,7 @@ export function gamModel(problem: GamProblem, coefficients: ArrayLike<number>, t
   }
   const basis = (j: number, grid: Tensor): GamTermBasis => {
     const t = A.terms[j]
-    if (!t) throw new Error(`gam: no term ${j}`)
+    if (!t) throw new DomainError('gam', `gam: no term ${j}`)
     const b = termBasis(t, grid, A.d)
     const bj = beta.slice(A.offsets[j], A.offsets[j] + t.size)
     const rawBeta = times(t.Z, t.rawSize, t.size, bj, 1)
@@ -240,7 +241,7 @@ export function gamModel(problem: GamProblem, coefficients: ArrayLike<number>, t
   const muT = vec(mu)
   const partialResiduals = (j: number) => {
     const t = A.terms[j]
-    if (!t) throw new Error(`gam: no term ${j}`)
+    if (!t) throw new DomainError('gam', `gam: no term ${j}`)
     const dmu = f64(lk.derivative(eta) as Tensor)
     const out = new Float64Array(n)
     for (let i = 0; i < n; i++) {

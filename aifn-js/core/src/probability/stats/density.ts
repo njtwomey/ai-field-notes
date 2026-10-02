@@ -2,6 +2,7 @@ import { fromData, type Tensor } from 'aifn/foundation/tensor'
 import { allValues, toSequence, vectorOf, type Data } from './input'
 import { requireNonEmpty, requireSameLength, weightedVariance, variance } from './descriptive'
 import { interquartileRange, sortedValues } from './quantile'
+import { DomainError, NumericalError, ShapeError } from 'aifn/foundation/errors'
 
 /**
  * How `histogram` chooses its bins. Every rule gives equal-width bins over [first, last] (the data's min and max, or
@@ -53,23 +54,24 @@ export function histogram(
   let uniform = true
   if (typeof bins === 'object' && !('width' in bins)) {
     edges = Float64Array.from(toSequence(bins, 'histogram edges'))
-    if (edges.length < 2) throw new Error('stats: histogram needs at least two edges')
+    if (edges.length < 2) throw new DomainError('stats', 'stats: histogram needs at least two edges')
     for (let i = 1; i < edges.length; i++)
-      if (!(edges[i] > edges[i - 1])) throw new Error('stats: histogram edges must increase strictly')
+      if (!(edges[i] > edges[i - 1])) throw new DomainError('stats', 'stats: histogram edges must increase strictly')
     uniform = false
   } else {
     let [first, last] = options.range ?? [Infinity, -Infinity]
     if (!options.range) {
       for (let i = 0; i < x.length; i++) {
         // As numpy: without an explicit range, NaN makes the range undefined.
-        if (Number.isNaN(x[i])) throw new Error('stats: histogram range is not finite (the data contain NaN)')
+        if (Number.isNaN(x[i]))
+          throw new DomainError('stats', 'stats: histogram range is not finite (the data contain NaN)')
         if (x[i] < first) first = x[i]
         if (x[i] > last) last = x[i]
       }
       if (x.length === 0) [first, last] = [0, 1]
     }
     if (!Number.isFinite(first) || !Number.isFinite(last) || first > last)
-      throw new Error(`stats: histogram range [${first}, ${last}] is not finite and increasing`)
+      throw new DomainError('stats', `stats: histogram range [${first}, ${last}] is not finite and increasing`)
     // Rules estimate a width from the data inside the range, as numpy does.
     const inside = options.range ? Array.from(x).filter((v) => v >= first && v <= last) : x
     let lowest = Infinity
@@ -86,10 +88,10 @@ export function histogram(
     let count: number
     if (typeof bins === 'number') {
       if (!(bins >= 1) || !Number.isInteger(bins))
-        throw new Error('stats: the number of bins must be a positive integer')
+        throw new DomainError('stats', 'stats: the number of bins must be a positive integer')
       count = bins
     } else if (typeof bins === 'object') {
-      if (!(bins.width > 0)) throw new Error('stats: the bin width must be positive')
+      if (!(bins.width > 0)) throw new DomainError('stats', 'stats: the bin width must be positive')
       count = Math.max(1, Math.ceil((last - first) / bins.width))
       last = first + count * bins.width
     } else {
@@ -200,7 +202,7 @@ export function kdeBandwidth(xData: Data, rule: BandwidthRule = 'scott', weights
   const weights = weightsData === undefined ? undefined : toSequence(weightsData, 'kdeBandwidth')
   requireNonEmpty(x, 'kdeBandwidth')
   if (typeof rule === 'number') {
-    if (!(rule > 0)) throw new Error('stats: a KDE bandwidth must be positive')
+    if (!(rule > 0)) throw new DomainError('stats', 'stats: a KDE bandwidth must be positive')
     return rule
   }
   const n = weights ? importanceSize(weights) : x.length
@@ -275,7 +277,12 @@ function whitened(x: ArrayLike<number>, n: number, d: number, factor: number) {
       let s = cov[a * d + b]
       for (let k = 0; k < b; k++) s -= L[a * d + k] * L[b * d + k]
       if (a === b) {
-        if (!(s > 0)) throw new Error('multivariateKde: the sample covariance is singular (points on a subspace)')
+        if (!(s > 0))
+          throw new NumericalError(
+            'multivariateKde',
+            'multivariateKde: the sample covariance is singular (points on a subspace)',
+            'singular',
+          )
         L[a * d + a] = Math.sqrt(s)
       } else L[a * d + b] = s / L[b * d + b]
     }
@@ -353,7 +360,8 @@ export function multivariateKde(
 ): MultivariateKde {
   const [n, d] = sample.shape
   const [m, dq] = at.shape
-  if (!(n >= 2) || d !== dq) throw new Error('multivariateKde: need an [n, d] sample (n ≥ 2) and [m, d] queries')
+  if (!(n >= 2) || d !== dq)
+    throw new ShapeError('multivariateKde', 'multivariateKde: need an [n, d] sample (n ≥ 2) and [m, d] queries')
   const rule = options.bandwidth ?? 'scott'
   const x = allValues(sample)
   const q = allValues(at)
@@ -365,7 +373,7 @@ export function multivariateKde(
         : rule === 'silverman'
           ? ((n * (d + 2)) / 4) ** (-1 / (d + 4))
           : crossValidatedFactor(x, n, d)
-  if (!(factor > 0)) throw new Error('multivariateKde: the bandwidth factor must be positive')
+  if (!(factor > 0)) throw new DomainError('multivariateKde', 'multivariateKde: the bandwidth factor must be positive')
   const { cov, logNorm, wx, whiten } = whitened(x, n, d, factor)
   const wq = new Float64Array(d)
   const terms = new Float64Array(n)

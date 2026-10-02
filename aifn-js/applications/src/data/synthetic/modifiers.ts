@@ -29,6 +29,7 @@ import { MultivariateNormal, Normal, Uniform } from 'aifn/probability/distributi
 import type { ModifierInfo } from 'aifn/foundation/contracts'
 import { definer } from 'aifn/foundation/registry'
 import { int, oneOf, real, space, when } from 'aifn/foundation/space'
+import { DomainError, ShapeError } from 'aifn/foundation/errors'
 
 /** Metadata fields a modifier sets. */
 type MetaEdit = { -readonly [K in keyof DatasetMeta]?: DatasetMeta[K] }
@@ -168,7 +169,8 @@ export type LabelNoiseOptions = { rate: number } | { matrix: readonly (readonly 
 
 /** The noise matrix of symmetric label noise at `rate` over `k` classes. */
 export function symmetricNoise(rate: number, k: number): number[][] {
-  if (!(rate >= 0 && rate <= 1)) throw new RangeError(`label noise rate must be in [0, 1], got ${rate}`)
+  if (!(rate >= 0 && rate <= 1))
+    throw new DomainError('symmetricNoise', `label noise rate must be in [0, 1], got ${rate}`)
   return Array.from({ length: k }, (_, i) => Array.from({ length: k }, (_, j) => (i === j ? 1 - rate : rate / (k - 1))))
 }
 
@@ -183,11 +185,14 @@ export function withLabelNoise(s: Stream, d: Dataset, options: LabelNoiseOptions
   const k = classCount(d, y)
   const m = 'rate' in options ? symmetricNoise(options.rate, k) : options.matrix.map((r) => [...r])
   if (m.length !== k || m.some((r) => r.length !== k))
-    throw new RangeError(`withLabelNoise: the noise matrix must be ${k} × ${k}`)
+    throw new ShapeError('withLabelNoise', `withLabelNoise: the noise matrix must be ${k} × ${k}`)
   m.forEach((r, i) => {
     const sum = r.reduce((a, b) => a + b, 0)
     if (r.some((v) => !(v >= 0)) || Math.abs(sum - 1) > 1e-9)
-      throw new RangeError(`withLabelNoise: row ${i} of the noise matrix must be a probability vector`)
+      throw new DomainError(
+        'withLabelNoise',
+        `withLabelNoise: row ${i} of the noise matrix must be a probability vector`,
+      )
   })
   const out = new Int32Array(y.length)
   for (let i = 0; i < y.length; i++) {
@@ -240,33 +245,33 @@ export interface PrevalenceOptions {
 
 function targetWeights(target: number | readonly number[], k: number, what: string): number[] {
   if (typeof target === 'number') {
-    if (k !== 2) throw new RangeError(`${what}: a single prevalence needs two classes; give ${k} weights`)
-    if (!(target >= 0 && target <= 1)) throw new RangeError(`${what}: prevalence must be in [0, 1]`)
+    if (k !== 2) throw new DomainError(what, `${what}: a single prevalence needs two classes; give ${k} weights`)
+    if (!(target >= 0 && target <= 1)) throw new DomainError(what, `${what}: prevalence must be in [0, 1]`)
     return [1 - target, target]
   }
-  if (target.length !== k) throw new RangeError(`${what}: ${target.length} weights for ${k} classes`)
+  if (target.length !== k) throw new ShapeError(what, `${what}: ${target.length} weights for ${k} classes`)
   const sum = target.reduce((a, b) => a + b, 0)
-  if (!(sum > 0) || target.some((v) => !(v >= 0))) throw new RangeError(`${what}: weights must be non-negative`)
+  if (!(sum > 0) || target.some((v) => !(v >= 0))) throw new DomainError(what, `${what}: weights must be non-negative`)
   return target.map((v) => v / sum)
 }
 
 function resample(s: Stream, d: Dataset, options: PrevalenceOptions, op: string) {
   const { method = 'subsample' } = options
   const target = options.weights ?? options.prevalence
-  if (target === undefined) throw new RangeError(`${op}: give a prevalence or class weights`)
+  if (target === undefined) throw new DomainError(op, `${op}: give a prevalence or class weights`)
   const y = intLabels(d, op)
   const k = classCount(d, y)
   const pi = targetWeights(target, k, op)
   const have = countsOf(y, k)
   pi.forEach((p, j) => {
-    if (p > 0 && have[j] === 0) throw new RangeError(`${op}: no points of class ${j} to resample`)
+    if (p > 0 && have[j] === 0) throw new DomainError(op, `${op}: no points of class ${j} to resample`)
   })
   let counts: number[]
   if (method === 'subsample') {
     let total = options.n ?? Math.min(...pi.map((p, j) => (p > 0 ? Math.floor(have[j] / p) : Infinity)))
     counts = classCounts(total, pi)
     if (options.n !== undefined && counts.some((c, j) => c > have[j]))
-      throw new RangeError(`${op}: not enough points for n = ${options.n} by subsampling; use method 'oversample'`)
+      throw new DomainError(op, `${op}: not enough points for n = ${options.n} by subsampling; use method 'oversample'`)
     while (counts.some((c, j) => c > have[j])) counts = classCounts(--total, pi)
   } else {
     const total = options.n ?? Math.max(...pi.map((p, j) => (p > 0 ? Math.ceil(have[j] / p) : 0)))
@@ -355,7 +360,8 @@ export interface OutlierOptions {
  */
 export function withOutliers(s: Stream, d: Dataset, options: OutlierOptions): Dataset {
   const { fraction, scale = 4 } = options
-  if (!(fraction >= 0 && fraction <= 1)) throw new RangeError('withOutliers: fraction must be in [0, 1]')
+  if (!(fraction >= 0 && fraction <= 1))
+    throw new DomainError('withOutliers', 'withOutliers: fraction must be in [0, 1]')
   const realTarget = d.y !== undefined && d.y.dtype !== 'int32'
   const target = options.target ?? (realTarget ? 'y' : 'x')
   const [n, dim] = d.x.shape
@@ -452,7 +458,7 @@ export interface NuisanceOptions {
 export function withNuisanceFeatures(s: Stream, d: Dataset, options: NuisanceOptions): Dataset {
   const { count, kind = 'gaussian' } = options
   if (!(Number.isInteger(count) && count >= 0))
-    throw new RangeError('withNuisanceFeatures: count must be an integer ≥ 0')
+    throw new DomainError('withNuisanceFeatures', 'withNuisanceFeatures: count must be an integer ≥ 0')
   const [n, d0] = d.x.shape
   const old = values(d.x)
   const scale = options.scale ?? (columnStats(old, n, d0).sd.reduce((a, b) => a + b, 0) / d0 || 1)
@@ -580,7 +586,8 @@ function transformMatrix(options: TransformOptions, d: number): readonly (readon
   const { rotation = 0, shear = 0, stretch = 1 } = options
   const a: number[][] = Array.from({ length: d }, (_, r) => Array.from({ length: d }, (_, c) => (r === c ? 1 : 0)))
   if (d < 2) {
-    if (rotation !== 0 || shear !== 0) throw new RangeError('withTransform: a rotation or shear needs two features')
+    if (rotation !== 0 || shear !== 0)
+      throw new DomainError('withTransform', 'withTransform: a rotation or shear needs two features')
     a[0][0] = stretch
     return a
   }
@@ -603,9 +610,10 @@ export function withTransform(d: Dataset, options: TransformOptions): Dataset {
   const a = transformMatrix(options, d0)
   const b = options.offset
   const m = a.length
-  if (a.some((row) => row.length !== d0)) throw new RangeError(`withTransform: A must have ${d0} columns`)
+  if (a.some((row) => row.length !== d0))
+    throw new ShapeError('withTransform', `withTransform: A must have ${d0} columns`)
   const offset = b ?? new Array<number>(m).fill(0)
-  if (offset.length !== m) throw new RangeError(`withTransform: b must have length ${m}`)
+  if (offset.length !== m) throw new ShapeError('withTransform', `withTransform: b must have length ${m}`)
   const apply = (src: Float64Array) => {
     const out = new Float64Array(n * m)
     for (let i = 0; i < n; i++)
@@ -707,7 +715,7 @@ export interface MissingOptions {
  */
 export function withMissing(s: Stream, d: Dataset, options: MissingOptions): Dataset {
   const { rate, mechanism = 'mcar', strength = 2, observed = 0 } = options
-  if (!(rate >= 0 && rate <= 1)) throw new RangeError('withMissing: rate must be in [0, 1]')
+  if (!(rate >= 0 && rate <= 1)) throw new DomainError('withMissing', 'withMissing: rate must be in [0, 1]')
   const [n, dim] = d.x.shape
   const x = values(d.x)
   const complete = d.meta.complete ?? d.x
@@ -715,7 +723,8 @@ export function withMissing(s: Stream, d: Dataset, options: MissingOptions): Dat
   const { mean, sd } = columnStats(full, n, dim)
   const z = (i: number, c: number) => (full[i * dim + c] - mean[c]) / (sd[c] || 1)
   const mask = d.meta.missing ? Int32Array.from(values(d.meta.missing)) : new Int32Array(n * dim)
-  if (mechanism === 'mar' && dim < 2) throw new RangeError('withMissing: MAR needs at least two features')
+  if (mechanism === 'mar' && dim < 2)
+    throw new DomainError('withMissing', 'withMissing: MAR needs at least two features')
   for (let c = 0; c < dim; c++) {
     if (mechanism === 'mar' && c === observed) continue
     const r = child(s, 'feature', c)
@@ -769,7 +778,8 @@ export function withCovariateShift(s: Stream, d: Dataset, options: CovariateShif
   const x = values(d.x)
   const { mean, sd } = columnStats(x, n, dim)
   const raw = options.direction ?? [1, ...new Array<number>(dim - 1).fill(0)]
-  if (raw.length !== dim) throw new RangeError(`withCovariateShift: direction must have ${dim} entries`)
+  if (raw.length !== dim)
+    throw new ShapeError('withCovariateShift', `withCovariateShift: direction must have ${dim} entries`)
   const norm = Math.hypot(...raw) || 1
   const u = raw.map((v) => v / norm)
   const projection = (p: Row) => {
@@ -847,7 +857,7 @@ export interface SplitOptions {
  */
 export function split(s: Stream, d: Dataset, options: SplitOptions = {}): { train: Dataset; test: Dataset } {
   const { test = 0.25 } = options
-  if (!(test >= 0 && test <= 1)) throw new RangeError('split: test must be in [0, 1]')
+  if (!(test >= 0 && test <= 1)) throw new DomainError('split', 'split: test must be in [0, 1]')
   const n = d.x.shape[0]
   const labelled = d.y !== undefined && d.y.dtype === 'int32'
   const stratify = options.stratify ?? labelled

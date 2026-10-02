@@ -272,7 +272,8 @@ export const min: Reduction = extreme('min', (a, b) => a < b, 'The smallest elem
 
 /**
  * log Σ exp(x), computed as m + log Σ exp(x − m) with m the maximum so that it neither overflows nor underflows
- * (−∞ when every element is −∞). Its derivative is the softmax of x.
+ * (−∞ when every element is −∞). Its derivative is the softmax of x; a group of −∞ alone has derivative 0, and one
+ * holding +∞ splits it equally among its +∞ entries.
  */
 export const logsumexp: Reduction = reduction(
   'logsumexp',
@@ -293,8 +294,19 @@ export const logsumexp: Reduction = reduction(
       false,
       'logsumexp',
     ),
-  // The derivative is the softmax of x along the reduced axes.
-  (x, y, p) => exp(sub(x, expand(y, x, p))),
+  // The derivative is the softmax of x along the reduced axes. Where a group is entirely −∞ (a fully masked row) the
+  // softmax is 0/0; the subgradient is taken as 0. Where it holds +∞ the derivative goes to the +∞ entries, split
+  // equally (the limit of the softmax). Both branches are kept finite so second derivatives stay finite too.
+  (x, y, p) => {
+    const ye = expand(y, x, p)
+    const up = equalTo(ye, Infinity)
+    const down = equalTo(ye, -Infinity)
+    const finite = (v: Value) => where(up, 0, where(down, 0, v))
+    const soft = exp(sub(finite(x), finite(ye)))
+    const hit = equalTo(x, ye)
+    const share = div(hit, expand(sum(hit, p.axis, true), x, p))
+    return where(down, 0, where(up, share, soft))
+  },
   'log Σ exp(x), without overflow.',
 )
 
@@ -366,7 +378,7 @@ const euclidean: Reduction = reduction(
 /**
  * Vector p-norm of the elements along `axis` (of all elements when omitted, which for a matrix is the Frobenius
  * norm): `ord` = 2 (default; the scaled kernel above, so no overflow and a zero gradient at 0), 1, ∞ (largest |x|),
- * −∞ (smallest |x|), 0 (count of non-zeros) or any p > 0.
+ * −∞ (smallest |x|), 0 (count of non-zeros) or any p > 0. At x = 0 the gradient is 0 for every order p > 1.
  */
 export const norm: Reduction<[ord?: number]> = ((x0: Value, axis?: Axes | null, keepDims = false, ord = 2) => {
   // A complex vector's norms are those of its moduli.
@@ -377,7 +389,11 @@ export const norm: Reduction<[ord?: number]> = ((x0: Value, axis?: Axes | null, 
   if (ord === -Infinity) return min(abs(x), axis, keepDims)
   if (ord === 0) return sum(notEqualTo(x, 0), axis, keepDims)
   if (!(ord > 0)) throw new AifnError('norm', `norm: unsupported order ${ord}`)
-  return pow(sum(pow(abs(x), ord), axis, keepDims), 1 / ord)
+  // (Σ|x|ᵖ)^{1/p}, with the root guarded at 0: its derivative there is ∞ · 0, so the zero group takes the
+  // minimum-norm subgradient 0 instead (for p > 1; for p < 1 |x|ᵖ itself has an infinite slope at 0).
+  const s = sum(pow(abs(x), ord), axis, keepDims)
+  const zero = equalTo(s, 0)
+  return where(zero, 0, pow(where(zero, 1, s), 1 / ord))
 }) as Reduction<[ord?: number]>
 
 type ArgParams = { axis: number | undefined; keepDims: boolean }

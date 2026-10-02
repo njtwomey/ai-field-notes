@@ -12,6 +12,7 @@ import { run } from 'aifn/foundation/trace'
 import type { Algorithm, Scalar, Size } from 'aifn/foundation/contracts'
 import { checkDirection, evaluate, initialState, nextStep, reached } from './explicit'
 import type { FixedStepOptions, InitialValue, JacobianOption, OdeState, Rhs } from './types'
+import { DomainError } from 'aifn/foundation/errors'
 
 const { allFinite, toF64, toMatrixF64 } = dense
 type F64 = dense.F64
@@ -167,7 +168,8 @@ function implicitSolver(f: Rhs, scheme: Scheme, options: ImplicitOptions): Algor
     newtonTolerance: newtonTol = 1e-10,
     maxNewtonSteps: maxNewton = 20,
   } = options
-  if (!(h !== 0 && Number.isFinite(h))) throw new Error(`${scheme.name}: the step size must be finite and non-zero`)
+  if (!(h !== 0 && Number.isFinite(h)))
+    throw new DomainError(scheme.name, `${scheme.name}: the step size must be finite and non-zero`)
   const name = scheme.name
   return {
     name,
@@ -254,6 +256,6 @@ export function implicitTrapezoid(f: Rhs, options: ImplicitOptions): Algorithm<I
  * and BDF2 are A-stable; BDF3 is A(α)-stable with α ≈ 86°.
  */
 export function bdf(f: Rhs, order: 1 | 2 | 3, options: ImplicitOptions): Algorithm<InitialValue, ImplicitState> {
-  if (![1, 2, 3].includes(order)) throw new Error('bdf: the order must be 1, 2 or 3')
+  if (![1, 2, 3].includes(order)) throw new DomainError('bdf', 'bdf: the order must be 1, 2 or 3')
   return implicitSolver(f, bdfScheme(order), options)
 }

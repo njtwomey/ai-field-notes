@@ -25,9 +25,19 @@
  */
 
 import type { Status } from 'aifn/foundation/contracts'
-import { concat, fromData, isTensor, take, toFlat, type Tensor, type VectorLike } from 'aifn/foundation/tensor'
+import {
+  concat,
+  fromData,
+  isTensor,
+  logsumexp,
+  take,
+  toFlat,
+  type Tensor,
+  type VectorLike,
+} from 'aifn/foundation/tensor'
 import type { Algorithm } from 'aifn/foundation/trace'
 import { Bernoulli, NegativeBinomial, Normal, StudentT, type Univariate } from 'aifn/probability/distributions'
+import { DomainError } from 'aifn/foundation/errors'
 
 // ── Protocol ─────────────────────────────────────────────────────────────────────────────────────────────────────────
 
@@ -61,7 +71,8 @@ export type Hazard = number | ((tau: Tensor) => Tensor)
 
 /** The constant hazard of geometric gaps with mean `meanGap` λ: H = 1/λ (Adams and MacKay, §2.1). */
 export function constantHazard(meanGap: number): number {
-  if (!(meanGap >= 1)) throw new RangeError(`constantHazard: the mean gap must be at least 1, got ${meanGap}`)
+  if (!(meanGap >= 1))
+    throw new DomainError('constantHazard', `constantHazard: the mean gap must be at least 1, got ${meanGap}`)
   return 1 / meanGap
 }
 
@@ -99,18 +110,13 @@ export interface BocpdOptions {
   maxRuns?: number
 }
 
-function logSumExp(v: ArrayLike<number>): number {
-  let m = -Infinity
-  for (let i = 0; i < v.length; i++) if (v[i] > m) m = v[i]
-  if (m === -Infinity) return -Infinity
-  let s = 0
-  for (let i = 0; i < v.length; i++) s += Math.exp(v[i] - m)
-  return m + Math.log(s)
-}
+/** log Σ exp(vᵢ) of plain numbers, by the tensor reduction (one definition of the stable form). */
+const logSumExp = (v: ArrayLike<number>): number => logsumexp(fromData(Float64Array.from(v))) as number
 
 function hazards(hazard: Hazard, tau: Float64Array): Float64Array {
   if (typeof hazard === 'number') {
-    if (!(hazard >= 0 && hazard <= 1)) throw new RangeError(`bocpd: the hazard must be in [0, 1], got ${hazard}`)
+    if (!(hazard >= 0 && hazard <= 1))
+      throw new DomainError('bocpd', `bocpd: the hazard must be in [0, 1], got ${hazard}`)
     return new Float64Array(tau.length).fill(hazard)
   }
   return Float64Array.from(toFlat(hazard(fromData(tau))))
@@ -372,7 +378,7 @@ const vec = (v: ArrayLike<number>): Tensor => fromData(Float64Array.from(v))
 const one = (v: number): Tensor => vec([v])
 
 function positive(what: string, v: number): void {
-  if (!(v > 0 && Number.isFinite(v))) throw new RangeError(`${what} must be positive and finite, got ${v}`)
+  if (!(v > 0 && Number.isFinite(v))) throw new DomainError('positive', `${what} must be positive and finite, got ${v}`)
 }
 
 /**
@@ -545,7 +551,8 @@ export function regressionNormalGamma({
   beta?: number
 }): ConjugatePredictive<Regressed, { w: Tensor; V: Tensor; alpha: Tensor; beta: Tensor }> {
   const p = dimension
-  if (!(Number.isInteger(p) && p >= 1)) throw new RangeError(`regressionNormalGamma: dimension must be ≥ 1, got ${p}`)
+  if (!(Number.isInteger(p) && p >= 1))
+    throw new DomainError('regressionNormalGamma', `regressionNormalGamma: dimension must be ≥ 1, got ${p}`)
   positive('regressionNormalGamma: priorScale', priorScale)
   positive('regressionNormalGamma: alpha', alpha)
   positive('regressionNormalGamma: beta', beta)

@@ -20,6 +20,7 @@ import { Mlp, type Layer } from 'aifn/nn/layers'
 import { fullBatchTraining, trainingLoop, treeObjective } from 'aifn/nn/training'
 import { adamRule, sgdRule, type UpdateRule } from 'aifn/optim/first-order'
 import type { LbfgsState } from 'aifn/optim/second-order'
+import { DomainError } from 'aifn/foundation/errors'
 
 /** The optimisers compared, in their fixed order (and colour slots). */
 export const COMPARISON_OPTIMISERS = ['lbfgs', 'gradient-descent', 'adam', 'sgd'] as const
@@ -145,7 +146,7 @@ export function* fullBatchComparison(
     seed = 0,
     checkpoints = 120,
   } = options
-  if (!data.y) throw new Error('fullBatchComparison: the data need targets y')
+  if (!data.y) throw new DomainError('fullBatchComparison', 'fullBatchComparison: the data need targets y')
   const [n, d] = data.x.shape
   const network: ComparisonNetwork = { ...options.network, inputs: d }
   const { model, size } = comparisonModel(network)

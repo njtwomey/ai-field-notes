@@ -15,6 +15,7 @@ import * as probabilistic from './probabilistic'
 import * as ranking from './ranking'
 import * as regression from './regression'
 import * as representation from './representation'
+import { DomainError } from 'aifn/foundation/errors'
 
 const modules = [
   classification,
@@ -47,7 +48,7 @@ export function listMetrics(filter: { inputs?: InputKind; note?: string; capabil
 /** The metric with this key; throws for an unknown key. */
 export function getMetric(key: string): Metric {
   const m = metricRegistry[key]
-  if (!m) throw new Error(`metrics: no metric '${key}'`)
+  if (!m) throw new DomainError('metrics', `metrics: no metric '${key}'`)
   return m
 }
 

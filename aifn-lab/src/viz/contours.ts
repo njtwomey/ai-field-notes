@@ -13,7 +13,12 @@ export function contourSeries(
   field: readonly (readonly number[])[],
   levels: readonly number[],
   mode: Mode,
-  { id = '__contours', color, labels = true }: { id?: string; color?: string; labels?: boolean } = {},
+  {
+    id = '__contours',
+    color,
+    labels = true,
+    width = 1,
+  }: { id?: string; color?: string; labels?: boolean; width?: number } = {},
 ): Record<string, unknown>[] {
   const { ink, surface } = chrome(mode)
   const stroke = color ?? ink
@@ -44,7 +49,7 @@ export function contourSeries(
       showSymbol: false,
       silent: true,
       clip: true,
-      lineStyle: { color: stroke, width: 1 },
+      lineStyle: { color: stroke, width },
       tooltip: { show: false },
       animation: false,
       z: 2,

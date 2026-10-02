@@ -36,10 +36,10 @@ import { fromData, toFlat, toRows, type Tensor } from 'aifn/foundation/tensor'
 import { trace } from 'aifn/foundation/trace'
 import { Player } from '@lab/controls'
 import { ControlRow, Figure } from '@lab/layout'
-import { choice, row, slider, useFigureState } from '@lab/state'
+import { choice, row, slider, toggle, useFigureState } from '@lab/state'
 import { Contours, Curve, Plot, Plots, Points, Raster, Readout, useAxis } from '@lab/viz'
-import { DecisionRegionPanel, formatValue } from '@lab/views'
-import { DATASET_OPTIONS, DATASETS, type DatasetName } from './data'
+import { datasetChoice, DecisionRegionPanel, formatValue } from '@lab/views'
+import { DATASETS } from './data'
 
 // ── A gallery of decision regions ─────────────────────────────────────────────────────────────────────────────────
 
@@ -106,20 +106,41 @@ const CLASSIFIER_OPTIONS = (Object.keys(CLASSIFIERS) as ClassifierName[]).map((v
   label: CLASSIFIERS[value].label,
 }))
 
+/** The classify page's sets: registered generators with typed size and noise (`datasetChoice`). */
+const CLASSIFY_DATA = datasetChoice({
+  blobs: {
+    label: 'three blobs',
+    n: 150,
+    noise: 0.9,
+    knobs: {
+      centers: [
+        [-2, -1],
+        [2, -1],
+        [0, 2],
+      ],
+    },
+  },
+  moons: { label: 'two moons', n: 160, noise: 0.15 },
+  circles: { label: 'two circles', n: 160, noise: 0.08, knobs: { factor: 0.45 } },
+  xor: { label: 'XOR', n: 160, noise: 0.45, knobs: { kind: 'gaussian' } },
+})
+
 export function DecisionRegionsSpecimen() {
   const state = useFigureState({
-    data: row('1 · data', { dataset: choice(DATASET_OPTIONS, 'moons', { label: 'dataset' }) }),
+    data: CLASSIFY_DATA.field({ label: '1 · data', initial: 'moons' }),
     model: row('2 · classifier', { name: choice(CLASSIFIER_OPTIONS, 'knn', { label: 'classifier' }) }),
+    show: row('3 · show', { boundary: toggle(true, 'decision boundaries') }),
     qx: slider(-3, 3, 0.5, { onChart: true }),
     qy: slider(-3, 3, 0.25, { onChart: true }),
   })
-  const dataset = state.data.dataset as DatasetName
+  const dataKey = CLASSIFY_DATA.key(state.data)
   const name = state.model.name as ClassifierName
   const query = useMemo((): [number, number] => [state.qx, state.qy], [state.qx, state.qy])
   const data = useMemo(() => {
-    const d = DATASETS[dataset].make()
+    const d = CLASSIFY_DATA.make(state.data, `lab/classify/${state.data.key}`)
     return { x: d.x, y: d.y!, names: d.meta.labelNames }
-  }, [dataset])
+    // oxlint-disable-next-line react-hooks/exhaustive-deps -- the key changes exactly when the dataset does
+  }, [dataKey])
   const model = useMemo(() => CLASSIFIERS[name].fit(data.x, data.y) as Decider, [name, data])
   // k-NN: ring the query's neighbours. SVM: ring the support vectors of every pairwise machine.
   const overlay = useMemo(() => {
@@ -158,7 +179,7 @@ export function DecisionRegionsSpecimen() {
       state={state}
       defaultSize="L"
       readouts={<Readout label="training accuracy" value={formatValue(accuracy)} />}
-      caption="Drag the query point: its prediction and, where the model has one, its predictive are read out. For k-NN its seven neighbours are ringed; for the SVM, the support vectors of every pairwise machine. Linear models (LDA, the perceptron, Crammer–Singer) cannot follow the moons or circles; trees cut the plane into axis-aligned boxes; boosting and forests smooth those boxes by averaging."
+      caption="Drag the query point: its prediction and, where the model has one, its predictive are read out. For k-NN its seven neighbours are ringed; for the SVM, the support vectors of every pairwise machine. Linear models (LDA, the perceptron, Crammer–Singer) cannot follow the moons or circles; trees cut the plane into axis-aligned boxes; boosting and forests smooth those boxes by averaging. With decision boundaries on, ink lines mark where the decided class changes."
     >
       <DecisionRegionPanel
         model={model}
@@ -170,6 +191,7 @@ export function DecisionRegionsSpecimen() {
           state.set('qy', b)
         }}
         overlay={overlay}
+        boundary={state.show.boundary}
       />
     </Figure>
   )

@@ -2,6 +2,7 @@ import type { Scalar } from 'aifn/foundation/contracts'
 import type { Tensor } from 'aifn/foundation/tensor'
 import { requireNonEmpty, type Along, type Whole } from './descriptive'
 import { allValues, reduce, toSequence, vectorOf, type AxisOption, type Data } from './input'
+import { DomainError } from 'aifn/foundation/errors'
 
 /**
  * The quantile methods of `numpy.quantile`, which are the nine sample quantiles of Hyndman and Fan (1996) plus four
@@ -115,7 +116,7 @@ function quantileSorted(sorted: ArrayLike<number>, q: number, method: QuantileMe
       return (at(Math.floor(k)) + at(Math.ceil(k))) / 2
     }
     default:
-      throw new Error(`stats: unknown quantile method "${method}"`)
+      throw new DomainError('stats', `stats: unknown quantile method "${method}"`)
   }
 }
 
@@ -136,7 +137,8 @@ export type QuantileOptions = { method?: QuantileMethod }
 function quantilesOf(x: ArrayLike<number>, qs: ArrayLike<number>, method: QuantileMethod): Float64Array {
   requireNonEmpty(x, 'quantile')
   for (let i = 0; i < qs.length; i++)
-    if (!(qs[i] >= 0 && qs[i] <= 1)) throw new Error(`stats: quantile probability ${qs[i]} is outside [0, 1]`)
+    if (!(qs[i] >= 0 && qs[i] <= 1))
+      throw new DomainError('stats', `stats: quantile probability ${qs[i]} is outside [0, 1]`)
   const s = Float64Array.from(x).sort()
   const hasNaN = Number.isNaN(s[s.length - 1]) // typed-array sort puts NaN last
   return Float64Array.from(qs, (p) => (hasNaN ? NaN : quantileSorted(s, p, method)))
@@ -160,7 +162,8 @@ export function quantile(
   const options = typeof method === 'string' ? { method } : method
   const m = options.method ?? 'linear'
   if (typeof q !== 'number') {
-    if (options.axis !== undefined) throw new Error('stats: quantile along an axis takes one probability')
+    if (options.axis !== undefined)
+      throw new DomainError('stats', 'stats: quantile along an axis takes one probability')
     return vectorOf(quantilesOf(allValues(x), toSequence(q, 'quantile probabilities'), m))
   }
   return reduce(x, options, (v) => quantilesOf(v, [q], m)[0], 'quantile')

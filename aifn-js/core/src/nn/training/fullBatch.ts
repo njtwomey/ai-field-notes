@@ -13,6 +13,7 @@ import { ravel, type Params } from 'aifn/foundation/pytree'
 import { toFlat, unwrap, type Value } from 'aifn/foundation/tensor'
 import type { Algorithm } from 'aifn/foundation/trace'
 import { methodAlgorithm, type Method, type MethodOptions } from 'aifn/optim/minimize'
+import { DomainError } from 'aifn/foundation/errors'
 
 /** Options of `fullBatchTraining`. */
 export type FullBatchOptions<P extends Params, B, M extends Method = 'lbfgs'> = {
@@ -71,7 +72,7 @@ export function fullBatchTraining<P extends Params, B, M extends Method = 'lbfgs
   }
   // The stopping rule reads only the state's flags, so it comes from the method built on any objective.
   const unused: ObjectiveFn = () => {
-    throw new Error('fullBatchTraining: no objective here')
+    throw new DomainError('fullBatchTraining', 'fullBatchTraining: no objective here')
   }
   const stops = methodAlgorithm(method, unused, methodOptions)
   return {

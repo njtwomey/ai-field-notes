@@ -6,6 +6,7 @@ import { checkCount, type Dataset, generatorRecipe, matrix, vector } from '../ty
 import type { DatasetInfo } from 'aifn/foundation/contracts'
 import { definer } from 'aifn/foundation/registry'
 import { int, oneOf, real, space } from 'aifn/foundation/space'
+import { DomainError } from 'aifn/foundation/errors'
 
 /** The named 1-D regression functions. */
 export type RegressionFunction = 'sine' | 'linear' | 'cubic' | 'step' | 'sinc' | 'bump' | 'doppler'
@@ -53,7 +54,7 @@ export function regression1d(s: Stream, options: Regression1dOptions = {}): Data
   const { n = 50, fn = 'sine', noise = 0.2, spacing = 'random', heteroscedastic = 0 } = options
   checkCount(n, 'regression1d')
   const named = typeof fn === 'string' ? FUNCTIONS[fn] : undefined
-  if (typeof fn === 'string' && !named) throw new RangeError(`regression1d: unknown function ${fn}`)
+  if (typeof fn === 'string' && !named) throw new DomainError('regression1d', `regression1d: unknown function ${fn}`)
   const f = named ? named.f : (fn as (x: number) => number)
   const [lo, hi] = options.range ?? named?.range ?? [0, 1]
   const xs = new Float64Array(n)
@@ -177,7 +178,7 @@ export function linearRegressionData(
 export function friedman1(s: Stream, options: { n?: number; d?: number; noise?: number } = {}): Dataset {
   const { n = 200, d = 10, noise = 1 } = options
   checkCount(n, 'friedman1')
-  if (d < 5) throw new RangeError('friedman1: needs at least five features')
+  if (d < 5) throw new DomainError('friedman1', 'friedman1: needs at least five features')
   const x = new Float64Array(n * d)
   const fx = new Float64Array(n)
   const y = new Float64Array(n)

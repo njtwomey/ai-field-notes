@@ -41,7 +41,10 @@ export type RunResult =
   | { readonly ok: true; readonly value: unknown; readonly output: readonly string[]; readonly ms: number }
   | { readonly ok: false; readonly error: RunError; readonly output: readonly string[]; readonly ms: number }
 
-const HEADER = '"use strict";\n'
+// The program runs inside a block (opened on the header's line, so line numbers are unchanged): its own `const stats`
+// or `let print` then shadows a prelude name instead of colliding with the parameter of the same name.
+const HEADER = '"use strict";{\n'
+const FOOTER = '\n}'
 const ARGS = '__aifnEntryArgs'
 const IDENTIFIER = /^[A-Za-z_$][\w$]*$/
 
@@ -56,7 +59,7 @@ function framePosition(err: unknown): { line: number; column: number } | null {
 /** How many lines the engine puts before the program's first line (measured once, as engines differ). */
 const LINE_OFFSET: number | null = (() => {
   try {
-    new Function('a', `${HEADER}throw new Error('probe')`)(0)
+    new Function('a', `${HEADER}throw new Error('probe')${FOOTER}`)(0)
   } catch (err) {
     const at = framePosition(err)
     if (at) return at.line - 1
@@ -105,7 +108,7 @@ function scope(prelude: Prelude, ctx: Context): Map<string, unknown> {
 export function checkProgram(source: string, prelude: Prelude = corePrelude): RunError | null {
   try {
     const names = [...scope(prelude, { draw: () => rootStream(0), seed: () => {}, log: () => {} }).keys()]
-    new Function(...names, ARGS, `${HEADER}${source}\n`)
+    new Function(...names, ARGS, `${HEADER}${source}${FOOTER}`)
     return null
   } catch (err) {
     return toRunError(err, source.split('\n').length)
@@ -117,7 +120,7 @@ export function checkProgram(source: string, prelude: Prelude = corePrelude): Ru
  * function's value when it returns nothing.
  *
  * @example
- * runProgram('seed(7)\nfunction make(n = 5) { return normal(n) }').value // five seeded normal draws
+ * runProgram('seed(7)\nfunction make(n = 5) { return random.normal(n) }').value // five seeded normal draws
  */
 export function runProgram(source: string, options: RunOptions = {}): RunResult {
   const { seed = 0, prelude = corePrelude, entry = 'make', args = [] } = options
@@ -141,7 +144,7 @@ export function runProgram(source: string, options: RunOptions = {}): RunResult 
     if (entry !== null && !IDENTIFIER.test(entry)) throw new TypeError(`runProgram: '${entry}' is not a function name`)
     const names = scope(prelude, ctx)
     const tail = entry === null ? '' : `\n;return typeof ${entry} === 'function' ? ${entry}(...${ARGS}) : undefined`
-    const program = new Function(...names.keys(), ARGS, `${HEADER}${source}${tail}`)
+    const program = new Function(...names.keys(), ARGS, `${HEADER}${source}${tail}${FOOTER}`)
     const value: unknown = program(...names.values(), args)
     return { ok: true, value, output, ms: ms() }
   } catch (err) {

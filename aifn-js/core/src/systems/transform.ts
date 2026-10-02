@@ -7,8 +7,21 @@
  * Systems", 3rd ed., §6.2 (Tustin); Ogata (2010), "Modern Control Engineering", §2-3 (block-diagram algebra).
  */
 
-import { expm, solveDense } from 'aifn/numerics/linalg'
-import { dense, fromData, type Tensor } from 'aifn/foundation/tensor'
+import { expm, LinAlgError, solve } from 'aifn/numerics/linalg'
+import {
+  add,
+  concat,
+  dense,
+  eye,
+  fromData,
+  mul,
+  shapeOfValue,
+  slice,
+  sub,
+  zeros,
+  type Tensor,
+  type Value,
+} from 'aifn/foundation/tensor'
 import type { LtiSystem, MatrixLike, Scalar, VectorLike } from 'aifn/foundation/contracts'
 import { DomainError, ShapeError } from 'aifn/foundation/errors'
 import {
@@ -30,16 +43,52 @@ const { matMul, identity } = dense
 const addM = (a: ArrayLike<number>, b: ArrayLike<number>, beta = 1) => Float64Array.from(a, (v, i) => v + beta * b[i])
 const scaleM = (a: ArrayLike<number>, k: Scalar) => Float64Array.from(a, (v) => v * k)
 
+/** Discretisation rules: zero-order hold (exact for inputs held over each step), bilinear (Tustin), forward Euler. */
+export type SsmDiscretisation = 'zoh' | 'bilinear' | 'euler'
+
+/** A discrete state-space system x_k = Ā x_{k−1} + B̄ u_k. */
+export type DiscreteSsm = { A: Value; B: Value }
+
+/**
+ * The discretisation of x′ = A x + B u with step Δ (A [N, N], B [N, M]):
+ *
+ * - `zoh`: Ā = e^{ΔA}, B̄ = ∫₀^Δ e^{sA} ds B, both read from one exponential exp(Δ[[A, B], [0, 0]]) = [[Ā, B̄], [0, I]]
+ *   (Van Loan, 1978), so A need not be invertible;
+ * - `bilinear` (Tustin, as S4): Ā = (I − ΔA/2)⁻¹(I + ΔA/2), B̄ = (I − ΔA/2)⁻¹ΔB, which maps the stable half-plane onto
+ *   the unit disc;
+ * - `euler`: Ā = I + ΔA, B̄ = ΔB.
+ *
+ * Differentiable in A, B and Δ (through `expm` and `solve`): the one definition, which `discretise` uses for control
+ * systems and `aifn/nn/sequence` for learned state-space layers.
+ */
+export function discretiseSsm(A: Value, B: Value, step: Value, method: SsmDiscretisation = 'zoh'): DiscreteSsm {
+  const [n] = shapeOfValue(A)
+  const m = shapeOfValue(B)[1]
+  const I = eye(n)
+  if (method === 'euler') return { A: add(I, mul(step, A)), B: mul(step, B) }
+  if (method === 'bilinear') {
+    const half = mul(0.5, mul(step, A))
+    const left = sub(I, half)
+    return { A: solve(left, add(I, half)), B: solve(left, mul(step, B)) }
+  }
+  const top = concat([A, B], 1)
+  const block = mul(step, concat([top, zeros([m, n + m])], 0))
+  const E = expm(block as never).value as Value
+  return { A: slice(E, [0, n], [0, n]), B: slice(E, [0, n], [n, n + m]) }
+}
+
 /** Methods for `discretise`. */
 export type DiscretisationMethod = 'zoh' | 'euler' | 'tustin'
 
 /**
- * A continuous system sampled every `dt`, in state-space form (any representation is realised first):
- * - `zoh` (zero-order hold, exact for piecewise-constant inputs): exp([[A, B], [0, 0]]·dt) = [[A_d, B_d], [0, I]], so
- *   A_d = e^{A dt} and B_d = ∫₀^dt e^{As} ds B (Van Loan, 1978); C and D unchanged.
+ * A continuous system sampled every `dt`, in state-space form (any representation is realised first). A_d and B_d are
+ * {@link discretiseSsm}'s (`tustin` is its `bilinear`):
+ * - `zoh` (zero-order hold, exact for piecewise-constant inputs): A_d = e^{A dt}, B_d = ∫₀^dt e^{As} ds B; C and D
+ *   unchanged.
  * - `euler` (forward difference): A_d = I + A dt, B_d = B dt.
- * - `tustin` (bilinear, s ≈ (2/dt)(z − 1)/(z + 1)): with W = (I − A dt/2)⁻¹, A_d = W(I + A dt/2), B_d = W B dt,
- *   C_d = C W, D_d = D + C W B dt/2 (as scipy's `cont2discrete` with `bilinear`). Stability is preserved.
+ * - `tustin` (bilinear, s ≈ (2/dt)(z − 1)/(z + 1)): with W = (I − A dt/2)⁻¹, A_d = W(I + A dt/2), B_d = W B dt, and
+ *   the output map C_d = C W = C (A_d + I)/2, D_d = D + C B_d/2 (as scipy's `cont2discrete` with `bilinear`). Stability
+ *   is preserved.
  * A delay τ (seconds) becomes τ/dt samples.
  */
 export function discretise(sys: LtiSystem, dt: Scalar, method: DiscretisationMethod = 'zoh'): LtiOf<StateSpaceForm> {
@@ -49,47 +98,33 @@ export function discretise(sys: LtiSystem, dt: Scalar, method: DiscretisationMet
   const n = r.A.shape[0]
   const m = r.B.shape[1]
   const p = r.C.shape[0]
-  const A = dense.data(r.A)
-  const B = dense.data(r.B)
   const C = dense.data(r.C)
   const D = dense.data(r.D)
-  const options = { dt, delay: sys.delay / dt }
-  const build = (Ad: ArrayLike<number>, Bd: ArrayLike<number>, Cd: ArrayLike<number>, Dd: ArrayLike<number>) =>
-    stateSpace({
-      A: fromData(Float64Array.from(Ad), [n, n]),
-      B: fromData(Float64Array.from(Bd), [n, m]),
-      C: fromData(Float64Array.from(Cd), [p, n]),
-      D: fromData(Float64Array.from(Dd), [p, m]),
-      ...options,
-    })
-  if (method === 'euler') return build(addM(identity(n), scaleM(A, dt)), scaleM(B, dt), C, D)
+  let Ad: Float64Array
+  let Bd: Float64Array
+  try {
+    const d = discretiseSsm(r.A, r.B, dt, method === 'tustin' ? 'bilinear' : method)
+    Ad = Float64Array.from(dense.data(d.A as Tensor))
+    Bd = Float64Array.from(dense.data(d.B as Tensor))
+  } catch (e) {
+    if (method === 'tustin' && e instanceof LinAlgError)
+      throw new DomainError('discretise', 'discretise: I − A dt/2 is singular (an eigenvalue of A at 2/dt)')
+    throw e
+  }
+  let Cd: ArrayLike<number> = C
+  let Dd: ArrayLike<number> = D
   if (method === 'tustin') {
-    const lhs = addM(identity(n), scaleM(A, dt / 2), -1)
-    const W = solveDense(lhs, identity(n), n)
-    if (!W.x) throw new DomainError('discretise', 'discretise: I − A dt/2 is singular (an eigenvalue of A at 2/dt)')
-    const Wm = W.x
-    const Bd = scaleM(matMul(Wm, B, n, n, m), dt)
-    return build(
-      matMul(Wm, addM(identity(n), scaleM(A, dt / 2)), n, n, n),
-      Bd,
-      matMul(C, Wm, p, n, n),
-      addM(D, scaleM(matMul(C, Bd, p, n, m), 0.5)),
-    )
+    Cd = scaleM(matMul(C, addM(Ad, identity(n)), p, n, n), 0.5)
+    Dd = addM(D, scaleM(matMul(C, Bd, p, n, m), 0.5))
   }
-  const size = n + m
-  const big = new Float64Array(size * size)
-  for (let i = 0; i < n; i++) {
-    for (let j = 0; j < n; j++) big[i * size + j] = A[i * n + j] * dt
-    for (let j = 0; j < m; j++) big[i * size + n + j] = B[i * m + j] * dt
-  }
-  const E = dense.data(expm(fromData(big, [size, size])).value)
-  const Ad = new Float64Array(n * n)
-  const Bd = new Float64Array(n * m)
-  for (let i = 0; i < n; i++) {
-    for (let j = 0; j < n; j++) Ad[i * n + j] = E[i * size + j]
-    for (let j = 0; j < m; j++) Bd[i * m + j] = E[i * size + n + j]
-  }
-  return build(Ad, Bd, C, D)
+  return stateSpace({
+    A: fromData(Ad, [n, n]),
+    B: fromData(Bd, [n, m]),
+    C: fromData(Float64Array.from(Cd), [p, n]),
+    D: fromData(Float64Array.from(Dd), [p, m]),
+    dt,
+    delay: sys.delay / dt,
+  })
 }
 
 /** The system with state feedback u = −Kx + v: A ← A − BK, C ← C − DK. K is m×n (a vector for one input). */

@@ -436,3 +436,31 @@ describe('review regressions (2026-10-01)', () => {
     expect(toFlat(both as Tensor)).toEqual([3, 5, 8, 10])
   })
 })
+
+describe('subgradients at the edges (review foundation 13, 14)', () => {
+  const finite = (g: Value) => toFlat(g as Tensor) as ArrayLike<number>
+  it('logsumexp: a fully −∞ group has gradient 0, a +∞ group splits it over its +∞ entries', () => {
+    const masked = tensor([
+      [-Infinity, -Infinity, -Infinity],
+      [0, Math.log(3), -Infinity],
+    ])
+    const g = finite(grad((x: Value) => sum(logsumexp(x, 1)))(masked))
+    expect(Array.from(g)).toEqual([0, 0, 0, 0.25, 0.75, 0])
+    const h = finite(grad((x: Value) => sum(logsumexp(x, 1)))(tensor([[Infinity, 1, Infinity]])))
+    expect(Array.from(h)).toEqual([0.5, 0, 0.5])
+    // Second derivatives through the masked row stay finite.
+    const hh = hessian((x: Value) => logsumexp(x))(tensor([-Infinity, -Infinity])) as Tensor
+    expect(Array.from(toFlat(hh)).every(Number.isFinite)).toBe(true)
+  })
+  it('norm: the gradient at 0 is 0 for every order p > 1, and unchanged away from 0', () => {
+    for (const ord of [1.5, 3, 4]) {
+      const g = finite(grad((x: Value) => norm(x, null, false, ord))(tensor([0, 0, 0])))
+      expect(Array.from(g)).toEqual([0, 0, 0])
+      const x = tensor([1, -2, 0.5])
+      const at = finite(grad((v: Value) => norm(v, null, false, ord))(x))
+      const n = (1 + 2 ** ord + 0.5 ** ord) ** (1 / ord)
+      const want = [1, -2, 0.5].map((v) => (Math.sign(v) * Math.abs(v) ** (ord - 1)) / n ** (ord - 1))
+      for (let i = 0; i < 3; i++) expect(at[i]).toBeCloseTo(want[i], 12)
+    }
+  })
+})

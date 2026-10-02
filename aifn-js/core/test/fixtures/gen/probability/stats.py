@@ -1,9 +1,15 @@
-"""Golden values for aifn/stats, from numpy and scipy (direct sums where neither has the function)."""
+"""Golden values for aifn/stats, from numpy and scipy (direct sums where neither has the function), and the minimum
+covariance determinant from scikit-learn (gen/probability/_robust.py)."""
 
+import sys
+from pathlib import Path
 from typing import Any, Literal, Protocol, cast, get_args
 
 import numpy as np
 from scipy import stats
+
+sys.path.insert(0, str(Path(__file__).parent))
+from _robust import mcd_cases
 
 QuantileMethod = Literal[
     "inverted_cdf",
@@ -101,6 +107,7 @@ def cases() -> dict[str, object]:
     other = np.roll(series, 3) + rng.normal(0, 0.5, size=80)
     acov = lagged(series, series, 20)[20:]
     return {
+        "mcd": mcd_cases(),
         "x": x,
         "y": y,
         "w": w,

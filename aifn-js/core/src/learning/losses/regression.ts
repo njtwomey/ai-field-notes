@@ -23,6 +23,7 @@ import {
   type Value,
 } from 'aifn/foundation/tensor'
 import { constant, defineLoss, reduce, type ReductionOptions, type Target } from './core'
+import { DomainError } from 'aifn/foundation/errors'
 
 const regressionInfo = (key: string, name: string, target: string, note = 'regression-losses') =>
   ({ key, name, family: 'regression', inputs: 'values', notes: [note], target }) as const
@@ -93,7 +94,8 @@ export type PinballOptions = ReductionOptions & {
 export const pinball = defineLoss(
   regressionInfo('pinball', 'Pinball (quantile) loss', 'the conditional τ-quantile'),
   (predictions: Value, targets: Target, { reduction, quantile = 0.5 }: PinballOptions = {}): Value => {
-    if (!(quantile > 0 && quantile < 1)) throw new RangeError(`pinball: quantile ${quantile} is not in (0, 1)`)
+    if (!(quantile > 0 && quantile < 1))
+      throw new DomainError('pinball', `pinball: quantile ${quantile} is not in (0, 1)`)
     const r = sub(constant(targets), predictions)
     return reduce(maximum(mul(quantile, r), mul(quantile - 1, r)), reduction)
   },
@@ -118,7 +120,7 @@ export const expectileLoss = defineLoss(
   ),
   (predictions: Value, targets: Target, { reduction, expectile = 0.5 }: ExpectileLossOptions = {}): Value => {
     if (!(expectile > 0 && expectile < 1))
-      throw new RangeError(`expectileLoss: expectile ${expectile} is not in (0, 1)`)
+      throw new DomainError('expectileLoss', `expectileLoss: expectile ${expectile} is not in (0, 1)`)
     const r = sub(constant(targets), predictions)
     const r2 = square(r)
     return reduce(where(less(unwrap(r), 0), mul(1 - expectile, r2), mul(expectile, r2)), reduction)

@@ -13,6 +13,7 @@ import { int, oneOf, real, space } from 'aifn/foundation/space'
 import type { FamilyName, LinkName } from 'aifn/probability/likelihoods'
 import { curve1dTruth, type Curve1dLaw } from '../truth'
 import { checkCount, generatorRecipe, matrix, vector, type Dataset } from '../types'
+import { DomainError } from 'aifn/foundation/errors'
 
 /** The cases of `curve1d`. */
 export type Curve1dCase = 'sine' | 'skewed' | 'counts' | 'binary' | 'gamma'
@@ -69,11 +70,11 @@ export function curve1d(s: Stream, options: Curve1dOptions = {}): Dataset {
   const which = options.case ?? 'sine'
   checkCount(n, 'curve1d')
   const spec = CURVE1D_CASES[which]
-  if (!spec) throw new RangeError(`curve1d: unknown case "${which}"`)
-  if (!(h >= 0)) throw new RangeError('curve1d: heteroscedastic must be non-negative')
+  if (!spec) throw new DomainError('curve1d', `curve1d: unknown case "${which}"`)
+  if (!(h >= 0)) throw new DomainError('curve1d', 'curve1d: heteroscedastic must be non-negative')
   const continuous = which === 'sine' || which === 'skewed'
   const noise = options.noise ?? (which === 'gamma' ? 0.5 : 0.15)
-  if (!(noise > 0)) throw new RangeError('curve1d: the noise must be positive')
+  if (!(noise > 0)) throw new DomainError('curve1d', 'curve1d: the noise must be positive')
   const noiseShape = options.noiseShape ?? (which === 'skewed' ? 'skewed' : 'normal')
   const law: Curve1dLaw = continuous
     ? {

@@ -7,6 +7,7 @@ import type { Column, Dataset, Features, Size, Table } from 'aifn/foundation/con
 import type { Stream } from 'aifn/foundation/random'
 import { copy, isTensor, take, type Tensor } from 'aifn/foundation/tensor'
 import type { TraceOptions } from 'aifn/foundation/trace'
+import { DomainError, ShapeError } from 'aifn/foundation/errors'
 
 // Types defined once, in `aifn/foundation/contracts`.
 export type { Column, Dataset, DatasetMeta, Features, Table } from 'aifn/foundation/contracts'
@@ -61,17 +62,17 @@ export type DataOf<E> = E extends { fit(data: infer D, ...rest: never[]): unknow
 /** Number of rows of a tensor (its first axis), label list or table (all columns must agree). */
 export function rowCount(x: Features | Column): Size {
   if (isTensor(x)) {
-    if (x.shape.length === 0) throw new Error('rowCount: a scalar has no rows')
+    if (x.shape.length === 0) throw new ShapeError('rowCount', 'rowCount: a scalar has no rows')
     return x.shape[0]
   }
   if (Array.isArray(x)) return x.length
   let n = -1
   for (const [name, column] of Object.entries(x as Table)) {
     const m = rowCount(column)
-    if (n >= 0 && m !== n) throw new Error(`rowCount: column "${name}" has ${m} rows, others ${n}`)
+    if (n >= 0 && m !== n) throw new ShapeError('rowCount', `rowCount: column "${name}" has ${m} rows, others ${n}`)
     n = m
   }
-  if (n < 0) throw new Error('rowCount: a table with no columns')
+  if (n < 0) throw new DomainError('rowCount', 'rowCount: a table with no columns')
   return n
 }
 

@@ -19,7 +19,7 @@
  */
 
 import type { Algorithm, Status } from 'aifn/foundation/contracts'
-import { ShapeError } from 'aifn/foundation/errors'
+import { DomainError, ShapeError } from 'aifn/foundation/errors'
 import { dense, fromData, type Matrix, type Tensor, type Vector } from 'aifn/foundation/tensor'
 import { solveDense } from 'aifn/numerics/linalg'
 import type { TiltedFn } from './ep'
@@ -197,7 +197,7 @@ export function multivariateExpectationPropagation(
   }
   const p: Problem = { d, n, mu0, S0, A, priorShift, priorQuad }
   const damping = o.damping ?? 0
-  if (!(damping >= 0 && damping < 1)) throw new RangeError(`${where}: damping must be in [0, 1)`)
+  if (!(damping >= 0 && damping < 1)) throw new DomainError(where, `${where}: damping must be in [0, 1)`)
   const power = o.power ?? 1
   const order = [...(o.order ?? Array.from({ length: n }, (_, i) => i))]
   const tolerance = o.tolerance ?? 1e-8

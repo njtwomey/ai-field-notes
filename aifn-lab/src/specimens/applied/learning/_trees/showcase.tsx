@@ -29,7 +29,7 @@ import { useMemo, useState, type ReactNode } from 'react'
 import { Player } from '@lab/controls'
 import { MathText } from '@lab/diagram'
 import { Dashboard, DashboardCell, DashboardRow, Figure } from '@lab/layout'
-import { choice, row, slider, useFigureState, type FigureState } from '@lab/state'
+import { choice, row, slider, toggle, useFigureState, usePinned, type FigureState } from '@lab/state'
 import {
   Annotation,
   Bars,
@@ -146,6 +146,7 @@ const selection = (lower: readonly number[], upper: readonly number[]) => ({
   node: slider(0, 4000, 0, { step: 1, onChart: true }),
   qx: slider(lower[0], upper[0], (lower[0] + upper[0]) / 2, { step: 0.01, onChart: true }),
   qy: slider(lower[1], upper[1], (lower[1] + upper[1]) / 2, { step: 0.01, onChart: true }),
+  boundary: toggle(true, 'decision boundaries'),
 })
 type SelectionState = FigureState<ReturnType<typeof selection>>
 
@@ -216,6 +217,18 @@ function useFocus(
   const chosen = pick === 'node' && node < tree.nodes.length && within(node) ? node : null
   const focus = path ? path.leaf : (chosen ?? fallback)
   return { path, chosen, focus }
+}
+
+/** Click a node to pin it, again or Escape to unpin: the shared hover-and-pin helper over the figure's pick. */
+function useNodePin(figure: SelectionState) {
+  const pins = usePinned(figure.pick === 'node' ? figure.node : -1, (v) => {
+    if (v < 0) figure.set('pick', 'none')
+    else {
+      figure.set('node', v)
+      figure.set('pick', 'node')
+    }
+  })
+  return pins.toggle
 }
 
 // ── The scatter: decision regions, the focus node's region, the query point ─────────────────────────────────────
@@ -303,6 +316,7 @@ function Scatter({
         scale="categorical"
         fillOpacity={0.22}
         categoryNames={data.names}
+        boundary={figure.boundary}
       />
       {focusBox && (
         <Bars
@@ -315,22 +329,19 @@ function Scatter({
           opacity={0.22}
         />
       )}
-      {/* Always mounted (empty without a guide), so hovering patches one live layer instead of adding and removing it. */}
-      <Segments
-        segments={
-          guide && focusBox
-            ? [
-                guide.feature === 0
-                  ? { from: [guide.threshold, focusBox.lower[1]], to: [guide.threshold, focusBox.upper[1]] }
-                  : { from: [focusBox.lower[0], guide.threshold], to: [focusBox.upper[0], guide.threshold] },
-              ]
-            : []
-        }
-        emphasis
-        width={2}
-        dashed
-        live
-      />
+      {guide && focusBox && (
+        <Segments
+          segments={[
+            guide.feature === 0
+              ? { from: [guide.threshold, focusBox.lower[1]], to: [guide.threshold, focusBox.upper[1]] }
+              : { from: [focusBox.lower[0], guide.threshold], to: [focusBox.upper[0], guide.threshold] },
+          ]}
+          emphasis
+          width={2}
+          dashed
+          live
+        />
+      )}
       {layers.map((l) => (
         <Segments key={l.id} segments={rect(box(l.id))} emphasis={l.last} width={l.width} dashed={!l.last} />
       ))}
@@ -525,10 +536,7 @@ function GrowFigure() {
   const ax0 = useAxis({ label: 'x₀', hold: 'initial', key: name })
   const ax1 = useAxis({ label: 'x₁', hold: 'initial', key: name, equal: ax0 })
   const axes = useSplitAxes(name, data.names)
-  const select = (v: number) => {
-    figure.set('node', v)
-    figure.set('pick', 'node')
-  }
+  const select = useNodePin(figure)
   const band =
     path !== null
       ? explainPath(tree, path, data.names)
@@ -559,10 +567,11 @@ function GrowFigure() {
       }}
       caption={
         <>
-          Points keep their true class&apos;s colour; circles are classified correctly by the tree at this step and
-          squares wrongly. Play the growth one node at a time. The band explains the step: every feature&apos;s best
-          threshold and its decrease, the largest taken, or why a node stops. Click a node (or use Tab and the arrow
-          keys) to see its region, the intersection of its ancestors&apos; half-spaces, and its split criterion. Click
+          Points keep their true class&apos;s colour; with decision boundaries on, ink lines separate the predicted
+          classes; circles are classified correctly by the tree at this step and squares wrongly. Play the growth one
+          node at a time. The band explains the step: every feature&apos;s best threshold and its decrease, the largest
+          taken, or why a node stops. Click a node (or use Tab and the arrow keys) to see its region, the intersection
+          of its ancestors&apos; half-spaces, and its split criterion; click it again or press Escape to unpin. Click
           the scatter to drop a query point (then drag it) and follow its decision path. Without a leaf budget every
           expansion order ends in the same tree, since each split depends only on its own node&apos;s rows; with a
           budget, best-first spends it on the splits that decrease impurity most.
@@ -681,10 +690,7 @@ function PruneFigure() {
     return { x, train: hold(errors.train), valid: hold(errors.valid) }
   }, [ccp, last, top, errors])
   const alpha = ccp.alphas[k]
-  const select = (v: number) => {
-    figure.set('node', v)
-    figure.set('pick', 'node')
-  }
+  const select = useNodePin(figure)
   const onAlpha = (a: number) =>
     setStep(
       Math.max(

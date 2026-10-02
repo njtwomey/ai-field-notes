@@ -11,6 +11,7 @@ import type { Features, FitOptions, ServedMetric } from 'aifn/learning/estimator
 import { ranks as rankData } from 'aifn/probability/stats'
 import { crossValidate, type CrossValidation, type CrossValidationData, type Fittable } from './cross'
 import type { Splitter } from './splitters'
+import { DomainError } from 'aifn/foundation/errors'
 
 /** One row of a search's results table. */
 export interface SearchRow<P> {
@@ -83,7 +84,7 @@ function makeSearch<P, M>(
   metrics: readonly ServedMetric[],
   refit: boolean,
 ): Search<P, M> {
-  if (metrics.length === 0) throw new Error(`${name}: needs at least one metric`)
+  if (metrics.length === 0) throw new DomainError(name, `${name}: needs at least one metric`)
   const metric = metrics[0]
   const search: Search<P, M> = {
     name,
@@ -133,7 +134,7 @@ function makeSearch<P, M>(
         name: `${name} with ${splitter.name}`,
         fit(data, options: FitOptions = {}) {
           const result = search.run(data, splitter, options.stream)
-          if (!result.model) throw new Error(`${name}: an estimator needs refit`)
+          if (!result.model) throw new DomainError(name, `${name}: an estimator needs refit`)
           return { ...(result.model as object), search: result, params: result.best.params } as SearchModel<P, M>
         },
       }
@@ -180,7 +181,7 @@ export function randomSearch<const S extends Space, M>(
   }: { metrics: readonly ServedMetric[]; iterations?: number; refit?: boolean },
 ): Search<ValuesOf<S>, M> {
   const candidates = (s?: Stream) => {
-    if (!s) throw new Error('randomSearch: needs a stream')
+    if (!s) throw new DomainError('randomSearch', 'randomSearch: needs a stream')
     return Array.from({ length: iterations }, (_, k) => sample(child(s, 'candidate', k), space as Space) as ValuesOf<S>)
   }
   return makeSearch('random-search', make as (p: ValuesOf<S>) => Fittable<Features, M>, candidates, metrics, refit)

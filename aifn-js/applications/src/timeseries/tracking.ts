@@ -5,6 +5,7 @@
  */
 
 import type { StateSpaceModel } from 'aifn/inference/filtering'
+import { ShapeError } from 'aifn/foundation/errors'
 
 /** Options of `constantVelocityModel`. */
 export type ConstantVelocityOptions = {
@@ -58,6 +59,10 @@ export function constantVelocityModel(options: ConstantVelocityOptions = {}): St
     Array.from({ length: dim }, (_, j) => (i === j ? measurementStd ** 2 : 0)),
   )
   const m0 = options.initialMean ? [...options.initialMean] : new Array<number>(n).fill(0)
-  if (m0.length !== n) throw new Error(`constantVelocityModel: initialMean has ${m0.length} values for a state of ${n}`)
+  if (m0.length !== n)
+    throw new ShapeError(
+      'constantVelocityModel',
+      `constantVelocityModel: initialMean has ${m0.length} values for a state of ${n}`,
+    )
   return { A, C, Q, R, m0, P0 }
 }

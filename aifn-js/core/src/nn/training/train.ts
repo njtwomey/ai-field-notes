@@ -24,6 +24,7 @@ import {
   globalNorm,
   type UpdateRule,
 } from 'aifn/optim/first-order'
+import { DomainError, ShapeError } from 'aifn/foundation/errors'
 
 /** A dataset: named tensors whose first axis indexes the examples (all the same length), e.g. `{ x, y }`. */
 export type Batch = Record<string, Tensor>
@@ -84,10 +85,11 @@ function examplesOf(data: Batch): Size {
   let n = -1
   for (const [name, t] of Object.entries(data)) {
     const m = t.shape[0]
-    if (n >= 0 && m !== n) throw new Error(`trainingLoop: data field '${name}' has ${m} rows, expected ${n}`)
+    if (n >= 0 && m !== n)
+      throw new ShapeError('trainingLoop', `trainingLoop: data field '${name}' has ${m} rows, expected ${n}`)
     n = m
   }
-  if (n <= 0) throw new Error('trainingLoop: the data has no examples')
+  if (n <= 0) throw new DomainError('trainingLoop', 'trainingLoop: the data has no examples')
   return n
 }
 

@@ -17,6 +17,7 @@ import { fromData, toFlat, type Tensor } from 'aifn/foundation/tensor'
 import type { Estimator, Scores } from 'aifn/learning/estimators'
 import type { LogitsFn } from 'aifn/nn/decoding'
 import type { Vocabulary } from 'aifn/text/vocabulary'
+import { DomainError } from 'aifn/foundation/errors'
 
 /** A corpus as token ids over a vocabulary. */
 export type TokenCorpus = { readonly ids: readonly number[]; readonly vocabulary: Vocabulary }
@@ -83,7 +84,7 @@ export type KneserNeyOptions = {
 /** An interpolated Kneser–Ney n-gram language model, fitted by counting a token corpus. */
 export function kneserNey(options: KneserNeyOptions = {}): Estimator<TokenCorpus, KneserNeyModel> {
   const { order = 3, modified = false } = options
-  if (!(order >= 1)) throw new Error(`kneserNey: order ${order} must be at least 1`)
+  if (!(order >= 1)) throw new DomainError('kneserNey', `kneserNey: order ${order} must be at least 1`)
   return {
     name: 'kneser-ney',
     params: { order, modified },

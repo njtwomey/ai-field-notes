@@ -18,13 +18,14 @@ import { definer } from 'aifn/foundation/registry'
 import { bool, domainSize, int, real, space } from 'aifn/foundation/space'
 import { fromData, type Tensor } from 'aifn/foundation/tensor'
 import { isActive, type MdpTables, type PolicyInput } from '../mdp'
+import { DomainError, ShapeError } from 'aifn/foundation/errors'
 
 // ── Shared pieces ────────────────────────────────────────────────────────────────────────────────────────────────────
 
 /** The number of observations and actions of an environment with discrete domains. */
 function sizes(env: EnvironmentShape): { S: number; A: number } {
   if (env.observation.kind !== 'discrete' || env.action.kind !== 'discrete')
-    throw new RangeError('tabular agents need discrete observations and actions')
+    throw new DomainError('sizes', 'tabular agents need discrete observations and actions')
   return { S: domainSize(env.observation), A: domainSize(env.action) }
 }
 
@@ -327,7 +328,7 @@ export interface TdPredictionState {
 function policyTable(policy: PolicyInput, S: number, A: number): Float64Array {
   const v = 'shape' in policy ? Array.from(policy.data) : [...policy]
   if (v.length === S * A) return Float64Array.from(v)
-  if (v.length !== S) throw new RangeError(`policy: expected ${S} actions or ${S} × ${A} probabilities`)
+  if (v.length !== S) throw new ShapeError('policy', `policy: expected ${S} actions or ${S} × ${A} probabilities`)
   const pi = new Float64Array(S * A)
   for (let s = 0; s < S; s++) if (v[s] >= 0) pi[s * A + v[s]] = 1
   return pi

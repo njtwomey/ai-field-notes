@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
 import { stream } from 'aifn/foundation/random'
 import type { Trace } from 'aifn/foundation/trace'
 import {
@@ -24,7 +24,19 @@ import {
 } from 'aifn-applied/text/tokenisers'
 import { Button, Player } from '@lab/controls'
 import { Columns, ControlRow, Figure } from '@lab/layout'
-import { call, choice, int, setting, slider, useFigureState, when, type Task } from '@lab/state'
+import {
+  call,
+  choice,
+  packPair,
+  pinField,
+  setting,
+  slider,
+  unpackPair,
+  useFigureState,
+  usePinned,
+  when,
+  type Task,
+} from '@lab/state'
 import { Textarea } from '@lab/ui/textarea'
 import { formatValue, TrainControls, useTrainedRun } from '@lab/views'
 import { Bars, Curve, Plot, Plots, Points, Readout, useAxis } from '@lab/viz'
@@ -80,34 +92,20 @@ export function TokenisersComparedSpecimen() {
     lowercaseWords: setting(false, 'lower-case words'),
     dropout: setting(false, 'BPE-dropout'),
     p: slider(0.05, 0.6, 0.2, { label: 'dropout p', step: 0.05, when: when('dropout', true) }),
-    // The pinned span of the text (−1: none); no control, kept in the URL so a link reproduces it.
-    pinStart: int(-1, { min: -1, max: 1e6, when: () => false }),
-    pinEnd: int(-1, { min: -1, max: 1e6, when: () => false }),
+    // The pinned span of the text (start and end packed into one), kept in the URL so a link reproduces it.
+    pin: pinField(),
   })
   const { corpus, vocabularySize: size, pattern, splitDigits, wordMinCount, lowercaseWords, dropout, p } = state
   const [text, setText] = useState(DEFAULT_TEXT)
   const [seed, setSeed] = useState(0)
-  const [hover, setHover] = useState<Span | null>(null)
-  const pinned: Span | null =
-    state.pinStart >= 0 && state.pinEnd >= state.pinStart ? [state.pinStart, state.pinEnd] : null
-  const setPin = (span: Span | null) => {
-    state.set('pinStart', span ? span[0] : -1)
-    state.set('pinEnd', span ? span[1] : -1)
-  }
-  // Click pins (again: unpins); hovering previews and falls back to the pin.
-  const pin = (span: Span) => setPin(pinned && pinned[0] === span[0] && pinned[1] === span[1] ? null : span)
-  const hot = hover ?? pinned
-  useEffect(() => {
-    const onKey = (ev: KeyboardEvent) => {
-      if (ev.key === 'Escape') {
-        state.set('pinStart', -1)
-        state.set('pinEnd', -1)
-      }
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-    // oxlint-disable-next-line react-hooks/exhaustive-deps -- `state.set` is stable
-  }, [])
+  // Hover previews a span; click pins it (again, empty space or Escape: unpins).
+  const pins = usePinned(state.pin, (v) => state.set('pin', v))
+  const asSpan = (v: number | null): Span | null => (v === null ? null : unpackPair(v))
+  const pinned = asSpan(pins.pinned)
+  const hot = asSpan(pins.focus)
+  const setHover = (span: Span | null) => pins.hover(span ? packPair(span[0], span[1]) : null)
+  const pin = (span: Span) => pins.toggle(packPair(span[0], span[1]))
+  const unpin = () => pins.clear()
   const settings: SuiteSettings = {
     corpus: corpus as CorpusChoice,
     typed: corpus === 'your text' ? text : '',
@@ -160,7 +158,7 @@ export function TokenisersComparedSpecimen() {
                 )
               }
             />
-            <div className="col-span-full flex flex-col gap-2" onClick={() => setPin(null)}>
+            <div className="col-span-full flex flex-col gap-2" onClick={unpin}>
               <Textarea
                 aria-label="text to tokenise"
                 value={text}
@@ -206,7 +204,7 @@ export function TokenisersComparedSpecimen() {
         }
       >
         <Body>
-          <div className="flex flex-col gap-3" onClick={() => setPin(null)}>
+          <div className="flex flex-col gap-3" onClick={unpin}>
             {!rows ? (
               <div className="py-6 text-center text-sm text-muted-foreground">
                 Press Train: the eight tokenisers are trained on the corpus, then cut the text above.

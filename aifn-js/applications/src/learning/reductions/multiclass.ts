@@ -35,6 +35,7 @@ import { classLabels, classPredictive, matrix, softmaxRows, values } from '../ut
 import { child, integers, uniform } from 'aifn/foundation/random'
 import { defineModel } from 'aifn/learning/estimators'
 import { oneOf, space } from 'aifn/foundation/space'
+import { DomainError, ShapeError } from 'aifn/foundation/errors'
 
 /** A fitted binary model with a real-valued margin. */
 export type BinaryModel = { score?(x: Tensor): Tensor; forward?(x: Tensor): Tensor; predictive?(x: Tensor): unknown }
@@ -47,9 +48,10 @@ export type BinaryEstimator<M extends BinaryModel = BinaryModel> = {
 /** The margin [m] of a binary model (from `score`, else `forward`). */
 function margin(model: BinaryModel, x: Tensor): Float64Array {
   const f = model.score ?? model.forward
-  if (!f) throw new Error('multiclass: the binary model needs score or forward')
+  if (!f) throw new DomainError('multiclass', 'multiclass: the binary model needs score or forward')
   const s = f.call(model, x)
-  if (s.shape.length !== 1) throw new Error('multiclass: the binary model must give one margin per row, [m]')
+  if (s.shape.length !== 1)
+    throw new ShapeError('multiclass', 'multiclass: the binary model must give one margin per row, [m]')
   return values(s)
 }
 
@@ -247,7 +249,7 @@ export function outputCode<M extends BinaryModel>(
       if (c[k * L + l] > 0) pos = true
       if (c[k * L + l] < 0) neg = true
     }
-    if (!pos || !neg) throw new Error(`outputCode: column ${l} needs both a +1 and a −1 class`)
+    if (!pos || !neg) throw new DomainError('outputCode', `outputCode: column ${l} needs both a +1 and a −1 class`)
   }
   return {
     name: 'output-code',
@@ -255,7 +257,7 @@ export function outputCode<M extends BinaryModel>(
     fit({ x, y }, options: FitOptions = {}) {
       const { n } = matrix(x, 'outputCode')
       const { y: labels, k } = classLabels(y, n, 'outputCode')
-      if (k > K) throw new Error(`outputCode: labels reach ${k - 1} but the code has ${K} rows`)
+      if (k > K) throw new DomainError('outputCode', `outputCode: labels reach ${k - 1} but the code has ${K} rows`)
       const models = fitCode(base, x, labels, c, L, options)
       const distances = (q: Tensor) => {
         const m = q.shape[0]
@@ -326,7 +328,7 @@ export function oneVersusOneCode(K: number): Tensor {
  * 2^(K−1) − 1 columns, with class 0 always +1. Any two rows differ in 2^(K−2) columns.
  */
 export function exhaustiveCode(K: number): Tensor {
-  if (K < 2 || K > 16) throw new Error('exhaustiveCode: K must be between 2 and 16')
+  if (K < 2 || K > 16) throw new DomainError('exhaustiveCode', 'exhaustiveCode: K must be between 2 and 16')
   const L = 2 ** (K - 1) - 1
   const out = new Float64Array(K * L)
   for (let r = 0; r < K; r++) {
@@ -454,7 +456,7 @@ export function nestedDichotomies<M extends BinaryModel>(
           .sort((a, b) => a - b)
           .join() !== Array.from({ length: K }, (_, k) => k).join()
       ) {
-        throw new Error('nestedDichotomies: the tree must contain every class exactly once')
+        throw new DomainError('nestedDichotomies', 'nestedDichotomies: the tree must contain every class exactly once')
       }
       const models: M[] = []
       const fitNode = (node: Dichotomy) => {

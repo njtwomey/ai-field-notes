@@ -55,6 +55,7 @@ import {
 } from 'aifn/nn/experts'
 import { xavierUniform } from 'aifn/nn/init'
 import { Linear, linear, Mlp, type Context, type Layer, type LinearParams } from 'aifn/nn/layers'
+import { DomainError } from 'aifn/foundation/errors'
 
 /** The experts' form. */
 export type ExpertKind = 'linear' | 'mlp'
@@ -112,7 +113,7 @@ export function moeSpec(config: MoeConfig): MoeSpec {
     ...config,
   }
   if (spec.gate === 'hierarchical' && spec.experts % spec.groups !== 0)
-    throw new RangeError(`moeSpec: ${spec.experts} experts do not split into ${spec.groups} equal groups`)
+    throw new DomainError('moeSpec', `moeSpec: ${spec.experts} experts do not split into ${spec.groups} equal groups`)
   return spec
 }
 

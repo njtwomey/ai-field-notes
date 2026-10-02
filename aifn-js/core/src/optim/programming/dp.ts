@@ -1,9 +1,7 @@
 /**
  * Dynamic programming over tables (Bellman, 1957, "Dynamic Programming"): a generic table-filling algorithm that a
- * figure can step row by row, and the classical instances built on it: 0/1 and unbounded knapsack, longest common
- * subsequence, edit distance (Wagner and Fischer, 1974, J. ACM 21(1)), and global and local sequence alignment
- * (Needleman and Wunsch, 1970, J. Mol. Biol. 48(3); Smith and Waterman, 1981, J. Mol. Biol. 147(1)), each with its
- * traceback.
+ * figure can step row by row. The sequence programmes built on it (longest common subsequence, edit distance, global
+ * and local alignment) are in `sequences.ts`; the knapsacks in `aifn-applied/algorithms/dynamic-programming`.
  */
 
 import type { Tensor } from 'aifn/foundation/tensor'

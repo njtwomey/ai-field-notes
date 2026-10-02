@@ -10,6 +10,7 @@
 import { multivariateKde } from 'aifn/probability/stats'
 import { toFlat, type Tensor } from 'aifn/foundation/tensor'
 import { mixtureLogDensityOf, modeOf, type LabelledDensity } from '../densities'
+import { DomainError } from 'aifn/foundation/errors'
 
 /** Mode coverage of a set of generated points. */
 export type ModeCoverage = {
@@ -49,7 +50,7 @@ export function modeCoverage(model: LabelledDensity, samples: Tensor, options: M
   let threshold: number
   if (typeof spec === 'number') threshold = spec
   else {
-    if (!options.real) throw new Error('modeCoverage: a quantile threshold needs the real points')
+    if (!options.real) throw new DomainError('modeCoverage', 'modeCoverage: a quantile threshold needs the real points')
     const ref = Array.from(mixtureLogDensityOf(model, options.real)).sort((a, b) => a - b)
     threshold = ref[Math.min(ref.length - 1, Math.max(0, Math.floor(spec.quantile * ref.length)))]
   }

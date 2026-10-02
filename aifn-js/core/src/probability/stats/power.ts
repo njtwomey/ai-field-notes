@@ -9,6 +9,7 @@ import { EPS, map, type Tensor } from 'aifn/foundation/tensor'
 import { allValues, type Data } from './input'
 import { varianceOf } from './descriptive'
 import { minimizeScalar } from 'aifn/numerics/roots'
+import { DomainError } from 'aifn/foundation/errors'
 
 /** Below this |λ| (or |λ − 2| for Yeo–Johnson's negative branch) the logarithmic limit is used, as scikit-learn does. */
 // Below this |λ| the transforms switch to their λ → 0 (or λ → 2) limits.
@@ -82,7 +83,7 @@ export type PowerLambda = {
  */
 export function boxCoxLambda(x: Data): PowerLambda {
   const v = Float64Array.from(allValues(x))
-  if (v.some((a) => !(a > 0))) throw new Error('boxCoxLambda: Box–Cox needs positive data')
+  if (v.some((a) => !(a > 0))) throw new DomainError('boxCoxLambda', 'boxCoxLambda: Box–Cox needs positive data')
   let sumLog = 0
   for (const a of v) sumLog += Math.log(a)
   const n = v.length

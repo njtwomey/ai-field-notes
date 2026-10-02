@@ -2,9 +2,9 @@
  * `aifn-applied/data/synthetic`: seeded synthetic datasets: points (blobs, moons, circles, spirals, …), regression,
  * 2-d densities for generative models (ring and grid of Gaussians, pinwheel, Swiss-roll slice, annulus), inverse
  * problems with multi-valued answers (Bishop's folded sine, two-link arm kinematics),
- * sequences, piecewise series with known changepoints, images, paired views (image and caption) and recommender
- * interactions; and modifiers (noise, outliers, shifts, missingness, linear maps). Recipes, which replay generators
- * and modifiers by key, are in `aifn-applied/data`.
+ * sequences, piecewise series with known changepoints, learners with zero-inflated responses, images, paired views
+ * (image and caption) and recommender interactions; and modifiers (noise, outliers, shifts, missingness, linear maps).
+ * Recipes, which replay generators and modifiers by key, are in `aifn-applied/data`.
  */
 
 export {
@@ -63,12 +63,15 @@ export {
   arSeries,
   casino,
   hmmSample,
+  motifSeries,
   randomWalk,
   seasonalSeries,
   type ArOptions,
   type CasinoOptions,
   type DiscreteHmm,
   type HmmSample,
+  type MotifSeries,
+  type MotifSeriesOptions,
   type SeasonalOptions,
   type TimeSeries,
 } from './sequences'
@@ -85,15 +88,42 @@ export {
 } from './changepoints'
 export {
   clickLog,
+  implicitFeedback,
   ratings,
   zipfCatalogue,
   zipfWeights,
   type ClickLog,
   type ClickLogOptions,
+  type ImplicitFeedback,
+  type ImplicitFeedbackOptions,
   type Ratings,
   type RatingsOptions,
   type ZipfCatalogue,
 } from './recsys'
+export {
+  banditProblem,
+  expertGame,
+  logBandit,
+  loggedBandit,
+  slateBandit,
+  type BanditLogDraw,
+  type BanditOptions,
+  type BanditProblem,
+  type ExpertGame,
+  type ExpertGameOptions,
+  type LoggedBandit,
+  type SlateBandit,
+  type SlateBanditOptions,
+} from './bandits'
+export {
+  classifierOutputs,
+  quantileModelOutputs,
+  type ClassifierOutputs,
+  type ClassifierOutputsOptions,
+  type QuantileModelOptions,
+  type QuantileModelOutputs,
+} from './predictions'
+export { ehrenfestChain, gamblersRuinChain, randomWalkChain, weatherChain, type NamedChain } from './chains'
 export {
   interleavedFunctions,
   piecewiseLinear,
@@ -114,7 +144,42 @@ export {
   type BishopInverseOptions,
   type TwoLinkArmOptions,
 } from './inverse'
-export { barsAndStripes, checkerboardImage, digitGlyphs, digits, gradientImage, shapesImage } from './images'
+export {
+  barsAndStripes,
+  checkerboardImage,
+  digitGlyphs,
+  digits,
+  geometricScene,
+  gradientImage,
+  shapesImage,
+  type GeometricScene,
+} from './images'
+export { attributionScore, attributionTask } from './attribution'
+export {
+  CONCEPTS,
+  conceptExamples,
+  conceptImages,
+  correlatedEffects,
+  correlatedEffectsTerm,
+  correlatedEffectsTruth,
+  feasibilityTask,
+  interactionTask,
+  interactionTaskTruth,
+  plantedMask,
+  plantedPatterns,
+  plantedShape,
+  type Concept,
+  type ConceptRule,
+} from './explanation'
+export {
+  cocktailParty,
+  glyphStrokes,
+  latentFactorModel,
+  latentFactors,
+  strokeGlyphs,
+  type CocktailParty,
+  type LatentFactorModel,
+} from './factors'
 export {
   PAIRED_COLOURS,
   PAIRED_RGB,
@@ -184,3 +249,81 @@ export {
   type OdeFailureKind,
   type OdeFailureOptions,
 } from './walks'
+export { irtResponses, plackettLuceRankings, tournament, type Tournament, type TournamentOptions } from './ratings'
+export {
+  focalPlayerMatches,
+  focalPlayerStream,
+  ratingMatches,
+  ratingPopulation,
+  skillPath,
+  winProbability,
+  type FocalPlayerOptions,
+  type FocalPlayerStream,
+  type OutcomeOptions,
+  type RatingPopulation,
+  type RatingPopulationOptions,
+  type SkillPath,
+} from './rating-streams'
+export {
+  LEARNER_CONDITIONS,
+  LEARNER_ITEM_FEATURES,
+  LEARNER_UNSUITABILITY,
+  learnerResponses,
+  type LearnerCondition,
+  type LearnerResponses,
+  type LearnerResponsesOptions,
+} from './learners'
+export { censoredSurvival, weibullPhSurvival, type CensoredSurvival, type CensoredSurvivalOptions } from './survival'
+export { ANOMALY_SHAPES, plantedAnomalies, type AnomalyShape, type PlantedAnomaliesOptions } from './anomalies'
+export {
+  complementaryLabels,
+  crowdLabels,
+  instanceBags,
+  labellingFunctions,
+  positiveUnlabelled,
+  proportionBags,
+  type CrowdLabelOptions,
+  type CrowdLabels,
+  type InstanceBags,
+  type LabellingFunctionOptions,
+  type LabellingFunctions,
+  type PositiveUnlabelled,
+  type ProportionBags,
+} from './weak'
+export { halfKernel, type HalfKernelOptions } from './half-kernel'
+export {
+  WEB_TRAFFIC_CLASSES,
+  webTraffic,
+  type WebTrafficClass,
+  type WebTrafficOptions,
+  type WebTrafficSample,
+} from './web-traffic'
+export {
+  classConditionalNoise,
+  classConditionalNoiseTruth,
+  noiseLayoutAnchors,
+  noiseLayoutPosterior,
+  noisyPosterior,
+  type NoiseLayout,
+  type ClassConditionalNoiseOptions,
+  type ClassConditionalNoiseSample,
+} from './label-noise'
+export {
+  labelShiftDomains,
+  rotatingTasks,
+  shiftedMoons,
+  type DomainPair,
+  type LabelShiftOptions,
+  type ShiftedMoonsOptions,
+} from './shift'
+export { simulatedImpressions } from './impressions'
+export {
+  PLANTED_CLASSIFIER,
+  PLANTED_CORRELATION,
+  PLANTED_MAIN,
+  PLANTED_SECONDARY,
+  plantedModelFlip,
+  plantedSubgroups,
+  type PlantedModelFlipOptions,
+  type PlantedSubgroupsOptions,
+} from './subgroups'

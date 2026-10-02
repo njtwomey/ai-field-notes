@@ -40,6 +40,7 @@ import {
   type LinearParams,
 } from 'aifn/nn/layers'
 import type { Params } from 'aifn/foundation/pytree'
+import { DomainError } from 'aifn/foundation/errors'
 
 /** The symbols the taggers read: padding `_`, the word boundary `.`, then a–z. */
 export const HYPHEN_ALPHABET: readonly string[] = ['_', '.', ...'abcdefghijklmnopqrstuvwxyz']
@@ -47,7 +48,7 @@ const PAD = 0
 const BOUNDARY = 1
 const idOf = (c: string) => {
   const k = HYPHEN_ALPHABET.indexOf(c)
-  if (k < 2) throw new RangeError(`hyphenation taggers: '${c}' is not a letter a–z`)
+  if (k < 2) throw new DomainError('hyphenation taggers', `hyphenation taggers: '${c}' is not a letter a–z`)
   return k
 }
 
@@ -63,7 +64,8 @@ export function letterWindow(word: string, i: number, radius: Size): number[] {
 
 /** `.word.` as ids padded with `_` to `width` (at least the word's length + 2). */
 export function dottedIds(word: string, width: Size): number[] {
-  if (word.length + 2 > width) throw new RangeError(`hyphenation taggers: '${word}' is longer than ${width - 2}`)
+  if (word.length + 2 > width)
+    throw new DomainError('hyphenation taggers', `hyphenation taggers: '${word}' is longer than ${width - 2}`)
   const ids = [BOUNDARY, ...[...word].map(idOf), BOUNDARY]
   while (ids.length < width) ids.push(PAD)
   return ids

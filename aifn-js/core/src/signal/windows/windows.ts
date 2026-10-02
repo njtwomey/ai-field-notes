@@ -7,6 +7,7 @@
 import { besselI0 } from 'aifn/numerics/special'
 import { dense, fromData, isTensor, type Tensor } from 'aifn/foundation/tensor'
 import type { Size } from 'aifn/foundation/contracts'
+import { DomainError, ShapeError } from 'aifn/foundation/errors'
 
 /** The windows that need no parameter. */
 export type WindowName =
@@ -102,7 +103,7 @@ function symmetric(spec: WindowSpec, m: number): Float64Array {
       for (let n = 0; n < m; n++) w[n] = Math.sin((Math.PI * (n + 0.5)) / m)
       return w
   }
-  throw new Error(`getWindow: unknown window ${JSON.stringify(spec)}`)
+  throw new DomainError('getWindow', `getWindow: unknown window ${JSON.stringify(spec)}`)
 }
 
 /**
@@ -111,7 +112,8 @@ function symmetric(spec: WindowSpec, m: number): Float64Array {
  * gaussian (std, in samples), tukey (α, the tapered fraction).
  */
 export function getWindow(spec: WindowSpec, n: Size, { periodic = false }: { periodic?: boolean } = {}): Tensor {
-  if (!Number.isInteger(n) || n < 0) throw new RangeError(`getWindow: length must be a non-negative integer, got ${n}`)
+  if (!Number.isInteger(n) || n < 0)
+    throw new DomainError('getWindow', `getWindow: length must be a non-negative integer, got ${n}`)
   if (n === 0) return fromData(new Float64Array(0))
   if (!periodic) return fromData(symmetric(spec, n))
   return fromData(symmetric(spec, n + 1).slice(0, n))
@@ -125,6 +127,7 @@ export function windowValues(input: WindowInput, n: Size, periodic: boolean): Fl
   if (typeof input === 'string' || (typeof input === 'object' && 'name' in input && !isTensor(input)))
     return getWindow(input as WindowSpec, n, { periodic }).data as Float64Array
   const v = Float64Array.from(isTensor(input) ? dense.data(input) : (input as ArrayLike<number>))
-  if (v.length !== n) throw new Error(`window of length ${v.length} does not match segment length ${n}`)
+  if (v.length !== n)
+    throw new ShapeError('windowValues', `window of length ${v.length} does not match segment length ${n}`)
   return v
 }

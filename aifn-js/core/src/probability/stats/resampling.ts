@@ -4,6 +4,7 @@ import type { Size } from 'aifn/foundation/contracts'
 import { mean, requireNonEmpty, standardDeviation } from './descriptive'
 import { toSequence, vectorOf, type Data } from './input'
 import { quantile, type QuantileMethod } from './quantile'
+import { DomainError } from 'aifn/foundation/errors'
 
 /**
  * `size` indices drawn uniformly with replacement from 0 … n − 1 (default size n), as an int32 rank-1 tensor: one
@@ -154,7 +155,7 @@ export function importanceEffectiveSampleSize(weightsData: Data, options: { log?
   let s2 = 0
   for (let i = 0; i < weights.length; i++) {
     const w = options.log ? Math.exp(weights[i] - shift) : weights[i]
-    if (w < 0) throw new Error('stats: importance weights must be non-negative')
+    if (w < 0) throw new DomainError('stats', 'stats: importance weights must be non-negative')
     s += w
     s2 += w * w
   }

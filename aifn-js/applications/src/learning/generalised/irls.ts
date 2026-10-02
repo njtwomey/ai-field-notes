@@ -11,6 +11,7 @@ import { cholesky, choleskySolve, lstsq } from 'aifn/numerics/linalg'
 import { fromData, toFlat, type Tensor } from 'aifn/foundation/tensor'
 import type { Algorithm } from 'aifn/foundation/trace'
 import { likelihood, type Family, type Link } from 'aifn/probability/likelihoods'
+import { ShapeError } from 'aifn/foundation/errors'
 
 /** The problem an IRLS run solves. */
 export type IrlsProblem = {
@@ -70,7 +71,7 @@ function dense(problem: IrlsProblem): Dense {
   const [n, p] = problem.design.shape
   const X = Float64Array.from(toFlat(problem.design))
   const y = Float64Array.from(toFlat(problem.y))
-  if (y.length !== n) throw new Error(`irls: ${n} rows of X but ${y.length} responses`)
+  if (y.length !== n) throw new ShapeError('irls', `irls: ${n} rows of X but ${y.length} responses`)
   const w = problem.weights ? Float64Array.from(toFlat(problem.weights)) : new Float64Array(n).fill(1)
   const o = problem.offset ? Float64Array.from(toFlat(problem.offset)) : new Float64Array(n)
   const P = problem.penalty ? Float64Array.from(toFlat(problem.penalty)) : null

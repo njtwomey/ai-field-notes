@@ -21,6 +21,7 @@ import {
   type Nested,
 } from 'aifn/inference/model'
 import { builtInEngines, withEngines, type EngineRegistration, type EngineTable } from 'aifn/inference/engines'
+import { DomainError } from 'aifn/foundation/errors'
 
 // ── LDA ─────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
@@ -90,6 +91,11 @@ export interface LdaOptions {
   /** Symmetric Dirichlet concentrations on θ (α) and φ (β). */
   alpha: number
   beta: number
+  /**
+   * The topics each document may use (labelled LDA, Ramage et al., 2009: a document's labels are its topics); default
+   * every topic for every document.
+   */
+  allowed?: readonly (readonly number[])[]
 }
 
 /** The state of collapsed Gibbs sampling for LDA: topic assignments and the count tables they imply. */
@@ -106,7 +112,17 @@ export interface LdaState extends Status {
   logLikelihood: number
 }
 
-function ldaLogLikelihood(nkw: Float64Array, nk: Float64Array, K: number, V: number, beta: number): number {
+/**
+ * log p(w | z) with the topics φ_k ~ Dir(β) integrated out, from the topic–word counts n_kw (K × V, row-major) and
+ * their totals n_k: Σ_k [log Γ(Vβ) − V log Γ(β) − log Γ(n_k + Vβ) + Σ_w log Γ(n_kw + β)]. Shared with the HDP sampler.
+ */
+export function ldaLogLikelihood(
+  nkw: ArrayLike<number>,
+  nk: ArrayLike<number>,
+  K: number,
+  V: number,
+  beta: number,
+): number {
   let total = 0
   for (let k = 0; k < K; k++) {
     total += logGamma(V * beta) - V * logGamma(beta) - logGamma(nk[k] + V * beta)
@@ -119,11 +135,20 @@ function ldaLogLikelihood(nkw: Float64Array, nk: Float64Array, K: number, V: num
  * Collapsed Gibbs sampling for LDA as a traceable algorithm (Griffiths and Steyvers, 2004): θ and φ are integrated
  * out, and each step (a sweep) resamples every token's topic from p(z = k | rest) ∝ (n_dk + α)(n_kw + β)/(n_k + Vβ),
  * with the token's own counts removed. The initial topics come from the `init` stream; token (d, n) in a sweep draws
- * from `child(ctx.stream, d, n)`. No start.
+ * from `child(ctx.stream, d, n)`. No start. With `allowed`, each document's tokens are drawn only from its own topics:
+ * labelled LDA, where the labels of a document are the topics it may use.
  */
 export function ldaCollapsedGibbs(options: LdaOptions): Algorithm<void, LdaState> {
   const { topics: K, vocabulary: V, alpha, beta, documents } = options
   const D = documents.length
+  const every = Array.from({ length: K }, (_, k) => k)
+  const allowed = documents.map((_, d) => options.allowed?.[d] ?? every)
+  for (const a of allowed)
+    if (a.length === 0 || a.some((k) => !(Number.isInteger(k) && k >= 0 && k < K)))
+      throw new DomainError(
+        'ldaCollapsedGibbs',
+        'ldaCollapsedGibbs: each document needs a non-empty set of topics in 0 … K − 1',
+      )
   return {
     name: 'lda-collapsed-gibbs',
     init: (_start, s) => {
@@ -132,7 +157,7 @@ export function ldaCollapsedGibbs(options: LdaOptions): Algorithm<void, LdaState
       const nk = new Float64Array(K)
       const assignments = documents.map((doc, d) => {
         const z = Int32Array.from(doc, (w, n) => {
-          const k = integers(child(s, d, n), K)
+          const k = allowed[d][integers(child(s, d, n), allowed[d].length)]
           ndk[d * K + k]++
           nkw[k * V + w]++
           nk[k]++
@@ -161,8 +186,10 @@ export function ldaCollapsedGibbs(options: LdaOptions): Algorithm<void, LdaState
           ndk[d * K + old]--
           nkw[old * V + w]--
           nk[old]--
-          for (let k = 0; k < K; k++) p[k] = ((ndk[d * K + k] + alpha) * (nkw[k * V + w] + beta)) / (nk[k] + V * beta)
-          const k = categorical(child(ctx.stream, d, n), p)
+          const topics = allowed[d]
+          const q = p.subarray(0, topics.length)
+          topics.forEach((k, j) => (q[j] = ((ndk[d * K + k] + alpha) * (nkw[k * V + w] + beta)) / (nk[k] + V * beta)))
+          const k = topics[categorical(child(ctx.stream, d, n), q)]
           z[n] = k
           ndk[d * K + k]++
           nkw[k * V + w]++
@@ -202,13 +229,13 @@ const scalar = (a: Arg, b: Bindings): number => {
     const c = b.constants?.[a.node]
     if (typeof c === 'number') return c
   }
-  throw new Error('lda: α, β, K and V must be numbers')
+  throw new DomainError('lda', 'lda: α, β, K and V must be numbers')
 }
 
 /** The problem of an LDA-shaped model under its bindings (the words are the observed node's data). */
 export function ldaOptions(m: Model, b: Bindings): LdaOptions {
   const shape = matchLda(m)
-  if (!shape) throw new Error(`lda: ${m.name} is not LDA-shaped`)
+  if (!shape) throw new DomainError('lda', `lda: ${m.name} is not LDA-shaped`)
   const docs = b.data?.[shape.w] as Nested
   const documents = (Array.isArray(docs) ? docs : []).map((d) =>
     isTensor(d) ? Array.from(toFlat(d as Tensor)) : Array.from(d as number[]),

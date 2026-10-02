@@ -27,6 +27,7 @@ import type { Size } from 'aifn/foundation/contracts'
 import { normalInit, type Initialiser } from 'aifn/nn/init'
 import { tap, type Layer } from 'aifn/nn/layers'
 import { positionRange } from './masks'
+import { DomainError, ShapeError } from 'aifn/foundation/errors'
 
 /** The positional schemes of `TransformerBlock` and the lab: where position enters the model. */
 export type PositionScheme = 'none' | 'sinusoidal' | 'learned' | 'rope' | 'alibi' | 't5'
@@ -39,7 +40,7 @@ export type PositionScheme = 'none' | 'sinusoidal' | 'learned' | 'rope' | 'alibi
  * PE[p] in each (sin, cos) pair, so a linear map can read relative offsets. `d` must be even.
  */
 export function sinusoidalPositions(positions: readonly number[] | Size, d: Size, { base = 10000 } = {}): Tensor {
-  if (d % 2 !== 0) throw new Error(`sinusoidalPositions: the dimension ${d} must be even`)
+  if (d % 2 !== 0) throw new DomainError('sinusoidalPositions', `sinusoidalPositions: the dimension ${d} must be even`)
   const ps = typeof positions === 'number' ? positionRange(positions) : positions
   const out = new Float64Array(ps.length * d)
   ps.forEach((p, r) => {
@@ -80,7 +81,8 @@ export function LearnedPositions(
 export function learnedPositions(table: Value, x: Value, positions: readonly number[]): Value {
   const max = shapeOfValue(table)[0]
   const beyond = positions.find((p) => p < 0 || p >= max)
-  if (beyond !== undefined) throw new RangeError(`learnedPositions: position ${beyond} is outside the table of ${max}`)
+  if (beyond !== undefined)
+    throw new DomainError('learnedPositions', `learnedPositions: position ${beyond} is outside the table of ${max}`)
   return add(x, take(table, positions))
 }
 
@@ -121,7 +123,7 @@ export type RopeFrequencies = { frequencies: number[]; magnitude: number }
 
 /** The rotary frequencies of a head dimension `d` (even) under `options`; see `RopeScaling`. */
 export function ropeFrequencies(d: Size, options: RopeOptions = {}): RopeFrequencies {
-  if (d % 2 !== 0) throw new Error(`ropeFrequencies: the dimension ${d} must be even`)
+  if (d % 2 !== 0) throw new DomainError('ropeFrequencies', `ropeFrequencies: the dimension ${d} must be even`)
   const { scaling } = options
   let base = options.base ?? 10000
   if (scaling?.kind === 'ntk') base *= scaling.factor ** (d / (d - 2))
@@ -186,7 +188,7 @@ export function applyRope(x: Value, positions: readonly number[], options: RopeO
   const s = shapeOfValue(x)
   const d = s[s.length - 1]
   if (s[s.length - 2] !== positions.length)
-    throw new Error(`applyRope: ${positions.length} positions for a sequence of ${s[s.length - 2]}`)
+    throw new ShapeError('applyRope', `applyRope: ${positions.length} positions for a sequence of ${s[s.length - 2]}`)
   const { cos, sin } = ropeTables(positions, d, options)
   return add(mul(x, cos), mul(matmul(x, rotationMatrix(d, options.layout ?? 'half')), sin))
 }

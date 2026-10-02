@@ -8,6 +8,7 @@ import { definer, entries, type AlgorithmInfo, type Entry, type FunctionInfo } f
 import * as cholesky from './cholesky'
 import * as distances from './distances'
 import * as eig from './eig'
+import * as inverseSqrt from './inverseSqrt'
 import * as iterative from './iterative'
 import * as lanczos from './lanczos'
 import * as levinson from './levinson'
@@ -198,6 +199,16 @@ fn(
     notes: ['condition-number', 'numerical-stability-and-conditioning'],
   },
   svd.conditionNumber,
+)
+fn(
+  {
+    key: 'symmetricInverseSqrt',
+    name: 'Symmetric inverse square root',
+    summary: 'S^{−1/2} = V Λ^{−1/2} Vᵀ of a symmetric positive-definite matrix, by its eigendecomposition.',
+    role: 'transform',
+    notes: ['eigendecomposition'],
+  },
+  inverseSqrt.symmetricInverseSqrt,
 )
 fn({ key: 'kron', name: 'Kronecker product', role: 'construction' }, products.kron)
 fn({ key: 'matrixTrace', name: 'Trace', role: 'property' }, products.matrixTrace)

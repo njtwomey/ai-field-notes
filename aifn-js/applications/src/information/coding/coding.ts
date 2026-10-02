@@ -11,6 +11,7 @@ import { treeFromChildren, type Tree } from 'aifn/graph'
 import { fromData, isTensor, toFlat, type Tensor } from 'aifn/foundation/tensor'
 import { run, type Algorithm } from 'aifn/foundation/trace'
 import { flatProbabilities, type Probabilities } from 'aifn/probability/information'
+import { DomainError, ShapeError } from 'aifn/foundation/errors'
 
 /** A prefix code for symbols 0 … K − 1 over a D-ary alphabet (digits 0–9 then a–z, so D ≤ 36). */
 export type PrefixCode = {
@@ -115,7 +116,7 @@ export function huffmanDummies(symbols: number, arity = 2): number {
 
 function checkArity(arity: number, where: string): void {
   if (!(Number.isInteger(arity) && arity >= 2 && arity <= 36))
-    throw new RangeError(`${where}: the arity must be an integer in 2 … 36 (digits 0–9, a–z)`)
+    throw new DomainError(where, `${where}: the arity must be an integer in 2 … 36 (digits 0–9, a–z)`)
 }
 
 /** Queue order under a tie rule: true when node a pops before node b. */
@@ -146,9 +147,10 @@ export function huffmanSteps(
   { arity = 2, ties = 'minimum-variance' }: HuffmanOptions = {},
 ): Algorithm<void, HuffmanState> {
   const p = flatProbabilities(probabilities, 'huffmanSteps')
-  if (p.length === 0) throw new RangeError('huffmanSteps: needs at least one symbol')
+  if (p.length === 0) throw new DomainError('huffmanSteps', 'huffmanSteps: needs at least one symbol')
   checkArity(arity, 'huffmanSteps')
-  if (ties !== 'minimum-variance' && ties !== 'merged-first') throw new RangeError(`huffmanSteps: unknown ties ${ties}`)
+  if (ties !== 'minimum-variance' && ties !== 'merged-first')
+    throw new DomainError('huffmanSteps', `huffmanSteps: unknown ties ${ties}`)
   const K = p.length
   const dummies = huffmanDummies(K, arity)
   return {
@@ -261,7 +263,8 @@ export type HuffmanTree = Tree<HuffmanNodeData, HuffmanEdgeData>
 
 /** The Huffman tree of a finished `huffmanSteps` state as a `Tree`, rooted at the last node created. */
 export function huffmanTree(state: HuffmanState): HuffmanTree {
-  if (!state.done) throw new Error('huffmanTree: the state is not finished (the queue holds more than one root)')
+  if (!state.done)
+    throw new DomainError('huffmanTree', 'huffmanTree: the state is not finished (the queue holds more than one root)')
   const tree = treeFromChildren<HuffmanNodeData, HuffmanEdgeData>(
     state.nodes.map((n) => [...n.children]),
     state.queue[0],
@@ -306,7 +309,7 @@ export function huffmanCode(
   options: HuffmanOptions = {},
 ): PrefixCode & { tree: HuffmanTree } {
   const p = flatProbabilities(probabilities, 'huffmanCode')
-  if (p.length === 0) throw new RangeError('huffmanCode: needs at least one symbol')
+  if (p.length === 0) throw new DomainError('huffmanCode', 'huffmanCode: needs at least one symbol')
   const steps = huffmanSteps(p, options)
   const s = run(steps, undefined, p.length + huffmanDummies(p.length, options.arity ?? 2))
   const tree = huffmanTree(s)
@@ -329,7 +332,7 @@ export function canonicalCode(lengths: ArrayLike<number> | Tensor, arity = 2): s
     ) >
     1 + 1e-12
   )
-    throw new RangeError('canonicalCode: the lengths break Kraft’s inequality (Σ D^−ℓ > 1)')
+    throw new DomainError('canonicalCode', 'canonicalCode: the lengths break Kraft’s inequality (Σ D^−ℓ > 1)')
   const order = ls
     .map((_, k) => k)
     .filter((k) => ls[k] > 0)
@@ -353,7 +356,8 @@ export function canonicalCode(lengths: ArrayLike<number> | Tensor, arity = 2): s
  */
 export function sourceExtension(probabilities: Probabilities, n: number): Tensor {
   const p = flatProbabilities(probabilities, 'sourceExtension')
-  if (!(Number.isInteger(n) && n >= 1)) throw new RangeError('sourceExtension: n must be a positive integer')
+  if (!(Number.isInteger(n) && n >= 1))
+    throw new DomainError('sourceExtension', 'sourceExtension: n must be a positive integer')
   let out = Float64Array.of(1)
   for (let i = 0; i < n; i++) {
     const next = new Float64Array(out.length * p.length)
@@ -373,7 +377,7 @@ export function prefixEncode(codewords: readonly string[], message: ArrayLike<nu
   for (let i = 0; i < message.length; i++) {
     const s = message[i]
     const c = codewords[s]
-    if (c === undefined || c === '') throw new RangeError(`prefixEncode: symbol ${s} has no codeword`)
+    if (c === undefined || c === '') throw new DomainError('prefixEncode', `prefixEncode: symbol ${s} has no codeword`)
     spans.push({ symbol: s, start: digits.length, end: digits.length + c.length })
     digits += c
   }
@@ -411,11 +415,13 @@ export function prefixDecode(tree: HuffmanTree, digits: string): Decoded {
   for (let i = 0; i < digits.length; i++) {
     const v = walk[walk.length - 1]
     const next = tree.nodes[v].children.find((c) => tree.edges[c]!.digit === parseInt(digits[i], 36))
-    if (next === undefined) throw new RangeError(`prefixDecode: no edge for digit ${digits[i]} at position ${i}`)
+    if (next === undefined)
+      throw new DomainError('prefixDecode', `prefixDecode: no edge for digit ${digits[i]} at position ${i}`)
     walk.push(next)
     const node = tree.nodes[next]
     if (node.children.length === 0) {
-      if (node.dummy) throw new RangeError(`prefixDecode: digits ${digits.slice(start, i + 1)} reach a dummy leaf`)
+      if (node.dummy)
+        throw new DomainError('prefixDecode', `prefixDecode: digits ${digits.slice(start, i + 1)} reach a dummy leaf`)
       symbols.push(node.symbol)
       walks.push(walk)
       walk = [tree.root]
@@ -521,7 +527,8 @@ export function arithmeticInterval(message: ArrayLike<number>, probabilities: Pr
   const steps = [{ low, high }]
   for (let i = 0; i < message.length; i++) {
     const s = message[i]
-    if (!(Number.isInteger(s) && s >= 0 && s < p.length)) throw new RangeError(`arithmeticInterval: bad symbol ${s}`)
+    if (!(Number.isInteger(s) && s >= 0 && s < p.length))
+      throw new DomainError('arithmeticInterval', `arithmeticInterval: bad symbol ${s}`)
     const width = high - low
     high = low + width * cumulative[s + 1]
     low = low + width * cumulative[s]
@@ -538,7 +545,7 @@ export type Word = string | ArrayLike<number>
 
 /** The number of positions where two words of equal length differ (Hamming, 1950). */
 export function hammingDistance(a: Word, b: Word): number {
-  if (a.length !== b.length) throw new RangeError('hammingDistance: words of different lengths')
+  if (a.length !== b.length) throw new ShapeError('hammingDistance', 'hammingDistance: words of different lengths')
   let d = 0
   for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) d++
   return d
@@ -567,9 +574,9 @@ function choose(n: number, k: number): number {
 }
 
 function checkCode(n: number, d: number, q: number, where: string): void {
-  if (!(Number.isInteger(n) && n >= 1)) throw new RangeError(`${where}: n must be a positive integer`)
-  if (!(Number.isInteger(d) && d >= 1 && d <= n)) throw new RangeError(`${where}: need 1 ≤ d ≤ n`)
-  if (!(Number.isInteger(q) && q >= 2)) throw new RangeError(`${where}: q must be an integer ≥ 2`)
+  if (!(Number.isInteger(n) && n >= 1)) throw new DomainError(where, `${where}: n must be a positive integer`)
+  if (!(Number.isInteger(d) && d >= 1 && d <= n)) throw new DomainError(where, `${where}: need 1 ≤ d ≤ n`)
+  if (!(Number.isInteger(q) && q >= 2)) throw new DomainError(where, `${where}: q must be an integer ≥ 2`)
 }
 
 /**

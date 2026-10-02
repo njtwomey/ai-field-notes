@@ -33,6 +33,7 @@ import {
   where,
   type Value,
 } from 'aifn/foundation/tensor'
+import { DomainError, ShapeError } from 'aifn/foundation/errors'
 
 /** A probability vector or table: a tensor (possibly traced) or plain numbers. */
 export type Probabilities = Value | ArrayLike<number> | readonly (readonly number[])[]
@@ -69,7 +70,7 @@ function sumLast(v: Value): Value {
 /** Change of base: divide nats by log(base). */
 function inBase(v: Value, base: number | undefined): Value {
   if (base === undefined || base === Math.E) return v
-  if (!(base > 0 && base !== 1)) throw new RangeError(`base must be positive and not 1, got ${base}`)
+  if (!(base > 0 && base !== 1)) throw new DomainError('inBase', `base must be positive and not 1, got ${base}`)
   return div(v, Math.log(base))
 }
 
@@ -91,7 +92,7 @@ export function jointEntropy(joint: Probabilities, { base }: BaseOption = {}): V
 /** The marginals of a joint table [|X|, |Y|]: p(x) (row sums) and p(y) (column sums), after normalisation. */
 function marginals(joint: Value): { pxy: Value; px: Value; py: Value } {
   const shape = shapeOfValue(joint)
-  if (shape.length !== 2) throw new RangeError('expected a joint table of shape [|X|, |Y|]')
+  if (shape.length !== 2) throw new ShapeError('marginals', 'expected a joint table of shape [|X|, |Y|]')
   const pxy = normaliseAll(joint)
   return { pxy, px: sum(pxy, 1), py: sum(pxy, 0) }
 }
@@ -199,7 +200,7 @@ export const fGenerators = {
 export function fDivergence(p: Probabilities, q: Probabilities, generator: FGenerator): number {
   const a = flatProbabilities(p, 'fDivergence')
   const b = flatProbabilities(q, 'fDivergence')
-  if (a.length !== b.length) throw new RangeError('fDivergence: p and q have different lengths')
+  if (a.length !== b.length) throw new ShapeError('fDivergence', 'fDivergence: p and q have different lengths')
   let total = 0
   for (let k = 0; k < a.length; k++) {
     if (b[k] > 0) total += b[k] * generator.f(a[k] / b[k])
@@ -219,7 +220,8 @@ export function flatProbabilities(p: Probabilities, where: string): number[] {
   const r = unwrap(v)
   const values = typeof r === 'number' ? [r] : toFlat(r)
   const total = values.reduce((s, x) => s + x, 0)
-  for (const x of values) if (!(x >= 0)) throw new RangeError(`${where}: probabilities must be non-negative, got ${x}`)
+  for (const x of values)
+    if (!(x >= 0)) throw new DomainError(where, `${where}: probabilities must be non-negative, got ${x}`)
   return values.map((x) => x / total)
 }
 

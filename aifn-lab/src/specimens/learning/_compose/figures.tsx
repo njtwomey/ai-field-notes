@@ -17,7 +17,7 @@ import { polynomialFeatures, standardScaler } from 'aifn-applied/learning/prepro
 import { child, normals, stream } from 'aifn/foundation/random'
 import { fromData, linspace, mean, toFlat, toRows, type Tensor } from 'aifn/foundation/tensor'
 import { Figure } from '@lab/layout'
-import { choice, row, slider, useFigureState } from '@lab/state'
+import { choice, row, slider, toggle, useFigureState } from '@lab/state'
 import { Annotation, Area, Curve, Handle, Plot, Plots, Points, Raster, Readout, useAxis } from '@lab/viz'
 import { formatValue, StateTree } from '@lab/views'
 
@@ -67,6 +67,7 @@ export function PipelineStepsSpecimen() {
     }),
     view: row('2 · stage', {
       stage: choice(STAGES, 'input', { label: 'show the data as this step sees it' }),
+      boundary: toggle(true, 'decision boundary (P = 0.5)'),
     }),
   })
   const { degree, l2 } = state.fit
@@ -158,7 +159,7 @@ export function PipelineStepsSpecimen() {
           </>
         ),
       }}
-      caption="pipeline(standardScaler(), polynomialFeatures(), standardScaler(), logisticRegression()) fitted once; choose a stage to see the data as that step sees it and the step's fitted state. The raw axes differ by a factor of six in spread, and the first scaler brings them to unit variance. The polynomial features let a linear classifier draw the parabola, but their spreads differ again (at degree 4 the x₀⁴ column dwarfs x₀ on the shared colour scale), so a second scaler standardises each feature before the L2-penalised fit, which would otherwise shrink the features unequally. The final stage is P(y = 1 | x) of the whole pipeline on raw inputs. Degree 1 cannot separate the classes."
+      caption="pipeline(standardScaler(), polynomialFeatures(), standardScaler(), logisticRegression()) fitted once; choose a stage to see the data as that step sees it and the step's fitted state. The raw axes differ by a factor of six in spread, and the first scaler brings them to unit variance. The polynomial features let a linear classifier draw the parabola, but their spreads differ again (at degree 4 the x₀⁴ column dwarfs x₀ on the shared colour scale), so a second scaler standardises each feature before the L2-penalised fit, which would otherwise shrink the features unequally. The final stage is P(y = 1 | x) of the whole pipeline on raw inputs, with its 0.5 contour in ink while the decision boundary is on. Degree 1 cannot separate the classes."
     >
       <div className="grid gap-3 md:grid-cols-[3fr_2fr]">
         <div>
@@ -170,7 +171,15 @@ export function PipelineStepsSpecimen() {
               <Raster x={view.x} y={view.y} z={view.z} scale="diverging" valueLabel="feature value" />
             )}
             {view.kind === 'probability' && (
-              <Raster x={xs} y={ys} z={view.z} range={[0, 1]} scale="diverging" valueLabel="P(y = 1 | x)" />
+              <Raster
+                x={xs}
+                y={ys}
+                z={view.z}
+                range={[0, 1]}
+                scale="diverging"
+                valueLabel="P(y = 1 | x)"
+                boundary={state.view.boundary ? 0.5 : false}
+              />
             )}
             {view.kind === 'probability' && (
               <Points name="rows" x={view.x} y={view.y} group={labels} groupNames={CLASS_NAMES} />

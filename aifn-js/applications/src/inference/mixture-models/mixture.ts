@@ -12,6 +12,7 @@ import { digamma, logGamma } from 'aifn/numerics/special'
 import { fromData, isTensor, tensor, toFlat, type Matrix, type Tensor, type Vector } from 'aifn/foundation/tensor'
 import type { Algorithm } from 'aifn/foundation/trace'
 import type { dense } from 'aifn/foundation/tensor'
+import { ShapeError } from 'aifn/foundation/errors'
 
 type F64 = dense.F64
 
@@ -63,7 +64,8 @@ function toMatrix(x: Tensor | readonly (readonly number[])[] | ArrayLike<number>
   }
   const t = isTensor(x) ? x : tensor(x as number[][])
   if (t.shape.length === 1) return { data: Float64Array.from(toFlat(t)), N: t.shape[0], D: 1 }
-  if (t.shape.length !== 2) throw new Error('caviGaussianMixture: data must be N×D (or a vector for D = 1)')
+  if (t.shape.length !== 2)
+    throw new ShapeError('caviGaussianMixture', 'caviGaussianMixture: data must be N×D (or a vector for D = 1)')
   return { data: Float64Array.from(toFlat(t)), N: t.shape[0], D: t.shape[1] }
 }
 

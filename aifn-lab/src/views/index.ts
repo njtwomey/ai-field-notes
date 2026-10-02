@@ -69,3 +69,12 @@ export {
   type ParsedTemplates,
 } from './crf/CrfViews'
 export { crfOptimiserField, crfTrainingOptions, describeOptimiser } from './crf/optimiser'
+export {
+  CLASSIFICATION_CASES,
+  datasetChoice,
+  REGRESSION_CASES,
+  type DatasetCase,
+  type DatasetChoice,
+  type DatasetValue,
+} from './dataset-choice'
+export { optimiserField, optimiserLabel, trainingMethodOf, type OptimiserFieldOptions } from './optimiser-field'

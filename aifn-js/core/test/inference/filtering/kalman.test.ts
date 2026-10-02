@@ -254,4 +254,29 @@ describe('the filter and smoother as algorithms', () => {
     const again = kalmanStep(md, f.steps[0].mean, f.steps[0].cov, y[1])
     close(toFlat(again.cov), toFlat(f.steps[1].cov), 0)
   })
+  test('a partly observed row updates with its observed entries (the reduced model)', () => {
+    // Two sensors of one random walk; the second is missing at the step.
+    const full = parseModel(
+      {
+        A: [[1]],
+        C: [[1], [2]],
+        Q: [[0.3]],
+        R: [
+          [0.5, 0.1],
+          [0.1, 0.8],
+        ],
+        m0: [0],
+        P0: [[1]],
+      },
+      'test',
+    )
+    const reduced = parseModel({ A: [[1]], C: [[1]], Q: [[0.3]], R: [[0.5]], m0: [0], P0: [[1]] }, 'test')
+    const a = kalmanStep(full, full.m0 as Vector, full.P0, [1.3, NaN])
+    const b = kalmanStep(reduced, reduced.m0 as Vector, reduced.P0, [1.3])
+    close(toFlat(a.mean), toFlat(b.mean), 1e-15)
+    close(toFlat(a.cov), toFlat(b.cov), 1e-15)
+    expect(a.term).toBeCloseTo(b.term, 15)
+    expect(Number.isNaN(toFlat(a.innovation)[1])).toBe(true)
+    expect(toFlat(a.gain)[1]).toBe(0)
+  })
 })

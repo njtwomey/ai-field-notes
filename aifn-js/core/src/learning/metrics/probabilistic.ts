@@ -29,6 +29,7 @@ import {
   type Labels,
   type Rows,
 } from './core'
+import { DomainError, ShapeError } from 'aifn/foundation/errors'
 
 /** Probabilities: a vector of P(positive) for a binary problem, or an n × K matrix whose columns follow `labels`. */
 export type Probabilities = Data | Rows
@@ -60,9 +61,9 @@ function probabilityRows(yTrue: Labels, probabilities: Probabilities, options: P
   nonEmpty(t.length, what)
   const classes = options.labels ? [...options.labels] : classesOf(t)
   if (classes.length !== P.cols)
-    throw new Error(`metrics: ${what}: ${P.cols} probability columns for ${classes.length} classes`)
+    throw new ShapeError('metrics', `metrics: ${what}: ${P.cols} probability columns for ${classes.length} classes`)
   const index = encodeLabels(t, classes)
-  if (index.includes(-1)) throw new Error(`metrics: ${what}: a label is not among the classes`)
+  if (index.includes(-1)) throw new DomainError('metrics', `metrics: ${what}: a label is not among the classes`)
   return { n: t.length, K: P.cols, rows: P.data, index, binary: false }
 }
 
@@ -169,13 +170,14 @@ export type ReliabilityDiagram = Curve<'reliability'> & {
 
 /** Bin index of each prediction, and the bin edges. */
 function binAssignments(p: Float64Array, bins: number, strategy: BinStrategy): { bin: Int32Array; edges: number[] } {
-  if (!(bins >= 1 && Number.isInteger(bins))) throw new Error('metrics: bins must be a positive integer')
+  if (!(bins >= 1 && Number.isInteger(bins)))
+    throw new DomainError('metrics', 'metrics: bins must be a positive integer')
   const n = p.length
   const bin = new Int32Array(n)
   if (strategy === 'uniform') {
     // Bins [k/M, (k+1)/M), the last closed at 1 (the notes' convention).
     for (let i = 0; i < n; i++) {
-      if (p[i] < 0 || p[i] > 1) throw new Error(`metrics: probability ${p[i]} lies outside [0, 1]`)
+      if (p[i] < 0 || p[i] > 1) throw new DomainError('metrics', `metrics: probability ${p[i]} lies outside [0, 1]`)
       bin[i] = Math.min(bins - 1, Math.floor(p[i] * bins))
     }
     return { bin, edges: Array.from({ length: bins + 1 }, (_, k) => k / bins) }
@@ -489,9 +491,9 @@ export type PerCase = Data | number
 
 function perCase(x: PerCase | Value, n: number, what: string): Float64Array {
   if (typeof x === 'number') return new Float64Array(n).fill(x)
-  if (isTraced(x)) throw new Error(`metrics: ${what}: traced values are not accepted`)
+  if (isTraced(x)) throw new DomainError('metrics', `metrics: ${what}: traced values are not accepted`)
   const v = values(x as Data)
-  if (v.length !== n) throw new Error(`metrics: ${what}: ${v.length} values for ${n} cases`)
+  if (v.length !== n) throw new ShapeError('metrics', `metrics: ${what}: ${v.length} values for ${n} cases`)
   return v
 }
 
@@ -508,7 +510,10 @@ const isDistribution = (x: unknown): x is Distribution =>
 function gaussianMoments(f: GaussianForecast, n: number, what: string): { mu: Float64Array; sd: Float64Array } {
   if (isDistribution(f)) {
     if (f.name !== 'Normal')
-      throw new Error(`metrics: ${what}: needs a Normal predictive, got ${f.name} (use logScore for any distribution)`)
+      throw new DomainError(
+        'metrics',
+        `metrics: ${what}: needs a Normal predictive, got ${f.name} (use logScore for any distribution)`,
+      )
     return { mu: perCase(f.mean(), n, `${what} mean`), sd: perCase(f.stddev(), n, `${what} sd`) }
   }
   return { mu: perCase(f.mean, n, `${what} mean`), sd: perCase(f.sd, n, `${what} sd`) }
@@ -532,7 +537,8 @@ export const logScore = defineMetric(
     capability: 'predictive',
   },
   (yTrue: Data, predictive: Distribution): number => {
-    if (!isDistribution(predictive)) throw new Error('metrics: logScore: needs a predictive distribution')
+    if (!isDistribution(predictive))
+      throw new DomainError('metrics', 'metrics: logScore: needs a predictive distribution')
     const y = values(yTrue)
     nonEmpty(y.length, 'logScore')
     const lp = perCase(predictive.logProb(vector(y)), y.length, 'logScore')
@@ -593,7 +599,8 @@ export const crpsEnsemble = defineMetric(
     const S = isMatrixLike(samples)
       ? dense(samples as Rows, 'crpsEnsemble')
       : { rows: 1, cols: values(samples as Data).length, data: values(samples as Data) }
-    if (S.rows !== y.length) throw new Error(`metrics: crpsEnsemble: ${S.rows} ensembles for ${y.length} observations`)
+    if (S.rows !== y.length)
+      throw new ShapeError('metrics', `metrics: crpsEnsemble: ${S.rows} ensembles for ${y.length} observations`)
     const m = S.cols
     let total = 0
     for (let i = 0; i < y.length; i++) {
@@ -712,7 +719,7 @@ export function pitValues(
     return vector(Float64Array.from(y, (v, i) => normalCdf((v - mu[i]) / sd[i])))
   }
   const S = dense(forecast.samples, 'pitValues samples')
-  if (S.rows !== y.length) throw new Error('metrics: pitValues: one row of samples per observation')
+  if (S.rows !== y.length) throw new ShapeError('metrics', 'metrics: pitValues: one row of samples per observation')
   return vector(
     Float64Array.from(y, (v, i) => {
       let below = 0

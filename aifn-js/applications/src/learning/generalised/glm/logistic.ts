@@ -18,6 +18,7 @@ import { binomialFamily, link } from 'aifn/probability/likelihoods'
 import { irls, type IrlsState } from '../irls'
 import { defineModel } from 'aifn/learning/estimators'
 import { bool, int, real, space } from 'aifn/foundation/space'
+import { DomainError, ShapeError } from 'aifn/foundation/errors'
 
 const values = dense.data
 
@@ -245,17 +246,19 @@ export function logisticRegression(
   params: LogisticRegressionParams = {},
 ): Estimator<Supervised<Tensor, Tensor>, LogisticRegressionModel> {
   const { l2 = 1, intercept = true, multinomial = false, tolerance = 1e-12, maxSteps = 100 } = params
-  if (!(l2 >= 0)) throw new Error('logisticRegression: l2 must be non-negative')
+  if (!(l2 >= 0)) throw new DomainError('logisticRegression', 'logisticRegression: l2 must be non-negative')
   return {
     name: 'logistic-regression',
     params: { l2, intercept, multinomial, tolerance, maxSteps },
     fit({ x, y }, options: FitOptions = {}) {
       const [n, d] = matrixShape(x, 'logisticRegression')
       const target = targetValues(y, 'logisticRegression')
-      if (target.length !== n) throw new Error(`logisticRegression: ${n} rows of x but ${target.length} labels`)
+      if (target.length !== n)
+        throw new ShapeError('logisticRegression', `logisticRegression: ${n} rows of x but ${target.length} labels`)
       let K = 0
       for (const v of target) {
-        if (!(Number.isInteger(v) && v >= 0)) throw new Error('logisticRegression: labels must be integers 0 … K−1')
+        if (!(Number.isInteger(v) && v >= 0))
+          throw new DomainError('logisticRegression', 'logisticRegression: labels must be integers 0 … K−1')
         K = Math.max(K, v + 1)
       }
       K = Math.max(K, 2)
@@ -338,7 +341,8 @@ export function logisticRegression(
       if (intercept) for (let k = 0; k < C; k++) bias[k] = W[d * C + k]
       const forward = (input: Tensor): Tensor => {
         const [m, cols] = matrixShape(input, 'logisticRegression.forward')
-        if (cols !== d) throw new Error(`logisticRegression: fitted on ${d} features, given ${cols}`)
+        if (cols !== d)
+          throw new ShapeError('logisticRegression', `logisticRegression: fitted on ${d} features, given ${cols}`)
         const Z = values(input)
         const out = new Float64Array(m * C)
         for (let i = 0; i < m; i++) {

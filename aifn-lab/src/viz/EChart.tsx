@@ -229,14 +229,34 @@ export function EChart({
     inputs.current = { option, patch, handles, mode: resolved, cartesian, axisAreas }
   })
 
+  /**
+   * `data-chart-ready` is set when ECharts reports a frame with no animation left ('finished') and cleared before
+   * every setOption; `make lab-shots` waits for it on every chart before capturing. ECharts emits 'finished' only after
+   * a frame it actually paints, so a setOption that changes nothing visible (a patch that removes a series, one whose
+   * data is unchanged) would leave the chart unready for good. A watcher therefore also marks the chart ready once two
+   * frames have passed (ECharts flushes a pending update in the next frame) and zrender has no animation running.
+   */
+  const watch = useRef(0)
+  const unready = () => {
+    const el = ref.current
+    const instance = chart.current
+    if (!el || !instance) return
+    el.removeAttribute('data-chart-ready')
+    cancelAnimationFrame(watch.current)
+    let frames = 0
+    const tick = () => {
+      if (chart.current !== instance || instance.isDisposed() || el.hasAttribute('data-chart-ready')) return
+      if (++frames >= 2 && instance.getZr().animation.isFinished()) el.setAttribute('data-chart-ready', '')
+      else watch.current = requestAnimationFrame(tick)
+    }
+    watch.current = requestAnimationFrame(tick)
+  }
+
   /** Draw from the latest inputs: `full` replaces the base option; otherwise only the patch and handles merge in. */
   const render = useRef((full: boolean) => {
     const instance = chart.current
     if (!instance) return
     const { option, patch, handles, mode, cartesian, axisAreas } = inputs.current
-    // `data-chart-ready` is set when ECharts reports a frame with no animation left ('finished') and cleared on every
-    // redraw; `make lab-shots` waits for it on every chart before capturing.
-    ref.current?.removeAttribute('data-chart-ready')
     if (full) {
       const base: Plain = { ...baseOption(mode) }
       if (!cartesian) {
@@ -255,6 +275,7 @@ export function EChart({
         merged.yAxis = tidyAxes(merged.yAxis)
       }
       if (handles && cartesian) merged.series = [...asArray(merged.series), handlesSeries(mode)]
+      unready()
       setOptionNamed(instance, merged, { notMerge: true })
       countSetOption(true)
       if (cartesian && !frozen.current) {
@@ -281,6 +302,7 @@ export function EChart({
     if (patch || withHandles) {
       const p = { ...(patch ?? {}) } as Plain
       if (withHandles) p.series = [...asArray(p.series), handlesPatch(handles)]
+      unready()
       setOptionNamed(instance, p)
       countSetOption(false)
     }
@@ -337,6 +359,7 @@ export function EChart({
     })
     observer.observe(el)
     return () => {
+      cancelAnimationFrame(watch.current)
       observer.disconnect()
       pointer.detach()
       detachHandles()
@@ -610,7 +633,7 @@ function handlesPatch(handles: Handle[]) {
   // end, where the right margin cannot clip it.
   return {
     id: HANDLES_ID,
-    data: handles.flatMap((h) => (h.kind === 'point' ? [h.at] : [])),
+    data: handles.flatMap((h) => (h.kind === 'point' ? [h.symbol ? { value: h.at, symbol: h.symbol } : h.at] : [])),
     markLine: {
       data: handles.flatMap((h) =>
         h.kind === 'point'

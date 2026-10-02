@@ -267,13 +267,21 @@ function* files(dir: string, pattern = /\.tsx?$/): Generator<string> {
   }
 }
 
-// Static imports and re-exports (`from '…'`), side-effect imports and `import('…')` type queries, with the named
-// bindings when there are any. A specifier has no whitespace, which keeps string literals in prose out.
+// Static imports and re-exports (`from '…'`, with a default binding before the braces too), side-effect imports and
+// `import('…')` type queries, with the named bindings when there are any. A specifier has no whitespace, which keeps
+// string literals in prose out.
 const statements =
-  /(?:\b(?:import|export)\s+(?:type\s+)?(?:\{([^}]*)\}\s*from\s*)?|\bfrom\s*|\bimport\s*\(\s*|^\s*import\s+)['"]([^'"\s]+)['"]/gm
+  /(?:\b(?:import|export)\s+(?:type\s+)?(?:(?:[\w$]+\s*,\s*)?\{([^}]*)\}\s*from\s*)?|\bfrom\s*|\bimport\s*\(\s*|^\s*import\s+)['"]([^'"\s]+)['"]/gm
+/** `import(x)` with a computed specifier, which no static check can follow. */
+const dynamicImport = /\bimport\s*\(\s*[^'"\s)]/g
 
 function* imports(file: string): Generator<{ spec: string; names: string[] | null; where: string }> {
   const text = fs.readFileSync(file, 'utf8')
+  if (file.startsWith(coreSrc + path.sep) || file.startsWith(appsSrc + path.sep))
+    for (const m of text.matchAll(dynamicImport))
+      errors.push(
+        `${path.relative(root, file)}:${text.slice(0, m.index).split('\n').length}: import() with a computed specifier`,
+      )
   for (const match of text.matchAll(statements)) {
     const line = text.slice(0, match.index).split('\n').length
     const names =
@@ -492,6 +500,26 @@ for (const file of files(path.join(coreDir, 'test')))
   for (const { spec, where } of imports(file))
     if (spec.startsWith('aifn-applied'))
       errors.push(`${where}: a core test imports the application '${spec}'; test that combination in applications`)
+
+// Tests and benchmarks (both packages) import the packages by their public paths, not by a relative path into `src`.
+// The exceptions test helpers that are deliberately not exported.
+const privateTestImports: Record<string, string> = {
+  'aifn-js/core/test/foundation/trace/protocol.test.ts': 'the runners’ shared protocol helpers are internal',
+  'aifn-js/applications/test/data/real/hyphenation.test.ts': 'checks the vendored word list against its source',
+}
+for (const dir of [path.join(coreDir, 'test'), path.join(coreDir, 'bench'), path.join(appsDir, 'test')]) {
+  if (!fs.existsSync(dir)) continue
+  for (const file of files(dir)) {
+    const rel = path.relative(root, file)
+    for (const { spec, where } of imports(file)) {
+      if (!spec.startsWith('.')) continue
+      const to = path.resolve(path.dirname(file), spec)
+      const intoSrc = [coreSrc, appsSrc].some((s) => to === s || to.startsWith(s + path.sep))
+      if (intoSrc && !(rel in privateTestImports))
+        errors.push(`${where}: '${spec}' reaches into src by a relative path; import the public 'aifn/…' path`)
+    }
+  }
+}
 
 // Tests mirror the tree (module-tree §5.5): a test file sits in `test/<node path>/`. Only checks of the whole package
 // sit at `test/` itself (listed here), beside shared helpers such as `fixtures.ts`. Fixtures sit in

@@ -8,6 +8,7 @@ import { dense, unwrap, type Tensor, type Value, type Vector } from 'aifn/founda
 import type { Algorithm, Scalar } from 'aifn/foundation/contracts'
 import { combine, evaluate, evaluateValue, initialValue, stages, type ButcherTableau } from './explicit'
 import type { InitialValue, OdeState, Rhs } from './types'
+import { DomainError } from 'aifn/foundation/errors'
 
 const { allFinite } = dense
 type F64 = dense.F64
@@ -120,7 +121,7 @@ export function startingStep(
  */
 export function dormandPrince(f: Rhs, options: AdaptiveOptions): Algorithm<InitialValue, AdaptiveState> {
   const { tEnd, rtol = 1e-3, atol = 1e-6, maxStepSize: hMax = Infinity } = options
-  if (!Number.isFinite(tEnd)) throw new Error('dormandPrince: tEnd must be finite')
+  if (!Number.isFinite(tEnd)) throw new DomainError('dormandPrince', 'dormandPrince: tEnd must be finite')
   const tab = DORMAND_PRINCE
   const name = tab.name
   const errW = tab.b.map((b, i) => b - tab.bHat![i])

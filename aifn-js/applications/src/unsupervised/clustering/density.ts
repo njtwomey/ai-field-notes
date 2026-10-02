@@ -16,6 +16,7 @@ import { trace, type Algorithm } from 'aifn/foundation/trace'
 import { mat, matrix, pairwise, sq, vec } from './util'
 import { defineModel } from 'aifn/learning/estimators'
 import { int, oneOf, real, space } from 'aifn/foundation/space'
+import { DomainError } from 'aifn/foundation/errors'
 
 // ── DBSCAN ───────────────────────────────────────────────────────────────────────────────────────────────────────
 
@@ -145,7 +146,7 @@ export function optics(params: { minSamples?: number } = {}): Estimator<Dataset<
     params: { minSamples },
     fit({ x }) {
       const { n } = matrix(x, 'optics')
-      if (minSamples > n) throw new Error('optics: minSamples exceeds the number of points')
+      if (minSamples > n) throw new DomainError('optics', 'optics: minSamples exceeds the number of points')
       const D = pairwise(x)
       const core = new Float64Array(n)
       for (let i = 0; i < n; i++) {

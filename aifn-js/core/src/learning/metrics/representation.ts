@@ -8,6 +8,7 @@
 
 import { defineMetric, dense, nonEmpty } from './core'
 import type { Rows } from './core'
+import { DomainError, ShapeError } from 'aifn/foundation/errors'
 
 /** Options of `alignment`. */
 export type AlignmentOptions = {
@@ -33,7 +34,7 @@ export const alignment = defineMetric(
     const a = dense(x, 'alignment x')
     const b = dense(y, 'alignment y')
     if (a.rows !== b.rows || a.cols !== b.cols)
-      throw new Error(`metrics: alignment: x is ${a.rows} × ${a.cols} but y is ${b.rows} × ${b.cols}`)
+      throw new ShapeError('metrics', `metrics: alignment: x is ${a.rows} × ${a.cols} but y is ${b.rows} × ${b.cols}`)
     nonEmpty(a.rows, 'alignment')
     let total = 0
     for (let i = 0; i < a.rows; i++) {
@@ -71,7 +72,7 @@ export const uniformity = defineMetric(
   },
   (x: Rows, { t = 2 }: UniformityOptions = {}): number => {
     const a = dense(x, 'uniformity x')
-    if (a.rows < 2) throw new Error('metrics: uniformity needs at least two rows')
+    if (a.rows < 2) throw new DomainError('metrics', 'metrics: uniformity needs at least two rows')
     const logs: number[] = []
     for (let i = 0; i < a.rows; i++)
       for (let j = i + 1; j < a.rows; j++) {

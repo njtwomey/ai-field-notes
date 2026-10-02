@@ -54,6 +54,7 @@ import {
 import { trace, type Trace } from 'aifn/foundation/trace'
 import { defineModel } from 'aifn/learning/estimators'
 import { bool, int, real, space } from 'aifn/foundation/space'
+import { DomainError, ShapeError } from 'aifn/foundation/errors'
 
 const LOG_2PI = Math.log(2 * Math.PI)
 
@@ -86,7 +87,7 @@ function flat(t: Tensor): Float64Array {
 /** y as a vector [n]. */
 function targets(y: Tensor): Tensor {
   if (y.shape.length === 2 && y.shape[1] === 1) return reshape(y, [y.shape[0]])
-  if (y.shape.length !== 1) throw new Error(`gp: targets must be [n], got shape [${y.shape.join(', ')}]`)
+  if (y.shape.length !== 1) throw new ShapeError('gp', `gp: targets must be [n], got shape [${y.shape.join(', ')}]`)
   return y
 }
 
@@ -274,11 +275,11 @@ export function gpPosterior<P extends KernelParams>(
   options: { noiseVariance?: number; mean?: number } = {},
 ): GpPosterior<P> {
   const { noiseVariance = 0, mean = 0 } = options
-  if (!(noiseVariance >= 0)) throw new Error('gpPosterior: noiseVariance must be ≥ 0')
+  if (!(noiseVariance >= 0)) throw new DomainError('gpPosterior', 'gpPosterior: noiseVariance must be ≥ 0')
   const X = asRows(x) as Tensor
   const Y = targets(y)
   const n = X.shape[0]
-  if (Y.shape[0] !== n) throw new Error(`gpPosterior: ${n} inputs but ${Y.shape[0]} targets`)
+  if (Y.shape[0] !== n) throw new ShapeError('gpPosterior', `gpPosterior: ${n} inputs but ${Y.shape[0]} targets`)
   const r = sub(Y, mean) as Tensor
   let L: Tensor
   let jitter = 0
@@ -445,7 +446,7 @@ export function fitGp<P extends KernelParams>(
   const starts: number[][] = [start0]
   if (restarts > 0) {
     const s = options.stream
-    if (!s) throw new Error('fitGp: restarts need a stream')
+    if (!s) throw new DomainError('fitGp', 'fitGp: restarts need a stream')
     for (let r = 0; r < restarts; r++) {
       const shift = toFlat(uniform(child(s, 'restart', r), -2, 2, { shape: [start0.length] }) as Tensor)
       starts.push(start0.map((v, i) => v + shift[i]))

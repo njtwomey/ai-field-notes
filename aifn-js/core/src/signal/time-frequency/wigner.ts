@@ -13,6 +13,7 @@ import type { Scalar, Size, TimeFrequency } from 'aifn/foundation/contracts'
 import { windowValues, type WindowInput } from 'aifn/signal/windows'
 import { readSamples, timeFrequency, type SignalInput } from '../signal'
 import { hilbert } from './hilbert'
+import { DomainError } from 'aifn/foundation/errors'
 
 /** Options of `wignerVille`. */
 export type WignerOptions = {
@@ -44,7 +45,7 @@ function oddWindow(input: WindowInput | undefined, length: Size | undefined, whe
     typeof input === 'string' || (typeof input === 'object' && 'name' in input)
       ? (length ?? 63)
       : (input as ArrayLike<number>).length
-  if (L % 2 !== 1) throw new RangeError(`${where}: smoothing windows must have odd length`)
+  if (L % 2 !== 1) throw new DomainError(where, `${where}: smoothing windows must have odd length`)
   return windowValues(input, L, false)
 }
 

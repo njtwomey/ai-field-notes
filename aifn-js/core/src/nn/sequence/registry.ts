@@ -23,17 +23,6 @@ fn(
 )
 fn(
   {
-    key: 'discretiseSsm',
-    name: 'State-space discretisation',
-    role: 'transform',
-    summary: 'Ā and B̄ of x′ = Ax + Bu sampled with step Δ by zero-order hold, bilinear or Euler; differentiable.',
-    notes: ssmNotes,
-    cite: ['gu2022s4'],
-  },
-  ssm.discretiseSsm,
-)
-fn(
-  {
     key: 'discretiseDiagonal',
     name: 'Diagonal state-space discretisation',
     role: 'transform',

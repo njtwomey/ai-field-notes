@@ -9,6 +9,7 @@ import { fromData, type Matrix, type Vector } from 'aifn/foundation/tensor'
 import type { Scalar, Size } from 'aifn/foundation/contracts'
 import { TABLEAUX, type ButcherTableau } from './explicit'
 import { DORMAND_PRINCE } from './adaptive'
+import { DomainError } from 'aifn/foundation/errors'
 
 /** A complex number as [re, im]. */
 type C = [number, number]
@@ -138,7 +139,7 @@ export function amplification(method: StabilityMethod, re: Scalar, im: Scalar): 
       : method === 'dormand-prince'
         ? DORMAND_PRINCE
         : (TABLEAUX as Record<string, ButcherTableau | undefined>)[method]
-  if (!tab) throw new Error(`amplification: unknown method ${String(method)}`)
+  if (!tab) throw new DomainError('amplification', `amplification: unknown method ${String(method)}`)
   const r = rkStability(tab, z)
   return Math.hypot(r[0], r[1])
 }

@@ -38,6 +38,7 @@ import {
 } from 'aifn/foundation/tensor'
 import { mixtureDensityNll } from 'aifn/learning/losses'
 import type { Propagation, Svfm, SvfmParams } from './model'
+import { DomainError } from 'aifn/foundation/errors'
 
 /** π(tᵢ) as [K, B] weights (from log π [B, K]). */
 const weightsAt = (p: Propagation, i: number): Value => permute(exp(p.logWeights[i]), [1, 0])
@@ -162,8 +163,11 @@ export type SvfmLossParts = { total: Value; predictive: Value; transport: Value;
 /** Refuse loss settings the paper rules out: FLoss with TLoss or VLoss (§4.1.3). */
 export function checkLossSettings(losses: SvfmLossSettings): void {
   if (losses.forecast && (losses.transport || losses.variance))
-    throw new RangeError('svfm: FLoss penalises deviation from the path, so it cannot be combined with TLoss or VLoss')
-  if (losses.lambda !== undefined && !(losses.lambda >= 0)) throw new RangeError('svfm: λ must be ≥ 0')
+    throw new DomainError(
+      'svfm',
+      'svfm: FLoss penalises deviation from the path, so it cannot be combined with TLoss or VLoss',
+    )
+  if (losses.lambda !== undefined && !(losses.lambda >= 0)) throw new DomainError('svfm', 'svfm: λ must be ≥ 0')
 }
 
 /**
@@ -179,7 +183,7 @@ export function svfmObjective(model: Svfm, losses: SvfmLossSettings = {}) {
   const predictive = losses.predictive ?? 'auto'
   const squared = predictive === 'squared-error' || (predictive === 'auto' && single)
   if (squared && model.options.components > 1)
-    throw new RangeError('svfm: the squared error needs a single component (K = 1)')
+    throw new DomainError('svfm', 'svfm: the squared error needs a single component (K = 1)')
   const ell = (params: SvfmParams, p: Propagation, i: number, y: Value) =>
     squared ? squaredErrorAt(model, p, i, y) : mixtureDensityLoss(model, params, p, i, y)
   return (params: SvfmParams, batch: SvfmBatch, onSolve?: Parameters<Svfm['propagate']>[3]): SvfmLossParts => {
@@ -188,7 +192,7 @@ export function svfmObjective(model: Svfm, losses: SvfmLossSettings = {}) {
     let pred: Value
     if (batch.labels) pred = classMixtureLoss(model, params, p, batch.labels, model.options.classes)
     else if (forecast) {
-      if (!batch.path) throw new Error('svfm: FLoss needs path targets')
+      if (!batch.path) throw new DomainError('svfm', 'svfm: FLoss needs path targets')
       pred = 0
       for (let i = 1; i <= T; i++) {
         const yi = reshape(slice(batch.path, null, [i, i + 1], null), [batch.path.shape[0], model.options.dim])
@@ -200,7 +204,7 @@ export function svfmObjective(model: Svfm, losses: SvfmLossSettings = {}) {
         (batch.path
           ? reshape(slice(batch.path, null, [T, T + 1], null), [batch.path.shape[0], model.options.dim])
           : null)
-      if (!y) throw new Error('svfm: no targets')
+      if (!y) throw new DomainError('svfm', 'svfm: no targets')
       pred = ell(params, p, T, y)
     }
     const tl = transport ? transportLoss(p) : 0

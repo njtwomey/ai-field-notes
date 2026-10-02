@@ -1,6 +1,7 @@
 import type { Tensor } from 'aifn/foundation/tensor'
 import { toSequence, vectorOf, type Data } from './input'
 import { correlation, requireSameLength } from './descriptive'
+import { DomainError } from 'aifn/foundation/errors'
 
 /**
  * How `ranks` treats ties, as in `scipy.stats.rankdata`:
@@ -32,7 +33,8 @@ export function ranks(xData: Data, ties: TiePolicy = 'average'): Tensor {
 
 function ranksOf(x: ArrayLike<number>, ties: TiePolicy): Float64Array {
   const n = x.length
-  for (let i = 0; i < n; i++) if (Number.isNaN(x[i])) throw new Error('stats: ranks of data containing NaN')
+  for (let i = 0; i < n; i++)
+    if (Number.isNaN(x[i])) throw new DomainError('stats', 'stats: ranks of data containing NaN')
   const order = argsortOf(x)
   const out = new Float64Array(n)
   let dense = 0

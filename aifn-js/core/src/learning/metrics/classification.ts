@@ -29,6 +29,7 @@ import {
   type Labels,
   type Rows,
 } from './core'
+import { ShapeError } from 'aifn/foundation/errors'
 
 /** Labels, or for multi-label metrics an n × L matrix of 0/1 (rows are cases, columns labels). */
 export type ClassificationInput = Labels | Rows
@@ -337,7 +338,7 @@ export type KappaWeights = 'none' | 'linear' | 'quadratic' | Rows
  */
 export function kappaFromTable(table: Rows, weights: KappaWeights = 'none'): number {
   const { rows: K, cols, data: c } = dense(table, 'kappaFromTable')
-  if (K !== cols) throw new Error('metrics: kappaFromTable needs a square table')
+  if (K !== cols) throw new ShapeError('metrics', 'metrics: kappaFromTable needs a square table')
   const w = new Float64Array(K * K)
   if (typeof weights === 'string') {
     for (let j = 0; j < K; j++)
@@ -345,7 +346,7 @@ export function kappaFromTable(table: Rows, weights: KappaWeights = 'none'): num
         w[j * K + k] = weights === 'none' ? (j === k ? 0 : 1) : weights === 'linear' ? Math.abs(j - k) : (j - k) ** 2
   } else {
     const m = dense(weights, 'kappa weights')
-    if (m.rows !== K || m.cols !== K) throw new Error('metrics: kappa weights must match the table')
+    if (m.rows !== K || m.cols !== K) throw new ShapeError('metrics', 'metrics: kappa weights must match the table')
     w.set(m.data)
   }
   const row = new Float64Array(K)

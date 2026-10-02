@@ -12,7 +12,7 @@ import { add, argmax, fromData, logsumexp, neg, toFlat, unwrap, type Tensor } fr
 import { softmax } from 'aifn/numerics/special'
 import { Player } from '@lab/controls'
 import { Figure } from '@lab/layout'
-import { call, choice, float, int, row, slider, useFigureState, type Task } from '@lab/state'
+import { call, choice, float, int, row, slider, toggle, useFigureState, type Task } from '@lab/state'
 import { formatValue, TrainControls, useTrainedRun } from '@lab/views'
 import { Curve, Handle, Histogram, Plot, Plots, Points, Raster, Readout, useAxis } from '@lab/viz'
 
@@ -74,7 +74,7 @@ export function JemShowcase() {
         'moons',
         { label: 'data' },
       ),
-      hidden: choice([32, 64], 64, { label: 'hidden width (2 layers, SiLU)' }),
+      hidden: int(64, { ge: 4, le: 256, suggestions: [32, 64], label: 'hidden width (2 layers, SiLU)' }),
       steps: int(600, { ge: 1, suggestions: [300, 600, 1000], label: 'updates' }),
       seed: int(1, { label: 'seed', ge: 0, le: 9999 }),
     }),
@@ -103,6 +103,7 @@ export function JemShowcase() {
       ),
       amount: slider(-3, 3, 0, { label: 'a', step: 0.1 }),
     }),
+    show: row('4 · show', { boundary: toggle(true, 'decision boundaries') }),
     px: slider(-3, 3, 0.5, { step: 0.01, onChart: true }),
     py: slider(-3, 3, 0.25, { step: 0.01, onChart: true }),
   })
@@ -236,6 +237,7 @@ export function JemShowcase() {
           scale="categorical"
           fillOpacity={0.22}
           categoryNames={names}
+          boundary={state.show.boundary}
         />
       )}
       {data && <Points name="training points" x={data.x} y={data.y} group={data.group} groupNames={names} thin />}
@@ -311,11 +313,12 @@ export function JemShowcase() {
           aifn jemRun: two MLP classifiers (2 → {settings.options.hidden?.[0]} → {settings.options.hidden?.[0]} → K,
           SiLU), from the same initial parameters and minibatches; one trained by softmax cross-entropy, one by JEM
           (cross-entropy plus persistent contrastive divergence on E(x) = −logsumexp f(x), negatives by short-run
-          Langevin from a replay buffer). Rows: decision regions; the energy with Langevin samples of p(x) started
-          uniform on the box (ink); samples of each p(x | y) ∝ exp f(x)[y]; the energy at test points against points on
-          a far shell (3 ≤ ‖x‖ ≤ 4). The logit shift adds c(x) to both models&apos; logits: the regions and p(y | x) at
-          the probe do not move while the energy does. The true energy −log p(x) is drawn from the generator&apos;s
-          known densities. Drag the probe on the region plots; play the checkpoints or drag the update marker.
+          Langevin from a replay buffer). Rows: decision regions (with the decision boundaries on, ink lines where the
+          argmax class changes); the energy with Langevin samples of p(x) started uniform on the box (ink); samples of
+          each p(x | y) ∝ exp f(x)[y]; the energy at test points against points on a far shell (3 ≤ ‖x‖ ≤ 4). The logit
+          shift adds c(x) to both models&apos; logits: the regions and p(y | x) at the probe do not move while the
+          energy does. The true energy −log p(x) is drawn from the generator&apos;s known densities. Drag the probe on
+          the region plots; play the checkpoints or drag the update marker.
         </>
       }
     >

@@ -9,6 +9,7 @@ import { fromData, imagPart, realPart, tensor, toFlat } from 'aifn/foundation/te
 import type { Scalar, Size } from 'aifn/foundation/contracts'
 import { getWindow, type WindowSpec } from 'aifn/signal/windows'
 import { complexValues, readSamples, timeFrequency, type SignalInput, type TimeFrequency } from '../signal'
+import { DomainError } from 'aifn/foundation/errors'
 
 /** Options for `cqt`. */
 export type CqtOptions = {
@@ -46,13 +47,15 @@ export function cqt(x: SignalInput, options: CqtOptions): TimeFrequency {
   const fs = s.fs
   const b = options.binsPerOctave ?? 12
   const fmin = options.fmin
-  if (!(fmin > 0 && fmin < fs / 2)) throw new RangeError(`${where}: fmin must lie in (0, fs/2)`)
-  if (!(Number.isInteger(b) && b >= 1)) throw new RangeError(`${where}: binsPerOctave must be a positive integer`)
+  if (!(fmin > 0 && fmin < fs / 2)) throw new DomainError(where, `${where}: fmin must lie in (0, fs/2)`)
+  if (!(Number.isInteger(b) && b >= 1))
+    throw new DomainError(where, `${where}: binsPerOctave must be a positive integer`)
   const Q = 1 / (2 ** (1 / b) - 1)
   const K = options.bins ?? Math.ceil(b * Math.log2(fs / 2 / fmin))
-  if (!(Number.isInteger(K) && K >= 1)) throw new RangeError(`${where}: bins must be a positive integer`)
+  if (!(Number.isInteger(K) && K >= 1)) throw new DomainError(where, `${where}: bins must be a positive integer`)
   const freqs = Array.from({ length: K }, (_, k) => fmin * 2 ** (k / b))
-  if (freqs[K - 1] >= fs / 2) throw new RangeError(`${where}: the top bin ${freqs[K - 1]} lies at or above Nyquist`)
+  if (freqs[K - 1] >= fs / 2)
+    throw new DomainError(where, `${where}: the top bin ${freqs[K - 1]} lies at or above Nyquist`)
   const lengths = freqs.map((f) => Math.round((Q * fs) / f))
   const N = nextPowerOfTwo(lengths[0])
   const hop = options.hop ?? Math.max(1, Math.floor(lengths[K - 1] / 4))

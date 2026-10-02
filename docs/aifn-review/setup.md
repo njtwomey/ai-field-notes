@@ -101,3 +101,17 @@ Open, each **S**:
 - `test/numerics/special/special.test.ts > normalLogIntervalProbability` failed (3.9e-11 > 1e-13) while
   `numerics/special/{erf,normal}.ts` were being edited by another reviewer (modified 18:08). That file is outside this
   area.
+
+## Status update (2026-10-02, overnight hygiene)
+
+- Done: test and bench trees are scanned (no relative imports into `src`, with a two-entry allow-list); the import
+  regex reads `import def, { a }` and src fails on a computed `import()`; the lab's import boundary runs in `make lint`
+  (`node aifn-lab/check.ts --imports-only`); generators pass Pyright and ruff (in `lint`/`typecheck`);
+  `make fixtures-check` regenerates in memory and reports drift; the plan's runner line is fixed; `make check` runs
+  lint before doctor; `make aifn-package` builds a publishable `aifn` (ES entries per node, declarations,
+  `dist/package.json`) without changing the workspace.
+- Left: the alias/transitional machinery (kept for the next tree move), a `src` tsconfig without node types (core uses
+  `performance` and `setTimeout`; needs a lib decision), merging the vitest projects and tagging the DQN test (test
+  infrastructure other agents relied on tonight), `_meta` version blocks in fixtures (`uv.lock` pins the versions; a
+  block would rewrite every fixture on each upgrade). The root tsconfig `paths` stay: editors and the shadcn CLI read
+  them.

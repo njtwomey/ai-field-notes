@@ -13,6 +13,7 @@ import { fft, irfft, rfft, rfftfreq } from 'aifn/foundation/fourier'
 import type { Scalar, Size, Spectrum, TimeFrequency } from 'aifn/foundation/contracts'
 import { windowValues, type WindowInput } from 'aifn/signal/windows'
 import { complexValues, powerUnit, readSamples, spectrum, timeFrequency, type SignalInput } from '../signal'
+import { DomainError } from 'aifn/foundation/errors'
 
 /** Detrending of each segment before its transform. */
 export type Detrend = 'constant' | 'linear' | false
@@ -79,9 +80,11 @@ export function segmentTransforms(
   o: Required<Omit<SegmentOptions, 'window'>> & { window: WindowInput },
 ): Segmented {
   const { fs, nperseg, noverlap, nfft, detrend, scaling, onesided } = o
-  if (nperseg < 1 || nperseg > x.length) throw new RangeError(`nperseg must be in [1, ${x.length}], got ${nperseg}`)
-  if (noverlap < 0 || noverlap >= nperseg) throw new RangeError(`noverlap must be in [0, nperseg), got ${noverlap}`)
-  if (nfft < nperseg) throw new RangeError('nfft must be at least nperseg')
+  if (nperseg < 1 || nperseg > x.length)
+    throw new DomainError('segmentTransforms', `nperseg must be in [1, ${x.length}], got ${nperseg}`)
+  if (noverlap < 0 || noverlap >= nperseg)
+    throw new DomainError('segmentTransforms', `noverlap must be in [0, nperseg), got ${noverlap}`)
+  if (nfft < nperseg) throw new DomainError('segmentTransforms', 'nfft must be at least nperseg')
   const win = windowValues(o.window, nperseg, true)
   let sumW = 0
   let sumW2 = 0
@@ -493,7 +496,7 @@ export interface Dpss {
  * energy; even tapers have a positive sum, odd tapers start with a positive lobe (Percival and Walden, p. 379).
  */
 export function dpss(n: Size, nw: Scalar, k: Size): Dpss {
-  if (!(k >= 1 && k <= n)) throw new RangeError(`dpss: need 1 ≤ k ≤ n, got k = ${k}`)
+  if (!(k >= 1 && k <= n)) throw new DomainError('dpss', `dpss: need 1 ≤ k ≤ n, got k = ${k}`)
   const w = nw / n
   const d = Float64Array.from({ length: n }, (_, i) => ((n - 1 - 2 * i) / 2) ** 2 * Math.cos(2 * Math.PI * w))
   const e = Float64Array.from({ length: n - 1 }, (_, i) => ((i + 1) * (n - i - 1)) / 2)

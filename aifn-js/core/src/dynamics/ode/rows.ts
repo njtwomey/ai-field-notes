@@ -9,6 +9,7 @@
 
 import type { Scalar, Size } from 'aifn/foundation/contracts'
 import { DORMAND_PRINCE } from './adaptive'
+import { DomainError, ShapeError } from 'aifn/foundation/errors'
 
 /**
  * The field on the rows still integrating: `t` their times [m], `x` their states [m × d] row-major and `rows` their
@@ -69,9 +70,12 @@ const MAX_FACTOR = 10
  */
 export function dormandPrinceRows(f: RowsRhs, x0: ArrayLike<number>, d: Size, options: RowsSolveOptions): RowsSolution {
   const { t0 = 0, tEnd, rtol = 1e-3, atol = 1e-6, maxSteps = 10_000 } = options
-  if (!Number.isFinite(tEnd) || !Number.isFinite(t0)) throw new Error('dormandPrinceRows: t0 and tEnd must be finite')
-  if (!(Number.isInteger(d) && d >= 1)) throw new Error('dormandPrinceRows: d must be a positive integer')
-  if (x0.length % d !== 0) throw new Error('dormandPrinceRows: x0 must hold B rows of d values')
+  if (!Number.isFinite(tEnd) || !Number.isFinite(t0))
+    throw new DomainError('dormandPrinceRows', 'dormandPrinceRows: t0 and tEnd must be finite')
+  if (!(Number.isInteger(d) && d >= 1))
+    throw new DomainError('dormandPrinceRows', 'dormandPrinceRows: d must be a positive integer')
+  if (x0.length % d !== 0)
+    throw new ShapeError('dormandPrinceRows', 'dormandPrinceRows: x0 must hold B rows of d values')
   const B = x0.length / d
   const tab = DORMAND_PRINCE
   const S = tab.c.length
@@ -96,7 +100,10 @@ export function dormandPrinceRows(f: RowsRhs, x0: ArrayLike<number>, d: Size, op
     for (const r of rows) evaluations[r]++
     const v = f(t, z, rows)
     if (v.length !== rows.length * d)
-      throw new Error(`dormandPrinceRows: f returned ${v.length} values, expected ${rows.length * d}`)
+      throw new ShapeError(
+        'dormandPrinceRows',
+        `dormandPrinceRows: f returned ${v.length} values, expected ${rows.length * d}`,
+      )
     return Float64Array.from(v)
   }
 

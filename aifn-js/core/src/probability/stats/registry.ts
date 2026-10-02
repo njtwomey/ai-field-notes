@@ -12,6 +12,7 @@ import * as power from './power'
 import * as quantile from './quantile'
 import * as ranks from './ranks'
 import * as resampling from './resampling'
+import * as robust from './robust'
 import * as sequence from './sequence'
 
 const fn = definer<FunctionInfo>('function', 'probability/stats')
@@ -288,6 +289,31 @@ fn(
   power.yeoJohnsonLambda,
 )
 
+// ── Robust location and scatter ──────────────────────────────────────────────────────────────────────────────────────
+
+fn(
+  {
+    key: 'minimumCovarianceDeterminant',
+    name: 'Minimum covariance determinant',
+    summary: 'Robust mean and covariance from the h-subset with the smallest determinant (FastMCD), reweighted.',
+    role: 'estimator',
+    notes: ['mahalanobis-distance-outliers', 'shrinkage-covariance-estimation'],
+    cite: ['rousseeuw1984', 'rousseeuw1999'],
+  },
+  robust.minimumCovarianceDeterminant,
+)
+fn(
+  {
+    key: 'squaredMahalanobis',
+    name: 'Squared Mahalanobis distances',
+    tex: '(\\mathbf{x}_i - \\boldsymbol{\\mu})^\\top \\Sigma^{-1} (\\mathbf{x}_i - \\boldsymbol{\\mu})',
+    summary: 'The squared Mahalanobis distance of every row under a location and covariance, by a Cholesky solve.',
+    role: 'transform',
+    notes: ['mahalanobis-distance-outliers'],
+  },
+  robust.squaredMahalanobis,
+)
+
 /** The functions of the module, keyed by name. */
 export const statsFunctions: Readonly<Record<string, Entry<(...args: never[]) => unknown, FunctionInfo>>> =
   entries<FunctionInfo>(
@@ -301,4 +327,5 @@ export const statsFunctions: Readonly<Record<string, Entry<(...args: never[]) =>
     acf,
     resampling,
     power,
+    robust,
   ) as Readonly<Record<string, Entry<(...args: never[]) => unknown, FunctionInfo>>>

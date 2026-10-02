@@ -63,3 +63,15 @@ Severity: **bug** (wrong result), **risk** (wrong or fragile at an edge, or a tr
 - `seek` now throws on a stream that disagrees with the trace's key. If the lab ever wants "trace key, ignore the
   stream", drop the stream there instead.
 - Nothing in `refinement.md`'s open core items overlaps these findings.
+
+## Status update (2026-10-02, overnight hygiene)
+
+- Done: 12 (`sumTo` follows the `float` rule like `sum`; `linearCombination` declares `float` and returns float32
+  only for float32 inputs), 13 (`logsumexp`: gradient 0 for an all-−∞ group, split over +∞ entries), 14 (p-norm
+  gradient 0 at x = 0 for p > 1), 16 (`define` throws on a second definition; `info` non-writable), 18 (`jvp`/`vjp`
+  check leaf shapes, `treeZip` checks leaf paths), 20 (`extend` with every `keep`), 21 (`space()` validates
+  conditions; a variants condition compares the case name), 22 (`map`/`map2` primitives built once), 23 (`jacobian`
+  auto mode reads the output size from a plain evaluation).
+- Left: 15 (the cache's lifetime depends on the sweep order of multi-output records; the leak is bounded per record and
+  a wrong drop would recompute or, worse, mis-route cotangents), 17 (the lab already full-reloads on aifn edits), 19
+  (edge-point lists and general-primitive dtype checks: M).

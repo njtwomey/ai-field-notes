@@ -1,6 +1,6 @@
 /**
- * `aifn-applied/unsupervised/embedding/manifold`: manifold learning: Isomap, locally linear embedding and Laplacian
- * eigenmaps.
+ * `aifn-applied/unsupervised/embedding/manifold`: manifold learning: Isomap, locally linear embedding, Laplacian
+ * eigenmaps, diffusion maps and self-organising maps.
  */
 
 export {
@@ -12,4 +12,6 @@ export {
   type LleModel,
   type SpectralEmbeddingModel,
 } from './manifold'
-export { manifoldFunctions } from './registry'
+export { diffusionMap, type DiffusionMapModel } from './diffusion'
+export { selfOrganisingMap, selfOrganisingMapSteps, somGrid, type SomModel, type SomParams, type SomState } from './som'
+export { manifoldAlgorithms, manifoldFunctions } from './registry'

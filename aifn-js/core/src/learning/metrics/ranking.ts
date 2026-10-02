@@ -23,6 +23,7 @@ import {
   type Data,
   type Rows,
 } from './core'
+import { ShapeError } from 'aifn/foundation/errors'
 
 /** Grades in rank order, or item relevance with scores, for one query (vectors) or several (matrices, rows as queries). */
 export type RankingInput = Data | Rows
@@ -42,10 +43,12 @@ function parse<O extends object>(a: RankingInput, b?: RankingInput | O, c?: O): 
   const relevance = rows(a)
   if (!scored) return { queries: relevance.map((grades) => ({ grades })), options }
   const scores = rows(b as RankingInput)
-  if (scores.length !== relevance.length) throw new Error('metrics: ranking: relevance and scores differ in queries')
+  if (scores.length !== relevance.length)
+    throw new ShapeError('metrics', 'metrics: ranking: relevance and scores differ in queries')
   const queries = relevance.map((rel, q) => {
     const s = scores[q]
-    if (s.length !== rel.length) throw new Error('metrics: ranking: relevance and scores differ in length')
+    if (s.length !== rel.length)
+      throw new ShapeError('metrics', 'metrics: ranking: relevance and scores differ in length')
     const order = orderDescending(s)
     const ties = new Int32Array(order.length)
     for (let r = 1; r < order.length; r++) ties[r] = ties[r - 1] + (s[order[r]] === s[order[r - 1]] ? 0 : 1)
@@ -155,19 +158,29 @@ export const hitRate = defineMetric(
   },
 )
 
+/** Options of `meanAveragePrecision`. */
+export type AveragePrecisionOptions = RecallOptions & {
+  /**
+   * The divisor of AP@k: `relevant` (default) is R, every relevant item (TREC's trec_eval); `cutoff` is min(R, k), so a
+   * perfect top k scores 1 even when R > k (the common AP@k of recommender and Kaggle evaluations).
+   */
+  normaliser?: 'relevant' | 'cutoff'
+}
+
 /**
  * Average precision of a ranking, (1/R) Σₖ P@k·relₖ, averaged over queries (MAP) (Manning et al. 2008;
  * mean-average-precision-and-mean-reciprocal-rank). R counts unretrieved relevant items when `totalRelevant` is given;
- * with `k`, only the top k ranks contribute.
+ * with `k`, only the top k ranks contribute, still divided by R unless `normaliser` is `cutoff` (then min(R, k)).
  */
 export const meanAveragePrecision = defineMetric(
   rankingInfo('meanAveragePrecision', 'Mean average precision', 'mean-average-precision-and-mean-reciprocal-rank'),
-  (a: RankingInput, b?: RankingInput | RecallOptions, c?: RecallOptions): number => {
+  (a: RankingInput, b?: RankingInput | AveragePrecisionOptions, c?: AveragePrecisionOptions): number => {
     const { queries, options } = parse(a, b, c)
     return meanOverQueries(
       queries,
       ({ grades }) => {
-        const R = options.totalRelevant ?? countRelevant(grades, grades.length)
+        const all = options.totalRelevant ?? countRelevant(grades, grades.length)
+        const R = options.normaliser === 'cutoff' && options.k !== undefined ? Math.min(all, options.k) : all
         let hits = 0
         let s = 0
         for (let i = 0; i < Math.min(options.k ?? grades.length, grades.length); i++)

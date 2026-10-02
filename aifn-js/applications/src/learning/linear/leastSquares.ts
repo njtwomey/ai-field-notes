@@ -12,6 +12,7 @@ import { withExpectation, withSampling } from 'aifn/learning/estimators'
 import { matrixShape, targetValues } from 'aifn/learning/estimators'
 import { defineModel } from 'aifn/learning/estimators'
 import { bool, real, space } from 'aifn/foundation/space'
+import { DomainError, ShapeError } from 'aifn/foundation/errors'
 
 const values = dense.data
 
@@ -63,14 +64,15 @@ export function linearRegression(
   params: LinearRegressionParams = {},
 ): Estimator<Supervised<Tensor, Tensor>, LinearRegressionModel> {
   const { l2 = 0, intercept = true } = params
-  if (!(l2 >= 0)) throw new Error('linearRegression: l2 must be non-negative')
+  if (!(l2 >= 0)) throw new DomainError('linearRegression', 'linearRegression: l2 must be non-negative')
   return {
     name: 'linear-regression',
     params: { l2, intercept },
     fit({ x, y }) {
       const [n, d] = matrixShape(x, 'linearRegression')
       const target = targetValues(y, 'linearRegression')
-      if (target.length !== n) throw new Error(`linearRegression: ${n} rows of x but ${target.length} targets`)
+      if (target.length !== n)
+        throw new ShapeError('linearRegression', `linearRegression: ${n} rows of x but ${target.length} targets`)
       const X = values(x)
       const xMean = new Float64Array(d)
       let yMean = 0
@@ -117,7 +119,8 @@ export function linearRegression(
       const weights = fromData(w, [d])
       const forward = (input: Tensor): Tensor => {
         const [m, cols] = matrixShape(input, 'linearRegression.forward')
-        if (cols !== d) throw new Error(`linearRegression: fitted on ${d} features, given ${cols}`)
+        if (cols !== d)
+          throw new ShapeError('linearRegression', `linearRegression: fitted on ${d} features, given ${cols}`)
         const Z = values(input)
         const out = new Float64Array(m)
         for (let i = 0; i < m; i++) {

@@ -12,9 +12,11 @@ import {
   withZero,
   type CommonProps,
   type HoverSeries,
+  type LayerContext,
   type Orient,
 } from '../layer'
 import { signedArea, signedParts } from '../probability'
+import { placeLabels, textWidth, toPixel, type Placement } from '../labels'
 
 type Values = ArrayLike<number>
 
@@ -104,7 +106,18 @@ export type PointsProps = CommonProps & {
   dense?: boolean
   /** Smaller, lighter marks, for many points in a small panel. */
   thin?: boolean
+  /**
+   * Text beside each point (a word map). Labels are placed greedily without overlap, in `labelPriority` order: each
+   * takes the first free spot right, left, above or below its point; one with no free spot is hidden and shows while
+   * its point is hovered. An `emphasis` layer's labels are bold, in ink, and always shown.
+   */
+  labels?: readonly (string | null | undefined)[]
+  /** Placement priority per point, higher first (e.g. frequency); default the order given. */
+  labelPriority?: Values
 }
+
+const LABEL_FONT = 10
+const STRONG_FONT = 12
 
 /** Scatter marks. Grouped points split by class (colour and shape); shapes may also vary on their own. */
 export const Points = defineLayer<PointsProps>({
@@ -121,6 +134,9 @@ export const Points = defineLayer<PointsProps>({
           : [p.name ?? 'points'],
   slotted: (p) => !p.group && !p.muted && !p.emphasis && !p.tone,
   canvas: (p) => !!p.dense || p.x.length > 4000,
+  // Labels are placed in pixels: rebuilt when the ranges or the plot's size change.
+  needsBox: (p) => !!p.labels,
+  needsPlot: (p) => !!p.labels,
   extent: (p) => ({ x: extentOf(p.x), y: extentOf(p.y) }),
   build: (p, ctx) => {
     const c = chrome(ctx.mode)
@@ -146,6 +162,13 @@ export const Points = defineLayer<PointsProps>({
         ],
       }
     }
+    const placement = p.labels ? placePointLabels(p, ctx) : null
+    const labelOf = (i: number) => {
+      const text = p.labels?.[i]
+      if (!text || !placement) return null
+      const at = placement[i]
+      return { name: text, label: { show: at.shown, position: at.position } }
+    }
     const shapeAt = (i: number) =>
       typeof p.shape === 'number' ? p.shape : p.shape ? p.shape[i] : p.group ? p.group[i] : p.emphasis ? 3 : 0
     // One series per (class, shape): ECharts gives a series one symbol.
@@ -156,7 +179,16 @@ export const Points = defineLayer<PointsProps>({
       const key = `${g}:${s}`
       let b = buckets.get(key)
       if (!b) buckets.set(key, (b = { g, s, data: [] }))
-      b.data.push(p.colors ? { value: [p.x[i], p.y[i]], itemStyle: { color: p.colors[i] } } : [p.x[i], p.y[i]])
+      const text = labelOf(i)
+      b.data.push(
+        p.colors || text
+          ? {
+              value: [p.x[i], p.y[i]],
+              ...(p.colors ? { itemStyle: { color: p.colors[i] } } : {}),
+              ...(text ?? {}),
+            }
+          : [p.x[i], p.y[i]],
+      )
     }
     // Every named class, and an ungrouped layer with no points, keeps its (empty) series: the legend entry stays, and a
     // live layer whose points come and go keeps one structure, so it is patched rather than redrawn.
@@ -172,7 +204,7 @@ export const Points = defineLayer<PointsProps>({
       })
     else if (!p.group && !p.shapeNames && buckets.size === 0)
       keep(null, typeof p.shape === 'number' ? p.shape : p.emphasis ? 3 : 0)
-    const size = p.size ?? (p.emphasis ? (p.thin ? 11 : 16) : p.thin ? 5 : MARKER_SIZE)
+    const size = markerSize(p)
     const series = [...buckets.entries()]
       .sort(([a], [b]) => (a < b ? -1 : 1))
       .map(([key, b]) => {
@@ -200,6 +232,21 @@ export const Points = defineLayer<PointsProps>({
                 borderColor: c.surface,
                 borderWidth: p.emphasis ? 2 : p.thin ? 0.5 : 1,
               },
+          ...(p.labels
+            ? {
+                // Shown per point as placed; a hidden label appears while its point is hovered.
+                label: {
+                  show: false,
+                  formatter: '{b}',
+                  distance: labelGap(p),
+                  color: p.emphasis ? c.ink : c.inkSecondary,
+                  fontWeight: p.emphasis ? 'bold' : 'normal',
+                  fontSize: p.emphasis ? STRONG_FONT : LABEL_FONT,
+                },
+                emphasis: { scale: false, label: { show: true } },
+                labelLayout: placement ? undefined : { hideOverlap: !p.emphasis },
+              }
+            : {}),
           z: p.emphasis ? 5 : 3,
         }
       })
@@ -215,6 +262,30 @@ export const Points = defineLayer<PointsProps>({
     }
   },
 })
+
+const markerSize = (p: PointsProps) => p.size ?? (p.emphasis ? (p.thin ? 11 : 16) : p.thin ? 5 : MARKER_SIZE)
+/** Pixels between a point and its label: clear of the marker. */
+const labelGap = (p: PointsProps) => Math.max(5, markerSize(p) / 2 + 2)
+
+/** Where each of a Points layer's labels goes, from the drawn box; null before the plot is measured. */
+function placePointLabels(p: PointsProps, ctx: LayerContext): Placement[] | null {
+  const labels = p.labels!
+  const n = p.x.length
+  if (p.emphasis) return Array.from({ length: n }, () => ({ position: 'right' as const, shown: true }))
+  if (!ctx.box || !ctx.plot || ctx.plot.width < 2 || ctx.plot.height < 2) return null
+  const { box, plot } = ctx
+  const px = Array.from({ length: n }, (_, i) => toPixel(p.x[i], box.x, plot.width, box.xLog))
+  const py = Array.from({ length: n }, (_, i) => plot.height - toPixel(p.y[i], box.y, plot.height, box.yLog))
+  const widths = Array.from({ length: n }, (_, i) => (labels[i] ? textWidth(labels[i]!, LABEL_FONT) : 0))
+  // Markers are obstacles too, so a label never covers another point.
+  const r = markerSize(p) / 2 + 1
+  return placeLabels(px, py, widths, LABEL_FONT + 2, {
+    priority: p.labelPriority,
+    bounds: plot,
+    gap: labelGap(p),
+    markers: { x: px, y: py, radius: r },
+  })
+}
 
 // ── Bars ─────────────────────────────────────────────────────────────────────────────────────────────────────────────
 

@@ -41,6 +41,7 @@ import {
   type Value,
 } from 'aifn/foundation/tensor'
 import type { Distribution, SampleOptions, Scalar, Stream } from 'aifn/foundation/contracts'
+import { DomainError } from 'aifn/foundation/errors'
 
 // ── Links ────────────────────────────────────────────────────────────────────────────────────────────────────────
 
@@ -99,7 +100,7 @@ const LINKS: Record<LinkName, Omit<Link, 'name'>> = {
 /** The link function by name (McCullagh and Nelder, 1989, §2.2.2). */
 export function link(name: LinkName): Link {
   const l = LINKS[name]
-  if (!l) throw new RangeError(`link: unknown link "${name}"`)
+  if (!l) throw new DomainError('link', `link: unknown link "${name}"`)
   return { name, ...l }
 }
 
@@ -308,7 +309,7 @@ export function inverseGaussianFamily(): Family {
  * mean is μ.
  */
 export function negativeBinomialFamily(theta: Scalar): Family {
-  if (!(theta > 0)) throw new RangeError('negativeBinomialFamily: θ must be positive')
+  if (!(theta > 0)) throw new DomainError('negativeBinomialFamily', 'negativeBinomialFamily: θ must be positive')
   // w · [log Γ(y + θ) − log Γ(θ) − log Γ(y + 1) + θ log(θ/(θ + μ)) + y log(μ/(θ + μ))].
   const logProb: Family['logProb'] = (y, mu, _phi, w = 1) => {
     const total = add(mu, theta)
@@ -360,18 +361,19 @@ export function family(name: FamilyName, params: { theta?: Scalar } = {}): Famil
     case 'negative-binomial':
       return negativeBinomialFamily(params.theta ?? 1)
   }
-  throw new RangeError(`family: unknown family "${name as string}"`)
+  throw new DomainError('family', `family: unknown family "${name as string}"`)
 }
 
 /**
  * The link by name or as given, checked against the family's `links`: a link outside them maps the mean space onto a
  * range the linear predictor cannot be held to (a logit for counts, an identity for probabilities), so a fit would
- * leave the mean space or diverge. Throws a RangeError naming the valid links.
+ * leave the mean space or diverge. Throws a `DomainError` naming the valid links.
  */
 export function checkLink(fam: Family, chosen: LinkName | Link = fam.defaultLink, where = 'likelihood'): Link {
   const g = typeof chosen === 'object' ? chosen : link(chosen)
   if (!fam.links.includes(g.name))
-    throw new RangeError(
+    throw new DomainError(
+      where,
       `${where}: the ${fam.name} family does not take the ${g.name} link; use one of ${fam.links.join(', ')}`,
     )
   return g

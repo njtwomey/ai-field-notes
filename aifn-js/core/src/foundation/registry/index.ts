@@ -4,7 +4,7 @@
  * module's namespaces into a frozen table keyed by `info.key`; `isEntry`. Registries are static and per module.
  */
 
-import { AifnError } from 'aifn/foundation/errors'
+import { AifnError, DomainError } from 'aifn/foundation/errors'
 import type {
   AlgorithmInfo,
   AlgorithmProblem,
@@ -57,9 +57,20 @@ export type {
   WindowInfo,
 }
 
-/** Attach `info` to `value` (the value itself is returned, with a frozen `info` added). */
+/**
+ * Attach `info` to `value` (the value itself is returned, with a frozen, non-writable `info` added). A value defined
+ * twice throws: a second `define` would silently replace the first entry's info (and its key in `entries`).
+ */
 export function define<T extends object, I extends Info>(info: I, value: T): Entry<T, I> {
-  return Object.assign(value, { info: Object.freeze({ ...info }) }) as Entry<T, I>
+  if (Object.prototype.hasOwnProperty.call(value, 'info')) {
+    const prior = (value as { info?: { kind?: unknown; key?: unknown } }).info
+    throw new DomainError(
+      'define',
+      `define: '${String(info.key)}' (${info.kind}) is already defined as '${String(prior?.key)}' (${String(prior?.kind)})`,
+    )
+  }
+  Object.defineProperty(value, 'info', { value: Object.freeze({ ...info }), enumerable: true, writable: false })
+  return value as Entry<T, I>
 }
 
 /** What a definition states: its info without `kind` and `module` (fixed by the definer), `stability` optional. */

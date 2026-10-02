@@ -9,6 +9,7 @@
 import type { Scalar } from 'aifn/foundation/contracts'
 import type { Tensor } from 'aifn/foundation/tensor'
 import { allValues, reduce, toSequence, vectorOf, type AxisOption, type Data } from './input'
+import { DomainError, ShapeError } from 'aifn/foundation/errors'
 
 /** Options for moments that have a population and a sample form. */
 export type SampleOption = {
@@ -17,12 +18,12 @@ export type SampleOption = {
 }
 
 function requireNonEmpty(x: ArrayLike<number>, what: string) {
-  if (x.length === 0) throw new Error(`stats: ${what} of an empty array`)
+  if (x.length === 0) throw new DomainError('stats', `stats: ${what} of an empty array`)
 }
 
 function requireSameLength(x: ArrayLike<number>, y: ArrayLike<number>, what: string) {
   if (x.length !== y.length)
-    throw new Error(`stats: ${what} needs arrays of equal length (${x.length} and ${y.length})`)
+    throw new ShapeError('stats', `stats: ${what} needs arrays of equal length (${x.length} and ${y.length})`)
 }
 
 /** A reduction's options with the axis given: the result is a tensor. */
@@ -103,11 +104,11 @@ export function weightedMean(xs: Data, ws: Data): number {
   let sw = 0
   let swx = 0
   for (let i = 0; i < x.length; i++) {
-    if (w[i] < 0) throw new Error('stats: weights must be non-negative')
+    if (w[i] < 0) throw new DomainError('stats', 'stats: weights must be non-negative')
     sw += w[i]
     swx += w[i] * x[i]
   }
-  if (!(sw > 0)) throw new Error('stats: weights must have a positive sum')
+  if (!(sw > 0)) throw new DomainError('stats', 'stats: weights must have a positive sum')
   return swx / sw
 }
 

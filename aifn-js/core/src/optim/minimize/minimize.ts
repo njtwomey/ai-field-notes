@@ -48,6 +48,7 @@ import type {
   VectorLike,
 } from 'aifn/foundation/contracts'
 import type { Tensor } from 'aifn/foundation/tensor'
+import { DomainError } from 'aifn/foundation/errors'
 
 /** Options of each method `minimize` can run, by name. */
 export type MethodOptions = {
@@ -119,7 +120,7 @@ export function methodAlgorithm<M extends Method>(
     'simulated-annealing': () => simulatedAnnealing(value, o),
     'cma-es': () => cmaEs(value, o),
   }
-  if (!Object.hasOwn(algorithms, method)) throw new Error(`minimize: unknown method "${method}"`)
+  if (!Object.hasOwn(algorithms, method)) throw new DomainError('minimize', `minimize: unknown method "${method}"`)
   return algorithms[method]()
 }
 

@@ -1,6 +1,7 @@
 /**
  * `aifn-applied/learning/preprocessing`: preprocessing transforms fitted with `fit({ x, y? })`: scalers, encoders,
- * imputers, power transforms, feature maps (polynomial, spline, random Fourier) and whitening.
+ * imputers, power transforms, feature maps (polynomial, spline, random Fourier) and whitening; and resamplers for
+ * imbalanced classes (random over- and under-sampling, SMOTE, borderline-SMOTE, ADASYN, Tomek links).
  */
 
 export { checkColumns, fitTransform, type FittedTransform, type Invertible, type Transformer } from './transformer'
@@ -47,4 +48,18 @@ export {
   type PowerLambda,
   type PowerTransform,
 } from './power'
+export {
+  adasyn,
+  adasynWeights,
+  borderlineSmote,
+  borderStatus,
+  randomOverSample,
+  randomUnderSample,
+  removeTomekLinks,
+  smote,
+  tomekLinks,
+  type BorderStatus,
+  type Resampled,
+  type SmoteOptions,
+} from './imbalanced'
 export { preprocessingFunctions } from './registry'

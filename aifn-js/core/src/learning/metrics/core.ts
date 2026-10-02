@@ -7,6 +7,7 @@
 import { copy, fromData, isTensor, type Tensor } from 'aifn/foundation/tensor'
 import { define, isEntry } from 'aifn/foundation/registry'
 import type { DataLike as Data, MetricInfo, MatrixLike as Rows, Stability } from 'aifn/foundation/contracts'
+import { DomainError, ShapeError } from 'aifn/foundation/errors'
 
 // Types defined once, in `aifn/foundation/contracts`.
 export type {
@@ -91,7 +92,7 @@ export function dense(x: Rows | Data, what: string): Dense {
   if (isTensor(x)) {
     if (x.shape.length === 2) return { rows: x.shape[0], cols: x.shape[1], data: values(x) }
     if (x.shape.length === 1) return { rows: x.shape[0], cols: 1, data: values(x) }
-    throw new Error(`metrics: ${what} needs a matrix, got shape [${x.shape.join(', ')}]`)
+    throw new ShapeError('metrics', `metrics: ${what} needs a matrix, got shape [${x.shape.join(', ')}]`)
   }
   const n = x.length
   if (n === 0) return { rows: 0, cols: 0, data: new Float64Array(0) }
@@ -102,7 +103,8 @@ export function dense(x: Rows | Data, what: string): Dense {
   const data = new Float64Array(n * cols)
   for (let i = 0; i < n; i++) {
     const r = rows[i]
-    if (r.length !== cols) throw new Error(`metrics: ${what}: row ${i} has ${r.length} values, expected ${cols}`)
+    if (r.length !== cols)
+      throw new ShapeError('metrics', `metrics: ${what}: row ${i} has ${r.length} values, expected ${cols}`)
     for (let j = 0; j < cols; j++) data[i * cols + j] = r[j]
   }
   return { rows: n, cols, data }
@@ -123,12 +125,13 @@ export function isArrayInput(x: unknown): x is Data {
 
 /** Throw unless two inputs have the same number of cases. */
 export function sameLength(a: { length: number }, b: { length: number }, what: string): void {
-  if (a.length !== b.length) throw new Error(`metrics: ${what}: inputs have ${a.length} and ${b.length} cases`)
+  if (a.length !== b.length)
+    throw new ShapeError('metrics', `metrics: ${what}: inputs have ${a.length} and ${b.length} cases`)
 }
 
 /** Throw on an empty input, where a mean would be 0/0. */
 export function nonEmpty(n: number, what: string): void {
-  if (n === 0) throw new Error(`metrics: ${what} needs at least one case`)
+  if (n === 0) throw new DomainError('metrics', `metrics: ${what} needs at least one case`)
 }
 
 // ── Labels ───────────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -210,7 +213,7 @@ export function weightedMeanOf(x: ArrayLike<number>, w?: ArrayLike<number>): num
 export function caseWeights(w: Data | undefined, n: number, what: string): Float64Array | undefined {
   if (w === undefined) return undefined
   const out = values(w)
-  if (out.length !== n) throw new Error(`metrics: ${what}: ${out.length} weights for ${n} cases`)
+  if (out.length !== n) throw new ShapeError('metrics', `metrics: ${what}: ${out.length} weights for ${n} cases`)
   return out
 }
 

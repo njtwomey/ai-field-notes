@@ -11,7 +11,6 @@ import {
   curveParameters,
   DESCENT_ABOVE,
   fuzzyGraph,
-  nearestNeighbourDescent,
   spectralLayout,
   jointProbabilities,
   perplexityCalibration,
@@ -20,6 +19,7 @@ import {
   umap,
   umapSteps,
 } from 'aifn-applied/unsupervised/embedding/neighbour'
+import { nearestNeighbourDescent } from 'aifn/numerics/neighbours'
 import { isomap, laplacianEigenmaps, locallyLinearEmbedding } from 'aifn-applied/unsupervised/embedding/manifold'
 import { rbf } from 'aifn/learning/kernels'
 import { blobs } from 'aifn-applied/data/synthetic'
@@ -163,7 +163,12 @@ describe('UMAP', () => {
     const v = dense.data(x)
     const k = 10
     const exact = fuzzyGraph(x, k + 1, { search: 'exact' })
-    const found = nearestNeighbourDescent(v, n, d, k, { stream: stream(1) })
+    const result = nearestNeighbourDescent(x, k, { stream: stream(1) })
+    const found = {
+      indices: result.indices.data as Int32Array,
+      distances: toFlat(result.distances),
+      rounds: result.rounds,
+    }
     const truth = toFlat(exact.neighbours)
     let hits = 0
     for (let i = 0; i < n; i++) {

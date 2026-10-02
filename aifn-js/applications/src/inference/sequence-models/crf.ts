@@ -19,6 +19,7 @@ import {
   type DiscreteFactor,
   type DiscreteFactorGraph,
 } from 'aifn/inference/model'
+import { ShapeError } from 'aifn/foundation/errors'
 
 /**
  * The structure of a linear-chain CRF (`aifn/graph/structured`): an undirected chain of labels y_n of length `N`,
@@ -54,14 +55,15 @@ export function linearChainCrf(
   const W = asMatrix(weights)
   const T = asMatrix(transitions)
   const K = W.shape[0]
-  if (T.shape[0] !== K || T.shape[1] !== K) throw new RangeError('linearChainCrf: transitions must be K × K')
+  if (T.shape[0] !== K || T.shape[1] !== K)
+    throw new ShapeError('linearChainCrf', 'linearChainCrf: transitions must be K × K')
   const s =
     start === undefined
       ? new Float64Array(K)
       : 'shape' in start
         ? Float64Array.from(start.data)
         : Float64Array.from(start)
-  if (s.length !== K) throw new RangeError('linearChainCrf: start must have length K')
+  if (s.length !== K) throw new ShapeError('linearChainCrf', 'linearChainCrf: start must have length K')
   return { weights: W, transitions: T, start: fromData(s, [K]) }
 }
 

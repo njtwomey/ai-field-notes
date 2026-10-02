@@ -12,6 +12,7 @@ import type { Estimator } from 'aifn/learning/estimators'
 import { gam, type GamData, type GamModel, type GamParams } from './model'
 import { defineModel } from 'aifn/learning/estimators'
 import { int, oneOf, real, space } from 'aifn/foundation/space'
+import { DomainError } from 'aifn/foundation/errors'
 
 /** A LAWS state. */
 export type ExpectileState = Status & {
@@ -57,7 +58,7 @@ export function expectileLaws(
   options: ExpectileLawsOptions = {},
 ): Algorithm<void, ExpectileState> {
   const { tau } = params
-  if (!(tau > 0 && tau < 1)) throw new Error('expectileGam: τ must be in (0, 1)')
+  if (!(tau > 0 && tau < 1)) throw new DomainError('expectileGam', 'expectileGam: τ must be in (0, 1)')
   const y = Float64Array.from(toFlat(data.y))
   const n = y.length
   const prior = data.weights ? Float64Array.from(toFlat(data.weights)) : new Float64Array(n).fill(1)

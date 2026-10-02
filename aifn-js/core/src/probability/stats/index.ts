@@ -92,4 +92,5 @@ export {
 } from './power'
 export type { AxisOption, Data } from './input'
 export { sampleAcf, samplePacf, type SampleAcf } from './acf'
+export { minimumCovarianceDeterminant, squaredMahalanobis, type Mcd, type McdOptions } from './robust'
 export { statsFunctions } from './registry'

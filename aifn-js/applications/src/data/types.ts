@@ -11,9 +11,12 @@ import type {
   Key,
   Recipe,
   RecipeStep,
+  Table,
 } from 'aifn/foundation/contracts'
+import type { Description } from 'aifn/learning/subgroups'
 import { copy, fromData, isTensor, type Tensor } from 'aifn/foundation/tensor'
 import type { Truth } from './truth'
+import { DomainError } from 'aifn/foundation/errors'
 
 // Types defined once, in `aifn/foundation/contracts`.
 export type { Recipe, RecipeStep } from 'aifn/foundation/contracts'
@@ -94,5 +97,31 @@ export function splitSizes(n: number, k: number): number[] {
 
 /** Throw unless `n` is a non-negative integer. */
 export function checkCount(n: number, what: string): void {
-  if (!Number.isInteger(n) || n < 0) throw new RangeError(`${what}: n must be a non-negative integer, got ${n}`)
+  if (!Number.isInteger(n) || n < 0) throw new DomainError(what, `${what}: n must be a non-negative integer, got ${n}`)
+}
+
+/** A pattern planted in a table: the description, which targets it affects, and how (for captions and ranks). */
+export interface PlantedPattern {
+  readonly description: Description
+  /** The target columns it changes. */
+  readonly targets: readonly string[]
+  /** One sentence: what is unusual inside it. */
+  readonly effect: string
+}
+
+/**
+ * A table for pattern mining (`output: 'table'`): named nominal (string) and numeric columns, the names of the target
+ * columns among them, and the patterns planted in it (empty for real data).
+ */
+export interface TableData {
+  readonly kind: 'table'
+  readonly table: Table
+  readonly targets: readonly string[]
+  readonly planted: readonly PlantedPattern[]
+  readonly meta: {
+    readonly name: string
+    readonly description: string
+    readonly source?: string
+    readonly url?: string
+  }
 }

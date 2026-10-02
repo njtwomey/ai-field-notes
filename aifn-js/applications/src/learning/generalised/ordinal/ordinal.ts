@@ -49,6 +49,7 @@ import {
 import { lbfgs, type LbfgsState } from 'aifn/optim/second-order'
 import { orderedBijector } from 'aifn/probability/bijectors'
 import { ordinalLikelihood, type OrdinalLinkName, type OrdinalModel } from 'aifn/probability/likelihoods'
+import { DomainError, ShapeError } from 'aifn/foundation/errors'
 
 /** Hyperparameters of `ordinalRegression`. */
 export type OrdinalRegressionParams = {
@@ -129,14 +130,17 @@ export function ordinalRegression(
     fit({ x, y }, options: FitOptions = {}) {
       const [n, d] = matrixShape(x, 'ordinalRegression')
       const t = targetValues(y, 'ordinalRegression')
-      if (t.length !== n) throw new Error(`ordinalRegression: ${n} inputs but ${t.length} labels`)
+      if (t.length !== n)
+        throw new ShapeError('ordinalRegression', `ordinalRegression: ${n} inputs but ${t.length} labels`)
       const labels = Int32Array.from(t, (v) => {
-        if (!(Number.isInteger(v) && v >= 0)) throw new Error('ordinalRegression: labels must be class indices 0, 1, …')
+        if (!(Number.isInteger(v) && v >= 0))
+          throw new DomainError('ordinalRegression', 'ordinalRegression: labels must be class indices 0, 1, …')
         return v
       })
       const K = params.classes ?? Math.max(...labels) + 1
-      if (K < 2) throw new Error('ordinalRegression: needs at least two classes')
-      if (labels.some((c) => c >= K)) throw new Error(`ordinalRegression: a label is outside 0 … ${K - 1}`)
+      if (K < 2) throw new DomainError('ordinalRegression', 'ordinalRegression: needs at least two classes')
+      if (labels.some((c) => c >= K))
+        throw new DomainError('ordinalRegression', `ordinalRegression: a label is outside 0 … ${K - 1}`)
       const X = fromData(Float64Array.from(dense.data(x)), [n, d])
       const split = (w: Value) => ({ beta: slice(w, [0, d]), theta: toThresholds(slice(w, [d, d + K - 1])) })
       const negLogLik = (w: Value): Value => {
@@ -169,7 +173,8 @@ export function ordinalRegression(
       for (const b of toFlat(beta)) penalty += 0.5 * l2 * b * b
       const forward = (input: Tensor): Tensor => {
         const [m, cols] = matrixShape(input, 'ordinalRegression.forward')
-        if (cols !== d) throw new Error(`ordinalRegression: fitted on ${d} features, given ${cols}`)
+        if (cols !== d)
+          throw new ShapeError('ordinalRegression', `ordinalRegression: fitted on ${d} features, given ${cols}`)
         return d > 0 ? (matmul(input, beta) as Tensor) : fromData(new Float64Array(m), [m])
       }
       const probabilities = (input: Tensor): Tensor => {

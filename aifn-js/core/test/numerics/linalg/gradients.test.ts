@@ -3,12 +3,15 @@ import {
   cholesky,
   choleskyLogDet,
   choleskySolve,
+  conditionNumber,
   det,
   eig,
   inverse,
   kron,
   logDet,
+  lstsq,
   normFrobenius,
+  pinv,
   solve,
   solveTriangular,
   matrixTrace,
@@ -143,5 +146,17 @@ describe('svd: the projection term at a zero singular value (review regression)'
     for (let i = 0; i < 3; i++)
       for (let j = 0; j < 2; j++)
         expect(g[i * 2 + j]).toBeCloseTo(u[i * 2] * v[j * 2] + u[i * 2 + 1] * v[j * 2 + 1], 12)
+  })
+})
+
+describe('dense routines under grad (review maths 13)', () => {
+  it('pinv, lstsq and conditionNumber throw NotDifferentiableError, not a TypeError', () => {
+    const a = tensor([
+      [2, 1],
+      [1, 3],
+    ])
+    expect(() => grad((x: Value) => sum(pinv(x as Tensor)))(a)).toThrow(NotDifferentiableError)
+    expect(() => grad((x: Value) => sum(lstsq(x as Tensor, tensor([1, 2])).x))(a)).toThrow(NotDifferentiableError)
+    expect(() => grad((x: Value) => conditionNumber(x as Tensor))(a)).toThrow(NotDifferentiableError)
   })
 })

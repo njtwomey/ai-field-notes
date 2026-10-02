@@ -27,6 +27,7 @@ import { transformLogDensity, type TransformedLogDensity } from 'aifn/probabilit
 import type { LogDensityInfo } from 'aifn/foundation/contracts'
 import { definer } from 'aifn/foundation/registry'
 import { int, real, space } from 'aifn/foundation/space'
+import { ShapeError } from 'aifn/foundation/errors'
 
 /** A vector input as a fresh Float64Array. */
 function vec(v: Tensor | VectorLike): Float64Array {
@@ -83,7 +84,7 @@ export function gaussianTarget(
   const d = mu.length
   const cov = isTensor(covariance) ? covariance : matrixOf(covariance as readonly (readonly number[])[])
   if (cov.shape.length !== 2 || cov.shape[0] !== d || cov.shape[1] !== d)
-    throw new RangeError(`gaussianTarget: covariance must be ${d}×${d}`)
+    throw new ShapeError('gaussianTarget', `gaussianTarget: covariance must be ${d}×${d}`)
   const law = MultivariateNormal(fromData(mu, [d]), { covariance: cov })
   const precision = inverse(cov)
   const P = Float64Array.from(toFlat(precision))

@@ -19,12 +19,13 @@ import {
   type Tensor,
   type Value,
 } from 'aifn/foundation/tensor'
+import { DomainError, ShapeError } from 'aifn/foundation/errors'
 
 /** Selection matrix picking the coordinates `indices` of a d-vector. */
 function selector(indices: readonly Index[], d: Size): Tensor {
   const out = new Float64Array(indices.length * d)
   indices.forEach((j, i) => {
-    if (!Number.isInteger(j) || j < 0 || j >= d) throw new RangeError(`index ${j} is outside 0 … ${d - 1}`)
+    if (!Number.isInteger(j) || j < 0 || j >= d) throw new DomainError('selector', `index ${j} is outside 0 … ${d - 1}`)
     out[i * d + j] = 1
   })
   return fromData(out, [indices.length, d])
@@ -75,9 +76,11 @@ export function ksgMutualInformation(
 ): Scalar {
   const a = rows(x, 'ksgMutualInformation')
   const b = rows(y, 'ksgMutualInformation')
-  if (a.n !== b.n) throw new RangeError('ksgMutualInformation: x and y need the same number of samples')
+  if (a.n !== b.n)
+    throw new ShapeError('ksgMutualInformation', 'ksgMutualInformation: x and y need the same number of samples')
   const n = a.n
-  if (!(Number.isInteger(k) && k >= 1 && k < n)) throw new RangeError(`ksgMutualInformation: need 1 ≤ k < n, got ${k}`)
+  if (!(Number.isInteger(k) && k >= 1 && k < n))
+    throw new DomainError('ksgMutualInformation', `ksgMutualInformation: need 1 ≤ k < n, got ${k}`)
   const dist = (s: typeof a, i: number, j: number) => {
     let m = 0
     for (let c = 0; c < s.d; c++) m = Math.max(m, Math.abs(s.values[i * s.d + c] - s.values[j * s.d + c]))

@@ -3,6 +3,7 @@ import { dense, fromData, type Tensor } from 'aifn/foundation/tensor'
 import { conv, type ConvMethod } from 'aifn/foundation/convolution'
 import { toSequence, vectorOf, type Data } from './input'
 import { mean, requireNonEmpty, requireSameLength, type SampleOption } from './descriptive'
+import { DomainError } from 'aifn/foundation/errors'
 
 // ---------------------------------------------------------------------------------------------------------------------
 // Running moments (Welford 1962; merging by Chan, Golub and LeVeque 1983).
@@ -87,7 +88,8 @@ export type LagOptions = {
 function lagged(x: ArrayLike<number>, y: ArrayLike<number>, options: LagOptions): Float64Array {
   const n = x.length
   const maxLag = Math.min(options.maxLag ?? n - 1, n - 1)
-  if (!(maxLag >= 0) || !Number.isInteger(maxLag)) throw new Error('stats: maxLag must be a non-negative integer')
+  if (!(maxLag >= 0) || !Number.isInteger(maxLag))
+    throw new DomainError('stats', 'stats: maxLag must be a non-negative integer')
   const demean = options.demean ?? true
   const mx = demean ? mean(x) : 0
   const my = demean ? mean(y) : 0

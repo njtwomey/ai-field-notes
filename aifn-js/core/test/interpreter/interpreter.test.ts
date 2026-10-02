@@ -216,3 +216,15 @@ describe('math.clip', () => {
     expect(value('return math.clip([1, 5], [0, 0], [2, 4])')).toEqual([1, 4])
   })
 })
+
+describe('prelude names can be shadowed (review models, interpreter)', () => {
+  test('a program may declare a prelude name, and the doc example runs', () => {
+    const r = runProgram('const stats = 3\nlet print = 4\nreturn stats + print')
+    expect(r.ok && r.value).toBe(7)
+    const ex = runProgram('seed(7)\nfunction make(n = 5) { return random.normal(n) }')
+    expect(ex.ok).toBe(true)
+    // Errors still report the program's own line.
+    const bad = runProgram('const a = 1\nnull.x')
+    expect(!bad.ok && bad.error.line).toBe(2)
+  })
+})

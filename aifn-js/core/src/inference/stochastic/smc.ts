@@ -10,6 +10,7 @@ import type { Status } from 'aifn/foundation/contracts'
 import type { Algorithm } from 'aifn/foundation/trace'
 import type { VectorLike } from './types'
 import { data, mat, standardNormals, toF64, toNumber, vec, type F64 } from './util'
+import { DomainError } from 'aifn/foundation/errors'
 
 /** log Σ exp(aᵢ) of a working array (−Infinity when empty or all −Infinity). */
 const logSumExp = (a: F64): number => (a.length === 0 ? -Infinity : toNumber(logsumexp(vec(a))))
@@ -40,10 +41,11 @@ function normalised(weights: VectorLike): F64 {
   const w = toF64(weights, 'resample')
   let total = 0
   for (let i = 0; i < w.length; i++) {
-    if (!(w[i] >= 0)) throw new Error('resample: weights must be non-negative numbers')
+    if (!(w[i] >= 0)) throw new DomainError('resample', 'resample: weights must be non-negative numbers')
     total += w[i]
   }
-  if (!(total > 0) || !Number.isFinite(total)) throw new Error('resample: weights must have a positive finite sum')
+  if (!(total > 0) || !Number.isFinite(total))
+    throw new DomainError('resample', 'resample: weights must have a positive finite sum')
   return w.map((v) => v / total)
 }
 

@@ -12,6 +12,7 @@ import { int, oneOf, real, space } from 'aifn/foundation/space'
 import { checkLink, family as familyByName, type LinkName } from 'aifn/probability/likelihoods'
 import { additiveTruth } from '../truth'
 import { checkCount, generatorRecipe, matrix, vector, type Dataset } from '../types'
+import { DomainError } from 'aifn/foundation/errors'
 
 /** The named effect shapes of `additiveData`, each on [0, 1] with mean zero there. */
 export type AdditiveShape = 'periodic' | 'monotone' | 'wiggly' | 'smooth' | 'linear' | 'none'
@@ -94,15 +95,16 @@ export function additiveData(s: Stream, options: AdditiveOptions = {}): Dataset 
   const fam = familyByName(family)
   const link = checkLink(fam, options.link, 'additiveData').name
   const setting = SCALES[family]?.[link]
-  if (!setting) throw new RangeError(`additiveData: no setting for the ${family} family with the ${link} link`)
+  if (!setting)
+    throw new DomainError('additiveData', `additiveData: no setting for the ${family} family with the ${link} link`)
   const noise = options.noise ?? (family === 'gamma' ? 0.3 : 0.4)
   if (!(noise > 0) && (family === 'gaussian' || family === 'gamma'))
-    throw new RangeError('additiveData: the noise must be positive')
+    throw new DomainError('additiveData', 'additiveData: the noise must be positive')
   const dispersion = family === 'gaussian' || family === 'gamma' ? noise * noise : 1
   const d = shapes.length
   const effects = shapes.map((name) => {
     const shape = ADDITIVE_SHAPES[name]
-    if (!shape) throw new RangeError(`additiveData: unknown shape "${name}"`)
+    if (!shape) throw new DomainError('additiveData', `additiveData: unknown shape "${name}"`)
     return { name, f: (x: number) => setting.scale * shape.f(x) }
   })
   const truth = additiveTruth({ family, link, intercept: setting.intercept, dispersion, effects })

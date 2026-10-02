@@ -7,7 +7,7 @@ import { ModularMlp, pairsOf, type GrokkingSnapshot, type ModularMlpParams } fro
 import { Button, Player, Slider } from '@lab/controls'
 import { ControlRow, Figure } from '@lab/layout'
 import { call, choice, float, int, row, slider, useFigureState, type Task } from '@lab/state'
-import { formatValue, TrainControls, useTrainedRun } from '@lab/views'
+import { formatValue, optimiserField, TrainControls, useTrainedRun } from '@lab/views'
 import { Bars, Curve, Handle, Plot, Plots, Points, Raster, Readout, useAxis } from '@lab/viz'
 
 const f3 = (v: number) => (Number.isFinite(v) ? formatValue(Number(v.toPrecision(3))) : '—')
@@ -28,6 +28,9 @@ type Settings = {
   width: number
   steps: number
   stepSize: number
+  /** AdamW (default) or full-batch L-BFGS on the cross-entropy plus (λ/2)‖θ‖². */
+  method: 'adamw' | 'lbfgs'
+  memory: number
   seed: number
 }
 
@@ -44,6 +47,8 @@ function grokkingTask(s: Settings): Task<GrokkingSnapshot> {
       steps: s.steps,
       stepSize: s.stepSize,
       weightDecay: s.weightDecay,
+      method: s.method,
+      memory: s.memory,
       recordEvery: 10,
       checkpointEvery: Math.max(10, Math.round(s.steps / 30 / 10) * 10),
       seed: s.seed,
@@ -89,11 +94,16 @@ export function GrokkingShowcase() {
       fraction: slider(0.3, 0.8, 0.5, { label: 'training fraction', step: 0.05 }),
     }),
     model: row('2 · model and optimiser', {
-      width: choice([64, 128, 256], 128, { label: 'hidden units' }),
-      weightDecay: choice([0, 0.5, 1, 2, 4], 2, { label: 'weight decay λ' }),
-      stepSize: float(0.01, { label: 'step size', gt: 0, le: 0.1, scale: 'log10', suggestions: [0.003, 0.01, 0.02] }),
+      width: int(128, { ge: 8, le: 512, suggestions: [64, 128, 256], label: 'hidden units' }),
+      weightDecay: float(2, { ge: 0, step: 0.5, suggestions: [0, 0.5, 1, 2, 4], label: 'weight decay λ' }),
     }),
-    run: row('3 · training run', {
+    optimiser: optimiserField({
+      label: '3 · optimiser (full batch)',
+      adamLabel: 'AdamW (decoupled decay)',
+      stepSize: 0.01,
+      suggestions: [0.003, 0.01, 0.02],
+    }),
+    run: row('4 · training run', {
       steps: int(1500, { ge: 1, suggestions: [1000, 1500, 2000, 3000], label: 'full-batch steps' }),
       seed: int(0, { label: 'seed', ge: 0, le: 9999 }),
     }),
@@ -105,7 +115,9 @@ export function GrokkingShowcase() {
     weightDecay: Number(state.model.weightDecay),
     width: Number(state.model.width),
     steps: Number(state.run.steps),
-    stepSize: state.model.stepSize,
+    stepSize: Number(state.optimiser.values.stepSize ?? 0.01),
+    method: state.optimiser.key === 'lbfgs' ? 'lbfgs' : 'adamw',
+    memory: Number(state.optimiser.values.memory ?? 10),
     seed: state.run.seed,
   }
   const trained = useTrainedRun(settings, grokkingTask)
@@ -273,12 +285,14 @@ export function GrokkingShowcase() {
             aifn-applied <code>modularArithmetic</code> splits the table of a {shown.op} b mod {p} into a training share
             of {shown.fraction} and a test rest; <code>grokkingRun</code> trains an MLP (a shared 32-dimensional
             embedding of the residues, [E_a, E_b] → {width} ReLU units → {p} logits) in the worker by full-batch AdamW
-            (β₂ = 0.98) with decoupled weight decay λ. The published runs (Power et al., 2022; Nanda et al., 2023) use a
-            1-layer transformer, p = 97 or 113 and 10⁴–10⁵ steps; this MLP on p = 31 with step size 0.01 and λ = 2 is
-            the fastest setting found to grok reliably in a browser: train accuracy reaches 100% by about step 50, test
-            accuracy stays near 0 until about step 300 and then climbs past 80% by step 1500 (about 45 s; 2000 or 3000
-            steps finish the climb). With λ = 0 the test accuracy stays low for the whole run; a smaller training
-            fraction delays it or prevents it. Drag the step marker or play the checkpoints; the figure below follows.
+            (β₂ = 0.98) with decoupled weight decay λ, or by full-batch L-BFGS on the cross-entropy plus (λ/2)‖θ‖²,
+            which heads straight for the regularised minimum instead of drifting to it. The published runs (Power et
+            al., 2022; Nanda et al., 2023) use a 1-layer transformer, p = 97 or 113 and 10⁴–10⁵ steps; this MLP on p =
+            31 with step size 0.01 and λ = 2 is the fastest setting found to grok reliably in a browser: train accuracy
+            reaches 100% by about step 50, test accuracy stays near 0 until about step 300 and then climbs past 80% by
+            step 1500 (about 45 s; 2000 or 3000 steps finish the climb). With λ = 0 the test accuracy stays low for the
+            whole run; a smaller training fraction delays it or prevents it. Drag the step marker or play the
+            checkpoints; the figure below follows.
           </>
         }
       >

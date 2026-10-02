@@ -6,7 +6,9 @@
  */
 
 import { defineMetric, type Rows } from 'aifn/learning/metrics'
+import { editDistance } from 'aifn/optim/programming'
 import { denseMatrix as dense, divide } from 'aifn/learning/metrics'
+import { ShapeError } from 'aifn/foundation/errors'
 
 /** A tokeniser: text to tokens. */
 export type Tokeniser = (text: string) => string[]
@@ -64,7 +66,7 @@ function corpusOf(references: References, candidates: string | readonly string[]
       cands: [candidates],
     }
   if (typeof references === 'string' || references.length !== candidates.length)
-    throw new Error(`metrics: a corpus needs one references entry per candidate (${candidates.length})`)
+    throw new ShapeError('metrics', `metrics: a corpus needs one references entry per candidate (${candidates.length})`)
   return { refs: references.map((r) => (typeof r === 'string' ? [r] : [...r])), cands: [...candidates] }
 }
 
@@ -345,47 +347,27 @@ export type Alignment = {
 }
 
 /**
- * The Levenshtein alignment of a reference and a hypothesis token list (word-and-character-error-rates):
- * d_{i,j} = min(d_{i−1,j} + 1, d_{i,j−1} + 1, d_{i−1,j−1} + [rᵢ ≠ hⱼ]), traced back preferring a match or
- * substitution, then a deletion, then an insertion.
+ * The Levenshtein alignment of a reference and a hypothesis token list (word-and-character-error-rates), by
+ * `aifn/optim/programming`'s `editDistance` with unit costs: its operations named in WER terms (hit, substitution,
+ * deletion, insertion) and counted. On ties the traceback prefers a hit or substitution, then a deletion, then an
+ * insertion.
  */
 export function editAlignment(reference: readonly string[], hypothesis: readonly string[]): Alignment {
-  const n = reference.length
-  const m = hypothesis.length
-  const d = Array.from({ length: n + 1 }, (_, i) =>
-    Int32Array.from({ length: m + 1 }, (_, j) => (i === 0 ? j : j === 0 ? i : 0)),
+  const r = editDistance(reference, hypothesis)
+  const operations: EditOperation[] = r.operations.map((o) =>
+    o.op === 'match' || o.op === 'substitute'
+      ? { op: o.op === 'match' ? 'hit' : 'substitution', reference: reference[o.i], hypothesis: hypothesis[o.j] }
+      : o.op === 'delete'
+        ? { op: 'deletion', reference: reference[o.i] }
+        : { op: 'insertion', hypothesis: hypothesis[o.j] },
   )
-  for (let i = 1; i <= n; i++)
-    for (let j = 1; j <= m; j++)
-      d[i][j] = Math.min(
-        d[i - 1][j] + 1,
-        d[i][j - 1] + 1,
-        d[i - 1][j - 1] + (reference[i - 1] === hypothesis[j - 1] ? 0 : 1),
-      )
-  const operations: EditOperation[] = []
-  let i = n
-  let j = m
-  while (i > 0 || j > 0) {
-    if (i > 0 && j > 0 && d[i][j] === d[i - 1][j - 1] + (reference[i - 1] === hypothesis[j - 1] ? 0 : 1)) {
-      const same = reference[i - 1] === hypothesis[j - 1]
-      operations.push({ op: same ? 'hit' : 'substitution', reference: reference[i - 1], hypothesis: hypothesis[j - 1] })
-      i--
-      j--
-    } else if (i > 0 && d[i][j] === d[i - 1][j] + 1) {
-      operations.push({ op: 'deletion', reference: reference[--i] })
-    } else {
-      operations.push({ op: 'insertion', hypothesis: hypothesis[--j] })
-    }
-  }
-  operations.reverse()
-  const count = (op: EditOperation['op']) => operations.filter((o) => o.op === op).length
   return {
-    distance: d[n][m],
+    distance: r.distance,
     operations,
-    hits: count('hit'),
-    substitutions: count('substitution'),
-    deletions: count('deletion'),
-    insertions: count('insertion'),
+    hits: r.counts.match,
+    substitutions: r.counts.substitute,
+    deletions: r.counts.delete,
+    insertions: r.counts.insert,
   }
 }
 
@@ -397,7 +379,8 @@ function pooledCounts(
 ) {
   const refs = typeof references === 'string' ? [references] : references
   const hyps = typeof hypotheses === 'string' ? [hypotheses] : hypotheses
-  if (refs.length !== hyps.length) throw new Error('metrics: references and hypotheses differ in number')
+  if (refs.length !== hyps.length)
+    throw new ShapeError('metrics', 'metrics: references and hypotheses differ in number')
   const out = { H: 0, S: 0, D: 0, I: 0 }
   refs.forEach((r, k) => {
     const a = editAlignment(split(r), split(hyps[k]))
@@ -585,7 +568,7 @@ function qaOf(
   if (typeof predictions === 'string')
     return { golds: [typeof golds === 'string' ? golds : (golds as readonly string[])], predictions: [predictions] }
   if (typeof golds === 'string' || golds.length !== predictions.length)
-    throw new Error('metrics: one gold entry per prediction')
+    throw new ShapeError('metrics', 'metrics: one gold entry per prediction')
   return { golds: [...golds], predictions: [...predictions] }
 }
 
@@ -663,7 +646,7 @@ export function bertScore(
   }
   const R = unit(referenceEmbeddings)
   const C = unit(candidateEmbeddings)
-  if (R.cols !== C.cols) throw new Error('metrics: bertScore: embeddings differ in dimension')
+  if (R.cols !== C.cols) throw new ShapeError('metrics', 'metrics: bertScore: embeddings differ in dimension')
   const sim = (i: number, j: number) => {
     let s = 0
     for (let c = 0; c < R.cols; c++) s += R.data[i * R.cols + c] * C.data[j * C.cols + c]
@@ -710,7 +693,8 @@ export const backretrieval = defineMetric(
     const G = dense(imageSimilarity, 'backretrieval')
     const N = T.rows
     const M = T.cols
-    if (G.rows !== M || G.cols !== N) throw new Error(`metrics: backretrieval: image similarity must be ${M} × ${N}`)
+    if (G.rows !== M || G.cols !== N)
+      throw new ShapeError('metrics', `metrics: backretrieval: image similarity must be ${M} × ${N}`)
     const K = options.k ?? 10
     let hits = 0
     for (let q = 0; q < N; q++) {

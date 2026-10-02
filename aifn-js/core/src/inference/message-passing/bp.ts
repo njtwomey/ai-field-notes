@@ -22,6 +22,7 @@ import {
   type DiscreteFactorGraph,
   type FactorGraphEdge,
 } from 'aifn/inference/model'
+import { DomainError } from 'aifn/foundation/errors'
 
 /** One message update: along edge `edge` (into `factorGraphEdges(graph)`), towards the factor or the variable. */
 export interface MessageUpdate {
@@ -233,7 +234,8 @@ export function beliefPropagationSteps(
     init: () => {
       const edges = factorGraphEdges(graph)
       const damping = o.damping ?? 0
-      if (!(damping >= 0 && damping < 1)) throw new RangeError('beliefPropagation: damping must be in [0, 1)')
+      if (!(damping >= 0 && damping < 1))
+        throw new DomainError('beliefPropagation', 'beliefPropagation: damping must be in [0, 1)')
       const tree = isTree(graph)
       const scheduleName = o.schedule ?? (tree ? 'tree' : 'flooding')
       const evidence = graph.cardinalities.map((k, v) => {

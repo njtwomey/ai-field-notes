@@ -20,7 +20,7 @@ import { stream } from 'aifn/foundation/random'
 import { fromData, toFlat, type Tensor } from 'aifn/foundation/tensor'
 import { Player, StatusText } from '@lab/controls'
 import { ControlRow, Figure } from '@lab/layout'
-import { call, choice, row, slider, useFigureState, useStreamed, type AnyValues, float } from '@lab/state'
+import { call, choice, int, row, slider, toggle, useFigureState, useStreamed, type AnyValues, float } from '@lab/state'
 import { Button } from '@lab/ui/button'
 import { Annotation, Area, Bars, Curve, Plot, Plots, Points, Raster, Readout, useAxis } from '@lab/viz'
 
@@ -159,7 +159,8 @@ type Setup = {
   k: number
   temperature: number
   capacityFactor: number
-  method: 'em' | 'adam'
+  method: 'em' | 'adam' | 'lbfgs'
+  memory: number
   steps: number
   balance: number
   z: number
@@ -227,12 +228,31 @@ export function MixtureOfExpertsShowcase() {
         [
           { value: 'em', label: 'EM' },
           { value: 'adam', label: 'Adam' },
+          { value: 'lbfgs', label: 'L-BFGS (full batch)' },
         ],
         'em',
         { label: 'training' },
       ),
-      emSteps: slider(5, 100, 40, { label: 'EM iterations', step: 5, when: (v) => methodOf(v) === 'em' }),
-      adamSteps: slider(100, 1500, 600, { label: 'Adam steps', step: 50, when: (v) => methodOf(v) === 'adam' }),
+      emSteps: int(40, {
+        ge: 1,
+        le: 500,
+        suggestions: [20, 40, 80],
+        label: 'EM iterations',
+        when: (v) => methodOf(v) === 'em',
+      }),
+      adamSteps: int(600, {
+        ge: 1,
+        suggestions: [300, 600, 1200],
+        label: 'steps',
+        when: (v) => methodOf(v) !== 'em',
+      }),
+      memory: int(10, {
+        ge: 1,
+        le: 50,
+        suggestions: [5, 10, 20],
+        label: 'L-BFGS memory m',
+        when: (v) => methodOf(v) === 'lbfgs',
+      }),
       stepSize: float(0.03, {
         gt: 0,
         scale: 'log10',
@@ -243,11 +263,12 @@ export function MixtureOfExpertsShowcase() {
       balance: slider(0, 1, 0, {
         label: 'load-balancing weight α',
         step: 0.01,
-        when: (v) => methodOf(v) === 'adam',
+        when: (v) => methodOf(v) !== 'em',
       }),
-      z: slider(0, 0.05, 0, { label: 'router z-loss weight', step: 0.001, when: (v) => methodOf(v) === 'adam' }),
+      z: slider(0, 0.05, 0, { label: 'router z-loss weight', step: 0.001, when: (v) => methodOf(v) !== 'em' }),
       seed: slider(0, 20, 0, { label: 'seed', step: 1 }),
     }),
+    show: row('5 · show', { boundary: toggle(true, 'decision boundaries') }),
   })
 
   const current: Setup = {
@@ -259,7 +280,8 @@ export function MixtureOfExpertsShowcase() {
     k: state.gate.k,
     temperature: state.gate.temperature,
     capacityFactor: (state.gate.capacity as number) || Infinity,
-    method: state.train.method as 'em' | 'adam',
+    method: state.train.method as Setup['method'],
+    memory: state.train.memory,
     steps: state.train.method === 'em' ? state.train.emSteps : state.train.adamSteps,
     balance: state.train.balance,
     z: state.train.z,
@@ -310,6 +332,7 @@ export function MixtureOfExpertsShowcase() {
       ),
       task: set.task,
       method: trained.method,
+      memory: trained.memory,
       steps: trained.steps,
       every: Math.max(1, Math.round(trained.steps / (trained.method === 'em' ? 40 : 60))),
       experts: trained.experts,
@@ -367,7 +390,7 @@ export function MixtureOfExpertsShowcase() {
   })
   const gateY = useAxis({ label: 'gate weight gᵢ(x)', range: [0, 1] })
   const stepAxis = useAxis({
-    label: trained?.method === 'em' ? 'EM iteration' : 'Adam step',
+    label: trained?.method === 'em' ? 'EM iteration' : trained?.method === 'lbfgs' ? 'L-BFGS iteration' : 'Adam step',
     range: [0, trained?.steps ?? 1],
     integer: true,
   })
@@ -423,6 +446,7 @@ export function MixtureOfExpertsShowcase() {
             scale="categorical"
             fillOpacity={0.45}
             categoryNames={expertNames}
+            boundary={state.show.boundary}
           />
         )}
         <Points
@@ -456,6 +480,7 @@ export function MixtureOfExpertsShowcase() {
             {...(classification ? { range: [0, 1] as const } : {})}
             fillOpacity={0.8}
             valueLabel={classification ? 'P(y = 1)' : 'E[y | x]'}
+            boundary={classification && state.show.boundary ? 0.5 : false}
           />
         )}
         {classification ? (
@@ -599,15 +624,16 @@ export function MixtureOfExpertsShowcase() {
             </>
           ) : (
             <>
-              <code>moeTraining</code>: full-batch Adam on the data loss + α·<code>loadBalancingLoss</code> + the z-loss
-              weight·<code>routerZLoss</code>
+              {trained?.method === 'lbfgs' ? 'full-batch L-BFGS (core methodTraining)' : 'full-batch Adam'} on the data
+              loss + α·<code>loadBalancingLoss</code> + the z-loss weight·<code>routerZLoss</code>
             </>
           )}
           ) over <code>MixtureOfExperts</code> and <code>route</code> of <code>aifn/nn/experts</code>. Press Train (or a
           preset), then play the checkpoints: the left panels show the experts and the gate at the chosen checkpoint
           (solid where an expert holds at least half the gate weight), the lower panels the whole run with the
-          checkpoint marked. ARI compares each row's largest-weight expert with the regime that generated it. Try the
-          collapse preset, then raise α and retrain: the idle experts come back.
+          checkpoint marked. ARI compares each row's largest-weight expert with the regime that generated it. With
+          decision boundaries on, ink lines mark where the gate's argmax expert changes and, for classification, the P(y
+          = 1) = 0.5 contour. Try the collapse preset, then raise α and retrain: the idle experts come back.
         </>
       }
     >

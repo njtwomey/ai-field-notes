@@ -17,6 +17,8 @@ import {
   type Value,
 } from 'aifn/foundation/tensor'
 import { define, isEntry } from 'aifn/foundation/registry'
+import { stopGradient } from 'aifn/foundation/autodiff'
+import { AifnError, DomainError, ShapeError } from 'aifn/foundation/errors'
 import type { LossInfo, ReductionMode as Reduction, Stability } from 'aifn/foundation/contracts'
 
 // Types defined once, in `aifn/foundation/contracts`.
@@ -73,10 +75,21 @@ export function reduce(v: Value, reduction: Reduction = 'mean'): Value {
 /** Targets, labels or grades: a number, an array of numbers, or a tensor (any dtype). Never differentiated. */
 export type Target = number | ArrayLike<number> | Tensor
 
-/** A target as a float64 constant (a number stays a number). Traced targets are read as constants. */
+/**
+ * A target as a float64 constant (a number stays a number). Traced targets are read as constants; inside `vmap`, where
+ * a batched target (one per example, as for per-example gradients) has no single value, it stays a batched value with
+ * its gradient stopped, which the elementwise losses combine as they would a tensor.
+ */
 export function constant(t: Target | Value): number | Tensor {
   if (typeof t === 'number') return t
-  if (isTraced(t)) return unwrap(t)
+  if (isTraced(t)) {
+    try {
+      return unwrap(t)
+    } catch (e) {
+      if (e instanceof AifnError) return stopGradient(t) as unknown as Tensor
+      throw e
+    }
+  }
   if (isTensor(t)) return t.dtype === 'float64' ? t : fromData(Float64Array.from(t.data), t.shape)
   return fromData(Float64Array.from(t as ArrayLike<number>), [(t as ArrayLike<number>).length])
 }
@@ -99,7 +112,8 @@ export function oneHot(labels: Target, K: number): Tensor {
   const ys = flatValues(labels)
   const out = new Float64Array(ys.length * K)
   ys.forEach((y, i) => {
-    if (!Number.isInteger(y) || y < 0 || y >= K) throw new RangeError(`oneHot: label ${y} is not a class in [0, ${K})`)
+    if (!Number.isInteger(y) || y < 0 || y >= K)
+      throw new DomainError('oneHot', `oneHot: label ${y} is not a class in [0, ${K})`)
     out[i * K + y] = 1
   })
   return fromData(out, [...shape, K])
@@ -109,7 +123,7 @@ export function oneHot(labels: Target, K: number): Tensor {
 export function expectRank(x: Value, ranks: readonly number[], what: string): number[] {
   const shape = shapeOfValue(x)
   if (!ranks.includes(shape.length)) {
-    throw new Error(`losses: ${what} needs rank ${ranks.join(' or ')}, got shape [${shape.join(', ')}]`)
+    throw new ShapeError('losses', `losses: ${what} needs rank ${ranks.join(' or ')}, got shape [${shape.join(', ')}]`)
   }
   return shape
 }

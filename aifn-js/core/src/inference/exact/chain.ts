@@ -12,7 +12,7 @@
 
 import type { Index, Size, Status } from 'aifn/foundation/contracts'
 import { categorical, child, type Stream } from 'aifn/foundation/random'
-import { ShapeError } from 'aifn/foundation/errors'
+import { DomainError, ShapeError } from 'aifn/foundation/errors'
 import { fromData, log, toRows, type Matrix, type Tensor, type Vector } from 'aifn/foundation/tensor'
 import type { Algorithm } from 'aifn/foundation/trace'
 import { chainOrder } from 'aifn/graph/structured'
@@ -510,7 +510,7 @@ export interface ChainSumProductState extends Status {
  */
 export function chainSumProduct(graph: DiscreteFactorGraph): Algorithm<void, ChainSumProductState> {
   const chain = factorChain(graph)
-  if (!chain) throw new RangeError('chainSumProduct: the factor graph is not a chain')
+  if (!chain) throw new DomainError('chainSumProduct', 'chainSumProduct: the factor graph is not a chain')
   const N = chain.order.length
   const full = chainForwardBackward(chain.logUnary, chain.logPairwise)
   const known = (fwd: number, bwdFrom: number) => {

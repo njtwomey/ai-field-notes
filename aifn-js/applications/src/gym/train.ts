@@ -12,6 +12,7 @@
 import type { Agent, Environment } from 'aifn/foundation/contracts'
 import { child, stream, type Stream } from 'aifn/foundation/random'
 import { runEpisode, type Trajectory } from './rollout'
+import { DomainError } from 'aifn/foundation/errors'
 
 /**
  * Options for `train` and `training`. The budget is `episodes`, or `steps`: run episodes until at least this many
@@ -91,7 +92,7 @@ export function* training<S, O, A, G>(
   const { seed = 0, checkpointEvery, maxCheckpoints = 200 } = options
   const budget = options.steps ?? NaN
   const total = Number.isNaN(budget) ? (options.episodes ?? NaN) : NaN
-  if (!(total >= 0) && !(budget >= 0)) throw new RangeError('training: give a budget, episodes or steps')
+  if (!(total >= 0) && !(budget >= 0)) throw new DomainError('training', 'training: give a budget, episodes or steps')
   // Under an episode budget the spacing is fixed; under a step budget it doubles as the checkpoints fill up.
   let every = checkpointSpacing(Number.isNaN(total) ? 0 : total, checkpointEvery, maxCheckpoints)
   const chunk = Math.max(1, Math.round(options.chunk ?? Math.ceil((Number.isNaN(total) ? 0 : total) / 20)))
@@ -212,7 +213,7 @@ export function replay<S, O, A, G>(
   t: Pick<Training<G>, 'seed' | 'checkpoints'>,
   e: number,
 ): { trajectory: Trajectory<S, O, A>; agent: G } {
-  if (!(e >= 1)) throw new RangeError(`replay: episodes are numbered from 1, got ${e}`)
+  if (!(e >= 1)) throw new DomainError('replay', `replay: episodes are numbered from 1, got ${e}`)
   const before = rerun(env, agent, t, e - 1)
   const run = runEpisode(env, agent, before, child(root(t.seed), 'step', e - 1))
   return { trajectory: run.trajectory, agent: before }

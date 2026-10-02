@@ -78,7 +78,7 @@ export function withStages(t: Tokeniser, parts: Partial<TokeniserParts>): Tokeni
  * An encoding: per token, its string, id (int32 [n]), [start, end) offsets in UTF-16 code units of the text of its
  * sequence (int32 [n, 2]; special tokens [0, 0)), the index of the pre-token it came from (`wordIds`, −1 for special
  * tokens and padding), the sequence it belongs to (`sequenceIds`: 0, 1 or −1), the token-type id, and the attention
- * mask (1 for real tokens, 0 for padding) and special-token mask (1 for added specials and padding). `overflowing`
+ * mask (1 for real tokens, 0 for padding) and special-token mask (1 for the template's specials and padding; 0 for specials typed in the text). `overflowing`
  * holds the windows truncation cut off, each a full encoding.
  */
 export interface Encoding {
@@ -183,9 +183,47 @@ export interface EncodeOptions extends SegmentOptions {
   addSpecialTokens?: boolean
 }
 
-/** The tokens of one text through normaliser, pre-tokeniser and model, before post-processing. */
-function encodeTemplateRows(t: Tokeniser, text: string, options: EncodeOptions): Draft {
+/**
+ * The splits to keep when truncation limits a sequence to `max` tokens, as `tokenizers` (0.22 and later) does before
+ * truncating: splits (pre-tokens, and specials typed in the text) are taken from the kept end until they hold at least
+ * `max` tokens, and the rest are dropped, so overflowing windows never reach beyond them. A special split counts but
+ * never ends the run; the next pre-token does. Returns the kept range [first, last) of split indices.
+ */
+function limitSplits(
+  sizes: readonly number[],
+  special: readonly boolean[],
+  max: number,
+  direction: 'right' | 'left',
+): [number, number] {
+  let total = 0
+  if (direction === 'right') {
+    for (let i = 0; i < sizes.length; i++) {
+      total += sizes[i]!
+      if (!special[i] && total >= max) return [0, i + 1]
+    }
+    return [0, sizes.length]
+  }
+  for (let i = sizes.length - 1; i >= 0; i--) {
+    total += sizes[i]!
+    if (!special[i] && total >= max) return [i, sizes.length]
+  }
+  return [0, sizes.length]
+}
+
+/**
+ * The tokens of one text through normaliser, pre-tokeniser and model, before post-processing. With `limit`, only the
+ * splits {@link limitSplits} keeps are returned, their word ids counted from the first kept split.
+ */
+function encodeTemplateRows(
+  t: Tokeniser,
+  text: string,
+  options: EncodeOptions,
+  limit: { max: number; direction: 'right' | 'left' } | null = null,
+): Draft {
   const d = emptyDraft()
+  // Token index where each split (one word id each) starts, and whether it is a special typed in the text.
+  const starts: number[] = []
+  const special: boolean[] = []
   const whole = aligned(text)
   // Special tokens typed in the text are matched verbatim first; the stretches between them go through the pipeline.
   const specials = [...t.specials].filter((s) => s.length > 0).sort((a, b) => b.length - a.length)
@@ -202,6 +240,8 @@ function encodeTemplateRows(t: Tokeniser, text: string, options: EncodeOptions):
   let word = 0
   for (const st of stretches) {
     if (st.special !== null) {
+      starts.push(d.ids.length)
+      special.push(true)
       d.tokens.push(st.special)
       d.ids.push(tokenId(t.model.vocabulary, st.special))
       d.offsets.push(st.s, st.e)
@@ -209,12 +249,14 @@ function encodeTemplateRows(t: Tokeniser, text: string, options: EncodeOptions):
       d.sequenceIds.push(0)
       d.typeIds.push(0)
       d.attention.push(1)
-      d.special.push(1)
+      d.special.push(0) // as tokenizers: the mask marks what the template and padding add, not specials in the text
       continue
     }
     let a = alignedSlice(whole, st.s, st.e)
     if (t.normaliser) a = applyNormaliser(t.normaliser, a)
     for (const part of applyPreTokeniser(t.preTokeniser, [a])) {
+      starts.push(d.ids.length)
+      special.push(false)
       for (const m of modelSegment(t.model, part.text, options)) {
         const [s, e] = originalSpan(part, m.start, m.end)
         d.tokens.push(m.token)
@@ -229,7 +271,13 @@ function encodeTemplateRows(t: Tokeniser, text: string, options: EncodeOptions):
       word++
     }
   }
-  return d
+  if (!limit) return d
+  starts.push(d.ids.length)
+  const sizes = special.map((_, i) => starts[i + 1]! - starts[i]!)
+  const [first, last] = limitSplits(sizes, special, limit.max, limit.direction)
+  const kept = sliceDraft(d, starts[first]!, starts[last]!)
+  kept.wordIds = kept.wordIds.map((w) => w - first)
+  return kept
 }
 
 function template(t: Tokeniser, a: Draft, b: Draft | null, add: boolean): Draft {
@@ -291,12 +339,15 @@ const padTarget = (n: number, p: Padding) => {
 
 function encodeOne(t: Tokeniser, text: string, pair: string | null, options: EncodeOptions): Encoding {
   const add = options.addSpecialTokens ?? true
-  const a = encodeTemplateRows(t, text, options)
-  const b = pair === null ? null : encodeTemplateRows(t, pair, options)
+  const tr = t.truncation
+  // Every sequence is cut to its first (or last) maxLength tokens' worth of splits, except the first under onlySecond.
+  const limit = (first: boolean) =>
+    tr && (tr.strategy !== 'onlySecond' || !first) ? { max: tr.maxLength, direction: tr.direction } : null
+  const a = encodeTemplateRows(t, text, options, limit(true))
+  const b = pair === null ? null : encodeTemplateRows(t, pair, options, limit(false))
   const sources = pair === null ? [text] : [text, pair]
   let windowsA: [number, number][] = [[0, a.ids.length]]
   let windowsB: [number, number][] = b ? [[0, b.ids.length]] : []
-  const tr = t.truncation
   if (tr) {
     const room = tr.maxLength - (add ? addedTokens(t.postProcessor, b !== null) : 0)
     if (!b) windowsA = truncationWindows(a.ids.length, room, tr.stride, tr.direction)

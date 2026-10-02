@@ -19,6 +19,7 @@ import {
   type DiscreteFactor,
   type DiscreteFactorGraph,
 } from 'aifn/inference/model'
+import { DomainError } from 'aifn/foundation/errors'
 
 // ── Enumeration ─────────────────────────────────────────────────────────────────────────────────────────────────────
 
@@ -253,7 +254,11 @@ export function variableEliminationSteps(
         const missing = graph.cardinalities
           .map((_, v) => v)
           .filter((v) => !query.includes(v) && !ev.has(v) && !order.includes(v))
-        if (missing.length) throw new RangeError(`variableElimination: order omits variables ${missing.join(', ')}`)
+        if (missing.length)
+          throw new DomainError(
+            'variableElimination',
+            `variableElimination: order omits variables ${missing.join(', ')}`,
+          )
       }
       return {
         t: 0,

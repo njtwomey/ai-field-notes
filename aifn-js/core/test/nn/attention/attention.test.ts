@@ -24,6 +24,7 @@ import {
   multiHeadLatentAttention,
   MultiHeadLatentAttention,
   paddingMask,
+  positionMask,
   ropeFrequencies,
   scaledDotProductAttention,
   sinusoidalPositions,
@@ -344,5 +345,16 @@ describe('cache accounting and tiled attention', () => {
     const s = run(flashAttentionSteps(q, k, v, { causal: true, queryBlock: 1, keyBlock: 2 }), undefined, 100)
     expect(s.skipped).toBeGreaterThan(0)
     expect(s.t).toBe(s.tiles.length)
+  })
+})
+
+describe('position masks', () => {
+  it('a window without causal is a symmetric band; with causal, the w keys ending at the query', () => {
+    const pos = [0, 1, 2, 3, 4]
+    const band = toFlat(positionMask(pos, pos, { window: 2 }))
+    // Query 2 sees keys 1, 2, 3 (|p − q| < 2).
+    expect(Array.from(band.slice(10, 15))).toEqual([0, 1, 1, 1, 0])
+    const causal = toFlat(positionMask(pos, pos, { window: 2, causal: true }))
+    expect(Array.from(causal.slice(10, 15))).toEqual([0, 1, 1, 0, 0])
   })
 })

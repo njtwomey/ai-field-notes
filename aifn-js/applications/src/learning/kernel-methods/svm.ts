@@ -22,9 +22,10 @@ import { fromData, type Tensor } from 'aifn/foundation/tensor'
 import { trace, type Algorithm, type Trace } from 'aifn/foundation/trace'
 import { gram, rbf, type Kernel } from 'aifn/learning/kernels'
 import { classLabels, inputs, matrix, values } from '../util'
-import { plattScaling, type PlattScaling } from './platt'
+import { plattScaling, type PlattScaling } from 'aifn/learning/calibration'
 import { defineModel } from 'aifn/learning/estimators'
 import { bool, int, oneOf, real, space } from 'aifn/foundation/space'
+import { DomainError, ShapeError } from 'aifn/foundation/errors'
 
 /** Q_ii ≤ 0 is replaced by this (LIBSVM's τ), so a degenerate pair still moves. */
 const TAU = 1e-12
@@ -73,8 +74,8 @@ export interface SmoState extends Status {
 function prepare(problem: SmoProblem) {
   const { n } = matrix(problem.x, 'smoSteps')
   const y = values(problem.y)
-  if (y.length !== n) throw new Error(`smoSteps: ${n} rows but ${y.length} labels`)
-  for (const t of y) if (t !== 1 && t !== -1) throw new Error('smoSteps: labels must be ±1')
+  if (y.length !== n) throw new ShapeError('smoSteps', `smoSteps: ${n} rows but ${y.length} labels`)
+  for (const t of y) if (t !== 1 && t !== -1) throw new DomainError('smoSteps', 'smoSteps: labels must be ±1')
   const kernel = problem.kernel ?? rbf({ lengthscale: 1 })
   const K = Float64Array.from(values(gram(kernel, problem.x)))
   return { n, y, K, C: problem.C ?? 1, tol: problem.tolerance ?? 1e-3, selection: problem.selection ?? 'second-order' }
@@ -340,14 +341,18 @@ export function supportVectorMachine(
     selection,
     probability = false,
   } = params
-  if (!(C > 0)) throw new Error('supportVectorMachine: C must be positive')
+  if (!(C > 0)) throw new DomainError('supportVectorMachine', 'supportVectorMachine: C must be positive')
   return {
     name: 'support-vector-machine',
     params: { C, kernel, tolerance, maxSteps, selection, probability },
     fit({ x, y }, options: FitOptions = {}) {
       const { n, d, v } = matrix(x, 'supportVectorMachine')
       const { y: labels, k } = classLabels(y, n, 'supportVectorMachine')
-      if (k > 2) throw new Error('supportVectorMachine: binary labels 0/1 only; use a multiclass reduction')
+      if (k > 2)
+        throw new DomainError(
+          'supportVectorMachine',
+          'supportVectorMachine: binary labels 0/1 only; use a multiclass reduction',
+        )
       const signs = Float64Array.from(labels, (c) => (c === 1 ? 1 : -1))
       const alg = smoSteps({ x, y: fromData(signs, [n]), C, kernel, tolerance, selection })
       const training: Trace<SmoState> = trace(alg, {}, maxSteps, {
@@ -452,7 +457,7 @@ export interface LinearSvmState extends Status {
 function linearData(problem: LinearSvmProblem, where: string) {
   const { n, d, v } = matrix(problem.x, where)
   const y = values(problem.y)
-  if (y.length !== n) throw new Error(`${where}: ${n} rows but ${y.length} labels`)
+  if (y.length !== n) throw new ShapeError(where, `${where}: ${n} rows but ${y.length} labels`)
   const intercept = problem.intercept ?? true
   const D = intercept ? d + 1 : d
   const X = new Float64Array(n * D)
@@ -614,7 +619,7 @@ export function linearSvm(
     fit({ x, y }, options: FitOptions = {}) {
       const { n, d } = matrix(x, 'linearSvm')
       const { y: labels, k } = classLabels(y, n, 'linearSvm')
-      if (k > 2) throw new Error('linearSvm: binary labels 0/1 only; use a multiclass reduction')
+      if (k > 2) throw new DomainError('linearSvm', 'linearSvm: binary labels 0/1 only; use a multiclass reduction')
       const signs = fromData(
         Float64Array.from(labels, (c) => (c === 1 ? 1 : -1)),
         [n],

@@ -14,6 +14,7 @@ import { startingStep, type StepAttempt } from './adaptive'
 import { evaluate, initialState } from './explicit'
 import { jacobianOf } from './implicit'
 import type { InitialValue, JacobianOption, OdeState, Rhs } from './types'
+import { DomainError, ShapeError } from 'aifn/foundation/errors'
 
 const { allFinite, toF64 } = dense
 type F64 = dense.F64
@@ -128,8 +129,8 @@ export function adaptiveBdf(f: Rhs, options: AdaptiveBdfOptions): Algorithm<Init
     variant = 'ndf',
   } = options
   const name = 'adaptiveBdf'
-  if (!Number.isFinite(tEnd)) throw new Error(`${name}: tEnd must be finite`)
-  if (!(rtol > 0)) throw new Error(`${name}: rtol must be positive`)
+  if (!Number.isFinite(tEnd)) throw new DomainError(name, `${name}: tEnd must be finite`)
+  if (!(rtol > 0)) throw new DomainError(name, `${name}: rtol must be positive`)
   // scipy's coefficients: κ (NDF), γ_k = Σ 1/j, α_k = (1 − κ_k)γ_k, error constants κ_kγ_k + 1/(k+1).
   const kappa = variant === 'ndf' ? [0, -0.185, -1 / 9, -0.0823, -0.0415, 0] : [0, 0, 0, 0, 0, 0]
   const gamma = [0]
@@ -145,7 +146,7 @@ export function adaptiveBdf(f: Rhs, options: AdaptiveBdfOptions): Algorithm<Init
       const n = y.length
       const atol = typeof atolOption === 'number' ? atolOption : toF64(atolOption, name)
       if (typeof atol !== 'number' && atol.length !== n)
-        throw new Error(`${name}: atol has ${atol.length} values for a state of length ${n}`)
+        throw new ShapeError(name, `${name}: atol has ${atol.length} values for a state of length ${n}`)
       const base = initialState(y, t0)
       const dir = Math.sign(tEnd - t0) || 1
       const f0 = evaluate(f, t0, y, name)

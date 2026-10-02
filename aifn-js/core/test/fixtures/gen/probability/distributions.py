@@ -41,6 +41,16 @@ CONTINUOUS = {
     "Beta": ([2.5, 0.6], stats.beta(2.5, 0.6), np.r_[1e-30, 1e-8, 1e-3, 0.1, 0.5, 0.9, 0.999, 1 - 1e-9, 1 - 1e-14]),
     "Weibull": ([1.7, 2.2], stats.weibull_min(1.7, scale=2.2), np.r_[1e-20, 1e-5, 0.1, 1, 2.2, 5, 20, 60, 150]),
     "Gumbel": ([0.5, 1.5], stats.gumbel_r(0.5, 1.5), np.r_[-8, -4, -1, 0, 0.5, 2, 10, 60, 400, 1000]),
+    "GeneralisedPareto": (
+        [0.3, 1.0, 2.0],
+        stats.genpareto(0.3, 1.0, 2.0),
+        np.r_[1.0 + 1e-9, 1.001, 1.5, 2, 4, 10, 100, 1e4, 1e8],
+    ),
+    "GeneralisedParetoBounded": (
+        [-0.4, 0.0, 1.5],
+        stats.genpareto(-0.4, 0.0, 1.5),
+        np.r_[1e-9, 0.01, 0.5, 1.5, 3, 3.7, 3.7499999],
+    ),
     "VonMises": ([0.7, 2.5], stats.vonmises(2.5, loc=0.7), np.r_[-2.4, -1.5, -0.5, 0, 0.7, 1.5, 2.8, 3.8]),
     "TruncatedNormal": (
         [0.5, 1.2, -1.0, 4.0],
@@ -81,7 +91,11 @@ def frozen(dist: object) -> Frozen:
     return cast(Frozen, dist)
 
 
-ALIASES = {"TruncatedNormalTail": "TruncatedNormal", "PoissonLarge": "Poisson"}
+ALIASES = {
+    "TruncatedNormalTail": "TruncatedNormal",
+    "PoissonLarge": "Poisson",
+    "GeneralisedParetoBounded": "GeneralisedPareto",
+}
 
 
 def student_t_quantile(p: float, nu: float, loc: float, scale: float) -> float:

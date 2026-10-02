@@ -41,6 +41,7 @@ import { ordinalLikelihood } from 'aifn/probability/likelihoods'
 import { laplaceAt, laplaceMode, type LaplaceProblem, type LaplaceState, type LaplaceTerms } from './classification'
 import { stableFactor } from './classification-ep'
 import { kernelLogVector } from './regression'
+import { DomainError, ShapeError } from 'aifn/foundation/errors'
 
 const LIKELIHOOD = ordinalLikelihood('cumulative', 'probit')
 
@@ -156,22 +157,26 @@ export function gpOrdinalRegression<P extends KernelParams>(
       const X = asRows(x) as Tensor
       const n = X.shape[0]
       const t = toFlat(y)
-      if (t.length !== n) throw new Error(`gpOrdinalRegression: ${n} inputs but ${t.length} labels`)
+      if (t.length !== n)
+        throw new ShapeError('gpOrdinalRegression', `gpOrdinalRegression: ${n} inputs but ${t.length} labels`)
       const labels = Int32Array.from(t, (v) => {
         if (!(Number.isInteger(v) && v >= 0))
-          throw new Error('gpOrdinalRegression: labels must be class indices 0, 1, …')
+          throw new DomainError('gpOrdinalRegression', 'gpOrdinalRegression: labels must be class indices 0, 1, …')
         return v
       })
       const K = params.classes ?? Math.max(...labels) + 1
-      if (K < 2) throw new Error('gpOrdinalRegression: needs at least two classes')
-      if (labels.some((c) => c >= K)) throw new Error(`gpOrdinalRegression: a label is outside 0 … ${K - 1}`)
+      if (K < 2) throw new DomainError('gpOrdinalRegression', 'gpOrdinalRegression: needs at least two classes')
+      if (labels.some((c) => c >= K))
+        throw new DomainError('gpOrdinalRegression', `gpOrdinalRegression: a label is outside 0 … ${K - 1}`)
       const labelTensor = fromData(labels, [n])
       let kernel: Kernel<P> = params.kernel
       let noise = params.noise ?? 1
       let theta = params.thresholds ? Float64Array.from(params.thresholds) : startingThresholds(labels, K, noise)
-      if (theta.length !== K - 1) throw new Error(`gpOrdinalRegression: ${K} classes need ${K - 1} thresholds`)
+      if (theta.length !== K - 1)
+        throw new ShapeError('gpOrdinalRegression', `gpOrdinalRegression: ${K} classes need ${K - 1} thresholds`)
       for (let k = 1; k < theta.length; k++)
-        if (!(theta[k] > theta[k - 1])) throw new Error('gpOrdinalRegression: thresholds must be increasing')
+        if (!(theta[k] > theta[k - 1]))
+          throw new DomainError('gpOrdinalRegression', 'gpOrdinalRegression: thresholds must be increasing')
       const problemFor = (kern: Kernel<P>, th: ArrayLike<number>, sigma: number): LaplaceProblem => ({
         K: gram(kern, X) as Tensor,
         labels: labelTensor,

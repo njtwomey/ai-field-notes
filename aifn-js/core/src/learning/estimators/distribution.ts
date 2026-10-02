@@ -10,6 +10,7 @@ import { gaussHermite } from 'aifn/numerics/quadrature'
 import { normalCdf } from 'aifn/numerics/special'
 import { Bernoulli, Categorical, Normal } from 'aifn/probability/distributions'
 import { sizeOf } from './util'
+import { DomainError } from 'aifn/foundation/errors'
 
 // Types defined once, in `aifn/foundation/contracts`.
 export type { AnyUnivariate, Distribution } from 'aifn/foundation/contracts'
@@ -23,7 +24,7 @@ export interface ClassDistribution extends Distribution {
 export function asTensor(v: Value): Tensor {
   if (typeof v === 'number') return fromData(Float64Array.of(v), [])
   if (isTensor(v)) return v
-  throw new Error('asTensor: a traced value; evaluate distributions outside a gradient tape here')
+  throw new DomainError('asTensor', 'asTensor: a traced value; evaluate distributions outside a gradient tape here')
 }
 
 /** True when `d` is univariate (scalar events) with a CDF and a quantile function. */
@@ -43,11 +44,12 @@ export function isClassDistribution(d: Distribution): d is ClassDistribution {
  * the support. Throws for any other distribution.
  */
 export function classProbabilities(d: Distribution): Tensor {
-  if (!isClassDistribution(d)) throw new Error(`classProbabilities: ${d.name} has no class probabilities`)
+  if (!isClassDistribution(d))
+    throw new DomainError('classProbabilities', `classProbabilities: ${d.name} has no class probabilities`)
   const n = sizeOf(d.batchShape)
   const upper = d.support.type === 'integers' ? d.support.upper : undefined
   const k = d.name === 'Bernoulli' ? 2 : typeof upper === 'number' ? upper + 1 : NaN
-  if (!Number.isInteger(k)) throw new Error('classProbabilities: unknown number of classes')
+  if (!Number.isInteger(k)) throw new DomainError('classProbabilities', 'classProbabilities: unknown number of classes')
   const out = new Float64Array(n * k)
   for (let c = 0; c < k; c++) {
     const lp = dense.data(asTensor(d.logProb(c)))
@@ -107,7 +109,8 @@ export function expectation(d: Distribution, f?: (y: number) => number): Tensor 
     for (let i = 0; i < n; i++) for (let c = 0; c < k; c++) out[i] += f(c) * probs[i * k + c]
     return fromData(out, d.batchShape)
   }
-  if (!isUnivariate(d)) throw new Error('expectation: needs a class distribution or a univariate one with a quantile')
+  if (!isUnivariate(d))
+    throw new DomainError('expectation', 'expectation: needs a class distribution or a univariate one with a quantile')
   const { nodes, weights } = normalRule()
   const n = sizeOf(d.batchShape)
   const out = new Float64Array(n)

@@ -43,6 +43,7 @@ import { trainingLoop, type TrainingState } from 'aifn/nn/training'
 import { adamRule } from 'aifn/optim/first-order'
 import { charCorpus } from './corpus'
 import type { TokenCorpus } from './ngram'
+import { DomainError } from 'aifn/foundation/errors'
 
 /** Where position enters a tiny GPT. */
 export type GptPosition = 'learned' | 'sinusoidal' | 'rope' | 'alibi' | 'none'
@@ -144,7 +145,7 @@ export function Gpt(config: GptConfig): Gpt {
         ? fromData(Int32Array.from(ids as number[]), [(ids as number[]).length])
         : (ids as Tensor)
       const T = idTensor.shape[idTensor.shape.length - 1]
-      if (T > c.context) throw new Error(`Gpt: ${T} tokens exceed the context of ${c.context}`)
+      if (T > c.context) throw new DomainError('Gpt', `Gpt: ${T} tokens exceed the context of ${c.context}`)
       const embedding = childContext(ctx, 'embedding')
       const tokens = tap(embedding, take(params.embedding, idTensor), 'tokens')
       let h: Value = tokens

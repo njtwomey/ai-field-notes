@@ -11,6 +11,7 @@ import { dense, fromData, toFlat, type Tensor, type Value, type Vector } from 'a
 import type { Algorithm, Scalar, VectorLike } from 'aifn/foundation/contracts'
 import { checkDirection, initialState, nextStep, reached } from './explicit'
 import type { FixedStepOptions, OdeState, Rhs } from './types'
+import { DomainError, ShapeError } from 'aifn/foundation/errors'
 
 const { allFinite, toF64 } = dense
 type F64 = dense.F64
@@ -140,8 +141,9 @@ export function symplectic(
   { stepSize: h, tEnd }: FixedStepOptions,
 ): Algorithm<PhaseInitial, SymplecticState> {
   const scheme = SCHEMES[method]
-  if (!scheme) throw new Error(`symplectic: unknown method ${method}`)
-  if (!(h !== 0 && Number.isFinite(h))) throw new Error('symplectic: the step size must be finite and non-zero')
+  if (!scheme) throw new DomainError('symplectic', `symplectic: unknown method ${method}`)
+  if (!(h !== 0 && Number.isFinite(h)))
+    throw new DomainError('symplectic', 'symplectic: the step size must be finite and non-zero')
   const P = parts(H)
   return {
     name: method,
@@ -149,7 +151,7 @@ export function symplectic(
       checkDirection(t0, h, tEnd, method)
       const q = toF64(q0, method)
       const p = toF64(p0, method)
-      if (q.length !== p.length) throw new Error('symplectic: q0 and p0 must have the same length')
+      if (q.length !== p.length) throw new ShapeError('symplectic', 'symplectic: q0 and p0 must have the same length')
       const x = new Float64Array(2 * q.length)
       x.set(q)
       x.set(p, q.length)

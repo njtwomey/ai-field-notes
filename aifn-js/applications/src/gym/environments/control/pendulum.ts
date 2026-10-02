@@ -49,6 +49,7 @@ import {
   unwrap,
   type Tensor,
 } from 'aifn/foundation/tensor'
+import { DomainError } from 'aifn/foundation/errors'
 
 /** The pendulum's state: the angle θ from upright (radians, not wrapped) and the angular velocity θ̇ (rad/s). */
 export interface PendulumState {
@@ -149,7 +150,10 @@ export function pendulumEnvironment(options: PendulumOptions = {}): PendulumEnvi
     start,
   } = options
   if (torques !== 0 && !(Number.isInteger(torques) && torques >= 2))
-    throw new RangeError(`pendulumEnvironment: torques must be 0 (a box) or an integer ≥ 2, got ${torques}`)
+    throw new DomainError(
+      'pendulumEnvironment',
+      `pendulumEnvironment: torques must be 0 (a box) or an integer ≥ 2, got ${torques}`,
+    )
   const levels = torques
     ? Array.from({ length: torques }, (_, k) => -maxTorque + (2 * maxTorque * k) / (torques - 1))
     : null
@@ -195,7 +199,8 @@ export function pendulumEnvironment(options: PendulumOptions = {}): PendulumEnvi
     if (typeof action === 'number') {
       if (!levels) throw new TypeError('pendulumEnvironment: a box pendulum takes a torque array, got a number')
       const l = levels[action]
-      if (l === undefined) throw new RangeError(`pendulumEnvironment: no torque level ${action}`)
+      if (l === undefined)
+        throw new DomainError('pendulumEnvironment', `pendulumEnvironment: no torque level ${action}`)
       return l
     }
     return action[0]

@@ -29,6 +29,7 @@ import {
 import { eulerMaruyama, geometricBrownianMotion, milstein, stochasticRungeKutta } from 'aifn/dynamics/sde'
 import { fromEdges } from 'aifn/graph'
 import { edmondsKarpSteps, minCostFlowSteps } from 'aifn/graph/flows'
+import { labelPropagationSteps, labelSpreadingSteps } from 'aifn/graph/propagation'
 import { aStarSteps, bellmanFordSteps, dijkstraSteps, floydWarshallSteps } from 'aifn/graph/shortest-paths'
 import { kruskalSteps, primSteps } from 'aifn/graph/spanning-trees'
 import {
@@ -88,9 +89,27 @@ import {
 import { normal, normals, uniform } from 'aifn/foundation/random'
 import { binaryCrossEntropyWithLogits, discriminatorLoss, generatorLoss } from 'aifn/learning/losses'
 import { poolAdjacentViolatorsSteps } from 'aifn/learning/calibration'
+import { markovChainSteps } from 'aifn/probability/markov'
+import {
+  fixedShare,
+  followTheRegularisedLeader,
+  hedge,
+  onlineAdagrad,
+  onlineGradientDescent,
+  onlineNewtonStep,
+  weightedMajority,
+  type OnlineLoss,
+} from 'aifn/optim/online'
 import { xavierUniform } from 'aifn/nn/init'
 import { Mlp } from 'aifn/nn/layers'
-import { adversarialTraining, contrastiveDivergence, fullBatchTraining, trainingLoop } from 'aifn/nn/training'
+import {
+  adversarialTraining,
+  contrastiveDivergence,
+  fullBatchTraining,
+  methodTraining,
+  privateTraining,
+  trainingLoop,
+} from 'aifn/nn/training'
 import { flashAttentionSteps } from 'aifn/nn/attention'
 import { beamSearch, greedyDecoding, samplingDecoding, speculativeDecoding } from 'aifn/nn/decoding'
 import { add as addT, blellochScanSteps, hillisSteeleScanSteps } from 'aifn/foundation/tensor'
@@ -105,6 +124,7 @@ import {
   riccatiMatrixSign,
   riccatiRecursion,
 } from 'aifn/numerics/linalg'
+import { nmfSteps } from 'aifn/numerics/factorisation'
 import { adaptiveSimpson, gaussKronrod, monteCarlo, romberg } from 'aifn/numerics/quadrature'
 import {
   bisection,
@@ -120,6 +140,8 @@ import {
   type SystemWithJacobian,
 } from 'aifn/numerics/roots'
 import { cmaEs, nelderMead, simulatedAnnealing } from 'aifn/optim/derivative-free'
+import { refinementSearchSteps } from 'aifn/optim/search'
+import { selectorLanguage, subgroupDiscoverySteps, wraccQuality } from 'aifn/learning/subgroups'
 import {
   adagrad,
   adam,
@@ -147,7 +169,10 @@ import { fista, ista, projectBox, projectedGradient, proximalGradient, proxL1 } 
 import { bfgs, gaussNewton, lbfgs, levenbergMarquardt, newton, owlqn, trustRegion } from 'aifn/optim/second-order'
 import { siftSteps, vmdSteps } from 'aifn/signal/decompositions'
 import { lms, nlms, rls } from 'aifn/signal/statistical'
-import { stateSpace, simulate } from 'aifn/systems'
+import { scrimpSteps } from 'aifn/signal/similarity'
+import { stateSpace, simulate, predictionErrorMethod } from 'aifn/systems'
+import { lqg, lqgSimulation, mpcController, recedingHorizon } from 'aifn/dynamics/control'
+import { ransac } from 'aifn/numerics/robust'
 import { costMatrix, gromovWassersteinSteps, sinkhornSteps, uniformWeights } from 'aifn/transport'
 import { fixture } from '../../fixtures'
 import { randomGraph } from '../../graph/helpers'
@@ -157,6 +182,8 @@ import { bowl, rosenbrock } from '../../optim/problems'
 import { bpeSteps, unigramLmSteps, wordPieceSteps } from 'aifn/text/subword'
 import { trainingSteps, whitespacePreTokeniser } from 'aifn/text/pipeline'
 import { hyphenationPatterns, liangSteps, parseHyphenated, patgenSteps } from 'aifn/text/hyphenation'
+import { foilProblem, foilSteps } from 'aifn/logic/induction'
+import { prologProgram, sldSteps } from 'aifn/logic/resolution'
 import { checkProtocol, plainOf } from '../../protocol'
 import { address, entriesOf } from '../../registries'
 
@@ -340,6 +367,21 @@ const toyLm = (prefix: readonly number[]): Tensor =>
     ][prefix.length ? prefix[prefix.length - 1] : 0],
   )
 
+// An expert-loss matrix and a linear online loss, for the online learners.
+const expertLosses = [
+  [0.1, 0.9, 0.5],
+  [0.8, 0.2, 0.5],
+  [0.3, 0.6, 0.4],
+  [0.9, 0.1, 0.5],
+  [0.2, 0.7, 0.6],
+  [0.4, 0.4, 0.4],
+]
+const onlineLinear: OnlineLoss = (t, w) => {
+  const g = [Math.cos(t), Math.sin(2 * t)]
+  const x = toFlat(w)
+  return { value: g[0] * x[0] + g[1] * x[1], grad: g }
+}
+
 const CASES: Record<string, () => Case> = {
   'dynamics/ode/rungeKutta': () => at(rungeKutta(lotkaVolterra, 'rk4', { stepSize: 0.05 }), lv, 16),
   'dynamics/ode/dormandPrince': () => at(dormandPrince(lotkaVolterra, { tEnd: 50 }), lv, 16),
@@ -352,6 +394,11 @@ const CASES: Record<string, () => Case> = {
   'dynamics/sde/milstein': () => at(milstein(gbm, { stepSize: 0.05 }), paths),
   'dynamics/sde/stochasticRungeKutta': () => at(stochasticRungeKutta(gbm, { stepSize: 0.05 }), paths),
   'graph/flows/edmondsKarpSteps': () => at(edmondsKarpSteps(network, { source: 0, sink: 3 }), undefined, 6),
+  'graph/propagation/labelPropagationSteps': () =>
+    at(labelPropagationSteps(undirected, [0, -1, -1, -1, -1, -1, -1, 1]), undefined, 6),
+  'graph/propagation/labelSpreadingSteps': () =>
+    at(labelSpreadingSteps(undirected, [0, -1, -1, -1, -1, -1, -1, 1], { alpha: 0.5 }), undefined, 6),
+  'signal/similarity/scrimpSteps': () => at(scrimpSteps(sift, 16, { diagonalsPerStep: 10 }), undefined, 6),
   'graph/flows/minCostFlowSteps': () =>
     at(
       minCostFlowSteps({
@@ -567,6 +614,28 @@ const CASES: Record<string, () => Case> = {
       { params: mlp.init(stream('protocol')) },
       8,
     ),
+  'nn/training/methodTraining': () =>
+    at(
+      methodTraining(
+        (p: ReturnType<typeof mlp.init>, b: typeof data) => binaryCrossEntropyWithLogits(mlp.apply(p, b.x), b.y),
+        data,
+        { method: 'adam', stepSize: 0.05, batchSize: 4 },
+      ),
+      { params: mlp.init(stream('protocol')) },
+      8,
+    ),
+  'nn/training/privateTraining': () =>
+    at(
+      privateTraining({
+        loss: (p: Tensor[], e: typeof data) => sum(square(sub(sum(mul(p[0], e.x)), e.y))),
+        data,
+        batchSize: 4,
+        clipNorm: 1,
+        noiseMultiplier: 1,
+      }),
+      { params: [tensor([0.1, -0.2])] },
+      6,
+    ),
   'nn/training/trainingLoop': () =>
     at(
       trainingLoop({
@@ -576,6 +645,20 @@ const CASES: Record<string, () => Case> = {
       }),
       { params: mlp.init(stream('protocol')) },
       8,
+    ),
+  'numerics/factorisation/nmfSteps': () =>
+    at(
+      nmfSteps(
+        [
+          [1, 2, 0.5],
+          [0.2, 1, 3],
+          [2, 0.1, 1],
+          [1, 1, 1],
+        ],
+        { rank: 2, tolerance: 0 },
+      ),
+      undefined,
+      6,
     ),
   'numerics/linalg/kleinmanIteration': () => at(kleinmanIteration(systems.care), undefined, 6),
   'numerics/linalg/riccatiMatrixSign': () => at(riccatiMatrixSign(systems.care), undefined, 6),
@@ -683,6 +766,66 @@ const CASES: Record<string, () => Case> = {
       6,
     ),
   'probability/tests/cusum': () => at(cusum([0.3, 1.2, 2.8, 2.1, 0.9, 3.4], { h: 2 }), undefined, 6),
+  'probability/markov/markovChainSteps': () =>
+    at(
+      markovChainSteps(
+        [
+          [0.7, 0.2, 0.1],
+          [0.3, 0.4, 0.3],
+          [0.2, 0.3, 0.5],
+        ],
+        { start: [0.2, 0.3, 0.5] },
+      ),
+      undefined,
+      8,
+    ),
+  'optim/online/hedge': () => at(hedge(expertLosses, { eta: 0.5 }), undefined, 6),
+  'optim/search/refinementSearchSteps': () =>
+    at(
+      refinementSearchSteps<readonly number[]>(
+        {
+          root: [],
+          refine: (n) => [0, 1, 2, 3, 4].filter((i) => i > (n.at(-1) ?? -1)).map((i) => [...n, i]),
+          quality: (n) => n.reduce((a, i) => a + [2, -1, 1.5, -2, 1][i] - 0.3, 0),
+          bound: (n) => n.reduce((a, i) => a + [2, -1, 1.5, -2, 1][i] - 0.3, 0) + 4,
+        },
+        { strategy: 'best-first', maxDepth: 3, k: 3 },
+      ),
+      undefined,
+      20,
+    ),
+  'learning/subgroups/subgroupDiscoverySteps': () =>
+    at(
+      subgroupDiscoverySteps(
+        selectorLanguage({ a: ['x', 'y', 'x', 'y', 'x', 'z'], b: [1, 2, 3, 4, 5, 6] }, { bins: 3 }),
+        wraccQuality([1, 0, 1, 0, 0, 1]),
+        { beamWidth: 2, maxDepth: 2 },
+      ),
+      undefined,
+      4,
+    ),
+  'optim/online/fixedShare': () => at(fixedShare(expertLosses, { eta: 0.5, alpha: 0.1 }), undefined, 6),
+  'optim/online/weightedMajority': () =>
+    at(
+      weightedMajority(
+        expertLosses.map((r) => r.map((v) => (v > 0.5 ? 1 : 0))),
+        [1, 0, 1, 1, 0, 1],
+      ),
+      undefined,
+      6,
+    ),
+  'optim/online/onlineGradientDescent': () =>
+    at(
+      onlineGradientDescent(onlineLinear, { dim: 2, domain: { kind: 'ball', radius: 1 }, comparator: [0.5, 0] }),
+      undefined,
+      6,
+    ),
+  'optim/online/followTheRegularisedLeader': () =>
+    at(followTheRegularisedLeader(onlineLinear, { dim: 2, eta: 0.3, l1: 0.1 }), undefined, 6),
+  'optim/online/onlineNewtonStep': () =>
+    at(onlineNewtonStep(onlineLinear, { dim: 2, domain: { kind: 'ball', radius: 1 } }), undefined, 6),
+  'optim/online/onlineAdagrad': () =>
+    at(onlineAdagrad(onlineLinear, { dim: 2, domain: { kind: 'box', lower: -1, upper: 1 } }), undefined, 6),
   'optim/derivative-free/nelderMead': () => at(nelderMead(rosen.value), fromRosen),
   'optim/derivative-free/simulatedAnnealing': () => at(simulatedAnnealing(rosen.value), fromRosen),
   'optim/derivative-free/cmaEs': () => at(cmaEs(rosen.value), fromRosen),
@@ -758,6 +901,72 @@ const CASES: Record<string, () => Case> = {
   'signal/statistical/lms': () => at(lms(adaptiveInput, adaptiveDesired, { order: 3, stepSize: 0.1 }), undefined),
   'signal/statistical/nlms': () => at(nlms(adaptiveInput, adaptiveDesired, { order: 3, stepSize: 0.5 }), undefined),
   'signal/statistical/rls': () => at(rls(adaptiveInput, adaptiveDesired, { order: 3 }), undefined),
+  'systems/predictionErrorMethod': () => {
+    const u = Array.from({ length: 120 }, (_, t) => Math.sin(0.7 * t) + Math.cos(1.9 * t))
+    const y = u.map((_, t) => (t > 0 ? 0.8 * u[t - 1] : 0) + 0.05 * Math.sin(3.1 * t))
+    return at(predictionErrorMethod(y, u, { na: 1, nb: 1, nc: 1 }), {}, 4)
+  },
+  'dynamics/control/recedingHorizon': () => {
+    const plant = {
+      A: [
+        [1, 0.1],
+        [0, 1],
+      ],
+      B: [[0.005], [0.1]],
+    }
+    const c = mpcController({
+      ...plant,
+      Q: [
+        [1, 0],
+        [0, 0.1],
+      ],
+      R: [[0.1]],
+      horizon: 5,
+      uMin: -1,
+      uMax: 1,
+    })
+    return at(recedingHorizon(c), { x0: [2, 0] }, 5)
+  },
+  'dynamics/control/lqgSimulation': () => {
+    const plant = {
+      A: [
+        [0.9, 0.1],
+        [0, 0.95],
+      ],
+      B: [[0], [0.1]],
+      C: [[1, 0]],
+    }
+    const w = {
+      Q: [
+        [1, 0],
+        [0, 1],
+      ],
+      R: [[1]],
+      W: [
+        [0.01, 0],
+        [0, 0.01],
+      ],
+      V: [[0.1]],
+    }
+    return at(lqgSimulation(plant, w, lqg(plant, w, { discrete: true })), { x0: [1, 0] }, 5)
+  },
+  'numerics/robust/ransac': () => {
+    const xs = Array.from({ length: 30 }, (_, i) => i / 3)
+    const ys = xs.map((x, i) => (i % 5 === 0 ? 20 - x : 2 * x + 1))
+    return at(
+      ransac(
+        {
+          count: 30,
+          sampleSize: 2,
+          fit: ([i, j]) => (xs[i] === xs[j] ? null : (ys[j] - ys[i]) / (xs[j] - xs[i])),
+          residuals: (a) => xs.map((x, k) => Math.abs(ys[k] - ys[0] - a * (x - xs[0]))),
+        },
+        { threshold: 0.1 },
+      ),
+      undefined,
+      5,
+    )
+  },
   'systems/simulate': () =>
     at(
       simulate(
@@ -800,6 +1009,23 @@ const CASES: Record<string, () => Case> = {
       ),
       undefined,
       6,
+    ),
+  'logic/resolution/sldSteps': () =>
+    at(
+      sldSteps(prologProgram('t(a). t(b). t(c). f(X) :- t(X), !. g(X) :- \\+ t(X).'), 'f(X), g(d), member(Y, [1, 2])'),
+      undefined,
+      30,
+    ),
+  'logic/induction/foilSteps': () =>
+    at(
+      foilSteps(
+        foilProblem(
+          'parent(ann, mary). parent(ann, tom). parent(tom, eve). parent(tom, ian). female(ann). female(mary). female(eve).',
+          'daughter(mary, ann). daughter(eve, tom).',
+        ),
+      ),
+      undefined,
+      4,
     ),
   'text/subword/bpeSteps': () => at(bpeSteps({ low: 5, lower: 2, newest: 6, widest: 3 }), undefined, 12),
   'text/subword/wordPieceSteps': () => at(wordPieceSteps({ hug: 10, pug: 5, pun: 12, bun: 4, hugs: 5 }), undefined, 8),

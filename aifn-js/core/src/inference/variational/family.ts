@@ -11,6 +11,7 @@
 
 import type { VectorLike } from 'aifn/foundation/contracts'
 import { dense, fromData, type Matrix, type Vector } from 'aifn/foundation/tensor'
+import { ShapeError } from 'aifn/foundation/errors'
 
 // Types defined once, in `aifn/foundation/contracts`.
 export type { VectorLike } from 'aifn/foundation/contracts'
@@ -75,7 +76,8 @@ function wrap(
 ): GaussianFamily {
   const check = (lambda: VectorLike) => {
     const l = toF64(lambda)
-    if (l.length !== size) throw new Error(`${kind} family: λ must have ${size} values, got ${l.length}`)
+    if (l.length !== size)
+      throw new ShapeError(`${kind} family`, `${kind} family: λ must have ${size} values, got ${l.length}`)
     return l
   }
   return {

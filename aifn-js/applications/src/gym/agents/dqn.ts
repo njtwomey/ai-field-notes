@@ -39,6 +39,7 @@ import type { ActivationName } from 'aifn/nn/functional'
 import { lecunUniform } from 'aifn/nn/init'
 import { ActivationLayer, LayerNorm, Linear, Sequential, type Layer } from 'aifn/nn/layers'
 import { adamRule, applyUpdates, chainRules, clipByGlobalNorm } from 'aifn/optim/first-order'
+import { DomainError } from 'aifn/foundation/errors'
 
 // ── The replay buffer ────────────────────────────────────────────────────────────────────────────────────────────────
 
@@ -74,7 +75,8 @@ export interface StoredTransition {
 
 /** An empty buffer for observations of `dim` numbers, keeping the last `capacity` transitions. */
 export function replayBuffer(dim: number, capacity: number): ReplayBuffer {
-  if (!(capacity >= 1)) throw new RangeError(`replayBuffer: capacity must be at least 1, got ${capacity}`)
+  if (!(capacity >= 1))
+    throw new DomainError('replayBuffer', `replayBuffer: capacity must be at least 1, got ${capacity}`)
   const width = 2 * dim + 3
   return { dim, width, capacity, count: 0, first: 0, chunks: [], tail: new Float32Array(0) }
 }
@@ -114,7 +116,7 @@ export function pushTransition(
 /** Where transition i lives: its array and offset. */
 function locate(b: ReplayBuffer, i: number): { data: Float32Array; offset: number } {
   if (!(i >= Math.max(0, b.count - b.capacity) && i < b.count))
-    throw new RangeError(`replay buffer: transition ${i} is outside the window`)
+    throw new DomainError('replay buffer', `replay buffer: transition ${i} is outside the window`)
   const c = Math.floor(i / CHUNK)
   const data = c - b.first < b.chunks.length ? b.chunks[c - b.first] : b.tail
   return { data, offset: (i % CHUNK) * b.width }
@@ -136,7 +138,7 @@ export function transitionAt(b: ReplayBuffer, i: number): StoredTransition {
 /** n transition indices drawn uniformly, with replacement, from the window, using only `s`. */
 export function sampleIndices(b: ReplayBuffer, n: number, s: Stream): Int32Array {
   const size = bufferSize(b)
-  if (size === 0) throw new RangeError('replay buffer: cannot sample an empty buffer')
+  if (size === 0) throw new DomainError('replay buffer', 'replay buffer: cannot sample an empty buffer')
   const offsets = toFlat(integers(s, size, { shape: [n] }))
   const start = b.count - size
   return Int32Array.from(offsets, (k) => start + k)

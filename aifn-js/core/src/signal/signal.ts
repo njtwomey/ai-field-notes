@@ -9,7 +9,7 @@
 
 import { abs, angle, complexAbs, dense, fromData, isTensor, type Tensor } from 'aifn/foundation/tensor'
 import type { Scalar, Size, Signal, Spectrum, TimeFrequency, VectorLike } from 'aifn/foundation/contracts'
-import { ShapeError } from 'aifn/foundation/errors'
+import { DomainError, ShapeError } from 'aifn/foundation/errors'
 import { decibels } from 'aifn/foundation/fourier'
 import { definer, entries, type Entry, type FunctionInfo } from 'aifn/foundation/registry'
 
@@ -47,7 +47,7 @@ export function signal(data: SignalInput | Tensor, options: SignalOptions = {}):
   if (values.shape.length < 1 || values.shape.length > 2)
     throw new ShapeError('signal', `signal: data must be [n] or [channels, n], got [${values.shape.join(', ')}]`)
   const fs = options.fs ?? base?.fs ?? 1
-  if (!(fs > 0)) throw new RangeError('signal: fs must be positive')
+  if (!(fs > 0)) throw new DomainError('signal', 'signal: fs must be positive')
   const unit = options.unit ?? base?.unit
   const channels = options.channels ?? base?.channels
   return {

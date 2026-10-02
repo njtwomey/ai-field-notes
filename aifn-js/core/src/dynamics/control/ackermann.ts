@@ -8,6 +8,7 @@ import { dense, fromData, toFlat, type Matrix, type Tensor, type Vector } from '
 import type { Scalar } from 'aifn/foundation/contracts'
 import { polyFromRoots, type ComplexLike } from 'aifn/numerics/polynomial'
 import type { StateFeedbackPlant } from './lqr'
+import { DomainError, ShapeError } from 'aifn/foundation/errors'
 
 /** The result of `ackermann`. */
 export type PolePlacement = {
@@ -31,12 +32,12 @@ export type PolePlacement = {
  */
 export function ackermann(plant: StateFeedbackPlant, desired: ComplexLike): PolePlacement {
   const { data: A, m: n, n: nA } = dense.toMatrixF64(plant.A, 'ackermann A')
-  if (n !== nA) throw new Error('ackermann: A must be square')
+  if (n !== nA) throw new ShapeError('ackermann', 'ackermann: A must be square')
   const { data: b, n: inputs } = dense.toMatrixF64(plant.B, 'ackermann B', n)
-  if (inputs !== 1) throw new Error('ackermann: single-input systems only')
+  if (inputs !== 1) throw new DomainError('ackermann', 'ackermann: single-input systems only')
   const phi = polyFromRoots(desired, { real: true })
   const alpha = toFlat(phi)
-  if (alpha.length !== n + 1) throw new Error(`ackermann: need ${n} poles, got ${alpha.length - 1}`)
+  if (alpha.length !== n + 1) throw new ShapeError('ackermann', `ackermann: need ${n} poles, got ${alpha.length - 1}`)
   // 𝒞 (n×n, row-major): column j is Aʲb.
   const C = new Float64Array(n * n)
   let col: ArrayLike<number> = b

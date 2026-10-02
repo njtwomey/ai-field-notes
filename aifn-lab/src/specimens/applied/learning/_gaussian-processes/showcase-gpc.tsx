@@ -107,7 +107,10 @@ export function GpClassification() {
       ell: slider(ELL.min, ELL.max, 0.2, { label: 'lengthscale ℓ', step: ELL.step }),
       variance: slider(VAR.min, VAR.max, 4, { label: 'signal variance σ²', step: VAR.step }),
     }),
-    reveal: row('3 · reveal', { latent: toggle(false, 'latent mean f̄ instead of π*') }),
+    reveal: row('3 · reveal', {
+      latent: toggle(false, 'latent mean f̄ instead of π*'),
+      boundary: toggle(true, 'decision boundary (π* = ½)'),
+    }),
     fitting: row('4 · fit', { hyperprior: setting(true, 'weak hyperprior (log θ ~ N(start, 2²))') }),
   })
   const method = state.approx.method as GpClassificationMethod
@@ -259,7 +262,7 @@ export function GpClassification() {
           </>
         ),
       }}
-      caption="Left: 50 points from two noisy moons (blue class 0, red class 1) over the predictive probability π*(x) (or, revealed, the latent posterior mean f̄), computed by aifn’s GP classifier with an RBF kernel and the probit likelihood, its posterior approximated by Laplace (Newton to the mode) or EP (moment-matched sites); the ink line is the decision boundary π* = ½, drawn within 0.35 of a training point (far from the data π* is ½ everywhere, so a boundary there means nothing). Drag the two ends of the dashed line cut, and drag the round handle on the evidence surface to set (ℓ, σ²). Top right: along the cut, f̄ with ± 2 posterior sd (the band), and π* scaled by 10 (dashed): between and beyond the moons the band widens and π* falls back towards ½ even where f̄ does not. Bottom right: the chosen approximation’s log marginal likelihood over log₁₀ ℓ and log₁₀ σ² (one fit per cell), the current hyperparameters (the handle) and, after “Fit hyperparameters”, the L-BFGS path, played as it climbs (by default with a weak Gaussian hyperprior on each log hyperparameter, sd 2 about its start, since on these nearly separable moons the evidence keeps rising with σ², EP’s without bound); its gradients come from differentiating the evidence through the Gram matrix (implicitly through the Laplace mode, at the EP fixed point). EP’s evidence is at or above Laplace’s, by up to 20 nats where σ² is large and the posterior skewed. EP’s surface fills in a row at a time. A very short ℓ overfits each point (π* near 0 or 1 at the data, ½ between), a long one underfits to a nearly linear boundary; the evidence peaks between."
+      caption="Left: 50 points from two noisy moons (blue class 0, red class 1) over the predictive probability π*(x) (or, revealed, the latent posterior mean f̄), computed by aifn’s GP classifier with an RBF kernel and the probit likelihood, its posterior approximated by Laplace (Newton to the mode) or EP (moment-matched sites); with the decision boundary on (the default), the ink line is π* = ½, drawn within 0.35 of a training point (far from the data π* is ½ everywhere, so a boundary there means nothing). Drag the two ends of the dashed line cut, and drag the round handle on the evidence surface to set (ℓ, σ²). Top right: along the cut, f̄ with ± 2 posterior sd (the band), and π* scaled by 10 (dashed): between and beyond the moons the band widens and π* falls back towards ½ even where f̄ does not. Bottom right: the chosen approximation’s log marginal likelihood over log₁₀ ℓ and log₁₀ σ² (one fit per cell), the current hyperparameters (the handle) and, after “Fit hyperparameters”, the L-BFGS path, played as it climbs (by default with a weak Gaussian hyperprior on each log hyperparameter, sd 2 about its start, since on these nearly separable moons the evidence keeps rising with σ², EP’s without bound); its gradients come from differentiating the evidence through the Gram matrix (implicitly through the Laplace mode, at the EP fixed point). EP’s evidence is at or above Laplace’s, by up to 20 nats where σ² is large and the posterior skewed. EP’s surface fills in a row at a time. A very short ℓ overfits each point (π* near 0 or 1 at the data, ½ between), a long one underfits to a nearly linear boundary; the evidence peaks between."
     >
       <GpcCharts
         model={model}
@@ -267,6 +270,7 @@ export function GpClassification() {
         boundary={boundary}
         fieldStale={fitted.stale}
         latent={latent}
+        showBoundary={state.reveal.boundary}
         evidence={evidence}
         path={path}
         ell={hp.ell}
@@ -284,6 +288,8 @@ type ChartsProps = {
   boundary: number[][]
   fieldStale: boolean
   latent: boolean
+  /** Draw the decision boundary. */
+  showBoundary: boolean
   evidence: number[][]
   path: { x: number[]; y: number[] } | null
   ell: number
@@ -301,6 +307,7 @@ const GpcCharts = memo(function GpcCharts({
   boundary,
   fieldStale,
   latent,
+  showBoundary,
   evidence,
   path,
   ell,
@@ -365,7 +372,7 @@ const GpcCharts = memo(function GpcCharts({
               valueLabel={latent ? 'f̄' : 'π*'}
               stale={fieldStale}
             />
-            <Contours x={GX} y={GY} z={boundary} levels={latent ? [0] : [0.5]} stale={fieldStale} />
+            {showBoundary && <Contours x={GX} y={GY} z={boundary} levels={latent ? [0] : [0.5]} stale={fieldStale} />}
             <Points name="points" x={points.x} y={points.y} group={LABELS} groupNames={CLASS_NAMES} />
             <Curve name="line cut" x={cutLine.x} y={cutLine.y} emphasis dashed live />
             <Handle kind="point" at={cut[0]} label="cut start" onDrag={(p) => moveCut(0, p)} />

@@ -1,5 +1,15 @@
 import { describe, expect, it } from 'vitest'
-import { eig, expm, matrixTrace, pairwiseDistances, solve, solveDense, squaredDistances } from 'aifn/numerics/linalg'
+import {
+  eig,
+  expm,
+  matrixTrace,
+  pairwiseDistances,
+  solve,
+  solveDense,
+  squaredDistances,
+  symmetricInverseSqrt,
+} from 'aifn/numerics/linalg'
+import { NumericalError, ShapeError } from 'aifn/foundation/errors'
 import { imagPart, realPart, tensor, toFlat, toRows } from 'aifn/foundation/tensor'
 import { fixture } from '../../fixtures'
 
@@ -85,5 +95,30 @@ describe('solveDense', () => {
     expect(r.singular).toBe(true)
     expect(r.x).toBeNull()
     expect(solveDense([1, NaN, 0, 1], [1, 1], 2).singular).toBe(true)
+  })
+})
+
+describe('symmetricInverseSqrt', () => {
+  it('is symmetric and squares to the inverse: W S W = I', () => {
+    const S = [
+      [4, 1, 0.5],
+      [1, 3, 0.2],
+      [0.5, 0.2, 2],
+    ]
+    const W = toRows(symmetricInverseSqrt(S))
+    for (let i = 0; i < 3; i++) for (let j = 0; j < 3; j++) expect(W[i][j]).toBeCloseTo(W[j][i], 12)
+    const WS = W.map((row) => S[0].map((_, j) => row.reduce((a, w, k) => a + w * S[k][j], 0)))
+    const WSW = WS.map((row) => W[0].map((_, j) => row.reduce((a, v, k) => a + v * W[k][j], 0)))
+    WSW.forEach((row, i) => row.forEach((v, j) => expect(v).toBeCloseTo(i === j ? 1 : 0, 12)))
+  })
+
+  it('refuses a singular matrix unless a floor is given, and a non-square one', () => {
+    const S = [
+      [1, 1],
+      [1, 1],
+    ]
+    expect(() => symmetricInverseSqrt(S)).toThrow(NumericalError)
+    expect(toFlat(symmetricInverseSqrt(S, { floor: 1e-6 })).every(Number.isFinite)).toBe(true)
+    expect(() => symmetricInverseSqrt([[1, 2, 3]])).toThrow(ShapeError)
   })
 })

@@ -1,8 +1,8 @@
 /**
  * `aifn/nn/sequence`: sequence layers beyond the recurrent cells of `aifn/nn/layers`. Backpropagation through time with
- * the gradient norm at every step (and truncation); linear state-space layers: discretisation (zero-order hold,
- * bilinear, Euler), HiPPO-LegS, the S4 convolution kernel, the recurrent mode by a parallel scan, and the causal
- * convolution; Mamba's selective scan and layer; linear attention in its parallel and recurrent forms (with retention's
+ * the gradient norm at every step (and truncation); linear state-space layers: diagonal discretisation (the dense one
+ * is `aifn/systems` `discretiseSsm`), HiPPO-LegS, the S4 convolution kernel, the recurrent mode by a parallel scan,
+ * and the causal convolution; Mamba's selective scan and layer; linear attention in its parallel and recurrent forms (with retention's
  * decay); and Bahdanau and Luong attention for recurrent encoder–decoders.
  */
 
@@ -10,15 +10,12 @@ export { gradientsThroughTime, type ThroughTime, type ThroughTimeOptions } from 
 export {
   causalConvolution,
   discretiseDiagonal,
-  discretiseSsm,
   hippoLegS,
   linearRecurrence,
   matrixRecurrence,
   ssmKernel,
   ssmRecurrent,
-  type DiscreteSsm,
   type RecurrenceOptions,
-  type SsmDiscretisation,
 } from './ssm'
 export {
   SelectiveSsm,

@@ -62,6 +62,7 @@ import { trace, type Algorithm, type Status, type Trace } from 'aifn/foundation/
 import { defineModel } from 'aifn/learning/estimators'
 import { bool, int, oneOf, real, space } from 'aifn/foundation/space'
 import { definer, type AlgorithmInfo } from 'aifn/foundation/registry'
+import { DomainError } from 'aifn/foundation/errors'
 
 const LOG_2PI = Math.log(2 * Math.PI)
 
@@ -164,7 +165,7 @@ export function sparseGp<P extends KernelParams>(
   options: SparseGpOptions & { noiseVariance: number },
 ): SparseGp<P> {
   const { method = 'vfe', noiseVariance, mean = 0 } = options
-  if (!(noiseVariance > 0)) throw new Error('sparseGp: noiseVariance must be positive')
+  if (!(noiseVariance > 0)) throw new DomainError('sparseGp', 'sparseGp: noiseVariance must be positive')
   const Y = y.shape.length === 2 ? (reshape(y, [y.shape[0]]) as Tensor) : y
   const Z = asRows(z) as Tensor
   const p = pieces(kernel, x, Y, Z, { ...options, method })

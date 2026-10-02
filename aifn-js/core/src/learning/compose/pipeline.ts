@@ -7,6 +7,7 @@ import type { Capability, Dataset, FitOptions } from 'aifn/learning/estimators'
 import type { Decides, Expects, Fitted, Predicts, Samples, Scores, Trained, Transforms } from 'aifn/learning/estimators'
 import type { Distribution } from 'aifn/learning/estimators'
 import { child, type Stream } from 'aifn/foundation/random'
+import { DomainError } from 'aifn/foundation/errors'
 
 /** Anything with a `fit`: an estimator or a transformer. */
 // oxlint-disable-next-line no-explicit-any -- estimator data types vary per step; the step list is typed below
@@ -88,7 +89,7 @@ export function pipeline<const S extends readonly [...TransformStep[], AnyEstima
   readonly steps: S
   fit(data: Dataset<InputOfStep<S[0]>, unknown>, options?: FitOptions): PipelineModel<S>
 } {
-  if (steps.length === 0) throw new Error('pipeline: needs at least one step')
+  if (steps.length === 0) throw new DomainError('pipeline', 'pipeline: needs at least one step')
   return {
     name: `pipeline(${steps.map((s) => s.name).join(', ')})`,
     steps,

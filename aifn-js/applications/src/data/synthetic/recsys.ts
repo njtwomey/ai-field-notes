@@ -6,6 +6,7 @@
 import { aliasSample, aliasTable, normal, type Stream, child, uniform } from 'aifn/foundation/random'
 import { fromData, type Tensor } from 'aifn/foundation/tensor'
 import { checkCount, labels, matrix, vector, type DatasetMeta } from '../types'
+import type { RecommenderData } from 'aifn-applied/retrieval/recommenders'
 import type { DatasetInfo } from 'aifn/foundation/contracts'
 import { definer } from 'aifn/foundation/registry'
 import { int, oneOf, real, space } from 'aifn/foundation/space'
@@ -242,6 +243,153 @@ export function clickLog(s: Stream, options: ClickLogOptions = {}): ClickLog {
   }
 }
 
+// ── Implicit feedback with known structure ──────────────────────────────────────────────────────────────────────────
+
+/** Implicit feedback from a known low-rank taste model under popularity-biased exposure. */
+export interface ImplicitFeedback extends RecommenderData {
+  /** Training rows (user, item) [m, 2] and the held-out rows: each user's last `testPerUser` interactions. */
+  train: Tensor
+  test: Tensor
+  /** A group per user and a category per item (int32): the side features. */
+  userGroup: Tensor
+  itemCategory: Tensor
+  /** Each user's training items in the order they were consumed. */
+  sequences: number[][]
+  /** The true affinity w_uᵀv_i of every user for every item (users × items). */
+  preference: Tensor
+  /** The exposure weight of each item (sums to 1): how often the platform shows it, regardless of taste. */
+  exposure: Tensor
+  /** The true user and item factors (users × rank, items × rank). */
+  userFactors: Tensor
+  itemFactors: Tensor
+  meta: DatasetMeta
+}
+
+/** Options of `implicitFeedback`. */
+export interface ImplicitFeedbackOptions {
+  users?: number
+  items?: number
+  /** Rank of the taste model (default 3). */
+  rank?: number
+  /** Item categories and user groups; factors cluster around a centre per category or group (default 5 and 3). */
+  categories?: number
+  groups?: number
+  /** Interactions per user, uniform between the two (default [12, 24]). */
+  perUser?: readonly [number, number]
+  /** Zipf exponent of exposure over a random order of the items: 0 shows every item equally (default 1). */
+  exposureBias?: number
+  /** Temperature τ of the taste term exp(w_uᵀv_i/τ) (default 0.5). */
+  temperature?: number
+  /** Log-weight added to items of the previous item's category: sequential structure (default 1.5). */
+  stickiness?: number
+  /** Held-out interactions per user, the last ones in time (default 2). */
+  testPerUser?: number
+}
+
+/**
+ * Implicit feedback with a known latent structure: user factors w_u (around a centre per user group) and item factors
+ * v_i (around a centre per item category) of rank r; item exposure e_i ∝ rank_i^{−b} over a random order of the items
+ * (popularity that has nothing to do with taste); and each user's interactions drawn one after another without
+ * replacement with probability ∝ e_i · exp(w_uᵀv_i/τ + γ·1[c(i) = c(previous item)]). Exposure bias makes popular
+ * items over-represented in the log; the stickiness γ gives the sequences an order that only a sequential model can
+ * use. The last `testPerUser` interactions of each user are held out (leave-last-out).
+ */
+export function implicitFeedback(s: Stream, options: ImplicitFeedbackOptions = {}): ImplicitFeedback {
+  const {
+    users = 80,
+    items = 100,
+    rank = 3,
+    categories = 5,
+    groups = 3,
+    perUser = [12, 24],
+    exposureBias = 1,
+    temperature = 0.5,
+    stickiness = 1.5,
+    testPerUser = 2,
+  } = options
+  checkCount(users, 'implicitFeedback')
+  checkCount(items, 'implicitFeedback')
+  const fs = child(s, 'factors')
+  const centre = (n: number, tag: string) =>
+    Array.from({ length: n }, (_, c) => Array.from({ length: rank }, (_, r) => 1.2 * normal(child(fs, tag, c, r))))
+  const groupCentres = centre(groups, 'group')
+  const categoryCentres = centre(categories, 'category')
+  const userGroup = Int32Array.from({ length: users }, (_, u) => u % groups)
+  const itemCategory = Int32Array.from({ length: items }, (_, i) => i % categories)
+  const W = new Float64Array(users * rank)
+  const V = new Float64Array(items * rank)
+  for (let u = 0; u < users; u++)
+    for (let r = 0; r < rank; r++)
+      W[u * rank + r] = groupCentres[userGroup[u]][r] + 0.6 * normal(child(fs, 'user', u, r))
+  for (let i = 0; i < items; i++)
+    for (let r = 0; r < rank; r++)
+      V[i * rank + r] = categoryCentres[itemCategory[i]][r] + 0.6 * normal(child(fs, 'item', i, r))
+  const scale = 1 / Math.sqrt(rank)
+  const preference = new Float64Array(users * items)
+  for (let u = 0; u < users; u++)
+    for (let i = 0; i < items; i++) {
+      let dot = 0
+      for (let r = 0; r < rank; r++) dot += W[u * rank + r] * V[i * rank + r]
+      preference[u * items + i] = scale * dot
+    }
+  // Exposure: Zipf weights over a random order of the items.
+  const order = Array.from({ length: items }, (_, i) => ({ i, key: uniform(child(s, 'order', i)) })).sort(
+    (a, b) => a.key - b.key,
+  )
+  const exposure = new Float64Array(items)
+  order.forEach(({ i }, r) => (exposure[i] = (r + 1) ** -exposureBias))
+  const total = exposure.reduce((a, b) => a + b, 0)
+  exposure.forEach((v, i) => (exposure[i] = v / total))
+  const train: number[] = []
+  const test: number[] = []
+  const sequences: number[][] = []
+  const [lo, hi] = perUser
+  for (let u = 0; u < users; u++) {
+    const us = child(s, 'user', u)
+    const n = Math.min(items, lo + Math.floor(uniform(child(us, 'length')) * (hi - lo + 1)))
+    const taken = new Set<number>()
+    const seq: number[] = []
+    let previous = -1
+    for (let t = 0; t < n; t++) {
+      const w = new Float64Array(items)
+      for (let i = 0; i < items; i++) {
+        if (taken.has(i)) continue
+        const sticky = previous >= 0 && itemCategory[i] === itemCategory[previous] ? stickiness : 0
+        w[i] = exposure[i] * Math.exp(preference[u * items + i] / temperature + sticky)
+      }
+      const j = aliasSample(child(us, 'step', t), aliasTable(vector(w)), { shape: [1] }).data[0]
+      taken.add(j)
+      seq.push(j)
+      previous = j
+    }
+    const cut = Math.max(1, seq.length - testPerUser)
+    seq.slice(0, cut).forEach((i) => train.push(u, i))
+    seq.slice(cut).forEach((i) => test.push(u, i))
+    sequences.push(seq.slice(0, cut))
+  }
+  const rows = (a: number[]) => fromData(Int32Array.from(a), [a.length / 2, 2])
+  return {
+    users,
+    items,
+    train: rows(train),
+    test: rows(test),
+    userGroup: labels(userGroup),
+    itemCategory: labels(itemCategory),
+    sequences,
+    preference: matrix(preference, users, items),
+    exposure: vector(exposure),
+    userFactors: matrix(W, users, rank),
+    itemFactors: matrix(V, items, rank),
+    meta: {
+      name: 'implicit feedback',
+      description: `${users} users and ${items} items: a rank-${rank} taste model with ${categories} item categories and ${groups} user groups, interactions drawn under Zipf(${exposureBias}) exposure; the last ${testPerUser} per user held out.`,
+      task: 'recommendation',
+      featureNames: ['user', 'item'],
+      key: s.key,
+    },
+  }
+}
+
 // ── Registry ─────────────────────────────────────────────────────────────────────────────────────────────────────────
 
 const dataset = definer<DatasetInfo>('dataset', 'data/synthetic')
@@ -304,4 +452,29 @@ dataset(
     notes: ['click-models'],
   },
   clickLog,
+)
+
+dataset(
+  {
+    key: 'implicitFeedback',
+    name: 'Implicit feedback (low-rank, exposure-biased)',
+    summary: 'Interaction sequences from a clustered low-rank taste model under Zipf exposure, last items held out.',
+    task: 'recommendation',
+    output: 'log',
+    knobs: space({
+      users: int(2, 1000, { default: 80 }),
+      items: int(2, 1000, { default: 100 }),
+      rank: int(1, 10, { default: 3 }),
+      categories: int(1, 20, { default: 5 }),
+      groups: int(1, 20, { default: 3 }),
+      exposureBias: real(0, 3, { default: 1 }),
+      temperature: real(0.05, 5, { default: 0.5 }),
+      stickiness: real(0, 5, { default: 1.5 }),
+      testPerUser: int(1, 10, { default: 2 }),
+    }),
+    truth: false,
+    random: true,
+    notes: ['explicit-and-implicit-feedback', 'popularity-bias', 'biases-in-recommender-feedback'],
+  },
+  implicitFeedback,
 )

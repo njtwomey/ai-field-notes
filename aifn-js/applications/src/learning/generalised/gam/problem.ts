@@ -34,6 +34,7 @@ import {
   type PenalisedFit,
 } from '../smoothing'
 import { buildTerms, times, type BuiltTerm, type TermSpec } from './terms'
+import { ShapeError } from 'aifn/foundation/errors'
 
 type F64 = Float64Array
 const lazy = <T>(f: () => T) => {
@@ -100,7 +101,7 @@ export type GamDesign = PenalisedDesign & {
 
 /** Build the terms on x [n, d] and assemble the model matrix and penalties. */
 export function gamDesign(specs: readonly TermSpec[], x: Tensor): GamDesign {
-  if (x.shape.length !== 2) throw new Error('gam: x must be [n, d]')
+  if (x.shape.length !== 2) throw new ShapeError('gam', 'gam: x must be [n, d]')
   const [n, d] = x.shape
   const Xin = f64(x)
   const terms = buildTerms(specs, Xin, n, d)
@@ -147,7 +148,7 @@ export function gamDesign(specs: readonly TermSpec[], x: Tensor): GamDesign {
 /** Rows of the model matrix at new inputs x [m, d], row-major [m, P]. */
 export function gamDesignAt(A: GamDesign, x: Tensor): F64 {
   const [m, d] = x.shape
-  if (d !== A.d) throw new Error(`gam: fitted on ${A.d} features, given ${d}`)
+  if (d !== A.d) throw new ShapeError('gam', `gam: fitted on ${A.d} features, given ${d}`)
   const Xin = f64(x)
   const out = new Float64Array(m * A.P)
   for (let i = 0; i < m; i++) out[i * A.P] = 1
@@ -235,7 +236,7 @@ export function gamProblem(spec: GamSpec, data: GamData): GamProblem {
   const A = gamDesign(spec.terms, data.x)
   const { n, P } = A
   const y = f64(data.y)
-  if (y.length !== n) throw new Error(`gam: ${n} rows of x but ${y.length} responses`)
+  if (y.length !== n) throw new ShapeError('gam', `gam: ${n} rows of x but ${y.length} responses`)
   const w = data.weights ? f64(data.weights) : new Float64Array(n).fill(1)
   const o = data.offset ? f64(data.offset) : new Float64Array(n)
 
@@ -246,7 +247,7 @@ export function gamProblem(spec: GamSpec, data: GamData): GamProblem {
     A.fixed.map((v, k) => (Number.isNaN(v) ? (method === 'fixed' ? common : Math.exp(logs[free.indexOf(k)])) : v))
   let lambdas = spec.lambdas ? [...spec.lambdas] : lambdasFrom(new Float64Array(free.length))
   if (spec.lambdas && spec.lambdas.length !== A.penalties.length)
-    throw new Error(`gam: ${spec.lambdas.length} λ given for ${A.penalties.length} penalties`)
+    throw new ShapeError('gam', `gam: ${spec.lambdas.length} λ given for ${A.penalties.length} penalties`)
   let evaluations = 0
   if (!spec.lambdas && method !== 'fixed' && free.length > 0) {
     let warm: F64 | undefined

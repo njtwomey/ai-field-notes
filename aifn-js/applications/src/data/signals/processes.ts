@@ -25,6 +25,7 @@ import { signal } from 'aifn/signal'
 import { lfilter } from 'aifn/signal/filters'
 import { spectralTruth, type ArmaParts, type SpectralLine, type SpectralModel } from '../truth'
 import { checkCount, generatorRecipe, matrix, vector, type Dataset } from '../types'
+import { DomainError } from 'aifn/foundation/errors'
 
 /** A series with a known spectrum: times in `x`, values in `y`, the same samples as a `Signal`. */
 export type SignalDataset = Dataset & {
@@ -167,7 +168,7 @@ export interface ArProcessOptions {
 export function arProcess(s: Stream, options: ArProcessOptions = {}): SignalDataset {
   const { n = 512, fs = 1, radius = 0.95, frequency = 0.2, sigma = 1 } = options
   checkCount(n, 'arProcess')
-  if (!(radius >= 0 && radius < 1)) throw new RangeError('arProcess: radius must be in [0, 1)')
+  if (!(radius >= 0 && radius < 1)) throw new DomainError('arProcess', 'arProcess: radius must be in [0, 1)')
   const ar = options.ar ? [...options.ar] : pair(radius, frequency)
   const parts: ArmaParts = { ar, ma: [], sigma2: sigma * sigma }
   const t = evenTimes(n, fs)

@@ -12,6 +12,7 @@ import { dense, fromData, imagPart, realPart, toFlat, type Matrix, type Vector }
 import type { MatrixLike, Scalar, Size, VectorLike } from 'aifn/foundation/contracts'
 import { gradientAt, jacobianAt, type ScalarField, type VectorField } from './calculus'
 import { streamline, type Box } from './flow'
+import { ShapeError } from 'aifn/foundation/errors'
 
 const { toF64, toMatrixF64 } = dense
 
@@ -50,7 +51,7 @@ export type Classification = {
  */
 export function classifyLinear(J: MatrixLike, { tolerance = 1e-9 }: { tolerance?: Scalar } = {}): Classification {
   const { data, m: n } = toMatrixF64(J, 'classifyLinear')
-  if (data.length !== n * n) throw new Error('classifyLinear: expected a square matrix')
+  if (data.length !== n * n) throw new ShapeError('classifyLinear', 'classifyLinear: expected a square matrix')
   const e = eig(fromData(Float64Array.from(data), [n, n]))
   const re = toFlat(realPart(e.values))
   const im = toFlat(imagPart(e.values))

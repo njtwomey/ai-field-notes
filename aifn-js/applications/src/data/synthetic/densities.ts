@@ -27,6 +27,7 @@ import {
   type Reference,
 } from '../truth'
 import { generatorRecipe, labels, matrix, type Dataset } from '../types'
+import { DomainError } from 'aifn/foundation/errors'
 
 const TAU = 2 * Math.PI
 
@@ -343,7 +344,7 @@ export interface AnnulusOptions {
  */
 export function annulus(s: Stream, options: AnnulusOptions = {}): Dataset {
   const { n = 200, inner = 3, outer = 4 } = options
-  if (!(outer > inner && inner >= 0)) throw new RangeError('annulus: need 0 ≤ inner < outer')
+  if (!(outer > inner && inner >= 0)) throw new DomainError('annulus', 'annulus: need 0 ≤ inner < outer')
   const x = new Float64Array(2 * n)
   const r = child(s, 'points')
   for (let i = 0; i < n; i++) {

@@ -20,6 +20,7 @@ import { child, normal, uniform, units, type Stream } from 'aifn/foundation/rand
 import { definer } from 'aifn/foundation/registry'
 import { int, oneOf, real, space } from 'aifn/foundation/space'
 import { checkCount, generatorRecipe, labels, matrix, vector, type Dataset } from '../types'
+import { DomainError } from 'aifn/foundation/errors'
 
 // ── Fig. 1 failure cases ─────────────────────────────────────────────────────────────────────────────────────────────
 
@@ -229,7 +230,8 @@ const NIGHT = [0, 0.1, 0.9, 0]
 export function floorplanWalks(s: Stream, options: FloorplanWalksOptions = {}): Dataset {
   const { n = 160, samples = 51, duration = 10, noise = 0.03, pause = 0.3, timeOfDay = 'day' } = options
   checkCount(n, 'floorplanWalks')
-  if (!(Number.isInteger(samples) && samples >= 2)) throw new RangeError('floorplanWalks: samples must be ≥ 2')
+  if (!(Number.isInteger(samples) && samples >= 2))
+    throw new DomainError('floorplanWalks', 'floorplanWalks: samples must be ≥ 2')
   const M = samples
   const x = new Float64Array(n * (2 * M + 1))
   const y = new Int32Array(n)

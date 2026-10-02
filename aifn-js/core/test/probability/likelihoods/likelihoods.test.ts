@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { DomainError } from 'aifn/foundation/errors'
 import {
   binomialFamily,
   checkLink,
@@ -155,7 +156,7 @@ describe('family–link pairs', () => {
       'gam: the poisson family does not take the logit link; use one of log, identity, sqrt',
     )
     expect(() => likelihood(family('binomial'), 'identity')).toThrow(/does not take the identity link/)
-    expect(() => likelihood(family('gamma'), 'probit')).toThrow(RangeError)
+    expect(() => likelihood(family('gamma'), 'probit')).toThrow(DomainError)
   })
 })
 

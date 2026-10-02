@@ -37,6 +37,7 @@ import {
   type Value,
 } from 'aifn/foundation/tensor'
 import type { Index, Size } from 'aifn/foundation/contracts'
+import { DomainError, ShapeError } from 'aifn/foundation/errors'
 
 /** The three ordinal models. */
 export type OrdinalModel = 'cumulative' | 'continuation-ratio' | 'adjacent-category'
@@ -78,7 +79,7 @@ export interface OrdinalLikelihood {
 function thresholdCount(thresholds: Value): Size {
   const shape = shapeOfValue(thresholds)
   if (shape.length !== 1 || shape[0] < 1) {
-    throw new RangeError(`ordinal: thresholds must be a non-empty vector, got shape [${shape.join(', ')}]`)
+    throw new ShapeError('ordinal', `ordinal: thresholds must be a non-empty vector, got shape [${shape.join(', ')}]`)
   }
   return shape[0]
 }
@@ -114,9 +115,12 @@ export function ordinalLikelihood(
   linkName: OrdinalLinkName = 'logit',
 ): OrdinalLikelihood {
   const F = LATENT[linkName]
-  if (!F) throw new RangeError(`ordinalLikelihood: unknown link "${linkName as string}"`)
+  if (!F) throw new DomainError('ordinalLikelihood', `ordinalLikelihood: unknown link "${linkName as string}"`)
   if (model === 'adjacent-category' && linkName !== 'logit') {
-    throw new RangeError('ordinalLikelihood: the adjacent-category model is defined for the logit link only')
+    throw new DomainError(
+      'ordinalLikelihood',
+      'ordinalLikelihood: the adjacent-category model is defined for the logit link only',
+    )
   }
   const logProbabilities = (eta: Value, thresholds: Value): Value => {
     const m = thresholdCount(thresholds)
@@ -141,7 +145,7 @@ export function ordinalLikelihood(
         return logSoftmax(neg(matmul(z, exclusiveCumsum(m, k))), { axis: -1 })
       }
     }
-    throw new RangeError(`ordinalLikelihood: unknown model "${model as string}"`)
+    throw new DomainError('ordinalLikelihood', `ordinalLikelihood: unknown model "${model as string}"`)
   }
   return {
     model,
@@ -156,11 +160,11 @@ export function ordinalLikelihood(
       const batch = shape.slice(0, -1)
       const count = batch.reduce((a, b) => a * b, 1)
       if (classes.length !== count) {
-        throw new RangeError(`ordinal logLik: ${classes.length} classes for a batch of ${count}`)
+        throw new ShapeError('ordinal logLik', `ordinal logLik: ${classes.length} classes for a batch of ${count}`)
       }
       const indices = Int32Array.from(classes, (c, i) => {
         if (!Number.isInteger(c) || c < 0 || c >= k)
-          throw new RangeError(`ordinal logLik: class ${c} outside 0 … ${k - 1}`)
+          throw new DomainError('ordinal logLik', `ordinal logLik: class ${c} outside 0 … ${k - 1}`)
         return i * k + c
       })
       const picked = gather(logP, indices, batch)

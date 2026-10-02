@@ -2,7 +2,7 @@
  * `aifn/inference/model`: the model description language on the structured graphs of `aifn/graph/structured`
  * (`model`, `dist`, plates and chains as groups, parameters, deterministic nodes; `expandModel` on `unroll`,
  * `logJoint`, `sampleModel`), discrete factor graphs and their algebra (`discreteFactor`, `factorProduct`,
- * `factorMarginalise`, `factorReduce`), the model's factor graph as a structured graph (`toFactorGraph`), and diagram
+ * `factorMarginalise`, `factorReduce`) and gates (`gateFactor`), the model's factor graph as a structured graph (`toFactorGraph`), and diagram
  * data (`toPlateDiagram`, `toFactorDiagram`, both `toDiagram` of a structured graph).
  */
 
@@ -17,6 +17,7 @@ export {
   factorProductAll,
   factorReduce,
   forEachAssignment,
+  gateFactor,
   isTree,
   logPotential,
   normaliseFactor,

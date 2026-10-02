@@ -1,5 +1,7 @@
 """Golden values for aifn/ode from scipy: solve_ivp's RK45 step sequence, expm and general eigenvalues."""
 
+from typing import cast
+
 import numpy as np
 import scipy.linalg as sla
 from scipy.integrate import solve_ivp
@@ -93,7 +95,7 @@ def neural_ode_case() -> dict[str, object]:
     field = Field()
     x = torch.tensor(x0, dtype=torch.float64, requires_grad=True)
     t = torch.tensor([0.0, 1.0], dtype=torch.float64)
-    xt = odeint_adjoint(field, x, t, method="dopri5", rtol=1e-11, atol=1e-12)[-1]  # pyright: ignore[reportUnknownVariableType]
+    xt = cast(torch.Tensor, odeint_adjoint(field, x, t, method="dopri5", rtol=1e-11, atol=1e-12))[-1]
     loss = (xt * torch.tensor(weights, dtype=torch.float64)).sum()  # pyright: ignore[reportUnknownMemberType]
     loss.backward()  # pyright: ignore[reportUnknownMemberType]
     return {

@@ -26,15 +26,10 @@ export { featureHash, hashColumn, hashedFeatures, murmurHash3, type HashingOptio
 export { oneHotTokens } from './onehot'
 export { characterShingles, jaccardSimilarity, wordShingles } from './shingles'
 export {
-  lshBands,
-  lshCandidates,
-  lshProbability,
-  lshThreshold,
   minHashSignature,
   minHashSignatures,
   minHashSimilarity,
   minHashStandardError,
-  type Banding,
   type MinHashOptions,
 } from './minhash'
 export {

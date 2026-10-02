@@ -46,6 +46,8 @@ function checkImports(): number {
 }
 
 const importErrors = checkImports()
+// `--imports-only` (run by `make lint`): the boundary alone, without rendering.
+if (process.argv.includes('--imports-only')) process.exit(importErrors ? 1 : 0)
 
 // The theme provider and figures read the colour-scheme preference and saved sizes; give them inert stand-ins.
 const store = new Map<string, string>()

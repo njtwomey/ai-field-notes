@@ -9,6 +9,7 @@ import type { AnyUnivariate } from 'aifn/foundation/contracts'
 import { argmax, dense, fromData, type Tensor } from 'aifn/foundation/tensor'
 import { bernoulliPredictive, categoricalPredictive, matrixShape } from 'aifn/learning/estimators'
 import { softmax } from 'aifn/numerics/special'
+import { DomainError, ShapeError } from 'aifn/foundation/errors'
 
 /** The elements of a tensor in row-major order as float64 (`dense.data`: shared when already dense; do not mutate). */
 export const values = (t: Tensor): Float64Array => dense.data(t)
@@ -25,14 +26,15 @@ export function matrix(x: Tensor, where: string): { n: number; d: number; v: Flo
  */
 export function classLabels(y: Tensor, n: number, where: string, minClasses = 2): { y: Int32Array; k: number } {
   if (y.shape.length > 2 || (y.shape.length === 2 && y.shape[1] !== 1)) {
-    throw new Error(`${where}: expected labels [n], got shape [${y.shape.join(', ')}]`)
+    throw new ShapeError(where, `${where}: expected labels [n], got shape [${y.shape.join(', ')}]`)
   }
   const v = dense.data(y)
-  if (v.length !== n) throw new Error(`${where}: ${n} rows of x but ${v.length} labels`)
+  if (v.length !== n) throw new ShapeError(where, `${where}: ${n} rows of x but ${v.length} labels`)
   const out = new Int32Array(n)
   let k = 0
   for (let i = 0; i < n; i++) {
-    if (!(Number.isInteger(v[i]) && v[i] >= 0)) throw new Error(`${where}: labels must be integers 0 … K−1`)
+    if (!(Number.isInteger(v[i]) && v[i] >= 0))
+      throw new DomainError(where, `${where}: labels must be integers 0 … K−1`)
     out[i] = v[i]
     k = Math.max(k, v[i] + 1)
   }
@@ -42,7 +44,7 @@ export function classLabels(y: Tensor, n: number, where: string, minClasses = 2)
 /** Real-valued targets [n] as a Float64Array. */
 export function targets(y: Tensor, n: number, where: string): Float64Array {
   const v = dense.data(y)
-  if (v.length !== n) throw new Error(`${where}: ${n} rows of x but ${v.length} targets`)
+  if (v.length !== n) throw new ShapeError(where, `${where}: ${n} rows of x but ${v.length} targets`)
   return v
 }
 
@@ -50,15 +52,16 @@ export function targets(y: Tensor, n: number, where: string): Float64Array {
 export function sampleWeights(w: Tensor | undefined, n: number, where: string): Float64Array {
   if (!w) return new Float64Array(n).fill(1)
   const v = dense.data(w)
-  if (v.length !== n) throw new Error(`${where}: ${n} rows but ${v.length} sample weights`)
-  for (const u of v) if (!(u >= 0 && Number.isFinite(u))) throw new Error(`${where}: sample weights must be ≥ 0`)
+  if (v.length !== n) throw new ShapeError(where, `${where}: ${n} rows but ${v.length} sample weights`)
+  for (const u of v)
+    if (!(u >= 0 && Number.isFinite(u))) throw new DomainError(where, `${where}: sample weights must be ≥ 0`)
   return v
 }
 
 /** Checks that a prediction input has the fitted number of features. */
 export function inputs(x: Tensor, d: number, where: string): { n: number; v: Float64Array } {
   const m = matrix(x, where)
-  if (m.d !== d) throw new Error(`${where}: fitted on ${d} features, given ${m.d}`)
+  if (m.d !== d) throw new ShapeError(where, `${where}: fitted on ${d} features, given ${m.d}`)
   return { n: m.n, v: m.v }
 }
 

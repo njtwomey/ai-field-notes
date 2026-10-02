@@ -12,6 +12,7 @@ import { normal, uniform, type Stream } from 'aifn/foundation/random'
 import { definer } from 'aifn/foundation/registry'
 import { boxDomain, discreteDomain, int, oneOf, real, space } from 'aifn/foundation/space'
 import { isTensor, toFlat, type Tensor } from 'aifn/foundation/tensor'
+import { DomainError } from 'aifn/foundation/errors'
 
 const read = (v: Tensor | readonly number[]) => Float64Array.from(isTensor(v) ? toFlat(v) : v)
 
@@ -47,7 +48,8 @@ export interface BernoulliBanditOptions {
 /** A Bernoulli bandit: arm a pays 1 with probability μ_a and 0 otherwise. */
 export function bernoulliBandit({ means = [0.3, 0.5, 0.7] }: BernoulliBanditOptions = {}): BanditEnvironment {
   const mu = read(means)
-  if (mu.some((p) => !(p >= 0 && p <= 1))) throw new RangeError('bernoulliBandit: means must be probabilities')
+  if (mu.some((p) => !(p >= 0 && p <= 1)))
+    throw new DomainError('bernoulliBandit', 'bernoulliBandit: means must be probabilities')
   return armBandit('Bernoulli bandit', mu, (s) => mu.map((p) => (uniform(s) < p ? 1 : 0)))
 }
 

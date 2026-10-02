@@ -9,6 +9,7 @@ import type { MatrixLike, Status, VectorLike } from 'aifn/foundation/contracts'
 import { run, type Algorithm } from 'aifn/foundation/trace'
 import { dense, fromData, logsumexp, toFlat, type Tensor } from 'aifn/foundation/tensor'
 import { softmax } from 'aifn/numerics/special'
+import { DomainError, ShapeError } from 'aifn/foundation/errors'
 
 function matrixOf(m: MatrixLike, where: string): { rows: number; cols: number; values: Float64Array } {
   const { data, m: rows, n: cols } = dense.toMatrixF64(m, where)
@@ -103,10 +104,12 @@ export function blahutArimotoCapacity(
     let s = 0
     for (let y = 0; y < cols; y++) {
       const w = values[x * cols + y]
-      if (!(w >= 0)) throw new RangeError('blahutArimotoCapacity: channel entries must be non-negative')
+      if (!(w >= 0))
+        throw new DomainError('blahutArimotoCapacity', 'blahutArimotoCapacity: channel entries must be non-negative')
       s += w
     }
-    if (Math.abs(s - 1) > 1e-9) throw new RangeError(`blahutArimotoCapacity: row ${x} of the channel sums to ${s}`)
+    if (Math.abs(s - 1) > 1e-9)
+      throw new DomainError('blahutArimotoCapacity', `blahutArimotoCapacity: row ${x} of the channel sums to ${s}`)
   }
   return {
     name: 'blahutArimotoCapacity',
@@ -268,12 +271,17 @@ export function blahutArimotoRateDistortion(
   beta: number,
   { tolerance = 1e-12 }: RateDistortionOptions = {},
 ): Algorithm<void, RateDistortionState> {
-  if (!(beta >= 0)) throw new RangeError('blahutArimotoRateDistortion: beta must be non-negative')
+  if (!(beta >= 0))
+    throw new DomainError('blahutArimotoRateDistortion', 'blahutArimotoRateDistortion: beta must be non-negative')
   const raw = vectorOf(source, 'blahutArimotoRateDistortion')
   const total = raw.reduce((a, b) => a + b, 0)
   const p = raw.map((v) => v / total)
   const { rows, cols, values } = matrixOf(distortion, 'blahutArimotoRateDistortion')
-  if (rows !== p.length) throw new RangeError('blahutArimotoRateDistortion: distortion needs one row per source symbol')
+  if (rows !== p.length)
+    throw new ShapeError(
+      'blahutArimotoRateDistortion',
+      'blahutArimotoRateDistortion: distortion needs one row per source symbol',
+    )
   return {
     name: 'blahutArimotoRateDistortion',
     init: () =>

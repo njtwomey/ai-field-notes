@@ -14,6 +14,7 @@ import type { StartOptions } from '../options'
 import type { IterateState, ObjectiveFn, StoppingOptions, VectorLike } from 'aifn/foundation/contracts'
 import { DEFAULT_DIVERGE, divergedAt, evaluate } from '../options'
 import { dense } from 'aifn/foundation/tensor'
+import { DomainError } from 'aifn/foundation/errors'
 
 const { axpy, data, dot, norm, sub, toF64, vec } = dense
 type F64 = dense.F64
@@ -60,25 +61,44 @@ export function projectBall(radius: number, center?: VectorLike): (x: Vector) =>
 }
 
 /**
- * Euclidean projection onto the simplex {x ≥ 0, Σx = z} (default z = 1), by sorting (Duchi, Shalev-Shwartz, Singer &
- * Chandra, 2008, "Efficient projections onto the l1-ball", Figure 1).
+ * Project v[start … start + length) onto the simplex {x ≥ 0, Σx = z} in place, by sorting (Duchi, Shalev-Shwartz,
+ * Singer & Chandra, 2008, "Efficient projections onto the l1-ball", Figure 1).
  */
+function simplexInPlace(v: Float64Array, start: number, length: number, z: number): void {
+  const u = v.slice(start, start + length).sort().reverse()
+  let cumulative = 0
+  let theta = 0
+  for (let j = 0; j < length; j++) {
+    cumulative += u[j]
+    const t = (cumulative - z) / (j + 1)
+    if (u[j] - t > 0) theta = t
+  }
+  for (let j = start; j < start + length; j++) v[j] = Math.max(v[j] - theta, 0)
+}
+
+/** Euclidean projection onto the simplex {x ≥ 0, Σx = z} (default z = 1), by sorting (Duchi et al. 2008, Figure 1). */
 export function projectSimplex(z = 1): (x: Vector) => Vector {
   return (x) => {
-    const v = toF64(x, 'projectSimplex')
-    const u = Float64Array.from(v).sort().reverse()
-    let cumulative = 0
-    let theta = 0
-    for (let j = 0; j < u.length; j++) {
-      cumulative += u[j]
-      const t = (cumulative - z) / (j + 1)
-      if (u[j] - t > 0) theta = t
-    }
-    return vec(v.map((vi) => Math.max(vi - theta, 0)))
+    const v = Float64Array.from(toF64(x, 'projectSimplex'))
+    simplexInPlace(v, 0, v.length, z)
+    return vec(v)
   }
 }
 
-/** g = 0: the prox is the identity, and proximal gradient is gradient descent. */
+/**
+ * Projection of every row of an n × c matrix (flattened row-major, length n·c) onto the simplex {x ≥ 0, Σx = z}: the
+ * projection onto the product of n simplices, as for a matrix of class distributions.
+ */
+export function projectSimplexRows(columns: number, z = 1): (x: Vector) => Vector {
+  return (x) => {
+    const v = Float64Array.from(toF64(x, 'projectSimplexRows'))
+    if (v.length % columns !== 0)
+      throw new DomainError('projectSimplexRows', `projectSimplexRows: ${v.length} entries are not rows of ${columns}`)
+    for (let start = 0; start < v.length; start += columns) simplexInPlace(v, start, columns, z)
+    return vec(v)
+  }
+}
+
 export function proxZero(): Prox {
   return { name: 'zero', value: () => 0, prox: (v) => v }
 }

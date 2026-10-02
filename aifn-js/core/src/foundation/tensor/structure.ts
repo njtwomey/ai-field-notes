@@ -11,7 +11,7 @@
 
 import { AifnError, ShapeError } from 'aifn/foundation/errors'
 import { flatData, fromData, normaliseAxis, promote, showShape, size, sizeOf, type Axes, type Tensor } from './core'
-import { zeros } from './create'
+import { astype, zeros } from './create'
 import { where } from './elementwise'
 import { sumToKernel } from './kernels'
 import {
@@ -129,13 +129,17 @@ const sumToOp: Op<readonly number[]> = definePrimitive<readonly number[]>({
   id: 'foundation/tensor/sumTo',
   dtype: 'float',
   arity: 1,
-  impl: ([x], shape) => sumToKernel(asTensor(x), shape),
+  // As `sum` (the `float` rule): integer sums come back as float64.
+  impl: ([x], shape) => {
+    const r = sumToKernel(asTensor(x), shape)
+    return r.dtype === 'int32' ? astype(r, 'float64') : r
+  },
   linear: 'linear',
   // The adjoint of summing down is broadcasting back up (to a number when the input was one).
   transpose: (ct, [x]) => fitTo(ct, avalOf(x)),
   shape: ([x], shape) => ({
     shape: [...shape],
-    dtype: x.dtype === 'int32' || x.dtype === 'complex128' ? x.dtype : 'float64',
+    dtype: x.dtype === 'complex128' ? x.dtype : 'float64',
     number: false,
   }),
   // Leading axes of an example are summed away; with the batch axis first, the target gets length-1 axes in their

@@ -40,6 +40,7 @@ import {
 import { logSoftmax, softplus } from 'aifn/numerics/special'
 import { Mixture, Normal, type Univariate } from 'aifn/probability/distributions'
 import { constant, defineLoss, reduce, type ReductionOptions, type Target } from './core'
+import { DomainError, ShapeError } from 'aifn/foundation/errors'
 
 const HALF_LOG_2PI = 0.5 * Math.log(2 * Math.PI)
 
@@ -63,11 +64,12 @@ export const mixtureHeadSize = (components: Size, dims: Size = 1): Size => compo
 
 function headShape(outputs: Value, options: MixtureHeadOptions, where: string) {
   const { components: K, dims: D = 1 } = options
-  if (!(Number.isInteger(K) && K >= 1)) throw new RangeError(`${where}: components must be a positive integer`)
-  if (!(Number.isInteger(D) && D >= 1)) throw new RangeError(`${where}: dims must be a positive integer`)
+  if (!(Number.isInteger(K) && K >= 1)) throw new DomainError(where, `${where}: components must be a positive integer`)
+  if (!(Number.isInteger(D) && D >= 1)) throw new DomainError(where, `${where}: dims must be a positive integer`)
   const shape = shapeOfValue(outputs)
   if (shape.length !== 2 || shape[1] !== mixtureHeadSize(K, D))
-    throw new RangeError(
+    throw new ShapeError(
+      where,
       `${where}: expected outputs [n, ${mixtureHeadSize(K, D)}] for K = ${K}, D = ${D}, got [${shape.join(', ')}]`,
     )
   return { n: shape[0], K, D }
@@ -80,7 +82,7 @@ export type MixtureHeadParts = { logWeights: Value; means: Value; scales: Value 
 export function mixtureDensityParams(outputs: Value, options: MixtureHeadOptions): MixtureHeadParts {
   const { n, K, D } = headShape(outputs, options, 'mixtureDensityParams')
   const { scale = 'exp', floor = 1e-3 } = options
-  if (!(floor >= 0)) throw new RangeError('mixtureDensityParams: floor must be ≥ 0')
+  if (!(floor >= 0)) throw new DomainError('mixtureDensityParams', 'mixtureDensityParams: floor must be ≥ 0')
   const logWeights = logSoftmax(slice(outputs, null, [0, K]))
   const means = reshape(slice(outputs, null, [K, K + K * D]), [n, K, D])
   const raw = reshape(slice(outputs, null, [K + K * D, K + 2 * K * D]), [n, K, D])
@@ -111,7 +113,8 @@ export const mixtureDensityNll = defineLoss(
     const { n, D } = headShape(outputs, options, 'mixtureDensityNll')
     const y = constant(targets)
     const count = typeof y === 'number' ? 1 : y.shape.reduce((a, b) => a * b, 1)
-    if (count !== n * D) throw new RangeError(`mixtureDensityNll: expected ${n * D} target values, got ${count}`)
+    if (count !== n * D)
+      throw new ShapeError('mixtureDensityNll', `mixtureDensityNll: expected ${n * D} target values, got ${count}`)
     const { logWeights, means, scales } = mixtureDensityParams(outputs, options)
     const z = div(sub(reshape(y as Tensor, [n, 1, D]), means), scales)
     // log N(y; μ, σ²) summed over the D independent coordinates: [n, K].

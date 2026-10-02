@@ -22,6 +22,7 @@ import {
   type Labels,
   type Rows,
 } from './core'
+import { DomainError } from 'aifn/foundation/errors'
 
 /** A contingency table of two labellings: `table[i][j]` counts items in class i of the first and cluster j of the second. */
 export type Contingency = {
@@ -299,7 +300,7 @@ function clustered(x: Rows, labels: Labels) {
   const ids = classesOf(l)
   const k = encodeLabels(l, ids)
   const K = ids.length
-  if (K < 2) throw new Error('metrics: internal clustering indices need at least two clusters')
+  if (K < 2) throw new DomainError('metrics', 'metrics: internal clustering indices need at least two clusters')
   const D = toFlat(pairwiseDistances(matrix(X.data, X.rows, X.cols)))
   const dist = (i: number, j: number) => D[i * X.rows + j]
   const sizes = new Float64Array(K)

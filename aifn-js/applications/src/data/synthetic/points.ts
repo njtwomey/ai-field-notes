@@ -32,6 +32,7 @@ import { MultivariateNormal, Normal } from 'aifn/probability/distributions'
 import type { DatasetInfo, ModifierInfo } from 'aifn/foundation/contracts'
 import { definer } from 'aifn/foundation/registry'
 import { int, oneOf, real, space, when } from 'aifn/foundation/space'
+import { DomainError, ShapeError } from 'aifn/foundation/errors'
 
 const TAU = 2 * Math.PI
 
@@ -209,7 +210,7 @@ export function blobs(s: Stream, options: BlobsOptions = {}): Dataset {
   const d = centres[0]?.length ?? dim
   const { sizes, priors } = resolveClassSizes(options, k, 300, 'blobs')
   const sds = sdList ?? Array<number>(k).fill((options.sd as number | undefined) ?? 1)
-  if (sds.length !== k) throw new RangeError(`blobs: ${sds.length} standard deviations for ${k} centres`)
+  if (sds.length !== k) throw new ShapeError('blobs', `blobs: ${sds.length} standard deviations for ${k} centres`)
   const total = sizes.reduce((a, b) => a + b, 0)
   const x = new Float64Array(total * d)
   const y = new Int32Array(total)
@@ -366,7 +367,7 @@ export interface CirclesOptions extends ClassSizeOptions {
  */
 export function circles(s: Stream, options: CirclesOptions = {}): Dataset {
   const { factor = 0.5, noise = 0.05 } = options
-  if (!(factor >= 0 && factor < 1)) throw new RangeError(`circles: factor must be in [0, 1), got ${factor}`)
+  if (!(factor >= 0 && factor < 1)) throw new DomainError('circles', `circles: factor must be in [0, 1), got ${factor}`)
   const { sizes, priors } = resolveClassSizes(options, 2, 200, 'circles')
   const [nOut, nIn] = sizes
   const total = nOut + nIn
@@ -786,14 +787,15 @@ export function gaussians(s: Stream, options: GaussiansOptions = {}): Dataset {
   const k = means.length
   const d = means[0].length
   const covariances = options.covariances ?? means.map(() => isotropic(d, options.sd ?? 1))
-  if (covariances.length !== k) throw new RangeError(`gaussians: ${covariances.length} covariances for ${k} means`)
+  if (covariances.length !== k)
+    throw new ShapeError('gaussians', `gaussians: ${covariances.length} covariances for ${k} means`)
   if (options.separation !== undefined && k > 1) {
     const pooled = isotropic(d, 0).map((row, i) => row.map((_, j) => covariances.reduce((a, c) => a + c[i][j], 0) / k))
     let closest = Infinity
     for (let a = 0; a < k; a++)
       for (let b = a + 1; b < k; b++)
         closest = Math.min(closest, mahalanobisDistance(means[a], means[b], { covariance: pooled }))
-    if (!(closest > 0)) throw new RangeError('gaussians: separation needs distinct means')
+    if (!(closest > 0)) throw new DomainError('gaussians', 'gaussians: separation needs distinct means')
     const centroid = means[0].map((_, c) => means.reduce((a, m) => a + m[c], 0) / k)
     const scale = options.separation / closest
     means = means.map((m) => m.map((v, c) => centroid[c] + scale * (v - centroid[c])))

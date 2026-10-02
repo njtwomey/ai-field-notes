@@ -18,6 +18,7 @@ import type {
   ValueFunction,
   VectorLike,
 } from 'aifn/foundation/contracts'
+import { DomainError, ShapeError } from 'aifn/foundation/errors'
 
 export type { StoppingOptions } from 'aifn/foundation/contracts'
 
@@ -47,7 +48,7 @@ const scalarOf = (v: unknown, where: string): Scalar => {
   // A traced value (an objective evaluated inside a transform, e.g. under `unrolled`) passes through.
   if (isTraced(v)) return v as unknown as Scalar
   if (isTensor(v) && v.shape.reduce((a, b) => a * b, 1) === 1) return toFlat(v)[0]
-  throw new Error(`${where}: the objective must return a scalar`)
+  throw new DomainError(where, `${where}: the objective must return a scalar`)
 }
 
 const isObjective = (f: unknown): f is Objective<Tensor> =>
@@ -76,10 +77,10 @@ export function valueFunction(f: Objective<Tensor> | ObjectiveFn | ValueFunction
 export function evaluate(f: ObjectiveFn, x: dense.F64, where: string): { value: Scalar; grad: dense.F64 } {
   const out = f(dense.vec(x)) as Evaluation | number
   if (typeof out === 'number' || out.grad === undefined)
-    throw new Error(`${where}: the objective must return { value, grad }; this method uses the gradient`)
+    throw new DomainError(where, `${where}: the objective must return { value, grad }; this method uses the gradient`)
   const grad = dense.toF64(out.grad, where)
   if (grad.length !== x.length)
-    throw new Error(`${where}: the gradient has length ${grad.length}, but x has length ${x.length}`)
+    throw new ShapeError(where, `${where}: the gradient has length ${grad.length}, but x has length ${x.length}`)
   return { value: out.value, grad }
 }
 

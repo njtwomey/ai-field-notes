@@ -7,6 +7,7 @@
 import { expm } from 'aifn/numerics/linalg'
 import { dense, fromData, toFlat, type Matrix } from 'aifn/foundation/tensor'
 import type { MatrixLike, VectorLike } from 'aifn/foundation/contracts'
+import { ShapeError } from 'aifn/foundation/errors'
 
 /**
  * The flow of the linear system x′ = Ax: x(t) = e^{At} x₀ at each of the given times, as a [times, n] matrix. Each
@@ -15,7 +16,7 @@ import type { MatrixLike, VectorLike } from 'aifn/foundation/contracts'
 export function linearFlow(a: MatrixLike, x0: VectorLike, times: VectorLike): Matrix {
   const { data: A, n } = dense.toMatrixF64(a, 'linearFlow')
   const x = dense.toF64(x0, 'linearFlow')
-  if (x.length !== n) throw new Error(`linearFlow: x0 has length ${x.length}, A is ${n}×${n}`)
+  if (x.length !== n) throw new ShapeError('linearFlow', `linearFlow: x0 has length ${x.length}, A is ${n}×${n}`)
   const ts = dense.toF64(times, 'linearFlow')
   const out = new Float64Array(ts.length * n)
   ts.forEach((t, k) => {

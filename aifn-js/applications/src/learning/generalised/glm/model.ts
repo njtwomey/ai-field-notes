@@ -28,6 +28,7 @@ import { checkLink, negativeBinomialFamily, type Family, type Link, type LinkNam
 import { irls, type IrlsState } from '../irls'
 import { defineModel } from 'aifn/learning/estimators'
 import { bool, int, real, space } from 'aifn/foundation/space'
+import { NumericalError, ShapeError } from 'aifn/foundation/errors'
 
 /** Data for a GLM fit: inputs x [n, d], responses y [n], optional prior weights and offset [n]. */
 export type GlmData = {
@@ -109,7 +110,7 @@ const vec = (a: Float64Array) => fromData(a, [a.length])
 const flat = (t: Tensor) => Float64Array.from(toFlat(t))
 
 function designOf(x: Tensor, intercept: boolean): { X: Float64Array; n: number; d: number; p: number } {
-  if (x.shape.length !== 2) throw new Error(`glm: x must be [n, d], got [${x.shape.join(', ')}]`)
+  if (x.shape.length !== 2) throw new ShapeError('glm', `glm: x must be [n, d], got [${x.shape.join(', ')}]`)
   const [n, d] = x.shape
   const p = d + (intercept ? 1 : 0)
   const v = toFlat(x)
@@ -159,7 +160,7 @@ export function glm(params: GlmParams): Estimator<GlmData, GlmModel> {
         record: { deviance: (s) => s.deviance, penalisedDeviance: (s) => s.penalisedDeviance },
       })
       const final = training.final
-      if (!final.coefficients) throw new Error('glm: IRLS took no step')
+      if (!final.coefficients) throw new NumericalError('glm', 'glm: IRLS took no step', 'not-converged')
       return summarise({ family, link, intercept, d, n, p, X, data, final, training, penalty })
     },
   }
@@ -238,7 +239,7 @@ function summarise(s: SummaryInput): GlmModel {
 
   const forward = (x: Tensor, offset?: Tensor) => {
     const { X: Z, n: m, d: cols } = designOf(x, intercept)
-    if (cols !== d) throw new Error(`glm: fitted on ${d} features, given ${cols}`)
+    if (cols !== d) throw new ShapeError('glm', `glm: fitted on ${d} features, given ${cols}`)
     const o = offset ? flat(offset) : null
     const out = new Float64Array(m)
     for (let i = 0; i < m; i++) {

@@ -14,6 +14,7 @@ import { trace, type Algorithm, type Trace } from 'aifn/foundation/trace'
 import { classLabels, inputs, matrix, vec } from '../util'
 import { defineModel } from 'aifn/learning/estimators'
 import { bool, int, real, space } from 'aifn/foundation/space'
+import { DomainError } from 'aifn/foundation/errors'
 
 /** The problem a perceptron run solves: inputs [n, d] and labels ±1. */
 export interface PerceptronProblem {
@@ -157,7 +158,7 @@ export function perceptron(
     fit({ x, y }, options: FitOptions = {}) {
       const { n, d } = matrix(x, 'perceptron')
       const { y: labels, k } = classLabels(y, n, 'perceptron')
-      if (k > 2) throw new Error('perceptron: binary labels 0/1 only; use a multiclass reduction')
+      if (k > 2) throw new DomainError('perceptron', 'perceptron: binary labels 0/1 only; use a multiclass reduction')
       const signs = vec(Array.from(labels, (c) => (c === 1 ? 1 : -1)))
       const alg = perceptronSteps({ x, y: signs, learningRate, intercept, shuffle })
       const training: Trace<PerceptronState> = trace(alg, {}, epochs * n, {

@@ -26,6 +26,7 @@ import {
 } from './arma'
 import { simplexFit, type FitState } from './fit'
 import { toVec, type VectorLike } from './inputs'
+import { DomainError } from 'aifn/foundation/errors'
 
 /** A seasonal ARIMA model. Omitted parts are empty, d = D = 0, σ = 1 and μ = 0. */
 export type SarimaSpec = {
@@ -67,10 +68,10 @@ function parse(m: SarimaSpec, where: string): Parsed {
   const d = m.diff ?? 0
   const s = m.period ?? 0
   if ((sar.length || sma.length || D) && !(Number.isInteger(s) && s >= 2))
-    throw new Error(`${where}: a seasonal term needs an integer period of at least 2`)
+    throw new DomainError(where, `${where}: a seasonal term needs an integer period of at least 2`)
   if (!(Number.isInteger(d) && d >= 0 && Number.isInteger(D) && D >= 0))
-    throw new Error(`${where}: the differencing orders must be non-negative integers`)
-  if ((m.mean ?? 0) !== 0 && d + D > 0) throw new Error(`${where}: a non-zero mean needs d = D = 0`)
+    throw new DomainError(where, `${where}: the differencing orders must be non-negative integers`)
+  if ((m.mean ?? 0) !== 0 && d + D > 0) throw new DomainError(where, `${where}: a non-zero mean needs d = D = 0`)
   return {
     ar: m.ar ? toVec(m.ar, where) : [],
     ma: m.ma ? toVec(m.ma, where) : [],
@@ -223,7 +224,7 @@ export function sarimaFitSteps(x: VectorLike, options: SarimaFitOptions): Algori
   const zeros = (m: number) => new Array<number>(m).fill(0)
   parse({ seasonalAr: zeros(P), seasonalMa: zeros(Q), period: s, diff: d, seasonalDiff: D }, 'sarimaFitSteps')
   const demean = options.demean ?? d + D === 0
-  if (demean && d + D > 0) throw new Error('sarimaFitSteps: a mean needs d = D = 0')
+  if (demean && d + D > 0) throw new DomainError('sarimaFitSteps', 'sarimaFitSteps: a mean needs d = D = 0')
   const w = differenced(toVec(x, 'sarimaFitSteps'), d, D, s)
   const mean = demean ? meanOf(tensor(w)) : 0
   const n = w.length

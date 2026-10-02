@@ -20,6 +20,7 @@ import {
   type Model,
   type ModelDiscreteGraph,
 } from 'aifn/inference/model'
+import { DomainError } from 'aifn/foundation/errors'
 
 /**
  * What an engine sees of a model: the model, its bindings, its discrete tabulation (null when a latent variable is not
@@ -44,7 +45,7 @@ export type EngineTable = readonly EngineRegistration[]
 
 const discreteGraph = (c: InferenceContext) => {
   const d = c.discrete()
-  if (!d) throw new Error(`infer: ${c.model.name} has a latent variable that is not discrete`)
+  if (!d) throw new DomainError('infer', `infer: ${c.model.name} has a latent variable that is not discrete`)
   return d.graph
 }
 
@@ -158,7 +159,10 @@ export function infer(model: Model, bindings: Bindings = {}, options: InferOptio
   const chosen =
     options.engine === undefined ? table.find((e) => e.matches(context)) : table.find((e) => e.name === options.engine)
   if (!chosen)
-    throw new Error(`infer: no engine ${options.engine === undefined ? 'matches' : `named ${options.engine}`}`)
+    throw new DomainError(
+      'infer',
+      `infer: no engine ${options.engine === undefined ? 'matches' : `named ${options.engine}`}`,
+    )
   return {
     engine: chosen.name,
     shape: context.shape(),

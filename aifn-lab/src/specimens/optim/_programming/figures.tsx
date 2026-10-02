@@ -24,15 +24,17 @@ import {
   linearInteriorPoint,
   linprog,
   lpCentralPath,
+  needlemanWunsch,
   quadraticInteriorPoint,
   quadprog,
   simplex,
+  smithWaterman,
   type BranchNode,
   type LinearProgram,
   type NodeSelection,
   type SimplexRule,
 } from 'aifn/optim/programming'
-import { knapsack, knapsackProgram, needlemanWunsch, smithWaterman } from 'aifn-applied/algorithms/dynamic-programming'
+import { knapsack, knapsackProgram } from 'aifn-applied/algorithms/dynamic-programming'
 import { integers, stream } from 'aifn/foundation/random'
 import { toFlat, toRows } from 'aifn/foundation/tensor'
 import { trace } from 'aifn/foundation/trace'

@@ -9,6 +9,7 @@ import { checkCount, labels, matrix, type Dataset } from '../types'
 import type { DatasetInfo } from 'aifn/foundation/contracts'
 import { definer } from 'aifn/foundation/registry'
 import { int, oneOf, real, space } from 'aifn/foundation/space'
+import { DomainError } from 'aifn/foundation/errors'
 
 /** A `size`-pixel checkerboard of `tile`-pixel squares, `low` and `high` valued, starting with `high` at the top left. */
 export function checkerboardImage({
@@ -54,7 +55,7 @@ export function gradientImage({
  */
 export function shapesImage(options: { size?: number; noise?: number; stream?: Stream } = {}): Tensor {
   const { size = 64, noise = 0, stream } = options
-  if (noise > 0 && !stream) throw new Error('shapesImage: noise needs a stream')
+  if (noise > 0 && !stream) throw new DomainError('shapesImage', 'shapesImage: noise needs a stream')
   const k = size / 64
   const out = new Float64Array(size * size)
   for (let row = 0; row < size; row++)
@@ -71,6 +72,81 @@ export function shapesImage(options: { size?: number; noise?: number; stream?: S
       out[row * size + c] = noise > 0 ? v + noise * normal(stream!) : v
     }
   return matrix(out, size, size)
+}
+
+/** A geometric test scene and the ground truth it was drawn from. */
+export interface GeometricScene {
+  /** The greyscale image [size, size] (row 0 at the top). */
+  image: Tensor
+  /** 1 on pixels whose 4-neighbourhood holds a different clean value (the true edges), else 0. */
+  edges: Tensor
+  /** The square's four corners (row, column; sub-pixel). */
+  corners: { row: number; col: number }[]
+  /** The two drawn lines, x cos θ + y sin θ = ρ with x the column and y the row. */
+  lines: { angle: number; distance: number }[]
+  /** The disc. */
+  circles: { row: number; col: number; radius: number }[]
+}
+
+/**
+ * A scene with known geometry for testing edge, corner, line and circle detectors: on a background of 0.2, a square
+ * of 0.85 rotated by `rotation` radians, a disc of 0.55 and two bright one-pixel lines; with a stream and `noise`,
+ * Gaussian noise of that standard deviation is added. The clean image's edges, the square's corners, the lines'
+ * normal-form parameters and the disc are returned with it. The noise is drawn from `stream`.
+ */
+export function geometricScene(
+  stream: Stream,
+  options: { size?: number; noise?: number; rotation?: number } = {},
+): GeometricScene {
+  const { size = 96, noise = 0, rotation = 0.3 } = options
+  const k = size / 96
+  const sq = { row: 32 * k, col: 30 * k, half: 15 * k }
+  const disc = { row: 66 * k, col: 64 * k, radius: 16 * k }
+  const lines = [
+    { angle: -0.35, distance: 0 },
+    { angle: 1.25, distance: 0 },
+  ]
+  // Each line passes through a chosen point: ρ = x cos θ + y sin θ there.
+  const through = [
+    [78 * k, 14 * k],
+    [12 * k, 70 * k],
+  ]
+  lines.forEach((l, i) => (l.distance = through[i][1] * Math.cos(l.angle) + through[i][0] * Math.sin(l.angle)))
+  const [c, s] = [Math.cos(rotation), Math.sin(rotation)]
+  const clean = new Float64Array(size * size)
+  for (let r = 0; r < size; r++)
+    for (let x = 0; x < size; x++) {
+      let v = 0.2
+      const dr = r - sq.row
+      const dc = x - sq.col
+      if (Math.abs(c * dc + s * dr) <= sq.half && Math.abs(-s * dc + c * dr) <= sq.half) v = 0.85
+      if ((r - disc.row) ** 2 + (x - disc.col) ** 2 <= disc.radius ** 2) v = 0.55
+      for (const l of lines) if (Math.abs(x * Math.cos(l.angle) + r * Math.sin(l.angle) - l.distance) < 0.5) v = 1
+      clean[r * size + x] = v
+    }
+  const edges = new Float64Array(size * size)
+  for (let r = 0; r < size; r++)
+    for (let x = 0; x < size; x++) {
+      const v = clean[r * size + x]
+      const differs = [
+        [r - 1, x],
+        [r + 1, x],
+        [r, x - 1],
+        [r, x + 1],
+      ].some(([a, b]) => a >= 0 && a < size && b >= 0 && b < size && clean[a * size + b] !== v)
+      edges[r * size + x] = differs ? 1 : 0
+    }
+  const corners = [
+    [-1, -1],
+    [1, -1],
+    [1, 1],
+    [-1, 1],
+  ].map(([u, w]) => ({
+    col: sq.col + sq.half * (c * u - s * w),
+    row: sq.row + sq.half * (s * u + c * w),
+  }))
+  const image = noise > 0 ? clean.map((v) => v + noise * normal(stream)) : clean
+  return { image: matrix(image, size, size), edges: matrix(edges, size, size), corners, lines, circles: [disc] }
 }
 
 // A 5 × 7 bitmap font for the digits, row by row from the top (the classic HD44780 LCD glyphs).
@@ -206,6 +282,25 @@ dataset(
     random: false,
   },
   shapesImage,
+)
+
+dataset(
+  {
+    key: 'geometricScene',
+    name: 'Geometric scene',
+    summary: 'A rotated square, a disc and two lines, with their true edges, corners, lines and circle.',
+    task: 'images',
+    output: 'scene',
+    knobs: space({
+      size: int(32, 512, { default: 96 }),
+      noise: real(0, 0.5, { default: 0 }),
+      rotation: real(-Math.PI / 4, Math.PI / 4, { default: 0.3 }),
+    }),
+    truth: true,
+    random: true,
+    notes: ['edge-detection', 'feature-detection-and-descriptors', 'hough-transform'],
+  },
+  geometricScene,
 )
 
 dataset(

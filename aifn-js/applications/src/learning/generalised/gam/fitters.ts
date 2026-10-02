@@ -28,6 +28,7 @@ import { lbfgs, type LbfgsState } from 'aifn/optim/second-order'
 import { backfitting, type BackfitState } from '../backfitting'
 import { irls, type IrlsState } from '../irls'
 import { gamProblem, type GamData, type GamProblem, type GamSpec } from './problem'
+import { DomainError } from 'aifn/foundation/errors'
 
 type F64 = Float64Array
 const vec = (a: ArrayLike<number>) => fromData(Float64Array.from(a), [a.length])
@@ -177,7 +178,7 @@ export function gamBackfitting(
   problem: GamProblem,
   options: { tolerance?: number } = {},
 ): Algorithm<void, GamFitState & { inner: BackfitState }> {
-  if (problem.data.offset) throw new Error('gamBackfitting: offsets are not supported')
+  if (problem.data.offset) throw new DomainError('gamBackfitting', 'gamBackfitting: offsets are not supported')
   const A = problem.design
   const block = (M: F64, from: number, rows: number, cols = rows, rowStride = A.P) => {
     const out = new Float64Array(rows * cols)
@@ -376,7 +377,7 @@ export function gamFitter(
     case 'lbfgs':
       return gamLbfgs(problem, options)
   }
-  throw new RangeError(`gamFitter: unknown method "${method as string}"`)
+  throw new DomainError('gamFitter', `gamFitter: unknown method "${method as string}"`)
 }
 
 // ── Runs as plain data ───────────────────────────────────────────────────────────────────────────────────────────────

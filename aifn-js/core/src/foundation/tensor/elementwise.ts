@@ -390,18 +390,16 @@ export function map(x: number, f: (v: number) => number): number
 export function map(x: Tensor, f: (v: number) => number): Tensor
 export function map(x: Value, f: (v: number) => number): Value
 export function map(x: Value, f: (v: number) => number): Value {
-  return escapeHatch('map', ([v]) => (typeof v === 'number' ? f(v) : unaryKernel(realOnly('map', v), f, 'float64')))(
-    [x],
-    undefined,
-  )
+  return mapOp([x], f)
 }
 
 /**
  * A local primitive for `map` and `map2`: no derivative at all (`vjp: null`, so jvp is missing by design: the scalar
  * function is opaque), batched by broadcasting like every elementwise primitive, with the broadcasting shape rule.
+ * Built once each; the scalar function is the primitive's parameter.
  */
-function escapeHatch(name: string, impl: (args: Raw[]) => Raw) {
-  return definePrimitive<undefined>({
+function escapeHatch<P>(name: string, impl: (args: Raw[], f: P) => Raw) {
+  return definePrimitive<P>({
     id: name,
     kind: 'elementwise',
     impl,
@@ -420,12 +418,18 @@ export function map2(a: Tensor, b: Tensor | number, f: (x: number, y: number) =>
 export function map2(a: number, b: Tensor, f: (x: number, y: number) => number): Tensor
 export function map2(a: Value, b: Value, f: (x: number, y: number) => number): Value
 export function map2(a: Value, b: Value, f: (x: number, y: number) => number): Value {
-  return escapeHatch('map2', ([x, y]) =>
-    typeof x === 'number' && typeof y === 'number'
-      ? f(x, y)
-      : binaryKernel(realOnly('map2', x), realOnly('map2', y), f, 'float64'),
-  )([a, b], undefined)
+  return map2Op([a, b], f)
 }
+
+const mapOp = escapeHatch<(v: number) => number>('map', ([v], f) =>
+  typeof v === 'number' ? f(v) : unaryKernel(realOnly('map', v), f, 'float64'),
+)
+
+const map2Op = escapeHatch<(x: number, y: number) => number>('map2', ([x, y], f) =>
+  typeof x === 'number' && typeof y === 'number'
+    ? f(x, y)
+    : binaryKernel(realOnly('map2', x), realOnly('map2', y), f, 'float64'),
+)
 
 /** A raw value that must not be complex (the scalar maps take one real number per element). */
 function realOnly<R extends Raw>(where: string, x: R): R {

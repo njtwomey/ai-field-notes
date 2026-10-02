@@ -12,6 +12,7 @@ import type { Algorithm } from 'aifn/foundation/trace'
 import { badLogDensity } from './metropolis'
 import type { ChainStart, ChainState, LogDensity, VectorLike } from './types'
 import { allFinite, data, logDensityAt, mat, standardNormals, toF64, vec, type F64 } from './util'
+import { DomainError, NumericalError, ShapeError } from 'aifn/foundation/errors'
 
 /** A full conditional: a draw of coordinate i given the current point x (whose coordinate i is ignored). */
 export type Conditional = (x: Vector, s: Stream) => number
@@ -57,14 +58,14 @@ function blockDimension(blocks: readonly Block[], name: string): number {
   const d = Math.max(-1, ...blocks.flatMap((b) => b.coordinates)) + 1
   const covered = new Uint8Array(d)
   for (const b of blocks) {
-    if (b.coordinates.length === 0) throw new Error(`${name}: a block has no coordinates`)
+    if (b.coordinates.length === 0) throw new DomainError(name, `${name}: a block has no coordinates`)
     for (const i of b.coordinates) {
-      if (!Number.isInteger(i) || i < 0) throw new Error(`${name}: coordinate ${i} is not an index`)
+      if (!Number.isInteger(i) || i < 0) throw new DomainError(name, `${name}: coordinate ${i} is not an index`)
       covered[i] = 1
     }
   }
   const missing = covered.indexOf(0)
-  if (missing >= 0) throw new Error(`${name}: no block updates coordinate ${missing}`)
+  if (missing >= 0) throw new DomainError(name, `${name}: no block updates coordinate ${missing}`)
   return d
 }
 
@@ -88,7 +89,8 @@ export function gibbs(
     name,
     init: ({ x0 }) => {
       const x = toF64(x0, name)
-      if (x.length !== d) throw new Error(`${name}: x0 has ${x.length} values for blocks covering ${d} coordinates`)
+      if (x.length !== d)
+        throw new ShapeError(name, `${name}: x0 has ${x.length} values for blocks covering ${d} coordinates`)
       return {
         t: 0,
         x: vec(x),
@@ -111,7 +113,10 @@ export function gibbs(
         const block = blocks[j]
         const value = block.draw(vec(x), u)
         if (value.length !== block.coordinates.length)
-          throw new Error(`${name}: block ${j} drew ${value.length} values for ${block.coordinates.length} coordinates`)
+          throw new ShapeError(
+            name,
+            `${name}: block ${j} drew ${value.length} values for ${block.coordinates.length} coordinates`,
+          )
         const next = Float64Array.from(x)
         block.coordinates.forEach((i, m) => (next[i] = value[m]))
         x = next
@@ -140,7 +145,7 @@ export function gibbs(
 export function conditionalMean(blocks: readonly Block[]): (x: Vector) => Vector {
   const d = blockDimension(blocks, 'conditionalMean')
   blocks.forEach((b, j) => {
-    if (!b.mean) throw new Error(`conditionalMean: block ${j} has no mean`)
+    if (!b.mean) throw new DomainError('conditionalMean', `conditionalMean: block ${j} has no mean`)
   })
   return (x) => {
     const out = new Float64Array(d)
@@ -183,7 +188,12 @@ export function gaussianConditionals(
     const Pbb = new Float64Array(nb * nb)
     B.forEach((i, a) => B.forEach((j, b) => (Pbb[a * nb + b] = P[i * d + j])))
     const chol = cholesky(fromData(Pbb, [nb, nb]))
-    if (chol.failed) throw new Error(`${name}: the precision block [${B.join(', ')}] is not positive definite`)
+    if (chol.failed)
+      throw new NumericalError(
+        name,
+        `${name}: the precision block [${B.join(', ')}] is not positive definite`,
+        'not-positive-definite',
+      )
     const L = chol.L
     const conditionalMean = (x: Vector) => {
       const xs = data(x)
@@ -210,7 +220,8 @@ export function gaussianConditionals(
 
 /** The full conditionals of the standard bivariate Gaussian with correlation ρ (unit variances, zero means). */
 export function bivariateGaussianConditionals(rho: number): Conditional[] {
-  if (!(Math.abs(rho) < 1)) throw new Error('bivariateGaussianConditionals: |ρ| must be below 1')
+  if (!(Math.abs(rho) < 1))
+    throw new DomainError('bivariateGaussianConditionals', 'bivariateGaussianConditionals: |ρ| must be below 1')
   const sd = Math.sqrt(1 - rho * rho)
   return [(x, s) => normal(s, rho * data(x)[1], sd), (x, s) => normal(s, rho * data(x)[0], sd)]
 }
@@ -257,9 +268,9 @@ export function sliceSampler(target: LogDensity, options: SliceOptions = {}): Al
     name,
     init: ({ x0 }) => {
       const x = toF64(x0, name)
-      if (x.length !== d) throw new Error(`${name}: x0 has ${x.length} values for dimension ${d}`)
+      if (x.length !== d) throw new ShapeError(name, `${name}: x0 has ${x.length} values for dimension ${d}`)
       const logDensity = logDensityAt(target, x)
-      if (logDensity === -Infinity) throw new Error(`${name}: x0 is outside the support`)
+      if (logDensity === -Infinity) throw new DomainError(name, `${name}: x0 is outside the support`)
       return {
         t: 0,
         x: vec(x),

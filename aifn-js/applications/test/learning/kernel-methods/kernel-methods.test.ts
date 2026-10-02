@@ -5,13 +5,13 @@ import {
   dualCoordinateSteps,
   linearSvm,
   pegasosSteps,
-  plattScaling,
   smoSteps,
   supportVectorMachine,
 } from 'aifn-applied/learning/kernel-methods'
 import { stream } from 'aifn/foundation/random'
 import { tensor, toFlat } from 'aifn/foundation/tensor'
 import { trace } from 'aifn/foundation/trace'
+import { plattScaling } from 'aifn/learning/calibration'
 import { dataset } from 'aifn/learning/estimators'
 import { linearKernel, rbf } from 'aifn/learning/kernels'
 import { expectProtocol } from '../../protocol'

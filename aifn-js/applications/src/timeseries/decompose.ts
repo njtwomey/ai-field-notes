@@ -7,6 +7,7 @@ import { median } from 'aifn/probability/stats'
 import type { Decomposition } from 'aifn/foundation/contracts'
 import { tensor, type Vector } from 'aifn/foundation/tensor'
 import { toVec, type VectorLike } from './inputs'
+import { DomainError, ShapeError } from 'aifn/foundation/errors'
 
 /**
  * The lag-`lag` difference applied `order` times: ∇_s x_t = x_t − x_{t−s}. Each pass shortens the series by `lag`.
@@ -25,7 +26,8 @@ export function difference(x: VectorLike, { lag = 1, order = 1 }: { lag?: number
 export function undifference(d: VectorLike, initial: VectorLike, { lag = 1 }: { lag?: number } = {}): Vector {
   const ds = toVec(d, 'undifference')
   const x = toVec(initial, 'undifference')
-  if (x.length !== lag) throw new Error(`undifference: need ${lag} initial values, got ${x.length}`)
+  if (x.length !== lag)
+    throw new ShapeError('undifference', `undifference: need ${lag} initial values, got ${x.length}`)
   for (const v of ds) x.push(v + x[x.length - lag])
   return tensor(x)
 }
@@ -99,7 +101,8 @@ export function classicalDecomposition(
   { model = 'additive' }: { model?: 'additive' | 'multiplicative' } = {},
 ): SeasonalDecomposition {
   const ys = toVec(y, 'classicalDecomposition')
-  if (ys.length < 2 * period) throw new Error('classicalDecomposition: need at least two full periods')
+  if (ys.length < 2 * period)
+    throw new DomainError('classicalDecomposition', 'classicalDecomposition: need at least two full periods')
   const add = model === 'additive'
   const trend = centredMovingAverage(ys, period)
   const sums = new Array<number>(period).fill(0)
@@ -185,7 +188,7 @@ export function stl(y: VectorLike, period: number, options: StlOptions = {}): Se
   const ys = toVec(y, 'stl')
   const n = ys.length
   const m = period
-  if (n < 2 * m) throw new Error('stl: need at least two full periods')
+  if (n < 2 * m) throw new DomainError('stl', 'stl: need at least two full periods')
   const ns = options.seasonalSpan ?? 7
   let nt = options.trendSpan ?? Math.ceil((1.5 * m) / (1 - 1.5 / ns))
   if (nt % 2 === 0) nt++

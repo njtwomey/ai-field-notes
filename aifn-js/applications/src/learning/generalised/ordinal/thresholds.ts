@@ -56,6 +56,7 @@ import { defineLoss, flatValues, reduce, type ReductionOptions, type Target } fr
 import { softplus } from 'aifn/numerics/special'
 import { lbfgs, type LbfgsState } from 'aifn/optim/second-order'
 import { orderedBijector } from 'aifn/probability/bijectors'
+import { DomainError, ShapeError } from 'aifn/foundation/errors'
 
 /** A margin penalty h(z) of the threshold losses. */
 export type ThresholdPenalty = 'hinge' | 'smooth-hinge' | 'logistic' | 'modified-least-squares'
@@ -78,7 +79,7 @@ export function thresholdPenalty(z: Value, penalty: ThresholdPenalty = 'logistic
     case 'modified-least-squares':
       return square(maximum(sub(1, z), 0))
   }
-  throw new RangeError(`thresholdPenalty: unknown penalty "${penalty as string}"`)
+  throw new DomainError('thresholdPenalty', `thresholdPenalty: unknown penalty "${penalty as string}"`)
 }
 
 /** Options of the threshold losses. */
@@ -95,7 +96,7 @@ function signsAndMask(labels: Float64Array, m: number, construction: ThresholdCo
   for (let i = 0; i < n; i++) {
     const y = labels[i]
     if (!(Number.isInteger(y) && y >= 0 && y <= m))
-      throw new RangeError(`threshold loss: class ${y} outside 0 … ${m} for ${m} thresholds`)
+      throw new DomainError('threshold loss', `threshold loss: class ${y} outside 0 … ${m} for ${m} thresholds`)
     for (let k = 0; k < m; k++) {
       sign[i * m + k] = k < y ? 1 : -1
       mask[i * m + k] = construction === 'all' || k === y - 1 || k === y ? 1 : 0
@@ -113,11 +114,12 @@ function thresholdLoss(
   { penalty = 'logistic', reduction }: ThresholdLossOptions,
 ): Value {
   const shape = shapeOfValue(scores)
-  if (shape.length > 1) throw new RangeError('threshold loss: scores must be a number or a vector [n]')
+  if (shape.length > 1)
+    throw new DomainError('threshold loss', 'threshold loss: scores must be a number or a vector [n]')
   const m = shapeOfValue(thresholds)[0]
   const y = flatValues(labels)
   const n = shape.length === 0 ? 1 : shape[0]
-  if (y.length !== n) throw new RangeError(`threshold loss: ${y.length} labels for ${n} scores`)
+  if (y.length !== n) throw new ShapeError('threshold loss', `threshold loss: ${y.length} labels for ${n} scores`)
   const { sign, mask } = signsAndMask(y, m, construction)
   const s = expandDims(shape.length === 0 ? reshape(scores, [1]) : scores, -1) // [n, 1]
   const z = mul(sign, sub(s, expandDims(thresholds, 0))) // [n, K − 1]
@@ -226,14 +228,22 @@ export function thresholdOrdinalRegression(
     fit({ x, y }, options: FitOptions = {}) {
       const [n, d] = matrixShape(x, 'thresholdOrdinalRegression')
       const t = targetValues(y, 'thresholdOrdinalRegression')
-      if (t.length !== n) throw new Error(`thresholdOrdinalRegression: ${n} inputs but ${t.length} labels`)
+      if (t.length !== n)
+        throw new ShapeError(
+          'thresholdOrdinalRegression',
+          `thresholdOrdinalRegression: ${n} inputs but ${t.length} labels`,
+        )
       const labels = Float64Array.from(t, (v) => {
         if (!(Number.isInteger(v) && v >= 0))
-          throw new Error('thresholdOrdinalRegression: labels must be class indices 0, 1, …')
+          throw new DomainError(
+            'thresholdOrdinalRegression',
+            'thresholdOrdinalRegression: labels must be class indices 0, 1, …',
+          )
         return v
       })
       const K = params.classes ?? Math.max(...labels) + 1
-      if (K < 2) throw new Error('thresholdOrdinalRegression: needs at least two classes')
+      if (K < 2)
+        throw new DomainError('thresholdOrdinalRegression', 'thresholdOrdinalRegression: needs at least two classes')
       const m = K - 1
       const X = fromData(Float64Array.from(dense.data(x)), [n, d])
       const split = (w: Value) => ({ weights: slice(w, [0, d]), theta: ordered.forward(slice(w, [d, d + m])) })
@@ -264,7 +274,11 @@ export function thresholdOrdinalRegression(
       const thresholds = fromData(Float64Array.from(toFlat(parts.theta as Tensor)), [m])
       const forward = (input: Tensor): Tensor => {
         const [rows, cols] = matrixShape(input, 'thresholdOrdinalRegression.forward')
-        if (cols !== d) throw new Error(`thresholdOrdinalRegression: fitted on ${d} features, given ${cols}`)
+        if (cols !== d)
+          throw new ShapeError(
+            'thresholdOrdinalRegression',
+            `thresholdOrdinalRegression: fitted on ${d} features, given ${cols}`,
+          )
         return d > 0 ? (matmul(input, coefficients) as Tensor) : fromData(new Float64Array(rows), [rows])
       }
       const theta = toFlat(thresholds)

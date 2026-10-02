@@ -9,6 +9,7 @@ import { argmax, dense, fromData, reshape, type Tensor } from 'aifn/foundation/t
 import type { InputOf } from './capabilities'
 import { asTensor, classProbabilities, expectation, isClassDistribution } from './distribution'
 import { sizeOf } from './util'
+import { DomainError, ShapeError } from 'aifn/foundation/errors'
 
 /**
  * How `withDecision` turns a model's outputs into a decision per input.
@@ -36,13 +37,14 @@ function costMatrix(costs: Tensor | readonly (readonly number[])[]): { c: Float6
     const k = costs.length
     const c = new Float64Array(k * k)
     ;(costs as readonly (readonly number[])[]).forEach((row, i) => {
-      if (row.length !== k) throw new Error('withDecision: the cost matrix must be square')
+      if (row.length !== k) throw new ShapeError('withDecision', 'withDecision: the cost matrix must be square')
       row.forEach((v, j) => (c[i * k + j] = v))
     })
     return { c, k }
   }
   const t = costs as Tensor
-  if (t.shape.length !== 2 || t.shape[0] !== t.shape[1]) throw new Error('withDecision: the cost matrix must be K×K')
+  if (t.shape.length !== 2 || t.shape[0] !== t.shape[1])
+    throw new ShapeError('withDecision', 'withDecision: the cost matrix must be K×K')
   return { c: dense.data(t), k: t.shape[0] }
 }
 
@@ -55,7 +57,10 @@ function decider(model: Decidable, rule: DecisionRule): (x: unknown) => Tensor {
       return (x) => {
         const s = score(x)
         if (s.shape.length < 2) {
-          throw new Error("withDecision('argmax'): a score of shape [N] has one column; use { threshold: 0 }")
+          throw new ShapeError(
+            'score',
+            "withDecision('argmax'): a score of shape [N] has one column; use { threshold: 0 }",
+          )
         }
         return argmaxRows(s)
       }
@@ -63,7 +68,7 @@ function decider(model: Decidable, rule: DecisionRule): (x: unknown) => Tensor {
     return (x) => argmaxRows(classProbabilities(predictive!(x)))
   }
   if (rule === 'mode') {
-    if (!predictive) throw new Error("withDecision('mode'): the model has no predictive")
+    if (!predictive) throw new DomainError('score', "withDecision('mode'): the model has no predictive")
     return (x) => {
       const d = predictive(x)
       return isClassDistribution(d) ? argmaxRows(classProbabilities(d)) : asTensor(d.mode())
@@ -76,15 +81,16 @@ function decider(model: Decidable, rule: DecisionRule): (x: unknown) => Tensor {
       if (predictive) {
         const d = predictive(x)
         if (!isClassDistribution(d))
-          throw new Error('withDecision(threshold): the predictive has no class probabilities')
+          throw new DomainError('withDecision', 'withDecision(threshold): the predictive has no class probabilities')
         const c = classProbabilities(d)
         const [n, k] = c.shape
-        if (k !== 2) throw new Error('withDecision(threshold): needs two classes')
+        if (k !== 2) throw new DomainError('withDecision', 'withDecision(threshold): needs two classes')
         const probs = dense.data(c)
         p = Float64Array.from({ length: n }, (_, i) => probs[2 * i + 1])
       } else {
         const s = score!(x)
-        if (sizeOf(s.shape) !== s.shape[0]) throw new Error('withDecision(threshold): the score must be [N] or [N, 1]')
+        if (sizeOf(s.shape) !== s.shape[0])
+          throw new ShapeError('withDecision', 'withDecision(threshold): the score must be [N] or [N, 1]')
         p = dense.data(s)
       }
       return fromData(
@@ -94,12 +100,13 @@ function decider(model: Decidable, rule: DecisionRule): (x: unknown) => Tensor {
     }
   }
   const { c, k } = costMatrix(rule.costs)
-  if (!predictive) throw new Error('withDecision(costs): the model has no predictive')
+  if (!predictive) throw new DomainError('withDecision', 'withDecision(costs): the model has no predictive')
   return (x) => {
     const pk = classProbabilities(predictive(x))
     const [n, classes] = pk.shape
     const probs = dense.data(pk)
-    if (classes !== k) throw new Error(`withDecision(costs): ${classes} classes but a ${k}×${k} cost matrix`)
+    if (classes !== k)
+      throw new ShapeError('withDecision', `withDecision(costs): ${classes} classes but a ${k}×${k} cost matrix`)
     const out = new Int32Array(n)
     for (let i = 0; i < n; i++) {
       let best = 0

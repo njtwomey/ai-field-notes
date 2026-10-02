@@ -8,6 +8,7 @@ import { fromData, isTensor, type Tensor, type Vector } from 'aifn/foundation/te
 import type { Status } from 'aifn/foundation/contracts'
 import { trace, type Algorithm, type Recorder, type Trace } from 'aifn/foundation/trace'
 import { data } from './util'
+import { ShapeError } from 'aifn/foundation/errors'
 
 /** Options for `sampleChains`. */
 export type SampleChainsOptions<S> = {
@@ -87,7 +88,8 @@ export function raoBlackwell(
   expectation: (x: Vector) => number | ArrayLike<number> | Tensor,
 ): RaoBlackwellEstimate {
   const shape = draws.shape.length === 2 ? [1, ...draws.shape] : draws.shape
-  if (shape.length !== 3) throw new Error(`raoBlackwell: draws must be m×n×d or n×d, got rank ${draws.shape.length}`)
+  if (shape.length !== 3)
+    throw new ShapeError('raoBlackwell', `raoBlackwell: draws must be m×n×d or n×d, got rank ${draws.shape.length}`)
   const [m, n, d] = shape
   const x = data(draws)
   let k = -1
@@ -101,7 +103,7 @@ export function raoBlackwell(
       out = new Float64Array(m * n * k)
       total = new Float64Array(k)
     } else if (row.length !== k)
-      throw new Error(`raoBlackwell: the expectation returned ${row.length} values, then ${k}`)
+      throw new ShapeError('raoBlackwell', `raoBlackwell: the expectation returned ${row.length} values, then ${k}`)
     for (let j = 0; j < k; j++) {
       out[r * k + j] = row[j]
       total[j] += row[j]

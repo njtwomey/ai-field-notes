@@ -281,6 +281,24 @@ family(
 )
 family(
   {
+    key: 'GeneralisedPareto',
+    name: 'Generalised Pareto',
+    params: space({
+      shape: real(-0.5, 1, { default: 0.2, label: '\\xi', doc: 'shape (tail index)' }),
+      loc: real(-5, 5, { default: 0, label: '\\mu', doc: 'location (the threshold)' }),
+      scale: real(0.1, 10, { default: 1, scale: 'log', label: '\\sigma', doc: 'scale' }),
+    }),
+    support: 'interval',
+    discrete: false,
+    eventRank: 0,
+    expFamily: false,
+    notes: ['extreme-value-theory-for-anomalies'],
+    cite: ['pickands1975'],
+  },
+  continuous.GeneralisedPareto,
+)
+family(
+  {
     key: 'VonMises',
     name: 'Von Mises',
     params: space({
@@ -529,6 +547,22 @@ family(
 )
 family(
   {
+    key: 'ZeroInflated',
+    stability: 'stable',
+    name: 'Zero-inflated',
+    summary: 'A discrete distribution with extra structural zeros: P(0) = π + (1 − π)p(0), P(k) = (1 − π)p(k).',
+    params: space({ pi: real(0, 1, { default: 0.3, label: '\\pi', doc: 'probability of a structural zero' }) }),
+    support: 'varies',
+    discrete: true,
+    eventRank: 0,
+    expFamily: false,
+    composite: true,
+    notes: ['poisson-regression', 'poisson-distribution'],
+  },
+  compose.ZeroInflated,
+)
+family(
+  {
     key: 'Independent',
     stability: 'stable',
     name: 'Independent',
@@ -590,6 +624,7 @@ fn(
   {
     key: 'kl',
     name: 'KL divergence (closed form)',
+    stability: 'stable',
     tex: 'D_{KL}(p \\| q)',
     summary: 'KL(p ‖ q) by the registered closed-form rule for the pair of families.',
     role: 'property',

@@ -10,6 +10,7 @@ import { defineMetric, type Rows } from 'aifn/learning/metrics'
 import { denseMatrix as dense, divide, matrix, type Dense } from 'aifn/learning/metrics'
 import { child, integers } from 'aifn/foundation/random'
 import { fromData, toFlat } from 'aifn/foundation/tensor'
+import { DomainError, ShapeError } from 'aifn/foundation/errors'
 
 /** Column means and the sample covariance (divisor n − 1, as `numpy.cov`) of the rows of X. */
 function moments(X: Dense): { mean: Float64Array; cov: Float64Array } {
@@ -34,7 +35,8 @@ function psdEigen(a: Float64Array, d: number, what: string) {
   let clipped = 0
   for (let i = 0; i < d; i++)
     if (lambda[i] < 0) {
-      if (lambda[i] < -tol) throw new Error(`metrics: ${what}: matrix is not positive semi-definite (λ = ${lambda[i]})`)
+      if (lambda[i] < -tol)
+        throw new DomainError('metrics', `metrics: ${what}: matrix is not positive semi-definite (λ = ${lambda[i]})`)
       lambda[i] = 0
       clipped++
     }
@@ -67,7 +69,7 @@ export function frechetDistance(
   const S2 = dense(cov2, 'frechetDistance')
   const d = S1.rows
   if (S1.cols !== d || S2.rows !== d || S2.cols !== d || mean1.length !== d || mean2.length !== d)
-    throw new Error('metrics: frechetDistance: dimensions differ')
+    throw new ShapeError('metrics', 'metrics: frechetDistance: dimensions differ')
   let meanTerm = 0
   for (let c = 0; c < d; c++) meanTerm += (mean1[c] - mean2[c]) ** 2
   // Σ₁^{1/2} = V diag(√λ) Vᵀ.
@@ -126,7 +128,7 @@ export type PolynomialKernel = { degree?: number; gamma?: number; coef0?: number
 /** The unbiased MMD² estimate with a polynomial kernel between the rows of X and Y. */
 function mmd2(X: Dense, Y: Dense, k: PolynomialKernel): number {
   const d = X.cols
-  if (Y.cols !== d) throw new Error('metrics: kid: feature dimensions differ')
+  if (Y.cols !== d) throw new ShapeError('metrics', 'metrics: kid: feature dimensions differ')
   const gamma = k.gamma ?? 1 / d
   const coef = k.coef0 ?? 1
   const degree = k.degree ?? 3
@@ -246,7 +248,7 @@ function distances(A: Dense, B: Dense): Float64Array {
 
 /** Each row's distance to its k-th nearest neighbour within its own set (itself excluded). */
 function kthNeighbourRadii(A: Dense, k: number): Float64Array {
-  if (k >= A.rows) throw new Error(`metrics: k = ${k} needs more than ${k} points`)
+  if (k >= A.rows) throw new DomainError('metrics', `metrics: k = ${k} needs more than ${k} points`)
   const D = distances(A, A)
   return Float64Array.from({ length: A.rows }, (_, i) => {
     const row = Array.from(D.subarray(i * A.rows, (i + 1) * A.rows))
@@ -330,7 +332,8 @@ export const clipScore = defineMetric(
   (imageEmbeddings: Rows, textEmbeddings: Rows, options: { weight?: number } = {}): number => {
     const I = dense(imageEmbeddings, 'clipScore')
     const T = dense(textEmbeddings, 'clipScore')
-    if (I.rows !== T.rows || I.cols !== T.cols) throw new Error('metrics: clipScore: embeddings differ in shape')
+    if (I.rows !== T.rows || I.cols !== T.cols)
+      throw new ShapeError('metrics', 'metrics: clipScore: embeddings differ in shape')
     const w = options.weight ?? 2.5
     let s = 0
     for (let i = 0; i < I.rows; i++) {

@@ -18,6 +18,7 @@ import { checkCount, generatorRecipe, labels, matrix, type Dataset } from '../ty
 import type { DatasetInfo } from 'aifn/foundation/contracts'
 import { definer } from 'aifn/foundation/registry'
 import { int, real, space } from 'aifn/foundation/space'
+import { DomainError, ShapeError } from 'aifn/foundation/errors'
 
 /** Where the segments start: given changepoints, or geometric gaps. */
 export interface SegmentOptions {
@@ -32,7 +33,7 @@ export interface SegmentOptions {
 }
 
 function drawnBoundaries(s: Stream, n: number, meanGap: number, minGap: number): number[] {
-  if (!(meanGap >= 1)) throw new RangeError(`changepoints: meanGap must be at least 1, got ${meanGap}`)
+  if (!(meanGap >= 1)) throw new DomainError('changepoints', `changepoints: meanGap must be at least 1, got ${meanGap}`)
   const gap = Geometric(1 / meanGap)
   const out: number[] = []
   let at = 0
@@ -49,7 +50,7 @@ function boundaries(s: Stream, options: SegmentOptions): { n: number; starts: nu
   const cps = options.changepoints ? [...options.changepoints] : drawnBoundaries(child(s, 'gaps'), n, meanGap, minGap)
   cps.forEach((c, i) => {
     if (!Number.isInteger(c) || c <= 0 || c >= n || (i > 0 && c <= cps[i - 1]))
-      throw new RangeError(`changepoints: ${c} is not an ascending index in (0, ${n})`)
+      throw new DomainError('changepoints', `changepoints: ${c} is not an ascending index in (0, ${n})`)
   })
   return { n, starts: [0, ...cps] }
 }
@@ -92,7 +93,7 @@ function build(
 
 function pick<T>(given: readonly T[] | undefined, j: number, draw: () => T, what: string): T {
   if (!given) return draw()
-  if (j >= given.length) throw new RangeError(`${what}: ${given.length} values given for more segments`)
+  if (j >= given.length) throw new ShapeError(what, `${what}: ${given.length} values given for more segments`)
   return given[j]
 }
 
@@ -290,9 +291,10 @@ function stationaryVariance(a: readonly number[], sd: number): number {
  */
 export function arRegimes(s: Stream, options: ArRegimeOptions = {}): Dataset {
   const { regimes = [[0.9], [-0.7]], sd = 1 } = options
-  if (regimes.length === 0) throw new RangeError('arRegimes: give at least one regime')
+  if (regimes.length === 0) throw new DomainError('arRegimes', 'arRegimes: give at least one regime')
   const p = regimes[0].length
-  if (regimes.some((a) => a.length !== p)) throw new RangeError('arRegimes: every regime must have the same order')
+  if (regimes.some((a) => a.length !== p))
+    throw new DomainError('arRegimes', 'arRegimes: every regime must have the same order')
   const { n, starts } = boundaries(s, options)
   const vs = child(s, 'values')
   const burn = 200

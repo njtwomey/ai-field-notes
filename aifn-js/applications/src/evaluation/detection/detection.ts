@@ -17,6 +17,7 @@ import {
   metricValues as values,
 } from 'aifn/learning/metrics'
 import { defineMetric, type Data, type Label, type Labels, type Rows } from 'aifn/learning/metrics'
+import { ShapeError } from 'aifn/foundation/errors'
 
 /** An axis-aligned box [x₀, y₀, x₁, y₁] with x₀ ≤ x₁ and y₀ ≤ y₁ (continuous coordinates, no +1 pixel convention). */
 export type Box = readonly [number, number, number, number]
@@ -209,7 +210,8 @@ export const generalisedDice = defineMetric(
   (truth: Rows, prediction: Rows): number => {
     const R = dense(truth, 'generalisedDice')
     const P = dense(prediction, 'generalisedDice')
-    if (R.rows !== P.rows || R.cols !== P.cols) throw new Error('metrics: generalisedDice: shapes differ')
+    if (R.rows !== P.rows || R.cols !== P.cols)
+      throw new ShapeError('metrics', 'metrics: generalisedDice: shapes differ')
     let num = 0
     let den = 0
     for (let l = 0; l < R.cols; l++) {
@@ -495,7 +497,8 @@ export function maskBoundary(mask: Data | Rows, options: { width?: number } = {}
   const width = options.width ?? m.cols
   const flat = m.data
   const height = flat.length / width
-  if (!Number.isInteger(height)) throw new Error('metrics: maskBoundary: the mask does not fill whole rows')
+  if (!Number.isInteger(height))
+    throw new ShapeError('metrics', 'metrics: maskBoundary: the mask does not fill whole rows')
   const inside = (r: number, c: number) => r >= 0 && r < height && c >= 0 && c < width && flat[r * width + c] !== 0
   const pts: number[] = []
   for (let r = 0; r < height; r++)

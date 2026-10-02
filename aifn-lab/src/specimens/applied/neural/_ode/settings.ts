@@ -10,6 +10,7 @@ import type {
   OdeRunOptions,
 } from 'aifn-applied/neural/ode'
 import { call, type Task } from '@lab/state'
+import { datasetChoice, type DatasetValue } from '@lab/views'
 
 export type TaskKind = 'classification' | 'regression' | 'density' | 'latent'
 
@@ -20,22 +21,25 @@ export const TASKS = [
   { value: 'latent', label: 'irregular trajectories (latent ODE)' },
 ] as const
 
-/** Classification data: registered generators of `aifn-applied/data/synthetic`. */
-export const CLASS_DATA = {
-  disc: { label: 'disc inside a ring (Dupont)', key: 'disc', knobs: { n: 400 } },
-  circles: { label: 'nested circles', key: 'circles', knobs: { n: 300, noise: 0.04, factor: 0.45 } },
-  moons: { label: 'two moons', key: 'moons', knobs: { n: 300, noise: 0.08 } },
-  spirals: { label: 'two spirals', key: 'spirals', knobs: { n: 300, arms: 2, noise: 0.03 } },
-} as const
-export type ClassData = keyof typeof CLASS_DATA
+/** Classification data: Dupont's disc inside a ring, and registered generators of `aifn-applied/data/synthetic`. */
+export const CLASS_DATA = datasetChoice({
+  disc: {
+    label: 'disc inside a ring (Dupont)',
+    n: 400,
+    noise: false,
+    custom: { task: (random, { n }) => call('applied/neural/ode/discInRing', random, n) },
+  },
+  circles: { label: 'nested circles', n: 300, noise: 0.04, knobs: { factor: 0.45 } },
+  moons: { label: 'two moons', n: 300, noise: 0.08 },
+  spirals: { label: 'two spirals', n: 300, noise: 0.03, knobs: { arms: 2 } },
+})
 
 /** Density data; the checkerboard keeps one colour of tiles. */
-export const DENSITY_DATA = {
-  moons: { label: 'two moons', key: 'moons', knobs: { n: 1000, noise: 0.06 }, keepLabel: undefined },
-  rings: { label: 'three rings', key: 'rings', knobs: { n: 1200, noise: 0.08 }, keepLabel: undefined },
-  checkerboard: { label: 'checkerboard', key: 'checkerboard', knobs: { n: 2000, tiles: 4 }, keepLabel: 0 },
-} as const
-export type DensityData = keyof typeof DENSITY_DATA
+export const DENSITY_DATA = datasetChoice({
+  moons: { label: 'two moons', n: 1000, noise: 0.06 },
+  rings: { label: 'three rings', n: 1200, noise: 0.08 },
+  checkerboard: { label: 'checkerboard', n: 2000, knobs: { tiles: 4 } },
+})
 
 export const LATENT_DATA = [
   { value: 'sine', label: 'sines (1-d)' },
@@ -64,8 +68,8 @@ export const SOLVERS = [
 /** Everything a run depends on, as plain data. */
 export type Settings = {
   task: TaskKind
-  classData: ClassData
-  densityData: DensityData
+  classData: DatasetValue
+  densityData: DatasetValue
   latentData: 'sine' | 'spiral'
   model: ModelKind
   augment: number
@@ -103,14 +107,9 @@ const solverOf = (s: Settings) => ({
 
 /** The worker task of a setting. */
 export function taskOf(s: Settings): Task<OdeRun | CnfRun | LatentOdeRun> {
-  const random = call('foundation/random/stream', s.seed)
   if (s.task === 'classification' || s.task === 'regression') {
     const data =
-      s.task === 'classification'
-        ? s.classData === 'disc'
-          ? call('applied/neural/ode/discInRing', random, 400)
-          : call(`applied/data/synthetic/${CLASS_DATA[s.classData].key}`, random, CLASS_DATA[s.classData].knobs)
-        : call('applied/neural/ode/reflectionData', 40)
+      s.task === 'classification' ? CLASS_DATA.task(s.classData, s.seed) : call('applied/neural/ode/reflectionData', 40)
     const options: OdeRunOptions = {
       kind: s.model,
       task: s.task,
@@ -129,7 +128,6 @@ export function taskOf(s: Settings): Task<OdeRun | CnfRun | LatentOdeRun> {
     return call<OdeRun>('applied/neural/ode/odeRun', data, options)
   }
   if (s.task === 'density') {
-    const d = DENSITY_DATA[s.densityData]
     const options: CnfRunOptions = {
       solver: solverOf(s),
       hidden: s.hidden,
@@ -137,13 +135,13 @@ export function taskOf(s: Settings): Task<OdeRun | CnfRun | LatentOdeRun> {
       probe: s.probe,
       kinetic: s.kinetic,
       jacobian: s.jacobian,
-      keepLabel: d.keepLabel,
+      keepLabel: s.densityData.key === 'checkerboard' ? 0 : undefined,
       steps: s.steps,
       batchSize: 128,
       learningRate: s.learningRate,
       seed: s.seed,
     }
-    return call<CnfRun>('applied/neural/ode/cnfRun', call(`applied/data/synthetic/${d.key}`, random, d.knobs), options)
+    return call<CnfRun>('applied/neural/ode/cnfRun', DENSITY_DATA.task(s.densityData, s.seed), options)
   }
   const options: LatentOdeRunOptions = {
     kind: s.latentData,

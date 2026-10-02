@@ -8,6 +8,7 @@ import { valueAndGrad } from 'aifn/foundation/autodiff'
 import { normals, type Stream } from 'aifn/foundation/random'
 import { dense, item, unwrap, type Tensor, type Value } from 'aifn/foundation/tensor'
 import type { LogDensity, VectorLike } from './types'
+import { ShapeError } from 'aifn/foundation/errors'
 
 /** A float64 working array. */
 export type F64 = dense.F64
@@ -39,7 +40,7 @@ export function logDensityAndGrad(target: LogDensity, x: F64): { value: number; 
     const value = logDensityAt(target, x)
     const g = toF64(target.grad(dense.vec(x)) as Tensor, 'mcmc: target.grad')
     if (g.length !== x.length)
-      throw new Error(`mcmc: target.grad returned ${g.length} values for dimension ${x.length}`)
+      throw new ShapeError('mcmc', `mcmc: target.grad returned ${g.length} values for dimension ${x.length}`)
     return { value, grad: g }
   }
   const { value, grad } = valueAndGrad((theta: Tensor) => target.logDensity(theta) as Value)(dense.vec(x))
@@ -52,7 +53,7 @@ export const standardNormals = (s: Stream, n: number): F64 => dense.data(normals
 /** Per-coordinate values from a number or an array of length n. */
 export function perCoordinate(v: number | ArrayLike<number>, n: number, where: string): F64 {
   if (typeof v === 'number') return new Float64Array(n).fill(v)
-  if (v.length !== n) throw new Error(`${where}: expected ${n} values, got ${v.length}`)
+  if (v.length !== n) throw new ShapeError(where, `${where}: expected ${n} values, got ${v.length}`)
   return Float64Array.from(v)
 }
 

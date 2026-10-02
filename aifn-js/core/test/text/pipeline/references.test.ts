@@ -1,5 +1,5 @@
 /**
- * Tokeniser pipelines against Hugging Face `tokenizers` 0.21.4 (fixture `text/pipeline`): the pre-tokenisers on
+ * Tokeniser pipelines against Hugging Face `tokenizers` 0.22+ (fixture `text/pipeline`): the pre-tokenisers on
  * crafted text, and six pipelines trained there, rebuilt here from their vocabularies and merges, compared token by
  * token: ids, tokens, offsets (Hugging Face counts code points, converted to UTF-16 here), word ids, type ids, masks,
  * decoded text, truncation with stride and overflow, and padding.
@@ -76,6 +76,14 @@ type Fx = {
       pairs: (HfEncoding & { a: string; b: string })[]
       batch: HfEncoding[]
       left: HfEncoding[]
+      variants: (HfEncoding & {
+        maxLength: number
+        stride: number
+        strategy: 'longest_first' | 'only_first' | 'only_second'
+        direction: 'right' | 'left'
+        a: string
+        b: string | null
+      })[]
     }
   }
 }
@@ -234,6 +242,15 @@ describe('truncation and padding', () => {
     const t = withStages(wp, { truncation: truncation(16, { stride: 2 }) })
     for (const c of T.pairs) expect(asHf(encodeText(t, c.a, c.b))).toEqual(strip(c))
   })
+  const STRATEGY = { longest_first: 'longestFirst', only_first: 'onlyFirst', only_second: 'onlySecond' } as const
+  it.each(T.variants.map((c) => [`${c.strategy} ${c.direction} ${c.maxLength}/${c.stride}: ${c.a}`, c] as const))(
+    'tokenises only the splits truncation can reach, then cuts (%s)',
+    (_, c) => {
+      const options = { stride: c.stride, strategy: STRATEGY[c.strategy], direction: c.direction }
+      const t = withStages(wp, { truncation: truncation(c.maxLength, options) })
+      expect(asHf(encodeText(t, c.a, c.b))).toEqual(strip(c))
+    },
+  )
   it('pads a batch to its longest, and to a fixed length on the left', () => {
     const texts = P.wordPiece.encode.map((c) => c.text)
     const right = withStages(wp, { padding: padding('[PAD]', 0) })

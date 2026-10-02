@@ -59,6 +59,7 @@ import { adamRule } from 'aifn/optim/first-order'
 import { orderedBijector } from 'aifn/probability/bijectors'
 import { ordinalLikelihood } from 'aifn/probability/likelihoods'
 import { differenceExceedance } from './decomposition'
+import { DomainError, ShapeError } from 'aifn/foundation/errors'
 
 /** The ordinal head of `deepOrdinalRegression`. */
 export type DeepOrdinalHead = 'coral' | 'cumulative'
@@ -133,11 +134,12 @@ export function deepOrdinalRegression(
     fit({ x, y }, options: FitOptions = {}) {
       const [n, d] = matrixShape(x, 'deepOrdinalRegression')
       const t = targetValues(y, 'deepOrdinalRegression')
-      if (t.length !== n) throw new Error(`deepOrdinalRegression: ${n} inputs but ${t.length} labels`)
+      if (t.length !== n)
+        throw new ShapeError('deepOrdinalRegression', `deepOrdinalRegression: ${n} inputs but ${t.length} labels`)
       if (!t.every((v) => Number.isInteger(v) && v >= 0))
-        throw new Error('deepOrdinalRegression: labels must be class indices 0, 1, …')
+        throw new DomainError('deepOrdinalRegression', 'deepOrdinalRegression: labels must be class indices 0, 1, …')
       const K = params.classes ?? Math.max(...t) + 1
-      if (K < 2) throw new Error('deepOrdinalRegression: needs at least two classes')
+      if (K < 2) throw new DomainError('deepOrdinalRegression', 'deepOrdinalRegression: needs at least two classes')
       const m = K - 1
       const s = options.stream ?? rootStream('deep-ordinal')
       const net = scoreNetwork(d, hidden, activation)
@@ -191,7 +193,8 @@ export function deepOrdinalRegression(
       const cuts = toFlat(cutpoints)
       const forward = (input: Tensor): Tensor => {
         const [, cols] = matrixShape(input, 'deepOrdinalRegression.forward')
-        if (cols !== d) throw new Error(`deepOrdinalRegression: fitted on ${d} features, given ${cols}`)
+        if (cols !== d)
+          throw new ShapeError('deepOrdinalRegression', `deepOrdinalRegression: fitted on ${d} features, given ${cols}`)
         return unwrap(score(fitted, input)) as Tensor
       }
       const exceedance = (input: Tensor): Tensor => {

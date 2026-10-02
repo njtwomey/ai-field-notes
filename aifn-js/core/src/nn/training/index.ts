@@ -1,7 +1,9 @@
 /**
  * `aifn/nn/training`: the training loop (`trainingLoop`, a traceable `Algorithm` over any pytree update rule of
  * `aifn/optim/first-order`), two-player adversarial training (`adversarialTraining`), persistent contrastive divergence
- * for energy-based models (`contrastiveDivergence`) and activation inspection (`activations`, `recordActivations`,
+ * for energy-based models (`contrastiveDivergence`), full-batch training by a vector method (`fullBatchTraining`), one
+ * state shape over first-order or L-BFGS training (`methodTraining`), differentially private training (DP-SGD,
+ * `privateTraining`) and activation inspection (`activations`, `recordActivations`,
  * `inspect`).
  */
 
@@ -15,3 +17,5 @@ export {
   type ContrastiveDivergenceTrainingOptions,
 } from './energy'
 export { fullBatchTraining, treeObjective, type FullBatchOptions, type FullBatchState } from './fullBatch'
+export { methodTraining, type MethodTrainingState, type TrainingMethod } from './method'
+export { privateTraining, type PrivateTrainingOptions, type PrivateTrainingState } from './private'

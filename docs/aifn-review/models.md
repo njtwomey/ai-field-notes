@@ -107,3 +107,17 @@ dataset, table above) clearly breaks C1. Borderline cases that I recommend keepi
 - The BOCPD conjugate segment models are families, not models.
 
 The named chain models already moved out (architecture, "Decided 2026-09-30").
+
+## Status update (2026-10-02, overnight hygiene)
+
+- Done: Kalman partly observed rows (update with the observed rows of C, R and y); Hausdorff and Unigram spreads
+  replaced by loops; interpreter programs run in a block (prelude names can be shadowed) and the `@example` fixed;
+  non-causal attention windows are symmetric (Longformer); systems/nn discretisation is one definition
+  (`aifn/systems` `discretiseSsm`); BOCPD and NUTS use the shared log-sum-exp; `instantaneous` uses `unwrapPhase`;
+  MAP@k takes `normaliser: 'cutoff'` for min(R, k); ODE events document the crossing rule against scipy; Sinkhorn's
+  KL term adds ab everywhere; `gradientVariance` uses Welford's update.
+- Promoted: edit distance, LCS and alignments to `aifn/optim/programming` (evaluation/text calls it); mel scale, mel
+  filter bank and MFCC to `aifn/signal/audio`.
+- Left: isotonic zero-weight ties (learning/calibration was being rewritten by another agent tonight); `STOP_WORDS`
+  stays in core as the default parameter of `removeStopWords` (moving it would make every caller import a list from
+  aifn-applied).

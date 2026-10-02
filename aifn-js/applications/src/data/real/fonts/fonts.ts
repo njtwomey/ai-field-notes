@@ -13,6 +13,7 @@ import { ANCHOR, CAP_HEIGHT, DISPLAY, DROPPED, FONTS, GLYPHS, HANDLE, SOURCE, VE
 import type { DatasetInfo } from 'aifn/foundation/contracts'
 import { definer } from 'aifn/foundation/registry'
 import { bool, space } from 'aifn/foundation/space'
+import { DomainError } from 'aifn/foundation/errors'
 
 /**
  * The six design classes, in the order of the class labels `y` = 0 … 5: `sans` (grotesque and geometric sans serif,
@@ -126,7 +127,7 @@ export interface FontDataset extends Dataset {
  *
  * Only capital letters are available, and not all of them: the 23 capitals "ABCDEFGHIJLMNOPRSTUVXYZ" (K, Q and W are left
  * out because their contour counts or shapes vary between designs: a split K, a free Q tail, a crossed W). There are no lowercase letters, digits or
- * punctuation; asking for one throws a `RangeError` naming the characters available.
+ * punctuation; asking for one throws a `DomainError` naming the characters available.
  */
 export function fonts(options: FontsOptions = {}): FontDataset {
   const table = fontVectors()
@@ -139,7 +140,7 @@ export function fonts(options: FontsOptions = {}): FontDataset {
   const names: string[] = []
   for (const c of chars) {
     const g = byChar.get(c)
-    if (!g) throw new RangeError(`fonts: no outlines for "${c}"; available: ${[...byChar.keys()].join('')}`)
+    if (!g) throw new DomainError('fonts', `fonts: no outlines for "${c}"; available: ${[...byChar.keys()].join('')}`)
     const offset = columns.length
     const samples = g.contours.reduce((a, b) => a + b, 0)
     for (let k = 0; k < 2 * samples; k++) columns.push(g.offset + k)
@@ -157,7 +158,8 @@ export function fonts(options: FontsOptions = {}): FontDataset {
   const d = columns.length
   const x = new Float64Array(rows.length * d)
   rows.forEach((r, i) => {
-    if (!(Number.isInteger(r) && r >= 0 && r < table.fonts.length)) throw new RangeError(`fonts: no font ${r}`)
+    if (!(Number.isInteger(r) && r >= 0 && r < table.fonts.length))
+      throw new DomainError('fonts', `fonts: no font ${r}`)
     for (let j = 0; j < d; j++) x[i * d + j] = table.values[r * table.width + columns[j]]
   })
   const kept = rows.map((r) => table.fonts[r])

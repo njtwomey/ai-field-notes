@@ -9,6 +9,7 @@ import { dense, type Matrix, type Vector } from 'aifn/foundation/tensor'
 import type { ObjectiveInfo } from 'aifn/foundation/contracts'
 import { definer } from 'aifn/foundation/registry'
 import { int, real, space } from 'aifn/foundation/space'
+import { DomainError, ShapeError } from 'aifn/foundation/errors'
 
 type F64 = dense.F64
 const { mat, toF64, vec } = dense
@@ -44,7 +45,7 @@ function build(
 ): TestFunction {
   const read = (x: Vector) => {
     const a = toF64(x, name)
-    if (a.length !== n) throw new Error(`${name}: expected a point of length ${n}, got ${a.length}`)
+    if (a.length !== n) throw new ShapeError(name, `${name}: expected a point of length ${n}, got ${a.length}`)
     return a
   }
   return {
@@ -70,7 +71,7 @@ function build(
  * (all ones); defaults a = 1, b = 100, n = 2, start (−1.2, 1, −1.2, 1, …).
  */
 export function rosenbrock({ a = 1, b = 100, n = 2 }: { a?: number; b?: number; n?: number } = {}): TestFunction {
-  if (n < 2) throw new Error('rosenbrock: needs n ≥ 2')
+  if (n < 2) throw new DomainError('rosenbrock', 'rosenbrock: needs n ≥ 2')
   const kernel: Kernel = {
     value: (x) => {
       let s = 0

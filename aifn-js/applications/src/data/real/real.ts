@@ -1,7 +1,11 @@
-/** Small real datasets, embedded: Iris, Old Faithful, Anscombe's quartet and the coal-mining disasters. */
+/**
+ * Small real datasets, embedded: Iris, Old Faithful, Anscombe's quartet, the coal-mining disasters and Zachary's karate
+ * club.
+ */
 
-import { fromData } from 'aifn/foundation/tensor'
-import { ANSCOMBE_DATA, COAL_MINING_DATA, FAITHFUL_DATA, IRIS_DATA } from './embedded'
+import { dense, fromData } from 'aifn/foundation/tensor'
+import { fromEdges, type Graph } from 'aifn/graph'
+import { ANSCOMBE_DATA, COAL_MINING_DATA, FAITHFUL_DATA, IRIS_DATA, KARATE_CLUBS, KARATE_EDGES } from './embedded'
 import { labels, matrix, vector, type Dataset } from '../types'
 import type { DatasetInfo } from 'aifn/foundation/contracts'
 import { definer } from 'aifn/foundation/registry'
@@ -93,6 +97,41 @@ export function coalMining(): Dataset {
   }
 }
 
+/** A dataset whose rows are the nodes of a graph. */
+export interface GraphDataset extends Dataset {
+  readonly graph: Graph
+}
+
+/**
+ * Zachary's karate club: 34 members joined by 78 friendships, labelled by the club each joined when the club split (0:
+ * Mr. Hi, 1: the Officer). x is the 34 × 34 identity (one feature per member, as in Kipf and Welling's experiment), y
+ * the clubs, and `graph` the undirected friendship graph.
+ */
+export function karateClub(): GraphDataset {
+  const n = KARATE_CLUBS.length
+  const pairs = Array.from(
+    { length: KARATE_EDGES.length / 2 },
+    (_, k) => [KARATE_EDGES[2 * k], KARATE_EDGES[2 * k + 1]] as const,
+  )
+  return {
+    kind: 'dataset',
+    x: matrix(dense.identity(n), n, n),
+    y: labels(KARATE_CLUBS),
+    graph: fromEdges(n, pairs, { directed: false }),
+    meta: {
+      name: "Zachary's karate club",
+      description:
+        'Friendships among 34 members of a university karate club, and the club each joined when it split in two.',
+      task: 'classification',
+      featureNames: Array.from({ length: n }, (_, i) => `member ${i}`),
+      labelNames: ['Mr. Hi', 'Officer'],
+      source:
+        'Zachary (1977), "An information flow model for conflict and fission in small groups", Journal of Anthropological Research 33(4); networkx karate_club_graph',
+      url: 'https://doi.org/10.1086/jar.33.4.3629752',
+    },
+  }
+}
+
 // ── Registry ─────────────────────────────────────────────────────────────────────────────────────────────────────────
 
 const dataset = definer<DatasetInfo>('dataset', 'data/real')
@@ -153,4 +192,19 @@ dataset(
     random: false,
   },
   coalMining,
+)
+
+dataset(
+  {
+    key: 'karateClub',
+    name: "Zachary's karate club",
+    summary: 'A 34-member friendship graph labelled by the club each member joined after the split.',
+    task: 'classification',
+    output: 'dataset',
+    knobs: space({}),
+    truth: false,
+    random: false,
+    notes: ['graph-convolutional-network', 'label-propagation'],
+  },
+  karateClub,
 )

@@ -22,6 +22,7 @@ import {
   type Value,
 } from 'aifn/foundation/tensor'
 import type { Algorithm, Index, Scalar, Shape, Size, Status, Trace } from 'aifn/foundation/contracts'
+import { DomainError, ShapeError } from 'aifn/foundation/errors'
 
 type F64 = dense.F64
 
@@ -78,9 +79,9 @@ function cloud(value: Value, shape: Shape, where: string): F64 {
     : Array.isArray(value) || ArrayBuffer.isView(value)
       ? Float64Array.from(value as ArrayLike<number>)
       : null
-  if (!flat) throw new Error(`${where}: expected a number, tensor or array`)
+  if (!flat) throw new DomainError(where, `${where}: expected a number, tensor or array`)
   if (flat.length === 1) return new Float64Array(size).fill(flat[0])
-  if (flat.length !== size) throw new Error(`${where}: returned ${flat.length} values for ${size} states`)
+  if (flat.length !== size) throw new ShapeError(where, `${where}: returned ${flat.length} values for ${size} states`)
   return flat
 }
 
@@ -121,7 +122,7 @@ export function scheme(
   { stepSize: h, tEnd }: SdeOptions,
   update: Update,
 ): Algorithm<SdeInitial, SdeState> {
-  if (!(h > 0)) throw new Error(`${name}: the step size must be positive`)
+  if (!(h > 0)) throw new DomainError(name, `${name}: the step size must be positive`)
   return {
     name,
     init: (opts) => initial(opts),
@@ -134,7 +135,10 @@ export function scheme(
       const x = next instanceof Float64Array ? fromData(next, shape) : (next as Tensor)
       const values = next instanceof Float64Array ? next : toFlat(unwrap(x) as Tensor)
       if (values.length !== dense.data(dW).length)
-        throw new Error(`${name}: the update gave ${values.length} values for ${dense.data(dW).length} states`)
+        throw new ShapeError(
+          name,
+          `${name}: the update gave ${values.length} values for ${dense.data(dW).length} states`,
+        )
       let nonFinite = 0
       for (const v of values) if (!Number.isFinite(v)) nonFinite++
       return {

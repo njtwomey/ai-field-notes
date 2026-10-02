@@ -41,6 +41,7 @@ import {
 import { affineBijector } from 'aifn/probability/bijectors'
 import { expectiles } from 'aifn/probability/stats'
 import { armaSpectrum } from 'aifn/signal/statistical'
+import { DomainError, ShapeError } from 'aifn/foundation/errors'
 
 const toFlatArray = (t: Tensor) => Float64Array.from(toFlat(t))
 
@@ -251,7 +252,8 @@ export function additiveTruth(model: AdditiveModel): AdditiveTruth {
   const g = linkByName(model.link)
   const linearPredictor = (x: Tensor) => {
     const { data, n, d } = points(x)
-    if (d !== model.effects.length) throw new Error(`additiveTruth: ${model.effects.length} features, given ${d}`)
+    if (d !== model.effects.length)
+      throw new ShapeError('additiveTruth', `additiveTruth: ${model.effects.length} features, given ${d}`)
     return fromData(
       Float64Array.from({ length: n }, (_, i) =>
         model.effects.reduce((acc, e, j) => acc + e.f(data[i * d + j]), model.intercept),
@@ -281,7 +283,7 @@ export function additiveTruth(model: AdditiveModel): AdditiveTruth {
     shapes: model.effects.map((e) => e.name),
     partial: (j, grid, centreOn) => {
       const e = model.effects[j]
-      if (!e) throw new Error(`additiveTruth: no feature ${j}`)
+      if (!e) throw new DomainError('additiveTruth', `additiveTruth: no feature ${j}`)
       const values = toFlatArray(grid).map(e.f)
       let shift = 0
       if (centreOn) {
@@ -300,7 +302,7 @@ export function additiveTruth(model: AdditiveModel): AdditiveTruth {
     expect: (x, f) => {
       if (!f) return mean(x)
       if (model.family !== 'gaussian')
-        throw new Error('additiveTruth: expect(x, f) is available for the Gaussian family')
+        throw new DomainError('additiveTruth', 'additiveTruth: expect(x, f) is available for the Gaussian family')
       const { nodes, weights } = HERMITE()
       const sd = Math.sqrt(model.dispersion)
       return fromData(
@@ -402,7 +404,7 @@ export function curve1dTruth(model: Curve1dModel): Curve1dTruth {
     if (model.family === 'gamma') return Math.sqrt(phi) * mu
     if (model.family === 'poisson') return Math.sqrt(mu)
     if (model.family === 'binomial') return Math.sqrt(mu * (1 - mu))
-    throw new Error(`curve1dTruth: no law for the ${model.family} family`)
+    throw new DomainError('curve1dTruth', `curve1dTruth: no law for the ${model.family} family`)
   }
   /** The law of y at x as atoms with masses. */
   const atomsAt = (x: number): { values: Float64Array; masses: Float64Array } => {
@@ -445,7 +447,7 @@ export function curve1dTruth(model: Curve1dModel): Curve1dTruth {
   // x ~ U(0, 1) on 200 midpoints, for population averages.
   const GRID = Float64Array.from({ length: 200 }, (_, i) => (i + 0.5) / 200)
   const shareBelow = (tau: number) => {
-    if (!(tau > 0 && tau < 1)) throw new RangeError(`curve1dTruth: τ = ${tau} is not in (0, 1)`)
+    if (!(tau > 0 && tau < 1)) throw new DomainError('curve1dTruth', `curve1dTruth: τ = ${tau} is not in (0, 1)`)
     const u = unit()
     if (u) {
       // The same at every x: P(Z < e_τ(Z)).
@@ -748,7 +750,8 @@ export const REFERENCE_SIZE = 6000
 
 /** The rows of an [n, d] matrix as a fresh row-major Float64Array, with n and d. */
 export function points(x: Tensor): { data: Float64Array; n: Size; d: Size } {
-  if (x.shape.length !== 2) throw new RangeError(`truth: points must be an [n, d] matrix, got rank ${x.shape.length}`)
+  if (x.shape.length !== 2)
+    throw new ShapeError('truth', `truth: points must be an [n, d] matrix, got rank ${x.shape.length}`)
   const [n, d] = x.shape
   const data = new Float64Array(n * d)
   const [s0, s1] = x.strides
@@ -1110,7 +1113,10 @@ export function changepointTruth(
   const n = segments.length ? segments[segments.length - 1].end : 0
   segments.forEach((g, i) => {
     if (g.start !== (i === 0 ? 0 : segments[i - 1].end) || g.end <= g.start)
-      throw new RangeError(`changepointTruth: segment ${i} (${g.start}–${g.end}) does not continue the series`)
+      throw new DomainError(
+        'changepointTruth',
+        `changepointTruth: segment ${i} (${g.start}–${g.end}) does not continue the series`,
+      )
   })
   const segmentAt = (t: number): Size => {
     const i = Math.max(0, Math.min(n - 1, Math.round(t)))
@@ -1494,7 +1500,7 @@ export function inverseTruth(model: InverseModel): InverseTruth {
     decide: mean,
     expect: (x, f) => {
       if (!f) return mean(x)
-      if (D !== 1) throw new RangeError('inverseTruth: expect with f needs a 1-d target')
+      if (D !== 1) throw new DomainError('inverseTruth', 'inverseTruth: expect with f needs a 1-d target')
       return perRow(x, (r) => {
         const { values, weights } = model.atoms(r)
         const total = weights.reduce((a, w) => a + w, 0)

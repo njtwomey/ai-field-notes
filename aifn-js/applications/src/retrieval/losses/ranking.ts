@@ -37,6 +37,7 @@ import { defineLoss, type ReductionOptions, type Target } from 'aifn/learning/lo
 import { dcg, gainFunction, positionDiscount as discount, type Gain as MetricGain } from 'aifn/learning/metrics'
 import { expectRank, flatValues, reduce } from 'aifn/learning/losses'
 import { integers, type Stream } from 'aifn/foundation/random'
+import { ShapeError } from 'aifn/foundation/errors'
 
 /**
  * How a relevance grade becomes a gain: `exponential` 2^rel − 1 (the default) or `linear` rel; the two named gains
@@ -56,7 +57,8 @@ function rowsOf(scores: Value, relevance: Target): Rows {
   const n = shape[shape.length - 1]
   const s = flatValues(unwrap(scores))
   const r = flatValues(relevance)
-  if (r.length !== s.length) throw new Error(`losses: relevance has ${r.length} values for ${s.length} scores`)
+  if (r.length !== s.length)
+    throw new ShapeError('losses', `losses: relevance has ${r.length} values for ${s.length} scores`)
   const cut = (a: Float64Array) => Array.from({ length: lists }, (_, b) => a.subarray(b * n, (b + 1) * n))
   return { lists, n, scores: cut(s), grades: cut(r), batched }
 }
@@ -271,7 +273,7 @@ export function warpWeights(positive: Value, negatives: Value, options: WarpOpti
   const B = shape.length === 2 ? shape[0] : 1
   const sPos = flatValues(unwrap(positive))
   const sNeg = flatValues(unwrap(negatives))
-  if (sPos.length !== B) throw new Error(`warp: ${sPos.length} positives for ${B} rows of negatives`)
+  if (sPos.length !== B) throw new ShapeError('warp', `warp: ${sPos.length} positives for ${B} rows of negatives`)
   const maxDraws = options.maxDraws ?? M
   const w = new Float64Array(B * M)
   for (let b = 0; b < B; b++) {

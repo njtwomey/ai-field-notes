@@ -2,8 +2,8 @@
  * `aifn-applied/gym/agents`: agents on the gym protocol. `random.ts` (the baseline), `bandits.ts` (the bandit
  * policies), `tabular.ts` (TD control, n-step SARSA, Monte Carlo control, TD(0) prediction, REINFORCE) and
  * `planning.ts` (value and policy iteration as traceable algorithms on an MDP's tables, and as planning agents),
- * `dqn.ts` (the deep Q-network and its persistent replay buffer); child:
- * `control` (classic control).
+ * `dqn.ts` (the deep Q-network and its persistent replay buffer); children:
+ * `control` (classic control) and `policy` (REINFORCE with baseline, A2C, PPO, DDPG, offline CQL).
  */
 
 export { randomAgent, type RandomAgentState } from './random'
@@ -99,4 +99,22 @@ export {
   type ReplayBuffer,
   type StoredTransition,
 } from './dqn'
+export {
+  a2cAgent,
+  ddpgAgent,
+  logTransitions,
+  offlineComparison,
+  offlineQLearning,
+  ppoAgent,
+  reinforceBaselineAgent,
+  type DdpgOptions,
+  type DdpgState,
+  type LogOptions,
+  type OfflineCheckpoint,
+  type OfflineLog,
+  type OfflineQOptions,
+  type OnPolicyOptions,
+  type OnPolicyState,
+  type PpoOptions,
+} from './policy'
 export { planningAlgorithms, agentFunctions } from './registry'

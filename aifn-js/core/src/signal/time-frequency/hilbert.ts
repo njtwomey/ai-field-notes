@@ -7,7 +7,7 @@
 import { copy, fromData, imagPart, mul, realPart, type Tensor } from 'aifn/foundation/tensor'
 import { fft, ifft } from 'aifn/foundation/fourier'
 import type { Scalar, Size, TimeFrequency } from 'aifn/foundation/contracts'
-import { readSamples, timeFrequency, type SignalInput } from '../signal'
+import { readSamples, timeFrequency, unwrapPhase, type SignalInput } from '../signal'
 
 /**
  * The analytic signal z = x + i H{x}, as `scipy.signal.hilbert`: the FFT with negative frequencies zeroed and positive
@@ -49,7 +49,6 @@ export function instantaneous(x: SignalInput, options: { fs?: Scalar } = {}): In
   const amp = new Float64Array(n)
   const ph = new Float64Array(n)
   const freq = new Float64Array(n)
-  let offset = 0
   for (let i = 0; i < n; i++) {
     amp[i] = Math.hypot(re[i], im[i])
     if (i + 1 < n) {
@@ -57,21 +56,10 @@ export function instantaneous(x: SignalInput, options: { fs?: Scalar } = {}): In
       const di = im[i + 1] * re[i] - re[i + 1] * im[i]
       freq[i] = (Math.atan2(di, dr) * fs) / (2 * Math.PI)
     }
-    ph[i] = Math.atan2(im[i], re[i]) + offset
-    // Unwrap by accumulating the principal increments.
-    if (i > 0) {
-      const inc = ph[i] - ph[i - 1]
-      if (inc > Math.PI) {
-        offset -= 2 * Math.PI
-        ph[i] -= 2 * Math.PI
-      } else if (inc < -Math.PI) {
-        offset += 2 * Math.PI
-        ph[i] += 2 * Math.PI
-      }
-    }
+    ph[i] = Math.atan2(im[i], re[i])
   }
   if (n > 1) freq[n - 1] = freq[n - 2]
-  return { amplitude: fromData(amp), phase: fromData(ph), frequency: fromData(freq) }
+  return { amplitude: fromData(amp), phase: unwrapPhase(ph), frequency: fromData(freq) }
 }
 
 /** The envelope |x + i H{x}| of a real signal. */

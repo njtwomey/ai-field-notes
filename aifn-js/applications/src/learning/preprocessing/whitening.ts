@@ -5,6 +5,7 @@ import { fromData, type Tensor } from 'aifn/foundation/tensor'
 import { checkColumns, matrix, values, type FittedTransform, type Invertible, type Transformer } from './transformer'
 import { defineModel } from 'aifn/learning/estimators'
 import { oneOf, real, space } from 'aifn/foundation/space'
+import { DomainError } from 'aifn/foundation/errors'
 
 /** A fitted whitening transform. */
 export interface Whitening extends FittedTransform, Invertible {
@@ -41,7 +42,7 @@ export function whitening({
     params: { method, components, epsilon },
     fit({ x }) {
       const { n, d, v } = matrix(x, 'whitening')
-      if (n < 2) throw new Error('whitening: needs at least two rows')
+      if (n < 2) throw new DomainError('whitening', 'whitening: needs at least two rows')
       const k = method === 'zca' ? d : Math.min(components ?? d, d)
       const mean = new Float64Array(d)
       for (let i = 0; i < n; i++) for (let j = 0; j < d; j++) mean[j] += v[i * d + j] / n

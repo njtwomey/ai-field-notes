@@ -3,6 +3,7 @@
  */
 
 import { definer, entries, type AlgorithmInfo, type Entry, type FunctionInfo } from 'aifn/foundation/registry'
+import * as adp from './adpredictor'
 import * as bpm from './bayesPointMachine'
 
 type Table<I extends AlgorithmInfo | FunctionInfo> = Readonly<Record<string, Entry<(...args: never[]) => unknown, I>>>
@@ -27,6 +28,40 @@ fn(
   bpm.bayesPointMachinePredict,
 )
 
+const AD = ['adpredictor', 'model-based-machine-learning']
+fn(
+  {
+    key: 'adPredictor',
+    name: 'AdPredictor model',
+    summary: 'Gaussian weights per sparse feature value for Bayesian probit click-through prediction.',
+    role: 'construction',
+    notes: AD,
+    cite: ['graepel2010adpredictor'],
+  },
+  adp.adPredictor,
+)
+fn(
+  {
+    key: 'adPredictorUpdate',
+    name: 'AdPredictor update',
+    summary: 'Assumed-density filtering of the active weights after one impression, with truncated-Gaussian v and w.',
+    role: 'inference',
+    notes: AD,
+    cite: ['graepel2010adpredictor'],
+  },
+  adp.adPredictorUpdate,
+)
+fn(
+  {
+    key: 'adPredictorProbability',
+    name: 'AdPredictor click probability',
+    role: 'property',
+    notes: AD,
+    cite: ['graepel2010adpredictor'],
+  },
+  adp.adPredictorProbability,
+)
+
 /** The algorithms of the module. */
 export const classifierModelAlgorithms: Table<AlgorithmInfo> = entries<AlgorithmInfo>(
   'algorithm',
@@ -36,4 +71,5 @@ export const classifierModelAlgorithms: Table<AlgorithmInfo> = entries<Algorithm
 export const classifierModelFunctions: Table<FunctionInfo> = entries<FunctionInfo>(
   'function',
   bpm,
+  adp,
 ) as Table<FunctionInfo>

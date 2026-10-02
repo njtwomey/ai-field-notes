@@ -12,7 +12,14 @@ export type Vec2 = [number, number]
 
 type Placement =
   /** A point to drag in two dimensions, e.g. a start position or a pair of parameters. */
-  | { kind: 'point'; at: Vec2; onDrag: (p: Vec2) => void }
+  | {
+      kind: 'point'
+      at: Vec2
+      onDrag: (p: Vec2) => void
+      /** The ink marker's shape (an ECharts symbol such as a `MARKER_SHAPES` entry; default `circle`), to tell kinds of
+       * point apart (poles and zeros). */
+      symbol?: string
+    }
   /** A vertical guide line; dragging sets its x value, e.g. a rank, a threshold or an iteration. */
   | { kind: 'x'; at: number; onDrag: (x: number) => void }
   /** A horizontal guide line; dragging sets its y value, e.g. a probability on a cdf. */

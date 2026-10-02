@@ -6,7 +6,7 @@
 import { useMemo } from 'react'
 import type { Trajectory } from 'aifn-applied/gym'
 import type { Environment } from 'aifn/foundation/contracts'
-import { Curve, Handle, Plot, Plots, Raster, useAxis } from '@lab/viz'
+import { Curve, Handle, Plot, Plots, Raster, useAxis, useChartHeight } from '@lab/viz'
 import { actionSeries, GYM_SERIES, type StateSeries } from './series'
 
 const NONE: readonly StateSeries[] = []
@@ -43,40 +43,45 @@ export function StepSeries({ env, kind, trajectory, step, onStep, scale }: StepS
   const y0 = useAxis({ label: states[0]?.name ?? '' })
   const y1 = useAxis({ label: states[1]?.name ?? '' })
   const y2 = useAxis({ label: states[2]?.name ?? '' })
-  const ya = [
-    useAxis({ label: actions[0]?.name ?? 'action', ...(actions[0]?.kind === 'strip' && { categories: [''] }) }),
-  ]
+  // A strip is too short for a rotated axis name: its one category label names it, horizontally.
+  const strip = actions[0]?.kind === 'strip'
+  const ya = [useAxis(strip ? { categories: [actions[0]?.name ?? 'action'] } : { label: actions[0]?.name ?? 'action' })]
   const ys = [y0, y1, y2]
-  const cursor = <Handle kind="x" at={step} label="step" onDrag={(v) => onStep(Math.max(0, Math.round(v)))} />
+  // The cursor is labelled on the top panel only: the panels sit edge to edge, so a label above a lower panel would
+  // overlap the panel above it.
+  const cursorAt = (top: boolean) => (
+    <Handle kind="x" at={step} label={top ? 'step' : undefined} onDrag={(v) => onStep(Math.max(0, Math.round(v)))} />
+  )
   const panels = [
     ...states.slice(0, 3).map((s, i) => (
       <Plot key={s.name} x={sa} y={ys[i]} legend={false}>
         <Curve name={s.name} x={data.xs} y={data.states[i]} slot={i} />
-        {cursor}
+        {cursorAt(i === 0)}
       </Plot>
     )),
     ...actions.slice(0, 1).map((a, i) =>
       a.kind === 'strip' ? (
         <Plot key={a.name} x={sa} y={ya[0]} legend={false}>
           <Raster x={data.xa} y={[0]} z={data.actions[i] as number[][]} scale="categorical" categoryNames={a.names} />
-          {cursor}
+          {cursorAt(states.length === 0)}
         </Plot>
       ) : (
         <Plot key={a.name} x={sa} y={ya[0]} legend={false}>
           <Curve name={a.name} x={data.xa} y={data.actions[i] as number[]} slot={3} />
-          {cursor}
+          {cursorAt(states.length === 0)}
         </Plot>
       ),
     ),
   ]
+  // Row heights that give each panel the plot height its weight asks for: the lowest row also carries the step axis's
+  // labels (about 40 px more than the others' margins), which would otherwise come out of its plot area and clip its
+  // rotated axis name.
+  const total = useChartHeight() * scale
+  const weights = panels.map((_, i) => (i < states.length || !strip ? 1 : 0.6))
+  const unit = Math.max(1, (total - 40) / weights.reduce((a, b) => a + b, 0))
+  const heights = weights.map((w, i) => w + (i === weights.length - 1 ? 40 / unit : 0))
   return (
-    <Plots
-      rows={panels.length}
-      cols={1}
-      tight
-      scale={scale}
-      heights={panels.map((_, i) => (i < states.length || actions[0]?.kind === 'line' ? 1 : 0.6))}
-    >
+    <Plots rows={panels.length} cols={1} tight scale={scale} heights={heights}>
       {panels}
     </Plots>
   )

@@ -2,8 +2,9 @@
 status and the marginals of every row and bound), mixed-integer programs from scipy.optimize.milp, assignments from
 scipy.optimize.linear_sum_assignment, quadratic programs solved exactly by enumerating active sets (each equality-
 constrained QP solved by its KKT system; the optimum is the feasible one with non-negative multipliers) and checked
-against scipy.optimize.minimize (SLSQP), box-constrained QPs the same way, and a 0/1 knapsack table computed
-directly."""
+against scipy.optimize.minimize (SLSQP), box-constrained QPs the same way, a 0/1 knapsack table computed
+directly, and the sequence programmes: edit distances from nltk, and LCS lengths and Needleman–Wunsch and
+Smith–Waterman scores from Biopython's PairwiseAligner."""
 
 import itertools
 from typing import Any
@@ -230,4 +231,43 @@ def cases() -> dict[str, object]:
             if weights[i - 1] <= w:
                 T[i, w] = max(T[i, w], T[i - 1, w - weights[i - 1]] + values[i - 1])
     out["dynamicProgram"] = {"weights": weights, "values": values, "capacity": cap, "table": T}
-    return out
+    return out | sequences()
+
+
+PAIRS = [
+    ("kitten", "sitting"),
+    ("GATTACA", "GCATGCU"),
+    ("intention", "execution"),
+    ("", "abc"),
+    ("TGTTACGG", "GGTTGACTA"),
+    ("the quick brown fox", "a quick brown dog"),
+    ("AAAA", "AAAA"),
+]
+
+
+def sequences() -> dict[str, object]:
+    from Bio.Align import PairwiseAligner
+    from nltk.metrics.distance import edit_distance
+
+    def score(a: str, b: str, mode: str, match: float, mismatch: float, gap: float) -> float:
+        aligner = PairwiseAligner(mode=mode, match_score=match, mismatch_score=mismatch, gap_score=gap)
+        return float(aligner.score(a, b)) if a and b else (gap * (len(a) + len(b)) if mode == "global" else 0.0)
+
+    return {
+        "editDistance": [
+            {"a": a, "b": b, "unit": edit_distance(a, b), "substitute2": edit_distance(a, b, substitution_cost=2)}
+            for a, b in PAIRS
+        ],
+        # LCS length: a global alignment scoring 1 per match, forbidding mismatches, with free gaps.
+        "lcs": [{"a": a, "b": b, "length": score(a, b, "global", 1, -1e6, 0)} for a, b in PAIRS],
+        "needlemanWunsch": [
+            {"a": a, "b": b, "match": m, "mismatch": x, "gap": g, "score": score(a, b, "global", m, x, g)}
+            for a, b in PAIRS
+            for m, x, g in [(1, -1, -1), (2, -1, -2)]
+        ],
+        "smithWaterman": [
+            {"a": a, "b": b, "match": m, "mismatch": x, "gap": g, "score": score(a, b, "local", m, x, g)}
+            for a, b in PAIRS
+            for m, x, g in [(1, -1, -1), (3, -3, -2)]
+        ],
+    }

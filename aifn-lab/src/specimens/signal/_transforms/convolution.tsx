@@ -198,7 +198,7 @@ export function CircularConvolutionFigure() {
           />
         )}
         <Curve name="linear x ∗ h" x={range(linear.length)} y={linear} emphasis />
-        <Segments name={`circular, M = ${size}`} segments={stems(range(size), circular)} slot={0} live />
+        <Segments name={`circular, M = ${size}`} segments={stems(range(size), circular)} slot={0} />
         <Points name={`circular, M = ${size}`} x={range(size)} y={circular} slot={0} size={5} />
       </Plot>
     </Figure>

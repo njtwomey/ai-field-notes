@@ -7,6 +7,7 @@
 
 import type { Size } from 'aifn/foundation/contracts'
 import { toFlat, unwrap, type Tensor, type Value } from 'aifn/foundation/tensor'
+import { DomainError, ShapeError } from 'aifn/foundation/errors'
 
 /** A language model as decoding sees it: the next-token logits [V] after a prefix of token ids. */
 export type LogitsFn = (prefix: readonly number[]) => Value
@@ -14,9 +15,10 @@ export type LogitsFn = (prefix: readonly number[]) => Value
 /** Logits of a value as plain numbers. */
 export function logitsOf(v: Value): number[] {
   const r = unwrap(v)
-  if (typeof r === 'number') throw new Error('decoding: logits must be a vector [V]')
+  if (typeof r === 'number') throw new ShapeError('decoding', 'decoding: logits must be a vector [V]')
   const t = r as Tensor
-  if (t.shape.length !== 1) throw new Error(`decoding: logits must be a vector [V], got [${t.shape.join(', ')}]`)
+  if (t.shape.length !== 1)
+    throw new ShapeError('decoding', `decoding: logits must be a vector [V], got [${t.shape.join(', ')}]`)
   return toFlat(t)
 }
 
@@ -24,7 +26,7 @@ export function logitsOf(v: Value): number[] {
 export function softmaxOf(logits: readonly number[]): number[] {
   // A loop, not Math.max(...logits): spreading a large vocabulary (> ~1e5 tokens) overflows the call stack.
   const m = logits.reduce((a, l) => Math.max(a, l), -Infinity)
-  if (m === -Infinity) throw new Error('decoding: every token was removed')
+  if (m === -Infinity) throw new DomainError('decoding', 'decoding: every token was removed')
   const e = logits.map((l) => (l === -Infinity ? 0 : Math.exp(l - m)))
   const z = e.reduce((a, b) => a + b, 0)
   return e.map((v) => v / z)
@@ -32,7 +34,8 @@ export function softmaxOf(logits: readonly number[]): number[] {
 
 /** Logits divided by a temperature T > 0: T < 1 sharpens the distribution, T > 1 flattens it. */
 export function applyTemperature(logits: readonly number[], temperature: number): number[] {
-  if (!(temperature > 0)) throw new RangeError(`applyTemperature: temperature ${temperature} must be positive`)
+  if (!(temperature > 0))
+    throw new DomainError('applyTemperature', `applyTemperature: temperature ${temperature} must be positive`)
   return logits.map((l) => l / temperature)
 }
 

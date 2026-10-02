@@ -7,6 +7,8 @@ import os
 import tempfile
 
 import numpy as np
+
+# pycrfsuite re-exports its classes from a compiled Cython module with `import *`, which Pyright cannot see.
 import pycrfsuite
 
 TEMPLATES = ["U00:%x[-1,0]", "U01:%x[0,0]", "U02:%x[1,0]", "U03:%x[0,1]", "U04:%x[0,0]/%x[0,1]", "B"]
@@ -60,7 +62,7 @@ def cases() -> dict[str, object]:
     train = [sentence(rng) for _ in range(40)]
     test = [sentence(rng) for _ in range(5)]
     c2 = 0.1
-    trainer = pycrfsuite.Trainer(algorithm="lbfgs", verbose=False)
+    trainer = pycrfsuite.Trainer(algorithm="lbfgs", verbose=False)  # pyright: ignore[reportAttributeAccessIssue]
     for rows, tags in train:
         trainer.append(attributes(rows), tags)
     trainer.set_params(
@@ -79,7 +81,7 @@ def cases() -> dict[str, object]:
     with tempfile.TemporaryDirectory() as d:
         path = os.path.join(d, "model.crfsuite")
         trainer.train(path)
-        tagger = pycrfsuite.Tagger()
+        tagger = pycrfsuite.Tagger()  # pyright: ignore[reportAttributeAccessIssue]
         tagger.open(path)
         info = tagger.info()
         state = [[a, y, w] for (a, y), w in info.state_features.items()]

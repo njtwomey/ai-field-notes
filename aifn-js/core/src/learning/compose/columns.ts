@@ -8,6 +8,7 @@ import type { Column, Dataset, Estimator, FitOptions, Table } from 'aifn/learnin
 import type { Transforms } from 'aifn/learning/estimators'
 import { fromData, isTensor, reshape, type Tensor } from 'aifn/foundation/tensor'
 import type { FittedOf } from './pipeline'
+import { DomainError } from 'aifn/foundation/errors'
 
 /** What to do with a named column: a transformer, pass it through (numeric columns only), or drop it. */
 // oxlint-disable-next-line no-explicit-any -- each column's transformer has its own input type
@@ -35,7 +36,7 @@ function asInput(c: Column): Column {
 
 function numeric(name: string, c: Column): Tensor {
   const t = asInput(c)
-  if (!isTensor(t)) throw new Error(`columns: "${name}" is not numeric and cannot pass through`)
+  if (!isTensor(t)) throw new DomainError('columns', `columns: "${name}" is not numeric and cannot pass through`)
   return t
 }
 
@@ -79,7 +80,7 @@ export function columns<const C extends Record<string, ColumnSpec>>(
     },
     fit(data, options = {}) {
       const table = data.x
-      for (const name of names) if (!(name in table)) throw new Error(`columns: no column "${name}"`)
+      for (const name of names) if (!(name in table)) throw new DomainError('columns', `columns: no column "${name}"`)
       const rest = remainder === 'passthrough' ? Object.keys(table).filter((k) => !(k in spec)) : []
       const steps: Record<string, Transforms<unknown, Tensor>> = {}
       names.forEach((name, k) => {
@@ -95,7 +96,7 @@ export function columns<const C extends Record<string, ColumnSpec>>(
         for (const name of names) {
           const s = spec[name]
           if (s === 'drop') continue
-          if (!(name in input)) throw new Error(`columns: no column "${name}"`)
+          if (!(name in input)) throw new DomainError('columns', `columns: no column "${name}"`)
           out.push([
             name,
             s === 'passthrough' ? numeric(name, input[name]) : steps[name].transform(asInput(input[name])),

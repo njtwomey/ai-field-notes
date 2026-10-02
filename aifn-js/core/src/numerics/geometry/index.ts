@@ -8,6 +8,9 @@
  * - Contours: `contourSegments`, `contourLines` (joined polylines), `contourLevels`.
  * - Grids: `meshgrid`, `grid2d`, `evaluateGrid` (z[i][j] = f(x[j], y[i])), `logspace`; `linspace` is in `aifn/foundation/tensor`.
  * - Simplex: `simplexVertices`, `barycentricToCartesian`, `cartesianToBarycentric`, `simplexGrid`.
+ * - Projective geometry: `normalisePoints` (Hartley), `homography` (normalised DLT), `applyHomography`,
+ *   `transferError`, `fundamentalMatrix` (normalised eight-point), `epipolarLines`, `sampsonDistance`, `cameraMatrix`,
+ *   `projectPoints`, `triangulate` (linear), `rotationMatrix`.
  */
 
 export { covarianceEllipse, massToRadius, precisionEllipse, type Ellipse, type EllipseOptions } from './ellipse'
@@ -21,4 +24,17 @@ export {
   type SimplexGrid,
 } from './simplex'
 export { grid2d, evaluateGrid, type Grid2d } from './grids'
+export {
+  applyHomography,
+  cameraMatrix,
+  epipolarLines,
+  fundamentalMatrix,
+  homography,
+  normalisePoints,
+  projectPoints,
+  rotationMatrix,
+  sampsonDistance,
+  transferError,
+  triangulate,
+} from './projective'
 export { geometryFunctions } from './registry'

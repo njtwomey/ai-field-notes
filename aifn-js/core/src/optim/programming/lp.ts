@@ -10,6 +10,7 @@
 import { dense, type Tensor } from 'aifn/foundation/tensor'
 import type { Index, MatrixLike, Scalar, Size, VectorLike } from 'aifn/foundation/contracts'
 import { checkFinite, intTensor, matTVec, matVec, readMatrix, readVector, vector, type Mat } from './input'
+import { DomainError, ShapeError } from 'aifn/foundation/errors'
 
 /** A bound on one variable: `[lower, upper]`; `null` or ±`Infinity` means no bound on that side. */
 export type Bound = readonly [Scalar | null, Scalar | null]
@@ -67,13 +68,14 @@ export function parseLP(problem: LinearProgram): ParsedLP {
   if (b !== undefined) {
     const single = b.length === 2 && !Array.isArray(b[0]) && (typeof b[0] === 'number' || b[0] === null)
     const list = single ? Array.from({ length: n }, () => b as Bound) : (b as readonly Bound[])
-    if (list.length !== n) throw new Error(`linear program: expected ${n} bounds, got ${list.length}`)
+    if (list.length !== n)
+      throw new ShapeError('linear program', `linear program: expected ${n} bounds, got ${list.length}`)
     for (let j = 0; j < n; j++) {
       const [lo, hi] = list[j]
       lower[j] = lo === null ? -Infinity : lo
       upper[j] = hi === null ? Infinity : hi
       if (Number.isNaN(lower[j]) || Number.isNaN(upper[j]) || lower[j] === Infinity || upper[j] === -Infinity)
-        throw new Error(`linear program: invalid bound on x${j + 1}`)
+        throw new DomainError('linear program', `linear program: invalid bound on x${j + 1}`)
     }
   }
   return { n, c, Aub, bub, Aeq, beq, lower, upper }

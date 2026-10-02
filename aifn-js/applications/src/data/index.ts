@@ -58,7 +58,14 @@ export {
   type Truth,
 } from './truth'
 export { classCounts, type ClassSizeOptions, type ClassSizes } from './sizes'
-export { type Dataset, type DatasetMeta, type Recipe, type RecipeStep } from './types'
+export {
+  type Dataset,
+  type DatasetMeta,
+  type PlantedPattern,
+  type Recipe,
+  type RecipeStep,
+  type TableData,
+} from './types'
 export {
   generate,
   modify,

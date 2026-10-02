@@ -72,3 +72,16 @@ overflows; nuclear-norm gradients at rank-deficient square matrices return a val
 1. Decide the rank-test conventions (findings 9–11) once, against scipy 1.18, and state them in the module doc.
 2. QAGS extrapolation in `integrate` (finding 12), together with the open narrow-peak item.
 3. A degenerate-input gradient table for the spectral factorisations (finding 18), built from `lin.test.ts`.
+
+## Status update (2026-10-02, overnight hygiene)
+
+- Done: 9 (T⁺ kept for every alternative, as R's V; documented in `ranks.ts`), 10 (`exact` with ties or zeros throws;
+  scipy's permutation `auto` documented), 11 (two-sample one-sided asymptotic KS uses Hodges' correction, as scipy),
+  12 (doc corrected: QAG without ε extrapolation, with the workaround), 13 (`pinv`, `lstsq`, `conditionNumber` throw
+  `NotDifferentiableError` under tracing), 16 (`clipByGlobalNorm` differentiates through traced gradients), 18
+  (`test/numerics/linalg/degenerate.test.ts`: eigh at repeated eigenvalues, svd at rank-deficient and zero matrices, qr
+  at rank deficiency).
+- All 16 hypothesis tests now have second-library references (statsmodels, lifelines, scipy) in
+  `probability/tests.json` `references`.
+- Left: 14 (Mills-ratio form, low priority), 15 (studentTCdf at ν ≈ 1e6 is 4e-11 relative; a fix threads log x into
+  the regularised beta's prefactor, not worth the risk to that kernel), QAGS itself (M).

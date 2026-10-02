@@ -26,7 +26,7 @@ import {
   type Value,
   where,
 } from 'aifn/foundation/tensor'
-import { NumericalError, ShapeError } from 'aifn/foundation/errors'
+import { NotDifferentiableError, NumericalError, ShapeError } from 'aifn/foundation/errors'
 import { dense, EPS, matrix, vector } from './dense'
 import {
   concrete,
@@ -376,11 +376,21 @@ function defaultRtol(m: number, n: number): number {
   return Math.max(m, n) * EPS
 }
 
+/** The dense routines below read the SVD's values; under a transformation they say so instead of failing inside. */
+function concreteOnly(a: unknown, where: string): void {
+  if (isTraced(a as Value))
+    throw new NotDifferentiableError(
+      where,
+      `${where}: not differentiable (it thresholds singular values); differentiate through \`svd\` or \`solve\``,
+    )
+}
+
 /**
  * Moore–Penrose pseudo-inverse (n×m) of an m×n matrix from its SVD: singular values at most `rtol`·σ_max are
  * treated as zero (default max(m, n)·ε).
  */
 export function pinv(a: Tensor, { rtol }: { rtol?: number } = {}): Tensor {
+  concreteOnly(a, 'pinv')
   const [m, n] = a.shape
   const { U, S, V } = svd(a)
   const k = S.shape[0]
@@ -414,6 +424,8 @@ export type LeastSquares = {
  * singular values at most `rtol`·σ_max treated as zero (default max(m, n)·ε). Rank deficiency is reported by `rank`.
  */
 export function lstsq(a: Tensor, b: Tensor, { rtol }: { rtol?: number } = {}): LeastSquares {
+  concreteOnly(a, 'lstsq')
+  concreteOnly(b, 'lstsq')
   const [m, n] = a.shape
   const isVector = b.shape.length === 1
   const rhs = dense(isVector ? reshape(b, [-1, 1]) : b, 'lstsq')
@@ -454,6 +466,7 @@ export function lstsq(a: Tensor, b: Tensor, { rtol }: { rtol?: number } = {}): L
 
 /** The 2-norm condition number σ_max / σ_min (∞ when σ_min = 0) of an m×n matrix, over its min(m, n) singular values. */
 export function conditionNumber(a: Tensor): number {
+  concreteOnly(a, 'conditionNumber')
   const { S } = svd(a)
   const k = S.shape[0]
   if (k === 0) return 0

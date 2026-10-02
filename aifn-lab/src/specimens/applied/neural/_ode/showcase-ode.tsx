@@ -2,7 +2,7 @@ import { useMemo, useState, type ReactNode } from 'react'
 import type { CnfRun, LatentOdeRun, OdeRun } from 'aifn-applied/neural/ode'
 import { Player, Select, Slider } from '@lab/controls'
 import { Dashboard, DashboardCell, DashboardRow, Figure } from '@lab/layout'
-import { choice, float, int, row, setting, useFigureState, when } from '@lab/state'
+import { choice, float, int, row, setting, toggle, useFigureState, when } from '@lab/state'
 import { formatValue, TrainControls, useTrainedRun } from '@lab/views'
 import { Annotation, Curve, Handle, Plot, Points, Raster, Readout, Segments, useAxis, Vectors } from '@lab/viz'
 import { arrows, at, rows, thin, trails, typicalLength } from './geometry'
@@ -16,8 +16,6 @@ import {
   SOLVERS,
   TASKS,
   taskOf,
-  type ClassData,
-  type DensityData,
   type ModelKind,
   type Result,
   type Settings,
@@ -39,20 +37,15 @@ export function NeuralOdeShowcase() {
   const state = useFigureState({
     setup: row('1 · task and model', {
       task: choice(TASKS, 'classification', { label: 'task' }),
-      classData: choice(
-        (Object.keys(CLASS_DATA) as ClassData[]).map((k) => ({ value: k, label: CLASS_DATA[k].label })),
-        'disc',
-        { label: 'data', when: when('task', 'classification') },
-      ),
-      densityData: choice(
-        (Object.keys(DENSITY_DATA) as DensityData[]).map((k) => ({ value: k, label: DENSITY_DATA[k].label })),
-        'moons',
-        { label: 'data', when: when('task', 'density') },
-      ),
+      classData: CLASS_DATA.field({ choiceLabel: 'data', initial: 'disc', when: when('task', 'classification') }),
+      densityData: DENSITY_DATA.field({ choiceLabel: 'data', initial: 'moons', when: when('task', 'density') }),
       latentData: choice(LATENT_DATA, 'sine', { label: 'data', when: when('task', 'latent') }),
       model: choice(MODELS, 'node', { label: 'model', when: supervised }),
       augment: choice([1, 2], 1, { label: 'extra dimensions', when: (v) => supervised(v) && v.model === 'anode' }),
-      depth: choice([4, 10, 20], 10, {
+      depth: int(10, {
+        ge: 1,
+        le: 100,
+        suggestions: [4, 10, 20],
         label: 'blocks (= Euler steps)',
         when: (v) => supervised(v) && v.model === 'resnet',
       }),
@@ -80,11 +73,21 @@ export function NeuralOdeShowcase() {
         label: 'step size',
         when: (v) => v.method !== 'dormand-prince',
       }),
-      rtol: choice([1e-2, 1e-3, 1e-4, 1e-5], 1e-3, {
+      rtol: float(1e-3, {
+        gt: 0,
+        le: 0.1,
+        scale: 'log10',
+        suggestions: [1e-2, 1e-3, 1e-4, 1e-5],
         label: 'rtol (atol = rtol/100)',
         when: when('method', 'dormand-prince'),
       }),
-      checkpoints: choice([1, 4, 10], 1, { label: 'adjoint checkpoints', when: when('gradient', 'adjoint') }),
+      checkpoints: int(1, {
+        ge: 1,
+        le: 50,
+        suggestions: [1, 4, 10],
+        label: 'adjoint checkpoints',
+        when: when('gradient', 'adjoint'),
+      }),
     }),
     train: row('3 · training', {
       steps: int(300, { ge: 1, suggestions: [100, 200, 300, 500], label: 'iterations' }),
@@ -95,17 +98,18 @@ export function NeuralOdeShowcase() {
         scale: 'log10',
         suggestions: [0.003, 0.01, 0.02],
       }),
-      kinetic: choice([0, 0.001, 0.01, 0.05], 0, { label: 'kinetic λ' }),
-      jacobian: choice([0, 0.001, 0.01, 0.05], 0, { label: 'Jacobian λ' }),
-      hidden: choice([16, 32, 64], 32, { label: 'field width' }),
+      kinetic: float(0, { ge: 0, step: 0.001, suggestions: [0, 0.001, 0.01, 0.05], label: 'kinetic λ' }),
+      jacobian: float(0, { ge: 0, step: 0.001, suggestions: [0, 0.001, 0.01, 0.05], label: 'Jacobian λ' }),
+      hidden: int(32, { ge: 2, le: 128, suggestions: [16, 32, 64], label: 'field width' }),
       seed: int(0, { label: 'seed', ge: 0, le: 9999 }),
     }),
+    show: row('4 · show', { boundary: toggle(true, 'decision boundary (P = 0.5)') }),
   })
   const { setup, solver, train } = state
   const settings: Settings = {
     task: setup.task as TaskKind,
-    classData: setup.classData as ClassData,
-    densityData: setup.densityData as DensityData,
+    classData: { key: setup.classData.key, values: { ...setup.classData.values } },
+    densityData: { key: setup.densityData.key, values: { ...setup.densityData.values } },
     latentData: setup.latentData as 'sine' | 'spiral',
     model: setup.model as ModelKind,
     augment: Number(setup.augment),
@@ -165,6 +169,7 @@ export function NeuralOdeShowcase() {
   const task = trained.trained?.task ?? settings.task
   // Every view's hooks run on every render (each with no run unless it is the task's), so the figures never remount.
   const flow = useFlowView({
+    boundary: state.show.boundary,
     ...common,
     run: result && (result.task === 'classification' || result.task === 'regression') ? result.run : null,
   })
@@ -331,7 +336,7 @@ function TimePlayer({
 
 // ── Classification and regression ─────────────────────────────────────────────────────────────────────────────────
 
-function useFlowView({ run, runKey, error, pending }: ViewProps<OdeRun>): View {
+function useFlowView({ run, runKey, error, pending, boundary }: ViewProps<OdeRun> & { boundary: boolean }): View {
   const { shot, marker, player } = useCheckpoint(run, runKey)
   const [frame, setFrame] = usePick(runKey)
   const T = run?.times.length ?? 1
@@ -526,12 +531,13 @@ function useFlowView({ run, runKey, error, pending }: ViewProps<OdeRun>): View {
         (class colours as in the data; for g(x) = −x the sign of x(0)). A 1-d neural ODE cannot map x to −x: its
         trajectories x(t) never cross, so the flow is increasing. A disc inside a ring defeats a plain 2-d NODE for the
         same reason: it can only squeeze the ring between the finite points, with a contorted flow; the augmented
-        NODE&apos;s extra coordinate a (middle) lifts the disc over the ring. Right: P(class 1) over the input plane, or
-        the fitted g. Below, the training figure: loss, function evaluations per iteration (forward, and backward: the
-        adjoint&apos;s backward solve, or backprop&apos;s replay of the recorded steps), and at each checkpoint the
-        adjoint gradient&apos;s relative error against backprop&apos;s and the error of x(0) reconstructed by
-        integrating backwards (checkpoints shrink it). Play time t; the slider (or the iteration marker in the training
-        figure) picks the model. {error ? `Run stopped: ${error}` : ''}
+        NODE&apos;s extra coordinate a (middle) lifts the disc over the ring. Right: P(class 1) over the input plane
+        (with the decision boundary on, the ink line is its 0.5 contour), or the fitted g. Below, the training figure:
+        loss, function evaluations per iteration (forward, and backward: the adjoint&apos;s backward solve, or
+        backprop&apos;s replay of the recorded steps), and at each checkpoint the adjoint gradient&apos;s relative error
+        against backprop&apos;s and the error of x(0) reconstructed by integrating backwards (checkpoints shrink it).
+        Play time t; the slider (or the iteration marker in the training figure) picks the model.{' '}
+        {error ? `Run stopped: ${error}` : ''}
       </>
     ),
     body: (
@@ -584,6 +590,7 @@ function useFlowView({ run, runKey, error, pending }: ViewProps<OdeRun>): View {
                     range={[0, 1]}
                     valueLabel="P(class 1)"
                     fillOpacity={0.7}
+                    boundary={boundary ? 0.5 : false}
                   />
                 )}
                 {data && run?.task === 'classification' && (

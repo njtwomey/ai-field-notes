@@ -199,7 +199,7 @@ export function InterpolationFigure() {
     >
       <Plots rows={2}>
         <Plot x={t} y={v}>
-          <Segments name="zero-stuffed" segments={stems(tt, stuffed)} muted live />
+          <Segments name="zero-stuffed" segments={stems(tt, stuffed)} muted />
           <Curve name="interpolated" x={tt} y={interp} slot={0} showPoints />
           <Points name="input" x={range(n)} y={x} emphasis size={7} />
         </Plot>
@@ -259,7 +259,7 @@ export function PolyphaseFigure() {
         {E.map((e, b) => {
           const n = e.map((_, p) => p * M + b)
           return [
-            <Segments key={`s${b}`} name={`E${b}`} segments={stems(n, e)} slot={b} live />,
+            <Segments key={`s${b}`} name={`E${b}`} segments={stems(n, e)} slot={b} />,
             <Points key={`p${b}`} name={`E${b}`} x={n} y={e} slot={b} size={5} />,
           ]
         })}

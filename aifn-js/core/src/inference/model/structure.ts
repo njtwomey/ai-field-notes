@@ -33,6 +33,7 @@ import {
   type Model,
   type NodeValue,
 } from './model'
+import { DomainError } from 'aifn/foundation/errors'
 
 /**
  * What a node of a model's factor graph carries: the instance key and model node of a variable (with its number of
@@ -149,7 +150,10 @@ export function toDiscreteFactorGraph(m: Model | ExpandedModel, bindings: Bindin
   const latent = vars.map((v, i) => (v.role === 'observed' ? -1 : i)).filter((i) => i >= 0)
   for (const i of latent)
     if (vars[i].data!.cardinality == null)
-      throw new Error(`toDiscreteFactorGraph: ${vars[i].name} is not discrete with finitely many values`)
+      throw new DomainError(
+        'toDiscreteFactorGraph',
+        `toDiscreteFactorGraph: ${vars[i].name} is not discrete with finitely many values`,
+      )
   const position = new Map(latent.map((v, i) => [v, i]))
   const cards = latent.map((i) => vars[i].data!.cardinality!)
   const factors: DiscreteFactor[] = []

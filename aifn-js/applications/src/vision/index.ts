@@ -1,6 +1,6 @@
 /**
- * `aifn-applied/vision`: image filters on the 2-D convolution of `aifn/foundation/convolution`: Gaussian blur, Sobel
- * gradients, Laplacian of Gaussian.
+ * `aifn-applied/vision`: worked vision setups on the core image and geometry modules (`aifn/signal/image`,
+ * `aifn/numerics/geometry`, `aifn/numerics/robust`): a two-view scene with known cameras and correspondences.
  */
 
-export { gaussianBlur, sobel } from './filters'
+export * from './two-view'

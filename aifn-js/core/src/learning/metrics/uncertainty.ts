@@ -20,6 +20,7 @@ import {
   type Label,
   type Labels,
 } from './core'
+import { ShapeError } from 'aifn/foundation/errors'
 
 /**
  * The Wilson score interval for a proportion of `successes` in `trials` (Wilson 1927): it inverts the score test, never
@@ -94,7 +95,7 @@ function resampler(s: Stream, n: number, groups?: Labels): (r: number) => Int32A
     }
   }
   const g = labelList(groups)
-  if (g.length !== n) throw new Error('metrics: bootstrap: one group per case')
+  if (g.length !== n) throw new ShapeError('metrics', 'metrics: bootstrap: one group per case')
   const members = new Map<Label, number[]>()
   g.forEach((v, i) => members.set(v, [...(members.get(v) ?? []), i]))
   const lists = [...members.values()]

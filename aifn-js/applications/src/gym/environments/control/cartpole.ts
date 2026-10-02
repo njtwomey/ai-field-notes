@@ -32,6 +32,7 @@ import { uniform, type Stream } from 'aifn/foundation/random'
 import { definer } from 'aifn/foundation/registry'
 import { boxDomain, discreteDomain, int, real, space } from 'aifn/foundation/space'
 import { add, cos, div, fromData, get, mul, sin, square, stack, sub, toFlat, unwrap } from 'aifn/foundation/tensor'
+import { DomainError } from 'aifn/foundation/errors'
 
 /** The cart-pole's state: cart position x (m) and velocity ẋ (m/s), pole angle θ (rad) and rate θ̇ (rad/s). */
 export interface CartPoleState {
@@ -163,7 +164,8 @@ export function cartPoleEnvironment(options: CartPoleOptions = {}): CartPoleEnvi
       return { state, observation: observe(state) }
     },
     step(s, a) {
-      if (a !== 0 && a !== 1) throw new RangeError(`cartPoleEnvironment: action must be 0 or 1, got ${a}`)
+      if (a !== 0 && a !== 1)
+        throw new DomainError('cartPoleEnvironment', `cartPoleEnvironment: action must be 0 or 1, got ${a}`)
       const [x, xDot, theta, thetaDot] = eulerStep(
         parameters,
         s.x,

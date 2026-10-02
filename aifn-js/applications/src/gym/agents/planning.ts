@@ -21,6 +21,7 @@ import {
   type MdpTables,
   type PolicyInput,
 } from '../mdp'
+import { DomainError } from 'aifn/foundation/errors'
 
 /** The greedy policy for an action-value table (states × actions), as int32 actions (−1 at terminals). */
 export function greedyPolicy(mdp: MdpTables, Q: Tensor | ArrayLike<number>): Tensor {
@@ -236,7 +237,7 @@ export interface PlannerState {
 /** The environment's tabular model, or an error naming the agent. */
 function tabularModel(env: EnvironmentShape, who: string): MdpTables {
   const m = env.model
-  if (m?.kind !== 'tabular') throw new RangeError(`${who} needs an environment with a tabular model`)
+  if (m?.kind !== 'tabular') throw new DomainError('tabularModel', `${who} needs an environment with a tabular model`)
   return m
 }
 

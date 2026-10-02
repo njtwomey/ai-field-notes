@@ -14,6 +14,7 @@ import type { RunOptions } from '../options'
 import { intTensor, matrix, readVector, vector } from './input'
 import { parseLP, toOriginal, type LinearProgram, type ParsedLP, type StandardForm } from './lp'
 import { basicSolution, pivotTableau, simplex, simplexSolve } from './simplex'
+import { DomainError } from 'aifn/foundation/errors'
 
 /**
  * A mixed-integer linear program: a `LinearProgram` whose variables marked in `integrality` must take integer values,
@@ -423,13 +424,14 @@ function checkIntegerData(lp: ParsedLP): void {
   for (const a of all)
     for (let k = 0; k < a.length; k++)
       if (!Number.isInteger(a[k]))
-        throw new Error('gomory: constraint data must be integers so that slacks are integer')
+        throw new DomainError('gomory', 'gomory: constraint data must be integers so that slacks are integer')
   for (let j = 0; j < lp.n; j++) {
     const lo = lp.lower[j]
     const hi = lp.upper[j]
-    if (!Number.isFinite(lo) && !Number.isFinite(hi)) throw new Error('gomory: free variables are not supported')
+    if (!Number.isFinite(lo) && !Number.isFinite(hi))
+      throw new DomainError('gomory', 'gomory: free variables are not supported')
     if ((Number.isFinite(lo) && !Number.isInteger(lo)) || (Number.isFinite(hi) && !Number.isInteger(hi)))
-      throw new Error('gomory: bounds must be integers')
+      throw new DomainError('gomory', 'gomory: bounds must be integers')
   }
 }
 

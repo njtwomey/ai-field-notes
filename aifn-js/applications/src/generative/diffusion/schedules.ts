@@ -6,6 +6,7 @@
  */
 
 import { fromData, type Tensor } from 'aifn/foundation/tensor'
+import { DomainError } from 'aifn/foundation/errors'
 
 /** A discrete noise schedule of T steps. Entry t − 1 of each tensor belongs to step t = 1 … T. */
 export type NoiseSchedule = {
@@ -37,7 +38,7 @@ export function scheduleFromBetas(
   const snr = new Float64Array(T)
   let prod = 1
   for (let i = 0; i < T; i++) {
-    if (!(b[i] > 0 && b[i] < 1)) throw new RangeError(`schedule: β_${i + 1} = ${b[i]} is not in (0, 1)`)
+    if (!(b[i] > 0 && b[i] < 1)) throw new DomainError('schedule', `schedule: β_${i + 1} = ${b[i]} is not in (0, 1)`)
     a[i] = 1 - b[i]
     prod *= a[i]
     ab[i] = prod
@@ -87,14 +88,14 @@ export function cosineSchedule(
 export function alphaBarAt(schedule: NoiseSchedule, t: number): number {
   if (t === 0) return 1
   if (!Number.isInteger(t) || t < 0 || t > schedule.steps)
-    throw new RangeError(`step ${t} is not in 0 … ${schedule.steps}`)
+    throw new DomainError('alphaBarAt', `step ${t} is not in 0 … ${schedule.steps}`)
   return schedule.alphaBars.data[t - 1]
 }
 
 /** β at step t = 1 … T. */
 export function betaAt(schedule: NoiseSchedule, t: number): number {
   if (!Number.isInteger(t) || t < 1 || t > schedule.steps)
-    throw new RangeError(`step ${t} is not in 1 … ${schedule.steps}`)
+    throw new DomainError('betaAt', `step ${t} is not in 1 … ${schedule.steps}`)
   return schedule.betas.data[t - 1]
 }
 
@@ -178,13 +179,13 @@ export function veSde({ sigmaMin = 0.01, sigmaMax = 50 }: { sigmaMin?: number; s
  */
 export function stepTime(schedule: NoiseSchedule, t: number): number {
   if (!Number.isInteger(t) || t < 0 || t > schedule.steps)
-    throw new RangeError(`step ${t} is not in 0 … ${schedule.steps}`)
+    throw new DomainError('stepTime', `step ${t} is not in 0 … ${schedule.steps}`)
   return t / schedule.steps
 }
 
 /** The discrete step nearest to time τ ∈ [0, 1] (the inverse of `stepTime` on the grid). */
 export function timeStep(schedule: NoiseSchedule, tau: number): number {
-  if (!(tau >= 0 && tau <= 1)) throw new RangeError(`time ${tau} is not in [0, 1]`)
+  if (!(tau >= 0 && tau <= 1)) throw new DomainError('timeStep', `time ${tau} is not in [0, 1]`)
   return Math.round(tau * schedule.steps)
 }
 
@@ -232,7 +233,7 @@ export function scheduleSde(schedule: NoiseSchedule): ForwardSde {
  */
 export function sdeSchedule(sde: ForwardSde, steps: number): NoiseSchedule {
   if (!Number.isInteger(steps) || steps < 1)
-    throw new RangeError(`sdeSchedule: steps = ${steps} is not a positive integer`)
+    throw new DomainError('sdeSchedule', `sdeSchedule: steps = ${steps} is not a positive integer`)
   const betas = new Float64Array(steps)
   let prev = 1
   for (let t = 1; t <= steps; t++) {

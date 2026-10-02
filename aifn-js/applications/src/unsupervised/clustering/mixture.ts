@@ -24,10 +24,11 @@ import { normals, type Stream, child, uniform } from 'aifn/foundation/random'
 import { fromData, logsumexp, type Tensor } from 'aifn/foundation/tensor'
 import { softmax } from 'aifn/numerics/special'
 import { trace, type Algorithm } from 'aifn/foundation/trace'
-import { kmeansPlusPlus } from './centroid'
+import { kmeansPlusPlus } from 'aifn/numerics/neighbours'
 import { mat, matrix, nearest, values, vec } from './util'
 import { defineModel } from 'aifn/learning/estimators'
 import { int, oneOf, real, space } from 'aifn/foundation/space'
+import { ShapeError } from 'aifn/foundation/errors'
 
 /** The shape of each component's covariance. */
 export type CovarianceType = 'full' | 'diagonal' | 'spherical'
@@ -260,7 +261,7 @@ export function gaussianMixture(params: {
       const c = values(final.covariances)
       const joint = (q: Tensor) => {
         const { n: rows, v, d: dq } = matrix(q, 'gaussianMixture')
-        if (dq !== d) throw new Error(`gaussianMixture: fitted on ${d} features, given ${dq}`)
+        if (dq !== d) throw new ShapeError('gaussianMixture', `gaussianMixture: fitted on ${d} features, given ${dq}`)
         const { out } = logDensities(v, rows, d, k, m, c)
         for (let i = 0; i < rows; i++) for (let j = 0; j < k; j++) out[i * k + j] += Math.log(w[j])
         return { out, rows }

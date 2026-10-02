@@ -96,6 +96,17 @@ fn(
   factors.discreteFactorGraph,
 )
 fn(
+  {
+    key: 'gateFactor',
+    name: 'Gate factor',
+    summary: 'A selector variable switches between factors: φ(c = k, x) = f_k(x), for mixtures and model selection.',
+    role: 'construction',
+    notes: ['gates-in-factor-graphs', ...FG],
+    cite: ['minka2008gates'],
+  },
+  factors.gateFactor,
+)
+fn(
   { key: 'factorProduct', name: 'Factor product', role: 'transform', notes: ['variable-elimination', ...FG] },
   factors.factorProduct,
 )

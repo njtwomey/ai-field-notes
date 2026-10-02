@@ -10,6 +10,7 @@ import { dense, fromData, type Tensor } from 'aifn/foundation/tensor'
 import { checkColumns, column, matrix, values, type FittedTransform, type Transformer } from './transformer'
 import { defineModel } from 'aifn/learning/estimators'
 import { bool, int, oneOf, real, space } from 'aifn/foundation/space'
+import { DomainError } from 'aifn/foundation/errors'
 
 // ── Polynomial features ──────────────────────────────────────────────────────────────────────────────────────────────
 
@@ -48,7 +49,8 @@ export function polynomialFeatures({
   Tensor,
   PolynomialFeatures
 > {
-  if (!(Number.isInteger(degree) && degree >= 0)) throw new Error('polynomialFeatures: degree must be a whole number')
+  if (!(Number.isInteger(degree) && degree >= 0))
+    throw new DomainError('polynomialFeatures', 'polynomialFeatures: degree must be a whole number')
   return {
     name: 'polynomial-features',
     params: { degree, interactionOnly, includeBias },
@@ -125,7 +127,7 @@ export function splineFeatures({
   extrapolation?: 'constant' | 'continue' | 'error'
   includeBias?: boolean
 } = {}): Transformer<Tensor, SplineFeatures> {
-  if (knots < 2) throw new Error('splineFeatures: needs at least 2 knots')
+  if (knots < 2) throw new DomainError('splineFeatures', 'splineFeatures: needs at least 2 knots')
   return {
     name: 'spline-features',
     params: { knots, degree, knotPlacement, extrapolation, includeBias },
@@ -176,7 +178,8 @@ export function splineFeatures({
             for (let i = 0; i < rows; i++) {
               let xi = z[i * d + j]
               if (xi < lo || xi > hi) {
-                if (extrapolation === 'error') throw new Error(`splineFeatures: ${xi} outside [${lo}, ${hi}]`)
+                if (extrapolation === 'error')
+                  throw new DomainError('splineFeatures', `splineFeatures: ${xi} outside [${lo}, ${hi}]`)
                 if (extrapolation === 'constant') xi = xi < lo ? lo : hi
               }
               xs[i] = xi
@@ -221,7 +224,8 @@ export function randomFourierFeatures({
     name: 'random-fourier-features',
     params: { components, lengthscale },
     fit({ x }, options: FitOptions = {}) {
-      if (!options.stream) throw new Error('randomFourierFeatures: fit needs a stream ({ stream })')
+      if (!options.stream)
+        throw new DomainError('randomFourierFeatures', 'randomFourierFeatures: fit needs a stream ({ stream })')
       const { d } = matrix(x, 'randomFourierFeatures')
       const D = components
       const omega = values(normals(child(options.stream, 'frequencies'), [d, D], 0, 1 / lengthscale))

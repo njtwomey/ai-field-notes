@@ -198,12 +198,15 @@ const SCHEMA = {
       sgd: {
         label: 'SGD',
         params: {
-          batch: choice([8, 16, 32, 64, 128], 32, { label: 'batch size' }),
+          batch: int(32, { ge: 1, suggestions: [8, 16, 32, 64, 128], label: 'batch size' }),
           scale: slider(0.05, 2.4, 0.5, { label: 'step size × L', step: 0.05 }),
         },
       },
       adam: { label: 'Adam', params: { logRate: slider(-3, 0, -1.3, { label: 'log₁₀ learning rate', step: 0.05 }) } },
-      lbfgs: { label: 'L-BFGS', params: { memory: choice([3, 5, 10, 20], 10, { label: 'memory m' }) } },
+      lbfgs: {
+        label: 'L-BFGS',
+        params: { memory: int(10, { ge: 1, le: 50, suggestions: [3, 5, 10, 20], label: 'memory m' }) },
+      },
     },
     {
       label: '4 · training',

@@ -290,10 +290,15 @@ export type IntegrateOptions = {
 }
 
 /**
- * ∫ₐᵇ f(x) dx by globally adaptive Gauss–Kronrod 7–15, like scipy's `quad`, at most `maxIntervals` subintervals
- * (default 200), or by Romberg integration (`method: 'romberg'`, at most `maxLevels` halvings). Infinite limits are mapped to (0, 1] as in QUADPACK's QAGI: x = a + (1 − t)/t for [a, ∞),
+ * ∫ₐᵇ f(x) dx by globally adaptive Gauss–Kronrod 7–15 (QUADPACK's QAG, as scipy's `quad` without its extrapolation),
+ * at most `maxIntervals` subintervals (default 200), or by Romberg integration (`method: 'romberg'`, at most
+ * `maxLevels` halvings). Infinite limits are mapped to (0, 1] as in QUADPACK's QAGI: x = a + (1 − t)/t for [a, ∞),
  * x = b − (1 − t)/t for (−∞, b], and f(x) + f(−x) on [0, ∞) for (−∞, ∞). The Kronrod nodes never touch t = 0.
  * Pass `points` for a narrow peak far from the first rule's nodes (see `IntegrateOptions`).
+ *
+ * There is no Wynn ε extrapolation (QAGS), so an integrable endpoint singularity converges slowly: ∫₀¹ x^−0.9 dx
+ * stops at 200 intervals with `converged: false` where `quad` needs a few dozen. Remove the singularity by a
+ * substitution first (x = u^k with k large enough that the integrand is bounded), or raise `maxIntervals`.
  */
 export function integrate(f: Integrand, a: number, b: number, options: IntegrateOptions = {}): IntegrationResult {
   if (a === b) return { value: 0, error: 0, evaluations: 0, intervals: 0, converged: true }

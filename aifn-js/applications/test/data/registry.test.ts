@@ -36,6 +36,7 @@ describe('dataset registry', () => {
         expect(d.meta.truth !== undefined, `${key}: truth`).toBe(truth)
       } else if (output === 'datasets') expect(Array.isArray(made), key).toBe(true)
       else if (output === 'image' || output === 'patterns') expect(isTensor(made), key).toBe(true)
+      else if (output === 'scene') expect(isTensor((made as { image: unknown }).image), key).toBe(true)
       else expect(typeof made, key).toBe('object')
     }
   })

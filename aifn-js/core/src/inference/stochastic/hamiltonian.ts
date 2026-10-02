@@ -9,6 +9,7 @@
  */
 
 import { child, uniform } from 'aifn/foundation/random'
+import { logAddExp } from 'aifn/numerics/special'
 import type { Matrix, Vector } from 'aifn/foundation/tensor'
 import type { Algorithm } from 'aifn/foundation/trace'
 import {
@@ -21,6 +22,7 @@ import {
 import { badLogDensity } from './metropolis'
 import type { AcceptRejectState, ChainStart, LogDensity } from './types'
 import { allFinite, data, logDensityAndGrad, mat, perCoordinate, standardNormals, toF64, vec, type F64 } from './util'
+import { DomainError, ShapeError } from 'aifn/foundation/errors'
 
 /** A leapfrog trajectory: positions and momenta at each of its L + 1 points, and H at each. */
 export type Leapfrog = {
@@ -161,12 +163,13 @@ export type DivergenceThreshold = number | { readonly relative: number }
 /** The absolute energy-error limit of a threshold for dimension d (checked positive). */
 export function divergenceLimit(threshold: DivergenceThreshold, d: number, name: string): number {
   const limit = typeof threshold === 'number' ? threshold : threshold.relative * d
-  if (!(limit > 0)) throw new Error(`${name}: the divergence threshold must be positive, got ${limit}`)
+  if (!(limit > 0)) throw new DomainError(name, `${name}: the divergence threshold must be positive, got ${limit}`)
   return limit
 }
 
 function hmcStart(target: LogDensity, x0: F64, name: string) {
-  if (x0.length !== target.dim) throw new Error(`${name}: x0 has ${x0.length} values for dimension ${target.dim}`)
+  if (x0.length !== target.dim)
+    throw new ShapeError(name, `${name}: x0 has ${x0.length} values for dimension ${target.dim}`)
   const { value, grad } = logDensityAndGrad(target, x0)
   return { value, grad, diverged: badLogDensity(value) || !allFinite(x0) }
 }
@@ -332,14 +335,6 @@ type Tree = {
   n: number
   keepGoing: boolean
   divergent: boolean
-}
-
-/** Log-weight bookkeeping for multinomial NUTS: log(e^a + e^b) with −∞ allowed. */
-function logAddExp(a: number, b: number): number {
-  if (a === -Infinity) return b
-  if (b === -Infinity) return a
-  const m = Math.max(a, b)
-  return m + Math.log(Math.exp(a - m) + Math.exp(b - m))
 }
 
 /**

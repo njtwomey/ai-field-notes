@@ -15,6 +15,7 @@ import { dense, fromData, square, sum, type Tensor } from 'aifn/foundation/tenso
 import { classLabels, inputs, mat, matrix, probabilityModel, softmaxRows, vec } from '../util'
 import { defineModel } from 'aifn/learning/estimators'
 import { real, space } from 'aifn/foundation/space'
+import { DomainError, ShapeError } from 'aifn/foundation/errors'
 
 /** A fitted generative classifier: joint log-likelihoods as its head, a categorical predictive. */
 export interface GenerativeClassifier
@@ -30,7 +31,7 @@ function priorsOf(y: Int32Array, K: number, priors: readonly number[] | undefine
   for (const c of y) counts[c]++
   const logPrior = new Float64Array(K)
   if (priors) {
-    if (priors.length !== K) throw new Error(`${where}: ${K} classes but ${priors.length} priors`)
+    if (priors.length !== K) throw new ShapeError(where, `${where}: ${K} classes but ${priors.length} priors`)
     const total = priors.reduce((a, b) => a + b, 0)
     for (let c = 0; c < K; c++) logPrior[c] = Math.log(priors[c] / total)
   } else {
@@ -151,7 +152,9 @@ export function multinomialNaiveBayes(
       const { n, d, v } = matrix(x, 'multinomialNaiveBayes')
       const { y: labels, k: K } = classLabels(y, n, 'multinomialNaiveBayes')
       const { logPrior } = priorsOf(labels, K, priors, 'multinomialNaiveBayes')
-      for (const u of v) if (!(u >= 0)) throw new Error('multinomialNaiveBayes: features must be non-negative counts')
+      for (const u of v)
+        if (!(u >= 0))
+          throw new DomainError('multinomialNaiveBayes', 'multinomialNaiveBayes: features must be non-negative counts')
       const counts = new Float64Array(K * d).fill(alpha)
       for (let i = 0; i < n; i++) for (let j = 0; j < d; j++) counts[labels[i] * d + j] += v[i * d + j]
       const logProb = new Float64Array(K * d)
@@ -301,7 +304,8 @@ export function linearDiscriminant(
   params: { priors?: readonly number[]; shrinkage?: number } = {},
 ): Estimator<Supervised<Tensor, Tensor>, LinearDiscriminantModel> {
   const { priors, shrinkage = 0 } = params
-  if (!(shrinkage >= 0 && shrinkage <= 1)) throw new Error('linearDiscriminant: shrinkage must lie in [0, 1]')
+  if (!(shrinkage >= 0 && shrinkage <= 1))
+    throw new DomainError('linearDiscriminant', 'linearDiscriminant: shrinkage must lie in [0, 1]')
   return {
     name: 'linear-discriminant',
     params: { priors, shrinkage },
@@ -408,7 +412,8 @@ export function quadraticDiscriminant(
       const { y: labels, k: K } = classLabels(y, n, 'quadraticDiscriminant')
       const { counts, logPrior } = priorsOf(labels, K, priors, 'quadraticDiscriminant')
       for (let c = 0; c < K; c++) {
-        if (counts[c] < 2) throw new Error(`quadraticDiscriminant: class ${c} has fewer than two rows`)
+        if (counts[c] < 2)
+          throw new DomainError('quadraticDiscriminant', `quadraticDiscriminant: class ${c} has fewer than two rows`)
       }
       const means = classMeans(v, labels, n, d, K, counts)
       const covs = new Float64Array(K * d * d)

@@ -27,6 +27,8 @@ export type DecisionRegionPanelProps = {
   queryReadouts?: ReactNode
   xLabel?: string
   yLabel?: string
+  /** Ink lines where the decided class changes (the argmax boundaries); default true. */
+  boundary?: boolean
 }
 
 function padded(v: number[], pad = 0.1): [number, number] {
@@ -58,6 +60,7 @@ export function DecisionRegionPanel({
   queryReadouts,
   xLabel = 'x₀',
   yLabel = 'x₁',
+  boundary = true,
 }: DecisionRegionPanelProps) {
   const cols = useMemo(() => {
     const flat = toFlat(data.x)
@@ -108,6 +111,7 @@ export function DecisionRegionPanel({
           categoryNames={names}
           fillOpacity={0.35}
           valueLabel="decision"
+          boundary={boundary}
         />
         <Points name="training rows" x={cols.x0} y={cols.x1} group={labels} groupNames={names} />
         {overlay}

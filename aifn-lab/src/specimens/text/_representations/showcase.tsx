@@ -19,11 +19,10 @@ import { namedCorpus, topicCorpus, TOPIC_CORPUS_TOPICS } from 'aifn-applied/text
 import { seriesColor } from '@lab/design/palette'
 import { useTheme } from '@lab/design/theme'
 import { Columns, Figure } from '@lab/layout'
-import { choice, slider, useFigureState, when } from '@lab/state'
+import { choice, namedPinField, slider, useFigureState, usePinnedName, when } from '@lab/state'
 import { Textarea } from '@lab/ui/textarea'
 import { Bars, Curve, Plot, Plots, Points, Raster, Readout, Segments, useAxis } from '@lab/viz'
 import { formatValue } from '@lab/views'
-import { WordLabels } from './labels'
 import { AnalogyFigure } from './analogies'
 import { ShingleFigure } from './shingles'
 
@@ -145,11 +144,11 @@ export function RepresentationsShowcase() {
     nonZeros: slider(2, 10, 4, { label: 'non-zeros', step: 2, when: when('rep', 'random indexing') }),
     k: slider(2, 40, 10, { label: 'rank k', step: 1, when: (v) => v.rep !== 'one-hot' }),
     shown: slider(20, 150, 70, { label: 'items shown', step: 5 }),
+    pin: namedPinField(),
   })
   const { corpus: source, sentences, seed, rep, items, tdWeighting, ccWeighting, window, side, distance } = state
   const { n, shingle, dimensions, nonZeros, k, shown } = state
   const [typed, setTyped] = useState(DEFAULT_TEXT)
-  const [pinned, setPinned] = useState<string | null>('cat')
   const { resolved: mode } = useTheme()
 
   const corpus: Corpus = useMemo(() => {
@@ -284,13 +283,16 @@ export function RepresentationsShowcase() {
     return { vectors, rank, x: plane.map((p) => p[0]), y: plane.map((p) => p[1]), count }
   }, [model, k, shown])
 
-  const pinnedIndex = model && pinned !== null ? model.items.indexOf(pinned) : -1
+  // The pin is a word (or document), so it survives a change of representation; its index is in the URL.
+  const pins = usePinnedName(state.pin, (i) => state.set('pin', i), model?.items ?? null, 'cat')
+  const pinned = pins.name
+  const pinnedIndex = pins.pinned ?? -1
   const neighbours = useMemo(
     () => (embedded && pinnedIndex >= 0 ? nearestByCosine(embedded.vectors, pinnedIndex, { count: 10 }) : []),
     [embedded, pinnedIndex],
   )
 
-  const togglePin = (item: string) => setPinned((p) => (p === item ? null : item))
+  const togglePin = (item: string) => pins.toggle(model ? model.items.indexOf(item) : -1)
   const pickNearest = ([px, py]: [number, number]) => {
     if (!embedded || !model) return
     const sx = Math.max(...embedded.x) - Math.min(...embedded.x) || 1
@@ -302,7 +304,7 @@ export function RepresentationsShowcase() {
       if (d < bestD) [best, bestD] = [i, d]
     }
     // A click far from every point unpins.
-    if (best < 0 || bestD > 0.03 ** 2) setPinned(null)
+    if (best < 0 || bestD > 0.03 ** 2) pins.clear()
     else togglePin(model.items[best])
   }
 
@@ -350,7 +352,7 @@ export function RepresentationsShowcase() {
             </>
           )
         }
-        caption="The corpus: generated sentences about animals, food, vehicles, colours and places, all built from the same frames ('the cat chases the mouse', 'some buses stop near the market', 'the painter paints the wall red'); or the pets sentences, or your own text (one document per line). Each representation turns the corpus into a matrix whose rows are the items (words, or documents for n-grams and shingles). The map shows the items' rank-k vectors (the truncated SVD, U_k Σ_k) by their cosine geometry: unit-length rows, centred, on their top two principal axes. Colours and shapes are true topics (function words: the, a, some, in, near, to). Click a word in the map or in the list to pin it and see its nearest neighbours by cosine at rank k; click it again or empty space to unpin. Drag rank k and the window: at k = 2 the map is crowded, around k = 10 topics and roles separate, at large k noise returns. With one-hot, every pair of words is at distance √2 with cosine 0, so the neighbour list is a tie and no plane can show the geometry (drawn on a circle)."
+        caption="The corpus: generated sentences about animals, food, vehicles, colours and places, all built from the same frames ('the cat chases the mouse', 'some buses stop near the market', 'the painter paints the wall red'); or the pets sentences, or your own text (one document per line). Each representation turns the corpus into a matrix whose rows are the items (words, or documents for n-grams and shingles). The map shows the items' rank-k vectors (the truncated SVD, U_k Σ_k) by their cosine geometry: unit-length rows, centred, on their top two principal axes. Colours and shapes are true topics (function words: the, a, some, in, near, to). Labels that would overlap are hidden, the most frequent words kept; hover a point to read its word. Click a word in the map or in the list to pin it and see its nearest neighbours by cosine at rank k; click it again, empty space or press Escape to unpin. Drag rank k and the window: at k = 2 the map is crowded, around k = 10 topics and roles separate, at large k noise returns. With one-hot, every pair of words is at distance √2 with cosine 0, so the neighbour list is a tie and no plane can show the geometry (drawn on a circle)."
       >
         {!model || !embedded ? (
           <div className="text-sm text-muted-foreground">
@@ -384,17 +386,15 @@ export function RepresentationsShowcase() {
                       group={model.groups.slice(0, kept)}
                       groupNames={model.groupNames}
                       thin={kept > 100}
+                      labels={shownIdx.map((i) => (i === pinnedIndex ? null : label(i)))}
                     />
-                    <WordLabels x={embedded.x} y={embedded.y} labels={shownIdx.map(label)} />
                     {strong.length > 0 && (
-                      <Points name="pinned" x={[embedded.x[pinnedIndex]]} y={[embedded.y[pinnedIndex]]} emphasis live />
-                    )}
-                    {strong.length > 0 && (
-                      <WordLabels
+                      <Points
+                        name="pinned"
                         x={[embedded.x[pinnedIndex]]}
                         y={[embedded.y[pinnedIndex]]}
                         labels={[label(pinnedIndex)]}
-                        strong
+                        emphasis
                         live
                       />
                     )}

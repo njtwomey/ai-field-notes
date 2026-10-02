@@ -1,6 +1,6 @@
 /** A value grid drawn as one cached canvas image (the heatmap), and contour lines of a field. */
 import { categorical, chrome, interpolateColors, mute, scaleStops, type Mode } from '@lab/design/palette'
-import { contourSeries } from '../../contours'
+import { argmaxMargins, contourSeries } from '../../contours'
 import { formatNumber } from '../../format'
 import { BAR, colorBarTicks } from '../../scale-bar'
 import { ScaleBar } from '../../ScaleBar'
@@ -36,6 +36,45 @@ export type RasterProps = CommonProps & {
   scaleTicks?: readonly number[]
   /** The value's name in tooltips, readouts and over the colour bar. */
   valueLabel?: string
+  /**
+   * The decision boundary in ink: for a categorical raster the argmax boundaries between classes; for a numeric field
+   * its contour at this level (`true`: 0.5 for a probability field within [0, 1], 0 for a diverging one, else the
+   * middle of the colour range).
+   */
+  boundary?: boolean | number
+}
+
+/** The boundary's contour inputs, per grid (a zoom rebuilds the layer but not the field). */
+const boundaries = new WeakMap<object, { key: string; fields: Grid[]; level: number }>()
+
+function boundaryFields(p: RasterProps, lo: number, hi: number): { fields: Grid[]; level: number } | null {
+  if (p.boundary === undefined || p.boundary === false) return null
+  const categorical = p.scale === 'categorical'
+  const level = categorical
+    ? 0
+    : typeof p.boundary === 'number'
+      ? p.boundary
+      : lo >= 0 && hi <= 1
+        ? 0.5
+        : p.scale === 'diverging'
+          ? 0
+          : (lo + hi) / 2
+  const key = `${categorical}|${level}`
+  const hit = boundaries.get(p.z)
+  if (hit?.key === key) return hit
+  let fields: Grid[] = [p.z]
+  if (categorical) {
+    // One indicator field per class present; the argmax margins' zero contours are the boundaries between regions.
+    const classes = [...new Set(p.z.flatMap((row) => row.filter((v) => Number.isFinite(v) && v >= 0)))].sort(
+      (a, b) => a - b,
+    )
+    const indicators = classes.map((c) => p.z.map((row) => row.map((v) => (v === c ? 1 : 0))))
+    const margins = indicators.length > 1 ? argmaxMargins(indicators) : []
+    fields = margins.length === 2 ? margins.slice(0, 1) : margins
+  }
+  const out = { key, fields, level }
+  boundaries.set(p.z, out)
+  return out
 }
 
 const step = (v: ArrayLike<number>) => (v.length > 1 ? v[1] - v[0] : 1)
@@ -222,8 +261,20 @@ export const Raster = defineLayer<RasterProps>({
     const { ticks, room } = colorBar(p, lo, hi)
     const showBar = room > 0
     const stops = scaleStops(scale === 'diverging' ? 'diverging' : 'sequential', ctx.mode)
+    const boundary = boundaryFields(p, lo, hi)
+    const xs = boundary ? Array.from(p.x) : []
+    const ys = boundary ? Array.from(p.y) : []
     return {
       series: [
+        ...(boundary
+          ? boundary.fields.flatMap((f, k) =>
+              contourSeries(xs, ys, f, [boundary.level], ctx.mode, {
+                id: `${ctx.id}:boundary${k}`,
+                labels: false,
+                width: 1.5,
+              }),
+            )
+          : []),
         {
           id: `${ctx.id}:image`,
           name: '__raster',

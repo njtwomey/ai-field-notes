@@ -21,6 +21,7 @@ import { squaredDistances } from '../neighbourhoods'
 import { mat, matrix, square, values, vec } from '../util'
 import { defineModel } from 'aifn/learning/estimators'
 import { bool, int, oneOf, space } from 'aifn/foundation/space'
+import { ShapeError } from 'aifn/foundation/errors'
 
 // ── PCA ──────────────────────────────────────────────────────────────────────────────────────────────────────────
 
@@ -86,7 +87,7 @@ export function pca(params: { components?: number; whiten?: boolean } = {}): Est
         whiten,
         transform: (q: Tensor) => {
           const { n: m, d: dq, v: qv } = matrix(q, 'pca.transform')
-          if (dq !== d) throw new Error(`pca: fitted on ${d} features, given ${dq}`)
+          if (dq !== d) throw new ShapeError('pca', `pca: fitted on ${d} features, given ${dq}`)
           const out = new Float64Array(m * r)
           for (let i = 0; i < m; i++) {
             for (let c = 0; c < r; c++) {
@@ -99,7 +100,7 @@ export function pca(params: { components?: number; whiten?: boolean } = {}): Est
         },
         inverseTransform: (z: Tensor) => {
           const { n: m, d: rz, v: zv } = matrix(z, 'pca.inverseTransform')
-          if (rz !== r) throw new Error(`pca: expected ${r} scores per row, given ${rz}`)
+          if (rz !== r) throw new ShapeError('pca', `pca: expected ${r} scores per row, given ${rz}`)
           const out = new Float64Array(m * d)
           for (let i = 0; i < m; i++) {
             for (let j = 0; j < d; j++) {
@@ -173,7 +174,7 @@ export function kernelPca(
         embedding: mat(Y, n, r),
         transform: (q: Tensor) => {
           const { n: m, d: dq } = matrix(q, 'kernelPca.transform')
-          if (dq !== d) throw new Error(`kernelPca: fitted on ${d} features, given ${dq}`)
+          if (dq !== d) throw new ShapeError('kernelPca', `kernelPca: fitted on ${d} features, given ${dq}`)
           const Kq = values(gram(kernel, q, x))
           const out = new Float64Array(m * r)
           for (let i = 0; i < m; i++) {

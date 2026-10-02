@@ -6,6 +6,7 @@
 import type { Model } from 'aifn/foundation/contracts'
 import { dense, fromData, type Tensor } from 'aifn/foundation/tensor'
 import { matrixShape, type Estimator, type FitOptions, type Transforms } from 'aifn/learning/estimators'
+import { ShapeError } from 'aifn/foundation/errors'
 
 /** A fitted transform (a model): its fitted state as public fields, `transform`, and `inverseTransform` where one exists. */
 export interface FittedTransform<X = Tensor, Z = Tensor> extends Model, Transforms<X, Z> {
@@ -48,7 +49,7 @@ export function matrix(x: Tensor, where: string): { n: number; d: number; v: Flo
 
 /** Check that a transform input has the fitted number of columns. */
 export function checkColumns(d: number, fitted: number, where: string): void {
-  if (d !== fitted) throw new Error(`${where}: fitted on ${fitted} columns, given ${d}`)
+  if (d !== fitted) throw new ShapeError(where, `${where}: fitted on ${fitted} columns, given ${d}`)
 }
 
 /** Apply f(value, column) to every element of an [n, d] matrix. */

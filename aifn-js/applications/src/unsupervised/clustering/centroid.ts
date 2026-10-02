@@ -3,7 +3,7 @@
  *
  * - `kmeansSteps`, `kmeans`: Lloyd's algorithm (Lloyd, 1957/1982) with k-means++ seeding (Arthur and Vassilvitskii,
  *   2007) and restarts, as scikit-learn's `KMeans(algorithm='lloyd')`.
- * - `kmeansPlusPlus`: the seeding with every pick's D² probabilities exposed.
+ * - k-means++ seeding is `aifn/numerics/neighbours`'s `kmeansPlusPlus`.
  * - `miniBatchKMeansSteps`, `miniBatchKMeans`: Sculley's (2010) mini-batch k-means with per-centre learning rates.
  * - `kMedoidsSteps`, `kMedoids`: PAM, BUILD then SWAP (Kaufman and Rousseeuw, 1990, "Finding Groups in Data", ch. 2).
  */
@@ -11,80 +11,15 @@
 import type { Status } from 'aifn/foundation/contracts'
 import type { Decides, Estimator, FitOptions, Fitted, Scores, Trained, Transforms } from 'aifn/learning/estimators'
 import type { Dataset } from 'aifn/learning/estimators'
-import { type Stream, child, integers, stream, uniform } from 'aifn/foundation/random'
+import { child, integers, stream } from 'aifn/foundation/random'
 import { pairwiseDistances, squaredDistances } from 'aifn/numerics/linalg'
+import { assignNearest, kmeansPlusPlus, lloydUpdate } from 'aifn/numerics/neighbours'
 import { fromData, type Tensor } from 'aifn/foundation/tensor'
 import { trace, type Algorithm, type Trace } from 'aifn/foundation/trace'
-import { ints, mat, matrix, nearest, sq, values, vec } from './util'
+import { ints, mat, matrix, nearest, values, vec } from './util'
 import { defineModel } from 'aifn/learning/estimators'
 import { int, oneOf, real, space } from 'aifn/foundation/space'
-
-// ── k-means++ ────────────────────────────────────────────────────────────────────────────────────────────────────
-
-/** The result of k-means++ seeding. */
-export interface KMeansPlusPlus {
-  /** The chosen rows, in the order picked. */
-  indices: Tensor
-  /** Their coordinates [k, d]. */
-  centroids: Tensor
-  /** Pick j's sampling probabilities over the rows [k, n]: uniform for the first, D(x)² / Σ D² after. */
-  probabilities: Tensor
-}
-
-/**
- * k-means++ seeding (Arthur and Vassilvitskii, 2007): the first centre is a uniform row; each next centre is row x with
- * probability D(x)² / Σ D², D the distance to the nearest centre so far. With `trials` > 1 each pick draws that many
- * candidates and keeps the one that lowers the potential most (scikit-learn's greedy variant uses 2 + ⌊log k⌋).
- * Pick j draws from `child(s, 'pick', j)`.
- */
-export function kmeansPlusPlus(s: Stream, x: Tensor, k: number, params: { trials?: number } = {}): KMeansPlusPlus {
-  const { n, d, v } = matrix(x, 'kmeansPlusPlus')
-  if (!(k >= 1 && k <= n)) throw new Error(`kmeansPlusPlus: k must lie in 1 … ${n}`)
-  const trials = params.trials ?? 1
-  const indices: number[] = []
-  const probs = new Float64Array(k * n)
-  const D2 = new Float64Array(n).fill(Infinity)
-  const draw = (sub: Stream, weights: Float64Array, total: number): number => {
-    let u = uniform(sub) * total
-    for (let i = 0; i < n; i++) {
-      u -= weights[i]
-      if (u < 0) return i
-    }
-    for (let i = n - 1; i >= 0; i--) if (weights[i] > 0) return i
-    return n - 1
-  }
-  for (let j = 0; j < k; j++) {
-    const sub = child(s, 'pick', j)
-    let pick: number
-    if (j === 0) {
-      probs.fill(1 / n, 0, n)
-      pick = integers(sub, n)
-    } else {
-      let total = 0
-      for (let i = 0; i < n; i++) total += D2[i]
-      for (let i = 0; i < n; i++) probs[j * n + i] = total > 0 ? D2[i] / total : 1 / n
-      if (total === 0) pick = integers(sub, n)
-      else {
-        pick = draw(sub, D2, total)
-        let bestPotential = Infinity
-        for (let t = 0; t < trials; t++) {
-          const c = t === 0 ? pick : draw(sub, D2, total)
-          let potential = 0
-          for (let i = 0; i < n; i++) potential += Math.min(D2[i], sq(v, i, v, c, d))
-          if (potential < bestPotential) {
-            bestPotential = potential
-            pick = c
-          }
-        }
-      }
-    }
-    indices.push(pick)
-    for (let i = 0; i < n; i++) D2[i] = Math.min(D2[i], sq(v, i, v, pick, d))
-  }
-  const centroids = new Float64Array(k * d)
-  indices.forEach((i, j) => centroids.set(v.subarray(i * d, (i + 1) * d), j * d))
-  return { indices: ints(indices), centroids: mat(centroids, k, d), probabilities: mat(probs, k, n) }
-}
+import { ShapeError } from 'aifn/foundation/errors'
 
 // ── Lloyd ────────────────────────────────────────────────────────────────────────────────────────────────────────
 
@@ -114,17 +49,10 @@ export interface KMeansInit {
   seeding?: 'k-means++' | 'random'
 }
 
+/** The nearest centroid of every row (core `assignNearest`, ties to the lower index) as plain arrays. */
 function assign(v: Float64Array, n: number, c: Float64Array, k: number, d: number) {
-  const labels = new Int32Array(n)
-  const sizes = new Float64Array(k)
-  let inertia = 0
-  for (let i = 0; i < n; i++) {
-    const [j, dist] = nearest(v, i, c, k, d)
-    labels[i] = j
-    sizes[j]++
-    inertia += dist
-  }
-  return { labels, sizes, inertia }
+  const a = assignNearest(mat(v, n, d), mat(c, k, d))
+  return { labels: Int32Array.from(values(a.labels)), sizes: Float64Array.from(values(a.sizes)), inertia: a.inertia }
 }
 
 /**
@@ -142,7 +70,7 @@ export function kmeansSteps(x: Tensor, params: { k: number; tolerance?: number }
       let c: Float64Array
       if (centroids) {
         if (centroids.shape[0] !== k || centroids.shape[1] !== d)
-          throw new Error(`kmeansSteps: centroids must be [${k}, ${d}]`)
+          throw new ShapeError('kmeansSteps', `kmeansSteps: centroids must be [${k}, ${d}]`)
         c = Float64Array.from(values(centroids))
       } else {
         const st = s
@@ -167,24 +95,11 @@ export function kmeansSteps(x: Tensor, params: { k: number; tolerance?: number }
       }
     },
     step: (state) => {
-      const old = values(state.centroids)
-      const labels = state.labels.data as Int32Array
-      const sums = new Float64Array(k * d)
-      const counts = new Float64Array(k)
-      for (let i = 0; i < n; i++) {
-        counts[labels[i]]++
-        for (let j = 0; j < d; j++) sums[labels[i] * d + j] += v[i * d + j]
-      }
-      const c = new Float64Array(k * d)
-      const empty: number[] = []
-      let shift = 0
-      for (let j = 0; j < k; j++) {
-        if (counts[j] === 0) empty.push(j)
-        for (let t = 0; t < d; t++) {
-          c[j * d + t] = counts[j] ? sums[j * d + t] / counts[j] : old[j * d + t]
-          shift += (c[j * d + t] - old[j * d + t]) ** 2
-        }
-      }
+      const labels = values(state.labels)
+      // The update step is core's `lloydUpdate`: each centroid to the mean of its rows, an empty one kept.
+      const u = lloydUpdate(x, state.labels, state.centroids)
+      const c = Float64Array.from(values(u.centroids))
+      const { empty, shift } = u
       const a = assign(v, n, c, k, d)
       let same = true
       for (let i = 0; i < n; i++) if (a.labels[i] !== labels[i]) same = false
@@ -222,7 +137,7 @@ function centroidModel(centroids: Tensor, d: number) {
   const k = centroids.shape[0]
   const sqd = (q: Tensor) => {
     const { n: m, v, d: dq } = matrix(q, 'kmeans')
-    if (dq !== d) throw new Error(`kmeans: fitted on ${d} features, given ${dq}`)
+    if (dq !== d) throw new ShapeError('kmeans', `kmeans: fitted on ${d} features, given ${dq}`)
     const out = values(squaredDistances(mat(v, m, d), centroids))
     return { out, m }
   }
@@ -454,7 +369,7 @@ export function kMedoidsSteps(
   params: { k: number },
 ): Algorithm<{ medoids?: readonly number[] }, KMedoidsState> {
   const [n, n2] = distances.shape
-  if (n !== n2) throw new Error('kMedoidsSteps: distances must be [n, n]')
+  if (n !== n2) throw new ShapeError('kMedoidsSteps', 'kMedoidsSteps: distances must be [n, n]')
   const D = values(distances)
   const { k } = params
   const make = (medoids: number[], t: number, swap: [number, number] | null, converged: boolean): KMedoidsState => {

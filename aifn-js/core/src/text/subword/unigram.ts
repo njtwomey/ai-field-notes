@@ -363,7 +363,7 @@ function wordLattice(model: UnigramLmModel, word: string): WordLattice {
   const edges = lattice(chars, c.index, c.L)
   const pieces = [...model.pieces]
   const finite = Array.from(c.lp).filter(Number.isFinite)
-  const floor = (finite.length > 0 ? Math.min(...finite) : 0) - 10
+  const floor = (finite.length > 0 ? finite.reduce((m, v) => Math.min(m, v), Infinity) : 0) - 10
   // Pieces of probability 0 stay in the lattice at the floor, so a word never loses every segmentation.
   const lp = Array.from(c.lp, (x) => (Number.isFinite(x) ? x : floor))
   // A character no piece starts with gets an unknown edge, scored below every piece (SentencePiece's unk penalty).

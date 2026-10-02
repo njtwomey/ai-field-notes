@@ -9,6 +9,7 @@ import { cholesky, inverse, logDet } from 'aifn/numerics/linalg'
 import { categorical, normals, type Stream, child } from 'aifn/foundation/random'
 import { fromData, fromRows, toFlat, toRows, type Tensor } from 'aifn/foundation/tensor'
 import type { NoisePredictor } from './predictor'
+import { DomainError, ShapeError } from 'aifn/foundation/errors'
 
 /** A Gaussian mixture in d dimensions. */
 export type GaussianMixture = {
@@ -29,7 +30,8 @@ export function gaussianMixtureData(
   spread: readonly (number | readonly number[] | readonly (readonly number[])[])[],
 ): GaussianMixture {
   const total = weights.reduce((a, b) => a + b, 0)
-  if (!(total > 0)) throw new RangeError('gaussianMixtureData: weights must have a positive sum')
+  if (!(total > 0))
+    throw new DomainError('gaussianMixtureData', 'gaussianMixtureData: weights must have a positive sum')
   const d = means[0].length
   const covariances = spread.map((sp) => {
     if (typeof sp === 'number')
@@ -50,7 +52,7 @@ export function sampleMixture(s: Stream, mixture: GaussianMixture, n: number): T
   const z = toFlat(normals(child(s, 'noise'), [n, d]))
   const chol = mixture.covariances.map((c) => {
     const f = cholesky(fromRows(c.map((r) => [...r])), { jitter: false })
-    if (f.failed) throw new RangeError('sampleMixture: a covariance is not positive definite')
+    if (f.failed) throw new DomainError('sampleMixture', 'sampleMixture: a covariance is not positive definite')
     return toRows(f.L)
   })
   const out = new Float64Array(n * d)
@@ -82,7 +84,7 @@ function noisedComponents(mixture: GaussianMixture, m: number, s: number) {
 /** Per-point log densities of each noised component and their gradients, reduced to log p and ∇ log p. */
 function evaluate(mixture: GaussianMixture, x: Tensor, m: number, s: number, withScore: boolean) {
   const d = mixture.dimension
-  if (x.shape.length !== 2 || x.shape[1] !== d) throw new Error(`mixture: points need shape [n, ${d}]`)
+  if (x.shape.length !== 2 || x.shape[1] !== d) throw new ShapeError('mixture', `mixture: points need shape [n, ${d}]`)
   const n = x.shape[0]
   const xs = toFlat(x)
   const comps = noisedComponents(mixture, m, s)

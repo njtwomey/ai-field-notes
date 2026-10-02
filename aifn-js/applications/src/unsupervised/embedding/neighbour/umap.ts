@@ -15,13 +15,14 @@ import type { Dataset, Estimator, FitOptions, Trained } from 'aifn/learning/esti
 import { eigh, eigsh } from 'aifn/numerics/linalg'
 import type { Status } from 'aifn/foundation/contracts'
 import { child, integers, stream, uniform, type Stream } from 'aifn/foundation/random'
-import { fromData, type Tensor } from 'aifn/foundation/tensor'
+import { fromData, toFlat, type Tensor } from 'aifn/foundation/tensor'
 import { trace, type Algorithm } from 'aifn/foundation/trace'
+import { nearestNeighbourDescent } from 'aifn/numerics/neighbours'
 import { squaredDistances } from '../neighbourhoods'
-import { nearestNeighbourDescent } from './nn-descent'
 import { mat, matrix, values, vec } from '../util'
 import { defineModel } from 'aifn/learning/estimators'
 import { int, oneOf, real, space } from 'aifn/foundation/space'
+import { DomainError } from 'aifn/foundation/errors'
 
 /** The fuzzy graph of the data: per-point ρ and σ, and the symmetric membership strengths. */
 export interface FuzzyGraph {
@@ -70,14 +71,16 @@ function neighbourLists(v: Float64Array, n: number, d: number, k: number, option
     }
     return { nb, dist }
   }
-  const found = nearestNeighbourDescent(v, n, d, k - 1, {
+  const found = nearestNeighbourDescent(fromData(v, [n, d]), k - 1, {
     stream: options.stream ?? stream('nearest-neighbour-descent'),
   })
+  const idx = found.indices.data as Int32Array
+  const dst = toFlat(found.distances)
   for (let i = 0; i < n; i++) {
     nb[i * k] = i
     for (let r = 1; r < k; r++) {
-      nb[i * k + r] = found.indices[i * (k - 1) + r - 1]
-      dist[i * k + r] = found.distances[i * (k - 1) + r - 1]
+      nb[i * k + r] = idx[i * (k - 1) + r - 1]
+      dist[i * k + r] = dst[i * (k - 1) + r - 1]
     }
   }
   return { nb, dist }
@@ -219,7 +222,8 @@ export function spectralLayout(
   const n = graph.rho.shape[0]
   const { from, to, weight } = graph.edges
   const k = dims + 1
-  if (!(k < n)) throw new Error(`spectral layout: need more than ${k} rows for ${dims} dimensions`)
+  if (!(k < n))
+    throw new DomainError('spectral layout', `spectral layout: need more than ${k} rows for ${dims} dimensions`)
   const deg = new Float64Array(n)
   for (let e = 0; e < from.length; e++) {
     deg[from[e]] += weight[e]

@@ -171,6 +171,7 @@ export {
   type DcgOptions,
   type Gain,
   type RankingInput,
+  type AveragePrecisionOptions,
   type RecallOptions,
 } from './ranking'
 export {

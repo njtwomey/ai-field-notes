@@ -11,6 +11,7 @@ import type { Scalar, Signal, Size } from 'aifn/foundation/contracts'
 import { fft, ifft } from 'aifn/foundation/fourier'
 import { solve } from 'aifn/numerics/linalg'
 import { readSamples, signal, type SignalInput } from '../signal'
+import { DomainError } from 'aifn/foundation/errors'
 
 /** A `Signal` on the input's time axis holding `values`. */
 function like(input: { fs: Scalar; t0: Scalar; unit?: string }, values: Float64Array): Signal {
@@ -22,7 +23,8 @@ function like(input: { fs: Scalar; t0: Scalar; unit?: string }, values: Float64A
 }
 
 const oddSize = (k: Size, where: string) => {
-  if (!(Number.isInteger(k) && k >= 1 && k % 2 === 1)) throw new RangeError(`${where}: the window length must be odd`)
+  if (!(Number.isInteger(k) && k >= 1 && k % 2 === 1))
+    throw new DomainError(where, `${where}: the window length must be odd`)
 }
 
 // ── Savitzky–Golay ────────────────────────────────────────────────────────────────────────────────────────────────
@@ -39,7 +41,8 @@ export function savgolCoeffs(
   { deriv = 0, delta = 1 }: { deriv?: Size; delta?: Scalar } = {},
 ): Tensor {
   oddSize(window, 'savgolCoeffs')
-  if (!(polyorder >= 0 && polyorder < window)) throw new RangeError('savgolCoeffs: polyorder must be below the window')
+  if (!(polyorder >= 0 && polyorder < window))
+    throw new DomainError('savgolCoeffs', 'savgolCoeffs: polyorder must be below the window')
   const half = (window - 1) / 2
   return fromData(polyWeights(window, polyorder, deriv, half, delta), [window])
 }
@@ -99,7 +102,8 @@ export function savgolFilter(x: SignalInput, window: Size, polyorder: Size, opti
   const { deriv = 0, mode = 'interp' } = options
   const delta = options.delta ?? 1 / input.fs
   oddSize(window, 'savgolFilter')
-  if (mode === 'interp' && window > n) throw new RangeError('savgolFilter: interp mode needs window ≤ the length')
+  if (mode === 'interp' && window > n)
+    throw new DomainError('savgolFilter', 'savgolFilter: interp mode needs window ≤ the length')
   const half = (window - 1) / 2
   const w = polyWeights(window, polyorder, deriv, half, delta)
   const at = (j: number): number => {

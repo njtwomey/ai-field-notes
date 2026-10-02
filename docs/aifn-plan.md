@@ -71,22 +71,23 @@ module may import only from strictly lower tiers. `scripts/aifn-layers.ts` enfor
 
 <!-- Generated from aifn-js/modules.json by `node scripts/aifn-layers.ts --write`; do not edit. -->
 
-| Tier | Family      | Modules (local tiers, low to high; * gap)                                                                                      | Shared             |
-| ---- | ----------- | ------------------------------------------------------------------------------------------------------------------------------ | ------------------ |
-| 0    | foundation  | contracts, errors · registry · tensor · pytree, fourier · convolution, autodiff, random · space, trace                         |                    |
-| 1    | numerics    | special · linalg · polynomial, quadrature, roots, implicit, geometry · interpolate                                             |                    |
-| 2    | graph       | traversal, shortest-paths, spanning-trees, structures, matrices · flows, structured, propagation                               | graph, tree, heap  |
-| 3    | probability | stats, bijectors, samplers · distributions · likelihoods, information, tests                                                   |                    |
-| 3    | optim       | line-search · first-order, second-order, proximal, derivative-free, programming · minimize                                     | options, schedules |
-| 3    | systems     | (one module)                                                                                                                   |                    |
-| 4    | inference   | model · exact, message-passing, expectation-propagation, variational, stochastic, filtering · engines                          |                    |
-| 4    | dynamics    | ode, sde · fields, control                                                                                                     |                    |
-| 4    | signal      | windows · filters, spectral, time-frequency, wavelets, statistical, cepstrum · multirate, decompositions                       | signal             |
-| 4    | transport   | (one module)                                                                                                                   |                    |
-| 4    | text        | normalise, tokenise, stem, hyphenation · vocabulary · subword, features, cooccurrence · pipeline, representations · statistics | aligned            |
-| 5    | learning    | estimators, kernels, calibration · losses, metrics, compose, validate                                                          |                    |
-| 6    | nn          | functional, init, decoding · layers · attention, training, experts · sequence                                                  |                    |
-| 7    | interpreter | (one module)                                                                                                                   |                    |
+| Tier | Family      | Modules (local tiers, low to high; * gap)                                                                                          | Shared             |
+| ---- | ----------- | ---------------------------------------------------------------------------------------------------------------------------------- | ------------------ |
+| 0    | foundation  | contracts, errors · registry · tensor · pytree, fourier · convolution, autodiff, random · space, trace                             |                    |
+| 1    | numerics    | special · linalg · polynomial, quadrature, roots, implicit, geometry, neighbours, robust, factorisation · interpolate              |                    |
+| 2    | graph       | traversal, shortest-paths, spanning-trees, structures, matrices · flows, structured, propagation                                   | graph, tree, heap  |
+| 3    | probability | stats, bijectors, samplers · distributions · likelihoods, information, tests, extremes, privacy · markov                           |                    |
+| 3    | optim       | line-search, search · first-order, second-order, proximal, derivative-free, programming, online · minimize                         | options, schedules |
+| 3    | systems     | (one module)                                                                                                                       |                    |
+| 4    | inference   | model · exact, message-passing, expectation-propagation, variational, stochastic, filtering · engines                              |                    |
+| 4    | dynamics    | ode, sde · fields, control                                                                                                         |                    |
+| 4    | signal      | windows · filters, spectral, time-frequency, wavelets, statistical, cepstrum, similarity, image · multirate, audio, decompositions | signal             |
+| 4    | transport   | (one module)                                                                                                                       |                    |
+| 4    | text        | normalise, tokenise, stem, hyphenation · vocabulary · subword, features, cooccurrence · pipeline, representations · statistics     | aligned            |
+| 4    | logic       | terms · resolution, induction                                                                                                      |                    |
+| 5    | learning    | estimators, kernels, conformal, subgroups · losses, metrics, compose, validate · calibration, off-policy, explain                  |                    |
+| 6    | nn          | functional, init, decoding · layers, quantise · attention, training, experts, graph · sequence                                     |                    |
+| 7    | interpreter | (one module)                                                                                                                       |                    |
 
 <!-- aifn-layers:end -->
 
@@ -527,7 +528,8 @@ A standalone app for developing and exploring aifn, separate from the site for n
 ## 13. Testing
 
 - vitest in `aifn-js/core/test` and `aifn-js/applications/test`, mirroring the source tree, run by `make test` (and
-  so `make check`). Golden values come from `make fixtures` (Python scripts in each package's `test/fixtures`).
+  so `make check`). Golden values come from `make fixtures`: generators in each package's `test/fixtures/gen`, run by
+  one runner, `aifn-js/core/test/fixtures/generate.py`; `make fixtures-check` regenerates in memory and reports drift.
 - Python generates the test cases. An aifn-py command (`uv run aifn fixtures`) writes JSON fixtures from
   numpy, scipy, scikit-learn, statsmodels-style computations and torch, covering most modules: tensor operations and
   linear algebra; special functions and distributions; information-theoretic quantities (`scipy.stats.entropy` and

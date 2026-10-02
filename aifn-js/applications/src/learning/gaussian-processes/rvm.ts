@@ -40,6 +40,7 @@ import {
 import { Normal, type Univariate } from 'aifn/probability/distributions'
 import { bool, int, oneOf, real, space } from 'aifn/foundation/space'
 import { definer, type AlgorithmInfo } from 'aifn/foundation/registry'
+import { ShapeError } from 'aifn/foundation/errors'
 
 const LOG_2PI = Math.log(2 * Math.PI)
 
@@ -72,7 +73,7 @@ export function rvmProblem(kernel: Kernel, x: Tensor, y: Tensor, options: { bias
   const X = asRows(x) as Tensor
   const Y = y.shape.length === 2 ? (reshape(y, [y.shape[0]]) as Tensor) : y
   const n = X.shape[0]
-  if (Y.shape[0] !== n) throw new RangeError(`rvm: ${n} inputs but ${Y.shape[0]} targets`)
+  if (Y.shape[0] !== n) throw new ShapeError('rvm', `rvm: ${n} inputs but ${Y.shape[0]} targets`)
   const size = n + (bias ? 1 : 0)
   const basis = (xs: Tensor) => {
     const S = asRows(xs) as Tensor

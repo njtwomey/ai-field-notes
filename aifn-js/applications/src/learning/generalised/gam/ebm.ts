@@ -25,6 +25,7 @@ import { sigmoid } from 'aifn/numerics/special'
 import { trace, type Algorithm, type Trace } from 'aifn/foundation/trace'
 import { defineModel } from 'aifn/learning/estimators'
 import { int, oneOf, real, space } from 'aifn/foundation/space'
+import { ShapeError } from 'aifn/foundation/errors'
 
 type F64 = Float64Array
 
@@ -208,7 +209,7 @@ export function explainableBoostingMachine(params: EbmParams = {}): Estimator<Su
       }
       const forward = (x: Tensor) => {
         const [m, cols] = x.shape
-        if (cols !== d) throw new Error(`ebm: fitted on ${d} features, given ${cols}`)
+        if (cols !== d) throw new ShapeError('ebm', `ebm: fitted on ${d} features, given ${cols}`)
         const v = toFlat(x)
         const out = new Float64Array(m).fill(intercept)
         for (let i = 0; i < m; i++)

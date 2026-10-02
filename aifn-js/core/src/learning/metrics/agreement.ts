@@ -6,7 +6,9 @@
  */
 
 import { correlation, kendallTau, spearman } from 'aifn/probability/stats'
+import { expectedCounts, powerDivergence } from 'aifn/probability/tests'
 import { defineMetric, dense, divide, nonEmpty, sameLength, values, type Data, type Rows } from './core'
+import { ShapeError } from 'aifn/foundation/errors'
 
 const agreementInfo = (key: string, name: string, note: string) =>
   ({
@@ -93,7 +95,7 @@ export const fleissKappa = defineMetric(
         sq += v * v
         p[j] += v
       }
-      if (s !== n) throw new Error(`metrics: fleissKappa: item ${i} has ${s} ratings, expected ${n}`)
+      if (s !== n) throw new ShapeError('metrics', `metrics: fleissKappa: item ${i} has ${s} ratings, expected ${n}`)
       pBar += (sq - n) / (n * (n - 1))
     }
     pBar /= N
@@ -225,25 +227,13 @@ export const intraclassCorrelation = defineMetric(
 
 // ── Nominal association ──────────────────────────────────────────────────────────────────────────────────────────────
 
-/** Pearson's χ² = Σ (nᵢⱼ − eᵢⱼ)²/eᵢⱼ of a contingency table, with eᵢⱼ = nᵢ₊n₊ⱼ/n, and the table's shape. */
+/**
+ * Pearson's χ² = Σ (nᵢⱼ − eᵢⱼ)²/eᵢⱼ of a contingency table, with eᵢⱼ = nᵢ₊n₊ⱼ/n, and the table's shape: the
+ * expected counts and the power divergence of `aifn/probability/tests` (one definition for the tests and the metrics).
+ */
 export function chiSquareStatistic(table: Rows): { chiSquare: number; n: number; rows: number; cols: number } {
-  const { rows, cols, data } = dense(table, 'chiSquareStatistic')
-  const r = new Float64Array(rows)
-  const c = new Float64Array(cols)
-  let n = 0
-  for (let i = 0; i < rows; i++)
-    for (let j = 0; j < cols; j++) {
-      r[i] += data[i * cols + j]
-      c[j] += data[i * cols + j]
-      n += data[i * cols + j]
-    }
-  let chi = 0
-  for (let i = 0; i < rows; i++)
-    for (let j = 0; j < cols; j++) {
-      const e = (r[i] * c[j]) / n
-      chi += (data[i * cols + j] - e) ** 2 / e
-    }
-  return { chiSquare: chi, n, rows, cols }
+  const t = expectedCounts(table)
+  return { chiSquare: powerDivergence(t.observed, t.expected, 1), n: t.total, rows: t.rows, cols: t.cols }
 }
 
 const associationInfo = (key: string, name: string) =>

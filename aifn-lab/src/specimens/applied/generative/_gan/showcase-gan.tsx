@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react'
 import type { GanCheckpoint, GanRun, GanRunOptions } from 'aifn-applied/generative/gan'
 import { Player } from '@lab/controls'
 import { Figure } from '@lab/layout'
-import { call, choice, float, int, row, useFigureState, type Task } from '@lab/state'
+import { call, choice, float, int, row, toggle, useFigureState, type Task } from '@lab/state'
 import { Button } from '@lab/ui/button'
 import { formatValue, TrainControls, useTrainedRun } from '@lab/views'
 import { Curve, Handle, Plot, Plots, Points, Raster, Readout, useAxis, Vectors, type Vector } from '@lab/viz'
@@ -88,7 +88,7 @@ export function GanShowcase() {
       ),
       game: choice(GAMES, 'non-saturating', { label: 'game' }),
       criticSteps: int(1, { label: 'discriminator steps per generator step', ge: 1, le: 10, suggestions: [1, 2, 5] }),
-      hidden: choice([32, 64, 128], 64, { label: 'hidden width (both nets, 2 layers)' }),
+      hidden: int(64, { ge: 4, le: 256, suggestions: [32, 64, 128], label: 'hidden width (both nets, 2 layers)' }),
     }),
     optim: row('2 · optimisers', {
       generator: choice(OPTIMISERS, 'adam', { label: 'generator' }),
@@ -110,9 +110,10 @@ export function GanShowcase() {
     }),
     run: row('3 · training run', {
       steps: int(1500, { ge: 1, suggestions: [500, 1000, 1500, 2000, 3000], label: 'generator steps' }),
-      batch: choice([32, 64, 128], 64, { label: 'batch' }),
+      batch: int(64, { ge: 1, suggestions: [32, 64, 128], label: 'batch' }),
       seed: int(4, { label: 'seed', ge: 0, le: 9999 }),
     }),
+    show: row('4 · show', { boundary: toggle(true, 'decision boundary (D = ½, critic = 0)') }),
   })
   const { setup, optim, run: runRow } = state
   const settings: Settings = {
@@ -258,11 +259,11 @@ export function GanShowcase() {
           and non-saturating games or the critic&apos;s score, with arrows where the generator&apos;s loss pushes 64 of
           the points (one scale for the whole run, so vanishing gradients show as short arrows). Right: the optimal
           discriminator D* = p_data/(p_data + p_g), with p_data exact and p_g a Gaussian KDE of the generated points
-          (probability games only). Bottom: both losses, and the share of modes hit and of high-quality points (log
-          p_data above its 1% quantile on the data). Presets: against a discriminator with five steps per generator
-          step, the minimax generator&apos;s push vanishes and it stalls off the data, while the non-saturating loss
-          finds the modes; WGAN-GP on two moons first collapses onto one moon. Play the checkpoints, or drag the step
-          marker on either bottom chart.
+          (probability games only); with the decision boundary on, ink lines mark D = ½ (critic = 0). Bottom: both
+          losses, and the share of modes hit and of high-quality points (log p_data above its 1% quantile on the data).
+          Presets: against a discriminator with five steps per generator step, the minimax generator&apos;s push
+          vanishes and it stalls off the data, while the non-saturating loss finds the modes; WGAN-GP on two moons first
+          collapses onto one moon. Play the checkpoints, or drag the step marker on either bottom chart.
         </>
       }
     >
@@ -286,6 +287,7 @@ export function GanShowcase() {
               range={probability ? [0, 1] : [-scales.critic, scales.critic]}
               valueLabel={probability ? 'D(x)' : 'critic'}
               fillOpacity={0.8}
+              boundary={state.show.boundary ? (probability ? 0.5 : 0) : false}
             />
           )}
           {samples && <Points name="generated" x={samples.x} y={samples.y} slot={0} thin />}
@@ -301,6 +303,7 @@ export function GanShowcase() {
               range={[0, 1]}
               valueLabel="D*(x)"
               fillOpacity={0.8}
+              boundary={state.show.boundary ? 0.5 : false}
             />
           )}
           {samples && optimal && <Points name="generated" x={samples.x} y={samples.y} slot={0} thin />}

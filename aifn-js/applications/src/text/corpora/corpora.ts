@@ -7,6 +7,8 @@
 
 import type { DatasetInfo, DatasetMeta } from 'aifn/foundation/contracts'
 import { child, uniform, type Stream } from 'aifn/foundation/random'
+import { toFlat, type Tensor } from 'aifn/foundation/tensor'
+import { gammaVariate } from 'aifn/probability/samplers'
 import { definer, type Entry } from 'aifn/foundation/registry'
 import { int, oneOf, real, space } from 'aifn/foundation/space'
 import { DomainError } from 'aifn/foundation/errors'
@@ -20,6 +22,16 @@ export interface Corpus {
   readonly labels?: readonly number[]
   /** The true topic of each word the generator can emit, by name (`function` for determiners and prepositions). */
   readonly wordTopics?: Readonly<Record<string, string>>
+  /** The time slice of each document (corpora that change over time only). */
+  readonly times?: readonly number[]
+  /**
+   * The generating topics, where they are known: the vocabulary and each slice's word distribution per topic,
+   * `topicWord[t][k][w]` over `vocabulary`.
+   */
+  readonly topics?: {
+    readonly vocabulary: readonly string[]
+    readonly topicWord: readonly (readonly (readonly number[])[])[]
+  }
 }
 
 const repeat = (word: string, n: number) => Array.from({ length: n }, () => word)
@@ -404,6 +416,150 @@ export function topicCorpus(s: Stream, options: TopicCorpusOptions = {}): Corpus
   }
 }
 
+/** The themes of `driftingTopicCorpus`, each a list of words ordered from the oldest usage to the newest. */
+export const DRIFTING_TOPICS: Readonly<Record<string, readonly string[]>> = {
+  travel: [
+    'horse',
+    'carriage',
+    'coach',
+    'canal',
+    'steamship',
+    'railway',
+    'tram',
+    'bicycle',
+    'motorcar',
+    'airliner',
+    'motorway',
+    'jet',
+  ],
+  messages: [
+    'letter',
+    'courier',
+    'post',
+    'telegraph',
+    'telegram',
+    'wireless',
+    'telephone',
+    'radio',
+    'television',
+    'fax',
+    'email',
+    'internet',
+  ],
+  medicine: [
+    'herbs',
+    'leeches',
+    'bleeding',
+    'tonic',
+    'quinine',
+    'ether',
+    'antiseptic',
+    'aspirin',
+    'insulin',
+    'penicillin',
+    'vaccine',
+    'genome',
+  ],
+  work: [
+    'field',
+    'plough',
+    'loom',
+    'mill',
+    'forge',
+    'factory',
+    'foundry',
+    'assembly',
+    'office',
+    'typewriter',
+    'computer',
+    'software',
+  ],
+}
+
+/** Options of `driftingTopicCorpus`. */
+export interface DriftingTopicCorpusOptions {
+  /** Time slices (default 6) and documents per slice (default 30). */
+  slices?: number
+  documentsPerSlice?: number
+  /** Words per document (default 40) and the Dirichlet concentration of the documents' topic proportions (0.1). */
+  length?: number
+  alpha?: number
+  /** Width of a theme's usage window, in words of its list (default 2.5). */
+  width?: number
+}
+
+/**
+ * Documents whose themes' vocabularies change over time, for dynamic topic models (Blei & Lafferty, 2006): four themes
+ * (travel, messages, medicine, work), each a list of twelve words from old usage to new; in slice t of T a theme's
+ * word distribution is a Gaussian window over its list, centred at position 11·t/(T − 1), so "horse" gives way to
+ * "jet" and "letter" to "email". Each document draws proportions θ ~ Dir(α) over the themes, then each word's theme
+ * and the word. The true topics of every slice are returned with the documents. Document (t, i) depends only on
+ * `child(s, t, i)`.
+ */
+export function driftingTopicCorpus(s: Stream, options: DriftingTopicCorpusOptions = {}): Corpus {
+  const { slices = 6, documentsPerSlice = 30, length = 40, alpha = 0.1, width = 2.5 } = options
+  if (!(Number.isInteger(slices) && slices >= 1 && Number.isInteger(documentsPerSlice) && documentsPerSlice >= 1))
+    throw new DomainError('driftingTopicCorpus', 'driftingTopicCorpus: slices and documentsPerSlice ≥ 1')
+  if (!(Number.isInteger(length) && length >= 1 && alpha > 0 && width > 0))
+    throw new DomainError('driftingTopicCorpus', 'driftingTopicCorpus: length ≥ 1, α > 0 and width > 0')
+  const names = Object.keys(DRIFTING_TOPICS)
+  const vocabulary = names.flatMap((n) => DRIFTING_TOPICS[n])
+  const K = names.length
+  const V = vocabulary.length
+  const topicWord = Array.from({ length: slices }, (_, t) => {
+    const centre = slices > 1 ? (11 * t) / (slices - 1) : 5.5
+    return names.map((n, k) => {
+      const row = new Array<number>(V).fill(0)
+      let z = 0
+      DRIFTING_TOPICS[n].forEach(
+        (_, i) => (z += row[k * 12 + i] = Math.exp(-((i - centre) ** 2) / (2 * width * width))),
+      )
+      return row.map((v) => v / z)
+    })
+  })
+  const documents: string[] = []
+  const labels: number[] = []
+  const times: number[] = []
+  const pick = (weights: readonly number[], u: number) => {
+    let acc = 0
+    for (let i = 0; i < weights.length; i++) if ((acc += weights[i]) > u) return i
+    return weights.length - 1
+  }
+  for (let t = 0; t < slices; t++)
+    for (let i = 0; i < documentsPerSlice; i++) {
+      const r = child(s, t, i)
+      // θ ~ Dir(α) by normalised Gamma draws.
+      const g = toFlat(gammaVariate(child(r, 'theta'), alpha, 1, { shape: [K] }) as Tensor)
+      const total = g.reduce((a, b) => a + b, 0)
+      const theta = Array.from(g, (v) => v / total)
+      const u = uniform(child(r, 'words'), 0, 1, { shape: [2 * length] }).data
+      const words: string[] = []
+      for (let n = 0; n < length; n++) {
+        const k = pick(theta, u[2 * n])
+        words.push(vocabulary[pick(topicWord[t][k], u[2 * n + 1])])
+      }
+      documents.push(words.join(' '))
+      labels.push(theta.indexOf(Math.max(...theta)))
+      times.push(t)
+    }
+  const wordTopics: Record<string, string> = {}
+  names.forEach((n) => DRIFTING_TOPICS[n].forEach((w) => (wordTopics[w] = n)))
+  return {
+    kind: 'corpus',
+    documents,
+    labels,
+    wordTopics,
+    times,
+    topics: { vocabulary, topicWord },
+    meta: {
+      name: 'drifting topic corpus',
+      description: `${slices} time slices of ${documentsPerSlice} documents mixing ${names.join(', ')}, whose words change over time; labelled by each document's main theme.`,
+      task: 'text',
+      labelNames: names,
+    },
+  }
+}
+
 const dataset = definer<DatasetInfo>('dataset', 'text/corpora')
 
 dataset(
@@ -466,7 +622,29 @@ dataset(
   topicCorpus,
 )
 
+dataset(
+  {
+    key: 'driftingTopicCorpus',
+    name: 'Drifting topic corpus',
+    summary: 'Documents over time slices mixing four themes whose words change from old usage to new.',
+    task: 'text',
+    output: 'corpus',
+    knobs: space({
+      slices: int(1, 20, { default: 6 }),
+      documentsPerSlice: int(1, 500, { default: 30 }),
+      length: int(1, 500, { default: 40 }),
+      alpha: real(0.01, 10, { default: 0.1 }),
+      width: real(0.1, 6, { default: 2.5 }),
+    }),
+    truth: true,
+    random: true,
+    notes: ['dynamic-topic-model', 'latent-dirichlet-allocation'],
+    cite: ['blei2006dtm'],
+  },
+  driftingTopicCorpus,
+)
+
 /** The corpus generators, keyed by name. */
-export const corpusDatasets = { namedCorpus, toyCorpus, topicCorpus } as unknown as Readonly<
+export const corpusDatasets = { namedCorpus, toyCorpus, topicCorpus, driftingTopicCorpus } as unknown as Readonly<
   Record<string, Entry<(...args: never[]) => unknown, DatasetInfo>>
 >

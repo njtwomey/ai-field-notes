@@ -13,16 +13,12 @@ import type { DatasetInfo, Size } from 'aifn/foundation/contracts'
 import { child, normal, uniform, type Stream } from 'aifn/foundation/random'
 import { definer } from 'aifn/foundation/registry'
 import { int, real, space } from 'aifn/foundation/space'
+import { logAddExp } from 'aifn/numerics/special'
 import { inverseTruth, type InverseModel, type InverseSolution, type Row } from '../truth'
 import { checkCount, generatorRecipe, matrix, vector, type Dataset } from '../types'
+import { DomainError } from 'aifn/foundation/errors'
 
 const LOG_SQRT_2PI = 0.5 * Math.log(2 * Math.PI)
-
-function logSumExp(a: readonly number[]): number {
-  const m = Math.max(...a)
-  if (m === -Infinity) return -Infinity
-  return m + Math.log(a.reduce((acc, v) => acc + Math.exp(v - m), 0))
-}
 
 /** Bisection for the root of a continuous g on [a, b] with g(a), g(b) of opposite signs (or zero). */
 function bisect(g: (t: number) => number, a: number, b: number): number {
@@ -60,7 +56,7 @@ export interface BishopInverseOptions {
 export function bishopInverse(s: Stream, options: BishopInverseOptions = {}): Dataset {
   const { n = 400, noise = 0.05, amplitude = 0.3 } = options
   checkCount(n, 'bishopInverse')
-  if (!(noise >= 0)) throw new RangeError('bishopInverse: noise must be ≥ 0')
+  if (!(noise >= 0)) throw new DomainError('bishopInverse', 'bishopInverse: noise must be ≥ 0')
   const a = amplitude
   const f = (t: number) => t + a * Math.sin(2 * Math.PI * t)
   const slope = (t: number) => 1 + 2 * Math.PI * a * Math.cos(2 * Math.PI * t)
@@ -104,7 +100,10 @@ export function bishopInverse(s: Stream, options: BishopInverseOptions = {}): Da
           logLikelihood: (x: Row, y: Row) => {
             if (!(y[0] >= 0 && y[0] <= 1)) return -Infinity
             // p(t | x) = N(x; f(t), σ²) / ∫₀¹ N(x; f(u), σ²) du, the prior being 1 on [0, 1].
-            return logKernel(x[0], y[0]) - (logSumExp(nodes.map((t) => logKernel(x[0], t))) - Math.log(Q))
+            return (
+              logKernel(x[0], y[0]) -
+              (nodes.reduce((acc, t) => logAddExp(acc, logKernel(x[0], t)) as number, -Infinity) - Math.log(Q))
+            )
           },
         }
       : {}),
@@ -201,7 +200,7 @@ const wrapInto = (v: number, [lo, hi]: readonly [number, number]) => {
 export function twoLinkArm(s: Stream, options: TwoLinkArmOptions = {}): Dataset {
   const { n = 600, l1 = 0.8, l2 = 0.5, noise = 0.01 } = options
   checkCount(n, 'twoLinkArm')
-  if (!(l1 > 0 && l2 > 0)) throw new RangeError('twoLinkArm: link lengths must be positive')
+  if (!(l1 > 0 && l2 > 0)) throw new DomainError('twoLinkArm', 'twoLinkArm: link lengths must be positive')
   const lengths: [number, number] = [l1, l2]
   const solutions = (x: Row): InverseSolution[] => {
     const kept = twoLinkInverse(x, lengths)

@@ -30,6 +30,7 @@ import {
   type Labels,
   type Rows,
 } from './core'
+import { DomainError, ShapeError } from 'aifn/foundation/errors'
 
 /** Cumulative counts at each distinct threshold, from the highest score down. */
 type Sweep = {
@@ -50,7 +51,8 @@ function sweep(yTrue: Labels, scores: Data, positive?: Label): Sweep {
   const { y } = binaryTruth(yTrue, positive)
   const s = values(scores)
   sameLength(y, s, 'curve')
-  for (let i = 0; i < s.length; i++) if (Number.isNaN(s[i])) throw new Error('metrics: curve: a score is NaN')
+  for (let i = 0; i < s.length; i++)
+    if (Number.isNaN(s[i])) throw new DomainError('metrics', 'metrics: curve: a score is NaN')
   const order = orderDescending(s)
   const thresholds: number[] = []
   const tps: number[] = []
@@ -160,7 +162,7 @@ export const auroc = defineMetric(
     const S = dense(scores as Rows, 'auroc scores')
     const classes = options.labels ? [...options.labels] : classesOf(t)
     if (classes.length !== S.cols)
-      throw new Error(`metrics: auroc: ${S.cols} score columns for ${classes.length} classes`)
+      throw new ShapeError('metrics', `metrics: auroc: ${S.cols} score columns for ${classes.length} classes`)
     const ti = encodeLabels(t, classes)
     const column = (k: number, rows?: number[]) =>
       Float64Array.from(rows ?? Array.from({ length: S.rows }, (_, i) => i), (i) => S.data[i * S.cols + k])
@@ -208,7 +210,8 @@ export const partialAuroc = defineMetric(
   },
   (yTrue: Labels, scores: Data, options: { maxFpr: number; standardised?: boolean; positive?: Label }): number => {
     const { maxFpr } = options
-    if (!(maxFpr > 0 && maxFpr <= 1)) throw new Error('metrics: partialAuroc: maxFpr must lie in (0, 1]')
+    if (!(maxFpr > 0 && maxFpr <= 1))
+      throw new DomainError('metrics', 'metrics: partialAuroc: maxFpr must lie in (0, 1]')
     const c = rocCurve(yTrue, scores, options)
     const fpr = c.x.data as Float64Array
     const tpr = c.y.data as Float64Array

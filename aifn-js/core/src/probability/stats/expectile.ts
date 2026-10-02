@@ -6,6 +6,7 @@
  */
 
 import { allValues, type Data } from './input'
+import { DomainError, ShapeError } from 'aifn/foundation/errors'
 
 /** Options of `expectile`. */
 export type ExpectileOptions = {
@@ -17,20 +18,20 @@ export type ExpectileOptions = {
 function prepare(x: Data, weights?: Data) {
   const v = allValues(x)
   const n = v.length
-  if (n === 0) throw new Error('expectile: no values')
+  if (n === 0) throw new DomainError('expectile', 'expectile: no values')
   const w = weights ? allValues(weights) : null
-  if (w && w.length !== n) throw new Error(`expectile: ${n} values but ${w.length} weights`)
+  if (w && w.length !== n) throw new ShapeError('expectile', `expectile: ${n} values but ${w.length} weights`)
   const order = Array.from({ length: n }, (_, i) => i).sort((a, b) => v[a] - v[b])
   const xs = Float64Array.from(order, (i) => v[i])
   const ws = Float64Array.from(order, (i) => (w ? w[i] : 1))
   const W = new Float64Array(n + 1)
   const S = new Float64Array(n + 1)
   for (let i = 0; i < n; i++) {
-    if (!(ws[i] >= 0)) throw new RangeError('expectile: weights must be non-negative')
+    if (!(ws[i] >= 0)) throw new DomainError('expectile', 'expectile: weights must be non-negative')
     W[i + 1] = W[i] + ws[i]
     S[i + 1] = S[i] + ws[i] * xs[i]
   }
-  if (!(W[n] > 0)) throw new RangeError('expectile: the weights sum to zero')
+  if (!(W[n] > 0)) throw new DomainError('expectile', 'expectile: the weights sum to zero')
   return { xs, W, S, n }
 }
 
@@ -39,7 +40,7 @@ function prepare(x: Data, weights?: Data) {
  * τU = (1 − τ)L decreases in m and the right increases, so the k whose m lies in [x₍ₖ₋₁₎, x₍ₖ₎] is found by bisection.
  */
 function solve(p: ReturnType<typeof prepare>, tau: number): number {
-  if (!(tau > 0 && tau < 1)) throw new RangeError(`expectile: τ = ${tau} is not in (0, 1)`)
+  if (!(tau > 0 && tau < 1)) throw new DomainError('expectile', `expectile: τ = ${tau} is not in (0, 1)`)
   const { xs, W, S, n } = p
   const at = (k: number) => {
     const den = tau * (W[n] - W[k]) + (1 - tau) * W[k]

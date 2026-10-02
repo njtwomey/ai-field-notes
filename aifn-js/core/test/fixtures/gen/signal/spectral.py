@@ -5,9 +5,12 @@ quantiles; the ARMA spectrum by scipy.signal.freqz; and numpy ports where no lib
 Blackman-Tukey sum, Thomson's adaptive multitaper weights (Percival and Walden, 1993, eqs. 368a and 370a, as nitime's
 adaptive_weights) and the modified covariance AR fit."""
 
+from typing import cast
+
 import numpy as np
 from astropy.timeseries import LombScargle
 from scipy import signal, stats
+from scipy.signal import windows
 from statsmodels.regression.linear_model import burg, yule_walker
 
 
@@ -23,7 +26,7 @@ def blackman_tukey(x: np.ndarray, M: int, fs: float, nfft: int) -> tuple[np.ndar
     n = len(x)
     xc = x - x.mean()
     g = np.array([xc[: n - k] @ xc[k:] / n for k in range(M + 1)])
-    w = signal.windows.bartlett(2 * M + 1)[M:]
+    w = windows.bartlett(2 * M + 1)[M:]
     f = np.fft.rfftfreq(nfft, 1 / fs)
     k = np.arange(1, M + 1)
     S = np.array([w[0] * g[0] + 2 * np.sum(w[1:] * g[1:] * np.cos(2 * np.pi * fk * k / fs)) for fk in f]) / fs
@@ -36,7 +39,7 @@ def blackman_tukey(x: np.ndarray, M: int, fs: float, nfft: int) -> tuple[np.ndar
 def adaptive_multitaper(x: np.ndarray, NW: float, K: int, fs: float) -> dict[str, object]:
     n = len(x)
     xc = x - x.mean()
-    tapers, ratios = signal.windows.dpss(n, NW, K, return_ratios=True)
+    tapers, ratios = cast(tuple[np.ndarray, np.ndarray], windows.dpss(n, NW, K, return_ratios=True))
     Sk = np.abs(np.fft.rfft(tapers * xc, axis=1)) ** 2 / fs
     sig2 = xc @ xc / n
     B = sig2 / fs
@@ -106,11 +109,14 @@ def cases() -> dict[str, object]:
 
     # AR fits and spectra.
     rho_b, sigma2_b = burg(x, order=4, demean=True)
-    rho_yw, sigma_yw = yule_walker(x, order=4, method="mle", demean=True, result_object=False)
+    rho_yw, sigma_yw = cast(
+        tuple[np.ndarray, float], yule_walker(x, order=4, method="mle", demean=True, result_object=False)
+    )
     lsq = modified_covariance(x, 4)
     ar = [1.2, -0.6]
     ma = [0.4, 0.2]
-    w, h = signal.freqz([1.0, *ma], [1.0, *(-np.array(ar))], worN=65, fs=fs, include_nyquist=True)
+    # scipy is unstubbed, so Pyright infers freqz's `a` as int from its default `a=1`.
+    w, h = signal.freqz([1.0, *ma], [1.0, *(-np.array(ar))], worN=65, fs=fs, include_nyquist=True)  # pyright: ignore[reportArgumentType]
     arma_psd = 2 * 1.5 * np.abs(h) ** 2 / fs
     arma_psd[0] /= 2
     arma_psd[-1] /= 2
@@ -122,12 +128,15 @@ def cases() -> dict[str, object]:
         "welch": {"f": f, "psd": Pw},
         "bartlett": Pb,
         "periodogram": Pp,
-        "csd": {"f": fc, "re": Pxy.real, "im": Pxy.imag},
+        "csd": {"f": fc, "re": np.real(Pxy), "im": np.imag(Pxy)},
         "coherence": Cxy,
         "blackmanTukey": {"f": fbt, "psd": Sbt},
         "multitaper": mt,
-        "chi2": {"nu": [2.0, 7.5, 30.0], "lo": [stats.chi2.ppf(0.025, v) for v in (2.0, 7.5, 30.0)],
-                 "hi": [stats.chi2.ppf(0.975, v) for v in (2.0, 7.5, 30.0)]},
+        "chi2": {
+            "nu": [2.0, 7.5, 30.0],
+            "lo": [stats.chi2.ppf(0.025, v) for v in (2.0, 7.5, 30.0)],
+            "hi": [stats.chi2.ppf(0.975, v) for v in (2.0, 7.5, 30.0)],
+        },
         "uneven": {
             "t": t,
             "y": yu,

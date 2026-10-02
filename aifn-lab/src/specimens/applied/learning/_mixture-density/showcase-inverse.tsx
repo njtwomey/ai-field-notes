@@ -12,8 +12,8 @@ import { bishopInverse } from 'aifn-applied/data/synthetic'
 import { mdnPredict, type MdnSnapshot } from 'aifn-applied/learning/mixture-density'
 import { Player } from '@lab/controls'
 import { Figure } from '@lab/layout'
-import { choice, float, int, row, useFigureState } from '@lab/state'
-import { formatValue, TrainControls, useTrainedRun } from '@lab/views'
+import { choice, int, row, useFigureState } from '@lab/state'
+import { formatValue, optimiserField, TrainControls, trainingMethodOf, useTrainedRun } from '@lab/views'
 import { Annotation, Curve, Handle, Plot, Plots, Points, Raster, Readout, Rug, useAxis, useScaleColor } from '@lab/viz'
 import { TrainingCurves } from './curves'
 import { paramsOf, runTask, SLOT, useCheckpoint, useNetworks, type RunSettings } from './shared'
@@ -35,17 +35,11 @@ export function InverseShowcase() {
       noise: choice([0.02, 0.05, 0.1], 0.05, { label: 'noise σ on x' }),
     }),
     net: row('2 · networks (same body)', {
-      components: choice([1, 2, 3, 4, 5, 6, 8], 3, { label: 'MDN components K' }),
-      width: choice([5, 10, 20, 40], 20, { label: 'hidden width (one tanh layer)' }),
+      components: int(3, { ge: 1, le: 10, suggestions: [1, 2, 3, 5, 8], label: 'MDN components K' }),
+      width: int(20, { ge: 2, le: 64, suggestions: [5, 10, 20, 40], label: 'hidden width (one tanh layer)' }),
     }),
-    run: row('3 · training (Adam, full batch)', {
-      stepSize: float(0.01, {
-        label: 'learning rate',
-        gt: 0,
-        le: 0.3,
-        scale: 'log10',
-        suggestions: [0.003, 0.01, 0.03],
-      }),
+    optimiser: optimiserField({ label: '3 · optimiser (full batch)', stepSize: 0.01 }),
+    run: row('4 · run', {
       steps: int(2000, { ge: 1, suggestions: [1000, 2000, 3000], label: 'steps' }),
       seed: int(1, { label: 'seed', ge: 0, le: 9999 }),
     }),
@@ -56,7 +50,7 @@ export function InverseShowcase() {
     dataSeed: DATA_SEED,
     components: state.net.components,
     hidden: [state.net.width],
-    stepSize: state.run.stepSize,
+    method: trainingMethodOf(state.optimiser, { clipNorm: 10 }),
     steps: state.run.steps,
     seed: state.run.seed,
   }
@@ -175,16 +169,16 @@ export function InverseShowcase() {
       caption={
         <>
           aifn <code>mixtureDensityRun</code> on <code>bishopInverse</code> ({N} points, noise σ {noise}): two MLPs with
-          one tanh layer of {shown.hidden[0]} units trained by full-batch Adam from the same seed, one on the squared
-          error (slot {SLOT.mean + 1}) and one on the mixture negative log-likelihood <code>mixtureDensityNll</code>{' '}
-          with K = {shown.components} Gaussians (π by softmax, σ by exp plus a floor). Left: the data, the true branches
-          of the inverse (ink) and its conditional mean E[t | x] (dashed), with the squared-error network, which follows
-          the mean through the gaps between branches. Middle: the MDN&apos;s p(t | x), each column scaled to its
-          maximum, with each component&apos;s mean drawn where its weight is above 3%, coloured by its weight (pale:
-          switched off, dark: carrying the column) and the MDN&apos;s own mean. Right: the slice at the probe, the
-          MDN&apos;s density with its modes against the true p(t | x) (dashed) and the true branches (ticks); the
-          squared-error prediction is the vertical line. Drag the probe x on the left or middle chart; play the
-          checkpoints from step 0, or drag the step marker on either curve.
+          one tanh layer of {shown.hidden[0]} units trained by the chosen full-batch optimiser (Adam or L-BFGS) from the
+          same seed, one on the squared error (slot {SLOT.mean + 1}) and one on the mixture negative log-likelihood{' '}
+          <code>mixtureDensityNll</code> with K = {shown.components} Gaussians (π by softmax, σ by exp plus a floor).
+          Left: the data, the true branches of the inverse (ink) and its conditional mean E[t | x] (dashed), with the
+          squared-error network, which follows the mean through the gaps between branches. Middle: the MDN&apos;s p(t |
+          x), each column scaled to its maximum, with each component&apos;s mean drawn where its weight is above 3%,
+          coloured by its weight (pale: switched off, dark: carrying the column) and the MDN&apos;s own mean. Right: the
+          slice at the probe, the MDN&apos;s density with its modes against the true p(t | x) (dashed) and the true
+          branches (ticks); the squared-error prediction is the vertical line. Drag the probe x on the left or middle
+          chart; play the checkpoints from step 0, or drag the step marker on either curve.
         </>
       }
     >

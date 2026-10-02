@@ -14,6 +14,7 @@ import { integers, normal, uniform, type Stream } from 'aifn/foundation/random'
 import { definer } from 'aifn/foundation/registry'
 import { int, real, space } from 'aifn/foundation/space'
 import { fromData, toFlat, type Tensor } from 'aifn/foundation/tensor'
+import { DomainError } from 'aifn/foundation/errors'
 
 /** Pull counts and reward sums per arm: the state of every context-free policy. */
 export interface ArmStatistics {
@@ -34,7 +35,8 @@ function argmaxRandom(scores: Float64Array, s: Stream): number {
 }
 
 function armCount(env: EnvironmentShape): number {
-  if (env.action.kind !== 'discrete') throw new RangeError('bandit policies need a discrete action domain (the arms)')
+  if (env.action.kind !== 'discrete')
+    throw new DomainError('armCount', 'bandit policies need a discrete action domain (the arms)')
   return env.action.n
 }
 
@@ -265,7 +267,10 @@ export interface RidgeState extends ArmStatistics {
 function ridgeInit(env: EnvironmentShape, lambda: number): RidgeState {
   const o = env.observation
   if (o.kind !== 'box' || o.shape.length !== 2)
-    throw new RangeError('linear bandit policies need an arms × features box observation (a linear bandit)')
+    throw new DomainError(
+      'ridgeInit',
+      'linear bandit policies need an arms × features box observation (a linear bandit)',
+    )
   const d = o.shape[1]
   const vInverse = new Float64Array(d * d)
   for (let i = 0; i < d; i++) vInverse[i * d + i] = 1 / lambda

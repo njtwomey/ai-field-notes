@@ -12,7 +12,7 @@
  *   interleaving of the pooled sorted samples is equally likely, so P(D ≥ d) is one minus the probability that a
  *   uniformly random monotone lattice path from (0, 0) to (m, n) keeps i/m − j/n inside the band, computed exactly by
  *   dynamic programming (Hodges, 1958, Ark. Mat. 3). Above m·n = 10⁶ the one-sample law at n = round(mn/(m + n)) is
- *   used for two-sided tests (scipy's 'asymp'), and exp(−2 d² mn/(m + n)) for one-sided ones.
+ *   used for two-sided tests (scipy's 'asymp'), and Hodges' corrected limit (scipy's) for one-sided ones.
  */
 
 import { DomainError } from 'aifn/foundation/errors'
@@ -219,6 +219,18 @@ export function twoSampleKsSf(d: number, m: number, n: number, oneSided = false)
   return Math.min(1, Math.max(0, 1 - p[n]))
 }
 
+/**
+ * Hodges' (1958, eq. 5.3) corrected limit for the one-sided two-sample D⁺: exp(−2z² − 2z(M + 2N)/(3√(MN(M + N))))
+ * with z = d√(MN/(M + N)) and M ≥ N the larger and smaller sizes (scipy's `ks_2samp`, `method='asymp'`). The
+ * correction term makes it far closer to the exact law than Smirnov's plain exp(−2z²) at small sizes.
+ */
+function hodgesOneSidedSf(d: number, m: number, n: number): number {
+  const [big, small] = m >= n ? [m, n] : [n, m]
+  const z = d * Math.sqrt((big * small) / (big + small))
+  const e = -2 * z * z - (2 * z * (big + 2 * small)) / Math.sqrt(big * small * (big + small)) / 3
+  return Math.min(1, Math.max(0, Math.exp(e)))
+}
+
 /** The exact law of the one-sample D (two-sided) or D⁺ (one-sided) for n draws, on [0, 1]. */
 export function kolmogorovNull(n: number, { oneSided = false, limit = false } = {}): Univariate {
   const sf = oneSided
@@ -251,7 +263,7 @@ export function twoSampleKsNull(
   const sf = exact
     ? (d: number) => twoSampleKsSf(d, m, n, oneSided)
     : oneSided
-      ? (d: number) => Math.min(1, Math.exp(-2 * d * d * en))
+      ? (d: number) => hodgesOneSidedSf(d, m, n)
       : (d: number) => kolmogorovSf(d, Math.round(en))
   return continuousLaw({
     name: 'KolmogorovSmirnovTwoSample',
@@ -308,8 +320,8 @@ export function ksTest(
   const s = twoSample(xs, ys, alternative)
   const [m, n] = [xs.length, ys.length]
   const exact = method === 'exact' && m * n <= 1e6
-  // Beyond the exact range the two-sided law is the one-sample law at the effective size, the one-sided law Smirnov's
-  // limit exp(−2 d² mn/(m + n)).
+  // Beyond the exact range the two-sided law is the one-sample law at the effective size, the one-sided law Hodges'
+  // corrected limit.
   const law =
     exact || oneSided ? twoSampleKsNull(m, n, { oneSided, exact }) : kolmogorovNull(Math.round((m * n) / (m + n)))
   return {

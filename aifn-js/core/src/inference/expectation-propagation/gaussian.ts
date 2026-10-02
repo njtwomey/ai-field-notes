@@ -36,6 +36,7 @@ import {
   type Value,
   type Vector,
 } from 'aifn/foundation/tensor'
+import { DomainError } from 'aifn/foundation/errors'
 
 /** A Gaussian in natural parameters: precision τ = 1/σ² and shift ν = μ/σ² (numbers, or tensors for a batch). */
 export interface NaturalGaussian<T extends Value = number> {
@@ -101,7 +102,7 @@ export function gaussianToNormal(g: NaturalGaussian<Value>): Distribution {
 
 /** Natural parameters of a Normal distribution object, from its exponential-family form (η₁ = ν, η₂ = −τ/2). */
 export function normalToGaussian(d: Distribution): NaturalGaussian<Value> {
-  if (d.name !== 'Normal' || !d.expFamily) throw new Error('normalToGaussian: needs a Normal')
+  if (d.name !== 'Normal' || !d.expFamily) throw new DomainError('normalToGaussian', 'normalToGaussian: needs a Normal')
   const [eta1, eta2] = d.expFamily.naturalParams()
   return { precision: mul(-2, eta2), shift: eta1 }
 }
@@ -146,13 +147,13 @@ export interface ExpFamilyMessage {
 
 /** The natural parameters of an exponential-family distribution object. */
 export function messageOf(d: Distribution): ExpFamilyMessage {
-  if (!d.expFamily) throw new Error(`messageOf: ${d.name} is not an exponential family`)
+  if (!d.expFamily) throw new DomainError('messageOf', `messageOf: ${d.name} is not an exponential family`)
   return { family: d.name, natural: d.expFamily.naturalParams() }
 }
 
 function sameFamily(a: ExpFamilyMessage, b: ExpFamilyMessage): void {
   if (a.family !== b.family || a.natural.length !== b.natural.length)
-    throw new Error(`messages: ${a.family} and ${b.family} are not the same family`)
+    throw new DomainError('messages', `messages: ${a.family} and ${b.family} are not the same family`)
 }
 
 /** The product of two messages of one family: natural parameters add (the base measure is counted once). */
@@ -208,6 +209,6 @@ export function messageToDistribution(m: ExpFamilyMessage): Distribution {
     case 'Exponential':
       return Exponential(neg(a))
     default:
-      throw new Error(`messageToDistribution: ${m.family} is not supported`)
+      throw new DomainError('messageToDistribution', `messageToDistribution: ${m.family} is not supported`)
   }
 }

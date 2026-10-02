@@ -26,6 +26,7 @@ import type { KvCache } from './cache'
 import { feedForward, FeedForward, type FeedForwardKind, type FeedForwardParams } from './feedforward'
 import { continuePositions } from './masks'
 import { alibiBias, t5RelativeBias, type RopeOptions, type T5BucketOptions } from './positions'
+import { DomainError } from 'aifn/foundation/errors'
 
 /** Relative position schemes applied inside a block. */
 export type RelativePosition = 'none' | 'rope' | 'alibi' | 't5'
@@ -95,7 +96,8 @@ export function transformerBlock(
   ctx?: Context,
 ): BlockResult {
   const { placement = 'pre', parallel = false, position = 'none', heads, causal = false } = options
-  if (parallel && placement !== 'pre') throw new Error('transformerBlock: the parallel form is pre-norm')
+  if (parallel && placement !== 'pre')
+    throw new DomainError('transformerBlock', 'transformerBlock: the parallel form is pre-norm')
   const normalise = (np: NormParams, h: Value) =>
     options.norm === 'rms' ? rmsNorm(h, np.gamma) : layerNorm(h, np.gamma, np.beta)
   const drop = Dropout(options.dropout ?? 0)
@@ -106,7 +108,8 @@ export function transformerBlock(
   let bias: Value | undefined
   if (position === 'alibi') bias = alibiBias(heads, positions, keys)
   if (position === 't5') {
-    if (!params.positionBias) throw new Error('transformerBlock: T5 positions need a positionBias table')
+    if (!params.positionBias)
+      throw new DomainError('transformerBlock', 'transformerBlock: T5 positions need a positionBias table')
     bias = t5RelativeBias(params.positionBias, positions, keys, { bidirectional: !causal, ...options.t5 })
   }
   let weights: Value = 0

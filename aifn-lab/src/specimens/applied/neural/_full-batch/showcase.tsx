@@ -4,8 +4,6 @@
  * `trainingLoop` for the minibatch ones); the page draws the fit at any recorded iteration from the checkpointed θ.
  */
 import { useMemo, useState } from 'react'
-import { circles, moons, regression1d, spirals, xor } from 'aifn-applied/data/synthetic'
-import type { Dataset } from 'aifn-applied/data'
 import {
   COMPARISON_OPTIMISERS,
   comparisonModel,
@@ -15,13 +13,20 @@ import {
   type ComparisonSnapshot,
   type ComparisonTask,
 } from 'aifn-applied/neural/full-batch'
-import { stream } from 'aifn/foundation/random'
 import { fromData, toFlat, unwrap, type Tensor } from 'aifn/foundation/tensor'
 import { sigmoid } from 'aifn/numerics/special'
 import { Select, Slider } from '@lab/controls'
 import { ControlRow, Figure } from '@lab/layout'
-import { call, choice, int, row, setting, useFigureState, when, type Task } from '@lab/state'
-import { formatValue, TrainControls, useTrainedRun } from '@lab/views'
+import { call, choice, float, int, row, setting, toggle, useFigureState, type Task } from '@lab/state'
+import {
+  CLASSIFICATION_CASES,
+  datasetChoice,
+  formatValue,
+  REGRESSION_CASES,
+  TrainControls,
+  useTrainedRun,
+  type DatasetValue,
+} from '@lab/views'
 import { Bars, Curve, Plot, Plots, Points, Raster, Readout, useAxis } from '@lab/viz'
 
 const f3 = (v: number | undefined) =>
@@ -36,32 +41,11 @@ const LABELS: Record<ComparisonOptimiser, string> = {
 /** Fixed colour slots by optimiser, whichever are trained. */
 const SLOT: Record<ComparisonOptimiser, number> = { lbfgs: 0, 'gradient-descent': 1, adam: 2, sgd: 3 }
 
-const TASKS = [
-  { value: 'classification', label: 'classify 2-d points' },
-  { value: 'regression', label: 'regress y on x (1-d)' },
-] as const
-
-/** Classification data: registered generators of `aifn-applied/data/synthetic`, binary labels. */
-const CLASS_DATA = {
-  moons: { label: 'two moons', knobs: { n: 200, noise: 0.15 }, make: moons },
-  circles: { label: 'two circles', knobs: { n: 200, noise: 0.08, factor: 0.5 }, make: circles },
-  xor: { label: 'XOR', knobs: { n: 200, kind: 'gaussian', sd: 0.45 }, make: xor },
-  spirals: { label: 'two spirals', knobs: { n: 200, arms: 2, noise: 0.03 }, make: spirals },
-} as const
-type ClassData = keyof typeof CLASS_DATA
-
-/** Regression data: `regression1d` on a range centred at 0. */
-const CURVES = {
-  sine: { label: 'sin x', knobs: { n: 80, fn: 'sine', noise: 0.1, range: [-3, 3] } },
-  sinc: { label: 'sin(πx)/(πx)', knobs: { n: 80, fn: 'sinc', noise: 0.05, range: [-3, 3] } },
-  cubic: { label: 'x³ − x', knobs: { n: 80, fn: 'cubic', noise: 0.1, range: [-1.5, 1.5] } },
-} as const
-type CurveData = keyof typeof CURVES
+/** Every 2-d classification set and 1-d regression curve, from `aifn-applied/data`'s registered generators. */
+const DATA = datasetChoice({ ...CLASSIFICATION_CASES, ...REGRESSION_CASES })
 
 type Settings = {
-  task: ComparisonTask
-  classData: ClassData
-  curve: CurveData
+  data: DatasetValue
   width: number
   depth: number
   activation: 'tanh' | 'gelu' | 'relu'
@@ -78,25 +62,13 @@ type Settings = {
   seed: number
 }
 
-const dataKey = (s: Pick<Settings, 'task' | 'classData' | 'curve'>) =>
-  s.task === 'classification' ? `full-batch-data-${s.classData}` : `full-batch-data-${s.curve}`
-
-/** The dataset of a setting, built in the page exactly as the worker builds it. */
-function datasetOf(s: Pick<Settings, 'task' | 'classData' | 'curve'>): Dataset {
-  const random = stream(dataKey(s))
-  if (s.task === 'regression') return regression1d(random, CURVES[s.curve].knobs as never)
-  const d = CLASS_DATA[s.classData]
-  return (d.make as (r: typeof random, k: unknown) => Dataset)(random, d.knobs)
-}
+/** The data's stream name: one per dataset choice, so the page and the worker draw the same points. */
+const dataSeed = (d: DatasetValue) => `full-batch-data-${d.key}`
 
 function comparisonTask(s: Settings): Task<ComparisonSnapshot> {
-  const random = call('foundation/random/stream', dataKey(s))
-  const data =
-    s.task === 'classification'
-      ? call(`applied/data/synthetic/${s.classData}`, random, CLASS_DATA[s.classData].knobs)
-      : call('applied/data/synthetic/regression1d', random, CURVES[s.curve].knobs)
+  const data = DATA.task(s.data, dataSeed(s.data))
   const options: ComparisonOptions = {
-    task: s.task,
+    task: DATA.taskOf(s.data) as ComparisonTask,
     network: { width: s.width, depth: s.depth, activation: s.activation },
     optimisers: s.compareAll ? COMPARISON_OPTIMISERS : [s.optimiser],
     iterations: s.iterations,
@@ -116,17 +88,16 @@ function comparisonTask(s: Settings): Task<ComparisonSnapshot> {
 const PRESETS: Record<string, { label: string; values: Record<string, string | number | boolean> }> = {
   smooth: {
     label: 'tanh on moons: L-BFGS shines',
-    values: { 'data.task': 'classification', 'data.classData': 'moons', 'network.activation': 'tanh' },
+    values: { data: 'moons', 'network.activation': 'tanh' },
   },
   kinks: {
     label: 'ReLU on moons: kinks hurt the line search',
-    values: { 'data.task': 'classification', 'data.classData': 'moons', 'network.activation': 'relu' },
+    values: { data: 'moons', 'network.activation': 'relu' },
   },
   spirals: {
     label: 'tanh on two spirals (16 × 2)',
     values: {
-      'data.task': 'classification',
-      'data.classData': 'spirals',
+      data: 'spirals',
       'network.activation': 'tanh',
       'network.width': 16,
       'network.depth': 2,
@@ -134,7 +105,7 @@ const PRESETS: Record<string, { label: string; values: Record<string, string | n
   },
   sine: {
     label: 'ReLU regression of sin x',
-    values: { 'data.task': 'regression', 'data.curve': 'sine', 'network.activation': 'relu' },
+    values: { data: 'fn:sine', 'network.activation': 'relu' },
   },
 }
 
@@ -154,22 +125,10 @@ function spaced(values: ArrayLike<number>, count: number): number[] {
 
 export function FullBatchShowcase() {
   const state = useFigureState({
-    data: row('1 · task and data', {
-      task: choice(TASKS, 'classification', { label: 'task' }),
-      classData: choice(
-        (Object.keys(CLASS_DATA) as ClassData[]).map((k) => ({ value: k, label: CLASS_DATA[k].label })),
-        'moons',
-        { label: 'data', when: when('task', 'classification') },
-      ),
-      curve: choice(
-        (Object.keys(CURVES) as CurveData[]).map((k) => ({ value: k, label: CURVES[k].label })),
-        'sine',
-        { label: 'function', when: when('task', 'regression') },
-      ),
-    }),
+    data: DATA.field({ label: '1 · data (classification sets, then regression curves)', initial: 'moons' }),
     network: row('2 · network', {
-      width: choice([4, 8, 16, 32], 8, { label: 'hidden units' }),
-      depth: choice([1, 2, 3], 2, { label: 'hidden layers' }),
+      width: int(8, { ge: 1, le: 64, suggestions: [4, 8, 16, 32], label: 'hidden units' }),
+      depth: int(2, { ge: 1, le: 4, suggestions: [1, 2, 3], label: 'hidden layers' }),
       activation: choice(['tanh', 'gelu', 'relu'], 'tanh', { label: 'activation' }),
     }),
     optimiser: row('3 · optimiser', {
@@ -179,38 +138,51 @@ export function FullBatchShowcase() {
         { label: 'optimiser' },
       ),
       compareAll: setting(true, { label: 'compare all (same initial weights)' }),
-      memory: choice([3, 5, 10, 20], 10, {
+      memory: int(10, {
+        ge: 1,
+        le: 50,
+        suggestions: [3, 5, 10, 20],
         label: 'L-BFGS memory m',
         when: (v) => v.compareAll === true || v.optimiser === 'lbfgs',
       }),
-      tolerance: choice([1e-4, 1e-6, 1e-8], 1e-6, { label: 'tolerance ‖∇‖' }),
-      gdStep: choice([0.1, 0.3, 1], 0.3, {
+      tolerance: float(1e-6, { gt: 0, scale: 'log10', suggestions: [1e-4, 1e-6, 1e-8], label: 'tolerance ‖∇‖' }),
+      gdStep: float(0.3, {
+        gt: 0,
+        scale: 'log10',
+        suggestions: [0.1, 0.3, 1],
         label: 'gradient-descent η',
         when: (v) => v.compareAll === true || v.optimiser === 'gradient-descent',
       }),
-      adamStep: choice([0.003, 0.01, 0.03], 0.01, {
+      adamStep: float(0.01, {
+        gt: 0,
+        scale: 'log10',
+        suggestions: [0.003, 0.01, 0.03],
         label: 'Adam η',
         when: (v) => v.compareAll === true || v.optimiser === 'adam',
       }),
-      sgdStep: choice([0.03, 0.1, 0.3], 0.1, {
+      sgdStep: float(0.1, {
+        gt: 0,
+        scale: 'log10',
+        suggestions: [0.03, 0.1, 0.3],
         label: 'SGD η',
         when: (v) => v.compareAll === true || v.optimiser === 'sgd',
       }),
-      batchSize: choice([8, 16, 32, 64], 32, {
+      batchSize: int(32, {
+        ge: 1,
+        suggestions: [8, 16, 32, 64],
         label: 'minibatch size',
         when: (v) => v.compareAll === true || v.optimiser === 'adam' || v.optimiser === 'sgd',
       }),
     }),
     run: row('4 · objective and run', {
-      l2: choice([0, 1e-4, 1e-3, 1e-2], 1e-3, { label: 'L2 strength λ' }),
+      l2: float(1e-3, { ge: 0, step: 1e-4, suggestions: [0, 1e-4, 1e-3, 1e-2], label: 'L2 strength λ' }),
       iterations: int(300, { ge: 1, suggestions: [100, 200, 300, 500], label: 'iterations (each)' }),
       seed: int(0, { label: 'initialisation seed', ge: 0, le: 9999 }),
     }),
+    show: row('5 · show', { boundary: toggle(true, 'decision boundary (P = 0.5)') }),
   })
   const settings: Settings = {
-    task: state.data.task as ComparisonTask,
-    classData: state.data.classData as ClassData,
-    curve: state.data.curve as CurveData,
+    data: { key: state.data.key, values: { ...state.data.values } },
     width: Number(state.network.width),
     depth: Number(state.network.depth),
     activation: state.network.activation as Settings['activation'],
@@ -229,8 +201,10 @@ export function FullBatchShowcase() {
   const trained = useTrainedRun(settings, comparisonTask)
   const result = trained.run.value
   const shown = trained.trained ?? settings
-  const { task, classData, curve } = shown
-  const data = useMemo(() => datasetOf({ task, classData, curve }), [task, classData, curve])
+  const shownKey = DATA.key(shown.data)
+  // oxlint-disable-next-line react-hooks/exhaustive-deps -- the key changes exactly when the dataset does
+  const data = useMemo(() => DATA.make(shown.data, dataSeed(shown.data)), [shownKey])
+  const task = DATA.taskOf(shown.data)
   const runs = useMemo(() => result?.runs ?? [], [result])
 
   // The fit is shown for one optimiser: the chosen one, or a pick among those trained.
@@ -338,7 +312,7 @@ export function FullBatchShowcase() {
   const total = result?.total ?? settings.iterations * (settings.compareAll ? COMPARISON_OPTIMISERS.length : 1)
   const viewControls =
     runs.length > 0 ? (
-      <ControlRow label="5 · view">
+      <ControlRow label="6 · view">
         <div className="flex flex-wrap items-end gap-3">
           {runs.length > 1 && (
             <Select
@@ -439,7 +413,7 @@ export function FullBatchShowcase() {
             <code>trainingLoop</code>. With compare all, every optimiser starts from the same initial weights (seed{' '}
             {shown.seed}).{' '}
             {isClass
-              ? 'The field is P(class 1) on a diverging scale, pale at 0.5, the decision boundary; points keep their class colours.'
+              ? 'The field is P(class 1) on a diverging scale, pale at 0.5; with the decision boundary on, the ink line is its 0.5 contour; points keep their class colours.'
               : 'The curve is the network’s prediction over the inputs; points are the training data.'}{' '}
             Step through the recorded iterations with the slider (it opens at the last); pick another trained optimiser
             to compare fits.
@@ -460,6 +434,7 @@ export function FullBatchShowcase() {
               range={[0, 1]}
               valueLabel="P(class 1)"
               fillOpacity={0.7}
+              boundary={state.show.boundary ? 0.5 : false}
             />
           )}
           {isClass ? (

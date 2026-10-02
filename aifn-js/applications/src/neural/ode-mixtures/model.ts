@@ -60,6 +60,7 @@ import { logSoftmax, sigmoid, softplus } from 'aifn/numerics/special'
 import { relu } from 'aifn/nn/functional'
 import { heUniform, xavierUniform } from 'aifn/nn/init'
 import { odeFlow, type OdeFlowMethod, type OdeSolveInfo } from 'aifn/dynamics/ode'
+import { DomainError } from 'aifn/foundation/errors'
 
 /** How the component membership π(t) is specified over the integration interval (§2.1). */
 export type ComponentSelection = 'pick-and-stick' | 'forward-filtering'
@@ -304,8 +305,8 @@ export function svfm(options: SvfmOptions): Svfm {
     ...options,
   }
   const { dim: D, components: K, stochastic, selection, augment, context: C, hidden, layers, activation, classes } = o
-  if (!(Number.isInteger(K) && K >= 1)) throw new RangeError('svfm: components must be a positive integer')
-  if (!(Number.isInteger(o.grid) && o.grid >= 1)) throw new RangeError('svfm: grid must be a positive integer')
+  if (!(Number.isInteger(K) && K >= 1)) throw new DomainError('svfm', 'svfm: components must be a positive integer')
+  if (!(Number.isInteger(o.grid) && o.grid >= 1)) throw new DomainError('svfm', 'svfm: grid must be a positive integer')
   const S = D + augment
   const inF = S + 1 + C
   const filtering = selection === 'forward-filtering' && K > 1
@@ -460,7 +461,7 @@ export function svfm(options: SvfmOptions): Svfm {
 
   const classLogLikelihoods = (params: SvfmParams, p: Propagation): Value => {
     const { weight, bias } = params.readout
-    if (!weight || !bias) throw new Error('svfm: no classifier readout (classes = 0)')
+    if (!weight || !bias) throw new DomainError('svfm', 'svfm: no classifier readout (classes = 0)')
     const last = p.states.length - 1
     const m = permute(p.states[last], [1, 0, 2]) // [B, K, S]
     let logits = add(matmul(m, weight), bias) // [B, K, classes]

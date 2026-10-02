@@ -183,7 +183,8 @@ const interior = (i: Interval) =>
 function buildBijector(key: string, entry: unknown, info: BijectorInfo): Bijector | null {
   if (!info.factory) return entry as Bijector
   if (key === 'chainBijectors') return (entry as (...b: Bijector[]) => Bijector)(sigmoidBijector, expBijector)
-  if (key === 'orderedBijector') return null
+  // Vector bijectors (eventRank 1) have their own tests.
+  if (key === 'orderedBijector' || key === 'affineCouplingBijector') return null
   return (entry as (...a: unknown[]) => Bijector)(...Object.values(defaults(info.params)))
 }
 describe.each(bijectors.map((b) => [address(b), b] as const))('bijector %s', (_, entry) => {

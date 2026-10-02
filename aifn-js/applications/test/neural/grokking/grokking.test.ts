@@ -39,3 +39,23 @@ describe('grokking', () => {
     expect(c.testAccuracy.at(-1)).toBeGreaterThan(0.6)
   }, 180_000)
 })
+
+describe('grokkingRun by full-batch L-BFGS', () => {
+  it('fits the training pairs and may stop early', () => {
+    const data = modularArithmetic(stream('lbfgs'), { p: 7, fraction: 0.6 })
+    const snaps = [
+      ...grokkingRun(data, {
+        embed: 4,
+        width: 16,
+        steps: 150,
+        recordEvery: 10,
+        checkpointEvery: 50,
+        method: 'lbfgs',
+        weightDecay: 0.01,
+      }),
+    ]
+    const last = snaps.at(-1)!
+    expect(last.step).toBe(last.steps)
+    expect(last.curves.trainAccuracy.at(-1)).toBe(1)
+  })
+})

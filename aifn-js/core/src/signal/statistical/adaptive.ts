@@ -6,7 +6,7 @@
  * ch. 10, 11 and 30). A run ends (`terminated`) once every sample has been used.
  */
 
-import { ShapeError } from 'aifn/foundation/errors'
+import { DomainError, ShapeError } from 'aifn/foundation/errors'
 import { fromData, type Tensor } from 'aifn/foundation/tensor'
 import type { Algorithm, Scalar, Size, Status, VectorLike } from 'aifn/foundation/contracts'
 import { readSamples } from '../signal'
@@ -144,8 +144,8 @@ export function rls(
   const { x, d, n } = signals(input, desired, M, name)
   const lambda = options.forgetting ?? 0.99
   const delta = options.delta ?? 0.01
-  if (!(lambda > 0 && lambda <= 1)) throw new RangeError('rls: forgetting must lie in (0, 1]')
-  if (!(delta > 0)) throw new RangeError('rls: delta must be positive')
+  if (!(lambda > 0 && lambda <= 1)) throw new DomainError('rls', 'rls: forgetting must lie in (0, 1]')
+  if (!(delta > 0)) throw new DomainError('rls', 'rls: delta must be positive')
   return {
     name,
     init: (start) => {

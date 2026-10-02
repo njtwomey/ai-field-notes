@@ -281,6 +281,15 @@ describe('extend', () => {
     }
   })
 
+  it("equals a longer trace with keep: 'none' and with checkpoints (review foundation 20)", () => {
+    for (const keep of ['none', 'checkpoints', 'all'] as const) {
+      const longer = trace(randomWalk, opts, 17, { every: 3, record, keep, checkpointEvery: 5, stream: toyStream('k') })
+      const short = trace(randomWalk, opts, 9, { every: 3, record, keep, checkpointEvery: 5, stream: toyStream('k') })
+      const extended = extend(short, randomWalk, 8)
+      expect(plain(extended)).toEqual(plain(longer))
+    }
+  })
+
   it('accepts recorders explicitly and rejects different ones', () => {
     const short = trace(randomWalk, opts, 5, { record, stream: toyStream('e') })
     const copy = { ...short } // a copy made elsewhere: its recorders are not remembered

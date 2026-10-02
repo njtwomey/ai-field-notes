@@ -5,6 +5,8 @@
  * Recipes", 3rd ed., §10.1–10.3; the options follow `scipy.optimize.minimize_scalar`.
  */
 
+import { DomainError } from 'aifn/foundation/errors'
+
 /** Options of `minimizeScalar`. */
 export type MinimizeScalarOptions = {
   /**
@@ -199,10 +201,11 @@ export function minimizeScalar(f: (x: number) => number, options: MinimizeScalar
   let bracketed = true
   if (options.bounds) {
     ;[lo, hi] = options.bounds
-    if (!(lo <= hi)) throw new Error(`minimizeScalar: bounds must satisfy lo ≤ hi, got [${lo}, ${hi}]`)
+    if (!(lo <= hi))
+      throw new DomainError('minimizeScalar', `minimizeScalar: bounds must satisfy lo ≤ hi, got [${lo}, ${hi}]`)
   } else {
     const [a, b] = options.bracket ?? [0, 1]
-    if (a === b) throw new Error('minimizeScalar: the two bracket points must differ')
+    if (a === b) throw new DomainError('minimizeScalar', 'minimizeScalar: the two bracket points must differ')
     const br = bracketMinimum(g, a, b)
     bracketed = br.found
     lo = Math.min(br.a, br.c)

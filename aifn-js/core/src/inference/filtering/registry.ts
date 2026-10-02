@@ -8,6 +8,7 @@ import { definer, entries, type AlgorithmInfo, type Entry, type FunctionInfo } f
 import * as changepoint from './changepoint'
 import * as kalman from './kalman'
 import * as nonlinear from './nonlinear'
+import * as tracking from './tracking'
 
 const algorithm = definer<AlgorithmInfo>('algorithm', 'inference/filtering')
 
@@ -196,8 +197,19 @@ fn(
   changepoint.laggedObservations,
 )
 
+fn(
+  {
+    key: 'trackingMetrics',
+    name: 'Tracking metrics against a known truth',
+    summary: 'Lag to follow a step, overshoot, settled noise, RMSE before and after the change, and band coverage.',
+    role: 'test',
+    notes: [...KF, 'kalman-smoother'],
+  },
+  tracking.trackingMetrics,
+)
+
 /** The functions of the module, keyed by name. */
 export const filteringFunctions: Readonly<Record<string, Entry<(...args: never[]) => unknown, FunctionInfo>>> =
-  entries<FunctionInfo>('function', kalman, nonlinear, changepoint) as Readonly<
+  entries<FunctionInfo>('function', kalman, nonlinear, changepoint, tracking) as Readonly<
     Record<string, Entry<(...args: never[]) => unknown, FunctionInfo>>
   >

@@ -7,7 +7,7 @@
  */
 
 import { dense, fromData, toFlat, type Tensor } from 'aifn/foundation/tensor'
-import { eigh, qr } from 'aifn/numerics/linalg'
+import { eigh } from 'aifn/numerics/linalg'
 import type { Algorithm } from 'aifn/foundation/trace'
 import { run } from 'aifn/foundation/trace'
 import type { MatrixLike, Scalar, Size, Status, VectorLike } from 'aifn/foundation/contracts'
@@ -25,6 +25,7 @@ import {
   type Mat,
 } from './input'
 import { simplexSolve } from './simplex'
+import { DomainError, ShapeError } from 'aifn/foundation/errors'
 
 /** A convex quadratic program: minimise ½xᵀQx + cᵀx subject to A x ≤ b and E x = e (variables otherwise free). */
 export interface QuadraticProgram {
@@ -59,7 +60,7 @@ export function parseQP(problem: QuadraticProgram): ParsedQP {
   const c = readVector(problem.c, 'quadratic program: c')
   const n = c.length
   const Q = readMatrix(problem.Q, 'quadratic program: Q', n)
-  if (Q.m !== n) throw new Error(`quadratic program: Q must be ${n}×${n}`)
+  if (Q.m !== n) throw new ShapeError('quadratic program', `quadratic program: Q must be ${n}×${n}`)
   const A = readMatrix(problem.A, 'quadratic program: A', n)
   const b = readVector(problem.b, 'quadratic program: b', A.m)
   const E = readMatrix(problem.E, 'quadratic program: E', n)
@@ -231,23 +232,38 @@ function equalityQP(qp: ParsedQP, M: Mat, g: Float64Array) {
 
 /**
  * Whether Q has negative curvature on the null space of M: the reduced Hessian ZᵀQZ (Z an orthonormal basis of that
- * null space, from the complete QR factorisation of Mᵀ) has an eigenvalue below −`tol` relative to Q's scale. Zero
- * curvature is left to the KKT solve, which reports it as singular. M has independent rows (the working set is kept so).
+ * null space) has an eigenvalue below −`tol` relative to Q's scale. Z is rank-revealing, the eigenvectors of MᵀM with
+ * eigenvalues below 10⁻¹² of the largest, so dependent rows of M (repeated or combined equalities) do not shrink the
+ * null space. Zero curvature is left to the KKT solve, which reports it as singular.
  */
 function negativeCurvature(qp: ParsedQP, M: Mat, tol: number): boolean {
   const n = qp.n
   const k = M.m
-  if (k >= n) return false
   let Z: Float64Array
-  if (k === 0) Z = Float64Array.from({ length: n * n }, (_, i) => (i % (n + 1) === 0 ? 1 : 0))
-  else {
-    const Mt = new Float64Array(n * k)
-    for (let r = 0; r < k; r++) for (let j = 0; j < n; j++) Mt[j * k + r] = M.a[r * n + j]
-    const Qf = toFlat(qr(fromData(Mt, [n, k]), { mode: 'complete' }).Q)
-    Z = new Float64Array(n * (n - k))
-    for (let i = 0; i < n; i++) for (let c = k; c < n; c++) Z[i * (n - k) + c - k] = Qf[i * n + c]
+  let r: number
+  if (k === 0) {
+    Z = Float64Array.from({ length: n * n }, (_, i) => (i % (n + 1) === 0 ? 1 : 0))
+    r = n
+  } else {
+    // MᵀM (n × n); its eigenvectors with negligible eigenvalues span null(M) whatever M's rank.
+    const G = new Float64Array(n * n)
+    for (let i = 0; i < n; i++)
+      for (let j = 0; j < n; j++) {
+        let v = 0
+        for (let row = 0; row < k; row++) v += M.a[row * n + i] * M.a[row * n + j]
+        G[i * n + j] = v
+      }
+    const e = eigh(fromData(G, [n, n]))
+    const lambda = toFlat(e.values)
+    const V = toFlat(e.vectors)
+    const cutoff = 1e-12 * Math.max(lambda[0], 0)
+    const keep: number[] = []
+    for (let c = 0; c < n; c++) if (lambda[c] <= cutoff) keep.push(c)
+    r = keep.length
+    if (r === 0) return false
+    Z = new Float64Array(n * r)
+    for (let i = 0; i < n; i++) keep.forEach((c, q) => (Z[i * r + q] = V[i * n + c]))
   }
-  const r = n - k
   const QZ = new Float64Array(n * r)
   for (let i = 0; i < n; i++)
     for (let c = 0; c < r; c++) {
@@ -800,7 +816,8 @@ export function boxQuadraticProgram(
   const Qm = readMatrix(problem.Q, `${where}: Q`, n)
   const lower = readVector(problem.lower, `${where}: lower`, n)
   const upper = readVector(problem.upper, `${where}: upper`, n)
-  for (let j = 0; j < n; j++) if (!(lower[j] <= upper[j])) throw new Error(`${where}: empty box for x${j + 1}`)
+  for (let j = 0; j < n; j++)
+    if (!(lower[j] <= upper[j])) throw new DomainError(where, `${where}: empty box for x${j + 1}`)
   const tol = options.tolerance ?? 1e-10
   const base = { Q: matrix(Qm.a, n, n), c: vector(c), lower: vector(lower), upper: vector(upper) }
   return {

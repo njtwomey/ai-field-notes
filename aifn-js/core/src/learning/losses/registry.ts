@@ -12,8 +12,10 @@ import * as energy from './energy'
 import * as mixture from './mixture'
 import * as regression from './regression'
 import * as representation from './representation'
+import * as weak from './weak'
+import { DomainError } from 'aifn/foundation/errors'
 
-const modules = [classification, regression, divergence, representation, adversarial, energy, mixture]
+const modules = [classification, regression, divergence, representation, adversarial, energy, mixture, weak]
 
 /** Every loss, keyed by its `info.key`. */
 export const lossRegistry: Readonly<Record<string, Loss>> = entries('loss', ...modules) as unknown as Readonly<
@@ -33,6 +35,6 @@ export function listLosses(filter: { family?: LossFamily; inputs?: LossInput; no
 /** The loss with this key; throws for an unknown key. */
 export function getLoss(key: string): Loss {
   const l = lossRegistry[key]
-  if (!l) throw new Error(`losses: no loss '${key}'`)
+  if (!l) throw new DomainError('losses', `losses: no loss '${key}'`)
   return l
 }

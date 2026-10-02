@@ -9,6 +9,7 @@ import { fromData, type Tensor } from 'aifn/foundation/tensor'
 import type { Scalar, Size } from 'aifn/foundation/contracts'
 import { readSamples, type SignalInput } from '../signal'
 import { parabola } from './cepstrum'
+import { DomainError } from 'aifn/foundation/errors'
 
 /** The YIN difference function and its normalised form over lags 0 … maxLag. */
 export type YinDifference = { d: Tensor; dPrime: Tensor }
@@ -20,7 +21,7 @@ export type YinDifference = { d: Tensor; dPrime: Tensor }
 export function yinDifference(x: SignalInput, maxLag: Size): YinDifference {
   const v = readSamples(x, 'yinDifference').values
   const n = v.length
-  if (!(maxLag >= 1 && maxLag < n)) throw new RangeError('yinDifference: maxLag must lie in [1, n)')
+  if (!(maxLag >= 1 && maxLag < n)) throw new DomainError('yinDifference', 'yinDifference: maxLag must lie in [1, n)')
   const W = n - maxLag
   const d = new Float64Array(maxLag + 1)
   for (let tau = 1; tau <= maxLag; tau++) {
@@ -72,7 +73,8 @@ export function yinPitch(x: SignalInput, options: YinOptions = {}): YinEstimate 
   const n = input.values.length
   const tauMax = Math.ceil(fs / fmin)
   const tauMin = Math.max(2, Math.floor(fs / fmax))
-  if (2 * tauMax >= n) throw new RangeError('yinPitch: the frame must be longer than twice the longest period')
+  if (2 * tauMax >= n)
+    throw new DomainError('yinPitch', 'yinPitch: the frame must be longer than twice the longest period')
   const { dPrime } = yinDifference(input.values, tauMax + 1)
   const dp = dPrime.data as Float64Array
   let tau = -1

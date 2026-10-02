@@ -4,9 +4,9 @@ word level), each trained here on a small corpus, then rebuilt in aifn from its 
 encoding by encoding (ids, tokens, offsets, word ids, masks), with truncation, overflow and padding. Offsets are in
 Unicode code points, as `tokenizers` reports them.
 
-`tokenizers` is not a dependency of the project. The cases are recomputed only when it imports (0.21.4 was used);
-otherwise the recorded `text/pipeline.json` is kept. To refresh, run `python aifn-js/core/test/fixtures/generate.py
-text/pipeline` with an interpreter that has it.
+`tokenizers` (0.22 or later) is in the `fixtures` dependency group. The cases are recomputed only when it imports;
+otherwise the recorded `text/pipeline.json` is kept. Refresh with `uv run python aifn-js/core/test/fixtures/generate.py
+text/pipeline`.
 """
 
 import json
@@ -74,6 +74,28 @@ def encoding(e: Any) -> dict[str, object]:
     }
 
 
+def canonical_unigram(vocab: list[list[Any]]) -> list[tuple[str, float]]:
+    """Remove the run-to-run variation of a trained Unigram vocabulary, keeping the trainer's rules.
+
+    The trainer iterates hash maps, so (1) its EM sums run in a varying order, which moves scores in the last digits;
+    (2) the characters it must keep but did not learn get the scores `min + 0, min + 1e-4, min + 2e-4, ...` (`min` the
+    lowest learned score) in a varying order; (3) equal scores are listed in a varying order. Here scores are rounded
+    to 10 significant digits, the fallback scores are dealt to those characters in code-point order (the multiset of
+    scores is unchanged), and pieces are sorted by score, then text."""
+    head, pieces = vocab[0], [(str(p), float(f"{s:.10g}")) for p, s in vocab[1:]]
+    low = min(s for _, s in pieces)
+
+    def on_grid(s: float) -> bool:
+        return abs((s - low) / 1e-4 - round((s - low) / 1e-4)) < 1e-4 and s - low < 1e-4 * len(pieces)
+
+    grid = [i for i, (p, s) in enumerate(pieces) if len(p) == 1 and on_grid(s)]
+    chars = sorted(pieces[i][0] for i in grid)
+    dealt = dict(zip(chars, sorted((pieces[i][1] for i in grid), reverse=True), strict=True))
+    pieces = [(p, dealt.get(p, s)) for p, s in pieces]
+    pieces.sort(key=lambda ps: (-ps[1], ps[0]))
+    return [(str(head[0]), float(head[1])), *pieces]
+
+
 def hf_cases() -> dict[str, object]:
     from tokenizers import Tokenizer, decoders, models, normalizers, pre_tokenizers, processors, trainers
 
@@ -121,22 +143,32 @@ def hf_cases() -> dict[str, object]:
     )
     pipelines["byteLevelBpe"] = t
 
-    t = Tokenizer(make(models.WordPiece, unk_token="[UNK]"))
-    assign(
-        t,
-        normalizer=make(normalizers.Sequence, [normalizers.NFD(), normalizers.Lowercase(), normalizers.StripAccents()]),
+    # The trainer numbers the continuation pieces ("##e") in the order it meets them while iterating a hash map, which
+    # changes from run to run; merges of equal count are then broken by those ids, so the trained vocabulary changes
+    # too. Listing every continuation piece as a training-time special token fixes their ids (in code-point order); the
+    # tokeniser is then rebuilt from the trained vocabulary with only the real special tokens.
+    wp_specials = ["[PAD]", "[UNK]", "[CLS]", "[SEP]", "[MASK]"]
+    wp_normalizer = make(normalizers.Sequence, [normalizers.NFD(), normalizers.Lowercase(), normalizers.StripAccents()])
+    wp_pre = pre_tokenizers.BertPreTokenizer()
+    continuations = sorted(
+        {
+            f"##{c}"
+            for line in CORPUS
+            for w, _ in wp_pre.pre_tokenize_str(wp_normalizer.normalize_str(line))
+            for c in w[1:]
+        }
     )
-    assign(t, pre_tokenizer=pre_tokenizers.BertPreTokenizer())
-    assign(t, decoder=decoders.WordPiece())
+    t = Tokenizer(make(models.WordPiece, unk_token="[UNK]"))
+    assign(t, normalizer=wp_normalizer, pre_tokenizer=wp_pre)
     t.train_from_iterator(
         CORPUS,
         make(
-            trainers.WordPieceTrainer,
-            vocab_size=200,
-            special_tokens=["[PAD]", "[UNK]", "[CLS]", "[SEP]", "[MASK]"],
-            show_progress=False,
+            trainers.WordPieceTrainer, vocab_size=200, special_tokens=wp_specials + continuations, show_progress=False
         ),
     )
+    t = Tokenizer(make(models.WordPiece, t.get_vocab(), unk_token="[UNK]"))
+    assign(t, normalizer=wp_normalizer, pre_tokenizer=wp_pre, decoder=decoders.WordPiece())
+    t.add_special_tokens(wp_specials)
     assign(
         t,
         post_processor=processors.TemplateProcessing(
@@ -148,13 +180,14 @@ def hf_cases() -> dict[str, object]:
     pipelines["wordPiece"] = t
 
     t = Tokenizer(make(models.Unigram))
-    assign(t, normalizer=normalizers.NFKC())
-    assign(t, pre_tokenizer=pre_tokenizers.Metaspace())
-    assign(t, decoder=decoders.Metaspace())
+    assign(t, normalizer=normalizers.NFKC(), pre_tokenizer=pre_tokenizers.Metaspace(), decoder=decoders.Metaspace())
     t.train_from_iterator(
         CORPUS,
         make(trainers.UnigramTrainer, vocab_size=150, special_tokens=["<unk>"], unk_token="<unk>", show_progress=False),
     )
+    t = Tokenizer(make(models.Unigram, canonical_unigram(json.loads(t.to_str())["model"]["vocab"]), unk_id=0))
+    assign(t, normalizer=normalizers.NFKC(), pre_tokenizer=pre_tokenizers.Metaspace(), decoder=decoders.Metaspace())
+    t.add_special_tokens(["<unk>"])
     pipelines["unigram"] = t
 
     # SentencePiece-style BPE with byte fallback, as LLaMA: ▁ for spaces, <0xNN> for characters outside the vocabulary.
@@ -210,6 +243,32 @@ def hf_cases() -> dict[str, object]:
     }
     wp.enable_truncation(max_length=16, stride=2, strategy="longest_first")
     trunc["pairs"] = [{"a": a, "b": b, **encoding(wp.encode(a, b))} for a, b in PAIRS[:1]]
+    # tokenizers 0.22+ tokenises each sequence only until its splits hold max_length tokens (the first sequence is
+    # exempt under only_second), so overflowing windows stop there; specials typed in the text count as splits.
+    long_a = CORPUS[2] + " " + CORPUS[3]
+    variants = []
+    for max_length, stride, strategy, direction, a, b in [
+        (10, 2, "longest_first", "left", long_a, None),
+        (12, 0, "longest_first", "right", "the [MASK] of [MASK] and the dog. " + CORPUS[0], None),
+        (12, 3, "longest_first", "left", CORPUS[4] + " [MASK] the end", None),
+        (20, 2, "only_first", "right", long_a, PAIRS[0][1]),
+        (20, 2, "only_second", "right", PAIRS[0][1], long_a),
+        (14, 1, "longest_first", "left", PAIRS[0][0], long_a),
+    ]:
+        wp.enable_truncation(max_length=max_length, stride=stride, strategy=strategy, direction=direction)
+        e = wp.encode(a) if b is None else wp.encode(a, b)
+        variants.append(
+            {
+                "maxLength": max_length,
+                "stride": stride,
+                "strategy": strategy,
+                "direction": direction,
+                "a": a,
+                "b": b,
+                **encoding(e),
+            }
+        )
+    trunc["variants"] = variants
     wp.no_truncation()
     wp.enable_padding(pad_id=wp.token_to_id("[PAD]"), pad_token="[PAD]")
     trunc["batch"] = [encoding(e) for e in wp.encode_batch(ENCODE)]

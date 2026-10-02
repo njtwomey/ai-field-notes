@@ -13,7 +13,7 @@ import type { Algorithm } from 'aifn/foundation/trace'
 import { int, oneOf, real, space } from 'aifn/foundation/space'
 import { defineModel, withExpectation, withSampling, type FitOptions, type Supervised } from 'aifn/learning/estimators'
 import type { ScaleLink } from 'aifn/learning/losses'
-import { trainingLoop, type TrainingState } from 'aifn/nn/training'
+import { methodTraining, trainingLoop, type TrainingMethod, type TrainingState } from 'aifn/nn/training'
 import { adamRule } from 'aifn/optim/first-order'
 import {
   inputMatrix,
@@ -69,6 +69,11 @@ export type MdnRunOptions = Omit<MdnConfig, 'inputs' | 'outputs' | 'objective'> 
   every?: Size
   stepSize?: number
   batchSize?: Size
+  /**
+   * How both networks train (default Adam with `stepSize` and `batchSize`); `{ method: 'lbfgs' }` trains them by
+   * full-batch L-BFGS, one line-searched step per step.
+   */
+  method?: TrainingMethod
   /** The root stream's seed (default 'mdn'); both networks start from its child `init`. */
   seed?: string | number
 }
@@ -107,7 +112,16 @@ export type MdnSnapshot = {
  * the same seed, yielding a snapshot every `every` steps: a generator, so a worker can stream the run to a page.
  */
 export function* mixtureDensityRun(options: MdnRunOptions): Generator<MdnSnapshot> {
-  const { data, steps = 2000, every: everyOption, stepSize = 0.01, batchSize, seed = 'mdn', ...structure } = options
+  const {
+    data,
+    steps = 2000,
+    every: everyOption,
+    stepSize = 0.01,
+    batchSize,
+    method = { method: 'adam', stepSize, batchSize, clipNorm: 10 },
+    seed = 'mdn',
+    ...structure
+  } = options
   const x = inputMatrix(data.x)
   const outputs = data.y.shape.length === 1 ? 1 : data.y.shape[1]
   const scaling = inputStandardisation(x)
@@ -126,9 +140,11 @@ export function* mixtureDensityRun(options: MdnRunOptions): Generator<MdnSnapsho
     history.mse.push(mdnMeanSquaredError(a, data.y))
     history.meanMse.push(mdnMeanSquaredError(b, data.y))
   }
+  // A run that stops early (converged L-BFGS) reports its last step as the total.
+  let total = steps
   const snapshot = (t: Size, done: boolean): MdnSnapshot => ({
     step: t,
-    steps,
+    steps: total,
     done,
     spec: mdn.spec,
     meanSpec: meanNet.spec,
@@ -141,8 +157,9 @@ export function* mixtureDensityRun(options: MdnRunOptions): Generator<MdnSnapsho
     },
     checkpoints: [...checkpoints],
   })
-  const a = mdnTraining(mdn, { x, y: data.y }, { stepSize, batchSize })
-  const b = mdnTraining(meanNet, { x, y: data.y }, { stepSize, batchSize })
+  const train = { x, y: data.y }
+  const a = methodTraining((p: Params[], d: MdnData) => mdnLoss(mdn, p, d.x, d.y), train, method)
+  const b = methodTraining((p: Params[], d: MdnData) => mdnLoss(meanNet, p, d.x, d.y), train, method)
   let sa = a.init({ params: mdn.init(child(root, 'init', 'mixture')) }, child(root, 'init'))
   let sb = b.init({ params: meanNet.init(child(root, 'init', 'mean')) }, child(root, 'init'))
   record(0, sa.params, sb.params)
@@ -159,7 +176,13 @@ export function* mixtureDensityRun(options: MdnRunOptions): Generator<MdnSnapsho
       checkpoints.push({ step: k, mixture: sa.params, mean: sb.params })
       yield snapshot(k, k === steps)
     }
-    if (sa.diverged || sb.diverged) {
+    if (sa.diverged || sb.diverged || (sa.stopped && sb.stopped)) {
+      total = k
+      // Converged L-BFGS (or divergence) ends the run early; its last state is a checkpoint.
+      if (k % every !== 0 && k !== steps) {
+        if (k % recordEvery !== 0) record(k, sa.params, sb.params)
+        checkpoints.push({ step: k, mixture: sa.params, mean: sb.params })
+      }
       yield snapshot(k, true)
       return
     }

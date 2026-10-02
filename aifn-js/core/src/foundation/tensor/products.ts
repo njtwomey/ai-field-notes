@@ -8,6 +8,7 @@ import { AifnError, ShapeError } from 'aifn/foundation/errors'
 import { allocate, flatData, fromData, isTensor, promote, readonlyData, showShape, sizeOf, type Tensor } from './core'
 import * as dense from './dense'
 import { mul } from './elementwise'
+import { resultType } from './dtype'
 import { complexKernel, matmulKernel, splitComplex } from './kernels'
 import { conj } from './complex'
 import { batchToFront, definePrimitive, sumLike, type Op, type Raw, type Result2 } from './primitive'
@@ -372,7 +373,8 @@ export function einsum(spec: string, ...operands: Value[]): Value {
 const linearCombinationOp: Op<readonly number[]> = definePrimitive<readonly number[]>({
   id: 'foundation/tensor/linearCombination',
   arity: 'variadic',
-  dtype: 'same',
+  // Accumulated in float64; the result is float32 only when every tensor input is (the `float` rule).
+  dtype: 'float',
   impl: (xs, c) => {
     if (xs.length === 0 || xs.length !== c.length)
       throw new ShapeError('linearCombination', `linearCombination: ${xs.length} inputs for ${c.length} coefficients`)
@@ -398,7 +400,9 @@ const linearCombinationOp: Op<readonly number[]> = definePrimitive<readonly numb
       const v = readonlyData(x) ?? flatData(x)
       for (let k = 0; k < n; k++) out[k] += ci * (v[k] as number)
     })
-    return fromData(out, [...shape])
+    const tensors = xs.filter(isTensor)
+    const single = tensors.length > 0 && tensors.every((x) => x.dtype === 'float32')
+    return single ? fromData(Float32Array.from(out), [...shape]) : fromData(out, [...shape])
   },
   linear: 'linear',
   transpose: (ct, xs, which, c) => {
@@ -412,8 +416,15 @@ const linearCombinationOp: Op<readonly number[]> = definePrimitive<readonly numb
         'linearCombination',
         `linearCombination: ${avals.length} inputs for ${c.length} coefficients`,
       )
+    const tensorDTypes = avals.filter((a) => !a.number).map((a) => a.dtype)
     return tensorAval
-      ? { shape: [...tensorAval.shape], dtype: avals.map((a) => a.dtype).reduce(promote), number: false }
+      ? {
+          shape: [...tensorAval.shape],
+          dtype: tensorDTypes.every((d) => d === 'float32')
+            ? 'float32'
+            : resultType('float', tensorDTypes.reduce(promote)),
+          number: false,
+        }
       : { shape: [], dtype: 'float64', number: true }
   },
   // Every input is brought to [size, ...example shape]: batched ones move their batch axis first, and both they and

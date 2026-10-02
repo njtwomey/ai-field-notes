@@ -269,7 +269,9 @@ export interface FilterDesignInfo extends Info {
  * differential equation), `map` (an iterated map), `log-density` (a target to sample), `factor-graph`, `chain` (chain
  * potentials), `gaussian-model`, `graph`, `flow-network`, `linear-program`, `quadratic-program`, `integer-program`,
  * `assignment`, `dynamic-program`, `riccati`, `transport`, `signal`, `lti-system`, `network` (a model to train),
- * `sequence` (a data stream to filter), `corpus` (words or documents of text, e.g. a tokeniser to train).
+ * `sequence` (a data stream to filter), `corpus` (words or documents of text, e.g. a tokeniser to train),
+ * `search-space` (a root, a refinement operator and a quality to search over), `table` (named columns to mine for
+ * patterns, e.g. subgroups), `logic-program` (clauses with a query, or examples to learn clauses from).
  */
 export type AlgorithmProblem =
   | 'objective'
@@ -299,6 +301,9 @@ export type AlgorithmProblem =
   | 'network'
   | 'sequence'
   | 'corpus'
+  | 'logic-program'
+  | 'search-space'
+  | 'table'
 
 /** The `Status` flags a state may set. */
 export type StatusFlag = 'converged' | 'diverged' | 'stalled' | 'terminated'

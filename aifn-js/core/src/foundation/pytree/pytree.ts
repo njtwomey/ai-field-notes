@@ -158,6 +158,13 @@ export function treeZip<T, V extends Value = LeafValue>(
         'treeZip',
         `treeZip: tree ${i + 2} has ${o.leaves.length} leaves, the first has ${main.leaves.length}`,
       )
+    // Equal counts are not enough: the leaves must sit at the same paths (a.x with b.x, not with b.y).
+    const k = o.paths.findIndex((p, j) => p !== main.paths[j])
+    if (k >= 0)
+      throw new ShapeError(
+        'treeZip',
+        `treeZip: tree ${i + 2} has a leaf at '${o.paths[k]}' where the first has '${main.paths[k]}'`,
+      )
   })
   const mapped = main.leaves.map((leaf, k) => f([leaf, ...others.map((o) => o.leaves[k])], main.paths[k]))
   return treeUnflatten<T>(main.treedef, mapped)

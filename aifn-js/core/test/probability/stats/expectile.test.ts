@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { DomainError } from 'aifn/foundation/errors'
 import { expectile, expectiles } from 'aifn/probability/stats'
 import { expectileLoss } from 'aifn/learning/losses'
 import { fromData, toFlat, type Tensor } from 'aifn/foundation/tensor'
@@ -45,7 +46,7 @@ describe('expectile', () => {
   })
 
   it('rejects τ outside (0, 1) and empty data', () => {
-    expect(() => expectile([1, 2], 1)).toThrow(RangeError)
+    expect(() => expectile([1, 2], 1)).toThrow(DomainError)
     expect(() => expectile([], 0.5)).toThrow()
   })
 })

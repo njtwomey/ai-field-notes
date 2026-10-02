@@ -13,7 +13,7 @@
  */
 
 import { defineCustomVjp, vjp } from 'aifn/foundation/autodiff'
-import { NumericalError } from 'aifn/foundation/errors'
+import { DomainError, NumericalError } from 'aifn/foundation/errors'
 import {
   concat,
   fromData,
@@ -111,9 +111,9 @@ export function odeAdjoint(
     onSolve,
   } = options
   if (!(Number.isInteger(checkpoints) && checkpoints >= 1))
-    throw new Error('odeAdjoint: checkpoints must be a positive integer')
+    throw new DomainError('odeAdjoint', 'odeAdjoint: checkpoints must be a positive integer')
   if (!(t1 !== t0 && Number.isFinite(t0) && Number.isFinite(t1)))
-    throw new Error('odeAdjoint: the interval must be finite and non-empty')
+    throw new DomainError('odeAdjoint', 'odeAdjoint: the interval must be finite and non-empty')
   const name = 'odeAdjoint'
   const bounds = Array.from({ length: checkpoints + 1 }, (_, j) =>
     j === checkpoints ? t1 : t0 + ((t1 - t0) * j) / checkpoints,

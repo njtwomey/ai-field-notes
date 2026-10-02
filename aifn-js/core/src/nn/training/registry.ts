@@ -8,6 +8,8 @@ import { definer, entries, type AlgorithmInfo, type Entry } from 'aifn/foundatio
 import * as adversarial from './adversarial'
 import * as energy from './energy'
 import * as fullBatch from './fullBatch'
+import * as method from './method'
+import * as privacy from './private'
 import * as train from './train'
 
 const algorithm = definer<AlgorithmInfo>('algorithm', 'nn/training')
@@ -68,8 +70,38 @@ algorithm(
   fullBatch.fullBatchTraining,
 )
 
+algorithm(
+  {
+    key: 'methodTraining',
+    name: 'Training by method (first-order or L-BFGS)',
+    summary:
+      'A network trained by a chosen method with one state shape: an update rule through the training loop, or full-batch L-BFGS.',
+    problem: 'network',
+    state: { iterate: 'params', objective: 'loss', flags: ['converged', 'diverged'] },
+    random: true,
+    notes: ['quasi-newton-methods', 'multilayer-perceptron'],
+    cite: ['liu1989'],
+  },
+  method.methodTraining,
+)
+
+algorithm(
+  {
+    key: 'privateTraining',
+    name: 'DP-SGD',
+    summary:
+      'Poisson-sampled per-example gradients clipped to norm C and noised with N(0, σ²C²), with the ε spent by RDP accounting.',
+    problem: 'network',
+    state: { iterate: 'params', objective: 'loss', flags: ['diverged'] },
+    random: true,
+    notes: ['differentially-private-stochastic-gradient-descent', 'differential-privacy'],
+    cite: ['abadi2016dp', 'mironov2017'],
+  },
+  privacy.privateTraining,
+)
+
 /** Every algorithm of the module, keyed by factory name. */
 export const trainingAlgorithms: Readonly<Record<string, Entry<(...args: never[]) => unknown, AlgorithmInfo>>> =
-  entries<AlgorithmInfo>('algorithm', train, adversarial, energy, fullBatch) as Readonly<
+  entries<AlgorithmInfo>('algorithm', train, adversarial, energy, fullBatch, method, privacy) as Readonly<
     Record<string, Entry<(...args: never[]) => unknown, AlgorithmInfo>>
   >

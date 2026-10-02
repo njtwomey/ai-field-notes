@@ -7,6 +7,7 @@ import type { LtiSystem, Status, VectorLike } from 'aifn/foundation/contracts'
 import { dense, fromData, type Vector } from 'aifn/foundation/tensor'
 import type { Algorithm } from 'aifn/foundation/trace'
 import { discretise, toStateSpace } from 'aifn/systems'
+import { DomainError, ShapeError } from 'aifn/foundation/errors'
 
 /** PID gains: u = k_p e + k_i ∫e dt + k_d de/dt, the derivative filtered by a first-order lag of time constant T_f. */
 export type PidGains = {
@@ -89,9 +90,9 @@ export function pidLoop(
   options: PidOptions,
 ): Algorithm<{ x0?: VectorLike }, PidState> {
   const { dt } = options
-  if (!(dt > 0)) throw new RangeError('pidLoop: dt must be positive')
+  if (!(dt > 0)) throw new DomainError('pidLoop', 'pidLoop: dt must be positive')
   if (plant.dt !== null && Math.abs(plant.dt - dt) > 1e-12 * dt)
-    throw new RangeError('pidLoop: a discrete plant must have the controller interval dt')
+    throw new DomainError('pidLoop', 'pidLoop: a discrete plant must have the controller interval dt')
   const ss = (plant.domain === 'continuous' ? discretise(plant, dt, 'zoh') : toStateSpace(plant)).repr
   const n = ss.A.shape[0]
   const inputs = ss.B.shape[1]
@@ -100,7 +101,7 @@ export function pidLoop(
   const b = Float64Array.from({ length: n }, (_, i) => B[i * inputs])
   const c = dense.data(ss.C).slice(0, n)
   // A feedthrough D would make u depend on y and y on u within one sample (an algebraic loop).
-  if (dense.data(ss.D)[0] !== 0) throw new RangeError('pidLoop: the plant must be strictly proper (D = 0)')
+  if (dense.data(ss.D)[0] !== 0) throw new DomainError('pidLoop', 'pidLoop: the plant must be strictly proper (D = 0)')
   const kp = gains.kp
   const ki = gains.ki ?? 0
   const kd = gains.kd ?? 0
@@ -157,7 +158,7 @@ export function pidLoop(
     name: 'pid-loop',
     init: ({ x0 } = {}) => {
       const x = x0 === undefined ? new Float64Array(n) : dense.toF64(x0, 'pidLoop x0')
-      if (x.length !== n) throw new RangeError(`pidLoop: x0 must have ${n} components`)
+      if (x.length !== n) throw new ShapeError('pidLoop', `pidLoop: x0 must have ${n} components`)
       return control(0, x, 0, 0, null, new Array(lag).fill(0))
     },
     step: (s) => {

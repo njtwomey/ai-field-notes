@@ -208,6 +208,27 @@ describe('quadratic programming', () => {
     close(toFlat(f.x), [2, 1], 1e-9)
   })
 
+  it('the curvature check sees through dependent equality rows (rank-revealing null space)', () => {
+    // Q = diag(1, 1, −1) with x₁ fixed twice (two identical rows of E): null(E) still holds the negative direction x₃.
+    const dependent = {
+      Q: [
+        [1, 0, 0],
+        [0, 1, 0],
+        [0, 0, -1],
+      ],
+      c: [0, 0, 0],
+      E: [
+        [1, 0, 0],
+        [1, 0, 0],
+        [2, 0, 0],
+      ],
+      e: [1, 1, 2],
+      A: [[0, 1, 0]],
+      b: [5],
+    }
+    expect(quadprog(dependent, { method: 'interior-point' }).status).toBe('nonconvex')
+  })
+
   it('interior point stops nonconvex on an indefinite Q, and solves when E removes the negative direction', () => {
     // The lab's case: Q = diag(2, −2) on the polygon. Without the check the iterates reach a KKT point reported optimal.
     const indefinite = {

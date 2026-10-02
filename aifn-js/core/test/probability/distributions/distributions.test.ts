@@ -403,7 +403,7 @@ describe('distributions: maps, supports and pushforwards', () => {
     // Beta through logit (the inverse of the sigmoid) covers ℝ; an Exponential through log too (0 has mass zero).
     expect(D.Transformed(D.Exponential(2), B.logBijector).support.type).toBe('real')
     expect(() => D.Transformed(D.Normal(0, 1), B.logBijector)).toThrow(/ℝ is not inside the domain \(0, ∞\) of log/)
-    expect(() => D.Transformed(D.Poisson(2), B.logBijector)).toThrow(RangeError)
+    expect(() => D.Transformed(D.Poisson(2), B.logBijector)).toThrow(DomainError)
   })
   it('bijectors: inverse and log-Jacobian', () => {
     const x = 0.7

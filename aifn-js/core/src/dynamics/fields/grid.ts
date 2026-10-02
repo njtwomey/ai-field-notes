@@ -7,6 +7,7 @@
 import { dense, fromData, type Matrix, type Tensor, type Value, type Vector } from 'aifn/foundation/tensor'
 import type { Scalar, Size } from 'aifn/foundation/contracts'
 import type { ScalarField } from './calculus'
+import { ShapeError } from 'aifn/foundation/errors'
 
 type F64 = dense.F64
 
@@ -23,7 +24,7 @@ function scalarValue(v: Value, where: string): Scalar {
   if (typeof v === 'number') return v
   const t = v as Tensor
   if (t.shape.length > 1 || (t.shape.length === 1 && t.shape[0] !== 1))
-    throw new Error(`${where}: expected a scalar, got shape [${t.shape.join(', ')}]`)
+    throw new ShapeError(where, `${where}: expected a scalar, got shape [${t.shape.join(', ')}]`)
   return t.data[t.offset]
 }
 

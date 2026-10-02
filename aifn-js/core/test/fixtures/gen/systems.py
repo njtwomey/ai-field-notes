@@ -1,8 +1,10 @@
-"""Golden values for aifn/control from scipy: Riccati and Lyapunov equations, discretisation, tf/ss conversion, Bode."""
+"""Golden values for aifn/control from scipy: Riccati and Lyapunov equations, discretisation, tf/ss conversion, Bode;
+and from python-control: root loci and Nyquist encirclement counts."""
 
 from collections.abc import Callable
 from typing import Protocol, cast
 
+import control as ct  # pyright: ignore[reportMissingTypeStubs]
 import numpy as np
 import scipy.linalg as sla
 import scipy.signal as sig
@@ -91,6 +93,50 @@ def place_cases() -> dict[str, object]:
     return out
 
 
+def locus_case(num: list[float], den: list[float], gains: list[float]) -> dict[str, object]:
+    """Closed-loop poles at each gain, sorted per gain (branch order is not compared)."""
+    data = ct.root_locus_map(ct.tf(num, den), gains)  # pyright: ignore[reportUnknownMemberType]
+    loci = np.asarray(data.loci)  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType, reportAttributeAccessIssue]
+    rows = [np.sort_complex(row) for row in loci]
+    return {
+        "num": num,
+        "den": den,
+        "gains": gains,
+        "re": [r.real for r in rows],
+        "im": [r.imag for r in rows],
+    }
+
+
+def nyquist_case(num: list[float], den: list[float], dt: float | None = None) -> dict[str, object]:
+    """python-control's encirclement count N and the open-loop unstable poles P."""
+    sys = ct.tf(num, den, dt) if dt else ct.tf(num, den)  # pyright: ignore[reportUnknownMemberType]
+    resp = ct.nyquist_response(sys)  # pyright: ignore[reportUnknownMemberType]
+    p = np.asarray(sys.poles())  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType, reportOptionalMemberAccess]
+    unstable = int(np.sum(np.abs(p) > 1 + 1e-9)) if dt else int(np.sum(p.real > 1e-9))  # pyright: ignore[reportAttributeAccessIssue]
+    return {"num": num, "den": den, "dt": dt, "count": int(resp.count), "P": unstable}  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]
+
+
+def criteria_cases() -> dict[str, object]:
+    """Root loci and Nyquist encirclement counts from python-control."""
+    return {
+        "rootLocus": [
+            locus_case([1.0], [1.0, 3.0, 2.0, 0.0], [0.0, 0.1, 0.5, 1.0, 6.0, 20.0, 100.0]),
+            locus_case([1.0, 2.0], [1.0, 2.0, 5.0, 0.0], [0.0, 0.3, 1.0, 4.0, 10.0]),
+            locus_case([1.0, 1.0], [1.0, -1.0, 0.0], [0.0, 0.5, 1.0, 2.0, 8.0]),
+        ],
+        "nyquist": [
+            nyquist_case([1.0], [1.0, 3.0, 2.0, 0.0]),
+            nyquist_case([20.0], [1.0, 3.0, 2.0, 0.0]),
+            nyquist_case([2.0, 2.0], [1.0, -1.0]),
+            nyquist_case([3.0], [1.0, 2.0, 2.0, 1.0]),
+            nyquist_case([10.0], [1.0, 2.0, 2.0, 1.0]),
+            nyquist_case([2.0, 1.0], [1.0, 1.0, 0.0, 0.0]),
+            nyquist_case([0.5], [1.0, -1.2, 0.35], 0.1),
+            nyquist_case([2.0], [1.0, -1.2, 0.35], 0.1),
+        ],
+    }
+
+
 def cases() -> dict[str, object]:
     rng = np.random.default_rng(3)
     a = rng.normal(size=(3, 3))
@@ -167,4 +213,5 @@ def cases() -> dict[str, object]:
         "discrete": {"b": d_b, "a": d_a, "w": d_w, "re": d_h.real, "im": d_h.imag, "sos": d_sos},
         "margins": {"num": [2.0], "den": [1.0, 3.0, 2.0, 0.0], **margins_reference([2.0], [1.0, 3.0, 2.0, 0.0])},
         "place": place_cases(),
+        **criteria_cases(),
     }

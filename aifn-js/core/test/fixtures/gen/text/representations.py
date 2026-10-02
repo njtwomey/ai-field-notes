@@ -1,8 +1,11 @@
 """aifn/text/representations and the truncated SVD, shingles and MinHash: scikit-learn's CountVectorizer and
 TruncatedSVD, numpy's SVD and 3CosAdd analogies, and datasketch's MinHash estimates."""
 
+from typing import cast
+
 import numpy as np
 from datasketch import MinHash
+from scipy.sparse import csr_matrix
 from sklearn.decomposition import TruncatedSVD
 from sklearn.feature_extraction.text import CountVectorizer
 
@@ -18,7 +21,7 @@ DOCS = [
 
 def term_document() -> dict[str, object]:
     cv = CountVectorizer(token_pattern=r"(?u)\b\w+\b")
-    x = cv.fit_transform(DOCS).toarray()
+    x = cast(csr_matrix, cv.fit_transform(DOCS)).toarray()
     return {"vocabulary": cv.get_feature_names_out().tolist(), "termDocument": x.T}
 
 
@@ -28,7 +31,7 @@ def truncated() -> dict[str, object]:
     for name, (m, n, k) in {"small": (12, 9, 3), "tall": (90, 70, 5), "wide": (70, 110, 6)}.items():
         a = rng.random((m, n)) * (rng.random((m, n)) < 0.2)
         a[:, 0] += 1.0  # a dominant direction, so the leading singular values are well separated
-        svd = TruncatedSVD(n_components=k, algorithm="arpack").fit(a)
+        svd = TruncatedSVD(n_components=k, algorithm="arpack", random_state=0).fit(a)
         u, s, _ = np.linalg.svd(a, full_matrices=False)
         out[name] = {
             "matrix": a,

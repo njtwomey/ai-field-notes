@@ -13,6 +13,7 @@
 import type { Algorithm, Size, Status } from 'aifn/foundation/contracts'
 import { fromData, toFlat, unwrap, type Tensor, type Value } from 'aifn/foundation/tensor'
 import { run } from 'aifn/foundation/trace'
+import { ShapeError } from 'aifn/foundation/errors'
 
 /** A tile: query rows [q0, q1) against key rows [k0, k1). */
 export type AttentionTile = { readonly queries: readonly [number, number]; readonly keys: readonly [number, number] }
@@ -50,7 +51,8 @@ export interface FlashAttentionState extends Status {
 
 const matrix = (v: Value, what: string) => {
   const t = unwrap(v) as Tensor
-  if (typeof t === 'number' || t.shape.length !== 2) throw new Error(`flashAttentionSteps: ${what} must be [T, d]`)
+  if (typeof t === 'number' || t.shape.length !== 2)
+    throw new ShapeError('flashAttentionSteps', `flashAttentionSteps: ${what} must be [T, d]`)
   return { rows: t.shape[0], cols: t.shape[1], data: toFlat(t) }
 }
 
@@ -68,7 +70,8 @@ export function flashAttentionSteps(
   const Q = matrix(q, 'q')
   const K = matrix(k, 'k')
   const V = matrix(v, 'v')
-  if (Q.cols !== K.cols || K.rows !== V.rows) throw new Error('flashAttentionSteps: q, k and v do not agree')
+  if (Q.cols !== K.cols || K.rows !== V.rows)
+    throw new ShapeError('flashAttentionSteps', 'flashAttentionSteps: q, k and v do not agree')
   const { queryBlock = 4, keyBlock = 4, causal = false } = options
   const scale = options.scale ?? 1 / Math.sqrt(Q.cols)
   const shift = K.rows - Q.rows

@@ -13,6 +13,7 @@ import type { Algorithm } from 'aifn/foundation/trace'
 import { badLogDensity } from './metropolis'
 import type { AcceptRejectState, ChainStart, ChainState, LogDensity, VectorLike } from './types'
 import { allFinite, data, logDensityAndGrad, standardNormals, toF64, vec, type F64 } from './util'
+import { ShapeError } from 'aifn/foundation/errors'
 
 /** The state of `unadjustedLangevin` and `mala`. */
 export type LangevinState = AcceptRejectState & {
@@ -48,7 +49,7 @@ function langevin(
     name,
     init: ({ x0 }) => {
       const x = toF64(x0, name)
-      if (x.length !== d) throw new Error(`${name}: x0 has ${x.length} values for dimension ${d}`)
+      if (x.length !== d) throw new ShapeError(name, `${name}: x0 has ${x.length} values for dimension ${d}`)
       const { value, grad } = logDensityAndGrad(target, x)
       const X = vec(x)
       return {
@@ -183,7 +184,7 @@ export function sgld(model: MinibatchModel, options: SgldOptions = {}): Algorith
     name,
     init: ({ x0 }) => {
       const x = toF64(x0, name)
-      if (x.length !== d) throw new Error(`${name}: x0 has ${x.length} values for dimension ${d}`)
+      if (x.length !== d) throw new ShapeError(name, `${name}: x0 has ${x.length} values for dimension ${d}`)
       return {
         t: 0,
         x: vec(x),
@@ -288,7 +289,8 @@ export function langevinParticles(
   return {
     name: 'langevin-particles',
     init: ({ x }) => {
-      if (x.shape.length !== 2) throw new Error('langevinParticles: the particles must be an [n, d] tensor')
+      if (x.shape.length !== 2)
+        throw new ShapeError('langevinParticles', 'langevinParticles: the particles must be an [n, d] tensor')
       return {
         t: 0,
         x,

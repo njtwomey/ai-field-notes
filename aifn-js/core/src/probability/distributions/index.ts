@@ -22,10 +22,10 @@
  *   `GammaWithScale`, Geometric on k ≥ 1, NegativeBinomial counting failures.
  *
  * Families (`distributionRegistry`: every constructor with its parameter `Space`, support and structure). Continuous: Normal, LogNormal, StudentT, Cauchy, Laplace, Logistic, Uniform, Exponential, Gamma,
- * InverseGamma, Beta, ChiSquare, FisherSnedecor (F), Weibull, Gumbel, VonMises, TruncatedNormal. Discrete: Bernoulli, Binomial,
+ * InverseGamma, Beta, ChiSquare, FisherSnedecor (F), Weibull, Gumbel, GeneralisedPareto, VonMises, TruncatedNormal. Discrete: Bernoulli, Binomial,
  * Categorical, Poisson, Geometric, NegativeBinomial, Hypergeometric, DiscreteUniform. Multivariate:
  * MultivariateNormal (with `condition` and `marginal`), Dirichlet, Multinomial, Wishart. Composition: Mixture,
- * Independent, Transformed (through a monotone bijector: `affineBijector`, `expBijector`, `logBijector`,
+ * ZeroInflated, Independent, Transformed (through a monotone bijector: `affineBijector`, `expBijector`, `logBijector`,
  * `sigmoidBijector`, `tanhBijector`, `softplusBijector`, `powerBijector`, `normalCdfBijector`, `chainBijectors`),
  * Pushforward (through a many-to-one map such as `squareMap`, summing over preimages). Maps declare their `domain` and
  * `codomain` as `Interval`s; `imageOf`, `supportInterval` and `formatInterval` work with them. Divergences: `kl`,
@@ -59,6 +59,7 @@ export {
   Gamma,
   GammaWithScale,
   Gumbel,
+  GeneralisedPareto,
   InverseGamma,
   Laplace,
   Logistic,
@@ -82,7 +83,7 @@ export {
   Poisson,
 } from './discrete'
 export { Dirichlet, Multinomial, MultivariateNormal, Wishart, type MultivariateNormalSpread } from './multivariate'
-export { Independent, Mixture, Pushforward, Transformed } from './compose'
+export { Independent, Mixture, Pushforward, Transformed, ZeroInflated } from './compose'
 export { hasKl, kl, klMonteCarlo, klRegistry, type KlRule } from './kl'
 export { distributionFunctions, distributionRegistry } from './registry'
 export { univariate, type UnivariateSpec } from './util'

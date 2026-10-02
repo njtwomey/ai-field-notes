@@ -2,7 +2,13 @@
  * Rank tests: the Mann–Whitney U test of two independent samples (scipy's `mannwhitneyu`) and the Wilcoxon
  * signed-rank test of paired differences (scipy's `wilcoxon`, zero method `wilcox`). Without ties each statistic has
  * an exact null law, built here as a `Categorical` over its integer values by a recursion on the sample size; with
- * ties (or large samples) the normal approximation with the tie-corrected variance is used.
+ * ties (or large samples) the normal approximation with the tie-corrected variance is used, and `method: 'exact'`
+ * with ties throws.
+ *
+ * Two conventions differ from scipy 1.18. `wilcoxonSignedRank` reports T⁺ for every alternative (as R's `wilcox.test`
+ * reports V), where scipy's two-sided result reports min(T⁺, T⁻); the p-values agree. With ties or zero differences
+ * and n ≤ 50, scipy's `auto` runs a permutation test over the actual midranks, and here the normal approximation
+ * is used (the p-values differ by a few hundredths at small n).
  */
 
 import { DomainError } from 'aifn/foundation/errors'
@@ -115,6 +121,8 @@ export function mannWhitneyU(
   const alternative = options.alternative ?? 'two-sided'
   let method = options.method ?? 'auto'
   if (method === 'auto') method = (m > 8 && n > 8) || ties > 0 ? 'asymptotic' : 'exact'
+  else if (method === 'exact' && ties > 0)
+    throw new DomainError('mannWhitneyU', "mannWhitneyU: the exact law assumes no ties; use method 'asymptotic'")
   const N = m + n
   const mu = (m * n) / 2
   const sd = Math.sqrt(((m * n) / 12) * (N + 1 - ties / (N * (N - 1))))
@@ -168,6 +176,11 @@ export function wilcoxonSignedRank(
   const alternative = options.alternative ?? 'two-sided'
   let method = options.method ?? 'auto'
   if (method === 'auto') method = ties === 0 && zeros === 0 && n <= 50 ? 'exact' : 'asymptotic'
+  else if (method === 'exact' && (ties > 0 || zeros > 0))
+    throw new DomainError(
+      'wilcoxonSignedRank',
+      "wilcoxonSignedRank: the exact law assumes no ties or zero differences; use method 'asymptotic'",
+    )
   const exact = method === 'exact'
   const mu = total / 2
   const sd = Math.sqrt((n * (n + 1) * (2 * n + 1)) / 24 - ties / 48)

@@ -1,4 +1,13 @@
-import { useContext, useLayoutEffect, useMemo, useState, type CSSProperties, type ReactNode } from 'react'
+import {
+  useContext,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+  type PointerEvent as ReactPointerEvent,
+  type ReactNode,
+} from 'react'
 import { chrome, seriesColor, useTheme, type Mode } from '@lab/design'
 import { FrameContext, useElementSize } from '@lab/viz'
 import { parseEnd } from './ends'
@@ -395,6 +404,12 @@ export type DiagramProps = {
   onNodeHover?: (id: string | null) => void
   /** With `onNodeClick`: each node takes the focus by Tab and clicks on Enter or Space (default true). */
   focusable?: boolean
+  /**
+   * Makes nodes draggable: called with the node's id and the pointer's position in grid units on every move (`move`)
+   * and on release (`end`). The figure writes the position back into the spec. A press that moves the pointer less than
+   * 4 px is a click, not a drag. Give the spec a `frame` so the view does not refit under the pointer.
+   */
+  onNodeDrag?: (id: string, x: number, y: number, phase: 'move' | 'end') => void
 }
 
 /**
@@ -410,7 +425,12 @@ export function Diagram({
   onNodeClick,
   onNodeHover,
   focusable = true,
+  onNodeDrag,
 }: DiagramProps) {
+  const svgRef = useRef<SVGSVGElement>(null)
+  // The node being dragged and where the press began, and whether the pointer has moved far enough to be a drag.
+  const drag = useRef<{ id: string; x: number; y: number; moved: boolean } | null>(null)
+  const justDragged = useRef(false)
   const { resolved: mode } = useTheme()
   const frame = useContext(FrameContext)
   const u = source.unit ?? 40
@@ -517,8 +537,47 @@ export function Diagram({
     </span>
   )
 
+  /** The pointer's position in grid units (the SVG's user space divided by the unit). */
+  const gridPoint = (event: ReactPointerEvent): { x: number; y: number } | null => {
+    const el = svgRef.current
+    const m = el?.getScreenCTM()
+    if (!el || !m) return null
+    const p = new DOMPoint(event.clientX, event.clientY).matrixTransform(m.inverse())
+    return { x: p.x / u, y: p.y / u }
+  }
+  const dragHandlers = (id: string) =>
+    onNodeDrag
+      ? {
+          onPointerDown: (event: ReactPointerEvent<SVGGElement>) => {
+            if (event.button !== 0) return
+            event.currentTarget.setPointerCapture(event.pointerId)
+            drag.current = { id, x: event.clientX, y: event.clientY, moved: false }
+          },
+          onPointerMove: (event: ReactPointerEvent<SVGGElement>) => {
+            const d = drag.current
+            if (!d || d.id !== id) return
+            if (!d.moved && Math.hypot(event.clientX - d.x, event.clientY - d.y) < 4) return
+            d.moved = true
+            const p = gridPoint(event)
+            if (p) onNodeDrag(id, p.x, p.y, 'move')
+          },
+          onPointerUp: (event: ReactPointerEvent<SVGGElement>) => {
+            const d = drag.current
+            drag.current = null
+            if (!d || d.id !== id || !d.moved) return
+            justDragged.current = true
+            const p = gridPoint(event)
+            if (p) onNodeDrag(id, p.x, p.y, 'end')
+          },
+          onPointerCancel: () => {
+            drag.current = null
+          },
+        }
+      : {}
+
   const svg = (
     <svg
+      ref={svgRef}
       viewBox={`${vx} ${vy} ${width} ${height}`}
       role="img"
       aria-label={ariaLabel}
@@ -848,7 +907,21 @@ export function Diagram({
         return (
           <g
             key={n.id}
-            onClick={onNodeClick ? () => onNodeClick(n.id) : undefined}
+            data-node-id={n.id}
+            data-node-label={n.ariaLabel ?? n.label}
+            {...dragHandlers(n.id)}
+            onClick={
+              onNodeClick
+                ? () => {
+                    // A drag ends with a click on the same node; it is not a choice.
+                    if (justDragged.current) {
+                      justDragged.current = false
+                      return
+                    }
+                    onNodeClick(n.id)
+                  }
+                : undefined
+            }
             onKeyDown={
               onNodeClick
                 ? (event) => {
@@ -864,7 +937,13 @@ export function Diagram({
             role={onNodeClick ? 'button' : undefined}
             aria-label={onNodeClick ? (n.ariaLabel ?? n.label ?? n.id) : undefined}
             aria-pressed={onNodeClick && n.selected !== undefined ? n.selected : undefined}
-            style={onNodeClick ? { cursor: 'pointer', outline: 'none' } : undefined}
+            style={
+              onNodeDrag
+                ? { cursor: 'grab', outline: 'none', touchAction: 'none' }
+                : onNodeClick
+                  ? { cursor: 'pointer', outline: 'none' }
+                  : undefined
+            }
           >
             {body}
             {n.bar && (shape === 'box' || shape === 'pill' || !n.label) && (

@@ -9,6 +9,7 @@ import { det, solve, squaredDistances, svd } from 'aifn/numerics/linalg'
 import { quantile } from 'aifn/probability/stats'
 import { fromData, toFlat, type Tensor } from 'aifn/foundation/tensor'
 import { defineMetric, dense, divide, matrix, sameLength, values, vector, type Data, type Rows } from './core'
+import { DomainError, ShapeError } from 'aifn/foundation/errors'
 
 function pairOf(x: Data, y: Data, what: string) {
   const a = values(x)
@@ -128,7 +129,7 @@ export function orthogonalProcrustes(
   const X = dense(x, 'orthogonalProcrustes')
   const Y = dense(y, 'orthogonalProcrustes')
   if (X.rows !== Y.rows || X.cols !== Y.cols)
-    throw new Error('metrics: orthogonalProcrustes: point sets differ in shape')
+    throw new ShapeError('metrics', 'metrics: orthogonalProcrustes: point sets differ in shape')
   const { rows: n, cols: d } = X
   const mx = new Float64Array(d)
   const my = new Float64Array(d)
@@ -208,7 +209,7 @@ export const procrustesDisparity = defineMetric(
       for (let i = 0; i < D.rows; i++) for (let c = 0; c < D.cols; c++) mean[c] += D.data[i * D.cols + c] / D.rows
       const out = Float64Array.from(D.data, (v, k) => v - mean[k % D.cols])
       const norm = Math.sqrt(out.reduce((s, v) => s + v * v, 0))
-      if (norm === 0) throw new Error('metrics: procrustesDisparity: a point set has no spread')
+      if (norm === 0) throw new DomainError('metrics', 'metrics: procrustesDisparity: a point set has no spread')
       return matrix(
         out.map((v) => v / norm),
         D.rows,
@@ -231,8 +232,8 @@ export const procrustesDisparity = defineMetric(
 
 /** Each point of X's Euclidean distance to its nearest point of Y. */
 function nearestDistances(X: ReturnType<typeof dense>, Y: ReturnType<typeof dense>): Float64Array {
-  if (X.cols !== Y.cols) throw new Error('metrics: point sets differ in dimension')
-  if (Y.rows === 0) throw new Error('metrics: a point set is empty')
+  if (X.cols !== Y.cols) throw new ShapeError('metrics', 'metrics: point sets differ in dimension')
+  if (Y.rows === 0) throw new DomainError('metrics', 'metrics: a point set is empty')
   const D = toFlat(squaredDistances(matrix(X.data, X.rows, X.cols), matrix(Y.data, Y.rows, Y.cols)))
   return Float64Array.from({ length: X.rows }, (_, i) => {
     let best = Infinity
@@ -266,8 +267,9 @@ export function hausdorffDistances(x: Rows, y: Rows): HausdorffDistances {
   const xy = nearestDistances(X, Y)
   const yx = nearestDistances(Y, X)
   const pooled = Float64Array.from([...xy, ...yx])
-  const directedXY = Math.max(...xy)
-  const directedYX = Math.max(...yx)
+  // A loop, not Math.max(...xy): spreading a data-sized array overflows the call stack past ~10⁵ entries.
+  const directedXY = xy.reduce((m, v) => Math.max(m, v), -Infinity)
+  const directedYX = yx.reduce((m, v) => Math.max(m, v), -Infinity)
   return {
     hausdorff: Math.max(directedXY, directedYX),
     directedXY,

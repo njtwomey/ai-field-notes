@@ -9,6 +9,7 @@ import { dense, fromData, type Tensor } from 'aifn/foundation/tensor'
 import { fft, ifft, nextPowerOfTwo } from 'aifn/foundation/fourier'
 import type { Scalar, Signal, Size, TimeFrequency, VectorLike } from 'aifn/foundation/contracts'
 import { complexValues, readSamples, signal, timeFrequency, type SignalInput } from '../signal'
+import { DomainError, ShapeError } from 'aifn/foundation/errors'
 
 /** The orthogonal wavelets available. `db1` is Haar. */
 export type WaveletName = 'haar' | 'db1' | 'db2' | 'db3' | 'db4' | 'db5' | 'db6' | 'db7' | 'db8' | 'db9' | 'db10'
@@ -78,7 +79,7 @@ export interface WaveletFilters {
 
 function scaling(name: WaveletName): number[] {
   const h = SCALING[name]
-  if (!h) throw new Error(`unknown wavelet ${name}`)
+  if (!h) throw new DomainError('scaling', `unknown wavelet ${name}`)
   return [...h]
 }
 
@@ -100,7 +101,7 @@ export function waveletFilters(name: WaveletName): WaveletFilters {
 
 function analysis(x: Float64Array, h: number[], g: number[]) {
   const n = x.length
-  if (n % 2) throw new RangeError('dwt: the signal length must be even at every level')
+  if (n % 2) throw new ShapeError('dwt', 'dwt: the signal length must be even at every level')
   const half = n / 2
   const approx = new Float64Array(half)
   const detail = new Float64Array(half)
@@ -128,8 +129,9 @@ function synthesis(approx: Float64Array, detail: Float64Array, h: number[], g: n
 
 /**
  * One level of the periodic orthogonal DWT: a[k] = Σ_m h[m] x[(2k + m) mod n], d[k] = Σ_m g[m] x[(2k + m) mod n].
- * An orthogonal transform: energy is preserved and `idwt` inverts it exactly. (The coefficients match pywt's
- * 'periodization' mode up to a circular shift.)
+ * An orthogonal transform: energy is preserved and `idwt` inverts it exactly. For dbN the coefficients are pywt's
+ * 'periodization' coefficients of x rolled by (N + 1) mod 2 samples, rolled back by ⌊N/2⌋ coefficients (checked
+ * against PyWavelets in the fixtures).
  */
 export function dwt(x: SignalInput, wavelet: WaveletName = 'haar'): { approx: Tensor; detail: Tensor } {
   const h = scaling(wavelet)
@@ -160,7 +162,8 @@ export function wavedec(x: SignalInput, wavelet: WaveletName = 'haar', levels: S
   const g = highpass(h)
   const input = readSamples(x, 'wavedec')
   let a = input.values
-  if (a.length % 2 ** levels) throw new RangeError(`wavedec: length ${a.length} is not divisible by 2^${levels}`)
+  if (a.length % 2 ** levels)
+    throw new ShapeError('wavedec', `wavedec: length ${a.length} is not divisible by 2^${levels}`)
   const details: Tensor[] = []
   for (let j = 0; j < levels; j++) {
     const r = analysis(a, h, g)
@@ -182,7 +185,7 @@ export function waverec(d: WaveletDecomposition): Signal {
 /**
  * The scaling function φ and wavelet ψ by the cascade algorithm: iterate the two-scale equation
  * φ(t) = √2 Σ h[n] φ(2t − n) from a unit impulse. After `iterations` steps the samples approximate φ and ψ on a grid
- * of spacing 2^{−iterations} over [0, L − 1].
+ * of spacing 2^{−iterations} over [0, L − 1] (L taps), as pywt's `Wavelet.wavefun`.
  */
 export function wavefun(wavelet: WaveletName = 'db2', iterations: Size = 8): { t: Tensor; phi: Tensor; psi: Tensor } {
   const h = scaling(wavelet)
@@ -201,12 +204,15 @@ export function wavefun(wavelet: WaveletName = 'db2', iterations: Size = 8): { t
     // ψ(t) = √2 Σ g[n] φ(2t − n): the first step uses g, later steps refine by h.
     psi = i === 0 ? g.slice() : conv(upsample(psi), scaled)
   }
+  // The cascade's sample k approximates the function at t = (k + 1)·2^−j: place it there, on the grid
+  // t = i·2^−j, i = 0 … (L − 1)·2^j, with φ = ψ = 0 at both ends of the support (pywt's `wavefun`).
   const step = 2 ** -iterations
-  const psiOut = Float64Array.from({ length: phi.length }, (_, i) => psi[i] ?? 0)
+  const n = (h.length - 1) * 2 ** iterations + 1
+  const onGrid = (v: number[]) => Float64Array.from({ length: n }, (_, i) => (i === 0 ? 0 : (v[i - 1] ?? 0)))
   return {
-    t: fromData(Float64Array.from(phi, (_, i) => i * step)),
-    phi: fromData(Float64Array.from(phi)),
-    psi: fromData(psiOut),
+    t: fromData(Float64Array.from({ length: n }, (_, i) => i * step)),
+    phi: fromData(onGrid(phi)),
+    psi: fromData(onGrid(psi)),
   }
 }
 
@@ -342,7 +348,7 @@ export function waveletDenoise(x: SignalInput, options: WaveletDenoiseOptions = 
   const n = input.values.length
   let levels = options.levels ?? 0
   if (options.levels === undefined) while (levels < 6 && n % 2 ** (levels + 1) === 0 && n >> (levels + 1) >= 8) levels++
-  if (levels < 1) throw new RangeError('waveletDenoise: the length must be even')
+  if (levels < 1) throw new ShapeError('waveletDenoise', 'waveletDenoise: the length must be even')
   const d = wavedec(x, wavelet, levels)
   const finest = Float64Array.from(dense.toF64(d.details[0], 'waveletDenoise'), Math.abs).sort()
   const mid = finest.length >> 1

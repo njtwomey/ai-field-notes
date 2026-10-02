@@ -2,6 +2,7 @@
 
 import { fromData, type Tensor } from 'aifn/foundation/tensor'
 import { readValues } from 'aifn/foundation/fourier'
+import { DomainError } from 'aifn/foundation/errors'
 
 /** Sample times t_i = i / fs for i = 0, …, n − 1 (`aifn/signal`'s `sampleTimes` reads them from a `Signal`). */
 export function uniformTimes(n: number, fs = 1): Tensor {
@@ -26,7 +27,7 @@ export function chirp(
     if (method === 'linear') phase = 2 * Math.PI * (f0 * ti + (0.5 * (f1 - f0) * ti * ti) / t1)
     else if (method === 'quadratic') phase = 2 * Math.PI * (f0 * ti + ((f1 - f0) * ti ** 3) / (3 * t1 * t1))
     else {
-      if (!(f0 > 0 && f1 > 0)) throw new RangeError('chirp: a logarithmic sweep needs positive frequencies')
+      if (!(f0 > 0 && f1 > 0)) throw new DomainError('chirp', 'chirp: a logarithmic sweep needs positive frequencies')
       if (f0 === f1) phase = 2 * Math.PI * f0 * ti
       else {
         const beta = t1 / Math.log(f1 / f0)

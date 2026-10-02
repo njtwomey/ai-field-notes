@@ -37,6 +37,7 @@ import {
   type Value,
 } from 'aifn/foundation/tensor'
 import { softmax } from 'aifn/numerics/special'
+import { DomainError, ShapeError } from 'aifn/foundation/errors'
 
 /** The gating rules of `route`. */
 export type GateKind = 'softmax' | 'top-k' | 'noisy-top-k' | 'switch' | 'expert-choice'
@@ -111,7 +112,8 @@ function rowsOf(v: Value, T: Size, N: Size): Float64Array[] {
 
 /** The capacity ⌈c · assignments / N⌉ (∞ when c is). */
 export function expertCapacity(tokens: Size, experts: Size, k: number, capacityFactor = Infinity): number {
-  if (!(capacityFactor > 0)) throw new RangeError(`expertCapacity: the capacity factor must be positive`)
+  if (!(capacityFactor > 0))
+    throw new DomainError('expertCapacity', `expertCapacity: the capacity factor must be positive`)
   return Number.isFinite(capacityFactor) ? Math.ceil((capacityFactor * tokens * k) / experts) : Infinity
 }
 
@@ -123,11 +125,12 @@ export function expertCapacity(tokens: Size, experts: Size, k: number, capacityF
 export function route(logits: Value, options: RoutingOptions = {}): Routing {
   const { gate = 'top-k', temperature = 1 } = options
   const shape = shapeOfValue(logits)
-  if (shape.length !== 2) throw new Error(`route: logits must be [tokens, experts], got [${shape.join(', ')}]`)
+  if (shape.length !== 2)
+    throw new ShapeError('route', `route: logits must be [tokens, experts], got [${shape.join(', ')}]`)
   const [T, N] = shape
-  if (!(temperature > 0)) throw new RangeError('route: the temperature must be positive')
+  if (!(temperature > 0)) throw new DomainError('route', 'route: the temperature must be positive')
   const k = gate === 'switch' ? 1 : gate === 'softmax' ? N : Math.min(options.k ?? 2, N)
-  if (!(k >= 1)) throw new RangeError('route: k must be at least 1')
+  if (!(k >= 1)) throw new DomainError('route', 'route: k must be at least 1')
 
   let scores: Value = temperature === 1 ? logits : mul(logits, 1 / temperature)
   if (gate === 'noisy-top-k' && options.stream) {
@@ -211,7 +214,7 @@ export function route(logits: Value, options: RoutingOptions = {}): Routing {
  */
 export function denseRouting(probs: Value, logProbs?: Value): Routing {
   const shape = shapeOfValue(probs)
-  if (shape.length !== 2) throw new Error(`denseRouting: probabilities must be [tokens, experts]`)
+  if (shape.length !== 2) throw new ShapeError('denseRouting', `denseRouting: probabilities must be [tokens, experts]`)
   const [T, N] = shape
   const ones = fromData(new Float64Array(T * N).fill(1), [T, N])
   const lp = logProbs ?? log(probs)

@@ -11,6 +11,7 @@ import { trace, type Trace } from 'aifn/foundation/trace'
 import { cholesky, choleskySolve, eigh } from 'aifn/numerics/linalg'
 import type { Family, Link } from 'aifn/probability/likelihoods'
 import { irls, type IrlsState } from './irls'
+import { NumericalError } from 'aifn/foundation/errors'
 
 type F64 = Float64Array
 
@@ -147,7 +148,8 @@ export function penalisedFit(
     record: { deviance: (s) => s.deviance, penalisedDeviance: (s) => s.penalisedDeviance },
   })
   const final = training.final
-  if (!final.coefficients) throw new Error('penalisedFit: P-IRLS took no step')
+  if (!final.coefficients)
+    throw new NumericalError('penalisedFit', 'penalisedFit: P-IRLS took no step', 'not-converged')
   const beta = Float64Array.from(dense.data(final.coefficients))
   return { training, final, beta, ...penalisedInference(A, dense.data(final.workingWeights), S, beta) }
 }

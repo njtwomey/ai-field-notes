@@ -16,7 +16,10 @@ import {
   concat,
   fromData,
   matmul,
+  mul,
   norm,
+  square,
+  sum,
   take,
   toFlat,
   unwrap,
@@ -28,8 +31,8 @@ import { softmaxCrossEntropy } from 'aifn/learning/losses'
 import { relu } from 'aifn/nn/functional'
 import { normalInit } from 'aifn/nn/init'
 import { childContext, tap, type Context } from 'aifn/nn/layers'
-import { trainingLoop } from 'aifn/nn/training'
-import { adamRule } from 'aifn/optim/first-order'
+import { methodTraining } from 'aifn/nn/training'
+import { DomainError } from 'aifn/foundation/errors'
 
 /** Parameters of the modular MLP: embedding [p, d], hidden layer [2d, width] + [width], output [width, p] + [p]. */
 export type ModularMlpParams = { embedding: Tensor; hidden: Tensor; hiddenBias: Tensor; out: Tensor; outBias: Tensor }
@@ -138,8 +141,15 @@ export type GrokkingSnapshot = {
 
 /** Options of `grokkingRun`. */
 export type GrokkingRunOptions = Omit<ModularMlpConfig, 'p'> & {
-  /** Full-batch AdamW steps (default 1500). */
+  /** Full-batch AdamW steps or L-BFGS iterations (default 1500). */
   steps?: Size
+  /**
+   * `adamw` (default) or `lbfgs`: full-batch L-BFGS on the cross-entropy plus the coupled penalty (λ/2)‖θ‖², the
+   * weight decay's fixed point, which it reaches directly rather than by the slow drift that grokking rides.
+   */
+  method?: 'adamw' | 'lbfgs'
+  /** L-BFGS's memory m (default 10). */
+  memory?: Size
   /** AdamW's step size (default 0.01) and decoupled weight decay λ (default 2). */
   stepSize?: number
   weightDecay?: number
@@ -170,19 +180,27 @@ export function* grokkingRun(
     recordEvery = 10,
     checkpointEvery = 50,
     seed = 'grokking',
+    method = 'adamw',
+    memory,
     ...arch
   } = options
-  if (!data.train.y || !data.test.y) throw new Error('grokkingRun: both parts need labels')
+  if (!data.train.y || !data.test.y) throw new DomainError('grokkingRun', 'grokkingRun: both parts need labels')
   const model = ModularMlp({ ...arch, p: data.p })
   const train = { ...pairsOf(data.train), y: data.train.y }
   const test = { ...pairsOf(data.test), y: data.test.y }
   const root = stream(seed)
-  const alg = trainingLoop<ModularMlpParams, { a: Tensor; b: Tensor; y: Tensor }>({
-    loss: (q, batch) => softmaxCrossEntropy(model.apply(q, batch), batch.y),
-    data: train,
-    // β₂ = 0.98, as in Nanda et al.'s runs: a shorter memory of the squared gradient than Adam's default 0.999.
-    optimizer: adamRule({ stepSize, weightDecay, decoupled: true, beta2: 0.98 }) as never,
-  })
+  const crossEntropy = (q: ModularMlpParams, batch: { a: Tensor; b: Tensor; y: Tensor }) =>
+    softmaxCrossEntropy(model.apply(q, batch), batch.y)
+  const penalised = (q: ModularMlpParams, batch: { a: Tensor; b: Tensor; y: Tensor }) => {
+    let total: Value = 0
+    for (const w of Object.values(q)) total = add(total, sum(square(w)))
+    return add(crossEntropy(q, batch), mul(weightDecay / 2, total))
+  }
+  const alg =
+    method === 'lbfgs'
+      ? methodTraining(penalised, train, { method: 'lbfgs', memory })
+      : // β₂ = 0.98, as in Nanda et al.'s runs: a shorter memory of the squared gradient than Adam's default 0.999.
+        methodTraining(crossEntropy, train, { method: 'adam', stepSize, weightDecay, decoupled: true, beta2: 0.98 })
   let state = alg.init({ params: model.init(child(root, 'init')) }, child(root, 'init'))
   const curves: GrokkingCurves = {
     steps: [],
@@ -203,9 +221,11 @@ export function* grokkingRun(
     curves.testLoss.push(te.loss)
     curves.weightNorm.push(Math.sqrt(Object.values(state.params).reduce((a, w) => a + norm(w) ** 2, 0)))
   }
+  // A run that stops early (converged L-BFGS) reports its last step as the total, so a page reads it as finished.
+  let total = steps
   const snapshot = (t: Size): GrokkingSnapshot => ({
     step: t,
-    steps,
+    steps: total,
     config: model.config,
     curves: {
       steps: [...curves.steps],
@@ -222,11 +242,13 @@ export function* grokkingRun(
   yield snapshot(0)
   for (let t = 0; t < steps; t++) {
     state = alg.step(state, { t, stream: child(root, 'step', t) })
-    const done = t + 1 === steps
+    const done = t + 1 === steps || state.stopped
+    if (done) total = t + 1
     if ((t + 1) % recordEvery === 0 || done) record(t + 1)
     if ((t + 1) % checkpointEvery === 0 || done) {
       checkpoints.push({ step: t + 1, params: state.params })
       yield snapshot(t + 1)
     }
+    if (done) return
   }
 }

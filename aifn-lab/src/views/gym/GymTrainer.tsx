@@ -429,7 +429,7 @@ export function GymTrainer({
         {scene}
       </Plots>
       {withSeries && trajectory && (
-        <StepSeries env={shownEnv} kind={kind} trajectory={trajectory} step={at} onStep={setStep} scale={0.38} />
+        <StepSeries env={shownEnv} kind={kind} trajectory={trajectory} step={at} onStep={setStep} scale={0.44} />
       )}
     </Figure>
   )

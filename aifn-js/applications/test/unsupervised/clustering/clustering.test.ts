@@ -10,7 +10,6 @@ import {
   gaussianMixtureSteps,
   kMedoids,
   kmeans,
-  kmeansPlusPlus,
   kmeansSteps,
   kMedoidsSteps,
   meanShiftSteps,
@@ -25,6 +24,7 @@ import {
 } from 'aifn-applied/unsupervised/clustering'
 import { leaves } from 'aifn/graph'
 import { pairwiseDistances } from 'aifn/numerics/linalg'
+import { kmeansPlusPlus } from 'aifn/numerics/neighbours'
 import { stream } from 'aifn/foundation/random'
 import { tensor, toFlat, toRows, type Tensor } from 'aifn/foundation/tensor'
 import { dataset } from 'aifn/learning/estimators'

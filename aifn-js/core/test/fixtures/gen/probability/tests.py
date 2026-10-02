@@ -531,6 +531,267 @@ def f_distribution():
     return rows
 
 
+# ── Second references, keyed by registry name ────────────────────────────────────────────────────────────────────────
+
+SM_ALT = {"two-sided": "two-sided", "less": "smaller", "greater": "larger"}
+
+
+def interval(c: Any) -> list[float]:
+    lo, hi = c
+    return [float(lo), float(hi)]
+
+
+def references() -> dict[str, Any]:
+    """Each registered test against a second library where one exists (statsmodels, lifelines), on fresh inputs with
+    ties, zeros, small and lopsided samples. Keys are the registry names, so the catalog counts them as covered."""
+    from lifelines.statistics import multivariate_logrank_test
+    from statsmodels.stats import proportion as smp
+    from statsmodels.stats.contingency_tables import Table
+    from statsmodels.stats.gof import chisquare as sm_chisquare
+    from statsmodels.stats.weightstats import CompareMeans, DescrStatsW
+
+    rng = np.random.default_rng(20261002)
+    x = np.round(rng.normal(1.0, 2.0, 15), 2)
+    y = np.round(rng.normal(0.2, 0.7, 6), 2)
+    x2 = np.round(x[:6] + rng.normal(0.3, 0.5, 6), 2)
+    out: dict[str, Any] = {"x": x, "y": y, "x2": x2}
+
+    def t_row(test: str, alt: str, level: float, mu: float, r: Any, c: Any) -> dict[str, Any]:
+        stat, pv, df = r
+        return {
+            "test": test,
+            "alternative": alt,
+            "level": level,
+            "mu": mu,
+            "statistic": stat,
+            "p": pv,
+            "df": df,
+            "ci": interval(c),
+        }
+
+    one, paired, pooled, welch = [], [], [], []
+    for alt in ALTS:
+        for level, mu in [(0.95, 0.0), (0.9, 1.5)]:
+            # statsmodels annotates the null value `value` as int; it takes any float.
+            value = cast(Any, mu)
+            d = DescrStatsW(x)
+            one.append(
+                t_row(
+                    "oneSampleTTest",
+                    alt,
+                    level,
+                    mu,
+                    d.ttest_mean(value, SM_ALT[alt]),
+                    d.tconfint_mean(1 - level, SM_ALT[alt]),
+                )
+            )
+            dd = DescrStatsW(x2 - y)
+            r = dd.ttest_mean(value, SM_ALT[alt])
+            paired.append(t_row("pairedTTest", alt, level, mu, r, dd.tconfint_mean(1 - level, SM_ALT[alt])))
+            cm = CompareMeans(DescrStatsW(x), DescrStatsW(y))
+            for usevar, rows in [("pooled", pooled), ("unequal", welch)]:
+                r = cm.ttest_ind(SM_ALT[alt], usevar, value)
+                # tconfint_diff ignores `value`; the interval is for the difference itself.
+                c = cm.tconfint_diff(1 - level, SM_ALT[alt], usevar)
+                rows.append(t_row("pooledTTest" if usevar == "pooled" else "welchTTest", alt, level, mu, r, c))
+    out["oneSampleTTest"], out["pairedTTest"], out["pooledTTest"], out["welchTTest"] = one, paired, pooled, welch
+
+    # z-tests with a known σ: no library takes σ as given, so the statistic is the formula and the tails scipy's.
+    z = []
+    for alt in ALTS:
+        for sigma, sigma_y, two, mu in [(2.0, None, False, 0.5), (1.5, None, True, 0.0), (2.0, 0.7, True, 0.4)]:
+            se = sigma / np.sqrt(len(x)) if not two else np.sqrt(sigma**2 / len(x) + (sigma_y or sigma) ** 2 / len(y))
+            est = x.mean() - (y.mean() if two else 0.0)
+            zz = (est - mu) / se
+            pv = {"two-sided": 2 * stats.norm.sf(abs(zz)), "greater": stats.norm.sf(zz), "less": stats.norm.cdf(zz)}
+            z.append(
+                {
+                    "alternative": alt,
+                    "sigma": sigma,
+                    "sigmaY": sigma_y,
+                    "two": two,
+                    "mu": mu,
+                    "statistic": zz,
+                    "p": pv[alt],
+                }
+            )
+    out["zTest"] = z
+
+    binom = []
+    for k, n, p0 in [(7, 20, 0.5), (0, 12, 0.3), (12, 12, 0.8), (31, 200, 0.2), (3, 10, 0.05)]:
+        for alt in ALTS:
+            r = stats.binomtest(k, n, p0, alternative=alt)
+            # proportion_confint names the side of the interval's finite end: `larger` bounds p from above, the
+            # interval that goes with the alternative `less`.
+            side = {"two-sided": "two-sided", "less": "larger", "greater": "smaller"}[alt]
+            ci = smp.proportion_confint(k, n, 0.05, method="beta", alternative=side)
+            binom.append({"k": k, "n": n, "p0": p0, "alternative": alt, "p": r.pvalue, "ci": interval(ci)})
+    out["binomialTest"] = binom
+
+    two_prop = []
+    for k1, n1, k2, n2 in [(45, 100, 30, 100), (3, 40, 9, 35), (0, 20, 4, 25)]:
+        for alt in ALTS:
+            zz, pv = smp.proportions_ztest([k1, k2], [n1, n2], alternative=SM_ALT[alt])
+            row: dict[str, Any] = {"k1": k1, "n1": n1, "k2": k2, "n2": n2, "alternative": alt, "z": zz, "p": pv}
+            if alt == "two-sided":
+                row["wald"] = interval(smp.confint_proportions_2indep(k1, n1, k2, n2, method="wald", alpha=0.05))
+            two_prop.append(row)
+    out["twoProportionZTest"] = two_prop
+
+    gof_cases = [
+        ([18, 22, 21, 39], None, 0),
+        ([18, 22, 21, 39], [0.2, 0.2, 0.2, 0.4], 0),
+        ([5, 9, 14, 30, 22, 10, 6, 4], None, 2),
+        ([0, 3, 7, 10], [0.1, 0.2, 0.3, 0.4], 1),
+    ]
+    chi_gof, g_gof = [], []
+    for obs, probs, ddof in gof_cases:
+        o = np.array(obs, dtype=float)
+        e = None if probs is None else np.array(probs) * o.sum()
+        stat, pv = cast(tuple[float, float], sm_chisquare(o, e, ddof=ddof))
+        chi_gof.append({"observed": obs, "probabilities": probs, "ddof": ddof, "statistic": stat, "p": pv})
+        # G = 2 Σ o log(o/e) with 0 log 0 = 0, against the χ² law with k − 1 − ddof degrees of freedom.
+        ee = np.full_like(o, o.mean()) if e is None else e
+        g = 2 * np.sum(special.xlogy(o, o / ee))
+        g_gof.append(
+            {
+                "observed": obs,
+                "probabilities": probs,
+                "ddof": ddof,
+                "statistic": g,
+                "p": stats.chi2.sf(g, len(o) - 1 - ddof),
+            }
+        )
+    out["chiSquareGoodnessOfFit"], out["gTestGoodnessOfFit"] = chi_gof, g_gof
+
+    ind_tables = [
+        [[25, 15], [10, 30]],
+        [[2, 8], [7, 3]],
+        [[12, 7, 3], [5, 11, 9]],
+        [[8, 4, 2, 1], [3, 6, 5, 2], [1, 2, 7, 9]],
+    ]
+    chi_ind, g_ind = [], []
+    for t in ind_tables:
+        a = np.array(t, dtype=float)
+        nominal = cast(TTestResult, Table(a).test_nominal_association())
+        row = {"table": t, "plain": [nominal.statistic, nominal.pvalue, nominal.df]}
+        if a.shape == (2, 2):
+            r = cast(Chi2Result, stats.chi2_contingency(a, correction=True))
+            row["yates"] = [r.statistic, r.pvalue, r.dof]
+        chi_ind.append(row)
+        # G by its definition from the expected counts (Yates-shifted counts for 2 × 2 when corrected).
+        e = a.sum(1, keepdims=True) * a.sum(0, keepdims=True) / a.sum()
+        df = (a.shape[0] - 1) * (a.shape[1] - 1)
+        g_plain = 2 * np.sum(special.xlogy(a, a / e))
+        grow: dict[str, Any] = {"table": t, "plain": [g_plain, stats.chi2.sf(g_plain, df), df]}
+        if a.shape == (2, 2):
+            shift = np.minimum(0.5, np.abs(a - e))
+            ac = a - np.sign(a - e) * shift
+            g_c = 2 * np.sum(special.xlogy(ac, ac / e))
+            grow["yates"] = [g_c, stats.chi2.sf(g_c, df), df]
+        g_ind.append(grow)
+    out["chiSquareIndependence"], out["gTestIndependence"] = chi_ind, g_ind
+
+    fisher = []
+    for t in [[[3, 1], [1, 3]], [[10, 2], [3, 15]], [[0, 7], [6, 1]], [[25, 20], [15, 30]], [[1, 0], [0, 1]]]:
+        for alt in ALTS:
+            r = cast(TestResult, stats.fisher_exact(t, alternative=alt))
+            fisher.append({"table": t, "alternative": alt, "p": r.pvalue})
+    out["fisherExact"] = fisher
+
+    ks = []
+    u = np.round(rng.normal(0.3, 1.2, 25), 3)
+    v = np.round(rng.standard_t(3, 18), 3)
+    for alt in ALTS:
+        for method in ["exact", "asymp"]:
+            r = cast(TestResult, stats.ks_1samp(u, stats.norm(0, 1.5).cdf, alternative=alt, method=method))
+            ks.append(
+                {
+                    "sample": "one",
+                    "loc": 0.0,
+                    "scale": 1.5,
+                    "alternative": alt,
+                    "method": method,
+                    "statistic": r.statistic,
+                    "p": r.pvalue,
+                }
+            )
+            r = cast(TestResult, stats.ks_2samp(u, v, alternative=alt, method=method))
+            ks.append({"sample": "two", "alternative": alt, "method": method, "statistic": r.statistic, "p": r.pvalue})
+    out["ksTest"] = {"u": u, "v": v, "cases": ks}
+
+    mwu = []
+    c = np.round(rng.gamma(2.0, 1.0, 7), 2)
+    d = np.round(rng.gamma(3.0, 1.0, 5), 2)
+    tx = np.array([3, 1, 4, 1, 5, 9, 2, 6, 5, 3, 5])
+    ty = np.array([2, 7, 1, 8, 2, 8, 1, 8, 2, 8, 4, 5])
+    for name, a1, b1, method, cc in [
+        ("exact", c, d, "exact", True),
+        ("auto", c, d, "auto", True),
+        ("ties", tx, ty, "asymptotic", True),
+        ("tiesPlain", tx, ty, "asymptotic", False),
+        ("tiesAuto", tx, ty, "auto", True),
+    ]:
+        for alt in ALTS:
+            r = cast(TestResult, stats.mannwhitneyu(a1, b1, alternative=alt, method=method, use_continuity=cc))
+            mwu.append(
+                {
+                    "name": name,
+                    "x": a1,
+                    "y": b1,
+                    "method": method,
+                    "continuity": cc,
+                    "alternative": alt,
+                    "U": r.statistic,
+                    "p": r.pvalue,
+                }
+            )
+    out["mannWhitneyU"] = mwu
+
+    wil = []
+    e1 = np.round(rng.normal(0.4, 1.0, 14), 2)
+    e2 = np.array([0.5, -1.0, 2.0, 0.5, 0.0, 1.5, -0.5, 3.0, 0.5, 2.0, 0.0, -2.0, 1.0, 1.5, 2.5, -0.5])
+    e3 = np.round(rng.normal(0.2, 1.0, 70), 2)  # n > 50: scipy's auto is the normal approximation
+    for name, dv, method, corr in [
+        ("exact", e1, "exact", False),
+        ("auto", e1, "auto", False),
+        ("approx", e1, "approx", True),
+        ("tiesZeros", e2, "approx", False),
+        ("tiesZerosCorrected", e2, "approx", True),
+        ("large", e3, "auto", False),
+    ]:
+        dd = dv[dv != 0]
+        rk = stats.rankdata(np.abs(dd))
+        for alt in ALTS:
+            r = cast(
+                TestResult, stats.wilcoxon(dv, alternative=alt, method=method, correction=corr, zero_method="wilcox")
+            )
+            wil.append(
+                {
+                    "name": name,
+                    "d": dv,
+                    "method": "asymptotic" if method == "approx" else method,
+                    "correction": corr,
+                    "alternative": alt,
+                    "plus": float(rk[dd > 0].sum()),
+                    "p": r.pvalue,
+                }
+            )
+    out["wilcoxonSignedRank"] = wil
+
+    # Log-rank against lifelines: two groups with tied event times and censoring, and three groups.
+    lr = []
+    for groups in [2, 3]:
+        n = 30
+        g = np.arange(n) % groups
+        t = np.round(rng.exponential(10.0 / (1 + 0.6 * g), n)).clip(1)
+        ev = (rng.random(n) < 0.75).astype(int)
+        r = multivariate_logrank_test(t, g, ev)
+        lr.append({"time": t, "event": ev, "group": g, "statistic": r.test_statistic, "p": r.p_value, "df": groups - 1})
+    out["logRankTest"] = lr
+    return out
+
+
 def cases() -> dict[str, Any]:
     return {
         "t": t_tests(),
@@ -546,4 +807,5 @@ def cases() -> dict[str, Any]:
         "survival": survival(),
         "boundaries": boundaries(),
         "f": f_distribution(),
+        "references": references(),
     }

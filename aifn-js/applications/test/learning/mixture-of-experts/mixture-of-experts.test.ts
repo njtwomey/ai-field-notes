@@ -168,3 +168,24 @@ describe('gradient training and routing balance', () => {
     expect(last.history.load.every((l) => Math.abs(l.reduce((a, b) => a + b, 0) - 1) < 1e-9)).toBe(true)
   })
 })
+
+describe('mixtureOfExpertsRun by full-batch L-BFGS', () => {
+  it('lowers the loss and records the method', () => {
+    const d = piecewiseLinear(stream('lbfgs'), {})
+    const snaps = [
+      ...mixtureOfExpertsRun({
+        data: { x: d.x as Tensor, y: d.y as Tensor },
+        task: 'regression',
+        experts: 2,
+        method: 'lbfgs',
+        steps: 40,
+        every: 10,
+        seed: 'l',
+      }),
+    ]
+    const last = snaps.at(-1)!
+    expect(last.method).toBe('lbfgs')
+    expect(last.done).toBe(true)
+    expect(last.history.loss.at(-1)!).toBeLessThan(last.history.loss[0])
+  })
+})

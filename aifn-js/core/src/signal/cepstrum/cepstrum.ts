@@ -12,6 +12,7 @@ import { fft, ifft } from 'aifn/foundation/fourier'
 import type { Scalar, Size } from 'aifn/foundation/contracts'
 import { windowValues, type WindowInput } from 'aifn/signal/windows'
 import { readSamples, unwrapPhase, type SignalInput } from '../signal'
+import { DomainError } from 'aifn/foundation/errors'
 
 /** The DFT of real samples (zero-padded or truncated to n) as interleaved (re, im). */
 function spectrumOf(v: Float64Array, n: Size): Float64Array {
@@ -155,7 +156,7 @@ export function cepstralPitch(x: SignalInput, options: CepstralPitchOptions = {}
   const half = Math.floor(nfft / 2)
   const lo = Math.max(1, Math.floor(fs / fmax))
   const hi = Math.min(half - 1, Math.ceil(fs / fmin))
-  if (!(hi > lo)) throw new RangeError('cepstralPitch: the frame is too short for the pitch range')
+  if (!(hi > lo)) throw new DomainError('cepstralPitch', 'cepstralPitch: the frame is too short for the pitch range')
   let best = lo
   for (let q = lo; q <= hi; q++) if (c[q] > c[best]) best = q
   const shift = parabola(c[best - 1], c[best], c[best + 1])

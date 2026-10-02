@@ -66,6 +66,10 @@ export function hermite(t0: Scalar, x0: F64, f0: F64, t1: Scalar, x1: F64, f1: F
  * changes sign (in its `direction`) is located by Brent's method on the step's Hermite interpolant, which costs two
  * extra evaluations of f per step with a crossing. A terminal event ends the run at the event: the state is moved to
  * (t_e, x(t_e)) and `terminated` is set, which stops the runners. Works with any solver whose state is an `OdeState`.
+ *
+ * A crossing is a strict sign change into or onto zero (g < 0 → g ≥ 0, or g > 0 → g ≤ 0), so a step that ends
+ * exactly on g = 0 reports the event once, and a run that starts on g = 0 reports nothing there. scipy's `solve_ivp`
+ * counts g ≤ 0 → g ≥ 0, so it reports a start on zero, and a zero at a step's end in both steps.
  */
 export function withEvents<Opts, S extends OdeState>(
   solver: Algorithm<Opts, S>,

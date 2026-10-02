@@ -13,8 +13,8 @@ import { twoLinkArm, twoLinkJoints } from 'aifn-applied/data/synthetic'
 import { mdnPredict, type MdnSnapshot } from 'aifn-applied/learning/mixture-density'
 import { Player } from '@lab/controls'
 import { Figure } from '@lab/layout'
-import { choice, float, int, row, useFigureState } from '@lab/state'
-import { formatValue, TrainControls, useTrainedRun } from '@lab/views'
+import { choice, int, row, useFigureState } from '@lab/state'
+import { formatValue, optimiserField, TrainControls, trainingMethodOf, useTrainedRun } from '@lab/views'
 import { Curve, Handle, Plot, Plots, Points, Raster, Readout, Segments, useAxis, type Vec2 } from '@lab/viz'
 import { TrainingCurves } from './curves'
 import { paramsOf, runTask, SLOT, useCheckpoint, useNetworks, type RunSettings } from './shared'
@@ -42,17 +42,11 @@ export function ArmShowcase() {
       noise: choice([0.005, 0.01, 0.03], 0.01, { label: 'noise sd on the hand position' }),
     }),
     net: row('2 · networks (same body)', {
-      components: choice([1, 2, 3, 4, 6], 3, { label: 'MDN components K' }),
-      width: choice([16, 24, 32], 24, { label: 'hidden width (two tanh layers)' }),
+      components: int(3, { ge: 1, le: 8, suggestions: [1, 2, 3, 4, 6], label: 'MDN components K' }),
+      width: int(24, { ge: 4, le: 48, suggestions: [16, 24, 32], label: 'hidden width (two tanh layers)' }),
     }),
-    run: row('3 · training (Adam, full batch)', {
-      stepSize: float(0.01, {
-        label: 'learning rate',
-        gt: 0,
-        le: 0.3,
-        scale: 'log10',
-        suggestions: [0.003, 0.01, 0.03],
-      }),
+    optimiser: optimiserField({ label: '3 · optimiser (full batch)', stepSize: 0.01 }),
+    run: row('4 · run', {
       steps: int(1500, { ge: 1, suggestions: [1000, 1500, 2500], label: 'steps' }),
       seed: int(1, { label: 'seed', ge: 0, le: 9999 }),
     }),
@@ -63,7 +57,7 @@ export function ArmShowcase() {
     dataSeed: DATA_SEED,
     components: state.net.components,
     hidden: [state.net.width, state.net.width],
-    stepSize: state.run.stepSize,
+    method: trainingMethodOf(state.optimiser, { clipNorm: 10 }),
     steps: state.run.steps,
     seed: state.run.seed,
   }

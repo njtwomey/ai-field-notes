@@ -8,6 +8,7 @@ import type { Tensor } from 'aifn/foundation/tensor'
 import type { Algorithm } from 'aifn/foundation/trace'
 import type { AcceptRejectState, ChainStart, LogDensity, VectorLike } from './types'
 import { allFinite, data, logDensityAt, perCoordinate, standardNormals, toF64, vec, type F64 } from './util'
+import { ShapeError } from 'aifn/foundation/errors'
 
 /** The state of a Metropolis–Hastings chain. */
 export type MetropolisState = AcceptRejectState
@@ -21,7 +22,8 @@ export const badLogDensity = (v: number) => Number.isNaN(v) || v === Infinity
 /** The initial state shared by accept/reject samplers. */
 export function startState(target: LogDensity, x0: VectorLike, name: string): MetropolisState {
   const x = toF64(x0, name)
-  if (x.length !== target.dim) throw new Error(`${name}: x0 has ${x.length} values for dimension ${target.dim}`)
+  if (x.length !== target.dim)
+    throw new ShapeError(name, `${name}: x0 has ${x.length} values for dimension ${target.dim}`)
   const logDensity = logDensityAt(target, x)
   return {
     t: 0,

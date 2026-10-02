@@ -20,7 +20,7 @@ import { ControlRow, Figure } from '@lab/layout'
 import { seriesColor } from '@lab/design/palette'
 import { useTheme } from '@lab/design/theme'
 import { cn } from '@lab/lib/utils'
-import { call, int, row, useFigureState, type Task } from '@lab/state'
+import { call, int, packPair, row, unpackPair, useFigureState, usePinned, type Task } from '@lab/state'
 import {
   CrfTrainingPlots,
   CrfWeightPlots,
@@ -187,8 +187,13 @@ export function CrfTemplatesSpecimen() {
       disagree: vPath.flatMap((k, i) => (k !== qPath[i] ? [i] : [])),
     }
   }, [model, sentence, decision])
-  const [pin, setPin] = useState<{ sentence: string; n: number; k: number } | null>(null)
-  const pinned = pin && pin.sentence === picked && pin.n === n ? pin.k : null
+  // The pinned lattice cell (position, label) of this sentence: click pins, click again or Escape unpins.
+  const [pinRaw, setPinRaw] = useState<{ sentence: string; value: number }>({ sentence: picked, value: -1 })
+  const pins = usePinned(pinRaw.sentence === picked ? pinRaw.value : -1, (value) =>
+    setPinRaw({ sentence: picked, value }),
+  )
+  const cell = pins.pinned === null ? null : unpackPair(pins.pinned)
+  const pinned = cell && cell[0] === n ? cell[1] : null
   const label = pinned ?? inference?.path[n] ?? 0
   const previous = n > 0 ? (inference?.path[n - 1] ?? 0) : null
   const features = useMemo(() => (model ? firingFeatures(model, sentence.rows, n) : []), [model, sentence, n])
@@ -370,7 +375,7 @@ export function CrfTemplatesSpecimen() {
         trained={trained}
         onPin={(m, k) => {
           setN(m)
-          setPin({ sentence: picked, n: m, k })
+          pins.toggle(packPair(m, k))
         }}
         features={features}
         previous={previous}
@@ -549,7 +554,7 @@ function LatticeFigure({
           Σ_n P(ŷ_n | x), and can string together labels whose transitions are improbable or even impossible. When the
           two differ, the other path is drawn dashed; the readouts give each path&apos;s log score (Viterbi&apos;s is
           the largest) and expected number of correct labels (the posterior path&apos;s is the largest). Click a node to
-          pin it: the list below shows the features that make its potentials.
+          pin it (click again or press Escape to unpin): the list below shows the features that make its potentials.
           {!trained && ' The weights are 0 until the tagger is trained, so every label is equally likely.'}
         </>
       }

@@ -1,7 +1,8 @@
 /**
  * `aifn/optim/programming`: mathematical programming: linear programmes (simplex, interior point, `linprog`),
  * quadratic programmes (active set, interior point, box-constrained, `quadprog`), mixed-integer programmes (branch and
- * bound, Gomory cuts, `milp`), assignment (`hungarian`), and the dynamic-programming engine (`dynamicProgram`, `dp`).
+ * bound, Gomory cuts, `milp`), assignment (`hungarian`), and the dynamic-programming engine (`dynamicProgram`, `dp`)
+ * with the sequence programmes on it (`lcs`, `editDistance`, `needlemanWunsch`, `smithWaterman`).
  * Every method is an `Algorithm` factory over its problem, paired with a one-call runner.
  */
 
@@ -78,6 +79,26 @@ export {
   type SearchTreeNodeData,
 } from './milp'
 export { dp, dynamicProgram, type DynamicProgram, type DynamicProgramState } from './dp'
+export {
+  alignmentProgram,
+  DIAGONAL,
+  editDistance,
+  editDistanceProgram,
+  LEFT,
+  lcs,
+  lcsProgram,
+  needlemanWunsch,
+  smithWaterman,
+  STOP,
+  UP,
+  type AlignmentResult,
+  type AlignmentScoring,
+  type EditCosts,
+  type EditDistanceResult,
+  type EditOperation,
+  type LCSResult,
+  type Sequence,
+} from './sequences'
 export {
   hungarian,
   hungarianSteps,

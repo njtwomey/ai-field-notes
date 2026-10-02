@@ -11,6 +11,7 @@
 
 import { conv, convOutputSize } from 'aifn/foundation/convolution'
 import { concat, fromData, gather, max, reshape, shapeOfValue, type Value } from 'aifn/foundation/tensor'
+import { ShapeError } from 'aifn/foundation/errors'
 
 export { convOutputSize }
 
@@ -39,7 +40,8 @@ export type ConvOptions<P = Pair> = {
  */
 export function conv2d(x: Value, w: Value, options: ConvOptions = {}): Value {
   const ws = shapeOfValue(w)
-  if (ws.length !== 4) throw new Error(`conv2d: kernels need shape [O, C, KH, KW], got [${ws.join(', ')}]`)
+  if (ws.length !== 4)
+    throw new ShapeError('conv2d', `conv2d: kernels need shape [O, C, KH, KW], got [${ws.join(', ')}]`)
   return conv(x, w, {
     layout: 'nchw',
     flip: false,
@@ -57,7 +59,7 @@ export function conv2d(x: Value, w: Value, options: ConvOptions = {}): Value {
  */
 export function conv1d(x: Value, w: Value, options: ConvOptions<number> = {}): Value {
   const ws = shapeOfValue(w)
-  if (ws.length !== 3) throw new Error(`conv1d: kernels need shape [O, C, K]`)
+  if (ws.length !== 3) throw new ShapeError('conv1d', `conv1d: kernels need shape [O, C, K]`)
   return conv(x, w, {
     layout: 'ncw',
     flip: false,
@@ -94,7 +96,7 @@ export type PoolOptions<P = Pair> = {
 function pool4(x: Value, kernel: Pair, options: PoolOptions, what: string) {
   const xs = shapeOfValue(x)
   const batched = xs.length === 4
-  if (!batched && xs.length !== 3) throw new Error(`${what}: input needs shape [N, C, H, W] or [C, H, W]`)
+  if (!batched && xs.length !== 3) throw new ShapeError(what, `${what}: input needs shape [N, C, H, W] or [C, H, W]`)
   const x4 = batched ? x : reshape(x, [1, ...xs])
   const k = pair(kernel)
   const p: PoolParams = {

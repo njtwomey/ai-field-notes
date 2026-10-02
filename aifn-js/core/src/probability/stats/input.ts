@@ -5,6 +5,7 @@
 
 import { copy, fromData, isTensor, permute, type Tensor } from 'aifn/foundation/tensor'
 import type { DataLike as Data, Scalar } from 'aifn/foundation/contracts'
+import { DomainError, ShapeError } from 'aifn/foundation/errors'
 
 // Types defined once, in `aifn/foundation/contracts`.
 export type { DataLike as Data } from 'aifn/foundation/contracts'
@@ -28,7 +29,8 @@ function tensorValues(t: Tensor): Float64Array {
 /** The values of a sequence: an array as is, or a rank-1 tensor's elements. Other ranks are an error. */
 export function toSequence(x: Data, what: string): ArrayLike<number> {
   if (!isTensor(x)) return x
-  if (x.shape.length !== 1) throw new Error(`stats: ${what} needs a rank-1 tensor, got shape [${x.shape.join(', ')}]`)
+  if (x.shape.length !== 1)
+    throw new ShapeError('stats', `stats: ${what} needs a rank-1 tensor, got shape [${x.shape.join(', ')}]`)
   return tensorValues(x)
 }
 
@@ -52,7 +54,7 @@ export function alongAxis(
   const rank = x.shape.length
   const a = axis < 0 ? axis + rank : axis
   if (!Number.isInteger(a) || a < 0 || a >= rank)
-    throw new Error(`stats: ${what}: axis ${axis} is out of range for rank ${rank}`)
+    throw new ShapeError('stats', `stats: ${what}: axis ${axis} is out of range for rank ${rank}`)
   const order = [...Array.from({ length: rank }, (_, k) => k).filter((k) => k !== a), a]
   const lanes = tensorValues(permute(x, order))
   const length = x.shape[a]
@@ -74,7 +76,7 @@ export function reduce(
   what: string,
 ): Scalar | Tensor {
   if (options.axis === undefined) return statistic(allValues(x))
-  if (!isTensor(x)) throw new Error(`stats: ${what}: axis needs a tensor input`)
+  if (!isTensor(x)) throw new DomainError('stats', `stats: ${what}: axis needs a tensor input`)
   return alongAxis(x, options.axis, options.keepDims ?? false, statistic, what)
 }
 

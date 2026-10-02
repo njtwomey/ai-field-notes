@@ -57,4 +57,5 @@ export {
 } from './number'
 export { isPointerHeld, onceReleased } from './pointer'
 export { useProbe, type ProbeModel } from './probe'
+export { namedPinField, packPair, pinField, unpackPair, usePinned, usePinnedName, type Pinned } from './usePinned'
 export { ProbeReadout } from './ProbeReadout'

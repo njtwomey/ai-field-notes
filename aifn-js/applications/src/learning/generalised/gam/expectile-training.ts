@@ -21,6 +21,7 @@ import { penalisedFit } from '../smoothing'
 import { expectileLaws, type ExpectileGamParams, type ExpectileState } from './expectile'
 import { gamFitter, type GamFitMethod, type GamFitState, type GamFitterOptions } from './fitters'
 import { gamProblem, type GamData, type GamEvaluation, type GamProblem } from './problem'
+import { DomainError } from 'aifn/foundation/errors'
 
 type F64 = Float64Array
 const vec = (a: ArrayLike<number>) => fromData(Float64Array.from(a), [a.length])
@@ -31,9 +32,12 @@ const vec = (a: ArrayLike<number>) => fromData(Float64Array.from(a), [a.length])
  * EDF and bands of the weighted fit there), and `optimum` is LAWS at these λ.
  */
 export function expectileProblem(base: GamProblem, tau: number): GamProblem {
-  if (!(tau > 0 && tau < 1)) throw new RangeError(`expectileProblem: τ = ${tau} is not in (0, 1)`)
+  if (!(tau > 0 && tau < 1)) throw new DomainError('expectileProblem', `expectileProblem: τ = ${tau} is not in (0, 1)`)
   if (base.family.name !== 'gaussian' || base.link.name !== 'identity')
-    throw new Error('expectileProblem: the base problem must be Gaussian with the identity link')
+    throw new DomainError(
+      'expectileProblem',
+      'expectileProblem: the base problem must be Gaussian with the identity link',
+    )
   const A = base.design
   const { n, P, X } = A
   const { y, w, o, penalty } = base

@@ -97,6 +97,19 @@ export type Conditioned<O> = O extends { readonly when: Condition } ? { readonly
 
 /** A space from its dimensions (keys in the order given, which is the order of `encode` and `grid`). */
 export function space<const D extends Readonly<Record<string, DimSpec>>>(dims: D): { readonly dims: D } {
+  // A condition names an earlier dimension whose value can equal a scalar: a real, int, choice or bool, or a variants
+  // dimension (compared by its case name). A nested space's value is an object, which never equals one.
+  const seen = new Map<string, DimSpec>()
+  for (const [name, dim] of Object.entries(dims)) {
+    if (dim.when !== undefined) {
+      const ref = seen.get(dim.when.key)
+      if (ref === undefined)
+        throw new DomainError('space', `space: '${name}' is conditioned on '${dim.when.key}', which is not earlier`)
+      if (ref.type === 'space')
+        throw new DomainError('space', `space: '${name}' is conditioned on the nested space '${dim.when.key}'`)
+    }
+    seen.set(name, dim)
+  }
   return { dims }
 }
 
@@ -172,7 +185,10 @@ export function variants<
   return dim as DimDoc & { readonly type: 'variants'; readonly cases: C; readonly default: string } & Conditioned<D>
 }
 
-/** The condition "dimension `key` has the value `equals`", for `DimDoc.when`. `key` must come earlier in the space. */
+/**
+ * The condition "dimension `key` has the value `equals`", for `DimDoc.when`. `key` must come earlier in the space
+ * (`space` checks it); for a variants dimension, `equals` is a case name.
+ */
 export function when(key: string, equals: string | number | boolean): Condition {
   return { key, equals }
 }
@@ -181,7 +197,11 @@ export function when(key: string, equals: string | number | boolean): Condition 
 
 /** True when a dimension applies under `values`: it has no condition, or its condition holds. */
 export function isDimActive(dim: DimSpec, values: SpaceValues): boolean {
-  return dim.when === undefined || values[dim.when.key] === dim.when.equals
+  if (dim.when === undefined) return true
+  const v = values[dim.when.key]
+  // A variants dimension's value is { case, params }: its condition compares the case name.
+  const scalar = typeof v === 'object' && v !== null && 'case' in v ? (v as VariantValue).case : v
+  return scalar === dim.when.equals
 }
 
 function clampDim(dim: Dim, v: unknown, dropped?: string[], path = ''): SpaceValue {

@@ -13,6 +13,7 @@ import { fromData, type Tensor } from 'aifn/foundation/tensor'
 import type { Algorithm, Status } from 'aifn/foundation/contracts'
 import type { GaussianMoments, NaturalGaussian } from './gaussian'
 import type { Tilted } from './tilted'
+import { DomainError } from 'aifn/foundation/errors'
 
 /** Tilted moments of factor i (raised to `power`) against a cavity. */
 export type TiltedFn = (i: number, cavity: GaussianMoments, power: number) => Tilted
@@ -83,7 +84,8 @@ function posteriorOf(prior: NaturalGaussian, tau: Float64Array, nu: Float64Array
 export function expectationPropagation(o: EpOptions): Algorithm<void, EpState> {
   const n = o.factors
   const damping = o.damping ?? 0
-  if (!(damping >= 0 && damping < 1)) throw new RangeError('expectationPropagation: damping must be in [0, 1)')
+  if (!(damping >= 0 && damping < 1))
+    throw new DomainError('expectationPropagation', 'expectationPropagation: damping must be in [0, 1)')
   const power = o.power ?? 1
   const order = [...(o.order ?? Array.from({ length: n }, (_, i) => i))]
   const tolerance = o.tolerance ?? 1e-8

@@ -10,6 +10,7 @@ import type { Algorithm } from 'aifn/foundation/trace'
 import { logit, sigmoid } from 'aifn/numerics/special'
 import { simplexFit, type FitState } from './fit'
 import { toVec, type VectorLike } from './inputs'
+import { DomainError } from 'aifn/foundation/errors'
 
 /** The structure of an exponential-smoothing model. */
 export type SmoothingStructure = {
@@ -69,7 +70,7 @@ function parse(spec: SmoothingSpec): Parsed {
   const trend = spec.trend ?? 'none'
   const seasonal = spec.seasonal ?? 'none'
   if (seasonal !== 'none' && !(spec.period && spec.period >= 2))
-    throw new Error('exponentialSmoothing: a seasonal model needs period ≥ 2')
+    throw new DomainError('exponentialSmoothing', 'exponentialSmoothing: a seasonal model needs period ≥ 2')
   return {
     alpha: spec.alpha,
     beta: trend === 'none' ? 0 : (spec.beta ?? 0.1),
@@ -91,7 +92,8 @@ function initialStates(y: number[], p: Parsed) {
   const seasonal = p.seasonal !== 'none'
   const m = p.period
   const need = seasonal ? 2 * m : 2
-  if (y.length < need) throw new Error(`exponentialSmoothing: need at least ${need} observations`)
+  if (y.length < need)
+    throw new DomainError('exponentialSmoothing', `exponentialSmoothing: need at least ${need} observations`)
   const first = meanOf(tensor(y.slice(0, m)))
   const second = meanOf(tensor(y.slice(m, 2 * m)))
   let b = p.trend !== 'none' ? (second - first) / m : 0

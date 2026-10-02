@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { DomainError } from 'aifn/foundation/errors'
 import {
   bufferSize,
   CHUNK,
@@ -50,8 +51,8 @@ describe('the replay buffer', () => {
       (3 * CHUNK + 9) % 7 === 6,
     ])
     expect(transitionAt(b, b.count - bufferSize(b)).reward).toBe(b.count - bufferSize(b))
-    expect(() => transitionAt(b, b.count - bufferSize(b) - 1)).toThrow(RangeError)
-    expect(() => transitionAt(b, b.count)).toThrow(RangeError)
+    expect(() => transitionAt(b, b.count - bufferSize(b) - 1)).toThrow(DomainError)
+    expect(() => transitionAt(b, b.count)).toThrow(DomainError)
   })
 
   it('is persistent: a push never changes an earlier buffer, and sealed chunks are shared', () => {
@@ -59,7 +60,7 @@ describe('the replay buffer', () => {
     const early = states[5]
     expect(early.count).toBe(5)
     expect(transitionAt(early, 4).reward).toBe(4)
-    expect(() => transitionAt(early, 5)).toThrow(RangeError)
+    expect(() => transitionAt(early, 5)).toThrow(DomainError)
     // The tail is copied on each push, so the early state still holds exactly its own five transitions.
     expect(early.tail.length).toBe(5 * early.width)
     const a = states[CHUNK + 1]
@@ -77,7 +78,7 @@ describe('the replay buffer', () => {
     const m = gatherMinibatch(b, i)
     expect(Array.from(m.rewards)).toEqual(Array.from(i))
     expect(m.observations[2 * 7 + 1]).toBe(-i[7])
-    expect(() => sampleIndices(replayBuffer(2, 10), 1, stream(0))).toThrow(RangeError)
+    expect(() => sampleIndices(replayBuffer(2, 10), 1, stream(0))).toThrow(DomainError)
   })
 })
 

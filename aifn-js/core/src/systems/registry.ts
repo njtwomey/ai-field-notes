@@ -5,6 +5,9 @@
  */
 
 import { definer, entries, type AlgorithmInfo, type Entry, type FunctionInfo } from 'aifn/foundation/registry'
+import * as criteria from './criteria'
+import * as identification from './identification'
+import * as locus from './locus'
 import * as placement from './placement'
 import * as responses from './responses'
 import * as structure from './structure'
@@ -23,6 +26,19 @@ algorithm(
     notes: ['state-space-representation', 'difference-equations', 'linear-time-invariant-systems'],
   },
   responses.simulate,
+)
+
+algorithm(
+  {
+    key: 'predictionErrorMethod',
+    name: 'Prediction-error method',
+    summary: 'Damped Gauss–Newton on the one-step prediction error of A y = (B/F) u + C e; gradients by filtering.',
+    problem: 'least-squares',
+    state: { iterate: 'theta', objective: 'loss', flags: ['converged', 'stalled'] },
+    notes: ['autoregressive-exogenous-models-and-prediction-error-methods'],
+    cite: ['ljung1999'],
+  },
+  identification.predictionErrorMethod,
 )
 
 const fn = definer<FunctionInfo>('function', 'systems')
@@ -179,6 +195,17 @@ fn(
 
 fn(
   {
+    key: 'discretiseSsm',
+    name: 'State-space discretisation',
+    role: 'transform',
+    summary: 'Ā and B̄ of x′ = Ax + Bu sampled with step Δ by zero-order hold, bilinear or Euler; differentiable.',
+    notes: ['structured-state-space-models', 'deep-state-space-models', ...SS],
+    cite: ['gu2022s4'],
+  },
+  transform.discretiseSsm,
+)
+fn(
+  {
     key: 'discretise',
     name: 'Discretise',
     summary: 'A continuous system sampled at Δt by zero-order hold, first-order hold, Tustin (bilinear) or Euler.',
@@ -213,14 +240,98 @@ fn(
   placement.placePoles,
 )
 
+// ── Stability criteria ───────────────────────────────────────────────────────────────────────────────────────────────
+
+fn(
+  {
+    key: 'routhArray',
+    name: 'Routh array',
+    summary: 'Right-half-plane roots of a polynomial from sign changes in the first column of its Routh array.',
+    role: 'property',
+    notes: ['routh-hurwitz-criterion'],
+    cite: ['routh1877', 'hurwitz1895'],
+  },
+  criteria.routhArray,
+)
+fn(
+  {
+    key: 'nyquist',
+    name: 'Nyquist plot',
+    summary: 'L along the indented Nyquist contour and its encirclements of −1: Z = N + P closed-loop unstable poles.',
+    role: 'property',
+    notes: ['nyquist-stability-criterion', 'bode-plots-and-stability-margins'],
+    cite: ['nyquist1932'],
+  },
+  criteria.nyquist,
+)
+fn(
+  {
+    key: 'rootLocus',
+    name: 'Root locus',
+    summary: 'Closed-loop poles of 1 + kL as k grows: branches, asymptotes, breakaway points and stability crossings.',
+    role: 'property',
+    notes: ['root-locus'],
+    cite: ['evans1950'],
+  },
+  locus.rootLocus,
+)
+fn(
+  { key: 'closedLoopPolesAt', name: 'Closed-loop poles at a gain', role: 'property', notes: ['root-locus'] },
+  locus.closedLoopPolesAt,
+)
+
+// ── Identification ───────────────────────────────────────────────────────────────────────────────────────────────────
+
+const ID = ['autoregressive-exogenous-models-and-prediction-error-methods']
+fn({ key: 'arx', name: 'ARX by least squares', role: 'fit', notes: ID, cite: ['ljung1999'] }, identification.arx)
+fn(
+  { key: 'arxOrderSelection', name: 'ARX order selection', role: 'estimator', notes: ID, cite: ['ljung1999'] },
+  identification.arxOrderSelection,
+)
+fn(
+  {
+    key: 'polynomialModel',
+    name: 'Polynomial model by PEM',
+    summary: 'A y = (B/F) u + C e fitted by the prediction-error method (ARX, ARMAX, OE and mixtures).',
+    role: 'fit',
+    notes: ID,
+    cite: ['ljung1999'],
+  },
+  identification.polynomialModel,
+)
+fn({ key: 'armax', name: 'ARMAX by PEM', role: 'fit', notes: ID, cite: ['ljung1999'] }, identification.armax)
+fn(
+  { key: 'outputError', name: 'Output-error model by PEM', role: 'fit', notes: ID, cite: ['ljung1999'] },
+  identification.outputError,
+)
+fn(
+  {
+    key: 'n4sid',
+    name: 'N4SID subspace identification',
+    summary: 'A state-space model from the SVD of an oblique projection of future outputs onto past data.',
+    role: 'fit',
+    notes: ['subspace-identification'],
+    cite: ['vanoverschee1994'],
+  },
+  identification.n4sid,
+)
+
 /** The functions of the module, keyed by name. */
 export const systemsFunctions: Readonly<Record<string, Entry<(...args: never[]) => unknown, FunctionInfo>>> =
-  entries<FunctionInfo>('function', system, structure, responses, transform, placement) as Readonly<
-    Record<string, Entry<(...args: never[]) => unknown, FunctionInfo>>
-  >
+  entries<FunctionInfo>(
+    'function',
+    system,
+    structure,
+    responses,
+    transform,
+    placement,
+    criteria,
+    locus,
+    identification,
+  ) as Readonly<Record<string, Entry<(...args: never[]) => unknown, FunctionInfo>>>
 
 /** Every algorithm of the module, keyed by factory name. */
 export const systemsAlgorithms: Readonly<Record<string, Entry<(...args: never[]) => unknown, AlgorithmInfo>>> =
-  entries<AlgorithmInfo>('algorithm', responses) as Readonly<
+  entries<AlgorithmInfo>('algorithm', responses, identification) as Readonly<
     Record<string, Entry<(...args: never[]) => unknown, AlgorithmInfo>>
   >

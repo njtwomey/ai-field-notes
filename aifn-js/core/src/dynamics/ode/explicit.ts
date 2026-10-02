@@ -17,7 +17,7 @@ import {
   type Vector,
 } from 'aifn/foundation/tensor'
 import type { Algorithm, Scalar, Size, VectorLike } from 'aifn/foundation/contracts'
-import { NotDifferentiableError } from 'aifn/foundation/errors'
+import { DomainError, NotDifferentiableError, ShapeError } from 'aifn/foundation/errors'
 import type { FixedStepOptions, InitialValue, OdeState, Rhs } from './types'
 
 const { allFinite, toF64 } = dense
@@ -79,7 +79,8 @@ export function evaluateValue(f: Rhs, t: Scalar, x: Value, where: string): Value
       ? (out as Value)
       : fromData(Float64Array.from(out as ArrayLike<number>), [(out as ArrayLike<number>).length])
   const n = lengthOf(x)
-  if (lengthOf(k) !== n) throw new Error(`${where}: f returned ${lengthOf(k)} values for a state of length ${n}`)
+  if (lengthOf(k) !== n)
+    throw new ShapeError(where, `${where}: f returned ${lengthOf(k)} values for a state of length ${n}`)
   return k
 }
 
@@ -162,7 +163,7 @@ export function nextStep(t: number, h: number, tEnd: number | undefined): number
  */
 export function checkDirection(t0: number, h: number, tEnd: number | undefined, where: string): void {
   if (tEnd !== undefined && tEnd !== t0 && Math.sign(tEnd - t0) !== Math.sign(h))
-    throw new Error(`${where}: the step size ${h} points away from tEnd = ${tEnd} (t₀ = ${t0})`)
+    throw new DomainError(where, `${where}: the step size ${h} points away from tEnd = ${tEnd} (t₀ = ${t0})`)
 }
 
 /** True when a solver has reached `tEnd` (to rounding; internal). */
@@ -186,8 +187,9 @@ export function rungeKutta(
   { stepSize: h, tEnd }: FixedStepOptions,
 ): Algorithm<InitialValue, OdeState> {
   const tab = typeof method === 'string' ? TABLEAUX[method] : method
-  if (!tab) throw new Error(`rungeKutta: unknown method ${String(method)}`)
-  if (!(h !== 0 && Number.isFinite(h))) throw new Error('rungeKutta: the step size must be finite and non-zero')
+  if (!tab) throw new DomainError('rungeKutta', `rungeKutta: unknown method ${String(method)}`)
+  if (!(h !== 0 && Number.isFinite(h)))
+    throw new DomainError('rungeKutta', 'rungeKutta: the step size must be finite and non-zero')
   const name = tab.name
   return {
     name,

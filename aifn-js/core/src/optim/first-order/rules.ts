@@ -13,9 +13,25 @@
  * difficulty of training recurrent neural networks" (gradient clipping).
  */
 
-import { add, div, mul, neg, sqrt, square, toFlat, type Tensor, type Value } from 'aifn/foundation/tensor'
+import {
+  add,
+  div,
+  greater,
+  isTraced,
+  mul,
+  neg,
+  norm,
+  sqrt,
+  square,
+  stack,
+  toFlat,
+  where,
+  type Tensor,
+  type Value,
+} from 'aifn/foundation/tensor'
 import { treeLeaves, treeMap, treeZip, zerosLike, type LeafValue, type Params } from 'aifn/foundation/pytree'
 import type { Scalar, Schedule, Size } from 'aifn/foundation/contracts'
+import { DomainError } from 'aifn/foundation/errors'
 
 /**
  * A step size: a constant, or a schedule t ↦ η_t read at the rule's update count t = 0, 1, 2, … A constant may be a
@@ -57,7 +73,8 @@ const negated = (eta: Value): Value => (typeof eta === 'number' ? -eta : neg(eta
 const leaf = (v: unknown) => v as LeafValue & Tensor
 
 const needParams = (name: string, params: Params | undefined): Params => {
-  if (params === undefined) throw new Error(`${name}: weight decay needs the parameters; pass them to update`)
+  if (params === undefined)
+    throw new DomainError(name, `${name}: weight decay needs the parameters; pass them to update`)
   return params
 }
 
@@ -104,16 +121,33 @@ export function globalNorm(tree: Params): Scalar {
 }
 
 /**
+ * The global norm of a tree with traced leaves, by tensor primitives (each leaf's stable Euclidean norm, then the norm
+ * of those), so that it differentiates.
+ */
+function tracedGlobalNorm(tree: Params): Value {
+  const norms = treeLeaves(tree).map(({ value }) => norm(value as Value))
+  return norm(stack(norms))
+}
+
+/**
  * Clips the gradient tree to a global norm of at most `maxNorm` (Pascanu et al., 2013): g ← g · min(1, c/‖g‖). The
- * state counts the updates.
+ * state counts the updates. With traced gradients (a hypergradient through `unrolled`) the factor is computed with
+ * tensor primitives and differentiated through, as optax's clip is.
  */
 export function clipByGlobalNorm(maxNorm: Scalar): UpdateRule<RuleState> {
   return {
     name: 'clip-by-global-norm',
     init: () => ({ t: 0, slots: {} }),
     update: (grads, state) => {
-      const norm = globalNorm(grads)
-      const factor = norm > maxNorm ? maxNorm / norm : 1
+      if (treeLeaves(grads).some(({ value }) => isTraced(value as Value))) {
+        const total = tracedGlobalNorm(grads)
+        // The unused branch's divisor is replaced, so it stays finite and so does its derivative.
+        const over = greater(total, maxNorm)
+        const scale = where(over, div(maxNorm, where(over, total, 1)), 1)
+        return { updates: treeMap(grads, (g) => mul(leaf(g), scale)), state: { t: state.t + 1, slots: {} } }
+      }
+      const total = globalNorm(grads)
+      const factor = total > maxNorm ? maxNorm / total : 1
       return {
         updates: factor === 1 ? grads : treeMap(grads, (g) => mul(leaf(g), factor)),
         state: { t: state.t + 1, slots: {} },

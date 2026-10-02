@@ -10,6 +10,7 @@ import { checkCount, labels, matrix, vector, type DatasetMeta } from '../types'
 import type { DatasetInfo } from 'aifn/foundation/contracts'
 import { definer } from 'aifn/foundation/registry'
 import { int, real, space } from 'aifn/foundation/space'
+import { DomainError } from 'aifn/foundation/errors'
 
 /** A discrete hidden Markov model: initial distribution (k), transition matrix (k × k) and emission matrix (k × m). */
 export interface DiscreteHmm {
@@ -29,7 +30,7 @@ export interface HmmSample {
 function rows(m: readonly (readonly number[])[], what: string): number[][] {
   return m.map((r, i) => {
     const total = r.reduce((a, b) => a + b, 0)
-    if (Math.abs(total - 1) > 1e-9) throw new RangeError(`${what}: row ${i} sums to ${total}, not 1`)
+    if (Math.abs(total - 1) > 1e-9) throw new DomainError(what, `${what}: row ${i} sums to ${total}, not 1`)
     return [...r]
   })
 }
@@ -240,6 +241,59 @@ export function randomWalk(
   })
 }
 
+/** Options for `motifSeries`. */
+export interface MotifSeriesOptions {
+  n?: number
+  /** The motif's length m. Default 40. */
+  m?: number
+  /** Where the motif is planted (start indices). Default [n/7, 2n/3]. */
+  motifs?: readonly number[]
+  /** Where the discord (a fast burst seen nowhere else) is planted. Default 0.43n. */
+  discord?: number
+  /** The random walk's step sd. Default 0.3. */
+  sd?: number
+}
+
+/** A series with known planted motif occurrences and one discord. */
+export interface MotifSeries extends TimeSeries {
+  readonly m: number
+  readonly motifs: readonly number[]
+  readonly discord: number
+}
+
+/**
+ * A Gaussian random walk (step sd) with one shape, 1.5 periods of a sine of amplitude 3 and length m, added at each of
+ * `motifs`, and a discord, three periods of a fast sine of amplitude 2.5 over 30 samples, added at `discord`: the test
+ * bed of matrix-profile motif and discord discovery (the shapes are found by their z-normalised distances).
+ */
+export function motifSeries(s: Stream, options: MotifSeriesOptions = {}): MotifSeries {
+  const { n = 600, m = 40, sd = 0.3 } = options
+  checkCount(n, 'motifSeries')
+  const motifs = options.motifs ?? [Math.round(n / 7), Math.round((2 * n) / 3)]
+  const discord = options.discord ?? Math.round(0.43 * n)
+  const y = new Float64Array(n)
+  let v = 0
+  for (let t = 0; t < n; t++) {
+    if (t > 0) v += sd * normal(s)
+    y[t] = v
+  }
+  for (const at of motifs)
+    for (let j = 0; j < m && at + j < n; j++) y[at + j] += 3 * Math.sin((3 * Math.PI * j) / (m - 1))
+  for (let j = 0; j < 30 && discord + j < n; j++) y[discord + j] += 2.5 * Math.sin((12 * Math.PI * j) / 29)
+  return {
+    ...series(y, {
+      name: 'planted motifs',
+      description: `A random walk of ${n} steps with one shape of length ${m} planted at ${motifs.join(' and ')} and a burst at ${discord}.`,
+      task: 'sequence',
+      featureNames: ['y'],
+      key: s.key,
+    }),
+    m,
+    motifs,
+    discord,
+  }
+}
+
 // ── Registry ─────────────────────────────────────────────────────────────────────────────────────────────────────────
 
 const dataset = definer<DatasetInfo>('dataset', 'data/synthetic')
@@ -324,4 +378,23 @@ dataset(
     notes: ['white-noise-and-random-walk', 'random-walk'],
   },
   randomWalk,
+)
+
+dataset(
+  {
+    key: 'motifSeries',
+    name: 'Planted motifs and a discord',
+    summary: 'A random walk with one shape planted twice and a fast burst planted once.',
+    task: 'sequence',
+    output: 'series',
+    knobs: space({
+      n: int(100, 20000, { default: 600 }),
+      m: int(8, 500, { default: 40 }),
+      sd: real(0.01, 5, { default: 0.3 }),
+    }),
+    truth: false,
+    random: true,
+    notes: ['matrix-profile', 'motif-discovery-variants', 'discord-discovery-at-scale'],
+  },
+  motifSeries,
 )

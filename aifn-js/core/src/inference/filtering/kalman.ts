@@ -4,7 +4,8 @@
  * filter and smoother as step-through `Algorithm`s.
  *
  * Convention: (m₀, P₀) describes z₀, which is not observed; the first observation y₁ is of z₁ = A z₀ + w₁, so the
- * filter predicts before its first update. Rows of y that contain NaN are missing: the filter predicts through them.
+ * filter predicts before its first update. NaN entries of y are missing: a step updates with its observed entries only,
+ * and predicts through a row that is entirely NaN.
  *
  * Everything is written on tensors (`aifn/foundation/tensor` arithmetic, `aifn/numerics/linalg` factorisations): one
  * filter step (`kalmanStep`) and one smoother step (`rtsStep`) are the definitions, and the batch functions, the
@@ -119,9 +120,9 @@ export type KalmanStep = {
   mean: Vector
   /** P_{t|t}. */
   cov: Matrix
-  /** K_t (n×m); zero for a missing or singular step. */
+  /** K_t (n×m); zero for a missing or singular step, and in the columns of missing entries. */
   gain: Matrix
-  /** y_t − C μ_{t|t−1}; NaN for a missing step. */
+  /** y_t − C μ_{t|t−1}; NaN in missing entries. */
   innovation: Vector
   /** S_t = C P_{t|t−1} Cᵀ + R. */
   innovationCov: Matrix
@@ -132,10 +133,11 @@ export type KalmanStep = {
 }
 
 /**
- * One step of the Kalman filter (Kalman, 1960) from (μ_{t−1|t−1}, P_{t−1|t−1}) and the observation y_t (NaN entries:
- * missing). Predict μ⁻ = A μ, P⁻ = A P Aᵀ + Q; update with S = C P⁻ Cᵀ + R, K = P⁻ Cᵀ S⁻¹ (solved as Kᵀ = S⁻¹ C P⁻),
- * μ = μ⁻ + K(y − C μ⁻) and the covariance in Joseph form (I − KC) P⁻ (I − KC)ᵀ + K R Kᵀ, which keeps P symmetric
- * positive semi-definite in finite precision.
+ * One step of the Kalman filter (Kalman, 1960) from (μ_{t−1|t−1}, P_{t−1|t−1}) and the observation y_t (NaN entries
+ * are missing: the update then uses the observed rows of C and y and the observed block of R, and a step with every
+ * entry missing is a prediction only). Predict μ⁻ = A μ, P⁻ = A P Aᵀ + Q; update with S = C P⁻ Cᵀ + R,
+ * K = P⁻ Cᵀ S⁻¹ (solved as Kᵀ = S⁻¹ C P⁻), μ = μ⁻ + K(y − C μ⁻) and the covariance in Joseph form
+ * (I − KC) P⁻ (I − KC)ᵀ + K R Kᵀ, which keeps P symmetric positive semi-definite in finite precision.
  */
 export function kalmanStep(md: Model, mean: Vector, cov: Matrix, y: readonly number[]): KalmanStep {
   const d = denseModel(md)
@@ -198,39 +200,62 @@ function stepDense(d: DenseModel, mean: F64, cov: F64, y: readonly number[]) {
     term: 0,
     singular: false,
   }
-  if (y.some((v) => Number.isNaN(v))) return out
-  const innovation = dense.sub(y, dense.matVec(C, predictedMean, m, n))
-  out.innovation = innovation
-  // The right-hand side [C P⁻ | v] (m × (n + 1)): Kᵀ = S⁻¹ C P⁻ and S⁻¹ v from one factorisation.
-  const CP = dense.matMul(C, predictedCov, m, n, n)
-  const rhs = new Float64Array(m * (n + 1))
-  for (let i = 0; i < m; i++) {
+  // Missing entries drop out: the update uses the observed rows of C, the observed block of R and the observed y
+  // (a fully missing step is a pure prediction).
+  const observed: number[] = []
+  y.forEach((v, i) => {
+    if (!Number.isNaN(v)) observed.push(i)
+  })
+  if (observed.length === 0) return out
+  const k = observed.length
+  const all = k === m
+  const Co = all
+    ? C
+    : (Float64Array.from({ length: k * n }, (_, t) => C[observed[Math.floor(t / n)] * n + (t % n)]) as F64)
+  const Ro = all
+    ? R
+    : (Float64Array.from({ length: k * k }, (_, t) => R[observed[Math.floor(t / k)] * m + observed[t % k]]) as F64)
+  const So = all
+    ? innovationCov
+    : (Float64Array.from(
+        { length: k * k },
+        (_, t) => innovationCov[observed[Math.floor(t / k)] * m + observed[t % k]],
+      ) as F64)
+  const yo = observed.map((i) => y[i])
+  const innovationO = dense.sub(yo, dense.matVec(Co, predictedMean, k, n))
+  for (let i = 0; i < k; i++) out.innovation[observed[i]] = innovationO[i]
+  // The right-hand side [C P⁻ | v] (k × (n + 1)): Kᵀ = S⁻¹ C P⁻ and S⁻¹ v from one factorisation.
+  const CP = dense.matMul(Co, predictedCov, k, n, n)
+  const rhs = new Float64Array(k * (n + 1))
+  for (let i = 0; i < k; i++) {
     rhs.set(CP.subarray(i * n, (i + 1) * n), i * (n + 1))
-    rhs[i * (n + 1) + n] = innovation[i]
+    rhs[i * (n + 1) + n] = innovationO[i]
   }
-  const sol = solveDense(innovationCov, rhs, m)
+  const sol = solveDense(So, rhs, k)
   if (sol.x === null) return { ...out, term: NaN, singular: true }
   const x = sol.x
-  const gain = new Float64Array(n * m) as F64
+  const gainO = new Float64Array(n * k) as F64
   let quad = 0
-  for (let i = 0; i < m; i++) {
-    for (let j = 0; j < n; j++) gain[j * m + i] = x[i * (n + 1) + j]
-    quad += innovation[i] * x[i * (n + 1) + n]
+  for (let i = 0; i < k; i++) {
+    for (let j = 0; j < n; j++) gainO[j * k + i] = x[i * (n + 1) + j]
+    quad += innovationO[i] * x[i * (n + 1) + n]
   }
-  const J = dense.sub(d.I, dense.matMul(gain, C, n, m, n))
+  const gain = new Float64Array(n * m) as F64
+  for (let j = 0; j < n; j++) for (let i = 0; i < k; i++) gain[j * m + observed[i]] = gainO[j * k + i]
+  const J = dense.sub(d.I, dense.matMul(gainO, Co, n, k, n))
   return {
     ...out,
     gain,
-    mean: dense.add(predictedMean, dense.matVec(gain, innovation, n, m)),
-    cov: dense.symmetrise(dense.add(dense.sandwich(J, predictedCov, n, n), dense.sandwich(gain, R, n, m)), n),
-    term: -0.5 * (m * Math.log(2 * Math.PI) + sol.logAbsDet + quad),
+    mean: dense.add(predictedMean, dense.matVec(gainO, innovationO, n, k)),
+    cov: dense.symmetrise(dense.add(dense.sandwich(J, predictedCov, n, n), dense.sandwich(gainO, Ro, n, k)), n),
+    term: -0.5 * (k * Math.log(2 * Math.PI) + sol.logAbsDet + quad),
   }
 }
 
 /** The filter over a whole series: every step, the total log-likelihood and the steps with a singular S_t. */
 export type FilterRun = { steps: KalmanStep[]; logLikelihood: number; singularSteps: number[] }
 
-/** Run `kalmanStep` over the rows of `ys` (T rows of m observations, NaN rows missing) from (m₀, P₀). */
+/** Run `kalmanStep` over the rows of `ys` (T rows of m observations, NaN entries missing) from (m₀, P₀). */
 export function filterAll(md: Model, ys: readonly (readonly number[])[]): FilterRun {
   let mean = md.m0
   let cov = md.P0

@@ -31,6 +31,7 @@ import {
   type SvfmParams,
 } from './model'
 import { instanceWork, realisation, samplePaths } from './sampling'
+import { DomainError, NumericalError } from 'aifn/foundation/errors'
 
 /** The kinds of problem a run trains on. */
 export type SvfmTask = 'classification' | 'endpoint' | 'forecast'
@@ -195,7 +196,8 @@ export function* svfmRun(data: SvfmRunData, options: SvfmRunOptions = {}): Gener
     checkpoints = 12,
   } = options
   checkLossSettings(losses)
-  if (losses.forecast && task !== 'forecast') throw new RangeError('svfmRun: FLoss needs a forecasting task')
+  if (losses.forecast && task !== 'forecast')
+    throw new DomainError('svfmRun', 'svfmRun: FLoss needs a forecasting task')
   const D = data.x.shape[1]
   const n = data.x.shape[0]
   const standardise = options.standardise ?? !(task === 'endpoint' && D === 1)
@@ -486,7 +488,8 @@ export function* svfmRun(data: SvfmRunData, options: SvfmRunOptions = {}): Gener
     let next: IteratorResult<Item, void>
     try {
       next = iterator.next() as IteratorResult<Item, void>
-      if (!next.done && !Number.isFinite(next.value.state.loss)) throw new Error('the loss is not finite')
+      if (!next.done && !Number.isFinite(next.value.state.loss))
+        throw new NumericalError('snapshot', 'the loss is not finite', 'not-finite')
     } catch (e) {
       error = e instanceof Error ? e.message : String(e)
       const last = snapshot(losses_.length, true)

@@ -34,6 +34,7 @@ import {
 } from 'aifn/foundation/tensor'
 import type { KernelParams, Kernel } from 'aifn/foundation/contracts'
 import { treeMap } from 'aifn/foundation/pytree'
+import { DomainError, ShapeError } from 'aifn/foundation/errors'
 
 // Types defined once, in `aifn/foundation/contracts`.
 export type { KernelParams, Kernel } from 'aifn/foundation/contracts'
@@ -45,7 +46,7 @@ export function asRows(x: Value): Value {
   const shape = shapeOfValue(x)
   if (shape.length === 1) return reshape(x, [shape[0], 1])
   if (shape.length === 2) return x
-  throw new Error(`kernels: inputs must be [n] or [n, d], got shape [${shape.join(', ')}]`)
+  throw new ShapeError('kernels', `kernels: inputs must be [n] or [n, d], got shape [${shape.join(', ')}]`)
 }
 
 function rows(x: Value): number {
@@ -89,7 +90,7 @@ function filled(v: Value, n: number): Value {
 function checkLengthscale(name: string, lengthscale: Value) {
   const v = unwrap(lengthscale)
   const values = typeof v === 'number' ? [v] : Array.from(v.data)
-  if (!values.every((l) => l > 0)) throw new Error(`${name}: lengthscales must be positive`)
+  if (!values.every((l) => l > 0)) throw new DomainError(name, `${name}: lengthscales must be positive`)
 }
 
 /** A stationary kernel σ² g(r²) with r² the scaled squared distance. */
@@ -148,7 +149,7 @@ export function matern(nu: MaternNu, { lengthscale = 1, variance = 1 }: Partial<
           const s = mul(Math.sqrt(5), r)
           return mul(add(add(1, s), mul(5 / 3, r2)), exp(neg(s)))
         }
-        throw new Error(`matern: ν must be 0.5, 1.5 or 2.5, got ${nu}`)
+        throw new DomainError('matern', `matern: ν must be 0.5, 1.5 or 2.5, got ${nu}`)
       },
       make,
     )
@@ -311,7 +312,8 @@ export function polynomial(
   degree: number,
   { variance = 1, bias = 1 }: Partial<DotProductParams> = {},
 ): Kernel<DotProductParams> {
-  if (!(Number.isInteger(degree) && degree >= 1)) throw new Error('polynomial: degree must be an integer ≥ 1')
+  if (!(Number.isInteger(degree) && degree >= 1))
+    throw new DomainError('polynomial', 'polynomial: degree must be an integer ≥ 1')
   const make = (params: DotProductParams): Kernel<DotProductParams> => ({
     kind: 'kernel',
     name: `polynomial${degree}`,
@@ -330,7 +332,7 @@ export function polynomial(
 export type CombinedParams = { terms: readonly KernelParams[] }
 
 function combine(op: 'sum' | 'product', kernels: readonly Kernel[]): Kernel<CombinedParams> {
-  if (kernels.length === 0) throw new Error(`${op}Kernel: needs at least one kernel`)
+  if (kernels.length === 0) throw new DomainError(`${op}Kernel`, `${op}Kernel: needs at least one kernel`)
   const combineOp = op === 'sum' ? add : mul
   const fold = (f: (k: Kernel) => Value) => kernels.map(f).reduce((a, b) => combineOp(a, b))
   return {
@@ -341,7 +343,8 @@ function combine(op: 'sum' | 'product', kernels: readonly Kernel[]): Kernel<Comb
     evaluate: (x, y) => fold((k) => k.evaluate(x, y)),
     diagonal: (x) => fold((k) => k.diagonal(x)),
     withParams: (p) => {
-      if (p.terms.length !== kernels.length) throw new Error(`${op}Kernel: expected ${kernels.length} term trees`)
+      if (p.terms.length !== kernels.length)
+        throw new ShapeError(`${op}Kernel`, `${op}Kernel: expected ${kernels.length} term trees`)
       return combine(
         op,
         kernels.map((k, i) => k.withParams(p.terms[i])),

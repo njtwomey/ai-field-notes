@@ -7,6 +7,7 @@
 
 import { fromData, type Tensor } from 'aifn/foundation/tensor'
 import type { Size } from 'aifn/foundation/contracts'
+import { ShapeError } from 'aifn/foundation/errors'
 
 /** Consecutive positions start, start + 1, …, start + n − 1. */
 export function positionRange(n: Size, start = 0): number[] {
@@ -23,7 +24,8 @@ export function continuePositions(
   given?: readonly number[],
 ): number[] {
   if (given) {
-    if (given.length !== n) throw new Error(`continuePositions: ${given.length} positions for ${n} tokens`)
+    if (given.length !== n)
+      throw new ShapeError('continuePositions', `continuePositions: ${given.length} positions for ${n} tokens`)
     return [...given]
   }
   const start = previous?.length ? previous[previous.length - 1] + 1 : 0
@@ -34,7 +36,10 @@ export function continuePositions(
 export type MaskOptions = {
   /** Hide keys after the query (q > p). */
   causal?: boolean
-  /** Hide keys w or more positions before the query (p − q ≥ w); with `causal`, a sliding window of w tokens. */
+  /**
+   * Hide keys w or more positions from the query (|p − q| ≥ w): without `causal`, a symmetric band of 2w − 1 keys
+   * (Longformer's local attention); with `causal`, a sliding window of the w tokens ending at the query.
+   */
   window?: Size
 }
 
@@ -47,7 +52,7 @@ export function positionMask(queries: readonly number[], keys: readonly number[]
   const out = new Float64Array(queries.length * keys.length)
   queries.forEach((p, i) =>
     keys.forEach((q, j) => {
-      const hidden = (causal && q > p) || (window !== undefined && p - q >= window)
+      const hidden = (causal && q > p) || (window !== undefined && Math.abs(p - q) >= window)
       out[i * keys.length + j] = hidden ? 0 : 1
     }),
   )

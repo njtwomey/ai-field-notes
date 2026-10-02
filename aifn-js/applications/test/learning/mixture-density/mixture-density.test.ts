@@ -77,3 +77,23 @@ describe('mixtureDensityNetwork', () => {
     expect(decided[0]).toBeCloseTo(truth.solutions([0.1])[0].value[0], 1)
   })
 })
+
+describe('mixtureDensityRun by full-batch L-BFGS', () => {
+  it('lowers both networks’ objectives in a few dozen iterations', () => {
+    const snaps = [
+      ...mixtureDensityRun({
+        data,
+        components: 3,
+        hidden: [10],
+        steps: 40,
+        every: 10,
+        seed: 4,
+        method: { method: 'lbfgs' },
+      }),
+    ]
+    const h = snaps.at(-1)!.history
+    expect(snaps.at(-1)!.done).toBe(true)
+    expect(h.nll.at(-1)!).toBeLessThan(h.nll[0] - 0.5)
+    expect(h.meanMse.at(-1)!).toBeLessThan(h.meanMse[0])
+  })
+})

@@ -5,6 +5,9 @@
 
 export {
   CORPUS_TOPICS,
+  DRIFTING_TOPICS,
+  driftingTopicCorpus,
+  type DriftingTopicCorpusOptions,
   corpusDatasets,
   NAMED_CORPORA,
   namedCorpus,

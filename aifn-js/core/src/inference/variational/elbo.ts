@@ -19,6 +19,7 @@ import type { LogDensity } from 'aifn/foundation/contracts'
 import { child, normals, type Stream } from 'aifn/foundation/random'
 import { fromData, item, toFlat, unwrap, type Tensor, type Value, type Vector } from 'aifn/foundation/tensor'
 import { toF64, vec, type F64, type GaussianFamily, type VectorLike } from './family'
+import { DomainError } from 'aifn/foundation/errors'
 
 /** Which gradient estimator. */
 export type GradientEstimator = 'reparameterisation' | 'score'
@@ -146,7 +147,8 @@ export function elboGradient(
     return { grad: vec(grad), elbo: elboSum / S, draws: fromData(X, [S, d]) }
   }
   const baseline = options.baseline ?? (S >= 2 ? 'leave-one-out' : 'none')
-  if (baseline !== 'none' && S < 2) throw new Error(`elboGradient: the ${baseline} baseline needs at least 2 samples`)
+  if (baseline !== 'none' && S < 2)
+    throw new DomainError('elboGradient', `elboGradient: the ${baseline} baseline needs at least 2 samples`)
   const f = new Float64Array(S)
   const h: F64[] = []
   for (let r = 0; r < S; r++) {
@@ -158,7 +160,8 @@ export function elboGradient(
   }
   const total = f.reduce((a, b) => a + b, 0)
   if (baseline === 'control-variate') {
-    if (S < 3) throw new Error('elboGradient: the control-variate baseline needs at least 3 samples')
+    if (S < 3)
+      throw new DomainError('elboGradient', 'elboGradient: the control-variate baseline needs at least 3 samples')
     for (let i = 0; i < P; i++) {
       // a*ᵢ = Cov(hᵢf, hᵢ)/Var(hᵢ), estimated for each sample from the other S − 1 so the estimate stays unbiased.
       let sh = 0
@@ -216,16 +219,17 @@ export function gradientVariance(
 ): GradientVariance {
   const R = options.repeats ?? 200
   const P = family.size
-  const sum = new Float64Array(P)
-  const sum2 = new Float64Array(P)
+  // Welford's update: no cancellation when the mean is large against the spread.
+  const mean = new Float64Array(P)
+  const m2 = new Float64Array(P)
   for (let r = 0; r < R; r++) {
     const g = toFlat(elboGradient(child(s, r), target, family, lambda, options).grad)
     for (let i = 0; i < P; i++) {
-      sum[i] += g[i]
-      sum2[i] += g[i] * g[i]
+      const d = g[i] - mean[i]
+      mean[i] += d / (r + 1)
+      m2[i] += d * (g[i] - mean[i])
     }
   }
-  const mean = sum.map((v) => v / R)
-  const variance = sum2.map((v, i) => (v - R * mean[i] * mean[i]) / (R - 1))
+  const variance = m2.map((v) => v / (R - 1))
   return { mean: vec(mean), variance: vec(variance), totalVariance: variance.reduce((a, b) => a + b, 0), repeats: R }
 }

@@ -10,6 +10,7 @@
 import { solveDense } from 'aifn/numerics/linalg'
 import { dense, fromData, type Tensor } from 'aifn/foundation/tensor'
 import type { MatrixLike, Shape, Size, VectorLike } from 'aifn/foundation/contracts'
+import { DomainError, ShapeError } from 'aifn/foundation/errors'
 
 /** A dense row-major working matrix: `a[i * n + j]` is element (i, j). */
 export type Mat = { m: Size; n: Size; a: Float64Array }
@@ -19,7 +20,7 @@ export function readVector(x: VectorLike | undefined, where: string, length?: Si
   if (x === undefined) return new Float64Array(length ?? 0)
   const out = dense.toF64(x, where)
   if (length !== undefined && out.length !== length)
-    throw new Error(`${where}: expected length ${length}, got ${out.length}`)
+    throw new ShapeError(where, `${where}: expected length ${length}, got ${out.length}`)
   return out
 }
 
@@ -28,13 +29,13 @@ export function readMatrix(x: MatrixLike | undefined, where: string, columns: Si
   if (x === undefined) return { m: 0, n: columns, a: new Float64Array(0) }
   const { data, m, n } = dense.toMatrixF64(x, where)
   if (m === 0) return { m: 0, n: columns, a: new Float64Array(0) }
-  if (n !== columns) throw new Error(`${where}: expected ${columns} columns, got ${n}`)
+  if (n !== columns) throw new ShapeError(where, `${where}: expected ${columns} columns, got ${n}`)
   return { m, n, a: data }
 }
 
 /** Throw unless every entry is finite. */
 export function checkFinite(a: ArrayLike<number>, where: string): void {
-  if (!dense.allFinite(a)) throw new Error(`${where}: non-finite entry`)
+  if (!dense.allFinite(a)) throw new DomainError(where, `${where}: non-finite entry`)
 }
 
 /** A float64 vector tensor holding a copy of `a`. */

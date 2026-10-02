@@ -11,6 +11,7 @@ import { lu, luSolve, type LU } from 'aifn/numerics/linalg'
 import { fromData, toFlat, type Tensor, type Vector } from 'aifn/foundation/tensor'
 import type { Status } from 'aifn/foundation/contracts'
 import type { Algorithm } from 'aifn/foundation/trace'
+import { DomainError, NumericalError, ShapeError } from 'aifn/foundation/errors'
 
 type F64 = Float64Array<ArrayBuffer>
 
@@ -19,7 +20,7 @@ export type Grid1 = { a: number; b: number; n: number }
 
 /** The points of a grid (length n). */
 export function gridPoints({ a, b, n }: Grid1): Vector {
-  if (!(n >= 3)) throw new Error('gridPoints: a grid needs at least 3 points')
+  if (!(n >= 3)) throw new DomainError('gridPoints', 'gridPoints: a grid needs at least 3 points')
   return fromData(
     Float64Array.from({ length: n }, (_, i) => a + ((b - a) * i) / (n - 1)),
     [n],
@@ -35,7 +36,8 @@ function sample(profile: Profile, grid: Grid1, where: string): F64 {
   const v = Float64Array.from(
     (profile as Tensor).shape !== undefined ? toFlat(profile as Tensor) : Array.from(profile as ArrayLike<number>),
   )
-  if (v.length !== grid.n) throw new Error(`${where}: the initial profile has ${v.length} values for ${grid.n} points`)
+  if (v.length !== grid.n)
+    throw new ShapeError(where, `${where}: the initial profile has ${v.length} values for ${grid.n} points`)
   return v
 }
 
@@ -131,9 +133,9 @@ function thetaMethod(
   tEnd: number | undefined,
 ): Stepper {
   const theta = THETA[scheme]
-  if (theta === undefined) throw new Error(`${name}: unknown scheme ${scheme}`)
+  if (theta === undefined) throw new DomainError(name, `${name}: unknown scheme ${scheme}`)
   const factor = theta > 0 ? implicitFactor(L, theta, dt) : null
-  if (factor?.singular) throw new Error(`${name}: the implicit system is singular`)
+  if (factor?.singular) throw new NumericalError(name, `${name}: the implicit system is singular`, 'singular')
   const state = (time: number, u: F64, t: number): PdeState => ({
     t,
     time,
@@ -178,7 +180,8 @@ export type HeatOptions = Common & {
  */
 export function heatEquation(options: HeatOptions): Algorithm<{ u0: Profile }, PdeState> {
   const { diffusivity: D, grid, boundary, dt, scheme = 'crank-nicolson', tEnd } = options
-  if (!(D > 0) || !(dt > 0)) throw new Error('heatEquation: the diffusivity and dt must be positive')
+  if (!(D > 0) || !(dt > 0))
+    throw new DomainError('heatEquation', 'heatEquation: the diffusivity and dt must be positive')
   const n = grid.n
   const dx = (grid.b - grid.a) / (n - 1)
   const k = D / (dx * dx)
@@ -388,7 +391,8 @@ export function fokkerPlanck(options: FokkerPlanckOptions): Algorithm<{ u0: Prof
   const dx = (grid.b - grid.a) / (n - 1)
   const xs = toFlat(gridPoints(grid))
   const D = xs.map(diffusion)
-  if (D.some((d) => !(d >= 0))) throw new Error('fokkerPlanck: the diffusion must be non-negative')
+  if (D.some((d) => !(d >= 0)))
+    throw new DomainError('fokkerPlanck', 'fokkerPlanck: the diffusion must be non-negative')
   // Each interior cell interface i+½ (between points i and i+1) carries a flux J = a·p_i + b·p_{i+1}.
   const lo = new Float64Array(n)
   const di = new Float64Array(n)

@@ -11,7 +11,7 @@
  * Hutter (2019) (full titles in `rules.ts`).
  */
 
-import { NotDifferentiableError } from 'aifn/foundation/errors'
+import { DomainError, NotDifferentiableError, ShapeError } from 'aifn/foundation/errors'
 import type { Algorithm } from 'aifn/foundation/trace'
 import {
   add,
@@ -89,7 +89,7 @@ const primal = (v: Value): number => {
 function evaluateValue(f: ObjectiveFn, x: Value, n: number, where: string): { value: Value; grad: Value } {
   const out = f(x as Vector) as { value: Value; grad?: Value | ArrayLike<number> } | number
   if (typeof out === 'number' || out.grad === undefined)
-    throw new Error(`${where}: the objective must return { value, grad }; this method uses the gradient`)
+    throw new DomainError(where, `${where}: the objective must return { value, grad }; this method uses the gradient`)
   const g = out.grad
   // A plain array for a traced point was computed on raw values: the gradient's dependence on x is lost.
   if (isTraced(x) && typeof g === 'object' && !isTensor(g) && !isTraced(g))
@@ -100,7 +100,7 @@ function evaluateValue(f: ObjectiveFn, x: Value, n: number, where: string): { va
   const grad: Value =
     typeof g === 'number' || isTensor(g) || !('length' in g) ? (g as Value) : fromData(Float64Array.from(g), [g.length])
   const length = sizeOf(grad)
-  if (length !== n) throw new Error(`${where}: the gradient has length ${length}, but x has length ${n}`)
+  if (length !== n) throw new ShapeError(where, `${where}: the gradient has length ${length}, but x has length ${n}`)
   return { value: out.value, grad }
 }
 

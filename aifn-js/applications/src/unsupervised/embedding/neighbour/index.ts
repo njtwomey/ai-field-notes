@@ -1,6 +1,6 @@
 /**
- * `aifn-applied/unsupervised/embedding/neighbour`: neighbour embeddings: t-SNE and UMAP, and approximate k-nearest
- * neighbours by nearest-neighbour descent.
+ * `aifn-applied/unsupervised/embedding/neighbour`: neighbour embeddings: t-SNE, UMAP and PaCMAP (approximate k-nearest neighbours
+ * by nearest-neighbour descent come from `aifn/numerics/neighbours`).
  */
 
 export {
@@ -27,5 +27,13 @@ export {
   type UmapModel,
   type UmapState,
 } from './umap'
-export { nearestNeighbourDescent, type NearestNeighbourDescentOptions, type NeighbourLists } from './nn-descent'
+export {
+  pacmap,
+  pacmapPairs,
+  pacmapSteps,
+  pacmapWeights,
+  type PacmapModel,
+  type PacmapPairs,
+  type PacmapState,
+} from './pacmap'
 export { neighbourEmbeddingAlgorithms, neighbourEmbeddingFunctions } from './registry'

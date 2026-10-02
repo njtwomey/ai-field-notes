@@ -2,15 +2,13 @@ import { useMemo, useState } from 'react'
 import {
   characterShingles,
   jaccardSimilarity,
-  lshCandidates,
-  lshProbability,
-  lshThreshold,
   minHashSignature,
   minHashSignatures,
   minHashSimilarity,
   minHashStandardError,
   wordShingles,
 } from 'aifn/text/features'
+import { lshCandidates, lshProbability, lshThreshold } from 'aifn/numerics/neighbours'
 import { Figure } from '@lab/layout'
 import { choice, slider, useFigureState, when } from '@lab/state'
 import { Button } from '@lab/ui/button'

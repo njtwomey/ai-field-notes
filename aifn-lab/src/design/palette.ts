@@ -68,8 +68,14 @@ export const palette = {
 
 export type Chrome = (typeof palette.chrome)[Mode]
 
-/** Marker shapes by group, so group identity never relies on colour alone. */
-export const MARKER_SHAPES = ['circle', 'rect', 'triangle', 'diamond', 'pin', 'roundRect', 'arrow', 'circle'] as const
+/** A filled × (ECharts path symbol): the conventional mark for poles, removed or rejected points. */
+const CROSS = 'path://M0,2L2,0L5,3L8,0L10,2L7,5L10,8L8,10L5,7L2,10L0,8L3,5Z'
+
+/**
+ * Marker shapes by group, so group identity never relies on colour alone. Shape 4 is a cross (×), which pages use for
+ * poles and discarded points.
+ */
+export const MARKER_SHAPES = ['circle', 'rect', 'triangle', 'diamond', CROSS, 'roundRect', 'arrow', 'circle'] as const
 
 /** The number of categorical slots. */
 export const SLOTS = palette.categorical.light.length

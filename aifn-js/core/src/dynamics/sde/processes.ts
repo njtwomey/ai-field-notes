@@ -7,6 +7,7 @@
 import { dense, mul, sub, type Tensor } from 'aifn/foundation/tensor'
 import type { Algorithm, Scalar } from 'aifn/foundation/contracts'
 import { scheme, type Sde, type SdeInitial, type SdeOptions, type SdeState } from './integrators'
+import { DomainError } from 'aifn/foundation/errors'
 
 // ---------------------------------------------------------------------------------------------------------------------
 // Exact solutions
@@ -50,7 +51,7 @@ export function brownianMotion(sigma: Scalar = 1): ExactSde {
  * shares the schemes' streams (though not their exact Brownian path).
  */
 export function ornsteinUhlenbeck({ theta, mu = 0, sigma }: { theta: Scalar; mu?: Scalar; sigma: Scalar }): ExactSde {
-  if (!(theta > 0)) throw new Error('ornsteinUhlenbeck: θ must be positive')
+  if (!(theta > 0)) throw new DomainError('ornsteinUhlenbeck', 'ornsteinUhlenbeck: θ must be positive')
   return {
     sde: {
       drift: (_t, x) => mul(theta, sub(mu, x)),

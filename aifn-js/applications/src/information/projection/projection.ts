@@ -10,6 +10,7 @@ import { lbfgs } from 'aifn/optim/second-order'
 import { gaussHermite, gaussLegendre } from 'aifn/numerics/quadrature'
 import { add, exp, get, mul, neg, sum, tensor, toFlat, unwrap, type Tensor, type Value } from 'aifn/foundation/tensor'
 import { trace } from 'aifn/foundation/trace'
+import { DomainError } from 'aifn/foundation/errors'
 
 /** Which KL a projection minimises: `forward` KL(p ‖ q) (moment projection) or `reverse` KL(q ‖ p) (information). */
 export type KlDirection = 'forward' | 'reverse'
@@ -85,9 +86,10 @@ export function normalProjection(
   { init = { loc: 0, scale: 1 }, maxSteps = 200, nodes }: NormalProjectionOptions = {},
 ): NormalProjection {
   if (p.eventShape.length !== 0 || p.batchShape.length !== 0 || p.discrete)
-    throw new RangeError('normalProjection: needs an unbatched continuous univariate distribution')
+    throw new DomainError('normalProjection', 'normalProjection: needs an unbatched continuous univariate distribution')
   const target = p as AnyUnivariate
-  if (!(init.scale > 0)) throw new RangeError('normalProjection: the initial scale must be positive')
+  if (!(init.scale > 0))
+    throw new DomainError('normalProjection', 'normalProjection: the initial scale must be positive')
 
   let f: (theta: Value) => Value
   if (direction === 'forward') {

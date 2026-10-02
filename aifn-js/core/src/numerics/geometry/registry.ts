@@ -7,6 +7,7 @@ import * as contours from './contours'
 import * as ellipse from './ellipse'
 import * as grids from './grids'
 import * as planar from './planar'
+import * as projective from './projective'
 import * as simplex from './simplex'
 
 const fn = definer<FunctionInfo>('function', 'numerics/geometry')
@@ -82,8 +83,69 @@ fn(
 fn({ key: 'grid2d', name: 'Two-dimensional grid', role: 'construction' }, grids.grid2d)
 fn({ key: 'evaluateGrid', name: 'Evaluate on a grid', role: 'transform' }, grids.evaluateGrid)
 
+// ── Projective geometry ──────────────────────────────────────────────────────────────────────────────────────────────
+
+const H = ['homography']
+const EPI = ['epipolar-geometry-and-stereo']
+const CAM = ['pinhole-camera-model']
+fn(
+  {
+    key: 'normalisePoints',
+    name: 'Hartley normalisation',
+    role: 'transform',
+    notes: [...H, ...EPI],
+    cite: ['hartley1997'],
+  },
+  projective.normalisePoints,
+)
+fn(
+  {
+    key: 'homography',
+    name: 'Homography (normalised DLT)',
+    summary: 'The 3 × 3 projective map between two planes from four or more correspondences.',
+    role: 'fit',
+    notes: H,
+    cite: ['hartley2004'],
+  },
+  projective.homography,
+)
+fn({ key: 'applyHomography', name: 'Apply a homography', role: 'transform', notes: H }, projective.applyHomography)
+fn({ key: 'transferError', name: 'Homography transfer error', role: 'property', notes: H }, projective.transferError)
+fn(
+  {
+    key: 'fundamentalMatrix',
+    name: 'Fundamental matrix (normalised eight-point)',
+    tex: 'x_2^\top F x_1 = 0',
+    role: 'fit',
+    notes: EPI,
+    cite: ['hartley1997', 'longuethiggins1981'],
+  },
+  projective.fundamentalMatrix,
+)
+fn({ key: 'epipolarLines', name: 'Epipolar lines', role: 'transform', notes: EPI }, projective.epipolarLines)
+fn(
+  { key: 'sampsonDistance', name: 'Sampson distance', role: 'property', notes: EPI, cite: ['hartley2004'] },
+  projective.sampsonDistance,
+)
+fn({ key: 'cameraMatrix', name: 'Camera matrix K[R | t]', role: 'construction', notes: CAM }, projective.cameraMatrix)
+fn({ key: 'projectPoints', name: 'Project scene points', role: 'transform', notes: CAM }, projective.projectPoints)
+fn(
+  {
+    key: 'triangulate',
+    name: 'Linear triangulation',
+    role: 'solver',
+    notes: [...EPI, 'structure-from-motion'],
+    cite: ['hartley1997b'],
+  },
+  projective.triangulate,
+)
+fn(
+  { key: 'rotationMatrix', name: 'Rotation matrix (Rodrigues)', role: 'construction', notes: CAM },
+  projective.rotationMatrix,
+)
+
 /** The functions of the module, keyed by name. */
 export const geometryFunctions: Readonly<Record<string, Entry<(...args: never[]) => unknown, FunctionInfo>>> =
-  entries<FunctionInfo>('function', ellipse, planar, contours, simplex, grids) as Readonly<
+  entries<FunctionInfo>('function', projective, ellipse, planar, contours, simplex, grids) as Readonly<
     Record<string, Entry<(...args: never[]) => unknown, FunctionInfo>>
   >

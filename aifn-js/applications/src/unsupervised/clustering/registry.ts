@@ -81,17 +81,6 @@ algorithm(
   hierarchical.agglomerativeSteps,
 )
 fn(
-  {
-    key: 'kmeansPlusPlus',
-    name: 'k-means++ seeding',
-    role: 'simulation',
-    random: true,
-    notes: ['k-means'],
-    cite: ['arthur2007'],
-  },
-  centroid.kmeansPlusPlus,
-)
-fn(
   { key: 'linkage', name: 'Linkage matrix', role: 'fit', notes: ['hierarchical-clustering'], cite: ['mullner2011'] },
   hierarchical.linkage,
 )
