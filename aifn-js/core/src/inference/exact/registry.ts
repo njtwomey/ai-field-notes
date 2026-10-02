@@ -118,6 +118,17 @@ fn(
 )
 fn(
   {
+    key: 'posteriorDecode',
+    name: 'Posterior (max-marginal) decoding',
+    summary: 'Each position takes its most probable label under the marginals: the most correct labels in expectation.',
+    role: 'inference',
+    notes: [...HMM, 'conditional-random-field'],
+    cite: ['rabiner1989'],
+  },
+  chain.posteriorDecode,
+)
+fn(
+  {
     key: 'sampleHiddenPath',
     name: 'Forward filtering, backward sampling',
     role: 'simulation',

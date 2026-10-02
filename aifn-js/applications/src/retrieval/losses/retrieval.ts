@@ -1,34 +1,30 @@
 /**
  * Losses for large output spaces and learned representations: sampled softmax with the logQ correction, negative
- * sampling and noise-contrastive estimation, in-batch softmax and InfoNCE, and the triplet and contrastive (siamese)
- * losses on embeddings. Scores and embeddings may be traced; sampling probabilities, labels and masks are constants.
+ * sampling and noise-contrastive estimation, in-batch softmax (InfoNCE itself is core's), and the triplet and
+ * contrastive (siamese) losses on embeddings. Scores and embeddings may be traced; sampling probabilities, labels and
+ * masks are constants.
  */
 
 import { softplus } from 'aifn/numerics/special'
 import {
   add,
   concat,
-  div,
-  eye,
   expandDims,
   logsumexp,
-  matmul,
   maximum,
   mul,
   neg,
   norm,
-  shapeOfValue,
   sqrt,
   square,
   sub,
   sum,
-  transpose,
   where,
   type Value,
 } from 'aifn/foundation/tensor'
 import { constantTarget as constant, expectRank, reduce } from 'aifn/learning/losses'
 import { defineLoss, type ReductionOptions, type Target } from 'aifn/learning/losses'
-import { softmaxCrossEntropy } from 'aifn/learning/losses'
+import { infoNce, type InfoNceOptions } from 'aifn/learning/losses'
 
 // ── Sampled softmax ──────────────────────────────────────────────────────────────────────────────────────────────────
 
@@ -125,77 +121,12 @@ export const noiseContrastiveEstimation = defineLoss(
   },
 )
 
-// ── In-batch softmax and InfoNCE ─────────────────────────────────────────────────────────────────────────────────────
-
-/** Options of `infoNce` and `inBatchSoftmax`. */
-export type InfoNceOptions = ReductionOptions & {
-  /** The temperature τ > 0 dividing every similarity. Default 0.1 for `infoNce`, 1 for `inBatchSoftmax`. */
-  temperature?: number
-  /** `cosine` (default for `infoNce`) normalises the embeddings first; `dot` uses raw inner products. */
-  similarity?: 'cosine' | 'dot'
-  /**
-   * log q_j of each in-batch item (shape [B]): subtracted from column j's logits, the logQ correction for popular items
-   * appearing more often as negatives (Yi et al., 2019).
-   */
-  logQ?: Target
-  /** Average the loss over both directions (anchors → positives and back), as CLIP does. Default false. */
-  symmetric?: boolean
-}
-
-function unitRows(x: Value): Value {
-  return div(x, norm(x, -1, true))
-}
-
-/** Similarity logits between every anchor and every positive, [B, B], with the logQ correction by column. */
-function batchLogits(
-  anchors: Value,
-  positives: Value,
-  options: InfoNceOptions,
-  defaults: Required<Pick<InfoNceOptions, 'temperature' | 'similarity'>>,
-): Value {
-  expectRank(anchors, [2], 'anchors')
-  expectRank(positives, [2], 'positives')
-  const { temperature = defaults.temperature, similarity = defaults.similarity, logQ } = options
-  const [a, p] = similarity === 'cosine' ? [unitRows(anchors), unitRows(positives)] : [anchors, positives]
-  const logits = div(matmul(a, transpose(p)), temperature)
-  return logQ === undefined ? logits : sub(logits, constant(logQ))
-}
-
-function diagonalCrossEntropy(logits: Value, symmetric: boolean, reduction: ReductionOptions['reduction']): Value {
-  const B = shapeOfValue(logits)[0]
-  const labels = eye(B)
-  const forward = softmaxCrossEntropy(logits, labels, { reduction: 'none' })
-  if (!symmetric) return reduce(forward, reduction)
-  const backward = softmaxCrossEntropy(transpose(logits), labels, { reduction: 'none' })
-  return reduce(mul(0.5, add(forward, backward)), reduction)
-}
-
-/**
- * InfoNCE (van den Oord, Li & Vinyals, 2018; SimCLR, Chen et al., 2020): each anchor (row of [B, d]) must pick its own
- * positive (the same row of [B, d]) out of the batch, by softmax cross-entropy over the similarities sim(aᵢ, pⱼ)/τ.
- * The other rows are the negatives. log B − InfoNCE lower-bounds the mutual information between the two views.
- */
-export const infoNce = defineLoss(
-  {
-    module: 'applied/retrieval/losses',
-    key: 'infoNce',
-    name: 'InfoNCE',
-    family: 'representation',
-    inputs: 'embeddings',
-    notes: ['contrastive-learning'],
-  },
-  (anchors: Value, positives: Value, options: InfoNceOptions = {}): Value =>
-    diagonalCrossEntropy(
-      batchLogits(anchors, positives, options, { temperature: 0.1, similarity: 'cosine' }),
-      options.symmetric ?? false,
-      options.reduction,
-    ),
-)
+// ── In-batch softmax ─────────────────────────────────────────────────────────────────────────────────────────────────
 
 /**
  * In-batch softmax for two-tower retrieval (Yi et al., 2019): query embeddings [B, d] against the batch's item
  * embeddings [B, d] by inner product, with the logQ correction when `logQ` gives each item's sampling log-probability.
- * The same loss as `infoNce` with retrieval's defaults (dot product, τ = 1).
+ * It is `aifn/learning/losses`' `infoNce` with retrieval's defaults (dot product, τ = 1).
  */
 export const inBatchSoftmax = defineLoss(
   {
@@ -207,11 +138,7 @@ export const inBatchSoftmax = defineLoss(
     notes: ['contrastive-losses-for-retrieval'],
   },
   (queries: Value, items: Value, options: InfoNceOptions = {}): Value =>
-    diagonalCrossEntropy(
-      batchLogits(queries, items, options, { temperature: 1, similarity: 'dot' }),
-      options.symmetric ?? false,
-      options.reduction,
-    ),
+    infoNce(queries, items, { temperature: 1, similarity: 'dot', ...options }),
 )
 
 // ── Metric-learning losses ───────────────────────────────────────────────────────────────────────────────────────────

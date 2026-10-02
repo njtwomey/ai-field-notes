@@ -45,7 +45,18 @@ export {
 } from './quantile'
 export { expectile, expectiles, type ExpectileOptions } from './expectile'
 export { argsort, kendallTau, ranks, spearman, type TiePolicy } from './ranks'
-export { ecdf, ecdfAt, histogram, kde, kdeBandwidth, type BandwidthRule, type BinRule, type Histogram } from './density'
+export {
+  ecdf,
+  ecdfAt,
+  histogram,
+  kde,
+  kdeBandwidth,
+  multivariateKde,
+  type BandwidthRule,
+  type BinRule,
+  type Histogram,
+  type MultivariateKde,
+} from './density'
 export {
   autocorrelation,
   autocovariance,

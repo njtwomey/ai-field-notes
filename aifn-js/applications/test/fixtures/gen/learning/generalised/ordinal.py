@@ -11,6 +11,8 @@ aifn-applied/learning/gaussian-processes), each written out directly in numpy/sc
 - GP ordinal regression (Chu & Ghahramani, 2005) by Laplace at fixed hyperparameters: Newton for the mode with the
   closed-form gradient and curvature of the cumulative probit likelihood, the evidence, and predictions."""
 
+from typing import Any
+
 import numpy as np
 from scipy import optimize, special, stats
 from sklearn.linear_model import LogisticRegression
@@ -33,7 +35,7 @@ def probabilities(model: str, link: str, eta: np.ndarray, theta: np.ndarray) -> 
     return special.softmax(s, axis=1)
 
 
-def fit(model: str, link: str, x: np.ndarray, y: np.ndarray, k: int) -> dict[str, object]:
+def fit(model: str, link: str, x: np.ndarray, y: np.ndarray, k: int) -> dict[str, Any]:
     d = x.shape[1]
 
     def unpack(w):

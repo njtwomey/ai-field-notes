@@ -304,3 +304,54 @@ export function cwt(x: SignalInput, frequencies: VectorLike, options: { fs?: Sca
     scales: fromData(scales, [scales.length]),
   }
 }
+
+/**
+ * Soft or hard thresholding of coefficients, as `pywt.threshold`: hard keeps |c| ≥ λ and zeroes the rest; soft also
+ * shrinks the survivors towards zero by λ, sign(c) max(|c| − λ, 0).
+ */
+export function waveletThreshold(values: VectorLike, lambda: Scalar, mode: 'soft' | 'hard' = 'soft'): Tensor {
+  const v = dense.toF64(values, 'waveletThreshold')
+  const out = Float64Array.from(v, (c) =>
+    mode === 'hard' ? (Math.abs(c) >= lambda ? c : 0) : Math.sign(c) * Math.max(Math.abs(c) - lambda, 0),
+  )
+  return fromData(out, [out.length])
+}
+
+/** Options of `waveletDenoise`. */
+export type WaveletDenoiseOptions = {
+  wavelet?: WaveletName
+  /** Decomposition levels (default as many as divide the length by 2, at most 6). */
+  levels?: Size
+  mode?: 'soft' | 'hard'
+  /** A fixed threshold, or `universal` (default): λ = σ̂ √(2 ln n), σ̂ = median |d₁| / 0.6745. */
+  threshold?: Scalar | 'universal'
+}
+
+/** The denoised signal with the threshold and the noise estimate used. */
+export type WaveletDenoised = { signal: Signal; threshold: Scalar; sigma: Scalar; levels: Size }
+
+/**
+ * Wavelet shrinkage (Donoho and Johnstone, 1994, Biometrika 81(3)): decompose with the periodic DWT, threshold every
+ * detail level (the approximation is kept), reconstruct. The universal threshold σ̂√(2 ln n), with σ̂ from the median
+ * absolute finest detail, removes white noise with high probability while an orthogonal transform concentrates a
+ * smooth or piecewise-smooth signal into a few large coefficients.
+ */
+export function waveletDenoise(x: SignalInput, options: WaveletDenoiseOptions = {}): WaveletDenoised {
+  const { wavelet = 'db4', mode = 'soft' } = options
+  const input = readSamples(x, 'waveletDenoise')
+  const n = input.values.length
+  let levels = options.levels ?? 0
+  if (options.levels === undefined) while (levels < 6 && n % 2 ** (levels + 1) === 0 && n >> (levels + 1) >= 8) levels++
+  if (levels < 1) throw new RangeError('waveletDenoise: the length must be even')
+  const d = wavedec(x, wavelet, levels)
+  const finest = Float64Array.from(dense.toF64(d.details[0], 'waveletDenoise'), Math.abs).sort()
+  const mid = finest.length >> 1
+  const median = finest.length % 2 ? finest[mid] : 0.5 * (finest[mid - 1] + finest[mid])
+  const sigma = median / 0.6745
+  const lambda =
+    options.threshold === undefined || options.threshold === 'universal'
+      ? sigma * Math.sqrt(2 * Math.log(n))
+      : options.threshold
+  const shrunk: WaveletDecomposition = { ...d, details: d.details.map((c) => waveletThreshold(c, lambda, mode)) }
+  return { signal: waverec(shrunk), threshold: lambda, sigma, levels }
+}

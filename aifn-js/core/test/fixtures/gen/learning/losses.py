@@ -7,6 +7,7 @@ predictions.
 """
 
 import math
+from typing import cast
 
 import numpy as np
 import torch
@@ -78,7 +79,8 @@ def ranking(s: torch.Tensor, rel: list[float], kind: str) -> torch.Tensor:
         ideal = sum(gain(r) * discount(k) for k, r in enumerate(sorted(rel, reverse=True)))
         dcg = torch.zeros(())
         for i in range(n):
-            rank = 1 + sum(torch.sigmoid(s[j] - s[i]) for j in range(n) if j != i)
+            # n ≥ 2, so the sum has a term and is a tensor.
+            rank = cast(torch.Tensor, 1 + sum(torch.sigmoid(s[j] - s[i]) for j in range(n) if j != i))
             dcg = dcg + gain(rel[i]) / torch.log2(1 + rank)
         loss = -dcg / ideal
     return loss

@@ -10,7 +10,19 @@
 import { ShapeError } from 'aifn/foundation/errors'
 import { conv, upfirdn } from 'aifn/foundation/convolution'
 import { ifft } from 'aifn/foundation/fourier'
-import { add, mul, reshape, slice, tensor, toFlat, transpose, type Tensor, type Value } from 'aifn/foundation/tensor'
+import {
+  add,
+  dense,
+  fromData,
+  mul,
+  reshape,
+  slice,
+  tensor,
+  toFlat,
+  transpose,
+  type Tensor,
+  type Value,
+} from 'aifn/foundation/tensor'
 import type { Scalar, Size, VectorLike } from 'aifn/foundation/contracts'
 import { cheby1, filtfilt, firwin, sosfilt } from 'aifn/signal/filters'
 import type { WindowSpec } from 'aifn/signal/windows'
@@ -178,4 +190,25 @@ export function dftFilterBank(x: SignalInput, prototype: VectorLike, channels: S
   // y[k, m] = Σᵣ uᵣ[m] e^{i2πkr/M} = M · ifft over r.
   const y = mul(M, ifft(transpose(u), { axis: -1 })) as Tensor // [frames, M]
   return transpose(y) as Tensor
+}
+
+/**
+ * Whittaker–Shannon reconstruction x(t) = Σₙ x[n] sinc(fs (t − t₀) − n) at arbitrary times (seconds), the ideal
+ * low-pass interpolation of the sampling theorem (Shannon, 1949). Exact for a signal band-limited below fs/2 sampled
+ * forever; a finite record truncates the sum, so the error grows towards its ends.
+ */
+export function sincInterpolate(x: SignalInput, times: VectorLike): Tensor {
+  const s = readSamples(x, 'sincInterpolate')
+  const t = dense.toF64(times, 'sincInterpolate')
+  const out = new Float64Array(t.length)
+  for (let i = 0; i < t.length; i++) {
+    const u = (t[i] - s.t0) * s.fs
+    let acc = 0
+    for (let n = 0; n < s.values.length; n++) {
+      const d = u - n
+      acc += s.values[n] * (d === 0 ? 1 : Math.sin(Math.PI * d) / (Math.PI * d))
+    }
+    out[i] = acc
+  }
+  return fromData(out, [out.length])
 }

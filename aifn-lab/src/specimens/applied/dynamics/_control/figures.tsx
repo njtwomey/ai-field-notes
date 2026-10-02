@@ -102,7 +102,7 @@ export function PidSpecimen() {
       controls={
         <>
           <ControlRow label="3 · time">
-            <Player value={i} onChange={setI} count={t.length} duration={5} format={timeLabel(t)} label="t" />
+            <Player value={i} onChange={setI} count={t.length} format={timeLabel(t)} label="t" />
           </ControlRow>
         </>
       }

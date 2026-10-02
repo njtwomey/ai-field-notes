@@ -1,7 +1,7 @@
 /**
  * `aifn-applied/learning`: supervised models over the estimator protocol of `aifn/learning/estimators`. Groups:
  * generalised (glm, gam, ordinal), trees-and-ensembles (bagging, boosting); modules: linear, generative-classifiers,
- * kernel-methods, gaussian-processes, neighbours, reductions, preprocessing. `learningModelRegistry` lists every
+ * kernel-methods, gaussian-processes, neighbours, reductions, preprocessing, mixture-density. `learningModelRegistry` lists every
  * registered estimator factory of the area (supervised models and preprocessing transformers) by key.
  */
 
@@ -14,6 +14,7 @@ import * as gaussianProcesses from './gaussian-processes'
 import * as generativeClassifiers from './generative-classifiers'
 import * as kernelMethods from './kernel-methods'
 import * as linear from './linear'
+import * as mixtureDensity from './mixture-density'
 import * as neighbours from './neighbours'
 import * as preprocessing from './preprocessing'
 import * as reductions from './reductions'
@@ -36,6 +37,7 @@ export { gaussianProcessRegressor, gpClassifier, gpOrdinalRegression } from './g
 export { randomForest } from './trees-and-ensembles/bagging'
 export { adaBoost, gradientBoosting } from './trees-and-ensembles/boosting'
 export { kNearestNeighbours } from './neighbours'
+export { mixtureDensityNetwork } from './mixture-density'
 export { oneVersusRest } from './reductions'
 export { standardScaler } from './preprocessing'
 
@@ -55,4 +57,5 @@ export const learningModelRegistry = entries(
   neighbours,
   reductions,
   preprocessing,
+  mixtureDensity,
 ) as Readonly<Record<string, ModelEntry>>

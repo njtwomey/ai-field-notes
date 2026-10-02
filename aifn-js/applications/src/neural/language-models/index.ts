@@ -1,7 +1,7 @@
 /**
  * `aifn-applied/neural/language-models`: language models as users of `aifn/nn/attention` and `aifn/nn/decoding`. A
  * tiny character-level GPT (`Gpt`, its training loop, `gptLogits` for decoding, and the registered estimator
- * `charGpt`) and the interpolated Kneser–Ney n-gram model (`kneserNey`), on a toy corpus of nursery rhymes.
+ * `charGpt`), the same GPT trained on prompt–answer tasks (`taskTrainingRun`), and the interpolated Kneser–Ney n-gram model (`kneserNey`), on a toy corpus of nursery rhymes.
  */
 
 export { charCorpus, decodeChars, encodeChars, NURSERY_RHYMES, type CharCorpus } from './corpus'
@@ -23,3 +23,15 @@ export {
 } from './gpt'
 export { type KneserNeyModel, type KneserNeyOptions, type TokenCorpus } from './ngram'
 export { charGpt, kneserNey } from './registry'
+export {
+  taskAccuracy,
+  taskLoss,
+  taskTraining,
+  taskTrainingRun,
+  type TaskAccuracy,
+  type TaskCheckpoint,
+  type TaskExamples,
+  type TaskSnapshot,
+  type TaskTrainingOptions,
+  type TaskTrainingRunOptions,
+} from './tasks'

@@ -79,7 +79,6 @@ export function HeatSpecimen() {
               value={at}
               onChange={setAt}
               count={tr.steps.length}
-              duration={4}
               label="t"
               format={(i) => fmt((tr.steps[i] as PdeState).time)}
             />
@@ -161,7 +160,6 @@ export function TransportSchemesSpecimen() {
               value={at}
               onChange={setAt}
               count={count}
-              duration={3 + periods}
               startReason="the figure compares the schemes after whole periods, where the exact solution is the initial profile again"
               label="t"
               format={(i) => fmt(runs[0].frames[i].time)}
@@ -238,7 +236,6 @@ export function WaveSpecimen() {
               value={at}
               onChange={setAt}
               count={run.steps.length}
-              duration={5}
               label="t"
               format={(i) => fmt(run.steps[i].time)}
             />

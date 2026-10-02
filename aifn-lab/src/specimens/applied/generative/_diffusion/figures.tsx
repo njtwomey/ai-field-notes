@@ -22,7 +22,7 @@ import { useMemo, useState } from 'react'
 import { adamRule } from 'aifn/optim/first-order'
 import { ControlRow, Figure } from '@lab/layout'
 import { Player } from '@lab/controls'
-import { choice, row, slider, useFigureState } from '@lab/state'
+import { choice, row, slider, useFigureState, int } from '@lab/state'
 import { Curve, Handle, Plot, Plots, Points, Readout, formatNumber, useAxis } from '@lab/viz'
 
 const fmt = (v: number) => formatNumber(v)
@@ -242,7 +242,7 @@ const SMALL = linearSchedule(100, { betaEnd: 0.2 })
 export function LearnedDenoiserSpecimen() {
   const state = useFigureState({
     setup: row('1 · training and sampling', {
-      steps: choice([200, 800, 2000], 800, { label: 'training steps' }),
+      steps: int(800, { ge: 1, suggestions: [200, 800, 2000], label: 'training steps' }),
       ddimSteps: slider(5, 200, 40, { label: 'DDIM steps', step: 5 }),
     }),
   })

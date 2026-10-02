@@ -15,31 +15,46 @@ import type { DatasetEntry, LogDensityEntry, ModifierEntry, ObjectiveEntry } fro
 import * as objectives from './objectives'
 import * as real from './real'
 import { recipeBook } from './recipe'
+import * as signals from './signals'
 import * as synthetic from './synthetic'
 import * as targets from './targets'
 
 export {
   additiveTruth,
+  armaVariance,
   changepointTruth,
   classificationTruth,
   curve1dTruth,
+  inverseTruth,
   regressionTruth,
+  regimeTruth,
+  spectralTruth,
   twoGaussianBayesError,
   type AdditiveModel,
   type AdditiveTruth,
+  type ArmaParts,
   type ChangepointFamily,
   type ChangepointTruth,
   type ClassModel,
   type ClassificationTruth,
+  type CoupledSpectra,
   type Curve1dLaw,
   type Curve1dModel,
   type Curve1dTruth,
+  type InverseModel,
+  type InverseSolution,
+  type InverseTruth,
   type LabelOp,
   type Reference,
   type RegressionModel,
   type RegressionTruth,
+  type RegimeModel,
+  type RegimeTruth,
   type Row,
   type Segment,
+  type SpectralLine,
+  type SpectralModel,
+  type SpectralTruth,
   type Truth,
 } from './truth'
 export { classCounts, type ClassSizeOptions, type ClassSizes } from './sizes'
@@ -55,8 +70,8 @@ export {
 export { type NormalisedRecipe, type RecipeBook, type RecipeInput, type RecipeStepInput } from './recipe'
 export { blobs, moons } from './synthetic'
 
-/** Every registered dataset generator (kind `dataset`) of `data/synthetic` and `data/real`. */
-export const datasetRegistry = entries('dataset', synthetic, real) as Readonly<Record<string, DatasetEntry>>
+/** Every registered dataset generator (kind `dataset`) of `data/synthetic`, `data/real` and `data/signals`. */
+export const datasetRegistry = entries('dataset', synthetic, real, signals) as Readonly<Record<string, DatasetEntry>>
 
 /** Every registered dataset modifier (kind `modifier`). */
 export const modifierRegistry = entries('modifier', synthetic) as Readonly<Record<string, ModifierEntry>>

@@ -9,7 +9,11 @@
 Series are simulated here with numpy and stored, so both sides see the same data.
 """
 
+from collections.abc import Callable, Sequence
+from typing import Any
+
 import numpy as np
+from numpy.typing import ArrayLike, NDArray
 from scipy import optimize, signal, stats
 from scipy.linalg import toeplitz
 
@@ -17,12 +21,12 @@ from scipy.linalg import toeplitz
 def psi_weights(ar, ma, n):
     impulse = np.zeros(n)
     impulse[0] = 1
-    return signal.lfilter(np.r_[1, ma], np.r_[1, -np.asarray(ar, float)], impulse)
+    return np.asarray(signal.lfilter(np.r_[1, ma], np.r_[1, -np.asarray(ar, float)], impulse))
 
 
 def autocovariance(ar, ma, sigma, n, terms=4000):
     psi = psi_weights(ar, ma, terms + n)
-    return sigma**2 * np.array([psi[: terms] @ psi[h : terms + h] for h in range(n)])
+    return sigma**2 * np.array([psi[:terms] @ psi[h : terms + h] for h in range(n)])
 
 
 def exact_loglik(z, ar, ma, sigma=None):
@@ -41,19 +45,26 @@ def stationary(ar):
     return len(ar) == 0 or np.all(np.abs(np.roots(np.r_[-np.asarray(ar)[::-1], 1])) > 1)
 
 
-def fit(negloglik, starts, bounds):
-    best = None
+def fit(
+    negloglik: Callable[[NDArray[np.float64]], float],
+    starts: Sequence[ArrayLike],
+    bounds: Sequence[tuple[float | None, float | None]],
+) -> optimize.OptimizeResult:
+    best: optimize.OptimizeResult | None = None
     for s in starts:
-        r = optimize.minimize(negloglik, s, method="Nelder-Mead", options={"xatol": 1e-10, "fatol": 1e-12, "maxiter": 20000})
+        r = optimize.minimize(
+            negloglik, s, method="Nelder-Mead", options={"xatol": 1e-10, "fatol": 1e-12, "maxiter": 20000}
+        )
         r = optimize.minimize(negloglik, r.x, method="L-BFGS-B", bounds=bounds, options={"ftol": 1e-15, "gtol": 1e-10})
         if best is None or r.fun < best.fun:
             best = r
+    assert best is not None, "no starting points"
     return best
 
 
 def simulate_arma(rng, ar, ma, sigma, n, mean=0.0, burn=500):
     e = sigma * rng.standard_normal(n + burn)
-    return mean + signal.lfilter(np.r_[1, ma], np.r_[1, -np.asarray(ar, float)], e)[burn:]
+    return mean + np.asarray(signal.lfilter(np.r_[1, ma], np.r_[1, -np.asarray(ar, float)], e))[burn:]
 
 
 def arma_cases(rng):
@@ -63,7 +74,8 @@ def arma_cases(rng):
         p, q = len(ar_t), len(ma_t)
         z = x - x.mean()
 
-        def nll(u):
+        # Defaults bind this iteration's p and z; fit() calls nll only within the iteration.
+        def nll(u: NDArray[np.float64], p: int = p, z: NDArray[np.float64] = z) -> float:
             ar, ma = u[:p], u[p:]
             if not stationary(ar) or not stationary(-np.asarray(ma)):
                 return 1e10
@@ -156,12 +168,18 @@ def garch_cases(rng):
             "r": r,
             "spec": spec,
             "logLikelihoodAtSpec": garch_loglik(r, 0.2, 0.15, 0.7, 0.0),
-            "fit": {"omega": best.x[0], "alpha": best.x[1], "beta": best.x[2], "mean": mean, "logLikelihood": -best.fun},
+            "fit": {
+                "omega": best.x[0],
+                "alpha": best.x[1],
+                "beta": best.x[2],
+                "mean": mean,
+                "logLikelihood": -best.fun,
+            },
         }
     ]
 
 
-def cases() -> dict:
+def cases() -> dict[str, Any]:
     rng = np.random.default_rng(20261001)
     x = rng.standard_normal(30).cumsum()
     return {

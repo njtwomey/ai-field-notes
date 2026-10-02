@@ -124,7 +124,6 @@ export function MatchSetSpecimen() {
             value={Math.min(step, run.steps.length - 1)}
             onChange={setStep}
             count={run.steps.length}
-            defaultSpeed={3}
           />
         </div>
       }

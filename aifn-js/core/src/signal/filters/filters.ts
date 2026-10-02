@@ -14,6 +14,8 @@
  */
 
 import { solve } from 'aifn/numerics/linalg'
+import { polynomialRoots } from 'aifn/numerics/polynomial'
+import { ellipf, ellipj, ellipk, ellipkm1 } from 'aifn/numerics/special'
 import {
   add,
   complex,
@@ -206,6 +208,116 @@ function cheb2ap(n: Size, rs: number): Proto {
   return { z, p, k: gainRatio(p, z) }
 }
 
+/** A complex128 vector from (re, im) pairs. */
+function complexVector(roots: readonly ComplexNumber[]): Tensor {
+  const v = new Float64Array(2 * roots.length)
+  roots.forEach((r, i) => {
+    v[2 * i] = r.re
+    v[2 * i + 1] = r.im
+  })
+  return fromData(v, [roots.length], 'complex128')
+}
+
+/** 10^{x/10} − 1 without cancellation for small x (scipy's `_pow10m1`). */
+const pow10m1 = (x: number) => Math.expm1(0.1 * x * Math.LN10)
+
+/** The modulus m of an order-n elliptic filter from m₁ = ε²/(10^{rs/10} − 1), by nomes (scipy's `_ellipdeg`). */
+function ellipdeg(n: Size, m1: number): number {
+  const q = Math.exp((-Math.PI * ellipkm1(m1)) / ellipk(m1) / n)
+  let num = 0
+  let den = 1
+  for (let k = 0; k <= 7; k++) num += q ** (k * (k + 1))
+  for (let k = 1; k <= 8; k++) den += 2 * q ** (k * k)
+  return 16 * q * (num / den) ** 4
+}
+
+/**
+ * Analog elliptic (Cauer) prototype with passband ripple rp dB and stopband attenuation rs dB, as
+ * `scipy.signal.ellipap` (Orfanidis, 2006, "Lecture notes on elliptic filter design"): zeros i/(√m sn) and poles from
+ * the Jacobi functions at jK/n and at v₀ = K F(arctan(1/ε) | 1 − m₁)/(n K₁).
+ */
+function ellipap(n: Size, rp: number, rs: number): Proto {
+  const epsSq = pow10m1(rp)
+  if (n === 1) {
+    const p = -Math.sqrt(1 / epsSq)
+    return { z: none(), p: complexVector([{ re: p, im: 0 }]), k: -p }
+  }
+  const m1 = epsSq / pow10m1(rs)
+  if (!(m1 > 0)) throw new RangeError('ellip: the stopband attenuation is too large for double precision')
+  const m = ellipdeg(n, m1)
+  const capk = ellipk(m)
+  const zs: ComplexNumber[] = []
+  const ps: ComplexNumber[] = []
+  // v₀ solves sc(v₀ | 1 − m₁) = 1/ε: the imaginary part of the inverse sn at i/ε (scipy's `_arc_jac_sc1`).
+  const r = ellipf(Math.atan(1 / Math.sqrt(epsSq)), 1 - m1, m1)
+  const v0 = (capk * r) / (n * ellipk(m1))
+  const { sn: sv, cn: cv, dn: dv } = ellipj(v0, 1 - m)
+  const half: ComplexNumber[] = []
+  for (let j = 1 - (n % 2); j < n; j += 2) {
+    const { sn: s, cn: c, dn: d } = ellipj((j * capk) / n, m)
+    if (Math.abs(s) > Number.EPSILON) zs.push({ re: 0, im: 1 / (Math.sqrt(m) * s) })
+    const den = 1 - (d * sv) ** 2
+    half.push({ re: -(c * d * sv * cv) / den, im: -(s * dv) / den })
+  }
+  const norm = Math.sqrt(half.reduce((t, p) => t + p.re * p.re + p.im * p.im, 0))
+  for (const p of half) {
+    ps.push(p)
+    if (n % 2 === 0 || Math.abs(p.im) > Number.EPSILON * norm) ps.push({ re: p.re, im: -p.im })
+  }
+  const z = complexVector([...zs, ...zs.map((v) => ({ re: v.re, im: -v.im }))])
+  const p = complexVector(ps)
+  let k = gainRatio(p, z)
+  if (n % 2 === 0) k /= Math.sqrt(1 + epsSq)
+  return { z, p, k }
+}
+
+/** log n!, summed (n is a filter order). */
+const logFactorial = (n: number) => {
+  let s = 0
+  for (let i = 2; i <= n; i++) s += Math.log(i)
+  return s
+}
+
+/**
+ * Analog Bessel–Thomson prototype, phase-normalised as `scipy.signal.besselap(n, norm='phase')`: the roots of the
+ * reverse Bessel polynomial θₙ(s) = Σₖ (2n − k)! / (2^{n−k} k! (n − k)!) sᵏ, scaled by θₙ(0)^{−1/n} so the phase
+ * response matches Butterworth's at high frequency; unit DC gain. A maximally flat group delay (Thomson, 1949).
+ */
+function besselap(n: Size): Proto {
+  const logA = (k: number) => logFactorial(2 * n - k) - (n - k) * Math.LN2 - logFactorial(k) - logFactorial(n - k)
+  const log0 = logA(0)
+  // q(s) = θₙ(c s)/θₙ(0) with c = θₙ(0)^{1/n}: monic with unit constant term, so well scaled. Highest power first.
+  const q = Array.from({ length: n + 1 }, (_, i) => {
+    const k = n - i
+    return Math.exp(logA(k) + (k / n) * log0 - log0)
+  })
+  const found = polynomialRoots(q).roots
+  const flat = toComplexFlat(found)
+  // Newton polishing in complex arithmetic: the companion eigenvalues are accurate to a few ulps of the largest root.
+  const polished = flat.map((z0) => {
+    let { re, im } = z0
+    for (let it = 0; it < 8; it++) {
+      let pr = 0
+      let pi = 0
+      let dr = 0
+      let di = 0
+      for (let i = 0; i <= n; i++) {
+        ;[dr, di] = [dr * re - di * im + pr, dr * im + di * re + pi]
+        ;[pr, pi] = [pr * re - pi * im + q[i], pr * im + pi * re]
+      }
+      const d2 = dr * dr + di * di
+      if (d2 === 0) break
+      const sr = (pr * dr + pi * di) / d2
+      const si = (pi * dr - pr * di) / d2
+      re -= sr
+      im -= si
+      if (Math.hypot(sr, si) < 1e-16 * Math.hypot(re, im)) break
+    }
+    return { re, im }
+  })
+  return { z: none(), p: complexVector(polished), k: 1 }
+}
+
 function lp2lp({ z, p, k }: Proto, wo: number): Proto {
   const degree = p.shape[0] - z.shape[0]
   return { z: mul(z, wo), p: mul(p, wo), k: k * wo ** degree }
@@ -255,10 +367,10 @@ function bilinear({ z, p, k }: Proto, fs: number): Proto {
 /** Options for `iirfilter`. */
 export interface IirOptions {
   btype?: 'lowpass' | 'highpass' | 'bandpass' | 'bandstop'
-  ftype?: 'butter' | 'cheby1' | 'cheby2'
-  /** Passband ripple (dB), Chebyshev I. */
+  ftype?: 'butter' | 'cheby1' | 'cheby2' | 'ellip' | 'bessel'
+  /** Passband ripple (dB), Chebyshev I and elliptic. Default 1. */
   rp?: number
-  /** Stopband attenuation (dB), Chebyshev II. */
+  /** Stopband attenuation (dB), Chebyshev II and elliptic. Default 40. */
   rs?: number
   /** Sampling frequency; the system gets dt = 1/fs. Default 2 (edges as fractions of Nyquist, dt = 1). */
   fs?: Scalar
@@ -269,8 +381,9 @@ export interface IirOptions {
 /**
  * An IIR filter of order n, as `scipy.signal.iirfilter`: an analog prototype, frequency-transformed to the pre-warped
  * edges 4 tan(πWₙ/2) (fs = 2), then mapped by the bilinear transform. `wn` is one edge (low/high-pass) or two
- * (band-pass/stop). For Butterworth the edge is the −3 dB point; Chebyshev I, the passband edge; Chebyshev II, the
- * stopband edge. Returns the discrete system (dt = 1/fs) in the `output` representation.
+ * (band-pass/stop). For Butterworth the edge is the −3 dB point; Chebyshev I and elliptic, the passband edge (where
+ * the gain leaves the ripple band); Chebyshev II, the stopband edge; Bessel, the phase-normalised edge (the phase
+ * asymptote of Butterworth's). Returns the discrete system (dt = 1/fs) in the `output` representation.
  */
 export function iirfilter(n: Size, wn: Scalar | readonly [Scalar, Scalar], options: IirOptions = {}): LtiSystem {
   const { ftype = 'butter', rp = 1, rs = 40 } = options
@@ -281,7 +394,15 @@ export function iirfilter(n: Size, wn: Scalar | readonly [Scalar, Scalar], optio
     throw new RangeError('iirfilter: edges must lie strictly between 0 and Nyquist')
   const two = btype === 'bandpass' || btype === 'bandstop'
   if (two !== (edges.length === 2)) throw new RangeError(`iirfilter: ${btype} needs ${two ? 'two edges' : 'one edge'}`)
-  let proto = ftype === 'butter' ? buttap(n) : ftype === 'cheby1' ? cheb1ap(n, rp) : cheb2ap(n, rs)
+  if (!(Number.isInteger(n) && n >= 1)) throw new RangeError('iirfilter: the order must be a positive integer')
+  const proto0: Record<NonNullable<IirOptions['ftype']>, () => Proto> = {
+    butter: () => buttap(n),
+    cheby1: () => cheb1ap(n, rp),
+    cheby2: () => cheb2ap(n, rs),
+    ellip: () => ellipap(n, rp, rs),
+    bessel: () => besselap(n),
+  }
+  let proto = proto0[ftype]()
   const warped = edges.map((f) => 4 * Math.tan((Math.PI * f) / 2))
   if (btype === 'lowpass') proto = lp2lp(proto, warped[0])
   else if (btype === 'highpass') proto = lp2hp(proto, warped[0])
@@ -322,6 +443,29 @@ export function cheby2(
   options: Omit<IirOptions, 'ftype' | 'rs'> = {},
 ): LtiSystem {
   return iirfilter(n, wn, { ...options, ftype: 'cheby2', rs })
+}
+
+/** An elliptic (Cauer) filter: equiripple in both bands, the steepest transition for its order, as `scipy.signal.ellip`. */
+export function ellip(
+  n: number,
+  rp: Scalar,
+  rs: Scalar,
+  wn: number | readonly [number, number],
+  options: Omit<IirOptions, 'ftype' | 'rp' | 'rs'> = {},
+): LtiSystem {
+  return iirfilter(n, wn, { ...options, ftype: 'ellip', rp, rs })
+}
+
+/**
+ * A Bessel–Thomson filter (maximally flat group delay, phase-normalised), as `scipy.signal.bessel(norm='phase')`. The
+ * bilinear transform keeps the magnitude shape but not the flat delay exactly.
+ */
+export function bessel(
+  n: Size,
+  wn: Scalar | readonly [Scalar, Scalar],
+  options: Omit<IirOptions, 'ftype'> = {},
+): LtiSystem {
+  return iirfilter(n, wn, { ...options, ftype: 'bessel' })
 }
 
 // ── Filtering ─────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -742,6 +886,7 @@ export interface GroupDelay {
  */
 export function groupDelay(sys: LtiSystem, options: ResponseOptions = {}): GroupDelay {
   if (sys.domain !== 'discrete') throw new DomainError('groupDelay', 'groupDelay: the system must be discrete')
+  if (sys.repr.form === 'zpk') return zpkGroupDelay(sys.repr.zeros, sys.repr.poles, sys, options)
   const tf = toTransferFunction(sys).repr
   const bv = dense.data(tf.b)
   const av = dense.data(tf.a)
@@ -758,6 +903,49 @@ export function groupDelay(sys: LtiSystem, options: ResponseOptions = {}): Group
     }
     const num = evaluate(cr, omega)
     return (num.re * den.re + num.im * den.im) / (den.re * den.re + den.im * den.im) - (av.length - 1) + sys.delay
+  })
+  const { axis, scale } = axisOf(sys, options)
+  return {
+    f: fromData(
+      w.map((v) => v * scale),
+      [w.length],
+    ),
+    axis,
+    delay: fromData(delay, [w.length]),
+    singular,
+  }
+}
+
+/**
+ * Group delay of a discrete zeros–poles–gain system, root by root (no polynomial is formed, so high orders keep their
+ * accuracy): each factor e^{iω} − r adds −Re(e^{iω}/(e^{iω} − r)) for a zero and +Re(…) for a pole. A zero on the unit
+ * circle at ω makes the delay undefined there (NaN).
+ */
+function zpkGroupDelay(zeros: Tensor, poles: Tensor, sys: LtiSystem, options: ResponseOptions): GroupDelay {
+  const z = toComplexFlat(zeros)
+  const p = toComplexFlat(poles)
+  const w = frequencies(options)
+  let singular = 0
+  const term = (c: number, s: number, r: ComplexNumber) => {
+    const dr = c - r.re
+    const di = s - r.im
+    const d2 = dr * dr + di * di
+    // Re(e^{iω} / (e^{iω} − r)) = Re(e^{iω} conj(e^{iω} − r)) / |e^{iω} − r|².
+    return d2 === 0 ? NaN : (c * dr + s * di) / d2
+  }
+  const delay = w.map((omega) => {
+    const c = Math.cos(omega)
+    const s = Math.sin(omega)
+    let tau = sys.delay
+    for (const r of p) tau += term(c, s, r)
+    for (const r of z) {
+      if (Math.hypot(c - r.re, s - r.im) < 1e-12) {
+        singular++
+        return NaN
+      }
+      tau -= term(c, s, r)
+    }
+    return tau
   })
   const { axis, scale } = axisOf(sys, options)
   return {

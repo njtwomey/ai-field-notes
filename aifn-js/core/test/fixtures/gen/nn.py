@@ -103,6 +103,7 @@ def cases() -> dict[str, object]:
     batches = [rb.normal(loc=1.5, scale=2.0, size=(4, 3, 2, 2)) for _ in range(3)]
     bn.train()
     train_y = [arr(bn(torch.tensor(xb))) for xb in batches]
+    assert bn.running_mean is not None and bn.running_var is not None  # track_running_stats defaults to True
     running = [arr(bn.running_mean).copy(), arr(bn.running_var).copy()]
     bn.eval()
     x = rb.normal(size=(2, 3, 2, 2))

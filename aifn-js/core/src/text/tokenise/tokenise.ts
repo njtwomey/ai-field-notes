@@ -29,7 +29,16 @@ export interface Tokenisation {
  * - `alphanumeric`: runs of two or more word characters (letters, digits, underscore), scikit-learn's default
  *   `(?u)\b\w\w+\b`, so single letters are dropped;
  * - `gpt2`: the GPT-2 pre-tokeniser (Radford et al. 2019): English contractions, an optional space followed by letters,
- *   by digits or by other symbols, and white space; the tokens concatenate back to the text exactly.
+ *   by digits or by other symbols, and white space; the tokens concatenate back to the text exactly;
+ * - `cl100k`: the pre-tokeniser of tiktoken's `cl100k_base` (GPT-3.5 and GPT-4): case-insensitive contractions, letters
+ *   with one optional leading non-letter, numbers in groups of at most three digits, symbols with an optional leading
+ *   space and trailing newlines, and newline-aware white space; exact concatenation;
+ * - `o200k`: the pre-tokeniser of tiktoken's `o200k_base` (GPT-4o): as `cl100k`, but words split at lower-to-upper case
+ *   changes ("camelCase" → "camel", "Case") and contractions attach to the word before them;
+ * - `bert`: BERT's basic pre-tokeniser (Devlin et al. 2019): runs of non-space, non-punctuation characters, and every
+ *   punctuation character (Unicode P, and all ASCII symbols) on its own;
+ * - `wordsOrSymbols`: Hugging Face's `Whitespace` pre-tokeniser `\w+|[^\w\s]+`: runs of word characters, or runs of
+ *   other non-space characters.
  */
 export const TOKEN_PATTERNS = {
   words: /[\p{L}\p{N}]+(?:['’-][\p{L}\p{N}]+)*/gu,
@@ -37,6 +46,13 @@ export const TOKEN_PATTERNS = {
   whitespace: /\S+/gu,
   alphanumeric: /(?<![\p{L}\p{N}_])[\p{L}\p{N}_]{2,}(?![\p{L}\p{N}_])/gu,
   gpt2: /'s|'t|'re|'ve|'m|'ll|'d| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+/gu,
+  cl100k:
+    /'[sS]|'[tT]|'[rR][eE]|'[vV][eE]|'[mM]|'[lL][lL]|'[dD]|[^\r\n\p{L}\p{N}]?\p{L}+|\p{N}{1,3}| ?[^\s\p{L}\p{N}]+[\r\n]*|\s*[\r\n]+|\s+(?!\S)|\s+/gu,
+  o200k:
+    /[^\r\n\p{L}\p{N}]?[\p{Lu}\p{Lt}\p{Lm}\p{Lo}\p{M}]*[\p{Ll}\p{Lm}\p{Lo}\p{M}]+(?:'[sS]|'[tT]|'[rR][eE]|'[vV][eE]|'[mM]|'[lL][lL]|'[dD])?|[^\r\n\p{L}\p{N}]?[\p{Lu}\p{Lt}\p{Lm}\p{Lo}\p{M}]+[\p{Ll}\p{Lm}\p{Lo}\p{M}]*(?:'[sS]|'[tT]|'[rR][eE]|'[vV][eE]|'[mM]|'[lL][lL]|'[dD])?|\p{N}{1,3}| ?[^\s\p{L}\p{N}]+[\r\n/]*|\s*[\r\n]+|\s+(?!\S)|\s+/gu,
+  bert: /[^\s\p{P}!-/:-@[-`{-~]+|[\p{P}!-/:-@[-`{-~]/gu,
+  wordsOrSymbols:
+    /[\p{Alphabetic}\p{M}\p{Nd}\p{Pc}\p{Join_Control}]+|[^\p{Alphabetic}\p{M}\p{Nd}\p{Pc}\p{Join_Control}\s]+/gu,
 } as const
 
 /** A named token pattern. */

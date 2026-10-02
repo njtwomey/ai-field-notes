@@ -50,11 +50,13 @@ def cases() -> dict[str, object]:
             "importances": t.feature_importances_,
         }
 
-    svc = SVC(C=1.0, kernel="rbf", gamma=0.5, tol=1e-6).fit(x2, y2)
+    # sklearn ships no type stubs, so Pyright takes a parameter's type from its default (gamma="scale", dual="auto",
+    # tol=1e-3); the ignores below mark those arguments.
+    svc = SVC(C=1.0, kernel="rbf", gamma=0.5, tol=1e-6).fit(x2, y2)  # pyright: ignore[reportArgumentType]
     svc_linear = SVC(C=0.5, kernel="linear", tol=1e-6).fit(x2, y2)
-    lsvc = LinearSVC(C=0.5, loss="hinge", dual=True, tol=1e-10, max_iter=1_000_000, random_state=0).fit(x2, y2)
+    lsvc = LinearSVC(C=0.5, loss="hinge", dual=True, tol=1e-10, max_iter=1_000_000, random_state=0).fit(x2, y2)  # pyright: ignore[reportArgumentType]
     cs = LinearSVC(C=0.5, multi_class="crammer_singer", tol=1e-10, max_iter=1_000_000, random_state=0).fit(x3, y3)
-    perceptron = Perceptron(shuffle=False, eta0=1.0, max_iter=1000, tol=None).fit(x2, y2)
+    perceptron = Perceptron(shuffle=False, eta0=1.0, max_iter=1000, tol=None).fit(x2, y2)  # pyright: ignore[reportArgumentType]
 
     ada = AdaBoostClassifier(DecisionTreeClassifier(max_depth=1), n_estimators=5, random_state=0).fit(x3, y3)
     gbr = GradientBoostingRegressor(n_estimators=5, max_depth=2, learning_rate=0.3, random_state=0).fit(x3, yreg)
@@ -86,11 +88,11 @@ def cases() -> dict[str, object]:
         "yreg": yreg,
         "rtree": tree_json(rtree),
         "rtree_predict": rtree.predict(xq),
-        "svc": {"decision": svc.decision_function(xq), "support": svc.support_, "dual": svc.dual_coef_[0]},
+        "svc": {"decision": svc.decision_function(xq), "support": svc.support_, "dual": np.asarray(svc.dual_coef_)[0]},
         "svc_linear": {"decision": svc_linear.decision_function(xq), "coef": svc_linear.coef_[0]},
-        "lsvc": {"coef": lsvc.coef_[0], "intercept": lsvc.intercept_[0]},
+        "lsvc": {"coef": np.asarray(lsvc.coef_)[0], "intercept": np.asarray(lsvc.intercept_)[0]},
         "cs": {"coef": cs.coef_, "intercept": cs.intercept_, "decision": cs.decision_function(xq)},
-        "perceptron": {"coef": perceptron.coef_[0], "intercept": perceptron.intercept_[0]},
+        "perceptron": {"coef": np.asarray(perceptron.coef_)[0], "intercept": np.asarray(perceptron.intercept_)[0]},
         "ada": {"weights": ada.estimator_weights_, "errors": ada.estimator_errors_, "predict": ada.predict(xq)},
         "gbr": {"staged": np.array(list(gbr.staged_predict(xq)))},
         "gbc": {"decision": gbc.decision_function(xq), "proba": gbc.predict_proba(xq)},

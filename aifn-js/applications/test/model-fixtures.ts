@@ -14,6 +14,7 @@ import * as gp from 'aifn-applied/learning/gaussian-processes'
 import * as bayes from 'aifn-applied/learning/generative-classifiers'
 import * as kernels from 'aifn-applied/learning/kernel-methods'
 import * as linear from 'aifn-applied/learning/linear'
+import * as mdn from 'aifn-applied/learning/mixture-density'
 import * as neighbours from 'aifn-applied/learning/neighbours'
 import * as pre from 'aifn-applied/learning/preprocessing'
 import * as reductions from 'aifn-applied/learning/reductions'
@@ -132,6 +133,11 @@ export const MODEL_FIXTURES: Record<string, Fixture> = {
   supportVectorMachine: f(() => kernels.supportVectorMachine({ kernel }), dataset(bin.x, bin.y)),
   linearSvm: f(() => kernels.linearSvm(), dataset(bin.x, bin.y)),
   crammerSinger: f(() => kernels.crammerSinger(), dataset(tri.x, tri.y)),
+  // learning/mixture-density
+  mixtureDensityNetwork: f(
+    () => mdn.mixtureDensityNetwork({ components: 2, hidden: 4, steps: 5 }),
+    dataset(reg.x, reg.y),
+  ),
   // learning/gaussian-processes
   gaussianProcessRegressor: f(
     () => gp.gaussianProcessRegressor({ kernel, noiseVariance: 0.01 }),

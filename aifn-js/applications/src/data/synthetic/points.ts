@@ -876,7 +876,7 @@ export function anisotropicBlobs(s: Stream, options: AnisotropicOptions = {}): D
   for (let i = 0; i < x.length; i += 2) [x[i], x[i + 1]] = map(x[i], x[i + 1])
   let truth
   const bt = base.meta.truth
-  if (bt?.task === 'classification' && wantTruth()) {
+  if (bt?.task === 'classification' && 'priors' in bt && wantTruth()) {
     const recipeParams = base.meta.recipe!.knobs as { centers: number[][]; sd?: number | number[] }
     const centres = recipeParams.centers
     const sds =

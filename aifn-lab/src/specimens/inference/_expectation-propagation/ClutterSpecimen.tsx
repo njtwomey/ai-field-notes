@@ -76,7 +76,6 @@ export function ClutterSpecimen() {
             onChange={setStep}
             count={run.steps.length}
             format={format}
-            defaultSpeed={4}
           />
         </div>
       }

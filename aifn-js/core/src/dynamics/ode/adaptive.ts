@@ -4,12 +4,12 @@
  * formulae", J. Comput. Appl. Math. 6; Hairer, Nørsett & Wanner, 1993, §II.4, as in scipy's `RK45`).
  */
 
-import { dense, fromData, type Tensor, type Vector } from 'aifn/foundation/tensor'
+import { dense, unwrap, type Tensor, type Value, type Vector } from 'aifn/foundation/tensor'
 import type { Algorithm, Scalar } from 'aifn/foundation/contracts'
-import { combine, evaluate, initialState, stages, type ButcherTableau } from './explicit'
+import { combine, evaluate, evaluateValue, initialValue, stages, type ButcherTableau } from './explicit'
 import type { InitialValue, OdeState, Rhs } from './types'
 
-const { allFinite, toF64 } = dense
+const { allFinite } = dense
 type F64 = dense.F64
 
 /** The Dormand–Prince 5(4) tableau: b gives the fifth-order solution, bHat the embedded fourth-order one. */
@@ -127,10 +127,13 @@ export function dormandPrince(f: Rhs, options: AdaptiveOptions): Algorithm<Initi
   return {
     name,
     init: ({ x0, t0 = 0 }) => {
-      const x = toF64(x0, name)
-      const base = initialState(x, t0)
+      // A traced x₀ stays the state (and f(t₀, x₀) its traced first stage), so `unrolled` differentiates through the
+      // accepted steps; step sizes are chosen on primal values and are constants of the discrete solution.
+      const base = initialValue(x0, t0, name)
+      const x = dense.data(unwrap(base.x as Value) as Tensor)
       const dir = Math.sign(tEnd - t0) || 1
-      const f0 = evaluate(f, t0, x, name)
+      const k0 = evaluateValue(f, t0, base.x, name)
+      const f0 = dense.data(unwrap(k0) as Tensor)
       let evaluations = 1
       let h = options.initialStepSize
       if (h === undefined) {
@@ -138,10 +141,10 @@ export function dormandPrince(f: Rhs, options: AdaptiveOptions): Algorithm<Initi
         evaluations++
       }
       h = dir * Math.min(Math.abs(h), hMax)
-      return { ...base, evaluations, nextStepSize: h, derivative: fromData(f0, [f0.length]), attempts: [] }
+      return { ...base, evaluations, nextStepSize: h, derivative: k0 as Vector, attempts: [] }
     },
     step: (s) => {
-      const x = dense.data(s.x)
+      const x = dense.data(unwrap(s.x as Value) as Tensor)
       const dir = Math.sign(s.nextStepSize) || 1
       const hMin = options.minStepSize ?? 1e-12 * Math.max(1, Math.abs(s.time))
       let h = s.nextStepSize
@@ -161,8 +164,9 @@ export function dormandPrince(f: Rhs, options: AdaptiveOptions): Algorithm<Initi
         }
         const k = stages(f, tab, s.time, s.x, h, name, s.derivative)
         evaluations += tab.b.length - 1
-        const y = dense.data(combine(s.x, h, tab.b, k) as Tensor)
-        const e = dense.data(combine(0, h, errW, k) as Tensor)
+        const yValue = combine(s.x, h, tab.b, k)
+        const y = dense.data(unwrap(yValue) as Tensor)
+        const e = dense.data(unwrap(combine(0, h, errW, k)) as Tensor)
         const err = errorNorm(e, x, y, rtol, atol)
         if (!allFinite(y) || !Number.isFinite(err)) {
           attempts.push({ stepSize: h, error: err, accepted: false })
@@ -180,7 +184,7 @@ export function dormandPrince(f: Rhs, options: AdaptiveOptions): Algorithm<Initi
           return {
             t: s.t + 1,
             time: s.time + h,
-            x: fromData(y, [y.length]),
+            x: yValue as Vector,
             stepSize: h,
             error: err,
             evaluations: s.evaluations + evaluations,

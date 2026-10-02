@@ -4,9 +4,13 @@ quantiles at extreme probabilities (down to 1e-300), mean, variance and entropy;
 the multivariate families (MultivariateNormal, Dirichlet, Multinomial, Wishart); the compositions (Mixture, Independent,
 Transformed, Pushforward); and every registered closed-form KL rule. Families are keyed by registry key."""
 
+from collections.abc import Callable
+from typing import Any, Protocol, cast
+
 import mpmath as mp
 import numpy as np
 import torch
+from numpy.typing import ArrayLike
 from scipy import special, stats
 from torch import distributions as td
 
@@ -62,6 +66,21 @@ DISCRETE = {
     "DiscreteUniform": ([-3, 4], stats.randint(-3, 5), [-3, -1, 0, 2, 4]),
 }
 
+
+class Frozen(Protocol):
+    """A frozen scipy distribution. Calling an rv_continuous or rv_discrete is typed as returning either frozen kind,
+    so Pyright cannot see logpdf on a continuous one; this names the methods the fixtures use."""
+
+    def pdf(self, x: Any) -> Any: ...
+    def logpdf(self, x: Any) -> Any: ...
+    def logpmf(self, x: Any) -> Any: ...
+    def cdf(self, x: Any) -> Any: ...
+
+
+def frozen(dist: object) -> Frozen:
+    return cast(Frozen, dist)
+
+
 ALIASES = {"TruncatedNormalTail": "TruncatedNormal", "PoissonLarge": "Poisson"}
 
 
@@ -70,7 +89,7 @@ def student_t_quantile(p: float, nu: float, loc: float, scale: float) -> float:
     mp.mp.dps = 60
     nu_ = mp.mpf(nu)
 
-    def logcdf(z):
+    def logcdf(z: Any) -> Any:
         return mp.log(mp.betainc(nu_ / 2, mp.mpf(1) / 2, 0, nu_ / (nu_ + z * z), regularized=True) / 2)
 
     target = mp.log(mp.mpf(p))
@@ -86,7 +105,7 @@ def student_t_quantile(p: float, nu: float, loc: float, scale: float) -> float:
     return float(loc + scale * hi)
 
 
-def finite_or_none(f):
+def finite_or_none(f: Callable[[], Any]) -> float | None:
     with np.errstate(all="ignore"):
         try:
             v = float(f())
@@ -95,7 +114,7 @@ def finite_or_none(f):
     return v
 
 
-def univariate(dist, x, discrete: bool) -> dict[str, object]:
+def univariate(dist: Any, x: ArrayLike, discrete: bool) -> dict[str, object]:
     with np.errstate(all="ignore"):
         cdf, sf = dist.cdf(x), dist.sf(x)
         out: dict[str, object] = {
@@ -117,8 +136,8 @@ def univariate(dist, x, discrete: bool) -> dict[str, object]:
 
 
 def cases() -> dict[str, object]:
-    out: dict[str, object] = {}
-    fams: dict[str, object] = {}
+    out: dict[str, Any] = {}
+    fams: dict[str, Any] = {}
     for name, (args, dist, x) in CONTINUOUS.items():
         fams[name] = {"family": ALIASES.get(name, name), "args": args, **univariate(dist, x, False)}
     for name, (args, dist, x) in DISCRETE.items():
@@ -195,32 +214,32 @@ def cases() -> dict[str, object]:
         "Normal": {
             "args": [loc, scale],
             "x": xb,
-            "logProb": stats.norm(loc, scale).logpdf(xb),
+            "logProb": frozen(stats.norm(loc, scale)).logpdf(xb),
             "cdf": stats.norm(loc, scale).cdf(xb),
         },
         "NormalBroadcast": {
             "family": "Normal",
             "args": [loc, 2.0],
             "x": xb,
-            "logProb": stats.norm(loc, 2.0).logpdf(xb),
+            "logProb": frozen(stats.norm(loc, 2.0)).logpdf(xb),
             "cdf": stats.norm(loc, 2.0).cdf(xb),
         },
         "Gamma": {
             "args": [shape, 1.5],
             "x": xg,
-            "logProb": stats.gamma(shape, scale=1 / 1.5).logpdf(xg),
+            "logProb": frozen(stats.gamma(shape, scale=1 / 1.5)).logpdf(xg),
             "cdf": stats.gamma(shape, scale=1 / 1.5).cdf(xg),
         },
         "Binomial": {
             "args": [nb, 0.3],
             "x": kb,
-            "logProb": stats.binom(nb, 0.3).logpmf(kb),
+            "logProb": frozen(stats.binom(nb, 0.3)).logpmf(kb),
             "cdf": stats.binom(nb, 0.3).cdf(kb),
         },
         "StudentT": {
             "args": [np.array([1.5, 4.0, 30.0]), 0.0, 1.0],
             "x": xb,
-            "logProb": stats.t(np.array([1.5, 4.0, 30.0])).logpdf(xb),
+            "logProb": frozen(stats.t(np.array([1.5, 4.0, 30.0]))).logpdf(xb),
             "cdf": stats.t(np.array([1.5, 4.0, 30.0])).cdf(xb),
         },
         "Beta": {
@@ -231,7 +250,7 @@ def cases() -> dict[str, object]:
         },
     }
     bb = out["batches"]["Beta"]
-    bdist = stats.beta(np.array([0.5, 2.0, 5.0]), np.array([0.5, 3.0, 1.0]))
+    bdist = frozen(stats.beta(np.array([0.5, 2.0, 5.0]), np.array([0.5, 3.0, 1.0])))
     bb["logProb"], bb["cdf"] = bdist.logpdf(bb["x"]), bdist.cdf(bb["x"])
 
     # Multivariate.
@@ -245,14 +264,16 @@ def cases() -> dict[str, object]:
     pm = np.array([0.2, 0.5, 0.3])
     km = np.array([[3, 4, 3], [0, 10, 0], [1, 1, 8], [5, 5, 0]])
     df = 5.5
+    # scipy's signature infers cov's type from its default (1); a covariance matrix is what it accepts.
+    mvn_cov = cast(Any, cov)
     W = stats.wishart(df, cov).rvs(size=3, random_state=1)
     multi = {
         "MultivariateNormal": {
             "loc": mu,
             "covariance": cov,
             "x": xm,
-            "logProb": stats.multivariate_normal(mu, cov).logpdf(xm),
-            "entropy": stats.multivariate_normal(mu, cov).entropy(),
+            "logProb": stats.multivariate_normal(mu, mvn_cov).logpdf(xm),
+            "entropy": stats.multivariate_normal(mu, mvn_cov).entropy(),
         },
         "Dirichlet": {
             "concentration": alpha,
@@ -283,7 +304,7 @@ def cases() -> dict[str, object]:
     xs = np.r_[-6, -2, -0.5, 0, 0.7, 2, 5, 9]
     w = np.array([0.3, 0.5, 0.2])
     comps = [(-2.0, 0.5), (0.5, 1.0), (4.0, 2.0)]
-    mix_pdf = sum(wk * stats.norm(m, s).pdf(xs) for wk, (m, s) in zip(w, comps, strict=True))
+    mix_pdf = sum(wk * frozen(stats.norm(m, s)).pdf(xs) for wk, (m, s) in zip(w, comps, strict=True))
     mix_cdf = sum(wk * stats.norm(m, s).cdf(xs) for wk, (m, s) in zip(w, comps, strict=True))
     out["compose"] = {
         "Mixture": {
@@ -298,22 +319,22 @@ def cases() -> dict[str, object]:
             "loc": loc,
             "scale": scale,
             "x": xb,
-            "logProb": stats.norm(loc, scale).logpdf(xb).sum(axis=1),
+            "logProb": frozen(stats.norm(loc, scale)).logpdf(xb).sum(axis=1),
             "entropy": stats.norm(loc, scale).entropy().sum(),
         },
         "Transformed": {
             "x": np.r_[1e-6, 0.05, 0.5, 1, 2, 20, 1e4],
-            "logProb": stats.lognorm(1.0).logpdf(np.r_[1e-6, 0.05, 0.5, 1, 2, 20, 1e4]),
+            "logProb": frozen(stats.lognorm(1.0)).logpdf(np.r_[1e-6, 0.05, 0.5, 1, 2, 20, 1e4]),
             "cdf": stats.lognorm(1.0).cdf(np.r_[1e-6, 0.05, 0.5, 1, 2, 20, 1e4]),
         },
         "Pushforward": {
             "x": np.r_[1e-8, 0.01, 0.5, 1, 3, 10, 40],
-            "logProb": stats.chi2(1).logpdf(np.r_[1e-8, 0.01, 0.5, 1, 3, 10, 40]),
+            "logProb": frozen(stats.chi2(1)).logpdf(np.r_[1e-8, 0.01, 0.5, 1, 3, 10, 40]),
             "cdf": stats.chi2(1).cdf(np.r_[1e-8, 0.01, 0.5, 1, 3, 10, 40]),
         },
     }
 
-    def kl(p, q):
+    def kl(p: td.Distribution, q: td.Distribution) -> float:
         return float(td.kl_divergence(p, q))
 
     t = torch.tensor

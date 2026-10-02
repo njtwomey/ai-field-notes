@@ -79,7 +79,6 @@ export function EquationSteps({
           onChange={onStep}
           count={steps.length}
           format={(p) => `${Math.round(p) + 1} / ${steps.length}`}
-          defaultSpeed={1}
         />
       )}
       <ol className="flex flex-col gap-1.5">

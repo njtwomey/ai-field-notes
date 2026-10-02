@@ -83,6 +83,25 @@ algorithm(
 )
 algorithm(
   {
+    key: 'owlqn',
+    name: 'OWL-QN',
+    summary:
+      'L-BFGS for f(x) + C‖x‖₁: pseudo-gradient, orthant-projected direction and backtracking along the projected path.',
+    problem: 'objective',
+    state: {
+      iterate: 'x',
+      objective: 'value',
+      grad: 'grad',
+      stepSize: 'stepSize',
+      flags: ['converged', 'diverged', 'stalled'],
+    },
+    notes: ['quasi-newton-methods', 'lasso', 'elastic-net'],
+    cite: ['liu1989'],
+  },
+  quasiNewton.owlqn,
+)
+algorithm(
+  {
     key: 'gaussNewton',
     name: 'Gauss–Newton',
     problem: 'least-squares',

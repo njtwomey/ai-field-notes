@@ -2,8 +2,9 @@
  * `aifn/learning/metrics`: evaluation metrics, each defined once with its registry metadata (as sklearn.metrics):
  * confusion counts, classification rates, curves (ROC, precision–recall, DET, cost, gain), proper scoring rules and
  * calibration, regression errors and deviances, clustering indices, agreement, bootstrap and DeLong intervals, ranking
- * metrics, vector distances and ordinal metrics; `metricRegistry`, `getMetric`, `listMetrics`. Application metrics
- * (text, detection, quality, generative, fairness, beyond-accuracy) are in `aifn-applied/evaluation`.
+ * metrics, vector distances, embedding alignment and uniformity, and ordinal metrics; `metricRegistry`, `getMetric`,
+ * `listMetrics`. Application metrics (text, detection, quality, generative, fairness, beyond-accuracy) are in
+ * `aifn-applied/evaluation`.
  */
 
 export {
@@ -226,6 +227,7 @@ export {
   type HausdorffDistances,
   type Procrustes,
 } from './distances'
+export { alignment, uniformity, type AlignmentOptions, type UniformityOptions } from './representation'
 export {
   aurocDeLong,
   bootstrapMetric,

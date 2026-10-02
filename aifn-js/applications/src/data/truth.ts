@@ -18,7 +18,7 @@
  */
 
 import type { Distribution, Scores, Size, Truth as TruthContract } from 'aifn/foundation/contracts'
-import { fromData, logsumexp, reshape, stack, toFlat, type Tensor } from 'aifn/foundation/tensor'
+import { complex, fromData, isTensor, logsumexp, reshape, stack, toFlat, type Tensor } from 'aifn/foundation/tensor'
 import {
   family as familyByName,
   link as linkByName,
@@ -40,6 +40,7 @@ import {
 } from 'aifn/probability/distributions'
 import { affineBijector } from 'aifn/probability/bijectors'
 import { expectiles } from 'aifn/probability/stats'
+import { armaSpectrum } from 'aifn/signal/statistical'
 
 const toFlatArray = (t: Tensor) => Float64Array.from(toFlat(t))
 
@@ -519,7 +520,226 @@ export function curve1dTruth(model: Curve1dModel): Curve1dTruth {
   }
 }
 
-export type Truth = ClassificationTruth | RegressionTruth | ChangepointTruth | AdditiveTruth | Curve1dTruth
+// ── Spectra: sinusoids plus a stationary ARMA process, with a known power spectrum ───────────────────────────────────
+
+/** One deterministic sinusoid A sin(2πft + φ) of a spectral model; its power in a one-sided spectrum is A²/2. */
+export interface SpectralLine {
+  /** Frequency, in Hz (or cycles per unit of time). */
+  readonly frequency: number
+  readonly amplitude: number
+  /** Phase φ, in radians. */
+  readonly phase: number
+}
+
+/** An ARMA(p, q) process x_t = Σ φᵢ x_{t−i} + ε_t + Σ θⱼ ε_{t−j}, ε_t ~ N(0, σ²); white noise has no coefficients. */
+export interface ArmaParts {
+  readonly ar: readonly number[]
+  readonly ma: readonly number[]
+  readonly sigma2: number
+}
+
+/**
+ * The parts of a `SpectralTruth`: sinusoids plus a stationary ARMA process, sampled at rate fs; optionally a second
+ * series y = h ∗ x + v coupled to the first through a rational filter H = B/A and independent ARMA noise v.
+ */
+export interface SpectralModel {
+  readonly name: string
+  /** Sample rate (for uneven sampling, the mean rate n/T, which only scales the noise density). */
+  readonly fs: number
+  readonly lines: readonly SpectralLine[]
+  readonly noise: ArmaParts
+  readonly coupling?: { readonly b: readonly number[]; readonly a: readonly number[]; readonly noise: ArmaParts }
+}
+
+/** The true spectra of a coupled pair (x, y), with y = h ∗ x + v. */
+export interface CoupledSpectra {
+  /** The one-sided PSD of y, |H|² S_xx + S_vv. */
+  psd(f: Tensor | ArrayLike<number>): Tensor
+  /** The cross-spectral density S_xy = H S_xx (scipy's conj(X)·Y convention), complex128. */
+  crossSpectrum(f: Tensor | ArrayLike<number>): Tensor
+  /** The magnitude-squared coherence |H|² S_xx / (|H|² S_xx + S_vv). */
+  coherence(f: Tensor | ArrayLike<number>): Tensor
+  /** The phase of S_xy, arg H(f), in radians (unwrapped along f). */
+  phase(f: Tensor | ArrayLike<number>): Tensor
+}
+
+/**
+ * The truth of a series with a known power spectrum (task `spectrum`): a line spectrum (sinusoids of known frequency,
+ * amplitude and phase) on top of the continuous spectrum of a stationary ARMA process, which is white noise when the
+ * process has no coefficients. Methods over times (an [n, 1] or [n] tensor): `expect` is the sum of the sinusoids,
+ * `predictive` the marginal normal law around it, `bayesRisk` the variance of the stochastic part. `psd(f)` is the
+ * continuous part as a one-sided density (`aifn/signal/statistical`'s `armaSpectrum`), and `lines` the line part,
+ * each line of power A²/2: a periodogram of n samples shows a line as a peak of height ≈ (A²/2)·n/fs in density units
+ * on top of `psd`.
+ */
+export interface SpectralTruth extends TruthContract {
+  readonly task: 'spectrum'
+  readonly name: string
+  readonly fs: number
+  readonly lines: readonly SpectralLine[]
+  /** The continuous part's one-sided power spectral density at frequencies f. */
+  psd(f: Tensor | ArrayLike<number>): Tensor
+  /** The variance of the stochastic part (the integral of `psd` over [0, fs/2]). */
+  readonly noiseVariance: number
+  /** The total variance: `noiseVariance` + Σ A²/2. */
+  readonly variance: number
+  /** For a coupled pair, the second series' spectra and the cross-spectra. */
+  readonly coupled?: CoupledSpectra
+  readonly model: SpectralModel
+}
+
+const freqArray = (f: Tensor | ArrayLike<number>): Float64Array => Float64Array.from(isTensor(f) ? toFlat(f) : f)
+
+/** The variance of an ARMA process from its impulse response, σ² Σ ψⱼ² (ψ₀ = 1, ψⱼ = θⱼ + Σ φᵢ ψ_{j−i}). */
+export function armaVariance(p: ArmaParts): number {
+  if (!p.ar.length && !p.ma.length) return p.sigma2
+  const psi: number[] = [1]
+  let total = 1
+  for (let j = 1; j < 200000; j++) {
+    let v = j <= p.ma.length ? p.ma[j - 1] : 0
+    for (let i = 1; i <= Math.min(j, p.ar.length); i++) v += p.ar[i - 1] * psi[j - i]
+    psi.push(v)
+    total += v * v
+    if (j > p.ma.length + p.ar.length && Math.abs(v) < 1e-12 && Math.abs(psi[j - 1]) < 1e-12) break
+  }
+  return p.sigma2 * total
+}
+
+/** A filter's frequency response H(e^{iω}) = B(e^{−iω}) / A(e^{−iω}) at ω = 2πf/fs, as [re, im]. */
+function response(b: readonly number[], a: readonly number[], omega: number): [number, number] {
+  const poly = (c: readonly number[]) => {
+    let re = 0
+    let im = 0
+    c.forEach((v, k) => {
+      re += v * Math.cos(omega * k)
+      im -= v * Math.sin(omega * k)
+    })
+    return [re, im]
+  }
+  const [br, bi] = poly(b)
+  const [ar, ai] = poly(a)
+  const d = ar * ar + ai * ai
+  return [(br * ar + bi * ai) / d, (bi * ar - br * ai) / d]
+}
+
+/** Build a spectral truth (see `SpectralTruth`). */
+export function spectralTruth(model: SpectralModel): SpectralTruth {
+  const { fs, lines, noise } = model
+  const psdOf = (p: ArmaParts, f: Float64Array) =>
+    armaSpectrum({ ar: [...p.ar], ma: [...p.ma], sigma2: p.sigma2 }, { fs, frequencies: f }).values.data as Float64Array
+  const psd = (f: Tensor | ArrayLike<number>) => {
+    const fr = freqArray(f)
+    return fromData(Float64Array.from(psdOf(noise, fr)), [fr.length])
+  }
+  const noiseVariance = armaVariance(noise)
+  const variance = noiseVariance + lines.reduce((acc, l) => acc + (l.amplitude * l.amplitude) / 2, 0)
+  const times = (t: Tensor) => Float64Array.from(toFlat(t))
+  const meanAt = (t: number) =>
+    lines.reduce((acc, l) => acc + l.amplitude * Math.sin(2 * Math.PI * l.frequency * t + l.phase), 0)
+  const mean = (t: Tensor) => {
+    const ts = times(t)
+    return fromData(Float64Array.from(ts, meanAt), [ts.length])
+  }
+  const sd = Math.sqrt(noiseVariance)
+  let coupled: CoupledSpectra | undefined
+  if (model.coupling) {
+    const c = model.coupling
+    const parts = (f: Tensor | ArrayLike<number>) => {
+      const fr = freqArray(f)
+      const sxx = psdOf(noise, fr)
+      const svv = psdOf(c.noise, fr)
+      const H = Array.from(fr, (v) => response(c.b, c.a, (2 * Math.PI * v) / fs))
+      return { fr, sxx, svv, H }
+    }
+    coupled = {
+      psd: (f) => {
+        const { fr, sxx, svv, H } = parts(f)
+        return fromData(
+          Float64Array.from(fr, (_, i) => (H[i][0] ** 2 + H[i][1] ** 2) * sxx[i] + svv[i]),
+          [fr.length],
+        )
+      },
+      crossSpectrum: (f) => {
+        const { fr, sxx, H } = parts(f)
+        return complex(
+          fromData(
+            Float64Array.from(fr, (_, i) => H[i][0] * sxx[i]),
+            [fr.length],
+          ),
+          fromData(
+            Float64Array.from(fr, (_, i) => H[i][1] * sxx[i]),
+            [fr.length],
+          ),
+        ) as Tensor
+      },
+      coherence: (f) => {
+        const { fr, sxx, svv, H } = parts(f)
+        return fromData(
+          Float64Array.from(fr, (_, i) => {
+            const g = (H[i][0] ** 2 + H[i][1] ** 2) * sxx[i]
+            return g + svv[i] > 0 ? g / (g + svv[i]) : 0
+          }),
+          [fr.length],
+        )
+      },
+      phase: (f) => {
+        const { fr, H } = parts(f)
+        const out = new Float64Array(fr.length)
+        let offset = 0
+        for (let i = 0; i < fr.length; i++) {
+          const p = Math.atan2(H[i][1], H[i][0])
+          if (i > 0) {
+            const prev = out[i - 1] - offset
+            if (p - prev > Math.PI) offset -= 2 * Math.PI
+            else if (p - prev < -Math.PI) offset += 2 * Math.PI
+          }
+          out[i] = p + offset
+        }
+        return fromData(out, [fr.length])
+      },
+    }
+  }
+  return {
+    kind: 'model',
+    task: 'spectrum',
+    name: model.name,
+    fs,
+    lines,
+    psd,
+    noiseVariance,
+    variance,
+    ...(coupled ? { coupled } : {}),
+    decide: mean,
+    predictive: (t) => {
+      const m = mean(t)
+      return Normal(m, fromData(new Float64Array(m.shape[0]).fill(sd), [m.shape[0]]))
+    },
+    expect: (t, f) => {
+      if (!f) return mean(t)
+      const { nodes, weights } = HERMITE()
+      const ts = times(t)
+      return fromData(
+        Float64Array.from(ts, (v) => {
+          const m = meanAt(v)
+          return nodes.reduce((acc, z, q) => acc + weights[q] * f(m + sd * z), 0)
+        }),
+        [ts.length],
+      )
+    },
+    bayesRisk: noiseVariance,
+    model,
+  }
+}
+
+export type Truth =
+  | ClassificationTruth
+  | RegressionTruth
+  | ChangepointTruth
+  | AdditiveTruth
+  | Curve1dTruth
+  | RegimeTruth
+  | InverseTruth
+  | SpectralTruth
 
 /** Number of reference points drawn for Monte Carlo Bayes errors. */
 export const REFERENCE_SIZE = 6000
@@ -946,5 +1166,344 @@ export function changepointTruth(
       )
     },
     bayesRisk: n ? segments.reduce((acc, g) => acc + g.risk * (g.end - g.start), 0) / n : 0,
+  }
+}
+
+// ── Regimes: a gate over x chooses which of K functions generated y ─────────────────────────────────────────────────
+
+/**
+ * The parts of a `RegimeTruth`: K regimes, a gate P(regime k | x), and each regime's function of x (the mean of y for
+ * regression, the log-odds of class 1 for classification), on a box of inputs.
+ */
+export interface RegimeModel {
+  name: string
+  task: 'regression' | 'classification'
+  regimes: Size
+  /** P(regime k | x) at one point, length K. */
+  gate: (x: Row) => number[]
+  /** Regime k's function at one point: the mean of y (regression) or the log-odds of y = 1 (classification). */
+  fn: (x: Row, k: number) => number
+  /** The noise sd of y around a regime's mean (regression; 0 for classification). */
+  noiseSd: number
+  /** The input box the population's x is uniform on. */
+  lower: readonly number[]
+  upper: readonly number[]
+  /** Each regime's function as text, for captions. */
+  formulas: readonly string[]
+}
+
+/**
+ * The truth of data in which a gate over x picks one of K regimes and the regime's function generates y: a mixture of
+ * regressions or classifiers whose weights depend on x (the generative model of a mixture of experts; Jacobs, Jordan,
+ * Nowlan and Hinton, 1991). When the gate is hard, the regimes partition the input space and the truth is a piecewise
+ * function.
+ */
+export interface RegimeTruth extends TruthContract {
+  readonly task: 'regression' | 'classification'
+  readonly name: string
+  readonly regimes: Size
+  /** P(regime k | x) per row ([n, K]). */
+  gate(x: Tensor): Tensor
+  /** The most probable regime per row (int32 [n]). */
+  regime(x: Tensor): Tensor
+  /** Each regime's prediction per row ([n, K]): its mean of y (regression) or P(y = 1 | x, regime) (classification). */
+  regimeMean(x: Tensor): Tensor
+  /** E[y | x] per row ([n]): the gate-weighted regime means. */
+  mean(x: Tensor): Tensor
+  /** log p(y | x) per row ([n]): the log of the gate-weighted mixture of the regimes' laws. */
+  logLikelihood(x: Tensor, y: Tensor): Tensor
+  /**
+   * Regression: the normal with y's conditional mean and variance (exact where the gate is hard, moment-matched where
+   * regimes overlap; `logLikelihood` is exact everywhere). Classification: the Bernoulli of class 1.
+   */
+  predictive(x: Tensor): Distribution
+  /** The mean (regression) or the Bayes class (classification, int32). */
+  decide(x: Tensor): Tensor
+  expect(x: Tensor, f?: (y: number) => number): Tensor
+  /** E[Var(y | x)] (regression) or the Bayes error E[min(p, 1 − p)] (classification), over a grid of the box. */
+  readonly bayesRisk: number
+  readonly model: RegimeModel
+}
+
+const sigmoidOf = (v: number) => 1 / (1 + Math.exp(-v))
+
+/** Build a regime truth (see `RegimeTruth`). */
+export function regimeTruth(model: RegimeModel): RegimeTruth {
+  const K = model.regimes
+  const perRow = (x: Tensor, f: (row: Float64Array) => number[]) => {
+    const { data, n, d } = points(x)
+    const out: number[][] = []
+    for (let i = 0; i < n; i++) out.push(f(data.subarray(i * d, (i + 1) * d)))
+    return out
+  }
+  const regimeValue = (row: Row, k: number) =>
+    model.task === 'regression' ? model.fn(row, k) : sigmoidOf(model.fn(row, k))
+  const meanAt = (row: Row) => {
+    const g = model.gate(row)
+    return g.reduce((acc, w, k) => acc + w * regimeValue(row, k), 0)
+  }
+  const varianceAt = (row: Row) => {
+    const g = model.gate(row)
+    const m = meanAt(row)
+    if (model.task === 'classification') return m * (1 - m)
+    // Law of total variance: σ² + Σ gₖ (μₖ − μ)².
+    return model.noiseSd ** 2 + g.reduce((acc, w, k) => acc + w * (model.fn(row, k) - m) ** 2, 0)
+  }
+  const mean = (x: Tensor) => fromData(Float64Array.from(perRow(x, (r) => [meanAt(r)]).flat()), [x.shape[0]])
+  const risk = lazy(() => {
+    // A regular grid over the box: 2000 points in 1-D, 100 × 100 in 2-D.
+    const d = model.lower.length
+    const per = d === 1 ? 2000 : Math.max(2, Math.round(Math.pow(10000, 1 / d)))
+    const total = per ** d
+    let acc = 0
+    const row = new Float64Array(d)
+    for (let i = 0; i < total; i++) {
+      let rest = i
+      for (let c = 0; c < d; c++) {
+        const j = rest % per
+        rest = Math.floor(rest / per)
+        row[c] = model.lower[c] + ((j + 0.5) * (model.upper[c] - model.lower[c])) / per
+      }
+      if (model.task === 'regression') acc += varianceAt(row)
+      else {
+        const p = meanAt(row)
+        acc += Math.min(p, 1 - p)
+      }
+    }
+    return acc / total
+  })
+  const truth: RegimeTruth = {
+    kind: 'model',
+    task: model.task,
+    name: model.name,
+    regimes: K,
+    gate: (x) => fromData(Float64Array.from(perRow(x, (r) => model.gate(r)).flat()), [x.shape[0], K]),
+    regime: (x) =>
+      fromData(
+        Int32Array.from(
+          perRow(x, (r) => {
+            const g = model.gate(r)
+            return [g.indexOf(Math.max(...g))]
+          }).flat(),
+        ),
+        [x.shape[0]],
+      ),
+    regimeMean: (x) =>
+      fromData(Float64Array.from(perRow(x, (r) => Array.from({ length: K }, (_, k) => regimeValue(r, k))).flat()), [
+        x.shape[0],
+        K,
+      ]),
+    mean,
+    logLikelihood: (x, y) => {
+      const ys = toFlatArray(y)
+      let i = 0
+      const out = perRow(x, (r) => {
+        const g = model.gate(r)
+        const v = ys[i++]
+        let p = 0
+        for (let k = 0; k < K; k++) {
+          if (g[k] === 0) continue
+          if (model.task === 'regression') {
+            const s = model.noiseSd
+            p += (g[k] * Math.exp(-0.5 * ((v - model.fn(r, k)) / s) ** 2)) / (s * Math.sqrt(2 * Math.PI))
+          } else {
+            const q = sigmoidOf(model.fn(r, k))
+            p += g[k] * (v === 1 ? q : 1 - q)
+          }
+        }
+        return [Math.log(p)]
+      })
+      return fromData(Float64Array.from(out.flat()), [x.shape[0]])
+    },
+    predictive: (x) => {
+      const m = mean(x)
+      if (model.task === 'classification') return Bernoulli(m)
+      return Normal(m, fromData(Float64Array.from(perRow(x, (r) => [Math.sqrt(varianceAt(r))]).flat()), [x.shape[0]]))
+    },
+    decide: (x) => {
+      const m = mean(x)
+      if (model.task === 'regression') return m
+      return fromData(
+        Int32Array.from(toFlatArray(m), (p) => (p > 0.5 ? 1 : 0)),
+        [x.shape[0]],
+      )
+    },
+    expect: (x, f) => {
+      if (!f) return mean(x)
+      if (model.task === 'classification')
+        return fromData(Float64Array.from(perRow(x, (r) => [(1 - meanAt(r)) * f(0) + meanAt(r) * f(1)]).flat()), [
+          x.shape[0],
+        ])
+      const { nodes, weights } = HERMITE()
+      return fromData(
+        Float64Array.from(
+          perRow(x, (r) => {
+            const g = model.gate(r)
+            let acc = 0
+            for (let k = 0; k < K; k++)
+              if (g[k] > 0) {
+                const m = model.fn(r, k)
+                acc += g[k] * nodes.reduce((a, z, q) => a + weights[q] * f(m + model.noiseSd * z), 0)
+              }
+            return [acc]
+          }).flat(),
+        ),
+        [x.shape[0]],
+      )
+    },
+    get bayesRisk() {
+      return risk()
+    },
+    model,
+  }
+  return truth
+}
+
+// ── Inverse problems: y given x where x = f(y) + ε and f is many-to-one ─────────────────────────────────────────────
+
+/** One exact solution of an inverse problem: a target y with f(y) = x, and its share of p(y | x). */
+export interface InverseSolution {
+  readonly value: number[]
+  /** The solution's probability in the small-noise limit, p(y*)/|det f′(y*)| normalised over the solutions. */
+  readonly weight: number
+}
+
+/**
+ * The parts of an `InverseTruth`: targets y drawn from a uniform prior on a box, inputs x = f(y) + ε with
+ * ε ~ N(0, σ²I), and the inverse of f, which is multi-valued.
+ */
+export interface InverseModel {
+  name: string
+  /** The dimension D of the target y. */
+  outputs: Size
+  /** The forward map f(y), noise-free. */
+  forward: (y: Row) => number[]
+  /** Every y in the prior's box with f(y) = x, with its weight (empty where x is outside f's image). */
+  solutions: (x: Row) => InverseSolution[]
+  /** The law of y given x as weighted atoms: a quadrature rule of the exact posterior, or the solutions. */
+  atoms: (x: Row) => { values: number[][]; weights: number[] }
+  /** log p(y | x), where the posterior has a closed form up to quadrature (1-d targets). */
+  logLikelihood?: (x: Row, y: Row) => number
+  /** The noise sd σ of the inputs. */
+  noise: number
+  /** The prior's box of targets. */
+  lower: readonly number[]
+  upper: readonly number[]
+  /** f as text, for captions. */
+  formula: string
+}
+
+/**
+ * The truth of an inverse problem (Bishop, 1994, "Mixture density networks"): y is drawn uniformly on a box and
+ * observed through x = f(y) + ε, and the task is to predict y from x. Where f folds over, y given x has a mode at every
+ * solution of f(y) = x, and the conditional mean E[y | x], the minimiser of the squared error, can fall between them on
+ * no solution at all.
+ */
+export interface InverseTruth extends TruthContract {
+  readonly task: 'regression'
+  readonly name: string
+  /** The dimension D of y. */
+  readonly outputs: Size
+  /** The noise-free solutions of f(y) = x at one input, most probable first. */
+  solutions(x: Row): InverseSolution[]
+  /** f(y) at one target. */
+  forward(y: Row): number[]
+  /** E[y | x] per row: [n] for D = 1, else [n, D]. */
+  mean(x: Tensor): Tensor
+  /** Var(yⱼ | x) per row, the shape of `mean`. */
+  variance(x: Tensor): Tensor
+  /** log p(y | x) per row ([n]); NaN where the model has no density (a law concentrated on the solutions). */
+  logLikelihood(x: Tensor, y: Tensor): Tensor
+  /** The normal with y's conditional mean and variance per row (moment-matched: the true law is multimodal). */
+  predictive(x: Tensor): AnyUnivariate
+  /** E[y | x], the Bayes decision under squared loss. */
+  decide(x: Tensor): Tensor
+  /** E[f(y) | x] ([n]; D = 1 only with `f`). */
+  expect(x: Tensor, f?: (y: number) => number): Tensor
+  /** E[Σⱼ Var(yⱼ | x)] over the prior (on noise-free inputs, a 2000-point grid in 1-d, 60 × 60 in 2-d). */
+  readonly bayesRisk: number
+  readonly model: InverseModel
+}
+
+/** Build an inverse-problem truth (see `InverseTruth`). */
+export function inverseTruth(model: InverseModel): InverseTruth {
+  const D = model.outputs
+  const moments = (r: Row) => {
+    const { values, weights } = model.atoms(r)
+    const total = weights.reduce((a, w) => a + w, 0)
+    const m = new Array<number>(D).fill(0)
+    const v = new Array<number>(D).fill(0)
+    if (!(total > 0)) return { m: m.fill(NaN), v: v.fill(NaN) }
+    values.forEach((y, i) => y.forEach((yj, j) => (m[j] += (weights[i] / total) * yj)))
+    values.forEach((y, i) => y.forEach((yj, j) => (v[j] += (weights[i] / total) * (yj - m[j]) ** 2)))
+    return { m, v }
+  }
+  const perRow = (x: Tensor, f: (r: Float64Array) => number[]) => {
+    const { data, n, d } = points(x)
+    const out = new Float64Array(n * D)
+    for (let i = 0; i < n; i++) out.set(f(data.subarray(i * d, (i + 1) * d)), i * D)
+    return fromData(out, D === 1 ? [n] : [n, D])
+  }
+  const mean = (x: Tensor) => perRow(x, (r) => moments(r).m)
+  const variance = (x: Tensor) => perRow(x, (r) => moments(r).v)
+  const risk = lazy(() => {
+    const per = D === 1 ? 2000 : 60
+    const total = per ** D
+    const y = new Array<number>(D)
+    let acc = 0
+    let count = 0
+    for (let i = 0; i < total; i++) {
+      let rest = i
+      for (let j = 0; j < D; j++) {
+        y[j] = model.lower[j] + (((rest % per) + 0.5) * (model.upper[j] - model.lower[j])) / per
+        rest = Math.floor(rest / per)
+      }
+      const { v } = moments(model.forward(y))
+      if (v.every(Number.isFinite)) {
+        acc += v.reduce((a, b) => a + b, 0)
+        count++
+      }
+    }
+    return acc / Math.max(1, count)
+  })
+  return {
+    kind: 'model',
+    task: 'regression',
+    name: model.name,
+    outputs: D,
+    solutions: (x) => model.solutions(x),
+    forward: (y) => model.forward(y),
+    mean,
+    variance,
+    logLikelihood: (x, y) => {
+      const { data, n, d } = points(x)
+      const ys = toFlatArray(y)
+      return fromData(
+        Float64Array.from({ length: n }, (_, i) =>
+          model.logLikelihood
+            ? model.logLikelihood(data.subarray(i * d, (i + 1) * d), ys.subarray(i * D, (i + 1) * D))
+            : NaN,
+        ),
+        [n],
+      )
+    },
+    predictive: (x) => {
+      const v = variance(x)
+      return Normal(mean(x), fromData(Float64Array.from(toFlatArray(v), Math.sqrt), v.shape))
+    },
+    decide: mean,
+    expect: (x, f) => {
+      if (!f) return mean(x)
+      if (D !== 1) throw new RangeError('inverseTruth: expect with f needs a 1-d target')
+      return perRow(x, (r) => {
+        const { values, weights } = model.atoms(r)
+        const total = weights.reduce((a, w) => a + w, 0)
+        return [values.reduce((a, v, i) => a + (weights[i] / total) * f(v[0]), 0)]
+      })
+    },
+    get bayesRisk() {
+      return risk()
+    },
+    model,
   }
 }

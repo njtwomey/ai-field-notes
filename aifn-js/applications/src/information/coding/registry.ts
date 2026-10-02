@@ -6,15 +6,17 @@ import * as coding from './coding'
 type Table<I extends AlgorithmInfo | FunctionInfo> = Readonly<Record<string, Entry<(...args: never[]) => unknown, I>>>
 const fn = definer<FunctionInfo>('function', 'information/coding')
 const SRC = ['source-coding-theorem', 'entropy']
+const TREE = [...SRC, 'hierarchical-softmax']
 
 definer<AlgorithmInfo>('algorithm', 'information/coding')(
   {
     key: 'huffmanSteps',
     name: 'Huffman coding',
-    summary: 'Merge the two least probable nodes per step until one tree remains.',
+    summary:
+      'Pop the D least-weight roots off a priority queue, join them under a new node and push it back, until one tree remains; binary or D-ary, with a tie-breaking rule.',
     problem: 'graph',
     state: { iterate: 'nodes', flags: [] },
-    notes: SRC,
+    notes: TREE,
     cite: ['huffman1952'],
   },
   coding.huffmanSteps,
@@ -25,7 +27,7 @@ fn(
     name: 'Huffman tree',
     role: 'construction',
     returns: 'tree',
-    notes: SRC,
+    notes: TREE,
     cite: ['huffman1952'],
   },
   coding.huffmanTree,
@@ -34,6 +36,39 @@ fn(
   { key: 'huffmanCode', name: 'Huffman code', role: 'construction', notes: SRC, cite: ['huffman1952'] },
   coding.huffmanCode,
 )
+fn(
+  {
+    key: 'huffmanDummies',
+    name: 'Huffman dummy symbols',
+    summary: 'Zero-weight leaves a D-ary Huffman code needs so that every merge takes D nodes.',
+    role: 'property',
+    notes: SRC,
+  },
+  coding.huffmanDummies,
+)
+fn(
+  {
+    key: 'canonicalCode',
+    name: 'Canonical prefix code',
+    summary: 'Codewords from lengths alone: consecutive numbers in (length, symbol) order.',
+    role: 'construction',
+    notes: SRC,
+  },
+  coding.canonicalCode,
+)
+fn(
+  {
+    key: 'sourceExtension',
+    name: 'Source extension (block coding)',
+    summary: 'The K^n probabilities of blocks of n i.i.d. symbols.',
+    role: 'construction',
+    notes: SRC,
+    cite: ['cover2006'],
+  },
+  coding.sourceExtension,
+)
+fn({ key: 'prefixEncode', name: 'Prefix encoding', role: 'transform', notes: SRC }, coding.prefixEncode)
+fn({ key: 'prefixDecode', name: 'Prefix decoding by tree walk', role: 'transform', notes: SRC }, coding.prefixDecode)
 fn(
   {
     key: 'shannonCode',

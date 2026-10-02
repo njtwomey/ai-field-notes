@@ -1,6 +1,8 @@
 """Golden values for aifn-applied/inference/conjugate-models: the normal-gamma log evidence by numerical
 integration (scipy), and data sets."""
 
+from typing import cast
+
 import numpy as np
 from scipy import integrate, stats
 
@@ -16,7 +18,11 @@ def cases() -> dict[str, object]:
 
     # The integrand is scaled by exp(c) to stay in floating-point range.
     c = 20.0
-    z, _ = integrate.dblquad(lambda mu, tau: joint(mu, tau) * np.exp(c), 1e-6, 12.0, -3.0, 6.0, epsabs=0, epsrel=1e-10)
+    # dblquad's return type also covers full_output, which is not requested: the result is (value, error).
+    z, _ = cast(
+        tuple[float, float],
+        integrate.dblquad(lambda mu, tau: joint(mu, tau) * np.exp(c), 1e-6, 12.0, -3.0, 6.0, epsabs=0, epsrel=1e-10),
+    )
     return {
         "normal_gamma": {
             "x": x,

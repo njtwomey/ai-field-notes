@@ -66,6 +66,46 @@ def bdf_cases() -> dict[str, object]:
     return out
 
 
+def neural_ode_case() -> dict[str, object]:
+    """torchdiffeq's adjoint (odeint_adjoint, dopri5, tight tolerances) on a tiny tanh field with fixed weights.
+
+    f(x) = tanh(x W1 + b) W2 on a batch x of shape [2, 2], θ = [W1 (2×3), b (3), W2 (3×2)] flattened row-major, and
+    L = Σ x(1) ⊙ M. Returns x(1), ∂L/∂θ and ∂L/∂x(0), all in float64.
+    """
+    import torch
+    from torchdiffeq import odeint_adjoint  # pyright: ignore[reportMissingTypeStubs, reportUnknownVariableType]
+
+    theta = [0.5, -0.3, 0.8, 0.2, -0.6, 0.4, 0.1, -0.2, 0.05, 0.7, -0.4, 0.3, 0.9, -0.5, 0.2]
+    x0 = [[0.3, -0.7], [1.1, 0.4]]
+    weights = [[1.0, -2.0], [0.5, 1.0]]
+
+    class Field(torch.nn.Module):
+        def __init__(self) -> None:
+            super().__init__()
+            self.theta = torch.nn.Parameter(torch.tensor(theta, dtype=torch.float64))
+
+        def forward(self, _t: torch.Tensor, x: torch.Tensor) -> torch.Tensor:
+            w1 = self.theta[0:6].reshape(2, 3)
+            b = self.theta[6:9]
+            w2 = self.theta[9:15].reshape(3, 2)
+            return torch.tanh(x @ w1 + b) @ w2
+
+    field = Field()
+    x = torch.tensor(x0, dtype=torch.float64, requires_grad=True)
+    t = torch.tensor([0.0, 1.0], dtype=torch.float64)
+    xt = odeint_adjoint(field, x, t, method="dopri5", rtol=1e-11, atol=1e-12)[-1]  # pyright: ignore[reportUnknownVariableType]
+    loss = (xt * torch.tensor(weights, dtype=torch.float64)).sum()  # pyright: ignore[reportUnknownMemberType]
+    loss.backward()  # pyright: ignore[reportUnknownMemberType]
+    return {
+        "theta": theta,
+        "x0": x0,
+        "weights": weights,
+        "x1": xt.detach().numpy(),  # pyright: ignore[reportUnknownMemberType]
+        "grad_theta": field.theta.grad.numpy(),  # pyright: ignore[reportOptionalMemberAccess]
+        "grad_x0": x.grad.numpy(),  # pyright: ignore[reportOptionalMemberAccess]
+    }
+
+
 def cases() -> dict[str, object]:
     rng = np.random.default_rng(3)
     rk45 = {}
@@ -95,8 +135,8 @@ def cases() -> dict[str, object]:
         "companion": np.array([[0, 1, 0], [0, 0, 1], [6, -11, 6.0]]),
     }.items():
         w = np.linalg.eigvals(a)
-        order = np.lexsort((-w.imag, -w.real))
-        eig[k] = {"a": a, "real": w.real[order], "imag": w.imag[order]}
+        order = np.lexsort((-np.imag(w), -np.real(w)))
+        eig[k] = {"a": a, "real": np.real(w)[order], "imag": np.imag(w)[order]}
 
     return {
         "rk45": rk45,
@@ -104,4 +144,5 @@ def cases() -> dict[str, object]:
         "expm": expm,
         "eig": eig,
         "bdf": bdf_cases(),
+        "neural_ode": neural_ode_case(),
     }

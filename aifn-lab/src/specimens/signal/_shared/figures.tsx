@@ -258,7 +258,7 @@ export function SiftSpecimen() {
       title="Sifting one intrinsic mode function"
       purpose="Each sift fits cubic splines through the maxima and minima and subtracts their mean; after a few sifts the mean is near zero and h is the fastest oscillation, the first IMF."
       defaultSize="L"
-      controls={<Player label="sift" value={at} onChange={setK} count={run.steps.length} defaultSpeed={2} />}
+      controls={<Player label="sift" value={at} onChange={setK} count={run.steps.length} />}
       readouts={{
         'this sift': (
           <>

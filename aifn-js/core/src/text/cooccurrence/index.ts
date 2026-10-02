@@ -1,6 +1,6 @@
 /**
- * `aifn/text/cooccurrence`: windowed word–context counts, PMI, PPMI with context smoothing and shifting, and word
- * vectors from a truncated SVD.
+ * `aifn/text/cooccurrence`: windowed word–context counts, PMI, PPMI with context smoothing and shifting, the
+ * truncated SVD, and word vectors from it.
  */
 
 export {
@@ -12,4 +12,5 @@ export {
   type CooccurrenceOptions,
   type PmiOptions,
 } from './cooccurrence'
+export { truncatedSvd, type TruncatedSvd } from './svd'
 export { cooccurrenceFunctions } from './registry'

@@ -1,8 +1,9 @@
 /**
- * Source and channel coding: Huffman, Shannon–Fano and Shannon codes with their expected lengths, the Kraft sum,
- * the arithmetic-coding interval of a message, Hamming distance and weight, the minimum distance of a code, and the
- * Hamming (sphere-packing), Singleton and Plotkin bounds on the size of a code. Codes are binary; codewords are
- * strings of '0' and '1'.
+ * Source and channel coding: Huffman codes (binary and D-ary, with a choice of tie-breaking rule) as a step-through
+ * algorithm, canonical codewords from lengths, the n-th extension of a source for block coding, encoding and decoding
+ * with a prefix code, Shannon–Fano and Shannon codes with their expected lengths, the Kraft sum, the arithmetic-coding
+ * interval of a message, Hamming distance and weight, the minimum distance of a code, and the Hamming
+ * (sphere-packing), Singleton and Plotkin bounds on the size of a code. Codewords are strings of digits 0 … D − 1.
  */
 
 import type { Status } from 'aifn/foundation/contracts'
@@ -11,158 +12,417 @@ import { fromData, isTensor, toFlat, type Tensor } from 'aifn/foundation/tensor'
 import { run, type Algorithm } from 'aifn/foundation/trace'
 import { flatProbabilities, type Probabilities } from 'aifn/probability/information'
 
-/** A prefix code for symbols 0 … K − 1. */
+/** A prefix code for symbols 0 … K − 1 over a D-ary alphabet (digits 0–9 then a–z, so D ≤ 36). */
 export type PrefixCode = {
-  /** The codeword of each symbol. */
+  /** The codeword of each symbol (digits 0 … D − 1). */
   codewords: string[]
   /** The length of each codeword (int32, length K). */
   lengths: Tensor
-  /** Σₖ pₖ ℓₖ in bits per symbol. */
+  /** The code alphabet's size D (2 for a binary code). */
+  arity: number
+  /** Σₖ pₖ ℓₖ in D-ary digits per symbol (bits when D = 2). */
   expectedLength: number
-  /** The entropy H(p) in bits, the lower bound on the expected length of any prefix code. */
+  /** Σₖ pₖ (ℓₖ − E[ℓ])², the variance of the codeword length. */
+  lengthVariance: number
+  /** The entropy H_D(p) = −Σ pₖ log_D pₖ, the lower bound on the expected length of any D-ary prefix code. */
   entropy: number
 }
 
-/** Node data of a Huffman tree: leaves carry their `symbol`, internal nodes −1; every node its total probability. */
-export type HuffmanNodeData = { probability: number; symbol: number }
-/** Edge data of a Huffman tree: the bit the branch appends (0 for the first node merged, 1 for the second). */
-export type HuffmanEdgeData = { bit: 0 | 1 }
-/**
- * A Huffman tree as an `aifn/graph` `Tree` (binary, `arity: 2`): leaves are ids 0 … K − 1 (symbol k is node k),
- * internal nodes follow in merge order and the root is last. Edges are labelled '0' and '1' (slot 0 is the 0 branch);
- * a symbol's codeword is the edge labels on its path from the root.
- */
-export type HuffmanTree = Tree<HuffmanNodeData, HuffmanEdgeData>
+// ── Huffman's algorithm ──────────────────────────────────────────────────────────────────────────────────────────────
 
-/** One state of Huffman's algorithm: a forest of merged nodes and the queue of roots still to merge. */
+/**
+ * How Huffman's algorithm orders nodes of equal weight in its queue. Every rule gives an optimal code (the same
+ * expected length); they differ in the spread of the lengths.
+ *
+ * - `minimum-variance`: original leaves before merged nodes of the same weight, merged nodes oldest first. A merged
+ *   node goes after the equal-weight originals, so it is merged as late as possible and the tree stays shallow; this
+ *   gives the code of least length variance (and least maximum length) among Huffman codes (Schwartz, 1964,
+ *   "Generating a canonical prefix encoding", CACM 7(3)).
+ * - `merged-first`: merged nodes before original leaves of the same weight, newest first, so a subtree just built is
+ *   merged again at once and the tree grows deep.
+ */
+export type HuffmanTies = 'minimum-variance' | 'merged-first'
+
+export type HuffmanOptions = {
+  /** The code alphabet's size D ≥ 2 (default 2). D > 2 pads the source with zero-weight dummy leaves. */
+  arity?: number
+  /** The tie-breaking rule (default `minimum-variance`). */
+  ties?: HuffmanTies
+}
+
+/** One node of Huffman's forest: a symbol's leaf, a dummy leaf (D-ary padding) or a merged node. */
+export type HuffmanNode = {
+  id: number
+  /** The probability of the symbols under the node (0 for a dummy). */
+  weight: number
+  /** The symbol of a leaf (0 … K − 1); −1 for a merged node or a dummy. */
+  symbol: number
+  /** A zero-weight leaf added so that every merge takes exactly D nodes. */
+  dummy: boolean
+  /** The node it was merged into, or null while it is a root in the queue. */
+  parent: number | null
+  /** Children in digit order: child i hangs on the edge labelled i. Empty for a leaf. */
+  children: readonly number[]
+  /** The digit on the edge from its parent, or null for a root. */
+  digit: number | null
+  /** The step that created it (0 for leaves). */
+  step: number
+}
+
+/** One state of Huffman's algorithm: the forest so far, its queue of roots, and what the last step did. */
 export type HuffmanState = Status & {
   /** Merges done. */
   t: number
-  /** Every node so far: leaves 0 … K − 1, then one internal node per merge. */
-  nodes: readonly {
-    probability: number
-    symbol: number
-    parent: number | null
-    /** [the 0 branch, the 1 branch], or null for a leaf. */
-    children: readonly [number, number] | null
-  }[]
-  /** The roots still to merge, least probable first (ties: older first). */
+  arity: number
+  ties: HuffmanTies
+  /** Real symbols K (leaves 0 … K − 1); dummies are ids K … K + d − 1, merged nodes follow in merge order. */
+  symbols: number
+  /** Every node so far. */
+  nodes: readonly HuffmanNode[]
+  /** The priority queue: the roots still to merge, in pop order (least weight first, ties by the rule). */
   queue: readonly number[]
-  /** The two nodes merged by the last step ([0-branch, 1-branch]), or null. */
-  merged: readonly [number, number] | null
-  /** The node the last step created, or −1. */
+  /** The D nodes the last step popped, in pop order: popped[i] got digit i. Empty at step 0. */
+  popped: readonly number[]
+  /** The node the last step created (the popped nodes' parent), or −1. */
   created: number
+  /** Where the created node was inserted in the queue (its index in `queue`), or −1. */
+  inserted: number
   /**
-   * The codewords so far. A merge prepends a bit to every symbol under the two merged nodes, so codewords grow from
-   * their last bit to their first as the queue shrinks.
+   * Nodes of the same weight as the last popped one that stayed in the queue: when non-empty, the tie-breaking rule,
+   * not the weights, chose which nodes the last step popped.
+   */
+  tied: readonly number[]
+  /** The symbols under each popped node (dummies left out): each gained the popped node's digit as its first digit. */
+  under: readonly (readonly number[])[]
+  /**
+   * Each symbol's codeword so far. A merge puts a digit in front of every symbol under the merged nodes, so codewords
+   * grow from their last digit to their first as the queue shrinks; '' for a symbol still alone in the queue.
    */
   codewords: readonly string[]
+  /** One root left. */
   done: boolean
 }
 
+/** Relative tolerance under which two weights count as equal (sums of probabilities round). */
+const TIE = 1e-12
+
+/** The number of zero-weight dummies that make (K + d − 1) divisible by (D − 1), so every merge takes D nodes. */
+export function huffmanDummies(symbols: number, arity = 2): number {
+  checkArity(arity, 'huffmanDummies')
+  if (symbols <= 1) return 0
+  return (arity - 1 - ((symbols - 1) % (arity - 1))) % (arity - 1)
+}
+
+function checkArity(arity: number, where: string): void {
+  if (!(Number.isInteger(arity) && arity >= 2 && arity <= 36))
+    throw new RangeError(`${where}: the arity must be an integer in 2 … 36 (digits 0–9, a–z)`)
+}
+
+/** Queue order under a tie rule: true when node a pops before node b. */
+function popsBefore(a: HuffmanNode, b: HuffmanNode, ties: HuffmanTies): boolean {
+  const scale = Math.max(Math.abs(a.weight), Math.abs(b.weight), 1e-300)
+  if (Math.abs(a.weight - b.weight) > TIE * scale) return a.weight < b.weight
+  const am = a.children.length > 0
+  const bm = b.children.length > 0
+  if (ties === 'minimum-variance') return am !== bm ? !am : a.id < b.id
+  if (am !== bm) return am
+  return am ? a.id > b.id : a.id < b.id
+}
+
+const sameWeight = (a: number, b: number) => Math.abs(a - b) <= TIE * Math.max(Math.abs(a), Math.abs(b), 1e-300)
+
 /**
- * Huffman's algorithm as a traceable `Algorithm` (Huffman, 1952) on the probabilities (any shape, flattened); no
- * start. Each step merges the two least probable roots of the queue into a new node (ties broken by creation order,
- * older first; the first taken gets the 0 branch) and prepends 0 or 1 to the codewords under them. The run is done
- * when one root is left: K − 1 steps for K symbols. `huffmanTree(state)` turns the final state into a `Tree`.
+ * Huffman's algorithm as a step-through `Algorithm` (Huffman, 1952, "A method for the construction of
+ * minimum-redundancy codes", Proc. IRE 40) on the probabilities (any shape, flattened); no start. The queue starts
+ * with the K symbol leaves (and, for D > 2, `huffmanDummies(K, D)` zero-weight dummy leaves) in pop order. Each step
+ * pops the D least-weight roots, gives the i-th popped digit i, makes them the children of a new node whose weight is
+ * their sum, and inserts that node back into the queue at its place under the tie rule (`HuffmanTies`). Every symbol
+ * under a popped node gains that digit in front of its codeword. The run is done when one root is left: (K + d − 1) /
+ * (D − 1) steps. Each state records the queue, the popped nodes, the created node and where it went, the ties the rule
+ * decided, and the partial codewords. `huffmanTree(state)` turns the final state into a `Tree`.
  */
-export function huffmanSteps(probabilities: Probabilities): Algorithm<void, HuffmanState> {
+export function huffmanSteps(
+  probabilities: Probabilities,
+  { arity = 2, ties = 'minimum-variance' }: HuffmanOptions = {},
+): Algorithm<void, HuffmanState> {
   const p = flatProbabilities(probabilities, 'huffmanSteps')
   if (p.length === 0) throw new RangeError('huffmanSteps: needs at least one symbol')
+  checkArity(arity, 'huffmanSteps')
+  if (ties !== 'minimum-variance' && ties !== 'merged-first') throw new RangeError(`huffmanSteps: unknown ties ${ties}`)
+  const K = p.length
+  const dummies = huffmanDummies(K, arity)
   return {
     name: 'huffman',
     init: () => {
-      const nodes = p.map((v, k) => ({ probability: v, symbol: k, parent: null, children: null }))
+      const nodes: HuffmanNode[] = []
+      for (let i = 0; i < K + dummies; i++)
+        nodes.push({
+          id: i,
+          weight: i < K ? p[i] : 0,
+          symbol: i < K ? i : -1,
+          dummy: i >= K,
+          parent: null,
+          children: [],
+          digit: null,
+          step: 0,
+        })
+      const queue = nodes.map((n) => n.id).sort((a, b) => (popsBefore(nodes[a], nodes[b], ties) ? -1 : 1))
       return {
         t: 0,
+        arity,
+        ties,
+        symbols: K,
         nodes,
-        queue: sortQueue(
-          nodes,
-          nodes.map((_, k) => k),
-        ),
-        merged: null,
+        queue,
+        popped: [],
         created: -1,
+        inserted: -1,
+        tied: [],
+        under: [],
         codewords: p.map(() => ''),
-        done: p.length === 1,
+        done: queue.length === 1,
       }
     },
     step: (s) => {
       if (s.done) return s
-      const [a, b, ...rest] = s.queue
+      const popped = s.queue.slice(0, arity)
+      const rest = s.queue.slice(arity)
       const id = s.nodes.length
-      const nodes = s.nodes.map((n, i) => (i === a || i === b ? { ...n, parent: id } : n))
-      nodes.push({
-        probability: s.nodes[a].probability + s.nodes[b].probability,
+      const t = s.t + 1
+      const lastWeight = s.nodes[popped[popped.length - 1]].weight
+      const tied = rest.filter((v) => sameWeight(s.nodes[v].weight, lastWeight))
+      const created: HuffmanNode = {
+        id,
+        weight: popped.reduce((sum, v) => sum + s.nodes[v].weight, 0),
         symbol: -1,
+        dummy: false,
         parent: null,
-        children: [a, b],
-      })
-      const codewords = [...s.codewords]
-      const prepend = (v: number, bit: string) => {
-        const c = nodes[v].children
-        if (c === null) codewords[v] = bit + codewords[v]
-        else c.forEach((w) => prepend(w, bit))
+        children: popped,
+        digit: null,
+        step: t,
       }
-      prepend(a, '0')
-      prepend(b, '1')
-      const queue = sortQueue(nodes, [...rest, id])
-      return { t: s.t + 1, nodes, queue, merged: [a, b], created: id, codewords, done: queue.length === 1 }
+      const nodes = s.nodes.map((n) => {
+        const i = popped.indexOf(n.id)
+        return i < 0 ? n : { ...n, parent: id, digit: i }
+      })
+      nodes.push(created)
+      const codewords = [...s.codewords]
+      const under = popped.map((v, digit) => {
+        const symbols: number[] = []
+        const stack = [v]
+        while (stack.length) {
+          const w = nodes[stack.pop()!]
+          if (w.children.length) stack.push(...w.children)
+          else if (!w.dummy) symbols.push(w.symbol)
+        }
+        symbols.sort((a, b) => a - b)
+        for (const k of symbols) codewords[k] = digit.toString(36) + codewords[k]
+        return symbols
+      })
+      // Binary search for the first queued node the new one pops before.
+      let lo = 0
+      let hi = rest.length
+      while (lo < hi) {
+        const mid = (lo + hi) >> 1
+        if (popsBefore(nodes[rest[mid]], created, ties)) lo = mid + 1
+        else hi = mid
+      }
+      const queue = [...rest.slice(0, lo), id, ...rest.slice(lo)]
+      return {
+        t,
+        arity,
+        ties,
+        symbols: K,
+        nodes,
+        queue,
+        popped,
+        created: id,
+        inserted: lo,
+        tied,
+        under,
+        codewords,
+        done: queue.length === 1,
+      }
     },
     done: (s) => s.done,
   }
 }
 
-/** Queue order: probability, then creation order. A sorted list is enough for the sizes a figure uses. */
-function sortQueue(nodes: HuffmanState['nodes'], ids: number[]): number[] {
-  return [...ids].sort((x, y) => nodes[x].probability - nodes[y].probability || x - y)
-}
+/** Node data of a Huffman tree. */
+export type HuffmanNodeData = { weight: number; symbol: number; dummy: boolean }
+/** Edge data of a Huffman tree: the digit the branch appends. */
+export type HuffmanEdgeData = { digit: number }
+/**
+ * A Huffman tree as an `aifn/graph` `Tree` (`arity` D): node ids are those of the `HuffmanState` (symbol k is node k,
+ * dummies follow, merged nodes in merge order, the root last). Edges are labelled with their digit and each child's
+ * `slot` is its digit; a symbol's codeword is the edge labels on its path from the root.
+ */
+export type HuffmanTree = Tree<HuffmanNodeData, HuffmanEdgeData>
 
 /** The Huffman tree of a finished `huffmanSteps` state as a `Tree`, rooted at the last node created. */
 export function huffmanTree(state: HuffmanState): HuffmanTree {
   if (!state.done) throw new Error('huffmanTree: the state is not finished (the queue holds more than one root)')
-  const root = state.queue[0]
   const tree = treeFromChildren<HuffmanNodeData, HuffmanEdgeData>(
-    state.nodes.map((n) => (n.children ? [...n.children] : [])),
-    root,
+    state.nodes.map((n) => [...n.children]),
+    state.queue[0],
     {
-      data: (i) => ({ probability: state.nodes[i].probability, symbol: state.nodes[i].symbol }),
-      edge: (c, p) => {
-        const bit = state.nodes[p].children![0] === c ? 0 : 1
-        return { bit, label: String(bit) }
-      },
+      data: (i) => ({ weight: state.nodes[i].weight, symbol: state.nodes[i].symbol, dummy: state.nodes[i].dummy }),
+      edge: (c) => ({ digit: state.nodes[c].digit!, label: state.nodes[c].digit!.toString(36) }),
     },
   )
-  // Mark sides so a binary layout keeps the 0 branch on the left.
-  for (const n of tree.nodes) if (n.parent !== null) n.slot = tree.edges[n.id]!.bit
-  return { ...tree, arity: 2 }
+  for (const n of tree.nodes) if (n.parent !== null) n.slot = state.nodes[n.id].digit!
+  return { ...tree, arity: state.arity }
 }
 
-function entropyBits(p: number[]): number {
+function entropyBase(p: number[], base: number): number {
   let h = 0
-  for (const v of p) if (v > 0) h -= v * Math.log2(v)
-  return h
+  for (const v of p) if (v > 0) h -= v * Math.log(v)
+  return h / Math.log(base)
 }
 
-function finish(p: number[], codewords: string[]): PrefixCode {
+function finish(p: number[], codewords: string[], arity = 2): PrefixCode {
   const lengths = Int32Array.from(codewords, (c) => c.length)
   let expected = 0
   p.forEach((v, k) => (expected += v * lengths[k]))
-  return { codewords, lengths: fromData(lengths, [lengths.length]), expectedLength: expected, entropy: entropyBits(p) }
+  let variance = 0
+  p.forEach((v, k) => (variance += v * (lengths[k] - expected) ** 2))
+  return {
+    codewords,
+    lengths: fromData(lengths, [lengths.length]),
+    arity,
+    expectedLength: expected,
+    lengthVariance: variance,
+    entropy: entropyBase(p, arity),
+  }
 }
 
 /**
- * A binary Huffman code (Huffman, 1952, "A method for the construction of minimum-redundancy codes", Proc. IRE 40):
- * repeatedly merge the two least probable nodes (`huffmanSteps` run to the end). The result is an optimal prefix code,
- * with H(p) ≤ expected length < H(p) + 1. Ties are broken by creation order (older nodes first), and the first node
- * taken gets the 0 branch, so the code is deterministic. A single symbol gets the codeword "0". Returns the code and
- * its `tree` (a `HuffmanTree`: leaves are ids 0 … K − 1, the root is last).
+ * A Huffman code: `huffmanSteps` run to the end. The result is an optimal D-ary prefix code, with H_D(p) ≤ E[ℓ] <
+ * H_D(p) + 1; the tie rule changes the lengths' variance, never E[ℓ]. A single symbol gets the codeword "0". Returns
+ * the code and its `tree` (a `HuffmanTree`).
  */
-export function huffmanCode(probabilities: Probabilities): PrefixCode & { tree: HuffmanTree } {
+export function huffmanCode(
+  probabilities: Probabilities,
+  options: HuffmanOptions = {},
+): PrefixCode & { tree: HuffmanTree } {
   const p = flatProbabilities(probabilities, 'huffmanCode')
   if (p.length === 0) throw new RangeError('huffmanCode: needs at least one symbol')
-  const s = run(huffmanSteps(p), undefined, p.length)
+  const steps = huffmanSteps(p, options)
+  const s = run(steps, undefined, p.length + huffmanDummies(p.length, options.arity ?? 2))
   const tree = huffmanTree(s)
-  return { ...finish(p, p.length === 1 ? ['0'] : [...s.codewords]), tree }
+  return { ...finish(p, p.length === 1 ? ['0'] : [...s.codewords], s.arity), tree }
+}
+
+/**
+ * Canonical codewords for given lengths (Schwartz and Kallick, 1964): symbols sorted by (length, index) get
+ * consecutive D-ary numbers, each written with its length's number of digits; going to a longer length appends zeros
+ * (code ← (code + 1) · D^{Δℓ}). Any prefix code's lengths give a canonical code with the same lengths, so a decoder
+ * needs only the lengths. A length of 0 gives ''. Throws when the lengths break Kraft's inequality.
+ */
+export function canonicalCode(lengths: ArrayLike<number> | Tensor, arity = 2): string[] {
+  checkArity(arity, 'canonicalCode')
+  const ls = isTensor(lengths) ? toFlat(lengths) : Array.from(lengths)
+  if (
+    kraftSum(
+      ls.filter((l) => l > 0),
+      arity,
+    ) >
+    1 + 1e-12
+  )
+    throw new RangeError('canonicalCode: the lengths break Kraft’s inequality (Σ D^−ℓ > 1)')
+  const order = ls
+    .map((_, k) => k)
+    .filter((k) => ls[k] > 0)
+    .sort((a, b) => ls[a] - ls[b] || a - b)
+  const out = ls.map(() => '')
+  const D = BigInt(arity)
+  let code = -1n
+  let length = 0
+  for (const k of order) {
+    code = (code + 1n) * D ** BigInt(ls[k] - length)
+    length = ls[k]
+    out[k] = code.toString(arity).padStart(length, '0')
+  }
+  return out
+}
+
+/**
+ * The n-th extension of a memoryless source: the K^n probabilities of blocks of n symbols, Π pᵢ over the block, in
+ * lexicographic order (the first symbol most significant). Coding blocks with a Huffman code gives E[ℓ_n] / n → H(p)
+ * digits per symbol, since H(p) ≤ E[ℓ_n] / n < H(p) + 1/n (Cover and Thomas, 2006, §5.4).
+ */
+export function sourceExtension(probabilities: Probabilities, n: number): Tensor {
+  const p = flatProbabilities(probabilities, 'sourceExtension')
+  if (!(Number.isInteger(n) && n >= 1)) throw new RangeError('sourceExtension: n must be a positive integer')
+  let out = Float64Array.of(1)
+  for (let i = 0; i < n; i++) {
+    const next = new Float64Array(out.length * p.length)
+    for (let a = 0; a < out.length; a++) for (let b = 0; b < p.length; b++) next[a * p.length + b] = out[a] * p[b]
+    out = next
+  }
+  return fromData(out, [out.length])
+}
+
+/** A message encoded with a prefix code: the digit string and the span each symbol's codeword takes in it. */
+export type Encoded = { digits: string; spans: { symbol: number; start: number; end: number }[] }
+
+/** Encode a message (symbol indices) by concatenating codewords. */
+export function prefixEncode(codewords: readonly string[], message: ArrayLike<number>): Encoded {
+  let digits = ''
+  const spans: Encoded['spans'] = []
+  for (let i = 0; i < message.length; i++) {
+    const s = message[i]
+    const c = codewords[s]
+    if (c === undefined || c === '') throw new RangeError(`prefixEncode: symbol ${s} has no codeword`)
+    spans.push({ symbol: s, start: digits.length, end: digits.length + c.length })
+    digits += c
+  }
+  return { digits, spans }
+}
+
+/** A digit string decoded by walking a code tree. */
+export type Decoded = {
+  /** The symbols decoded. */
+  symbols: number[]
+  /** For each decoded symbol, the nodes walked from the root to its leaf. */
+  walks: number[][]
+  /** Digits at the end that stop inside the tree (a codeword cut short); '' when the string decodes exactly. */
+  rest: string
+}
+
+/**
+ * Decode a digit string by walking a `HuffmanTree`: from the root, follow the child whose edge digit is the next
+ * digit; at a leaf, emit its symbol and go back to the root. A prefix code needs no separators, since no codeword is
+ * the start of another. Throws on a digit with no edge or a walk that reaches a dummy leaf.
+ */
+export function prefixDecode(tree: HuffmanTree, digits: string): Decoded {
+  const symbols: number[] = []
+  const walks: number[][] = []
+  let walk = [tree.root]
+  let start = 0
+  // A one-leaf tree: every digit is the one symbol.
+  if (tree.nodes[tree.root].children.length === 0) {
+    for (let i = 0; i < digits.length; i++) {
+      symbols.push(tree.nodes[tree.root].symbol)
+      walks.push([tree.root])
+    }
+    return { symbols, walks, rest: '' }
+  }
+  for (let i = 0; i < digits.length; i++) {
+    const v = walk[walk.length - 1]
+    const next = tree.nodes[v].children.find((c) => tree.edges[c]!.digit === parseInt(digits[i], 36))
+    if (next === undefined) throw new RangeError(`prefixDecode: no edge for digit ${digits[i]} at position ${i}`)
+    walk.push(next)
+    const node = tree.nodes[next]
+    if (node.children.length === 0) {
+      if (node.dummy) throw new RangeError(`prefixDecode: digits ${digits.slice(start, i + 1)} reach a dummy leaf`)
+      symbols.push(node.symbol)
+      walks.push(walk)
+      walk = [tree.root]
+      start = i + 1
+    }
+  }
+  return { symbols, walks, rest: digits.slice(start) }
 }
 
 /**

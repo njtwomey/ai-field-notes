@@ -6,13 +6,12 @@
 import { describe, expect, it } from 'vitest'
 import { valueAndGrad } from 'aifn/foundation/autodiff'
 import { tensor, toFlat, unwrap, type Tensor, type Value } from 'aifn/foundation/tensor'
-import type { Loss } from 'aifn/learning/losses'
+import { infoNce, type Loss } from 'aifn/learning/losses'
 import {
   approxNdcg,
   bpr,
   contrastive,
   inBatchSoftmax,
-  infoNce,
   lambdaRank,
   lambdaWeights,
   listMle,
@@ -101,9 +100,7 @@ describe('retrieval and representation losses', () => {
     )
   })
 
-  it('InfoNCE (symmetric, cosine) and the triplet loss match torch', () => {
-    const c = F.infoNce
-    check((a) => infoNce(a, T(c.b), { temperature: 0.5, symmetric: true }), c.a, c)
+  it('the triplet loss matches torch (InfoNCE is tested with core)', () => {
     const t = F.triplet
     check((a) => triplet(a, T(t.p), T(t.n)), t.a, t)
   })

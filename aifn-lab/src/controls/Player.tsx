@@ -18,13 +18,11 @@ export type PlayerProps = {
   label?: ReactNode
   /** Formats a position in the slider's field, e.g. as the step number it stands for. */
   format?: (position: number) => string
-  /** Positions per second when playing (default 10). */
-  defaultSpeed?: number
   /**
-   * Seconds to play from first to last at the starting speed, in place of `defaultSpeed`: the speed is the listed one
-   * nearest count / duration. Use it for a run whose length varies, e.g. a solver's steps.
+   * Positions per second when playing (default 60, the lab-wide rate). Figures leave it alone; only a view whose frames
+   * are simulation time steps (e.g. a gym episode) passes its own rate.
    */
-  duration?: number
+  defaultSpeed?: number
   /** Start again from the beginning at the end rather than stopping. */
   loop?: boolean
   /**
@@ -46,15 +44,14 @@ export function Player({
   count,
   label = 'step',
   format,
-  defaultSpeed = 10,
-  duration,
+  defaultSpeed = 60,
   loop = false,
   startReason,
   className,
 }: PlayerProps) {
   const last = Math.max(0, count - 1)
   const [playing, setPlaying] = useState(false)
-  const [speed, setSpeed] = useState<Speed>(() => nearestSpeed(duration ? count / duration : defaultSpeed))
+  const [speed, setSpeed] = useState<Speed>(() => nearestSpeed(defaultSpeed))
   // Every walk-through opens at its first position unless the figure says why not (see `startReason`). Done here, once,
   // so no figure has to remember it.
   const opened = useRef(false)

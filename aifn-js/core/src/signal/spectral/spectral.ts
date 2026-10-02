@@ -36,7 +36,8 @@ export interface SegmentOptions {
   onesided?: boolean
 }
 
-function detrendInPlace(seg: Float64Array, kind: Detrend): void {
+/** Detrend one segment in place (module-internal; `estimation` and `uneven` share it). */
+export function detrendInPlace(seg: Float64Array, kind: Detrend): void {
   const n = seg.length
   if (!kind || n === 0) return
   let mean = 0
@@ -58,7 +59,8 @@ function detrendInPlace(seg: Float64Array, kind: Detrend): void {
   for (let i = 0; i < n; i++) seg[i] -= mean + slope * (i - tMean)
 }
 
-interface Segmented {
+/** Segment transforms of one signal (module-internal). */
+export interface Segmented {
   freqs: Float64Array
   times: Float64Array
   /** Per segment: real and imaginary parts of the scaled, windowed transform (length nfreq each). */
@@ -72,7 +74,10 @@ interface Segmented {
  * scipy.signal's `_spectral_helper` for real input: split into segments of `nperseg` stepping by nperseg − noverlap,
  * detrend, window, and take the FFT. Returns the unscaled transforms and the scale factor for the requested scaling.
  */
-function segmentTransforms(x: Float64Array, o: Required<Omit<SegmentOptions, 'window'>> & { window: WindowInput }) {
+export function segmentTransforms(
+  x: Float64Array,
+  o: Required<Omit<SegmentOptions, 'window'>> & { window: WindowInput },
+): Segmented {
   const { fs, nperseg, noverlap, nfft, detrend, scaling, onesided } = o
   if (nperseg < 1 || nperseg > x.length) throw new RangeError(`nperseg must be in [1, ${x.length}], got ${nperseg}`)
   if (noverlap < 0 || noverlap >= nperseg) throw new RangeError(`noverlap must be in [0, nperseg), got ${noverlap}`)
@@ -122,7 +127,7 @@ function segmentTransforms(x: Float64Array, o: Required<Omit<SegmentOptions, 'wi
 }
 
 /** Power per segment, scaled, with one-sided doubling of the bins strictly between DC and Nyquist. */
-function segmentPowers(s: Segmented, nfft: number, onesided: boolean): Float64Array[] {
+export function segmentPowers(s: Segmented, nfft: number, onesided: boolean): Float64Array[] {
   return s.re.map((re, k) => {
     const im = s.im[k]
     const p = new Float64Array(s.nfreq)
@@ -135,7 +140,7 @@ function segmentPowers(s: Segmented, nfft: number, onesided: boolean): Float64Ar
   })
 }
 
-function resolve(
+export function resolveSegments(
   x: Float64Array,
   fs: Scalar,
   o: SegmentOptions,
@@ -162,7 +167,7 @@ function windowName(w: WindowInput): string {
 }
 
 /** A power `Spectrum` of a real signal from one-sided (or two-sided) frequencies and values. */
-function powerSpectrum(
+export function powerSpectrum(
   f: ArrayLike<number>,
   values: ArrayLike<number>,
   o: { fs: Scalar; scaling: 'density' | 'spectrum'; onesided: boolean },
@@ -181,17 +186,41 @@ function powerSpectrum(
 }
 
 /**
+ * The equivalent degrees of freedom of a Welch average of K segments of length nperseg, hop nperseg − noverlap, under
+ * a window w (Percival and Walden, 1993, "Spectral Analysis for Physical Applications", eq. 292b; Welch, 1967):
+ * ν = 2K / (1 + 2 Σ_{l=1}^{K−1} (1 − l/K) ρ²(l)), with ρ(l) = Σₙ w[n] w[n + l·hop] / Σₙ w[n]² the overlap correlation
+ * of segments l hops apart. Each periodogram ordinate is ≈ S(f) χ²₂/2, so a mean of K independent ones has ν = 2K;
+ * overlapping segments are correlated and count for less. Valid away from DC and Nyquist (where a periodogram has one
+ * degree of freedom) and for a smooth spectrum.
+ */
+export function welchDof(window: WindowInput, nperseg: Size, noverlap: Size, segments: Size): number {
+  if (segments < 1) return 0
+  const w = windowValues(window, nperseg, true)
+  const step = nperseg - noverlap
+  let energy = 0
+  for (const v of w) energy += v * v
+  let sum = 0
+  for (let l = 1; l < segments && l * step < nperseg; l++) {
+    let r = 0
+    for (let n = 0; n + l * step < nperseg; n++) r += w[n] * w[n + l * step]
+    sum += (1 - l / segments) * (r / energy) ** 2
+  }
+  return (2 * segments) / (1 + 2 * sum)
+}
+
+/**
  * Welch's estimate of the power spectral density, as `scipy.signal.welch`: the average (mean or median) of windowed,
  * detrended periodograms of overlapping segments. Defaults: Hann window, 256-sample segments (or the whole signal if
- * shorter), 50% overlap, constant detrending.
+ * shorter), 50% overlap, constant detrending. `segments` is the number averaged and `dof` the equivalent degrees of
+ * freedom of the mean (`welchDof`), for `spectralConfidence`.
  */
 export function welch(
   x: SignalInput,
   options: SegmentOptions & { average?: 'mean' | 'median' } = {},
-): Spectrum & { segments: Size } {
+): Spectrum & { segments: Size; dof: number } {
   const input = readSamples(x, 'welch', options.fs)
   const v = input.values
-  const o = resolve(v, input.fs, options, {
+  const o = resolveSegments(v, input.fs, options, {
     window: 'hann',
     nperseg: 256,
     overlap: (n) => Math.floor(n / 2),
@@ -213,14 +242,22 @@ export function welch(
       psd[j] = med / bias
     }
   }
-  return { ...powerSpectrum(seg.freqs, psd, o, input.unit), segments: powers.length }
+  return {
+    ...powerSpectrum(seg.freqs, psd, o, input.unit),
+    segments: powers.length,
+    dof: welchDof(o.window, o.nperseg, o.noverlap, powers.length),
+  }
 }
 
 /**
  * The periodogram, as `scipy.signal.periodogram`: one segment (the whole signal), rectangular window by default,
- * constant detrending. With a window it is the modified periodogram.
+ * constant detrending. With a window it is the modified periodogram. `dof` is 2: each ordinate away from DC and
+ * Nyquist is S(f) χ²₂/2, so its standard deviation equals its mean however long the record.
  */
-export function periodogram(x: SignalInput, options: Omit<SegmentOptions, 'nperseg' | 'noverlap'> = {}): Spectrum {
+export function periodogram(
+  x: SignalInput,
+  options: Omit<SegmentOptions, 'nperseg' | 'noverlap'> = {},
+): Spectrum & { dof: number } {
   const n = readSamples(x, 'periodogram').values.length
   const { segments: _segments, ...r } = welch(x, {
     window: 'boxcar',
@@ -240,7 +277,7 @@ export function periodogram(x: SignalInput, options: Omit<SegmentOptions, 'npers
 export function spectrogram(x: SignalInput, options: SegmentOptions = {}): TimeFrequency {
   const input = readSamples(x, 'spectrogram', options.fs)
   const v = input.values
-  const o = resolve(v, input.fs, options, {
+  const o = resolveSegments(v, input.fs, options, {
     window: { name: 'tukey', alpha: 0.25 },
     nperseg: 256,
     overlap: (n) => Math.floor(n / 8),
@@ -371,10 +408,12 @@ function tridiagonalTop(d: Float64Array, e: Float64Array, k: number): { values: 
     }
     const lambda = (a + b) / 2
     values.push(lambda)
-    // Inverse iteration with a slightly perturbed shift; three solves suffice for separated eigenvalues.
+    // Inverse iteration with a slightly perturbed shift, until the vector stops changing (a few solves for the
+    // well-separated DPSS eigenvalues).
     const shift = lambda + 1e-10 * Math.max(1, Math.abs(lambda))
     let v: Float64Array = new Float64Array(n).fill(1 / Math.sqrt(n))
-    for (let it = 0; it < 3; it++) {
+    for (let it = 0; it < 20; it++) {
+      const previous = v
       v = solveTridiagonal(d, e, shift, v)
       // Orthogonalise against the vectors already found, in case of close eigenvalues.
       for (const u of vectors) {
@@ -386,6 +425,12 @@ function tridiagonalTop(d: Float64Array, e: Float64Array, k: number): { values: 
       for (let i = 0; i < n; i++) norm += v[i] * v[i]
       norm = Math.sqrt(norm)
       for (let i = 0; i < n; i++) v[i] /= norm
+      let change = 0
+      let dot = 0
+      for (let i = 0; i < n; i++) dot += v[i] * previous[i]
+      const sign = dot < 0 ? -1 : 1
+      for (let i = 0; i < n; i++) change = Math.max(change, Math.abs(v[i] - sign * previous[i]))
+      if (it >= 2 && change < 1e-15) break
     }
     vectors.push(v)
   }
@@ -480,37 +525,107 @@ export function dpss(n: Size, nw: Scalar, k: Size): Dpss {
   return { tapers: fromData(flat, [k, n]), concentrations: fromData(Float64Array.from(conc)) }
 }
 
+/** Options of `multitaper`. */
+export type MultitaperOptions = {
+  /** Time–half-bandwidth product NW (default 4): the tapers concentrate in |f| < NW/n cycles per sample. */
+  nw?: Scalar
+  /** Number of tapers (default 2NW − 1, the well-concentrated ones). */
+  k?: Size
+  fs?: Scalar
+  nfft?: Size
+  detrend?: Detrend
+  /**
+   * Thomson's adaptive weights (default false): down-weight high-order tapers where their broadband leakage would
+   * exceed the local spectrum. Off, every taper has weight 1/k.
+   */
+  adaptive?: boolean
+  /** Adaptive iterations: the relative change at which to stop (default 1e-10) and the cap (default 150). */
+  tolerance?: Scalar
+  maxIterations?: Size
+}
+
 /**
- * Thomson's multitaper PSD: the average of the k eigenspectra |Σₙ v_j[n] x[n] e^{−2πi fn}|² / fs, one-sided (doubled
- * off DC and Nyquist), with DPSS tapers of time–half-bandwidth NW. Default k = 2NW − 1, the tapers that are well
- * concentrated.
+ * Thomson's multitaper PSD (Thomson, 1982): eigenspectra Sₖ(f) = |Σₙ vₖ[n] x[n] e^{−2πi fn/fs}|² / fs under the k
+ * DPSS tapers of time–half-bandwidth NW, combined and made one-sided (doubled off DC and Nyquist). Default k = 2NW − 1.
+ *
+ * Without `adaptive` the estimate is their mean, with ν = 2k degrees of freedom. With `adaptive`, Thomson's weights
+ * (Percival and Walden, 1993, §7.4, eqs. 368a and 370a) are iterated from the mean of the first two eigenspectra:
+ * dₖ(f) = √λₖ S(f) / (λₖ S(f) + (1 − λₖ) σ²/fs) and S(f) = Σ dₖ² Sₖ / Σ dₖ², where λₖ is taper k's concentration and
+ * σ² the series' variance (the broadband leakage a taper lets in is (1 − λₖ)σ²). The degrees of freedom then vary
+ * with frequency, ν(f) = 2 (Σ dₖ²)² / Σ dₖ⁴, between 2 and 2k. `weights` holds dₖ(f) as [k, nfreq].
  */
 export function multitaper(
   x: SignalInput,
-  options: { nw?: Scalar; k?: Size; fs?: Scalar; nfft?: Size; detrend?: Detrend } = {},
-): Spectrum & Dpss {
+  options: MultitaperOptions = {},
+): Spectrum & Dpss & { dof: Tensor; weights: Tensor } {
   const input = readSamples(x, 'multitaper', options.fs)
   const v = input.values
   const n = v.length
   const fs = input.fs
-  const { nw = 4, detrend = 'constant' } = options
+  const { nw = 4, detrend = 'constant', adaptive = false, tolerance = 1e-10, maxIterations = 150 } = options
   const k = options.k ?? Math.max(1, Math.floor(2 * nw) - 1)
   const nfft = Math.max(options.nfft ?? n, n)
   detrendInPlace(v, detrend)
   const tapers = dpss(n, nw, k)
   const nfreq = Math.floor(nfft / 2) + 1
-  const psd = new Float64Array(nfreq)
   // The k tapered copies of the signal as rows of a [k, n] matrix, transformed along the rows at once.
   const tapered = new Float64Array(k * n)
   for (let j = 0; j < k; j++) for (let i = 0; i < n; i++) tapered[j * n + i] = v[i] * tapers.tapers.data[j * n + i]
   const spec = rfft(fromData(tapered, [k, n]), { n: nfft }).data as Float64Array
+  // Two-sided eigenspectra Sₖ(f), [k, nfreq].
+  const eigen = new Float64Array(k * nfreq)
   for (let j = 0; j < k; j++)
     for (let b = 0; b < nfreq; b++) {
       const re = spec[2 * (j * nfreq + b)]
       const im = spec[2 * (j * nfreq + b) + 1]
-      psd[b] += (re * re + im * im) / (k * fs)
+      eigen[j * nfreq + b] = (re * re + im * im) / fs
     }
+  const psd = new Float64Array(nfreq)
+  const weights = new Float64Array(k * nfreq).fill(1 / Math.sqrt(k))
+  const dof = new Float64Array(nfreq).fill(2 * k)
+  if (!adaptive || k === 1) {
+    for (let j = 0; j < k; j++) for (let b = 0; b < nfreq; b++) psd[b] += eigen[j * nfreq + b] / k
+  } else {
+    const lambda = tapers.concentrations.data as Float64Array
+    let variance = 0
+    for (let i = 0; i < n; i++) variance += v[i] * v[i]
+    variance /= n
+    const broadband = variance / fs
+    for (let b = 0; b < nfreq; b++) {
+      let S = 0.5 * (eigen[b] + eigen[nfreq + b])
+      const d = new Float64Array(k)
+      for (let it = 0; it < maxIterations; it++) {
+        let num = 0
+        let den = 0
+        for (let j = 0; j < k; j++) {
+          d[j] = (Math.sqrt(lambda[j]) * S) / (lambda[j] * S + (1 - lambda[j]) * broadband)
+          num += d[j] * d[j] * eigen[j * nfreq + b]
+          den += d[j] * d[j]
+        }
+        const next = den > 0 ? num / den : 0
+        const done = Math.abs(next - S) <= tolerance * Math.max(next, Number.MIN_VALUE)
+        S = next
+        if (done) break
+      }
+      // The weights at the converged S.
+      let s2 = 0
+      let s4 = 0
+      for (let j = 0; j < k; j++) {
+        d[j] = (Math.sqrt(lambda[j]) * S) / (lambda[j] * S + (1 - lambda[j]) * broadband)
+        weights[j * nfreq + b] = d[j]
+        s2 += d[j] * d[j]
+        s4 += d[j] ** 4
+      }
+      psd[b] = S
+      dof[b] = s4 > 0 ? (2 * s2 * s2) / s4 : 2 * k
+    }
+  }
   for (let b = 1; b < nfreq; b++) if (!(nfft % 2 === 0 && b === nfft / 2)) psd[b] *= 2
   const f = rfftfreq(nfft, 1 / fs).data
-  return { ...powerSpectrum(f, psd, { fs, scaling: 'density', onesided: true }, input.unit), ...tapers }
+  return {
+    ...powerSpectrum(f, psd, { fs, scaling: 'density', onesided: true }, input.unit),
+    ...tapers,
+    dof: fromData(dof, [nfreq]),
+    weights: fromData(weights, [k, nfreq]),
+  }
 }

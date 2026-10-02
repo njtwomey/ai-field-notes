@@ -16,6 +16,7 @@ import {
   reshape,
   shapeOfValue,
   slice,
+  sub,
   take,
   transpose,
   unwrap,
@@ -83,7 +84,11 @@ export type Gpt = {
   readonly config: Required<GptConfig>
   readonly label: string
   init(s: Stream): GptParams
-  /** Logits [..., T, V] for ids [..., T] (T ≤ context); the attention weights are tapped at `blocks.<i>.attention.weights`. */
+  /**
+   * Logits [..., T, V] for ids [..., T] (T ≤ context). With a tapping context it records `embedding.tokens`,
+   * `embedding.positions` (absolute schemes), `embedding` (the residual stream entering the first block), every block's
+   * activations below `blocks.<i>` (see `transformerBlock`), `final` (the last normalisation) and `logits`.
+   */
   apply(params: GptParams, ids: Tensor | readonly number[], ctx?: Context): Value
 }
 
@@ -140,15 +145,19 @@ export function Gpt(config: GptConfig): Gpt {
         : (ids as Tensor)
       const T = idTensor.shape[idTensor.shape.length - 1]
       if (T > c.context) throw new Error(`Gpt: ${T} tokens exceed the context of ${c.context}`)
-      let h: Value = take(params.embedding, idTensor)
+      const embedding = childContext(ctx, 'embedding')
+      const tokens = tap(embedding, take(params.embedding, idTensor), 'tokens')
+      let h: Value = tokens
       const positions = Array.from({ length: T }, (_, i) => i)
       if (params.positions) h = learnedPositions(params.positions, h, positions)
       if (sinusoid) h = add(h, slice(sinusoid, [0, T]))
+      if (ctx?.tap && h !== tokens) tap(embedding, sub(h, tokens), 'positions')
+      h = tap(embedding, h)
       params.blocks.forEach((bp, i) => {
         h = transformerBlock(bp, h, blockOptions, { positions }, childContext(childContext(ctx, 'blocks'), i)).output
       })
       h = tap(childContext(ctx, 'final'), normalise(params.finalNorm, h))
-      return matmul(h, transpose(params.embedding))
+      return tap(childContext(ctx, 'logits'), matmul(h, transpose(params.embedding)))
     },
   }
 }

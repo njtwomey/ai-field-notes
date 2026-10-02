@@ -24,7 +24,7 @@ def cases() -> dict[str, object]:
     }
 
     x = rng.normal(size=(3, 4, 5))
-    axes: list[tuple[str, object]] = [
+    axes: list[tuple[str, int | tuple[int, ...] | None]] = [
         ("all", None),
         ("0", 0),
         ("1", 1),
@@ -33,7 +33,7 @@ def cases() -> dict[str, object]:
     ]
     reductions: dict[str, object] = {"x": x}
     for name, axis in axes:
-        ax = axis if not isinstance(axis, tuple) else tuple(axis)
+        ax = axis
         reductions[name] = {
             "sum": np.sum(x, axis=ax),
             "mean": np.mean(x, axis=ax),

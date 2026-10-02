@@ -11,8 +11,9 @@ def sinkhorn_log(a: np.ndarray, b: np.ndarray, c: np.ndarray, eps: float, iters:
     g = np.zeros(len(b))
     la, lb = np.log(a), np.log(b)
     for _ in range(iters):
-        f = -eps * special.logsumexp((g[None, :] - c) / eps + lb[None, :], axis=1)
-        g = -eps * special.logsumexp((f[:, None] - c) / eps + la[:, None], axis=0)
+        # logsumexp's declared return includes the (value, sign) pair of return_sign=True.
+        f = -eps * np.asarray(special.logsumexp((g[None, :] - c) / eps + lb[None, :], axis=1))
+        g = -eps * np.asarray(special.logsumexp((f[:, None] - c) / eps + la[:, None], axis=0))
     plan = a[:, None] * b[None, :] * np.exp((f[:, None] + g[None, :] - c) / eps)
     return {"f": f, "g": g, "plan": plan, "transport": float((plan * c).sum())}
 

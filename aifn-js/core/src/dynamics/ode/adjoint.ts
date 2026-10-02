@@ -57,6 +57,28 @@ export type OdeAdjointOptions = {
    * backward pass restarts x from each. Default 1: only x(t₁) is kept, and x is integrated backwards throughout.
    */
   checkpoints?: Size
+  /**
+   * Called after every solve with its work and end state: the forward segments, then the backward (augmented) segments
+   * from t₁ to t₀. Comparing a backward segment's reconstructed x with the forward state kept at its end time measures
+   * the reconstruction error that `checkpoints` bounds.
+   */
+  onSolve?: (info: OdeSolveInfo) => void
+}
+
+/** The record of one solve of {@link odeAdjoint} (or of `odeFlow`), as passed to `onSolve`. */
+export type OdeSolveInfo = {
+  /** `'forward'` for x′ = f; `'backward'` for the augmented system [x, a, g] integrated from `from` to `to` < `from`. */
+  phase: 'forward' | 'backward'
+  from: Scalar
+  to: Scalar
+  /** Evaluations of the right-hand side (of f forward; of the augmented system, one vjp of f each, backward). */
+  evaluations: Size
+  /** Accepted steps. */
+  steps: Size
+  /** Rejected step attempts (adaptive methods). */
+  rejected: Size
+  /** The primal x at `to` (the x part of the augmented state backward), flattened. */
+  x: Float64Array
 }
 
 const flat = (v: Value): Float64Array =>
@@ -79,7 +101,15 @@ export function odeAdjoint(
   [t0, t1]: readonly [Scalar, Scalar],
   options: OdeAdjointOptions = {},
 ): (x0: Value, params: Value) => Value {
-  const { method = 'rk4', stepSize = (t1 - t0) / 100, rtol, atol, maxSteps = 100_000, checkpoints = 1 } = options
+  const {
+    method = 'rk4',
+    stepSize = (t1 - t0) / 100,
+    rtol,
+    atol,
+    maxSteps = 100_000,
+    checkpoints = 1,
+    onSolve,
+  } = options
   if (!(Number.isInteger(checkpoints) && checkpoints >= 1))
     throw new Error('odeAdjoint: checkpoints must be a positive integer')
   if (!(t1 !== t0 && Number.isFinite(t0) && Number.isFinite(t1)))
@@ -90,7 +120,7 @@ export function odeAdjoint(
   )
 
   /** x(to) from x(from) with the chosen solver, on values (raw or traced). */
-  const solve = (rhs: Rhs, x: Value, from: Scalar, to: Scalar): Value => {
+  const solve = (rhs: Rhs, x: Value, from: Scalar, to: Scalar, phase: 'forward' | 'backward', n = 0): Value => {
     const h = Math.sign(to - from) * Math.abs(stepSize)
     const alg = solverFor(rhs, to, from, { method, stepSize: h, rtol, atol })
     const s: OdeState = run(alg, { x0: x, t0: from } as unknown as InitialValue, maxSteps)
@@ -100,6 +130,18 @@ export function odeAdjoint(
         `${name}: the solve from t = ${from} stopped at t = ${s.time} (${s.failure ?? 'maxSteps reached'})`,
         'not-converged',
       )
+    if (onSolve) {
+      const end = flat(s.x as Value)
+      onSolve({
+        phase,
+        from,
+        to,
+        evaluations: s.evaluations,
+        steps: s.t,
+        rejected: s.rejected,
+        x: phase === 'forward' ? end : end.slice(0, n),
+      })
+    }
     return s.x as Value
   }
 
@@ -107,7 +149,7 @@ export function odeAdjoint(
   const forward = (x0: Value, params: Value): Value[] => {
     const rhs: Rhs = (t, x) => f(t, x, params)
     const xs: Value[] = [x0]
-    for (let j = 1; j < bounds.length; j++) xs.push(solve(rhs, xs[j - 1], bounds[j - 1], bounds[j]))
+    for (let j = 1; j < bounds.length; j++) xs.push(solve(rhs, xs[j - 1], bounds[j - 1], bounds[j], 'forward'))
     return xs
   }
 
@@ -137,7 +179,7 @@ export function odeAdjoint(
       let a: Value = asVector(ct, n)
       let g: Value = fromData(new Float64Array(p), [p])
       for (let j = bounds.length - 1; j >= 1; j--) {
-        const z = solve(augmented, concat([asVector(states[j], n), a, g]), bounds[j], bounds[j - 1])
+        const z = solve(augmented, concat([asVector(states[j], n), a, g]), bounds[j], bounds[j - 1], 'backward', n)
         a = slice(z, [n, 2 * n])
         g = slice(z, [2 * n, 2 * n + p])
       }

@@ -19,6 +19,7 @@ import {
   useFigureState,
   useProbe,
   variants,
+  int,
 } from '@lab/state'
 import {
   Contours,
@@ -250,7 +251,7 @@ export function SchedulerFigure() {
       'frame',
       { label: 'scheduling' },
     ),
-    steps: choice([2000, 20000, 100000, 400000], 100000, { label: 'steps per path (cost)' }),
+    steps: int(100000, { ge: 1, suggestions: [2000, 20000, 100000, 400000], label: 'steps per path (cost)' }),
     sx: slider(-3.5, 3.5, 2.2, { onChart: true }),
     sy: slider(-3.5, 3.5, 2.4, { onChart: true }),
   })

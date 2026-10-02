@@ -3,8 +3,18 @@ iteration and call counts), roots of systems from scipy.optimize.root (MINPACK h
 from scipy.optimize.fixed_point, and minima from scipy.optimize.minimize_scalar (Brent and bounded). The functions are
 named; the test holds the same expressions under the same names."""
 
+from typing import Protocol, cast
+
 import numpy as np
 from scipy import optimize, special
+
+
+class _ScalarMinimum(Protocol):
+    """The fields read from minimize_scalar's OptimizeResult (declared as object)."""
+
+    x: float
+    fun: float
+
 
 SCALAR = {
     "cubic": (lambda x: x**3 - 2 * x - 5, 2.0, 3.0, 2.0),
@@ -79,14 +89,19 @@ def cases() -> dict[str, object]:
         out[key] = {"systems": list(SYSTEMS)}
 
     out["fixedPoint"] = {
-        name: {"x0": x0, "point": np.atleast_1d(optimize.fixed_point(g, np.asarray(x0), xtol=1e-14, maxiter=5000))}
+        name: {
+            "x0": x0,
+            "point": np.atleast_1d(np.asarray(optimize.fixed_point(g, np.asarray(x0), xtol=1e-14, maxiter=5000))),
+        }
         for name, (g, x0) in FIXED.items()
     }
 
     minima = {}
     for name, (f, bracket, bounds) in MINIMA.items():
-        brent = optimize.minimize_scalar(f, bracket=bracket, method="brent", tol=1e-12)
-        bounded = optimize.minimize_scalar(f, bounds=bounds, method="bounded", options={"xatol": 1e-12})
+        brent = cast(_ScalarMinimum, optimize.minimize_scalar(f, bracket=bracket, method="brent", tol=1e-12))
+        bounded = cast(
+            _ScalarMinimum, optimize.minimize_scalar(f, bounds=bounds, method="bounded", options={"xatol": 1e-12})
+        )
         minima[name] = {"bracket": bracket, "bounds": bounds, "x": brent.x, "value": brent.fun, "boundedX": bounded.x}
     out["minimizeScalar"] = minima
     return out

@@ -328,7 +328,6 @@ export function BocpdShowcase() {
           onChange={setPos}
           count={N + 1}
           format={(p) => (p === 0 ? 'none yet' : `t = ${p}`)}
-          defaultSpeed={20}
         />
       }
       readouts={{

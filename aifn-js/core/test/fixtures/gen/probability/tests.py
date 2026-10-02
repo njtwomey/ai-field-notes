@@ -7,13 +7,37 @@ log-rank test are direct numpy formulas from their papers. Group-sequential boun
 scipy's multivariate normal cdf and brentq (no numerical integration), and the F distribution is checked against
 scipy.stats.f."""
 
+from typing import Any, Protocol, cast
+
 import numpy as np
+from numpy.typing import NDArray
 from scipy import optimize, special, stats
 
 ALTS = ["two-sided", "less", "greater"]
 
 
-def ci(r, level):
+# scipy builds its result objects dynamically, so Pyright cannot see their fields; these declare the ones used.
+class Interval(Protocol):
+    low: Any
+    high: Any
+
+
+class TestResult(Protocol):
+    statistic: Any
+    pvalue: Any
+
+
+class TTestResult(TestResult, Protocol):
+    df: Any
+
+    def confidence_interval(self, confidence_level: float = ...) -> Interval: ...
+
+
+class Chi2Result(TestResult, Protocol):
+    dof: Any
+
+
+def ci(r: TTestResult, level: float) -> list[float]:
     c = r.confidence_interval(level)
     return [float(c.low), float(c.high)]
 
@@ -28,23 +52,62 @@ def samples():
 
 def t_tests():
     x, y, small = samples()
-    out = {"x": x, "y": y, "small": small, "cases": []}
+    out: dict[str, Any] = {"x": x, "y": y, "small": small, "cases": []}
     for alt in ALTS:
         for level in [0.95, 0.9]:
-            r = stats.ttest_1samp(x, 0.3, alternative=alt)
-            out["cases"].append({"test": "oneSample", "args": {"mu": 0.3}, "alternative": alt, "level": level,
-                                 "statistic": r.statistic, "df": r.df, "p": r.pvalue, "ci": ci(r, level)})
-            r = stats.ttest_rel(x[:9], y, alternative=alt)
-            out["cases"].append({"test": "paired", "args": {}, "alternative": alt, "level": level,
-                                 "statistic": r.statistic, "df": r.df, "p": r.pvalue, "ci": ci(r, level)})
+            r = cast(TTestResult, stats.ttest_1samp(x, 0.3, alternative=alt))
+            out["cases"].append(
+                {
+                    "test": "oneSample",
+                    "args": {"mu": 0.3},
+                    "alternative": alt,
+                    "level": level,
+                    "statistic": r.statistic,
+                    "df": r.df,
+                    "p": r.pvalue,
+                    "ci": ci(r, level),
+                }
+            )
+            r = cast(TTestResult, stats.ttest_rel(x[:9], y, alternative=alt))
+            out["cases"].append(
+                {
+                    "test": "paired",
+                    "args": {},
+                    "alternative": alt,
+                    "level": level,
+                    "statistic": r.statistic,
+                    "df": r.df,
+                    "p": r.pvalue,
+                    "ci": ci(r, level),
+                }
+            )
             for equal in [True, False]:
-                r = stats.ttest_ind(x, y, equal_var=equal, alternative=alt)
-                out["cases"].append({"test": "pooled" if equal else "welch", "args": {}, "alternative": alt,
-                                     "level": level, "statistic": r.statistic, "df": r.df, "p": r.pvalue,
-                                     "ci": ci(r, level)})
-    r = stats.ttest_1samp(small, 0.0)
-    out["cases"].append({"test": "oneSampleSmall", "args": {"mu": 0}, "alternative": "two-sided", "level": 0.95,
-                         "statistic": r.statistic, "df": r.df, "p": r.pvalue, "ci": ci(r, 0.95)})
+                r = cast(TTestResult, stats.ttest_ind(x, y, equal_var=equal, alternative=alt))
+                out["cases"].append(
+                    {
+                        "test": "pooled" if equal else "welch",
+                        "args": {},
+                        "alternative": alt,
+                        "level": level,
+                        "statistic": r.statistic,
+                        "df": r.df,
+                        "p": r.pvalue,
+                        "ci": ci(r, level),
+                    }
+                )
+    r = cast(TTestResult, stats.ttest_1samp(small, 0.0))
+    out["cases"].append(
+        {
+            "test": "oneSampleSmall",
+            "args": {"mu": 0},
+            "alternative": "two-sided",
+            "level": 0.95,
+            "statistic": r.statistic,
+            "df": r.df,
+            "p": r.pvalue,
+            "ci": ci(r, 0.95),
+        }
+    )
     # Effect sizes by their definitions: d with the pooled sd, g with the exact gamma correction.
     m, n = len(x), len(y)
     sp = np.sqrt(((m - 1) * x.var(ddof=1) + (n - 1) * y.var(ddof=1)) / (m + n - 2))
@@ -56,8 +119,13 @@ def t_tests():
     out["cohensDOne"] = (x.mean() - 0.3) / x.std(ddof=1)
     # z-test with a known σ = 1.1 against μ₀ = 0.1.
     z = (x.mean() - 0.1) / (1.1 / np.sqrt(m))
-    out["z"] = {"statistic": z, "p": 2 * stats.norm.sf(abs(z)), "pGreater": stats.norm.sf(z),
-                "ci": [x.mean() - stats.norm.isf(0.025) * 1.1 / np.sqrt(m), x.mean() + stats.norm.isf(0.025) * 1.1 / np.sqrt(m)]}
+    half = stats.norm.isf(0.025) * 1.1 / np.sqrt(m)
+    out["z"] = {
+        "statistic": z,
+        "p": 2 * stats.norm.sf(abs(z)),
+        "pGreater": stats.norm.sf(z),
+        "ci": [x.mean() - half, x.mean() + half],
+    }
     return out
 
 
@@ -66,7 +134,7 @@ def binomial():
     for k, n, p in [(7, 20, 0.3), (0, 10, 0.2), (10, 10, 0.5), (3, 50, 0.1), (682, 925, 0.75), (12, 30, 0.4)]:
         for alt in ALTS:
             r = stats.binomtest(k, n, p, alternative=alt)
-            row = {"k": k, "n": n, "p": p, "alternative": alt, "pValue": r.pvalue, "ci": {}}
+            row: dict[str, Any] = {"k": k, "n": n, "p": p, "alternative": alt, "pValue": r.pvalue, "ci": {}}
             for method, key in [("exact", "clopper-pearson"), ("wilson", "wilson"), ("wilsoncc", "wilson-cc")]:
                 for level in [0.95, 0.9]:
                     c = r.proportion_ci(level, method=method)
@@ -82,11 +150,25 @@ def binomial():
     w1 = stats.binomtest(k1, n1).proportion_ci(0.95, method="wilson")
     w2 = stats.binomtest(k2, n2).proportion_ci(0.95, method="wilson")
     d = p1 - p2
-    newcombe = [d - np.sqrt((p1 - w1.low) ** 2 + (w2.high - p2) ** 2), d + np.sqrt((w1.high - p1) ** 2 + (p2 - w2.low) ** 2)]
+    newcombe = [
+        d - np.sqrt((p1 - w1.low) ** 2 + (w2.high - p2) ** 2),
+        d + np.sqrt((w1.high - p1) ** 2 + (p2 - w2.low) ** 2),
+    ]
     wald1 = [7 / 20 - q * np.sqrt(0.35 * 0.65 / 20), 7 / 20 + q * np.sqrt(0.35 * 0.65 / 20)]
-    return {"cases": cases, "twoProportion": {"k1": k1, "n1": n1, "k2": k2, "n2": n2, "z": z,
-            "p": 2 * stats.norm.sf(abs(z)), "wald": [d - q * se, d + q * se], "newcombe": newcombe},
-            "wald": wald1}
+    return {
+        "cases": cases,
+        "twoProportion": {
+            "k1": k1,
+            "n1": n1,
+            "k2": k2,
+            "n2": n2,
+            "z": z,
+            "p": 2 * stats.norm.sf(abs(z)),
+            "wald": [d - q * se, d + q * se],
+            "newcombe": newcombe,
+        },
+        "wald": wald1,
+    }
 
 
 def tables():
@@ -104,18 +186,26 @@ def tables():
     gof = {k: ([v.statistic, v.pvalue] if hasattr(v, "pvalue") else v) for k, v in gof.items()}
     contingency = []
     for t in [[[12, 5], [7, 9]], [[3, 9], [8, 2]], [[10, 20, 30], [6, 9, 17]], [[5, 1, 2], [3, 8, 4], [2, 3, 9]]]:
-        row = {"table": t}
+        row: dict[str, Any] = {"table": t}
         for corr in [True, False]:
             for lam in ["pearson", "log-likelihood"]:
-                r = stats.chi2_contingency(t, correction=corr, lambda_=lam)
+                r = cast(Chi2Result, stats.chi2_contingency(t, correction=corr, lambda_=lam))
                 row[f"{lam}/{corr}"] = [r.statistic, r.pvalue, r.dof]
         row["cramer"] = stats.contingency.association(t, method="cramer")
         contingency.append(row)
     fisher = []
-    for t in [[[8, 2], [1, 5]], [[1, 9], [11, 3]], [[0, 5], [5, 0]], [[3, 1], [1, 3]], [[7, 12], [0, 15]], [[20, 15], [10, 25]]]:
+    fisher_tables = [
+        [[8, 2], [1, 5]],
+        [[1, 9], [11, 3]],
+        [[0, 5], [5, 0]],
+        [[3, 1], [1, 3]],
+        [[7, 12], [0, 15]],
+        [[20, 15], [10, 25]],
+    ]
+    for t in fisher_tables:
         row = {"table": t}
         for alt in ALTS:
-            r = stats.fisher_exact(t, alternative=alt)
+            r = cast(TestResult, stats.fisher_exact(t, alternative=alt))
             o = stats.contingency.odds_ratio(t, kind="conditional")
             c = o.confidence_interval(0.95, alternative=alt)
             row[alt] = {"p": r.pvalue, "or": o.statistic, "ci": [c.low, c.high]}
@@ -136,35 +226,67 @@ def ranks():
     big_x = np.round(np.linspace(0, 1, 11) ** 1.7 * 10, 4) + 0.123
     big_y = np.round(np.sin(np.arange(14)) * 4 + 6, 4)
     mwu = []
-    for name, x, y, method, cc in [("exact", c, d, "exact", True), ("tiesCorrected", tied_x, tied_y, "asymptotic", True),
-                                   ("tiesPlain", tied_x, tied_y, "asymptotic", False), ("bigExact", big_x, big_y, "exact", True),
-                                   ("bigAsymp", big_x, big_y, "asymptotic", True)]:
+    for name, x, y, method, cc in [
+        ("exact", c, d, "exact", True),
+        ("tiesCorrected", tied_x, tied_y, "asymptotic", True),
+        ("tiesPlain", tied_x, tied_y, "asymptotic", False),
+        ("bigExact", big_x, big_y, "exact", True),
+        ("bigAsymp", big_x, big_y, "asymptotic", True),
+    ]:
         for alt in ALTS:
-            r = stats.mannwhitneyu(x, y, alternative=alt, method=method, use_continuity=cc)
-            mwu.append({"name": name, "x": x, "y": y, "method": method, "continuity": cc, "alternative": alt,
-                        "U": r.statistic, "p": r.pvalue})
+            r = cast(TestResult, stats.mannwhitneyu(x, y, alternative=alt, method=method, use_continuity=cc))
+            mwu.append(
+                {
+                    "name": name,
+                    "x": x,
+                    "y": y,
+                    "method": method,
+                    "continuity": cc,
+                    "alternative": alt,
+                    "U": r.statistic,
+                    "p": r.pvalue,
+                }
+            )
     wil = []
     diffs_tied = np.array([1.5, -0.5, 2.0, 2.0, 0.0, -1.0, 3.5, 1.0, -0.5, 4.0, 2.0, 0.0])
-    for name, x, y, method, corr in [("exact", a, b, "exact", False), ("approx", a, b, "approx", False),
-                                     ("approxCorrected", a, b, "approx", True), ("tied", diffs_tied, None, "approx", False),
-                                     ("tiedCorrected", diffs_tied, None, "approx", True)]:
+    for name, x, y, method, corr in [
+        ("exact", a, b, "exact", False),
+        ("approx", a, b, "approx", False),
+        ("approxCorrected", a, b, "approx", True),
+        ("tied", diffs_tied, None, "approx", False),
+        ("tiedCorrected", diffs_tied, None, "approx", True),
+    ]:
         for alt in ALTS:
-            r = stats.wilcoxon(x, y, alternative=alt, method=method, correction=corr, zero_method="wilcox")
-            plus = stats.wilcoxon(x, y, alternative="greater", method=method, correction=corr,
-                                  zero_method="wilcox").statistic
-            wil.append({"name": name, "x": x, "y": y, "method": "exact" if method == "exact" else "asymptotic",
-                        "correction": corr, "alternative": alt, "plus": plus, "p": r.pvalue})
+            r = cast(
+                TestResult, stats.wilcoxon(x, y, alternative=alt, method=method, correction=corr, zero_method="wilcox")
+            )
+            plus = cast(
+                TestResult,
+                stats.wilcoxon(x, y, alternative="greater", method=method, correction=corr, zero_method="wilcox"),
+            ).statistic
+            wil.append(
+                {
+                    "name": name,
+                    "x": x,
+                    "y": y,
+                    "method": "exact" if method == "exact" else "asymptotic",
+                    "correction": corr,
+                    "alternative": alt,
+                    "plus": plus,
+                    "p": r.pvalue,
+                }
+            )
     return {"mannWhitney": mwu, "wilcoxon": wil}
 
 
 def ks():
     x = np.array([0.1, -0.4, 0.3, 1.2, -1.5, 0.8, 2.1, -0.2, 0.05, -0.9])
     y = np.array([0.5, 1.1, 1.9, 0.7, 2.4, 1.3, 0.2, 1.8])
-    out = {"x": x, "y": y, "one": {}, "two": {}}
+    out: dict[str, Any] = {"x": x, "y": y, "one": {}, "two": {}}
     for alt in ["greater", "less"]:
-        r = stats.ks_1samp(x, stats.norm.cdf, alternative=alt, method="exact")
+        r = cast(TestResult, stats.ks_1samp(x, stats.norm.cdf, alternative=alt, method="exact"))
         out["one"][alt] = [r.statistic, r.pvalue]
-        r = stats.ks_2samp(x, y, alternative=alt, method="exact")
+        r = cast(TestResult, stats.ks_2samp(x, y, alternative=alt, method="exact"))
         out["two"][alt] = [r.statistic, r.pvalue]
     out["smirnov"] = [[d, n, special.smirnov(n, d)] for d, n in [(0.1, 10), (0.3, 10), (0.05, 200), (0.4, 5)]]
     return out
@@ -195,8 +317,16 @@ def ljung_box():
         q = n * (n + 2) * np.sum(acf[1 : lags + 1] ** 2 / (n - np.arange(1, lags + 1)))
         bp = n * np.sum(acf[1 : lags + 1] ** 2)
         df = lags - fitted
-        out["cases"].append({"lags": lags, "fitted": fitted, "Q": q, "p": stats.chi2.sf(q, df), "boxPierce": bp,
-                             "pBoxPierce": stats.chi2.sf(bp, df)})
+        out["cases"].append(
+            {
+                "lags": lags,
+                "fitted": fitted,
+                "Q": q,
+                "p": stats.chi2.sf(q, df),
+                "boxPierce": bp,
+                "pBoxPierce": stats.chi2.sf(bp, df),
+            }
+        )
     return out
 
 
@@ -204,8 +334,12 @@ def grubbs():
     x = np.array([2.1, 2.3, 1.9, 2.2, 2.0, 2.4, 2.1, 3.9, 2.2, 1.8])
     n = len(x)
     m, s = x.mean(), x.std(ddof=1)
-    out = {"x": x}
-    for alt, g in [("two-sided", np.max(np.abs(x - m)) / s), ("greater", (x.max() - m) / s), ("less", (m - x.min()) / s)]:
+    out: dict[str, Any] = {"x": x}
+    for alt, g in [
+        ("two-sided", np.max(np.abs(x - m)) / s),
+        ("greater", (x.max() - m) / s),
+        ("less", (m - x.min()) / s),
+    ]:
         t = np.sqrt(n * (n - 2) * g**2 / ((n - 1) ** 2 - n * g**2))
         sides = 2 if alt == "two-sided" else 1
         out[alt] = {"G": g, "p": min(1.0, sides * n * stats.t.sf(t, n - 2))}
@@ -241,9 +375,16 @@ def multiple():
     bh = unsort(np.minimum(1, np.minimum.accumulate((m / ranks * ps)[::-1])[::-1]))
     c = np.sum(1 / ranks)
     by = unsort(np.minimum(1, np.minimum.accumulate((c * m / ranks * ps)[::-1])[::-1]))
-    return {"p": p, "bonferroni": np.minimum(1, m * p), "holm": holm, "hochberg": hoch, "benjaminiHochberg": bh,
-            "benjaminiYekutieli": by, "scipyBH": stats.false_discovery_control(p, method="bh"),
-            "scipyBY": stats.false_discovery_control(p, method="by")}
+    return {
+        "p": p,
+        "bonferroni": np.minimum(1, m * p),
+        "holm": holm,
+        "hochberg": hoch,
+        "benjaminiHochberg": bh,
+        "benjaminiYekutieli": by,
+        "scipyBH": stats.false_discovery_control(p, method="bh"),
+        "scipyBY": stats.false_discovery_control(p, method="by"),
+    }
 
 
 def survival():
@@ -252,7 +393,7 @@ def survival():
     data = stats.CensoredData(uncensored=time[event == 1], right=time[event == 0])
     r = stats.ecdf(data)
     keep = np.isin(r.sf.quantiles, np.unique(time[event == 1]))
-    km = {"time": r.sf.quantiles[keep], "survival": r.sf.probabilities[keep]}
+    km: dict[str, Any] = {"time": r.sf.quantiles[keep], "survival": r.sf.probabilities[keep]}
     for method in ["linear", "log-log"]:
         c = r.sf.confidence_interval(0.95, method=method)
         km[method] = [c.low.probabilities[keep], c.high.probabilities[keep]]
@@ -278,83 +419,119 @@ def survival():
     def k_sample(t, e, g):
         labels = np.unique(g)
         G = len(labels)
-        O = np.zeros(G)
+        observed = np.zeros(G)
         E = np.zeros(G)
         V = np.zeros((G, G))
         for u in np.unique(t[e == 1]):
             at = t >= u
             n = at.sum()
             dd = ((t == u) & (e == 1)).sum()
-            ng = np.array([(at & (g == l)).sum() for l in labels])
-            dg = np.array([((t == u) & (e == 1) & (g == l)).sum() for l in labels])
-            O += dg
+            ng = np.array([(at & (g == lab)).sum() for lab in labels])
+            dg = np.array([((t == u) & (e == 1) & (g == lab)).sum() for lab in labels])
+            observed += dg
             E += dd * ng / n
             if n > 1:
                 V += dd * (n - dd) / (n - 1) * (np.diag(ng / n) - np.outer(ng / n, ng / n))
-        diff = (O - E)[:-1]
+        diff = (observed - E)[:-1]
         stat = diff @ np.linalg.solve(V[:-1, :-1], diff)
         return stat, stats.chi2.sf(stat, G - 1)
 
     s3, p3 = k_sample(t2, e2, g3)
-    return {"time": time, "event": event, "km": km, "na": na,
-            "logrank": {"time": t2, "event": e2, "group": g2, "chi2": lr.statistic**2, "p": lr.pvalue,
-                        "group3": g3, "chi2_3": s3, "p3": p3}}
+    return {
+        "time": time,
+        "event": event,
+        "km": km,
+        "na": na,
+        "logrank": {
+            "time": t2,
+            "event": e2,
+            "group": g2,
+            "chi2": lr.statistic**2,
+            "p": lr.pvalue,
+            "group3": g3,
+            "chi2_3": s3,
+            "p3": p3,
+        },
+    }
 
 
 def boundaries():
     """Group-sequential boundaries solved with the multivariate normal cdf: corr(Z_i, Z_j) = √(t_i/t_j)."""
 
-    def mvn_inside(t, c, sides):
+    def mvn_inside(t: NDArray[np.float64], c: list[float], sides: int) -> float:
         k = len(c)
         cov = np.array([[np.sqrt(min(t[i], t[j]) / max(t[i], t[j])) for j in range(k)] for i in range(k)])
         upper = np.array(c)
         lower = -upper if sides == 2 else np.full(k, -np.inf)
         if k == 1:
-            return stats.norm.cdf(upper[0]) - stats.norm.cdf(lower[0])
+            return float(stats.norm.cdf(upper[0]) - stats.norm.cdf(lower[0]))
         # Genz's quasi-Monte Carlo integration draws random shifts; a fixed rng makes the fixture reproducible.
-        return stats.multivariate_normal.cdf(upper, mean=np.zeros(k), cov=cov, lower_limit=lower, abseps=1e-10,
-                                             releps=1e-10, maxpts=4_000_000, rng=0)
+        # scipy's signature infers cov's type from its default (1); a covariance matrix is what it accepts.
+        cov_arg = cast(Any, cov)
+        p = stats.multivariate_normal.cdf(
+            upper, mean=np.zeros(k), cov=cov_arg, lower_limit=lower, abseps=1e-10, releps=1e-10, maxpts=4_000_000, rng=0
+        )
+        return float(p)
 
-    def spend(fam, alpha, t):
+    def excess(ck: float, t: NDArray[np.float64], c: list[float], sides: int, target: float) -> float:
+        # P(stopped by look k) = 1 − P(inside at every look ≤ k), less the α to spend by look k.
+        return (1 - mvn_inside(t, [*c, ck], sides)) - target
+
+    def spend(fam: str, alpha: float, t: float) -> float:
         if fam == "obrien-fleming":
-            return 2 - 2 * stats.norm.cdf(stats.norm.ppf(1 - alpha / 2) / np.sqrt(t))
+            return float(2 - 2 * stats.norm.cdf(stats.norm.ppf(1 - alpha / 2) / np.sqrt(t)))
         if fam == "pocock":
-            return alpha * np.log(1 + (np.e - 1) * t)
+            return float(alpha * np.log(1 + (np.e - 1) * t))
         return alpha * t**2
 
     out = []
-    for fam, info, sides, alpha in [("obrien-fleming", [1, 2, 3, 4], 2, 0.05), ("pocock", [1, 2, 3], 2, 0.05),
-                                    ("power", [0.3, 0.7, 1.0], 1, 0.025), ("obrien-fleming", [0.25, 0.6, 1.0], 1, 0.025)]:
+    designs: list[tuple[str, list[float], int, float]] = [
+        ("obrien-fleming", [1, 2, 3, 4], 2, 0.05),
+        ("pocock", [1, 2, 3], 2, 0.05),
+        ("power", [0.3, 0.7, 1.0], 1, 0.025),
+        ("obrien-fleming", [0.25, 0.6, 1.0], 1, 0.025),
+    ]
+    for fam, info, sides, alpha in designs:
         t = np.array(info, dtype=float) / info[-1]
-        c = []
-        inside_prev = 1.0
+        c: list[float] = []
         for k in range(len(t)):
             # Two-sided designs spend α/2 on each side (Lan and DeMets' one-sided function at α/2, doubled).
-            target = 2 * spend(fam, alpha / 2, t[k]) if sides == 2 else spend(fam, alpha, t[k])
-            # P(stopped by look k) = 1 − P(inside at every look ≤ k).
-            f = lambda ck: (1 - mvn_inside(t[: k + 1], c + [ck], sides)) - target
-            ck = optimize.brentq(f, 0.5, 12, xtol=1e-10)
+            target = 2 * spend(fam, alpha / 2, float(t[k])) if sides == 2 else spend(fam, alpha, float(t[k]))
+            ck = cast(float, optimize.brentq(excess, 0.5, 12, args=(t[: k + 1], c, sides, target), xtol=1e-10))
             c.append(ck)
         out.append({"family": fam, "information": info, "sides": sides, "alpha": alpha, "z": c})
     # Classical constant boundaries (Jennison and Turnbull, 2000, Tables 2.1 and 2.3), K = 5, two-sided α = 0.05.
     # Lan–DeMets O'Brien–Fleming spending, K = 5 equally spaced, two-sided α = 0.05 (as R's ldbounds and gsDesign).
-    return {"spending": out, "pocock5": 2.413, "obrienFleming5": 2.040,
-            "ldObf5": [4.877, 3.357, 2.680, 2.290, 2.031]}
+    return {"spending": out, "pocock5": 2.413, "obrienFleming5": 2.040, "ldObf5": [4.877, 3.357, 2.680, 2.290, 2.031]}
 
 
 def f_distribution():
     rows = []
     for d1, d2 in [(5, 20), (1, 3), (3.5, 7.2), (12, 40)]:
-        f = stats.f(d1, d2)
+        # stats.f is an rv_continuous; Pyright infers the frozen type from a generic base without logpdf.
+        f = cast(Any, stats.f(d1, d2))
         x = np.array([1e-4, 0.1, 0.5, 1, 2, 5, 20, 100])
         p = np.array([1e-10, 0.01, 0.3, 0.5, 0.9, 0.999])
-        rows.append({"d1": d1, "d2": d2, "x": x, "logpdf": f.logpdf(x), "cdf": f.cdf(x), "sf": f.sf(x),
-                     "p": p, "ppf": f.ppf(p), "isf": f.isf(p), "mean": f.mean(), "var": f.var(),
-                     "entropy": f.entropy()})
+        rows.append(
+            {
+                "d1": d1,
+                "d2": d2,
+                "x": x,
+                "logpdf": f.logpdf(x),
+                "cdf": f.cdf(x),
+                "sf": f.sf(x),
+                "p": p,
+                "ppf": f.ppf(p),
+                "isf": f.isf(p),
+                "mean": f.mean(),
+                "var": f.var(),
+                "entropy": f.entropy(),
+            }
+        )
     return rows
 
 
-def cases() -> dict:
+def cases() -> dict[str, Any]:
     return {
         "t": t_tests(),
         "binomial": binomial(),

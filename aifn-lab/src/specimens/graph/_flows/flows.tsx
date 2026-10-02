@@ -54,7 +54,7 @@ export function MaxFlowSpecimen() {
       hoverReadout={false}
       controls={
         <div className="col-span-full">
-          <Player label="augmentation" value={step} onChange={setStep} count={t.steps.length} defaultSpeed={1} />
+          <Player label="augmentation" value={step} onChange={setStep} count={t.steps.length} />
         </div>
       }
       readouts={

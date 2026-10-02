@@ -152,7 +152,6 @@ export function KalmanTrackingSpecimen() {
               value={position}
               onChange={setPosition}
               count={3 * T}
-              duration={8}
               label="filter step, then smoother pass"
               format={(p) => {
                 const s = kalmanPhase(p, T)
@@ -282,7 +281,6 @@ export function ArmaSpecimen() {
               value={t}
               onChange={setT}
               count={n + 1}
-              duration={4}
               label="t"
               format={(k) => `t = ${k}`}
               startReason="The ACF and PACF are read from the whole sample, so the figure opens with all 300 values."
@@ -406,7 +404,6 @@ export function HoltWintersSpecimen() {
               value={k}
               onChange={setK}
               count={ORIGINS.length}
-              duration={4}
               label="origin"
               format={(p) => `t = ${ORIGINS[p]}`}
             />
@@ -522,7 +519,6 @@ export function GarchSpecimen() {
               value={t}
               onChange={setT}
               count={n + 1}
-              duration={5}
               label="t"
               format={(k) => `t = ${k}`}
               startReason="Volatility clustering and the ACF of r² need the whole series, so the figure opens with all 1000 returns."

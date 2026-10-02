@@ -180,7 +180,7 @@ export function MazeAgentSpecimen() {
       defaultSize="XL"
       controls={
         <ControlRow label="3 · step">
-          <Player label="step" value={at} onChange={setStep} count={steps} defaultSpeed={10} />
+          <Player label="step" value={at} onChange={setStep} count={steps} />
         </ControlRow>
       }
       readouts={

@@ -10,9 +10,15 @@ from sklearn.isotonic import IsotonicRegression
 def cases() -> dict:
     rng = np.random.default_rng(7)
     out: dict = {"isotonicRegression": [], "poolAdjacentViolatorsSteps": []}
-    for n, increasing, weighted, ties in [(12, True, False, False), (30, True, True, False), (25, False, True, False), (40, True, True, True)]:
+    for n, increasing, weighted, ties in [
+        (12, True, False, False),
+        (30, True, True, False),
+        (25, False, True, False),
+        (40, True, True, True),
+    ]:
         x = np.sort(rng.uniform(0, 10, n)) if not ties else np.round(rng.uniform(0, 10, n))
-        y = np.sin(x / 3) * (1 if increasing else -1) + 0.4 * rng.standard_normal(n) + x / 10 * (1 if increasing else -1)
+        sign = 1 if increasing else -1
+        y = np.sin(x / 3) * sign + 0.4 * rng.standard_normal(n) + x / 10 * sign
         w = rng.uniform(0.2, 2.0, n) if weighted else np.ones(n)
         fit = IsotonicRegression(increasing=increasing).fit(x, y, sample_weight=w).predict(x)
         out["isotonicRegression"].append({"x": x, "y": y, "weights": w, "increasing": increasing, "fit": fit})

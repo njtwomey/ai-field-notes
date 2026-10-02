@@ -16,10 +16,13 @@ const raw = (v: Value): Tensor | number => unwrap(v)
 /** The output and every tapped activation of a forward pass, keyed by layer path (e.g. `0`, `2`, `1.weights`). */
 export type Activations = { output: Tensor | number; activations: Record<string, Tensor | number> }
 
-/** Run a layer and record every activation it taps. */
-export function activations<P extends Params>(layer: Layer<P>, params: P, x: Value, ctx: Context = {}): Activations {
+/**
+ * Run any forward pass written on a `Context` (a layer, or a model that is not one, such as a language model) and
+ * record every activation it taps, in the order tapped. `ctx`'s own tap, if any, still sees each value.
+ */
+export function recordActivations(forward: (ctx: Context) => Value, ctx: Context = {}): Activations {
   const seen: Record<string, Tensor | number> = {}
-  const output = layer.apply(params, x, {
+  const output = forward({
     ...ctx,
     tap: (path, v) => {
       seen[path] = raw(v)
@@ -27,6 +30,11 @@ export function activations<P extends Params>(layer: Layer<P>, params: P, x: Val
     },
   })
   return { output: raw(output), activations: seen }
+}
+
+/** Run a layer and record every activation it taps. */
+export function activations<P extends Params>(layer: Layer<P>, params: P, x: Value, ctx: Context = {}): Activations {
+  return recordActivations((c) => layer.apply(params, x, c), ctx)
 }
 
 /** The result of `inspect`. */

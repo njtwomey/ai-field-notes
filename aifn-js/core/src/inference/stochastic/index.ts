@@ -1,7 +1,7 @@
 /**
  * `aifn/inference/stochastic`: Monte Carlo inference: Metropolis–Hastings (random-walk, independence), Gibbs over
  * conditionals or blocks (block Gibbs) with Rao–Blackwellised estimates, slice sampling, Hamiltonian Monte Carlo and
- * NUTS, MALA and SGLD, sequential Monte Carlo and the particle filter, multi-chain runs and diagnostics (R̂, ESS, MCSE;
+ * NUTS, MALA and SGLD, batched short-run Langevin with persistent chains in a replay buffer, sequential Monte Carlo and the particle filter, multi-chain runs and diagnostics (R̂, ESS, MCSE;
  * the autocorrelation function is `aifn/probability/stats`'s), and Gibbs sampling on discrete factor graphs
  * (`factorGraphGibbs`) and on model descriptions (`modelGibbs`, by enumeration and conjugate updates).
  */
@@ -53,9 +53,18 @@ export {
   type NutsState,
 } from './hamiltonian'
 export {
+  langevinParticles,
   mala,
+  persistentLangevin,
+  chainBuffer,
   sgld,
   unadjustedLangevin,
+  type BatchScore,
+  type ParticleLangevinOptions,
+  type ParticleLangevinState,
+  type PersistentDraw,
+  type PersistentLangevinOptions,
+  type ChainBuffer,
   type LangevinOptions,
   type LangevinState,
   type MinibatchModel,

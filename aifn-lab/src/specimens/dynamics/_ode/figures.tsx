@@ -138,7 +138,6 @@ export function StiffStepsSpecimen() {
           value={frame}
           onChange={setFrame}
           count={STIFF_FRAMES + 1}
-          duration={4}
           label="3 · time t"
           format={(i) => `t = ${frameTime(i, STIFF_FRAMES, STIFF_END).toFixed(3)}`}
         />
@@ -283,7 +282,6 @@ export function EnergyDriftSpecimen() {
           value={frame}
           onChange={setFrame}
           count={ENERGY_FRAMES + 1}
-          duration={5}
           label="3 · time t"
           format={(i) => `t = ${Math.round(frameTime(i, ENERGY_FRAMES, ENERGY_END))}`}
         />

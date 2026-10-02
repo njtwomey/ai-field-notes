@@ -10,7 +10,7 @@ import type { Size } from 'aifn/foundation/contracts'
 import { mul, type Value } from 'aifn/foundation/tensor'
 import { activationFn, type Activation } from 'aifn/nn/functional'
 import { xavierUniform } from 'aifn/nn/init'
-import { Linear, linear, tap, type Layer, type LinearParams } from 'aifn/nn/layers'
+import { Linear, linear, tap, type Context, type Layer, type LinearParams } from 'aifn/nn/layers'
 
 /** The kinds of feed-forward layer: a plain two-layer network or a gated one. */
 export type FeedForwardKind = 'mlp' | 'swiglu' | 'geglu' | 'reglu'
@@ -30,14 +30,21 @@ const gateActivation = { swiglu: 'silu', geglu: 'gelu', reglu: 'relu' } as const
 
 /**
  * The feed-forward layer of x [..., d]: down(act(up(x))) for `mlp`, down(act(gate(x)) ⊙ up(x)) for the gated kinds.
+ * The hidden activations [..., hidden] (what `down` reads) are tapped at `<path>.hidden`.
  */
-export function feedForward(params: FeedForwardParams, x: Value, options: FeedForwardOptions = {}): Value {
+export function feedForward(
+  params: FeedForwardParams,
+  x: Value,
+  options: FeedForwardOptions = {},
+  ctx?: Context,
+): Value {
   const { kind = 'mlp', activation = 'gelu' } = options
   const up = linear(x, params.up.weight, params.up.bias)
-  if (kind === 'mlp') return linear(activationFn(activation)(up), params.down.weight, params.down.bias)
+  const hidden = (h: Value) => tap(ctx, h, 'hidden')
+  if (kind === 'mlp') return linear(hidden(activationFn(activation)(up)), params.down.weight, params.down.bias)
   if (!params.gate) throw new Error(`feedForward: a ${kind} layer needs gate parameters`)
   const gate = activationFn(gateActivation[kind])(linear(x, params.gate.weight, params.gate.bias))
-  return linear(mul(gate, up), params.down.weight, params.down.bias)
+  return linear(hidden(mul(gate, up)), params.down.weight, params.down.bias)
 }
 
 /** The usual hidden width: 4·d for a plain network, ⌈(8/3)·d⌉ for a gated one (the same parameter count). */
@@ -68,6 +75,6 @@ export function FeedForward(dModel: Size, options: FeedForwardLayerOptions = {})
       ...(kind === 'mlp' ? {} : { gate: up.init(child(s, 'gate')) }),
       down: down.init(child(s, 'down')),
     }),
-    apply: (p, x, ctx) => tap(ctx, feedForward(p, x, options)),
+    apply: (p, x, ctx) => tap(ctx, feedForward(p, x, options, ctx)),
   }
 }

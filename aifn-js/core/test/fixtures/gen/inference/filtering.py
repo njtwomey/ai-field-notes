@@ -87,7 +87,7 @@ def kalman_reference(
     mean_y = (big_c @ mean_z.reshape(-1)).reshape(t_len, m)
     cov_y = big_c @ cov_z @ big_c.T + np.kron(np.eye(t_len), r)
     cov_zy = cov_z @ big_c.T
-    loglik = multivariate_normal(mean_y.reshape(-1), cov_y).logpdf(y.reshape(-1))
+    loglik = multivariate_normal(mean_y.reshape(-1), cov_y).logpdf(y.reshape(-1))  # pyright: ignore[reportArgumentType]  # scipy is unstubbed: cov inferred as int from its default
 
     def condition(k: int):
         idx = np.arange(k * m)
@@ -156,7 +156,7 @@ def cases() -> dict[str, object]:
     spec = {"ar": [0.5], "ma": [0.4], "sigma": 1.3}
     gam = arma_acov(spec["ar"], spec["ma"], spec["sigma"], 59)
     cov = sla.toeplitz(gam)
-    exact = multivariate_normal(np.zeros(60), cov).logpdf(arma)
+    exact = multivariate_normal(np.zeros(60), cov).logpdf(arma)  # pyright: ignore[reportArgumentType]  # scipy is unstubbed: cov inferred as int from its default
 
     # Kalman: constant velocity in 1-D with position observed, 12 steps; R with a deterministic part in 2-D below.
     a = np.array([[1.0, 1.0], [0.0, 1.0]])

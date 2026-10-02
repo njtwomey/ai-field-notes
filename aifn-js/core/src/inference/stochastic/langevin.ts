@@ -7,8 +7,8 @@
  * grows with h; MALA treats the step as a proposal and corrects it with a Metropolis–Hastings test, so π is exact.
  */
 
-import { child, integers, uniform } from 'aifn/foundation/random'
-import { fromData, type Tensor, type Vector } from 'aifn/foundation/tensor'
+import { child, integers, uniform, type Stream } from 'aifn/foundation/random'
+import { fromData, toFlat, type Tensor, type Vector } from 'aifn/foundation/tensor'
 import type { Algorithm } from 'aifn/foundation/trace'
 import { badLogDensity } from './metropolis'
 import type { AcceptRejectState, ChainStart, ChainState, LogDensity, VectorLike } from './types'
@@ -224,5 +224,159 @@ export function sgld(model: MinibatchModel, options: SgldOptions = {}): Algorith
         diverged: !allFinite(y),
       }
     },
+  }
+}
+
+// ---------------------------------------------------------------------------------------------------------------------
+// Langevin on a batch of particles, and persistent chains with a replay buffer (energy-based models).
+
+/** A batch score: ∇ₓ log π at every row of x ([n, d] → [n, d]), e.g. −∇ₓ E(x) for an energy E. */
+export type BatchScore = (x: Tensor) => Tensor
+
+/** Options of `langevinParticles` and `persistentLangevin`. */
+export type ParticleLangevinOptions = {
+  /** The gradient step α of x′ = x + α∇ log π(x) + σξ. Default 0.01. */
+  stepSize?: number
+  /**
+   * The noise standard deviation σ. Default √(2α), the Euler step of the Langevin diffusion, whose law tends to π as
+   * α → 0. Smaller noise (JEM takes α = 1, σ = 0.01; Grathwohl et al., 2019, §4) samples a sharpened law: short-run
+   * chains that serve as negatives in training, not as exact draws.
+   */
+  noise?: number
+  /** Clip every coordinate to [−bound, bound] after each step (the box the data live in). Default: no clipping. */
+  bound?: number
+}
+
+/** The state of `langevinParticles`. */
+export type ParticleLangevinState = {
+  t: number
+  /** The particles, [n, d]. */
+  x: Tensor
+  /** The score at the particles before the last step, [n, d]. */
+  grad: Tensor
+  /** The step size α. */
+  stepSize: number
+  diverged: boolean
+}
+
+function langevinMove(score: BatchScore, x: Tensor, s: Stream, alpha: number, sigma: number, bound: number) {
+  const [n, d] = x.shape
+  const g = toFlat(score(x))
+  const xs = toFlat(x)
+  const xi = sigma > 0 ? standardNormals(s, n * d) : new Float64Array(n * d)
+  const y = new Float64Array(n * d)
+  for (let k = 0; k < n * d; k++) {
+    const v = xs[k] + alpha * g[k] + sigma * xi[k]
+    y[k] = v > bound ? bound : v < -bound ? -bound : v
+  }
+  return { x: fromData(y, [n, d]), grad: fromData(Float64Array.from(g), [n, d]) }
+}
+
+/**
+ * Unadjusted Langevin steps on a batch of particles at once: x′ = x + α∇ log π(x) + σξ, ξ ~ N(0, I) per row, with a
+ * batch score (one network evaluation moves every particle). With σ = √(2α) this is `unadjustedLangevin` run on n
+ * independent chains; with smaller σ it is the short-run sampler of energy-based-model training (Du & Mordatch, 2019;
+ * Nijkamp et al., 2019). `init` takes the particles `{ x }` ([n, d]).
+ */
+export function langevinParticles(
+  score: BatchScore,
+  options: ParticleLangevinOptions = {},
+): Algorithm<{ x: Tensor }, ParticleLangevinState> {
+  const alpha = options.stepSize ?? 0.01
+  const sigma = options.noise ?? Math.sqrt(2 * alpha)
+  const bound = options.bound ?? Infinity
+  return {
+    name: 'langevin-particles',
+    init: ({ x }) => {
+      if (x.shape.length !== 2) throw new Error('langevinParticles: the particles must be an [n, d] tensor')
+      return {
+        t: 0,
+        x,
+        grad: fromData(new Float64Array(x.shape[0] * x.shape[1]), x.shape),
+        stepSize: alpha,
+        diverged: false,
+      }
+    },
+    step: (s, ctx) => {
+      const next = langevinMove(score, s.x, child(ctx.stream, 'noise'), alpha, sigma, bound)
+      return { ...s, t: s.t + 1, x: next.x, grad: next.grad, diverged: !allFinite(toFlat(next.x)) }
+    },
+  }
+}
+
+/** A replay buffer of persistent chains: the last positions of past samples, [m, d]. Plain data. */
+export type ChainBuffer = {
+  /** The stored particles, [m, d]. */
+  readonly samples: Tensor
+}
+
+/** Options of `persistentLangevin`. */
+export type PersistentLangevinOptions = ParticleLangevinOptions & {
+  /** Langevin steps per draw (K). Default 20 (JEM). */
+  steps?: number
+  /** The probability ρ that a drawn chain restarts from `fresh` instead of its stored position. Default 0.05 (JEM). */
+  reinitialise?: number
+  /** Fresh starting points: n rows [n, d] from the stream (JEM: uniform on the data's box). */
+  fresh: (s: Stream, n: number) => Tensor
+}
+
+/** What `persistentLangevin` returns. */
+export type PersistentDraw = {
+  /** The n samples after K steps, [n, d]. */
+  x: Tensor
+  /** Where the chains started (stored or fresh), [n, d]. */
+  start: Tensor
+  /** The buffer with the drawn slots overwritten by the new samples. */
+  buffer: ChainBuffer
+  /** The buffer slots drawn (int32 [n]). */
+  slots: Tensor
+  /** 1 where a chain was restarted from `fresh` (uint8 [n]). */
+  restarted: Uint8Array
+}
+
+/** A replay buffer of m fresh points. */
+export function chainBuffer(s: Stream, m: number, fresh: (s: Stream, n: number) => Tensor): ChainBuffer {
+  return { samples: fresh(s, m) }
+}
+
+/**
+ * Draw n samples by persistent short-run Langevin with a replay buffer (Du & Mordatch, 2019; Grathwohl et al., 2019,
+ * Algorithm 1): pick n slots of the buffer uniformly, restart each with probability ρ from `fresh`, run K steps of
+ * `langevinParticles` from there, and write the results back to their slots. Chains thus persist across training
+ * steps (persistent contrastive divergence; Tieleman, 2008) while ρ keeps new mass entering. Pure: the stream decides
+ * every draw (`slots`, `restart`, `fresh`, and step k's noise from `child(s, 'step', k)`).
+ */
+export function persistentLangevin(
+  score: BatchScore,
+  buffer: ChainBuffer,
+  s: Stream,
+  n: number,
+  options: PersistentLangevinOptions,
+): PersistentDraw {
+  const { steps = 20, reinitialise = 0.05, fresh } = options
+  const alpha = options.stepSize ?? 0.01
+  const sigma = options.noise ?? Math.sqrt(2 * alpha)
+  const bound = options.bound ?? Infinity
+  const [m, d] = buffer.samples.shape
+  const stored = toFlat(buffer.samples)
+  const pick = child(s, 'slots')
+  const coin = child(s, 'restart')
+  const slots = Int32Array.from({ length: n }, () => integers(pick, m))
+  const restarted = Uint8Array.from({ length: n }, () => (uniform(coin) < reinitialise ? 1 : 0))
+  const replacements = toFlat(fresh(child(s, 'fresh'), n))
+  const start = new Float64Array(n * d)
+  for (let i = 0; i < n; i++)
+    for (let j = 0; j < d; j++) start[i * d + j] = restarted[i] ? replacements[i * d + j] : stored[slots[i] * d + j]
+  let x = fromData(start, [n, d])
+  for (let k = 0; k < steps; k++) x = langevinMove(score, x, child(s, 'step', k), alpha, sigma, bound).x
+  const next = Float64Array.from(stored)
+  const xs = toFlat(x)
+  for (let i = 0; i < n; i++) for (let j = 0; j < d; j++) next[slots[i] * d + j] = xs[i * d + j]
+  return {
+    x,
+    start: fromData(start, [n, d]),
+    buffer: { samples: fromData(next, [m, d]) },
+    slots: fromData(slots, [n]),
+    restarted,
   }
 }

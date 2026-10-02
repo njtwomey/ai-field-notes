@@ -139,6 +139,18 @@ algorithm(
 )
 algorithm(
   {
+    key: 'langevinParticles',
+    name: 'Langevin on a batch of particles',
+    problem: 'log-density',
+    state: { iterate: 'x', grad: 'grad', stepSize: 'stepSize', flags: ['diverged'] },
+    random: true,
+    notes: ['langevin-dynamics', 'energy-based-models'],
+    cite: ['du2019', 'nijkamp2019'],
+  },
+  langevin.langevinParticles,
+)
+algorithm(
+  {
     key: 'particleFilter',
     name: 'Particle filter',
     problem: 'sequence',
@@ -276,12 +288,34 @@ fn(
   hamiltonian.leapfrog,
 )
 fn(
+  {
+    key: 'persistentLangevin',
+    name: 'Persistent Langevin with a replay buffer',
+    role: 'simulation',
+    random: true,
+    notes: ['energy-based-models', 'joint-energy-models'],
+    cite: ['du2019', 'grathwohl2019', 'tieleman2008'],
+  },
+  langevin.persistentLangevin,
+)
+fn(
+  {
+    key: 'chainBuffer',
+    name: 'Replay buffer of persistent chains',
+    role: 'construction',
+    random: true,
+    notes: ['energy-based-models'],
+    cite: ['du2019'],
+  },
+  langevin.chainBuffer,
+)
+fn(
   { key: 'resample', name: 'Resample particles', role: 'simulation', random: true, notes: ['particle-filter'] },
   smc.resample,
 )
 
 /** The functions of the module, keyed by name. */
 export const stochasticFunctions: Readonly<Record<string, Entry<(...args: never[]) => unknown, FunctionInfo>>> =
-  entries<FunctionInfo>('function', diagnostics, chains, factorGibbs, gibbs, hamiltonian, smc) as Readonly<
+  entries<FunctionInfo>('function', diagnostics, chains, factorGibbs, gibbs, hamiltonian, langevin, smc) as Readonly<
     Record<string, Entry<(...args: never[]) => unknown, FunctionInfo>>
   >

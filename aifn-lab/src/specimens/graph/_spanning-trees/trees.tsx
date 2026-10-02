@@ -93,7 +93,7 @@ export function SpanningTreeSpecimen() {
       hoverReadout={false}
       controls={
         <div className="col-span-full">
-          <Player label="step" value={step} onChange={setStep} count={count} defaultSpeed={2} />
+          <Player label="step" value={step} onChange={setStep} count={count} />
         </div>
       }
       readouts={

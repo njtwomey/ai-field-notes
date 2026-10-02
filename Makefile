@@ -1,5 +1,8 @@
 # Common tasks. `make help` lists them.
 .DEFAULT_GOAL := help
+# Python sources that ruff lints and formats; Pyright reads its include list from pyproject.toml.
+PY_SRC := python aifn-js/core/test/fixtures aifn-js/applications/test/fixtures
+
 .PHONY: help install dev contracts assets content doctor links wrap lint aifn-layers aifn-names catalog catalog-check format typecheck test bench fixtures lab-check lab-shots lab check build preview clean
 
 help: ## List targets
@@ -35,8 +38,8 @@ lint: aifn-layers aifn-names ## Lint TypeScript, Python and note prose
 	npx oxlint
 	git ls-files -z -co --exclude-standard | xargs -0 sh -c 'for f; do [ -f "$$f" ] && printf "%s\0" "$$f"; done' _ | xargs -0 npx prettier --check --ignore-unknown
 	node scripts/wrap-mdx.ts --check
-	uv run ruff check python
-	uv run ruff format --check python
+	uv run ruff check $(PY_SRC)
+	uv run ruff format --check $(PY_SRC)
 
 aifn-names: ## Check that no two aifn modules export different values under one name (allowlist in the test)
 	npx vitest run --config aifn-js/applications/vitest.config.ts test/names.test.ts
@@ -53,8 +56,8 @@ aifn-layers: ## Check aifn-js imports: core tiers, the application area DAG, cor
 format: ## Format TypeScript, Python and note prose
 	git ls-files -z -co --exclude-standard | xargs -0 sh -c 'for f; do [ -f "$$f" ] && printf "%s\0" "$$f"; done' _ | xargs -0 npx prettier --write --ignore-unknown --log-level warn
 	node scripts/wrap-mdx.ts
-	uv run ruff check --fix python
-	uv run ruff format python
+	uv run ruff check --fix $(PY_SRC)
+	uv run ruff format $(PY_SRC)
 
 typecheck: ## Type-check TypeScript and Python
 	npx tsc -b

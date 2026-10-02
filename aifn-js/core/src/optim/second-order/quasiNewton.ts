@@ -1,7 +1,8 @@
 /**
  * Quasi-Newton methods: BFGS, which keeps a dense inverse-Hessian approximation, and L-BFGS, which keeps only the
  * last m curvature pairs (s, y) and applies the approximation by the two-loop recursion. Both take steps from a strong
- * Wolfe line search, which guarantees yᵀs > 0 and so keeps the approximation positive definite.
+ * Wolfe line search, which guarantees yᵀs > 0 and so keeps the approximation positive definite. OWL-QN extends
+ * L-BFGS, with the same pairs and two-loop recursion, to f(x) + C‖x‖₁, whose L1 term is not differentiable at 0.
  */
 
 import type { Matrix, Vector } from 'aifn/foundation/tensor'
@@ -205,38 +206,238 @@ export function lbfgs(f: ObjectiveFn, options: LbfgsOptions = {}): Algorithm<Sta
         diverged: divergedAt(value, x, divergeAbove),
       }
     },
-    step: (st) => {
-      const x = data(st.x)
-      const g = data(st.grad)
-      const pairs = st.pairs.map((q) => ({ s: data(q.s), y: data(q.y), rho: q.rho }))
-      // Without curvature information, a unit-length steepest-descent step (as scipy's L-BFGS-B starts).
-      const gamma = pairs.length ? st.gamma : 1 / Math.max(norm(g), 1e-300)
-      const p = scale(-1, twoLoop(g, pairs, gamma))
-      const { found, s, y, sy } = searchAlong(f, x, st.value, g, p, options.lineSearchOptions)
-      const skipped = !(sy > 1e-10 * norm(s) * norm(y))
-      let kept = st.pairs
-      let nextGamma = st.gamma
-      if (!skipped) {
-        kept = [...st.pairs, { s: vec(s), y: vec(y), rho: 1 / sy }].slice(-memory)
-        nextGamma = sy / dot(y, y)
+    step: (st) => lbfgsStep(f, st, memory, tolerance, divergeAbove, options.lineSearchOptions),
+    done: (s) => s.converged || s.diverged || s.stalled,
+  }
+}
+
+/** The L-BFGS direction −H·v from the stored pairs; with no pairs, −v scaled to unit length. */
+function lbfgsDirection(v: F64, st: { pairs: CurvaturePair[]; gamma: number }): F64 {
+  const pairs = st.pairs.map((q) => ({ s: data(q.s), y: data(q.y), rho: q.rho }))
+  // Without curvature information, a unit-length steepest-descent step (as scipy's L-BFGS-B starts).
+  const gamma = pairs.length ? st.gamma : 1 / Math.max(norm(v), 1e-300)
+  return scale(-1, twoLoop(v, pairs, gamma))
+}
+
+/** The history after a step: the pair (s, y) is stored, the oldest dropped beyond `memory`, unless yᵀs ≤ 10⁻¹⁰‖s‖‖y‖. */
+function updateHistory(st: { pairs: CurvaturePair[]; gamma: number }, s: F64, y: F64, memory: number) {
+  const sy = dot(s, y)
+  const skipped = !(sy > 1e-10 * norm(s) * norm(y))
+  if (skipped) return { pairs: st.pairs, gamma: st.gamma, skipped }
+  return { pairs: [...st.pairs, { s: vec(s), y: vec(y), rho: 1 / sy }].slice(-memory), gamma: sy / dot(y, y), skipped }
+}
+
+/** One L-BFGS step: the two-loop direction, a strong Wolfe step, and the history update. */
+function lbfgsStep<S extends LbfgsState>(
+  f: ObjectiveFn,
+  st: S,
+  memory: number,
+  tolerance: number,
+  divergeAbove: number,
+  lineSearchOptions: StrongWolfeOptions | undefined,
+): S {
+  const x = data(st.x)
+  const g = data(st.grad)
+  const p = lbfgsDirection(g, st)
+  const { found, s, y } = searchAlong(f, x, st.value, g, p, lineSearchOptions)
+  const history = updateHistory(st, s, y, memory)
+  const gradNorm = norm(found.grad)
+  return {
+    ...st,
+    t: st.t + 1,
+    x: vec(found.x),
+    value: found.value,
+    grad: vec(found.grad),
+    gradNorm,
+    ...history,
+    direction: vec(p),
+    stepSize: found.result.alpha,
+    lineSearch: found.result,
+    stalled: found.result.alpha === 0,
+    evaluations: st.evaluations + found.result.evaluations,
+    converged: gradNorm <= tolerance,
+    diverged: divergedAt(found.value, found.x, divergeAbove),
+  }
+}
+
+// ── OWL-QN ───────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+/** Options for `owlqn`. */
+export type OwlqnOptions = LbfgsOptions & {
+  /** The L1 strength C ≥ 0 in F(x) = f(x) + C‖x‖₁. Default 0, where OWL-QN is L-BFGS. */
+  l1?: number
+  /** The sufficient-decrease constant of the backtracking search, c₁ (default 1e-4). */
+  decrease?: number
+  /** The backtracking factor (default 0.5) and the most halvings per step (default 50). */
+  backtrack?: number
+  maxBacktracks?: number
+}
+
+/** The state of `owlqn`. */
+export type OwlqnState = LbfgsState & {
+  /** `value` is F(x) = f(x) + C‖x‖₁; `smoothValue` is f(x). */
+  smoothValue: number
+  /** ∇f(x), the smooth part's gradient, from which the curvature pairs are taken. `grad` is the pseudo-gradient ◇F. */
+  smoothGrad: Vector
+  /** The number of non-zero coordinates of x. */
+  nonzero: number
+  /** Backtracking halvings in the last step (0 when the first trial point was accepted). */
+  backtracks: number
+}
+
+/**
+ * The pseudo-gradient ◇F of F(x) = f(x) + C‖x‖₁ (Andrew & Gao 2007, eq. 4) from g = ∇f(x): ∂ᵢf + C·sign(xᵢ) where
+ * xᵢ ≠ 0; at xᵢ = 0, the one-sided derivative ∂ᵢf ± C that is negative on its side if there is one, else 0. −◇F is
+ * the steepest-descent direction of F, and ◇F = 0 exactly where x minimises F.
+ */
+export function pseudoGradient(x: ArrayLike<number>, g: ArrayLike<number>, l1: number): F64 {
+  const out = new Float64Array(x.length)
+  for (let i = 0; i < x.length; i++) {
+    if (x[i] > 0) out[i] = g[i] + l1
+    else if (x[i] < 0) out[i] = g[i] - l1
+    else if (g[i] + l1 < 0) out[i] = g[i] + l1
+    else if (g[i] - l1 > 0) out[i] = g[i] - l1
+  }
+  return out
+}
+
+const l1Norm = (x: ArrayLike<number>) => {
+  let a = 0
+  for (let i = 0; i < x.length; i++) a += Math.abs(x[i])
+  return a
+}
+const countNonzero = (x: ArrayLike<number>) => {
+  let k = 0
+  for (let i = 0; i < x.length; i++) if (x[i] !== 0) k++
+  return k
+}
+
+/**
+ * Orthant-wise limited-memory quasi-Newton (OWL-QN; Andrew & Gao 2007, "Scalable training of L1-regularized
+ * log-linear models", ICML) for F(x) = f(x) + C‖x‖₁ with f smooth. Each step:
+ *
+ * 1. the pseudo-gradient v = ◇F(x) (`pseudoGradient`);
+ * 2. the L-BFGS direction d = −H v from the same two-loop recursion and pair history as `lbfgs`, with the pairs taken
+ *    from ∇f alone (the L1 term adds no curvature);
+ * 3. d projected onto the orthant of steepest descent: dᵢ = 0 wherever sign(dᵢ) ≠ sign(−vᵢ);
+ * 4. the orthant ξᵢ = sign(xᵢ), or sign(−vᵢ) where xᵢ = 0;
+ * 5. a backtracking search along the projected path x(α) = π(x + αd; ξ), where π zeroes every coordinate that leaves
+ *    its orthant, accepting F(x(α)) ≤ F(x) + c₁ vᵀ(x(α) − x).
+ *
+ * Coordinates that cross zero stop at zero, so the iterates are sparse. The run converges when ‖◇F‖ ≤ tolerance. With
+ * C = 0 the steps are exactly those of `lbfgs` (strong Wolfe search included), as in libLBFGS. `init` takes `{ x0 }`.
+ */
+export function owlqn(f: ObjectiveFn, options: OwlqnOptions = {}): Algorithm<StartOptions, OwlqnState> {
+  const {
+    memory = 10,
+    tolerance = DEFAULT_TOLERANCE,
+    divergeAbove = DEFAULT_DIVERGE,
+    l1 = 0,
+    decrease = 1e-4,
+    backtrack = 0.5,
+    maxBacktracks = 50,
+  } = options
+  const name = 'owlqn'
+  if (!(l1 >= 0)) throw new RangeError(`${name}: l1 must be ≥ 0, got ${l1}`)
+  const total = (value: number, x: ArrayLike<number>) => value + (l1 > 0 ? l1 * l1Norm(x) : 0)
+  return {
+    name,
+    init: ({ x0 }) => {
+      const x = toF64(x0, name)
+      const { value, grad } = evaluate(f, x, name)
+      const v = pseudoGradient(x, grad, l1)
+      const F = total(value, x)
+      const gradNorm = norm(v)
+      return {
+        t: 0,
+        x: vec(x),
+        value: F,
+        grad: vec(v),
+        gradNorm,
+        smoothValue: value,
+        smoothGrad: vec(grad),
+        nonzero: countNonzero(x),
+        pairs: [],
+        gamma: 1,
+        direction: vec(new Float64Array(x.length)),
+        stepSize: NaN,
+        lineSearch: null,
+        skipped: false,
+        stalled: false,
+        backtracks: 0,
+        evaluations: 1,
+        converged: gradNorm <= tolerance,
+        diverged: divergedAt(F, x, divergeAbove),
       }
-      const gradNorm = norm(found.grad)
+    },
+    step: (st) => {
+      if (l1 === 0) {
+        // Plain L-BFGS: the smooth objective is the whole objective, so value and grad carry over unchanged.
+        const next = lbfgsStep(f, st, memory, tolerance, divergeAbove, options.lineSearchOptions)
+        return {
+          ...next,
+          backtracks: 0,
+          smoothValue: next.value,
+          smoothGrad: next.grad,
+          nonzero: countNonzero(data(next.x)),
+        }
+      }
+      const x = data(st.x)
+      const g = data(st.smoothGrad)
+      const v = data(st.grad)
+      const n = x.length
+      let d = lbfgsDirection(v, st)
+      for (let i = 0; i < n; i++) if (d[i] * v[i] >= 0) d[i] = 0
+      // If the projection leaves no descent (possible with a poor H), fall back to steepest descent of F.
+      if (!(dot(d, v) < 0)) d = scale(-1 / Math.max(norm(v), 1e-300), v)
+      const orthant = new Float64Array(n)
+      for (let i = 0; i < n; i++) orthant[i] = x[i] !== 0 ? Math.sign(x[i]) : Math.sign(-v[i])
+      let alpha = 1
+      let evaluations = 0
+      let accepted: { x: F64; value: number; grad: F64; F: number } | null = null
+      let k = 0
+      for (; k <= maxBacktracks; k++) {
+        const xn = new Float64Array(n)
+        for (let i = 0; i < n; i++) {
+          const z = x[i] + alpha * d[i]
+          xn[i] = Math.sign(z) === orthant[i] ? z : 0
+        }
+        const out = evaluate(f, xn, name)
+        evaluations++
+        const F = total(out.value, xn)
+        let decreaseTerm = 0
+        for (let i = 0; i < n; i++) decreaseTerm += v[i] * (xn[i] - x[i])
+        if (Number.isFinite(F) && F <= st.value + decrease * decreaseTerm) {
+          accepted = { x: xn, value: out.value, grad: out.grad, F }
+          break
+        }
+        alpha *= backtrack
+      }
+      if (!accepted)
+        return { ...st, t: st.t + 1, stalled: true, backtracks: k, evaluations: st.evaluations + evaluations }
+      const s = sub(accepted.x, x)
+      const y = sub(accepted.grad, g)
+      const history = updateHistory(st, s, y, memory)
+      const pv = pseudoGradient(accepted.x, accepted.grad, l1)
+      const gradNorm = norm(pv)
       return {
         t: st.t + 1,
-        x: vec(found.x),
-        value: found.value,
-        grad: vec(found.grad),
+        x: vec(accepted.x),
+        value: accepted.F,
+        grad: vec(pv),
         gradNorm,
-        pairs: kept,
-        gamma: nextGamma,
-        direction: vec(p),
-        stepSize: found.result.alpha,
-        lineSearch: found.result,
-        skipped,
-        stalled: found.result.alpha === 0,
-        evaluations: st.evaluations + found.result.evaluations,
+        smoothValue: accepted.value,
+        smoothGrad: vec(accepted.grad),
+        nonzero: countNonzero(accepted.x),
+        ...history,
+        direction: vec(d),
+        stepSize: alpha,
+        lineSearch: null,
+        backtracks: k,
+        stalled: false,
+        evaluations: st.evaluations + evaluations,
         converged: gradNorm <= tolerance,
-        diverged: divergedAt(found.value, found.x, divergeAbove),
+        diverged: divergedAt(accepted.F, accepted.x, divergeAbove),
       }
     },
     done: (s) => s.converged || s.diverged || s.stalled,

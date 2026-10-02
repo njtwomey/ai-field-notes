@@ -86,7 +86,7 @@ export function SearchSpecimen() {
       hoverReadout={false}
       controls={
         <div className="col-span-full">
-          <Player label="step" value={step} onChange={setStep} count={count} defaultSpeed={3} />
+          <Player label="step" value={step} onChange={setStep} count={count} />
         </div>
       }
       readouts={
@@ -168,7 +168,6 @@ export function SearchTreesSpecimen() {
             value={Math.min(step, count - 1)}
             onChange={setStep}
             count={count}
-            defaultSpeed={3}
             startReason="the finished trees are the point: their shapes, shallow against deep"
           />
         </div>
@@ -262,7 +261,7 @@ export function KahnSpecimen() {
       hoverReadout={false}
       controls={
         <div className="col-span-full">
-          <Player label="step" value={step} onChange={setStep} count={t.steps.length} defaultSpeed={1.5} />
+          <Player label="step" value={step} onChange={setStep} count={t.steps.length} />
         </div>
       }
       readouts={
@@ -347,7 +346,7 @@ export function TarjanSpecimen() {
       hoverReadout={false}
       controls={
         <div className="col-span-full">
-          <Player label="step" value={step} onChange={setStep} count={t.steps.length} defaultSpeed={2} />
+          <Player label="step" value={step} onChange={setStep} count={t.steps.length} />
         </div>
       }
       readouts={

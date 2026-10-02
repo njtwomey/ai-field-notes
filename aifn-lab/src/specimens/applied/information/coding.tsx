@@ -1,13 +1,24 @@
 import type { Specimen } from '../../../specimen'
-import { HuffmanSpecimen } from './_coding/figures'
+import { HuffmanShowcase } from './_coding/figures'
 
 export const specimens: Specimen[] = [
   {
     module: 'applied/information/coding',
-    title: 'Huffman tree against the entropy',
+    title: 'Showcase: Huffman coding, merge by merge',
     description:
-      'huffmanSteps on a Zipf distribution, drawn as a tree merge by merge with codeword paths, then codeword lengths against −log₂ p and expected lengths of the Huffman, Shannon–Fano and Shannon codes against H.',
-    tags: ['huffmanCode', 'huffmanSteps', 'Tree', 'shannonFanoCode', 'shannonCode', 'kraftSum', 'coding'],
-    render: () => <HuffmanSpecimen />,
+      'huffmanSteps played from the queue of leaves to the finished tree, binary or D-ary, with a tie rule and its effect on length variance; click a leaf to pin its codeword, encode and decode a message; then codeword lengths against −log p (Zipf, uniform, dyadic, skewed, English) and block coding.',
+    tags: [
+      'showcase',
+      'huffmanSteps',
+      'huffmanCode',
+      'canonicalCode',
+      'sourceExtension',
+      'prefixEncode',
+      'prefixDecode',
+      'kraftSum',
+      'Diagram',
+      'coding',
+    ],
+    render: () => <HuffmanShowcase />,
   },
 ]

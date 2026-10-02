@@ -3,13 +3,17 @@
  * filter them by family, input kind or note.
  */
 
+import * as adversarial from './adversarial'
 import * as classification from './classification'
 import { entries } from 'aifn/foundation/registry'
 import { type Loss, type LossFamily, type LossInput } from './core'
 import * as divergence from './divergence'
+import * as energy from './energy'
+import * as mixture from './mixture'
 import * as regression from './regression'
+import * as representation from './representation'
 
-const modules = [classification, regression, divergence]
+const modules = [classification, regression, divergence, representation, adversarial, energy, mixture]
 
 /** Every loss, keyed by its `info.key`. */
 export const lossRegistry: Readonly<Record<string, Loss>> = entries('loss', ...modules) as unknown as Readonly<

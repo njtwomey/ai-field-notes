@@ -210,7 +210,7 @@ export function GibbsZigZag() {
       title="Gibbs sampling zig-zags along the axes"
       purpose="Each update moves one coordinate to a draw from its conditional N(ρ·other, 1 − ρ²), so a strong correlation makes every step short."
       state={state}
-      controls={<Player label="2 · sweep" value={sweep} onChange={setSweep} count={ZIGZAG_SWEEPS + 1} duration={6} />}
+      controls={<Player label="2 · sweep" value={sweep} onChange={setSweep} count={ZIGZAG_SWEEPS + 1} />}
       readouts={{
         mixing: (
           <>
@@ -606,7 +606,7 @@ export function WarmupAdaptation() {
       purpose="During warmup, dual averaging moves log ε against the error δ − a of each step's acceptance statistic a, so the running mean of a reaches δ; after warmup ε is frozen at the averaged ε̄."
       description="Hoffman and Gelman (2014), §3.2: the same adaptation for HMC (Algorithm 5) and NUTS (Algorithm 6)."
       state={state}
-      controls={<Player label="4 · iteration" value={i} onChange={setAt} count={r.iteration.length + 1} duration={6} />}
+      controls={<Player label="4 · iteration" value={i} onChange={setAt} count={r.iteration.length + 1} />}
       readouts={{
         'this iteration': (
           <>

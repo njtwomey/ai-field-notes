@@ -16,6 +16,10 @@ export interface Corpus {
   readonly kind: 'corpus'
   readonly documents: readonly string[]
   readonly meta: DatasetMeta
+  /** The true topic of each document, an index into `meta.labelNames` (generated corpora with topics only). */
+  readonly labels?: readonly number[]
+  /** The true topic of each word the generator can emit, by name (`function` for determiners and prepositions). */
+  readonly wordTopics?: Readonly<Record<string, string>>
 }
 
 const repeat = (word: string, n: number) => Array.from({ length: n }, () => word)
@@ -210,6 +214,196 @@ export function toyCorpus(s: Stream, options: ToyCorpusOptions = {}): Corpus {
   }
 }
 
+// ── A topical corpus with shared frames, for word representations ────────────────────────────────────────────────────
+
+/** A word with its two forms: a noun's singular and plural, or a verb's third-person singular and base form. */
+type Forms = readonly [one: string, many: string]
+
+interface TopicFrames {
+  readonly subjects: readonly Forms[]
+  readonly transitive: readonly Forms[]
+  readonly objects: readonly string[]
+  readonly intransitive: readonly Forms[]
+}
+
+const TOPIC_FRAMES: Readonly<Record<string, TopicFrames>> = {
+  animals: {
+    subjects: [
+      ['cat', 'cats'],
+      ['dog', 'dogs'],
+      ['horse', 'horses'],
+      ['cow', 'cows'],
+      ['bird', 'birds'],
+    ],
+    transitive: [
+      ['chases', 'chase'],
+      ['watches', 'watch'],
+      ['bites', 'bite'],
+    ],
+    objects: ['fish', 'bone', 'grass', 'mouse', 'seed'],
+    intransitive: [
+      ['sleeps', 'sleep'],
+      ['runs', 'run'],
+      ['hides', 'hide'],
+    ],
+  },
+  food: {
+    subjects: [
+      ['cook', 'cooks'],
+      ['chef', 'chefs'],
+      ['baker', 'bakers'],
+      ['waiter', 'waiters'],
+    ],
+    transitive: [
+      ['bakes', 'bake'],
+      ['serves', 'serve'],
+      ['slices', 'slice'],
+      ['stirs', 'stir'],
+    ],
+    objects: ['bread', 'cake', 'soup', 'pie', 'rice', 'cheese'],
+    intransitive: [
+      ['eats', 'eat'],
+      ['smiles', 'smile'],
+    ],
+  },
+  vehicles: {
+    subjects: [
+      ['car', 'cars'],
+      ['bus', 'buses'],
+      ['truck', 'trucks'],
+      ['train', 'trains'],
+      ['van', 'vans'],
+    ],
+    transitive: [
+      ['carries', 'carry'],
+      ['pulls', 'pull'],
+      ['tows', 'tow'],
+    ],
+    objects: ['cargo', 'trailer', 'load', 'crate', 'timber'],
+    intransitive: [
+      ['stops', 'stop'],
+      ['turns', 'turn'],
+      ['speeds', 'speed'],
+    ],
+  },
+  colours: {
+    subjects: [
+      ['painter', 'painters'],
+      ['artist', 'artists'],
+      ['decorator', 'decorators'],
+    ],
+    transitive: [
+      ['paints', 'paint'],
+      ['colours', 'colour'],
+      ['dyes', 'dye'],
+    ],
+    objects: ['wall', 'door', 'canvas', 'fence', 'ceiling'],
+    intransitive: [
+      ['sketches', 'sketch'],
+      ['draws', 'draw'],
+    ],
+  },
+  places: {
+    subjects: [
+      ['tourist', 'tourists'],
+      ['traveller', 'travellers'],
+      ['visitor', 'visitors'],
+    ],
+    transitive: [
+      ['visits', 'visit'],
+      ['explores', 'explore'],
+      ['leaves', 'leave'],
+    ],
+    objects: ['harbour', 'museum', 'castle', 'cathedral', 'bridge'],
+    intransitive: [
+      ['arrives', 'arrive'],
+      ['wanders', 'wander'],
+    ],
+  },
+}
+
+/** Colour words: adjectives in every topic, and the result of the colours topic's verbs ("paints the wall red"). */
+const COLOURS = ['red', 'blue', 'green', 'yellow', 'white', 'black']
+/** Places: where any topic's intransitive sentences happen ("the cat sleeps in the town"). */
+const PLACES = ['city', 'town', 'village', 'park', 'market']
+const FUNCTION_WORDS = ['the', 'a', 'some', 'in', 'near', 'to']
+
+/** The topics of {@link topicCorpus}, in label order. */
+export const TOPIC_CORPUS_TOPICS = Object.keys(TOPIC_FRAMES)
+
+/** Options of {@link topicCorpus}. */
+export interface TopicCorpusOptions {
+  /** The number of sentences (default 300). */
+  sentences?: number
+  /** How many of the topics (animals, food, vehicles, colours, places) to use, from the first (default 5). */
+  topics?: number
+  /** The chance that a noun takes a colour adjective, in any topic (default 0.2). */
+  colourRate?: number
+  /** The chance that an intransitive sentence ends at a place, in any topic (default 0.7). */
+  placeRate?: number
+}
+
+/**
+ * A seeded corpus for word representations: short sentences about animals, food, vehicles, colours and places, built
+ * from the same frames ("the cat chases the mouse", "the buses stop near the market", "the painter paints the wall
+ * red"), so that words cluster both by topic (the nouns and verbs of one topic share contexts) and by syntactic role
+ * (colour words follow determiners in every topic, place words follow prepositions, plural nouns take base-form verbs).
+ * The document labels are each sentence's topic; `wordTopics` gives every word's. Sentence k depends only on
+ * `child(s, k)`, so a longer corpus extends a shorter one.
+ */
+export function topicCorpus(s: Stream, options: TopicCorpusOptions = {}): Corpus {
+  const { sentences = 300, topics = TOPIC_CORPUS_TOPICS.length, colourRate = 0.2, placeRate = 0.7 } = options
+  if (!(Number.isInteger(sentences) && sentences >= 1))
+    throw new DomainError('topicCorpus', 'topicCorpus: sentences ≥ 1')
+  const names = TOPIC_CORPUS_TOPICS.slice(0, Math.max(1, Math.min(topics, TOPIC_CORPUS_TOPICS.length)))
+  const documents: string[] = []
+  const labels: number[] = []
+  const at = <T>(xs: readonly T[], u: number) => xs[Math.min(xs.length - 1, Math.floor(u * xs.length))]
+  for (let k = 0; k < sentences; k++) {
+    const u = uniform(child(s, k), 0, 1, { shape: [16] }).data
+    const t = Math.min(names.length - 1, Math.floor(u[0] * names.length))
+    const name = names[t]
+    const f = TOPIC_FRAMES[name]
+    const plural = u[1] < 0.35
+    const subject = at(f.subjects, u[2])
+    const words: string[] = [u[3] < 0.7 ? 'the' : plural ? 'some' : 'a']
+    if (u[4] < colourRate) words.push(at(COLOURS, u[5]))
+    words.push(plural ? subject[1] : subject[0])
+    if (u[6] < 0.6) {
+      words.push(at(f.transitive, u[7])[plural ? 1 : 0], 'the')
+      if (u[8] < colourRate && name !== 'colours') words.push(at(COLOURS, u[9]))
+      words.push(at(f.objects, u[10]))
+      if (name === 'colours') words.push(at(COLOURS, u[9]))
+    } else {
+      words.push(at(f.intransitive, u[11])[plural ? 1 : 0])
+      if (u[12] < placeRate) words.push(at(['in', 'near', 'to'], u[13]), 'the', at(PLACES, u[14]))
+    }
+    documents.push(words.join(' '))
+    labels.push(t)
+  }
+  const wordTopics: Record<string, string> = {}
+  for (const w of FUNCTION_WORDS) wordTopics[w] = 'function'
+  for (const n of names) {
+    const f = TOPIC_FRAMES[n]
+    for (const w of [...f.subjects.flat(), ...f.transitive.flat(), ...f.objects, ...f.intransitive.flat()])
+      wordTopics[w] = n
+  }
+  for (const w of COLOURS) wordTopics[w] = 'colours'
+  for (const w of PLACES) wordTopics[w] = 'places'
+  return {
+    kind: 'corpus',
+    documents,
+    labels,
+    wordTopics,
+    meta: {
+      name: 'topic corpus',
+      description: `${sentences} generated sentences about ${names.join(', ')}, built from shared frames; each sentence is labelled with its topic.`,
+      task: 'text',
+      labelNames: names,
+    },
+  }
+}
+
 const dataset = definer<DatasetInfo>('dataset', 'text/corpora')
 
 dataset(
@@ -251,7 +445,28 @@ dataset(
   toyCorpus,
 )
 
+dataset(
+  {
+    key: 'topicCorpus',
+    name: 'Topic corpus',
+    summary: 'Seeded sentences about animals, food, vehicles, colours and places in shared frames, labelled by topic.',
+    task: 'text',
+    output: 'corpus',
+    knobs: space({
+      sentences: int(1, 5000, { default: 300 }),
+      topics: int(1, 5, { default: 5 }),
+      colourRate: real(0, 1, { default: 0.2 }),
+      placeRate: real(0, 1, { default: 0.7 }),
+    }),
+    truth: false,
+    random: true,
+    notes: ['distributional-semantics', 'latent-semantic-analysis', 'word-embeddings'],
+    cite: ['harris1954', 'firth1957'],
+  },
+  topicCorpus,
+)
+
 /** The corpus generators, keyed by name. */
-export const corpusDatasets = { namedCorpus, toyCorpus } as unknown as Readonly<
+export const corpusDatasets = { namedCorpus, toyCorpus, topicCorpus } as unknown as Readonly<
   Record<string, Entry<(...args: never[]) => unknown, DatasetInfo>>
 >

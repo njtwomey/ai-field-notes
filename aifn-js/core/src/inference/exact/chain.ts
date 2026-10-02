@@ -13,7 +13,7 @@
 import type { Index, Size, Status } from 'aifn/foundation/contracts'
 import { categorical, child, type Stream } from 'aifn/foundation/random'
 import { ShapeError } from 'aifn/foundation/errors'
-import { fromData, log, logsumexp, toRows, type Matrix, type Tensor, type Vector } from 'aifn/foundation/tensor'
+import { fromData, log, toRows, type Matrix, type Tensor, type Vector } from 'aifn/foundation/tensor'
 import type { Algorithm } from 'aifn/foundation/trace'
 import { chainOrder } from 'aifn/graph/structured'
 import { bipartiteGraph, valuesOf, type DiscreteFactorGraph } from 'aifn/inference/model'
@@ -191,6 +191,16 @@ export function viterbi(chain: ChainPotentials): ViterbiResult {
   return chainViterbi(log(chain.nodePotentials), log(chain.transition))
 }
 
+/** log Σ exp xᵢ over a plain array, shifted by the maximum (−∞ for an empty or all −∞ input; +∞ if any is +∞). */
+function lse(xs: readonly number[]): number {
+  let m = -Infinity
+  for (const x of xs) if (x > m) m = x
+  if (m === -Infinity || m === Infinity || Number.isNaN(m)) return m
+  let s = 0
+  for (const x of xs) s += Math.exp(x - m)
+  return m + Math.log(s)
+}
+
 /** The result of log-space forward–backward on a chain of potentials. */
 export interface ChainMarginals {
   /** log α_n (N × K): log Σ over paths to n, excluding u_n. */
@@ -211,7 +221,6 @@ export function chainForwardBackward(logUnary: Matrix, logPairwise: Tensor): Cha
   const [N, K] = logUnary.shape
   const U = toRows(logUnary)
   const pair = pairwiseAt(logPairwise, K)
-  const lse = (xs: number[]) => logsumexp(fromData(Float64Array.from(xs), [xs.length]))
   const la: number[][] = [Array(K).fill(0)]
   for (let n = 1; n < N; n++) {
     const P = pair(n - 1)
@@ -238,6 +247,39 @@ export function chainForwardBackward(logUnary: Matrix, logPairwise: Tensor): Cha
     pairwise: fromData(pairwise, [Math.max(N - 1, 0), K, K]),
     logZ,
   }
+}
+
+/** The result of posterior (max-marginal) decoding. */
+export interface PosteriorDecoding {
+  /** ŷ_n = argmax_k P(y_n = k | x) (int32, length N); ties go to the smaller state. */
+  path: Vector
+  /** P(y_n = ŷ_n | x) per position. */
+  confidence: Vector
+  /** Σ_n P(y_n = ŷ_n | x): the expected number of correct labels, the largest any labelling has. */
+  expectedCorrect: number
+}
+
+/**
+ * Posterior (marginal, max-marginal) decoding (Rabiner 1989, §III.B, "individually most likely states"): each position
+ * takes its most probable label under the marginals, ŷ_n = argmax_k P(y_n = k | x). It maximises the expected number of
+ * correct labels Σ_n P(y_n = ŷ_n | x), where Viterbi maximises the probability of the whole sequence; the two can
+ * differ, and the posterior path may even contain a transition of zero probability (−∞ log-potential). `marginals` is
+ * N × K, e.g. `chainForwardBackward(…).marginals`.
+ */
+export function posteriorDecode(marginals: Matrix): PosteriorDecoding {
+  const [N, K] = marginals.shape
+  const P = marginals.data
+  const path = new Int32Array(N)
+  const confidence = new Float64Array(N)
+  let expectedCorrect = 0
+  for (let n = 0; n < N; n++) {
+    let best = 0
+    for (let k = 1; k < K; k++) if (P[n * K + k] > P[n * K + best]) best = k
+    path[n] = best
+    confidence[n] = P[n * K + best]
+    expectedCorrect += confidence[n]
+  }
+  return { path: fromData(path, [N]), confidence: fromData(confidence, [N]), expectedCorrect }
 }
 
 // ── Stepping ─────────────────────────────────────────────────────────────────────────────────────────────────────────

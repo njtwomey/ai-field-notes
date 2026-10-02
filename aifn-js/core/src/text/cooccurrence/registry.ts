@@ -2,6 +2,7 @@
 
 import { definer, entries, type Entry, type FunctionInfo } from 'aifn/foundation/registry'
 import * as c from './cooccurrence'
+import * as svd from './svd'
 
 const fn = definer<FunctionInfo>('function', 'text/cooccurrence')
 const NOTE = 'co-occurrence-matrices-and-pointwise-mutual-information'
@@ -12,7 +13,7 @@ fn(
     name: 'Co-occurrence matrix',
     role: 'estimator',
     returns: 'cooccurrence',
-    summary: 'Word × context counts within a window, uniform, harmonic or linear in distance.',
+    summary: 'Word × context counts within a symmetric or asymmetric window, uniform or weighted by distance (HAL).',
     notes: [NOTE, 'distributional-semantics'],
     cite: ['turney2010'],
   },
@@ -55,7 +56,21 @@ fn(
   c.wordVectors,
 )
 
+fn(
+  {
+    key: 'truncatedSvd',
+    name: 'Truncated SVD',
+    tex: 'A \\approx U_k \\Sigma_k V_k^\\top',
+    role: 'transform',
+    returns: 'truncated-svd',
+    summary: 'The k largest singular triplets of a word × context or term × document matrix, with each energy share.',
+    notes: ['latent-semantic-analysis', 'singular-value-decomposition', NOTE],
+    cite: ['deerwester1990', 'levy2015'],
+  },
+  svd.truncatedSvd,
+)
+
 /** The functions of the module, keyed by name. */
-export const cooccurrenceFunctions = entries<FunctionInfo>('function', c) as Readonly<
+export const cooccurrenceFunctions = entries<FunctionInfo>('function', c, svd) as Readonly<
   Record<string, Entry<(...args: never[]) => unknown, FunctionInfo>>
 >

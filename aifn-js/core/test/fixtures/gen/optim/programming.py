@@ -6,6 +6,7 @@ against scipy.optimize.minimize (SLSQP), box-constrained QPs the same way, and a
 directly."""
 
 import itertools
+from typing import Any
 
 import numpy as np
 from scipy import optimize
@@ -43,8 +44,8 @@ def lp_case(c, A_ub=None, b_ub=None, A_eq=None, b_eq=None, bounds=None) -> dict[
     return out
 
 
-def linear_programs(rng: np.random.Generator) -> dict[str, object]:
-    lps: dict[str, object] = {}
+def linear_programs(rng: np.random.Generator) -> dict[str, dict[str, object]]:
+    lps: dict[str, dict[str, object]] = {}
     lps["wyndor"] = lp_case([-3, -5], [[1, 0], [0, 2], [3, 2]], [4, 12, 18])
     # Random dense LPs, feasible by construction (b = A x0 + positive slack) and bounded by finite boxes.
     n, m = 4, 6
@@ -162,10 +163,10 @@ def box_programs(rng: np.random.Generator) -> dict[str, object]:
     return boxes
 
 
-def integer_programs(rng: np.random.Generator) -> dict[str, object]:
-    ips: dict[str, object] = {}
+def integer_programs(rng: np.random.Generator) -> dict[str, dict[str, Any]]:
+    ips: dict[str, dict[str, Any]] = {}
 
-    def case(c, A, b, integrality, bounds=(0, np.inf)):
+    def case(c, A, b, integrality, bounds=(0, np.inf)) -> dict[str, Any]:
         lo, hi = bounds
         r = optimize.milp(
             c,
@@ -192,17 +193,20 @@ def integer_programs(rng: np.random.Generator) -> dict[str, object]:
 
 def cases() -> dict[str, object]:
     rng = np.random.default_rng(20261001)
-    out: dict[str, object] = {"lp": linear_programs(rng)}
-    optimal = [k for k, v in out["lp"].items() if v["status"] == "optimal"]
-    out["simplex"] = {"problems": list(out["lp"])}
+    lps = linear_programs(rng)
+    out: dict[str, object] = {"lp": lps}
+    optimal = [k for k, v in lps.items() if v["status"] == "optimal"]
+    out["simplex"] = {"problems": list(lps)}
     out["linearInteriorPoint"] = {"problems": optimal}
-    out["qp"] = quadratic_programs(rng)
-    out["activeSet"] = {"problems": list(out["qp"])}
-    out["quadraticInteriorPoint"] = {"problems": list(out["qp"])}
+    qps = quadratic_programs(rng)
+    out["qp"] = qps
+    out["activeSet"] = {"problems": list(qps)}
+    out["quadraticInteriorPoint"] = {"problems": list(qps)}
     out["boxQuadraticProgram"] = box_programs(rng)
-    out["milp"] = integer_programs(rng)
-    out["branchAndBound"] = {"problems": list(out["milp"])}
-    out["gomory"] = {"problems": [k for k, v in out["milp"].items() if all(v["problem"]["integrality"])]}
+    ips = integer_programs(rng)
+    out["milp"] = ips
+    out["branchAndBound"] = {"problems": list(ips)}
+    out["gomory"] = {"problems": [k for k, v in ips.items() if all(v["problem"]["integrality"])]}
 
     assignments = {}
     for name, shape, maximize, integer in [

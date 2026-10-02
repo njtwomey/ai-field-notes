@@ -5,6 +5,8 @@
  */
 
 import type { Status } from 'aifn/foundation/contracts'
+import { createHeap, heapPop, heapPush } from 'aifn/graph'
+import { uniform, type Stream } from 'aifn/foundation/random'
 import { fromData, toFlat, type Tensor } from 'aifn/foundation/tensor'
 import { run, type Algorithm } from 'aifn/foundation/trace'
 import type { Tokenisation, TokenPattern } from 'aifn/text/tokenise'
@@ -33,6 +35,11 @@ export interface BpeOptions {
   endOfWord?: string
   /** The pre-tokeniser an encoder applies to new text (default `words` for characters, `gpt2` for bytes). */
   pattern?: TokenPattern
+  /**
+   * Base symbols always in the vocabulary, seen or not (character level; e.g. the 256 byte symbols when the words are
+   * already byte-level strings, as Hugging Face's `initial_alphabet`). Default: the characters of the words.
+   */
+  alphabet?: readonly string[]
 }
 
 /** The state of BPE training after `t` merges. */
@@ -117,6 +124,7 @@ function resolve(options: BpeOptions) {
     minCount: options.minCount ?? 2,
     endOfWord: options.endOfWord ?? (unit === 'byte' ? '' : '</w>'),
     pattern: options.pattern ?? (unit === 'byte' ? 'gpt2' : 'words'),
+    alphabet: options.alphabet ?? [],
   }
 }
 
@@ -138,7 +146,9 @@ export function bpeSteps(words: WordCountsLike, options: BpeOptions = {}): Algor
       const segmentations = table.words.map((w) => baseSymbols(w, o.unit, o.endOfWord).map((p) => p.token))
       const seen = new Set(segmentations.flat())
       const base =
-        o.unit === 'byte' ? [...byteAlphabet()] : [...seen].filter((s) => s !== o.endOfWord).sort(byCodePoint)
+        o.unit === 'byte'
+          ? [...byteAlphabet()]
+          : [...new Set([...o.alphabet, ...seen])].filter((s) => s !== o.endOfWord).sort(byCodePoint)
       if (o.endOfWord) base.push(o.endOfWord)
       const symbols = segmentations.reduce((acc, seg, w) => acc + seg.length * table.counts[w], 0)
       return {
@@ -216,37 +226,76 @@ function rankTable(model: BpeModel): Map<string, number> {
   return r
 }
 
+/** Options of {@link bpeSegment} and {@link bpeEncode}. */
+export interface BpeSegmentOptions {
+  /** Apply only the first `upTo` merges (default all). */
+  upTo?: number
+  /**
+   * BPE-dropout (Provilkov, Emelianenko & Voita 2020): each time a merge is the next to apply, it is skipped with this
+   * probability (default 0, deterministic), so one word gets different segmentations; needs `stream`.
+   */
+  dropout?: number
+  /** The random stream of BPE-dropout. */
+  stream?: Stream
+}
+
 /**
  * Segment one word with a BPE tokeniser, as pieces with their ranges in the word: start from base symbols and apply
- * merges in the order they were learned, by repeatedly merging the adjacent pair of lowest merge rank (equivalent to
- * replaying the list, and as GPT-2 encodes). `upTo` replays only the first `upTo` merges.
+ * merges in the order they were learned, by repeatedly merging the adjacent pair of lowest merge rank (leftmost among
+ * equals), as GPT-2 and Hugging Face encode. The candidate pairs sit in a priority queue keyed by (rank, position) and
+ * the symbols in a linked list, so a word of n symbols costs O(n log n) rather than the O(n²) of rescanning after
+ * every merge; the result equals replaying the merge list in order. With `dropout`, a popped merge is skipped with
+ * that probability and retried after the next merge that succeeds (Hugging Face's BPE-dropout).
  */
-export function bpeSegment(model: BpeModel, word: string, upTo = Infinity): Piece[] {
+export function bpeSegment(model: BpeModel, word: string, options: BpeSegmentOptions | number = {}): Piece[] {
+  const { upTo = Infinity, dropout = 0, stream } = typeof options === 'number' ? { upTo: options } : options
   const r = rankTable(model)
-  let pieces = baseSymbols(word, model.unit, model.endOfWord)
-  for (;;) {
-    let best = -1
-    let bestRank = Infinity
-    for (let i = 0; i + 1 < pieces.length; i++) {
-      const k = r.get(pieces[i].token + SEP + pieces[i + 1].token)
-      if (k !== undefined && k < upTo && k < bestRank) [best, bestRank] = [i, k]
-    }
-    if (best < 0) return pieces
-    const { left, right, merged } = model.merges[bestRank]
-    const next: Piece[] = []
-    for (let i = 0; i < pieces.length; i++) {
-      if (i + 1 < pieces.length && pieces[i].token === left && pieces[i + 1].token === right) {
-        next.push({ token: merged, start: pieces[i].start, end: pieces[i + 1].end })
-        i++
-      } else next.push(pieces[i])
-    }
-    pieces = next
+  const pieces = baseSymbols(word, model.unit, model.endOfWord)
+  const n = pieces.length
+  const token = pieces.map((p) => p.token)
+  const start = pieces.map((p) => p.start)
+  const end = pieces.map((p) => p.end)
+  const prev = Array.from({ length: n }, (_, i) => i - 1)
+  const next = Array.from({ length: n }, (_, i) => (i + 1 < n ? i + 1 : -1))
+  const alive = new Array<boolean>(n).fill(true)
+  const heap = createHeap<{ i: number; left: string; right: string; rank: number }>()
+  const push = (i: number) => {
+    if (i < 0 || next[i] < 0) return
+    const j = next[i]
+    const rank = r.get(token[i] + SEP + token[j])
+    if (rank !== undefined && rank < upTo)
+      heapPush(heap, { i, left: token[i], right: token[j], rank }, rank * (n + 1) + i)
   }
+  for (let i = 0; i + 1 < n; i++) push(i)
+  const skipped: { i: number; left: string; right: string; rank: number }[] = []
+  for (;;) {
+    const top = heapPop(heap)
+    if (!top) break
+    const { i, left, right, rank } = top.value
+    const j = next[i]
+    // Stale: one of the pair was merged away since this candidate was queued.
+    if (!alive[i] || j < 0 || token[i] !== left || token[j] !== right) continue
+    if (dropout > 0 && (uniform(stream!) as number) < dropout) {
+      skipped.push(top.value)
+      continue
+    }
+    token[i] = model.merges[rank].merged
+    end[i] = end[j]
+    alive[j] = false
+    next[i] = next[j]
+    if (next[j] >= 0) prev[next[j]] = i
+    for (const s of skipped.splice(0)) heapPush(heap, s, s.rank * (n + 1) + s.i)
+    if (prev[i] >= 0) push(prev[i])
+    push(i)
+  }
+  const out: Piece[] = []
+  for (let i = n > 0 ? 0 : -1; i >= 0; i = next[i]) out.push({ token: token[i], start: start[i], end: end[i] })
+  return out
 }
 
 /** Encode text with a BPE tokeniser: pre-tokenise by the model's pattern, then segment each word. */
-export function bpeEncode(model: BpeModel, text: string, options: { upTo?: number } = {}): Tokenisation {
-  return encodeByWords(text, model.pattern, (w) => bpeSegment(model, w, options.upTo))
+export function bpeEncode(model: BpeModel, text: string, options: BpeSegmentOptions = {}): Tokenisation {
+  return encodeByWords(text, model.pattern, (w) => bpeSegment(model, w, options))
 }
 
 /**

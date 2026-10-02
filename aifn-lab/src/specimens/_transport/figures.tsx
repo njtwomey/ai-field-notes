@@ -88,7 +88,6 @@ export function SinkhornSpecimen() {
           value={at}
           onChange={setStep}
           count={run.steps.length}
-          duration={4}
           startReason="iteration 0 is the unscaled kernel exp(−C/ε) with almost no mass; iteration 1 is the first plan"
         />
       }

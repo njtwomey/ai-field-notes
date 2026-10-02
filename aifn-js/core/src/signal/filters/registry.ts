@@ -7,6 +7,8 @@
 import { definer, entries, type Entry, type FilterDesignInfo, type FunctionInfo } from 'aifn/foundation/registry'
 import { int, oneOf, real, space } from 'aifn/foundation/space'
 import * as filters from './filters'
+import * as remez from './remez'
+import * as smoothing from './smoothing'
 
 const define = definer<FilterDesignInfo>('filter-design', 'signal/filters')
 const bands = ['lowpass', 'highpass', 'bandpass', 'bandstop'] as const
@@ -89,9 +91,62 @@ define(
   filters.firwin,
 )
 
+define(
+  {
+    key: 'ellip',
+    name: 'Elliptic (Cauer)',
+    summary: 'Equiripple in both bands: the narrowest transition for a given order, ripple and attenuation.',
+    family: 'iir',
+    bands,
+    honours: ['order', 'cutoff', 'passRippleDb', 'stopAttenDb'],
+    params: space({
+      order,
+      passRippleDb: real(0.01, 6, { default: 1, label: 'r_p', unit: 'dB', doc: 'passband ripple' }),
+      stopAttenDb: real(10, 120, { default: 40, label: 'r_s', unit: 'dB', doc: 'stopband attenuation' }),
+      cutoff,
+      btype,
+    }),
+    cite,
+    notes: iirNotes,
+  },
+  filters.ellip,
+)
+define(
+  {
+    key: 'bessel',
+    name: 'Bessel–Thomson',
+    summary: 'A maximally flat group delay (phase-normalised); the gentlest roll-off of the classical families.',
+    family: 'iir',
+    bands,
+    honours: ['order', 'cutoff'],
+    params: space({ order, cutoff, btype }),
+    cite,
+    notes: [...iirNotes, 'linear-phase-and-group-delay'],
+  },
+  filters.bessel,
+)
+define(
+  {
+    key: 'equiripple',
+    name: 'Parks–McClellan (equiripple FIR)',
+    summary: 'The linear-phase FIR filter with the smallest maximum weighted error over the bands (Remez exchange).',
+    family: 'fir',
+    bands,
+    honours: ['numtaps', 'cutoff', 'transition', 'weights'],
+    params: space({
+      numtaps: int(3, 255, { default: 31, label: 'N', doc: 'number of taps (odd for high-pass and band-stop)' }),
+      cutoff,
+      transition: real(0.01, 0.3, { default: 0.1, label: '\\Delta f', doc: 'transition width, fraction of Nyquist' }),
+    }),
+    cite: ['parks1972'],
+    notes: ['finite-impulse-response-filter-design'],
+  },
+  remez.equiripple,
+)
+
 /** Every filter design method, keyed by function name. */
 export const filterDesignRegistry: Readonly<Record<string, Entry<(...args: never[]) => unknown, FilterDesignInfo>>> =
-  entries<FilterDesignInfo>('filter-design', filters) as Readonly<
+  entries<FilterDesignInfo>('filter-design', filters, remez) as Readonly<
     Record<string, Entry<(...args: never[]) => unknown, FilterDesignInfo>>
   >
 
@@ -191,8 +246,88 @@ fn(
   filters.groupDelay,
 )
 
+fn(
+  {
+    key: 'remez',
+    name: 'Remez exchange (Parks–McClellan)',
+    summary: 'The minimax linear-phase FIR filter for piecewise-constant bands, desired gains and weights.',
+    role: 'construction',
+    returns: 'lti',
+    notes: ['finite-impulse-response-filter-design'],
+    cite: ['parks1972'],
+  },
+  remez.remez,
+)
+fn(
+  {
+    key: 'savgolCoeffs',
+    name: 'Savitzky–Golay coefficients',
+    role: 'construction',
+    notes: ['moving-average-and-smoothing-filters'],
+    cite: ['savitzky1964'],
+  },
+  smoothing.savgolCoeffs,
+)
+fn(
+  {
+    key: 'savgolFilter',
+    name: 'Savitzky–Golay filter',
+    summary: 'Local least-squares polynomial smoothing (or differentiation) that keeps peak heights.',
+    role: 'transform',
+    returns: 'signal',
+    notes: ['moving-average-and-smoothing-filters'],
+    cite: ['savitzky1964'],
+  },
+  smoothing.savgolFilter,
+)
+fn(
+  {
+    key: 'medfilt',
+    name: 'Median filter',
+    summary: 'The running median: removes impulses, keeps edges.',
+    role: 'transform',
+    returns: 'signal',
+    notes: ['median-filter'],
+    cite: ['tukey1977'],
+  },
+  smoothing.medfilt,
+)
+fn(
+  {
+    key: 'wiener',
+    name: 'Local Wiener filter',
+    summary: 'Shrink each sample towards its local mean by 1 − noise/local variance (scipy.signal.wiener).',
+    role: 'transform',
+    returns: 'signal',
+    notes: ['wiener-filter'],
+  },
+  smoothing.wiener,
+)
+fn(
+  {
+    key: 'wienerDenoise',
+    name: 'Frequency-domain Wiener shrinkage',
+    summary: 'Gain S/(S + N) per DFT bin, with S estimated from the smoothed periodogram and a known noise variance.',
+    role: 'transform',
+    notes: ['wiener-filter', 'spectral-subtraction-and-denoising'],
+    cite: ['wiener1949'],
+  },
+  smoothing.wienerDenoise,
+)
+fn(
+  {
+    key: 'matchedFilter',
+    name: 'Matched filter',
+    summary: 'Correlate with the known template: the linear filter with the largest output SNR in white noise.',
+    role: 'transform',
+    notes: ['matched-filter'],
+    cite: ['turin1960'],
+  },
+  smoothing.matchedFilter,
+)
+
 /** The functions of the module, keyed by name. */
 export const filtersFunctions: Readonly<Record<string, Entry<(...args: never[]) => unknown, FunctionInfo>>> =
-  entries<FunctionInfo>('function', filters) as Readonly<
+  entries<FunctionInfo>('function', filters, smoothing, remez) as Readonly<
     Record<string, Entry<(...args: never[]) => unknown, FunctionInfo>>
   >

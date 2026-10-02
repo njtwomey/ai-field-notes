@@ -48,6 +48,7 @@ import {
 import { ShapeError } from 'aifn/foundation/errors'
 import * as B from './beta'
 import * as I from './bessel'
+import * as L from './elliptic'
 import * as E from './erf'
 import * as G from './gamma'
 import * as N from './normal'
@@ -106,6 +107,8 @@ const domains: Readonly<Record<string, Domain | readonly Domain[]>> = {
   xlogy: [d(-2, 2), d(0.1, 3)],
   xlog1py: [d(-2, 2), d(-0.5, 2)],
   binaryEntropy: probability,
+  ellipk: d(0.05, 0.95),
+  ellipe: d(0.05, 0.95),
 }
 
 // ── Registration ─────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -531,6 +534,27 @@ export const besselRatio: Unary = unary('besselRatio', I.besselRatio, (x, a) => 
 })
 /** log I₀(κ) for κ ≥ 0 (NaN below), without overflow; its derivative is `besselRatio`. */
 export const logBesselI0: Unary = unary('logBesselI0', I.logBesselI0, (x) => besselRatio(x))
+
+/**
+ * The complete elliptic integral of the first kind K(m) = ∫₀^{π/2} (1 − m sin²θ)^{−½} dθ, elementwise in the parameter
+ * m < 1 (as `scipy.special.ellipk`); K′(m) = (E − (1 − m)K) / (2m(1 − m)) (π/8 at 0).
+ */
+export const ellipk: Unary = unary('ellipk', L.ellipk, (m, k) => {
+  const nonzero = notEqualTo(m, 0)
+  const ms = guarded(nonzero, m, 0.5)
+  return where(nonzero, div(sub(ellipe(ms), mul(sub(1, ms), k)), mul(mul(2, ms), sub(1, ms))), Math.PI / 8)
+})
+/**
+ * The complete elliptic integral of the second kind E(m) = ∫₀^{π/2} (1 − m sin²θ)^{½} dθ, elementwise in m ≤ 1 (as
+ * `scipy.special.ellipe`); E′(m) = (E − K) / (2m) (−π/8 at 0).
+ */
+export const ellipe: Unary = unary('ellipe', L.ellipe, (m, e) => {
+  const nonzero = notEqualTo(m, 0)
+  const ms = guarded(nonzero, m, 0.5)
+  return where(nonzero, div(sub(e, ellipk(ms)), mul(2, ms)), -Math.PI / 8)
+})
+/** Scalar elliptic functions (numbers in and out): K(1 − p), F(φ | m), the Jacobi functions and Carlson's forms. */
+export { carlsonRD, carlsonRF, ellipf, ellipj, ellipkm1, type Jacobi } from './elliptic'
 
 /** Options of `softmax` and `logSoftmax`. */
 export type SoftmaxOptions = {

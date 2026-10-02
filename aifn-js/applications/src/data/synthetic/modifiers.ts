@@ -63,7 +63,7 @@ function intLabels(d: Dataset, what: string): Int32Array {
 /** The number of classes: from the truth, the label names or the largest label. */
 function classCount(d: Dataset, y: Int32Array): number {
   const t = d.meta.truth
-  if (t?.task === 'classification') return t.classes
+  if (t?.task === 'classification' && 'classes' in t) return t.classes
   if (d.meta.labelNames) return d.meta.labelNames.length
   return y.reduce((a, b) => Math.max(a, b), -1) + 1
 }
@@ -138,7 +138,8 @@ function rowSums(t: Tensor): Float64Array {
 
 function classTruth(d: Dataset): ClassificationTruth | undefined {
   const t = d.meta.truth
-  return t?.task === 'classification' ? t : undefined
+  // A regime truth (`regimeTruth`) is a classification truth without class densities: modifiers leave it alone.
+  return t?.task === 'classification' && 'priors' in t ? t : undefined
 }
 
 /** A Gaussian regression truth (an additive GAM truth has its own family, which these modifiers do not edit). */

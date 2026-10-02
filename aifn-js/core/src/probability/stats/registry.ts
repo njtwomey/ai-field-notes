@@ -121,6 +121,16 @@ fn(
 )
 fn(
   {
+    key: 'multivariateKde',
+    name: 'Multivariate Gaussian kernel density estimate',
+    summary: "A d-dimensional Gaussian KDE with the sample covariance scaled by Scott's or Silverman's factor.",
+    role: 'estimator',
+    notes: ['kernel-density-estimation'],
+  },
+  density.multivariateKde,
+)
+fn(
+  {
     key: 'kdeBandwidth',
     name: 'KDE bandwidth',
     summary: "Scott's or Silverman's rule-of-thumb bandwidth.",

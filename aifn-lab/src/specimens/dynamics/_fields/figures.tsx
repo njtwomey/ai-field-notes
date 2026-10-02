@@ -251,7 +251,6 @@ export function PhasePortraitSpecimen() {
           count={PORTRAIT_FRAMES + 1}
           format={time}
           label="3 · time"
-          duration={5}
         />
       }
       readouts={{
@@ -469,7 +468,6 @@ export function TransportSpecimen() {
           count={T_FRAMES + 1}
           format={time}
           label="3 · time"
-          duration={4}
         />
       }
       readouts={{

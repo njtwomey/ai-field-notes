@@ -167,7 +167,6 @@ export function PeekingPlayerSpecimen() {
             count={N}
             label="n"
             format={(i) => `${i + 1}`}
-            duration={8}
           />
         </ControlRow>
       }

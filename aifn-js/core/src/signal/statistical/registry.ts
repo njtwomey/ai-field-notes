@@ -6,6 +6,7 @@
 
 import { definer, entries, type AlgorithmInfo, type Entry, type FunctionInfo } from 'aifn/foundation/registry'
 import * as autoregression from './autoregression'
+import * as parametric from './parametric'
 import * as adaptive from './adaptive'
 
 const algorithm = definer<AlgorithmInfo>('algorithm', 'signal/statistical')
@@ -82,9 +83,81 @@ fn(
   },
   autoregression.burg,
 )
+fn(
+  {
+    key: 'leastSquaresAr',
+    name: 'Least-squares AR estimate',
+    summary: 'AR coefficients minimising forward (and backward) prediction errors without zero padding.',
+    role: 'estimator',
+    notes: AR,
+    cite: ['stoica2005'],
+  },
+  parametric.leastSquaresAr,
+)
+fn(
+  {
+    key: 'armaSpectrum',
+    name: 'ARMA power spectral density',
+    summary: 'σ² |B(e^{−iω})|² / |A(e^{−iω})|²: the spectrum of white noise through a rational filter.',
+    role: 'property',
+    returns: 'spectrum',
+    notes: [
+      'autoregressive-moving-average-model',
+      'parametric-spectral-estimation',
+      'autocorrelation-and-wiener-khinchin',
+    ],
+  },
+  parametric.armaSpectrum,
+)
+fn(
+  {
+    key: 'arPsd',
+    name: 'Autoregressive spectral estimate',
+    summary: 'The spectrum of an AR(p) fitted by Burg, Yule–Walker or least squares.',
+    role: 'estimator',
+    returns: 'spectrum',
+    notes: ['parametric-spectral-estimation', 'autoregressive-model'],
+    cite: ['stoica2005'],
+  },
+  parametric.arPsd,
+)
+fn(
+  {
+    key: 'music',
+    name: 'MUSIC pseudospectrum',
+    summary: 'Peaks where the steering vector is orthogonal to the noise subspace of the correlation matrix.',
+    role: 'estimator',
+    returns: 'spectrum',
+    notes: ['subspace-frequency-estimation', 'parametric-spectral-estimation'],
+    cite: ['schmidt1986'],
+  },
+  parametric.music,
+)
+fn(
+  {
+    key: 'esprit',
+    name: 'ESPRIT frequency estimates',
+    summary: 'Frequencies from the rotational invariance of the signal subspace, without a grid search.',
+    role: 'estimator',
+    notes: ['subspace-frequency-estimation', 'parametric-spectral-estimation'],
+    cite: ['roy1989'],
+  },
+  parametric.esprit,
+)
+fn(
+  {
+    key: 'sinusoidFit',
+    name: 'Least-squares sinusoid fit',
+    summary: 'Amplitudes and phases of sinusoids at known frequencies, a linear least-squares problem.',
+    role: 'fit',
+    notes: ['subspace-frequency-estimation', 'parametric-spectral-estimation'],
+    cite: ['stoica2005'],
+  },
+  parametric.sinusoidFit,
+)
 
 /** The functions of the module, keyed by name. */
 export const statisticalFunctions: Readonly<Record<string, Entry<(...args: never[]) => unknown, FunctionInfo>>> =
-  entries<FunctionInfo>('function', autoregression) as Readonly<
+  entries<FunctionInfo>('function', autoregression, parametric) as Readonly<
     Record<string, Entry<(...args: never[]) => unknown, FunctionInfo>>
   >

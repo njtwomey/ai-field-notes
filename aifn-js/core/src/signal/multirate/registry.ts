@@ -50,6 +50,18 @@ fn(
   multirate.dftFilterBank,
 )
 
+fn(
+  {
+    key: 'sincInterpolate',
+    name: 'Sinc (Whittaker–Shannon) interpolation',
+    tex: 'x(t) = \\sum_n x[n] \\operatorname{sinc}(f_s t - n)',
+    role: 'transform',
+    notes: ['sampling-theorem', 'aliasing'],
+    cite: ['shannon1949'],
+  },
+  multirate.sincInterpolate,
+)
+
 /** The functions of the module, keyed by name. */
 export const multirateFunctions: Readonly<Record<string, Entry<(...args: never[]) => unknown, FunctionInfo>>> =
   entries<FunctionInfo>('function', multirate) as Readonly<

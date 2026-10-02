@@ -158,7 +158,6 @@ export function TracePanel<S>({
               onChange={setPosition}
               count={kept}
               format={(p) => `${trace.index[Math.min(last, Math.round(p))] ?? ''}`}
-              defaultSpeed={30}
               startReason={startReason}
             />
           </div>

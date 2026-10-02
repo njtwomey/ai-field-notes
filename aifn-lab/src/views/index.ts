@@ -58,3 +58,14 @@ export { type GymRenderer, type GymRenderProps } from './gym/renderers'
 export { GYM_SERIES, actionSeries, type ActionSeries, type StateSeries } from './gym/series'
 export { HypothesisTestPanel, type HypothesisTestPanelProps } from './HypothesisTestView'
 export { AttentionPanel, attentionPattern, type AttentionPanelProps, type AttentionPattern } from './AttentionView'
+export { TrainControls, type TrainControlsProps } from './TrainControls'
+export { useTrainedRun, type TrainedRun } from './useTrainedRun'
+export {
+  CrfTrainingPlots,
+  CrfWeightPlots,
+  FiringFeatureList,
+  TemplateCells,
+  TemplateEditor,
+  type ParsedTemplates,
+} from './crf/CrfViews'
+export { crfOptimiserField, crfTrainingOptions, describeOptimiser } from './crf/optimiser'

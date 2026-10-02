@@ -12,7 +12,8 @@ def cases() -> dict[str, object]:
     x = np.vstack([c + rng.normal(scale=0.7, size=(15, 2)) for c in centres])
     init = np.array([[0.5, 0.5], [3.0, 0.0], [2.0, 2.0]])
 
-    km = KMeans(n_clusters=3, init=init, n_init=1, algorithm="lloyd", tol=0).fit(x)
+    # sklearn ships no type stubs, so Pyright takes init's and n_init's types from their defaults ("k-means++", "auto").
+    km = KMeans(n_clusters=3, init=init, n_init=1, algorithm="lloyd", tol=0).fit(x)  # pyright: ignore[reportArgumentType]
 
     gmm = {}
     for kind, sk in (("full", "full"), ("diagonal", "diag"), ("spherical", "spherical")):
@@ -39,12 +40,13 @@ def cases() -> dict[str, object]:
                 max_iter=it,
                 tol=0,
             ).fit(x)
+            fitted = np.asarray(g.covariances_)  # declared Optional; set by fit
             full = (
-                g.covariances_
+                fitted
                 if sk == "full"
-                else np.array([np.diag(v) for v in g.covariances_])
+                else np.array([np.diag(v) for v in fitted])
                 if sk == "diag"
-                else np.array([np.eye(2) * v for v in g.covariances_])
+                else np.array([np.eye(2) * v for v in fitted])
             )
             steps.append({"weights": g.weights_, "means": g.means_, "covariances": full, "lower_bound": g.lower_bound_})
         gmm[kind] = {"weights": weights, "covariances": covs, "steps": steps}

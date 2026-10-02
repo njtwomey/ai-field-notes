@@ -197,7 +197,6 @@ export function PathCloudSpecimen() {
           value={at}
           onChange={setAt}
           count={cloud.t.length}
-          duration={5}
           label="4 · time t"
           format={(i) => fmt(cloud.t[i])}
         />

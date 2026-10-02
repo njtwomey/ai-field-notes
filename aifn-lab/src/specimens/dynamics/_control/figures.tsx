@@ -101,9 +101,7 @@ export function LqrCartPoleSpecimen() {
       purpose="The optimal gain K = R⁻¹BᵀP trades the angle error against control effort: a heavier angle weight or a cheaper force catches the pole faster with a larger push."
       defaultSize="L"
       state={state}
-      controls={
-        <Player value={i} onChange={setI} count={t.length} duration={4} format={timeLabel(t)} label="3 · time t" />
-      }
+      controls={<Player value={i} onChange={setI} count={t.length} format={timeLabel(t)} label="3 · time t" />}
       readouts={{
         'at t': (
           <>
@@ -205,7 +203,6 @@ export function LqrPolesSpecimen() {
           value={k}
           onChange={setK}
           count={R_SWEEP.length}
-          duration={4}
           format={(j) => `log₁₀ R = ${R_SWEEP[j].toFixed(1)}`}
           label="2 · sweep log₁₀ R"
         />
@@ -319,9 +316,7 @@ export function PolePlacementSpecimen() {
       purpose="Choosing the closed-loop poles fixes the gain K by Ackermann's formula; LQR chooses them for you by minimising ∫ xᵀx + R u² dt. Real parts set the decay rate and imaginary parts the oscillation."
       defaultSize="XL"
       state={state}
-      controls={
-        <Player value={i} onChange={setI} count={t.length} duration={4} format={timeLabel(t)} label="2 · time t" />
-      }
+      controls={<Player value={i} onChange={setI} count={t.length} format={timeLabel(t)} label="2 · time t" />}
       readouts={{
         gains: (
           <>

@@ -5,13 +5,30 @@ Kolmogorov–Smirnov statistic on a grid) and the exact mean and variance. Discr
 all but about 1e-12 of the mass, for a chi-square goodness-of-fit test, and the exact mean and variance.
 """
 
+from typing import Any, Protocol, cast
+
 import numpy as np
 from scipy import stats
 
 PROBS = np.linspace(0.005, 0.995, 199)
 
 
-def continuous(name: str, dist: stats.rv_continuous, args: dict[str, float]) -> dict[str, object]:
+class Frozen(Protocol):
+    """The frozen-distribution methods the continuous cases use (scipy's rv_frozen, which is private)."""
+
+    def ppf(self, q: Any) -> Any: ...
+    def mean(self) -> Any: ...
+    def var(self) -> Any: ...
+
+
+class FrozenDiscrete(Frozen, Protocol):
+    """Calling an rv_discrete is typed as returning either frozen kind, so the discrete cases cast to this."""
+
+    def isf(self, q: Any) -> Any: ...
+    def pmf(self, k: Any) -> Any: ...
+
+
+def continuous(name: str, dist: Frozen, args: dict[str, float]) -> dict[str, object]:
     return {
         "name": name,
         "args": args,
@@ -22,7 +39,7 @@ def continuous(name: str, dist: stats.rv_continuous, args: dict[str, float]) -> 
     }
 
 
-def discrete(name: str, dist: stats.rv_discrete, args: dict[str, float]) -> dict[str, object]:
+def discrete(name: str, dist: FrozenDiscrete, args: dict[str, float]) -> dict[str, object]:
     lo = int(max(dist.ppf(1e-13) - 1, 0))
     hi = int(dist.isf(1e-13) + 1)
     k = np.arange(lo, hi + 1)
@@ -50,11 +67,11 @@ def cases() -> dict[str, object]:
     ]
     disc = [
         *[
-            discrete(f"poisson {lam}", stats.poisson(lam), {"lambda": lam})
+            discrete(f"poisson {lam}", cast(FrozenDiscrete, stats.poisson(lam)), {"lambda": lam})
             for lam in [0.5, 4.0, 9.9, 10.0, 25.0, 300.0]
         ],
         *[
-            discrete(f"binomial {n} {p}", stats.binom(n, p), {"n": n, "p": p})
+            discrete(f"binomial {n} {p}", cast(FrozenDiscrete, stats.binom(n, p)), {"n": n, "p": p})
             for n, p in [(10, 0.3), (40, 0.9), (1000, 0.2), (1_000_000, 0.4), (100_000, 1e-4), (61, 0.5)]
         ],
     ]

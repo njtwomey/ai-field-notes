@@ -5,6 +5,8 @@ Each case gives its inputs, the function's value and torch's derivatives; the te
 aifn primitives and compare.
 """
 
+from typing import cast
+
 import numpy as np
 import torch
 from scipy import special as sp
@@ -70,9 +72,10 @@ def cases() -> dict[str, object]:
     pt = t(p)
     y = loglik(pt)
     (g,) = torch.autograd.grad(y, pt)
-    h = torch.autograd.functional.hessian(loglik, pt)
+    # hessian and hvp are typed for tuples of inputs; one tensor in gives one tensor out.
+    h = cast(torch.Tensor, torch.autograd.functional.hessian(loglik, pt))
     v = np.array([0.7, -1.3])
-    _, hv = torch.autograd.functional.hvp(loglik, pt, torch.tensor(v))
+    hv = cast(torch.Tensor, torch.autograd.functional.hvp(loglik, pt, torch.tensor(v))[1])
     out["normalLogLikelihood"] = {
         "data": data,
         "params": p,

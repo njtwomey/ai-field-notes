@@ -3,6 +3,7 @@ the MurmurHash3 they hash with), Python's Unicode normalisation and case folding
 
 import re
 import unicodedata
+from typing import Any
 
 import numpy as np
 from sklearn.feature_extraction.text import CountVectorizer, HashingVectorizer, TfidfVectorizer
@@ -19,8 +20,13 @@ DOCS = [
 MESSY = [
     "Café ﬁancée naïve résumé — Straße ΣΊΣΥΦΟΣ",
     "The QUICK brown fox's tail: don't stop_now 42 times!",
-    "Ｆｕｌｌ-width ① x² ẞ and İstanbul",
+    "Ｆｕｌｌ-width ① x² ẞ and İstanbul",  # noqa: RUF001 (full-width letters on purpose: NFKC folds them)
 ]
+
+
+def dense(matrix: Any) -> np.ndarray:
+    """A vectoriser's sparse document-term matrix as a dense array (sklearn is unstubbed; returns are unknown)."""
+    return matrix.toarray()
 
 
 def tokens(doc: str) -> list[str]:
@@ -30,12 +36,12 @@ def tokens(doc: str) -> list[str]:
 def vectoriser_cases() -> dict[str, object]:
     out: dict[str, object] = {}
     cv = CountVectorizer()
-    counts = cv.fit_transform(DOCS).toarray()
+    counts = dense(cv.fit_transform(DOCS))
     out["count"] = {"vocabulary": cv.get_feature_names_out().tolist(), "matrix": counts}
     cvb2 = CountVectorizer(binary=True, ngram_range=(1, 2)).fit(DOCS)
     out["count_binary_bigrams"] = {
         "vocabulary": cvb2.get_feature_names_out().tolist(),
-        "matrix": cvb2.transform(DOCS).toarray(),
+        "matrix": dense(cvb2.transform(DOCS)),
     }
     cvdf = CountVectorizer(min_df=2, max_df=0.7).fit(DOCS)
     out["count_df_limits"] = {"vocabulary": cvdf.get_feature_names_out().tolist()}
@@ -50,13 +56,14 @@ def vectoriser_cases() -> dict[str, object]:
         out[f"tfidf_{name}"] = {
             "options": kw,
             "vocabulary": tv.get_feature_names_out().tolist(),
-            "matrix": tv.transform(DOCS).toarray(),
+            "matrix": dense(tv.transform(DOCS)),
             "idf": tv.idf_ if kw.get("use_idf", True) else None,
         }
-    hv = HashingVectorizer(n_features=8, norm=None, token_pattern=r"(?u)\b\w+\b")
-    out["hashing_8"] = {"matrix": hv.transform(DOCS).toarray()}
+    # norm is inferred as str from its default; None (no normalisation) is documented.
+    hv = HashingVectorizer(n_features=8, norm=None, token_pattern=r"(?u)\b\w+\b")  # pyright: ignore[reportArgumentType]
+    out["hashing_8"] = {"matrix": dense(hv.transform(DOCS))}
     hv2 = HashingVectorizer(n_features=16, alternate_sign=False)
-    out["hashing_16_unsigned_l2"] = {"matrix": hv2.transform(DOCS).toarray()}
+    out["hashing_16_unsigned_l2"] = {"matrix": dense(hv2.transform(DOCS))}
     return out
 
 
@@ -75,22 +82,27 @@ def analyzer_cases() -> dict[str, object]:
 
 def hash_cases() -> dict[str, object]:
     words = ["", "a", "ab", "abc", "abcd", "abcde", "the", "cat", "naïve", "日本語", "🙂", "hello world", "x" * 37]
-    return {"words": words, "hashes": [murmurhash3_32(w, seed=0) for w in words],
-            "seeded": [murmurhash3_32(w, seed=42) for w in words]}
+    return {
+        "words": words,
+        "hashes": [murmurhash3_32(w, seed=0) for w in words],
+        "seeded": [murmurhash3_32(w, seed=42) for w in words],
+    }
 
 
 def unicode_cases() -> dict[str, object]:
-    out: list[dict[str, str]] = []
+    out: list[dict[str, str | list[str]]] = []
     for s in MESSY:
-        out.append({
-            "text": s,
-            "nfkc": unicodedata.normalize("NFKC", s),
-            "casefold": s.casefold(),
-            "nfkc_casefold": unicodedata.normalize("NFC", unicodedata.normalize("NFKC", s).casefold()),
-            # scikit-learn's strip_accents='unicode'
-            "strip_accents": "".join(c for c in unicodedata.normalize("NFKD", s) if not unicodedata.combining(c)),
-            "sklearn_tokens": re.findall(r"(?u)\b\w\w+\b", s),
-        })
+        out.append(
+            {
+                "text": s,
+                "nfkc": unicodedata.normalize("NFKC", s),
+                "casefold": s.casefold(),
+                "nfkc_casefold": unicodedata.normalize("NFC", unicodedata.normalize("NFKC", s).casefold()),
+                # scikit-learn's strip_accents='unicode'
+                "strip_accents": "".join(c for c in unicodedata.normalize("NFKD", s) if not unicodedata.combining(c)),
+                "sklearn_tokens": re.findall(r"(?u)\b\w\w+\b", s),
+            }
+        )
     return {"strings": out}
 
 

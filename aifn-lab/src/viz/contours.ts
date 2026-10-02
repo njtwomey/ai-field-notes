@@ -76,3 +76,24 @@ export function contourSeries(
       : []),
   ]
 }
+
+/**
+ * The argmax margin fields of K score fields on one grid (e.g. class probabilities or mixture weights): mₖ(x) =
+ * sₖ(x) − max_{j≠k} sⱼ(x), positive exactly where k wins. The level-0 contour of mₖ is the boundary of k's region, so
+ * drawing every mₖ at 0 draws the argmax boundaries (each shared boundary appears in two margins). With K = 2, m₁ = s₁ − s₂
+ * alone suffices (for probabilities, the s₁ = 0.5 contour).
+ */
+export function argmaxMargins(fields: readonly (readonly (readonly number[])[])[]): number[][][] {
+  const K = fields.length
+  if (K === 0) return []
+  const rows = fields[0].length
+  return fields.map((_, k) =>
+    Array.from({ length: rows }, (__, i) =>
+      Array.from({ length: fields[0][i].length }, (___, j) => {
+        let other = -Infinity
+        for (let q = 0; q < K; q++) if (q !== k) other = Math.max(other, fields[q][i][j])
+        return fields[k][i][j] - other
+      }),
+    ),
+  )
+}

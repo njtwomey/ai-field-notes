@@ -12,6 +12,8 @@
 Parameters are in aifn's layout: Linear weights [in, out]; recurrent weights [in, gates * H].
 """
 
+from typing import cast
+
 import numpy as np
 import scipy.signal
 import torch
@@ -26,6 +28,11 @@ def t(a, grad: bool = False) -> torch.Tensor:
 
 def arr(x: torch.Tensor) -> np.ndarray:
     return x.detach().numpy()
+
+
+def grad_of(p: torch.Tensor) -> torch.Tensor:
+    assert p.grad is not None, "backward() has not reached this tensor"
+    return p.grad
 
 
 def legs(n: int) -> tuple[np.ndarray, np.ndarray]:
@@ -63,11 +70,15 @@ def cases() -> dict[str, object]:
     C = rng.normal(size=(1, 4))
     disc = {"A": A, "B": B, "C": C, "dt": 0.1}
     for method, name in [("zoh", "zoh"), ("bilinear", "bilinear")]:
-        Ad, Bd, *_ = scipy.signal.cont2discrete((A, B, C, np.zeros((1, 1))), 0.1, method=method)
+        Ad, Bd, *_ = cast(
+            tuple[np.ndarray, ...], scipy.signal.cont2discrete((A, B, C, np.zeros((1, 1))), 0.1, method=method)
+        )
         disc[name] = {"A": Ad, "B": Bd}
     S = np.array([[0.0, 1.0], [0.0, -0.5]])  # singular: ZOH must not invert A
     Sb = np.array([[0.0], [1.0]])
-    Ad, Bd, *_ = scipy.signal.cont2discrete((S, Sb, np.eye(2), np.zeros((2, 1))), 0.3, method="zoh")
+    Ad, Bd, *_ = cast(
+        tuple[np.ndarray, ...], scipy.signal.cont2discrete((S, Sb, np.eye(2), np.zeros((2, 1))), 0.3, method="zoh")
+    )
     disc["singular"] = {"A": S, "B": Sb, "dt": 0.3, "Ad": Ad, "Bd": Bd}
     out["discretise"] = disc
     out["hippo"] = {str(n): {"A": legs(n)[0], "B": legs(n)[1]} for n in [1, 3, 6]}
@@ -77,7 +88,8 @@ def cases() -> dict[str, object]:
     L = 12
     K = np.array([(C @ np.linalg.matrix_power(Ad, k) @ Bd).item() for k in range(L)])
     u = rng.normal(size=L)
-    _, y, x = scipy.signal.dlsim((Ad, Bd, C, np.zeros((1, 1)), 1), u)
+    # A state-space system makes dlsim return (t, y, x); its declared return also allows (t, y).
+    _, y, x = cast(tuple[np.ndarray, np.ndarray, np.ndarray], scipy.signal.dlsim((Ad, Bd, C, np.zeros((1, 1)), 1), u))
     # dlsim's state x_k is before input u_k; aifn's state after it (x_k = Ā x_{k−1} + B̄ u_k, y_k = C x_k).
     states = x[1:] if len(x) > L else np.vstack([x[1:], (Ad @ x[-1] + Bd[:, 0] * u[-1])[None]])
     out["s4"] = {"kernel": K, "u": u, "y": np.convolve(K, u)[:L], "states": states}
@@ -212,6 +224,6 @@ def cases() -> dict[str, object]:
         "hiddenBias": arr(gru.bias_hh),
         "loss": loss.item(),
         "hiddenGrads": np.stack([hh.grad.numpy() for hh in hs]),
-        "gInputWeight": arr(gru.weight_ih.grad).T,
+        "gInputWeight": arr(grad_of(gru.weight_ih)).T,
     }
     return out

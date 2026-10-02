@@ -6,7 +6,7 @@ import { linspace, reshape, toFlat, type Tensor } from 'aifn/foundation/tensor'
 import type { Trace } from 'aifn/foundation/trace'
 import { matern12, matern32, matern52, rbf } from 'aifn/learning/kernels'
 import { useMemo, useState } from 'react'
-import { Player } from '@lab/controls'
+import { Player, StatusText } from '@lab/controls'
 import { Dashboard, DashboardCell, DashboardRow, Equation, Figure, live, tex } from '@lab/layout'
 import { call, choice, float, int, row, useComputed, useFigureState } from '@lab/state'
 import { Annotation, Area, Bars, Curve, Handle, Plot, Plots, Points, Readout, useAxis } from '@lab/viz'
@@ -292,7 +292,6 @@ export function RvmShowcase() {
           value={pos}
           onChange={setPos}
           count={Math.max(1, states.length)}
-          duration={8}
           format={(p) => {
             const st = states[p]
             if (!st) return `step ${p}`
@@ -313,7 +312,7 @@ export function RvmShowcase() {
             {(run.stale || !run.value) && !run.error && (
               <Readout label="fit" value={<span aria-busy="true">computing in a worker…</span>} />
             )}
-            {run.error && <Readout label="fit failed" value={run.error} />}
+            {run.error && <StatusText tone="error">fit failed: {run.error}</StatusText>}
           </>
         ),
         'at the probe': (

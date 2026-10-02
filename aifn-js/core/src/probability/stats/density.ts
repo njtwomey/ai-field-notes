@@ -1,4 +1,4 @@
-import type { Tensor } from 'aifn/foundation/tensor'
+import { fromData, type Tensor } from 'aifn/foundation/tensor'
 import { allValues, toSequence, vectorOf, type Data } from './input'
 import { requireNonEmpty, requireSameLength, weightedVariance, variance } from './descriptive'
 import { interquartileRange, sortedValues } from './quantile'
@@ -249,4 +249,144 @@ export function kde(
     return s * norm
   })
   return { density: vectorOf(density), bandwidth: h, degenerate: !(h > 0) }
+}
+
+/** The sample covariance (n − 1) of row-major points [n × d]. */
+function sampleCovariance(x: ArrayLike<number>, n: number, d: number): Float64Array {
+  const mu = new Float64Array(d)
+  for (let i = 0; i < n; i++) for (let j = 0; j < d; j++) mu[j] += x[i * d + j] / n
+  const cov = new Float64Array(d * d)
+  for (let i = 0; i < n; i++)
+    for (let a = 0; a < d; a++)
+      for (let b = 0; b <= a; b++) cov[a * d + b] += ((x[i * d + a] - mu[a]) * (x[i * d + b] - mu[b])) / (n - 1)
+  for (let a = 0; a < d; a++) for (let b = 0; b < a; b++) cov[b * d + a] = cov[a * d + b]
+  return cov
+}
+
+/**
+ * The kernel N(0, c²Σ̂) of a sample: its covariance, log of 1/(n (2π)^{d/2} |c²Σ̂|^{1/2}), the whitened sample L⁻¹xᵢ
+ * (LLᵀ = c²Σ̂) and the whitening map, so a quadratic form is a squared distance between whitened points.
+ */
+function whitened(x: ArrayLike<number>, n: number, d: number, factor: number) {
+  const cov = sampleCovariance(x, n, d).map((v) => v * factor * factor)
+  const L = new Float64Array(d * d)
+  for (let a = 0; a < d; a++)
+    for (let b = 0; b <= a; b++) {
+      let s = cov[a * d + b]
+      for (let k = 0; k < b; k++) s -= L[a * d + k] * L[b * d + k]
+      if (a === b) {
+        if (!(s > 0)) throw new Error('multivariateKde: the sample covariance is singular (points on a subspace)')
+        L[a * d + a] = Math.sqrt(s)
+      } else L[a * d + b] = s / L[b * d + b]
+    }
+  let logDet = 0
+  for (let a = 0; a < d; a++) logDet += 2 * Math.log(L[a * d + a])
+  const logNorm = -0.5 * (d * Math.log(2 * Math.PI) + logDet) - Math.log(n)
+  const whiten = (src: ArrayLike<number>, off: number, out: Float64Array, o: number) => {
+    for (let a = 0; a < d; a++) {
+      let s = src[off + a]
+      for (let k = 0; k < a; k++) s -= L[a * d + k] * out[o + k]
+      out[o + a] = s / L[a * d + a]
+    }
+  }
+  const wx = new Float64Array(n * d)
+  for (let i = 0; i < n; i++) whiten(x, i * d, wx, i * d)
+  return { cov, logNorm, wx, whiten }
+}
+
+/**
+ * The bandwidth factor maximising the leave-one-out log-likelihood Σᵢ log f̂₋ᵢ(xᵢ) over 25 log-spaced factors in
+ * [0.01, 2] (likelihood cross-validation; Duin, 1976; Silverman, 1986, §3.4.4). Unlike Scott's rule, which assumes one
+ * Gaussian bump, it follows the scale of narrow, separated modes.
+ */
+function crossValidatedFactor(x: ArrayLike<number>, n: number, d: number): number {
+  // Squared distances under the unscaled covariance (factor 1); a factor c divides them by c².
+  const { wx } = whitened(x, n, d, 1)
+  const d2 = new Float64Array(n * n)
+  for (let i = 0; i < n; i++)
+    for (let j = 0; j < i; j++) {
+      let s = 0
+      for (let a = 0; a < d; a++) s += (wx[i * d + a] - wx[j * d + a]) ** 2
+      d2[i * n + j] = d2[j * n + i] = s
+    }
+  let best = 1
+  let bestScore = -Infinity
+  for (let k = 0; k < 25; k++) {
+    const c = 0.01 * 200 ** (k / 24)
+    let score = -n * d * Math.log(c)
+    for (let i = 0; i < n; i++) {
+      let top = -Infinity
+      for (let j = 0; j < n; j++) if (j !== i) top = Math.max(top, -d2[i * n + j] / (2 * c * c))
+      let acc = 0
+      for (let j = 0; j < n; j++) if (j !== i) acc += Math.exp(-d2[i * n + j] / (2 * c * c) - top)
+      score += top + Math.log(acc)
+    }
+    if (score > bestScore) {
+      bestScore = score
+      best = c
+    }
+  }
+  return best
+}
+
+/** What `multivariateKde` returns. */
+export type MultivariateKde = {
+  /** f̂ at each query row (rank 1). */
+  density: Tensor
+  /** log f̂ at each query row (rank 1), computed stably (finite far from the sample). */
+  logDensity: Tensor
+  /** The bandwidth factor c: the kernel covariance is c²Σ̂. */
+  factor: number
+  /** The kernel covariance c²Σ̂ (d × d, row-major). */
+  covariance: Tensor
+}
+
+/**
+ * A Gaussian kernel density estimate in d dimensions, as `scipy.stats.gaussian_kde`: the kernel is N(0, c²Σ̂) with Σ̂
+ * the sample covariance (n − 1 denominator) and c the bandwidth factor, Scott's n^{−1/(d+4)} (default), Silverman's
+ * (n(d + 2)/4)^{−1/(d+4)}, `cross-validation` (the leave-one-out likelihood's best factor) or a given number; f̂(t) = (1/n) Σᵢ N(t; xᵢ, c²Σ̂). `sample` is [n, d] and `at` is [m, d].
+ */
+export function multivariateKde(
+  sample: Tensor,
+  at: Tensor,
+  options: { bandwidth?: BandwidthRule | 'cross-validation' } = {},
+): MultivariateKde {
+  const [n, d] = sample.shape
+  const [m, dq] = at.shape
+  if (!(n >= 2) || d !== dq) throw new Error('multivariateKde: need an [n, d] sample (n ≥ 2) and [m, d] queries')
+  const rule = options.bandwidth ?? 'scott'
+  const x = allValues(sample)
+  const q = allValues(at)
+  const factor =
+    typeof rule === 'number'
+      ? rule
+      : rule === 'scott'
+        ? n ** (-1 / (d + 4))
+        : rule === 'silverman'
+          ? ((n * (d + 2)) / 4) ** (-1 / (d + 4))
+          : crossValidatedFactor(x, n, d)
+  if (!(factor > 0)) throw new Error('multivariateKde: the bandwidth factor must be positive')
+  const { cov, logNorm, wx, whiten } = whitened(x, n, d, factor)
+  const wq = new Float64Array(d)
+  const terms = new Float64Array(n)
+  const logDensity = new Float64Array(m)
+  for (let r = 0; r < m; r++) {
+    whiten(q, r * d, wq, 0)
+    let top = -Infinity
+    for (let i = 0; i < n; i++) {
+      let s = 0
+      for (let a = 0; a < d; a++) s += (wq[a] - wx[i * d + a]) ** 2
+      terms[i] = -0.5 * s
+      if (terms[i] > top) top = terms[i]
+    }
+    let acc = 0
+    for (let i = 0; i < n; i++) acc += Math.exp(terms[i] - top)
+    logDensity[r] = logNorm + top + Math.log(acc)
+  }
+  return {
+    density: vectorOf(logDensity.map(Math.exp)),
+    logDensity: vectorOf(logDensity),
+    factor,
+    covariance: fromData(cov, [d, d]),
+  }
 }

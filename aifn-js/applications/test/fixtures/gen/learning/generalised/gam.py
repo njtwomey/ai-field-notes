@@ -8,6 +8,8 @@ design, wrapped difference penalty), a tensor-product smooth (row-wise Kronecker
 I ⊗ S_B; Wood, 2006) and a factor term (indicator columns, optionally ridge-penalised), each centred by a sum-to-zero
 constraint in the KKT system, at fixed smoothing parameters."""
 
+from typing import cast
+
 import numpy as np
 from scipy import interpolate, optimize
 
@@ -137,12 +139,14 @@ def expectile(B, y, lam, tau):
     """Least asymmetric weighted squares (Schnabel and Eilers, 2009): refit with weight τ above the curve and 1 − τ
     below it, from w = ½, until no point changes side."""
     w = np.full(len(y), 0.5)
+    f = None
     for _ in range(100):
         f, *_ = fit([B], y, [lam], w)
         nxt = np.where(y > f, tau, 1 - tau)
         if np.array_equal(nxt, w):
             break
         w = nxt
+    assert f is not None
     return {"fitted": f, "below": float(np.mean(y < f))}
 
 
@@ -201,8 +205,11 @@ def cases() -> dict[str, object]:
         f, e, *_ = fit(blocks[:1], y, [np.exp(log_lam)])
         rss = np.sum((y - f) ** 2)
         gcv.append(n * rss / (n - e) ** 2)
-    reml_best = optimize.minimize_scalar(
-        lambda r: reml_criterion(blocks[0], y, r), bounds=(-8, 8), method="bounded", options={"xatol": 1e-8}
+    reml_best = cast(
+        optimize.OptimizeResult,
+        optimize.minimize_scalar(
+            lambda r: reml_criterion(blocks[0], y, r), bounds=(-8, 8), method="bounded", options={"xatol": 1e-8}
+        ),
     ).x
     reml_grid = np.linspace(-4, 4, 17)
     reml = [reml_criterion(blocks[0], y, r) for r in reml_grid]

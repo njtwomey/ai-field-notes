@@ -1,9 +1,11 @@
 """Golden values for aifn/stats, from numpy and scipy (direct sums where neither has the function)."""
 
+from typing import Any, Literal, Protocol, cast, get_args
+
 import numpy as np
 from scipy import stats
 
-QUANTILE_METHODS = [
+QuantileMethod = Literal[
     "inverted_cdf",
     "averaged_inverted_cdf",
     "closest_observation",
@@ -18,6 +20,17 @@ QUANTILE_METHODS = [
     "midpoint",
     "nearest",
 ]
+QUANTILE_METHODS: list[QuantileMethod] = list(get_args(QuantileMethod))
+
+
+class Statistic(Protocol):
+    """scipy's correlation results are built dynamically, so Pyright cannot see their `statistic`."""
+
+    statistic: Any
+
+
+def statistic(result: object) -> Any:
+    return cast(Statistic, result).statistic
 
 
 def lagged(x: np.ndarray, y: np.ndarray, max_lag: int, adjusted: bool = False) -> np.ndarray:
@@ -111,11 +124,11 @@ def cases() -> dict[str, object]:
             "kurtosisUnbiased": stats.kurtosis(x, bias=False),
             "cov": np.cov(x, y, ddof=0)[0, 1],
             "covSample": np.cov(x, y)[0, 1],
-            "pearson": stats.pearsonr(x, y).statistic,
-            "spearman": stats.spearmanr(x, y).statistic,
-            "kendall": stats.kendalltau(x, y).statistic,
-            "spearmanTies": stats.spearmanr(ties, ties_y).statistic,
-            "kendallTies": stats.kendalltau(ties, ties_y).statistic,
+            "pearson": statistic(stats.pearsonr(x, y)),
+            "spearman": statistic(stats.spearmanr(x, y)),
+            "kendall": statistic(stats.kendalltau(x, y)),
+            "spearmanTies": statistic(stats.spearmanr(ties, ties_y)),
+            "kendallTies": statistic(stats.kendalltau(ties, ties_y)),
             "zscore": stats.zscore(x),
             "zscoreSample": stats.zscore(x, ddof=1),
             "median": np.median(x),

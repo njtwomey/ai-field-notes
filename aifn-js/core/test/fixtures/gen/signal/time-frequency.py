@@ -45,7 +45,7 @@ def cases() -> dict[str, object]:
             "hop": hop,
             "window": window,
             "f": freqs,
-            "re": X.real,
-            "im": X.imag,
+            "re": np.real(X),
+            "im": np.imag(X),
         }
     return {"x": x, "fs": fs, "fmin": fmin, "cqt": out}

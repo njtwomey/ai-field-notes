@@ -98,7 +98,7 @@ export function MazeSpecimen() {
       state={state}
       controls={
         <div className="col-span-full">
-          <Player label="2 · expansion" value={at} onChange={setStep} count={count} defaultSpeed={12} />
+          <Player label="2 · expansion" value={at} onChange={setStep} count={count} />
         </div>
       }
       readouts={{

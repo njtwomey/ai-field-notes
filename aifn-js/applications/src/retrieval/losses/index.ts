@@ -1,6 +1,6 @@
 /**
  * `aifn-applied/retrieval/losses`: ranking and retrieval losses (pointwise, pairwise and listwise; sampled softmax,
- * negative sampling, NCE, InfoNCE, triplet, contrastive), collected in `retrievalLossRegistry`.
+ * negative sampling, NCE, in-batch softmax, triplet, contrastive), collected in `retrievalLossRegistry`.
  */
 
 export {
@@ -28,12 +28,10 @@ export {
 export {
   contrastive,
   inBatchSoftmax,
-  infoNce,
   negativeSampling,
   noiseContrastiveEstimation,
   sampledSoftmax,
   triplet,
-  type InfoNceOptions,
   type MarginOptions,
   type NceOptions,
   type SampledSoftmaxOptions,

@@ -1,5 +1,7 @@
 """Golden values for aifn/linalg from numpy and scipy, including singular and ill-conditioned inputs."""
 
+from typing import cast
+
 import numpy as np
 import scipy.linalg as sla
 
@@ -16,10 +18,12 @@ def eigsh_cases() -> dict[str, object]:
 
     rng = np.random.default_rng(17)
     n = 300
-    lap = sp.diags([-np.ones(n - 1), 2 * np.ones(n), -np.ones(n - 1)], [-1, 0, 1]).toarray()
+    # scipy is unstubbed: diags' offsets and eigsh's tol are inferred as int from their defaults, and the rng decorator
+    # hides the legacy random_state keyword (which seeds differently from rng=, so it stays).
+    lap = sp.diags([-np.ones(n - 1), 2 * np.ones(n), -np.ones(n - 1)], [-1, 0, 1]).toarray()  # pyright: ignore[reportArgumentType]
     lap[0, 0] = lap[-1, -1] = 1  # free ends: a graph Laplacian with eigenvalue 0
     m = 200
-    r = sp.random(m, m, density=0.03, random_state=rng, data_rvs=rng.standard_normal).toarray()
+    r = sp.random(m, m, density=0.03, random_state=rng, data_rvs=rng.standard_normal).toarray()  # pyright: ignore[reportCallIssue]
     sym = r + r.T
     out = {}
     for key, a in {"laplacian": lap, "random": sym}.items():
@@ -28,7 +32,7 @@ def eigsh_cases() -> dict[str, object]:
         for which, label in [("LA", "largest"), ("SA", "smallest"), ("LM", "magnitude")]:
             # ARPACK draws a random start vector unless given one; a seeded v0 makes the fixture reproducible.
             v0 = np.random.default_rng(0).standard_normal(a.shape[0])
-            w, v = eigsh(a, k=5, which=which, tol=1e-12, v0=v0)
+            w, v = eigsh(a, k=5, which=which, tol=1e-12, v0=v0)  # pyright: ignore[reportArgumentType]
             order = {"LA": np.argsort(-w), "SA": np.argsort(w), "LM": np.argsort(-np.abs(w))}[which]
             entry[label] = {"values": w[order], "vectors": v[:, order]}
         out[key] = entry
@@ -46,7 +50,7 @@ def cases() -> dict[str, object]:
     upper = lower.T.copy()
 
     chol = np.linalg.cholesky(spd)
-    p, lo, up = sla.lu(general)
+    p, lo, up = cast(tuple[np.ndarray, np.ndarray, np.ndarray], sla.lu(general))  # (p, l, u) without permute_l
     sign, logabs = np.linalg.slogdet(general)
     values, vectors = descending_eigh(spd)
 
@@ -87,7 +91,7 @@ def cases() -> dict[str, object]:
     }
     two_out = {
         "symEig": descending_eigh(two["sym"]),
-        "generalEig": np.sort(np.linalg.eigvals(two["general"]).real)[::-1],
+        "generalEig": np.sort(np.real(np.linalg.eigvals(two["general"])))[::-1],
         "rotationEig": [
             float(np.linalg.eigvals(two["rotation"])[0].real),
             float(abs(np.linalg.eigvals(two["rotation"])[0].imag)),
@@ -109,9 +113,9 @@ def cases() -> dict[str, object]:
         "cholesky": chol,
         "triangular": {
             "lower": sla.solve_triangular(lower, rhs, lower=True),
-            "lowerTrans": sla.solve_triangular(lower, rhs, lower=True, trans="T"),
+            "lowerTrans": sla.solve_triangular(lower, rhs, lower=True, trans=1),  # trans=1 is "T": solve Aᵀ x = b
             "upper": sla.solve_triangular(upper, rhs, lower=False),
-            "upperTrans": sla.solve_triangular(upper, vec, lower=False, trans="T"),
+            "upperTrans": sla.solve_triangular(upper, vec, lower=False, trans=1),
             "unit": sla.solve_triangular(lower, vec, lower=True, unit_diagonal=True),
         },
         "choSolve": sla.cho_solve((chol, True), rhs),

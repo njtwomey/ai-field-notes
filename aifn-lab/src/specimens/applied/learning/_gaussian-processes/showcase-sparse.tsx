@@ -11,7 +11,7 @@ import { fromData, linspace, toFlat, type Tensor } from 'aifn/foundation/tensor'
 import type { Trace } from 'aifn/foundation/trace'
 import { rbf } from 'aifn/learning/kernels'
 import { memo, useCallback, useMemo, useRef, useState } from 'react'
-import { Player } from '@lab/controls'
+import { Player, StatusText } from '@lab/controls'
 import { Dashboard, DashboardCell, DashboardRow, Equation, Figure, live, tex } from '@lab/layout'
 import { call, choice, float, int, row, useComputed, useFigureState, when } from '@lab/state'
 import { Area, Curve, Handle, Plot, Plots, Points, Readout, useAxis, type AxisModel } from '@lab/viz'
@@ -54,7 +54,12 @@ const SCHEMA = {
     mode: choice(MODES, 'grow', { label: 'mode' }),
     m: int(8, { ge: 2, le: 30, label: 'inducing inputs m', when: when('mode', 'optimise') }),
     maxM: int(15, { ge: 2, le: 40, label: 'grow to m', when: when('mode', 'grow') }),
-    reoptimise: choice([0, 3, 10], 0, { label: 'L-BFGS steps per addition', when: when('mode', 'grow') }),
+    reoptimise: int(0, {
+      ge: 0,
+      suggestions: [0, 3, 10],
+      label: 'L-BFGS steps per addition',
+      when: when('mode', 'grow'),
+    }),
   }),
 }
 
@@ -232,7 +237,6 @@ export function SparseGpShowcase() {
           value={pos}
           onChange={setPos}
           count={Math.max(1, frames.length)}
-          duration={grow ? 6 : 10}
           format={(p) => (grow ? `m = ${frames[p]?.z.length ?? '…'}` : `step ${p}`)}
         />
       }
@@ -254,7 +258,7 @@ export function SparseGpShowcase() {
             {(run.stale || !run.value) && !run.error && (
               <Readout label="run" value={<span aria-busy="true">computing in a worker…</span>} />
             )}
-            {run.error && <Readout label="run failed" value={run.error} />}
+            {run.error && <StatusText tone="error">run failed: {run.error}</StatusText>}
           </>
         ),
       }}

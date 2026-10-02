@@ -2,9 +2,11 @@
  * The registry of `aifn-applied/inference/sequence-models`.
  */
 
-import { definer, entries, type Entry, type FunctionInfo } from 'aifn/foundation/registry'
+import { definer, entries, type AlgorithmInfo, type Entry, type FunctionInfo } from 'aifn/foundation/registry'
 import * as crf from './crf'
 import * as hmm from './hmm'
+import * as templateCrf from './template-crf'
+import * as toyTagging from './toy-tagging'
 
 const fn = definer<FunctionInfo>('function', 'inference/sequence-models')
 const HMM = ['hidden-markov-model']
@@ -65,8 +67,106 @@ fn(
   crf.crfGradient,
 )
 
+const TCRF = ['conditional-random-field', 'conditional-random-field-variants']
+fn(
+  {
+    key: 'templateCrf',
+    name: 'Linear-chain CRF over feature templates',
+    summary: 'A CRF whose features are CRF++ template strings conjoined with the current label (U) or label pair (B).',
+    role: 'construction',
+    notes: TCRF,
+    cite: ['lafferty2001', 'sutton2012', 'twomey2016'],
+  },
+  templateCrf.templateCrf,
+)
+fn({ key: 'crfProblem', name: 'CRF training problem', role: 'construction', notes: TCRF }, templateCrf.crfProblem)
+fn(
+  {
+    key: 'templateCrfMarginals',
+    name: 'Template CRF marginals (forward–backward)',
+    role: 'inference',
+    notes: TCRF,
+    cite: ['twomey2016'],
+  },
+  templateCrf.templateCrfMarginals,
+)
+fn(
+  { key: 'templateCrfViterbi', name: 'Template CRF decoding (Viterbi)', role: 'inference', notes: TCRF },
+  templateCrf.templateCrfViterbi,
+)
+fn(
+  {
+    key: 'templateCrfPosterior',
+    name: 'Template CRF posterior (max-marginal) decoding',
+    role: 'inference',
+    notes: TCRF,
+  },
+  templateCrf.templateCrfPosterior,
+)
+fn(
+  {
+    key: 'crfNegLogLikelihood',
+    name: 'Template CRF negative log-likelihood and gradient',
+    summary: 'Expected minus observed feature counts from the node and pairwise marginals.',
+    role: 'estimator',
+    notes: TCRF,
+    cite: ['sutton2012'],
+  },
+  templateCrf.crfNegLogLikelihood,
+)
+fn(
+  {
+    key: 'firingFeatures',
+    name: 'Features firing at a position',
+    role: 'property',
+    notes: TCRF,
+  },
+  templateCrf.firingFeatures,
+)
+fn(
+  {
+    key: 'crfTrainingRun',
+    name: 'Template CRF training run',
+    role: 'fit',
+    summary: 'Index, encode and train a template CRF, yielding the model and its curves after every step.',
+    notes: TCRF,
+  },
+  templateCrf.crfTrainingRun,
+)
+
+fn(
+  {
+    key: 'toyPosCorpus',
+    name: 'Toy part-of-speech corpus',
+    summary: 'Short tagged English sentences with ambiguous words, as CRF++ rows (word, suffix, shape).',
+    role: 'construction',
+    notes: ['sequence-labelling', ...TCRF],
+  },
+  toyTagging.toyPosCorpus,
+)
+
+const algorithm = definer<AlgorithmInfo>('algorithm', 'inference/sequence-models')
+algorithm(
+  {
+    key: 'crfTraining',
+    name: 'Template CRF training',
+    summary: 'L-BFGS, OWL-QN (L1 + L2), SGD or Adam on the regularised conditional log-likelihood.',
+    problem: 'sequence',
+    state: { iterate: 'weights', objective: 'objective', flags: ['converged', 'diverged', 'stalled'] },
+    notes: [...TCRF, 'quasi-newton-methods'],
+    cite: ['sutton2012', 'liu1989', 'tsuruoka2009'],
+  },
+  templateCrf.crfTraining,
+)
+
+/** The algorithms of the module. */
+export const sequenceModelAlgorithms: Readonly<Record<string, Entry<(...args: never[]) => unknown, AlgorithmInfo>>> =
+  entries<AlgorithmInfo>('algorithm', templateCrf) as Readonly<
+    Record<string, Entry<(...args: never[]) => unknown, AlgorithmInfo>>
+  >
+
 /** The functions of the module. */
 export const sequenceModelFunctions: Readonly<Record<string, Entry<(...args: never[]) => unknown, FunctionInfo>>> =
-  entries<FunctionInfo>('function', hmm, crf) as Readonly<
+  entries<FunctionInfo>('function', hmm, crf, templateCrf, toyTagging) as Readonly<
     Record<string, Entry<(...args: never[]) => unknown, FunctionInfo>>
   >

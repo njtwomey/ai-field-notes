@@ -69,6 +69,7 @@ import {
   nuts,
   particleFilter,
   randomWalkMetropolis,
+  langevinParticles,
   sgld,
   sliceSampler,
   temperedSmc,
@@ -84,12 +85,12 @@ import {
   msprt,
   sprt,
 } from 'aifn/probability/tests'
-import { normal, normals } from 'aifn/foundation/random'
-import { binaryCrossEntropyWithLogits } from 'aifn/learning/losses'
+import { normal, normals, uniform } from 'aifn/foundation/random'
+import { binaryCrossEntropyWithLogits, discriminatorLoss, generatorLoss } from 'aifn/learning/losses'
 import { poolAdjacentViolatorsSteps } from 'aifn/learning/calibration'
 import { xavierUniform } from 'aifn/nn/init'
 import { Mlp } from 'aifn/nn/layers'
-import { trainingLoop } from 'aifn/nn/training'
+import { adversarialTraining, contrastiveDivergence, fullBatchTraining, trainingLoop } from 'aifn/nn/training'
 import { flashAttentionSteps } from 'aifn/nn/attention'
 import { beamSearch, greedyDecoding, samplingDecoding, speculativeDecoding } from 'aifn/nn/decoding'
 import { add as addT, blellochScanSteps, hillisSteeleScanSteps } from 'aifn/foundation/tensor'
@@ -143,7 +144,7 @@ import {
   simplex,
 } from 'aifn/optim/programming'
 import { fista, ista, projectBox, projectedGradient, proximalGradient, proxL1 } from 'aifn/optim/proximal'
-import { bfgs, gaussNewton, lbfgs, levenbergMarquardt, newton, trustRegion } from 'aifn/optim/second-order'
+import { bfgs, gaussNewton, lbfgs, levenbergMarquardt, newton, owlqn, trustRegion } from 'aifn/optim/second-order'
 import { siftSteps, vmdSteps } from 'aifn/signal/decompositions'
 import { lms, nlms, rls } from 'aifn/signal/statistical'
 import { stateSpace, simulate } from 'aifn/systems'
@@ -154,6 +155,8 @@ import { casinoChain, isingGrid, randomTree, sprinkler } from '../../inference/g
 import { banana, gaussianTarget } from '../../inference/stochastic/targets'
 import { bowl, rosenbrock } from '../../optim/problems'
 import { bpeSteps, unigramLmSteps, wordPieceSteps } from 'aifn/text/subword'
+import { trainingSteps, whitespacePreTokeniser } from 'aifn/text/pipeline'
+import { hyphenationPatterns, liangSteps, parseHyphenated, patgenSteps } from 'aifn/text/hyphenation'
 import { checkProtocol, plainOf } from '../../protocol'
 import { address, entriesOf } from '../../registries'
 
@@ -524,6 +527,46 @@ const CASES: Record<string, () => Case> = {
       undefined,
       6,
     ),
+  'inference/stochastic/langevinParticles': () =>
+    at(
+      langevinParticles((x: Tensor) => mul(-1, x) as Tensor, { stepSize: 0.05 }),
+      { x: normals(stream('particles'), [16, 2]) },
+      10,
+    ),
+  'nn/training/adversarialTraining': () =>
+    at(
+      adversarialTraining<Tensor[], Tensor[]>({
+        // A point-mass generator θ against a linear critic a·x + b on data drawn near 1.
+        criticLoss: ([a, b], [theta], s) =>
+          discriminatorLoss(addT(mul(a, normals(s, 2, 1, 0.1)), b), addT(mul(a, mul(theta, tensor([1, 1]))), b)),
+        generatorLoss: ([theta], [a, b]) => generatorLoss(addT(mul(a, mul(theta, tensor([1, 1]))), b)),
+        criticSteps: 2,
+      }),
+      { generator: [tensor([0])], critic: [tensor([0.1]), tensor([0])] },
+      8,
+    ),
+  'nn/training/contrastiveDivergence': () =>
+    at(
+      contrastiveDivergence<Tensor[], { x: Tensor }>({
+        energy: ([theta], x) => mul(0.5, sum(square(sub(x, theta)), -1)),
+        data: { x: tensor(ys.map((v) => [v])) },
+        batchSize: 4,
+        sampler: { steps: 3, stepSize: 0.1, fresh: (s, n) => uniform(s, -2, 2, { shape: [n, 1] }) as Tensor },
+        bufferSize: 10,
+      }),
+      { params: [tensor([0])] },
+      8,
+    ),
+  'nn/training/fullBatchTraining': () =>
+    at(
+      fullBatchTraining({
+        loss: (p: ReturnType<typeof mlp.init>, b: typeof data) => binaryCrossEntropyWithLogits(mlp.apply(p, b.x), b.y),
+        data,
+        options: { memory: 5 },
+      }),
+      { params: mlp.init(stream('protocol')) },
+      8,
+    ),
   'nn/training/trainingLoop': () =>
     at(
       trainingLoop({
@@ -707,6 +750,7 @@ const CASES: Record<string, () => Case> = {
   'optim/second-order/trustRegion': () => at(trustRegion(rosen.objective, { hessian: rosen.hessian }), fromRosen),
   'optim/second-order/bfgs': () => at(bfgs(rosen.objective), fromRosen),
   'optim/second-order/lbfgs': () => at(lbfgs(rosen.objective, { memory: 3 }), fromRosen),
+  'optim/second-order/owlqn': () => at(owlqn(rosen.objective, { memory: 3, l1: 0.1 }), fromRosen),
   'optim/second-order/gaussNewton': () => at(gaussNewton(residuals), { x0: [1, 0] }, 6),
   'optim/second-order/levenbergMarquardt': () => at(levenbergMarquardt(residuals), { x0: [1, 0] }, 6),
   'signal/decompositions/siftSteps': () => at(siftSteps(sift), undefined, 4),
@@ -739,10 +783,38 @@ const CASES: Record<string, () => Case> = {
       undefined,
       6,
     ),
+  'text/hyphenation/liangSteps': () =>
+    at(
+      liangSteps(hyphenationPatterns(['hy3ph', 'he2n', 'hena4', 'hen5at', '1na', 'n2at']), 'hyphenation'),
+      undefined,
+      13,
+    ),
+  'text/hyphenation/patgenSteps': () =>
+    at(
+      patgenSteps(
+        ['hy-phen-a-tion', 'ta-ble', 'peo-ple', 'win-ter', 'bet-ter'].map((w) => parseHyphenated(w)),
+        {
+          leftMin: 1,
+          rightMin: 1,
+        },
+      ),
+      undefined,
+      6,
+    ),
   'text/subword/bpeSteps': () => at(bpeSteps({ low: 5, lower: 2, newest: 6, widest: 3 }), undefined, 12),
   'text/subword/wordPieceSteps': () => at(wordPieceSteps({ hug: 10, pug: 5, pun: 12, bun: 4, hugs: 5 }), undefined, 8),
   'text/subword/unigramLmSteps': () =>
     at(unigramLmSteps({ hug: 10, pug: 5, pun: 12, bun: 4, hugs: 5 }, { vocabularySize: 12 }), undefined, 4),
+  'text/pipeline/trainingSteps': () =>
+    at(
+      trainingSteps({ preTokeniser: whitespacePreTokeniser() }, ['low lower newest widest', 'newest low'], {
+        type: 'bpe',
+        vocabularySize: 20,
+        minCount: 1,
+      }),
+      undefined,
+      6,
+    ),
 }
 
 const FLAGS = ['converged', 'diverged', 'stalled', 'terminated'] as const

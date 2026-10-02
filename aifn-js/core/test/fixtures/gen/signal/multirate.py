@@ -40,7 +40,7 @@ def cases() -> dict[str, object]:
     decimate.append({"q": 4, "ftype": "iir", "n": 4, "zeroPhase": True, "y": signal.decimate(long, 4, n=4)})
 
     M = 4
-    proto = signal.firwin(24, 1 / M)
+    proto = np.asarray(signal.firwin(24, 1 / M))
     xs = rng.normal(size=61)
     frames = -(-(len(xs) + len(proto) - 1) // M)
     bank = np.zeros((M, frames), dtype=complex)
@@ -58,6 +58,6 @@ def cases() -> dict[str, object]:
         "resamplePoly": {"cases": resample, "variants": variants},
         "long": long,
         "decimateSignal": decimate,
-        "dftFilterBank": {"x": xs, "prototype": proto, "channels": M, "re": bank.real, "im": bank.imag},
+        "dftFilterBank": {"x": xs, "prototype": proto, "channels": M, "re": np.real(bank), "im": np.imag(bank)},
         "polyphase": {"h": proto, "branches": M, "components": poly},
     }

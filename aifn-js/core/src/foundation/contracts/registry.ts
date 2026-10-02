@@ -108,7 +108,8 @@ export interface MetricInfo extends Info {
 }
 
 /** The family a loss belongs to, as the site's notes group them. */
-export type LossFamily = 'classification' | 'regression' | 'ranking' | 'retrieval' | 'representation' | 'divergence'
+export type LossFamily =
+  'classification' | 'regression' | 'ranking' | 'retrieval' | 'representation' | 'divergence' | 'adversarial' | 'energy'
 
 /**
  * What a loss reads from a model: `logits`, `probabilities`, `margins` (scores with labels in {−1, +1}), `values`,

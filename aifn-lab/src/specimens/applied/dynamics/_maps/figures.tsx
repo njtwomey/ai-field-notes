@@ -159,7 +159,6 @@ export function BifurcationSpecimen() {
               count={SWEEP}
               format={(k) => `r = ${sweepR(k).toFixed(3)}`}
               label="r"
-              duration={10}
               startReason="The sweep is a view of r, which opens at the family's chosen value."
             />
           </ControlRow>
@@ -171,7 +170,6 @@ export function BifurcationSpecimen() {
               count={COBWEB_N + 1}
               format={(k) => `n = ${k}`}
               label="iteration"
-              duration={5}
             />
           </ControlRow>
         </>
@@ -311,7 +309,6 @@ export function PlaneMapSpecimen() {
               count={REVEAL + 1}
               format={(i) => `n = ${i}`}
               label="iteration"
-              duration={5}
             />
           </ControlRow>
         </>

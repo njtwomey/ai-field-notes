@@ -46,12 +46,14 @@ export interface Recipe {
 export interface Truth<X = Tensor> extends Model, Decides<X>, Predicts<X, Distribution>, Expects<X> {
   /**
    * `changepoint`: a piecewise series whose inputs are times; `decide` gives the segment, `predictive` and `expect`
-   * the law and mean of the value at each time.
+   * the law and mean of the value at each time. `spectrum`: a stationary series (plus sinusoids) whose inputs are
+   * times, with a known power spectrum; `expect` gives the sinusoids at each time, `predictive` the marginal law.
    */
-  readonly task: 'classification' | 'regression' | 'changepoint'
+  readonly task: 'classification' | 'regression' | 'changepoint' | 'spectrum'
   /**
-   * The Bayes error (classification), the Bayes risk under squared loss (regression), or the mean squared error of
-   * predicting each value from its segment's true parameters (changepoint).
+   * The Bayes error (classification), the Bayes risk under squared loss (regression), the mean squared error of
+   * predicting each value from its segment's true parameters (changepoint), or the variance of the stochastic part
+   * (spectrum: no function of time alone predicts it).
    */
   readonly bayesRisk: number
 }
@@ -91,10 +93,23 @@ export interface Dataset<X extends Features = Features, Y = Tensor> extends Kind
 /**
  * What a dataset generator returns: a `Dataset` (the only form a recipe can start from), several (`datasets`), a
  * sequence with hidden states, a series, an image tensor, a set of binary patterns, ratings, a click log, a
- * catalogue or a text corpus.
+ * catalogue, a text corpus, paired views of the same objects (`pairs`: two feature matrices whose row i describes
+ * the same object, for contrastive and multi-view learning), or a split (`split`: a whole population, such as a
+ * finite table, with fixed train and test parts and its truth beside them).
  */
 export type DatasetOutput =
-  'dataset' | 'datasets' | 'sequence' | 'series' | 'image' | 'patterns' | 'ratings' | 'clicks' | 'catalogue' | 'corpus'
+  | 'dataset'
+  | 'datasets'
+  | 'sequence'
+  | 'series'
+  | 'image'
+  | 'patterns'
+  | 'ratings'
+  | 'clicks'
+  | 'catalogue'
+  | 'corpus'
+  | 'pairs'
+  | 'split'
 
 /**
  * Registry metadata of a dataset generator: its task, its knobs (the scalar options, with the generator's defaults),

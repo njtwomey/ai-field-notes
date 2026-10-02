@@ -57,6 +57,7 @@ def fit(x, y, fam, lk, w=None, offset=None, theta=1.0):
     mu = {"binomial": (w * y + 0.5) / (w + 1), "poisson": y + 0.1, "negative-binomial": y + 0.1}.get(fam, y.copy())
     eta = g(mu)
     dev_old = np.inf
+    beta = dev = None
     for _ in range(100):
         de = dmu(eta)
         z = eta - o + (y - mu) / de
@@ -68,6 +69,7 @@ def fit(x, y, fam, lk, w=None, offset=None, theta=1.0):
         if abs(dev - dev_old) / (abs(dev) + 0.1) < 1e-12:
             break
         dev_old = dev
+    assert beta is not None and dev is not None
     de = dmu(eta)
     W = w * de**2 / V(mu)
     inv = np.linalg.inv(X.T @ (W[:, None] * X))

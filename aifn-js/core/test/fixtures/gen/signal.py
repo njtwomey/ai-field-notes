@@ -1,8 +1,15 @@
 """Golden values for aifn/dsp, from numpy.fft, scipy.signal, scipy.fft and scipy.ndimage."""
 
+from typing import cast
+
 import numpy as np
 from scipy import fft as sfft
 from scipy import ndimage, signal
+from scipy.signal.windows import dpss
+
+# scipy is unstubbed, and its filter designs declare a union of output forms (and None); these name the form asked for.
+type Zpk = tuple[np.ndarray, np.ndarray, float]
+type Ba = tuple[np.ndarray, np.ndarray]
 
 
 def cx(z: np.ndarray) -> dict[str, object]:
@@ -177,42 +184,43 @@ def cases() -> dict[str, object]:
     tv = np.arange(1000) / 1000.0
     xv = np.cos(2 * np.pi * 2 * tv) + 0.25 * np.cos(2 * np.pi * 24 * tv) + 1 / 16 * np.cos(2 * np.pi * 288 * tv)
     xv = xv + 0.01 * rng.normal(size=tv.size)
-    vmd_out = {}
+    vmd_out: dict[str, object] = {}
     for key, (alpha, tau, K, DC) in {"plain": (2000.0, 0.0, 3, False), "dc_tau": (1000.0, 0.1, 3, True)}.items():
         u, omega, iters = vmd_reference(xv, alpha, tau, K, DC, 1e-7)
         vmd_out[key] = {"alpha": alpha, "tau": tau, "K": K, "dc": DC, "u": u, "omega": omega[-1], "iterations": iters}
     out["vmd"] = {"x": xv, "cases": vmd_out}
-    tapers, ratios = signal.windows.dpss(64, 3.0, 5, return_ratios=True)
+    tapers, ratios = dpss(64, 3.0, 5, return_ratios=True)
     out["dpss"] = {"tapers": tapers, "ratios": ratios}
 
     out["firwin"] = {
         "lowpass": signal.firwin(31, 0.3),
         "highpass": signal.firwin(31, 0.3, pass_zero=False),
-        "bandpass": signal.firwin(41, [0.2, 0.5], pass_zero=False, window=("kaiser", 6.0)),
+        # window is inferred as str from its default; a (name, parameter) tuple is documented.
+        "bandpass": signal.firwin(41, [0.2, 0.5], pass_zero=False, window=("kaiser", 6.0)),  # pyright: ignore[reportArgumentType]
         "bandstop": signal.firwin(41, [0.2, 0.5]),
         "fs": signal.firwin(21, 10.0, fs=100.0, window="hann"),
         "kaiserord": list(signal.kaiserord(60.0, 0.05)),
     }
     iir = {}
-    designs = {
-        "butter-low": signal.butter(4, 0.2, output="zpk"),
-        "butter-high": signal.butter(3, 0.4, btype="highpass", output="zpk"),
-        "butter-band": signal.butter(3, [0.2, 0.5], btype="bandpass", output="zpk"),
-        "butter-stop": signal.butter(2, [0.2, 0.5], btype="bandstop", output="zpk"),
-        "cheby1-low": signal.cheby1(4, 1.0, 0.3, output="zpk"),
-        "cheby2-low": signal.cheby2(4, 40.0, 0.3, output="zpk"),
-        "cheby2-odd": signal.cheby2(5, 30.0, 0.3, output="zpk"),
-        "butter-fs": signal.butter(4, 10.0, fs=100.0, output="zpk"),
+    designs: dict[str, Zpk] = {
+        "butter-low": cast(Zpk, signal.butter(4, 0.2, output="zpk")),
+        "butter-high": cast(Zpk, signal.butter(3, 0.4, btype="highpass", output="zpk")),
+        "butter-band": cast(Zpk, signal.butter(3, [0.2, 0.5], btype="bandpass", output="zpk")),
+        "butter-stop": cast(Zpk, signal.butter(2, [0.2, 0.5], btype="bandstop", output="zpk")),
+        "cheby1-low": cast(Zpk, signal.cheby1(4, 1.0, 0.3, output="zpk")),
+        "cheby2-low": cast(Zpk, signal.cheby2(4, 40.0, 0.3, output="zpk")),
+        "cheby2-odd": cast(Zpk, signal.cheby2(5, 30.0, 0.3, output="zpk")),
+        "butter-fs": cast(Zpk, signal.butter(4, 10.0, fs=100.0, output="zpk")),
     }
     for key, (z, pl, k) in designs.items():
         b, a = signal.zpk2tf(z, pl, k)
         iir[key] = {"b": b, "a": a, "k": k}
     out["iir"] = iir
 
-    b, a = signal.butter(4, 0.2)
+    b, a = cast(Ba, signal.butter(4, 0.2))
     zi = signal.lfilter_zi(b, a)
     y, zf = signal.lfilter(b, a, x[:200], zi=zi * x[0])
-    w, h = signal.freqz(b, a, worN=64)
+    w, h = signal.freqz(b, a, worN=64)  # pyright: ignore[reportArgumentType]  # a is inferred as int from its default
     wg, gd = signal.group_delay((b, a), w=64)
     out["filtering"] = {
         "b": b,
@@ -229,7 +237,7 @@ def cases() -> dict[str, object]:
     }
     u = rng.normal(size=9)
     v = rng.normal(size=4)
-    conv = {"u": u, "v": v}
+    conv: dict[str, object] = {"u": u, "v": v}
     for mode in ("full", "same", "valid"):
         conv[f"convolve-{mode}"] = signal.convolve(u, v, mode=mode)
         conv[f"correlate-{mode}"] = signal.correlate(u, v, mode=mode)

@@ -118,6 +118,28 @@ fn(
   wavelets.cwt,
 )
 
+fn(
+  {
+    key: 'waveletThreshold',
+    name: 'Soft and hard thresholding',
+    role: 'transform',
+    notes: ['wavelet-denoising'],
+    cite: ['donoho1994'],
+  },
+  wavelets.waveletThreshold,
+)
+fn(
+  {
+    key: 'waveletDenoise',
+    name: 'Wavelet shrinkage denoising',
+    summary: 'Threshold the detail coefficients at σ̂√(2 ln n) and reconstruct.',
+    role: 'transform',
+    notes: ['wavelet-denoising', 'discrete-wavelet-transform'],
+    cite: ['donoho1994'],
+  },
+  wavelets.waveletDenoise,
+)
+
 /** The functions of the module, keyed by name. */
 export const waveletsFunctions: Readonly<Record<string, Entry<(...args: never[]) => unknown, FunctionInfo>>> =
   entries<FunctionInfo>('function', wavelets) as Readonly<

@@ -111,7 +111,6 @@ export function PlanningSpecimen() {
               value={at}
               onChange={setStep}
               count={run.steps.length}
-              defaultSpeed={4}
             />
           </ControlRow>
         </>
@@ -242,7 +241,6 @@ export function CliffSpecimen() {
               value={e}
               onChange={setEpisode}
               count={EPISODES + 1}
-              defaultSpeed={40}
               startReason="The figure compares the routes the two methods have learned, which needs all 500 episodes."
             />
           </ControlRow>

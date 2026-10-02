@@ -211,7 +211,6 @@ export function ComputationGraphPanel({
               value={current}
               onChange={setStep}
               count={count}
-              defaultSpeed={2}
               startReason={startReason}
             />
           </div>

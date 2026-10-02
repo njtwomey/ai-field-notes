@@ -40,7 +40,19 @@ import {
 } from 'react'
 import { Player } from '@lab/controls'
 import { Dashboard, DashboardCell, DashboardRow, Equation, Figure, live, tex } from '@lab/layout'
-import { call, choice, row, setting, slider, toggle, useComputed, useFigureState, variants, when } from '@lab/state'
+import {
+  call,
+  choice,
+  row,
+  setting,
+  slider,
+  toggle,
+  useComputed,
+  useFigureState,
+  variants,
+  when,
+  int,
+} from '@lab/state'
 import { Area, Curve, Handle, Plot, Plots, Points, Readout, useAxis, useScaleColor, type AxisModel } from '@lab/viz'
 import { formatValue } from '@lab/views'
 
@@ -165,7 +177,7 @@ const SCHEMA = {
       choiceLabel: 'method',
       initial: 'adam',
       shared: {
-        steps: choice([20, 50, 100, 200, 500, 1000, 2000], 500, { label: 'max iterations' }),
+        steps: int(500, { ge: 1, suggestions: [20, 50, 100, 200, 500, 1000, 2000], label: 'max iterations' }),
       },
     },
   ),

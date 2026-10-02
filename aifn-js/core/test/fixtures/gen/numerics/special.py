@@ -40,6 +40,7 @@ def unary() -> dict[str, object]:
 
     x_bessel = np.concatenate([np.linspace(-40, 40, 81), np.logspace(-8, 2.8, 20), -np.logspace(-3, 2.5, 8)])
     x_bessel_pos = np.concatenate([[0.0], np.logspace(-8, 5, 40), np.linspace(25, 35, 11)])
+    x_ellip = np.concatenate([np.linspace(-5, 0.99, 41), 1 - np.logspace(-12, -2.5, 8)])
 
     def mp_v(t):
         return mp.npdf(t) / mp.ncdf(t)
@@ -88,6 +89,8 @@ def unary() -> dict[str, object]:
         "besselI0": {"x": x_bessel, "y": sp.i0(x_bessel)},
         "besselI1": {"x": x_bessel, "y": sp.i1(x_bessel)},
         "logBesselI0": {"x": x_bessel_pos, "y": mp_map(lambda v: mp.log(mp.besseli(0, v)), x_bessel_pos)},
+        "ellipk": {"x": x_ellip, "y": sp.ellipk(x_ellip)},
+        "ellipe": {"x": x_ellip, "y": sp.ellipe(x_ellip)},
         "besselRatio": {"x": x_bessel_pos, "y": mp_map(lambda v: mp.besseli(1, v) / mp.besseli(0, v), x_bessel_pos)},
     }
 

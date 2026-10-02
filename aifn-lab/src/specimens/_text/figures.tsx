@@ -1,9 +1,17 @@
-import { useContext, useMemo, useState, type ReactNode } from 'react'
+import { useMemo, useState, type ReactNode } from 'react'
 import { stream } from 'aifn/foundation/random'
 import { toFlat, toRows } from 'aifn/foundation/tensor'
 import { trace } from 'aifn/foundation/trace'
 import { normalise } from 'aifn/text/normalise'
-import { characterTokenise, tokenise, type Tokenisation, type TokenPattern } from 'aifn/text/tokenise'
+import {
+  casualTokenise,
+  characterTokenise,
+  sentenceSplit,
+  tokenise,
+  treebankTokenise,
+  type Tokenisation,
+  type TokenPattern,
+} from 'aifn/text/tokenise'
 import { porterStem, removeStopWords } from 'aifn/text/stem'
 import { bpeEncode, bpeModel, bpeSteps, type BpeState } from 'aifn/text/subword'
 import { bagOfWords, bm25, bm25Weights, characterNgrams, featureHash, tfidf, wordNgrams } from 'aifn/text/features'
@@ -17,15 +25,50 @@ import { Columns, Figure } from '@lab/layout'
 import { choice, setting, slider, useFigureState, when } from '@lab/state'
 import { Textarea } from '@lab/ui/textarea'
 import { Input } from '@lab/ui/input'
-import { Bars, Curve, Plot, Plots, Points, Raster, Readout, useAxis, DEFAULT_HEIGHT, FrameContext } from '@lab/viz'
+import { Bars, Curve, Plot, Plots, Points, Raster, Readout, useAxis } from '@lab/viz'
 import { formatValue } from '@lab/views'
+import { Body } from './tokens'
 
 // ── The corpus, shared by every figure on the page ───────────────────────────────────────────────────────────────────
 
 type Source = CorpusName | 'toy corpus' | 'your text'
 const SOURCES: Source[] = [...(Object.keys(NAMED_CORPORA) as CorpusName[]), 'toy corpus', 'your text']
-type Unit = 'words' | 'wordsAndPunctuation' | 'whitespace' | 'alphanumeric' | 'gpt2' | 'characters'
-const UNITS: Unit[] = ['words', 'wordsAndPunctuation', 'whitespace', 'alphanumeric', 'gpt2', 'characters']
+type Unit =
+  | 'words'
+  | 'wordsAndPunctuation'
+  | 'whitespace'
+  | 'alphanumeric'
+  | 'bert'
+  | 'gpt2'
+  | 'cl100k'
+  | 'o200k'
+  | 'treebank'
+  | 'casual'
+  | 'sentences'
+  | 'characters'
+const UNITS: Unit[] = [
+  'words',
+  'wordsAndPunctuation',
+  'whitespace',
+  'alphanumeric',
+  'bert',
+  'gpt2',
+  'cl100k',
+  'o200k',
+  'treebank',
+  'casual',
+  'sentences',
+  'characters',
+]
+
+/** A document cut by one of the units. */
+function cut(doc: string, unit: Unit): Tokenisation {
+  if (unit === 'characters') return characterTokenise(doc)
+  if (unit === 'treebank') return treebankTokenise(doc)
+  if (unit === 'casual') return casualTokenise(doc)
+  if (unit === 'sentences') return sentenceSplit(doc)
+  return tokenise(doc, { pattern: unit as TokenPattern })
+}
 
 const DEFAULT_TEXT = `Tokenisers split text into tokens.
 The café's naïve résumé — ﬁne print, ２０２４.
@@ -73,16 +116,6 @@ function TokenText({ t, highlight }: { t: Tokenisation; highlight?: (token: stri
   return <div className="font-mono text-sm leading-7 whitespace-pre-wrap">{parts}</div>
 }
 
-/** A scrolling body that fills the figure's frame height. */
-function Body({ children }: { children: ReactNode }) {
-  const { height } = useContext(FrameContext)
-  return (
-    <div className="flex flex-col gap-3 overflow-auto pr-1" style={{ height: height ?? DEFAULT_HEIGHT }}>
-      {children}
-    </div>
-  )
-}
-
 function Chips({ items, hot, label }: { items: readonly string[]; hot?: string; label: string }) {
   return (
     <div className="flex flex-wrap items-center gap-1 text-xs">
@@ -126,9 +159,7 @@ export function TextPipelineSpecimen() {
           ? [...toyCorpus(stream(seed), { sentences }).documents]
           : [...namedCorpus({ name: corpus }).documents]
     const docs = raw.map((d) => normalise(d, { caseFold, stripAccents, whitespace: false }))
-    const tokenised = docs.map((d) =>
-      unit === 'characters' ? characterTokenise(d) : tokenise(d, { pattern: unit as TokenPattern }),
-    )
+    const tokenised = docs.map((d) => cut(d, unit))
     const wordLists = docs.map((d) => tokenise(d).tokens)
     const terms = wordLists.map((ws) => {
       const kept = stopWords ? removeStopWords(ws) : [...ws]
@@ -157,7 +188,7 @@ export function TextPipelineSpecimen() {
             <Readout label="distinct tokens" value={types} />
           </>
         }
-        caption="Pick a corpus or type your own (one document per line). Normalisation (NFKC, case folding, accent stripping) runs before tokenising; hover a token for its [start, end) offsets in UTF-16 code units. The table lists the first document's tokens with their Porter stems."
+        caption="Pick a corpus or type your own (one document per line). Normalisation (NFKC, case folding, accent stripping) runs before tokenising; hover a token for its [start, end) offsets in UTF-16 code units. The tokenisers: regular expressions (words, scikit-learn's alphanumeric, BERT's, and the GPT-2, cl100k and o200k pre-tokenisers, which keep spaces so the tokens rebuild the text), the Penn Treebank and casual (tweet) rules as NLTK applies them, Punkt-style sentences, and characters. The table lists the first document's tokens with their Porter stems. Subword tokenisers side by side: the page Text: tokenisers compared."
       >
         <Body>
           {corpus === 'your text' && (
@@ -259,7 +290,7 @@ function BpeFigure({ processed }: { processed: Processed }) {
       hoverReadout={false}
       controls={
         <div className="col-span-full">
-          <Player label="merge" value={at} onChange={setStep} count={count} defaultSpeed={4} />
+          <Player label="merge" value={at} onChange={setStep} count={count} />
         </div>
       }
       readouts={

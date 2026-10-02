@@ -14,7 +14,7 @@
 import { useMemo, useState, type ReactNode } from 'react'
 import { evaluateEpisode, replay, type Training, type Trajectory } from 'aifn-applied/gym'
 import type { Agent, Environment } from 'aifn/foundation/contracts'
-import { Player } from '@lab/controls'
+import { Player, StatusText } from '@lab/controls'
 import { ControlRow, Figure, type FigureProps } from '@lab/layout'
 import { call, useStreamed, type Task } from '@lab/state'
 import { Button } from '@lab/ui/button'
@@ -93,7 +93,7 @@ export function GymTrainer({
   initialMode = 'replay',
   rendererOptions,
   scalars: scalarNames = [],
-  playbackSpeed = 10,
+  playbackSpeed = 60,
   actions,
 }: GymTrainerProps) {
   // The setup of the run shown: none until Train is pressed, then the setup current at that press. A fresh object per
@@ -352,9 +352,7 @@ export function GymTrainer({
               <div className="h-1.5 w-40 overflow-hidden rounded bg-muted" aria-busy={run.running}>
                 <div className="h-full bg-primary" style={{ width: `${100 * Math.min(1, progress)}%` }} />
               </div>
-              <span
-                className={`text-xs tabular-nums ${!trained || stale ? 'font-medium text-foreground' : 'text-muted-foreground'}`}
-              >
+              <StatusText tone={run.error ? 'error' : !trained || stale ? 'attention' : 'muted'}>
                 {!trained
                   ? 'Not trained yet: choose the settings, then press Train.'
                   : run.error
@@ -364,7 +362,7 @@ export function GymTrainer({
                       : run.stopped
                         ? `stopped at ${n} episodes / ${stepsDone.toLocaleString()} steps`
                         : `${progressText}${run.running ? '…' : ''}`}
-              </span>
+              </StatusText>
             </div>
           </ControlRow>
         </>

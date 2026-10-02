@@ -12,6 +12,10 @@ export type Vector = {
   label?: string
   labelAt?: 'end' | 'middle'
   width?: number
+  /** Arrowhead size in pixels (default 10); smaller for a dense field. */
+  head?: number
+  /** Draw in the muted chrome colour (a background field under trails and points). */
+  muted?: boolean
 }
 
 /** The plot's visible box in data coordinates, with each axis's scale. */
@@ -63,7 +67,7 @@ export function vectorLines(vectors: readonly Vector[], mode: Mode, box?: Box) {
   return vectors.flatMap((v) => {
     const clipped = box ? clipSegment(v.from, v.to, box) : { from: v.from, to: v.to, tipInside: true }
     if (!clipped) return []
-    const color = v.slot === undefined ? chrome(mode).ink : seriesColor(mode, v.slot)
+    const color = v.muted ? chrome(mode).muted : v.slot === undefined ? chrome(mode).ink : seriesColor(mode, v.slot)
     // A midpoint label is drawn upright on its own (`vectorMidLabels`), not along the line.
     const label =
       v.label && v.labelAt !== 'middle'
@@ -74,7 +78,7 @@ export function vectorLines(vectors: readonly Vector[], mode: Mode, box?: Box) {
       [
         { coord: clipped.from, lineStyle, label, symbol: 'none' },
         clipped.tipInside
-          ? { coord: clipped.to, symbol: 'arrow', symbolSize: 10 }
+          ? { coord: clipped.to, symbol: 'arrow', symbolSize: v.head ?? 10 }
           : { coord: clipped.to, symbol: CHEVRON, symbolSize: [8, 8] },
       ],
     ]
@@ -91,7 +95,7 @@ export function vectorMidLabels(vectors: readonly Vector[], mode: Mode, box?: Bo
     if (!v.label || v.labelAt !== 'middle') return []
     const mid: Point = [(v.from[0] + v.to[0]) / 2, (v.from[1] + v.to[1]) / 2]
     if (!inside(mid)) return []
-    const color = v.slot === undefined ? chrome(mode).ink : seriesColor(mode, v.slot)
+    const color = v.muted ? chrome(mode).muted : v.slot === undefined ? chrome(mode).ink : seriesColor(mode, v.slot)
     return [
       {
         value: mid,

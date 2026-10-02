@@ -82,7 +82,10 @@ export type BlockResult = { output: Value; weights: Value; cache: KvCache }
 
 /**
  * One transformer block applied to x [..., T, d_model], continuing from `state` (positions and the key–value cache of
- * earlier tokens), as `multiHeadAttention` does.
+ * earlier tokens), as `multiHeadAttention` does. With a tapping context it records, below its path: `attentionNorm`
+ * and `feedForwardNorm` (the normalised inputs of the branches), `attention.weights` [..., h, T, Tk], `attention` (the
+ * branch output), `residual` (the stream between the branches), `feedForward.hidden`, `feedForward`, and the block's
+ * output at the path itself.
  */
 export function transformerBlock(
   params: TransformerBlockParams,
@@ -129,22 +132,27 @@ export function transformerBlock(
     nextCache = r.cache
     return tap(childContext(ctx, 'attention'), r.output)
   }
+  const ffnCtx = childContext(ctx, 'feedForward')
   const ffn = (h: Value) =>
     tap(
-      childContext(ctx, 'feedForward'),
-      feedForward(params.feedForward, h, { kind: options.feedForward, activation: options.activation }),
+      ffnCtx,
+      feedForward(params.feedForward, h, { kind: options.feedForward, activation: options.activation }, ffnCtx),
     )
   const dropped = (name: string, v: Value) => drop.apply({}, v, childContext(ctx, `${name}Dropout`))
+  // Normalisations are tapped at `attentionNorm` and `feedForwardNorm`, the stream between the branches at `residual`.
+  const norm1 = (h: Value) => tap(ctx, normalise(params.attentionNorm, h), 'attentionNorm')
+  const norm2 = (h: Value) => tap(ctx, normalise(params.feedForwardNorm!, h), 'feedForwardNorm')
+  const mid = (h: Value) => tap(ctx, h, 'residual')
   let out: Value
   if (parallel) {
-    const h = normalise(params.attentionNorm, x)
+    const h = norm1(x)
     out = add(add(x, dropped('attention', attend(h))), dropped('feedForward', ffn(h)))
   } else if (placement === 'pre') {
-    const h = add(x, dropped('attention', attend(normalise(params.attentionNorm, x))))
-    out = add(h, dropped('feedForward', ffn(normalise(params.feedForwardNorm!, h))))
+    const h = mid(add(x, dropped('attention', attend(norm1(x)))))
+    out = add(h, dropped('feedForward', ffn(norm2(h))))
   } else {
-    const h = normalise(params.attentionNorm, add(x, dropped('attention', attend(x))))
-    out = normalise(params.feedForwardNorm!, add(h, dropped('feedForward', ffn(h))))
+    const h = mid(norm1(add(x, dropped('attention', attend(x)))))
+    out = norm2(add(h, dropped('feedForward', ffn(h))))
   }
   return { output: tap(ctx, out), weights, cache: nextCache! }
 }

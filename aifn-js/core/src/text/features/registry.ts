@@ -3,7 +3,11 @@
 import { definer, entries, type Entry, type FunctionInfo } from 'aifn/foundation/registry'
 import * as bag from './bag'
 import * as hashing from './hashing'
+import * as minhash from './minhash'
 import * as ngrams from './ngrams'
+import * as onehot from './onehot'
+import * as shingles from './shingles'
+import * as templates from './templates'
 import * as weighting from './weighting'
 
 const fn = definer<FunctionInfo>('function', 'text/features')
@@ -152,7 +156,196 @@ fn(
   hashing.featureHash,
 )
 
+const SHINGLES = ['character-n-grams-and-shingles']
+const LSH = ['locality-sensitive-hashing']
+fn(
+  {
+    key: 'oneHotTokens',
+    name: 'One-hot encoding',
+    role: 'transform',
+    summary:
+      'A token sequence as the vocabulary × positions matrix of indicator vectors; distinct words are orthogonal.',
+    notes: ['one-hot-encoding-of-words'],
+    cite: ['jurafsky2025'],
+  },
+  onehot.oneHotTokens,
+)
+fn(
+  {
+    key: 'characterShingles',
+    name: 'Character shingles',
+    role: 'transform',
+    summary: 'The set of contiguous k-character substrings of a text.',
+    notes: SHINGLES,
+    cite: ['broder1997'],
+  },
+  shingles.characterShingles,
+)
+fn(
+  {
+    key: 'wordShingles',
+    name: 'Word shingles',
+    role: 'transform',
+    summary: 'The set of runs of w consecutive tokens.',
+    notes: SHINGLES,
+    cite: ['broder1997'],
+  },
+  shingles.wordShingles,
+)
+fn(
+  {
+    key: 'jaccardSimilarity',
+    name: 'Jaccard similarity of sets',
+    tex: '\\frac{|A \\cap B|}{|A \\cup B|}',
+    role: 'property',
+    summary: 'The resemblance |A ∩ B| / |A ∪ B| of two shingle sets.',
+    notes: [...SHINGLES, 'hamming-jaccard-and-exact-match'],
+    cite: ['jaccard1912', 'broder1997'],
+  },
+  shingles.jaccardSimilarity,
+)
+fn(
+  {
+    key: 'minHashSignature',
+    name: 'MinHash signature',
+    role: 'transform',
+    summary: 'The minima of k seeded hash functions over a set; agreeing minima estimate the Jaccard similarity.',
+    notes: [...SHINGLES, ...LSH],
+    cite: ['broder1997', 'broder2000minwise'],
+  },
+  minhash.minHashSignature,
+)
+fn(
+  {
+    key: 'minHashSignatures',
+    name: 'MinHash signatures of several sets',
+    role: 'transform',
+    notes: [...SHINGLES, ...LSH],
+    cite: ['broder1997'],
+  },
+  minhash.minHashSignatures,
+)
+fn(
+  {
+    key: 'minHashSimilarity',
+    name: 'MinHash estimate of Jaccard similarity',
+    role: 'estimator',
+    summary: 'The share of signature positions where two sets agree; unbiased for J with variance J(1 − J)/k.',
+    notes: [...SHINGLES, ...LSH],
+    cite: ['broder1997', 'broder2000minwise'],
+  },
+  minhash.minHashSimilarity,
+)
+fn(
+  {
+    key: 'minHashStandardError',
+    name: 'Standard error of the MinHash estimate',
+    tex: '\\sqrt{J(1 - J)/k}',
+    role: 'property',
+    notes: SHINGLES,
+    cite: ['broder1997'],
+  },
+  minhash.minHashStandardError,
+)
+fn(
+  {
+    key: 'lshBands',
+    name: 'LSH band keys',
+    role: 'transform',
+    summary: 'The bucket key of each of b bands of r signature rows.',
+    notes: LSH,
+    cite: ['indyk1998'],
+  },
+  minhash.lshBands,
+)
+fn(
+  {
+    key: 'lshCandidates',
+    name: 'LSH candidate pairs',
+    role: 'transform',
+    summary: 'The pairs of signatures that agree on at least one band.',
+    notes: LSH,
+    cite: ['indyk1998', 'broder1997'],
+  },
+  minhash.lshCandidates,
+)
+fn(
+  {
+    key: 'lshProbability',
+    name: 'LSH banding S-curve',
+    tex: '1 - (1 - s^r)^b',
+    role: 'property',
+    summary: 'The probability that a pair of Jaccard similarity s becomes a candidate under b bands of r rows.',
+    notes: LSH,
+    cite: ['indyk1998'],
+  },
+  minhash.lshProbability,
+)
+fn(
+  {
+    key: 'lshThreshold',
+    name: 'LSH banding threshold',
+    tex: '(1/b)^{1/r}',
+    role: 'property',
+    summary: 'The similarity near which the banding S-curve is steepest.',
+    notes: LSH,
+  },
+  minhash.lshThreshold,
+)
+
+const TEMPLATES = ['conditional-random-field', 'sequence-labelling']
+
+fn(
+  {
+    key: 'parseTemplates',
+    name: 'CRF++ feature templates',
+    role: 'construction',
+    summary: 'Parse CRF++ templates: U (unigram) and B (bigram) lines with %x[row,column] macros over token rows.',
+    notes: TEMPLATES,
+  },
+  templates.parseTemplates,
+)
+fn(
+  {
+    key: 'expandTemplates',
+    name: 'Expand feature templates',
+    role: 'transform',
+    summary: 'The feature strings of every template at every position, with _B-k and _B+k past the ends.',
+    notes: TEMPLATES,
+  },
+  templates.expandTemplates,
+)
+fn(
+  {
+    key: 'featureIndex',
+    name: 'Feature index of templates',
+    role: 'construction',
+    summary:
+      'Expanded template strings of training data with ids and counts, dropping those below a minimum frequency.',
+    notes: TEMPLATES,
+  },
+  templates.featureIndex,
+)
+fn(
+  {
+    key: 'encodeTemplateRows',
+    name: 'Encode a sequence by a feature index',
+    role: 'transform',
+    summary: 'The ids of the indexed feature strings that fire at each position, in compressed rows.',
+    notes: TEMPLATES,
+  },
+  templates.encodeTemplateRows,
+)
+
 /** The functions of the module, keyed by name. */
-export const featuresFunctions = entries<FunctionInfo>('function', ngrams, bag, weighting, hashing) as Readonly<
-  Record<string, Entry<(...args: never[]) => unknown, FunctionInfo>>
->
+export const featuresFunctions = entries<FunctionInfo>(
+  'function',
+  ngrams,
+  bag,
+  weighting,
+  hashing,
+  onehot,
+  shingles,
+  minhash,
+  templates,
+) as Readonly<Record<string, Entry<(...args: never[]) => unknown, FunctionInfo>>>

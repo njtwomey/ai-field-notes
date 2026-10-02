@@ -6,8 +6,8 @@
 
 import { DomainError } from 'aifn/foundation/errors'
 import { dense, fromData, toFlat, type MatrixLike, type Tensor } from 'aifn/foundation/tensor'
-import { svd } from 'aifn/numerics/linalg'
 import { buildVocabulary, tokenId, type Vocabulary } from 'aifn/text/vocabulary'
+import { truncatedSvd } from './svd'
 
 /** A word × context count matrix with the vocabularies of its rows and columns. */
 export interface Cooccurrence {
@@ -24,11 +24,16 @@ export interface CooccurrenceOptions {
   window?: number
   /** Count only contexts to the right (default false: both sides, so the matrix is symmetric). */
   rightOnly?: boolean
+  /** Context words up to this distance on the left (default `window`, or 0 with `rightOnly`): an asymmetric window. */
+  left?: number
+  /** Context words up to this distance on the right (default `window`). */
+  right?: number
   /**
-   * How a context at distance d counts: `uniform` 1 (default), `harmonic` 1/d (GloVe), `linear` (L − d + 1)/L
-   * (word2vec's dynamic window in expectation).
+   * How a context at distance d on a side of size L counts: `uniform` 1 (default), `harmonic` 1/d (GloVe), `linear`
+   * (L − d + 1)/L (word2vec's dynamic window in expectation), `hal` L − d + 1 (the Hyperspace Analogue to Language,
+   * Lund & Burgess 1996: the nearest context counts L, the farthest 1).
    */
-  weighting?: 'uniform' | 'harmonic' | 'linear'
+  weighting?: 'uniform' | 'harmonic' | 'linear' | 'hal'
   /** The row vocabulary (default every word, by descending frequency, without specials). */
   words?: Vocabulary
   /** The column vocabulary (default the row vocabulary). */
@@ -37,32 +42,38 @@ export interface CooccurrenceOptions {
 
 /**
  * Windowed co-occurrence counts: for every token w of every document (sentence), each token c at distance
- * d = 1 … window inside the same document adds weight(d) to #(w, c). Tokens outside the vocabularies are skipped.
+ * d = 1 … left before it or d = 1 … right after it, inside the same document, adds weight(d) to #(w, c). Tokens outside
+ * the vocabularies are skipped.
  */
 export function cooccurrence(
   documents: readonly (readonly string[])[],
   options: CooccurrenceOptions = {},
 ): Cooccurrence {
   const { window = 2, rightOnly = false, weighting = 'uniform' } = options
-  if (!(Number.isInteger(window) && window >= 1))
-    throw new DomainError('cooccurrence', 'cooccurrence: window must be a positive integer')
+  const left = options.left ?? (rightOnly ? 0 : window)
+  const right = options.right ?? window
+  const side = (L: number) => Number.isInteger(L) && L >= 0
+  if (!(Number.isInteger(window) && window >= 1) || !side(left) || !side(right) || left + right < 1)
+    throw new DomainError('cooccurrence', 'cooccurrence: the window sizes must be integers ≥ 0, not both 0')
   const words = options.words ?? buildVocabulary(documents, { specials: [] })
   const contexts = options.contexts ?? words
   const V = words.tokens.length
   const C = contexts.tokens.length
   const out = new Float64Array(V * C)
-  const weight = (d: number) =>
-    weighting === 'harmonic' ? 1 / d : weighting === 'linear' ? (window - d + 1) / window : 1
+  const weight = (d: number, L: number) =>
+    weighting === 'harmonic' ? 1 / d : weighting === 'linear' ? (L - d + 1) / L : weighting === 'hal' ? L - d + 1 : 1
   for (const doc of documents) {
     const w = doc.map((t) => tokenId(words, t))
     const c = doc.map((t) => tokenId(contexts, t))
     for (let i = 0; i < doc.length; i++) {
       if (w[i] < 0) continue
-      for (let d = 1; d <= window; d++) {
-        for (const j of rightOnly ? [i + d] : [i - d, i + d]) {
-          if (j < 0 || j >= doc.length || c[j] < 0) continue
-          out[w[i] * C + c[j]] += weight(d)
-        }
+      for (let d = 1; d <= left; d++) {
+        const j = i - d
+        if (j >= 0 && c[j] >= 0) out[w[i] * C + c[j]] += weight(d, left)
+      }
+      for (let d = 1; d <= right; d++) {
+        const j = i + d
+        if (j < doc.length && c[j] >= 0) out[w[i] * C + c[j]] += weight(d, right)
       }
     }
   }
@@ -130,21 +141,21 @@ export function ppmi(counts: MatrixLike, options: PmiOptions & { shift?: number 
 
 /**
  * Dense word vectors from a word × context matrix (counts, PPMI, …): the rows of U_d Σ_d^p from its singular value
- * decomposition, truncated to the `dimensions` largest singular values (float64 [V, d]). `power` p = 1 is the textbook
- * truncated SVD; Levy et al. (2015) found p = 0.5 (default) or 0 better on similarity tasks. Uses a full SVD, so it suits
- * vocabularies of up to a few hundred words.
+ * decomposition, truncated to the `dimensions` largest singular values (float64 [V, d]), from {@link truncatedSvd}. `power` p = 1 is
+ * the textbook truncated SVD (latent semantic analysis); Levy et al. (2015) found p = 0.5 (default) or 0 better on
+ * similarity tasks.
  */
 export function wordVectors(matrix: MatrixLike, dimensions: number, options: { power?: number } = {}): Tensor {
   const { power = 0.5 } = options
-  const { data, m, n } = dense.toMatrixF64(matrix, 'wordVectors')
+  const { m, n } = dense.toMatrixF64(matrix, 'wordVectors')
   const k = Math.min(m, n)
   if (!(Number.isInteger(dimensions) && dimensions >= 1 && dimensions <= k))
     throw new DomainError('wordVectors', `wordVectors: dimensions must be an integer in [1, ${k}]`)
-  const { U, S } = svd(fromData(data, [m, n]))
+  const { U, S } = truncatedSvd(matrix, dimensions)
   const u = toFlat(U)
   const s = toFlat(S)
   const out = new Float64Array(m * dimensions)
   for (let i = 0; i < m; i++)
-    for (let j = 0; j < dimensions; j++) out[i * dimensions + j] = u[i * k + j] * s[j] ** power
+    for (let j = 0; j < dimensions; j++) out[i * dimensions + j] = u[i * dimensions + j] * s[j] ** power
   return fromData(out, [m, dimensions])
 }

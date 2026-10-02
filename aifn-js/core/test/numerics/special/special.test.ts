@@ -72,6 +72,8 @@ const TOLERANCE: Record<string, [rel: number, floor: number]> = {
   besselI1: [1e-13, 1e-300],
   logBesselI0: [1e-13, 1],
   besselRatio: [1e-13, 1e-300],
+  ellipk: [1e-14, 1],
+  ellipe: [1e-14, 1],
   xlogy: [1e-15, 1e-300],
   xlog1py: [1e-15, 1e-300],
   regularisedGammaP: [1e-11, 1e-300],
@@ -291,6 +293,8 @@ const UNARY_POINTS: Record<string, number[]> = {
   besselI1: [-5, -0.3, 0.2, 3, 40],
   logBesselI0: [0.2, 3, 29, 31, 200],
   besselRatio: [0.2, 3, 29, 31, 200],
+  ellipk: [-3, -0.5, 0.2, 0.7, 0.95],
+  ellipe: [-3, -0.5, 0.2, 0.7, 0.95],
 }
 
 const BINARY_POINTS: Record<string, [number, number][]> = {
@@ -615,6 +619,8 @@ const GRADIENT_POINTS: Record<string, number[]> = {
   besselI1: [-1.2, 0.3, 0.8, 1.5],
   logBesselI0: [0.3, 0.8, 1.5, 4],
   besselRatio: [0.3, 0.8, 1.5, 4],
+  ellipk: [-0.4, 0.1, 0.5, 0.8],
+  ellipe: [-0.4, 0.1, 0.5, 0.8],
 }
 
 /** Points and the differentiable arguments of each binary primitive, as ([a…], [b…], wrt). */

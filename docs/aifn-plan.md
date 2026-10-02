@@ -71,22 +71,22 @@ module may import only from strictly lower tiers. `scripts/aifn-layers.ts` enfor
 
 <!-- Generated from aifn-js/modules.json by `node scripts/aifn-layers.ts --write`; do not edit. -->
 
-| Tier | Family      | Modules (local tiers, low to high; * gap)                                                              | Shared             |
-| ---- | ----------- | ------------------------------------------------------------------------------------------------------ | ------------------ |
-| 0    | foundation  | contracts, errors · registry · tensor · pytree, fourier · convolution, autodiff, random · space, trace |                    |
-| 1    | numerics    | special · linalg · polynomial, quadrature, roots, implicit, geometry · interpolate                     |                    |
-| 2    | graph       | traversal, shortest-paths, spanning-trees, structures, matrices · flows, structured, propagation       | graph, tree, heap  |
-| 3    | probability | stats, bijectors, samplers · distributions · likelihoods, information, tests                           |                    |
-| 3    | optim       | line-search · first-order, second-order, proximal, derivative-free, programming · minimize             | options, schedules |
-| 3    | systems     | (one module)                                                                                           |                    |
-| 4    | inference   | model · exact, message-passing, expectation-propagation, variational, stochastic, filtering · engines  |                    |
-| 4    | dynamics    | ode, sde · fields, control                                                                             |                    |
-| 4    | signal      | windows · filters, spectral, time-frequency, wavelets, statistical · multirate, decompositions         | signal             |
-| 4    | transport   | (one module)                                                                                           |                    |
-| 4    | text        | normalise, tokenise, stem · vocabulary · subword, features, cooccurrence                               |                    |
-| 5    | learning    | estimators, kernels, calibration · losses, metrics, compose, validate                                  |                    |
-| 6    | nn          | functional, init, decoding · layers · attention, training · sequence                                   |                    |
-| 7    | interpreter | (one module)                                                                                           |                    |
+| Tier | Family      | Modules (local tiers, low to high; * gap)                                                                                      | Shared             |
+| ---- | ----------- | ------------------------------------------------------------------------------------------------------------------------------ | ------------------ |
+| 0    | foundation  | contracts, errors · registry · tensor · pytree, fourier · convolution, autodiff, random · space, trace                         |                    |
+| 1    | numerics    | special · linalg · polynomial, quadrature, roots, implicit, geometry · interpolate                                             |                    |
+| 2    | graph       | traversal, shortest-paths, spanning-trees, structures, matrices · flows, structured, propagation                               | graph, tree, heap  |
+| 3    | probability | stats, bijectors, samplers · distributions · likelihoods, information, tests                                                   |                    |
+| 3    | optim       | line-search · first-order, second-order, proximal, derivative-free, programming · minimize                                     | options, schedules |
+| 3    | systems     | (one module)                                                                                                                   |                    |
+| 4    | inference   | model · exact, message-passing, expectation-propagation, variational, stochastic, filtering · engines                          |                    |
+| 4    | dynamics    | ode, sde · fields, control                                                                                                     |                    |
+| 4    | signal      | windows · filters, spectral, time-frequency, wavelets, statistical, cepstrum · multirate, decompositions                       | signal             |
+| 4    | transport   | (one module)                                                                                                                   |                    |
+| 4    | text        | normalise, tokenise, stem, hyphenation · vocabulary · subword, features, cooccurrence · pipeline, representations · statistics | aligned            |
+| 5    | learning    | estimators, kernels, calibration · losses, metrics, compose, validate                                                          |                    |
+| 6    | nn          | functional, init, decoding · layers · attention, training, experts · sequence                                                  |                    |
+| 7    | interpreter | (one module)                                                                                                                   |                    |
 
 <!-- aifn-layers:end -->
 

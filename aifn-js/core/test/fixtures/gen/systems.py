@@ -1,9 +1,25 @@
 """Golden values for aifn/control from scipy: Riccati and Lyapunov equations, discretisation, tf/ss conversion, Bode."""
 
+from collections.abc import Callable
+from typing import Protocol, cast
+
 import numpy as np
 import scipy.linalg as sla
 import scipy.signal as sig
 from scipy.optimize import brentq
+
+
+class PlacedPoles(Protocol):
+    """The fields read from place_poles' Bunch (scipy is unstubbed)."""
+
+    gain_matrix: np.ndarray
+    nb_iter: int
+    X: np.ndarray
+
+
+def root(f: Callable[[float], float], lo: float, hi: float) -> float:
+    """brentq's root; its declared return also covers the (root, RootResults) pair of full_output=True."""
+    return cast(float, brentq(f, lo, hi))
 
 
 def margins_reference(num: list[float], den: list[float]) -> dict[str, float]:
@@ -17,12 +33,12 @@ def margins_reference(num: list[float], den: list[float]) -> dict[str, float]:
     mags = np.array([abs(response(w)) for w in ws])
     ims = np.array([response(w).imag for w in ws])
     gc = [
-        brentq(lambda w: abs(response(w)) - 1, ws[i], ws[i + 1])
+        root(lambda w: abs(response(w)) - 1, ws[i], ws[i + 1])
         for i in range(len(ws) - 1)
         if (mags[i] - 1) * (mags[i + 1] - 1) < 0
     ]
     pc = [
-        brentq(lambda w: response(w).imag, ws[i], ws[i + 1])
+        root(lambda w: response(w).imag, ws[i], ws[i + 1])
         for i in range(len(ws) - 1)
         if ims[i] * ims[i + 1] < 0 and response(ws[i]).real < 0
     ]
@@ -57,9 +73,9 @@ def place_cases() -> dict[str, object]:
         "random6x3": (a2, b2, [-1.0, -2.0, -3.0, -4.0, -5.0, -6.0], [-1 + 2j, -1 - 2j, -2 + 1j, -2 - 1j, -3.0, -4.0]),
     }
     for key, (a, b, real_poles, complex_poles) in systems.items():
-        knv = sig.place_poles(a, b, real_poles, method="KNV0")
-        yt_real = sig.place_poles(a, b, real_poles, method="YT")
-        yt = sig.place_poles(a, b, complex_poles, method="YT")
+        knv = cast(PlacedPoles, sig.place_poles(a, b, real_poles, method="KNV0"))
+        yt_real = cast(PlacedPoles, sig.place_poles(a, b, real_poles, method="YT"))
+        yt = cast(PlacedPoles, sig.place_poles(a, b, complex_poles, method="YT"))
         out[key] = {
             "A": a,
             "B": b,
@@ -94,8 +110,9 @@ def cases() -> dict[str, object]:
     stable = a - (max(np.linalg.eigvals(a).real) + 0.5) * np.eye(3)
     c = rng.normal(size=(2, 3))
     d = rng.normal(size=(2, 2))
-    zoh = sig.cont2discrete((a, b, c, d), 0.1, method="zoh")
-    tustin = sig.cont2discrete((a, b, c, d), 0.1, method="bilinear")
+    # A state-space system discretises to (A, B, C, D, dt).
+    zoh = cast(tuple[np.ndarray, ...], sig.cont2discrete((a, b, c, d), 0.1, method="zoh"))
+    tustin = cast(tuple[np.ndarray, ...], sig.cont2discrete((a, b, c, d), 0.1, method="bilinear"))
 
     num = [1.0, 3.0]
     den = [1.0, 2.0, 3.0, 4.0]
@@ -108,8 +125,9 @@ def cases() -> dict[str, object]:
     fr_w = np.logspace(-1, 1, 7)
     _, fr_h = sig.freqresp(sig.lti(fr_num, fr_den), fr_w)
     z, p, k = sig.tf2zpk(fr_num, fr_den)
-    d_b, d_a = sig.ellip(4, 1, 40, 0.3)  # distinct zeros: a repeated root is ill-conditioned
-    d_w, d_h = sig.freqz(d_b, d_a, worN=9)
+    # Distinct zeros: a repeated root is ill-conditioned. ellip's declared return is a union of output forms.
+    d_b, d_a = cast(tuple[np.ndarray, np.ndarray], sig.ellip(4, 1, 40, 0.3))
+    d_w, d_h = sig.freqz(d_b, d_a, worN=9)  # pyright: ignore[reportArgumentType]  # a is inferred as int from its default
     d_z, d_p, d_k = sig.tf2zpk(d_b, d_a)
     d_sos = sig.zpk2sos(d_z, d_p, d_k, pairing="nearest")
     _, mag, phase = sig.bode(sig.lti([2.0, 1.0], [1.0, 0.5, 4.0, 0.0]), w)

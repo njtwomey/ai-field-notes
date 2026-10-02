@@ -17,7 +17,8 @@ def cases() -> dict[str, object]:
     for bc in ["not-a-knot", "natural", "clamped"]:
         cs = interpolate.CubicSpline(x, y, bc_type=bc)
         cubic[bc] = {"v": cs(t), "d1": cs(t, 1), "d2": cs(t, 2)}
-    cs = interpolate.CubicSpline(x, y, bc_type=((1, 0.5), (1, -1.0)))
+    # scipy is unstubbed: bc_type is inferred as str from its default.
+    cs = interpolate.CubicSpline(x, y, bc_type=((1, 0.5), (1, -1.0)))  # pyright: ignore[reportArgumentType]
     cubic["first"] = {"v": cs(t), "d1": cs(t, 1), "d2": cs(t, 2)}
     yp = y.copy()
     yp[-1] = yp[0]
@@ -36,7 +37,9 @@ def cases() -> dict[str, object]:
         "v": interpolate.make_smoothing_spline(x, y, lam=0.8)(ts),
         "vw": interpolate.make_smoothing_spline(x, y, w=w, lam=0.8)(ts),
     }
-    bary = interpolate.BarycentricInterpolator(x, y, random_state=0)  # it permutes the nodes randomly unless seeded
+    # It permutes the nodes randomly unless seeded. random_state is the legacy spelling that scipy's rng decorator still
+    # accepts (seeding a RandomState, unlike rng=); the decorator hides it from Pyright.
+    bary = interpolate.BarycentricInterpolator(x, y, random_state=0)  # pyright: ignore[reportCallIssue]
     out["polynomial"] = {"v": bary(ts), "d1": bary.derivative(ts, 1)}
 
     # B-spline design matrices (and derivatives) on a non-uniform clamped knot vector.

@@ -1,8 +1,10 @@
 /**
  * `aifn-applied/data/synthetic`: seeded synthetic datasets: points (blobs, moons, circles, spirals, …), regression,
- * sequences, piecewise series with known changepoints, images and recommender interactions; and modifiers (noise,
- * outliers, shifts, missingness, linear maps). Recipes, which replay generators and modifiers by key, are in
- * `aifn-applied/data`.
+ * 2-d densities for generative models (ring and grid of Gaussians, pinwheel, Swiss-roll slice, annulus), inverse
+ * problems with multi-valued answers (Bishop's folded sine, two-link arm kinematics),
+ * sequences, piecewise series with known changepoints, images, paired views (image and caption) and recommender
+ * interactions; and modifiers (noise, outliers, shifts, missingness, linear maps). Recipes, which replay generators
+ * and modifiers by key, are in `aifn-applied/data`.
  */
 
 export {
@@ -29,6 +31,18 @@ export {
   type SpiralsOptions,
   type XorOptions,
 } from './points'
+export {
+  annulus,
+  gaussianGrid,
+  gaussianRing,
+  pinwheel,
+  swissRoll2d,
+  type AnnulusOptions,
+  type GaussianGridOptions,
+  type GaussianRingOptions,
+  type PinwheelOptions,
+  type SwissRoll2dOptions,
+} from './densities'
 export {
   ADDITIVE_SHAPES,
   additiveData,
@@ -80,7 +94,39 @@ export {
   type RatingsOptions,
   type ZipfCatalogue,
 } from './recsys'
+export {
+  interleavedFunctions,
+  piecewiseLinear,
+  quadrantOf,
+  quadrantPlanes,
+  regressionMixture,
+  type InterleavedOptions,
+  type PiecewiseLinearOptions,
+  type QuadrantPlanesOptions,
+  type RegimeDataset,
+  type RegressionMixtureOptions,
+} from './regimes'
+export {
+  bishopInverse,
+  twoLinkArm,
+  twoLinkInverse,
+  twoLinkJoints,
+  type BishopInverseOptions,
+  type TwoLinkArmOptions,
+} from './inverse'
 export { barsAndStripes, checkerboardImage, digitGlyphs, digits, gradientImage, shapesImage } from './images'
+export {
+  PAIRED_COLOURS,
+  PAIRED_RGB,
+  PAIRED_SHAPES,
+  PAIRED_SIZES,
+  pairedShapes,
+  type Attribute,
+  type PairTruth,
+  type PairedShapesOptions,
+  type PairedViews,
+  type View,
+} from './paired'
 export {
   flippedMask,
   rotation2d,
@@ -105,3 +151,36 @@ export {
   type SplitOptions,
   type TransformOptions,
 } from './modifiers'
+export {
+  decodeSequence,
+  encodeSequence,
+  MODULAR_OPERATIONS,
+  modularArithmetic,
+  modularTruth,
+  modularValue,
+  SEQUENCE_TASKS,
+  SEQUENCE_VOCABULARY,
+  sequenceTasks,
+  sequenceTaskTruth,
+  type ModularArithmeticData,
+  type ModularArithmeticOptions,
+  type ModularOperation,
+  type ModularPart,
+  type ModularTruth,
+  type SequenceExamples,
+  type SequenceScore,
+  type SequenceTaskData,
+  type SequenceTaskName,
+  type SequenceTaskOptions,
+  type SequenceTaskTruth,
+} from './algorithmic'
+export {
+  FLOORPLAN,
+  floorplanWalks,
+  odeFailureCase,
+  type FloorPoint,
+  type Floorplan,
+  type FloorplanWalksOptions,
+  type OdeFailureKind,
+  type OdeFailureOptions,
+} from './walks'

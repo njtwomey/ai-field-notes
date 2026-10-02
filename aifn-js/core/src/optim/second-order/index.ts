@@ -1,5 +1,6 @@
 /**
- * `aifn/optim/second-order`: second-order and quasi-Newton methods: Newton (damped, trust region), BFGS, L-BFGS,
+ * `aifn/optim/second-order`: second-order and quasi-Newton methods: Newton (damped, trust region), BFGS, L-BFGS, OWL-QN
+ * (L-BFGS for f + C‖x‖₁),
  * Gauss–Newton and Levenberg–Marquardt for least squares.
  */
 
@@ -15,10 +16,14 @@ export {
 export {
   bfgs,
   lbfgs,
+  owlqn,
+  pseudoGradient,
   type BfgsState,
   type CurvaturePair,
   type LbfgsOptions,
   type LbfgsState,
+  type OwlqnOptions,
+  type OwlqnState,
   type QuasiNewtonOptions,
 } from './quasiNewton'
 export {

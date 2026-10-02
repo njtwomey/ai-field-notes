@@ -2,7 +2,10 @@
 GaussianProcessClassifier (Laplace, logistic), and for the probit link (which scikit-learn lacks) from direct numpy
 implementations of Rasmussen & Williams' Algorithms 3.1–3.2 (Laplace) and 3.5 (EP)."""
 
+from typing import Any, Protocol, cast
+
 import numpy as np
+from numpy.typing import NDArray
 from scipy import linalg, stats
 from sklearn.gaussian_process import GaussianProcessClassifier, GaussianProcessRegressor
 from sklearn.gaussian_process.kernels import (
@@ -10,10 +13,27 @@ from sklearn.gaussian_process.kernels import (
     ConstantKernel,
     DotProduct,
     ExpSineSquared,
+    Kernel,
     Matern,
     RationalQuadratic,
     WhiteKernel,
 )
+
+# sklearn ships no type stubs, so Pyright takes a parameter's type from its default (length_scale=1.0,
+# optimizer="fmin_l_bfgs_b"); the reportArgumentType ignores below mark ARD length scales and optimizer=None.
+
+
+class LaplaceBinary(Protocol):
+    """The fitted binary Laplace classifier inside GaussianProcessClassifier (a private sklearn class)."""
+
+    f_cached: NDArray[np.float64]
+    log_marginal_likelihood_value_: float
+
+
+def lml_with_gradient(gp: GaussianProcessRegressor) -> tuple[float, NDArray[np.float64]]:
+    """The log marginal likelihood and its gradient at the fitted kernel's θ (sklearn's return type omits the tuple)."""
+    theta = cast(Kernel, gp.kernel_).theta
+    return cast(tuple[float, NDArray[np.float64]], gp.log_marginal_likelihood(theta, eval_gradient=True))
 
 
 def probit_laplace(K, y01, Ks, kss):
@@ -106,10 +126,10 @@ def cases() -> dict[str, object]:
     ard = np.array([0.7, 1.9])
     kernels = {
         "rbf": (ConstantKernel(1.7) * RBF(0.8), {"lengthscale": 0.8, "variance": 1.7}),
-        "rbf_ard": (ConstantKernel(1.3) * RBF(ard), {"lengthscale": ard, "variance": 1.3}),
+        "rbf_ard": (ConstantKernel(1.3) * RBF(ard), {"lengthscale": ard, "variance": 1.3}),  # pyright: ignore[reportArgumentType]
         "matern12": (ConstantKernel(0.9) * Matern(0.6, nu=0.5), {"lengthscale": 0.6, "variance": 0.9}),
         "matern32": (ConstantKernel(1.1) * Matern(1.2, nu=1.5), {"lengthscale": 1.2, "variance": 1.1}),
-        "matern52": (ConstantKernel(2.0) * Matern(ard, nu=2.5), {"lengthscale": ard, "variance": 2.0}),
+        "matern52": (ConstantKernel(2.0) * Matern(ard, nu=2.5), {"lengthscale": ard, "variance": 2.0}),  # pyright: ignore[reportArgumentType]
         "rq": (
             ConstantKernel(1.4) * RationalQuadratic(0.9, alpha=0.7),
             {"lengthscale": 0.9, "alpha": 0.7, "variance": 1.4},
@@ -133,23 +153,24 @@ def cases() -> dict[str, object]:
     xs = np.linspace(-0.5, 5.5, 9)[:, None]
     noise = 0.05
     kr = ConstantKernel(1.5) * RBF(0.7)
-    gpr = GaussianProcessRegressor(kernel=kr, alpha=noise, optimizer=None).fit(xr, yr)
+    gpr = GaussianProcessRegressor(kernel=kr, alpha=noise, optimizer=None).fit(xr, yr)  # pyright: ignore[reportArgumentType]
     mean, cov = gpr.predict(xs, return_cov=True)
-    lml, _grad = gpr.log_marginal_likelihood(gpr.kernel_.theta, eval_gradient=True)
+    lml, _grad = lml_with_gradient(gpr)
     # Gradient w.r.t. log noise too: use a WhiteKernel for the noise.
     kw = ConstantKernel(1.5) * RBF(0.7) + WhiteKernel(noise)
-    gw = GaussianProcessRegressor(kernel=kw, alpha=0.0, optimizer=None).fit(xr, yr)
-    lml_w, grad_w = gw.log_marginal_likelihood(gw.kernel_.theta, eval_gradient=True)
+    gw = GaussianProcessRegressor(kernel=kw, alpha=0.0, optimizer=None).fit(xr, yr)  # pyright: ignore[reportArgumentType]
+    lml_w, grad_w = lml_with_gradient(gw)
     # Fitted hyperparameters (L-BFGS-B from the same start, several restarts).
     fitted = GaussianProcessRegressor(kernel=kw, alpha=0.0, n_restarts_optimizer=5, random_state=0).fit(xr, yr)
-    fp = fitted.kernel_.get_params()
+    fp: dict[str, Any] = cast(Kernel, fitted.kernel_).get_params()
 
     # Classification by Laplace, fixed hyperparameters.
     xc = rng.uniform(-3, 3, size=(30, 1))
     yc = (np.sin(xc[:, 0]) + 0.3 * rng.normal(size=30) > 0).astype(int)
     kc = ConstantKernel(2.0) * RBF(1.0)
-    gpc = GaussianProcessClassifier(kernel=kc, optimizer=None).fit(xc, yc)
-    base = gpc.base_estimator_
+    gpc = GaussianProcessClassifier(kernel=kc, optimizer=None).fit(xc, yc)  # pyright: ignore[reportArgumentType]
+    # Binary targets: base_estimator_ is the Laplace classifier itself, not a one-vs-rest wrapper.
+    base = cast(LaplaceBinary, gpc.base_estimator_)
     xcs = np.linspace(-3, 3, 7)[:, None]
     Kc = kc(xc)
     Kcs = kc(xc, xcs)

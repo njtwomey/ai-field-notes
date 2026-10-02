@@ -10,6 +10,7 @@ import { categorical as categoricalDraws, child, type Stream } from 'aifn/founda
 import { logAddExp } from 'aifn/numerics/special'
 import {
   add,
+  broadcastShapes,
   broadcastTo,
   div,
   exp,
@@ -21,6 +22,7 @@ import {
   log,
   mul,
   shapeOfValue,
+  slice,
   sqrt,
   square,
   sub,
@@ -74,8 +76,10 @@ function extreme(v: Value, which: 'min' | 'max'): number {
 
 /**
  * A finite mixture Σₖ wₖ pₖ(x) of univariate components with weights w (length K, non-negative, normalised here; a
- * number array or a tensor, possibly traced). `logProb` is a log-sum-exp over components (differentiable in the
- * weights and in every component's parameters), the cdf and survival function are the weighted sums, and the quantile
+ * number array or a tensor, possibly traced). The weights may be a batch [..., K], one weight vector per element of
+ * the batch (a mixture density network's head: weights and component parameters that vary by input); the batch shape
+ * is the broadcast of the weights' and the components'. `logProb` is a log-sum-exp over components (differentiable in
+ * the weights and in every component's parameters), the cdf and survival function are the weighted sums, and the quantile
  * is found numerically. The mean and variance follow from the law of total variance; the entropy and mode have no
  * closed form and throw. Draws pick a component per draw (stream `child(s, 'component')`) and take that component's
  * draw (stream `child(s, 'draws', k)`). No `rsample`: the choice of component is discrete.
@@ -84,11 +88,14 @@ export function Mixture(weights: Value | readonly number[], components: readonly
   const w: Value = Array.isArray(weights) ? tensor(weights as number[]) : (weights as Value)
   const K = components.length
   if (K === 0) throw new DomainError('Mixture', 'Mixture: needs at least one component')
-  if (shapeOfValue(w).length !== 1 || shapeOfValue(w)[0] !== K)
-    throw new DomainError('Mixture', `Mixture: needs ${K} weights, one per component`)
+  const wShape = shapeOfValue(w)
+  if (wShape.length < 1 || wShape[wShape.length - 1] !== K)
+    throw new DomainError('Mixture', `Mixture: needs ${K} weights, one per component (on the last axis)`)
   check('Mixture', 'weights', w, (x) => x >= 0, 'non-negative')
-  const normalised = div(w, sum(w))
-  const weight = (k: number) => get(normalised, k)
+  const weightBatch = wShape.slice(0, -1)
+  const normalised = weightBatch.length === 0 ? div(w, sum(w)) : div(w, sum(w, -1, true))
+  const leading = weightBatch.map(() => null)
+  const weight = (k: number) => (weightBatch.length === 0 ? get(normalised, k) : slice(normalised, ...leading, k))
   const logWeight = (k: number) => log(weight(k))
   const fold = (f: (k: number) => Value, combine: (a: Value, b: Value) => Value): Value => {
     let acc = f(0)
@@ -112,10 +119,7 @@ export function Mixture(weights: Value | readonly number[], components: readonly
   return univariate<Value>({
     name: 'Mixture',
     params,
-    batchShape: components.reduce<readonly number[]>(
-      (shape, c) => (c.batchShape.length > shape.length ? c.batchShape : shape),
-      [],
-    ),
+    batchShape: broadcastShapes(weightBatch, ...components.map((c) => c.batchShape)),
     support,
     discrete,
     logProb: (x) => fold((k) => add(logWeight(k), components[k].logProb(x)), logAddExp),
@@ -126,7 +130,8 @@ export function Mixture(weights: Value | readonly number[], components: readonly
       const choice = categoricalDraws(child(s, 'component'), raw(normalised, 'Mixture') as Tensor, { shape }) as Tensor
       const picks = toFlat(choice)
       const draws = components.map((c, k) => {
-        const t = c.sample(child(s, 'draws', k), { shape })
+        // `shape` is the full draw shape (sample axes, then the batch); a component prepends its own batch.
+        const t = c.sample(child(s, 'draws', k), { shape: shape.slice(0, shape.length - c.batchShape.length) })
         return toFlat(broadcastTo(t, shape))
       })
       return fromData(

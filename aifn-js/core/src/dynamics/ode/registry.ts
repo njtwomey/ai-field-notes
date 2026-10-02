@@ -8,6 +8,8 @@ import { definer, entries, type AlgorithmInfo, type Entry, type FunctionInfo } f
 import * as adjoint from './adjoint'
 import * as events from './events'
 import * as linear from './linear'
+import * as neural from './neural'
+import * as rows from './rows'
 import * as solve from './solve'
 import * as stability from './stability'
 import * as adaptive from './adaptive'
@@ -177,9 +179,70 @@ fn(
   },
   adjoint.odeAdjoint,
 )
+const NODE = ['neural-ordinary-differential-equations']
+fn(
+  {
+    key: 'odeFlow',
+    name: 'Differentiable ODE flow',
+    summary:
+      'States of an ODE at given times, differentiated by backpropagation through the solver or by the adjoint method.',
+    role: 'solver',
+    notes: [...NODE, 'numerical-ode-solvers', 'backpropagation'],
+    cite: ['chen2018', 'kidger2022'],
+  },
+  neural.odeFlow,
+)
+fn(
+  {
+    key: 'jacobianTrace',
+    name: 'Jacobian trace (exact or Hutchinson)',
+    summary:
+      'The trace of a row-wise map’s Jacobian per row, exactly by forward products or by Hutchinson’s estimator.',
+    role: 'estimator',
+    notes: ['normalising-flow', ...NODE],
+    cite: ['hutchinson1989', 'grathwohl2019'],
+  },
+  neural.jacobianTrace,
+)
+fn(
+  {
+    key: 'traceProbe',
+    name: 'Trace-estimator probe',
+    summary: 'A Rademacher (±1) or Gaussian probe ε with E[εεᵀ] = I for Hutchinson’s trace estimator.',
+    role: 'construction',
+    random: true,
+    notes: ['normalising-flow'],
+    cite: ['hutchinson1989'],
+  },
+  neural.traceProbe,
+)
+fn(
+  {
+    key: 'augmentedDynamics',
+    name: 'Augmented CNF dynamics',
+    summary:
+      'An ODE with the change in log density, the kinetic energy and the Jacobian Frobenius norm integrated alongside.',
+    role: 'construction',
+    notes: ['normalising-flow', ...NODE, 'vector-fields-and-flows'],
+    cite: ['chen2018', 'grathwohl2019'],
+  },
+  neural.augmentedDynamics,
+)
+fn(
+  {
+    key: 'dormandPrinceRows',
+    name: 'Dormand–Prince on many independent problems',
+    summary:
+      'Solve a batch of independent IVPs together, each row with its own adaptive steps: per-instance work at batched cost.',
+    role: 'solver',
+    notes: ['numerical-ode-solvers', ...NODE],
+    cite: ['dormand1980'],
+  },
+  rows.dormandPrinceRows,
+)
 
 /** The functions of the module, keyed by name. */
 export const odeFunctions: Readonly<Record<string, Entry<(...args: never[]) => unknown, FunctionInfo>>> =
-  entries<FunctionInfo>('function', solve, linear, stability, symplectic, events, adjoint) as Readonly<
+  entries<FunctionInfo>('function', solve, linear, stability, symplectic, events, adjoint, neural, rows) as Readonly<
     Record<string, Entry<(...args: never[]) => unknown, FunctionInfo>>
   >

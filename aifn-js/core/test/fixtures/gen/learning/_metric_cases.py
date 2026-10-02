@@ -4,6 +4,7 @@ the metric, from published worked examples where they exist (Krippendorff 2011, 
 and otherwise from a direct numpy computation of the formula in the metric's docstring."""
 
 import itertools
+from typing import Protocol, cast
 
 import numpy as np
 from scipy import stats
@@ -11,6 +12,15 @@ from scipy.spatial import distance, procrustes
 from scipy.stats import contingency
 from sklearn import metrics as sk
 from sklearn.preprocessing import label_binarize
+
+
+class _HasStatistic(Protocol):
+    statistic: float
+
+
+def statistic(result: object) -> float:
+    """The statistic of a scipy.stats result, whose result classes Pyright cannot see into (scipy is unstubbed)."""
+    return cast(_HasStatistic, result).statistic
 
 
 def softmax(z):
@@ -90,7 +100,7 @@ def classification(rng, cases):
         cases[key].append(
             {
                 "args": [Y, P, {"average": "samples", "zeroDivision": 0}],
-                "value": f(Y, P, average="samples", zero_division=0),
+                "value": f(Y, P, average="samples", zero_division=0),  # pyright: ignore[reportArgumentType]  # sklearn is unstubbed: zero_division inferred as str
             }
         )
         cases[key].append({"args": [Y, P, {"average": "micro"}], "value": f(Y, P, average="micro")})
@@ -174,7 +184,9 @@ def regression(rng, cases):
         {"args": [y, q, {"tau": tau}], "value": sk.mean_pinball_loss(y, q, alpha=tau)} for tau in (0.1, 0.5, 0.9)
     ]
     cases["tweedieDeviance"] = [
-        {"args": [y, q, {"power": pw}], "value": sk.mean_tweedie_deviance(y, q, power=pw)} for pw in (0, 1, 1.5, 2, 3)
+        # sklearn is unstubbed: power is inferred as int from its default of 0.
+        {"args": [y, q, {"power": pw}], "value": sk.mean_tweedie_deviance(y, q, power=pw)}  # pyright: ignore[reportArgumentType]
+        for pw in (0, 1, 1.5, 2, 3)
     ]
     r2 = sk.r2_score(y, q)
     cases["adjustedR2Score"] = [{"args": [y, q, {"predictors": 3}], "value": 1 - (1 - r2) * (n - 1) / (n - 3 - 1)}]
@@ -526,10 +538,10 @@ def agreement(rng, cases):
     x = rng.normal(size=40)
     yv = 0.6 * x + rng.normal(0, 0.8, 40)
     yt = np.round(yv, 0)  # ties for the rank correlations
-    cases["pearsonCorrelation"] = [{"args": [x, yv], "value": stats.pearsonr(x, yv).statistic}]
+    cases["pearsonCorrelation"] = [{"args": [x, yv], "value": statistic(stats.pearsonr(x, yv))}]
     cases["spearmanCorrelation"] = [
-        {"args": [x, yv], "value": stats.spearmanr(x, yv).statistic},
-        {"args": [x, yt], "value": stats.spearmanr(x, yt).statistic},
+        {"args": [x, yv], "value": statistic(stats.spearmanr(x, yv))},
+        {"args": [x, yt], "value": statistic(stats.spearmanr(x, yt))},
     ]
     cases["kendallCorrelation"] = [
         {"args": [x, yv], "value": stats.kendalltau(x, yv).statistic},
@@ -637,9 +649,39 @@ def distances(rng, cases):
     cases["hausdorffDistance"] = [{"args": [A, Y], "value": h}]
 
 
+def representation(rng, cases):
+    """Wang & Isola (2020)'s reference code: (x - y).norm(dim=1).pow(alpha).mean() and
+    pdist(x).pow(2).mul(-t).exp().mean().log(), on unit-norm embeddings."""
+    x = rng.normal(size=(9, 3))
+    x /= np.linalg.norm(x, axis=1, keepdims=True)
+    y = x + 0.3 * rng.normal(size=(9, 3))
+    y /= np.linalg.norm(y, axis=1, keepdims=True)
+    gap = np.linalg.norm(x - y, axis=1)
+    cases["alignment"] = [
+        {"args": [x, y], "value": np.mean(gap**2)},
+        {"args": [x, y, {"alpha": 1}], "value": np.mean(gap)},
+    ]
+    d2 = distance.pdist(x) ** 2
+    cases["uniformity"] = [
+        {"args": [x], "value": np.log(np.mean(np.exp(-2 * d2)))},
+        {"args": [x, {"t": 0.5}], "value": np.log(np.mean(np.exp(-0.5 * d2)))},
+    ]
+
+
 def metric_cases() -> dict[str, list[dict[str, object]]]:
     rng = np.random.default_rng(20261001)
     cases: dict[str, list[dict[str, object]]] = {}
-    for part in (classification, ordinal, regression, probabilistic, curves, ranking, clustering, agreement, distances):
+    for part in (
+        classification,
+        ordinal,
+        regression,
+        probabilistic,
+        curves,
+        ranking,
+        clustering,
+        agreement,
+        distances,
+        representation,
+    ):
         part(rng, cases)
     return cases

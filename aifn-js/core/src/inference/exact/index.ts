@@ -29,6 +29,7 @@ export {
   factorChain,
   forwardBackward,
   forwardBackwardSteps,
+  posteriorDecode,
   sampleHiddenPath,
   viterbi,
   viterbiSteps,
@@ -38,6 +39,7 @@ export {
   type FactorChain,
   type ForwardBackwardResult,
   type ForwardBackwardState,
+  type PosteriorDecoding,
   type ViterbiResult,
   type ViterbiState,
 } from './chain'

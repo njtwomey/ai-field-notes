@@ -14,8 +14,20 @@ import * as ordinal from './ordinal'
 import * as probabilistic from './probabilistic'
 import * as ranking from './ranking'
 import * as regression from './regression'
+import * as representation from './representation'
 
-const modules = [classification, ordinal, curves, probabilistic, regression, ranking, clustering, agreement, distances]
+const modules = [
+  classification,
+  ordinal,
+  curves,
+  probabilistic,
+  regression,
+  ranking,
+  clustering,
+  agreement,
+  distances,
+  representation,
+]
 
 /** Every metric, keyed by its `info.key`. */
 export const metricRegistry: Readonly<Record<string, Metric>> = entries('metric', ...modules) as unknown as Readonly<

@@ -70,7 +70,7 @@ export function TreeBpSpecimen() {
       state={state}
       controls={
         <div className="col-span-full">
-          <Player label="2 · message" value={step} onChange={setStep} count={run.steps.length} defaultSpeed={2} />
+          <Player label="2 · message" value={step} onChange={setStep} count={run.steps.length} />
         </div>
       }
       readouts={{
