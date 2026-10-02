@@ -1,7 +1,7 @@
 # Common tasks. `make help` lists them.
 .DEFAULT_GOAL := help
 # Python sources that ruff lints and formats; Pyright reads its include list from pyproject.toml.
-PY_SRC := python aifn-js/core/test/fixtures aifn-js/applications/test/fixtures
+PY_SRC := python aifn-js/core/test/fixtures aifn-js/methods/test/fixtures
 
 .PHONY: help install dev contracts assets content doctor links wrap lint aifn-layers aifn-names catalog catalog-check format typecheck test bench aifn-package fixtures fixtures-check lab-check lab-shots lab check build preview clean
 
@@ -36,14 +36,14 @@ doctor: ## Check the content tree (SCOPE="taxonomy/path slug ..." limits per-not
 
 lint: aifn-layers aifn-names ## Lint TypeScript, Python and note prose
 	npx oxlint
-	node aifn-lab/check.ts --imports-only
+	node aifn-js/lab/check.ts --imports-only
 	git ls-files -z -co --exclude-standard | xargs -0 sh -c 'for f; do [ -f "$$f" ] && printf "%s\0" "$$f"; done' _ | xargs -0 npx prettier --check --ignore-unknown
 	node scripts/wrap-mdx.ts --check
 	uv run ruff check $(PY_SRC)
 	uv run ruff format --check $(PY_SRC)
 
 aifn-names: ## Check that no two aifn modules export different values under one name (allowlist in the test)
-	npx vitest run --config aifn-js/applications/vitest.config.ts test/names.test.ts
+	npx vitest run --config aifn-js/methods/vitest.config.ts test/names.test.ts
 
 catalog: ## Collect every aifn registry entry into aifn-js/generated/catalog.json and check its note, glossary and reference links
 	node scripts/aifn-catalog.ts
@@ -67,7 +67,7 @@ typecheck: ## Type-check TypeScript and Python
 test: aifn-layers aifn-names ## Run the aifn-js tests (core and applications) and the Python core tests
 	npx vitest run --config aifn-js/core/vitest.config.ts
 	@# The name lint (test/names.test.ts) already ran as the aifn-names prerequisite; make runs a prerequisite once.
-	npx vitest run --config aifn-js/applications/vitest.config.ts --exclude test/names.test.ts
+	npx vitest run --config aifn-js/methods/vitest.config.ts --exclude test/names.test.ts
 	uv run pytest
 
 bench: ## Run the aifn core micro-benchmarks (reported, not gated; not part of check)
@@ -83,14 +83,14 @@ fixtures-check: ## Regenerate every aifn-js fixture in memory and fail if any di
 	uv run python aifn-js/core/test/fixtures/generate.py --check $(FIXTURES)
 
 lab-check: ## Render every aifn lab specimen on the server and report any that throw
-	node aifn-lab/check.ts
+	node aifn-js/lab/check.ts
 
 lab-shots: ## Screenshot aifn lab pages and figures to .scratch/lab-shots (ARGS="--only module/slug --theme dark ...")
-	node aifn-lab/screenshot.ts $(ARGS)
+	node aifn-js/lab/screenshot.ts $(ARGS)
 
 lab: ## Start the aifn lab (standalone explorer for aifn) → http://localhost:5190/
 	@echo "aifn lab → http://localhost:5190/  (pages at /<module>/<specimen>, figures at #<figure-id>; UI kit at /ui-kit)"
-	npx vite --config aifn-lab/vite.config.ts
+	npx vite --config aifn-js/lab/vite.config.ts
 
 check: contracts lint doctor typecheck test catalog-check ## Everything CI runs before a build (cheap checks first)
 	uv run mlc check

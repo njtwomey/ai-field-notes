@@ -188,5 +188,5 @@ An area imports core freely and the areas it depends on (transitively).
 ## Presentation code lives in the lab
 
 Presentation helpers that the design assigned to "aifn-ui" moved to the lab with the module tree
-(`aifn-lab/src/viz/drawing`): `fields.ts` samples direction and slope fields, contours, level sets and nullclines for
+(`lab/src/viz/drawing`): `fields.ts` samples direction and slope fields, contours, level sets and nullclines for
 drawing (on core's `aifn/dynamics/fields` grids), and `decimate.ts` holds `lttb` and `minMaxDecimate`.

@@ -313,9 +313,9 @@ A module that needs one of these imports it; it does not keep a private copy.
 
 ## The lab
 
-`make lab` starts `aifn-lab` (http://localhost:5190/). Each module adds specimens in
-`aifn-lab/src/specimens/<family>/<module>.tsx` (figures in `_<module>/`; applications under `specimens/applied/`),
-and generic views of aifn objects live in `aifn-lab/src/views/`, registered by `kind` and drawn by `Show`. A
+`make lab` starts the lab (http://localhost:5190/). Each module adds specimens in
+`aifn-js/lab/src/specimens/<family>/<module>.tsx` (figures in `_<module>/`; applications under `specimens/applied/`),
+and generic views of aifn objects live in `aifn-js/lab/src/views/`, registered by `kind` and drawn by `Show`. A
 specimen's page is `/<family>/<module>/<specimen-slug>` and a figure on it is `#<figure-id>` (the slug of its title),
 e.g. `/foundation/tensor/broadcasting`; `/ui-kit` shows every control and chart. `make lab-check` renders every page
-and checks paths and figure ids are unique; `make lab-shots` screenshots pages (`aifn-lab/README.md`).
+and checks paths and figure ids are unique; `make lab-shots` screenshots pages (`aifn-js/lab/README.md`).
