@@ -2,7 +2,7 @@
  * Components available in every note without an import. Notes import only note-local widgets and
  * '@/components/viz' / '@/components/widgets' pieces.
  */
-import { Interactive, Readout } from '@/components/viz'
+import { Interactive, Readout } from 'aifn-render'
 import { DistributionExplorer } from '@/components/widgets/DistributionExplorer'
 import { Asset } from './Asset'
 import { H2, H3, H4 } from './Anchored'

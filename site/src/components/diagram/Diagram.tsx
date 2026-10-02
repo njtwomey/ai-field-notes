@@ -1,7 +1,7 @@
 import { useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useTheme } from '@/components/theme-provider'
 import { MathText } from '@/components/content/MathText'
-import { chrome, seriesColor, type Mode } from '@/components/viz/palette'
+import { chrome, seriesColor, type Mode } from 'aifn-render'
 import type { DiagramEdge, DiagramGroup, DiagramNode, DiagramSpec, Direction, Side, Tone } from './types'
 
 type Pt = { x: number; y: number }

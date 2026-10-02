@@ -1,4 +1,4 @@
-import { Heatmap, XYChart, formatNumber } from '@/components/viz'
+import { Heatmap, XYChart, formatNumber } from 'aifn-render'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import type { Output } from '@/generated/contracts'
 import { generatedUrl } from '@/lib/generated'

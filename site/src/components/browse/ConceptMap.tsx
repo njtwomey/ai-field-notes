@@ -1,8 +1,7 @@
 import { useMemo } from 'react'
 import { useNavigate } from 'react-router'
 import { useTheme } from '@/components/theme-provider'
-import { EChart, type EChartClick } from '@/components/viz/EChart'
-import { chrome, MARKER_SHAPES, seriesColor } from '@/components/viz/palette'
+import { EChart, type EChartClick, chrome, MARKER_SHAPES, seriesColor } from 'aifn-render'
 import { kindLabels, notes, noteUrl, taxonomy, topicOf, type NoteMeta } from '@/lib/content'
 
 type Edge = { source: string; target: string; kind: 'requires' | 'part of' | 'related' }
