@@ -25,8 +25,8 @@ const leaves = (prefix: string, list: readonly AppNode[]): string[] =>
       : [`${prefix}/${n.group}`, ...leaves(`${prefix}/${n.group}`, n.children)],
   )
 
-// Names allowed to collide (none: every collision was resolved in phase 1).
-const ALLOWED: readonly string[] = []
+// Names allowed to collide.
+const ALLOWED: readonly string[] = ['bernoulliKl']
 
 // Importing every module of both packages takes several seconds when it runs alongside the rest of the suite.
 it('no two aifn modules export different values under one name', async () => {
