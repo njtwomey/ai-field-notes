@@ -1,57 +1,21 @@
-/** The lab's controls. Everything outside src/controls imports from '@render/controls' only. */
-export { Slider, type SliderProps } from './Slider'
-export { NumberField, type NumberFieldProps } from './NumberField'
-export { Select, type SelectProps } from './Select'
-export { Combobox, type ComboboxProps } from './Combobox'
-export { MultiCombobox, type MultiComboboxProps } from './MultiCombobox'
-export { Choice, SEARCHABLE_FROM, type ChoiceProps } from './Choice'
-export { Switch } from './Switch'
-export { Player, type PlayerProps } from './Player'
-export { usePlayhead } from './playhead'
-export { StepControls } from './StepControls'
-export { ControlLabel } from './ControlLabel'
-export { useParam, type Param, type ParamSpec } from './param'
-export {
-  slider,
-  number,
-  float,
-  int,
-  choice,
-  toggle,
-  setting,
-  row,
-  variants,
-  when,
-  type ParamDef,
-  type ParamDefs,
-  type ParamValue,
-  type Values,
-  type ValueOf,
-} from './params'
-export { FigureControls, LeafControl, ParamControls, type ParamControlsProps } from './ParamControls'
-export {
-  defineVariants,
-  useVariants,
-  useParams,
-  type Variants,
-  type VariantsControl,
-  type VariantsJson,
-} from './variants'
-export { VariantControls } from './VariantControls'
-export type { Option, Options } from './options'
-// Buttons come straight from the shadcn primitives; re-exported so figures need one import for their controls.
+/**
+ * Structured interactive controls for aifn figures and specimens:
+ * - visual: SwatchPicker, RampPicker, ThemeToggle, RevealToggle
+ * - numeric: Slider, NumberField, useNumberDraft
+ * - selection: Select, Combobox, MultiCombobox, Choice, options
+ * - playback: Player, StepControls, usePlayhead
+ * - schema: params, ParamControls, variants, VariantControls, useParam
+ * - code: CodeEditor, prologLanguage
+ * - base: ControlLabel, StatusText, Switch
+ */
+export * from './visual'
+export * from './numeric'
+export * from './selection'
+export * from './playback'
+export * from './schema'
+export * from './code'
+export * from './base'
+
+// Buttons re-exported from UI primitives so figures have a single controls import point
 export { Button } from '@render/ui/button'
 export { ButtonGroup, ButtonGroupSeparator, ButtonGroupText } from '@render/ui/button-group'
-export { CodeEditor, type CodeEditorProps, type CodeError } from './CodeEditor'
-export { StatusText } from './StatusText'
-export {
-  RampPicker,
-  RevealToggle,
-  SwatchPicker,
-  ThemeToggle,
-  type RampPickerProps,
-  type RampType,
-  type RevealToggleProps,
-  type SwatchPickerProps,
-} from './visual'
-
