@@ -9,7 +9,7 @@ import {
   type Handle,
   type ParamSpec,
   type XYSeries,
-} from '@/components/viz'
+} from 'aifn-render'
 import { linspace } from '@/lib/math'
 import { svd2 } from '@/lib/math/mat2'
 

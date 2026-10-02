@@ -9,7 +9,7 @@ import {
   useParam,
   type Handle,
   type XYSeries,
-} from '@/components/viz'
+} from 'aifn-render'
 import { classify2, directionField, expm2, formatEig, integrate, type Mat2 } from '../_shared/ode'
 
 type Preset = 'node' | 'saddle' | 'spiral' | 'centre'

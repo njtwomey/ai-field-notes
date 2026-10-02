@@ -1,4 +1,4 @@
-import type { XYSeries } from '@/components/viz'
+import type { XYSeries } from 'aifn-render'
 import type { Point } from './solver'
 
 /** The plotting window shared by the figures: every point of the example with room for the margins. */

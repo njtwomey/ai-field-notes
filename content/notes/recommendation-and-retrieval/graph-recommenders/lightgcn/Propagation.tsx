@@ -1,5 +1,5 @@
 import { useMemo } from 'react'
-import { Heatmap, Interactive, ParamSlider, Readout, formatNumber, useParam } from '@/components/viz'
+import { Heatmap, Interactive, ParamSlider, Readout, formatNumber, useParam } from 'aifn-render'
 
 /** A toy interaction matrix: 6 users × 7 items. Users 1–3 share tastes, users 4–6 share others, user 3 bridges. */
 const R = [

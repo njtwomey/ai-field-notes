@@ -1,4 +1,4 @@
-import { Heatmap, Interactive } from '@/components/viz'
+import { Heatmap, Interactive } from 'aifn-render'
 import type { TypeIErrorMaps as Maps } from '@/generated/contracts'
 import { useFigure } from '@/lib/generated'
 

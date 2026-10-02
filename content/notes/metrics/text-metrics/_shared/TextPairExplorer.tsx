@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { Interactive, ParamChoice, Readout, XYChart, formatNumber, type XYSeries } from '@/components/viz'
+import { Interactive, ParamChoice, Readout, XYChart, formatNumber, type XYSeries } from 'aifn-render'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Textarea } from '@/components/ui/textarea'
 import { cn } from '@/lib/utils'

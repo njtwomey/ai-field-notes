@@ -10,7 +10,7 @@ import {
   type Handle,
   type Vector,
   type XYSeries,
-} from '@/components/viz'
+} from 'aifn-render'
 import type { LossSurface } from '@/generated/contracts'
 import { useFigure } from '@/lib/generated'
 import { mean, sigmoid } from '@/lib/math'

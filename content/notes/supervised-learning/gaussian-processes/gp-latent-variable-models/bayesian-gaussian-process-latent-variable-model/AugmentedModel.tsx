@@ -1,6 +1,6 @@
 import { Diagram } from '@/components/diagram/Diagram'
 import type { DiagramSpec } from '@/components/diagram/types'
-import { Interactive } from '@/components/viz'
+import { Interactive } from 'aifn-render'
 
 const spec: DiagramSpec = {
   nodes: [

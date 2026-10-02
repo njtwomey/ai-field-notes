@@ -8,7 +8,7 @@ import {
   formatNumber,
   useParam,
   type XYSeries,
-} from '@/components/viz'
+} from 'aifn-render'
 import { linspace, rng } from '@/lib/math'
 import { costMatrix, hungarian, type Pt } from '../_shared/ot'
 

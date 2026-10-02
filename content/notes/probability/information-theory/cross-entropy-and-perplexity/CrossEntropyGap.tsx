@@ -8,7 +8,7 @@ import {
   useParam,
   type Handle,
   type XYSeries,
-} from '@/components/viz'
+} from 'aifn-render'
 
 const log2 = (x: number) => Math.log(x) / Math.LN2
 /** The true distribution: four outcomes with probabilities 1/2, 1/4, 1/8, 1/8, so H(p) = 1.75 bits. */

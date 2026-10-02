@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { Interactive, ParamSlider, Readout, StepControls, formatNumber } from '@/components/viz'
+import { Interactive, ParamSlider, Readout, StepControls, formatNumber } from 'aifn-render'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { cn } from '@/lib/utils'
 

@@ -8,7 +8,7 @@ import {
   useParam,
   type Handle,
   type XYSeries,
-} from '@/components/viz'
+} from 'aifn-render'
 import { TS_DEFAULTS, eloExpectedGaussian, simulateGames, trueSkill1v1, type Rating } from '../_shared/skill'
 
 const NAMES = ['A', 'B', 'C', 'D']

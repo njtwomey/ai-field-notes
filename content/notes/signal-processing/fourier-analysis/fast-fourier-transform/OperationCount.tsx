@@ -8,7 +8,7 @@ import {
   useParam,
   type Handle,
   type XYSeries,
-} from '@/components/viz'
+} from 'aifn-render'
 
 const EXPONENTS = Array.from({ length: 21 }, (_, i) => i + 2)
 

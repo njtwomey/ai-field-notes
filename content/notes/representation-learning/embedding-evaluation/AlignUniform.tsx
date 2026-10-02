@@ -9,7 +9,7 @@ import {
   type Handle,
   type Segment,
   type XYSeries,
-} from '@/components/viz'
+} from 'aifn-render'
 import { rng } from '@/lib/math'
 
 const PAIRS = 4

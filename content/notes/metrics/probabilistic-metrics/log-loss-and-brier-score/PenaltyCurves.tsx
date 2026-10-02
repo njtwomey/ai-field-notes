@@ -1,4 +1,4 @@
-import { Interactive, Readout, XYChart, formatNumber, useParam, type Handle, type XYSeries } from '@/components/viz'
+import { Interactive, Readout, XYChart, formatNumber, useParam, type Handle, type XYSeries } from 'aifn-render'
 import { linspace } from '@/lib/math'
 
 const P = linspace(0.005, 1, 200)

@@ -1,7 +1,7 @@
 import { Diagram } from '@/components/diagram/Diagram'
 import { factor, link, variable } from '@/components/diagram/components'
 import type { DiagramNode, DiagramSpec } from '@/components/diagram/types'
-import { Interactive } from '@/components/viz'
+import { Interactive } from 'aifn-render'
 
 const PLAYERS = [0, 1, 2, 3]
 const px = (i: number) => i * 1.6

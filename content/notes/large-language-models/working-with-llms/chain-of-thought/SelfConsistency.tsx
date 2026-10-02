@@ -8,7 +8,7 @@ import {
   useParam,
   type Handle,
   type XYSeries,
-} from '@/components/viz'
+} from 'aifn-render'
 
 const K_MAX = 40
 const KS = Array.from({ length: K_MAX }, (_, i) => i + 1)

@@ -10,7 +10,7 @@ import {
   useParam,
   type Handle,
   type XYSeries,
-} from '@/components/viz'
+} from 'aifn-render'
 import { linspace } from '@/lib/math'
 import { metricsAt, negativeDensity, positiveDensity, posterior, scoreForPosterior } from '../_shared/binormal'
 

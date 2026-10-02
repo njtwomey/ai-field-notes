@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { Interactive, ParamButton, Readout, XYChart, formatNumber, type Handle, type XYSeries } from '@/components/viz'
+import { Interactive, ParamButton, Readout, XYChart, formatNumber, type Handle, type XYSeries } from 'aifn-render'
 import { rng } from '@/lib/math'
 import { concordance, mae, mse, pearson, r2, spearman } from './scores'
 

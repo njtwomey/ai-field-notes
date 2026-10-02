@@ -1,5 +1,5 @@
 import { useMemo } from 'react'
-import { Interactive, ParamSlider, Readout, XYChart, formatNumber, useParam, type XYSeries } from '@/components/viz'
+import { Interactive, ParamSlider, Readout, XYChart, formatNumber, useParam, type XYSeries } from 'aifn-render'
 import { fft, ifft, lfilter, makeWindow } from '@/lib/dsp'
 
 const FS = 16000

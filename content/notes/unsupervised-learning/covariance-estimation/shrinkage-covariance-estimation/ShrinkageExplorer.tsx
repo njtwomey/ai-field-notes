@@ -8,7 +8,7 @@ import {
   formatNumber,
   useParam,
   type Handle,
-} from '@/components/viz'
+} from 'aifn-render'
 import { linspace, rng } from '@/lib/math'
 import { eigSymmetric, type Matrix } from '../../_shared/linalg'
 

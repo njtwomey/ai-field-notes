@@ -2,7 +2,7 @@ import { useMemo } from 'react'
 import { MathText } from '@/components/content/MathText'
 import { Diagram } from '@/components/diagram/Diagram'
 import type { DiagramNode, DiagramSpec } from '@/components/diagram/types'
-import { Interactive, ParamSlider, useParam } from '@/components/viz'
+import { Interactive, ParamSlider, useParam } from 'aifn-render'
 
 /** One assumption: the node and group ids it adds (or removes), and a sentence saying what it assumes. */
 export type GraphStep = { add: string[]; remove?: string[]; text: string }

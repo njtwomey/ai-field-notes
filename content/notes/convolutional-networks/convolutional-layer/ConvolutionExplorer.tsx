@@ -8,7 +8,7 @@ import {
   formatNumber,
   useParam,
   type HeatmapOverlay,
-} from '@/components/viz'
+} from 'aifn-render'
 
 const N = 12
 const K = 3

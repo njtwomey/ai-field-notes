@@ -9,7 +9,7 @@ import {
   useParam,
   type Handle,
   type XYSeries,
-} from '@/components/viz'
+} from 'aifn-render'
 import { rng } from '@/lib/math'
 import { normalPdf } from '@/lib/math/special'
 import { binomialLower } from '@/lib/math/tests'

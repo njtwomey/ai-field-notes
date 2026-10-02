@@ -1,5 +1,5 @@
 import { Diagram } from '@/components/diagram/Diagram'
-import { Interactive } from '@/components/viz'
+import { Interactive } from 'aifn-render'
 import { bertopicSpec } from '../_shared/specs'
 
 /** The BERTopic pipeline: embed, reduce, cluster, then describe each cluster with class-based TF-IDF. */

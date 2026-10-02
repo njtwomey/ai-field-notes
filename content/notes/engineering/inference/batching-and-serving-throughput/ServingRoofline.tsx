@@ -9,7 +9,7 @@ import {
   useParam,
   type Handle,
   type XYSeries,
-} from '@/components/viz'
+} from 'aifn-render'
 
 // NVIDIA A100 80 GB SXM: 2.039 TB/s memory bandwidth, 312 TFLOP/s dense bf16, 80 GB of memory.
 const BANDWIDTH = 2.039e12

@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { MathText } from '@/components/content/MathText'
-import { Interactive, ParamSlider, Readout, XYChart, formatNumber, type Handle, type XYSeries } from '@/components/viz'
+import { Interactive, ParamSlider, Readout, XYChart, formatNumber, type Handle, type XYSeries } from 'aifn-render'
 import { linspace } from '@/lib/math'
 import { useClassColors } from '../_shared/classColor'
 import { fitGpOrdinal, gpOrdinalData } from '../_shared/laplace'

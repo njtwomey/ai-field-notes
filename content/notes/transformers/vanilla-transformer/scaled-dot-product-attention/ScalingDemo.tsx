@@ -8,7 +8,7 @@ import {
   formatNumber,
   useParam,
   type XYSeries,
-} from '@/components/viz'
+} from 'aifn-render'
 import { rng } from '@/lib/math'
 
 /** Rows of Q and K: n queries attend over n keys. */

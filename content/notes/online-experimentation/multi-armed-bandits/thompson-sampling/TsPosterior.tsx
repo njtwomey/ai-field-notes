@@ -9,7 +9,7 @@ import {
   useParam,
   type Handle,
   type XYSeries,
-} from '@/components/viz'
+} from 'aifn-render'
 import { linspace, rng } from '@/lib/math'
 import { logGamma } from '@/lib/math/special'
 import { sampleBeta } from '../_shared/bandits'

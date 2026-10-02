@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { Interactive, ParamChoice, Readout, XYChart, formatNumber, type XYSeries } from '@/components/viz'
+import { Interactive, ParamChoice, Readout, XYChart, formatNumber, type XYSeries } from 'aifn-render'
 import { rng } from '@/lib/math'
 
 // A stack of residual blocks with feed-forward branches only, at initialisation. Width D, hidden 4D, T tokens.

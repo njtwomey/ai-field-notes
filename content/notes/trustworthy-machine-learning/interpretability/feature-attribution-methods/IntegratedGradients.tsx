@@ -8,7 +8,7 @@ import {
   useParam,
   type Handle,
   type HeatmapOverlay,
-} from '@/components/viz'
+} from 'aifn-render'
 import { linspace, sigmoid } from '@/lib/math'
 
 // A small nonlinear model with an interaction term: f(x) = σ(2 x₁ + x₂ + 1.5 x₁ x₂ − 1).

@@ -1,5 +1,5 @@
 import { useMemo } from 'react'
-import { Heatmap, XYChart, type Handle, type HeatmapOverlay, type XYSeries } from '@/components/viz'
+import { Heatmap, XYChart, type Handle, type HeatmapOverlay, type XYSeries } from 'aifn-render'
 import { CLASS_SCALE, useClassColors } from './classColor'
 import { expectedClass, type Dataset, type Fitted, type Point } from './ordinal'
 import { useGrid, type FillMode, type Resolution } from './useOrdinalData'

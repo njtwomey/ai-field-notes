@@ -8,7 +8,7 @@ import {
   useParam,
   type Handle,
   type XYSeries,
-} from '@/components/viz'
+} from 'aifn-render'
 import { normalQuantile } from '@/lib/math/special'
 import { tPower } from '@/lib/math/tests'
 

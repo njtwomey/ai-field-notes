@@ -1,4 +1,4 @@
-import { Readout, formatNumber } from '@/components/viz'
+import { Readout, formatNumber } from 'aifn-render'
 import { ConstrainedExplorer, type ConstrainedProblem } from './ConstrainedExplorer'
 
 /** Minimise x on the cusp x³ = y², parametrised as (t², t³). The minimum is the origin, where ∇g = 0. */

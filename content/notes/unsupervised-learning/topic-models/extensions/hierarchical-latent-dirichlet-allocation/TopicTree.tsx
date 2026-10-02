@@ -1,7 +1,7 @@
 import { MathText } from '@/components/content/MathText'
 import { Diagram } from '@/components/diagram/Diagram'
 import type { DiagramEdge, DiagramNode, DiagramSpec } from '@/components/diagram/types'
-import { Interactive } from '@/components/viz'
+import { Interactive } from 'aifn-render'
 
 const node = (id: string, x: number, y: number, label: string, tone: number | 'neutral'): DiagramNode => ({
   id,

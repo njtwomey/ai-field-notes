@@ -1,6 +1,6 @@
 import { Diagram } from '@/components/diagram/Diagram'
 import type { DiagramSpec } from '@/components/diagram/types'
-import { Interactive } from '@/components/viz'
+import { Interactive } from 'aifn-render'
 
 type N = DiagramSpec['nodes'][number]
 const v = (id: string, x: number, y: number, label: string, extra: Partial<N> = {}): N => ({

@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Interactive, ParamChoice, Readout, XYChart, formatNumber, type Handle, type XYSeries } from '@/components/viz'
+import { Interactive, ParamChoice, Readout, XYChart, formatNumber, type Handle, type XYSeries } from 'aifn-render'
 import { linspace } from '@/lib/math'
 
 const GRID = linspace(0, 1, 201)

@@ -8,7 +8,7 @@ import {
   formatNumber,
   useParam,
   type XYSeries,
-} from '@/components/viz'
+} from 'aifn-render'
 import { formatComplex, polyAdd, roots, type Complex, type Vec } from '../../_shared/control'
 
 type Plant = {

@@ -1,5 +1,5 @@
 import { useMemo } from 'react'
-import { Interactive, ParamSlider, Readout, XYChart, formatNumber, useParam, type XYSeries } from '@/components/viz'
+import { Interactive, ParamSlider, Readout, XYChart, formatNumber, useParam, type XYSeries } from 'aifn-render'
 import { logGamma } from '@/lib/math/special'
 
 const logBeta = (a: number, b: number) => logGamma(a) + logGamma(b) - logGamma(a + b)

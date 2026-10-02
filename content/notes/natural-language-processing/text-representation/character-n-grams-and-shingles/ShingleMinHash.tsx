@@ -8,7 +8,7 @@ import {
   XYChart,
   formatNumber,
   type XYSeries,
-} from '@/components/viz'
+} from 'aifn-render'
 import { Textarea } from '@/components/ui/textarea'
 import { rng } from '@/lib/math'
 import { jaccard, minhash, shingles } from '../_shared/text'

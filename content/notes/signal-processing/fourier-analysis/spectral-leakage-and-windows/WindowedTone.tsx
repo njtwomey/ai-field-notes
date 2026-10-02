@@ -9,7 +9,7 @@ import {
   useParam,
   type Handle,
   type XYSeries,
-} from '@/components/viz'
+} from 'aifn-render'
 // Imported under another name: a module-level `window` would shadow the browser global that React's refresh checks.
 import { db, kaiser, magnitudeSpectrum, makeWindow as windowFunction, type WindowName } from '@/lib/dsp'
 

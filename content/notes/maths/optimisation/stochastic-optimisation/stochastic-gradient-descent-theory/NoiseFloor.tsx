@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { Interactive, ParamButton, ParamSlider, Readout, XYChart, formatNumber, type XYSeries } from '@/components/viz'
+import { Interactive, ParamButton, ParamSlider, Readout, XYChart, formatNumber, type XYSeries } from 'aifn-render'
 import { rng } from '@/lib/math'
 
 /** f(x) = ½(λ₁x₁² + λ₂x₂²) with gradient noise of standard deviation σ in each coordinate; x* = 0. */

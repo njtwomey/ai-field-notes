@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { Heatmap, Interactive, ParamChoice, ParamSlider, ParamSwitch, Readout, formatNumber } from '@/components/viz'
+import { Heatmap, Interactive, ParamChoice, ParamSlider, ParamSwitch, Readout, formatNumber } from 'aifn-render'
 import {
   AXIS,
   SOBEL_X,

@@ -8,7 +8,7 @@ import {
   type Handle,
   type Vec2,
   type XYSeries,
-} from '@/components/viz'
+} from 'aifn-render'
 import { linspace, rng } from '@/lib/math'
 
 /** Bands of u₁ that map to rings of the Gaussian plane: small u₁ gives a large radius. */

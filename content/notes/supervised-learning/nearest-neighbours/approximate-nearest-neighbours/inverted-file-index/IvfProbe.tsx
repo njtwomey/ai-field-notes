@@ -10,7 +10,7 @@ import {
   type Handle,
   type HeatmapOverlay,
   type XYSeries,
-} from '@/components/viz'
+} from 'aifn-render'
 import { linspace, rng } from '@/lib/math'
 import { blobs, dist2, kmeans2d, nearest, rankBy, type P } from '../_shared/geometry'
 

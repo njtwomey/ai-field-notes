@@ -1,5 +1,5 @@
 import { Pause, Play } from 'lucide-react'
-import { ParamButton } from '@/components/viz'
+import { ParamButton } from 'aifn-render'
 
 export function PlayButton({
   playing,

@@ -9,7 +9,7 @@ import {
   formatNumber,
   useParam,
   type XYSeries,
-} from '@/components/viz'
+} from 'aifn-render'
 import { rng } from '@/lib/math'
 import { normalCdf } from '@/lib/math/special'
 import { ALGORITHMS, DEFAULT_TUNING, checkpoints, makePolicy, type AlgorithmId } from '../_shared/bandits'

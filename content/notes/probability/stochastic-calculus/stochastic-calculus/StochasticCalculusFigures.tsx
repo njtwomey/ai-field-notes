@@ -1,7 +1,7 @@
 import { useMemo } from 'react'
 import { Diagram } from '@/components/diagram/Diagram'
 import type { DiagramSpec } from '@/components/diagram/types'
-import { Interactive, ParamSlider, Readout, XYChart, formatNumber, useParam, type XYSeries } from '@/components/viz'
+import { Interactive, ParamSlider, Readout, XYChart, formatNumber, useParam, type XYSeries } from 'aifn-render'
 import { rng } from '@/lib/math'
 
 const FINE = 2 ** 16

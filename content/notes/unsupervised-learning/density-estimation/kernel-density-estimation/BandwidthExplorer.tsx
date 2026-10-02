@@ -9,7 +9,7 @@ import {
   formatNumber,
   useParam,
   type Handle,
-} from '@/components/viz'
+} from 'aifn-render'
 import { linspace } from '@/lib/math'
 import { DOMAIN, ise, sample, summary, trueDensity } from '../../_shared/density'
 import { kde, KERNEL_OPTIONS, silverman, type Kernel } from './kde'

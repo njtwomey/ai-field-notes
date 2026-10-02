@@ -9,7 +9,7 @@ import {
   useParam,
   type Handle,
   type XYSeries,
-} from '@/components/viz'
+} from 'aifn-render'
 import { boundary, contour, penalty, quadratic, solve, type Vec } from './geometry'
 
 const RANGE: [number, number] = [-2.5, 2.5]

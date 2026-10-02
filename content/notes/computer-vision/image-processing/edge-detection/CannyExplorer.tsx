@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { Heatmap, Interactive, ParamChoice, ParamSlider, Readout } from '@/components/viz'
+import { Heatmap, Interactive, ParamChoice, ParamSlider, Readout } from 'aifn-render'
 import { AXIS, SIZE, gradients, testImage, type Image } from '../_shared/image'
 
 type Stage = 'magnitude' | 'nms' | 'edges'

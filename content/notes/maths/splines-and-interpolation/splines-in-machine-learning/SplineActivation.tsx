@@ -8,7 +8,7 @@ import {
   useParam,
   type Handle,
   type XYSeries,
-} from '@/components/viz'
+} from 'aifn-render'
 import { bsplineBasis, solve } from '../_shared/splines'
 
 const K = 3

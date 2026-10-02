@@ -1,5 +1,5 @@
 import { useMemo } from 'react'
-import { Interactive, ParamSlider, Readout, XYChart, formatNumber, useParam, type XYSeries } from '@/components/viz'
+import { Interactive, ParamSlider, Readout, XYChart, formatNumber, useParam, type XYSeries } from 'aifn-render'
 import { linspace, rng } from '@/lib/math'
 import { normalPdf } from '@/lib/math/special'
 import { histogramDensity } from '../_shared/ode'

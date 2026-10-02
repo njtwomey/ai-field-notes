@@ -13,7 +13,7 @@ import {
   useParam,
   type Segment,
   type XYSeries,
-} from '@/components/viz'
+} from 'aifn-render'
 import { linspace } from '@/lib/math'
 import { TS_DEFAULTS, drawMargin, gauss, trueSkill1v1, type Outcome } from '../_shared/skill'
 

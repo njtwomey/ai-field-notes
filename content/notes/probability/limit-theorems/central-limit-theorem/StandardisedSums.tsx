@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { Interactive, ParamChoice, ParamSlider, Readout, XYChart, formatNumber, type XYSeries } from '@/components/viz'
+import { Interactive, ParamChoice, ParamSlider, Readout, XYChart, formatNumber, type XYSeries } from 'aifn-render'
 import { linspace, rng } from '@/lib/math'
 import { normalCdf, normalPdf } from '@/lib/math/special'
 

@@ -8,7 +8,7 @@ import {
   formatNumber,
   useParam,
   type XYSeries,
-} from '@/components/viz'
+} from 'aifn-render'
 import { rng } from '@/lib/math'
 
 // Homogeneous online transfer learning (Zhao & Hoi, 2010) on a stream of 2-D points. The source classifier h is a

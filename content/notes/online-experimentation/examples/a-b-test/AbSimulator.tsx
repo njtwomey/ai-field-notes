@@ -8,7 +8,7 @@ import {
   formatNumber,
   type Segment,
   type XYSeries,
-} from '@/components/viz'
+} from 'aifn-render'
 import { rng } from '@/lib/math'
 import { normalPdf, normalQuantile } from '@/lib/math/special'
 import { requiredN, sampleBinomial, twoProportionZ, zTestPower } from '../_shared/ab'

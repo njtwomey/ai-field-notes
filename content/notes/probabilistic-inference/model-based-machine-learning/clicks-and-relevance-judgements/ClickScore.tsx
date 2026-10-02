@@ -8,7 +8,7 @@ import {
   formatNumber,
   useParam,
   type XYSeries,
-} from '@/components/viz'
+} from 'aifn-render'
 import { grid } from '../_shared/gaussian'
 import { CLICK_MODEL, labelProbabilities, scoreDensities } from '../_shared/clicks'
 

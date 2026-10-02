@@ -1,5 +1,5 @@
 import { useMemo } from 'react'
-import { Interactive, ParamSlider, Readout, XYChart, formatNumber, useParam } from '@/components/viz'
+import { Interactive, ParamSlider, Readout, XYChart, formatNumber, useParam } from 'aifn-render'
 import { linspace } from '@/lib/math'
 import { rocExample } from '../../_shared/rocExample'
 

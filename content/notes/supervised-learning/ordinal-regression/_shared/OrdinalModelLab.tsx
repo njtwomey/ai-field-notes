@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { Interactive, ParamChoice, ParamSlider, Readout, formatNumber } from '@/components/viz'
+import { Interactive, ParamChoice, ParamSlider, Readout, formatNumber } from 'aifn-render'
 import { fitGp2d, GP_CAP } from './gp2d'
 import { MAP_CAPTION, negativeShare } from './mapText'
 import { OrdinalDataControls } from './OrdinalDataControls'

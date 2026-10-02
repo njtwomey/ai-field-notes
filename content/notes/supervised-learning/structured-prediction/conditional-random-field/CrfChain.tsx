@@ -8,7 +8,7 @@ import {
   formatNumber,
   useParam,
   type HeatmapOverlay,
-} from '@/components/viz'
+} from 'aifn-render'
 import { rng } from '@/lib/math'
 import { forwardBackward, rankOne, viterbi, type Mat } from '../_shared/chain-crf'
 

@@ -8,7 +8,7 @@ import {
   useParam,
   type Handle,
   type XYSeries,
-} from '@/components/viz'
+} from 'aifn-render'
 import { linspace } from '@/lib/math'
 import { frechet2d, type Cov, type Vec } from '../_shared/fid'
 

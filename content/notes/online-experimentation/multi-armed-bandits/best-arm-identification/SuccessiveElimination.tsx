@@ -8,7 +8,7 @@ import {
   useParam,
   type Handle,
   type XYSeries,
-} from '@/components/viz'
+} from 'aifn-render'
 import { rng } from '@/lib/math'
 
 const START_MEANS = [0.7, 0.6, 0.5, 0.4, 0.3]

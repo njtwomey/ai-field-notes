@@ -8,7 +8,7 @@ import {
   formatNumber,
   useParam,
   type XYSeries,
-} from '@/components/viz'
+} from 'aifn-render'
 import { linspace } from '@/lib/math'
 
 const P = linspace(0.01, 1, 200)

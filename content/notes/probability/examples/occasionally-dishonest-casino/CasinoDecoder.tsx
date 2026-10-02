@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { Interactive, ParamSlider, Readout, XYChart, formatNumber, type XYSeries } from '@/components/viz'
+import { Interactive, ParamSlider, Readout, XYChart, formatNumber, type XYSeries } from 'aifn-render'
 import { forwardBackward, simulate, viterbi, type Casino } from './hmm'
 
 /** A 0/1 sequence as a step line, so each roll's state covers the width of that roll. */

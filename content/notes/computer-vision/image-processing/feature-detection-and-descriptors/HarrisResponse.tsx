@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { Heatmap, Interactive, ParamChoice, ParamSlider, Readout, type HeatmapOverlay } from '@/components/viz'
+import { Heatmap, Interactive, ParamChoice, ParamSlider, Readout, type HeatmapOverlay } from 'aifn-render'
 import { AXIS, SIZE, gaussianBlur, gradients, testImage, type Image } from '../_shared/image'
 
 type Method = 'harris' | 'shi-tomasi'

@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { Diagram } from '@/components/diagram/Diagram'
 import { link, variable } from '@/components/diagram/components'
-import { Interactive, ParamSwitch, Readout } from '@/components/viz'
+import { Interactive, ParamSwitch, Readout } from 'aifn-render'
 
 // The worked example's numbers: p(B = 1), p(E = 1) and p(A = 1 | B, E).
 const P_B = 0.001

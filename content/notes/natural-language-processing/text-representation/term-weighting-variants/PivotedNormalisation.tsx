@@ -8,7 +8,7 @@ import {
   useParam,
   type Handle,
   type XYSeries,
-} from '@/components/viz'
+} from 'aifn-render'
 
 const Z = Array.from({ length: 101 }, (_, i) => i * 4)
 const SHORT = 40

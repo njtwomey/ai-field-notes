@@ -8,7 +8,7 @@ import {
   useParam,
   type Handle,
   type XYSeries,
-} from '@/components/viz'
+} from 'aifn-render'
 import { linspace } from '@/lib/math'
 
 // Rubin's (1981) eight schools: estimated coaching effects y_j and their standard errors σ_j, in SAT points.

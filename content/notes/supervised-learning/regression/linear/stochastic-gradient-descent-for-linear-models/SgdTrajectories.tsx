@@ -9,7 +9,7 @@ import {
   useParam,
   type Handle,
   type XYSeries,
-} from '@/components/viz'
+} from 'aifn-render'
 import type { SgdTrajectories as Trajectories } from '@/generated/contracts'
 import { useFigure } from '@/lib/generated'
 import { HIGHLIGHT, featureStyle } from '../_shared/features'

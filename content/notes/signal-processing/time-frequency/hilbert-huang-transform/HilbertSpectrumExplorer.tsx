@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { Heatmap, Interactive, ParamChoice, Readout, XYChart, formatNumber } from '@/components/viz'
+import { Heatmap, Interactive, ParamChoice, Readout, XYChart, formatNumber } from 'aifn-render'
 import { magnitudeSpectrum } from '@/lib/dsp'
 import { emd } from '../_shared/emd'
 import { hilbertSpectrum } from '../_shared/hht'

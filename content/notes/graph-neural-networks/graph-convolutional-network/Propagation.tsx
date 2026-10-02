@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { Heatmap, Interactive, ParamChoice, ParamSlider, Readout, formatNumber, useParam } from '@/components/viz'
+import { Heatmap, Interactive, ParamChoice, ParamSlider, Readout, formatNumber, useParam } from 'aifn-render'
 
 // Two 5-cliques (nodes 0–4 and 5–9) joined by one edge between nodes 4 and 5.
 const N = 10

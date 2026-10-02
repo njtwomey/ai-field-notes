@@ -10,7 +10,7 @@ import {
   type HeatmapOverlay,
   type Segment,
   type XYSeries,
-} from '@/components/viz'
+} from 'aifn-render'
 import { dtw, lbKeogh } from '../_shared/tsc'
 
 const N = 40

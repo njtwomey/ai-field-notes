@@ -11,7 +11,7 @@ import {
   useParam,
   type Handle,
   type HeatmapOverlay,
-} from '@/components/viz'
+} from 'aifn-render'
 import { grid } from '../_shared/ep'
 import { ellipse, epProbit, exactProbitGrid, laplaceProbit, predictive, type V2 } from '../_shared/probit'
 

@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { Interactive, Readout, XYChart, formatNumber, type Handle, type XYSeries } from '@/components/viz'
+import { Interactive, Readout, XYChart, formatNumber, type Handle, type XYSeries } from 'aifn-render'
 
 type Vec = [number, number]
 const R = 4

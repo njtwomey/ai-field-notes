@@ -1,4 +1,4 @@
-import { Readout, formatNumber } from '@/components/viz'
+import { Readout, formatNumber } from 'aifn-render'
 import { ConstrainedExplorer, type ConstrainedProblem } from './ConstrainedExplorer'
 
 const DEG = Math.PI / 180

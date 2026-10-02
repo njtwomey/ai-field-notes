@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { Interactive, ParamSlider, Readout, XYChart, formatNumber } from '@/components/viz'
+import { Interactive, ParamSlider, Readout, XYChart, formatNumber } from 'aifn-render'
 import { rings } from '../../_shared/datasets'
 import { distances, doubleCentre, linearSplitAccuracy, topScaled } from '../../_shared/manifold'
 

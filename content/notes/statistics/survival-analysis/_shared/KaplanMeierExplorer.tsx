@@ -9,7 +9,7 @@ import {
   formatNumber,
   type Segment,
   type XYSeries,
-} from '@/components/viz'
+} from 'aifn-render'
 import { linspace, rng } from '@/lib/math'
 import { normalCdf } from '@/lib/math/special'
 import { eventTable, logRank, median, stepPath } from './survival'

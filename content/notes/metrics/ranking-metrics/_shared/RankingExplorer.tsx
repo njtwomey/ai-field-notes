@@ -1,7 +1,7 @@
 import { ArrowDown, ArrowUp, Minus, Plus } from 'lucide-react'
 import { useState } from 'react'
 import { Button } from '@/components/ui/button'
-import { Interactive, ParamButton, ParamSlider, Readout, XYChart, formatNumber, useParam } from '@/components/viz'
+import { Interactive, ParamButton, ParamSlider, Readout, XYChart, formatNumber, useParam } from 'aifn-render'
 import { averagePrecision, isRelevant, ndcg, precisionAt, recallAt, reciprocalRank } from './ranking'
 
 const START = [2, 0, 3, 1, 0, 0, 2, 0, 1, 0]

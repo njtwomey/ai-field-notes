@@ -8,7 +8,7 @@ import {
   useParam,
   type Handle,
   type XYSeries,
-} from '@/components/viz'
+} from 'aifn-render'
 import { correctedArcCurve, selfJoin } from '../_shared/matrix-profile'
 import { regimeChange } from '../_shared/synthetic'
 

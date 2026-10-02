@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { Interactive, ParamSlider, Readout, XYChart, formatNumber, type XYSeries } from '@/components/viz'
+import { Interactive, ParamSlider, Readout, XYChart, formatNumber, type XYSeries } from 'aifn-render'
 import { rng } from '@/lib/math'
 
 const harmonic = (n: number) => Array.from({ length: n }, (_, k) => 1 / (k + 1)).reduce((a, b) => a + b, 0)

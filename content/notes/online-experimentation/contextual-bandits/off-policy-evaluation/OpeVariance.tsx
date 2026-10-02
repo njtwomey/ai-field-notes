@@ -8,7 +8,7 @@ import {
   formatNumber,
   useParam,
   type XYSeries,
-} from '@/components/viz'
+} from 'aifn-render'
 import { rng } from '@/lib/math'
 import { BEST_VALUE, bestPolicy, estimate, logData, type Estimates, type RewardModel } from '../_shared/ope'
 

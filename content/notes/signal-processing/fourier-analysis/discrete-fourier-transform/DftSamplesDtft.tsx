@@ -1,5 +1,5 @@
 import { useMemo } from 'react'
-import { Interactive, ParamSlider, Readout, XYChart, useParam, type XYSeries } from '@/components/viz'
+import { Interactive, ParamSlider, Readout, XYChart, useParam, type XYSeries } from 'aifn-render'
 import { dft } from '@/lib/dsp'
 import { linspace } from '@/lib/math'
 

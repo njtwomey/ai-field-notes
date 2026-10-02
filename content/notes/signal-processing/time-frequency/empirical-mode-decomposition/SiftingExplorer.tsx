@@ -10,7 +10,7 @@ import {
   useParam,
   type Handle,
   type XYSeries,
-} from '@/components/viz'
+} from 'aifn-render'
 import { emd, findExtrema, RILLING, rillingStats, sdCriterion, sift, type StopRule } from '../_shared/emd'
 
 const N = 400

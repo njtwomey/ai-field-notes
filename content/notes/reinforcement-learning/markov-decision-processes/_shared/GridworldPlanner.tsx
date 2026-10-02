@@ -11,7 +11,7 @@ import {
   type Handle,
   type HeatmapOverlay,
   type XYSeries,
-} from '@/components/viz'
+} from 'aifn-render'
 import { ACTIONS, cellIndex, cellXY, policyIteration, valueIteration, type GridSpec, type Vec2 } from './gridworld'
 
 const WIDTH = 7

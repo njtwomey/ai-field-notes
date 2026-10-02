@@ -1,5 +1,5 @@
 import { type Dispatch, type SetStateAction } from 'react'
-import { ParamChoice, ParamSlider } from '@/components/viz'
+import { ParamChoice, ParamSlider } from 'aifn-render'
 import { SHAPE_OPTIONS, type DataSpec } from './ordinal'
 import { CELLS, type FillMode, type Resolution } from './useOrdinalData'
 

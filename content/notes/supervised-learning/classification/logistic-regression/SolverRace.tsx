@@ -12,7 +12,7 @@ import {
   type Handle,
   type HeatmapOverlay,
   type XYSeries,
-} from '@/components/viz'
+} from 'aifn-render'
 import type { SolverDatasets } from '@/generated/contracts'
 import { useFigure } from '@/lib/generated'
 import { rng, sigmoid } from '@/lib/math'

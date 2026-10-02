@@ -1,7 +1,7 @@
 import { Diagram } from '@/components/diagram/Diagram'
 import { projector } from '@/components/diagram/components'
 import type { DiagramSpec } from '@/components/diagram/types'
-import { Interactive } from '@/components/viz'
+import { Interactive } from 'aifn-render'
 
 const box = (id: string, x: number, y: number, label: string, tone: number | 'neutral', w = 2.8, h = 1.1) => ({
   id,

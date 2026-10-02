@@ -9,7 +9,7 @@ import {
   useParam,
   type Handle,
   type XYSeries,
-} from '@/components/viz'
+} from 'aifn-render'
 import { db, freqz, lfilter } from '@/lib/dsp'
 
 const FS = 1000

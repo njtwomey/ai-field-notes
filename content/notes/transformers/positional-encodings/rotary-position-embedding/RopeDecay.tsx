@@ -1,5 +1,5 @@
 import { useMemo } from 'react'
-import { Interactive, ParamSlider, Readout, XYChart, formatNumber, useParam, type XYSeries } from '@/components/viz'
+import { Interactive, ParamSlider, Readout, XYChart, formatNumber, useParam, type XYSeries } from 'aifn-render'
 
 const MAX_DISTANCE = 2000
 const DISTANCES = Array.from({ length: 401 }, (_, i) => (i * MAX_DISTANCE) / 400)

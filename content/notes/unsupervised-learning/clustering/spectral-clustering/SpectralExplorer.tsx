@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { Interactive, ParamChoice, ParamSlider, Readout, XYChart, formatNumber } from '@/components/viz'
+import { Interactive, ParamChoice, ParamSlider, Readout, XYChart, formatNumber } from 'aifn-render'
 import { moons, rings } from '../../_shared/datasets'
 import { kmeans, spectralTwo } from './spectral'
 

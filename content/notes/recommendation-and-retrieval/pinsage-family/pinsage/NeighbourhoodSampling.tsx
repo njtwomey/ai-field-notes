@@ -3,7 +3,7 @@ import { MathText } from '@/components/content/MathText'
 import { Diagram } from '@/components/diagram/Diagram'
 import { link, variable } from '@/components/diagram/components'
 import type { DiagramEdge, DiagramNode } from '@/components/diagram/types'
-import { Interactive, ParamSlider, Readout, XYChart, useParam } from '@/components/viz'
+import { Interactive, ParamSlider, Readout, XYChart, useParam } from 'aifn-render'
 import { rng } from '@/lib/math'
 
 /** A toy pin–board graph: each board lists the pins saved to it. Pin 1 is the query. */

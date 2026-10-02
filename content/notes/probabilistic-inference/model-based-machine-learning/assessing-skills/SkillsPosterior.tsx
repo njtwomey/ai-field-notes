@@ -11,7 +11,7 @@ import {
   formatNumber,
   useParam,
   type XYSeries,
-} from '@/components/viz'
+} from 'aifn-render'
 import { exactPosterior, loopyHistory, type SkillsModel } from '../_shared/skills'
 
 const SWEEPS = 8

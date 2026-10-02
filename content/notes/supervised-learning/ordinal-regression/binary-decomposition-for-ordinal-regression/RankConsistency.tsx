@@ -10,7 +10,7 @@ import {
   useParam,
   type Handle,
   type XYSeries,
-} from '@/components/viz'
+} from 'aifn-render'
 import { linspace, sigmoid } from '@/lib/math'
 import { useClassColors } from '../_shared/classColor'
 import { exceedanceProbs, fitShared1d, logistic1d, nonParallelSample } from '../_shared/ordinal'

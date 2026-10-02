@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { Diagram } from '@/components/diagram/Diagram'
 import { factor, link, variable } from '@/components/diagram/components'
 import type { DiagramSpec } from '@/components/diagram/types'
-import { Interactive, ParamChoice } from '@/components/viz'
+import { Interactive, ParamChoice } from 'aifn-render'
 
 type Target = 'x1' | 'x2'
 

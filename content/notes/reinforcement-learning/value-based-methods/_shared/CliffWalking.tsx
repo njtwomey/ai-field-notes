@@ -1,5 +1,5 @@
 import { useMemo } from 'react'
-import { Interactive, ParamSlider, Readout, XYChart, formatNumber, useParam, type XYSeries } from '@/components/viz'
+import { Interactive, ParamSlider, Readout, XYChart, formatNumber, useParam, type XYSeries } from 'aifn-render'
 import { GOAL, HEIGHT, START, WIDTH, greedyPath, isCliff, train, xy, type Method } from './cliff'
 
 const EPISODES = 500

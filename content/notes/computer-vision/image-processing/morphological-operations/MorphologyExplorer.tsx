@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { Heatmap, Interactive, ParamChoice, ParamSlider, Readout } from '@/components/viz'
+import { Heatmap, Interactive, ParamChoice, ParamSlider, Readout } from 'aifn-render'
 import { rng } from '@/lib/math'
 import { AXIS, SIZE, type Image } from '../_shared/image'
 

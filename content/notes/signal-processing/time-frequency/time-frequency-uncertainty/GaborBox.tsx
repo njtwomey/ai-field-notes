@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { Interactive, ParamChoice, ParamSlider, Readout, XYChart, formatNumber, useParam } from '@/components/viz'
+import { Interactive, ParamChoice, ParamSlider, Readout, XYChart, formatNumber, useParam } from 'aifn-render'
 import { fft, makeWindow as dspWindow } from '@/lib/dsp'
 
 type Shape = 'gaussian' | 'hann' | 'blackman'

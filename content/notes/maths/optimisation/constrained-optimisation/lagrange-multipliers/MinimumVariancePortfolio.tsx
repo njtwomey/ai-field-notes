@@ -1,5 +1,5 @@
 import { useMemo } from 'react'
-import { ParamSlider, Readout, formatNumber, useParam } from '@/components/viz'
+import { ParamSlider, Readout, formatNumber, useParam } from 'aifn-render'
 import { ConstrainedExplorer, type ConstrainedProblem } from './ConstrainedExplorer'
 
 /**

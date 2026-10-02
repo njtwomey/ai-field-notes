@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { Interactive, Readout, XYChart, formatNumber, type Handle, type Vec2, type XYSeries } from '@/components/viz'
+import { Interactive, Readout, XYChart, formatNumber, type Handle, type Vec2, type XYSeries } from 'aifn-render'
 
 const BASE_X = [1, 2, 3, 4, 5, 6, 7, 8]
 const BASE_Y = [3.1, 3.9, 6.8, 6.2, 9.5, 10.1, 13.4, 12.9]

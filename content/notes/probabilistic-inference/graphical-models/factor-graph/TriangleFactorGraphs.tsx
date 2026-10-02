@@ -2,7 +2,7 @@ import { MathText } from '@/components/content/MathText'
 import { Diagram } from '@/components/diagram/Diagram'
 import { factor, link, variable } from '@/components/diagram/components'
 import type { DiagramSpec } from '@/components/diagram/types'
-import { Interactive } from '@/components/viz'
+import { Interactive } from 'aifn-render'
 
 const VARIABLES = [variable('1', 1.2, 0, '$x_1$'), variable('2', 0, 2, '$x_2$'), variable('3', 2.4, 2, '$x_3$')]
 

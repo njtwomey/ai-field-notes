@@ -8,7 +8,7 @@ import {
   formatNumber,
   useParam,
   type XYSeries,
-} from '@/components/viz'
+} from 'aifn-render'
 import { grid, normalLogPdf, normalPdf } from '../_shared/ep'
 
 // Integrate well beyond the plotted range: a broad q (variance about 5.5) has mass past ±8 that would bias D_α.

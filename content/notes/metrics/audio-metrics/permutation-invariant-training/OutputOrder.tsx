@@ -10,7 +10,7 @@ import {
   useParam,
   type HeatmapOverlay,
   type XYSeries,
-} from '@/components/viz'
+} from 'aifn-render'
 import { rng } from '@/lib/math'
 
 const N = 300

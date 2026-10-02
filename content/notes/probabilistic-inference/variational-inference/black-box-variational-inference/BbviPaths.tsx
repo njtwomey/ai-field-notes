@@ -9,7 +9,7 @@ import {
   useParam,
   type Handle,
   type HeatmapOverlay,
-} from '@/components/viz'
+} from 'aifn-render'
 import { linspace, rng } from '@/lib/math'
 
 const X = 1.5

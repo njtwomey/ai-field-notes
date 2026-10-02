@@ -8,7 +8,7 @@ import {
   type Handle,
   type Segment,
   type XYSeries,
-} from '@/components/viz'
+} from 'aifn-render'
 import { linspace } from '@/lib/math'
 
 type Fn = { label: string; f: (x: number) => number; df: (x: number) => number; range: [number, number] }

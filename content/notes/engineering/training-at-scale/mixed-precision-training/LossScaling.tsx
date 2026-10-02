@@ -8,7 +8,7 @@ import {
   formatNumber,
   type Segment,
   type XYSeries,
-} from '@/components/viz'
+} from 'aifn-render'
 import { rng } from '@/lib/math'
 
 const N = 20000

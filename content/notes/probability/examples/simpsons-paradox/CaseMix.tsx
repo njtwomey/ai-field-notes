@@ -8,7 +8,7 @@ import {
   useParam,
   type Handle,
   type XYSeries,
-} from '@/components/viz'
+} from 'aifn-render'
 import { rng } from '@/lib/math'
 
 /** Success rates by stone size, from Charig et al. (1986). A is open surgery, B is percutaneous nephrolithotomy. */

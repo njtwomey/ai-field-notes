@@ -10,7 +10,7 @@ import {
   formatNumber,
   type HeatmapOverlay,
   type PlotPointer,
-} from '@/components/viz'
+} from 'aifn-render'
 import {
   AXIS,
   accumulate,

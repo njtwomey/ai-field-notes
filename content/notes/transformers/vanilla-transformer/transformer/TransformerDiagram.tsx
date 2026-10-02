@@ -1,4 +1,4 @@
-import { Interactive } from '@/components/viz'
+import { Interactive } from 'aifn-render'
 import { Diagram } from '@/components/diagram/Diagram'
 import { transformer } from '@/components/diagram/specs/transformer'
 

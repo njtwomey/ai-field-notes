@@ -1,4 +1,4 @@
-import { Interactive, Readout, formatNumber } from '@/components/viz'
+import { Interactive, Readout, formatNumber } from 'aifn-render'
 import type { RidgePath } from '@/generated/contracts'
 import { useFigure } from '@/lib/generated'
 import { CoefficientPathExplorer } from '../_shared/CoefficientPathExplorer'

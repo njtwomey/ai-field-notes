@@ -8,7 +8,7 @@ import {
   formatNumber,
   useParam,
   type XYSeries,
-} from '@/components/viz'
+} from 'aifn-render'
 import { fft, makeWindow } from '@/lib/dsp'
 import { whiteNoise } from '../_shared/spectra'
 

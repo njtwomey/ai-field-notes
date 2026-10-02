@@ -11,7 +11,7 @@ import {
   formatNumber,
   useParam,
   type XYSeries,
-} from '@/components/viz'
+} from 'aifn-render'
 
 type Weapon = 'unknown' | 'revolver' | 'dagger'
 type Hair = 'unknown' | 'found' | 'absent'

@@ -9,7 +9,7 @@ import {
   useParam,
   type Handle,
   type HeatmapOverlay,
-} from '@/components/viz'
+} from 'aifn-render'
 import { linspace } from '@/lib/math'
 import { fitDensity, scorePoint, twoDensityData, type Pt } from './localDensity'
 

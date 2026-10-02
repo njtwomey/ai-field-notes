@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { MathText } from '@/components/content/MathText'
-import { Interactive, ParamSlider, Readout, XYChart, formatNumber, type XYSeries } from '@/components/viz'
+import { Interactive, ParamSlider, Readout, XYChart, formatNumber, type XYSeries } from 'aifn-render'
 import { sigmoid } from '@/lib/math'
 import { useClassColors } from '../_shared/classColor'
 import { softplus } from '../_shared/ordinal'

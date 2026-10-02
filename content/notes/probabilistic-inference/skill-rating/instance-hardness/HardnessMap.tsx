@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { Interactive, ParamChoice, ParamSlider, Readout, XYChart, formatNumber, type XYSeries } from '@/components/viz'
+import { Interactive, ParamChoice, ParamSlider, Readout, XYChart, formatNumber, type XYSeries } from 'aifn-render'
 import { instanceHardness, respond, simulate, type Point } from '../_shared/instanceIrt'
 
 type Colour = 'ih' | 'kdn' | 'label'

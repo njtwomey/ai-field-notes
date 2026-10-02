@@ -8,7 +8,7 @@ import {
   useParam,
   type Handle,
   type XYSeries,
-} from '@/components/viz'
+} from 'aifn-render'
 
 const MAX_N = 128
 const NS = Array.from({ length: MAX_N }, (_, i) => i + 1)

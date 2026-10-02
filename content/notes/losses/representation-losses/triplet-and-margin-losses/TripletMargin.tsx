@@ -10,7 +10,7 @@ import {
   type Segment,
   type Vec2,
   type XYSeries,
-} from '@/components/viz'
+} from 'aifn-render'
 
 const RANGE: [number, number] = [-3, 3]
 const ANCHOR: Vec2 = [0, 0]

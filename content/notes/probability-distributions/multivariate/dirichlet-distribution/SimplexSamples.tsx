@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { Interactive, ParamSlider, Readout, XYChart, formatNumber, type Segment, type XYSeries } from '@/components/viz'
+import { Interactive, ParamSlider, Readout, XYChart, formatNumber, type Segment, type XYSeries } from 'aifn-render'
 import { rng } from '@/lib/math'
 
 const N = 600

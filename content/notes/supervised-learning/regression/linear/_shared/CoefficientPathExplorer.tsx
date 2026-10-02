@@ -1,5 +1,5 @@
 import { useMemo, type ReactNode } from 'react'
-import { ParamSlider, XYChart, formatNumber, useParam, type Handle, type XYSeries } from '@/components/viz'
+import { ParamSlider, XYChart, formatNumber, useParam, type Handle, type XYSeries } from 'aifn-render'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import type { CoefficientPath } from '@/generated/contracts'
 import { cn } from '@/lib/utils'

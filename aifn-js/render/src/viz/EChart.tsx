@@ -12,8 +12,8 @@ import type { Range } from './viewport'
 export type EChartProps = {
   /** Chart-specific option, merged over the lab theme from `baseOption`. Keep it referentially stable (useMemo). */
   option: EChartsOption
-  /** Pixels, or 'fill' to take the full height of the parent (which must have one). */
-  height?: number | 'fill'
+  /** Pixels, 'fill' to take the full height of the parent, or 'auto' to size from CSS. */
+  height?: number | 'fill' | 'auto'
   className?: string
   /**
    * Small, frequently changing update merged onto the chart without redrawing the rest, e.g. a moving marker. Series
@@ -396,12 +396,13 @@ export function EChart({
       className={cn(
         'w-full',
         height === 'fill' && 'h-full',
+        height === 'auto' && 'h-auto',
         callbacks.onPlotClick && 'cursor-pointer',
         callbacks.onBrush && 'cursor-crosshair touch-none select-none',
         handles && 'touch-none select-none',
         className,
       )}
-      style={height === 'fill' ? undefined : { height }}
+      style={height === 'fill' || height === 'auto' ? undefined : { height }}
     />
   )
 }

@@ -1,5 +1,5 @@
 import { useMemo } from 'react'
-import { Interactive, ParamSlider, Readout, XYChart, useParam, type XYSeries } from '@/components/viz'
+import { Interactive, ParamSlider, Readout, XYChart, useParam, type XYSeries } from 'aifn-render'
 import { longestChain, movingStats, selfJoin } from '../_shared/matrix-profile'
 import { driftingPattern } from '../_shared/synthetic'
 

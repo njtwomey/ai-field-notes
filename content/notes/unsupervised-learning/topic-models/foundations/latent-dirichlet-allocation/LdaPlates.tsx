@@ -1,7 +1,7 @@
 import { MathText } from '@/components/content/MathText'
 import { Diagram } from '@/components/diagram/Diagram'
 import { lda } from '@/components/diagram/specs/graphical'
-import { Interactive } from '@/components/viz'
+import { Interactive } from 'aifn-render'
 
 /** LDA in plate notation: documents d contain word positions n; topics k sit on their own plate. */
 export function LdaPlates() {

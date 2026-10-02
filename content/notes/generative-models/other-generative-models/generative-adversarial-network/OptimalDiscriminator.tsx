@@ -1,5 +1,5 @@
 import { useMemo } from 'react'
-import { Interactive, ParamSlider, Readout, XYChart, formatNumber, useParam, type XYSeries } from '@/components/viz'
+import { Interactive, ParamSlider, Readout, XYChart, formatNumber, useParam, type XYSeries } from 'aifn-render'
 import { linspace } from '@/lib/math'
 
 /** Data N(0, 1) against a Gaussian generator N(m, s²); D* = p_data / (p_data + p_g) and JS by numerical integration. */

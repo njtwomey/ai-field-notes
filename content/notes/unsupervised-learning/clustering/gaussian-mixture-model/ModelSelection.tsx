@@ -8,7 +8,7 @@ import {
   useParam,
   type Handle,
   type XYSeries,
-} from '@/components/viz'
+} from 'aifn-render'
 import type { FittedMixture, ModelSelectionTable, PointCloud2d } from '@/generated/contracts'
 import { useFigure } from '@/lib/generated'
 import type { Point } from '@/lib/math/cluster'

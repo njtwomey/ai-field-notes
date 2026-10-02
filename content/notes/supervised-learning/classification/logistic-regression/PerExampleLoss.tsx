@@ -9,7 +9,7 @@ import {
   useParam,
   type Handle,
   type XYSeries,
-} from '@/components/viz'
+} from 'aifn-render'
 import { linspace, sigmoid } from '@/lib/math'
 
 type Label = '1' | '0'

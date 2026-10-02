@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { Interactive, ParamSlider, Readout, XYChart, formatNumber } from '@/components/viz'
+import { Interactive, ParamSlider, Readout, XYChart, formatNumber } from 'aifn-render'
 import { rng } from '@/lib/math'
 import { correlation, dirichlet, softmax } from '../_shared/random'
 

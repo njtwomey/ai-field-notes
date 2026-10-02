@@ -1,7 +1,7 @@
 import { MathText } from '@/components/content/MathText'
 import { Diagram } from '@/components/diagram/Diagram'
 import type { DiagramSpec } from '@/components/diagram/types'
-import { Interactive } from '@/components/viz'
+import { Interactive } from 'aifn-render'
 
 /** A graphical model in plate notation, framed like every other figure; the caption may contain `$…$` maths. */
 export function Plate({ spec, title, caption }: { spec: DiagramSpec; title: string; caption: string }) {

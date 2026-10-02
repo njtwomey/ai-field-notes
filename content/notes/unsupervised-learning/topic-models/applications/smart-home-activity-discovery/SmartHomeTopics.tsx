@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { Interactive, ParamSlider, Readout, XYChart, formatNumber, useParam, type Segment } from '@/components/viz'
+import { Interactive, ParamSlider, Readout, XYChart, formatNumber, useParam, type Segment } from 'aifn-render'
 import { ACTIVITIES, DAYS, SENSORS, fit, segment, simulate, topicToActivity } from './smarthome'
 
 const TOPIC_ROW = -1.5

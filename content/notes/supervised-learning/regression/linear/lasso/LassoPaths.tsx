@@ -1,4 +1,4 @@
-import { Interactive, Readout } from '@/components/viz'
+import { Interactive, Readout } from 'aifn-render'
 import type { LassoPath } from '@/generated/contracts'
 import { useFigure } from '@/lib/generated'
 import { CoefficientPathExplorer } from '../_shared/CoefficientPathExplorer'

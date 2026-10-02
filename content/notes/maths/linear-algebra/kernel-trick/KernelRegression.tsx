@@ -9,7 +9,7 @@ import {
   formatNumber,
   useParam,
   type XYSeries,
-} from '@/components/viz'
+} from 'aifn-render'
 import { linspace, rng } from '@/lib/math'
 
 type KernelName = 'rbf' | 'polynomial' | 'linear'

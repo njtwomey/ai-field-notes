@@ -8,7 +8,7 @@ import {
   useParam,
   type Handle,
   type XYSeries,
-} from '@/components/viz'
+} from 'aifn-render'
 import { grid, logNormalCdf, normalLogPdf, normalPdf, probitTilted, stepTilted, toNat, vFn, wFn } from '../_shared/ep'
 
 const XS = grid(-6, 8, 351)

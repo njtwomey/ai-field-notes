@@ -1,17 +1,3 @@
-/** Public surface of the visual layer. Notes and widgets import from '@/components/viz' only. */
-export { EChart } from './EChart'
-export { XYChart, type XYSeries, type Segment } from './XYChart'
-export { Heatmap, type HeatmapOverlay } from './Heatmap'
-export { ImagePlot, type ImagePlotLine } from './ImagePlot'
-export { GlyphPlot, type GlyphShape } from './GlyphPlot'
-export { Interactive, Readout } from './Interactive'
-export { ParamSlider, ParamChoice, ParamSwitch, ParamButton } from './controls'
-export { StepControls } from './StepControls'
-export { useParam, type Param, type ParamSpec } from './param'
-export type { Handle, Vec2 } from './handles'
-export type { Vector } from './vectors'
-export { seriesColor, sequential, diverging } from './palette'
-export { useScaleColor } from './useScaleColor'
-export { formatNumber } from './theme'
-export { MarginalPanels, type Panel, type PanelMark, type PanelMarks, type PanelPointer } from './MarginalPanels'
-export type { PlotPointer } from './EChart'
+/** Public surface of the visual layer, forwarded from the canonical aifn-render package. */
+export * from 'aifn-render'
+

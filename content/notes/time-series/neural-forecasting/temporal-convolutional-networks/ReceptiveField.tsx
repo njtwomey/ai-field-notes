@@ -9,7 +9,7 @@ import {
   type Handle,
   type Segment,
   type XYSeries,
-} from '@/components/viz'
+} from 'aifn-render'
 
 /** Number of input time steps drawn. */
 const N = 48

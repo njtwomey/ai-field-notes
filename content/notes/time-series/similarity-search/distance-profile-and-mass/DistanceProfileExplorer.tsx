@@ -8,7 +8,7 @@ import {
   useParam,
   type Handle,
   type XYSeries,
-} from '@/components/viz'
+} from 'aifn-render'
 import { exclusionZone, mass, movingStats } from '../_shared/matrix-profile'
 import { beats } from '../_shared/synthetic'
 

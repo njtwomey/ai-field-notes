@@ -1,7 +1,7 @@
 import { Diagram } from '@/components/diagram/Diagram'
 import { link, variable } from '@/components/diagram/components'
 import type { DiagramEdge, DiagramNode, DiagramSpec } from '@/components/diagram/types'
-import { Interactive } from '@/components/viz'
+import { Interactive } from 'aifn-render'
 
 /* ----------------------------------------------------------------------------------------------------------------- */
 /* The progression of ideas                                                                                           */

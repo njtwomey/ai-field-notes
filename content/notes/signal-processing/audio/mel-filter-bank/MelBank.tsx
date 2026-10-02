@@ -8,7 +8,7 @@ import {
   formatNumber,
   useParam,
   type XYSeries,
-} from '@/components/viz'
+} from 'aifn-render'
 import { melFilterBank, type MelNorm } from '../_shared/audio'
 
 const FS = 16000

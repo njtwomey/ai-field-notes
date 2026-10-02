@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { Heatmap, Interactive, ParamSwitch, Readout, formatNumber } from '@/components/viz'
+import { Heatmap, Interactive, ParamSwitch, Readout, formatNumber } from 'aifn-render'
 import { rng } from '@/lib/math'
 
 const N = 8

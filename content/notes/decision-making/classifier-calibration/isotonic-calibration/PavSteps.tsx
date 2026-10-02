@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Interactive, Readout, StepControls, XYChart, formatNumber } from '@/components/viz'
+import { Interactive, Readout, StepControls, XYChart, formatNumber } from 'aifn-render'
 
 const SCORES = [0.05, 0.12, 0.2, 0.27, 0.33, 0.41, 0.48, 0.55, 0.62, 0.7, 0.81, 0.9]
 const LABELS = [0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 1, 1]

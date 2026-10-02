@@ -9,7 +9,7 @@ import {
   useParam,
   type Handle,
   type Segment,
-} from '@/components/viz'
+} from 'aifn-render'
 import { linspace } from '@/lib/math'
 import { eigSym } from '@/lib/math/mat2'
 

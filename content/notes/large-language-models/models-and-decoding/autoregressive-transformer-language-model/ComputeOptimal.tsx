@@ -8,7 +8,7 @@ import {
   useParam,
   type Handle,
   type XYSeries,
-} from '@/components/viz'
+} from 'aifn-render'
 
 // Hoffmann et al. (2022), approach 3: L(N, D) = E + A / N^α + B / D^β, with training compute C ≈ 6ND.
 const E = 1.69

@@ -1,4 +1,4 @@
-import { Interactive } from '@/components/viz'
+import { Interactive } from 'aifn-render'
 import { Diagram } from '@/components/diagram/Diagram'
 import { merge, op } from '@/components/diagram/components'
 import type { DiagramEdge, DiagramNode } from '@/components/diagram/types'

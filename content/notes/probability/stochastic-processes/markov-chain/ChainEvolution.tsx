@@ -11,7 +11,7 @@ import {
   formatNumber,
   useParam,
   type XYSeries,
-} from '@/components/viz'
+} from 'aifn-render'
 
 type Matrix = number[][]
 type State = '0' | '1' | '2'

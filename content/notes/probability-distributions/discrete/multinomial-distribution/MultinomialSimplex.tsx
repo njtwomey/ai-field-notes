@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { Heatmap, Interactive, ParamSlider, Readout, formatNumber } from '@/components/viz'
+import { Heatmap, Interactive, ParamSlider, Readout, formatNumber } from 'aifn-render'
 import { logFactorial } from '@/lib/math/special'
 
 /** The joint pmf of a three-category multinomial, over the counts of the first two categories. */

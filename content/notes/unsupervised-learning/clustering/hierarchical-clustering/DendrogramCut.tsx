@@ -8,7 +8,7 @@ import {
   formatNumber,
   useParam,
   type Handle,
-} from '@/components/viz'
+} from 'aifn-render'
 import { blobs, type Point } from '../../_shared/datasets'
 import { clusterSeries } from '../../_shared/groups'
 import { agglomerate, cut, dendrogram, type Linkage } from './agglomerate'

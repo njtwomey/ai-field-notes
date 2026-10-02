@@ -8,7 +8,7 @@ import {
   useParam,
   type Handle,
   type XYSeries,
-} from '@/components/viz'
+} from 'aifn-render'
 import { minRootModulus, quadraticRoots, simulateArma, theoreticalAcf } from '../_shared/arma'
 
 const H = 20

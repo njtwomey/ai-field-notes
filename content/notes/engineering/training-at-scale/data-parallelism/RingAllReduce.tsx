@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { Heatmap, Interactive, ParamSlider, Readout, formatNumber } from '@/components/viz'
+import { Heatmap, Interactive, ParamSlider, Readout, formatNumber } from 'aifn-render'
 
 /**
  * Ring all-reduce on N workers, each holding N chunks. Cell (chunk c, worker i) counts how many workers' gradients have

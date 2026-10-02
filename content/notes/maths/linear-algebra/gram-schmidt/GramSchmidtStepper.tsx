@@ -8,7 +8,7 @@ import {
   type Handle,
   type Segment,
   type XYSeries,
-} from '@/components/viz'
+} from 'aifn-render'
 
 type Vec = [number, number]
 const R = 4

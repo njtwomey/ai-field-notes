@@ -2,7 +2,7 @@ import { MathText } from '@/components/content/MathText'
 import { Diagram } from '@/components/diagram/Diagram'
 import { link, variable } from '@/components/diagram/components'
 import type { DiagramSpec } from '@/components/diagram/types'
-import { Interactive } from '@/components/viz'
+import { Interactive } from 'aifn-render'
 
 const FEATURES = ['1', '2', '3', 'd']
 const X = [0, 1.4, 2.8, 5.2]

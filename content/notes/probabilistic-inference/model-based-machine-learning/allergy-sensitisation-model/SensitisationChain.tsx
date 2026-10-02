@@ -8,7 +8,7 @@ import {
   formatNumber,
   useParam,
   type XYSeries,
-} from '@/components/viz'
+} from 'aifn-render'
 import { posterior, type ChainParams } from '../_shared/sensitisation'
 
 const AGES = [1, 3, 5, 8]

@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { Interactive, ParamSlider, Readout, XYChart, formatNumber, type XYSeries } from '@/components/viz'
+import { Interactive, ParamSlider, Readout, XYChart, formatNumber, type XYSeries } from 'aifn-render'
 import { linspace, rng } from '@/lib/math'
 
 const bump = (x: number, mu: number, sd: number) => Math.exp(-0.5 * ((x - mu) / sd) ** 2)

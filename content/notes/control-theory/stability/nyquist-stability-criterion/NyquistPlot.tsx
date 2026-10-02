@@ -9,7 +9,7 @@ import {
   useParam,
   type Segment,
   type XYSeries,
-} from '@/components/viz'
+} from 'aifn-render'
 import { carg, freqResponse, logspace, polyAdd, roots, type TF } from '../../_shared/control'
 
 type Loop = { label: string; tf: TF; openLoopRhpPoles: number; initial: number }

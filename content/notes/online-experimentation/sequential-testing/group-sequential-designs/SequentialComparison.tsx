@@ -8,7 +8,7 @@ import {
   formatNumber,
   useParam,
   type XYSeries,
-} from '@/components/viz'
+} from 'aifn-render'
 import { normalCdf, normalQuantile } from '@/lib/math/special'
 import { TABLES, type Alpha } from './tables'
 

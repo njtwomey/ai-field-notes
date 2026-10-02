@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { Interactive, ParamChoice, Readout, XYChart, formatNumber, type XYSeries } from '@/components/viz'
+import { Interactive, ParamChoice, Readout, XYChart, formatNumber, type XYSeries } from 'aifn-render'
 
 type FnId = 'exp' | 'sqrt' | 'periodic' | 'runge'
 

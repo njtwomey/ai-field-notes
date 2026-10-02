@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { Interactive, Readout, XYChart, formatNumber, type Handle, type Segment, type XYSeries } from '@/components/viz'
+import { Interactive, Readout, XYChart, formatNumber, type Handle, type Segment, type XYSeries } from 'aifn-render'
 import { linspace } from '@/lib/math'
 import { overlap, type Box } from '../_shared/boxes'
 

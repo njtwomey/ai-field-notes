@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { MathText } from '@/components/content/MathText'
 import { Diagram } from '@/components/diagram/Diagram'
 import { link, variable } from '@/components/diagram/components'
-import { Interactive, ParamChoice, Readout } from '@/components/viz'
+import { Interactive, ParamChoice, Readout } from 'aifn-render'
 
 type Vertex = { id: string; label: string; x: number; y: number }
 type Graph = { nodes: Vertex[]; edges: [string, string][]; a: string; b: string; separator: string[] }

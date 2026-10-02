@@ -1,5 +1,5 @@
 import { useMemo } from 'react'
-import { Interactive, ParamSlider, Readout, XYChart, useParam, type Handle, type XYSeries } from '@/components/viz'
+import { Interactive, ParamSlider, Readout, XYChart, useParam, type Handle, type XYSeries } from 'aifn-render'
 
 /**
  * Peak memory of reverse mode on a chain of n layers when a checkpoint is stored every s layers: ⌈n/s⌉ checkpoints plus

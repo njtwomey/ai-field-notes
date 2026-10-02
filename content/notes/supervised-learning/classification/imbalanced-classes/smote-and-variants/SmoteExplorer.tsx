@@ -9,7 +9,7 @@ import {
   useParam,
   type Segment,
   type XYSeries,
-} from '@/components/viz'
+} from 'aifn-render'
 import { rng } from '@/lib/math'
 
 type Pt = [number, number]

@@ -8,7 +8,7 @@ import {
   useParam,
   ParamSlider,
   type XYSeries,
-} from '@/components/viz'
+} from 'aifn-render'
 import { hzToMel } from '@/lib/dsp'
 
 const bark = (f: number) => 13 * Math.atan(0.00076 * f) + 3.5 * Math.atan((f / 7500) ** 2)

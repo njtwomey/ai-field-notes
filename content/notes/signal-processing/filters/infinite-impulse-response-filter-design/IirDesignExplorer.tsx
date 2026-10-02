@@ -9,7 +9,7 @@ import {
   useParam,
   type Handle,
   type XYSeries,
-} from '@/components/viz'
+} from 'aifn-render'
 import { db, freqz } from '@/lib/dsp'
 import { linspace } from '@/lib/math'
 import { groupDelay, iirLowpass } from '../_shared/design'

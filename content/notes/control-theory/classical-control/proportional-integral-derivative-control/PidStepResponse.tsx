@@ -9,7 +9,7 @@ import {
   formatNumber,
   useParam,
   type XYSeries,
-} from '@/components/viz'
+} from 'aifn-render'
 import { rk4 } from '../../_shared/control'
 
 const DT = 0.02

@@ -9,7 +9,7 @@ import {
   type Handle,
   type Vec2,
   type XYSeries,
-} from '@/components/viz'
+} from 'aifn-render'
 import { linspace } from '@/lib/math'
 
 const RANGE: [number, number] = [-3, 3]

@@ -9,7 +9,7 @@ import {
   formatNumber,
   useParam,
   type XYSeries,
-} from '@/components/viz'
+} from 'aifn-render'
 import { boundaryLine, corrupt, fitLogistic, lineAnchors, parametricTest, twoGaussians } from './noiseTests'
 
 const XS = [-4.5, 4.5]

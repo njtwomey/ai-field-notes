@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { Heatmap, Interactive, ParamSlider, Readout, XYChart, type Handle, type XYSeries } from '@/components/viz'
+import { Heatmap, Interactive, ParamSlider, Readout, XYChart, type Handle, type XYSeries } from 'aifn-render'
 import type { ImageSvd } from '@/generated/contracts'
 import { useFigure } from '@/lib/generated'
 

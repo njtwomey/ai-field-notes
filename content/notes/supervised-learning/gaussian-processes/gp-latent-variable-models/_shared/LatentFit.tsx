@@ -8,7 +8,7 @@ import {
   formatNumber,
   useParam,
   type HeatmapOverlay,
-} from '@/components/viz'
+} from 'aifn-render'
 import { linspace } from '@/lib/math'
 import { loopData, LOOP_N } from './data'
 import { fitGplvm, pcaScores, predictor, randomLatent, type Point } from './gplvm'

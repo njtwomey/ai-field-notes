@@ -91,10 +91,38 @@ export function seriesColor(mode: Mode, slot: number): string {
   return colours[slot]
 }
 
-/** The sequential ramp in a theme, from the surface (low) to the strong hue (high). */
-export function sequential(mode: Mode): readonly string[] {
-  return palette.sequential[mode]
+export type SequentialScale = {
+  (mode?: Mode): readonly string[]
+  readonly [index: number]: string
+  readonly length: number
+  [Symbol.iterator](): Iterator<string>
+  slice(start?: number, end?: number): string[]
+  map<U>(callbackfn: (value: string, index: number, array: readonly string[]) => U): U[]
 }
+
+/** The sequential ramp in a theme, from the surface (low) to the strong hue (high). Can also be indexed directly as an array. */
+const defaultSequential = palette.sequential.light
+const rawSequentialFn = (mode: Mode = 'light'): readonly string[] => palette.sequential[mode]
+export const sequential: SequentialScale = new Proxy(rawSequentialFn as unknown as SequentialScale, {
+  get(target, prop, receiver) {
+    if (typeof prop === 'string' && /^\d+$/.test(prop)) {
+      return defaultSequential[Number(prop)]
+    }
+    if (prop === 'length') {
+      return defaultSequential.length
+    }
+    if (prop === Symbol.iterator) {
+      return () => defaultSequential[Symbol.iterator]()
+    }
+    // oxlint-disable-next-line typescript/no-explicit-any
+    if (prop in defaultSequential) {
+      // oxlint-disable-next-line typescript/no-explicit-any
+      const val = (defaultSequential as any)[prop]
+      return typeof val === 'function' ? val.bind(defaultSequential) : val
+    }
+    return Reflect.get(target, prop, receiver)
+  },
+})
 
 /** The diverging ramp in a theme: strong blue (low), the neutral midpoint (zero), strong red (high). */
 export function diverging(mode: Mode): string[] {

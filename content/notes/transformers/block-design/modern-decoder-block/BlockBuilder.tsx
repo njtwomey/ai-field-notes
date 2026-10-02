@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { Interactive, ParamChoice, ParamSlider, Readout, XYChart, type XYSeries } from '@/components/viz'
+import { Interactive, ParamChoice, ParamSlider, Readout, XYChart, type XYSeries } from 'aifn-render'
 
 // Llama 2 7B dimensions: width, heads, head size, layers.
 const D = 4096

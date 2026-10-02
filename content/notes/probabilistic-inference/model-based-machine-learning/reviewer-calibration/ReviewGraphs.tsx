@@ -1,7 +1,7 @@
 import { Diagram } from '@/components/diagram/Diagram'
 import { factor, link, variable } from '@/components/diagram/components'
 import type { DiagramSpec } from '@/components/diagram/types'
-import { Interactive } from '@/components/viz'
+import { Interactive } from 'aifn-render'
 import { StepGraph, type GraphStep } from '../_shared/StepGraph'
 
 const line = (a: string, b: string) => link(a, b, false)

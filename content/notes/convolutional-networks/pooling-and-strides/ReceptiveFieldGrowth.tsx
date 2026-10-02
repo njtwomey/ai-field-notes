@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { Interactive, ParamChoice, ParamSlider, Readout, XYChart, useParam, type XYSeries } from '@/components/viz'
+import { Interactive, ParamChoice, ParamSlider, Readout, XYChart, useParam, type XYSeries } from 'aifn-render'
 
 type Layer = { k: number; s: number; pool: boolean }
 

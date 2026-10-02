@@ -9,7 +9,7 @@ import {
   useParam,
   type Handle,
   type XYSeries,
-} from '@/components/viz'
+} from 'aifn-render'
 import { linspace, rng } from '@/lib/math'
 import { evaluate, logDet, makeBasis, penalise, smooth } from '../../regression/nonlinear-regression/_shared/splines'
 

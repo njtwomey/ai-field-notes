@@ -9,7 +9,7 @@ import {
   useParam,
   type Handle,
   type XYSeries,
-} from '@/components/viz'
+} from 'aifn-render'
 import { clutterEp, clutterExact, clutterFactorAndSite, clutterLaplace, clutterVb } from '../_shared/clutter'
 import { grid, normalPdf, toMoments, type Moments } from '../_shared/ep'
 

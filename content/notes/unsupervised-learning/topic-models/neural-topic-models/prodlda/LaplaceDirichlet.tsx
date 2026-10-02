@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
 import { MathText } from '@/components/content/MathText'
-import { Heatmap, Interactive, ParamChoice, ParamSlider, ParamSwitch, Readout, formatNumber } from '@/components/viz'
-import type { HeatmapOverlay } from '@/components/viz'
+import { Heatmap, Interactive, ParamChoice, ParamSlider, ParamSwitch, Readout, formatNumber } from 'aifn-render'
+import type { HeatmapOverlay } from 'aifn-render'
 import { linspace } from '@/lib/math'
 import { logGamma } from '@/lib/math/special'
 

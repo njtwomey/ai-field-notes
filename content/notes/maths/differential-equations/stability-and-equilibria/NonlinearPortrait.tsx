@@ -8,7 +8,7 @@ import {
   formatNumber,
   type Handle,
   type XYSeries,
-} from '@/components/viz'
+} from 'aifn-render'
 import { classify2, directionField, formatEig, integrate, type Mat2 } from '../_shared/ode'
 
 type System = 'pendulum' | 'double-well' | 'predator-prey'

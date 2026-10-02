@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { Heatmap, Interactive, ParamSlider, Readout } from '@/components/viz'
+import { Heatmap, Interactive, ParamSlider, Readout } from 'aifn-render'
 
 const N = 10
 const POS = Array.from({ length: N }, (_, i) => i)

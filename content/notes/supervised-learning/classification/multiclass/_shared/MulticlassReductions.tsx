@@ -9,7 +9,7 @@ import {
   useParam,
   type Handle,
   type HeatmapOverlay,
-} from '@/components/viz'
+} from 'aifn-render'
 import { linspace } from '@/lib/math'
 import { CONTESTED, UNASSIGNED, decide, expectedAccuracy, fit, makeData, type Method, type Vec2 } from './reductions'
 

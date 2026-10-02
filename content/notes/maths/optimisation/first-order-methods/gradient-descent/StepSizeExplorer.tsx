@@ -9,7 +9,7 @@ import {
   formatNumber,
   type Handle,
   type HeatmapOverlay,
-} from '@/components/viz'
+} from 'aifn-render'
 import type { RegressionSurface } from '@/generated/contracts'
 import { useFigure } from '@/lib/generated'
 import { mean } from '@/lib/math'

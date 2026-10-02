@@ -8,7 +8,7 @@ import {
   XYChart,
   formatNumber,
   type XYSeries,
-} from '@/components/viz'
+} from 'aifn-render'
 import { linspace, mean, rng } from '@/lib/math'
 
 const N = 500

@@ -1,5 +1,5 @@
 import { useMemo } from 'react'
-import { Heatmap, Interactive, ParamSlider, Readout, formatNumber, useParam } from '@/components/viz'
+import { Heatmap, Interactive, ParamSlider, Readout, formatNumber, useParam } from 'aifn-render'
 import { linspace } from '@/lib/math'
 import { eigSym } from '@/lib/math/mat2'
 

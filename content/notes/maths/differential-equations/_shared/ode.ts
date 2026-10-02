@@ -1,5 +1,5 @@
 /** Small ODE helpers shared by the differential-equations widgets. Light enough to run on every slider drag. */
-import type { Segment } from '@/components/viz'
+import type { Segment } from 'aifn-render'
 
 export type Vec = number[]
 /** Right-hand side of ẋ = f(t, x). */

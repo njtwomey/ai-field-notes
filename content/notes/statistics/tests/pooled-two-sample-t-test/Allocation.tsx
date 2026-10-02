@@ -8,7 +8,7 @@ import {
   useParam,
   type Handle,
   type XYSeries,
-} from '@/components/viz'
+} from 'aifn-render'
 import { tPower } from '@/lib/math/tests'
 
 /** Power of the pooled two-sample t-test against a standardised difference d, as the total N is split n₁ + n₂. */

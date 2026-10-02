@@ -11,7 +11,7 @@ import {
   type Handle,
   type ImagePlotLine,
   type PlotPointer,
-} from '@/components/viz'
+} from 'aifn-render'
 import {
   H,
   MAX_INSERT,

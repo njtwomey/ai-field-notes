@@ -1,5 +1,5 @@
 import { useMemo } from 'react'
-import { Interactive, ParamSlider, Readout, XYChart, formatNumber, useParam, type XYSeries } from '@/components/viz'
+import { Interactive, ParamSlider, Readout, XYChart, formatNumber, useParam, type XYSeries } from 'aifn-render'
 import { clutterExact, clutterLaplace, clutterVb, CLUTTER_VAR } from '../_shared/clutter'
 import { grid, normalPdf, powerEp1d, toMoments, toNat, type Moments } from '../_shared/ep'
 

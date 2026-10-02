@@ -2,7 +2,7 @@ import { MathText } from '@/components/content/MathText'
 import { Diagram } from '@/components/diagram/Diagram'
 import { link, variable } from '@/components/diagram/components'
 import type { DiagramSpec } from '@/components/diagram/types'
-import { Interactive } from '@/components/viz'
+import { Interactive } from 'aifn-render'
 import { at, chainEnds, labelNodes } from '../_shared/chain-graph'
 
 const ends = chainEnds(0, 'y0', 'y2', true)

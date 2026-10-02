@@ -8,7 +8,7 @@ import {
   formatNumber,
   useParam,
   type XYSeries,
-} from '@/components/viz'
+} from 'aifn-render'
 import { logGamma } from '@/lib/math/special'
 
 /** Click counts C_ui for 4 users × 5 items. User 3 clicked item 5 six times, far above what the margins predict. */

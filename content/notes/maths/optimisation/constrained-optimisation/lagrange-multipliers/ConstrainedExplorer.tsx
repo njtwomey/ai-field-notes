@@ -11,7 +11,7 @@ import {
   type Segment,
   type Vec2,
   type XYSeries,
-} from '@/components/viz'
+} from 'aifn-render'
 import { linspace } from '@/lib/math'
 import { contour, contours, quantileLevels, sampleGrid } from './contours'
 

@@ -8,7 +8,7 @@ import {
   formatNumber,
   useParam,
   type XYSeries,
-} from '@/components/viz'
+} from 'aifn-render'
 import { periodogram, powerDb, welch, whiteNoise } from '../_shared/spectra'
 
 const N = 4096

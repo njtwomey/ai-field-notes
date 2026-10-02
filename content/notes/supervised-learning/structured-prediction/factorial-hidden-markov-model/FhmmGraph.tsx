@@ -3,7 +3,7 @@ import { MathText } from '@/components/content/MathText'
 import { Diagram } from '@/components/diagram/Diagram'
 import { link, variable } from '@/components/diagram/components'
 import type { DiagramEdge, DiagramNode } from '@/components/diagram/types'
-import { Interactive, ParamSwitch } from '@/components/viz'
+import { Interactive, ParamSwitch } from 'aifn-render'
 import { POSITIONS } from '../_shared/chain-graph'
 
 const CHAINS = [1, 2, 3]

@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { Interactive, ParamChoice, ParamSlider, Readout, XYChart, formatNumber } from '@/components/viz'
+import { Interactive, ParamChoice, ParamSlider, Readout, XYChart, formatNumber } from 'aifn-render'
 import { covariance, eigSymmetric } from '../../_shared/linalg'
 import { CLUSTER_NAMES, clusters } from './data'
 import { affinities, squaredDistances, tsne } from '../../_shared/tsne'

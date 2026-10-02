@@ -9,7 +9,7 @@ import {
   Readout,
   formatNumber,
   useParam,
-} from '@/components/viz'
+} from 'aifn-render'
 
 type Matrix = number[][]
 

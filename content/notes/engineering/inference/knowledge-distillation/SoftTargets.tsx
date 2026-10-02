@@ -1,5 +1,5 @@
 import { useMemo } from 'react'
-import { Interactive, ParamSlider, Readout, XYChart, formatNumber, useParam, type XYSeries } from '@/components/viz'
+import { Interactive, ParamSlider, Readout, XYChart, formatNumber, useParam, type XYSeries } from 'aifn-render'
 
 /** Illustrative teacher logits for an image of a handwritten 7 that also looks a little like a 1 and a 2. */
 const LOGITS = [-2, 3.5, 4, 0.5, -1, -0.5, -3, 10, -1.5, 1]

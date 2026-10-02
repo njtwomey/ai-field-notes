@@ -8,7 +8,7 @@ import {
   formatNumber,
   useParam,
   type HeatmapOverlay,
-} from '@/components/viz'
+} from 'aifn-render'
 import { linspace, rng } from '@/lib/math'
 import { decision, rbfKernel, trainSvm, type Point } from '../_shared/svm'
 

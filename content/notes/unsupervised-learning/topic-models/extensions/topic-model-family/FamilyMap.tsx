@@ -1,7 +1,7 @@
 import { MathText } from '@/components/content/MathText'
 import { Diagram } from '@/components/diagram/Diagram'
 import type { DiagramEdge, DiagramNode, DiagramSpec } from '@/components/diagram/types'
-import { Interactive } from '@/components/viz'
+import { Interactive } from 'aifn-render'
 
 type Column = { id: string; title: string; models: string[]; tone: number }
 

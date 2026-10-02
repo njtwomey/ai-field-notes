@@ -8,7 +8,7 @@ import {
   useParam,
   type Handle,
   type Vec2,
-} from '@/components/viz'
+} from 'aifn-render'
 import { expectedCost, lineInSquare, rocExample } from '../../_shared/rocExample'
 
 /**

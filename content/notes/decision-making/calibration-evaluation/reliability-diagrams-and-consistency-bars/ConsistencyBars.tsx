@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { Interactive, ParamChoice, ParamSlider, Readout, XYChart, useParam, type Segment } from '@/components/viz'
+import { Interactive, ParamChoice, ParamSlider, Readout, XYChart, useParam, type Segment } from 'aifn-render'
 import { rng } from '@/lib/math'
 
 const sigmoid = (z: number) => 1 / (1 + Math.exp(-z))

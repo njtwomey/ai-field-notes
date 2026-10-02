@@ -1,4 +1,4 @@
-import { Interactive, ParamSlider, Readout, XYChart, useParam, type XYSeries } from '@/components/viz'
+import { Interactive, ParamSlider, Readout, XYChart, useParam, type XYSeries } from 'aifn-render'
 
 /**
  * The partial sums of the counterexample are spikes g_N = N on (0, 1/N): every one has area 1, yet at each x > 0 the

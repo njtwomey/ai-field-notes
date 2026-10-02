@@ -1,5 +1,5 @@
 import { useMemo } from 'react'
-import { XYChart, type XYSeries } from '@/components/viz'
+import { XYChart, type XYSeries } from 'aifn-render'
 import { BOX } from './plot'
 import { X, Y } from './solver'
 

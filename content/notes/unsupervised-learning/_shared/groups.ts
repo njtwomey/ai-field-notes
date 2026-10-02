@@ -1,4 +1,4 @@
-import type { XYSeries } from '@/components/viz'
+import type { XYSeries } from 'aifn-render'
 import type { Point } from './datasets'
 
 /** Most clusters given their own colour and marker; the palette has 8 slots and scatter plots should use few. */

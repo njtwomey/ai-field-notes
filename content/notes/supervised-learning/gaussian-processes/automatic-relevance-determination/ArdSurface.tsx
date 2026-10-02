@@ -9,7 +9,7 @@ import {
   formatNumber,
   useParam,
   type Handle,
-} from '@/components/viz'
+} from 'aifn-render'
 import { linspace, rng } from '@/lib/math'
 import { addDiagonal, cholesky, forward, logDet, gridMaximum } from '../_shared/gp'
 

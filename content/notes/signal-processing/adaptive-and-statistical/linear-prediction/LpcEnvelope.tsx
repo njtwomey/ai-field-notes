@@ -1,5 +1,5 @@
 import { useMemo } from 'react'
-import { Interactive, ParamSlider, Readout, XYChart, formatNumber, useParam, type XYSeries } from '@/components/viz'
+import { Interactive, ParamSlider, Readout, XYChart, formatNumber, useParam, type XYSeries } from 'aifn-render'
 import { binFrequencies, db, freqz, lfilter, magnitudeSpectrum, makeWindow } from '@/lib/dsp'
 import { autocorrelation, levinsonDurbin } from '../_shared/stat'
 

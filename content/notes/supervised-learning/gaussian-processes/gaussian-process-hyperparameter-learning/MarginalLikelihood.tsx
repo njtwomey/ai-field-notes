@@ -10,7 +10,7 @@ import {
   useParam,
   type Handle,
   type XYSeries,
-} from '@/components/viz'
+} from 'aifn-render'
 import { linspace, rng } from '@/lib/math'
 import { addDiagonal, cholesky, gram, logMarginal, makeKernel, posterior, gridMaximum } from '../_shared/gp'
 

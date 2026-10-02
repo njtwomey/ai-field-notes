@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { Diagram } from '@/components/diagram/Diagram'
 import { link, variable } from '@/components/diagram/components'
 import type { DiagramSpec } from '@/components/diagram/types'
-import { Interactive, ParamSwitch } from '@/components/viz'
+import { Interactive, ParamSwitch } from 'aifn-render'
 import { POSITIONS, at, chainEnds, labelNodes, potentialChain } from '../_shared/chain-graph'
 
 function directedChain(): DiagramSpec {

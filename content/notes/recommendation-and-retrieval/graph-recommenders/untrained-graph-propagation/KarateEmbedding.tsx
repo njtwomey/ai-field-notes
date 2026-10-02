@@ -9,7 +9,7 @@ import {
   useParam,
   type Segment,
   type XYSeries,
-} from '@/components/viz'
+} from 'aifn-render'
 import { rng } from '@/lib/math'
 
 /** Zachary's karate club: 34 members, 78 friendships (0-indexed, as in networkx's karate_club_graph). */

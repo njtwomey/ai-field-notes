@@ -12,7 +12,7 @@ import {
   type HeatmapOverlay,
   type Segment,
   type XYSeries,
-} from '@/components/viz'
+} from 'aifn-render'
 import { rng } from '@/lib/math'
 import { costMatrix, hungarian, sinkhorn, type Pt } from '../_shared/ot'
 

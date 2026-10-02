@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { Interactive, ParamSlider, ParamSwitch, Readout, XYChart, useParam, type XYSeries } from '@/components/viz'
+import { Interactive, ParamSlider, ParamSwitch, Readout, XYChart, useParam, type XYSeries } from 'aifn-render'
 import { convolve, db, magnitudeSpectrum, makeWindow } from '@/lib/dsp'
 
 const N = 2048

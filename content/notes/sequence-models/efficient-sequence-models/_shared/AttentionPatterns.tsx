@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { Heatmap, Interactive, ParamChoice, ParamSlider, ParamSwitch, Readout, formatNumber } from '@/components/viz'
+import { Heatmap, Interactive, ParamChoice, ParamSlider, ParamSwitch, Readout, formatNumber } from 'aifn-render'
 import { rng } from '@/lib/math'
 
 export type Pattern = 'full' | 'sliding' | 'dilated' | 'strided' | 'longformer' | 'bigbird'

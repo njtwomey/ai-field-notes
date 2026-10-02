@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { Heatmap, Interactive, ParamChoice, Readout, formatNumber, type HeatmapOverlay } from '@/components/viz'
+import { Heatmap, Interactive, ParamChoice, Readout, formatNumber, type HeatmapOverlay } from 'aifn-render'
 
 /**
  * Toy two-dimensional "contextual embeddings": each word is a unit vector at an angle, and related words sit at nearby

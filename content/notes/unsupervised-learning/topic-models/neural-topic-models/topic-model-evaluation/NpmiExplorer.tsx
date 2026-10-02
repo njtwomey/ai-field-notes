@@ -9,7 +9,7 @@ import {
   useParam,
   type Handle,
   type XYSeries,
-} from '@/components/viz'
+} from 'aifn-render'
 
 const N = 1000
 const Y_RANGE: [number, number] = [-1, 1]

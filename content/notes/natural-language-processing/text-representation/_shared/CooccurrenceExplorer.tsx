@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { Interactive, ParamChoice, ParamSlider, Readout, formatNumber, sequential } from '@/components/viz'
+import { Interactive, ParamChoice, ParamSlider, Readout, formatNumber, sequential } from 'aifn-render'
 import { cn } from '@/lib/utils'
 
 const TOY_CORPUS = [

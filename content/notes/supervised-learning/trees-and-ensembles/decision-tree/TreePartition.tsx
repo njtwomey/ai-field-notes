@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { Heatmap, Interactive, ParamChoice, ParamSlider, Readout, formatNumber, useParam } from '@/components/viz'
+import { Heatmap, Interactive, ParamChoice, ParamSlider, Readout, formatNumber, useParam } from 'aifn-render'
 import { linspace, rng } from '@/lib/math'
 import { countLeaves, fitTree, predictTree, type Criterion } from '../_shared/trees'
 

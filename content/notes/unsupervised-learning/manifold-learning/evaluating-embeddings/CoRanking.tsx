@@ -8,7 +8,7 @@ import {
   XYChart,
   formatNumber,
   useParam,
-} from '@/components/viz'
+} from 'aifn-render'
 import {
   coranking,
   distances,

@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { Interactive, ParamChoice, Readout } from '@/components/viz'
+import { Interactive, ParamChoice, Readout } from 'aifn-render'
 import { Input } from '@/components/ui/input'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { cvForm, measure, porterStem, type PorterStep } from '../_shared/text'

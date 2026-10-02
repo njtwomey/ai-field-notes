@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { Interactive, ParamChoice, ParamSlider, Readout, XYChart, useParam } from '@/components/viz'
+import { Interactive, ParamChoice, ParamSlider, Readout, XYChart, useParam } from 'aifn-render'
 import { FILTERS, VANISHING_MOMENTS, cascade, type Family } from '../_shared/wavelets'
 
 /**

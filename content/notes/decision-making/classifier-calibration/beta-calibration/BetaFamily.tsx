@@ -1,5 +1,5 @@
 import { useMemo } from 'react'
-import { Interactive, ParamSlider, Readout, XYChart, formatNumber, useParam, type Handle } from '@/components/viz'
+import { Interactive, ParamSlider, Readout, XYChart, formatNumber, useParam, type Handle } from 'aifn-render'
 import { linspace } from '@/lib/math'
 
 const S = linspace(0.001, 0.999, 250)

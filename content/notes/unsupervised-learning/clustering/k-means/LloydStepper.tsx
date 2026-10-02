@@ -8,7 +8,7 @@ import {
   XYChart,
   formatNumber,
   type Handle,
-} from '@/components/viz'
+} from 'aifn-render'
 import type { PointCloud2d } from '@/generated/contracts'
 import { useFigure } from '@/lib/generated'
 import { useDerivedState } from '@/lib/use-derived-state'

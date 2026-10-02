@@ -1,5 +1,5 @@
 import { useMemo } from 'react'
-import { ParamSlider, Readout, formatNumber, useParam } from '@/components/viz'
+import { ParamSlider, Readout, formatNumber, useParam } from 'aifn-render'
 import { ConstrainedExplorer, SensitivityPanel, type ConstrainedProblem } from './ConstrainedExplorer'
 
 const PI = Math.PI

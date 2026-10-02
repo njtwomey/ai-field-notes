@@ -8,7 +8,7 @@ import {
   formatNumber,
   useParam,
   type Handle,
-} from '@/components/viz'
+} from 'aifn-render'
 import { linspace, mean, olsFit, rng } from '@/lib/math'
 
 const TRUE_SLOPE = 1.5

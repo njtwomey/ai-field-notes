@@ -1,5 +1,5 @@
 import { useMemo } from 'react'
-import { Interactive, ParamSlider, Readout, XYChart, useParam, type XYSeries } from '@/components/viz'
+import { Interactive, ParamSlider, Readout, XYChart, useParam, type XYSeries } from 'aifn-render'
 import { linspace } from '@/lib/math'
 import { arProcess, arSpectrum, multitaper, periodogram, powerDb } from '../_shared/spectra'
 

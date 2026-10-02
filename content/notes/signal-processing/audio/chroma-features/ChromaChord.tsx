@@ -8,7 +8,7 @@ import {
   formatNumber,
   useParam,
   type XYSeries,
-} from '@/components/viz'
+} from 'aifn-render'
 import { magnitudeSpectrum, makeWindow } from '@/lib/dsp'
 
 const FS = 16000

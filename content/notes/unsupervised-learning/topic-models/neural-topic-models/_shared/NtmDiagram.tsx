@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
 import { MathText } from '@/components/content/MathText'
 import { Diagram } from '@/components/diagram/Diagram'
-import { Interactive, ParamChoice } from '@/components/viz'
+import { Interactive, ParamChoice } from 'aifn-render'
 import { ntmSpec, type NtmDecoder, type NtmInput } from './specs'
 
 type Variant = 'nvdm' | 'avitm' | 'prodlda' | 'etm' | 'ctm' | 'zeroshot'

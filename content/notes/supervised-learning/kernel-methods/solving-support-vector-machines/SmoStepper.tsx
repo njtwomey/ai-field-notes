@@ -1,6 +1,6 @@
 import { useMemo } from 'react'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
-import { Interactive, ParamSlider, Readout, XYChart, useParam, type XYSeries } from '@/components/viz'
+import { Interactive, ParamSlider, Readout, XYChart, useParam, type XYSeries } from 'aifn-render'
 import { BOX, Y_RANGE, exact, slackSeries, svmSeries } from './plot'
 import { C0, X, Y, dualObjective, gram, smo, weights } from './solver'
 

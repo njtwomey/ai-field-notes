@@ -13,7 +13,7 @@ import {
   type Handle,
   type HeatmapOverlay,
   type Vec2,
-} from '@/components/viz'
+} from 'aifn-render'
 import type { FontInfo, FontManifoldData, GlyphLayout } from '@/generated/contracts'
 import { useFigure } from '@/lib/generated'
 import { linspace } from '@/lib/math'

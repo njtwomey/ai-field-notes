@@ -1,5 +1,5 @@
 import { useMemo } from 'react'
-import { Heatmap, Interactive, ParamSlider, Readout, useParam } from '@/components/viz'
+import { Heatmap, Interactive, ParamSlider, Readout, useParam } from 'aifn-render'
 import { rng } from '@/lib/math'
 import { applyBank, chirp, harmonicTone, melFilterBank, powerSpectrogram } from '../_shared/audio'
 

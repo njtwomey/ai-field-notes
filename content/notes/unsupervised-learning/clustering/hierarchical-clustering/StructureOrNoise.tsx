@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { Interactive, ParamChoice, ParamSlider, XYChart, useParam, type Handle, type Param } from '@/components/viz'
+import { Interactive, ParamChoice, ParamSlider, XYChart, useParam, type Handle, type Param } from 'aifn-render'
 import { rng } from '@/lib/math'
 import type { Point } from '../../_shared/datasets'
 import { clusterSeries } from '../../_shared/groups'

@@ -8,7 +8,7 @@ import {
   formatNumber,
   type Handle,
   type XYSeries,
-} from '@/components/viz'
+} from 'aifn-render'
 import { directionField, integrate } from '../_shared/ode'
 
 type Eq = 'linear' | 'logistic' | 'forced'

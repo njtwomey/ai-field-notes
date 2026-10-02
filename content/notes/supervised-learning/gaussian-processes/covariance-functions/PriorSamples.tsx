@@ -8,7 +8,7 @@ import {
   formatNumber,
   useParam,
   type XYSeries,
-} from '@/components/viz'
+} from 'aifn-render'
 import { linspace, rng } from '@/lib/math'
 import { addDiagonal, cholesky, gram, makeKernel, samplesFromFactor, type Kernel } from '../_shared/gp'
 

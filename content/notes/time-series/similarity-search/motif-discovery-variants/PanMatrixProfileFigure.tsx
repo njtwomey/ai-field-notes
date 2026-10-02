@@ -1,5 +1,5 @@
 import { useMemo } from 'react'
-import { Heatmap, Interactive, ParamSlider, Readout, XYChart, useParam, type XYSeries } from '@/components/viz'
+import { Heatmap, Interactive, ParamSlider, Readout, XYChart, useParam, type XYSeries } from 'aifn-render'
 import { selfJoin } from '../_shared/matrix-profile'
 import { twoScales } from '../_shared/synthetic'
 

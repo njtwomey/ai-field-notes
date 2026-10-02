@@ -8,7 +8,7 @@ import {
   formatNumber,
   useParam,
   type XYSeries,
-} from '@/components/viz'
+} from 'aifn-render'
 import { rng } from '@/lib/math'
 
 const DIMS = [1, 2, 3, 5, 10, 20, 50, 100, 200, 500, 1000]

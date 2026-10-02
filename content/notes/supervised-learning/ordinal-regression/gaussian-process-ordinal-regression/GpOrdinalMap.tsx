@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { Interactive, ParamButton, ParamSlider, Readout, formatNumber } from '@/components/viz'
+import { Interactive, ParamButton, ParamSlider, Readout, formatNumber } from 'aifn-render'
 import { MAP_CAPTION } from '../_shared/mapText'
 import { OrdinalDataControls } from '../_shared/OrdinalDataControls'
 import { OrdinalMap } from '../_shared/OrdinalMap'

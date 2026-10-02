@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { Heatmap, Interactive, ParamSlider } from '@/components/viz'
+import { Heatmap, Interactive, ParamSlider } from 'aifn-render'
 
 /** Sinusoidal encoding PE[pos, 2i] = sin(pos / base^(2i/d)), PE[pos, 2i+1] = cos(pos / base^(2i/d)). */
 function encoding(positions: number, d: number, base: number): number[][] {

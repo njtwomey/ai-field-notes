@@ -10,7 +10,7 @@ import {
   formatNumber,
   useParam,
   type Handle,
-} from '@/components/viz'
+} from 'aifn-render'
 import { BOX, Y_RANGE, exact, slackSeries, svmSeries } from './plot'
 import { C0, X, Y, position, solve, type Point } from './solver'
 

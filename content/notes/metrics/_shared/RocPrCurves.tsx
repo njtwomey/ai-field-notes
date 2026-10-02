@@ -8,7 +8,7 @@ import {
   useParam,
   type Handle,
   type XYSeries,
-} from '@/components/viz'
+} from 'aifn-render'
 import { averagePrecision, binormalAuc, binormalEer, curves, nearestIndex, rates } from './binormal'
 
 /**

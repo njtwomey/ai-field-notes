@@ -8,7 +8,7 @@ import {
   XYChart,
   formatNumber,
   useParam,
-} from '@/components/viz'
+} from 'aifn-render'
 import { PEAK, SIZE, distort, psnr, ssim, testImage, type Distortion, type Image } from '../_shared/image'
 
 const REFERENCE = testImage()

@@ -8,7 +8,7 @@ import {
   formatNumber,
   useParam,
   type XYSeries,
-} from '@/components/viz'
+} from 'aifn-render'
 import { linspace, rng } from '@/lib/math'
 
 /** Schedules of Song et al. (2021): β(t) linear from 0.1 to 20 on [0, 1]; σ(t) = 0.01 · 5000ᵗ, from 0.01 to 50. */

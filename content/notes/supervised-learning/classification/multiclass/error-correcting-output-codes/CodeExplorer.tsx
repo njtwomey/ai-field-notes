@@ -10,7 +10,7 @@ import {
   XYChart,
   type Handle,
   type XYSeries,
-} from '@/components/viz'
+} from 'aifn-render'
 import { linspace } from '@/lib/math'
 import {
   exhaustive,

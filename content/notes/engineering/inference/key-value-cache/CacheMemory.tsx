@@ -10,7 +10,7 @@ import {
   useParam,
   type Handle,
   type XYSeries,
-} from '@/components/viz'
+} from 'aifn-render'
 
 const MAX_LEN = 32768
 const LENGTHS = Array.from({ length: 65 }, (_, i) => (i * MAX_LEN) / 64)

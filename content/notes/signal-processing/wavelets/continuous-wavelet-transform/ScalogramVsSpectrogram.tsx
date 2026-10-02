@@ -1,5 +1,5 @@
 import { useMemo } from 'react'
-import { Heatmap, Interactive, ParamSlider, Readout, formatNumber, useParam } from '@/components/viz'
+import { Heatmap, Interactive, ParamSlider, Readout, formatNumber, useParam } from 'aifn-render'
 import { db, stft } from '@/lib/dsp'
 import { morletCwt } from '../_shared/wavelets'
 

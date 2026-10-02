@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { Heatmap, Interactive, ParamSlider, Readout, StepControls, XYChart, formatNumber } from '@/components/viz'
+import { Heatmap, Interactive, ParamSlider, Readout, StepControls, XYChart, formatNumber } from 'aifn-render'
 import { useDerivedState } from '@/lib/use-derived-state'
 import {
   K,

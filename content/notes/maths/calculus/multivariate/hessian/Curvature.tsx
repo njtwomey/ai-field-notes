@@ -1,5 +1,5 @@
 import { useMemo } from 'react'
-import { Heatmap, Interactive, ParamSlider, Readout, formatNumber, useParam, type Handle } from '@/components/viz'
+import { Heatmap, Interactive, ParamSlider, Readout, formatNumber, useParam, type Handle } from 'aifn-render'
 import { linspace } from '@/lib/math'
 
 type Vec = [number, number]

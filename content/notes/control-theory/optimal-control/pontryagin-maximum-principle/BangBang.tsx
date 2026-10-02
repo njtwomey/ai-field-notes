@@ -1,5 +1,5 @@
 import { useMemo } from 'react'
-import { Interactive, ParamSlider, Readout, XYChart, formatNumber, useParam, type XYSeries } from '@/components/viz'
+import { Interactive, ParamSlider, Readout, XYChart, formatNumber, useParam, type XYSeries } from 'aifn-render'
 
 /**
  * Time-optimal control of the double integrator ẋ₁ = x₂, ẋ₂ = u with |u| ≤ 1, solved in closed form: one arc with

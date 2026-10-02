@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { Interactive, Readout, StepControls } from '@/components/viz'
+import { Interactive, Readout, StepControls } from 'aifn-render'
 
 const END = '</w>'
 const CORPUS: [string, number][] = [

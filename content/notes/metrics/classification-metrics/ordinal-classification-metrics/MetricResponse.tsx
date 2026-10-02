@@ -12,7 +12,7 @@ import {
   useParam,
   type Handle,
   type XYSeries,
-} from '@/components/viz'
+} from 'aifn-render'
 import { majorityTable, ordinalScores, shiftedTable } from './metrics'
 
 type Prior = 'uniform' | 'skewed'

@@ -11,7 +11,7 @@ import {
   useParam,
   type HeatmapOverlay,
   type XYSeries,
-} from '@/components/viz'
+} from 'aifn-render'
 import { forwardBackward, viterbi, type Hmm } from './hmm'
 
 const START = [3, 6, 6, 6, 1, 6, 6, 2, 4, 1]

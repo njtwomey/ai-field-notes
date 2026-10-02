@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { Interactive, ParamSlider, Readout, formatNumber } from '@/components/viz'
+import { Interactive, ParamSlider, Readout, formatNumber } from 'aifn-render'
 import { studentTCdf } from '@/lib/math/special'
 
 type Result = { t: number; df: number; p: number }

@@ -1,5 +1,5 @@
 import { useMemo } from 'react'
-import { Interactive, ParamSlider, Readout, XYChart, formatNumber, useParam, type XYSeries } from '@/components/viz'
+import { Interactive, ParamSlider, Readout, XYChart, formatNumber, useParam, type XYSeries } from 'aifn-render'
 import { comparisonEp } from '../_shared/comparisons'
 import { grid, logNormalCdf, normalLogPdf, normalPdf, toMoments } from '../_shared/ep'
 

@@ -12,7 +12,7 @@ import {
   formatNumber,
   type Handle,
   type HeatmapOverlay,
-} from '@/components/viz'
+} from 'aifn-render'
 import { useClassColors } from '../_shared/classColor'
 import { OrdinalDataControls } from '../_shared/OrdinalDataControls'
 import { NYSTROM_LANDMARKS, ordinalMetrics, type Point } from '../_shared/ordinal'

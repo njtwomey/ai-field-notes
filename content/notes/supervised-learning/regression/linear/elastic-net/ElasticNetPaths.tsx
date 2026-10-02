@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Interactive, ParamChoice, Readout } from '@/components/viz'
+import { Interactive, ParamChoice, Readout } from 'aifn-render'
 import type { ElasticNetPaths as Paths } from '@/generated/contracts'
 import { useFigure } from '@/lib/generated'
 import { CoefficientPathExplorer } from '../_shared/CoefficientPathExplorer'

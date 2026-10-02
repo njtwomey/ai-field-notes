@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { Heatmap, Interactive, ParamChoice, Readout, XYChart, formatNumber, type XYSeries } from '@/components/viz'
+import { Heatmap, Interactive, ParamChoice, Readout, XYChart, formatNumber, type XYSeries } from 'aifn-render'
 import { rng } from '@/lib/math'
 import {
   accuracy,

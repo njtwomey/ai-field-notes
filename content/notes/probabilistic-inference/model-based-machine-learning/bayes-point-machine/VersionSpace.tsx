@@ -10,7 +10,7 @@ import {
   type Handle,
   type HeatmapOverlay,
   type XYSeries,
-} from '@/components/viz'
+} from 'aifn-render'
 import { grid } from '../_shared/gaussian'
 import { epBpm, maxMarginDirection, posteriorGrid, type Labelled, type Vec2 } from '../_shared/bpm'
 

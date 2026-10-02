@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { Interactive, ParamButton, Readout, XYChart, type Handle, type XYSeries } from '@/components/viz'
+import { Interactive, ParamButton, Readout, XYChart, type Handle, type XYSeries } from 'aifn-render'
 
 type Pt = [number, number]
 type Mat3 = number[][]

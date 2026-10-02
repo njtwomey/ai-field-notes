@@ -12,7 +12,7 @@ import {
   useParam,
   type Handle,
   type XYSeries,
-} from '@/components/viz'
+} from 'aifn-render'
 import { cn } from '@/lib/utils'
 import { isRelevant } from './ranking'
 import { METRICS, listWith, verdict, type MetricId, type MetricSpec, type Verdict } from './duel'

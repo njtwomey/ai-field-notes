@@ -9,7 +9,7 @@ import {
   type Handle,
   type HeatmapOverlay,
   type XYSeries,
-} from '@/components/viz'
+} from 'aifn-render'
 import { linspace } from '@/lib/math'
 
 type Vec = [number, number]

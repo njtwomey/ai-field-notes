@@ -8,7 +8,7 @@ import {
   formatNumber,
   useParam,
   type XYSeries,
-} from '@/components/viz'
+} from 'aifn-render'
 import { cholesky2, eig2, type Mat2 } from '@/lib/math/mat2'
 
 const H = 20

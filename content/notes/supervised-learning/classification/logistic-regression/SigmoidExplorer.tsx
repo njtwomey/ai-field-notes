@@ -1,4 +1,4 @@
-import { Interactive, ParamSlider, XYChart, useParam, type Handle } from '@/components/viz'
+import { Interactive, ParamSlider, XYChart, useParam, type Handle } from 'aifn-render'
 import { linspace, sigmoid } from '@/lib/math'
 
 export function SigmoidExplorer() {

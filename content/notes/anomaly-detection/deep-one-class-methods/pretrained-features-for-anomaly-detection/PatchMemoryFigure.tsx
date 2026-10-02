@@ -1,5 +1,5 @@
 import { useDeferredValue, useMemo, useState } from 'react'
-import { Heatmap, Interactive, ParamChoice, ParamSwitch, Readout, type Handle } from '@/components/viz'
+import { Heatmap, Interactive, ParamChoice, ParamSwitch, Readout, type Handle } from 'aifn-render'
 import { rng } from '@/lib/math'
 import {
   CENTRES,

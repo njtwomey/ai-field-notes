@@ -9,7 +9,7 @@ import {
   useParam,
   type Handle,
   type XYSeries,
-} from '@/components/viz'
+} from 'aifn-render'
 
 /**
  * Measured with faiss-cpu 1.15.1 on one thread of an Apple M1 Pro: 10^5 vectors and 1000 queries in 64 dimensions from

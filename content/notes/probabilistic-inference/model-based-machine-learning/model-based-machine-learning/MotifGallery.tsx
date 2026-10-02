@@ -2,7 +2,7 @@ import { MathText } from '@/components/content/MathText'
 import { Diagram } from '@/components/diagram/Diagram'
 import { factor, link, variable } from '@/components/diagram/components'
 import type { DiagramSpec } from '@/components/diagram/types'
-import { Interactive } from '@/components/viz'
+import { Interactive } from 'aifn-render'
 
 const line = (a: string, b: string) => link(a, b, false)
 const dot = (id: string, x: number, y: number) => ({ id, x, y, shape: 'dot' as const, w: 0.18, h: 0.18 })

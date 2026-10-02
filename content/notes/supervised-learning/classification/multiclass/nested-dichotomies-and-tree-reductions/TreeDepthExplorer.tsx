@@ -9,7 +9,7 @@ import {
   useParam,
   type Handle,
   type XYSeries,
-} from '@/components/viz'
+} from 'aifn-render'
 
 type KChoice = '4' | '8' | '16' | '32' | '64'
 const K_OPTIONS: KChoice[] = ['4', '8', '16', '32', '64']

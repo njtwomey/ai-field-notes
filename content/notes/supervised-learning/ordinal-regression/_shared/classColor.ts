@@ -1,5 +1,5 @@
 import { useMemo } from 'react'
-import { useScaleColor } from '@/components/viz'
+import { useScaleColor } from 'aifn-render'
 
 /** The class colour scale of every ordinal widget: diverging, dark blue for the lowest class to dark red for the highest. */
 export const CLASS_SCALE = 'diverging' as const

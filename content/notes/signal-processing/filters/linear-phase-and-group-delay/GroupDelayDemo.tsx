@@ -8,7 +8,7 @@ import {
   formatNumber,
   useParam,
   type XYSeries,
-} from '@/components/viz'
+} from 'aifn-render'
 import { freqz, lfilter, unwrap } from '@/lib/dsp'
 import { firLowpass, groupDelay, iirLowpass } from '../_shared/design'
 

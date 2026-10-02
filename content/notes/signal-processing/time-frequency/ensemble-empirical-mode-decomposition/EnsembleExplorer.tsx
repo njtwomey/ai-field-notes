@@ -8,7 +8,7 @@ import {
   formatNumber,
   useParam,
   type XYSeries,
-} from '@/components/viz'
+} from 'aifn-render'
 import { ceemdan, eemd, emd, type Decomposition } from '../_shared/emd'
 
 const N = 512

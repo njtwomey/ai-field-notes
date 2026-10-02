@@ -10,7 +10,7 @@ import {
   type Segment,
   type Vec2,
   type XYSeries,
-} from '@/components/viz'
+} from 'aifn-render'
 import { rng } from '@/lib/math'
 
 const RANGE: [number, number] = [-3.5, 3.5]

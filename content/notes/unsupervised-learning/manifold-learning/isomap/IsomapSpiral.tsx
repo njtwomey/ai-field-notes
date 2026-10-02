@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { Interactive, ParamSlider, Readout, XYChart, formatNumber, type Segment } from '@/components/viz'
+import { Interactive, ParamSlider, Readout, XYChart, formatNumber, type Segment } from 'aifn-render'
 import { classicalMds, geodesics, knnEdges, spiral } from './isomap'
 
 const N = 100

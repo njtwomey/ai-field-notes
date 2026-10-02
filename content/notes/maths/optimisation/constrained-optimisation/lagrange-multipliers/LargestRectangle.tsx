@@ -1,5 +1,5 @@
 import { useMemo } from 'react'
-import { ParamSlider, Readout, formatNumber, useParam } from '@/components/viz'
+import { ParamSlider, Readout, formatNumber, useParam } from 'aifn-render'
 import { ConstrainedExplorer, SensitivityPanel, type ConstrainedProblem } from './ConstrainedExplorer'
 
 /** Maximise xy on the line x + y = c, parametrised by signed distance t from the midpoint (c/2, c/2). */

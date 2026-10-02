@@ -9,7 +9,7 @@ import {
   useParam,
   type Handle,
   type XYSeries,
-} from '@/components/viz'
+} from 'aifn-render'
 import { db, freqz, lfilter, unwrap } from '@/lib/dsp'
 import { iirLowpass } from '../_shared/design'
 

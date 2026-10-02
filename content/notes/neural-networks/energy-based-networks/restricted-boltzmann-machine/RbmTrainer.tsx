@@ -9,7 +9,7 @@ import {
   formatNumber,
   type Handle,
   type XYSeries,
-} from '@/components/viz'
+} from 'aifn-render'
 import { rng } from '@/lib/math'
 import { PlayButton } from '../_shared/Playback'
 import { usePlayLoop } from '../_shared/usePlayLoop'

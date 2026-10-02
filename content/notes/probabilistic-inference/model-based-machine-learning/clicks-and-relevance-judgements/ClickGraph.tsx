@@ -1,7 +1,7 @@
 import { Diagram } from '@/components/diagram/Diagram'
 import { factor, link, variable } from '@/components/diagram/components'
 import type { DiagramSpec } from '@/components/diagram/types'
-import { Interactive } from '@/components/viz'
+import { Interactive } from 'aifn-render'
 
 const line = (a: string, b: string, label?: string) =>
   link(a, b, false, label ? { label, labelSide: 'left', labelRotate: false } : {})

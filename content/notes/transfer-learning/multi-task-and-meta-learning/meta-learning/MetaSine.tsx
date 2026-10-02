@@ -8,7 +8,7 @@ import {
   formatNumber,
   useParam,
   type XYSeries,
-} from '@/components/viz'
+} from 'aifn-render'
 import { linspace, rng } from '@/lib/math'
 
 // Sine-wave regression tasks as in Finn et al. (2017): y = A sin(x − φ), A ∈ [0.1, 5], φ ∈ [0, π], x ∈ [−5, 5].

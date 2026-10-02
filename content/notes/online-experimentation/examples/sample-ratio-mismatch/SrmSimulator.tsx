@@ -10,7 +10,7 @@ import {
   type Handle,
   type Segment,
   type XYSeries,
-} from '@/components/viz'
+} from 'aifn-render'
 import { rng } from '@/lib/math'
 import { normalCdf } from '@/lib/math/special'
 import { sampleBinomial, twoProportionZ } from '../_shared/ab'

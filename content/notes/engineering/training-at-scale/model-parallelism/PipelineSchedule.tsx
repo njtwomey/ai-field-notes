@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { Heatmap, Interactive, ParamChoice, ParamSlider, Readout, formatNumber } from '@/components/viz'
+import { Heatmap, Interactive, ParamChoice, ParamSlider, Readout, formatNumber } from 'aifn-render'
 
 type Kind = 'gpipe' | '1f1b'
 const KINDS = [

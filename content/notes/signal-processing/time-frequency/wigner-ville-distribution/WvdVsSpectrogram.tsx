@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { Heatmap, Interactive, ParamChoice, Readout, formatNumber } from '@/components/viz'
+import { Heatmap, Interactive, ParamChoice, Readout, formatNumber } from 'aifn-render'
 import { db, stft } from '@/lib/dsp'
 import { analytic, chirp, wignerVille } from '../_shared/tf'
 

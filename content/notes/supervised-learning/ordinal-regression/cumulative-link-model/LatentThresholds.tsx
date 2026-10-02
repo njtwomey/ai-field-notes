@@ -9,7 +9,7 @@ import {
   formatNumber,
   type Handle,
   type XYSeries,
-} from '@/components/viz'
+} from 'aifn-render'
 import { linspace, sigmoid } from '@/lib/math'
 import { normalCdf, normalPdf } from '@/lib/math/special'
 import { useClassColors } from '../_shared/classColor'

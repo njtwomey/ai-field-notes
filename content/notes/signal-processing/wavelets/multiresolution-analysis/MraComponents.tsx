@@ -8,7 +8,7 @@ import {
   formatNumber,
   useParam,
   type XYSeries,
-} from '@/components/viz'
+} from 'aifn-render'
 import { FILTERS, wavedec, waverec, type Family } from '../_shared/wavelets'
 
 type Shape = 'steps' | 'chirp'

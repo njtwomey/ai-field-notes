@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { MathText } from '@/components/content/MathText'
-import { Interactive, ParamChoice, ParamSlider, Readout, XYChart, formatNumber, type XYSeries } from '@/components/viz'
+import { Interactive, ParamChoice, ParamSlider, Readout, XYChart, formatNumber, type XYSeries } from 'aifn-render'
 import { useClassColors } from '../_shared/classColor'
 
 type Distance = 'absolute' | 'squared'

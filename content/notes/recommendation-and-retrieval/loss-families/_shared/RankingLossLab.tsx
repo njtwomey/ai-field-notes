@@ -9,7 +9,7 @@ import {
   type Handle,
   type Vector,
   type XYSeries,
-} from '@/components/viz'
+} from 'aifn-render'
 import { LOSSES, ndcg, rankingLoss, ranks, type LossId } from './ranking-losses'
 
 type Preset = 'graded' | 'one' | 'two'

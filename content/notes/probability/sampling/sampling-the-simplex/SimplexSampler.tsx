@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { Interactive, ParamChoice, ParamSlider, Readout, XYChart, type XYSeries } from '@/components/viz'
+import { Interactive, ParamChoice, ParamSlider, Readout, XYChart, type XYSeries } from 'aifn-render'
 import { rng } from '@/lib/math'
 
 type Method = 'uniforms' | 'exponentials' | 'spacings'

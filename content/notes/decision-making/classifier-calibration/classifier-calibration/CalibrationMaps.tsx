@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { Interactive, ParamChoice, ParamSlider, Readout, XYChart, formatNumber, useParam } from '@/components/viz'
+import { Interactive, ParamChoice, ParamSlider, Readout, XYChart, formatNumber, useParam } from 'aifn-render'
 import { linspace, rng } from '@/lib/math'
 import { expit, fitBeta, fitIsotonic, fitPlatt, logLoss, logit } from '../../_shared/calibration'
 

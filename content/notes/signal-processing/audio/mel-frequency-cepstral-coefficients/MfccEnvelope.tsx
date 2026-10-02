@@ -8,7 +8,7 @@ import {
   formatNumber,
   useParam,
   type XYSeries,
-} from '@/components/viz'
+} from 'aifn-render'
 import { lfilter, magnitudeSpectrum, makeWindow } from '@/lib/dsp'
 import { dct, melFilterBank } from '../_shared/audio'
 

@@ -8,7 +8,7 @@ import {
   formatNumber,
   useParam,
   type XYSeries,
-} from '@/components/viz'
+} from 'aifn-render'
 import { history, makeRatings, predict, rmse } from '../_shared/mf'
 
 const DATA = makeRatings()

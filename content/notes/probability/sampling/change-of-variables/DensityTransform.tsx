@@ -14,7 +14,7 @@ import {
   type PanelMarks,
   type PanelPointer,
   type Vec2,
-} from '@/components/viz'
+} from 'aifn-render'
 import { linspace, rng, sigmoid } from '@/lib/math'
 import { normalCdf, normalPdf } from '@/lib/math/special'
 

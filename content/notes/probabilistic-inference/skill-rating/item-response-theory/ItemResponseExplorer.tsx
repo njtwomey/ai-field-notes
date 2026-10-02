@@ -8,7 +8,7 @@ import {
   formatNumber,
   type Handle,
   type XYSeries,
-} from '@/components/viz'
+} from 'aifn-render'
 import { linspace } from '@/lib/math'
 
 type Form = '1PL' | '2PL' | '3PL' | '4PL'

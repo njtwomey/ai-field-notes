@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { Interactive, ParamSlider, Readout } from '@/components/viz'
+import { Interactive, ParamSlider, Readout } from 'aifn-render'
 import { MathText } from '@/components/content/MathText'
 import { Diagram } from '@/components/diagram/Diagram'
 import type { DiagramEdge, DiagramNode, DiagramSpec } from '@/components/diagram/types'

@@ -9,7 +9,7 @@ import {
   type Handle,
   type Segment,
   type XYSeries,
-} from '@/components/viz'
+} from 'aifn-render'
 import { linspace, rng } from '@/lib/math'
 import { costMatrix, hungarian, wass1dSamples, type Pt } from '../_shared/ot'
 

@@ -9,7 +9,7 @@ import {
   formatNumber,
   useParam,
   type XYSeries,
-} from '@/components/viz'
+} from 'aifn-render'
 import { linspace, rng } from '@/lib/math'
 import { makeKernel, samples, gram } from '../../_shared/gp'
 import { hgpLogMarginal, hgpPosterior, type Replicate } from '../_shared/hgp'

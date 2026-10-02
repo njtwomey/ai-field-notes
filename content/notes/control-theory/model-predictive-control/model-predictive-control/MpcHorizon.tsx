@@ -8,7 +8,7 @@ import {
   formatNumber,
   useParam,
   type XYSeries,
-} from '@/components/viz'
+} from 'aifn-render'
 import { dlqr, type Mat } from '../../_shared/control'
 
 const H = 0.2

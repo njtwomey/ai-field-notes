@@ -8,7 +8,7 @@ import {
   useParam,
   type Handle,
   type XYSeries,
-} from '@/components/viz'
+} from 'aifn-render'
 
 const G = 9.81
 /** Segments per curve for the time integral; the substitution below makes this accurate to about 1e-6 s. */

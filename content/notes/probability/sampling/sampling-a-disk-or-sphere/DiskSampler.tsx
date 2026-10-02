@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { Interactive, ParamSlider, Readout, XYChart, type XYSeries } from '@/components/viz'
+import { Interactive, ParamSlider, Readout, XYChart, type XYSeries } from 'aifn-render'
 import { linspace, rng } from '@/lib/math'
 
 /** The circle that splits the unit disc into two halves of equal area. */

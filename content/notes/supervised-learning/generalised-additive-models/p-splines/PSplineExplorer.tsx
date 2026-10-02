@@ -8,7 +8,7 @@ import {
   XYChart,
   formatNumber,
   type XYSeries,
-} from '@/components/viz'
+} from 'aifn-render'
 import { linspace, rng } from '@/lib/math'
 import { solve } from '../../regression/nonlinear-regression/_shared/splines'
 import {

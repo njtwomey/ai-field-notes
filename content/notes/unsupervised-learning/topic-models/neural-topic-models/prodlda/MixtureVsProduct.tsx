@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { MathText } from '@/components/content/MathText'
-import { Interactive, ParamSlider, Readout, XYChart, formatNumber, type XYSeries } from '@/components/viz'
+import { Interactive, ParamSlider, Readout, XYChart, formatNumber, type XYSeries } from 'aifn-render'
 
 const WORDS = ['goal', 'match', 'team', 'league', 'club', 'transfer', 'fee', 'deal', 'market', 'shares', 'bank', 'rate']
 const X = WORDS.map((_, i) => i + 1)

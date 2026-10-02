@@ -10,7 +10,7 @@ import {
   type Segment,
   type Vec2,
   type XYSeries,
-} from '@/components/viz'
+} from 'aifn-render'
 import { contour, contours, sampleGrid } from './contours'
 
 type Vec3 = [number, number, number]

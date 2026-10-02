@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { Interactive, ParamSlider, Readout, XYChart, formatNumber, useParam, type XYSeries } from '@/components/viz'
+import { Interactive, ParamSlider, Readout, XYChart, formatNumber, useParam, type XYSeries } from 'aifn-render'
 import { linspace, rng, sigmoid } from '@/lib/math'
 
 // Covariate shift in two dimensions. The labelling rule p(y = 1 | x) is the same in both domains and has a curved

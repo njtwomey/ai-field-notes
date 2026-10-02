@@ -10,7 +10,7 @@ import {
   type Handle,
   type Segment,
   type XYSeries,
-} from '@/components/viz'
+} from 'aifn-render'
 import { rng } from '@/lib/math'
 import { eigSym } from '@/lib/math/mat2'
 import { dist2, kmeans1d, nearest1d, type P } from './geometry'

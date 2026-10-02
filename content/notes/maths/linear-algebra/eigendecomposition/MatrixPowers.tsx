@@ -9,7 +9,7 @@ import {
   type Handle,
   type ParamSpec,
   type XYSeries,
-} from '@/components/viz'
+} from 'aifn-render'
 import { apply, eig2, type Mat2, type Vec2 } from '@/lib/math/mat2'
 
 const R = 4
