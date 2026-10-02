@@ -1,21 +1,9 @@
-/** Helpers for statistical-test widgets: quantiles and tails built on the special functions in ./special. */
-import { logChoose, logGamma, normalCdf, studentTCdf } from './special'
-
-/** Invert a continuous, increasing cdf on [lo, hi] by bisection. */
-function invert(cdf: (x: number) => number, p: number, lo: number, hi: number): number {
-  for (let i = 0; i < 100; i++) {
-    const mid = (lo + hi) / 2
-    if (cdf(mid) < p) lo = mid
-    else hi = mid
-  }
-  return (lo + hi) / 2
-}
+/** Helpers for statistical-test widgets, backed by aifn/numerics/special. */
+import { logChoose, logGamma, normalCdf } from './special'
+import { studentTQuantile as aifnStudentTQuantile } from 'aifn/numerics/special'
 
 /** Quantile of Student's t with ν degrees of freedom. */
-export function studentTQuantile(p: number, df: number): number {
-  if (p === 0.5) return 0
-  return invert((t) => studentTCdf(t, df), p, -1e3, 1e3)
-}
+export const studentTQuantile = (p: number, df: number): number => aifnStudentTQuantile(p, df) as number
 
 /** Binomial pmf P(S = k) for S ~ Binom(n, p). */
 export function binomialPmf(k: number, n: number, p: number): number {

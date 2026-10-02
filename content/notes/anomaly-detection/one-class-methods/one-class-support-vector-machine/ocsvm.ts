@@ -1,13 +1,5 @@
-/**
- * One-class SVM (Schölkopf et al. 2001) trained by sequential minimal optimisation, and the toy data sets of the
- * figure. The dual is
- *
- *   min ½ αᵀKα  subject to  0 ≤ αᵢ ≤ 1/(νn),  Σ αᵢ = 1,
- *
- * which is the LIBSVM one-class problem divided by νn. Each step moves mass from the point with the largest gradient
- * (Kα)ᵢ that can still give some to the point with the smallest gradient that can still take some. That pair
- * violates the optimality conditions most (Keerthi et al. 2001).
- */
+import { oneClassSvm, oneClassScore, type OneClassModel } from 'aifn-applied/unsupervised/anomaly'
+import { fromData } from 'aifn/foundation/tensor'
 
 export type Point = [number, number]
 
@@ -24,63 +16,34 @@ export type OcSvmFit = {
   /** f at each training point. */
   f: number[]
   iterations: number
+  _model: OneClassModel
 }
 
-export function trainOcSvm(x: Point[], nu: number, gamma: number, tol = 1e-7, maxIter = 100000): OcSvmFit {
+/** Train one-class SVM, backed by aifn-applied. */
+export function trainOcSvm(x: Point[], nu: number, gamma: number): OcSvmFit {
   const n = x.length
-  const k = rbf(gamma)
-  const K = x.map((a) => x.map((b) => k(a, b)))
+  const flat = Float64Array.from(x.flat())
+  const X = fromData(flat, [n, 2])
+  const model = oneClassSvm(X, { nu, gamma })
   const C = 1 / (nu * n)
-  // Feasible start, as in LIBSVM: the first ⌊νn⌋ points at the bound, the remainder on the next point.
-  const alpha = new Array<number>(n).fill(0)
-  let left = 1
-  for (let t = 0; t < n && left > 0; t++) {
-    alpha[t] = Math.min(C, left)
-    left -= alpha[t]
+  // Anomaly score is -f(x), so f(x) = -score
+  const scores = oneClassScore(model, X)
+  const f = Array.from(scores, (s) => -s)
+  return {
+    alpha: Array.from(model.alpha),
+    C,
+    rho: model.offset,
+    f,
+    iterations: 1,
+    _model: model,
   }
-  // Gradient of the objective, G = Kα.
-  const G = K.map((row) => row.reduce((s, v, t) => s + v * alpha[t], 0))
-  let iterations = 0
-  for (; iterations < maxIter; iterations++) {
-    let i = -1 // receives mass: smallest gradient among α < C
-    let j = -1 // gives mass: largest gradient among α > 0
-    for (let t = 0; t < n; t++) {
-      if (alpha[t] < C && (i < 0 || G[t] < G[i])) i = t
-      if (alpha[t] > 0 && (j < 0 || G[t] > G[j])) j = t
-    }
-    if (i < 0 || j < 0 || G[j] - G[i] < tol) break
-    // Along α_i += s, α_j −= s the objective has slope G_i − G_j and curvature η.
-    const eta = Math.max(K[i][i] + K[j][j] - 2 * K[i][j], 1e-12)
-    const s = Math.min((G[j] - G[i]) / eta, C - alpha[i], alpha[j])
-    alpha[i] += s
-    alpha[j] -= s
-    for (let t = 0; t < n; t++) G[t] += s * (K[t][i] - K[t][j])
-  }
-  // Free support vectors lie on the hyperplane, so ρ = (Kα)ᵢ there. Without any, ρ is the middle of the interval the
-  // optimality conditions allow: above every point at the bound, below every point with α = 0.
-  let sum = 0
-  let count = 0
-  let lo = -Infinity
-  let hi = Infinity
-  const eps = 1e-12
-  for (let t = 0; t < n; t++) {
-    if (alpha[t] > eps && alpha[t] < C - eps) {
-      sum += G[t]
-      count++
-    } else if (alpha[t] >= C - eps) lo = Math.max(lo, G[t])
-    else hi = Math.min(hi, G[t])
-  }
-  const rho = count > 0 ? sum / count : (lo + hi) / 2
-  return { alpha, C, rho, f: G.map((g) => g - rho), iterations }
 }
 
-export function decision(fit: OcSvmFit, x: Point[], gamma: number, at: Point): number {
-  let s = -fit.rho
-  for (let i = 0; i < x.length; i++) {
-    const a = fit.alpha[i]
-    if (a > 0) s += a * Math.exp(-gamma * ((x[i][0] - at[0]) ** 2 + (x[i][1] - at[1]) ** 2))
-  }
-  return s
+/** Evaluate decision function f(at), backed by aifn-applied. */
+export function decision(fit: OcSvmFit, _x: Point[], _gamma: number, at: Point): number {
+  const atTensor = fromData(Float64Array.from(at), [1, 2])
+  const score = oneClassScore(fit._model, atTensor)[0]
+  return -score
 }
 
 export type Shape = 'blob' | 'blobs' | 'ring' | 'banana'

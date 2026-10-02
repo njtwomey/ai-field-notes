@@ -1,5 +1,5 @@
-/** A small isolation forest (Liu, Ting and Zhou 2008) for 2D points. */
-import { rng } from '@/lib/math'
+import { averagePathLength } from 'aifn-applied/unsupervised/anomaly'
+import { stream, uniform as drawUniform } from 'aifn/foundation/random'
 
 export type Pt = [number, number]
 export type Box = { x0: number; x1: number; y0: number; y1: number }
@@ -7,11 +7,8 @@ export type Segment = { from: [number, number]; to: [number, number] }
 
 type Node = { size: number } | { dim: 0 | 1; split: number; left: Node; right: Node }
 
-const HARMONIC = [0]
-for (let i = 1; i <= 4096; i++) HARMONIC.push(HARMONIC[i - 1] + 1 / i)
-
-/** Average leaf depth of a random binary tree with n leaves: c(n) = 2H(n − 1) − 2(n − 1)/n. */
-export const avgPathLength = (n: number) => (n <= 1 ? 0 : 2 * HARMONIC[n - 1] - (2 * (n - 1)) / n)
+/** Average leaf depth of a random binary tree with n leaves, delegated to aifn-applied. */
+export const avgPathLength = averagePathLength
 
 /**
  * Grow one isolation tree on `idx`. A split picks a coordinate at random and a value uniformly between the node's
@@ -69,7 +66,8 @@ function pathLength(node: Node, x: Pt, depth = 0): number {
 export type Forest = { trees: Node[]; psi: number; firstSample: number[]; firstCuts: Segment[] }
 
 export function buildForest(pts: Pt[], nTrees: number, psi: number, seed: number, region: Box): Forest {
-  const g = rng(seed)
+  const s = stream(`iforest/${seed}`)
+  const uniform = () => drawUniform(s)
   const size = Math.min(psi, pts.length)
   const limit = Math.ceil(Math.log2(Math.max(size, 2)))
   const trees: Node[] = []
@@ -79,12 +77,12 @@ export function buildForest(pts: Pt[], nTrees: number, psi: number, seed: number
     // Partial Fisher–Yates shuffle: a subsample of `size` indices without replacement.
     const all = pts.map((_, i) => i)
     for (let i = 0; i < size; i++) {
-      const j = i + Math.floor(g.uniform() * (all.length - i))
+      const j = i + Math.floor(uniform() * (all.length - i))
       ;[all[i], all[j]] = [all[j], all[i]]
     }
     const sample = all.slice(0, size)
     if (t === 0) firstSample = sample
-    trees.push(grow(pts, sample, 0, limit, g.uniform, region, t === 0 ? firstCuts : undefined))
+    trees.push(grow(pts, sample, 0, limit, uniform, region, t === 0 ? firstCuts : undefined))
   }
   return { trees, psi: size, firstSample, firstCuts }
 }

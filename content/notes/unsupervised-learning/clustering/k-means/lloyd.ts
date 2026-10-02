@@ -1,33 +1,38 @@
-import { d2, initialCentres, type CentreInit, type Point } from '@/lib/math/cluster'
+import { assignNearest, lloydUpdate, kmeansPlusPlus } from 'aifn/numerics/neighbours'
+import { fromData, toFlat, toRows } from 'aifn/foundation/tensor'
+import { stream } from 'aifn/foundation/random'
+import type { Point, CentreInit } from '@/lib/math/cluster'
 
-/** Lloyd's algorithm, shared by the step-by-step figure and the elbow curve. */
 export type State = { centroids: Point[]; labels: number[]; inertia: number; iteration: number; done: boolean }
 
 export function assign(points: Point[], centroids: Point[]) {
-  const labels = points.map((p) => centroids.reduce((best, c, j) => (d2(p, c) < d2(p, centroids[best]) ? j : best), 0))
-  const inertia = points.reduce((s, p, i) => s + d2(p, centroids[labels[i]]), 0)
-  return { labels, inertia }
+  const x = fromData(Float64Array.from(points.flat()), [points.length, 2])
+  const c = fromData(Float64Array.from(centroids.flat()), [centroids.length, 2])
+  const res = assignNearest(x, c)
+  return { labels: Array.from(toFlat(res.labels)), inertia: res.inertia }
 }
 
 export function step(points: Point[], s: State): State {
-  const k = s.centroids.length
-  const centroids = s.centroids.map((c, j) => {
-    const members = points.filter((_, i) => s.labels[i] === j)
-    if (!members.length) return c
-    return [
-      members.reduce((a, p) => a + p[0], 0) / members.length,
-      members.reduce((a, p) => a + p[1], 0) / members.length,
-    ] as Point
-  })
-  const moved = centroids.some((c, j) => d2(c, s.centroids[j]) > 1e-12)
-  const { labels, inertia } = assign(points, centroids)
-  return { centroids, labels, inertia, iteration: s.iteration + 1, done: !moved || k === 0 }
+  const x = fromData(Float64Array.from(points.flat()), [points.length, 2])
+  const c = fromData(Float64Array.from(s.centroids.flat()), [s.centroids.length, 2])
+  const labelsTensor = fromData(Int32Array.from(s.labels), [s.labels.length])
+  const next = lloydUpdate(x, labelsTensor, c)
+  const nextCentroids = toRows(next.centroids) as Point[]
+  const nextAssign = assignNearest(x, next.centroids)
+  return {
+    centroids: nextCentroids,
+    labels: Array.from(toFlat(nextAssign.labels)),
+    inertia: nextAssign.inertia,
+    iteration: s.iteration + 1,
+    done: next.shift <= 1e-12,
+  }
 }
 
-/** Lloyd's algorithm from one initialisation, run until no centroid moves. */
 export function converge(points: Point[], k: number, init: CentreInit, seed: number, maxIter = 100): State {
-  const centroids = initialCentres(points, k, init, seed)
-  let s: State = { centroids, ...assign(points, centroids), iteration: 0, done: false }
-  for (let i = 0; i < maxIter && !s.done; i++) s = step(points, s)
-  return s
+  const x = fromData(Float64Array.from(points.flat()), [points.length, 2])
+  const s = stream(`kmeans/${seed}`)
+  const c0 = init === 'kmeans++' ? kmeansPlusPlus(s, x, k).centroids : fromData(Float64Array.from(points.slice(0, k).flat()), [k, 2])
+  let curr: State = { centroids: toRows(c0) as Point[], ...assign(points, toRows(c0) as Point[]), iteration: 0, done: false }
+  for (let i = 0; i < maxIter && !curr.done; i++) curr = step(points, curr)
+  return curr
 }

@@ -1,5 +1,6 @@
-/** Small ODE helpers shared by the differential-equations widgets. Light enough to run on every slider drag. */
 import type { Segment } from 'aifn-render'
+import { solveIvp } from 'aifn/dynamics/ode'
+import { fromData, toFlat, toRows } from 'aifn/foundation/tensor'
 
 export type Vec = number[]
 /** Right-hand side of ẋ = f(t, x). */
@@ -17,21 +18,35 @@ export function rk4Step(f: Rhs, t: number, x: Vec, h: number): Vec {
 }
 
 /**
- * Integrate from (t0, x0) to t1 with `n` RK4 steps (t1 may be earlier than t0). Returns the times and states,
- * stopping early if the state leaves the box |x_i| ≤ `bound`, so blow-up does not produce Infinity.
+ * Integrate from (t0, x0) to t1 with `n` RK4 steps (t1 may be earlier than t0), backed by aifn/dynamics/ode.
+ * Stops early if the state leaves the box |x_i| ≤ `bound`.
  */
 export function integrate(f: Rhs, x0: Vec, t0: number, t1: number, n: number, bound = 1e3) {
-  const h = (t1 - t0) / n
-  const ts = [t0]
-  const xs = [x0]
-  let x = x0
-  for (let k = 0; k < n; k++) {
-    x = rk4Step(f, t0 + k * h, x, h)
-    if (!x.every((v) => Number.isFinite(v) && Math.abs(v) <= bound)) break
-    ts.push(t0 + (k + 1) * h)
-    xs.push(x)
+  const d = x0.length
+  const stepSize = (t1 - t0) / n
+  if (stepSize === 0) return { ts: [t0], xs: [x0] }
+  const fTensor = (t: number, x: any) => {
+    const xVec = Array.from(toFlat(x))
+    const out = f(t, xVec)
+    return fromData(Float64Array.from(out), [d])
   }
-  return { ts, xs }
+  const x0Tensor = fromData(Float64Array.from(x0), [d])
+  try {
+    const sol = solveIvp(fTensor, [t0, t1], x0Tensor, { method: 'rk4', stepSize })
+    const allTs = Array.from(toFlat(sol.time))
+    const allXs = toRows(sol.x) as number[][]
+    const ts: number[] = []
+    const xs: number[][] = []
+    for (let i = 0; i < allTs.length; i++) {
+      const state = allXs[i]
+      if (!state.every((v) => Number.isFinite(v) && Math.abs(v) <= bound)) break
+      ts.push(allTs[i])
+      xs.push(state)
+    }
+    return { ts, xs }
+  } catch {
+    return { ts: [t0], xs: [x0] }
+  }
 }
 
 /**

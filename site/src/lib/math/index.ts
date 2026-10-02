@@ -1,20 +1,14 @@
-/** Small numeric helpers for in-browser widgets. Heavy computation belongs in a Python `@figure` builder instead. */
+/** Small numeric helpers for in-browser widgets, backed by aifn. */
+import { stream, uniform as drawUniform, normal as drawNormal } from 'aifn/foundation/random'
+import { sigmoid as aifnSigmoid } from 'aifn/numerics/special'
 
-/** Deterministic PRNG (mulberry32). Same seed, same sequence, on every device. */
+/** Deterministic PRNG backed by aifn stream. Same seed, same sequence, on every device. */
 export function rng(seed: number) {
-  let a = seed >>> 0
-  const uniform = () => {
-    a = (a + 0x6d2b79f5) >>> 0
-    let t = a
-    t = Math.imul(t ^ (t >>> 15), t | 1)
-    t ^= t + Math.imul(t ^ (t >>> 7), t | 61)
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296
+  const s = stream(seed)
+  return {
+    uniform: () => drawUniform(s),
+    normal: () => drawNormal(s),
   }
-  const normal = () => {
-    const u = Math.max(uniform(), 1e-12)
-    return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * uniform())
-  }
-  return { uniform, normal }
 }
 
 export function linspace(start: number, stop: number, n: number): number[] {
@@ -24,7 +18,7 @@ export function linspace(start: number, stop: number, n: number): number[] {
 
 export const sum = (xs: number[]) => xs.reduce((a, b) => a + b, 0)
 export const mean = (xs: number[]) => sum(xs) / xs.length
-export const sigmoid = (z: number) => 1 / (1 + Math.exp(-z))
+export const sigmoid = (z: number) => aifnSigmoid(z) as number
 
 /** Least-squares slope and intercept for one feature. */
 export function olsFit(x: number[], y: number[]): { slope: number; intercept: number } {

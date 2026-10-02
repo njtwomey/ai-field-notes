@@ -1,5 +1,6 @@
-/** EM for a diagonal-covariance Gaussian mixture in 2-D. Mirrors python/mlc/examples/gmm/model.py. */
 import { initialCentres, type CentreInit, type Point } from '@/lib/math/cluster'
+import { logsumexp, fromData, toFlat } from 'aifn/foundation/tensor'
+import { softmax } from 'aifn/numerics/special'
 
 /** Smallest allowed variance. Without it a component can collapse onto one point and the likelihood diverges. */
 const VARIANCE_FLOOR = 1e-3
@@ -29,18 +30,27 @@ function logJoint(p: Point, m: Mixture, j: number): number {
   )
 }
 
-/** Responsibilities and mean log-likelihood under `m`. */
+/** Responsibilities and mean log-likelihood under `m`, delegated to aifn tensor and special functions. */
 export function eStep(points: Point[], m: Mixture): { responsibilities: number[][]; logLikelihood: number } {
+  const n = points.length
+  const k = m.weights.length
+  const flatJoint = new Float64Array(n * k)
+  for (let i = 0; i < n; i++) {
+    for (let j = 0; j < k; j++) {
+      flatJoint[i * k + j] = logJoint(points[i], m, j)
+    }
+  }
+  const joint = fromData(flatJoint, [n, k])
+  const respTensor = softmax(joint)
+  const respFlat = toFlat(respTensor)
+  const responsibilities: number[][] = []
+  for (let i = 0; i < n; i++) {
+    responsibilities.push(respFlat.slice(i * k, (i + 1) * k))
+  }
+  const logMarginals = toFlat(logsumexp(joint, 1))
   let total = 0
-  const responsibilities = points.map((p) => {
-    const logs = m.weights.map((_, j) => logJoint(p, m, j))
-    const top = Math.max(...logs)
-    const sum = logs.reduce((s, l) => s + Math.exp(l - top), 0)
-    const logMarginal = top + Math.log(sum)
-    total += logMarginal
-    return logs.map((l) => Math.exp(l - logMarginal))
-  })
-  return { responsibilities, logLikelihood: total / points.length }
+  for (let i = 0; i < n; i++) total += logMarginals[i]
+  return { responsibilities, logLikelihood: total / n }
 }
 
 /** Weighted maximum-likelihood estimates, each point weighted by its responsibility. */
