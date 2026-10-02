@@ -1,1 +1,1 @@
-export { ControlRow, Controls } from '@render/layout/Controls'
+export { ControlGroup, ControlRow, Controls } from '@render/layout/Controls'

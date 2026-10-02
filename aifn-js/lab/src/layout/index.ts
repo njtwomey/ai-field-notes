@@ -1,7 +1,7 @@
 /** The lab's layout: the figure frame, the app shell and small typographic pieces. Import from '@lab/layout'. */
 export { Figure, type FigureProps } from './Figure'
 export { Columns } from './Columns'
-export { ControlRow, Controls } from './Controls'
+export { ControlGroup, ControlRow, Controls } from './Controls'
 export { PanelSlot } from './slots'
 export { FrameSlotsContext, type SlotName } from './slots-context'
 export { Dashboard, DashboardCell, DashboardRow } from './Dashboard'

@@ -9,12 +9,12 @@ import { fromMessage, isTask, toMessage, type WorkerRequest, type WorkerResponse
 
 // Every aifn module (a directory with an index.ts; `_` folders are private), imported lazily by path.
 const MODULES = {
-  ...import.meta.glob(['../../../aifn-js/core/src/**/index.ts', '!**/_*/**']),
-  ...import.meta.glob(['../../../aifn-js/methods/src/**/index.ts', '!**/_*/**']),
+  ...import.meta.glob(['../../../core/src/**/index.ts', '!**/_*/**']),
+  ...import.meta.glob(['../../../methods/src/**/index.ts', '!**/_*/**']),
 } as Record<string, () => Promise<Record<string, unknown>>>
 
-const CORE = '../../../aifn-js/core/src/'
-const APPLIED = '../../../aifn-js/methods/src/'
+const CORE = '../../../core/src/'
+const APPLIED = '../../../methods/src/'
 
 /** The aifn export at `address` (`<module>/<export>`), from the core or the applications. */
 async function resolve(address: string): Promise<unknown> {

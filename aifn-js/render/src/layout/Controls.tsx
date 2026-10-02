@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react'
+import type { ComponentType, ReactNode } from 'react'
 import { cn } from '@render/lib/utils'
 
 /**
@@ -39,3 +39,51 @@ export function ControlRow({
     </div>
   )
 }
+
+/**
+ * A structured section or card of related controls (e.g. Visual, Color, Parameters, Playback),
+ * with an optional title, subtitle/description, badge, and icon.
+ */
+export function ControlGroup({
+  title,
+  description,
+  badge,
+  icon: Icon,
+  children,
+  className,
+}: {
+  title?: ReactNode
+  description?: ReactNode
+  badge?: ReactNode
+  icon?: ComponentType<{ className?: string }>
+  children: ReactNode
+  className?: string
+}) {
+  return (
+    <div
+      className={cn(
+        'col-span-full flex flex-col gap-3 rounded-lg border bg-card/50 p-3.5 text-card-foreground shadow-xs',
+        className,
+      )}
+    >
+      {(title || description || badge || Icon) && (
+        <div className="flex items-center justify-between gap-2 border-b border-border/60 pb-2">
+          <div className="flex items-center gap-2 min-w-0">
+            {Icon && <Icon className="size-4 shrink-0 text-muted-foreground" />}
+            <div className="min-w-0">
+              {title && <h3 className="text-xs font-semibold tracking-wide uppercase text-foreground/80">{title}</h3>}
+              {description && <p className="text-[11px] text-muted-foreground">{description}</p>}
+            </div>
+          </div>
+          {badge && (
+            <span className="font-mono text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground shrink-0">
+              {badge}
+            </span>
+          )}
+        </div>
+      )}
+      <Controls>{children}</Controls>
+    </div>
+  )
+}
+

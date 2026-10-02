@@ -44,3 +44,14 @@ export { Button } from '@render/ui/button'
 export { ButtonGroup, ButtonGroupSeparator, ButtonGroupText } from '@render/ui/button-group'
 export { CodeEditor, type CodeEditorProps, type CodeError } from './CodeEditor'
 export { StatusText } from './StatusText'
+export {
+  RampPicker,
+  RevealToggle,
+  SwatchPicker,
+  ThemeToggle,
+  type RampPickerProps,
+  type RampType,
+  type RevealToggleProps,
+  type SwatchPickerProps,
+} from './visual'
+

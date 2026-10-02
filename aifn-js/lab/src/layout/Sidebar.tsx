@@ -178,19 +178,107 @@ function buildTree(entries: readonly Entry[]): TreeNode[] {
   const labEntries = byFamily.get(LAB_FAMILY) ?? []
   if (labEntries.length > 0) {
     const fam = FAMILIES.find((f) => f.id === LAB_FAMILY)!
+
+    const GROUPS: { id: string; label: string; keys: string[] }[] = [
+      {
+        id: 'lab/overview',
+        label: 'Galleries & Showcase',
+        keys: ['ui-kit', 'diagrams'],
+      },
+      {
+        id: 'lab/mark-layers',
+        label: 'Plot: Mark Layers',
+        keys: [
+          'ui-kit/curve',
+          'ui-kit/points',
+          'ui-kit/bars',
+          'ui-kit/area',
+          'ui-kit/signed-area',
+          'ui-kit/segments',
+          'ui-kit/vectors',
+          'ui-kit/rug',
+          'ui-kit/annotation',
+          'ui-kit/handle',
+        ],
+      },
+      {
+        id: 'lab/field-layers',
+        label: 'Plot: Fields & Density',
+        keys: [
+          'ui-kit/histogram',
+          'ui-kit/density',
+          'ui-kit/mass',
+          'ui-kit/support-band',
+          'ui-kit/raster',
+          'ui-kit/contours',
+        ],
+      },
+      {
+        id: 'lab/compositions',
+        label: 'Plot: Grids & Compositions',
+        keys: ['ui-kit/plots'],
+      },
+      {
+        id: 'lab/architecture',
+        label: 'State & Architecture',
+        keys: ['ui-kit/state', 'ui-kit/probes', 'ui-kit/scheduler', 'ui-kit/equations'],
+      },
+    ]
+
+    const entryByKey = new Map(labEntries.map((e) => [e.key, e]))
+    const placed = new Set<string>()
+
+    const groupNodes: TreeNode[] = []
+    for (const g of GROUPS) {
+      const children: TreeNode[] = []
+      for (const k of g.keys) {
+        const e = entryByKey.get(k)
+        if (e) {
+          placed.add(k)
+          children.push({
+            id: e.key,
+            label: e.title,
+            count: 1,
+            isBranch: false,
+            entry: e,
+          })
+        }
+      }
+      if (children.length > 0) {
+        groupNodes.push({
+          id: g.id,
+          label: g.label,
+          count: children.length,
+          isBranch: true,
+          children,
+        })
+      }
+    }
+
+    const remaining = labEntries.filter((e) => !placed.has(e.key))
+    if (remaining.length > 0) {
+      groupNodes.push({
+        id: 'lab/other',
+        label: 'Other Components',
+        count: remaining.length,
+        isBranch: true,
+        children: remaining.map((e) => ({
+          id: e.key,
+          label: e.title,
+          count: 1,
+          isBranch: false,
+          entry: e,
+        })),
+      })
+    }
+
     nodes.push({
       id: LAB_FAMILY,
       label: fam.title,
       icon: fam.icon,
       count: labEntries.length,
       isBranch: true,
-      children: labEntries.map((e) => ({
-        id: e.key,
-        label: e.title,
-        count: 1,
-        isBranch: false,
-        entry: e,
-      })),
+      children: groupNodes,
     })
   }
 

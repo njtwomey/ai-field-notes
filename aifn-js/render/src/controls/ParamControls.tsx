@@ -1,6 +1,4 @@
-import { Eye, EyeOff } from 'lucide-react'
 import { memo, type ReactNode } from 'react'
-import { Toggle } from '@render/ui/toggle'
 import {
   isActive,
   optionValue,
@@ -17,6 +15,7 @@ import { Choice } from './Choice'
 import { NumberField } from './NumberField'
 import { Slider } from './Slider'
 import { Switch } from './Switch'
+import { RevealToggle } from './visual/RevealToggle'
 
 export type ParamControlsProps = {
   defs: ParamDefs
@@ -176,32 +175,7 @@ export function LeafControl({
   }
 }
 
-/** A revealing toggle: a button that turns on the ingredient being taught. */
-function RevealToggle({
-  label,
-  pressed,
-  onChange,
-}: {
-  label: ReactNode
-  pressed: boolean
-  onChange: (v: boolean) => void
-}) {
-  return (
-    <div className="flex items-end self-end">
-      <Toggle
-        variant="outline"
-        size="sm"
-        aria-label={typeof label === 'string' ? label : undefined}
-        pressed={pressed}
-        onPressedChange={onChange}
-        className="data-pressed:border-primary/60 data-pressed:bg-primary/10 data-pressed:text-foreground"
-      >
-        {pressed ? <Eye /> : <EyeOff />}
-        {label}
-      </Toggle>
-    </div>
-  )
-}
+
 
 /**
  * The control rows of a figure state (DESIGN.md §4): each `row` and each `variants` field is one labelled row, in

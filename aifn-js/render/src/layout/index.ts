@@ -2,7 +2,7 @@
 export { Figure, type FigureProps } from './Figure'
 export { FigurePage } from './FigurePage'
 export { Columns } from './Columns'
-export { ControlRow, Controls } from './Controls'
+export { ControlGroup, ControlRow, Controls } from './Controls'
 export { Dashboard, DashboardCell, DashboardRow } from './Dashboard'
 export { Equation, EquationSteps, type EquationStep } from './Equation'
 export { Tex } from './Tex'
