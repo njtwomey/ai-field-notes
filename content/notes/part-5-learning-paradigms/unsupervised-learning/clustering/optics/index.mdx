@@ -1,0 +1,78 @@
+---
+title: OPTICS
+kind: concept
+summary: 'OPTICS extends DBSCAN to datasets with varying densities by producing an augmented cluster ordering and reachability plot. Instead of fixing a single global radius, valleys in the reachability diagram reveal clusters and hierarchical sub-clusters across all scales.'
+tags: [clustering, unsupervised, density-based, worked-example]
+aliases: [ordering points to identify the clustering structure, reachability distance, core distance, reachability plot]
+requires: [density-based-spatial-clustering]
+related: [hierarchical-clustering, spectral-clustering, k-means]
+references: [ankerst1999, ester1996, campello2013]
+status: draft
+updated: 2026-10-03
+---
+
+import { OpticsExplorer } from './OpticsExplorer'
+
+<Definition>
+**OPTICS** (Ordering Points To Identify the Clustering Structure) computes an augmented linear ordering of points alongside two distances per point: the **core distance** and the **reachability distance** <Cite id="ankerst1999" />.
+
+Given generating distance $\varepsilon$ and minimum points $\text{minPts}$:
+
+1. The **core distance** of $\pvec$ is the smallest distance such that $\pvec$ qualifies as a core point:
+   $$
+   \operatorname{core-dist}_\varepsilon(\pvec) = \begin{cases}
+   \text{undefined} & \text{if } |N_\varepsilon(\pvec)| < \text{minPts} \\
+   d(\pvec, N_\varepsilon^{\text{minPts}}(\pvec)) & \text{otherwise}
+   \end{cases}
+   $$
+   where $N_\varepsilon^{\text{minPts}}(\pvec)$ is the $\text{minPts}$-th nearest neighbour of $\pvec$.
+
+2. The **reachability distance** of point $\pvec$ with respect to core object $\qvec$ is:
+   $$
+   \operatorname{reachability-dist}_\varepsilon(\pvec, \qvec) = \begin{cases}
+   \text{undefined} & \text{if } |N_\varepsilon(\qvec)| < \text{minPts} \\
+   \max\paren{\operatorname{core-dist}_\varepsilon(\qvec), d(\qvec, \pvec)} & \text{otherwise}
+   \end{cases}
+   $$
+</Definition>
+
+## Why DBSCAN needs varying density
+
+In <NoteLink to="density-based-spatial-clustering">DBSCAN</NoteLink>, a single global radius $\varepsilon$ determines whether points are density-connected. When a dataset contains multiple clusters of differing densities—such as a compact dense core surrounded by a diffuse outer ring—any choice of a single $\varepsilon$ fails:
+
+- Setting $\varepsilon$ small enough to separate dense clusters isolates sparse clusters as pure noise.
+- Setting $\varepsilon$ large enough to capture sparse clusters merges the dense clusters into a single blob.
+
+OPTICS avoids committing to a single partition at fit time. Instead, it visits points in order of density connectedness, recording each point's reachability distance from its densest predecessor.
+
+## The reachability plot
+
+When the points are arranged along the horizontal axis in their OPTICS visit order, and their reachability distances are plotted as vertical bars, the resulting graph is the **reachability plot**:
+
+- **Valleys** correspond to clusters: points within a dense region have low reachability distances from one another.
+- **Deep valleys** correspond to dense clusters; **shallow valleys** correspond to sparser clusters.
+- **Valleys within valleys** reveal hierarchical cluster structure: dense cores nested inside broader clusters.
+- **Peaks** (bars with high reachability or undefined values) mark transitions between clusters or isolated noise points.
+
+<OpticsExplorer />
+
+## Extracting DBSCAN clusters from the reachability plot
+
+A primary theorem proved by Ankerst et al. <Cite id="ankerst1999" /> is that the OPTICS ordering contains the DBSCAN clustering for every radius $\varepsilon' \le \varepsilon$:
+
+1. Draw a horizontal threshold line at height $\varepsilon'$.
+2. Scan the reachability plot from left to right.
+3. Every continuous sequence of points whose reachability falls below $\varepsilon'$ constitutes a DBSCAN cluster (starting after a point with $\operatorname{core-dist} \le \varepsilon'$).
+4. Points whose reachability remains above $\varepsilon'$ are classified as noise.
+
+Adjusting $\varepsilon'$ in the interactive figure above corresponds directly to shifting this horizontal slice.
+
+## Comparison: DBSCAN, OPTICS, and HDBSCAN
+
+| Property | DBSCAN <Cite id="ester1996" /> | OPTICS <Cite id="ankerst1999" /> | HDBSCAN <Cite id="campello2013" /> |
+| :--- | :--- | :--- | :--- |
+| **Output** | Hard flat partition | Ordering + reachability distances | Condensed cluster hierarchy + labels |
+| **Varying density** | No (single global $\varepsilon$) | Yes (full multiscale spectrum) | Yes (stability-optimised selection) |
+| **Parameters** | $\varepsilon, \text{minPts}$ | $\text{minPts}$ (and upper bound $\varepsilon$) | $\text{minPts}, \text{minClusterSize}$ |
+| **Hierarchical view** | None | Visual reachability valleys / $\xi$-steep | Condensed tree & persistence |
+| **Computational cost** | $O(n \log n)$ spatial, $O(n^2)$ | $O(n \log n)$ spatial, $O(n^2)$ | $O(n^2)$ or $O(n \log n)$ via dual-tree MST |
