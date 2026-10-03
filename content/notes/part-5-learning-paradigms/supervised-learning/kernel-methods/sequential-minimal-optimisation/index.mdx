@@ -1,0 +1,166 @@
+---
+title: Sequential minimal optimisation (SMO)
+kind: example
+summary: "Sequential minimal optimisation (SMO) solves the support vector machine dual quadratic programme by breaking it into the smallest possible sub-problems: two Lagrange multipliers at each step, solved analytically without a matrix QP solver."
+tags: [classification, svm, smo, dual, quadratic-programming, worked-example]
+aliases: [SMO, sequential minimal optimization, Platt's SMO, SMO algorithm, SVM training by SMO]
+requires: [support-vector-machine, kernel-support-vector-machine]
+related: [solving-support-vector-machines, quadratic-programming, karush-kuhn-tucker-conditions, coordinate-descent]
+references: [platt1998, keerthi2001, cortes1995, scholkopf2002]
+status: draft
+updated: 2026-10-03
+---
+
+import { SmoOptimization } from '../_shared/SmoOptimization'
+
+<Definition>
+Given training data $(\xvec_i, y_i)$ with $y_i \in \{-1, +1\}$ and a kernel function $k(\xvec, \xvec')$, the dual soft-margin support vector machine is the convex quadratic programme:
+
+$$
+\max_{\alphavec} \quad W(\alphavec) = \sum_{i=1}^N \alpha_i - \frac{1}{2} \sum_{i=1}^N \sum_{j=1}^N y_i y_j \alpha_i \alpha_j k(\xvec_i, \xvec_j)
+$$
+
+subject to the box constraints $0 \le \alpha_i \le C$ for all $i = 1, \dots, N$ and the linear equality constraint:
+
+$$
+\sum_{i=1}^N y_i \alpha_i = 0.
+$$
+
+**Sequential Minimal Optimisation (SMO)** <Cite id="platt1998" /> solves this problem by iteratively picking two Lagrange multipliers $(\alpha_i, \alpha_j)$, freezing all other $N - 2$ multipliers, and updating the pair analytically in closed form.
+</Definition>
+
+## Why SMO?
+
+Standard quadratic programming (QP) algorithms such as interior-point or active-set methods scale between $O(N^2)$ and $O(N^3)$ per iteration, requiring an explicit $N \times N$ kernel matrix in memory. For thousands or millions of points, this becomes prohibitively expensive.
+
+SMO avoids matrix operations altogether:
+1. **Zero matrix storage**: Kernel matrix elements $k(\xvec_i, \xvec_j)$ are computed on demand.
+2. **Analytical sub-problems**: Each step updates two variables without numerical optimization.
+3. **Sparse solutions**: Most multipliers remain at $0$ throughout training; only support vectors with $\alpha_i > 0$ ever need tracking.
+
+<SmoOptimization />
+
+## The Two-Variable Sub-Problem
+
+Why must SMO update **two** multipliers rather than one?
+
+Suppose we attempted coordinate ascent by varying a single multiplier $\alpha_1$ while holding $\alpha_2, \dots, \alpha_N$ fixed. The equality constraint forces:
+
+$$
+y_1 \alpha_1 = -\sum_{i=2}^N y_i \alpha_i \implies \alpha_1 = -y_1 \sum_{i=2}^N y_i \alpha_i.
+$$
+
+Since $y_1 \in \{-1, +1\}$, $\alpha_1$ is completely fixed. A single multiplier has zero degrees of freedom. Two multipliers $(\alpha_1, \alpha_2)$ is the smallest non-trivial sub-problem.
+
+### Analytical update along the constraint line
+
+Fix all $\alpha_k$ for $k > 2$. The equality constraint reduces to:
+
+$$
+y_1 \alpha_1 + y_2 \alpha_2 = \zeta \equiv -\sum_{k=3}^N y_k \alpha_k = y_1 \alpha_1^{\text{old}} + y_2 \alpha_2^{\text{old}}.
+$$
+
+Multiplying by $y_1$ (since $y_1^2 = 1$):
+
+$$
+\alpha_1 = \alpha_1^{\text{old}} + y_1 y_2 (\alpha_2^{\text{old}} - \alpha_2).
+$$
+
+Substituting this into the dual objective $W(\alpha_1, \alpha_2)$ turns it into a one-dimensional quadratic function of $\alpha_2$ alone:
+
+$$
+W(\alpha_2) = -\frac{1}{2} \eta \alpha_2^2 + \beta \alpha_2 + \text{const},
+$$
+
+where $\eta$ is the second derivative (curvature) along the constraint line:
+
+$$
+\eta = 2 k(\xvec_1, \xvec_2) - k(\xvec_1, \xvec_1) - k(\xvec_2, \xvec_2).
+$$
+
+By Mercer's theorem, $\eta \le 0$. When $\eta < 0$ (the usual strictly convex case), setting the derivative $\frac{\mathrm{d}W}{\mathrm{d}\alpha_2} = 0$ gives the unclipped optimum:
+
+$$
+\alpha_2^{\text{new, unclipped}} = \alpha_2^{\text{old}} + \frac{y_2 (E_1 - E_2)}{\eta},
+$$
+
+where $E_i = f(\xvec_i) - y_i$ is the classification error of the current model on training point $\xvec_i$, with decision function:
+
+$$
+f(\xvec) = \sum_{k=1}^N y_k \alpha_k k(\xvec_k, \xvec) + b.
+$$
+
+### Box constraint clipping
+
+Both $\alpha_1$ and $\alpha_2$ must remain within $[0, C]$. The line $y_1 \alpha_1 + y_2 \alpha_2 = \zeta$ intersects the box $[0, C] \times [0, C]$ in a line segment $[L, H]$:
+
+- If $y_1 \ne y_2$ ($\alpha_1 - \alpha_2 = \text{const}$):
+  $$
+  L = \max(0, \alpha_2^{\text{old}} - \alpha_1^{\text{old}}), \quad H = \min(C, C + \alpha_2^{\text{old}} - \alpha_1^{\text{old}}).
+  $$
+- If $y_1 = y_2$ ($\alpha_1 + \alpha_2 = \text{const}$):
+  $$
+  L = \max(0, \alpha_1^{\text{old}} + \alpha_2^{\text{old}} - C), \quad H = \min(C, \alpha_1^{\text{old}} + \alpha_2^{\text{old}}).
+  $$
+
+The new multiplier $\alpha_2^{\text{new}}$ is simply the unclipped value projected into $[L, H]$:
+
+$$
+\alpha_2^{\text{new}} = \begin{cases}
+H & \text{if } \alpha_2^{\text{new, unclipped}} > H, \\
+\alpha_2^{\text{new, unclipped}} & \text{if } L \le \alpha_2^{\text{new, unclipped}} \le H, \\
+L & \text{if } \alpha_2^{\text{new, unclipped}} < L.
+\end{cases}
+$$
+
+The companion multiplier $\alpha_1$ follows immediately from the equality constraint:
+
+$$
+\alpha_1^{\text{new}} = \alpha_1^{\text{old}} + y_1 y_2 (\alpha_2^{\text{old}} - \alpha_2^{\text{new}}).
+$$
+
+## Updating the Threshold $b$
+
+To evaluate $f(\xvec)$ and $E_i$ at subsequent steps, we update the bias $b$. If $\alpha_1^{\text{new}}$ is non-bound ($0 < \alpha_1^{\text{new}} < C$), the Karush–Kuhn–Tucker (KKT) conditions require that point 1 lies exactly on its margin, $y_1 f(\xvec_1) = 1$, which uniquely fixes:
+
+$$
+b_1 = b^{\text{old}} - E_1 - y_1 (\alpha_1^{\text{new}} - \alpha_1^{\text{old}}) k(\xvec_1, \xvec_1) - y_2 (\alpha_2^{\text{new}} - \alpha_2^{\text{old}}) k(\xvec_1, \xvec_2).
+$$
+
+Similarly, if $\alpha_2^{\text{new}} \in (0, C)$:
+
+$$
+b_2 = b^{\text{old}} - E_2 - y_1 (\alpha_1^{\text{new}} - \alpha_1^{\text{old}}) k(\xvec_1, \xvec_2) - y_2 (\alpha_2^{\text{new}} - \alpha_2^{\text{old}}) k(\xvec_2, \xvec_2).
+$$
+
+When both multipliers are non-bound, $b_1 = b_2$. When both are clamped at the bounds $[0, C]$, any value between $b_1$ and $b_2$ satisfies the KKT conditions, and the algorithm adopts the midpoint $\frac{b_1 + b_2}{2}$.
+
+## Working Pair Selection and KKT Gap
+
+To ensure fast convergence, SMO uses two heuristics to choose the working pair $(\alpha_i, \alpha_j)$:
+
+1. **Outer loop (First multiplier $\alpha_i$)**: Scans non-bound examples ($0 < \alpha_i < C$) for points that violate the KKT conditions beyond a numerical tolerance $\epsilon$ (typically $10^{-3}$). If all non-bound examples satisfy the KKT conditions, it sweeps through the entire training set.
+2. **Inner loop (Second multiplier $\alpha_j$)**: Chooses $\alpha_j$ to maximize the step size:
+   $$
+   \max_j |E_i - E_j|.
+   $$
+   If point $i$ has a positive error $E_i$, choosing a point $j$ with the most negative error $E_j$ guarantees a substantial change in $\alpha_2$.
+
+### Keerthi's optimality criterion
+
+Keerthi et al. <Cite id="keerthi2001" /> unified the KKT violation condition into a single scalar gap using the sets:
+
+$$
+I_{\text{up}} = \{i : \alpha_i < C \text{ if } y_i = +1 \text{ or } \alpha_i > 0 \text{ if } y_i = -1\},
+$$
+$$
+I_{\text{low}} = \{i : \alpha_i > 0 \text{ if } y_i = +1 \text{ or } \alpha_i < C \text{ if } y_i = -1\}.
+$$
+
+Defining the directional gradients $F_i = -y_i \nabla W(\alphavec)_i = y_i f(\xvec_i) - 1$, the optimality gap is:
+
+$$
+\Delta = \max_{i \in I_{\text{up}}} (-F_i) - \min_{j \in I_{\text{low}}} (-F_j) = m(\alphavec) - M(\alphavec).
+$$
+
+When $\Delta \le \epsilon$, no pair of multipliers can make further progress within tolerance, and the algorithm terminates. In the live figure above, the lower plot visualizes this monotonic decrease in $\Delta$ over several hundred steps.

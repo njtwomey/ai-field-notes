@@ -1,105 +1,166 @@
-import { ChevronLeft, ChevronRight } from 'lucide-react'
-import { useEffect, useId, useState, type ReactNode } from 'react'
+import { useId, type ReactNode } from 'react'
 import { Button } from '@render/ui/button'
 import { Label } from '@render/ui/label'
-import { Slider } from '@render/ui/slider'
 import { Switch } from '@render/ui/switch'
 import { ToggleGroup, ToggleGroupItem } from '@render/ui/toggle-group'
-import { useDebouncedCallback } from './use-debounced-callback'
 import type { Param } from './param'
-import { formatNumber } from '@render/viz/format'
+import { type NumberOptions } from '@render/state/number'
+import { Slider as ModernSlider } from '@render/controls/numeric/Slider'
+import {
+  NumberField,
+  NumberSelector,
+  NumericSelector,
+  NumericControl,
+  ParamNumberField,
+} from '@render/controls/numeric'
+
+export {
+  NumberField,
+  NumberSelector,
+  NumericSelector,
+  NumericControl,
+  ParamNumberField,
+}
 
 type SliderOptions = {
   label: ReactNode
   format?: (v: number) => string
   debounceMs?: number
   withArrows?: boolean
+  slider?: boolean
+  variant?: 'slider' | 'field' | 'auto'
+  logTransform?: boolean | 'value-is-log' | 'value-is-real'
+  headerValue?: string | ((v: number) => string)
+  spacing?: NumberOptions['spacing']
+  increment?: NumberOptions['increment']
+  points_per_decade?: number
+  points?: number
+  scale?: NumberOptions['scale']
+  type?: NumberOptions['type']
+  suggestions?: readonly number[]
+  className?: string
+  disabled?: boolean
 }
 
-type ParamSliderProps = SliderOptions &
-  (
-    | { param: Param; value?: never; onChange?: never; min?: never; max?: never; step?: never }
-    | { param?: never; value: number; onChange: (value: number) => void; min: number; max: number; step?: number }
-  )
+type ParamSliderProps = SliderOptions & {
+  param?: Param
+  value?: number
+  onChange?: (value: number) => void
+  min?: number
+  max?: number
+  step?: number
+}
+
+const SLIDER_KEYWORDS =
+  /\b(time|t\s*\(s\)|frame|playback|scrub|progress|phase|angle|direction|degrees|radians|rotation|orientation|azimuth|threshold|cutoff|probability|fraction|ratio|proportion|prevalence|leakage|split ratio|quantile|percentile|coverage|confidence level|correlation|rho|blend|mix|interpolation)\b/i
+
+function shouldUseSlider(props: ParamSliderProps): boolean {
+  if (props.slider === true || props.variant === 'slider') return true
+  if (props.slider === false || props.variant === 'field') return false
+  if (typeof props.label === 'string') {
+    return SLIDER_KEYWORDS.test(props.label)
+  }
+  return false
+}
 
 export function ParamSlider(props: ParamSliderProps) {
-  const { label, format = formatNumber, debounceMs = 60, withArrows = false } = props
-  const value = props.param ? props.param.value : props.value
-  const onChange = props.param ? props.param.set : props.onChange
-  const min = props.param ? props.param.min : props.min
-  const max = props.param ? props.param.max : props.max
-  const step = props.param ? props.param.step : (props.step ?? 0.01)
-  const id = useId()
-  const [dragging, setDragging] = useState<number | null>(null)
-  const debounced = useDebouncedCallback(onChange, debounceMs)
-  const shown = dragging ?? value
+  const useSlider = shouldUseSlider(props)
 
-  useEffect(() => {
-    if (dragging === null) debounced.cancel()
-  }, [value, dragging, debounced])
-
-  const toNumber = (v: number | readonly number[]) => (Array.isArray(v) ? v[0] : (v as number))
-  const stepFrom = (v: number, direction: 1 | -1) => {
-    const places = (String(step).split('.')[1] ?? '').length
-    const next = min + Math.round((v + direction * step - min) / step) * step
-    return Number(Math.min(max, Math.max(min, next)).toFixed(places))
+  if (useSlider) {
+    if (props.param) {
+      return (
+        <ModernSlider
+          label={props.label}
+          param={props.param}
+          format={props.format}
+          steppable={props.withArrows ?? true}
+          disabled={props.disabled}
+          className={props.className}
+        />
+      )
+    }
+    return (
+      <ModernSlider
+        label={props.label}
+        value={props.value!}
+        onChange={props.onChange!}
+        min={props.min ?? 0}
+        max={props.max ?? 100}
+        step={props.step}
+        format={props.format}
+        steppable={props.withArrows ?? true}
+        disabled={props.disabled}
+        className={props.className}
+      />
+    )
   }
 
-  const slider = (
-    <Slider
-      id={id}
-      value={shown}
-      min={min}
-      max={max}
-      step={step}
-      onValueChange={(v) => {
-        const n = toNumber(v)
-        if (debounceMs <= 0) return onChange(n)
-        setDragging(n)
-        debounced(n)
-      }}
-      onValueCommitted={(v) => {
-        debounced.cancel()
-        setDragging(null)
-        if (toNumber(v) !== value) onChange(toNumber(v))
-      }}
+  // Otherwise render NumberField (free-form numeric selector)
+  let logTransform = props.logTransform
+  let points_per_decade = props.points_per_decade
+  if (logTransform === undefined && props.format) {
+    try {
+      const fnStr = props.format.toString()
+      if (fnStr.includes('10 **') || fnStr.includes('10**')) {
+        logTransform = 'value-is-log'
+        if (points_per_decade === undefined) points_per_decade = 2
+      }
+    } catch {
+      // ignore
+    }
+  }
+
+  let type = props.type
+  if (!type && typeof props.label === 'string') {
+    if (
+      /\b(seed|draws|steps|iterations|epochs|sample|samples|count|points|terms|layers|depth|clusters|components|neighbours|degree|order|horizon|folds|trees|sweeps|chains|paths|trials|rounds|batches|subsequence)\b/i.test(
+        props.label,
+      )
+    ) {
+      type = 'int'
+    }
+  }
+
+  if (props.param) {
+    return (
+      <NumberField
+        label={props.label}
+        param={props.param}
+        format={props.format}
+        type={type}
+        spacing={props.spacing}
+        increment={props.increment}
+        points_per_decade={points_per_decade}
+        points={props.points}
+        logTransform={logTransform}
+        headerValue={props.headerValue}
+        suggestions={props.suggestions}
+        disabled={props.disabled}
+        className={props.className}
+      />
+    )
+  }
+
+  return (
+    <NumberField
+      label={props.label}
+      value={props.value}
+      onChange={props.onChange}
+      min={props.min}
+      max={props.max}
+      step={props.step}
+      format={props.format}
+      type={type}
+      spacing={props.spacing}
+      increment={props.increment}
+      points_per_decade={points_per_decade}
+      points={props.points}
+      logTransform={logTransform}
+      headerValue={props.headerValue}
+      suggestions={props.suggestions}
+      disabled={props.disabled}
+      className={props.className}
     />
-  )
-
-  return (
-    <div className="flex flex-col gap-2">
-      <div className="flex items-baseline justify-between">
-        <Label htmlFor={id} className="text-xs font-normal text-muted-foreground">
-          {label}
-        </Label>
-        <span className="font-mono text-xs tabular-nums">{format(shown)}</span>
-      </div>
-      {withArrows ? (
-        <div className="flex items-center gap-1.5">
-          <StepButton direction={-1} disabled={value <= min} onClick={() => onChange(stepFrom(value, -1))} />
-          <div className="min-w-0 flex-1">{slider}</div>
-          <StepButton direction={1} disabled={value >= max} onClick={() => onChange(stepFrom(value, 1))} />
-        </div>
-      ) : (
-        slider
-      )}
-    </div>
-  )
-}
-
-function StepButton({ direction, disabled, onClick }: { direction: 1 | -1; disabled: boolean; onClick: () => void }) {
-  const Icon = direction < 0 ? ChevronLeft : ChevronRight
-  return (
-    <Button
-      type="button"
-      variant="ghost"
-      size="icon-xs"
-      disabled={disabled}
-      onClick={onClick}
-      aria-label={direction < 0 ? 'Previous' : 'Next'}
-    >
-      <Icon />
-    </Button>
   )
 }
 

@@ -3,6 +3,7 @@ import {
   Interactive,
   ParamButton,
   ParamChoice,
+  ParamNumberField,
   ParamSlider,
   ParamSwitch,
   Readout,
@@ -54,7 +55,7 @@ export function GpRegression() {
   const logEll = useParam(0, { min: -1.2, max: 1, step: 0.02 })
   const sf = useParam(1, { min: 0.2, max: 2, step: 0.05 })
   const sn = useParam(0.1, { min: 0.01, max: 1, step: 0.01 })
-  const count = useParam(3, { min: 1, max: MAX_SAMPLES, step: 1 })
+  const count = useParam(30, { min: 1, max: MAX_SAMPLES, step: 1 })
   const [showSamples, setShowSamples] = useState(true)
   const ell = 10 ** logEll.value
   const data = useMemo(() => points.slice(0, n.value), [points, n.value])
@@ -123,12 +124,18 @@ export function GpRegression() {
       controls={
         <>
           <ParamChoice label="kernel" value={name} onChange={setName} options={KERNEL_OPTIONS} />
-          <ParamSlider label="training points N" param={n} format={(v) => String(v)} />
-          <ParamSlider label="length-scale ℓ" param={logEll} format={(v) => formatNumber(10 ** v)} />
+          <ParamNumberField label="training points N" param={n} type="int" min={1} max={30} step={1} />
+          <ParamNumberField
+            label="length-scale ℓ"
+            param={logEll}
+            logTransform="value-is-log"
+            step={0.5}
+            points_per_decade={2}
+          />
           <ParamSlider label="signal sd σ_f" param={sf} />
           <ParamSlider label="noise sd σ_n" param={sn} />
           <ParamSwitch label="posterior samples" checked={showSamples} onChange={setShowSamples} />
-          <ParamSlider label="draws" param={count} withArrows format={(v) => String(v)} />
+          <ParamNumberField label="draws" param={count} type="int" min={0} max={20} step={1} />
           <ParamButton onClick={() => setPoints(INITIAL)}>Reset points</ParamButton>
         </>
       }

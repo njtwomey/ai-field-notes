@@ -3,9 +3,9 @@ import {
   Heatmap,
   Interactive,
   ParamChoice,
+  ParamNumberField,
   ParamSlider,
   Readout,
-  formatNumber,
   useParam,
   type HeatmapOverlay,
 } from 'aifn-render'
@@ -93,10 +93,22 @@ export function KernelSvm() {
       controls={
         <>
           <ParamChoice label="data" value={shape} onChange={setShape} options={SHAPES} />
-          <ParamSlider label="kernel length-scale ℓ" param={logEll} format={(v) => formatNumber(10 ** v)} />
-          <ParamSlider label="C" param={logC} format={(v) => formatNumber(10 ** v)} />
+          <ParamNumberField
+            label="kernel length-scale ℓ"
+            param={logEll}
+            logTransform="value-is-log"
+            step={0.5}
+            points_per_decade={2}
+          />
+          <ParamNumberField
+            label="C"
+            param={logC}
+            logTransform="value-is-log"
+            step={0.5}
+            points_per_decade={2}
+          />
           <ParamSlider label="noise" param={noise} />
-          <ParamSlider label="data seed" param={seed} format={(v) => String(v)} />
+          <ParamNumberField label="data seed" param={seed} type="int" min={1} max={100} step={1} />
         </>
       }
       readout={

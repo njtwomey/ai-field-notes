@@ -2,6 +2,8 @@ import { Check, Copy, Link2, RotateCcw } from 'lucide-react'
 import {
   Component,
   createContext,
+  Fragment,
+  isValidElement,
   useCallback,
   useContext,
   useLayoutEffect,
@@ -17,6 +19,7 @@ import { cn } from '@render/lib/utils'
 import { FrameContext, Readout, ReadoutGroup, Readouts, type FrameContextValue, type HoverInfo } from '@render/viz'
 import { FigureControls } from '@render/controls/ParamControls'
 import type { FigureState } from '@render/state/useFigureState'
+import { ControlGroup } from './Controls'
 import { FrameSlotsContext, type FrameSlots } from './slots-context'
 import { useFigureId } from './figure-ids'
 import { FIGURE_SIZES, FigureScope, type FigureSize } from './figure-size'
@@ -203,7 +206,7 @@ export function Figure({
       {(state || controls) && (
         <div className="flex flex-col gap-2 w-full">
           {state && <FigureControls state={state} />}
-          {controls}
+          {controls && wrapInControlGroup(controls)}
         </div>
       )}
       <div
@@ -237,6 +240,36 @@ export function Figure({
       </div>
       {caption && <p className="max-w-4xl text-sm text-muted-foreground leading-relaxed">{caption}</p>}
     </section>
+  )
+}
+
+function isControlGroup(element: unknown): boolean {
+  if (!isValidElement(element)) return false
+  if (element.type === ControlGroup) return true
+  const typeName = typeof element.type === 'function' ? element.type.name : ''
+  if (typeName === 'ControlGroup') return true
+  return false
+}
+
+function hasAnyControlGroup(node: ReactNode): boolean {
+  if (!node) return false
+  if (Array.isArray(node)) return node.some(hasAnyControlGroup)
+  if (isValidElement(node)) {
+    if (isControlGroup(node)) return true
+    if (node.type === Fragment && (node.props as { children?: ReactNode })?.children) {
+      return hasAnyControlGroup((node.props as { children?: ReactNode }).children)
+    }
+  }
+  return false
+}
+
+function wrapInControlGroup(controls: ReactNode): ReactNode {
+  if (!controls) return null
+  if (hasAnyControlGroup(controls)) return controls
+  return (
+    <ControlGroup title="Configuration" collapsible defaultCollapsed={false}>
+      {controls}
+    </ControlGroup>
   )
 }
 

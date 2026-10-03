@@ -1,4 +1,4 @@
-import { ArrowRight, BookOpen, Search, Waypoints } from 'lucide-react'
+import { ArrowRight, Search, Waypoints } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router'
 import { TopicIcon } from '@/components/layout/category-icon'

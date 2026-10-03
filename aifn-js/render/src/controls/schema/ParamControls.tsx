@@ -10,7 +10,7 @@ import {
   type VariantsDef,
 } from '@render/state/schema'
 import type { FigureState } from '@render/state/useFigureState'
-import { ControlGroup, Controls } from '@render/layout/Controls'
+import { ControlGroup } from '@render/layout/Controls'
 import { Choice } from '../selection/Choice'
 import { NumberField } from '../numeric/NumberField'
 import { Slider } from '../numeric/Slider'
@@ -221,23 +221,17 @@ function FigureControlsImpl({ state }: { state: FigureState<ParamDefs> }) {
   const set = (path: string, value: ParamValue) => state.set(path, value)
   return (
     <div className="flex flex-col gap-2.5 w-full">
-      {rows.map((r) =>
-        r.plain && !r.label ? (
-          <Controls key={r.key}>
-            <ParamControls defs={r.defs} values={values} set={set} />
-          </Controls>
-        ) : (
-          <ControlGroup
-            key={r.key}
-            title={r.label}
-            description={r.description}
-            collapsible={r.collapsible ?? true}
-            defaultCollapsed={r.defaultCollapsed ?? false}
-          >
-            <ParamControls defs={r.defs} values={values} set={set} />
-          </ControlGroup>
-        ),
-      )}
+      {rows.map((r) => (
+        <ControlGroup
+          key={r.key}
+          title={r.label ?? 'Configuration'}
+          description={r.description}
+          collapsible={r.collapsible ?? true}
+          defaultCollapsed={r.defaultCollapsed ?? false}
+        >
+          <ParamControls defs={r.defs} values={values} set={set} />
+        </ControlGroup>
+      ))}
     </div>
   )
 }

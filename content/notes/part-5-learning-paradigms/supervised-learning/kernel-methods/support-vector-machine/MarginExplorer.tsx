@@ -1,5 +1,5 @@
 import { useMemo } from 'react'
-import { Interactive, ParamSlider, Readout, XYChart, formatNumber, useParam, type XYSeries } from 'aifn-render'
+import { Interactive, ParamNumberField, ParamSlider, Readout, XYChart, formatNumber, useParam, type XYSeries } from 'aifn-render'
 import { rng } from '@/lib/math'
 import { linearKernel, trainSvm, type Point } from '../_shared/svm'
 
@@ -91,9 +91,15 @@ export function MarginExplorer() {
       caption="Two classes of 25 points each. The solid line is the decision boundary w·x + b = 0 and the dashed lines are the margins w·x + b = ±1. Diamonds mark the support vectors, the points with αᵢ > 0: those on the margin, inside it, or misclassified. Only they determine the boundary. A small C tolerates margin violations cheaply, so the margin is wide and many points are support vectors. A large C penalises violations heavily, the margin narrows, and with separable data the solution approaches the hard-margin SVM."
       controls={
         <>
-          <ParamSlider label="C (penalty on slack)" param={logC} format={(v) => formatNumber(10 ** v)} />
+          <ParamNumberField
+            label="C (penalty on slack)"
+            param={logC}
+            logTransform="value-is-log"
+            step={0.5}
+            points_per_decade={2}
+          />
           <ParamSlider label="class separation" param={gap} />
-          <ParamSlider label="data seed" param={seed} format={(v) => String(v)} />
+          <ParamNumberField label="data seed" param={seed} type="int" min={1} max={100} step={1} />
         </>
       }
       readout={

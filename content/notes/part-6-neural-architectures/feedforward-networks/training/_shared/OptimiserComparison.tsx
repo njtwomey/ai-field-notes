@@ -2,12 +2,11 @@ import { useMemo, useState } from 'react'
 import {
   Heatmap,
   Interactive,
+  NumberSelector,
   ParamChoice,
-  ParamSlider,
   ParamSwitch,
   Readout,
   XYChart,
-  formatNumber,
   type Handle,
   type HeatmapOverlay,
   type XYSeries,
@@ -115,25 +114,37 @@ export function OptimiserComparison({ initial = ['sgd', 'nesterov', 'adam'], ini
             onChange={chooseSurface}
             options={SURFACES.map((s) => ({ value: s.id, label: s.label }))}
           />
-          <ParamSlider
+          <NumberSelector
             label="SGD-family step size η"
             value={logEta}
             onChange={setLogEta}
             min={-3}
             max={-0.5}
-            step={0.01}
-            format={(v) => formatNumber(10 ** v)}
+            step={0.1}
+            logTransform="value-is-log"
+            points_per_decade={2}
           />
-          <ParamSlider
+          <NumberSelector
             label="adaptive step size α"
             value={logAlpha}
             onChange={setLogAlpha}
             min={-2.5}
             max={0}
-            step={0.01}
-            format={(v) => formatNumber(10 ** v)}
+            step={0.1}
+            logTransform="value-is-log"
+            points_per_decade={2}
           />
-          <ParamSlider label="steps" value={steps} onChange={setSteps} min={20} max={400} step={10} />
+          <NumberSelector
+            label="steps"
+            value={steps}
+            onChange={setSteps}
+            type="int"
+            min={20}
+            max={400}
+            increment="lin"
+            points={10}
+            step={10}
+          />
           <div className="col-span-full flex flex-wrap gap-x-5 gap-y-2">
             {OPTIMISERS.map((o, i) => (
               <ParamSwitch
