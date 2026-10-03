@@ -40,6 +40,7 @@ export { kNearestNeighbours } from './neighbours'
 export { mixtureDensityNetwork } from './mixture-density'
 export { oneVersusRest } from './reductions'
 export { standardScaler } from './preprocessing'
+export { isotonicRegressor, type IsotonicParams, type IsotonicRegressor } from './isotonic'
 
 /** Every registered estimator factory of `aifn-applied/learning`, keyed by `info.key` (kind `model`). */
 export const learningModelRegistry = entries(
