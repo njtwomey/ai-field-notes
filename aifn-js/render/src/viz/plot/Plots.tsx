@@ -21,7 +21,7 @@ export type PlotsProps = {
   height?: number
   /** A share of that height, e.g. 0.6 for a grid that sits beside other content in the same Figure. */
   scale?: number
-  /** The grid's axis toolbar: one button per axis (each shared axis once) and one auto-scale (default true). */
+  /** The grid's axis toolbar: one button per axis (each shared axis once) and one auto-scale (default false). */
   toolbar?: boolean
   /**
    * With an equal-units panel in a single column: `frame` (default) splits the rest of the frame among the other rows
@@ -74,7 +74,7 @@ export function Plots({
   hoverGroup,
   height: ownHeight,
   scale = 1,
-  toolbar = true,
+  toolbar = false,
   ratiosOf = 'frame',
   tight = false,
   children,

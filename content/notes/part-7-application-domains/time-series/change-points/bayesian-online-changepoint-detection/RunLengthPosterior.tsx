@@ -23,13 +23,27 @@ import { stream } from 'aifn/foundation/random'
 import { toFlat } from 'aifn/foundation/tensor'
 import { extend, seek, trace, type Trace } from 'aifn/foundation/trace'
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Player } from '@lab/controls'
-import { Dashboard, DashboardCell, DashboardRow, Figure } from '@lab/layout'
-import { slider, useFigureState, variants } from '@lab/state'
-import { Bars, Curve, Handle, Plot, Plots, Raster, Readout, useAxis } from '@lab/viz'
-import { formatValue } from '@lab/views'
+import {
+  Bars,
+  Curve,
+  Dashboard,
+  DashboardCell,
+  DashboardRow,
+  Figure,
+  Handle,
+  Player,
+  Plot,
+  Plots,
+  Raster,
+  Readout,
+  formatNumber,
+  slider,
+  useAxis,
+  useFigureState,
+  variants,
+} from 'aifn-render'
 
-const f3 = (v: number) => formatValue(Number(v.toPrecision(3)))
+const f3 = (v: number) => (Number.isFinite(v) ? formatNumber(Number(v.toPrecision(3))) : '—')
 
 // ── Row 1: the data ─────────────────────────────────────────────────────────────────────────────────────────────────
 
@@ -153,7 +167,7 @@ type ModelKey = 'normal' | 'normalGamma' | 'poisson' | 'ar'
 /** The run-length heatmap's floor: probabilities below 10⁻⁶ share the lightest colour. */
 const FLOOR = -6
 
-export function BocpdShowcase() {
+export function RunLengthPosterior() {
   const state = useFigureState({ data: DATA, model: MODELS })
   const data = state.data
   const model = state.model
@@ -412,3 +426,5 @@ export function BocpdShowcase() {
     </Figure>
   )
 }
+
+export { RunLengthPosterior as BocpdShowcase }

@@ -1,129 +1,273 @@
-import { ArrowRight, ChevronDown, Search, Waypoints } from 'lucide-react'
-import { useState } from 'react'
+import { ArrowRight, BookOpen, Search, Waypoints } from 'lucide-react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router'
 import { TopicIcon } from '@/components/layout/category-icon'
 import { openSearch } from '@/components/layout/SearchCommand'
 import { Kbd } from '@/components/ui/kbd'
-import { browseUrl, groups, notes, notesInCategory, references, taxonomy, type CategoryNode } from '@/lib/content'
+import { browseUrl, notes, notesInCategory, references, taxonomy } from '@/lib/content'
 import { cn } from '@/lib/utils'
 
-/** Landing page: search, then every topic with its subtopics, in the groups of content/groups.yaml. */
+/**
+ * Editorial Home Page:
+ * Re-invented for the canonical 8-Part Master Taxonomy.
+ * Compact, formal, and functional:
+ * - Dynamic scroll-spy floating index that highlights and auto-centers the active section
+ * - Clear distinctions between the 8 Parts
+ * - Compact subject rows with inline child-topic pills and note counts
+ */
 export function HomePage() {
+  const [activePart, setActivePart] = useState<string>(taxonomy[0]?.path ?? '')
+  const navContainerRef = useRef<HTMLDivElement>(null)
+  const buttonRefs = useRef<Record<string, HTMLButtonElement | null>>({})
+  const isClickScrolling = useRef(false)
+
+  const totalSubjects = useMemo(
+    () => taxonomy.reduce((sum, p) => sum + p.children.length, 0),
+    [],
+  )
+
+  // Scroll-spy: track which section is currently in view
+  useEffect(() => {
+    const handleScroll = () => {
+      if (isClickScrolling.current) return
+      const scrollY = window.scrollY
+      const offset = 240
+
+      for (let i = taxonomy.length - 1; i >= 0; i--) {
+        const el = document.getElementById(taxonomy[i].path)
+        if (el) {
+          const top = el.getBoundingClientRect().top + window.scrollY
+          if (scrollY >= top - offset) {
+            setActivePart(taxonomy[i].path)
+            return
+          }
+        }
+      }
+      if (taxonomy[0]) setActivePart(taxonomy[0].path)
+    }
+
+    window.addEventListener('scroll', handleScroll, { passive: true })
+    handleScroll()
+    return () => window.removeEventListener('scroll', handleScroll)
+  }, [])
+
+  // Auto-center the active part button in the floating nav
+  useEffect(() => {
+    if (!activePart) return
+    const btn = buttonRefs.current[activePart]
+    const container = navContainerRef.current
+    if (btn && container) {
+      const btnLeft = btn.offsetLeft
+      const btnWidth = btn.offsetWidth
+      const containerWidth = container.offsetWidth
+      const targetScroll = btnLeft - (containerWidth - btnWidth) / 2
+      container.scrollTo({ left: targetScroll, behavior: 'smooth' })
+    }
+  }, [activePart])
+
+  const scrollToPart = (path: string) => {
+    setActivePart(path)
+    isClickScrolling.current = true
+    const el = document.getElementById(path)
+    if (el) {
+      el.scrollIntoView({ behavior: 'smooth' })
+    }
+    setTimeout(() => {
+      isClickScrolling.current = false
+    }, 800)
+  }
+
   return (
-    <main className="px-4 pt-14 pb-20 lg:px-8">
-      <section className="mx-auto max-w-2xl space-y-6 text-center">
-        <h1 className="font-prose text-5xl font-bold">AI Field Notes</h1>
-        <p className="font-prose text-lg text-muted-foreground">
+    <main className="px-4 pt-12 pb-24 lg:px-8 max-w-6xl mx-auto">
+      {/* Hero Section */}
+      <section className="mx-auto max-w-2xl space-y-5 text-center">
+
+        <h1 className="font-prose text-4xl sm:text-5xl font-bold tracking-tight">
+          AI Field Notes
+        </h1>
+
+        <p className="font-prose text-base sm:text-lg text-muted-foreground leading-relaxed">
           Machine learning notes from my research career, digitised and made interactive.
         </p>
+
         <button
           type="button"
           onClick={openSearch}
-          className="flex h-12 w-full items-center gap-3 rounded-xl border bg-muted/40 px-4 text-left text-muted-foreground transition-colors hover:bg-muted"
+          className="flex h-11 w-full items-center gap-3 rounded-xl border bg-muted/40 px-4 text-left text-muted-foreground transition-all hover:border-foreground/30 hover:bg-muted shadow-xs"
         >
-          <Search className="size-5" aria-hidden />
-          <span className="flex-1">Search concepts, techniques and tests…</span>
+          <Search className="size-4.5" aria-hidden />
+          <span className="flex-1 text-sm">Search concepts, techniques and tests…</span>
           <Kbd>⌘K</Kbd>
         </button>
-        <div className="flex flex-wrap items-center justify-center gap-x-5 gap-y-2 text-sm text-muted-foreground">
+
+        <div className="flex flex-wrap items-center justify-center gap-x-5 gap-y-2 text-xs sm:text-sm text-muted-foreground">
           <span>
-            {notes.length} notes · {taxonomy.length} topics · {Object.keys(references).length} references
+            <strong className="text-foreground font-semibold">{notes.length}</strong> notes ·{' '}
+            <strong className="text-foreground font-semibold">8</strong> parts ·{' '}
+            <strong className="text-foreground font-semibold">{totalSubjects}</strong> subjects ·{' '}
+            <strong className="text-foreground font-semibold">{Object.keys(references).length}</strong> references
           </span>
-          <Link to={browseUrl()} className="inline-flex items-center gap-1 text-foreground hover:underline">
+          <span className="text-muted-foreground/40 hidden sm:inline">|</span>
+          <Link to={browseUrl()} className="inline-flex items-center gap-1 text-foreground hover:underline font-medium">
             Browse all <ArrowRight className="size-3.5" aria-hidden />
           </Link>
           <Link
             to={browseUrl({ view: 'map' })}
-            className="inline-flex items-center gap-1 text-foreground hover:underline"
+            className="inline-flex items-center gap-1 text-foreground hover:underline font-medium"
           >
-            <Waypoints className="size-3.5" aria-hidden /> Open the map
+            <Waypoints className="size-3.5" aria-hidden /> Open map
           </Link>
         </div>
       </section>
 
-      <div className="mt-16 space-y-12">
-        {groups.map((group) => (
-          <section key={group.title} aria-labelledby={groupId(group.title)}>
-            <div className="mb-4 flex items-baseline gap-3">
-              <h2 id={groupId(group.title)} className="font-prose text-xl font-bold">
-                {group.title}
-              </h2>
-              <span className="text-xs text-muted-foreground tabular-nums">
-                {group.topics.reduce((sum, t) => sum + notesInCategory(t).length, 0)} notes
-              </span>
-              <div className="h-px flex-1 self-center bg-border" />
-            </div>
-            <div className="grid items-start gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
-              {group.topics.map((path) => (
-                <TopicTile key={path} topic={taxonomy.find((t) => t.path === path)!} />
-              ))}
-            </div>
-          </section>
-        ))}
-      </div>
-    </main>
-  )
-}
-
-const groupId = (title: string) => `group-${title.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`
-
-/** Subtopics shown before a tile is expanded. Every collapsed tile reserves exactly this many rows, so all match. */
-const TILE_ROWS = 6
-
-function TopicTile({ topic }: { topic: CategoryNode }) {
-  const [open, setOpen] = useState(false)
-  const extra = topic.children.length - TILE_ROWS
-  const shown = open ? topic.children : topic.children.slice(0, TILE_ROWS)
-  // Invisible rows pad short tiles to the same height as full ones.
-  const padding = Math.max(0, TILE_ROWS - shown.length)
-  return (
-    <div className="flex flex-col rounded-xl border p-5">
-      <Link to={browseUrl({ c: topic.path })} className="group mb-3 flex items-center gap-2.5">
-        <span className="flex size-8 items-center justify-center rounded-lg bg-muted">
-          <TopicIcon icon={topic.icon} className="size-4" aria-hidden />
-        </span>
-        <span className="flex-1 font-medium group-hover:underline">{topic.title}</span>
-        <span className="text-xs text-muted-foreground tabular-nums">{notesInCategory(topic.path).length}</span>
-      </Link>
-      <ul className="space-y-1">
-        {shown.map((child) => {
-          const count = notesInCategory(child.path).length
-          return (
-            <li key={child.path}>
-              <Link
-                to={browseUrl({ c: child.path })}
+      {/* Floating Index with Auto-Centering & Scroll-Spy */}
+      <nav
+        ref={navContainerRef}
+        aria-label="Canon volume index"
+        className="sticky top-14 z-20 mt-10 -mx-4 overflow-x-auto px-4 py-2.5 bg-background/85 backdrop-blur-md border-y border-border/60 shadow-xs lg:mx-0 lg:rounded-xl lg:border"
+      >
+        <div className="flex items-center gap-1.5 min-w-max mx-auto justify-center">
+          {taxonomy.map((part) => {
+            const count = notesInCategory(part.path).length
+            const isSelected = activePart === part.path
+            return (
+              <button
+                key={part.path}
+                ref={(el) => {
+                  buttonRefs.current[part.path] = el
+                }}
+                type="button"
+                onClick={() => scrollToPart(part.path)}
                 className={cn(
-                  '-mx-2 flex items-center gap-2 rounded-md px-2 py-1 text-sm hover:bg-muted',
-                  count === 0 && 'text-muted-foreground',
+                  'inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs transition-all select-none',
+                  isSelected
+                    ? 'bg-foreground text-background font-semibold shadow-xs'
+                    : 'text-muted-foreground hover:bg-muted hover:text-foreground',
                 )}
+                title={`${part.roman ?? ''}: ${part.title} (${count} notes)`}
               >
-                <span className="flex-1 truncate">{child.title}</span>
-                <span className="text-xs text-muted-foreground tabular-nums">{count}</span>
-              </Link>
-            </li>
+                <span className={cn('font-mono text-[10px]', isSelected ? 'opacity-90' : 'opacity-70')}>
+                  {part.roman ?? ''}
+                </span>
+                <span className="truncate max-w-[130px] sm:max-w-none">{part.title}</span>
+                <span className={cn('text-[10px] font-mono tabular-nums', isSelected ? 'opacity-80' : 'opacity-50')}>
+                  {count}
+                </span>
+              </button>
+            )
+          })}
+        </div>
+      </nav>
+
+      {/* Part Sections: Refined, Functional, Compact Chapter Rows */}
+      <div className="mt-8 space-y-10">
+        {taxonomy.map((part, idx) => {
+          const partNotesCount = notesInCategory(part.path).length
+
+          return (
+            <section
+              key={part.path}
+              id={part.path}
+              aria-labelledby={`heading-${part.path}`}
+              className="scroll-mt-28 pt-8 pb-4 border-t border-border/70 first:border-t-0 first:pt-2"
+            >
+              {/* Part Header: Clear Distinction */}
+              <div className="mb-3 flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
+                <div className="flex flex-wrap items-baseline gap-x-2.5 gap-y-1">
+                  <span className="font-mono text-xs font-bold uppercase tracking-wider text-primary">
+                    {part.roman ?? `Part ${idx + 1}`}
+                  </span>
+                  <h2
+                    id={`heading-${part.path}`}
+                    className="font-prose text-xl sm:text-2xl font-bold tracking-tight text-foreground"
+                  >
+                    {part.title}
+                  </h2>
+                  <span className="text-xs text-muted-foreground tabular-nums">
+                    ({partNotesCount} {partNotesCount === 1 ? 'note' : 'notes'})
+                  </span>
+                </div>
+
+                <Link
+                  to={browseUrl({ part: part.path })}
+                  className="text-xs text-muted-foreground hover:text-foreground hover:underline inline-flex items-center gap-1"
+                >
+                  Browse {part.roman ? `${part.roman}` : ''} →
+                </Link>
+              </div>
+
+              {part.description && (
+                <p className="mb-3.5 text-xs text-muted-foreground leading-relaxed max-w-3xl">
+                  {part.description}
+                </p>
+              )}
+
+              {/* List of top-level items (Subjects), and inline child-topic pills */}
+              <div className="divide-y divide-border/30 rounded-lg border border-border/50 bg-card/20 px-3.5 py-0.5">
+                {part.children.map((subject) => {
+                  const subjectNotesCount = notesInCategory(subject.path).length
+                  const hasNotes = subjectNotesCount > 0
+
+                  return (
+                    <div
+                      key={subject.path}
+                      className="py-2.5 flex flex-col md:flex-row md:items-baseline gap-2 md:gap-4"
+                    >
+                      {/* Top-level subject item */}
+                      <div className="flex items-center gap-2 md:w-52 shrink-0">
+                        <TopicIcon icon={subject.icon} className="size-3.5 shrink-0 text-muted-foreground" />
+                        <Link
+                          to={browseUrl({ c: subject.path })}
+                          className={cn(
+                            'text-xs font-semibold hover:underline truncate',
+                            hasNotes ? 'text-foreground' : 'text-muted-foreground',
+                          )}
+                          title={subject.title}
+                        >
+                          {subject.title}
+                        </Link>
+                        <span className="text-[10px] font-mono tabular-nums text-muted-foreground/70 ml-auto md:ml-1">
+                          {subjectNotesCount}
+                        </span>
+                      </div>
+
+                      {/* Inline list of child-topics under that level as buttons/pills with note counts at the end */}
+                      <div className="flex flex-wrap items-center gap-1.5 flex-1 min-w-0">
+                        {subject.children.length > 0 ? (
+                          subject.children.map((topic) => {
+                            const count = notesInCategory(topic.path).length
+                            return (
+                              <Link
+                                key={topic.path}
+                                to={browseUrl({ c: topic.path })}
+                                className={cn(
+                                  'inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs transition-colors',
+                                  count > 0
+                                    ? 'bg-muted/70 text-foreground hover:bg-muted hover:text-foreground'
+                                    : 'border border-dashed border-border/60 text-muted-foreground/50 hover:bg-muted/20 hover:text-muted-foreground',
+                                )}
+                              >
+                                <span className="truncate max-w-[180px] sm:max-w-[220px]">{topic.title}</span>
+                                <span className="font-mono text-[10px] tabular-nums text-muted-foreground">
+                                  {count}
+                                </span>
+                              </Link>
+                            )
+                          })
+                        ) : (
+                          <span className="text-[11px] text-muted-foreground/50 italic">
+                            {hasNotes ? `${subjectNotesCount} overview notes` : 'Roadmap area · notes planned'}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            </section>
           )
         })}
-        {Array.from({ length: padding }, (_, k) => (
-          <li key={`pad-${k}`} aria-hidden className="invisible px-2 py-1 text-sm">
-            &nbsp;
-          </li>
-        ))}
-      </ul>
-      {extra > 0 ? (
-        <button
-          type="button"
-          onClick={() => setOpen((o) => !o)}
-          aria-expanded={open}
-          className="-mx-2 mt-2 flex items-center gap-1 rounded-md px-2 py-1 text-xs text-muted-foreground hover:bg-muted hover:text-foreground"
-        >
-          <ChevronDown className={cn('size-3.5 transition-transform', open && 'rotate-180')} aria-hidden />
-          {open ? 'Show fewer' : `Show all ${topic.children.length}`}
-        </button>
-      ) : (
-        <div aria-hidden className="invisible mt-2 px-2 py-1 text-xs">
-          &nbsp;
-        </div>
-      )}
-    </div>
+      </div>
+    </main>
   )
 }

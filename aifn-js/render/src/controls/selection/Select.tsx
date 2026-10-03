@@ -18,7 +18,7 @@ export function Select<T extends string>({ label, value, onChange, options, disa
   const id = useId()
   const items = normalise(options)
   return (
-    <div className={cn('flex w-full max-w-xs min-w-40 flex-col gap-1.5', className)}>
+    <div className={cn('flex w-full max-w-xs min-w-0 flex-col gap-1.5', className)}>
       <ControlLabel id={id}>{label}</ControlLabel>
       <SelectRoot
         value={value}

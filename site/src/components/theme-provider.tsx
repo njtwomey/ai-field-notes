@@ -1,4 +1,5 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react'
+import { ThemeContext as RenderThemeContext } from 'aifn-render'
 
 export type ThemePreference = 'light' | 'dark' | 'system'
 type ThemeContext = {
@@ -21,9 +22,12 @@ function readPreference(): ThemePreference {
 
 export function ThemeProvider({ children }: { children: ReactNode }) {
   const [preference, setPreferenceState] = useState<ThemePreference>(readPreference)
-  const [systemDark, setSystemDark] = useState(() => matchMedia('(prefers-color-scheme: dark)').matches)
+  const [systemDark, setSystemDark] = useState(() =>
+    typeof matchMedia !== 'undefined' ? matchMedia('(prefers-color-scheme: dark)').matches : false,
+  )
 
   useEffect(() => {
+    if (typeof matchMedia === 'undefined') return
     const mq = matchMedia('(prefers-color-scheme: dark)')
     const onChange = () => setSystemDark(mq.matches)
     mq.addEventListener('change', onChange)
@@ -45,12 +49,29 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     }
   }
 
-  return <Context.Provider value={{ preference, resolved, setPreference }}>{children}</Context.Provider>
+  const value = { preference, resolved, setPreference }
+
+  return (
+    <Context.Provider value={value}>
+      <RenderThemeContext.Provider value={value}>{children}</RenderThemeContext.Provider>
+    </Context.Provider>
+  )
 }
 
 // eslint-disable-next-line react/only-export-components
 export function useTheme(): ThemeContext {
-  const ctx = useContext(Context)
-  if (!ctx) throw new Error('useTheme must be used inside <ThemeProvider>')
+  const ctx = useContext(Context) ?? useContext(RenderThemeContext)
+  if (!ctx) {
+    const isDark =
+      typeof document !== 'undefined'
+        ? document.documentElement.classList.contains('dark') ||
+          (typeof window !== 'undefined' && window.matchMedia?.('(prefers-color-scheme: dark)').matches)
+        : false
+    return {
+      preference: 'system',
+      resolved: isDark ? 'dark' : 'light',
+      setPreference: () => {},
+    }
+  }
   return ctx
 }

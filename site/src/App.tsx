@@ -1,5 +1,7 @@
 import { lazy, Suspense } from 'react'
 import { createBrowserRouter, RouterProvider } from 'react-router'
+import { registerMathMacros, RenderMathProvider } from 'aifn-render'
+import { macros } from '@content/macros'
 import { ThemeProvider } from '@/components/theme-provider'
 import { AppShell } from '@/components/layout/AppShell'
 import { TooltipProvider } from '@/components/ui/tooltip'
@@ -12,6 +14,11 @@ import { NotFoundPage } from '@/pages/NotFoundPage'
 import { ReferencesPage } from '@/pages/ReferencesPage'
 import { TagPage, TagsPage } from '@/pages/TagsPage'
 
+import { RouteErrorBoundary } from '@/components/layout/RouteErrorBoundary'
+
+// Register site macros globally for aifn-render components
+registerMathMacros(macros)
+
 // Loads KaTeX's renderer, so it gets its own chunk.
 const NotationPage = lazy(() => import('@/pages/NotationPage'))
 
@@ -19,6 +26,7 @@ const router = createBrowserRouter(
   [
     {
       element: <AppShell />,
+      errorElement: <RouteErrorBoundary />,
       children: [
         { index: true, element: <HomePage /> },
         { path: 'browse', element: <BrowsePage /> },
@@ -49,9 +57,12 @@ const router = createBrowserRouter(
 export default function App() {
   return (
     <ThemeProvider>
-      <TooltipProvider>
-        <RouterProvider router={router} />
-      </TooltipProvider>
+      <RenderMathProvider macros={macros}>
+        <TooltipProvider>
+          <RouterProvider router={router} />
+        </TooltipProvider>
+      </RenderMathProvider>
     </ThemeProvider>
   )
 }
+

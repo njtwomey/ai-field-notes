@@ -182,9 +182,13 @@ export class AxisModel {
     const old = this.extents.get(source)
     if (extent) {
       if (old && old[0] === extent[0] && old[1] === extent[1] && old[2] === extent[2]) return this.takeHold()
+      // If data extent changed (points added or dropped) and this axis is not held, auto-scale by clearing manual zoom
+      if (!this.options.hold) this.view = undefined
       this.extents.set(source, extent)
-    } else if (old) this.extents.delete(source)
-    else return
+    } else if (old) {
+      if (!this.options.hold) this.view = undefined
+      this.extents.delete(source)
+    } else return
     this.takeHold()
     if (!same(before, this.resolve())) this.emit()
   }

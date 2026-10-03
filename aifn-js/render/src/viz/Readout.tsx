@@ -14,14 +14,14 @@ export function Readout({ label, value, color }: { label: ReactNode; value: Reac
 
 /** A wrapping row of readouts. */
 export function Readouts({ children, className }: { children: ReactNode; className?: string }) {
-  return <div className={cn('flex flex-wrap gap-x-5 gap-y-1 text-xs', className)}>{children}</div>
+  return <div className={cn('flex flex-wrap gap-x-4 gap-y-1 text-[11px]', className)}>{children}</div>
 }
 
 /** A labelled group of readouts (a Figure's `readouts` given as a record draws one per entry). */
 export function ReadoutGroup({ label, children }: { label: ReactNode; children: ReactNode }) {
   return (
-    <div className="flex min-w-0 flex-col gap-1">
-      <div className="text-xs font-medium text-muted-foreground">{label}</div>
+    <div className="flex min-w-0 flex-col gap-0.5">
+      <div className="text-[11px] font-medium text-muted-foreground">{label}</div>
       <Readouts>{children}</Readouts>
     </div>
   )

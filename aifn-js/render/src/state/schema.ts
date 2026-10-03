@@ -112,6 +112,9 @@ export type VariantsDef<
   initial?: keyof V & string
   /** The row's label. */
   label?: ReactNode
+  description?: ReactNode
+  collapsible?: boolean
+  defaultCollapsed?: boolean
   /** The label of the case picker (default 'function'). */
   choiceLabel?: ReactNode
   doc?: string
@@ -123,6 +126,9 @@ export type VariantsDef<
 export type RowDef<F extends ParamDefs = ParamDefs> = {
   kind: 'row'
   label?: ReactNode
+  description?: ReactNode
+  collapsible?: boolean
+  defaultCollapsed?: boolean
   fields: F
   doc?: string
   when?: Common['when']
@@ -226,8 +232,18 @@ export function setting(initial = false, extra?: LabelOr<SwitchDef>): SwitchDef 
 }
 
 /** A labelled row of fields, nested under its key. */
-export function row<const F extends ParamDefs>(label: ReactNode, fields: F): RowDef<F> {
-  return { kind: 'row', label, fields }
+export function row<const F extends ParamDefs>(
+  label: ReactNode,
+  fields: F,
+  extra: {
+    description?: ReactNode
+    collapsible?: boolean
+    defaultCollapsed?: boolean
+    doc?: string
+    when?: Common['when']
+  } = {},
+): RowDef<F> {
+  return { kind: 'row', label, fields, ...extra }
 }
 
 /** The condition "field `key` has the value `equals`", for a field's `when`. */
@@ -246,6 +262,9 @@ export function variants<const C extends Record<string, CaseInput>, const S exte
   cases: C,
   extra: {
     label?: ReactNode
+    description?: ReactNode
+    collapsible?: boolean
+    defaultCollapsed?: boolean
     choiceLabel?: ReactNode
     initial?: keyof C & string
     shared?: S

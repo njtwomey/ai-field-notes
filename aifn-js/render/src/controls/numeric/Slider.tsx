@@ -75,15 +75,20 @@ export function Slider(props: SliderProps) {
     />
   )
   return (
-    <div className={cn('flex w-full max-w-sm min-w-48 flex-col gap-1.5', className)}>
+    <div className={cn('flex w-full max-w-sm min-w-0 flex-col gap-1.5', className)}>
       <div className="flex items-center justify-between gap-2">
-        <ControlLabel htmlFor={id}>{label}</ControlLabel>
+        <ControlLabel
+          htmlFor={id}
+          className="min-w-0 flex-1 truncate"
+          title={typeof label === 'string' ? label : undefined}
+        >
+          {label}
+        </ControlLabel>
         <input
           aria-label={typeof label === 'string' ? `${label} value` : 'value'}
           disabled={disabled}
-          // At least w-20, wider for a long formatted value (e.g. a Player's "t = 12 · update").
-          style={{ width: `max(5rem, ${String(field.value).length + 2}ch)` }}
-          className="h-7 rounded-md border border-input bg-transparent px-1.5 text-right font-mono text-xs tabular-nums outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/50 disabled:opacity-50 dark:bg-input/30"
+          style={{ width: `max(4rem, ${String(field.value).length + 2}ch)` }}
+          className="h-7 shrink-0 rounded-md border border-input bg-transparent px-1.5 text-right font-mono text-xs tabular-nums outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/50 disabled:opacity-50 dark:bg-input/30"
           {...field}
         />
       </div>

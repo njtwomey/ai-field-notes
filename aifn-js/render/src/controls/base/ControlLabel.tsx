@@ -6,17 +6,20 @@ export function ControlLabel({
   children,
   htmlFor,
   id,
+  title,
   className,
 }: {
   children: ReactNode
   htmlFor?: string
   id?: string
+  title?: string
   className?: string
 }) {
   return (
     <label
       id={id}
       htmlFor={htmlFor}
+      title={title}
       className={cn('text-xs leading-none text-muted-foreground select-none', className)}
     >
       {children}

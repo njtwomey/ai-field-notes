@@ -17,7 +17,6 @@ import { cn } from '@render/lib/utils'
 import { FrameContext, Readout, ReadoutGroup, Readouts, type FrameContextValue, type HoverInfo } from '@render/viz'
 import { FigureControls } from '@render/controls/ParamControls'
 import type { FigureState } from '@render/state/useFigureState'
-import { Controls } from './Controls'
 import { FrameSlotsContext, type FrameSlots } from './slots-context'
 import { useFigureId } from './figure-ids'
 import { FIGURE_SIZES, FigureScope, type FigureSize } from './figure-size'
@@ -184,28 +183,28 @@ export function Figure({
       data-figure-nested={nested ? '' : undefined}
       // Every part keeps its natural height (shrink-0): the chart area never overlaps the readouts or the caption.
       className={cn(
-        'flex shrink-0 scroll-mt-16 flex-col gap-4 rounded-xl border bg-card p-4 text-card-foreground ring-ring/60 transition-shadow duration-500 *:shrink-0 data-highlight:ring-2',
+        'flex shrink-0 scroll-mt-16 flex-col gap-2.5 rounded-xl border bg-card p-3.5 text-card-foreground ring-ring/60 transition-shadow duration-500 *:shrink-0 data-highlight:ring-2',
         className,
       )}
     >
-      <header className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2">
+      <header className="flex flex-wrap items-start justify-between gap-x-4 gap-y-1">
         <div className="min-w-0 space-y-1">
           <AnchorTitle id={figureId}>{title}</AnchorTitle>
-          {purpose && <p className="max-w-prose text-sm text-foreground/90">{purpose}</p>}
-          {description && <p className="max-w-prose text-xs text-muted-foreground">{description}</p>}
-          <div ref={setAbout} className="max-w-prose text-xs text-muted-foreground empty:hidden" />
+          {purpose && <p className="max-w-4xl text-sm text-foreground/90 leading-relaxed">{purpose}</p>}
+          {description && <p className="max-w-4xl text-xs sm:text-sm text-muted-foreground leading-relaxed">{description}</p>}
+          <div ref={setAbout} className="max-w-4xl text-xs sm:text-sm text-muted-foreground leading-relaxed empty:hidden" />
         </div>
-        <div className="flex items-center gap-1.5">
+        <div className="flex items-center gap-1.5 shrink-0">
           {state && <ResetButton disabled={state.isDefault} onClick={state.reset} />}
           <SizePicker size={size} onChange={choose} />
           <CopyData data={exportData} />
         </div>
       </header>
       {(state || controls) && (
-        <Controls>
+        <div className="flex flex-col gap-2 w-full">
           {state && <FigureControls state={state} />}
           {controls}
-        </Controls>
+        </div>
       )}
       <div
         ref={setViewControls}
@@ -236,7 +235,7 @@ export function Figure({
         <div ref={setViewReadouts} className="flex flex-wrap gap-x-5 gap-y-1 text-xs empty:hidden" />
         {hoverReadout && <HoverReadout hover={hover} />}
       </div>
-      {caption && <p className="max-w-prose text-xs text-muted-foreground">{caption}</p>}
+      {caption && <p className="max-w-4xl text-sm text-muted-foreground leading-relaxed">{caption}</p>}
     </section>
   )
 }
@@ -470,22 +469,28 @@ class FigureBoundary extends Component<{ children: ReactNode }, { error: Error |
  * to it and highlights it) and copies the full URL.
  */
 function AnchorTitle({ id, children }: { id: string; children: ReactNode }) {
+  const handleClick = (e: React.MouseEvent) => {
+    if (!e.metaKey && !e.ctrlKey && !e.shiftKey) {
+      if (window.location.hash !== `#${id}`) {
+        window.history.pushState(null, '', `#${id}`)
+        window.dispatchEvent(new HashChangeEvent('hashchange'))
+      }
+      const el = document.getElementById(id)
+      el?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+    }
+  }
+
   return (
-    <h2 className="group/anchor flex items-center gap-1.5 text-sm leading-snug font-medium">
+    <a
+      href={`#${id}`}
+      onClick={handleClick}
+      className="group/anchor !mt-0 !mb-0 flex cursor-pointer items-center gap-1.5 font-sans text-sm font-semibold leading-tight text-foreground no-underline transition-colors hover:text-primary select-none"
+      title="Link to this figure"
+    >
       <span>{children}</span>
-      <a
-        href={`#${id}`}
-        aria-label="Link to this figure (copies the URL)"
-        title="Link to this figure (copies the URL)"
-        className="rounded text-muted-foreground opacity-0 transition-opacity group-hover/anchor:opacity-100 hover:text-foreground focus-visible:opacity-100"
-        onClick={(e) => {
-          e.preventDefault()
-          location.hash = id
-          navigator.clipboard?.writeText(location.href).catch(() => {})
-        }}
-      >
+      <span className="rounded text-muted-foreground opacity-0 transition-opacity group-hover/anchor:opacity-100 hover:text-foreground">
         <Link2 className="size-3.5" />
-      </a>
-    </h2>
+      </span>
+    </a>
   )
 }

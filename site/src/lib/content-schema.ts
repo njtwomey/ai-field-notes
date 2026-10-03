@@ -137,6 +137,8 @@ export type CategoryInput = {
   /** The category's index note: `true` for the note whose slug is the category id, or another slug in the category. */
   index?: boolean | string
   children?: CategoryInput[]
+  num?: number
+  roman?: string
 }
 export const categorySchema: z.ZodType<CategoryInput> = z.lazy(() =>
   z
@@ -147,6 +149,8 @@ export const categorySchema: z.ZodType<CategoryInput> = z.lazy(() =>
       icon: z.enum(categoryIcons).optional(),
       index: z.union([z.boolean(), slug]).optional(),
       children: z.array(categorySchema).optional(),
+      num: z.number().optional(),
+      roman: z.string().optional(),
     })
     .strict(),
 )
@@ -177,10 +181,18 @@ export type CategoryNode = {
   /** Slug of the note that introduces the category and is listed first; see `index` in taxonomy.yaml. */
   index?: string
   children: CategoryNode[]
+  num?: number
+  roman?: string
 }
 
-/** A home-page group of top-level topics (content/groups.yaml). */
-export type TopicGroup = { title: string; topics: string[] }
+/** A home-page and browse-page group of top-level topics (content/groups.yaml). */
+export type TopicGroup = {
+  id?: string
+  num?: number
+  roman?: string
+  title: string
+  topics: string[]
+}
 
 export type NoteKind = (typeof noteKinds)[number]
 export type Reference = z.infer<typeof referenceSchema>

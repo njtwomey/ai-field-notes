@@ -34,7 +34,7 @@ export type PlotProps = {
   legend?: boolean
   /** Plots sharing a hover group share the hovered x. Inside `Plots` the grid's group is used. */
   hoverGroup?: string
-  /** The axis toolbar of a Plot on its own (default true). In a `Plots` grid the grid draws one for all axes. */
+  /** The axis toolbar of a Plot on its own (default false). In a `Plots` grid the grid draws one for all axes. */
   toolbar?: boolean
   /** No axes, ticks or grid lines (a grid of people, where coordinates mean nothing). */
   bare?: boolean
@@ -171,7 +171,7 @@ export function Plot({
   title,
   legend: legendProp,
   hoverGroup,
-  toolbar = true,
+  toolbar = false,
   bare = false,
   height: ownHeight,
   scale = 1,

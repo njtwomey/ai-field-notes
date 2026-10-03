@@ -1,16 +1,34 @@
-import type { ComponentType, ReactNode } from 'react'
+import { useState, type ComponentType, type ReactNode } from 'react'
+import { ChevronDown, ChevronRight } from 'lucide-react'
 import { cn } from '@render/lib/utils'
 
 /**
- * The layout for a set of controls: a responsive grid whose columns are at least 14rem, so labels and tracks line up
- * and sliders never collapse. Figures use it for their controls slot; use it anywhere else controls sit together,
- * rather than an ad-hoc flex row. Children fill their cell.
+ * The layout for a set of controls: a responsive multi-column grid whose items align neatly,
+ * keeping controls space-efficient and avoiding vertical stretching.
  */
-export function Controls({ children, className }: { children: ReactNode; className?: string }) {
+export function Controls({
+  children,
+  className,
+  columns = 'default',
+}: {
+  children: ReactNode
+  className?: string
+  columns?: 'default' | 'compact' | 'wide' | 'single'
+}) {
+  const gridCols =
+    columns === 'single'
+      ? 'grid-cols-1'
+      : columns === 'compact'
+        ? 'grid-cols-[repeat(auto-fill,minmax(11rem,1fr))]'
+        : columns === 'wide'
+          ? 'grid-cols-[repeat(auto-fill,minmax(15rem,1fr))]'
+          : 'grid-cols-[repeat(auto-fill,minmax(13rem,1fr))]'
+
   return (
     <div
       className={cn(
-        'grid grid-cols-[repeat(auto-fill,minmax(14rem,1fr))] items-end gap-x-6 gap-y-4 *:w-full *:max-w-none',
+        'grid items-end gap-x-4 gap-y-2.5 w-full *:w-full *:max-w-none',
+        gridCols,
         className,
       )}
     >
@@ -20,8 +38,7 @@ export function Controls({ children, className }: { children: ReactNode; classNa
 }
 
 /**
- * One full-width row of related controls inside a `Controls` grid (a Figure's controls slot), e.g. a selector followed
- * by its own parameters. Rows stack, so each group reads on its own line instead of wrapping into its neighbours.
+ * One full-width row of related controls inside a `Controls` grid.
  */
 export function ControlRow({
   label,
@@ -33,57 +50,121 @@ export function ControlRow({
   className?: string
 }) {
   return (
-    <div className={cn('col-span-full flex flex-col gap-2', className)}>
+    <div className={cn('col-span-full flex flex-col gap-1.5 w-full', className)}>
       {label && <div className="text-xs font-medium text-muted-foreground">{label}</div>}
       <Controls>{children}</Controls>
     </div>
   )
 }
 
+export type ControlGroupProps = {
+  title?: ReactNode
+  description?: ReactNode
+  badge?: ReactNode
+  icon?: ComponentType<{ className?: string }>
+  collapsible?: boolean
+  defaultCollapsed?: boolean
+  collapsed?: boolean
+  onToggleCollapsed?: (collapsed: boolean) => void
+  children: ReactNode
+  className?: string
+  contentClassName?: string
+}
+
 /**
- * A structured section or card of related controls (e.g. Visual, Color, Parameters, Playback),
- * with an optional title, subtitle/description, badge, and icon.
+ * A structured group of related controls (e.g. Data, Model, Playback, Configuration),
+ * with a small group title, subtle border, compact multi-column layout, and optional collapsing.
  */
 export function ControlGroup({
   title,
   description,
   badge,
   icon: Icon,
+  collapsible = true,
+  defaultCollapsed = false,
+  collapsed: controlledCollapsed,
+  onToggleCollapsed,
   children,
   className,
-}: {
-  title?: ReactNode
-  description?: ReactNode
-  badge?: ReactNode
-  icon?: ComponentType<{ className?: string }>
-  children: ReactNode
-  className?: string
-}) {
+  contentClassName,
+}: ControlGroupProps) {
+  const [internalCollapsed, setInternalCollapsed] = useState(defaultCollapsed)
+  const isControlled = controlledCollapsed !== undefined
+  const isCollapsed = isControlled ? controlledCollapsed : internalCollapsed
+
+  const toggle = () => {
+    if (!collapsible) return
+    const next = !isCollapsed
+    if (!isControlled) setInternalCollapsed(next)
+    onToggleCollapsed?.(next)
+  }
+
+  const hasHeader = Boolean(title || description || badge || Icon || collapsible)
+
   return (
     <div
       className={cn(
-        'col-span-full flex flex-col gap-3 rounded-lg border bg-card/50 p-3.5 text-card-foreground shadow-xs',
+        'col-span-full flex flex-col rounded-lg border border-border/60 bg-muted/20 text-card-foreground shadow-2xs transition-colors',
+        isCollapsed ? 'px-3 py-1.5' : 'px-3 pt-1.5 pb-2.5',
         className,
       )}
     >
-      {(title || description || badge || Icon) && (
-        <div className="flex items-center justify-between gap-2 border-b border-border/60 pb-2">
-          <div className="flex items-center gap-2 min-w-0">
-            {Icon && <Icon className="size-4 shrink-0 text-muted-foreground" />}
-            <div className="min-w-0">
-              {title && <h3 className="text-xs font-semibold tracking-wide uppercase text-foreground/80">{title}</h3>}
-              {description && <p className="text-[11px] text-muted-foreground">{description}</p>}
+      {hasHeader && (
+        <div
+          role={collapsible ? 'button' : undefined}
+          tabIndex={collapsible ? 0 : undefined}
+          onClick={collapsible ? toggle : undefined}
+          onKeyDown={
+            collapsible
+              ? (e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault()
+                    toggle()
+                  }
+                }
+              : undefined
+          }
+          className={cn(
+            'flex items-center justify-between gap-2 select-none',
+            collapsible && 'cursor-pointer group hover:text-foreground',
+            !isCollapsed && 'border-b border-border/30 pb-1 mb-2',
+          )}
+        >
+          <div className="flex items-center gap-1.5 min-w-0">
+            {collapsible && (
+              <span className="text-muted-foreground transition-transform group-hover:text-foreground">
+                {isCollapsed ? <ChevronRight className="size-3" /> : <ChevronDown className="size-3" />}
+              </span>
+            )}
+            {Icon && <Icon className="size-3 shrink-0 text-muted-foreground" />}
+            <div className="min-w-0 flex items-baseline gap-2">
+              {title && (
+                <span className="font-sans text-[11px] font-semibold tracking-wider uppercase text-muted-foreground/90 group-hover:text-foreground">
+                  {title}
+                </span>
+              )}
+              {description && <p className="font-sans text-[11px] text-muted-foreground/75 truncate">{description}</p>}
             </div>
           </div>
-          {badge && (
-            <span className="font-mono text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground shrink-0">
-              {badge}
-            </span>
-          )}
+          <div className="flex items-center gap-2 shrink-0">
+            {badge && (
+              <span className="font-mono text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground font-medium">
+                {badge}
+              </span>
+            )}
+            {collapsible && isCollapsed && (
+              <span className="font-sans text-[10px] text-muted-foreground/70 italic">collapsed</span>
+            )}
+          </div>
         </div>
       )}
-      <Controls>{children}</Controls>
+      {!isCollapsed && (
+        <div className={cn('w-full', contentClassName)}>
+          <Controls>{children}</Controls>
+        </div>
+      )}
     </div>
   )
 }
+
 

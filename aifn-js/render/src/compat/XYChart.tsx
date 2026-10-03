@@ -31,6 +31,22 @@ export type XYSeries = Omit<Series, 'group' | 'type'> & {
 
 export type Segment = { from: [number, number]; to: [number, number] }
 
+export type XYRect = {
+  name?: string
+  x0: number
+  x1: number
+  y0: number
+  y1: number
+  color?: string
+  fill?: string
+  stroke?: string
+  strokeWidth?: number
+  dashed?: boolean
+  label?: string
+  labelSub?: string
+  labelColor?: string
+}
+
 export type XYChartProps = {
   series: XYSeries[]
   xLabel?: string
@@ -40,6 +56,7 @@ export type XYChartProps = {
   yLog?: boolean
   segments?: Segment[]
   vectors?: Vector[]
+  rects?: XYRect[]
   equalAspect?: boolean
   integerX?: boolean
   bare?: boolean
@@ -58,6 +75,7 @@ export function XYChart({
   yLog,
   segments,
   vectors,
+  rects,
   equalAspect,
   onPlotClick,
   handles,
@@ -139,6 +157,66 @@ export function XYChart({
         z: 1,
       })
     }
+    if (rects?.length) {
+      out.unshift({
+        name: '__rects',
+        type: 'custom',
+        data: rects.map((r, i) => [r.x0, r.x1, r.y0, r.y1, i]),
+        silent: true,
+        clip: true,
+        renderItem: (
+          _params: unknown,
+          api: {
+            value: (dim: number) => number
+            coord: (pt: [number, number]) => [number, number]
+          },
+        ) => {
+          const idx = api.value(4)
+          const r = rects[idx]
+          if (!r) return
+          const p0 = api.coord([r.x0, r.y0])
+          const p1 = api.coord([r.x1, r.y1])
+          const rx = Math.min(p0[0], p1[0])
+          const ry = Math.min(p0[1], p1[1])
+          const rw = Math.abs(p1[0] - p0[0])
+          const rh = Math.abs(p1[1] - p0[1])
+
+          const groupChildren: Record<string, unknown>[] = [
+            {
+              type: 'rect',
+              shape: { x: rx, y: ry, width: rw, height: rh },
+              style: {
+                fill: r.fill ?? 'transparent',
+                stroke: r.stroke ?? r.color ?? '#3b82f6',
+                lineWidth: r.strokeWidth ?? 1.5,
+                lineDash: r.dashed ? [4, 4] : undefined,
+              },
+            },
+          ]
+
+          if (r.label && rw > 28 && rh > 28) {
+            groupChildren.push({
+              type: 'text',
+              style: {
+                text: r.labelSub ? `${r.label}\n${r.labelSub}` : r.label,
+                x: rx + rw / 2,
+                y: ry + rh / 2,
+                fill: r.labelColor ?? (mode === 'dark' ? '#f3f4f6' : '#1f2937'),
+                font: 'bold 11px sans-serif',
+                align: 'center',
+                verticalAlign: 'middle',
+              },
+            })
+          }
+
+          return {
+            type: 'group',
+            children: groupChildren,
+          }
+        },
+        z: 2,
+      })
+    }
     if (vectors?.length) {
       out.push({
         name: '__vectors',
@@ -193,7 +271,7 @@ export function XYChart({
         : { type: 'value', name: yLabel, min: y0, max: y1, scale: true, nameGap: 36, show: !bare },
       series: out,
     }
-  }, [series, segments, vectors, xLabel, yLabel, x0, x1, y0, y1, yLog, equalAspect, bare, integerX, mode])
+  }, [series, segments, vectors, rects, xLabel, yLabel, x0, x1, y0, y1, yLog, equalAspect, bare, integerX, mode])
 
   const wrapper = useRef<HTMLDivElement>(null)
   const [width, setWidth] = useState(0)

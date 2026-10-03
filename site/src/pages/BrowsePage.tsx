@@ -1,6 +1,6 @@
 import { ChevronDown, FolderTree, List, Search, Waypoints } from 'lucide-react'
 import { useMemo, useState } from 'react'
-import { Navigate, useParams, useSearchParams } from 'react-router'
+import { Link, Navigate, useParams, useSearchParams } from 'react-router'
 import { CategoryTrail } from '@/components/note/TaxonomyTrail'
 import { ConceptMap } from '@/components/browse/ConceptMap'
 import { filterNotes, inCategory } from '@/components/browse/filters'
@@ -20,7 +20,9 @@ import {
   indexOfCategory,
   kindLabels,
   notes,
+  taxonomy,
   type BrowseParams,
+  type CategoryNode,
   type NoteKind,
 } from '@/lib/content'
 import { noteKinds } from '@/lib/content-schema'
@@ -35,6 +37,7 @@ export function BrowsePage() {
   const [search, setSearch] = useSearchParams()
   const params: BrowseParams = {
     c: search.get('c') ?? undefined,
+    part: search.get('part') ?? undefined,
     kind: (search.get('kind') as NoteKind | null) ?? undefined,
     q: search.get('q') ?? undefined,
     view: search.get('view') === 'map' ? 'map' : 'list',
@@ -48,14 +51,14 @@ export function BrowsePage() {
     setSearch(next, { replace: true })
   }
 
-  const matches = useMemo(() => filterNotes(params), [params.c, params.kind, params.q]) // eslint-disable-line react-hooks/exhaustive-deps
+  const matches = useMemo(() => filterNotes(params), [params.c, params.part, params.kind, params.q]) // eslint-disable-line react-hooks/exhaustive-deps
   const kindCounts = useMemo(() => {
-    const scoped = filterNotes({ c: params.c, q: params.q })
+    const scoped = filterNotes({ c: params.c, part: params.part, q: params.q })
     return Object.fromEntries(noteKinds.map((k) => [k, scoped.filter((n) => n.kind === k).length]))
-  }, [params.c, params.q])
+  }, [params.c, params.part, params.q])
 
   // Group cards under their category so a topic's structure is visible without reading.
-  const groups = useMemo(() => {
+  const categoryGroups = useMemo(() => {
     // An index note leads the group of the category it introduces, which may be an ancestor of its own folder.
     const inView = (path: string) => !params.c || path === params.c || path.startsWith(`${params.c}/`)
     const byCategory = new Map<string, typeof matches>()
@@ -69,12 +72,48 @@ export function BrowsePage() {
       .map(([path, list]) => [path, indexFirst(list, path)] as const)
   }, [matches, params.c])
 
-  const filtered = !!(params.c || params.kind || params.q)
-  const scopeTitle = params.c ? category(params.c)?.title : 'All notes'
+  const selectedPart = params.part
+    ? taxonomy.find(
+        (p) =>
+          p.path === params.part ||
+          String(p.num) === params.part ||
+          `part-${p.num}` === params.part ||
+          p.title.toLowerCase() === params.part?.toLowerCase(),
+      )
+    : undefined
+
+  // When browsing all notes or an entire part, group the categories under the 8 Parts
+  const partSections = useMemo(() => {
+    if (params.c) return null
+    const relevantParts = selectedPart ? [selectedPart] : taxonomy
+    const sections: {
+      part: CategoryNode
+      categories: typeof categoryGroups
+      totalNotes: number
+    }[] = []
+
+    for (const p of relevantParts) {
+      const catsInPart = categoryGroups.filter(([catPath]) =>
+        catPath === p.path || catPath.startsWith(`${p.path}/`),
+      )
+      if (catsInPart.length > 0) {
+        const totalNotes = catsInPart.reduce((sum, [, list]) => sum + list.length, 0)
+        sections.push({ part: p, categories: catsInPart, totalNotes })
+      }
+    }
+    return sections
+  }, [categoryGroups, params.c, selectedPart])
+
+  const filtered = !!(params.c || params.part || params.kind || params.q)
+  const scopeTitle = params.c
+    ? (category(params.c)?.title ?? params.c)
+    : selectedPart
+      ? `${selectedPart.roman ? `${selectedPart.roman}: ` : ''}${selectedPart.title}`
+      : 'All notes'
 
   return (
     <main className="px-4 py-8 lg:px-8">
-      <div className="grid gap-8 lg:grid-cols-[240px_minmax(0,1fr)]">
+      <div className="grid gap-8 lg:grid-cols-[250px_minmax(0,1fr)]">
         <aside className="hidden lg:block">
           <div className="sticky top-20 max-h-[calc(100svh-6rem)] overflow-y-auto overscroll-contain pr-2 pb-6">
             <TopicRail params={params} />
@@ -90,7 +129,18 @@ export function BrowsePage() {
           )}
           <div className="flex flex-wrap items-end justify-between gap-4">
             <div>
-              <h1 className="font-prose text-3xl font-bold">{scopeTitle}</h1>
+              <div className="flex items-center gap-2">
+                <h1 className="font-prose text-3xl font-bold">{scopeTitle}</h1>
+                {params.part && (
+                  <button
+                    type="button"
+                    onClick={() => set({ part: undefined })}
+                    className="text-xs text-muted-foreground hover:text-foreground underline"
+                  >
+                    (show all parts)
+                  </button>
+                )}
+              </div>
               <p className="mt-1 text-sm text-muted-foreground">
                 {matches.length} of {notes.length} notes
               </p>
@@ -148,11 +198,51 @@ export function BrowsePage() {
             <p className="rounded-lg border border-dashed p-8 text-center text-sm text-muted-foreground">
               No notes match. Clear a filter or try another word.
             </p>
+          ) : partSections ? (
+            <div className="space-y-12">
+              {partSections.map(({ part, categories, totalNotes }) => (
+                <section key={part.title} className="space-y-6">
+                  <div className="flex items-baseline justify-between border-b border-border/70 pb-2">
+                    <div className="flex items-baseline gap-2.5">
+                      <h2 className="font-prose text-xl font-bold tracking-tight">
+                        {part.roman ? `${part.roman}: ` : ''}
+                        {part.title}
+                      </h2>
+                      <span className="text-xs text-muted-foreground tabular-nums">
+                        {totalNotes} {totalNotes === 1 ? 'note' : 'notes'}
+                      </span>
+                    </div>
+                    {!params.part && (
+                      <Link
+                        to={browseUrl({ ...params, part: part.path, c: undefined })}
+                        className="text-xs text-muted-foreground hover:text-foreground hover:underline"
+                      >
+                        Focus this part →
+                      </Link>
+                    )}
+                  </div>
+                  <div className="space-y-8">
+                    {categories.map(([path, list]) => (
+                      <section key={path} className="space-y-3">
+                        <h3 className="text-xs font-semibold tracking-wider text-muted-foreground uppercase">
+                          {groupTitle(path, part.path)}
+                        </h3>
+                        <div className="grid gap-3 sm:grid-cols-2 2xl:grid-cols-3">
+                          {list.map((n) => (
+                            <NoteCard key={n.slug} note={n} lead={category(path)?.index === n.slug} />
+                          ))}
+                        </div>
+                      </section>
+                    ))}
+                  </div>
+                </section>
+              ))}
+            </div>
           ) : (
             <div className="space-y-8">
-              {groups.map(([path, list]) => (
+              {categoryGroups.map(([path, list]) => (
                 <section key={path} className="space-y-3">
-                  <h2 className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
+                  <h2 className="text-xs font-semibold tracking-wider text-muted-foreground uppercase">
                     {groupTitle(path, params.c)}
                   </h2>
                   <div className="grid gap-3 sm:grid-cols-2 2xl:grid-cols-3">
@@ -205,8 +295,26 @@ function KindChip({
 /** Below `lg`: the selected topic as one button, opening the topic rail in a sheet that closes on a choice. */
 function TopicPicker({ params }: { params: BrowseParams }) {
   const [open, setOpen] = useState(false)
-  const title = params.c ? (category(params.c)?.title ?? params.c) : 'All topics'
-  const count = params.c ? notes.filter((n) => inCategory(n, params.c!)).length : notes.length
+  const selectedPart = params.part
+    ? taxonomy.find(
+        (p) =>
+          p.path === params.part ||
+          String(p.num) === params.part ||
+          `part-${p.num}` === params.part ||
+          p.title.toLowerCase() === params.part?.toLowerCase(),
+      )
+    : undefined
+  const title = params.c
+    ? (category(params.c)?.title ?? params.c)
+    : selectedPart
+      ? `${selectedPart.roman ? `${selectedPart.roman}: ` : ''}${selectedPart.title}`
+      : 'All notes'
+  const count = notes.filter((n) => {
+    if (params.c && !inCategory(n, params.c)) return false
+    if (selectedPart && !inCategory(n, selectedPart.path)) return false
+    return true
+  }).length
+
   return (
     <Sheet open={open} onOpenChange={setOpen}>
       <SheetTrigger render={<Button variant="outline" className="w-full justify-between" />}>

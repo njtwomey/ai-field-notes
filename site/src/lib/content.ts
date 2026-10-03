@@ -1,9 +1,9 @@
 import type { ComponentType } from 'react'
 import { contentErrors, glossary, groups, notes, references, stats, taxonomy } from 'virtual:content'
-import type { CategoryNode, GlossaryEntry, GlossaryKind, NoteKind, NoteMeta, Reference } from '@/lib/content-schema'
+import type { CategoryNode, GlossaryEntry, GlossaryKind, NoteKind, NoteMeta, Reference, TopicGroup } from '@/lib/content-schema'
 
 export { contentErrors, glossary, groups, notes, references, stats, taxonomy }
-export type { CategoryNode, GlossaryEntry, GlossaryKind, NoteKind, NoteMeta, Reference }
+export type { CategoryNode, GlossaryEntry, GlossaryKind, NoteKind, NoteMeta, Reference, TopicGroup }
 
 export const notesBySlug: ReadonlyMap<string, NoteMeta> = new Map(notes.map((n) => [n.slug, n]))
 
@@ -147,7 +147,25 @@ export function topicOf(note: NoteMeta): CategoryNode {
   return taxonomy.find((t) => note.category === t.path || note.category.startsWith(`${t.path}/`))!
 }
 
-export type BrowseParams = { c?: string; kind?: NoteKind; q?: string; view?: 'list' | 'map' }
+/** Find a TopicGroup by its id (e.g. part-1-mathematical-foundations) or index (1..8) or title. */
+export function groupById(idOrNum: string | number): TopicGroup | undefined {
+  const str = String(idOrNum).toLowerCase()
+  return groups.find(
+    (g, idx) =>
+      g.id === str ||
+      String(g.num) === str ||
+      `part-${idx + 1}` === str ||
+      g.title.toLowerCase() === str,
+  )
+}
+
+/** Check if a note belongs to a part/group. */
+export function inGroup(note: NoteMeta, group: TopicGroup): boolean {
+  const t = topicOf(note)
+  return t ? group.topics.includes(t.path) : false
+}
+
+export type BrowseParams = { c?: string; part?: string; kind?: NoteKind; q?: string; view?: 'list' | 'map' }
 
 /** Link to the browse page with filters. Empty values are dropped. */
 export function browseUrl(params: BrowseParams = {}): string {

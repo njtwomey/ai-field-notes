@@ -134,6 +134,8 @@ function flattenCategories(nodes: CategoryInput[], prefix = ''): CategoryNode[] 
       icon: n.icon,
       index: n.index === true ? n.id : n.index || undefined,
       children: flattenCategories(n.children ?? [], p),
+      num: n.num,
+      roman: n.roman,
     }
   })
 }
@@ -218,7 +220,17 @@ export function buildIndex(
   // Home-page groups: every top-level topic in exactly one group, listed in taxonomy order.
   const groupsFile = path.join(contentDir, 'groups.yaml')
   const groupsParsed = z
-    .array(z.object({ title: z.string().min(1), topics: z.array(slug).min(1) }).strict())
+    .array(
+      z
+        .object({
+          id: z.string().optional(),
+          num: z.number().optional(),
+          roman: z.string().optional(),
+          title: z.string().min(1),
+          topics: z.array(slug).min(1),
+        })
+        .strict(),
+    )
     .safeParse(YAML.parse(fs.readFileSync(groupsFile, 'utf8')))
   if (!groupsParsed.success) throw new Error(formatIssues('content/groups.yaml', groupsParsed.error))
   const groups: TopicGroup[] = groupsParsed.data

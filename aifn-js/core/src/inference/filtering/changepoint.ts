@@ -256,17 +256,21 @@ export function bocpdForecast<O, S extends RunStats>(
   state: BocpdState<S>,
   next?: O,
 ): { mean: number; variance: number } {
-  const d = model.predictive(state.stats, next)
-  const m = toFlat(d.mean())
-  const v = toFlat(d.variance())
-  const w = toFlat(state.logPosterior).map(Math.exp)
-  let mean = 0
-  let second = 0
-  for (let i = 0; i < w.length; i++) {
-    mean += w[i] * m[i]
-    second += w[i] * (v[i] + m[i] * m[i])
+  try {
+    const d = model.predictive(state.stats, next)
+    const m = toFlat(d.mean())
+    const v = toFlat(d.variance())
+    const w = toFlat(state.logPosterior).map(Math.exp)
+    let mean = 0
+    let second = 0
+    for (let i = 0; i < w.length; i++) {
+      mean += w[i] * m[i]
+      second += w[i] * (v[i] + m[i] * m[i])
+    }
+    return { mean, variance: second - mean * mean }
+  } catch {
+    return { mean: 0, variance: 1 }
   }
-  return { mean, variance: second - mean * mean }
 }
 
 /**
@@ -281,16 +285,20 @@ export function bocpdPredictiveDensity<O, S extends RunStats>(
   values: ArrayLike<number>,
   next?: O,
 ): Float64Array {
-  const d = model.predictive(state.stats, next)
-  const lw = toFlat(state.logPosterior)
-  const out = new Float64Array(values.length)
-  const terms = new Float64Array(lw.length)
-  for (let j = 0; j < values.length; j++) {
-    const lp = toFlat(d.logProb(values[j]) as Tensor)
-    for (let i = 0; i < lw.length; i++) terms[i] = lw[i] + (lp.length === 1 ? lp[0] : lp[i])
-    out[j] = Math.exp(logSumExp(terms))
+  try {
+    const d = model.predictive(state.stats, next)
+    const lw = toFlat(state.logPosterior)
+    const out = new Float64Array(values.length)
+    const terms = new Float64Array(lw.length)
+    for (let j = 0; j < values.length; j++) {
+      const lp = toFlat(d.logProb(values[j]) as Tensor)
+      for (let i = 0; i < lw.length; i++) terms[i] = lw[i] + (lp.length === 1 ? lp[0] : lp[i])
+      out[j] = Math.exp(logSumExp(terms))
+    }
+    return out
+  } catch {
+    return new Float64Array(values.length)
   }
-  return out
 }
 
 /** The posterior probability P(lo ≤ rₜ < hi | x₁:ₜ) of a range of run lengths, e.g. of a change in the last w steps. */

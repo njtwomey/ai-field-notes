@@ -8,12 +8,13 @@ export type InteractiveProps = {
   purpose?: ReactNode
   controls?: ReactNode
   readout?: ReactNode
+  equation?: ReactNode
   children: ReactNode
   className?: string
 }
 
 /** The standard frame for every interactive figure: backed by Figure from @render/layout. */
-export function Interactive({ title, caption, purpose, controls, readout, children, className }: InteractiveProps) {
+export function Interactive({ title, caption, purpose, controls, readout, equation, children, className }: InteractiveProps) {
   return (
     <Figure
       title={title}
@@ -21,6 +22,7 @@ export function Interactive({ title, caption, purpose, controls, readout, childr
       caption={caption}
       controls={controls}
       readouts={readout}
+      equation={equation}
       className={cn('not-prose my-8', className)}
     >
       {children}

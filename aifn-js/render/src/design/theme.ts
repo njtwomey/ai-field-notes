@@ -14,6 +14,17 @@ export const ThemeContext = createContext<ThemeContextValue | null>(null)
 
 export function useTheme(): ThemeContextValue {
   const ctx = useContext(ThemeContext)
-  if (!ctx) throw new Error('useTheme must be used inside <ThemeProvider>')
+  if (!ctx) {
+    const isDark =
+      typeof document !== 'undefined'
+        ? document.documentElement.classList.contains('dark') ||
+          (typeof window !== 'undefined' && window.matchMedia?.('(prefers-color-scheme: dark)').matches)
+        : false
+    return {
+      preference: 'system',
+      resolved: isDark ? 'dark' : 'light',
+      setPreference: () => {},
+    }
+  }
   return ctx
 }

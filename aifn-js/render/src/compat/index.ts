@@ -1,4 +1,4 @@
-export { XYChart, type XYSeries, type Segment, type Series, type XYChartProps } from './XYChart'
+export { XYChart, type XYSeries, type XYRect, type Segment, type Series, type XYChartProps } from './XYChart'
 export { Heatmap, type HeatmapOverlay, type HeatmapProps } from './Heatmap'
 export { ImagePlot, type ImagePlotLine, type ImagePlotProps } from './ImagePlot'
 export { GlyphPlot, type GlyphShape, type GlyphPlotProps } from './GlyphPlot'

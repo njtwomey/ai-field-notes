@@ -13,3 +13,12 @@ export { PanelSlot } from './slots'
 export { FrameSlotsContext, type SlotName } from './slots-context'
 export { Providers } from './Providers'
 export { slugify } from './slugify'
+export {
+  defaultMathMacros,
+  registerMathMacros,
+  getGlobalMathMacros,
+  RenderMathContext,
+  RenderMathProvider,
+  useRenderMathMacros,
+  renderKatex,
+} from './math-macros'

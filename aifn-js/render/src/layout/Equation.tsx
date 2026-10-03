@@ -12,8 +12,9 @@ import { useMemo, type ReactNode } from 'react'
 import { Player } from '@render/controls/Player'
 import { cn } from '@render/lib/utils'
 import { toTex, type EquationTemplate } from './equation-tex'
+import { useRenderMathMacros } from './math-macros'
 
-function render(t: EquationTemplate | string, display: boolean) {
+function render(t: EquationTemplate | string, display: boolean, macros?: Record<string, string>) {
   return katex.renderToString(toTex(t), {
     displayMode: display,
     throwOnError: false,
@@ -21,6 +22,7 @@ function render(t: EquationTemplate | string, display: boolean) {
     // \htmlClass marks the live values; nothing else in a template is trusted.
     trust: (ctx) => ctx.command === '\\htmlClass',
     strict: false,
+    macros: { ...(macros ?? {}) },
   })
 }
 
@@ -29,13 +31,20 @@ export function Equation({
   children,
   size = 'lg',
   className,
+  macros: propMacros,
 }: {
   children: EquationTemplate | string
   /** `lg` (default) for the band, `md` for an equation among other text. */
   size?: 'lg' | 'md'
   className?: string
+  macros?: Record<string, string>
 }) {
-  const html = useMemo(() => render(children, true), [children])
+  const contextMacros = useRenderMathMacros()
+  const effectiveMacros = useMemo(
+    () => (propMacros ? { ...contextMacros, ...propMacros } : contextMacros),
+    [contextMacros, propMacros],
+  )
+  const html = useMemo(() => render(children, true, effectiveMacros), [children, effectiveMacros])
   return (
     <div
       className={cn(
@@ -61,15 +70,22 @@ export function EquationSteps({
   onStep,
   label = 'step',
   className,
+  macros: propMacros,
 }: {
   steps: readonly EquationStep[]
   step: number
   onStep?: (step: number) => void
   label?: ReactNode
   className?: string
+  macros?: Record<string, string>
 }) {
   const current = Math.max(0, Math.min(steps.length - 1, Math.round(step)))
-  const html = useMemo(() => steps.map((s) => render(s.tex, true)), [steps])
+  const contextMacros = useRenderMathMacros()
+  const effectiveMacros = useMemo(
+    () => (propMacros ? { ...contextMacros, ...propMacros } : contextMacros),
+    [contextMacros, propMacros],
+  )
+  const html = useMemo(() => steps.map((s) => render(s.tex, true, effectiveMacros)), [steps, effectiveMacros])
   return (
     <div className={cn('flex flex-col gap-3', className)}>
       {onStep && (

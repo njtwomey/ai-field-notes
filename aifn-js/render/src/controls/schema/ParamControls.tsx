@@ -10,7 +10,7 @@ import {
   type VariantsDef,
 } from '@render/state/schema'
 import type { FigureState } from '@render/state/useFigureState'
-import { ControlRow } from '@render/layout/Controls'
+import { ControlGroup, Controls } from '@render/layout/Controls'
 import { Choice } from '../selection/Choice'
 import { NumberField } from '../numeric/NumberField'
 import { Slider } from '../numeric/Slider'
@@ -193,23 +193,51 @@ function FigureControlsImpl({ state }: { state: FigureState<ParamDefs> }) {
   const defs = state.schema
   const values = state.values as AnyValues
   const seen = flat(values)
-  const rows: { key: string; label?: ReactNode; plain: boolean; defs: Record<string, ParamDef> }[] = []
+  const rows: {
+    key: string
+    label?: ReactNode
+    description?: ReactNode
+    collapsible?: boolean
+    defaultCollapsed?: boolean
+    plain: boolean
+    defs: Record<string, ParamDef>
+  }[] = []
   for (const [name, def] of Object.entries(defs)) {
     if (def.onChart || !isActive(def, seen)) continue
     const last = rows[rows.length - 1]
     if (def.kind === 'row' || def.kind === 'variants')
-      rows.push({ key: name, label: def.label, plain: false, defs: { [name]: def } })
+      rows.push({
+        key: name,
+        label: def.label,
+        description: def.description,
+        collapsible: def.collapsible,
+        defaultCollapsed: def.defaultCollapsed,
+        plain: false,
+        defs: { [name]: def },
+      })
     else if (last?.plain) last.defs[name] = def
     else rows.push({ key: name, plain: true, defs: { [name]: def } })
   }
   const set = (path: string, value: ParamValue) => state.set(path, value)
   return (
-    <>
-      {rows.map((r) => (
-        <ControlRow key={r.key} label={r.label}>
-          <ParamControls defs={r.defs} values={values} set={set} />
-        </ControlRow>
-      ))}
-    </>
+    <div className="flex flex-col gap-2.5 w-full">
+      {rows.map((r) =>
+        r.plain && !r.label ? (
+          <Controls key={r.key}>
+            <ParamControls defs={r.defs} values={values} set={set} />
+          </Controls>
+        ) : (
+          <ControlGroup
+            key={r.key}
+            title={r.label}
+            description={r.description}
+            collapsible={r.collapsible ?? true}
+            defaultCollapsed={r.defaultCollapsed ?? false}
+          >
+            <ParamControls defs={r.defs} values={values} set={set} />
+          </ControlGroup>
+        ),
+      )}
+    </div>
   )
 }
