@@ -8,11 +8,10 @@ import {
   runEpisode,
   train,
   training,
-  type Trajectory,
 } from 'aifn-methods/gym'
 import { qLearningAgent, reinforceAgent, ucb1, type TabularAgentState } from 'aifn-methods/gym/agents'
 import { bernoulliBandit, mazeEnvironment } from 'aifn-methods/gym/environments'
-import type { Agent } from 'aifn/foundation/contracts'
+import type { Agent, Trajectory } from 'aifn/foundation/contracts'
 import { child, stream } from 'aifn/foundation/random'
 import { toFlat } from 'aifn/foundation/tensor'
 import { trace } from 'aifn/foundation/trace'

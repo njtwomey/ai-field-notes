@@ -1,19 +1,15 @@
 /**
- * The chosen episode against step, under `GymTrainer`'s Player: the state series of its render kind (`GYM_SERIES`) and
+ * The chosen episode against step, under `GymTrainer`'s Player: the environment's state series (`render.series`) and
  * the actions (a strip of names for a discrete action, a line per element of a box), with a draggable cursor at the
  * played step. Step k's action is the one taken from state k.
  */
 import { useMemo } from 'react'
-import type { Trajectory } from 'aifn-methods/gym'
-import type { Environment } from 'aifn/foundation/contracts'
-import { Curve, Handle, Plot, Plots, Raster, useAxis, useChartHeight } from '@lab/viz'
-import { actionSeries, GYM_SERIES, type StateSeries } from './series'
-
-const NONE: readonly StateSeries[] = []
+import type { Environment, Trajectory } from 'aifn/foundation/contracts'
+import { Curve, Handle, Plot, Plots, Raster, useAxis, useChartHeight } from '@render/viz'
+import { actionSeries, stateSeries } from './series'
 
 export type StepSeriesProps = {
   env: Environment<unknown, unknown, unknown>
-  kind: string
   trajectory: Trajectory<unknown, unknown, unknown>
   step: number
   onStep: (step: number) => void
@@ -21,8 +17,8 @@ export type StepSeriesProps = {
   scale: number
 }
 
-export function StepSeries({ env, kind, trajectory, step, onStep, scale }: StepSeriesProps) {
-  const states = GYM_SERIES[kind] ?? NONE
+export function StepSeries({ env, trajectory, step, onStep, scale }: StepSeriesProps) {
+  const states = stateSeries(env)
   const actions = useMemo(() => actionSeries(env), [env])
   const data = useMemo(() => {
     const xs = trajectory.states.map((_, i) => i)

@@ -7,7 +7,8 @@ import {
 } from 'aifn-methods/gym/agents'
 import { choice, float, int, row, setting, slider, useFigureState, type AnyValues } from '@lab/state'
 import { Button } from '@lab/ui/button'
-import { GymTrainer, gymSetup, trainingRun } from '@lab/views'
+import { gymSetup } from 'aifn-methods/gym'
+import { GymTrainer, trainingRun } from 'aifn-render/gym'
 
 /** The cart-pole agents by registry key, with their labels. */
 const AGENTS = {

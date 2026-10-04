@@ -1,9 +1,10 @@
 /**
- * Pure helpers behind `GridView`: a grid environment's cells as raster rows, a value table as raster rows, a policy as
- * arrows, and a path of cells as move arrows that keep backtracking visible.
+ * Pure helpers behind `GridView`: a grid environment's cells as raster rows, a value table or a colour per cell (a
+ * search's visited cells and frontier) as raster rows, a policy as arrows, and a path of cells as move arrows that keep
+ * backtracking visible.
  */
 import type { GridRender } from 'aifn/foundation/contracts'
-import type { Vector } from '@lab/viz'
+import type { Vector } from '@render/viz'
 
 /** Cell kinds drawn in colour, in slot order; other cells are blank. */
 export const GRID_KINDS = ['wall', 'goal', 'trap', 'start', 'hole', 'cliff', 'terminal'] as const
@@ -29,6 +30,21 @@ export function valueRows(r: GridRender<unknown>, values: ArrayLike<number>): nu
     Array.from({ length: r.width }, (_, x) => {
       const c = y * r.width + x
       return NO_VALUE.has(r.cells[c]) ? NaN : values[c]
+    }),
+  )
+}
+
+/**
+ * A tone per cell index as categorical raster rows for colour-only drawing (a search's visited cells, frontier and
+ * path): tone k of `names` in slot k, other cells unassigned (−1, a neutral fill), and walls left empty (NaN, the
+ * background) unless toned.
+ */
+export function toneRows(r: GridRender<unknown>, tones: ArrayLike<number>, names: readonly string[]): number[][] {
+  return Array.from({ length: r.height }, (_, y) =>
+    Array.from({ length: r.width }, (_, x) => {
+      const c = y * r.width + x
+      const t = tones[c]
+      return t >= 0 && t < names.length ? t : r.cells[c] === 'wall' ? NaN : -1
     }),
   )
 }
@@ -65,7 +81,8 @@ export type PathMovesOptions = {
  * cell edge, labelled at its midpoint with its count when walked more than once. An edge walked one way only gets one
  * centred arrow; an edge walked both ways gets two, shifted `LANE_OFFSET` to either side, so backtracking shows as a
  * pair of opposite arrows. The stroke thickens a little with the count. A move that stays in its cell (a bump into a
- * wall) draws nothing. The arrow holding the latest move is in ink (unless `inkLatest` is false) and drawn last.
+ * wall) draws nothing, nor does a jump of more than one cell (a trap's return to the start). The arrow holding the
+ * latest move is in ink (unless `inkLatest` is false) and drawn last.
  */
 export function pathMoves(
   cells: readonly (readonly [number, number])[],
@@ -77,7 +94,9 @@ export function pathMoves(
   let latest: string | null = null
   for (let i = 0; i < last; i++) {
     const [a, b] = [cells[i], cells[i + 1]]
+    // A stay (a bump into a wall) draws nothing, nor does a jump (a trap or a cliff sending the agent back).
     if (a[0] === b[0] && a[1] === b[1]) continue
+    if (Math.max(Math.abs(b[0] - a[0]), Math.abs(b[1] - a[1])) > 1) continue
     const key = `${a[0]},${a[1]}>${b[0]},${b[1]}`
     const e = edges.get(key)
     if (e) e.n += 1

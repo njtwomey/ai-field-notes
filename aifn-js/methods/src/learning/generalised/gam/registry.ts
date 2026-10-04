@@ -8,6 +8,7 @@ import * as ebm from './ebm'
 import * as expectile from './expectile'
 import * as expectileTraining from './expectile-training'
 import * as fitters from './fitters'
+import * as gamlss from './gamlss'
 import * as model from './model'
 import * as problem from './problem'
 import * as terms from './terms'
@@ -159,8 +160,43 @@ fn(
   expectileTraining.expectileTrainingRun,
 )
 
-/** The EBM algorithm, keyed by factory name. */
-export const gamAlgorithms: Table<AlgorithmInfo> = entries<AlgorithmInfo>('algorithm', ebm) as Table<AlgorithmInfo>
+const GAMLSS = ['generalised-additive-models-for-location-scale-and-shape']
+definer<AlgorithmInfo>('algorithm', 'learning/generalised/gam')(
+  {
+    key: 'gamlssRs',
+    name: 'RS algorithm (GAMLSS)',
+    summary:
+      'Cycle over the distribution parameters, refitting each additive predictor by penalised IRLS with the first and expected second derivatives of the log-likelihood.',
+    problem: 'least-squares',
+    state: { iterate: 'coefficients', objective: 'deviance', flags: ['converged', 'diverged'] },
+    notes: GAMLSS,
+    cite: ['rigby2005', 'stasinopoulos2007'],
+  },
+  gamlss.gamlssRs,
+)
+fn(
+  { key: 'gamlssProblem', name: 'GAMLSS problem', role: 'construction', notes: GAMLSS, cite: ['rigby2005'] },
+  gamlss.gamlssProblem,
+)
+fn({ key: 'gamlssTrace', name: 'GAMLSS fit by the RS algorithm', role: 'fit', notes: GAMLSS }, gamlss.gamlssTrace)
+fn(
+  {
+    key: 'gamlssModel',
+    name: 'Fitted GAMLSS',
+    summary: 'Parameter and centile curves, quantile residuals, worm plot and GAIC at an RS state.',
+    role: 'fit',
+    notes: GAMLSS,
+    cite: ['rigby2005', 'cole1992', 'vanbuuren2001'],
+  },
+  gamlss.gamlssModel,
+)
+
+/** The EBM and GAMLSS algorithms, keyed by factory name. */
+export const gamAlgorithms: Table<AlgorithmInfo> = entries<AlgorithmInfo>(
+  'algorithm',
+  ebm,
+  gamlss,
+) as Table<AlgorithmInfo>
 /** The functions of the module, keyed by name. */
 export const gamFunctions: Table<FunctionInfo> = entries<FunctionInfo>(
   'function',
@@ -170,4 +206,5 @@ export const gamFunctions: Table<FunctionInfo> = entries<FunctionInfo>(
   model,
   expectile,
   expectileTraining,
+  gamlss,
 ) as Table<FunctionInfo>

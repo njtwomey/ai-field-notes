@@ -634,7 +634,19 @@ function handlesPatch(handles: Handle[]) {
   // end, where the right margin cannot clip it.
   return {
     id: HANDLES_ID,
-    data: handles.flatMap((h) => (h.kind === 'point' ? [h.symbol ? { value: h.at, symbol: h.symbol } : h.at] : [])),
+    data: handles.flatMap((h) =>
+      h.kind === 'point'
+        ? [
+            h.symbol || h.color
+              ? {
+                  value: h.at,
+                  ...(h.symbol ? { symbol: h.symbol } : {}),
+                  ...(h.color ? { itemStyle: { color: h.color } } : {}),
+                }
+              : h.at,
+          ]
+        : [],
+    ),
     markLine: {
       data: handles.flatMap((h) =>
         h.kind === 'point'
@@ -643,6 +655,7 @@ function handlesPatch(handles: Handle[]) {
               {
                 [h.kind === 'x' ? 'xAxis' : 'yAxis']: h.at,
                 label: { formatter: h.label ?? '', position: h.kind === 'x' ? 'end' : 'insideEndTop' },
+                ...(h.color ? { lineStyle: { color: h.color } } : {}),
               },
             ],
       ),

@@ -229,7 +229,7 @@ agents, { replicates, steps, stream?, points? })` runs replicate k of every agen
   picked to replay or evaluate. `CartPoleView` draws the cart and the pole. `GymTrainer` has no slot for the x and θ
   time series or the action strip, so the page does not show them yet.
   he rod is drawn by
-  `PendulumView` (`aifn-lab/src/views/gym/`), which `GymTrainer` also uses for the `pendulum` render kind.
+  `PendulumView` (`aifn-render/gym`), which `GymTrainer` also uses for the `pendulum` render kind.
   The swing-up, LQR and cart-pole agents implement `greedy`.
 
 ### 3d. Function approximation: the deep Q-network (2026-10-01)
@@ -340,7 +340,7 @@ Registry addresses read `gym/environments/<key>` and `gym/agents/<key>`; `gym/in
 
 ### 4b. Headless training and the trainer (2026-10-01)
 
-- **One training-run row (2026-10-01).** Every `GymTrainer` page spreads `run: trainingRun(defaults)` (`views/gym`)
+- **One training-run row (2026-10-01).** Every `GymTrainer` page spreads `run: trainingRun(defaults)` (`aifn-render/gym`)
   into its `useFigureState`: the budget in episodes or environment steps, its size and the seed, in the figure's URL
   state; `GymTrainer` reads `state.run`, so pages declare no budget or seed fields. `gymSetup(envKey, envParams,
 agentKey, agentParams)` builds the page's environment and agent from the gym registries and the matching worker
@@ -364,7 +364,7 @@ agentKey, agentParams)` builds the page's environment and agent from the gym reg
   `evaluateEpisode(env, agent, t, e, seed)` plays a fresh episode of the policy after e episodes with no learning,
   using the agent's optional `greedy` action (its `act` otherwise). Both return a `Trajectory` (environment states,
   observations, actions, rewards). `runEpisode` is the one episode loop under `episodes`, `train` and both.
-- Lab: `GymTrainer` (`@lab/views`) takes the page's controls and a `setup` (environment and agent on the page and as
+- Lab: `GymTrainer` (`aifn-render/gym`) takes the page's controls and a `setup` (environment and agent on the page and as
   worker tasks), trains on mount and on Train, draws return (with a moving average), the first agent scalar and length
   or cumulative regret, with a draggable episode marker, a replay/evaluate switch, a Player over the chosen episode,
   and the environment drawn by `GYM_RENDERERS[render.kind]` (`grid`, `bandit`, `pendulum`, `cartpole`).
@@ -373,8 +373,20 @@ agentKey, agentParams)` builds the page's environment and agent from the gym reg
   survives the time limit; a grid MDP succeeds at a goal and fails in a hole, a trap or a time-out. Trajectories carry
   `ending` and training an `outcome` column. At an episode's last step `GymTrainer` draws the scene in the theme's
   destructive or success tone with the reason; the learning curve marks each episode by outcome and plots the
-  failure share over a trailing window. Per-step panels (`GYM_SERIES` per render kind, plus the actions as a strip or
+  failure share over a trailing window. Per-step panels (the render spec's `series`, plus the actions as a strip or
   lines) sit under the Player; the pendulum page evaluates from a draggable start angle (`evaluationEnv`).
+
+- **Views in aifn-render (2026-10-04).** The trace shapes (`Trajectory`, `Checkpoint`, `Training`) and `GymSetup`
+  live in the core contract (`aifn/foundation/contracts`, gym.ts), beside `Environment` and `Agent`; a render spec may
+  name `series` of the state to plot against step. `aifn-methods/gym` implements them (`runEpisode`, `training`,
+  `replay`, `evaluateEpisode`, `agentAfter`) and builds a `GymSetup` from registry keys (`gymSetup`, `gymEnvironment`):
+  the environment and agent as values, the same two as worker calls, the training generator's address, and closures
+  that replay, evaluate and re-run an agent to an episode. The views live in `aifn-render/gym` and import only core:
+  `GridView` (cells by kind, a value field, or tones for a colour-only search; optional policy arrows and a path of
+  counted move arrows; page layers and clicks), `CartPoleView`, `PendulumView`, `StepSeries`, the renderer registry by
+  `render.kind` and `GymTrainer` with `trainingRun`. `GridRenderer` takes an `overlay` option (the agent's state after
+  the chosen episode → a value field and greedy policy), and `GymTrainer` an `idleScene` drawn before training. The
+  lab, the notes and the examples import them from there.
 
 ## 5. Bandits are the one-step case
 

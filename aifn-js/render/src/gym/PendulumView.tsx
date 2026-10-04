@@ -1,6 +1,6 @@
 import { useMemo } from 'react'
 import type { PendulumRender } from 'aifn/foundation/contracts'
-import { Curve, Handle, Plot, Points, useAxis } from '@lab/viz'
+import { Curve, Handle, Plot, Points, useAxis } from '@render/viz'
 
 /** Props of `PendulumView`: one step's environment state, drawn by the environment's `pendulum` render spec. */
 export type PendulumViewProps<S> = {

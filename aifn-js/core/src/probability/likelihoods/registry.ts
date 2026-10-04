@@ -4,8 +4,16 @@
  * used with and whether its dispersion is estimated.
  */
 
-import { definer, entries, type Entry, type LikelihoodInfo, type LinkInfo } from 'aifn/foundation/registry'
+import {
+  definer,
+  entries,
+  type Entry,
+  type FunctionInfo,
+  type LikelihoodInfo,
+  type LinkInfo,
+} from 'aifn/foundation/registry'
 import { real, space } from 'aifn/foundation/space'
+import * as distributional from './distributional'
 import * as families from './families'
 import { link, type Link, type LinkName } from './families'
 
@@ -141,3 +149,67 @@ export const likelihoodRegistry: Readonly<Record<string, Entry<() => families.Fa
   entries<LikelihoodInfo>('likelihood', families) as Readonly<
     Record<string, Entry<() => families.Family, LikelihoodInfo>>
   >
+
+const defineFunction = definer<FunctionInfo>('function', 'probability/likelihoods')
+const GAMLSS = ['generalised-additive-models-for-location-scale-and-shape']
+const gamlssFamily = (key: string, name: string, summary: string, cites: string[] = []) =>
+  defineFunction(
+    { key, name, summary, role: 'construction', notes: GAMLSS, cite: ['rigby2005', 'stasinopoulos2007', ...cites] },
+    distributional[key as keyof typeof distributional] as () => distributional.DistributionalFamily,
+  )
+gamlssFamily(
+  'normalDistributional',
+  'Normal NO(μ, σ)',
+  'The normal with mean μ and sd σ, with scores and expected information.',
+)
+gamlssFamily(
+  'studentTDistributional',
+  'Student t TF(μ, σ, ν)',
+  'Location-scale Student t: heavy tails through ν, with the expected information of Lange, Little and Taylor.',
+  ['lange1989'],
+)
+gamlssFamily(
+  'boxCoxColeGreenDistributional',
+  'Box–Cox Cole–Green BCCG(μ, σ, ν)',
+  'The LMS distribution: median μ, coefficient of variation σ and Box–Cox skewness power ν.',
+  ['cole1992'],
+)
+gamlssFamily('gammaDistributional', 'Gamma GA(μ, σ)', 'The gamma with mean μ and coefficient of variation σ.')
+gamlssFamily(
+  'poissonDistributional',
+  'Poisson PO(μ)',
+  'The Poisson with mean μ as a one-parameter distributional family.',
+)
+defineFunction(
+  {
+    key: 'distributionalFamily',
+    name: 'Distributional-regression family',
+    summary: 'A GAMLSS family by name: links, scores, expected second derivatives, cdf and quantile per parameter.',
+    role: 'construction',
+    notes: GAMLSS,
+    cite: ['rigby2005'],
+  },
+  distributional.distributionalFamily,
+)
+defineFunction(
+  {
+    key: 'quantileResidual',
+    name: 'Normalised quantile residual',
+    summary: 'Φ⁻¹ of the fitted cdf at the response: standard normal under the true model.',
+    role: 'estimator',
+    notes: [...GAMLSS, 'residual-diagnostics'],
+    cite: ['dunn1996'],
+  },
+  distributional.quantileResidual,
+)
+defineFunction(
+  {
+    key: 'wormPlot',
+    name: 'Worm plot',
+    summary: 'A detrended normal Q–Q plot of residuals with a pointwise 95% band.',
+    role: 'estimator',
+    notes: [...GAMLSS, 'residual-diagnostics'],
+    cite: ['vanbuuren2001'],
+  },
+  distributional.wormPlot,
+)

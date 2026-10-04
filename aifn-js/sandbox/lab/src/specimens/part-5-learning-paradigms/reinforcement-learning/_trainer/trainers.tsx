@@ -1,6 +1,7 @@
 import { useMemo } from 'react'
 import { choice, float, row, slider, useFigureState } from '@lab/state'
-import { GymTrainer, gymSetup, trainingRun } from '@lab/views'
+import { gymSetup } from 'aifn-methods/gym'
+import { GymTrainer, trainingRun } from 'aifn-render/gym'
 
 /** The maze agents by registry key, with their labels. */
 const MAZE_AGENTS = {

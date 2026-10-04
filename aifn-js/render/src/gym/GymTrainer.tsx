@@ -1,41 +1,30 @@
 /**
- * `GymTrainer`: train any agent in any environment headlessly in the compute worker (`aifn-methods/gym` `training`),
- * watch the learning curve fill in as summaries stream, pick an episode on it (drag or click the marker), and play that
- * episode step by step: `replay` re-runs the training episode exactly as it happened (from the nearest checkpoint),
- * `evaluate` plays a fresh greedy episode of the policy as it was after that episode. The environment is drawn by the
- * renderer for its `render.kind` (`GYM_RENDERERS`).
+ * `GymTrainer`: train any agent in any environment headlessly in the compute worker (the setup's training generator,
+ * `aifn-methods/gym` `training`), watch the learning curve fill in as summaries stream, pick an episode on it (drag or
+ * click the marker), and play that episode step by step: `replay` re-runs the training episode exactly as it happened
+ * (from the nearest checkpoint), `evaluate` plays a fresh greedy episode of the policy as it was after that episode.
+ * The environment is drawn by the renderer for its `render.kind` (`GYM_RENDERERS`).
  *
  * The page owns the environment's and agent's controls in its `useFigureState`, spreads in the shared training-run
  * row (`run: trainingRun(defaults)`: the budget in episodes or steps, and the seed), which `GymTrainer` reads from
- * `state.run`, and passes a `setup` (`gymSetup(envKey, envParams, agentKey, agentParams)`): the environment and agent
- * built on the page (for replay and evaluation) and the same two as worker tasks (for training). Nothing trains until Train is pressed, and a changed setting marks the shown run as stale until Train
- * is pressed again, so the reader chooses the configuration before spending the compute.
+ * `state.run`, and passes a `setup`: the core `GymSetup` (`aifn-methods/gym` `gymSetup(envKey, envParams, agentKey,
+ * agentParams)`), which carries the environment and agent as values, the same two as worker calls, and the functions
+ * that re-run episodes, so this view never imports an environment or an agent. Nothing trains until Train is pressed,
+ * and a changed setting marks the shown run as stale until Train is pressed again, so the reader chooses the
+ * configuration before spending the compute.
  */
 import { useMemo, useState, type ReactNode } from 'react'
-import { evaluateEpisode, replay, type Training, type Trajectory } from 'aifn-methods/gym'
-import type { Agent, Environment } from 'aifn/foundation/contracts'
-import { Player, StatusText } from '@lab/controls'
-import { ControlRow, Figure, type FigureProps } from '@lab/layout'
-import { call, useStreamed, type Task } from '@lab/state'
-import { Button } from '@lab/ui/button'
-import { Curve, Handle, Plot, Plots, Points, Readout, useAxis } from '@lab/viz'
+import type { GymSetup, Training, Trajectory } from 'aifn/foundation/contracts'
+import { Player, StatusText } from '@render/controls'
+import { ControlRow, Figure, type FigureProps } from '@render/layout'
+import { call, useStreamed } from '@render/state'
+import { Button } from '@render/ui/button'
+import { Curve, Handle, Plot, Plots, Points, Readout, useAxis } from '@render/viz'
 import { GYM_RENDERERS, renderKind, WIDE_KINDS } from './registry'
 import type { GymRenderer } from './renderers'
 import { hasStepSeries } from './series'
 import { trainingRunOf } from './trainingRun'
 import { StepSeries } from './StepSeries'
-
-/** What to train: the environment and agent on the page, the same as worker tasks, and the run's length and seed. */
-export type GymSetup = {
-  env: Environment<unknown, unknown, unknown>
-  agent: Agent<unknown, unknown, unknown>
-  /** `call('gym/environments/<key>', params)` for the worker. */
-  envTask: Task
-  /** `call('gym/agents/<key>', params)`. */
-  agentTask: Task
-  /** The environment `evaluate` plays in, when it differs from the trained one (another start state). Not trained on. */
-  evaluationEnv?: Environment<unknown, unknown, unknown>
-}
 
 export type GymTrainerProps = {
   title: string
@@ -57,8 +46,12 @@ export type GymTrainerProps = {
   scalars?: readonly string[]
   /** Extra buttons beside Train (e.g. a page's presets). */
   actions?: ReactNode
-  /** The episode Player's starting speed, in steps per second (default 10). */
+  /** The episode Player's starting speed, in steps per second (default 60). */
   playbackSpeed?: number
+  /** The page's own readouts, after the trainer's (a reference return, an optimal value). */
+  readouts?: ReactNode
+  /** What the scene shows before an episode can be played (default an empty plot saying what to do): the grid. */
+  idleScene?: ReactNode
 }
 
 type Mode = 'replay' | 'evaluate'
@@ -79,7 +72,7 @@ function smooth(y: ArrayLike<number>, total: number, fraction: number): number[]
 /** A setup with the training run (budget and seed) from the figure state's `run` row. */
 type RunSetup = GymSetup & { episodes?: number; steps?: number; seed: number }
 
-const keyOf = (s: RunSetup) => JSON.stringify([s.envTask, s.agentTask, s.steps ?? s.episodes, s.seed])
+const keyOf = (s: RunSetup) => JSON.stringify([s.envCall, s.agentCall, s.steps ?? s.episodes, s.seed])
 
 export function GymTrainer({
   title,
@@ -95,6 +88,8 @@ export function GymTrainer({
   scalars: scalarNames = [],
   playbackSpeed = 60,
   actions,
+  idleScene,
+  readouts: extraReadouts,
 }: GymTrainerProps) {
   // The setup of the run shown: none until Train is pressed, then the setup current at that press. A fresh object per
   // press, so pressing again with the same settings reruns.
@@ -107,9 +102,9 @@ export function GymTrainer({
     () =>
       trained
         ? call<Training<unknown>>(
-            'gym/training',
-            trained.envTask,
-            trained.agentTask,
+            trained.trainingAddress,
+            call(trained.envCall.address, trained.envCall.params),
+            call(trained.agentCall.address, trained.agentCall.params),
             trained.steps !== undefined
               ? { steps: trained.steps, seed: trained.seed }
               : { episodes: trained.episodes, seed: trained.seed },
@@ -141,11 +136,19 @@ export function GymTrainer({
   const busy = run.running
   const trajectory = useMemo((): Trajectory<unknown, unknown, unknown> | null => {
     if (busy || !training || !trained || episode < 1) return null
-    const { env, agent } = trained
     return mode === 'replay'
-      ? replay(env, agent, training, episode).trajectory
-      : evaluateEpisode(evaluationEnv, agent, training, episode, evaluationSeed).trajectory
+      ? trained.replay(training, episode)
+      : trained.evaluate(evaluationEnv, training, episode, evaluationSeed)
   }, [busy, training, episode, mode, trained, evaluationSeed, evaluationEnv])
+  // The agent's state after the chosen episode, computed once on first use (by a renderer's overlay).
+  const agentAfter = useMemo(() => {
+    let cached: { value: unknown } | null = null
+    return () => {
+      if (!trained || !training) return null
+      cached ??= { value: trained.agentAfter(training, episode) }
+      return cached.value
+    }
+  }, [trained, training, episode])
   // The step belongs to the trajectory it was set on: a newly chosen episode opens at step 0.
   const [stepOf, setStepOf] = useState<{ trajectory: typeof trajectory; step: number } | null>(null)
   const step = stepOf?.trajectory === trajectory ? stepOf.step : 0
@@ -195,7 +198,7 @@ export function GymTrainer({
   const kind = renderKind(shown.env)
   const Renderer = renderer ?? GYM_RENDERERS[kind]
   // Per-step panels (state series and actions against step) for environments that declare state series.
-  const withSeries = hasStepSeries(shown.env, kind)
+  const withSeries = hasStepSeries(shown.env)
   const wide = WIDE_KINDS.has(kind)
   // Under a step budget the number of episodes is not known in advance: the episode axis follows the run.
   const total = stepBudget ? Math.max(1, n) : (shown.episodes ?? 1)
@@ -262,9 +265,12 @@ export function GymTrainer({
         step={at}
         training={training}
         episode={episode}
+        agentAfter={agentAfter}
         options={rendererOptions}
         end={end}
       />
+    ) : idleScene && !trajectory ? (
+      idleScene
     ) : (
       <Plot
         x={sx}
@@ -374,6 +380,7 @@ export function GymTrainer({
           <Readout label="reward so far" value={rewardsSoFar.toFixed(2)} />
           <Readout label="episode return" value={trajectory ? trajectory.episodeReturn.toFixed(2) : '—'} />
           <Readout label="outcome" value={outcomeText} />
+          {extraReadouts}
         </>
       }
       caption={
@@ -429,7 +436,7 @@ export function GymTrainer({
         {scene}
       </Plots>
       {withSeries && trajectory && (
-        <StepSeries env={shownEnv} kind={kind} trajectory={trajectory} step={at} onStep={setStep} scale={0.44} />
+        <StepSeries env={shownEnv} trajectory={trajectory} step={at} onStep={setStep} scale={0.44} />
       )}
     </Figure>
   )

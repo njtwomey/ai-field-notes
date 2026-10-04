@@ -5,13 +5,16 @@
  * or evaluates any training episode (`replay`, `evaluateEpisode`). `mdp.ts` holds the finite-MDP tables both sides
  * share.
  * Registries: `environmentRegistry` and `agentRegistry`, keyed by `info.key`; `validPairs` lists the environment ×
- * agent pairs whose declared domains, model and family agree.
+ * agent pairs whose declared domains, model and family agree; `gymSetup` makes the core `GymSetup` a training view
+ * consumes from two registry keys.
  */
 
-import type { AgentInfo, EnvironmentInfo } from 'aifn/foundation/contracts'
+import type { Agent, AgentInfo, Environment, EnvironmentInfo, GymSetup } from 'aifn/foundation/contracts'
+import { DomainError } from 'aifn/foundation/errors'
 import { entries, type Entry } from 'aifn/foundation/registry'
 import * as agents from './agents'
 import * as environments from './environments'
+import { agentAfter as afterEpisodes, evaluateEpisode as evaluateAfter, replay as replayEpisode } from './train'
 
 export {
   compare,
@@ -26,19 +29,8 @@ export {
   runEpisode,
   type EpisodeMode,
   type Spread,
-  type Trajectory,
 } from './rollout'
-export {
-  agentAfter,
-  checkpointSpacing,
-  evaluateEpisode,
-  replay,
-  train,
-  training,
-  type Checkpoint,
-  type Training,
-  type TrainOptions,
-} from './train'
+export { agentAfter, checkpointSpacing, evaluateEpisode, replay, train, training, type TrainOptions } from './train'
 export {
   cellState,
   GRID_ACTION_NAMES,
@@ -93,4 +85,44 @@ export function validPairs(): { environment: string; agent: string }[] {
       if (compatible(e.info, a.info)) out.push({ environment: e.info.key, agent: a.info.key })
   return out
 }
+
+// ── Setups for training views ─────────────────────────────────────────────────────────────────────────────────────
+
+type AnyEnv = Environment<unknown, unknown, unknown>
+type AnyAgent = Agent<unknown, unknown, unknown>
+
+/** An environment of the gym registry built from its parameters (an evaluation variant, say). */
+export function gymEnvironment(envKey: string, envParams: object): AnyEnv {
+  const e = environmentRegistry[envKey]
+  if (!e) throw new DomainError('gymEnvironment', `gymEnvironment: no environment '${envKey}' in the gym registry`)
+  return (e as unknown as (p: object) => AnyEnv)(envParams)
+}
+
+/** The setup for environment `envKey` and agent `agentKey` of the gym registries, built from their parameters. */
+export function gymSetup(
+  envKey: string,
+  envParams: object,
+  agentKey: string,
+  agentParams: object,
+  extra: { evaluationEnv?: AnyEnv } = {},
+): GymSetup {
+  const e = environmentRegistry[envKey]
+  const a = agentRegistry[agentKey]
+  if (!e) throw new DomainError('gymSetup', `gymSetup: no environment '${envKey}' in the gym registry`)
+  if (!a) throw new DomainError('gymSetup', `gymSetup: no agent '${agentKey}' in the gym registry`)
+  const env = (e as unknown as (p: object) => AnyEnv)(envParams)
+  const agent = (a as unknown as (p: object) => AnyAgent)(agentParams)
+  return {
+    env,
+    agent,
+    envCall: { address: `${e.info.module}/${envKey}`, params: envParams },
+    agentCall: { address: `${a.info.module}/${agentKey}`, params: agentParams },
+    trainingAddress: 'gym/training',
+    ...extra,
+    replay: (training, episode) => replayEpisode(env, agent, training, episode).trajectory,
+    evaluate: (on, training, episode, seed) => evaluateAfter(on, agent, training, episode, seed).trajectory,
+    agentAfter: (training, episode) => afterEpisodes(env, agent, training, episode),
+  }
+}
+
 export { gymFunctions } from './registry'

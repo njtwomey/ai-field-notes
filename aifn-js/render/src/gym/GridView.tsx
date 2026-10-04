@@ -1,14 +1,16 @@
 /**
- * One drawing of a grid environment (gridworld, maze, FrozenLake, the cliff) from its `render` spec, used by every grid
- * page. Layers, bottom to top: the cells by kind (or a value field in their place), policy arrows, a path drawn as move
- * arrows (`pathMoves`: one arrow per direction of a cell edge, counted when walked more than once, the two directions
- * side by side, the latest move in ink), and the agent, in the success or destructive tone at an episode's ending.
- * Cells are square and the axes hold their first fit.
+ * One drawing of a grid environment (gridworld, maze, FrozenLake, the cliff) or of a search on a grid, from a `render`
+ * spec (core `GridRender`). Layers, bottom to top: the cells by kind, or in their place a value field (V(s), max Q,
+ * visit counts) or tones (colour only: a search's visited cells, frontier and path); policy arrows; a path drawn as
+ * move arrows (`pathMoves`: one arrow per direction of a cell edge, counted when walked more than once, the two
+ * directions side by side, the latest move in ink); the agent, in the success or destructive tone at an episode's
+ * ending; then the page's own layers (`children`: handles, markers). Arrows are optional: without `policy` and `path`
+ * the grid is colour only. Cells are square and the axes hold their first fit.
  */
-import { useMemo } from 'react'
+import { useMemo, type ReactNode } from 'react'
 import type { EpisodeEnd, GridRender } from 'aifn/foundation/contracts'
-import { Plot, Points, Raster, useAxis, Vectors, type AxisModel, type Range } from '@lab/viz'
-import { cellXY, GRID_KINDS, kindRows, pathMoves, policyArrows, valueRows } from './grid'
+import { Plot, Points, Raster, useAxis, Vectors, type AxisModel, type Range } from '@render/viz'
+import { cellXY, GRID_KINDS, kindRows, pathMoves, policyArrows, toneRows, valueRows } from './grid'
 
 export type GridValueField = {
   /** A value per cell index (V(s), or max_a Q(s, a)); walls and cliffs are left blank. */
@@ -25,11 +27,19 @@ export type GridValueField = {
   fillOpacity?: number
 }
 
+/** A colour per cell for colour-only drawing (a search): `values[c]` indexes `names` (−1 for none); walls stay empty. */
+export type GridTones = {
+  values: ArrayLike<number>
+  names: readonly string[]
+}
+
 export type GridViewProps<S> = {
   render: GridRender<S>
   title?: string
   /** A value field drawn as a raster in place of the cell kinds. */
   value?: GridValueField | null
+  /** Tones drawn in place of the cell kinds (ignored under a value field). */
+  tones?: GridTones | null
   /** An action per cell index, drawn as arrows (a negative action draws nothing). */
   policy?: ArrayLike<number> | null
   /** A path of states, drawn as move arrows up to `step`. */
@@ -49,6 +59,13 @@ export type GridViewProps<S> = {
   y?: AxisModel
   /** The plot's size in a `Plots` group. */
   scale?: number
+  /** Pixels, outside a Figure's frame. */
+  height?: number
+  /** A click on the grid, in data units (round to get the cell): toggling walls, say. */
+  onPlotClick?: (point: [number, number]) => void
+  ariaLabel?: string
+  /** Extra layers drawn on top (handles for a goal or a trap, markers). */
+  children?: ReactNode
 }
 
 const axisOf = (n: number) => Array.from({ length: n }, (_, i) => i)
@@ -57,6 +74,7 @@ export function GridView<S>({
   render: r,
   title,
   value,
+  tones,
   policy,
   path,
   step,
@@ -67,6 +85,10 @@ export function GridView<S>({
   x,
   y,
   scale,
+  height: plotHeight,
+  onPlotClick,
+  ariaLabel,
+  children,
 }: GridViewProps<S>) {
   const { width, height } = r
   const xs = useMemo(() => axisOf(width), [width])
@@ -74,6 +96,12 @@ export function GridView<S>({
   const kinds = useMemo(() => kindRows(r as GridRender<unknown>), [r])
   const values = value?.values
   const field = useMemo(() => (values ? valueRows(r as GridRender<unknown>, values) : null), [r, values])
+  const toneValues = tones?.values
+  const toneNames = tones?.names
+  const toned = useMemo(
+    () => (toneValues && toneNames ? toneRows(r as GridRender<unknown>, toneValues, toneNames) : null),
+    [r, toneValues, toneNames],
+  )
   const arrows = useMemo(() => (policy ? policyArrows(r as GridRender<unknown>, policy) : null), [r, policy])
   const cells = useMemo(() => (path ? path.map((s) => cellXY(width, r.cell(s))) : null), [path, r, width])
   const at = cells ? Math.min(step ?? cells.length - 1, cells.length - 1) : -1
@@ -85,7 +113,15 @@ export function GridView<S>({
   const ownY = useAxis({ label: 'y', equal: ownX, hold: 'initial', key: r })
   const tone = end ? (end.success ? 'success' : 'destructive') : undefined
   return (
-    <Plot x={x ?? ownX} y={y ?? ownY} title={title} scale={scale}>
+    <Plot
+      x={x ?? ownX}
+      y={y ?? ownY}
+      title={title}
+      scale={scale}
+      height={plotHeight}
+      onPlotClick={onPlotClick}
+      ariaLabel={ariaLabel}
+    >
       {field ? (
         <Raster
           x={xs}
@@ -97,6 +133,8 @@ export function GridView<S>({
           colorBar={value?.colorBar}
           fillOpacity={value?.fillOpacity}
         />
+      ) : toned && toneNames ? (
+        <Raster x={xs} y={ys} z={toned} scale="categorical" categoryNames={toneNames} />
       ) : (
         <Raster x={xs} y={ys} z={kinds} scale="categorical" categoryNames={GRID_KINDS} />
       )}
@@ -112,6 +150,7 @@ export function GridView<S>({
           size={end ? 16 : undefined}
         />
       )}
+      {children}
     </Plot>
   )
 }

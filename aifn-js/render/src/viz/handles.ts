@@ -27,6 +27,8 @@ type Placement =
 
 export type Handle = Placement & {
   label?: string
+  /** The marker's or guide line's colour (a resolved CSS colour); ink by default. A `Handle` layer sets it from `slot`. */
+  color?: string
   /** Called once when the pointer lets go, e.g. to start work too slow to redo on every move. */
   onRelease?: () => void
 }

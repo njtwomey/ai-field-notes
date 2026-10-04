@@ -9,9 +9,9 @@
  * that agent on an evaluation seed.
  */
 
-import type { Agent, Environment } from 'aifn/foundation/contracts'
+import type { Agent, Checkpoint, Environment, Training, Trajectory } from 'aifn/foundation/contracts'
 import { child, stream, type Stream } from 'aifn/foundation/random'
-import { runEpisode, type Trajectory } from './rollout'
+import { runEpisode } from './rollout'
 import { DomainError } from 'aifn/foundation/errors'
 
 /**
@@ -35,42 +35,6 @@ export interface TrainOptions {
    * every twentieth of the steps).
    */
   chunk?: number
-}
-
-/** A checkpoint: the agent's state after `episode` episodes (0 is the initial state). */
-export interface Checkpoint<G> {
-  episode: number
-  agent: G
-}
-
-/** A training run so far: per-episode columns (one entry per completed episode) and checkpoints. Plain data. */
-export interface Training<G> {
-  seed: number | string
-  /** Episodes requested (NaN under a step budget) and completed. */
-  total: number
-  episodes: number
-  /** The step budget (NaN under an episode budget) and the environment steps done. */
-  budget: number
-  steps: number
-  /** The checkpoint spacing in episodes (doubled whenever a step-budget run would exceed `maxCheckpoints`). */
-  every: number
-  /** Undiscounted return, length (steps) and whether it ended at a terminal state, per episode. */
-  returns: Float64Array
-  lengths: Float64Array
-  terminated: Uint8Array
-  /** Σ pseudo-regret per episode, when the environment's oracle knows expected rewards; else null. */
-  regret: Float64Array | null
-  /** 1 for a success, −1 for a failure, 0 when the environment does not say (`ending`). */
-  outcome: Int8Array
-  /** The episode's first action, for discrete actions (a bandit's pull); NaN otherwise. */
-  firstAction: Float64Array
-  /** The agent's `scalars` after each episode (NaN before a scalar first appears). */
-  scalars: Record<string, Float64Array>
-  /** The agent's state after every `every` episodes, from episode 0. */
-  checkpoints: Checkpoint<G>[]
-  /** The agent's state after the last completed episode. */
-  final: G
-  done: boolean
 }
 
 /** The checkpoint spacing for a run: at least `checkpointEvery`, wide enough for at most `maxCheckpoints`. */

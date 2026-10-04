@@ -235,7 +235,15 @@ export function pendulumEnvironment(options: PendulumOptions = {}): PendulumEnvi
       return { state: next, observation: observe(next), reward: r, terminated: false, truncated: false }
     },
     model: { kind: 'dynamics', stateSize: 2, actionSize: 1, transition, reward, encode, decode },
-    render: { kind: 'pendulum', length, angle: (s) => s.theta },
+    render: {
+      kind: 'pendulum',
+      length,
+      angle: (s) => s.theta,
+      series: [
+        { name: 'θ (rad)', value: (s) => wrapAngle(s.theta) },
+        { name: 'θ̇ (rad/s)', value: (s) => s.thetaDot },
+      ],
+    },
   }
 }
 

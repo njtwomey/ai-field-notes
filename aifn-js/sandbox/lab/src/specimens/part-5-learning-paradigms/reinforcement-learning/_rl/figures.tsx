@@ -22,7 +22,7 @@ import { trace } from 'aifn/foundation/trace'
 import { Player } from '@lab/controls'
 import { ControlRow, Figure } from '@lab/layout'
 import { choice, float, row, slider, useFigureState } from '@lab/state'
-import { GridView } from '@lab/views'
+import { GridView } from 'aifn-render/gym'
 import { Bars, Curve, Handle, Plot, Plots, Readout, useAxis } from '@lab/viz'
 
 // ---------------------------------------------------------------------------------------------------------------------

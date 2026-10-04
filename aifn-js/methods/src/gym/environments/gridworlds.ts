@@ -314,11 +314,34 @@ export function maze(rows: readonly string[], options: MazeOptions = {}): Tabula
   })
 }
 
-/** Built-in maze layouts, top row first (`#` wall, `S` start, `G` goal, `T` trap). */
-export const MAZES: Record<'small' | 'classic' | 'traps', readonly string[]> = {
+/**
+ * Built-in maze layouts, top row first (`#` wall, `S` start, `G` goal, `T` trap). `room` is an open 8 × 8 room;
+ * `corridors` a winding maze; `cliff` a row of traps between start and goal (cliff walking as a maze); `routes` a short
+ * bridge between traps against a long detour, where Q-learning and SARSA choose different routes.
+ */
+export const MAZES: Record<
+  'small' | 'classic' | 'traps' | 'room' | 'corridors' | 'cliff' | 'routes',
+  readonly string[]
+> = {
   small: ['.....', '.###.', '.#G#.', '.#.#.', 'S....'],
   classic: ['.....#...G', '.###.#.##.', '.#...#....', '.#.####.#.', '.#......#.', 'S..####...'],
   traps: ['S..T....', '.#.#.##.', '.#...T..', '.####.#.', '......#G'],
+  room: ['.......G', '........', '........', '........', '........', '........', '........', 'S.......'],
+  corridors: [
+    '..........G',
+    '##########.',
+    '.....#.....',
+    '.###.#.###.',
+    '.#.....#...',
+    '.#######.##',
+    '.#...#...#.',
+    '.#.#.#.###.',
+    '...#.#.#...',
+    '####.#.#.#.',
+    'S....#...#.',
+  ],
+  cliff: ['..........', '..........', '..........', 'STTTTTTTTG'],
+  routes: ['.........', '.#######.', '.#######.', '.#TTTTT#.', 'S.......G', '##TTTTT##'],
 }
 
 /** The episode cap of an environment form: the longest episode before the rollout truncates it. */
@@ -466,7 +489,7 @@ environment(
       'A maze (start, goal, walls, traps) with optional slip: cell-index observations, four moves, a tabular model.',
     family: 'mdp',
     params: space({
-      layout: oneOf(['small', 'classic', 'traps']),
+      layout: oneOf(['small', 'classic', 'traps', 'room', 'corridors', 'cliff', 'routes']),
       slip: real(0, 1, { default: 0 }),
       gamma: real(0, 1, { default: 0.95, label: 'γ' }),
       horizon: horizon(100),

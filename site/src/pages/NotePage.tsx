@@ -8,6 +8,7 @@ import { ConceptTab } from '@/components/note/ConceptTab'
 import { NoteAside } from '@/components/note/NoteAside'
 import { NoteBar, type NoteTab } from '@/components/note/NoteBar'
 import { NoteHeader } from '@/components/note/NoteHeader'
+import { NoteNav } from '@/components/note/NoteNav'
 import { OutputsTab, RunIndexNav } from '@/components/note/OutputsTab'
 import { noteReferences, notesBySlug, noteUrl, prefetchNotesWhenIdle } from '@/lib/content'
 import { MARGIN_QUERY, useMediaQuery } from '@/hooks/use-media-query'
@@ -17,8 +18,8 @@ import { useManifest } from '@/lib/generated'
 type Tab = NoteTab
 
 /**
- * Three columns: sticky, independently scrolling index on the left (TOC, files or runs, per tab); content in the
- * centre; references and relations on the right, scrolling with the page.
+ * Three columns: sticky, independently scrolling index on the left (the taxonomy navigator, then the TOC, files or
+ * runs, per tab); content in the centre; references and relations on the right, scrolling with the page.
  */
 export function NotePage({ tab }: { tab: Tab }) {
   const { slug = '', run: runParam } = useParams()
@@ -84,6 +85,7 @@ export function NotePage({ tab }: { tab: Tab }) {
           <div className="grid grid-cols-1 gap-10 lg:grid-cols-[220px_minmax(0,1fr)] xl:grid-cols-[240px_minmax(0,1fr)_300px]">
             <aside className="hidden pt-8 lg:block">
               <div className="sticky top-30 max-h-[calc(100svh-8.5rem)] overflow-y-auto overscroll-contain pr-2 pb-6">
+                <NoteNav note={note} />
                 {left}
               </div>
             </aside>

@@ -3,7 +3,8 @@
  * products, factor and linear terms, shape constraints) and their bases, the penalised problem (`gamProblem`: design,
  * smoothing parameters by REML, GCV or fixed, the P-IRLS optimum), fitters that solve it step by step (P-IRLS,
  * backfitting, gradient descent, SGD, Adam, L-BFGS), the model at any coefficients (`gamModel`) and the estimator
- * `gam`; expectile GAMs and the explainable boosting machine.
+ * `gam`; expectile GAMs, GAMLSS (`gamlssRs`, the RS algorithm over distributional families) and the explainable boosting
+ * machine.
  */
 
 export {
@@ -80,5 +81,18 @@ export {
   type ExpectileRunRequest,
   type ExpectileTrainingRun,
 } from './expectile-training'
+export {
+  gamlssModel,
+  gamlssProblem,
+  gamlssRs,
+  gamlssTrace,
+  type GamlssData,
+  type GamlssModel,
+  type GamlssParameterSpec,
+  type GamlssProblem,
+  type GamlssSmoothing,
+  type GamlssSpec,
+  type GamlssState,
+} from './gamlss'
 export { ebmBoosting, explainableBoostingMachine, type EbmModel, type EbmParams, type EbmState } from './ebm'
 export { gamAlgorithms, gamFunctions } from './registry'

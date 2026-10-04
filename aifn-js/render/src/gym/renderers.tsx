@@ -2,14 +2,21 @@
  * Environment renderers for `GymTrainer`, one per `render.kind`: each draws the chosen episode at a step as one `Plot`.
  * `grid` draws a gridworld or maze (cells by kind, the path so far, the agent); `bandit` (an environment without a
  * render whose episodes are single pulls) draws the pulls per arm up to the chosen episode. Add a kind to
- * `GYM_RENDERERS` (`registry.ts`). `pendulum` and `cartpole` draw
- * classic control with `PendulumView` and `CartPoleView`.
+ * `GYM_RENDERERS` (`registry.ts`). `pendulum` and `cartpole` draw classic control with
+ * `PendulumView` and `CartPoleView`.
  */
 import { useMemo, type ComponentType } from 'react'
-import type { Trajectory, Training } from 'aifn-methods/gym'
-import type { CartPoleRender, Environment, EpisodeEnd, GridRender, PendulumRender } from 'aifn/foundation/contracts'
-import { Bars, Plot, Points, useAxis } from '@lab/viz'
-import { GridView } from './GridView'
+import type {
+  CartPoleRender,
+  Environment,
+  EpisodeEnd,
+  GridRender,
+  PendulumRender,
+  Trajectory,
+  Training,
+} from 'aifn/foundation/contracts'
+import { Bars, Plot, Points, useAxis } from '@render/viz'
+import { GridView, type GridValueField } from './GridView'
 import { CartPoleView } from './CartPoleView'
 import { PendulumView, type PendulumViewProps } from './PendulumView'
 
@@ -22,6 +29,8 @@ export type GymRenderProps = {
   training: Training<unknown>
   /** The chosen episode (1-based). */
   episode: number
+  /** The agent's state after the chosen episode (re-run from the nearest checkpoint; call it inside a memo). */
+  agentAfter: () => unknown
   /** Page-specific options of a renderer (the pendulum's draggable `start`). */
   options?: Readonly<Record<string, unknown>>
   /** At the episode's last step, how it ended: the scene is drawn in the destructive or the success tone. */
@@ -34,15 +43,36 @@ const toneOf = (end: EpisodeEnd | null | undefined): 'destructive' | 'success' |
 
 export type GymRenderer = ComponentType<GymRenderProps>
 
-/** A gridworld or maze: the shared `GridView` with the episode's path up to the step and the agent there. */
-export function GridRenderer({ env, trajectory, step, end }: GymRenderProps) {
+/** What the agent knows, drawn under the path: a value field and a greedy policy per cell index. */
+export type GridOverlay = { value?: GridValueField | null; policy?: ArrayLike<number> | null }
+
+/**
+ * Options of `GridRenderer` (`GymTrainerProps.rendererOptions`): `overlay` maps the agent's state after the chosen
+ * episode to a value field and policy (a tabular agent's max Q and greedy actions); `onPlotClick` takes clicks on the
+ * grid (toggling walls).
+ */
+export type GridRendererOptions = {
+  overlay?: (agent: unknown) => GridOverlay
+  onPlotClick?: (point: [number, number]) => void
+}
+
+/**
+ * A gridworld or maze: the shared `GridView` with the episode's path up to the step and the agent there, over what the
+ * agent had learnt after that episode when the page gives an `overlay`.
+ */
+export function GridRenderer({ env, trajectory, step, end, agentAfter, options }: GymRenderProps) {
+  const { overlay, onPlotClick } = (options ?? {}) as GridRendererOptions
+  const drawn = useMemo(() => (overlay ? overlay(agentAfter()) : null), [overlay, agentAfter])
   return (
     <GridView
       render={env.render as GridRender<unknown>}
       title={end ? `${env.name}: ${end.reason}` : env.name}
+      value={drawn?.value}
+      policy={drawn?.policy}
       path={trajectory.states}
       step={step}
       end={end}
+      onPlotClick={onPlotClick}
     />
   )
 }

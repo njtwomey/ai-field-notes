@@ -40,6 +40,7 @@ export {
   type ReinforceState,
   type TabularAgentState,
   type TabularOptions,
+  type TdControlOptions,
   type TdAgentState,
   type TdMethod,
   type TdPredictionState,

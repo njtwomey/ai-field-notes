@@ -104,8 +104,14 @@ export interface EnvironmentOracle<S, A> {
   optimalValues?(): Tensor
 }
 
+/** A numeric series of an environment's state, plotted against step under an episode's playback (an angle, a position). */
+export interface StateSeries<S> {
+  readonly name: string
+  value(state: S): number
+}
+
 /**
- * How the lab draws a state. `grid`: a `width` × `height` grid of cells, cell (x, y) at index y · width + x with y = 0 at
+ * How the lab draws a state. Every kind may name `series` of the state to plot against step. `grid`: a `width` × `height` grid of cells, cell (x, y) at index y · width + x with y = 0 at
  * the bottom row; `cells` names each cell's kind (`wall`, `goal`, …), `cell` gives a state's cell index, and
  * `actionVectors` the (dx, dy) of each action.
  */
@@ -116,6 +122,7 @@ export interface GridRender<S> {
   readonly cells: readonly string[]
   cell(state: S): Index
   readonly actionVectors: readonly (readonly [number, number])[]
+  readonly series?: readonly StateSeries<S>[]
 }
 
 /** `pendulum`: a rod of `length` pivoted at the origin, at `angle(state)` radians from upright (anticlockwise). */
@@ -123,6 +130,7 @@ export interface PendulumRender<S> {
   readonly kind: 'pendulum'
   readonly length: number
   angle(state: S): number
+  readonly series?: readonly StateSeries<S>[]
 }
 
 /**
@@ -135,6 +143,7 @@ export interface CartPoleRender<S> {
   readonly trackLimit: number
   cart(state: S): number
   angle(state: S): number
+  readonly series?: readonly StateSeries<S>[]
 }
 
 /** How to draw an environment's state. */
@@ -217,4 +226,95 @@ export interface Agent<G, O, A> {
   greedy?(agent: G, observation: O, legal?: readonly A[]): A
   /** Scalars that track learning (a value estimate, an exploration rate, a loss), for training curves. */
   scalars?(agent: G): Readonly<Record<string, number>>
+}
+
+// ── Traces ───────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+/**
+ * One episode in full, as the rollouts of `aifn-methods/gym` produce it and the views play it: environment states and
+ * observations (both from the reset to the arrival), actions and rewards.
+ */
+export interface Trajectory<S, O, A> {
+  states: S[]
+  observations: O[]
+  actions: A[]
+  rewards: number[]
+  /** The undiscounted sum of the rewards. */
+  episodeReturn: number
+  /** It ended at a terminal state, not by truncation. */
+  reachedTerminal: boolean
+  /** Σ pseudo-regret of its actions, when the environment's oracle knows expected rewards; else 0. */
+  regret: number
+  /** How it ended (success or failure, and why), when the environment says (`ending`); else null. */
+  ending: EpisodeEnd | null
+}
+
+/** A checkpoint of a training run: the agent's state after `episode` episodes (0 is the initial state). */
+export interface Checkpoint<G> {
+  episode: number
+  agent: G
+}
+
+/** A training run so far: per-episode columns (one entry per completed episode) and checkpoints. Plain data. */
+export interface Training<G> {
+  seed: number | string
+  /** Episodes requested (NaN under a step budget) and completed. */
+  total: number
+  episodes: number
+  /** The step budget (NaN under an episode budget) and the environment steps done. */
+  budget: number
+  steps: number
+  /** The checkpoint spacing in episodes (doubled whenever a step-budget run would exceed `maxCheckpoints`). */
+  every: number
+  /** Undiscounted return, length (steps) and whether it ended at a terminal state, per episode. */
+  returns: Float64Array
+  lengths: Float64Array
+  terminated: Uint8Array
+  /** Σ pseudo-regret per episode, when the environment's oracle knows expected rewards; else null. */
+  regret: Float64Array | null
+  /** 1 for a success, −1 for a failure, 0 when the environment does not say (`ending`). */
+  outcome: Int8Array
+  /** The episode's first action, for discrete actions (a bandit's pull); NaN otherwise. */
+  firstAction: Float64Array
+  /** The agent's `scalars` after each episode (NaN before a scalar first appears). */
+  scalars: Record<string, Float64Array>
+  /** The agent's state after every `every` episodes, from episode 0. */
+  checkpoints: Checkpoint<G>[]
+  /** The agent's state after the last completed episode. */
+  final: G
+  done: boolean
+}
+
+/** A call of a registered factory by its worker address (`<module>/<key>`) with plain parameters. */
+export interface FactoryCall {
+  readonly address: string
+  readonly params: object
+}
+
+/**
+ * What a training view needs to train an agent in an environment and play its episodes, with no knowledge of where
+ * either is defined: both as values on the page (to replay and evaluate episodes), the same two as worker calls with
+ * the training generator's address (to train off the main thread), and the functions that re-run a run's episodes.
+ * `aifn-methods/gym` `gymSetup` builds one from registry keys.
+ */
+export interface GymSetup {
+  readonly env: Environment<unknown, unknown, unknown>
+  readonly agent: Agent<unknown, unknown, unknown>
+  readonly envCall: FactoryCall
+  readonly agentCall: FactoryCall
+  /** The worker address of the training generator, called `(env, agent, { episodes | steps, seed })`. */
+  readonly trainingAddress: string
+  /** The environment `evaluate` plays in, when it differs from the trained one (another start state). */
+  readonly evaluationEnv?: Environment<unknown, unknown, unknown>
+  /** Training episode `episode` (1-based) exactly as it happened. */
+  replay(training: Training<unknown>, episode: number): Trajectory<unknown, unknown, unknown>
+  /** A fresh greedy episode in `env` of the agent as it was after `episode` episodes, on `seed`. */
+  evaluate(
+    env: Environment<unknown, unknown, unknown>,
+    training: Training<unknown>,
+    episode: number,
+    seed: number | string,
+  ): Trajectory<unknown, unknown, unknown>
+  /** The agent's state after `episode` episodes. */
+  agentAfter(training: Training<unknown>, episode: number): unknown
 }

@@ -51,6 +51,7 @@ export {
   type AdditiveShape,
 } from './additive'
 export { CURVE1D_CASES, curve1d, type Curve1dCase, type Curve1dOptions } from './curves'
+export { GROWTH_TRUTH, growthChart, type GrowthChartOptions } from './growth'
 export {
   friedman1,
   linearRegressionData,

@@ -54,6 +54,11 @@ export const SECTIONS = [
   },
   { id: 'animation', title: 'Animation', blurb: 'Players, step-through traces, live algorithms and frame loops.' },
   {
+    id: 'gym',
+    title: 'Gym and grids',
+    blurb: 'Grids for mazes, gridworlds and search; environment playback and the gym trainer.',
+  },
+  {
     id: 'interpreter',
     title: 'Interpreter',
     blurb: 'Type a program and see its value as a plot, controls, a table or an image.',

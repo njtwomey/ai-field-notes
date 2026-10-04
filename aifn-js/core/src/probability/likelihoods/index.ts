@@ -8,6 +8,9 @@
  *   deviance, canonical and default links, dispersion and pointwise log-likelihood.
  * - `likelihood(family, link?)`: the family through a link, with `mean(η)`, `logLik(y, η)`, the score ∂ℓ/∂η and the
  *   unit deviance.
+ * - Distributional-regression (GAMLSS) families (`distributionalFamily`: normal, Student t, Box–Cox Cole–Green,
+ *   gamma, Poisson), each parameter with its links, score and expected second derivative, cdf and quantile function;
+ *   `quantileResidual` and `wormPlot`.
  * - Ordinal likelihoods (`ordinalLikelihood`): cumulative, continuation-ratio and adjacent-category models over a
  *   logit, probit or cloglog latent cdf, with class probabilities and log-likelihoods in η and the thresholds.
  *
@@ -35,5 +38,21 @@ export {
   type Link,
   type LinkName,
 } from './families'
+export {
+  boxCoxColeGreenDistributional,
+  distributionalFamily,
+  distributionalLinks,
+  gammaDistributional,
+  normalDistributional,
+  poissonDistributional,
+  quantileResidual,
+  studentTDistributional,
+  type DistributionalFamily,
+  type DistributionalFamilyName,
+  type DistributionalParameter,
+  type DistributionalParameterInfo,
+  type WormPlot,
+  wormPlot,
+} from './distributional'
 export { ordinalLikelihood, type OrdinalLikelihood, type OrdinalLinkName, type OrdinalModel } from './ordinal'
 export { likelihoodRegistry, linkRegistry } from './registry'

@@ -1,6 +1,7 @@
 import { useMemo } from 'react'
 import { choice, row, slider, useFigureState } from '@lab/state'
-import { GymTrainer, gymEnvironment, gymSetup, trainingRun } from '@lab/views'
+import { gymEnvironment, gymSetup } from 'aifn-methods/gym'
+import { GymTrainer, trainingRun } from 'aifn-render/gym'
 
 type AgentKind = 'swing' | 'lqr' | 'random'
 

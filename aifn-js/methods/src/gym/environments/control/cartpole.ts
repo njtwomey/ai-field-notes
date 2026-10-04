@@ -186,7 +186,17 @@ export function cartPoleEnvironment(options: CartPoleOptions = {}): CartPoleEnvi
         : { success: false, reason: `cart left the track: x = ${s.x.toFixed(2)} m` }
     },
     model: { kind: 'dynamics', stateSize: 4, actionSize: 1, transition, reward: () => 1, encode, decode },
-    render: { kind: 'cartpole', poleLength: 2 * halfLength, trackLimit, cart: (s) => s.x, angle: (s) => s.theta },
+    render: {
+      kind: 'cartpole',
+      poleLength: 2 * halfLength,
+      trackLimit,
+      cart: (s) => s.x,
+      angle: (s) => s.theta,
+      series: [
+        { name: 'x (m)', value: (s) => s.x },
+        { name: 'θ (rad)', value: (s) => s.theta },
+      ],
+    },
   }
 }
 

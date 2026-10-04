@@ -7,10 +7,13 @@ aliases: [GAMLSS, distributional regression, location-scale model, RS algorithm]
 requires: [generalised-linear-model, iteratively-reweighted-least-squares]
 partOf: [generalised-additive-model]
 related: [expectile-generalised-additive-models, gamma-and-tweedie-regression]
-references: [rigby2005, stasinopoulos2007, wood2017]
+references: [rigby2005, stasinopoulos2007, wood2017, cole1992, wood2017fellner]
 status: draft
-updated: 2026-09-27
+updated: 2026-10-04
 ---
+
+import { GamlssGenerative } from './GamlssGenerative'
+import { GamlssFit } from './GamlssFit'
 
 <Definition>
 A **generalised additive model for location, scale and shape** (GAMLSS) assumes $y_i \sim \Dcal(\theta_{i1}, \dots,
@@ -34,6 +37,18 @@ need the 3rd and 97th centiles as smooth functions of age, and those depend on h
 only on the median. A GAMLSS gives each of these features its own additive predictor. The fitted distribution at each
 $\xvec$ then yields any quantile, interval or tail probability directly.
 
+## Each parameter as a smooth function
+
+A GAMLSS is a generative model: fix the curves $\eta_k(x)$ and the conditional law of $y$ follows at every $x$. In the
+figure each $\eta_k(x) = \sum_j c_{kj}B_j(x)$ is a cubic B-spline with six coefficients, drawn as control points on the
+link scale. The parameter itself is $\theta_k(x) = g_k^{-1}(\eta_k(x))$. The location $\mu$ moves the distribution. The
+scale $\sigma$ widens or narrows it without moving its centre. A shape parameter $\nu$ changes the tails (Student t) or
+the skewness (Box–Cox Cole–Green), so the centiles spread unequally about the median. A log link maps every real $\eta$
+to a positive $\sigma$. An identity link sets $\sigma = \eta$, and the distribution is undefined wherever that curve
+crosses zero.
+
+<GamlssGenerative />
+
 ## Fitting by penalised likelihood
 
 The estimate maximises the penalised log-likelihood
@@ -45,9 +60,36 @@ $$
 
 Rigby and Stasinopoulos's **RS algorithm** cycles over the parameters. It updates the predictor $\eta_k$ of one
 parameter by <NoteLink to="penalised-iteratively-reweighted-least-squares">penalised iteratively reweighted least
-squares (IRLS)</NoteLink> with the others held fixed, then moves to the next, until the likelihood stops changing
-<Cite id="rigby2005" />. Each inner step is an ordinary penalised weighted least-squares fit, so any smoother that a GAM
-can use works for any parameter.
+squares (IRLS)</NoteLink> with the others held fixed, then moves to the next, until the global deviance
+$\mathrm{GD} = -2\ell$ stops changing <Cite id="rigby2005" />. Each inner step is an ordinary penalised weighted
+least-squares fit, so any smoother that a GAM can use works for any parameter. The step for $\theta_k$ needs only the
+family's score $\partial\ell_i/\partial\theta_{ik}$ and expected second derivative
+$\expect[\partial^2\ell_i/\partial\theta_{ik}^2]$. The cross derivatives between parameters are not used.
+
+```text
+θ_k ← initial values; β_k ← least-squares fit of g_k(θ_k) on X_k
+repeat                                       # one RS cycle
+  for k = 1 … K                              # μ, then σ, then ν
+    repeat                                   # penalised IRLS
+      d_i ← dθ_ik/dη_ik
+      u_i ← (∂ℓ_i/∂θ_ik) d_i                 # score in η
+      w_i ← −E[∂²ℓ_i/∂θ_ik²] d_i²            # information in η
+      z_i ← η_ik + u_i / w_i                 # working response
+      β_k ← solve (X_kᵀWX_k + λ_k S_k) β = X_kᵀWz
+      while GD + Σ λ βᵀSβ rises: halve the step
+    until the penalised deviance settles
+    λ_k ← (rank S_k − λ_k tr(H_k⁻¹S_k)) / (β_kᵀS_kβ_k)
+until GD changes by less than 0.001
+```
+
+Here $\Hmat_k = \Xmat_k^\top\Wmat\Xmat_k + \lambda_k\Smat_k$. The update of $\lambda_k$ is the Fellner–Schall fixed
+point of the working model's marginal likelihood, in which $\betavec_k$ has a Gaussian prior with precision
+$\lambda_k\Smat_k$ <Cite id="wood2017fellner" />. This local maximum-likelihood step is optional; without it $\lambda_k$
+stays fixed. At fixed $\lambda$ every accepted step lowers the penalised deviance, so the penalised deviance never rises
+from one cycle to the next. The effective degrees of freedom of $\theta_k$ are
+$\operatorname{tr}(\Hmat_k^{-1}\Xmat_k^\top\Wmat\Xmat_k)$. The generalised Akaike information criterion
+$\mathrm{GAIC}(\kappa) = \mathrm{GD} + \kappa\,\mathrm{df}$ uses their sum over the parameters as $\mathrm{df}$;
+$\kappa = 2$ gives the AIC.
 
 **Worked example: a Gaussian location-scale model.** Let $y_i \sim \Gauss(\mu_i, \sigma_i^2)$ with $\eta_{i1} = \mu_i$
 and $\eta_{i2} = \log\sigma_i$. With $r_i = y_i - \mu_i$, the log-likelihood of one observation is
@@ -71,6 +113,35 @@ $$
 The scale smooths are refitted to $\zvec_2$ by penalised least squares with equal weights. An observation with residual
 $r_i = 2$ where the current $\sigma_i = 1$ has $z_{i2} = 0 + (4 - 1)/2 = 1.5$ and pulls $\log\sigma$ upward there. One
 with $r_i = 0.5$ has $z_{i2} = (0.25 - 1)/2 = -0.375$ and pulls it down. The algorithm alternates the two refits.
+
+## Worked example: growth centiles
+
+A growth reference chart gives the centiles of a body measurement as smooth functions of age. The synthetic data in the
+figure hold 1000 measurements at ages uniform on $[0, 18]$ years, drawn from a Box–Cox Cole–Green (BCCG) law. In BCCG,
+$z = ((y/\mu)^\nu - 1)/(\nu\sigma)$ is standard normal (truncated so that $y > 0$). Then $\mu$ is the median, $\sigma$
+is close to the coefficient of variation and $\nu$ is the Box–Cox power that makes $y$ symmetric. This is the LMS
+method of growth charts <Cite id="cole1992" />. The true $\sigma$ rises from 0.10 to 0.18 with age, and the true $\nu$
+falls from 1 (symmetric) to $-1$ (right-skewed). Each parameter that gets a smooth has a P-spline with 12 basis
+functions and $\lambda$ chosen by local maximum likelihood. The other parameters are constants.
+
+<GamlssFit />
+
+The table gives the fits at convergence for seed 1. The last two columns give the percentage of the data below the 3rd
+fitted centile and above the 97th, at ages under 6 and over 12. A correct model puts about 3% in each.
+
+| Family and smooths                | Cycles |     GD |   df | GAIC(2) | Ages 0–6    | Ages 12–18   |
+| --------------------------------- | -----: | -----: | ---: | ------: | ----------- | ------------ |
+| Normal, $\mu$ only                |      9 | 6847.4 |  8.4 |  6864.1 | 0.0% / 0.0% | 7.8% / 11.6% |
+| Normal, $\mu$ and $\sigma$        |     15 | 5763.3 | 16.8 |  5796.9 | 2.8% / 2.8% | 0.0% / 5.4%  |
+| BCCG, $\mu$, $\sigma$ and $\nu$   |     29 | 5702.7 | 14.5 |  5731.8 | 3.1% / 2.8% | 2.7% / 2.4%  |
+
+The mean-only model is a GAM with a constant $\sigma$. Its median follows the data, but its centiles are parallel to the
+median. They are too wide for infants, where no point falls outside them, and too narrow for adolescents, where 19.4% of
+the points fall outside instead of 6%. A smooth $\sigma$ sets the width at each age but keeps the normal's symmetry. For
+adolescents no point then falls below the 3rd centile, and 5.4% lie above the 97th. The BCCG fit models the skewness
+through $\nu$ and puts close to 3% in each tail at every age. Its GAIC is the lowest of the three. Its global deviance
+falls from 16656 at the starting values to 5756 after one cycle and 5699 after three. Local maximum likelihood then
+stiffens the $\sigma$ and $\nu$ smooths, and the global deviance rises to 5702.7 at convergence.
 
 ## Software
 

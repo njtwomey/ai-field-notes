@@ -147,6 +147,8 @@ export type TdMethod = 'sarsa' | 'q-learning' | 'expected-sarsa'
 /** A TD control agent's state; SARSA also holds the transition whose update waits for the next action. */
 export interface TdAgentState extends TabularAgentState {
   pending: Transition<number, number> | null
+  /** Episodes completed, for the decay of ε. */
+  episodes: number
 }
 
 /**
@@ -161,19 +163,29 @@ export function tdControlAgent({
   epsilon = 0.1,
   gamma,
   initialQ = 0,
-}: TabularOptions & { method?: TdMethod } = {}): Agent<TdAgentState, number, number> {
+  epsilonDecay = Infinity,
+}: TabularOptions & {
+  method?: TdMethod
+  /** ε decays as ε / (1 + e / `epsilonDecay`) after e episodes, so exploration fades. Default ∞ (no decay). */
+  epsilonDecay?: number
+} = {}): Agent<TdAgentState, number, number> {
+  const eps = (g: TdAgentState) => epsilon / (1 + g.episodes / epsilonDecay)
   const update = (Q: Float64Array, A: number, g: number, t: Transition<number, number>, boot: number) => {
     const k = t.observation * A + t.action
     Q[k] += alpha * (t.reward + (t.terminated ? 0 : g * boot) - Q[k])
   }
   return {
     name: method === 'sarsa' ? 'SARSA' : method === 'q-learning' ? 'Q-learning' : 'expected SARSA',
-    init: (env) => ({ ...qState(env, gamma, initialQ), pending: null }),
-    act: (g, o, stream, legal) => epsilonGreedyDecision(g.Q.data, o, g.Q.shape[1], epsilon, stream, legal),
+    init: (env) => ({ ...qState(env, gamma, initialQ), pending: null, episodes: 0 }),
+    act: (g, o, stream, legal) => epsilonGreedyDecision(g.Q.data, o, g.Q.shape[1], eps(g), stream, legal),
     ...valueBased,
+    // ε is a training curve only when it decays.
+    scalars: (g) => ({ 'mean max Q': meanMaxQ(g.Q), ...(epsilonDecay < Infinity && { ε: eps(g) }) }),
     learn(g, t) {
       const A = g.Q.shape[1]
       const Q = Float64Array.from(g.Q.data)
+      const epsilon = eps(g)
+      const episodes = g.episodes + (t.terminated || t.truncated ? 1 : 0)
       let pending: Transition<number, number> | null = null
       if (method === 'sarsa') {
         // The waiting update bootstraps from the action taken now; this one waits for the next action.
@@ -185,17 +197,20 @@ export function tdControlAgent({
           method === 'q-learning' ? maxQ(Q, t.next, A, t.nextLegal) : expectedQ(Q, t.next, A, epsilon, t.nextLegal)
         update(Q, A, g.gamma, t, t.terminated ? 0 : boot)
       }
-      return { Q: fromData(Q, g.Q.shape), gamma: g.gamma, updates: g.updates + 1, pending }
+      return { Q: fromData(Q, g.Q.shape), gamma: g.gamma, updates: g.updates + 1, pending, episodes }
     },
   }
 }
 
+/** Options of the TD control agents: those of every value-based agent, and the decay of ε. */
+export type TdControlOptions = TabularOptions & { epsilonDecay?: number }
+
 /** Q-learning (see `tdControlAgent`). */
-export const qLearningAgent = (options: TabularOptions = {}) => tdControlAgent({ ...options, method: 'q-learning' })
+export const qLearningAgent = (options: TdControlOptions = {}) => tdControlAgent({ ...options, method: 'q-learning' })
 /** SARSA (see `tdControlAgent`). */
-export const sarsaAgent = (options: TabularOptions = {}) => tdControlAgent({ ...options, method: 'sarsa' })
+export const sarsaAgent = (options: TdControlOptions = {}) => tdControlAgent({ ...options, method: 'sarsa' })
 /** Expected SARSA (see `tdControlAgent`). */
-export const expectedSarsaAgent = (options: TabularOptions = {}) =>
+export const expectedSarsaAgent = (options: TdControlOptions = {}) =>
   tdControlAgent({ ...options, method: 'expected-sarsa' })
 
 // ── n-step SARSA ─────────────────────────────────────────────────────────────────────────────────────────────────────

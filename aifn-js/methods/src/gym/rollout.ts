@@ -7,7 +7,7 @@
  * environment masks actions, and scores pseudo-regret when the environment's oracle knows expected rewards.
  */
 
-import type { Agent, Environment, EpisodeEnd, Status, StepContext, Transition } from 'aifn/foundation/contracts'
+import type { Agent, Environment, Status, StepContext, Trajectory, Transition } from 'aifn/foundation/contracts'
 import { child, replicate, stream as rootStream, type Stream } from 'aifn/foundation/random'
 import { fromData, type Tensor } from 'aifn/foundation/tensor'
 import type { Algorithm } from 'aifn/foundation/trace'
@@ -153,22 +153,6 @@ export function rollout<S, O, A, G>(
 }
 
 // ── episodes ─────────────────────────────────────────────────────────────────────────────────────────────────────────
-
-/** One episode in full: environment states, observations (both from the reset to the arrival), actions and rewards. */
-export interface Trajectory<S, O, A> {
-  states: S[]
-  observations: O[]
-  actions: A[]
-  rewards: number[]
-  /** The undiscounted sum of the rewards. */
-  episodeReturn: number
-  /** It ended at a terminal state, not by truncation. */
-  reachedTerminal: boolean
-  /** Σ pseudo-regret of its actions, when the environment's oracle knows expected rewards; else 0. */
-  regret: number
-  /** How it ended (success or failure, and why), when the environment says (`ending`); else null. */
-  ending: EpisodeEnd | null
-}
 
 /** How `runEpisode` acts: learning as in training, or a fixed policy (greedy when the agent has `greedy`). */
 export type EpisodeMode = 'learn' | 'greedy'

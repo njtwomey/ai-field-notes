@@ -778,8 +778,10 @@ export const HandleLayer = defineLayer<HandleSpec & CommonProps>({
   slotted: () => false,
   // An x guide's label sits above the plot area.
   margins: (p) => (p.kind === 'x' && p.label ? { labelRow: LABEL_ROW } : {}),
-  build: (p) => {
+  build: (p, ctx) => {
     const { name: _n, slot: _s, emphasis: _e, muted: _m, color: _c, live: _l, id: _i, stale: _st, ...handle } = p
-    return { series: [], handles: [handle as HandleSpec] }
+    // A palette slot (or an explicit colour) colours the handle like the series it moves; otherwise it stays ink.
+    const color = p.color ?? (p.slot !== undefined ? seriesColor(ctx.mode, p.slot) : undefined)
+    return { series: [], handles: [{ ...handle, ...(color ? { color } : {}) } as HandleSpec] }
   },
 })

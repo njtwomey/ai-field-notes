@@ -1,5 +1,5 @@
 import type { CartPoleRender } from 'aifn/foundation/contracts'
-import { Curve, Plot, Points, useAxis } from '@lab/viz'
+import { Curve, Plot, Points, useAxis } from '@render/viz'
 
 /** Props of `CartPoleView`: one step's environment state, drawn by the environment's `cartpole` render spec. */
 export type CartPoleViewProps<S> = {

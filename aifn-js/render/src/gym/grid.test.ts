@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { LANE_OFFSET, pathMoves } from './grid'
+import type { GridRender } from 'aifn/foundation/contracts'
+import { LANE_OFFSET, pathMoves, toneRows } from './grid'
 
 type Cell = readonly [number, number]
 
@@ -75,5 +76,35 @@ describe('pathMoves', () => {
     expect(v[0].slot).toBe(4)
     expect(pathMoves(cells, 99, { inkLatest: false }).every((m) => m.slot === 1)).toBe(true)
     expect(pathMoves(cells, 0)).toEqual([])
+  })
+
+  it('skips jumps of more than one cell, such as a trap returning the agent to the start', () => {
+    const cells: Cell[] = [
+      [0, 0],
+      [1, 0],
+      [2, 0],
+      [0, 0],
+      [0, 1],
+    ]
+    const v = pathMoves(cells, 4)
+    expect(v).toHaveLength(3)
+    expect(v.every((m) => Math.hypot(m.to[0] - m.from[0], m.to[1] - m.from[1]) < 1)).toBe(true)
+  })
+})
+
+describe('toneRows', () => {
+  it('puts tones in their slots, leaves walls empty unless toned, and the rest unassigned', () => {
+    const r: GridRender<number> = {
+      kind: 'grid',
+      width: 3,
+      height: 2,
+      cells: ['open', 'wall', 'open', 'wall', 'open', 'goal'],
+      cell: (s) => s,
+      actionVectors: [],
+    }
+    expect(toneRows(r, [0, -1, 1, 2, -1, -1], ['visited', 'frontier', 'path'])).toEqual([
+      [0, NaN, 1],
+      [2, -1, -1],
+    ])
   })
 })

@@ -2,7 +2,8 @@
  * `make examples-check`: render the gallery and every recipe page to HTML on the server (through Vite, so aliases, TSX
  * and `?raw` work) and report any that throw. Charts render their containers only (ECharts draws in the browser), so
  * this catches import errors, bad props and exceptions in recipe code, not visual problems. It also enforces the
- * import boundary (aifn-render, aifn and packages only; no aifn-methods, site or content) and warns about snippets
+ * import boundary (aifn-render, aifn and packages only; no site or content, and of aifn-methods only `aifn-methods/gym`
+ * in the gym section, whose views take an environment and an agent as values) and warns about snippets
  * longer than a recipe should be. `--imports-only` (run by `make lint`) checks the boundary alone.
  */
 import { readdirSync, readFileSync } from 'node:fs'
@@ -28,9 +29,13 @@ function checkImports(): number {
       const spec = match[1]
       const where = `${path.relative(root, file)}:${text.slice(0, match.index).split('\n').length}`
       const target = spec.startsWith('.') ? path.resolve(path.dirname(file), spec) : null
-      if (/^(@\/|@lab\/|site\/|content\/|aifn-methods)/.test(spec)) {
+      const gymRecipe =
+        file.startsWith(path.join(src, 'recipes', 'gym') + path.sep) && /^aifn-methods\/gym(\/|$)/.test(spec)
+      if (/^(@\/|@lab\/|site\/|content\/|aifn-methods)/.test(spec) && !gymRecipe) {
         errors++
-        console.error(`FAIL  ${where}: imports '${spec}'; examples import aifn-render, aifn and packages only`)
+        console.error(
+          `FAIL  ${where}: imports '${spec}'; examples import aifn-render, aifn and packages only (gym recipes also aifn-methods/gym)`,
+        )
       } else if (target && path.relative(root, target).startsWith('..') && !target.startsWith(renderRoot)) {
         errors++
         console.error(`FAIL  ${where}: imports '${spec}', which is outside aifn-js/examples`)

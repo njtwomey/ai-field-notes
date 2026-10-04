@@ -4,7 +4,7 @@
  * state and URL like any other; `GymTrainer` reads them from `state.run`. Pages declare no budget or seed fields.
  */
 import type { ReactNode } from 'react'
-import { choice, int, row, when } from '@lab/state'
+import { choice, int, row, when } from '@render/state'
 
 /** A page's default budget: a number of episodes or of environment steps, and the seed (default 1). */
 export type TrainingRunDefaults = ({ episodes: number } | { steps: number }) & {
@@ -53,6 +53,6 @@ export function trainingRun(defaults: TrainingRunDefaults) {
 export function trainingRunOf(state: unknown): { episodes?: number; steps?: number; seed: number } {
   const run = (state as { run?: Partial<TrainingRunValues> } | undefined)?.run
   if (!run || run.seed === undefined || !run.budget)
-    throw new Error('GymTrainer: the figure state needs `run: trainingRun(defaults)` (views/gym/trainingRun)')
+    throw new Error('GymTrainer: the figure state needs `run: trainingRun(defaults)` (aifn-render/gym trainingRun)')
   return run.budget === 'steps' ? { steps: run.steps, seed: run.seed } : { episodes: run.episodes, seed: run.seed }
 }

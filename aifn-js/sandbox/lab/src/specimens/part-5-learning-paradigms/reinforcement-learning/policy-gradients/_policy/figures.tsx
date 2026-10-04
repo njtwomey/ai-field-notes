@@ -8,7 +8,9 @@ import type { OfflineCheckpoint } from 'aifn-methods/gym/agents'
 import { Player } from '@lab/controls'
 import { ControlRow, Figure } from '@lab/layout'
 import { call, choice, float, int, row, slider, useFigureState, type AnyValues, type Task } from '@lab/state'
-import { GymTrainer, gymEnvironment, gymSetup, TrainControls, trainingRun, useTrainedRun } from '@lab/views'
+import { gymEnvironment, gymSetup } from 'aifn-methods/gym'
+import { GymTrainer, trainingRun } from 'aifn-render/gym'
+import { TrainControls, useTrainedRun } from '@lab/views'
 import { Curve, formatNumber, Handle, Plot, Plots, Readout, useAxis } from '@lab/viz'
 
 const fmt = (v: number, digits = 3) => (Number.isFinite(v) ? formatNumber(Number(v.toPrecision(digits))) : '—')
