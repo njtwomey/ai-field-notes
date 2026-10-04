@@ -1,0 +1,118 @@
+---
+title: Riemannian manifolds
+kind: concept
+summary: 'A Riemannian manifold $(\Mcal, g)$ equips each tangent space $T_p\Mcal$ with a smoothly varying inner product $g_p$. It defines intrinsic lengths, angles, geodesics, and the exponential map for optimization on constrained parameter spaces.'
+tags: [geometry, differential-geometry, riemannian-geometry, manifolds, geodesics, optimization]
+aliases: [Riemannian manifold, tangent space, metric tensor, Riemannian metric, exponential map, logarithmic map, retraction, Riemannian gradient descent, Stiefel manifold]
+requires: [vector-norms, dot-product, metric-spaces-and-geodesics]
+partOf: [geometry]
+related: [gradient-descent, ordinary-differential-equations, vector-fields-and-flows]
+references: [docarmo1992, absil2008]
+status: draft
+updated: 2026-10-04
+---
+
+import { RiemannianManifoldsExplorer } from './RiemannianManifoldsExplorer'
+
+<Definition>
+A **smooth manifold** $\Mcal$ of dimension $d$ is a topological space that locally resembles $\reals^d$ through a
+family of smooth coordinate charts. At every point $p \in \Mcal$, the vectors tangent to curves passing through $p$
+form a $d$-dimensional vector space called the **tangent space** $T_p\Mcal$.
+
+A **Riemannian manifold** $(\Mcal, g)$ equips each tangent space with a positive-definite inner product
+$g_p: T_p\Mcal \times T_p\Mcal \to \reals$ that varies smoothly with $p$. In local coordinates,
+$g_p(u, v) = u^\top G(p)\, v$, where $G(p) \in \reals^{d \times d}$ is the symmetric positive-definite **metric tensor**.
+</Definition>
+
+## Tangent spaces and the Riemannian metric
+
+In unconstrained machine learning, parameters $\thetavec \in \reals^D$ can move in any direction. When parameters must
+satisfy smooth constraints—such as unit-norm embeddings $\norm{\uvec} = 1$ or orthogonal matrices
+$\Wmat^\top\Wmat = \Imat$—the valid configurations form a submanifold embedded in ambient space.
+
+- **Tangent vectors:** If $\gamma: (-\epsilon, \epsilon) \to \Mcal$ is a smooth curve on the manifold with
+  $\gamma(0) = p$, its velocity $\dot{\gamma}(0)$ is a tangent vector $v \in T_p\Mcal$. For the unit sphere
+  $\mathbb{S}^{n-1} = \set{x \in \reals^n : \norm{x}^2 = 1}$, differentiating $x(t)^\top x(t) = 1$ shows that tangent
+  vectors are precisely those orthogonal to the position vector: $T_p \mathbb{S}^{n-1} = \set{v \in \reals^n : p^\top v = 0}$.
+- **Riemannian gradient:** Given a smooth loss function $f: \Mcal \to \reals$, its ambient Euclidean gradient
+  $\nabla_{\mathrm{E}} f(p)$ may point off the manifold. The **Riemannian gradient** $\operatorname{grad} f(p) \in T_p\Mcal$
+  is the orthogonal projection of $\nabla_{\mathrm{E}} f(p)$ onto the tangent space:
+  $$
+  \operatorname{grad} f(p) = \operatorname{Proj}_{T_p\Mcal}\paren{\nabla_{\mathrm{E}} f(p)}.
+  $$
+  For the sphere, $\operatorname{Proj}_{T_p \mathbb{S}^{n-1}}(u) = (\Imat - p p^\top) u = u - (p^\top u) p$.
+
+## The exponential map and retractions
+
+In Euclidean gradient descent, one updates parameters by stepping along the negative gradient: $\theta_{t+1} = \theta_t - \eta \nabla f(\theta_t)$.
+On a curved manifold, adding a tangent vector $p - \eta v$ escapes the manifold into ambient space.
+
+### The exponential map
+
+The **exponential map** $\exp_p: T_p\Mcal \to \Mcal$ maps a tangent vector $v$ to the point reached by following the
+unique geodesic $\gamma(t)$ initialised at $\gamma(0) = p$ with velocity $\dot{\gamma}(0) = v$ for unit time $t = 1$:
+
+$$
+\exp_p(v) = \gamma(1).
+$$
+
+On the unit sphere $\mathbb{S}^{n-1}$, geodesics are great circles, and the exponential map has the closed form:
+
+$$
+\exp_p(v) = \cos(\norm{v})\, p + \sin(\norm{v})\, \frac{v}{\norm{v}}.
+$$
+
+The inverse operation, the **logarithmic map** $\log_p(q) = v \in T_p\Mcal$, computes the tangent vector whose geodesic
+connects $p$ to $q$. The intrinsic Riemannian distance is simply the tangent norm: $d_\Mcal(p, q) = \norm{\log_p(q)}_g$.
+
+### Retractions
+
+Computing the exact exponential map requires integrating the geodesic differential equations, which can be prohibitively
+costly on complex manifolds. A **retraction** $\Rcal_p: T_p\Mcal \to \Mcal$ is any smooth, first-order approximation to
+$\exp_p$ satisfying <Cite id="absil2008" />:
+
+1. $\Rcal_p(0) = p$.
+2. The derivative of $\Rcal_p$ at $0$ is the identity: $D\Rcal_p(0)[v] = v$.
+
+For the sphere, the standard retraction normalises the ambient addition back to the surface:
+
+$$
+\Rcal_p(v) = \frac{p + v}{\norm{p + v}}.
+$$
+
+**Riemannian gradient descent** updates parameters using retractions: $p_{k+1} = \Rcal_{p_k}\paren{-\eta \operatorname{grad} f(p_k)}$.
+
+<RiemannianManifoldsExplorer />
+
+## Worked example
+
+Consider the unit sphere $\mathbb{S}^2 \subset \reals^3$. At base point $p = (1, 0, 0)^\top$, let the ambient gradient
+of a loss function be $g_{\mathrm{amb}} = (3, 2, 1)^\top$.
+
+1. **Riemannian gradient:** The tangent space $T_p\mathbb{S}^2$ consists of vectors with $x_1 = 0$.
+   Projecting $g_{\mathrm{amb}}$:
+   $$
+   \operatorname{grad} f(p) = g_{\mathrm{amb}} - (p^\top g_{\mathrm{amb}}) p = \begin{pmatrix} 3 \\ 2 \\ 1 \end{pmatrix} - 3 \begin{pmatrix} 1 \\ 0 \\ 0 \end{pmatrix} = \begin{pmatrix} 0 \\ 2 \\ 1 \end{pmatrix}.
+   $$
+2. **Tangent step:** With step size $\eta = 0.5$, the search vector is $v = -\eta \operatorname{grad} f(p) = (0, -1, -0.5)^\top$.
+   Its tangent norm is $\norm{v} = \sqrt{0^2 + (-1)^2 + (-0.5)^2} = \sqrt{1.25} \approx 1.118$ radians.
+3. **Exponential map:**
+   $$
+   p_{\text{new}} = \cos(1.118) \begin{pmatrix} 1 \\ 0 \\ 0 \end{pmatrix} + \sin(1.118) \frac{1}{1.118} \begin{pmatrix} 0 \\ -1 \\ -0.5 \end{pmatrix} \approx \begin{pmatrix} 0.437 \\ -0.804 \\ -0.402 \end{pmatrix}.
+   $$
+   Note that $\norm{p_{\text{new}}}^2 = 0.437^2 + 0.804^2 + 0.402^2 = 0.191 + 0.646 + 0.162 = 0.999 \approx 1.0$.
+4. **Retraction:**
+   $$
+   p + v = (1, -1, -0.5)^\top, \quad \norm{p + v} = \sqrt{1 + 1 + 0.25} = 1.5, \quad \Rcal_p(v) = \begin{pmatrix} 0.667 \\ -0.667 \\ -0.333 \end{pmatrix}.
+   $$
+   The retraction remains on the sphere with zero transcendental function evaluations.
+
+## Matrix manifolds in modern deep learning
+
+1. **Stiefel Manifold $\mathrm{St}(k, n)$:** Matrices with $k$ orthonormal columns in $\reals^n$. Used to constrain
+   weight matrices in recurrent neural networks to prevent exploding and vanishing gradients, and in transformer projection heads.
+2. **Grassmann Manifold $\mathrm{Gr}(k, n)$:** The space of all $k$-dimensional linear subspaces of $\reals^n$, invariant
+   to choice of basis. Used in subspace clustering and domain adaptation.
+3. **Symmetric Positive-Definite (SPD) Manifold $\Scal_{++}^n$:** Covariance matrices and diffusion tensors. Under the
+   affine-invariant Riemannian metric $d(A, B) = \norm{\log(A^{-1/2} B A^{-1/2})}_{\mathrm{F}}$, interpolation between
+   covariances preserves positive definiteness without swelling artifacts.

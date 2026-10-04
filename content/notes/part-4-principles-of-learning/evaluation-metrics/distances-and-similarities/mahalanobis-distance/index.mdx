@@ -1,0 +1,129 @@
+---
+title: Mahalanobis distance
+kind: concept
+summary: 'Measures distance scaled by data covariance, identical to Euclidean distance after statistical whitening $\mathbf{z} = \mathbf{\Sigma}^{-1/2}(\mathbf{x} - \boldsymbol{\mu})$.'
+tags: [metrics, distance, covariance, whitening, statistics, outlier-detection, metric-learning]
+aliases: [Mahalanobis metric, statistical distance, covariance-scaled distance, whitening transformation, generalized distance]
+requires: [vector-norms, dot-product, positive-definite-matrices]
+partOf: [geometry]
+related: [pairwise-distances-and-cosine-similarity, metric-spaces-and-geodesics, variance-and-covariance]
+references: [mahalanobis1936, weinberger2009]
+status: draft
+updated: 2026-10-04
+---
+
+import { MahalanobisExplorer } from './MahalanobisExplorer'
+
+<Definition>
+For a random vector $\xvec \in \reals^d$ with mean $\muvec \in \reals^d$ and symmetric positive-definite covariance matrix
+$\Sigmamat \in \reals^{d \times d}$, the **Mahalanobis distance** between a point $\xvec$ and the mean $\muvec$ is <Cite id="mahalanobis1936" />:
+
+$$
+D_M(\xvec, \muvec) = \sqrt{(\xvec - \muvec)^\top \Sigmamat^{-1} (\xvec - \muvec)}.
+$$
+
+Between two points $\xvec, \yvec \in \reals^d$, the pairwise distance is:
+
+$$
+D_M(\xvec, \yvec) = \sqrt{(\xvec - \yvec)^\top \Sigmamat^{-1} (\xvec - \yvec)}.
+$$
+
+When $\Sigmamat = \sigma^2 \Imat$ (spherical covariance), $D_M$ reduces to standard Euclidean distance scaled by $1/\sigma$:
+$D_M(\xvec, \yvec) = \frac{1}{\sigma}\norm{\xvec - \yvec}_2$.
+</Definition>
+
+## Why Euclidean distance fails in correlated spaces
+
+Standard <NoteLink to="pairwise-distances-and-cosine-similarity">Euclidean distance</NoteLink> $\norm{\xvec - \yvec}_2$ treats
+every coordinate axis independently and symmetrically. In real datasets, this assumption leads to two major failure modes:
+
+1. **Scale heterogeneity:** If feature 1 is measured in millimeters ($\sigma_1 \approx 1000$) and feature 2 in meters
+   ($\sigma_2 \approx 1$), Euclidean distance is dominated entirely by feature 1, ignoring meaningful variation in feature 2.
+2. **Correlation and directionality:** When features covary, data points disperse along oblique axes. Points that deviate from
+   the center along the direction of natural correlation are expected fluctuations, whereas deviations orthogonal to that direction
+   represent severe anomalies.
+
+Euclidean distance measures absolute spatial separation; Mahalanobis distance measures separation **in units of standard deviation**
+along the principal axes of variation.
+
+## Equivalence to statistical whitening
+
+The metric tensor defining Mahalanobis distance is the inverse covariance $\Sigmamat^{-1}$. Because $\Sigmamat$ is symmetric
+and positive definite, it has an eigendecomposition:
+
+$$
+\Sigmamat = \Vmat \Lambdamat \Vmat^\top,
+$$
+
+where $\Vmat = [\vvec_1, \dots, \vvec_d]$ is an orthogonal matrix of eigenvectors and $\Lambdamat = \operatorname{diag}(\lambda_1, \dots, \lambda_d)$
+contains strictly positive eigenvalues ($\lambda_i = \sigma_i^2$). The inverse square root matrix, or **whitening matrix**, is:
+
+$$
+\Sigmamat^{-1/2} = \Vmat \Lambdamat^{-1/2} \Vmat^\top.
+$$
+
+Applying the whitening transformation to center and uncorrelate the data:
+
+$$
+\zvec = \Sigmamat^{-1/2} (\xvec - \muvec),
+$$
+
+the covariance of $\zvec$ becomes the identity matrix:
+
+$$
+\cov(\zvec) = \Sigmamat^{-1/2} \Sigmamat \Sigmamat^{-1/2} = \Imat_d.
+$$
+
+Substituting $\zvec$ into the Euclidean norm reveals the fundamental identity:
+
+$$
+\norm{\zvec}_2^2 = \zvec^\top \zvec = (\xvec - \muvec)^\top \Sigmamat^{-1/2} \Sigmamat^{-1/2} (\xvec - \muvec) = (\xvec - \muvec)^\top \Sigmamat^{-1} (\xvec - \muvec) = D_M(\xvec, \muvec)^2.
+$$
+
+Mahalanobis distance in the original coordinate space is **identically equal to standard Euclidean distance in the whitened space**.
+Elliptical isoprobability contours in $\xvec$ map to concentric spherical contours in $\zvec$.
+
+<MahalanobisExplorer />
+
+## Relationship to Gaussian likelihood and outlier detection
+
+In a multivariate Gaussian distribution $\xvec \sim \Gauss(\muvec, \Sigmamat)$, the probability density is:
+
+$$
+p(\xvec) = \frac{1}{(2\pi)^{d/2} \det(\Sigmamat)^{1/2}} \exp\paren{-\frac{1}{2} D_M^2(\xvec, \muvec)}.
+$$
+
+The level sets of constant probability density $p(\xvec) = c$ are precisely the ellipsoids of constant Mahalanobis distance $D_M(\xvec, \muvec) = r$.
+
+### The $\chi^2$ distribution of squared distances
+
+Under the Gaussian assumption, the whitened variable $\zvec = \Sigmamat^{-1/2}(\xvec - \muvec) \sim \Gauss(\zeros, \Imat_d)$ is a vector of
+$d$ independent standard normal random variables. Consequently, the squared Mahalanobis distance is the sum of $d$ squared standard normals:
+
+$$
+D_M^2(\xvec, \muvec) = \sum_{k=1}^d z_k^2 \sim \chi^2(d).
+$$
+
+This distribution provides exact, principled statistical thresholds for anomaly detection:
+- In $d = 2$, $D_M^2 \le 5.99$ encompasses $95\%$ of probability mass ($\chi^2_{0.95}(2) \approx 5.99$, or $D_M \approx 2.45$).
+- Any observation with $D_M^2 > \chi^2_{1 - \alpha}(d)$ can be rejected as an outlier at significance level $\alpha$.
+
+## Metric learning and generalized Mahalanobis distances
+
+In supervised classification, Euclidean distance between raw feature vectors often groups different classes together.
+**Distance metric learning** replaces the empirical inverse covariance $\Sigmamat^{-1}$ with a parameterised positive semi-definite matrix $\Mmat \succeq 0$:
+
+$$
+d_\Mmat(\xvec, \yvec) = \sqrt{(\xvec - \yvec)^\top \Mmat (\xvec - \yvec)}.
+$$
+
+Factoring $\Mmat = \Lmat^\top \Lmat$ for some transformation matrix $\Lmat \in \reals^{k \times d}$:
+
+$$
+d_\Mmat(\xvec, \yvec) = \sqrt{(\xvec - \yvec)^\top \Lmat^\top \Lmat (\xvec - \yvec)} = \norm{\Lmat \xvec - \Lmat \yvec}_2.
+$$
+
+Methods like **Large Margin Nearest Neighbor (LMNN)** <Cite id="weinberger2009" /> optimize $\Mmat$ via semidefinite programming so that
+$k$-nearest neighbours always belong to the same class while points from differing classes are separated by a large margin.
+Modern deep metric learning (e.g. triplet loss and contrastive representation learning) can be viewed as learning a nonlinear neural feature map
+$\phi_\theta(\xvec)$ such that the Euclidean distance $\norm{\phi_\theta(\xvec) - \phi_\theta(\yvec)}_2$ acts as an optimal generalized metric.
