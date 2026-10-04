@@ -53,7 +53,7 @@ export function FeatureAttributionExplorer() {
         const z = 1.8 * x0 - 1.2 * x1 + 2.5 * x2 * x3 + 0.1 * x4 - 0.05 * x5
         out[r] = 1 / (1 + Math.exp(-z))
       }
-      return out
+      return fromData(out, [m])
     }
   }, [])
 
@@ -74,7 +74,7 @@ export function FeatureAttributionExplorer() {
   const prediction = useMemo(() => {
     const input = fromData(instance, [1, 6])
     const out = scoringModel(input)
-    return toFlat(out as Tensor)[0]
+    return 'shape' in out ? toFlat(out as Tensor)[0] : (out as Float64Array)[0]
   }, [scoringModel, instance])
 
   // Compute local attributions
