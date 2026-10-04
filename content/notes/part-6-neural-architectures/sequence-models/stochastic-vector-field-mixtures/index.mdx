@@ -1,0 +1,102 @@
+---
+title: Stochastic vector field mixtures
+kind: concept
+summary: 'Stochastic vector field mixtures (SVFM) extend neural ODEs to multimodal dynamics. Where standard Lipschitz ODEs cannot cross or branch, SVFM combines K vector fields with directional and speed stochasticity, dynamic forward-filtering gating and path regularisation.'
+tags: [neural-ode, continuous-time-models, sequence-models, dynamical-systems, trajectory-modelling, worked-example]
+aliases: [SVFM, stochastic vector field mixture, neural ODE mixture, SVF, VFM, forward filtering, stochastic vector fields]
+requires: [neural-ordinary-differential-equations, gaussian-mixture-model, numerical-ode-solvers]
+related: [neural-ordinary-differential-equations, structured-state-space-models, normalising-flow]
+references: [twomey2020, dupont2019, chen2018]
+status: draft
+updated: 2026-10-04
+---
+
+import { SvfmExplorer } from './SvfmExplorer'
+
+<Definition>
+A **stochastic vector field mixture** (SVFM) models continuous-time latent states $\hvec(t) \in \reals^D$ through a
+mixture of $K$ candidate vector fields $\fvec^{(k)}(\hvec(t), t; \thetavec)$, governed by time-dependent mixing
+probabilities $\pivec(t) \in \Delta^{K-1}$:
+
+$$
+\dot{\hvec}(t) = \sum_{k=1}^K \pi_k(t) \, \fvec^{(k)}\paren{\hvec(t), t; \thetavec},
+$$
+
+where each component $\fvec^{(k)}$ can be either a deterministic vector field (VF) or a **stochastic vector field**
+(SVF) parameterized by a directional distribution on the unit sphere and a speed distribution on $\reals_{>0}$
+<Cite id="twomey2020" />.
+</Definition>
+
+## Why standard neural ODEs fail on branching and crossing
+
+A standard <NoteLink to="neural-ordinary-differential-equations">neural ordinary differential equation</NoteLink>
+governs trajectories by $\dot{\hvec}(t) = \fvec_{\thetavec}(\hvec(t), t)$. When $\fvec_{\thetavec}$ is Lipschitz
+continuous, the Picard–Lindelöf theorem guarantees that initial value problems have unique solutions:
+trajectories starting at distinct points can never cross, merge, or branch in state space <Cite id="chen2018" />.
+
+While uniqueness ensures invertibility in continuous normalising flows, it creates structural bottlenecks for real-world
+processes:
+
+1. **Splitting / Multimodal outcomes:** If a system begins at state $\xvec(0) \approx \zeros$ and can diverge towards
+   distinct destinations (such as pedestrians choosing left or right hallways), a single deterministic ODE is forced to
+   average the destinations, predicting a physically impossible intermediate state.
+2. **Crossing:** If two trajectories must swap coordinates (for instance, $x_1(0) = -1 \to x_1(1) = 1$ and
+   $x_2(0) = 1 \to x_2(1) = -1$ in 1-D), their continuous paths would need to intersect, which is impossible without
+   lifting the state into unobserved dimensions (as in augmented neural ODEs <Cite id="dupont2019" />).
+3. **Scaling / Heterogeneous speeds:** When instances travel along the same direction but cover widely differing
+   distances, a single deterministic field requires extreme gradients or stiffness in the ODE solver.
+
+## The SVFM formulation
+
+To resolve these limitations, Twomey et al. <Cite id="twomey2020" /> introduce a lattice of continuous-depth models:
+
+- **Deterministic Vector Field (VF):** An MLP predicting the derivative $\dot{\hvec} = \fvec(\hvec, t)$.
+- **Stochastic Vector Field (SVF):** Separates the vector field into an **orientation** $\uvec$ on the unit sphere
+  and a scalar **speed** $v > 0$:
+
+$$
+\uvec \sim \Ncal_s\paren{\muvec^{(u)}, \tau^{(u)}}, \qquad \log v \sim \Ncal\paren{\log \mu^{(v)}, \tau^{(v)}}, \qquad \dot{\hvec} = v \, \uvec.
+$$
+
+The spherical distribution $\Ncal_s$ is constructed as a projected normal distribution with tangential projection
+$\Pmat = \Imat - \muvec^{(u)} {\muvec^{(u)}}^\top$, ensuring directional consistency ($\uvec^\top \muvec^{(u)} > 0$)
+while capturing velocity spread.
+
+### Component selection: pick-and-stick vs forward filtering
+
+When $K > 1$, assigning instances to vector fields over time can follow two regimes:
+
+1. **Pick-and-stick:** Initial routing $\pivec(t_0) = \operatorname{softmax}(\fvec_\pi(\hvec(t_0), t_0))$ is evaluated
+   at the start and held constant throughout the trajectory ($\pivec(t) = \pivec(t_0)$).
+2. **Forward filtering:** Dynamic gating where a transition matrix $\boldsymbol{\Psi}(t) \in \reals^{K \times K}$ and
+   emission vector $\boldsymbol{\psi}(t) \in \Delta^{K-1}$ allow trajectories to transition between vector fields at
+   branching points:
+
+$$
+\pivec(t_i) \propto \boldsymbol{\Psi}(t_i)^\top \paren{\boldsymbol{\psi}(t_i) \odot \pivec(t_{i-1})}.
+$$
+
+### Path regularisation
+
+Unregularised neural ODEs often develop convoluted, high-frequency vector fields that require hundreds of numerical
+solver steps (NFEs). SVFM incorporates path regularisers:
+
+- **Transport loss ($\Lcal_T$):** Penalises kinetic energy $\int_0^T \|\dot{\hvec}(t)\|^2 \, dt$, encouraging straight,
+  constant-velocity paths.
+- **Variance loss ($\Lcal_V$):** Penalises spatial variation across the vector field along the trajectory, dampening
+  spurious oscillations.
+
+<SvfmExplorer />
+
+## Worked comparison
+
+Consider the splitting problem with $x(0) \approx 0$ and targets $y \in \{-1, +1\}$:
+
+- **Standard Neural ODE (VF):** The loss $\expect[(h(1) - y)^2]$ forces the flow to converge to $h(1) \approx 0$,
+  completely failing to capture either target branch.
+- **SVF (Single stochastic field):** Generates speed variance, spreading outputs along a Gaussian cloud around 0, but
+  cannot split into two well-separated modes.
+- **VFM ($K=2$):** Component 1 drives paths towards $+1$ and Component 2 drives paths towards $-1$. The mixture weights
+  $\pi_1 \approx 0.5$ and $\pi_2 \approx 0.5$ correctly capture both destination clusters.
+- **SVFM ($K=2$ with SVF units):** Captures both modes while accurately modelling the spread within each destination
+  cluster.
