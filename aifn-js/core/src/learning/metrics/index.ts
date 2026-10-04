@@ -4,7 +4,7 @@
  * calibration, regression errors and deviances, clustering indices, agreement, bootstrap and DeLong intervals, ranking
  * metrics, vector distances, embedding alignment and uniformity, and ordinal metrics; `metricRegistry`, `getMetric`,
  * `listMetrics`. Application metrics (text, detection, quality, generative, fairness, beyond-accuracy) are in
- * `aifn-applied/evaluation`.
+ * `aifn-methods/evaluation`.
  */
 
 export {
@@ -250,7 +250,7 @@ export {
   ordinalConcordanceIndex,
 } from './ordinal'
 
-// Helpers for defining metrics outside this module (the application metrics of `aifn-applied/evaluation`): the input
+// Helpers for defining metrics outside this module (the application metrics of `aifn-methods/evaluation`): the input
 // conventions every metric here follows.
 export {
   classesOf,

@@ -1,18 +1,23 @@
-import { useMemo, useState } from 'react'
+import { useMemo } from 'react'
 import {
-  Heatmap,
-  Interactive,
-  ParamButton,
-  ParamChoice,
-  ParamSlider,
-  Readout,
-  XYChart,
+  Bars,
+  choice,
+  Curve,
+  Figure,
+  float,
   formatNumber,
-  useParam,
-  type Handle,
-  type XYSeries,
+  Handle,
+  int,
+  Plot,
+  Points,
+  Raster,
+  Readout,
+  seriesLayers,
+  type SeriesSpec,
+  useAxis,
+  slider,
+  useFigureState,
 } from 'aifn-render'
-import { linspace, rng } from '@/lib/math'
 import {
   basisSize,
   crossProduct,
@@ -23,6 +28,8 @@ import {
   transposeTimes,
   uniformKnots,
 } from '../_shared/core-smoothing'
+import { linspace, toFlat } from 'aifn/foundation/tensor'
+import { normal, stream, uniform } from 'aifn/foundation/random'
 
 type Order = '1' | '2' | '3'
 const ORDER_OPTIONS = [
@@ -31,50 +38,50 @@ const ORDER_OPTIONS = [
   { value: '3' as const, label: "f'''" },
 ]
 const PRIME = { '1': '′', '2': '″', '3': '‴' }
-const GRID = linspace(0, 1, 201)
+const GRID = toFlat(linspace(0, 1, 201))
+/** Five equal intervals on [0, 1]: eight cubic B-splines. */
+const KNOTS = uniformKnots(5, 0, 1)
+const P = basisSize(KNOTS)
 
 /** Greville abscissa of B-spline k: the mean of its interior knots, where it peaks for equally spaced knots. */
 const greville = (t: number[], k: number, q = 3) => t.slice(k + 1, k + q + 1).reduce((a, b) => a + b, 0) / q
 
 /** Eight cubic B-splines, their m-th derivatives and the penalty matrix S_kl = ∫ B_k^(m) B_l^(m) dx. */
 export function PenaltyMatrix() {
-  const [order, setOrder] = useState<Order>('2')
+  const state = useFigureState({
+    order: choice<Order>(ORDER_OPTIONS, '2', { label: 'penalised derivative' }),
+    k: slider(1, P, 4, { step: 1, label: 'basis function k', format: (v) => String(v) }),
+  })
+  const { order, k } = state
   const m = Number(order)
-  const t = useMemo(() => uniformKnots(5, 0, 1), [])
-  const p = basisSize(t)
-  const k = useParam(4, { min: 1, max: p, step: 1 })
+  const t = KNOTS
+  const p = P
   const values = useMemo(() => designMatrix(GRID, t), [t])
   const derivs = useMemo(() => designMatrix(GRID, t, 3, m), [t, m])
   const S = useMemo(() => derivativePenalty(t, 3, m, 0, 1), [t, m])
   const scale = Math.max(...S.flat().map(Math.abs))
   const idx = Array.from({ length: p }, (_, i) => i + 1)
 
-  const lines = (M: number[][]): XYSeries[] =>
+  const lines = (M: number[][]): SeriesSpec[] =>
     idx.map((j) => ({
-      name: j === k.value ? `B${j}` : 'other B-splines',
+      name: j === k ? `B${j}` : 'other B-splines',
       type: 'line',
       x: GRID,
       y: M.map((row) => row[j - 1]),
-      ...(j === k.value ? { slot: 0 } : { muted: true }),
+      ...(j === k ? { slot: 0 } : { muted: true }),
     }))
-  const handles: Handle[] = [
-    {
-      kind: 'x',
-      at: greville(t, k.value - 1),
-      label: `B${k.value}`,
-      onDrag: (x) => {
-        // Pick the basis function whose peak is nearest the pointer.
-        const dist = idx.map((j) => Math.abs(greville(t, j - 1) - x))
-        k.set(dist.indexOf(Math.min(...dist)) + 1)
-      },
-    },
-  ]
-  const row = S[k.value - 1]
+  const row = S[k - 1]
   const rank = p - m
   const rowSum = row.reduce((a, b) => a + b, 0)
 
+  const xAxis = useAxis({ label: 'x', range: [0, 1] })
+  const yAxis = useAxis({ label: 'B_k(x)', range: [0, 0.7] })
+  const xAxis2 = useAxis({ label: 'x', range: [0, 1] })
+  const yAxis2 = useAxis({ label: `B_k${PRIME[order]}(x)`, hold: 'union' })
+  const xAxis3 = useAxis({ label: 'l' })
+  const yAxis3 = useAxis({ label: 'k' })
   return (
-    <Interactive
+    <Figure
       title="From basis functions to the penalty matrix"
       caption={
         <>
@@ -84,15 +91,10 @@ export function PenaltyMatrix() {
           derivative, and S has rank p − m.
         </>
       }
-      controls={
+      state={state}
+      readouts={
         <>
-          <ParamChoice label="penalised derivative" value={order} onChange={setOrder} options={ORDER_OPTIONS} />
-          <ParamSlider label="basis function k" param={k} withArrows format={(v) => String(v)} />
-        </>
-      }
-      readout={
-        <>
-          <Readout label={`S_kk`} value={formatNumber(row[k.value - 1])} />
+          <Readout label={`S_kk`} value={formatNumber(row[k - 1])} />
           <Readout label="row sum of S" value={formatNumber(Math.abs(rowSum) < 1e-9 * scale ? 0 : rowSum)} />
           <Readout label="rank of S" value={`${rank} of ${p}`} />
           <Readout label="null space" value={m === 1 ? 'constants' : m === 2 ? 'lines' : 'quadratics'} />
@@ -100,30 +102,35 @@ export function PenaltyMatrix() {
       }
     >
       <div className="grid gap-2 lg:grid-cols-3">
-        <XYChart
-          series={lines(values)}
-          xRange={[0, 1]}
-          yRange={[0, 0.7]}
-          xLabel="x"
-          yLabel="B_k(x)"
-          handles={handles}
-          height={240}
-        />
-        <XYChart series={lines(derivs)} xRange={[0, 1]} xLabel="x" yLabel={`B_k${PRIME[order]}(x)`} height={240} />
-        <Heatmap
-          x={idx}
-          y={idx}
-          z={S.map((r) => r.map((v) => v / scale))}
-          scale="diverging"
-          range={[-1, 1]}
-          xLabel="l"
-          yLabel="k"
-          valueLabel="S_kl / max|S|"
-          marker={[k.value, k.value]}
-          height={240}
-        />
+        <Plot x={xAxis} y={yAxis} height={240}>
+          {seriesLayers(lines(values))}
+          <Handle
+            kind="x"
+            at={greville(t, k - 1)}
+            label={`B${k}`}
+            onDrag={(x) => {
+              // Pick the basis function whose peak is nearest the pointer.
+              const dist = idx.map((j) => Math.abs(greville(t, j - 1) - x))
+              state.set('k', dist.indexOf(Math.min(...dist)) + 1)
+            }}
+          />
+        </Plot>
+        <Plot x={xAxis2} y={yAxis2} height={240}>
+          {seriesLayers(lines(derivs))}
+        </Plot>
+        <Plot x={xAxis3} y={yAxis3} height={240}>
+          <Raster
+            x={idx}
+            y={idx}
+            z={S.map((r) => r.map((v) => v / scale))}
+            scale={'diverging'}
+            range={[-1, 1]}
+            valueLabel={'S_kl / max|S|'}
+          />
+          <Points x={[k]} y={[k]} emphasis live />
+        </Plot>
       </div>
-    </Interactive>
+    </Figure>
   )
 }
 
@@ -133,17 +140,19 @@ const truth = (x: number) => Math.sin(2 * Math.PI * x) + 0.6 * x
 
 /** A penalised cubic spline in the Demmler–Reinsch basis: the fit, its m-th derivative and the shrinkage factors. */
 export function PenaltyShrinkage() {
-  const [order, setOrder] = useState<Order>('2')
-  const m = Number(order)
-  const [logLambda, setLogLambda] = useState(-4)
-  const [seed, setSeed] = useState(3)
-  const lambda = 10 ** logLambda
+  const state = useFigureState({
+    order: choice<Order>(ORDER_OPTIONS, '2', { label: 'penalised derivative' }),
+    logLambda: float(-4, { min: -10, max: 4, step: 0.1, label: 'log₁₀ λ', format: (v) => v.toFixed(1) }),
+    seed: int(3, { ge: 0, label: 'seed' }),
+  })
+  const m = Number(state.order)
+  const lambda = 10 ** state.logLambda
 
   const data = useMemo(() => {
-    const r = rng(seed)
-    const x = Array.from({ length: N }, () => r.uniform())
-    return { x, y: x.map((xi) => truth(xi) + 0.3 * r.normal()) }
-  }, [seed])
+    const r = stream(state.seed)
+    const x = Array.from({ length: N }, () => uniform(r))
+    return { x, y: x.map((xi) => truth(xi) + 0.3 * normal(r)) }
+  }, [state.seed])
   const t = useMemo(() => uniformKnots(K, 0, 1), [])
   const B = useMemo(() => designMatrix(data.x, t), [data, t])
   const BtB = useMemo(() => crossProduct(B), [B])
@@ -172,18 +181,25 @@ export function PenaltyShrinkage() {
   const penalty = dr.d.reduce((acc, d, k) => acc + (k < nullDim ? 0 : d) * (s[k] * shrink[k]) ** 2, 0)
   const edf = shrink.reduce((a, b) => a + b, 0)
 
-  const fitSeries: XYSeries[] = [
-    { name: 'data', type: 'scatter', x: data.x, y: data.y, muted: true },
-    { name: 'λ → ∞ limit', type: 'line', x: GRID, y: times(gridB, limit), slot: 1, dashed: true },
-    { name: 'fit', type: 'line', x: GRID, y: times(gridB, beta), slot: 0 },
-  ]
-  const derivSeries: XYSeries[] = [{ name: `f${PRIME[order]}`, type: 'line', x: GRID, y: times(gridD, beta), slot: 0 }]
+  const fitSeries = [
+    { name: 'data', x: data.x, y: data.y, muted: true },
+    { name: 'λ → ∞ limit', x: GRID, y: times(gridB, limit), slot: 1, dashed: true },
+    { name: 'fit', x: GRID, y: times(gridB, beta), slot: 0 },
+  ] as const
+  const derivSeries = [{ name: `f${PRIME[state.order]}`, x: GRID, y: times(gridD, beta), slot: 0 }] as const
   const ks = shrink.map((_, k) => k + 1)
-  const shrinkSeries: XYSeries[] = [{ name: '1 / (1 + λ d_k)', type: 'bar', x: ks, y: shrink, slot: 0 }]
+  const shrinkSeries = [{ name: '1 / (1 + λ d_k)', x: ks, y: shrink, slot: 0 }] as const
 
+  const xAxis = useAxis({ label: 'x', range: [0, 1] })
+  const yAxis = useAxis({ label: 'y', range: [-2, 2.5] })
+  const xAxis2 = useAxis({ label: 'x', range: [0, 1] })
+  const yAxis2 = useAxis({ label: `f${PRIME[state.order]}(x)`, hold: 'union' })
+  const xAxis3 = useAxis({ label: 'k', range: [0.5, ks.length + 0.5] })
+  const yAxis3 = useAxis({ label: 'shrinkage', range: [0, 1] })
   return (
-    <Interactive
+    <Figure
       title="The penalty as shrinkage"
+      state={state}
       caption={
         <>
           Eighty noisy points and a penalised cubic spline with 23 basis functions. The centre chart shows the m-th
@@ -193,42 +209,29 @@ export function PenaltyShrinkage() {
           grows the fit tends to the dashed least-squares polynomial.
         </>
       }
-      controls={
-        <>
-          <ParamChoice label="penalised derivative" value={order} onChange={setOrder} options={ORDER_OPTIONS} />
-          <ParamSlider
-            label="log₁₀ λ"
-            value={logLambda}
-            onChange={setLogLambda}
-            min={-10}
-            max={4}
-            step={0.1}
-            format={(v) => v.toFixed(1)}
-          />
-          <ParamButton onClick={() => setSeed((v) => v + 1)}>New sample</ParamButton>
-        </>
-      }
-      readout={
+
+      readouts={
         <>
           <Readout label="edf = Σ 1/(1 + λd_k)" value={formatNumber(edf)} />
-          <Readout label={`∫ f${PRIME[order]}(x)² dx`} value={formatNumber(penalty)} />
+          <Readout label={`∫ f${PRIME[state.order]}(x)² dx`} value={formatNumber(penalty)} />
           <Readout label="RSS" value={formatNumber(rss)} />
           <Readout label="zero eigenvalues d_k" value={String(nullDim)} />
         </>
       }
     >
       <div className="grid gap-2 lg:grid-cols-3">
-        <XYChart series={fitSeries} xRange={[0, 1]} yRange={[-2, 2.5]} xLabel="x" yLabel="y" height={250} />
-        <XYChart series={derivSeries} xRange={[0, 1]} xLabel="x" yLabel={`f${PRIME[order]}(x)`} height={250} />
-        <XYChart
-          series={shrinkSeries}
-          xRange={[0.5, ks.length + 0.5]}
-          yRange={[0, 1]}
-          xLabel="k"
-          yLabel="shrinkage"
-          height={250}
-        />
+        <Plot x={xAxis} y={yAxis} height={250}>
+          <Points {...fitSeries[0]} />
+          <Curve {...fitSeries[1]} />
+          <Curve {...fitSeries[2]} />
+        </Plot>
+        <Plot x={xAxis2} y={yAxis2} height={250}>
+          <Curve {...derivSeries[0]} />
+        </Plot>
+        <Plot x={xAxis3} y={yAxis3} height={250}>
+          <Bars {...shrinkSeries[0]} />
+        </Plot>
       </div>
-    </Interactive>
+    </Figure>
   )
 }

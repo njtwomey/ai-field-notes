@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
-import { gaussians } from 'aifn-applied/data/synthetic'
-import { logisticRegression } from 'aifn-applied/learning/generalised/glm'
+import { gaussians } from 'aifn-methods/data/synthetic'
+import { logisticRegression } from 'aifn-methods/learning/generalised/glm'
 import {
   adasyn,
   borderlineSmote,
@@ -9,7 +9,7 @@ import {
   removeTomekLinks,
   smote,
   type Resampled,
-} from 'aifn-applied/learning/preprocessing'
+} from 'aifn-methods/learning/preprocessing'
 import { child, stream } from 'aifn/foundation/random'
 import { fromData, toFlat, type Tensor } from 'aifn/foundation/tensor'
 import { dataset } from 'aifn/learning/estimators'
@@ -118,9 +118,7 @@ export function DoesSmoteHelpExplorer() {
 
     const computeField = (m: typeof base) => {
       const p = toFlat(m.expect(GRID))
-      return Array.from({ length: G }, (_, i): number[] =>
-        Array.from(p.slice(i * G, (i + 1) * G)) as number[],
-      )
+      return Array.from({ length: G }, (_, i): number[] => Array.from(p.slice(i * G, (i + 1) * G)) as number[])
     }
 
     return {
@@ -193,7 +191,7 @@ export function DoesSmoteHelpExplorer() {
         />
       </ControlRow>
 
-      <div className="flex flex-wrap gap-4 text-xs font-mono text-muted-foreground my-2">
+      <div className="my-2 flex flex-wrap gap-4 font-mono text-xs text-muted-foreground">
         <Readout label="Minority Recall" value={`${formatNumber(before.recall)} → ${formatNumber(after.recall)}`} />
         <Readout label="Precision" value={`${formatNumber(before.precision)} → ${formatNumber(after.precision)}`} />
         <Readout label="AUROC (Ranking)" value={`${formatNumber(before.auroc)} → ${formatNumber(after.auroc)}`} />

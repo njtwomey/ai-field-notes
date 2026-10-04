@@ -29,7 +29,7 @@ import {
   veSde,
   vpSde,
   type SamplerState,
-} from 'aifn-applied/generative/diffusion'
+} from 'aifn-methods/generative/diffusion'
 import { fork, normals, stream } from 'aifn/foundation/random'
 import { fromRows, tensor, toFlat, toRows, type Tensor } from 'aifn/foundation/tensor'
 import { run, trace, type Algorithm } from 'aifn/foundation/trace'

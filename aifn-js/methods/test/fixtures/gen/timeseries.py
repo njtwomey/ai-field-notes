@@ -1,4 +1,4 @@
-"""Reference values for aifn-applied/timeseries by direct numpy/scipy computation (statsmodels is not installed).
+"""Reference values for aifn-methods/timeseries by direct numpy/scipy computation (statsmodels is not installed).
 
 - ARMA and seasonal ARIMA: the exact Gaussian log-likelihood as a dense multivariate normal density with the Toeplitz
   autocovariance of the (differenced) series, the autocovariance from ψ weights (scipy.signal.lfilter of an impulse);

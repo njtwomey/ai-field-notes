@@ -1,17 +1,22 @@
-import { useMemo, useState } from 'react'
-import { Diagram } from 'aifn-render'
-import { factor, link, variable } from 'aifn-render'
-import type { DiagramEdge, DiagramNode, DiagramSpec } from 'aifn-render'
+import { useMemo } from 'react'
 import {
-  Interactive,
-  ParamSlider,
-  ParamSwitch,
-  Readout,
-  XYChart,
+  Curve,
+  Diagram,
+  factor,
+  Figure,
   formatNumber,
-  useParam,
-  type XYSeries,
+  Handle,
+  int,
+  link,
+  Plot,
+  Readout,
+  setting,
+  slider,
+  useAxis,
+  useFigureState,
+  variable,
 } from 'aifn-render'
+import type { DiagramEdge, DiagramNode, DiagramSpec } from 'aifn-render'
 import { exactPosterior, loopyHistory, type SkillsModel } from '../_shared/skills'
 
 const SWEEPS = 8
@@ -21,12 +26,18 @@ const QUESTIONS = [[0], [1], [0, 1], [0, 1]]
 
 /** Toggle a candidate's answers and watch the skill posteriors, exact and by loopy belief propagation. */
 export function SkillsPosterior() {
-  const [answers, setAnswers] = useState([true, false, false, false])
-  const [fourth, setFourth] = useState(false)
-  const guess = useParam(0.2, { min: 0.05, max: 0.5, step: 0.05 })
-  const sweep = useParam(1, { min: 0, max: SWEEPS, step: 1 })
+  const state = useFigureState({
+    fourth: setting(false, 'ask Q4 (both)'),
+    q1: setting(true, 'Q1 (C#) correct'),
+    q2: setting(false, 'Q2 (SQL) correct'),
+    q3: setting(false, 'Q3 (both) correct'),
+    q4: setting(false, { label: 'Q4 (both) correct', when: (v) => v.fourth === true }),
+    guess: slider(0.05, 0.5, 0.2, { step: 0.05, label: 'guess probability', format: (v) => v.toFixed(2) }),
+    sweep: int(1, { min: 0, max: SWEEPS, step: 1, label: 'BP sweep', format: (v) => String(v) }),
+  })
 
-  const nq = fourth ? 4 : 3
+  const nq = state.fourth ? 4 : 3
+  const answers = useMemo(() => [state.q1, state.q2, state.q3, state.q4], [state.q1, state.q2, state.q3, state.q4])
   const key = answers.slice(0, nq).join()
   const { exact, history } = useMemo(() => {
     const model: SkillsModel = {
@@ -34,42 +45,34 @@ export function SkillsPosterior() {
       questions: QUESTIONS.slice(0, nq),
       prior: 0.5,
       pKnow: 0.9,
-      pGuess: guess.value,
+      pGuess: state.guess,
     }
     const a = key.split(',').map((v) => v === 'true')
     return { exact: exactPosterior(model, a), history: loopyHistory(model, a, SWEEPS) }
-  }, [key, nq, guess.value])
+  }, [key, nq, state.guess])
 
   const series = useMemo(
-    (): XYSeries[] => [
-      { name: 'C# (loopy BP)', type: 'line', x: X, y: history.map((h) => h[0]), slot: 0 },
-      { name: 'SQL (loopy BP)', type: 'line', x: X, y: history.map((h) => h[1]), slot: 1 },
-      { name: 'C# (exact)', type: 'line', x: X, y: X.map(() => exact[0]), slot: 0, dashed: true },
-      { name: 'SQL (exact)', type: 'line', x: X, y: X.map(() => exact[1]), slot: 1, dashed: true },
-    ],
+    () =>
+      [
+        { name: 'C# (loopy BP)', x: X, y: history.map((h) => h[0]), slot: 0 },
+        { name: 'SQL (loopy BP)', x: X, y: history.map((h) => h[1]), slot: 1 },
+        { name: 'C# (exact)', x: X, y: X.map(() => exact[0]), slot: 0, dashed: true },
+        { name: 'SQL (exact)', x: X, y: X.map(() => exact[1]), slot: 1, dashed: true },
+      ] as const,
     [history, exact],
   )
 
-  const now = history[sweep.value]
+  const now = history[state.sweep]
   const spec = useMemo(() => graph(now, answers, nq), [now, answers, nq])
-  const toggle = (i: number) => (v: boolean) => setAnswers((a) => a.map((x, j) => (j === i ? v : x)))
 
+  const xAxis = useAxis({ label: 'sweeps of belief propagation', range: [0, SWEEPS] })
+  const yAxis = useAxis({ label: 'P(has skill)', range: [0, 1] })
   return (
-    <Interactive
+    <Figure
       title="Skill posteriors from four test answers"
-      caption="Tick the questions the candidate answered correctly. Questions 1 and 2 need one skill each; questions 3 and 4 need both. With three questions the factor graph is a tree and one sweep of belief propagation gives the exact posterior. Adding question 4 closes a loop: loopy belief propagation then converges to slightly wrong values (solid lines) next to the exact ones (dashed). Step through sweeps with the arrows or drag the sweep line. Skill nodes are shaded by their current probability."
-      controls={
-        <>
-          <ParamSwitch label="Q1 (C#) correct" checked={answers[0]} onChange={toggle(0)} />
-          <ParamSwitch label="Q2 (SQL) correct" checked={answers[1]} onChange={toggle(1)} />
-          <ParamSwitch label="Q3 (both) correct" checked={answers[2]} onChange={toggle(2)} />
-          <ParamSwitch label="ask Q4 (both)" checked={fourth} onChange={setFourth} />
-          {fourth && <ParamSwitch label="Q4 (both) correct" checked={answers[3]} onChange={toggle(3)} />}
-          <ParamSlider label="guess probability" param={guess} format={(v) => v.toFixed(2)} />
-          <ParamSlider label="BP sweep" param={sweep} format={(v) => String(v)} withArrows />
-        </>
-      }
-      readout={
+      state={state}
+      caption="Switch on the questions the candidate answered correctly. Questions 1 and 2 need one skill each; questions 3 and 4 need both. With three questions the factor graph is a tree and one sweep of belief propagation gives the exact posterior. Adding question 4 closes a loop: loopy belief propagation then converges to slightly wrong values (solid lines) next to the exact ones (dashed). Step through sweeps with the arrows or drag the sweep line. Skill nodes are shaded by their current probability."
+      readouts={
         <>
           <Readout label="P(C#) loopy / exact" value={`${formatNumber(now[0])} / ${formatNumber(exact[0])}`} />
           <Readout label="P(SQL) loopy / exact" value={`${formatNumber(now[1])} / ${formatNumber(exact[1])}`} />
@@ -81,17 +84,15 @@ export function SkillsPosterior() {
           spec={spec}
           ariaLabel="Factor graph of the skills model: two skills, an AND factor, noise factors and observed answers"
         />
-        <XYChart
-          series={series}
-          xLabel="sweeps of belief propagation"
-          yLabel="P(has skill)"
-          xRange={[0, SWEEPS]}
-          yRange={[0, 1]}
-          height={280}
-          handles={[{ kind: 'x', at: sweep.value, label: 'sweep', onDrag: (x) => sweep.set(x) }]}
-        />
+        <Plot x={xAxis} y={yAxis} height={280}>
+          <Curve {...series[0]} />
+          <Curve {...series[1]} />
+          <Curve {...series[2]} />
+          <Curve {...series[3]} />
+          <Handle {...state.handle('sweep', { label: 'sweep' })} />
+        </Plot>
       </div>
-    </Interactive>
+    </Figure>
   )
 }
 

@@ -1,5 +1,5 @@
 /**
- * `aifn-applied/data/real`: small embedded real datasets.
+ * `aifn-methods/data/real`: small embedded real datasets.
  */
 
 export { anscombe, coalMining, iris, karateClub, oldFaithful, type GraphDataset } from './real'

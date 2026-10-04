@@ -5,7 +5,7 @@ import {
   linearDiscriminant,
   multinomialNaiveBayes,
   quadraticDiscriminant,
-} from 'aifn-applied/learning/generative-classifiers'
+} from 'aifn-methods/learning/generative-classifiers'
 import { tensor, toRows } from 'aifn/foundation/tensor'
 import { dataset } from 'aifn/learning/estimators'
 import { close, fx, X3, XQ, Y3 } from '../shared'

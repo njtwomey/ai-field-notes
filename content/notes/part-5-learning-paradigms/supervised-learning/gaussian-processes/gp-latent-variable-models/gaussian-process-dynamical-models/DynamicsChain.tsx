@@ -1,6 +1,5 @@
-import { Diagram } from 'aifn-render'
+import { Diagram, Figure } from 'aifn-render'
 import type { DiagramSpec } from 'aifn-render'
-import { Interactive } from 'aifn-render'
 
 const T = ['1', '2', '3', 'T']
 const X = [0, 2.4, 4.8, 8.4]
@@ -45,11 +44,11 @@ const spec: DiagramSpec = {
 /** The GPDM: a latent Markov chain with a GP transition function and a GP observation map, both integrated out. */
 export function DynamicsChain() {
   return (
-    <Interactive
+    <Figure
       title="A latent dynamical system with two Gaussian process maps"
       caption="The poses y_t are observed. The latent states x_t form a first-order Markov chain whose transition function f has a Gaussian process prior; the observation map g has another. Both functions (dashed) are integrated out, which couples every latent state to every other through the kernel matrices. The latent trajectory X is optimised."
     >
       <Diagram spec={spec} ariaLabel="Graphical model of the Gaussian process dynamical model" />
-    </Interactive>
+    </Figure>
   )
 }

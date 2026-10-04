@@ -1,10 +1,11 @@
-import { useMemo, useState } from 'react'
-import { Interactive, ParamChoice, ParamSlider, Readout, XYChart, formatNumber, useParam } from 'aifn-render'
-import { linspace, rng } from '@/lib/math'
+import { useMemo } from 'react'
+import { choice, Curve, Figure, formatNumber, int, Plot, Points, Readout, useAxis, useFigureState } from 'aifn-render'
 import { expit, fitBeta, fitIsotonic, fitPlatt, logLoss, logit } from '../../_shared/calibration'
+import { linspace, toFlat } from 'aifn/foundation/tensor'
+import { normal, stream, uniform } from 'aifn/foundation/random'
 
 type Distortion = 'calibrated' | 'overconfident' | 'underconfident' | 'shifted' | 'wavy'
-const GRID = linspace(0.005, 0.995, 100)
+const GRID = toFlat(linspace(0.005, 0.995, 100))
 const TEST = 4000
 const BINS = 10
 
@@ -37,12 +38,12 @@ function trueMap(kind: Distortion, s: number): number {
 }
 
 function sample(kind: Distortion, n: number, seed: number) {
-  const g = rng(seed)
+  const g = stream(seed)
   const scores: number[] = []
   const labels: boolean[] = []
   for (let i = 0; i < n; i++) {
-    const q = expit(1.5 * g.normal())
-    labels.push(g.uniform() < q)
+    const q = expit(1.5 * normal(g))
+    labels.push(uniform(g) < q)
     scores.push(Math.min(1 - 1e-6, Math.max(1e-6, distort(kind, q))))
   }
   return { scores, labels }
@@ -54,13 +55,25 @@ function sample(kind: Distortion, n: number, seed: number) {
  * and the model's distortion are chosen by the reader.
  */
 export function CalibrationMaps() {
-  const [kind, setKind] = useState<Distortion>('overconfident')
-  const n = useParam(300, { min: 30, max: 3000, step: 10 })
-  const seed = useParam(1, { min: 1, max: 30, step: 1 })
+  const state = useFigureState({
+    kind: choice<Distortion>(
+      [
+        { value: 'calibrated', label: 'none' },
+        { value: 'overconfident', label: 'over' },
+        { value: 'underconfident', label: 'under' },
+        { value: 'shifted', label: 'shifted' },
+        { value: 'wavy', label: 'wavy' },
+      ],
+      'overconfident',
+      { label: 'model distortion' },
+    ),
+    n: int(300, { min: 30, max: 3000, step: 10, label: 'calibration set size', format: (v) => String(v) }),
+    seed: int(1, { min: 1, max: 30, step: 1, label: 'seed', format: (v) => String(v) }),
+  })
 
   const r = useMemo(() => {
-    const cal = sample(kind, n.value, 100 + seed.value)
-    const test = sample(kind, TEST, 7)
+    const cal = sample(state.kind, state.n, 100 + state.seed)
+    const test = sample(state.kind, TEST, 7)
     const platt = fitPlatt(cal.scores, cal.labels)
     const iso = fitIsotonic(cal.scores, cal.labels)
     const beta = fitBeta(cal.scores, cal.labels)
@@ -77,7 +90,7 @@ export function CalibrationMaps() {
     })
     const bins = count.flatMap((c, b) => (c ? [{ x: sumS[b] / c, y: sumY[b] / c }] : []))
     return {
-      truth: GRID.map((s) => trueMap(kind, s)),
+      truth: GRID.map((s) => trueMap(state.kind, s)),
       platt: GRID.map(platt),
       iso: GRID.map(iso),
       beta: GRID.map(beta),
@@ -87,34 +100,20 @@ export function CalibrationMaps() {
         platt: loss(platt),
         iso: loss(iso),
         beta: loss(beta),
-        truth: loss((s) => trueMap(kind, s)),
+        truth: loss((s) => trueMap(state.kind, s)),
       },
     }
-  }, [kind, n.value, seed.value])
+  }, [state.kind, state.n, state.seed])
 
+  const xAxis = useAxis({ label: 'raw score s', range: [0, 1] })
+  const yAxis = useAxis({ label: 'calibrated probability', range: [0, 1], equal: xAxis })
   return (
-    <Interactive
+    <Figure
       title="Three calibration maps on the same data"
+      state={state}
       caption="A simulated model reports a distorted version of each case's true probability. The thick line is the true calibration map from raw score to probability; dots are the observed frequencies of the calibration set in ten bins. Logistic (Platt) calibration fits a sigmoid in the score, isotonic calibration a step function, beta calibration the family σ(a ln s − b ln(1 − s) + c). Log losses are on a separate test set of 4000 cases. Try a calibrated model: beta and isotonic stay near the diagonal, logistic cannot. Shrink the calibration set to see isotonic overfit."
-      controls={
-        <>
-          <ParamChoice
-            label="model distortion"
-            value={kind}
-            onChange={setKind}
-            options={[
-              { value: 'calibrated', label: 'none' },
-              { value: 'overconfident', label: 'over' },
-              { value: 'underconfident', label: 'under' },
-              { value: 'shifted', label: 'shifted' },
-              { value: 'wavy', label: 'wavy' },
-            ]}
-          />
-          <ParamSlider label="calibration set size" param={n} format={(v) => String(v)} />
-          <ParamSlider label="seed" param={seed} format={(v) => String(v)} withArrows />
-        </>
-      }
-      readout={
+
+      readouts={
         <>
           <Readout label="test log loss: raw" value={formatNumber(r.losses.raw)} />
           <Readout label="logistic" value={formatNumber(r.losses.platt)} />
@@ -124,27 +123,14 @@ export function CalibrationMaps() {
         </>
       }
     >
-      <XYChart
-        equalAspect
-        xLabel="raw score s"
-        yLabel="calibrated probability"
-        xRange={[0, 1]}
-        yRange={[0, 1]}
-        series={[
-          { name: 'identity', type: 'line', x: [0, 1], y: [0, 1], dashed: true, muted: true },
-          {
-            name: 'binned frequency',
-            type: 'scatter',
-            x: r.bins.map((b) => b.x),
-            y: r.bins.map((b) => b.y),
-            muted: true,
-          },
-          { name: 'true map', type: 'line', x: GRID, y: r.truth, emphasis: true },
-          { name: 'logistic (Platt)', type: 'line', x: GRID, y: r.platt, slot: 0 },
-          { name: 'isotonic', type: 'line', x: GRID, y: r.iso, slot: 1 },
-          { name: 'beta', type: 'line', x: GRID, y: r.beta, slot: 2 },
-        ]}
-      />
-    </Interactive>
+      <Plot x={xAxis} y={yAxis}>
+        <Curve name="identity" x={[0, 1]} y={[0, 1]} dashed muted />
+        <Points name="binned frequency" x={r.bins.map((b) => b.x)} y={r.bins.map((b) => b.y)} muted />
+        <Curve name="true map" x={GRID} y={r.truth} emphasis />
+        <Curve name="logistic (Platt)" x={GRID} y={r.platt} slot={0} />
+        <Curve name="isotonic" x={GRID} y={r.iso} slot={1} />
+        <Curve name="beta" x={GRID} y={r.beta} slot={2} />
+      </Plot>
+    </Figure>
   )
 }

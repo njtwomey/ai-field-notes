@@ -1,15 +1,18 @@
-import { useMemo, useState } from 'react'
+import { useMemo } from 'react'
 import {
-  Interactive,
-  ParamButton,
-  ParamSlider,
-  Readout,
-  XYChart,
+  Bars,
+  Curve,
+  Figure,
   formatNumber,
-  useParam,
-  type XYSeries,
+  Handle,
+  int,
+  Plot,
+  Points,
+  Readout,
+  useAxis,
+  useFigureState,
 } from 'aifn-render'
-import { rng } from '@/lib/math'
+import { normal, stream } from 'aifn/foundation/random'
 
 /** Rows of Q and K: n queries attend over n keys. */
 const N = 16
@@ -49,9 +52,9 @@ function softmax(xs: number[]) {
  * running sum over columns gives QKᵀ for every d in one pass (n² · 1024 multiplications).
  */
 function draw(seed: number): Draw {
-  const r = rng(seed)
-  const q = Array.from({ length: N }, () => Float64Array.from({ length: MAX_D }, () => r.normal()))
-  const k = Array.from({ length: N }, () => Float64Array.from({ length: MAX_D }, () => r.normal()))
+  const r = stream(seed)
+  const q = Array.from({ length: N }, () => Float64Array.from({ length: MAX_D }, () => normal(r)))
+  const k = Array.from({ length: N }, () => Float64Array.from({ length: MAX_D }, () => normal(r)))
   const acc = new Float64Array(N * N)
   const wanted = new Set(DIMS)
   const logits = new Map<number, Float64Array>()
@@ -70,10 +73,12 @@ const SQRT_CURVE_Y = SQRT_CURVE_X.map(Math.sqrt)
 
 /** Spread of the logits QKᵀ against the head dimension, raw and divided by √d, and the softmax of one row. */
 export function ScalingDemo() {
-  const logD = useParam(6, { min: 0, max: MAX_LOG_D, step: 1 })
-  const [seed, setSeed] = useState(1)
-  const sample = useMemo(() => draw(seed), [seed])
-  const d = 2 ** logD.value
+  const state = useFigureState({
+    logD: int(6, { min: 0, max: MAX_LOG_D, step: 1, label: 'dimension d', format: (v) => String(2 ** v) }),
+    seed: int(1, { ge: 0, label: 'seed' }),
+  })
+  const sample = useMemo(() => draw(state.seed), [state.seed])
+  const d = 2 ** state.logD
 
   const scaledSd = useMemo(() => sample.rawSd.map((s, i) => s / Math.sqrt(DIMS[i])), [sample])
 
@@ -85,41 +90,46 @@ export function ScalingDemo() {
     return { raw, scaled, rawSd: sample.rawSd[i], scaledSd: scaledSd[i] }
   }, [sample, scaledSd, d])
 
-  const setLogD = logD.set
+  const setLogD = (v: number) => state.set('logD', v)
   const handles = useMemo(
     () => [{ kind: 'x' as const, at: d, label: 'd', onDrag: (x: number) => setLogD(Math.log2(Math.max(x, 1))) }],
     [d, setLogD],
   )
 
-  const rawSeries = useMemo<XYSeries[]>(
-    () => [
-      { name: '√d', type: 'line', x: SQRT_CURVE_X, y: SQRT_CURVE_Y, muted: true, dashed: true },
-      { name: 'std of QKᵀ', type: 'scatter', x: DIMS, y: sample.rawSd, slot: 0 },
-      { name: `d = ${d}`, type: 'scatter', x: [d], y: [row.rawSd], emphasis: true },
-    ],
+  const rawSeries = useMemo(
+    () =>
+      [
+        { name: '√d', x: SQRT_CURVE_X, y: SQRT_CURVE_Y, muted: true, dashed: true },
+        { name: 'std of QKᵀ', x: DIMS, y: sample.rawSd, slot: 0 },
+        { name: `d = ${d}`, x: [d], y: [row.rawSd], emphasis: true },
+      ] as const,
     [sample, row, d],
   )
-  const scaledSeries = useMemo<XYSeries[]>(
-    () => [
-      { name: '1', type: 'line', x: [0, MAX_D], y: [1, 1], muted: true, dashed: true },
-      { name: 'std of QKᵀ/√d', type: 'scatter', x: DIMS, y: scaledSd, slot: 1 },
-      { name: `d = ${d}`, type: 'scatter', x: [d], y: [row.scaledSd], emphasis: true },
-    ],
+  const scaledSeries = useMemo(
+    () =>
+      [
+        { name: '1', x: [0, MAX_D], y: [1, 1], muted: true, dashed: true },
+        { name: 'std of QKᵀ/√d', x: DIMS, y: scaledSd, slot: 1 },
+        { name: `d = ${d}`, x: [d], y: [row.scaledSd], emphasis: true },
+      ] as const,
     [scaledSd, row, d],
   )
-  const rawBars = useMemo<XYSeries[]>(
-    () => [{ name: 'weight, raw', type: 'bar', x: KEY_INDEX, y: row.raw, slot: 0 }],
-    [row],
-  )
-  const scaledBars = useMemo<XYSeries[]>(
-    () => [{ name: 'weight, scaled', type: 'bar', x: KEY_INDEX, y: row.scaled, slot: 1 }],
-    [row],
-  )
+  const rawBars = useMemo(() => [{ name: 'weight, raw', x: KEY_INDEX, y: row.raw, slot: 0 }] as const, [row])
+  const scaledBars = useMemo(() => [{ name: 'weight, scaled', x: KEY_INDEX, y: row.scaled, slot: 1 }] as const, [row])
 
   const panel = 'text-center text-xs text-muted-foreground'
+  const xAxis = useAxis({ label: 'd', range: [0, MAX_D] })
+  const yAxis = useAxis({ label: 'std of logits', range: [0, 40] })
+  const xAxis2 = useAxis({ label: 'd', range: [0, MAX_D] })
+  const yAxis2 = useAxis({ label: 'std of logits', range: [0, 2] })
+  const xAxis3 = useAxis({ label: 'key', range: [0.5, N + 0.5] })
+  const yAxis3 = useAxis({ label: 'weight', range: [0, 1] })
+  const xAxis4 = useAxis({ label: 'key', range: [0.5, N + 0.5] })
+  const yAxis4 = useAxis({ label: 'weight', range: [0, 1] })
   return (
-    <Interactive
+    <Figure
       title="Why divide by √d"
+      state={state}
       caption={
         <>
           Q and K are 16 × d matrices with independent standard normal entries. Top: the standard deviation of the 256
@@ -128,13 +138,8 @@ export function ScalingDemo() {
           in either top chart; draw new matrices to see the scatter across seeds.
         </>
       }
-      controls={
-        <>
-          <ParamSlider label="dimension d" param={logD} format={(v) => String(2 ** v)} withArrows />
-          <ParamButton onClick={() => setSeed((s) => s + 1)}>New Q and K</ParamButton>
-        </>
-      }
-      readout={
+
+      readouts={
         <>
           <Readout label="std of logits, raw" value={formatNumber(row.rawSd)} />
           <Readout label="std of logits, scaled" value={formatNumber(row.scaledSd)} />
@@ -146,44 +151,39 @@ export function ScalingDemo() {
       <div className="grid grid-cols-1 gap-x-4 gap-y-2 sm:grid-cols-2">
         <div>
           <p className={panel}>Raw logits QKᵀ</p>
-          <XYChart
-            series={rawSeries}
-            xLabel="d"
-            yLabel="std of logits"
-            xRange={[0, MAX_D]}
-            yRange={[0, 40]}
-            handles={handles}
-            height={230}
-          />
+          <Plot x={xAxis} y={yAxis} height={230}>
+            <Curve {...rawSeries[0]} />
+            <Points {...rawSeries[1]} />
+            <Points {...rawSeries[2]} />
+            {(handles ?? []).map((h, i) => (
+              <Handle key={i} {...h} />
+            ))}
+          </Plot>
         </div>
         <div>
           <p className={panel}>Scaled logits QKᵀ/√d</p>
-          <XYChart
-            series={scaledSeries}
-            xLabel="d"
-            yLabel="std of logits"
-            xRange={[0, MAX_D]}
-            yRange={[0, 2]}
-            handles={handles}
-            height={230}
-          />
+          <Plot x={xAxis2} y={yAxis2} height={230}>
+            <Curve {...scaledSeries[0]} />
+            <Points {...scaledSeries[1]} />
+            <Points {...scaledSeries[2]} />
+            {(handles ?? []).map((h, i) => (
+              <Handle key={i} {...h} />
+            ))}
+          </Plot>
         </div>
         <div>
           <p className={panel}>Softmax of row 1, raw</p>
-          <XYChart series={rawBars} xLabel="key" yLabel="weight" xRange={[0.5, N + 0.5]} yRange={[0, 1]} height={200} />
+          <Plot x={xAxis3} y={yAxis3} height={200}>
+            <Bars {...rawBars[0]} />
+          </Plot>
         </div>
         <div>
           <p className={panel}>Softmax of row 1, scaled</p>
-          <XYChart
-            series={scaledBars}
-            xLabel="key"
-            yLabel="weight"
-            xRange={[0.5, N + 0.5]}
-            yRange={[0, 1]}
-            height={200}
-          />
+          <Plot x={xAxis4} y={yAxis4} height={200}>
+            <Bars {...scaledBars[0]} />
+          </Plot>
         </div>
       </div>
-    </Interactive>
+    </Figure>
   )
 }

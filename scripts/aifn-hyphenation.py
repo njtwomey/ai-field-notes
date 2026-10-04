@@ -1,4 +1,4 @@
-"""Vendor a frequency-ranked subset of the Moby Hyphenator II word list into aifn-applied.
+"""Vendor a frequency-ranked subset of the Moby Hyphenator II word list into aifn-methods.
 
 Usage (the source file is not kept in the repository; download it first):
 
@@ -22,7 +22,7 @@ from pathlib import Path
 
 from nltk.corpus import brown
 
-OUT = Path(__file__).resolve().parent.parent / "aifn-js/applications/src/data/real/hyphenation/words.ts"
+OUT = Path(__file__).resolve().parent.parent / "aifn-js/methods/src/data/real/hyphenation/words.ts"
 MARK = 0xA5
 ENTRY = re.compile(rb"^[a-z\xa5]+$")
 

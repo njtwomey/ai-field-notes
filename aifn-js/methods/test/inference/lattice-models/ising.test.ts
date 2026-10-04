@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { isingInference, isingLattice, isingModel, isingShape } from 'aifn-applied/inference/lattice-models'
+import { isingInference, isingLattice, isingModel, isingShape } from 'aifn-methods/inference/lattice-models'
 import { beliefPropagation } from 'aifn/inference/message-passing'
 import { enumerate } from 'aifn/inference/exact'
 import { factorGraphGibbs, gibbsMarginals } from 'aifn/inference/stochastic'

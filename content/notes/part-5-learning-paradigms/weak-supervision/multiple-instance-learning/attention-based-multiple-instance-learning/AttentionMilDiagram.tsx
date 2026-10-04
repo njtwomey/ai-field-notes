@@ -1,5 +1,4 @@
-import { Interactive } from 'aifn-render'
-import { Diagram } from 'aifn-render'
+import { Diagram, Figure } from 'aifn-render'
 import type { DiagramEdge, DiagramNode, DiagramSpec } from 'aifn-render'
 
 const ROWS: { k: string; y: number }[] = [
@@ -52,7 +51,7 @@ const spec: DiagramSpec = {
 /** Attention-based MIL: embed every instance, pool with learned weights, classify the bag. */
 export function AttentionMilDiagram() {
   return (
-    <Interactive
+    <Figure
       title="Attention-based MIL pooling"
       caption="Every instance in the bag passes through the same embedding network f. The attention block scores each embedding, normalises the scores over the bag with a softmax and returns the weighted average z. The classifier g maps z to the bag-label probability. The weights a_k show which instances drove the prediction, and reordering the instances changes nothing."
     >
@@ -60,6 +59,6 @@ export function AttentionMilDiagram() {
         spec={spec}
         ariaLabel="Instances x_1 to x_K of a bag each pass through a shared network f; the embeddings h_k enter an attention pooling block that computes weights a_k and the weighted sum z; a classifier maps z to the bag probability"
       />
-    </Interactive>
+    </Figure>
   )
 }

@@ -1,24 +1,36 @@
 import { useMemo } from 'react'
-import { Interactive, ParamSlider, Readout, XYChart, formatNumber, useParam, type XYSeries } from 'aifn-render'
-import { linspace } from '@/lib/math'
+import {
+  Figure,
+  float,
+  formatNumber,
+  Plot,
+  Readout,
+  seriesLayers,
+  type SeriesSpec,
+  useAxis,
+  useFigureState,
+} from 'aifn-render'
 import { gaussPdf, normals } from '../_shared/sde'
+import { linspace, toFlat } from 'aifn/foundation/tensor'
 
 const N = 5000
 const LO = -4
 const HI = 6
 const BINS = 50
-const XS = linspace(LO, HI, 201)
+const XS = toFlat(linspace(LO, HI, 201))
 
 /**
  * Brownian paths on [0, 1] reweighted by Girsanov's likelihood ratio Z = exp(μW₁ − μ²/2). The weighted histogram of W₁
  * matches N(μ, 1), the law of Brownian motion with drift μ, although no path was simulated with a drift.
  */
 export function Reweighting() {
-  const mu = useParam(1.5, { min: -2, max: 3, step: 0.05 })
+  const state = useFigureState({
+    mu: float(1.5, { min: -2, max: 3, step: 0.05, label: 'drift μ' }),
+  })
   const w1 = useMemo(() => normals(N, 51), [])
 
   const { series, ess, mean } = useMemo(() => {
-    const m = mu.value
+    const m = state.mu
     const weights = w1.map((w) => Math.exp(m * w - (m * m) / 2))
     const total = weights.reduce((a, b) => a + b, 0)
     const width = (HI - LO) / BINS
@@ -32,7 +44,7 @@ export function Reweighting() {
       s2 += weights[i] ** 2
     })
     const x = counts.map((_, b) => LO + (b + 0.5) * width)
-    const out: XYSeries[] = [
+    const out: SeriesSpec[] = [
       { name: 'unweighted W₁ ~ N(0, 1)', type: 'line', x: XS, y: XS.map((v) => gaussPdf(v, 0, 1)), muted: true },
       { name: 'Brownian samples, weighted by Z', type: 'bar', x, y: counts.map((c) => c / (total * width)), slot: 0 },
       {
@@ -45,22 +57,27 @@ export function Reweighting() {
       },
     ]
     return { series: out, ess: total ** 2 / s2, mean: s1 / total }
-  }, [mu.value, w1])
+  }, [state.mu, w1])
 
+  const xAxis = useAxis({ label: 'W₁', range: [LO, HI] })
+  const yAxis = useAxis({ label: 'density', range: [0, 0.6] })
   return (
-    <Interactive
+    <Figure
       title="Changing the drift by reweighting paths"
+      state={state}
       caption="5,000 values of W₁ from standard Brownian motion, each weighted by the Girsanov likelihood ratio exp(μW₁ − μ²/2). The weighted histogram is the law N(μ, 1) of Brownian motion with drift μ. The effective sample size shows the cost: as μ grows, a few paths that happened to drift the right way carry almost all the weight."
-      controls={<ParamSlider label="drift μ" param={mu} />}
-      readout={
+
+      readouts={
         <>
           <Readout label="weighted mean of W₁" value={formatNumber(mean)} />
           <Readout label="effective sample size" value={formatNumber(ess)} />
-          <Readout label="theory N e^{−μ²}" value={formatNumber(N * Math.exp(-(mu.value ** 2)))} />
+          <Readout label="theory N e^{−μ²}" value={formatNumber(N * Math.exp(-(state.mu ** 2)))} />
         </>
       }
     >
-      <XYChart height={300} xLabel="W₁" yLabel="density" series={series} xRange={[LO, HI]} yRange={[0, 0.6]} />
-    </Interactive>
+      <Plot x={xAxis} y={yAxis} height={300}>
+        {seriesLayers(series)}
+      </Plot>
+    </Figure>
   )
 }

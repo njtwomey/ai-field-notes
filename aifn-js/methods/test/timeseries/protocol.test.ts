@@ -1,4 +1,4 @@
-/** Every fitting algorithm of `aifn-applied/timeseries` follows the Algorithm protocol. */
+/** Every fitting algorithm of `aifn-methods/timeseries` follows the Algorithm protocol. */
 import { describe, expect, it } from 'vitest'
 import {
   armaFitSteps,
@@ -8,7 +8,7 @@ import {
   simulateArma,
   simulateGarch,
   stateSpaceEm,
-} from 'aifn-applied/timeseries'
+} from 'aifn-methods/timeseries'
 import { stream } from 'aifn/foundation/random'
 import { toFlat } from 'aifn/foundation/tensor'
 import { run } from 'aifn/foundation/trace'

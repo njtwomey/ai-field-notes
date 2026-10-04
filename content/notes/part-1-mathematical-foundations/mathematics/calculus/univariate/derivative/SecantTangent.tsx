@@ -1,16 +1,18 @@
-import { useMemo, useState } from 'react'
+import { useMemo } from 'react'
 import {
-  Interactive,
-  ParamChoice,
-  ParamSlider,
-  Readout,
-  XYChart,
+  choice,
+  Figure,
+  float,
   formatNumber,
-  useParam,
-  type Handle,
-  type XYSeries,
+  Handle,
+  Plot,
+  Readout,
+  seriesLayers,
+  type SeriesSpec,
+  useAxis,
+  useFigureState,
 } from 'aifn-render'
-import { linspace } from '@/lib/math'
+import { linspace, toFlat } from 'aifn/foundation/tensor'
 
 type Fn = {
   label: string
@@ -36,32 +38,41 @@ const FUNCTIONS: Record<'square' | 'sin' | 'exp' | 'abs', Fn> = {
 
 /** The secant through (a, f(a)) and (a + h, f(a + h)) turning into the tangent as h shrinks. */
 export function SecantTangent() {
-  const [name, setName] = useState<keyof typeof FUNCTIONS>('square')
-  const fn = FUNCTIONS[name]
-  const a = useParam(1, { min: -2, max: 2, step: 0.05 })
-  const h = useParam(1, { min: -1.5, max: 1.5, step: 0.01 })
-  const step = Math.abs(h.value) < 0.005 ? 0.005 : h.value
+  const state = useFigureState({
+    name: choice<keyof typeof FUNCTIONS>(
+      Object.entries(FUNCTIONS).map(([value, f]) => ({
+        value: value as keyof typeof FUNCTIONS,
+        label: f.label,
+      })),
+      'square',
+      { label: 'function' },
+    ),
+    a: float(1, { min: -2, max: 2, step: 0.05, label: 'point a' }),
+    h: float(1, { min: -1.5, max: 1.5, step: 0.01, label: 'step h' }),
+  })
+  const fn = FUNCTIONS[state.name]
+  const step = Math.abs(state.h) < 0.005 ? 0.005 : state.h
 
   const r = useMemo(() => {
-    const xs = linspace(fn.domain[0], fn.domain[1], 300)
-    const fa = fn.f(a.value)
-    const slope = (fn.f(a.value + step) - fa) / step
-    const derivative = fn.df(a.value)
+    const xs = toFlat(linspace(fn.domain[0], fn.domain[1], 300))
+    const fa = fn.f(state.a)
+    const slope = (fn.f(state.a + step) - fa) / step
+    const derivative = fn.df(state.a)
     const [x0, x1] = fn.domain
-    const series: XYSeries[] = [
+    const series: SeriesSpec[] = [
       { name: `f(x) = ${fn.label}`, type: 'line', x: xs, y: xs.map(fn.f), slot: 0 },
       {
         name: 'secant',
         type: 'line',
         x: [x0, x1],
-        y: [fa + slope * (x0 - a.value), fa + slope * (x1 - a.value)],
+        y: [fa + slope * (x0 - state.a), fa + slope * (x1 - state.a)],
         slot: 1,
       },
       {
         name: 'points',
         type: 'scatter',
-        x: [a.value, a.value + step],
-        y: [fa, fn.f(a.value + step)],
+        x: [state.a, state.a + step],
+        y: [fa, fn.f(state.a + step)],
         emphasis: true,
       },
     ]
@@ -70,36 +81,23 @@ export function SecantTangent() {
         name: 'tangent',
         type: 'line',
         x: [x0, x1],
-        y: [fa + derivative * (x0 - a.value), fa + derivative * (x1 - a.value)],
+        y: [fa + derivative * (x0 - state.a), fa + derivative * (x1 - state.a)],
         slot: 2,
         dashed: true,
       })
     }
     return { series, slope, derivative }
-  }, [fn, a.value, step])
+  }, [fn, state.a, step])
 
-  const handles: Handle[] = [{ kind: 'x', at: a.value, label: 'a', onDrag: a.set }]
-
+  const xAxis = useAxis({ label: 'x', range: fn.domain })
+  const yAxis = useAxis({ label: 'y', range: fn.range })
   return (
-    <Interactive
+    <Figure
       title="From secant to tangent"
+      state={state}
       caption="The secant joins (a, f(a)) and (a + h, f(a + h)); its slope is the difference quotient. As h shrinks towards 0 from either side, the secant turns into the tangent (dashed), whose slope is f′(a). Drag the line labelled a to move the point. For |x| at a = 0 the quotient is +1 for h > 0 and −1 for h < 0, so it has no limit and there is no tangent."
-      controls={
-        <>
-          <ParamChoice
-            label="function"
-            value={name}
-            onChange={setName}
-            options={Object.entries(FUNCTIONS).map(([value, f]) => ({
-              value: value as keyof typeof FUNCTIONS,
-              label: f.label,
-            }))}
-          />
-          <ParamSlider label="point a" param={a} />
-          <ParamSlider label="step h" param={h} />
-        </>
-      }
-      readout={
+
+      readouts={
         <>
           <Readout label="difference quotient" value={formatNumber(r.slope)} />
           <Readout label="f′(a)" value={r.derivative === undefined ? 'does not exist' : formatNumber(r.derivative)} />
@@ -110,15 +108,10 @@ export function SecantTangent() {
         </>
       }
     >
-      <XYChart
-        series={r.series}
-        xRange={fn.domain}
-        yRange={fn.range}
-        xLabel="x"
-        yLabel="y"
-        handles={handles}
-        height={340}
-      />
-    </Interactive>
+      <Plot x={xAxis} y={yAxis} height={340}>
+        {seriesLayers(r.series)}
+        <Handle {...state.handle('a', { label: 'a' })} />
+      </Plot>
+    </Figure>
   )
 }

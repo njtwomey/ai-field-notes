@@ -1,4 +1,4 @@
-/** The functions of `aifn-applied/learning/reductions`: multiclass codes and dichotomy trees. */
+/** The functions of `aifn-methods/learning/reductions`: multiclass codes and dichotomy trees. */
 
 import { definer, entries, type Entry, type FunctionInfo } from 'aifn/foundation/registry'
 import * as multiclass from './multiclass'

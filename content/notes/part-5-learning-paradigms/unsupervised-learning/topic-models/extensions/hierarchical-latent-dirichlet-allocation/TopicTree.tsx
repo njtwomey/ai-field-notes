@@ -1,7 +1,5 @@
-import { MathText } from 'aifn-render'
-import { Diagram } from 'aifn-render'
+import { Diagram, Figure, MathText } from 'aifn-render'
 import type { DiagramEdge, DiagramNode, DiagramSpec } from 'aifn-render'
-import { Interactive } from 'aifn-render'
 
 const node = (id: string, x: number, y: number, label: string, tone: number | 'neutral'): DiagramNode => ({
   id,
@@ -47,13 +45,13 @@ const spec: DiagramSpec = {
 
 export function TopicTree() {
   return (
-    <Interactive
+    <Figure
       title="A topic tree grown by the nested Chinese restaurant process"
       caption={
         <MathText text="Each box is a topic, shown by its most probable words. Edge labels count the documents whose root-to-leaf path uses that edge. The root topic holds words common to every document; deeper topics are more specific. A new document picks a child in proportion to these counts, or a new child in proportion to $\gamma$, at every level." />
       }
     >
       <Diagram spec={spec} ariaLabel="A three-level topic hierarchy with document counts on its edges" />
-    </Interactive>
+    </Figure>
   )
 }

@@ -1,23 +1,12 @@
 import { useMemo, useState } from 'react'
-import {
-  ControlRow,
-  Figure,
-  Player,
-  Plot,
-  Plots,
-  Points,
-  Readout,
-  Select,
-  formatNumber,
-  useAxis,
-} from 'aifn-render'
+import { ControlRow, Figure, Player, Plot, Plots, Points, Readout, Select, formatNumber, useAxis } from 'aifn-render'
 import {
   autoencoderRun,
   type AutoencoderCheckpoint,
   type AutoencoderKind,
   type AutoencoderRun,
-} from 'aifn-applied/generative/autoencoders'
-import { moons, pinwheel } from 'aifn-applied/data/synthetic'
+} from 'aifn-methods/generative/autoencoders'
+import { moons, pinwheel } from 'aifn-methods/data/synthetic'
 import { stream } from 'aifn/foundation/random'
 
 const DATASETS = [
@@ -152,9 +141,7 @@ export function VaeExplorer() {
   const reconLoss = run?.history.reconstruction ?? []
   const klLoss = run?.history.regulariser ?? []
 
-  const lossIdx = currentCheckpoint
-    ? lossSteps.findIndex((s) => s >= currentCheckpoint.step)
-    : -1
+  const lossIdx = currentCheckpoint ? lossSteps.findIndex((s) => s >= currentCheckpoint.step) : -1
   const curRecon = lossIdx >= 0 ? reconLoss[lossIdx] : reconLoss[reconLoss.length - 1]
   const curKl = lossIdx >= 0 ? klLoss[lossIdx] : klLoss[klLoss.length - 1]
 
@@ -173,12 +160,7 @@ export function VaeExplorer() {
           options={DATASETS}
           onChange={(v) => setDataChoice(v as 'moons' | 'pinwheel')}
         />
-        <Select
-          label="Architecture"
-          value={modelChoice}
-          options={MODELS}
-          onChange={setModelChoice}
-        />
+        <Select label="Architecture" value={modelChoice} options={MODELS} onChange={setModelChoice} />
         <Select
           label="Training updates"
           value={String(steps)}
@@ -192,52 +174,23 @@ export function VaeExplorer() {
       </ControlRow>
 
       <ControlRow label="Training progression">
-        <Player
-          count={Math.max(1, numCheckpoints)}
-          value={currentIdx}
-          onChange={setCheckpointIndex}
-        />
+        <Player count={Math.max(1, numCheckpoints)} value={currentIdx} onChange={setCheckpointIndex} />
       </ControlRow>
 
       <Plots>
         <Plot x={dataAxisX} y={dataAxisY} title="Data space: real, reconstructions & prior samples">
-          <Points
-            x={dataPoints.x}
-            y={dataPoints.y}
-            slot={0}
-            size={4}
-            thin={true}
-          />
-          <Points
-            x={reconPoints.x}
-            y={reconPoints.y}
-            slot={1}
-            size={4}
-            thin={true}
-          />
-          <Points
-            x={priorSamples.x}
-            y={priorSamples.y}
-            slot={2}
-            size={5}
-          />
+          <Points x={dataPoints.x} y={dataPoints.y} slot={0} size={4} thin={true} />
+          <Points x={reconPoints.x} y={reconPoints.y} slot={1} size={4} thin={true} />
+          <Points x={priorSamples.x} y={priorSamples.y} slot={2} size={5} />
         </Plot>
 
         <Plot x={latentAxisX} y={latentAxisY} title="Latent space representation (z₁, z₂)">
-          <Points
-            x={latentCodes.x}
-            y={latentCodes.y}
-            slot={0}
-            size={4}
-          />
+          <Points x={latentCodes.x} y={latentCodes.y} slot={0} size={4} />
         </Plot>
       </Plots>
 
       <ControlRow label="Diagnostics">
-        <Readout
-          label="Step"
-          value={currentCheckpoint ? currentCheckpoint.step : '—'}
-        />
+        <Readout label="Step" value={currentCheckpoint ? currentCheckpoint.step : '—'} />
         <Readout
           label="Reconstruction error (MSE)"
           value={curRecon !== undefined ? formatNumber(Number(curRecon.toFixed(3))) : '—'}
@@ -246,10 +199,7 @@ export function VaeExplorer() {
           label="KL divergence (nats)"
           value={curKl !== undefined ? formatNumber(Number(curKl.toFixed(3))) : '—'}
         />
-        <Readout
-          label="Latent dimension"
-          value="2"
-        />
+        <Readout label="Latent dimension" value="2" />
       </ControlRow>
     </Figure>
   )

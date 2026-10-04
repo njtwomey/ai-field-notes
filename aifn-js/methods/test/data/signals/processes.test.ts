@@ -2,8 +2,8 @@ import { describe, expect, test } from 'vitest'
 import { stream } from 'aifn/foundation/random'
 import { toFlat } from 'aifn/foundation/tensor'
 import { coherence, logSpectralError, welch } from 'aifn/signal/spectral'
-import { arProcess, armaProcess, coupledProcesses, sinusoidsInNoise, unevenSinusoids } from 'aifn-applied/data/signals'
-import type { SpectralTruth } from 'aifn-applied/data'
+import { arProcess, armaProcess, coupledProcesses, sinusoidsInNoise, unevenSinusoids } from 'aifn-methods/data/signals'
+import type { SpectralTruth } from 'aifn-methods/data'
 
 const truthOf = (d: { meta: { truth?: unknown } }) => d.meta.truth as SpectralTruth
 

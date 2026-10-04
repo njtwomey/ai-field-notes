@@ -303,13 +303,7 @@ export function HigherOrderDerivativesExplorer() {
       <Plots rows={2} heights={[2, 1]} hoverGroup>
         <Plot x={xAx} y={yTopAx} title="f(x) with Tangent Line and Osculating Circle">
           <Curve name={funcName} x={xs} y={ys} slot={0} width={2} />
-          <Curve
-            name="Tangent"
-            x={[at - span, at + span]}
-            y={[y0 - p * span, y0 + p * span]}
-            emphasis
-            width={1.5}
-          />
+          <Curve name="Tangent" x={[at - span, at + span]} y={[y0 - p * span, y0 + p * span]} emphasis width={1.5} />
           {!isFlat && (
             <Curve
               name="Osculating Circle"
@@ -319,17 +313,14 @@ export function HigherOrderDerivativesExplorer() {
               width={1.5}
             />
           )}
-          {!isFlat && (
-            <Curve
-              name="Radius Vector"
-              x={[at, centre[0]]}
-              y={[y0, centre[1]]}
-              slot={3}
-              dashed
-              width={1}
-            />
-          )}
-          <Points name="Center of Curvature" x={isFlat ? [] : [centre[0]]} y={isFlat ? [] : [centre[1]]} slot={3} size={8} />
+          {!isFlat && <Curve name="Radius Vector" x={[at, centre[0]]} y={[y0, centre[1]]} slot={3} dashed width={1} />}
+          <Points
+            name="Center of Curvature"
+            x={isFlat ? [] : [centre[0]]}
+            y={isFlat ? [] : [centre[1]]}
+            slot={3}
+            size={8}
+          />
           <Points name="Point (x₀, f(x₀))" x={[at]} y={[y0]} emphasis size={11} />
           <Handle kind="x" at={at} onDrag={setX0} label="x₀" />
         </Plot>

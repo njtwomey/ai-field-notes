@@ -1,5 +1,5 @@
 /**
- * The registry of `aifn-applied/neural/ode`: the neural ODE family, the continuous normalising flow, the latent ODE and
+ * The registry of `aifn-methods/neural/ode`: the neural ODE family, the continuous normalising flow, the latent ODE and
  * their streamed runs, as functions.
  */
 

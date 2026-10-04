@@ -1,8 +1,5 @@
-import { useState } from 'react'
-import { Diagram } from 'aifn-render'
-import { link, variable } from 'aifn-render'
+import { Diagram, Figure, link, Readout, setting, useFigureState, variable } from 'aifn-render'
 import type { DiagramEdge, DiagramSpec } from 'aifn-render'
-import { Interactive, ParamSwitch, Readout } from 'aifn-render'
 
 type Structure = { name: string; edges: DiagramEdge[]; blockedWhenObserved: boolean }
 
@@ -26,7 +23,9 @@ const STRUCTURES: Structure[] = [
 
 /** The three canonical structures, with c observed or not, and whether a path between a and b is open. */
 export function CanonicalStructures() {
-  const [observed, setObserved] = useState(false)
+  const state = useFigureState({
+    observed: setting(false, 'observe c'),
+  })
   const spec = (s: Structure, open: boolean): DiagramSpec => {
     // Chains read left to right; forks and colliders put c between a and b, above or below them.
     const collider = !s.blockedWhenObserved
@@ -37,25 +36,26 @@ export function CanonicalStructures() {
       unit: 56,
       nodes: [
         variable('a', 0, ends, '$a$', { ...size, highlight: open }),
-        variable('c', 1.5, chain ? 0 : collider ? 1.3 : 0, '$c$', { ...size, filled: observed }),
+        variable('c', 1.5, chain ? 0 : collider ? 1.3 : 0, '$c$', { ...size, filled: state.observed }),
         variable('b', 3, ends, '$b$', { ...size, highlight: open }),
       ],
       edges: s.edges,
     }
   }
   return (
-    <Interactive
+    <Figure
       title="Chain, fork and collider"
+      state={state}
       caption="Each structure links a and b through c. A shaded node is observed. Observing c blocks the chain and the fork, so a and b become independent given c; observing c opens the collider, so a and b, independent a priori, become dependent given c."
-      controls={<ParamSwitch label="observe c" checked={observed} onChange={setObserved} />}
-      readout={STRUCTURES.map((s) => {
-        const open = observed ? !s.blockedWhenObserved : s.blockedWhenObserved
+
+      readouts={STRUCTURES.map((s) => {
+        const open = state.observed ? !s.blockedWhenObserved : s.blockedWhenObserved
         return <Readout key={s.name} label={s.name.split(' ')[0]} value={open ? 'a and b dependent' : 'a ⫫ b'} />
       })}
     >
       <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
         {STRUCTURES.map((s) => {
-          const open = observed ? !s.blockedWhenObserved : s.blockedWhenObserved
+          const open = state.observed ? !s.blockedWhenObserved : s.blockedWhenObserved
           return (
             <div key={s.name} className="flex flex-col gap-1 text-center">
               <div className="flex flex-1 items-center">
@@ -66,6 +66,6 @@ export function CanonicalStructures() {
           )
         })}
       </div>
-    </Interactive>
+    </Figure>
   )
 }

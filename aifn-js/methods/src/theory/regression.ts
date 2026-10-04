@@ -1,5 +1,5 @@
 /**
- * The shared layer of `aifn-applied/theory`: one-dimensional regression problems with a known regression function on
+ * The shared layer of `aifn-methods/theory`: one-dimensional regression problems with a known regression function on
  * [−1, 1], noisy training sets drawn from them, and least-squares fits of a feature map: minimum-norm when the system
  * is underdetermined, and ridge-penalised through the augmented system [Φ; √λ I] w ≈ [y; 0].
  */

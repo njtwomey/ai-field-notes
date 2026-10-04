@@ -1,7 +1,7 @@
 /**
  * Dynamic programming over tables (Bellman, 1957, "Dynamic Programming"): a generic table-filling algorithm that a
  * figure can step row by row. The sequence programmes built on it (longest common subsequence, edit distance, global
- * and local alignment) are in `sequences.ts`; the knapsacks in `aifn-applied/algorithms/dynamic-programming`.
+ * and local alignment) are in `sequences.ts`; the knapsacks in `aifn-methods/algorithms/dynamic-programming`.
  */
 
 import type { Tensor } from 'aifn/foundation/tensor'

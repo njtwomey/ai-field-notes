@@ -1,15 +1,18 @@
-import { useState } from 'react'
 import {
-  Interactive,
-  ParamChoice,
-  ParamSlider,
-  Readout,
-  XYChart,
+  choice,
+  Curve,
+  Figure,
+  float,
   formatNumber,
-  useParam,
-  type Handle,
+  Handle,
+  Plot,
+  Points,
+  Readout,
   type Segment,
-  type XYSeries,
+  Segments,
+  slider,
+  useAxis,
+  useFigureState,
 } from 'aifn-render'
 import { lineInSquare } from '../../_shared/rocExample'
 import type { Point } from '../../_shared/calibration'
@@ -37,74 +40,66 @@ function isometric(metric: Metric, v: number, c: number): { at: Point; slope: nu
  * isometrics are parallel; precision isometrics rotate about the origin; F1 isometrics rotate about (−1/c, 0).
  */
 export function IsometricPlot() {
-  const [metric, setMetric] = useState<Metric>('accuracy')
-  const logC = useParam(0, { min: -3, max: 3, step: 0.1 })
-  const fpr = useParam(0.2, { min: 0.001, max: 1, step: 0.001 })
-  const tpr = useParam(0.7, { min: 0, max: 1, step: 0.001 })
-  const c = 2 ** logC.value
-  const here: Point = [fpr.value, tpr.value]
-  const v = value(metric, here, c)
-  const through = isometric(metric, Math.min(Math.max(v, 1e-6), 1 - 1e-6), c)
+  const state = useFigureState({
+    metric: choice<Metric>(
+      [
+        { value: 'accuracy', label: 'accuracy' },
+        { value: 'precision', label: 'precision' },
+        { value: 'f1', label: 'F1' },
+      ],
+      'accuracy',
+      { label: 'metric' },
+    ),
+    logC: float(0, { min: -3, max: 3, step: 0.1, label: 'log₂ c' }),
+    fpr: slider(0.001, 1, 0.2, { step: 0.001, onChart: true }),
+    tpr: slider(0, 1, 0.7, { step: 0.001, onChart: true }),
+  })
+  const c = 2 ** state.logC
+  const here: Point = [state.fpr, state.tpr]
+  const v = value(state.metric, here, c)
+  const through = isometric(state.metric, Math.min(Math.max(v, 1e-6), 1 - 1e-6), c)
   const own = lineInSquare(through.at, through.slope)
 
   const segments: Segment[] = LEVELS.flatMap((lv) => {
-    const iso = isometric(metric, lv, c)
+    const iso = isometric(state.metric, lv, c)
     const seg = lineInSquare(iso.at, iso.slope)
     return seg.x.length === 2 ? [{ from: [seg.x[0], seg.y[0]], to: [seg.x[1], seg.y[1]] } as Segment] : []
   })
-  const series: XYSeries[] = [
-    { name: 'isometric through the point', type: 'line', x: own.x, y: own.y, slot: 0 },
-    { name: 'classifier', type: 'scatter', x: [fpr.value], y: [tpr.value], emphasis: true },
-  ]
-  const handles: Handle[] = [
-    {
-      kind: 'point',
-      at: here,
-      label: 'classifier',
-      onDrag: ([x, y]) => {
-        fpr.set(x)
-        tpr.set(y)
-      },
-    },
-  ]
+  const series = [
+    { name: 'isometric through the point', x: own.x, y: own.y, slot: 0 },
+    { name: 'classifier', x: [state.fpr], y: [state.tpr], emphasis: true },
+  ] as const
 
+  const xAxis = useAxis({ label: 'false-positive rate', range: [0, 1] })
+  const yAxis = useAxis({ label: 'true-positive rate', range: [0, 1], equal: xAxis })
   return (
-    <Interactive
+    <Figure
       title="ROC isometrics"
+      state={state}
       caption="Thin lines join ROC points with equal metric value, at levels 0.1 to 0.9, for skew ratio c (negatives per positive, times the cost ratio). Accuracy isometrics are parallel with slope c. Precision isometrics all pass through the origin. F1 isometrics all pass through (−1/c, 0), off the chart to the left. Drag the classifier and change c: the slope of its isometric is the trade-off the metric makes at that point."
-      controls={
-        <>
-          <ParamChoice
-            label="metric"
-            value={metric}
-            onChange={setMetric}
-            options={[
-              { value: 'accuracy', label: 'accuracy' },
-              { value: 'precision', label: 'precision' },
-              { value: 'f1', label: 'F1' },
-            ]}
-          />
-          <ParamSlider label="log₂ c" param={logC} />
-        </>
-      }
-      readout={
+
+      readouts={
         <>
           <Readout label="c" value={formatNumber(c)} />
-          <Readout label={metric} value={formatNumber(v)} />
+          <Readout label={state.metric} value={formatNumber(v)} />
           <Readout label="effective skew (slope)" value={formatNumber(through.slope)} />
         </>
       }
     >
-      <XYChart
-        equalAspect
-        xLabel="false-positive rate"
-        yLabel="true-positive rate"
-        xRange={[0, 1]}
-        yRange={[0, 1]}
-        handles={handles}
-        segments={segments}
-        series={series}
-      />
-    </Interactive>
+      <Plot x={xAxis} y={yAxis}>
+        <Curve {...series[0]} />
+        <Points {...series[1]} />
+        <Segments segments={segments} />
+        <Handle
+          kind="point"
+          at={here}
+          label="classifier"
+          onDrag={([x, y]) => {
+            state.set('fpr', x)
+            state.set('tpr', y)
+          }}
+        />
+      </Plot>
+    </Figure>
   )
 }

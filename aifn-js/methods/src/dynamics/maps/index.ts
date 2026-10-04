@@ -1,5 +1,5 @@
 /**
- * `aifn-applied/dynamics/maps`: discrete-time dynamical systems x_{n+1} = f(x_n): iteration as a traceable `Algorithm`,
+ * `aifn-methods/dynamics/maps`: discrete-time dynamical systems x_{n+1} = f(x_n): iteration as a traceable `Algorithm`,
  * orbits, cobweb paths, bifurcation diagrams and Lyapunov exponents, with the standard families (logistic, tent, sine,
  * Hénon, Chirikov's standard map). References: May (1976), "Simple mathematical models with very complicated dynamics",
  * Nature 261; Strogatz (2015), "Nonlinear Dynamics and Chaos", 2nd ed., §10; Benettin et al. (1980), Meccanica 15, for

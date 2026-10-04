@@ -1,5 +1,5 @@
+import { normalCdf, normalQuantile } from 'aifn/numerics/special'
 /** Helpers shared by the A/A, A/B and sample-ratio-mismatch examples: binomial draws and the two-proportion z-test. */
-import { normalCdf, normalQuantile } from '@/lib/math/special'
 
 /**
  * An exact Binomial(n, p) draw by geometric skips: the gap before each success is geometric, so the cost is about np

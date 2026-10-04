@@ -1,5 +1,4 @@
-import { Interactive } from 'aifn-render'
-import { Diagram } from 'aifn-render'
+import { Diagram, Figure } from 'aifn-render'
 import type { DiagramSpec } from 'aifn-render'
 
 const spec: DiagramSpec = {
@@ -87,7 +86,7 @@ const spec: DiagramSpec = {
 /** The two loops of MAML. */
 export function MamlLoopDiagram() {
   return (
-    <Interactive
+    <Figure
       title="The two loops of MAML"
       caption="For each task in a batch, the inner loop takes one or a few gradient steps from the shared initialisation θ on the task's training (support) examples. The adapted weights are scored on the task's validation (query) examples. The outer loop differentiates the sum of those scores with respect to θ, through the inner steps, and updates θ."
     >
@@ -95,6 +94,6 @@ export function MamlLoopDiagram() {
         spec={spec}
         ariaLabel="Shared initialisation theta feeds inner-loop adaptation for several tasks; their validation losses are summed and the outer loop updates theta"
       />
-    </Interactive>
+    </Figure>
   )
 }

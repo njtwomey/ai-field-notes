@@ -1,7 +1,16 @@
-import { useMemo, useState } from 'react'
-import { Interactive, ParamButton, ParamSlider, Readout, XYChart, formatNumber, type XYSeries } from 'aifn-render'
-import { linspace, mean, rng } from '@/lib/math'
-import { normalCdf, normalPdf } from '@/lib/math/special'
+import { useMemo } from 'react'
+import {
+  Figure,
+  float,
+  formatNumber,
+  int,
+  Plot,
+  Readout,
+  seriesLayers,
+  type SeriesSpec,
+  useAxis,
+  useFigureState,
+} from 'aifn-render'
 import {
   addScaled,
   cholesky,
@@ -14,10 +23,15 @@ import {
   psplineRow,
   type Matrix,
 } from '../_shared/terms-psplines'
+import { linspace, toFlat } from 'aifn/foundation/tensor'
+import { normal, stream, uniform } from 'aifn/foundation/random'
+import { normalCdf, normalPdf } from 'aifn/numerics/special'
+
+const mean = (xs: readonly number[]) => xs.reduce((a, b) => a + b, 0) / xs.length
 
 const N = 300
 const K = 15
-const GRID = linspace(0, 1, 121)
+const GRID = toFlat(linspace(0, 1, 121))
 const BACKGROUND = [0.05, 0.25, 0.5, 0.75, 0.95]
 const S = gram(diffMatrix(K, 2))
 const location = (x: number) => 1 + 0.8 * Math.sin(2 * Math.PI * x)
@@ -55,27 +69,29 @@ function laws(B: Matrix, y: number[], tau: number, lambda: number) {
 }
 
 export function ExpectileCurves() {
-  const [tau, setTau] = useState(0.9)
-  const [logLambda, setLogLambda] = useState(0)
-  const [seed, setSeed] = useState(11)
+  const state = useFigureState({
+    tau: float(0.9, { min: 0.01, max: 0.99, step: 0.01, label: 'τ' }),
+    logLambda: float(0, { min: -2, max: 4, step: 0.1, label: 'log₁₀ λ', format: (v) => v.toFixed(1) }),
+    seed: int(11, { ge: 0, label: 'seed' }),
+  })
 
   const data = useMemo(() => {
-    const r = rng(seed)
-    const x = Array.from({ length: N }, () => r.uniform())
-    const y = x.map((xi) => location(xi) + scale(xi) * r.normal())
+    const r = stream(state.seed)
+    const x = Array.from({ length: N }, () => uniform(r))
+    const y = x.map((xi) => location(xi) + scale(xi) * normal(r))
     return { x, y, B: x.map((xi) => psplineRow(xi, 0, 1, K)) }
-  }, [seed])
+  }, [state.seed])
   const Bgrid = useMemo(() => GRID.map((g) => psplineRow(g, 0, 1, K)), [])
 
-  const lambda = 10 ** logLambda
+  const lambda = 10 ** state.logLambda
   const background = useMemo(() => BACKGROUND.map((t) => laws(data.B, data.y, t, lambda).beta), [data, lambda])
-  const chosen = useMemo(() => laws(data.B, data.y, tau, lambda), [data, tau, lambda])
-  const e = normalExpectile(tau)
+  const chosen = useMemo(() => laws(data.B, data.y, state.tau, lambda), [data, state.tau, lambda])
+  const e = normalExpectile(state.tau)
   const below = mean(data.B.map((row, i) => (data.y[i] < dot(row, chosen.beta) ? 1 : 0)))
 
-  const series: XYSeries[] = [
+  const series: SeriesSpec[] = [
     { name: 'data', type: 'scatter', x: data.x, y: data.y, muted: true },
-    ...BACKGROUND.map((t, j): XYSeries => ({
+    ...BACKGROUND.map((t, j): SeriesSpec => ({
       name: `τ = ${t}`,
       type: 'line',
       x: GRID,
@@ -93,9 +109,12 @@ export function ExpectileCurves() {
     { name: `fitted τ-expectile`, type: 'line', x: GRID, y: Bgrid.map((row) => dot(row, chosen.beta)), slot: 1 },
   ]
 
+  const xAxis = useAxis({ label: 'x', range: [0, 1] })
+  const yAxis = useAxis({ label: 'y', range: [-1.5, 3.5] })
   return (
-    <Interactive
+    <Figure
       title="Expectile curves by asymmetric least squares"
+      state={state}
       caption={
         <>
           Three hundred points with a sinusoidal mean and a spread that grows from left to right. Grey curves are
@@ -106,22 +125,8 @@ export function ExpectileCurves() {
           0.9-expectile is only about the 0.81-quantile.
         </>
       }
-      controls={
-        <>
-          <ParamSlider label="τ" value={tau} onChange={setTau} min={0.01} max={0.99} step={0.01} />
-          <ParamSlider
-            label="log₁₀ λ"
-            value={logLambda}
-            onChange={setLogLambda}
-            min={-2}
-            max={4}
-            step={0.1}
-            format={(v) => v.toFixed(1)}
-          />
-          <ParamButton onClick={() => setSeed((s) => s + 1)}>New sample</ParamButton>
-        </>
-      }
-      readout={
+
+      readouts={
         <>
           <Readout label="share of y below the fit" value={formatNumber(below)} />
           <Readout label="quantile level of the true τ-expectile" value={formatNumber(normalCdf(e))} />
@@ -129,7 +134,9 @@ export function ExpectileCurves() {
         </>
       }
     >
-      <XYChart series={series} xRange={[0, 1]} yRange={[-1.5, 3.5]} xLabel="x" yLabel="y" height={340} />
-    </Interactive>
+      <Plot x={xAxis} y={yAxis} height={340}>
+        {seriesLayers(series)}
+      </Plot>
+    </Figure>
   )
 }

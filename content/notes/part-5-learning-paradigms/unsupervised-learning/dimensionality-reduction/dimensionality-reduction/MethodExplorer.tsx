@@ -1,5 +1,16 @@
-import { useMemo, useState } from 'react'
-import { Interactive, ParamChoice, ParamSlider, Readout, XYChart, formatNumber, type XYSeries } from 'aifn-render'
+import { useMemo } from 'react'
+import {
+  choice,
+  Figure,
+  formatNumber,
+  int,
+  Plot,
+  Readout,
+  seriesLayers,
+  type SeriesSpec,
+  useAxis,
+  useFigureState,
+} from 'aifn-render'
 import {
   classicalMds,
   diffusionMap,
@@ -56,7 +67,7 @@ const USES_K: Record<Method, boolean> = {
 }
 
 /** Points in three bands of the intrinsic coordinate, or by cluster label, as one grouped scatter series. */
-function coloured(xy: Rows, t: number[], labelled: boolean, name: string): XYSeries {
+function coloured(xy: Rows, t: number[], labelled: boolean, name: string): SeriesSpec {
   let group: number[]
   let groupNames: string[]
   if (labelled) {
@@ -73,19 +84,21 @@ function coloured(xy: Rows, t: number[], labelled: boolean, name: string): XYSer
 }
 
 export function MethodExplorer() {
-  const [dataset, setDataset] = useState<DatasetId>('swiss-roll')
-  const [method, setMethod] = useState<Method>('isomap')
-  const [k, setK] = useState(6)
+  const state = useFigureState({
+    dataset: choice<DatasetId>(DATASETS, 'swiss-roll', { label: 'data' }),
+    method: choice<Method>(METHODS, 'isomap', { label: 'method' }),
+    k: int(6, { min: 4, max: 20, step: 1, label: 'k (neighbours)' }),
+  })
   const data = useMemo(() => {
-    const m = manifold(dataset, N)
+    const m = manifold(state.dataset, N)
     const d = distances(m.x)
     return { ...m, d, r: ranks(d) }
-  }, [dataset])
-  const kUsed = USES_K[method] ? k : 0
+  }, [state.dataset])
+  const kUsed = USES_K[state.method] ? state.k : 0
   const fit = useMemo(() => {
     let connected: boolean | undefined
     let y: Rows
-    switch (method) {
+    switch (state.method) {
       case 'pca':
         y = pca(data.x)
         break
@@ -115,13 +128,18 @@ export function MethodExplorer() {
         break
     }
     return { y, connected, ...trustworthiness(data.r, ranks(distances(y)), SCORE_K) }
-  }, [data, method, kUsed])
+  }, [data, state.method, kUsed])
   const [a, b] = data.view
   const view = data.x.map((p) => [p[a], p[b]])
 
+  const xAxis = useAxis({ label: `x${'₁₂₃'[a]}`, hold: 'union' })
+  const yAxis = useAxis({ label: `x${'₁₂₃'[b]}`, hold: 'union' })
+  const xAxis2 = useAxis({ label: 'embedding 1', hold: 'union' })
+  const yAxis2 = useAxis({ label: 'embedding 2', hold: 'union' })
   return (
-    <Interactive
+    <Figure
       title="Eight methods on five data sets"
+      state={state}
       caption={
         <>
           240 points in three dimensions. Left: the data seen along two of its axes. Right: the two-dimensional
@@ -133,22 +151,12 @@ export function MethodExplorer() {
           uses a Gaussian kernel of width twice the mean distance to the k-th neighbour.
         </>
       }
-      controls={
-        <>
-          <div className="sm:col-span-2 lg:col-span-3">
-            <ParamChoice label="data" value={dataset} onChange={setDataset} options={DATASETS} />
-          </div>
-          <div className="sm:col-span-2 lg:col-span-3">
-            <ParamChoice label="method" value={method} onChange={setMethod} options={METHODS} />
-          </div>
-          <ParamSlider label="k (neighbours)" value={k} onChange={setK} min={4} max={20} step={1} />
-        </>
-      }
-      readout={
+
+      readouts={
         <>
           <Readout label={`trustworthiness (k = ${SCORE_K})`} value={formatNumber(fit.trust)} />
           <Readout label={`continuity (k = ${SCORE_K})`} value={formatNumber(fit.cont)} />
-          <Readout label="uses k" value={USES_K[method] ? 'yes' : 'no'} />
+          <Readout label="uses k" value={USES_K[state.method] ? 'yes' : 'no'} />
           {fit.connected !== undefined && (
             <Readout label="graph" value={fit.connected ? 'connected' : 'disconnected'} />
           )}
@@ -156,19 +164,13 @@ export function MethodExplorer() {
       }
     >
       <div className="grid gap-4 md:grid-cols-2">
-        <XYChart
-          height={320}
-          xLabel={`x${'₁₂₃'[a]}`}
-          yLabel={`x${'₁₂₃'[b]}`}
-          series={[coloured(view, data.t, data.labelled, 'data')]}
-        />
-        <XYChart
-          height={320}
-          xLabel="embedding 1"
-          yLabel="embedding 2"
-          series={[coloured(fit.y, data.t, data.labelled, 'embedding')]}
-        />
+        <Plot x={xAxis} y={yAxis} height={320}>
+          {seriesLayers([coloured(view, data.t, data.labelled, 'data')])}
+        </Plot>
+        <Plot x={xAxis2} y={yAxis2} height={320}>
+          {seriesLayers([coloured(fit.y, data.t, data.labelled, 'embedding')])}
+        </Plot>
       </div>
-    </Interactive>
+    </Figure>
   )
 }

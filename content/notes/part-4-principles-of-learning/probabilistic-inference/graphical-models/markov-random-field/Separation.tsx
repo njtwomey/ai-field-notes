@@ -1,8 +1,5 @@
 import { useState } from 'react'
-import { MathText } from 'aifn-render'
-import { Diagram } from 'aifn-render'
-import { link, variable } from 'aifn-render'
-import { Interactive, ParamChoice, Readout } from 'aifn-render'
+import { choice, Diagram, Figure, link, MathText, Readout, useFigureState, variable } from 'aifn-render'
 
 type Vertex = { id: string; label: string; x: number; y: number }
 type Graph = { nodes: Vertex[]; edges: [string, string][]; a: string; b: string; separator: string[] }
@@ -52,10 +49,19 @@ function reachable(g: Graph, start: string, blocked: Set<string>): Set<string> {
 
 /** Toggle the observed set S by clicking; the nodes reachable from A without passing through S are coloured. */
 export function Separation() {
-  const [which, setWhich] = useState<'chain' | 'grid'>('chain')
+  const state = useFigureState({
+    which: choice<'chain' | 'grid'>(
+      [
+        { value: 'chain', label: 'Ising chain' },
+        { value: 'grid', label: '3 × 3 grid' },
+      ],
+      'chain',
+      { label: 'graph' },
+    ),
+  })
   const [observed, setObserved] = useState<Record<string, string[]>>({})
-  const g = GRAPHS[which]
-  const s = new Set(observed[which] ?? g.separator)
+  const g = GRAPHS[state.which]
+  const s = new Set(observed[state.which] ?? g.separator)
   const reach = reachable(g, g.a, s)
   const label = (id: string) => `$${g.nodes.find((n) => n.id === id)!.label}$`
   const toggle = (id: string) => {
@@ -63,28 +69,19 @@ export function Separation() {
     const next = new Set(s)
     if (next.has(id)) next.delete(id)
     else next.add(id)
-    setObserved({ ...observed, [which]: [...next] })
+    setObserved({ ...observed, [state.which]: [...next] })
   }
   return (
-    <Interactive
+    <Figure
       title="Separation in a Markov random field"
+      state={state}
       caption={
         <MathText
           text={`Click a node to add it to the observed set $S$ (shaded) or remove it. The coloured nodes are those reachable from ${label(g.a)} without passing through $S$. $S$ separates ${label(g.a)} from ${label(g.b)} exactly when ${label(g.b)} is not coloured, and then the two are conditionally independent given $S$.`}
         />
       }
-      controls={
-        <ParamChoice
-          label="graph"
-          value={which}
-          onChange={setWhich}
-          options={[
-            { value: 'chain', label: 'Ising chain' },
-            { value: 'grid', label: '3 × 3 grid' },
-          ]}
-        />
-      }
-      readout={
+
+      readouts={
         <>
           <Readout
             label={<MathText text="$S$" />}
@@ -106,8 +103,8 @@ export function Separation() {
           edges: g.edges.map(([a, b]) => link(a, b, false)),
         }}
         onNodeClick={toggle}
-        ariaLabel={`Undirected ${which} with an observed set`}
+        ariaLabel={`Undirected ${state.which} with an observed set`}
       />
-    </Interactive>
+    </Figure>
   )
 }

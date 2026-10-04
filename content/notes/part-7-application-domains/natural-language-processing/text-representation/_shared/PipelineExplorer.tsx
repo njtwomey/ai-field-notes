@@ -1,7 +1,19 @@
 import { useMemo, useState } from 'react'
-import { Interactive, ParamChoice, ParamSwitch, Readout, formatNumber } from 'aifn-render'
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from 'aifn-render'
-import { Textarea } from 'aifn-render'
+import {
+  choice,
+  Figure,
+  formatNumber,
+  Readout,
+  setting,
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+  Textarea,
+  useFigureState,
+} from 'aifn-render'
 import { cn } from '@/lib/utils'
 import { NEGATIONS, STOP_WORDS, counts, lemmatise, ngrams, normalise, porterStem, tokenise } from './text'
 
@@ -56,25 +68,53 @@ function features(toks: Tok[], grams: Grams): string[] {
 
 /** Raw text → normalised tokens → stop words → stems or lemmas → n-grams → weighted bag, over a six-sentence corpus. */
 export function PipelineExplorer() {
-  const [choice, setChoice] = useState<string>('0')
-  const [text, setText] = useState(CORPUS[0])
-  const [casefold, setCasefold] = useState(true)
-  const [accents, setAccents] = useState(false)
-  const [contractions, setContractions] = useState(false)
-  const [stop, setStop] = useState(false)
-  const [keepNegation, setKeepNegation] = useState(true)
-  const [morph, setMorph] = useState<Morph>('none')
-  const [grams, setGrams] = useState<Grams>('1')
-  const [weight, setWeight] = useState<Weight>('count')
-
-  const pick = (v: string) => {
-    setChoice(v)
-    if (v !== 'custom') setText(CORPUS[Number(v)])
-  }
+  const state = useFigureState({
+    sentence: choice(
+      [...CORPUS.map((_, i) => ({ value: String(i), label: String(i + 1) })), { value: 'custom', label: 'custom' }],
+      '0',
+      { label: 'sentence' },
+    ),
+    morph: choice<Morph>(
+      [
+        { value: 'none', label: 'none' },
+        { value: 'porter', label: 'Porter stem' },
+        { value: 'lemma', label: 'lemma' },
+      ],
+      'none',
+      { label: 'stemming or lemmatisation' },
+    ),
+    grams: choice<Grams>(
+      [
+        { value: '1', label: 'unigrams' },
+        { value: '1-2', label: '1 + 2' },
+        { value: '2', label: 'bigrams' },
+      ],
+      '1',
+      { label: 'n-grams' },
+    ),
+    weight: choice<Weight>(
+      [
+        { value: 'count', label: 'count' },
+        { value: 'binary', label: 'binary' },
+        { value: 'tfidf', label: 'TF-IDF' },
+      ],
+      'count',
+      { label: 'weighting' },
+    ),
+    casefold: setting(true, 'case folding'),
+    accents: setting(false, 'strip accents'),
+    contractions: setting(false, 'expand contractions'),
+    stop: setting(false, 'remove stop words'),
+    keepNegation: setting(true, { label: '…but keep negations', when: (v) => Boolean(v.stop) }),
+  })
+  const { sentence, casefold, accents, contractions, stop, keepNegation, morph, grams, weight } = state
+  // Typed text is kept while a corpus sentence is shown, and comes back with "custom".
+  const [custom, setCustom] = useState(CORPUS[0])
+  const text = sentence === 'custom' ? custom : CORPUS[Number(sentence)]
 
   const r = useMemo(() => {
     const s: Settings = { casefold, accents, contractions, stop, keepNegation, morph, grams }
-    const docs = choice === 'custom' ? [...CORPUS, text] : CORPUS
+    const docs = sentence === 'custom' ? [...CORPUS, text] : CORPUS
     const docFeatures = docs.map((d) => features(process(d, s), grams))
     const df = counts(docFeatures.flatMap((f) => [...new Set(f)]))
     const toks = process(text, s)
@@ -89,61 +129,14 @@ export function PipelineExplorer() {
       })
       .sort((a, b) => b.w - a.w || a.term.localeCompare(b.term))
     return { toks, rows, N, vocab: df.size }
-  }, [text, choice, casefold, accents, contractions, stop, keepNegation, morph, grams, weight])
+  }, [text, sentence, casefold, accents, contractions, stop, keepNegation, morph, grams, weight])
 
   return (
-    <Interactive
+    <Figure
       title="From raw text to a bag of words"
       caption="Pick a sentence or type one. Each switch is one pipeline step; the chips show the tokens after it (struck through when a stop list removes them), and the table shows the resulting features with their weight. Corpus vocabulary is the number of distinct features across all six sentences: watch it shrink with case folding and stemming, and grow with bigrams. Stemming uses Porter's 1980 rules; lemmatisation uses a small built-in dictionary."
-      controls={
-        <>
-          <ParamChoice
-            label="sentence"
-            value={choice}
-            onChange={pick}
-            options={[
-              ...CORPUS.map((_, i) => ({ value: String(i), label: String(i + 1) })),
-              { value: 'custom', label: 'custom' },
-            ]}
-          />
-          <ParamChoice
-            label="stemming or lemmatisation"
-            value={morph}
-            onChange={setMorph}
-            options={[
-              { value: 'none', label: 'none' },
-              { value: 'porter', label: 'Porter stem' },
-              { value: 'lemma', label: 'lemma' },
-            ]}
-          />
-          <ParamChoice
-            label="n-grams"
-            value={grams}
-            onChange={setGrams}
-            options={[
-              { value: '1', label: 'unigrams' },
-              { value: '1-2', label: '1 + 2' },
-              { value: '2', label: 'bigrams' },
-            ]}
-          />
-          <ParamChoice
-            label="weighting"
-            value={weight}
-            onChange={setWeight}
-            options={[
-              { value: 'count', label: 'count' },
-              { value: 'binary', label: 'binary' },
-              { value: 'tfidf', label: 'TF-IDF' },
-            ]}
-          />
-          <ParamSwitch label="case folding" checked={casefold} onChange={setCasefold} />
-          <ParamSwitch label="strip accents" checked={accents} onChange={setAccents} />
-          <ParamSwitch label="expand contractions" checked={contractions} onChange={setContractions} />
-          <ParamSwitch label="remove stop words" checked={stop} onChange={setStop} />
-          <ParamSwitch label="…but keep negations" checked={keepNegation} onChange={setKeepNegation} />
-        </>
-      }
-      readout={
+      state={state}
+      readouts={
         <>
           <Readout label="tokens kept" value={`${r.toks.filter((t) => !t.removed).length} / ${r.toks.length}`} />
           <Readout label="distinct features here" value={r.rows.length} />
@@ -155,8 +148,8 @@ export function PipelineExplorer() {
       <Textarea
         value={text}
         onChange={(e) => {
-          setText(e.target.value)
-          setChoice('custom')
+          setCustom(e.target.value)
+          state.set('sentence', 'custom')
         }}
         className="min-h-10 font-mono text-sm"
         aria-label="text to process"
@@ -199,6 +192,6 @@ export function PipelineExplorer() {
           </TableBody>
         </Table>
       </div>
-    </Interactive>
+    </Figure>
   )
 }

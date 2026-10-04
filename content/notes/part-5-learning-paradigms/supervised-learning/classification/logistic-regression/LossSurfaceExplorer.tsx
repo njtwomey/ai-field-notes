@@ -1,19 +1,24 @@
-import { useMemo, useState } from 'react'
+import { useMemo } from 'react'
 import {
-  Heatmap,
-  Interactive,
-  ParamSlider,
-  Readout,
-  XYChart,
+  Figure,
+  float,
   formatNumber,
-  useParam,
-  type Handle,
+  Handle,
+  Plot,
+  Raster,
+  Readout,
+  seriesLayers,
+  type SeriesSpec,
+  useAxis,
+  useFigureState,
   type Vector,
-  type XYSeries,
+  Vectors,
 } from 'aifn-render'
 import type { LossSurface } from '@/generated/contracts'
 import { useFigure } from '@/lib/generated'
-import { mean, sigmoid } from '@/lib/math'
+import { sigmoid } from 'aifn/numerics/special'
+
+const mean = (xs: readonly number[]) => xs.reduce((a, b) => a + b, 0) / xs.length
 
 type Vec = [number, number]
 
@@ -30,17 +35,19 @@ function boundary(w1: number, w2: number): number[] | undefined {
  */
 export function LossSurfaceExplorer() {
   const { data, error } = useFigure<LossSurface>('logistic-regression/loss-surface')
-  const w1Param = useParam(-2, { min: -4, max: 4, step: 0.1 })
-  const w2Param = useParam(2.5, { min: -4, max: 4, step: 0.1 })
-  const w1 = w1Param.value
-  const w2 = w2Param.value
-  const [lambda, setLambda] = useState(0)
+  const state = useFigureState({
+    w1Param: float(-2, { min: -4, max: 4, step: 0.1, label: 'w₁' }),
+    w2Param: float(2.5, { min: -4, max: 4, step: 0.1, label: 'w₂' }),
+    lambda: float(0, { min: 0, max: 1, step: 0.01, label: 'L2 penalty λ' }),
+  })
+  const w1 = state.w1Param
+  const w2 = state.w2Param
 
   // Regularised surface and its minimum on the grid. Recomputed only when λ changes.
   const surface = useMemo(() => {
     if (!data) return undefined
     const { x, y, z } = data.surface
-    const total = z.map((row, i) => row.map((v, j) => v + penalty(lambda, x[j], y[i])))
+    const total = z.map((row, i) => row.map((v, j) => v + penalty(state.lambda, x[j], y[i])))
     let best = { i: 0, j: 0 }
     total.forEach((row, i) =>
       row.forEach((v, j) => {
@@ -48,7 +55,7 @@ export function LossSurfaceExplorer() {
       }),
     )
     return { z: total, minimum: [x[best.j], y[best.i]] as [number, number] }
-  }, [data, lambda])
+  }, [data, state.lambda])
 
   const stats = useMemo(() => {
     if (!data) return undefined
@@ -64,8 +71,8 @@ export function LossSurfaceExplorer() {
       mean(p.map((pi, i) => (pi - labels[i]) * x[i])),
       mean(p.map((pi, i) => (pi - labels[i]) * y[i])),
     ]
-    return { crossEntropy, reg: penalty(lambda, w1, w2), accuracy, grad }
-  }, [data, w1, w2, lambda])
+    return { crossEntropy, reg: penalty(state.lambda, w1, w2), accuracy, grad }
+  }, [data, w1, w2, state.lambda])
 
   const overlay = useMemo(
     () =>
@@ -83,7 +90,7 @@ export function LossSurfaceExplorer() {
     [surface],
   )
 
-  const series = useMemo((): XYSeries[] => {
+  const series = useMemo((): SeriesSpec[] => {
     if (!data || !surface) return []
     const chosen = boundary(w1, w2)
     const optimal = boundary(...surface.minimum)
@@ -109,63 +116,37 @@ export function LossSurfaceExplorer() {
     const [g1, g2] = stats.grad
     const from: Vec = [w1, w2]
     const out: Vector[] = [{ from, to: [w1 - g1, w2 - g2], slot: 1, label: '−∇ cross-entropy' }]
-    if (lambda > 0) {
-      out.push({ from, to: [w1 - lambda * w1, w2 - lambda * w2], slot: 2, label: '−∇ penalty' })
-      out.push({ from, to: [w1 - g1 - lambda * w1, w2 - g2 - lambda * w2], label: '−∇ total' })
+    if (state.lambda > 0) {
+      out.push({ from, to: [w1 - state.lambda * w1, w2 - state.lambda * w2], slot: 2, label: '−∇ penalty' })
+      out.push({ from, to: [w1 - g1 - state.lambda * w1, w2 - g2 - state.lambda * w2], label: '−∇ total' })
     }
     return out
-  }, [stats, w1, w2, lambda])
+  }, [stats, w1, w2, state.lambda])
 
   // On the loss surface, the weights themselves are the handle.
-  const weightHandle: Handle[] = [
-    {
-      kind: 'point',
-      at: [w1, w2],
-      label: 'w',
-      onDrag: ([a, b]) => {
-        w1Param.set(a)
-        w2Param.set(b)
-      },
-    },
-  ]
   // In feature space, the tip of the unit normal turns w about the origin and keeps ‖w‖ (1 when w = 0).
-  const normalHandle: Handle[] = [
-    {
-      kind: 'point',
-      at: normal.length ? normal[0].to : [1, 0],
-      label: 'direction of w',
-      onDrag: ([a, b]) => {
-        if (Math.hypot(a, b) < 1e-9) return
-        const angle = Math.atan2(b, a)
-        const norm = Math.hypot(w1, w2) || 1
-        w1Param.set(norm * Math.cos(angle))
-        w2Param.set(norm * Math.sin(angle))
-      },
-    },
-  ]
+
+  const xAxis = useAxis({ label: data?.surface.x_label })
+  const yAxis = useAxis({ label: data?.surface.y_label })
+  const xAxis2 = useAxis({ label: 'x₁', range: [-4, 4] })
+  const yAxis2 = useAxis({ label: 'x₂', range: [-4, 4], equal: xAxis2 })
 
   if (error) return <p className="text-sm text-destructive">{error.message}</p>
   if (!data || !surface || !stats) return null
-
   return (
-    <Interactive
+    <Figure
       title="Loss surface and decision boundary"
+      state={state}
       caption="Left: mean cross-entropy plus the L2 penalty (λ/2)‖w‖² for every (w₁, w₂), bias fixed at 0. The diamond marks the minimum. The arrows at w are the negative gradients, the step gradient descent with η = 1 would take: from the cross-entropy, from the penalty (pointing at the origin), and their sum. At the minimum the first two are equal and opposite, so the sum vanishes. Right: the data, the boundary for your weights and the boundary at the minimum. The arrow is the unit normal w/‖w‖, coloured as class y = 1, toward which it points. The length ‖w‖, in the readout, sets how sharply P(y = 1) changes across the boundary. Drag the dot on the loss surface to move w, or drag the arrow tip to turn the boundary at fixed ‖w‖. Raise λ and the minimum moves toward the origin: a smaller ‖w‖, a softer boundary."
-      controls={
-        <>
-          <ParamSlider label="w₁" param={w1Param} />
-          <ParamSlider label="w₂" param={w2Param} />
-          <ParamSlider label="L2 penalty λ" value={lambda} onChange={setLambda} min={0} max={1} step={0.01} />
-        </>
-      }
-      readout={
+
+      readouts={
         <>
           <Readout label="cross-entropy" value={formatNumber(stats.crossEntropy)} />
           <Readout label="penalty" value={formatNumber(stats.reg)} />
           <Readout label="total" value={formatNumber(stats.crossEntropy + stats.reg)} />
           <Readout
             label="‖∇ total‖"
-            value={formatNumber(Math.hypot(stats.grad[0] + lambda * w1, stats.grad[1] + lambda * w2))}
+            value={formatNumber(Math.hypot(stats.grad[0] + state.lambda * w1, stats.grad[1] + state.lambda * w2))}
           />
           <Readout label="‖w‖" value={formatNumber(Math.hypot(w1, w2))} />
           <Readout label="accuracy" value={`${(stats.accuracy * 100).toFixed(1)}%`} />
@@ -174,30 +155,37 @@ export function LossSurfaceExplorer() {
       }
     >
       <div className="grid gap-4 md:grid-cols-2">
-        <Heatmap
-          x={data.surface.x}
-          y={data.surface.y}
-          z={surface.z}
-          xLabel={data.surface.x_label}
-          yLabel={data.surface.y_label}
-          valueLabel="loss"
-          overlay={overlay}
-          handles={weightHandle}
-          vectors={descent}
-          range={[0, 3]}
-          height={340}
-        />
-        <XYChart
-          equalAspect
-          xRange={[-4, 4]}
-          yRange={[-4, 4]}
-          xLabel="x₁"
-          yLabel="x₂"
-          series={series}
-          vectors={normal}
-          handles={normalHandle}
-        />
+        <Plot x={xAxis} y={yAxis} height={340}>
+          <Raster x={data.surface.x} y={data.surface.y} z={surface.z} range={[0, 3]} valueLabel={'loss'} />
+          {seriesLayers(overlay, { live: true })}
+          <Vectors vectors={descent} />
+          <Handle
+            kind="point"
+            at={[w1, w2]}
+            label="w"
+            onDrag={([a, b]) => {
+              state.set('w1Param', a)
+              state.set('w2Param', b)
+            }}
+          />
+        </Plot>
+        <Plot x={xAxis2} y={yAxis2}>
+          {seriesLayers(series)}
+          <Vectors vectors={normal} />
+          <Handle
+            kind="point"
+            at={normal.length ? normal[0].to : [1, 0]}
+            label="direction of w"
+            onDrag={([a, b]) => {
+              if (Math.hypot(a, b) < 1e-9) return
+              const angle = Math.atan2(b, a)
+              const norm = Math.hypot(w1, w2) || 1
+              state.set('w1Param', norm * Math.cos(angle))
+              state.set('w2Param', norm * Math.sin(angle))
+            }}
+          />
+        </Plot>
       </div>
-    </Interactive>
+    </Figure>
   )
 }

@@ -1,15 +1,27 @@
 import { useMemo, useState } from 'react'
-import { Interactive, ParamChoice, ParamSlider, Readout, XYChart, formatNumber, type XYSeries } from 'aifn-render'
-import { linspace } from '@/lib/math'
+import {
+  choice,
+  Curve,
+  Figure,
+  float,
+  formatNumber,
+  int,
+  Plot,
+  Points,
+  Readout,
+  useAxis,
+  useFigureState,
+} from 'aifn-render'
 import { iccBetaThree, iccTwoPL, runExperiment } from './instanceIrt'
+import { linspace, toFlat } from 'aifn/foundation/tensor'
 
 type Model = '2PL' | 'beta3'
 type Colour = 'difficulty' | 'discrimination' | 'label'
 
 const FEATURE_X: [number, number] = [-4.5, 4.5]
 const FEATURE_Y: [number, number] = [-2.5, 2.5]
-const THETA_2PL = linspace(-3.5, 3.5, 141)
-const THETA_B3 = linspace(0.005, 0.995, 199)
+const THETA_2PL = toFlat(linspace(-3.5, 3.5, 141))
+const THETA_B3 = toFlat(linspace(0.005, 0.995, 199))
 
 /** Tertile bands of a list of values: 0 = lowest third, 1 = middle, 2 = highest. */
 function tertiles(v: number[]): number[] {
@@ -26,56 +38,72 @@ const BAND_NAMES: Record<Colour, string[]> = {
 }
 
 export function InstanceIrtExplorer({ initialModel = '2PL' }: { initialModel?: Model }) {
-  const [model, setModel] = useState<Model>(initialModel)
-  const [colour, setColour] = useState<Colour>('discrimination')
-  const [noise, setNoise] = useState(0.15)
-  const [seed, setSeed] = useState(1)
+  const state = useFigureState({
+    model: choice<Model>(
+      [
+        { value: '2PL', label: '2PL' },
+        { value: 'beta3', label: 'β³' },
+      ],
+      initialModel,
+      { label: 'IRT model' },
+    ),
+    colour: choice<Colour>(
+      [
+        { value: 'discrimination', label: 'discrimination' },
+        { value: 'difficulty', label: 'difficulty' },
+        { value: 'label', label: 'given label' },
+      ],
+      'discrimination',
+      { label: 'colour by' },
+    ),
+    noise: float(0.15, { min: 0, max: 0.3, step: 0.05, label: 'label noise rate' }),
+    seed: int(1, { min: 1, max: 20, step: 1, label: 'seed' }),
+  })
   const [picked, setPicked] = useState<number | null>(null)
 
-  const run = useMemo(() => runExperiment(seed, noise), [seed, noise])
+  const run = useMemo(() => runExperiment(state.seed, state.noise), [state.seed, state.noise])
   const { data, resp, hardness, twoPL, betaThree } = run
   const n = data.test.x.length
 
-  const a = model === '2PL' ? twoPL.a : betaThree.a
-  const difficulty = model === '2PL' ? twoPL.b : betaThree.delta
-  const ability = model === '2PL' ? twoPL.theta : betaThree.theta
+  const a = state.model === '2PL' ? twoPL.a : betaThree.a
+  const difficulty = state.model === '2PL' ? twoPL.b : betaThree.delta
+  const ability = state.model === '2PL' ? twoPL.theta : betaThree.theta
 
   // Default to the first flipped instance, so the figure opens on a mislabelled point.
   const firstFlipped = data.test.flipped.indexOf(true)
   const sel = picked ?? (firstFlipped >= 0 ? firstFlipped : 0)
 
-  const feature = useMemo<XYSeries[]>(() => {
+  const feature = useMemo(() => {
     const group =
-      colour === 'label'
+      state.colour === 'label'
         ? data.test.y.map((y, j) => (data.test.flipped[j] ? 2 : y))
-        : colour === 'difficulty'
+        : state.colour === 'difficulty'
           ? tertiles(difficulty)
           : a.map((v) => (v < 0 ? 0 : v < 1 ? 1 : 2))
     return [
       {
         name: 'instances',
-        type: 'scatter',
         x: data.test.x.map((p) => p[0]),
         y: data.test.x.map((p) => p[1]),
         group,
-        groupNames: BAND_NAMES[colour],
+        groupNames: BAND_NAMES[state.colour],
       },
-      { name: 'selected', type: 'scatter', x: [data.test.x[sel][0]], y: [data.test.x[sel][1]], emphasis: true },
-    ]
-  }, [data, colour, difficulty, a, sel])
+      { name: 'selected', x: [data.test.x[sel][0]], y: [data.test.x[sel][1]], emphasis: true },
+    ] as const
+  }, [data, state.colour, difficulty, a, sel])
 
-  const icc = useMemo<XYSeries[]>(() => {
-    const grid = model === '2PL' ? THETA_2PL : THETA_B3
+  const icc = useMemo(() => {
+    const grid = state.model === '2PL' ? THETA_2PL : THETA_B3
     const curve =
-      model === '2PL'
+      state.model === '2PL'
         ? grid.map((t) => iccTwoPL(twoPL.a[sel], twoPL.c[sel], t))
         : grid.map((t) => iccBetaThree(t, betaThree.delta[sel], betaThree.a[sel]))
-    const responses = model === '2PL' ? resp.correct.map((row) => row[sel]) : resp.probs.map((row) => row[sel])
+    const responses = state.model === '2PL' ? resp.correct.map((row) => row[sel]) : resp.probs.map((row) => row[sel])
     return [
-      { name: 'classifiers', type: 'scatter', x: ability, y: responses, slot: 0 },
-      { name: 'item characteristic curve', type: 'line', x: grid, y: curve, emphasis: true },
-    ]
-  }, [model, twoPL, betaThree, resp, ability, sel])
+      { name: 'classifiers', x: ability, y: responses, slot: 0 },
+      { name: 'item characteristic curve', x: grid, y: curve, emphasis: true },
+    ] as const
+  }, [state.model, twoPL, betaThree, resp, ability, sel])
 
   const flagged = a.map((v) => v < 0)
   const nFlagged = flagged.filter(Boolean).length
@@ -96,9 +124,17 @@ export function InstanceIrtExplorer({ initialModel = '2PL' }: { initialModel?: M
     setPicked(best)
   }
 
+  const xAxis = useAxis({ label: 'x₁', range: FEATURE_X })
+  const yAxis = useAxis({ label: 'x₂', range: FEATURE_Y, equal: xAxis })
+  const xAxis2 = useAxis({
+    label: state.model === '2PL' ? 'ability θ' : 'ability θ ∈ (0, 1)',
+    range: state.model === '2PL' ? [-3.5, 3.5] : [0, 1],
+  })
+  const yAxis2 = useAxis({ label: state.model === '2PL' ? 'correct' : 'P(given label)', range: [0, 1] })
   return (
-    <Interactive
+    <Figure
       title="Instances as test items, classifiers as respondents"
+      state={state}
       caption={
         <>
           Two Gaussian classes; a fraction of the 70 test labels is flipped. Seventeen classifiers (QDA, LDA, naive
@@ -110,40 +146,8 @@ export function InstanceIrtExplorer({ initialModel = '2PL' }: { initialModel?: M
           other class&apos;s side of the Bayes boundary, which no classifier can tell from a flip.
         </>
       }
-      controls={
-        <>
-          <ParamChoice
-            label="IRT model"
-            value={model}
-            onChange={setModel}
-            options={[
-              { value: '2PL', label: '2PL' },
-              { value: 'beta3', label: 'β³' },
-            ]}
-          />
-          <ParamChoice
-            label="colour by"
-            value={colour}
-            onChange={setColour}
-            options={[
-              { value: 'discrimination', label: 'discrimination' },
-              { value: 'difficulty', label: 'difficulty' },
-              { value: 'label', label: 'given label' },
-            ]}
-          />
-          <ParamSlider
-            label="label noise rate"
-            value={noise}
-            onChange={setNoise}
-            min={0}
-            max={0.3}
-            step={0.05}
-            debounceMs={150}
-          />
-          <ParamSlider label="seed" value={seed} onChange={setSeed} min={1} max={20} step={1} debounceMs={150} />
-        </>
-      }
-      readout={
+
+      readouts={
         <>
           <Readout
             label={`instance ${sel + 1}:`}
@@ -152,7 +156,10 @@ export function InstanceIrtExplorer({ initialModel = '2PL' }: { initialModel?: M
           <Readout label="Bayes P(given label)" value={formatNumber(data.test.bayes[sel])} />
           <Readout label="instance hardness" value={formatNumber(hardness[sel])} />
           <Readout label="discrimination a" value={formatNumber(a[sel])} />
-          <Readout label={model === '2PL' ? 'difficulty b' : 'difficulty δ'} value={formatNumber(difficulty[sel])} />
+          <Readout
+            label={state.model === '2PL' ? 'difficulty b' : 'difficulty δ'}
+            value={formatNumber(difficulty[sel])}
+          />
           <Readout
             label="a < 0:"
             value={`${nFlagged} flagged, ${caught} of ${nFlipped} flips, ${againstBayes} against the Bayes rule`}
@@ -161,30 +168,29 @@ export function InstanceIrtExplorer({ initialModel = '2PL' }: { initialModel?: M
       }
     >
       <div className="space-y-2">
-        <XYChart
-          series={feature}
-          xLabel="x₁"
-          yLabel="x₂"
-          xRange={FEATURE_X}
-          yRange={FEATURE_Y}
-          equalAspect
+        <Plot
+          x={xAxis}
+          y={yAxis}
           onPlotClick={pick}
-          ariaLabel="Test instances in feature space, coloured by fitted IRT parameter"
-        />
-        <XYChart
-          series={icc}
-          xLabel={model === '2PL' ? 'ability θ' : 'ability θ ∈ (0, 1)'}
-          yLabel={model === '2PL' ? 'correct' : 'P(given label)'}
-          xRange={model === '2PL' ? [-3.5, 3.5] : [0, 1]}
-          yRange={[0, 1]}
+          ariaLabel={'Test instances in feature space, coloured by fitted IRT parameter'}
+        >
+          <Points {...feature[0]} />
+          <Points {...feature[1]} />
+        </Plot>
+        <Plot
+          x={xAxis2}
+          y={yAxis2}
           height={300}
-          ariaLabel="Item characteristic curve of the selected instance with classifier responses"
-        />
+          ariaLabel={'Item characteristic curve of the selected instance with classifier responses'}
+        >
+          <Points {...icc[0]} />
+          <Curve {...icc[1]} />
+        </Plot>
       </div>
       <p className="mt-2 text-xs text-muted-foreground">
         {n} test instances, {resp.names.length} classifiers. Best accuracy on the given labels:{' '}
         {formatNumber(Math.max(...resp.accuracy))}.
       </p>
-    </Interactive>
+    </Figure>
   )
 }

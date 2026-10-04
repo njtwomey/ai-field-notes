@@ -8,7 +8,7 @@ import type { FunctionInfo } from 'aifn/foundation/contracts'
 import { child, standardNormals, units, type Stream } from 'aifn/foundation/random'
 import { definer } from 'aifn/foundation/registry'
 import { fromData, type Tensor } from 'aifn/foundation/tensor'
-import type { PairedResult } from 'aifn-applied/inference/rating-models'
+import type { PairedResult } from 'aifn-methods/inference/rating-models'
 import { DomainError } from 'aifn/foundation/errors'
 
 /** Options of `tournament`. */

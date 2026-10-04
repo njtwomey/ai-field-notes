@@ -1,5 +1,5 @@
 /**
- * The registry of `aifn-applied/generative/gan`: GAN training as a traceable algorithm, and the networks, the
+ * The registry of `aifn-methods/generative/gan`: GAN training as a traceable algorithm, and the networks, the
  * diagnostics against a known density and the streamed run as functions.
  */
 

@@ -1,5 +1,5 @@
-import type { XYSeries } from 'aifn-render'
 import type { Point } from './datasets'
+import { type SeriesSpec } from 'aifn-render'
 
 /** Most clusters given their own colour and marker; the palette has 8 slots and scatter plots should use few. */
 export const MAX_COLOURED = 6
@@ -9,7 +9,7 @@ export const MAX_COLOURED = 6
  * cluster keeps its colour while a parameter changes. Clusters past `MAX_COLOURED`, singletons and noise share one
  * muted series.
  */
-export function clusterSeries(points: Point[], labels: number[], mutedName = 'noise or small'): XYSeries[] {
+export function clusterSeries(points: Point[], labels: number[], mutedName = 'noise or small'): SeriesSpec[] {
   const size = new Map<number, number>()
   labels.forEach((l) => l >= 0 && size.set(l, (size.get(l) ?? 0) + 1))
   const slot = new Map<number, number>()
@@ -18,7 +18,7 @@ export function clusterSeries(points: Point[], labels: number[], mutedName = 'no
   })
   const coloured = points.flatMap((_, i) => (slot.has(labels[i]) ? [i] : []))
   const rest = points.flatMap((_, i) => (slot.has(labels[i]) ? [] : [i]))
-  const series: XYSeries[] = []
+  const series: SeriesSpec[] = []
   if (coloured.length)
     series.push({
       name: 'clusters',

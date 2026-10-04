@@ -1,15 +1,19 @@
 import { useMemo, useState } from 'react'
 import {
-  Interactive,
-  ParamSlider,
-  Readout,
-  XYChart,
+  Bars,
+  Curve,
+  Figure,
   formatNumber,
-  useParam,
-  type Handle,
+  Handle,
+  int,
+  Plot,
+  Points,
+  Readout,
   type Segment,
+  useAxis,
+  useFigureState,
   type Vec2,
-  type XYSeries,
+  Vectors,
 } from 'aifn-render'
 import { contour, contours, sampleGrid } from './contours'
 
@@ -43,11 +47,13 @@ const Y_RANGE: [number, number] = [-0.08, H + 0.08]
 const DROPS = [0.5, 1, 2, 4, 8, 16]
 
 export function SimplexLikelihood() {
-  const n1 = useParam(6, { min: 1, max: 30, step: 1 })
-  const n2 = useParam(3, { min: 1, max: 30, step: 1 })
-  const n3 = useParam(1, { min: 1, max: 30, step: 1 })
+  const state = useFigureState({
+    n1: int(6, { min: 1, max: 30, step: 1, label: 'count n₁' }),
+    n2: int(3, { min: 1, max: 30, step: 1, label: 'count n₂' }),
+    n3: int(1, { min: 1, max: 30, step: 1, label: 'count n₃' }),
+  })
   const [p, setP] = useState<Vec3>([0.3, 0.3, 0.4])
-  const n: Vec3 = [n1.value, n2.value, n3.value]
+  const n: Vec3 = [state.n1, state.n2, state.n3]
   const total = n[0] + n[1] + n[2]
   const mle: Vec3 = [n[0] / total, n[1] / total, n[2] / total]
   const loglik = (q: Vec3) => n[0] * Math.log(q[0]) + n[1] * Math.log(q[1]) + n[2] * Math.log(q[2])
@@ -71,16 +77,16 @@ export function SimplexLikelihood() {
     }
   }, [c1, c2, c3])
 
-  const series = useMemo((): XYSeries[] => {
+  const series = useMemo(() => {
     const level = contour(analysis.grid, value)
     const N = c1 + c2 + c3
     const [mx, my] = toPlane([c1 / N, c2 / N, c3 / N])
     return [
-      { name: 'contours of ℓ(p)', type: 'line', x: analysis.background.x, y: analysis.background.y, muted: true },
-      { name: 'simplex p₁ + p₂ + p₃ = 1', type: 'line', x: TRIANGLE.x, y: TRIANGLE.y, slot: 0 },
-      { name: 'level set through p', type: 'line', x: level.x, y: level.y, slot: 1, dashed: true },
-      { name: 'maximum n/N', type: 'scatter', x: [mx], y: [my], emphasis: true },
-    ]
+      { name: 'contours of ℓ(p)', x: analysis.background.x, y: analysis.background.y, muted: true },
+      { name: 'simplex p₁ + p₂ + p₃ = 1', x: TRIANGLE.x, y: TRIANGLE.y, slot: 0 },
+      { name: 'level set through p', x: level.x, y: level.y, slot: 1, dashed: true },
+      { name: 'maximum n/N', x: [mx], y: [my], emphasis: true },
+    ] as const
   }, [analysis, value, c1, c2, c3])
 
   // Partial derivatives nᵢ/pᵢ. The Lagrange condition says they all equal λ; their mean is the least-squares λ.
@@ -98,31 +104,26 @@ export function SimplexLikelihood() {
     return len > 1e-9 ? [{ from: [px, py], to: [px + (0.14 * tx) / len, py + (0.14 * ty) / len] }] : []
   }, [px, py, tx, ty])
 
-  const bars = useMemo((): XYSeries[] => {
+  const bars = useMemo(() => {
     const y = [c1 / p[0], c2 / p[1], c3 / p[2]]
     const N = c1 + c2 + c3
     return [
-      { name: 'nᵢ / pᵢ', type: 'bar', x: [1, 2, 3], y, slot: 0 },
-      { name: 'λ = N', type: 'line', x: [0.5, 3.5], y: [N, N], slot: 1, dashed: true },
-    ]
+      { name: 'nᵢ / pᵢ', x: [1, 2, 3], y, slot: 0 },
+      { name: 'λ = N', x: [0.5, 3.5], y: [N, N], slot: 1, dashed: true },
+    ] as const
   }, [p, c1, c2, c3])
 
-  const handles: Handle[] = [
-    { kind: 'point', at: [px, py], label: 'p', onDrag: (q) => setP(clampToSimplex(toSimplex(q))) },
-  ]
-
+  const xAxis = useAxis({ range: X_RANGE })
+  const yAxis = useAxis({ range: Y_RANGE, equal: xAxis })
+  const xAxis2 = useAxis({ label: 'category i', range: [0, 4] })
+  const yAxis2 = useAxis({ label: '∂ℓ/∂pᵢ', range: [0, 3 * total] })
   return (
-    <Interactive
+    <Figure
       title="Maximum likelihood on the probability simplex"
+      state={state}
       caption="Left: the simplex of three-category distributions, with vertex i the distribution pᵢ = 1 (bottom left p₁, bottom right p₂, top p₃). Grey lines are contours of the log-likelihood ℓ(p) = Σ nᵢ log pᵢ, and the arrow is the part of ∇ℓ that lies along the simplex. Drag p, and set the counts with the sliders. Right: the partial derivatives nᵢ/pᵢ. At the maximum all three equal λ = N, so ∇ℓ is parallel to the normal 1 of the constraint and the arrow vanishes."
-      controls={
-        <>
-          <ParamSlider label="count n₁" param={n1} />
-          <ParamSlider label="count n₂" param={n2} />
-          <ParamSlider label="count n₃" param={n3} />
-        </>
-      }
-      readout={
+
+      readouts={
         <>
           <Readout label="p" value={`(${p.map(formatNumber).join(', ')})`} />
           <Readout label="ℓ(p)" value={formatNumber(value)} />
@@ -135,24 +136,19 @@ export function SimplexLikelihood() {
       }
     >
       <div className="grid gap-4 md:grid-cols-2">
-        <XYChart
-          series={series}
-          vectors={vectors}
-          handles={handles}
-          xRange={X_RANGE}
-          yRange={Y_RANGE}
-          equalAspect
-          bare
-        />
-        <XYChart
-          height={300}
-          series={bars}
-          xRange={[0, 4]}
-          yRange={[0, 3 * total]}
-          xLabel="category i"
-          yLabel="∂ℓ/∂pᵢ"
-        />
+        <Plot x={xAxis} y={yAxis} bare>
+          <Curve {...series[0]} />
+          <Curve {...series[1]} />
+          <Curve {...series[2]} />
+          <Points {...series[3]} />
+          <Vectors vectors={vectors} />
+          <Handle kind="point" at={[px, py]} label="p" onDrag={(q) => setP(clampToSimplex(toSimplex(q)))} />
+        </Plot>
+        <Plot x={xAxis2} y={yAxis2} height={300}>
+          <Bars {...bars[0]} />
+          <Curve {...bars[1]} />
+        </Plot>
       </div>
-    </Interactive>
+    </Figure>
   )
 }

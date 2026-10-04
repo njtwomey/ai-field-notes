@@ -1,4 +1,4 @@
-/** The algorithms of `aifn-applied/learning/mixture-density`: Adam training of a mixture density network. */
+/** The algorithms of `aifn-methods/learning/mixture-density`: Adam training of a mixture density network. */
 
 import { definer, entries, type AlgorithmInfo, type Entry } from 'aifn/foundation/registry'
 import * as training from './training'

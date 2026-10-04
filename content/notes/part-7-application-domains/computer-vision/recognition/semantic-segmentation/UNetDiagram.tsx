@@ -1,5 +1,4 @@
-import { Interactive } from 'aifn-render'
-import { Diagram } from 'aifn-render'
+import { Diagram, Figure } from 'aifn-render'
 import type { DiagramEdge, DiagramNode } from 'aifn-render'
 
 const LEVELS: [string, string][] = [
@@ -42,7 +41,7 @@ const edges: DiagramEdge[] = [
 /** U-Net: a contracting path, an expanding path, and a skip at every resolution. */
 export function UNetDiagram() {
   return (
-    <Interactive
+    <Figure
       title="U-Net"
       caption="Each box is two 3 × 3 convolutions at the resolution and channel count shown. The encoder halves the resolution and doubles the channels at each stage; the decoder reverses both. The dashed skips copy each encoder map across and concatenate it with the upsampled decoder features at the same resolution, which restores the precise locations lost by pooling."
     >
@@ -50,6 +49,6 @@ export function UNetDiagram() {
         spec={{ nodes, edges }}
         ariaLabel="U-Net: four encoder stages with max pooling down to a bottleneck, four decoder stages with up-convolution back to full resolution, and skip connections concatenating encoder maps into the decoder at each resolution"
       />
-    </Interactive>
+    </Figure>
   )
 }

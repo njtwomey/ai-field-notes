@@ -1,5 +1,4 @@
-import { Interactive } from 'aifn-render'
-import { Diagram } from 'aifn-render'
+import { Diagram, Figure } from 'aifn-render'
 import type { DiagramNode, DiagramSpec } from 'aifn-render'
 
 const lf = (id: string, y: number, label: string): DiagramNode => ({ id, x: 2.8, y, w: 1.9, h: 0.6, label, tone: 0 })
@@ -56,7 +55,7 @@ const spec: DiagramSpec = {
 /** The three stages of Snorkel. */
 export function SnorkelPipeline() {
   return (
-    <Interactive
+    <Figure
       title="The Snorkel pipeline"
       caption="Labelling functions vote or abstain on every unlabelled candidate, filling the label matrix Λ. The label model learns each function's accuracy and the correlations between functions from their agreements alone, and outputs probabilistic labels Ỹ. A discriminative end model trained on Ỹ uses the full features, so it can label points on which every function abstains."
     >
@@ -64,6 +63,6 @@ export function SnorkelPipeline() {
         spec={spec}
         ariaLabel="Unlabelled candidates pass through labelling functions to form a label matrix; a label model turns the matrix into probabilistic labels; an end model is trained on those labels"
       />
-    </Interactive>
+    </Figure>
   )
 }

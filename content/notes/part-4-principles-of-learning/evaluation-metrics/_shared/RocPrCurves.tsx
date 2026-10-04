@@ -1,13 +1,18 @@
 import { useMemo } from 'react'
 import {
-  Interactive,
-  ParamSlider,
-  Readout,
-  XYChart,
+  Curve,
+  Figure,
+  float,
   formatNumber,
-  useParam,
-  type Handle,
-  type XYSeries,
+  Handle,
+  Plot,
+  Points,
+  Readout,
+  seriesLayers,
+  type SeriesSpec,
+  slider,
+  useAxis,
+  useFigureState,
 } from 'aifn-render'
 import { averagePrecision, binormalAuc, binormalEer, curves, nearestIndex, rates } from './binormal'
 
@@ -28,17 +33,19 @@ export function RocPrCurves({
   separation?: number
   showEer?: boolean
 }) {
-  const pi = useParam(prevalence, { min: 0.01, max: 0.5, step: 0.01 })
-  const d = useParam(separation, { min: 0, max: 4, step: 0.1 })
-  const t = useParam(separation / 2, { min: -4, max: 8, step: 0.01 })
+  const state = useFigureState({
+    pi: slider(0.01, 0.5, prevalence, { step: 0.01, label: 'prevalence π' }),
+    d: float(separation, { min: 0, max: 4, step: 0.1, label: 'separation d' }),
+    t: slider(-4, 8, separation / 2, { step: 0.01, label: 'threshold t' }),
+  })
 
-  const c = useMemo(() => curves(d.value, pi.value), [d.value, pi.value])
-  const ap = useMemo(() => averagePrecision(d.value, pi.value), [d.value, pi.value])
-  const at = rates(t.value, d.value)
-  const precisionAt = (pi.value * at.tpr) / (pi.value * at.tpr + (1 - pi.value) * at.fpr || 1)
-  const eer = binormalEer(d.value)
+  const c = useMemo(() => curves(state.d, state.pi), [state.d, state.pi])
+  const ap = useMemo(() => averagePrecision(state.d, state.pi), [state.d, state.pi])
+  const at = rates(state.t, state.d)
+  const precisionAt = (state.pi * at.tpr) / (state.pi * at.tpr + (1 - state.pi) * at.fpr || 1)
+  const eer = binormalEer(state.d)
 
-  const roc: XYSeries[] = [
+  const roc: SeriesSpec[] = [
     { name: 'chance', type: 'line', x: [0, 1], y: [0, 1], dashed: true, muted: true },
     { name: 'ROC curve', type: 'line', x: c.fpr, y: c.tpr, slot: 0 },
     ...(showEer
@@ -48,38 +55,29 @@ export function RocPrCurves({
         ]
       : []),
   ]
-  const pr: XYSeries[] = [
-    { name: 'chance (precision = π)', type: 'line', x: [0, 1], y: [pi.value, pi.value], dashed: true, muted: true },
-    { name: 'PR curve', type: 'line', x: c.tpr, y: c.precision, slot: 1 },
-    { name: 'operating point', type: 'scatter', x: [at.tpr], y: [precisionAt], emphasis: true },
-  ]
+  const pr = [
+    { name: 'chance (precision = π)', x: [0, 1], y: [state.pi, state.pi], dashed: true, muted: true },
+    { name: 'PR curve', x: c.tpr, y: c.precision, slot: 1 },
+    { name: 'operating point', x: [at.tpr], y: [precisionAt], emphasis: true },
+  ] as const
   // The operating point is a location on the ROC curve: dragging moves it along the curve, which sets the threshold.
-  const handles: Handle[] = [
-    {
-      kind: 'point',
-      at: [at.fpr, at.tpr],
-      label: 'operating point',
-      onDrag: (p) => t.set(c.thresholds[nearestIndex(c.fpr, c.tpr, p)]),
-    },
-  ]
 
+  const xAxis = useAxis({ label: 'false-positive rate', range: [0, 1] })
+  const yAxis = useAxis({ label: 'true-positive rate', range: [0, 1], equal: xAxis })
+  const xAxis2 = useAxis({ label: 'recall', range: [0, 1] })
+  const yAxis2 = useAxis({ label: 'precision', range: [0, 1], equal: xAxis2 })
   return (
-    <Interactive
+    <Figure
       title={title}
+      state={state}
       caption={
         caption ??
         'Scores are N(0, 1) for negatives and N(d, 1) for positives. Left: the ROC curve, true-positive rate against false-positive rate over all thresholds. Right: precision against recall. Drag the operating point along the ROC curve to move the threshold. Lower the prevalence: the ROC curve and AUROC do not move, while precision and average precision fall.'
       }
-      controls={
+
+      readouts={
         <>
-          <ParamSlider label="prevalence π" param={pi} />
-          <ParamSlider label="separation d" param={d} />
-          <ParamSlider label="threshold t" param={t} />
-        </>
-      }
-      readout={
-        <>
-          <Readout label="AUROC" value={formatNumber(binormalAuc(d.value))} />
+          <Readout label="AUROC" value={formatNumber(binormalAuc(state.d))} />
           <Readout label="average precision" value={formatNumber(ap)} />
           <Readout label="TPR" value={formatNumber(at.tpr)} />
           <Readout label="FPR" value={formatNumber(at.fpr)} />
@@ -89,17 +87,21 @@ export function RocPrCurves({
       }
     >
       <div className="grid gap-4 md:grid-cols-2">
-        <XYChart
-          series={roc}
-          xLabel="false-positive rate"
-          yLabel="true-positive rate"
-          xRange={[0, 1]}
-          yRange={[0, 1]}
-          equalAspect
-          handles={handles}
-        />
-        <XYChart series={pr} xLabel="recall" yLabel="precision" xRange={[0, 1]} yRange={[0, 1]} equalAspect />
+        <Plot x={xAxis} y={yAxis}>
+          {seriesLayers(roc)}
+          <Handle
+            kind="point"
+            at={[at.fpr, at.tpr]}
+            label="operating point"
+            onDrag={(p) => state.set('t', c.thresholds[nearestIndex(c.fpr, c.tpr, p)])}
+          />
+        </Plot>
+        <Plot x={xAxis2} y={yAxis2}>
+          <Curve {...pr[0]} />
+          <Curve {...pr[1]} />
+          <Points {...pr[2]} />
+        </Plot>
       </div>
-    </Interactive>
+    </Figure>
   )
 }

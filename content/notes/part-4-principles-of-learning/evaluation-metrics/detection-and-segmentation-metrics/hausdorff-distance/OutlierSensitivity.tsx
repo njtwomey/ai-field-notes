@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { Interactive, Readout, XYChart, formatNumber, type Handle, type XYSeries } from 'aifn-render'
+import { Figure, formatNumber, Handle, Plot, Readout, seriesLayers, type SeriesSpec, useAxis } from 'aifn-render'
 
 type Vec = [number, number]
 const N = 40
@@ -45,27 +45,21 @@ export function OutlierSensitivity() {
     }
   }, [stray])
 
-  const pts = (name: string, p: Vec[], slot: number): XYSeries => ({
+  const pts = (name: string, p: Vec[], slot: number): SeriesSpec => ({
     name,
     type: 'scatter',
     x: p.map((v) => v[0]),
     y: p.map((v) => v[1]),
     slot,
   })
-  const handles: Handle[] = [
-    {
-      kind: 'point',
-      at: stray,
-      label: 'stray point',
-      onDrag: ([x, y]) => setStray([Math.min(11.5, Math.max(0.5, x)), Math.min(11.5, Math.max(0.5, y))]),
-    },
-  ]
 
+  const xAxis = useAxis({ range: VIEW })
+  const yAxis = useAxis({ range: VIEW, equal: xAxis })
   return (
-    <Interactive
+    <Figure
       title="One stray point sets the Hausdorff distance"
       caption="Two boundaries: the ground truth and a close prediction, plus one extra predicted point that can be dragged. The Hausdorff distance is the largest distance from any point of either boundary to the other, so it jumps as soon as the stray point leaves the ring. The 95th-percentile Hausdorff distance and the average symmetric surface distance use the whole distribution of distances and barely change."
-      readout={
+      readouts={
         <>
           <Readout label="h(truth → prediction)" value={formatNumber(r.hAB)} />
           <Readout label="h(prediction → truth)" value={formatNumber(r.hBA)} />
@@ -76,14 +70,16 @@ export function OutlierSensitivity() {
       }
     >
       <div className="mx-auto w-full max-w-md">
-        <XYChart
-          series={[pts('ground-truth boundary', TRUTH, 0), pts('predicted boundary', r.pred, 1)]}
-          xRange={VIEW}
-          yRange={VIEW}
-          equalAspect
-          handles={handles}
-        />
+        <Plot x={xAxis} y={yAxis}>
+          {seriesLayers([pts('ground-truth boundary', TRUTH, 0), pts('predicted boundary', r.pred, 1)])}
+          <Handle
+            kind="point"
+            at={stray}
+            label="stray point"
+            onDrag={([x, y]) => setStray([Math.min(11.5, Math.max(0.5, x)), Math.min(11.5, Math.max(0.5, y))])}
+          />
+        </Plot>
       </div>
-    </Interactive>
+    </Figure>
   )
 }

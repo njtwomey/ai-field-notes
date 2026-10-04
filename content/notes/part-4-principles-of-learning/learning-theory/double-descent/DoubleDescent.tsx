@@ -1,14 +1,16 @@
-import { useMemo, useState } from 'react'
+import { useMemo } from 'react'
 import {
-  Interactive,
-  ParamChoice,
-  ParamSlider,
-  Readout,
-  XYChart,
+  choice,
+  Curve,
+  Figure,
+  float,
   formatNumber,
-  useParam,
-  type Handle,
-  type XYSeries,
+  Handle,
+  int,
+  Plot,
+  Readout,
+  useAxis,
+  useFigureState,
 } from 'aifn-render'
 
 const D = 200
@@ -37,79 +39,71 @@ function risk(p: number, n: number, sigma2: number, cum: number[]) {
 
 /** Test error of least squares against the number of features used, across the interpolation threshold p = n. */
 export function DoubleDescent() {
-  const n = useParam(40, { min: 10, max: 100, step: 5 })
-  const sigma = useParam(0.3, { min: 0, max: 1, step: 0.05 })
-  const p = useParam(120, { min: 1, max: D, step: 1 })
-  const [signal, setSignal] = useState<Signal>('spread')
+  const state = useFigureState({
+    p: int(120, { min: 1, max: D, step: 1, label: 'features used p', format: (v) => String(v) }),
+    n: int(40, { min: 10, max: 100, step: 5, label: 'training points n', format: (v) => String(v) }),
+    sigma: float(0.3, { min: 0, max: 1, step: 0.05, label: 'noise σ' }),
+    signal: choice<Signal>(
+      [
+        { value: 'spread', label: 'spread evenly' },
+        { value: 'decaying', label: 'decaying, βⱼ ∝ 1/j' },
+      ],
+      'spread',
+      { label: 'true coefficients' },
+    ),
+  })
 
   const cum = useMemo(() => {
-    const beta = coefficients(signal)
+    const beta = coefficients(state.signal)
     const out = [0]
     beta.forEach((b, j) => out.push(out[j] + b * b))
     return out
-  }, [signal])
-  const s2 = sigma.value ** 2
+  }, [state.signal])
+  const s2 = state.sigma ** 2
 
-  const series = useMemo((): XYSeries[] => {
+  const series = useMemo(() => {
     const ps = Array.from({ length: D }, (_, i) => i + 1)
-    const tests = ps.map((q) => risk(q, n.value, s2, cum).test)
-    const trains = ps.map((q) => risk(q, n.value, s2, cum).train)
+    const tests = ps.map((q) => risk(q, state.n, s2, cum).test)
+    const trains = ps.map((q) => risk(q, state.n, s2, cum).train)
     const null0 = cum[D] + s2
     return [
       {
         name: 'test error',
-        type: 'line',
         x: ps,
         y: tests.map((t) => (Number.isFinite(t) ? Math.min(t, 1e3) : NaN)),
         slot: 0,
       },
-      { name: 'training error', type: 'line', x: ps, y: trains.map((t) => Math.max(t, 0.01)), slot: 1 },
-      { name: 'predict zero', type: 'line', x: [1, D], y: [null0, null0], muted: true, dashed: true },
-      { name: 'p = n', type: 'line', x: [n.value, n.value], y: [0.01, 100], emphasis: true, dashed: true },
-    ]
-  }, [n.value, s2, cum])
+      { name: 'training error', x: ps, y: trains.map((t) => Math.max(t, 0.01)), slot: 1 },
+      { name: 'predict zero', x: [1, D], y: [null0, null0], muted: true, dashed: true },
+      { name: 'p = n', x: [state.n, state.n], y: [0.01, 100], emphasis: true, dashed: true },
+    ] as const
+  }, [state.n, s2, cum])
 
-  const at = risk(p.value, n.value, s2, cum)
-  const handles: Handle[] = [{ kind: 'x', at: p.value, label: 'p', onDrag: (x) => p.set(x) }]
+  const at = risk(state.p, state.n, s2, cum)
 
+  const xAxis = useAxis({ label: 'number of features p', range: [1, D] })
+  const yAxis = useAxis({ label: 'mean squared error', range: [0.01, 100], log: true })
   return (
-    <Interactive
+    <Figure
       title="Test error across the interpolation threshold"
+      state={state}
       caption="Least squares on the first p of 200 independent Gaussian features, from n training points; the true model uses all 200 features. Below p = n the fit is ordinary least squares; above it, the fit is the minimum-norm interpolant and the training error is zero. The curves are exact expectations. The test error peaks where the model first interpolates, then falls again. With the signal spread over all features, the largest model beats every small one; with a decaying signal it does not. Drag the p line or use the sliders."
-      controls={
+
+      readouts={
         <>
-          <ParamSlider label="features used p" param={p} format={(v) => String(v)} />
-          <ParamSlider label="training points n" param={n} format={(v) => String(v)} />
-          <ParamSlider label="noise σ" param={sigma} />
-          <ParamChoice
-            label="true coefficients"
-            value={signal}
-            onChange={setSignal}
-            options={[
-              { value: 'spread', label: 'spread evenly' },
-              { value: 'decaying', label: 'decaying, βⱼ ∝ 1/j' },
-            ]}
-          />
-        </>
-      }
-      readout={
-        <>
-          <Readout label="p / n" value={formatNumber(p.value / n.value)} />
+          <Readout label="p / n" value={formatNumber(state.p / state.n)} />
           <Readout label="expected test error" value={Number.isFinite(at.test) ? formatNumber(at.test) : '∞'} />
           <Readout label="expected training error" value={formatNumber(at.train)} />
         </>
       }
     >
-      <XYChart
-        series={series}
-        xLabel="number of features p"
-        yLabel="mean squared error"
-        xRange={[1, D]}
-        yRange={[0.01, 100]}
-        yLog
-        handles={handles}
-        height={340}
-      />
-    </Interactive>
+      <Plot x={xAxis} y={yAxis} height={340}>
+        <Curve {...series[0]} />
+        <Curve {...series[1]} />
+        <Curve {...series[2]} />
+        <Curve {...series[3]} />
+        <Handle {...state.handle('p', { label: 'p' })} />
+      </Plot>
+    </Figure>
   )
 }

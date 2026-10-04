@@ -1,5 +1,5 @@
 /**
- * `aifn-applied/interpreter`: models for programs run by `aifn/interpreter`, in the `learn` namespace.
+ * `aifn-methods/interpreter`: models for programs run by `aifn/interpreter`, in the `learn` namespace.
  *
  * - `learn.fitLinear(X, y, l2 = 0)`: least squares (ridge when l2 > 0) by `linearRegression`;
  * - `learn.fitLogistic(X, labels, l2 = 1)`: logistic regression by `logisticRegression`;
@@ -18,8 +18,8 @@ import {
   type PreludeEntry,
 } from 'aifn/interpreter'
 import { dataset } from 'aifn/learning/estimators'
-import { linearRegression } from 'aifn-applied/learning/linear'
-import { logisticRegression } from 'aifn-applied/learning/generalised/glm'
+import { linearRegression } from 'aifn-methods/learning/linear'
+import { logisticRegression } from 'aifn-methods/learning/generalised/glm'
 
 /** A design matrix from a program's X: a vector is one feature, a matrix is rows of features. */
 function design(X: unknown, what: string): Tensor {
@@ -34,7 +34,7 @@ const flat = (t: unknown) => Array.from(toFlat(t as Tensor))
 const fitLinear: PreludeEntry = {
   namespace: 'learn',
   name: 'fitLinear',
-  source: 'aifn-applied/learning/linear',
+  source: 'aifn-methods/learning/linear',
   params: params('X, y, l2 = 0'),
   doc: 'Fit y ≈ X·w + b by least squares (ridge when l2 > 0); X is a vector or rows of features.',
   returns: '{ weights, intercept, fitted, r2, noiseSd, predict(X) }',
@@ -60,7 +60,7 @@ const fitLinear: PreludeEntry = {
 const fitLogistic: PreludeEntry = {
   namespace: 'learn',
   name: 'fitLogistic',
-  source: 'aifn-applied/learning/generalised/glm',
+  source: 'aifn-methods/learning/generalised/glm',
   params: params('X, labels, l2 = 1'),
   doc: 'Fit a two-class logistic regression P(label = 1) = σ(X·w + b) with an L2 penalty; labels are 0 or 1.',
   returns: '{ weights, intercept, probabilities, accuracy, predict(X) }',
@@ -85,7 +85,7 @@ const fitLogistic: PreludeEntry = {
 
 /** The `learn` namespace: models fitted to a program's data. */
 export const learningPrelude: Prelude = makePrelude(
-  [{ name: 'learn', doc: 'Fit models to data: linear and logistic regression.', source: 'aifn-applied/learning' }],
+  [{ name: 'learn', doc: 'Fit models to data: linear and logistic regression.', source: 'aifn-methods/learning' }],
   [fitLinear, fitLogistic],
 )
 

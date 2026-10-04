@@ -1,17 +1,21 @@
-import { useMemo, useState } from 'react'
+import { useMemo } from 'react'
 import {
-  Interactive,
-  ParamChoice,
-  ParamSlider,
-  ParamSwitch,
-  Readout,
-  XYChart,
+  choice,
+  Curve,
+  Figure,
   formatNumber,
-  useParam,
-  type XYSeries,
+  int,
+  Plot,
+  Plots,
+  Readout,
+  setting,
+  slider,
+  type SwitchDef,
+  useAxis,
+  useFigureState,
 } from 'aifn-render'
-import { rng } from '@/lib/math'
 import { ALGORITHMS, checkpoints, sampleBeta, type Rand } from '../_shared/bandits'
+import { seededRand } from '../_shared/rand'
 
 const HORIZON = 5000
 const RUNS = 10
@@ -99,8 +103,8 @@ function simulate(
   const ts = checkpoints(HORIZON, 200)
   const regret = new Array<number>(ts.length).fill(0)
   for (let run = 0; run < RUNS; run++) {
-    const env = rng(seed * 7919 + run)
-    const policy = makeChooser(id, gamma, tau, rng(seed * 104729 + run + 1))
+    const env = seededRand(seed * 7919 + run)
+    const policy = makeChooser(id, gamma, tau, seededRand(seed * 104729 + run + 1))
     let cum = 0
     let next = 0
     for (let t = 1; t <= HORIZON; t++) {
@@ -117,81 +121,70 @@ function simulate(
 
 /** Two arms whose means change over time, and the dynamic regret of stationary and forgetting UCB policies. */
 export function NonStationary() {
-  const [scenario, setScenario] = useState<Scenario>('abrupt')
-  const [enabled, setEnabled] = useState<PolicyId[]>(['ucb1', 'ts', 'ducb', 'swucb'])
-  const changes = useParam(3, { min: 0, max: 10, step: 1 })
-  const gap = useParam(0.3, { min: 0.05, max: 0.8, step: 0.01 })
-  const memory = useParam(300, { min: 20, max: 3000, step: 10 })
-  const windowSize = useParam(300, { min: 20, max: 3000, step: 10 })
-  const seed = useParam(1, { min: 1, max: 30, step: 1 })
+  const state = useFigureState({
+    scenario: choice<Scenario>(
+      [
+        { value: 'abrupt', label: 'abrupt swaps' },
+        { value: 'drift', label: 'smooth drift' },
+      ],
+      'abrupt',
+      { label: 'change' },
+    ),
+    changes: int(3, { min: 0, max: 10, step: 1, label: 'change points (or half-cycles − 1)' }),
+    gap: slider(0.05, 0.8, 0.3, { step: 0.01, label: 'gap between the arms' }),
+    memory: int(300, {
+      min: 20,
+      max: 3000,
+      step: 10,
+      label: 'discount memory 1/(1 − γ)',
+      suggestions: [50, 100, 300, 1000],
+    }),
+    windowSize: int(300, { min: 20, max: 3000, step: 10, label: 'window τ', suggestions: [50, 100, 300, 1000] }),
+    seed: int(1, { min: 1, max: 30, step: 1, label: 'seed' }),
+    // One switch per policy.
+    ...(Object.fromEntries(POLICIES.map((p) => [`on_${p.id}`, setting(true, p.label)])) as Record<
+      `on_${PolicyId}`,
+      SwitchDef
+    >),
+  })
+  const { scenario, changes, gap, seed } = state
 
-  const gamma = 1 - 1 / memory.value
-  const tau = windowSize.value
-  const activeKey = enabled.join(',')
+  const gamma = 1 - 1 / state.memory
+  const tau = state.windowSize
+  const activeKey = POLICIES.filter((p) => state[`on_${p.id}`])
+    .map((p) => p.id)
+    .join(',')
   const results = useMemo(
     () =>
       new Map(
         (activeKey ? (activeKey.split(',') as PolicyId[]) : []).map(
-          (id) => [id, simulate(id, scenario, changes.value, gap.value, gamma, tau, seed.value)] as const,
+          (id) => [id, simulate(id, scenario, changes, gap, gamma, tau, seed)] as const,
         ),
       ),
-    [activeKey, scenario, changes.value, gap.value, gamma, tau, seed.value],
+    [activeKey, scenario, changes, gap, gamma, tau, seed],
   )
   const active = POLICIES.filter((p) => results.has(p.id))
 
-  const meanSeries = useMemo((): XYSeries[] => {
+  const means = useMemo(() => {
     const t = checkpoints(HORIZON, 400)
-    const mu = t.map((v) => meansAt(v, scenario, changes.value, gap.value))
-    return [
-      { name: 'arm 1 mean', type: 'line', x: t, y: mu.map((m) => m[0]), emphasis: true },
-      { name: 'arm 2 mean', type: 'line', x: t, y: mu.map((m) => m[1]), emphasis: true, dashed: true },
-    ]
-  }, [scenario, changes.value, gap.value])
-  const regretSeries: XYSeries[] = active.map((p) => {
-    const r = results.get(p.id)!
-    return { name: p.label, type: 'line', x: r.t, y: r.regret, slot: p.slot }
-  })
+    const mu = t.map((v) => meansAt(v, scenario, changes, gap))
+    return { t, arm1: mu.map((m) => m[0]), arm2: mu.map((m) => m[1]) }
+  }, [scenario, changes, gap])
 
   // Garivier and Moulines' tuning for Υ breakpoints, with rewards in [0, 1] (B = 1).
-  const breaks = Math.max(1, changes.value)
+  const breaks = Math.max(1, changes)
   const tunedTau = 2 * Math.sqrt((HORIZON * Math.log(HORIZON)) / breaks)
   const tunedMemory = 4 * Math.sqrt(HORIZON / breaks)
-  const toggle = (id: PolicyId, on: boolean) =>
-    setEnabled((prev) => (on ? [...prev, id] : prev.filter((x) => x !== id)))
 
+  const xAxis = useAxis({ label: 'round t', range: [0, HORIZON] })
+  const yMean = useAxis({ label: 'mean', range: [0, 1] })
+  const yRegret = useAxis({ label: 'dynamic regret', range: [0, undefined], hold: 'union' })
   return (
-    <Interactive
+    <Figure
       title="Forgetting in a changing bandit"
+      state={state}
       caption={`Two Bernoulli arms whose means swap at change points, or drift smoothly (top). Bottom: cumulative dynamic regret, measured against the best arm at each round, averaged over ${RUNS} seeded runs. UCB1 and Thompson sampling accumulate evidence for ever, so after each swap they keep pulling the formerly best arm until the new data outweigh the old; their regret jumps at every change. Discounted UCB weights a reward observed s rounds ago by γ^s, with memory 1/(1 − γ); sliding-window UCB uses only the last τ rounds. Too long a memory reacts slowly; too short a memory keeps re-exploring even when nothing changes.`}
-      controls={
-        <>
-          <ParamChoice
-            label="change"
-            value={scenario}
-            onChange={setScenario}
-            options={[
-              { value: 'abrupt', label: 'abrupt swaps' },
-              { value: 'drift', label: 'smooth drift' },
-            ]}
-          />
-          <ParamSlider label="change points (or half-cycles − 1)" param={changes} format={(v) => String(v)} />
-          <ParamSlider label="gap between the arms" param={gap} />
-          <ParamSlider label="discount memory 1/(1 − γ)" param={memory} format={(v) => String(v)} />
-          <ParamSlider label="window τ" param={windowSize} format={(v) => String(v)} />
-          <ParamSlider label="seed" param={seed} format={(v) => String(v)} withArrows />
-          <div className="flex flex-wrap gap-x-4 gap-y-2 sm:col-span-2 lg:col-span-3">
-            {POLICIES.map((p) => (
-              <ParamSwitch
-                key={p.id}
-                label={p.label}
-                checked={enabled.includes(p.id)}
-                onChange={(on) => toggle(p.id, on)}
-              />
-            ))}
-          </div>
-        </>
-      }
-      readout={
+      readouts={
         <>
           {active.map((p) => (
             <Readout key={p.id} label={`${p.label}: regret`} value={formatNumber(results.get(p.id)!.regret.at(-1)!)} />
@@ -201,14 +194,18 @@ export function NonStationary() {
         </>
       }
     >
-      <XYChart series={meanSeries} xLabel="round t" yLabel="mean" xRange={[0, HORIZON]} yRange={[0, 1]} height={180} />
-      <XYChart
-        series={regretSeries}
-        xLabel="round t"
-        yLabel="dynamic regret"
-        xRange={[0, HORIZON]}
-        yRange={[0, undefined]}
-      />
-    </Interactive>
+      <Plots rows={2} heights={[1, 2]}>
+        <Plot x={xAxis} y={yMean}>
+          <Curve name="arm 1 mean" x={means.t} y={means.arm1} emphasis />
+          <Curve name="arm 2 mean" x={means.t} y={means.arm2} emphasis dashed />
+        </Plot>
+        <Plot x={xAxis} y={yRegret}>
+          {active.map((p) => {
+            const r = results.get(p.id)!
+            return <Curve key={p.id} name={p.label} x={r.t} y={r.regret} slot={p.slot} />
+          })}
+        </Plot>
+      </Plots>
+    </Figure>
   )
 }

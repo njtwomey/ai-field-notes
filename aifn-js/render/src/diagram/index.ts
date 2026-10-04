@@ -7,6 +7,7 @@
 export { Diagram, type DiagramProps } from './Diagram'
 export { layeredLayout } from './layout'
 export { treeLayout, type TreeLayoutOptions } from './tree'
+export { TreeView, type NodeSummary, type PerItem, type TreeViewProps } from './TreeView'
 export { circleLayout, forceLayout, type ForceOptions, type Point } from './force'
 export { MathText } from './MathText'
 export { factor, gate, link, merge, op, projector, reparam, variable } from './components'

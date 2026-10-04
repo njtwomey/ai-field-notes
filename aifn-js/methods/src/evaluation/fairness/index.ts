@@ -1,5 +1,5 @@
 /**
- * `aifn-applied/evaluation/fairness`: fairness metrics.
+ * `aifn-methods/evaluation/fairness`: fairness metrics.
  */
 
 export {

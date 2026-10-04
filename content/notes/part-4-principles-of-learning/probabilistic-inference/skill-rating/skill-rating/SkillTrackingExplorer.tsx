@@ -1,12 +1,12 @@
 import { useMemo, useState } from 'react'
-import { focalPlayerStream, type SkillPath } from 'aifn-applied/data/synthetic'
+import { focalPlayerStream, type SkillPath } from 'aifn-methods/data/synthetic'
 import {
   THURSTONE_BETA,
   rateStream,
   trueSkillThroughTime,
   type RaterSpec,
   type RatingTrace,
-} from 'aifn-applied/inference/rating-models'
+} from 'aifn-methods/inference/rating-models'
 import { trackingMetrics, type TrackingMetrics } from 'aifn/inference/filtering'
 import { stream } from 'aifn/foundation/random'
 import {
@@ -152,14 +152,7 @@ export function SkillTrackingExplorer() {
               onChange={(v) => setOpponents(v as 'close' | 'field')}
               options={OPPONENT_OPTIONS}
             />
-            <Slider
-              label="Total games"
-              value={games}
-              onChange={setGames}
-              min={100}
-              max={500}
-              step={50}
-            />
+            <Slider label="Total games" value={games} onChange={setGames} min={100} max={500} step={50} />
           </ControlRow>
           <ControlRow label="Change parameters">
             {(path === 'step' || path === 'drift') && (
@@ -193,14 +186,7 @@ export function SkillTrackingExplorer() {
               />
             )}
             {path === 'random-walk' && (
-              <Slider
-                label="Walk innovation SD"
-                value={walkSd}
-                onChange={setWalkSd}
-                min={2}
-                max={25}
-                step={1}
-              />
+              <Slider label="Walk innovation SD" value={walkSd} onChange={setWalkSd} min={2} max={25} step={1} />
             )}
             {(path === 'step' || path === 'drift') && (
               <Slider
@@ -223,38 +209,10 @@ export function SkillTrackingExplorer() {
                 { value: 'no', label: 'Online raters only' },
               ]}
             />
-            <Slider
-              label="Elo K-factor"
-              value={kElo}
-              onChange={setKElo}
-              min={8}
-              max={64}
-              step={4}
-            />
-            <Slider
-              label="Glicko drift c/day"
-              value={cDrift}
-              onChange={setCDrift}
-              min={0}
-              max={30}
-              step={2}
-            />
-            <Slider
-              label="Glicko-2 volatility τ"
-              value={tau2}
-              onChange={setTau2}
-              min={0.2}
-              max={1.2}
-              step={0.1}
-            />
-            <Slider
-              label="TrueSkill dynamics τ/day"
-              value={tauTs}
-              onChange={setTauTs}
-              min={5}
-              max={40}
-              step={5}
-            />
+            <Slider label="Elo K-factor" value={kElo} onChange={setKElo} min={8} max={64} step={4} />
+            <Slider label="Glicko drift c/day" value={cDrift} onChange={setCDrift} min={0} max={30} step={2} />
+            <Slider label="Glicko-2 volatility τ" value={tau2} onChange={setTau2} min={0.2} max={1.2} step={0.1} />
+            <Slider label="TrueSkill dynamics τ/day" value={tauTs} onChange={setTauTs} min={5} max={40} step={5} />
           </ControlRow>
         </>
       }

@@ -3,7 +3,7 @@
  * J. ACM 21(1)) with its operations and their counts, and global and local alignment with a linear gap penalty
  * (Needleman and Wunsch, 1970, J. Mol. Biol. 48(3); Smith and Waterman, 1981, J. Mol. Biol. 147(1)), each with its
  * table and traceback. Each `…Program` is the problem for `dynamicProgram` (so a figure can step the table); the plain
- * function solves it. Word and character error rates (`aifn-applied/evaluation/text`) count their edits here.
+ * function solves it. Word and character error rates (`aifn-methods/evaluation/text`) count their edits here.
  */
 
 import type { Tensor } from 'aifn/foundation/tensor'

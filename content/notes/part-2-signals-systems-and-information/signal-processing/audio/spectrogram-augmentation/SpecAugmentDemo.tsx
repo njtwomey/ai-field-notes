@@ -1,7 +1,7 @@
 import { useMemo } from 'react'
-import { Heatmap, Interactive, ParamSlider, Readout, useParam } from 'aifn-render'
-import { rng } from '@/lib/math'
+import { Figure, int, Plot, Raster, Readout, slider, useAxis, useFigureState } from 'aifn-render'
 import { applyBank, chirp, harmonicTone, melFilterBank, powerSpectrogram } from '../_shared/audio'
+import { stream, uniform } from 'aifn/foundation/random'
 
 const FS = 16000
 const LENGTH = 2 * FS
@@ -36,23 +36,25 @@ function logMel(): number[][] {
 
 /** SpecAugment on a log-mel spectrogram: time warping, frequency masks and time masks, with their sampling rules. */
 export function SpecAugmentDemo() {
-  const W = useParam(40, { min: 0, max: 80, step: 1 })
-  const F = useParam(27, { min: 0, max: 40, step: 1 })
-  const mF = useParam(2, { min: 0, max: 4, step: 1 })
-  const T = useParam(40, { min: 0, max: 100, step: 1 })
-  const mT = useParam(2, { min: 0, max: 4, step: 1 })
-  const seed = useParam(1, { min: 1, max: 40, step: 1 })
+  const state = useFigureState({
+    W: slider(0, 80, 40, { step: 1, label: 'time warp W (frames)' }),
+    F: int(27, { min: 0, max: 40, step: 1, label: 'frequency mask F (bands)' }),
+    mF: int(2, { min: 0, max: 4, step: 1, label: 'frequency masks m_F' }),
+    T: slider(0, 100, 40, { step: 1, label: 'time mask T (frames)' }),
+    mT: slider(0, 4, 2, { step: 1, label: 'time masks m_T' }),
+    seed: int(1, { min: 1, max: 40, step: 1, label: 'seed' }),
+  })
   const base = useMemo(() => logMel(), [])
 
   const r = useMemo(() => {
-    const g = rng(seed.value)
+    const g = stream(state.seed)
     const tau = base.length
     const nu = MELS
     // Time warp: a centre point c in (W, τ − W) moves to c + w, w ~ U(−W, W); both sides stretch linearly.
     let warped = base
-    if (W.value > 0 && tau > 2 * W.value) {
-      const c = W.value + g.uniform() * (tau - 2 * W.value)
-      const w = (2 * g.uniform() - 1) * W.value
+    if (state.W > 0 && tau > 2 * state.W) {
+      const c = state.W + uniform(g) * (tau - 2 * state.W)
+      const w = (2 * uniform(g) - 1) * state.W
       warped = Array.from({ length: tau }, (_, t) => {
         const src = t < c + w ? (t * c) / (c + w) : c + ((t - (c + w)) * (tau - c)) / (tau - c - w)
         const i = Math.min(tau - 2, Math.max(0, Math.floor(src)))
@@ -62,42 +64,38 @@ export function SpecAugmentDemo() {
     }
     const out = warped.map((f) => [...f])
     const freqMasks: [number, number][] = []
-    for (let j = 0; j < mF.value; j++) {
-      const f = Math.floor(g.uniform() * (F.value + 1))
-      const f0 = Math.floor(g.uniform() * (nu - f))
+    for (let j = 0; j < state.mF; j++) {
+      const f = Math.floor(uniform(g) * (state.F + 1))
+      const f0 = Math.floor(uniform(g) * (nu - f))
       freqMasks.push([f0, f])
       out.forEach((frame) => frame.fill(0, f0, f0 + f))
     }
     const timeMasks: [number, number][] = []
-    for (let j = 0; j < mT.value; j++) {
-      const t = Math.floor(g.uniform() * (T.value + 1))
-      const t0 = Math.floor(g.uniform() * (tau - t))
+    for (let j = 0; j < state.mT; j++) {
+      const t = Math.floor(uniform(g) * (state.T + 1))
+      const t0 = Math.floor(uniform(g) * (tau - t))
       timeMasks.push([t0, t])
       for (let i = t0; i < t0 + t; i++) out[i].fill(0)
     }
     const toRows = (grid: number[][]) => grid[0].map((_, m) => grid.map((f) => f[m]))
     return { original: toRows(base), augmented: toRows(out), freqMasks, timeMasks }
-  }, [base, W.value, F.value, mF.value, T.value, mT.value, seed.value])
+  }, [base, state.W, state.F, state.mF, state.T, state.mT, state.seed])
 
   const times = base.map((_, t) => (t * HOP) / FS)
   const bands = Array.from({ length: MELS }, (_, m) => m)
   const range: [number, number] = [-6, 6]
 
+  const xAxis = useAxis({ label: 'time (s)' })
+  const yAxis = useAxis({ label: 'mel band' })
+  const xAxis2 = useAxis({ label: 'time (s)' })
+  const yAxis2 = useAxis({ label: 'mel band' })
   return (
-    <Interactive
+    <Figure
       title="SpecAugment"
+      state={state}
       caption="A normalised 80-band log-mel spectrogram (25 ms windows, 10 ms hop) before (top) and after (bottom) augmentation. Time warping moves a random centre point by up to W frames and stretches both sides; each frequency mask zeroes f ~ U[0, F] consecutive bands, and each time mask t ~ U[0, T] consecutive frames, at uniformly random positions. Zero is the mean after normalisation, so masked regions carry no information. Step the seed to draw new augmentations."
-      controls={
-        <>
-          <ParamSlider label="time warp W (frames)" param={W} />
-          <ParamSlider label="frequency mask F (bands)" param={F} />
-          <ParamSlider label="frequency masks m_F" param={mF} />
-          <ParamSlider label="time mask T (frames)" param={T} />
-          <ParamSlider label="time masks m_T" param={mT} />
-          <ParamSlider label="seed" param={seed} withArrows />
-        </>
-      }
-      readout={
+
+      readouts={
         <>
           <Readout
             label="frequency masks [start, width]"
@@ -111,27 +109,13 @@ export function SpecAugmentDemo() {
       }
     >
       <div className="space-y-4">
-        <Heatmap
-          x={times}
-          y={bands}
-          z={r.original}
-          range={range}
-          xLabel="time (s)"
-          yLabel="mel band"
-          valueLabel="normalised log energy"
-          height={220}
-        />
-        <Heatmap
-          x={times}
-          y={bands}
-          z={r.augmented}
-          range={range}
-          xLabel="time (s)"
-          yLabel="mel band"
-          valueLabel="normalised log energy"
-          height={220}
-        />
+        <Plot x={xAxis} y={yAxis} height={220}>
+          <Raster x={times} y={bands} z={r.original} range={range} valueLabel={'normalised log energy'} />
+        </Plot>
+        <Plot x={xAxis2} y={yAxis2} height={220}>
+          <Raster x={times} y={bands} z={r.augmented} range={range} valueLabel={'normalised log energy'} />
+        </Plot>
       </div>
-    </Interactive>
+    </Figure>
   )
 }

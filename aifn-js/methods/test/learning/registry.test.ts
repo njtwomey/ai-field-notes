@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import { defaults } from 'aifn/foundation/space'
-import { learningModelRegistry } from 'aifn-applied/learning'
-import { unsupervisedModelRegistry } from 'aifn-applied/unsupervised'
-import { neuralModelRegistry } from 'aifn-applied/neural'
+import { learningModelRegistry } from 'aifn-methods/learning'
+import { unsupervisedModelRegistry } from 'aifn-methods/unsupervised'
+import { neuralModelRegistry } from 'aifn-methods/neural'
 import { MODEL_FIXTURES } from '../model-fixtures'
 import { expectModelProtocol } from '../registry'
 

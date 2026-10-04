@@ -2,7 +2,7 @@
  * `aifn/learning/off-policy`: off-policy (counterfactual) evaluation from logged bandit feedback: IPS, clipped and
  * self-normalised IPS, the direct method, doubly robust and switch-DR; slate estimators (pseudo-inverse and slate IPS);
  * propensity models; importance weights (their effective sample size is `importanceEffectiveSampleSize` in
- * `aifn/probability/stats`). Logged-bandit generators are in `aifn-applied/data/synthetic`.
+ * `aifn/probability/stats`). Logged-bandit generators are in `aifn-methods/data/synthetic`.
  */
 
 export {

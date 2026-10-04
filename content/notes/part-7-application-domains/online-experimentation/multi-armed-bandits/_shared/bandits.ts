@@ -2,7 +2,7 @@
  * Stochastic Bernoulli bandits for the figures in this category: samplers, the classical index policies and a seeded
  * simulator that averages cumulative pseudo-regret over independent runs.
  *
- * The random source is passed in (`rng(seed)` from '@/lib/math' in the widgets), so this module has no imports and runs
+ * The random source is passed in (`seededRand(seed)` from './rand' in the widgets), so this module has no imports and runs
  * under plain Node for checking.
  */
 

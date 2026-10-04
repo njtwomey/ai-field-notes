@@ -1,5 +1,5 @@
 /**
- * `aifn-applied/information/coding`: source coding (Huffman codes as a step-through algorithm, canonical codes, source
+ * `aifn-methods/information/coding`: source coding (Huffman codes as a step-through algorithm, canonical codes, source
  * extensions, prefix encoding and decoding, Shannon–Fano, Shannon and arithmetic coding) and error-correcting code
  * bounds.
  */

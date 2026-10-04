@@ -1,15 +1,6 @@
-import { useMemo, useState } from 'react'
-import {
-  Interactive,
-  ParamSlider,
-  Readout,
-  XYChart,
-  formatNumber,
-  useParam,
-  type Handle,
-  type XYSeries,
-} from 'aifn-render'
-import { rng } from '@/lib/math'
+import { useMemo } from 'react'
+import { Curve, Figure, float, formatNumber, Handle, int, Plot, Readout, useAxis, useFigureState } from 'aifn-render'
+import { stream, uniform as drawUniform } from 'aifn/foundation/random'
 
 /** Success rates by stone size, from Charig et al. (1986). A is open surgery, B is percutaneous nephrolithotomy. */
 const RATES = {
@@ -25,59 +16,48 @@ const overall = (t: keyof typeof RATES, largeShare: number) =>
  * between them, at the treatment's share of large stones. Dragging a point changes that case mix.
  */
 export function CaseMix() {
-  const mixA = useParam(263 / 350, { min: 0, max: 1, step: 0.001 })
-  const mixB = useParam(80 / 350, { min: 0, max: 1, step: 0.001 })
-  const [patients, setPatients] = useState(350)
-  const [seed, setSeed] = useState(1)
+  const state = useFigureState({
+    mixA: float(263 / 350, { min: 0, max: 1, step: 0.001, label: 'A: share of large stones' }),
+    mixB: float(80 / 350, { min: 0, max: 1, step: 0.001, label: 'B: share of large stones' }),
+    patients: int(350, { min: 50, max: 5000, step: 50, label: 'simulated patients per arm' }),
+    seed: int(1, { min: 0, max: 30, step: 1, label: 'seed' }),
+  })
 
   const series = useMemo(
-    (): XYSeries[] => [
-      { name: 'A: open surgery', type: 'line', x: [0, 1], y: [RATES.A.small, RATES.A.large], slot: 0 },
-      { name: 'B: nephrolithotomy', type: 'line', x: [0, 1], y: [RATES.B.small, RATES.B.large], slot: 1 },
-    ],
+    () =>
+      [
+        { name: 'A: open surgery', x: [0, 1], y: [RATES.A.small, RATES.A.large], slot: 0 },
+        { name: 'B: nephrolithotomy', x: [0, 1], y: [RATES.B.small, RATES.B.large], slot: 1 },
+      ] as const,
     [],
   )
 
   const simulated = useMemo(() => {
-    const { uniform } = rng(seed)
+    const draws = stream(state.seed)
+    const uniform = () => drawUniform(draws)
     const arm = (t: keyof typeof RATES, share: number) => {
       let successes = 0
-      for (let k = 0; k < patients; k++) {
+      for (let k = 0; k < state.patients; k++) {
         const rate = uniform() < share ? RATES[t].large : RATES[t].small
         if (uniform() < rate) successes++
       }
-      return successes / patients
+      return successes / state.patients
     }
-    return { A: arm('A', mixA.value), B: arm('B', mixB.value) }
-  }, [mixA.value, mixB.value, patients, seed])
+    return { A: arm('A', state.mixA), B: arm('B', state.mixB) }
+  }, [state.mixA, state.mixB, state.patients, state.seed])
 
-  const a = overall('A', mixA.value)
-  const b = overall('B', mixB.value)
-  const handles: Handle[] = [
-    { kind: 'point', at: [mixA.value, a], label: 'A overall', onDrag: ([x]) => mixA.set(x) },
-    { kind: 'point', at: [mixB.value, b], label: 'B overall', onDrag: ([x]) => mixB.set(x) },
-  ]
+  const a = overall('A', state.mixA)
+  const b = overall('B', state.mixB)
 
+  const xAxis = useAxis({ label: 'share of patients with large stones', range: [0, 1] })
+  const yAxis = useAxis({ label: 'success rate', range: [0.6, 1] })
   return (
-    <Interactive
+    <Figure
       title="Success rate against case mix"
+      state={state}
       caption="Each line joins a treatment's success rate for small stones (left) and for large stones (right). A is better in both groups, so its line is higher everywhere. Each dot is a treatment's overall success rate, placed at its share of large stones. In the study, A treated mostly large stones, so its dot sits low on a higher line. Drag the dots to change the case mix: with equal mixes, A wins overall too."
-      controls={
-        <>
-          <ParamSlider label="A: share of large stones" param={mixA} />
-          <ParamSlider label="B: share of large stones" param={mixB} />
-          <ParamSlider
-            label="simulated patients per arm"
-            value={patients}
-            onChange={setPatients}
-            min={50}
-            max={5000}
-            step={50}
-          />
-          <ParamSlider label="seed" value={seed} onChange={setSeed} min={0} max={30} step={1} />
-        </>
-      }
-      readout={
+
+      readouts={
         <>
           <Readout label="A overall, exact" value={formatNumber(a)} />
           <Readout label="B overall, exact" value={formatNumber(b)} />
@@ -87,15 +67,12 @@ export function CaseMix() {
         </>
       }
     >
-      <XYChart
-        height={320}
-        xLabel="share of patients with large stones"
-        yLabel="success rate"
-        series={series}
-        xRange={[0, 1]}
-        yRange={[0.6, 1]}
-        handles={handles}
-      />
-    </Interactive>
+      <Plot x={xAxis} y={yAxis} height={320}>
+        <Curve {...series[0]} />
+        <Curve {...series[1]} />
+        <Handle kind="point" at={[state.mixA, a]} label="A overall" onDrag={([x]) => state.set('mixA', x)} />
+        <Handle kind="point" at={[state.mixB, b]} label="B overall" onDrag={([x]) => state.set('mixB', x)} />
+      </Plot>
+    </Figure>
   )
 }

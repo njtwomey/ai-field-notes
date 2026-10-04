@@ -1,5 +1,4 @@
-import { Interactive } from 'aifn-render'
-import { Diagram } from 'aifn-render'
+import { Diagram, Figure } from 'aifn-render'
 import type { DiagramEdge, DiagramNode, DiagramSpec } from 'aifn-render'
 
 const ROWS: { b: string; y: number }[] = [
@@ -46,7 +45,7 @@ const spec: DiagramSpec = { unit: 38, spread: [1.2, 1], nodes, edges }
 /** Random forest: bagging plus random feature subsets at every split. */
 export function ForestDiagram() {
   return (
-    <Interactive
+    <Figure
       title="Growing a random forest"
       caption="Each tree is grown deep on its own bootstrap sample of the n training points. At every split the tree may choose only among m features drawn at random from the d available, which makes the trees less alike. The forest averages the trees' predictions for regression and takes a vote for classification. The points left out of a bootstrap sample give that tree's out-of-bag error."
     >
@@ -54,6 +53,6 @@ export function ForestDiagram() {
         spec={spec}
         ariaLabel="The training set is resampled into B bootstrap samples; each grows a tree that splits on random feature subsets; the trees' predictions are averaged or voted"
       />
-    </Interactive>
+    </Figure>
   )
 }

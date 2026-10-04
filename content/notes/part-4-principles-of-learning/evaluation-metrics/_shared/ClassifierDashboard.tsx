@@ -1,14 +1,18 @@
 import { useMemo, useState } from 'react'
-import { recipe, type ClassificationTruth } from 'aifn-applied/data'
-import { gpClassifier } from 'aifn-applied/learning/gaussian-processes'
-import { gaussianNaiveBayes, linearDiscriminant, quadraticDiscriminant } from 'aifn-applied/learning/generative-classifiers'
-import { logisticRegression } from 'aifn-applied/learning/generalised/glm'
-import { supportVectorMachine } from 'aifn-applied/learning/kernel-methods'
-import { kNearestNeighbours } from 'aifn-applied/learning/neighbours'
-import { polynomialFeatures, splineFeatures, standardScaler } from 'aifn-applied/learning/preprocessing'
-import { decisionTree } from 'aifn-applied/learning/trees-and-ensembles'
-import { randomForest } from 'aifn-applied/learning/trees-and-ensembles/bagging'
-import { gradientBoosting } from 'aifn-applied/learning/trees-and-ensembles/boosting'
+import { recipe, type ClassificationTruth } from 'aifn-methods/data'
+import { gpClassifier } from 'aifn-methods/learning/gaussian-processes'
+import {
+  gaussianNaiveBayes,
+  linearDiscriminant,
+  quadraticDiscriminant,
+} from 'aifn-methods/learning/generative-classifiers'
+import { logisticRegression } from 'aifn-methods/learning/generalised/glm'
+import { supportVectorMachine } from 'aifn-methods/learning/kernel-methods'
+import { kNearestNeighbours } from 'aifn-methods/learning/neighbours'
+import { polynomialFeatures, splineFeatures, standardScaler } from 'aifn-methods/learning/preprocessing'
+import { decisionTree } from 'aifn-methods/learning/trees-and-ensembles'
+import { randomForest } from 'aifn-methods/learning/trees-and-ensembles/bagging'
+import { gradientBoosting } from 'aifn-methods/learning/trees-and-ensembles/boosting'
 import { type Params } from 'aifn/foundation/pytree'
 import { stream } from 'aifn/foundation/random'
 import { fromData, toFlat, toRows, unwrap, type Tensor } from 'aifn/foundation/tensor'
@@ -208,11 +212,18 @@ export function ClassifierDashboard() {
         return predictiveScorer(logisticRegression({ l2: 1.0 }).fit(d))
       case 'polynomial':
         return predictiveScorer(
-          pipeline(standardScaler(), polynomialFeatures({ degree: 3, includeBias: false }), logisticRegression({ l2: 0.1 })).fit(d),
+          pipeline(
+            standardScaler(),
+            polynomialFeatures({ degree: 3, includeBias: false }),
+            logisticRegression({ l2: 0.1 }),
+          ).fit(d),
         )
       case 'spline':
         return predictiveScorer(
-          pipeline(splineFeatures({ knots: 6, degree: 3, extrapolation: 'continue', includeBias: false }), logisticRegression({ l2: 0.1 })).fit(d),
+          pipeline(
+            splineFeatures({ knots: 6, degree: 3, extrapolation: 'continue', includeBias: false }),
+            logisticRegression({ l2: 0.1 }),
+          ).fit(d),
         )
       case 'knn':
         return predictiveScorer(kNearestNeighbours({ k: Math.min(knnNeighbors, n) }).fit(d))
@@ -230,7 +241,11 @@ export function ClassifierDashboard() {
       case 'tree':
         return predictiveScorer(decisionTree({ maxDepth: treeDepth }).fit(d))
       case 'forest':
-        return predictiveScorer(randomForest({ trees: forestTrees, maxDepth: treeDepth, maxFeatures: 1 }).fit(d, { stream: stream('dash/forest') }))
+        return predictiveScorer(
+          randomForest({ trees: forestTrees, maxDepth: treeDepth, maxFeatures: 1 }).fit(d, {
+            stream: stream('dash/forest'),
+          }),
+        )
       case 'boosting': {
         const m = gradientBoosting({ loss: 'logistic', stages: 60, learningRate: 0.2, tree: { maxDepth: 2 } }).fit(d)
         return predictiveScorer({ predictive: (x) => m.predictive!(x) })
@@ -252,7 +267,9 @@ export function ClassifierDashboard() {
           { every: 250 },
         )
         const w = run.steps[run.steps.length - 1].params
-        return fromProbability((x) => Float64Array.from(toFlat(unwrap(sigmoid(net.apply(w, scaler.transform(x)))) as Tensor)))
+        return fromProbability((x) =>
+          Float64Array.from(toFlat(unwrap(sigmoid(net.apply(w, scaler.transform(x)))) as Tensor)),
+        )
       }
     }
   }, [modelKey, datasetObj, knnNeighbors, n, svmGamma, svmC, treeDepth, forestTrees, mlpWidth])
@@ -320,8 +337,14 @@ export function ClassifierDashboard() {
   }, [scorer, datasetObj, yFlat])
 
   // Decision boundary lines at threshold
-  const boundary = useMemo(() => polylines(contourLines(plane.gx, plane.gy, field, threshold)), [plane, field, threshold])
-  const bayesBoundary = useMemo(() => (bayes ? polylines(contourLines(plane.gx, plane.gy, bayes.onGrid, 0)) : null), [plane, bayes])
+  const boundary = useMemo(
+    () => polylines(contourLines(plane.gx, plane.gy, field, threshold)),
+    [plane, field, threshold],
+  )
+  const bayesBoundary = useMemo(
+    () => (bayes ? polylines(contourLines(plane.gx, plane.gy, bayes.onGrid, 0)) : null),
+    [plane, bayes],
+  )
 
   // Histograms
   const histograms = useMemo(() => {
@@ -351,7 +374,11 @@ export function ClassifierDashboard() {
   // Axes
   const fx1 = useAxis({ label: 'x₁', nice: false })
   const fx2 = useAxis({ label: 'x₂', equal: fx1, nice: false })
-  const sx = useAxis({ label: scorer.kind === 'log-odds' ? 'Log-Odds Score' : 'SVM Margin Score', range: scoreRange, nice: false })
+  const sx = useAxis({
+    label: scorer.kind === 'log-odds' ? 'Log-Odds Score' : 'SVM Margin Score',
+    range: scoreRange,
+    nice: false,
+  })
   const sy = useAxis({ label: 'Count', nice: true })
   const rocX = useAxis({ label: 'False Positive Rate (FPR)', range: [0, 1], nice: false })
   const rocY = useAxis({ label: 'True Positive Rate (TPR / Recall)', range: [0, 1], nice: false })
@@ -492,18 +519,19 @@ export function ClassifierDashboard() {
         </div>
       }
       readouts={{
-        [`Threshold Metrics at t = ${fmt(threshold)} (P = ${scorer.kind === 'log-odds' ? fmt(sigmoid(threshold)) : '—'})`]: (
-          <>
-            <Readout label="Accuracy" value={fmt(rates.accuracy)} />
-            <Readout label="Balanced Accuracy" value={fmt(rates.balancedAccuracy)} />
-            <Readout label="Precision (PPV)" value={fmt(rates.precision)} />
-            <Readout label="Recall (TPR)" value={fmt(rates.recall)} />
-            <Readout label="Specificity (TNR)" value={fmt(rates.specificity)} />
-            <Readout label="F₁ Score" value={fmt(rates.f1)} />
-            <Readout label="MCC" value={fmt(rates.matthewsCorrelation)} />
-            <Readout label="Cohen's κ" value={fmt(rates.cohensKappa)} />
-          </>
-        ),
+        [`Threshold Metrics at t = ${fmt(threshold)} (P = ${scorer.kind === 'log-odds' ? fmt(sigmoid(threshold)) : '—'})`]:
+          (
+            <>
+              <Readout label="Accuracy" value={fmt(rates.accuracy)} />
+              <Readout label="Balanced Accuracy" value={fmt(rates.balancedAccuracy)} />
+              <Readout label="Precision (PPV)" value={fmt(rates.precision)} />
+              <Readout label="Recall (TPR)" value={fmt(rates.recall)} />
+              <Readout label="Specificity (TNR)" value={fmt(rates.specificity)} />
+              <Readout label="F₁ Score" value={fmt(rates.f1)} />
+              <Readout label="MCC" value={fmt(rates.matthewsCorrelation)} />
+              <Readout label="Cohen's κ" value={fmt(rates.cohensKappa)} />
+            </>
+          ),
         'Ranking & Discrimination Metrics (all t)': (
           <>
             <Readout label="AUROC" value={fmt(roc.area)} />
@@ -541,7 +569,9 @@ export function ClassifierDashboard() {
                 valueLabel={scoreName}
                 fillOpacity={0.4}
               />
-              {bayesBoundary && <Curve name="Bayes Boundary" x={bayesBoundary.x} y={bayesBoundary.y} muted dashed width={1.5} />}
+              {bayesBoundary && (
+                <Curve name="Bayes Boundary" x={bayesBoundary.x} y={bayesBoundary.y} muted dashed width={1.5} />
+              )}
               <Curve name="Decision Boundary" x={boundary.x} y={boundary.y} slot={6} width={2.5} />
               <Points
                 name="Data Cases"
@@ -618,7 +648,7 @@ export function ClassifierDashboard() {
           {/* Panel 5: Confusion Matrix Contingency Table */}
           <DashboardCell ratio={1.0}>
             <div className="flex h-full flex-col justify-center rounded-lg border border-border/70 bg-card p-3 shadow-2xs">
-              <div className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+              <div className="mb-2 text-xs font-semibold tracking-wider text-muted-foreground uppercase">
                 5 · Confusion Matrix (Counts & Rates)
               </div>
               <div className="grid grid-cols-3 gap-1.5 text-center text-xs">
@@ -628,32 +658,38 @@ export function ClassifierDashboard() {
 
                 <div className="flex items-center justify-end pr-1 font-semibold">Act Pos</div>
                 <div className="flex flex-col items-center justify-center rounded border border-emerald-500/40 bg-emerald-500/10 p-2">
-                  <span className="text-[10px] text-muted-foreground font-mono">TP</span>
+                  <span className="font-mono text-[10px] text-muted-foreground">TP</span>
                   <span className="font-mono text-base font-bold text-foreground">{counts.tp}</span>
                   <span className="text-[10px] text-muted-foreground">TPR: {fmt(rates.recall)}</span>
                 </div>
                 <div className="flex flex-col items-center justify-center rounded border border-destructive/30 bg-destructive/10 p-2">
-                  <span className="text-[10px] text-muted-foreground font-mono">FN</span>
+                  <span className="font-mono text-[10px] text-muted-foreground">FN</span>
                   <span className="font-mono text-base font-bold text-foreground">{counts.fn}</span>
                   <span className="text-[10px] text-muted-foreground">FNR: {fmt(rates.falseNegativeRate)}</span>
                 </div>
 
                 <div className="flex items-center justify-end pr-1 font-semibold">Act Neg</div>
                 <div className="flex flex-col items-center justify-center rounded border border-destructive/30 bg-destructive/10 p-2">
-                  <span className="text-[10px] text-muted-foreground font-mono">FP</span>
+                  <span className="font-mono text-[10px] text-muted-foreground">FP</span>
                   <span className="font-mono text-base font-bold text-foreground">{counts.fp}</span>
                   <span className="text-[10px] text-muted-foreground">FPR: {fmt(rates.falsePositiveRate)}</span>
                 </div>
                 <div className="flex flex-col items-center justify-center rounded border border-emerald-500/40 bg-emerald-500/10 p-2">
-                  <span className="text-[10px] text-muted-foreground font-mono">TN</span>
+                  <span className="font-mono text-[10px] text-muted-foreground">TN</span>
                   <span className="font-mono text-base font-bold text-foreground">{counts.tn}</span>
                   <span className="text-[10px] text-muted-foreground">TNR: {fmt(rates.specificity)}</span>
                 </div>
               </div>
               <div className="mt-3 flex justify-between border-t border-border/50 pt-2 text-[11px] text-muted-foreground">
-                <span>Precision (PPV): <strong className="text-foreground">{fmt(rates.precision)}</strong></span>
-                <span>Accuracy: <strong className="text-foreground">{fmt(rates.accuracy)}</strong></span>
-                <span>F1: <strong className="text-foreground">{fmt(rates.f1)}</strong></span>
+                <span>
+                  Precision (PPV): <strong className="text-foreground">{fmt(rates.precision)}</strong>
+                </span>
+                <span>
+                  Accuracy: <strong className="text-foreground">{fmt(rates.accuracy)}</strong>
+                </span>
+                <span>
+                  F1: <strong className="text-foreground">{fmt(rates.f1)}</strong>
+                </span>
               </div>
             </div>
           </DashboardCell>

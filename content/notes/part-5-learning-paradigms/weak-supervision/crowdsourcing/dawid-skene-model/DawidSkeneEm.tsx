@@ -1,6 +1,6 @@
 import { useMemo } from 'react'
-import { Interactive, ParamSlider, Readout, XYChart, formatNumber, useParam, type XYSeries } from 'aifn-render'
-import { rng } from '@/lib/math'
+import { Curve, Figure, float, formatNumber, int, Plot, Points, Readout, useAxis, useFigureState } from 'aifn-render'
+import { stream, uniform } from 'aifn/foundation/random'
 
 const ITEMS = 300
 const ITERATIONS = 50
@@ -44,20 +44,22 @@ function dawidSkene(labels: number[][]) {
  * Dawid–Skene estimates each annotator's confusion matrix and weights their votes accordingly.
  */
 export function DawidSkeneEm() {
-  const annotators = useParam(7, { min: 3, max: 15, step: 1 })
-  const spam = useParam(0.4, { min: 0, max: 0.8, step: 0.1 })
-  const seed = useParam(4, { min: 1, max: 20, step: 1 })
-  const m = annotators.value
-  const q = spam.value
-  const s = seed.value
+  const state = useFigureState({
+    annotators: int(7, { min: 3, max: 15, step: 1, label: 'annotators', format: (v) => String(v) }),
+    spam: float(0.4, { min: 0, max: 0.8, step: 0.1, label: 'share of spammers' }),
+    seed: int(4, { min: 1, max: 20, step: 1, label: 'seed', format: (v) => String(v) }),
+  })
+  const m = state.annotators
+  const q = state.spam
+  const s = state.seed
 
   const r = useMemo(() => {
-    const g = rng(s)
+    const g = stream(s)
     const spammers = Math.round(q * m)
     // Accuracy of each annotator: spammers answer at random, the rest are between 0.6 and 0.9.
-    const acc = Array.from({ length: m }, (_, k) => (k < spammers ? 0.5 : 0.6 + 0.3 * g.uniform()))
-    const truth: number[] = Array.from({ length: ITEMS }, () => (g.uniform() < 0.5 ? 1 : 0))
-    const labels: number[][] = truth.map((y) => acc.map((a) => (g.uniform() < a ? y : 1 - y)))
+    const acc = Array.from({ length: m }, (_, k) => (k < spammers ? 0.5 : 0.6 + 0.3 * uniform(g)))
+    const truth: number[] = Array.from({ length: ITEMS }, () => (uniform(g) < 0.5 ? 1 : 0))
+    const labels: number[][] = truth.map((y) => acc.map((a) => (uniform(g) < a ? y : 1 - y)))
     const { T, conf } = dawidSkene(labels)
     const vote = labels.map((row) => row.reduce((t, l) => t + l, 0) / m)
     // Ties in majority vote are broken by a fair coin, so each tie scores one half.
@@ -68,30 +70,26 @@ export function DawidSkeneEm() {
     return { acc, est, mv, ds, spammers }
   }, [m, q, s])
 
-  const series: XYSeries[] = [
-    { name: 'equal', type: 'line', x: DIAGONAL, y: DIAGONAL, muted: true, dashed: true },
+  const series = [
+    { name: 'equal', x: DIAGONAL, y: DIAGONAL, muted: true, dashed: true },
     {
       name: 'annotators',
-      type: 'scatter',
       x: r.acc,
       y: r.est,
       group: r.acc.map((_, k) => (k < r.spammers ? 0 : 1)),
       groupNames: ['spammer', 'reliable'],
     },
-  ]
+  ] as const
 
+  const xAxis = useAxis({ label: 'true annotator accuracy', range: [0.4, 1] })
+  const yAxis = useAxis({ label: 'estimated accuracy', range: [0.4, 1], equal: xAxis })
   return (
-    <Interactive
+    <Figure
       title="Dawid–Skene against majority vote"
+      state={state}
       caption="Three hundred binary items, each labelled by every annotator. A share of the annotators are spammers who answer at random; the others are right with probability between 0.6 and 0.9. Dawid–Skene EM estimates each annotator's confusion matrix without any gold labels (the chart compares each annotator's estimated accuracy with the true one) and weights votes by the log-odds of those estimates. Majority vote gives every annotator the same weight, so spammers dilute it. The gap is largest when spammers are numerous and the crowd is small."
-      controls={
-        <>
-          <ParamSlider label="annotators" param={annotators} format={(v) => String(v)} />
-          <ParamSlider label="share of spammers" param={spam} />
-          <ParamSlider label="seed" param={seed} format={(v) => String(v)} />
-        </>
-      }
-      readout={
+
+      readouts={
         <>
           <Readout label="majority-vote accuracy" value={formatNumber(r.mv)} />
           <Readout label="Dawid–Skene accuracy" value={formatNumber(r.ds)} />
@@ -99,14 +97,10 @@ export function DawidSkeneEm() {
         </>
       }
     >
-      <XYChart
-        series={series}
-        xLabel="true annotator accuracy"
-        yLabel="estimated accuracy"
-        xRange={[0.4, 1]}
-        yRange={[0.4, 1]}
-        equalAspect
-      />
-    </Interactive>
+      <Plot x={xAxis} y={yAxis}>
+        <Curve {...series[0]} />
+        <Points {...series[1]} />
+      </Plot>
+    </Figure>
   )
 }

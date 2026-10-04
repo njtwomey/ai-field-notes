@@ -1,0 +1,120 @@
+---
+title: Vantage-point tree
+kind: technique
+summary: 'A vantage-point tree picks a point $\pvec$ at each node and splits the rest at the median distance $\mu$ from it: inside the sphere of radius $\mu$ or outside. A child is skipped when the query''s distance to its shell of distances from $\pvec$ exceeds the current best distance. It needs only a metric.'
+tags: [nearest-neighbours, trees, algorithms, similarity-search, worked-example]
+aliases: [vp-tree, vp tree, vantage point tree]
+requires: [nearest-neighbour-search]
+partOf: [space-partitioning-trees]
+related: [ball-tree]
+references: [yianilos1993, uhlmann1991]
+status: draft
+updated: 2026-10-04
+---
+
+import { TreeBuild, TreeSearch } from '../_shared/TreeSearch'
+
+<Definition>
+A **vantage-point tree** over points in a metric space with distance $\delta$ is a binary tree whose internal nodes each
+hold a **vantage point** $\pvec$ and a radius $\mu$, the median of $\delta(\pvec, \xvec)$ over the node's points. Points
+nearer than $\mu$ go to the inside child and the rest to the outside child <Cite id="yianilos1993" />. Each child
+records the **shell** $[\lambda, \upsilon]$, the least and greatest distance from $\pvec$ to one of its points.
+</Definition>
+
+## Problem
+
+Find the $k$ points nearest a query using nothing but distances. A <NoteLink to="ball-tree">ball tree</NoteLink> does
+this too, but its sibling balls may overlap. A vantage-point tree splits by one distance threshold, so the two children
+partition the points exactly, and each split costs one distance per point to compute <Cite id="uhlmann1991" />.
+
+## Mechanism
+
+### Mental model
+
+- **Build:** stand at one point and sort the others by distance from it; the nearer half goes inside, the farther half
+  outside. Repeat inside each half with a new vantage point.
+- **Search:** knowing how far the query is from the vantage point bounds how near it can be to any point at a known
+  distance from that vantage point.
+
+### Building
+
+```text
+build(points):
+    if |points| ≤ m: return leaf(points)
+    p ← a vantage point (here: the point farthest from the centroid)
+    μ ← the median of δ(p, x) over points
+    inner ← points with δ(p, x) < μ;   outer ← the rest
+    shell(inner) ← [min, max] of δ(p, x) over inner;  likewise for outer
+    return node(p, μ, build(inner), build(outer))
+```
+
+A vantage point near the edge of the cloud spreads the distances from it widely, which makes the shells thin and the
+bounds tight; Yianilos chose the candidate with the largest spread of distances to a sample <Cite id="yianilos1993" />.
+Median splits give a balanced tree of depth $O(\log n)$ and a build cost of $O(n \log n)$ distances.
+
+<TreeBuild index="vp" />
+
+### Searching
+
+```text
+r ← ∞                                            # k-th best distance so far
+search(node):                                    # the node's shell [λ, υ] is about its parent's vantage point p
+    s ← δ(q, p)
+    if max(0, λ − s, s − υ) > r:  PRUNE            # the query is too far from the shell
+    elif node is a leaf:          SCAN             # distances to its points; keep the k best; update r
+    else:                         DESCEND
+        visit the child with the smaller bound first, then the other
+```
+
+**Pruning, and why it is safe.** Let $s = \delta(\qvec, \pvec)$ and let $\xvec$ be any point of the child, so
+$\lambda \le \delta(\pvec, \xvec) \le \upsilon$. The triangle inequality in its two directions gives
+
+$$
+\delta(\qvec, \xvec) \ge \delta(\pvec, \xvec) - s \ge \lambda - s, \qquad \delta(\qvec, \xvec) \ge s - \delta(\pvec, \xvec) \ge s - \upsilon .
+$$
+
+So no point of the child is nearer than $\max(0, \lambda - s, s - \upsilon)$: the distance from $s$ to the interval
+$[\lambda, \upsilon]$. When that exceeds $r$, the child is skipped.
+
+**Backtracking.** The search visits the child with the smaller bound first, not necessarily the side the query is on,
+and returns to the parent when that subtree is finished; the parent then tests its other child against the current
+$r$.
+
+<TreeSearch index="vp" />
+
+## Worked example
+
+The same eight points as in the $k$-d tree note, leaf size 2, query $\qvec = (6.6, 4.6)$, $k = 1$.
+
+**Build.** The root's vantage point is $(1,1)$, with $\mu = 6.71$. The inside half $\set{(1,1), (2,4), (3,2), (6,3)}$
+takes vantage point $(6,3)$; the outside half $\set{(4,7), (7,6), (8,1), (9,5)}$ takes $(8,1)$.
+
+| step | node | shell about | shell | $s$ | bound | $r$ before | decision |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| 1 | root | none | none | none | 0 | $\infty$ | descend; outside first (bound 0.05 against 1.27) |
+| 2 | outside half | $(1,1)$ | $[6.71, 8.94]$ | 6.66 | 0.05 | $\infty$ | descend |
+| 3 | leaf $\set{(8,1), (9,5)}$ | $(8,1)$ | $[0, 4.12]$ | 3.86 | 0 | $\infty$ | scan: $r = 2.43$ |
+| 4 | leaf $\set{(7,6), (4,7)}$ | $(8,1)$ | $[5.10, 7.21]$ | 3.86 | 1.24 | 2.43 | scan: $r = 1.46$ |
+| 5 | inside half | $(1,1)$ | $[0, 5.39]$ | 6.66 | 1.27 | 1.46 | descend |
+| 6 | leaf $\set{(6,3), (3,2)}$ | $(6,3)$ | $[0, 3.16]$ | 1.71 | 0 | 1.46 | scan: no improvement |
+| 7 | leaf $\set{(2,4), (1,1)}$ | $(6,3)$ | $[4.12, 5.39]$ | 1.71 | 2.41 | 1.46 | prune |
+
+The query lies just inside the root's sphere ($s = 6.66 < \mu = 6.71$), yet the outside half has the smaller bound
+and is searched first. The answer is $(7,6)$ at distance 1.46, with 6 distances. On eight points in the plane the
+$k$-d tree's boxes do better; the vantage-point tree's advantage is that it needs no coordinates.
+
+## Cost
+
+| | build | memory | query |
+| --- | --- | --- | --- |
+| vantage-point tree | $O(n \log n)$ distances | $O(n)$ | $O(\log n)$ expected when the intrinsic dimension is low |
+
+## Trade-offs
+
+- **One distance per node.** Each bound costs one distance, to the parent's vantage point, and each internal node's
+  vantage point is also one of its points.
+- **Exact partition.** The children share no points, unlike overlapping sibling balls, but a query near $\mu$ still
+  opens both.
+- **Metric only.** The bounds use the triangle inequality and nothing else, so any metric works.
+- **Dimension.** As the intrinsic dimension grows, distances from a vantage point concentrate around their median, the
+  shells overlap the query's distance, and both children are opened.

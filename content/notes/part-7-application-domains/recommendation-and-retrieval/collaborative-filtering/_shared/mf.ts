@@ -1,4 +1,4 @@
-import { rng } from '@/lib/math'
+import { normal, stream, uniform } from 'aifn/foundation/random'
 
 /** A small synthetic ratings problem: U users, M items, ratings 1–5 from a rank-2 taste model plus noise. */
 export type Ratings = {
@@ -14,15 +14,15 @@ export type Ratings = {
 }
 
 export function makeRatings(users = 12, items = 16, seed = 7, observed = 0.45): Ratings {
-  const r = rng(seed)
-  const w = Array.from({ length: users }, () => [r.normal(), r.normal()])
-  const v = Array.from({ length: items }, () => [r.normal(), r.normal()])
-  const truth = w.map((wu) => v.map((vi) => clamp(3 + 0.9 * (wu[0] * vi[0] + wu[1] * vi[1]) + 0.3 * r.normal())))
+  const r = stream(seed)
+  const w = Array.from({ length: users }, () => [normal(r), normal(r)])
+  const v = Array.from({ length: items }, () => [normal(r), normal(r)])
+  const truth = w.map((wu) => v.map((vi) => clamp(3 + 0.9 * (wu[0] * vi[0] + wu[1] * vi[1]) + 0.3 * normal(r))))
   const train: [number, number, number][] = []
   const test: [number, number, number][] = []
   for (let u = 0; u < users; u++)
     for (let i = 0; i < items; i++) {
-      const p = r.uniform()
+      const p = uniform(r)
       if (p < observed * 0.75) train.push([u, i, truth[u][i]])
       else if (p < observed) test.push([u, i, truth[u][i]])
     }
@@ -57,8 +57,8 @@ function solve(A: number[][], b: number[]): number[] {
 export type Factors = { W: number[][]; V: number[][] }
 
 export function initFactors(data: Ratings, d: number, seed = 3): Factors {
-  const r = rng(seed)
-  const f = () => Array.from({ length: d }, () => 0.3 * r.normal())
+  const r = stream(seed)
+  const f = () => Array.from({ length: d }, () => 0.3 * normal(r))
   return { W: Array.from({ length: data.users }, f), V: Array.from({ length: data.items }, f) }
 }
 
@@ -133,10 +133,10 @@ export function history(
   lr = 0.03,
 ): Factors[] {
   const out = [initFactors(data, d)]
-  const r = rng(11)
+  const r = stream(11)
   const order = data.train.map((_, k) => k)
   for (let k = order.length - 1; k > 0; k--) {
-    const j = Math.floor(r.uniform() * (k + 1))
+    const j = Math.floor(uniform(r) * (k + 1))
     ;[order[k], order[j]] = [order[j], order[k]]
   }
   for (let t = 0; t < steps; t++) {

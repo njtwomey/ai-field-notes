@@ -8,7 +8,7 @@ import {
   rvmProblem,
   rvmReestimationSteps,
   type RvmState,
-} from 'aifn-applied/learning/gaussian-processes'
+} from 'aifn-methods/learning/gaussian-processes'
 import { child, normals, stream, uniform } from 'aifn/foundation/random'
 import { fromData, linspace, toFlat, type Tensor } from 'aifn/foundation/tensor'
 import { trace } from 'aifn/foundation/trace'

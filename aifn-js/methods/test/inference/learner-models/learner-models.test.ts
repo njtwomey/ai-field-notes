@@ -9,7 +9,7 @@ import { valueAndGrad } from 'aifn/foundation/autodiff'
 import { stream } from 'aifn/foundation/random'
 import { fromData, tensor, toFlat, unwrap, type Tensor, type Value } from 'aifn/foundation/tensor'
 import { correlation } from 'aifn/probability/stats'
-import { learnerResponses } from 'aifn-applied/data/synthetic'
+import { learnerResponses } from 'aifn-methods/data/synthetic'
 import {
   abilityEquity,
   fitLearnerModel,
@@ -20,7 +20,7 @@ import {
   responseScores,
   structuralZeroPosterior,
   zilmProbability,
-} from 'aifn-applied/inference/learner-models'
+} from 'aifn-methods/inference/learner-models'
 
 const num = (v: Value) => {
   const u = unwrap(v)

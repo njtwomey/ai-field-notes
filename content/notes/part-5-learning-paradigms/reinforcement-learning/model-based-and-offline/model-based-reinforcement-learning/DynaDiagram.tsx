@@ -1,5 +1,4 @@
-import { Interactive } from 'aifn-render'
-import { Diagram } from 'aifn-render'
+import { Diagram, Figure } from 'aifn-render'
 import type { DiagramSpec } from 'aifn-render'
 
 const spec: DiagramSpec = {
@@ -29,7 +28,7 @@ const spec: DiagramSpec = {
 /** Dyna: every real step feeds both a direct update and the model, and the model feeds n more updates. */
 export function DynaDiagram() {
   return (
-    <Interactive
+    <Figure
       title="Dyna"
       caption="Each real transition is used twice: once for a Q-learning update, and once to update the model. The model then generates n simulated transitions, each given the same Q-learning update. Acting, learning and planning all improve the same value function."
     >
@@ -37,6 +36,6 @@ export function DynaDiagram() {
         spec={spec}
         ariaLabel="Dyna: the agent acts in the environment; each real transition updates Q directly and updates a learned model; the model produces simulated transitions that also update Q"
       />
-    </Interactive>
+    </Figure>
   )
 }

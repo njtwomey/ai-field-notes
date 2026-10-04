@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import { ravel } from 'aifn/foundation/pytree'
 import { stream } from 'aifn/foundation/random'
-import { moons, regression1d } from 'aifn-applied/data/synthetic'
-import { comparisonModel, fullBatchComparison } from 'aifn-applied/neural/full-batch'
+import { moons, regression1d } from 'aifn-methods/data/synthetic'
+import { comparisonModel, fullBatchComparison } from 'aifn-methods/neural/full-batch'
 
 describe('fullBatchComparison', () => {
   const data = moons(stream('moons'), { n: 64, noise: 0.15 })

@@ -1,27 +1,30 @@
 import { useMemo, useState } from 'react'
 import {
-  Interactive,
-  ParamButton,
-  ParamSlider,
-  ParamSwitch,
-  Readout,
-  XYChart,
+  Button,
+  Figure,
+  float,
   formatNumber,
-  useParam,
-  type Handle,
+  Handle,
+  Plot,
+  Points,
+  Readout,
   type Segment,
-  type XYSeries,
+  Segments,
+  setting,
+  slider,
+  useAxis,
+  useFigureState,
 } from 'aifn-render'
-import { rng } from '@/lib/math'
-import { apply, svd2, type Mat2, type Vec2 } from '@/lib/math/mat2'
+import { normal, stream } from 'aifn/foundation/random'
+import { apply2, svd2, type Mat2, type Vec2 } from 'aifn/numerics/linalg'
 
 const N = 10
 const RANGE = 3
 
 /** N points from a seeded standard normal, centred so translation plays no part in the alignment. */
 function seedPoints(seed: number, scale: number): Vec2[] {
-  const draw = rng(seed)
-  const pts: Vec2[] = Array.from({ length: N }, () => [draw.normal() * scale, draw.normal() * scale])
+  const draw = stream(seed)
+  const pts: Vec2[] = Array.from({ length: N }, () => [normal(draw) * scale, normal(draw) * scale])
   const mx = pts.reduce((s, p) => s + p[0], 0) / N
   const my = pts.reduce((s, p) => s + p[1], 0) / N
   return pts.map(([x, y]) => [x - mx, y - my])
@@ -52,7 +55,10 @@ function fitRotation(newPts: Vec2[], oldPts: Vec2[]): Mat2 {
     c += ny * ox
     d += ny * oy
   })
-  const { u, v } = svd2(a, b, c, d)
+  const { u, v } = svd2([
+    [a, b],
+    [c, d],
+  ])
   return [
     [v[0][0] * u[0][0] + v[1][0] * u[1][0], v[0][0] * u[0][1] + v[1][0] * u[1][1]],
     [v[0][1] * u[0][0] + v[1][1] * u[1][0], v[0][1] * u[0][1] + v[1][1] * u[1][1]],
@@ -83,55 +89,59 @@ function agreement(shown: Vec2[], oldPts: Vec2[]): number {
  * item (with alignment off) gives it real drift instead, which alignment cannot remove.
  */
 export function EmbeddingCompatibility() {
-  const theta = useParam(130, { min: 0, max: 360, step: 1 })
-  const noise = useParam(0.12, { min: 0, max: 0.6, step: 0.01 })
-  const [aligned, setAligned] = useState(false)
+  const state = useFigureState({
+    theta: slider(0, 360, 130, { step: 1, label: 'rotation of the new space', format: (v) => `${Math.round(v)}°` }),
+    noise: float(0.12, { min: 0, max: 0.6, step: 0.01, label: 'ordinary noise' }),
+    aligned: setting(false, 'align to the old space'),
+  })
   const [drift, setDrift] = useState<Vec2 | null>(null)
 
   const newRaw = useMemo<Vec2[]>(
     () =>
       OLD_POINTS.map((p, i) => {
         if (i === 0 && drift) return drift
-        return add(rotate(p, theta.value), BASE_NOISE[i], noise.value)
+        return add(rotate(p, state.theta), BASE_NOISE[i], state.noise)
       }),
-    [theta.value, noise.value, drift],
+    [state.theta, state.noise, drift],
   )
 
   const rotation = useMemo(() => fitRotation(newRaw, OLD_POINTS), [newRaw])
-  const shown = useMemo(() => (aligned ? newRaw.map((p) => apply(rotation, p)) : newRaw), [aligned, newRaw, rotation])
+  const shown = useMemo(
+    () => (state.aligned ? newRaw.map((p) => apply2(rotation, p)) : newRaw),
+    [state.aligned, newRaw, rotation],
+  )
   const nnAgreement = useMemo(() => agreement(shown, OLD_POINTS), [shown])
   const meanGap = useMemo(() => shown.reduce((s, p, i) => s + dist(p, OLD_POINTS[i]), 0) / N, [shown])
 
-  const series: XYSeries[] = [
-    { name: 'old model', type: 'scatter', x: OLD_POINTS.map((p) => p[0]), y: OLD_POINTS.map((p) => p[1]), slot: 0 },
+  const series = [
+    { name: 'old model', x: OLD_POINTS.map((p) => p[0]), y: OLD_POINTS.map((p) => p[1]), slot: 0 },
     {
-      name: aligned ? 'new model, aligned' : 'new model, raw',
-      type: 'scatter',
+      name: state.aligned ? 'new model, aligned' : 'new model, raw',
       x: shown.map((p) => p[0]),
       y: shown.map((p) => p[1]),
       slot: 1,
     },
-  ]
+  ] as const
   const segments: Segment[] = OLD_POINTS.map((p, i) => ({ from: p, to: shown[i] }))
-  const handles: Handle[] = aligned
+  const handles: Handle[] = state.aligned
     ? []
     : [{ kind: 'point', at: newRaw[0], label: 'drifted item', onDrag: (p) => setDrift(p) }]
 
+  const xAxis = useAxis({ range: [-RANGE, RANGE] })
+  const yAxis = useAxis({ range: [-RANGE, RANGE], equal: xAxis })
   return (
-    <Interactive
+    <Figure
       title="Realigning a retrained embedding"
+      state={state}
       caption="Ten shared items in an old embedding (one colour) and a newly retrained one (the other), related by an unknown rotation plus small per-item noise. Toggle alignment to fit R from all ten and watch it snap into place. With alignment off, drag the highlighted item to give it real drift instead of noise: alignment still realigns everything else, but that item's gap does not close."
       controls={
         <>
-          <ParamSlider label="rotation of the new space" param={theta} format={(v) => `${Math.round(v)}°`} />
-          <ParamSlider label="ordinary noise" param={noise} />
-          <ParamSwitch label="align to the old space" checked={aligned} onChange={setAligned} />
-          <ParamButton onClick={() => setDrift(null)} disabled={!drift}>
+          <Button variant="outline" size="sm" onClick={() => setDrift(null)} disabled={!drift}>
             Undrift item
-          </ParamButton>
+          </Button>
         </>
       }
-      readout={
+      readouts={
         <>
           <Readout label="nearest-neighbour agreement" value={`${Math.round(nnAgreement * 100)}%`} />
           <Readout label="mean gap to old position" value={formatNumber(meanGap)} />
@@ -139,16 +149,15 @@ export function EmbeddingCompatibility() {
       }
     >
       <div className="mx-auto w-full max-w-lg">
-        <XYChart
-          series={series}
-          segments={segments}
-          handles={handles}
-          xRange={[-RANGE, RANGE]}
-          yRange={[-RANGE, RANGE]}
-          equalAspect
-          bare
-        />
+        <Plot x={xAxis} y={yAxis} bare>
+          <Points {...series[0]} />
+          <Points {...series[1]} />
+          <Segments segments={segments} />
+          {(handles ?? []).map((h, i) => (
+            <Handle key={i} {...h} />
+          ))}
+        </Plot>
       </div>
-    </Interactive>
+    </Figure>
   )
 }

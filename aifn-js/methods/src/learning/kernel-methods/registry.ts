@@ -1,4 +1,4 @@
-/** The registry of `aifn-applied/learning/kernel-methods`: SVM solvers as traceable algorithms. */
+/** The registry of `aifn-methods/learning/kernel-methods`: SVM solvers as traceable algorithms. */
 
 import { definer, entries, type AlgorithmInfo, type Entry, type FunctionInfo } from 'aifn/foundation/registry'
 import * as crammerSinger from './crammerSinger'

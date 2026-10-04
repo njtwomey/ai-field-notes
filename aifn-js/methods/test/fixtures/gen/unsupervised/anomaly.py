@@ -1,4 +1,4 @@
-"""Reference values for aifn-applied/unsupervised/anomaly from scikit-learn: the local outlier factor of training and
+"""Reference values for aifn-methods/unsupervised/anomaly from scikit-learn: the local outlier factor of training and
 new points (LocalOutlierFactor, novelty=True), k-nearest-neighbour distances (NearestNeighbors), the one-class SVM's
 decision function (OneClassSVM, whose dual weights and offset are nu * n times aifn's) and isolation-forest scores with
 their AUROC (IsolationForest: compared statistically, since the random trees differ)."""

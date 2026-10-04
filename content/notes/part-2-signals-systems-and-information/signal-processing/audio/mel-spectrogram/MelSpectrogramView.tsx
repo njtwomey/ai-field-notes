@@ -1,14 +1,14 @@
-import { useMemo, useState } from 'react'
-import { Heatmap, Interactive, ParamChoice, ParamSlider, Readout, useParam } from 'aifn-render'
-import { rng } from '@/lib/math'
+import { useMemo } from 'react'
+import { choice, Figure, int, Plot, Raster, Readout, useAxis, useFigureState } from 'aifn-render'
 import { applyBank, harmonicTone, melFilterBank, powerSpectrogram } from '../_shared/audio'
+import { normal, stream } from 'aifn/foundation/random'
 
 const FS = 16000
 const LENGTH = FS // one second
 
 /** One second of test audio: a harmonic tone, an upward chirp, a noise burst, then a two-note chord. */
 function testSignal(): number[] {
-  const g = rng(5)
+  const g = stream(5)
   const tone = harmonicTone(220, FS, LENGTH, 12)
   const upper = harmonicTone(415, FS, LENGTH, 8)
   const chord = harmonicTone(330, FS, LENGTH, 8).map((v, n) => v + upper[n])
@@ -19,7 +19,7 @@ function testSignal(): number[] {
       const u = t - 0.3
       return 0.8 * Math.cos(2 * Math.PI * (300 * u + ((4000 - 300) * u * u) / (2 * 0.3)))
     }
-    if (t < 0.68) return 0.5 * g.normal()
+    if (t < 0.68) return 0.5 * normal(g)
     if (t < 0.72) return 0
     return 0.4 * chord[n]
   })
@@ -32,15 +32,25 @@ type Size = '256' | '512' | '1024'
  * below the maximum.
  */
 export function MelSpectrogramView() {
-  const [size, setSize] = useState<Size>('512')
-  const mels = useParam(64, { min: 16, max: 128, step: 8 })
+  const state = useFigureState({
+    size: choice<Size>(
+      [
+        { value: '256', label: '256 (16 ms)' },
+        { value: '512', label: '512 (32 ms)' },
+        { value: '1024', label: '1024 (64 ms)' },
+      ],
+      '512',
+      { label: 'window length (samples)' },
+    ),
+    mels: int(64, { min: 16, max: 128, step: 8, label: 'mel bands' }),
+  })
   const signal = useMemo(() => testSignal(), [])
 
   const r = useMemo(() => {
-    const n = Number(size)
+    const n = Number(state.size)
     const hop = n / 4
     const { power, centres } = powerSpectrogram(signal, n, hop)
-    const bank = melFilterBank(mels.value, n, FS, 0, FS / 2, 'slaney')
+    const bank = melFilterBank(state.mels, n, FS, 0, FS / 2, 'slaney')
     const melPower = applyBank(power, bank.filters)
     const toDb = (grid: number[][]) => {
       const flat = grid.flat()
@@ -59,58 +69,35 @@ export function MelSpectrogramView() {
       frames: power.length,
       hop,
     }
-  }, [signal, size, mels.value])
+  }, [signal, state.size, state.mels])
 
+  const xAxis = useAxis({ label: 'time (s)' })
+  const yAxis = useAxis({ label: 'frequency (Hz)' })
+  const xAxis2 = useAxis({ label: 'time (s)' })
+  const yAxis2 = useAxis({ label: 'mel band' })
   return (
-    <Interactive
+    <Figure
       title="Linear and mel spectrograms"
+      state={state}
       caption="One second of test audio: a 220 Hz harmonic tone, a chirp from 300 to 4000 Hz, a noise burst, and a two-note chord. Top: the power spectrogram on a linear frequency axis, with a Hann window and a hop of a quarter window. Bottom: the log-mel spectrogram, the same power summed through a mel filter bank, which spends most of its rows below 2 kHz. Longer windows sharpen the harmonics but smear the chirp and the burst in time."
-      controls={
-        <>
-          <ParamChoice
-            label="window length (samples)"
-            value={size}
-            onChange={setSize}
-            options={[
-              { value: '256', label: '256 (16 ms)' },
-              { value: '512', label: '512 (32 ms)' },
-              { value: '1024', label: '1024 (64 ms)' },
-            ]}
-          />
-          <ParamSlider label="mel bands" param={mels} withArrows />
-        </>
-      }
-      readout={
+
+      readouts={
         <>
           <Readout label="frames" value={r.frames} />
           <Readout label="hop" value={`${r.hop} samples`} />
           <Readout label="frequency bins" value={r.bins.length} />
-          <Readout label="mel bands" value={mels.value} />
+          <Readout label="mel bands" value={state.mels} />
         </>
       }
     >
       <div className="space-y-4">
-        <Heatmap
-          x={r.times}
-          y={r.bins}
-          z={r.linear}
-          range={[-80, 0]}
-          xLabel="time (s)"
-          yLabel="frequency (Hz)"
-          valueLabel="dB"
-          height={260}
-        />
-        <Heatmap
-          x={r.times}
-          y={r.melIndex}
-          z={r.mel}
-          range={[-80, 0]}
-          xLabel="time (s)"
-          yLabel="mel band"
-          valueLabel="dB"
-          height={260}
-        />
+        <Plot x={xAxis} y={yAxis} height={260}>
+          <Raster x={r.times} y={r.bins} z={r.linear} range={[-80, 0]} valueLabel={'dB'} />
+        </Plot>
+        <Plot x={xAxis2} y={yAxis2} height={260}>
+          <Raster x={r.times} y={r.melIndex} z={r.mel} range={[-80, 0]} valueLabel={'dB'} />
+        </Plot>
       </div>
-    </Interactive>
+    </Figure>
   )
 }

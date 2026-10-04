@@ -1,15 +1,5 @@
 import { useMemo, useState } from 'react'
-import {
-  Interactive,
-  ParamButton,
-  ParamSlider,
-  Readout,
-  XYChart,
-  formatNumber,
-  useParam,
-  type Handle,
-  type XYSeries,
-} from 'aifn-render'
+import { Button, Curve, Figure, float, formatNumber, Handle, Plot, Readout, useAxis, useFigureState } from 'aifn-render'
 import { grid, normalLogPdf, normalPdf, normaliseOnGrid } from '../_shared/ep'
 import { betaLogPdf, mixtureEp, type BetaParams } from '../_shared/mixture'
 
@@ -57,7 +47,15 @@ function laplaceLogit(p1: number[], p2: number[]) {
  */
 export function MixtureWeightEp() {
   const [points, setPoints] = useState(INITIAL)
-  const step = useParam(INITIAL.length, { min: 0, max: INITIAL.length * SWEEPS, step: 1 })
+  const state = useFigureState({
+    step: float(INITIAL.length, {
+      min: 0,
+      max: INITIAL.length * SWEEPS,
+      step: 1,
+      label: 'site updates',
+      format: (v) => String(v),
+    }),
+  })
 
   const r = useMemo(() => {
     const p1 = points.map((x) => normalPdf(x, 0, 1))
@@ -77,18 +75,18 @@ export function MixtureWeightEp() {
   }, [points])
 
   const prior: BetaParams = { a: 1, b: 1 }
-  const qKl = step.value === 0 ? prior : r.kl[step.value - 1].q
-  const qMom = step.value === 0 ? prior : r.moments[step.value - 1].q
-  const data: XYSeries[] = [
-    { name: 'p₁ = N(0, 1)', type: 'line', x: XS, y: P1, slot: 3 },
-    { name: 'p₂ = N(2, 1)', type: 'line', x: XS, y: P2, slot: 4 },
-  ]
-  const posterior: XYSeries[] = [
-    { name: 'exact', type: 'line', x: WS, y: r.exact.density, emphasis: true },
-    { name: 'EP, KL projection', type: 'line', x: WS, y: betaCurve(qKl), slot: 0 },
-    { name: 'EP, mean and variance', type: 'line', x: WS, y: betaCurve(qMom), slot: 1, dashed: true },
-    { name: 'Laplace (logit scale)', type: 'line', x: WS, y: r.laplace, slot: 2, dashed: true },
-  ]
+  const qKl = state.step === 0 ? prior : r.kl[state.step - 1].q
+  const qMom = state.step === 0 ? prior : r.moments[state.step - 1].q
+  const data = [
+    { name: 'p₁ = N(0, 1)', x: XS, y: P1, slot: 3 },
+    { name: 'p₂ = N(2, 1)', x: XS, y: P2, slot: 4 },
+  ] as const
+  const posterior = [
+    { name: 'exact', x: WS, y: r.exact.density, emphasis: true },
+    { name: 'EP, KL projection', x: WS, y: betaCurve(qKl), slot: 0 },
+    { name: 'EP, mean and variance', x: WS, y: betaCurve(qMom), slot: 1, dashed: true },
+    { name: 'Laplace (logit scale)', x: WS, y: r.laplace, slot: 2, dashed: true },
+  ] as const
   const handles: Handle[] = points.map((x, i) => ({
     kind: 'point',
     at: [x, 0],
@@ -96,20 +94,26 @@ export function MixtureWeightEp() {
     onDrag: ([nx]) =>
       setPoints((ps) => ps.map((p, j) => (j === i ? Math.round(Math.min(5.8, Math.max(-3.8, nx)) * 20) / 20 : p))),
   }))
-  const s = step.value === 0 ? null : r.kl[step.value - 1]
+  const s = state.step === 0 ? null : r.kl[state.step - 1]
   const where = s ? `sweep ${s.sweep + 1}, site ${s.site + 1}` : 'prior'
 
+  const xAxis = useAxis({ label: 'x', range: X_RANGE })
+  const yAxis = useAxis({ label: 'density', range: Y_RANGE })
+  const xAxis2 = useAxis({ label: 'w', range: W_RANGE })
+  const yAxis2 = useAxis({ label: 'density', range: W_Y_RANGE })
   return (
-    <Interactive
+    <Figure
       title="EP for a mixture weight, with a Beta approximation"
+      state={state}
       caption="Top: the two known components and the data; drag the points. A point near 0 favours p₁ and raises w; a point near 2 lowers it; a point at 1 is equally likely under both and carries no information. Bottom: the posterior of the weight w of p₁ after the chosen number of site updates, projected onto the Beta family either by the KL projection (matching E log w and E log(1 − w)) or by matching the mean and variance, against the exact posterior and a Laplace approximation on the logit scale."
       controls={
         <>
-          <ParamSlider label="site updates" param={step} withArrows format={(v) => String(v)} />
-          <ParamButton onClick={() => setPoints(INITIAL)}>Reset points</ParamButton>
+          <Button variant="outline" size="sm" onClick={() => setPoints(INITIAL)}>
+            Reset points
+          </Button>
         </>
       }
-      readout={
+      readouts={
         <>
           <Readout label="position" value={where} />
           <Readout label="KL projection" value={summary(qKl)} />
@@ -118,16 +122,19 @@ export function MixtureWeightEp() {
         </>
       }
     >
-      <XYChart
-        series={data}
-        xLabel="x"
-        yLabel="density"
-        xRange={X_RANGE}
-        yRange={Y_RANGE}
-        handles={handles}
-        height={200}
-      />
-      <XYChart series={posterior} xLabel="w" yLabel="density" xRange={W_RANGE} yRange={W_Y_RANGE} height={280} />
-    </Interactive>
+      <Plot x={xAxis} y={yAxis} height={200}>
+        <Curve {...data[0]} />
+        <Curve {...data[1]} />
+        {(handles ?? []).map((h, i) => (
+          <Handle key={i} {...h} />
+        ))}
+      </Plot>
+      <Plot x={xAxis2} y={yAxis2} height={280}>
+        <Curve {...posterior[0]} />
+        <Curve {...posterior[1]} />
+        <Curve {...posterior[2]} />
+        <Curve {...posterior[3]} />
+      </Plot>
+    </Figure>
   )
 }

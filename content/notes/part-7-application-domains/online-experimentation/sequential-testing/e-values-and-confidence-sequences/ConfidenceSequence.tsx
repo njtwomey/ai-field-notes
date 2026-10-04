@@ -1,16 +1,20 @@
-import { useMemo, useState } from 'react'
+import { useMemo } from 'react'
 import {
-  Interactive,
-  ParamChoice,
-  ParamSlider,
-  Readout,
-  XYChart,
+  choice,
+  Curve,
+  Figure,
+  float,
   formatNumber,
-  useParam,
-  type XYSeries,
+  int,
+  Plot,
+  Readout,
+  seriesLayers,
+  type SeriesSpec,
+  useAxis,
+  useFigureState,
 } from 'aifn-render'
-import { rng } from '@/lib/math'
-import { normalQuantile } from '@/lib/math/special'
+import { normal, stream } from 'aifn/foundation/random'
+import { normalQuantile } from 'aifn/numerics/special'
 
 const N = 2000
 const STREAMS = 200
@@ -37,18 +41,20 @@ function csHalfWidth(n: number, rho: number, alpha: number): number {
  * the true mean at least once so far.
  */
 export function ConfidenceSequence() {
-  const [rho, setRho] = useState(0.5)
-  const [alpha, setAlpha] = useState('0.05')
-  const [seed, setSeed] = useState(1)
-  const drawn = useParam(10, { min: 1, max: MAX_DRAWN, step: 1 })
+  const state = useFigureState({
+    rho: float(0.5, { min: 0.05, max: 2, step: 0.05, label: 'mixing scale ρ' }),
+    alpha: choice(ALPHAS, '0.05', { label: 'α' }),
+    drawn: int(10, { min: 1, max: MAX_DRAWN, step: 1, label: 'paths', format: (v) => String(v) }),
+    seed: int(1, { min: 1, max: 20, step: 1, label: 'seed' }),
+  })
 
   const r = useMemo(() => {
-    const a = Number(alpha)
+    const a = Number(state.alpha)
     const z = normalQuantile(1 - a / 2)
     const ns = Array.from({ length: N }, (_, i) => i + 1)
     const ci = ns.map((n) => z / Math.sqrt(n))
-    const cs = ns.map((n) => csHalfWidth(n, rho, a))
-    const g = rng(seed * 104729)
+    const cs = ns.map((n) => csHalfWidth(n, state.rho, a))
+    const g = stream(state.seed * 104729)
     const firstMissCi = new Array<number>(N).fill(0)
     const firstMissCs = new Array<number>(N).fill(0)
     // The first MAX_DRAWN of the 200 streams are recorded for drawing, so the paths slider never reruns the simulation.
@@ -60,7 +66,7 @@ export function ConfidenceSequence() {
       const record = s < MAX_DRAWN
       const means: number[] = []
       for (let i = 0; i < N; i++) {
-        sum += g.normal()
+        sum += normal(g)
         const m = sum / (i + 1)
         if (record) means.push(m)
         if (!missedCi && Math.abs(m) >= ci[i]) {
@@ -79,7 +85,7 @@ export function ConfidenceSequence() {
       return first.map((f) => (c += f) / STREAMS)
     }
     const band = (w: number[], sign: number) => w.map((v) => sign * Math.min(v, Y * 2))
-    const path: XYSeries[] = [
+    const path: SeriesSpec[] = [
       {
         name: 'pointwise interval',
         type: 'line',
@@ -99,18 +105,18 @@ export function ConfidenceSequence() {
     ]
     const missCi = cumulative(firstMissCi)
     const missCs = cumulative(firstMissCs)
-    const miss: XYSeries[] = [
-      { name: 'pointwise interval', type: 'line', x: ns, y: missCi, slot: 1 },
-      { name: 'confidence sequence', type: 'line', x: ns, y: missCs, slot: 2 },
-      { name: 'α', type: 'line', x: [1, N], y: [a, a], emphasis: true, dashed: true },
-    ]
+    const miss = [
+      { name: 'pointwise interval', x: ns, y: missCi, slot: 1 },
+      { name: 'confidence sequence', x: ns, y: missCs, slot: 2 },
+      { name: 'α', x: [1, N], y: [a, a], emphasis: true, dashed: true },
+    ] as const
     return { shown, path, miss, finalCi: missCi[N - 1], finalCs: missCs[N - 1], ratio: cs[N - 1] / ci[N - 1] }
-  }, [rho, alpha, seed])
+  }, [state.rho, state.alpha, state.seed])
 
-  const pathSeries = useMemo((): XYSeries[] => {
-    const many = drawn.value > 1
+  const pathSeries = useMemo((): SeriesSpec[] => {
+    const many = state.drawn > 1
     const x = DRAWN_IDX.map((i) => i + 1)
-    const means = r.shown.slice(0, drawn.value).map((y): XYSeries => ({
+    const means = r.shown.slice(0, state.drawn).map((y): SeriesSpec => ({
       name: many ? 'running means' : 'running mean',
       type: 'line',
       x,
@@ -119,21 +125,19 @@ export function ConfidenceSequence() {
       thin: many,
     }))
     return [...means, ...r.path]
-  }, [r, drawn.value])
+  }, [r, state.drawn])
 
+  const xAxis = useAxis({ label: 'observations n', range: [1, N] })
+  const yAxis = useAxis({ label: 'mean', range: [-Y, Y] })
+  const xAxis2 = useAxis({ label: 'observations n', range: [1, N] })
+  const yAxis2 = useAxis({ label: 'P(interval has missed by n)', range: [0, undefined], hold: 'union' })
   return (
-    <Interactive
+    <Figure
       title="Pointwise intervals against a confidence sequence"
+      state={state}
       caption="Left: running means of streams of standard normal observations with true mean 0, one light line per stream; the paths slider sets how many of the 200 simulated streams are drawn. After each observation, the pointwise interval x̄ ± z₁₋α/₂/√n has coverage 1 − α at that n; the confidence sequence is wider, and covers the true mean at every n simultaneously with probability at least 1 − α. Right: over 200 streams, the share whose interval has excluded the true mean at least once by observation n. For pointwise intervals it keeps rising, as with peeking; for the confidence sequence it stays below α. The mixing scale ρ sets the sample size at which the sequence is tightest."
-      controls={
-        <>
-          <ParamSlider label="mixing scale ρ" value={rho} onChange={setRho} min={0.05} max={2} step={0.05} />
-          <ParamChoice label="α" value={alpha} onChange={setAlpha} options={ALPHAS} />
-          <ParamSlider label="paths" param={drawn} withArrows format={(v) => String(v)} />
-          <ParamSlider label="seed" value={seed} onChange={setSeed} min={1} max={20} step={1} />
-        </>
-      }
-      readout={
+
+      readouts={
         <>
           <Readout label={`pointwise: ever missed by n = ${N}`} value={formatNumber(r.finalCi)} />
           <Readout label="sequence: ever missed" value={formatNumber(r.finalCs)} />
@@ -142,23 +146,15 @@ export function ConfidenceSequence() {
       }
     >
       <div className="grid gap-4 md:grid-cols-2">
-        <XYChart
-          height={320}
-          xLabel="observations n"
-          yLabel="mean"
-          series={pathSeries}
-          xRange={[1, N]}
-          yRange={[-Y, Y]}
-        />
-        <XYChart
-          height={320}
-          xLabel="observations n"
-          yLabel="P(interval has missed by n)"
-          series={r.miss}
-          xRange={[1, N]}
-          yRange={[0, undefined]}
-        />
+        <Plot x={xAxis} y={yAxis} height={320}>
+          {seriesLayers(pathSeries)}
+        </Plot>
+        <Plot x={xAxis2} y={yAxis2} height={320}>
+          <Curve {...r.miss[0]} />
+          <Curve {...r.miss[1]} />
+          <Curve {...r.miss[2]} />
+        </Plot>
       </div>
-    </Interactive>
+    </Figure>
   )
 }

@@ -1,57 +1,64 @@
 import { useMemo } from 'react'
 import {
-  Interactive,
-  ParamSlider,
-  Readout,
-  XYChart,
+  Figure,
   formatNumber,
-  useParam,
-  type Handle,
-  type XYSeries,
+  Handle,
+  Plot,
+  Readout,
+  seriesLayers,
+  type SeriesSpec,
+  slider,
+  useAxis,
+  useFigureState,
 } from 'aifn-render'
-import { linspace } from '@/lib/math'
+import { linspace, toFlat } from 'aifn/foundation/tensor'
 
-const T = linspace(0, 4, 161)
+const T = toFlat(linspace(0, 4, 161))
 const FAMILY = [0.5, 1.5, 2.5, 3.5]
 
 /** x(t) = 0 until time c, then (t − c)²/4: every such curve solves ẋ = √x with x(0) = 0. */
 const solution = (c: number) => T.map((t) => (t <= c ? 0 : (t - c) ** 2 / 4))
 
 export function NonUniqueness() {
-  const c = useParam(1, { min: 0, max: 4, step: 0.05 })
-  const series = useMemo<XYSeries[]>(
+  const state = useFigureState({
+    c: slider(0, 4, 1, { step: 0.05, label: 'departure time c' }),
+  })
+  const series = useMemo<SeriesSpec[]>(
     () => [
       ...FAMILY.map((f) => ({ name: 'other solutions', type: 'line' as const, x: T, y: solution(f), muted: true })),
       { name: 'x(t) = 0', type: 'line', x: T, y: T.map(() => 0), slot: 1, dashed: true },
-      { name: 'solution leaving 0 at t = c', type: 'line', x: T, y: solution(c.value), slot: 0 },
+      { name: 'solution leaving 0 at t = c', type: 'line', x: T, y: solution(state.c), slot: 0 },
     ],
-    [c.value],
+    [state.c],
   )
-  const handles = useMemo<Handle[]>(() => [{ kind: 'x', at: c.value, label: 'c', onDrag: c.set }], [c])
+  const handles = useMemo<Handle[]>(
+    () => [{ kind: 'x', at: state.c, label: 'c', onDrag: (v: number) => state.set('c', v) }],
+    [state.bind('c')],
+  )
   const t = 3
-  const x = t <= c.value ? 0 : (t - c.value) ** 2 / 4
+  const x = t <= state.c ? 0 : (t - state.c) ** 2 / 4
+  const xAxis = useAxis({ label: 't', range: [0, 4] })
+  const yAxis = useAxis({ label: 'x', range: [-0.2, 4] })
   return (
-    <Interactive
+    <Figure
       title="Many solutions from one initial value"
+      state={state}
       caption="Every curve here satisfies ẋ = √x and starts at x(0) = 0. The solution may rest at 0 for any length of time c and then leave along (t − c)²/4. Drag the vertical line, or use the slider, to choose c. The right side √x has an infinite slope at x = 0, so it is not Lipschitz there and uniqueness fails."
-      controls={<ParamSlider label="departure time c" param={c} />}
-      readout={
+
+      readouts={
         <>
           <Readout label="x(3)" value={formatNumber(x)} />
-          <Readout label="ẋ(3)" value={formatNumber(t <= c.value ? 0 : (t - c.value) / 2)} />
+          <Readout label="ẋ(3)" value={formatNumber(t <= state.c ? 0 : (t - state.c) / 2)} />
           <Readout label="√x(3)" value={formatNumber(Math.sqrt(x))} />
         </>
       }
     >
-      <XYChart
-        height={300}
-        xLabel="t"
-        yLabel="x"
-        series={series}
-        handles={handles}
-        xRange={[0, 4]}
-        yRange={[-0.2, 4]}
-      />
-    </Interactive>
+      <Plot x={xAxis} y={yAxis} height={300}>
+        {seriesLayers(series)}
+        {(handles ?? []).map((h, i) => (
+          <Handle key={i} {...h} />
+        ))}
+      </Plot>
+    </Figure>
   )
 }

@@ -1,4 +1,4 @@
-import type { XYSeries } from 'aifn-render'
+import type { SeriesSpec } from 'aifn-render'
 import type { Point } from './solver'
 
 /** The plotting window shared by the figures: every point of the example with room for the margins. */
@@ -28,8 +28,8 @@ export function clipLine(w: Point, b: number, c: number): { x: number[]; y: numb
 }
 
 /** Points coloured by class, the boundary wᵀx + b = 0 and the margins wᵀx + b = ±1 (omitted while w = 0). */
-export function svmSeries(x: Point[], y: number[], w: Point, b: number): XYSeries[] {
-  const out: XYSeries[] = [
+export function svmSeries(x: Point[], y: number[], w: Point, b: number): SeriesSpec[] {
+  const out: SeriesSpec[] = [
     {
       name: 'points',
       type: 'scatter',
@@ -53,7 +53,7 @@ export function svmSeries(x: Point[], y: number[], w: Point, b: number): XYSerie
  * ξ, to exactly 1. Segments of points inside the margin (0 < ξ ≤ 1) and misclassified points (ξ > 1) are separate
  * series; NaN breaks a line between segments.
  */
-export function slackSeries(x: Point[], y: number[], w: Point, b: number): XYSeries[] {
+export function slackSeries(x: Point[], y: number[], w: Point, b: number): SeriesSpec[] {
   const n2 = w[0] * w[0] + w[1] * w[1]
   const inside = { x: [] as number[], y: [] as number[] }
   const across = { x: [] as number[], y: [] as number[] }
@@ -66,7 +66,7 @@ export function slackSeries(x: Point[], y: number[], w: Point, b: number): XYSer
     s.x.push(p[0], to[0], NaN)
     s.y.push(p[1], to[1], NaN)
   })
-  const out: XYSeries[] = []
+  const out: SeriesSpec[] = []
   if (inside.x.length) out.push({ name: 'slack (inside)', type: 'line', ...inside, slot: 2 })
   if (across.x.length) out.push({ name: 'slack (misclassified)', type: 'line', ...across, slot: 3 })
   return out

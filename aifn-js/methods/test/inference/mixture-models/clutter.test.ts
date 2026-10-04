@@ -7,7 +7,7 @@ import {
   clutterPosterior,
   clutterTilted,
   sampleClutter,
-} from 'aifn-applied/inference/mixture-models'
+} from 'aifn-methods/inference/mixture-models'
 import { integrate } from 'aifn/numerics/quadrature'
 import { stream } from 'aifn/foundation/random'
 import { run } from 'aifn/foundation/trace'

@@ -1,16 +1,19 @@
-import { useMemo, useState } from 'react'
+import { useMemo } from 'react'
 import {
-  Interactive,
-  ParamChoice,
-  ParamSlider,
-  Readout,
-  XYChart,
+  choice,
+  Figure,
+  float,
   formatNumber,
-  useParam,
-  type XYSeries,
+  int,
+  Plot,
+  Readout,
+  seriesLayers,
+  type SeriesSpec,
+  useAxis,
+  useFigureState,
 } from 'aifn-render'
-import { rng } from '@/lib/math'
 import { ALGORITHMS, checkpoints, sampleBeta, type Rand } from '../_shared/bandits'
+import { seededRand } from '../_shared/rand'
 
 const K = 3
 const HORIZON = 3000
@@ -105,30 +108,47 @@ function play(id: PolicyId, table: Uint8Array[], eta: number, r: Rand, ts: numbe
 
 /** EXP3 against UCB1 and Thompson sampling on a sequence built to defeat UCB1, a stochastic one and a switching one. */
 export function Exp3Figure() {
-  const [scenario, setScenario] = useState<Scenario>('adversary')
-  const logScale = useParam(0, { min: -2, max: 2, step: 0.05 })
-  const seed = useParam(1, { min: 1, max: 30, step: 1 })
+  const state = useFigureState({
+    scenario: choice<Scenario>(
+      [
+        { value: 'adversary', label: 'built against UCB1' },
+        { value: 'stochastic', label: 'stochastic' },
+        { value: 'switch', label: 'best arm switches at 40%' },
+      ],
+      'adversary',
+      { label: 'rewards' },
+    ),
+    etaScale: float(1, {
+      ge: 0.01,
+      le: 100,
+      scale: 'log10',
+      suggestions: [0.1, 0.3, 1, 3, 10],
+      label: 'learning rate η (× tuned value)',
+    }),
+    seed: int(1, { min: 1, max: 30, step: 1, label: 'seed' }),
+  })
+  const { scenario, seed } = state
 
   const baseEta = Math.sqrt((2 * Math.log(K)) / (K * HORIZON))
-  const eta = baseEta * 10 ** logScale.value
+  const eta = baseEta * state.etaScale
   const result = useMemo(() => {
     const ts = checkpoints(HORIZON, 200)
     const sums = new Map(POLICIES.map((p) => [p.id, new Array<number>(ts.length).fill(0)] as const))
     let probs: number[][] = []
     for (let run = 0; run < RUNS; run++) {
-      const table = rewardTable(scenario, rng(seed.value * 7919 + run))
+      const table = rewardTable(scenario, seededRand(seed * 7919 + run))
       for (const p of POLICIES) {
-        const out = play(p.id, table, eta, rng(seed.value * 104729 + run + 1), ts, run === 0)
+        const out = play(p.id, table, eta, seededRand(seed * 104729 + run + 1), ts, run === 0)
         const acc = sums.get(p.id)!
         out.regret.forEach((v, j) => (acc[j] += v / RUNS))
         if (out.probs) probs = out.probs
       }
     }
     return { ts, sums, probs }
-  }, [scenario, eta, seed.value])
+  }, [scenario, eta, seed])
 
-  const regretSeries: XYSeries[] = [
-    ...POLICIES.map((p): XYSeries => ({
+  const regretSeries: SeriesSpec[] = [
+    ...POLICIES.map((p): SeriesSpec => ({
       name: p.label,
       type: 'line',
       x: result.ts,
@@ -144,7 +164,7 @@ export function Exp3Figure() {
       dashed: true,
     },
   ]
-  const probSeries: XYSeries[] = ARM_SLOTS.map((slot, i) => ({
+  const probSeries: SeriesSpec[] = ARM_SLOTS.map((slot, i) => ({
     name: `P(arm ${i + 1})`,
     type: 'line',
     x: result.ts,
@@ -152,43 +172,33 @@ export function Exp3Figure() {
     slot,
   }))
 
+  const xAxis = useAxis({ label: 'round t', range: [0, HORIZON] })
+  const yAxis = useAxis({ label: 'regret vs best fixed arm', hold: 'union' })
+  const xAxis2 = useAxis({ label: 'round t', range: [0, HORIZON] })
+  const yAxis2 = useAxis({ label: 'EXP3 probability', range: [0, 1] })
   return (
-    <Interactive
+    <Figure
       title="EXP3 against a fixed sequence of rewards"
       caption="Three arms whose 0/1 rewards for every round are fixed in advance. Left: regret against the best single arm in hindsight, averaged over seeded runs. The first sequence is built by simulating UCB1: each round the arm UCB1 is about to pull pays 0 and the others pay 1. UCB1 is deterministic, so it earns nothing, and its regret grows linearly. EXP3 randomises and, on the same sequence, stays under its √(2TK ln K) guarantee. On stochastic rewards EXP3 is worse than UCB1 and Thompson sampling, which exploit the stochastic structure. Right: EXP3's arm probabilities in one run. Too large a learning rate η commits early and reacts to noise; too small a rate learns slowly."
-      controls={
-        <>
-          <ParamChoice
-            label="rewards"
-            value={scenario}
-            onChange={setScenario}
-            options={[
-              { value: 'adversary', label: 'built against UCB1' },
-              { value: 'stochastic', label: 'stochastic' },
-              { value: 'switch', label: 'best arm switches at 40%' },
-            ]}
-          />
-          <ParamSlider
-            label="learning rate η (× tuned value)"
-            param={logScale}
-            format={(v) => `${formatNumber(10 ** v)}× = ${formatNumber(baseEta * 10 ** v)}`}
-          />
-          <ParamSlider label="seed" param={seed} format={(v) => String(v)} withArrows />
-        </>
-      }
-      readout={
+      state={state}
+      readouts={
         <>
           {POLICIES.map((p) => (
             <Readout key={p.id} label={`${p.label}: regret`} value={formatNumber(result.sums.get(p.id)!.at(-1)!)} />
           ))}
+          <Readout label="η" value={formatNumber(eta)} />
           <Readout label="bound √(2TK ln K)" value={formatNumber(Math.sqrt(2 * HORIZON * K * Math.log(K)))} />
         </>
       }
     >
       <div className="grid gap-4 md:grid-cols-[3fr_2fr]">
-        <XYChart series={regretSeries} xLabel="round t" yLabel="regret vs best fixed arm" xRange={[0, HORIZON]} />
-        <XYChart series={probSeries} xLabel="round t" yLabel="EXP3 probability" xRange={[0, HORIZON]} yRange={[0, 1]} />
+        <Plot x={xAxis} y={yAxis}>
+          {seriesLayers(regretSeries)}
+        </Plot>
+        <Plot x={xAxis2} y={yAxis2}>
+          {seriesLayers(probSeries)}
+        </Plot>
       </div>
-    </Interactive>
+    </Figure>
   )
 }

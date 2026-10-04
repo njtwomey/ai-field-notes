@@ -3,14 +3,14 @@ import { valueAndGrad } from 'aifn/foundation/autodiff'
 import { treeLeaves } from 'aifn/foundation/pytree'
 import { child, stream } from 'aifn/foundation/random'
 import { fromData, norm, toFlat, type Tensor } from 'aifn/foundation/tensor'
-import { barsAndStripes, moons } from 'aifn-applied/data/synthetic'
+import { barsAndStripes, moons } from 'aifn-methods/data/synthetic'
 import {
   autoencoder,
   autoencoderLoss,
   autoencoderRun,
   initAutoencoder,
   type AutoencoderParams,
-} from 'aifn-applied/generative/autoencoders'
+} from 'aifn-methods/generative/autoencoders'
 import {
   flowForward,
   flowLogDensityValues,
@@ -18,7 +18,7 @@ import {
   initRealNvp,
   realNvp,
   realNvpRun,
-} from 'aifn-applied/generative/flows'
+} from 'aifn-methods/generative/flows'
 import {
   capacityCurve,
   corruptPattern,
@@ -29,7 +29,7 @@ import {
   modernHopfieldUpdate,
   rbm,
   rbmRun,
-} from 'aifn-applied/generative/boltzmann'
+} from 'aifn-methods/generative/boltzmann'
 
 const data = moons(stream(1), { n: 300, noise: 0.08 })
 

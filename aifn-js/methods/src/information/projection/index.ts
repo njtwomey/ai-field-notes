@@ -1,5 +1,5 @@
 /**
- * `aifn-applied/information/projection`: KL projection onto a family by L-BFGS.
+ * `aifn-methods/information/projection`: KL projection onto a family by L-BFGS.
  */
 
 export {

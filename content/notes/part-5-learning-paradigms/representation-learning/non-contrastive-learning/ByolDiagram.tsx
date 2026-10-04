@@ -1,5 +1,4 @@
-import { Interactive } from 'aifn-render'
-import { Diagram } from 'aifn-render'
+import { Diagram, Figure } from 'aifn-render'
 import type { DiagramSpec } from 'aifn-render'
 
 const spec: DiagramSpec = {
@@ -42,7 +41,7 @@ const spec: DiagramSpec = {
 /** BYOL's asymmetry: a predictor on one side, a slowly moving copy with no gradient on the other. */
 export function ByolDiagram() {
   return (
-    <Interactive
+    <Figure
       title="BYOL"
       caption="Two augmented views of one image go through two networks. The online network, with an extra predictor, is trained to predict the target network's projection of the other view. No gradient flows into the target; its weights follow the online weights as a moving average. There are no negative pairs."
     >
@@ -50,6 +49,6 @@ export function ByolDiagram() {
         spec={spec}
         ariaLabel="BYOL: view A through the online encoder, projector and predictor; view B through the target encoder and projector with a stop-gradient; loss compares the two; target weights are a moving average of the online weights"
       />
-    </Interactive>
+    </Figure>
   )
 }

@@ -1,20 +1,9 @@
 import { useMemo, useState } from 'react'
-import {
-  Bars,
-  ControlRow,
-  Figure,
-  Plot,
-  Plots,
-  Points,
-  Readout,
-  Select,
-  formatNumber,
-  useAxis,
-} from 'aifn-render'
+import { Bars, ControlRow, Figure, Plot, Plots, Points, Readout, Select, formatNumber, useAxis } from 'aifn-render'
 import { stream } from 'aifn/foundation/random'
 import { toFlat } from 'aifn/foundation/tensor'
-import { labellingFunctions } from 'aifn-applied/data/synthetic'
-import { labelModelReport } from 'aifn-applied/learning/weak-supervision'
+import { labellingFunctions } from 'aifn-methods/data/synthetic'
+import { labelModelReport } from 'aifn-methods/learning/weak-supervision'
 
 const NOISE_PRESETS = [
   { value: 'clean', label: 'High quality LFs (accuracy 70% – 95%)' },
@@ -120,27 +109,12 @@ export function LabelModelExplorer() {
 
       <Plots>
         <Plot x={accAxisX} y={accAxisY} title="LF accuracy: true (dots) vs Snorkel estimated (bars)">
-          <Bars
-            x={lfIndices}
-            y={estimatedAccuracies}
-            slot={1}
-            width={0.5}
-          />
-          <Points
-            x={lfIndices}
-            y={empiricalAccuracies}
-            slot={0}
-            size={6}
-          />
+          <Bars x={lfIndices} y={estimatedAccuracies} slot={1} width={0.5} />
+          <Points x={lfIndices} y={empiricalAccuracies} slot={0} size={6} />
         </Plot>
 
         <Plot x={methodAxisX} y={methodAxisY} title="End training label accuracy: Majority vs DS vs Snorkel">
-          <Bars
-            x={methodIndices}
-            y={overallAccuracies}
-            slot={0}
-            width={0.6}
-          />
+          <Bars x={methodIndices} y={overallAccuracies} slot={0} width={0.6} />
         </Plot>
       </Plots>
 
@@ -157,10 +131,7 @@ export function LabelModelExplorer() {
           label="Modelling advantage"
           value={formatNumber(Number(((res.accuracy.labelModel - res.accuracy.majority) * 100).toFixed(1))) + '%'}
         />
-        <Readout
-          label="Label density d_Λ"
-          value={formatNumber(Number(labelDensity.toFixed(2))) + ' votes/item'}
-        />
+        <Readout label="Label density d_Λ" value={formatNumber(Number(labelDensity.toFixed(2))) + ' votes/item'} />
       </ControlRow>
     </Figure>
   )

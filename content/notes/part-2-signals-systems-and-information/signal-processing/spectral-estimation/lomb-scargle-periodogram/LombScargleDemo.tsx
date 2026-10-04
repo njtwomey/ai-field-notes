@@ -1,12 +1,13 @@
 import { useMemo } from 'react'
-import { Interactive, ParamSlider, Readout, XYChart, formatNumber, useParam, type XYSeries } from 'aifn-render'
-import { linspace, rng } from '@/lib/math'
+import { Curve, Figure, float, formatNumber, int, Plot, Readout, slider, useAxis, useFigureState } from 'aifn-render'
 import { periodogram, powerDb } from '../_shared/spectra'
+import { linspace, toFlat } from 'aifn/foundation/tensor'
+import { normal, stream, uniform } from 'aifn/foundation/random'
 
 const N = 240
 const W1 = 0.3 * Math.PI
 const W2 = 0.8 * Math.PI
-const GRID = linspace(0.005 * Math.PI, 1.2 * Math.PI, 900)
+const GRID = toFlat(linspace(0.005 * Math.PI, 1.2 * Math.PI, 900))
 
 /** Lomb–Scargle periodogram P(ω) = ½[(Σ y c)²/Σ c² + (Σ y s)²/Σ s²], with c, s at the time offset τ. */
 function lombScargle(t: number[], y: number[], omega: number[]): number[] {
@@ -43,18 +44,20 @@ const localPeak = (x: number[], y: number[], x0: number, width: number) =>
  * 1 s). Lomb–Scargle fits sinusoids at the sample times; the alternative interpolates to a grid first.
  */
 export function LombScargleDemo() {
-  const jitter = useParam(0.45, { min: 0, max: 0.5, step: 0.05 })
-  const gap = useParam(0.2, { min: 0, max: 0.5, step: 0.05 })
-  const seed = useParam(2, { min: 1, max: 30, step: 1 })
+  const state = useFigureState({
+    jitter: float(0.45, { min: 0, max: 0.5, step: 0.05, label: 'timing jitter (× mean spacing)' }),
+    gap: slider(0, 0.5, 0.2, { step: 0.05, label: 'gap (fraction of record)' }),
+    seed: int(2, { min: 1, max: 30, step: 1, label: 'seed', format: (v) => String(v) }),
+  })
 
   const r = useMemo(() => {
-    const g = rng(seed.value)
+    const g = stream(state.seed)
     // Nominal times 0..N−1, jittered, then a contiguous gap removed from the middle of the record.
-    const all = Array.from({ length: N }, (_, j) => j + jitter.value * (2 * g.uniform() - 1))
-    const gapStart = Math.floor((N * (1 - gap.value)) / 2)
-    const gapEnd = gapStart + Math.floor(N * gap.value)
+    const all = Array.from({ length: N }, (_, j) => j + state.jitter * (2 * uniform(g) - 1))
+    const gapStart = Math.floor((N * (1 - state.gap)) / 2)
+    const gapEnd = gapStart + Math.floor(N * state.gap)
     const t = all.filter((_, j) => j < gapStart || j >= gapEnd).sort((a, b) => a - b)
-    const raw = t.map((tj) => Math.cos(W1 * tj) + 0.5 * Math.cos(W2 * tj) + 0.2 * g.normal())
+    const raw = t.map((tj) => Math.cos(W1 * tj) + 0.5 * Math.cos(W2 * tj) + 0.2 * normal(g))
     const mean = raw.reduce((s, v) => s + v, 0) / raw.length
     const y = raw.map((v) => v - mean)
     const ls = lombScargle(t, y, GRID)
@@ -77,25 +80,22 @@ export function LombScargleDemo() {
     const pPi = p.omega.map((w) => w / Math.PI)
     const ratio = (x: number[], v: number[]) => localPeak(x, v, 0.8, 0.03) - localPeak(x, v, 0.3, 0.03)
     return { gridPi, lsDb, pPi, pDb, count: t.length, lsRatio: ratio(gridPi, lsDb), interpRatio: ratio(pPi, pDb) }
-  }, [jitter.value, gap.value, seed.value])
+  }, [state.jitter, state.gap, state.seed])
 
-  const series: XYSeries[] = [
-    { name: 'periodogram of interpolated signal', type: 'line', x: r.pPi, y: r.pDb, slot: 2 },
-    { name: 'Lomb–Scargle', type: 'line', x: r.gridPi, y: r.lsDb, slot: 0 },
-  ]
+  const series = [
+    { name: 'periodogram of interpolated signal', x: r.pPi, y: r.pDb, slot: 2 },
+    { name: 'Lomb–Scargle', x: r.gridPi, y: r.lsDb, slot: 0 },
+  ] as const
 
+  const xAxis = useAxis({ label: 'ω / π (rad/s)', range: [0, 1.2] })
+  const yAxis = useAxis({ label: 'normalised power (dB)', range: [-50, 5] })
   return (
-    <Interactive
+    <Figure
       title="Irregular samples: fit, don't interpolate"
+      state={state}
       caption="Samples at jittered times with a gap, mean spacing 1 s, of cos(0.3πt) + 0.5 cos(0.8πt) plus noise; the 0.8π component should sit 6 dB below the 0.3π one. Lomb–Scargle fits sinusoids at the actual sample times and keeps that ratio. Interpolating onto a regular grid first acts as a low-pass filter, attenuating the high-frequency component, and invents data in the gap. Lomb–Scargle is also defined above the pseudo-Nyquist frequency π rad/s, where it shows aliases whose strength depends on how irregular the sampling is."
-      controls={
-        <>
-          <ParamSlider label="timing jitter (× mean spacing)" param={jitter} withArrows />
-          <ParamSlider label="gap (fraction of record)" param={gap} withArrows />
-          <ParamSlider label="seed" param={seed} format={(v) => String(v)} withArrows />
-        </>
-      }
-      readout={
+
+      readouts={
         <>
           <Readout label="samples" value={r.count} />
           <Readout label="0.8π vs 0.3π, Lomb–Scargle" value={`${formatNumber(r.lsRatio)} dB`} />
@@ -104,14 +104,10 @@ export function LombScargleDemo() {
         </>
       }
     >
-      <XYChart
-        series={series}
-        xLabel="ω / π (rad/s)"
-        yLabel="normalised power (dB)"
-        xRange={[0, 1.2]}
-        yRange={[-50, 5]}
-        height={320}
-      />
-    </Interactive>
+      <Plot x={xAxis} y={yAxis} height={320}>
+        <Curve {...series[0]} />
+        <Curve {...series[1]} />
+      </Plot>
+    </Figure>
   )
 }

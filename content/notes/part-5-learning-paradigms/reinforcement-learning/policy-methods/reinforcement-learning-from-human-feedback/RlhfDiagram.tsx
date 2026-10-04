@@ -1,5 +1,4 @@
-import { Interactive } from 'aifn-render'
-import { Diagram } from 'aifn-render'
+import { Diagram, Figure } from 'aifn-render'
 import type { DiagramSpec } from 'aifn-render'
 
 const spec: DiagramSpec = {
@@ -73,7 +72,7 @@ const spec: DiagramSpec = {
 /** The three stages of RLHF and what flows between them. */
 export function RlhfDiagram() {
   return (
-    <Interactive
+    <Figure
       title="The RLHF pipeline"
       caption="A supervised policy is trained first and frozen as the reference. A reward model is fitted to human comparisons of pairs of responses. The policy, initialised from the reference, is then optimised by PPO against the reward model's score minus a KL penalty that keeps it close to the reference."
     >
@@ -81,6 +80,6 @@ export function RlhfDiagram() {
         spec={spec}
         ariaLabel="RLHF pipeline: pretrained model fine-tuned into a reference policy; human comparisons train a reward model; the policy generates responses scored by the reward model minus a KL penalty to the reference, and is updated by PPO"
       />
-    </Interactive>
+    </Figure>
   )
 }

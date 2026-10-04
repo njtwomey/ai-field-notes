@@ -1,5 +1,5 @@
 /**
- * Generalised additive models g(E[y]) = α + Σⱼ fⱼ(x) fitted by penalised IRLS (`aifn-applied/learning/glm`'s `irls`
+ * Generalised additive models g(E[y]) = α + Σⱼ fⱼ(x) fitted by penalised IRLS (`aifn-methods/learning/glm`'s `irls`
  * with the penalty S_λ = Σ λₖ Sₖ), with smoothing parameters chosen by GCV/UBRE or REML (Laplace-approximate restricted
  * likelihood), effective degrees of freedom, Bayesian posterior bands and draws, and shape constraints.
  *

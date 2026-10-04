@@ -7,7 +7,7 @@ import {
   pegasosSteps,
   smoSteps,
   supportVectorMachine,
-} from 'aifn-applied/learning/kernel-methods'
+} from 'aifn-methods/learning/kernel-methods'
 import { stream } from 'aifn/foundation/random'
 import { tensor, toFlat } from 'aifn/foundation/tensor'
 import { trace } from 'aifn/foundation/trace'

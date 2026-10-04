@@ -1,50 +1,41 @@
-import { useMemo, useState } from 'react'
-import { Interactive, ParamSlider, Readout, XYChart, formatNumber, useParam, type XYSeries } from 'aifn-render'
-import { distribution } from '@/lib/distributions'
-
-const poisson = distribution('poisson')
-const binomial = distribution('binomial')
+import { useMemo } from 'react'
+import { Curve, Figure, formatNumber, int, Plot, Points, Readout, slider, useAxis, useFigureState } from 'aifn-render'
+import { Binomial, Poisson } from 'aifn/probability/distributions'
 
 /** Binomial(n, λ/n) against Poisson(λ) as n grows, with the total-variation distance and Le Cam's bound. */
 export function BinomialLimit() {
-  const lambdaParam = useParam(3, { min: 0.5, max: 10, step: 0.5 })
-  const lambda = lambdaParam.value
-  const [logN, setLogN] = useState(1)
-  const n = Math.max(Math.ceil(lambda), Math.round(10 ** logN))
+  const state = useFigureState({
+    lambda: slider(0.5, 10, 3, { step: 0.5, label: 'rate λ' }),
+    pieces: int(10, { min: 3, max: 1000, scale: 'log10', suggestions: [10, 30, 100, 1000], label: 'pieces n' }),
+  })
+  const lambda = state.lambda
+  // Each piece holds an event with probability λ/n ≤ 1.
+  const n = Math.max(Math.ceil(lambda), state.pieces)
 
   const result = useMemo(() => {
     const kMax = Math.max(12, Math.ceil(lambda + 5 * Math.sqrt(lambda)))
     const ks = Array.from({ length: kMax + 1 }, (_, k) => k)
-    const pois = ks.map((k) => poisson.density(k, { lambda }))
-    const binom = ks.map((k) => binomial.density(k, { n, p: lambda / n }))
+    const poisson = Poisson(lambda)
+    const binomial = Binomial(n, lambda / n)
+    const pois = ks.map((k) => poisson.prob(k))
+    const binom = ks.map((k) => binomial.prob(k))
     // Mass beyond kMax is negligible for the ranges plotted.
     const tv = 0.5 * ks.reduce((s, k) => s + Math.abs(pois[k] - binom[k]), 0)
-    const series: XYSeries[] = [
-      { name: 'Poisson(λ)', type: 'scatter', x: ks, y: pois, slot: 0 },
-      { name: `Binomial(n, λ/n)`, type: 'line', x: ks, y: binom, slot: 1, dashed: true },
-    ]
+    const series = [
+      { name: 'Poisson(λ)', x: ks, y: pois, slot: 0 },
+      { name: `Binomial(n, λ/n)`, x: ks, y: binom, slot: 1, dashed: true },
+    ] as const
     return { series, tv }
   }, [lambda, n])
 
+  const xAxis = useAxis({ label: 'k', hold: 'union' })
+  const yAxis = useAxis({ label: 'P(X = k)', range: [0, undefined], hold: 'union' })
   return (
-    <Interactive
+    <Figure
       title="The law of rare events"
+      state={state}
       caption="Split an interval into n pieces, each holding an event with probability λ/n. As n grows, the binomial count (dashed) approaches the Poisson pmf (points). The distance between them is bounded by λ²/n."
-      controls={
-        <>
-          <ParamSlider label="rate λ" param={lambdaParam} />
-          <ParamSlider
-            label="pieces n"
-            value={logN}
-            onChange={setLogN}
-            min={0.5}
-            max={3}
-            step={0.05}
-            format={(v) => String(Math.max(Math.ceil(lambda), Math.round(10 ** v)))}
-          />
-        </>
-      }
-      readout={
+      readouts={
         <>
           <Readout label="n" value={n} />
           <Readout label="p = λ/n" value={formatNumber(lambda / n)} />
@@ -53,7 +44,10 @@ export function BinomialLimit() {
         </>
       }
     >
-      <XYChart height={280} series={result.series} xLabel="k" yLabel="P(X = k)" yRange={[0, undefined]} />
-    </Interactive>
+      <Plot x={xAxis} y={yAxis} height={280}>
+        <Points {...result.series[0]} />
+        <Curve {...result.series[1]} />
+      </Plot>
+    </Figure>
   )
 }

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { stream } from 'aifn/foundation/random'
 import { linspace, reshape, toFlat, type Tensor } from 'aifn/foundation/tensor'
-import { curve1d } from 'aifn-applied/data/synthetic'
+import { curve1d } from 'aifn-methods/data/synthetic'
 import {
   expectileFan,
   expectileGam,
@@ -11,7 +11,7 @@ import {
   s,
   smoothingPath,
   smoothingProfile,
-} from 'aifn-applied/learning/generalised/gam'
+} from 'aifn-methods/learning/generalised/gam'
 
 const d = curve1d(stream('fan'), { case: 'sine', n: 200 })
 const data = { x: d.x as Tensor, y: d.y as Tensor }

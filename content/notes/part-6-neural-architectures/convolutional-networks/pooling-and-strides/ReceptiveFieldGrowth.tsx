@@ -1,5 +1,5 @@
-import { useMemo, useState } from 'react'
-import { Interactive, ParamChoice, ParamSlider, Readout, XYChart, useParam, type XYSeries } from 'aifn-render'
+import { useMemo } from 'react'
+import { choice, Curve, Figure, int, Plot, Readout, useAxis, useFigureState } from 'aifn-render'
 
 type Layer = { k: number; s: number; pool: boolean }
 
@@ -26,16 +26,25 @@ function receptiveFields(layers: Layer[]): { r: number[]; j: number[] } {
 
 /** Receptive-field size after each layer, with and without downsampling between stages. */
 export function ReceptiveFieldGrowth() {
-  const stages = useParam(5, { min: 1, max: 5, step: 1 })
-  const perStage = useParam(2, { min: 1, max: 3, step: 1 })
-  const [kernel, setKernel] = useState<'3' | '5'>('3')
-  const k = Number(kernel)
+  const state = useFigureState({
+    stages: int(5, { min: 1, max: 5, step: 1, label: 'stages', format: (v) => String(v) }),
+    perStage: int(2, { min: 1, max: 3, step: 1, label: 'convolutions per stage', format: (v) => String(v) }),
+    kernel: choice<'3' | '5'>(
+      [
+        { value: '3', label: '3 × 3' },
+        { value: '5', label: '5 × 5' },
+      ],
+      '3',
+      { label: 'kernel k' },
+    ),
+  })
+  const k = Number(state.kernel)
 
   const { series, pooled, plain } = useMemo(() => {
-    const withPool = network(stages.value, perStage.value, k, true)
+    const withPool = network(state.stages, state.perStage, k, true)
     const pooled = receptiveFields(withPool)
     // The same convolutions with the pooling layers removed.
-    const withoutPool = network(stages.value, perStage.value, k, false)
+    const withoutPool = network(state.stages, state.perStage, k, false)
     const plain = receptiveFields(withoutPool)
     const convIndex = (layers: Layer[]) => {
       // Plot against the number of convolution layers so both networks share the x axis.
@@ -44,35 +53,24 @@ export function ReceptiveFieldGrowth() {
       for (const l of layers) xs.push(l.pool ? n : ++n)
       return xs
     }
-    const series: XYSeries[] = [
-      { name: 'with 2 × 2 pooling after each stage', type: 'line', x: convIndex(withPool), y: pooled.r, slot: 0 },
-      { name: 'no pooling', type: 'line', x: convIndex(withoutPool), y: plain.r, slot: 1 },
-    ]
+    const series = [
+      { name: 'with 2 × 2 pooling after each stage', x: convIndex(withPool), y: pooled.r, slot: 0 },
+      { name: 'no pooling', x: convIndex(withoutPool), y: plain.r, slot: 1 },
+    ] as const
     return { series, pooled, plain }
-  }, [stages.value, perStage.value, k])
+  }, [state.stages, state.perStage, k])
 
   const last = (a: number[]) => a[a.length - 1]
 
+  const xAxis = useAxis({ label: 'convolution layers', hold: 'union' })
+  const yAxis = useAxis({ label: 'receptive field (pixels per side)', hold: 'union' })
   return (
-    <Interactive
+    <Figure
       title="Receptive-field growth"
+      state={state}
       caption="Each convolution adds (k − 1) × jump to the receptive field, where the jump is the product of all earlier strides. Without pooling the field grows linearly with depth. With a stride-2 pool after each stage the jump doubles per stage, so later layers add more pixels per layer and the growth is geometric. The vertical steps of the blue curve are the pooling layers."
-      controls={
-        <>
-          <ParamSlider label="stages" param={stages} format={(v) => String(v)} withArrows />
-          <ParamSlider label="convolutions per stage" param={perStage} format={(v) => String(v)} withArrows />
-          <ParamChoice
-            label="kernel k"
-            value={kernel}
-            onChange={setKernel}
-            options={[
-              { value: '3', label: '3 × 3' },
-              { value: '5', label: '5 × 5' },
-            ]}
-          />
-        </>
-      }
-      readout={
+
+      readouts={
         <>
           <Readout label="receptive field, pooled" value={`${last(pooled.r)} × ${last(pooled.r)}`} />
           <Readout label="receptive field, no pooling" value={`${last(plain.r)} × ${last(plain.r)}`} />
@@ -80,7 +78,10 @@ export function ReceptiveFieldGrowth() {
         </>
       }
     >
-      <XYChart series={series} xLabel="convolution layers" yLabel="receptive field (pixels per side)" height={300} />
-    </Interactive>
+      <Plot x={xAxis} y={yAxis} height={300}>
+        <Curve {...series[0]} />
+        <Curve {...series[1]} />
+      </Plot>
+    </Figure>
   )
 }

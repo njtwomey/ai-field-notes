@@ -1,13 +1,16 @@
-import { useMemo, useState } from 'react'
+import { useMemo } from 'react'
 import {
-  Interactive,
-  ParamChoice,
-  ParamSlider,
-  Readout,
-  XYChart,
+  choice,
+  Curve,
+  Figure,
+  float,
   formatNumber,
-  useParam,
-  type XYSeries,
+  Plot,
+  Points,
+  Readout,
+  row,
+  useAxis,
+  useFigureState,
 } from 'aifn-render'
 import { posterior, type ChainParams } from '../_shared/sensitisation'
 
@@ -28,16 +31,34 @@ const toTest = (r: Result) => (r === 'none' ? null : r === 'pos')
 
 /** Toggle skin-test results at four ages; see sensitisation over time and the posterior over classes. */
 export function SensitisationChain() {
-  const [results, setResults] = useState<Result[]>(['neg', 'neg', 'pos', 'pos'])
-  const [cls, setCls] = useState('unknown')
-  const sensitivity = useParam(0.8, { min: 0.5, max: 1, step: 0.01 })
-  const falsePositive = useParam(0.05, { min: 0, max: 0.3, step: 0.01 })
+  const state = useFigureState({
+    tests: row('skin test at age', {
+      age1: choice(OPTIONS, 'neg', { label: '1' }),
+      age3: choice(OPTIONS, 'neg', { label: '3' }),
+      age5: choice(OPTIONS, 'pos', { label: '5' }),
+      age8: choice(OPTIONS, 'pos', { label: '8' }),
+    }),
+    cls: choice(
+      [{ value: 'unknown', label: 'unknown' }, ...CLASSES.map((c, i) => ({ value: String(i), label: c.name }))],
+      'unknown',
+      { label: 'class' },
+    ),
+    sensitivity: float(0.8, { min: 0.5, max: 1, step: 0.01, label: 'test sensitivity', format: (v) => v.toFixed(2) }),
+    falsePositive: float(0.05, {
+      min: 0,
+      max: 0.3,
+      step: 0.01,
+      label: 'false-positive rate',
+      format: (v) => v.toFixed(2),
+    }),
+  })
 
-  const key = results.join()
+  const { age1, age3, age5, age8 } = state.tests
+  const key = [age1, age3, age5, age8].join()
   const { post, byClass } = useMemo(() => {
     const tests = key.split(',').map((r) => toTest(r as Result))
-    const tp = { sensitivity: sensitivity.value, falsePositive: falsePositive.value }
-    const known = cls === 'unknown' ? null : Number(cls)
+    const tp = { sensitivity: state.sensitivity, falsePositive: state.falsePositive }
+    const known = state.cls === 'unknown' ? null : Number(state.cls)
     const classes = known === null ? CLASSES : [CLASSES[known]]
     const post = posterior(
       classes.map((c) => c.params),
@@ -52,53 +73,31 @@ export function SensitisationChain() {
       tp,
     ).classPosterior
     return { post, byClass }
-  }, [key, cls, sensitivity.value, falsePositive.value])
+  }, [key, state.cls, state.sensitivity, state.falsePositive])
 
-  const series = useMemo((): XYSeries[] => {
+  const series = useMemo(() => {
     const observed = key.split(',').map((r) => (r === 'none' ? null : r === 'pos' ? 1 : 0))
     const idx = observed.flatMap((o, i) => (o === null ? [] : [i]))
     return [
-      { name: 'P(sensitised)', type: 'line', x: AGES, y: post.sensitised, slot: 0 },
-      { name: 'P(sensitised) at test ages', type: 'scatter', x: AGES, y: post.sensitised, slot: 0 },
+      { name: 'P(sensitised)', x: AGES, y: post.sensitised, slot: 0 },
+      { name: 'P(sensitised) at test ages', x: AGES, y: post.sensitised, slot: 0 },
       {
         name: 'test result (1 = positive)',
-        type: 'scatter',
         x: idx.map((i) => AGES[i]),
         y: idx.map((i) => observed[i] as number),
         emphasis: true,
       },
-    ]
+    ] as const
   }, [post, key])
 
+  const xAxis = useAxis({ label: 'age (years)', range: [0.5, 8.5] })
+  const yAxis = useAxis({ label: 'probability', range: [0, 1] })
   return (
-    <Interactive
+    <Figure
       title="Sensitisation over time, seen through a noisy test"
+      state={state}
       caption="One child and one allergen. Sensitisation follows a two-state Markov chain from age 1 to age 8; a skin-prick test at each age is positive with probability equal to its sensitivity if the child is sensitised, and with the false-positive rate if not. The class, a gate, chooses the chain's initial, gain and retain probabilities. Choose 'unknown' to average over classes and read off the posterior class probabilities. The class parameters here are illustrative, not the study's."
-      controls={
-        <>
-          {AGES.map((a, i) => (
-            <ParamChoice
-              key={a}
-              label={`skin test at age ${a}`}
-              value={results[i]}
-              onChange={(v) => setResults((old) => old.map((r, j) => (j === i ? v : r)))}
-              options={OPTIONS}
-            />
-          ))}
-          <ParamChoice
-            label="class"
-            value={cls}
-            onChange={setCls}
-            options={[
-              { value: 'unknown', label: 'unknown' },
-              ...CLASSES.map((c, i) => ({ value: String(i), label: c.name })),
-            ]}
-          />
-          <ParamSlider label="test sensitivity" param={sensitivity} format={(v) => v.toFixed(2)} />
-          <ParamSlider label="false-positive rate" param={falsePositive} format={(v) => v.toFixed(2)} />
-        </>
-      }
-      readout={
+      readouts={
         <>
           {CLASSES.map((c, i) => (
             <Readout key={c.name} label={`P(${c.name})`} value={formatNumber(byClass[i])} />
@@ -106,7 +105,11 @@ export function SensitisationChain() {
         </>
       }
     >
-      <XYChart series={series} xLabel="age (years)" yLabel="probability" xRange={[0.5, 8.5]} yRange={[0, 1]} />
-    </Interactive>
+      <Plot x={xAxis} y={yAxis}>
+        <Curve {...series[0]} />
+        <Points {...series[1]} />
+        <Points {...series[2]} />
+      </Plot>
+    </Figure>
   )
 }

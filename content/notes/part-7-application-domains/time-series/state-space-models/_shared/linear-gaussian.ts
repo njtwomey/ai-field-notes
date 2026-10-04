@@ -1,9 +1,9 @@
+import { normal, stream } from 'aifn/foundation/random'
 /**
  * Linear-Gaussian state-space model z_t = A z_{t−1} + w_t, x_t = C z_t + v_t, with w_t ~ N(0, Q) and v_t ~ N(0, R),
  * plus the Kalman filter and the Rauch–Tung–Striebel smoother. Plain arrays keep the code close to the equations;
  * the models here have at most four state dimensions.
  */
-import { rng } from '@/lib/math'
 
 export type Vec = number[]
 export type Mat = number[][]
@@ -174,13 +174,13 @@ export function constantVelocity(q: number, r: number, shape: NoiseShape): Model
 
 /** Simulate a trajectory and its measurements from the model, starting at the origin with velocity (0.5, 0.2). */
 export function simulate(model: Model, steps: number, seed: number): { z: Vec[]; x: Vec[] } {
-  const g = rng(seed)
+  const g = stream(seed)
   const Lq = cholesky(model.Q)
   const Lr = cholesky(model.R)
   const noise = (L: Mat) =>
     matvec(
       L,
-      L.map(() => g.normal()),
+      L.map(() => normal(g)),
     )
   let state = [0, 0, 0.5, 0.2]
   const z: Vec[] = []

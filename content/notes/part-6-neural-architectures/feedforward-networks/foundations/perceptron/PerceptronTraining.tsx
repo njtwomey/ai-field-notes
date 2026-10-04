@@ -1,6 +1,18 @@
 import { useMemo, useState } from 'react'
-import { Interactive, ParamButton, ParamSlider, Readout, XYChart, formatNumber, type XYSeries } from 'aifn-render'
-import { rng } from '@/lib/math'
+import {
+  Figure,
+  formatNumber,
+  int,
+  Player,
+  Plot,
+  Readout,
+  seriesLayers,
+  type SeriesSpec,
+  slider,
+  useAxis,
+  useFigureState,
+} from 'aifn-render'
+import { stream, uniform } from 'aifn/foundation/random'
 
 type Vec3 = [number, number, number]
 const BOX = 1.2
@@ -9,13 +21,13 @@ const MAX_EPOCHS = 200
 
 /** Points uniform in [-1, 1]², labelled by a fixed line, with those closer than `gap` to the line removed. */
 function makeData(seed: number, gap: number) {
-  const r = rng(seed)
-  const angle = 2 * Math.PI * r.uniform()
-  const truth: Vec3 = [Math.cos(angle), Math.sin(angle), 0.4 * r.uniform() - 0.2]
+  const r = stream(seed)
+  const angle = 2 * Math.PI * uniform(r)
+  const truth: Vec3 = [Math.cos(angle), Math.sin(angle), 0.4 * uniform(r) - 0.2]
   const xs: Vec3[] = []
   const ys: number[] = []
   while (xs.length < N) {
-    const x: Vec3 = [2 * r.uniform() - 1, 2 * r.uniform() - 1, 1]
+    const x: Vec3 = [2 * uniform(r) - 1, 2 * uniform(r) - 1, 1]
     const s = truth[0] * x[0] + truth[1] * x[1] + truth[2]
     if (Math.abs(s) < gap) continue
     xs.push(x)
@@ -52,9 +64,14 @@ function lineInBox([a, b, c]: Vec3): { x: number[]; y: number[] } {
 }
 
 export function PerceptronTraining() {
-  const [seed, setSeed] = useState(3)
-  const [gap, setGap] = useState(0.1)
-  const [shown, setShown] = useState<number | null>(null)
+  const state = useFigureState({
+    gap: slider(0.01, 0.4, 0.1, { step: 0.01, label: 'gap around the labelling line' }),
+    seed: int(3, { ge: 0, label: 'seed' }),
+  })
+  const { seed, gap } = state
+  // The walk-through restarts at update 0 for new data: the position remembers the data it belongs to.
+  const data = `${seed}:${gap}`
+  const [pos, setPos] = useState({ data, step: 0 })
 
   const { xs, ys, truth, history, bound, gamma } = useMemo(() => {
     const d = makeData(seed, gap)
@@ -66,11 +83,11 @@ export function PerceptronTraining() {
   }, [seed, gap])
 
   const updates = history.length - 1
-  const step = Math.min(shown ?? updates, updates)
+  const step = pos.data === data ? Math.min(pos.step, updates) : 0
   const w = history[step]
   const mistakes = xs.filter((x, i) => ys[i] * dot(w, x) <= 0).length
 
-  const series = useMemo((): XYSeries[] => {
+  const series = useMemo((): SeriesSpec[] => {
     const current = lineInBox(w)
     const reference = lineInBox(truth)
     return [
@@ -87,45 +104,23 @@ export function PerceptronTraining() {
     ]
   }, [xs, ys, truth, w, step])
 
+  const xAxis = useAxis({ label: 'x₁', range: [-BOX, BOX] })
+  const yAxis = useAxis({ label: 'x₂', range: [-BOX, BOX], equal: xAxis })
   return (
-    <Interactive
+    <Figure
       title="Perceptron updates until every point is on the right side"
-      caption="Forty points are labelled by the dashed line; points closer to it than the gap are removed. The perceptron starts from w = 0 and cycles through the data, adding y·x to w at each mistake. Scrub through the updates to watch the boundary move. Shrinking the gap shrinks the margin γ, and the number of updates grows, always below the bound (R/γ)²."
+      caption="Forty points are labelled by the dashed line; points closer to it than the gap are removed. The perceptron starts from w = 0 and cycles through the data, adding y·x to w at each mistake. Play or scrub through the updates to watch the boundary move; the seed's + button draws new data. Shrinking the gap shrinks the margin γ, and the number of updates grows, always below the bound (R/γ)²."
+      state={state}
       controls={
-        <>
-          <ParamSlider
-            label="gap around the labelling line"
-            value={gap}
-            onChange={(v) => {
-              setGap(v)
-              setShown(null)
-            }}
-            min={0.01}
-            max={0.4}
-            step={0.01}
-          />
-          <ParamSlider
-            label="update shown"
-            value={step}
-            onChange={setShown}
-            min={0}
-            max={Math.max(updates, 1)}
-            step={1}
-            withArrows
-          />
-          <div className="flex items-end">
-            <ParamButton
-              onClick={() => {
-                setSeed((s) => s + 1)
-                setShown(null)
-              }}
-            >
-              New data
-            </ParamButton>
-          </div>
-        </>
+        <Player
+          value={step}
+          onChange={(k) => setPos({ data, step: k })}
+          count={updates + 1}
+          label="update"
+          format={(k) => `${k} of ${updates}`}
+        />
       }
-      readout={
+      readouts={
         <>
           <Readout label="updates to converge" value={updates} />
           <Readout label="mistakes at this update" value={mistakes} />
@@ -135,8 +130,10 @@ export function PerceptronTraining() {
       }
     >
       <div className="mx-auto w-full max-w-md">
-        <XYChart series={series} xRange={[-BOX, BOX]} yRange={[-BOX, BOX]} equalAspect xLabel="x₁" yLabel="x₂" />
+        <Plot x={xAxis} y={yAxis}>
+          {seriesLayers(series)}
+        </Plot>
       </div>
-    </Interactive>
+    </Figure>
   )
 }

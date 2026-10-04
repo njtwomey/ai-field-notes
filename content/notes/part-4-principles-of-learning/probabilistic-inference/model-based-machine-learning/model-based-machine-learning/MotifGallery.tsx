@@ -1,8 +1,5 @@
-import { MathText } from 'aifn-render'
-import { Diagram } from 'aifn-render'
-import { factor, link, variable } from 'aifn-render'
+import { Diagram, factor, Figure, link, MathText, variable } from 'aifn-render'
 import type { DiagramSpec } from 'aifn-render'
-import { Interactive } from 'aifn-render'
 
 const line = (a: string, b: string) => link(a, b, false)
 const dot = (id: string, x: number, y: number) => ({ id, x, y, shape: 'dot' as const, w: 0.18, h: 0.18 })
@@ -132,7 +129,7 @@ const MOTIFS: { name: string; caption: string; spec: DiagramSpec }[] = [
 /** The recurring factor-graph motifs of the case studies, side by side. */
 export function MotifGallery() {
   return (
-    <Interactive
+    <Figure
       title="Six motifs that recur across the case studies"
       caption="Circles are variables, squares factors, shaded circles observed. Dashed boxes are gates, labelled with the value of the selector that turns them on; solid boxes are plates."
     >
@@ -147,6 +144,6 @@ export function MotifGallery() {
           </div>
         ))}
       </div>
-    </Interactive>
+    </Figure>
   )
 }

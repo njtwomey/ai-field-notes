@@ -1,9 +1,8 @@
+import { regularisedGammaP, sigmoid } from 'aifn/numerics/special'
 /**
  * Brant's test for inputs of any dimension D: a separate binary logit per cumulative split, the joint covariance of
  * their slopes, and a Wald test that all K − 1 slope vectors are equal, on D(K − 2) degrees of freedom.
  */
-import { sigmoid } from '@/lib/math'
-import { incompleteGamma } from '@/lib/math/special'
 
 type Mat = number[][]
 
@@ -103,5 +102,5 @@ export function brantTest(xs: number[][], y: number[], k: number, lambda = 1e-2)
   const Sinv = inverse(S)
   const chi2 = diff.reduce((s, v, i) => s + v * Sinv[i].reduce((t, w, j) => t + w * diff[j], 0), 0)
   const df = D * (k - 2)
-  return { chi2, df, p: 1 - incompleteGamma(df / 2, chi2 / 2), slopes }
+  return { chi2, df, p: 1 - regularisedGammaP(df / 2, chi2 / 2), slopes }
 }

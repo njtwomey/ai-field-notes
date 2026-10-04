@@ -1,5 +1,5 @@
 /**
- * `aifn-applied/theory/double-descent`: random-features regression across the interpolation threshold, with
+ * `aifn-methods/theory/double-descent`: random-features regression across the interpolation threshold, with
  * minimum-norm or ridge least squares (`doubleDescent`, `randomFeatures`, `featureCounts`).
  */
 

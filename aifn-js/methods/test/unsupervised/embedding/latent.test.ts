@@ -14,7 +14,7 @@ import {
   fastIca,
   latentGaussianSteps,
   probabilisticPca,
-} from 'aifn-applied/unsupervised/embedding/linear'
+} from 'aifn-methods/unsupervised/embedding/linear'
 import { fixture } from '../../fixtures'
 
 type F = {

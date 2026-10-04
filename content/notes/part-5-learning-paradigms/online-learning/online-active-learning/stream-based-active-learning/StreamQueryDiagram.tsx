@@ -1,5 +1,4 @@
-import { Interactive } from 'aifn-render'
-import { Diagram } from 'aifn-render'
+import { Diagram, Figure } from 'aifn-render'
 import type { DiagramSpec } from 'aifn-render'
 
 const spec: DiagramSpec = {
@@ -35,7 +34,7 @@ const spec: DiagramSpec = {
 /** One round of stream-based active learning. */
 export function StreamQueryDiagram() {
   return (
-    <Interactive
+    <Figure
       title="One round of stream-based active learning"
       caption="Each unlabelled example is seen once. The query rule decides on the spot whether its label is worth paying for: when the model is uncertain, a committee disagrees, or the example lies in the region of disagreement. A queried label updates the model; an unqueried example is labelled by the model and then discarded."
     >
@@ -43,6 +42,6 @@ export function StreamQueryDiagram() {
         spec={spec}
         ariaLabel="An example arrives from the stream; a query rule decides whether to ask the oracle for its label; if yes, the label updates the model; if no, the model predicts and the example is discarded; the next round begins"
       />
-    </Interactive>
+    </Figure>
   )
 }

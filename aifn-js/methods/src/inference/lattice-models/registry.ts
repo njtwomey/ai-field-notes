@@ -1,5 +1,5 @@
 /**
- * The registry of `aifn-applied/inference/lattice-models`.
+ * The registry of `aifn-methods/inference/lattice-models`.
  */
 
 import { definer, entries, type Entry, type FunctionInfo } from 'aifn/foundation/registry'

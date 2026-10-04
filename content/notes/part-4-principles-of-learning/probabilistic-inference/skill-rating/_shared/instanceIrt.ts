@@ -1,3 +1,5 @@
+import { normal, stream, uniform } from 'aifn/foundation/random'
+import { logGamma } from 'aifn/numerics/special'
 /**
  * Item response theory on classifiers, small enough to recompute on every slider move. A two-class dataset in two
  * features is simulated with some test labels flipped; a population of simple classifiers of varying skill is trained
@@ -7,8 +9,6 @@
  * - the β³ model on the probabilities themselves, by maximum a posteriori estimation with Adam.
  * Used by the notes on IRT for machine learning and on the β³ model.
  */
-import { rng } from '@/lib/math'
-import { logGamma } from '@/lib/math/special'
 
 export type Point = [number, number]
 
@@ -40,13 +40,13 @@ const SDS: [Point, Point] = [
 
 /** Simulate balanced training and test sets, then flip the labels of a fraction `noise` of the test instances. */
 export function simulate(seed: number, noise: number, nTrain = 100, nTest = 70): Dataset {
-  const r = rng(seed)
+  const r = stream(seed)
   const draw = (n: number) => {
     const x: Point[] = []
     const y: number[] = []
     for (let i = 0; i < n; i++) {
       const c = i % 2
-      x.push([MEANS[c][0] + SDS[c][0] * r.normal(), MEANS[c][1] + SDS[c][1] * r.normal()])
+      x.push([MEANS[c][0] + SDS[c][0] * normal(r), MEANS[c][1] + SDS[c][1] * normal(r)])
       y.push(c)
     }
     return { x, y }
@@ -56,7 +56,7 @@ export function simulate(seed: number, noise: number, nTrain = 100, nTest = 70):
   // Choose the flipped instances by a seeded shuffle, so a higher noise rate flips a superset of a lower one.
   const order = t.x.map((_, i) => i)
   for (let i = order.length - 1; i > 0; i--) {
-    const j = Math.floor(r.uniform() * (i + 1))
+    const j = Math.floor(uniform(r) * (i + 1))
     ;[order[i], order[j]] = [order[j], order[i]]
   }
   const nFlip = Math.round(noise * nTest)
@@ -184,7 +184,7 @@ export type Responses = {
 
 /** Train the population on (balanced) subsamples of the clean training set and score every test instance. */
 export function respond(data: Dataset, seed: number): Responses {
-  const r = rng(seed + 7919)
+  const r = stream(seed + 7919)
   const names: string[] = []
   const probs: number[][] = []
   for (const spec of POPULATION) {
@@ -192,7 +192,7 @@ export function respond(data: Dataset, seed: number): Responses {
     const pick = [0, 1].flatMap((c) => {
       const idx = data.train.y.flatMap((yy, i) => (yy === c ? [i] : []))
       for (let i = idx.length - 1; i > 0; i--) {
-        const j = Math.floor(r.uniform() * (i + 1))
+        const j = Math.floor(uniform(r) * (i + 1))
         ;[idx[i], idx[j]] = [idx[j], idx[i]]
       }
       return idx.slice(0, Math.max(2, Math.floor(spec.n / 2)))
@@ -223,14 +223,14 @@ export function respond(data: Dataset, seed: number): Responses {
         model = stumpModel(x, y, 1)
         break
       case 'random': {
-        const u = data.test.x.map(() => r.uniform())
+        const u = data.test.x.map(() => uniform(r))
         let k = 0
         model = () => u[k++ % u.length]
         break
       }
     }
     const blur = spec.blur ?? 0
-    const seen = data.test.x.map((p): Point => (blur ? [p[0] + blur * r.normal(), p[1] + blur * r.normal()] : p))
+    const seen = data.test.x.map((p): Point => (blur ? [p[0] + blur * normal(r), p[1] + blur * normal(r)] : p))
     const label = spec.family === 'kNN' ? `${spec.k}-NN` : spec.family
     names.push(spec.family === 'random' ? 'random' : blur ? `${label}, input noise ${blur}` : `${label}, n = ${spec.n}`)
     probs.push(seen.map((q, j) => (data.test.y[j] === 1 ? model(q) : 1 - model(q))))

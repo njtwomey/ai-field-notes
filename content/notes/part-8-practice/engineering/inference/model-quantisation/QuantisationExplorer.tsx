@@ -1,18 +1,21 @@
-import { useMemo, useState } from 'react'
+import { useMemo } from 'react'
 import {
-  Interactive,
-  ParamButton,
-  ParamChoice,
-  ParamSlider,
-  Readout,
-  XYChart,
+  Bars,
+  Button,
+  choice,
+  Figure,
+  float,
   formatNumber,
-  useParam,
-  type Handle,
+  Handle,
+  int,
+  Plot,
+  Readout,
   type Segment,
-  type XYSeries,
+  Segments,
+  useAxis,
+  useFigureState,
 } from 'aifn-render'
-import { rng } from '@/lib/math'
+import { normal, stream, uniform } from 'aifn/foundation/random'
 
 const N = 5000
 const BINS = 70
@@ -27,15 +30,15 @@ const SHAPES = [
 
 /** Unit-variance weights, fixed by the seed so that only the quantiser changes between renders. */
 function sampleWeights(shape: Shape): number[] {
-  const r = rng(7)
+  const r = stream(7)
   return Array.from({ length: N }, (_, i) => {
     if (shape === 'laplace') {
-      const u = r.uniform() - 0.5
+      const u = uniform(r) - 0.5
       return (-Math.sign(u) * Math.log(1 - 2 * Math.abs(u))) / Math.SQRT2
     }
     // One weight in 200 is an outlier of about ±5 standard deviations.
-    if (shape === 'outliers' && i % 200 === 0) return (i % 400 === 0 ? 1 : -1) * (5 + 0.3 * r.normal())
-    return r.normal()
+    if (shape === 'outliers' && i % 200 === 0) return (i % 400 === 0 ? 1 : -1) * (5 + 0.3 * normal(r))
+    return normal(r)
   })
 }
 
@@ -70,13 +73,15 @@ function quantise(w: number[], bits: number, c: number) {
 }
 
 export function QuantisationExplorer() {
-  const [shape, setShape] = useState<Shape>('gauss')
-  const [bits, setBits] = useState(4)
-  const clip = useParam(3, { min: 0.2, max: RANGE, step: 0.05 })
-  const weights = useMemo(() => sampleWeights(shape), [shape])
-  const res = useMemo(() => quantise(weights, bits, clip.value), [weights, bits, clip.value])
+  const state = useFigureState({
+    shape: choice<Shape>(SHAPES, 'gauss', { label: 'weight distribution' }),
+    bits: int(4, { min: 2, max: 8, step: 1, label: 'bits b' }),
+    clip: float(3, { min: 0.2, max: RANGE, step: 0.05, label: 'clipping range c (standard deviations)' }),
+  })
+  const weights = useMemo(() => sampleWeights(state.shape), [state.shape])
+  const res = useMemo(() => quantise(weights, state.bits, state.clip), [weights, state.bits, state.clip])
 
-  const histogram = useMemo((): XYSeries[] => {
+  const histogram = useMemo(() => {
     const width = (2 * RANGE) / BINS
     const counts = new Array(BINS).fill(0)
     for (const x of weights) {
@@ -86,12 +91,11 @@ export function QuantisationExplorer() {
     return [
       {
         name: 'weights',
-        type: 'bar',
         x: counts.map((_, i) => -RANGE + (i + 0.5) * width),
         y: counts.map((k) => k / (N * width)),
         slot: 0,
       },
-    ]
+    ] as const
   }, [weights])
 
   // One vertical tick per representable value; at 7 or 8 bits they merge into a band.
@@ -102,37 +106,36 @@ export function QuantisationExplorer() {
   }, [res.qmax, res.s])
 
   const bestClip = () => {
-    let best = clip.min
+    let best = state.bind('clip').min
     let bestMse = Infinity
-    for (let c = clip.min; c <= clip.max; c += clip.step) {
-      const r = quantise(weights, bits, c)
+    for (let c = state.bind('clip').min; c <= state.bind('clip').max; c += state.bind('clip').step) {
+      const r = quantise(weights, state.bits, c)
       if (r.total < bestMse) {
         bestMse = r.total
         best = c
       }
     }
-    clip.set(best)
+    state.set('clip', best)
   }
 
   const mse = res.total
-  const handles: Handle[] = [
-    { kind: 'x', at: clip.value, label: '+c', onDrag: (x) => clip.set(Math.abs(x)) },
-    { kind: 'x', at: -clip.value, label: '−c', onDrag: (x) => clip.set(Math.abs(x)) },
-  ]
 
+  const xAxis = useAxis({ label: 'weight value (standard deviations)', range: [-RANGE, RANGE] })
+  const yAxis = useAxis({ label: 'density', range: [0, 0.75] })
   return (
-    <Interactive
+    <Figure
       title="Quantising 5,000 unit-variance weights"
+      purpose="Change the bit width and drag the clipping range to trade clipping error against rounding error."
+      state={state}
       caption="Grey ticks are the representable values of a symmetric b-bit quantiser with clipping range [−c, c]. Drag either dashed line to move c. A wide range keeps outliers but spaces the levels far apart; a narrow range packs the levels together but clips the tails. The best c shrinks as the bit width falls."
       controls={
         <>
-          <ParamChoice label="weight distribution" value={shape} onChange={setShape} options={SHAPES} />
-          <ParamSlider label="bits b" value={bits} onChange={setBits} min={2} max={8} step={1} />
-          <ParamSlider label="clipping range c (standard deviations)" param={clip} />
-          <ParamButton onClick={bestClip}>Minimise MSE over c</ParamButton>
+          <Button variant="outline" size="sm" onClick={bestClip}>
+            Minimise MSE over c
+          </Button>
         </>
       }
-      readout={
+      readouts={
         <>
           <Readout label="step s = c / (2^(b−1) − 1)" value={formatNumber(res.s)} />
           <Readout label="rounding MSE inside [−c, c]" value={formatNumber(res.rounding)} />
@@ -143,16 +146,12 @@ export function QuantisationExplorer() {
         </>
       }
     >
-      <XYChart
-        series={histogram}
-        segments={levels}
-        xLabel="weight value (standard deviations)"
-        yLabel="density"
-        xRange={[-RANGE, RANGE]}
-        yRange={[0, 0.75]}
-        handles={handles}
-        height={300}
-      />
-    </Interactive>
+      <Plot x={xAxis} y={yAxis} height={300}>
+        <Bars {...histogram[0]} />
+        <Segments segments={levels} />
+        <Handle kind="x" at={state.clip} label="+c" onDrag={(x) => state.set('clip', Math.abs(x))} />
+        <Handle kind="x" at={-state.clip} label="−c" onDrag={(x) => state.set('clip', Math.abs(x))} />
+      </Plot>
+    </Figure>
   )
 }

@@ -1,16 +1,17 @@
 import { Minus, Plus } from 'lucide-react'
 import { useMemo, useState } from 'react'
-import { Button } from 'aifn-render'
 import {
-  Interactive,
-  ParamButton,
-  ParamSlider,
-  Readout,
-  XYChart,
+  Button,
+  Figure,
   formatNumber,
-  useParam,
-  type Handle,
-  type XYSeries,
+  Handle,
+  int,
+  Plot,
+  Readout,
+  seriesLayers,
+  type SeriesSpec,
+  useAxis,
+  useFigureState,
 } from 'aifn-render'
 import { bradleyTerryLogLik, bradleyTerryMM } from '../_shared/skill'
 
@@ -34,18 +35,20 @@ function stronglyConnected(wins: number[][]): boolean {
 
 export function BradleyTerryFit() {
   const [wins, setWins] = useState(START)
-  const iter = useParam(3, { min: 0, max: MAX_ITER, step: 1 })
+  const state = useFigureState({
+    iter: int(3, { min: 0, max: MAX_ITER, step: 1, label: 'iteration', format: (v) => String(v) }),
+  })
 
   const fit = useMemo(() => {
     const history = bradleyTerryMM(wins, MAX_ITER)
     return { history, ll: history.map((th) => bradleyTerryLogLik(wins, th)), ok: stronglyConnected(wins) }
   }, [wins])
 
-  const k = iter.value
+  const k = state.iter
   const iters = useMemo(() => Array.from({ length: MAX_ITER + 1 }, (_, i) => i), [])
-  const series = useMemo<XYSeries[]>(
+  const series = useMemo<SeriesSpec[]>(
     () => [
-      ...NAMES.map<XYSeries>((name, p) => ({
+      ...NAMES.map<SeriesSpec>((name, p) => ({
         name,
         type: 'line',
         x: iters,
@@ -62,7 +65,6 @@ export function BradleyTerryFit() {
     ],
     [fit, iters, k],
   )
-  const handles: Handle[] = [{ kind: 'x', at: k, label: 'iteration', onDrag: iter.set }]
 
   const change = (i: number, j: number, delta: number) =>
     setWins((w) => w.map((row, a) => row.map((v, b) => (a === i && b === j ? Math.max(0, v + delta) : v))))
@@ -70,17 +72,21 @@ export function BradleyTerryFit() {
   const theta = fit.history[k]
   const pAB = 1 / (1 + Math.exp(theta[1] - theta[0]))
 
+  const xAxis = useAxis({ label: 'MM iteration', range: [0, MAX_ITER] })
+  const yAxis = useAxis({ label: 'log-strength θ', range: [-2.5, 2.5] })
   return (
-    <Interactive
+    <Figure
       title="Fitting Bradley–Terry by Zermelo's iteration"
+      state={state}
       caption="Each cell counts the wins of the row player over the column player; change them with the buttons. The chart shows the log-strengths θ after each MM iteration, centred to mean zero. Drag the vertical line or use the slider to pick an iteration. The log-likelihood rises at every step. Make a player lose every game, or win every game, and the strengths drift apart without converging: the maximum-likelihood estimate no longer exists."
       controls={
         <>
-          <ParamSlider label="iteration" param={iter} format={(v) => String(v)} withArrows />
-          <ParamButton onClick={() => setWins(START)}>Reset results</ParamButton>
+          <Button variant="outline" size="sm" onClick={() => setWins(START)}>
+            Reset results
+          </Button>
         </>
       }
-      readout={
+      readouts={
         <>
           <Readout label="log-likelihood at this iteration" value={formatNumber(fit.ll[k])} />
           <Readout label={`after ${MAX_ITER}`} value={formatNumber(fit.ll[MAX_ITER])} />
@@ -140,16 +146,11 @@ export function BradleyTerryFit() {
             ))}
           </tbody>
         </table>
-        <XYChart
-          series={series}
-          xLabel="MM iteration"
-          yLabel="log-strength θ"
-          xRange={[0, MAX_ITER]}
-          yRange={[-2.5, 2.5]}
-          height={280}
-          handles={handles}
-        />
+        <Plot x={xAxis} y={yAxis} height={280}>
+          {seriesLayers(series)}
+          <Handle kind="x" at={k} label="iteration" onDrag={(v: number) => state.set('iter', v)} />
+        </Plot>
       </div>
-    </Interactive>
+    </Figure>
   )
 }

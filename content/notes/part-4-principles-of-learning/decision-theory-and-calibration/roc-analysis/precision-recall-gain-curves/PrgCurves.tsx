@@ -1,7 +1,7 @@
 import { useMemo } from 'react'
-import { Interactive, ParamSlider, Readout, XYChart, formatNumber, useParam } from 'aifn-render'
-import { linspace } from '@/lib/math'
+import { Curve, Figure, formatNumber, Plot, Points, Readout, slider, useAxis, useFigureState } from 'aifn-render'
 import { rocExample } from '../../_shared/rocExample'
+import { linspace, toFlat } from 'aifn/foundation/tensor'
 
 /**
  * The same classifier in precision-recall space and in precision-recall-gain space, at a chosen prevalence π. The
@@ -9,11 +9,13 @@ import { rocExample } from '../../_shared/rocExample'
  * through it are drawn in both: a hyperbola in PR space, a straight line of slope −1 in PRG space.
  */
 export function PrgCurves() {
-  const pi = useParam(0.2, { min: 0.02, max: 0.8, step: 0.01 })
+  const state = useFigureState({
+    pi: slider(0.02, 0.8, 0.2, { step: 0.01, label: 'prevalence π' }),
+  })
   const data = useMemo(() => rocExample(), [])
 
   const r = useMemo(() => {
-    const p = pi.value
+    const p = state.pi
     const pts = data.curve
       .filter(([, tpr]) => tpr > 0)
       .map(([fpr, tpr]) => {
@@ -31,17 +33,22 @@ export function PrgCurves() {
     const inGain = pts.filter((q) => q.recG >= 0 && q.precG >= 0)
     const fg = (best.f1 - p) / ((1 - p) * best.f1)
     // F1 isometric in PR space: P = F R / (2R − F), for R > F/2.
-    const rs = linspace(best.f1 / 2 + 1e-3, 1, 120)
+    const rs = toFlat(linspace(best.f1 / 2 + 1e-3, 1, 120))
     const iso = { x: rs, y: rs.map((x) => (best.f1 * x) / (2 * x - best.f1)) }
     return { pts, best, inGain, fg, iso }
-  }, [data, pi.value])
+  }, [data, state.pi])
 
+  const xAxis = useAxis({ label: 'recall', range: [0, 1] })
+  const yAxis = useAxis({ label: 'precision', range: [0, 1] })
+  const xAxis2 = useAxis({ label: 'recall gain', range: [0, 1] })
+  const yAxis2 = useAxis({ label: 'precision gain', range: [0, 1] })
   return (
-    <Interactive
+    <Figure
       title="Precision-recall and precision-recall-gain curves"
+      state={state}
       caption="One classifier's thresholds, drawn in PR space (left) and PRG space (right) at prevalence π. The ringed point has the highest F1. The line through it is its F1 isometric: a hyperbola in PR space, but in PRG space a straight line of slope −1, so the F1-optimal point is where a line of slope −1 touches the curve. Change π: the PR baseline (precision = π) moves, while in PRG space the always-positive classifier stays at (1, 0)."
-      controls={<ParamSlider label="prevalence π" param={pi} />}
-      readout={
+
+      readouts={
         <>
           <Readout label="best F1" value={formatNumber(r.best.f1)} />
           <Readout label="its F1 gain" value={formatNumber(r.fg)} />
@@ -50,53 +57,25 @@ export function PrgCurves() {
       }
     >
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-        <XYChart
-          height={300}
-          xLabel="recall"
-          yLabel="precision"
-          xRange={[0, 1]}
-          yRange={[0, 1]}
-          series={[
-            {
-              name: 'baseline precision = π',
-              type: 'line',
-              x: [0, 1],
-              y: [pi.value, pi.value],
-              dashed: true,
-              muted: true,
-            },
-            { name: 'PR curve', type: 'line', x: r.pts.map((q) => q.rec), y: r.pts.map((q) => q.prec), slot: 0 },
-            { name: 'F1 isometric', type: 'line', x: r.iso.x, y: r.iso.y, slot: 1, dashed: true },
-            { name: 'best F1', type: 'scatter', x: [r.best.rec], y: [r.best.prec], emphasis: true },
-          ]}
-        />
-        <XYChart
-          height={300}
-          xLabel="recall gain"
-          yLabel="precision gain"
-          xRange={[0, 1]}
-          yRange={[0, 1]}
-          series={[
-            { name: 'baseline F1 = π', type: 'line', x: [0, 1], y: [1, 0], dashed: true, muted: true },
-            {
-              name: 'PRG curve',
-              type: 'line',
-              x: r.inGain.map((q) => q.recG),
-              y: r.inGain.map((q) => q.precG),
-              slot: 0,
-            },
-            {
-              name: 'F1 isometric',
-              type: 'line',
-              x: [Math.max(0, 2 * r.fg - 1), Math.min(1, 2 * r.fg)],
-              y: [Math.min(1, 2 * r.fg - Math.max(0, 2 * r.fg - 1)), 2 * r.fg - Math.min(1, 2 * r.fg)],
-              slot: 1,
-              dashed: true,
-            },
-            { name: 'best F1', type: 'scatter', x: [r.best.recG], y: [r.best.precG], emphasis: true },
-          ]}
-        />
+        <Plot x={xAxis} y={yAxis} height={300}>
+          <Curve name="baseline precision = π" x={[0, 1]} y={[state.pi, state.pi]} dashed muted />
+          <Curve name="PR curve" x={r.pts.map((q) => q.rec)} y={r.pts.map((q) => q.prec)} slot={0} />
+          <Curve name="F1 isometric" x={r.iso.x} y={r.iso.y} slot={1} dashed />
+          <Points name="best F1" x={[r.best.rec]} y={[r.best.prec]} emphasis />
+        </Plot>
+        <Plot x={xAxis2} y={yAxis2} height={300}>
+          <Curve name="baseline F1 = π" x={[0, 1]} y={[1, 0]} dashed muted />
+          <Curve name="PRG curve" x={r.inGain.map((q) => q.recG)} y={r.inGain.map((q) => q.precG)} slot={0} />
+          <Curve
+            name="F1 isometric"
+            x={[Math.max(0, 2 * r.fg - 1), Math.min(1, 2 * r.fg)]}
+            y={[Math.min(1, 2 * r.fg - Math.max(0, 2 * r.fg - 1)), 2 * r.fg - Math.min(1, 2 * r.fg)]}
+            slot={1}
+            dashed
+          />
+          <Points name="best F1" x={[r.best.recG]} y={[r.best.precG]} emphasis />
+        </Plot>
       </div>
-    </Interactive>
+    </Figure>
   )
 }

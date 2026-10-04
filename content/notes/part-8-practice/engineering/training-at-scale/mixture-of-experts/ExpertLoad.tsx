@@ -1,14 +1,14 @@
-import { useMemo, useState } from 'react'
-import { Interactive, ParamChoice, ParamSlider, Readout, XYChart, formatNumber, type XYSeries } from 'aifn-render'
-import { rng } from '@/lib/math'
+import { useMemo } from 'react'
+import { Bars, choice, Curve, Figure, float, formatNumber, Plot, Readout, useAxis, useFigureState } from 'aifn-render'
+import { normal, stream } from 'aifn/foundation/random'
 
 const TOKENS = 1024
 const EXPERTS = 8
 const EXPERT_IDS = Array.from({ length: EXPERTS }, (_, i) => i + 1)
 // Fixed per-token router noise, so that only the controls change the routing.
 const NOISE = (() => {
-  const r = rng(11)
-  return Array.from({ length: TOKENS }, () => Array.from({ length: EXPERTS }, () => r.normal()))
+  const r = stream(11)
+  return Array.from({ length: TOKENS }, () => Array.from({ length: EXPERTS }, () => normal(r)))
 })()
 
 type K = '1' | '2'
@@ -40,31 +40,32 @@ function route(skew: number, k: number, capacityFactor: number) {
 }
 
 export function ExpertLoad() {
-  const [skew, setSkew] = useState(1)
-  const [k, setK] = useState<K>('1')
-  const [cf, setCf] = useState(1.25)
-  const r = useMemo(() => route(skew, Number(k), cf), [skew, k, cf])
+  const state = useFigureState({
+    skew: float(1, { min: 0, max: 3, step: 0.05, label: 'router preference' }),
+    k: choice<K>(KS, '1', { label: 'experts per token' }),
+    cf: float(1.25, { min: 1, max: 2, step: 0.05, label: 'capacity factor' }),
+  })
+  const r = useMemo(() => route(state.skew, Number(state.k), state.cf), [state.skew, state.k, state.cf])
 
   const series = useMemo(
-    (): XYSeries[] => [
-      { name: 'tokens routed', type: 'bar', x: EXPERT_IDS, y: r.load, slot: 0 },
-      { name: 'capacity', type: 'line', x: [0.5, EXPERTS + 0.5], y: [r.capacity, r.capacity], slot: 1, dashed: true },
-    ],
+    () =>
+      [
+        { name: 'tokens routed', x: EXPERT_IDS, y: r.load, slot: 0 },
+        { name: 'capacity', x: [0.5, EXPERTS + 0.5], y: [r.capacity, r.capacity], slot: 1, dashed: true },
+      ] as const,
     [r],
   )
 
+  const xAxis = useAxis({ label: 'expert', range: [0.5, EXPERTS + 0.5] })
+  const yAxis = useAxis({ label: 'tokens', range: [0, undefined], hold: 'union' })
   return (
-    <Interactive
+    <Figure
       title="Routing 1,024 tokens to 8 experts"
+      purpose="Change the router's preference, the experts per token and the capacity factor to see expert load, dropped tokens and the auxiliary loss."
+      state={state}
       caption="Each token's router scores are a shared preference for lower-numbered experts plus token-specific noise. With no preference the load is nearly even and the auxiliary loss is near its minimum of 1. As the preference grows, popular experts exceed their capacity and the excess tokens are dropped, while the auxiliary loss rises."
-      controls={
-        <>
-          <ParamSlider label="router preference" value={skew} onChange={setSkew} min={0} max={3} step={0.05} />
-          <ParamChoice label="experts per token" value={k} onChange={setK} options={KS} />
-          <ParamSlider label="capacity factor" value={cf} onChange={setCf} min={1} max={2} step={0.05} />
-        </>
-      }
-      readout={
+
+      readouts={
         <>
           <Readout label="capacity per expert" value={`${r.capacity} tokens`} />
           <Readout label="assignments dropped" value={`${formatNumber(100 * r.dropped)}%`} />
@@ -72,14 +73,10 @@ export function ExpertLoad() {
         </>
       }
     >
-      <XYChart
-        series={series}
-        xLabel="expert"
-        yLabel="tokens"
-        xRange={[0.5, EXPERTS + 0.5]}
-        yRange={[0, undefined]}
-        height={280}
-      />
-    </Interactive>
+      <Plot x={xAxis} y={yAxis} height={280}>
+        <Bars {...series[0]} />
+        <Curve {...series[1]} />
+      </Plot>
+    </Figure>
   )
 }

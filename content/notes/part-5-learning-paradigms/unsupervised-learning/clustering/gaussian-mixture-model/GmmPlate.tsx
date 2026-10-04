@@ -1,5 +1,4 @@
-import { Interactive } from 'aifn-render'
-import { Diagram } from 'aifn-render'
+import { Diagram, Figure } from 'aifn-render'
 import type { DiagramSpec } from 'aifn-render'
 
 const spec: DiagramSpec = {
@@ -29,7 +28,7 @@ const spec: DiagramSpec = {
 /** The Gaussian mixture model as a plate diagram. */
 export function GmmPlate() {
   return (
-    <Interactive
+    <Figure
       title="The Gaussian mixture as a graphical model"
       caption="Each of the n points draws a component label z_i from the mixing weights π, then draws x_i from that component's Gaussian. Only x_i is observed (shaded). The k component means and covariances sit in their own plate: every point depends on all of them, and z_i selects which one applies."
     >
@@ -37,6 +36,6 @@ export function GmmPlate() {
         spec={spec}
         ariaLabel="Plate diagram: mixing weights pi point to the latent label z_i, which points to the observed x_i inside a plate over n points; the component means and covariances, in a plate over k components, also point to x_i"
       />
-    </Interactive>
+    </Figure>
   )
 }

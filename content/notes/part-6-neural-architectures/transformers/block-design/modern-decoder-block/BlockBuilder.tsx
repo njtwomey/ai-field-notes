@@ -1,5 +1,5 @@
-import { useMemo, useState } from 'react'
-import { Interactive, ParamChoice, ParamSlider, Readout, XYChart, type XYSeries } from 'aifn-render'
+import { useMemo } from 'react'
+import { choice, Curve, Figure, int, Plot, Readout, useAxis, useFigureState } from 'aifn-render'
 
 // Llama 2 7B dimensions: width, heads, head size, layers.
 const D = 4096
@@ -102,29 +102,53 @@ const CONTROLS: { key: Key; label: string; options: { value: string; label: stri
   },
 ]
 
+/** The choice field for one component, starting from the modern choice. */
+function component<K extends Key>(key: K) {
+  const c = CONTROLS.find((x) => x.key === key)!
+  return choice<Config[K]>(c.options as { value: Config[K]; label: string }[], MODERN[key], { label: c.label })
+}
+
 /** Toggle each component of a d = 4096 decoder block between the 2017 choice and the modern one. */
 export function BlockBuilder() {
-  const [config, setConfig] = useState<Config>(MODERN)
-  const [n, setN] = useState(4096)
-  const [metric, setMetric] = useState<'flops' | 'kv'>('kv')
+  const state = useFigureState({
+    placement: component('placement'),
+    norm: component('norm'),
+    ffn: component('ffn'),
+    attn: component('attn'),
+    position: component('position'),
+    bias: component('bias'),
+    n: int(4096, { min: 512, max: 32768, step: 512, label: 'context n (tokens)', format: (v) => v.toFixed(0) }),
+    metric: choice<'flops' | 'kv'>(
+      [
+        { value: 'kv', label: 'KV cache, GiB' },
+        { value: 'flops', label: 'GFLOPs per token' },
+      ],
+      'kv',
+      { label: 'plot' },
+    ),
+  })
+  const { placement, norm, ffn, attn, position, bias } = state
+  const config: Config = useMemo(
+    () => ({ placement, norm, ffn, attn, position, bias }),
+    [placement, norm, ffn, attn, position, bias],
+  )
   const p = useMemo(() => parts(config), [config])
   const o = useMemo(() => parts(ORIGINAL), [])
 
-  const series: XYSeries[] = useMemo(() => {
+  const series = useMemo(() => {
     const value = (c: Config, ctx: number) =>
-      metric === 'kv' ? (kvBytes(c) * ctx) / 2 ** 30 : (LAYERS * flops(c, ctx)) / 1e9
+      state.metric === 'kv' ? (kvBytes(c) * ctx) / 2 ** 30 : (LAYERS * flops(c, ctx)) / 1e9
     return [
       {
         name: '2017 choices',
-        type: 'line',
         x: CONTEXTS,
         y: CONTEXTS.map((ctx) => value(ORIGINAL, ctx)),
         dashed: true,
         slot: 1,
       },
-      { name: 'current selection', type: 'line', x: CONTEXTS, y: CONTEXTS.map((ctx) => value(config, ctx)), slot: 0 },
-    ]
-  }, [config, metric])
+      { name: 'current selection', x: CONTEXTS, y: CONTEXTS.map((ctx) => value(config, ctx)), slot: 0 },
+    ] as const
+  }, [config, state.metric])
 
   const rows: [string, number, number, string][] = [
     ['attention projections', o.attention, p.attention, `${kvHeads(config)} key-value heads of size ${DH}`],
@@ -144,58 +168,31 @@ export function BlockBuilder() {
     ['position', 0, 0, config.position === 'rope' ? 'rotates q and k in every layer' : 'added once to the input'],
   ]
 
+  const xAxis = useAxis({ label: 'context length n', hold: 'union' })
+  const yAxis = useAxis({
+    label: state.metric === 'kv' ? 'KV cache per sequence (GiB)' : 'GFLOPs per new token',
+    hold: 'union',
+  })
   return (
-    <Interactive
+    <Figure
       title="Decoder block builder"
+      state={state}
       caption="A decoder block with width d = 4096, 32 query heads of size 128 and 32 layers, the dimensions of Llama 2 7B (which keeps 32 key-value heads; Llama 3 8B uses 8). Each control switches one component between the 2017 choice and the modern one. Parameters are per block. FLOPs count two per weight in the matrix products plus 4nd for the scores and the weighted sum of values when the new token attends to n earlier tokens; normalisations, activations and rotations are elementwise and not counted. The KV cache stores one key and one value vector per key-value head per layer at 2 bytes per number. Placement and position change no count: their effects are on training stability and on how position enters."
-      controls={
-        <>
-          {CONTROLS.map(({ key, label, options }) => (
-            <ParamChoice
-              key={key}
-              label={label}
-              value={config[key]}
-              onChange={(v) => setConfig((c) => ({ ...c, [key]: v }) as Config)}
-              options={options}
-            />
-          ))}
-          <ParamSlider
-            label="context n (tokens)"
-            value={n}
-            onChange={setN}
-            min={512}
-            max={32768}
-            step={512}
-            format={(v) => v.toFixed(0)}
-          />
-          <ParamChoice
-            label="plot"
-            value={metric}
-            onChange={setMetric}
-            options={[
-              { value: 'kv', label: 'KV cache, GiB' },
-              { value: 'flops', label: 'GFLOPs per token' },
-            ]}
-          />
-        </>
-      }
-      readout={
+      readouts={
         <>
           <Readout label="parameters per block" value={millions(p.total)} />
-          <Readout label="GFLOPs per token (32 blocks)" value={((LAYERS * flops(config, n)) / 1e9).toFixed(2)} />
+          <Readout label="GFLOPs per token (32 blocks)" value={((LAYERS * flops(config, state.n)) / 1e9).toFixed(2)} />
           <Readout label="KV cache per token" value={`${(kvBytes(config) / 1024).toFixed(0)} KiB`} />
-          <Readout label="KV cache at n" value={`${((kvBytes(config) * n) / 2 ** 30).toFixed(2)} GiB`} />
+          <Readout label="KV cache at n" value={`${((kvBytes(config) * state.n) / 2 ** 30).toFixed(2)} GiB`} />
           <Readout label="warmup" value={config.placement === 'post' ? 'required' : 'optional'} />
         </>
       }
     >
       <div className="flex flex-col gap-4">
-        <XYChart
-          series={series}
-          xLabel="context length n"
-          yLabel={metric === 'kv' ? 'KV cache per sequence (GiB)' : 'GFLOPs per new token'}
-          height={260}
-        />
+        <Plot x={xAxis} y={yAxis} height={260}>
+          <Curve {...series[0]} />
+          <Curve {...series[1]} />
+        </Plot>
         <div className="overflow-x-auto">
           <table className="w-full text-xs">
             <thead className="text-muted-foreground">
@@ -225,6 +222,6 @@ export function BlockBuilder() {
           </table>
         </div>
       </div>
-    </Interactive>
+    </Figure>
   )
 }

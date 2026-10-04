@@ -1,6 +1,20 @@
-import { useMemo, useState } from 'react'
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from 'aifn-render'
-import { Interactive, ParamButton, ParamChoice, Readout, XYChart } from 'aifn-render'
+import { useMemo } from 'react'
+import {
+  Button,
+  choice,
+  Figure,
+  Plot,
+  Readout,
+  seriesLayers,
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+  useAxis,
+  useFigureState,
+} from 'aifn-render'
 import { BOX, Y_RANGE, exact, slackSeries, svmSeries } from './plot'
 import { C0, X, Y, activeSet, type Status } from './solver'
 
@@ -14,36 +28,40 @@ const OPTIONS = [
 const START: Status[] = ['zero', 'free', 'free', 'bound', 'zero', 'free']
 const RIGHT: Status[] = ['zero', 'bound', 'free', 'bound', 'zero', 'free']
 
+/** The guess for point t as a choice field, labelled with the point's class. */
+const guess = (t: number) => choice<Status>(OPTIONS, START[t], { label: `x${t + 1} (y = ${Y[t] > 0 ? '+1' : '−1'})` })
+
 /** Guess each point's status, solve the linear KKT equations that the guess implies, and check the rest. */
 export function ActiveSetGuess() {
-  const [status, setStatus] = useState<Status[]>(START)
-  const r = useMemo(() => activeSet(X, Y, C0, status), [status])
+  const state = useFigureState({ x1: guess(0), x2: guess(1), x3: guess(2), x4: guess(3), x5: guess(4), x6: guess(5) })
+  const status: Status[] = [state.x1, state.x2, state.x3, state.x4, state.x5, state.x6]
+  const setGuess = (guesses: Status[]) =>
+    guesses.forEach((g, t) => state.set(`x${t + 1}` as 'x1' | 'x2' | 'x3' | 'x4' | 'x5' | 'x6', g))
+  const r = useMemo(() => activeSet(X, Y, C0, status), [state.x1, state.x2, state.x3, state.x4, state.x5, state.x6])
   const series = useMemo(
     () => (r.ok ? [...svmSeries(X, Y, r.w, r.b), ...slackSeries(X, Y, r.w, r.b)] : svmSeries(X, Y, [0, 0], 0)),
     [r],
   )
   const failed = r.ok ? r.checks.filter((c) => !c.holds).length : null
 
+  const xAxis = useAxis({ label: 'x₁', range: BOX.x })
+  const yAxis = useAxis({ label: 'x₂', range: Y_RANGE, equal: xAxis })
   return (
-    <Interactive
+    <Figure
       title="Guess the active set, then check it"
       caption="Each point is guessed to be at α = 0, free (on the margin) or at α = C, with C = 1/2. The guess turns the KKT conditions into linear equations: yᵢf(xᵢ) = 1 for each free point and Σ αᵢyᵢ = 0. Their solution gives α, w and b. The guess is right only if the conditions it did not impose also hold: y f ≥ 1 where α = 0, y f ≤ 1 where α = C, and 0 ≤ α ≤ C for the free points. The figure starts from the wrong guess worked in the text."
+      state={state}
       controls={
         <>
-          {X.map((_, t) => (
-            <ParamChoice
-              key={t}
-              label={`x${t + 1} (y = ${Y[t] > 0 ? '+1' : '−1'})`}
-              value={status[t]}
-              onChange={(v) => setStatus((prev) => prev.map((s, k) => (k === t ? v : s)))}
-              options={OPTIONS}
-            />
-          ))}
-          <ParamButton onClick={() => setStatus(START)}>Wrong guess</ParamButton>
-          <ParamButton onClick={() => setStatus(RIGHT)}>Right guess</ParamButton>
+          <Button variant="outline" size="sm" onClick={() => setGuess(START)}>
+            Wrong guess
+          </Button>
+          <Button variant="outline" size="sm" onClick={() => setGuess(RIGHT)}>
+            Right guess
+          </Button>
         </>
       }
-      readout={
+      readouts={
         r.ok ? (
           <>
             <Readout label="w" value={`(${exact(r.w[0])}, ${exact(r.w[1])})`} />
@@ -60,15 +78,9 @@ export function ActiveSetGuess() {
     >
       <div className="flex flex-col gap-4">
         <div className="mx-auto w-full max-w-lg">
-          <XYChart
-            series={series}
-            xLabel="x₁"
-            yLabel="x₂"
-            xRange={BOX.x}
-            yRange={Y_RANGE}
-            equalAspect
-            ariaLabel="The boundary implied by the guessed active set"
-          />
+          <Plot x={xAxis} y={yAxis} ariaLabel={'The boundary implied by the guessed active set'}>
+            {seriesLayers(series)}
+          </Plot>
         </div>
         <Table>
           <TableHeader>
@@ -99,6 +111,6 @@ export function ActiveSetGuess() {
           </TableBody>
         </Table>
       </div>
-    </Interactive>
+    </Figure>
   )
 }

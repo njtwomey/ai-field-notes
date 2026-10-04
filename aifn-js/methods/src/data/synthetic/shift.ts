@@ -2,7 +2,7 @@
  * Generators for transfer, continual and meta-learning: a source and a shifted target domain of two moons (covariate
  * shift by rotation, translation or scaling), classes drawn with different priors in two domains (label shift), a
  * sequence of related classification tasks for continual learning. (The sinusoid tasks of MAML are part of
- * `aifn-applied/learning/transfer`'s meta-learning set-up.)
+ * `aifn-methods/learning/transfer`'s meta-learning set-up.)
  */
 
 import type { FunctionInfo } from 'aifn/foundation/contracts'

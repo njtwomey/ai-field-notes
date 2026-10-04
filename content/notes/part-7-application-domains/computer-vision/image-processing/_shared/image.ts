@@ -1,8 +1,8 @@
+import { normal, stream } from 'aifn/foundation/random'
 /**
  * Small greyscale-image helpers for the image-processing notes. An image is row-major, `img[r][c]`, with values in
  * [0, 1]. Everything here is light enough to recompute on a 64 × 64 image during a slider drag.
  */
-import { rng } from '@/lib/math'
 
 export type Image = number[][]
 export type Kernel = number[][]
@@ -16,7 +16,7 @@ export const SIZE = 64
  * deviation.
  */
 export function testImage(noise = 0, seed = 7): Image {
-  const g = rng(seed)
+  const g = stream(seed)
   return Array.from({ length: SIZE }, (_, r) =>
     Array.from({ length: SIZE }, (_, c) => {
       let v = 0.15
@@ -26,7 +26,7 @@ export function testImage(noise = 0, seed = 7): Image {
       if (r >= 6 && r <= 28 && Math.abs(c - 48) <= (28 - r) * 0.55) v = 0.7
       if (r >= 36 && r <= 59 && c >= 36 && c <= 59)
         v = (Math.floor((r - 36) / 6) + Math.floor((c - 36) / 6)) % 2 ? 0.9 : 0.1
-      return noise > 0 ? v + noise * g.normal() : v
+      return noise > 0 ? v + noise * normal(g) : v
     }),
   )
 }

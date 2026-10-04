@@ -1,5 +1,5 @@
 /**
- * `aifn-applied/evaluation/generative`: generative-model metrics (FID, KID, inception score, precision and recall).
+ * `aifn-methods/evaluation/generative`: generative-model metrics (FID, KID, inception score, precision and recall).
  */
 
 export {

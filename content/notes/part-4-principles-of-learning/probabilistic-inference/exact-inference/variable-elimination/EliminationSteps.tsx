@@ -1,8 +1,5 @@
 import { useState } from 'react'
-import { MathText } from 'aifn-render'
-import { Diagram } from 'aifn-render'
-import { link, variable } from 'aifn-render'
-import { Interactive, ParamChoice, Readout, StepControls } from 'aifn-render'
+import { choice, Diagram, Figure, link, MathText, Player, Readout, useFigureState, variable } from 'aifn-render'
 
 type Vertex = { id: string; label?: string; x: number; y: number }
 type Problem = { nodes: Vertex[]; edges: [string, string][]; order: string[] }
@@ -74,9 +71,21 @@ function eliminate(p: Problem, steps: number) {
 
 /** Step through an elimination order; each step joins the eliminated variable's neighbours with fill edges. */
 export function EliminationSteps() {
-  const [key, setKey] = useState<Key>('centre')
-  const [steps, setSteps] = useState(0)
-  const p: Problem = PROBLEMS[key]
+  const fs = useFigureState({
+    key: choice<Key>(
+      [
+        { value: 'alarm', label: 'alarm: E, B' },
+        { value: 'leaves', label: 'star: leaves first' },
+        { value: 'centre', label: 'star: centre first' },
+      ],
+      'centre',
+      { label: 'graph and order' },
+    ),
+  })
+  // The position belongs to the graph it was reached on; a new graph starts again from step 0.
+  const [pos, setPos] = useState({ key: fs.key, step: 0 })
+  const steps = pos.key === fs.key ? pos.step : 0
+  const p: Problem = PROBLEMS[fs.key]
   const state = eliminate(p, steps)
   const done = steps >= p.order.length
   const label = (id: string) => `$${p.nodes.find((n) => n.id === id)?.label ?? id}$`
@@ -109,35 +118,21 @@ export function EliminationSteps() {
     edges,
   }
   return (
-    <Interactive
+    <Figure
       title="Elimination order and fill edges"
       caption={
-        <MathText text="Step eliminates the coloured variable. Its current neighbours become a clique; the dashed coloured edges are fill edges added by earlier steps. Eliminated variables stay in place, dashed and grey. In the star, eliminating the leaves first adds nothing, while eliminating the centre first joins every pair of leaves." />
+        <MathText text="Each step eliminates the coloured variable. Its current neighbours become a clique; the dashed coloured edges are fill edges added by earlier steps. Eliminated variables stay in place, dashed and grey. In the star, eliminating the leaves first adds nothing, while eliminating the centre first joins every pair of leaves." />
       }
+      state={fs}
       controls={
-        <>
-          <ParamChoice
-            label="graph and order"
-            value={key}
-            onChange={(k) => {
-              setKey(k)
-              setSteps(0)
-            }}
-            options={[
-              { value: 'alarm', label: 'alarm: E, B' },
-              { value: 'leaves', label: 'star: leaves first' },
-              { value: 'centre', label: 'star: centre first' },
-            ]}
-          />
-          <StepControls
-            onStep={() => setSteps((s) => s + 1)}
-            onRun={() => setSteps(p.order.length)}
-            onReset={() => setSteps(0)}
-            done={done}
-          />
-        </>
+        <Player
+          value={steps}
+          onChange={(step) => setPos({ key: fs.key, step })}
+          count={p.order.length + 1}
+          label="variables eliminated"
+        />
       }
-      readout={
+      readouts={
         <>
           <Readout label="order" value={<MathText text={p.order.map(label).join(', ')} />} />
           <Readout
@@ -150,6 +145,6 @@ export function EliminationSteps() {
       }
     >
       <Diagram spec={spec} ariaLabel="Undirected graph during variable elimination" />
-    </Interactive>
+    </Figure>
   )
 }

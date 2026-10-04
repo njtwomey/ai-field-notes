@@ -5,7 +5,7 @@
 
 import { normal, type Stream } from 'aifn/foundation/random'
 import { fromData, type Tensor } from 'aifn/foundation/tensor'
-import { hmm, sampleHmm } from 'aifn-applied/inference/sequence-models'
+import { hmm, sampleHmm } from 'aifn-methods/inference/sequence-models'
 import { checkCount, labels, matrix, vector, type DatasetMeta } from '../types'
 import type { DatasetInfo } from 'aifn/foundation/contracts'
 import { definer } from 'aifn/foundation/registry'
@@ -37,7 +37,7 @@ function rows(m: readonly (readonly number[])[], what: string): number[][] {
 
 /**
  * n steps of a discrete hidden Markov model: z₁ ~ initial, z_t | z_{t−1} ~ transition[z_{t−1}], x_t | z_t ~
- * emission[z_t]. Observation symbols are 0, …, m − 1. Drawn by `aifn-applied/inference/sequence-models`' `sampleHmm`
+ * emission[z_t]. Observation symbols are 0, …, m − 1. Drawn by `aifn-methods/inference/sequence-models`' `sampleHmm`
  * (step t from `child(s, 'step', t)`).
  */
 export function hmmSample(

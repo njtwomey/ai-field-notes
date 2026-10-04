@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { Interactive, ParamButton, ParamSlider, Readout, formatNumber } from 'aifn-render'
+import { Button, Figure, float, formatNumber, Readout, useFigureState } from 'aifn-render'
 import { MAP_CAPTION } from '../_shared/mapText'
 import { OrdinalDataControls } from '../_shared/OrdinalDataControls'
 import { OrdinalMap } from '../_shared/OrdinalMap'
@@ -14,23 +14,26 @@ import { fitGp2d, GP_CAP, LENGTHSCALES } from '../_shared/gp2d'
 export function GpOrdinalMap() {
   const { spec, setSpec, resolution, setResolution, fill, setFill } = useOrdinalData()
   const [query, setQuery] = useState<Point>([0, 1.5])
-  const [lengthscale, setLengthscale] = useState(0.8)
-  const [sigma, setSigma] = useState(0.3)
+  const state = useFigureState({
+    lengthscale: float(0.8, { min: 0.2, max: 2.5, step: 0.05, label: 'lengthscale ℓ' }),
+    sigma: float(0.3, { min: 0.05, max: 1, step: 0.05, label: 'noise σ of the likelihood' }),
+  })
   const d = dataset(spec)
 
-  const fit = useMemo(() => fitGp2d(d, spec, lengthscale, sigma), [d, spec, lengthscale, sigma])
+  const fit = useMemo(() => fitGp2d(d, spec, state.lengthscale, state.sigma), [d, spec, state.lengthscale, state.sigma])
   const metrics = useMemo(() => ordinalMetrics(d.test.y, d.test.x.map(fit.fitted.predict), d.k), [d, fit])
 
   const fitByEvidence = () => {
-    const best = LENGTHSCALES.map((l) => ({ l, e: fitGp2d(d, spec, l, sigma).logEvidence })).reduce((a, b) =>
+    const best = LENGTHSCALES.map((l) => ({ l, e: fitGp2d(d, spec, l, state.sigma).logEvidence })).reduce((a, b) =>
       b.e > a.e ? b : a,
     )
-    setLengthscale(best.l)
+    state.set('lengthscale', best.l)
   }
 
   return (
-    <Interactive
+    <Figure
       title="Gaussian-process ordinal regression on shared data"
+      state={state}
       caption={`A GP with a squared-exponential kernel, fitted by the Laplace approximation to at most ${GP_CAP} training points (the same number from each class), with thresholds fixed one unit apart. ${MAP_CAPTION} Metrics are computed on ${TEST_PER_CLASS} held-out points per class. The button tries ${LENGTHSCALES.length} lengthscales and keeps the one with the highest approximate evidence.`}
       controls={
         <>
@@ -42,28 +45,12 @@ export function GpOrdinalMap() {
             fill={fill}
             setFill={setFill}
           />
-          <ParamSlider
-            label="lengthscale ℓ"
-            value={lengthscale}
-            onChange={setLengthscale}
-            min={0.2}
-            max={2.5}
-            step={0.05}
-            debounceMs={150}
-          />
-          <ParamSlider
-            label="noise σ of the likelihood"
-            value={sigma}
-            onChange={setSigma}
-            min={0.05}
-            max={1}
-            step={0.05}
-            debounceMs={150}
-          />
-          <ParamButton onClick={fitByEvidence}>fit ℓ by evidence</ParamButton>
+          <Button variant="outline" size="sm" onClick={fitByEvidence}>
+            fit ℓ by evidence
+          </Button>
         </>
       }
-      readout={
+      readouts={
         <>
           <Readout label="accuracy" value={formatNumber(metrics.accuracy)} />
           <Readout label="MAE" value={formatNumber(metrics.mae)} />
@@ -75,6 +62,6 @@ export function GpOrdinalMap() {
       }
     >
       <OrdinalMap fitted={fit.fitted} data={d} resolution={resolution} fill={fill} query={query} setQuery={setQuery} />
-    </Interactive>
+    </Figure>
   )
 }

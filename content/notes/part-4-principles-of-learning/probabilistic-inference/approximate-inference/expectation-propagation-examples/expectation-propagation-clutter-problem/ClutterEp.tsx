@@ -1,21 +1,23 @@
 import { useMemo, useState } from 'react'
 import {
-  Interactive,
-  ParamButton,
-  ParamSlider,
-  Readout,
-  XYChart,
+  Button,
+  Figure,
   formatNumber,
-  useParam,
-  type Handle,
-  type XYSeries,
+  Handle,
+  Player,
+  Plot,
+  Readout,
+  seriesLayers,
+  type SeriesSpec,
+  slider,
+  useAxis,
+  useFigureState,
 } from 'aifn-render'
 import { clutterEp, clutterExact, clutterFactorAndSite, clutterLaplace, clutterVb } from '../_shared/clutter'
 import { grid, normalPdf, toMoments, type Moments } from '../_shared/ep'
 
 const X_RANGE: [number, number] = [-6, 8]
 const PLOT = grid(-6, 8, 281)
-const Y_RANGE: [number | undefined, number | undefined] = [0, undefined]
 const INITIAL = [-2.5, 0.5, 1.5, 2, 3]
 const SWEEPS = 10
 
@@ -28,27 +30,32 @@ const density = (m: Moments) => PLOT.map((t) => (m.variance > 0 ? normalPdf(t, m
  */
 export function ClutterEp() {
   const [points, setPoints] = useState(INITIAL)
-  const w = useParam(0.2, { min: 0.05, max: 0.9, step: 0.05 })
-  const damping = useParam(1, { min: 0.1, max: 1, step: 0.05 })
-  const step = useParam(INITIAL.length, { min: 0, max: INITIAL.length * SWEEPS, step: 1 })
+  const state = useFigureState({
+    w: slider(0.05, 0.9, 0.2, { step: 0.05, label: 'clutter weight w' }),
+    damping: slider(0.1, 1, 1, { step: 0.05, label: 'damping (1 = none)' }),
+  })
+  const w = state.w
+  const damping = state.damping
+  // Site updates made: the walk-through position. It counts updates, so it keeps its meaning when the inputs change.
+  const [step, setStep] = useState(0)
 
   const r = useMemo(() => {
-    const exact = clutterExact(points, w.value)
+    const exact = clutterExact(points, w)
     // Plot the exact density on the plot grid by interpolating the wide grid, which is 0.04 apart.
     const h = exact.thetas[1] - exact.thetas[0]
     const exactPlot = PLOT.map((t) => exact.density[Math.round((t - exact.thetas[0]) / h)])
     return {
       exact,
       exactPlot,
-      steps: clutterEp(points, w.value, SWEEPS, damping.value),
-      laplace: clutterLaplace(points, w.value),
-      vb: clutterVb(points, w.value),
+      steps: clutterEp(points, w, SWEEPS, damping),
+      laplace: clutterLaplace(points, w),
+      vb: clutterVb(points, w),
     }
-  }, [points, w.value, damping.value])
+  }, [points, w, damping])
 
-  const current = step.value === 0 ? null : r.steps[step.value - 1]
+  const current = step === 0 ? null : r.steps[step - 1]
   const q: Moments = current ? toMoments(current.q) : { mean: 0, variance: 100 }
-  const upper: XYSeries[] = [
+  const upper: SeriesSpec[] = [
     { name: 'exact', type: 'line', x: PLOT, y: r.exactPlot, emphasis: true },
     { name: 'EP', type: 'line', x: PLOT, y: density(q), slot: 0 },
     ...(Number.isFinite(r.laplace.variance)
@@ -57,13 +64,13 @@ export function ClutterEp() {
     { name: 'VB', type: 'line', x: PLOT, y: density(r.vb), slot: 2, dashed: true },
   ]
 
-  let lower: XYSeries[] = []
+  let lower: SeriesSpec[] = []
   let site = '—'
   if (current?.ok && current.q.tau > 0) {
     const x = points[current.site]
     // The stored site is q_after / cavity; with damping this differs from the undamped projection of the tilted density.
     const next = toMoments(current.q)
-    const fs = clutterFactorAndSite(x, w.value, PLOT, current.cavity, next, current.tilted.logZ)
+    const fs = clutterFactorAndSite(x, w, PLOT, current.cavity, next, current.tilted.logZ)
     const top = Math.max(...fs.factor)
     const cav = PLOT.map((t) => normalPdf(t, current.cavity.mean, current.cavity.variance))
     const cavTop = Math.max(...cav)
@@ -77,7 +84,7 @@ export function ClutterEp() {
   } else if (current) site = 'skipped: cavity precision ≤ 0'
 
   const negative = current ? current.sites.filter((s) => s.tau < 0).length : 0
-  const handles: Handle[] = points.map((x, i) => ({
+  const handles = points.map((x, i): Handle => ({
     kind: 'point',
     at: [x, 0],
     label: `x${i + 1}`,
@@ -86,19 +93,30 @@ export function ClutterEp() {
   }))
   const where = current ? `sweep ${current.sweep + 1}, site ${current.site + 1}` : 'prior'
 
+  const xAxis = useAxis({ label: 'θ', range: X_RANGE })
+  const yAxis = useAxis({ label: 'density', range: [0, undefined], hold: 'union' })
+  const yAxis2 = useAxis({ label: 'factor value', range: [0, undefined], hold: 'union' })
+
   return (
-    <Interactive
+    <Figure
       title="EP on the clutter problem, one site at a time"
+      state={state}
       caption="Top: the exact posterior of θ (ink), EP after the chosen number of site updates, and the Laplace and variational (VB) Gaussians. The five data points sit on the axis; drag them. Bottom: the update just made, with the exact factor for that point, the cavity (scaled) and the Gaussian site that replaces the factor. An outlier's site has negative precision and curves upward. The first sweep is assumed density filtering."
       controls={
         <>
-          <ParamSlider label="site updates" param={step} withArrows format={(v) => String(v)} />
-          <ParamSlider label="clutter weight w" param={w} />
-          <ParamSlider label="damping (1 = none)" param={damping} />
-          <ParamButton onClick={() => setPoints(INITIAL)}>Reset points</ParamButton>
+          <Player
+            value={step}
+            onChange={setStep}
+            count={INITIAL.length * SWEEPS + 1}
+            label="site updates"
+            format={(k) => `${k} of ${INITIAL.length * SWEEPS}`}
+          />
+          <Button variant="outline" size="sm" onClick={() => setPoints(INITIAL)}>
+            Reset points
+          </Button>
         </>
       }
-      readout={
+      readouts={
         <>
           <Readout label="position" value={where} />
           <Readout label="EP mean, var" value={`${formatNumber(q.mean)}, ${formatNumber(q.variance)}`} />
@@ -110,10 +128,17 @@ export function ClutterEp() {
         </>
       }
     >
-      <XYChart series={upper} xLabel="θ" yLabel="density" xRange={X_RANGE} yRange={Y_RANGE} handles={handles} />
+      <Plot x={xAxis} y={yAxis}>
+        {seriesLayers(upper)}
+        {handles.map((h) => (
+          <Handle key={h.label} {...h} />
+        ))}
+      </Plot>
       {lower.length > 0 && (
-        <XYChart series={lower} xLabel="θ" yLabel="factor value" xRange={X_RANGE} yRange={Y_RANGE} height={240} />
+        <Plot x={xAxis} y={yAxis2} height={240}>
+          {seriesLayers(lower)}
+        </Plot>
       )}
-    </Interactive>
+    </Figure>
   )
 }

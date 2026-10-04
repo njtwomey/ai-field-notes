@@ -1,15 +1,18 @@
 import { useMemo, useState } from 'react'
 import {
-  Interactive,
-  ParamChoice,
-  ParamSlider,
-  Readout,
-  XYChart,
+  Area,
+  choice,
+  Curve,
+  Figure,
   formatNumber,
-  type Handle,
-  type XYSeries,
+  Handle,
+  int,
+  Plot,
+  Readout,
+  useAxis,
+  useFigureState,
 } from 'aifn-render'
-import { linspace } from '@/lib/math'
+import { linspace, toFlat } from 'aifn/foundation/tensor'
 
 type Rule = 'left' | 'midpoint' | 'right'
 type Fn = { label: string; f: (x: number) => number; F: (x: number) => number; range: [number, number] }
@@ -31,82 +34,79 @@ const FUNCTIONS: Record<'square' | 'sine' | 'bump', Fn> = {
  * f(x) there (right): the two halves of the fundamental theorem.
  */
 export function RiemannSums() {
-  const [name, setName] = useState<keyof typeof FUNCTIONS>('square')
-  const [rule, setRule] = useState<Rule>('left')
-  const [n, setN] = useState(6)
-  const fn = FUNCTIONS[name]
+  const state = useFigureState({
+    name: choice<keyof typeof FUNCTIONS>(
+      [
+        { value: 'square', label: 'x²' },
+        { value: 'sine', label: 'sin x' },
+        { value: 'bump', label: '1 + x e⁻ˣ' },
+      ],
+      'square',
+      { label: 'function' },
+    ),
+    rule: choice<Rule>(
+      [
+        { value: 'left', label: 'left' },
+        { value: 'midpoint', label: 'midpoint' },
+        { value: 'right', label: 'right' },
+      ],
+      'left',
+      { label: 'rule' },
+    ),
+    n: int(6, { min: 1, max: 60, step: 1, label: 'pieces n' }),
+  })
+  const fn = FUNCTIONS[state.name]
   const [a, b] = fn.range
   const [x0, setX0] = useState(1)
   const x = Math.min(Math.max(x0, a), b)
 
   const r = useMemo(() => {
-    const h = (b - a) / n
-    const offset = rule === 'left' ? 0 : rule === 'right' ? 1 : 0.5
+    const h = (b - a) / state.n
+    const offset = state.rule === 'left' ? 0 : state.rule === 'right' ? 1 : 0.5
     // Each rectangle traced as one closed outline, so the whole set draws as a single shaded line.
     const rx: number[] = []
     const ry: number[] = []
     let sum = 0
-    for (let i = 0; i < n; i++) {
+    for (let i = 0; i < state.n; i++) {
       const lo = a + i * h
       const height = fn.f(lo + offset * h)
       sum += height * h
       rx.push(lo, lo, lo + h, lo + h)
       ry.push(0, height, height, 0)
     }
-    const xs = linspace(a, b, 300)
+    const xs = toFlat(linspace(a, b, 300))
     return { h, sum, rx, ry, xs, exact: fn.F(b) - fn.F(a) }
-  }, [fn, a, b, n, rule])
+  }, [fn, a, b, state.n, state.rule])
 
-  const left: XYSeries[] = [
-    { name: `${rule} sum`, type: 'line', x: r.rx, y: r.ry, area: true, slot: 1 },
-    { name: `f(x) = ${fn.label}`, type: 'line', x: r.xs, y: r.xs.map(fn.f), slot: 0 },
-  ]
+  const left = [
+    { name: `${state.rule} sum`, x: r.rx, y: r.ry, slot: 1 },
+    { name: `f(x) = ${fn.label}`, x: r.xs, y: r.xs.map(fn.f), slot: 0 },
+  ] as const
   // The tangent to F at x has slope f(x): the first part of the theorem.
   const slope = fn.f(x)
   const span = (b - a) / 4
-  const right: XYSeries[] = [
-    { name: 'F(x) = area from a to x', type: 'line', x: r.xs, y: r.xs.map((t) => fn.F(t) - fn.F(a)), slot: 0 },
+  const right = [
+    { name: 'F(x) = area from a to x', x: r.xs, y: r.xs.map((t) => fn.F(t) - fn.F(a)), slot: 0 },
     {
       name: 'tangent, slope f(x)',
-      type: 'line',
       x: [x - span, x + span],
       y: [fn.F(x) - fn.F(a) - slope * span, fn.F(x) - fn.F(a) + slope * span],
       slot: 1,
       dashed: true,
     },
-  ]
-  const handles: Handle[] = [{ kind: 'x', at: x, label: 'x', onDrag: (v) => setX0(Math.min(Math.max(v, a), b)) }]
+  ] as const
 
+  const xAxis = useAxis({ label: 'x', range: [a, b] })
+  const yAxis = useAxis({ label: 'f(x)', hold: 'union' })
+  const xAxis2 = useAxis({ label: 'x', range: [a, b] })
+  const yAxis2 = useAxis({ label: 'F(x)', hold: 'union' })
   return (
-    <Interactive
+    <Figure
       title="Area as a limit, and its rate of change"
+      state={state}
       caption="Left: rectangles whose heights are taken at the left end, the midpoint or the right end of each piece. Their total area approaches the integral as n grows; the midpoint rule gets there fastest. Right: the accumulated area F(x). Drag the line labelled x; the dashed tangent has slope exactly f(x), the height of the curve on the left."
-      controls={
-        <>
-          <ParamChoice
-            label="function"
-            value={name}
-            onChange={setName}
-            options={[
-              { value: 'square', label: 'x²' },
-              { value: 'sine', label: 'sin x' },
-              { value: 'bump', label: '1 + x e⁻ˣ' },
-            ]}
-          />
-          <ParamChoice
-            label="rule"
-            value={rule}
-            onChange={setRule}
-            options={[
-              { value: 'left', label: 'left' },
-              { value: 'midpoint', label: 'midpoint' },
-              { value: 'right', label: 'right' },
-            ]}
-          />
-          <ParamSlider label="pieces n" value={n} onChange={setN} min={1} max={60} step={1} />
-        </>
-      }
-      readout={
+
+      readouts={
         <>
           <Readout label="Riemann sum" value={formatNumber(r.sum)} />
           <Readout label="integral F(b) − F(a)" value={formatNumber(r.exact)} />
@@ -116,9 +116,16 @@ export function RiemannSums() {
       }
     >
       <div className="grid gap-4 md:grid-cols-2">
-        <XYChart series={left} xLabel="x" yLabel="f(x)" xRange={[a, b]} />
-        <XYChart series={right} xLabel="x" yLabel="F(x)" xRange={[a, b]} handles={handles} />
+        <Plot x={xAxis} y={yAxis}>
+          <Area {...left[0]} />
+          <Curve {...left[1]} />
+        </Plot>
+        <Plot x={xAxis2} y={yAxis2}>
+          <Curve {...right[0]} />
+          <Curve {...right[1]} />
+          <Handle kind="x" at={x} label="x" onDrag={(v) => setX0(Math.min(Math.max(v, a), b))} />
+        </Plot>
       </div>
-    </Interactive>
+    </Figure>
   )
 }

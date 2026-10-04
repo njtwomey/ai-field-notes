@@ -1,5 +1,5 @@
 /**
- * The registry of the `aifn-applied/learning/trees-and-ensembles` group's shared layer: tree growth as a traceable
+ * The registry of the `aifn-methods/learning/trees-and-ensembles` group's shared layer: tree growth as a traceable
  * algorithm and the tree functions (prediction, paths, regions, pruning, importances). Bagging and boosting register
  * in their own modules.
  */

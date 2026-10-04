@@ -1,6 +1,18 @@
 import { useMemo } from 'react'
-import { Interactive, ParamSlider, Readout, XYChart, formatNumber, useParam, type XYSeries } from 'aifn-render'
-import { rng } from '@/lib/math'
+import {
+  Bars,
+  Curve,
+  Figure,
+  float,
+  formatNumber,
+  int,
+  Plot,
+  Points,
+  Readout,
+  useAxis,
+  useFigureState,
+} from 'aifn-render'
+import { normal, stream, uniform } from 'aifn/foundation/random'
 
 const sigmoid = (z: number) => 1 / (1 + Math.exp(-z))
 
@@ -10,20 +22,22 @@ const sigmoid = (z: number) => 1 / (1 + Math.exp(-z))
  * reliability diagram bins p and compares the mean prediction with the observed frequency in each bin.
  */
 export function ReliabilityDiagram() {
-  const k = useParam(2, { min: 0.3, max: 3, step: 0.05 })
-  const b = useParam(0, { min: -2, max: 2, step: 0.05 })
-  const bins = useParam(10, { min: 3, max: 20, step: 1 })
-  const n = useParam(2000, { min: 200, max: 5000, step: 100 })
-  const seed = useParam(1, { min: 1, max: 30, step: 1 })
+  const state = useFigureState({
+    k: float(2, { min: 0.3, max: 3, step: 0.05, label: 'sharpness k' }),
+    b: float(0, { min: -2, max: 2, step: 0.05, label: 'bias b' }),
+    bins: int(10, { min: 3, max: 20, step: 1, label: 'bins', format: (v) => String(v) }),
+    n: int(2000, { min: 200, max: 5000, step: 100, label: 'cases', format: (v) => String(v) }),
+    seed: int(1, { min: 1, max: 30, step: 1, label: 'seed', format: (v) => String(v) }),
+  })
 
   const r = useMemo(() => {
-    const g = rng(seed.value)
-    const cases = Array.from({ length: n.value }, () => {
-      const z = 1.5 * g.normal()
-      const y = g.uniform() < sigmoid(z) ? 1 : 0
-      return { p: sigmoid(k.value * z + b.value), y }
+    const g = stream(state.seed)
+    const cases = Array.from({ length: state.n }, () => {
+      const z = 1.5 * normal(g)
+      const y = uniform(g) < sigmoid(z) ? 1 : 0
+      return { p: sigmoid(state.k * z + state.b), y }
     })
-    const m = bins.value
+    const m = state.bins
     const sumP = new Array<number>(m).fill(0)
     const sumY = new Array<number>(m).fill(0)
     const count = new Array<number>(m).fill(0)
@@ -53,28 +67,23 @@ export function ReliabilityDiagram() {
       predicted.push(sumP[j] / count[j])
     }
     return { ece, mce, logLoss: logLoss / cases.length, brier: brier / cases.length, centres, observed, predicted }
-  }, [k.value, b.value, bins.value, n.value, seed.value])
+  }, [state.k, state.b, state.bins, state.n, state.seed])
 
-  const series: XYSeries[] = [
-    { name: 'perfect calibration', type: 'line', x: [0, 1], y: [0, 1], dashed: true, muted: true },
-    { name: 'observed frequency', type: 'bar', x: r.centres, y: r.observed, slot: 0 },
-    { name: 'mean prediction in bin', type: 'scatter', x: r.centres, y: r.predicted, emphasis: true },
-  ]
+  const series = [
+    { name: 'perfect calibration', x: [0, 1], y: [0, 1], dashed: true, muted: true },
+    { name: 'observed frequency', x: r.centres, y: r.observed, slot: 0 },
+    { name: 'mean prediction in bin', x: r.centres, y: r.predicted, emphasis: true },
+  ] as const
 
+  const xAxis = useAxis({ label: 'predicted probability', range: [0, 1] })
+  const yAxis = useAxis({ label: 'frequency of positives', range: [0, 1], equal: xAxis })
   return (
-    <Interactive
+    <Figure
       title="Reliability diagram and expected calibration error"
+      state={state}
       caption="A classifier reports p = σ(k·z + b) where the true probability is σ(z). Bars show the observed frequency of positives in each bin of p; diamonds show the mean prediction in the bin. Where they differ the classifier is miscalibrated. k > 1 makes it overconfident (bars flatter than the diagonal), k < 1 underconfident, and b biases every prediction. At k = 1, b = 0 the model is calibrated and the remaining ECE is sampling noise, which grows with more bins and fewer cases."
-      controls={
-        <>
-          <ParamSlider label="sharpness k" param={k} />
-          <ParamSlider label="bias b" param={b} />
-          <ParamSlider label="bins" param={bins} format={(v) => String(v)} />
-          <ParamSlider label="cases" param={n} format={(v) => String(v)} />
-          <ParamSlider label="seed" param={seed} format={(v) => String(v)} withArrows />
-        </>
-      }
-      readout={
+
+      readouts={
         <>
           <Readout label="ECE" value={formatNumber(r.ece)} />
           <Readout label="MCE" value={formatNumber(r.mce)} />
@@ -84,15 +93,12 @@ export function ReliabilityDiagram() {
       }
     >
       <div className="mx-auto w-full max-w-xl">
-        <XYChart
-          series={series}
-          xLabel="predicted probability"
-          yLabel="frequency of positives"
-          xRange={[0, 1]}
-          yRange={[0, 1]}
-          equalAspect
-        />
+        <Plot x={xAxis} y={yAxis}>
+          <Curve {...series[0]} />
+          <Bars {...series[1]} />
+          <Points {...series[2]} />
+        </Plot>
       </div>
-    </Interactive>
+    </Figure>
   )
 }

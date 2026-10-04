@@ -1,6 +1,6 @@
-import { Heatmap, XYChart, formatNumber } from 'aifn-render'
+import { Plot, Raster, formatNumber, seriesLayers, useAxis } from 'aifn-render'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
-import type { Output } from '@/generated/contracts'
+import type { ChartOutput, HeatmapOutput, Output } from '@/generated/contracts'
 import { generatedUrl } from '@/lib/generated'
 
 /**
@@ -57,26 +57,9 @@ function OutputBody({ output, runDir }: { output: Output; runDir: string }) {
         </div>
       )
     case 'chart':
-      return (
-        <XYChart
-          series={output.series.map((s) => ({ ...s, emphasis: s.name === 'centroids' }))}
-          xLabel={output.x_label}
-          yLabel={output.y_label}
-          ariaLabel={output.title ?? undefined}
-        />
-      )
+      return <ChartView output={output} />
     case 'heatmap':
-      return (
-        <Heatmap
-          x={output.x}
-          y={output.y}
-          z={output.z}
-          xLabel={output.x_label}
-          yLabel={output.y_label}
-          overlay={output.overlay}
-          ariaLabel={output.title ?? undefined}
-        />
-      )
+      return <HeatmapView output={output} />
     case 'file':
       return output.mime.startsWith('image/') ? (
         <img
@@ -92,4 +75,25 @@ function OutputBody({ output, runDir }: { output: Output; runDir: string }) {
     default:
       return output satisfies never
   }
+}
+
+function ChartView({ output }: { output: ChartOutput }) {
+  const x = useAxis({ label: output.x_label })
+  const y = useAxis({ label: output.y_label })
+  return (
+    <Plot x={x} y={y} ariaLabel={output.title ?? undefined}>
+      {seriesLayers(output.series.map((s) => ({ ...s, emphasis: s.name === 'centroids' })))}
+    </Plot>
+  )
+}
+
+function HeatmapView({ output }: { output: HeatmapOutput }) {
+  const x = useAxis({ label: output.x_label })
+  const y = useAxis({ label: output.y_label })
+  return (
+    <Plot x={x} y={y} ariaLabel={output.title ?? undefined}>
+      <Raster x={output.x} y={output.y} z={output.z} />
+      {seriesLayers(output.overlay, { live: true })}
+    </Plot>
+  )
 }

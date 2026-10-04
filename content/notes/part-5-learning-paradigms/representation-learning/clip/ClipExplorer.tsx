@@ -16,14 +16,14 @@ import {
 } from 'aifn-render'
 import { stream } from 'aifn/foundation/random'
 import { slice, toFlat } from 'aifn/foundation/tensor'
-import { pairedShapes } from 'aifn-applied/data/synthetic'
+import { pairedShapes } from 'aifn-methods/data/synthetic'
 import {
   contrastiveTrainingRun,
   embed,
   TwoTower,
   type ContrastiveSnapshot,
   type TemperatureSetting,
-} from 'aifn-applied/neural/contrastive'
+} from 'aifn-methods/neural/contrastive'
 
 const TEMPERATURE_MODES = [
   { value: 'learned', label: 'Learned temperature (initial τ = 0.1)' },
@@ -45,8 +45,7 @@ export function ClipExplorer() {
     const train = pairedShapes(sTrain, { n: 300, pixelNoise: 0.05 })
     const test = pairedShapes(sTest, { n: 120, pixelNoise: 0.05 })
 
-    const tempSetting: TemperatureSetting =
-      tempChoice === 'learned' ? 'learned' : Number(tempChoice)
+    const tempSetting: TemperatureSetting = tempChoice === 'learned' ? 'learned' : Number(tempChoice)
 
     const gen = contrastiveTrainingRun(train, test, {
       steps,
@@ -179,12 +178,7 @@ export function ClipExplorer() {
       }
     >
       <ControlRow label="Training settings">
-        <Select
-          label="Temperature parameter"
-          value={tempChoice}
-          options={TEMPERATURE_MODES}
-          onChange={setTempChoice}
-        />
+        <Select label="Temperature parameter" value={tempChoice} options={TEMPERATURE_MODES} onChange={setTempChoice} />
         <Select
           label="Training steps"
           value={String(steps)}
@@ -198,79 +192,41 @@ export function ClipExplorer() {
       </ControlRow>
 
       <ControlRow label="Training progression">
-        <Player
-          count={Math.max(1, numCheckpoints)}
-          value={currentIdx}
-          onChange={setCheckpointIndex}
-        />
+        <Player count={Math.max(1, numCheckpoints)} value={currentIdx} onChange={setCheckpointIndex} />
       </ControlRow>
 
       <Plots>
         <Plot x={circleX} y={circleY} title="Multimodal alignment circle S¹ (lines = paired views)">
-          <Curve
-            x={circleRing.x}
-            y={circleRing.y}
-            slot={0}
-            thin={true}
-          />
-          <Segments
-            segments={subsetData.segments}
-            slot={0}
-          />
-          <Points
-            x={subsetData.imageX}
-            y={subsetData.imageY}
-            slot={1}
-            size={5}
-          />
-          <Points
-            x={subsetData.textX}
-            y={subsetData.textY}
-            slot={2}
-            size={4}
-          />
+          <Curve x={circleRing.x} y={circleRing.y} slot={0} thin={true} />
+          <Segments segments={subsetData.segments} slot={0} />
+          <Points x={subsetData.imageX} y={subsetData.imageY} slot={1} size={5} />
+          <Points x={subsetData.textX} y={subsetData.textY} slot={2} size={4} />
         </Plot>
 
         <Plot x={matrixAxisX} y={matrixAxisY} title="Batch similarity matrix (diagonal = positive pairs)">
           {subsetData.similarityMatrix.length > 0 && (
-            <Raster
-              x={matrixGrid}
-              y={matrixGrid}
-              z={subsetData.similarityMatrix}
-              scale="diverging"
-            />
+            <Raster x={matrixGrid} y={matrixGrid} z={subsetData.similarityMatrix} scale="diverging" />
           )}
         </Plot>
       </Plots>
 
       <ControlRow label="Diagnostics">
-        <Readout
-          label="Step"
-          value={currentCheckpoint ? currentCheckpoint.step : '—'}
-        />
+        <Readout label="Step" value={currentCheckpoint ? currentCheckpoint.step : '—'} />
         <Readout
           label="Zero-shot accuracy"
           value={
-            currentCheckpoint
-              ? `${formatNumber(Number((currentCheckpoint.zeroShotSeen * 100).toFixed(1)))}%`
-              : '—'
+            currentCheckpoint ? `${formatNumber(Number((currentCheckpoint.zeroShotSeen * 100).toFixed(1)))}%` : '—'
           }
         />
         <Readout
           label="Top-1 retrieval"
           value={
-            currentCheckpoint
-              ? `${formatNumber(Number((currentCheckpoint.retrievalTop1 * 100).toFixed(1)))}%`
-              : '—'
+            currentCheckpoint ? `${formatNumber(Number((currentCheckpoint.retrievalTop1 * 100).toFixed(1)))}%` : '—'
           }
         />
         <Readout
           label="Temperature τ"
-          value={
-            currentCheckpoint
-              ? formatNumber(Number(currentCheckpoint.temperature.toFixed(3)))
-              : '—'
-          }
+          value={currentCheckpoint ? formatNumber(Number(currentCheckpoint.temperature.toFixed(3))) : '—'}
         />
       </ControlRow>
     </Figure>

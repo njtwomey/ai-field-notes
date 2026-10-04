@@ -143,10 +143,7 @@ export function RandomProjectionExplorer() {
             value={Number.isFinite(epsNow) ? epsNow.toFixed(3) : 'none (k < 24 ln n)'}
           />
           <Readout label="evaluated pairs" value={String(at.ratios.length)} />
-          <Readout
-            label={`k for ε = 0.25 (n = ${n})`}
-            value={String(johnsonLindenstraussDimension(n, 0.25))}
-          />
+          <Readout label={`k for ε = 0.25 (n = ${n})`} value={String(johnsonLindenstraussDimension(n, 0.25))} />
         </>
       }
       caption="Top-left: 2.5%–97.5% quantile band (shaded), median, and extremes of squared distance ratios after projection vs before over all pairs, alongside the theoretical 1 ± ε(k, n) envelope (dashed). Drag the vertical handle k to inspect the ratio histogram (bottom-left) and worst-case distortion (bottom-right). Top-right: Theoretical target dimension k as a function of n for ε ∈ {0.1, 0.25, 0.5}, illustrating logarithmic scaling in n."
@@ -170,8 +167,22 @@ export function RandomProjectionExplorer() {
             slot={0}
             size={6}
           />
-          <Curve name="1 + ε (JL bound)" x={boundK} y={boundEps.map((e) => ok(1 + e) ?? NaN)} emphasis dashed width={1.5} />
-          <Curve name="1 - ε (JL bound)" x={boundK} y={boundEps.map((e) => ok(1 - e) ?? NaN)} emphasis dashed width={1.5} />
+          <Curve
+            name="1 + ε (JL bound)"
+            x={boundK}
+            y={boundEps.map((e) => ok(1 + e) ?? NaN)}
+            emphasis
+            dashed
+            width={1.5}
+          />
+          <Curve
+            name="1 - ε (JL bound)"
+            x={boundK}
+            y={boundEps.map((e) => ok(1 - e) ?? NaN)}
+            emphasis
+            dashed
+            width={1.5}
+          />
           <Handle
             kind="x"
             at={k}

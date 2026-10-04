@@ -1,10 +1,10 @@
+import { normal, stream, uniform } from 'aifn/foundation/random'
 /**
  * One-parameter EM problems for the bound figure. Each has an exact log-likelihood ℓ(θ), the EM map θ ↦ M(θ), and the
  * KL divergence between the E-step distribution built at θ_q and the exact posterior at θ. The bound built at θ_q is
  * then 𝓛(q, θ) = ℓ(θ) − KL, by the exact decomposition, which is cheaper and more accurate than evaluating
  * E_q[log p(x, z | θ)] + H(q) directly.
  */
-import { rng } from '@/lib/math'
 
 export type EmProblem = {
   label: string
@@ -45,8 +45,8 @@ export const linkage: EmProblem = {
 
 // Symmetric mixture ½N(μ, 1) + ½N(−μ, 1): the likelihood is even in μ, with maxima at ±μ̂ and a stationary point at 0.
 const XS: number[] = (() => {
-  const g = rng(11)
-  return Array.from({ length: 60 }, () => (g.uniform() < 0.5 ? 1 : -1) * 1.2 + g.normal())
+  const g = stream(11)
+  return Array.from({ length: 60 }, () => (uniform(g) < 0.5 ? 1 : -1) * 1.2 + normal(g))
 })()
 const phi = (x: number) => Math.exp(-0.5 * x * x) / Math.sqrt(2 * Math.PI)
 /** Posterior probability that x came from the +μ component: φ(x − μ)/(φ(x − μ) + φ(x + μ)) = sigmoid(2μx). */

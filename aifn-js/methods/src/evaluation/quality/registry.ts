@@ -1,4 +1,4 @@
-/** The functions of `aifn-applied/evaluation/quality` besides its metrics. */
+/** The functions of `aifn-methods/evaluation/quality` besides its metrics. */
 
 import { definer, entries, type Entry, type FunctionInfo } from 'aifn/foundation/registry'
 import * as signal from './signal'

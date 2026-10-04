@@ -1,5 +1,5 @@
 import { useMemo } from 'react'
-import { Interactive, ParamSlider, Readout, XYChart, formatNumber, useParam, type XYSeries } from 'aifn-render'
+import { Curve, Figure, float, formatNumber, Handle, int, Plot, Readout, useAxis, useFigureState } from 'aifn-render'
 
 const N_MAX = 60
 const NS = Array.from({ length: N_MAX + 1 }, (_, n) => n)
@@ -15,36 +15,35 @@ const posterior = (prior: number, n: number, sigma2: number) => 1 / (1 / prior +
 
 /** ID-only, content-only and hybrid item embeddings as ratings accumulate for a new item. */
 export function WarmUp() {
-  const quality = useParam(0.6, { min: 0, max: 0.95, step: 0.05 })
-  const noise = useParam(0.5, { min: 0.1, max: 1.5, step: 0.05 })
-  const count = useParam(5, { min: 0, max: N_MAX, step: 1 })
-  const s2 = (1 - quality.value) * TAU2
-  const sigma2 = noise.value ** 2
+  const state = useFigureState({
+    quality: float(0.6, { min: 0, max: 0.95, step: 0.05, label: 'variance explained by item features' }),
+    noise: float(0.5, { min: 0.1, max: 1.5, step: 0.05, label: 'rating noise σ' }),
+    count: int(5, { min: 0, max: N_MAX, step: 1, label: 'ratings observed for the item', format: (v) => String(v) }),
+  })
+  const s2 = (1 - state.quality) * TAU2
+  const sigma2 = state.noise ** 2
 
-  const series = useMemo((): XYSeries[] => {
+  const series = useMemo(() => {
     const id = NS.map((n) => Math.sqrt(posterior(TAU2, n, sigma2)))
     const content = NS.map(() => Math.sqrt(s2))
     const hybrid = NS.map((n) => Math.sqrt(posterior(s2, n, sigma2)))
     return [
-      { name: 'ID embedding only (collaborative)', type: 'line', x: NS, y: id, slot: 0 },
-      { name: 'content features only', type: 'line', x: NS, y: content, slot: 1 },
-      { name: 'hybrid: content prior + ID updates', type: 'line', x: NS, y: hybrid, slot: 2 },
-    ]
+      { name: 'ID embedding only (collaborative)', x: NS, y: id, slot: 0 },
+      { name: 'content features only', x: NS, y: content, slot: 1 },
+      { name: 'hybrid: content prior + ID updates', x: NS, y: hybrid, slot: 2 },
+    ] as const
   }, [s2, sigma2])
 
-  const n = count.value
+  const n = state.count
+  const xAxis = useAxis({ label: 'ratings observed for the new item', range: [0, N_MAX] })
+  const yAxis = useAxis({ label: 'expected prediction error (RMS)', range: [0, 1.05] })
   return (
-    <Interactive
+    <Figure
       title="Warming up a new item"
+      state={state}
       caption="An idealised linear-Gaussian model of a new item's latent vector. A collaborative ID embedding starts at the prior (it knows nothing) and improves as ratings arrive. A pure content embedding is available at once but never improves, because it does not use the item's ratings; its error is the part of the item's taste profile the features cannot explain. A hybrid starts from the content estimate and refines it with the ratings, so it is best at every count. Raise the feature quality to shrink the content error; step the number of ratings with the arrows."
-      controls={
-        <>
-          <ParamSlider label="variance explained by item features" param={quality} />
-          <ParamSlider label="rating noise σ" param={noise} />
-          <ParamSlider label="ratings observed for the item" param={count} format={(v) => String(v)} withArrows />
-        </>
-      }
-      readout={
+
+      readouts={
         <>
           <Readout label="ID-only error" value={formatNumber(series[0].y[n])} />
           <Readout label="content-only error" value={formatNumber(series[1].y[n])} />
@@ -52,14 +51,12 @@ export function WarmUp() {
         </>
       }
     >
-      <XYChart
-        series={series}
-        xLabel="ratings observed for the new item"
-        yLabel="expected prediction error (RMS)"
-        xRange={[0, N_MAX]}
-        yRange={[0, 1.05]}
-        handles={[{ kind: 'x', at: n, label: 'n', onDrag: (x) => count.set(x) }]}
-      />
-    </Interactive>
+      <Plot x={xAxis} y={yAxis}>
+        <Curve {...series[0]} />
+        <Curve {...series[1]} />
+        <Curve {...series[2]} />
+        <Handle kind="x" at={n} label="n" onDrag={(x) => state.set('count', x)} />
+      </Plot>
+    </Figure>
   )
 }

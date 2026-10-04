@@ -1,5 +1,5 @@
-import { useMemo, useState } from 'react'
-import { Interactive, ParamSlider, Readout, XYChart, type XYSeries } from 'aifn-render'
+import { useMemo } from 'react'
+import { Figure, Plot, Readout, seriesLayers, type SeriesSpec, slider, useAxis, useFigureState } from 'aifn-render'
 
 type Box = { object: string; box: [number, number, number, number]; score: number }
 
@@ -57,11 +57,16 @@ function outlines(boxes: Box[]): { x: number[]; y: number[] } {
 
 /** Greedy non-maximum suppression on ten candidate boxes around three objects. */
 export function NmsExplorer() {
-  const [iouThreshold, setIouThreshold] = useState(0.5)
-  const [scoreThreshold, setScoreThreshold] = useState(0.35)
-  const kept = useMemo(() => nms(BOXES, iouThreshold, scoreThreshold), [iouThreshold, scoreThreshold])
+  const state = useFigureState({
+    iouThreshold: slider(0.1, 0.9, 0.5, { step: 0.05, label: 'IoU threshold', format: (v) => v.toFixed(2) }),
+    scoreThreshold: slider(0, 0.9, 0.35, { step: 0.05, label: 'score threshold', format: (v) => v.toFixed(2) }),
+  })
+  const kept = useMemo(
+    () => nms(BOXES, state.iouThreshold, state.scoreThreshold),
+    [state.iouThreshold, state.scoreThreshold],
+  )
 
-  const series = useMemo<XYSeries[]>(() => {
+  const series = useMemo<SeriesSpec[]>(() => {
     const keptBoxes = BOXES.filter((_, i) => kept[i])
     const dropped = BOXES.filter((_, i) => !kept[i])
     return [
@@ -74,48 +79,24 @@ export function NmsExplorer() {
     .map((b) => `${b.object} ${b.score.toFixed(2)}`)
     .join(', ')
 
+  const xAxis = useAxis({ label: 'x', range: [0, 11] })
+  const yAxis = useAxis({ label: 'y', range: [0, 7.5], equal: xAxis })
   return (
-    <Interactive
+    <Figure
       title="Greedy non-maximum suppression"
+      state={state}
       caption="Ten candidate boxes around three objects. People A and B stand close together, so their best boxes overlap with IoU 0.35. NMS keeps the highest-scoring box, deletes every remaining box whose IoU with it exceeds the threshold, and repeats. At a threshold of 0.3 the best box for B is deleted by A's box, and a worse box for B survives instead. At 0.7 duplicates of A and C survive."
-      controls={
-        <>
-          <ParamSlider
-            label="IoU threshold"
-            value={iouThreshold}
-            onChange={setIouThreshold}
-            min={0.1}
-            max={0.9}
-            step={0.05}
-            format={(v) => v.toFixed(2)}
-          />
-          <ParamSlider
-            label="score threshold"
-            value={scoreThreshold}
-            onChange={setScoreThreshold}
-            min={0}
-            max={0.9}
-            step={0.05}
-            format={(v) => v.toFixed(2)}
-          />
-        </>
-      }
-      readout={
+
+      readouts={
         <>
           <Readout label="boxes kept" value={String(keptList ? keptList.split(', ').length : 0)} />
           <Readout label="kept (object, score)" value={keptList || 'none'} />
         </>
       }
     >
-      <XYChart
-        series={series}
-        xRange={[0, 11]}
-        yRange={[0, 7.5]}
-        equalAspect
-        xLabel="x"
-        yLabel="y"
-        ariaLabel="Candidate boxes, kept and suppressed"
-      />
-    </Interactive>
+      <Plot x={xAxis} y={yAxis} ariaLabel={'Candidate boxes, kept and suppressed'}>
+        {seriesLayers(series)}
+      </Plot>
+    </Figure>
   )
 }

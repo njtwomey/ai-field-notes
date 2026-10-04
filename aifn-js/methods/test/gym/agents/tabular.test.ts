@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { cellState, episodes, greedyActions, rollout, tabularMdp } from 'aifn-applied/gym'
+import { cellState, episodes, greedyActions, rollout, tabularMdp } from 'aifn-methods/gym'
 import {
   evaluatePolicy,
   expectedSarsaAgent,
@@ -16,7 +16,7 @@ import {
   valueIteration,
   valueIterationAgent,
   type TabularAgentState,
-} from 'aifn-applied/gym/agents'
+} from 'aifn-methods/gym/agents'
 import {
   cliffWalking,
   cliffWalkingEnvironment,
@@ -26,7 +26,7 @@ import {
   maze,
   mazeEnvironment,
   mdpEnvironment,
-} from 'aifn-applied/gym/environments'
+} from 'aifn-methods/gym/environments'
 import type { Agent } from 'aifn/foundation/contracts'
 import { stream } from 'aifn/foundation/random'
 import { toFlat } from 'aifn/foundation/tensor'

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { bayesPointMachine, bayesPointMachinePredict } from 'aifn-applied/inference/classifier-models'
+import { bayesPointMachine, bayesPointMachinePredict } from 'aifn-methods/inference/classifier-models'
 import { toFlat } from 'aifn/foundation/tensor'
 import { run } from 'aifn/foundation/trace'
 

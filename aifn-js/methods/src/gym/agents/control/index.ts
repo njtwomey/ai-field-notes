@@ -1,5 +1,5 @@
 /**
- * `aifn-applied/gym/agents/control`: model-based controllers for classic-control environments: LQR about an
+ * `aifn-methods/gym/agents/control`: model-based controllers for classic-control environments: LQR about an
  * equilibrium from autodiff Jacobians of a differentiable dynamics model (`lineariseDynamics`), and the pendulum's energy
  * swing-up with an LQR hand-over (`swingUpAgent`).
  */

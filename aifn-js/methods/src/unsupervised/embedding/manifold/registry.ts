@@ -1,4 +1,4 @@
-/** The registry of `aifn-applied/unsupervised/embedding/manifold`: neighbourhood graphs and the batch SOM. */
+/** The registry of `aifn-methods/unsupervised/embedding/manifold`: neighbourhood graphs and the batch SOM. */
 
 import { definer, entries, type AlgorithmInfo, type Entry, type FunctionInfo } from 'aifn/foundation/registry'
 import * as diffusion from './diffusion'

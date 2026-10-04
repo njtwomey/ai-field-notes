@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { anscombe, coalMining, iris, oldFaithful } from 'aifn-applied/data/real'
+import { anscombe, coalMining, iris, oldFaithful } from 'aifn-methods/data/real'
 import { toFlat } from 'aifn/foundation/tensor'
 import { bocpd, detectChangepoints, poissonGamma, runLengthMass } from 'aifn/inference/filtering'
 import { run } from 'aifn/foundation/trace'

@@ -1,7 +1,9 @@
 import { useMemo } from 'react'
-import { Interactive, ParamSlider, Readout, XYChart, formatNumber, useParam, type XYSeries } from 'aifn-render'
-import { convolve, db, freqz } from '@/lib/dsp'
-import { rng } from '@/lib/math'
+import { Curve, Figure, formatNumber, int, Plot, Readout, useAxis, useFigureState } from 'aifn-render'
+import { convolve } from 'aifn/foundation/convolution'
+import { fromData, toFlat, type Tensor } from 'aifn/foundation/tensor'
+import { db, response as freqz } from '../_shared/design'
+import { normal, stream } from 'aifn/foundation/random'
 
 const N = 300
 
@@ -35,21 +37,33 @@ function savgol(m: number, degree: number): number[] {
 
 /** Moving average against Savitzky–Golay on a narrow peak and a broad bump, with their frequency responses. */
 export function SmoothingCompare() {
-  const half = useParam(7, { min: 1, max: 25, step: 1 })
-  const degree = useParam(2, { min: 2, max: 6, step: 2 })
-  const L = 2 * half.value + 1
+  const state = useFigureState({
+    half: int(7, {
+      min: 1,
+      max: 25,
+      step: 1,
+      label: 'half-width m (window 2m + 1)',
+      format: (v) => `${v}  (${2 * v + 1} points)`,
+    }),
+    degree: int(2, { min: 2, max: 6, step: 2, label: 'Savitzky–Golay degree', format: (v) => String(v) }),
+  })
+  const L = 2 * state.half + 1
 
   const r = useMemo(() => {
-    const g = rng(8)
+    const g = stream(8)
     const clean = Array.from(
       { length: N },
       (_, n) => Math.exp(-0.5 * ((n - 90) / 4) ** 2) + 0.6 * Math.exp(-0.5 * ((n - 200) / 25) ** 2),
     )
-    const x = clean.map((v) => v + 0.08 * g.normal())
+    const x = clean.map((v) => v + 0.08 * normal(g))
     const ma = new Array<number>(L).fill(1 / L)
-    const sg = savgol(half.value, Math.min(degree.value, L - 1))
+    const sg = savgol(state.half, Math.min(state.degree, L - 1))
     // Centre the convolution so outputs line up with inputs (both filters are symmetric).
-    const apply = (h: number[]) => Array.from(convolve(x, h)).slice(half.value, half.value + N)
+    const apply = (h: number[]) =>
+      toFlat(convolve(fromData(Float64Array.from(x)), fromData(Float64Array.from(h))) as Tensor).slice(
+        state.half,
+        state.half + N,
+      )
     const resp = (h: number[]) => freqz(h, [1], 512)
     const rm = resp(ma)
     const rs = resp(sg)
@@ -65,36 +79,31 @@ export function SmoothingCompare() {
       sgPeak: Math.max(...apply(sg).slice(70, 110)),
       noiseGain: [ma, sg].map((h) => h.reduce((s, v) => s + v * v, 0)),
     }
-  }, [half.value, degree.value, L])
+  }, [state.half, state.degree, L])
 
   const n = Array.from({ length: N }, (_, i) => i)
-  const time: XYSeries[] = [
-    { name: 'noisy input', type: 'line', x: n, y: r.x, muted: true },
-    { name: `moving average (${L} points)`, type: 'line', x: n, y: r.ma, slot: 2 },
-    { name: `Savitzky–Golay (${L} points, degree ${degree.value})`, type: 'line', x: n, y: r.sg, slot: 0 },
-    { name: 'clean', type: 'line', x: n, y: r.clean, slot: 1, dashed: true },
-  ]
-  const freq: XYSeries[] = [
-    { name: 'moving average', type: 'line', x: r.w, y: r.maDb, slot: 2 },
-    { name: 'Savitzky–Golay', type: 'line', x: r.w, y: r.sgDb, slot: 0 },
-  ]
+  const time = [
+    { name: 'noisy input', x: n, y: r.x, muted: true },
+    { name: `moving average (${L} points)`, x: n, y: r.ma, slot: 2 },
+    { name: `Savitzky–Golay (${L} points, degree ${state.degree})`, x: n, y: r.sg, slot: 0 },
+    { name: 'clean', x: n, y: r.clean, slot: 1, dashed: true },
+  ] as const
+  const freq = [
+    { name: 'moving average', x: r.w, y: r.maDb, slot: 2 },
+    { name: 'Savitzky–Golay', x: r.w, y: r.sgDb, slot: 0 },
+  ] as const
 
+  const xAxis = useAxis({ label: 'n', range: [0, N - 1] })
+  const yAxis = useAxis({ label: 'amplitude', range: [-0.3, 1.2] })
+  const xAxis2 = useAxis({ label: 'ω / π', range: [0, 1] })
+  const yAxis2 = useAxis({ label: 'magnitude (dB)', range: [-60, 5] })
   return (
-    <Interactive
+    <Figure
       title="Moving average against Savitzky–Golay"
+      state={state}
       caption="A narrow peak (height 1) and a broad bump in noise, smoothed with the same window length. The moving average flattens the narrow peak; Savitzky–Golay fits a local polynomial and keeps the peak's height much better, at the price of passing more high-frequency noise. The frequency responses show why: Savitzky–Golay has a flatter passband and a less attenuating stopband. Both filters are symmetric, so neither shifts the features."
-      controls={
-        <>
-          <ParamSlider
-            label="half-width m (window 2m + 1)"
-            param={half}
-            format={(v) => `${v}  (${2 * v + 1} points)`}
-            withArrows
-          />
-          <ParamSlider label="Savitzky–Golay degree" param={degree} format={(v) => String(v)} />
-        </>
-      }
-      readout={
+
+      readouts={
         <>
           <Readout label="peak height, moving average" value={formatNumber(r.maPeak)} />
           <Readout label="peak height, Savitzky–Golay" value={formatNumber(r.sgPeak)} />
@@ -105,8 +114,16 @@ export function SmoothingCompare() {
         </>
       }
     >
-      <XYChart series={time} xLabel="n" yLabel="amplitude" xRange={[0, N - 1]} yRange={[-0.3, 1.2]} height={280} />
-      <XYChart series={freq} xLabel="ω / π" yLabel="magnitude (dB)" xRange={[0, 1]} yRange={[-60, 5]} height={200} />
-    </Interactive>
+      <Plot x={xAxis} y={yAxis} height={280}>
+        <Curve {...time[0]} />
+        <Curve {...time[1]} />
+        <Curve {...time[2]} />
+        <Curve {...time[3]} />
+      </Plot>
+      <Plot x={xAxis2} y={yAxis2} height={200}>
+        <Curve {...freq[0]} />
+        <Curve {...freq[1]} />
+      </Plot>
+    </Figure>
   )
 }

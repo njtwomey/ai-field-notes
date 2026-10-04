@@ -1,16 +1,20 @@
 import { useMemo, useState } from 'react'
 import {
-  Heatmap,
-  Interactive,
-  ParamButton,
-  ParamSlider,
-  Readout,
-  XYChart,
+  Button,
+  Curve,
+  Figure,
+  float,
   formatNumber,
-  useParam,
-  type Handle,
-  type HeatmapOverlay,
-  type XYSeries,
+  Handle,
+  int,
+  Plot,
+  Points,
+  Raster,
+  Readout,
+  slider,
+  useAxis,
+  useFigureState,
+  Vectors,
 } from 'aifn-render'
 import { ACTIONS, cellIndex, cellXY, policyIteration, valueIteration, type GridSpec, type Vec2 } from './gridworld'
 
@@ -27,6 +31,7 @@ const START_TRAP: Vec2 = [6, 2]
 const XS = Array.from({ length: WIDTH }, (_, i) => i)
 const YS = Array.from({ length: HEIGHT }, (_, i) => i)
 const NAMES = ['up', 'right', 'down', 'left']
+const RANGE: [number, number] = [-1, 1]
 
 const clampCell = ([x, y]: Vec2): Vec2 => [
   Math.min(WIDTH - 1, Math.max(0, Math.round(x))),
@@ -47,10 +52,17 @@ export function GridworldPlanner({ algorithm = 'value-iteration' }: { algorithm?
   const [walls, setWalls] = useState<Vec2[]>(START_WALLS)
   const [goal, setGoal] = useState<Vec2>(START_GOAL)
   const [trap, setTrap] = useState<Vec2>(START_TRAP)
-  const gamma = useParam(0.9, { min: 0.5, max: 0.99, step: 0.01 })
-  const noise = useParam(0.2, { min: 0, max: 0.6, step: 0.02 })
-  const step = useParam(-0.02, { min: -0.2, max: 0, step: 0.01 })
-  const sweep = useParam(vi ? 5 : 1, { min: 0, max: vi ? MAX_SWEEPS : 12, step: 1 })
+  const state = useFigureState({
+    sweep: int(vi ? 5 : 1, {
+      min: 0,
+      max: vi ? MAX_SWEEPS : 12,
+      step: 1,
+      label: vi ? 'sweep k' : 'improvement step k',
+    }),
+    gamma: float(0.9, { min: 0.5, max: 0.99, step: 0.01, label: 'discount γ' }),
+    noise: slider(0, 0.6, 0.2, { step: 0.02, label: 'noise (sideways probability)' }),
+    step: float(-0.02, { min: -0.2, max: 0, step: 0.01, label: 'step reward' }),
+  })
 
   const walled = wallKey(walls)
   const [gx, gy] = goal
@@ -71,15 +83,15 @@ export function GridworldPlanner({ algorithm = 'value-iteration' }: { algorithm?
         [cellIndex({ width: WIDTH }, gx, gy), 1],
         [cellIndex({ width: WIDTH }, tx, ty), -1],
       ]),
-      gamma: gamma.value,
-      noise: noise.value,
-      stepReward: step.value,
+      gamma: state.gamma,
+      noise: state.noise,
+      stepReward: state.step,
     }
     return { spec, sweeps: vi ? valueIteration(spec, MAX_SWEEPS) : policyIteration(spec, 12) }
-  }, [walled, gx, gy, tx, ty, gamma.value, noise.value, step.value, vi])
+  }, [walled, gx, gy, tx, ty, state.gamma, state.noise, state.step, vi])
 
   const last = run.sweeps.length - 1
-  const k = Math.min(sweep.value, last)
+  const k = Math.min(state.sweep, last)
   const { V, policy, residual } = run.sweeps[k]
   const z = useMemo(() => YS.map((y) => XS.map((x) => V[cellIndex({ width: WIDTH }, x, y)])), [V])
   const vectors = useMemo(
@@ -92,13 +104,11 @@ export function GridworldPlanner({ algorithm = 'value-iteration' }: { algorithm?
       }),
     [policy],
   )
-  const overlay: HeatmapOverlay[] = useMemo(
-    () => [{ name: 'wall', type: 'scatter', x: walls.map((w) => w[0]), y: walls.map((w) => w[1]), emphasis: true }],
-    [walls],
-  )
+  const wallXs = useMemo(() => walls.map((w) => w[0]), [walls])
+  const wallYs = useMemo(() => walls.map((w) => w[1]), [walls])
 
-  const toggleWall = (x: number, y: number) => {
-    const c: Vec2 = clampCell([x, y])
+  const toggleWall = (p: [number, number]) => {
+    const c: Vec2 = clampCell(p)
     if (same(c, goal) || same(c, trap)) return
     setWalls((prev) => (prev.some((w) => same(w, c)) ? prev.filter((w) => !same(w, c)) : [...prev, c]))
   }
@@ -120,28 +130,32 @@ export function GridworldPlanner({ algorithm = 'value-iteration' }: { algorithm?
   }
 
   // Value iteration only: the sup-norm change per sweep against the contraction bound γᵏ · (first change).
-  const residualSeries: XYSeries[] = useMemo(() => {
+  const residualSeries = useMemo(() => {
     const ks = run.sweeps.map((_, i) => i).slice(1)
     const first = run.sweeps[1]?.residual ?? 1
     return [
-      { name: '‖V_k − V_(k−1)‖∞', type: 'line', x: ks, y: ks.map((i) => Math.max(run.sweeps[i].residual, 1e-12)) },
+      { name: '‖V_k − V_(k−1)‖∞', x: ks, y: ks.map((i) => Math.max(run.sweeps[i].residual, 1e-12)) },
       {
         name: 'γ^(k−1) × first change',
-        type: 'line',
         x: ks,
-        y: ks.map((i) => Math.max(first * gamma.value ** (i - 1), 1e-12)),
+        y: ks.map((i) => Math.max(first * state.gamma ** (i - 1), 1e-12)),
         dashed: true,
         slot: 1,
       },
-    ]
-  }, [run, gamma.value])
+    ] as const
+  }, [run, state.gamma])
 
   const start = cellIndex({ width: WIDTH }, 0, 0)
   const startAction = policy[start]
 
+  const xAxis = useAxis({ label: 'sweep k', range: [1, Math.max(2, last)] })
+  const yAxis = useAxis({ label: 'largest change', hold: 'union', log: true })
+  const gridX = useAxis({ label: 'x', range: [-0.5, WIDTH - 0.5], nice: false })
+  const gridY = useAxis({ label: 'y', range: [-0.5, HEIGHT - 0.5], nice: false, equal: gridX })
   return (
-    <Interactive
+    <Figure
       title={vi ? 'Value iteration on a gridworld' : 'Policy iteration on a gridworld'}
+      state={state}
       caption={
         vi
           ? 'Colour is the value table V_k after k sweeps of the Bellman optimality update, starting from V₀ = 0; arrows are the greedy policy with respect to V_k. Terminal cells pay +1 (goal) or −1 (trap) and end the episode; every other move pays the step reward. With noise, a move goes sideways with that probability, split between the two perpendicular directions. Click a cell to add or remove a wall; drag the goal or the trap. Values spread outwards from the terminals one cell per sweep, and the greedy policy settles long before the values stop changing. Right: the largest change per sweep falls at least as fast as γᵏ; drag the vertical line to choose k.'
@@ -149,22 +163,15 @@ export function GridworldPlanner({ algorithm = 'value-iteration' }: { algorithm?
       }
       controls={
         <>
-          <ParamSlider
-            label={vi ? 'sweep k' : 'improvement step k'}
-            param={sweep}
-            format={(v) => String(v)}
-            withArrows
-          />
-          <ParamSlider label="discount γ" param={gamma} />
-          <ParamSlider label="noise (sideways probability)" param={noise} />
-          <ParamSlider label="step reward" param={step} />
-          <ParamButton onClick={reset}>Reset layout</ParamButton>
+          <Button variant="outline" size="sm" onClick={reset}>
+            Reset layout
+          </Button>
         </>
       }
-      readout={
+      readouts={
         <>
           <Readout label={vi ? 'sweeps to converge' : 'steps to converge'} value={String(last)} />
-          <Readout label="shown" value={k < sweep.value ? `k = ${k} (converged)` : `k = ${k}`} />
+          <Readout label="shown" value={k < state.sweep ? `k = ${k} (converged)` : `k = ${k}`} />
           <Readout label="largest change at k" value={k === 0 ? '–' : formatNumber(residual)} />
           <Readout label="V at bottom-left" value={formatNumber(V[start])} />
           <Readout label="action there" value={startAction >= 0 ? NAMES[startAction] : '–'} />
@@ -172,33 +179,28 @@ export function GridworldPlanner({ algorithm = 'value-iteration' }: { algorithm?
       }
     >
       <div className={vi ? 'grid gap-4 md:grid-cols-[3fr_2fr]' : ''}>
-        <Heatmap
-          x={XS}
-          y={YS}
-          z={z}
-          xLabel="x"
-          yLabel="y"
-          scale="diverging"
-          range={[-1, 1]}
-          overlay={overlay}
-          vectors={vectors}
-          handles={handles}
-          onCellClick={toggleWall}
-          valueLabel="V"
+        <Plot
+          x={gridX}
+          y={gridY}
           height={340}
+          onPlotClick={toggleWall}
           ariaLabel="Gridworld value table with greedy policy arrows"
-        />
+        >
+          <Raster x={XS} y={YS} z={z} scale="diverging" range={RANGE} valueLabel="V" />
+          <Points name="wall" x={wallXs} y={wallYs} emphasis live />
+          <Vectors vectors={vectors} />
+          {handles.map((h) => (
+            <Handle key={h.label} {...h} />
+          ))}
+        </Plot>
         {vi && (
-          <XYChart
-            series={residualSeries}
-            xLabel="sweep k"
-            yLabel="largest change"
-            xRange={[1, Math.max(2, last)]}
-            yLog
-            handles={[{ kind: 'x', at: Math.max(1, k), label: 'k', onDrag: (x) => sweep.set(Math.round(x)) }]}
-          />
+          <Plot x={xAxis} y={yAxis}>
+            <Curve {...residualSeries[0]} />
+            <Curve {...residualSeries[1]} />
+            <Handle kind="x" at={Math.max(1, k)} label="k" onDrag={(x) => state.set('sweep', Math.round(x))} />
+          </Plot>
         )}
       </div>
-    </Interactive>
+    </Figure>
   )
 }

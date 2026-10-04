@@ -1,16 +1,18 @@
 import { useMemo } from 'react'
 import {
-  Heatmap,
-  Interactive,
-  ParamSlider,
-  Readout,
-  XYChart,
+  Figure,
   formatNumber,
-  useParam,
-  type XYSeries,
+  int,
+  Plot,
+  Raster,
+  Readout,
+  seriesLayers,
+  type SeriesSpec,
+  useAxis,
+  useFigureState,
 } from 'aifn-render'
-import { stft } from '@/lib/dsp'
-import { rng } from '@/lib/math'
+import { stft } from '../_shared/audio'
+import { stream, uniform } from 'aifn/foundation/random'
 
 const FS = 8000
 const SIZE = 512
@@ -44,8 +46,10 @@ const magnitudes = (x: number[]) => stft(x, SIZE, HOP).frames.map((f) => Array.f
  * W_k H_k / (W H) applied to V to separate each component.
  */
 export function NmfSeparation() {
-  const rank = useParam(2, { min: 1, max: 4, step: 1 })
-  const iterations = useParam(120, { min: 1, max: 300, step: 1 })
+  const state = useFigureState({
+    rank: int(2, { min: 1, max: 4, step: 1, label: 'rank K' }),
+    iterations: int(120, { min: 1, max: 300, step: 1, label: 'iterations' }),
+  })
   const data = useMemo(() => {
     return { V: magnitudes(mixture().mix) }
   }, [])
@@ -54,15 +58,15 @@ export function NmfSeparation() {
     const V = data.V // frames × bins, i.e. V transposed; W is bins × K, H is K × frames
     const T = V.length
     const F = BINS
-    const K = rank.value
-    const g = rng(3)
-    const W = Array.from({ length: F }, () => Array.from({ length: K }, () => 0.5 + g.uniform()))
-    const H = Array.from({ length: K }, () => Array.from({ length: T }, () => 0.5 + g.uniform()))
+    const K = state.rank
+    const g = stream(3)
+    const W = Array.from({ length: F }, () => Array.from({ length: K }, () => 0.5 + uniform(g)))
+    const H = Array.from({ length: K }, () => Array.from({ length: T }, () => 0.5 + uniform(g)))
     const approx = () =>
       Array.from({ length: F }, (_, f) =>
         Array.from({ length: T }, (_, t) => W[f].reduce((s, w, k) => s + w * H[k][t], 1e-12)),
       )
-    for (let it = 0; it < iterations.value; it++) {
+    for (let it = 0; it < state.iterations; it++) {
       let WH = approx()
       // H ← H ⊙ (Wᵀ (V / WH)) / (Wᵀ 1)
       for (let k = 0; k < K; k++) {
@@ -103,11 +107,11 @@ export function NmfSeparation() {
     }
     const mixture = Array.from({ length: F }, (_, f) => Array.from({ length: T }, (_, t) => V[t][f]))
     return { H, kl, mixture: dB(mixture), masked: dB(masked), lowK }
-  }, [data, rank.value, iterations.value])
+  }, [data, state.rank, state.iterations])
 
   const times = data.V.map((_, t) => (t * HOP + SIZE / 2) / FS)
   const freqs = Array.from({ length: BINS }, (_, k) => (k * FS) / SIZE)
-  const activations: XYSeries[] = r.H.map((h, k) => ({
+  const activations: SeriesSpec[] = r.H.map((h, k) => ({
     name: `component ${k + 1}${k === r.lowK ? ' (masked below)' : ''}`,
     type: 'line',
     x: times,
@@ -115,45 +119,35 @@ export function NmfSeparation() {
     slot: k,
   }))
 
+  const xAxis = useAxis({ label: 'time (s)' })
+  const yAxis = useAxis({ label: 'frequency (Hz)' })
+  const xAxis2 = useAxis({ label: 'time (s)', hold: 'union' })
+  const yAxis2 = useAxis({ label: 'activation', hold: 'union' })
+  const xAxis3 = useAxis({ label: 'time (s)' })
+  const yAxis3 = useAxis({ label: 'frequency (Hz)' })
   return (
-    <Interactive
+    <Figure
       title="Separating two notes with NMF"
+      state={state}
       caption="A repeated low note (196 Hz, every half second) and a sustained higher note (523 Hz) mixed together. NMF factorises the mixture's magnitude spectrogram into spectral templates W and activations H with the KL multiplicative updates. With rank 2, each component learns one note's harmonic template and its activations say when it sounds (middle). Masking the mixture with one component's share W_k H_k / W H recovers that note alone (bottom). Rank 1 cannot separate them; higher ranks split one note over several components."
-      controls={
-        <>
-          <ParamSlider label="rank K" param={rank} withArrows />
-          <ParamSlider label="iterations" param={iterations} withArrows />
-        </>
-      }
-      readout={
+
+      readouts={
         <>
           <Readout label="generalised KL D(V ‖ WH)" value={formatNumber(r.kl)} />
         </>
       }
     >
       <div className="space-y-4">
-        <Heatmap
-          x={times}
-          y={freqs}
-          z={r.mixture}
-          range={[-60, 0]}
-          xLabel="time (s)"
-          yLabel="frequency (Hz)"
-          valueLabel="dB"
-          height={220}
-        />
-        <XYChart series={activations} xLabel="time (s)" yLabel="activation" height={200} />
-        <Heatmap
-          x={times}
-          y={freqs}
-          z={r.masked}
-          range={[-60, 0]}
-          xLabel="time (s)"
-          yLabel="frequency (Hz)"
-          valueLabel="dB"
-          height={220}
-        />
+        <Plot x={xAxis} y={yAxis} height={220}>
+          <Raster x={times} y={freqs} z={r.mixture} range={[-60, 0]} valueLabel={'dB'} />
+        </Plot>
+        <Plot x={xAxis2} y={yAxis2} height={200}>
+          {seriesLayers(activations)}
+        </Plot>
+        <Plot x={xAxis3} y={yAxis3} height={220}>
+          <Raster x={times} y={freqs} z={r.masked} range={[-60, 0]} valueLabel={'dB'} />
+        </Plot>
       </div>
-    </Interactive>
+    </Figure>
   )
 }

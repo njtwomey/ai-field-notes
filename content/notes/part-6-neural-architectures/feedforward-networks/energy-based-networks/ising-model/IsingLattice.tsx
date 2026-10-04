@@ -1,21 +1,24 @@
 import { RotateCcw, StepForward } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import {
-  ImagePlot,
-  Interactive,
-  ParamButton,
-  ParamChoice,
-  ParamSlider,
-  Readout,
-  XYChart,
+  Button,
+  choice,
+  Curve,
+  Figure,
+  float,
   formatNumber,
-  useParam,
-  type Handle,
-  type ImagePlotLine,
+  Handle,
+  int,
+  Pixels,
+  Plot,
   type PlotPointer,
-  type XYSeries,
+  Points,
+  Readout,
+  useAxis,
+  useFigureState,
+  variants,
 } from 'aifn-render'
-import { linspace, rng } from '@/lib/math'
+import { stream, uniform as drawUniform } from 'aifn/foundation/random'
 import { PlayButton } from '../_shared/Playback'
 import { usePlayLoop } from '../_shared/usePlayLoop'
 import {
@@ -32,6 +35,7 @@ import {
   type Rule,
   type SpinUpdate,
 } from '../_shared/spins'
+import { linspace, toFlat } from 'aifn/foundation/tensor'
 
 const L = 64
 const HISTORY = 1500
@@ -48,6 +52,25 @@ const SCENARIOS: { value: Scenario; label: string; T: number; h: number; start: 
   { value: 'field', label: 'field against the order', T: 1.6, h: -0.25, start: 'up' },
 ]
 
+const PIXEL_RANGE: [number, number] = [-1, 1]
+
+/** Each scenario sets the temperature, field and starting state; T and h then change the running system. */
+const SCENARIO = variants(
+  Object.fromEntries(
+    SCENARIOS.map((sc) => [
+      sc.value,
+      {
+        label: sc.label,
+        params: {
+          T: float(sc.T, { min: 0.5, max: 5, step: 0.01, label: 'temperature T' }),
+          h: float(sc.h, { min: -1, max: 1, step: 0.01, label: 'field h' }),
+        },
+      },
+    ]),
+  ) as Record<Scenario, { label: string; params: { T: ReturnType<typeof float>; h: ReturnType<typeof float> } }>,
+  { label: 'Scenario', choiceLabel: 'scenario', initial: 'critical' },
+)
+
 /** The mutable simulation: the lattice and its trace. Re-rendering is driven by `tick`. */
 type Sim = {
   id: number
@@ -62,7 +85,8 @@ type Sim = {
 
 function createSim(id: number, scenario: Scenario, seed: number): Sim {
   const spec = SCENARIOS.find((s) => s.value === scenario)!
-  const { uniform } = rng(seed)
+  const g = stream(seed)
+  const uniform = () => drawUniform(g)
   const lattice = spec.start === 'up' ? uniformLattice(L, 1) : randomLattice(L, uniform)
   return {
     id,
@@ -122,40 +146,47 @@ function flipBlock(sim: Sim, c0: number, r0: number) {
  * the temperature, field and starting state; the sliders then change the temperature and field of the running system.
  */
 export function IsingLattice() {
-  const [scenario, setScenario] = useState<Scenario>('critical')
-  const [seed, setSeed] = useState(1)
-  const [rule, setRule] = useState<Rule>('metropolis')
-  const [speed, setSpeed] = useState(2)
+  const state = useFigureState({
+    scenario: SCENARIO,
+    rule: choice<Rule>(
+      [
+        { value: 'metropolis', label: 'Metropolis' },
+        { value: 'glauber', label: 'Glauber (heat bath)' },
+      ],
+      'metropolis',
+      { label: 'update rule' },
+    ),
+    speed: int(2, {
+      min: 0,
+      max: SPEEDS.length - 1,
+      step: 1,
+      label: 'sweeps per second',
+      format: (v) => String(SPEEDS[v]),
+    }),
+    seed: int(1, { ge: 0, label: 'seed' }),
+  })
+  const scenario = state.scenario.key as Scenario
+  const { T, h } = state.scenario.values as { T: number; h: number }
+  const seed = state.seed
   const [playing, setPlaying] = useState(false)
   const [generation, setGeneration] = useState(0)
   const [, setTick] = useState(0)
-  const T = useParam(2.27, { min: 0.5, max: 5, step: 0.01 })
-  const h = useParam(0, { min: -1, max: 1, step: 0.01 })
 
   const sim = useMemo(() => createSim(generation, scenario, seed), [generation, scenario, seed])
   const refresh = () => setTick((k) => k + 1)
 
-  const choose = (value: Scenario) => {
-    const spec = SCENARIOS.find((s) => s.value === value)!
-    setScenario(value)
-    T.set(spec.T)
-    h.set(spec.h)
-    setGeneration((g) => g + 1)
-    setPlaying(true)
-  }
-
   const runSweeps = (n: number) => {
-    advanceSweeps(sim, n, T.value, h.value, rule)
+    advanceSweeps(sim, n, T, h, state.rule)
     refresh()
   }
 
   const stepSpin = () => {
     setPlaying(false)
-    advanceSpin(sim, T.value, h.value, rule)
+    advanceSpin(sim, T, h, state.rule)
     refresh()
   }
 
-  usePlayLoop(playing, SPEEDS[speed], (n) => {
+  usePlayLoop(playing, SPEEDS[state.speed], (n) => {
     runSweeps(n)
     return true
   })
@@ -173,11 +204,7 @@ export function IsingLattice() {
 
   const values = Float32Array.from(sim.lattice.s)
   const last = sim.last
-  const lines = useMemo(
-    (): ImagePlotLine[] =>
-      last ? [{ name: 'updated spin', ...pixelBox(last.site % L, Math.floor(last.site / L)), emphasis: true }] : [],
-    [last],
-  )
+  const box = useMemo(() => (last ? pixelBox(last.site % L, Math.floor(last.site / L)) : null), [last])
 
   const { history } = sim
   const m = history.m[history.m.length - 1]
@@ -185,25 +212,32 @@ export function IsingLattice() {
   const recent = history.m.slice(-WINDOW)
   const meanAbsM = recent.reduce((a, v) => a + Math.abs(v), 0) / recent.length
 
-  const traces: XYSeries[] = [
-    { name: 'magnetisation m', type: 'line', x: [...history.sweep], y: [...history.m], slot: 0 },
-    { name: 'energy per spin', type: 'line', x: [...history.sweep], y: [...history.e], slot: 1 },
-  ]
+  const traces = [
+    { name: 'magnetisation m', x: [...history.sweep], y: [...history.m], slot: 0 },
+    { name: 'energy per spin', x: [...history.sweep], y: [...history.e], slot: 1 },
+  ] as const
 
-  const curveT = useMemo(() => linspace(0.5, 5, 181), [])
+  const curveT = useMemo(() => toFlat(linspace(0.5, 5, 181)), [])
   const curve = useMemo(() => curveT.map(onsagerMagnetisation), [curveT])
   const phase = useMemo(
-    (): XYSeries[] => [
-      { name: 'Onsager–Yang |m|, infinite lattice', type: 'line', x: curveT, y: curve, slot: 2 },
-      { name: `simulated |m|, last ${WINDOW} sweeps`, type: 'scatter', x: [T.value], y: [meanAbsM], emphasis: true },
-    ],
-    [curveT, curve, T.value, meanAbsM],
+    () =>
+      [
+        { name: 'Onsager–Yang |m|, infinite lattice', x: curveT, y: curve, slot: 2 },
+        { name: `simulated |m|, last ${WINDOW} sweeps`, x: [T], y: [meanAbsM], emphasis: true },
+      ] as const,
+    [curveT, curve, T, meanAbsM],
   )
-  const phaseHandles = useMemo((): Handle[] => [{ kind: 'x', at: T.value, label: 'T', onDrag: T.set }], [T])
 
+  const xAxis = useAxis({ label: 'sweep', hold: 'union' })
+  const yAxis = useAxis({ label: 'per spin', range: [-2.2, 1.1] })
+  const xAxis2 = useAxis({ label: 'temperature T', range: [0.5, 5] })
+  const yAxis2 = useAxis({ label: '|m|', range: [0, 1.05] })
+  const latticeX = useAxis({ range: [-0.5, L - 0.5], nice: false })
+  const latticeY = useAxis({ range: [-0.5, L - 0.5], nice: false, inverse: true, equal: latticeX })
   return (
-    <Interactive
+    <Figure
       title="Ising lattice explorer"
+      state={state}
       caption={
         <>
           A 64 × 64 lattice of spins (red +1, blue −1) with periodic edges and coupling J = 1. Each sweep makes 4096
@@ -215,57 +249,40 @@ export function IsingLattice() {
       }
       controls={
         <>
-          <ParamChoice label="scenario" value={scenario} onChange={choose} options={SCENARIOS} />
-          <ParamSlider label="temperature T" param={T} />
-          <ParamSlider label="field h" param={h} />
-          <ParamChoice
-            label="update rule"
-            value={rule}
-            onChange={setRule}
-            options={[
-              { value: 'metropolis', label: 'Metropolis' },
-              { value: 'glauber', label: 'Glauber (heat bath)' },
-            ]}
-          />
-          <ParamSlider
-            label="sweeps per second"
-            value={speed}
-            onChange={setSpeed}
-            min={0}
-            max={SPEEDS.length - 1}
-            step={1}
-            format={(v) => String(SPEEDS[v])}
-          />
           <div className="flex flex-wrap gap-2 self-end">
             <PlayButton playing={playing} onToggle={() => setPlaying((p) => !p)} />
-            <ParamButton
+            <Button
+              variant="outline"
+              size="sm"
               onClick={() => {
                 setPlaying(false)
                 runSweeps(1)
               }}
             >
               <StepForward /> Sweep
-            </ParamButton>
-            <ParamButton onClick={stepSpin}>
+            </Button>
+            <Button variant="outline" size="sm" onClick={stepSpin}>
               <StepForward /> One spin
-            </ParamButton>
-            <ParamButton
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
               onClick={() => {
-                setSeed((s) => s + 1)
+                setGeneration((k) => k + 1)
                 setPlaying(false)
               }}
             >
               <RotateCcw /> Restart
-            </ParamButton>
+            </Button>
           </div>
         </>
       }
-      readout={
+      readouts={
         <>
           <Readout label="sweep" value={sim.sweeps + (sim.partial ? ` + ${sim.partial} spins` : '')} />
           <Readout label="m" value={formatNumber(m)} />
           <Readout label="energy per spin" value={formatNumber(e)} />
-          <Readout label="T / critical T" value={formatNumber(T.value / T_CRITICAL)} />
+          <Readout label="T / critical T" value={formatNumber(T / T_CRITICAL)} />
           {last && (
             <Readout
               label="last spin"
@@ -277,38 +294,35 @@ export function IsingLattice() {
     >
       <div className="grid gap-4 lg:grid-cols-[1fr_1fr]">
         <div className="mx-auto w-full max-w-[420px]">
-          <ImagePlot
-            width={L}
-            height={L}
-            values={values}
-            scale="diverging"
-            range={[-1, 1]}
-            lines={lines}
+          <Plot
+            x={latticeX}
+            y={latticeY}
+            bare
+            height={400}
             onPointer={onPointer}
             ariaLabel="Spins of the Ising lattice"
-          />
+          >
+            <Pixels width={L} height={L} values={values} scale="diverging" range={PIXEL_RANGE} />
+            {box && <Curve name="updated spin" x={box.x} y={box.y} emphasis live />}
+          </Plot>
         </div>
         <div className="flex flex-col gap-2">
-          <XYChart
+          <Plot x={xAxis} y={yAxis} height={200} ariaLabel={'Magnetisation and energy per spin over sweeps'}>
+            <Curve {...traces[0]} />
+            <Curve {...traces[1]} />
+          </Plot>
+          <Plot
+            x={xAxis2}
+            y={yAxis2}
             height={200}
-            xLabel="sweep"
-            yLabel="per spin"
-            yRange={[-2.2, 1.1]}
-            series={traces}
-            ariaLabel="Magnetisation and energy per spin over sweeps"
-          />
-          <XYChart
-            height={200}
-            xLabel="temperature T"
-            yLabel="|m|"
-            xRange={[0.5, 5]}
-            yRange={[0, 1.05]}
-            series={phase}
-            handles={phaseHandles}
-            ariaLabel="Spontaneous magnetisation against temperature, with the simulated value"
-          />
+            ariaLabel={'Spontaneous magnetisation against temperature, with the simulated value'}
+          >
+            <Curve {...phase[0]} />
+            <Points {...phase[1]} />
+            <Handle {...state.handle('scenario.T', { label: 'T' })} />
+          </Plot>
         </div>
       </div>
-    </Interactive>
+    </Figure>
   )
 }

@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { censoredSurvival, weibullPhSurvival } from 'aifn-applied/data/synthetic'
+import { censoredSurvival, weibullPhSurvival } from 'aifn-methods/data/synthetic'
 import {
   aftModel,
   aftSurvival,
@@ -7,7 +7,7 @@ import {
   coxPh,
   coxSurvival,
   harrellConcordance,
-} from 'aifn-applied/learning/survival'
+} from 'aifn-methods/learning/survival'
 import { stream } from 'aifn/foundation/random'
 import { toFlat } from 'aifn/foundation/tensor'
 import { kaplanMeier, logRankTest } from 'aifn/probability/tests'
@@ -68,9 +68,7 @@ export function CoxExplorer() {
 
   const fitted = useMemo(() => {
     const arms = [0, 1].map((arm) => {
-      const idx = Array.from({ length: tFlat.length }, (_, i) => i).filter(
-        (i) => xFlat[2 * i] === arm,
-      )
+      const idx = Array.from({ length: tFlat.length }, (_, i) => i).filter((i) => xFlat[2 * i] === arm)
       const ti = idx.map((i) => tFlat[i])
       const ei = idx.map((i) => eFlat[i])
       const km = idx.length ? kaplanMeier(ti, ei) : null
@@ -93,22 +91,15 @@ export function CoxExplorer() {
   }, [data, tFlat, eFlat, xFlat, tiesMethod])
 
   const end = useMemo(() => Math.max(...tFlat) * 1.02, [tFlat])
-  const grid = useMemo(
-    () => Float64Array.from({ length: 151 }, (_, i) => 0.01 + (end * i) / 150),
-    [end],
-  )
+  const grid = useMemo(() => Float64Array.from({ length: 151 }, (_, i) => 0.01 + (end * i) / 150), [end])
 
   // Profiles along β₁ for partial likelihood view
   const likelihoodResult = useMemo(() => {
-    const fits = (['efron', 'breslow'] as const).map((ties) =>
-      coxPh(data.x, data.time, data.event, { ties }),
-    )
+    const fits = (['efron', 'breslow'] as const).map((ties) => coxPh(data.x, data.time, data.event, { ties }))
     const b2 = fits[0].coefficients[1]
     const betaGrid = Float64Array.from({ length: 121 }, (_, i) => -3 + i * 0.05)
     const profiles = (['efron', 'breslow'] as const).map((ties) =>
-      Float64Array.from(betaGrid, (b) =>
-        coxPartialLikelihood(data.x, data.time, data.event, [b, b2], ties),
-      ),
+      Float64Array.from(betaGrid, (b) => coxPartialLikelihood(data.x, data.time, data.event, [b, b2], ties)),
     )
     return { fits, betaGrid, profiles, b2 }
   }, [data])
@@ -185,16 +176,11 @@ export function CoxExplorer() {
 
       {view === 'likelihood' && (
         <ControlRow>
-          <Player
-            label="Newton step"
-            value={currentStep}
-            count={iterations}
-            onChange={setNewtonStep}
-          />
+          <Player label="Newton step" value={currentStep} count={iterations} onChange={setNewtonStep} />
         </ControlRow>
       )}
 
-      <div className="flex flex-wrap gap-4 text-xs font-mono text-muted-foreground my-2">
+      <div className="my-2 flex flex-wrap gap-4 font-mono text-xs text-muted-foreground">
         <Readout label="HR treated" value={formatNumber(cox.hazardRatios[0])} />
         <Readout
           label="β̂₁ (Cox)"
@@ -267,15 +253,7 @@ export function CoxExplorer() {
           <Plot x={tAxis} y={sAxis} title="Cox & AFT fits vs Weibull Ground Truth">
             {[0, 1].map((arm) => {
               const s = steps(cox.baseline.time, coxSurvival(cox, [arm, 0]), end)
-              return (
-                <Curve
-                  key={`cox${arm}`}
-                  name={`Cox model: ${label[arm]}`}
-                  slot={arm}
-                  x={s.x}
-                  y={s.y}
-                />
-              )
+              return <Curve key={`cox${arm}`} name={`Cox model: ${label[arm]}`} slot={arm} x={s.x} y={s.y} />
             })}
             {[0, 1].map((arm) => (
               <Curve
@@ -304,22 +282,11 @@ export function CoxExplorer() {
         <Plots cols={2}>
           <Plot x={betaAxis} y={llAxis} title="Partial log-likelihood profile ℓ(β₁)">
             <Curve name="Efron" slot={0} x={likelihoodResult.betaGrid} y={likelihoodResult.profiles[0]} />
-            <Curve
-              name="Breslow"
-              slot={1}
-              x={likelihoodResult.betaGrid}
-              y={likelihoodResult.profiles[1]}
-              dashed
-            />
+            <Curve name="Breslow" slot={1} x={likelihoodResult.betaGrid} y={likelihoodResult.profiles[1]} dashed />
             <Points
               name="Newton iterate"
               x={[pathX[currentStep]]}
-              y={[
-                coxPartialLikelihood(data.x, data.time, data.event, [
-                  pathX[currentStep],
-                  likelihoodResult.b2,
-                ]),
-              ]}
+              y={[coxPartialLikelihood(data.x, data.time, data.event, [pathX[currentStep], likelihoodResult.b2])]}
               emphasis
               size={8}
             />

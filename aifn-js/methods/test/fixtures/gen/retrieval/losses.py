@@ -1,4 +1,4 @@
-"""Golden values for aifn-applied/retrieval/losses' in-batch softmax (Yi et al., 2019) in torch: logits
+"""Golden values for aifn-methods/retrieval/losses' in-batch softmax (Yi et al., 2019) in torch: logits
 qᵢ·vⱼ/τ − log Q_j (the logQ correction by column), torch.nn.functional.cross_entropy against the diagonal, mean over
 the batch; symmetric adds the transposed logits' cross-entropy and halves. Value and gradients in both towers."""
 

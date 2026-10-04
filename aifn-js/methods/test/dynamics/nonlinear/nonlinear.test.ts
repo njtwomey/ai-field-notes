@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { limitCycle, lyapunovCheck, poincareSection } from 'aifn-applied/dynamics/nonlinear'
+import { limitCycle, lyapunovCheck, poincareSection } from 'aifn-methods/dynamics/nonlinear'
 import { mul, sum, toFlat, type Tensor } from 'aifn/foundation/tensor'
 
 // The Hopf normal form in Cartesian coordinates: ṙ = r(1 − r²), θ̇ = 1. The unit circle is a stable limit cycle of

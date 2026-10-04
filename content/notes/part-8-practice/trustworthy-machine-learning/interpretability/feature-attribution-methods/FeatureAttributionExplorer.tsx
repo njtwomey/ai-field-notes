@@ -1,24 +1,8 @@
 import { useMemo, useState } from 'react'
-import {
-  Bars,
-  ControlRow,
-  Figure,
-  Plot,
-  Plots,
-  Readout,
-  Select,
-  formatNumber,
-  useAxis,
-} from 'aifn-render'
+import { Bars, ControlRow, Figure, Plot, Plots, Readout, Select, formatNumber, useAxis } from 'aifn-render'
 import { normals, stream } from 'aifn/foundation/random'
 import { fromData, toFlat, type Tensor } from 'aifn/foundation/tensor'
-import {
-  exactShapley,
-  interventionalValue,
-  kernelShap,
-  lime,
-  type ScalarModel,
-} from 'aifn/learning/explain'
+import { exactShapley, interventionalValue, kernelShap, lime, type ScalarModel } from 'aifn/learning/explain'
 
 const METHODS = [
   { value: 'exactshap', label: 'Exact Shapley (all 2⁶ coalitions)' },
@@ -160,37 +144,18 @@ export function FeatureAttributionExplorer() {
 
       <Plots>
         <Plot x={localX} y={localY} title={`Local attribution φ for sample #${sampleIdx + 1}`}>
-          <Bars
-            x={barIndices}
-            y={attributions}
-            slot={0}
-            width={0.6}
-          />
+          <Bars x={barIndices} y={attributions} slot={0} width={0.6} />
         </Plot>
 
         <Plot x={globalX} y={globalY} title="Global feature importance (mean |Shapley|)">
-          <Bars
-            x={barIndices}
-            y={globalImportance}
-            slot={1}
-            width={0.6}
-          />
+          <Bars x={barIndices} y={globalImportance} slot={1} width={0.6} />
         </Plot>
       </Plots>
 
       <ControlRow label="Diagnostics">
-        <Readout
-          label="Prediction f(x)"
-          value={formatNumber(Number(prediction.toFixed(3)))}
-        />
-        <Readout
-          label="Base value E[f(x)]"
-          value={formatNumber(Number(baseValue.toFixed(3)))}
-        />
-        <Readout
-          label="Sum of attributions Σ φⱼ"
-          value={formatNumber(Number(sumAttr.toFixed(3)))}
-        />
+        <Readout label="Prediction f(x)" value={formatNumber(Number(prediction.toFixed(3)))} />
+        <Readout label="Base value E[f(x)]" value={formatNumber(Number(baseValue.toFixed(3)))} />
+        <Readout label="Sum of attributions Σ φⱼ" value={formatNumber(Number(sumAttr.toFixed(3)))} />
         <Readout
           label="Completeness gap"
           value={formatNumber(Number(Math.abs(baseValue + sumAttr - prediction).toFixed(4)))}

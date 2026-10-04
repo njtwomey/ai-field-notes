@@ -1,5 +1,5 @@
 /**
- * `aifn-applied/inference/learner-models`: learner models for equitable ability estimation (Twomey et al., 2022).
+ * `aifn-methods/inference/learner-models`: learner models for equitable ability estimation (Twomey et al., 2022).
  * IRT-ZILM, the zero-inflated learner model, with its baselines, two-parameter IRT and a linear knowledge-tracing
  * machine, fitted by penalised joint maximum likelihood (`zilm.ts`); equity and recovery measures (`evaluation.ts`);
  * and streamed experiments: one comparison, and a sweep of the zero-inflation gap between groups (`run.ts`).

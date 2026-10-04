@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
-import { linspace } from '@/lib/math'
 import { DEFAULT_DATA, type DataSpec } from './ordinal'
+import { linspace, toFlat } from 'aifn/foundation/tensor'
 
 export type Resolution = 'low' | 'medium' | 'high'
 
@@ -25,5 +25,5 @@ export function useOrdinalData(initial: Partial<DataSpec> = {}) {
 /** The cells of a filled map over a dataset's square range at a resolution. */
 export function useGrid(range: [number, number], resolution: Resolution): number[] {
   const [lo, hi] = range
-  return useMemo(() => linspace(lo, hi, CELLS[resolution]), [lo, hi, resolution])
+  return useMemo(() => toFlat(linspace(lo, hi, CELLS[resolution])), [lo, hi, resolution])
 }

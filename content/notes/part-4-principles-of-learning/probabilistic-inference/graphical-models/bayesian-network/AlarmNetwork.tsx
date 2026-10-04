@@ -1,7 +1,4 @@
-import { useState } from 'react'
-import { Diagram } from 'aifn-render'
-import { link, variable } from 'aifn-render'
-import { Interactive, ParamSwitch, Readout } from 'aifn-render'
+import { Diagram, Figure, link, Readout, setting, useFigureState, variable } from 'aifn-render'
 
 // The worked example's numbers: p(B = 1), p(E = 1) and p(A = 1 | B, E).
 const P_B = 0.001
@@ -25,32 +22,32 @@ function posteriorBurglary(alarm: boolean, quake: boolean): number {
 
 /** The burglary–earthquake–alarm collider, with the posterior of a burglary under each choice of evidence. */
 export function AlarmNetwork() {
-  const [alarm, setAlarm] = useState(true)
-  const [quake, setQuake] = useState(false)
+  const state = useFigureState({
+    alarm: setting(true, 'observe A = 1'),
+    quake: setting(false, 'observe E = 1'),
+  })
   return (
-    <Interactive
+    <Figure
       title="Explaining away in the alarm network"
+      state={state}
       caption="Burglary B and earthquake E are independent causes of the alarm A. A shaded node is observed. Observing A raises the probability of a burglary; observing E as well explains the alarm away. Observing E without A leaves B at its prior."
-      controls={
-        <>
-          <ParamSwitch label="observe A = 1" checked={alarm} onChange={setAlarm} />
-          <ParamSwitch label="observe E = 1" checked={quake} onChange={setQuake} />
-        </>
+
+      readouts={
+        <Readout label="p(B = 1 | evidence)" value={posteriorBurglary(state.alarm, state.quake).toPrecision(3)} />
       }
-      readout={<Readout label="p(B = 1 | evidence)" value={posteriorBurglary(alarm, quake).toPrecision(3)} />}
     >
       <Diagram
         spec={{
           unit: 56,
           nodes: [
             variable('B', 0, 0, '$B$', { highlight: true }),
-            variable('E', 2.4, 0, '$E$', { filled: quake }),
-            variable('A', 1.2, 1.6, '$A$', { filled: alarm }),
+            variable('E', 2.4, 0, '$E$', { filled: state.quake }),
+            variable('A', 1.2, 1.6, '$A$', { filled: state.alarm }),
           ],
           edges: [link('B', 'A'), link('E', 'A')],
         }}
         ariaLabel="Burglary and earthquake both point into alarm"
       />
-    </Interactive>
+    </Figure>
   )
 }

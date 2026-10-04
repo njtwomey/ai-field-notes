@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { deviance, irls } from 'aifn-applied/learning/generalised'
+import { deviance, irls } from 'aifn-methods/learning/generalised'
 import { family, link, poissonFamily, type FamilyName, type LinkName } from 'aifn/probability/likelihoods'
 import {
   glm,
@@ -7,7 +7,7 @@ import {
   negativeBinomialAlternation,
   negativeBinomialRegression,
   softmaxNewton,
-} from 'aifn-applied/learning/generalised/glm'
+} from 'aifn-methods/learning/generalised/glm'
 import { stream } from 'aifn/foundation/random'
 import { fromData, tensor, toFlat, toRows } from 'aifn/foundation/tensor'
 import { trace } from 'aifn/foundation/trace'

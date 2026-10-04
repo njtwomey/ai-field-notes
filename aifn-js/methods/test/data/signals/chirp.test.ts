@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { chirp, tones } from 'aifn-applied/data/signals'
+import { chirp, tones } from 'aifn-methods/data/signals'
 import { toFlat, type Tensor } from 'aifn/foundation/tensor'
 // The scipy.signal.chirp references live in core's `signal` fixture.
 import { fixture } from '../../../../core/test/fixtures'

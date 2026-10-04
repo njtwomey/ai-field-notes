@@ -1,5 +1,4 @@
-import { Interactive } from 'aifn-render'
-import { Diagram } from 'aifn-render'
+import { Diagram, Figure } from 'aifn-render'
 import type { DiagramSpec } from 'aifn-render'
 
 const spec: DiagramSpec = {
@@ -41,7 +40,7 @@ const spec: DiagramSpec = {
 /** Stacking: out-of-fold predictions train the meta-model; refitted base models feed it at test time. */
 export function StackingDiagram() {
   return (
-    <Interactive
+    <Figure
       title="Stacking"
       caption="Every base model is cross-fitted: for each fold it is trained on the other K − 1 folds and predicts the held-out fold. The n × L matrix of out-of-fold predictions and the targets y train the meta-model. At test time the base models, refitted on all the data, feed their predictions for a new x to the meta-model."
     >
@@ -49,6 +48,6 @@ export function StackingDiagram() {
         spec={spec}
         ariaLabel="Base models are cross-fitted on K folds to give out-of-fold predictions, which train a meta-model; at test time refitted base models feed the meta-model"
       />
-    </Interactive>
+    </Figure>
   )
 }

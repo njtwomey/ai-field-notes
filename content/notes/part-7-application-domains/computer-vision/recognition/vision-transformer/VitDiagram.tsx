@@ -1,5 +1,4 @@
-import { Interactive } from 'aifn-render'
-import { Diagram } from 'aifn-render'
+import { Diagram, Figure } from 'aifn-render'
 import type { DiagramNode, DiagramSpec } from 'aifn-render'
 
 /** Columns of the patch tokens; the class token sits at x = 0.4. */
@@ -71,7 +70,7 @@ const spec: DiagramSpec = {
 /** From pixels to a class: patches become tokens, a class token gathers them, and its final state is classified. */
 export function VitDiagram() {
   return (
-    <Interactive
+    <Figure
       title="The vision transformer"
       caption="Each patch is flattened and mapped by the same linear layer to a D-dimensional token, and a learned position embedding is added. A learned class token, tied to no patch, is prepended. After L encoder blocks the class token's state, which has attended to every patch, goes to the classification head; the patch outputs are unused for classification."
     >
@@ -79,6 +78,6 @@ export function VitDiagram() {
         spec={spec}
         ariaLabel="Vision transformer: image patches projected by a shared linear layer into tokens, a class token prepended, all passed through a transformer encoder; the class token output goes to a linear head that predicts the class"
       />
-    </Interactive>
+    </Figure>
   )
 }

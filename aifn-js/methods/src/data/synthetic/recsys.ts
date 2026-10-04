@@ -6,7 +6,7 @@
 import { aliasSample, aliasTable, normal, type Stream, child, uniform } from 'aifn/foundation/random'
 import { fromData, type Tensor } from 'aifn/foundation/tensor'
 import { checkCount, labels, matrix, vector, type DatasetMeta } from '../types'
-import type { RecommenderData } from 'aifn-applied/retrieval/recommenders'
+import type { RecommenderData } from 'aifn-methods/retrieval/recommenders'
 import type { DatasetInfo } from 'aifn/foundation/contracts'
 import { definer } from 'aifn/foundation/registry'
 import { int, oneOf, real, space } from 'aifn/foundation/space'

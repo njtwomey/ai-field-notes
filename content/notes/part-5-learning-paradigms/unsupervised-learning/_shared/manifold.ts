@@ -2,9 +2,9 @@
  * Toy manifolds in three dimensions and light embedding methods for the dimensionality-reduction widgets. Every method
  * takes rows of data and returns an n × 2 embedding. All are exact and dense, so they suit a few hundred points.
  */
-import { rng } from '@/lib/math'
 import { symmetricEigen } from './eigen'
 import { affinities, squaredDistances, tsne } from './tsne'
+import { normal, stream, uniform } from 'aifn/foundation/random'
 
 export type Rows = number[][]
 
@@ -22,12 +22,12 @@ export type DatasetId = 'swiss-roll' | 's-curve' | 'moons' | 'blobs' | 'circle'
 
 /** Swiss roll: a 2D sheet (angle t in [1.5π, 4.5π], height h in [0, 10]) rolled up in 3D. */
 function swissRoll(n: number, seed: number): Manifold {
-  const r = rng(seed)
+  const r = stream(seed)
   const x: Rows = []
   const t: number[] = []
   for (let i = 0; i < n; i++) {
-    const s = 1.5 * Math.PI * (1 + 2 * r.uniform())
-    const h = 10 * r.uniform()
+    const s = 1.5 * Math.PI * (1 + 2 * uniform(r))
+    const h = 10 * uniform(r)
     x.push([s * Math.cos(s), h, s * Math.sin(s)])
     t.push(s)
   }
@@ -36,12 +36,12 @@ function swissRoll(n: number, seed: number): Manifold {
 
 /** S-curve: a sheet bent into an S, t in [-1.5π, 1.5π] along the S and height in [0, 2]. */
 function sCurve(n: number, seed: number): Manifold {
-  const r = rng(seed)
+  const r = stream(seed)
   const x: Rows = []
   const t: number[] = []
   for (let i = 0; i < n; i++) {
-    const s = 3 * Math.PI * (r.uniform() - 0.5)
-    x.push([Math.sin(s), 2 * r.uniform(), Math.sign(s) * (Math.cos(s) - 1)])
+    const s = 3 * Math.PI * (uniform(r) - 0.5)
+    x.push([Math.sin(s), 2 * uniform(r), Math.sign(s) * (Math.cos(s) - 1)])
     t.push(s)
   }
   return { x, t, labelled: false, view: [0, 2] }
@@ -49,16 +49,16 @@ function sCurve(n: number, seed: number): Manifold {
 
 /** Two interleaved half circles, tilted out of the plane and with noise in all three coordinates. */
 function moons3d(n: number, seed: number): Manifold {
-  const r = rng(seed)
+  const r = stream(seed)
   const x: Rows = []
   const t: number[] = []
   const c = Math.cos(0.6)
   const s = Math.sin(0.6)
   for (let i = 0; i < n; i++) {
     const upper = i % 2 === 0
-    const a = Math.PI * r.uniform()
+    const a = Math.PI * uniform(r)
     const [u, v] = upper ? [Math.cos(a), Math.sin(a)] : [1 - Math.cos(a), 0.5 - Math.sin(a)]
-    x.push([u + 0.08 * r.normal(), c * v + 0.08 * r.normal(), s * v + 0.08 * r.normal()])
+    x.push([u + 0.08 * normal(r), c * v + 0.08 * normal(r), s * v + 0.08 * normal(r)])
     t.push(upper ? 0 : 1)
   }
   return { x, t, labelled: true, view: [0, 1] }
@@ -66,7 +66,7 @@ function moons3d(n: number, seed: number): Manifold {
 
 /** Three Gaussian blobs of different spreads. */
 function blobs3d(n: number, seed: number): Manifold {
-  const r = rng(seed)
+  const r = stream(seed)
   const centres = [
     [0, 0, 0],
     [4, 0, 0],
@@ -77,7 +77,7 @@ function blobs3d(n: number, seed: number): Manifold {
   const t: number[] = []
   for (let i = 0; i < n; i++) {
     const j = i % 3
-    x.push(centres[j].map((m) => m + sd[j] * r.normal()))
+    x.push(centres[j].map((m) => m + sd[j] * normal(r)))
     t.push(j)
   }
   return { x, t, labelled: true, view: [0, 1] }
@@ -85,13 +85,13 @@ function blobs3d(n: number, seed: number): Manifold {
 
 /** A unit circle in a tilted plane with noise of standard deviation 0.1 in every coordinate. */
 function noisyCircle(n: number, seed: number): Manifold {
-  const r = rng(seed)
+  const r = stream(seed)
   const x: Rows = []
   const t: number[] = []
   for (let i = 0; i < n; i++) {
-    const a = 2 * Math.PI * r.uniform()
+    const a = 2 * Math.PI * uniform(r)
     const [u, v] = [Math.cos(a), Math.sin(a)]
-    x.push([u + 0.1 * r.normal(), 0.5 * v + 0.1 * r.normal(), 0.866 * v + 0.1 * r.normal()])
+    x.push([u + 0.1 * normal(r), 0.5 * v + 0.1 * normal(r), 0.866 * v + 0.1 * normal(r)])
     t.push(a)
   }
   return { x, t, labelled: false, view: [0, 2] }
@@ -306,14 +306,14 @@ export function umap(d: number[][], k: number, seed = 1): Rows {
   const init = generalisedBottom(w, 0)
   const span = Math.max(...init.flat().map(Math.abs)) || 1
   const y = init.map((p) => p.map((v) => (10 * v) / span))
-  const r = rng(seed)
+  const r = stream(seed)
   const maxW = Math.max(...edges.map((e) => e[2]))
   const epochs = 200
   const clip = (v: number) => Math.max(-4, Math.min(4, v))
   for (let epoch = 0; epoch < epochs; epoch++) {
     const lr = 1 - epoch / epochs
     for (const [i, j, v] of edges) {
-      if (r.uniform() > v / maxW) continue
+      if (uniform(r) > v / maxW) continue
       for (const [p, q] of [
         [i, j],
         [j, i],
@@ -329,7 +329,7 @@ export function umap(d: number[][], k: number, seed = 1): Rows {
           y[q][1] -= lr * clip(c * dy)
         }
         for (let s = 0; s < 5; s++) {
-          const o = Math.floor(r.uniform() * n)
+          const o = Math.floor(uniform(r) * n)
           if (o === p) continue
           const ex = y[p][0] - y[o][0]
           const ey = y[p][1] - y[o][1]

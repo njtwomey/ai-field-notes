@@ -1,9 +1,6 @@
 import { useMemo, useState } from 'react'
-import { MathText } from 'aifn-render'
-import { Diagram } from 'aifn-render'
-import { link, variable } from 'aifn-render'
+import { choice, Diagram, Figure, link, MathText, Player, Readout, useFigureState, variable } from 'aifn-render'
 import type { DiagramEdge, DiagramSpec } from 'aifn-render'
-import { Interactive, ParamChoice, Readout, StepControls } from 'aifn-render'
 
 /** The worked example's 16 training rows: class c, then features x1..x4. */
 const DATA = [
@@ -114,7 +111,17 @@ type View = 'kruskal' | 'nb' | 'tan'
 
 /** The complete graph of conditional mutual informations, Kruskal's algorithm on it, and the resulting TAN. */
 export function TanStructure() {
-  const [view, setView] = useState<View>('kruskal')
+  const state = useFigureState({
+    view: choice<View>(
+      [
+        { value: 'kruskal', label: "Kruskal's algorithm" },
+        { value: 'nb', label: 'naive Bayes' },
+        { value: 'tan', label: 'TAN' },
+      ],
+      'kruskal',
+      { label: 'view' },
+    ),
+  })
   const [steps, setSteps] = useState(0)
   const [root, setRoot] = useState(0)
   const accepted = kruskal(steps)
@@ -124,7 +131,7 @@ export function TanStructure() {
   const tan = useMemo(() => evaluate(directed(root)), [root])
 
   let spec: DiagramSpec
-  if (view === 'kruskal') {
+  if (state.view === 'kruskal') {
     const ends = next ? [id(next.i), id(next.j)] : []
     spec = {
       unit: 48,
@@ -143,7 +150,7 @@ export function TanStructure() {
     const parents = directed(root)
     const edges: DiagramEdge[] = Array.from({ length: D }, (_, i) => link('c', id(i)))
     // Tree edges run along the feature row, bowing below it so that they clear the features in between.
-    if (view === 'tan')
+    if (state.view === 'tan')
       parents.forEach((p, i) => {
         if (p !== null) edges.push(link(id(p), id(i), true, { highlight: true, route: 'curve', bend: 0.35 * (i - p) }))
       })
@@ -152,7 +159,7 @@ export function TanStructure() {
       nodes: [
         variable('c', 2.25, 0, '$c$'),
         ...Array.from({ length: D }, (_, i) =>
-          variable(id(i), 1.5 * i, 1.8, `$x_${i + 1}$`, { highlight: view === 'tan' && i === root }),
+          variable(id(i), 1.5 * i, 1.8, `$x_${i + 1}$`, { highlight: state.view === 'tan' && i === root }),
         ),
       ],
       edges,
@@ -166,41 +173,33 @@ export function TanStructure() {
   const treeWeight = EDGES.reduce((s, e, k) => s + (k < steps && accepted[k] ? e.w : 0), 0)
 
   return (
-    <Interactive
+    <Figure
       title="Learning the TAN structure"
+      state={state}
       caption={
         <MathText
           text={
-            view === 'kruskal'
-              ? 'Edge weights are the conditional mutual informations $I(x_i; x_j \\mid c)$ in bits, from the worked example. Step considers edges from heaviest to lightest: a coloured edge is accepted into the tree, a dashed edge is rejected because it would close a cycle. The coloured nodes are the ends of the next edge.'
+            state.view === 'kruskal'
+              ? 'Edge weights are the conditional mutual informations $I(x_i; x_j \\mid c)$ in bits, from the worked example. The player considers edges from heaviest to lightest: a coloured edge is accepted into the tree, a dashed edge is rejected because it would close a cycle. The coloured nodes are the ends of the next edge.'
               : 'The class $c$ is a parent of every feature. In the TAN graph the coloured arrows are the maximum spanning tree, directed away from the coloured root; click a feature to make it the root. The training log-likelihood does not change with the root.'
           }
         />
       }
       controls={
         <>
-          <ParamChoice
-            label="view"
-            value={view}
-            onChange={setView}
-            options={[
-              { value: 'kruskal', label: "Kruskal's algorithm" },
-              { value: 'nb', label: 'naive Bayes' },
-              { value: 'tan', label: 'TAN' },
-            ]}
-          />
-          {view === 'kruskal' && (
-            <StepControls
-              onStep={() => setSteps((s) => s + 1)}
-              onRun={() => setSteps(EDGES.length)}
-              onReset={() => setSteps(0)}
-              done={done}
+          {state.view === 'kruskal' && (
+            <Player
+              value={steps}
+              onChange={setSteps}
+              count={EDGES.length + 1}
+              label="edges considered"
+              format={(k) => `${k} of ${EDGES.length}`}
             />
           )}
         </>
       }
-      readout={
-        view === 'kruskal' ? (
+      readouts={
+        state.view === 'kruskal' ? (
           <>
             <Readout label="step" value={`${steps} / ${EDGES.length}`} />
             <Readout
@@ -219,10 +218,10 @@ export function TanStructure() {
           </>
         ) : (
           <>
-            <Readout label="training log-likelihood (bits)" value={(view === 'nb' ? nb : tan).ll.toFixed(2)} />
+            <Readout label="training log-likelihood (bits)" value={(state.view === 'nb' ? nb : tan).ll.toFixed(2)} />
             <Readout
               label={<MathText text="$p(c = 1 \mid \xvec = (1, 1, 1, 0))$" />}
-              value={(view === 'nb' ? nb : tan).posterior.toFixed(3)}
+              value={(state.view === 'nb' ? nb : tan).posterior.toFixed(3)}
             />
           </>
         )
@@ -231,12 +230,12 @@ export function TanStructure() {
       <Diagram
         spec={spec}
         ariaLabel={
-          view === 'kruskal'
+          state.view === 'kruskal'
             ? 'Complete graph over four features weighted by conditional mutual information'
             : 'Class node with arrows to four features, plus tree edges between features in the TAN view'
         }
-        onNodeClick={view === 'tan' ? (n) => n.startsWith('x') && setRoot(Number(n.slice(1)) - 1) : undefined}
+        onNodeClick={state.view === 'tan' ? (n) => n.startsWith('x') && setRoot(Number(n.slice(1)) - 1) : undefined}
       />
-    </Interactive>
+    </Figure>
   )
 }

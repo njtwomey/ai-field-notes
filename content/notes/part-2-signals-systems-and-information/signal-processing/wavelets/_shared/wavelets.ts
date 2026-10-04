@@ -2,7 +2,16 @@
  * Orthogonal wavelet helpers shared by the wavelet notes: Daubechies filters, the periodic discrete wavelet transform
  * (Mallat's pyramid algorithm), the cascade algorithm and a Morlet continuous wavelet transform.
  */
-import { fftInPlace, nextPowerOfTwo } from '@/lib/dsp'
+import { fft, ifft, nextPowerOfTwo } from 'aifn/foundation/fourier'
+import { complex, imagPart, realPart, tensor, toFlat } from 'aifn/foundation/tensor'
+
+/** The complex FFT of (re, im), written back into the two arrays. The inverse is unscaled (no 1/N). */
+function fftInPlace(re: Float64Array, im: Float64Array, inverse = false) {
+  const z = complex(tensor(re), tensor(im))
+  const out = inverse ? ifft(z, { norm: 'forward' }) : fft(z)
+  re.set(toFlat(realPart(out)))
+  im.set(toFlat(imagPart(out)))
+}
 
 export type Family = 'haar' | 'db2' | 'db3' | 'db4'
 

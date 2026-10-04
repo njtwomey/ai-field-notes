@@ -10,8 +10,8 @@
  *   lower local tier (D5); its ancestors' shared files by relative path; nothing else of core by relative path. A
  *   family index is imported from outside the family only for its shared names; the package root and aliases never
  *   (aliases warn while they exist). `foundation` (tier 0) therefore imports nothing else in core. Core, its tests
- *   included, never imports `aifn-applied`, and nothing outside aifn.
- * - Applications (package `aifn-applied`): any core node; ancestors' shared files by relative path; another area only
+ *   included, never imports `aifn-methods`, and nothing outside aifn.
+ * - Applications (package `aifn-methods`): any core node; ancestors' shared files by relative path; another area only
  *   down `dependsOn` (acyclic), through its public path; never a node of its own area (siblings share through the
  *   parent). No React, DOM libraries or third-party packages.
  * - A parent never imports a child, except an `index.ts` re-exporting it.
@@ -44,7 +44,7 @@ type Modules = {
 
 const root = path.resolve(import.meta.dirname, '..')
 const coreDir = path.join(root, 'aifn-js', 'core')
-const appsDir = path.join(root, 'aifn-js', 'applications')
+const appsDir = path.join(root, 'aifn-js', 'methods')
 const coreSrc = path.join(coreDir, 'src')
 const appsSrc = path.join(appsDir, 'src')
 const write = process.argv.includes('--write')
@@ -203,7 +203,7 @@ const plainFiles = (dir: string) =>
         .map((d) => d.name.replace(/\.tsx?$/, ''))
     : []
 
-const publicOf = (pkg: 'core' | 'apps', p: string) => `${pkg === 'core' ? 'aifn' : 'aifn-applied'}/${p}`
+const publicOf = (pkg: 'core' | 'apps', p: string) => `${pkg === 'core' ? 'aifn' : 'aifn-methods'}/${p}`
 const srcOf = (pkg: 'core' | 'apps') => (pkg === 'core' ? coreSrc : appsSrc)
 
 /** Legacy folders: aliases whose folder is not a declared node (their files are checked leniently). */
@@ -220,7 +220,7 @@ function checkDir(pkg: 'core' | 'apps', rel: string) {
       legacyDirs.add(`${pkg}:${p}`)
       continue
     }
-    errors.push(`aifn-js/${pkg === 'core' ? 'core' : 'applications'}/src/${p}: folder is not declared in modules.json`)
+    errors.push(`aifn-js/${pkg === 'core' ? 'core' : 'methods'}/src/${p}: folder is not declared in modules.json`)
   }
   for (const d of dirs(full)) {
     const p = rel ? `${rel}/${d}` : d
@@ -231,7 +231,7 @@ checkDir('core', '')
 checkDir('apps', '')
 for (const [key, n] of nodes) {
   const full = path.join(srcOf(n.pkg), n.path)
-  const where = `aifn-js/${n.pkg === 'core' ? 'core' : 'applications'}/src/${n.path}`
+  const where = `aifn-js/${n.pkg === 'core' ? 'core' : 'methods'}/src/${n.path}`
   if (!fs.existsSync(full)) {
     if (!n.gap) errors.push(`modules.json: ${key} has no folder`)
     continue
@@ -322,9 +322,9 @@ function place(file: string): Place | null {
 
 /** The node a public specifier names (`aifn/numerics/linalg`), or 'alias', 'root' or null. */
 function target(spec: string): { pkg: 'core' | 'apps'; node: Node } | 'alias' | 'root' | null {
-  if (spec === 'aifn' || spec === 'aifn-applied') return 'root'
+  if (spec === 'aifn' || spec === 'aifn-methods') return 'root'
   if (aliases.has(spec)) return 'alias'
-  const m = /^(aifn|aifn-applied)\/(.+)$/.exec(spec)
+  const m = /^(aifn|aifn-methods)\/(.+)$/.exec(spec)
   if (!m) return null
   const pkg = m[1] === 'aifn' ? 'core' : 'apps'
   const node = nodes.get(`${pkg}:${m[2]}`)
@@ -406,8 +406,8 @@ function checkCore(file: string) {
       checkRelative(file, at, spec, where)
       continue
     }
-    if (spec.startsWith('aifn-applied')) {
-      errors.push(`${where}: core imports the application '${spec}'; core never imports aifn-applied`)
+    if (spec.startsWith('aifn-methods')) {
+      errors.push(`${where}: core imports the application '${spec}'; core never imports aifn-methods`)
       continue
     }
     const t = target(spec)
@@ -480,7 +480,7 @@ function checkApp(file: string) {
       continue
     }
     if (t === null || t === 'root') {
-      errors.push(`${where}: '${spec}' is not a node of aifn or aifn-applied; applications import only those`)
+      errors.push(`${where}: '${spec}' is not a node of aifn or aifn-methods; applications import only those`)
       continue
     }
     if (t.pkg === 'core') continue
@@ -498,14 +498,14 @@ for (const file of files(appsSrc)) checkApp(file)
 // Core tests: never an application.
 for (const file of files(path.join(coreDir, 'test')))
   for (const { spec, where } of imports(file))
-    if (spec.startsWith('aifn-applied'))
+    if (spec.startsWith('aifn-methods'))
       errors.push(`${where}: a core test imports the application '${spec}'; test that combination in applications`)
 
 // Tests and benchmarks (both packages) import the packages by their public paths, not by a relative path into `src`.
 // The exceptions test helpers that are deliberately not exported.
 const privateTestImports: Record<string, string> = {
   'aifn-js/core/test/foundation/trace/protocol.test.ts': 'the runners’ shared protocol helpers are internal',
-  'aifn-js/applications/test/data/real/hyphenation.test.ts': 'checks the vendored word list against its source',
+  'aifn-js/methods/test/data/real/hyphenation.test.ts': 'checks the vendored word list against its source',
 }
 for (const dir of [path.join(coreDir, 'test'), path.join(coreDir, 'bench'), path.join(appsDir, 'test')]) {
   if (!fs.existsSync(dir)) continue

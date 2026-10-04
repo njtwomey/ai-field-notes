@@ -7,15 +7,15 @@ import { describe, expect, it } from 'vitest'
 import { stream } from 'aifn/foundation/random'
 import { tensor, toFlat, unwrap, type Tensor } from 'aifn/foundation/tensor'
 import { dataset as asDataset } from 'aifn/learning/estimators'
-import type { InverseTruth } from 'aifn-applied/data'
-import { bishopInverse } from 'aifn-applied/data/synthetic'
+import type { InverseTruth } from 'aifn-methods/data'
+import { bishopInverse } from 'aifn-methods/data/synthetic'
 import {
   mdnModel,
   mdnPredict,
   mixtureDensityNetwork,
   mixtureDensityRun,
   type MdnSnapshot,
-} from 'aifn-applied/learning/mixture-density'
+} from 'aifn-methods/learning/mixture-density'
 
 const dataset = bishopInverse(stream('mdn-test'), { n: 300 })
 const data = { x: dataset.x, y: dataset.y! }

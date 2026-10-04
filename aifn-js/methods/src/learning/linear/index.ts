@@ -1,5 +1,5 @@
 /**
- * `aifn-applied/learning/linear`: linear models: least squares and ridge regression, and the perceptron.
+ * `aifn-methods/learning/linear`: linear models: least squares and ridge regression, and the perceptron.
  */
 
 export {

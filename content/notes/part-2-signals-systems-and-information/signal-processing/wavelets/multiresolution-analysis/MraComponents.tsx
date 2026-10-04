@@ -1,13 +1,15 @@
-import { useMemo, useState } from 'react'
+import { useMemo } from 'react'
 import {
-  Interactive,
-  ParamChoice,
-  ParamSlider,
-  Readout,
-  XYChart,
+  choice,
+  Figure,
   formatNumber,
-  useParam,
-  type XYSeries,
+  int,
+  Plot,
+  Readout,
+  seriesLayers,
+  type SeriesSpec,
+  useAxis,
+  useFigureState,
 } from 'aifn-render'
 import { FILTERS, wavedec, waverec, type Family } from '../_shared/wavelets'
 
@@ -33,14 +35,31 @@ function makeSignal(shape: Shape): Float64Array {
  * each projected back to full length. They sum exactly to the signal, and their energies add.
  */
 export function MraComponents() {
-  const [shape, setShape] = useState<Shape>('steps')
-  const [family, setFamily] = useState<Family>('db4')
-  const levels = useParam(4, { min: 1, max: 5, step: 1 })
+  const state = useFigureState({
+    shape: choice<Shape>(
+      [
+        { value: 'steps', label: 'steps and a tone' },
+        { value: 'chirp', label: 'chirp' },
+      ],
+      'steps',
+      { label: 'signal' },
+    ),
+    family: choice<Family>(
+      [
+        { value: 'haar', label: 'Haar' },
+        { value: 'db2', label: 'db2' },
+        { value: 'db4', label: 'db4' },
+      ],
+      'db4',
+      { label: 'wavelet' },
+    ),
+    levels: int(4, { min: 1, max: 5, step: 1, label: 'levels J', format: (v) => String(v) }),
+  })
 
   const r = useMemo(() => {
-    const x = makeSignal(shape)
-    const h = FILTERS[family]
-    const { approx, details } = wavedec(x, h, levels.value)
+    const x = makeSignal(state.shape)
+    const h = FILTERS[state.family]
+    const { approx, details } = wavedec(x, h, state.levels)
     const zero = (v: Float64Array) => new Float64Array(v.length)
     // Each component: reconstruct with every other coefficient set zeroed.
     const a = waverec(approx, details.map(zero), h)
@@ -57,18 +76,18 @@ export function MraComponents() {
     const sum = Float64Array.from(x, (_, n) => a[n] + ds.reduce((s, d) => s + d[n], 0))
     const error = Math.max(...Array.from(x, (v, n) => Math.abs(v - sum[n])))
     return { x, a, ds, total, coeffEnergy, error }
-  }, [shape, family, levels.value])
+  }, [state.shape, state.family, state.levels])
 
   // Stack the components with vertical offsets so each has its own band.
   const gap = 2.2
-  const J = levels.value
-  const series: XYSeries[] = [
+  const J = state.levels
+  const series: SeriesSpec[] = [
     { name: 'signal', type: 'line', x: T, y: Array.from(r.x), slot: 0 },
     { name: `A${J}`, type: 'line', x: T, y: Array.from(r.a, (v) => v - gap), slot: 1 },
     ...r.ds
       .map((d, j) => ({ d, j }))
       .reverse()
-      .map(({ d, j }, i): XYSeries => ({
+      .map(({ d, j }, i): SeriesSpec => ({
         name: `D${j + 1}`,
         type: 'line',
         x: T,
@@ -77,35 +96,15 @@ export function MraComponents() {
       })),
   ]
 
+  const xAxis = useAxis({ label: 't', range: [0, 1] })
+  const yAxis = useAxis({ label: 'components (offset)', hold: 'union' })
   return (
-    <Interactive
+    <Figure
       title="A signal as approximation plus details"
+      state={state}
       caption="Top: the signal. Below, offset for legibility: the level-J approximation A_J, then the details D_J (coarsest) down to D_1 (finest), each reconstructed to full length with every other coefficient zeroed. The components add up to the signal exactly, and, because the transform is orthogonal, the coefficient energies add up to the signal's energy. Steps and kinks put detail energy at every level near the discontinuity; smooth parts go to the approximation."
-      controls={
-        <>
-          <ParamChoice
-            label="signal"
-            value={shape}
-            onChange={setShape}
-            options={[
-              { value: 'steps', label: 'steps and a tone' },
-              { value: 'chirp', label: 'chirp' },
-            ]}
-          />
-          <ParamChoice
-            label="wavelet"
-            value={family}
-            onChange={setFamily}
-            options={[
-              { value: 'haar', label: 'Haar' },
-              { value: 'db2', label: 'db2' },
-              { value: 'db4', label: 'db4' },
-            ]}
-          />
-          <ParamSlider label="levels J" param={levels} format={(v) => String(v)} withArrows />
-        </>
-      }
-      readout={
+
+      readouts={
         <>
           <Readout
             label="energy share A, then D_J … D_1"
@@ -117,7 +116,9 @@ export function MraComponents() {
         </>
       }
     >
-      <XYChart series={series} xLabel="t" yLabel="components (offset)" xRange={[0, 1]} height={420} />
-    </Interactive>
+      <Plot x={xAxis} y={yAxis} height={420}>
+        {seriesLayers(series)}
+      </Plot>
+    </Figure>
   )
 }

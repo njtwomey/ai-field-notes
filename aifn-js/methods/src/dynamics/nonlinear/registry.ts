@@ -1,5 +1,5 @@
 /**
- * The functions of `aifn-applied/dynamics/nonlinear`, registered with the notes they serve.
+ * The functions of `aifn-methods/dynamics/nonlinear`, registered with the notes they serve.
  */
 
 import { definer, entries, type Entry, type FunctionInfo } from 'aifn/foundation/registry'

@@ -16,7 +16,7 @@ import {
   odeRun,
   reflectionData,
   trajectories,
-} from 'aifn-applied/neural/ode'
+} from 'aifn-methods/neural/ode'
 
 const flat = (v: unknown) => Array.from(toFlat(v as Tensor))
 const x = fromData(Float64Array.from([0.3, -0.7, 1.1, 0.4, -0.5, 0.2]), [3, 2])

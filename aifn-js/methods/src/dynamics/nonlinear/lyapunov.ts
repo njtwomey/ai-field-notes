@@ -1,5 +1,5 @@
 /**
- * Lyapunov's direct method checked on a grid, part of `aifn-applied/dynamics/nonlinear` (Khalil, 2002, "Nonlinear
+ * Lyapunov's direct method checked on a grid, part of `aifn-methods/dynamics/nonlinear` (Khalil, 2002, "Nonlinear
  * Systems", 3rd ed., §4.1).
  */
 

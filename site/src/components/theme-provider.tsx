@@ -60,7 +60,10 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
 
 // eslint-disable-next-line react/only-export-components
 export function useTheme(): ThemeContext {
-  const ctx = useContext(Context) ?? useContext(RenderThemeContext)
+  // Both hooks run on every render (rules of hooks); the site's context wins over the render package's.
+  const site = useContext(Context)
+  const render = useContext(RenderThemeContext)
+  const ctx = site ?? render
   if (!ctx) {
     const isDark =
       typeof document !== 'undefined'

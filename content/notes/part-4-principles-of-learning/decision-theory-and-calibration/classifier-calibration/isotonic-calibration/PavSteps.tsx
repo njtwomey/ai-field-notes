@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from 'react'
-import { Interactive, Readout, StepControls, XYChart, formatNumber } from 'aifn-render'
+import { useMemo, useState } from 'react'
+import { Curve, Figure, formatNumber, Player, Plot, Points, Readout, useAxis } from 'aifn-render'
 
 const SCORES = [0.05, 0.12, 0.2, 0.27, 0.33, 0.41, 0.48, 0.55, 0.62, 0.7, 0.81, 0.9]
 const LABELS = [0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 1, 1]
@@ -47,39 +47,22 @@ function stepLine(blocks: Block[]) {
  */
 export function PavSteps() {
   const [k, setK] = useState(0)
-  const [running, setRunning] = useState(false)
   const { blocks, merges } = useMemo(() => pavPrefix(k), [k])
   const line = stepLine(blocks)
-  const done = k >= SCORES.length
-
-  useEffect(() => {
-    // Running stops by itself at the end; Reset clears the flag.
-    if (!running || done) return
-    const id = setTimeout(() => setK((v) => v + 1), 500)
-    return () => clearTimeout(id)
-  }, [running, done, k])
 
   const fitted = blocks.flatMap((b) => new Array<number>(b.end - b.start + 1).fill(b.mean))
   const sse = fitted.reduce((acc, v, i) => acc + (v - LABELS[i]) ** 2, 0)
   const seen = SCORES.slice(0, k)
   const unseen = SCORES.slice(k)
 
+  const xAxis = useAxis({ label: 'classifier score', range: [0, 1] })
+  const yAxis = useAxis({ label: 'label / calibrated probability', range: [-0.05, 1.05] })
   return (
-    <Interactive
+    <Figure
       title="Pool adjacent violators, one point at a time"
       caption="Twelve calibration cases sorted by score, with labels 0 or 1. Step through them from the left. Each new case starts its own block at its label. Whenever a block's value is lower than the block to its left, the monotonicity constraint is violated and the two blocks are pooled at their average. The final step function is the isotonic calibration map."
-      controls={
-        <StepControls
-          onStep={() => setK((v) => Math.min(SCORES.length, v + 1))}
-          onRun={() => setRunning(true)}
-          onReset={() => {
-            setRunning(false)
-            setK(0)
-          }}
-          done={done}
-        />
-      }
-      readout={
+      controls={<Player value={k} onChange={setK} count={SCORES.length + 1} label="cases absorbed" />}
+      readouts={
         <>
           <Readout label="cases absorbed" value={`${k} of ${SCORES.length}`} />
           <Readout label="blocks" value={blocks.length} />
@@ -88,18 +71,11 @@ export function PavSteps() {
         </>
       }
     >
-      <XYChart
-        height={300}
-        xLabel="classifier score"
-        yLabel="label / calibrated probability"
-        xRange={[0, 1]}
-        yRange={[-0.05, 1.05]}
-        series={[
-          { name: 'absorbed cases', type: 'scatter', x: seen, y: LABELS.slice(0, k), slot: 0 },
-          { name: 'remaining cases', type: 'scatter', x: unseen, y: LABELS.slice(k), muted: true },
-          { name: 'isotonic fit so far', type: 'line', x: line.x, y: line.y, emphasis: true },
-        ]}
-      />
-    </Interactive>
+      <Plot x={xAxis} y={yAxis} height={300}>
+        <Points name="absorbed cases" x={seen} y={LABELS.slice(0, k)} slot={0} />
+        <Points name="remaining cases" x={unseen} y={LABELS.slice(k)} muted />
+        <Curve name="isotonic fit so far" x={line.x} y={line.y} emphasis />
+      </Plot>
+    </Figure>
   )
 }

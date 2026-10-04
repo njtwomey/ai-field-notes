@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { normalProjection } from 'aifn-applied/information/projection'
+import { normalProjection } from 'aifn-methods/information/projection'
 import { Mixture, Normal } from 'aifn/probability/distributions'
 
 const close = (a: number, b: number, tol = 1e-12) =>

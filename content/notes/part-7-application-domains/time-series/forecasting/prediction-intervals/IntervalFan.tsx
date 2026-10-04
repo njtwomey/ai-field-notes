@@ -1,16 +1,19 @@
-import { useMemo, useState } from 'react'
+import { useMemo } from 'react'
 import {
-  Interactive,
-  ParamChoice,
-  ParamSlider,
-  Readout,
-  XYChart,
+  choice,
+  Figure,
+  float,
   formatNumber,
-  useParam,
-  type XYSeries,
+  int,
+  Plot,
+  Readout,
+  seriesLayers,
+  type SeriesSpec,
+  useAxis,
+  useFigureState,
 } from 'aifn-render'
-import { rng } from '@/lib/math'
-import { normalQuantile } from '@/lib/math/special'
+import { normal, stream, type Stream, uniform } from 'aifn/foundation/random'
+import { normalQuantile } from 'aifn/numerics/special'
 
 const N_HISTORY = 200
 const SHOWN = 40
@@ -21,10 +24,10 @@ const N_TRUTH = 2000
 type Noise = 'gaussian' | 't3'
 
 /** A unit-variance shock: Gaussian, or Student t with 3 degrees of freedom rescaled to variance 1. */
-function shock(g: ReturnType<typeof rng>, noise: Noise) {
-  const z = g.normal()
+function shock(g: Stream, noise: Noise) {
+  const z = normal(g)
   if (noise === 'gaussian') return z
-  const chi2 = g.normal() ** 2 + g.normal() ** 2 + g.normal() ** 2
+  const chi2 = normal(g) ** 2 + normal(g) ** 2 + normal(g) ** 2
   return z / Math.sqrt(chi2 / 3) / Math.sqrt(3)
 }
 
@@ -34,22 +37,39 @@ function quantile(sorted: number[], p: number) {
 }
 
 export function IntervalFan() {
-  const phi = useParam(0.8, { min: 0, max: 0.99, step: 0.01 })
-  const seed = useParam(2, { min: 1, max: 30, step: 1 })
-  const drawn = useParam(20, { min: 1, max: 50, step: 1 })
-  const [noise, setNoise] = useState<Noise>('gaussian')
-  const [level, setLevel] = useState<'0.8' | '0.95' | '0.99'>('0.95')
-  const coverage = Number(level)
+  const state = useFigureState({
+    phi: float(0.8, { min: 0, max: 0.99, step: 0.01, label: 'AR coefficient φ', format: (v) => v.toFixed(2) }),
+    noise: choice<Noise>(
+      [
+        { value: 'gaussian', label: 'Gaussian' },
+        { value: 't3', label: 'Student t, 3 df' },
+      ],
+      'gaussian',
+      { label: 'shocks' },
+    ),
+    level: choice<'0.8' | '0.95' | '0.99'>(
+      [
+        { value: '0.8', label: '80%' },
+        { value: '0.95', label: '95%' },
+        { value: '0.99', label: '99%' },
+      ],
+      '0.95',
+      { label: 'nominal coverage' },
+    ),
+    drawn: int(20, { min: 1, max: 50, step: 1, label: 'paths', format: (v) => String(v) }),
+    seed: int(2, { min: 1, max: 30, step: 1, label: 'seed', format: (v) => String(v) }),
+  })
+  const coverage = Number(state.level)
 
   const result = useMemo(() => {
-    const g = rng(seed.value)
-    const f = phi.value
+    const g = stream(state.seed)
+    const f = state.phi
     // History of an AR(1) with mean 0 and unit-variance shocks. The shocks double as the fitted residuals, since the
     // model is known here; the bootstrap resamples them.
     const y = [0]
     const resid: number[] = []
     for (let t = 1; t < N_HISTORY; t++) {
-      const e = shock(g, noise)
+      const e = shock(g, state.noise)
       resid.push(e)
       y.push(f * y[t - 1] + e)
     }
@@ -76,13 +96,13 @@ export function IntervalFan() {
       }
       return paths
     }
-    const boot = simulate(() => resid[Math.floor(g.uniform() * resid.length)], N_BOOT).map((p) =>
+    const boot = simulate(() => resid[Math.floor(uniform(g) * resid.length)], N_BOOT).map((p) =>
       p.sort((a, b) => a - b),
     )
     const bLo = boot.map((p) => quantile(p, 0.5 - coverage / 2))
     const bHi = boot.map((p) => quantile(p, 0.5 + coverage / 2))
     // Fresh futures from the true process, to measure how often each interval contains the outcome.
-    const truth = simulate(() => shock(g, noise), N_TRUTH)
+    const truth = simulate(() => shock(g, state.noise), N_TRUTH)
     let inA = 0
     let inB = 0
     truth.forEach((p, h) =>
@@ -103,26 +123,26 @@ export function IntervalFan() {
       coverA: inA / (N_TRUTH * H),
       coverB: inB / (N_TRUTH * H),
     }
-  }, [phi.value, seed.value, noise, coverage])
+  }, [state.phi, state.seed, state.noise, coverage])
 
   // Drawn bootstrap futures, separate from the 1000 behind the interval: path k has its own stream, so adding paths
   // leaves the existing ones and the intervals unchanged.
-  const futures = useMemo((): XYSeries[] => {
-    const many = drawn.value > 1
+  const futures = useMemo((): SeriesSpec[] => {
+    const many = state.drawn > 1
     const x = Array.from({ length: H + 1 }, (_, i) => i)
-    return Array.from({ length: drawn.value }, (_, k) => {
-      const g = rng(seed.value * 1000 + k)
+    return Array.from({ length: state.drawn }, (_, k) => {
+      const g = stream(state.seed * 1000 + k)
       let v = result.last
       const y = [v]
       for (let h = 0; h < H; h++) {
-        v = phi.value * v + result.resid[Math.floor(g.uniform() * result.resid.length)]
+        v = state.phi * v + result.resid[Math.floor(uniform(g) * result.resid.length)]
         y.push(v)
       }
       return { name: many ? 'bootstrap paths' : 'bootstrap path', type: 'line', x, y, slot: 2, thin: many }
     })
-  }, [result, phi.value, seed.value, drawn.value])
+  }, [result, state.phi, state.seed, state.drawn])
 
-  const series = useMemo((): XYSeries[] => {
+  const series = useMemo((): SeriesSpec[] => {
     const past = Array.from({ length: SHOWN }, (_, i) => i - SHOWN + 1)
     const ahead = Array.from({ length: H }, (_, i) => i + 1)
     return [
@@ -136,39 +156,17 @@ export function IntervalFan() {
     ]
   }, [result, futures])
 
-  const stationarySd = 1 / Math.sqrt(1 - phi.value ** 2)
+  const stationarySd = 1 / Math.sqrt(1 - state.phi ** 2)
 
+  const xAxis = useAxis({ label: 'time relative to forecast origin', range: [-SHOWN + 1, H] })
+  const yAxis = useAxis({ label: 'y', hold: 'union' })
   return (
-    <Interactive
+    <Figure
       title="Prediction intervals for an AR(1)"
+      state={state}
       caption="An AR(1) series y_t = φ y_{t−1} + ε_t with unit-variance shocks is observed up to time 0 and forecast 20 steps ahead. The analytic interval assumes Gaussian shocks and has half-width z times the standard deviation √((1 − φ^{2h})/(1 − φ²)), which grows with h and levels off at the stationary standard deviation. The bootstrap interval simulates 1000 future paths by resampling the model's residuals and takes their quantiles; the light lines are further paths drawn the same way, and the paths slider sets how many. Coverage is measured on 2000 fresh futures from the true process. With Student t shocks the Gaussian interval over-covers at 80% and under-covers at 99%, most clearly at short horizons, where one shock dominates the error; the bootstrap follows the shock distribution."
-      controls={
-        <>
-          <ParamSlider label="AR coefficient φ" param={phi} format={(v) => v.toFixed(2)} />
-          <ParamChoice
-            label="shocks"
-            value={noise}
-            onChange={setNoise}
-            options={[
-              { value: 'gaussian', label: 'Gaussian' },
-              { value: 't3', label: 'Student t, 3 df' },
-            ]}
-          />
-          <ParamChoice
-            label="nominal coverage"
-            value={level}
-            onChange={setLevel}
-            options={[
-              { value: '0.8', label: '80%' },
-              { value: '0.95', label: '95%' },
-              { value: '0.99', label: '99%' },
-            ]}
-          />
-          <ParamSlider label="paths" param={drawn} withArrows format={(v) => String(v)} />
-          <ParamSlider label="seed" param={seed} format={(v) => String(v)} withArrows />
-        </>
-      }
-      readout={
+
+      readouts={
         <>
           <Readout label="coverage, analytic" value={`${formatNumber(100 * result.coverA)}%`} />
           <Readout label="coverage, bootstrap" value={`${formatNumber(100 * result.coverB)}%`} />
@@ -176,7 +174,9 @@ export function IntervalFan() {
         </>
       }
     >
-      <XYChart series={series} xLabel="time relative to forecast origin" yLabel="y" xRange={[-SHOWN + 1, H]} />
-    </Interactive>
+      <Plot x={xAxis} y={yAxis}>
+        {seriesLayers(series)}
+      </Plot>
+    </Figure>
   )
 }

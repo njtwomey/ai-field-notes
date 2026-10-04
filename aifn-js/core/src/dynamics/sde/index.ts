@@ -11,7 +11,7 @@
  * - Exact solutions: `ornsteinUhlenbeck` and `geometricBrownianMotion` (moments, transition laws and exact samplers
  *   on the same streams), and `brownianMotion`.
  * - `paths` extracts a path matrix from a trace. The density of a scalar SDE by its Fokker–Planck equation
- *   (`densityEvolution`) is in `aifn-applied/dynamics`, beside the named PDEs.
+ *   (`densityEvolution`) is in `aifn-methods/dynamics`, beside the named PDEs.
  *
  * References: Kloeden & Platen (1992), "Numerical Solution of Stochastic Differential Equations", §9–11; Higham
  * (2001), "An algorithmic introduction to numerical simulation of stochastic differential equations", SIAM Review 43.

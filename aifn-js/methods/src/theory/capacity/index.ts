@@ -1,5 +1,5 @@
 /**
- * `aifn-applied/theory/capacity`: shattering by half-planes, rectangles and intervals, enumerated exactly
+ * `aifn-methods/theory/capacity`: shattering by half-planes, rectangles and intervals, enumerated exactly
  * (`realisable`, `shatteringTable`), and the empirical Rademacher complexity of the realised labellings
  * (`empiricalRademacher`).
  */

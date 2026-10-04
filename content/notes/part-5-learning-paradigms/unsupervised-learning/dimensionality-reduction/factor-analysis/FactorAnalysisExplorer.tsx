@@ -13,12 +13,8 @@ import {
   Readout,
   useAxis,
 } from 'aifn-render'
-import { latentFactors, latentFactorModel } from 'aifn-applied/data/synthetic'
-import {
-  factorAnalysis,
-  probabilisticPca,
-  latentGaussianSteps,
-} from 'aifn-applied/unsupervised/embedding/linear'
+import { latentFactors, latentFactorModel } from 'aifn-methods/data/synthetic'
+import { factorAnalysis, probabilisticPca, latentGaussianSteps } from 'aifn-methods/unsupervised/embedding/linear'
 import { dataset } from 'aifn/learning/estimators'
 import { stream } from 'aifn/foundation/random'
 import { toFlat, type Tensor } from 'aifn/foundation/tensor'
@@ -73,7 +69,8 @@ export function FactorAnalysisExplorer() {
   const fAxis = useAxis({ label: 'feature index', range: [0.4, d + 0.6], integer: true })
 
   const top = Math.max(...run.trueNoise, ...run.steps.flatMap((s) => s.noise), run.ppcaNoise) * 1.15
-  const ctop = Math.max(...run.trueCommunality, ...run.ppcaCommunality, ...run.steps.flatMap((s) => s.communality)) * 1.15
+  const ctop =
+    Math.max(...run.trueCommunality, ...run.ppcaCommunality, ...run.steps.flatMap((s) => s.communality)) * 1.15
 
   const noiseAxis = useAxis({ label: 'noise variance ψᵢ', range: [0, top], key: `${spread}-${seed}-${n}` })
   const commAxis = useAxis({ label: 'communality Σⱼ Wᵢⱼ²', range: [0, ctop], key: `${spread}-${seed}-${n}` })
@@ -119,12 +116,7 @@ export function FactorAnalysisExplorer() {
             />
           </ControlGroup>
           <ControlGroup title="2 · EM iterations">
-            <Player
-              value={currentStep}
-              onChange={setStep}
-              count={run.steps.length}
-              label="iteration"
-            />
+            <Player value={currentStep} onChange={setStep} count={run.steps.length} label="iteration" />
           </ControlGroup>
         </>
       }
@@ -142,13 +134,7 @@ export function FactorAnalysisExplorer() {
         <Plot x={fAxis} y={noiseAxis} title="Feature-specific noise variance ψᵢ">
           <Bars name="true ψᵢ" x={shift(0)} y={run.trueNoise} width={0.25} emphasis />
           <Bars name="Factor Analysis ψᵢ" x={shift(1)} y={now.noise} width={0.25} slot={0} />
-          <Bars
-            name="PPCA shared σ²"
-            x={shift(2)}
-            y={features.map(() => run.ppcaNoise)}
-            width={0.25}
-            slot={1}
-          />
+          <Bars name="PPCA shared σ²" x={shift(2)} y={features.map(() => run.ppcaNoise)} width={0.25} slot={1} />
         </Plot>
         <Plot x={fAxis} y={commAxis} title="Feature communality Σⱼ Wᵢⱼ²">
           <Bars name="true communality" x={shift(0)} y={run.trueCommunality} width={0.25} emphasis />

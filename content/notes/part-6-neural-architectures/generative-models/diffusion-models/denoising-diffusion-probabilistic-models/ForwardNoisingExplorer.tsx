@@ -6,7 +6,7 @@ import {
   gaussianMixtureData,
   linearSchedule,
   sampleMixture,
-} from 'aifn-applied/generative/diffusion'
+} from 'aifn-methods/generative/diffusion'
 import { stream } from 'aifn/foundation/random'
 import { toRows, type Tensor } from 'aifn/foundation/tensor'
 import {
@@ -111,13 +111,7 @@ export function ForwardNoisingExplorer() {
             step={10}
             suggestions={[0, 100, 250, 500, 750, 1000]}
           />
-          <Player
-            value={k}
-            onChange={setK}
-            count={TICKS.length}
-            format={(i) => String(TICKS[i])}
-            label="Play t"
-          />
+          <Player value={k} onChange={setK} count={TICKS.length} format={(i) => String(TICKS[i])} label="Play t" />
         </ControlGroup>
       }
       readouts={

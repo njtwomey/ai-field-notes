@@ -1,10 +1,10 @@
 import { useMemo } from 'react'
-import { Interactive, ParamSlider, Readout, XYChart, formatNumber, useParam, type XYSeries } from 'aifn-render'
-import { linspace } from '@/lib/math'
-import { normalPdf } from '@/lib/math/special'
+import { Curve, Figure, float, formatNumber, Plot, Readout, useAxis, useFigureState } from 'aifn-render'
+import { linspace, toFlat } from 'aifn/foundation/tensor'
+import { normalPdf } from 'aifn/numerics/special'
 
 const X_RANGE: [number, number] = [-5, 5]
-const GRID = linspace(-5, 5, 401)
+const GRID = toFlat(linspace(-5, 5, 401))
 
 /** First x on the grid where a curve crosses 1/2 from below, or null if it never does. */
 function crossing(ys: number[]): number | null {
@@ -18,12 +18,14 @@ function crossing(ys: number[]): number | null {
  * c recovers f. The estimate e₁ = E[g(x) | s = 1] equals c only when the classes do not overlap.
  */
 export function PuCorrection() {
-  const prior = useParam(0.4, { min: 0.1, max: 0.9, step: 0.05 })
-  const c = useParam(0.3, { min: 0.05, max: 1, step: 0.05 })
-  const sep = useParam(3, { min: 0.5, max: 6, step: 0.25 })
-  const pi = prior.value
-  const cv = c.value
-  const d = sep.value
+  const state = useFigureState({
+    prior: float(0.4, { min: 0.1, max: 0.9, step: 0.05, label: 'class prior π' }),
+    c: float(0.3, { min: 0.05, max: 1, step: 0.05, label: 'label frequency c' }),
+    sep: float(3, { min: 0.5, max: 6, step: 0.25, label: 'class separation Δ' }),
+  })
+  const pi = state.prior
+  const cv = state.c
+  const d = state.sep
 
   const r = useMemo(() => {
     const pPos = GRID.map((x) => normalPdf(x - d / 2))
@@ -37,29 +39,26 @@ export function PuCorrection() {
     return { f, g, corrected, e1 }
   }, [pi, cv, d])
 
-  const series: XYSeries[] = [
-    { name: 'P(y = 1 | x), true', type: 'line', x: GRID, y: r.f, slot: 0 },
-    { name: 'g(x) = P(s = 1 | x), labelled vs unlabelled', type: 'line', x: GRID, y: r.g, slot: 1 },
-    { name: 'g(x) / e₁, Elkan–Noto estimate', type: 'line', x: GRID, y: r.corrected, slot: 2, dashed: true },
-    { name: 'threshold 1/2', type: 'line', x: [...X_RANGE], y: [0.5, 0.5], muted: true, dashed: true },
-  ]
+  const series = [
+    { name: 'P(y = 1 | x), true', x: GRID, y: r.f, slot: 0 },
+    { name: 'g(x) = P(s = 1 | x), labelled vs unlabelled', x: GRID, y: r.g, slot: 1 },
+    { name: 'g(x) / e₁, Elkan–Noto estimate', x: GRID, y: r.corrected, slot: 2, dashed: true },
+    { name: 'threshold 1/2', x: [...X_RANGE], y: [0.5, 0.5], muted: true, dashed: true },
+  ] as const
   const bayes = crossing(r.f)
   const naive = crossing(r.g)
   const fixed = crossing(r.corrected)
   const fmt = (v: number | null) => (v === null ? 'none' : formatNumber(v))
 
+  const xAxis = useAxis({ label: 'x', range: X_RANGE })
+  const yAxis = useAxis({ label: 'probability', range: [0, 1.02] })
   return (
-    <Interactive
+    <Figure
       title="Correcting a labelled-versus-unlabelled classifier"
+      state={state}
       caption="Positives are N(Δ/2, 1) and negatives N(−Δ/2, 1), with class prior π. Only a fraction c of the positives carries a label, chosen at random. A classifier trained to separate labelled from unlabelled points learns g(x) = c·P(y = 1 | x): the same shape as the true posterior, scaled down by c. Thresholding g at one half misses most positives, or all of them when c < 1/2. Dividing by c restores the posterior. Elkan and Noto estimate c by e₁, the average of g over labelled points; e₁ equals c only when the classes do not overlap, so with overlap it is too small and the corrected curve overshoots."
-      controls={
-        <>
-          <ParamSlider label="class prior π" param={prior} />
-          <ParamSlider label="label frequency c" param={c} />
-          <ParamSlider label="class separation Δ" param={sep} />
-        </>
-      }
-      readout={
+
+      readouts={
         <>
           <Readout label="e₁ (estimate of c)" value={formatNumber(r.e1)} />
           <Readout label="true boundary" value={fmt(bayes)} />
@@ -68,7 +67,12 @@ export function PuCorrection() {
         </>
       }
     >
-      <XYChart series={series} xLabel="x" yLabel="probability" xRange={X_RANGE} yRange={[0, 1.02]} />
-    </Interactive>
+      <Plot x={xAxis} y={yAxis}>
+        <Curve {...series[0]} />
+        <Curve {...series[1]} />
+        <Curve {...series[2]} />
+        <Curve {...series[3]} />
+      </Plot>
+    </Figure>
   )
 }

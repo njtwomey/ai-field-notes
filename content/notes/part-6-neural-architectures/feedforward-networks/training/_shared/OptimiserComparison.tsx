@@ -1,17 +1,21 @@
-import { useMemo, useState } from 'react'
+import { useMemo } from 'react'
 import {
-  Heatmap,
-  Interactive,
-  NumberSelector,
-  ParamChoice,
-  ParamSwitch,
+  Figure,
+  float,
+  Handle,
+  int,
+  Plot,
+  Raster,
   Readout,
-  XYChart,
-  type Handle,
-  type HeatmapOverlay,
-  type XYSeries,
+  row,
+  seriesLayers,
+  type SeriesSpec,
+  setting,
+  slider,
+  useAxis,
+  useFigureState,
+  variants,
 } from 'aifn-render'
-import { linspace } from '@/lib/math'
 import {
   KAPPA,
   OPTIMISERS,
@@ -22,6 +26,7 @@ import {
   type SurfaceId,
   type Vec,
 } from './optimisers'
+import { linspace, toFlat } from 'aifn/foundation/tensor'
 
 const GRID = 81
 const TOL = 1e-3
@@ -36,32 +41,61 @@ type Props = {
 
 const clamp = (v: number, [lo, hi]: Vec) => Math.round(Math.min(Math.max(v, lo), hi) * 100) / 100
 
-export function OptimiserComparison({ initial = ['sgd', 'nesterov', 'adam'], initialSurface = 'valley' }: Props) {
-  const [surfaceId, setSurfaceId] = useState<SurfaceId>(initialSurface)
-  const surface = SURFACES.find((s) => s.id === surfaceId)!
-  const [logEta, setLogEta] = useState(Math.log10(surface.eta))
-  const [logAlpha, setLogAlpha] = useState(Math.log10(surface.alpha))
-  const [steps, setSteps] = useState(150)
-  const [start, setStart] = useState<Vec>(surface.start)
-  const [shown, setShown] = useState<boolean[]>(OPTIMISERS.map((o) => initial.includes(o.id)))
-
-  const chooseSurface = (id: SurfaceId) => {
-    const s = SURFACES.find((x) => x.id === id)!
-    setSurfaceId(id)
-    setStart(s.start)
-    setLogEta(Math.log10(s.eta))
-    setLogAlpha(Math.log10(s.alpha))
+/** One surface's own settings: each surface opens at its own step sizes and start, and keeps them when revisited. */
+function surfaceCase(id: SurfaceId) {
+  const s = SURFACES.find((x) => x.id === id)!
+  return {
+    label: s.label,
+    params: {
+      eta: float(s.eta, {
+        min: 1e-3,
+        max: 0.3,
+        scale: 'log10',
+        suggestions: [0.001, 0.003, 0.01, 0.03, 0.1, 0.3],
+        label: 'SGD-family step size η',
+      }),
+      alpha: float(s.alpha, {
+        min: 3e-3,
+        max: 1,
+        scale: 'log10',
+        suggestions: [0.003, 0.01, 0.03, 0.1, 0.3, 1],
+        label: 'adaptive step size α',
+      }),
+      x0: slider(s.xRange[0], s.xRange[1], s.start[0], { step: 0.01, onChart: true }),
+      y0: slider(s.yRange[0], s.yRange[1], s.start[1], { step: 0.01, onChart: true }),
+    },
   }
+}
+
+export function OptimiserComparison({ initial = ['sgd', 'nesterov', 'adam'], initialSurface = 'valley' }: Props) {
+  const state = useFigureState({
+    surface: variants(
+      { valley: surfaceCase('valley'), rotated: surfaceCase('rotated'), rosenbrock: surfaceCase('rosenbrock') },
+      { choiceLabel: 'surface', initial: initialSurface },
+    ),
+    steps: int(150, { min: 20, max: 400, suggestions: [50, 150, 400], label: 'steps' }),
+    show: row(
+      'optimisers',
+      Object.fromEntries(OPTIMISERS.map((o) => [o.id, setting(initial.includes(o.id), o.label)])) as Record<
+        OptimiserId,
+        ReturnType<typeof setting>
+      >,
+    ),
+  })
+  const surface = SURFACES.find((s) => s.id === state.surface.key)!
+  const { eta, alpha, x0, y0 } = state.surface.values
+  const steps = state.steps
+  const start = useMemo<Vec>(() => [x0, y0], [x0, y0])
+  const showValues = state.show
+  const shown = useMemo(() => OPTIMISERS.map((o) => showValues[o.id]), [showValues])
 
   const grid = useMemo(() => {
-    const x = linspace(surface.xRange[0], surface.xRange[1], GRID)
-    const y = linspace(surface.yRange[0], surface.yRange[1], GRID)
+    const x = toFlat(linspace(surface.xRange[0], surface.xRange[1], GRID))
+    const y = toFlat(linspace(surface.yRange[0], surface.yRange[1], GRID))
     const z = y.map((yv) => x.map((xv) => Math.log10(surface.f([xv, yv]).loss + 0.01)))
     return { x, y, z }
   }, [surface])
 
-  const eta = 10 ** logEta
-  const alpha = 10 ** logAlpha
   const runs = useMemo(
     () =>
       OPTIMISERS.map((o, i) =>
@@ -70,8 +104,8 @@ export function OptimiserComparison({ initial = ['sgd', 'nesterov', 'adam'], ini
     [surface, start, eta, alpha, steps, shown],
   )
 
-  const overlay = useMemo((): HeatmapOverlay[] => {
-    const paths = OPTIMISERS.flatMap((o, i): HeatmapOverlay[] => {
+  const overlay = useMemo((): SeriesSpec[] => {
+    const paths = OPTIMISERS.flatMap((o, i): SeriesSpec[] => {
       const run = runs[i]
       if (!run) return []
       return [{ name: o.label, type: 'line', x: run.path.map((p) => p[0]), y: run.path.map((p) => p[1]), slot: i + 1 }]
@@ -83,8 +117,8 @@ export function OptimiserComparison({ initial = ['sgd', 'nesterov', 'adam'], ini
   }, [runs, surface])
 
   const curves = useMemo(
-    (): XYSeries[] =>
-      OPTIMISERS.flatMap((o, i): XYSeries[] => {
+    (): SeriesSpec[] =>
+      OPTIMISERS.flatMap((o, i): SeriesSpec[] => {
         const run = runs[i]
         if (!run) return []
         const y = run.losses.map((l) => Math.max(l, FLOOR))
@@ -93,71 +127,16 @@ export function OptimiserComparison({ initial = ['sgd', 'nesterov', 'adam'], ini
     [runs],
   )
 
-  const handles: Handle[] = [
-    {
-      kind: 'point',
-      at: start,
-      label: 'start',
-      onDrag: ([x, y]) => setStart([clamp(x, surface.xRange), clamp(y, surface.yRange)]),
-    },
-  ]
-
+  const xAxis = useAxis({ label: 'x' })
+  const yAxis = useAxis({ label: 'y' })
+  const xAxis2 = useAxis({ label: 'step', hold: 'union' })
+  const yAxis2 = useAxis({ label: 'loss L', hold: 'union', log: true })
   return (
-    <Interactive
+    <Figure
       title="Optimisers on three surfaces"
       caption={`Left: log₁₀(L + 0.01) over the parameters, with each optimiser's path from the same start; drag the start point to move it. Right: the loss per step on a log scale. The valley is L = ½(x² + ${KAPPA}y²), with condition number ${KAPPA}; the rotated valley is the same function turned by 45°, so its axes of curvature are no longer the coordinate axes. SGD, momentum (β = 0.9) and Nesterov share the step size η; AdaGrad, RMSProp (ρ = 0.9) and Adam (β₁ = 0.9, β₂ = 0.999) share the step size α. Rotation leaves the SGD family unchanged and slows the per-coordinate methods.`}
-      controls={
-        <>
-          <ParamChoice
-            label="surface"
-            value={surfaceId}
-            onChange={chooseSurface}
-            options={SURFACES.map((s) => ({ value: s.id, label: s.label }))}
-          />
-          <NumberSelector
-            label="SGD-family step size η"
-            value={logEta}
-            onChange={setLogEta}
-            min={-3}
-            max={-0.5}
-            step={0.1}
-            logTransform="value-is-log"
-            points_per_decade={2}
-          />
-          <NumberSelector
-            label="adaptive step size α"
-            value={logAlpha}
-            onChange={setLogAlpha}
-            min={-2.5}
-            max={0}
-            step={0.1}
-            logTransform="value-is-log"
-            points_per_decade={2}
-          />
-          <NumberSelector
-            label="steps"
-            value={steps}
-            onChange={setSteps}
-            type="int"
-            min={20}
-            max={400}
-            increment="lin"
-            points={10}
-            step={10}
-          />
-          <div className="col-span-full flex flex-wrap gap-x-5 gap-y-2">
-            {OPTIMISERS.map((o, i) => (
-              <ParamSwitch
-                key={o.id}
-                label={o.label}
-                checked={shown[i]}
-                onChange={(v) => setShown((s) => s.map((old, j) => (j === i ? v : old)))}
-              />
-            ))}
-          </div>
-        </>
-      }
-      readout={OPTIMISERS.flatMap((o, i) => {
+      state={state}
+      readouts={OPTIMISERS.flatMap((o, i) => {
         const run = runs[i]
         if (!run) return []
         const hit = stepsTo(run.losses, TOL)
@@ -166,19 +145,23 @@ export function OptimiserComparison({ initial = ['sgd', 'nesterov', 'adam'], ini
       })}
     >
       <div className="grid gap-4 md:grid-cols-2">
-        <Heatmap
-          x={grid.x}
-          y={grid.y}
-          z={grid.z}
-          xLabel="x"
-          yLabel="y"
-          valueLabel="log₁₀(L + 0.01)"
-          overlay={overlay}
-          handles={handles}
-          height={340}
-        />
-        <XYChart height={340} series={curves} yLog xLabel="step" yLabel="loss L" />
+        <Plot x={xAxis} y={yAxis} height={340}>
+          <Raster x={grid.x} y={grid.y} z={grid.z} valueLabel={'log₁₀(L + 0.01)'} />
+          {seriesLayers(overlay, { live: true })}
+          <Handle
+            kind="point"
+            at={start}
+            label="start"
+            onDrag={([x, y]) => {
+              state.set('surface.x0', clamp(x, surface.xRange))
+              state.set('surface.y0', clamp(y, surface.yRange))
+            }}
+          />
+        </Plot>
+        <Plot x={xAxis2} y={yAxis2} height={340}>
+          {seriesLayers(curves)}
+        </Plot>
       </div>
-    </Interactive>
+    </Figure>
   )
 }

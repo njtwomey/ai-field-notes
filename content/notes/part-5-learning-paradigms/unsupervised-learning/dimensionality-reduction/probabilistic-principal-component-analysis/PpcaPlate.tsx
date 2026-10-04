@@ -1,5 +1,4 @@
-import { Interactive } from 'aifn-render'
-import { Diagram } from 'aifn-render'
+import { Diagram, Figure } from 'aifn-render'
 import type { DiagramSpec } from 'aifn-render'
 
 const param = (id: string, x: number, y: number, label: string) => ({
@@ -46,7 +45,7 @@ const spec: DiagramSpec = {
 /** Probabilistic PCA as a plate diagram. */
 export function PpcaPlate() {
   return (
-    <Interactive
+    <Figure
       title="PPCA as a graphical model"
       caption="Each observation x_i (shaded) is generated from its own q-dimensional latent z_i through the shared loading matrix W, mean μ and isotropic noise variance σ². The plate repeats the pair for every point; the parameters outside it are shared."
     >
@@ -54,6 +53,6 @@ export function PpcaPlate() {
         spec={spec}
         ariaLabel="Plate diagram: the latent z_i points to the observed x_i inside a plate over n points; the shared parameters W, mu and sigma squared also point to x_i"
       />
-    </Interactive>
+    </Figure>
   )
 }

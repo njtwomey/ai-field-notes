@@ -1,4 +1,4 @@
-/** The functions of `aifn-applied/learning/generalised/ordinal`. */
+/** The functions of `aifn-methods/learning/generalised/ordinal`. */
 
 import { definer, entries, type Entry, type FunctionInfo } from 'aifn/foundation/registry'
 import * as decomposition from './decomposition'

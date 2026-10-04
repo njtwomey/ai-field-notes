@@ -1,4 +1,4 @@
-/** The functions of `aifn-applied/learning/preprocessing` besides its registered transformers. */
+/** The functions of `aifn-methods/learning/preprocessing` besides its registered transformers. */
 
 import { definer, entries, type Entry, type FunctionInfo } from 'aifn/foundation/registry'
 import * as encoding from './encoding'

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { pairedShapes } from 'aifn-applied/data/synthetic'
+import { pairedShapes } from 'aifn-methods/data/synthetic'
 import {
   contrastiveAblation,
   contrastiveLoss,
@@ -10,7 +10,7 @@ import {
   TwoTower,
   zeroShot,
   type ContrastiveSnapshot,
-} from 'aifn-applied/neural/contrastive'
+} from 'aifn-methods/neural/contrastive'
 import { valueAndGrad } from 'aifn/foundation/autodiff'
 import { stream } from 'aifn/foundation/random'
 import { tensor, toFlat, unwrap, type Tensor, type Value } from 'aifn/foundation/tensor'

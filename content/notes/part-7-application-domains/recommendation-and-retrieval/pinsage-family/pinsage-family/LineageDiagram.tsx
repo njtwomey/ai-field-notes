@@ -1,5 +1,4 @@
-import { Interactive } from 'aifn-render'
-import { Diagram } from 'aifn-render'
+import { Diagram, Figure } from 'aifn-render'
 import type { DiagramEdge, DiagramSpec } from 'aifn-render'
 
 const model = (id: string, x: number, y: number, label: string, tone: number | 'neutral') => ({
@@ -61,7 +60,7 @@ const spec: DiagramSpec = {
 /** Who builds on whom in Pinterest's representation models, by year of publication. */
 export function LineageDiagram() {
   return (
-    <Interactive
+    <Figure
       title="Lineage of the PinSage family"
       caption="Top row: models that embed items and other entities. Bottom row: models of users and their action sequences. An arrow means that the later model uses the earlier one's output or extends its method; the dashed arrow marks a replacement (PinnerFormer replaced PinnerSage as the user feature in ranking). PinSage embeddings are an input to almost every later model until OmniSage replaced them."
     >
@@ -69,6 +68,6 @@ export function LineageDiagram() {
         spec={spec}
         ariaLabel="Timeline from GraphSAGE 2017 through Pixie and PinSage 2018, PinnerSage 2020, MultiBiSage, ItemSage and PinnerFormer 2022, TransAct 2023, OmniSearchSage 2024, to OmniSage, TransAct V2 and PinFM 2025"
       />
-    </Interactive>
+    </Figure>
   )
 }

@@ -1,5 +1,5 @@
 /**
- * The registry of `aifn-applied/learning/generalised/gam` besides its fitters (registered in `fitters.ts`): the EBM
+ * The registry of `aifn-methods/learning/generalised/gam` besides its fitters (registered in `fitters.ts`): the EBM
  * boosting algorithm, term constructors, the problem and smoothing-path functions, and the expectile set-ups.
  */
 

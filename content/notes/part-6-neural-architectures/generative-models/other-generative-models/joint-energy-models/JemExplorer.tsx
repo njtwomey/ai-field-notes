@@ -14,13 +14,8 @@ import {
   useAxis,
 } from 'aifn-render'
 import { normals, stream } from 'aifn/foundation/random'
-import { moons, pinwheel } from 'aifn-applied/data/synthetic'
-import {
-  jemRun,
-  type JemCheckpoint,
-  type JemRun,
-  type JemTrack,
-} from 'aifn-applied/generative/energy'
+import { moons, pinwheel } from 'aifn-methods/data/synthetic'
+import { jemRun, type JemCheckpoint, type JemRun, type JemTrack } from 'aifn-methods/generative/energy'
 
 const DATASETS = [
   { value: 'moons', label: 'Two moons (non-linear separation)' },
@@ -192,18 +187,8 @@ export function JemExplorer() {
       }
     >
       <ControlRow label="Model & view">
-        <Select
-          label="Dataset"
-          value={dataChoice}
-          options={DATASETS}
-          onChange={(v) => setDataChoice(v as any)}
-        />
-        <Select
-          label="Model"
-          value={modelType}
-          options={MODELS}
-          onChange={(v) => setModelType(v as any)}
-        />
+        <Select label="Dataset" value={dataChoice} options={DATASETS} onChange={(v) => setDataChoice(v as any)} />
+        <Select label="Model" value={modelType} options={MODELS} onChange={(v) => setModelType(v as any)} />
         <Select
           label="Surface visualisation"
           value={viewType}
@@ -213,87 +198,42 @@ export function JemExplorer() {
       </ControlRow>
 
       <ControlRow label="Training progression">
-        <Player
-          count={Math.max(1, numCheckpoints)}
-          value={currentIdx}
-          onChange={setCheckpointIndex}
-        />
+        <Player count={Math.max(1, numCheckpoints)} value={currentIdx} onChange={setCheckpointIndex} />
       </ControlRow>
 
       <Plots>
         <Plot x={planeAxisX} y={planeAxisY} title="State space, energy surface & SGLD negative samples">
           {surfaceMatrix.length > 0 && gridAxis.length > 0 && (
-            <Raster
-              x={gridAxis}
-              y={gridAxis}
-              z={surfaceMatrix}
-              scale="diverging"
-            />
+            <Raster x={gridAxis} y={gridAxis} z={surfaceMatrix} scale="diverging" />
           )}
-          <Points
-            x={trainPoints.c0.x}
-            y={trainPoints.c0.y}
-            slot={0}
-            size={4}
-          />
-          <Points
-            x={trainPoints.c1.x}
-            y={trainPoints.c1.y}
-            slot={1}
-            size={4}
-          />
+          <Points x={trainPoints.c0.x} y={trainPoints.c0.y} slot={0} size={4} />
+          <Points x={trainPoints.c1.x} y={trainPoints.c1.y} slot={1} size={4} />
           {negativeSamples.x.length > 0 && (
-            <Points
-              x={negativeSamples.x}
-              y={negativeSamples.y}
-              slot={2}
-              size={5}
-              thin={true}
-            />
+            <Points x={negativeSamples.x} y={negativeSamples.y} slot={2} size={5} thin={true} />
           )}
         </Plot>
 
         <Plot x={lossX} y={lossY} title="Classification Cross-Entropy Loss">
-          <Curve
-            x={lossSteps}
-            y={ceLoss}
-            slot={0}
-          />
+          <Curve x={lossSteps} y={ceLoss} slot={0} />
         </Plot>
       </Plots>
 
       <ControlRow label="Diagnostics">
         <Readout
           label="Accuracy"
-          value={
-            currentCheckpoint
-              ? `${formatNumber(Number((currentCheckpoint.accuracy * 100).toFixed(1)))}%`
-              : '—'
-          }
+          value={currentCheckpoint ? `${formatNumber(Number((currentCheckpoint.accuracy * 100).toFixed(1)))}%` : '—'}
         />
         <Readout
           label="Calibration (ECE)"
-          value={
-            currentCheckpoint
-              ? formatNumber(Number(currentCheckpoint.ece.toFixed(3)))
-              : '—'
-          }
+          value={currentCheckpoint ? formatNumber(Number(currentCheckpoint.ece.toFixed(3))) : '—'}
         />
         <Readout
           label="Mean Data Energy"
-          value={
-            !Number.isNaN(meanDataEnergy)
-              ? formatNumber(Number(meanDataEnergy.toFixed(2)))
-              : '—'
-          }
+          value={!Number.isNaN(meanDataEnergy) ? formatNumber(Number(meanDataEnergy.toFixed(2))) : '—'}
         />
         <Readout
           label="OOD AUROC"
-          value={
-            currentCheckpoint
-              ? formatNumber(Number(currentCheckpoint.oodAuroc.toFixed(2)))
-              : '—'
-          }
+          value={currentCheckpoint ? formatNumber(Number(currentCheckpoint.oodAuroc.toFixed(2))) : '—'}
         />
       </ControlRow>
     </Figure>

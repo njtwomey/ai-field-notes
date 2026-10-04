@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { drawMargin, trueSkillEp, trueSkillModel, trueSkillUpdate } from 'aifn-applied/inference/rating-models'
+import { drawMargin, trueSkillEp, trueSkillModel, trueSkillUpdate } from 'aifn-methods/inference/rating-models'
 import { logJoint } from 'aifn/inference/model'
 import { modelExpectationPropagation } from 'aifn/inference/expectation-propagation'
 import { Normal } from 'aifn/probability/distributions'

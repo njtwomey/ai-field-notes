@@ -1,11 +1,5 @@
 import { useMemo } from 'react'
-import {
-  henonMap,
-  lyapunovSpectrum,
-  orbit,
-  standardMap,
-  type MapN,
-} from 'aifn-applied/dynamics/maps'
+import { henonMap, lyapunovSpectrum, orbit, standardMap, type MapN } from 'aifn-methods/dynamics/maps'
 import { histogram } from 'aifn/probability/stats'
 import { toFlat, toRows } from 'aifn/foundation/tensor'
 import {
@@ -155,7 +149,10 @@ export function PlaneMaps() {
           <>
             <Readout label="Lyapunov spectrum (λ₁, λ₂)" value={spectrum.map(fmt).join(', ')} />
             <Readout label="trace log|det J| (sum)" value={fmt(spectrum[0] + spectrum[1])} />
-            <Readout label="dissipative vs Hamiltonian" value={which === 'henon' ? 'dissipative (det J = −b)' : 'symplectic (det J = 1)'} />
+            <Readout
+              label="dissipative vs Hamiltonian"
+              value={which === 'henon' ? 'dissipative (det J = −b)' : 'symplectic (det J = 1)'}
+            />
           </>
         ),
       }}

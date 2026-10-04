@@ -1,6 +1,6 @@
-import { useMemo, useState } from 'react'
-import { Interactive, ParamChoice, ParamSlider, Readout, XYChart, formatNumber, type XYSeries } from 'aifn-render'
-import { linspace } from '@/lib/math'
+import { useMemo } from 'react'
+import { choice, Curve, Figure, float, formatNumber, Plot, Readout, useAxis, useFigureState } from 'aifn-render'
+import { linspace, toFlat } from 'aifn/foundation/tensor'
 
 type ExprId = 'cos' | 'exp' | 'sqrt'
 
@@ -37,18 +37,24 @@ const EXPRESSIONS: Record<ExprId, Expr> = {
   },
 }
 
-const LOG_X = linspace(-10, 0, 301)
+const LOG_X = toFlat(linspace(-10, 0, 301))
 
 /**
  * Relative error of a naive and a rearranged formula, both evaluated in the browser's double precision. The
  * rearranged formula serves as the reference because it has no cancellation.
  */
 export function CancellationErrors() {
-  const [id, setId] = useState<ExprId>('cos')
-  const [logX, setLogX] = useState(-6)
-  const e = EXPRESSIONS[id]
+  const state = useFigureState({
+    id: choice<ExprId>(
+      (Object.keys(EXPRESSIONS) as ExprId[]).map((k) => ({ value: k, label: EXPRESSIONS[k].label })),
+      'cos',
+      { label: 'expression' },
+    ),
+    logX: float(-6, { min: -10, max: 0, step: 0.5, label: 'log₁₀ x (readout)' }),
+  })
+  const e = EXPRESSIONS[state.id]
 
-  const series = useMemo((): XYSeries[] => {
+  const series = useMemo(() => {
     const rel = (f: (x: number) => number) =>
       LOG_X.map((lx) => {
         const x = 10 ** lx
@@ -56,38 +62,30 @@ export function CancellationErrors() {
         return Math.max(FLOOR, Math.abs(f(x) - truth) / Math.abs(truth))
       })
     return [
-      { name: `naive ${e.label}`, type: 'line', x: LOG_X, y: rel(e.naive), slot: 1 },
+      { name: `naive ${e.label}`, x: LOG_X, y: rel(e.naive), slot: 1 },
       {
         name: 'predicted: u × (size of cancelled terms / result)',
-        type: 'line',
         x: LOG_X,
         y: LOG_X.map((lx) => Math.min(10, e.predicted(10 ** lx))),
         dashed: true,
         slot: 0,
       },
-      { name: 'machine epsilon', type: 'line', x: [-10, 0], y: [2 * U, 2 * U], muted: true, dashed: true },
-    ]
+      { name: 'machine epsilon', x: [-10, 0], y: [2 * U, 2 * U], muted: true, dashed: true },
+    ] as const
   }, [e])
 
-  const x = 10 ** logX
+  const x = 10 ** state.logX
   const naive = e.naive(x)
   const stable = e.stable(x)
+  const xAxis = useAxis({ label: 'log₁₀ x', range: [-10, 0] })
+  const yAxis = useAxis({ label: 'relative error', range: [1e-18, 10], log: true })
   return (
-    <Interactive
+    <Figure
       title="Catastrophic cancellation in double precision"
+      state={state}
       caption="Relative error of the naive formula, computed live in IEEE double precision, against an algebraically equal rearrangement that avoids subtracting nearly equal numbers. The naive error grows as x shrinks, as predicted by the rounding error in the large terms divided by the small result. For (1 − cos x)/x² the naive formula returns 0 below x ≈ 10⁻⁸."
-      controls={
-        <>
-          <ParamChoice
-            label="expression"
-            value={id}
-            onChange={setId}
-            options={(Object.keys(EXPRESSIONS) as ExprId[]).map((k) => ({ value: k, label: EXPRESSIONS[k].label }))}
-          />
-          <ParamSlider label="log₁₀ x (readout)" value={logX} onChange={setLogX} min={-10} max={0} step={0.5} />
-        </>
-      }
-      readout={
+
+      readouts={
         <>
           <Readout label="x" value={x.toExponential(1)} />
           <Readout label="naive" value={naive.toPrecision(17)} />
@@ -96,15 +94,11 @@ export function CancellationErrors() {
         </>
       }
     >
-      <XYChart
-        height={320}
-        xLabel="log₁₀ x"
-        yLabel="relative error"
-        series={series}
-        xRange={[-10, 0]}
-        yLog
-        yRange={[1e-18, 10]}
-      />
-    </Interactive>
+      <Plot x={xAxis} y={yAxis} height={320}>
+        <Curve {...series[0]} />
+        <Curve {...series[1]} />
+        <Curve {...series[2]} />
+      </Plot>
+    </Figure>
   )
 }

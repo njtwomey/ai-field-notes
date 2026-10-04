@@ -1,6 +1,18 @@
 import { useMemo } from 'react'
-import { Interactive, ParamSlider, Readout, XYChart, formatNumber, useParam, type XYSeries } from 'aifn-render'
-import { rng } from '@/lib/math'
+import {
+  Figure,
+  float,
+  formatNumber,
+  int,
+  Plot,
+  Points,
+  Readout,
+  Segments,
+  slider,
+  useAxis,
+  useFigureState,
+} from 'aifn-render'
+import { stream, uniform } from 'aifn/foundation/random'
 
 const N = 3000
 
@@ -14,14 +26,14 @@ const accuracies = (m: number, best: number) =>
  * conditional independence.
  */
 function simulate(m: number, best: number, coverage: number, rho: number, seed: number) {
-  const g = rng(seed)
+  const g = stream(seed)
   const acc = accuracies(m, best)
   const y: number[] = []
   const L: number[][] = []
   for (let i = 0; i < N; i++) {
-    const yi = g.uniform() < 0.5 ? 1 : -1
-    const row = acc.map((a) => (g.uniform() < coverage ? (g.uniform() < a ? yi : -yi) : 0))
-    if (m > 1 && row[0] !== 0 && g.uniform() < rho) row[1] = row[0]
+    const yi = uniform(g) < 0.5 ? 1 : -1
+    const row = acc.map((a) => (uniform(g) < coverage ? (uniform(g) < a ? yi : -yi) : 0))
+    if (m > 1 && row[0] !== 0 && uniform(g) < rho) row[1] = row[0]
     y.push(yi)
     L.push(row)
   }
@@ -83,15 +95,17 @@ function weightedVote(L: number[][], y: number[], w: number[]) {
 }
 
 export function LabelModelDemo() {
-  const lfs = useParam(5, { min: 3, max: 8, step: 1 })
-  const best = useParam(0.9, { min: 0.6, max: 0.95, step: 0.05 })
-  const coverage = useParam(0.5, { min: 0.1, max: 1, step: 0.05 })
-  const rho = useParam(0, { min: 0, max: 1, step: 0.05 })
-  const seed = useParam(1, { min: 1, max: 20, step: 1 })
-  const m = lfs.value
+  const state = useFigureState({
+    lfs: int(5, { min: 3, max: 8, step: 1, label: 'labelling functions m', format: (v) => String(v) }),
+    best: float(0.9, { min: 0.6, max: 0.95, step: 0.05, label: 'best LF accuracy' }),
+    coverage: slider(0.1, 1, 0.5, { step: 0.05, label: 'coverage' }),
+    rho: slider(0, 1, 0, { step: 0.05, label: 'correlation ρ of LF 1 and LF 2' }),
+    seed: int(1, { min: 1, max: 20, step: 1, label: 'seed', format: (v) => String(v) }),
+  })
+  const m = state.lfs
 
   const r = useMemo(() => {
-    const d = simulate(m, best.value, coverage.value, rho.value, seed.value)
+    const d = simulate(m, state.best, state.coverage, state.rho, state.seed)
     const est = tripletAccuracies(d.L, m)
     const logit = (a: number) => Math.log(a / (1 - a))
     return {
@@ -102,32 +116,27 @@ export function LabelModelDemo() {
       oracle: weightedVote(d.L, d.y, d.acc.map(logit)),
       err: est.reduce((s, a, i) => s + Math.abs(a - d.acc[i]), 0) / m,
     }
-  }, [m, best.value, coverage.value, rho.value, seed.value])
+  }, [m, state.best, state.coverage, state.rho, state.seed])
 
   const index = Array.from({ length: m }, (_, i) => i + 1)
-  const series: XYSeries[] = [
-    { name: 'true accuracy', type: 'scatter', x: index, y: r.acc, slot: 0 },
-    { name: 'estimated (triplet method)', type: 'scatter', x: index, y: r.est, slot: 1 },
-  ]
+  const series = [
+    { name: 'true accuracy', x: index, y: r.acc, slot: 0 },
+    { name: 'estimated (triplet method)', x: index, y: r.est, slot: 1 },
+  ] as const
   const segments = index.map((x, i) => ({
     from: [x, r.acc[i]] as [number, number],
     to: [x, r.est[i]] as [number, number],
   }))
 
+  const xAxis = useAxis({ label: 'labelling function', range: [0.5, m + 0.5] })
+  const yAxis = useAxis({ label: 'accuracy when voting', range: [0.45, 1] })
   return (
-    <Interactive
+    <Figure
       title="Estimating labelling-function accuracies without labels"
+      state={state}
       caption="Three thousand balanced binary points and m labelling functions (LFs). Each LF votes on a point with the chosen coverage and, when it votes, is right with its accuracy; accuracies run evenly from the best LF down to 0.55. The triplet method estimates every accuracy from agreement rates alone. The label model then weights each vote by the log-odds of its estimated accuracy, while majority vote weights all votes equally. With independent LFs the estimates sit on the true values and the label model beats majority vote. Raise the correlation ρ, the probability that LF 2 copies LF 1: the two now agree more than independence allows, their estimated accuracies inflate, and the label model counts one opinion twice."
-      controls={
-        <>
-          <ParamSlider label="labelling functions m" param={lfs} format={(v) => String(v)} />
-          <ParamSlider label="best LF accuracy" param={best} />
-          <ParamSlider label="coverage" param={coverage} />
-          <ParamSlider label="correlation ρ of LF 1 and LF 2" param={rho} />
-          <ParamSlider label="seed" param={seed} format={(v) => String(v)} />
-        </>
-      }
-      readout={
+
+      readouts={
         <>
           <Readout label="majority vote" value={formatNumber(r.mv)} />
           <Readout label="label model" value={formatNumber(r.lm)} />
@@ -136,14 +145,11 @@ export function LabelModelDemo() {
         </>
       }
     >
-      <XYChart
-        series={series}
-        segments={segments}
-        xLabel="labelling function"
-        yLabel="accuracy when voting"
-        xRange={[0.5, m + 0.5]}
-        yRange={[0.45, 1]}
-      />
-    </Interactive>
+      <Plot x={xAxis} y={yAxis}>
+        <Points {...series[0]} />
+        <Points {...series[1]} />
+        <Segments segments={segments} />
+      </Plot>
+    </Figure>
   )
 }

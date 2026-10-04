@@ -1,13 +1,16 @@
 import { useMemo } from 'react'
 import {
-  Interactive,
-  ParamSlider,
-  Readout,
-  XYChart,
+  Bars,
+  Curve,
+  Figure,
+  float,
   formatNumber,
-  useParam,
-  type Handle,
-  type XYSeries,
+  Handle,
+  Plot,
+  Points,
+  Readout,
+  useAxis,
+  useFigureState,
 } from 'aifn-render'
 
 const log2 = (x: number) => Math.log(x) / Math.LN2
@@ -29,28 +32,34 @@ const CURVE = T_GRID.map((t) => crossEntropy(model(t)))
 
 /** Cross-entropy of a tempered model against the true distribution, split into entropy plus KL divergence. */
 export function CrossEntropyGap() {
-  const temperature = useParam(2, { min: 0.25, max: 4, step: 0.05 })
-  const q = useMemo(() => model(temperature.value), [temperature.value])
+  const state = useFigureState({
+    temperature: float(2, { min: 0.25, max: 4, step: 0.05, label: 'temperature T' }),
+  })
+  const q = useMemo(() => model(state.temperature), [state.temperature])
   const hpq = crossEntropy(q)
 
-  const bars: XYSeries[] = [
-    { name: 'model q', type: 'bar', x: OUTCOMES, y: q, slot: 0 },
-    { name: 'true p', type: 'scatter', x: OUTCOMES, y: P, emphasis: true },
-  ]
-  const curve: XYSeries[] = [
-    { name: 'cross-entropy H(p, q)', type: 'line', x: T_GRID, y: CURVE, slot: 0 },
-    { name: 'entropy H(p)', type: 'line', x: [0.25, 4], y: [H_P, H_P], dashed: true, slot: 1 },
-    { name: 'current model', type: 'scatter', x: [temperature.value], y: [hpq], emphasis: true },
-  ]
+  const bars = [
+    { name: 'model q', x: OUTCOMES, y: q, slot: 0 },
+    { name: 'true p', x: OUTCOMES, y: P, emphasis: true },
+  ] as const
+  const curve = [
+    { name: 'cross-entropy H(p, q)', x: T_GRID, y: CURVE, slot: 0 },
+    { name: 'entropy H(p)', x: [0.25, 4], y: [H_P, H_P], dashed: true, slot: 1 },
+    { name: 'current model', x: [state.temperature], y: [hpq], emphasis: true },
+  ] as const
   // The temperature is the horizontal position on the curve, so dragging along the axis sets it.
-  const handles: Handle[] = [{ kind: 'x', at: temperature.value, label: 'T', onDrag: (x) => temperature.set(x) }]
 
+  const xAxis = useAxis({ label: 'outcome', range: [0.5, 4.5] })
+  const yAxis = useAxis({ label: 'probability', range: [0, 1] })
+  const xAxis2 = useAxis({ label: 'temperature T', range: [0.25, 4] })
+  const yAxis2 = useAxis({ label: 'bits', range: [1.5, 3.2] })
   return (
-    <Interactive
+    <Figure
       title="Cross-entropy is entropy plus KL divergence"
+      state={state}
       caption="The true distribution p has probabilities 1/2, 1/4, 1/8, 1/8, so its entropy is 1.75 bits. The model q is p tempered by T, q ∝ p^(1/T): T = 1 is exact, larger T flattens q towards uniform and smaller T sharpens it. Left: p (diamonds) against q (bars). Right: the cross-entropy H(p, q) against T. It never falls below H(p), and the gap is KL(p ‖ q). Drag T or use the slider."
-      controls={<ParamSlider label="temperature T" param={temperature} />}
-      readout={
+
+      readouts={
         <>
           <Readout label="H(p)" value={`${formatNumber(H_P)} bits`} />
           <Readout label="KL(p ‖ q)" value={`${formatNumber(hpq - H_P)} bits`} />
@@ -61,17 +70,17 @@ export function CrossEntropyGap() {
       }
     >
       <div className="grid gap-4 md:grid-cols-2">
-        <XYChart series={bars} xLabel="outcome" yLabel="probability" xRange={[0.5, 4.5]} yRange={[0, 1]} height={300} />
-        <XYChart
-          series={curve}
-          xLabel="temperature T"
-          yLabel="bits"
-          xRange={[0.25, 4]}
-          yRange={[1.5, 3.2]}
-          handles={handles}
-          height={300}
-        />
+        <Plot x={xAxis} y={yAxis} height={300}>
+          <Bars {...bars[0]} />
+          <Points {...bars[1]} />
+        </Plot>
+        <Plot x={xAxis2} y={yAxis2} height={300}>
+          <Curve {...curve[0]} />
+          <Curve {...curve[1]} />
+          <Points {...curve[2]} />
+          <Handle {...state.handle('temperature', { label: 'T' })} />
+        </Plot>
       </div>
-    </Interactive>
+    </Figure>
   )
 }

@@ -19,7 +19,7 @@ export {
   type SmootherResult,
   type StateSpaceModel,
 } from './kalman'
-// The steps the batch functions, the algorithms and EM (`aifn-applied/timeseries`) share, on tensors.
+// The steps the batch functions, the algorithms and EM (`aifn-methods/timeseries`) share, on tensors.
 export {
   filterAll,
   kalmanStep,

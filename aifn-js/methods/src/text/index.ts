@@ -1,5 +1,5 @@
 /**
- * `aifn-applied/text`: applications of text processing on `aifn/text`. Children: corpora (toy and worked-example
+ * `aifn-methods/text`: applications of text processing on `aifn/text`. Children: corpora (toy and worked-example
  * corpora) and tokenisers (a trained suite of named tokenisers to compare).
  */
 

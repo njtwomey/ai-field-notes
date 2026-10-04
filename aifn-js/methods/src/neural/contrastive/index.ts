@@ -1,6 +1,6 @@
 /**
- * `aifn-applied/neural/contrastive`: a tiny CLIP: two MLP encoders aligned by the symmetric InfoNCE loss with a
- * learnable temperature, trained on paired views (`aifn-applied/data`'s `pairedShapes`), with zero-shot
+ * `aifn-methods/neural/contrastive`: a tiny CLIP: two MLP encoders aligned by the symmetric InfoNCE loss with a
+ * learnable temperature, trained on paired views (`aifn-methods/data`'s `pairedShapes`), with zero-shot
  * classification, retrieval, Wang & Isola's alignment and uniformity, and an ablation over batch size and temperature.
  */
 

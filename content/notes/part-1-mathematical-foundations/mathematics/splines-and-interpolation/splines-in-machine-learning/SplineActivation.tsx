@@ -1,13 +1,16 @@
 import { useMemo, useState } from 'react'
 import {
-  Interactive,
-  ParamSlider,
-  Readout,
-  XYChart,
+  Figure,
+  float,
   formatNumber,
-  useParam,
-  type Handle,
-  type XYSeries,
+  Handle,
+  int,
+  Plot,
+  Readout,
+  seriesLayers,
+  type SeriesSpec,
+  useAxis,
+  useFigureState,
 } from 'aifn-render'
 import { bsplineBasis, solve } from '../_shared/splines'
 
@@ -44,22 +47,30 @@ function refit(c: number[], from: number[], to: number[]): number[] {
  * The coefficients are draggable; changing the grid refits the spline by least squares.
  */
 export function SplineActivation() {
-  const [grid, setGrid] = useState(5)
-  const [coefs, setCoefs] = useState<number[]>(() => greville(knots(5)).map((x) => 0.8 * Math.sin(3 * x)))
-  const wb = useParam(0, { min: 0, max: 1, step: 0.05 })
+  const state = useFigureState({
+    grid: int(5, { min: 2, max: 16, step: 1, label: 'Grid intervals G', suggestions: [3, 5, 8, 16] }),
+    wb: float(0, { min: 0, max: 1, step: 0.05, label: 'Base weight w_b on SiLU' }),
+  })
+  const grid = state.grid
+  // The dragged coefficients with the grid they belong to; a new grid refits them by least squares.
+  const [fit, setFit] = useState(() => ({ grid: 5, coefs: greville(knots(5)).map((x) => 0.8 * Math.sin(3 * x)) }))
+  const coefs = useMemo(
+    () => (fit.grid === grid ? fit.coefs : refit(fit.coefs, knots(fit.grid), knots(grid))),
+    [fit, grid],
+  )
   const t = useMemo(() => knots(grid), [grid])
   const xi = useMemo(() => greville(t), [t])
 
   const r = useMemo(() => {
     const rows = GRID.map((x) => bsplineBasis(x, t, K))
     const spline = rows.map((row) => row.reduce((s, b, i) => s + b * coefs[i], 0))
-    const phi = spline.map((v, i) => v + wb.value * silu(GRID[i]))
-    const top: XYSeries[] = [
+    const phi = spline.map((v, i) => v + state.wb * silu(GRID[i]))
+    const top: SeriesSpec[] = [
       { name: 'coefficients (ξᵢ, cᵢ)', type: 'line', x: xi, y: coefs, muted: true, dashed: true },
       { name: 'φ(x)', type: 'line', x: GRID, y: phi, slot: 0 },
     ]
-    if (wb.value > 0) top.push({ name: 'spline part', type: 'line', x: GRID, y: spline, slot: 1, dashed: true })
-    const basis: XYSeries[] = coefs.map((_, j) => ({
+    if (state.wb > 0) top.push({ name: 'spline part', type: 'line', x: GRID, y: spline, slot: 1, dashed: true })
+    const basis: SeriesSpec[] = coefs.map((_, j) => ({
       name: 'B-splines',
       type: 'line',
       x: GRID,
@@ -67,41 +78,26 @@ export function SplineActivation() {
       muted: true,
     }))
     return { top, basis }
-  }, [t, xi, coefs, wb.value])
+  }, [t, xi, coefs, state.wb])
 
   // The outer coefficients sit beyond [-1, 1] on the extended grid, so the axis shows them too.
   const xRange: [number, number] = [xi[0] - 0.1, xi[xi.length - 1] + 0.1]
   const handles: Handle[] = coefs.map((c, i) => ({
     kind: 'point',
     at: [xi[i], c],
-    onDrag: ([, y]) => setCoefs((prev) => prev.map((v, j) => (j === i ? Math.min(Math.max(y, -2), 2) : v))),
+    onDrag: ([, y]) => setFit({ grid, coefs: coefs.map((v, j) => (j === i ? Math.min(Math.max(y, -2), 2) : v)) }),
   }))
 
+  const xAxis = useAxis({ label: 'x', range: xRange })
+  const yAxis = useAxis({ label: 'φ(x)', range: [-2, 2] })
+  const xAxis2 = useAxis({ label: 'x', range: xRange })
+  const yAxis2 = useAxis({ label: 'Bᵢ(x)', range: [0, 1] })
   return (
-    <Interactive
+    <Figure
       title="A learnable spline activation"
+      state={state}
       caption="Each dark point is one coefficient cᵢ, drawn at its Greville abscissa ξᵢ (the outermost ones lie beyond [−1, 1], where the extended grid lives); drag it up or down to reshape φ. Only the four nearest grid intervals move, because cubic B-splines have local support. Change the grid size G: the spline is refitted to the new grid by least squares, which is how KANs refine a trained activation. Raise w_b to add the SiLU term that KANs keep beside the spline."
-      controls={
-        <>
-          <ParamSlider
-            label="Grid intervals G"
-            value={grid}
-            onChange={(g) => {
-              const next = Math.round(g)
-              if (next === grid) return
-              setCoefs((prev) => refit(prev, knots(grid), knots(next)))
-              setGrid(next)
-            }}
-            min={2}
-            max={16}
-            step={1}
-            withArrows
-            format={(v) => String(v)}
-          />
-          <ParamSlider label="Base weight w_b on SiLU" param={wb} />
-        </>
-      }
-      readout={
+      readouts={
         <>
           <Readout label="spline coefficients G + k" value={grid + K} />
           <Readout label="parameters per edge" value={grid + K + 2} />
@@ -109,16 +105,15 @@ export function SplineActivation() {
         </>
       }
     >
-      <XYChart
-        series={r.top}
-        xRange={xRange}
-        yRange={[-2, 2]}
-        xLabel="x"
-        yLabel="φ(x)"
-        height={280}
-        handles={handles}
-      />
-      <XYChart series={r.basis} xRange={xRange} yRange={[0, 1]} xLabel="x" yLabel="Bᵢ(x)" height={160} />
-    </Interactive>
+      <Plot x={xAxis} y={yAxis} height={280}>
+        {seriesLayers(r.top)}
+        {(handles ?? []).map((h, i) => (
+          <Handle key={i} {...h} />
+        ))}
+      </Plot>
+      <Plot x={xAxis2} y={yAxis2} height={160}>
+        {seriesLayers(r.basis)}
+      </Plot>
+    </Figure>
   )
 }

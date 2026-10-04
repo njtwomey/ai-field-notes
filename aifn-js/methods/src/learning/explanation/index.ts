@@ -1,5 +1,5 @@
 /**
- * `aifn-applied/learning/explanation`: studies that compare explanation methods of `aifn/learning/explain` on planted
+ * `aifn-methods/learning/explanation`: studies that compare explanation methods of `aifn/learning/explain` on planted
  * truths, for the lab's workers: data attribution (influence, TracIn, KNN- and data Shapley) against planted label
  * noise.
  */

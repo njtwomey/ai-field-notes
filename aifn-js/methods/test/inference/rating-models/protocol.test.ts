@@ -1,5 +1,5 @@
 import { describe, it } from 'vitest'
-import { trueSkillEp } from 'aifn-applied/inference/rating-models'
+import { trueSkillEp } from 'aifn-methods/inference/rating-models'
 import { expectProtocol } from '../../protocol'
 
 describe('trueSkillEp', () => {

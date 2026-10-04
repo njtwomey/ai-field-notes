@@ -1,15 +1,18 @@
-import { useMemo, useState } from 'react'
+import { useMemo } from 'react'
 import {
-  Interactive,
-  ParamChoice,
-  ParamSlider,
-  Readout,
-  XYChart,
+  choice,
+  Curve,
+  Figure,
+  float,
   formatNumber,
-  useParam,
-  type XYSeries,
+  Plot,
+  Readout,
+  seriesLayers,
+  type SeriesSpec,
+  useAxis,
+  useFigureState,
 } from 'aifn-render'
-import { rng } from '@/lib/math'
+import { stream, uniform } from 'aifn/foundation/random'
 
 const N = 4
 const T = 1000
@@ -24,10 +27,10 @@ const ALGO_SLOTS = { ftl: 4, hedge: 6, share: 5 }
 
 /** Bernoulli losses: the planted expert of each segment has mean 0.2, the others 0.6. Fixed seed, so only η and α vary. */
 function makeLosses(): number[][] {
-  const r = rng(7)
+  const r = stream(7)
   return ROUNDS.map((_, t) => {
     const best = SCHEDULE[Math.floor(t / SEGMENT)]
-    return Array.from({ length: N }, (_, i) => (r.uniform() < (i === best ? GOOD : BAD) ? 1 : 0))
+    return Array.from({ length: N }, (_, i) => (uniform(r) < (i === best ? GOOD : BAD) ? 1 : 0))
   })
 }
 const LOSSES = makeLosses()
@@ -87,24 +90,49 @@ type Shown = 'share' | 'hedge'
 
 /** Cumulative regret against a switching best expert for FTL, Hedge and fixed share, with the weights over time. */
 export function TrackingFigure() {
-  const logEta = useParam(Math.log10(0.3), { min: -2, max: 1, step: 0.05 })
-  const logAlpha = useParam(Math.log10(M_SWITCHES / (T - 1)), { min: -4, max: -0.5, step: 0.05 })
-  const round = useParam(T, { min: 10, max: T, step: 10 })
-  const [shown, setShown] = useState<Shown>('share')
-  const eta = 10 ** logEta.value
-  const alpha = 10 ** logAlpha.value
+  const state = useFigureState({
+    round: float(T, { min: 10, max: T, step: 10, label: 'round t', format: (v) => String(v) }),
+    logEta: float(Math.log10(0.3), {
+      min: -2,
+      max: 1,
+      step: 0.05,
+      label: 'learning rate η',
+      points_per_decade: 2,
+      logTransform: 'value-is-log',
+      format: (v) => formatNumber(10 ** v),
+    }),
+    logAlpha: float(Math.log10(M_SWITCHES / (T - 1)), {
+      min: -4,
+      max: -0.5,
+      step: 0.05,
+      label: 'share rate α',
+      points_per_decade: 2,
+      logTransform: 'value-is-log',
+      format: (v) => formatNumber(10 ** v),
+    }),
+    shown: choice<Shown>(
+      [
+        { value: 'share', label: 'fixed share' },
+        { value: 'hedge', label: 'Hedge' },
+      ],
+      'share',
+      { label: 'weights of' },
+    ),
+  })
+  const eta = 10 ** state.logEta
+  const alpha = 10 ** state.logAlpha
   const hedge = useMemo(() => runShare(eta, 0), [eta])
   const share = useMemo(() => runShare(eta, alpha), [eta, alpha])
-  const t = round.value
+  const t = state.round
   const xs = ROUNDS.slice(0, t)
 
-  const regretSeries: XYSeries[] = [
-    { name: 'follow the leader', type: 'line', x: xs, y: FTL_REGRET.slice(0, t), slot: ALGO_SLOTS.ftl },
-    { name: 'Hedge', type: 'line', x: xs, y: hedge.regret.slice(0, t), slot: ALGO_SLOTS.hedge },
-    { name: 'fixed share', type: 'line', x: xs, y: share.regret.slice(0, t), slot: ALGO_SLOTS.share },
-  ]
-  const run = shown === 'share' ? share : hedge
-  const weightSeries: XYSeries[] = EXPERT_SLOTS.map((slot, i) => ({
+  const regretSeries = [
+    { name: 'follow the leader', x: xs, y: FTL_REGRET.slice(0, t), slot: ALGO_SLOTS.ftl },
+    { name: 'Hedge', x: xs, y: hedge.regret.slice(0, t), slot: ALGO_SLOTS.hedge },
+    { name: 'fixed share', x: xs, y: share.regret.slice(0, t), slot: ALGO_SLOTS.share },
+  ] as const
+  const run = state.shown === 'share' ? share : hedge
+  const weightSeries: SeriesSpec[] = EXPERT_SLOTS.map((slot, i) => ({
     name: `expert ${i + 1}`,
     type: 'line',
     x: xs,
@@ -112,27 +140,17 @@ export function TrackingFigure() {
     slot,
   }))
 
+  const xAxis = useAxis({ label: 'round t', range: [0, T] })
+  const yAxis = useAxis({ label: 'regret vs switching sequence', hold: 'union' })
+  const xAxis2 = useAxis({ label: 'round t', range: [0, T] })
+  const yAxis2 = useAxis({ label: 'weight', range: [0, 1] })
   return (
-    <Interactive
+    <Figure
       title="Tracking a best expert that switches"
+      state={state}
       caption="Four experts with 0/1 losses. In each quarter of the 1000 rounds one expert errs with probability 0.2 and the others with 0.6; the good expert goes 1, 2, 3, then back to 1. Left: cumulative loss minus the loss of that switching sequence. Hedge's weight on a once-poor expert decays exponentially, so after each switch it needs longer to move; fixed share keeps every weight above α/N and moves after a few dozen rounds. Follow the leader waits until the new expert's total overtakes the old one's. Step through the rounds to watch the weights move; a larger α tracks faster but pays more on every stationary stretch."
-      controls={
-        <>
-          <ParamSlider label="round t" param={round} format={(v) => String(v)} withArrows />
-          <ParamSlider label="learning rate η" param={logEta} format={(v) => formatNumber(10 ** v)} />
-          <ParamSlider label="share rate α" param={logAlpha} format={(v) => formatNumber(10 ** v)} />
-          <ParamChoice
-            label="weights of"
-            value={shown}
-            onChange={setShown}
-            options={[
-              { value: 'share', label: 'fixed share' },
-              { value: 'hedge', label: 'Hedge' },
-            ]}
-          />
-        </>
-      }
-      readout={
+
+      readouts={
         <>
           <Readout label="FTL" value={formatNumber(FTL_REGRET[t - 1])} />
           <Readout label="Hedge" value={formatNumber(hedge.regret[t - 1])} />
@@ -142,9 +160,15 @@ export function TrackingFigure() {
       }
     >
       <div className="grid gap-4 md:grid-cols-[3fr_2fr]">
-        <XYChart series={regretSeries} xLabel="round t" yLabel="regret vs switching sequence" xRange={[0, T]} />
-        <XYChart series={weightSeries} xLabel="round t" yLabel="weight" xRange={[0, T]} yRange={[0, 1]} />
+        <Plot x={xAxis} y={yAxis}>
+          <Curve {...regretSeries[0]} />
+          <Curve {...regretSeries[1]} />
+          <Curve {...regretSeries[2]} />
+        </Plot>
+        <Plot x={xAxis2} y={yAxis2}>
+          {seriesLayers(weightSeries)}
+        </Plot>
       </div>
-    </Interactive>
+    </Figure>
   )
 }

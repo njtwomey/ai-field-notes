@@ -1,6 +1,6 @@
 /**
  * A tiny GPT trained on a prompt–answer task (copying, reversing, sorting, bracket completion, addition, associative
- * recall; `aifn-applied/data`'s `sequenceTasks`): each example is one row `^ prompt = answer .`, the model reads it
+ * recall; `aifn-methods/data`'s `sequenceTasks`): each example is one row `^ prompt = answer .`, the model reads it
  * causally, and the loss is the next-token cross-entropy at the answer positions only, so the model is never asked to
  * predict a random prompt. Accuracy is teacher-forced: an example is exact when the most probable next token is right
  * at every answer position, which is when greedy decoding from the prompt reproduces the answer.

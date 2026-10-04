@@ -1,4 +1,4 @@
-/** The registry of `aifn-applied/neural/quantisation`. */
+/** The registry of `aifn-methods/neural/quantisation`. */
 
 import { definer, entries, type Entry, type FunctionInfo } from 'aifn/foundation/registry'
 import * as cost from './cost'

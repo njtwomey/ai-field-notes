@@ -1,22 +1,25 @@
-import { useMemo, useState } from 'react'
+import { useMemo } from 'react'
 import {
-  Heatmap,
-  Interactive,
-  ParamChoice,
-  ParamSlider,
-  Readout,
+  choice,
+  Figure,
   formatNumber,
-  useParam,
-  type Handle,
-  type HeatmapOverlay,
+  Handle,
+  int,
+  Plot,
+  Points,
+  Raster,
+  Readout,
+  slider,
+  useAxis,
+  useFigureState,
 } from 'aifn-render'
-import { linspace } from '@/lib/math'
 import { fitDensity, scorePoint, twoDensityData, type Pt } from './localDensity'
+import { linspace, toFlat } from 'aifn/foundation/tensor'
 
 type Score = 'knn' | 'lof'
 
-const X = linspace(-3, 10, 40)
-const Y = linspace(-3.5, 8, 36)
+const X = toFlat(linspace(-3, 10, 40))
+const Y = toFlat(linspace(-3.5, 8, 36))
 const DATA = twoDensityData()
 const PLANTED = new Set(DATA.planted)
 const SCORE_OPTIONS = [
@@ -29,12 +32,14 @@ const SCORE_OPTIONS = [
  * as unusual; LOF, which divides by the neighbours' own density, is near 1 inside both clusters.
  */
 export function LocalDensityFigure({ initialScore = 'lof' }: { initialScore?: Score }) {
-  const [score, setScore] = useState<Score>(initialScore)
-  const k = useParam(10, { min: 2, max: 40, step: 1 })
-  const px = useParam(1.6, { min: -3, max: 10, step: 0.05 })
-  const py = useParam(1.4, { min: -3.5, max: 8, step: 0.05 })
+  const state = useFigureState({
+    score: choice<Score>(SCORE_OPTIONS, initialScore, { label: 'score' }),
+    k: int(10, { min: 2, max: 40, step: 1, label: 'neighbours k', format: (v) => String(v) }),
+    px: slider(-3, 10, 1.6, { step: 0.05, onChart: true }),
+    py: slider(-3.5, 8, 1.4, { step: 0.05, onChart: true }),
+  })
 
-  const model = useMemo(() => fitDensity(DATA.points, k.value), [k.value])
+  const model = useMemo(() => fitDensity(DATA.points, state.k), [state.k])
 
   const grid = useMemo(() => {
     const knn: number[][] = []
@@ -55,7 +60,7 @@ export function LocalDensityFigure({ initialScore = 'lof' }: { initialScore?: Sc
     return { knn, lof, knnTop: sorted[Math.floor(0.9 * sorted.length)] }
   }, [model])
 
-  const trainScores = score === 'knn' ? model.knn : model.lof
+  const trainScores = state.score === 'knn' ? model.knn : model.lof
   const top = useMemo(
     () =>
       trainScores
@@ -67,12 +72,11 @@ export function LocalDensityFigure({ initialScore = 'lof' }: { initialScore?: Sc
   )
   const hits = top.filter((i) => PLANTED.has(i)).length
 
-  const overlay = useMemo((): HeatmapOverlay[] => {
+  const overlay = useMemo(() => {
     const pts = DATA.points
     return [
       {
         name: 'points',
-        type: 'scatter',
         x: pts.map((p) => p[0]),
         y: pts.map((p) => p[1]),
         group: pts.map((_, i) => (PLANTED.has(i) ? 1 : 0)),
@@ -80,41 +84,27 @@ export function LocalDensityFigure({ initialScore = 'lof' }: { initialScore?: Sc
       },
       {
         name: `top ${PLANTED.size} scores`,
-        type: 'scatter',
         x: top.map((i) => pts[i][0]),
         y: top.map((i) => pts[i][1]),
         emphasis: true,
       },
-    ]
+    ] as const
   }, [top])
 
-  const probe: Pt = [px.value, py.value]
+  const probe: Pt = [state.px, state.py]
   const probeScore = scorePoint(model, probe)
-  const handles: Handle[] = [
-    {
-      kind: 'point',
-      at: probe,
-      label: 'probe',
-      onDrag: ([a, b]) => {
-        px.set(a)
-        py.set(b)
-      },
-    },
-  ]
-  const lo = score === 'knn' ? 0 : 1
-  const hi = score === 'knn' ? grid.knnTop : 3
+  const lo = state.score === 'knn' ? 0 : 1
+  const hi = state.score === 'knn' ? grid.knnTop : 3
 
+  const xAxis = useAxis({ label: 'x₁' })
+  const yAxis = useAxis({ label: 'x₂' })
   return (
-    <Interactive
+    <Figure
       title="Global distance against local density"
+      state={state}
       caption="A tight cluster at the origin, a diffuse cluster to the upper right and three planted outliers (two just outside the tight cluster, one far from both). The shading is the score a new point would get at each place; darker is more anomalous. Ink diamonds mark the three training points with the highest scores. Drag the probe point to read its scores. The k-NN distance darkens the diffuse cluster's fringe and misses the two local outliers; LOF stays near 1 inside both clusters and ranks all three planted points first."
-      controls={
-        <>
-          <ParamChoice label="score" value={score} onChange={setScore} options={SCORE_OPTIONS} />
-          <ParamSlider label="neighbours k" param={k} format={(v) => String(v)} />
-        </>
-      }
-      readout={
+
+      readouts={
         <>
           <Readout label="planted outliers in the top 3" value={`${hits} of ${PLANTED.size}`} />
           <Readout label="probe k-NN distance" value={formatNumber(probeScore.knn)} />
@@ -122,18 +112,26 @@ export function LocalDensityFigure({ initialScore = 'lof' }: { initialScore?: Sc
         </>
       }
     >
-      <Heatmap
-        x={X}
-        y={Y}
-        z={score === 'knn' ? grid.knn : grid.lof}
-        range={[lo, hi]}
-        overlay={overlay}
-        handles={handles}
-        xLabel="x₁"
-        yLabel="x₂"
-        valueLabel={score === 'knn' ? 'k-NN distance' : 'LOF'}
-        height={420}
-      />
-    </Interactive>
+      <Plot x={xAxis} y={yAxis} height={420}>
+        <Raster
+          x={X}
+          y={Y}
+          z={state.score === 'knn' ? grid.knn : grid.lof}
+          range={[lo, hi]}
+          valueLabel={state.score === 'knn' ? 'k-NN distance' : 'LOF'}
+        />
+        <Points {...overlay[0]} live />
+        <Points {...overlay[1]} live />
+        <Handle
+          kind="point"
+          at={probe}
+          label="probe"
+          onDrag={([a, b]) => {
+            state.set('px', a)
+            state.set('py', b)
+          }}
+        />
+      </Plot>
+    </Figure>
   )
 }

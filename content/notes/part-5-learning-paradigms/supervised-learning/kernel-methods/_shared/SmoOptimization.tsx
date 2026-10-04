@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
-import { moons } from 'aifn-applied/data/synthetic'
-import { dualDecision, smoSteps, type SmoState } from 'aifn-applied/learning/kernel-methods'
+import { moons } from 'aifn-methods/data/synthetic'
+import { dualDecision, smoSteps, type SmoState } from 'aifn-methods/learning/kernel-methods'
 import { stream } from 'aifn/foundation/random'
 import { fromData, toFlat, toRows } from 'aifn/foundation/tensor'
 import { trace } from 'aifn/foundation/trace'

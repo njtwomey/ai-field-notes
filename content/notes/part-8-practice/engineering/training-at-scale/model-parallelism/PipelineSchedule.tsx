@@ -1,5 +1,5 @@
-import { useMemo, useState } from 'react'
-import { Heatmap, Interactive, ParamChoice, ParamSlider, Readout, formatNumber } from 'aifn-render'
+import { useMemo } from 'react'
+import { choice, Figure, formatNumber, int, Plot, Raster, Readout, useAxis, useFigureState } from 'aifn-render'
 
 type Kind = 'gpipe' | '1f1b'
 const KINDS = [
@@ -74,45 +74,37 @@ function schedule(p: number, m: number, kind: Kind) {
 }
 
 export function PipelineSchedule() {
-  const [p, setP] = useState(4)
-  const [m, setM] = useState(8)
-  const [kind, setKind] = useState<Kind>('1f1b')
-  const { z, total, peak } = useMemo(() => schedule(p, m, kind), [p, m, kind])
+  const state = useFigureState({
+    kind: choice<Kind>(KINDS, '1f1b', { label: 'schedule' }),
+    p: int(4, { min: 2, max: 8, step: 1, label: 'stages p' }),
+    m: int(8, { min: 1, max: 16, step: 1, label: 'micro-batches m' }),
+  })
+  const { z, total, peak } = useMemo(() => schedule(state.p, state.m, state.kind), [state.p, state.m, state.kind])
   const x = useMemo(() => Array.from({ length: total }, (_, t) => t), [total])
-  const y = useMemo(() => Array.from({ length: p }, (_, s) => s + 1), [p])
-  const idle = z.flat().filter((v) => v === 0).length / (p * total)
+  const y = useMemo(() => Array.from({ length: state.p }, (_, s) => s + 1), [state.p])
+  const idle = z.flat().filter((v) => v === 0).length / (state.p * total)
 
+  const xAxis = useAxis({ label: 'time' })
+  const yAxis = useAxis({ label: 'stage' })
   return (
-    <Interactive
+    <Figure
       title="Pipeline schedules and the bubble"
+      purpose="Compare GPipe and 1F1B schedules and see how the bubble shrinks as the number of micro-batches grows."
+      state={state}
       caption="Each row is one pipeline stage and each column one forward-pass time. Red cells are forward passes and blue cells backward passes, which take twice as long. Grey cells are the bubble, where a stage waits for its neighbour. GPipe and 1F1B have the same bubble, (p − 1)/(m + p − 1) of the time, but 1F1B starts backward passes early, so each stage holds the activations of at most p micro-batches instead of m."
-      controls={
-        <>
-          <ParamChoice label="schedule" value={kind} onChange={setKind} options={KINDS} />
-          <ParamSlider label="stages p" value={p} onChange={setP} min={2} max={8} step={1} />
-          <ParamSlider label="micro-batches m" value={m} onChange={setM} min={1} max={16} step={1} />
-        </>
-      }
-      readout={
+
+      readouts={
         <>
           <Readout label="total time" value={`${total} forward units`} />
           <Readout label="idle fraction" value={formatNumber(idle)} />
-          <Readout label="(p − 1)/(m + p − 1)" value={formatNumber((p - 1) / (m + p - 1))} />
+          <Readout label="(p − 1)/(m + p − 1)" value={formatNumber((state.p - 1) / (state.m + state.p - 1))} />
           <Readout label="activations held by stage 1" value={`${peak} micro-batches`} />
         </>
       }
     >
-      <Heatmap
-        x={x}
-        y={y}
-        z={z}
-        xLabel="time"
-        yLabel="stage"
-        scale="diverging"
-        range={[-1, 1]}
-        valueLabel="forward (+1) / backward (−1)"
-        height={60 + 32 * p}
-      />
-    </Interactive>
+      <Plot x={xAxis} y={yAxis} height={60 + 32 * state.p}>
+        <Raster x={x} y={y} z={z} scale={'diverging'} range={[-1, 1]} valueLabel={'forward (+1) / backward (−1)'} />
+      </Plot>
+    </Figure>
   )
 }

@@ -1,5 +1,5 @@
 /**
- * The registry of `aifn-applied/generative/energy`: JEM (or plain cross-entropy) training as a traceable algorithm,
+ * The registry of `aifn-methods/generative/energy`: JEM (or plain cross-entropy) training as a traceable algorithm,
  * and the classifier, its energy and score, the logit shift and the streamed run as functions.
  */
 

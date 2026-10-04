@@ -1,5 +1,5 @@
 /**
- * aifn-applied/neural/language-models: the Kneser–Ney n-gram model by its laws (every distribution sums to one; the
+ * aifn-methods/neural/language-models: the Kneser–Ney n-gram model by its laws (every distribution sums to one; the
  * discount and continuation counts on a hand-worked corpus; modified discounts; perplexity falls with order on its own
  * corpus) and the tiny GPT (shapes, causality, gradients, a short training run that lowers the loss, decoding).
  */
@@ -18,7 +18,7 @@ import {
   gptTraining,
   kneserNey,
   nextTokenWindows,
-} from 'aifn-applied/neural/language-models'
+} from 'aifn-methods/neural/language-models'
 
 describe('Kneser–Ney n-gram model', () => {
   const corpus = charCorpus()

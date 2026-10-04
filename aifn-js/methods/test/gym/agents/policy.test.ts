@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { train } from 'aifn-applied/gym'
-import { cartPoleEnvironment, pendulumEnvironment } from 'aifn-applied/gym/environments'
+import { train } from 'aifn-methods/gym'
+import { cartPoleEnvironment, pendulumEnvironment } from 'aifn-methods/gym/environments'
 import {
   a2cAgent,
   ddpgAgent,
@@ -8,7 +8,7 @@ import {
   offlineQLearning,
   ppoAgent,
   reinforceBaselineAgent,
-} from 'aifn-applied/gym/agents'
+} from 'aifn-methods/gym/agents'
 
 const env = cartPoleEnvironment({})
 const mean = (a: ArrayLike<number>) => Array.from(a).reduce((s, v) => s + v, 0) / a.length

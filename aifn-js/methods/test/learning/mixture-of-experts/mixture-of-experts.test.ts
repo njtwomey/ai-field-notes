@@ -1,12 +1,12 @@
 /**
- * aifn-applied/learning/mixture-of-experts: the mixture likelihood against a hand computation, the hierarchical gate
+ * aifn-methods/learning/mixture-of-experts: the mixture likelihood against a hand computation, the hierarchical gate
  * as a product of softmaxes, EM's monotone likelihood and recovery of piecewise-linear regimes, the auxiliary
  * load-balancing loss preventing the collapse of top-1 routing, and the streaming run's snapshots.
  */
 import { describe, expect, it } from 'vitest'
 import { stream } from 'aifn/foundation/random'
 import { fromData, tensor, toFlat, toRows, unwrap, type Tensor } from 'aifn/foundation/tensor'
-import { piecewiseLinear, quadrantPlanes } from 'aifn-applied/data/synthetic'
+import { piecewiseLinear, quadrantPlanes } from 'aifn-methods/data/synthetic'
 import {
   mixtureOfExpertsRun,
   moeEm,
@@ -16,7 +16,7 @@ import {
   moePredict,
   type MoeParams,
   type MoeSnapshot,
-} from 'aifn-applied/learning/mixture-of-experts'
+} from 'aifn-methods/learning/mixture-of-experts'
 
 const lastOf = (g: Generator<MoeSnapshot>) => {
   let last: MoeSnapshot | undefined

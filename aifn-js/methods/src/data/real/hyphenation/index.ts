@@ -1,8 +1,8 @@
 /**
- * `aifn-applied/data/real/hyphenation`: common English words with dictionary hyphenation points from the Moby
+ * `aifn-methods/data/real/hyphenation`: common English words with dictionary hyphenation points from the Moby
  * Hyphenator II list (public domain), split by word into train and test, with the dictionary as truth. A separate
  * module so that the 79 KB word list is loaded only by pages that use it (its own registry,
- * `hyphenationDatasetRegistry`, sits outside `aifn-applied/data`'s `datasetRegistry`).
+ * `hyphenationDatasetRegistry`, sits outside `aifn-methods/data`'s `datasetRegistry`).
  */
 
 import { entries } from 'aifn/foundation/registry'

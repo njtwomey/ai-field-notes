@@ -1,5 +1,16 @@
-import { useMemo, useState } from 'react'
-import { Interactive, ParamSlider, Readout, XYChart, formatNumber, type Segment } from 'aifn-render'
+import { useMemo } from 'react'
+import {
+  Figure,
+  formatNumber,
+  int,
+  Plot,
+  Points,
+  Readout,
+  type Segment,
+  Segments,
+  useAxis,
+  useFigureState,
+} from 'aifn-render'
 import { classicalMds, geodesics, knnEdges, spiral } from './isomap'
 
 const N = 100
@@ -8,9 +19,11 @@ const SHORT_CIRCUIT = 0.15
 
 export function IsomapSpiral() {
   const data = useMemo(() => spiral(N, 2), [])
-  const [k, setK] = useState(5)
+  const state = useFigureState({
+    k: int(5, { min: 3, max: 20, step: 1, label: 'k (neighbours)' }),
+  })
   const fit = useMemo(() => {
-    const edges = knnEdges(data.points, k)
+    const edges = knnEdges(data.points, state.k)
     const g = geodesics(N, edges)
     const finite = g.flat().filter((v) => v < Infinity)
     const connected = finite.length === N * N
@@ -26,19 +39,24 @@ export function IsomapSpiral() {
     const shortCircuits = edges.filter(([i, j]) => Math.abs(data.t[i] - data.t[j]) > SHORT_CIRCUIT).length
     const segments: Segment[] = edges.map(([i, j]) => ({ from: data.points[i], to: data.points[j] }))
     return { z: z.map((v) => sign * v), connected, shortCircuits, segments, edges: edges.length }
-  }, [data, k])
+  }, [data, state.k])
   const arcMean = data.arc.reduce((a, b) => a + b, 0) / N
   const zMean = fit.z.reduce((a, b) => a + b, 0) / N
   const corr =
     fit.z.reduce((s, v, i) => s + (v - zMean) * (data.arc[i] - arcMean), 0) /
     Math.sqrt(fit.z.reduce((s, v) => s + (v - zMean) ** 2, 0) * data.arc.reduce((s, v) => s + (v - arcMean) ** 2, 0))
 
+  const xAxis = useAxis({ label: 'x₁', range: [-3, 3] })
+  const yAxis = useAxis({ label: 'x₂', range: [-3, 3], equal: xAxis })
+  const xAxis2 = useAxis({ label: 'arc length along the spiral', hold: 'union' })
+  const yAxis2 = useAxis({ label: 'Isomap coordinate', hold: 'union' })
   return (
-    <Interactive
+    <Figure
       title="Isomap unrolls a spiral, until the graph short-circuits"
+      state={state}
       caption="Left: 100 points on a spiral and their k-nearest-neighbour graph. Right: the one-dimensional Isomap coordinate of each point against its arc length along the spiral. With k from 5 to 7 the graph follows the curve, graph distances approximate arc length, and the points fall on a straight line. From k = 8, edges jump between turns, shortest paths cut across, and the embedding folds. With k of 3 or 4 the graph falls apart."
-      controls={<ParamSlider label="k (neighbours)" value={k} onChange={setK} min={3} max={20} step={1} />}
-      readout={
+
+      readouts={
         <>
           <Readout label="graph" value={fit.connected ? 'connected' : 'disconnected'} />
           <Readout label="edges" value={fit.edges} />
@@ -48,30 +66,14 @@ export function IsomapSpiral() {
       }
     >
       <div className="grid gap-4 md:grid-cols-2">
-        <XYChart
-          equalAspect
-          xRange={[-3, 3]}
-          yRange={[-3, 3]}
-          xLabel="x₁"
-          yLabel="x₂"
-          segments={fit.segments}
-          series={[
-            {
-              name: 'points',
-              type: 'scatter',
-              x: data.points.map((p) => p[0]),
-              y: data.points.map((p) => p[1]),
-              slot: 0,
-            },
-          ]}
-        />
-        <XYChart
-          height={340}
-          xLabel="arc length along the spiral"
-          yLabel="Isomap coordinate"
-          series={[{ name: 'embedding', type: 'scatter', x: data.arc, y: fit.z, slot: 0 }]}
-        />
+        <Plot x={xAxis} y={yAxis}>
+          <Points name="points" x={data.points.map((p) => p[0])} y={data.points.map((p) => p[1])} slot={0} />
+          <Segments segments={fit.segments} />
+        </Plot>
+        <Plot x={xAxis2} y={yAxis2} height={340}>
+          <Points name="embedding" x={data.arc} y={fit.z} slot={0} />
+        </Plot>
       </div>
-    </Interactive>
+    </Figure>
   )
 }

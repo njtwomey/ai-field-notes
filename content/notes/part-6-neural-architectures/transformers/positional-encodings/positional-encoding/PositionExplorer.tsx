@@ -1,16 +1,18 @@
-import { useMemo, useState } from 'react'
+import { useMemo } from 'react'
 import {
-  Heatmap,
-  Interactive,
-  ParamChoice,
-  ParamSlider,
-  Readout,
-  XYChart,
+  Curve,
+  Figure,
   formatNumber,
-  useParam,
-  type XYSeries,
+  Plot,
+  Raster,
+  Readout,
+  choice,
+  int,
+  slider,
+  useAxis,
+  useFigureState,
 } from 'aifn-render'
-import { rng } from '@/lib/math'
+import { normal, stream } from 'aifn/foundation/random'
 
 const D = 64
 const BASE = 10000
@@ -42,10 +44,10 @@ const CAUSAL: Record<Scheme, boolean> = {
 
 /** Fixed content: a query and a correlated key (k = q + 0.7·noise), plus Shaw's offset vectors, seeded. */
 const SAMPLE = (() => {
-  const r = rng(11)
-  const q = Array.from({ length: D }, () => r.normal())
-  const k = q.map((v) => v + 0.7 * r.normal())
-  const shaw = Array.from({ length: 2 * 16 + 1 }, () => Array.from({ length: D }, () => 0.5 * r.normal()))
+  const r = stream(11)
+  const q = Array.from({ length: D }, () => normal(r))
+  const k = q.map((v) => v + 0.7 * normal(r))
+  const shaw = Array.from({ length: 2 * 16 + 1 }, () => Array.from({ length: D }, () => 0.5 * normal(r)))
   return { q, k, shaw }
 })()
 
@@ -117,15 +119,23 @@ function score(scheme: Scheme, m: number, n: number, slope: number): number {
 
 /** Score against a fixed key under several schemes: pick one, move the query, and see whether only the offset matters. */
 export function PositionExplorer() {
-  const [scheme, setScheme] = useState<Scheme>('rope')
-  const m2 = useParam(1500, { min: M1, max: 4000, step: 10 })
-  const head = useParam(3, { min: 1, max: 8, step: 1 })
-  const slope = 2 ** -head.value
+  const state = useFigureState({
+    scheme: choice<Scheme>(SCHEMES, 'rope', { label: 'scheme' }),
+    m2: int(1500, { min: M1, max: 4000, step: 10, suggestions: [512, 1500, 4000], label: 'second query position m' }),
+    head: slider(1, 8, 3, {
+      step: 1,
+      label: 'ALiBi head h of 8',
+      format: (v) => `${v} (slope 1/${2 ** v})`,
+      when: (v) => v.scheme === 'alibi',
+    }),
+  })
+  const { scheme, m2 } = state
+  const slope = 2 ** -state.head
   const causal = CAUSAL[scheme]
 
   const r = useMemo(() => {
     const a = DISTANCES.map((d) => score(scheme, M1, M1 - d, slope))
-    const b = DISTANCES.map((d) => score(scheme, m2.value, m2.value - d, slope))
+    const b = DISTANCES.map((d) => score(scheme, m2, m2 - d, slope))
     const gap = Math.max(...a.map((v, i) => Math.abs(v - b[i])))
     const grid = POSITIONS.map((i) => POSITIONS.map((j) => (causal && j > i ? NaN : score(scheme, i, j, slope))))
     const finite = grid.flat().filter((v) => !Number.isNaN(v))
@@ -134,47 +144,37 @@ export function PositionExplorer() {
     // Masked cells (key after query) are drawn at the bottom of the colour scale: their weight is 0.
     const z = grid.map((row) => row.map((v) => (Number.isNaN(v) ? lo : v)))
     return { a, b, gap, z, lo, hi: hi > lo ? hi : lo + 1 }
-  }, [scheme, m2.value, slope, causal])
+  }, [scheme, m2, slope, causal])
   const range = useMemo<[number, number]>(() => [r.lo, r.hi], [r.lo, r.hi])
 
-  const series: XYSeries[] = [
-    { name: `query at position ${M1}`, type: 'line', x: DISTANCES, y: r.a, slot: 0 },
-    { name: `query at position ${m2.value}`, type: 'line', x: DISTANCES, y: r.b, slot: 1, dashed: true },
-  ]
+  const series = [
+    { name: `query at position ${M1}`, x: DISTANCES, y: r.a, slot: 0 },
+    { name: `query at position ${m2}`, x: DISTANCES, y: r.b, slot: 1, dashed: true },
+  ] as const
 
+  const xAxis = useAxis({ label: 'distance r = m − n', hold: 'union' })
+  const yAxis = useAxis({ label: 'logit', hold: 'union' })
+  const xAxis2 = useAxis({ label: 'key position j' })
+  const yAxis2 = useAxis({ label: 'query position i' })
   return (
-    <Interactive
+    <Figure
       title="Position scheme explorer"
       caption="A fixed query and a fixed, similar key (d = 64) are placed at positions m and n = m − r, and each chart shows their attention logit. Top: logit against the distance r, for two absolute query positions; the curves coincide exactly when the scheme is relative. Bottom: the logit for every query position i and key position j from 0 to 31. A relative scheme gives a matrix that is constant along each diagonal. Shaw's offset vectors and T5's bucket biases are learned in practice; here they are fixed illustrative values. ALiBi and xPos are causal: cells with j > i are masked and drawn at the bottom of the scale."
-      controls={
-        <>
-          <div className="sm:col-span-2 lg:col-span-3">
-            <ParamChoice label="scheme" value={scheme} onChange={setScheme} options={SCHEMES} />
-          </div>
-          <ParamSlider label="second query position m" param={m2} />
-          {scheme === 'alibi' && (
-            <ParamSlider label="ALiBi head h of 8" param={head} format={(v) => `${v} (slope 1/${2 ** v})`} />
-          )}
-        </>
-      }
-      readout={
+      state={state}
+      readouts={
         <>
           <Readout label="largest gap between the two curves" value={formatNumber(r.gap)} />
           <Readout label="depends on" value={r.gap < 1e-6 ? 'offset only' : 'absolute positions too'} />
         </>
       }
     >
-      <XYChart series={series} xLabel="distance r = m − n" yLabel="logit" height={260} />
-      <Heatmap
-        x={POSITIONS}
-        y={POSITIONS}
-        z={r.z}
-        range={range}
-        xLabel="key position j"
-        yLabel="query position i"
-        valueLabel="logit"
-        height={320}
-      />
-    </Interactive>
+      <Plot x={xAxis} y={yAxis} height={260}>
+        <Curve {...series[0]} />
+        <Curve {...series[1]} />
+      </Plot>
+      <Plot x={xAxis2} y={yAxis2} height={320}>
+        <Raster x={POSITIONS} y={POSITIONS} z={r.z} range={range} valueLabel={'logit'} />
+      </Plot>
+    </Figure>
   )
 }

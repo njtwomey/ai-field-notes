@@ -67,9 +67,7 @@ export function logSeriesMantissas(pointsPerDecade: number): number[] {
   if (pointsPerDecade === 2) return [1, 3]
   if (pointsPerDecade === 3) return [1, 2, 5]
   if (pointsPerDecade === 5) return [1, 1.5, 2.5, 4, 6.3]
-  return Array.from({ length: pointsPerDecade }, (_, i) =>
-    Number((10 ** (i / pointsPerDecade)).toPrecision(2)),
-  )
+  return Array.from({ length: pointsPerDecade }, (_, i) => Number((10 ** (i / pointsPerDecade)).toPrecision(2)))
 }
 
 /** The bounds as one interval: each end finite or infinite, strict or not. An int's bounds are inclusive integers. */
@@ -186,12 +184,7 @@ export function stepNumber(o: NumberOptions, x: number, dir: 1 | -1, big = false
     }
   } else {
     const linStep =
-      o.step ??
-      (o.increment === 'lin' && o.points
-        ? o.points
-        : o.spacing === 'lin' && o.points
-          ? o.points
-          : 1)
+      o.step ?? (o.increment === 'lin' && o.points ? o.points : o.spacing === 'lin' && o.points ? o.points : 1)
     y = clean(x + dir * linStep * (big ? 10 : 1))
     if (o.type === 'int') y = Math.round(y)
   }
@@ -272,9 +265,7 @@ export function formatHeaderValue(o: NumberOptions, value: number): string | nul
     } else {
       const real = 10 ** value
       const realStr =
-        real >= 0.001 && real < 1e4
-          ? String(Number(real.toPrecision(3)))
-          : formatNumberValue({ scale: 'log10' }, real)
+        real >= 0.001 && real < 1e4 ? String(Number(real.toPrecision(3))) : formatNumberValue({ scale: 'log10' }, real)
       return `${clean(value)} (${realStr})`
     }
   }
@@ -282,9 +273,7 @@ export function formatHeaderValue(o: NumberOptions, value: number): string | nul
   if (logTransform === 'value-is-log') {
     const real = 10 ** value
     const realStr =
-      real >= 0.001 && real < 1e4
-        ? String(Number(real.toPrecision(3)))
-        : formatNumberValue({ scale: 'log10' }, real)
+      real >= 0.001 && real < 1e4 ? String(Number(real.toPrecision(3))) : formatNumberValue({ scale: 'log10' }, real)
     return `${clean(value)} (${realStr})`
   }
 
@@ -298,4 +287,3 @@ export function formatHeaderValue(o: NumberOptions, value: number): string | nul
 
   return null
 }
-

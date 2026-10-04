@@ -1,5 +1,5 @@
 /**
- * `aifn-applied/learning/trees-and-ensembles/boosting`: boosting: AdaBoost and gradient boosting, with their steps.
+ * `aifn-methods/learning/trees-and-ensembles/boosting`: boosting: AdaBoost and gradient boosting, with their steps.
  */
 
 export {

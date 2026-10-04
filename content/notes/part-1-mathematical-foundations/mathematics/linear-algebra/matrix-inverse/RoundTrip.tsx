@@ -1,24 +1,27 @@
-import { useMemo, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, type ReactNode } from 'react'
 import {
-  Interactive,
-  ParamButton,
-  ParamChoice,
-  ParamSlider,
-  Readout,
-  XYChart,
+  Button,
+  choice,
+  Figure,
+  float,
   formatNumber,
-  useParam,
-  type Handle,
-  type ParamSpec,
+  Handle,
+  Plot,
+  Readout,
   type Segment,
-  type XYSeries,
+  seriesLayers,
+  type SeriesSpec,
+  slider,
+  useAxis,
+  useFigureState,
+  Vectors,
 } from 'aifn-render'
-import { rng } from '@/lib/math'
-import { apply, svd2, type Mat2, type Vec2 } from '@/lib/math/mat2'
+import { normal, stream } from 'aifn/foundation/random'
+import { apply2, svd2, type Mat2, type Vec2 } from 'aifn/numerics/linalg'
 
 type Build = 'entries' | 'stretch'
 
-const ENTRY: ParamSpec = { min: -2, max: 2, step: 0.05 }
+const ENTRY_STEP = 0.05
 const R = 3
 const RANGE: [number, number] = [-R, R]
 /** Singular values below this fraction of the largest count as zero: the matrix has no inverse. */
@@ -44,8 +47,8 @@ const LETTER: { p: Vec2; part: number }[] = (() => {
 
 /** A fixed standard-normal draw per point, scaled by the noise slider. */
 const NOISE: Vec2[] = (() => {
-  const g = rng(7)
-  return LETTER.map((): Vec2 => [g.normal(), g.normal()])
+  const g = stream(7)
+  return LETTER.map((): Vec2 => [normal(g), normal(g)])
 })()
 
 const rotation = (deg: number): Mat2 => {
@@ -98,43 +101,74 @@ const PRESETS: { label: string; m: Mat2 }[] = [
  * closest recovery, which collapses onto a line: the lost direction cannot be restored.
  */
 export function RoundTrip() {
-  const [build, setBuild] = useState<Build>('entries')
-  const a = useParam(1.2, ENTRY)
-  const b = useParam(0.6, ENTRY)
-  const c = useParam(-0.3, ENTRY)
-  const d = useParam(0.9, ENTRY)
-  const outer = useParam(30, { min: 0, max: 180, step: 1 })
-  const inner = useParam(0, { min: 0, max: 180, step: 1 })
-  const s1 = useParam(1.5, { min: 0.1, max: 2, step: 0.05 })
-  const s2 = useParam(0.6, { min: 0, max: 2, step: 0.01 })
-  const noise = useParam(0, { min: 0, max: 0.2, step: 0.01 })
+  const byEntries = (v: Readonly<Record<string, unknown>>) => v.build === 'entries'
+  const byStretch = (v: Readonly<Record<string, unknown>>) => v.build === 'stretch'
+  const entry = (initial: number, label: string) => slider(-2, 2, initial, { step: ENTRY_STEP, label, when: byEntries })
+  const state = useFigureState({
+    build: choice<Build>(
+      [
+        { value: 'entries', label: 'entries' },
+        { value: 'stretch', label: 'rotate · stretch · rotate' },
+      ],
+      'entries',
+      { label: 'build A from' },
+    ),
+    a: entry(1.2, 'a'),
+    b: entry(0.6, 'b'),
+    c: entry(-0.3, 'c'),
+    d: entry(0.9, 'd'),
+    inner: slider(0, 180, 0, { step: 1, label: 'first rotation (°)', when: byStretch }),
+    s1: slider(0.1, 2, 1.5, { step: 0.05, label: 'stretch σ₁', when: byStretch }),
+    s2: slider(0, 2, 0.6, { step: 0.01, label: 'stretch σ₂', when: byStretch }),
+    outer: slider(0, 180, 30, { step: 1, label: 'second rotation (°)', when: byStretch }),
+    noise: float(0, { min: 0, max: 0.2, step: 0.01, label: 'noise on y' }),
+  })
+  const build = state.build
 
   const m: Mat2 = useMemo(() => {
     if (build === 'entries') {
       return [
-        [a.value, b.value],
-        [c.value, d.value],
+        [state.a, state.b],
+        [state.c, state.d],
       ]
     }
     const scale: Mat2 = [
-      [s1.value, 0],
-      [0, s2.value],
+      [state.s1, 0],
+      [0, state.s2],
     ]
-    const back = rotation(-inner.value)
-    return mul(mul(rotation(outer.value), scale), back)
-  }, [build, a.value, b.value, c.value, d.value, outer.value, inner.value, s1.value, s2.value])
+    const back = rotation(-state.inner)
+    return mul(mul(rotation(state.outer), scale), back)
+  }, [build, state.a, state.b, state.c, state.d, state.outer, state.inner, state.s1, state.s2])
 
   const setEntries = (next: Mat2) => {
-    setBuild('entries')
-    a.set(next[0][0])
-    b.set(next[0][1])
-    c.set(next[1][0])
-    d.set(next[1][1])
+    state.set('build', 'entries')
+    state.set('a', next[0][0])
+    state.set('b', next[0][1])
+    state.set('c', next[1][0])
+    state.set('d', next[1][1])
   }
+
+  // On a switch to the stretch controls, start them from the current matrix's SVD so the picture does not jump.
+  // Rotations cannot mirror, so a matrix with det A < 0 loses its reflection here.
+  const previous = useRef(build)
+  useEffect(() => {
+    if (previous.current === build) return
+    previous.current = build
+    if (build !== 'stretch') return
+    const { s, u, v } = svd2([
+      [state.a, state.b],
+      [state.c, state.d],
+    ])
+    const angle = (w: Vec2) => ((((Math.atan2(w[1], w[0]) * 180) / Math.PI) % 180) + 180) % 180
+    state.set('s1', Math.max(s[0], 0.1))
+    state.set('s2', s[1])
+    state.set('outer', Math.round(angle(u[0])))
+    state.set('inner', Math.round(angle(v[0])))
+  }, [build, state])
 
   const r = useMemo(() => {
     const [[m11, m12], [m21, m22]] = m
-    const { s, u, v } = svd2(m11, m12, m21, m22)
+    const { s, u, v } = svd2(m)
     const singular = s[1] <= RANK_TOL * Math.max(s[0], 1e-12)
     // Recovery map: A⁻¹ = V Σ⁻¹ Uᵀ when invertible, else A⁺ = V Σ⁺ Uᵀ with 1/0 replaced by 0.
     const inv = s.map((si) => (si > RANK_TOL * Math.max(s[0], 1e-12) ? 1 / si : 0))
@@ -144,8 +178,8 @@ export function RoundTrip() {
       return [v[0][0] * k1 + v[1][0] * k2, v[0][1] * k1 + v[1][1] * k2]
     }
     const images = LETTER.map(({ p }, i): Vec2 => {
-      const y = apply(m, p)
-      return [y[0] + noise.value * NOISE[i][0], y[1] + noise.value * NOISE[i][1]]
+      const y = apply2(m, p)
+      return [y[0] + state.noise * NOISE[i][0], y[1] + state.noise * NOISE[i][1]]
     })
     const recovered = images.map(recover)
     const rms = Math.sqrt(
@@ -153,9 +187,9 @@ export function RoundTrip() {
         LETTER.length,
     )
     return { s, singular, recover, images, recovered, rms, det: m11 * m22 - m12 * m21 }
-  }, [m, noise.value])
+  }, [m, state.noise])
 
-  const cloud = (points: Vec2[]): XYSeries => ({
+  const cloud = (points: Vec2[]): SeriesSpec => ({
     name: 'points',
     type: 'scatter',
     x: points.map((p) => p[0]),
@@ -183,7 +217,7 @@ export function RoundTrip() {
               [m[0][0], x],
               [m[1][0], y],
             ]
-      setEntries(next.map((row) => row.map((v) => Math.round(v / ENTRY.step!) * ENTRY.step!)) as Mat2)
+      setEntries(next.map((row) => row.map((v) => Math.round(v / ENTRY_STEP) * ENTRY_STEP)) as Mat2)
     },
   }))
 
@@ -194,59 +228,29 @@ export function RoundTrip() {
     </div>
   )
 
+  const xAxis = useAxis({ range: RANGE })
+  const yAxis = useAxis({ range: RANGE, equal: xAxis })
+  const xAxis2 = useAxis({ range: RANGE })
+  const yAxis2 = useAxis({ range: RANGE, equal: xAxis2 })
+  const xAxis3 = useAxis({ range: RANGE })
+  const yAxis3 = useAxis({ range: RANGE, equal: xAxis3 })
   return (
-    <Interactive
+    <Figure
       title="Map, then invert"
+      state={state}
       caption="The letter's points x are mapped to y = Ax, then mapped back by the inverse. With an invertible A the round trip returns every point exactly. Drag the tips of the columns Ae₁ and Ae₂ in the middle panel, or build A from a rotation, two stretches and a second rotation. Pull the second stretch to zero and A becomes singular: the letter collapses onto a line, no inverse exists, and the best recovery, the pseudoinverse, stays on a line. Add measurement noise to y to see a nearly singular A amplify small errors."
       controls={
         <>
-          <ParamChoice
-            label="build A from"
-            value={build}
-            onChange={(v) => {
-              if (v === 'stretch') {
-                // Start the stretch controls from the current matrix's SVD so the picture does not jump.
-                // Rotations cannot mirror, so a matrix with det A < 0 loses its reflection here.
-                const { s, u, v } = svd2(m[0][0], m[0][1], m[1][0], m[1][1])
-                const angle = (w: Vec2) => ((((Math.atan2(w[1], w[0]) * 180) / Math.PI) % 180) + 180) % 180
-                s1.set(Math.max(s[0], 0.1))
-                s2.set(s[1])
-                outer.set(Math.round(angle(u[0])))
-                inner.set(Math.round(angle(v[0])))
-              }
-              setBuild(v)
-            }}
-            options={[
-              { value: 'entries', label: 'entries' },
-              { value: 'stretch', label: 'rotate · stretch · rotate' },
-            ]}
-          />
-          {build === 'entries' ? (
-            <>
-              <ParamSlider label="a" param={a} />
-              <ParamSlider label="b" param={b} />
-              <ParamSlider label="c" param={c} />
-              <ParamSlider label="d" param={d} />
-            </>
-          ) : (
-            <>
-              <ParamSlider label="first rotation (°)" param={inner} />
-              <ParamSlider label="stretch σ₁" param={s1} />
-              <ParamSlider label="stretch σ₂" param={s2} />
-              <ParamSlider label="second rotation (°)" param={outer} />
-            </>
-          )}
-          <ParamSlider label="noise on y" param={noise} />
           <div className="flex flex-wrap gap-1.5 self-end">
             {PRESETS.map((p) => (
-              <ParamButton key={p.label} onClick={() => setEntries(p.m)}>
+              <Button variant="outline" size="sm" key={p.label} onClick={() => setEntries(p.m)}>
                 {p.label}
-              </ParamButton>
+              </Button>
             ))}
           </div>
         </>
       }
-      readout={
+      readouts={
         <>
           <Readout label="det A" value={formatNumber(r.det)} />
           <Readout label="σ₁, σ₂" value={`${formatNumber(r.s[0])}, ${formatNumber(r.s[1])}`} />
@@ -259,39 +263,34 @@ export function RoundTrip() {
       <div className="grid gap-4 md:grid-cols-3">
         {panel(
           'x',
-          <XYChart
-            series={[cloud(LETTER.map((q) => q.p))]}
-            vectors={arrows([
-              [1, 0],
-              [0, 1],
-            ])}
-            xRange={RANGE}
-            yRange={RANGE}
-            equalAspect
-          />,
+          <Plot x={xAxis} y={yAxis}>
+            {seriesLayers([cloud(LETTER.map((q) => q.p))])}
+            <Vectors
+              vectors={arrows([
+                [1, 0],
+                [0, 1],
+              ])}
+            />
+          </Plot>,
         )}
         {panel(
-          noise.value > 0 ? 'y = Ax + noise' : 'y = Ax',
-          <XYChart
-            series={[cloud(r.images)]}
-            vectors={arrows(columns)}
-            xRange={RANGE}
-            yRange={RANGE}
-            equalAspect
-            handles={handles}
-          />,
+          state.noise > 0 ? 'y = Ax + noise' : 'y = Ax',
+          <Plot x={xAxis2} y={yAxis2}>
+            {seriesLayers([cloud(r.images)])}
+            <Vectors vectors={arrows(columns)} />
+            {(handles ?? []).map((h, i) => (
+              <Handle key={i} {...h} />
+            ))}
+          </Plot>,
         )}
         {panel(
           r.singular ? 'no inverse: A⁺y, the best recovery' : 'A⁻¹y',
-          <XYChart
-            series={[cloud(r.recovered)]}
-            vectors={arrows(columns.map(r.recover))}
-            xRange={RANGE}
-            yRange={RANGE}
-            equalAspect
-          />,
+          <Plot x={xAxis3} y={yAxis3}>
+            {seriesLayers([cloud(r.recovered)])}
+            <Vectors vectors={arrows(columns.map(r.recover))} />
+          </Plot>,
         )}
       </div>
-    </Interactive>
+    </Figure>
   )
 }

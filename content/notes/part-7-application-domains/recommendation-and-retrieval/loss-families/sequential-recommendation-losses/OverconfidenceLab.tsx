@@ -1,5 +1,19 @@
 import { useMemo } from 'react'
-import { Interactive, ParamSlider, Readout, XYChart, formatNumber, useParam, type XYSeries } from 'aifn-render'
+import {
+  Figure,
+  float,
+  formatNumber,
+  Handle,
+  int,
+  Plot,
+  Readout,
+  Segments,
+  seriesLayers,
+  type SeriesSpec,
+  slider,
+  useAxis,
+  useFigureState,
+} from 'aifn-render'
 
 const X_MIN = -6
 const X_MAX = 0
@@ -27,18 +41,20 @@ const pow10 = (v: number) => Math.round(10 ** v).toLocaleString('en-GB')
  * item's true next-item probability, for plain BCE and for gBCE with calibration parameter t.
  */
 export function OverconfidenceLab() {
-  const logN = useParam(4, { min: 2, max: 6, step: 0.1 })
-  const logK = useParam(0, { min: 0, max: 10, step: 1 })
-  const t = useParam(0.75, { min: 0, max: 1, step: 0.01 })
-  const logP = useParam(-2, { min: X_MIN, max: -0.01, step: 0.01 })
+  const state = useFigureState({
+    logN: float(4, { min: 2, max: 6, step: 0.1, label: 'catalogue size |I|', format: pow10 }),
+    logK: int(0, { min: 0, max: 10, step: 1, label: 'negatives per positive k', format: (v) => String(2 ** v) }),
+    t: float(0.75, { min: 0, max: 1, step: 0.01, label: 'calibration t' }),
+    logP: slider(X_MIN, -0.01, -2, { step: 0.01, label: 'true probability p', format: (v) => formatNumber(10 ** v) }),
+  })
 
-  const n = Math.round(10 ** logN.value)
-  const k = Math.min(2 ** logK.value, n - 1)
+  const n = Math.round(10 ** state.logN)
+  const k = Math.min(2 ** state.logK, n - 1)
   const alpha = k / (n - 1)
-  const beta = alpha * (t.value * (1 - 1 / alpha) + 1 / alpha)
-  const p = 10 ** logP.value
+  const beta = alpha * (state.t * (1 - 1 / alpha) + 1 / alpha)
+  const p = 10 ** state.logP
 
-  const series = useMemo((): XYSeries[] => {
+  const series = useMemo((): SeriesSpec[] => {
     const ps = LOG_P.map((x) => 10 ** x)
     return [
       { name: 'calibrated, q = p', type: 'line', x: LOG_P, y: ps, muted: true, dashed: true },
@@ -48,14 +64,14 @@ export function OverconfidenceLab() {
   }, [alpha, beta])
 
   const markers = useMemo(
-    (): XYSeries => ({
+    (): SeriesSpec => ({
       name: 'at p',
       type: 'scatter',
-      x: [logP.value, logP.value],
-      y: [predicted(10 ** logP.value, alpha, 1), predicted(10 ** logP.value, alpha, beta)],
+      x: [state.logP, state.logP],
+      y: [predicted(10 ** state.logP, alpha, 1), predicted(10 ** state.logP, alpha, beta)],
       emphasis: true,
     }),
-    [logP.value, alpha, beta],
+    [state.logP, alpha, beta],
   )
 
   const sums = useMemo(() => [zipfSum(n, alpha, 1), zipfSum(n, alpha, beta)], [n, alpha, beta])
@@ -65,21 +81,17 @@ export function OverconfidenceLab() {
       logAlpha > X_MIN ? [{ from: [logAlpha, 0] as [number, number], to: [logAlpha, 1] as [number, number] }] : [],
     [logAlpha],
   )
-  const allSeries = useMemo(() => [...series, markers], [series, markers])
+  const allSeries = useMemo(() => [...series, markers] as const, [series, markers])
 
+  const xAxis = useAxis({ label: 'log₁₀ true probability p', range: X_RANGE })
+  const yAxis = useAxis({ label: 'predicted probability q', range: Y_RANGE })
   return (
-    <Interactive
+    <Figure
       title="Overconfidence from negative sampling"
+      state={state}
       caption="Each curve is the probability q that a model converges to for an item, against the item's true next-item probability p (log scale), when trained with binary cross-entropy on one positive and k negatives drawn uniformly from the other items. The sampling rate is α = k / (|I| − 1), marked by the thin vertical line. Plain BCE gives q = p / (p + α(1 − p)), which is close to 1 for every item with p well above α. gBCE raises the positive's sigmoid to the power β = 1 − t(1 − α); at t = 1 (β = α) the model is calibrated. Drag the vertical handle to move p. The Zipf readouts sum q over a catalogue whose true probabilities fall as 1/rank; a calibrated model sums to 1."
-      controls={
-        <>
-          <ParamSlider label="catalogue size |I|" param={logN} format={pow10} />
-          <ParamSlider label="negatives per positive k" param={logK} format={(v) => String(2 ** v)} withArrows />
-          <ParamSlider label="calibration t" param={t} />
-          <ParamSlider label="true probability p" param={logP} format={(v) => formatNumber(10 ** v)} />
-        </>
-      }
-      readout={
+
+      readouts={
         <>
           <Readout label="α" value={formatNumber(alpha)} />
           <Readout label="β" value={formatNumber(beta)} />
@@ -90,15 +102,11 @@ export function OverconfidenceLab() {
         </>
       }
     >
-      <XYChart
-        series={allSeries}
-        xLabel="log₁₀ true probability p"
-        yLabel="predicted probability q"
-        xRange={X_RANGE}
-        yRange={Y_RANGE}
-        segments={segments}
-        handles={[{ kind: 'x', at: logP.value, label: 'p', onDrag: (x) => logP.set(x) }]}
-      />
-    </Interactive>
+      <Plot x={xAxis} y={yAxis}>
+        {seriesLayers(allSeries)}
+        <Segments segments={segments} />
+        <Handle {...state.handle('logP', { label: 'p' })} />
+      </Plot>
+    </Figure>
   )
 }

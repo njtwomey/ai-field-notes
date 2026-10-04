@@ -1,6 +1,22 @@
-import { useMemo, useState } from 'react'
-import { Interactive, ParamSlider, ParamSwitch, Readout, XYChart, useParam, type XYSeries } from 'aifn-render'
-import { convolve, db, magnitudeSpectrum, makeWindow } from '@/lib/dsp'
+import { useMemo } from 'react'
+import {
+  Figure,
+  int,
+  Plot,
+  Readout,
+  seriesLayers,
+  type SeriesSpec,
+  setting,
+  useAxis,
+  useFigureState,
+} from 'aifn-render'
+import { convolve } from 'aifn/foundation/convolution'
+import { rfft } from 'aifn/foundation/fourier'
+import { complexAbs, toFlat } from 'aifn/foundation/tensor'
+import { getWindow } from 'aifn/signal'
+
+/** Decibels, 20 log₁₀ of a magnitude, floored so zeros stay finite. */
+const db = (magnitude: number, floor: number) => Math.max(floor, 20 * Math.log10(Math.max(magnitude, 1e-300)))
 
 const N = 2048
 const NFFT = 4096
@@ -16,7 +32,7 @@ const signal = (() => {
 
 /** Blackman-windowed sinc lowpass with cutoff ω_c (rad/sample) and unit DC gain. */
 function lowpass(cutoff: number): Float64Array {
-  const w = makeWindow('blackman', TAPS)
+  const w = toFlat(getWindow('blackman', TAPS))
   const h = new Float64Array(TAPS)
   const mid = (TAPS - 1) / 2
   for (let i = 0; i < TAPS; i++) {
@@ -29,9 +45,9 @@ function lowpass(cutoff: number): Float64Array {
 
 /** One-sided spectrum in dB (Hann window), against ω/π of the sequence's own rate. */
 function spectrumDb(x: ArrayLike<number>): { x: number[]; y: number[] } {
-  const w = makeWindow('hann', x.length, true)
+  const w = toFlat(getWindow('hann', x.length, { periodic: true }))
   const xw = Float64Array.from(x, (v, i) => v * w[i])
-  const mag = magnitudeSpectrum(xw, NFFT)
+  const mag = toFlat(complexAbs(rfft(xw, { n: NFFT })))
   const scale = x.length / 4 // a unit-amplitude tone peaks at N/4 through a Hann window
   return { x: Array.from(mag, (_, k) => (2 * k) / NFFT), y: Array.from(mag, (m) => db(m / scale, -80)) }
 }
@@ -41,14 +57,16 @@ function spectrumDb(x: ArrayLike<number>): { x: number[]; y: number[] } {
  * anti-aliasing lowpass before the downsampler removes those tones instead of letting them fold.
  */
 export function DownsamplingSpectrum() {
-  const factor = useParam(3, { min: 1, max: 6, step: 1 })
-  const [filtered, setFiltered] = useState(false)
-  const M = factor.value
+  const state = useFigureState({
+    factor: int(3, { min: 1, max: 6, step: 1, label: 'downsampling factor M', format: (v) => String(v) }),
+    filtered: setting(false, 'anti-aliasing lowpass before ↓M'),
+  })
+  const M = state.factor
 
   const r = useMemo(() => {
     let x: ArrayLike<number> = signal
-    if (filtered && M > 1) {
-      const full = convolve(signal, lowpass(Math.PI / M))
+    if (state.filtered && M > 1) {
+      const full = toFlat(convolve(signal, lowpass(Math.PI / M)))
       const mid = (TAPS - 1) / 2
       x = full.slice(mid, mid + N)
     }
@@ -59,25 +77,25 @@ export function DownsamplingSpectrum() {
       return (wm > Math.PI ? 2 * Math.PI - wm : wm) / Math.PI
     })
     return { input: spectrumDb(x), output: spectrumDb(y), landed }
-  }, [M, filtered])
+  }, [M, state.filtered])
 
   const aliased = TONES.filter(({ w }) => w > Math.PI / M).length
-  const inputSeries: XYSeries[] = [
-    { name: filtered ? 'after anti-aliasing filter' : 'input x[n]', type: 'line', ...r.input, slot: 0 },
+  const inputSeries: SeriesSpec[] = [
+    { name: state.filtered ? 'after anti-aliasing filter' : 'input x[n]', type: 'line', ...r.input, slot: 0 },
   ]
-  const outputSeries: XYSeries[] = [{ name: `y[n] = x[${M}n]`, type: 'line', ...r.output, slot: 1 }]
+  const outputSeries: SeriesSpec[] = [{ name: `y[n] = x[${M}n]`, type: 'line', ...r.output, slot: 1 }]
 
+  const xAxis = useAxis({ label: 'ω/π (input rate)', range: [0, 1] })
+  const yAxis = useAxis({ label: 'dB', range: [-80, 5] })
+  const xAxis2 = useAxis({ label: 'ω/π (output rate)', range: [0, 1] })
+  const yAxis2 = useAxis({ label: 'dB', range: [-80, 5] })
   return (
-    <Interactive
+    <Figure
       title="Downsampling folds the spectrum"
+      state={state}
       caption="The input is ten tones at ω/π = 0.05, 0.15, …, 0.95, with amplitudes falling from 1 to 0.1. Keeping every M-th sample stretches the band [0, π/M] across the whole output band, and every tone above π/M folds back onto a new frequency: a tone at ω lands at Mω reduced into [0, π]. Switch on the anti-aliasing filter, a lowpass with cutoff π/M before the downsampler, and the high tones are removed instead of folded."
-      controls={
-        <>
-          <ParamSlider label="downsampling factor M" param={factor} format={(v) => String(v)} withArrows />
-          <ParamSwitch label="anti-aliasing lowpass before ↓M" checked={filtered} onChange={setFiltered} />
-        </>
-      }
-      readout={
+
+      readouts={
         <>
           <Readout label="output Nyquist, in input units" value={`π/${M}`} />
           <Readout label="tones above π/M" value={`${aliased} of ${TONES.length}`} />
@@ -91,27 +109,17 @@ export function DownsamplingSpectrum() {
       <div className="grid gap-4 md:grid-cols-2">
         <div className="min-w-0 space-y-1">
           <div className="text-center text-xs text-muted-foreground">before downsampling</div>
-          <XYChart
-            series={inputSeries}
-            xLabel="ω/π (input rate)"
-            yLabel="dB"
-            xRange={[0, 1]}
-            yRange={[-80, 5]}
-            height={280}
-          />
+          <Plot x={xAxis} y={yAxis} height={280}>
+            {seriesLayers(inputSeries)}
+          </Plot>
         </div>
         <div className="min-w-0 space-y-1">
           <div className="text-center text-xs text-muted-foreground">after downsampling by {M}</div>
-          <XYChart
-            series={outputSeries}
-            xLabel="ω/π (output rate)"
-            yLabel="dB"
-            xRange={[0, 1]}
-            yRange={[-80, 5]}
-            height={280}
-          />
+          <Plot x={xAxis2} y={yAxis2} height={280}>
+            {seriesLayers(outputSeries)}
+          </Plot>
         </div>
       </div>
-    </Interactive>
+    </Figure>
   )
 }

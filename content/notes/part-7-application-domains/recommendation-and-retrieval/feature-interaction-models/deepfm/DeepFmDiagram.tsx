@@ -1,5 +1,4 @@
-import { Interactive } from 'aifn-render'
-import { Diagram } from 'aifn-render'
+import { Diagram, Figure } from 'aifn-render'
 import type { DiagramSpec } from 'aifn-render'
 
 const field = (i: number) => ({
@@ -62,7 +61,7 @@ const spec: DiagramSpec = {
 /** DeepFM: one embedding table feeding both an FM component and a deep network. */
 export function DeepFmDiagram() {
   return (
-    <Interactive
+    <Figure
       title="DeepFM"
       caption="Each field's one-hot value is looked up in one embedding table. The FM component uses the embeddings for its first- and second-order terms; the deep component concatenates the same embeddings and passes them through hidden layers for higher-order interactions. The two outputs are summed before the sigmoid."
     >
@@ -70,6 +69,6 @@ export function DeepFmDiagram() {
         spec={spec}
         ariaLabel="DeepFM: fields to shared embeddings, feeding an FM layer and an MLP whose outputs are summed into a sigmoid"
       />
-    </Interactive>
+    </Figure>
   )
 }

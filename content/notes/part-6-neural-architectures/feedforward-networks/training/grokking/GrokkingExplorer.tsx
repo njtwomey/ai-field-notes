@@ -1,8 +1,8 @@
 import { useMemo, useState } from 'react'
 import { stream } from 'aifn/foundation/random'
 import { fromData, toFlat, unwrap, type Tensor } from 'aifn/foundation/tensor'
-import { modularArithmetic, type ModularOperation } from 'aifn-applied/data/synthetic'
-import { grokkingRun, ModularMlp, type GrokkingSnapshot } from 'aifn-applied/neural/grokking'
+import { modularArithmetic, type ModularOperation } from 'aifn-methods/data/synthetic'
+import { grokkingRun, ModularMlp, type GrokkingSnapshot } from 'aifn-methods/neural/grokking'
 import {
   ControlGroup,
   Curve,

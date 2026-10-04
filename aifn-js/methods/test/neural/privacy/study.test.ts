@@ -4,8 +4,8 @@
  */
 import { describe, expect, it } from 'vitest'
 import { stream } from 'aifn/foundation/random'
-import { blobs } from 'aifn-applied/data/synthetic'
-import { privateTrainingStudy, type PrivateStudySnapshot } from 'aifn-applied/neural/privacy'
+import { blobs } from 'aifn-methods/data/synthetic'
+import { privateTrainingStudy, type PrivateStudySnapshot } from 'aifn-methods/neural/privacy'
 
 describe('privateTrainingStudy', () => {
   it('trains each noise multiplier and accounts ε', () => {

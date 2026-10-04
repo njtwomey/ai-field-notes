@@ -1,5 +1,4 @@
-import { Interactive } from 'aifn-render'
-import { Diagram } from 'aifn-render'
+import { Diagram, Figure } from 'aifn-render'
 import type { DiagramSpec } from 'aifn-render'
 
 const spec: DiagramSpec = {
@@ -45,7 +44,7 @@ const spec: DiagramSpec = {
 /** The DDPM chain: a fixed noising process one way, a learned denoising process the other. */
 export function DiffusionChainDiagram() {
   return (
-    <Interactive
+    <Figure
       title="Forward and reverse processes"
       caption="Solid arrows are the learned reverse process, which generates by running from pure noise to data. Dashed arrows are the fixed forward process, which adds a little Gaussian noise per step and is used only in training; its marginal at any step t has a closed form, so training jumps straight from the data to a random step."
     >
@@ -53,6 +52,6 @@ export function DiffusionChainDiagram() {
         spec={spec}
         ariaLabel="Diffusion Markov chain from x_T to x_0: learned reverse transitions p_theta left to right, fixed forward transitions q dashed right to left, and the closed-form jump q(x_t | x_0)"
       />
-    </Interactive>
+    </Figure>
   )
 }

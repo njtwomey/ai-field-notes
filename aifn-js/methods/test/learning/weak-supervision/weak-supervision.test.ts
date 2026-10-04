@@ -16,7 +16,7 @@ import {
   labellingFunctions,
   positiveUnlabelled,
   proportionBags,
-} from 'aifn-applied/data/synthetic'
+} from 'aifn-methods/data/synthetic'
 import {
   attentionMil,
   complementaryClassifier,
@@ -31,7 +31,7 @@ import {
   votesOf,
   weakSupervisionAlgorithms,
   weakSupervisionFunctions,
-} from 'aifn-applied/learning/weak-supervision'
+} from 'aifn-methods/learning/weak-supervision'
 import { fixture } from '../../fixtures'
 import { expectInfo } from '../../registry'
 

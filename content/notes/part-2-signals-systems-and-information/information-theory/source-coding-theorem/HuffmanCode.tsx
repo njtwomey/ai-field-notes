@@ -1,5 +1,5 @@
-import { useMemo, useState } from 'react'
-import { Interactive, ParamChoice, Readout, XYChart, formatNumber, type XYSeries } from 'aifn-render'
+import { useMemo } from 'react'
+import { Bars, choice, Figure, formatNumber, Plot, Points, Readout, useAxis, useFigureState } from 'aifn-render'
 
 const log2 = (x: number) => Math.log(x) / Math.LN2
 
@@ -40,8 +40,19 @@ function huffman(probs: readonly number[]): string[] {
 
 /** Code lengths from Huffman's algorithm against the ideal −log₂ p and the Shannon lengths ⌈−log₂ p⌉. */
 export function HuffmanCode() {
-  const [preset, setPreset] = useState<Preset>('textbook')
-  const probs = PRESETS[preset]
+  const state = useFigureState({
+    preset: choice<Preset>(
+      [
+        { value: 'dyadic', label: '½, ¼, ⅛, ⅛' },
+        { value: 'textbook', label: '0.4, 0.2, 0.2, 0.1, 0.1' },
+        { value: 'skewed', label: '0.7, 0.1, 0.1, 0.05, 0.05' },
+        { value: 'uniform', label: 'uniform over 5' },
+      ],
+      'textbook',
+      { label: 'distribution' },
+    ),
+  })
+  const probs = PRESETS[state.preset]
 
   const r = useMemo(() => {
     const codes = huffman(probs)
@@ -62,30 +73,21 @@ export function HuffmanCode() {
   }, [probs])
 
   const index = probs.map((_, i) => i + 1)
-  const series: XYSeries[] = [
-    { name: 'Huffman length', type: 'bar', x: index, y: r.huff, slot: 0 },
-    { name: 'Shannon length ⌈−log₂ p⌉', type: 'scatter', x: index, y: r.shannon, slot: 1 },
-    { name: 'ideal −log₂ p', type: 'scatter', x: index, y: r.ideal, emphasis: true },
-  ]
+  const series = [
+    { name: 'Huffman length', x: index, y: r.huff, slot: 0 },
+    { name: 'Shannon length ⌈−log₂ p⌉', x: index, y: r.shannon, slot: 1 },
+    { name: 'ideal −log₂ p', x: index, y: r.ideal, emphasis: true },
+  ] as const
 
+  const xAxis = useAxis({ label: 'symbol (a, b, c, …)', range: [0.5, 5.5] })
+  const yAxis = useAxis({ label: 'bits', range: [0, 5] })
   return (
-    <Interactive
+    <Figure
       title="Huffman coding"
+      state={state}
       caption="Each symbol gets a binary codeword; no codeword is a prefix of another, so a stream of codewords decodes without separators. Bars: Huffman's code lengths. Diamonds: the ideal lengths −log₂ p, which only an entropy-achieving code would use. Circles: Shannon's rounded-up lengths ⌈−log₂ p⌉. For the dyadic distribution every probability is a power of 1/2 and Huffman meets the entropy exactly."
-      controls={
-        <ParamChoice
-          label="distribution"
-          value={preset}
-          onChange={setPreset}
-          options={[
-            { value: 'dyadic', label: '½, ¼, ⅛, ⅛' },
-            { value: 'textbook', label: '0.4, 0.2, 0.2, 0.1, 0.1' },
-            { value: 'skewed', label: '0.7, 0.1, 0.1, 0.05, 0.05' },
-            { value: 'uniform', label: 'uniform over 5' },
-          ]}
-        />
-      }
-      readout={
+
+      readouts={
         <>
           <Readout label="code" value={r.codes.map((c, i) => `${SYMBOLS[i]}:${c}`).join('  ')} />
           <Readout label="entropy H" value={`${formatNumber(r.entropy)} bits`} />
@@ -95,14 +97,11 @@ export function HuffmanCode() {
         </>
       }
     >
-      <XYChart
-        series={series}
-        xLabel="symbol (a, b, c, …)"
-        yLabel="bits"
-        xRange={[0.5, 5.5]}
-        yRange={[0, 5]}
-        height={300}
-      />
-    </Interactive>
+      <Plot x={xAxis} y={yAxis} height={300}>
+        <Bars {...series[0]} />
+        <Points {...series[1]} />
+        <Points {...series[2]} />
+      </Plot>
+    </Figure>
   )
 }

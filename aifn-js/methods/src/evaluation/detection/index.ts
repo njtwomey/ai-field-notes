@@ -1,5 +1,5 @@
 /**
- * `aifn-applied/evaluation/detection`: detection and segmentation metrics: boxes, masks and panoptic quality.
+ * `aifn-methods/evaluation/detection`: detection and segmentation metrics: boxes, masks and panoptic quality.
  */
 
 export {

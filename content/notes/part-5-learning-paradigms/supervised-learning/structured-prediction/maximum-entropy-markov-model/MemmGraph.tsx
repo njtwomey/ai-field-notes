@@ -1,8 +1,5 @@
-import { MathText } from 'aifn-render'
-import { Diagram } from 'aifn-render'
-import { link, variable } from 'aifn-render'
+import { Diagram, Figure, link, MathText, variable } from 'aifn-render'
 import type { DiagramSpec } from 'aifn-render'
-import { Interactive } from 'aifn-render'
 import { at, chainEnds, labelNodes } from '../_shared/chain-graph'
 
 const ends = chainEnds(0, 'y0', 'y2', true)
@@ -16,13 +13,13 @@ const spec: DiagramSpec = {
 /** The MEMM: directed edges from the previous label and from the whole observation sequence into each label. */
 export function MemmGraph() {
   return (
-    <Interactive
+    <Figure
       title="The MEMM as a graph"
       caption={
         <MathText text="Each label $y_n$ has two parents: the previous label $y_{n-1}$ and the observation sequence $\xvec$ (shaded). Each node's conditional is one locally normalised classifier." />
       }
     >
       <Diagram spec={spec} ariaLabel="Maximum-entropy Markov model chain" />
-    </Interactive>
+    </Figure>
   )
 }

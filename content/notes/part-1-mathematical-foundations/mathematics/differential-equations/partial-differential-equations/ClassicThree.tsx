@@ -1,30 +1,32 @@
-import { useMemo, useState } from 'react'
+import { useMemo } from 'react'
 import {
-  Heatmap,
-  Interactive,
-  ParamChoice,
-  ParamSlider,
-  Readout,
-  XYChart,
+  choice,
+  Curve,
+  Figure,
+  float,
   formatNumber,
-  useParam,
-  type Handle,
-  type XYSeries,
+  Handle,
+  Plot,
+  Raster,
+  Readout,
+  slider,
+  useAxis,
+  useFigureState,
 } from 'aifn-render'
-import { linspace } from '@/lib/math'
+import { linspace, toFlat } from 'aifn/foundation/tensor'
 
 type Equation = 'heat' | 'wave' | 'laplace'
 const MODES = 80
 const WIDTH = 0.06
 const D = 0.02
-const X = linspace(0, 1, 201)
-const GRID = linspace(0, 1, 51)
+const X = toFlat(linspace(0, 1, 201))
+const GRID = toFlat(linspace(0, 1, 51))
 
 const bump = (c: number) => (x: number) => Math.exp(-((x - c) ** 2) / (2 * WIDTH * WIDTH))
 
 /** Sine-series coefficients bₙ = 2∫₀¹ g(x) sin(nπx) dx, by the trapezoid rule on a fine grid. */
 function sineCoefficients(g: (x: number) => number): number[] {
-  const xs = linspace(0, 1, 1001)
+  const xs = toFlat(linspace(0, 1, 1001))
   const h = xs[1] - xs[0]
   return Array.from({ length: MODES }, (_, k) => {
     const n = k + 1
@@ -39,49 +41,59 @@ const sinhRatio = (n: number, y: number) =>
   (Math.exp(n * Math.PI * (y - 1)) - Math.exp(-n * Math.PI * (y + 1))) / (1 - Math.exp(-2 * n * Math.PI))
 
 export function ClassicThree() {
-  const [equation, setEquation] = useState<Equation>('heat')
-  const time = useParam(0.3, { min: 0, max: 2, step: 0.05 })
-  const centre = useParam(0.35, { min: 0.1, max: 0.9, step: 0.01 })
-  const b = useMemo(() => sineCoefficients(bump(centre.value)), [centre.value])
+  const state = useFigureState({
+    equation: choice<Equation>(
+      [
+        { value: 'heat', label: 'heat' },
+        { value: 'wave', label: 'wave' },
+        { value: 'laplace', label: 'Laplace' },
+      ],
+      'heat',
+      { label: 'equation' },
+    ),
+    centre: float(0.35, { min: 0.1, max: 0.9, step: 0.01, label: 'bump position' }),
+    time: slider(0, 2, 0.3, { step: 0.05, label: 'time t', when: (v) => v.equation !== 'laplace' }),
+  })
+  const b = useMemo(() => sineCoefficients(bump(state.centre)), [state.centre])
 
-  const initial = useMemo(() => X.map(bump(centre.value)), [centre.value])
+  const initial = useMemo(() => X.map(bump(state.centre)), [state.centre])
   const profile = useMemo(() => {
-    if (equation === 'laplace') return []
+    if (state.equation === 'laplace') return []
     return X.map((x) =>
       b.reduce((s, bn, k) => {
         const n = k + 1
         const w = n * Math.PI
-        const factor = equation === 'heat' ? Math.exp(-D * w * w * time.value) : Math.cos(w * time.value)
+        const factor = state.equation === 'heat' ? Math.exp(-D * w * w * state.time) : Math.cos(w * state.time)
         return s + bn * factor * Math.sin(w * x)
       }, 0),
     )
-  }, [b, equation, time.value])
+  }, [b, state.equation, state.time])
 
   const laplace = useMemo(() => {
-    if (equation !== 'laplace') return null
+    if (state.equation !== 'laplace') return null
     // Rows are y values (z[i][j] at (x[j], y[i])); the top edge y = 1 carries the bump.
     const z = GRID.map((y) =>
       GRID.map((x) => b.reduce((s, bn, k) => s + bn * Math.sin((k + 1) * Math.PI * x) * sinhRatio(k + 1, y), 0)),
     )
     return z
-  }, [b, equation])
+  }, [b, state.equation])
 
-  const series = useMemo<XYSeries[]>(
-    () => [
-      { name: 'initial shape', type: 'line', x: X, y: initial, muted: true, dashed: true },
-      {
-        name: equation === 'heat' ? 'temperature u(x, t)' : 'displacement u(x, t)',
-        type: 'line',
-        x: X,
-        y: profile,
-        slot: 0,
-      },
-    ],
-    [initial, profile, equation],
+  const series = useMemo(
+    () =>
+      [
+        { name: 'initial shape', x: X, y: initial, muted: true, dashed: true },
+        {
+          name: state.equation === 'heat' ? 'temperature u(x, t)' : 'displacement u(x, t)',
+          x: X,
+          y: profile,
+          slot: 0,
+        },
+      ] as const,
+    [initial, profile, state.equation],
   )
   const handles = useMemo<Handle[]>(
-    () => [{ kind: 'x', at: centre.value, label: 'bump', onDrag: centre.set }],
-    [centre],
+    () => [{ kind: 'x', at: state.centre, label: 'bump', onDrag: (v: number) => state.set('centre', v) }],
+    [state.bind('centre')],
   )
 
   const area = profile.length ? profile.reduce((s, v) => s + v, 0) * (X[1] - X[0]) : 0
@@ -92,28 +104,18 @@ export function ClassicThree() {
       'Laplace equation uₓₓ + u_yy = 0 on the unit square: the top edge holds the bump and the other edges are held at 0. There is no time; u is the steady temperature. The bump fades smoothly into the interior, and every interior value is the average of its surroundings.',
   }
 
+  const xAxis = useAxis({ label: 'x' })
+  const yAxis = useAxis({ label: 'y' })
+  const xAxis2 = useAxis({ label: 'x', range: [0, 1] })
+  const yAxis2 = useAxis({ label: 'u', range: [-1.1, 1.1] })
   return (
-    <Interactive
+    <Figure
       title="The heat, wave and Laplace equations"
-      caption={`${captions[equation]} Drag the vertical line or use the slider to move the bump.`}
-      controls={
-        <>
-          <ParamChoice
-            label="equation"
-            value={equation}
-            onChange={setEquation}
-            options={[
-              { value: 'heat', label: 'heat' },
-              { value: 'wave', label: 'wave' },
-              { value: 'laplace', label: 'Laplace' },
-            ]}
-          />
-          <ParamSlider label="bump position" param={centre} />
-          {equation !== 'laplace' && <ParamSlider label="time t" param={time} withArrows />}
-        </>
-      }
-      readout={
-        equation === 'laplace' ? (
+      state={state}
+      caption={`${captions[state.equation]} Drag the vertical line or use the slider to move the bump.`}
+
+      readouts={
+        state.equation === 'laplace' ? (
           <Readout label="u at the centre (0.5, 0.5)" value={formatNumber(laplace ? laplace[25][25] : 0)} />
         ) : (
           <>
@@ -123,30 +125,22 @@ export function ClassicThree() {
         )
       }
     >
-      {equation === 'laplace' && laplace ? (
-        <Heatmap
-          x={GRID}
-          y={GRID}
-          z={laplace}
-          xLabel="x"
-          yLabel="y"
-          valueLabel="u"
-          scale="sequential"
-          range={[0, 1]}
-          handles={handles}
-          height={380}
-        />
+      {state.equation === 'laplace' && laplace ? (
+        <Plot x={xAxis} y={yAxis} height={380}>
+          <Raster x={GRID} y={GRID} z={laplace} scale={'sequential'} range={[0, 1]} valueLabel={'u'} />
+          {(handles ?? []).map((h, i) => (
+            <Handle key={i} {...h} />
+          ))}
+        </Plot>
       ) : (
-        <XYChart
-          height={300}
-          xLabel="x"
-          yLabel="u"
-          series={series}
-          handles={handles}
-          xRange={[0, 1]}
-          yRange={[-1.1, 1.1]}
-        />
+        <Plot x={xAxis2} y={yAxis2} height={300}>
+          <Curve {...series[0]} />
+          <Curve {...series[1]} />
+          {(handles ?? []).map((h, i) => (
+            <Handle key={i} {...h} />
+          ))}
+        </Plot>
       )}
-    </Interactive>
+    </Figure>
   )
 }

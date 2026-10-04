@@ -1,9 +1,10 @@
 import { useMemo } from 'react'
-import { Interactive, ParamSlider, Readout, XYChart, useParam, type XYSeries } from 'aifn-render'
-import { linspace, rng } from '@/lib/math'
+import { Figure, int, Plot, Readout, seriesLayers, type SeriesSpec, useAxis, useFigureState } from 'aifn-render'
 import { periodogram, powerDb, symmetricEigen } from '../_shared/spectra'
+import { linspace, toFlat } from 'aifn/foundation/tensor'
+import { normal, stream, uniform } from 'aifn/foundation/random'
 
-const GRID = linspace(0, Math.PI, 2001)
+const GRID = toFlat(linspace(0, Math.PI, 2001))
 const CENTRE = 0.3 * Math.PI
 
 /** Local maxima of y, largest first. */
@@ -18,22 +19,24 @@ function topPeaks(y: number[], count: number): number[] {
  * the sample correlation matrix; the pseudospectrum peaks where a steering vector is orthogonal to it.
  */
 export function MusicDemo() {
-  const sep = useParam(0.02, { min: 0.005, max: 0.1, step: 0.005 })
-  const snr = useParam(20, { min: 0, max: 40, step: 1 })
-  const n = useParam(64, { min: 32, max: 256, step: 16 })
-  const seed = useParam(3, { min: 1, max: 30, step: 1 })
+  const state = useFigureState({
+    sep: int(0.02, { min: 0.005, max: 0.1, step: 0.005, label: 'separation (×π rad/sample)' }),
+    snr: int(20, { min: 0, max: 40, step: 1, label: 'SNR per sinusoid (dB)', format: (v) => `${v} dB` }),
+    n: int(64, { min: 32, max: 256, step: 16, label: 'samples N', format: (v) => String(v) }),
+    seed: int(3, { min: 1, max: 30, step: 1, label: 'seed', format: (v) => String(v) }),
+  })
 
   const r = useMemo(() => {
-    const g = rng(seed.value)
-    const freqs = [CENTRE - (sep.value * Math.PI) / 2, CENTRE + (sep.value * Math.PI) / 2]
-    const phases = freqs.map(() => 2 * Math.PI * g.uniform())
-    const sigma = Math.sqrt(0.5 / 10 ** (snr.value / 10))
-    const x = Array.from({ length: n.value }, (_, t) =>
-      freqs.reduce((s, w, k) => s + Math.cos(w * t + phases[k]), sigma * g.normal()),
+    const g = stream(state.seed)
+    const freqs = [CENTRE - (state.sep * Math.PI) / 2, CENTRE + (state.sep * Math.PI) / 2]
+    const phases = freqs.map(() => 2 * Math.PI * uniform(g))
+    const sigma = Math.sqrt(0.5 / 10 ** (state.snr / 10))
+    const x = Array.from({ length: state.n }, (_, t) =>
+      freqs.reduce((s, w, k) => s + Math.cos(w * t + phases[k]), sigma * normal(g)),
     )
     // Forward–backward averaged M × M sample correlation matrix of overlapping snapshots.
-    const m = Math.min(24, Math.floor(n.value / 2))
-    const snapshots = n.value - m + 1
+    const m = Math.min(24, Math.floor(state.n / 2))
+    const snapshots = state.n - m + 1
     const R = Array.from({ length: m }, () => new Array<number>(m).fill(0))
     for (let s = 0; s < snapshots; s++)
       for (let i = 0; i < m; i++) for (let j = 0; j < m; j++) R[i][j] += (x[s + i] * x[s + j]) / snapshots
@@ -68,12 +71,12 @@ export function MusicDemo() {
       est,
       eig: values.slice(0, 6),
     }
-  }, [sep.value, snr.value, n.value, seed.value])
+  }, [state.sep, state.snr, state.n, state.seed])
 
-  const series: XYSeries[] = [
+  const series: SeriesSpec[] = [
     { name: 'periodogram (Hann)', type: 'line', x: r.pOmega, y: r.pDb, muted: true },
     { name: 'MUSIC pseudospectrum', type: 'line', x: GRID.map((w) => w / Math.PI), y: r.music, slot: 0 },
-    ...r.freqs.map((f): XYSeries => ({
+    ...r.freqs.map((f): SeriesSpec => ({
       name: 'true frequencies',
       type: 'line',
       x: [f, f],
@@ -83,35 +86,26 @@ export function MusicDemo() {
     })),
   ]
 
+  const xAxis = useAxis({ label: 'ω / π', range: [0.15, 0.45] })
+  const yAxis = useAxis({ label: 'normalised level (dB)', range: [-60, 5] })
   return (
-    <Interactive
+    <Figure
       title="Resolving sinusoids below the Fourier limit"
+      state={state}
       caption="Two unit-amplitude sinusoids centred on 0.3π rad/sample, in white noise. The periodogram (grey) cannot separate them when they are closer than about 2π/N. MUSIC estimates the correlation matrix of 24-sample snapshots, splits its eigenvectors into a four-dimensional signal subspace and a noise subspace, and peaks where the steering vector (1, e^{iω}, …) is orthogonal to the noise subspace. Its resolution improves with SNR, not only with N."
-      controls={
-        <>
-          <ParamSlider label="separation (×π rad/sample)" param={sep} withArrows />
-          <ParamSlider label="SNR per sinusoid (dB)" param={snr} format={(v) => `${v} dB`} />
-          <ParamSlider label="samples N" param={n} format={(v) => String(v)} withArrows />
-          <ParamSlider label="seed" param={seed} format={(v) => String(v)} withArrows />
-        </>
-      }
-      readout={
+
+      readouts={
         <>
           <Readout label="true (×π)" value={r.freqs.map((f) => f.toFixed(4)).join(', ')} />
           <Readout label="MUSIC estimates (×π)" value={r.est.map((f) => f.toFixed(4)).join(', ')} />
-          <Readout label="Fourier limit 2/N (×π)" value={(2 / n.value).toFixed(4)} />
+          <Readout label="Fourier limit 2/N (×π)" value={(2 / state.n).toFixed(4)} />
           <Readout label="largest eigenvalues" value={r.eig.map((v) => v.toFixed(3)).join(', ')} />
         </>
       }
     >
-      <XYChart
-        series={series}
-        xLabel="ω / π"
-        yLabel="normalised level (dB)"
-        xRange={[0.15, 0.45]}
-        yRange={[-60, 5]}
-        height={320}
-      />
-    </Interactive>
+      <Plot x={xAxis} y={yAxis} height={320}>
+        {seriesLayers(series)}
+      </Plot>
+    </Figure>
   )
 }

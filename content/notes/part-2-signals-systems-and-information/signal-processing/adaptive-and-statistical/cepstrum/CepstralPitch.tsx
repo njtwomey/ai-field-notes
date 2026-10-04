@@ -1,6 +1,9 @@
 import { useMemo } from 'react'
-import { Interactive, ParamSlider, Readout, XYChart, formatNumber, useParam, type XYSeries } from 'aifn-render'
-import { fft, ifft, lfilter, makeWindow } from '@/lib/dsp'
+import { Curve, Figure, formatNumber, int, Plot, Points, Readout, useAxis, useFigureState } from 'aifn-render'
+import { fft, ifft } from 'aifn/foundation/fourier'
+import { complexAbs, realPart, toFlat, type Tensor } from 'aifn/foundation/tensor'
+import { lfilter } from 'aifn/signal/filters'
+import { getWindow } from 'aifn/signal/windows'
 
 const FS = 16000
 const N = 1024
@@ -28,27 +31,29 @@ function formantPolynomial(): number[] {
  * keeping only low quefrencies (liftering) recovers the smooth vocal-tract envelope.
  */
 export function CepstralPitch() {
-  const f0 = useParam(200, { min: 80, max: 400, step: 5 })
-  const lifter = useParam(30, { min: 5, max: 120, step: 1 })
+  const state = useFigureState({
+    f0: int(200, { min: 80, max: 400, step: 5, label: 'fundamental f₀ (Hz)' }),
+    lifter: int(30, { min: 5, max: 120, step: 1, label: 'lifter cut-off L (samples)' }),
+  })
 
   const r = useMemo(() => {
-    const period = FS / f0.value
+    const period = FS / state.f0
     const excitation = Array.from({ length: 4000 }, (_, n) =>
       Math.floor(n / period) !== Math.floor((n - 1) / period) ? 1 : 0,
     )
-    const voiced = lfilter([1], formantPolynomial(), excitation).slice(2000, 2000 + N)
-    const w = makeWindow('hann', N, true)
+    const voiced = toFlat(lfilter({ b: [1], a: formantPolynomial() }, excitation).y as Tensor).slice(2000, 2000 + N)
+    const w = toFlat(getWindow('hann', N, { periodic: true }))
     const X = fft(voiced.map((v, n) => v * w[n]))
-    const logMag = Array.from(X.re, (re, k) => Math.log(Math.hypot(re, X.im[k]) + 1e-9))
-    const c = ifft(logMag, new Array(N).fill(0)).re
+    const logMag = toFlat(complexAbs(X)).map((m) => Math.log(m + 1e-9))
+    const c = toFlat(realPart(ifft(logMag)))
     // Pitch search over quefrencies 2.5–12.5 ms (80–400 Hz).
     const lo = Math.round(0.0025 * FS)
     const hi = Math.round(0.0125 * FS)
     let peak = lo
     for (let q = lo; q <= hi; q++) if (c[q] > c[peak]) peak = q
     // Lifter: keep quefrencies below L (and their mirror), transform back to a smoothed log spectrum.
-    const kept = Array.from(c, (v, q) => (q < lifter.value || q > N - lifter.value ? v : 0))
-    const smooth = fft(kept).re
+    const kept = Array.from(c, (v, q) => (q < state.lifter || q > N - state.lifter ? v : 0))
+    const smooth = toFlat(realPart(fft(kept)))
     const half = N / 2 + 1
     const toDb = 20 / Math.LN10
     return {
@@ -59,39 +64,45 @@ export function CepstralPitch() {
       cep: Array.from(c.slice(0, hi + 20)),
       peak,
     }
-  }, [f0.value, lifter.value])
+  }, [state.f0, state.lifter])
 
-  const spectrum: XYSeries[] = [
-    { name: 'log |X| (dB)', type: 'line', x: r.freqs, y: r.logDb, muted: true },
-    { name: `liftered, L = ${lifter.value}`, type: 'line', x: r.freqs, y: r.smoothDb, slot: 1 },
-  ]
-  const cepstrum: XYSeries[] = [
-    { name: 'real cepstrum c[q]', type: 'line', x: r.quefrency.slice(1), y: r.cep.slice(1), slot: 0 },
-    { name: 'pitch peak', type: 'scatter', x: [(1000 * r.peak) / FS], y: [r.cep[r.peak]], emphasis: true },
-  ]
+  const spectrum = [
+    { name: 'log |X| (dB)', x: r.freqs, y: r.logDb, muted: true },
+    { name: `liftered, L = ${state.lifter}`, x: r.freqs, y: r.smoothDb, slot: 1 },
+  ] as const
+  const cepstrum = [
+    { name: 'real cepstrum c[q]', x: r.quefrency.slice(1), y: r.cep.slice(1), slot: 0 },
+    { name: 'pitch peak', x: [(1000 * r.peak) / FS], y: [r.cep[r.peak]], emphasis: true },
+  ] as const
 
+  const xAxis = useAxis({ label: 'frequency (Hz)', range: [0, FS / 2] })
+  const yAxis = useAxis({ label: 'dB', hold: 'union' })
+  const xAxis2 = useAxis({ label: 'quefrency (ms)', hold: 'union' })
+  const yAxis2 = useAxis({ label: 'c[q]', hold: 'union' })
   return (
-    <Interactive
+    <Figure
       title="Pitch and envelope from the cepstrum"
+      state={state}
       caption="A voiced frame: a pulse train at f₀ through three formant resonances. Left: its log spectrum, harmonics riding on the formant envelope, and the envelope recovered by keeping only quefrencies below L. Right: the real cepstrum. The harmonics' regular spacing f₀ in frequency becomes a peak at quefrency 1/f₀ in the cepstrum; low quefrencies hold the slowly varying envelope. Too large an L lets the harmonic ripple back in."
-      controls={
+
+      readouts={
         <>
-          <ParamSlider label="fundamental f₀ (Hz)" param={f0} />
-          <ParamSlider label="lifter cut-off L (samples)" param={lifter} />
-        </>
-      }
-      readout={
-        <>
-          <Readout label="true period" value={`${formatNumber(1000 / f0.value)} ms`} />
+          <Readout label="true period" value={`${formatNumber(1000 / state.f0)} ms`} />
           <Readout label="cepstral peak" value={`${formatNumber((1000 * r.peak) / FS)} ms`} />
           <Readout label="estimated f₀" value={`${formatNumber(FS / r.peak)} Hz`} />
         </>
       }
     >
       <div className="grid gap-4 lg:grid-cols-2">
-        <XYChart series={spectrum} xLabel="frequency (Hz)" yLabel="dB" xRange={[0, FS / 2]} height={300} />
-        <XYChart series={cepstrum} xLabel="quefrency (ms)" yLabel="c[q]" height={300} />
+        <Plot x={xAxis} y={yAxis} height={300}>
+          <Curve {...spectrum[0]} />
+          <Curve {...spectrum[1]} />
+        </Plot>
+        <Plot x={xAxis2} y={yAxis2} height={300}>
+          <Curve {...cepstrum[0]} />
+          <Points {...cepstrum[1]} />
+        </Plot>
       </div>
-    </Interactive>
+    </Figure>
   )
 }

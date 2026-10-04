@@ -22,7 +22,9 @@ export function RevealToggle({ label, pressed, onChange, className }: RevealTogg
         aria-label={typeof label === 'string' ? label : undefined}
         pressed={pressed}
         onPressedChange={onChange}
-        className={className ?? 'data-pressed:border-primary/60 data-pressed:bg-primary/10 data-pressed:text-foreground'}
+        className={
+          className ?? 'data-pressed:border-primary/60 data-pressed:bg-primary/10 data-pressed:text-foreground'
+        }
       >
         {pressed ? <Eye className="size-3.5" /> : <EyeOff className="size-3.5" />}
         {label}

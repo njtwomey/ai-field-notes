@@ -1,5 +1,5 @@
 /**
- * `aifn-applied/unsupervised/clustering`: clustering estimators: k-means with k-means++ seeding, mini-batch and
+ * `aifn-methods/unsupervised/clustering`: clustering estimators: k-means with k-means++ seeding, mini-batch and
  * k-medoids; Gaussian mixtures by EM; hierarchical clustering; DBSCAN, OPTICS and mean shift; spectral clustering.
  */
 

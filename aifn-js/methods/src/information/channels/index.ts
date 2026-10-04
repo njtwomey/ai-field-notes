@@ -1,5 +1,5 @@
 /**
- * `aifn-applied/information/channels`: channel capacity and rate–distortion by Blahut–Arimoto.
+ * `aifn-methods/information/channels`: channel capacity and rate–distortion by Blahut–Arimoto.
  */
 
 export {

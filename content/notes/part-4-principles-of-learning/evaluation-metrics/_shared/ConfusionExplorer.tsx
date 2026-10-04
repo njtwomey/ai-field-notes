@@ -1,20 +1,11 @@
 import { useMemo } from 'react'
-import {
-  Interactive,
-  ParamSlider,
-  Readout,
-  XYChart,
-  formatNumber,
-  useParam,
-  type Handle,
-  type XYSeries,
-} from 'aifn-render'
-import { linspace } from '@/lib/math'
-import { normalPdf } from '@/lib/math/special'
+import { Area, Figure, float, formatNumber, Handle, Plot, Readout, slider, useAxis, useFigureState } from 'aifn-render'
 import { METRIC_LABELS, expectedCounts, metricsFrom, type MetricKey } from './binormal'
+import { linspace, toFlat } from 'aifn/foundation/tensor'
+import { normalPdf } from 'aifn/numerics/special'
 
 const N = 1000
-const X = linspace(-4, 7, 221)
+const X = toFlat(linspace(-4, 7, 221))
 
 const show = (v: number) => (Number.isFinite(v) ? formatNumber(v) : '—')
 
@@ -38,27 +29,27 @@ export function ConfusionExplorer({
   separation?: number
   threshold?: number
 }) {
-  const pi = useParam(prevalence, { min: 0.01, max: 0.5, step: 0.01 })
-  const d = useParam(separation, { min: 0, max: 4, step: 0.1 })
-  const t = useParam(threshold, { min: -3, max: 6, step: 0.05 })
+  const state = useFigureState({
+    pi: slider(0.01, 0.5, prevalence, { step: 0.01, label: 'prevalence π' }),
+    d: float(separation, { min: 0, max: 4, step: 0.1, label: 'separation d' }),
+    t: slider(-3, 6, threshold, { step: 0.05, label: 'threshold t' }),
+  })
 
-  const counts = expectedCounts(t.value, d.value, pi.value, N)
+  const counts = expectedCounts(state.t, state.d, state.pi, N)
   const m = metricsFrom(counts)
   const series = useMemo(
-    (): XYSeries[] => [
-      { name: 'negatives', type: 'line', x: X, y: X.map((x) => (1 - pi.value) * normalPdf(x)), slot: 0, area: true },
-      {
-        name: 'positives',
-        type: 'line',
-        x: X,
-        y: X.map((x) => pi.value * normalPdf(x - d.value)),
-        slot: 1,
-        area: true,
-      },
-    ],
-    [pi.value, d.value],
+    () =>
+      [
+        { name: 'negatives', x: X, y: X.map((x) => (1 - state.pi) * normalPdf(x)), slot: 0 },
+        {
+          name: 'positives',
+          x: X,
+          y: X.map((x) => state.pi * normalPdf(x - state.d)),
+          slot: 1,
+        },
+      ] as const,
+    [state.pi, state.d],
   )
-  const handles: Handle[] = [{ kind: 'x', at: t.value, label: 'threshold', onDrag: (x) => t.set(x) }]
 
   const cell = (label: string, value: number, tone: 'right' | 'wrong') => (
     <div
@@ -72,21 +63,18 @@ export function ConfusionExplorer({
     </div>
   )
 
+  const xAxis = useAxis({ label: 'score', range: [-4, 7] })
+  const yAxis = useAxis({ label: 'density × share', hold: 'union' })
   return (
-    <Interactive
+    <Figure
       title={title}
+      state={state}
       caption={
         caption ??
         'Negative scores follow N(0, 1) and positive scores N(d, 1); each density is scaled by its share of the population. Cases scoring above the threshold are predicted positive. Drag the threshold, or change the prevalence and the separation d, and watch the confusion matrix for 1,000 cases and the metrics below it.'
       }
-      controls={
-        <>
-          <ParamSlider label="prevalence π" param={pi} />
-          <ParamSlider label="separation d" param={d} />
-          <ParamSlider label="threshold t" param={t} />
-        </>
-      }
-      readout={
+
+      readouts={
         <>
           {metrics.map((k) => (
             <Readout key={k} label={METRIC_LABELS[k]} value={show(m[k])} />
@@ -95,14 +83,11 @@ export function ConfusionExplorer({
       }
     >
       <div className="grid items-center gap-4 md:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
-        <XYChart
-          series={series}
-          xLabel="score"
-          yLabel="density × share"
-          xRange={[-4, 7]}
-          handles={handles}
-          height={260}
-        />
+        <Plot x={xAxis} y={yAxis} height={260}>
+          <Area {...series[0]} />
+          <Area {...series[1]} />
+          <Handle {...state.handle('t', { label: 'threshold' })} />
+        </Plot>
         <div className="grid grid-cols-[auto_1fr_1fr] gap-1.5 text-center text-xs">
           <span />
           <span className="text-muted-foreground">predicted +</span>
@@ -115,6 +100,6 @@ export function ConfusionExplorer({
           {cell('TN', counts.tn, 'right')}
         </div>
       </div>
-    </Interactive>
+    </Figure>
   )
 }

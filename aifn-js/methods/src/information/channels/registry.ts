@@ -1,4 +1,4 @@
-/** The registry of `aifn-applied/information/channels`: capacity and rate–distortion by Blahut–Arimoto. */
+/** The registry of `aifn-methods/information/channels`: capacity and rate–distortion by Blahut–Arimoto. */
 
 import { definer, entries, type AlgorithmInfo, type Entry, type FunctionInfo } from 'aifn/foundation/registry'
 import * as channel from './channel'

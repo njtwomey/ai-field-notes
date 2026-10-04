@@ -1,5 +1,5 @@
 /**
- * `aifn-applied/timeseries`: models of one series observed in time: ARMA and seasonal ARIMA fitting and forecasting,
+ * `aifn-methods/timeseries`: models of one series observed in time: ARMA and seasonal ARIMA fitting and forecasting,
  * GARCH, exponential smoothing, classical and STL decomposition, and EM for linear-Gaussian state-space models.
  */
 

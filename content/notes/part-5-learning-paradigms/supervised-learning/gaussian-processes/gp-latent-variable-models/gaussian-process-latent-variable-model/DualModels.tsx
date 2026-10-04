@@ -1,6 +1,5 @@
-import { Diagram } from 'aifn-render'
+import { Diagram, Figure } from 'aifn-render'
 import type { DiagramSpec } from 'aifn-render'
-import { Interactive } from 'aifn-render'
 
 const spec: DiagramSpec = {
   nodes: [
@@ -57,11 +56,11 @@ const spec: DiagramSpec = {
 /** Probabilistic PCA and the GP-LVM as graphical models: which variable is integrated out and which is optimised. */
 export function DualModels() {
   return (
-    <Interactive
+    <Figure
       title="Two ways to make PCA probabilistic"
       caption="Shaded nodes are observed. Dashed nodes are integrated out; highlighted nodes are optimised. Probabilistic PCA integrates out the latent point of each observation and optimises the shared linear map. The GP-LVM does the opposite: it integrates out the map, under a Gaussian process prior with hyperparameters θ, and optimises one latent point per observation. With a linear kernel both give the principal subspace."
     >
       <Diagram spec={spec} ariaLabel="Graphical models of probabilistic PCA and of the GP-LVM" />
-    </Interactive>
+    </Figure>
   )
 }

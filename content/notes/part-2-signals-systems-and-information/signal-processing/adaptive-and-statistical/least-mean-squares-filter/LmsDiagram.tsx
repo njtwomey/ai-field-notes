@@ -1,5 +1,4 @@
-import { Interactive } from 'aifn-render'
-import { Diagram } from 'aifn-render'
+import { Diagram, Figure } from 'aifn-render'
 import type { DiagramSpec } from 'aifn-render'
 
 const spec: DiagramSpec = {
@@ -38,7 +37,7 @@ const spec: DiagramSpec = {
 /** The adaptive-filter loop that LMS runs once per sample. */
 export function LmsDiagram() {
   return (
-    <Interactive
+    <Figure
       title="The LMS adaptive filter"
       caption="An FIR filter with weights w[n] maps the last M input samples x[n] to the output y[n]. The error e[n] = d[n] − y[n] against the desired signal, multiplied by the input vector and the step size μ, updates the weights before the next sample arrives."
     >
@@ -46,6 +45,6 @@ export function LmsDiagram() {
         spec={spec}
         ariaLabel="The input x passes through an FIR filter to give y; y is subtracted from the desired signal d to give the error e; the error and the input drive the LMS update, which sets the filter's weights"
       />
-    </Interactive>
+    </Figure>
   )
 }

@@ -1,5 +1,4 @@
-import { Interactive } from 'aifn-render'
-import { Diagram } from 'aifn-render'
+import { Diagram, Figure } from 'aifn-render'
 import type { DiagramSpec } from 'aifn-render'
 
 const spec: DiagramSpec = {
@@ -51,7 +50,7 @@ const spec: DiagramSpec = {
 /** The two players of a GAN and where each one's gradient comes from. */
 export function GanDiagram() {
   return (
-    <Interactive
+    <Figure
       title="The adversarial game"
       caption="The discriminator classifies real data (label 1) against generated samples (label 0) and climbs the value V. The generator never sees the data: its only training signal is the gradient of V passed back through the discriminator into the sample it produced. The two updates alternate."
     >
@@ -59,6 +58,6 @@ export function GanDiagram() {
         spec={spec}
         ariaLabel="GAN: noise z into generator G, generated samples and real data into discriminator D, D's output into the value V; dashed gradients back to D (ascend) and G (descend)"
       />
-    </Interactive>
+    </Figure>
   )
 }

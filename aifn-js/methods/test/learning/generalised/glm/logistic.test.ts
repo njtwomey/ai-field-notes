@@ -3,7 +3,7 @@
  * linear regression cases).
  */
 import { describe, expect, it } from 'vitest'
-import { logisticRegression } from 'aifn-applied/learning/generalised/glm'
+import { logisticRegression } from 'aifn-methods/learning/generalised/glm'
 import { fromData, tensor, toFlat } from 'aifn/foundation/tensor'
 import { asTensor, dataset, evaluate, hasTraining } from 'aifn/learning/estimators'
 import { accuracy, auroc, logLoss } from 'aifn/learning/metrics'

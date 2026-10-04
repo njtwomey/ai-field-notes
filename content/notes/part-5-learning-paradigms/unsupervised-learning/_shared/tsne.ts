@@ -1,4 +1,4 @@
-import { rng } from '@/lib/math'
+import { normal, stream } from 'aifn/foundation/random'
 
 export type Embedding = [number, number][]
 
@@ -47,8 +47,8 @@ export type Run = { snapshots: Embedding[]; kl: number[] }
  */
 export function tsne(p: number[][], seed: number, iterations = 500, every = 10): Run {
   const n = p.length
-  const r = rng(seed)
-  const y: Embedding = Array.from({ length: n }, () => [1e-2 * r.normal(), 1e-2 * r.normal()])
+  const r = stream(seed)
+  const y: Embedding = Array.from({ length: n }, () => [1e-2 * normal(r), 1e-2 * normal(r)])
   const velocity = y.map(() => [0, 0])
   const gains = y.map(() => [1, 1])
   const eta = Math.max(n / 12, 50)

@@ -8,7 +8,7 @@ import { describe, expect, it } from 'vitest'
 import { stream } from 'aifn/foundation/random'
 import { toFlat } from 'aifn/foundation/tensor'
 import { run, trace } from 'aifn/foundation/trace'
-import { implicitFeedback } from 'aifn-applied/data/synthetic'
+import { implicitFeedback } from 'aifn-methods/data/synthetic'
 import {
   alternatingLeastSquares,
   biasedFactorInit,
@@ -28,7 +28,7 @@ import {
   worldFromFactors,
   type RecommenderKind,
   type RecommenderSnapshot,
-} from 'aifn-applied/retrieval/recommenders'
+} from 'aifn-methods/retrieval/recommenders'
 import { fixture } from '../../fixtures'
 import { expectInfo } from '../../registry'
 

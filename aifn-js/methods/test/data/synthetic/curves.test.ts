@@ -2,8 +2,8 @@ import { describe, expect, it } from 'vitest'
 import { stream } from 'aifn/foundation/random'
 import { fromData, toFlat, type Tensor } from 'aifn/foundation/tensor'
 import { expectile } from 'aifn/probability/stats'
-import { curve1d, type Curve1dCase } from 'aifn-applied/data/synthetic'
-import { datasetRegistry, type Curve1dTruth } from 'aifn-applied/data'
+import { curve1d, type Curve1dCase } from 'aifn-methods/data/synthetic'
+import { datasetRegistry, type Curve1dTruth } from 'aifn-methods/data'
 
 const CASES: Curve1dCase[] = ['sine', 'skewed', 'counts', 'binary', 'gamma']
 const at = (v: number) => fromData(Float64Array.of(v), [1, 1])

@@ -1,5 +1,5 @@
 /**
- * `aifn-applied/generative/autoencoders`: the autoencoder, the variational autoencoder (with β), the conditional VAE
+ * `aifn-methods/generative/autoencoders`: the autoencoder, the variational autoencoder (with β), the conditional VAE
  * and the VQ-VAE on small data (`models.ts`), and a streamed training run for a worker (`run.ts`).
  */
 

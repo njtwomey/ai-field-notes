@@ -1,18 +1,22 @@
 import { useMemo, useState } from 'react'
 import {
-  Interactive,
-  ParamButton,
-  ParamChoice,
-  ParamSlider,
-  Readout,
-  XYChart,
+  Button,
+  choice,
+  Curve,
+  Figure,
+  float,
+  int,
   formatNumber,
-  useParam,
-  type Handle,
-  type XYSeries,
+  Handle,
+  Plot,
+  Points,
+  Readout,
+  useAxis,
+  useFigureState,
 } from 'aifn-render'
-import { linspace, rng } from '@/lib/math'
 import { addDiagonal, cholesky, forward, gram, logDet, logMarginal, makeKernel, posterior } from '../_shared/gp'
+import { linspace, toFlat } from 'aifn/foundation/tensor'
+import { normal, stream, uniform } from 'aifn/foundation/random'
 
 type Method = 'vfe' | 'fitc' | 'sor'
 const METHODS = [
@@ -24,16 +28,16 @@ const METHODS = [
 const N = 100
 const NOISE = 0.25
 const MAX_M = 20
-const GRID = linspace(-6, 6, 151)
+const GRID = toFlat(linspace(-6, 6, 151))
 const X_RANGE: [number, number] = [-6, 6]
 const Y_RANGE: [number | undefined, number | undefined] = [-3, 3]
 const truth = (x: number) => Math.sin(1.4 * x) + 0.5 * Math.sin(3.1 * x) * Math.exp(-0.1 * x * x)
-const spread = (m: number) => linspace(-4.5, 4.5, m)
+const spread = (m: number) => toFlat(linspace(-4.5, 4.5, m))
 
 const DATA = (() => {
-  const g = rng(8)
-  const x = Array.from({ length: N }, () => -5 + 10 * g.uniform()).sort((a, b) => a - b)
-  return { x, y: x.map((v) => truth(v) + NOISE * g.normal()) }
+  const g = stream(8)
+  const x = Array.from({ length: N }, () => -5 + 10 * uniform(g)).sort((a, b) => a - b)
+  return { x, y: x.map((v) => truth(v) + NOISE * normal(g)) }
 })()
 
 /**
@@ -95,40 +99,52 @@ function sparse(method: Method, z: number[], ell: number) {
 
 /** Inducing points as draggable handles: a sparse GP against the exact GP on 100 points. */
 export function SparseGp() {
-  const [method, setMethod] = useState<Method>('vfe')
-  const [z, setZ] = useState<number[]>(spread(10))
-  const logEll = useParam(-0.22, { min: -0.8, max: 0.4, step: 0.01 })
-  const ell = 10 ** logEll.value
+  const state = useFigureState({
+    method: choice<Method>(METHODS, 'vfe', { label: 'approximation' }),
+    logEll: float(-0.22, {
+      min: -0.8,
+      max: 0.4,
+      step: 0.01,
+      label: 'length-scale ℓ',
+      points_per_decade: 2,
+      logTransform: 'value-is-log',
+      format: (v) => formatNumber(10 ** v),
+    }),
+    m: int(10, { min: 2, max: MAX_M, suggestions: [2, 5, 10, MAX_M], label: 'inducing points M' }),
+  })
+  // Dragged inducing inputs belong to the count they were dragged at; a new count starts evenly spread.
+  const [placed, setPlaced] = useState<number[] | null>(null)
+  const z = useMemo(() => (placed && placed.length === state.m ? placed : spread(state.m)), [placed, state.m])
+  const setZ = (update: (prev: number[]) => number[]) => setPlaced(update(z))
+  const ell = 10 ** state.logEll
 
   const exact = useMemo(() => {
     const k = makeKernel('se', { ell, sf: 1 })
     const post = posterior(k, DATA.x, DATA.y, NOISE * NOISE, GRID)
     return { post, lml: logMarginal(k, DATA.x, DATA.y, NOISE * NOISE).value }
   }, [ell])
-  const r = useMemo(() => sparse(method, z, ell), [method, z, ell])
+  const r = useMemo(() => sparse(state.method, z, ell), [state.method, z, ell])
 
   const exactSd = exact.post.variance.map(Math.sqrt)
-  const series: XYSeries[] = [
-    { name: 'data', type: 'scatter', x: DATA.x, y: DATA.y, muted: true },
-    { name: 'exact GP mean', type: 'line', x: GRID, y: exact.post.mean, slot: 2, dashed: true },
+  const series = [
+    { name: 'data', x: DATA.x, y: DATA.y, muted: true },
+    { name: 'exact GP mean', x: GRID, y: exact.post.mean, slot: 2, dashed: true },
     {
       name: 'exact GP ± 2 sd',
-      type: 'line',
       x: GRID,
       y: exact.post.mean.map((m, i) => m + 2 * exactSd[i]),
       muted: true,
     },
     {
       name: 'exact GP ± 2 sd',
-      type: 'line',
       x: GRID,
       y: exact.post.mean.map((m, i) => m - 2 * exactSd[i]),
       muted: true,
     },
-    { name: 'sparse ± 2 sd', type: 'line', x: GRID, y: r.mean.map((m, i) => m + 2 * r.sd[i]), slot: 0, dashed: true },
-    { name: 'sparse ± 2 sd', type: 'line', x: GRID, y: r.mean.map((m, i) => m - 2 * r.sd[i]), slot: 0, dashed: true },
-    { name: 'sparse mean', type: 'line', x: GRID, y: r.mean, slot: 0 },
-  ]
+    { name: 'sparse ± 2 sd', x: GRID, y: r.mean.map((m, i) => m + 2 * r.sd[i]), slot: 0, dashed: true },
+    { name: 'sparse ± 2 sd', x: GRID, y: r.mean.map((m, i) => m - 2 * r.sd[i]), slot: 0, dashed: true },
+    { name: 'sparse mean', x: GRID, y: r.mean, slot: 0 },
+  ] as const
   const handles: Handle[] = z.map((zj, j) => ({
     kind: 'point',
     at: [zj, r.zMean[j]],
@@ -136,40 +152,44 @@ export function SparseGp() {
     onDrag: ([nx]) =>
       setZ((prev) => prev.map((v, i) => (i === j ? Math.min(Math.max(nx, X_RANGE[0]), X_RANGE[1]) : v))),
   }))
-  const setCount = (m: number) => setZ(spread(Math.round(m)))
 
+  const xAxis = useAxis({ label: 'x', range: X_RANGE })
+  const yAxis = useAxis({ label: 'f(x)', range: Y_RANGE })
   return (
-    <Interactive
+    <Figure
       title="Inducing points"
+      state={state}
       caption="One hundred noisy points, the exact GP posterior (green dashed mean, grey ±2 sd) and a sparse approximation through M inducing inputs (blue). The black markers are the inducing variables u = f(z); drag them sideways to move the inducing inputs. VFE and FITC keep the full prior variance away from the inducing inputs, so their bands widen there; SoR uses only the M basis functions, so its band collapses between and beyond them. The VFE bound is always below the exact log marginal likelihood, and the gap is the trace term: crowd the inducing inputs into one region and watch it grow. The SoR marginal likelihood, which DTC shares, is not a bound: at the default setting it exceeds the exact value."
       controls={
         <>
-          <ParamChoice label="approximation" value={method} onChange={setMethod} options={METHODS} />
-          <ParamSlider label="inducing points M" value={z.length} onChange={setCount} min={2} max={MAX_M} step={1} />
-          <ParamSlider label="length-scale ℓ" param={logEll} format={(v) => formatNumber(10 ** v)} />
-          <ParamButton onClick={() => setZ(spread(z.length))}>Spread evenly</ParamButton>
+          <Button variant="outline" size="sm" onClick={() => setPlaced(null)}>
+            Spread evenly
+          </Button>
         </>
       }
-      readout={
+      readouts={
         <>
           <Readout label="exact ln p(y)" value={formatNumber(exact.lml)} />
           <Readout
-            label={method === 'vfe' ? 'VFE bound' : `${method === 'fitc' ? 'FITC' : 'SoR'} ln p(y)`}
-            value={formatNumber(method === 'vfe' ? r.bound : r.approx)}
+            label={state.method === 'vfe' ? 'VFE bound' : `${state.method === 'fitc' ? 'FITC' : 'SoR'} ln p(y)`}
+            value={formatNumber(state.method === 'vfe' ? r.bound : r.approx)}
           />
           <Readout label="trace term tr(K − Q)/2σ²" value={formatNumber(r.trace / (2 * NOISE * NOISE))} />
         </>
       }
     >
-      <XYChart
-        series={series}
-        handles={handles}
-        xLabel="x"
-        yLabel="f(x)"
-        xRange={X_RANGE}
-        yRange={Y_RANGE}
-        height={400}
-      />
-    </Interactive>
+      <Plot x={xAxis} y={yAxis} height={400}>
+        <Points {...series[0]} />
+        <Curve {...series[1]} />
+        <Curve {...series[2]} />
+        <Curve {...series[3]} />
+        <Curve {...series[4]} />
+        <Curve {...series[5]} />
+        <Curve {...series[6]} />
+        {(handles ?? []).map((h, i) => (
+          <Handle key={i} {...h} />
+        ))}
+      </Plot>
+    </Figure>
   )
 }

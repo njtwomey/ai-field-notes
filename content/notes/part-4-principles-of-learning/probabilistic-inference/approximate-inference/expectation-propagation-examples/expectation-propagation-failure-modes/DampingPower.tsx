@@ -1,5 +1,5 @@
 import { useMemo } from 'react'
-import { Interactive, ParamSlider, Readout, XYChart, formatNumber, useParam, type XYSeries } from 'aifn-render'
+import { Curve, Figure, float, formatNumber, Plot, Readout, useAxis, useFigureState } from 'aifn-render'
 import { clutterExact, clutterLaplace, clutterVb, CLUTTER_VAR } from '../_shared/clutter'
 import { grid, normalPdf, powerEp1d, toMoments, toNat, type Moments } from '../_shared/ep'
 
@@ -32,40 +32,42 @@ const VB = clutterVb(DATA, W)
  * EP posterior mean after every site update. Right: the final Gaussian against the exact posterior, Laplace and VB.
  */
 export function DampingPower() {
-  const damping = useParam(0.5, { min: 0.1, max: 1, step: 0.05 })
-  const power = useParam(1, { min: 0.1, max: 1, step: 0.05 })
+  const state = useFigureState({
+    damping: float(0.5, { min: 0.1, max: 1, step: 0.05, label: 'damping (1 = none)' }),
+    power: float(1, { min: 0.1, max: 1, step: 0.05, label: 'power α (1 = ordinary EP)' }),
+  })
 
   const r = useMemo(() => {
-    const steps = run(damping.value, power.value)
+    const steps = run(state.damping, state.power)
     const last = steps[steps.length - 1]
     const prev = steps[steps.length - 1 - DATA.length]
     const q = toMoments(last.q)
     const moved = Math.abs(q.mean - toMoments(prev.q).mean)
     return { trace: means(steps), q, moved, skipped: steps.filter((s) => !s.ok).length }
-  }, [damping.value, power.value])
+  }, [state.damping, state.power])
 
-  const trace: XYSeries[] = [
-    { name: 'plain EP', type: 'line', x: UPDATES, y: PLAIN, muted: true },
-    { name: 'chosen settings', type: 'line', x: UPDATES, y: r.trace, slot: 0 },
-  ]
-  const fits: XYSeries[] = [
-    { name: 'exact', type: 'line', x: PLOT, y: EXACT_PLOT, emphasis: true },
-    { name: 'EP (chosen settings)', type: 'line', x: PLOT, y: density(r.q), slot: 0 },
-    { name: 'Laplace', type: 'line', x: PLOT, y: density(LAPLACE), slot: 1, dashed: true },
-    { name: 'VB', type: 'line', x: PLOT, y: density(VB), slot: 2, dashed: true },
-  ]
+  const trace = [
+    { name: 'plain EP', x: UPDATES, y: PLAIN, muted: true },
+    { name: 'chosen settings', x: UPDATES, y: r.trace, slot: 0 },
+  ] as const
+  const fits = [
+    { name: 'exact', x: PLOT, y: EXACT_PLOT, emphasis: true },
+    { name: 'EP (chosen settings)', x: PLOT, y: density(r.q), slot: 0 },
+    { name: 'Laplace', x: PLOT, y: density(LAPLACE), slot: 1, dashed: true },
+    { name: 'VB', x: PLOT, y: density(VB), slot: 2, dashed: true },
+  ] as const
 
+  const xAxis = useAxis({ label: 'sweep', hold: 'union' })
+  const yAxis = useAxis({ label: 'EP mean of θ', range: MEAN_RANGE })
+  const xAxis2 = useAxis({ label: 'θ', range: X_RANGE })
+  const yAxis2 = useAxis({ label: 'density', range: Y_RANGE })
   return (
-    <Interactive
+    <Figure
       title="Oscillation, damping and power EP"
+      state={state}
       caption="Clutter problem with w = 0.5 and data −1.5, −1, 4 and 4.5: two groups, so the exact posterior has two modes. Left: EP's posterior mean after each site update, for 40 sweeps. Plain EP (grey) swings between the modes and never settles. Damping mixes each new site with the old one; power EP updates only a fraction of each site. Either makes the sweeps converge. Right: the final Gaussian covers both modes, where Laplace and VB sit on one."
-      controls={
-        <>
-          <ParamSlider label="damping (1 = none)" param={damping} />
-          <ParamSlider label="power α (1 = ordinary EP)" param={power} />
-        </>
-      }
-      readout={
+
+      readouts={
         <>
           <Readout label="final EP mean, var" value={`${formatNumber(r.q.mean)}, ${formatNumber(r.q.variance)}`} />
           <Readout label="change over last sweep" value={formatNumber(r.moved)} />
@@ -75,9 +77,17 @@ export function DampingPower() {
       }
     >
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-        <XYChart series={trace} xLabel="sweep" yLabel="EP mean of θ" yRange={MEAN_RANGE} height={280} />
-        <XYChart series={fits} xLabel="θ" yLabel="density" xRange={X_RANGE} yRange={Y_RANGE} height={280} />
+        <Plot x={xAxis} y={yAxis} height={280}>
+          <Curve {...trace[0]} />
+          <Curve {...trace[1]} />
+        </Plot>
+        <Plot x={xAxis2} y={yAxis2} height={280}>
+          <Curve {...fits[0]} />
+          <Curve {...fits[1]} />
+          <Curve {...fits[2]} />
+          <Curve {...fits[3]} />
+        </Plot>
       </div>
-    </Interactive>
+    </Figure>
   )
 }

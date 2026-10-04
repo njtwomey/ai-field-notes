@@ -1,5 +1,4 @@
-import { Interactive } from 'aifn-render'
-import { Diagram } from 'aifn-render'
+import { Diagram, Figure } from 'aifn-render'
 import type { DiagramSpec } from 'aifn-render'
 
 const spec: DiagramSpec = {
@@ -54,7 +53,7 @@ const spec: DiagramSpec = {
 /** Where DQN's two stabilisers sit: the buffer between acting and learning, and the frozen copy that sets targets. */
 export function DqnDiagram() {
   return (
-    <Interactive
+    <Figure
       title="DQN: replay buffer and target network"
       caption="Acting and learning are decoupled. The online network acts in the environment and every transition goes into the replay buffer. Each gradient step regresses the online network on a random minibatch towards targets computed by the target network, a frozen copy that is refreshed every C steps."
     >
@@ -62,6 +61,6 @@ export function DqnDiagram() {
         spec={spec}
         ariaLabel="DQN: environment and online Q-network exchange states and actions; transitions stored in a replay buffer; minibatches and targets from a target network feed a TD loss that updates the online network; online weights copied to the target network every C steps"
       />
-    </Interactive>
+    </Figure>
   )
 }

@@ -1,5 +1,5 @@
 /**
- * `aifn-applied/gym/environments`: environments on the gym protocol. Bandits (`bandits.ts`: Bernoulli, Gaussian, linear)
+ * `aifn-methods/gym/environments`: environments on the gym protocol. Bandits (`bandits.ts`: Bernoulli, Gaussian, linear)
  * and finite MDPs (`gridworlds.ts`: the grid builders and `mdpEnvironment`, which makes any `TabularMdp` an
  * environment with a tabular model, an oracle and a grid render); child: `control` (classic control).
  */

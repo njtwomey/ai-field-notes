@@ -1,6 +1,6 @@
-import { useMemo, useState } from 'react'
-import { Interactive, ParamButton, ParamSlider, Readout, XYChart, formatNumber, type XYSeries } from 'aifn-render'
-import { rng } from '@/lib/math'
+import { useMemo } from 'react'
+import { Figure, formatNumber, int, Plot, Points, Readout, slider, useAxis, useFigureState } from 'aifn-render'
+import { normal, stream } from 'aifn/foundation/random'
 
 const REPS = 300
 const BETA: [number, number] = [1, 1]
@@ -11,15 +11,17 @@ const RANGE: [number, number] = [-1.5, 3.5]
  * (β̂₁, β̂₂). Correlated predictors stretch the cloud along β₁ + β₂ = const: the sum is well determined, the split is not.
  */
 export function CollinearEstimates() {
-  const [rho, setRho] = useState(0.9)
-  const [n, setN] = useState(50)
-  const [seed, setSeed] = useState(1)
+  const state = useFigureState({
+    rho: slider(-0.99, 0.99, 0.9, { step: 0.01, label: 'correlation ρ of x₁ and x₂' }),
+    n: int(50, { min: 10, max: 200, step: 10, label: 'sample size n' }),
+    seed: int(1, { ge: 0, label: 'seed' }),
+  })
 
   const r = useMemo(() => {
-    const g = rng(seed)
+    const g = stream(state.seed)
     const b1: number[] = []
     const b2: number[] = []
-    const c = Math.sqrt(1 - rho * rho)
+    const c = Math.sqrt(1 - state.rho * state.rho)
     for (let rep = 0; rep < REPS; rep++) {
       let s11 = 0
       let s22 = 0
@@ -32,17 +34,17 @@ export function CollinearEstimates() {
       const x1: number[] = []
       const x2: number[] = []
       const y: number[] = []
-      for (let i = 0; i < n; i++) {
-        const a = g.normal()
-        const b = rho * a + c * g.normal()
+      for (let i = 0; i < state.n; i++) {
+        const a = normal(g)
+        const b = state.rho * a + c * normal(g)
         x1.push(a)
         x2.push(b)
-        y.push(BETA[0] * a + BETA[1] * b + g.normal())
-        m1 += a / n
-        m2 += b / n
-        my += y[i] / n
+        y.push(BETA[0] * a + BETA[1] * b + normal(g))
+        m1 += a / state.n
+        m2 += b / state.n
+        my += y[i] / state.n
       }
-      for (let i = 0; i < n; i++) {
+      for (let i = 0; i < state.n; i++) {
         const u = x1[i] - m1
         const v = x2[i] - m2
         const w = y[i] - my
@@ -62,32 +64,22 @@ export function CollinearEstimates() {
       return Math.sqrt(xs.reduce((a, x) => a + (x - m) ** 2, 0) / (xs.length - 1))
     }
     const sums = b1.map((v, i) => v + b2[i])
-    const series: XYSeries[] = [
-      { name: 'estimates (β̂₁, β̂₂)', type: 'scatter', x: b1, y: b2, slot: 0 },
-      { name: 'true (β₁, β₂)', type: 'scatter', x: [BETA[0]], y: [BETA[1]], emphasis: true },
-    ]
-    return { series, sd1: sd(b1), sdSum: sd(sums), vif: 1 / (1 - rho * rho) }
-  }, [rho, n, seed])
+    const series = [
+      { name: 'estimates (β̂₁, β̂₂)', x: b1, y: b2, slot: 0 },
+      { name: 'true (β₁, β₂)', x: [BETA[0]], y: [BETA[1]], emphasis: true },
+    ] as const
+    return { series, sd1: sd(b1), sdSum: sd(sums), vif: 1 / (1 - state.rho * state.rho) }
+  }, [state.rho, state.n, state.seed])
 
+  const xAxis = useAxis({ label: 'β̂₁', range: RANGE })
+  const yAxis = useAxis({ label: 'β̂₂', range: RANGE, equal: xAxis })
   return (
-    <Interactive
+    <Figure
       title="Correlated predictors make coefficients unstable"
+      state={state}
       caption="Each dot is the least-squares estimate from one of 300 independent samples of size n, with true coefficients (1, 1). As the correlation ρ between the two predictors grows, the cloud stretches along the line β̂₁ + β̂₂ = 2: the data determine the sum of the coefficients well and their split poorly. The standard deviation of each coefficient grows like √VIF = 1/√(1 − ρ²)."
-      controls={
-        <>
-          <ParamSlider
-            label="correlation ρ of x₁ and x₂"
-            value={rho}
-            onChange={setRho}
-            min={-0.99}
-            max={0.99}
-            step={0.01}
-          />
-          <ParamSlider label="sample size n" value={n} onChange={setN} min={10} max={200} step={10} />
-          <ParamButton onClick={() => setSeed((s) => s + 1)}>New samples</ParamButton>
-        </>
-      }
-      readout={
+
+      readouts={
         <>
           <Readout label="VIF = 1/(1 − ρ²)" value={formatNumber(r.vif)} />
           <Readout label="sd of β̂₁" value={formatNumber(r.sd1)} />
@@ -95,7 +87,10 @@ export function CollinearEstimates() {
         </>
       }
     >
-      <XYChart series={r.series} xRange={RANGE} yRange={RANGE} equalAspect xLabel="β̂₁" yLabel="β̂₂" />
-    </Interactive>
+      <Plot x={xAxis} y={yAxis}>
+        <Points {...r.series[0]} />
+        <Points {...r.series[1]} />
+      </Plot>
+    </Figure>
   )
 }

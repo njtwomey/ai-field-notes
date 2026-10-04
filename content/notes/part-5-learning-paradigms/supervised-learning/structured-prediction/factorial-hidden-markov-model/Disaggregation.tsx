@@ -1,5 +1,15 @@
 import { useMemo } from 'react'
-import { Interactive, ParamSlider, Readout, XYChart, formatNumber, useParam, type XYSeries } from 'aifn-render'
+import {
+  Figure,
+  formatNumber,
+  int,
+  Plot,
+  Readout,
+  seriesLayers,
+  useAxis,
+  useFigureState,
+  type SeriesSpec,
+} from 'aifn-render'
 import { APPLIANCES, exactPosterior, meanFieldPosterior, simulate } from './fhmm'
 
 const N = 200
@@ -14,23 +24,25 @@ function steps(values: number[]): { x: number[]; y: number[] } {
  * sum of their powers plus noise. Exact inference over all 2^M joint states is compared with structured mean field.
  */
 export function Disaggregation() {
-  const count = useParam(3, { min: 1, max: 4, step: 1 })
-  const sigma = useParam(100, { min: 10, max: 400, step: 10 })
-  const seed = useParam(1, { min: 1, max: 20, step: 1 })
+  const state = useFigureState({
+    count: int(3, { min: 1, max: 4, step: 1, label: 'appliances M', format: (v) => String(v) }),
+    sigma: int(100, { min: 10, max: 400, step: 10, label: 'meter noise σ (W)', format: (v) => `${v}` }),
+    seed: int(1, { min: 1, max: 20, step: 1, label: 'seed', format: (v) => String(v) }),
+  })
 
   const r = useMemo(() => {
-    const apps = APPLIANCES.slice(0, count.value)
-    const sim = simulate(apps, N, sigma.value, seed.value)
-    const exact = exactPosterior(apps, sim.x, sigma.value)
-    const mf = meanFieldPosterior(apps, sim.x, sigma.value)
+    const apps = APPLIANCES.slice(0, state.count)
+    const sim = simulate(apps, N, state.sigma, state.seed)
+    const exact = exactPosterior(apps, sim.x, state.sigma)
+    const mf = meanFieldPosterior(apps, sim.x, state.sigma)
     const accuracy = (q: number[][]) =>
       q.reduce((s, row, m) => s + row.filter((p, n) => (p > 0.5 ? 1 : 0) === sim.states[m][n]).length, 0) /
       (N * apps.length)
     return { apps, sim, exact, mf, exactAccuracy: accuracy(exact), mfAccuracy: accuracy(mf) }
-  }, [count.value, sigma.value, seed.value])
+  }, [state.count, state.sigma, state.seed])
 
   const t = Array.from({ length: N }, (_, n) => n + 1)
-  const meter: XYSeries[] = [
+  const meter: SeriesSpec[] = [
     {
       name: 'true total power',
       type: 'line',
@@ -43,18 +55,16 @@ export function Disaggregation() {
   const M = r.apps.length
   const K = 2
 
+  const xAxis = useAxis({ label: 'time step', hold: 'union' })
+  const yAxis = useAxis({ label: 'power (W)', hold: 'union' })
+  // Every appliance's panel shares the time axis of the meter and one probability axis.
+  const pAxis = useAxis({ label: 'p(on)', range: [0, 1] })
   return (
-    <Interactive
+    <Figure
       title="One meter, several appliances"
+      state={state}
       caption="The meter reads only the total power. Each appliance is a two-state hidden chain, and the factorial HMM infers which appliances are on. Exact inference runs forward–backward over all 2^M combinations; structured mean field runs one forward–backward per appliance against the others' expected power. With more appliances and more noise, combinations with similar totals (a kettle against a heater plus a microwave) become hard to tell apart, and mean field can lock onto the wrong one."
-      controls={
-        <>
-          <ParamSlider label="appliances M" param={count} format={(v) => String(v)} withArrows />
-          <ParamSlider label="meter noise σ (W)" param={sigma} format={(v) => `${v}`} />
-          <ParamSlider label="seed" param={seed} format={(v) => String(v)} withArrows />
-        </>
-      }
-      readout={
+      readouts={
         <>
           <Readout label="joint states Kᴹ" value={K ** M} />
           <Readout label="exact cost per step K²ᴹ" value={K ** (2 * M)} />
@@ -64,26 +74,25 @@ export function Disaggregation() {
         </>
       }
     >
-      <XYChart series={meter} xLabel="time step" yLabel="power (W)" height={220} />
+      <Plot x={xAxis} y={yAxis} height={220}>
+        {seriesLayers(meter)}
+      </Plot>
       <div className="grid gap-3 md:grid-cols-2">
         {r.apps.map((a, m) => (
           <div key={a.name} className="min-w-0 space-y-1">
             <div className="text-center text-xs text-muted-foreground">
               {a.name}, {a.power} W
             </div>
-            <XYChart
-              series={[
+            <Plot x={xAxis} y={pAxis} height={170}>
+              {seriesLayers([
                 { name: 'on (truth)', type: 'line', ...steps(r.sim.states[m]), slot: 2, area: true },
                 { name: 'exact p(on | x)', type: 'line', x: t, y: r.exact[m], slot: 0 },
                 { name: 'mean-field q(on)', type: 'line', x: t, y: r.mf[m], slot: 1, dashed: true },
-              ]}
-              xLabel="time step"
-              yRange={[0, 1]}
-              height={170}
-            />
+              ])}
+            </Plot>
           </div>
         ))}
       </div>
-    </Interactive>
+    </Figure>
   )
 }

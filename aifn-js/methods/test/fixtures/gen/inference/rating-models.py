@@ -1,4 +1,4 @@
-"""Golden values for aifn-applied/inference/rating-models: Bradley–Terry and Plackett–Luce maximum-likelihood and MAP
+"""Golden values for aifn-methods/inference/rating-models: Bradley–Terry and Plackett–Luce maximum-likelihood and MAP
 strengths by `choix`'s MM algorithm (Hunter, 2004) on seeded comparison data; online TrueSkill over a game sequence by
 the `trueskill` package (Lee's reference implementation); and TrueSkill Through Time by `trueskillthroughtime`
 (Landfried and Mocskos's implementation of Dangauthier et al., 2007)."""

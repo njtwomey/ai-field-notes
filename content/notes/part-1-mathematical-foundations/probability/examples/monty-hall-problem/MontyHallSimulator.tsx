@@ -1,6 +1,6 @@
-import { useMemo, useState } from 'react'
-import { Interactive, ParamChoice, ParamSlider, Readout, XYChart, formatNumber, type XYSeries } from 'aifn-render'
-import { rng } from '@/lib/math'
+import { useMemo } from 'react'
+import { choice, Curve, Figure, formatNumber, int, Plot, Readout, useAxis, useFigureState } from 'aifn-render'
+import { stream, uniform as drawUniform } from 'aifn/foundation/random'
 
 type Host = 'knows' | 'ignorant'
 
@@ -10,13 +10,24 @@ type Host = 'knows' | 'ignorant'
  * in which he reveals the car are discarded.
  */
 export function MontyHallSimulator() {
-  const [doors, setDoors] = useState(3)
-  const [host, setHost] = useState<Host>('knows')
-  const [games, setGames] = useState(1000)
-  const [seed, setSeed] = useState(1)
+  const state = useFigureState({
+    doors: int(3, { min: 3, max: 20, step: 1, suggestions: [3, 5, 10, 20], label: 'doors' }),
+    host: choice<Host>(
+      [
+        { value: 'knows', label: 'knows' },
+        { value: 'ignorant', label: 'ignorant' },
+      ],
+      'knows',
+      { label: 'host' },
+    ),
+    games: int(1000, { min: 50, max: 5000, step: 50, suggestions: [100, 1000, 5000], label: 'games' }),
+    seed: int(1, { ge: 0, label: 'seed' }),
+  })
+  const { doors, host, games, seed } = state
 
   const result = useMemo(() => {
-    const { uniform } = rng(seed)
+    const draws = stream(seed)
+    const uniform = () => drawUniform(draws)
     const pick = () => Math.floor(uniform() * doors)
     const x: number[] = []
     const stay: number[] = []
@@ -27,20 +38,20 @@ export function MontyHallSimulator() {
     let discarded = 0
     for (let g = 0; g < games; g++) {
       const car = pick()
-      const choice = pick()
+      const first = pick()
       // The one other door left closed.
       let closed: number
       if (host === 'knows') {
-        closed = car !== choice ? car : (choice + 1 + Math.floor(uniform() * (doors - 1))) % doors
+        closed = car !== first ? car : (first + 1 + Math.floor(uniform() * (doors - 1))) % doors
       } else {
-        closed = (choice + 1 + Math.floor(uniform() * (doors - 1))) % doors
-        if (car !== choice && car !== closed) {
+        closed = (first + 1 + Math.floor(uniform() * (doors - 1))) % doors
+        if (car !== first && car !== closed) {
           discarded++
           continue
         }
       }
       played++
-      if (car === choice) stayWins++
+      if (car === first) stayWins++
       if (car === closed) swapWins++
       x.push(played)
       stay.push(stayWins / played)
@@ -51,37 +62,24 @@ export function MontyHallSimulator() {
     return { x, stay, swap, played, discarded, exactSwap, exactStay }
   }, [doors, host, games, seed])
 
-  const series = useMemo((): XYSeries[] => {
+  const series = useMemo(() => {
     const ends = [1, Math.max(result.played, 1)]
     return [
-      { name: 'switch', type: 'line', x: result.x, y: result.swap, slot: 0 },
-      { name: 'stay', type: 'line', x: result.x, y: result.stay, slot: 1 },
-      { name: 'exact, switch', type: 'line', x: ends, y: [result.exactSwap, result.exactSwap], dashed: true, slot: 0 },
-      { name: 'exact, stay', type: 'line', x: ends, y: [result.exactStay, result.exactStay], dashed: true, slot: 1 },
-    ]
+      { name: 'switch', x: result.x, y: result.swap, slot: 0 },
+      { name: 'stay', x: result.x, y: result.stay, slot: 1 },
+      { name: 'exact, switch', x: ends, y: [result.exactSwap, result.exactSwap], dashed: true, slot: 0 },
+      { name: 'exact, stay', x: ends, y: [result.exactStay, result.exactStay], dashed: true, slot: 1 },
+    ] as const
   }, [result])
 
+  const xAxis = useAxis({ label: 'games played', hold: 'union' })
+  const yAxis = useAxis({ label: 'share won', range: [0, 1] })
   return (
-    <Interactive
+    <Figure
       title="Switch or stay, played many times"
       caption="Running share of games won by each strategy, against the number of games played. Dashed lines are the exact probabilities. With a host who knows, switching wins whenever the first pick was wrong. With an ignorant host, the games he spoils are discarded, and the remaining games favour neither strategy."
-      controls={
-        <>
-          <ParamSlider label="doors" value={doors} onChange={setDoors} min={3} max={20} step={1} />
-          <ParamChoice
-            label="host"
-            value={host}
-            onChange={setHost}
-            options={[
-              { value: 'knows', label: 'knows' },
-              { value: 'ignorant', label: 'ignorant' },
-            ]}
-          />
-          <ParamSlider label="games" value={games} onChange={setGames} min={50} max={5000} step={50} />
-          <ParamSlider label="seed" value={seed} onChange={setSeed} min={0} max={30} step={1} />
-        </>
-      }
-      readout={
+      state={state}
+      readouts={
         <>
           <Readout label="switch wins, exact" value={formatNumber(result.exactSwap)} />
           <Readout label="switch wins, simulated" value={formatNumber(result.swap.at(-1) ?? 0)} />
@@ -90,7 +88,12 @@ export function MontyHallSimulator() {
         </>
       }
     >
-      <XYChart height={300} xLabel="games played" yLabel="share won" series={series} yRange={[0, 1]} />
-    </Interactive>
+      <Plot x={xAxis} y={yAxis} height={300}>
+        <Curve {...series[0]} />
+        <Curve {...series[1]} />
+        <Curve {...series[2]} />
+        <Curve {...series[3]} />
+      </Plot>
+    </Figure>
   )
 }

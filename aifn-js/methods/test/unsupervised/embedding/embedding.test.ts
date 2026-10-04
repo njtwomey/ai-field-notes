@@ -6,7 +6,7 @@ import {
   metricMds,
   pca,
   smacofSteps,
-} from 'aifn-applied/unsupervised/embedding/linear'
+} from 'aifn-methods/unsupervised/embedding/linear'
 import {
   curveParameters,
   DESCENT_ABOVE,
@@ -18,11 +18,11 @@ import {
   tsneSteps,
   umap,
   umapSteps,
-} from 'aifn-applied/unsupervised/embedding/neighbour'
+} from 'aifn-methods/unsupervised/embedding/neighbour'
 import { nearestNeighbourDescent } from 'aifn/numerics/neighbours'
-import { isomap, laplacianEigenmaps, locallyLinearEmbedding } from 'aifn-applied/unsupervised/embedding/manifold'
+import { isomap, laplacianEigenmaps, locallyLinearEmbedding } from 'aifn-methods/unsupervised/embedding/manifold'
 import { rbf } from 'aifn/learning/kernels'
-import { blobs } from 'aifn-applied/data/synthetic'
+import { blobs } from 'aifn-methods/data/synthetic'
 import { stream } from 'aifn/foundation/random'
 import { dense, tensor, toFlat, toRows, type Tensor } from 'aifn/foundation/tensor'
 import { dataset } from 'aifn/learning/estimators'

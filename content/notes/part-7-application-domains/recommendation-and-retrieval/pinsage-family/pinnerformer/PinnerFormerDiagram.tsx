@@ -1,5 +1,4 @@
-import { Interactive } from 'aifn-render'
-import { Diagram } from 'aifn-render'
+import { Diagram, Figure } from 'aifn-render'
 import type { DiagramSpec } from 'aifn-render'
 
 const action = (id: string, x: number, label: string) => ({
@@ -91,7 +90,7 @@ const spec: DiagramSpec = {
 /** PinnerFormer: a causal transformer over a user's actions, trained so each position predicts long-horizon positives. */
 export function PinnerFormerDiagram() {
   return (
-    <Interactive
+    <Figure
       title="PinnerFormer"
       caption="The user's most recent actions, each described by the pin's PinSage embedding and metadata, pass through a causally masked transformer that outputs a unit-length embedding at every position. Pins are embedded by a small MLP on their PinSage vector. The dense all-action loss pairs sampled positions with a random positive engagement from the following 28 days and contrasts it with negatives. At serving time only the last embedding is used, computed once a day."
     >
@@ -99,6 +98,6 @@ export function PinnerFormerDiagram() {
         spec={spec}
         ariaLabel="PinnerFormer: action features projected and passed through a causal transformer to per-position user embeddings, trained with a sampled softmax against future positives and negatives embedded by a pin MLP"
       />
-    </Interactive>
+    </Figure>
   )
 }

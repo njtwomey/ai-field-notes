@@ -1,5 +1,17 @@
 import { useMemo, useState } from 'react'
-import { Interactive, Readout, XYChart, formatNumber, type Handle, type Segment, type XYSeries } from 'aifn-render'
+import {
+  Figure,
+  formatNumber,
+  Handle,
+  Plot,
+  Readout,
+  type Segment,
+  Segments,
+  seriesLayers,
+  type SeriesSpec,
+  useAxis,
+  Vectors,
+} from 'aifn-render'
 
 type Vec = [number, number]
 const R = 4
@@ -33,7 +45,7 @@ export function BasisCoordinates() {
         })
       }
     }
-    const series: XYSeries[] = [{ name: 'b', type: 'scatter', x: [b[0]], y: [b[1]], slot: 2 }]
+    const series: SeriesSpec[] = [{ name: 'b', type: 'scatter', x: [b[0]], y: [b[1]], slot: 2 }]
     if (c) {
       // The route to b: c₁ v₁ along the first basis vector, then c₂ v₂.
       const corner: Vec = [c[0] * v1[0], c[0] * v1[1]]
@@ -60,17 +72,13 @@ export function BasisCoordinates() {
     return { det, c, grid, series }
   }, [v1, v2, b])
 
-  const handles: Handle[] = [
-    { kind: 'point', at: v1, label: 'v₁', onDrag: ([x, y]) => setV1([clamp(x), clamp(y)]) },
-    { kind: 'point', at: v2, label: 'v₂', onDrag: ([x, y]) => setV2([clamp(x), clamp(y)]) },
-    { kind: 'point', at: b, label: 'b', onDrag: ([x, y]) => setB([clamp(x), clamp(y)]) },
-  ]
-
+  const xAxis = useAxis({ label: 'x₁', range: [-R, R] })
+  const yAxis = useAxis({ label: 'x₂', range: [-R, R], equal: xAxis })
   return (
-    <Interactive
+    <Figure
       title="Coordinates in a basis"
       caption="Drag the tips of v₁ and v₂, and the point b. The grey grid marks the integer combinations of v₁ and v₂. The dashed route reaches b by going c₁ times along v₁, then c₂ times along v₂; (c₁, c₂) are the coordinates of b in this basis. Line the two vectors up and the grid collapses: the vectors become dependent, their span shrinks to a line, and most points b can no longer be reached."
-      readout={
+      readouts={
         <>
           <Readout label="c₁" value={r.c ? formatNumber(r.c[0]) : 'none'} />
           <Readout label="c₂" value={r.c ? formatNumber(r.c[1]) : 'none'} />
@@ -81,21 +89,20 @@ export function BasisCoordinates() {
     >
       {/* Equal-aspect charts take their height from their width; keep square plots a readable size. */}
       <div className="mx-auto w-full max-w-lg">
-        <XYChart
-          equalAspect
-          xRange={[-R, R]}
-          yRange={[-R, R]}
-          xLabel="x₁"
-          yLabel="x₂"
-          series={r.series}
-          segments={r.grid}
-          vectors={[
-            { from: [0, 0], to: v1 },
-            { from: [0, 0], to: v2 },
-          ]}
-          handles={handles}
-        />
+        <Plot x={xAxis} y={yAxis}>
+          {seriesLayers(r.series)}
+          <Segments segments={r.grid} />
+          <Vectors
+            vectors={[
+              { from: [0, 0], to: v1 },
+              { from: [0, 0], to: v2 },
+            ]}
+          />
+          <Handle kind="point" at={v1} label="v₁" onDrag={([x, y]) => setV1([clamp(x), clamp(y)])} />
+          <Handle kind="point" at={v2} label="v₂" onDrag={([x, y]) => setV2([clamp(x), clamp(y)])} />
+          <Handle kind="point" at={b} label="b" onDrag={([x, y]) => setB([clamp(x), clamp(y)])} />
+        </Plot>
       </div>
-    </Interactive>
+    </Figure>
   )
 }

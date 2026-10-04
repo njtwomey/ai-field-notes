@@ -2,13 +2,13 @@
 title: Nearest-neighbour search
 kind: technique
 summary: 'Nearest-neighbour search finds the stored points closest to a query faster than the $O(nd)$ scan. Space-partitioning trees (k-d trees, ball trees) prune regions that cannot beat the current best: exact and fast in low dimensions, overtaken by approximate methods in high ones.'
-tags: [nearest-neighbours, algorithms, similarity-search, information-retrieval, worked-example]
-aliases: [k-d tree, kd-tree, ball tree, metric tree, exact nearest-neighbour search, brute-force nearest-neighbour search, branch and bound search]
+tags: [nearest-neighbours, algorithms, similarity-search, information-retrieval]
+aliases: [exact nearest-neighbour search, brute-force nearest-neighbour search]
 requires: [k-nearest-neighbours]
 related: [curse-of-dimensionality-for-neighbours, pairwise-distances-and-cosine-similarity, matrix-profile]
 references: [bentley1975, friedman1977, weber1998]
 status: draft
-updated: 2026-09-27
+updated: 2026-10-04
 ---
 
 <Definition>
@@ -27,29 +27,17 @@ Search structures built once in advance reduce the per-query cost.
 
 ## Mechanism
 
-### k-d trees
+### Space-partitioning trees
 
-A **$k$-d tree** recursively splits the points at the median of one coordinate, cycling through coordinates or
-choosing the coordinate with the largest spread, until each leaf holds a few points <Cite id="bentley1975" />. Each
-node owns an axis-aligned box.
-
-A query descends to the leaf containing $\qvec$ and takes its points as candidates. It then backtracks. At each node
-it asks whether the other child's box could contain a point closer than the current $k$-th best distance $r$. The
-distance from $\qvec$ to the splitting hyperplane is $\abs{q_j - t}$ for a split $x_j \le t$; if it exceeds $r$, the
-whole other side lies farther than $r$ and is pruned. Friedman, Bentley and Finkel showed that the expected query time
-is $O(\log n)$ for fixed $d$ as $n$ grows <Cite id="friedman1977" />.
-
-The constant grows exponentially with $d$. A ball of radius $r$ around $\qvec$ intersects many boxes once $d$ is
-large, and pruning fails. As a rule of thumb, $k$-d trees beat brute force only when $n \gg 2^d$, which in practice
-means $d$ up to about 10 to 20.
-
-### Ball trees
-
-A **ball tree** partitions the points into nested balls, each with a centre $\cvec$ and a radius $\rho$ that covers its
-points. By the triangle inequality, every point $\xvec$ in the ball satisfies
-$\norm{\qvec - \xvec} \ge \norm{\qvec - \cvec} - \rho$. If this lower bound exceeds the current $k$-th best distance,
-the ball is pruned. The bound uses only distances, so ball trees work for any metric, and balls adapt to data that lie
-near a low-dimensional manifold better than axis-aligned boxes do.
+<NoteLink to="space-partitioning-trees">Space-partitioning trees</NoteLink> split the stored points recursively into
+regions, each with a lower bound on its distance to a query. A query visits the nearer regions first and skips any
+region whose bound exceeds the current $k$-th best distance $r$, so the answer stays exact. A
+<NoteLink to="k-d-tree">$k$-d tree</NoteLink> splits at coordinate medians into axis-aligned boxes and needs
+coordinates <Cite id="bentley1975" />. A <NoteLink to="ball-tree">ball tree</NoteLink> nests balls and a
+<NoteLink to="vantage-point-tree">vantage-point tree</NoteLink> splits at a median distance from a chosen point; both
+bound distances by the triangle inequality, so they need only a metric. For fixed dimension the expected query time is
+$O(\log n)$ <Cite id="friedman1977" />, but the constant grows exponentially with the dimension: a ball of radius $r$
+around the query meets almost every region once $d$ is large, and pruning fails.
 
 ### Beyond exact search
 
@@ -62,32 +50,20 @@ returns most of the true neighbours in a small fraction of the time. Its main fa
 quantisation</NoteLink>, graph indexes such as <NoteLink to="hnsw">HNSW</NoteLink>, and
 <NoteLink to="tree-based-approximate-nearest-neighbours">approximate tree search</NoteLink>.
 
-## Worked example
-
-**A k-d tree prune.** A query $\qvec = (0.5, 0.2)$ sits in the left child of a split $x_1 \le 0.6$. The best point found
-in its leaf is at distance $r = 0.15$. The distance from $\qvec$ to the splitting line is
-$\abs{0.5 - 0.6} = 0.1 < 0.15$, so the right child might hold a closer point and must be searched. Had the leaf yielded
-$r = 0.08$, the right child would be pruned, since every point in it is at least $0.1$ away.
-
-**A ball tree prune.** A ball has centre $\cvec$ at distance $\norm{\qvec - \cvec} = 2.0$ from the query and radius
-$\rho = 0.5$. Every point in it is at least $2.0 - 0.5 = 1.5$ from $\qvec$. With a current best of $r = 1.2$ the ball is
-pruned without computing any of its distances; with $r = 1.7$ it must be opened.
-
 ## Cost
 
-| method      | build         | query                          | exact? |
-| ----------- | ------------- | ------------------------------ | ------ |
-| brute force | none          | $O(nd)$                        | yes    |
-| $k$-d tree  | $O(n \log n)$ | $O(\log n)$ in low $d$         | yes    |
-| ball tree   | $O(n \log n)$ | sublinear in low intrinsic $d$ | yes    |
+| method | build | query | exact? |
+| --- | --- | --- | --- |
+| brute force | none | $O(nd)$ | yes |
+| space-partitioning tree | $O(n \log n)$ | $O(\log n)$ in low intrinsic $d$ | yes |
 
 ## Trade-offs
 
 - **Dimension.** Exact trees fail as the <NoteLink to="curse-of-dimensionality-for-neighbours">curse of
   dimensionality</NoteLink> sets in, because almost nothing can be pruned. Above a few tens of dimensions, approximate
   methods or brute force on a <Gloss name="gpu" /> are the practical choices.
-- **Metric.** $k$-d trees need coordinates and axis-aligned splits. Ball trees need only a metric, so they also serve
-  distances such as edit distance on strings.
+- **Metric.** $k$-d trees need coordinates and axis-aligned splits. Ball and vantage-point trees need only a metric, so
+  they also serve distances such as edit distance on strings.
 - **<NoteLink to="minibatching-and-batch-size">Batch size</NoteLink>.** For many queries at once, a brute-force scan
   written as a <NoteLink to="matrix-multiplication">matrix multiplication</NoteLink> often beats a tree, even in
   moderate dimensions, because it runs at the machine's peak arithmetic rate.

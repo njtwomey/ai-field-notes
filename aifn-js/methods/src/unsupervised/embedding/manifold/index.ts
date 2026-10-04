@@ -1,5 +1,5 @@
 /**
- * `aifn-applied/unsupervised/embedding/manifold`: manifold learning: Isomap, locally linear embedding, Laplacian
+ * `aifn-methods/unsupervised/embedding/manifold`: manifold learning: Isomap, locally linear embedding, Laplacian
  * eigenmaps, diffusion maps and self-organising maps.
  */
 

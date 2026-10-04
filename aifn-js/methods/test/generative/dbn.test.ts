@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import { stream } from 'aifn/foundation/random'
 import { toFlat } from 'aifn/foundation/tensor'
-import { digitGlyphs, digits } from 'aifn-applied/data/synthetic'
-import { dbnRun, dbnUp, hiddenProbabilities, rbm, type DbnRun } from 'aifn-applied/generative/boltzmann'
+import { digitGlyphs, digits } from 'aifn-methods/data/synthetic'
+import { dbnRun, dbnUp, hiddenProbabilities, rbm, type DbnRun } from 'aifn-methods/generative/boltzmann'
 
 const last = <T>(g: Generator<T, T>): T => {
   let r = g.next()

@@ -1,6 +1,6 @@
-import { useMemo, useState } from 'react'
-import { Interactive, ParamChoice, ParamSlider, Readout, XYChart, formatNumber, type XYSeries } from 'aifn-render'
-import { rng } from '@/lib/math'
+import { useMemo } from 'react'
+import { choice, Curve, Figure, float, formatNumber, int, Plot, Readout, useAxis, useFigureState } from 'aifn-render'
+import { normal, stream } from 'aifn/foundation/random'
 
 const D = 64
 const MAX_OFFSET = 48
@@ -15,9 +15,9 @@ const METHODS = [
 
 /** A query and a correlated key, so the score at offset 0 is large: k = q + 0.7 · noise. */
 function draw() {
-  const r = rng(7)
-  const q = Array.from({ length: D }, () => r.normal())
-  const k = q.map((v) => v + 0.7 * r.normal())
+  const r = stream(7)
+  const q = Array.from({ length: D }, () => normal(r))
+  const k = q.map((v) => v + 0.7 * normal(r))
   return { q, k }
 }
 const SAMPLE = draw()
@@ -55,46 +55,48 @@ function scores(method: Method, m: number, w: number[]): number[] {
 }
 
 export function RopeOffset() {
-  const [method, setMethod] = useState<Method>('rope')
-  const [m2, setM2] = useState(700)
-  const [logBase, setLogBase] = useState(4)
-  const base = 10 ** logBase
+  const state = useFigureState({
+    method: choice<Method>(METHODS, 'rope', { label: 'encoding' }),
+    m2: int(700, { min: 100, max: 4000, step: 10, label: 'second query position m' }),
+    logBase: float(4, {
+      min: 1,
+      max: 5,
+      step: 0.1,
+      label: 'base',
+      points_per_decade: 2,
+      logTransform: 'value-is-log',
+      format: (v) => Math.round(10 ** v).toLocaleString(),
+    }),
+  })
+  const base = 10 ** state.logBase
 
   const r = useMemo(() => {
     const w = freqs(base)
-    const a = scores(method, M1, w)
-    const b = scores(method, m2, w)
+    const a = scores(state.method, M1, w)
+    const b = scores(state.method, state.m2, w)
     const gap = Math.max(...a.map((v, i) => Math.abs(v - b[i])))
     return { a, b, gap }
-  }, [method, m2, base])
+  }, [state.method, state.m2, base])
 
-  const series: XYSeries[] = [
-    { name: `query at m = ${M1}`, type: 'line', x: OFFSETS, y: r.a, slot: 0 },
-    { name: `query at m = ${m2}`, type: 'line', x: OFFSETS, y: r.b, slot: 1, dashed: true },
-  ]
+  const series = [
+    { name: `query at m = ${M1}`, x: OFFSETS, y: r.a, slot: 0 },
+    { name: `query at m = ${state.m2}`, x: OFFSETS, y: r.b, slot: 1, dashed: true },
+  ] as const
 
+  const xAxis = useAxis({ label: 'offset n − m', hold: 'union' })
+  const yAxis = useAxis({ label: 'score', hold: 'union' })
   return (
-    <Interactive
+    <Figure
       title="Score against offset: rotary versus added encodings"
+      state={state}
       caption="One fixed query vector and one fixed key vector (d = 64) are placed at positions m and n = m + offset, and the score q·k/√d is plotted against the offset. With RoPE the two curves coincide for every choice of m: the score depends only on n − m. With a sinusoid added to the query and key vectors (identity projections), moving the query to another absolute position changes the curve."
-      controls={
-        <>
-          <ParamChoice label="encoding" value={method} onChange={setMethod} options={METHODS} />
-          <ParamSlider label="second query position m" value={m2} onChange={setM2} min={100} max={4000} step={10} />
-          <ParamSlider
-            label="base"
-            value={logBase}
-            onChange={setLogBase}
-            min={1}
-            max={5}
-            step={0.1}
-            format={(v) => Math.round(10 ** v).toLocaleString()}
-          />
-        </>
-      }
-      readout={<Readout label="largest gap between the curves" value={formatNumber(r.gap)} />}
+
+      readouts={<Readout label="largest gap between the curves" value={formatNumber(r.gap)} />}
     >
-      <XYChart series={series} xLabel="offset n − m" yLabel="score" height={300} />
-    </Interactive>
+      <Plot x={xAxis} y={yAxis} height={300}>
+        <Curve {...series[0]} />
+        <Curve {...series[1]} />
+      </Plot>
+    </Figure>
   )
 }

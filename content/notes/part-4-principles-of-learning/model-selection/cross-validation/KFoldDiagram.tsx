@@ -1,5 +1,4 @@
-import { Interactive } from 'aifn-render'
-import { Diagram } from 'aifn-render'
+import { Diagram, Figure } from 'aifn-render'
 import type { DiagramEdge, DiagramNode, DiagramSpec } from 'aifn-render'
 
 const K = 5
@@ -60,7 +59,7 @@ const spec: DiagramSpec = { unit: 38, nodes, edges }
 /** Five-fold cross-validation: each fold is held out once. */
 export function KFoldDiagram() {
   return (
-    <Interactive
+    <Figure
       title="Five-fold cross-validation"
       caption="Each row is one fit. The model is trained on four folds and predicts the fifth; every point is predicted exactly once, by a model that did not see it. The cross-validation error is the mean loss over all n held-out predictions."
     >
@@ -68,6 +67,6 @@ export function KFoldDiagram() {
         spec={spec}
         ariaLabel="A five-by-five grid: in row k, fold k is held out and predicted while the other four folds are used for training; the five fold losses are combined into the cross-validation error"
       />
-    </Interactive>
+    </Figure>
   )
 }

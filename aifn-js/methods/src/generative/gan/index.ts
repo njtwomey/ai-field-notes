@@ -1,11 +1,11 @@
 /**
- * `aifn-applied/generative/gan`: generative adversarial networks on low-dimensional toy data.
+ * `aifn-methods/generative/gan`: generative adversarial networks on low-dimensional toy data.
  *
  * - The networks and training: `gan` (an MLP generator and discriminator), `latents`, `generatePoints`,
  *   `discriminate`, `ganTraining` (`aifn/nn/training`'s `adversarialTraining` with a game of `aifn/learning/losses`:
  *   minimax, non-saturating, Wasserstein with gradient penalty, hinge), `sampleGenerator`, `scoresAt`.
- * - Diagnostics against a known density (a labelled mixture of `aifn-applied/generative`'s shared layer, e.g. a
- *   classification truth's `model` from `aifn-applied/data`): `modeCoverage`, `optimalDiscriminator` (D* with a KDE
+ * - Diagnostics against a known density (a labelled mixture of `aifn-methods/generative`'s shared layer, e.g. a
+ *   classification truth's `model` from `aifn-methods/data`): `modeCoverage`, `optimalDiscriminator` (D* with a KDE
  *   of p_g).
  * - A streamed run for a worker: `ganRun` (snapshots of losses and checkpoints), `optimizerOf`.
  */

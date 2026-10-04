@@ -1,6 +1,6 @@
-import { useMemo, useState } from 'react'
-import { Interactive, ParamChoice, Readout, XYChart, formatNumber, type XYSeries } from 'aifn-render'
-import { rng } from '@/lib/math'
+import { useMemo } from 'react'
+import { choice, Curve, Figure, formatNumber, Plot, Readout, useAxis, useFigureState } from 'aifn-render'
+import { normal, stream, type Stream } from 'aifn/foundation/random'
 
 // A stack of residual blocks with feed-forward branches only, at initialisation. Width D, hidden 4D, T tokens.
 const D = 32
@@ -85,9 +85,9 @@ function layerNormBack(x: Float64Array, g: Float64Array): Float64Array {
   return out
 }
 
-function gaussian(r: ReturnType<typeof rng>, n: number, sd: number): Float64Array {
+function gaussian(r: Stream, n: number, sd: number): Float64Array {
   const out = new Float64Array(n)
-  for (let i = 0; i < n; i++) out[i] = sd * r.normal()
+  for (let i = 0; i < n; i++) out[i] = sd * normal(r)
   return out
 }
 
@@ -96,7 +96,7 @@ function simulate(depth: number, mode: Mode): { grad: number[]; rms: number[] } 
   const grad = new Array<number>(depth).fill(0)
   const rms = new Array<number>(depth).fill(0)
   for (let seed = 0; seed < SEEDS; seed++) {
-    const r = rng(101 + seed)
+    const r = stream(101 + seed)
     const W1 = Array.from({ length: depth }, () => gaussian(r, D * H, Math.sqrt(1 / D)))
     const W2 = Array.from({ length: depth }, () => gaussian(r, H * D, Math.sqrt(1 / H)))
     let x = gaussian(r, T * D, 1)
@@ -142,42 +142,44 @@ type Depth = (typeof DEPTHS)[number]
 
 /** Gradient norms and residual-stream scale per layer at initialisation, post-norm against pre-norm. */
 export function NormGradients() {
-  const [depth, setDepth] = useState<Depth>('12')
-  const [view, setView] = useState<'grad' | 'rms'>('grad')
-  const L = Number(depth)
+  const state = useFigureState({
+    depth: choice<Depth>(
+      DEPTHS.map((d) => ({ value: d, label: d })),
+      '12',
+      { label: 'depth L' },
+    ),
+    view: choice<'grad' | 'rms'>(
+      [
+        { value: 'grad', label: 'gradient norm' },
+        { value: 'rms', label: 'residual RMS' },
+      ],
+      'grad',
+      { label: 'show' },
+    ),
+  })
+  const L = Number(state.depth)
   const sims = useMemo(() => ({ post: simulate(L, 'post'), pre: simulate(L, 'pre') }), [L])
   const layers = useMemo(() => Array.from({ length: L }, (_, i) => i + 1), [L])
-  const series: XYSeries[] = useMemo(
-    () => [
-      { name: 'post-norm', type: 'line', x: layers, y: view === 'grad' ? sims.post.grad : sims.post.rms, slot: 0 },
-      { name: 'pre-norm', type: 'line', x: layers, y: view === 'grad' ? sims.pre.grad : sims.pre.rms, slot: 1 },
-    ],
-    [layers, sims, view],
+  const series = useMemo(
+    () =>
+      [
+        { name: 'post-norm', x: layers, y: state.view === 'grad' ? sims.post.grad : sims.post.rms, slot: 0 },
+        { name: 'pre-norm', x: layers, y: state.view === 'grad' ? sims.pre.grad : sims.pre.rms, slot: 1 },
+      ] as const,
+    [layers, sims, state.view],
   )
+  const xAxis = useAxis({ label: 'layer', hold: 'union' })
+  const yAxis = useAxis({
+    label: state.view === 'grad' ? 'gradient norm' : 'residual-stream RMS',
+    range: state.view === 'rms' ? RMS_RANGE : undefined,
+  })
   return (
-    <Interactive
+    <Figure
       title="Post-norm and pre-norm at initialisation"
+      state={state}
       caption={`A stack of L residual blocks, each a ReLU feed-forward branch of width ${D} → ${H} → ${D}, run on ${T} random tokens with fan-in initialisation and a random linear loss on the output. "Gradient" is the Frobenius norm of the loss gradient with respect to each block's second weight matrix. In the post-norm stack the last layer's gradient does not depend on L. In the pre-norm stack the residual stream grows with depth, the final normalisation divides by its size, and the last layer's gradient shrinks roughly as 1/√L. Averaged over ${SEEDS} random draws.`}
-      controls={
-        <>
-          <ParamChoice
-            label="depth L"
-            value={depth}
-            onChange={setDepth}
-            options={DEPTHS.map((d) => ({ value: d, label: d }))}
-          />
-          <ParamChoice
-            label="show"
-            value={view}
-            onChange={setView}
-            options={[
-              { value: 'grad', label: 'gradient norm' },
-              { value: 'rms', label: 'residual RMS' },
-            ]}
-          />
-        </>
-      }
-      readout={
+
+      readouts={
         <>
           <Readout
             label="last-layer gradient, post / pre"
@@ -187,14 +189,10 @@ export function NormGradients() {
         </>
       }
     >
-      <XYChart
-        series={series}
-        xLabel="layer"
-        yLabel={view === 'grad' ? 'gradient norm' : 'residual-stream RMS'}
-        yLog={view === 'grad'}
-        yRange={view === 'rms' ? RMS_RANGE : undefined}
-        height={300}
-      />
-    </Interactive>
+      <Plot x={xAxis} y={yAxis} height={300}>
+        <Curve {...series[0]} />
+        <Curve {...series[1]} />
+      </Plot>
+    </Figure>
   )
 }

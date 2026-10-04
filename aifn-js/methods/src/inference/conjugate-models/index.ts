@@ -1,5 +1,5 @@
 /**
- * `aifn-applied/inference/conjugate-models`: coordinate-ascent variational inference for the normal–gamma model.
+ * `aifn-methods/inference/conjugate-models`: coordinate-ascent variational inference for the normal–gamma model.
  */
 
 export {

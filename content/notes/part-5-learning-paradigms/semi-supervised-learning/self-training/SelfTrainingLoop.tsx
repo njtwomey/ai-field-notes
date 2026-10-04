@@ -1,5 +1,4 @@
-import { Interactive } from 'aifn-render'
-import { Diagram } from 'aifn-render'
+import { Diagram, Figure } from 'aifn-render'
 import type { DiagramSpec } from 'aifn-render'
 
 const spec: DiagramSpec = {
@@ -38,7 +37,7 @@ const spec: DiagramSpec = {
 /** The self-training loop. */
 export function SelfTrainingLoop() {
   return (
-    <Interactive
+    <Figure
       title="The self-training loop"
       caption="The model is fitted to the training set, which starts as the labelled set. It predicts every unlabelled point, and the points whose largest class probability reaches the threshold τ join the training set with their predicted class as a pseudo-label. The model is refitted and the loop repeats until no new point qualifies."
     >
@@ -46,6 +45,6 @@ export function SelfTrainingLoop() {
         spec={spec}
         ariaLabel="The labelled set forms the training set; a model is fitted and predicts the unlabelled points; confident predictions are added to the training set as pseudo-labels and the model is refitted"
       />
-    </Interactive>
+    </Figure>
   )
 }

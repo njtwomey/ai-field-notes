@@ -1,19 +1,25 @@
 import { useMemo } from 'react'
 import {
-  Heatmap,
-  Interactive,
-  ParamSlider,
-  Readout,
-  XYChart,
+  Bars,
+  Curve,
+  Figure,
+  float,
   formatNumber,
-  useParam,
-  type Handle,
-  type HeatmapOverlay,
-  type XYSeries,
+  Handle,
+  int,
+  Plot,
+  Raster,
+  Readout,
+  seriesLayers,
+  type SeriesSpec,
+  slider,
+  useAxis,
+  useFigureState,
 } from 'aifn-render'
-import { linspace, rng } from '@/lib/math'
-import { normalPdf } from '@/lib/math/special'
+import { normal as drawNormal, stream, uniform as drawUniform } from 'aifn/foundation/random'
 import { histogramDensity } from '../_shared/ode'
+import { linspace, toFlat } from 'aifn/foundation/tensor'
+import { normalPdf } from 'aifn/numerics/special'
 
 const D = 0.5
 const DT = 0.01
@@ -24,13 +30,15 @@ const N = 2000
 const S0 = 0.25
 const LO = -5
 const HI = 5
-const XS = linspace(LO, HI, 201)
-const T_GRID = linspace(0, (FRAMES - 1) * FRAME * DT, FRAMES)
-const X_GRID = linspace(LO, HI, 81)
+const XS = toFlat(linspace(LO, HI, 201))
+const T_GRID = toFlat(linspace(0, (FRAMES - 1) * FRAME * DT, FRAMES))
+const X_GRID = toFlat(linspace(LO, HI, 81))
 
 /** Which bump each particle starts in, its offset within the bump, and its random-walk displacement at every frame. */
 const WALK = (() => {
-  const { uniform, normal } = rng(21)
+  const rs = stream(21)
+  const uniform = () => drawUniform(rs)
+  const normal = () => drawNormal(rs)
   const side = Uint8Array.from({ length: N }, () => (uniform() < 0.5 ? 0 : 1))
   const offset = Float64Array.from({ length: N }, () => S0 * normal())
   const disp = Array.from({ length: FRAMES }, () => new Float64Array(N))
@@ -49,17 +57,19 @@ const density = (x: number, t: number, c: [number, number]) => {
 }
 
 export function HeatParticles() {
-  const frame = useParam(10, { min: 0, max: FRAMES - 1, step: 1 })
-  const c1 = useParam(-1.5, { min: -3.5, max: 3.5, step: 0.05 })
-  const c2 = useParam(1, { min: -3.5, max: 3.5, step: 0.05 })
-  const tracked = useParam(6, { min: 1, max: 50, step: 1 })
-  const c = useMemo<[number, number]>(() => [c1.value, c2.value], [c1.value, c2.value])
-  const t = T_GRID[frame.value]
+  const state = useFigureState({
+    frame: slider(0, FRAMES - 1, 10, { step: 1, label: 'time t', format: (f) => formatNumber(T_GRID[f]) }),
+    tracked: int(6, { min: 1, max: 50, step: 1, label: 'paths', format: (v) => String(v) }),
+    c1: float(-1.5, { min: -3.5, max: 3.5, step: 0.05, label: 'bump 1 centre' }),
+    c2: float(1, { min: -3.5, max: 3.5, step: 0.05, label: 'bump 2 centre' }),
+  })
+  const c = useMemo<[number, number]>(() => [state.c1, state.c2], [state.c1, state.c2])
+  const t = T_GRID[state.frame]
 
   const start = useMemo(() => Float64Array.from({ length: N }, (_, i) => c[WALK.side[i]] + WALK.offset[i]), [c])
   const positions = useMemo(
-    () => Float64Array.from(start, (x0, i) => x0 + WALK.disp[frame.value][i]),
-    [start, frame.value],
+    () => Float64Array.from(start, (x0, i) => x0 + WALK.disp[state.frame][i]),
+    [start, state.frame],
   )
   const stats = useMemo(() => {
     let m = 0
@@ -70,19 +80,19 @@ export function HeatParticles() {
     return { mean: m, variance: v / N }
   }, [positions])
 
-  const series = useMemo<XYSeries[]>(() => {
+  const series = useMemo(() => {
     const hist = histogramDensity(positions, LO, HI, 50)
     return [
-      { name: 'particles (histogram)', type: 'bar', x: hist.x, y: hist.y, muted: true },
-      { name: 'initial density', type: 'line', x: XS, y: XS.map((x) => density(x, 0, c)), slot: 1, dashed: true },
-      { name: 'heat equation u(x, t)', type: 'line', x: XS, y: XS.map((x) => density(x, t, c)), slot: 0 },
-    ]
+      { name: 'particles (histogram)', x: hist.x, y: hist.y, muted: true },
+      { name: 'initial density', x: XS, y: XS.map((x) => density(x, 0, c)), slot: 1, dashed: true },
+      { name: 'heat equation u(x, t)', x: XS, y: XS.map((x) => density(x, t, c)), slot: 0 },
+    ] as const
   }, [positions, c, t])
 
   const field = useMemo(() => T_GRID.map((tt) => X_GRID.map((x) => density(x, tt, c))), [c])
-  const paths = useMemo<HeatmapOverlay[]>(() => {
-    const many = tracked.value > 1
-    return Array.from({ length: tracked.value }, (_, k) => {
+  const paths = useMemo<SeriesSpec[]>(() => {
+    const many = state.tracked > 1
+    return Array.from({ length: state.tracked }, (_, k) => {
       // 97 is coprime to N, so walkers are distinct, and adding walkers keeps the ones already drawn.
       const i = (k * 97) % N
       return {
@@ -94,30 +104,28 @@ export function HeatParticles() {
         thin: many,
       }
     })
-  }, [start, tracked.value])
+  }, [start, state.tracked])
   const handles = useMemo<Handle[]>(
     () => [
-      { kind: 'x', at: c1.value, onDrag: c1.set },
-      { kind: 'x', at: c2.value, onDrag: c2.set },
+      { kind: 'x', at: state.c1, onDrag: (v: number) => state.set('c1', v) },
+      { kind: 'x', at: state.c2, onDrag: (v: number) => state.set('c2', v) },
     ],
-    [c1, c2],
+    [state.bind('c1'), state.bind('c2')],
   )
   // Mixture variance: within-bump variance plus the spread of the two centres.
   const predicted = S0 * S0 + 2 * D * t + ((c[0] - c[1]) / 2) ** 2
 
+  const xAxis = useAxis({ label: 'x', range: [LO, HI] })
+  const yAxis = useAxis({ label: 'density', range: [0, undefined], hold: 'union' })
+  const xAxis2 = useAxis({ label: 'x' })
+  const yAxis2 = useAxis({ label: 't' })
   return (
-    <Interactive
+    <Figure
       title="Random walkers and the heat equation"
+      state={state}
       caption="2000 particles start in two bumps and take steps of ±0.1 every 0.01 time units. Left: their histogram at time t against the heat-equation solution with D = ½, the two bumps each widened to variance 0.25² + t. Right: the solution u(x, t) over time as a heat map, with the paths of some walkers as light lines; the paths slider sets how many. Drag the two vertical lines to move the starting bumps; step the time to watch both spread."
-      controls={
-        <>
-          <ParamSlider label="time t" param={frame} format={(f) => formatNumber(T_GRID[f])} withArrows />
-          <ParamSlider label="paths" param={tracked} withArrows format={(v) => String(v)} />
-          <ParamSlider label="bump 1 centre" param={c1} />
-          <ParamSlider label="bump 2 centre" param={c2} />
-        </>
-      }
-      readout={
+
+      readouts={
         <>
           <Readout label="particle mean" value={formatNumber(stats.mean)} />
           <Readout label="particle variance" value={formatNumber(stats.variance)} />
@@ -126,27 +134,19 @@ export function HeatParticles() {
       }
     >
       <div className="grid gap-4 md:grid-cols-2">
-        <XYChart
-          height={320}
-          xLabel="x"
-          yLabel="density"
-          series={series}
-          handles={handles}
-          xRange={[LO, HI]}
-          yRange={[0, undefined]}
-        />
-        <Heatmap
-          x={X_GRID}
-          y={T_GRID}
-          z={field}
-          xLabel="x"
-          yLabel="t"
-          valueLabel="u"
-          scale="sequential"
-          overlay={paths}
-          height={320}
-        />
+        <Plot x={xAxis} y={yAxis} height={320}>
+          <Bars {...series[0]} />
+          <Curve {...series[1]} />
+          <Curve {...series[2]} />
+          {(handles ?? []).map((h, i) => (
+            <Handle key={i} {...h} />
+          ))}
+        </Plot>
+        <Plot x={xAxis2} y={yAxis2} height={320}>
+          <Raster x={X_GRID} y={T_GRID} z={field} scale={'sequential'} valueLabel={'u'} />
+          {seriesLayers(paths, { live: true })}
+        </Plot>
       </div>
-    </Interactive>
+    </Figure>
   )
 }

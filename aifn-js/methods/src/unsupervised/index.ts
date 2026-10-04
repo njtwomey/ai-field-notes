@@ -1,5 +1,5 @@
 /**
- * `aifn-applied/unsupervised`: unsupervised learning: clustering (k-means family, mixtures by EM, hierarchical,
+ * `aifn-methods/unsupervised`: unsupervised learning: clustering (k-means family, mixtures by EM, hierarchical,
  * density-based, spectral) and embeddings (linear, manifold, neighbour). `unsupervisedModelRegistry` lists every
  * registered estimator factory of the area by key.
  */
@@ -15,7 +15,7 @@ export { kmeans, gaussianMixture, dbscan } from './clustering'
 export { pca } from './embedding/linear'
 export { tsne, umap } from './embedding/neighbour'
 
-/** Every registered estimator factory of `aifn-applied/unsupervised`, keyed by `info.key` (kind `model`). */
+/** Every registered estimator factory of `aifn-methods/unsupervised`, keyed by `info.key` (kind `model`). */
 export const unsupervisedModelRegistry = entries('model', clustering, embeddingLinear, manifold, neighbour) as Readonly<
   Record<string, ModelEntry>
 >

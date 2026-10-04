@@ -1,4 +1,4 @@
-/** The registry of `aifn-applied/retrieval/recommenders`: the recommenders, their evaluation and the simulators. */
+/** The registry of `aifn-methods/retrieval/recommenders`: the recommenders, their evaluation and the simulators. */
 
 import { definer, entries, type AlgorithmInfo, type Entry, type FunctionInfo } from 'aifn/foundation/registry'
 import * as factorisation from './factorisation'

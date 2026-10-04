@@ -1,4 +1,4 @@
-/** The functions of `aifn-applied/retrieval/ann`: the nearest-neighbour index benchmark. */
+/** The functions of `aifn-methods/retrieval/ann`: the nearest-neighbour index benchmark. */
 
 import { definer, entries, type Entry, type FunctionInfo } from 'aifn/foundation/registry'
 import * as benchmark from './benchmark'

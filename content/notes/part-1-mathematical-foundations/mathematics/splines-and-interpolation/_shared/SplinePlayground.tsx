@@ -1,18 +1,23 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from 'aifn-render/ui/select'
 import {
-  Interactive,
-  ParamButton,
-  ParamChoice,
-  ParamSlider,
-  ParamSwitch,
-  Readout,
-  XYChart,
+  Button,
+  choice,
+  Figure,
   formatNumber,
-  useParam,
-  type Handle,
+  Handle,
+  int,
+  Plot,
+  Readout,
+  Segments,
+  seriesLayers,
+  setting,
+  Slider,
+  slider,
+  useAxis,
+  useFigureState,
   type Segment,
-  type XYSeries,
+  type SeriesSpec,
 } from 'aifn-render'
 import {
   bendingEnergy,
@@ -147,8 +152,13 @@ export type SplinePlaygroundProps = {
   yRange?: [number, number]
 }
 
+/** Types with knot vectors, and types drawn with a construction (de Casteljau, de Boor) at t. */
+const KNOTTED = new Set<unknown>(['bspline', 'nurbs'])
+const CONSTRUCTED = new Set<unknown>(['bezier', 'bspline', 'nurbs'])
+
 const clamp = (v: number, lo: number, hi: number) => Math.min(Math.max(v, lo), hi)
 const MIN_POINTS = 3
+const BASIS_RANGE: [number, number] = [-0.1, 1.05]
 const MAX_POINTS = 16
 
 /**
@@ -182,15 +192,71 @@ export function SplinePlayground({
   xRange = [0, 10],
   yRange = [0, 6],
 }: SplinePlaygroundProps) {
-  const [type, setType] = useState<SplineType>(initialType)
+  const offered = types.filter((ty) => ALL_TYPES.includes(ty))
+  const state = useFigureState({
+    type: choice<SplineType>(
+      offered.map((ty) => ({ value: ty, label: LABELS[ty] })),
+      initialType,
+      { label: 'Spline type', when: () => offered.length > 1 },
+    ),
+    end: choice<EndCondition>(
+      [
+        { value: 'natural', label: 'natural' },
+        { value: 'clamped', label: 'clamped' },
+        { value: 'not-a-knot', label: 'not-a-knot' },
+        { value: 'periodic', label: 'periodic' },
+      ],
+      initialEnd,
+      { label: 'End condition', when: (v) => v.type === 'cubic' },
+    ),
+    alpha: choice<Alpha>(
+      [
+        { value: '0', label: 'uniform' },
+        { value: '0.5', label: 'centripetal' },
+        { value: '1', label: 'chordal' },
+      ],
+      String(initialAlpha) as Alpha,
+      { label: 'Parameterisation (α)', when: (v) => v.type === 'catmull-rom' },
+    ),
+    tension: slider(0, 1, initialTension, { step: 0.05, label: 'Tension τ', when: (v) => v.type === 'catmull-rom' }),
+    degree: int(initialDegree, { min: 1, max: 5, step: 1, label: 'Degree p', when: (v) => KNOTTED.has(v.type) }),
+    knotMode: choice<'open' | 'uniform'>(
+      [
+        { value: 'open', label: 'open uniform' },
+        { value: 'uniform', label: 'uniform' },
+      ],
+      initialKnotMode,
+      { label: 'Knots', when: (v) => KNOTTED.has(v.type) },
+    ),
+    logLambda: slider(-4, 3, initialLogLambda, {
+      step: 0.05,
+      label: 'log₁₀ λ',
+      format: (v) => `${formatNumber(v)} (λ = ${formatNumber(10 ** v)})`,
+      when: (v) => v.type === 'smoothing',
+    }),
+    t: slider(0, 1, initialT, { step: 0.005, label: 'Parameter t', format: (v) => v.toFixed(3) }),
+    polygon: setting(showPolygon, { label: 'control polygon', when: (v) => !isFunctionType(v.type as SplineType) }),
+    comb: setting(showComb, 'curvature comb'),
+    construction: setting(showConstruction, { label: 'construction at t', when: (v) => CONSTRUCTED.has(v.type) }),
+    osculating: setting(showOsculating, 'osculating circle'),
+    lowerOn: setting(showLower, 'derivative plots'),
+    lower: choice<Lower>(
+      [
+        { value: 'derivatives', label: 'first and second derivatives' },
+        { value: 'curvature', label: 'curvature' },
+      ],
+      initialLower,
+      { label: 'Lower panel', when: (v) => v.lowerOn === true },
+    ),
+    overlayOn: setting(Boolean(overlay), {
+      label: overlay ? `compare with ${LABELS[overlay].toLowerCase()}` : 'compare',
+      when: (v) => Boolean(overlay) && overlay !== v.type,
+    }),
+  })
+  const { type, end, alpha, polygon, comb, construction, osculating, lowerOn, lower, overlayOn, knotMode } = state
   const [points, setPoints] = useState<Vec2[]>(initialPoints)
   const [weights, setWeights] = useState<number[]>(initialWeights ?? initialPoints.map(() => 1))
   const [selected, setSelected] = useState(0)
-  const [end, setEnd] = useState<EndCondition>(initialEnd)
-  const [alpha, setAlpha] = useState<Alpha>(String(initialAlpha) as Alpha)
-  const tension = useParam(initialTension, { min: 0, max: 1, step: 0.05 })
-  const degree = useParam(initialDegree, { min: 1, max: 5, step: 1 })
-  const [knotMode, setKnotMode] = useState<'open' | 'uniform'>(initialKnotMode)
   const sig = (n: number, p: number, mode: string) => `${n}|${p}|${mode}`
   const [custom, setCustom] = useState<{ sig: string; knots: number[] } | null>(
     initialKnots
@@ -201,15 +267,6 @@ export function SplinePlayground({
       : null,
   )
   const [selectedKnot, setSelectedKnot] = useState<number | null>(null)
-  const logLambda = useParam(initialLogLambda, { min: -4, max: 3, step: 0.05 })
-  const t = useParam(initialT, { min: 0, max: 1, step: 0.005 })
-  const [polygon, setPolygon] = useState(showPolygon)
-  const [comb, setComb] = useState(showComb)
-  const [construction, setConstruction] = useState(showConstruction)
-  const [osculating, setOsculating] = useState(showOsculating)
-  const [lowerOn, setLowerOn] = useState(showLower)
-  const [lower, setLower] = useState<Lower>(initialLower)
-  const [overlayOn, setOverlayOn] = useState(Boolean(overlay))
   const [preset, setPreset] = useState<Preset>('initial')
 
   // Shift-click removes a point. The chart reports clicks without modifier keys, so track Shift here.
@@ -229,7 +286,7 @@ export function SplinePlayground({
   const n = points.length
   const parametric = !isFunctionType(type)
   const usesKnots = type === 'bspline' || type === 'nurbs'
-  const p = Math.min(degree.value, n - 1)
+  const p = Math.min(state.degree, n - 1)
   const knotSig = sig(n, p, knotMode)
   const knots = useMemo(
     () => (custom?.sig === knotSig ? custom.knots : knotMode === 'open' ? openUniformKnots(n, p) : uniformKnots(n, p)),
@@ -244,12 +301,12 @@ export function SplinePlayground({
         weights,
         end,
         alpha: Number(alpha),
-        tension: tension.value,
+        tension: state.tension,
         degree: p,
         knots,
-        lambda: 10 ** logLambda.value,
+        lambda: 10 ** state.logLambda,
       }),
-    [type, points, weights, end, alpha, tension.value, p, knots, logLambda.value],
+    [type, points, weights, end, alpha, state.tension, p, knots, state.logLambda],
   )
   const overlayModel = useMemo(
     () =>
@@ -263,13 +320,13 @@ export function SplinePlayground({
             tension: 0,
             degree: p,
             knots,
-            lambda: 10 ** logLambda.value,
+            lambda: 10 ** state.logLambda,
           })
         : null,
-    [overlay, overlayOn, type, points, weights, p, knots, logLambda.value],
+    [overlay, overlayOn, type, points, weights, p, knots, state.logLambda],
   )
   const [lo, hi] = model.domain
-  const u = lo + t.value * (hi - lo)
+  const u = lo + state.t * (hi - lo)
 
   const samples = useMemo(() => sampleCurve(model, 400), [model])
   const stats = useMemo(() => {
@@ -294,7 +351,7 @@ export function SplinePlayground({
   })()
 
   const curveSeries = useMemo(() => {
-    const series: XYSeries[] = []
+    const series: SeriesSpec[] = []
     const segments: Segment[] = []
     if (polygon && parametric) {
       series.push({
@@ -349,7 +406,7 @@ export function SplinePlayground({
   }, [polygon, parametric, points, overlayModel, overlay, type, samples, comb, stats.maxKappa, usesKnots, model])
 
   // Fast-changing layers (at the parameter t) are built every render; they are small.
-  const tSeries: XYSeries[] = []
+  const tSeries: SeriesSpec[] = []
   if (construction && model.construction) {
     const levels = model.construction(u)
     levels.slice(1).forEach((level) => {
@@ -392,8 +449,6 @@ export function SplinePlayground({
     })
   }
   tSeries.push({ name: 'C(t)', type: 'scatter', x: [current.p[0]], y: [current.p[1]], emphasis: true })
-
-  const allSeries = [...curveSeries.series, ...tSeries]
 
   const clampPoint = (q: Vec2): Vec2 => [clamp(q[0], xRange[0], xRange[1]), clamp(q[1], yRange[0], yRange[1])]
   const pointHandles: Handle[] = points.map((q, i) => ({
@@ -497,7 +552,12 @@ export function SplinePlayground({
     setKnots(next)
   }
 
-  const tHandle: Handle = { kind: 'x', at: u, label: 't', onDrag: (v) => t.set(hi > lo ? (v - lo) / (hi - lo) : 0) }
+  const tHandle: Handle = {
+    kind: 'x',
+    at: u,
+    label: 't',
+    onDrag: (v) => state.set('t', hi > lo ? (v - lo) / (hi - lo) : 0),
+  }
 
   const basisChart = useMemo(() => {
     if (!model.basis) return null
@@ -505,7 +565,7 @@ export function SplinePlayground({
     const rows = us.map((v) => model.basis!(v))
     const count = rows[0].length
     const sel = model.order.indexOf(selected)
-    const series: XYSeries[] = []
+    const series: SeriesSpec[] = []
     for (let j = 0; j < count; j++) {
       if (j === sel) continue
       series.push({ name: 'basis functions', type: 'line', x: us, y: rows.map((r) => r[j]), muted: true })
@@ -525,7 +585,7 @@ export function SplinePlayground({
   }, [model, lo, hi, selected])
 
   const basisAtT = model.basis ? model.basis(u) : []
-  const basisDots: XYSeries = {
+  const basisDots: SeriesSpec = {
     name: 'values at t',
     type: 'scatter',
     x: basisAtT.flatMap((v) => (Math.abs(v) > 1e-9 ? [u] : [])),
@@ -537,18 +597,18 @@ export function SplinePlayground({
   const lowerSeries = useMemo(() => {
     const us = samples.map((s) => s.u)
     if (lower === 'curvature')
-      return [{ name: 'curvature κ', type: 'line', x: us, y: samples.map((s) => s.kappa), slot: 0 }] as XYSeries[]
+      return [{ name: 'curvature κ', type: 'line', x: us, y: samples.map((s) => s.kappa), slot: 0 }] as SeriesSpec[]
     if (!parametric)
       return [
         { name: "f'(x)", type: 'line', x: us, y: samples.map((s) => s.e.d1[1]), slot: 0 },
         { name: "f''(x)", type: 'line', x: us, y: samples.map((s) => s.e.d2[1]), slot: 1 },
-      ] as XYSeries[]
+      ] as SeriesSpec[]
     return [
       { name: "x'(u)", type: 'line', x: us, y: samples.map((s) => s.e.d1[0]), slot: 0 },
       { name: "y'(u)", type: 'line', x: us, y: samples.map((s) => s.e.d1[1]), slot: 1 },
       { name: "x''(u)", type: 'line', x: us, y: samples.map((s) => s.e.d2[0]), slot: 2 },
       { name: "y''(u)", type: 'line', x: us, y: samples.map((s) => s.e.d2[1]), slot: 3 },
-    ] as XYSeries[]
+    ] as SeriesSpec[]
   }, [samples, lower, parametric])
 
   const loadPreset = (pr: Preset) => {
@@ -556,9 +616,9 @@ export function SplinePlayground({
     setSelected(0)
     setCustom(null)
     if (pr === 'circle') {
-      setType('nurbs')
-      degree.set(2)
-      setKnotMode('open')
+      state.set('type', 'nurbs')
+      state.set('degree', 2)
+      state.set('knotMode', 'open')
       setPoints(CIRCLE.points)
       setWeights(CIRCLE.weights)
       setCustom({ sig: sig(CIRCLE.points.length, 2, 'open'), knots: CIRCLE.knots })
@@ -571,7 +631,6 @@ export function SplinePlayground({
       setCustom({ sig: sig(pts.length, Math.min(initialDegree, pts.length - 1), initialKnotMode), knots: initialKnots })
   }
 
-  const offered = types.filter((ty) => ALL_TYPES.includes(ty))
   const continuity =
     model.continuity === Infinity
       ? 'C∞'
@@ -581,27 +640,6 @@ export function SplinePlayground({
 
   const controls = (
     <>
-      {offered.length > 1 && (
-        <div className="flex flex-col gap-2">
-          <span className="text-xs text-muted-foreground">Spline type</span>
-          <Select
-            items={Object.fromEntries(offered.map((ty) => [ty, LABELS[ty]]))}
-            value={type}
-            onValueChange={(v) => v && setType(v as SplineType)}
-          >
-            <SelectTrigger size="sm" className="w-full">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {offered.map((ty) => (
-                <SelectItem key={ty} value={ty}>
-                  {LABELS[ty]}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-      )}
       {presets.length > 1 && (
         <div className="flex flex-col gap-2">
           <span className="text-xs text-muted-foreground">Load points</span>
@@ -623,66 +661,18 @@ export function SplinePlayground({
           </Select>
         </div>
       )}
-      {type === 'cubic' && (
-        <div className="sm:col-span-2">
-          <ParamChoice
-            label="End condition"
-            value={end}
-            onChange={setEnd}
-            options={[
-              { value: 'natural', label: 'natural' },
-              { value: 'clamped', label: 'clamped' },
-              { value: 'not-a-knot', label: 'not-a-knot' },
-              { value: 'periodic', label: 'periodic' },
-            ]}
-          />
-        </div>
-      )}
-      {type === 'catmull-rom' && (
-        <>
-          <ParamChoice
-            label="Parameterisation (α)"
-            value={alpha}
-            onChange={setAlpha}
-            options={[
-              { value: '0', label: 'uniform' },
-              { value: '0.5', label: 'centripetal' },
-              { value: '1', label: 'chordal' },
-            ]}
-          />
-          <ParamSlider label="Tension τ" param={tension} />
-        </>
-      )}
-      {usesKnots && (
-        <>
-          <ParamSlider label="Degree p" param={degree} withArrows format={(v) => String(Math.min(v, n - 1))} />
-          <ParamChoice
-            label="Knots"
-            value={knotMode}
-            onChange={(v) => {
-              setKnotMode(v)
-              setCustom(null)
-            }}
-            options={[
-              { value: 'open', label: 'open uniform' },
-              { value: 'uniform', label: 'uniform' },
-            ]}
-          />
-          {activeKnot !== undefined && p > 1 && (
-            <ParamSlider
-              label={`Multiplicity of the knot at ${formatNumber(knots[activeKnot])}`}
-              value={multiplicity}
-              onChange={(m) => setMultiplicity(Math.round(m))}
-              min={1}
-              max={Math.min(p, knotIndices.length)}
-              step={1}
-              withArrows
-            />
-          )}
-        </>
+      {usesKnots && activeKnot !== undefined && p > 1 && (
+        <Slider
+          label={`Multiplicity of the knot at ${formatNumber(knots[activeKnot])}`}
+          value={multiplicity}
+          onChange={(m) => setMultiplicity(Math.round(m))}
+          min={1}
+          max={Math.min(p, knotIndices.length)}
+          step={1}
+        />
       )}
       {type === 'nurbs' && (
-        <ParamSlider
+        <Slider
           label={`Weight of point ${selected + 1}`}
           value={weights[selected] ?? 1}
           onChange={(v) => setWeights((prev) => prev.map((w, i) => (i === selected ? v : w)))}
@@ -691,33 +681,11 @@ export function SplinePlayground({
           step={0.05}
         />
       )}
-      {type === 'smoothing' && (
-        <ParamSlider
-          label="log₁₀ λ"
-          param={logLambda}
-          format={(v) => `${formatNumber(v)} (λ = ${formatNumber(10 ** v)})`}
-        />
-      )}
-      <ParamSlider label={`Parameter t (u = ${formatNumber(u)})`} param={t} withArrows format={(v) => v.toFixed(3)} />
-      <div className="flex flex-wrap gap-x-4 gap-y-3">
-        {parametric && <ParamSwitch label="control polygon" checked={polygon} onChange={setPolygon} />}
-        <ParamSwitch label="curvature comb" checked={comb} onChange={setComb} />
-        {model.construction && (
-          <ParamSwitch label="construction at t" checked={construction} onChange={setConstruction} />
-        )}
-        <ParamSwitch label="osculating circle" checked={osculating} onChange={setOsculating} />
-        <ParamSwitch label="derivative plots" checked={lowerOn} onChange={setLowerOn} />
-        {overlay && overlay !== type && (
-          <ParamSwitch
-            label={`compare with ${LABELS[overlay].toLowerCase()}`}
-            checked={overlayOn}
-            onChange={setOverlayOn}
-          />
-        )}
-      </div>
       <div className="flex flex-wrap gap-2">
         {usesKnots && (
-          <ParamButton
+          <Button
+            variant="outline"
+            size="sm"
             disabled={n >= MAX_POINTS}
             onClick={() => {
               const r = insertKnot(points, type === 'nurbs' ? weights : points.map(() => 1), knots, p, u)
@@ -727,10 +695,12 @@ export function SplinePlayground({
             }}
           >
             Insert knot at t
-          </ParamButton>
+          </Button>
         )}
         {type === 'bezier' && (
-          <ParamButton
+          <Button
+            variant="outline"
+            size="sm"
             disabled={n >= MAX_POINTS}
             onClick={() => {
               setPoints(elevateBezier(points))
@@ -738,21 +708,32 @@ export function SplinePlayground({
             }}
           >
             Elevate degree
-          </ParamButton>
+          </Button>
         )}
-        <ParamButton disabled={n <= MIN_POINTS} onClick={() => removePoint(selected)}>
+        <Button variant="outline" size="sm" disabled={n <= MIN_POINTS} onClick={() => removePoint(selected)}>
           Remove point {selected + 1}
-        </ParamButton>
+        </Button>
       </div>
     </>
   )
+
+  const curveX = useAxis({ range: xRange })
+  const curveY = useAxis({ range: yRange, equal: curveX })
+  const paramX = useAxis({ label: parametric ? 'parameter u' : 'x', range: [lo, hi], nice: false })
+  const basisY = useAxis({ label: 'basis value', range: basisChart?.yRange ?? BASIS_RANGE })
+  const lowerY = useAxis({
+    label: lower === 'curvature' ? 'curvature' : 'derivative',
+    hold: 'union',
+    key: `${type}:${lower}`,
+  })
 
   const knotText = usesKnots ? knots.map((k) => formatNumber(Number(k.toFixed(3)))).join(', ') : null
   const inner = usesKnots ? interiorKnots(knots, p) : []
 
   return (
-    <Interactive
+    <Figure
       title={title}
+      state={state}
       caption={
         caption ?? (
           <>
@@ -762,7 +743,7 @@ export function SplinePlayground({
         )
       }
       controls={controls}
-      readout={
+      readouts={
         <>
           <Readout label="continuity" value={continuity} />
           {usesKnots && inner.length > 0 && (
@@ -774,6 +755,7 @@ export function SplinePlayground({
           {stats.overshoot !== null && (
             <Readout label="overshoot" value={`${formatNumber(100 * stats.overshoot)}% of the data range`} />
           )}
+          <Readout label={parametric ? 'u at t' : 'x at t'} value={formatNumber(u)} />
           <Readout label="κ at t" value={formatNumber(kappaAtT)} />
           {type === 'cubic' && end === 'periodic' && (
             <span>Periodic: the last point takes the first point's height.</span>
@@ -782,28 +764,28 @@ export function SplinePlayground({
         </>
       }
     >
-      <XYChart
-        series={allSeries}
-        segments={curveSeries.segments}
-        xRange={xRange}
-        yRange={[yRange[0], yRange[1]]}
-        equalAspect
-        handles={pointHandles}
-        onPlotClick={onPlotClick}
-        ariaLabel={`${LABELS[type]} through ${n} draggable points`}
-      />
+      <Plot x={curveX} y={curveY} onPlotClick={onPlotClick} ariaLabel={`${LABELS[type]} through ${n} draggable points`}>
+        {seriesLayers(curveSeries.series)}
+        <Segments segments={curveSeries.segments} muted />
+        {seriesLayers(tSeries, { live: true })}
+        {pointHandles.map((h, i) => (
+          <Handle key={i} {...h} />
+        ))}
+      </Plot>
       {showBasis &&
         (basisChart ? (
-          <XYChart
-            series={basisSeries}
-            xRange={[lo, hi]}
-            yRange={basisChart.yRange}
-            xLabel={parametric ? 'parameter u' : 'x'}
-            yLabel="basis value"
+          <Plot
+            x={paramX}
+            y={basisY}
             height={220}
-            handles={[tHandle, ...knotHandles]}
             ariaLabel="Basis functions over the parameter, with the current t marked"
-          />
+          >
+            {seriesLayers(basisSeries)}
+            <Handle {...tHandle} />
+            {knotHandles.map((h, i) => (
+              <Handle key={i} {...h} />
+            ))}
+          </Plot>
         ) : (
           <p className="rounded-md bg-muted p-3 text-xs text-muted-foreground">
             {LABELS[type]} chooses its slopes from the data by a non-linear rule, so the curve is not a fixed linear
@@ -811,26 +793,11 @@ export function SplinePlayground({
           </p>
         ))}
       {lowerOn && (
-        <>
-          <ParamChoice
-            label="Lower panel"
-            value={lower}
-            onChange={setLower}
-            options={[
-              { value: 'derivatives', label: 'first and second derivatives' },
-              { value: 'curvature', label: 'curvature' },
-            ]}
-          />
-          <XYChart
-            series={lowerSeries}
-            xRange={[lo, hi]}
-            xLabel={parametric ? 'parameter u' : 'x'}
-            height={220}
-            handles={[tHandle]}
-            ariaLabel="Derivatives or curvature along the curve"
-          />
-        </>
+        <Plot x={paramX} y={lowerY} height={220} ariaLabel="Derivatives or curvature along the curve">
+          {seriesLayers(lowerSeries)}
+          <Handle {...tHandle} />
+        </Plot>
       )}
-    </Interactive>
+    </Figure>
   )
 }

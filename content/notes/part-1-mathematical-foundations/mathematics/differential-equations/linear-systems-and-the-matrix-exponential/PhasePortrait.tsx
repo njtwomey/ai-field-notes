@@ -1,14 +1,17 @@
-import { useMemo, useState } from 'react'
+import { useMemo } from 'react'
 import {
-  Interactive,
-  ParamChoice,
-  ParamSlider,
-  Readout,
-  XYChart,
+  Choice,
+  Figure,
   formatNumber,
-  useParam,
-  type Handle,
-  type XYSeries,
+  Handle,
+  Plot,
+  Readout,
+  Segments,
+  seriesLayers,
+  type SeriesSpec,
+  slider,
+  useAxis,
+  useFigureState,
 } from 'aifn-render'
 import { classify2, directionField, expm2, formatEig, integrate, type Mat2 } from '../_shared/ode'
 
@@ -37,18 +40,22 @@ const RING = Array.from({ length: 10 }, (_, k) => (2 * Math.PI * (k + 0.5)) / 10
 const SPEC = { min: -3, max: 3, step: 0.1 }
 
 export function PhasePortrait() {
-  const a = useParam(0, SPEC)
-  const b = useParam(1, SPEC)
-  const c = useParam(-1, SPEC)
-  const d = useParam(-0.5, SPEC)
-  const time = useParam(1, { min: 0, max: 6, step: 0.1 })
-  const [start, setStart] = useState<[number, number]>([2, 0])
+  const state = useFigureState({
+    a: slider(SPEC.min, SPEC.max, 0, { step: SPEC.step, label: 'a₁₁' }),
+    b: slider(SPEC.min, SPEC.max, 1, { step: SPEC.step, label: 'a₁₂' }),
+    c: slider(SPEC.min, SPEC.max, -1, { step: SPEC.step, label: 'a₂₁' }),
+    d: slider(SPEC.min, SPEC.max, -0.5, { step: SPEC.step, label: 'a₂₂' }),
+    time: slider(0, 6, 1, { step: 0.1, label: 'time t' }),
+    x0: slider(-R, R, 2, { step: 0.01, onChart: true }),
+    y0: slider(-R, R, 0, { step: 0.01, onChart: true }),
+  })
+  const start = useMemo<[number, number]>(() => [state.x0, state.y0], [state.x0, state.y0])
   const m: Mat2 = useMemo(
     () => [
-      [a.value, b.value],
-      [c.value, d.value],
+      [state.a, state.b],
+      [state.c, state.d],
     ],
-    [a.value, b.value, c.value, d.value],
+    [state.a, state.b, state.c, state.d],
   )
   const preset = (Object.keys(PRESETS) as Preset[]).find((k) => {
     const p = PRESETS[k]
@@ -56,10 +63,10 @@ export function PhasePortrait() {
   })
   const choose = (k: Preset) => {
     const p = PRESETS[k]
-    a.set(p[0][0])
-    b.set(p[0][1])
-    c.set(p[1][0])
-    d.set(p[1][1])
+    state.set('a', p[0][0])
+    state.set('b', p[0][1])
+    state.set('c', p[1][0])
+    state.set('d', p[1][1])
   }
 
   const info = useMemo(() => classify2(m), [m])
@@ -69,8 +76,8 @@ export function PhasePortrait() {
   )
   const field = useMemo(() => directionField((x, y) => f(0, [x, y]) as [number, number], RANGE, RANGE, 13, 13), [f])
 
-  const background = useMemo<XYSeries[]>(() => {
-    const out: XYSeries[] = RING.map((th) => {
+  const background = useMemo<SeriesSpec[]>(() => {
+    const out: SeriesSpec[] = RING.map((th) => {
       const path = integrate(f, [2.8 * Math.cos(th), 2.8 * Math.sin(th)], 0, 8, 240, 20)
       return {
         name: 'other trajectories',
@@ -102,13 +109,13 @@ export function PhasePortrait() {
   }, [f, info, m])
 
   const trajectory = useMemo(() => integrate(f, start, 0, 6, 360, 20), [f, start])
-  const E = useMemo(() => expm2(m, time.value), [m, time.value])
+  const E = useMemo(() => expm2(m, state.time), [m, state.time])
   const xt = useMemo<[number, number]>(
     () => [E[0][0] * start[0] + E[0][1] * start[1], E[1][0] * start[0] + E[1][1] * start[1]],
     [E, start],
   )
 
-  const series = useMemo<XYSeries[]>(
+  const series = useMemo<SeriesSpec[]>(
     () => [
       ...background,
       {
@@ -123,38 +130,24 @@ export function PhasePortrait() {
     ],
     [background, trajectory, xt, start],
   )
-  const handles = useMemo<Handle[]>(
-    () => [
-      {
-        kind: 'point',
-        at: start,
-        label: 'x₀',
-        onDrag: ([x, y]) => setStart([Math.max(-R, Math.min(R, x)), Math.max(-R, Math.min(R, y))]),
-      },
-    ],
-    [start],
-  )
-
+  const xAxis = useAxis({ label: 'x₁', range: RANGE })
+  const yAxis = useAxis({ label: 'x₂', range: RANGE, equal: xAxis })
   return (
-    <Interactive
+    <Figure
       title="Phase portrait of ẋ = Ax"
+      state={state}
       caption="Arrows show the direction of Ax at each point; grey curves are trajectories from a ring of starts, and dashed lines are real eigenvectors. Drag the black point x₀. The coloured point is eᴬᵗx₀ at the chosen time. Change the entries of A, or pick a preset, and watch the portrait change type as the eigenvalues cross between real and complex or change sign."
       controls={
         <>
-          <ParamChoice
+          <Choice
             label="preset"
             value={preset ?? ('' as Preset)}
             onChange={choose}
             options={(Object.keys(PRESETS) as Preset[]).map((k) => ({ value: k, label: k }))}
           />
-          <ParamSlider label="time t" param={time} withArrows />
-          <ParamSlider label="a₁₁" param={a} />
-          <ParamSlider label="a₁₂" param={b} />
-          <ParamSlider label="a₂₁" param={c} />
-          <ParamSlider label="a₂₂" param={d} />
         </>
       }
-      readout={
+      readouts={
         <>
           <Readout label="type" value={info.kind} />
           <Readout label="trace" value={formatNumber(info.tr)} />
@@ -169,17 +162,12 @@ export function PhasePortrait() {
       }
     >
       <div className="mx-auto w-full max-w-lg">
-        <XYChart
-          series={series}
-          segments={field}
-          handles={handles}
-          xRange={RANGE}
-          yRange={RANGE}
-          xLabel="x₁"
-          yLabel="x₂"
-          equalAspect
-        />
+        <Plot x={xAxis} y={yAxis}>
+          {seriesLayers(series)}
+          <Segments segments={field} />
+          <Handle {...state.handle(['x0', 'y0'], { label: 'x₀' })} />
+        </Plot>
       </div>
-    </Interactive>
+    </Figure>
   )
 }

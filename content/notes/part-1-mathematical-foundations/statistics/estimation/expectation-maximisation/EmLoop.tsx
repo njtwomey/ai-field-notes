@@ -1,5 +1,4 @@
-import { Interactive } from 'aifn-render'
-import { Diagram } from 'aifn-render'
+import { Diagram, Figure } from 'aifn-render'
 import type { DiagramSpec } from 'aifn-render'
 
 const spec: DiagramSpec = {
@@ -48,7 +47,7 @@ const spec: DiagramSpec = {
 /** The EM iteration as a loop. */
 export function EmLoop() {
   return (
-    <Interactive
+    <Figure
       title="The EM iteration"
       caption="The E-step computes the posterior of the latent variables at the current parameters, which makes the lower bound touch the log-likelihood ℓ there. The M-step maximises the bound over the parameters, so ℓ cannot fall. The loop stops when neither ℓ nor the parameters change much."
     >
@@ -56,6 +55,6 @@ export function EmLoop() {
         spec={spec}
         ariaLabel="From a starting value, the E-step computes the latent posterior, the M-step maximises the expected complete-data log-likelihood, and the loop repeats until convergence"
       />
-    </Interactive>
+    </Figure>
   )
 }

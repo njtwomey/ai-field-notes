@@ -60,7 +60,11 @@ describe('randomWalkMatrix and spreadingResolvent', () => {
     for (let t = 0; t < 200; t++)
       F = F.map((_, i) => a * S.slice(i * n, (i + 1) * n).reduce((s, v, j) => s + v * F[j], 0) + (1 - a) * Y[i])
     const R = dense.data(spreadingResolvent(randomWalkMatrix(W), a))
-    for (let i = 0; i < n; i++) expect(F[i]).toBeCloseTo(R.slice(i * n, (i + 1) * n).reduce((s, v, j) => s + v * Y[j], 0), 10)
+    for (let i = 0; i < n; i++)
+      expect(F[i]).toBeCloseTo(
+        R.slice(i * n, (i + 1) * n).reduce((s, v, j) => s + v * Y[j], 0),
+        10,
+      )
     const raw = dense.data(spreadingResolvent(randomWalkMatrix(W), a, { scaled: false }))
     for (let k = 0; k < n * n; k++) expect(raw[k] * (1 - a)).toBeCloseTo(R[k], 12)
   })

@@ -1,4 +1,4 @@
-/** The registry of `aifn-applied/learning/weak-supervision`: label models, weak-label classifiers, MIL and noise. */
+/** The registry of `aifn-methods/learning/weak-supervision`: label models, weak-label classifiers, MIL and noise. */
 
 import { definer, entries, type AlgorithmInfo, type Entry, type FunctionInfo } from 'aifn/foundation/registry'
 import * as classifiers from './classifiers'
@@ -204,7 +204,8 @@ fn(
   {
     key: 'inverseCalibration',
     name: 'Inverse calibration (InvCal)',
-    summary: 'Support vector regression from bag means to the log-odds of the bag proportions; a point is 1 when f(x) > 0.',
+    summary:
+      'Support vector regression from bag means to the log-odds of the bag proportions; a point is 1 when f(x) > 0.',
     role: 'fit',
     notes: ['mean-map-and-invcal', ...LLP],
     cite: ['ruping2010'],
@@ -250,7 +251,8 @@ algorithm(
   {
     key: 'activeProportionsSteps',
     name: 'Active learning with label proportions',
-    summary: 'Query a bag of pool points (US-Mass, US-LP, random or exact), add the oracle’s proportion as a bag, refit LP-LLP.',
+    summary:
+      'Query a bag of pool points (US-Mass, US-LP, random or exact), add the oracle’s proportion as a bag, refit LP-LLP.',
     problem: 'graph',
     state: { iterate: 'scores', objective: 'accuracy', flags: ['terminated'] },
     notes: LLP,
@@ -301,7 +303,8 @@ fn(
     key: 'classConditionalNoiseTest',
     name: 'Anchor-point test for class-conditional label noise',
     tex: 'z = \\frac{\\bar\\eta - 1/2}{\\sqrt{v}},\\quad v = \\tfrac{1}{16}\\,\\bar x^\\top \\hat H \\bar x',
-    summary: 'A z-test that the noisy posterior averages ½ over anchor points, from a logistic or local likelihood fit.',
+    summary:
+      'A z-test that the noisy posterior averages ½ over anchor points, from a logistic or local likelihood fit.',
     role: 'test',
     notes: [...NOISE, 'local-maximum-likelihood-noise-test', 'z-test'],
     cite: ['poyiadzi2022', 'yang2024'],
@@ -345,7 +348,8 @@ fn(
     key: 'localLogistic',
     name: 'Local likelihood logistic regression',
     tex: '\\hat r(x) = \\sigma(\\hat\\beta_0),\; \\hat\\beta = \\arg\\max_\\beta \\textstyle\\sum_i K_h(x - x_i)\\, \\ell(y_i, \\langle \\beta, A_p(x_i - x) \\rangle)',
-    summary: 'A kernel-weighted logistic fit of a local polynomial in x_i − x, with the sandwich variance of its log-odds.',
+    summary:
+      'A kernel-weighted logistic fit of a local polynomial in x_i − x, with the sandwich variance of its log-odds.',
     role: 'fit',
     notes: ['local-regression', 'local-maximum-likelihood-noise-test', 'logistic-regression'],
     cite: ['loader1999', 'yang2024'],
@@ -426,7 +430,13 @@ fn(
   millet.milletScores,
 )
 fn(
-  { key: 'milletInterpretation', name: 'MILLET time-point interpretation', role: 'transform', notes: MILLET, cite: ['early2024'] },
+  {
+    key: 'milletInterpretation',
+    name: 'MILLET time-point interpretation',
+    role: 'transform',
+    notes: MILLET,
+    cite: ['early2024'],
+  },
   millet.milletInterpretation,
 )
 fn({ key: 'milletLogits', name: 'MILLET logits of a bag', role: 'transform', notes: MILLET }, millet.milletLogits)
@@ -434,10 +444,7 @@ fn(
   { key: 'milletProbabilities', name: 'MILLET class probabilities', role: 'transform', notes: MILLET },
   millet.milletProbabilities,
 )
-fn(
-  { key: 'replicatePad', name: 'Replicate padding', role: 'transform', notes: ['millet'] },
-  millet.replicatePad,
-)
+fn({ key: 'replicatePad', name: 'Replicate padding', role: 'transform', notes: ['millet'] }, millet.replicatePad)
 
 type Table<I extends AlgorithmInfo | FunctionInfo> = Readonly<Record<string, Entry<(...args: never[]) => unknown, I>>>
 const sources = [labelModels, classifiers, mil, noise, compare, labelProportions, active, noiseTests, local, millet]

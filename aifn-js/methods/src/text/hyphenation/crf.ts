@@ -19,7 +19,7 @@ import {
   type CrfSnapshot,
   type LabelledSequence,
   type TemplateCrf,
-} from 'aifn-applied/inference/sequence-models'
+} from 'aifn-methods/inference/sequence-models'
 import type { HyphenationSplit } from './runs'
 import { hyphenScores, type HyphenScores } from './scores'
 

@@ -26,7 +26,7 @@ import { adamRule } from 'aifn/optim/first-order'
 /**
  * Two views of the same objects, row by row: `a` [n, dA] and `b` [n, dB]. For zero-shot evaluation, `prototypes`
  * [K, dB] describes each class in the B view, and `truth.combination` gives each row's class and `truth.heldOut` marks
- * rows of classes left out of training (the shape of `aifn-applied/data`'s paired views).
+ * rows of classes left out of training (the shape of `aifn-methods/data`'s paired views).
  */
 export type ContrastivePairs = {
   readonly a: Tensor

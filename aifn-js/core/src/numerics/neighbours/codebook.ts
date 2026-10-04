@@ -2,7 +2,7 @@
  * Vector-quantisation codebooks, the coarse and fine quantisers of inverted files and product quantisation: k-means++
  * seeding (Arthur and Vassilvitskii 2007, "k-means++: the advantages of careful seeding", SODA), the assignment of rows
  * to their nearest codeword, the centroid update of Lloyd's algorithm (Lloyd 1982, "Least squares quantization in
- * PCM", IEEE Trans. Inf. Theory 28(2)) and a codebook trained by running them. `aifn-applied`'s k-means model steps
+ * PCM", IEEE Trans. Inf. Theory 28(2)) and a codebook trained by running them. `aifn-methods`'s k-means model steps
  * through the same assignment and update.
  */
 

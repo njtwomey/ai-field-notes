@@ -1,4 +1,4 @@
-import { linkage as aifnLinkage, cutTree } from 'aifn-applied/unsupervised/clustering'
+import { linkage as aifnLinkage, cutTree } from 'aifn-methods/unsupervised/clustering'
 import { fromData, toFlat } from 'aifn/foundation/tensor'
 
 export type Linkage = 'single' | 'complete' | 'average' | 'ward'
@@ -7,7 +7,7 @@ export type Linkage = 'single' | 'complete' | 'average' | 'ward'
 export type Merge = { a: number; b: number; height: number; size: number }
 
 /**
- * Agglomerative clustering of points in any dimension, backed by aifn-applied.
+ * Agglomerative clustering of points in any dimension, backed by aifn-methods.
  */
 export function agglomerate(points: readonly (readonly number[])[], linkage: Linkage): Merge[] {
   const n = points.length
@@ -45,14 +45,14 @@ function mergesToTensor(merges: Merge[]): { tensor: ReturnType<typeof fromData>;
   return { tensor: fromData(flat, [r, 4]), n }
 }
 
-/** Cluster labels after applying every merge at or below `height`, backed by aifn-applied. */
+/** Cluster labels after applying every merge at or below `height`, backed by aifn-methods. */
 export function cut(n: number, merges: Merge[], height: number): number[] {
   if (merges.length === 0) return Array.from({ length: n }, (_, i) => i)
   const { tensor } = mergesToTensor(merges)
   return Array.from(toFlat(cutTree(tensor, { height })))
 }
 
-/** Cluster labels for exactly `k` clusters, backed by aifn-applied. */
+/** Cluster labels for exactly `k` clusters, backed by aifn-methods. */
 export function cutK(n: number, merges: Merge[], k: number): number[] {
   if (merges.length === 0) return Array.from({ length: n }, (_, i) => i)
   const { tensor } = mergesToTensor(merges)

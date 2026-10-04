@@ -1,18 +1,22 @@
-import { useMemo, useState } from 'react'
+import { useMemo } from 'react'
 import {
-  Interactive,
-  ParamChoice,
-  ParamSlider,
-  Readout,
-  XYChart,
+  choice,
+  Curve,
+  Figure,
+  float,
   formatNumber,
-  useParam,
-  type XYSeries,
+  int,
+  Plot,
+  Points,
+  Readout,
+  useAxis,
+  useFigureState,
 } from 'aifn-render'
-import { linspace, rng } from '@/lib/math'
+import { stream } from 'aifn/foundation/random'
 import { BEST_VALUE, logData, thresholdValue } from '../_shared/ope'
+import { linspace, toFlat } from 'aifn/foundation/tensor'
 
-const THETAS = linspace(0, 1, 201)
+const THETAS = toFlat(linspace(0, 1, 201))
 const SIZES = ['200', '1000', '5000'] as const
 type Size = (typeof SIZES)[number]
 
@@ -24,14 +28,20 @@ const argmaxOf = (ys: number[]) => ys.reduce((best, y, i) => (y > ys[best] ? i :
  * minimisation penalty). The true value curve is known in closed form.
  */
 export function PolicyLearning() {
-  const [size, setSize] = useState<Size>('1000')
-  const eps = useParam(0.2, { min: 0.02, max: 1, step: 0.01 })
-  const shift = useParam(0, { min: -1, max: 1, step: 0.05 })
-  const seed = useParam(1, { min: 1, max: 30, step: 1 })
-  const n = Number(size)
+  const state = useFigureState({
+    size: choice<Size>(
+      SIZES.map((v) => ({ value: v, label: Number(v).toLocaleString() })),
+      '1000',
+      { label: 'logged rows n' },
+    ),
+    eps: float(0.2, { min: 0.02, max: 1, step: 0.01, label: 'logging exploration ε' }),
+    shift: float(0, { min: -1, max: 1, step: 0.05, label: 'reward shift c' }),
+    seed: int(1, { min: 1, max: 30, step: 1, label: 'seed', format: (v) => String(v) }),
+  })
+  const n = Number(state.size)
 
-  const rows = useMemo(() => logData(n, eps.value, rng(seed.value * 7919 + 5)), [n, eps.value, seed.value])
-  const c = shift.value
+  const rows = useMemo(() => logData(n, state.eps, stream(state.seed * 7919 + 5)), [n, state.eps, state.seed])
+  const c = state.shift
   const curves = useMemo(() => {
     const ips: number[] = []
     const snips: number[] = []
@@ -64,38 +74,28 @@ export function PolicyLearning() {
     snips: THETAS[argmaxOf(curves.snips)],
     pessimistic: THETAS[argmaxOf(curves.pessimistic)],
   }
-  const series: XYSeries[] = [
-    { name: 'true value V(π_θ)', type: 'line', x: THETAS, y: truth, emphasis: true, dashed: true },
-    { name: 'IPS', type: 'line', x: THETAS, y: curves.ips, slot: 0 },
-    { name: 'SNIPS', type: 'line', x: THETAS, y: curves.snips, slot: 1 },
-    { name: 'IPS − 1 standard error', type: 'line', x: THETAS, y: curves.pessimistic, slot: 2 },
+  const series = [
+    { name: 'true value V(π_θ)', x: THETAS, y: truth, emphasis: true, dashed: true },
+    { name: 'IPS', x: THETAS, y: curves.ips, slot: 0 },
+    { name: 'SNIPS', x: THETAS, y: curves.snips, slot: 1 },
+    { name: 'IPS − 1 standard error', x: THETAS, y: curves.pessimistic, slot: 2 },
     {
       name: 'learned θ',
-      type: 'scatter',
       x: [picks.ips, picks.snips, picks.pessimistic],
       y: [picks.ips, picks.snips, picks.pessimistic].map(thresholdValue),
       emphasis: true,
     },
-  ]
+  ] as const
 
+  const xAxis = useAxis({ label: 'threshold θ', range: [0, 1] })
+  const yAxis = useAxis({ label: 'value', hold: 'union' })
   return (
-    <Interactive
+    <Figure
       title="Learning a policy from logs"
+      state={state}
       caption="Policies π_θ play arm 1 for contexts x below θ and arm 2 above; the best threshold is 0.4375. Logs come from a policy that mostly plays poor arms and explores with probability ε. Each curve estimates V(π_θ) from the same log, and learning picks its maximiser (diamonds on the true curve, dashed). With few rows or small ε the IPS curve is jagged and its peak is often a spike of luck. Shift the rewards by c, which changes nothing about which policy is best: the IPS curve tilts and its maximiser moves, because the average weight differs between policies. SNIPS is unchanged by the shift. The pessimistic curve subtracts one standard error, which steers away from policies whose estimate rests on few heavily weighted rows."
-      controls={
-        <>
-          <ParamChoice
-            label="logged rows n"
-            value={size}
-            onChange={setSize}
-            options={SIZES.map((v) => ({ value: v, label: Number(v).toLocaleString() }))}
-          />
-          <ParamSlider label="logging exploration ε" param={eps} />
-          <ParamSlider label="reward shift c" param={shift} />
-          <ParamSlider label="seed" param={seed} format={(v) => String(v)} withArrows />
-        </>
-      }
-      readout={
+
+      readouts={
         <>
           <Readout label="best θ, value" value={`0.4375, ${formatNumber(BEST_VALUE)}`} />
           <Readout
@@ -114,7 +114,13 @@ export function PolicyLearning() {
         </>
       }
     >
-      <XYChart series={series} xLabel="threshold θ" yLabel="value" xRange={[0, 1]} />
-    </Interactive>
+      <Plot x={xAxis} y={yAxis}>
+        <Curve {...series[0]} />
+        <Curve {...series[1]} />
+        <Curve {...series[2]} />
+        <Curve {...series[3]} />
+        <Points {...series[4]} />
+      </Plot>
+    </Figure>
   )
 }

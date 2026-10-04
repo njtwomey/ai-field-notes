@@ -1,7 +1,5 @@
-import { MathText } from 'aifn-render'
-import { Diagram } from 'aifn-render'
+import { Diagram, Figure, MathText } from 'aifn-render'
 import type { DiagramSpec } from 'aifn-render'
-import { Interactive } from 'aifn-render'
 
 const box = (id: string, x: number, y: number, label: string, tone: number | 'neutral') => ({
   id,
@@ -36,13 +34,13 @@ const spec: DiagramSpec = {
 
 export function VisualWordsPipeline() {
   return (
-    <Interactive
+    <Figure
       title="From an image to a document"
       caption={
         <MathText text="Local patches are described by vectors such as SIFT descriptors. A codebook of $V$ centres, learned by $k$-means on descriptors from many images, quantises each descriptor to its nearest centre, a visual word. The image becomes a vector of word counts, which any topic model of text accepts." />
       }
     >
       <Diagram spec={spec} ariaLabel="Pipeline from image patches to visual words to a topic model" />
-    </Interactive>
+    </Figure>
   )
 }

@@ -1,5 +1,4 @@
-import { Interactive } from 'aifn-render'
-import { Diagram } from 'aifn-render'
+import { Diagram, Figure } from 'aifn-render'
 import type { DiagramSpec } from 'aifn-render'
 
 const spec: DiagramSpec = {
@@ -33,7 +32,7 @@ const spec: DiagramSpec = {
 /** Wide & Deep: a linear model on crossed sparse features and an MLP on embeddings, summed before one sigmoid. */
 export function WideDeepDiagram() {
   return (
-    <Interactive
+    <Figure
       title="Wide & Deep"
       caption="The wide part is a linear model over raw and crossed sparse features; the deep part embeds the sparse features, concatenates them with dense features and passes them through ReLU layers. Their logits are added and trained jointly through one logistic loss."
     >
@@ -41,6 +40,6 @@ export function WideDeepDiagram() {
         spec={spec}
         ariaLabel="Wide and Deep architecture: cross-product features into a linear model, embeddings into an MLP, summed into a sigmoid"
       />
-    </Interactive>
+    </Figure>
   )
 }

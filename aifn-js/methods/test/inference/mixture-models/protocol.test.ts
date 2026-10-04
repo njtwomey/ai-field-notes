@@ -1,5 +1,5 @@
 import { describe, it } from 'vitest'
-import { caviGaussianMixture } from 'aifn-applied/inference/mixture-models'
+import { caviGaussianMixture } from 'aifn-methods/inference/mixture-models'
 import { expectProtocol } from '../../protocol'
 
 describe('caviGaussianMixture', () => {

@@ -1,15 +1,6 @@
-import { useMemo, useState } from 'react'
-import {
-  Interactive,
-  ParamButton,
-  ParamSlider,
-  Readout,
-  XYChart,
-  formatNumber,
-  useParam,
-  type XYSeries,
-} from 'aifn-render'
-import { rng } from '@/lib/math'
+import { useMemo } from 'react'
+import { Curve, Figure, float, formatNumber, int, Plot, Points, Readout, useAxis, useFigureState } from 'aifn-render'
+import { normal, stream, uniform } from 'aifn/foundation/random'
 
 const ITEMS = 10
 const IDX = Array.from({ length: ITEMS }, (_, i) => i + 1)
@@ -26,15 +17,15 @@ type Estimates = { naive: number[]; ips: number[]; clipped: number[] }
  * click/π(k) (IPS) and with weights capped at τ (clipped IPS).
  */
 function simulate(seed: number, sessions: number, eta: number, noise: number, tau: number): Estimates {
-  const r = rng(seed)
+  const r = stream(seed)
   const prop = IDX.map((k) => k ** -eta)
   const clicks = new Array(ITEMS).fill(0)
   const ips = new Array(ITEMS).fill(0)
   const clipped = new Array(ITEMS).fill(0)
   for (let s = 0; s < sessions; s++) {
-    const order = REL.map((rel, i) => ({ i, score: rel + noise * r.normal() })).sort((a, b) => b.score - a.score)
+    const order = REL.map((rel, i) => ({ i, score: rel + noise * normal(r) })).sort((a, b) => b.score - a.score)
     order.forEach(({ i }, k) => {
-      if (r.uniform() < prop[k] * REL[i]) {
+      if (uniform(r) < prop[k] * REL[i]) {
         clicks[i]++
         ips[i] += 1 / prop[k]
         clipped[i] += Math.min(1 / prop[k], tau)
@@ -52,20 +43,22 @@ const rmse = (est: number[]) => Math.sqrt(est.reduce((s, e, i) => s + (e - REL[i
 
 /** Naive click rates against IPS-corrected estimates of relevance under position bias. */
 export function IpsClicks() {
-  const eta = useParam(1, { min: 0, max: 2, step: 0.1 })
-  const sessions = useParam(500, { min: 50, max: 3000, step: 50 })
-  const noise = useParam(0.1, { min: 0, max: 0.5, step: 0.02 })
-  const tau = useParam(5, { min: 1, max: 20, step: 0.5 })
-  const [seed, setSeed] = useState(1)
+  const state = useFigureState({
+    eta: float(1, { min: 0, max: 2, step: 0.1, label: 'position bias η' }),
+    sessions: int(500, { min: 50, max: 3000, step: 50, label: 'sessions logged', format: (v) => String(v) }),
+    noise: float(0.1, { min: 0, max: 0.5, step: 0.02, label: 'logging-rank noise' }),
+    tau: float(5, { min: 1, max: 20, step: 0.5, label: 'clipping cap τ' }),
+    seed: int(1, { ge: 0, label: 'seed' }),
+  })
 
   const one = useMemo(
-    () => simulate(seed, sessions.value, eta.value, noise.value, tau.value),
-    [seed, sessions.value, eta.value, noise.value, tau.value],
+    () => simulate(state.seed, state.sessions, state.eta, state.noise, state.tau),
+    [state.seed, state.sessions, state.eta, state.noise, state.tau],
   )
   // Spread across independent replications: the price of unbiasedness.
   const spread = useMemo(() => {
     const reps = Array.from({ length: REPS }, (_, k) =>
-      simulate(1000 + k, sessions.value, eta.value, noise.value, tau.value),
+      simulate(1000 + k, state.sessions, state.eta, state.noise, state.tau),
     )
     const sd = (key: keyof Estimates) => {
       let total = 0
@@ -77,29 +70,24 @@ export function IpsClicks() {
       return Math.sqrt(total / ITEMS)
     }
     return { naive: sd('naive'), ips: sd('ips'), clipped: sd('clipped') }
-  }, [sessions.value, eta.value, noise.value, tau.value])
+  }, [state.sessions, state.eta, state.noise, state.tau])
 
-  const series: XYSeries[] = [
-    { name: 'true relevance r', type: 'line', x: IDX, y: REL, emphasis: true },
-    { name: 'naive click rate', type: 'scatter', x: IDX, y: one.naive, slot: 0 },
-    { name: 'IPS estimate', type: 'scatter', x: IDX, y: one.ips, slot: 1 },
-    { name: `clipped IPS (τ = ${tau.value})`, type: 'scatter', x: IDX, y: one.clipped, slot: 2 },
-  ]
+  const series = [
+    { name: 'true relevance r', x: IDX, y: REL, emphasis: true },
+    { name: 'naive click rate', x: IDX, y: one.naive, slot: 0 },
+    { name: 'IPS estimate', x: IDX, y: one.ips, slot: 1 },
+    { name: `clipped IPS (τ = ${state.tau})`, x: IDX, y: one.clipped, slot: 2 },
+  ] as const
 
+  const xAxis = useAxis({ label: 'item (1 = most relevant)', range: [0.5, 10.5] })
+  const yAxis = useAxis({ label: 'click probability if examined', range: [0, 1] })
   return (
-    <Interactive
+    <Figure
       title="Correcting click rates for position"
+      state={state}
       caption="Ten items are shown in every session, ranked by a logging model that orders them by true relevance plus noise, so the most relevant items usually sit at the top. Clicks follow the position-based model with examination π(k) = k^(−η). The naive click rate estimates π(k)·r, not r, and collapses for items that are usually low in the list. Weighting each click by 1/π(k) removes the bias, at the cost of spread: the readout gives the standard deviation of each estimator over 20 independent logs. Capping weights at τ trades some of the bias back for lower spread."
-      controls={
-        <>
-          <ParamSlider label="position bias η" param={eta} />
-          <ParamSlider label="sessions logged" param={sessions} format={(v) => String(v)} />
-          <ParamSlider label="logging-rank noise" param={noise} />
-          <ParamSlider label="clipping cap τ" param={tau} />
-          <ParamButton onClick={() => setSeed((s) => s + 1)}>Resample log</ParamButton>
-        </>
-      }
-      readout={
+
+      readouts={
         <>
           <Readout label="RMSE naive" value={formatNumber(rmse(one.naive))} />
           <Readout label="RMSE IPS" value={formatNumber(rmse(one.ips))} />
@@ -110,13 +98,12 @@ export function IpsClicks() {
         </>
       }
     >
-      <XYChart
-        series={series}
-        xLabel="item (1 = most relevant)"
-        yLabel="click probability if examined"
-        xRange={[0.5, 10.5]}
-        yRange={[0, 1]}
-      />
-    </Interactive>
+      <Plot x={xAxis} y={yAxis}>
+        <Curve {...series[0]} />
+        <Points {...series[1]} />
+        <Points {...series[2]} />
+        <Points {...series[3]} />
+      </Plot>
+    </Figure>
   )
 }

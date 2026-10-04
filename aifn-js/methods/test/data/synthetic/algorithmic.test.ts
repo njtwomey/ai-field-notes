@@ -9,7 +9,7 @@ import {
   SEQUENCE_TASKS,
   sequenceTasks,
   sequenceTaskTruth,
-} from 'aifn-applied/data/synthetic'
+} from 'aifn-methods/data/synthetic'
 
 describe('sequenceTasks', () => {
   it('has the requested split sizes and one row width', () => {

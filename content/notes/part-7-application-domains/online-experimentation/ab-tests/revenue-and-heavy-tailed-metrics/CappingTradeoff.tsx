@@ -1,16 +1,6 @@
-import { useMemo, useState } from 'react'
-import {
-  Interactive,
-  ParamChoice,
-  ParamSlider,
-  Readout,
-  XYChart,
-  formatNumber,
-  useParam,
-  type Handle,
-  type XYSeries,
-} from 'aifn-render'
-import { normalCdf, normalQuantile } from '@/lib/math/special'
+import { useMemo } from 'react'
+import { choice, Curve, Figure, float, formatNumber, Handle, Plot, Readout, useAxis, useFigureState } from 'aifn-render'
+import { normalCdf, normalQuantile } from 'aifn/numerics/special'
 
 type Lift = 'value' | 'rate'
 
@@ -51,46 +41,34 @@ function tradeoff(share: number, p: number, s: number, lift: Lift) {
 }
 
 export function CappingTradeoff() {
-  const [p, setP] = useState(0.05)
-  const [sigma, setSigma] = useState(1.2)
-  const [lift, setLift] = useState<Lift>('value')
-  const share = useParam(2, { min: 0, max: X_MAX, step: 0.25 })
+  const state = useFigureState({
+    share: float(2, { min: 0, max: X_MAX, step: 0.25, label: 'buyers above the cap (%)' }),
+    p: float(0.05, { min: 0.01, max: 0.3, step: 0.01, label: 'purchase rate p' }),
+    sigma: float(1.2, { min: 0.4, max: 2, step: 0.05, label: 'log-normal σ of purchase value' }),
+    lift: choice<Lift>(LIFTS, 'value', { label: 'the treatment raises' }),
+  })
 
-  const series = useMemo<XYSeries[]>(() => {
+  const series = useMemo(() => {
     const xs = Array.from({ length: X_MAX * 4 + 1 }, (_, i) => i / 4)
-    const rows = xs.map((x) => tradeoff(x / 100, p, sigma, lift))
+    const rows = xs.map((x) => tradeoff(x / 100, state.p, state.sigma, state.lift))
     return [
-      { name: 'users needed', type: 'line', x: xs, y: rows.map((r) => Math.min(r.users, Y_MAX)), slot: 0 },
-      { name: 'variance', type: 'line', x: xs, y: rows.map((r) => r.varianceRatio), slot: 1 },
-      { name: 'effect retained', type: 'line', x: xs, y: rows.map((r) => r.retained), slot: 2 },
-    ]
-  }, [p, sigma, lift])
+      { name: 'users needed', x: xs, y: rows.map((r) => Math.min(r.users, Y_MAX)), slot: 0 },
+      { name: 'variance', x: xs, y: rows.map((r) => r.varianceRatio), slot: 1 },
+      { name: 'effect retained', x: xs, y: rows.map((r) => r.retained), slot: 2 },
+    ] as const
+  }, [state.p, state.sigma, state.lift])
 
-  const r = tradeoff(share.value / 100, p, sigma, lift)
-  const handles: Handle[] = [
-    { kind: 'x', at: share.value, label: 'cap', onDrag: (x) => share.set(Math.round(x * 4) / 4) },
-  ]
+  const r = tradeoff(state.share / 100, state.p, state.sigma, state.lift)
 
+  const xAxis = useAxis({ label: 'buyers above the cap (%)', range: [0, X_MAX] })
+  const yAxis = useAxis({ label: 'ratio to the uncapped metric', range: [0, Y_MAX] })
   return (
-    <Interactive
+    <Figure
       title="What capping revenue buys and costs"
+      state={state}
       caption="Revenue per user is zero for non-buyers and log-normal for buyers. Capping each user's revenue at c cuts the variance, but a change in the capped mean is smaller than the change in the true mean. The users needed for fixed power scale as variance ÷ effect², shown relative to no cap (1 = no gain; below 1 = capping helps). When the treatment raises purchase values, much of the effect sits in the tail that the cap removes; when it raises the purchase rate, the capped metric keeps most of it. Drag the line labelled cap, or use its slider; 0% means no cap."
-      controls={
-        <>
-          <ParamSlider label="buyers above the cap (%)" param={share} />
-          <ParamSlider label="purchase rate p" value={p} onChange={setP} min={0.01} max={0.3} step={0.01} />
-          <ParamSlider
-            label="log-normal σ of purchase value"
-            value={sigma}
-            onChange={setSigma}
-            min={0.4}
-            max={2}
-            step={0.05}
-          />
-          <ParamChoice label="the treatment raises" value={lift} onChange={setLift} options={LIFTS} />
-        </>
-      }
-      readout={
+
+      readouts={
         <>
           <Readout label="cap (median purchase = 33.1)" value={Number.isFinite(r.c) ? formatNumber(r.c) : 'none'} />
           <Readout label="variance ratio" value={formatNumber(r.varianceRatio)} />
@@ -99,15 +77,12 @@ export function CappingTradeoff() {
         </>
       }
     >
-      <XYChart
-        height={320}
-        series={series}
-        xRange={[0, X_MAX]}
-        yRange={[0, Y_MAX]}
-        xLabel="buyers above the cap (%)"
-        yLabel="ratio to the uncapped metric"
-        handles={handles}
-      />
-    </Interactive>
+      <Plot x={xAxis} y={yAxis} height={320}>
+        <Curve {...series[0]} />
+        <Curve {...series[1]} />
+        <Curve {...series[2]} />
+        <Handle kind="x" at={state.share} label="cap" onDrag={(x) => state.set('share', Math.round(x * 4) / 4)} />
+      </Plot>
+    </Figure>
   )
 }

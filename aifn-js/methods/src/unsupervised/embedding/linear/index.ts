@@ -1,5 +1,5 @@
 /**
- * `aifn-applied/unsupervised/embedding/linear`: linear embeddings: PCA, kernel PCA, classical and metric MDS, Andrews
+ * `aifn-methods/unsupervised/embedding/linear`: linear embeddings: PCA, kernel PCA, classical and metric MDS, Andrews
  * curves, and the linear latent-variable models (factor analysis, probabilistic PCA, FastICA).
  */
 

@@ -1,4 +1,4 @@
-/** The registry of `aifn-applied/vision/two-view`. */
+/** The registry of `aifn-methods/vision/two-view`. */
 
 import { definer, entries, type Entry, type FunctionInfo } from 'aifn/foundation/registry'
 import * as scene from './scene'

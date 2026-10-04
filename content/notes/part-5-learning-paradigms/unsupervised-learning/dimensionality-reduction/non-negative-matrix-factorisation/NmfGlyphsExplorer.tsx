@@ -13,8 +13,8 @@ import {
   Readout,
   useAxis,
 } from 'aifn-render'
-import { strokeGlyphs } from 'aifn-applied/data/synthetic'
-import { pca } from 'aifn-applied/unsupervised/embedding/linear'
+import { strokeGlyphs } from 'aifn-methods/data/synthetic'
+import { pca } from 'aifn-methods/unsupervised/embedding/linear'
 import { dataset } from 'aifn/learning/estimators'
 import { nmfSteps, type NmfLoss, type NmfSolver } from 'aifn/numerics/factorisation'
 import { stream } from 'aifn/foundation/random'
@@ -29,9 +29,7 @@ const SOLVERS: { value: string; label: string; solver: NmfSolver; loss: NmfLoss 
 
 /** A size x size image from a flat row, top row first, as Raster rows (row 0 at the bottom of the plot). */
 const image = (v: ArrayLike<number>, offset: number, size: number) =>
-  Array.from({ length: size }, (_, r) =>
-    Array.from({ length: size }, (_, c) => v[offset + (size - 1 - r) * size + c]),
-  )
+  Array.from({ length: size }, (_, r) => Array.from({ length: size }, (_, c) => v[offset + (size - 1 - r) * size + c]))
 
 export function NmfGlyphsExplorer() {
   const n = 200
@@ -48,12 +46,9 @@ export function NmfGlyphsExplorer() {
   const run = useMemo(() => {
     const g = strokeGlyphs(stream(`glyphs-${seed}`), { n, p, noise, size })
     const s = SOLVERS.find((x) => x.value === solverKey) ?? SOLVERS[0]
-    const tr = trace(
-      nmfSteps(g.x, { rank, solver: s.solver, loss: s.loss, tolerance: 0 }),
-      undefined,
-      sweeps,
-      { stream: stream(`nmf-${seed}`) },
-    )
+    const tr = trace(nmfSteps(g.x, { rank, solver: s.solver, loss: s.loss, tolerance: 0 }), undefined, sweeps, {
+      stream: stream(`nmf-${seed}`),
+    })
     const steps = tr.steps.map((st) => ({
       t: st.t,
       objective: st.objective,
@@ -151,12 +146,7 @@ export function NmfGlyphsExplorer() {
             />
           </ControlGroup>
           <ControlGroup title="3 · Sweep progression">
-            <Player
-              value={currentStep}
-              onChange={setStep}
-              count={run.steps.length}
-              label="sweep"
-            />
+            <Player value={currentStep} onChange={setStep} count={run.steps.length} label="sweep" />
           </ControlGroup>
         </>
       }
@@ -218,12 +208,7 @@ export function NmfGlyphsExplorer() {
       </Plots>
       <Plots rows={1}>
         <Plot x={sweepAxis} y={objAxis} title="Optimisation objective across sweeps">
-          <Curve
-            name="objective"
-            x={run.steps.map((s) => s.t)}
-            y={run.steps.map((s) => s.objective)}
-            slot={0}
-          />
+          <Curve name="objective" x={run.steps.map((s) => s.t)} y={run.steps.map((s) => s.objective)} slot={0} />
           <Points name="current sweep" x={[now.t]} y={[now.objective]} emphasis />
         </Plot>
       </Plots>

@@ -1,6 +1,16 @@
-import { useMemo, useState } from 'react'
-import { MathText } from 'aifn-render'
-import { Interactive, ParamSlider, Readout, XYChart, formatNumber, type XYSeries } from 'aifn-render'
+import { useMemo } from 'react'
+import {
+  Figure,
+  float,
+  formatNumber,
+  MathText,
+  Plot,
+  Readout,
+  seriesLayers,
+  type SeriesSpec,
+  useAxis,
+  useFigureState,
+} from 'aifn-render'
 
 const WORDS = ['goal', 'match', 'team', 'league', 'club', 'transfer', 'fee', 'deal', 'market', 'shares', 'bank', 'rate']
 const X = WORDS.map((_, i) => i + 1)
@@ -22,43 +32,45 @@ const perplexity = (p: number[]) => 2 ** -p.reduce((h, q) => (q > 0 ? h + q * Ma
 
 /** A mixture of two topics against their weighted product, over a twelve-word vocabulary. */
 export function MixtureVsProduct() {
-  const [theta, setTheta] = useState(0.5)
-  const [width, setWidth] = useState(1.6)
+  const state = useFigureState({
+    theta: float(0.5, { min: 0, max: 1, step: 0.01, label: 'θ₁ (weight of topic 1)' }),
+    width: float(1.6, { min: 0.8, max: 3, step: 0.1, label: 'topic width' }),
+  })
 
   const { sport, finance, mixture, product } = useMemo(() => {
-    const lA = logTopic(3, width)
-    const lB = logTopic(9, width)
+    const lA = logTopic(3, state.width)
+    const lB = logTopic(9, state.width)
     const sport = softmax(lA)
     const finance = softmax(lB)
     // LDA: average the probabilities. ProdLDA with B = log β: average the logits, then renormalise.
-    const mixture = sport.map((p, i) => theta * p + (1 - theta) * finance[i])
-    const product = softmax(lA.map((l, i) => theta * l + (1 - theta) * lB[i]))
+    const mixture = sport.map((p, i) => state.theta * p + (1 - state.theta) * finance[i])
+    const product = softmax(lA.map((l, i) => state.theta * l + (1 - state.theta) * lB[i]))
     return { sport, finance, mixture, product }
-  }, [theta, width])
+  }, [state.theta, state.width])
 
-  const experts: XYSeries[] = [
+  const experts: SeriesSpec[] = [
     { name: 'topic 1 (sport)', type: 'line', x: X, y: sport, slot: 0, dashed: true },
     { name: 'topic 2 (finance)', type: 'line', x: X, y: finance, slot: 1, dashed: true },
   ]
-  const mixSeries: XYSeries[] = [{ name: 'mixture', type: 'bar', x: X, y: mixture, slot: 2 }, ...experts]
-  const prodSeries: XYSeries[] = [{ name: 'product', type: 'bar', x: X, y: product, slot: 3 }, ...experts]
+  const mixSeries: SeriesSpec[] = [{ name: 'mixture', type: 'bar', x: X, y: mixture, slot: 2 }, ...experts]
+  const prodSeries: SeriesSpec[] = [{ name: 'product', type: 'bar', x: X, y: product, slot: 3 }, ...experts]
   const top = (p: number[]) => WORDS[p.indexOf(Math.max(...p))]
 
+  const xAxis = useAxis({ label: 'word', hold: 'union' })
+  const yAxis = useAxis({ label: 'p(w | θ)', range: Y_RANGE })
+  const xAxis2 = useAxis({ label: 'word', hold: 'union' })
+  const yAxis2 = useAxis({ label: 'p(w | θ)', range: Y_RANGE })
   return (
-    <Interactive
+    <Figure
       title="Mixture against product of experts"
+      state={state}
       caption={
         <MathText
           text={`Two topics over twelve words: ${WORDS.map((w, i) => `${i + 1} ${w}`).join(', ')}. Left: LDA's word distribution $\\theta_1\\betavec_1 + \\theta_2\\betavec_2$ spreads over both topics' words. Right: ProdLDA's $\\operatorname{softmax}(\\theta_1\\log\\betavec_1 + \\theta_2\\log\\betavec_2)$ concentrates on the words both topics give some weight, here the football transfer market, and is about as narrow as a single topic.`}
         />
       }
-      controls={
-        <>
-          <ParamSlider label="θ₁ (weight of topic 1)" value={theta} onChange={setTheta} min={0} max={1} step={0.01} />
-          <ParamSlider label="topic width" value={width} onChange={setWidth} min={0.8} max={3} step={0.1} />
-        </>
-      }
-      readout={
+
+      readouts={
         <>
           <Readout label="perplexity of one topic" value={formatNumber(perplexity(sport))} />
           <Readout label="mixture" value={formatNumber(perplexity(mixture))} />
@@ -68,9 +80,13 @@ export function MixtureVsProduct() {
       }
     >
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-        <XYChart series={mixSeries} xLabel="word" yLabel="p(w | θ)" yRange={Y_RANGE} height={260} />
-        <XYChart series={prodSeries} xLabel="word" yLabel="p(w | θ)" yRange={Y_RANGE} height={260} />
+        <Plot x={xAxis} y={yAxis} height={260}>
+          {seriesLayers(mixSeries)}
+        </Plot>
+        <Plot x={xAxis2} y={yAxis2} height={260}>
+          {seriesLayers(prodSeries)}
+        </Plot>
       </div>
-    </Interactive>
+    </Figure>
   )
 }

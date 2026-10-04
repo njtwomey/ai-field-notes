@@ -1,4 +1,4 @@
-/** The registry of `aifn-applied/neural/privacy`: a streamed DP-SGD study of a small MLP across noise multipliers. */
+/** The registry of `aifn-methods/neural/privacy`: a streamed DP-SGD study of a small MLP across noise multipliers. */
 
 import { definer, entries, type Entry, type FunctionInfo } from 'aifn/foundation/registry'
 import * as study from './study'

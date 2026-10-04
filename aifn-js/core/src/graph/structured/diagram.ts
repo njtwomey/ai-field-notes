@@ -1,6 +1,6 @@
 /**
  * Diagram data for a structured graph: plain data in the shape of the lab's `DiagramSpec`
- * (`aifn-lab/src/diagram/types.ts`), with no React. Variables are circles (observed shaded, deterministic dashed,
+ * (`aifn-js/sandbox/lab/src/diagram/types.ts`), with no React. Variables are circles (observed shaded, deterministic dashed,
  * parameters small), factors small squares, groups drawn as plates labelled bottom right (Buntine 1994), directed
  * edges with arrows and undirected ones without. aifn emits the data; the lab draws it.
  */

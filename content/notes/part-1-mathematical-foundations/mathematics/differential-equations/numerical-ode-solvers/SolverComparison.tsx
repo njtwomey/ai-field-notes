@@ -1,16 +1,18 @@
-import { useMemo, useState } from 'react'
+import { useMemo } from 'react'
 import {
-  Interactive,
-  ParamChoice,
-  ParamSlider,
-  Readout,
-  XYChart,
+  choice,
+  Figure,
+  float,
   formatNumber,
-  useParam,
-  type Handle,
-  type XYSeries,
+  Handle,
+  Plot,
+  Readout,
+  seriesLayers,
+  type SeriesSpec,
+  useAxis,
+  useFigureState,
 } from 'aifn-render'
-import { linspace } from '@/lib/math'
+import { linspace, toFlat } from 'aifn/foundation/tensor'
 
 type V2 = [number, number]
 type M2 = [V2, V2]
@@ -116,17 +118,31 @@ function solve(p: Problem, method: Method, h: number) {
   return { ts, xs, error: Math.abs(x[0] - p.exact(n * h)) }
 }
 
-const H_GRID = linspace(Math.log10(0.005), Math.log10(0.5), 40)
+const H_GRID = toFlat(linspace(Math.log10(0.005), Math.log10(0.5), 40))
 
 export function SolverComparison() {
-  const [problem, setProblem] = useState<ProblemKey>('decay')
-  const logH = useParam(-1, { min: Math.log10(0.005), max: Math.log10(0.5), step: 0.01 })
-  const h = 10 ** logH.value
-  const p: Problem = PROBLEMS[problem]
+  const state = useFigureState({
+    problem: choice<ProblemKey>(
+      (Object.keys(PROBLEMS) as ProblemKey[]).map((k) => ({ value: k, label: PROBLEMS[k].label })),
+      'decay',
+      { label: 'problem' },
+    ),
+    logH: float(-1, {
+      min: Math.log10(0.005),
+      max: Math.log10(0.5),
+      step: 0.01,
+      label: 'step size h',
+      points_per_decade: 2,
+      logTransform: 'value-is-log',
+      format: (v) => formatNumber(10 ** v),
+    }),
+  })
+  const h = 10 ** state.logH
+  const p: Problem = PROBLEMS[state.problem]
 
   const runs = useMemo(() => METHODS.map((m) => solve(p, m, h)), [p, h])
-  const exactT = useMemo(() => linspace(0, p.T, 400), [p])
-  const pathSeries = useMemo<XYSeries[]>(
+  const exactT = useMemo(() => toFlat(linspace(0, p.T, 400)), [p])
+  const pathSeries = useMemo<SeriesSpec[]>(
     () => [
       { name: 'exact', type: 'line', x: exactT, y: exactT.map(p.exact), emphasis: true, dashed: true },
       ...runs.map((r, i) => ({ name: METHODS[i], type: 'line' as const, x: r.ts, y: r.xs, slot: i })),
@@ -134,7 +150,7 @@ export function SolverComparison() {
     [runs, exactT, p],
   )
 
-  const errorSeries = useMemo<XYSeries[]>(
+  const errorSeries = useMemo<SeriesSpec[]>(
     () =>
       METHODS.map((m, i) => ({
         name: m,
@@ -146,24 +162,22 @@ export function SolverComparison() {
       })),
     [p],
   )
-  const handles = useMemo<Handle[]>(() => [{ kind: 'x', at: logH.value, label: 'h', onDrag: logH.set }], [logH])
+  const handles = useMemo<Handle[]>(
+    () => [{ kind: 'x', at: state.logH, label: 'h', onDrag: (v: number) => state.set('logH', v) }],
+    [state.bind('logH')],
+  )
 
+  const xAxis = useAxis({ label: 't', range: [0, p.T] })
+  const yAxis = useAxis({ label: 'x', range: p.y })
+  const xAxis2 = useAxis({ label: 'log₁₀ h', hold: 'union' })
+  const yAxis2 = useAxis({ label: 'error at T', range: [1e-14, 1e3], log: true })
   return (
-    <Interactive
+    <Figure
       title="Four solvers on three test problems"
+      state={state}
       caption="Left: each method's solution with step size h against the exact solution (dashed). Right: the error at the final time for every step size, on log–log axes; the slopes are the orders 1, 2, 4 and 1. Drag the vertical line or use the slider to change h. On the stiff problem, the explicit methods blow up once h exceeds their stability limit, while implicit Euler stays stable for every h."
-      controls={
-        <>
-          <ParamChoice
-            label="problem"
-            value={problem}
-            onChange={setProblem}
-            options={(Object.keys(PROBLEMS) as ProblemKey[]).map((k) => ({ value: k, label: PROBLEMS[k].label }))}
-          />
-          <ParamSlider label="step size h" param={logH} format={(v) => formatNumber(10 ** v)} />
-        </>
-      }
-      readout={
+
+      readouts={
         <>
           <Readout label="steps" value={Math.round(p.T / h)} />
           {runs.map((r, i) => (
@@ -177,17 +191,16 @@ export function SolverComparison() {
       }
     >
       <div className="grid gap-4 md:grid-cols-2">
-        <XYChart height={300} series={pathSeries} xLabel="t" yLabel="x" xRange={[0, p.T]} yRange={p.y} />
-        <XYChart
-          height={300}
-          series={errorSeries}
-          xLabel="log₁₀ h"
-          yLabel="error at T"
-          yLog
-          yRange={[1e-14, 1e3]}
-          handles={handles}
-        />
+        <Plot x={xAxis} y={yAxis} height={300}>
+          {seriesLayers(pathSeries)}
+        </Plot>
+        <Plot x={xAxis2} y={yAxis2} height={300}>
+          {seriesLayers(errorSeries)}
+          {(handles ?? []).map((h, i) => (
+            <Handle key={i} {...h} />
+          ))}
+        </Plot>
       </div>
-    </Interactive>
+    </Figure>
   )
 }

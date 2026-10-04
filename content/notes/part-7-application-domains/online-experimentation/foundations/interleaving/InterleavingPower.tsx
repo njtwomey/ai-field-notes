@@ -1,7 +1,7 @@
 import { useMemo } from 'react'
-import { Interactive, ParamSlider, Readout, XYChart, formatNumber, useParam, type XYSeries } from 'aifn-render'
-import { rng } from '@/lib/math'
-import { normalCdf } from '@/lib/math/special'
+import { Curve, Figure, float, formatNumber, int, Plot, Readout, useAxis, useFigureState } from 'aifn-render'
+import { normal, stream, uniform } from 'aifn/foundation/random'
+import { normalCdf } from 'aifn/numerics/special'
 
 const DOCS = 10
 /** Click probability given examination for each document; document 0 is the best. */
@@ -46,7 +46,7 @@ type Stats = { muA: number; muB: number; varA: number; varB: number; pA: number;
 /** Draws of a Gamma activity factor with mean 1 and coefficient of variation cv (Marsaglia–Tsang), fixed seed. */
 function activities(cv: number, n: number): number[] {
   if (cv < 1e-3) return new Array(n).fill(1)
-  const r = rng(17)
+  const r = stream(17)
   const shape = 1 / (cv * cv)
   const boost = shape < 1
   const k = boost ? shape + 1 : shape
@@ -55,15 +55,15 @@ function activities(cv: number, n: number): number[] {
   return Array.from({ length: n }, () => {
     let x = 0
     for (;;) {
-      const z = r.normal()
+      const z = normal(r)
       const v = (1 + c * z) ** 3
       if (v <= 0) continue
-      if (Math.log(r.uniform()) < 0.5 * z * z + d - d * v + d * Math.log(v)) {
+      if (Math.log(uniform(r)) < 0.5 * z * z + d - d * v + d * Math.log(v)) {
         x = d * v
         break
       }
     }
-    if (boost) x *= r.uniform() ** (1 / shape)
+    if (boost) x *= uniform(r) ** (1 / shape)
     return x / shape
   })
 }
@@ -135,42 +135,40 @@ const power = (effect: number, n: number) => normalCdf(Math.abs(effect) * Math.s
 
 /** Power of an A/B test on clicks per session against team-draft interleaving, as the number of users grows. */
 export function InterleavingPower() {
-  const swap = useParam(3, { min: 2, max: 10, step: 1 })
-  const cv = useParam(1, { min: 0, max: 2, step: 0.1 })
-  const eta = useParam(1, { min: 0.2, max: 2, step: 0.1 })
-  const s = useMemo(() => compute(swap.value, cv.value, eta.value), [swap.value, cv.value, eta.value])
+  const state = useFigureState({
+    swap: int(3, { min: 2, max: 10, step: 1, label: 'top documents reversed by B', format: (v) => String(v) }),
+    cv: float(1, { min: 0, max: 2, step: 0.1, label: 'user heterogeneity (CV)' }),
+    eta: float(1, { min: 0.2, max: 2, step: 0.1, label: 'position bias η' }),
+  })
+  const s = useMemo(() => compute(state.swap, state.cv, state.eta), [state.swap, state.cv, state.eta])
 
   // A/B: N users split evenly; the difference of means has variance (varA + varB)/(N/2).
   const abEffect = (s.muA - s.muB) / Math.sqrt(2 * (s.varA + s.varB))
   // Interleaving: every user is one session; the per-session preference is +1, −1 or 0.
   const m = s.pA - s.pB
   const ilEffect = m / Math.sqrt(Math.max(s.pA + s.pB - m * m, 1e-9))
-  const series: XYSeries[] = [
+  const series = [
     {
       name: 'A/B test on clicks per session',
-      type: 'line',
       x: LOGN,
       y: LOGN.map((l) => power(abEffect, 10 ** l)),
       slot: 0,
     },
-    { name: 'team-draft interleaving', type: 'line', x: LOGN, y: LOGN.map((l) => power(ilEffect, 10 ** l)), slot: 1 },
-  ]
+    { name: 'team-draft interleaving', x: LOGN, y: LOGN.map((l) => power(ilEffect, 10 ** l)), slot: 1 },
+  ] as const
   const needed = (effect: number) => (effect === 0 ? Infinity : ((Z + 0.841621) / effect) ** 2)
   const nAb = needed(abEffect)
   const nIl = needed(ilEffect)
 
+  const xAxis = useAxis({ label: 'log₁₀ total users', range: [LOGN[0], LOGN[LOGN.length - 1]] })
+  const yAxis = useAxis({ label: 'power', range: [0, 1] })
   return (
-    <Interactive
+    <Figure
       title="How much traffic each design needs"
+      state={state}
       caption="Ranker A orders ten documents by quality; ranker B shows the same documents but reverses the order of the top few. Users differ in how much they click (a Gamma activity factor with the given coefficient of variation) and examine rank k with probability k^(−η). The A/B test compares clicks per session between two groups of users; interleaving shows every user one team-draft list and counts whose documents got more clicks. Quantities are computed exactly for a fixed sample of 400 users, and the chart shows each design's power at the 5% level against the total number of users. Heterogeneous users inflate the A/B test's noise, and weak position bias makes clicks per session almost blind to order; interleaving is largely immune to both because each user compares the two rankers directly."
-      controls={
-        <>
-          <ParamSlider label="top documents reversed by B" param={swap} format={(v) => String(v)} withArrows />
-          <ParamSlider label="user heterogeneity (CV)" param={cv} />
-          <ParamSlider label="position bias η" param={eta} />
-        </>
-      }
-      readout={
+
+      readouts={
         <>
           <Readout label="clicks per session A / B" value={`${formatNumber(s.muA)} / ${formatNumber(s.muB)}`} />
           <Readout label="interleaving wins A / B" value={`${formatNumber(s.pA)} / ${formatNumber(s.pB)}`} />
@@ -183,13 +181,10 @@ export function InterleavingPower() {
         </>
       }
     >
-      <XYChart
-        series={series}
-        xLabel="log₁₀ total users"
-        yLabel="power"
-        xRange={[LOGN[0], LOGN[LOGN.length - 1]]}
-        yRange={[0, 1]}
-      />
-    </Interactive>
+      <Plot x={xAxis} y={yAxis}>
+        <Curve {...series[0]} />
+        <Curve {...series[1]} />
+      </Plot>
+    </Figure>
   )
 }

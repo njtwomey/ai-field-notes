@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { tensor, toFlat } from 'aifn/foundation/tensor'
 import { dataset } from 'aifn/learning/estimators'
-import { isotonicRegressor } from '../../src/learning/isotonic'
+import { isotonicRegressor } from 'aifn-methods/learning'
 
 describe('isotonicRegressor estimator', () => {
   it('fits the canonical worked example sequence', () => {

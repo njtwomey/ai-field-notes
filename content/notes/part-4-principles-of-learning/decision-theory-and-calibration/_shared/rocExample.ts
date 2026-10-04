@@ -1,5 +1,5 @@
-import { rng } from '@/lib/math'
 import { rocHull, rocPoints, type Point } from './calibration'
+import { normal, stream } from 'aifn/foundation/random'
 
 /**
  * A small scored test set shared by the ROC-analysis figures: 25 negatives with scores N(0, 1) and 25 positives with
@@ -7,15 +7,15 @@ import { rocHull, rocPoints, type Point } from './calibration'
  * so its convex hull differs from it.
  */
 export function rocExample(seed = 11) {
-  const g = rng(seed)
+  const g = stream(seed)
   const scores: number[] = []
   const labels: boolean[] = []
   for (let i = 0; i < 25; i++) {
-    scores.push(g.normal())
+    scores.push(normal(g))
     labels.push(false)
   }
   for (let i = 0; i < 25; i++) {
-    scores.push(1.4 + g.normal())
+    scores.push(1.4 + normal(g))
     labels.push(true)
   }
   const curve = rocPoints(scores, labels)

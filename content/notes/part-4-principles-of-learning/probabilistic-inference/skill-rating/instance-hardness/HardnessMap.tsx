@@ -1,5 +1,5 @@
-import { useMemo, useState } from 'react'
-import { Interactive, ParamChoice, ParamSlider, Readout, XYChart, formatNumber, type XYSeries } from 'aifn-render'
+import { useMemo } from 'react'
+import { choice, Figure, float, formatNumber, int, Plot, Points, Readout, useAxis, useFigureState } from 'aifn-render'
 import { instanceHardness, respond, simulate, type Point } from '../_shared/instanceIrt'
 
 type Colour = 'ih' | 'kdn' | 'label'
@@ -24,37 +24,46 @@ const NAMES: Record<Colour, string[]> = {
 }
 
 export function HardnessMap() {
-  const [colour, setColour] = useState<Colour>('ih')
-  const [noise, setNoise] = useState(0.1)
-  const [seed, setSeed] = useState(1)
+  const state = useFigureState({
+    colour: choice<Colour>(
+      [
+        { value: 'ih', label: 'instance hardness' },
+        { value: 'kdn', label: 'kDN' },
+        { value: 'label', label: 'given label' },
+      ],
+      'ih',
+      { label: 'colour by' },
+    ),
+    noise: float(0.1, { min: 0, max: 0.3, step: 0.05, label: 'label noise rate' }),
+    seed: int(1, { min: 1, max: 20, step: 1, label: 'seed' }),
+  })
 
   const run = useMemo(() => {
-    const data = simulate(seed, noise)
-    const resp = respond(data, seed)
+    const data = simulate(state.seed, state.noise)
+    const resp = respond(data, state.seed)
     return { data, ih: instanceHardness(resp.probs), kdn: kdn(data.test.x, data.test.y, K) }
-  }, [seed, noise])
+  }, [state.seed, state.noise])
   const { data, ih } = run
 
-  const series = useMemo<XYSeries[]>(() => {
+  const series = useMemo(() => {
     const group =
-      colour === 'label'
+      state.colour === 'label'
         ? data.test.y.map((y, j) => (data.test.flipped[j] ? 2 : y))
-        : colour === 'ih'
+        : state.colour === 'ih'
           ? ih.map((v) => (v < 1 / 3 ? 0 : v < 2 / 3 ? 1 : 2))
           : run.kdn.map((v) => (v === 0 ? 0 : v < 0.5 ? 1 : 2))
     return [
       {
         name: 'instances',
-        type: 'scatter',
         x: data.test.x.map((p) => p[0]),
         y: data.test.x.map((p) => p[1]),
         group,
-        groupNames: NAMES[colour],
+        groupNames: NAMES[state.colour],
       },
-    ]
-  }, [data, ih, run.kdn, colour])
+    ] as const
+  }, [data, ih, run.kdn, state.colour])
 
-  const scatter = useMemo<XYSeries[]>(() => {
+  const scatter = useMemo(() => {
     // Spread the five possible kDN values sideways so that tied points stay visible.
     const jitter = data.test.x.map((_, j) => ((j * 0.618) % 1) * 0.1 - 0.05)
     const x = run.kdn.map((v, j) => v + jitter[j])
@@ -62,9 +71,9 @@ export function HardnessMap() {
     const clean = pick(false)
     const flip = pick(true)
     return [
-      { name: 'clean label', type: 'scatter', x: clean.map((j) => x[j]), y: clean.map((j) => ih[j]), slot: 0 },
-      { name: 'flipped label', type: 'scatter', x: flip.map((j) => x[j]), y: flip.map((j) => ih[j]), slot: 2 },
-    ]
+      { name: 'clean label', x: clean.map((j) => x[j]), y: clean.map((j) => ih[j]), slot: 0 },
+      { name: 'flipped label', x: flip.map((j) => x[j]), y: flip.map((j) => ih[j]), slot: 2 },
+    ] as const
   }, [data, ih, run.kdn])
 
   const flipped = data.test.flipped
@@ -73,27 +82,17 @@ export function HardnessMap() {
     return sel.length ? sel.reduce((a, b) => a + b, 0) / sel.length : NaN
   }
 
+  const xAxis = useAxis({ label: 'x₁', range: [-4.5, 4.5] })
+  const yAxis = useAxis({ label: 'x₂', range: [-2.5, 2.5], equal: xAxis })
+  const xAxis2 = useAxis({ label: 'kDN (k = 5)', range: [-0.1, 1.1] })
+  const yAxis2 = useAxis({ label: 'instance hardness', range: [0, 1] })
   return (
-    <Interactive
+    <Figure
       title="Instance hardness from a population of classifiers, and one of its explanations"
+      state={state}
       caption="Seventy test instances from two overlapping Gaussian classes, with a fraction of the labels flipped. Instance hardness (IH) is one minus the mean probability that seventeen classifiers of different skill give the instance's label. kDN is the share of its five nearest neighbours with another label; it needs no classifiers. Colour the points by either, or by the label. The lower chart plots one against the other: flipped labels sit at the top right, boundary points in the middle."
-      controls={
-        <>
-          <ParamChoice
-            label="colour by"
-            value={colour}
-            onChange={setColour}
-            options={[
-              { value: 'ih', label: 'instance hardness' },
-              { value: 'kdn', label: 'kDN' },
-              { value: 'label', label: 'given label' },
-            ]}
-          />
-          <ParamSlider label="label noise rate" value={noise} onChange={setNoise} min={0} max={0.3} step={0.05} />
-          <ParamSlider label="seed" value={seed} onChange={setSeed} min={1} max={20} step={1} />
-        </>
-      }
-      readout={
+
+      readouts={
         <>
           <Readout label="mean IH, clean labels" value={formatNumber(meanOf(ih, (j) => !flipped[j]))} />
           <Readout label="mean IH, flipped labels" value={formatNumber(meanOf(ih, (j) => flipped[j]))} />
@@ -102,25 +101,14 @@ export function HardnessMap() {
       }
     >
       <div className="space-y-2">
-        <XYChart
-          series={series}
-          xLabel="x₁"
-          yLabel="x₂"
-          xRange={[-4.5, 4.5]}
-          yRange={[-2.5, 2.5]}
-          equalAspect
-          ariaLabel="Test instances in feature space coloured by hardness"
-        />
-        <XYChart
-          series={scatter}
-          xLabel="kDN (k = 5)"
-          yLabel="instance hardness"
-          xRange={[-0.1, 1.1]}
-          yRange={[0, 1]}
-          height={300}
-          ariaLabel="Instance hardness against k-disagreeing neighbours"
-        />
+        <Plot x={xAxis} y={yAxis} ariaLabel={'Test instances in feature space coloured by hardness'}>
+          <Points {...series[0]} />
+        </Plot>
+        <Plot x={xAxis2} y={yAxis2} height={300} ariaLabel={'Instance hardness against k-disagreeing neighbours'}>
+          <Points {...scatter[0]} />
+          <Points {...scatter[1]} />
+        </Plot>
       </div>
-    </Interactive>
+    </Figure>
   )
 }

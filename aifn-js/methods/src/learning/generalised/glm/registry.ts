@@ -1,4 +1,4 @@
-/** The registry of `aifn-applied/learning/generalised/glm`. */
+/** The registry of `aifn-methods/learning/generalised/glm`. */
 
 import { definer, entries, type AlgorithmInfo, type Entry, type FunctionInfo } from 'aifn/foundation/registry'
 import * as logistic from './logistic'

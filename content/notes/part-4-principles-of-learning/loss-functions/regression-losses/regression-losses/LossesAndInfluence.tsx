@@ -1,8 +1,18 @@
 import { useMemo } from 'react'
-import { Interactive, ParamSlider, Readout, XYChart, formatNumber, useParam, type XYSeries } from 'aifn-render'
-import { linspace } from '@/lib/math'
+import {
+  Figure,
+  formatNumber,
+  Plot,
+  Readout,
+  seriesLayers,
+  type SeriesSpec,
+  slider,
+  useAxis,
+  useFigureState,
+} from 'aifn-render'
+import { linspace, toFlat } from 'aifn/foundation/tensor'
 
-const R = linspace(-4, 4, 321)
+const R = toFlat(linspace(-4, 4, 321))
 const DATA = [1, 2, 3, 6, 18]
 
 const clip = (r: number, d: number) => Math.max(-d, Math.min(d, r))
@@ -22,12 +32,14 @@ function solve(psiSum: (theta: number) => number, lo = -100, hi = 100) {
 
 /** Regression losses as functions of the residual, and their derivatives (influence functions). */
 export function LossesAndInfluence() {
-  const delta = useParam(1, { min: 0.2, max: 3, step: 0.1 })
-  const tau = useParam(0.7, { min: 0.05, max: 0.95, step: 0.05 })
+  const state = useFigureState({
+    delta: slider(0.2, 3, 1, { step: 0.1, label: 'Huber threshold δ' }),
+    tau: slider(0.05, 0.95, 0.7, { step: 0.05, label: 'quantile level τ' }),
+  })
 
-  const [losses, influence] = useMemo((): [XYSeries[], XYSeries[]] => {
-    const d = delta.value
-    const t = tau.value
+  const [losses, influence] = useMemo((): [SeriesSpec[], SeriesSpec[]] => {
+    const d = state.delta
+    const t = state.tau
     return [
       [
         { name: 'squared ½r²', type: 'line', x: R, y: R.map((r) => 0.5 * r * r), slot: 0 },
@@ -44,25 +56,25 @@ export function LossesAndInfluence() {
         { name: 'quantile (pinball)', type: 'line', x: R, y: R.map((r) => (r < 0 ? t - 1 : t)), slot: 4 },
       ],
     ]
-  }, [delta.value, tau.value])
+  }, [state.delta, state.tau])
 
   const sorted = [...DATA].sort((a, b) => a - b)
   const mean = DATA.reduce((a, b) => a + b, 0) / DATA.length
-  const huberFit = solve((th) => DATA.reduce((a, y) => a + clip(y - th, delta.value), 0))
+  const huberFit = solve((th) => DATA.reduce((a, y) => a + clip(y - th, state.delta), 0))
   const logCoshFit = solve((th) => DATA.reduce((a, y) => a + Math.tanh(y - th), 0))
-  const quantile = sorted[Math.max(0, Math.ceil(DATA.length * tau.value - 1e-9) - 1)]
+  const quantile = sorted[Math.max(0, Math.ceil(DATA.length * state.tau - 1e-9) - 1)]
 
+  const xAxis = useAxis({ label: 'residual r', range: [-4, 4] })
+  const yAxis = useAxis({ label: 'loss', range: [0, 4] })
+  const xAxis2 = useAxis({ label: 'residual r', range: [-4, 4] })
+  const yAxis2 = useAxis({ label: 'ψ(r) = dloss/dr', range: [-3, 3] })
   return (
-    <Interactive
+    <Figure
       title="Regression losses and their influence functions"
+      state={state}
       caption="Left: each loss as a function of the residual r = y − ŷ. Right: its derivative ψ(r), the pull that one residual exerts on the fit. The squared loss pulls in proportion to the residual, so one outlier can drag the fit anywhere. The absolute, Huber, log-cosh and quantile losses have bounded pull. The readout gives the constant that minimises each loss on the five values 1, 2, 3, 6, 18."
-      controls={
-        <>
-          <ParamSlider label="Huber threshold δ" param={delta} />
-          <ParamSlider label="quantile level τ" param={tau} />
-        </>
-      }
-      readout={
+
+      readouts={
         <>
           <Readout label="squared → mean" value={formatNumber(mean)} />
           <Readout label="absolute → median" value={formatNumber(sorted[2])} />
@@ -73,16 +85,13 @@ export function LossesAndInfluence() {
       }
     >
       <div className="grid gap-4 md:grid-cols-2">
-        <XYChart series={losses} xLabel="residual r" yLabel="loss" xRange={[-4, 4]} yRange={[0, 4]} height={320} />
-        <XYChart
-          series={influence}
-          xLabel="residual r"
-          yLabel="ψ(r) = dloss/dr"
-          xRange={[-4, 4]}
-          yRange={[-3, 3]}
-          height={320}
-        />
+        <Plot x={xAxis} y={yAxis} height={320}>
+          {seriesLayers(losses)}
+        </Plot>
+        <Plot x={xAxis2} y={yAxis2} height={320}>
+          {seriesLayers(influence)}
+        </Plot>
       </div>
-    </Interactive>
+    </Figure>
   )
 }

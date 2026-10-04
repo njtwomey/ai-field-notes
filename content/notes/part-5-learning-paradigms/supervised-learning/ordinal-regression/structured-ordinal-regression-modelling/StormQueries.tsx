@@ -1,18 +1,22 @@
 import { useMemo, useState } from 'react'
-import { MathText } from 'aifn-render'
-import { Diagram } from 'aifn-render'
-import { link, variable } from 'aifn-render'
-import type { DiagramSpec } from 'aifn-render'
 import {
-  Heatmap,
-  Interactive,
-  ParamChoice,
-  ParamSlider,
-  Readout,
+  choice,
+  Diagram,
+  Figure,
   formatNumber,
-  type Handle,
-  type HeatmapOverlay,
+  Handle,
+  link,
+  MathText,
+  Plot,
+  Points,
+  Raster,
+  Readout,
+  Slider,
+  useAxis,
+  useFigureState,
+  variable,
 } from 'aifn-render'
+import type { DiagramSpec } from 'aifn-render'
 import { useClassColors } from '../_shared/classColor'
 import { OrdinalDataControls } from '../_shared/OrdinalDataControls'
 import { NYSTROM_LANDMARKS, ordinalMetrics, type Point } from '../_shared/ordinal'
@@ -55,12 +59,14 @@ const VIEWS = [
 ]
 
 export function StormQueries() {
-  const [view, setView] = useState<View>('valid')
-  const [features, setFeatures] = useState<Features>('storm-poly2')
+  const state = useFigureState({
+    features: choice<Features>(FEATURES, 'storm-poly2', { label: 'features' }),
+    view: choice<View>(VIEWS, 'valid', { label: 'map' }),
+  })
   const { spec, setSpec, resolution, setResolution } = useOrdinalData({ shape: 'spiral', k: 10 })
   const [range, setRange] = useState<[number, number]>([3, 5])
   const [query, setQuery] = useState<Point>([0, 1.5])
-  const { fitted, data: d, fitting } = useFit(spec, features)
+  const { fitted, data: d, fitting } = useFit(spec, state.features)
   const grid = useGrid(d.range, resolution)
   const colors = useClassColors(d.k)
   const model = fitted.storm!
@@ -69,26 +75,26 @@ export function StormQueries() {
 
   const z = useMemo(() => {
     const at = (x: Point) =>
-      view === 'valid'
+      state.view === 'valid'
         ? model.interval(x, lo - 1, hi - 1)
-        : view === 'chain'
+        : state.view === 'chain'
           ? model.bitInterval(x, lo - 1, hi - 1)
           : model.invalidMass(x)
     return grid.map((y) => grid.map((x) => at([x, y])))
-  }, [model, lo, hi, grid, view])
+  }, [model, lo, hi, grid, state.view])
   // Points in their class colours, as in every ordinal figure; the marker shape says whether the class is in [a, b].
-  const overlay = useMemo<HeatmapOverlay[]>(
-    () => [
-      {
-        name: 'training point',
-        type: 'scatter',
-        x: d.train.x.map((p) => p[0]),
-        y: d.train.x.map((p) => p[1]),
-        colors: d.train.y.map((y) => colors[y]),
-        group: d.train.y.map((y) => (y >= lo - 1 && y <= hi - 1 ? 0 : 1)),
-        groupNames: ['class in [a, b]', 'class outside [a, b]'],
-      },
-    ],
+  const overlay = useMemo(
+    () =>
+      [
+        {
+          name: 'training point',
+          x: d.train.x.map((p) => p[0]),
+          y: d.train.x.map((p) => p[1]),
+          colors: d.train.y.map((y) => colors[y]),
+          group: d.train.y.map((y) => (y >= lo - 1 && y <= hi - 1 ? 0 : 1)),
+          groupNames: ['class in [a, b]', 'class outside [a, b]'],
+        },
+      ] as const,
     [d, lo, hi, colors],
   )
 
@@ -102,24 +108,20 @@ export function StormQueries() {
     }),
     [d, fitted, model],
   )
-  const handles: Handle[] = [{ kind: 'point', at: query, label: 'x', onDrag: setQuery }]
 
+  const xAxis = useAxis({ label: 'x₁' })
+  const yAxis = useAxis({ label: 'x₂' })
   return (
-    <Interactive
+    <Figure
       title="Querying a StORM chain"
+      state={state}
       caption={
         <MathText text="The background shows one of three maps from a StORM fitted to the training points, with potentials linear in the inputs or in a polynomial or Nyström expansion of them. The default is $P(a \le y \le b \mid \xvec)$ over the valid codes: the probabilities of classes $a$ to $b$ divided by the total probability of all $K$ valid codes. The chain marginal $P(y_{a-1} = 1, y_b = 0 \mid \xvec)$ gives the same number where the chain puts its mass on valid codes, but it also counts invalid codes, and far from the data those take almost all the mass; the third map shows that invalid-code mass. The diagram shows the chain of up-to-$k$ bits at the query point, each shaded by $P(y_n = 1 \mid \xvec)$. Points are coloured by class; a circle marks a class inside $[a, b]$ and a square one outside it. Drag the query point; set the interval with the sliders." />
       }
       controls={
         <>
           <OrdinalDataControls spec={spec} setSpec={setSpec} resolution={resolution} setResolution={setResolution} />
-          <div className="sm:col-span-2 lg:col-span-3">
-            <ParamChoice label="features" value={features} onChange={setFeatures} options={FEATURES} />
-          </div>
-          <div className="sm:col-span-2 lg:col-span-3">
-            <ParamChoice label="map" value={view} onChange={setView} options={VIEWS} />
-          </div>
-          <ParamSlider
+          <Slider
             label="lowest class a"
             value={lo}
             onChange={(v) => setRange([v, Math.max(v, hi)])}
@@ -127,7 +129,7 @@ export function StormQueries() {
             max={d.k}
             step={1}
           />
-          <ParamSlider
+          <Slider
             label="highest class b"
             value={hi}
             onChange={(v) => setRange([Math.min(lo, v), v])}
@@ -137,7 +139,7 @@ export function StormQueries() {
           />
         </>
       }
-      readout={
+      readouts={
         <>
           {classProbs.map((p, k) => (
             <Readout key={k} label={`P(y = ${k + 1})`} value={formatNumber(p)} />
@@ -151,21 +153,19 @@ export function StormQueries() {
       }
     >
       <div className="grid grid-cols-1 items-center gap-4 lg:grid-cols-[3fr_2fr]">
-        <Heatmap
-          x={grid}
-          y={grid}
-          z={z}
-          range={[0, 1]}
-          overlay={overlay}
-          handles={handles}
-          xLabel="x₁"
-          yLabel="x₂"
-          valueLabel={view === 'invalid' ? 'invalid-code mass' : `P(${lo} ≤ y ≤ ${hi})`}
-          height={360}
-          ariaLabel="Interval probability over the input plane"
-        />
+        <Plot x={xAxis} y={yAxis} height={360} ariaLabel={'Interval probability over the input plane'}>
+          <Raster
+            x={grid}
+            y={grid}
+            z={z}
+            range={[0, 1]}
+            valueLabel={state.view === 'invalid' ? 'invalid-code mass' : `P(${lo} ≤ y ≤ ${hi})`}
+          />
+          <Points {...overlay[0]} live />
+          <Handle kind="point" at={query} label="x" onDrag={setQuery} />
+        </Plot>
         <Diagram spec={chain(marginals)} ariaLabel="Chain of up-to-k bits shaded by their marginal probabilities" />
       </div>
-    </Interactive>
+    </Figure>
   )
 }

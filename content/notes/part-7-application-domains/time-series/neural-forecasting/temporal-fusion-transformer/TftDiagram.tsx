@@ -1,5 +1,4 @@
-import { Interactive } from 'aifn-render'
-import { Diagram } from 'aifn-render'
+import { Diagram, Figure } from 'aifn-render'
 import type { DiagramSpec } from 'aifn-render'
 
 const PAST = 4.4
@@ -70,7 +69,7 @@ const spec: DiagramSpec = {
 /** Where each input enters the temporal fusion transformer, from the bottom up. */
 export function TftDiagram() {
   return (
-    <Interactive
+    <Figure
       title="The temporal fusion transformer"
       caption="Read from the bottom. Static, past and known-future inputs each pass through their own variable selection network. Static context vectors condition the selection, initialise the LSTM encoder and enrich the temporal features. The LSTM encoder–decoder handles local patterns, a single masked attention layer handles long-range ones, and gated skips let the model bypass any block. Linear quantile heads read the future positions."
     >
@@ -78,6 +77,6 @@ export function TftDiagram() {
         spec={spec}
         ariaLabel="Temporal fusion transformer: static, past and future inputs through variable selection; static encoders produce context vectors; LSTM encoder and decoder; static enrichment; masked attention; gated position-wise GRN; quantile heads"
       />
-    </Interactive>
+    </Figure>
   )
 }

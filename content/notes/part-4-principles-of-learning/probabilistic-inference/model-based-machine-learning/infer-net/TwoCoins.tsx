@@ -1,7 +1,5 @@
-import { Diagram } from 'aifn-render'
-import { factor, link, variable } from 'aifn-render'
+import { Diagram, factor, Figure, link, variable } from 'aifn-render'
 import type { DiagramSpec } from 'aifn-render'
-import { Interactive } from 'aifn-render'
 
 const line = (a: string, b: string, label?: string) =>
   link(a, b, false, label ? { label, labelSide: 'left', labelRotate: false } : {})
@@ -28,7 +26,7 @@ const SPEC: DiagramSpec = {
 /** Infer.NET's first tutorial as a factor graph, with the message that answers its backward query. */
 export function TwoCoins() {
   return (
-    <Interactive
+    <Figure
       title="The two-coins model"
       caption="Two fair coins c₁ and c₂ and their AND b, 'both heads'. With b observed false (shaded), the AND factor sends c₁ the probability that b is false for each value of c₁: 0.5 if c₁ is heads (c₂ must be tails) and 1 if it is tails. The posterior is P(c₁ = heads) = 0.5 · 0.5 / (0.5 · 0.5 + 0.5 · 1) = 1/3, which Infer.NET prints as Bernoulli(0.3333)."
     >
@@ -36,7 +34,7 @@ export function TwoCoins() {
         spec={SPEC}
         ariaLabel="Factor graph: two coin variables with Bernoulli priors joined by an AND factor to the observed both-heads variable"
       />
-    </Interactive>
+    </Figure>
   )
 }
 
@@ -62,7 +60,7 @@ const PIPELINE: DiagramSpec = {
 /** How Infer.NET turns a model into inference code. */
 export function InferPipeline() {
   return (
-    <Interactive
+    <Figure
       title="How Infer.NET runs a model"
       caption="The model definition and the queries go to the model compiler, which chooses a message-passing schedule for the requested algorithm and writes it out as source code. The compiled algorithm then runs on any observed values without recompiling."
     >
@@ -70,6 +68,6 @@ export function InferPipeline() {
         spec={PIPELINE}
         ariaLabel="Pipeline: model definition to model compiler to generated source code to compiled algorithm, which takes observed values and returns posterior marginals"
       />
-    </Interactive>
+    </Figure>
   )
 }

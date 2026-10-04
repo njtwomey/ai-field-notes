@@ -15,7 +15,7 @@ import {
   topFeatures,
   transitionWeights,
   type LabelledSequence,
-} from 'aifn-applied/inference/sequence-models'
+} from 'aifn-methods/inference/sequence-models'
 import { child, stream, uniform } from 'aifn/foundation/random'
 import { toFlat } from 'aifn/foundation/tensor'
 import { run } from 'aifn/foundation/trace'

@@ -1,5 +1,5 @@
 /**
- * `aifn-applied/learning/neighbours`: k-nearest-neighbour classification and regression.
+ * `aifn-methods/learning/neighbours`: k-nearest-neighbour classification and regression.
  */
 
 export {

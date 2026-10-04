@@ -1,3 +1,5 @@
+import { normal, stream, uniform } from 'aifn/foundation/random'
+import { normalCdf, normalPdf, sigmoid } from 'aifn/numerics/special'
 /**
  * Shared data, models and metrics for the ordinal regression notes. Every figure in the category draws from the same
  * seeded datasets, so a model can be compared with another on identical points.
@@ -5,8 +7,6 @@
  * Classes are 0-based in code (0, …, K − 1) and 1-based in the notes. Thresholds θ_0 < … < θ_{K−2} split a real score
  * into K intervals; θ_{−1} = −∞ and θ_{K−1} = +∞ are implicit.
  */
-import { rng, sigmoid } from '@/lib/math'
-import { normalCdf, normalPdf } from '@/lib/math/special'
 
 export type Point = [number, number]
 export type Sample = { x: Point[]; y: number[] }
@@ -105,15 +105,15 @@ export const classOf = (t: number, k: number) => Math.min(Math.floor(t * k), k -
 
 /** `perClass` points in each class, with t uniform within the class's interval, so every class has the same count. */
 function draw(spec: DataSpec, perClass: number, seed: number): Sample {
-  const r = rng(seed)
+  const r = stream(seed)
   const x: Point[] = []
   const y: number[] = []
   for (let c = 0; c < spec.k; c++)
     for (let i = 0; i < perClass; i++) {
-      const t = (c + r.uniform()) / spec.k
+      const t = (c + uniform(r)) / spec.k
       const [cx, cy] = curve(spec.shape, t, spec.k)
       const sd = spec.noise * noiseScale(spec.shape, t, spec.k)
-      x.push([cx + sd * r.normal(), cy + sd * r.normal()])
+      x.push([cx + sd * normal(r), cy + sd * normal(r)])
       y.push(c)
     }
   return { x, y }
@@ -561,7 +561,7 @@ function fitRegression(data: Sample, k: number): Fitted {
   return {
     probs: (x) =>
       cumulativeProbs(
-        normalCdf,
+        (v: number) => normalCdf(v),
         fit(x) / sigma,
         th.map((t) => t / sigma),
       ),
@@ -680,8 +680,8 @@ function polynomial(degree: number, train: Point[]): FeatureMap {
  * equal k(x)ᵀK_mm⁻¹k(x′). This is K_nm K_mm^{−1/2} up to a rotation, which a linear model does not notice.
  */
 function nystrom(train: Point[], m = NYSTROM_LANDMARKS, seed = 3): FeatureMap {
-  const r = rng(seed)
-  const order = train.map((_, i) => i).sort(() => r.uniform() - 0.5)
+  const r = stream(seed)
+  const order = train.map((_, i) => i).sort(() => uniform(r) - 0.5)
   const z = order.slice(0, Math.min(m, train.length)).map((i) => train[i])
   const dists = z
     .flatMap((a, i) => z.slice(i + 1).map((b) => Math.hypot(a[0] - b[0], a[1] - b[1])))
@@ -899,15 +899,27 @@ function heads(k: number): Record<'orcnn' | 'coral' | 'corn' | 'sord', Head> {
     })
     return [loss, dz]
   }
-  const exceed = (z: number[]) => exceedanceProbs(z.map(sigmoid))
+  const exceed = (z: number[]) => exceedanceProbs(z.map((v: number) => sigmoid(v)))
   // CORN: output j estimates P(y > j | y > j − 1) and is trained only on the examples that reached level j.
   const cornExceed = (z: number[]) => {
     let run = 1
     return z.map((zj) => (run *= sigmoid(zj)))
   }
   return {
-    orcnn: { outputs: k - 1, shared: false, loss: binary, probs: exceed, predict: (z) => countRule(z.map(sigmoid)) },
-    coral: { outputs: k - 1, shared: true, loss: binary, probs: exceed, predict: (z) => countRule(z.map(sigmoid)) },
+    orcnn: {
+      outputs: k - 1,
+      shared: false,
+      loss: binary,
+      probs: exceed,
+      predict: (z) => countRule(z.map((v: number) => sigmoid(v))),
+    },
+    coral: {
+      outputs: k - 1,
+      shared: true,
+      loss: binary,
+      probs: exceed,
+      predict: (z) => countRule(z.map((v: number) => sigmoid(v))),
+    },
     corn: {
       outputs: k - 1,
       shared: false,
@@ -947,12 +959,8 @@ function mlpProblem(data: Sample, head: Head, seed = 7): Problem {
   const out = head.outputs
   const inDim = 3 * H // W₁ (H × 2) and b₁
   const headDim = head.shared ? H + out : out * (H + 1)
-  const r = rng(seed)
-  const init = [
-    ...Array.from({ length: 2 * H }, () => 0.8 * r.normal()),
-    ...Array(H).fill(0),
-    ...Array(headDim).fill(0),
-  ]
+  const r = stream(seed)
+  const init = [...Array.from({ length: 2 * H }, () => 0.8 * normal(r)), ...Array(H).fill(0), ...Array(headDim).fill(0)]
   const n = data.y.length
   const hidden = (p: number[], x: Point) =>
     Array.from({ length: H }, (_, u) => Math.tanh(p[2 * u] * x[0] + p[2 * u + 1] * x[1] + p[2 * H + u]))
@@ -1022,9 +1030,9 @@ function mlpProblem(data: Sample, head: Head, seed = 7): Problem {
 function liLinProblem(data: Sample, k: number, seed = 11): Problem {
   const H = HIDDEN
   const inputs = 2 + (k - 1)
-  const r = rng(seed)
+  const r = stream(seed)
   const dim = H * inputs + H + H + 1
-  const init = [...Array.from({ length: H * inputs }, () => 0.8 * r.normal()), ...Array(2 * H + 1).fill(0)]
+  const init = [...Array.from({ length: H * inputs }, () => 0.8 * normal(r)), ...Array(2 * H + 1).fill(0)]
   const n = data.y.length
   const W2 = H * inputs + H
   const forward = (p: number[], x: Point, j: number) => {
@@ -1119,18 +1127,21 @@ function problemFor(spec: DataSpec, model: ModelId): Problem | Fitted {
       return scoreProblem(
         train,
         k,
-        cumulativeLoss(sigmoid, logisticPdf),
+        cumulativeLoss((v: number) => sigmoid(v), logisticPdf),
         true,
-        (s, th) => cumulativeProbs(sigmoid, s, th),
+        (s, th) => cumulativeProbs((v: number) => sigmoid(v), s, th),
         false,
       )
     case 'cumulative-probit':
       return scoreProblem(
         train,
         k,
-        cumulativeLoss(normalCdf, normalPdf),
+        cumulativeLoss(
+          (v: number) => normalCdf(v),
+          (v: number) => normalPdf(v),
+        ),
         true,
-        (s, th) => cumulativeProbs(normalCdf, s, th),
+        (s, th) => cumulativeProbs((v: number) => normalCdf(v), s, th),
         false,
       )
     case 'continuation-ratio':
@@ -1291,13 +1302,13 @@ export function logistic1d(x: number[], t: number[]) {
  * number of splits with u < P(y > j | x), and every split has exactly its stated probability.
  */
 export function nonParallelSample(n: number, delta: number, seed = 5): { x: number[]; y: number[] } {
-  const r = rng(seed)
+  const r = stream(seed)
   const x: number[] = []
   const y: number[] = []
   const theta = [-2.5, 0, 2.5]
   for (let i = 0; i < n; i++) {
-    const xi = -3 + 6 * r.uniform()
-    const u = r.uniform()
+    const xi = -3 + 6 * uniform(r)
+    const u = uniform(r)
     x.push(xi)
     y.push(theta.filter((t, j) => u < sigmoid(1.2 * (1 + delta * (j - 1)) * xi - t)).length)
   }
@@ -1307,7 +1318,7 @@ export function nonParallelSample(n: number, delta: number, seed = 5): { x: numb
 /** A cumulative logit or all-threshold (CORAL) fit to one feature: the slope w and the ordered thresholds. */
 export function fitShared1d(x: number[], y: number[], k: number, loss: 'cumulative-logit' | 'all-threshold') {
   const sample: Sample = { x: x.map((v) => [v, 0] as Point), y }
-  const l = loss === 'cumulative-logit' ? cumulativeLoss(sigmoid, logisticPdf) : thresholdLoss(true)
+  const l = loss === 'cumulative-logit' ? cumulativeLoss((v: number) => sigmoid(v), logisticPdf) : thresholdLoss(true)
   const m = scoreModel(sample, k, l, true)
   const { w, theta } = m.decode(minimise(m.init, m.lossGrad))
   return { w: w[0], theta }

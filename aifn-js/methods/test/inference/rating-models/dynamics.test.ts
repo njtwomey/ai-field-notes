@@ -16,8 +16,8 @@ import {
   trueSkillThroughTime,
   type GameStream,
   type PairedResult,
-} from 'aifn-applied/inference/rating-models'
-import { focalPlayerStream, ratingPopulation, tournament, winProbability } from 'aifn-applied/data/synthetic'
+} from 'aifn-methods/inference/rating-models'
+import { focalPlayerStream, ratingPopulation, tournament, winProbability } from 'aifn-methods/data/synthetic'
 import { run } from 'aifn/foundation/trace'
 import { fixture } from '../../fixtures'
 

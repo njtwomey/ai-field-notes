@@ -1,5 +1,5 @@
 /**
- * `aifn-applied/inference/classifier-models`: the Bayes point machine by expectation propagation, and AdPredictor
+ * `aifn-methods/inference/classifier-models`: the Bayes point machine by expectation propagation, and AdPredictor
  * (Bayesian online probit regression by assumed-density filtering).
  */
 export {

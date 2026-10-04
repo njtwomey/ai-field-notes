@@ -1,16 +1,17 @@
-import { useMemo, useState } from 'react'
+import { useMemo } from 'react'
 import {
-  Interactive,
-  ParamButton,
-  ParamChoice,
-  ParamSlider,
+  choice,
+  Figure,
+  int,
+  Plot,
+  Points,
   Readout,
-  XYChart,
-  useParam,
   type Segment,
-  type XYSeries,
+  Segments,
+  useAxis,
+  useFigureState,
 } from 'aifn-render'
-import { rng } from '@/lib/math'
+import { normal, stream, uniform } from 'aifn/foundation/random'
 
 type Pt = [number, number]
 type Method = 'smote' | 'borderline' | 'adasyn'
@@ -41,11 +42,11 @@ function nearest(p: Pt, pool: Pt[], k: number, self = -1): number[] {
  * the majority (label noise). Fixed seed, so the data never change; only the synthetic points do.
  */
 function makeData() {
-  const g = rng(5)
-  const majority: Pt[] = Array.from({ length: 200 }, () => [g.normal(), g.normal()])
+  const g = stream(5)
+  const majority: Pt[] = Array.from({ length: 200 }, () => [normal(g), normal(g)])
   const minority: Pt[] = [
-    ...Array.from({ length: 14 }, (): Pt => [2.1 + 0.5 * g.normal(), 1.8 + 0.5 * g.normal()]),
-    ...Array.from({ length: 6 }, (): Pt => [-1.8 + 0.35 * g.normal(), 2.3 + 0.35 * g.normal()]),
+    ...Array.from({ length: 14 }, (): Pt => [2.1 + 0.5 * normal(g), 1.8 + 0.5 * normal(g)]),
+    ...Array.from({ length: 6 }, (): Pt => [-1.8 + 0.35 * normal(g), 2.3 + 0.35 * normal(g)]),
     [0.2, -0.3],
     [-0.5, 0.4],
   ]
@@ -57,10 +58,12 @@ function makeData() {
  * to one of its k nearest minority neighbours; the variants differ in which minority points generate, and how many.
  */
 export function SmoteExplorer() {
-  const k = useParam(5, { min: 1, max: 12, step: 1 })
-  const rate = useParam(2, { min: 1, max: 5, step: 1 })
-  const [method, setMethod] = useState<Method>('smote')
-  const [seed, setSeed] = useState(1)
+  const state = useFigureState({
+    k: int(5, { min: 1, max: 12, step: 1, label: 'neighbours k' }),
+    rate: int(2, { min: 1, max: 5, step: 1, label: 'synthetic points per minority point' }),
+    method: choice<Method>(METHODS, 'smote', { label: 'method' }),
+    seed: int(1, { ge: 0, label: 'seed' }),
+  })
 
   const { majority, minority } = useMemo(() => makeData(), [])
   const all = useMemo(() => [...majority, ...minority], [majority, minority])
@@ -72,13 +75,13 @@ export function SmoteExplorer() {
   )
 
   const result = useMemo(() => {
-    const g = rng(seed)
-    const total = rate.value * minority.length
+    const g = stream(state.seed)
+    const total = state.rate * minority.length
     // How many synthetic points each minority point generates.
     let counts: number[]
-    if (method === 'smote') {
-      counts = minority.map(() => rate.value)
-    } else if (method === 'borderline') {
+    if (state.method === 'smote') {
+      counts = minority.map(() => state.rate)
+    } else if (state.method === 'borderline') {
       // Danger: at least half, but not all, of the M neighbours are majority. Only danger points generate.
       const danger = majorityNeighbours.map((m) => m >= M / 2 && m < M)
       const nDanger = danger.filter(Boolean).length
@@ -92,10 +95,10 @@ export function SmoteExplorer() {
     const segments: Segment[] = []
     minority.forEach((p, i) => {
       if (!counts[i]) return
-      const neighbours = nearest(p, minority, k.value, i)
+      const neighbours = nearest(p, minority, state.k, i)
       for (let c = 0; c < counts[i]; c++) {
-        const q = minority[neighbours[Math.floor(g.uniform() * neighbours.length)]]
-        const u = g.uniform()
+        const q = minority[neighbours[Math.floor(uniform(g) * neighbours.length)]]
+        const u = uniform(g)
         synthetic.push([p[0] + u * (q[0] - p[0]), p[1] + u * (q[1] - p[1])])
         segments.push({ from: p, to: q })
       }
@@ -103,39 +106,35 @@ export function SmoteExplorer() {
     // A synthetic point intrudes when its nearest real point is a majority point.
     const intruding = synthetic.filter((s) => nearest(s, all, 1)[0] < majority.length).length
     return { synthetic, segments, intruding }
-  }, [seed, rate.value, method, k.value, minority, majorityNeighbours, all, majority.length])
+  }, [state.seed, state.rate, state.method, state.k, minority, majorityNeighbours, all, majority.length])
 
-  const series = useMemo<XYSeries[]>(
-    () => [
-      { name: 'majority', type: 'scatter', x: majority.map((p) => p[0]), y: majority.map((p) => p[1]), slot: 0 },
-      { name: 'minority', type: 'scatter', x: minority.map((p) => p[0]), y: minority.map((p) => p[1]), slot: 1 },
-      {
-        name: 'synthetic',
-        type: 'scatter',
-        x: result.synthetic.map((p) => p[0]),
-        y: result.synthetic.map((p) => p[1]),
-        slot: 2,
-      },
-    ],
+  const series = useMemo(
+    () =>
+      [
+        { name: 'majority', x: majority.map((p) => p[0]), y: majority.map((p) => p[1]), slot: 0 },
+        { name: 'minority', x: minority.map((p) => p[0]), y: minority.map((p) => p[1]), slot: 1 },
+        {
+          name: 'synthetic',
+          x: result.synthetic.map((p) => p[0]),
+          y: result.synthetic.map((p) => p[1]),
+          slot: 2,
+        },
+      ] as const,
     [majority, minority, result.synthetic],
   )
 
   const noise = majorityNeighbours.filter((m) => m === M).length
   const danger = majorityNeighbours.filter((m) => m >= M / 2 && m < M).length
 
+  const xAxis = useAxis({ label: 'x₁', range: [-3.5, 4] })
+  const yAxis = useAxis({ label: 'x₂', range: [-3, 4], equal: xAxis })
   return (
-    <Interactive
+    <Figure
       title="Synthetic minority oversampling"
+      state={state}
       caption={`Majority points, a minority class in two clusters, and two mislabelled minority points inside the majority. Each synthetic point is drawn uniformly on the grey segment from a minority point to one of its k nearest minority neighbours. Raise k and SMOTE starts interpolating between the two clusters and from the noisy points, across majority territory. Borderline-SMOTE generates only from minority points with at least half their ${M} nearest neighbours in the majority (but not all, which it treats as noise); ADASYN generates more where the majority share is higher, so it amplifies the noisy points.`}
-      controls={
-        <>
-          <ParamSlider label="neighbours k" param={k} />
-          <ParamSlider label="synthetic points per minority point" param={rate} />
-          <ParamChoice label="method" value={method} onChange={setMethod} options={METHODS} />
-          <ParamButton onClick={() => setSeed((s) => s + 1)}>Resample</ParamButton>
-        </>
-      }
-      readout={
+
+      readouts={
         <>
           <Readout label="synthetic points" value={result.synthetic.length} />
           <Readout label="nearest real point is majority" value={result.intruding} />
@@ -146,15 +145,12 @@ export function SmoteExplorer() {
         </>
       }
     >
-      <XYChart
-        series={series}
-        segments={result.segments}
-        xLabel="x₁"
-        yLabel="x₂"
-        xRange={[-3.5, 4]}
-        yRange={[-3, 4]}
-        equalAspect
-      />
-    </Interactive>
+      <Plot x={xAxis} y={yAxis}>
+        <Points {...series[0]} />
+        <Points {...series[1]} />
+        <Points {...series[2]} />
+        <Segments segments={result.segments} />
+      </Plot>
+    </Figure>
   )
 }

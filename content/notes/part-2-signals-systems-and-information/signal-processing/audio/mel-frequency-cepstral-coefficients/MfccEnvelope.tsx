@@ -1,16 +1,21 @@
-import { useMemo, useState } from 'react'
+import { useMemo } from 'react'
 import {
-  Interactive,
-  ParamChoice,
-  ParamSlider,
-  Readout,
-  XYChart,
+  Bars,
+  choice,
+  Curve,
+  Figure,
   formatNumber,
-  useParam,
-  type XYSeries,
+  int,
+  Plot,
+  Points,
+  Readout,
+  useAxis,
+  useFigureState,
 } from 'aifn-render'
-import { lfilter, magnitudeSpectrum, makeWindow } from '@/lib/dsp'
-import { dct, melFilterBank } from '../_shared/audio'
+import { toFlat, type Tensor } from 'aifn/foundation/tensor'
+import { lfilter } from 'aifn/signal/filters'
+import { getWindow } from 'aifn/signal/windows'
+import { dct, magnitudeSpectrum, melFilterBank } from '../_shared/audio'
 
 const FS = 16000
 const N = 512
@@ -38,8 +43,8 @@ function vowelFrame(vowel: Vowel, f0: number): number[] {
   const excitation = Array.from({ length: 3000 }, (_, n) =>
     Math.floor(n / period) !== Math.floor((n - 1) / period) ? 1 : 0,
   )
-  const voiced = lfilter([1], a, excitation).slice(2000, 2000 + N)
-  const w = makeWindow('hamming', N)
+  const voiced = toFlat(lfilter({ b: [1], a }, excitation).y as Tensor).slice(2000, 2000 + N)
+  const w = toFlat(getWindow('hamming', N))
   return Array.from(voiced, (v, n) => v * w[n])
 }
 
@@ -58,66 +63,64 @@ function idct(c: number[], n: number): number[] {
  * the first C coefficients: the low-order cepstrum is a smooth description of the spectral envelope.
  */
 export function MfccEnvelope() {
-  const [vowel, setVowel] = useState<Vowel>('a')
-  const f0 = useParam(120, { min: 80, max: 300, step: 5 })
-  const keep = useParam(13, { min: 1, max: BANDS, step: 1 })
+  const state = useFigureState({
+    vowel: choice<Vowel>(
+      [
+        { value: 'a', label: '/a/' },
+        { value: 'i', label: '/i/' },
+        { value: 'u', label: '/u/' },
+      ],
+      'a',
+      { label: 'vowel' },
+    ),
+    f0: int(120, { min: 80, max: 300, step: 5, label: 'fundamental f₀ (Hz)' }),
+    keep: int(13, { min: 1, max: BANDS, step: 1, label: 'coefficients kept C' }),
+  })
 
   const r = useMemo(() => {
-    const frame = vowelFrame(vowel, f0.value)
+    const frame = vowelFrame(state.vowel, state.f0)
     const mag = magnitudeSpectrum(frame, N)
     const bank = melFilterBank(BANDS, N, FS, 0, FS / 2, 'htk')
     const logMel = bank.filters.map((w) => Math.log(1e-10 + w.reduce((s, wk, k) => s + wk * mag[k] * mag[k], 0)))
     const mfcc = dct(logMel)
-    const truncated = mfcc.map((c, k) => (k < keep.value ? c : 0))
+    const truncated = mfcc.map((c, k) => (k < state.keep ? c : 0))
     const rebuilt = idct(truncated, BANDS)
     const error = Math.sqrt(logMel.reduce((s, v, i) => s + (v - rebuilt[i]) ** 2, 0) / BANDS)
     return { logMel, mfcc, rebuilt, error, centres: bank.edges.slice(1, -1) }
-  }, [vowel, f0.value, keep.value])
+  }, [state.vowel, state.f0, state.keep])
 
   const idx = r.centres.map((_, m) => m + 1)
-  const bands: XYSeries[] = [
-    { name: 'log-mel energies', type: 'line', x: idx, y: r.logMel, muted: true },
-    { name: 'log-mel energies (points)', type: 'scatter', x: idx, y: r.logMel, slot: 0 },
-    { name: `rebuilt from c₀…c${keep.value - 1}`, type: 'line', x: idx, y: r.rebuilt, slot: 1 },
-  ]
-  const coefficients: XYSeries[] = [
+  const bands = [
+    { name: 'log-mel energies', x: idx, y: r.logMel, muted: true },
+    { name: 'log-mel energies (points)', x: idx, y: r.logMel, slot: 0 },
+    { name: `rebuilt from c₀…c${state.keep - 1}`, x: idx, y: r.rebuilt, slot: 1 },
+  ] as const
+  const coefficients = [
     {
       name: 'kept',
-      type: 'bar',
-      x: r.mfcc.map((_, k) => k).slice(0, keep.value),
-      y: r.mfcc.slice(0, keep.value),
+      x: r.mfcc.map((_, k) => k).slice(0, state.keep),
+      y: r.mfcc.slice(0, state.keep),
       slot: 1,
     },
     {
       name: 'discarded',
-      type: 'bar',
-      x: r.mfcc.map((_, k) => k).slice(keep.value),
-      y: r.mfcc.slice(keep.value),
+      x: r.mfcc.map((_, k) => k).slice(state.keep),
+      y: r.mfcc.slice(state.keep),
       muted: true,
     },
-  ]
+  ] as const
 
+  const xAxis = useAxis({ label: 'mel band', hold: 'union' })
+  const yAxis = useAxis({ label: 'log energy', hold: 'union' })
+  const xAxis2 = useAxis({ label: 'cepstral index k', hold: 'union' })
+  const yAxis2 = useAxis({ label: 'c_k', hold: 'union' })
   return (
-    <Interactive
+    <Figure
       title="MFCCs as a compact envelope"
+      state={state}
       caption="One frame of a synthetic vowel through 26 mel bands. Left: the log-mel energies, and the curve rebuilt from only the first C cepstral coefficients by the inverse DCT. Right: the coefficients themselves. A dozen coefficients reproduce the formant envelope; the discarded high-order coefficients hold the fine detail, including harmonic ripple at low bands. Different vowels change the low-order coefficients most; changing f₀ barely moves them."
-      controls={
-        <>
-          <ParamChoice
-            label="vowel"
-            value={vowel}
-            onChange={setVowel}
-            options={[
-              { value: 'a', label: '/a/' },
-              { value: 'i', label: '/i/' },
-              { value: 'u', label: '/u/' },
-            ]}
-          />
-          <ParamSlider label="fundamental f₀ (Hz)" param={f0} />
-          <ParamSlider label="coefficients kept C" param={keep} withArrows />
-        </>
-      }
-      readout={
+
+      readouts={
         <>
           <Readout label="c₀, c₁, c₂" value={r.mfcc.slice(0, 3).map(formatNumber).join(', ')} />
           <Readout label="rms rebuild error (log units)" value={formatNumber(r.error)} />
@@ -125,9 +128,16 @@ export function MfccEnvelope() {
       }
     >
       <div className="grid gap-4 lg:grid-cols-2">
-        <XYChart series={bands} xLabel="mel band" yLabel="log energy" height={300} />
-        <XYChart series={coefficients} xLabel="cepstral index k" yLabel="c_k" height={300} />
+        <Plot x={xAxis} y={yAxis} height={300}>
+          <Curve {...bands[0]} />
+          <Points {...bands[1]} />
+          <Curve {...bands[2]} />
+        </Plot>
+        <Plot x={xAxis2} y={yAxis2} height={300}>
+          <Bars {...coefficients[0]} />
+          <Bars {...coefficients[1]} />
+        </Plot>
       </div>
-    </Interactive>
+    </Figure>
   )
 }

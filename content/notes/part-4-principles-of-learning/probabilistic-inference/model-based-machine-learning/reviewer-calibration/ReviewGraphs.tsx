@@ -1,7 +1,5 @@
-import { Diagram } from 'aifn-render'
-import { factor, link, variable } from 'aifn-render'
+import { Diagram, factor, Figure, link, variable } from 'aifn-render'
 import type { DiagramSpec } from 'aifn-render'
-import { Interactive } from 'aifn-render'
 import { StepGraph, type GraphStep } from '../_shared/StepGraph'
 
 const line = (a: string, b: string) => link(a, b, false)
@@ -27,7 +25,7 @@ const LINEAR: DiagramSpec = {
 /** The linear-Gaussian calibration model as a factor graph. */
 export function LinearReviewGraph() {
   return (
-    <Interactive
+    <Figure
       title="Factor graph of the linear calibration model"
       caption="Each paper has a quality and each reviewer a bias, each with a Gaussian prior. Every assigned review is one Gaussian factor joining its paper's quality and its reviewer's bias to the observed score. The review plate is indexed by the assigned pairs, so the graph's loops follow the assignment."
     >
@@ -35,7 +33,7 @@ export function LinearReviewGraph() {
         spec={LINEAR}
         ariaLabel="Factor graph: paper quality and reviewer bias priors, joined by a Gaussian factor to each observed score"
       />
-    </Interactive>
+    </Figure>
   )
 }
 

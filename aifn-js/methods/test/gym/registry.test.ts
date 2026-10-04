@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { agentRegistry, compatible, environmentRegistry, episodes, rollout, validPairs } from 'aifn-applied/gym'
+import { agentRegistry, compatible, environmentRegistry, episodes, rollout, validPairs } from 'aifn-methods/gym'
 import type { Agent, Environment } from 'aifn/foundation/contracts'
 import { stream } from 'aifn/foundation/random'
 import { defaults, domainContains } from 'aifn/foundation/space'

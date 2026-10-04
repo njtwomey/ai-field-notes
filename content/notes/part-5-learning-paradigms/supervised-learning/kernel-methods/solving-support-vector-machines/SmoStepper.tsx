@@ -1,6 +1,19 @@
-import { useMemo } from 'react'
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from 'aifn-render'
-import { Interactive, ParamSlider, Readout, XYChart, useParam, type XYSeries } from 'aifn-render'
+import { useMemo, useState } from 'react'
+import {
+  Figure,
+  Player,
+  Plot,
+  Readout,
+  seriesLayers,
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+  useAxis,
+  type SeriesSpec,
+} from 'aifn-render'
 import { BOX, Y_RANGE, exact, slackSeries, svmSeries } from './plot'
 import { C0, X, Y, dualObjective, gram, smo, weights } from './solver'
 
@@ -11,7 +24,7 @@ const SUB = '₀₁₂₃₄₅₆₇₈₉'
 const sub = (i: number) => String(i + 1).replace(/\d/g, (d) => SUB[Number(d)])
 
 /** α and b after t steps, and the errors E_t = f(x_t) − y_t they give. */
-function state(t: number) {
+function stateAt(t: number) {
   const alpha = t === 0 ? X.map(() => 0) : TRACE.steps[t - 1].alpha
   const b = t === 0 ? 0 : TRACE.steps[t - 1].b
   const E = X.map((_, s) => alpha.reduce((f, a, r) => f + a * Y[r] * K[r][s], b) - Y[s])
@@ -41,13 +54,12 @@ const LIM_Y: [number | undefined, number | undefined] = LIM
 
 /** SMO on the six-point example, one pair update per step, from α = 0 to the exact optimum. */
 export function SmoStepper() {
-  const step = useParam(0, { min: 0, max: T, step: 1 })
-  const t = step.value
-  const cur = useMemo(() => state(t), [t])
+  const [t, setT] = useState(0)
+  const cur = useMemo(() => stateAt(t), [t])
   const next = t < T ? pairGeometry(t) : null
 
   const dataSeries = useMemo(() => {
-    const out: XYSeries[] = [...svmSeries(X, Y, cur.w, cur.b), ...slackSeries(X, Y, cur.w, cur.b)]
+    const out: SeriesSpec[] = [...svmSeries(X, Y, cur.w, cur.b), ...slackSeries(X, Y, cur.w, cur.b)]
     if (t < T) {
       const { i, j } = TRACE.steps[t]
       out.push({ name: 'next pair', type: 'scatter', x: [X[i][0], X[j][0]], y: [X[i][1], X[j][1]], emphasis: true })
@@ -59,7 +71,7 @@ export function SmoStepper() {
     if (t >= T) return null
     const { s, ai } = pairGeometry(t)
     const line = { x: LIM.map(ai), y: [...LIM] }
-    const series: XYSeries[] = [
+    const series: SeriesSpec[] = [
       { name: 'box [0, C]²', type: 'line', x: [0, C0, C0, 0, 0], y: [0, 0, C0, C0, 0], muted: true },
       { name: 'constraint line', type: 'line', ...line, muted: true, dashed: true },
       { name: 'segment [L, H]', type: 'line', x: [ai(s.L), ai(s.H)], y: [s.L, s.H], slot: 2 },
@@ -84,7 +96,7 @@ export function SmoStepper() {
     const hi = Math.max(s.H, s.ajOld, s.ajUnclipped) + 0.25
     const all = grid(lo, hi, 80)
     const inside = grid(s.L, s.H, 20)
-    const series: XYSeries[] = [
+    const series: SeriesSpec[] = [
       { name: 'D along the line', type: 'line', x: all, y: all.map(D), muted: true },
       { name: 'segment [L, H]', type: 'line', x: inside, y: inside.map(D), slot: 2 },
       { name: 'before', type: 'scatter', x: [s.ajOld], y: [D(s.ajOld)], muted: true },
@@ -98,12 +110,21 @@ export function SmoStepper() {
   const low = (r: number) => (Y[r] > 0 ? cur.alpha[r] > 0 : cur.alpha[r] < C0)
   const s = next?.s
 
+  const xData = useAxis({ label: 'x₁', range: BOX.x })
+  const yData = useAxis({ label: 'x₂', range: Y_RANGE, equal: xData })
+  const xBox = useAxis({ label: s ? `α${sub(s.i)}` : 'αᵢ', range: LIM })
+  const yBox = useAxis({ label: s ? `α${sub(s.j)}` : 'αⱼ', range: LIM_Y, equal: xBox })
+  const xCurve = useAxis({ label: s ? `α${sub(s.j)}` : 'αⱼ', hold: 'union' })
+  const yCurve = useAxis({ label: 'D', hold: 'union' })
+
   return (
-    <Interactive
+    <Figure
       title="SMO, one pair at a time"
       caption="Step through SMO from α = 0 with C = 1/2. The left plot shows the boundary after t steps and marks the next pair: i has the smallest error E among the points in I_up, j the largest among those in I_low. The right plot shows the pair in the (αᵢ, αⱼ) plane: the constraint Σ αₜyₜ = 0 keeps it on the dashed line, the box [0, C]² cuts that line to the feasible segment, and the update jumps to the unclipped optimum or, if that lies outside, to the nearest end. The plot below them shows the dual objective D along the same line: a parabola with curvature −η."
-      controls={<ParamSlider label="SMO steps taken" param={step} format={(v) => `${v} of ${T}`} withArrows />}
-      readout={
+      controls={
+        <Player value={t} onChange={setT} count={T + 1} label="SMO steps taken" format={(v) => `${v} of ${T}`} />
+      }
+      readouts={
         s ? (
           <>
             <Readout label="next pair (i, j)" value={`(x${s.i + 1}, x${s.j + 1})`} />
@@ -127,39 +148,23 @@ export function SmoStepper() {
       }
     >
       <div className="grid gap-4 md:grid-cols-2 md:items-start">
-        <XYChart
-          series={dataSeries}
-          xLabel="x₁"
-          yLabel="x₂"
-          xRange={BOX.x}
-          yRange={Y_RANGE}
-          equalAspect
-          ariaLabel="The data, the current boundary and the next SMO pair"
-        />
-        {boxSeries && s ? (
-          <XYChart
-            series={boxSeries}
-            xLabel={`α${sub(s.i)}`}
-            yLabel={`α${sub(s.j)}`}
-            xRange={LIM}
-            yRange={LIM_Y}
-            equalAspect
-            ariaLabel="The pair's feasible segment in the box"
-          />
+        <Plot x={xData} y={yData} ariaLabel="The data, the current boundary and the next SMO pair">
+          {seriesLayers(dataSeries)}
+        </Plot>
+        {boxSeries ? (
+          <Plot x={xBox} y={yBox} ariaLabel="The pair's feasible segment in the box">
+            {seriesLayers(boxSeries)}
+          </Plot>
         ) : (
           <p className="self-center text-center text-xs text-muted-foreground">
             SMO has stopped. No pair can raise the dual objective.
           </p>
         )}
       </div>
-      {curveSeries && s ? (
-        <XYChart
-          series={curveSeries}
-          xLabel={`α${sub(s.j)}`}
-          yLabel="D"
-          height={240}
-          ariaLabel="The dual objective along the pair's line"
-        />
+      {curveSeries ? (
+        <Plot x={xCurve} y={yCurve} height={240} ariaLabel="The dual objective along the pair's line">
+          {seriesLayers(curveSeries)}
+        </Plot>
       ) : null}
       <Table>
         <TableHeader>
@@ -191,6 +196,6 @@ export function SmoStepper() {
           ))}
         </TableBody>
       </Table>
-    </Interactive>
+    </Figure>
   )
 }

@@ -1,5 +1,4 @@
-import { Interactive } from 'aifn-render'
-import { Diagram } from 'aifn-render'
+import { Diagram, Figure } from 'aifn-render'
 import type { DiagramNode, DiagramSpec } from 'aifn-render'
 
 const step = (id: string, x: number, y: number, label: string, tone: number | 'neutral' = 'neutral'): DiagramNode => ({
@@ -55,7 +54,7 @@ const spec: DiagramSpec = {
 /** The MFCC pipeline from audio samples to cepstral coefficients. */
 export function MfccPipeline() {
   return (
-    <Interactive
+    <Figure
       title="From audio to MFCCs"
       caption="Each frame's power spectrum is pooled into mel-spaced bands and compressed by the logarithm; those three steps give the log-mel spectrogram. The DCT decorrelates the log energies, and truncating it to the first K coefficients keeps the smooth spectral envelope."
     >
@@ -63,6 +62,6 @@ export function MfccPipeline() {
         spec={spec}
         ariaLabel="Audio passes through pre-emphasis, framing and windowing, and a power spectrum; then a mel filter bank, a logarithm and a DCT give the MFCCs"
       />
-    </Interactive>
+    </Figure>
   )
 }

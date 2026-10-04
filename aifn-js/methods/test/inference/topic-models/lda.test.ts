@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { ldaEngines, ldaModel, type LdaState } from 'aifn-applied/inference/topic-models'
+import { ldaEngines, ldaModel, type LdaState } from 'aifn-methods/inference/topic-models'
 import { infer } from 'aifn/inference/engines'
 import {
   expandModel,

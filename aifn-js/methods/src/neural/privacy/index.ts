@@ -1,5 +1,5 @@
 /**
- * `aifn-applied/neural/privacy`: differentially private training of a small MLP by core DP-SGD (`privateTraining`),
+ * `aifn-methods/neural/privacy`: differentially private training of a small MLP by core DP-SGD (`privateTraining`),
  * one run per noise multiplier (`privateTrainingStudy`, a generator of snapshots for a worker), tracing test accuracy
  * against the ε spent.
  */

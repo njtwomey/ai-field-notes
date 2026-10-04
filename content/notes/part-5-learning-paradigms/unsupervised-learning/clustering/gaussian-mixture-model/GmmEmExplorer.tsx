@@ -15,11 +15,8 @@ import {
   useAxis,
   type Vec2,
 } from 'aifn-render'
-import { blobs } from 'aifn-applied/data/synthetic'
-import {
-  gaussianMixtureSteps,
-  type CovarianceType,
-} from 'aifn-applied/unsupervised/clustering'
+import { blobs } from 'aifn-methods/data/synthetic'
+import { gaussianMixtureSteps, type CovarianceType } from 'aifn-methods/unsupervised/clustering'
 import { covarianceEllipse } from 'aifn/numerics/geometry'
 import { stream } from 'aifn/foundation/random'
 import { fromData, toFlat, toRows, type Tensor } from 'aifn/foundation/tensor'
@@ -48,10 +45,32 @@ const blobData = () =>
   })
 
 const defaultStartsForK = (k: number): Vec2[] => {
-  if (k === 2) return [[-2, 3.5], [2, 3.5]]
-  if (k === 3) return [[-2.5, 3.5], [0, 3.5], [2.5, 3.5]]
-  if (k === 4) return [[-3, 3.5], [-1, 3.5], [1, 3.5], [3, 3.5]]
-  if (k === 5) return [[-3.5, 3.5], [-1.8, 3.5], [0, 3.5], [1.8, 3.5], [3.5, 3.5]]
+  if (k === 2)
+    return [
+      [-2, 3.5],
+      [2, 3.5],
+    ]
+  if (k === 3)
+    return [
+      [-2.5, 3.5],
+      [0, 3.5],
+      [2.5, 3.5],
+    ]
+  if (k === 4)
+    return [
+      [-3, 3.5],
+      [-1, 3.5],
+      [1, 3.5],
+      [3, 3.5],
+    ]
+  if (k === 5)
+    return [
+      [-3.5, 3.5],
+      [-1.8, 3.5],
+      [0, 3.5],
+      [1.8, 3.5],
+      [3.5, 3.5],
+    ]
   return Array.from({ length: k }, (_, i) => [-3 + (6 * i) / (k - 1), 3.5] as Vec2)
 }
 
@@ -99,10 +118,7 @@ export function GmmEmExplorer() {
   const currentStep = Math.min(step, run.steps.length - 1)
   const state = run.steps[currentStep]
 
-  const owner = useMemo(
-    () => toRows(state.responsibilities).map((r) => r.indexOf(Math.max(...r))),
-    [state],
-  )
+  const owner = useMemo(() => toRows(state.responsibilities).map((r) => r.indexOf(Math.max(...r))), [state])
 
   const means = useMemo(() => toRows(state.means) as Vec2[], [state])
 
@@ -133,10 +149,7 @@ export function GmmEmExplorer() {
   const stepAxis = useAxis({ label: 'step', hold: 'initial', key: `${run.steps.length}-${covariance}-${k}` })
   const llAxis = useAxis({ label: 'log-likelihood', hold: 'initial', key: `${run.steps.length}-${covariance}-${k}` })
 
-  const groupNames = useMemo(
-    () => Array.from({ length: k }, (_, j) => `component ${j + 1}`),
-    [k],
-  )
+  const groupNames = useMemo(() => Array.from({ length: k }, (_, j) => `component ${j + 1}`), [k])
 
   return (
     <Figure
@@ -177,12 +190,7 @@ export function GmmEmExplorer() {
             </Button>
           </ControlGroup>
           <ControlGroup title="2 · EM steps">
-            <Player
-              value={currentStep}
-              onChange={setStep}
-              count={run.steps.length}
-              label="step"
-            />
+            <Player value={currentStep} onChange={setStep} count={run.steps.length} label="step" />
           </ControlGroup>
         </>
       }
@@ -203,13 +211,7 @@ export function GmmEmExplorer() {
     >
       <Plots rows={2} heights={[3, 1]}>
         <Plot x={x0} y={x1} legend={false}>
-          <Points
-            name="points"
-            x={cols.x0}
-            y={cols.x1}
-            group={owner}
-            groupNames={groupNames}
-          />
+          <Points name="points" x={cols.x0} y={cols.x1} group={owner} groupNames={groupNames} />
           {ellipses.map((e) => (
             <Curve
               key={`${e.j}-${e.sd}`}
@@ -220,12 +222,7 @@ export function GmmEmExplorer() {
               dashed={e.sd === 2}
             />
           ))}
-          <Points
-            name="means"
-            x={means.map((m) => m[0])}
-            y={means.map((m) => m[1])}
-            emphasis
-          />
+          <Points name="means" x={means.map((m) => m[0])} y={means.map((m) => m[1])} emphasis />
           {start.map((p, j) => (
             <Handle
               key={j}

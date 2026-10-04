@@ -7,12 +7,7 @@
 import { describe, expect, it } from 'vitest'
 import { toFlat } from 'aifn/foundation/tensor'
 import { quadprog } from 'aifn/optim/programming'
-import {
-  alternatingProjections,
-  projectBox,
-  projectGroupSums,
-  projectSimplexRows,
-} from 'aifn/optim/proximal'
+import { alternatingProjections, projectBox, projectGroupSums, projectSimplexRows } from 'aifn/optim/proximal'
 
 const groups = [0, 0, 1, 1, 1, -1]
 const targets = [1.2, 0.5]

@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import { stream } from 'aifn/foundation/random'
 import { fromData, toFlat } from 'aifn/foundation/tensor'
-import { aftModel, aftSurvival, coxPh, coxSurvival, harrellConcordance } from 'aifn-applied/learning/survival'
-import { censoredSurvival } from 'aifn-applied/data/synthetic'
+import { aftModel, aftSurvival, coxPh, coxSurvival, harrellConcordance } from 'aifn-methods/learning/survival'
+import { censoredSurvival } from 'aifn-methods/data/synthetic'
 import { fixture } from '../../fixtures'
 
 type Fit = { coefficients: number[]; se: number[]; loglik: number }

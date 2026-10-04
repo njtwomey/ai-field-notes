@@ -1,19 +1,22 @@
-import { useMemo, useState } from 'react'
+import { useMemo } from 'react'
 import {
-  Interactive,
-  ParamButton,
-  ParamSlider,
-  Readout,
-  XYChart,
+  Figure,
+  float,
   formatNumber,
-  useParam,
-  type Handle,
+  Handle,
+  int,
+  Plot,
+  Readout,
   type Segment,
-  type XYSeries,
+  Segments,
+  seriesLayers,
+  type SeriesSpec,
+  useAxis,
+  useFigureState,
 } from 'aifn-render'
-import { rng } from '@/lib/math'
-import { normalCdf } from '@/lib/math/special'
+import { stream, uniform as drawUniform } from 'aifn/foundation/random'
 import { sampleBinomial, twoProportionZ } from '../_shared/ab'
+import { normalCdf } from 'aifn/numerics/special'
 
 const SRM_ALPHA = 0.001
 /** 1 − Φ(z) loses all precision below about 1e-16, so smaller p-values are shown as this floor. */
@@ -33,21 +36,23 @@ function srmTest(na: number, nb: number): { chi2: number; p: number } {
  * converters from it, so B looks better than it is.
  */
 export function SrmSimulator() {
-  const [assigned, setAssigned] = useState(100000)
-  const [slowShare, setSlowShare] = useState(0.3)
-  const [slowRate, setSlowRate] = useState(0.04)
-  const [fastRate, setFastRate] = useState(0.12)
-  const loss = useParam(0.2, { min: 0, max: LOSS_MAX, step: 0.005 })
-  const [seed, setSeed] = useState(1)
+  const state = useFigureState({
+    assigned: int(100000, { min: 10000, max: 500000, step: 10000, label: 'users assigned per arm' }),
+    loss: float(0.2, { min: 0, max: LOSS_MAX, step: 0.005, label: 'loss of slow users in B' }),
+    slowShare: float(0.3, { min: 0.05, max: 0.6, step: 0.05, label: 'share of slow users' }),
+    slowRate: float(0.04, { min: 0.01, max: 0.2, step: 0.01, label: "slow users' conversion" }),
+    fastRate: float(0.12, { min: 0.01, max: 0.3, step: 0.01, label: "fast users' conversion" }),
+    seed: int(1, { ge: 0, label: 'seed' }),
+  })
 
   // Expected values as a function of the loss rate: the bias in B − A and the SRM p-value.
   const curves = useMemo(() => {
-    const rateA = slowShare * slowRate + (1 - slowShare) * fastRate
+    const rateA = state.slowShare * state.slowRate + (1 - state.slowShare) * state.fastRate
     const at = (l: number) => {
-      const kept = slowShare * (1 - l)
-      const nb = assigned * (kept + 1 - slowShare)
-      const rateB = (kept * slowRate + (1 - slowShare) * fastRate) / (kept + 1 - slowShare)
-      return { bias: rateB - rateA, srmP: Math.max(srmTest(assigned, nb).p, P_FLOOR) }
+      const kept = state.slowShare * (1 - l)
+      const nb = state.assigned * (kept + 1 - state.slowShare)
+      const rateB = (kept * state.slowRate + (1 - state.slowShare) * state.fastRate) / (kept + 1 - state.slowShare)
+      return { bias: rateB - rateA, srmP: Math.max(srmTest(state.assigned, nb).p, P_FLOOR) }
     }
     const values = LOSSES.map(at)
     return {
@@ -65,31 +70,34 @@ export function SrmSimulator() {
         y: values.map((v) => v.srmP),
         slot: 0,
       },
-    } satisfies Record<string, XYSeries>
-  }, [assigned, slowShare, slowRate, fastRate])
+    } satisfies Record<string, SeriesSpec>
+  }, [state.assigned, state.slowShare, state.slowRate, state.fastRate])
 
   const r = useMemo(() => {
-    const { uniform } = rng(seed)
-    const slowA = sampleBinomial(assigned, slowShare, uniform)
-    const slowB = sampleBinomial(assigned, slowShare, uniform)
-    const keptSlowB = sampleBinomial(slowB, 1 - loss.value, uniform)
-    const na = assigned
-    const nb = keptSlowB + (assigned - slowB)
-    const xa = sampleBinomial(slowA, slowRate, uniform) + sampleBinomial(assigned - slowA, fastRate, uniform)
-    const xb = sampleBinomial(keptSlowB, slowRate, uniform) + sampleBinomial(assigned - slowB, fastRate, uniform)
+    const draws = stream(state.seed)
+    const uniform = () => drawUniform(draws)
+    const slowA = sampleBinomial(state.assigned, state.slowShare, uniform)
+    const slowB = sampleBinomial(state.assigned, state.slowShare, uniform)
+    const keptSlowB = sampleBinomial(slowB, 1 - state.loss, uniform)
+    const na = state.assigned
+    const nb = keptSlowB + (state.assigned - slowB)
+    const xa =
+      sampleBinomial(slowA, state.slowRate, uniform) + sampleBinomial(state.assigned - slowA, state.fastRate, uniform)
+    const xb =
+      sampleBinomial(keptSlowB, state.slowRate, uniform) +
+      sampleBinomial(state.assigned - slowB, state.fastRate, uniform)
     return { na, nb, srm: srmTest(na, nb), ab: twoProportionZ(xa, na, xb, nb, 0.05) }
-  }, [assigned, slowShare, slowRate, fastRate, loss.value, seed])
+  }, [state.assigned, state.slowShare, state.slowRate, state.fastRate, state.loss, state.seed])
 
-  const handles: Handle[] = [{ kind: 'x', at: 100 * loss.value, label: 'loss', onDrag: (x) => loss.set(x / 100) }]
-  const biasSeries: XYSeries[] = [
+  const biasSeries: SeriesSpec[] = [
     curves.bias,
-    { name: 'this experiment', type: 'scatter', x: [100 * loss.value], y: [100 * r.ab.diff], emphasis: true },
+    { name: 'this experiment', type: 'scatter', x: [100 * state.loss], y: [100 * r.ab.diff], emphasis: true },
   ]
   const ci: Segment[] = [
-    { from: [100 * loss.value, 100 * r.ab.ci[0]], to: [100 * loss.value, 100 * r.ab.ci[1]] },
+    { from: [100 * state.loss, 100 * r.ab.ci[0]], to: [100 * state.loss, 100 * r.ab.ci[1]] },
     { from: [0, 0], to: [100 * LOSS_MAX, 0] },
   ]
-  const srmSeries: XYSeries[] = [
+  const srmSeries: SeriesSpec[] = [
     curves.srm,
     {
       name: `SRM threshold (p = ${SRM_ALPHA})`,
@@ -102,55 +110,23 @@ export function SrmSimulator() {
     {
       name: 'this experiment',
       type: 'scatter',
-      x: [100 * loss.value],
+      x: [100 * state.loss],
       y: [Math.max(r.srm.p, P_FLOOR)],
       emphasis: true,
     },
   ]
 
+  const xAxis = useAxis({ label: 'slow users lost from B (%)', range: [0, 100 * LOSS_MAX] })
+  const yAxis = useAxis({ label: 'reported B − A (pp)', hold: 'union' })
+  const xAxis2 = useAxis({ label: 'slow users lost from B (%)', range: [0, 100 * LOSS_MAX] })
+  const yAxis2 = useAxis({ label: 'SRM p-value', hold: 'union', log: true })
   return (
-    <Interactive
+    <Figure
       title="Lost users, false wins"
+      state={state}
       caption="The new page in arm B is exactly as good as the old one, but it loads slowly, and a share of slow-connection users leave before they are logged. Left: the lift that the A/B test then reports, against the loss rate, with this experiment's 95% interval; the true lift is zero. Right: the sample-ratio test's p-value on a log scale. Drag the line labelled loss. The ratio test flags the problem at losses too small to bias the result visibly."
-      controls={
-        <>
-          <ParamSlider
-            label="users assigned per arm"
-            value={assigned}
-            onChange={setAssigned}
-            min={10000}
-            max={500000}
-            step={10000}
-          />
-          <ParamSlider label="loss of slow users in B" param={loss} />
-          <ParamSlider
-            label="share of slow users"
-            value={slowShare}
-            onChange={setSlowShare}
-            min={0.05}
-            max={0.6}
-            step={0.05}
-          />
-          <ParamSlider
-            label="slow users' conversion"
-            value={slowRate}
-            onChange={setSlowRate}
-            min={0.01}
-            max={0.2}
-            step={0.01}
-          />
-          <ParamSlider
-            label="fast users' conversion"
-            value={fastRate}
-            onChange={setFastRate}
-            min={0.01}
-            max={0.3}
-            step={0.01}
-          />
-          <ParamButton onClick={() => setSeed((s) => s + 1)}>Rerun</ParamButton>
-        </>
-      }
-      readout={
+
+      readouts={
         <>
           <Readout label="logged A, B" value={`${r.na.toLocaleString()}, ${r.nb.toLocaleString()}`} />
           <Readout label="B share" value={`${((100 * r.nb) / (r.na + r.nb)).toFixed(2)}%`} />
@@ -165,25 +141,16 @@ export function SrmSimulator() {
       }
     >
       <div className="grid gap-4 md:grid-cols-2">
-        <XYChart
-          height={300}
-          series={biasSeries}
-          segments={ci}
-          xRange={[0, 100 * LOSS_MAX]}
-          xLabel="slow users lost from B (%)"
-          yLabel="reported B − A (pp)"
-          handles={handles}
-        />
-        <XYChart
-          height={300}
-          series={srmSeries}
-          xRange={[0, 100 * LOSS_MAX]}
-          yLog
-          xLabel="slow users lost from B (%)"
-          yLabel="SRM p-value"
-          handles={handles}
-        />
+        <Plot x={xAxis} y={yAxis} height={300}>
+          {seriesLayers(biasSeries)}
+          <Segments segments={ci} />
+          <Handle kind="x" at={100 * state.loss} label="loss" onDrag={(x) => state.set('loss', x / 100)} />
+        </Plot>
+        <Plot x={xAxis2} y={yAxis2} height={300}>
+          {seriesLayers(srmSeries)}
+          <Handle kind="x" at={100 * state.loss} label="loss" onDrag={(x) => state.set('loss', x / 100)} />
+        </Plot>
       </div>
-    </Interactive>
+    </Figure>
   )
 }

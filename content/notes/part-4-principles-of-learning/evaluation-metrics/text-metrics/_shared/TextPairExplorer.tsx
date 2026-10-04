@@ -1,7 +1,22 @@
 import { useMemo, useState } from 'react'
-import { Interactive, ParamChoice, Readout, XYChart, formatNumber, type XYSeries } from 'aifn-render'
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from 'aifn-render'
-import { Textarea } from 'aifn-render'
+import {
+  Bars,
+  choice,
+  Curve,
+  Figure,
+  formatNumber,
+  Plot,
+  Readout,
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+  Textarea,
+  useAxis,
+  useFigureState,
+} from 'aifn-render'
 import { cn } from '@/lib/utils'
 import { bleu, chrf, errorRates, rougeL, rougeN, tokens } from './text'
 
@@ -36,17 +51,36 @@ const CAPTIONS: Record<Focus, string> = {
 
 /** A sentence pair with every text metric computed live; `focus` chooses the detail shown. */
 export function TextPairExplorer({ focus }: { focus: Focus }) {
-  const [preset, setPreset] = useState<Preset>(focus === 'wer' ? 'asr' : 'paraphrase')
-  const [ref, setRef] = useState<string>(PRESETS[focus === 'wer' ? 'asr' : 'paraphrase'].ref)
-  const [hyp, setHyp] = useState<string>(PRESETS[focus === 'wer' ? 'asr' : 'paraphrase'].hyp)
-  const [beta, setBeta] = useState<'1' | '2' | '3'>('2')
+  const first = focus === 'wer' ? 'asr' : 'paraphrase'
+  // The text typed by the reader; shown while the example is 'custom'.
+  const [custom, setCustom] = useState<{ ref: string; hyp: string }>({
+    ref: PRESETS[first].ref,
+    hyp: PRESETS[first].hyp,
+  })
+  const state = useFigureState({
+    preset: choice<Preset>(
+      [
+        ...(Object.keys(PRESETS) as (keyof typeof PRESETS)[]).map((k) => ({ value: k, label: PRESETS[k].label })),
+        { value: 'custom', label: 'custom' },
+      ],
+      first,
+      { label: 'example' },
+    ),
+    beta: choice<'1' | '2' | '3'>(
+      [
+        { value: '1', label: '1' },
+        { value: '2', label: '2' },
+        { value: '3', label: '3' },
+      ],
+      '2',
+      { label: 'β (weight of recall)', when: () => focus === 'chrf' },
+    ),
+  })
 
-  const choose = (p: Preset) => {
-    setPreset(p)
-    if (p !== 'custom') {
-      setRef(PRESETS[p].ref)
-      setHyp(PRESETS[p].hyp)
-    }
+  const { ref, hyp } = state.preset === 'custom' ? custom : PRESETS[state.preset]
+  const edit = (next: { ref: string; hyp: string }) => {
+    setCustom(next)
+    state.set('preset', 'custom')
   }
 
   const m = useMemo(() => {
@@ -54,57 +88,35 @@ export function TextPairExplorer({ focus }: { focus: Focus }) {
     const h = tokens(hyp)
     const b = bleu([{ hyp: h, refs: [r] }])
     const bs = bleu([{ hyp: h, refs: [r] }], 4, true)
-    const c = chrf(hyp, ref, 6, Number(beta))
+    const c = chrf(hyp, ref, 6, Number(state.beta))
     const r1 = rougeN(h, r, 1)
     const r2 = rougeN(h, r, 2)
     const rl = rougeL(h, r)
     const e = errorRates(r, h)
     const cer = errorRates([...ref.replace(/\s+/g, ' ').trim()], [...hyp.replace(/\s+/g, ' ').trim()]).wer
     return { b, bs, c, r1, r2, rl, e, cer }
-  }, [ref, hyp, beta])
+  }, [ref, hyp, state.beta])
 
-  const bleuBars: XYSeries[] = [
-    { name: 'clipped precision pₙ', type: 'bar', x: [1, 2, 3, 4], y: m.b.precisions, slot: 0 },
-  ]
-  const chrfLines: XYSeries[] = [
-    { name: 'precision', type: 'line', x: [1, 2, 3, 4, 5, 6], y: m.c.precisions, slot: 0 },
-    { name: 'recall', type: 'line', x: [1, 2, 3, 4, 5, 6], y: m.c.recalls, slot: 1, dashed: true },
-  ]
+  const bleuBars = [{ name: 'clipped precision pₙ', x: [1, 2, 3, 4], y: m.b.precisions, slot: 0 }] as const
+  const chrfLines = [
+    { name: 'precision', x: [1, 2, 3, 4, 5, 6], y: m.c.precisions, slot: 0 },
+    { name: 'recall', x: [1, 2, 3, 4, 5, 6], y: m.c.recalls, slot: 1, dashed: true },
+  ] as const
 
+  const xAxis = useAxis({ label: 'n-gram order n', hold: 'union' })
+  const yAxis = useAxis({ label: 'pₙ', range: [0, 1] })
+  const xAxis2 = useAxis({ label: 'character n-gram order n', hold: 'union' })
+  const yAxis2 = useAxis({ label: 'score', range: [0, 1] })
   return (
-    <Interactive
+    <Figure
       title={TITLES[focus]}
+      state={state}
       caption={CAPTIONS[focus]}
-      controls={
-        <>
-          <ParamChoice
-            label="example"
-            value={preset}
-            onChange={choose}
-            options={[
-              ...Object.entries(PRESETS).map(([k, v]) => ({ value: k as Preset, label: v.label })),
-              { value: 'custom', label: 'custom' },
-            ]}
-          />
-          {focus === 'chrf' && (
-            <ParamChoice
-              label="β (weight of recall)"
-              value={beta}
-              onChange={setBeta}
-              options={[
-                { value: '1', label: '1' },
-                { value: '2', label: '2' },
-                { value: '3', label: '3' },
-              ]}
-            />
-          )}
-        </>
-      }
-      readout={
+      readouts={
         <>
           <Readout label="BLEU" value={formatNumber(m.b.score)} />
           <Readout label="smoothed BLEU" value={formatNumber(m.bs.score)} />
-          <Readout label={`chrF${beta}`} value={formatNumber(m.c.F)} />
+          <Readout label={`chrF${state.beta}`} value={formatNumber(m.c.F)} />
           <Readout label="ROUGE-L F" value={formatNumber(m.rl.F)} />
           <Readout label="WER" value={formatNumber(m.e.wer)} />
           <Readout label="CER" value={formatNumber(m.cer)} />
@@ -116,10 +128,7 @@ export function TextPairExplorer({ focus }: { focus: Focus }) {
           reference
           <Textarea
             value={ref}
-            onChange={(e) => {
-              setRef(e.target.value)
-              setPreset('custom')
-            }}
+            onChange={(e) => edit({ ref: e.target.value, hyp })}
             className="min-h-10 font-mono text-sm text-foreground"
           />
         </label>
@@ -127,10 +136,7 @@ export function TextPairExplorer({ focus }: { focus: Focus }) {
           hypothesis
           <Textarea
             value={hyp}
-            onChange={(e) => {
-              setHyp(e.target.value)
-              setPreset('custom')
-            }}
+            onChange={(e) => edit({ ref, hyp: e.target.value })}
             className="min-h-10 font-mono text-sm text-foreground"
           />
         </label>
@@ -138,7 +144,9 @@ export function TextPairExplorer({ focus }: { focus: Focus }) {
 
       {focus === 'bleu' && (
         <div className="space-y-2">
-          <XYChart series={bleuBars} xLabel="n-gram order n" yLabel="pₙ" yRange={[0, 1]} height={220} />
+          <Plot x={xAxis} y={yAxis} height={220}>
+            <Bars {...bleuBars[0]} />
+          </Plot>
           <div className="flex flex-wrap gap-x-6 gap-y-1 text-xs text-muted-foreground">
             <Readout
               label="matched / total n-grams"
@@ -153,7 +161,10 @@ export function TextPairExplorer({ focus }: { focus: Focus }) {
 
       {focus === 'chrf' && (
         <div className="space-y-2">
-          <XYChart series={chrfLines} xLabel="character n-gram order n" yLabel="score" yRange={[0, 1]} height={220} />
+          <Plot x={xAxis2} y={yAxis2} height={220}>
+            <Curve {...chrfLines[0]} />
+            <Curve {...chrfLines[1]} />
+          </Plot>
           <div className="flex flex-wrap gap-x-6 gap-y-1 text-xs text-muted-foreground">
             <Readout label="average precision" value={formatNumber(m.c.P)} />
             <Readout label="average recall" value={formatNumber(m.c.R)} />
@@ -222,6 +233,6 @@ export function TextPairExplorer({ focus }: { focus: Focus }) {
           </div>
         </div>
       )}
-    </Interactive>
+    </Figure>
   )
 }

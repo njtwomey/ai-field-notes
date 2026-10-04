@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { blahutArimotoCapacity, blahutArimotoRateDistortion } from 'aifn-applied/information/channels'
+import { blahutArimotoCapacity, blahutArimotoRateDistortion } from 'aifn-methods/information/channels'
 import { run } from 'aifn/foundation/trace'
 import { expectProtocol } from '../../protocol'
 

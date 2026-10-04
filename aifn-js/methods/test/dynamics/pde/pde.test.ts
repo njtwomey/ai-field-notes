@@ -6,7 +6,7 @@ import {
   heatEquation,
   transportEquation,
   waveEquation,
-} from 'aifn-applied/dynamics/pde'
+} from 'aifn-methods/dynamics/pde'
 import { stream } from 'aifn/foundation/random'
 import { toFlat } from 'aifn/foundation/tensor'
 import { run, trace } from 'aifn/foundation/trace'

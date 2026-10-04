@@ -12,7 +12,7 @@ import {
   shannonCode,
   shannonFanoCode,
   singletonBound,
-} from 'aifn-applied/information/coding'
+} from 'aifn-methods/information/coding'
 
 const close = (a: number, b: number, tol = 1e-12) =>
   expect(Math.abs(a - b) / Math.max(1, Math.abs(b))).toBeLessThan(tol)

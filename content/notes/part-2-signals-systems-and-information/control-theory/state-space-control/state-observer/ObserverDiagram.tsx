@@ -1,5 +1,4 @@
-import { Interactive } from 'aifn-render'
-import { Diagram } from 'aifn-render'
+import { Diagram, Figure } from 'aifn-render'
 import type { DiagramSpec } from 'aifn-render'
 
 const spec: DiagramSpec = {
@@ -60,7 +59,7 @@ const spec: DiagramSpec = {
 /** An observer-based controller: the plant, the observer that estimates its state, and state feedback. */
 export function ObserverDiagram() {
   return (
-    <Interactive
+    <Figure
       title="Observer-based state feedback"
       caption="The observer runs a copy of the plant model on the same input u. It compares the predicted output ŷ = Cx̂ with the measured output y and feeds the difference back through the observer gain L. The controller applies the state-feedback gain K to the estimate x̂ instead of the unmeasured state x."
     >
@@ -68,6 +67,6 @@ export function ObserverDiagram() {
         spec={spec}
         ariaLabel="The input u drives both the plant and a model copy; the output error y minus y-hat is fed back into the model through L, and the estimate x-hat is fed through minus K to form u"
       />
-    </Interactive>
+    </Figure>
   )
 }

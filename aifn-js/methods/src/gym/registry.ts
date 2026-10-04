@@ -1,4 +1,4 @@
-/** The functions of the `aifn-applied/gym` area's shared layer: MDP tables, rollouts and training. */
+/** The functions of the `aifn-methods/gym` area's shared layer: MDP tables, rollouts and training. */
 
 import { definer, entries, type Entry, type FunctionInfo } from 'aifn/foundation/registry'
 import * as mdp from './mdp'

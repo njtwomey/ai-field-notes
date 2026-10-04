@@ -1,6 +1,6 @@
 import { useMemo } from 'react'
-import { ParamSlider, Readout, formatNumber, useParam } from 'aifn-render'
-import { ConstrainedExplorer, type ConstrainedProblem } from './ConstrainedExplorer'
+import { formatNumber, Readout, slider, useFigureState } from 'aifn-render'
+import { ConstrainedExplorer, tField, type ConstrainedProblem } from './ConstrainedExplorer'
 
 /**
  * Minimise the variance wᵀΣw of a two-asset portfolio subject to w₁ + w₂ = 1, with Σ built from the two volatilities
@@ -30,30 +30,25 @@ function solution(s1: number, s2: number, rho: number) {
 }
 
 export function MinimumVariancePortfolio() {
-  const s1 = useParam(0.2, { min: 0.05, max: 0.4, step: 0.01 })
-  const s2 = useParam(0.3, { min: 0.05, max: 0.4, step: 0.01 })
-  const rho = useParam(0.2, { min: -0.95, max: 0.95, step: 0.05 })
-  const p = useMemo(() => problem(s1.value, s2.value, rho.value), [s1.value, s2.value, rho.value])
-  const sol = solution(s1.value, s2.value, rho.value)
+  const state = useFigureState({
+    t: tField([-0.5, 1.5], 0.2, 0.005, 'weight w₁ in asset 1'),
+    s1: slider(0.05, 0.4, 0.2, { step: 0.01, label: 'volatility σ₁' }),
+    s2: slider(0.05, 0.4, 0.3, { step: 0.01, label: 'volatility σ₂' }),
+    rho: slider(-0.95, 0.95, 0.2, { step: 0.05, label: 'correlation ρ' }),
+  })
+  const p = useMemo(() => problem(state.s1, state.s2, state.rho), [state.s1, state.s2, state.rho])
+  const sol = solution(state.s1, state.s2, state.rho)
   return (
     <ConstrainedExplorer
+      state={state}
       problem={p}
       title="The minimum-variance portfolio of two assets"
       caption="Left: contours of the portfolio variance wᵀΣw over the weights (grey), the budget line w₁ + w₂ = 1, and the arrow of ∇f = 2Σw against the line's normal (1, 1). Drag the point along the line; weights outside [0, 1] are short positions. Set the two volatilities and their correlation with the sliders. Right: the variance along the line against w₁."
-      initialT={0.2}
-      tStep={0.005}
       xLabel="w₁"
       yLabel="w₂"
       tLabel="weight w₁ in asset 1"
       tSymbol="w₁"
       fLabel="variance"
-      controls={
-        <>
-          <ParamSlider label="volatility σ₁" param={s1} />
-          <ParamSlider label="volatility σ₂" param={s2} />
-          <ParamSlider label="correlation ρ" param={rho} />
-        </>
-      }
       readout={({ value }) => (
         <>
           <Readout label="portfolio volatility" value={formatNumber(Math.sqrt(value))} />

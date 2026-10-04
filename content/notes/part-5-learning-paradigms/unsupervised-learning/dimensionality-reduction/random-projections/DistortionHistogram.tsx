@@ -1,6 +1,6 @@
-import { useMemo, useState } from 'react'
-import { Interactive, ParamChoice, ParamSlider, Readout, XYChart, formatNumber } from 'aifn-render'
-import { rng } from '@/lib/math'
+import { useMemo } from 'react'
+import { Bars, choice, Figure, formatNumber, int, Plot, Readout, useAxis, useFigureState } from 'aifn-render'
+import { normal, stream, uniform } from 'aifn/foundation/random'
 
 const N = 60
 const D = 1000
@@ -25,18 +25,18 @@ type DataKind = (typeof DATA)[number]['value']
 const KURTOSIS: Record<MatrixKind, number> = { gauss: 3, sign: 1, achlioptas: 3, 'very-sparse': Math.sqrt(D) }
 
 function points(kind: DataKind): number[][] {
-  const r = rng(11)
+  const r = stream(11)
   return Array.from({ length: N }, () => {
-    if (kind === 'dense') return Array.from({ length: D }, () => r.normal())
+    if (kind === 'dense') return Array.from({ length: D }, () => normal(r))
     const x = new Array<number>(D).fill(0)
-    for (let m = 0; m < 5; m++) x[Math.floor(r.uniform() * D)] = r.normal()
+    for (let m = 0; m < 5; m++) x[Math.floor(uniform(r) * D)] = normal(r)
     return x
   })
 }
 
 /** Entries of a D × k matrix with mean 0 and variance 1 (divided by √k when applied), stored as sparse columns. */
 function matrix(kind: MatrixKind, k: number, seed: number): { rows: number[]; vals: number[] }[] {
-  const r = rng(seed)
+  const r = stream(seed)
   const s = kind === 'achlioptas' ? 3 : kind === 'very-sparse' ? Math.sqrt(D) : 1
   return Array.from({ length: k }, () => {
     const rows: number[] = []
@@ -44,9 +44,9 @@ function matrix(kind: MatrixKind, k: number, seed: number): { rows: number[]; va
     for (let j = 0; j < D; j++) {
       if (kind === 'gauss') {
         rows.push(j)
-        vals.push(r.normal())
+        vals.push(normal(r))
       } else {
-        const u = r.uniform()
+        const u = uniform(r)
         // Non-zero with probability 1/s, then ±√s with equal probability: mean 0, variance 1, fourth moment s.
         if (u < 1 / s) {
           rows.push(j)
@@ -73,13 +73,15 @@ function jlEpsilon(k: number, n: number): number {
 }
 
 export function DistortionHistogram() {
-  const [k, setK] = useState(100)
-  const [kind, setKind] = useState<MatrixKind>('gauss')
-  const [dataKind, setDataKind] = useState<DataKind>('dense')
-  const x = useMemo(() => points(dataKind), [dataKind])
+  const state = useFigureState({
+    k: int(100, { min: 5, max: 400, step: 5, label: 'k (target dimension)' }),
+    kind: choice<MatrixKind>(MATRICES, 'gauss', { label: 'matrix' }),
+    dataKind: choice<DataKind>(DATA, 'dense', { label: 'data' }),
+  })
+  const x = useMemo(() => points(state.dataKind), [state.dataKind])
   const result = useMemo(() => {
-    const cols = matrix(kind, k, 5)
-    const y = x.map((p) => cols.map((c) => c.rows.reduce((s, j, m) => s + c.vals[m] * p[j], 0) / Math.sqrt(k)))
+    const cols = matrix(state.kind, state.k, 5)
+    const y = x.map((p) => cols.map((c) => c.rows.reduce((s, j, m) => s + c.vals[m] * p[j], 0) / Math.sqrt(state.k)))
     const ratios: number[] = []
     let predicted = 0
     for (let i = 0; i < N; i++)
@@ -92,10 +94,10 @@ export function DistortionHistogram() {
           fourth += u ** 4
         }
         let after = 0
-        for (let m = 0; m < k; m++) after += (y[i][m] - y[j][m]) ** 2
+        for (let m = 0; m < state.k; m++) after += (y[i][m] - y[j][m]) ** 2
         ratios.push(after / before)
         // Var(‖Ru‖²/‖u‖²) = (2 + (κ − 3) Σu⁴/‖u‖⁴) / k for entries with fourth moment κ.
-        predicted += (2 + (KURTOSIS[kind] - 3) * (fourth / (before * before))) / k
+        predicted += (2 + (KURTOSIS[state.kind] - 3) * (fourth / (before * before))) / state.k
       }
     const mean = ratios.reduce((a, b) => a + b, 0) / ratios.length
     const sd = Math.sqrt(ratios.reduce((s, v) => s + (v - mean) ** 2, 0) / ratios.length)
@@ -110,38 +112,31 @@ export function DistortionHistogram() {
       predicted: Math.sqrt(predicted / ratios.length),
       worst,
     }
-  }, [x, kind, k])
+  }, [x, state.kind, state.k])
 
+  const xAxis = useAxis({ label: '‖R(x − x′)‖² / ‖x − x′‖²', range: RANGE })
+  const yAxis = useAxis({ label: 'density', hold: 'union' })
   return (
-    <Interactive
+    <Figure
       title="How much a random projection distorts squared distances"
+      state={state}
       caption="60 points in 1000 dimensions are projected to k dimensions. The histogram shows, for all 1770 pairs, the squared distance after projection divided by the squared distance before. The spread shrinks as 1/√k for every matrix on dense points. On sparse points, very sparse matrices often miss the few coordinates where two points differ, and the spread grows, while random signs give a smaller spread than Gaussian entries."
-      controls={
-        <>
-          <ParamSlider label="k (target dimension)" value={k} onChange={setK} min={5} max={400} step={5} />
-          <ParamChoice label="matrix" value={kind} onChange={setKind} options={MATRICES} />
-          <ParamChoice label="data" value={dataKind} onChange={setDataKind} options={DATA} />
-        </>
-      }
-      readout={
+
+      readouts={
         <>
           <Readout label="spread of ratios (sd)" value={formatNumber(result.sd)} />
           <Readout label="predicted sd" value={formatNumber(result.predicted)} />
           <Readout label="worst pair |ratio − 1|" value={formatNumber(result.worst)} />
           <Readout
             label="JL guarantee ε at this k"
-            value={Number.isFinite(jlEpsilon(k, N)) ? formatNumber(jlEpsilon(k, N)) : 'none (k < 99)'}
+            value={Number.isFinite(jlEpsilon(state.k, N)) ? formatNumber(jlEpsilon(state.k, N)) : 'none (k < 99)'}
           />
         </>
       }
     >
-      <XYChart
-        height={300}
-        xRange={RANGE}
-        xLabel="‖R(x − x′)‖² / ‖x − x′‖²"
-        yLabel="density"
-        series={[{ name: 'pairs', type: 'bar', x: result.centres, y: result.density, slot: 0 }]}
-      />
-    </Interactive>
+      <Plot x={xAxis} y={yAxis} height={300}>
+        <Bars name="pairs" x={result.centres} y={result.density} slot={0} />
+      </Plot>
+    </Figure>
   )
 }

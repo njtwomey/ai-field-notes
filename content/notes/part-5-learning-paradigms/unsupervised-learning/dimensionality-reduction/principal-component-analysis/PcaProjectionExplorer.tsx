@@ -14,8 +14,8 @@ import {
   type Vector,
 } from 'aifn-render'
 import { dataset } from 'aifn/learning/estimators'
-import { gaussians } from 'aifn-applied/data/synthetic'
-import { pca } from 'aifn-applied/unsupervised/embedding/linear'
+import { gaussians } from 'aifn-methods/data/synthetic'
+import { pca } from 'aifn-methods/unsupervised/embedding/linear'
 import { stream } from 'aifn/foundation/random'
 import { fromData, toFlat, toRows } from 'aifn/foundation/tensor'
 
@@ -114,12 +114,7 @@ export function PcaProjectionExplorer() {
         <Vectors vectors={vectors} />
         <Curve name="projection residual" x={[query[0], back[0]]} y={[query[1], back[1]]} dashed slot={1} />
         <Points name="reconstruction" x={[back[0]]} y={[back[1]]} slot={1} emphasis />
-        <Handle
-          kind="point"
-          at={query}
-          label="query q"
-          onDrag={setQuery}
-        />
+        <Handle kind="point" at={query} label="query q" onDrag={setQuery} />
       </Plot>
     </Figure>
   )

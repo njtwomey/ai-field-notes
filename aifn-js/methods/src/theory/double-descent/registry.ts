@@ -1,4 +1,4 @@
-/** The registry of `aifn-applied/theory/double-descent`. */
+/** The registry of `aifn-methods/theory/double-descent`. */
 
 import { definer, entries, type Entry, type FunctionInfo } from 'aifn/foundation/registry'
 import * as dd from './double-descent'

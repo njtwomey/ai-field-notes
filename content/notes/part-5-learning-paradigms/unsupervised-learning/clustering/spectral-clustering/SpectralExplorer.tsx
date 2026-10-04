@@ -1,17 +1,7 @@
 import { useMemo, useState } from 'react'
-import {
-  Figure,
-  ControlGroup,
-  Select,
-  NumberSelector,
-  Plots,
-  Plot,
-  Points,
-  Readout,
-  useAxis,
-} from 'aifn-render'
-import { circles, moons } from 'aifn-applied/data/synthetic'
-import { kmeans, spectralClustering } from 'aifn-applied/unsupervised/clustering'
+import { Figure, ControlGroup, Select, NumberSelector, Plots, Plot, Points, Readout, useAxis } from 'aifn-render'
+import { circles, moons } from 'aifn-methods/data/synthetic'
+import { kmeans, spectralClustering } from 'aifn-methods/unsupervised/clustering'
 import { dataset } from 'aifn/learning/estimators'
 import { stream } from 'aifn/foundation/random'
 import { toFlat, toRows, type Tensor } from 'aifn/foundation/tensor'

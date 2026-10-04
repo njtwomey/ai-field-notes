@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { grad } from 'aifn/foundation/autodiff'
 import { stream } from 'aifn/foundation/random'
 import { fromData, sum, toFlat, type Tensor, type Value } from 'aifn/foundation/tensor'
-import { labelShiftDomains, rotatingTasks, shiftedMoons } from 'aifn-applied/data/synthetic'
+import { labelShiftDomains, rotatingTasks, shiftedMoons } from 'aifn-methods/data/synthetic'
 import {
   blackBoxShiftEstimate,
   continualRun,
@@ -12,7 +12,7 @@ import {
   mamlRun,
   mmdSquared,
   priorShiftEm,
-} from 'aifn-applied/learning/transfer'
+} from 'aifn-methods/learning/transfer'
 
 const num = (v: Value) => (typeof v === 'number' ? v : toFlat(v as Tensor)[0])
 

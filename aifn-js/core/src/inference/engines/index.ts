@@ -2,7 +2,7 @@
  * `aifn/inference/engines`: `infer(model, bindings, options)` picks an engine by the shape of the model's structured
  * graph (forward–backward on a chain, exact BP on a tree, loopy BP otherwise, Gibbs for continuous latents) from a
  * static engine table; applications pass extra engines with `withEngines` (LDA in
- * `aifn-applied/inference/topic-models`).
+ * `aifn-methods/inference/topic-models`).
  */
 
 export {

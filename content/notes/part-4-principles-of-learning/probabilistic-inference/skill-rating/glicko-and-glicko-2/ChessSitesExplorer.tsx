@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { ratingPopulation } from 'aifn-applied/data/synthetic'
+import { ratingPopulation } from 'aifn-methods/data/synthetic'
 import {
   LICHESS_PROVISIONAL_RD,
   chessComSpec,
@@ -10,7 +10,7 @@ import {
   ratingScaleMap,
   settlingGames,
   type RatingTrace,
-} from 'aifn-applied/inference/rating-models'
+} from 'aifn-methods/inference/rating-models'
 import { child, standardNormals, stream } from 'aifn/foundation/random'
 import {
   Area,
@@ -121,10 +121,7 @@ export function ChessSitesExplorer() {
 
   const atDay = (t: RatingTrace) => t.mean.subarray(effectiveDay * P, (effectiveDay + 1) * P)
   const now = useMemo(() => traces.map(atDay), [traces, effectiveDay, P])
-  const maps = useMemo(
-    () => [ratingScaleMap(now[0], now[1]), ratingScaleMap(now[0], now[2])],
-    [now],
-  )
+  const maps = useMemo(() => [ratingScaleMap(now[0], now[1]), ratingScaleMap(now[0], now[2])], [now])
   const truthMaps = useMemo(() => now.map((r) => ratingScaleMap(relative, r)), [now, relative])
   const hist = useMemo(() => now.map(histogram), [now])
 
@@ -234,12 +231,7 @@ export function ChessSitesExplorer() {
               onChange={(v) => setView(v as 'trajectories' | 'settling')}
               options={VIEW_OPTIONS}
             />
-            <Select
-              label="chess.com initial rating"
-              value={start}
-              onChange={setStart}
-              options={START_OPTIONS}
-            />
+            <Select label="chess.com initial rating" value={start} onChange={setStart} options={START_OPTIONS} />
             <Select
               label="Matchmaking"
               value={matchmaking}
@@ -256,14 +248,7 @@ export function ChessSitesExplorer() {
               max={550}
               step={25}
             />
-            <Slider
-              label="chess.com drift c per day"
-              value={cDrift}
-              onChange={setCDrift}
-              min={0}
-              max={40}
-              step={2}
-            />
+            <Slider label="chess.com drift c per day" value={cDrift} onChange={setCDrift} min={0} max={40} step={2} />
             {view === 'trajectories' && (
               <Player
                 className="col-span-full"
@@ -284,14 +269,7 @@ export function ChessSitesExplorer() {
                   max={100}
                   step={5}
                 />
-                <Slider
-                  label="Stability hold (days)"
-                  value={hold}
-                  onChange={setHold}
-                  min={2}
-                  max={30}
-                  step={2}
-                />
+                <Slider label="Stability hold (days)" value={hold} onChange={setHold} min={2} max={30} step={2} />
               </>
             )}
           </ControlRow>
@@ -319,7 +297,10 @@ export function ChessSitesExplorer() {
               ),
               [`pool conversion on day ${effectiveDay}`]: (
                 <>
-                  <Readout label="Lichess − chess.com" value={`${fmt(maps[0].offset, 3)} ± ${fmt(maps[0].spread, 2)}`} />
+                  <Readout
+                    label="Lichess − chess.com"
+                    value={`${fmt(maps[0].offset, 3)} ± ${fmt(maps[0].spread, 2)}`}
+                  />
                   <Readout label="FIDE − chess.com" value={`${fmt(maps[1].offset, 3)} ± ${fmt(maps[1].spread, 2)}`} />
                   <Readout
                     label="chess.com fit"
@@ -388,12 +369,7 @@ export function ChessSitesExplorer() {
               <Bars key={i} name={SITES[i]} slot={i} x={h.x} y={h.y} edges={EDGES} opacity={0.4} />
             ))}
           </Plot>
-          <Plot
-            x={ccAxis}
-            y={otherAxis}
-            title="ratings compared against chess.com"
-            onPlotClick={pickNearest}
-          >
+          <Plot x={ccAxis} y={otherAxis} title="ratings compared against chess.com" onPlotClick={pickNearest}>
             <Curve name="equal ratings (y = x)" x={[200, 2800]} y={[200, 2800]} muted dashed thin />
             <Points name={SITES[1]} slot={1} x={now[0]} y={now[1]} size={4} />
             <Points name={SITES[2]} slot={2} x={now[0]} y={now[2]} size={4} />

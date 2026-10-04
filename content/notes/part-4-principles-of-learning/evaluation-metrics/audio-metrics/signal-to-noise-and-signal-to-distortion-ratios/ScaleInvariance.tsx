@@ -1,15 +1,7 @@
 import { useMemo } from 'react'
-import {
-  Interactive,
-  ParamSlider,
-  Readout,
-  XYChart,
-  formatNumber,
-  useParam,
-  type Handle,
-  type XYSeries,
-} from 'aifn-render'
-import { linspace, rng } from '@/lib/math'
+import { Curve, Figure, float, formatNumber, Handle, Plot, Readout, useAxis, useFigureState } from 'aifn-render'
+import { linspace, toFlat } from 'aifn/foundation/tensor'
+import { normal, stream } from 'aifn/foundation/random'
 
 const N = 400
 const T = Array.from({ length: N }, (_, n) => n)
@@ -17,10 +9,10 @@ const T = Array.from({ length: N }, (_, n) => n)
 const REF = T.map((n) => Math.sin((2 * Math.PI * 5 * n) / N) + 0.5 * Math.sin((2 * Math.PI * 13 * n) / N))
 const INTERFERENCE = T.map((n) => Math.sin((2 * Math.PI * 29 * n) / N + 0.7))
 const NOISE = (() => {
-  const g = rng(11)
-  return T.map(() => g.normal())
+  const g = stream(11)
+  return T.map(() => normal(g))
 })()
-const GAINS = linspace(0.05, 2, 80)
+const GAINS = toFlat(linspace(0.05, 2, 80))
 
 const dot = (a: number[], b: number[]) => a.reduce((s, v, i) => s + v * b[i], 0)
 const db = (num: number, den: number) => 10 * Math.log10(num / Math.max(den, 1e-300))
@@ -56,45 +48,45 @@ function scores(g: number, a: number, b: number) {
 
 /** SNR changes with the estimate's gain; SI-SDR does not, because it first rescales the reference to fit. */
 export function ScaleInvariance() {
-  const gain = useParam(1, { min: 0.05, max: 2, step: 0.01 })
-  const interference = useParam(0.2, { min: 0, max: 1, step: 0.01 })
-  const noise = useParam(0.1, { min: 0, max: 1, step: 0.01 })
+  const state = useFigureState({
+    gain: float(1, { min: 0.05, max: 2, step: 0.01, label: 'gain g' }),
+    interference: float(0.2, { min: 0, max: 1, step: 0.01, label: 'interference level a' }),
+    noise: float(0.1, { min: 0, max: 1, step: 0.01, label: 'noise level b' }),
+  })
 
   const s = useMemo(
-    () => scores(gain.value, interference.value, noise.value),
-    [gain.value, interference.value, noise.value],
+    () => scores(state.gain, state.interference, state.noise),
+    [state.gain, state.interference, state.noise],
   )
   const curves = useMemo(() => {
-    const rows = GAINS.map((g) => scores(g, interference.value, noise.value))
+    const rows = GAINS.map((g) => scores(g, state.interference, state.noise))
     return {
       snr: rows.map((r) => r.snr),
       sisdr: rows.map((r) => r.sisdr),
     }
-  }, [interference.value, noise.value])
+  }, [state.interference, state.noise])
 
-  const waves: XYSeries[] = [
-    { name: 'reference s', type: 'line', x: T.slice(0, 200), y: REF.slice(0, 200), slot: 0 },
-    { name: 'estimate ŝ', type: 'line', x: T.slice(0, 200), y: s.est.slice(0, 200), slot: 1 },
-    { name: 'scaled target αs', type: 'line', x: T.slice(0, 200), y: s.target.slice(0, 200), slot: 2, dashed: true },
-  ]
-  const vsGain: XYSeries[] = [
-    { name: 'SNR', type: 'line', x: GAINS, y: curves.snr, slot: 0 },
-    { name: 'SI-SDR', type: 'line', x: GAINS, y: curves.sisdr, slot: 1 },
-  ]
-  const handles: Handle[] = [{ kind: 'x', at: gain.value, label: 'gain', onDrag: (x) => gain.set(x) }]
+  const waves = [
+    { name: 'reference s', x: T.slice(0, 200), y: REF.slice(0, 200), slot: 0 },
+    { name: 'estimate ŝ', x: T.slice(0, 200), y: s.est.slice(0, 200), slot: 1 },
+    { name: 'scaled target αs', x: T.slice(0, 200), y: s.target.slice(0, 200), slot: 2, dashed: true },
+  ] as const
+  const vsGain = [
+    { name: 'SNR', x: GAINS, y: curves.snr, slot: 0 },
+    { name: 'SI-SDR', x: GAINS, y: curves.sisdr, slot: 1 },
+  ] as const
 
+  const xAxis = useAxis({ label: 'sample', hold: 'union' })
+  const yAxis = useAxis({ label: 'amplitude', hold: 'union' })
+  const xAxis2 = useAxis({ label: 'gain g', hold: 'union' })
+  const yAxis2 = useAxis({ label: 'dB', hold: 'union' })
   return (
-    <Interactive
+    <Figure
       title="Scale invariance"
+      state={state}
       caption="The estimate is g·(s + a·interference + b·noise): a separated signal played back at gain g. SNR compares it with the reference as is, so a wrong gain counts as error and SNR peaks near g = 1. SI-SDR first finds the scale α that best fits the reference to the estimate and measures the error against αs, so it does not change with g at all. Drag the gain line, or raise the interference and noise to see both fall. SIR and SAR split the SI-SDR error into the interference part and the rest."
-      controls={
-        <>
-          <ParamSlider label="gain g" param={gain} />
-          <ParamSlider label="interference level a" param={interference} />
-          <ParamSlider label="noise level b" param={noise} />
-        </>
-      }
-      readout={
+
+      readouts={
         <>
           <Readout label="SNR (dB)" value={formatNumber(s.snr)} />
           <Readout label="SI-SDR (dB)" value={formatNumber(s.sisdr)} />
@@ -105,9 +97,17 @@ export function ScaleInvariance() {
       }
     >
       <div className="grid gap-4 md:grid-cols-2">
-        <XYChart series={waves} xLabel="sample" yLabel="amplitude" height={280} />
-        <XYChart series={vsGain} xLabel="gain g" yLabel="dB" handles={handles} height={280} />
+        <Plot x={xAxis} y={yAxis} height={280}>
+          <Curve {...waves[0]} />
+          <Curve {...waves[1]} />
+          <Curve {...waves[2]} />
+        </Plot>
+        <Plot x={xAxis2} y={yAxis2} height={280}>
+          <Curve {...vsGain[0]} />
+          <Curve {...vsGain[1]} />
+          <Handle {...state.handle('gain', { label: 'gain' })} />
+        </Plot>
       </div>
-    </Interactive>
+    </Figure>
   )
 }

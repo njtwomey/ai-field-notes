@@ -1,4 +1,4 @@
-/** The registry of `aifn-applied/theory/bias-variance`. */
+/** The registry of `aifn-methods/theory/bias-variance`. */
 
 import { definer, entries, type Entry, type FunctionInfo } from 'aifn/foundation/registry'
 import * as bv from './bias-variance'

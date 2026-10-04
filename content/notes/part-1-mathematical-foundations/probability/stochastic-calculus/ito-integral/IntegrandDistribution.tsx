@@ -1,16 +1,18 @@
-import { useMemo, useState } from 'react'
+import { useMemo } from 'react'
 import {
-  Interactive,
-  ParamChoice,
-  ParamSlider,
-  Readout,
-  XYChart,
+  choice,
+  Figure,
   formatNumber,
-  useParam,
-  type XYSeries,
+  int,
+  Plot,
+  Readout,
+  seriesLayers,
+  type SeriesSpec,
+  useAxis,
+  useFigureState,
 } from 'aifn-render'
-import { rng } from '@/lib/math'
 import { gaussPdf, histogram } from '../_shared/sde'
+import { normal, stream } from 'aifn/foundation/random'
 
 type Integrand = 'constant' | 'steps' | 'ramp' | 'fade' | 'path'
 
@@ -41,13 +43,19 @@ function itoWdWDensity(y: number, T: number): number {
  * (not Gaussian: ½(W_T² − T)). Each path uses left-point sums over 200 steps.
  */
 export function IntegrandDistribution() {
-  const [integrand, setIntegrand] = useState<Integrand>('steps')
-  const seed = useParam(1, { min: 1, max: 20, step: 1 })
-  const count = useParam(10, { min: 1, max: MAX_DRAWN, step: 1 })
-  const spec = INTEGRANDS[integrand]
+  const state = useFigureState({
+    integrand: choice<Integrand>(
+      (Object.keys(INTEGRANDS) as Integrand[]).map((k) => ({ value: k, label: INTEGRANDS[k].label })),
+      'steps',
+      { label: 'integrand h(t)' },
+    ),
+    count: int(10, { min: 1, max: MAX_DRAWN, step: 1, label: 'paths', format: (v) => String(v) }),
+    seed: int(1, { min: 1, max: 20, step: 1, label: 'seed' }),
+  })
+  const spec = INTEGRANDS[state.integrand]
 
   const sim = useMemo(() => {
-    const { normal } = rng(seed.value)
+    const rs = stream(state.seed)
     const dt = spec.T / STEPS
     const sd = Math.sqrt(dt)
     const values = new Float64Array(PATHS)
@@ -62,8 +70,8 @@ export function IntegrandDistribution() {
       const sumTrace = [0]
       for (let j = 0; j < STEPS; j++) {
         const t = j * dt
-        const dW = sd * normal()
-        const h = integrand === 'path' ? w : spec.h(t)
+        const dW = sd * normal(rs)
+        const h = state.integrand === 'path' ? w : spec.h(t)
         sum += h * dW
         w += dW
         if (keep) {
@@ -82,16 +90,16 @@ export function IntegrandDistribution() {
     let variance = 0
     for (const v of values) variance += (v - mean) ** 2 / (PATHS - 1)
     return { values, mean, variance, wTraces, sumTraces }
-  }, [integrand, seed.value, spec])
+  }, [state.integrand, state.seed, spec])
 
   const ts = useMemo(() => Array.from({ length: STEPS + 1 }, (_, j) => (j * spec.T) / STEPS), [spec])
 
   const { integrandSeries, runningSeries } = useMemo(() => {
-    const many = count.value > 1
-    const shown = sim.sumTraces.slice(0, count.value)
-    const integrandSeries: XYSeries[] =
-      integrand === 'path'
-        ? sim.wTraces.slice(0, count.value).map((w) => ({
+    const many = state.count > 1
+    const shown = sim.sumTraces.slice(0, state.count)
+    const integrandSeries: SeriesSpec[] =
+      state.integrand === 'path'
+        ? sim.wTraces.slice(0, state.count).map((w) => ({
             name: many ? 'h(t) = W(t), sample paths' : 'h(t) = W(t), one sample path',
             type: 'line',
             x: ts,
@@ -103,8 +111,9 @@ export function IntegrandDistribution() {
     // Variance of the running integral: t²/2 for h = W, else the left-point sum of h² dt (the isometry).
     const dt = spec.T / STEPS
     const v: number[] = [0]
-    for (let j = 0; j < STEPS; j++) v.push(integrand === 'path' ? ts[j + 1] ** 2 / 2 : v[j] + spec.h(ts[j]) ** 2 * dt)
-    const runningSeries: XYSeries[] = shown.map((y) => ({
+    for (let j = 0; j < STEPS; j++)
+      v.push(state.integrand === 'path' ? ts[j + 1] ** 2 / 2 : v[j] + spec.h(ts[j]) ** 2 * dt)
+    const runningSeries: SeriesSpec[] = shown.map((y) => ({
       name: many ? 'running integrals, sample paths' : 'running integral, one sample path',
       type: 'line',
       x: ts,
@@ -122,26 +131,28 @@ export function IntegrandDistribution() {
         dashed: true,
       })
     return { integrandSeries, runningSeries }
-  }, [integrand, sim, spec, ts, count.value])
+  }, [state.integrand, sim, spec, ts, state.count])
 
   const { histSeries, below } = useMemo(() => {
     const sd = Math.sqrt(spec.variance)
-    const lo = integrand === 'path' ? -0.75 : -4 * sd
-    const hi = integrand === 'path' ? 3 : 4 * sd
+    const lo = state.integrand === 'path' ? -0.75 : -4 * sd
+    const hi = state.integrand === 'path' ? 3 : 4 * sd
     const hist = histogram(sim.values, lo, hi, 50)
     const grid = Array.from({ length: 241 }, (_, i) => lo + ((hi - lo) * i) / 240)
-    const theory = grid.map((y) => (integrand === 'path' ? itoWdWDensity(y, spec.T) : gaussPdf(y, 0, spec.variance)))
-    const histSeries: XYSeries[] = [
+    const theory = grid.map((y) =>
+      state.integrand === 'path' ? itoWdWDensity(y, spec.T) : gaussPdf(y, 0, spec.variance),
+    )
+    const histSeries: SeriesSpec[] = [
       { name: `${PATHS} simulated integrals`, type: 'bar', x: hist.x, y: hist.y, muted: true },
       {
-        name: integrand === 'path' ? 'exact density of ½(W² − 1)' : `N(0, ${formatNumber(spec.variance)})`,
+        name: state.integrand === 'path' ? 'exact density of ½(W² − 1)' : `N(0, ${formatNumber(spec.variance)})`,
         type: 'line',
         x: grid,
         y: theory,
         slot: 1,
       },
     ]
-    if (integrand === 'path')
+    if (state.integrand === 'path')
       histSeries.push({
         name: 'Gaussian with the same variance',
         type: 'line',
@@ -153,38 +164,40 @@ export function IntegrandDistribution() {
     let below = 0
     for (const v of sim.values) if (v < -0.4) below++
     return { histSeries, below: below / PATHS }
-  }, [integrand, sim, spec])
+  }, [state.integrand, sim, spec])
 
+  const xAxis = useAxis({ label: 't', hold: 'union' })
+  const yAxis = useAxis({ label: 'h(t)', hold: 'union' })
+  const xAxis2 = useAxis({ label: 't', hold: 'union' })
+  const yAxis2 = useAxis({ label: '∫₀ᵗ h dW', hold: 'union' })
+  const xAxis3 = useAxis({ label: '∫ h dW', hold: 'union' })
+  const yAxis3 = useAxis({ label: 'density', hold: 'union' })
   return (
-    <Interactive
+    <Figure
       title="The distribution of ∫ h dW for different integrands"
+      state={state}
       caption="Left-point sums of ∫ h dW over 200 steps, on 4,000 simulated Brownian paths. Top: the integrand h(t); for h = W, the first few sampled paths of W. Middle: the running integral ∫₀ᵗ h dW on the first few paths, as light lines, inside a band of ± 2 standard deviations, sd² = ∫₀ᵗ h(s)² ds (for h = W, t²/2); the paths slider sets how many are drawn. Bottom: the histogram of all 4,000 values at the end of the interval against the theory. For a deterministic integrand the integral is Gaussian with variance ∫ h(t)² dt, whatever the integrand's shape. For the integrand h = W, which depends on the path, the integral is ½(W₁² − 1): mean 0 and variance ½ as the isometry says, but skewed, never below −½, and not Gaussian (dashed)."
-      controls={
-        <>
-          <ParamChoice
-            label="integrand h(t)"
-            value={integrand}
-            onChange={setIntegrand}
-            options={(Object.keys(INTEGRANDS) as Integrand[]).map((k) => ({ value: k, label: INTEGRANDS[k].label }))}
-          />
-          <ParamSlider label="paths" param={count} withArrows format={(v) => String(v)} />
-          <ParamSlider label="seed" param={seed} withArrows />
-        </>
-      }
-      readout={
+
+      readouts={
         <>
           <Readout label="sample mean" value={formatNumber(sim.mean)} />
           <Readout label="sample variance" value={formatNumber(sim.variance)} />
           <Readout label="∫ h² dt (theory)" value={formatNumber(spec.variance)} />
-          {integrand === 'path' && <Readout label="share below −0.4 (exact 0.345)" value={formatNumber(below)} />}
+          {state.integrand === 'path' && <Readout label="share below −0.4 (exact 0.345)" value={formatNumber(below)} />}
         </>
       }
     >
       <div className="space-y-4">
-        <XYChart height={180} xLabel="t" yLabel="h(t)" series={integrandSeries} />
-        <XYChart height={220} xLabel="t" yLabel="∫₀ᵗ h dW" series={runningSeries} />
-        <XYChart height={260} xLabel="∫ h dW" yLabel="density" series={histSeries} />
+        <Plot x={xAxis} y={yAxis} height={180}>
+          {seriesLayers(integrandSeries)}
+        </Plot>
+        <Plot x={xAxis2} y={yAxis2} height={220}>
+          {seriesLayers(runningSeries)}
+        </Plot>
+        <Plot x={xAxis3} y={yAxis3} height={260}>
+          {seriesLayers(histSeries)}
+        </Plot>
       </div>
-    </Interactive>
+    </Figure>
   )
 }

@@ -1,13 +1,18 @@
 import { useMemo, useState } from 'react'
 import {
-  Interactive,
-  ParamChoice,
-  ParamSlider,
-  Readout,
-  XYChart,
+  choice,
+  Curve,
+  Figure,
+  float,
   formatNumber,
-  type Handle,
-  type XYSeries,
+  Handle,
+  Plot,
+  Points,
+  Readout,
+  Segments,
+  useAxis,
+  useFigureState,
+  when,
 } from 'aifn-render'
 import { classify2, directionField, formatEig, integrate, type Mat2 } from '../_shared/ode'
 
@@ -81,10 +86,15 @@ const SYSTEMS: { value: System; label: string }[] = [
 ]
 
 export function NonlinearPortrait() {
-  const [system, setSystem] = useState<System>('pendulum')
-  const [gamma, setGamma] = useState(0.5)
-  const s = useMemo(() => spec(system, gamma), [system, gamma])
-  const [start, setStart] = useState<[number, number]>(s.start)
+  const state = useFigureState({
+    system: choice<System>(SYSTEMS, 'pendulum', { label: 'system' }),
+    gamma: float(0.5, { min: 0, max: 1.5, step: 0.05, label: 'damping γ', when: when('system', 'pendulum') }),
+  })
+  const system = state.system
+  const s = useMemo(() => spec(system, state.gamma), [system, state.gamma])
+  // A dragged start belongs to the system it was dragged in; another system opens at its own default start.
+  const [picked, setPicked] = useState<{ system: System; start: [number, number] } | null>(null)
+  const start = picked?.system === system ? picked.start : s.start
 
   const field = useMemo(() => directionField(s.f, s.x, s.y, 17, 11), [s])
   const path = useMemo(
@@ -93,25 +103,24 @@ export function NonlinearPortrait() {
   )
   const kinds = useMemo(() => s.fixed.map(([x, y]) => classify2(s.jac(x, y))), [s])
 
-  const series = useMemo<XYSeries[]>(
-    () => [
-      { name: 'trajectory', type: 'line', x: path.xs.map((p) => p[0]), y: path.xs.map((p) => p[1]), slot: 0 },
-      {
-        name: 'stable equilibria',
-        type: 'scatter',
-        x: s.fixed.filter((_, i) => isStable(kinds[i].kind)).map((p) => p[0]),
-        y: s.fixed.filter((_, i) => isStable(kinds[i].kind)).map((p) => p[1]),
-        slot: 1,
-      },
-      {
-        name: 'unstable or neutral equilibria',
-        type: 'scatter',
-        x: s.fixed.filter((_, i) => !isStable(kinds[i].kind)).map((p) => p[0]),
-        y: s.fixed.filter((_, i) => !isStable(kinds[i].kind)).map((p) => p[1]),
-        slot: 2,
-      },
-      { name: 'start', type: 'scatter', x: [start[0]], y: [start[1]], emphasis: true },
-    ],
+  const series = useMemo(
+    () =>
+      [
+        { name: 'trajectory', x: path.xs.map((p) => p[0]), y: path.xs.map((p) => p[1]), slot: 0 },
+        {
+          name: 'stable equilibria',
+          x: s.fixed.filter((_, i) => isStable(kinds[i].kind)).map((p) => p[0]),
+          y: s.fixed.filter((_, i) => isStable(kinds[i].kind)).map((p) => p[1]),
+          slot: 1,
+        },
+        {
+          name: 'unstable or neutral equilibria',
+          x: s.fixed.filter((_, i) => !isStable(kinds[i].kind)).map((p) => p[0]),
+          y: s.fixed.filter((_, i) => !isStable(kinds[i].kind)).map((p) => p[1]),
+          slot: 2,
+        },
+        { name: 'start', x: [start[0]], y: [start[1]], emphasis: true },
+      ] as const,
     [path, s, kinds, start],
   )
 
@@ -121,34 +130,35 @@ export function NonlinearPortrait() {
         kind: 'point',
         at: start,
         label: 'start',
-        onDrag: ([x, y]) => setStart([Math.min(s.x[1], Math.max(s.x[0], x)), Math.min(s.y[1], Math.max(s.y[0], y))]),
+        onDrag: ([x, y]) =>
+          setPicked({
+            system,
+            start: [Math.min(s.x[1], Math.max(s.x[0], x)), Math.min(s.y[1], Math.max(s.y[0], y))],
+          }),
       },
     ],
-    [start, s],
+    [start, s, system],
   )
 
-  const choose = (v: System) => {
-    setSystem(v)
-    setStart(spec(v, gamma).start)
-  }
   // Show each distinct equilibrium type once; the pendulum repeats its two types every 2π.
   const shown = s.fixed
     .map((p, i) => ({ p, k: kinds[i] }))
     .filter(({ p }) => system !== 'pendulum' || (p[0] >= 0 && p[0] <= Math.PI))
 
+  const xAxis = useAxis({
+    label: system === 'pendulum' ? 'angle θ' : system === 'predator-prey' ? 'prey x' : 'x',
+    range: s.x,
+  })
+  const yAxis = useAxis({
+    label: system === 'pendulum' ? 'velocity ω' : system === 'predator-prey' ? 'predators y' : 'y',
+    range: s.y,
+  })
   return (
-    <Interactive
+    <Figure
       title="Equilibria of nonlinear systems"
+      state={state}
       caption="Arrows show the vector field. Drag the black start point to launch a trajectory. Equilibria are marked on the plot and listed below, each classified by the eigenvalues of the Jacobian there. In the pendulum, lower the damping to zero and the stable spirals become centres; in the double well, starts on either side of the y-axis fall into different minima."
-      controls={
-        <>
-          <ParamChoice label="system" value={system} onChange={choose} options={SYSTEMS} />
-          {system === 'pendulum' && (
-            <ParamSlider label="damping γ" value={gamma} onChange={setGamma} min={0} max={1.5} step={0.05} />
-          )}
-        </>
-      }
-      readout={shown.map(({ p, k }, i) => (
+      readouts={shown.map(({ p, k }, i) => (
         <Readout
           key={i}
           label={`(${formatNumber(p[0])}, ${formatNumber(p[1])})`}
@@ -156,17 +166,17 @@ export function NonlinearPortrait() {
         />
       ))}
     >
-      <XYChart
-        height={340}
-        series={series}
-        segments={field}
-        handles={handles}
-        xRange={s.x}
-        yRange={s.y}
-        xLabel={system === 'pendulum' ? 'angle θ' : system === 'predator-prey' ? 'prey x' : 'x'}
-        yLabel={system === 'pendulum' ? 'velocity ω' : system === 'predator-prey' ? 'predators y' : 'y'}
-      />
-    </Interactive>
+      <Plot x={xAxis} y={yAxis} height={340}>
+        <Curve {...series[0]} />
+        <Points {...series[1]} />
+        <Points {...series[2]} />
+        <Points {...series[3]} />
+        <Segments segments={field} />
+        {(handles ?? []).map((h, i) => (
+          <Handle key={i} {...h} />
+        ))}
+      </Plot>
+    </Figure>
   )
 }
 

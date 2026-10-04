@@ -9,7 +9,7 @@
  *
  * Everything is written on tensors (`aifn/foundation/tensor` arithmetic, `aifn/numerics/linalg` factorisations): one
  * filter step (`kalmanStep`) and one smoother step (`rtsStep`) are the definitions, and the batch functions, the
- * algorithms and EM (`aifn-applied/timeseries`) all call them.
+ * algorithms and EM (`aifn-methods/timeseries`) all call them.
  */
 
 import type { Algorithm, Status } from 'aifn/foundation/contracts'

@@ -1,10 +1,10 @@
 /**
- * `aifn-applied/data`: datasets: seeded synthetic generators and modifiers, small embedded real datasets, test
+ * `aifn-methods/data`: datasets: seeded synthetic generators and modifiers, small embedded real datasets, test
  * objectives, test log densities and test signals. The shared
  * layer holds the `Dataset` shape, ground truth, sizes and the recipe interpreter.
  *
  * Registries (design S §3), keyed by `info.key`: `datasetRegistry` (generators; the font table, a large module, keeps
- * its own `fontDatasetRegistry` in `aifn-applied/data/real/fonts`), `modifierRegistry`,
+ * its own `fontDatasetRegistry` in `aifn-methods/data/real/fonts`), `modifierRegistry`,
  * `objectiveRegistry` and `logDensityRegistry`. Recipes replay them: `recipe`, `normaliseRecipe`, `describeRecipe`,
  * `encodeRecipe`, `decodeRecipe`, `parseRecipe`, `recipeBases`, `recipeOps` and `recipeSpace` (the space of a base and
  * its knobs, derived from the registry).

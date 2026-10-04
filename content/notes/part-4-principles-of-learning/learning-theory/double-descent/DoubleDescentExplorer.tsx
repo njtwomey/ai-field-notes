@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { doubleDescent, type DoubleDescentResult } from 'aifn-applied/theory/double-descent'
+import { doubleDescent, type DoubleDescentResult } from 'aifn-methods/theory/double-descent'
 import { stream } from 'aifn/foundation/random'
 import {
   Figure,
@@ -101,8 +101,10 @@ export function DoubleDescentExplorer() {
             label="Current p"
             value={currentP}
             onChange={(val) => {
-              const closest = res.features.reduce((prev, curr, idx) =>
-                Math.abs(curr - val) < Math.abs(res.features[prev] - val) ? idx : prev, 0)
+              const closest = res.features.reduce(
+                (prev, curr, idx) => (Math.abs(curr - val) < Math.abs(res.features[prev] - val) ? idx : prev),
+                0,
+              )
               setFeatureIdx(closest)
             }}
             min={res.features[0]}
@@ -110,18 +112,18 @@ export function DoubleDescentExplorer() {
             step={1}
             suggestions={[n / 2, n, n * 2, n * 4]}
           />
-          <Player
-            label="Sweep features p"
-            value={at}
-            onChange={setFeatureIdx}
-            count={res.features.length}
-          />
+          <Player label="Sweep features p" value={at} onChange={setFeatureIdx} count={res.features.length} />
         </ControlGroup>
       }
       readouts={
         <>
           <Readout label="Parameters p" value={currentP} />
-          <Readout label="Regime" value={currentP < n ? 'Under-parameterised' : currentP === n ? 'Interpolation threshold' : 'Over-parameterised'} />
+          <Readout
+            label="Regime"
+            value={
+              currentP < n ? 'Under-parameterised' : currentP === n ? 'Interpolation threshold' : 'Over-parameterised'
+            }
+          />
           <Readout label="Test MSE" value={fmt(res.testError[at])} />
           <Readout label="Train MSE" value={fmt(res.trainError[at])} />
           <Readout label="Weight norm ‖w‖" value={fmt(res.weightNorm[at])} />
@@ -140,8 +142,10 @@ export function DoubleDescentExplorer() {
             at={currentP}
             label="p"
             onDrag={(val) => {
-              const closest = res.features.reduce((prev, curr, idx) =>
-                Math.abs(curr - val) < Math.abs(res.features[prev] - val) ? idx : prev, 0)
+              const closest = res.features.reduce(
+                (prev, curr, idx) => (Math.abs(curr - val) < Math.abs(res.features[prev] - val) ? idx : prev),
+                0,
+              )
               setFeatureIdx(closest)
             }}
           />

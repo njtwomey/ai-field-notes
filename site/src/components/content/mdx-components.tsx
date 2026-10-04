@@ -2,7 +2,7 @@
  * Components available in every note without an import. Notes import only note-local widgets and
  * '@/components/viz' / '@/components/widgets' pieces.
  */
-import { Interactive, Readout } from 'aifn-render'
+import { Readout } from 'aifn-render'
 import { DistributionExplorer } from '@/components/widgets/DistributionExplorer'
 import { Asset } from './Asset'
 import { H2, H3, H4 } from './Anchored'
@@ -27,7 +27,6 @@ export const mdxComponents = {
   Derivation,
   DistributionExplorer,
   Gloss,
-  Interactive,
   NoteLink,
   Readout,
   SpecTable,

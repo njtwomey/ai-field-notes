@@ -29,8 +29,8 @@ import {
   xor,
   zipfCatalogue,
   zipfWeights,
-} from 'aifn-applied/data/synthetic'
-import { type Dataset } from 'aifn-applied/data'
+} from 'aifn-methods/data/synthetic'
+import { type Dataset } from 'aifn-methods/data'
 import { stream } from 'aifn/foundation/random'
 import { toFlat } from 'aifn/foundation/tensor'
 

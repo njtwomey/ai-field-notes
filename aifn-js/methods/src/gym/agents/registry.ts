@@ -1,5 +1,5 @@
 /**
- * The registry of the `aifn-applied/gym/agents` group's shared layer besides the agents (registered with
+ * The registry of the `aifn-methods/gym/agents` group's shared layer besides the agents (registered with
  * `agentRegistry`): dynamic-programming planners as traceable algorithms, and bandit and DQN functions.
  */
 

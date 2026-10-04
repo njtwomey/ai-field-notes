@@ -1,5 +1,4 @@
-import { Interactive } from 'aifn-render'
-import { Diagram } from 'aifn-render'
+import { Diagram, Figure } from 'aifn-render'
 import type { DiagramSpec } from 'aifn-render'
 
 const spec: DiagramSpec = {
@@ -106,7 +105,7 @@ const spec: DiagramSpec = {
 /** TransAct inside Pinterest's homefeed ranking model, next to the daily PinnerFormer embedding. */
 export function TransActDiagram() {
   return (
-    <Interactive
+    <Figure
       title="TransAct inside the homefeed ranker"
       caption="For each candidate pin, the candidate's PinSage embedding is concatenated to every action in the user's real-time sequence before a small transformer encodes it. The first K output positions and an element-wise max over all positions are flattened and joined with the static features and the daily PinnerFormer user embedding, crossed by DCN V2 and mapped to one probability per action type."
     >
@@ -114,6 +113,6 @@ export function TransActDiagram() {
         spec={spec}
         ariaLabel="TransAct: real-time actions fused with the candidate pin, masked, encoded by a two-layer transformer, compressed by first-K outputs and max pooling, then concatenated with static features and PinnerFormer in the Pinnability ranker with DCN V2, MLP and action heads"
       />
-    </Interactive>
+    </Figure>
   )
 }

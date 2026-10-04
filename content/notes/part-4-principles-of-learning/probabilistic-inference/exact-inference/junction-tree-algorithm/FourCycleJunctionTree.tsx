@@ -1,9 +1,5 @@
-import { useState } from 'react'
-import { MathText } from 'aifn-render'
-import { Diagram } from 'aifn-render'
-import { link, variable } from 'aifn-render'
+import { choice, Diagram, Figure, link, MathText, Readout, useFigureState, variable } from 'aifn-render'
 import type { DiagramEdge, DiagramSpec } from 'aifn-render'
-import { Interactive, ParamChoice, Readout } from 'aifn-render'
 
 type Stage = 'cycle' | 'chordal' | 'tree'
 
@@ -38,29 +34,29 @@ const STAGES: Record<Stage, { spec: DiagramSpec; cliques: string }> = {
 
 /** The worked example's three stages: the four-cycle, its triangulation by the chord a–c, and the junction tree. */
 export function FourCycleJunctionTree() {
-  const [stage, setStage] = useState<Stage>('cycle')
-  const s = STAGES[stage]
+  const state = useFigureState({
+    stage: choice<Stage>(
+      [
+        { value: 'cycle', label: '1. four-cycle' },
+        { value: 'chordal', label: '2. triangulated' },
+        { value: 'tree', label: '3. junction tree' },
+      ],
+      'cycle',
+      { label: 'stage' },
+    ),
+  })
+  const s = STAGES[state.stage]
   return (
-    <Interactive
+    <Figure
       title="From a four-cycle to a junction tree"
+      state={state}
       caption={
         <MathText text="The four-cycle has no junction tree over its cliques. The chord $a - c$ (dashed) makes it chordal, with two maximal cliques. The junction tree joins them through their separator $\{a, c\}$, which labels the edge." />
       }
-      controls={
-        <ParamChoice
-          label="stage"
-          value={stage}
-          onChange={setStage}
-          options={[
-            { value: 'cycle', label: '1. four-cycle' },
-            { value: 'chordal', label: '2. triangulated' },
-            { value: 'tree', label: '3. junction tree' },
-          ]}
-        />
-      }
-      readout={<Readout label="maximal cliques" value={<MathText text={s.cliques} />} />}
+
+      readouts={<Readout label="maximal cliques" value={<MathText text={s.cliques} />} />}
     >
-      <Diagram spec={s.spec} ariaLabel={`Stage: ${stage}`} />
-    </Interactive>
+      <Diagram spec={s.spec} ariaLabel={`Stage: ${state.stage}`} />
+    </Figure>
   )
 }

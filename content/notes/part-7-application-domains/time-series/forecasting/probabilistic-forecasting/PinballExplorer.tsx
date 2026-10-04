@@ -1,23 +1,28 @@
-import { useMemo, useState } from 'react'
+import { useMemo } from 'react'
 import {
-  Interactive,
-  ParamChoice,
-  ParamSlider,
-  Readout,
-  XYChart,
+  Area,
+  choice,
+  Curve,
+  Figure,
+  float,
   formatNumber,
-  useParam,
-  type XYSeries,
+  Handle,
+  Plot,
+  Points,
+  Readout,
+  slider,
+  useAxis,
+  useFigureState,
 } from 'aifn-render'
-import { linspace } from '@/lib/math'
-import { normalCdf, normalPdf, normalQuantile } from '@/lib/math/special'
+import { linspace, toFlat } from 'aifn/foundation/tensor'
+import { normalCdf, normalPdf, normalQuantile } from 'aifn/numerics/special'
 
 type Dist = 'gaussian' | 'lognormal'
 
 const X_MIN = 0
 const X_MAX = 45
-const Y_GRID = linspace(X_MIN, X_MAX, 901)
-const Q_GRID = linspace(2, 26, 121)
+const Y_GRID = toFlat(linspace(X_MIN, X_MAX, 901))
+const Q_GRID = toFlat(linspace(2, 26, 121))
 const DY = Y_GRID[1] - Y_GRID[0]
 
 /** Two outcome distributions with median 10: Gaussian with sd 2, and log-normal with log-scale sd 0.4 (right-skewed). */
@@ -45,60 +50,59 @@ function expectedLoss(density: number[], tau: number, q: number) {
 }
 
 export function PinballExplorer() {
-  const tau = useParam(0.9, { min: 0.05, max: 0.95, step: 0.05 })
-  const q = useParam(10, { min: 2, max: 26, step: 0.1 })
-  const [dist, setDist] = useState<Dist>('gaussian')
+  const state = useFigureState({
+    tau: slider(0.05, 0.95, 0.9, { step: 0.05, label: 'quantile level τ', format: (v) => v.toFixed(2) }),
+    q: float(10, { min: 2, max: 26, step: 0.1, label: 'forecast q', format: (v) => v.toFixed(1) }),
+    dist: choice<Dist>(
+      [
+        { value: 'gaussian', label: 'Gaussian' },
+        { value: 'lognormal', label: 'log-normal' },
+      ],
+      'gaussian',
+      { label: 'outcome distribution' },
+    ),
+  })
 
-  const d = DISTS[dist]
-  const density = useMemo(() => Y_GRID.map((y) => DISTS[dist].pdf(y)), [dist])
-  const curve = useMemo(() => Q_GRID.map((qq) => expectedLoss(density, tau.value, qq)), [density, tau.value])
-  const best = d.quantile(tau.value)
-  const lossAtQ = expectedLoss(density, tau.value, q.value)
-  const lossAtBest = expectedLoss(density, tau.value, best)
+  const d = DISTS[state.dist]
+  const density = useMemo(() => Y_GRID.map((y) => DISTS[state.dist].pdf(y)), [state.dist])
+  const curve = useMemo(() => Q_GRID.map((qq) => expectedLoss(density, state.tau, qq)), [density, state.tau])
+  const best = d.quantile(state.tau)
+  const lossAtQ = expectedLoss(density, state.tau, state.q)
+  const lossAtBest = expectedLoss(density, state.tau, best)
 
-  const lossSeries = useMemo((): XYSeries[] => {
-    const qStar = DISTS[dist].quantile(tau.value)
+  const lossSeries = useMemo(() => {
+    const qStar = DISTS[state.dist].quantile(state.tau)
     return [
-      { name: 'expected pinball loss', type: 'line', x: Q_GRID, y: curve, slot: 0 },
+      { name: 'expected pinball loss', x: Q_GRID, y: curve, slot: 0 },
       {
         name: 'minimum: the τ-quantile',
-        type: 'scatter',
         x: [qStar],
-        y: [expectedLoss(density, tau.value, qStar)],
+        y: [expectedLoss(density, state.tau, qStar)],
         emphasis: true,
       },
-    ]
-  }, [curve, density, dist, tau.value])
-  const densitySeries = useMemo((): XYSeries[] => {
-    const below = Y_GRID.filter((y) => y <= q.value)
+    ] as const
+  }, [curve, density, state.dist, state.tau])
+  const densitySeries = useMemo(() => {
+    const below = Y_GRID.filter((y) => y <= state.q)
     return [
-      { name: 'density of Y', type: 'line', x: Y_GRID, y: density, slot: 1 },
-      { name: 'P(Y ≤ q)', type: 'line', x: below, y: below.map((y) => DISTS[dist].pdf(y)), slot: 1, area: true },
-    ]
-  }, [density, q.value, dist])
+      { name: 'density of Y', x: Y_GRID, y: density, slot: 1 },
+      { name: 'P(Y ≤ q)', x: below, y: below.map((y) => DISTS[state.dist].pdf(y)), slot: 1 },
+    ] as const
+  }, [density, state.q, state.dist])
 
+  const xAxis = useAxis({ label: 'forecast q', range: [2, 26] })
+  const yAxis = useAxis({ label: 'expected loss', range: [0, undefined], hold: 'union' })
+  const xAxis2 = useAxis({ label: 'y', range: [2, 26] })
+  const yAxis2 = useAxis({ label: 'density', range: [0, undefined], hold: 'union' })
   return (
-    <Interactive
+    <Figure
       title="The pinball loss is minimised at the quantile"
+      state={state}
       caption="The outcome Y has the distribution in the lower panel (both choices have median 10). The upper panel shows the expected pinball loss of a forecast q at level τ. Drag the vertical line or use the slider to move q. The loss is lowest where the shaded probability below q equals τ, that is, at the τ-quantile of Y. For the skewed distribution the quantiles above the median lie further out than below it."
-      controls={
+
+      readouts={
         <>
-          <ParamSlider label="quantile level τ" param={tau} format={(v) => v.toFixed(2)} />
-          <ParamSlider label="forecast q" param={q} format={(v) => v.toFixed(1)} />
-          <ParamChoice
-            label="outcome distribution"
-            value={dist}
-            onChange={setDist}
-            options={[
-              { value: 'gaussian', label: 'Gaussian' },
-              { value: 'lognormal', label: 'log-normal' },
-            ]}
-          />
-        </>
-      }
-      readout={
-        <>
-          <Readout label="P(Y ≤ q)" value={formatNumber(d.cdf(q.value))} />
+          <Readout label="P(Y ≤ q)" value={formatNumber(d.cdf(state.q))} />
           <Readout label="expected loss at q" value={formatNumber(lossAtQ)} />
           <Readout label="τ-quantile" value={formatNumber(best)} />
           <Readout label="expected loss at the quantile" value={formatNumber(lossAtBest)} />
@@ -106,24 +110,16 @@ export function PinballExplorer() {
       }
     >
       <div className="space-y-4">
-        <XYChart
-          series={lossSeries}
-          xLabel="forecast q"
-          yLabel="expected loss"
-          xRange={[2, 26]}
-          yRange={[0, undefined]}
-          height={220}
-          handles={[{ kind: 'x', at: q.value, onDrag: q.set, label: 'q' }]}
-        />
-        <XYChart
-          series={densitySeries}
-          xLabel="y"
-          yLabel="density"
-          xRange={[2, 26]}
-          yRange={[0, undefined]}
-          height={160}
-        />
+        <Plot x={xAxis} y={yAxis} height={220}>
+          <Curve {...lossSeries[0]} />
+          <Points {...lossSeries[1]} />
+          <Handle {...state.handle('q', { label: 'q' })} />
+        </Plot>
+        <Plot x={xAxis2} y={yAxis2} height={160}>
+          <Curve {...densitySeries[0]} />
+          <Area {...densitySeries[1]} />
+        </Plot>
       </div>
-    </Interactive>
+    </Figure>
   )
 }

@@ -3,7 +3,7 @@
  * observations and actions (docs/aifn-gym.md §3). Gymnasium's semantics in aifn's style: environment state is
  * plain data, randomness is an explicit `Stream`, and `terminated` (a true end: values do not bootstrap past it) is kept
  * apart from `truncated` (cut short by a time limit: values still bootstrap). Implementations live in applications
- * (`aifn-applied/gym`).
+ * (`aifn-methods/gym`).
  */
 
 import type { Index, Scalar, Shape, Size, Tensor, Value } from './numbers'

@@ -1,5 +1,5 @@
 /**
- * `aifn-applied/text/tokenisers`: a suite of named tokenisers (characters, bytes, Treebank words, BPE, byte-level BPE,
+ * `aifn-methods/text/tokenisers`: a suite of named tokenisers (characters, bytes, Treebank words, BPE, byte-level BPE,
  * WordPiece, unigram, SentencePiece BPE with byte fallback) built from `aifn/text/pipeline` and trained on one corpus.
  */
 

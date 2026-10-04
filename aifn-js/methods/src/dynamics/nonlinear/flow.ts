@@ -1,5 +1,5 @@
 /**
- * Nonlinear dynamics, part of `aifn-applied/dynamics/nonlinear`: limit cycles and Poincaré sections (Strogatz, 2015,
+ * Nonlinear dynamics, part of `aifn-methods/dynamics/nonlinear`: limit cycles and Poincaré sections (Strogatz, 2015,
  * "Nonlinear Dynamics and Chaos", 2nd ed., §8.7; Guckenheimer and Holmes, 1983, §1.5).
  */
 

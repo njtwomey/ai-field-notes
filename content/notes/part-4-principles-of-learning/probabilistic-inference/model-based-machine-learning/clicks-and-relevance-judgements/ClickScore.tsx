@@ -1,13 +1,16 @@
-import { useMemo, useState } from 'react'
+import { useMemo } from 'react'
 import {
-  Interactive,
-  ParamChoice,
-  ParamSlider,
-  Readout,
-  XYChart,
+  choice,
+  Figure,
   formatNumber,
-  useParam,
-  type XYSeries,
+  int,
+  Plot,
+  Readout,
+  seriesLayers,
+  type SeriesSpec,
+  slider,
+  useAxis,
+  useFigureState,
 } from 'aifn-render'
 import { grid } from '../_shared/gaussian'
 import { CLICK_MODEL, labelProbabilities, scoreDensities } from '../_shared/clicks'
@@ -16,17 +19,35 @@ const S = grid(-1, 2, 301)
 
 /** Combine a document's click record with a judge's label and read off the relevance score and label probabilities. */
 export function ClickScore() {
-  const logExams = useParam(2, { min: 0, max: 4, step: 0.1 })
-  const rate = useParam(0.1, { min: 0, max: 1, step: 0.01 })
-  const [label, setLabel] = useState('none')
-  const exams = Math.round(10 ** logExams.value)
-  const clicks = Math.round(rate.value * exams)
+  const state = useFigureState({
+    exams: int(100, {
+      ge: 1,
+      le: 10000,
+      scale: 'log10',
+      suggestions: [1, 10, 100, 1000, 10000],
+      label: 'examinations',
+    }),
+    rate: slider(0, 1, 0.1, { step: 0.01, label: 'click rate', format: (v) => v.toFixed(2) }),
+    label: choice(
+      [
+        { value: 'none', label: 'none' },
+        { value: '0', label: '0 not relevant' },
+        { value: '1', label: '1 possibly' },
+        { value: '2', label: '2 relevant' },
+      ],
+      'none',
+      { label: "judge's label" },
+    ),
+  })
+  const exams = state.exams
+  const clicks = Math.round(state.rate * exams)
+  const label = state.label
   const lab = label === 'none' ? null : Number(label)
 
   const d = useMemo(() => scoreDensities(S, clicks, exams, lab), [clicks, exams, lab])
   const probs = labelProbabilities(d.clicks.mean, d.clicks.variance)
-  const series = useMemo((): XYSeries[] => {
-    const out: XYSeries[] = [
+  const series = useMemo((): SeriesSpec[] => {
+    const out: SeriesSpec[] = [
       { name: 'prior', type: 'line', x: S, y: d.prior, muted: true },
       { name: 'clicks only', type: 'line', x: S, y: d.fromClicks, slot: 0 },
     ]
@@ -37,28 +58,14 @@ export function ClickScore() {
     return out
   }, [d, lab])
 
+  const xAxis = useAxis({ label: 'latent relevance score', range: [-1, 2] })
+  const yAxis = useAxis({ label: 'density', range: [0, undefined], hold: 'union' })
   return (
-    <Interactive
+    <Figure
       title="A relevance score from clicks and a judgement"
+      state={state}
       caption="Set how often the document was examined and what fraction of examinations ended in a click. The click record becomes a Gaussian observation of the latent score, as sharp as the number of examinations allows. Add a judge's label to see the two sources combined: a label that disagrees with many clicks barely moves the score, which flags the label for review. The dashed lines are the learned thresholds between labels 0, 1 and 2. Parameters are those Infer.NET learns on its example data."
-      controls={
-        <>
-          <ParamSlider label="examinations (log₁₀)" param={logExams} format={() => String(exams)} />
-          <ParamSlider label="click rate" param={rate} format={(v) => v.toFixed(2)} />
-          <ParamChoice
-            label="judge's label"
-            value={label}
-            onChange={setLabel}
-            options={[
-              { value: 'none', label: 'none' },
-              { value: '0', label: '0 not relevant' },
-              { value: '1', label: '1 possibly' },
-              { value: '2', label: '2 relevant' },
-            ]}
-          />
-        </>
-      }
-      readout={
+      readouts={
         <>
           <Readout label="clicks / exams" value={`${clicks} / ${exams}`} />
           <Readout
@@ -70,13 +77,9 @@ export function ClickScore() {
         </>
       }
     >
-      <XYChart
-        series={series}
-        xLabel="latent relevance score"
-        yLabel="density"
-        xRange={[-1, 2]}
-        yRange={[0, undefined]}
-      />
-    </Interactive>
+      <Plot x={xAxis} y={yAxis}>
+        {seriesLayers(series)}
+      </Plot>
+    </Figure>
   )
 }

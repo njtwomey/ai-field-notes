@@ -1,8 +1,5 @@
-import { useState } from 'react'
-import { Diagram } from 'aifn-render'
-import { factor, link, variable } from 'aifn-render'
+import { choice, Diagram, factor, Figure, link, useFigureState, variable } from 'aifn-render'
 import type { DiagramSpec } from 'aifn-render'
-import { Interactive, ParamChoice } from 'aifn-render'
 
 type Target = 'x1' | 'x2'
 
@@ -29,29 +26,28 @@ function spec(target: Target): DiagramSpec {
 }
 
 export function GibbsFactorGraph() {
-  const [target, setTarget] = useState<Target>('x1')
-  const other = target === 'x1' ? 'x₂' : 'x₁'
-  const self = target === 'x1' ? 'x₁' : 'x₂'
+  const state = useFigureState({
+    target: choice<Target>(
+      [
+        { value: 'x1', label: 'x₁' },
+        { value: 'x2', label: 'x₂' },
+      ],
+      'x1',
+      { label: 'full conditional of' },
+    ),
+  })
+  const other = state.target === 'x1' ? 'x₂' : 'x₁'
+  const self = state.target === 'x1' ? 'x₁' : 'x₂'
   return (
-    <Interactive
+    <Figure
       title="The bivariate Gaussian as a factor graph"
+      state={state}
       caption={`The joint density is φ₁(x₁) φ₂(x₂) ψ₁₂(x₁, x₂): one factor for each diagonal entry of the precision matrix and one for the off-diagonal entry. The dashed outline holds the factors that touch ${self}; their product is the full conditional of ${self}, because every other factor is constant in ${self}. The shaded variable, ${other}, is ${self}'s Markov blanket: the only variable the conditional depends on.`}
-      controls={
-        <ParamChoice
-          label="full conditional of"
-          value={target}
-          onChange={setTarget}
-          options={[
-            { value: 'x1', label: 'x₁' },
-            { value: 'x2', label: 'x₂' },
-          ]}
-        />
-      }
     >
       <Diagram
-        spec={spec(target)}
+        spec={spec(state.target)}
         ariaLabel="Factor graph with variables x1 and x2, unary factors phi1 and phi2, and a pair factor psi12 between them"
       />
-    </Interactive>
+    </Figure>
   )
 }

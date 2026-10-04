@@ -1,5 +1,4 @@
-import { Interactive } from 'aifn-render'
-import { Diagram } from 'aifn-render'
+import { Diagram, Figure } from 'aifn-render'
 import type { DiagramSpec } from 'aifn-render'
 
 const spec: DiagramSpec = {
@@ -24,7 +23,7 @@ const spec: DiagramSpec = {
 /** The Box–Jenkins cycle: identify, estimate, check, and go round again until the residuals look like noise. */
 export function BoxJenkinsDiagram() {
   return (
-    <Interactive
+    <Figure
       title="The Box–Jenkins cycle"
       caption="Identification proposes a few candidate orders from the plots and correlograms of the transformed and differenced series. Estimation fits each and ranks them. Diagnostic checking asks whether the chosen model's residuals are white noise. If they are not, the pattern left in them suggests how to revise the model, and the cycle repeats."
     >
@@ -32,6 +31,6 @@ export function BoxJenkinsDiagram() {
         spec={spec}
         ariaLabel="Box-Jenkins cycle: series to identification, estimation and residual checking; if the residuals are white noise, forecast; otherwise return to identification"
       />
-    </Interactive>
+    </Figure>
   )
 }

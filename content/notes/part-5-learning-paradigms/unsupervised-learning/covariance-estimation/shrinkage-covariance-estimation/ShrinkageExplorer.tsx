@@ -1,16 +1,21 @@
-import { useMemo, useState } from 'react'
+import { useMemo } from 'react'
 import {
-  Interactive,
-  ParamButton,
-  ParamSlider,
-  Readout,
-  XYChart,
+  Button,
+  Curve,
+  Figure,
+  float,
   formatNumber,
-  useParam,
-  type Handle,
+  Handle,
+  int,
+  Plot,
+  Points,
+  Readout,
+  useAxis,
+  useFigureState,
 } from 'aifn-render'
-import { linspace, rng } from '@/lib/math'
 import { eigSymmetric, type Matrix } from '../../_shared/linalg'
+import { linspace, toFlat } from 'aifn/foundation/tensor'
+import { normal, stream } from 'aifn/foundation/random'
 
 const P = 40
 const RHO = 0.5
@@ -18,11 +23,11 @@ const RHO = 0.5
 const SIGMA: Matrix = Array.from({ length: P }, (_, i) => Array.from({ length: P }, (_, j) => RHO ** Math.abs(i - j)))
 /** Cholesky factor of an AR(1) covariance in closed form: x_i = ρ x_{i−1} + √(1 − ρ²) ε_i. */
 function draw(n: number, seed: number): Matrix {
-  const r = rng(seed)
+  const r = stream(seed)
   return Array.from({ length: n }, () => {
     const x = new Array<number>(P)
-    x[0] = r.normal()
-    for (let i = 1; i < P; i++) x[i] = RHO * x[i - 1] + Math.sqrt(1 - RHO * RHO) * r.normal()
+    x[0] = normal(r)
+    for (let i = 1; i < P; i++) x[i] = RHO * x[i - 1] + Math.sqrt(1 - RHO * RHO) * normal(r)
     return x
   })
 }
@@ -56,33 +61,39 @@ const shrink = (s: Matrix, m: number, delta: number): Matrix =>
 
 const TRUE_EIG = eigSymmetric(SIGMA).values
 const INDEX = Array.from({ length: P }, (_, i) => i + 1)
-const DELTAS = linspace(0, 1, 51)
+const DELTAS = toFlat(linspace(0, 1, 51))
 
 export function ShrinkageExplorer() {
-  const [n, setN] = useState(50)
-  const delta = useParam(0.3, { min: 0, max: 1, step: 0.01 })
-  const sample = useMemo(() => fit(draw(n, 9)), [n])
+  const state = useFigureState({
+    n: int(50, { min: 10, max: 400, step: 5, label: 'observations n' }),
+    delta: float(0.3, { min: 0, max: 1, step: 0.01, label: 'shrinkage δ' }),
+  })
+  const sample = useMemo(() => fit(draw(state.n, 9)), [state.n])
   const sampleEig = useMemo(() => eigSymmetric(sample.s).values, [sample])
   // Shrinkage keeps the eigenvectors and maps each eigenvalue λ to (1 − δ)λ + δm.
-  const shrunkEig = sampleEig.map((l) => (1 - delta.value) * l + delta.value * sample.m)
+  const shrunkEig = sampleEig.map((l) => (1 - state.delta) * l + state.delta * sample.m)
   const curve = useMemo(() => DELTAS.map((d) => loss(shrink(sample.s, sample.m, d), SIGMA)), [sample])
-  const current = loss(shrink(sample.s, sample.m, delta.value), SIGMA)
+  const current = loss(shrink(sample.s, sample.m, state.delta), SIGMA)
   const oracle = DELTAS[curve.indexOf(Math.min(...curve))]
-  const handles: Handle[] = [{ kind: 'x', at: delta.value, label: 'δ', onDrag: (x) => delta.set(x) }]
   const cond = (e: number[]) => (e[P - 1] > 1e-9 ? formatNumber(e[0] / e[P - 1]) : '∞')
 
+  const xAxis = useAxis({ label: 'eigenvalue rank', hold: 'union' })
+  const yAxis = useAxis({ label: 'eigenvalue', range: [0, undefined], hold: 'union' })
+  const xAxis2 = useAxis({ label: 'shrinkage δ', range: [0, 1] })
+  const yAxis2 = useAxis({ label: '‖Σ̂ − Σ‖² / p', range: [0, undefined], hold: 'union' })
   return (
-    <Interactive
+    <Figure
       title="Shrinking the sample covariance toward a multiple of the identity"
+      state={state}
       caption="Forty variables with covariance 0.5^|i−j|. Left: the sorted eigenvalues of the true covariance (dashed), the sample covariance and the shrunk estimate. With few observations the sample eigenvalues spread far beyond the true range, and below n = 40 the smallest are zero. Right: the estimation error for every shrinkage intensity δ. Drag the line labelled δ, use the slider, or apply the Ledoit–Wolf estimate, which lands near the minimum without knowing the truth."
       controls={
         <>
-          <ParamSlider label="observations n" value={n} onChange={setN} min={10} max={400} step={5} />
-          <ParamSlider label="shrinkage δ" param={delta} />
-          <ParamButton onClick={() => delta.set(sample.delta)}>Ledoit–Wolf δ</ParamButton>
+          <Button variant="outline" size="sm" onClick={() => state.set('delta', sample.delta)}>
+            Ledoit–Wolf δ
+          </Button>
         </>
       }
-      readout={
+      readouts={
         <>
           <Readout label="Ledoit–Wolf δ" value={formatNumber(sample.delta)} />
           <Readout label="best δ for this sample" value={formatNumber(oracle)} />
@@ -93,30 +104,17 @@ export function ShrinkageExplorer() {
       }
     >
       <div className="grid gap-4 md:grid-cols-2">
-        <XYChart
-          height={320}
-          xLabel="eigenvalue rank"
-          yLabel="eigenvalue"
-          yRange={[0, undefined]}
-          series={[
-            { name: 'true Σ', type: 'line', x: INDEX, y: TRUE_EIG, dashed: true, slot: 2 },
-            { name: 'sample S', type: 'line', x: INDEX, y: sampleEig, slot: 0 },
-            { name: 'shrunk', type: 'line', x: INDEX, y: shrunkEig, slot: 1 },
-          ]}
-        />
-        <XYChart
-          height={320}
-          xLabel="shrinkage δ"
-          yLabel="‖Σ̂ − Σ‖² / p"
-          xRange={[0, 1]}
-          yRange={[0, undefined]}
-          handles={handles}
-          series={[
-            { name: 'error', type: 'line', x: DELTAS, y: curve, slot: 1 },
-            { name: 'current δ', type: 'scatter', x: [delta.value], y: [current], emphasis: true },
-          ]}
-        />
+        <Plot x={xAxis} y={yAxis} height={320}>
+          <Curve name="true Σ" x={INDEX} y={TRUE_EIG} dashed slot={2} />
+          <Curve name="sample S" x={INDEX} y={sampleEig} slot={0} />
+          <Curve name="shrunk" x={INDEX} y={shrunkEig} slot={1} />
+        </Plot>
+        <Plot x={xAxis2} y={yAxis2} height={320}>
+          <Curve name="error" x={DELTAS} y={curve} slot={1} />
+          <Points name="current δ" x={[state.delta]} y={[current]} emphasis />
+          <Handle {...state.handle('delta', { label: 'δ' })} />
+        </Plot>
       </div>
-    </Interactive>
+    </Figure>
   )
 }

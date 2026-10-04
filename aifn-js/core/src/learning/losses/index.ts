@@ -2,7 +2,7 @@
  * `aifn/learning/losses`: training losses, each a composition of `aifn/foundation/tensor` primitives with its registry
  * metadata: classification, regression, divergence, representation (InfoNCE, CLIP's learnable temperature),
  * adversarial (GAN games, gradient penalty), energy-based (contrastive divergence), mixture density (MDN heads)
- * and weak-supervision (uPU, nnPU, LLP proportion, complementary-label) losses; `lossRegistry`, `getLoss`, `listLosses`. Ranking and retrieval losses are in `aifn-applied/retrieval/losses`.
+ * and weak-supervision (uPU, nnPU, LLP proportion, complementary-label) losses; `lossRegistry`, `getLoss`, `listLosses`. Ranking and retrieval losses are in `aifn-methods/retrieval/losses`.
  */
 
 export {
@@ -92,6 +92,6 @@ export {
 } from './weak'
 export { getLoss, listLosses, lossRegistry } from './registry'
 
-// Helpers for defining losses outside this module (the ranking and retrieval losses of `aifn-applied/retrieval`): the
+// Helpers for defining losses outside this module (the ranking and retrieval losses of `aifn-methods/retrieval`): the
 // input conventions every loss here follows.
 export { constant as constantTarget, expectRank, flatValues, reduce } from './core'

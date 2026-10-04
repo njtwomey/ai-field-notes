@@ -3,7 +3,7 @@
  * generic chain engines: on a chain of potentials (`ChainPotentials`: `forwardBackward`, `viterbi`, their steps,
  * `sampleHiddenPath` by forward filtering backward sampling), on log-potentials (`chainForwardBackward`,
  * `chainViterbi`, which a linear-chain CRF runs), and on chain-shaped factor graphs (`factorChain`, `chainSumProduct`,
- * which `infer` picks by shape). Named chain models (the HMM, the CRF) are in `aifn-applied/inference/sequence-models`.
+ * which `infer` picks by shape). Named chain models (the HMM, the CRF) are in `aifn-methods/inference/sequence-models`.
  */
 
 export {

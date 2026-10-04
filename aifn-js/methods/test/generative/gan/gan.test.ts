@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import { stream } from 'aifn/foundation/random'
 import { fromData, toFlat } from 'aifn/foundation/tensor'
-import { type ClassificationTruth } from 'aifn-applied/data'
-import { gaussianRing } from 'aifn-applied/data/synthetic'
-import { mixtureLogDensityOf, squareGrid } from 'aifn-applied/generative'
-import { ganRun, modeCoverage, optimalDiscriminator, type GanRun } from 'aifn-applied/generative/gan'
+import { type ClassificationTruth } from 'aifn-methods/data'
+import { gaussianRing } from 'aifn-methods/data/synthetic'
+import { mixtureLogDensityOf, squareGrid } from 'aifn-methods/generative'
+import { ganRun, modeCoverage, optimalDiscriminator, type GanRun } from 'aifn-methods/generative/gan'
 
 const ring = gaussianRing(stream(0), { n: 800 })
 const model = (ring.meta.truth as ClassificationTruth).model

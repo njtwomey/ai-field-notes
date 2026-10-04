@@ -71,7 +71,8 @@ export interface ActiveProportionsState extends Status {
 
 const binaryProportions = (P: MatrixLike) => {
   const m = dense.toMatrixF64(P, 'activeProportionsSteps')
-  if (m.n !== 2) throw new DomainError('activeProportionsSteps', 'activeProportionsSteps: two classes only, as in the paper')
+  if (m.n !== 2)
+    throw new DomainError('activeProportionsSteps', 'activeProportionsSteps: two classes only, as in the paper')
   return Float64Array.from(m.data)
 }
 
@@ -91,16 +92,30 @@ export function activeProportionsSteps(
   // L = (I − αS)⁻¹ up to the factor (1 − α), which does not change the ranking US-Mass reads from it.
   const L = dense.data(lpllpGraph(problem.x, lp).propagation)
   const root = makeStream(`activeProportions/${seed}`)
-  const fit = (bags: Int32Array, proportions: Float64Array, t: number, query: number[], seedPoint: number, answer: number) => {
-    const s = trace(lpllpSteps(problem.x, bags, fromData(proportions, [proportions.length / 2, 2]), lp), undefined, maxSteps, {
-      keep: 'none',
-    }).final
+  const fit = (
+    bags: Int32Array,
+    proportions: Float64Array,
+    t: number,
+    query: number[],
+    seedPoint: number,
+    answer: number,
+  ) => {
+    const s = trace(
+      lpllpSteps(problem.x, bags, fromData(proportions, [proportions.length / 2, 2]), lp),
+      undefined,
+      maxSteps,
+      {
+        keep: 'none',
+      },
+    ).final
     const F = dense.data(s.scores)
     const scores = Float64Array.from({ length: n }, (_, i) => F[2 * i + 1])
     const labels = Int32Array.from(toFlat(s.labels))
     let hit = 0
     for (const i of test) if (labels[i] === y[i]) hit++
-    const uncertainty = Float64Array.from(scores, (f, i) => (bags[i] < 0 && !test.has(i) ? Math.abs(f - 0.5) : Infinity))
+    const uncertainty = Float64Array.from(scores, (f, i) =>
+      bags[i] < 0 && !test.has(i) ? Math.abs(f - 0.5) : Infinity,
+    )
     const pool = uncertainty.filter((u) => u < Infinity).length
     return {
       t,
@@ -244,7 +259,9 @@ export function* activeProportionsCurves(options: ActiveCurvesOptions): Generato
   const total = datasets.length * strategies.length
   let done = 0
   const snapshot = (): ActiveCurves => {
-    const mean = runs.map((rs) => Array.from({ length: queries + 1 }, (_, q) => (rs.length ? rs.reduce((a, r) => a + r[q], 0) / rs.length : NaN)))
+    const mean = runs.map((rs) =>
+      Array.from({ length: queries + 1 }, (_, q) => (rs.length ? rs.reduce((a, r) => a + r[q], 0) / rs.length : NaN)),
+    )
     const sd = runs.map((rs, s) =>
       Array.from({ length: queries + 1 }, (_, q) =>
         rs.length > 1 ? Math.sqrt(rs.reduce((a, r) => a + (r[q] - mean[s][q]) ** 2, 0) / (rs.length - 1)) : 0,
@@ -253,11 +270,20 @@ export function* activeProportionsCurves(options: ActiveCurvesOptions): Generato
     return { strategies, mean, sd, done, total }
   }
   for (let d = 0; d < datasets.length; d++) {
-    const problem = activeProportionsProblem(child(root, 'split', d), datasets[d], { startSize, startProportions, testShare })
+    const problem = activeProportionsProblem(child(root, 'split', d), datasets[d], {
+      startSize,
+      startProportions,
+      testShare,
+    })
     for (let s = 0; s < strategies.length; s++) {
-      const run = trace(activeProportionsSteps(problem, { ...lp, strategy: strategies[s], bagSize, seed: `${seed}/${d}` }), undefined, queries, {
-        keep: 'all',
-      })
+      const run = trace(
+        activeProportionsSteps(problem, { ...lp, strategy: strategies[s], bagSize, seed: `${seed}/${d}` }),
+        undefined,
+        queries,
+        {
+          keep: 'all',
+        },
+      )
       const curve = run.steps.map((st) => st.accuracy)
       while (curve.length < queries + 1) curve.push(curve[curve.length - 1])
       runs[s].push(curve)

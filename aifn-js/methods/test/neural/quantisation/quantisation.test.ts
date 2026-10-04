@@ -6,9 +6,9 @@ import {
   type QatSnapshot,
   servingMemory,
   type QuantisationSnapshot,
-} from 'aifn-applied/neural/quantisation'
-import { moons } from 'aifn-applied/data'
-import { spirals } from 'aifn-applied/data/synthetic'
+} from 'aifn-methods/neural/quantisation'
+import { moons } from 'aifn-methods/data'
+import { spirals } from 'aifn-methods/data/synthetic'
 import { stream } from 'aifn/foundation/random'
 
 describe('serving cost', () => {

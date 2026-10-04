@@ -1,18 +1,22 @@
 import { useMemo, useState } from 'react'
 import {
-  Interactive,
-  ParamChoice,
-  ParamSlider,
-  ParamSwitch,
-  Readout,
-  XYChart,
+  choice,
+  Figure,
+  float,
   formatNumber,
-  useParam,
-  type Handle,
-  type XYSeries,
+  Handle,
+  int,
+  Plot,
+  Readout,
+  seriesLayers,
+  type SeriesSpec,
+  setting,
+  type SwitchDef,
+  useAxis,
+  useFigureState,
 } from 'aifn-render'
-import { rng } from '@/lib/math'
 import { ALGORITHMS, DEFAULT_TUNING, laiRobbinsConstant, simulate, type AlgorithmId, type Tuning } from './bandits'
+import { seededRand } from './rand'
 
 const START_MEANS = [0.6, 0.5, 0.45, 0.35, 0.2]
 const HORIZONS = ['500', '1000', '2000', '5000'] as const
@@ -48,7 +52,7 @@ function simulateAll(
   const ids = (activeKey ? activeKey.split(',') : []) as AlgorithmId[]
   const mu = meansKey.split(',').map(Number)
   const tuning = { epsilon, etcM, decayC }
-  return new Map(ids.map((id) => [id, simulate(id, mu, horizon, runCount, seed, tuning, rng)] as const))
+  return new Map(ids.map((id) => [id, simulate(id, mu, horizon, runCount, seed, tuning, seededRand)] as const))
 }
 
 /**
@@ -64,31 +68,72 @@ export function BanditSimulator({
   caption,
 }: BanditSimulatorProps) {
   const [means, setMeans] = useState(START_MEANS)
-  const [armCount, setArmCount] = useState<ArmCount>('3')
-  const [horizon, setHorizon] = useState<Horizon>('2000')
-  const [enabled, setEnabled] = useState<AlgorithmId[]>(algorithms)
-  const [showBound, setShowBound] = useState(lowerBound)
-  const [focus, setFocus] = useState<AlgorithmId>(algorithms[algorithms.length - 1] ?? 'ucb1')
-  const runs = useParam(20, { min: 1, max: 50, step: 1 })
-  const seed = useParam(1, { min: 1, max: 30, step: 1 })
-  const epsilon = useParam(DEFAULT_TUNING.epsilon, { min: 0, max: 0.5, step: 0.01 })
-  const etcM = useParam(DEFAULT_TUNING.etcM, { min: 1, max: 300, step: 1 })
-  const decayC = useParam(DEFAULT_TUNING.decayC, { min: 0.5, max: 50, step: 0.5 })
+  const state = useFigureState({
+    armCount: choice<ArmCount>(
+      ARM_COUNTS.map((v) => ({ value: v, label: v })),
+      '3',
+      { label: 'arms' },
+    ),
+    horizon: choice<Horizon>(
+      HORIZONS.map((v) => ({ value: v, label: v })),
+      '2000',
+      { label: 'horizon T' },
+    ),
+    runs: int(20, { min: 1, max: 50, step: 1, label: 'runs averaged', suggestions: [1, 5, 20, 50] }),
+    seed: int(1, { min: 1, max: 30, step: 1, label: 'seed' }),
+    epsilon: float(DEFAULT_TUNING.epsilon, {
+      min: 0,
+      max: 0.5,
+      step: 0.01,
+      label: 'ε (constant ε-greedy)',
+      when: () => tuningKeys.includes('epsilon'),
+    }),
+    decayC: float(DEFAULT_TUNING.decayC, {
+      min: 0.5,
+      max: 50,
+      step: 0.5,
+      label: 'c (decaying ε = min(1, cK/t))',
+      format: (v) => String(v),
+      when: () => tuningKeys.includes('decayC'),
+    }),
+    etcM: float(DEFAULT_TUNING.etcM, {
+      min: 1,
+      max: 300,
+      step: 1,
+      label: 'm (explore-then-commit pulls per arm)',
+      format: (v) => String(v),
+      when: () => tuningKeys.includes('etcM'),
+    }),
+    showBound: setting(lowerBound, 'Lai–Robbins bound'),
+    focus: choice<AlgorithmId>(
+      ALGORITHMS.filter((a) => offer.includes(a.id)).map((a) => ({ value: a.id, label: a.label })),
+      algorithms[algorithms.length - 1] ?? 'ucb1',
+      { label: 'bars show', when: (v) => ALGORITHMS.filter((a) => offer.includes(a.id) && v[`on_${a.id}`]).length > 1 },
+    ),
+    // One switch per offered algorithm.
+    ...(Object.fromEntries(
+      ALGORITHMS.map((a) => [
+        `on_${a.id}`,
+        setting(algorithms.includes(a.id), { label: a.label, when: () => offer.includes(a.id) }),
+      ]),
+    ) as Record<`on_${AlgorithmId}`, SwitchDef>),
+  })
+  const focus = state.focus
 
-  const k = Number(armCount)
-  const T = Number(horizon)
+  const k = Number(state.armCount)
+  const T = Number(state.horizon)
   const armMeans = useMemo(() => means.slice(0, k), [means, k])
-  const eps = epsilon.value
-  const m = etcM.value
-  const c = decayC.value
+  const eps = state.epsilon
+  const m = state.etcM
+  const c = state.decayC
   const shown = ALGORITHMS.filter((a) => offer.includes(a.id))
-  const active = shown.filter((a) => enabled.includes(a.id))
+  const active = shown.filter((a) => state[`on_${a.id}`])
 
   // A string key, so the simulation reruns only when the set of algorithms changes, not on every render.
   const activeKey = active.map((a) => a.id).join(',')
   const meansKey = armMeans.join(',')
-  const runCount = runs.value
-  const seedValue = seed.value
+  const runCount = state.runs
+  const seedValue = state.seed
   // The React Compiler cannot prove this memo is preserved and skips the component; the memo itself is exact, because
   // every dependency is a string or number, and it keeps the simulation from rerunning while a handle is dragged.
   /* oxlint-disable react/preserve-manual-memoization */
@@ -99,11 +144,11 @@ export function BanditSimulator({
   /* oxlint-enable react/preserve-manual-memoization */
 
   const regretSeries = (() => {
-    const out: XYSeries[] = ALGORITHMS.filter((a) => results.has(a.id)).map((a) => {
+    const out: SeriesSpec[] = ALGORITHMS.filter((a) => results.has(a.id)).map((a) => {
       const r = results.get(a.id)!
       return { name: a.label, type: 'line', x: r.t, y: r.regret, slot: a.slot }
     })
-    if (showBound) {
+    if (state.showBound) {
       const lr = laiRobbinsConstant(armMeans)
       const ts = results.values().next().value?.t ?? [T]
       out.push({
@@ -121,7 +166,7 @@ export function BanditSimulator({
   const focused = active.find((a) => a.id === focus) ?? active[active.length - 1]
   const focusResult = focused ? results.get(focused.id) : undefined
   const arms = armMeans.map((_, i) => i + 1)
-  const armSeries: XYSeries[] = [
+  const armSeries: SeriesSpec[] = [
     ...(focused && focusResult
       ? [
           {
@@ -143,81 +188,33 @@ export function BanditSimulator({
       setMeans((prev) => prev.map((v, j) => (j === i ? Math.min(0.99, Math.max(0.01, Math.round(y * 100) / 100)) : v))),
   }))
 
-  const toggle = (id: AlgorithmId, on: boolean) =>
-    setEnabled((prev) => (on ? [...prev, id] : prev.filter((x) => x !== id)))
-
+  const xAxis = useAxis({ label: 'round t', range: [0, T] })
+  const yAxis = useAxis({ label: 'cumulative regret', range: [0, undefined], hold: 'union' })
+  const xAxis2 = useAxis({ label: 'arm', range: [0.5, k + 0.5] })
+  const yAxis2 = useAxis({ label: 'mean / share', range: [0, 1] })
   return (
-    <Interactive
+    <Figure
       title={title}
+      state={state}
       caption={
         caption ??
-        `Bernoulli arms with the true means shown as diamonds; drag a diamond to change an arm. Each curve is the cumulative pseudo-regret, the expected reward lost to pulling suboptimal arms, averaged over ${runs.value} seeded runs. Every algorithm sees the same reward draws. A curve that keeps a constant slope has linear regret; a curve that flattens has sublinear regret. The bars show how one algorithm split its pulls.`
+        `Bernoulli arms with the true means shown as diamonds; drag a diamond to change an arm. Each curve is the cumulative pseudo-regret, the expected reward lost to pulling suboptimal arms, averaged over ${state.runs} seeded runs. Every algorithm sees the same reward draws. A curve that keeps a constant slope has linear regret; a curve that flattens has sublinear regret. The bars show how one algorithm split its pulls.`
       }
-      controls={
-        <>
-          <ParamChoice
-            label="arms"
-            value={armCount}
-            onChange={setArmCount}
-            options={ARM_COUNTS.map((v) => ({ value: v, label: v }))}
-          />
-          <ParamChoice
-            label="horizon T"
-            value={horizon}
-            onChange={setHorizon}
-            options={HORIZONS.map((v) => ({ value: v, label: v }))}
-          />
-          <ParamSlider label="runs averaged" param={runs} format={(v) => String(v)} />
-          <ParamSlider label="seed" param={seed} format={(v) => String(v)} withArrows />
-          {tuningKeys.includes('epsilon') && <ParamSlider label="ε (constant ε-greedy)" param={epsilon} />}
-          {tuningKeys.includes('decayC') && (
-            <ParamSlider label="c (decaying ε = min(1, cK/t))" param={decayC} format={(v) => String(v)} />
-          )}
-          {tuningKeys.includes('etcM') && (
-            <ParamSlider label="m (explore-then-commit pulls per arm)" param={etcM} format={(v) => String(v)} />
-          )}
-          {active.length > 1 && (
-            <ParamChoice
-              label="bars show"
-              value={focused?.id ?? focus}
-              onChange={setFocus}
-              options={active.map((a) => ({ value: a.id, label: a.label }))}
-            />
-          )}
-          <div className="flex flex-wrap gap-x-4 gap-y-2 sm:col-span-2 lg:col-span-3">
-            {shown.map((a) => (
-              <ParamSwitch
-                key={a.id}
-                label={a.label}
-                checked={enabled.includes(a.id)}
-                onChange={(on) => toggle(a.id, on)}
-              />
-            ))}
-            <ParamSwitch label="Lai–Robbins bound" checked={showBound} onChange={setShowBound} />
-          </div>
-        </>
-      }
-      readout={active.map((a) => (
+      readouts={active.map((a) => (
         <Readout key={a.id} label={`${a.label}: regret`} value={formatNumber(results.get(a.id)!.regret.at(-1)!)} />
       ))}
     >
       <div className="grid gap-4 md:grid-cols-[2fr_1fr]">
-        <XYChart
-          series={regretSeries}
-          xLabel="round t"
-          yLabel="cumulative regret"
-          xRange={[0, T]}
-          yRange={[0, undefined]}
-        />
-        <XYChart
-          series={armSeries}
-          xLabel="arm"
-          yLabel="mean / share"
-          xRange={[0.5, k + 0.5]}
-          yRange={[0, 1]}
-          handles={handles}
-        />
+        <Plot x={xAxis} y={yAxis}>
+          {seriesLayers(regretSeries)}
+        </Plot>
+        <Plot x={xAxis2} y={yAxis2}>
+          {seriesLayers(armSeries)}
+          {(handles ?? []).map((h, i) => (
+            <Handle key={i} {...h} />
+          ))}
+        </Plot>
       </div>
-    </Interactive>
+    </Figure>
   )
 }

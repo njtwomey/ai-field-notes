@@ -11,8 +11,8 @@ import { child, standardNormals, units, type Stream } from 'aifn/foundation/rand
 import { definer } from 'aifn/foundation/registry'
 import { normalCdf } from 'aifn/numerics/special'
 import { int, oneOf, real, space } from 'aifn/foundation/space'
-import { THURSTONE_BETA, eloUpdate, type GameStream } from 'aifn-applied/inference/rating-models'
-import type { PairedResult } from 'aifn-applied/inference/rating-models'
+import { THURSTONE_BETA, eloUpdate, type GameStream } from 'aifn-methods/inference/rating-models'
+import type { PairedResult } from 'aifn-methods/inference/rating-models'
 
 /** How a true skill moves over the rounds. */
 export type SkillPath =

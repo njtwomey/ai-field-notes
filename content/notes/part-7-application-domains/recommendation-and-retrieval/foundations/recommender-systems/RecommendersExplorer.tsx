@@ -13,13 +13,13 @@ import {
   useAxis,
 } from 'aifn-render'
 import { stream } from 'aifn/foundation/random'
-import { implicitFeedback } from 'aifn-applied/data/synthetic'
+import { implicitFeedback } from 'aifn-methods/data/synthetic'
 import {
   recommenderRun,
   type RecommenderCheckpoint,
   type RecommenderKind,
   type RecommenderSnapshot,
-} from 'aifn-applied/retrieval/recommenders'
+} from 'aifn-methods/retrieval/recommenders'
 
 const MODELS: { value: RecommenderKind; label: string }[] = [
   { value: 'bpr', label: 'BPR Matrix Factorisation (Bayesian pairwise ranking)' },
@@ -150,60 +150,26 @@ export function RecommendersExplorer() {
       </ControlRow>
 
       <ControlRow label="Epoch progression">
-        <Player
-          count={Math.max(1, numCheckpoints)}
-          value={currentIdx}
-          onChange={setCheckpointIndex}
-        />
+        <Player count={Math.max(1, numCheckpoints)} value={currentIdx} onChange={setCheckpointIndex} />
       </ControlRow>
 
       <Plots>
         <Plot x={mapAxisX} y={mapAxisY} title="Joint PCA embedding space (users: gold, items: blue)">
-          <Points
-            x={userCoords.x}
-            y={userCoords.y}
-            slot={1}
-            size={5}
-          />
-          <Points
-            x={itemCoords.x}
-            y={itemCoords.y}
-            slot={0}
-            size={4}
-          />
+          <Points x={userCoords.x} y={userCoords.y} slot={1} size={5} />
+          <Points x={itemCoords.x} y={itemCoords.y} slot={0} size={4} />
         </Plot>
 
         <Plot x={metricAxisX} y={metricAxisY} title="Held-out ranking performance">
-          <Curve
-            x={epochSteps}
-            y={recallCurve}
-            slot={0}
-          />
-          <Curve
-            x={epochSteps}
-            y={ndcgCurve}
-            slot={1}
-          />
+          <Curve x={epochSteps} y={recallCurve} slot={0} />
+          <Curve x={epochSteps} y={ndcgCurve} slot={1} />
         </Plot>
       </Plots>
 
       <ControlRow label="Diagnostics">
-        <Readout
-          label="Epoch"
-          value={currentCheckpoint ? currentCheckpoint.epoch : '—'}
-        />
-        <Readout
-          label="Recall@10"
-          value={curRecall !== undefined ? formatNumber(Number(curRecall.toFixed(3))) : '—'}
-        />
-        <Readout
-          label="NDCG@10"
-          value={curNdcg !== undefined ? formatNumber(Number(curNdcg.toFixed(3))) : '—'}
-        />
-        <Readout
-          label="Catalogue"
-          value="60 users, 80 items"
-        />
+        <Readout label="Epoch" value={currentCheckpoint ? currentCheckpoint.epoch : '—'} />
+        <Readout label="Recall@10" value={curRecall !== undefined ? formatNumber(Number(curRecall.toFixed(3))) : '—'} />
+        <Readout label="NDCG@10" value={curNdcg !== undefined ? formatNumber(Number(curNdcg.toFixed(3))) : '—'} />
+        <Readout label="Catalogue" value="60 users, 80 items" />
       </ControlRow>
     </Figure>
   )

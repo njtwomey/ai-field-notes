@@ -87,7 +87,12 @@ function layoutLogDensity(layout: NoiseLayout): (x: Tensor) => Tensor {
  * The truth of a noisy layout as a classification model: clean densities and equal priors, then the noise matrix
  * T = [[1 − β, β], [α, 1 − α]] (T[i][j] = P(ỹ = j | y = i)), so `posterior` is η̃ and `cleanPosterior` is η.
  */
-export function classConditionalNoiseTruth(s: Stream, layout: NoiseLayout, alpha: number, beta: number): ClassificationTruth {
+export function classConditionalNoiseTruth(
+  s: Stream,
+  layout: NoiseLayout,
+  alpha: number,
+  beta: number,
+): ClassificationTruth {
   return classificationTruth({
     classes: 2,
     priors: [0.5, 0.5],
@@ -122,7 +127,8 @@ const BOX = 4
  */
 export function noiseLayoutAnchors(s: Stream, layout: NoiseLayout, k: number, delta = 0): number[][] {
   checkCount(k, 'noiseLayoutAnchors')
-  if (!(delta >= 0 && delta < 0.5)) throw new DomainError('noiseLayoutAnchors', 'noiseLayoutAnchors: δ must be in [0, ½)')
+  if (!(delta >= 0 && delta < 0.5))
+    throw new DomainError('noiseLayoutAnchors', 'noiseLayoutAnchors: δ must be in [0, ½)')
   const eta = noiseLayoutPosterior(layout)
   const draw = (r: Stream) => [BOX * (2 * uniform(child(r, 'a')) - 1), BOX * (2 * uniform(child(r, 'b')) - 1)]
   const out: number[][] = []
@@ -200,7 +206,10 @@ export interface ClassConditionalNoiseOptions {
  * probability α, a class-0 label with probability β. The flips use their own substream (`child(s, 'flip')`), so the
  * same seed with α = β = 0 gives the clean sample.
  */
-export function classConditionalNoise(s: Stream, options: ClassConditionalNoiseOptions = {}): ClassConditionalNoiseSample {
+export function classConditionalNoise(
+  s: Stream,
+  options: ClassConditionalNoiseOptions = {},
+): ClassConditionalNoiseSample {
   const { n = 1000, layout = 'gaussians', alpha = 0, beta = 0.1, truth = true } = options
   checkCount(n, 'classConditionalNoise')
   if (!(alpha >= 0 && beta >= 0 && alpha + beta < 1))
@@ -258,7 +267,11 @@ dataset(
     }),
     truth: true,
     random: true,
-    notes: ['hypothesis-testing-for-class-conditional-label-noise', 'local-maximum-likelihood-noise-test', 'label-noise-models'],
+    notes: [
+      'hypothesis-testing-for-class-conditional-label-noise',
+      'local-maximum-likelihood-noise-test',
+      'label-noise-models',
+    ],
     cite: ['poyiadzi2022', 'yang2024'],
   },
   classConditionalNoise,

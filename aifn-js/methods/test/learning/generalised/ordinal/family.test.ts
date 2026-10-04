@@ -18,9 +18,9 @@ import {
   thresholdClasses,
   thresholdOrdinalRegression,
   thresholdPenalty,
-} from 'aifn-applied/learning/generalised/ordinal'
-import { logisticRegression } from 'aifn-applied/learning/generalised/glm'
-import { learningModelRegistry } from 'aifn-applied/learning'
+} from 'aifn-methods/learning/generalised/ordinal'
+import { logisticRegression } from 'aifn-methods/learning/generalised/glm'
+import { learningModelRegistry } from 'aifn-methods/learning'
 import { fixture } from '../../../fixtures'
 
 type ThresholdFit = { w: number[]; theta: number[]; objective: number }

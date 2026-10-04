@@ -1,5 +1,5 @@
 /**
- * The registry of `aifn-applied/inference/classifier-models`.
+ * The registry of `aifn-methods/inference/classifier-models`.
  */
 
 import { definer, entries, type AlgorithmInfo, type Entry, type FunctionInfo } from 'aifn/foundation/registry'

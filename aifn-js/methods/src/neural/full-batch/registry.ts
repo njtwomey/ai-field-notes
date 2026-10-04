@@ -1,5 +1,5 @@
 /**
- * The registry of `aifn-applied/neural/full-batch`: the streamed comparison of full-batch L-BFGS against first-order
+ * The registry of `aifn-methods/neural/full-batch`: the streamed comparison of full-batch L-BFGS against first-order
  * training of a small MLP, and the model it trains, as functions.
  */
 

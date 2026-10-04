@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { dishonestCasino, hmmChain, sampleHmm } from 'aifn-applied/inference/sequence-models'
+import { dishonestCasino, hmmChain, sampleHmm } from 'aifn-methods/inference/sequence-models'
 import { forwardBackward, viterbi } from 'aifn/inference/exact'
 import { child, stream } from 'aifn/foundation/random'
 import { toRows } from 'aifn/foundation/tensor'

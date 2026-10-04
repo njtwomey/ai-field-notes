@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { huffmanSteps } from 'aifn-applied/information/coding'
+import { huffmanSteps } from 'aifn-methods/information/coding'
 import { trace } from 'aifn/foundation/trace'
 import { expectProtocol } from '../../protocol'
 

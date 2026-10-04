@@ -12,7 +12,7 @@ import {
   logMarginalLikelihoodGradient,
   samplePrior,
   sparseGp,
-} from 'aifn-applied/learning/gaussian-processes'
+} from 'aifn-methods/learning/gaussian-processes'
 import {
   gram,
   kernelDiagonal,

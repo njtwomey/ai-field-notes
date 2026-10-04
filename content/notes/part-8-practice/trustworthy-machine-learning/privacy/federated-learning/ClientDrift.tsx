@@ -1,5 +1,5 @@
 import { useMemo } from 'react'
-import { Interactive, ParamSlider, Readout, XYChart, formatNumber, useParam, type XYSeries } from 'aifn-render'
+import { Curve, Figure, float, formatNumber, int, Plot, Readout, useAxis, useFigureState } from 'aifn-render'
 
 const ROUNDS = 30
 const ETA = 0.1
@@ -14,12 +14,14 @@ const A1 = 1
  * clients' own optima.
  */
 export function ClientDrift() {
-  const steps = useParam(10, { min: 1, max: 50, step: 1 })
-  const a2 = useParam(3, { min: 0.5, max: 5, step: 0.1 })
+  const state = useFigureState({
+    steps: int(10, { min: 1, max: 50, step: 1, label: 'local steps s' }),
+    a2: float(3, { min: 0.5, max: 5, step: 0.1, label: 'curvature of client 2, a₂' }),
+  })
 
   const { path, fixed } = useMemo(() => {
-    const r1 = (1 - ETA * A1) ** steps.value
-    const r2 = (1 - ETA * a2.value) ** steps.value
+    const r1 = (1 - ETA * A1) ** state.steps
+    const r2 = (1 - ETA * state.a2) ** state.steps
     const local = (w: number, c: number, r: number) => c + r * (w - c)
     const ws = [-1]
     for (let t = 0; t < ROUNDS; t++) {
@@ -27,26 +29,25 @@ export function ClientDrift() {
       ws.push(0.5 * local(w, C1, r1) + 0.5 * local(w, C2, r2))
     }
     return { path: ws, fixed: ((1 - r1) * C1 + (1 - r2) * C2) / (1 - r1 + (1 - r2)) }
-  }, [steps.value, a2.value])
-  const optimum = (A1 * C1 + a2.value * C2) / (A1 + a2.value)
+  }, [state.steps, state.a2])
+  const optimum = (A1 * C1 + state.a2 * C2) / (A1 + state.a2)
   const rounds = path.map((_, i) => i)
 
-  const series: XYSeries[] = [
-    { name: 'global optimum', type: 'line', x: [0, ROUNDS], y: [optimum, optimum], dashed: true, emphasis: true },
-    { name: 'server model', type: 'line', x: rounds, y: path, slot: 0 },
-  ]
+  const series = [
+    { name: 'global optimum', x: [0, ROUNDS], y: [optimum, optimum], dashed: true, emphasis: true },
+    { name: 'server model', x: rounds, y: path, slot: 0 },
+  ] as const
 
+  const xAxis = useAxis({ label: 'communication round', range: [0, ROUNDS] })
+  const yAxis = useAxis({ label: 'server parameter w', range: [-1, 1] })
   return (
-    <Interactive
+    <Figure
       title="Client drift in federated averaging"
+      purpose="Change the number of local steps and the second client's curvature to see federated averaging settle away from the global optimum."
+      state={state}
       caption="Two clients with equal weight hold quadratic losses with optima at 0 and 1 and curvatures 1 and a₂. Each round, both run s local gradient steps with step size 0.1 from the server model, and the server averages. With one local step FedAvg is gradient descent on the global loss and converges to the dashed global optimum. With more local steps it converges faster but to the wrong point, pulled towards 0.5, the plain average of the clients' optima."
-      controls={
-        <>
-          <ParamSlider label="local steps s" param={steps} />
-          <ParamSlider label="curvature of client 2, a₂" param={a2} />
-        </>
-      }
-      readout={
+
+      readouts={
         <>
           <Readout label="global optimum" value={formatNumber(optimum)} />
           <Readout label="FedAvg fixed point" value={formatNumber(fixed)} />
@@ -54,14 +55,14 @@ export function ClientDrift() {
         </>
       }
     >
-      <XYChart
-        series={series}
-        xRange={[0, ROUNDS]}
-        yRange={[-1, 1]}
-        xLabel="communication round"
-        yLabel="server parameter w"
-        ariaLabel="Server model over communication rounds of federated averaging, with the global optimum"
-      />
-    </Interactive>
+      <Plot
+        x={xAxis}
+        y={yAxis}
+        ariaLabel={'Server model over communication rounds of federated averaging, with the global optimum'}
+      >
+        <Curve {...series[0]} />
+        <Curve {...series[1]} />
+      </Plot>
+    </Figure>
   )
 }

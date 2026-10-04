@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { stream } from 'aifn/foundation/random'
-import { simulatedImpressions } from 'aifn-applied/data/synthetic'
-import { adPredictor, adPredictorProbability, adPredictorUpdate } from 'aifn-applied/inference/classifier-models'
+import { simulatedImpressions } from 'aifn-methods/data/synthetic'
+import { adPredictor, adPredictorProbability, adPredictorUpdate } from 'aifn-methods/inference/classifier-models'
 
 describe('AdPredictor', () => {
   it('a click raises the active weights’ means and shrinks their variances, leaving the rest', () => {

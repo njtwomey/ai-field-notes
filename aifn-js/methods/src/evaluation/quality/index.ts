@@ -1,5 +1,5 @@
 /**
- * `aifn-applied/evaluation/quality`: signal and image quality metrics (PSNR, SSIM, SI-SDR, spectral angle).
+ * `aifn-methods/evaluation/quality`: signal and image quality metrics (PSNR, SSIM, SI-SDR, spectral angle).
  */
 
 export {

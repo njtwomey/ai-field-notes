@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { valueAndGrad } from 'aifn/foundation/autodiff'
 import { stream } from 'aifn/foundation/random'
 import { fromData, toFlat, type Tensor, type Value } from 'aifn/foundation/tensor'
-import { curve1d } from 'aifn-applied/data/synthetic'
+import { curve1d } from 'aifn-methods/data/synthetic'
 import {
   expectileGam,
   expectileProblem,
@@ -10,7 +10,7 @@ import {
   gamModel,
   gamProblem,
   s,
-} from 'aifn-applied/learning/generalised/gam'
+} from 'aifn-methods/learning/generalised/gam'
 
 const d = curve1d(stream('train'), { case: 'skewed', n: 150 })
 const data = { x: d.x as Tensor, y: d.y as Tensor }

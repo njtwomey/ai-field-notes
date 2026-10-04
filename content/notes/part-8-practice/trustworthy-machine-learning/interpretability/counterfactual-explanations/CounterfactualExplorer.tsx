@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
-import { feasibilityTask } from 'aifn-applied/data/synthetic'
-import { comparisonModel, fullBatchComparison } from 'aifn-applied/neural/full-batch'
+import { feasibilityTask } from 'aifn-methods/data/synthetic'
+import { comparisonModel, fullBatchComparison } from 'aifn-methods/neural/full-batch'
 import { stream } from 'aifn/foundation/random'
 import { fromData, toFlat, type Tensor } from 'aifn/foundation/tensor'
 import {
@@ -189,12 +189,17 @@ export function CounterfactualExplorer() {
       steps: 80,
       rate: 0.05,
     })
-    const dice = diverseCounterfactuals(logit, query, stream(`dice-${Math.round(query[0] * 100)}-${Math.round(query[1] * 100)}`), {
-      count: 3,
-      steps: 250,
-      scale,
-      constraints,
-    })
+    const dice = diverseCounterfactuals(
+      logit,
+      query,
+      stream(`dice-${Math.round(query[0] * 100)}-${Math.round(query[1] * 100)}`),
+      {
+        count: 3,
+        steps: 250,
+        scale,
+        constraints,
+      },
+    )
     return { wachter, dice }
   }, [net, query, targetProbability, scale, constraints])
 
@@ -245,16 +250,11 @@ export function CounterfactualExplorer() {
   const gsResult = useMemo(() => {
     if (!net) return null
     const predict = (Z: Tensor) => Float64Array.from(denseOutput(net, Z), (v) => (v > 0 ? 1 : 0))
-    return growingSpheres(
-      predict,
-      query,
-      stream(`gs-${Math.round(query[0] * 100)}-${Math.round(query[1] * 100)}`),
-      {
-        radius: gsRadius,
-        samples: gsSamples,
-        constraints,
-      },
-    )
+    return growingSpheres(predict, query, stream(`gs-${Math.round(query[0] * 100)}-${Math.round(query[1] * 100)}`), {
+      radius: gsRadius,
+      samples: gsSamples,
+      constraints,
+    })
   }, [net, query, gsRadius, gsSamples, constraints])
 
   const gsLayers = gsResult?.layers ?? []
@@ -394,8 +394,14 @@ export function CounterfactualExplorer() {
             <>
               <Readout label="Coordinates (x₁, x₂)" value={`(${fmt(query[0], 3)}, ${fmt(query[1], 3)})`} />
               <Readout label="P(y = 1) at x" value={queryProb !== null ? fmt(queryProb, 3) : '—'} />
-              <Readout label="FACE Reachable Candidates" value={faceResult ? String(faceResult.candidates.length) : '—'} />
-              <Readout label="FACE Path Cost" value={faceResult && faceResult.index >= 0 ? fmt(faceResult.cost, 3) : '—'} />
+              <Readout
+                label="FACE Reachable Candidates"
+                value={faceResult ? String(faceResult.candidates.length) : '—'}
+              />
+              <Readout
+                label="FACE Path Cost"
+                value={faceResult && faceResult.index >= 0 ? fmt(faceResult.cost, 3) : '—'}
+              />
             </>
           ),
           'Methods Comparison: P(y = 1) · Distance · Relative Density': (
@@ -407,7 +413,9 @@ export function CounterfactualExplorer() {
                   value={`${fmt(e.probability, 2)} · ${fmt(e.distance, 2)} · ${fmt(e.density, 2)}`}
                 />
               ))}
-              {faceResult && faceResult.index < 0 && <Readout label="FACE" value="No reachable path meeting density & probability" />}
+              {faceResult && faceResult.index < 0 && (
+                <Readout label="FACE" value="No reachable path meeting density & probability" />
+              )}
             </>
           ),
         }}
@@ -568,7 +576,14 @@ export function CounterfactualExplorer() {
             <Points name="Nearest Enemy" x={[gsResult.enemy[0]]} y={[gsResult.enemy[1]]} emphasis shape={3} size={12} />
           )}
           {isFinalGsStep && gsResult?.sparse && (
-            <Points name="Sparse Enemy" x={[gsResult.sparse[0]]} y={[gsResult.sparse[1]]} emphasis shape={2} size={12} />
+            <Points
+              name="Sparse Enemy"
+              x={[gsResult.sparse[0]]}
+              y={[gsResult.sparse[1]]}
+              emphasis
+              shape={2}
+              size={12}
+            />
           )}
         </Plot>
       </Figure>

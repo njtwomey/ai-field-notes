@@ -1,4 +1,4 @@
-"""Reference values for aifn-applied/learning/weak-supervision: Dawid-Skene expectation-maximisation written directly
+"""Reference values for aifn-methods/learning/weak-supervision: Dawid-Skene expectation-maximisation written directly
 in NumPy (majority-vote start, pseudo-count smoothing 0.01, the M-step before the E-step), on random crowd votes with
 abstentions; the posteriors, priors, confusion matrices and log-likelihood after a fixed number of steps. Also the
 anchor-point tests for class-conditional label noise (Poyiadzi et al. 2022; Yang et al. 2024): the logistic MLE and

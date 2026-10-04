@@ -1,18 +1,22 @@
-import { useMemo, useState } from 'react'
+import { useMemo } from 'react'
 import {
-  Heatmap,
-  Interactive,
-  ParamChoice,
-  ParamSlider,
-  Readout,
-  XYChart,
+  choice,
+  Figure,
+  float,
   formatNumber,
-  useParam,
-  type HeatmapOverlay,
-  type XYSeries,
+  Handle,
+  int,
+  Plot,
+  Raster,
+  Readout,
+  seriesLayers,
+  type SeriesSpec,
+  slider,
+  useAxis,
+  useFigureState,
 } from 'aifn-render'
-import { rng } from '@/lib/math'
 import { gaussPdf, histogram } from '../_shared/sde'
+import { normal, stream } from 'aifn/foundation/random'
 
 type Model = 'heat' | 'ou' | 'well'
 const DRIFTS: Record<Model, { f: (x: number) => number; label: string; potential: ((x: number) => number) | null }> = {
@@ -70,18 +74,18 @@ function solveFokkerPlanck(f: (x: number) => number, sigma: number, x0: number):
 
 /** Euler–Maruyama particles with reflection at ±4, recorded at every frame. */
 function simulateParticles(f: (x: number) => number, sigma: number, x0: number, seed: number): Float64Array[] {
-  const { normal } = rng(seed)
+  const rs = stream(seed)
   const sub = 10
   const h = FRAME / sub
   const sq = sigma * Math.sqrt(h)
-  let x = Float64Array.from({ length: PARTICLES }, () => x0 + START_SD * normal())
+  let x = Float64Array.from({ length: PARTICLES }, () => x0 + START_SD * normal(rs))
   const out = [x]
   for (let frame = 0; frame < FRAMES; frame++) {
     const next = Float64Array.from(x)
     for (let i = 0; i < PARTICLES; i++) {
       let xi = next[i]
       for (let s = 0; s < sub; s++) {
-        xi += f(xi) * h + sq * normal()
+        xi += f(xi) * h + sq * normal(rs)
         if (xi > L) xi = 2 * L - xi
         if (xi < -L) xi = -2 * L - xi
       }
@@ -108,69 +112,67 @@ function moments(xs: ArrayLike<number>, weights?: ArrayLike<number>) {
 }
 
 export function ParticlesAndDensity() {
-  const [model, setModel] = useState<Model>('ou')
-  const sigma = useParam(1, { min: 0.4, max: 1.5, step: 0.05 })
-  const x0 = useParam(2.5, { min: -3, max: 3, step: 0.05 })
-  const t = useParam(0.5, { min: 0, max: T_MAX, step: FRAME })
-  const count = useParam(20, { min: 1, max: 50, step: 1 })
+  const state = useFigureState({
+    model: choice<Model>(
+      (Object.keys(DRIFTS) as Model[]).map((m) => ({ value: m, label: DRIFTS[m].label })),
+      'ou',
+      { label: 'drift f(x)' },
+    ),
+    t: slider(0, T_MAX, 0.5, { step: FRAME, label: 'time t' }),
+    sigma: float(1, { min: 0.4, max: 1.5, step: 0.05, label: 'noise σ' }),
+    x0: float(2.5, { min: -3, max: 3, step: 0.05, label: 'start x₀' }),
+    count: int(20, { min: 1, max: 50, step: 1, label: 'paths', format: (v) => String(v) }),
+  })
 
-  const { f, potential } = DRIFTS[model]
-  const pde = useMemo(() => solveFokkerPlanck(f, sigma.value, x0.value), [f, sigma.value, x0.value])
-  const particles = useMemo(() => simulateParticles(f, sigma.value, x0.value, 12), [f, sigma.value, x0.value])
+  const { f, potential } = DRIFTS[state.model]
+  const pde = useMemo(() => solveFokkerPlanck(f, state.sigma, state.x0), [f, state.sigma, state.x0])
+  const particles = useMemo(() => simulateParticles(f, state.sigma, state.x0, 12), [f, state.sigma, state.x0])
 
-  const frame = Math.round(t.value / FRAME)
-  const series = useMemo<XYSeries[]>(() => {
+  const frame = Math.round(state.t / FRAME)
+  const series = useMemo<SeriesSpec[]>(() => {
     const hist = histogram(particles[frame], -L, L, 64)
-    const out: XYSeries[] = [
+    const out: SeriesSpec[] = [
       { name: '3,000 particles', type: 'bar', x: hist.x, y: hist.y, slot: 0 },
       { name: 'Fokker–Planck density', type: 'line', x: GRID, y: Array.from(pde[frame]), emphasis: true },
     ]
     if (potential) {
       // Stationary density ∝ exp(−2U/σ²).
-      const un = GRID.map((x) => Math.exp((-2 * potential(x)) / sigma.value ** 2))
+      const un = GRID.map((x) => Math.exp((-2 * potential(x)) / state.sigma ** 2))
       const z = un.reduce((a, b) => a + b, 0) * DX
       out.push({ name: 'stationary density', type: 'line', x: GRID, y: un.map((u) => u / z), dashed: true, slot: 1 })
     }
     return out
-  }, [particles, pde, frame, potential, sigma.value])
+  }, [particles, pde, frame, potential, state.sigma])
 
   // The Fokker–Planck density over (t, x), with the first particles' trajectories drawn over it. The particles share one
   // random stream, so raising the count adds trajectories without changing the ones already drawn.
   const densityMap = useMemo(() => MAP_ROWS.map((i) => pde.map((p) => p[i])), [pde])
-  const trajectories = useMemo<HeatmapOverlay[]>(
+  const trajectories = useMemo<SeriesSpec[]>(
     () =>
-      Array.from({ length: count.value }, (_, i) => ({
+      Array.from({ length: state.count }, (_, i) => ({
         name: 'particle trajectories',
         type: 'line',
         x: TIMES,
         y: particles.map((frameStates) => frameStates[i]),
         slot: 2,
-        thin: count.value > 1,
+        thin: state.count > 1,
       })),
-    [particles, count.value],
+    [particles, state.count],
   )
 
   const pm = moments(particles[frame])
   const dm = moments(GRID, pde[frame])
+  const xAxis = useAxis({ label: 'x', range: [-L, L] })
+  const yAxis = useAxis({ label: 'density p_t(x)', range: [0, 1.2] })
+  const xAxis2 = useAxis({ label: 't' })
+  const yAxis2 = useAxis({ label: 'x' })
   return (
-    <Interactive
+    <Figure
       title="Particles and the density they follow"
+      state={state}
       caption="Bars: a histogram of 3,000 particles simulated from the SDE dX = f(X) dt + σ dW, all released near x₀. Line: the density obtained by solving the Fokker–Planck equation numerically from the same start, with no simulation at all. The two agree at every time. With no drift the density spreads as the heat equation dictates; the spring pulls it to a fixed Gaussian; the double well splits it between two wells, and the dashed stationary density exp(−2U/σ²) is reached slowly when σ is small. Below, the numerical density over time and x, with the trajectories of some of the particles drawn over it as light lines; the paths slider sets how many. Each trajectory is rough, but together they fill the density. Drag the vertical line at x₀ to release the particles elsewhere, or the vertical line in the lower panel to move in time."
-      controls={
-        <>
-          <ParamChoice
-            label="drift f(x)"
-            value={model}
-            onChange={setModel}
-            options={(Object.keys(DRIFTS) as Model[]).map((m) => ({ value: m, label: DRIFTS[m].label }))}
-          />
-          <ParamSlider label="time t" param={t} withArrows />
-          <ParamSlider label="noise σ" param={sigma} />
-          <ParamSlider label="start x₀" param={x0} />
-          <ParamSlider label="paths" param={count} withArrows format={(v) => String(v)} />
-        </>
-      }
-      readout={
+
+      readouts={
         <>
           <Readout label="particle mean" value={formatNumber(pm.mean)} />
           <Readout label="PDE mean" value={formatNumber(dm.mean)} />
@@ -179,27 +181,15 @@ export function ParticlesAndDensity() {
         </>
       }
     >
-      <XYChart
-        height={320}
-        xLabel="x"
-        yLabel="density p_t(x)"
-        series={series}
-        xRange={[-L, L]}
-        yRange={[0, 1.2]}
-        handles={[{ kind: 'x', at: x0.value, label: 'x₀', onDrag: (x) => x0.set(x) }]}
-      />
-      <Heatmap
-        x={TIMES}
-        y={MAP_Y}
-        z={densityMap}
-        xLabel="t"
-        yLabel="x"
-        range={DENSITY_RANGE}
-        overlay={trajectories}
-        handles={[{ kind: 'x', at: t.value, label: 't', onDrag: (v) => t.set(v) }]}
-        valueLabel="density p_t(x)"
-        height={260}
-      />
-    </Interactive>
+      <Plot x={xAxis} y={yAxis} height={320}>
+        {seriesLayers(series)}
+        <Handle {...state.handle('x0', { label: 'x₀' })} />
+      </Plot>
+      <Plot x={xAxis2} y={yAxis2} height={260}>
+        <Raster x={TIMES} y={MAP_Y} z={densityMap} range={DENSITY_RANGE} valueLabel={'density p_t(x)'} />
+        {seriesLayers(trajectories, { live: true })}
+        <Handle {...state.handle('t', { label: 't' })} />
+      </Plot>
+    </Figure>
   )
 }

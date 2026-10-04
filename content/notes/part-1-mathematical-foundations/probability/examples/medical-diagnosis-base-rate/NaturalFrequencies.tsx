@@ -1,31 +1,44 @@
-import { useMemo, useState } from 'react'
-import { Interactive, ParamSlider, Readout, XYChart, formatNumber, type XYSeries } from 'aifn-render'
+import { useMemo } from 'react'
+import {
+  Figure,
+  float,
+  formatNumber,
+  Plot,
+  Readout,
+  seriesLayers,
+  type SeriesSpec,
+  slider,
+  useAxis,
+  useFigureState,
+} from 'aifn-render'
 
 const PEOPLE = 1000
 const COLUMNS = 50
 
 /** A population of 1,000 as a grid, split by disease status and test result. Positives are highlighted. */
 export function NaturalFrequencies() {
-  const [prevalence, setPrevalence] = useState(1)
-  const [sensitivity, setSensitivity] = useState(99)
-  const [specificity, setSpecificity] = useState(95)
+  const state = useFigureState({
+    prevalence: slider(0.1, 50, 1, { step: 0.1, label: 'prevalence', format: (v) => `${v}%` }),
+    sensitivity: float(99, { min: 50, max: 100, step: 0.5, label: 'sensitivity P(+ | D)', format: (v) => `${v}%` }),
+    specificity: float(95, { min: 50, max: 100, step: 0.5, label: 'specificity P(− | not D)', format: (v) => `${v}%` }),
+  })
 
   const result = useMemo(() => {
-    const sick = Math.round((PEOPLE * prevalence) / 100)
-    const truePos = Math.round((sick * sensitivity) / 100)
+    const sick = Math.round((PEOPLE * state.prevalence) / 100)
+    const truePos = Math.round((sick * state.sensitivity) / 100)
     const falseNeg = sick - truePos
     const healthy = PEOPLE - sick
-    const falsePos = Math.round((healthy * (100 - specificity)) / 100)
+    const falsePos = Math.round((healthy * (100 - state.specificity)) / 100)
     const trueNeg = healthy - falsePos
     // Lay people out in reading order, grouped so each outcome forms one block.
-    const groups: [string, number, Partial<XYSeries>][] = [
+    const groups: [string, number, Partial<SeriesSpec>][] = [
       ['true positive', truePos, { slot: 0 }],
       ['missed (false negative)', falseNeg, { slot: 2 }],
       ['false positive', falsePos, { slot: 1 }],
       ['true negative', trueNeg, { muted: true }],
     ]
     let index = 0
-    const series = groups.map(([name, count, style]): XYSeries => {
+    const series = groups.map(([name, count, style]): SeriesSpec => {
       const cells = Array.from({ length: count }, () => index++)
       return {
         name,
@@ -35,46 +48,21 @@ export function NaturalFrequencies() {
         ...style,
       }
     })
-    const exact = (sensitivity * prevalence) / (sensitivity * prevalence + (100 - specificity) * (100 - prevalence))
+    const exact =
+      (state.sensitivity * state.prevalence) /
+      (state.sensitivity * state.prevalence + (100 - state.specificity) * (100 - state.prevalence))
     return { truePos, falsePos, falseNeg, series, exact }
-  }, [prevalence, sensitivity, specificity])
+  }, [state.prevalence, state.sensitivity, state.specificity])
 
+  const xAxis = useAxis({ range: [-1, COLUMNS] })
+  const yAxis = useAxis({ range: [-PEOPLE / COLUMNS, 1] })
   return (
-    <Interactive
+    <Figure
       title="1,000 people take the test"
+      state={state}
       caption="Each mark is a person. Of everyone who tests positive, what share is sick? Lower the prevalence: the false positives, drawn from the large healthy majority, soon outnumber the true positives."
-      controls={
-        <>
-          <ParamSlider
-            label="prevalence"
-            value={prevalence}
-            onChange={setPrevalence}
-            min={0.1}
-            max={50}
-            step={0.1}
-            format={(v) => `${v}%`}
-          />
-          <ParamSlider
-            label="sensitivity P(+ | D)"
-            value={sensitivity}
-            onChange={setSensitivity}
-            min={50}
-            max={100}
-            step={0.5}
-            format={(v) => `${v}%`}
-          />
-          <ParamSlider
-            label="specificity P(− | not D)"
-            value={specificity}
-            onChange={setSpecificity}
-            min={50}
-            max={100}
-            step={0.5}
-            format={(v) => `${v}%`}
-          />
-        </>
-      }
-      readout={
+
+      readouts={
         <>
           <Readout label="positives" value={result.truePos + result.falsePos} />
           <Readout label="of which sick" value={result.truePos} />
@@ -82,7 +70,9 @@ export function NaturalFrequencies() {
         </>
       }
     >
-      <XYChart bare height={240} series={result.series} xRange={[-1, COLUMNS]} yRange={[-PEOPLE / COLUMNS, 1]} />
-    </Interactive>
+      <Plot x={xAxis} y={yAxis} height={240} bare>
+        {seriesLayers(result.series)}
+      </Plot>
+    </Figure>
   )
 }

@@ -1,5 +1,5 @@
 /**
- * The algorithms of `aifn-applied/learning/mixture-of-experts`: EM and Adam training as step-through algorithms, and
+ * The algorithms of `aifn-methods/learning/mixture-of-experts`: EM and Adam training as step-through algorithms, and
  * the streaming run.
  */
 

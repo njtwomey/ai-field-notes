@@ -1,5 +1,5 @@
 /**
- * `aifn-applied/neural/quantisation`: the memory and decoding throughput of a served transformer at a given
+ * `aifn-methods/neural/quantisation`: the memory and decoding throughput of a served transformer at a given
  * precision (`servingMemory`, `decodeThroughput`, the roofline argument), and a streamed study that trains a small MLP
  * and quantises its weights by round-to-nearest (per tensor, per channel), GPTQ and AWQ (`quantisationStudy`), and
  * quantisation-aware training against post-training quantisation (`quantisationAwareTraining`).

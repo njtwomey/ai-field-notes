@@ -1,8 +1,8 @@
 /** The ANN benchmark: every method reports a recall curve that rises with its knob, against exact brute force. */
 import { describe, expect, it } from 'vitest'
 import { stream } from 'aifn/foundation/random'
-import { blobs } from 'aifn-applied/data/synthetic'
-import { annBenchmark, type AnnBenchmarkSnapshot } from 'aifn-applied/retrieval/ann'
+import { blobs } from 'aifn-methods/data/synthetic'
+import { annBenchmark, type AnnBenchmarkSnapshot } from 'aifn-methods/retrieval/ann'
 import type { Tensor } from 'aifn/foundation/tensor'
 
 describe('annBenchmark', () => {

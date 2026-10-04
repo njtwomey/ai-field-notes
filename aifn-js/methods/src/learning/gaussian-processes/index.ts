@@ -1,5 +1,5 @@
 /**
- * `aifn-applied/learning/gaussian-processes`: Gaussian processes on the kernels of `aifn/learning/kernels`: regression
+ * `aifn-methods/learning/gaussian-processes`: Gaussian processes on the kernels of `aifn/learning/kernels`: regression
  * with the marginal likelihood and fitting, sparse approximations (fitted by L-BFGS or grown greedily, step by step), the relevance vector machine (Tipping and
  * Faul's fast algorithm and re-estimation), classification (Laplace and EP, with evidence
  * gradients and L-BFGS fitting), ordinal regression (Laplace; Chu & Ghahramani, 2005), and the GP latent variable

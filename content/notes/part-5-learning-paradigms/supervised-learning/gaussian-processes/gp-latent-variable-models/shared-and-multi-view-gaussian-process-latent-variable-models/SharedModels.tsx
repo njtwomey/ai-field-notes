@@ -1,6 +1,5 @@
-import { Diagram } from 'aifn-render'
+import { Diagram, Figure } from 'aifn-render'
 import type { DiagramSpec } from 'aifn-render'
-import { Interactive } from 'aifn-render'
 
 type N = DiagramSpec['nodes'][number]
 const v = (id: string, x: number, y: number, label: string, extra: Partial<N> = {}): N => ({
@@ -52,7 +51,7 @@ const spec: DiagramSpec = {
 /** Three ways to relate two views through GP-LVM latent spaces. */
 export function SharedModels() {
   return (
-    <Interactive
+    <Figure
       title="From a shared latent space to manifold relevance determination"
       caption="Shaded nodes are the two observed views. Left: one latent space generates both views. Centre: the latent space is split by hand into a shared part and a part private to each view. Right: one latent space, integrated out, with a separate vector of ARD weights for each view; which dimensions are shared and which are private is learned from the weights."
     >
@@ -60,6 +59,6 @@ export function SharedModels() {
         spec={spec}
         ariaLabel="Shared GP-LVM, factorised shared and private GP-LVM, and manifold relevance determination"
       />
-    </Interactive>
+    </Figure>
   )
 }

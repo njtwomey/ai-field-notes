@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
-import { digits } from 'aifn-applied/data/synthetic'
-import { dbnRun, type DbnRun } from 'aifn-applied/generative/boltzmann'
+import { digits } from 'aifn-methods/data/synthetic'
+import { dbnRun, type DbnRun } from 'aifn-methods/generative/boltzmann'
 import { stream } from 'aifn/foundation/random'
 import {
   ControlRow,

@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import { stream } from 'aifn/foundation/random'
 import { toFlat, unwrap, type Tensor } from 'aifn/foundation/tensor'
-import { modularArithmetic } from 'aifn-applied/data/synthetic'
-import { grokkingRun, ModularMlp, pairsOf } from 'aifn-applied/neural/grokking'
+import { modularArithmetic } from 'aifn-methods/data/synthetic'
+import { grokkingRun, ModularMlp, pairsOf } from 'aifn-methods/neural/grokking'
 
 describe('grokking', () => {
   it('maps pairs to logits over the residues', () => {

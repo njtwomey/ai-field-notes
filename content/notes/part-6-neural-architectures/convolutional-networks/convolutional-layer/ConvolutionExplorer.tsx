@@ -1,17 +1,24 @@
-import { useMemo, useState } from 'react'
+import { useMemo } from 'react'
 import {
-  Heatmap,
-  Interactive,
-  ParamChoice,
-  ParamSlider,
-  Readout,
+  choice,
+  Curve,
+  Figure,
   formatNumber,
-  useParam,
-  type HeatmapOverlay,
+  Handle,
+  Plot,
+  Points,
+  Raster,
+  Readout,
+  slider,
+  Slider,
+  useAxis,
+  useFigureState,
 } from 'aifn-render'
 
 const N = 12
 const K = 3
+/** The largest output size, at padding 1 and stride 1. */
+const MAX_OUT = N + 2 - K + 1
 
 // A 12 × 12 binary image: a hollow square and a filled bar. Rows are counted from the bottom, as on the chart.
 const IMAGE: number[][] = Array.from({ length: N }, (_, r) =>
@@ -69,16 +76,43 @@ const range = (lo: number, hi: number) => Array.from({ length: hi - lo + 1 }, (_
  * together; drag the window or set the output position with the sliders.
  */
 export function ConvolutionExplorer() {
-  const [kernel, setKernel] = useState<KernelName>('vertical')
-  const [padding, setPadding] = useState<'0' | '1'>('0')
-  const [stride, setStride] = useState<'1' | '2'>('1')
-  const p = Number(padding)
-  const s = Number(stride)
+  const state = useFigureState({
+    kernel: choice<KernelName>(
+      [
+        { value: 'vertical', label: 'vertical edge' },
+        { value: 'horizontal', label: 'horizontal edge' },
+        { value: 'blur', label: 'blur' },
+        { value: 'sharpen', label: 'sharpen' },
+      ],
+      'vertical',
+      { label: 'kernel' },
+    ),
+    padding: choice<'0' | '1'>(
+      [
+        { value: '0', label: '0' },
+        { value: '1', label: '1' },
+      ],
+      '0',
+      { label: 'padding p' },
+    ),
+    stride: choice<'1' | '2'>(
+      [
+        { value: '1', label: '1' },
+        { value: '2', label: '2' },
+      ],
+      '1',
+      { label: 'stride s' },
+    ),
+    // The output position: its range depends on padding and stride, so its sliders are placed by hand below.
+    row: slider(0, MAX_OUT - 1, 4, { step: 1, onChart: true }),
+    col: slider(0, MAX_OUT - 1, 2, { step: 1, onChart: true }),
+  })
+  const kernel = state.kernel
+  const p = Number(state.padding)
+  const s = Number(state.stride)
   const m = Math.floor((N + 2 * p - K) / s) + 1
-  const row = useParam(4, { min: 0, max: m - 1, step: 1 })
-  const col = useParam(2, { min: 0, max: m - 1, step: 1 })
-  const i = Math.min(row.value, m - 1)
-  const j = Math.min(col.value, m - 1)
+  const i = Math.min(state.row, m - 1)
+  const j = Math.min(state.col, m - 1)
 
   const output = useMemo(() => convolve(KERNELS[kernel], p, s), [kernel, p, s])
   const input = useMemo(() => range(-p, N - 1 + p).map((r) => range(-p, N - 1 + p).map((c) => pixel(r, c))), [p])
@@ -86,60 +120,42 @@ export function ConvolutionExplorer() {
   // Bottom-left corner of the window in input coordinates, and its outline half a cell outside the cell centres.
   const r0 = i * s - p
   const c0 = j * s - p
-  const window: HeatmapOverlay[] = [
+  const window = [
     {
       name: 'window',
-      type: 'line',
       x: [c0 - 0.5, c0 + K - 0.5, c0 + K - 0.5, c0 - 0.5, c0 - 0.5],
       y: [r0 - 0.5, r0 - 0.5, r0 + K - 0.5, r0 + K - 0.5, r0 - 0.5],
       emphasis: true,
     },
-  ]
+  ] as const
   const terms = KERNELS[kernel].flatMap((ku, u) => ku.map((kv, v) => kv * pixel(r0 + u, c0 + v)))
   const signed = kernel !== 'blur'
   const bound = kernel === 'sharpen' ? 5 : 3
   const outRange: [number, number] = signed ? [-bound, bound] : [0, 1]
 
+  const xAxis = useAxis({ label: 'column' })
+  const yAxis = useAxis({ label: 'row' })
+  const xAxis2 = useAxis({ label: 'column j' })
+  const yAxis2 = useAxis({ label: 'row i' })
   return (
-    <Interactive
+    <Figure
       title="A 3 × 3 kernel sliding over an image"
       caption="Left: the input, with zero padding shown as the outer ring when padding is 1. Right: the output feature map. Drag the window on the input (or use the sliders) to choose an output cell; its value is the sum of the kernel times the nine pixels under the window. The same nine weights produce every output cell. Stride 2 skips every other position and roughly halves the output size."
+      state={state}
       controls={
         <>
-          <ParamChoice
-            label="kernel"
-            value={kernel}
-            onChange={setKernel}
-            options={[
-              { value: 'vertical', label: 'vertical edge' },
-              { value: 'horizontal', label: 'horizontal edge' },
-              { value: 'blur', label: 'blur' },
-              { value: 'sharpen', label: 'sharpen' },
-            ]}
+          <Slider label="output row i" value={i} onChange={(v) => state.set('row', v)} min={0} max={m - 1} step={1} />
+          <Slider
+            label="output column j"
+            value={j}
+            onChange={(v) => state.set('col', v)}
+            min={0}
+            max={m - 1}
+            step={1}
           />
-          <ParamChoice
-            label="padding p"
-            value={padding}
-            onChange={setPadding}
-            options={[
-              { value: '0', label: '0' },
-              { value: '1', label: '1' },
-            ]}
-          />
-          <ParamChoice
-            label="stride s"
-            value={stride}
-            onChange={setStride}
-            options={[
-              { value: '1', label: '1' },
-              { value: '2', label: '2' },
-            ]}
-          />
-          <ParamSlider label="output row i" param={row} format={(v) => String(v)} withArrows />
-          <ParamSlider label="output column j" param={col} format={(v) => String(v)} withArrows />
         </>
       }
-      readout={
+      readouts={
         <>
           <Readout label="output size ⌊(n + 2p − k)/s⌋ + 1" value={`⌊(${N} + ${2 * p} − ${K})/${s}⌋ + 1 = ${m}`} />
           <Readout label={`y[${i}, ${j}]`} value={formatNumber(terms.reduce((a, b) => a + b, 0))} />
@@ -148,43 +164,31 @@ export function ConvolutionExplorer() {
       }
     >
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-        <Heatmap
-          x={range(-p, N - 1 + p)}
-          y={range(-p, N - 1 + p)}
-          z={input}
-          range={[0, 1]}
-          xLabel="column"
-          yLabel="row"
-          valueLabel="pixel"
-          overlay={window}
-          handles={[
-            {
-              kind: 'point',
-              at: [c0 + 1, r0 + 1],
-              onDrag: ([x, y]) => {
-                col.set((x - 1 + p) / s)
-                row.set((y - 1 + p) / s)
-              },
-              label: 'window',
-            },
-          ]}
-          height={320}
-          ariaLabel="Input image with the kernel window"
-        />
-        <Heatmap
-          x={range(0, m - 1)}
-          y={range(0, m - 1)}
-          z={output}
-          scale={signed ? 'diverging' : 'sequential'}
-          range={outRange}
-          xLabel="column j"
-          yLabel="row i"
-          valueLabel="output"
-          marker={[j, i]}
-          height={320}
-          ariaLabel="Output feature map"
-        />
+        <Plot x={xAxis} y={yAxis} height={320} ariaLabel={'Input image with the kernel window'}>
+          <Raster x={range(-p, N - 1 + p)} y={range(-p, N - 1 + p)} z={input} range={[0, 1]} valueLabel={'pixel'} />
+          <Curve {...window[0]} live />
+          <Handle
+            kind="point"
+            at={[c0 + 1, r0 + 1]}
+            onDrag={([x, y]) => {
+              state.set('col', Math.min(Math.max(Math.round((x - 1 + p) / s), 0), m - 1))
+              state.set('row', Math.min(Math.max(Math.round((y - 1 + p) / s), 0), m - 1))
+            }}
+            label="window"
+          />
+        </Plot>
+        <Plot x={xAxis2} y={yAxis2} height={320} ariaLabel={'Output feature map'}>
+          <Raster
+            x={range(0, m - 1)}
+            y={range(0, m - 1)}
+            z={output}
+            scale={signed ? 'diverging' : 'sequential'}
+            range={outRange}
+            valueLabel={'output'}
+          />
+          <Points x={[j]} y={[i]} emphasis live />
+        </Plot>
       </div>
-    </Interactive>
+    </Figure>
   )
 }

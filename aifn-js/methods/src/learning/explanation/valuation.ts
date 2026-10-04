@@ -80,7 +80,7 @@ const withIntercept = (x: Tensor): Tensor => {
 
 /**
  * Run the study on `train` and `valid` (binary labels) with `estimator` as the TMC utility's model (e.g. an
- * `aifn-applied` logistic regression), yielding after each method and every few permutations.
+ * `aifn-methods` logistic regression), yielding after each method and every few permutations.
  */
 export function* dataValuationStudy(
   train: { readonly x: Tensor; readonly y?: Tensor },

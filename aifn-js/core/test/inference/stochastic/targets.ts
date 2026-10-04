@@ -1,5 +1,5 @@
 /**
- * Target densities for the sampler tests, written here so the core tests do not depend on `aifn-applied`'s targets:
+ * Target densities for the sampler tests, written here so the core tests do not depend on `aifn-methods`'s targets:
  * a correlated Gaussian, Haario's banana and Neal's funnel, each normalised and with its gradient in closed form.
  */
 import type { LogDensity } from 'aifn/foundation/contracts'

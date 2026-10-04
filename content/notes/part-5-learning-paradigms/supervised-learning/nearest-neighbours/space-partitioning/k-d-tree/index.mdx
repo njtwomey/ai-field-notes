@@ -1,0 +1,126 @@
+---
+title: k-d tree
+kind: technique
+summary: 'A $k$-d tree splits points recursively at the median of their widest coordinate, so each node owns an axis-aligned box. A query descends to its own leaf, then backtracks, skipping any box farther than the $k$-th best distance so far. Queries take $O(\log n)$ expected time in low dimension.'
+tags: [nearest-neighbours, trees, algorithms, similarity-search, worked-example]
+aliases: [kd-tree, kd tree, k-dimensional tree, multidimensional binary search tree]
+requires: [nearest-neighbour-search]
+partOf: [space-partitioning-trees]
+references: [bentley1975, friedman1977, weber1998]
+status: draft
+updated: 2026-10-04
+---
+
+import { TreeBuild, TreeSearch } from '../_shared/TreeSearch'
+
+<Definition>
+A **$k$-d tree** over points $\xvec_1, \dots, \xvec_n \in \reals^d$ is a binary tree whose internal nodes each hold a
+coordinate $j$ and a threshold $t$: points with $x_j < t$ go to the left child, the rest to the right
+<Cite id="bentley1975" />. Each node therefore owns an axis-aligned box. Leaves hold at most $m$ points.
+</Definition>
+
+## Problem
+
+Find the $k$ points nearest a query $\qvec$ without computing all $n$ distances. A $k$-d tree spends $O(n \log n)$ once
+on an index, then answers queries by ruling out whole boxes of points with one bound each.
+
+## Mechanism
+
+### Mental model
+
+- **Build:** cut the cloud in half with a line through the median of its widest coordinate, then cut each half the same
+  way, until each piece holds at most $m$ points.
+- **Search:** go straight to the piece containing $\qvec$ and scan it. Then walk back up, and look into a neighbouring
+  piece only if it could hold something closer than the best found so far.
+
+### Building
+
+```text
+build(points):
+    if |points| ≤ m: return leaf(points)
+    j ← the coordinate with the largest spread (max − min) among points
+    t ← the median of x_j over points
+    box ← the bounding box of points            # used by the search's bound
+    return node(j, t, box,
+                build(points with x_j < t),
+                build(points with x_j ≥ t))
+```
+
+The median halves the points at every level, so the depth is $\lceil \log_2(n/m) \rceil$ and the build costs
+$O(n \log n)$. Splitting the widest coordinate keeps boxes from becoming long and thin.
+
+<TreeBuild index="kd" />
+
+### Searching
+
+```text
+r ← ∞                                     # k-th best distance so far
+search(node):
+    if gap(q, node.box) > r:  PRUNE        # the whole box is farther than r
+    elif node is a leaf:      SCAN         # distances to its points; keep the k best; update r
+    else:                     DESCEND
+        visit the child whose box is nearer to q first, then the other
+```
+
+Here $\text{gap}(\qvec, B)$ is the distance from $\qvec$ to the box $B = [\bvec^{\text{lo}}, \bvec^{\text{hi}}]$, zero
+when $\qvec$ is inside:
+
+$$
+\text{gap}(\qvec, B)^2 = \sum_{i=1}^{d} \max\bigl(0,\; b^{\text{lo}}_i - q_i,\; q_i - b^{\text{hi}}_i\bigr)^2 .
+$$
+
+**Backtracking.** The nearer child's box usually contains $\qvec$, so the first chain of descents ends at the leaf
+around the query, and its scan gives a small $r$. Each recursive call then returns to its parent, which visits its
+second child. That visit starts with the prune test against the current $r$, so most second children are skipped with
+one bound and no distances.
+
+**Pruning, and why it is safe.** For any point $\xvec$ in box $B$, each coordinate difference is at least the gap in
+that coordinate, $\abs{q_i - x_i} \ge \max(0, b^{\text{lo}}_i - q_i, q_i - b^{\text{hi}}_i)$, because $x_i$ lies in
+$[b^{\text{lo}}_i, b^{\text{hi}}_i]$. Squaring and summing gives $\norm{\qvec - \xvec}_2 \ge \text{gap}(\qvec, B)$.
+So when the gap exceeds $r$, every point in the box is farther than the $k$ points already held, and skipping the box
+loses nothing. Friedman, Bentley and Finkel showed that the expected number of nodes examined is $O(\log n)$ for fixed
+$d$ <Cite id="friedman1977" />.
+
+<TreeSearch index="kd" />
+
+## Worked example
+
+Eight points, leaf size $m = 2$, query $\qvec = (6.6, 4.6)$, $k = 1$:
+
+$$
+(1,1),\ (2,4),\ (3,2),\ (4,7),\ (6,3),\ (7,6),\ (8,1),\ (9,5).
+$$
+
+**Build.** The root splits $x_1$ at $6$ ($x_1$ spans 8 and $x_2$ spans 6, so $x_1$ is wider). The left half
+$\set{(1,1), (2,4), (3,2), (4,7)}$ splits $x_2$ at $4$; the right half $\set{(6,3), (7,6), (8,1), (9,5)}$ splits $x_2$
+at $5$. The four leaves hold two points each.
+
+**Search,** as traced by the implementation:
+
+| step | node | box | gap | $r$ before | decision |
+| --- | --- | --- | --- | --- | --- |
+| 1 | root | $[1,9] \times [1,7]$ | 0 | $\infty$ | descend; right child nearer ($q_1 = 6.6 \ge 6$) |
+| 2 | right half | $[6,9] \times [1,6]$ | 0 | $\infty$ | descend; upper child nearer (gap 0.57 against 1.60) |
+| 3 | leaf $\set{(7,6), (9,5)}$ | $[7,9] \times [5,6]$ | 0.57 | $\infty$ | scan: distances 1.46 and 2.43, $r = 1.46$ |
+| 4 | leaf $\set{(6,3), (8,1)}$ | $[6,8] \times [1,3]$ | 1.60 | 1.46 | prune: $1.60 > 1.46$ |
+| 5 | left half | $[1,4] \times [1,7]$ | 2.60 | 1.46 | prune: $2.60 > 1.46$ |
+
+The answer is $(7,6)$ at distance 1.46, found with 2 distance computations instead of 8. Steps 4 and 5 are the
+backtracking: after the first leaf, control returns to the right half and then to the root, and each pending child is
+pruned by its gap alone.
+
+## Cost
+
+| | build | memory | query, low $d$ | query, high $d$ |
+| --- | --- | --- | --- | --- |
+| $k$-d tree | $O(n \log n)$ | $O(n)$ | $O(\log n)$ expected | approaches $O(nd)$ |
+| scan | none | $O(n)$ | $O(nd)$ | $O(nd)$ |
+
+## Trade-offs
+
+- **Dimension.** A ball of radius $r$ crosses about $2^d$ boxes of comparable size, so the tree beats a scan only when
+  $n \gg 2^d$; in practice up to about 10 to 20 dimensions <Cite id="weber1998" />.
+- **Shape.** Boxes fit data spread along the axes. Clouds near a rotated or curved low-dimensional set suit the balls
+  of a <NoteLink to="ball-tree">ball tree</NoteLink>.
+- **Metric.** The gap bound needs coordinates and an $\ell_p$ distance, not a general metric.
+- **Updates.** Insertions go to the leaf whose box holds the point; many of them unbalance the tree until it is rebuilt.

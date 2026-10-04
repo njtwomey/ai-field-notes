@@ -1,7 +1,18 @@
 import { useMemo } from 'react'
-import { Interactive, ParamSlider, Readout, XYChart, formatNumber, useParam, type XYSeries } from 'aifn-render'
-import { rng } from '@/lib/math'
+import {
+  Figure,
+  float,
+  formatNumber,
+  int,
+  Plot,
+  Readout,
+  seriesLayers,
+  type SeriesSpec,
+  useAxis,
+  useFigureState,
+} from 'aifn-render'
 import { effectiveSampleSize, splitRhat } from '../../_shared/mcmc'
+import { normal, stream } from 'aifn/foundation/random'
 
 /** Trace points drawn per chain; longer chains are thinned for drawing only. */
 const TRACE_POINTS = 400
@@ -12,24 +23,26 @@ const TRACE_POINTS = 400
  * mode μ = δ, standing in for a chain trapped in a second mode.
  */
 export function ChainDiagnostics() {
-  const chains = useParam(4, { min: 1, max: 20, step: 1 })
-  const phi = useParam(0.9, { min: 0, max: 0.995, step: 0.005 })
-  const draws = useParam(1000, { min: 100, max: 4000, step: 100 })
-  const spread = useParam(8, { min: 0, max: 20, step: 0.5 })
-  const offset = useParam(0, { min: 0, max: 3, step: 0.05 })
-  const seed = useParam(1, { min: 1, max: 30, step: 1 })
+  const state = useFigureState({
+    chains: int(4, { min: 1, max: 20, step: 1, label: 'chains', format: (v) => String(v) }),
+    phi: float(0.9, { min: 0, max: 0.995, step: 0.005, label: 'autocorrelation φ' }),
+    draws: int(1000, { min: 100, max: 4000, step: 100, label: 'draws per chain', format: (v) => String(v) }),
+    spread: float(8, { min: 0, max: 20, step: 0.5, label: 'starting spread' }),
+    offset: float(0, { min: 0, max: 3, step: 0.05, label: 'last chain centred at δ' }),
+    seed: int(1, { min: 1, max: 30, step: 1, label: 'random seed' }),
+  })
 
   const run = useMemo(() => {
-    const m = chains.value
-    const noise = Math.sqrt(1 - phi.value ** 2)
+    const m = state.chains
+    const noise = Math.sqrt(1 - state.phi ** 2)
     // Each chain has its own random stream, so adding a chain leaves the others unchanged.
     const all = Array.from({ length: m }, (_, c) => {
-      const g = rng(seed.value * 1000 + c)
-      const mu = c === m - 1 ? offset.value : 0
-      let x = (m === 1 ? 1 : -1 + (2 * c) / (m - 1)) * spread.value
+      const g = stream(state.seed * 1000 + c)
+      const mu = c === m - 1 ? state.offset : 0
+      let x = (m === 1 ? 1 : -1 + (2 * c) / (m - 1)) * state.spread
       const out: number[] = []
-      for (let t = 0; t < draws.value; t++) {
-        x = mu + phi.value * (x - mu) + noise * g.normal()
+      for (let t = 0; t < state.draws; t++) {
+        x = mu + state.phi * (x - mu) + noise * normal(g)
         out.push(x)
       }
       return out
@@ -42,12 +55,12 @@ export function ChainDiagnostics() {
       ess: kept.reduce((a, c) => a + effectiveSampleSize(c), 0),
       keptCount: kept.reduce((a, c) => a + c.length, 0),
     }
-  }, [chains.value, phi.value, draws.value, spread.value, offset.value, seed.value])
+  }, [state.chains, state.phi, state.draws, state.spread, state.offset, state.seed])
 
-  const series: XYSeries[] = useMemo(() => {
+  const series: SeriesSpec[] = useMemo(() => {
     const many = run.chains.length > 1
-    const stride = Math.max(1, Math.ceil(draws.value / TRACE_POINTS))
-    return run.chains.map((c, i): XYSeries => {
+    const stride = Math.max(1, Math.ceil(state.draws / TRACE_POINTS))
+    return run.chains.map((c, i): SeriesSpec => {
       const idx: number[] = []
       for (let t = 0; t < c.length; t += stride) idx.push(t)
       const last = i === run.chains.length - 1
@@ -60,25 +73,19 @@ export function ChainDiagnostics() {
         thin: many,
       }
     })
-  }, [run, draws.value])
+  }, [run, state.draws])
 
-  const tau = (1 + phi.value) / (1 - phi.value)
+  const tau = (1 + state.phi) / (1 - state.phi)
 
+  const xAxis = useAxis({ label: 'iteration', hold: 'union' })
+  const yAxis = useAxis({ label: 'x', hold: 'union' })
   return (
-    <Interactive
+    <Figure
       title="Trace plots, split R-hat and effective sample size"
+      state={state}
       caption="Several chains whose stationary distribution is N(0, 1), each with its own random stream, moving with autocorrelation φ from starts spread evenly across ± the starting spread. Each chain is a light line; the chains slider sets how many run. The first half of each chain is treated as warm-up, and R-hat and the effective sample size (summed over chains) use every chain shown. With large starting spread, R-hat over all draws is far above 1 until the chains forget their starts. Raise φ: the chains mix slowly, the effective sample size falls towards (draws/2) × chains/τ, and R-hat on the kept half rises. Move the last chain to another mode: every chain on its own looks stationary, but the chains disagree and R-hat flags it."
-      controls={
-        <>
-          <ParamSlider label="chains" param={chains} format={(v) => String(v)} withArrows />
-          <ParamSlider label="autocorrelation φ" param={phi} />
-          <ParamSlider label="draws per chain" param={draws} format={(v) => String(v)} />
-          <ParamSlider label="starting spread" param={spread} />
-          <ParamSlider label="last chain centred at δ" param={offset} />
-          <ParamSlider label="random seed" param={seed} withArrows />
-        </>
-      }
-      readout={
+
+      readouts={
         <>
           <Readout label="split R-hat, all draws" value={formatNumber(run.rhatAll)} />
           <Readout label="split R-hat, second halves" value={formatNumber(run.rhatKept)} />
@@ -88,7 +95,9 @@ export function ChainDiagnostics() {
         </>
       }
     >
-      <XYChart series={series} xLabel="iteration" yLabel="x" height={300} />
-    </Interactive>
+      <Plot x={xAxis} y={yAxis} height={300}>
+        {seriesLayers(series)}
+      </Plot>
+    </Figure>
   )
 }

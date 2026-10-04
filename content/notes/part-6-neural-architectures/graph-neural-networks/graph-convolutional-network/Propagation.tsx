@@ -1,5 +1,5 @@
-import { useMemo, useState } from 'react'
-import { Heatmap, Interactive, ParamChoice, ParamSlider, Readout, formatNumber, useParam } from 'aifn-render'
+import { useMemo } from 'react'
+import { choice, Figure, formatNumber, int, Plot, Raster, Readout, useAxis, useFigureState } from 'aifn-render'
 
 // Two 5-cliques (nodes 0–4 and 5–9) joined by one edge between nodes 4 and 5.
 const N = 10
@@ -37,14 +37,23 @@ const apply = (m: number[][], x: number[]) => m.map((row) => row.reduce((s, v, j
 
 /** Repeated graph-convolution propagation of one feature, without weights or nonlinearity. */
 export function Propagation() {
-  const [kind, setKind] = useState<Operator>('renormalised')
-  const steps = useParam(12, { min: 1, max: 30, step: 1 })
+  const state = useFigureState({
+    kind: choice<Operator>(
+      [
+        { value: 'renormalised', label: 'renormalised Â' },
+        { value: 'first-order', label: 'first-order' },
+      ],
+      'renormalised',
+      { label: 'propagation matrix' },
+    ),
+    steps: int(12, { min: 1, max: 30, step: 1, label: 'steps', format: (v) => String(v) }),
+  })
 
   const rows = useMemo(() => {
     const out = [X0]
-    for (let k = 1; k <= steps.value; k++) out.push(apply(OPERATORS[kind], out[k - 1]))
+    for (let k = 1; k <= state.steps; k++) out.push(apply(OPERATORS[state.kind], out[k - 1]))
     return out
-  }, [kind, steps.value])
+  }, [state.kind, state.steps])
 
   const last = rows[rows.length - 1]
   const maxAbs = Math.max(...last.map(Math.abs))
@@ -52,42 +61,31 @@ export function Propagation() {
   const mean = (xs: number[]) => xs.reduce((s, v) => s + v, 0) / xs.length
   const gap = Math.abs(mean(last.slice(0, 5)) - mean(last.slice(5)))
 
+  const xAxis = useAxis({ label: 'node' })
+  const yAxis = useAxis({ label: 'step k' })
   return (
-    <Interactive
+    <Figure
       title="Repeated propagation on a graph"
+      state={state}
       caption="Two 5-node cliques joined by one edge (nodes 4 and 5). Each row applies the propagation matrix once more to a scalar feature, starting from an arbitrary signal at step 0. With the renormalised matrix, one step makes each clique almost uniform, and further steps slowly pull the two cliques together: this is oversmoothing. The first-order matrix I + D^(−1/2) A D^(−1/2) has an eigenvalue of 2, so the feature grows by a factor approaching 2 at every step."
-      controls={
-        <>
-          <ParamChoice
-            label="propagation matrix"
-            value={kind}
-            onChange={setKind}
-            options={[
-              { value: 'renormalised', label: 'renormalised Â' },
-              { value: 'first-order', label: 'first-order' },
-            ]}
-          />
-          <ParamSlider label="steps" param={steps} format={(v) => String(v)} withArrows />
-        </>
-      }
-      readout={
+
+      readouts={
         <>
           <Readout label="max |feature| at last step" value={formatNumber(maxAbs)} />
           <Readout label="gap between clique means" value={formatNumber(gap)} />
         </>
       }
     >
-      <Heatmap
-        x={Array.from({ length: N }, (_, i) => i)}
-        y={rows.map((_, k) => k)}
-        z={rows}
-        scale="diverging"
-        range={[-bound, bound]}
-        xLabel="node"
-        yLabel="step k"
-        valueLabel="feature"
-        height={360}
-      />
-    </Interactive>
+      <Plot x={xAxis} y={yAxis} height={360}>
+        <Raster
+          x={Array.from({ length: N }, (_, i) => i)}
+          y={rows.map((_, k) => k)}
+          z={rows}
+          scale={'diverging'}
+          range={[-bound, bound]}
+          valueLabel={'feature'}
+        />
+      </Plot>
+    </Figure>
   )
 }

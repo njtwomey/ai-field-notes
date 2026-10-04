@@ -1,5 +1,5 @@
 /**
- * `aifn-applied/evaluation`: application metrics, defined with the metric registry pattern of `aifn/learning/metrics`:
+ * `aifn-methods/evaluation`: application metrics, defined with the metric registry pattern of `aifn/learning/metrics`:
  * text, detection and segmentation, signal and image quality, generative-model, fairness and beyond-accuracy metrics,
  * collected in `evaluationMetricRegistry`. Ordinal metrics are in `aifn/learning/metrics`.
  */

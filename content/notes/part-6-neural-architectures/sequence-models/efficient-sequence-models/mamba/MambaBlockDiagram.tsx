@@ -1,6 +1,4 @@
-import { Interactive } from 'aifn-render'
-import { Diagram } from 'aifn-render'
-import { op } from 'aifn-render'
+import { Diagram, Figure, op } from 'aifn-render'
 import type { DiagramSpec } from 'aifn-render'
 
 const L = 1.6
@@ -50,7 +48,7 @@ const spec: DiagramSpec = {
 /** The Mamba block: one gated branch holding the selective SSM, wrapped in a residual connection. */
 export function MambaBlockDiagram() {
   return (
-    <Interactive
+    <Figure
       title="The Mamba block"
       caption="Read from the bottom. A linear layer widens the input by the factor E into two branches. The left branch mixes along the sequence: a short causal convolution, SiLU, then the selective SSM. The right branch passes through SiLU and gates the left one elementwise. A linear layer returns to width D, and a residual connection wraps the block. There is no separate attention or MLP layer."
     >
@@ -58,6 +56,6 @@ export function MambaBlockDiagram() {
         spec={spec}
         ariaLabel="Mamba block: norm, linear expansion into two branches; one branch causal convolution, SiLU and selective SSM; the other SiLU as a gate; elementwise product, linear projection back, residual addition"
       />
-    </Interactive>
+    </Figure>
   )
 }

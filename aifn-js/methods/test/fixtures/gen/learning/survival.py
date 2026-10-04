@@ -1,4 +1,4 @@
-"""Golden values for aifn-applied/learning/survival: Cox proportional hazards with Efron ties (lifelines'
+"""Golden values for aifn-methods/learning/survival: Cox proportional hazards with Efron ties (lifelines'
 CoxPHFitter) and Breslow ties (statsmodels' PHReg), and Weibull and log-normal AFT fits (lifelines), on seeded
 right-censored data with tied (rounded) times."""
 

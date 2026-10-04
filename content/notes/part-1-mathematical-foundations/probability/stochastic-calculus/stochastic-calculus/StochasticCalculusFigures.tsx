@@ -1,8 +1,19 @@
 import { useMemo } from 'react'
-import { Diagram } from 'aifn-render'
+import {
+  Diagram,
+  Figure,
+  formatNumber,
+  Handle,
+  int,
+  Plot,
+  Readout,
+  seriesLayers,
+  type SeriesSpec,
+  useAxis,
+  useFigureState,
+} from 'aifn-render'
 import type { DiagramSpec } from 'aifn-render'
-import { Interactive, ParamSlider, Readout, XYChart, formatNumber, useParam, type XYSeries } from 'aifn-render'
-import { rng } from '@/lib/math'
+import { normal, stream } from 'aifn/foundation/random'
 
 const FINE = 2 ** 16
 const KS = Array.from({ length: 16 }, (_, i) => i + 1)
@@ -18,10 +29,10 @@ const statsCache = new Map<number, Stats>()
 function pathStats(p: number): Stats {
   const hit = statsCache.get(p)
   if (hit) return hit
-  const { normal } = rng(p === 0 ? 7 : 7000 + p)
+  const rs = stream(p === 0 ? 7 : 7000 + p)
   const b = new Float64Array(FINE + 1)
   const sd = Math.sqrt(1 / FINE)
-  for (let i = 1; i <= FINE; i++) b[i] = b[i - 1] + sd * normal()
+  for (let i = 1; i <= FINE; i++) b[i] = b[i - 1] + sd * normal(rs)
   const out = KS.map((kk) => {
     const m = 2 ** kk
     const stride = FINE / m
@@ -43,11 +54,13 @@ function pathStats(p: number): Stats {
  * never settles, while the sum of (ΔW)² settles at 1 on every path: (dW)² behaves like dt.
  */
 export function RoughPath() {
-  const k = useParam(4, { min: 1, max: 16, step: 1 })
-  const count = useParam(10, { min: 1, max: MAX_PATHS, step: 1 })
+  const state = useFigureState({
+    k: int(4, { min: 1, max: 16, step: 1, label: 'k (step h = 2⁻ᵏ)' }),
+    count: int(10, { min: 1, max: MAX_PATHS, step: 1, label: 'paths', format: (v) => String(v) }),
+  })
 
   // Statistics at every resolution, computed once per path; the k slider only picks a column.
-  const stats = useMemo(() => Array.from({ length: count.value }, (_, p) => pathStats(p)), [count.value])
+  const stats = useMemo(() => Array.from({ length: state.count }, (_, p) => pathStats(p)), [state.count])
   const avg = useMemo(
     () =>
       KS.map((_, i) => ({
@@ -57,9 +70,9 @@ export function RoughPath() {
     [stats],
   )
 
-  const series = useMemo<XYSeries[]>(() => {
+  const series = useMemo<SeriesSpec[]>(() => {
     const many = stats.length > 1
-    const out: XYSeries[] = []
+    const out: SeriesSpec[] = []
     for (const st of stats)
       out.push({
         name: many ? 'mean |ΔW| / h, each path' : 'mean |ΔW| / h',
@@ -97,23 +110,21 @@ export function RoughPath() {
     return out
   }, [stats, avg])
 
-  const now = avg[k.value - 1]
-  const qvs = stats.map((st) => st[k.value - 1].qv)
-  const many = count.value > 1
+  const now = avg[state.k - 1]
+  const qvs = stats.map((st) => st[state.k - 1].qv)
+  const many = state.count > 1
 
+  const xAxis = useAxis({ label: 'k', range: [1, 16] })
+  const yAxis = useAxis({ label: 'value', range: [0.02, 300], log: true })
   return (
-    <Interactive
+    <Figure
       title="Why ordinary calculus fails on a Brownian path"
+      state={state}
       caption="Brownian paths on [0, 1], each sampled with step h = 2⁻ᵏ; the paths slider sets how many. With several paths each one is a light line and the solid lines average them. The average slope |ΔW|/h grows like 1/√h without limit on every path, so no path has a derivative. The sum of squared increments settles at 1, the length of the interval, and the paths bunch ever closer around it as h shrinks: over a step of length h, (ΔW)² is about h. Drag the vertical line or use the slider to change k. The y axis is logarithmic."
-      controls={
+
+      readouts={
         <>
-          <ParamSlider label="k (step h = 2⁻ᵏ)" param={k} withArrows />
-          <ParamSlider label="paths" param={count} withArrows format={(v) => String(v)} />
-        </>
-      }
-      readout={
-        <>
-          <Readout label="h" value={formatNumber(2 ** -k.value)} />
+          <Readout label="h" value={formatNumber(2 ** -state.k)} />
           <Readout label={many ? 'mean |ΔW| / h (average)' : 'mean |ΔW| / h'} value={formatNumber(now.quot)} />
           <Readout label={many ? 'Σ (ΔW)² (average)' : 'Σ (ΔW)²'} value={formatNumber(now.qv)} />
           {many && (
@@ -125,17 +136,11 @@ export function RoughPath() {
         </>
       }
     >
-      <XYChart
-        height={300}
-        xLabel="k"
-        yLabel="value"
-        yLog
-        series={series}
-        xRange={[1, 16]}
-        yRange={[0.02, 300]}
-        handles={[{ kind: 'x', at: k.value, label: 'k', onDrag: (x) => k.set(x) }]}
-      />
-    </Interactive>
+      <Plot x={xAxis} y={yAxis} height={300}>
+        {seriesLayers(series)}
+        <Handle {...state.handle('k', { label: 'k' })} />
+      </Plot>
+    </Figure>
   )
 }
 
@@ -188,7 +193,7 @@ const spec: DiagramSpec = {
 /** The order of ideas in this section, from Brownian motion to diffusion models. */
 export function SectionMap() {
   return (
-    <Interactive
+    <Figure
       title="The route from Brownian motion to diffusion models"
       caption="Each box is a note in this section; an arrow means the idea at its tail is used to build the idea at its head. Itô's lemma drives everything below it: it gives the Fokker–Planck equation for densities, which in turn gives the reverse-time SDE and the probability-flow ODE. The Ornstein–Uhlenbeck process is the forward noising process of a diffusion model, and Tweedie's formula turns its denoiser into a score."
     >
@@ -196,6 +201,6 @@ export function SectionMap() {
         spec={spec}
         ariaLabel="Map of the stochastic calculus section: Brownian motion, Itô integral, Itô's lemma, SDEs, then Fokker–Planck, Ornstein–Uhlenbeck and Euler–Maruyama, then reverse-time SDE, probability-flow ODE and Tweedie's formula, all feeding diffusion models"
       />
-    </Interactive>
+    </Figure>
   )
 }

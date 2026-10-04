@@ -1,6 +1,18 @@
 import { useMemo } from 'react'
-import { Interactive, ParamSlider, Readout, XYChart, formatNumber, useParam, type XYSeries } from 'aifn-render'
-import { incompleteBeta, invertCdf } from '@/lib/math/special'
+import {
+  Curve,
+  Figure,
+  float,
+  formatNumber,
+  Handle,
+  int,
+  Plot,
+  Points,
+  Readout,
+  useAxis,
+  useFigureState,
+} from 'aifn-render'
+import { regularisedBetaInverse } from 'aifn/numerics/special'
 
 /** Pseudo-counts a + b at which the index is computed. */
 const COUNTS = [2, 3, 4, 5, 6, 8, 10, 12, 16, 20, 25, 32, 40, 50, 64, 80, 100]
@@ -39,44 +51,43 @@ function gittins(a: number, b: number, gamma: number, depth: number): number {
  * observations grows at a fixed posterior mean.
  */
 export function GittinsIndex() {
-  const mean = useParam(0.4, { min: 0.05, max: 0.95, step: 0.01 })
-  const gamma = useParam(0.95, { min: 0.5, max: 0.98, step: 0.01 })
-  const count = useParam(10, { min: 2, max: 100, step: 1 })
+  const state = useFigureState({
+    mean: float(0.4, { min: 0.05, max: 0.95, step: 0.01, label: 'posterior mean a / (a + b)' }),
+    gamma: float(0.95, { min: 0.5, max: 0.98, step: 0.01, label: 'discount γ' }),
+    count: int(10, { min: 2, max: 100, step: 1, label: 'observations a + b', format: (v) => String(v) }),
+  })
 
-  const g = gamma.value
-  const p = mean.value
+  const g = state.gamma
+  const p = state.mean
   // Look far enough ahead that γ^depth < 0.001.
   const depth = Math.min(400, Math.ceil(Math.log(1e-3) / Math.log(g)))
 
   const curve = useMemo(() => COUNTS.map((m) => gittins(p * m, (1 - p) * m, g, depth)), [p, g, depth])
   // Bayes-UCB-style comparison: the posterior quantile at level 1 − 1/H, with H = 1/(1 − γ) the effective horizon.
-  const quantiles = useMemo(
-    () => COUNTS.map((m) => invertCdf((x) => incompleteBeta(x, p * m, (1 - p) * m), g, 0, 1)),
-    [p, g],
-  )
+  const quantiles = useMemo(() => COUNTS.map((m) => regularisedBetaInverse(p * m, (1 - p) * m, g)), [p, g])
 
-  const m = count.value
+  const m = state.count
   const index = useMemo(() => gittins(p * m, (1 - p) * m, g, depth), [p, m, g, depth])
 
-  const series: XYSeries[] = [
-    { name: 'Gittins index', type: 'line', x: COUNTS, y: curve, slot: 0 },
-    { name: 'posterior quantile at level γ', type: 'line', x: COUNTS, y: quantiles, slot: 1, dashed: true },
-    { name: 'posterior mean', type: 'line', x: [2, 100], y: [p, p], emphasis: true },
-    { name: 'index at a + b', type: 'scatter', x: [m], y: [index], emphasis: true },
-  ]
+  const series = [
+    { name: 'Gittins index', x: COUNTS, y: curve, slot: 0 },
+    { name: 'posterior quantile at level γ', x: COUNTS, y: quantiles, slot: 1, dashed: true },
+    { name: 'posterior mean', x: [2, 100], y: [p, p], emphasis: true },
+    { name: 'index at a + b', x: [m], y: [index], emphasis: true },
+  ] as const
 
+  const xAxis = useAxis({ label: 'observations a + b', range: [0, 100] })
+  const yAxis = useAxis({
+    label: 'value per round',
+    range: [Math.max(0, p - 0.1), Math.min(1, Math.max(...curve, ...quantiles) + 0.05)],
+  })
   return (
-    <Interactive
+    <Figure
       title="The Gittins index of a Bernoulli arm"
+      state={state}
       caption="An arm whose success probability has posterior Beta(a, b), with posterior mean a / (a + b) held fixed while the number of observations a + b grows. The Gittins index is the constant reward λ at which a Bayesian who discounts by γ per round is indifferent between retiring to λ for ever and pulling the arm. It exceeds the posterior mean by an exploration bonus, the value of what the next pulls would reveal. The bonus shrinks as the posterior sharpens and grows with γ, which sets the effective horizon 1 / (1 − γ). Drag along the chart to read the index at a given a + b."
-      controls={
-        <>
-          <ParamSlider label="posterior mean a / (a + b)" param={mean} />
-          <ParamSlider label="discount γ" param={gamma} />
-          <ParamSlider label="observations a + b" param={count} format={(v) => String(v)} />
-        </>
-      }
-      readout={
+
+      readouts={
         <>
           <Readout label="Gittins index" value={formatNumber(index)} />
           <Readout label="exploration bonus" value={formatNumber(index - p)} />
@@ -84,14 +95,13 @@ export function GittinsIndex() {
         </>
       }
     >
-      <XYChart
-        series={series}
-        xLabel="observations a + b"
-        yLabel="value per round"
-        xRange={[0, 100]}
-        yRange={[Math.max(0, p - 0.1), Math.min(1, Math.max(...curve, ...quantiles) + 0.05)]}
-        handles={[{ kind: 'x', at: m, label: 'a + b', onDrag: (x) => count.set(Math.round(x)) }]}
-      />
-    </Interactive>
+      <Plot x={xAxis} y={yAxis}>
+        <Curve {...series[0]} />
+        <Curve {...series[1]} />
+        <Curve {...series[2]} />
+        <Points {...series[3]} />
+        <Handle kind="x" at={m} label="a + b" onDrag={(x) => state.set('count', Math.round(x))} />
+      </Plot>
+    </Figure>
   )
 }

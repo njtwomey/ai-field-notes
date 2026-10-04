@@ -1,15 +1,18 @@
 import { useMemo, useState } from 'react'
 import {
-  Interactive,
-  ParamSlider,
-  Readout,
-  XYChart,
+  Figure,
+  float,
   formatNumber,
-  useParam,
-  type Handle,
+  Handle,
+  Plot,
+  Readout,
   type Segment,
+  seriesLayers,
+  type SeriesSpec,
+  useAxis,
+  useFigureState,
   type Vec2,
-  type XYSeries,
+  Vectors,
 } from 'aifn-render'
 
 const RANGE: [number, number] = [-3, 3]
@@ -32,16 +35,18 @@ function circle(r: number) {
 export function TripletMargin() {
   const [pos, setPos] = useState<Vec2>([1, 0.4])
   const [neg, setNeg] = useState<Vec2>([0.4, 1])
-  const alpha = useParam(1, { min: 0, max: 3, step: 0.1 })
+  const state = useFigureState({
+    alpha: float(1, { min: 0, max: 3, step: 0.1, label: 'margin α' }),
+  })
 
   const r = useMemo(() => {
     const dap = d2(ANCHOR, pos)
     const dan = d2(ANCHOR, neg)
-    const loss = Math.max(0, dap - dan + alpha.value)
-    const kind = dan < dap ? 'hard' : dan < dap + alpha.value ? 'semi-hard' : 'easy'
+    const loss = Math.max(0, dap - dan + state.alpha)
+    const kind = dan < dap ? 'hard' : dan < dap + state.alpha ? 'semi-hard' : 'easy'
     const inner = circle(Math.sqrt(dap))
-    const outer = circle(Math.sqrt(dap + alpha.value))
-    const series: XYSeries[] = [
+    const outer = circle(Math.sqrt(dap + state.alpha))
+    const series: SeriesSpec[] = [
       { name: 'hard boundary: d(a, n)² = d(a, p)²', type: 'line', ...inner, slot: 0, dashed: true },
       { name: 'margin boundary: d(a, n)² = d(a, p)² + α', type: 'line', ...outer, slot: 1, dashed: true },
       { name: 'anchor', type: 'scatter', x: [ANCHOR[0]], y: [ANCHOR[1]], emphasis: true },
@@ -63,19 +68,17 @@ export function TripletMargin() {
           ]
         : []
     return { dap, dan, loss, kind, series, vectors }
-  }, [pos, neg, alpha.value])
+  }, [pos, neg, state.alpha])
 
-  const handles: Handle[] = [
-    { kind: 'point', at: pos, label: 'positive', onDrag: ([x, y]) => setPos([clamp(x), clamp(y)]) },
-    { kind: 'point', at: neg, label: 'negative', onDrag: ([x, y]) => setNeg([clamp(x), clamp(y)]) },
-  ]
-
+  const xAxis = useAxis({ label: 'embedding dimension 1', range: RANGE })
+  const yAxis = useAxis({ label: 'embedding dimension 2', range: RANGE, equal: xAxis })
   return (
-    <Interactive
+    <Figure
       title="Triplet loss: hard, semi-hard and easy negatives"
+      state={state}
       caption="Drag the positive and the negative; the anchor stays at the origin. Inside the inner circle the negative is closer to the anchor than the positive is (hard). Between the circles it is farther, but by less than the margin α (semi-hard). Outside the outer circle the triplet is satisfied and contributes no loss or gradient (easy). While the loss is positive, the arrows show the gradient-descent step: the positive moves toward the anchor and the negative moves directly away from it."
-      controls={<ParamSlider label="margin α" param={alpha} />}
-      readout={
+
+      readouts={
         <>
           <Readout label="d(a, p)²" value={formatNumber(r.dap)} />
           <Readout label="d(a, n)²" value={formatNumber(r.dan)} />
@@ -84,16 +87,12 @@ export function TripletMargin() {
         </>
       }
     >
-      <XYChart
-        series={r.series}
-        vectors={r.vectors}
-        handles={handles}
-        xRange={RANGE}
-        yRange={RANGE}
-        equalAspect
-        xLabel="embedding dimension 1"
-        yLabel="embedding dimension 2"
-      />
-    </Interactive>
+      <Plot x={xAxis} y={yAxis}>
+        {seriesLayers(r.series)}
+        <Vectors vectors={r.vectors} />
+        <Handle kind="point" at={pos} label="positive" onDrag={([x, y]) => setPos([clamp(x), clamp(y)])} />
+        <Handle kind="point" at={neg} label="negative" onDrag={([x, y]) => setNeg([clamp(x), clamp(y)])} />
+      </Plot>
+    </Figure>
   )
 }

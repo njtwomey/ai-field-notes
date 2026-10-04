@@ -1,5 +1,4 @@
-import { Interactive } from 'aifn-render'
-import { Diagram } from 'aifn-render'
+import { Diagram, Figure } from 'aifn-render'
 import type { DiagramSpec } from 'aifn-render'
 
 const spec: DiagramSpec = {
@@ -31,7 +30,7 @@ const spec: DiagramSpec = {
 /** Two towers that meet only at a dot product, which is what lets the item side be indexed offline. */
 export function TwoTowerDiagram() {
   return (
-    <Interactive
+    <Figure
       title="The two-tower model"
       caption="User and item features never meet until the final dot product. The item tower is run offline over the whole catalogue and its outputs are stored in an approximate nearest-neighbour index; at request time only the query tower runs, and its vector retrieves the items with the largest dot products."
     >
@@ -39,6 +38,6 @@ export function TwoTowerDiagram() {
         spec={spec}
         ariaLabel="Two-tower model: user features to query tower to u, item features to item tower to v, dot product score, item vectors in an ANN index"
       />
-    </Interactive>
+    </Figure>
   )
 }

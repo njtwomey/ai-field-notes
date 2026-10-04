@@ -1,38 +1,45 @@
 import { useMemo } from 'react'
-import { Interactive, ParamSlider, Readout, XYChart, formatNumber, useParam, type XYSeries } from 'aifn-render'
-import { db, freqz } from '@/lib/dsp'
-import { rng } from '@/lib/math'
+import { Curve, Figure, float, formatNumber, int, Plot, Readout, useAxis, useFigureState } from 'aifn-render'
+import { complexAbs, toFlat, type Tensor } from 'aifn/foundation/tensor'
+import { freqz } from 'aifn/signal/filters'
+import { transferFunction } from 'aifn/systems'
 import { solve, toeplitz } from '../_shared/stat'
+import { normal, stream } from 'aifn/foundation/random'
 
 const N = 400
 const SHOW = 120
 const OMEGA_COUNT = 256
+
+/** Decibels, 20 log₁₀ of a magnitude, floored at −200 dB so zeros stay finite. */
+const db = (m: number) => Math.max(-200, 20 * Math.log10(Math.max(m, 1e-300)))
 
 /**
  * FIR Wiener filter for an AR(1) signal in white noise. The taps solve R w = p with R the Toeplitz autocorrelation of
  * the noisy input and p its cross-correlation with the clean signal, both known in closed form for this model.
  */
 export function WienerDenoising() {
-  const pole = useParam(0.9, { min: 0, max: 0.98, step: 0.01 })
-  const snr = useParam(0, { min: -10, max: 20, step: 1 })
-  const taps = useParam(5, { min: 1, max: 20, step: 1 })
-  const seed = useParam(1, { min: 1, max: 20, step: 1 })
+  const state = useFigureState({
+    pole: float(0.9, { min: 0, max: 0.98, step: 0.01, label: 'AR pole a' }),
+    snr: int(0, { min: -10, max: 20, step: 1, label: 'SNR (dB)' }),
+    taps: int(5, { min: 1, max: 20, step: 1, label: 'filter taps M' }),
+    seed: int(1, { min: 1, max: 20, step: 1, label: 'seed' }),
+  })
 
   const r = useMemo(() => {
-    const a = pole.value
+    const a = state.pole
     const varS = 1 / (1 - a * a) // AR(1) driven by unit-variance white noise
-    const varV = varS / 10 ** (snr.value / 10)
+    const varV = varS / 10 ** (state.snr / 10)
     // Signal and noise with fixed seeds, so sliders deform the same realisation.
-    const g = rng(seed.value)
+    const g = stream(state.seed)
     const s: number[] = []
-    let prev = g.normal() * Math.sqrt(varS)
+    let prev = normal(g) * Math.sqrt(varS)
     for (let n = 0; n < N; n++) {
-      prev = a * prev + g.normal()
+      prev = a * prev + normal(g)
       s.push(prev)
     }
-    const x = s.map((v) => v + Math.sqrt(varV) * g.normal())
+    const x = s.map((v) => v + Math.sqrt(varV) * normal(g))
     // Wiener–Hopf: r_x[k] = r_s[k] + σ_v² δ[k], p[k] = r_s[k] = σ_s² a^k.
-    const M = taps.value
+    const M = state.taps
     const rs = Array.from({ length: M }, (_, k) => varS * a ** k)
     const R = toeplitz(rs).map((row, i) => row.map((v, j) => v + (i === j ? varV : 0)))
     const w = solve(R, rs)
@@ -40,7 +47,9 @@ export function WienerDenoising() {
     const y = x.map((_, n) => w.reduce((acc, wk, k) => acc + (n - k >= 0 ? wk * x[n - k] : 0), 0))
     const empirical = (e: number[]) => e.slice(M).reduce((acc, v) => acc + v * v, 0) / (N - M)
     // Noncausal Wiener gain S_s / (S_s + S_v), and the FIR filter's response.
-    const { omega, magnitude } = freqz(w, [1], OMEGA_COUNT)
+    const h = freqz(transferFunction(w, [1], { dt: 1 }), { n: OMEGA_COUNT, includeNyquist: true, axis: 'rad/sample' })
+    const omega = toFlat(h.f)
+    const magnitude = toFlat(complexAbs(h.values) as Tensor)
     const ideal = omega.map((om) => {
       const ss = 1 / (1 + a * a - 2 * a * Math.cos(om))
       return ss / (ss + varV)
@@ -59,39 +68,36 @@ export function WienerDenoising() {
       magnitude,
       ideal,
     }
-  }, [pole.value, snr.value, taps.value, seed.value])
+  }, [state.pole, state.snr, state.taps, state.seed])
 
   const t = Array.from({ length: SHOW }, (_, n) => n + 200)
   const slice = (v: number[]) => t.map((n) => v[n])
-  const timeSeries: XYSeries[] = [
-    { name: 'noisy input x[n]', type: 'line', x: t, y: slice(r.x), muted: true },
-    { name: 'clean signal s[n]', type: 'line', x: t, y: slice(r.s), slot: 0, dashed: true },
-    { name: 'Wiener output y[n]', type: 'line', x: t, y: slice(r.y), slot: 1 },
-  ]
-  const response: XYSeries[] = [
-    { name: 'noncausal Wiener gain', type: 'line', x: r.omega, y: r.ideal.map((v) => db(v)), slot: 2, dashed: true },
+  const timeSeries = [
+    { name: 'noisy input x[n]', x: t, y: slice(r.x), muted: true },
+    { name: 'clean signal s[n]', x: t, y: slice(r.s), slot: 0, dashed: true },
+    { name: 'Wiener output y[n]', x: t, y: slice(r.y), slot: 1 },
+  ] as const
+  const response = [
+    { name: 'noncausal Wiener gain', x: r.omega, y: r.ideal.map((v) => db(v)), slot: 2, dashed: true },
     {
-      name: `FIR Wiener filter, ${taps.value} taps`,
-      type: 'line',
+      name: `FIR Wiener filter, ${state.taps} taps`,
       x: r.omega,
       y: r.magnitude.map((v) => db(v)),
       slot: 1,
     },
-  ]
+  ] as const
 
+  const xAxis = useAxis({ label: 'n', hold: 'union' })
+  const yAxis = useAxis({ label: 'amplitude', hold: 'union' })
+  const xAxis2 = useAxis({ label: 'ω (rad/sample)', range: [0, Math.PI] })
+  const yAxis2 = useAxis({ label: 'gain (dB)', range: [-40, 5] })
   return (
-    <Interactive
+    <Figure
       title="Wiener filtering an AR(1) signal in white noise"
+      state={state}
       caption="The signal is s[n] = a s[n−1] + w[n] with unit-variance white w; the observation adds white noise at the chosen SNR. The FIR Wiener taps solve the Wiener–Hopf equations R w = p using the model's exact correlations. Left: a stretch of the clean, noisy and filtered signals. Right: the filter's magnitude response against the ideal noncausal gain S_s/(S_s + S_v), which passes frequencies where the signal dominates the noise. More taps, a stronger pole or a higher SNR all lower the error."
-      controls={
-        <>
-          <ParamSlider label="AR pole a" param={pole} />
-          <ParamSlider label="SNR (dB)" param={snr} />
-          <ParamSlider label="filter taps M" param={taps} withArrows />
-          <ParamSlider label="seed" param={seed} withArrows />
-        </>
-      }
-      readout={
+
+      readouts={
         <>
           <Readout label="σ_s², σ_v²" value={`${formatNumber(r.varS)}, ${formatNumber(r.varV)}`} />
           <Readout label="theoretical MSE" value={formatNumber(r.mse)} />
@@ -102,16 +108,16 @@ export function WienerDenoising() {
       }
     >
       <div className="grid gap-4 lg:grid-cols-2">
-        <XYChart series={timeSeries} xLabel="n" yLabel="amplitude" height={300} />
-        <XYChart
-          series={response}
-          xLabel="ω (rad/sample)"
-          yLabel="gain (dB)"
-          xRange={[0, Math.PI]}
-          yRange={[-40, 5]}
-          height={300}
-        />
+        <Plot x={xAxis} y={yAxis} height={300}>
+          <Curve {...timeSeries[0]} />
+          <Curve {...timeSeries[1]} />
+          <Curve {...timeSeries[2]} />
+        </Plot>
+        <Plot x={xAxis2} y={yAxis2} height={300}>
+          <Curve {...response[0]} />
+          <Curve {...response[1]} />
+        </Plot>
       </div>
-    </Interactive>
+    </Figure>
   )
 }

@@ -1,7 +1,5 @@
-import { Diagram } from 'aifn-render'
-import { link, variable } from 'aifn-render'
+import { Diagram, Figure, link, variable } from 'aifn-render'
 import type { DiagramEdge, DiagramNode, DiagramSpec } from 'aifn-render'
-import { Interactive } from 'aifn-render'
 
 /* ----------------------------------------------------------------------------------------------------------------- */
 /* The progression of ideas                                                                                           */
@@ -65,7 +63,7 @@ const progression: DiagramSpec = {
 
 export function ProgressionDiagram() {
   return (
-    <Interactive
+    <Figure
       title="From spins to Boltzmann machines and attention"
       caption="Top row: the statistical physics of interacting spins. Middle row: networks that store memories as energy minima. Bottom row: networks that learn a probability distribution. An arrow means that the later idea uses the earlier one. The 2024 Nobel Prize in Physics cited the Hopfield network and the Boltzmann machine."
     >
@@ -73,7 +71,7 @@ export function ProgressionDiagram() {
         spec={progression}
         ariaLabel="Timeline: Ising model 1925 leads to Monte Carlo dynamics and spin glasses; spin glasses and Hebb's rule lead to the Hopfield network 1982; Hopfield network and simulated annealing lead to the Boltzmann machine 1985, then the RBM 1986, contrastive divergence 2002 and deep belief nets 2006; the Hopfield network's capacity analysis 1985 leads to dense associative memory 2016 and Hopfield layers as attention 2020"
       />
-    </Interactive>
+    </Figure>
   )
 }
 
@@ -100,7 +98,7 @@ const triangle: DiagramSpec = {
 
 export function FrustratedTriangle() {
   return (
-    <Interactive
+    <Figure
       title="A frustrated triangle"
       caption="Three spins joined by antiferromagnetic couplings J = −1, each of which prefers its two spins to differ. Once s₁ and s₂ differ, s₃ equals one of them whichever sign it takes, so one bond is always unsatisfied. Six of the eight states tie for the lowest energy, −1."
     >
@@ -108,7 +106,7 @@ export function FrustratedTriangle() {
         spec={triangle}
         ariaLabel="Triangle of three spins with antiferromagnetic couplings; the third spin cannot satisfy both of its bonds"
       />
-    </Interactive>
+    </Figure>
   )
 }
 
@@ -166,7 +164,7 @@ const architectures: DiagramSpec = {
 
 export function BoltzmannArchitectures() {
   return (
-    <Interactive
+    <Figure
       title="General and restricted Boltzmann machines"
       caption="Shaded circles are visible units, which the data clamp; open circles are hidden units. Every line is a symmetric weight. A general Boltzmann machine may connect any pair of units. A restricted Boltzmann machine connects only visible to hidden, so the units of one layer are conditionally independent given the other."
     >
@@ -174,7 +172,7 @@ export function BoltzmannArchitectures() {
         spec={architectures}
         ariaLabel="Left: three visible and two hidden units with every pair connected. Right: four visible and three hidden units with connections only between the layers"
       />
-    </Interactive>
+    </Figure>
   )
 }
 
@@ -215,7 +213,7 @@ const dbnSpec: DiagramSpec = { unit: 40, nodes: dbn.nodes, edges: dbn.edges }
 
 export function DeepBeliefNetDiagram() {
   return (
-    <Interactive
+    <Figure
       title="A deep belief net built from three RBMs"
       caption="Each RBM is trained on the hidden activities of the one below it. In the finished model the top two layers remain an undirected RBM; every lower layer of weights becomes a directed generative connection pointing down, towards the data. Recognition runs the same weights upwards."
     >
@@ -223,6 +221,6 @@ export function DeepBeliefNetDiagram() {
         spec={dbnSpec}
         ariaLabel="Four layers: visible units at the bottom, then three hidden layers. The top two hidden layers are joined by undirected edges; lower layers by arrows pointing down"
       />
-    </Interactive>
+    </Figure>
   )
 }

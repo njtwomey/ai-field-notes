@@ -1,5 +1,5 @@
 /**
- * `aifn-applied/unsupervised/embedding/neighbour`: neighbour embeddings: t-SNE, UMAP and PaCMAP (approximate k-nearest neighbours
+ * `aifn-methods/unsupervised/embedding/neighbour`: neighbour embeddings: t-SNE, UMAP and PaCMAP (approximate k-nearest neighbours
  * by nearest-neighbour descent come from `aifn/numerics/neighbours`).
  */
 

@@ -1,15 +1,20 @@
-import { useMemo, useState } from 'react'
+import { useMemo } from 'react'
 import {
-  Interactive,
-  ParamChoice,
-  ParamSlider,
-  ParamSwitch,
-  Readout,
-  XYChart,
+  choice,
+  Figure,
   formatNumber,
-  useParam,
-  type Handle,
-  type XYSeries,
+  Handle,
+  int,
+  Plot,
+  Points,
+  Readout,
+  Segments,
+  seriesLayers,
+  type SeriesSpec,
+  setting,
+  slider,
+  useAxis,
+  useFigureState,
 } from 'aifn-render'
 import { emd, findExtrema, RILLING, rillingStats, sdCriterion, sift, type StopRule } from '../_shared/emd'
 
@@ -37,7 +42,7 @@ function makeSignal(f1: number, a1: number, f2: number, a2: number, burst: boole
   return { x, parts: [fast, slow, trend] }
 }
 
-const line = (name: string, y: ArrayLike<number>, extra: Partial<XYSeries> = {}): XYSeries => ({
+const line = (name: string, y: ArrayLike<number>, extra: Partial<SeriesSpec> = {}): SeriesSpec => ({
   name,
   type: 'line',
   x: TIME,
@@ -45,38 +50,69 @@ const line = (name: string, y: ArrayLike<number>, extra: Partial<XYSeries> = {})
   ...extra,
 })
 
+/** One component of the decomposition on its own small chart. */
+function PartPlot({ name, y, emphasis }: { name: string; y: ArrayLike<number>; emphasis: boolean }) {
+  const xAxis = useAxis({ range: [0, N - 1] })
+  const yAxis = useAxis({ hold: 'union' })
+  const series = useMemo(() => [line(name, y, emphasis ? { emphasis: true } : { slot: 0 })], [name, y, emphasis])
+  return (
+    <Plot x={xAxis} y={yAxis} height={150}>
+      {seriesLayers(series)}
+    </Plot>
+  )
+}
+
 /**
  * Step through the sifting of one IMF: extrema, cubic-spline envelopes through them, their mean, and the candidate
  * IMF left after subtracting it. The tones' frequencies and amplitudes are handles on a line spectrum.
  */
 export function SiftingExplorer() {
-  const f1 = useParam(0.06, { min: 0.005, max: 0.15, step: 0.001 })
-  const a1 = useParam(1, { min: 0.1, max: 1.5, step: 0.01 })
-  const f2 = useParam(0.015, { min: 0.005, max: 0.15, step: 0.001 })
-  const a2 = useParam(0.8, { min: 0.1, max: 1.5, step: 0.01 })
-  const step = useParam(1, { min: 1, max: SIFTS, step: 1 })
-  const [which, setWhich] = useState<'0' | '1' | '2'>('0')
-  const [ruleName, setRuleName] = useState<RuleName>('sd')
-  const [mirror, setMirror] = useState(true)
-  const [burst, setBurst] = useState(false)
+  const state = useFigureState({
+    step: int(1, { min: 1, max: SIFTS, step: 1, label: 'sift', format: (v) => `${v}` }),
+    which: choice<'0' | '1' | '2'>(
+      [
+        { value: '0', label: 'IMF 1' },
+        { value: '1', label: 'IMF 2' },
+        { value: '2', label: 'IMF 3' },
+      ],
+      '0',
+      { label: 'sifting for' },
+    ),
+    ruleName: choice<RuleName>(
+      [
+        { value: 'sd', label: 'SD' },
+        { value: 'snumber', label: 'S-number' },
+        { value: 'rilling', label: 'Rilling' },
+        { value: 'fixed', label: 'fixed' },
+      ],
+      'sd',
+      { label: 'stopping rule' },
+    ),
+    mirror: setting(true, 'mirror extrema at the ends'),
+    burst: setting(false, 'faster tone as a burst'),
+    f1: slider(0.005, 0.15, 0.06, { step: 0.001, onChart: true }),
+    a1: slider(0.1, 1.5, 1, { step: 0.01, onChart: true }),
+    f2: slider(0.005, 0.15, 0.015, { step: 0.001, onChart: true }),
+    a2: slider(0.1, 1.5, 0.8, { step: 0.01, onChart: true }),
+  })
 
   const signal = useMemo(
-    () => makeSignal(f1.value, a1.value, f2.value, a2.value, burst),
-    [f1.value, a1.value, f2.value, a2.value, burst],
+    () => makeSignal(state.f1, state.a1, state.f2, state.a2, state.burst),
+    [state.f1, state.a1, state.f2, state.a2, state.burst],
   )
 
   const result = useMemo(() => {
-    const rule = RULES[ruleName]
-    const d = emd(signal.x, { rule, mirror, maxImfs: 5 })
+    const rule = RULES[state.ruleName]
+    const d = emd(signal.x, { rule, mirror: state.mirror, maxImfs: 5 })
     // The signal the chosen IMF is sifted from: x minus the IMFs before it.
-    const j = Math.min(Number(which), d.imfs.length)
+    const j = Math.min(Number(state.which), d.imfs.length)
     const start = Float64Array.from(signal.x, (v, i) => v - d.imfs.slice(0, j).reduce((s, c) => s + c[i], 0))
-    const shown = sift(start, { kind: 'fixed', sifts: SIFTS }, mirror)
-    const stopsAt = sift(start, rule, mirror).steps.length
+    const shown = sift(start, { kind: 'fixed', sifts: SIFTS }, state.mirror)
+    const stopsAt = sift(start, rule, state.mirror).steps.length
     return { d, j, steps: shown.steps, stopsAt }
-  }, [signal, ruleName, mirror, which])
+  }, [signal, state.ruleName, state.mirror, state.which])
 
-  const k = Math.min(step.value, result.steps.length)
+  const k = Math.min(state.step, result.steps.length)
   const s = k > 0 ? result.steps[k - 1] : null
 
   const readout = useMemo(() => {
@@ -93,7 +129,7 @@ export function SiftingExplorer() {
     }
   }, [s, result.steps, k])
 
-  const siftSeries: XYSeries[] = s
+  const siftSeries: SeriesSpec[] = s
     ? [
         line('h (being sifted)', s.h, { slot: 0 }),
         line('upper envelope', s.upper, { slot: 1 }),
@@ -105,60 +141,36 @@ export function SiftingExplorer() {
     : []
 
   const truth = result.j < 2 ? signal.parts[result.j] : null
-  const candidateSeries: XYSeries[] = s
+  const candidateSeries: SeriesSpec[] = s
     ? [
         ...(truth ? [line(result.j === 0 ? 'faster tone' : 'slower tone', truth, { muted: true, dashed: true })] : []),
         line(`candidate IMF after sift ${k}`, s.next, { slot: 0 }),
       ]
     : []
 
-  const spectrum: XYSeries[] = [
-    { name: 'faster tone', type: 'scatter', x: [f1.value], y: [a1.value], slot: 0 },
-    { name: 'slower tone', type: 'scatter', x: [f2.value], y: [a2.value], slot: 0 },
-  ]
-  const handles: Handle[] = [
-    { kind: 'point', at: [f1.value, a1.value], onDrag: ([f, a]) => (f1.set(f), a1.set(a)), label: 'tone 1' },
-    { kind: 'point', at: [f2.value, a2.value], onDrag: ([f, a]) => (f2.set(f), a2.set(a)), label: 'tone 2' },
-  ]
+  const spectrum = [
+    { name: 'faster tone', x: [state.f1], y: [state.a1], slot: 0 },
+    { name: 'slower tone', x: [state.f2], y: [state.a2], slot: 0 },
+  ] as const
 
   const parts = [
     ...result.d.imfs.map((c, i) => ({ name: `IMF ${i + 1}`, y: c })),
     { name: 'residue', y: result.d.residue },
   ]
 
+  const xAxis = useAxis({ label: 'frequency (cycles/sample)', range: [0, 0.15] })
+  const yAxis = useAxis({ label: 'amplitude', range: [0, 1.5] })
+  const xAxis2 = useAxis({ label: 'sample', range: [0, N - 1] })
+  const yAxis2 = useAxis({ hold: 'union' })
+  const xAxis3 = useAxis({ range: [0, N - 1] })
+  const yAxis3 = useAxis({ hold: 'union' })
   return (
-    <Interactive
+    <Figure
       title="Sifting, one step at a time"
+      state={state}
       caption="Drag the two tones on the line spectrum to set their frequencies (cycles per sample) and amplitudes; a slow linear trend is always added. Step through the sifts: the top panel shows the signal being sifted, its maxima and minima, the not-a-knot cubic-spline envelopes through them, and their mean (black). The middle panel shows what is left after the mean is subtracted, against the true component. The bottom panels show the full decomposition under the chosen stopping rule. Stopping rules: SD below 0.2, S-number 4, Rilling's thresholds, or a fixed 10 sifts. Switch off mirroring to see the envelopes swing at the ends, turn on the burst to see mode mixing, and bring the tones within a frequency ratio of about 0.7 to see them extracted as one IMF."
-      controls={
-        <>
-          <ParamSlider label="sift" param={step} withArrows format={(v) => `${v}`} />
-          <ParamChoice
-            label="sifting for"
-            value={which}
-            onChange={setWhich}
-            options={[
-              { value: '0', label: 'IMF 1' },
-              { value: '1', label: 'IMF 2' },
-              { value: '2', label: 'IMF 3' },
-            ]}
-          />
-          <ParamChoice
-            label="stopping rule"
-            value={ruleName}
-            onChange={setRuleName}
-            options={[
-              { value: 'sd', label: 'SD' },
-              { value: 'snumber', label: 'S-number' },
-              { value: 'rilling', label: 'Rilling' },
-              { value: 'fixed', label: 'fixed' },
-            ]}
-          />
-          <ParamSwitch label="mirror extrema at the ends" checked={mirror} onChange={setMirror} />
-          <ParamSwitch label="faster tone as a burst" checked={burst} onChange={setBurst} />
-        </>
-      }
-      readout={
+
+      readouts={
         readout && (
           <>
             <Readout label="SD this sift" value={formatNumber(readout.sd)} />
@@ -177,43 +189,52 @@ export function SiftingExplorer() {
       <div className="grid gap-4 md:grid-cols-[1fr_2fr]">
         <div className="min-w-0 space-y-1">
           <div className="text-center text-xs text-muted-foreground">line spectrum (drag the tones)</div>
-          <XYChart
-            series={spectrum}
-            segments={[
-              { from: [f1.value, 0], to: [f1.value, a1.value] },
-              { from: [f2.value, 0], to: [f2.value, a2.value] },
-            ]}
-            handles={handles}
-            xRange={[0, 0.15]}
-            yRange={[0, 1.5]}
-            xLabel="frequency (cycles/sample)"
-            yLabel="amplitude"
-            height={260}
-          />
+          <Plot x={xAxis} y={yAxis} height={260}>
+            <Points {...spectrum[0]} />
+            <Points {...spectrum[1]} />
+            <Segments
+              segments={[
+                { from: [state.f1, 0], to: [state.f1, state.a1] },
+                { from: [state.f2, 0], to: [state.f2, state.a2] },
+              ]}
+            />
+            <Handle
+              kind="point"
+              at={[state.f1, state.a1]}
+              onDrag={([f, a]) => (state.set('f1', f), state.set('a1', a))}
+              label="tone 1"
+            />
+            <Handle
+              kind="point"
+              at={[state.f2, state.a2]}
+              onDrag={([f, a]) => (state.set('f2', f), state.set('a2', a))}
+              label="tone 2"
+            />
+          </Plot>
         </div>
         <div className="min-w-0 space-y-1">
           <div className="text-center text-xs text-muted-foreground">
             {s ? `sift ${k} of IMF ${result.j + 1}: extrema, envelopes and their mean` : 'no extrema left to sift'}
           </div>
-          <XYChart series={siftSeries} xLabel="sample" xRange={[0, N - 1]} height={260} />
+          <Plot x={xAxis2} y={yAxis2} height={260}>
+            {seriesLayers(siftSeries)}
+          </Plot>
         </div>
       </div>
       <div className="min-w-0 space-y-1">
         <div className="text-center text-xs text-muted-foreground">candidate IMF: h minus the mean</div>
-        <XYChart series={candidateSeries} xRange={[0, N - 1]} height={170} />
+        <Plot x={xAxis3} y={yAxis3} height={170}>
+          {seriesLayers(candidateSeries)}
+        </Plot>
       </div>
       <div className="grid gap-2 sm:grid-cols-2">
         {parts.map((p, i) => (
           <div key={p.name} className="min-w-0">
             <div className="text-center text-xs text-muted-foreground">{p.name}</div>
-            <XYChart
-              series={[line(p.name, p.y, i === parts.length - 1 ? { emphasis: true } : { slot: 0 })]}
-              xRange={[0, N - 1]}
-              height={150}
-            />
+            <PartPlot name={p.name} y={p.y} emphasis={i === parts.length - 1} />
           </div>
         ))}
       </div>
-    </Interactive>
+    </Figure>
   )
 }

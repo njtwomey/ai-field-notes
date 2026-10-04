@@ -1,16 +1,20 @@
 import { useMemo } from 'react'
 import {
-  Interactive,
-  ParamSlider,
-  Readout,
-  XYChart,
+  Curve,
+  Figure,
+  float,
   formatNumber,
-  useParam,
-  type Handle,
-  type XYSeries,
+  Handle,
+  Plot,
+  Points,
+  Readout,
+  slider,
+  useAxis,
+  useFigureState,
 } from 'aifn-render'
-import { linspace, rng } from '@/lib/math'
-import { incompleteBeta, normalQuantile } from '@/lib/math/special'
+import { linspace, toFlat } from 'aifn/foundation/tensor'
+import { normal, stream } from 'aifn/foundation/random'
+import { normalQuantile, regularisedBeta } from 'aifn/numerics/special'
 
 const R = 3
 const N = 2000
@@ -22,7 +26,7 @@ const blobRadius = (t: number) => 1.7 + 0.35 * Math.cos(3 * t)
 const inA = (x: number, y: number) =>
   Math.hypot(x, y) < blobRadius(Math.atan2(y, x)) && Math.hypot(x - HOLE.x, y - HOLE.y) > HOLE.r
 
-const ANGLES = linspace(0, 2 * Math.PI, 361)
+const ANGLES = toFlat(linspace(0, 2 * Math.PI, 361))
 const BLOB = { x: ANGLES.map((t) => blobRadius(t) * Math.cos(t)), y: ANGLES.map((t) => blobRadius(t) * Math.sin(t)) }
 const HOLE_LINE = {
   x: ANGLES.map((t) => HOLE.x + HOLE.r * Math.cos(t)),
@@ -31,8 +35,8 @@ const HOLE_LINE = {
 
 // Fixed standard normal draws: the same noise for every input, so the estimate moves smoothly under a drag.
 const NOISE = (() => {
-  const g = rng(7)
-  return Array.from({ length: N }, () => [g.normal(), g.normal()] as const)
+  const g = stream(7)
+  return Array.from({ length: N }, () => [normal(g), normal(g)] as const)
 })()
 
 /** One-sided Clopper–Pearson lower bound: the α quantile of Beta(k, n − k + 1). */
@@ -42,7 +46,7 @@ function lowerBound(k: number, n: number, alpha: number) {
   let hi = 1
   for (let i = 0; i < 50; i++) {
     const mid = (lo + hi) / 2
-    if (incompleteBeta(mid, k, n - k + 1) < alpha) lo = mid
+    if (regularisedBeta(k, n - k + 1, mid) < alpha) lo = mid
     else hi = mid
   }
   return lo
@@ -56,19 +60,21 @@ function boundaryDistance(x: number, y: number) {
 }
 
 export function SmoothingCertificate() {
-  const sigma = useParam(0.5, { min: 0.1, max: 1.2, step: 0.01 })
-  const px = useParam(0.35, { min: -R, max: R, step: 0.01 })
-  const py = useParam(0.1, { min: -R, max: R, step: 0.01 })
+  const state = useFigureState({
+    sigma: float(0.5, { min: 0.1, max: 1.2, step: 0.01, label: 'noise σ' }),
+    px: slider(-R, R, 0.35, { step: 0.01, onChart: true }),
+    py: slider(-R, R, 0.1, { step: 0.01, onChart: true }),
+  })
 
   const est = useMemo(() => {
-    const s = sigma.value
+    const s = state.sigma
     const zx: number[] = []
     const zy: number[] = []
     const cls: number[] = []
     let countA = 0
     NOISE.forEach(([a, b], i) => {
-      const x = px.value + s * a
-      const y = py.value + s * b
+      const x = state.px + s * a
+      const y = state.py + s * b
       const isA = inA(x, y)
       if (isA) countA++
       if (i < SHOWN) {
@@ -82,64 +88,67 @@ export function SmoothingCertificate() {
     const pLower = lowerBound(k, N, ALPHA)
     const radius = pLower > 0.5 ? s * normalQuantile(pLower) : 0
     return { zx, zy, cls, topIsA, pHat: k / N, pLower, radius }
-  }, [sigma.value, px.value, py.value])
+  }, [state.sigma, state.px, state.py])
 
   const circle = {
-    x: ANGLES.map((t) => px.value + est.radius * Math.cos(t)),
-    y: ANGLES.map((t) => py.value + est.radius * Math.sin(t)),
+    x: ANGLES.map((t) => state.px + est.radius * Math.cos(t)),
+    y: ANGLES.map((t) => state.py + est.radius * Math.sin(t)),
   }
-  const series: XYSeries[] = [
+  const series = [
     {
       name: 'noisy copies',
-      type: 'scatter',
       x: est.zx,
       y: est.zy,
       group: est.cls,
       groupNames: ['f = A', 'f = B'],
     },
-    { name: 'base boundary', type: 'line', x: BLOB.x, y: BLOB.y, emphasis: true },
-    { name: 'pocket of class B', type: 'line', x: HOLE_LINE.x, y: HOLE_LINE.y, emphasis: true },
-    { name: 'certified radius', type: 'line', x: circle.x, y: circle.y, slot: 2 },
-  ]
-  const handles: Handle[] = [
-    {
-      kind: 'point',
-      at: [px.value, py.value],
-      label: 'input',
-      onDrag: ([x, y]) => {
-        px.set(x)
-        py.set(y)
-      },
-    },
-  ]
+    { name: 'base boundary', x: BLOB.x, y: BLOB.y, emphasis: true },
+    { name: 'pocket of class B', x: HOLE_LINE.x, y: HOLE_LINE.y, emphasis: true },
+    { name: 'certified radius', x: circle.x, y: circle.y, slot: 2 },
+  ] as const
 
+  const xAxis = useAxis({ label: 'x₁', range: [-R, R] })
+  const yAxis = useAxis({ label: 'x₂', range: [-R, R], equal: xAxis })
   return (
-    <Interactive
+    <Figure
       title="Randomised smoothing certificate"
+      purpose="Drag the input and change the noise σ to see the certified radius that randomised smoothing gives at that point."
+      state={state}
       caption={`The base classifier f says A inside the three-lobed curve, except in the small circular pocket, and B elsewhere. Drag the input. The smoothed classifier g votes over ${N} copies of the input with Gaussian noise of standard deviation σ (${SHOWN} shown, shaped by f's label). The circle is the certified ℓ₂ radius σΦ⁻¹(p_A), with p_A the one-sided Clopper–Pearson lower bound at α = ${ALPHA}. Near the pocket f can be flipped by a tiny perturbation, but g cannot: its certificate covers the pocket when σ is large enough. Larger σ certifies larger radii far from the boundary and loses accuracy near it.`}
-      controls={<ParamSlider label="noise σ" param={sigma} />}
-      readout={
+
+      readouts={
         <>
           <Readout label="smoothed prediction" value={est.pLower > 0.5 ? (est.topIsA ? 'A' : 'B') : 'abstain'} />
           <Readout label="vote share of top class" value={formatNumber(est.pHat)} />
           <Readout label="lower bound p_A" value={formatNumber(est.pLower)} />
           <Readout label="certified radius" value={formatNumber(est.radius)} />
-          <Readout label="distance to f's boundary" value={formatNumber(boundaryDistance(px.value, py.value))} />
+          <Readout label="distance to f's boundary" value={formatNumber(boundaryDistance(state.px, state.py))} />
         </>
       }
     >
       <div className="mx-auto w-full max-w-md">
-        <XYChart
-          series={series}
-          handles={handles}
-          xRange={[-R, R]}
-          yRange={[-R, R]}
-          equalAspect
-          xLabel="x₁"
-          yLabel="x₂"
-          ariaLabel="A base classifier's regions, Gaussian noise samples around an input and the certified radius of the smoothed classifier"
-        />
+        <Plot
+          x={xAxis}
+          y={yAxis}
+          ariaLabel={
+            "A base classifier's regions, Gaussian noise samples around an input and the certified radius of the smoothed classifier"
+          }
+        >
+          <Points {...series[0]} />
+          <Curve {...series[1]} />
+          <Curve {...series[2]} />
+          <Curve {...series[3]} />
+          <Handle
+            kind="point"
+            at={[state.px, state.py]}
+            label="input"
+            onDrag={([x, y]) => {
+              state.set('px', x)
+              state.set('py', y)
+            }}
+          />
+        </Plot>
       </div>
-    </Interactive>
+    </Figure>
   )
 }

@@ -1,13 +1,16 @@
 import { useMemo, useState } from 'react'
 import {
-  Interactive,
-  ParamSlider,
-  Readout,
-  XYChart,
+  Figure,
+  float,
   formatNumber,
-  useParam,
-  type Handle,
-  type XYSeries,
+  Handle,
+  int,
+  Plot,
+  Readout,
+  seriesLayers,
+  type SeriesSpec,
+  useAxis,
+  useFigureState,
 } from 'aifn-render'
 import { TS_DEFAULTS, eloExpectedGaussian, simulateGames, trueSkill1v1, type Rating } from '../_shared/skill'
 
@@ -44,14 +47,16 @@ function misordered(est: number[], truth: number[]): number {
 
 export function SkillRace() {
   const [skills, setSkills] = useState([33, 28, 24, 19])
-  const K = useParam(1.5, { min: 0.1, max: 6, step: 0.1 })
-  const beta = useParam(TS_DEFAULTS.beta, { min: 1, max: 12, step: 0.1 })
-  const tau = useParam(TS_DEFAULTS.tau, { min: 0, max: 2, step: 0.01 })
-  const shown = useParam(N_GAMES, { min: 0, max: N_GAMES, step: 1 })
-  const seed = useParam(3, { min: 1, max: 30, step: 1 })
+  const state = useFigureState({
+    shown: float(N_GAMES, { min: 0, max: N_GAMES, step: 1, label: 'games played', format: (v) => String(v) }),
+    K: float(1.5, { min: 0.1, max: 6, step: 0.1, label: 'Elo K (skill units per game)' }),
+    beta: float(TS_DEFAULTS.beta, { min: 1, max: 12, step: 0.1, label: 'assumed performance noise β' }),
+    tau: float(TS_DEFAULTS.tau, { min: 0, max: 2, step: 0.01, label: 'TrueSkill dynamics τ' }),
+    seed: int(3, { min: 1, max: 30, step: 1, label: 'seed', format: (v) => String(v) }),
+  })
 
   const run = useMemo(() => {
-    const games = simulateGames(skills, N_GAMES, TRUE_BETA, seed.value)
+    const games = simulateGames(skills, N_GAMES, TRUE_BETA, state.seed)
     const m = skills.length
     const elo = Array.from({ length: m }, () => [TS_DEFAULTS.mu])
     const mu = Array.from({ length: m }, () => [TS_DEFAULTS.mu])
@@ -59,10 +64,10 @@ export function SkillRace() {
     const r = Array(m).fill(TS_DEFAULTS.mu)
     const ts: Rating[] = Array.from({ length: m }, () => ({ mu: TS_DEFAULTS.mu, sigma: TS_DEFAULTS.sigma }))
     for (const { i, j, y } of games) {
-      const step = K.value * (y - eloExpectedGaussian(r[i], r[j], beta.value))
+      const step = state.K * (y - eloExpectedGaussian(r[i], r[j], state.beta))
       r[i] += step
       r[j] -= step
-      const u = trueSkill1v1(ts[i], ts[j], y ? 'win' : 'loss', { beta: beta.value, tau: tau.value, eps: 0 })
+      const u = trueSkill1v1(ts[i], ts[j], y ? 'win' : 'loss', { beta: state.beta, tau: state.tau, eps: 0 })
       ts[i] = u.p1
       ts[j] = u.p2
       for (let p = 0; p < m; p++) {
@@ -72,13 +77,13 @@ export function SkillRace() {
       }
     }
     return { elo, mu, sd, eloSettled: settledAt(elo, skills), tsSettled: settledAt(mu, skills) }
-  }, [skills, K.value, beta.value, tau.value, seed.value])
+  }, [skills, state.K, state.beta, state.tau, state.seed])
 
-  const g = shown.value
+  const g = state.shown
   const xs = useMemo(() => Array.from({ length: g + 1 }, (_, k) => k), [g])
 
   // One grouped scatter: each true skill takes its player's colour and a distinct marker shape.
-  const truthMarkers = useMemo<XYSeries[]>(
+  const truthMarkers = useMemo<SeriesSpec[]>(
     () => [
       {
         name: 'true skill',
@@ -92,11 +97,11 @@ export function SkillRace() {
     [skills],
   )
 
-  const eloSeries = useMemo<XYSeries[]>(
+  const eloSeries = useMemo<SeriesSpec[]>(
     () => [
-      ...NAMES.map<XYSeries>((name, p) => ({ name, type: 'line', x: xs, y: run.elo[p].slice(0, g + 1), slot: p })),
+      ...NAMES.map<SeriesSpec>((name, p) => ({ name, type: 'line', x: xs, y: run.elo[p].slice(0, g + 1), slot: p })),
       // True skills as dashed levels across the whole chart; each is also a drag handle.
-      ...NAMES.map<XYSeries>((name, p) => ({
+      ...NAMES.map<SeriesSpec>((name, p) => ({
         name,
         type: 'line',
         x: [0, N_GAMES],
@@ -107,9 +112,9 @@ export function SkillRace() {
     ],
     [run, xs, g, skills],
   )
-  const tsSeries = useMemo<XYSeries[]>(
+  const tsSeries = useMemo<SeriesSpec[]>(
     () => [
-      ...NAMES.flatMap<XYSeries>((name, p) => {
+      ...NAMES.flatMap<SeriesSpec>((name, p) => {
         const m = run.mu[p].slice(0, g + 1)
         const s = run.sd[p].slice(0, g + 1)
         return [
@@ -135,22 +140,19 @@ export function SkillRace() {
   const muNow = run.mu.map((e) => e[g])
   const games = (s: number | null) => (s === null ? `not within ${N_GAMES}` : String(s))
   // One unit of skill in logistic Elo points: Φ(x/(√2β)) ≈ σ(1.702 x/(√2β)) and Elo's logistic scale is 400/ln 10.
-  const eloPoints = (K.value * (400 / Math.LN10) * 1.702) / (Math.SQRT2 * beta.value)
+  const eloPoints = (state.K * (400 / Math.LN10) * 1.702) / (Math.SQRT2 * state.beta)
 
+  const xAxis = useAxis({ label: 'game', range: X_RANGE })
+  const yAxis = useAxis({ label: 'rating', range: Y_RANGE })
+  const xAxis2 = useAxis({ label: 'game', range: X_RANGE })
+  const yAxis2 = useAxis({ label: 'skill', range: Y_RANGE })
   return (
-    <Interactive
+    <Figure
       title="Elo against TrueSkill on the same match stream"
+      state={state}
       caption="Four players with fixed true skills (the dashed levels in the top chart, which you can drag up and down, and the markers on the right of the bottom chart) play random pairings. Each game is decided by the Thurstone model with performance noise 25/6. Elo (top) keeps one number per player and moves it by K times the surprise. TrueSkill (bottom) keeps a mean and a standard deviation; the dashed lines are μ ± σ. Early on, TrueSkill's large σ makes big steps, and the steps shrink as σ narrows. A large K makes Elo fast but noisy; a small K makes it smooth but slow. τ stops σ from shrinking to zero."
-      controls={
-        <>
-          <ParamSlider label="games played" param={shown} format={(v) => String(v)} withArrows />
-          <ParamSlider label="Elo K (skill units per game)" param={K} />
-          <ParamSlider label="assumed performance noise β" param={beta} />
-          <ParamSlider label="TrueSkill dynamics τ" param={tau} />
-          <ParamSlider label="seed" param={seed} format={(v) => String(v)} withArrows />
-        </>
-      }
-      readout={
+
+      readouts={
         <>
           <Readout label="Elo: order right from game" value={games(run.eloSettled)} />
           <Readout label="TrueSkill: order right from game" value={games(run.tsSettled)} />
@@ -164,18 +166,17 @@ export function SkillRace() {
     >
       <div className="space-y-2">
         <p className="text-xs text-muted-foreground">Elo rating</p>
-        <XYChart
-          series={eloSeries}
-          xLabel="game"
-          yLabel="rating"
-          xRange={X_RANGE}
-          yRange={Y_RANGE}
-          height={240}
-          handles={handles}
-        />
+        <Plot x={xAxis} y={yAxis} height={240}>
+          {seriesLayers(eloSeries)}
+          {(handles ?? []).map((h, i) => (
+            <Handle key={i} {...h} />
+          ))}
+        </Plot>
         <p className="text-xs text-muted-foreground">TrueSkill mean μ with μ ± σ</p>
-        <XYChart series={tsSeries} xLabel="game" yLabel="skill" xRange={X_RANGE} yRange={Y_RANGE} height={280} />
+        <Plot x={xAxis2} y={yAxis2} height={280}>
+          {seriesLayers(tsSeries)}
+        </Plot>
       </div>
-    </Interactive>
+    </Figure>
   )
 }

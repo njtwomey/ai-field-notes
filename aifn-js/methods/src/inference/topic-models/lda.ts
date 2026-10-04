@@ -1,5 +1,5 @@
 /**
- * Latent Dirichlet allocation (Blei, Ng and Jordan, 2003, JMLR 3), part of `aifn-applied/inference/topic-models`: the
+ * Latent Dirichlet allocation (Blei, Ng and Jordan, 2003, JMLR 3), part of `aifn-methods/inference/topic-models`: the
  * model in the model language (a structured graph with the topic, document and word plates as groups), its match,
  * collapsed Gibbs sampling (Griffiths and Steyvers, 2004, PNAS 101), and the engine to pass to
  * `aifn/inference/engines`' `infer`.

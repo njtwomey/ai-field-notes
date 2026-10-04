@@ -1,7 +1,5 @@
-import { Diagram } from 'aifn-render'
-import { factor, link, variable } from 'aifn-render'
+import { Diagram, factor, Figure, link, variable } from 'aifn-render'
 import type { DiagramNode, DiagramSpec } from 'aifn-render'
-import { Interactive } from 'aifn-render'
 
 const PLAYERS = [0, 1, 2, 3]
 const px = (i: number) => i * 1.6
@@ -86,7 +84,7 @@ const SPEC: DiagramSpec = {
 /** The TrueSkill factor graph of one game between two teams of two players, in which team 1 wins. */
 export function TrueSkillFactorGraph() {
   return (
-    <Interactive
+    <Figure
       title="The TrueSkill factor graph of one team game"
       caption="Circles are variables and squares are factors. Each row of factors adds one assumption: a Gaussian belief about each skill, a noisy performance around each skill, team performance as the sum of its players' performances, the difference between the teams, and the observed outcome as a constraint on the sign of that difference. Every factor except the last is Gaussian or linear."
     >
@@ -94,6 +92,6 @@ export function TrueSkillFactorGraph() {
         spec={SPEC}
         ariaLabel="TrueSkill factor graph: skills, performances, team sums, difference and outcome"
       />
-    </Interactive>
+    </Figure>
   )
 }

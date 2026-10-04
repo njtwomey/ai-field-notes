@@ -189,18 +189,9 @@ export function getGlobalMathMacros(): Record<string, string> {
 export const RenderMathContext = createContext<Record<string, string> | undefined>(undefined)
 
 /** Provider to supply or override mathematical macros for a subtree. */
-export function RenderMathProvider({
-  macros,
-  children,
-}: {
-  macros?: Record<string, string>
-  children: ReactNode
-}) {
+export function RenderMathProvider({ macros, children }: { macros?: Record<string, string>; children: ReactNode }) {
   const parentMacros = useContext(RenderMathContext)
-  const merged = useMemo(
-    () => ({ ...(parentMacros ?? {}), ...(macros ?? {}) }),
-    [parentMacros, macros],
-  )
+  const merged = useMemo(() => ({ ...(parentMacros ?? {}), ...(macros ?? {}) }), [parentMacros, macros])
   return <RenderMathContext.Provider value={merged}>{children}</RenderMathContext.Provider>
 }
 
@@ -217,10 +208,7 @@ const katexCache = new Map<string, string>()
 /**
  * Render LaTeX using KaTeX with effective mathematical macros and caching.
  */
-export function renderKatex(
-  tex: string,
-  options?: katex.KatexOptions & { macros?: Record<string, string> },
-): string {
+export function renderKatex(tex: string, options?: katex.KatexOptions & { macros?: Record<string, string> }): string {
   const display = options?.displayMode ?? false
   const effectiveMacros = options?.macros ?? globalMacros
   const hasCustomMacros = !!options?.macros

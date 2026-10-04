@@ -1,4 +1,4 @@
-/** The registry of `aifn-applied/learning/transfer`. */
+/** The registry of `aifn-methods/learning/transfer`. */
 
 import { definer, entries, type Entry, type FunctionInfo } from 'aifn/foundation/registry'
 import * as adaptation from './adaptation'

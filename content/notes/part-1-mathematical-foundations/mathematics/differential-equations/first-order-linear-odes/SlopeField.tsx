@@ -1,13 +1,18 @@
 import { useMemo, useState } from 'react'
 import {
-  Interactive,
-  ParamChoice,
-  ParamSlider,
-  Readout,
-  XYChart,
+  choice,
+  Figure,
+  float,
   formatNumber,
-  type Handle,
-  type XYSeries,
+  Handle,
+  Plot,
+  Readout,
+  Segments,
+  seriesLayers,
+  type SeriesSpec,
+  useAxis,
+  useFigureState,
+  when,
 } from 'aifn-render'
 import { directionField, integrate } from '../_shared/ode'
 
@@ -53,18 +58,27 @@ function rate(eq: Eq, a: number): (t: number, x: number) => number {
 
 /** Slope field of a first-order ODE with two draggable initial conditions and the solution through each. */
 export function SlopeField() {
-  const [eq, setEq] = useState<Eq>('linear')
-  const [a, setA] = useState(-0.8)
-  const [starts, setStarts] = useState<[Pt, Pt]>(SPEC.linear.starts)
+  const state = useFigureState({
+    eq: choice<Eq>(
+      (Object.keys(SPEC) as Eq[]).map((k) => ({ value: k, label: SPEC[k].label })),
+      'linear',
+      { label: 'equation' },
+    ),
+    a: float(-0.8, { min: -1.5, max: 1.5, step: 0.1, label: 'rate a', when: when('eq', 'linear') }),
+  })
+  const eq = state.eq
+  // Dragged starts belong to the equation they were dragged on; another equation opens at its own defaults.
+  const [picked, setPicked] = useState<{ eq: Eq; starts: [Pt, Pt] }>({ eq: 'linear', starts: SPEC.linear.starts })
+  const starts = picked.eq === eq ? picked.starts : SPEC[eq].starts
   const spec = SPEC[eq]
 
   const field = useMemo(() => {
-    const g = rate(eq, a)
+    const g = rate(eq, state.a)
     return directionField((t, x) => [1, g(t, x)], SPEC[eq].t, SPEC[eq].x, 22, 14, { arrows: false })
-  }, [eq, a])
+  }, [eq, state.a])
 
   const curves = useMemo(() => {
-    const g = rate(eq, a)
+    const g = rate(eq, state.a)
     const f = (t: number, x: number[]) => [g(t, x[0])]
     const spec = SPEC[eq]
     return starts.map(([t0, x0]) => {
@@ -75,9 +89,9 @@ export function SlopeField() {
       const complete = fwd.ts[fwd.ts.length - 1] >= spec.t[1] - 1e-9
       return { ts, xs, end: complete ? fwd.xs[fwd.xs.length - 1][0] : NaN }
     })
-  }, [eq, a, starts])
+  }, [eq, state.a, starts])
 
-  const series = useMemo<XYSeries[]>(
+  const series = useMemo<SeriesSpec[]>(
     () => [
       ...curves.map((c, i) => ({ name: `solution ${i + 1}`, type: 'line' as const, x: c.ts, y: c.xs, slot: i })),
       {
@@ -98,37 +112,25 @@ export function SlopeField() {
         at: s,
         label: `start ${i + 1}`,
         onDrag: ([t, x]) =>
-          setStarts((prev) => {
-            const next: [Pt, Pt] = [prev[0], prev[1]]
+          setPicked((prev) => {
+            const base = prev.eq === eq ? prev.starts : SPEC[eq].starts
+            const next: [Pt, Pt] = [base[0], base[1]]
             const clamp = (v: number, [lo, hi]: [number, number]) => Math.min(hi, Math.max(lo, v))
             next[i] = [clamp(t, spec.t), clamp(x, spec.x)]
-            return next
+            return { eq, starts: next }
           }),
       })),
-    [starts, spec],
+    [starts, spec, eq],
   )
 
-  const choose = (e: Eq) => {
-    setEq(e)
-    setStarts(SPEC[e].starts)
-  }
-
+  const xAxis = useAxis({ label: 't', range: spec.t })
+  const yAxis = useAxis({ label: 'x', range: spec.x })
   return (
-    <Interactive
+    <Figure
       title="Slope field and solutions"
+      state={state}
       caption="Each short segment has the slope ẋ that the equation assigns to that point (t, x). A solution is a curve that is tangent to every segment it passes. Drag either black point to move an initial condition; the curve through it is the unique solution with that starting value. Solutions never cross."
-      controls={
-        <>
-          <ParamChoice
-            label="equation"
-            value={eq}
-            onChange={choose}
-            options={(Object.keys(SPEC) as Eq[]).map((k) => ({ value: k, label: SPEC[k].label }))}
-          />
-          {eq === 'linear' && <ParamSlider label="rate a" value={a} onChange={setA} min={-1.5} max={1.5} step={0.1} />}
-        </>
-      }
-      readout={curves.map((c, i) => (
+      readouts={curves.map((c, i) => (
         <Readout
           key={i}
           label={`solution ${i + 1} at t = ${spec.t[1]}`}
@@ -136,16 +138,13 @@ export function SlopeField() {
         />
       ))}
     >
-      <XYChart
-        height={340}
-        xLabel="t"
-        yLabel="x"
-        series={series}
-        segments={field}
-        handles={handles}
-        xRange={spec.t}
-        yRange={spec.x}
-      />
-    </Interactive>
+      <Plot x={xAxis} y={yAxis} height={340}>
+        {seriesLayers(series)}
+        <Segments segments={field} />
+        {(handles ?? []).map((h, i) => (
+          <Handle key={i} {...h} />
+        ))}
+      </Plot>
+    </Figure>
   )
 }

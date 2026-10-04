@@ -1,16 +1,18 @@
-import { useMemo, useState } from 'react'
+import { useMemo } from 'react'
 import {
-  Interactive,
-  ParamChoice,
-  ParamSlider,
-  Readout,
-  XYChart,
+  choice,
+  Curve,
+  Figure,
+  float,
   formatNumber,
-  useParam,
-  type Handle,
-  type XYSeries,
+  Handle,
+  Plot,
+  Points,
+  Readout,
+  useAxis,
+  useFigureState,
 } from 'aifn-render'
-import { rng } from '@/lib/math'
+import { normal, stream } from 'aifn/foundation/random'
 
 const L = 96
 const FREQS = 160
@@ -41,8 +43,8 @@ function discretise(lambda: Cx, delta: number, disc: Disc): [Cx, Cx] {
 
 // Test input: a square wave with seeded noise.
 const U = (() => {
-  const r = rng(7)
-  return Array.from({ length: L }, (_, k) => (k % 40 < 20 ? 1 : -1) + 0.3 * r.normal())
+  const r = stream(7)
+  return Array.from({ length: L }, (_, k) => (k % 40 < 20 ? 1 : -1) + 0.3 * normal(r))
 })()
 const STEPS = Array.from({ length: L }, (_, k) => k)
 
@@ -95,85 +97,86 @@ const DISCS = [
 ] as const
 
 export function SsmKernel() {
-  const [mode, setMode] = useState<Mode>('complex')
-  const [disc, setDisc] = useState<Disc>('zoh')
-  const alpha = useParam(0.5, { min: 0.05, max: 2, step: 0.05 })
-  const omega = useParam(2, { min: 0, max: 4, step: 0.05 })
-  const [logDelta, setLogDelta] = useState(-1)
-  const delta = 10 ** logDelta
+  const state = useFigureState({
+    mode: choice<Mode>(MODES, 'complex', { label: 'eigenvalues' }),
+    disc: choice<Disc>(DISCS, 'zoh', { label: 'discretisation' }),
+    alpha: float(0.5, { min: 0.05, max: 2, step: 0.05, label: 'decay α' }),
+    omega: float(2, { min: 0, max: 4, step: 0.05, label: 'frequency ω', when: (v) => v.mode === 'complex' }),
+    logDelta: float(-1, {
+      min: -2,
+      max: 0.5,
+      step: 0.05,
+      label: 'step Δ',
+      points_per_decade: 2,
+      logTransform: 'value-is-log',
+      format: (v) => formatNumber(10 ** v),
+    }),
+  })
+  const delta = 10 ** state.logDelta
 
   const sim = useMemo(
-    () => simulate(mode, alpha.value, omega.value, delta, disc),
-    [mode, alpha.value, omega.value, delta, disc],
+    () => simulate(state.mode, state.alpha, state.omega, delta, state.disc),
+    [state.mode, state.alpha, state.omega, delta, state.disc],
   )
   const radius = abs(sim.a)
   const memory = radius < 1 ? -1 / Math.log(radius) : Infinity
 
-  const eigSeries = useMemo<XYSeries[]>(
-    () => [
-      {
-        name: 'eigenvalue λ',
-        type: 'scatter',
-        x: mode === 'complex' ? [-alpha.value, -alpha.value] : [-alpha.value],
-        y: mode === 'complex' ? [omega.value, -omega.value] : [0],
-        slot: 0,
-      },
-    ],
-    [mode, alpha.value, omega.value],
+  const eigSeries = useMemo(
+    () =>
+      [
+        {
+          name: 'eigenvalue λ',
+          x: state.mode === 'complex' ? [-state.alpha, -state.alpha] : [-state.alpha],
+          y: state.mode === 'complex' ? [state.omega, -state.omega] : [0],
+          slot: 0,
+        },
+      ] as const,
+    [state.mode, state.alpha, state.omega],
   )
   const handles = useMemo<Handle[]>(
     () => [
       {
         kind: 'point',
-        at: [-alpha.value, mode === 'complex' ? omega.value : 0],
+        at: [-state.alpha, state.mode === 'complex' ? state.omega : 0],
         label: 'λ',
         onDrag: ([x, y]) => {
-          alpha.set(-x)
-          if (mode === 'complex') omega.set(Math.abs(y))
+          state.set('alpha', -x)
+          if (state.mode === 'complex') state.set('omega', Math.abs(y))
         },
       },
     ],
-    [alpha, omega, mode],
+    [state.bind('alpha'), state.bind('omega'), state.mode],
   )
-  const kernelSeries = useMemo<XYSeries[]>(
-    () => [{ name: 'kernel K_k', type: 'line', x: STEPS, y: sim.kernel, slot: 0 }],
-    [sim.kernel],
-  )
-  const responseSeries = useMemo<XYSeries[]>(
-    () => [{ name: '|H|', type: 'line', x: sim.theta, y: sim.response, slot: 0 }],
+  const kernelSeries = useMemo(() => [{ name: 'kernel K_k', x: STEPS, y: sim.kernel, slot: 0 }] as const, [sim.kernel])
+  const responseSeries = useMemo(
+    () => [{ name: '|H|', x: sim.theta, y: sim.response, slot: 0 }] as const,
     [sim.theta, sim.response],
   )
-  const outputSeries = useMemo<XYSeries[]>(
-    () => [
-      { name: 'input u', type: 'line', x: STEPS, y: U, muted: true },
-      { name: 'recurrence', type: 'line', x: STEPS, y: sim.recurrent, slot: 0 },
-      { name: 'convolution', type: 'scatter', x: STEPS, y: sim.conv, slot: 1 },
-    ],
+  const outputSeries = useMemo(
+    () =>
+      [
+        { name: 'input u', x: STEPS, y: U, muted: true },
+        { name: 'recurrence', x: STEPS, y: sim.recurrent, slot: 0 },
+        { name: 'convolution', x: STEPS, y: sim.conv, slot: 1 },
+      ] as const,
     [sim.recurrent, sim.conv],
   )
 
+  const xAxis = useAxis({ label: 'Re λ', range: [-2.2, 0.2] })
+  const yAxis = useAxis({ label: 'Im λ', range: [-4.4, 4.4] })
+  const xAxis2 = useAxis({ label: 'lag k', range: [0, L - 1] })
+  const yAxis2 = useAxis({ label: 'K_k', hold: 'union' })
+  const xAxis3 = useAxis({ label: 'frequency θ (radians per step)', range: [0, Math.PI] })
+  const yAxis3 = useAxis({ label: '|H(e^{iθ})|', hold: 'union', log: true })
+  const xAxis4 = useAxis({ label: 'step k', range: [0, L - 1] })
+  const yAxis4 = useAxis({ label: 'y_k', hold: 'union' })
   return (
-    <Interactive
+    <Figure
       title="The SSM convolution kernel"
+      state={state}
       caption="A diagonal state-space layer with one real eigenvalue λ = −α, or a conjugate pair λ = −α ± iω, discretised with step Δ. Drag λ in the complex plane or use the sliders. The kernel K_k = C Ā^k B̄ decays at the rate |Ā| per step and oscillates at ωΔ radians per step. A larger Δ shortens the memory and moves the resonance to a higher frequency. The output computed by the recurrence (line) and by convolution with K (dots) agree to rounding error."
-      controls={
-        <>
-          <ParamChoice label="eigenvalues" value={mode} onChange={setMode} options={MODES} />
-          <ParamChoice label="discretisation" value={disc} onChange={setDisc} options={DISCS} />
-          <ParamSlider label="decay α" param={alpha} />
-          {mode === 'complex' && <ParamSlider label="frequency ω" param={omega} />}
-          <ParamSlider
-            label="step Δ"
-            value={logDelta}
-            onChange={setLogDelta}
-            min={-2}
-            max={0.5}
-            step={0.05}
-            format={(v) => formatNumber(10 ** v)}
-          />
-        </>
-      }
-      readout={
+
+      readouts={
         <>
           <Readout label="|Ā| (pole radius)" value={formatNumber(radius)} />
           <Readout label="memory −1 / ln|Ā|" value={Number.isFinite(memory) ? `${formatNumber(memory)} steps` : '∞'} />
@@ -182,26 +185,24 @@ export function SsmKernel() {
       }
     >
       <div className="grid gap-4 sm:grid-cols-2">
-        <XYChart
-          series={eigSeries}
-          handles={handles}
-          xLabel="Re λ"
-          yLabel="Im λ"
-          xRange={[-2.2, 0.2]}
-          yRange={[-4.4, 4.4]}
-          height={260}
-        />
-        <XYChart series={kernelSeries} xLabel="lag k" yLabel="K_k" xRange={[0, L - 1]} height={260} />
-        <XYChart
-          series={responseSeries}
-          xLabel="frequency θ (radians per step)"
-          yLabel="|H(e^{iθ})|"
-          xRange={[0, Math.PI]}
-          yLog
-          height={260}
-        />
-        <XYChart series={outputSeries} xLabel="step k" yLabel="y_k" xRange={[0, L - 1]} height={260} />
+        <Plot x={xAxis} y={yAxis} height={260}>
+          <Points {...eigSeries[0]} />
+          {(handles ?? []).map((h, i) => (
+            <Handle key={i} {...h} />
+          ))}
+        </Plot>
+        <Plot x={xAxis2} y={yAxis2} height={260}>
+          <Curve {...kernelSeries[0]} />
+        </Plot>
+        <Plot x={xAxis3} y={yAxis3} height={260}>
+          <Curve {...responseSeries[0]} />
+        </Plot>
+        <Plot x={xAxis4} y={yAxis4} height={260}>
+          <Curve {...outputSeries[0]} />
+          <Curve {...outputSeries[1]} />
+          <Points {...outputSeries[2]} />
+        </Plot>
       </div>
-    </Interactive>
+    </Figure>
   )
 }

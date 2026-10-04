@@ -1,6 +1,6 @@
 import { useMemo } from 'react'
-import { Interactive, ParamSlider, Readout, XYChart, formatNumber, useParam, type XYSeries } from 'aifn-render'
-import { rng } from '@/lib/math'
+import { Curve, Figure, float, formatNumber, int, Plot, Readout, useAxis, useFigureState } from 'aifn-render'
+import { stream, uniform } from 'aifn/foundation/random'
 
 const ITEMS = 40
 const SLATE = 5
@@ -28,11 +28,11 @@ function gini(x: number[]): number {
  * random. Items start with a small random head start in clicks, as if from an earlier system.
  */
 function simulate(policy: Policy, eps: number, seed: number): Trace {
-  const r = rng(seed)
-  const appeal = Array.from({ length: ITEMS }, () => 0.05 + 0.6 * r.uniform() ** 2)
+  const r = stream(seed)
+  const appeal = Array.from({ length: ITEMS }, () => 0.05 + 0.6 * uniform(r) ** 2)
   const best = [...appeal].sort((a, b) => b - a)
   const oracle = best.slice(0, SLATE).reduce((s, a, k) => s + a / (k + 1), 0)
-  const clicks = Array.from({ length: ITEMS }, () => Math.floor(6 * r.uniform()))
+  const clicks = Array.from({ length: ITEMS }, () => Math.floor(6 * uniform(r)))
   const shown = Array.from({ length: ITEMS }, () => 10)
   const exposure = new Array(ITEMS).fill(0)
   const trace: Trace = { gini: [], regret: [], distinct: [] }
@@ -46,7 +46,7 @@ function simulate(policy: Policy, eps: number, seed: number): Trace {
       let next = 0
       while (slate.length < SLATE) {
         let pick: number
-        if (policy === 'explore' && r.uniform() < eps) pick = Math.floor(r.uniform() * ITEMS)
+        if (policy === 'explore' && uniform(r) < eps) pick = Math.floor(uniform(r) * ITEMS)
         else {
           while (slate.includes(ranked[next].i)) next++
           pick = ranked[next].i
@@ -58,7 +58,7 @@ function simulate(policy: Policy, eps: number, seed: number): Trace {
         expected += p
         exposure[i] += 1 / (k + 1)
         shown[i] += 1
-        if (r.uniform() < p) clicks[i]++
+        if (uniform(r) < p) clicks[i]++
       })
     }
     cumRegret += oracle - expected / USERS
@@ -71,38 +71,37 @@ function simulate(policy: Policy, eps: number, seed: number): Trace {
 
 /** Popularity-driven, click-rate-driven and exploring policies, round by round. */
 export function LoopSimulation() {
-  const round = useParam(ROUNDS, { min: 1, max: ROUNDS, step: 1 })
-  const eps = useParam(0.2, { min: 0.05, max: 0.5, step: 0.05 })
-  const seed = useParam(3, { min: 1, max: 20, step: 1 })
+  const state = useFigureState({
+    round: float(ROUNDS, { min: 1, max: ROUNDS, step: 1, label: 'round', format: (v) => String(v) }),
+    eps: float(0.2, { min: 0.05, max: 0.5, step: 0.05, label: 'exploration share ε' }),
+    seed: int(3, { min: 1, max: 20, step: 1, label: 'seed', format: (v) => String(v) }),
+  })
 
   const traces = useMemo(
     () => ({
-      clicks: simulate('clicks', 0, seed.value),
-      ctr: simulate('ctr', 0, seed.value),
-      explore: simulate('explore', eps.value, seed.value),
+      clicks: simulate('clicks', 0, state.seed),
+      ctr: simulate('ctr', 0, state.seed),
+      explore: simulate('explore', state.eps, state.seed),
     }),
-    [eps.value, seed.value],
+    [state.eps, state.seed],
   )
-  const t = round.value
+  const t = state.round
   const x = ROUND_AXIS.slice(0, t)
-  const series: XYSeries[] = [
-    { name: 'rank by total clicks', type: 'line', x, y: traces.clicks.gini.slice(0, t), slot: 0 },
-    { name: 'rank by click rate', type: 'line', x, y: traces.ctr.gini.slice(0, t), slot: 1 },
-    { name: `click rate + ε = ${eps.value} exploration`, type: 'line', x, y: traces.explore.gini.slice(0, t), slot: 2 },
-  ]
+  const series = [
+    { name: 'rank by total clicks', x, y: traces.clicks.gini.slice(0, t), slot: 0 },
+    { name: 'rank by click rate', x, y: traces.ctr.gini.slice(0, t), slot: 1 },
+    { name: `click rate + ε = ${state.eps} exploration`, x, y: traces.explore.gini.slice(0, t), slot: 2 },
+  ] as const
 
+  const xAxis = useAxis({ label: 'round', range: [1, ROUNDS] })
+  const yAxis = useAxis({ label: 'Gini of cumulative exposure', range: [0, 1] })
   return (
-    <Interactive
+    <Figure
       title="A feedback loop in simulation"
+      state={state}
       caption="Forty items with hidden appeal; each round a hundred users see a five-item slate with position bias π(k) = 1/k, and the system re-ranks from the clicks it has logged. Ranking by total clicks locks in at once: the items with a head start are the only ones ever shown, they collect all the clicks, and exposure stays concentrated (Gini near 0.9). Ranking by click rate lets a shown item whose rate falls be replaced by an untried one, so more items get a chance. Random exploration shows every item; it lowers concentration and, depending on the seed, costs or saves reward. Regret is the expected clicks lost per user against always showing the five best items. Step through rounds with the arrows; change the seed to redraw the items."
-      controls={
-        <>
-          <ParamSlider label="round" param={round} format={(v) => String(v)} withArrows />
-          <ParamSlider label="exploration share ε" param={eps} />
-          <ParamSlider label="seed" param={seed} format={(v) => String(v)} withArrows />
-        </>
-      }
-      readout={
+
+      readouts={
         <>
           <Readout
             label="items ever shown (clicks / rate / explore)"
@@ -114,13 +113,11 @@ export function LoopSimulation() {
         </>
       }
     >
-      <XYChart
-        series={series}
-        xLabel="round"
-        yLabel="Gini of cumulative exposure"
-        xRange={[1, ROUNDS]}
-        yRange={[0, 1]}
-      />
-    </Interactive>
+      <Plot x={xAxis} y={yAxis}>
+        <Curve {...series[0]} />
+        <Curve {...series[1]} />
+        <Curve {...series[2]} />
+      </Plot>
+    </Figure>
   )
 }

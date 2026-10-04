@@ -1,5 +1,15 @@
-import { useMemo, useState } from 'react'
-import { Interactive, ParamChoice, Readout, XYChart, formatNumber, type XYSeries } from 'aifn-render'
+import { useMemo } from 'react'
+import {
+  choice,
+  Figure,
+  formatNumber,
+  Plot,
+  Readout,
+  seriesLayers,
+  type SeriesSpec,
+  useAxis,
+  useFigureState,
+} from 'aifn-render'
 
 type FnId = 'exp' | 'sqrt' | 'periodic' | 'runge'
 
@@ -68,16 +78,22 @@ function gauss(g: Integrand, rule: { x: number[]; w: number[] }): number {
 
 /** Error against the number of function evaluations for the trapezoid rule, Simpson's rule and Gauss–Legendre. */
 export function QuadratureErrors() {
-  const [id, setId] = useState<FnId>('exp')
+  const state = useFigureState({
+    id: choice<FnId>(
+      (Object.keys(INTEGRANDS) as FnId[]).map((k) => ({ value: k, label: INTEGRANDS[k].label })),
+      'exp',
+      { label: 'integrand' },
+    ),
+  })
   const rules = useMemo(() => KS.map((k) => gaussLegendre(2 ** k + 1)), [])
-  const g = INTEGRANDS[id]
+  const g = INTEGRANDS[state.id]
 
   const { series, errs } = useMemo(() => {
     const err = (v: number) => Math.max(FLOOR, Math.abs(v - g.exact))
     const t = KS.map((k) => err(trapezoid(g, 2 ** k)))
     const s = KS.map((k) => err(simpson(g, 2 ** k)))
     const q = KS.map((_, i) => err(gauss(g, rules[i])))
-    const out: XYSeries[] = [
+    const out: SeriesSpec[] = [
       { name: 'trapezoid', type: 'line', x: KS, y: t, slot: 0 },
       { name: 'Simpson', type: 'line', x: KS, y: s, slot: 1 },
       { name: 'Gauss–Legendre', type: 'line', x: KS, y: q, slot: 2 },
@@ -85,19 +101,15 @@ export function QuadratureErrors() {
     return { series: out, errs: { t: t[2], s: s[2], q: q[2] } }
   }, [g, rules])
 
+  const xAxis = useAxis({ label: 'k (2ᵏ + 1 evaluations)', range: [1, 10] })
+  const yAxis = useAxis({ label: 'absolute error', range: [FLOOR, 1], log: true })
   return (
-    <Interactive
+    <Figure
       title="Quadrature error against the number of evaluations"
+      state={state}
       caption="Each rule uses 2ᵏ + 1 evaluations of f. On a log scale, the trapezoid error falls by 4 per doubling (slope h²) and Simpson's by 16 (h⁴) for smooth integrands; Gauss–Legendre falls faster than any power. √x has an infinite derivative at 0, which slows every rule. For a smooth periodic integrand over a full period the plain trapezoid rule is the best of the three."
-      controls={
-        <ParamChoice
-          label="integrand"
-          value={id}
-          onChange={setId}
-          options={(Object.keys(INTEGRANDS) as FnId[]).map((k) => ({ value: k, label: INTEGRANDS[k].label }))}
-        />
-      }
-      readout={
+
+      readouts={
         <>
           <Readout label="exact" value={g.exact.toPrecision(12)} />
           <Readout label="errors with 9 evaluations: trapezoid" value={formatNumber(errs.t)} />
@@ -106,15 +118,9 @@ export function QuadratureErrors() {
         </>
       }
     >
-      <XYChart
-        height={320}
-        xLabel="k (2ᵏ + 1 evaluations)"
-        yLabel="absolute error"
-        series={series}
-        xRange={[1, 10]}
-        yLog
-        yRange={[FLOOR, 1]}
-      />
-    </Interactive>
+      <Plot x={xAxis} y={yAxis} height={320}>
+        {seriesLayers(series)}
+      </Plot>
+    </Figure>
   )
 }

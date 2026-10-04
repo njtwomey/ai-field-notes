@@ -17,8 +17,8 @@ import {
   type AutoencoderCheckpoint,
   type AutoencoderKind,
   type AutoencoderRun,
-} from 'aifn-applied/generative/autoencoders'
-import { moons, pinwheel } from 'aifn-applied/data/synthetic'
+} from 'aifn-methods/generative/autoencoders'
+import { moons, pinwheel } from 'aifn-methods/data/synthetic'
 import { stream } from 'aifn/foundation/random'
 
 const fmt = (v: number, digits = 3) => (Number.isFinite(v) ? formatNumber(Number(v.toPrecision(digits))) : '—')
@@ -195,9 +195,7 @@ export function CvaeExplorer() {
   const reconLoss = run?.history.reconstruction ?? []
   const klLoss = run?.history.regulariser ?? []
 
-  const lossIdx = currentCheckpoint
-    ? lossSteps.findIndex((s) => s >= currentCheckpoint.step)
-    : -1
+  const lossIdx = currentCheckpoint ? lossSteps.findIndex((s) => s >= currentCheckpoint.step) : -1
   const curRecon = lossIdx >= 0 ? reconLoss[lossIdx] : reconLoss[reconLoss.length - 1]
   const curKl = lossIdx >= 0 ? klLoss[lossIdx] : klLoss[klLoss.length - 1]
 
@@ -209,7 +207,8 @@ export function CvaeExplorer() {
   const lossXAxis = useAxis({ label: 'training step', range: [0, 220] })
   const lossYAxis = useAxis({ label: 'loss (nats)', range: [0, 6] })
 
-  const classNames = dataChoice === 'moons' ? ['Class 0 (top moon)', 'Class 1 (bottom moon)'] : ['Class 0', 'Class 1', 'Class 2']
+  const classNames =
+    dataChoice === 'moons' ? ['Class 0 (top moon)', 'Class 1 (bottom moon)'] : ['Class 0', 'Class 1', 'Class 2']
 
   const CLASS_OPTIONS = [
     { value: 'all', label: 'All classes' },
@@ -267,16 +266,11 @@ export function CvaeExplorer() {
         ),
         'latent space alignment': (
           <>
-            <Readout
-              label="centroid separation (class 0 vs 1)"
-              value={`${fmt(classDist, 3)} units`}
-            />
+            <Readout label="centroid separation (class 0 vs 1)" value={`${fmt(classDist, 3)} units`} />
             <Readout
               label="latent structure"
               value={
-                modelChoice === 'cvae'
-                  ? 'shared prior N(0, I) for all classes'
-                  : 'partitioned into separate clusters'
+                modelChoice === 'cvae' ? 'shared prior N(0, I) for all classes' : 'partitioned into separate clusters'
               }
             />
           </>

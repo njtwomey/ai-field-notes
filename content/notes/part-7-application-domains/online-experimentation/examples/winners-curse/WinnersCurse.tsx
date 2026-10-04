@@ -1,17 +1,20 @@
-import { useMemo, useState } from 'react'
+import { useMemo } from 'react'
 import {
-  Interactive,
-  ParamChoice,
-  ParamSlider,
-  Readout,
-  XYChart,
+  choice,
+  Figure,
+  float,
   formatNumber,
-  useParam,
-  type Handle,
-  type XYSeries,
+  Handle,
+  int,
+  Plot,
+  Readout,
+  seriesLayers,
+  type SeriesSpec,
+  useAxis,
+  useFigureState,
 } from 'aifn-render'
-import { rng } from '@/lib/math'
-import { normalCdf, normalPdf, normalQuantile } from '@/lib/math/special'
+import { normal, stream } from 'aifn/foundation/random'
+import { normalCdf, normalPdf, normalQuantile } from 'aifn/numerics/special'
 
 const EXPERIMENTS = 4000
 /** Bins per critical distance z·s, so the significance threshold falls on a bin edge and no bin is split. */
@@ -39,22 +42,24 @@ function retrodesign(theta: number, s: number, alpha: number) {
  * average they overstate the true effect, and some have the wrong sign.
  */
 export function WinnersCurse() {
-  const effect = useParam(0.1, { min: 0.02, max: 0.4, step: 0.01 })
-  const n = useParam(200, { min: 20, max: 2000, step: 10 })
-  const [alpha, setAlpha] = useState('0.05')
-  const seed = useParam(1, { min: 1, max: 20, step: 1 })
+  const state = useFigureState({
+    effect: float(0.1, { min: 0.02, max: 0.4, step: 0.01, label: 'true effect θ' }),
+    n: int(200, { min: 20, max: 2000, step: 10, label: 'users per arm n' }),
+    alpha: choice(ALPHAS, '0.05', { label: 'α' }),
+    seed: int(1, { min: 1, max: 20, step: 1, label: 'seed' }),
+  })
 
-  const s = Math.sqrt(2 / n.value)
-  const exact = retrodesign(effect.value, s, Number(alpha))
+  const s = Math.sqrt(2 / state.n)
+  const exact = retrodesign(state.effect, s, Number(state.alpha))
 
   // One standard-normal draw per replication, rescaled on every change, so moving a slider moves the same experiments.
   const draws = useMemo(() => {
-    const g = rng(seed.value)
-    return Array.from({ length: EXPERIMENTS }, () => g.normal())
-  }, [seed.value])
+    const g = stream(state.seed)
+    return Array.from({ length: EXPERIMENTS }, () => normal(g))
+  }, [state.seed])
 
   const r = useMemo(() => {
-    const estimates = draws.map((e) => effect.value + s * e)
+    const estimates = draws.map((e) => state.effect + s * e)
     const crit = exact.z * s
     const significant = estimates.filter((t) => Math.abs(t) >= crit)
     const width = crit / BINS_PER_CRIT
@@ -85,16 +90,15 @@ export function WinnersCurse() {
           y: bins.filter(isSig).map(density),
           slot: 1,
         },
-      ] satisfies XYSeries[],
+      ] satisfies SeriesSpec[],
       power: significant.length / EXPERIMENTS,
       typeS: significant.length ? significant.filter((t) => t < 0).length / significant.length : NaN,
-      exaggeration: sigMean / effect.value,
+      exaggeration: sigMean / state.effect,
       sigMean,
     }
-  }, [draws, effect.value, s, exact.z])
+  }, [draws, state.effect, s, exact.z])
 
-  const handles: Handle[] = [{ kind: 'x', at: effect.value, label: 'true effect', onDrag: effect.set }]
-  const series: XYSeries[] = [
+  const series: SeriesSpec[] = [
     ...r.series,
     ...(Number.isFinite(r.sigMean)
       ? [
@@ -110,19 +114,15 @@ export function WinnersCurse() {
       : []),
   ]
 
+  const xAxis = useAxis({ label: 'estimated effect θ̂', hold: 'union' })
+  const yAxis = useAxis({ label: 'density', hold: 'union' })
   return (
-    <Interactive
+    <Figure
       title="Significant estimates overstate the effect"
+      state={state}
       caption="4,000 replications of the same A/B test with n users per arm. Each bar counts estimates of the difference in means (in units of the outcome's standard deviation). Only the orange tails reach significance. When power is low, those tails sit far from the true effect: the average significant estimate is several times too large, and some point the wrong way. Drag the true effect or raise n to watch the exaggeration shrink towards 1."
-      controls={
-        <>
-          <ParamSlider label="true effect θ" param={effect} />
-          <ParamSlider label="users per arm n" param={n} />
-          <ParamChoice label="α" value={alpha} onChange={setAlpha} options={ALPHAS} />
-          <ParamSlider label="seed" param={seed} />
-        </>
-      }
-      readout={
+
+      readouts={
         <>
           <Readout label="standard error s" value={formatNumber(s)} />
           <Readout label="power" value={`${formatNumber(exact.power)} (sim ${formatNumber(r.power)})`} />
@@ -134,7 +134,10 @@ export function WinnersCurse() {
         </>
       }
     >
-      <XYChart height={340} xLabel="estimated effect θ̂" yLabel="density" series={series} handles={handles} />
-    </Interactive>
+      <Plot x={xAxis} y={yAxis} height={340}>
+        {seriesLayers(series)}
+        <Handle {...state.handle('effect', { label: 'true effect' })} />
+      </Plot>
+    </Figure>
   )
 }

@@ -1,6 +1,6 @@
 import { useMemo } from 'react'
-import { Interactive, ParamSlider, Readout, XYChart, formatNumber, useParam, type XYSeries } from 'aifn-render'
-import { rng } from '@/lib/math'
+import { Curve, Figure, float, formatNumber, int, Plot, Readout, useAxis, useFigureState } from 'aifn-render'
+import { normal, stream } from 'aifn/foundation/random'
 
 /** Forecast horizon H and look-back length L = 3H, in time steps. */
 const H = 12
@@ -70,58 +70,58 @@ const rmse = (a: number[], b: number[]) => Math.sqrt(a.reduce((s, v, i) => s + (
  * Both bases extend over the forecast window, which gives the two partial forecasts.
  */
 export function BasisFit() {
-  const degree = useParam(2, { min: 0, max: 4, step: 1 })
-  const harmonics = useParam(3, { min: 0, max: 6, step: 1 })
-  const noise = useParam(1, { min: 0, max: 4, step: 0.1 })
-  const seed = useParam(3, { min: 1, max: 30, step: 1 })
+  const state = useFigureState({
+    degree: int(2, { min: 0, max: 4, step: 1, label: 'polynomial degree p', format: (v) => String(v) }),
+    harmonics: int(3, { min: 0, max: 6, step: 1, label: 'harmonics K', format: (v) => String(v) }),
+    noise: float(1, { min: 0, max: 4, step: 0.1, label: 'noise sd' }),
+    seed: int(3, { min: 1, max: 30, step: 1, label: 'seed', format: (v) => String(v) }),
+  })
 
   const r = useMemo(() => {
-    const g = rng(seed.value)
-    const y = TRUTH.map((v) => v + noise.value * g.normal())
+    const g = stream(state.seed)
+    const y = TRUTH.map((v) => v + state.noise * normal(g))
     const yBack = y.slice(0, L)
 
-    const T = trendBasis(degree.value)
+    const T = trendBasis(state.degree)
     const thetaT = lstsq(BACK.map(T), yBack)
     const trend = STEPS.map((n) => dot(T(n), thetaT))
 
     // Doubly residual stacking: the seasonality stack sees the look-back window minus the trend stack's backcast.
     const residual = yBack.map((v, i) => v - trend[i])
-    const S = seasonBasis(harmonics.value)
-    const thetaS = harmonics.value > 0 ? lstsq(BACK.map(S), residual) : []
-    const season = STEPS.map((n) => (harmonics.value > 0 ? dot(S(n), thetaS) : 0))
+    const S = seasonBasis(state.harmonics)
+    const thetaS = state.harmonics > 0 ? lstsq(BACK.map(S), residual) : []
+    const season = STEPS.map((n) => (state.harmonics > 0 ? dot(S(n), thetaS) : 0))
 
     const total = trend.map((v, i) => v + season[i])
-    const data: XYSeries[] = [
-      { name: 'observed look-back', type: 'line', x: BACK, y: yBack, slot: 0 },
-      { name: 'future values', type: 'line', x: FORE, y: y.slice(L), slot: 0, dashed: true },
-      { name: 'backcast + forecast', type: 'line', x: STEPS, y: total, emphasis: true },
-    ]
-    const parts: XYSeries[] = [
-      { name: 'trend stack', type: 'line', x: STEPS, y: trend, slot: 1 },
-      { name: 'seasonality stack', type: 'line', x: STEPS, y: season, slot: 2 },
-    ]
+    const data = [
+      { name: 'observed look-back', x: BACK, y: yBack, slot: 0 },
+      { name: 'future values', x: FORE, y: y.slice(L), slot: 0, dashed: true },
+      { name: 'backcast + forecast', x: STEPS, y: total, emphasis: true },
+    ] as const
+    const parts = [
+      { name: 'trend stack', x: STEPS, y: trend, slot: 1 },
+      { name: 'seasonality stack', x: STEPS, y: season, slot: 2 },
+    ] as const
     return {
       data,
       parts,
       backErr: rmse(total.slice(0, L), yBack),
       foreErr: rmse(total.slice(L), TRUTH.slice(L)),
-      coefs: degree.value + 1 + 2 * harmonics.value,
+      coefs: state.degree + 1 + 2 * state.harmonics,
     }
-  }, [degree.value, harmonics.value, noise.value, seed.value])
+  }, [state.degree, state.harmonics, state.noise, state.seed])
 
+  const xAxis = useAxis({ label: 'time step n', hold: 'union' })
+  const yAxis = useAxis({ label: 'y', hold: 'union' })
+  const xAxis2 = useAxis({ label: 'time step n', hold: 'union' })
+  const yAxis2 = useAxis({ label: 'component', hold: 'union' })
   return (
-    <Interactive
+    <Figure
       title="Trend and seasonality bases"
+      state={state}
       caption="A series of 48 steps: a look-back window of L = 36 steps (n < 0) and a forecast window of H = 12 (n ≥ 0), on the N-BEATS grid t = n / H. The trend stack fits a polynomial of degree p in t to the look-back window by least squares; the seasonality stack fits K Fourier harmonics of period H/i to what the trend leaves. Each basis is then evaluated over the forecast window, and the forecast is the sum of the two partial forecasts. In N-BEATS the coefficients come from fully connected networks; here they come from least squares, so the figure shows only what the bases can express. A high polynomial degree fits the look-back window more closely and extrapolates wildly. Too few harmonics leave seasonal shape in the residual."
-      controls={
-        <>
-          <ParamSlider label="polynomial degree p" param={degree} format={(v) => String(v)} withArrows />
-          <ParamSlider label="harmonics K" param={harmonics} format={(v) => String(v)} withArrows />
-          <ParamSlider label="noise sd" param={noise} />
-          <ParamSlider label="seed" param={seed} format={(v) => String(v)} withArrows />
-        </>
-      }
-      readout={
+
+      readouts={
         <>
           <Readout label="coefficients (p + 1) + 2K" value={String(r.coefs)} />
           <Readout label="look-back RMSE" value={formatNumber(r.backErr)} />
@@ -130,9 +130,16 @@ export function BasisFit() {
       }
     >
       <div className="space-y-3">
-        <XYChart series={r.data} xLabel="time step n" yLabel="y" height={240} />
-        <XYChart series={r.parts} xLabel="time step n" yLabel="component" height={180} />
+        <Plot x={xAxis} y={yAxis} height={240}>
+          <Curve {...r.data[0]} />
+          <Curve {...r.data[1]} />
+          <Curve {...r.data[2]} />
+        </Plot>
+        <Plot x={xAxis2} y={yAxis2} height={180}>
+          <Curve {...r.parts[0]} />
+          <Curve {...r.parts[1]} />
+        </Plot>
       </div>
-    </Interactive>
+    </Figure>
   )
 }

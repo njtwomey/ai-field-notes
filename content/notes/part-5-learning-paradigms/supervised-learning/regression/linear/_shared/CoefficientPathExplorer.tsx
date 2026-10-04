@@ -1,6 +1,19 @@
-import { useMemo, type ReactNode } from 'react'
-import { ParamSlider, XYChart, formatNumber, useParam, type Handle, type XYSeries } from 'aifn-render'
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from 'aifn-render'
+import { useMemo, useState, type ReactNode } from 'react'
+import {
+  formatNumber,
+  Handle,
+  Plot,
+  seriesLayers,
+  type SeriesSpec,
+  Slider,
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+  useAxis,
+} from 'aifn-render'
 import type { CoefficientPath } from '@/generated/contracts'
 import { cn } from '@/lib/utils'
 import { featureStyle, nearest } from './features'
@@ -27,35 +40,40 @@ export function CoefficientPathExplorer({
   children?: (index: number) => ReactNode
 }) {
   const last = path.penalty.length - 1
-  const index = useParam(nearest(path.penalty.map(Math.log10), Math.log10(start)), { min: 0, max: last, step: 1 })
-  const i = index.value
+  // The grid index of the penalty: the slider steps along the grid and the handle snaps to it. The parent's Figure
+  // owns the state rows, so this body keeps its own index.
+  const [i, setI] = useState(() => nearest(path.penalty.map(Math.log10), Math.log10(start)))
   const logs = useMemo(() => path.penalty.map((p) => Math.log10(p)), [path])
 
   const series = useMemo(
-    (): XYSeries[] =>
+    (): SeriesSpec[] =>
       path.features.map((name, j) => ({ type: 'line', x: logs, y: path.coef[j], ...featureStyle(name) })),
     [path, logs],
   )
-  const handles: Handle[] = [
-    {
-      kind: 'x',
-      at: logs[i],
-      label: symbol,
-      // Snap to the nearest precomputed penalty.
-      onDrag: (x) => index.set(nearest(logs, x)),
-    },
-  ]
 
+  const xAxis = useAxis({ label: `log₁₀ ${symbol}`, hold: 'union' })
+  const yAxis = useAxis({ label: 'coefficient', hold: 'union' })
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-end gap-6">
         <div className="w-64">
-          <ParamSlider label={`penalty ${symbol}`} param={index} format={(k) => formatNumber(path.penalty[k])} />
+          <Slider
+            label={`penalty ${symbol}`}
+            value={i}
+            onChange={setI}
+            min={0}
+            max={last}
+            step={1}
+            format={(k) => formatNumber(path.penalty[k])}
+          />
         </div>
         {children?.(i)}
       </div>
       <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_220px]">
-        <XYChart height={340} series={series} xLabel={`log₁₀ ${symbol}`} yLabel="coefficient" handles={handles} />
+        <Plot x={xAxis} y={yAxis} height={340}>
+          {seriesLayers(series)}
+          <Handle kind="x" at={logs[i]} label={symbol} onDrag={(x) => setI(nearest(logs, x))} />
+        </Plot>
         <Table>
           <TableHeader>
             <TableRow>

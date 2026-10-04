@@ -1,14 +1,14 @@
 import { describe, expect, it } from 'vitest'
 import { stream } from 'aifn/foundation/random'
 import { parseTemplates } from 'aifn/text/features'
-import { mobyHyphenation } from 'aifn-applied/data/real/hyphenation'
+import { mobyHyphenation } from 'aifn-methods/data/real/hyphenation'
 import {
   crfHyphenate,
   crfHyphenationRun,
   HYPHENATION_TEMPLATES,
   hyphenationRows,
   hyphenationSequence,
-} from 'aifn-applied/text/hyphenation'
+} from 'aifn-methods/text/hyphenation'
 
 describe('hyphenation with a template CRF', () => {
   it('makes letter rows and HYPH/O labels, and every preset parses', () => {

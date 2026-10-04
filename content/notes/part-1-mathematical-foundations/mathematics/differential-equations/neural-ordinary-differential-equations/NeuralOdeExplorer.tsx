@@ -20,7 +20,7 @@ import {
   type OdeCheckpoint,
   type OdeModelKind,
   type OdeRun,
-} from 'aifn-applied/neural/ode'
+} from 'aifn-methods/neural/ode'
 
 const DATASETS = [
   { value: 'disc', label: 'Disc in ring (non-homeomorphic topology in 2D)' },
@@ -172,18 +172,8 @@ export function NeuralOdeExplorer() {
           options={DATASETS}
           onChange={(v) => setDataChoice(v as 'disc' | 'reflection')}
         />
-        <Select
-          label="Model"
-          value={modelKind}
-          options={MODELS}
-          onChange={(v) => setModelKind(v as OdeModelKind)}
-        />
-        <Select
-          label="Solver"
-          value={solver}
-          options={SOLVERS}
-          onChange={(v) => setSolver(v as 'rk4' | 'euler')}
-        />
+        <Select label="Model" value={modelKind} options={MODELS} onChange={(v) => setModelKind(v as OdeModelKind)} />
+        <Select label="Solver" value={solver} options={SOLVERS} onChange={(v) => setSolver(v as 'rk4' | 'euler')} />
         <Select
           label="Iterations"
           value={String(steps)}
@@ -197,35 +187,17 @@ export function NeuralOdeExplorer() {
       </ControlRow>
 
       <ControlRow label="Continuous time evolution">
-        <Player
-          count={Math.max(1, numTimes)}
-          value={currentFrame}
-          onChange={setTimeIndex}
-        />
+        <Player count={Math.max(1, numTimes)} value={currentFrame} onChange={setTimeIndex} />
       </ControlRow>
 
       <Plots>
         <Plot x={plotX} y={plotY} title={isOneD ? '1D flow over time t' : 'State trajectories in feature space'}>
-          <Points
-            x={pointCoordinates.class0.x}
-            y={pointCoordinates.class0.y}
-            slot={0}
-            size={5}
-          />
-          <Points
-            x={pointCoordinates.class1.x}
-            y={pointCoordinates.class1.y}
-            slot={1}
-            size={5}
-          />
+          <Points x={pointCoordinates.class0.x} y={pointCoordinates.class0.y} slot={0} size={5} />
+          <Points x={pointCoordinates.class1.x} y={pointCoordinates.class1.y} slot={1} size={5} />
         </Plot>
 
         <Plot x={lossX} y={lossY} title="Training loss convergence">
-          <Curve
-            x={lossSteps}
-            y={lossValues}
-            slot={0}
-          />
+          <Curve x={lossSteps} y={lossValues} slot={0} />
         </Plot>
       </Plots>
 
@@ -235,14 +207,8 @@ export function NeuralOdeExplorer() {
           value={run && run.loss.length > 0 ? formatNumber(Number(run.loss[run.loss.length - 1].toFixed(4))) : '—'}
         />
         <Readout label="Time t" value={formatNumber(Number(currentTime.toFixed(2)))} />
-        <Readout
-          label="Evaluations (NFE)"
-          value={lastCheckpoint ? lastCheckpoint.evaluations : '—'}
-        />
-        <Readout
-          label="State dimensions"
-          value={run ? run.stateDim : 2}
-        />
+        <Readout label="Evaluations (NFE)" value={lastCheckpoint ? lastCheckpoint.evaluations : '—'} />
+        <Readout label="State dimensions" value={run ? run.stateDim : 2} />
       </ControlRow>
     </Figure>
   )

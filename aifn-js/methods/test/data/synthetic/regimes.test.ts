@@ -6,7 +6,7 @@
 import { describe, expect, it } from 'vitest'
 import { stream } from 'aifn/foundation/random'
 import { tensor, toFlat, toRows, type Tensor } from 'aifn/foundation/tensor'
-import { datasetRegistry, generate, type RegimeTruth } from 'aifn-applied/data'
+import { datasetRegistry, generate, type RegimeTruth } from 'aifn-methods/data'
 import {
   interleavedFunctions,
   piecewiseLinear,
@@ -14,7 +14,7 @@ import {
   quadrantPlanes,
   regressionMixture,
   type RegimeDataset,
-} from 'aifn-applied/data/synthetic'
+} from 'aifn-methods/data/synthetic'
 
 const GENERATORS = {
   piecewiseLinear: (seed: string) => piecewiseLinear(stream(seed), { n: 150, pieces: 4 }),

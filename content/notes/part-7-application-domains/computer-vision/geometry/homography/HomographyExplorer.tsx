@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { Interactive, ParamButton, Readout, XYChart, type Handle, type XYSeries } from 'aifn-render'
+import { Button, Figure, Handle, Plot, Readout, seriesLayers, type SeriesSpec, useAxis } from 'aifn-render'
 
 type Pt = [number, number]
 type Mat3 = number[][]
@@ -106,9 +106,9 @@ export function HomographyExplorer() {
   const H = useMemo(() => homography(SOURCE, corners), [corners])
   const ok = H !== null && convex(corners)
 
-  const series = useMemo<XYSeries[]>(() => {
+  const series = useMemo<SeriesSpec[]>(() => {
     const square = { x: [0, 1, 1, 0, 0], y: [0, 0, 1, 1, 0] }
-    const out: XYSeries[] = [{ name: 'unit square (source)', type: 'line', ...square, muted: true, dashed: true }]
+    const out: SeriesSpec[] = [{ name: 'unit square (source)', type: 'line', ...square, muted: true, dashed: true }]
     if (H) {
       out.push({ name: 'warped grid', type: 'line', ...warpPaths(H, GRID), slot: 0 })
       out.push({ name: 'warped circle', type: 'line', ...warpPaths(H, CIRCLE), slot: 1 })
@@ -145,15 +145,23 @@ export function HomographyExplorer() {
 
   const affine = H !== null && Math.abs(H[2][0]) < 1e-6 && Math.abs(H[2][1]) < 1e-6
 
+  const xAxis = useAxis({ label: 'x′', range: X_RANGE })
+  const yAxis = useAxis({ label: 'y′', range: Y_RANGE, equal: xAxis })
   return (
-    <Interactive
+    <Figure
       title="A homography maps a square to any quadrilateral"
       caption="Drag the four corners. The homography is fixed by where the corners of the unit square (dashed) go: 4 point pairs give the 8 equations for its 8 degrees of freedom. Straight lines stay straight, but parallel grid lines meet at vanishing points (diamonds) and equal steps along a line become unequal. The circle maps to an ellipse while the quadrilateral stays convex. If the corners stop forming a convex quadrilateral, the line that maps to infinity passes through the square and the warp folds the plane over it."
       controls={
         <>
-          <ParamButton onClick={() => setCorners(PERSPECTIVE)}>perspective</ParamButton>
-          <ParamButton onClick={() => setCorners(SOURCE)}>identity</ParamButton>
-          <ParamButton
+          <Button variant="outline" size="sm" onClick={() => setCorners(PERSPECTIVE)}>
+            perspective
+          </Button>
+          <Button variant="outline" size="sm" onClick={() => setCorners(SOURCE)}>
+            identity
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
             onClick={() =>
               setCorners([
                 [0.2, 0],
@@ -164,10 +172,10 @@ export function HomographyExplorer() {
             }
           >
             affine
-          </ParamButton>
+          </Button>
         </>
       }
-      readout={
+      readouts={
         H ? (
           <>
             <Readout label="H row 1" value={H[0].map(fmt).join('  ')} />
@@ -183,16 +191,12 @@ export function HomographyExplorer() {
         )
       }
     >
-      <XYChart
-        series={series}
-        xRange={X_RANGE}
-        yRange={Y_RANGE}
-        equalAspect
-        handles={handles}
-        xLabel="x′"
-        yLabel="y′"
-        ariaLabel="Grid and circle warped by a homography"
-      />
-    </Interactive>
+      <Plot x={xAxis} y={yAxis} ariaLabel={'Grid and circle warped by a homography'}>
+        {seriesLayers(series)}
+        {(handles ?? []).map((h, i) => (
+          <Handle key={i} {...h} />
+        ))}
+      </Plot>
+    </Figure>
   )
 }

@@ -11,8 +11,8 @@ import {
   subgroupDiscovery,
   wraccQuality,
 } from 'aifn/learning/subgroups'
-import { plantedModelFlip, plantedSubgroups } from 'aifn-applied/data/synthetic'
-import { titanic } from 'aifn-applied/data/real'
+import { plantedModelFlip, plantedSubgroups } from 'aifn-methods/data/synthetic'
+import { titanic } from 'aifn-methods/data/real'
 
 const numbers = (c: unknown) => c as number[]
 

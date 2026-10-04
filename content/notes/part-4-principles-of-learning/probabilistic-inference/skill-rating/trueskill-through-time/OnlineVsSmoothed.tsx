@@ -1,14 +1,17 @@
-import { useMemo, useState } from 'react'
+import { useMemo } from 'react'
 import {
-  Interactive,
-  ParamChoice,
-  ParamSlider,
-  Readout,
-  XYChart,
+  choice,
+  Figure,
   formatNumber,
-  useParam,
+  int,
+  Plot,
+  Readout,
   type Segment,
-  type XYSeries,
+  Segments,
+  seriesLayers,
+  type SeriesSpec,
+  useAxis,
+  useFigureState,
 } from 'aifn-render'
 import { TS_DEFAULTS, trueSkill1v1, type Rating } from '../_shared/skill'
 
@@ -83,17 +86,26 @@ const ranking = (r: Rating[]) =>
     .join(' ')
 
 export function OnlineVsSmoothed() {
-  const sweeps = useParam(1, { min: 1, max: 8, step: 1 })
-  const [order, setOrder] = useState<'played' | 'reversed'>('played')
+  const state = useFigureState({
+    sweeps: int(1, { min: 1, max: 8, step: 1, label: 'EP sweeps', format: (v) => String(v) }),
+    order: choice<'played' | 'reversed'>(
+      [
+        { value: 'played', label: 'as played' },
+        { value: 'reversed', label: 'reversed' },
+      ],
+      'played',
+      { label: 'game order' },
+    ),
+  })
 
   const res = useMemo(() => {
-    const games = order === 'played' ? PLAYED : [...PLAYED].reverse()
-    return { online: online(games), ep: ep(games, sweeps.value) }
-  }, [order, sweeps.value])
+    const games = state.order === 'played' ? PLAYED : [...PLAYED].reverse()
+    return { online: online(games), ep: ep(games, state.sweeps) }
+  }, [state.order, state.sweeps])
 
   const { series, segments } = useMemo(() => {
     const xs = NAMES.map((_, i) => i + 1)
-    const mk = (name: string, r: Rating[], dx: number, slot: number): XYSeries => ({
+    const mk = (name: string, r: Rating[], dx: number, slot: number): SeriesSpec => ({
       name,
       type: 'scatter',
       x: xs.map((x) => x + dx),
@@ -105,31 +117,21 @@ export function OnlineVsSmoothed() {
     return {
       series: [
         mk('online, one pass', res.online, -0.12, 0),
-        mk(`EP, ${sweeps.value} sweep${sweeps.value > 1 ? 's' : ''}`, res.ep, 0.12, 1),
+        mk(`EP, ${state.sweeps} sweep${state.sweeps > 1 ? 's' : ''}`, res.ep, 0.12, 1),
       ],
       segments: [...bars(res.online, -0.12), ...bars(res.ep, 0.12)],
     }
-  }, [res, sweeps.value])
+  }, [res, state.sweeps])
 
+  const xAxis = useAxis({ label: 'player (A = 1, …, F = 6)', range: [0.5, 6.5] })
+  const yAxis = useAxis({ label: 'skill μ ± σ', range: [10, 40] })
   return (
-    <Interactive
+    <Figure
       title="Filtering against smoothing on five games"
+      state={state}
       caption="Six players start with the same belief. The games are A beats B, C beats D, E beats F, then B beats C and D beats E. One online pass leaves A, C and E tied, and B and D tied, because each update sees only the past. Step through the EP sweeps: repeated sweeps let the later games revise the earlier ones: B's win over C shows that A's win was against a good player. Skills are held fixed here, as within one year of TrueSkill Through Time. Bars are μ ± σ."
-      controls={
-        <>
-          <ParamSlider label="EP sweeps" param={sweeps} format={(v) => String(v)} withArrows />
-          <ParamChoice
-            label="game order"
-            value={order}
-            onChange={setOrder}
-            options={[
-              { value: 'played', label: 'as played' },
-              { value: 'reversed', label: 'reversed' },
-            ]}
-          />
-        </>
-      }
-      readout={
+
+      readouts={
         <>
           <Readout label="online order" value={ranking(res.online)} />
           <Readout label="EP order" value={ranking(res.ep)} />
@@ -140,15 +142,10 @@ export function OnlineVsSmoothed() {
         </>
       }
     >
-      <XYChart
-        series={series}
-        segments={segments}
-        xLabel="player (A = 1, …, F = 6)"
-        yLabel="skill μ ± σ"
-        xRange={[0.5, 6.5]}
-        yRange={[10, 40]}
-        height={300}
-      />
-    </Interactive>
+      <Plot x={xAxis} y={yAxis} height={300}>
+        {seriesLayers(series)}
+        <Segments segments={segments} />
+      </Plot>
+    </Figure>
   )
 }

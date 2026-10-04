@@ -1,7 +1,19 @@
 import { useMemo } from 'react'
-import { Interactive, ParamSlider, Readout, XYChart, formatNumber, useParam, type XYSeries } from 'aifn-render'
-import { rng } from '@/lib/math'
+import {
+  Figure,
+  float,
+  formatNumber,
+  int,
+  Plot,
+  Readout,
+  seriesLayers,
+  type SeriesSpec,
+  slider,
+  useAxis,
+  useFigureState,
+} from 'aifn-render'
 import { toeplitz } from '../_shared/stat'
+import { normal, stream } from 'aifn/foundation/random'
 
 const M = 8
 const STEPS = 1500
@@ -33,28 +45,30 @@ function extremeEigenvalues(R: number[][]) {
  * scaled to unit variance, so a controls the eigenvalue spread of R and the speed of the slowest mode.
  */
 export function LmsConvergence() {
-  const logMu = useParam(-1.6, { min: -3.5, max: -0.3, step: 0.05 })
-  const corr = useParam(0, { min: 0, max: 0.95, step: 0.05 })
-  const seed = useParam(1, { min: 1, max: 20, step: 1 })
-  const mu = 10 ** logMu.value
+  const state = useFigureState({
+    logMu: float(-1.6, { min: -3.5, max: -0.3, step: 0.05, label: 'log₁₀ step size μ' }),
+    corr: slider(0, 0.95, 0, { step: 0.05, label: 'input correlation a' }),
+    seed: int(1, { min: 1, max: 20, step: 1, label: 'seed' }),
+  })
+  const mu = 10 ** state.logMu
 
   const r = useMemo(() => {
-    const a = corr.value
+    const a = state.corr
     const R = toeplitz(Array.from({ length: M }, (_, k) => a ** k)) // unit-variance AR(1) autocorrelation
     const { max, min } = extremeEigenvalues(R)
     const mse = new Array(STEPS).fill(0)
     const devSq = new Array(STEPS).fill(0)
     let diverged = false
     for (let run = 0; run < RUNS; run++) {
-      const g = rng(1000 * seed.value + run)
+      const g = stream(1000 * state.seed + run)
       const w = new Array(M).fill(0)
       const buf = new Array(M).fill(0)
-      let u = g.normal()
+      let u = normal(g)
       for (let n = 0; n < STEPS; n++) {
-        u = a * u + Math.sqrt(1 - a * a) * g.normal()
+        u = a * u + Math.sqrt(1 - a * a) * normal(g)
         buf.unshift(u)
         buf.pop()
-        const d = UNKNOWN.reduce((s, h, k) => s + h * buf[k], 0) + Math.sqrt(NOISE) * g.normal()
+        const d = UNKNOWN.reduce((s, h, k) => s + h * buf[k], 0) + Math.sqrt(NOISE) * normal(g)
         const y = w.reduce((s, wk, k) => s + wk * buf[k], 0)
         const e = d - y
         for (let k = 0; k < M; k++) w[k] += mu * e * buf[k]
@@ -69,11 +83,11 @@ export function LmsConvergence() {
     }
     const trR = M // unit-variance input: tr R = M σ_u²
     return { mse, devSq, max, min, diverged, misadjustment: (mu * trR) / 2, bound: 2 / max, trBound: 2 / trR }
-  }, [mu, corr.value, seed.value])
+  }, [mu, state.corr, state.seed])
 
   const t = Array.from({ length: STEPS }, (_, n) => n)
   const clampDb = (v: number) => Math.max(-60, 10 * Math.log10(Math.max(v, 1e-12)))
-  const series: XYSeries[] = r.diverged
+  const series: SeriesSpec[] = r.diverged
     ? []
     : [
         { name: 'mean-squared error (dB)', type: 'line', x: t, y: r.mse.map(clampDb), slot: 0 },
@@ -88,18 +102,15 @@ export function LmsConvergence() {
         },
       ]
 
+  const xAxis = useAxis({ label: 'iteration n', hold: 'union' })
+  const yAxis = useAxis({ label: 'dB', range: [-60, 10] })
   return (
-    <Interactive
+    <Figure
       title="LMS system identification"
+      state={state}
       caption="An 8-tap LMS filter learns an unknown 8-tap system from white or correlated input, averaged over 20 runs. The error falls towards the noise floor σ_v² = −20 dB; the gap that remains is the excess error from gradient noise, about μ tr R / 2 of the floor. Raise μ and convergence speeds up while the floor rises; past about 2/tr R the filter diverges. Correlated input spreads the eigenvalues of R, and the slowest mode, set by λ_min, dominates the tail."
-      controls={
-        <>
-          <ParamSlider label="log₁₀ step size μ" param={logMu} />
-          <ParamSlider label="input correlation a" param={corr} />
-          <ParamSlider label="seed" param={seed} withArrows />
-        </>
-      }
-      readout={
+
+      readouts={
         <>
           <Readout label="μ" value={formatNumber(mu)} />
           <Readout label="λ_max, λ_min" value={`${formatNumber(r.max)}, ${formatNumber(r.min)}`} />
@@ -114,8 +125,10 @@ export function LmsConvergence() {
           The filter diverged: μ is too large for this input.
         </div>
       ) : (
-        <XYChart series={series} xLabel="iteration n" yLabel="dB" yRange={[-60, 10]} height={300} />
+        <Plot x={xAxis} y={yAxis} height={300}>
+          {seriesLayers(series)}
+        </Plot>
       )}
-    </Interactive>
+    </Figure>
   )
 }

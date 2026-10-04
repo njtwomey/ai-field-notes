@@ -1,15 +1,18 @@
-import { useMemo, useState } from 'react'
+import { useMemo } from 'react'
 import {
-  Interactive,
-  ParamChoice,
-  ParamSlider,
-  Readout,
-  XYChart,
+  choice,
+  Figure,
   formatNumber,
-  useParam,
-  type XYSeries,
+  int,
+  Plot,
+  Readout,
+  seriesLayers,
+  type SeriesSpec,
+  useAxis,
+  useFigureState,
 } from 'aifn-render'
-import { rng } from '@/lib/math'
+import { stream, uniform as drawUniform } from 'aifn/foundation/random'
+import type { Stream } from 'aifn/foundation/random'
 
 type DistId = 'bernoulli' | 'exponential' | 'cauchy'
 
@@ -39,21 +42,24 @@ function draw(id: DistId, u: () => number): number {
 
 /** Running means of independent draws: they settle on the mean when it exists and never settle for the Cauchy. */
 export function RunningMeans() {
-  const [id, setId] = useState<DistId>('exponential')
-  const [n, setN] = useState(1000)
-  const count = useParam(12, { min: 1, max: 50, step: 1 })
+  const state = useFigureState({
+    id: choice<DistId>(DISTRIBUTIONS, 'exponential', { label: 'distribution' }),
+    count: int(12, { min: 1, max: 50, step: 1, label: 'paths', format: (v) => String(v) }),
+    n: int(1000, { min: 50, max: MAX_N, step: 50, label: 'n (draws shown)' }),
+  })
 
   // All paths to MAX_N are simulated once per distribution and count; the n slider only changes how much is shown.
   // Path p has its own stream, so adding paths leaves the existing ones unchanged.
   const paths = useMemo(() => {
     const out: { x: number[]; y: number[] }[] = []
-    for (let p = 0; p < count.value; p++) {
-      const { uniform } = rng(1000 + p)
+    for (let p = 0; p < state.count; p++) {
+      const g: Stream = stream(1000 + p)
+      const uniform = () => drawUniform(g)
       let s = 0
       const x: number[] = []
       const y: number[] = []
       for (let i = 1; i <= MAX_N; i++) {
-        s += draw(id, uniform)
+        s += draw(state.id, uniform)
         if (i === 1 || i % STRIDE === 0) {
           x.push(i)
           y.push(s / i)
@@ -62,62 +68,54 @@ export function RunningMeans() {
       out.push({ x, y })
     }
     return out
-  }, [id, count.value])
+  }, [state.id, state.count])
 
-  const m = MOMENTS[id]
+  const m = MOMENTS[state.id]
   const center = m ? m.mu : 0
   const half = m ? 4 * m.sigma : 6
-  const series = useMemo((): XYSeries[] => {
+  const series = useMemo((): SeriesSpec[] => {
     const many = paths.length > 1
-    const shown = paths.map((p): XYSeries => {
-      const cut = p.x.findIndex((v) => v > n)
+    const shown = paths.map((p): SeriesSpec => {
+      const cut = p.x.findIndex((v) => v > state.n)
       const end = cut === -1 ? p.x.length : cut
       const name = many ? 'running means' : 'running mean'
       return { name, type: 'line', x: p.x.slice(0, end), y: p.y.slice(0, end), slot: 1, thin: many }
     })
     if (!m) return shown
-    const grid = Array.from({ length: 200 }, (_, i) => 1 + ((n - 1) * i) / 199)
+    const grid = Array.from({ length: 200 }, (_, i) => 1 + ((state.n - 1) * i) / 199)
     return [
       ...shown,
       { name: 'μ + 2σ/√n', type: 'line', x: grid, y: grid.map((k) => m.mu + (2 * m.sigma) / Math.sqrt(k)), slot: 0 },
       { name: 'μ − 2σ/√n', type: 'line', x: grid, y: grid.map((k) => m.mu - (2 * m.sigma) / Math.sqrt(k)), slot: 0 },
-      { name: 'μ', type: 'line', x: [1, n], y: [m.mu, m.mu], emphasis: true, dashed: true },
+      { name: 'μ', type: 'line', x: [1, state.n], y: [m.mu, m.mu], emphasis: true, dashed: true },
     ]
-  }, [paths, n, m])
+  }, [paths, state.n, m])
 
   const finals = paths.map((p) => {
-    const cut = p.x.findIndex((v) => v > n)
+    const cut = p.x.findIndex((v) => v > state.n)
     return p.y[(cut === -1 ? p.x.length : cut) - 1]
   })
   const spread = Math.max(...finals) - Math.min(...finals)
 
+  const xAxis = useAxis({ label: 'n', range: [1, state.n] })
+  const yAxis = useAxis({ label: 'running mean', range: [center - half, center + half] })
   return (
-    <Interactive
+    <Figure
       title="Running means of independent draws"
+      state={state}
       caption="Independent sequences, each drawn as a light line showing the mean of its first n draws; the paths slider sets how many sequences. For the Bernoulli and exponential distributions the paths close in on μ inside the band μ ± 2σ/√n. The Cauchy distribution has no mean, and its running means keep jumping however large n is."
-      controls={
-        <>
-          <ParamChoice label="distribution" value={id} onChange={setId} options={DISTRIBUTIONS} />
-          <ParamSlider label="paths" param={count} withArrows format={(v) => String(v)} />
-          <ParamSlider label="n (draws shown)" value={n} onChange={setN} min={50} max={MAX_N} step={50} withArrows />
-        </>
-      }
-      readout={
+
+      readouts={
         <>
           <Readout label="mean μ" value={m ? formatNumber(m.mu) : 'undefined'} />
-          <Readout label={`spread of the ${count.value} means at n`} value={formatNumber(spread)} />
-          {m && <Readout label="4σ/√n" value={formatNumber((4 * m.sigma) / Math.sqrt(n))} />}
+          <Readout label={`spread of the ${state.count} means at n`} value={formatNumber(spread)} />
+          {m && <Readout label="4σ/√n" value={formatNumber((4 * m.sigma) / Math.sqrt(state.n))} />}
         </>
       }
     >
-      <XYChart
-        height={320}
-        xLabel="n"
-        yLabel="running mean"
-        series={series}
-        xRange={[1, n]}
-        yRange={[center - half, center + half]}
-      />
-    </Interactive>
+      <Plot x={xAxis} y={yAxis} height={320}>
+        {seriesLayers(series)}
+      </Plot>
+    </Figure>
   )
 }

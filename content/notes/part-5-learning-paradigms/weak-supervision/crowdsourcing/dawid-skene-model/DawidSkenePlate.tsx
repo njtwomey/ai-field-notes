@@ -1,5 +1,4 @@
-import { Interactive } from 'aifn-render'
-import { Diagram } from 'aifn-render'
+import { Diagram, Figure } from 'aifn-render'
 import type { DiagramSpec } from 'aifn-render'
 
 const spec: DiagramSpec = {
@@ -30,7 +29,7 @@ const spec: DiagramSpec = {
 /** The Dawid–Skene model as a plate diagram with crossed item and annotator plates. */
 export function DawidSkenePlate() {
   return (
-    <Interactive
+    <Figure
       title="The Dawid–Skene model"
       caption="Each item's true class t_i is drawn from the class prior p and is never observed. Annotator k's responses to item i (shaded: how often each class was given) depend on the true class through that annotator's confusion matrix π⁽ᵏ⁾. The responses sit where the item plate and the annotator plate cross: one set per item–annotator pair."
     >
@@ -38,6 +37,6 @@ export function DawidSkenePlate() {
         spec={spec}
         ariaLabel="Plate diagram: class prior p points to the latent true class t_i in the item plate; t_i and the annotator's confusion matrix pi^(k) point to the observed responses, which lie in both the item and the annotator plates"
       />
-    </Interactive>
+    </Figure>
   )
 }

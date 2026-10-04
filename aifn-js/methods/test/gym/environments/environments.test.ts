@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { DomainError } from 'aifn/foundation/errors'
-import { cellState, type TabularMdp } from 'aifn-applied/gym'
+import { cellState, type TabularMdp } from 'aifn-methods/gym'
 import {
   FROZEN_LAKE_MAPS,
   bernoulliBandit,
@@ -10,7 +10,7 @@ import {
   gridworld,
   linearBandit,
   maze,
-} from 'aifn-applied/gym/environments'
+} from 'aifn-methods/gym/environments'
 import { child, stream } from 'aifn/foundation/random'
 
 /** Every non-terminal (state, action) has a probability distribution over outcomes; terminals have none. */

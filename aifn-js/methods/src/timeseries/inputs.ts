@@ -1,5 +1,5 @@
 /**
- * Private input conversions of `aifn-applied/timeseries`: series and coefficient arguments (`VectorLike`,
+ * Private input conversions of `aifn-methods/timeseries`: series and coefficient arguments (`VectorLike`,
  * `MatrixLike`) as arrays of numbers for the scalar recursions, read with `aifn/foundation/tensor`'s `dense`
  * converters. Matrix algebra uses `aifn/foundation/tensor` and `aifn/numerics/linalg`; the Kalman recursions use
  * `aifn/inference/filtering`'s working form (rows of numbers), which `toSeries` produces.

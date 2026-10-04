@@ -1,5 +1,5 @@
 /**
- * `aifn-applied/generative/energy`: energy-based models on toy data, centred on JEM (Grathwohl et al., 2019): a
+ * `aifn-methods/generative/energy`: energy-based models on toy data, centred on JEM (Grathwohl et al., 2019): a
  * softmax classifier's logits read as an energy E(x) = −logsumexp_y f(x)[y], trained with cross-entropy plus the
  * contrastive-divergence term of log p(x).
  *

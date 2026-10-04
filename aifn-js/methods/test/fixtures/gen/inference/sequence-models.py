@@ -1,4 +1,4 @@
-"""Golden values for aifn-applied/inference/sequence-models: a linear-chain CRF trained by CRFsuite (python-crfsuite,
+"""Golden values for aifn-methods/inference/sequence-models: a linear-chain CRF trained by CRFsuite (python-crfsuite,
 L-BFGS with L2) on a small tagging task, with every state and transition weight, and the marginals and Viterbi tags of
 held-out sequences. The attributes are the CRF++ template strings of `TEMPLATES`, expanded here independently of aifn:
 unigram strings conjoined with every label (`feature.possible_states`) and all label pairs as transitions (`B`)."""

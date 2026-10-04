@@ -1,5 +1,5 @@
 /**
- * `aifn-applied/text/hyphenation`: three ways to hyphenate English words, compared on dictionary points. Liang's
+ * `aifn-methods/text/hyphenation`: three ways to hyphenate English words, compared on dictionary points. Liang's
  * patterns learned by PATGEN (`liangLearningRun`, on `aifn/text/hyphenation`), a NETtalk-style 7-character window MLP
  * (`WindowTagger`) and a small bidirectional LSTM tagger (`BiRnnTagger`), trained side by side
  * (`taggerTrainingRun`); a linear-chain CRF over CRF++ templates (`crfHyphenationRun`, `HYPHENATION_TEMPLATES`); and

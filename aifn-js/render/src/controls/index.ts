@@ -2,10 +2,11 @@
  * Structured interactive controls for aifn figures and specimens:
  * - visual: SwatchPicker, RampPicker, ThemeToggle, RevealToggle
  * - numeric: Slider, NumberField, useNumberDraft
- * - selection: Select, Combobox, MultiCombobox, Choice, options
+ * - selection: Select, Segmented, Combobox, MultiCombobox, Choice, options
  * - playback: Player, StepControls, usePlayhead
  * - schema: params, ParamControls, variants, VariantControls, useParam
- * - code: CodeEditor, prologLanguage
+ * - code: CodeEditor, CodeBlock (read-only, highlighted, copyable), prologLanguage; programs: useProgram,
+ *   useEntryArgs, EntryControls, ProgramStatus
  * - base: ControlLabel, StatusText, Switch
  */
 export * from './visual'

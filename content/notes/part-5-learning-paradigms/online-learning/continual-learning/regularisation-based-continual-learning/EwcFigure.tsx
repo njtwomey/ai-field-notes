@@ -1,6 +1,17 @@
 import { useMemo } from 'react'
-import { Interactive, ParamSlider, Readout, XYChart, formatNumber, useParam, type XYSeries } from 'aifn-render'
-import { eigSym, type Vec2 } from '@/lib/math/mat2'
+import {
+  Figure,
+  float,
+  formatNumber,
+  Handle,
+  Plot,
+  Readout,
+  seriesLayers,
+  type SeriesSpec,
+  useAxis,
+  useFigureState,
+} from 'aifn-render'
+import { eigh2, type Vec2 } from 'aifn/numerics/linalg'
 
 type Sym = [number, number, number] // [[p, q], [q, r]]
 
@@ -20,7 +31,11 @@ const quad = ([p, q, r]: Sym, c: Vec2, t: Vec2) => {
 
 /** The level set ½(θ − c)ᵀH(θ − c) = level, as a closed polyline. */
 function ellipse(h: Sym, c: Vec2, level: number): { x: number[]; y: number[] } {
-  const { values, vectors } = eigSym(...h)
+  const [p, q, r] = h
+  const { values, vectors } = eigh2([
+    [p, q],
+    [q, r],
+  ])
   const x: number[] = []
   const y: number[] = []
   for (let k = 0; k <= 96; k++) {
@@ -48,11 +63,21 @@ function ewc(f: Sym, b: Vec2, lambda: number): Vec2 {
 
 /** Two quadratic tasks; EWC with the exact curvature of task A against its diagonal approximation. */
 export function EwcFigure() {
-  const logLambda = useParam(0, { min: -2, max: 2, step: 0.05 })
-  const b1 = useParam(-1, { min: -2.5, max: 2.5, step: 0.05 })
-  const b2 = useParam(0.5, { min: -2.5, max: 2.5, step: 0.05 })
-  const lambda = 10 ** logLambda.value
-  const b: Vec2 = useMemo(() => [b1.value, b2.value], [b1.value, b2.value])
+  const state = useFigureState({
+    logLambda: float(0, {
+      min: -2,
+      max: 2,
+      step: 0.05,
+      label: 'penalty strength λ',
+      points_per_decade: 2,
+      logTransform: 'value-is-log',
+      format: (v) => formatNumber(10 ** v),
+    }),
+    b1: float(-1, { min: -2.5, max: 2.5, step: 0.05, label: 'task B optimum, θ₁' }),
+    b2: float(0.5, { min: -2.5, max: 2.5, step: 0.05, label: 'task B optimum, θ₂' }),
+  })
+  const lambda = 10 ** state.logLambda
+  const b: Vec2 = useMemo(() => [state.b1, state.b2], [state.b1, state.b2])
 
   const paths = useMemo(() => {
     const full = LAMBDAS.map((l) => ewc(H_A, b, l))
@@ -62,12 +87,12 @@ export function EwcFigure() {
   const full = ewc(H_A, b, lambda)
   const diag = ewc(DIAG_A, b, lambda)
 
-  const series: XYSeries[] = [
-    ...LEVELS.map((lv): XYSeries => {
+  const series: SeriesSpec[] = [
+    ...LEVELS.map((lv): SeriesSpec => {
       const e = ellipse(H_A, A, lv)
       return { name: 'task A loss contours', type: 'line', x: e.x, y: e.y, slot: SLOTS.a }
     }),
-    ...LEVELS.map((lv): XYSeries => {
+    ...LEVELS.map((lv): SeriesSpec => {
       const e = ellipse(H_B, b, lv)
       return { name: 'task B loss contours', type: 'line', x: e.x, y: e.y, slot: SLOTS.b }
     }),
@@ -92,18 +117,15 @@ export function EwcFigure() {
     { name: 'task optima', type: 'scatter', x: [A[0], b[0]], y: [A[1], b[1]], emphasis: true },
   ]
 
+  const xAxis = useAxis({ label: 'θ₁', range: [-3, 3] })
+  const yAxis = useAxis({ label: 'θ₂', range: [-3, 3], equal: xAxis })
   return (
-    <Interactive
+    <Figure
       title="Elastic weight consolidation on two quadratic tasks"
+      state={state}
       caption="Task A has its minimum at (1, 1) with correlated curvature; task B's minimum can be dragged. Training on B alone would move the weights to B's minimum and raise A's loss. EWC adds the penalty λ/2 (θ − θ_A)ᵀF(θ − θ_A). With the exact curvature of A (the Laplace approximation, exact for a quadratic) and λ = 1, the solution is the joint minimiser of both losses. The diagonal approximation ignores the correlation between the two weights, so at λ = 1 it misses the joint minimiser: with the initial optima the summed loss is 1.40 against 1.08. Large λ pins the weights to θ_A; small λ lets them go to B's minimum."
-      controls={
-        <>
-          <ParamSlider label="penalty strength λ" param={logLambda} format={(v) => formatNumber(10 ** v)} />
-          <ParamSlider label="task B optimum, θ₁" param={b1} />
-          <ParamSlider label="task B optimum, θ₂" param={b2} />
-        </>
-      }
-      readout={
+
+      readouts={
         <>
           <Readout label="exact: L_A" value={formatNumber(quad(H_A, A, full))} />
           <Readout label="L_B" value={formatNumber(quad(H_B, b, full))} />
@@ -112,26 +134,18 @@ export function EwcFigure() {
         </>
       }
     >
-      <XYChart
-        series={series}
-        xLabel="θ₁"
-        yLabel="θ₂"
-        xRange={[-3, 3]}
-        yRange={[-3, 3]}
-        equalAspect
-        height={380}
-        handles={[
-          {
-            kind: 'point',
-            at: b,
-            label: 'task B optimum',
-            onDrag: ([x, y]) => {
-              b1.set(x)
-              b2.set(y)
-            },
-          },
-        ]}
-      />
-    </Interactive>
+      <Plot x={xAxis} y={yAxis} height={380}>
+        {seriesLayers(series)}
+        <Handle
+          kind="point"
+          at={b}
+          label="task B optimum"
+          onDrag={([x, y]) => {
+            state.set('b1', x)
+            state.set('b2', y)
+          }}
+        />
+      </Plot>
+    </Figure>
   )
 }

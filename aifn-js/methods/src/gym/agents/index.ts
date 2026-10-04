@@ -1,5 +1,5 @@
 /**
- * `aifn-applied/gym/agents`: agents on the gym protocol. `random.ts` (the baseline), `bandits.ts` (the bandit
+ * `aifn-methods/gym/agents`: agents on the gym protocol. `random.ts` (the baseline), `bandits.ts` (the bandit
  * policies), `tabular.ts` (TD control, n-step SARSA, Monte Carlo control, TD(0) prediction, REINFORCE) and
  * `planning.ts` (value and policy iteration as traceable algorithms on an MDP's tables, and as planning agents),
  * `dqn.ts` (the deep Q-network and its persistent replay buffer); children:

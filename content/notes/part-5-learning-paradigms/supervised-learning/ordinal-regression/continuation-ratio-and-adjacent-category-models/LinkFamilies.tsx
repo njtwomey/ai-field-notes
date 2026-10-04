@@ -1,19 +1,22 @@
-import { useMemo, useState } from 'react'
-import { MathText } from 'aifn-render'
+import { useMemo } from 'react'
 import {
-  Interactive,
-  ParamChoice,
-  ParamSlider,
-  Readout,
-  XYChart,
+  choice,
+  Figure,
+  float,
   formatNumber,
-  useParam,
-  type Handle,
-  type XYSeries,
+  Handle,
+  MathText,
+  Plot,
+  Readout,
+  seriesLayers,
+  type SeriesSpec,
+  useAxis,
+  useFigureState,
 } from 'aifn-render'
-import { linspace, sigmoid } from '@/lib/math'
 import { useClassColors } from '../_shared/classColor'
 import { adjacentProbs, continuationProbs, cumulativeProbs } from '../_shared/ordinal'
+import { linspace, toFlat } from 'aifn/foundation/tensor'
+import { sigmoid } from 'aifn/numerics/special'
 
 type Family = 'cumulative' | 'continuation' | 'adjacent'
 const FAMILIES = [
@@ -21,12 +24,12 @@ const FAMILIES = [
   { value: 'continuation' as const, label: 'continuation ratio' },
   { value: 'adjacent' as const, label: 'adjacent category' },
 ]
-const ETA = linspace(-6, 6, 241)
+const ETA = toFlat(linspace(-6, 6, 241))
 const THETA = [-2, 0, 1.5]
 
 const probsOf = (family: Family, eta: number) =>
   family === 'cumulative'
-    ? cumulativeProbs(sigmoid, eta, THETA)
+    ? cumulativeProbs((v: number) => sigmoid(v), eta, THETA)
     : family === 'continuation'
       ? continuationProbs(eta, THETA)
       : adjacentProbs(eta, THETA)
@@ -51,12 +54,14 @@ function logits(family: Family, eta: number): { label: string; value: number }[]
  * predictor. Each family is logistic regression on a different set of binary comparisons.
  */
 export function LinkFamilies() {
-  const [family, setFamily] = useState<Family>('continuation')
-  const eta = useParam(0, { min: -6, max: 6, step: 0.05 })
+  const state = useFigureState({
+    family: choice<Family>(FAMILIES, 'continuation', { label: 'family' }),
+    eta: float(0, { min: -6, max: 6, step: 0.05, label: 'linear predictor η' }),
+  })
   const colors = useClassColors(4)
 
-  const series = useMemo<XYSeries[]>(() => {
-    const table = ETA.map((e) => probsOf(family, e))
+  const series = useMemo<SeriesSpec[]>(() => {
+    const table = ETA.map((e) => probsOf(state.family, e))
     return [0, 1, 2, 3].map((k) => ({
       name: `P(y = ${k + 1})`,
       type: 'line',
@@ -64,37 +69,28 @@ export function LinkFamilies() {
       y: table.map((p) => p[k]),
       color: colors[k],
     }))
-  }, [family, colors])
+  }, [state.family, colors])
 
-  const handles: Handle[] = [{ kind: 'x', at: eta.value, label: 'η', onDrag: eta.set }]
-  const here = logits(family, eta.value)
+  const here = logits(state.family, state.eta)
 
+  const xAxis = useAxis({ label: 'linear predictor η', range: [-6, 6] })
+  const yAxis = useAxis({ label: 'class probability', range: [0, 1] })
   return (
-    <Interactive
+    <Figure
       title="Three ways to split an ordered outcome into binary comparisons"
+      state={state}
       caption={
         <MathText text="Four classes, thresholds $\theta = (-2, 0, 1.5)$ and one linear predictor $\eta$. The cumulative family compares $y \le k$ with $y > k$; the continuation ratio compares $y = k$ with $y > k$ among outcomes that reached $k$; the adjacent-category family compares $y = k + 1$ with $y = k$. The readouts show each family's three binary logits at the cursor: each is $\pm(\eta - \theta_k)$ by construction. Drag the cursor along $\eta$." />
       }
-      controls={
-        <>
-          <ParamChoice label="family" value={family} onChange={setFamily} options={FAMILIES} />
-          <ParamSlider label="linear predictor η" param={eta} />
-        </>
-      }
-      readout={here.map((l) => (
+
+      readouts={here.map((l) => (
         <Readout key={l.label} label={l.label} value={formatNumber(l.value)} />
       ))}
     >
-      <XYChart
-        series={series}
-        handles={handles}
-        xRange={[-6, 6]}
-        yRange={[0, 1]}
-        xLabel="linear predictor η"
-        yLabel="class probability"
-        height={300}
-        ariaLabel="Class probability curves for the chosen ordinal family"
-      />
-    </Interactive>
+      <Plot x={xAxis} y={yAxis} height={300} ariaLabel={'Class probability curves for the chosen ordinal family'}>
+        {seriesLayers(series)}
+        <Handle {...state.handle('eta', { label: 'η' })} />
+      </Plot>
+    </Figure>
   )
 }

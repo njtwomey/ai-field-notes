@@ -1,5 +1,4 @@
-import { Interactive } from 'aifn-render'
-import { Diagram } from 'aifn-render'
+import { Diagram, Figure } from 'aifn-render'
 import type { DiagramEdge, DiagramNode, DiagramSpec } from 'aifn-render'
 
 const ROUNDS: { m: string; x: number }[] = [
@@ -88,7 +87,7 @@ const spec: DiagramSpec = { unit: 38, nodes, edges }
 /** The rounds of AdaBoost: fit, score, reweight, and a weighted vote at the end. */
 export function AdaBoostDiagram() {
   return (
-    <Interactive
+    <Figure
       title="The rounds of AdaBoost"
       caption="Each round fits a weak learner to the currently weighted data, scores it by its weighted error and gives it the vote α_m. The weights of the points it misclassifies are multiplied by e^α_m before the next round, so the next learner concentrates on them. The final classifier is the sign of the α-weighted vote."
     >
@@ -96,6 +95,6 @@ export function AdaBoostDiagram() {
         spec={spec}
         ariaLabel="Rounds 1, 2 to M: each round fits a weak learner to weighted data and computes its error and vote; misclassified points are up-weighted for the next round; all learners are combined by a weighted vote"
       />
-    </Interactive>
+    </Figure>
   )
 }

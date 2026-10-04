@@ -4,18 +4,7 @@ import { type IterateState, type ObjectiveFn } from 'aifn/optim'
 import { child, normals, stream } from 'aifn/foundation/random'
 import { toFlat } from 'aifn/foundation/tensor'
 import { trace } from 'aifn/foundation/trace'
-import {
-  Bars,
-  ControlRow,
-  Curve,
-  Figure,
-  formatNumber,
-  Plot,
-  Plots,
-  Readout,
-  Slider,
-  useAxis,
-} from 'aifn-render'
+import { Bars, ControlRow, Curve, Figure, formatNumber, Plot, Plots, Readout, Slider, useAxis } from 'aifn-render'
 
 export function ProximalExplorer() {
   const [logLambda, setLogLambda] = useState(-0.5)
@@ -27,9 +16,7 @@ export function ProximalExplorer() {
     const A = toFlat(normals(child(s, 'A'), [40, 20]))
     const truth = Array.from({ length: 20 }, (_, j) => (j % 5 === 0 ? 3 - j / 5 : 0))
     const noise = toFlat(normals(child(s, 'noise'), 40, 0, 0.1))
-    const b = Array.from({ length: 40 }, (_, i) =>
-      truth.reduce((acc, t, j) => acc + A[i * 20 + j] * t, 0) + noise[i],
-    )
+    const b = Array.from({ length: 40 }, (_, i) => truth.reduce((acc, t, j) => acc + A[i * 20 + j] * t, 0) + noise[i])
     const f: ObjectiveFn = (x) => {
       const v = toFlat(x)
       const r = b.map((bi, i) => v.reduce((acc, vj, j) => acc + A[i * 20 + j] * vj, 0) - bi)
@@ -96,7 +83,7 @@ export function ProximalExplorer() {
         />
       </ControlRow>
 
-      <div className="flex flex-wrap gap-4 text-xs font-mono text-muted-foreground my-2">
+      <div className="my-2 flex flex-wrap gap-4 font-mono text-xs text-muted-foreground">
         <Readout label="λ" value={formatNumber(lambda)} />
         <Readout label="non-zero (ISTA)" value={`${nonZeroA} / 20`} />
         <Readout label="non-zero (FISTA)" value={`${nonZeroB} / 20`} />

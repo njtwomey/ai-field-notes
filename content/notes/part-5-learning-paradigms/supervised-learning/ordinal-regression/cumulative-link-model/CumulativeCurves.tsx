@@ -1,19 +1,23 @@
 import { useMemo } from 'react'
-import { MathText } from 'aifn-render'
 import {
-  Interactive,
-  ParamSlider,
-  Readout,
-  XYChart,
+  Figure,
+  float,
   formatNumber,
-  useParam,
-  type Handle,
+  Handle,
+  MathText,
+  Plot,
+  Readout,
   type Segment,
-  type XYSeries,
+  Segments,
+  seriesLayers,
+  type SeriesSpec,
+  useAxis,
+  useFigureState,
 } from 'aifn-render'
-import { linspace, sigmoid } from '@/lib/math'
+import { linspace, toFlat } from 'aifn/foundation/tensor'
+import { sigmoid } from 'aifn/numerics/special'
 
-const ETA = linspace(-6, 6, 241)
+const ETA = toFlat(linspace(-6, 6, 241))
 const THETA = [-2, 0, 1.5]
 
 /**
@@ -22,9 +26,11 @@ const THETA = [-2, 0, 1.5]
  * neighbouring curves.
  */
 export function CumulativeCurves() {
-  const eta = useParam(0.5, { min: -6, max: 6, step: 0.05 })
+  const state = useFigureState({
+    eta: float(0.5, { min: -6, max: 6, step: 0.05, label: 'linear predictor η' }),
+  })
 
-  const series = useMemo<XYSeries[]>(
+  const series = useMemo<SeriesSpec[]>(
     () =>
       THETA.map((t, k) => ({
         name: `P(y ≤ ${k + 1})`,
@@ -36,34 +42,30 @@ export function CumulativeCurves() {
     [],
   )
 
-  const cum = [0, ...THETA.map((t) => sigmoid(t - eta.value)), 1]
+  const cum = [0, ...THETA.map((t) => sigmoid(t - state.eta)), 1]
   const probs = cum.slice(1).map((c, k) => c - cum[k])
   // The gaps at the cursor, drawn as thin segments: each one is a class probability.
-  const segments: Segment[] = cum.slice(1).map((c, k) => ({ from: [eta.value, cum[k]], to: [eta.value, c] }))
-  const handles: Handle[] = [{ kind: 'x', at: eta.value, label: 'η', onDrag: eta.set }]
+  const segments: Segment[] = cum.slice(1).map((c, k) => ({ from: [state.eta, cum[k]], to: [state.eta, c] }))
 
+  const xAxis = useAxis({ label: 'linear predictor η', range: [-6, 6] })
+  const yAxis = useAxis({ label: 'cumulative probability', range: [0, 1] })
   return (
-    <Interactive
+    <Figure
       title="Cumulative curves and the gaps between them"
+      state={state}
       caption={
         <MathText text="Each curve is $P(y \le k \mid \eta) = \sigma(\theta_k - \eta)$ for thresholds $\theta = (-2, 0, 1.5)$. The three curves are the same sigmoid shifted sideways, so they never cross. At the cursor, the gap between neighbouring curves is a class probability: the lowest gap is $P(y = 1)$ and the gap above the top curve is $P(y = 4)$. Drag the cursor along $\eta$." />
       }
-      controls={<ParamSlider label="linear predictor η" param={eta} />}
-      readout={probs.map((p, k) => (
+
+      readouts={probs.map((p, k) => (
         <Readout key={k} label={`P(y = ${k + 1})`} value={formatNumber(p)} />
       ))}
     >
-      <XYChart
-        series={series}
-        segments={segments}
-        handles={handles}
-        xRange={[-6, 6]}
-        yRange={[0, 1]}
-        xLabel="linear predictor η"
-        yLabel="cumulative probability"
-        height={300}
-        ariaLabel="Cumulative probability curves against the linear predictor"
-      />
-    </Interactive>
+      <Plot x={xAxis} y={yAxis} height={300} ariaLabel={'Cumulative probability curves against the linear predictor'}>
+        {seriesLayers(series)}
+        <Segments segments={segments} />
+        <Handle {...state.handle('eta', { label: 'η' })} />
+      </Plot>
+    </Figure>
   )
 }

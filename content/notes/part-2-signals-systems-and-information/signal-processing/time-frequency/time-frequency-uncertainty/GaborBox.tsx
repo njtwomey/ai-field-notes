@@ -1,6 +1,8 @@
-import { useMemo, useState } from 'react'
-import { Interactive, ParamChoice, ParamSlider, Readout, XYChart, formatNumber, useParam } from 'aifn-render'
-import { fft, makeWindow as dspWindow } from '@/lib/dsp'
+import { useMemo } from 'react'
+import { Area, choice, Figure, formatNumber, int, Plot, Readout, useAxis, useFigureState } from 'aifn-render'
+import { fft } from 'aifn/foundation/fourier'
+import { complexAbs, toFlat } from 'aifn/foundation/tensor'
+import { getWindow } from 'aifn/signal/windows'
 
 type Shape = 'gaussian' | 'hann' | 'blackman'
 
@@ -19,7 +21,7 @@ function makeWindow(shape: Shape, s: number): Float64Array {
     return w
   }
   const span = Math.min(LENGTH, Math.round((6 * s * FS) / 1000))
-  const core = dspWindow(shape, span)
+  const core = toFlat(getWindow(shape, span))
   const start = Math.floor((LENGTH - span) / 2)
   w.set(core, start)
   return w
@@ -30,16 +32,27 @@ function makeWindow(shape: Shape, s: number): Float64Array {
  * density. Their product is at least 1/(4π), with equality only for the Gaussian.
  */
 export function GaborBox() {
-  const [shape, setShape] = useState<Shape>('gaussian')
-  const width = useParam(20, { min: 4, max: 80, step: 1 })
+  const state = useFigureState({
+    shape: choice<Shape>(
+      [
+        { value: 'gaussian', label: 'Gaussian' },
+        { value: 'hann', label: 'Hann' },
+        { value: 'blackman', label: 'Blackman' },
+      ],
+      'gaussian',
+      { label: 'window' },
+    ),
+    width: int(20, { min: 4, max: 80, step: 1, label: 'width (ms)', format: (v) => `${v} ms` }),
+  })
 
   const r = useMemo(() => {
-    const w = makeWindow(shape, width.value)
+    const w = makeWindow(state.shape, state.width)
     const mid = (LENGTH - 1) / 2
     const energy = w.reduce((a, v) => a + v * v, 0)
     const sigmaT = Math.sqrt(w.reduce((a, v, i) => a + ((i - mid) / FS) ** 2 * v * v, 0) / energy)
-    const { re, im } = fft(w, NFFT)
-    const power = re.map((v, k) => v * v + im[k] * im[k])
+    const padded = new Float64Array(NFFT)
+    padded.set(w)
+    const power = toFlat(complexAbs(fft(padded))).map((m) => m * m)
     const freq = (k: number) => ((k <= NFFT / 2 ? k : k - NFFT) * FS) / NFFT
     const total = power.reduce((a, v) => a + v, 0)
     const sigmaF = Math.sqrt(power.reduce((a, v, k) => a + freq(k) ** 2 * v, 0) / total)
@@ -52,33 +65,23 @@ export function GaborBox() {
     return {
       time: { x: timeX, y: Array.from(w) },
       spec: { x: specF, y: specF.map((f) => Math.sqrt(power[bin(f)]) / peak) },
-      timeSpan: Math.min(512, 3.5 * width.value),
+      timeSpan: Math.min(512, 3.5 * state.width),
       freqSpan: span,
       sigmaT,
       sigmaF,
     }
-  }, [shape, width.value])
+  }, [state.shape, state.width])
 
+  const xAxis = useAxis({ label: 'time (ms)', range: [-r.timeSpan, r.timeSpan] })
+  const yAxis = useAxis({ label: 'amplitude', range: [0, 1.05] })
+  const xAxis2 = useAxis({ label: 'frequency (Hz)', range: [-r.freqSpan, r.freqSpan] })
+  const yAxis2 = useAxis({ label: 'relative magnitude', range: [0, 1.05] })
   return (
-    <Interactive
+    <Figure
       title="A window cannot be narrow in time and frequency at once"
+      state={state}
       caption="Left: the window in time. Right: its magnitude spectrum. The readouts measure each spread as the standard deviation of the normalised energy, |w(t)|² in time and |W(f)|² in frequency. Narrowing the window in time widens it in frequency, and the product σ_t σ_f never falls below 1/(4π) ≈ 0.0796. The Gaussian meets the bound exactly at every width; Hann and Blackman windows, shown spanning six widths, come within a few per cent."
-      controls={
-        <>
-          <ParamChoice
-            label="window"
-            value={shape}
-            onChange={setShape}
-            options={[
-              { value: 'gaussian', label: 'Gaussian' },
-              { value: 'hann', label: 'Hann' },
-              { value: 'blackman', label: 'Blackman' },
-            ]}
-          />
-          <ParamSlider label="width (ms)" param={width} format={(v) => `${v} ms`} />
-        </>
-      }
-      readout={
+      readouts={
         <>
           <Readout label="σ_t" value={`${formatNumber(1000 * r.sigmaT)} ms`} />
           <Readout label="σ_f" value={`${formatNumber(r.sigmaF)} Hz`} />
@@ -88,23 +91,13 @@ export function GaborBox() {
       }
     >
       <div className="grid gap-4 md:grid-cols-2">
-        <XYChart
-          series={[{ name: 'w(t)', type: 'line', ...r.time, slot: 0, area: true }]}
-          xLabel="time (ms)"
-          yLabel="amplitude"
-          xRange={[-r.timeSpan, r.timeSpan]}
-          yRange={[0, 1.05]}
-          height={260}
-        />
-        <XYChart
-          series={[{ name: '|W(f)|', type: 'line', ...r.spec, slot: 1, area: true }]}
-          xLabel="frequency (Hz)"
-          yLabel="relative magnitude"
-          xRange={[-r.freqSpan, r.freqSpan]}
-          yRange={[0, 1.05]}
-          height={260}
-        />
+        <Plot x={xAxis} y={yAxis} height={260}>
+          <Area name="w(t)" {...r.time} slot={0} />
+        </Plot>
+        <Plot x={xAxis2} y={yAxis2} height={260}>
+          <Area name="|W(f)|" {...r.spec} slot={1} />
+        </Plot>
       </div>
-    </Interactive>
+    </Figure>
   )
 }

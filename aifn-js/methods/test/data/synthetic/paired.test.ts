@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { datasetRegistry, generate } from 'aifn-applied/data'
-import { PAIRED_RGB, pairedShapes, type PairedViews } from 'aifn-applied/data/synthetic'
+import { datasetRegistry, generate } from 'aifn-methods/data'
+import { PAIRED_RGB, pairedShapes, type PairedViews } from 'aifn-methods/data/synthetic'
 import { stream } from 'aifn/foundation/random'
 import { defaults } from 'aifn/foundation/space'
 import { toFlat } from 'aifn/foundation/tensor'

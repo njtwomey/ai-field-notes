@@ -1,28 +1,8 @@
 import { useMemo, useState } from 'react'
-import {
-  ControlRow,
-  Figure,
-  Plot,
-  Plots,
-  Points,
-  Raster,
-  Readout,
-  Select,
-  formatNumber,
-  useAxis,
-} from 'aifn-render'
+import { ControlRow, Figure, Plot, Plots, Points, Raster, Readout, Select, formatNumber, useAxis } from 'aifn-render'
 import { stream } from 'aifn/foundation/random'
-import {
-  moons,
-  pinwheel,
-  spirals,
-  gaussianRing,
-} from 'aifn-applied/data/synthetic'
-import {
-  realNvpRun,
-  type RealNvpCheckpoint,
-  type RealNvpRun,
-} from 'aifn-applied/generative/flows'
+import { moons, pinwheel, spirals, gaussianRing } from 'aifn-methods/data/synthetic'
+import { realNvpRun, type RealNvpCheckpoint, type RealNvpRun } from 'aifn-methods/generative/flows'
 
 const DATASETS = [
   { value: 'moons', label: 'Two moons dataset' },
@@ -126,8 +106,14 @@ export function NormalisingFlowExplorer() {
   const planeAxisX = useAxis({ label: 'x₁', range: [-box, box] })
   const planeAxisY = useAxis({ label: 'x₂', range: [-box, box] })
 
-  const layerAxisX = useAxis({ label: effectiveLayer === 0 ? 'Data x₁' : `h₁ (layer ${effectiveLayer})`, range: [-box, box] })
-  const layerAxisY = useAxis({ label: effectiveLayer === 0 ? 'Data x₂' : `h₂ (layer ${effectiveLayer})`, range: [-box, box] })
+  const layerAxisX = useAxis({
+    label: effectiveLayer === 0 ? 'Data x₁' : `h₁ (layer ${effectiveLayer})`,
+    range: [-box, box],
+  })
+  const layerAxisY = useAxis({
+    label: effectiveLayer === 0 ? 'Data x₂' : `h₂ (layer ${effectiveLayer})`,
+    range: [-box, box],
+  })
 
   return (
     <Figure
@@ -180,28 +166,21 @@ export function NormalisingFlowExplorer() {
       <Plots>
         <Plot x={planeAxisX} y={planeAxisY} title="Model density & generated samples">
           {densityMatrix.length > 0 && gridAxis.length > 0 && (
-            <Raster
-              x={gridAxis}
-              y={gridAxis}
-              z={densityMatrix}
-              scale="sequential"
-            />
+            <Raster x={gridAxis} y={gridAxis} z={densityMatrix} scale="sequential" />
           )}
-          <Points
-            x={samplePoints.x}
-            y={samplePoints.y}
-            slot={1}
-            size={4}
-          />
+          <Points x={samplePoints.x} y={samplePoints.y} slot={1} size={4} />
         </Plot>
 
-        <Plot x={layerAxisX} y={layerAxisY} title={effectiveLayer === layers ? 'Base Gaussian space z = f⁻¹(x)' : `Representation at layer ${effectiveLayer} of ${layers}`}>
-          <Points
-            x={layerPoints.x}
-            y={layerPoints.y}
-            slot={0}
-            size={4}
-          />
+        <Plot
+          x={layerAxisX}
+          y={layerAxisY}
+          title={
+            effectiveLayer === layers
+              ? 'Base Gaussian space z = f⁻¹(x)'
+              : `Representation at layer ${effectiveLayer} of ${layers}`
+          }
+        >
+          <Points x={layerPoints.x} y={layerPoints.y} slot={0} size={4} />
         </Plot>
       </Plots>
 
@@ -218,7 +197,13 @@ export function NormalisingFlowExplorer() {
         <Readout label="Conditioner hidden" value="[24, 24]" />
         <Readout
           label="Current representation"
-          value={effectiveLayer === 0 ? 'Data input' : effectiveLayer === layers ? 'Latent N(0, I)' : `Coupling layer ${effectiveLayer}`}
+          value={
+            effectiveLayer === 0
+              ? 'Data input'
+              : effectiveLayer === layers
+                ? 'Latent N(0, I)'
+                : `Coupling layer ${effectiveLayer}`
+          }
         />
       </ControlRow>
     </Figure>

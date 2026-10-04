@@ -26,7 +26,7 @@ function basis(t: number, d: number): Float64Array {
 /**
  * Andrews curves of the rows of x [n, d], evaluated at the points t (a rank-1 tensor or array, default 101 points
  * evenly spaced on [−π, π]). Returns `{ t, curves }` with `curves` [n, m]: curves[i, j] = f_{x_i}(t_j). Scale the
- * features first (e.g. `aifn-applied/learning/preprocess` `standardScaler`) if they are in different units, since the
+ * features first (e.g. `aifn-methods/learning/preprocess` `standardScaler`) if they are in different units, since the
  * first features carry the lowest frequencies and dominate the shape.
  */
 export function andrewsCurves(x: Tensor, t?: Tensor | ArrayLike<number>): { t: Float64Array; curves: Tensor } {

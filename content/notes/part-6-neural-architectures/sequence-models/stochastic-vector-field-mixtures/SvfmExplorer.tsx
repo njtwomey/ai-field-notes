@@ -18,8 +18,8 @@ import {
   type ComponentSelection,
   type SvfmCheckpoint,
   type SvfmRun,
-} from 'aifn-applied/neural/ode-mixtures'
-import { odeFailureCase } from 'aifn-applied/data/synthetic'
+} from 'aifn-methods/neural/ode-mixtures'
+import { odeFailureCase } from 'aifn-methods/data/synthetic'
 import { stream } from 'aifn/foundation/random'
 
 const TASKS = [
@@ -199,12 +199,7 @@ export function SvfmExplorer() {
           options={TASKS}
           onChange={(v) => setTask(v as 'splitting' | 'crossing' | 'scaling')}
         />
-        <Select
-          label="Architecture"
-          value={model}
-          options={MODELS}
-          onChange={(v) => setModel(v as any)}
-        />
+        <Select label="Architecture" value={model} options={MODELS} onChange={(v) => setModel(v as any)} />
       </ControlRow>
 
       <ControlRow label="Mixture settings">
@@ -245,54 +240,23 @@ export function SvfmExplorer() {
       </ControlRow>
 
       <ControlRow label="Flow animation">
-        <Player
-          count={Math.max(1, numFrames)}
-          value={currentFrame}
-          onChange={setTimeIndex}
-        />
+        <Player count={Math.max(1, numFrames)} value={currentFrame} onChange={setTimeIndex} />
       </ControlRow>
 
       <Plots>
         <Plot x={flowX} y={flowY} title="Continuous flow trajectories h(t)">
           {trajectories.map((traj) => (
-            <Curve
-              key={traj.key}
-              x={traj.x}
-              y={traj.y}
-              slot={0}
-              thin={true}
-            />
+            <Curve key={traj.key} x={traj.x} y={traj.y} slot={0} thin={true} />
           ))}
-          <Points
-            x={currentPoints.x}
-            y={currentPoints.y}
-            slot={1}
-            size={5}
-          />
-          <Points
-            x={targetPoints.x}
-            y={targetPoints.y}
-            slot={2}
-            size={4}
-          />
+          <Points x={currentPoints.x} y={currentPoints.y} slot={1} size={5} />
+          <Points x={targetPoints.x} y={targetPoints.y} slot={2} size={4} />
         </Plot>
 
         <Plot x={piX} y={piY} title={isMixture ? 'Component posterior weights πₖ(t)' : 'Model loss'}>
           {isMixture ? (
-            piCurves.map((c) => (
-              <Curve
-                key={c.name}
-                x={c.x}
-                y={c.y}
-                slot={c.colorSlot}
-              />
-            ))
+            piCurves.map((c) => <Curve key={c.name} x={c.x} y={c.y} slot={c.colorSlot} />)
           ) : (
-            <Curve
-              x={lossCurve.x}
-              y={lossCurve.y}
-              slot={0}
-            />
+            <Curve x={lossCurve.x} y={lossCurve.y} slot={0} />
           )}
         </Plot>
       </Plots>

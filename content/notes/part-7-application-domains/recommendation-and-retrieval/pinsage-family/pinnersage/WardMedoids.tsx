@@ -1,27 +1,29 @@
-import { useMemo, useState } from 'react'
-import { MathText } from 'aifn-render'
+import { useMemo } from 'react'
 import {
-  Interactive,
-  ParamChoice,
-  ParamSlider,
-  Readout,
-  XYChart,
+  choice,
+  Figure,
   formatNumber,
-  useParam,
-  type XYSeries,
+  MathText,
+  Plot,
+  Readout,
+  seriesLayers,
+  type SeriesSpec,
+  slider,
+  useAxis,
+  useFigureState,
 } from 'aifn-render'
-import { rng } from '@/lib/math'
+import { normal, stream, uniform } from 'aifn/foundation/random'
 
 type Point = { x: number; y: number; age: number }
 
 /** A user's action pins in a 2-D stand-in for embedding space: three interests of different recency, plus strays. */
 function actions(): Point[] {
-  const r = rng(20)
+  const r = stream(20)
   const blob = (cx: number, cy: number, sd: number, n: number, age0: number, age1: number) =>
     Array.from({ length: n }, () => ({
-      x: cx + sd * r.normal(),
-      y: cy + sd * r.normal(),
-      age: Math.round(age0 + (age1 - age0) * r.uniform()),
+      x: cx + sd * normal(r),
+      y: cy + sd * normal(r),
+      age: Math.round(age0 + (age1 - age0) * uniform(r)),
     }))
   return [
     ...blob(-2.2, 1.2, 0.35, 9, 0, 15),
@@ -107,9 +109,23 @@ type Lambda = '0' | '0.01' | '0.1'
 
 /** Ward clustering of one user's action pins at a merge threshold, with medoids and time-decayed importance. */
 export function WardMedoids() {
-  const step = useParam(START, { min: FIRST, max: HEIGHTS.length - 1, step: 1 })
-  const [lambda, setLambda] = useState<Lambda>('0.01')
-  const alpha = HEIGHTS[step.value]
+  const state = useFigureState({
+    step: slider(FIRST, HEIGHTS.length - 1, START, {
+      step: 1,
+      label: 'merge threshold α (index into merge distances)',
+      format: (v) => formatNumber(HEIGHTS[v]),
+    }),
+    lambda: choice<Lambda>(
+      [
+        { value: '0', label: '0' },
+        { value: '0.01', label: '0.01' },
+        { value: '0.1', label: '0.1' },
+      ],
+      '0.01',
+      { label: 'decay λ per day' },
+    ),
+  })
+  const alpha = HEIGHTS[state.step]
   const clusters = useMemo(() => clustersAt(alpha), [alpha])
 
   const { series, ranked, stray } = useMemo(() => {
@@ -118,9 +134,9 @@ export function WardMedoids() {
     const inAny = POINTS.map((_, i) => i).filter((i) => group[i] >= 0)
     const out = POINTS.map((_, i) => i).filter((i) => group[i] < 0)
     const medoids = clusters.map(medoidOf)
-    const l = Number(lambda)
+    const l = Number(state.lambda)
     const importance = clusters.map((c) => c.reduce((s, i) => s + Math.exp(-l * POINTS[i].age), 0))
-    const s: XYSeries[] = [
+    const s: SeriesSpec[] = [
       {
         name: 'action pin',
         type: 'scatter',
@@ -146,35 +162,19 @@ export function WardMedoids() {
     ]
     const order = clusters.map((c, g) => ({ g, n: c.length, w: importance[g] })).sort((a, b) => b.w - a.w)
     return { series: s, ranked: order, stray: out.length }
-  }, [clusters, lambda])
+  }, [clusters, state.lambda])
 
+  const xAxis = useAxis({ label: 'embedding dimension 1', range: [-4, 4] })
+  const yAxis = useAxis({ label: 'embedding dimension 2', range: [-3.5, 3.5], equal: xAxis })
   return (
-    <Interactive
+    <Figure
       title="Ward clusters, medoids and importance"
+      state={state}
       caption={
         <MathText text="Points are one user's action pins in a two-dimensional stand-in for the embedding space: a recent interest on the left, an old one on the right, a mixed one below and three strays. Step the threshold $\alpha$ through the merge distances with the arrows. The clusters are the largest groups merged at distance at most $\alpha$; large ink points are their medoids. As in the published algorithm, a pin that merges only above $\alpha$ joins no cluster (grey). Importance sums $e^{-\lambda \cdot \mathrm{age}}$ over a cluster's pins, with age in days." />
       }
-      controls={
-        <>
-          <ParamSlider
-            label="merge threshold α (index into merge distances)"
-            param={step}
-            format={(v) => formatNumber(HEIGHTS[v])}
-            withArrows
-          />
-          <ParamChoice
-            label="decay λ per day"
-            value={lambda}
-            onChange={setLambda}
-            options={[
-              { value: '0', label: '0' },
-              { value: '0.01', label: '0.01' },
-              { value: '0.1', label: '0.1' },
-            ]}
-          />
-        </>
-      }
-      readout={
+
+      readouts={
         <>
           <Readout label="clusters" value={clusters.length} />
           <Readout label="pins in no cluster" value={stray} />
@@ -188,15 +188,13 @@ export function WardMedoids() {
         </>
       }
     >
-      <XYChart
-        series={series}
-        xRange={[-4, 4]}
-        yRange={[-3.5, 3.5]}
-        equalAspect
-        xLabel="embedding dimension 1"
-        yLabel="embedding dimension 2"
-        ariaLabel="Scatter of a user's action pins coloured by Ward cluster, with medoids marked"
-      />
-    </Interactive>
+      <Plot
+        x={xAxis}
+        y={yAxis}
+        ariaLabel={"Scatter of a user's action pins coloured by Ward cluster, with medoids marked"}
+      >
+        {seriesLayers(series)}
+      </Plot>
+    </Figure>
   )
 }

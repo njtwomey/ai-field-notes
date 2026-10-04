@@ -1,6 +1,6 @@
 /**
  * The Ising model (Ising, 1925; Koller and Friedman, 2009, "Probabilistic Graphical Models", §4.4.1), part of
- * `aifn-applied/inference/lattice-models`: pairwise spins on any graph as a discrete factor graph, on a lattice
+ * `aifn-methods/inference/lattice-models`: pairwise spins on any graph as a discrete factor graph, on a lattice
  * declared with `aifn/graph/structured`'s `latticeTemplate`, and belief propagation chosen by the graph's shape.
  */
 

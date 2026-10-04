@@ -1,16 +1,21 @@
 import { useMemo, useState } from 'react'
-import { Button } from 'aifn-render'
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from 'aifn-render'
 import {
-  Heatmap,
-  Interactive,
-  ParamSlider,
-  Readout,
-  XYChart,
+  Button,
+  Curve,
+  Figure,
+  float,
   formatNumber,
-  useParam,
-  type HeatmapOverlay,
-  type XYSeries,
+  Plot,
+  Raster,
+  Readout,
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+  useAxis,
+  useFigureState,
 } from 'aifn-render'
 import { forwardBackward, viterbi, type Hmm } from './hmm'
 
@@ -36,43 +41,42 @@ function casino(toLoaded: number, toFair: number, six: number): Hmm {
  * filtering against smoothing, and the α, ψ, β vectors themselves. Click a roll to change its face.
  */
 export function HmmTrellis() {
-  const toLoaded = useParam(0.05, { min: 0.01, max: 0.5, step: 0.01 })
-  const toFair = useParam(0.1, { min: 0.01, max: 0.5, step: 0.01 })
-  const six = useParam(0.5, { min: 0.2, max: 0.95, step: 0.01 })
+  const state = useFigureState({
+    toLoaded: float(0.05, { min: 0.01, max: 0.5, step: 0.01, label: 'P(fair → loaded)' }),
+    toFair: float(0.1, { min: 0.01, max: 0.5, step: 0.01, label: 'P(loaded → fair)' }),
+    six: float(0.5, { min: 0.2, max: 0.95, step: 0.01, label: 'P(six | loaded)' }),
+  })
   const [rolls, setRolls] = useState(START)
 
   const r = useMemo(() => {
-    const m = casino(toLoaded.value, toFair.value, six.value)
+    const m = casino(state.toLoaded, state.toFair, state.six)
     const xs = rolls.map((f) => f - 1)
     const fb = forwardBackward(m, xs)
     const vit = viterbi(m, xs)
     return { fb, vit }
-  }, [toLoaded.value, toFair.value, six.value, rolls])
+  }, [state.toLoaded, state.toFair, state.six, rolls])
 
   const positions = rolls.map((_, n) => n + 1)
   // Heatmap rows are states (0 fair, 1 loaded), columns positions: z[state][n] = p(y_n = state | x).
   const z = STATES.map((v) => r.fb.marginal.map((p) => p[v]))
-  const overlay: HeatmapOverlay[] = [
-    { name: 'Viterbi path', type: 'line', x: positions, y: r.vit.path, showPoints: true, emphasis: true },
-  ]
-  const lines: XYSeries[] = [
-    { name: 'filtering p(loaded | x₁…xₙ)', type: 'line', x: positions, y: r.fb.filtered.map((p) => p[1]), slot: 1 },
-    { name: 'smoothing p(loaded | x)', type: 'line', x: positions, y: r.fb.marginal.map((p) => p[1]), slot: 0 },
-  ]
+  const overlay = [{ name: 'Viterbi path', x: positions, y: r.vit.path, showPoints: true, emphasis: true }] as const
+  const lines = [
+    { name: 'filtering p(loaded | x₁…xₙ)', x: positions, y: r.fb.filtered.map((p) => p[1]), slot: 1 },
+    { name: 'smoothing p(loaded | x)', x: positions, y: r.fb.marginal.map((p) => p[1]), slot: 0 },
+  ] as const
   const cycle = (n: number) => setRolls((rs) => rs.map((f, i) => (i === n ? (f % 6) + 1 : f)))
 
+  const xAxis = useAxis({ label: 'position n' })
+  const yAxis = useAxis({ label: 'die (0 fair, 1 loaded)' })
+  const xAxis2 = useAxis({ label: 'position n', hold: 'union' })
+  const yAxis2 = useAxis({ label: 'p(loaded)', range: [0, 1] })
   return (
-    <Interactive
+    <Figure
       title="Forward–backward and Viterbi on a short sequence"
+      state={state}
       caption="Top: the posterior probability of each die at each roll (dark = probable), with the Viterbi path drawn on top. Middle: filtering uses only the rolls so far (α ⊙ ψ); smoothing also uses the rolls after (α ⊙ ψ ⊙ β), so it can revise an early roll once later rolls arrive. Bottom: the normalised vectors themselves. Click a roll to change its face, and move the sliders to change the model."
-      controls={
-        <>
-          <ParamSlider label="P(fair → loaded)" param={toLoaded} />
-          <ParamSlider label="P(loaded → fair)" param={toFair} />
-          <ParamSlider label="P(six | loaded)" param={six} />
-        </>
-      }
-      readout={
+
+      readouts={
         <>
           <Readout label="log p(x)" value={formatNumber(r.fb.logZ)} />
           <Readout label="Viterbi log p(x, y*)" value={formatNumber(r.vit.logProbability)} />
@@ -89,18 +93,14 @@ export function HmmTrellis() {
           </Button>
         ))}
       </div>
-      <Heatmap
-        x={positions}
-        y={STATES}
-        z={z}
-        range={[0, 1]}
-        xLabel="position n"
-        yLabel="die (0 fair, 1 loaded)"
-        valueLabel="p(yₙ | x)"
-        overlay={overlay}
-        height={220}
-      />
-      <XYChart series={lines} xLabel="position n" yLabel="p(loaded)" yRange={[0, 1]} height={220} />
+      <Plot x={xAxis} y={yAxis} height={220}>
+        <Raster x={positions} y={STATES} z={z} range={[0, 1]} valueLabel={'p(yₙ | x)'} />
+        <Curve {...overlay[0]} live />
+      </Plot>
+      <Plot x={xAxis2} y={yAxis2} height={220}>
+        <Curve {...lines[0]} />
+        <Curve {...lines[1]} />
+      </Plot>
       <div className="overflow-x-auto rounded-lg border">
         <Table>
           <TableHeader>
@@ -133,6 +133,6 @@ export function HmmTrellis() {
           </TableBody>
         </Table>
       </div>
-    </Interactive>
+    </Figure>
   )
 }

@@ -1,5 +1,5 @@
 /**
- * Nearest-neighbour search: brute force and the k-d and ball trees against scikit-learn (exact indices and distances
+ * Nearest-neighbour search: brute force and the k-d and ball trees against scikit-learn, the vantage-point tree against brute force (exact indices and distances
  * in three metrics), the trees' pruning, LSH collision laws and recall, IVF/PQ/OPQ/HNSW/NN-descent recall against
  * brute force, codebooks and the recall metric.
  */
@@ -41,6 +41,7 @@ import {
   trainCodebook,
   treeQuery,
   treeSearch,
+  vpTree,
   type TreeMetric,
 } from 'aifn/numerics/neighbours'
 import { fixture } from '../../fixtures'
@@ -90,6 +91,15 @@ describe('exact search against scikit-learn', () => {
       }
     })
   }
+  for (const metric of ['euclidean', 'sqeuclidean', 'manhattan', 'chebyshev'] as const) {
+    it(`the vantage-point tree returns brute force's answer with fewer distances (${metric})`, () => {
+      const brute = bruteForceNeighbours(F.data, F.queries, F.k, { metric })
+      const got = treeSearch(vpTree(F.data, { leafSize: 10, metric }), F.queries, F.k)
+      expect(rows(got.indices)).toEqual(rows(brute.indices))
+      rows(got.distances).forEach((r, i) => r.forEach((v, j) => expect(v).toBeCloseTo(rows(brute.distances)[i][j], 12)))
+      expect(got.distanceEvaluations).toBeLessThan(brute.distanceEvaluations)
+    })
+  }
   it('excludeSelf gives the k-NN graph of the data', () => {
     const got = bruteForceNeighbours(F.data, F.data, F.k, { excludeSelf: true })
     expect(rows(got.indices)).toEqual(F.self.indices)
@@ -113,7 +123,7 @@ describe('exact search against scikit-learn', () => {
 
 describe('trees', () => {
   it('partition the points, keep leaves small and bound every point of a node from below', () => {
-    for (const build of [kdTree, ballTree]) {
+    for (const build of [kdTree, ballTree, vpTree]) {
       const tree = build(F.data, { leafSize: 5 })
       expect([...tree.order].sort((a, b) => a - b)).toEqual(Array.from({ length: tree.n }, (_, i) => i))
       for (const [id, nd] of tree.nodes.entries()) {

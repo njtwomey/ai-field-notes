@@ -1,4 +1,4 @@
-/** The registry of `aifn-applied/learning/linear`. */
+/** The registry of `aifn-methods/learning/linear`. */
 
 import { definer, entries, type AlgorithmInfo, type Entry } from 'aifn/foundation/registry'
 import * as perceptron from './perceptron'

@@ -1,11 +1,11 @@
 import { useMemo, useState } from 'react'
-import { learnerResponses } from 'aifn-applied/data/synthetic'
+import { learnerResponses } from 'aifn-methods/data/synthetic'
 import {
   learnerModelRun,
   type LearnerModelKind,
   type LearnerModelResult,
   type LearnerModelRunResult,
-} from 'aifn-applied/inference/learner-models'
+} from 'aifn-methods/inference/learner-models'
 import { stream } from 'aifn/foundation/random'
 import {
   Bars,
@@ -70,8 +70,18 @@ export function ZeroInflatedLearnerExplorer() {
   const truthAbility = run ? Array.from(run.truth.ability) : []
 
   const tAxis = useAxis({ label: 'true ability θ', hold: 'union', key: `${students}/${inflationRate}` })
-  const eAxis = useAxis({ label: 'estimated ability θ̂', hold: 'union', key: `${students}/${inflationRate}`, equal: tAxis })
-  const eAxis2 = useAxis({ label: 'estimated ability θ̂', hold: 'union', key: `${students}/${inflationRate}`, equal: tAxis })
+  const eAxis = useAxis({
+    label: 'estimated ability θ̂',
+    hold: 'union',
+    key: `${students}/${inflationRate}`,
+    equal: tAxis,
+  })
+  const eAxis2 = useAxis({
+    label: 'estimated ability θ̂',
+    hold: 'union',
+    key: `${students}/${inflationRate}`,
+    equal: tAxis,
+  })
   const tAxis2 = useAxis({ label: 'true ability θ', hold: 'union', key: `${students}/${inflationRate}` })
   const gAxis = useAxis({ label: 'group', categories: GROUPS })
   const bAxis = useAxis({ label: 'mean θ̂ − θ (bias)', hold: 'union', key: `${students}/${inflationRate}` })

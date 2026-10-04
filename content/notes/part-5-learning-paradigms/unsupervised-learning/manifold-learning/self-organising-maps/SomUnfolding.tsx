@@ -1,6 +1,18 @@
-import { useMemo, useState } from 'react'
-import { Interactive, ParamChoice, ParamSlider, Readout, XYChart, formatNumber, type Segment } from 'aifn-render'
-import { rng } from '@/lib/math'
+import { useMemo } from 'react'
+import {
+  choice,
+  Figure,
+  float,
+  formatNumber,
+  Plot,
+  Points,
+  Readout,
+  type Segment,
+  Segments,
+  useAxis,
+  useFigureState,
+} from 'aifn-render'
+import { stream, uniform } from 'aifn/foundation/random'
 
 const STEPS = 4000
 const EVERY = 100
@@ -25,15 +37,15 @@ function schedule(step: number, sigma0: number): { eta: number; sigma: number } 
 }
 
 function train(kind: Lattice) {
-  const r = rng(7)
-  const data = Array.from({ length: N_DATA }, () => [r.uniform(), r.uniform()] as [number, number])
+  const r = stream(7)
+  const data = Array.from({ length: N_DATA }, () => [uniform(r), uniform(r)] as [number, number])
   const grid = lattice(kind)
   const sigma0 = kind === 'chain' ? 10 : 4
   // Start every unit near the centre, so that training has to unfold the lattice.
-  const w = grid.map(() => [0.5 + 0.05 * (r.uniform() - 0.5), 0.5 + 0.05 * (r.uniform() - 0.5)])
+  const w = grid.map(() => [0.5 + 0.05 * (uniform(r) - 0.5), 0.5 + 0.05 * (uniform(r) - 0.5)])
   const snapshots: number[][][] = [w.map((p) => [...p])]
   for (let step = 1; step <= STEPS; step++) {
-    const x = data[Math.floor(r.uniform() * N_DATA)]
+    const x = data[Math.floor(uniform(r) * N_DATA)]
     let c = 0
     let best = Infinity
     w.forEach((p, j) => {
@@ -70,10 +82,12 @@ function quality(data: [number, number][], w: number[][], grid: [number, number]
 }
 
 export function SomUnfolding() {
-  const [kind, setKind] = useState<Lattice>('grid')
-  const run = useMemo(() => train(kind), [kind])
-  const [step, setStep] = useState(STEPS)
-  const w = run.snapshots[step / EVERY]
+  const state = useFigureState({
+    kind: choice<Lattice>(LATTICES, 'grid', { label: 'lattice' }),
+    step: float(STEPS, { min: 0, max: STEPS, step: EVERY, label: 'training step' }),
+  })
+  const run = useMemo(() => train(state.kind), [state.kind])
+  const w = run.snapshots[state.step / EVERY]
   const segments = useMemo(() => {
     const index = new Map(run.grid.map((g, j) => [`${g[0]},${g[1]}`, j]))
     const out: Segment[] = []
@@ -89,28 +103,17 @@ export function SomUnfolding() {
     return out
   }, [run, w])
   const q = useMemo(() => quality(run.data, w, run.grid), [run, w])
-  const { eta, sigma } = schedule(step, run.sigma0)
+  const { eta, sigma } = schedule(state.step, run.sigma0)
 
+  const xAxis = useAxis({ label: 'x₁', range: [-0.05, 1.05] })
+  const yAxis = useAxis({ label: 'x₂', range: [-0.05, 1.05], equal: xAxis })
   return (
-    <Interactive
+    <Figure
       title="A self-organising map unfolds over the data"
+      state={state}
       caption="400 points uniform in the unit square (grey) and the prototypes of the units (blue), joined along the lattice. All units start near the centre. Step through training: while the neighbourhood is wide, each update drags large parts of the lattice together and the map unfolds; as it narrows, units spread to cover the square. A chain of 40 units folds into a curve that fills the square while keeping its order. The topographic error counts points whose two nearest units are not lattice neighbours."
-      controls={
-        <>
-          <ParamChoice label="lattice" value={kind} onChange={setKind} options={LATTICES} />
-          <ParamSlider
-            label="training step"
-            value={step}
-            onChange={setStep}
-            min={0}
-            max={STEPS}
-            step={EVERY}
-            debounceMs={0}
-            withArrows
-          />
-        </>
-      }
-      readout={
+
+      readouts={
         <>
           <Readout label="learning rate η" value={formatNumber(eta)} />
           <Readout label="neighbourhood width σ (lattice units)" value={formatNumber(sigma)} />
@@ -119,24 +122,11 @@ export function SomUnfolding() {
         </>
       }
     >
-      <XYChart
-        equalAspect
-        xRange={[-0.05, 1.05]}
-        yRange={[-0.05, 1.05]}
-        xLabel="x₁"
-        yLabel="x₂"
-        segments={segments}
-        series={[
-          {
-            name: 'data',
-            type: 'scatter',
-            x: run.data.map((p) => p[0]),
-            y: run.data.map((p) => p[1]),
-            muted: true,
-          },
-          { name: 'units', type: 'scatter', x: w.map((p) => p[0]), y: w.map((p) => p[1]), slot: 0 },
-        ]}
-      />
-    </Interactive>
+      <Plot x={xAxis} y={yAxis}>
+        <Points name="data" x={run.data.map((p) => p[0])} y={run.data.map((p) => p[1])} muted />
+        <Points name="units" x={w.map((p) => p[0])} y={w.map((p) => p[1])} slot={0} />
+        <Segments segments={segments} />
+      </Plot>
+    </Figure>
   )
 }

@@ -1,5 +1,5 @@
 /**
- * `aifn-applied/learning/reductions`: multiclass by binary reductions: one-versus-rest, one-versus-one, output codes
+ * `aifn-methods/learning/reductions`: multiclass by binary reductions: one-versus-rest, one-versus-one, output codes
  * and nested dichotomies.
  */
 

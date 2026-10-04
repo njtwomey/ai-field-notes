@@ -1,5 +1,5 @@
 /**
- * `aifn-applied/generative/flows`: RealNVP, a normalising flow of affine coupling layers (`realnvp.ts`, on core's
+ * `aifn-methods/generative/flows`: RealNVP, a normalising flow of affine coupling layers (`realnvp.ts`, on core's
  * `affineCouplingBijector`), and a streamed training run (`run.ts`).
  */
 

@@ -65,7 +65,10 @@ export function projectBall(radius: number, center?: VectorLike): (x: Vector) =>
  * Singer & Chandra, 2008, "Efficient projections onto the l1-ball", Figure 1).
  */
 function simplexInPlace(v: Float64Array, start: number, length: number, z: number): void {
-  const u = v.slice(start, start + length).sort().reverse()
+  const u = v
+    .slice(start, start + length)
+    .sort()
+    .reverse()
   let cumulative = 0
   let theta = 0
   for (let j = 0; j < length; j++) {

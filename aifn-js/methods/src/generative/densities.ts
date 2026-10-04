@@ -1,6 +1,6 @@
 /**
- * The shared layer of `aifn-applied/generative`: densities known as labelled mixtures (the `model` of a classification
- * truth from `aifn-applied/data`: a ring of Gaussians, a pinwheel, two moons), their log density and most probable
+ * The shared layer of `aifn-methods/generative`: densities known as labelled mixtures (the `model` of a classification
+ * truth from `aifn-methods/data`: a ring of Gaussians, a pinwheel, two moons), their log density and most probable
  * mode at given points, and the square grid every 2-d figure evaluates fields on.
  */
 
@@ -15,7 +15,7 @@ export type LabelledDensity = {
 
 /**
  * The labelled density of a dataset's truth, when it has one: a truth carrying a `model` with classes, priors and
- * class log densities (a classification truth of `aifn-applied/data`); null otherwise.
+ * class log densities (a classification truth of `aifn-methods/data`); null otherwise.
  */
 export function knownDensity(truth: unknown): LabelledDensity | null {
   const model = (truth as { model?: Partial<LabelledDensity> } | undefined)?.model

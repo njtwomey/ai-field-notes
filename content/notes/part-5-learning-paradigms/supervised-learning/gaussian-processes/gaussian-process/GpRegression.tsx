@@ -1,19 +1,20 @@
 import { useMemo, useState } from 'react'
 import {
-  Interactive,
-  ParamButton,
-  ParamChoice,
-  ParamNumberField,
-  ParamSlider,
-  ParamSwitch,
-  Readout,
-  XYChart,
+  Button,
+  choice,
+  Figure,
+  float,
   formatNumber,
-  useParam,
-  type Handle,
-  type XYSeries,
+  Handle,
+  int,
+  Plot,
+  Readout,
+  seriesLayers,
+  type SeriesSpec,
+  setting,
+  useAxis,
+  useFigureState,
 } from 'aifn-render'
-import { linspace, rng } from '@/lib/math'
 import {
   KERNEL_OPTIONS,
   addDiagonal,
@@ -23,8 +24,10 @@ import {
   samplesFromFactor,
   type KernelName,
 } from '../_shared/gp'
+import { linspace, toFlat } from 'aifn/foundation/tensor'
+import { normal, stream } from 'aifn/foundation/random'
 
-const GRID = linspace(-5, 5, 101)
+const GRID = toFlat(linspace(-5, 5, 101))
 const X_RANGE: [number, number] = [-5, 5]
 const Y_RANGE: [number | undefined, number | undefined] = [-3, 3]
 const INITIAL: [number, number][] = [
@@ -43,42 +46,50 @@ const MAX_SAMPLES = 30
  * its own stream, so raising the count adds draws without changing the earlier ones.
  */
 const NORMALS = Array.from({ length: MAX_SAMPLES }, (_, k) => {
-  const g = rng(11 * 1000 + k)
-  return GRID.map(() => g.normal())
+  const g = stream(11 * 1000 + k)
+  return GRID.map(() => normal(g))
 })
 
 /** GP regression on draggable training points: posterior mean, a band of ±2 posterior sd of f, and samples. */
 export function GpRegression() {
   const [points, setPoints] = useState<[number, number][]>(INITIAL)
-  const [name, setName] = useState<KernelName>('se')
-  const n = useParam(5, { min: 0, max: INITIAL.length, step: 1 })
-  const logEll = useParam(0, { min: -1.2, max: 1, step: 0.02 })
-  const sf = useParam(1, { min: 0.2, max: 2, step: 0.05 })
-  const sn = useParam(0.1, { min: 0.01, max: 1, step: 0.01 })
-  const count = useParam(30, { min: 1, max: MAX_SAMPLES, step: 1 })
-  const [showSamples, setShowSamples] = useState(true)
-  const ell = 10 ** logEll.value
-  const data = useMemo(() => points.slice(0, n.value), [points, n.value])
+  const state = useFigureState({
+    name: choice<KernelName>(KERNEL_OPTIONS, 'se', { label: 'kernel' }),
+    sf: float(1, { min: 0.2, max: 2, step: 0.05, label: 'signal sd σ_f' }),
+    sn: float(0.1, { min: 0.01, max: 1, step: 0.01, label: 'noise sd σ_n' }),
+    showSamples: setting(true, 'posterior samples'),
+    n: int(5, { min: 1, max: INITIAL.length, label: 'training points N' }),
+    ell: float(1, { min: 0.06, max: 10, scale: 'log10', suggestions: [0.1, 0.3, 1, 3, 10], label: 'length-scale ℓ' }),
+    count: int(MAX_SAMPLES, {
+      min: 1,
+      max: MAX_SAMPLES,
+      suggestions: [1, 5, 10, MAX_SAMPLES],
+      label: 'draws',
+      when: (v) => v.showSamples === true,
+    }),
+  })
+  const ell = state.ell
+  const data = useMemo(() => points.slice(0, state.n), [points, state.n])
 
   const r = useMemo(() => {
-    const k = makeKernel(name, { ell, sf: sf.value, period: 3 })
+    const k = makeKernel(state.name, { ell, sf: state.sf, period: 3 })
     const x = data.map((p) => p[0])
     const y = data.map((p) => p[1])
-    const post = posterior(k, x, y, sn.value ** 2, GRID, true)
+    const post = posterior(k, x, y, state.sn ** 2, GRID, true)
     // The Cholesky factor is computed once per posterior; changing the number of draws reuses it.
     const factor = cholesky(addDiagonal(post.covariance!, 1e-6))
     const sd = post.variance.map(Math.sqrt)
     const meanSd = sd.reduce((s, v) => s + v, 0) / sd.length
     return { post, factor, sd, meanSd }
-  }, [data, name, ell, sf.value, sn.value])
+  }, [data, state.name, ell, state.sf, state.sn])
   const draws = useMemo(
-    () => (showSamples ? samplesFromFactor(r.post.mean, r.factor, NORMALS.slice(0, count.value)) : []),
-    [r, count.value, showSamples],
+    () => (state.showSamples ? samplesFromFactor(r.post.mean, r.factor, NORMALS.slice(0, state.count)) : []),
+    [r, state.count, state.showSamples],
   )
   const many = draws.length > 1
 
-  const series: XYSeries[] = [
-    ...draws.map((d): XYSeries => ({
+  const series: SeriesSpec[] = [
+    ...draws.map((d): SeriesSpec => ({
       name: many ? 'posterior samples' : 'posterior sample',
       type: 'line',
       x: GRID,
@@ -117,44 +128,33 @@ export function GpRegression() {
       ),
   }))
 
+  const xAxis = useAxis({ label: 'x', range: X_RANGE })
+  const yAxis = useAxis({ label: 'f(x)', range: Y_RANGE })
   return (
-    <Interactive
+    <Figure
       title="Gaussian process regression"
-      caption="Drag the training points. The solid line is the posterior mean, the dashed lines are two posterior standard deviations of f either side of it, and the light curves are functions drawn from the posterior; the draws slider sets how many. Near the data the band narrows to about the noise level; far from it the band returns to the prior's ±2σ_f and the mean returns to zero. A short length-scale lets the function turn quickly and forget the data within a short distance. Matérn 1/2 gives rough, continuous but nowhere-differentiable samples; the periodic kernel (period 3) repeats the data."
+      state={state}
+      caption="Drag the training points. The solid line is the posterior mean, the dashed lines are two posterior standard deviations of f either side of it, and the light curves are functions drawn from the posterior; the draws field sets how many. Near the data the band narrows to about the noise level; far from it the band returns to the prior's ±2σ_f and the mean returns to zero. A short length-scale lets the function turn quickly and forget the data within a short distance. Matérn 1/2 gives rough, continuous but nowhere-differentiable samples; the periodic kernel (period 3) repeats the data."
       controls={
         <>
-          <ParamChoice label="kernel" value={name} onChange={setName} options={KERNEL_OPTIONS} />
-          <ParamNumberField label="training points N" param={n} type="int" min={1} max={30} step={1} />
-          <ParamNumberField
-            label="length-scale ℓ"
-            param={logEll}
-            logTransform="value-is-log"
-            step={0.5}
-            points_per_decade={2}
-          />
-          <ParamSlider label="signal sd σ_f" param={sf} />
-          <ParamSlider label="noise sd σ_n" param={sn} />
-          <ParamSwitch label="posterior samples" checked={showSamples} onChange={setShowSamples} />
-          <ParamNumberField label="draws" param={count} type="int" min={0} max={20} step={1} />
-          <ParamButton onClick={() => setPoints(INITIAL)}>Reset points</ParamButton>
+          <Button variant="outline" size="sm" onClick={() => setPoints(INITIAL)}>
+            Reset points
+          </Button>
         </>
       }
-      readout={
+      readouts={
         <>
           <Readout label="mean posterior sd over the plot" value={formatNumber(r.meanSd)} />
-          <Readout label="prior sd σ_f" value={formatNumber(sf.value)} />
+          <Readout label="prior sd σ_f" value={formatNumber(state.sf)} />
         </>
       }
     >
-      <XYChart
-        series={series}
-        handles={handles}
-        xLabel="x"
-        yLabel="f(x)"
-        xRange={X_RANGE}
-        yRange={Y_RANGE}
-        height={380}
-      />
-    </Interactive>
+      <Plot x={xAxis} y={yAxis} height={380}>
+        {seriesLayers(series)}
+        {(handles ?? []).map((h, i) => (
+          <Handle key={i} {...h} />
+        ))}
+      </Plot>
+    </Figure>
   )
 }

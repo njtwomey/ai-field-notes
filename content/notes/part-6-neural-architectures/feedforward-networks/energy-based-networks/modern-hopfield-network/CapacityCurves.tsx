@@ -1,6 +1,6 @@
 import { useMemo } from 'react'
-import { Interactive, Readout, XYChart, type XYSeries } from 'aifn-render'
-import { rng } from '@/lib/math'
+import { Figure, Plot, Readout, seriesLayers, type SeriesSpec, useAxis } from 'aifn-render'
+import { stream, uniform } from 'aifn/foundation/random'
 import { corrupt, randomPattern } from '../_shared/spins'
 import { denseRecall, softmaxUpdate } from './dense'
 
@@ -8,6 +8,12 @@ const N = 100
 const TESTS = 20
 const NOISE = 0.1
 const SIZES = [2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 25, 30, 40, 60, 80, 100, 150, 200, 300, 400]
+
+/** Seeded uniform draws. */
+function draws(seed: number) {
+  const g = stream(seed)
+  return () => uniform(g)
+}
 
 const MEMORIES: {
   name: string
@@ -17,12 +23,12 @@ const MEMORIES: {
   {
     name: 'classical, F(x) = x²',
     slot: 0,
-    recall: (p, cue, seed) => denseRecall(p, cue, { kind: 'power', n: 2 }, rng(seed).uniform),
+    recall: (p, cue, seed) => denseRecall(p, cue, { kind: 'power', n: 2 }, draws(seed)),
   },
   {
     name: 'dense, F(x) = x³',
     slot: 1,
-    recall: (p, cue, seed) => denseRecall(p, cue, { kind: 'power', n: 3 }, rng(seed).uniform),
+    recall: (p, cue, seed) => denseRecall(p, cue, { kind: 'power', n: 3 }, draws(seed)),
   },
   { name: 'softmax update, β = 0.1', slot: 2, recall: (p, cue) => softmaxUpdate(p, cue, 0.1) },
 ]
@@ -43,12 +49,12 @@ export function CapacityCurves() {
         const x: number[] = []
         const y: number[] = []
         for (const K of SIZES) {
-          const { uniform } = rng(K)
-          const patterns = Array.from({ length: K }, () => randomPattern(N, uniform))
+          const draw = draws(K)
+          const patterns = Array.from({ length: K }, () => randomPattern(N, draw))
           const tests = Math.min(K, TESTS)
           let ok = 0
           for (let mu = 0; mu < tests; mu++) {
-            const cue = corrupt(patterns[mu], NOISE, rng(1000 * K + mu).uniform)
+            const cue = corrupt(patterns[mu], NOISE, draws(1000 * K + mu))
             if (exact(memory.recall(patterns, cue, mu + 1), patterns[mu])) ok++
           }
           x.push(Math.log10(K))
@@ -60,15 +66,17 @@ export function CapacityCurves() {
       }),
     [],
   )
-  const series = useMemo((): XYSeries[] => {
-    const out: XYSeries[] = MEMORIES.map((m, k) => ({ name: m.name, type: 'line', ...curves[k], slot: m.slot }))
+  const series = useMemo((): SeriesSpec[] => {
+    const out: SeriesSpec[] = MEMORIES.map((m, k) => ({ name: m.name, type: 'line', ...curves[k], slot: m.slot }))
     const limit = Math.log10(0.138 * N)
     out.push({ name: 'K = 0.138 N', type: 'line', x: [limit, limit], y: [0, 1], dashed: true, muted: true })
     return out
   }, [curves])
 
+  const xAxis = useAxis({ label: 'log₁₀ K (stored patterns)', range: [0, Math.log10(400)] })
+  const yAxis = useAxis({ label: 'fraction recalled', range: [0, 1.05] })
   return (
-    <Interactive
+    <Figure
       title="Capacity: classical against dense memories"
       caption={
         <>
@@ -78,17 +86,16 @@ export function CapacityCurves() {
           number of neurons.
         </>
       }
-      readout={<Readout label="neurons N" value={N} />}
+      readouts={<Readout label="neurons N" value={N} />}
     >
-      <XYChart
+      <Plot
+        x={xAxis}
+        y={yAxis}
         height={280}
-        xLabel="log₁₀ K (stored patterns)"
-        yLabel="fraction recalled"
-        xRange={[0, Math.log10(400)]}
-        yRange={[0, 1.05]}
-        series={series}
-        ariaLabel="Fraction of patterns recalled against the number stored, for three memories"
-      />
-    </Interactive>
+        ariaLabel={'Fraction of patterns recalled against the number stored, for three memories'}
+      >
+        {seriesLayers(series)}
+      </Plot>
+    </Figure>
   )
 }

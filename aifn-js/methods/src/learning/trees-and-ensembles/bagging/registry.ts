@@ -1,4 +1,4 @@
-/** The registry of `aifn-applied/learning/trees-and-ensembles/bagging`. */
+/** The registry of `aifn-methods/learning/trees-and-ensembles/bagging`. */
 
 import { definer, entries, type AlgorithmInfo, type Entry } from 'aifn/foundation/registry'
 import * as forest from './forest'

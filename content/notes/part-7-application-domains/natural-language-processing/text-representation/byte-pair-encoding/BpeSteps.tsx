@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { Interactive, Readout, StepControls } from 'aifn-render'
+import { Figure, Player, Readout } from 'aifn-render'
 
 const END = '</w>'
 const CORPUS: [string, number][] = [
@@ -75,18 +75,19 @@ export function BpeSteps() {
   const corpusTokens = CORPUS.reduce((n, [w, f]) => n + f * encode(w, active).length, 0)
 
   return (
-    <Interactive
+    <Figure
       title="Byte-pair encoding, one merge at a time"
       caption="The corpus holds 'low' five times, 'lower' twice, 'newest' six times and 'widest' three times; </w> marks the end of a word. Each step merges the most frequent adjacent pair of symbols, weighting each word by its count. The unseen words at the bottom are encoded by replaying the learned merges in order."
       controls={
-        <StepControls
-          onStep={() => setStep((s) => Math.min(s + 1, merges.length))}
-          onRun={() => setStep(merges.length)}
-          onReset={() => setStep(0)}
-          done={step >= merges.length}
+        <Player
+          value={step}
+          onChange={setStep}
+          count={merges.length + 1}
+          label="merges"
+          format={(k) => `${k} of ${merges.length}`}
         />
       }
-      readout={
+      readouts={
         <>
           <Readout label="merges" value={step} />
           <Readout label="corpus length (tokens)" value={corpusTokens} />
@@ -127,6 +128,6 @@ export function BpeSteps() {
           </ol>
         </div>
       </div>
-    </Interactive>
+    </Figure>
   )
 }

@@ -1,10 +1,11 @@
 import { useMemo } from 'react'
-import { Interactive, ParamSlider, Readout, XYChart, formatNumber, useParam, type XYSeries } from 'aifn-render'
-import { convolve } from '@/lib/dsp'
+import { Bars, Figure, formatNumber, int, Plot, Points, Readout, useAxis, useFigureState } from 'aifn-render'
+import { convolve } from 'aifn/foundation/convolution'
+import { toFlat } from 'aifn/foundation/tensor'
 
 const X = [1, 1, 1, 1, 1, 1]
 const H = [1, 0.75, 0.5, 0.25]
-const LINEAR = Array.from(convolve(X, H))
+const LINEAR = toFlat(convolve(X, H))
 
 /** Circular convolution of length N: indices wrap modulo N, so the tail of the linear result folds onto the start. */
 const circular = (n: number) => {
@@ -18,29 +19,37 @@ const circular = (n: number) => {
  * shorter N wraps the tail around.
  */
 export function CircularWrap() {
-  const n = useParam(6, { min: 4, max: 12, step: 1 })
-  const circ = useMemo(() => circular(n.value), [n.value])
-  const error = LINEAR.reduce((s, v, i) => s + Math.abs(v - (i < n.value ? circ[i] : 0)), 0)
+  const state = useFigureState({
+    n: int(6, { min: 4, max: 12, step: 1, label: 'DFT length N', format: (v) => String(v) }),
+  })
+  const circ = useMemo(() => circular(state.n), [state.n])
+  const error = LINEAR.reduce((s, v, i) => s + Math.abs(v - (i < state.n ? circ[i] : 0)), 0)
 
-  const series: XYSeries[] = [
-    { name: 'linear convolution', type: 'bar', x: LINEAR.map((_, i) => i), y: LINEAR, slot: 0 },
-    { name: `circular, N = ${n.value}`, type: 'scatter', x: circ.map((_, i) => i), y: circ, emphasis: true },
-  ]
+  const series = [
+    { name: 'linear convolution', x: LINEAR.map((_, i) => i), y: LINEAR, slot: 0 },
+    { name: `circular, N = ${state.n}`, x: circ.map((_, i) => i), y: circ, emphasis: true },
+  ] as const
 
+  const xAxis = useAxis({ label: 'n', range: [-0.5, 11.5] })
+  const yAxis = useAxis({ label: 'value', range: [0, 5] })
   return (
-    <Interactive
+    <Figure
       title="Circular convolution wraps around"
+      state={state}
       caption="A length-6 sequence convolved with a length-4 response. Linear convolution has 6 + 4 − 1 = 9 samples (bars). Multiplying N-point DFTs gives circular convolution (points): when N < 9 the samples past N fold back onto the start and add to them. From N = 9 the two agree."
-      controls={<ParamSlider label="DFT length N" param={n} format={(v) => String(v)} withArrows />}
-      readout={
+
+      readouts={
         <>
           <Readout label="needed N ≥" value={LINEAR.length} />
-          <Readout label="wrapped samples" value={Math.max(0, LINEAR.length - n.value)} />
+          <Readout label="wrapped samples" value={Math.max(0, LINEAR.length - state.n)} />
           <Readout label="total error vs linear" value={formatNumber(error)} />
         </>
       }
     >
-      <XYChart series={series} xLabel="n" yLabel="value" xRange={[-0.5, 11.5]} yRange={[0, 5]} height={260} />
-    </Interactive>
+      <Plot x={xAxis} y={yAxis} height={260}>
+        <Bars {...series[0]} />
+        <Points {...series[1]} />
+      </Plot>
+    </Figure>
   )
 }

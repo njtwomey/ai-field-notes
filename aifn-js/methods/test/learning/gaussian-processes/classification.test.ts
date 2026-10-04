@@ -8,8 +8,8 @@ import {
   kernelLogVector,
   laplaceLogMarginal,
   type ClassificationLikelihood,
-} from 'aifn-applied/learning/gaussian-processes'
-import { moons } from 'aifn-applied/data/synthetic'
+} from 'aifn-methods/learning/gaussian-processes'
+import { moons } from 'aifn-methods/data/synthetic'
 import { gram, kernelFromLog, rbf, type Kernel } from 'aifn/learning/kernels'
 import { stream } from 'aifn/foundation/random'
 import { fromData, tensor, toFlat, type Tensor } from 'aifn/foundation/tensor'

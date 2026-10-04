@@ -1,16 +1,18 @@
-import { useMemo, useState } from 'react'
+import { useMemo } from 'react'
 import {
-  Interactive,
-  ParamSlider,
-  ParamSwitch,
-  Readout,
-  XYChart,
+  Curve,
+  Figure,
+  float,
   formatNumber,
-  useParam,
-  type XYSeries,
+  int,
+  Plot,
+  Points,
+  Readout,
+  setting,
+  useAxis,
+  useFigureState,
 } from 'aifn-render'
-import { fft, makeWindow } from '@/lib/dsp'
-import { whiteNoise } from '../_shared/spectra'
+import { halfSpectrum, whiteNoise, windowOf } from '../_shared/spectra'
 
 const N = 8192
 const SEG = 128
@@ -20,31 +22,39 @@ const SEG = 128
  * independent noise. Coherence is 1/(1 + noise variance) at every frequency; the cross-spectrum's phase is −ωd.
  */
 export function CoherenceDemo() {
-  const delay = useParam(5, { min: 0, max: 20, step: 1 })
-  const noise = useParam(0.5, { min: 0, max: 3, step: 0.1 })
-  const overlap = useParam(0.5, { min: 0, max: 0.75, step: 0.25 })
-  const [single, setSingle] = useState(false)
+  const state = useFigureState({
+    delay: int(5, { min: 0, max: 20, step: 1, label: 'delay d (samples)', format: (v) => String(v) }),
+    noise: float(0.5, { min: 0, max: 3, step: 0.1, label: 'noise standard deviation σ' }),
+    overlap: float(0.5, {
+      min: 0,
+      max: 0.75,
+      step: 0.25,
+      label: 'segment overlap',
+      format: (v) => `${Math.round(v * 100)}%`,
+    }),
+    single: setting(false, 'estimate from a single segment'),
+  })
 
   const r = useMemo(() => {
     const x = whiteNoise(N + 32, 11)
     const e = whiteNoise(N + 32, 12)
-    const y = x.map((_, n) => (n >= delay.value ? x[n - delay.value] : 0) + noise.value * e[n])
-    const w = makeWindow('hann', SEG, true)
+    const y = x.map((_, n) => (n >= state.delay ? x[n - state.delay] : 0) + state.noise * e[n])
+    const w = windowOf('hann', SEG)
     const half = SEG / 2 + 1
     const sxx = new Array<number>(half).fill(0)
     const syy = new Array<number>(half).fill(0)
     const sxyRe = new Array<number>(half).fill(0)
     const sxyIm = new Array<number>(half).fill(0)
-    const step = Math.max(1, Math.round(SEG * (1 - overlap.value)))
+    const step = Math.max(1, Math.round(SEG * (1 - state.overlap)))
     // With "one segment", only the first segment is used: coherence is then identically 1.
-    const last = single ? 0 : N - SEG
+    const last = state.single ? 0 : N - SEG
     let count = 0
     for (let s = 32; s <= 32 + last; s += step) {
-      const X = fft(
+      const X = halfSpectrum(
         x.slice(s, s + SEG).map((v, i) => v * w[i]),
         SEG,
       )
-      const Y = fft(
+      const Y = halfSpectrum(
         y.slice(s, s + SEG).map((v, i) => v * w[i]),
         SEG,
       )
@@ -62,39 +72,36 @@ export function CoherenceDemo() {
     const phase = omega.map((_, k) => Math.atan2(sxyIm[k], sxyRe[k]))
     const mean = coherence.slice(1, -1).reduce((s, v) => s + v, 0) / (half - 2)
     return { omega, coherence, phase, mean, count }
-  }, [delay.value, noise.value, overlap.value, single])
+  }, [state.delay, state.noise, state.overlap, state.single])
 
-  const theory = 1 / (1 + noise.value ** 2)
+  const theory = 1 / (1 + state.noise ** 2)
   const wrap = (p: number) => Math.atan2(Math.sin(p), Math.cos(p))
-  const coh: XYSeries[] = [
-    { name: 'estimated coherence', type: 'line', x: r.omega, y: r.coherence, slot: 0 },
-    { name: 'theory 1/(1 + σ²)', type: 'line', x: [0, 1], y: [theory, theory], slot: 1, dashed: true },
-  ]
-  const ph: XYSeries[] = [
-    { name: 'estimated phase of S_xy', type: 'scatter', x: r.omega, y: r.phase, slot: 0 },
+  const coh = [
+    { name: 'estimated coherence', x: r.omega, y: r.coherence, slot: 0 },
+    { name: 'theory 1/(1 + σ²)', x: [0, 1], y: [theory, theory], slot: 1, dashed: true },
+  ] as const
+  const ph = [
+    { name: 'estimated phase of S_xy', x: r.omega, y: r.phase, slot: 0 },
     {
       name: 'theory −ωd (wrapped)',
-      type: 'line',
       x: r.omega,
-      y: r.omega.map((w) => wrap(-w * Math.PI * delay.value)),
+      y: r.omega.map((w) => wrap(-w * Math.PI * state.delay)),
       slot: 1,
       dashed: true,
     },
-  ]
+  ] as const
 
+  const xAxis = useAxis({ label: 'ω / π', range: [0, 1] })
+  const yAxis = useAxis({ label: 'coherence', range: [0, 1.05] })
+  const xAxis2 = useAxis({ label: 'ω / π', range: [0, 1] })
+  const yAxis2 = useAxis({ label: 'phase (rad)', range: [-3.3, 3.3] })
   return (
-    <Interactive
+    <Figure
       title="Coherence and cross-phase"
+      state={state}
       caption="White noise x and y = x delayed by d samples plus independent noise of standard deviation σ. Welch-averaged cross-spectra give a coherence near 1/(1 + σ²) at every frequency, the fraction of y's power linearly explained by x, and a cross-spectrum phase that falls linearly with slope −d, the delay. Estimate from one segment and the coherence is exactly 1 everywhere, whatever the noise: coherence needs averaging."
-      controls={
-        <>
-          <ParamSlider label="delay d (samples)" param={delay} format={(v) => String(v)} withArrows />
-          <ParamSlider label="noise standard deviation σ" param={noise} />
-          <ParamSlider label="segment overlap" param={overlap} format={(v) => `${Math.round(v * 100)}%`} />
-          <ParamSwitch label="estimate from a single segment" checked={single} onChange={setSingle} />
-        </>
-      }
-      readout={
+
+      readouts={
         <>
           <Readout label="segments averaged" value={r.count} />
           <Readout label="mean estimated coherence" value={formatNumber(r.mean)} />
@@ -103,9 +110,15 @@ export function CoherenceDemo() {
       }
     >
       <div className="space-y-4">
-        <XYChart series={coh} xLabel="ω / π" yLabel="coherence" xRange={[0, 1]} yRange={[0, 1.05]} height={240} />
-        <XYChart series={ph} xLabel="ω / π" yLabel="phase (rad)" xRange={[0, 1]} yRange={[-3.3, 3.3]} height={240} />
+        <Plot x={xAxis} y={yAxis} height={240}>
+          <Curve {...coh[0]} />
+          <Curve {...coh[1]} />
+        </Plot>
+        <Plot x={xAxis2} y={yAxis2} height={240}>
+          <Points {...ph[0]} />
+          <Curve {...ph[1]} />
+        </Plot>
       </div>
-    </Interactive>
+    </Figure>
   )
 }

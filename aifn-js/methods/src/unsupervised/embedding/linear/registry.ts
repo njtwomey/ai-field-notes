@@ -1,4 +1,4 @@
-/** The registry of `aifn-applied/unsupervised/embedding/linear`. */
+/** The registry of `aifn-methods/unsupervised/embedding/linear`. */
 
 import { definer, entries, type AlgorithmInfo, type Entry, type FunctionInfo } from 'aifn/foundation/registry'
 import * as andrews from './andrews'

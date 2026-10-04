@@ -1,16 +1,18 @@
-import { useMemo, useState } from 'react'
+import { useMemo } from 'react'
 import {
-  Interactive,
-  ParamButton,
-  ParamSlider,
-  ParamSwitch,
-  Readout,
-  XYChart,
+  Button,
+  Figure,
+  float,
   formatNumber,
-  useParam,
-  type XYSeries,
+  int,
+  Plot,
+  Readout,
+  seriesLayers,
+  type SeriesSpec,
+  setting,
+  useAxis,
+  useFigureState,
 } from 'aifn-render'
-import { linspace, rng } from '@/lib/math'
 import { logDet } from '../../regression/nonlinear-regression/_shared/splines'
 import {
   cholesky,
@@ -21,27 +23,31 @@ import {
   times,
   uniformKnots,
 } from '../_shared/core-smoothing'
+import { linspace, toFlat } from 'aifn/foundation/tensor'
+import { normal, stream, uniform } from 'aifn/foundation/random'
 
 const N = 100
 const K = 17
 const MAX_DRAWS = 50
-const GRID = linspace(0, 1, 121)
-const LOG_LAMBDAS = linspace(-9, 1, 51)
+const GRID = toFlat(linspace(0, 1, 121))
+const LOG_LAMBDAS = toFlat(linspace(-9, 1, 51))
 const truth = (x: number) => Math.sin(2 * Math.PI * x) * Math.exp(-x) + 0.5 * x
 
 export function PosteriorBands() {
-  const [logLambda, setLogLambda] = useState(-5)
-  const [noise, setNoise] = useState(0.3)
-  const [seed, setSeed] = useState(1)
-  const [showDraws, setShowDraws] = useState(true)
-  const count = useParam(20, { min: 1, max: MAX_DRAWS, step: 1 })
+  const state = useFigureState({
+    logLambda: float(-5, { min: -9, max: 1, step: 0.1, label: 'log₁₀ λ', format: (v) => v.toFixed(1) }),
+    noise: float(0.3, { min: 0.05, max: 1, step: 0.05, label: 'noise σ' }),
+    showDraws: setting(true, 'posterior draws'),
+    count: int(20, { min: 1, max: MAX_DRAWS, step: 1, label: 'draws', format: (v) => String(v) }),
+    seed: int(1, { ge: 0, label: 'seed' }),
+  })
 
   const data = useMemo(() => {
-    const r = rng(seed)
-    const x = Array.from({ length: N }, () => r.uniform())
-    const eps = Array.from({ length: N }, () => r.normal())
-    return { x, y: x.map((xi, i) => truth(xi) + noise * eps[i]) }
-  }, [seed, noise])
+    const r = stream(state.seed)
+    const x = Array.from({ length: N }, () => uniform(r))
+    const eps = Array.from({ length: N }, () => normal(r))
+    return { x, y: x.map((xi, i) => truth(xi) + state.noise * eps[i]) }
+  }, [state.seed, state.noise])
   const t = useMemo(() => uniformKnots(K, 0, 1), [])
   const S = useMemo(() => derivativePenalty(t, 3, 2, 0, 1), [t])
   const B = useMemo(() => designMatrix(data.x, t), [data, t])
@@ -62,7 +68,7 @@ export function PosteriorBands() {
     return best.logLambda
   }, [B, BtB, S, data, p])
 
-  const fit = useMemo(() => penalisedFit(B, BtB, data.y, S, 10 ** logLambda), [B, BtB, S, data, logLambda])
+  const fit = useMemo(() => penalisedFit(B, BtB, data.y, S, 10 ** state.logLambda), [B, BtB, S, data, state.logLambda])
   const sigma2 = fit.rss / (N - fit.edf)
   // Bayesian posterior covariance V_β = (BᵀB + λS)⁻¹ σ̂²; pointwise standard error of f̂(x) is √(b(x)ᵀ V_β b(x)).
   const curve = times(gridB, fit.coef)
@@ -75,17 +81,17 @@ export function PosteriorBands() {
   // Draw k uses its own stream, so raising the count adds curves without redrawing the earlier ones.
   const draws = useMemo(() => {
     const L = factor
-    return Array.from({ length: count.value }, (_, k) => {
-      const r = rng((1000 + seed) * 1000 + k)
-      const z = Array.from({ length: p }, () => r.normal())
+    return Array.from({ length: state.count }, (_, k) => {
+      const r = stream((1000 + state.seed) * 1000 + k)
+      const z = Array.from({ length: p }, () => normal(r))
       const beta = fit.coef.map((c, i) => c + L[i].reduce((acc, v, j) => acc + v * z[j], 0))
       return times(gridB, beta)
     })
-  }, [factor, fit, gridB, p, seed, count.value])
+  }, [factor, fit, gridB, p, state.seed, state.count])
 
-  const series: XYSeries[] = [
-    ...(showDraws
-      ? draws.map((y): XYSeries => ({
+  const series: SeriesSpec[] = [
+    ...(state.showDraws
+      ? draws.map((y): SeriesSpec => ({
           name: 'posterior draws',
           type: 'line',
           x: GRID,
@@ -101,9 +107,12 @@ export function PosteriorBands() {
     { name: 'posterior mean f̂', type: 'line', x: GRID, y: curve, slot: 0 },
   ]
 
+  const xAxis = useAxis({ label: 'x', range: [0, 1] })
+  const yAxis = useAxis({ label: 'f(x)', range: [-2, 2.5] })
   return (
-    <Interactive
+    <Figure
       title="Posterior bands and draws for a penalised spline"
+      state={state}
       caption={
         <>
           A cubic spline with 20 B-splines and the penalty λ∫f″², fitted to 100 points. The band is f̂(x) ± 1.96 standard
@@ -115,23 +124,12 @@ export function PosteriorBands() {
       }
       controls={
         <>
-          <ParamSlider
-            label="log₁₀ λ"
-            value={logLambda}
-            onChange={setLogLambda}
-            min={-9}
-            max={1}
-            step={0.1}
-            format={(v) => v.toFixed(1)}
-          />
-          <ParamSlider label="noise σ" value={noise} onChange={setNoise} min={0.05} max={1} step={0.05} />
-          <ParamSwitch label="posterior draws" checked={showDraws} onChange={setShowDraws} />
-          <ParamSlider label="draws" param={count} withArrows format={(v) => String(v)} />
-          <ParamButton onClick={() => setLogLambda(remlBest)}>Set λ by REML</ParamButton>
-          <ParamButton onClick={() => setSeed((v) => v + 1)}>New sample</ParamButton>
+          <Button variant="outline" size="sm" onClick={() => state.set('logLambda', remlBest)}>
+            Set λ by REML
+          </Button>
         </>
       }
-      readout={
+      readouts={
         <>
           <Readout label="edf" value={formatNumber(fit.edf)} />
           <Readout label="σ̂" value={formatNumber(Math.sqrt(sigma2))} />
@@ -140,7 +138,9 @@ export function PosteriorBands() {
         </>
       }
     >
-      <XYChart series={series} xRange={[0, 1]} yRange={[-2, 2.5]} xLabel="x" yLabel="f(x)" height={340} />
-    </Interactive>
+      <Plot x={xAxis} y={yAxis} height={340}>
+        {seriesLayers(series)}
+      </Plot>
+    </Figure>
   )
 }

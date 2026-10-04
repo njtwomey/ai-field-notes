@@ -23,6 +23,7 @@
  * - **Intervals and effect sizes.** `meanInterval`, `differenceOfMeansInterval`, `proportionInterval` (Wald, Wilson,
  *   Wilson with continuity correction, Clopper–Pearson), `differenceOfProportionsInterval` (Wald, Newcombe);
  *   `cohensD`, `hedgesG`, `cohensH`, `oddsRatio` (sample or conditional MLE, with intervals); the independence tests report Cramér's V.
+ * - **Power.** `tTestPower`, `zTestPower`: two-sided power against a shift in standard errors.
  * - **Multiple testing.** `bonferroni`, `holm`, `hochberg`, `benjaminiHochberg`, `benjaminiYekutieli`: adjusted
  *   p-values and rejections.
  * - **Sequential tests** (Algorithms over a data stream, `testsAlgorithms`): `sprt`, `msprt`, `confidenceSequence`,
@@ -125,4 +126,5 @@ export {
   type SprtState,
 } from './sequential'
 export { kaplanMeier, logRankTest, nelsonAalen, type KaplanMeier, type LogRankTest, type NelsonAalen } from './survival'
+export { tTestPower, zTestPower } from './power'
 export { testRegistry, testsAlgorithms, testsFunctions } from './registry'

@@ -1,4 +1,4 @@
-/** The registry of `aifn-applied/learning/survival`. */
+/** The registry of `aifn-methods/learning/survival`. */
 
 import { definer, entries, type Entry, type FunctionInfo } from 'aifn/foundation/registry'
 import * as aft from './aft'

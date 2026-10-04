@@ -1,5 +1,4 @@
-import { Interactive } from 'aifn-render'
-import { Diagram } from 'aifn-render'
+import { Diagram, Figure } from 'aifn-render'
 import type { DiagramSpec } from 'aifn-render'
 
 const spec: DiagramSpec = {
@@ -59,7 +58,7 @@ const spec: DiagramSpec = {
 /** The LQG controller as a Kalman filter followed by an LQR gain. */
 export function LqgDiagram() {
   return (
-    <Interactive
+    <Figure
       title="The LQG controller"
       caption="The Kalman filter turns the noisy measurements and the past inputs into the state estimate. The LQR gain acts on the estimate as if it were the true state. The filter is designed from the noise covariances W and V alone, and the gain from the cost weights Q and R alone: this is the separation theorem."
     >
@@ -67,6 +66,6 @@ export function LqgDiagram() {
         spec={spec}
         ariaLabel="A plant with process noise produces a state, measured through C with sensor noise; a Kalman filter estimates the state from the measurements and past inputs, and an LQR gain maps the estimate to the next input"
       />
-    </Interactive>
+    </Figure>
   )
 }

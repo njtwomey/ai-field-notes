@@ -1,21 +1,24 @@
-import { useMemo, useState } from 'react'
+import { useMemo } from 'react'
 import {
-  Interactive,
-  ParamChoice,
-  ParamSlider,
-  ParamSwitch,
-  Readout,
-  XYChart,
+  choice,
+  Curve,
+  Figure,
+  float,
   formatNumber,
-  useParam,
-  type Handle,
-  type XYSeries,
+  Handle,
+  Plot,
+  Points,
+  Readout,
+  setting,
+  useAxis,
+  useFigureState,
 } from 'aifn-render'
-import { linspace, rng } from '@/lib/math'
 import { solve } from '../_shared/splines'
+import { linspace, toFlat } from 'aifn/foundation/tensor'
+import { normal, stream, uniform } from 'aifn/foundation/random'
 
 const N = 80
-const GRID = linspace(0, 1, 101)
+const GRID = toFlat(linspace(0, 1, 101))
 const truth = (x: number) => Math.sin(2 * Math.PI * x)
 const OUTLIERS = [9, 30, 55]
 const tricube = (u: number) => (u < 1 ? (1 - u ** 3) ** 3 : 0)
@@ -74,50 +77,53 @@ const DEGREES = [
 ] as const
 
 export function LoessExplorer() {
-  const [span, setSpan] = useState(0.3)
-  const [degree, setDegree] = useState<'0' | '1' | '2'>('1')
-  const [outliers, setOutliers] = useState(true)
-  const [robustOn, setRobustOn] = useState(false)
-  const x0 = useParam(0.05, { min: 0, max: 1, step: 0.005 })
-  const d = Number(degree)
+  const state = useFigureState({
+    x0: float(0.05, { min: 0, max: 1, step: 0.005, label: 'x₀' }),
+    span: float(0.3, { min: 0.05, max: 1, step: 0.05, label: 'span α' }),
+    degree: choice<'0' | '1' | '2'>(DEGREES, '1', { label: 'local polynomial' }),
+    outliers: setting(true, 'outliers'),
+    robustOn: setting(false, 'robustness iterations'),
+  })
+  const d = Number(state.degree)
 
   const data = useMemo(() => {
-    const r = rng(12)
-    const x = Array.from({ length: N }, () => r.uniform()).sort((a, b) => a - b)
-    const y = x.map((xi, i) => truth(xi) + 0.3 * r.normal() + (outliers && OUTLIERS.includes(i) ? 3 : 0))
+    const r = stream(12)
+    const x = Array.from({ length: N }, () => uniform(r)).sort((a, b) => a - b)
+    const y = x.map((xi, i) => truth(xi) + 0.3 * normal(r) + (state.outliers && OUTLIERS.includes(i) ? 3 : 0))
     return { x, y }
-  }, [outliers])
+  }, [state.outliers])
 
   const fit = useMemo(() => {
-    const { robust, edf } = loess(data.x, data.y, span, d, robustOn ? 2 : 0)
-    const curve = GRID.map((g) => localFit(g, data.x, data.y, robust, span, d).value)
+    const { robust, edf } = loess(data.x, data.y, state.span, d, state.robustOn ? 2 : 0)
+    const curve = GRID.map((g) => localFit(g, data.x, data.y, robust, state.span, d).value)
     return { robust, edf, curve }
-  }, [data, span, d, robustOn])
+  }, [data, state.span, d, state.robustOn])
 
-  const local = localFit(x0.value, data.x, data.y, fit.robust, span, d)
-  const lx = linspace(Math.max(0, x0.value - local.h), Math.min(1, x0.value + local.h), 31)
-  const ly = lx.map((g) => local.coef.reduce((s, c, k) => s + c * (g - x0.value) ** k, 0))
-  const inWindow: number[] = data.x.map((xi) => (Math.abs(xi - x0.value) < local.h ? 1 : 0))
+  const local = localFit(state.x0, data.x, data.y, fit.robust, state.span, d)
+  const lx = toFlat(linspace(Math.max(0, state.x0 - local.h), Math.min(1, state.x0 + local.h), 31))
+  const ly = lx.map((g) => local.coef.reduce((s, c, k) => s + c * (g - state.x0) ** k, 0))
+  const inWindow: number[] = data.x.map((xi) => (Math.abs(xi - state.x0) < local.h ? 1 : 0))
 
-  const series: XYSeries[] = [
+  const series = [
     {
       name: 'data',
-      type: 'scatter',
       x: data.x,
       y: data.y,
       group: inWindow,
       groupNames: ['outside the window', 'inside the window'],
     },
-    { name: 'true curve', type: 'line', x: GRID, y: GRID.map(truth), muted: true, dashed: true },
-    { name: 'LOESS', type: 'line', x: GRID, y: fit.curve, slot: 2 },
-    { name: 'local fit at x₀', type: 'line', x: lx, y: ly, slot: 3 },
-    { name: 'estimate at x₀', type: 'scatter', x: [x0.value], y: [local.value], emphasis: true },
-  ]
-  const handles: Handle[] = [{ kind: 'x', at: x0.value, label: 'x₀', onDrag: x0.set }]
+    { name: 'true curve', x: GRID, y: GRID.map(truth), muted: true, dashed: true },
+    { name: 'LOESS', x: GRID, y: fit.curve, slot: 2 },
+    { name: 'local fit at x₀', x: lx, y: ly, slot: 3 },
+    { name: 'estimate at x₀', x: [state.x0], y: [local.value], emphasis: true },
+  ] as const
 
+  const xAxis = useAxis({ label: 'x', range: [0, 1] })
+  const yAxis = useAxis({ label: 'y', range: [-2, 4.5] })
   return (
-    <Interactive
+    <Figure
       title="Local regression"
+      state={state}
       caption={
         <>
           Drag the vertical line to move the target point x₀. The points inside the window get tricube weights, and a
@@ -126,16 +132,8 @@ export function LoessExplorer() {
           shifted up by 3; robustness iterations downweight them.
         </>
       }
-      controls={
-        <>
-          <ParamSlider label="x₀" param={x0} />
-          <ParamSlider label="span α" value={span} onChange={setSpan} min={0.05} max={1} step={0.05} />
-          <ParamChoice label="local polynomial" value={degree} onChange={setDegree} options={DEGREES} />
-          <ParamSwitch label="outliers" checked={outliers} onChange={setOutliers} />
-          <ParamSwitch label="robustness iterations" checked={robustOn} onChange={setRobustOn} />
-        </>
-      }
-      readout={
+
+      readouts={
         <>
           <Readout label="points in window" value={String(inWindow.reduce((a, b) => a + b, 0))} />
           <Readout label="half-width h(x₀)" value={formatNumber(local.h)} />
@@ -143,7 +141,14 @@ export function LoessExplorer() {
         </>
       }
     >
-      <XYChart series={series} xRange={[0, 1]} yRange={[-2, 4.5]} xLabel="x" yLabel="y" handles={handles} />
-    </Interactive>
+      <Plot x={xAxis} y={yAxis}>
+        <Points {...series[0]} />
+        <Curve {...series[1]} />
+        <Curve {...series[2]} />
+        <Curve {...series[3]} />
+        <Points {...series[4]} />
+        <Handle {...state.handle('x0', { label: 'x₀' })} />
+      </Plot>
+    </Figure>
   )
 }

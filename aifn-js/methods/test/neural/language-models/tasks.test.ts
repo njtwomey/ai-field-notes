@@ -2,8 +2,8 @@ import { describe, expect, it } from 'vitest'
 import { child, stream } from 'aifn/foundation/random'
 import { fromData, unwrap, type Tensor } from 'aifn/foundation/tensor'
 import { recordActivations } from 'aifn/nn/training'
-import { sequenceTasks } from 'aifn-applied/data/synthetic'
-import { Gpt, taskAccuracy, taskLoss, taskTrainingRun } from 'aifn-applied/neural/language-models'
+import { sequenceTasks } from 'aifn-methods/data/synthetic'
+import { Gpt, taskAccuracy, taskLoss, taskTrainingRun } from 'aifn-methods/neural/language-models'
 
 describe('prompt–answer training', () => {
   it('taskLoss averages the cross-entropy over the weighted positions only', () => {

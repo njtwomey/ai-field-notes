@@ -1,13 +1,13 @@
 /** Sparse GPs step by step (`sparse.ts`): the L-BFGS fit as an Algorithm, greedy inducing-point growth, registration. */
 import { describe, expect, it } from 'vitest'
-import { regression1d } from 'aifn-applied/data/synthetic'
+import { regression1d } from 'aifn-methods/data/synthetic'
 import {
   fitSparseGp,
   sparseGp,
   sparseGpAt,
   sparseGpFitSteps,
   sparseGpGrowSteps,
-} from 'aifn-applied/learning/gaussian-processes'
+} from 'aifn-methods/learning/gaussian-processes'
 import { stream } from 'aifn/foundation/random'
 import { isEntry } from 'aifn/foundation/registry'
 import { take, toFlat, type Tensor } from 'aifn/foundation/tensor'

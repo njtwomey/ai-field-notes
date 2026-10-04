@@ -1,4 +1,4 @@
-import { oneClassSvm, oneClassScore, type OneClassModel } from 'aifn-applied/unsupervised/anomaly'
+import { oneClassSvm, oneClassScore, type OneClassModel } from 'aifn-methods/unsupervised/anomaly'
 import { fromData } from 'aifn/foundation/tensor'
 
 export type Point = [number, number]
@@ -19,7 +19,7 @@ export type OcSvmFit = {
   _model: OneClassModel
 }
 
-/** Train one-class SVM, backed by aifn-applied. */
+/** Train one-class SVM, backed by aifn-methods. */
 export function trainOcSvm(x: Point[], nu: number, gamma: number): OcSvmFit {
   const n = x.length
   const flat = Float64Array.from(x.flat())
@@ -39,7 +39,7 @@ export function trainOcSvm(x: Point[], nu: number, gamma: number): OcSvmFit {
   }
 }
 
-/** Evaluate decision function f(at), backed by aifn-applied. */
+/** Evaluate decision function f(at), backed by aifn-methods. */
 export function decision(fit: OcSvmFit, _x: Point[], _gamma: number, at: Point): number {
   const atTensor = fromData(Float64Array.from(at), [1, 2])
   const score = oneClassScore(fit._model, atTensor)[0]

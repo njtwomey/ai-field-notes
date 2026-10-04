@@ -1,9 +1,9 @@
+import { normal, stream } from 'aifn/foundation/random'
 /**
  * Multiclass classification on 2-D toy data from linear logistic classifiers: one-versus-rest, one-versus-one, an
  * exhaustive error-correcting output code, and multinomial logistic regression. Everything here is small enough to
  * refit on every drag: a few hundred points, a handful of 3-parameter Newton fits and one 3K-parameter Newton fit.
  */
-import { rng } from '@/lib/math'
 
 export type Vec2 = [number, number]
 
@@ -27,12 +27,12 @@ const NEWTON_STEPS = 12
  * seed, so moving a centre translates its cluster without redrawing it.
  */
 export function makeData(seed: number, centres: Vec2[], perClass: number, spread: number): Dataset {
-  const g = rng(seed)
+  const g = stream(seed)
   const x: Vec2[] = []
   const y: number[] = []
   centres.forEach(([cx, cy], k) => {
     for (let i = 0; i < perClass; i++) {
-      x.push([cx + spread * g.normal(), cy + spread * g.normal()])
+      x.push([cx + spread * normal(g), cy + spread * normal(g)])
       y.push(k)
     }
   })

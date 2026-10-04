@@ -1,11 +1,6 @@
 import { useMemo, useState } from 'react'
 import { Normal } from 'aifn/probability/distributions'
-import {
-  clutterEp,
-  clutterLogLikelihood,
-  clutterPosterior,
-  sampleClutter,
-} from 'aifn-applied/inference/mixture-models'
+import { clutterEp, clutterLogLikelihood, clutterPosterior, sampleClutter } from 'aifn-methods/inference/mixture-models'
 import { epLogEvidence, expectationPropagation } from 'aifn/inference/expectation-propagation'
 import { child, stream } from 'aifn/foundation/random'
 import { linspace, toFlat } from 'aifn/foundation/tensor'

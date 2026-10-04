@@ -1,16 +1,7 @@
-import { useMemo, useState } from 'react'
-import {
-  Interactive,
-  ParamChoice,
-  ParamSlider,
-  Readout,
-  XYChart,
-  formatNumber,
-  useParam,
-  type XYSeries,
-} from 'aifn-render'
-import { normalCdf, normalQuantile } from '@/lib/math/special'
+import { useMemo } from 'react'
+import { choice, Curve, Figure, formatNumber, int, Plot, Readout, useAxis, useFigureState } from 'aifn-render'
 import { TABLES, type Alpha } from './tables'
+import { normalCdf, normalQuantile } from 'aifn/numerics/special'
 
 const Z_MAX = 6
 const ALPHAS: { value: Alpha; label: string }[] = [
@@ -42,13 +33,15 @@ const clip = (c: number) => (c > Z_MAX ? NaN : c)
  * Pocock-type and O'Brien–Fleming-type alpha spending, and the mixture sequential probability ratio test.
  */
 export function SequentialComparison() {
-  const looks = useParam(10, { min: 1, max: 50, step: 1 })
-  const [alpha, setAlpha] = useState<Alpha>('0.05')
-  const K = looks.value
+  const state = useFigureState({
+    looks: int(10, { min: 1, max: 50, step: 1, label: 'looks K' }),
+    alpha: choice<Alpha>(ALPHAS, '0.05', { label: 'α' }),
+  })
+  const K = state.looks
 
   const r = useMemo(() => {
-    const a = Number(alpha)
-    const table = TABLES[alpha]
+    const a = Number(state.alpha)
+    const table = TABLES[state.alpha]
     const ks = Array.from({ length: K }, (_, i) => i + 1)
     const z = normalQuantile(1 - a / 2)
     const bounds = {
@@ -64,58 +57,55 @@ export function SequentialComparison() {
       msprt: table.msprt[K - 1],
     }
     const xEnd = Math.max(K, 2)
-    const boundary: XYSeries[] = [
-      { name: 'fixed threshold every look', type: 'line', x: ks, y: bounds.naive, slot: 0 },
-      { name: 'Pocock-type', type: 'line', x: ks, y: bounds.pocock.map(clip), slot: 1 },
-      { name: "O'Brien–Fleming-type", type: 'line', x: ks, y: bounds.obf.map(clip), slot: 2 },
-      { name: 'mSPRT', type: 'line', x: ks, y: bounds.msprt.map(clip), slot: 3 },
-    ]
-    const rate: XYSeries[] = [
-      { name: 'fixed threshold every look', type: 'line', x: ks, y: spent.naive, slot: 0 },
-      { name: 'Pocock-type', type: 'line', x: ks, y: spent.pocock, slot: 1 },
-      { name: "O'Brien–Fleming-type", type: 'line', x: ks, y: spent.obf, slot: 2 },
-      { name: 'mSPRT', type: 'line', x: ks, y: spent.msprt, slot: 3 },
-      { name: 'α', type: 'line', x: [1, xEnd], y: [a, a], emphasis: true, dashed: true },
-    ]
+    const boundary = [
+      { name: 'fixed threshold every look', x: ks, y: bounds.naive, slot: 0 },
+      { name: 'Pocock-type', x: ks, y: bounds.pocock.map(clip), slot: 1 },
+      { name: "O'Brien–Fleming-type", x: ks, y: bounds.obf.map(clip), slot: 2 },
+      { name: 'mSPRT', x: ks, y: bounds.msprt.map(clip), slot: 3 },
+    ] as const
+    const rate = [
+      { name: 'fixed threshold every look', x: ks, y: spent.naive, slot: 0 },
+      { name: 'Pocock-type', x: ks, y: spent.pocock, slot: 1 },
+      { name: "O'Brien–Fleming-type", x: ks, y: spent.obf, slot: 2 },
+      { name: 'mSPRT', x: ks, y: spent.msprt, slot: 3 },
+      { name: 'α', x: [1, xEnd], y: [a, a], emphasis: true, dashed: true },
+    ] as const
     return { boundary, rate, final: { naive: spent.naive[K - 1], msprt: spent.msprt[K - 1] }, xEnd }
-  }, [K, alpha])
+  }, [K, state.alpha])
 
+  const xAxis = useAxis({ label: 'look', range: [1, r.xEnd] })
+  const yAxis = useAxis({ label: 'boundary for |Z|', range: [0, Z_MAX] })
+  const xAxis2 = useAxis({ label: 'look', range: [1, r.xEnd] })
+  const yAxis2 = useAxis({ label: 'P(false positive by this look)', range: [0, undefined], hold: 'union' })
   return (
-    <Interactive
+    <Figure
       title="Four stopping rules on an A/A test"
+      state={state}
       caption="An A/A test analysed at K equally spaced looks and stopped at the first look where |Z| reaches the boundary. Left: each rule's boundary; O'Brien–Fleming-type boundaries above the plotted range are not drawn. Right: the probability, with no true effect, of having stopped by each look. The fixed-sample threshold z₁₋α/₂ exceeds α from the second look on. The two alpha-spending designs spend exactly α by the last look, Pocock-type evenly and O'Brien–Fleming-type mostly at the end. The mSPRT, with its mixing scale set to the effect the full fixed-horizon test detects with 80% power, stays far below α because its guarantee covers checking after every observation."
-      controls={
-        <>
-          <ParamSlider label="looks K" param={looks} />
-          <ParamChoice label="α" value={alpha} onChange={setAlpha} options={ALPHAS} />
-        </>
-      }
-      readout={
+
+      readouts={
         <>
           <Readout label="fixed threshold: false-positive rate" value={formatNumber(r.final.naive)} />
-          <Readout label="alpha spending: false-positive rate" value={formatNumber(Number(alpha))} />
+          <Readout label="alpha spending: false-positive rate" value={formatNumber(Number(state.alpha))} />
           <Readout label="mSPRT: false-positive rate" value={formatNumber(r.final.msprt)} />
         </>
       }
     >
       <div className="grid gap-4 md:grid-cols-2">
-        <XYChart
-          height={320}
-          xLabel="look"
-          yLabel="boundary for |Z|"
-          series={r.boundary}
-          xRange={[1, r.xEnd]}
-          yRange={[0, Z_MAX]}
-        />
-        <XYChart
-          height={320}
-          xLabel="look"
-          yLabel="P(false positive by this look)"
-          series={r.rate}
-          xRange={[1, r.xEnd]}
-          yRange={[0, undefined]}
-        />
+        <Plot x={xAxis} y={yAxis} height={320}>
+          <Curve {...r.boundary[0]} />
+          <Curve {...r.boundary[1]} />
+          <Curve {...r.boundary[2]} />
+          <Curve {...r.boundary[3]} />
+        </Plot>
+        <Plot x={xAxis2} y={yAxis2} height={320}>
+          <Curve {...r.rate[0]} />
+          <Curve {...r.rate[1]} />
+          <Curve {...r.rate[2]} />
+          <Curve {...r.rate[3]} />
+          <Curve {...r.rate[4]} />
+        </Plot>
       </div>
-    </Interactive>
+    </Figure>
   )
 }

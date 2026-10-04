@@ -1,9 +1,20 @@
-import { useMemo, useState } from 'react'
-import { MathText } from 'aifn-render'
-import { Interactive, ParamSlider, Readout, XYChart, formatNumber, type XYSeries } from 'aifn-render'
-import { sigmoid } from '@/lib/math'
+import { useMemo } from 'react'
+import {
+  Bars,
+  Figure,
+  formatNumber,
+  int,
+  MathText,
+  Plot,
+  Readout,
+  seriesLayers,
+  useAxis,
+  useFigureState,
+  type SeriesSpec,
+} from 'aifn-render'
 import { useClassColors } from '../_shared/classColor'
 import { softplus } from '../_shared/ordinal'
+import { sigmoid } from 'aifn/numerics/special'
 
 /** The worked example: class k (1-based) sits at score k − 1; classes 1, 3 and 4 have three examples each. */
 const SCORES = [0, 1, 2, 3]
@@ -101,15 +112,17 @@ const thresholdLine = (t: number, k: number) => ({ x: [clampX(t), clampX(t)], y:
  * constrained fit (solid) merges the two thresholds instead, and the multiplier of that constraint rises from zero.
  */
 export function OrderedThresholds() {
-  const [n2, setN2] = useState(1)
+  const state = useFigureState({
+    n2: int(1, { min: 0, max: MAX_N2, step: 1, label: 'examples in class 2' }),
+  })
   const colors = useClassColors(K)
-  const f = FITS[n2]
+  const f = FITS[state.n2]
   const crossed = f.separate.slice(0, -1).map((t, k) => t > f.separate[k + 1])
   const active = f.mu.map((m) => m > 0)
 
-  const points = useMemo<XYSeries[]>(
+  const points = useMemo<SeriesSpec[]>(
     () =>
-      countsFor(n2).map((count, c) => ({
+      countsFor(state.n2).map((count, c) => ({
         name: `class ${c + 1}`,
         type: 'scatter' as const,
         x: Array.from({ length: count }, () => SCORES[c]),
@@ -117,11 +130,11 @@ export function OrderedThresholds() {
         y: Array.from({ length: count }, (_, j) => c + 1 + (j - (count - 1) / 2) * 0.2),
         color: colors[c],
       })),
-    [n2, colors],
+    [state.n2, colors],
   )
 
-  const lines = useMemo<XYSeries[]>(() => {
-    const { separate: sep, constrained } = FITS[n2]
+  const lines = useMemo<SeriesSpec[]>(() => {
+    const { separate: sep, constrained } = FITS[state.n2]
     const isCrossed = (k: number) => (k > 0 && sep[k - 1] > sep[k]) || (k < sep.length - 1 && sep[k] > sep[k + 1])
     return [
       ...sep.map((t, k) => ({
@@ -138,12 +151,9 @@ export function OrderedThresholds() {
         ...thresholdLine(t, k),
       })),
     ]
-  }, [n2])
+  }, [state.n2])
 
-  const bars = useMemo<XYSeries[]>(
-    () => [{ name: 'μₖ', type: 'bar', x: FITS[n2].mu.map((_, k) => k + 1), y: FITS[n2].mu, slot: 0 }],
-    [n2],
-  )
+  const constraints = f.mu.map((_, k) => k + 1)
 
   const crossedText = crossed.flatMap((c, k) =>
     c ? [`θ${sub(k + 1)} = ${show(f.separate[k])} > θ${sub(k + 2)} = ${show(f.separate[k + 1])}`] : [],
@@ -153,16 +163,18 @@ export function OrderedThresholds() {
   )
   const activeSet = active.flatMap((a, k) => (a ? [`θ${sub(k + 1)} = θ${sub(k + 2)}`] : []))
 
+  const xAxis = useAxis({ label: 'score s', range: X_RANGE })
+  const yAxis = useAxis({ label: 'class', range: [0.4, K + 0.6] })
+  const kAxis = useAxis({ label: 'constraint k', range: [0.5, K - 0.5], integer: true })
+  const muAxis = useAxis({ label: 'μₖ', range: [0, 1] })
   return (
-    <Interactive
+    <Figure
       title="Ordering constraint and its multiplier"
+      state={state}
       caption={
         <MathText text="The worked example: one row per class, with the examples at their scores; the slider sets how many examples class 2 has. Each dashed line is a threshold fitted on its own to the two classes it separates, drawn across their two rows. Each solid line is the constrained fit, with $\theta_1 \le \theta_2 \le \theta_3$ imposed. Move the slider left. With two or more class-2 examples the two fits agree and every multiplier is 0. With one, the dashed $\theta_1$ and $\theta_2$ cross, the solid ones merge instead, and the multiplier $\mu_1$ rises above 0. With none, the dashed pair runs off to $\pm\infty$ (drawn at the edges) and $\mu_1$ rises further. The bars show $\mu_1$ and $\mu_2$; $\mu_2$ stays 0 because $\theta_2 < \theta_3$ throughout." />
       }
-      controls={
-        <ParamSlider label="examples in class 2" value={n2} onChange={setN2} min={0} max={MAX_N2} step={1} withArrows />
-      }
-      readout={
+      readouts={
         <>
           <Readout label="loss, separate fits" value={formatNumber(f.lossSeparate)} />
           <Readout label="loss, constrained" value={formatNumber(f.lossConstrained)} />
@@ -195,25 +207,17 @@ export function OrderedThresholds() {
           )}
         </span>
       </div>
-      <XYChart
-        series={[...points, ...lines]}
-        xRange={X_RANGE}
-        yRange={[0.4, K + 0.6]}
-        xLabel="score s"
-        yLabel="class"
+      <Plot
+        x={xAxis}
+        y={yAxis}
         height={280}
-        ariaLabel="Examples of four classes on a score axis with separate and constrained thresholds"
-      />
-      <XYChart
-        series={bars}
-        xRange={[0.5, K - 1.5]}
-        yRange={[0, 1]}
-        integerX
-        xLabel="constraint k"
-        yLabel="μₖ"
-        height={160}
-        ariaLabel="Multipliers of the ordering constraints"
-      />
-    </Interactive>
+        ariaLabel={'Examples of four classes on a score axis with separate and constrained thresholds'}
+      >
+        {seriesLayers([...points, ...lines])}
+      </Plot>
+      <Plot x={kAxis} y={muAxis} height={160} ariaLabel="Multipliers of the ordering constraints">
+        <Bars name="μₖ" x={constraints} y={f.mu} slot={0} />
+      </Plot>
+    </Figure>
   )
 }

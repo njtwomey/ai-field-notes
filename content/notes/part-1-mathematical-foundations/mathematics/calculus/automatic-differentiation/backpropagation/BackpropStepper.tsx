@@ -1,6 +1,18 @@
 import { useMemo, useState } from 'react'
-import { Interactive, ParamSlider, Readout, StepControls, formatNumber } from 'aifn-render'
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from 'aifn-render'
+import {
+  Figure,
+  float,
+  formatNumber,
+  Player,
+  Readout,
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+  useFigureState,
+} from 'aifn-render'
 import { cn } from '@/lib/utils'
 
 type Node = { name: string; expr: string; value: number; local: string; adjoint: number; adjointExpr: string }
@@ -34,10 +46,12 @@ const BACKWARD = [5, 4, 3, 2, 1, 0]
 const STEPS = FORWARD.length + BACKWARD.length
 
 export function BackpropStepper() {
-  const [x, setX] = useState(1.5)
-  const [y, setY] = useState(-0.5)
+  const state = useFigureState({
+    x: float(1.5, { min: -3, max: 3, step: 0.1, label: 'input x' }),
+    y: float(-0.5, { min: -3, max: 3, step: 0.1, label: 'input y' }),
+  })
   const [step, setStep] = useState(0)
-  const nodes = useMemo(() => trace(x, y), [x, y])
+  const nodes = useMemo(() => trace(state.x, state.y), [state.x, state.y])
 
   const valueShown = new Set(FORWARD.slice(0, Math.min(step, FORWARD.length)))
   const adjointShown = new Set(BACKWARD.slice(0, Math.max(0, step - FORWARD.length)))
@@ -46,25 +60,20 @@ export function BackpropStepper() {
 
   const f = (u: number, v: number) => (u * v + Math.sin(u)) ** 2
   const eps = 1e-5
-  const numeric = [(f(x + eps, y) - f(x - eps, y)) / (2 * eps), (f(x, y + eps) - f(x, y - eps)) / (2 * eps)]
+  const numeric = [
+    (f(state.x + eps, state.y) - f(state.x - eps, state.y)) / (2 * eps),
+    (f(state.x, state.y + eps) - f(state.x, state.y - eps)) / (2 * eps),
+  ]
 
   return (
-    <Interactive
+    <Figure
       title="Backpropagation, one node at a time"
+      state={state}
       caption="For f(x, y) = (xy + sin x)², the forward pass fills in each node's value from the inputs. The backward pass then fills in each node's adjoint, ∂f/∂node, starting from f̄ = 1 and multiplying by one local derivative per edge. The adjoints of x and y are the gradient."
       controls={
-        <>
-          <ParamSlider label="input x" value={x} onChange={setX} min={-3} max={3} step={0.1} />
-          <ParamSlider label="input y" value={y} onChange={setY} min={-3} max={3} step={0.1} />
-          <StepControls
-            onStep={() => setStep((s) => Math.min(s + 1, STEPS))}
-            onRun={() => setStep(STEPS)}
-            onReset={() => setStep(0)}
-            done={step === STEPS}
-          />
-        </>
+        <Player value={step} onChange={setStep} count={STEPS + 1} label="step" format={(k) => `${k} of ${STEPS}`} />
       }
-      readout={
+      readouts={
         <>
           <Readout label="step" value={`${step} of ${STEPS} (${phase})`} />
           <Readout label="∂f/∂x, finite difference" value={formatNumber(numeric[0])} />
@@ -102,6 +111,6 @@ export function BackpropStepper() {
           </TableBody>
         </Table>
       </div>
-    </Interactive>
+    </Figure>
   )
 }

@@ -1,5 +1,4 @@
-import { Interactive } from 'aifn-render'
-import { Diagram } from 'aifn-render'
+import { Diagram, Figure } from 'aifn-render'
 import type { DiagramSpec } from 'aifn-render'
 
 const state = (id: string, x: number, label: string, tone: number) => ({ id, x, y: 2, w: 1.1, h: 0.75, label, tone })
@@ -52,7 +51,7 @@ const spec: DiagramSpec = {
 /** The encoder reads the whole input into one vector; the decoder writes the output from it, one token at a time. */
 export function Seq2SeqDiagram() {
   return (
-    <Interactive
+    <Figure
       title="Encoder and decoder, unrolled"
       caption="The encoder RNN reads the input and passes only its final state to the decoder. The decoder RNN starts from that context vector and, at each step, reads the token it emitted at the previous step and outputs a distribution over the next one."
     >
@@ -60,6 +59,6 @@ export function Seq2SeqDiagram() {
         spec={spec}
         ariaLabel="Sequence-to-sequence model: encoder states h_1 to h_S over the input tokens, final state c passed to decoder states s_1 to s_T, each emitting an output token"
       />
-    </Interactive>
+    </Figure>
   )
 }

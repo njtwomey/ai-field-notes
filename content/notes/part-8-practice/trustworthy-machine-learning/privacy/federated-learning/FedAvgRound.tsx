@@ -1,4 +1,4 @@
-import { Interactive } from 'aifn-render'
+import { Figure } from 'aifn-render'
 import { Diagram } from 'aifn-render'
 import type { DiagramEdge, DiagramNode, DiagramSpec } from 'aifn-render'
 
@@ -68,14 +68,15 @@ const spec: DiagramSpec = {
 /** One round of federated averaging. */
 export function FedAvgRound() {
   return (
-    <Interactive
+    <Figure
       title="One round of federated averaging"
+      purpose="Follow one round of federated averaging from the server's broadcast to the averaged model."
       caption="The server sends the current model to a sample S of clients. Each client runs E epochs of local SGD on its own data and returns its updated model; the data never leave the client. The server replaces its model by the average of the returned models, weighted by each client's number of examples n_k out of n_S in the sample."
     >
       <Diagram
         spec={spec}
         ariaLabel="The server broadcasts the model to sampled clients; each trains locally on its own data; the server averages the returned models weighted by data size and starts the next round"
       />
-    </Interactive>
+    </Figure>
   )
 }

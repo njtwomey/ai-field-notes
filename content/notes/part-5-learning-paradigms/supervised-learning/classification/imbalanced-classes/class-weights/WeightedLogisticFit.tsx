@@ -1,21 +1,25 @@
-import { useMemo, useState } from 'react'
+import { useMemo } from 'react'
 import {
-  Interactive,
-  ParamSlider,
-  ParamSwitch,
-  Readout,
-  XYChart,
+  Curve,
+  Figure,
   formatNumber,
-  useParam,
-  type XYSeries,
+  int,
+  Plot,
+  Points,
+  Readout,
+  setting,
+  slider,
+  useAxis,
+  useFigureState,
 } from 'aifn-render'
-import { linspace, rng } from '@/lib/math'
-import { normalPdf } from '@/lib/math/special'
 import { expit } from '../_shared/binormal'
+import { linspace, toFlat } from 'aifn/foundation/tensor'
+import { normal, stream, uniform } from 'aifn/foundation/random'
+import { normalPdf } from 'aifn/numerics/special'
 
 const N = 10000
 const D = 2
-const S = linspace(-4, 6, 201)
+const S = toFlat(linspace(-4, 6, 201))
 
 /** Weighted logistic regression on one feature by Newton's method. Returns [slope, intercept]. */
 function fitWeighted(s: number[], y: number[], w: (label: number) => number): [number, number] {
@@ -57,61 +61,59 @@ function fitWeighted(s: number[], y: number[], w: (label: number) => number): [n
  * moves too.
  */
 export function WeightedLogisticFit() {
-  const pi = useParam(0.05, { min: 0.01, max: 0.3, step: 0.01 })
-  const w = useParam(19, { min: 1, max: 100, step: 1 })
-  const [misspecified, setMisspecified] = useState(false)
+  const state = useFigureState({
+    pi: slider(0.01, 0.3, 0.05, { step: 0.01, label: 'prevalence π' }),
+    w: int(19, { min: 1, max: 100, step: 1, label: 'weight on positives w' }),
+    misspecified: setting(false, 'misspecified (σ = 0.5)'),
+  })
 
-  const sdPositive = misspecified ? 0.5 : 1
+  const sdPositive = state.misspecified ? 0.5 : 1
   const data = useMemo(() => {
-    const g = rng(11)
+    const g = stream(11)
     const s: number[] = []
     const y: number[] = []
     for (let i = 0; i < N; i++) {
-      const positive = g.uniform() < pi.value
+      const positive = uniform(g) < state.pi
       y.push(positive ? 1 : 0)
-      s.push(positive ? D + sdPositive * g.normal() : g.normal())
+      s.push(positive ? D + sdPositive * normal(g) : normal(g))
     }
     return { s, y }
-  }, [pi.value, sdPositive])
+  }, [state.pi, sdPositive])
 
   const plain = useMemo(() => fitWeighted(data.s, data.y, () => 1), [data])
-  const weighted = useMemo(() => fitWeighted(data.s, data.y, (label) => (label === 1 ? w.value : 1)), [data, w.value])
-  const shift = Math.log(w.value)
+  const weighted = useMemo(() => fitWeighted(data.s, data.y, (label) => (label === 1 ? state.w : 1)), [data, state.w])
+  const shift = Math.log(state.w)
 
-  const series = useMemo<XYSeries[]>(() => {
+  const series = useMemo(() => {
     const truth = S.map((v) => {
-      const pos = pi.value * (normalPdf((v - D) / sdPositive) / sdPositive)
-      const neg = (1 - pi.value) * normalPdf(v)
+      const pos = state.pi * (normalPdf((v - D) / sdPositive) / sdPositive)
+      const neg = (1 - state.pi) * normalPdf(v)
       return pos / (pos + neg)
     })
     return [
-      { name: 'data', type: 'scatter', x: data.s, y: data.y.map((v) => (v === 1 ? 1.02 : -0.02)), muted: true },
-      { name: 'true posterior', type: 'line', x: S, y: truth, dashed: true, muted: true },
-      { name: 'unweighted fit', type: 'line', x: S, y: S.map((v) => expit(plain[0] * v + plain[1])), slot: 0 },
-      { name: 'weighted fit', type: 'line', x: S, y: S.map((v) => expit(weighted[0] * v + weighted[1])), slot: 1 },
+      { name: 'data', x: data.s, y: data.y.map((v) => (v === 1 ? 1.02 : -0.02)), muted: true },
+      { name: 'true posterior', x: S, y: truth, dashed: true, muted: true },
+      { name: 'unweighted fit', x: S, y: S.map((v) => expit(plain[0] * v + plain[1])), slot: 0 },
+      { name: 'weighted fit', x: S, y: S.map((v) => expit(weighted[0] * v + weighted[1])), slot: 1 },
       {
         name: 'weighted, intercept − log w',
-        type: 'line',
         x: S,
         y: S.map((v) => expit(weighted[0] * v + weighted[1] - shift)),
         slot: 2,
         dashed: true,
       },
-    ]
-  }, [data, plain, weighted, shift, pi.value, sdPositive])
+    ] as const
+  }, [data, plain, weighted, shift, state.pi, sdPositive])
 
+  const xAxis = useAxis({ label: 'score s', range: [-4, 6] })
+  const yAxis = useAxis({ label: 'P(y = 1 | s)', range: [-0.05, 1.05] })
   return (
-    <Interactive
+    <Figure
       title="Class weights move the intercept"
+      state={state}
       caption={`${N} simulated scores: negatives N(0, 1), positives N(2, σ²). Logistic regression is fitted without weights and with weight w on each positive. With σ = 1 the true posterior is logistic, the two fits have the same slope, and subtracting log w from the weighted intercept recovers the unweighted curve. Switch on the misspecified model (σ = 0.5): the true posterior is no longer logistic, and the weight now changes the slope too.`}
-      controls={
-        <>
-          <ParamSlider label="prevalence π" param={pi} />
-          <ParamSlider label="weight on positives w" param={w} />
-          <ParamSwitch label="misspecified (σ = 0.5)" checked={misspecified} onChange={setMisspecified} />
-        </>
-      }
-      readout={
+
+      readouts={
         <>
           <Readout label="positives" value={data.y.reduce((a, b) => a + b, 0)} />
           <Readout label="unweighted slope, intercept" value={`${formatNumber(plain[0])}, ${formatNumber(plain[1])}`} />
@@ -124,14 +126,13 @@ export function WeightedLogisticFit() {
         </>
       }
     >
-      <XYChart
-        height={340}
-        xLabel="score s"
-        yLabel="P(y = 1 | s)"
-        xRange={[-4, 6]}
-        yRange={[-0.05, 1.05]}
-        series={series}
-      />
-    </Interactive>
+      <Plot x={xAxis} y={yAxis} height={340}>
+        <Points {...series[0]} />
+        <Curve {...series[1]} />
+        <Curve {...series[2]} />
+        <Curve {...series[3]} />
+        <Curve {...series[4]} />
+      </Plot>
+    </Figure>
   )
 }

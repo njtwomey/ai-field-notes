@@ -42,6 +42,11 @@ export type PlotProps = {
   height?: number
   /** A share of that height, e.g. 0.5 for a strip under a larger chart in the same Figure. */
   scale?: number
+  /**
+   * With equal units and both ranges fixed (glyphs, a strip of shapes): the height follows the width, so the plot area
+   * takes exactly the ranges' aspect at any width. Overrides `height`.
+   */
+  fitHeight?: boolean
   /** Override the renderer (default: canvas when a layer has thousands of marks, else SVG). Fixed at mount. */
   renderer?: 'svg' | 'canvas'
   /** Hover, click and leave positions in data coordinates. */
@@ -175,6 +180,7 @@ export function Plot({
   bare = false,
   height: ownHeight,
   scale = 1,
+  fitHeight = false,
   renderer,
   onPointer,
   onPlotClick,
@@ -258,6 +264,14 @@ export function Plot({
   // Equal units: the plot area takes the ranges' aspect and is centred in the room the margins leave (no padding of
   // the axes). In a single-column Plots grid the grid sizes the panel so this leaves nothing over.
   const equal = x.partner === y || y.partner === x
+  const fitted =
+    fitHeight && equal && xr && yr && size.width > 0 && !x.log && !y.log
+      ? Math.round(
+          ((size.width - margins.left - margins.right) * (yr[1] - yr[0])) / (xr[1] - xr[0]) +
+            margins.top +
+            margins.bottom,
+        )
+      : undefined
   let grid = margins
   const roomW = size.width - margins.left - margins.right
   const roomH = size.height - margins.top - margins.bottom
@@ -563,7 +577,7 @@ export function Plot({
   const overlays = size.width > 0 ? outputs.flatMap((o) => (o.overlay ? [o.overlay(geometry)] : [])) : []
 
   return (
-    <div className="flex w-full shrink-0 flex-col gap-1 overflow-hidden" style={{ height }}>
+    <div className="flex w-full shrink-0 flex-col gap-1 overflow-hidden" style={{ height: fitted ?? height }}>
       {standaloneToolbar && (
         <AxisToolbar
           className="px-1"
@@ -708,6 +722,7 @@ function axisOption(
     ...(axis.log && r && r[0] > 0 ? { interval: logInterval(r, pixels, which) } : {}),
     ...(o.integer && !axis.log && !axis.categorical ? { minInterval: 1 } : {}),
     type: axis.log ? 'log' : 'value',
+    inverse: o.inverse,
     name: labels ? o.label : undefined,
     min: r?.[0],
     max: r?.[1],

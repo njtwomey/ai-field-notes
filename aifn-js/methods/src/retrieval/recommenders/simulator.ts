@@ -8,7 +8,7 @@
 
 import type { Size } from 'aifn/foundation/contracts'
 import { child, stream, units, type Stream } from 'aifn/foundation/random'
-import { giniCoefficient } from 'aifn-applied/evaluation/beyond-accuracy'
+import { giniCoefficient } from 'aifn-methods/evaluation/beyond-accuracy'
 import { alsFactors, factorScorer, implicitAls } from './factorisation'
 import { popularity } from './neighbourhood'
 import { topK, type Interactions, type Scorer } from './interactions'

@@ -1,5 +1,5 @@
 /**
- * Test problems for the optim tests, written here so the core tests do not depend on `aifn-applied`'s test surfaces:
+ * Test problems for the optim tests, written here so the core tests do not depend on `aifn-methods`'s test surfaces:
  * Rosenbrock's valley and a rotated quadratic bowl as bare value-and-gradient functions with their Hessians, and the
  * Rosenbrock function as an `Objective` written with primitives (gradients by autodiff).
  */

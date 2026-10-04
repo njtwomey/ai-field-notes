@@ -1,24 +1,27 @@
-import { useMemo, useState } from 'react'
+import { useMemo } from 'react'
 import {
-  Interactive,
-  ParamChoice,
-  ParamSlider,
-  Readout,
-  XYChart,
+  choice,
+  Curve,
+  Figure,
   formatNumber,
-  useParam,
-  type Handle,
-  type XYSeries,
+  Handle,
+  Plot,
+  Points,
+  Readout,
+  slider,
+  useAxis,
+  useFigureState,
 } from 'aifn-render'
-// Imported under another name: a module-level `window` would shadow the browser global that React's refresh checks.
-import { db, kaiser, magnitudeSpectrum, makeWindow as windowFunction, type WindowName } from '@/lib/dsp'
+import { rfft } from 'aifn/foundation/fourier'
+import { complexAbs, toFlat } from 'aifn/foundation/tensor'
+import { getWindow } from 'aifn/signal/windows'
 
 const N = 64
 const PAD = 1024
-type Choice = WindowName | 'kaiser'
+type Taper = 'rectangular' | 'hann' | 'hamming' | 'blackman' | 'kaiser'
 
 /** Measured for N = 64 periodic windows (see the note's table). */
-const PROPERTIES: Record<Choice, { lobe: number; sidelobe: number; scallop: number; enbw: number }> = {
+const PROPERTIES: Record<Taper, { lobe: number; sidelobe: number; scallop: number; enbw: number }> = {
   rectangular: { lobe: 2, sidelobe: -13.3, scallop: 3.92, enbw: 1.0 },
   hann: { lobe: 4, sidelobe: -31.5, scallop: 1.42, enbw: 1.5 },
   hamming: { lobe: 4, sidelobe: -42.4, scallop: 1.75, enbw: 1.36 },
@@ -27,60 +30,62 @@ const PROPERTIES: Record<Choice, { lobe: number; sidelobe: number; scallop: numb
 }
 
 /** Periodic (DFT-even) window of length N; Kaiser with β = 8.6. */
-const taper = (choice: Choice) =>
-  choice === 'kaiser' ? kaiser(N + 1, 8.6).slice(0, N) : windowFunction(choice, N, true)
+const taper = (name: Taper) => toFlat(getWindow(name === 'kaiser' ? { name, beta: 8.6 } : name, N, { periodic: true }))
+
+/** |X[k]|, k = 0..size/2, of x zero-padded to `size` samples. */
+const magnitudeSpectrum = (x: number[], size: number) => toFlat(complexAbs(rfft(x, { n: size })))
+/** Decibels, 20 log₁₀ of a magnitude, floored at −120 dB. */
+const db = (m: number) => Math.max(-120, 20 * Math.log10(Math.max(m, 1e-300)))
 
 /**
  * A tone at a chosen frequency, in DFT bins, analysed with a 64-point window. Off-bin frequencies spread energy into
  * every bin; the window trades main-lobe width against sidelobe level.
  */
 export function WindowedTone() {
-  const [choice, setChoice] = useState<Choice>('rectangular')
-  const bin = useParam(10.5, { min: 2, max: 28, step: 0.05 })
+  const state = useFigureState({
+    taper: choice<Taper>(
+      [
+        { value: 'rectangular', label: 'rectangular' },
+        { value: 'hann', label: 'Hann' },
+        { value: 'hamming', label: 'Hamming' },
+        { value: 'blackman', label: 'Blackman' },
+        { value: 'kaiser', label: 'Kaiser β=8.6' },
+      ],
+      'rectangular',
+      { label: 'window' },
+    ),
+    bin: slider(2, 28, 10.5, { step: 0.05, label: 'tone frequency (bins)' }),
+  })
+  const { taper: name, bin } = state
 
   const r = useMemo(() => {
-    const w = taper(choice)
+    const w = taper(name)
     const sum = w.reduce((s, v) => s + v, 0)
-    const x = Array.from({ length: N }, (_, n) => Math.cos((2 * Math.PI * bin.value * n) / N) * w[n])
+    const x = Array.from({ length: N }, (_, n) => Math.cos((2 * Math.PI * bin * n) / N) * w[n])
     // Scale so a tone exactly on a bin reads 0 dB: the coherent gain of a cosine is sum(w)/2.
-    const spectrum = Array.from(magnitudeSpectrum(x, PAD), (m) => db(m / (sum / 2), -120))
-    const coarse = Array.from(magnitudeSpectrum(x, N), (m) => db(m / (sum / 2), -120))
+    const spectrum = magnitudeSpectrum(x, PAD).map((m) => db(m / (sum / 2)))
+    const coarse = magnitudeSpectrum(x, N).map((m) => db(m / (sum / 2)))
     return { w, spectrum, coarse, peak: Math.max(...coarse) }
-  }, [choice, bin.value])
+  }, [name, bin])
 
   const fine = r.spectrum.map((_, k) => (k * N) / PAD)
-  const series: XYSeries[] = [
-    { name: 'DTFT of the windowed tone', type: 'line', x: fine, y: r.spectrum, slot: 0 },
-    { name: '64-point DFT bins', type: 'scatter', x: r.coarse.map((_, k) => k), y: r.coarse, emphasis: true },
-  ]
-  const time: XYSeries[] = [
-    { name: 'window', type: 'line', x: Array.from(r.w, (_, n) => n), y: Array.from(r.w), slot: 1 },
-  ]
-  const handles: Handle[] = [{ kind: 'x', at: bin.value, label: 'tone', onDrag: (v) => bin.set(v) }]
-  const props = PROPERTIES[choice]
+  const series = [
+    { name: 'DTFT of the windowed tone', x: fine, y: r.spectrum, slot: 0 },
+    { name: '64-point DFT bins', x: r.coarse.map((_, k) => k), y: r.coarse, emphasis: true },
+  ] as const
+  const time = [{ name: 'window', x: Array.from(r.w, (_, n) => n), y: Array.from(r.w), slot: 1 }] as const
+  const props = PROPERTIES[name]
 
+  const xAxis = useAxis({ label: 'frequency (bins)', range: [0, 32] })
+  const yAxis = useAxis({ label: 'dB', range: [-120, 5] })
+  const xAxis2 = useAxis({ label: 'n', range: [0, N - 1] })
+  const yAxis2 = useAxis({ label: 'w[n]', range: [0, 1.05] })
   return (
-    <Interactive
+    <Figure
       title="Leakage and windows"
       caption="A cosine analysed with 64 samples. When its frequency falls exactly on a bin, the DFT (points) shows one clean line; anywhere between bins, the window's own spectrum (line) is sampled off its peak and energy leaks into every bin. Tapered windows push the far leakage down by tens of decibels at the price of a wider main lobe. Drag the tone or use the slider."
-      controls={
-        <>
-          <ParamChoice
-            label="window"
-            value={choice}
-            onChange={setChoice}
-            options={[
-              { value: 'rectangular', label: 'rectangular' },
-              { value: 'hann', label: 'Hann' },
-              { value: 'hamming', label: 'Hamming' },
-              { value: 'blackman', label: 'Blackman' },
-              { value: 'kaiser', label: 'Kaiser β=8.6' },
-            ]}
-          />
-          <ParamSlider label="tone frequency (bins)" param={bin} />
-        </>
-      }
-      readout={
+      state={state}
+      readouts={
         <>
           <Readout label="main lobe (null to null)" value={`${formatNumber(props.lobe)} bins`} />
           <Readout label="peak sidelobe" value={`${props.sidelobe} dB`} />
@@ -91,17 +96,15 @@ export function WindowedTone() {
       }
     >
       <div className="space-y-4">
-        <XYChart
-          series={series}
-          xLabel="frequency (bins)"
-          yLabel="dB"
-          xRange={[0, 32]}
-          yRange={[-120, 5]}
-          handles={handles}
-          height={280}
-        />
-        <XYChart series={time} xLabel="n" yLabel="w[n]" xRange={[0, N - 1]} yRange={[0, 1.05]} height={140} />
+        <Plot x={xAxis} y={yAxis} height={280}>
+          <Curve {...series[0]} />
+          <Points {...series[1]} />
+          <Handle {...state.handle('bin', { label: 'tone' })} />
+        </Plot>
+        <Plot x={xAxis2} y={yAxis2} height={140}>
+          <Curve {...time[0]} />
+        </Plot>
       </div>
-    </Interactive>
+    </Figure>
   )
 }

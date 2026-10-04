@@ -1,17 +1,7 @@
 import { useMemo, useState } from 'react'
-import {
-  Figure,
-  ControlGroup,
-  NumberSelector,
-  Player,
-  Plots,
-  Plot,
-  Curve,
-  Readout,
-  useAxis,
-} from 'aifn-render'
-import { cocktailParty } from 'aifn-applied/data/synthetic'
-import { fastIca, pca } from 'aifn-applied/unsupervised/embedding/linear'
+import { Figure, ControlGroup, NumberSelector, Player, Plots, Plot, Curve, Readout, useAxis } from 'aifn-render'
+import { cocktailParty } from 'aifn-methods/data/synthetic'
+import { fastIca, pca } from 'aifn-methods/unsupervised/embedding/linear'
 import { dataset } from 'aifn/learning/estimators'
 import { stream } from 'aifn/foundation/random'
 import { toFlat } from 'aifn/foundation/tensor'
@@ -146,12 +136,7 @@ export function CocktailPartyExplorer() {
             />
           </ControlGroup>
           <ControlGroup title="2 · FastICA fixed-point iteration">
-            <Player
-              value={currentStep}
-              onChange={setStep}
-              count={run.steps.length}
-              label="iteration"
-            />
+            <Player value={currentStep} onChange={setStep} count={run.steps.length} label="iteration" />
           </ControlGroup>
         </>
       }
@@ -187,19 +172,19 @@ export function CocktailPartyExplorer() {
             <Curve key={`t${k}`} name={SOURCE_NAMES[k]} x={run.t} y={s} slot={k} dashed width={1} />
           ))}
           {now.aligned.map((a) => (
-            <Curve key={a.source} name={`FastICA ${SOURCE_NAMES[a.source]}`} x={run.t} y={a.y} slot={a.source} width={1.5} />
-          ))}
-        </Plot>
-        <Plot x={tAxis} y={pcAxis} title="PCA principal components">
-          {run.principal.map((a) => (
             <Curve
               key={a.source}
-              name={`PC ${a.source + 1}`}
+              name={`FastICA ${SOURCE_NAMES[a.source]}`}
               x={run.t}
               y={a.y}
               slot={a.source}
               width={1.5}
             />
+          ))}
+        </Plot>
+        <Plot x={tAxis} y={pcAxis} title="PCA principal components">
+          {run.principal.map((a) => (
+            <Curve key={a.source} name={`PC ${a.source + 1}`} x={run.t} y={a.y} slot={a.source} width={1.5} />
           ))}
         </Plot>
       </Plots>

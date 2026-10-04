@@ -3,7 +3,7 @@
 Fixtures mirror the module tree (aifn-js/modules.json). The generator `gen/<node path>.py` (e.g.
 `gen/numerics/linalg.py`) defines `cases() -> dict`; its result is written to `<node path>.json` beside the `gen`
 folder (`numerics/linalg.json`), which tests load with `fixture('numerics/linalg')`. The generators live in both
-packages: `aifn-js/core/test/fixtures/gen` and `aifn-js/applications/test/fixtures/gen`. Run with `make fixtures`
+packages: `aifn-js/core/test/fixtures/gen` and `aifn-js/methods/test/fixtures/gen`. Run with `make fixtures`
 (or `uv run python aifn-js/core/test/fixtures/generate.py [name ...]`); a name is a node path (`numerics/linalg`), a
 prefix of one (`numerics`) or a last segment (`linalg`). `--check` (`make fixtures-check`) writes nothing and exits
 non-zero when a regenerated fixture differs from the committed file.
@@ -18,7 +18,7 @@ import numpy as np
 
 HERE = Path(__file__).parent
 ROOT = HERE.parents[3]
-FIXTURE_DIRS = [HERE, ROOT / "aifn-js" / "applications" / "test" / "fixtures"]
+FIXTURE_DIRS = [HERE, ROOT / "aifn-js" / "methods" / "test" / "fixtures"]
 
 
 def to_json(value: object) -> object:

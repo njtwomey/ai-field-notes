@@ -67,7 +67,13 @@ export type SliderDef = Common & {
   format?: (v: number) => string
 }
 /** A typed number with − and + buttons: float or int, with strict or inclusive bounds, linear or log10 (number.ts). */
-export type NumberDef = Common & NumberOptions & { kind: 'number'; initial: number }
+export type NumberDef = Common &
+  NumberOptions & {
+    kind: 'number'
+    initial: number
+    /** Formats the value in the field (the number shown, not the value stored). */
+    format?: (v: number) => string
+  }
 
 /** One choice: a value, what to show, and words that search should also match. */
 export type ChoiceOption<T extends string | number> = {

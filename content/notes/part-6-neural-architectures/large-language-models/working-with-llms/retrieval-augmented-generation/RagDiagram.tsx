@@ -1,6 +1,4 @@
-import { Interactive } from 'aifn-render'
-import { Diagram } from 'aifn-render'
-import { op } from 'aifn-render'
+import { Diagram, Figure, op } from 'aifn-render'
 import type { DiagramSpec } from 'aifn-render'
 
 const spec: DiagramSpec = {
@@ -52,7 +50,7 @@ const spec: DiagramSpec = {
 /** Retrieval then generation: the passages are fetched by embedding similarity and marginalised out of the output. */
 export function RagDiagram() {
   return (
-    <Interactive
+    <Figure
       title="Retrieval-augmented generation"
       caption="Offline, every passage is embedded and stored in a vector index. Per request, the query encoder embeds the input and the index returns the k passages with the largest inner products. The generator reads the input together with each passage, and the output probability is summed over the passages, weighted by the retriever."
     >
@@ -60,6 +58,6 @@ export function RagDiagram() {
         spec={spec}
         ariaLabel="RAG pipeline: documents encoded offline into a vector index; the input is encoded, top-k passages retrieved, and a generator conditioned on input and passage produces y, marginalised over passages"
       />
-    </Interactive>
+    </Figure>
   )
 }

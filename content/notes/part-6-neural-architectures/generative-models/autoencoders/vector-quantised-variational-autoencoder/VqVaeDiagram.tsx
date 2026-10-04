@@ -1,6 +1,4 @@
-import { Interactive } from 'aifn-render'
-import { Diagram } from 'aifn-render'
-import { projector } from 'aifn-render'
+import { Diagram, Figure, projector } from 'aifn-render'
 import type { DiagramSpec } from 'aifn-render'
 
 const spec: DiagramSpec = {
@@ -47,7 +45,7 @@ const spec: DiagramSpec = {
 /** Encode, snap to the nearest codebook vector, decode; the gradient skips the snap. */
 export function VqVaeDiagram() {
   return (
-    <Interactive
+    <Figure
       title="The VQ-VAE forward and backward pass"
       caption="Each encoder output is replaced by its nearest codebook vector before decoding. The argmin has no useful derivative, so the backward pass copies the decoder's input gradient straight to the encoder output (dashed). The codebook is trained only by the codebook loss, which pulls the chosen vector towards the encoder output."
     >
@@ -55,6 +53,6 @@ export function VqVaeDiagram() {
         spec={spec}
         ariaLabel="VQ-VAE: x to encoder to z_e, nearest codebook vector gives z_q, decoder reconstructs x; codebook feeds the lookup; straight-through gradient from z_q back to z_e"
       />
-    </Interactive>
+    </Figure>
   )
 }

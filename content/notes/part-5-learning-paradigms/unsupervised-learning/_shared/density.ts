@@ -1,6 +1,6 @@
+import { normal, stream, uniform } from 'aifn/foundation/random'
+import { normalPdf } from 'aifn/numerics/special'
 /** A bimodal test density for the density-estimation widgets, with samplers and summary statistics. */
-import { rng } from '@/lib/math'
-import { normalPdf } from '@/lib/math/special'
 
 /** 0.7 N(0, 1) + 0.3 N(3, 0.5²): a broad mode and a narrow one, so no single bandwidth suits both. */
 const COMPONENTS = [
@@ -15,10 +15,10 @@ export function trueDensity(x: number): number {
 }
 
 export function sample(n: number, seed: number): number[] {
-  const r = rng(seed)
+  const r = stream(seed)
   return Array.from({ length: n }, () => {
-    const c = r.uniform() < COMPONENTS[0].weight ? COMPONENTS[0] : COMPONENTS[1]
-    return c.mean + c.sd * r.normal()
+    const c = uniform(r) < COMPONENTS[0].weight ? COMPONENTS[0] : COMPONENTS[1]
+    return c.mean + c.sd * normal(r)
   })
 }
 

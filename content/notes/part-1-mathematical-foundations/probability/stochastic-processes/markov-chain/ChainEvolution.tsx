@@ -1,17 +1,22 @@
-import { useMemo, useState } from 'react'
-import { MathText } from 'aifn-render'
-import { Diagram } from 'aifn-render'
-import type { DiagramEdge, DiagramSpec, Side } from 'aifn-render'
+import { useMemo } from 'react'
 import {
-  Interactive,
-  ParamChoice,
-  ParamSlider,
-  Readout,
-  XYChart,
+  Button,
+  choice,
+  Diagram,
+  Figure,
   formatNumber,
-  useParam,
-  type XYSeries,
+  Handle,
+  MathText,
+  Plot,
+  Readout,
+  seriesLayers,
+  type SeriesSpec,
+  slider,
+  type SliderDef,
+  useAxis,
+  useFigureState,
 } from 'aifn-render'
+import type { DiagramEdge, DiagramSpec, Side } from 'aifn-render'
 
 type Matrix = number[][]
 type State = '0' | '1' | '2'
@@ -46,6 +51,14 @@ const PRESETS: Record<string, RowSpec[]> = {
     { stay: 0.95, next: 0.5 },
     { stay: 0.95, next: 0.5 },
   ],
+}
+
+/** The two sliders of row i of P: the probability of staying, and the share of the rest that moves on. */
+function rowFields<I extends 0 | 1 | 2>(i: I, init: RowSpec) {
+  return {
+    [`stay${i}`]: slider(0, 1, init.stay, { step: 0.05, label: `${NAMES[i]}: stay` }),
+    [`next${i}`]: slider(0, 1, init.next, { step: 0.05, label: `${NAMES[i]}: share to ${NAMES[(i + 1) % 3]}` }),
+  } as Record<`stay${I}` | `next${I}`, SliderDef>
 }
 
 function toMatrix(rows: RowSpec[]): Matrix {
@@ -98,25 +111,48 @@ const pct = (v: number) => v.toFixed(2)
 
 /** A three-state chain with editable rows: the distribution of X_t from a chosen start, against the stationary π. */
 export function ChainEvolution() {
-  const [rows, setRows] = useState<RowSpec[]>(PRESETS.weather)
-  const [start, setStart] = useState<State>('2')
+  const w = PRESETS.weather
+  const state = useFigureState({
+    ...rowFields(0, w[0]),
+    ...rowFields(1, w[1]),
+    ...rowFields(2, w[2]),
+    time: slider(0, STEPS, 3, { step: 1, label: 'time t', format: (v) => String(v) }),
+    start: choice<State>(
+      NAMES.map((n, i) => ({ value: String(i) as State, label: n })),
+      '2',
+      { label: 'start state' },
+    ),
+  })
+  const rows = useMemo<RowSpec[]>(
+    () => [
+      { stay: state.stay0, next: state.next0 },
+      { stay: state.stay1, next: state.next1 },
+      { stay: state.stay2, next: state.next2 },
+    ],
+    [state.stay0, state.next0, state.stay1, state.next1, state.stay2, state.next2],
+  )
+  const setRows = (preset: RowSpec[]) =>
+    preset.forEach(({ stay, next }, i) => {
+      state.set(`stay${i}`, stay)
+      state.set(`next${i}`, next)
+    })
   const P = useMemo(() => toMatrix(rows), [rows])
   const pi = useMemo(() => stationary(P), [P])
   const lambda2 = secondEigenvalue(P)
 
   const path = useMemo(() => {
     let d = [0, 0, 0]
-    d[Number(start)] = 1
+    d[Number(state.start)] = 1
     const out = [d]
     for (let t = 0; t < STEPS; t++) {
       d = [0, 1, 2].map((j) => d[0] * P[0][j] + d[1] * P[1][j] + d[2] * P[2][j])
       out.push(d)
     }
     return out
-  }, [P, start])
+  }, [P, state.start])
 
-  const series = useMemo((): XYSeries[] => {
-    const lines: XYSeries[] = [0, 1, 2].map((j) => ({
+  const series = useMemo((): SeriesSpec[] => {
+    const lines: SeriesSpec[] = [0, 1, 2].map((j) => ({
       name: `P(X_t = ${NAMES[j]})`,
       type: 'line',
       x: TIMES,
@@ -131,8 +167,7 @@ export function ChainEvolution() {
     return lines
   }, [path, pi])
 
-  const time = useParam(3, { min: 0, max: STEPS, step: 1 })
-  const t = time.value
+  const t = state.time
   // Each state is shaded by P(X_t = state), in the colour of its line; arrows carry the transition probabilities.
   const diagram = useMemo((): DiagramSpec => {
     const edges: DiagramEdge[] = []
@@ -170,57 +205,27 @@ export function ChainEvolution() {
   }, [P, path, t])
 
   const tv = pi ? 0.5 * path[STEPS].reduce((s, v, j) => s + Math.abs(v - pi[j]), 0) : NaN
-  const setRow = (i: number, patch: Partial<RowSpec>) =>
-    setRows((r) => r.map((row, k) => (k === i ? { ...row, ...patch } : row)))
 
+  const xAxis = useAxis({ label: 't', range: [0, STEPS] })
+  const yAxis = useAxis({ label: 'probability', range: [0, 1] })
   return (
-    <Interactive
+    <Figure
       title="A three-state chain approaching its stationary distribution"
+      state={state}
       caption={
         <MathText text="States sunny (S), cloudy (C) and rainy (R). Each row of $P$ is set by the probability of staying and the share of the remainder that moves on to the next state (S → C → R → S). The graph shows the chain at time $t$: arrows carry the transition probabilities, self-loops included, and each state is shaded by $P(X_t = \text{state})$. Solid lines are $P(X_t = \text{state})$ from the chosen start; dashed lines are the stationary $\pi$. The distance shrinks like $\abs{\lambda_2}^t$. Step $t$ with the arrows or drag it on the chart. The cycle preset is periodic and never settles; the sticky preset settles slowly." />
       }
       controls={
-        <>
-          <ParamChoice
-            label="preset"
-            value=""
-            onChange={(v: string) => v && setRows(PRESETS[v])}
-            options={[
-              { value: 'weather', label: 'weather' },
-              { value: 'cycle', label: 'cycle' },
-              { value: 'sticky', label: 'sticky' },
-            ]}
-          />
-          <ParamSlider label="time t" param={time} format={(v) => String(v)} withArrows />
-          <ParamChoice
-            label="start state"
-            value={start}
-            onChange={setStart}
-            options={NAMES.map((n, i) => ({ value: String(i) as State, label: n }))}
-          />
-          {rows.map((row, i) => (
-            <div key={i} className="flex flex-col gap-3">
-              <ParamSlider
-                label={`${NAMES[i]}: stay`}
-                value={row.stay}
-                onChange={(v) => setRow(i, { stay: v })}
-                min={0}
-                max={1}
-                step={0.05}
-              />
-              <ParamSlider
-                label={`${NAMES[i]}: share to ${NAMES[(i + 1) % 3]}`}
-                value={row.next}
-                onChange={(v) => setRow(i, { next: v })}
-                min={0}
-                max={1}
-                step={0.05}
-              />
-            </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-sm text-muted-foreground">preset</span>
+          {Object.keys(PRESETS).map((name) => (
+            <Button key={name} variant="outline" size="sm" onClick={() => setRows(PRESETS[name])}>
+              {name}
+            </Button>
           ))}
-        </>
+        </div>
       }
-      readout={
+      readouts={
         <>
           <Readout label="π" value={pi ? `(${pi.map(pct).join(', ')})` : 'not unique'} />
           <Readout label="|λ₂|" value={formatNumber(lambda2)} />
@@ -233,16 +238,11 @@ export function ChainEvolution() {
           spec={diagram}
           ariaLabel="Transition graph of the chain, each state shaded by its probability at time t"
         />
-        <XYChart
-          height={260}
-          xLabel="t"
-          yLabel="probability"
-          series={series}
-          yRange={[0, 1]}
-          xRange={[0, STEPS]}
-          handles={[{ kind: 'x', at: t, label: 't', onDrag: (x) => time.set(x) }]}
-        />
+        <Plot x={xAxis} y={yAxis} height={260}>
+          {seriesLayers(series)}
+          <Handle kind="x" at={t} label="t" onDrag={(x) => state.set('time', x)} />
+        </Plot>
       </div>
-    </Interactive>
+    </Figure>
   )
 }

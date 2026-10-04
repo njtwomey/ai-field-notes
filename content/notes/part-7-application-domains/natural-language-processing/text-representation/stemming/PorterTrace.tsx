@@ -1,7 +1,17 @@
 import { useMemo, useState } from 'react'
-import { Interactive, ParamChoice, Readout } from 'aifn-render'
-import { Input } from 'aifn-render'
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from 'aifn-render'
+import {
+  choice,
+  Figure,
+  Input,
+  Readout,
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+  useFigureState,
+} from 'aifn-render'
 import { cvForm, measure, porterStem, type PorterStep } from '../_shared/text'
 
 const PRESETS = ['generalizations', 'oscillators', 'filing', 'hopping', 'argument', 'relational', 'university'] as const
@@ -19,8 +29,27 @@ const collapsed = (w: string) => cvForm(w).replace(/C+/g, 'C').replace(/V+/g, 'V
 
 /** Porter's algorithm on one word, rule by rule, plus the stems of a group of related words. */
 export function PorterTrace() {
-  const [word, setWord] = useState('generalizations')
-  const [group, setGroup] = useState<Group>('connect')
+  const state = useFigureState({
+    example: choice<(typeof PRESETS)[number] | 'custom'>(
+      [...PRESETS.map((p) => ({ value: p, label: p })), { value: 'custom', label: 'typed word' }],
+      'generalizations',
+      { label: 'example' },
+    ),
+    group: choice<Group>(
+      [
+        { value: 'connect', label: 'one family' },
+        { value: 'over', label: 'over-stemming' },
+        { value: 'under', label: 'under-stemming' },
+        { value: 'irregular', label: 'irregular' },
+      ],
+      'connect',
+      { label: 'word group' },
+    ),
+  })
+
+  // A typed word is kept while an example is shown, and comes back with "typed word".
+  const [custom, setCustom] = useState('generalizations')
+  const word = state.example === 'custom' ? custom : state.example
 
   const { stem, trace } = useMemo(() => {
     const t: PorterStep[] = []
@@ -30,40 +59,25 @@ export function PorterTrace() {
 
   const w = word.trim().toLowerCase()
   return (
-    <Interactive
+    <Figure
       title="Porter's algorithm, one rule at a time"
+      state={state}
       caption="Type a word or pick one. Each row is a rule that fired, with the measure m of the stem it left. A step whose longest matching suffix fails its condition does nothing, so 'argument' keeps its 'ment'. The lower table shows the stems of a group of related words: which ones the stemmer joins, and which it wrongly joins or leaves apart."
       controls={
-        <>
-          <label className="flex flex-col gap-2 text-xs text-muted-foreground">
-            word
-            <Input
-              value={word}
-              onChange={(e) => setWord(e.target.value)}
-              className="font-mono text-sm text-foreground"
-              spellCheck={false}
-            />
-          </label>
-          <ParamChoice
-            label="example"
-            value={(PRESETS as readonly string[]).includes(w) ? w : ''}
-            onChange={setWord}
-            options={PRESETS.map((p) => ({ value: p, label: p }))}
+        <label className="flex flex-col gap-2 text-xs text-muted-foreground">
+          word
+          <Input
+            value={word}
+            onChange={(e) => {
+              setCustom(e.target.value)
+              state.set('example', 'custom')
+            }}
+            className="font-mono text-sm text-foreground"
+            spellCheck={false}
           />
-          <ParamChoice
-            label="word group"
-            value={group}
-            onChange={setGroup}
-            options={[
-              { value: 'connect', label: 'one family' },
-              { value: 'over', label: 'over-stemming' },
-              { value: 'under', label: 'under-stemming' },
-              { value: 'irregular', label: 'irregular' },
-            ]}
-          />
-        </>
+        </label>
       }
-      readout={
+      readouts={
         <>
           <Readout label="C/V form" value={w ? collapsed(w) : '–'} />
           <Readout label="measure m of the word" value={w ? measure(w) : '–'} />
@@ -104,13 +118,13 @@ export function PorterTrace() {
         </Table>
       </div>
       <div className="flex flex-wrap gap-1.5">
-        {GROUPS[group].map((g) => (
+        {GROUPS[state.group].map((g) => (
           <span key={g} className="inline-flex flex-col items-center rounded-md border px-2 py-1 font-mono text-xs">
             <span>{g}</span>
             <span className="text-muted-foreground">{porterStem(g)}</span>
           </span>
         ))}
       </div>
-    </Interactive>
+    </Figure>
   )
 }

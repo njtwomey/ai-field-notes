@@ -1,4 +1,4 @@
-/** The registry of `aifn-applied/generative/autoencoders`. */
+/** The registry of `aifn-methods/generative/autoencoders`. */
 
 import { definer, entries, type Entry, type FunctionInfo } from 'aifn/foundation/registry'
 import * as models from './models'

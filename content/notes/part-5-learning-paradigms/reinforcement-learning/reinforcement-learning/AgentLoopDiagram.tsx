@@ -1,5 +1,4 @@
-import { Interactive } from 'aifn-render'
-import { Diagram } from 'aifn-render'
+import { Diagram, Figure } from 'aifn-render'
 import type { DiagramSpec } from 'aifn-render'
 
 const spec: DiagramSpec = {
@@ -40,7 +39,7 @@ const spec: DiagramSpec = {
 /** The agent–environment loop, with the agent's evaluation and improvement steps inside it. */
 export function AgentLoopDiagram() {
   return (
-    <Interactive
+    <Figure
       title="The agent–environment loop"
       caption="The environment is known only through the transitions it returns. Inside the agent, evaluation estimates how good the current policy is and improvement moves the policy towards actions the estimate rates higher. Methods differ in which of the two they represent explicitly and how they estimate it from samples."
     >
@@ -48,6 +47,6 @@ export function AgentLoopDiagram() {
         spec={spec}
         ariaLabel="Agent-environment loop: policy sends action to the environment; environment returns state and reward to the value estimate; value and policy linked by evaluation and improvement"
       />
-    </Interactive>
+    </Figure>
   )
 }

@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { Interactive, ParamChoice, ParamSlider, Readout, formatNumber } from 'aifn-render'
+import { choice, Figure, formatNumber, Readout, slider, useFigureState } from 'aifn-render'
 import { fitGp2d, GP_CAP } from './gp2d'
 import { MAP_CAPTION, negativeShare } from './mapText'
 import { OrdinalDataControls } from './OrdinalDataControls'
@@ -56,15 +56,20 @@ export function OrdinalModelLab({
   models = ALL_LAB_MODELS,
   title = 'Ordinal models on shared data',
 }: Props) {
-  const families = FAMILIES.map((f) => ({ ...f, models: f.models.filter((m) => models.includes(m)) })).filter(
-    (f) => f.models.length > 0,
+  // One list in the overview's family order; each option names its family, which search also matches.
+  const options = FAMILIES.flatMap((f) =>
+    f.models
+      .filter((m) => models.includes(m))
+      .map((m) => ({ value: m, label: `${LABELS[m]} (${f.label})`, keywords: f.label })),
   )
-  const [model, setModel] = useState<LabModel>(initialModel)
-  const family = families.find((f) => f.models.includes(model)) ?? families[0]
+  const state = useFigureState({
+    model: choice<LabModel>(options, initialModel, { label: 'model' }),
+    lengthscale: slider(0.2, 2.5, 0.8, { step: 0.05, label: 'GP lengthscale ℓ', when: (v) => v.model === 'gp' }),
+    sigma: slider(0.05, 1, 0.3, { step: 0.05, label: 'GP noise σ', when: (v) => v.model === 'gp' }),
+  })
+  const { model, lengthscale, sigma } = state
   const { spec, setSpec, resolution, setResolution, fill, setFill } = useOrdinalData(initialData)
   const [query, setQuery] = useState<Point>([0, 1.5])
-  const [lengthscale, setLengthscale] = useState(0.8)
-  const [sigma, setSigma] = useState(0.3)
 
   // The shared models fit in slices between frames; the GP's Laplace fit on its capped subsample is quick enough to
   // run here. The cumulative logit stands in for the hook while the GP is selected: it is cached and costs nothing.
@@ -88,62 +93,21 @@ export function OrdinalModelLab({
   const probs = fitted.probs(query)
 
   return (
-    <Interactive
+    <Figure
       title={title}
+      state={state}
       caption={`Each model is fitted to the same training points, an equal number per class, drawn along the chosen curve and cut into K classes by position along it; only the selected model is fitted. The neural models have one hidden layer of 24 units; the GP uses at most ${GP_CAP} points. ${MAP_CAPTION} Metrics are computed on ${TEST_PER_CLASS} held-out points per class from the same curve, whatever the training size.`}
       controls={
-        <>
-          <OrdinalDataControls
-            spec={spec}
-            setSpec={setSpec}
-            resolution={resolution}
-            setResolution={setResolution}
-            fill={fill}
-            setFill={setFill}
-          />
-          {families.length > 1 && (
-            <div className="sm:col-span-2 lg:col-span-3">
-              <ParamChoice
-                label="family"
-                value={family.value}
-                onChange={(v) => setModel(families.find((f) => f.value === v)!.models[0])}
-                options={families.map((f) => ({ value: f.value, label: f.label }))}
-              />
-            </div>
-          )}
-          <div className="sm:col-span-2 lg:col-span-3">
-            <ParamChoice
-              label="model"
-              value={model}
-              onChange={setModel}
-              options={family.models.map((m) => ({ value: m, label: LABELS[m] }))}
-            />
-          </div>
-          {model === 'gp' && (
-            <>
-              <ParamSlider
-                label="GP lengthscale ℓ"
-                value={lengthscale}
-                onChange={setLengthscale}
-                min={0.2}
-                max={2.5}
-                step={0.05}
-                debounceMs={150}
-              />
-              <ParamSlider
-                label="GP noise σ"
-                value={sigma}
-                onChange={setSigma}
-                min={0.05}
-                max={1}
-                step={0.05}
-                debounceMs={150}
-              />
-            </>
-          )}
-        </>
+        <OrdinalDataControls
+          spec={spec}
+          setSpec={setSpec}
+          resolution={resolution}
+          setResolution={setResolution}
+          fill={fill}
+          setFill={setFill}
+        />
       }
-      readout={
+      readouts={
         <>
           {fitting && <Readout label="fitting" value="…" />}
           <Readout label="accuracy" value={formatNumber(metrics.accuracy)} />
@@ -161,6 +125,6 @@ export function OrdinalModelLab({
       }
     >
       <OrdinalMap fitted={fitted} data={d} resolution={resolution} fill={fill} query={query} setQuery={setQuery} />
-    </Interactive>
+    </Figure>
   )
 }

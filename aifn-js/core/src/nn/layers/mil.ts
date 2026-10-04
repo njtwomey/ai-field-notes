@@ -27,7 +27,13 @@ import { Linear, linear, tap, type Context, type Layer, type LinearParams } from
 export type MilPoolingKind = 'embedding' | 'attention' | 'instance' | 'additive' | 'conjunctive'
 
 /** All pooling kinds, in MILLET's order. */
-export const MIL_POOLING_KINDS: readonly MilPoolingKind[] = ['embedding', 'attention', 'instance', 'additive', 'conjunctive']
+export const MIL_POOLING_KINDS: readonly MilPoolingKind[] = [
+  'embedding',
+  'attention',
+  'instance',
+  'additive',
+  'conjunctive',
+]
 
 /** Parameters of MIL pooling: the classifier ψ (d → c) and, for the attention kinds, the head (d → h → 1). */
 export type MilPoolingParams = {
@@ -65,7 +71,8 @@ function attend(p: NonNullable<MilPoolingParams['attention']>, z: Value): Value 
 /** Pool a bag of instance embeddings Z [B, t, d] into bag logits by one of the five methods (module notes). */
 export function milPool(kind: MilPoolingKind, params: MilPoolingParams, z: Value, mask?: Tensor): MilPooled {
   const shape = shapeOfValue(z)
-  if (shape.length !== 3) throw new ShapeError('milPool', `milPool: embeddings must be [B, t, d], got [${shape.join(', ')}]`)
+  if (shape.length !== 3)
+    throw new ShapeError('milPool', `milPool: embeddings must be [B, t, d], got [${shape.join(', ')}]`)
   if (mask && (mask.shape[0] !== shape[0] || mask.shape[1] !== shape[1]))
     throw new ShapeError('milPool', 'milPool: the mask must be [B, t]')
   const psi = (x: Value) => linear(x, params.classifier.weight, params.classifier.bias)
@@ -117,7 +124,12 @@ export function MilPooling(
     init: (s) => ({
       classifier: classifier.init(child(s, 'classifier')),
       ...(usesAttention(kind)
-        ? { attention: { hidden: hidden.init(child(s, 'attention', 'hidden')), score: score.init(child(s, 'attention', 'score')) } }
+        ? {
+            attention: {
+              hidden: hidden.init(child(s, 'attention', 'hidden')),
+              score: score.init(child(s, 'attention', 'score')),
+            },
+          }
         : {}),
     }),
     apply: (p, x, ctx?: Context) => tap(ctx, milPool(kind, p, x).logits),

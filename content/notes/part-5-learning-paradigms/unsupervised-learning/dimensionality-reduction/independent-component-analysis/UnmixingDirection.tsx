@@ -1,17 +1,21 @@
 import { useMemo } from 'react'
 import {
-  Interactive,
-  ParamButton,
-  ParamSlider,
-  Readout,
-  XYChart,
+  Button,
+  Curve,
+  Figure,
   formatNumber,
-  useParam,
-  type Handle,
+  Handle,
+  Plot,
+  Points,
+  Readout,
   type Segment,
+  slider,
+  useAxis,
+  useFigureState,
+  Vectors,
 } from 'aifn-render'
-import { linspace } from '@/lib/math'
-import { eigSym } from '@/lib/math/mat2'
+import { linspace, toFlat } from 'aifn/foundation/tensor'
+import { eigh2 } from 'aifn/numerics/linalg'
 
 const T = 400
 const SHOWN = 200
@@ -39,7 +43,10 @@ function whitened() {
   const sxx = c.reduce((s, p) => s + p[0] * p[0], 0) / T
   const sxy = c.reduce((s, p) => s + p[0] * p[1], 0) / T
   const syy = c.reduce((s, p) => s + p[1] * p[1], 0) / T
-  const { values, vectors } = eigSym(sxx, sxy, syy)
+  const { values, vectors } = eigh2([
+    [sxx, sxy],
+    [sxy, syy],
+  ])
   return c.map((p) => vectors.map((v, j) => (v[0] * p[0] + v[1] * p[1]) / Math.sqrt(values[j])) as [number, number])
 }
 
@@ -66,14 +73,16 @@ const corr = (a: number[], b: number[]) => {
 }
 
 export function UnmixingDirection() {
-  const angle = useParam(20, { min: -90, max: 90, step: 1 })
+  const state = useFigureState({
+    angle: slider(-90, 90, 20, { step: 1, label: 'direction of w (degrees)', format: (v) => `${v}°` }),
+  })
   const data = useMemo(() => {
     const z = whitened()
-    const thetas = linspace(-90, 90, 181)
+    const thetas = toFlat(linspace(-90, 90, 181))
     const kurt = thetas.map((t) => kurtosis(z, [Math.cos(rad(t)), Math.sin(rad(t))]))
     return { z, thetas, kurt }
   }, [])
-  const w: [number, number] = [Math.cos(rad(angle.value)), Math.sin(rad(angle.value))]
+  const w: [number, number] = [Math.cos(rad(state.angle)), Math.sin(rad(state.angle))]
   const y = data.z.map((p) => w[0] * p[0] + w[1] * p[1])
   const k = kurtosis(data.z, w)
   const c1 = corr(y, SOURCES[0])
@@ -82,32 +91,31 @@ export function UnmixingDirection() {
   // One FastICA fixed-point step with the kurtosis contrast: w ← E[z (wᵀz)³] − 3w, then normalise.
   const fastIcaStep = () => {
     const next = [0, 1].map((j) => data.z.reduce((s, p, t) => s + p[j] * y[t] ** 3, 0) / T - 3 * w[j])
-    angle.set(fold((Math.atan2(next[1], next[0]) * 180) / Math.PI))
+    state.set('angle', fold((Math.atan2(next[1], next[0]) * 180) / Math.PI))
   }
 
   const vectors: Segment[] = [{ from: [0, 0], to: [ARROW * w[0], ARROW * w[1]] }]
-  const tip: Handle[] = [
-    {
-      kind: 'point',
-      at: [ARROW * w[0], ARROW * w[1]],
-      label: 'w',
-      onDrag: ([px, py]) => angle.set(fold((Math.atan2(py, px) * 180) / Math.PI)),
-    },
-  ]
-  const onCurve: Handle[] = [{ kind: 'x', at: angle.value, label: 'direction', onDrag: (x) => angle.set(x) }]
   const ts = Array.from({ length: SHOWN }, (_, t) => t)
 
+  const xAxis = useAxis({ label: 'z₁ (whitened)', range: [-2.5, 2.5] })
+  const yAxis = useAxis({ label: 'z₂ (whitened)', range: [-2.5, 2.5], equal: xAxis })
+  const xAxis2 = useAxis({ label: 'direction of w (degrees)', range: [-90, 90] })
+  const yAxis2 = useAxis({ label: 'excess kurtosis', hold: 'union' })
+  const xAxis3 = useAxis({ label: 'time', hold: 'union' })
+  const yAxis3 = useAxis({ label: 'wᵀz', hold: 'union' })
   return (
-    <Interactive
+    <Figure
       title="Finding an independent component by non-Gaussianity"
+      state={state}
       caption="A sine wave and a sawtooth are mixed linearly, then whitened, which leaves the scatter a rotated square. Drag the tip of w, or the line on the kurtosis curve, or press FastICA step. The projection wᵀz is a single source exactly where its kurtosis is most negative: along the square's sides. Midway between them it is an equal mix, whose kurtosis is closer to the Gaussian value 0."
       controls={
         <>
-          <ParamSlider label="direction of w (degrees)" param={angle} format={(v) => `${v}°`} />
-          <ParamButton onClick={fastIcaStep}>FastICA step</ParamButton>
+          <Button variant="outline" size="sm" onClick={fastIcaStep}>
+            FastICA step
+          </Button>
         </>
       }
-      readout={
+      readouts={
         <>
           <Readout label="excess kurtosis of wᵀz" value={formatNumber(k)} />
           <Readout label="|corr| with sine" value={formatNumber(Math.abs(c1))} />
@@ -116,42 +124,25 @@ export function UnmixingDirection() {
       }
     >
       <div className="grid gap-4 md:grid-cols-2">
-        <XYChart
-          equalAspect
-          xRange={[-2.5, 2.5]}
-          yRange={[-2.5, 2.5]}
-          xLabel="z₁ (whitened)"
-          yLabel="z₂ (whitened)"
-          vectors={vectors}
-          handles={tip}
-          series={[
-            {
-              name: 'whitened mixtures',
-              type: 'scatter',
-              x: data.z.map((p) => p[0]),
-              y: data.z.map((p) => p[1]),
-              slot: 0,
-            },
-          ]}
-        />
-        <XYChart
-          height={320}
-          xLabel="direction of w (degrees)"
-          yLabel="excess kurtosis"
-          xRange={[-90, 90]}
-          handles={onCurve}
-          series={[
-            { name: 'kurtosis of wᵀz', type: 'line', x: data.thetas, y: data.kurt, slot: 1 },
-            { name: 'current w', type: 'scatter', x: [angle.value], y: [k], emphasis: true },
-          ]}
-        />
+        <Plot x={xAxis} y={yAxis}>
+          <Points name="whitened mixtures" x={data.z.map((p) => p[0])} y={data.z.map((p) => p[1])} slot={0} />
+          <Vectors vectors={vectors} />
+          <Handle
+            kind="point"
+            at={[ARROW * w[0], ARROW * w[1]]}
+            label="w"
+            onDrag={([px, py]) => state.set('angle', fold((Math.atan2(py, px) * 180) / Math.PI))}
+          />
+        </Plot>
+        <Plot x={xAxis2} y={yAxis2} height={320}>
+          <Curve name="kurtosis of wᵀz" x={data.thetas} y={data.kurt} slot={1} />
+          <Points name="current w" x={[state.angle]} y={[k]} emphasis />
+          <Handle {...state.handle('angle', { label: 'direction' })} />
+        </Plot>
       </div>
-      <XYChart
-        height={200}
-        xLabel="time"
-        yLabel="wᵀz"
-        series={[{ name: 'projection wᵀzₜ', type: 'line', x: ts, y: y.slice(0, SHOWN), slot: 2 }]}
-      />
-    </Interactive>
+      <Plot x={xAxis3} y={yAxis3} height={200}>
+        <Curve name="projection wᵀzₜ" x={ts} y={y.slice(0, SHOWN)} slot={2} />
+      </Plot>
+    </Figure>
   )
 }

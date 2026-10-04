@@ -1,52 +1,60 @@
-import { useMemo, useState } from 'react'
+import { useMemo } from 'react'
 import {
-  Interactive,
-  ParamButton,
-  ParamSlider,
-  ParamSwitch,
-  Readout,
-  XYChart,
+  Figure,
+  float,
   formatNumber,
+  int,
+  Plot,
+  Readout,
   type Segment,
-  type XYSeries,
+  Segments,
+  seriesLayers,
+  type SeriesSpec,
+  setting,
+  slider,
+  useAxis,
+  useFigureState,
 } from 'aifn-render'
-import { linspace, rng } from '@/lib/math'
-import { normalCdf } from '@/lib/math/special'
 import { eventTable, logRank, median, stepPath } from './survival'
+import { linspace, toFlat } from 'aifn/foundation/tensor'
+import { stream, uniform } from 'aifn/foundation/random'
+import { normalCdf } from 'aifn/numerics/special'
 
 const N = 60
 const T_MAX = 24
 /** Control-group hazard per month: median survival log 2 / 0.08 ≈ 8.7 months. */
 const BASE_HAZARD = 0.08
-const GRID = linspace(0, T_MAX, 97)
+const GRID = toFlat(linspace(0, T_MAX, 97))
 
 type Group = { t: number[]; d: number[] }
 
 export function KaplanMeierExplorer() {
-  const [censorRate, setCensorRate] = useState(0.05)
-  const [hr, setHr] = useState(0.6)
-  const [seed, setSeed] = useState(3)
-  const [showNaive, setShowNaive] = useState(true)
+  const state = useFigureState({
+    censorRate: float(0.05, { min: 0, max: 0.2, step: 0.01, label: 'dropout rate per month' }),
+    hr: slider(0.3, 1.5, 0.6, { step: 0.05, label: 'hazard ratio' }),
+    showNaive: setting(true, 'show drop-censored estimate'),
+    seed: int(3, { ge: 0, label: 'seed' }),
+  })
 
   const groups = useMemo(() => {
-    const r = rng(seed)
+    const r = stream(state.seed)
     const draw = (hazard: number): Group => {
       const t: number[] = []
       const d: number[] = []
       for (let i = 0; i < N; i++) {
-        const event = -Math.log(Math.max(r.uniform(), 1e-12)) / hazard
+        const event = -Math.log(Math.max(uniform(r), 1e-12)) / hazard
         // Random dropout (exponential with the chosen rate) and administrative censoring at the end of the study.
         // The uniform is drawn even at rate 0, so moving the slider changes censoring but never the event times.
-        const u = Math.max(r.uniform(), 1e-12)
-        const dropout = censorRate > 0 ? -Math.log(u) / censorRate : Infinity
+        const u = Math.max(uniform(r), 1e-12)
+        const dropout = state.censorRate > 0 ? -Math.log(u) / state.censorRate : Infinity
         const c = Math.min(dropout, T_MAX)
         t.push(Math.min(event, c))
         d.push(event <= c ? 1 : 0)
       }
       return { t, d }
     }
-    return [draw(BASE_HAZARD), draw(BASE_HAZARD * hr)] as const
-  }, [seed, censorRate, hr])
+    return [draw(BASE_HAZARD), draw(BASE_HAZARD * state.hr)] as const
+  }, [state.seed, state.censorRate, state.hr])
 
   const km = groups.map((g) => eventTable(g.t, g.d).map((s) => ({ time: s.time, value: s.surv })))
   // "Drop the censored rows": the empirical survival curve of the observed event times alone.
@@ -60,9 +68,9 @@ export function KaplanMeierExplorer() {
   const censored = 1 - all.d.reduce((a, b) => a + b, 0) / (2 * N)
   const names = ['control', 'treated']
 
-  const series: XYSeries[] = [0, 1].flatMap((j) => [
+  const series: SeriesSpec[] = [0, 1].flatMap((j) => [
     { name: `Kaplan–Meier, ${names[j]}`, type: 'line' as const, ...stepPath(km[j], T_MAX), slot: j },
-    ...(showNaive
+    ...(state.showNaive
       ? [
           {
             name: `drop censored, ${names[j]}`,
@@ -75,14 +83,17 @@ export function KaplanMeierExplorer() {
       : []),
   ])
   // True survival curves exp(−λt) as thin muted lines, without legend entries.
-  const truth: Segment[] = [BASE_HAZARD, BASE_HAZARD * hr].flatMap((h) =>
+  const truth: Segment[] = [BASE_HAZARD, BASE_HAZARD * state.hr].flatMap((h) =>
     GRID.slice(1).map((g, i) => ({ from: [GRID[i], Math.exp(-h * GRID[i])], to: [g, Math.exp(-h * g)] }) as Segment),
   )
   const fmtMedian = (v: number | null) => (v === null ? `> ${T_MAX}` : formatNumber(v))
 
+  const xAxis = useAxis({ label: 'months', range: [0, T_MAX] })
+  const yAxis = useAxis({ label: 'S(t)', range: [0, 1] })
   return (
-    <Interactive
+    <Figure
       title="Kaplan–Meier under censoring"
+      state={state}
       caption={
         <>
           Sixty patients per arm with exponential event times; the treated arm's hazard is the control hazard times the
@@ -92,22 +103,8 @@ export function KaplanMeierExplorer() {
           the censoring rate. The log-rank test uses the censored patients while they are at risk.
         </>
       }
-      controls={
-        <>
-          <ParamSlider
-            label="dropout rate per month"
-            value={censorRate}
-            onChange={setCensorRate}
-            min={0}
-            max={0.2}
-            step={0.01}
-          />
-          <ParamSlider label="hazard ratio" value={hr} onChange={setHr} min={0.3} max={1.5} step={0.05} />
-          <ParamSwitch label="show drop-censored estimate" checked={showNaive} onChange={setShowNaive} />
-          <ParamButton onClick={() => setSeed((s) => s + 1)}>New sample</ParamButton>
-        </>
-      }
-      readout={
+
+      readouts={
         <>
           <Readout label="censored" value={`${Math.round(censored * 100)}%`} />
           <Readout
@@ -116,14 +113,17 @@ export function KaplanMeierExplorer() {
           />
           <Readout
             label="true median"
-            value={`${formatNumber(Math.LN2 / BASE_HAZARD)} / ${formatNumber(Math.LN2 / (BASE_HAZARD * hr))}`}
+            value={`${formatNumber(Math.LN2 / BASE_HAZARD)} / ${formatNumber(Math.LN2 / (BASE_HAZARD * state.hr))}`}
           />
           <Readout label="log-rank χ²" value={formatNumber(test.chi2)} />
           <Readout label="p-value" value={formatNumber(p)} />
         </>
       }
     >
-      <XYChart series={series} segments={truth} xRange={[0, T_MAX]} yRange={[0, 1]} xLabel="months" yLabel="S(t)" />
-    </Interactive>
+      <Plot x={xAxis} y={yAxis}>
+        {seriesLayers(series)}
+        <Segments segments={truth} />
+      </Plot>
+    </Figure>
   )
 }

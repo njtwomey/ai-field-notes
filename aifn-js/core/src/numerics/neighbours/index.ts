@@ -1,7 +1,7 @@
 /**
  * `aifn/numerics/neighbours`: nearest-neighbour search, exact and approximate, as scikit-learn's `neighbors` and faiss.
  *
- * - Exact: `bruteForceNeighbours` (the reference), the k-d tree and ball tree (`kdTree`, `ballTree`, `treeQuery` with
+ * - Exact: `bruteForceNeighbours` (the reference), the k-d, ball and vantage-point trees (`kdTree`, `ballTree`, `vpTree`, `treeQuery` with
  *   its visit order, `treeSearch`).
  * - Hashing: random-hyperplane and p-stable families (`hyperplaneFamily`, `pStableFamily`), `lshIndex`, `lshQuery`, and
  *   the banding shared with MinHash (`lshBands`, `lshCandidates`, `lshProbability`, `lshThreshold`).
@@ -25,6 +25,7 @@ export {
 export {
   ballTree,
   kdTree,
+  vpTree,
   nodeLowerBound,
   treeQuery,
   treeSearch,

@@ -1,5 +1,4 @@
-import { Interactive } from 'aifn-render'
-import { Diagram } from 'aifn-render'
+import { Diagram, Figure } from 'aifn-render'
 import type { DiagramSpec } from 'aifn-render'
 
 const stage = (id: string, x: number, label: string, tone: number, h = 1.3) => ({
@@ -43,7 +42,7 @@ const spec: DiagramSpec = {
 /** The retrieve, rank, re-rank funnel and the feedback loop that closes it. */
 export function Funnel() {
   return (
-    <Interactive
+    <Figure
       title="The multi-stage funnel"
       caption="Each stage sees fewer items and can afford more computation per item. Retrieval uses models whose item side can be precomputed; ranking uses models that combine user and item features; re-ranking scores the list as a whole. What the user does with the slate is logged and becomes the next model's training data."
     >
@@ -51,6 +50,6 @@ export function Funnel() {
         spec={spec}
         ariaLabel="Catalogue to retrieval to ranking to re-ranking to slate, with logged feedback feeding retraining"
       />
-    </Interactive>
+    </Figure>
   )
 }

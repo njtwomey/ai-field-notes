@@ -37,8 +37,8 @@ it('no two aifn modules export different values under one name', async () => {
       ...f.modules.filter((m) => m.status !== 'gap').map((m) => `aifn/${f.family}/${m.module}`),
     ]),
     ...spec.applications.areas.flatMap((a) => [
-      `aifn-applied/${a.area}`,
-      ...leaves(`aifn-applied/${a.area}`, a.children),
+      `aifn-methods/${a.area}`,
+      ...leaves(`aifn-methods/${a.area}`, a.children),
     ]),
     ...spec.aliases.map((a) => a.path),
   ]

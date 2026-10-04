@@ -1,6 +1,6 @@
 import { useMemo } from 'react'
-import { Interactive, ParamSlider, Readout, XYChart, formatNumber, useParam, type XYSeries } from 'aifn-render'
-import { rng } from '@/lib/math'
+import { Curve, Figure, formatNumber, int, Plot, Readout, slider, useAxis, useFigureState } from 'aifn-render'
+import { normal, stream, uniform } from 'aifn/foundation/random'
 
 const N = 250
 
@@ -21,47 +21,48 @@ function riseWidth(y: number[]): number {
 
 /** A step and a ramp with small Gaussian noise and sparse impulses, smoothed by a running median and a running mean. */
 export function MedianVsMean() {
-  const half = useParam(3, { min: 1, max: 12, step: 1 })
-  const rate = useParam(0.08, { min: 0, max: 0.3, step: 0.01 })
+  const state = useFigureState({
+    half: int(3, {
+      min: 1,
+      max: 12,
+      step: 1,
+      label: 'half-width m (window 2m + 1)',
+      format: (v) => `${v}  (${2 * v + 1} points)`,
+    }),
+    rate: slider(0, 0.3, 0.08, { step: 0.01, label: 'impulse probability per sample', format: (v) => v.toFixed(2) }),
+  })
 
   const r = useMemo(() => {
-    const g = rng(11)
+    const g = stream(11)
     const clean = Array.from({ length: N }, (_, n) => (n < 120 ? 0 : n < 180 ? 1 : 1 - (n - 180) / 70))
     const x = clean.map((v) => {
-      const u = g.uniform()
-      const impulse = u < rate.value ? (g.uniform() < 0.5 ? -2.5 : 2.5) : 0
-      return v + 0.05 * g.normal() + impulse
+      const u = uniform(g)
+      const impulse = u < state.rate ? (uniform(g) < 0.5 ? -2.5 : 2.5) : 0
+      return v + 0.05 * normal(g) + impulse
     })
-    const med = running(x, half.value, median)
-    const avg = running(x, half.value, mean)
+    const med = running(x, state.half, median)
+    const avg = running(x, state.half, mean)
     const rms = (y: number[]) => Math.sqrt(y.reduce((s, v, n) => s + (v - clean[n]) ** 2, 0) / N)
     return { x, clean, med, avg, rmsMed: rms(med), rmsAvg: rms(avg), riseMed: riseWidth(med), riseAvg: riseWidth(avg) }
-  }, [half.value, rate.value])
+  }, [state.half, state.rate])
 
   const n = Array.from({ length: N }, (_, i) => i)
-  const series: XYSeries[] = [
-    { name: 'input with impulses', type: 'line', x: n, y: r.x, muted: true },
-    { name: `moving average (${2 * half.value + 1} points)`, type: 'line', x: n, y: r.avg, slot: 2 },
-    { name: `median (${2 * half.value + 1} points)`, type: 'line', x: n, y: r.med, slot: 0 },
-    { name: 'clean signal', type: 'line', x: n, y: r.clean, slot: 1, dashed: true },
-  ]
+  const series = [
+    { name: 'input with impulses', x: n, y: r.x, muted: true },
+    { name: `moving average (${2 * state.half + 1} points)`, x: n, y: r.avg, slot: 2 },
+    { name: `median (${2 * state.half + 1} points)`, x: n, y: r.med, slot: 0 },
+    { name: 'clean signal', x: n, y: r.clean, slot: 1, dashed: true },
+  ] as const
 
+  const xAxis = useAxis({ label: 'n', range: [0, N - 1] })
+  const yAxis = useAxis({ label: 'amplitude', range: [-3, 3.5] })
   return (
-    <Interactive
+    <Figure
       title="Running median against running mean"
+      state={state}
       caption="A step at n = 120 followed by a ramp, with small Gaussian noise and random impulses of ±2.5. The moving average spreads every impulse over its window and blurs the step. The median ignores an impulse as long as fewer than half the samples in the window are outliers, and passes the step unchanged. Raise the impulse rate until clusters of more than m impulses appear in one window: the median then fails too."
-      controls={
-        <>
-          <ParamSlider
-            label="half-width m (window 2m + 1)"
-            param={half}
-            format={(v) => `${v}  (${2 * v + 1} points)`}
-            withArrows
-          />
-          <ParamSlider label="impulse probability per sample" param={rate} format={(v) => v.toFixed(2)} />
-        </>
-      }
-      readout={
+
+      readouts={
         <>
           <Readout label="RMS error, median" value={formatNumber(r.rmsMed)} />
           <Readout label="RMS error, moving average" value={formatNumber(r.rmsAvg)} />
@@ -69,7 +70,12 @@ export function MedianVsMean() {
         </>
       }
     >
-      <XYChart series={series} xLabel="n" yLabel="amplitude" xRange={[0, N - 1]} yRange={[-3, 3.5]} height={320} />
-    </Interactive>
+      <Plot x={xAxis} y={yAxis} height={320}>
+        <Curve {...series[0]} />
+        <Curve {...series[1]} />
+        <Curve {...series[2]} />
+        <Curve {...series[3]} />
+      </Plot>
+    </Figure>
   )
 }

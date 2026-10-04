@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import { stream } from 'aifn/foundation/random'
 import { fromData, toFlat } from 'aifn/foundation/tensor'
-import { datasetRegistry, type ClassificationTruth, type Dataset } from 'aifn-applied/data'
-import { annulus, gaussianGrid, gaussianRing, pinwheel, swissRoll2d } from 'aifn-applied/data/synthetic'
-import { mixtureLogDensityOf } from 'aifn-applied/generative'
+import { datasetRegistry, type ClassificationTruth, type Dataset } from 'aifn-methods/data'
+import { annulus, gaussianGrid, gaussianRing, pinwheel, swissRoll2d } from 'aifn-methods/data/synthetic'
+import { mixtureLogDensityOf } from 'aifn-methods/generative'
 
 const model = (d: Dataset) => (d.meta.truth as ClassificationTruth).model
 

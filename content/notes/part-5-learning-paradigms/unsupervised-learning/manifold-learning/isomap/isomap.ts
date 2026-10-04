@@ -1,18 +1,18 @@
-import { rng } from '@/lib/math'
 import type { Point } from '../../_shared/datasets'
 import { eigSymmetric } from '../../_shared/linalg'
+import { normal, stream, uniform } from 'aifn/foundation/random'
 
 /**
  * Points along a spiral with radius 0.5 + 2t at angle π/2 + 3πt, for t uniform in [0, 1]. Successive turns are about
  * 1.3 apart. `arc` is each point's arc length from the start, the coordinate a perfect unrolling would recover.
  */
 export function spiral(n: number, seed: number): { points: Point[]; t: number[]; arc: number[] } {
-  const r = rng(seed)
-  const t = Array.from({ length: n }, () => r.uniform()).sort((a, b) => a - b)
+  const r = stream(seed)
+  const t = Array.from({ length: n }, () => uniform(r)).sort((a, b) => a - b)
   const points = t.map((s) => {
     const angle = Math.PI / 2 + 3 * Math.PI * s
     const radius = 0.5 + 2 * s
-    return [radius * Math.cos(angle) + 0.03 * r.normal(), radius * Math.sin(angle) + 0.03 * r.normal()] as Point
+    return [radius * Math.cos(angle) + 0.03 * normal(r), radius * Math.sin(angle) + 0.03 * normal(r)] as Point
   })
   // Speed |dp/dt| = sqrt((3π r)² + 2²); integrate it with the midpoint rule on a fine grid.
   const speed = (u: number) => Math.hypot(3 * Math.PI * (0.5 + 2 * u), 2)

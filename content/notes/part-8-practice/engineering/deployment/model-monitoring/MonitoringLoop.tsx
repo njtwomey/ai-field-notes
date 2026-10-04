@@ -1,4 +1,4 @@
-import { Interactive } from 'aifn-render'
+import { Figure } from 'aifn-render'
 import { Diagram } from 'aifn-render'
 import type { DiagramNode, DiagramSpec } from 'aifn-render'
 
@@ -59,14 +59,15 @@ const spec: DiagramSpec = {
 /** The monitoring loop around a deployed model. */
 export function MonitoringLoop() {
   return (
-    <Interactive
+    <Figure
       title="The monitoring loop"
+      purpose="Follow the signals a deployed model logs, from service health to delayed accuracy, and where each one triggers action."
       caption="Signals are logged at each stage of the serving path (dashed). Service health and data checks are available immediately, prediction distributions within a window, and accuracy only once the true outcomes arrive. A measurement outside its expected range raises an alert, and the response feeds back into training or deployment."
     >
       <Diagram
         spec={spec}
         ariaLabel="A training pipeline deploys a model to serving, which produces predictions and later outcomes; monitors on each stage feed an alert that triggers a rollback, retraining or a pipeline fix"
       />
-    </Interactive>
+    </Figure>
   )
 }

@@ -1,15 +1,16 @@
-import { useMemo, useState } from 'react'
+import { useMemo } from 'react'
 import {
-  Interactive,
-  ParamButton,
-  ParamChoice,
-  ParamSlider,
-  Readout,
-  XYChart,
+  Button,
+  choice,
+  Figure,
   formatNumber,
-  useParam,
-  type Handle,
-  type XYSeries,
+  Curve,
+  Handle,
+  Plot,
+  useAxis,
+  int,
+  Readout,
+  useFigureState,
 } from 'aifn-render'
 
 const MAX_LEN = 32768
@@ -36,89 +37,80 @@ const cacheGiB = (layers: number, kvHeads: number, dHead: number, bytes: number,
   (2 * layers * kvHeads * dHead * tokens * batch * bytes) / GIB
 
 export function CacheMemory() {
-  const [layers, setLayers] = useState(80)
-  const [heads, setHeads] = useState(64)
-  const [groups, setGroups] = useState(8)
-  const [dHead, setDHead] = useState<HeadDim>('128')
-  const [precision, setPrecision] = useState<Precision>('2')
-  const [batch, setBatch] = useState(1)
-  const length = useParam(4096, { min: 0, max: MAX_LEN, step: 256 })
+  const state = useFigureState({
+    layers: int(80, { min: 1, max: 128, step: 1, label: 'layers' }),
+    heads: int(64, { min: 1, max: 128, step: 1, label: 'query heads' }),
+    groups: int(8, { min: 1, max: 64, step: 1, label: 'KV heads for grouped-query' }),
+    dHead: choice<HeadDim>(HEAD_DIMS, '128', { label: 'head width' }),
+    precision: choice<Precision>(PRECISIONS, '2', { label: 'cache precision' }),
+    batch: int(1, { min: 1, max: 64, step: 1, label: 'batch size' }),
+    length: int(4096, { min: 0, max: MAX_LEN, step: 256, label: 'tokens cached' }),
+  })
 
-  const kvGroups = Math.min(groups, heads)
-  const bytes = Number(precision)
-  const dh = Number(dHead)
+  const kvGroups = Math.min(state.groups, state.heads)
+  const bytes = Number(state.precision)
+  const dh = Number(state.dHead)
 
-  const series = useMemo((): XYSeries[] => {
-    const line = (name: string, kvHeads: number, slot: number): XYSeries => ({
+  const series = useMemo(() => {
+    const line = (name: string, kvHeads: number, slot: number) => ({
       name,
-      type: 'line',
       x: LENGTHS,
-      y: LENGTHS.map((n) => cacheGiB(layers, kvHeads, dh, bytes, batch, n)),
+      y: LENGTHS.map((n) => cacheGiB(state.layers, kvHeads, dh, bytes, state.batch, n)),
       slot,
     })
     return [
-      line(`multi-head (${heads} KV heads)`, heads, 0),
+      line(`multi-head (${state.heads} KV heads)`, state.heads, 0),
       line(`grouped-query (${kvGroups} KV heads)`, kvGroups, 1),
       line('multi-query (1 KV head)', 1, 2),
     ]
-  }, [layers, heads, kvGroups, dh, bytes, batch])
+  }, [state.layers, state.heads, kvGroups, dh, bytes, state.batch])
 
-  const at = (kvHeads: number) => formatNumber(cacheGiB(layers, kvHeads, dh, bytes, batch, length.value))
-  const perToken = (2 * layers * kvGroups * dh * bytes) / 1024
-  const handles: Handle[] = [{ kind: 'x', at: length.value, label: 'tokens', onDrag: length.set }]
+  const at = (kvHeads: number) => formatNumber(cacheGiB(state.layers, kvHeads, dh, bytes, state.batch, state.length))
+  const perToken = (2 * state.layers * kvGroups * dh * bytes) / 1024
+  const lengthAxis = useAxis({ label: 'tokens cached per sequence', range: [0, MAX_LEN] })
+  const sizeAxis = useAxis({ label: 'cache size (GiB)', range: [0, undefined], hold: 'union' })
 
   const preset = (l: number, h: number, g: number) => {
-    setLayers(l)
-    setHeads(h)
-    setGroups(g)
-    setDHead('128')
-    setPrecision('2')
+    state.set('layers', l)
+    state.set('heads', h)
+    state.set('groups', g)
+    state.set('dHead', '128')
+    state.set('precision', '2')
   }
 
   return (
-    <Interactive
+    <Figure
       title="KV cache memory against sequence length"
+      purpose="Change the model's shape, the precision and the batch size to compare KV cache sizes for multi-head, grouped-query and multi-query attention."
+      state={state}
       caption="Cache size grows linearly with the number of cached tokens, with a slope set by layers × KV heads × head width × bytes. Grouped-query attention divides the slope by the number of query heads per KV head, and multi-query attention by the number of query heads. Drag the vertical line to read the three sizes at a given length."
       controls={
         <>
-          <ParamSlider label="layers" value={layers} onChange={setLayers} min={1} max={128} step={1} />
-          <ParamSlider label="query heads" value={heads} onChange={setHeads} min={1} max={128} step={1} />
-          <ParamSlider
-            label="KV heads for grouped-query"
-            value={groups}
-            onChange={setGroups}
-            min={1}
-            max={64}
-            step={1}
-          />
-          <ParamChoice label="head width" value={dHead} onChange={setDHead} options={HEAD_DIMS} />
-          <ParamChoice label="cache precision" value={precision} onChange={setPrecision} options={PRECISIONS} />
-          <ParamSlider label="batch size" value={batch} onChange={setBatch} min={1} max={64} step={1} />
-          <ParamSlider label="tokens cached" param={length} />
           <div className="flex flex-wrap gap-2">
-            <ParamButton onClick={() => preset(32, 32, 32)}>Llama 2 7B</ParamButton>
-            <ParamButton onClick={() => preset(80, 64, 8)}>Llama 2 70B</ParamButton>
+            <Button variant="outline" size="sm" onClick={() => preset(32, 32, 32)}>
+              Llama 2 7B
+            </Button>
+            <Button variant="outline" size="sm" onClick={() => preset(80, 64, 8)}>
+              Llama 2 70B
+            </Button>
           </div>
         </>
       }
-      readout={
+      readouts={
         <>
-          <Readout label="multi-head" value={`${at(heads)} GiB`} />
+          <Readout label="multi-head" value={`${at(state.heads)} GiB`} />
           <Readout label="grouped-query" value={`${at(kvGroups)} GiB`} />
           <Readout label="multi-query" value={`${at(1)} GiB`} />
           <Readout label="grouped-query per token" value={`${formatNumber(perToken)} KiB`} />
         </>
       }
     >
-      <XYChart
-        series={series}
-        xLabel="tokens cached per sequence"
-        yLabel="cache size (GiB)"
-        xRange={[0, MAX_LEN]}
-        yRange={[0, undefined]}
-        handles={handles}
-        height={320}
-      />
-    </Interactive>
+      <Plot x={lengthAxis} y={sizeAxis} height={320}>
+        {series.map((line) => (
+          <Curve key={line.slot} {...line} />
+        ))}
+        <Handle {...state.handle('length', { label: 'tokens' })} />
+      </Plot>
+    </Figure>
   )
 }

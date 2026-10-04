@@ -1,13 +1,17 @@
-import { useMemo, useState } from 'react'
+import { useMemo } from 'react'
 import {
-  Interactive,
-  ParamChoice,
-  ParamSlider,
-  Readout,
-  XYChart,
+  choice,
+  Curve,
+  Figure,
+  float,
   formatNumber,
-  useParam,
-  type XYSeries,
+  Plot,
+  Points,
+  Readout,
+  seriesLayers,
+  type SeriesSpec,
+  useAxis,
+  useFigureState,
 } from 'aifn-render'
 
 type Fn = 'sin' | 'square' | 'exp'
@@ -29,14 +33,24 @@ const gaussian = (y: number, m: number, v: number) => Math.exp(-((y - m) ** 2) /
  * 2/3, 1/6, 1/6.
  */
 export function UnscentedTransform() {
-  const [fn, setFn] = useState<Fn>('sin')
-  const mu = useParam(Math.PI / 2, { min: -2, max: 2, step: 0.05 })
-  const sigma = useParam(1, { min: 0.05, max: 1.5, step: 0.05 })
+  const state = useFigureState({
+    fn: choice<Fn>(
+      [
+        { value: 'sin', label: 'sin z' },
+        { value: 'square', label: 'z²' },
+        { value: 'exp', label: 'exp z' },
+      ],
+      'sin',
+      { label: 'function' },
+    ),
+    mu: float(Math.PI / 2, { min: -2, max: 2, step: 0.05, label: 'input mean μ' }),
+    sigma: float(1, { min: 0.05, max: 1.5, step: 0.05, label: 'input sd σ' }),
+  })
 
   const r = useMemo(() => {
-    const { g, dg } = FUNCTIONS[fn]
-    const m = mu.value
-    const s = sigma.value
+    const { g, dg } = FUNCTIONS[state.fn]
+    const m = state.mu
+    const s = state.sigma
     // Exact moments and density of y = g(z), from a grid over z weighted by the normal density.
     const zs = Array.from({ length: GRID }, (_, i) => m + s * (-6 + (12 * i) / (GRID - 1)))
     const weights = zs.map((z) => gaussian(z, m, s * s))
@@ -64,32 +78,31 @@ export function UnscentedTransform() {
     const utMean = images.reduce((a, y, i) => a + w[i] * y, 0)
     const ut = { mean: utMean, variance: images.reduce((a, y, i) => a + w[i] * (y - utMean) ** 2, 0) }
     return { g, dg, mean, variance, centres, density, lo, hi, ekf, ut, points, images }
-  }, [fn, mu.value, sigma.value])
+  }, [state.fn, state.mu, state.sigma])
 
-  const m = mu.value
-  const s = sigma.value
+  const m = state.mu
+  const s = state.sigma
   const zAxis = Array.from({ length: 201 }, (_, i) => m - 3.5 * s + (7 * s * i) / 200)
-  const top: XYSeries[] = [
-    { name: FUNCTIONS[fn].label, type: 'line', x: zAxis, y: zAxis.map(r.g), emphasis: true },
+  const top = [
+    { name: FUNCTIONS[state.fn].label, x: zAxis, y: zAxis.map(r.g), emphasis: true },
     {
       name: 'tangent at μ (EKF)',
-      type: 'line',
       x: zAxis,
       y: zAxis.map((z) => r.g(m) + r.dg(m) * (z - m)),
       slot: 0,
       dashed: true,
     },
-    { name: 'sigma points (UKF)', type: 'scatter', x: r.points, y: r.images, slot: 1 },
-  ]
+    { name: 'sigma points (UKF)', x: r.points, y: r.images, slot: 1 },
+  ] as const
   const span = r.hi - r.lo || 1
   const ys = Array.from({ length: 301 }, (_, i) => r.lo - 0.15 * span + (1.3 * span * i) / 300)
   const peak = Math.max(...r.density)
-  const curve = (name: string, est: { mean: number; variance: number }, slot: number): XYSeries =>
+  const curve = (name: string, est: { mean: number; variance: number }, slot: number): SeriesSpec =>
     est.variance < 1e-9
       ? // A zero-variance estimate is a point mass: draw it as a vertical line at its mean.
         { name, type: 'line', x: [est.mean, est.mean], y: [0, peak * 1.2], slot }
       : { name, type: 'line', x: ys, y: ys.map((y) => gaussian(y, est.mean, est.variance)), slot }
-  const bottom: XYSeries[] = [
+  const bottom: SeriesSpec[] = [
     { name: 'true density of y', type: 'bar', x: r.centres, y: r.density, muted: true },
     curve('linearised (EKF)', r.ekf, 0),
     curve('unscented (UKF)', r.ut, 1),
@@ -100,27 +113,17 @@ export function UnscentedTransform() {
   const fmt = (est: { mean: number; variance: number }) =>
     `${formatNumber(est.mean)}, ${formatNumber(est.variance < 1e-12 ? 0 : Math.sqrt(est.variance))}`
 
+  const xAxis = useAxis({ label: 'z', hold: 'union' })
+  const yAxis = useAxis({ label: 'g(z)', hold: 'union' })
+  const xAxis2 = useAxis({ label: 'y', hold: 'union' })
+  const yAxis2 = useAxis({ label: 'density', range: [0, yMax] })
   return (
-    <Interactive
+    <Figure
       title="A Gaussian through a nonlinearity"
+      state={state}
       caption="Top: the function g, its tangent at the input mean (what the extended Kalman filter uses) and the three sigma points of the unscented transform. Bottom: the exact distribution of y = g(z) for z ~ N(μ, σ²), with three Gaussian approximations. At μ = π/2 the sine has zero slope, so linearisation reports no uncertainty at all, while the sigma points see the curvature. For g(z) = z² the unscented transform is exact."
-      controls={
-        <>
-          <ParamChoice
-            label="function"
-            value={fn}
-            onChange={setFn}
-            options={[
-              { value: 'sin', label: 'sin z' },
-              { value: 'square', label: 'z²' },
-              { value: 'exp', label: 'exp z' },
-            ]}
-          />
-          <ParamSlider label="input mean μ" param={mu} withArrows />
-          <ParamSlider label="input sd σ" param={sigma} />
-        </>
-      }
-      readout={
+
+      readouts={
         <>
           <Readout label="mean, sd of y: exact" value={fmt({ mean: r.mean, variance: r.variance })} />
           <Readout label="linearised" value={fmt(r.ekf)} />
@@ -129,9 +132,15 @@ export function UnscentedTransform() {
       }
     >
       <div className="space-y-4">
-        <XYChart series={top} xLabel="z" yLabel="g(z)" height={240} />
-        <XYChart series={bottom} xLabel="y" yLabel="density" yRange={[0, yMax]} height={240} />
+        <Plot x={xAxis} y={yAxis} height={240}>
+          <Curve {...top[0]} />
+          <Curve {...top[1]} />
+          <Points {...top[2]} />
+        </Plot>
+        <Plot x={xAxis2} y={yAxis2} height={240}>
+          {seriesLayers(bottom)}
+        </Plot>
       </div>
-    </Interactive>
+    </Figure>
   )
 }

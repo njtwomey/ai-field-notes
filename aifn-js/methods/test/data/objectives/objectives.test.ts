@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { beale, himmelblau, quadraticBowl, rastrigin, rosenbrock } from 'aifn-applied/data/objectives'
+import { beale, himmelblau, quadraticBowl, rastrigin, rosenbrock } from 'aifn-methods/data/objectives'
 import { tensor, toFlat } from 'aifn/foundation/tensor'
 
 describe('test functions', () => {

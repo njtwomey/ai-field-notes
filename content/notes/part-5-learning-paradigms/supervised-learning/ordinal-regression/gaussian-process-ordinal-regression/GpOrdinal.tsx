@@ -1,11 +1,24 @@
 import { useMemo, useState } from 'react'
-import { MathText } from 'aifn-render'
-import { Interactive, ParamSlider, Readout, XYChart, formatNumber, type Handle, type XYSeries } from 'aifn-render'
-import { linspace } from '@/lib/math'
+import {
+  Curve,
+  Figure,
+  float,
+  formatNumber,
+  Handle,
+  MathText,
+  Plot,
+  Points,
+  Readout,
+  seriesLayers,
+  type SeriesSpec,
+  useAxis,
+  useFigureState,
+} from 'aifn-render'
 import { useClassColors } from '../_shared/classColor'
 import { fitGpOrdinal, gpOrdinalData } from '../_shared/laplace'
+import { linspace, toFlat } from 'aifn/foundation/tensor'
 
-const XS = linspace(-3.2, 3.2, 129)
+const XS = toFlat(linspace(-3.2, 3.2, 129))
 const DATA = gpOrdinalData()
 const GAP = 0.1
 
@@ -14,8 +27,10 @@ const GAP = 0.1
  * thresholds on the latent axis are draggable; the readout shows how the approximate evidence responds.
  */
 export function GpOrdinal() {
-  const [lengthscale, setLengthscale] = useState(1)
-  const [sigma, setSigma] = useState(0.3)
+  const state = useFigureState({
+    lengthscale: float(1, { min: 0.2, max: 3, step: 0.05, label: 'lengthscale ℓ' }),
+    sigma: float(0.3, { min: 0.05, max: 1, step: 0.01, label: 'noise σ' }),
+  })
   const [b, setB] = useState([-1, 0, 1])
 
   const setThreshold = (j: number) => (v: number) =>
@@ -30,23 +45,22 @@ export function GpOrdinal() {
   const colors = useClassColors(4)
   const [b0, b1, b2] = b
   const result = useMemo(() => {
-    const fit = fitGpOrdinal(DATA.x, DATA.y, [b0, b1, b2], lengthscale, sigma)
+    const fit = fitGpOrdinal(DATA.x, DATA.y, [b0, b1, b2], state.lengthscale, state.sigma)
     const latent = XS.map(fit.latent)
     const sd = latent.map((l) => 2 * Math.sqrt(l.variance))
-    const latentSeries: XYSeries[] = [
-      { name: 'posterior mean of f', type: 'line', x: XS, y: latent.map((l) => l.mean), emphasis: true },
-      { name: '± 2 sd', type: 'line', x: XS, y: latent.map((l, i) => l.mean + sd[i]), muted: true, dashed: true },
-      { name: '− 2 sd', type: 'line', x: XS, y: latent.map((l, i) => l.mean - sd[i]), muted: true, dashed: true },
+    const latentSeries = [
+      { name: 'posterior mean of f', x: XS, y: latent.map((l) => l.mean), emphasis: true },
+      { name: '± 2 sd', x: XS, y: latent.map((l, i) => l.mean + sd[i]), muted: true, dashed: true },
+      { name: '− 2 sd', x: XS, y: latent.map((l, i) => l.mean - sd[i]), muted: true, dashed: true },
       {
         name: 'mode at a training point',
-        type: 'scatter',
         x: DATA.x,
         y: fit.mode,
-        pointColors: DATA.y.map((y) => colors[y]),
+        colors: DATA.y.map((y) => colors[y]),
       },
-    ]
+    ] as const
     const probs = XS.map(fit.probs)
-    const probSeries: XYSeries[] = [0, 1, 2, 3].map((k) => ({
+    const probSeries: SeriesSpec[] = [0, 1, 2, 3].map((k) => ({
       name: `P(y = ${k + 1} | x)`,
       type: 'line',
       x: XS,
@@ -58,30 +72,23 @@ export function GpOrdinal() {
       return p.indexOf(Math.max(...p)) === DATA.y[i]
     }).length
     return { latentSeries, probSeries, evidence: fit.logEvidence, accuracy: correct / DATA.x.length }
-  }, [b0, b1, b2, lengthscale, sigma, colors])
+  }, [b0, b1, b2, state.lengthscale, state.sigma, colors])
 
   const handles: Handle[] = b.map((t, j) => ({ kind: 'y', at: t, label: `b${j + 1}`, onDrag: setThreshold(j) }))
 
+  const xAxis = useAxis({ label: 'input x', range: [-3.2, 3.2] })
+  const yAxis = useAxis({ label: 'latent f', range: [-3.5, 3.5] })
+  const xAxis2 = useAxis({ label: 'input x', range: [-3.2, 3.2] })
+  const yAxis2 = useAxis({ label: 'class probability', range: [0, 1] })
   return (
-    <Interactive
+    <Figure
       title="Gaussian-process ordinal regression"
+      state={state}
       caption={
         <MathText text="Top: the posterior over the latent function $f$ under a squared-exponential kernel, with the thresholds $b_1 < b_2 < b_3$ as horizontal lines. Markers show the posterior mode $\hat f(x_i)$ at each training input, coloured by its observed class; a good fit places each marker between its class's thresholds. Bottom: the predictive class probabilities, which widen where the latent posterior is uncertain. Drag a threshold to move it and watch the approximate log evidence, which is the quantity Chu and Ghahramani maximise to set the thresholds, the lengthscale and the noise." />
       }
-      controls={
-        <>
-          <ParamSlider
-            label="lengthscale ℓ"
-            value={lengthscale}
-            onChange={setLengthscale}
-            min={0.2}
-            max={3}
-            step={0.05}
-          />
-          <ParamSlider label="noise σ" value={sigma} onChange={setSigma} min={0.05} max={1} step={0.01} />
-        </>
-      }
-      readout={
+
+      readouts={
         <>
           <Readout label="log evidence (Laplace)" value={formatNumber(result.evidence)} />
           <Readout label="training accuracy" value={formatNumber(result.accuracy)} />
@@ -90,26 +97,19 @@ export function GpOrdinal() {
       }
     >
       <div className="flex flex-col gap-2">
-        <XYChart
-          series={result.latentSeries}
-          handles={handles}
-          xRange={[-3.2, 3.2]}
-          yRange={[-3.5, 3.5]}
-          xLabel="input x"
-          yLabel="latent f"
-          height={280}
-          ariaLabel="Latent posterior with draggable thresholds"
-        />
-        <XYChart
-          series={result.probSeries}
-          xRange={[-3.2, 3.2]}
-          yRange={[0, 1]}
-          xLabel="input x"
-          yLabel="class probability"
-          height={220}
-          ariaLabel="Predictive class probabilities"
-        />
+        <Plot x={xAxis} y={yAxis} height={280} ariaLabel={'Latent posterior with draggable thresholds'}>
+          <Curve {...result.latentSeries[0]} />
+          <Curve {...result.latentSeries[1]} />
+          <Curve {...result.latentSeries[2]} />
+          <Points {...result.latentSeries[3]} />
+          {(handles ?? []).map((h, i) => (
+            <Handle key={i} {...h} />
+          ))}
+        </Plot>
+        <Plot x={xAxis2} y={yAxis2} height={220} ariaLabel={'Predictive class probabilities'}>
+          {seriesLayers(result.probSeries)}
+        </Plot>
       </div>
-    </Interactive>
+    </Figure>
   )
 }

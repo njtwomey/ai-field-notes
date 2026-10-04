@@ -1,35 +1,40 @@
-import { useMemo, useState } from 'react'
+import { useMemo } from 'react'
 import {
-  Heatmap,
-  Interactive,
-  ParamSlider,
-  ParamSwitch,
-  Readout,
+  Figure,
+  float,
   formatNumber,
-  useParam,
-  type Handle,
-  type HeatmapOverlay,
+  Handle,
+  int,
+  Plot,
+  Points,
+  Raster,
+  Readout,
+  setting,
+  slider,
+  useAxis,
+  useFigureState,
 } from 'aifn-render'
-import { linspace, rng } from '@/lib/math'
+import { linspace, toFlat } from 'aifn/foundation/tensor'
+import { normal, stream, type Stream } from 'aifn/foundation/random'
 
 type V = [number, number]
 /** Symmetric 2×2 matrix stored as [s11, s12, s22]. */
 type S = [number, number, number]
 
 const BOX = 4
-const GRID = linspace(-BOX, BOX, 51)
+const GRID = toFlat(linspace(-BOX, BOX, 51))
 const RANGE: [number, number] = [0, 1]
 const N_TEST = 4000
 
 const covOf = (s1: number, s2: number, r: number): S => [s1 * s1, r * s1 * s2, s2 * s2]
 
-function sampleClass(n: number, mu: V, c: S, g: ReturnType<typeof rng>): V[] {
+function sampleClass(n: number, mu: V, c: S, g: Stream): V[] {
   const l11 = Math.sqrt(c[0])
   const l21 = c[1] / l11
   const l22 = Math.sqrt(Math.max(c[2] - l21 * l21, 1e-12))
   return Array.from({ length: n }, () => {
-    const z1 = g.normal()
-    const z2 = g.normal()
+    const z1 = normal(g)
+    const z2 = normal(g)
     return [mu[0] + l11 * z1, mu[1] + l21 * z1 + l22 * z2]
   })
 }
@@ -80,32 +85,41 @@ function fit(a: V[], b: V[]): { lda: Model; qda: Model } {
  * Two Gaussian classes in the plane with draggable means. LDA fits one pooled covariance and draws a straight
  * boundary; QDA fits one covariance per class and draws a conic.
  */
-export function DiscriminantExplorer() {
-  const [muA, setMuA] = useState<V>([-1.2, -0.4])
-  const [muB, setMuB] = useState<V>([1.2, 0.6])
-  const sA1 = useParam(1, { min: 0.3, max: 2, step: 0.05 })
-  const sA2 = useParam(0.6, { min: 0.3, max: 2, step: 0.05 })
-  const rA = useParam(0.3, { min: -0.9, max: 0.9, step: 0.05 })
-  const sB1 = useParam(0.5, { min: 0.3, max: 2, step: 0.05 })
-  const sB2 = useParam(1.4, { min: 0.3, max: 2, step: 0.05 })
-  const rB = useParam(-0.4, { min: -0.9, max: 0.9, step: 0.05 })
-  const n = useParam(40, { min: 5, max: 300, step: 1 })
-  const [shared, setShared] = useState(false)
+/** How far a mean can be dragged from the origin. */
+const LIM = BOX - 0.2
 
-  const covA = covOf(sA1.value, sA2.value, rA.value)
-  const covB = shared ? covA : covOf(sB1.value, sB2.value, rB.value)
+export function DiscriminantExplorer() {
+  const state = useFigureState({
+    n: int(40, { min: 5, max: 300, step: 1, suggestions: [10, 40, 100, 300], label: 'points per class' }),
+    shared: setting(false, 'shared true covariance'),
+    sA1: float(1, { min: 0.3, max: 2, step: 0.05, label: 'class 0: sd of x₁' }),
+    sA2: float(0.6, { min: 0.3, max: 2, step: 0.05, label: 'class 0: sd of x₂' }),
+    rA: slider(-0.9, 0.9, 0.3, { step: 0.05, label: 'class 0: correlation' }),
+    sB1: float(0.5, { min: 0.3, max: 2, step: 0.05, label: 'class 1: sd of x₁', when: (v) => !v.shared }),
+    sB2: float(1.4, { min: 0.3, max: 2, step: 0.05, label: 'class 1: sd of x₂', when: (v) => !v.shared }),
+    rB: slider(-0.9, 0.9, -0.4, { step: 0.05, label: 'class 1: correlation', when: (v) => !v.shared }),
+    ax: slider(-LIM, LIM, -1.2, { step: 0.01, onChart: true }),
+    ay: slider(-LIM, LIM, -0.4, { step: 0.01, onChart: true }),
+    bx: slider(-LIM, LIM, 1.2, { step: 0.01, onChart: true }),
+    by: slider(-LIM, LIM, 0.6, { step: 0.01, onChart: true }),
+  })
+  const muA = useMemo((): V => [state.ax, state.ay], [state.ax, state.ay])
+  const muB = useMemo((): V => [state.bx, state.by], [state.bx, state.by])
+
+  const covA = covOf(state.sA1, state.sA2, state.rA)
+  const covB = state.shared ? covA : covOf(state.sB1, state.sB2, state.rB)
   const [a0, a1, a2] = covA
   const [b0, b1, b2] = covB
 
   const r = useMemo(() => {
     const cA: S = [a0, a1, a2]
     const cB: S = [b0, b1, b2]
-    const g = rng(5)
-    const trainA = sampleClass(n.value, muA, cA, g)
-    const trainB = sampleClass(n.value, muB, cB, g)
+    const g = stream(5)
+    const trainA = sampleClass(state.n, muA, cA, g)
+    const trainB = sampleClass(state.n, muB, cB, g)
     const { lda, qda } = fit(trainA, trainB)
     const truth: Model = { mu: [muA, muB], cov: [cA, cB] }
-    const h = rng(99)
+    const h = stream(99)
     const testA = sampleClass(N_TEST / 2, muA, cA, h)
     const testB = sampleClass(N_TEST / 2, muB, cB, h)
     const error = (m: Model) =>
@@ -120,50 +134,32 @@ export function DiscriminantExplorer() {
       qdaErr: error(qda),
       bayesErr: error(truth),
     }
-  }, [muA, muB, a0, a1, a2, b0, b1, b2, n.value])
+  }, [muA, muB, a0, a1, a2, b0, b1, b2, state.n])
 
-  const overlay = useMemo((): HeatmapOverlay[] => {
+  const overlay = useMemo(() => {
     const pts = [...r.trainA, ...r.trainB]
     return [
       {
         name: 'points',
-        type: 'scatter',
         x: pts.map((p) => p[0]),
         y: pts.map((p) => p[1]),
         group: pts.map((_, i) => (i < r.trainA.length ? 0 : 1)),
         groupNames: ['class 0', 'class 1'],
       },
-      { name: 'true means', type: 'scatter', x: [muA[0], muB[0]], y: [muA[1], muB[1]], emphasis: true },
-    ]
+      { name: 'true means', x: [muA[0], muB[0]], y: [muA[1], muB[1]], emphasis: true },
+    ] as const
   }, [r, muA, muB])
 
-  const clamp = (v: number) => Math.max(-BOX + 0.2, Math.min(BOX - 0.2, v))
-  const handles: Handle[] = [
-    { kind: 'point', at: muA, label: 'mean of class 0', onDrag: (p) => setMuA([clamp(p[0]), clamp(p[1])]) },
-    { kind: 'point', at: muB, label: 'mean of class 1', onDrag: (p) => setMuB([clamp(p[0]), clamp(p[1])]) },
-  ]
-
+  const xAxis = useAxis({ label: 'x₁' })
+  const yAxis = useAxis({ label: 'x₂' })
+  const xAxis2 = useAxis({ label: 'x₁' })
+  const yAxis2 = useAxis({ label: 'x₂' })
   return (
-    <Interactive
+    <Figure
       title="Linear and quadratic discriminant analysis"
+      state={state}
       caption="Two Gaussian classes with equal priors; the diamonds are their true means, and both can be dragged on either chart. Shading is the fitted posterior probability of class 1. LDA pools the two sample covariances into one, so its boundary (where the shading is neutral) is a straight line. QDA fits a covariance per class and its boundary is a conic. When the true covariances differ, QDA approaches the Bayes error and LDA does not. With few points per class or a shared true covariance, QDA's extra parameters only add variance. Test errors use 4,000 fresh points."
-      controls={
-        <>
-          <ParamSlider label="points per class" param={n} format={(v) => String(v)} />
-          <ParamSwitch label="shared true covariance" checked={shared} onChange={setShared} />
-          <ParamSlider label="class 0: sd of x₁" param={sA1} />
-          <ParamSlider label="class 0: sd of x₂" param={sA2} />
-          <ParamSlider label="class 0: correlation" param={rA} />
-          {!shared && (
-            <>
-              <ParamSlider label="class 1: sd of x₁" param={sB1} />
-              <ParamSlider label="class 1: sd of x₂" param={sB2} />
-              <ParamSlider label="class 1: correlation" param={rB} />
-            </>
-          )}
-        </>
-      }
-      readout={
+      readouts={
         <>
           <Readout label="LDA test error" value={formatNumber(r.ldaErr)} />
           <Readout label="QDA test error" value={formatNumber(r.qdaErr)} />
@@ -174,37 +170,25 @@ export function DiscriminantExplorer() {
       <div className="grid gap-4 md:grid-cols-2">
         <div>
           <p className="mb-1 text-center text-xs text-muted-foreground">LDA: one pooled covariance</p>
-          <Heatmap
-            x={GRID}
-            y={GRID}
-            z={r.ldaZ}
-            scale="diverging"
-            range={RANGE}
-            xLabel="x₁"
-            yLabel="x₂"
-            valueLabel="P(class 1 | x)"
-            overlay={overlay}
-            handles={handles}
-            height={360}
-          />
+          <Plot x={xAxis} y={yAxis} height={360}>
+            <Raster x={GRID} y={GRID} z={r.ldaZ} scale={'diverging'} range={RANGE} valueLabel={'P(class 1 | x)'} />
+            <Points {...overlay[0]} live />
+            <Points {...overlay[1]} live />
+            <Handle {...state.handle(['ax', 'ay'], { label: 'mean of class 0' })} />
+            <Handle {...state.handle(['bx', 'by'], { label: 'mean of class 1' })} />
+          </Plot>
         </div>
         <div>
           <p className="mb-1 text-center text-xs text-muted-foreground">QDA: one covariance per class</p>
-          <Heatmap
-            x={GRID}
-            y={GRID}
-            z={r.qdaZ}
-            scale="diverging"
-            range={RANGE}
-            xLabel="x₁"
-            yLabel="x₂"
-            valueLabel="P(class 1 | x)"
-            overlay={overlay}
-            handles={handles}
-            height={360}
-          />
+          <Plot x={xAxis2} y={yAxis2} height={360}>
+            <Raster x={GRID} y={GRID} z={r.qdaZ} scale={'diverging'} range={RANGE} valueLabel={'P(class 1 | x)'} />
+            <Points {...overlay[0]} live />
+            <Points {...overlay[1]} live />
+            <Handle {...state.handle(['ax', 'ay'], { label: 'mean of class 0' })} />
+            <Handle {...state.handle(['bx', 'by'], { label: 'mean of class 1' })} />
+          </Plot>
         </div>
       </div>
-    </Interactive>
+    </Figure>
   )
 }

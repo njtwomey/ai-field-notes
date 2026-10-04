@@ -1,5 +1,5 @@
 /** A two-state hidden Markov model with six-sided dice: state 0 is the fair die, state 1 the loaded die. */
-import { rng } from '@/lib/math'
+import { stream, uniform as drawUniform } from 'aifn/foundation/random'
 
 export type Casino = {
   /** P(fair → loaded) per roll. */
@@ -27,7 +27,8 @@ export const initial = (m: Casino): number[] => {
 
 /** Draw `n` hidden states and rolls. */
 export function simulate(m: Casino, n: number, seed: number): { states: number[]; rolls: number[] } {
-  const { uniform } = rng(seed)
+  const draws = stream(seed)
+  const uniform = () => drawUniform(draws)
   const A = transition(m)
   const states: number[] = []
   const rolls: number[] = []

@@ -1,4 +1,4 @@
-import { banana, funnel, nonCentredFunnel } from 'aifn-applied/data/targets'
+import { banana, funnel, nonCentredFunnel } from 'aifn-methods/data/targets'
 import { hmc, type HmcState, type LogDensity } from 'aifn/inference/stochastic'
 import { stream } from 'aifn/foundation/random'
 import { linspace, tensor, toFlat, type Tensor } from 'aifn/foundation/tensor'

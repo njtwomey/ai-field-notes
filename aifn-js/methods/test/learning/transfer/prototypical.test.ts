@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { stream } from 'aifn/foundation/random'
 import { toFlat, unwrap, type Tensor } from 'aifn/foundation/tensor'
-import { fewShotEpisode, prototypeLogits, prototypicalRun, type PrototypicalRun } from 'aifn-applied/learning/transfer'
+import { fewShotEpisode, prototypeLogits, prototypicalRun, type PrototypicalRun } from 'aifn-methods/learning/transfer'
 
 const last = <T>(g: Generator<T, T>): T => {
   let r = g.next()

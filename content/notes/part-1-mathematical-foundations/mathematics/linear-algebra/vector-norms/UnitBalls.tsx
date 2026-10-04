@@ -1,17 +1,20 @@
 import { useMemo, useState } from 'react'
 import {
-  Interactive,
-  ParamSlider,
-  ParamSwitch,
-  Readout,
-  XYChart,
+  Figure,
+  float,
   formatNumber,
-  useParam,
-  type Handle,
+  Handle,
+  Plot,
+  Readout,
   type Segment,
-  type XYSeries,
+  Segments,
+  seriesLayers,
+  type SeriesSpec,
+  setting,
+  useAxis,
+  useFigureState,
 } from 'aifn-render'
-import { linspace } from '@/lib/math'
+import { linspace, toFlat } from 'aifn/foundation/tensor'
 
 type Vec = [number, number]
 const R = 2.2
@@ -22,7 +25,7 @@ const pNorm = (v: Vec, p: number) =>
 
 /** The sphere of radius r in the ℓp norm, traced by scaling each direction until its norm is r. */
 function sphere(p: number, r: number): { x: number[]; y: number[] } {
-  const ts = linspace(0, 2 * Math.PI, 721)
+  const ts = toFlat(linspace(0, 2 * Math.PI, 721))
   const pts = ts.map((t): Vec => {
     const d: Vec = [Math.cos(t), Math.sin(t)]
     const s = r / pNorm(d, p)
@@ -36,37 +39,35 @@ const toSegments = ({ x, y }: { x: number[]; y: number[] }): Segment[] =>
 
 /** Unit balls of the ℓp norms, and the ℓp sphere through a draggable point. */
 export function UnitBalls() {
-  const p = useParam(1.5, { min: 0.5, max: 8, step: 0.1 })
-  const [infinite, setInfinite] = useState(false)
+  const state = useFigureState({
+    p: float(1.5, { min: 0.5, max: 8, step: 0.1, label: 'p' }),
+    infinite: setting(false, 'p = ∞'),
+  })
   const [x, setX] = useState<Vec>([1.2, 0.6])
-  const pv = infinite ? Infinity : p.value
+  const pv = state.infinite ? Infinity : state.p
 
   // The ℓ1, ℓ2 and ℓ∞ unit spheres as a faint reference, drawn once.
   const references = useMemo(() => [1, 2, Infinity].flatMap((q) => toSegments(sphere(q, 1))), [])
 
   const r = useMemo(() => {
     const norm = pNorm(x, pv)
-    const series: XYSeries[] = [
-      { name: `unit ball, p = ${infinite ? '∞' : formatNumber(pv)}`, type: 'line', ...sphere(pv, 1), slot: 0 },
+    const series: SeriesSpec[] = [
+      { name: `unit ball, p = ${state.infinite ? '∞' : formatNumber(pv)}`, type: 'line', ...sphere(pv, 1), slot: 0 },
       { name: 'ℓp sphere through x', type: 'line', ...sphere(pv, norm), slot: 1, dashed: true },
       { name: 'x', type: 'scatter', x: [x[0]], y: [x[1]], slot: 1 },
     ]
     return { norm, series }
-  }, [x, pv, infinite])
+  }, [x, pv, state.infinite])
 
-  const handles: Handle[] = [{ kind: 'point', at: x, label: 'x', onDrag: ([a, b]) => setX([clamp(a), clamp(b)]) }]
-
+  const xAxis = useAxis({ label: 'x₁', range: [-R, R] })
+  const yAxis = useAxis({ label: 'x₂', range: [-R, R], equal: xAxis })
   return (
-    <Interactive
+    <Figure
       title="The shape of the unit ball"
+      state={state}
       caption="The solid curve is the unit sphere of the ℓp norm, the points with ‖x‖ₚ = 1; the faint curves are the ℓ1 diamond, the ℓ2 circle and the ℓ∞ square. Raise p and the ball swells from the diamond towards the square. Below p = 1 the ball caves in and stops being convex: the formula is no longer a norm. Drag x; the dashed curve is the ℓp sphere through it, and its size is ‖x‖ₚ."
-      controls={
-        <>
-          <ParamSlider label="p" param={p} />
-          <ParamSwitch label="p = ∞" checked={infinite} onChange={setInfinite} />
-        </>
-      }
-      readout={
+
+      readouts={
         <>
           <Readout label="‖x‖ₚ" value={formatNumber(r.norm)} />
           <Readout label="‖x‖₁" value={formatNumber(pNorm(x, 1))} />
@@ -78,17 +79,12 @@ export function UnitBalls() {
     >
       {/* Equal-aspect charts take their height from their width; keep square plots a readable size. */}
       <div className="mx-auto w-full max-w-lg">
-        <XYChart
-          equalAspect
-          xRange={[-R, R]}
-          yRange={[-R, R]}
-          xLabel="x₁"
-          yLabel="x₂"
-          series={r.series}
-          segments={references}
-          handles={handles}
-        />
+        <Plot x={xAxis} y={yAxis}>
+          {seriesLayers(r.series)}
+          <Segments segments={references} />
+          <Handle kind="point" at={x} label="x" onDrag={([a, b]) => setX([clamp(a), clamp(b)])} />
+        </Plot>
       </div>
-    </Interactive>
+    </Figure>
   )
 }

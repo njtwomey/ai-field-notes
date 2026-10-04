@@ -1,5 +1,4 @@
-import { Interactive } from 'aifn-render'
-import { Diagram } from 'aifn-render'
+import { Diagram, Figure } from 'aifn-render'
 import type { DiagramNode, DiagramSpec } from 'aifn-render'
 
 const COLS: { k: string; x: number; inp: string; h: string; out: string; th: string }[] = [
@@ -69,7 +68,7 @@ const spec: DiagramSpec = {
 /** DeepAR unrolled across the forecast origin: observed values feed the recurrence before it, samples after it. */
 export function DeepArDiagram() {
   return (
-    <Interactive
+    <Figure
       title="DeepAR at the forecast origin"
       caption="One recurrent network with the same weights runs over both ranges. Each step reads the previous value and the current covariates, and an affine layer maps the hidden state to the parameters of the likelihood. In the conditioning range the previous value is observed. In the prediction range it is the previous step's sample (dashed), so one pass draws one joint sample path."
     >
@@ -77,6 +76,6 @@ export function DeepArDiagram() {
         spec={spec}
         ariaLabel="DeepAR unrolled: at each step the previous value and covariates enter the recurrent state, which gives the likelihood parameters; after the forecast origin each sampled value is fed to the next step"
       />
-    </Interactive>
+    </Figure>
   )
 }

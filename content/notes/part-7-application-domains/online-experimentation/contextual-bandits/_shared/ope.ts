@@ -3,10 +3,9 @@
  * whose means are linear in x, a logging policy that favours a poor arm with probability 1 − ε and explores uniformly
  * otherwise, and the four standard value estimators.
  *
- * The random source is passed in (`rng(seed)` from '@/lib/math' in the widgets), so this module has no imports.
+ * The random source is passed in (a seeded `stream` in the widgets).
  */
-
-export type Rand = { uniform: () => number; normal: () => number }
+import { type Stream, uniform } from 'aifn/foundation/random'
 
 export const K = 3
 
@@ -25,11 +24,11 @@ export const loggingProb = (a: number, x: number, eps: number) => (1 - eps) * (a
 
 export type Row = { x: number; a: number; r: number; p: number }
 
-export function logData(n: number, eps: number, r: Rand): Row[] {
+export function logData(n: number, eps: number, g: Stream): Row[] {
   return Array.from({ length: n }, () => {
-    const x = r.uniform()
-    const a = r.uniform() < 1 - eps ? favourite(x) : Math.floor(r.uniform() * K)
-    return { x, a, r: r.uniform() < mu(a, x) ? 1 : 0, p: loggingProb(a, x, eps) }
+    const x = uniform(g)
+    const a = uniform(g) < 1 - eps ? favourite(x) : Math.floor(uniform(g) * K)
+    return { x, a, r: uniform(g) < mu(a, x) ? 1 : 0, p: loggingProb(a, x, eps) }
   })
 }
 

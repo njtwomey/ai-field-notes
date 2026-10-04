@@ -1,16 +1,19 @@
-import { useMemo, useState } from 'react'
+import { useMemo } from 'react'
 import {
-  Interactive,
-  ParamSlider,
-  Readout,
-  XYChart,
+  Curve,
+  Figure,
+  float,
   formatNumber,
-  useParam,
-  type Handle,
-  type XYSeries,
+  Handle,
+  int,
+  Plot,
+  Readout,
+  slider,
+  useAxis,
+  useFigureState,
 } from 'aifn-render'
-import { linspace } from '@/lib/math'
-import { tPower } from '@/lib/math/tests'
+import { tTestPower } from 'aifn/probability/tests'
+import { linspace, toFlat } from 'aifn/foundation/tensor'
 
 /**
  * Power against a mean difference δ (in units of the outcome's standard deviation σ) for two designs with the same
@@ -18,74 +21,52 @@ import { tPower } from '@/lib/math/tests'
  * groups of n. The paired difference has standard deviation σ√(2(1 − ρ)); the independent difference σ√(2/n).
  */
 export function PairingPower() {
-  const [n, setN] = useState(15)
-  const [effect, setEffect] = useState(0.5)
-  const [alpha, setAlpha] = useState(0.05)
-  const rho = useParam(0.6, { min: -0.5, max: 0.95, step: 0.01 })
+  const state = useFigureState({
+    rho: slider(-0.5, 0.95, 0.6, { step: 0.01, label: 'within-pair correlation ρ' }),
+    n: int(15, { min: 3, max: 100, step: 1, label: 'pairs n' }),
+    effect: float(0.5, { min: 0.05, max: 1.5, step: 0.05, label: 'true difference δ/σ' }),
+    alpha: float(0.05, { min: 0.01, max: 0.1, step: 0.005, label: 'significance level α' }),
+  })
 
   const result = useMemo(() => {
-    const paired = (r: number) => tPower((effect * Math.sqrt(n)) / Math.sqrt(2 * (1 - r)), n - 1, alpha)
-    const independent = tPower(effect / Math.sqrt(2 / n), 2 * n - 2, alpha)
-    const rs = linspace(-0.5, 0.95, 146)
-    const series: XYSeries[] = [
-      { name: 'paired design', type: 'line', x: rs, y: rs.map(paired), slot: 0 },
+    const paired = (r: number) =>
+      tTestPower((state.effect * Math.sqrt(state.n)) / Math.sqrt(2 * (1 - r)), state.n - 1, state.alpha)
+    const independent = tTestPower(state.effect / Math.sqrt(2 / state.n), 2 * state.n - 2, state.alpha)
+    const rs = toFlat(linspace(-0.5, 0.95, 146))
+    const series = [
+      { name: 'paired design', x: rs, y: rs.map(paired), slot: 0 },
       {
         name: 'two independent groups',
-        type: 'line',
         x: [-0.5, 0.95],
         y: [independent, independent],
         slot: 1,
         dashed: true,
       },
-    ]
+    ] as const
     return { series, paired, independent }
-  }, [n, effect, alpha])
+  }, [state.n, state.effect, state.alpha])
 
-  const handles: Handle[] = [{ kind: 'x', at: rho.value, label: 'ρ', onDrag: rho.set }]
-
+  const xAxis = useAxis({ label: 'within-pair correlation ρ', range: [-0.5, 0.95] })
+  const yAxis = useAxis({ label: 'power', range: [0, 1] })
   return (
-    <Interactive
+    <Figure
       title="Pairing pays when measurements correlate"
+      state={state}
       caption="Power of a two-sided t-test to detect a mean difference, for n pairs measured under both conditions against two independent groups of n. The paired design removes the variation shared within a pair, so its power grows with the correlation ρ between the two measurements. Below ρ = 0 pairing hurts. Drag the line labelled ρ, or use its slider."
-      controls={
+
+      readouts={
         <>
-          <ParamSlider label="within-pair correlation ρ" param={rho} />
-          <ParamSlider label="pairs n" value={n} onChange={setN} min={3} max={100} step={1} />
-          <ParamSlider
-            label="true difference δ/σ"
-            value={effect}
-            onChange={setEffect}
-            min={0.05}
-            max={1.5}
-            step={0.05}
-          />
-          <ParamSlider
-            label="significance level α"
-            value={alpha}
-            onChange={setAlpha}
-            min={0.01}
-            max={0.1}
-            step={0.005}
-          />
-        </>
-      }
-      readout={
-        <>
-          <Readout label="power, paired" value={formatNumber(result.paired(rho.value))} />
+          <Readout label="power, paired" value={formatNumber(result.paired(state.rho))} />
           <Readout label="power, independent" value={formatNumber(result.independent)} />
-          <Readout label="variance ratio 1 − ρ" value={formatNumber(1 - rho.value)} />
+          <Readout label="variance ratio 1 − ρ" value={formatNumber(1 - state.rho)} />
         </>
       }
     >
-      <XYChart
-        height={280}
-        series={result.series}
-        xRange={[-0.5, 0.95]}
-        yRange={[0, 1]}
-        xLabel="within-pair correlation ρ"
-        yLabel="power"
-        handles={handles}
-      />
-    </Interactive>
+      <Plot x={xAxis} y={yAxis} height={280}>
+        <Curve {...result.series[0]} />
+        <Curve {...result.series[1]} />
+        <Handle {...state.handle('rho', { label: 'ρ' })} />
+      </Plot>
+    </Figure>
   )
 }

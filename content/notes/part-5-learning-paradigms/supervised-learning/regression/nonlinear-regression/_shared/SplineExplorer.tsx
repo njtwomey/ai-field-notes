@@ -1,22 +1,28 @@
 import { useMemo, useState } from 'react'
 import {
-  Interactive,
-  ParamButton,
-  ParamSlider,
-  ParamSwitch,
-  Readout,
-  XYChart,
+  Curve,
+  Figure,
+  float,
   formatNumber,
-  type Handle,
+  Handle,
+  int,
+  NumberField,
+  Plot,
+  Points,
+  Readout,
   type Segment,
-  type XYSeries,
+  Segments,
+  setting,
+  useAxis,
+  useFigureState,
 } from 'aifn-render'
-import { linspace, rng } from '@/lib/math'
 import { bsplineRow, evaluate, makeBasis, penalise, smooth } from './splines'
+import { linspace, toFlat } from 'aifn/foundation/tensor'
+import { normal, stream, uniform } from 'aifn/foundation/random'
 
 const N = 80
 const NOISE = 0.3
-const GRID = linspace(0, 1, 161)
+const GRID = toFlat(linspace(0, 1, 161))
 /** The true curve oscillates faster as x grows, so evenly spaced knots are not the best placement. */
 const truth = (x: number) => Math.sin(4 * Math.PI * x * x)
 const even = (k: number) => Array.from({ length: k }, (_, i) => (i + 1) / (k + 1))
@@ -32,18 +38,20 @@ type Props = {
 
 export function SplineExplorer({ initialKnots = 4, draggable = true, initialLogLambda = -9 }: Props) {
   const [knots, setKnots] = useState(() => even(initialKnots))
-  const [logLambda, setLogLambda] = useState(initialLogLambda)
-  const [seed, setSeed] = useState(4)
-  const [showBasis, setShowBasis] = useState(false)
+  const state = useFigureState({
+    logLambda: float(initialLogLambda, { min: -9, max: 1, step: 0.1, label: 'log₁₀ λ', format: (v) => v.toFixed(1) }),
+    showBasis: setting(false, 'show scaled basis functions'),
+    seed: int(4, { ge: 0, label: 'seed' }),
+  })
 
   const data = useMemo(() => {
-    const r = rng(seed)
-    const x = Array.from({ length: N }, () => r.uniform())
-    return { x, y: x.map((xi) => truth(xi) + NOISE * r.normal()) }
-  }, [seed])
+    const r = stream(state.seed)
+    const x = Array.from({ length: N }, () => uniform(r))
+    return { x, y: x.map((xi) => truth(xi) + NOISE * normal(r)) }
+  }, [state.seed])
 
   const basis0 = useMemo(() => makeBasis(data.x, knots, 0, 1), [data, knots])
-  const smoother = useMemo(() => penalise(basis0, 10 ** logLambda), [basis0, logLambda])
+  const smoother = useMemo(() => penalise(basis0, 10 ** state.logLambda), [basis0, state.logLambda])
   const fit = useMemo(() => smooth(smoother, data.y), [smoother, data])
   const curve = useMemo(() => evaluate(smoother, fit.coef, GRID), [smoother, fit])
   const rss = data.y.reduce((s, y, i) => s + (y - fit.fitted[i]) ** 2, 0)
@@ -51,12 +59,12 @@ export function SplineExplorer({ initialKnots = 4, draggable = true, initialLogL
 
   // Each basis function scaled by its coefficient: the fit is their sum. Drawn as muted segments.
   const basis: Segment[] = useMemo(() => {
-    if (!showBasis) return []
+    if (!state.showBasis) return []
     const rows = GRID.map((g) => bsplineRow(g, smoother.knots, smoother.degree))
     return fit.coef.flatMap((c, j) =>
       GRID.slice(1).map((g, i) => ({ from: [GRID[i], c * rows[i][j]], to: [g, c * rows[i + 1][j]] }) as Segment),
     )
-  }, [showBasis, smoother, fit])
+  }, [state.showBasis, smoother, fit])
 
   const handles: Handle[] = draggable
     ? knots.map((k, i) => ({
@@ -67,15 +75,18 @@ export function SplineExplorer({ initialKnots = 4, draggable = true, initialLogL
       }))
     : []
 
-  const series: XYSeries[] = [
-    { name: 'data', type: 'scatter', x: data.x, y: data.y, slot: 0 },
-    { name: 'true curve', type: 'line', x: GRID, y: GRID.map(truth), slot: 2, dashed: true },
-    { name: 'spline fit', type: 'line', x: GRID, y: curve, slot: 1 },
-  ]
+  const series = [
+    { name: 'data', x: data.x, y: data.y, slot: 0 },
+    { name: 'true curve', x: GRID, y: GRID.map(truth), slot: 2, dashed: true },
+    { name: 'spline fit', x: GRID, y: curve, slot: 1 },
+  ] as const
 
+  const xAxis = useAxis({ label: 'x', range: [0, 1] })
+  const yAxis = useAxis({ label: 'y', range: [-2, 2] })
   return (
-    <Interactive
+    <Figure
       title={draggable ? 'Knots and smoothing' : 'Smoothing parameter and effective degrees of freedom'}
+      state={state}
       caption={
         draggable ? (
           <>
@@ -94,32 +105,19 @@ export function SplineExplorer({ initialKnots = 4, draggable = true, initialLogL
         )
       }
       controls={
-        <>
-          <ParamSlider
-            label="log₁₀ λ"
-            value={logLambda}
-            onChange={setLogLambda}
-            min={-9}
-            max={1}
-            step={0.1}
-            format={(v) => v.toFixed(1)}
+        draggable && (
+          <NumberField
+            label="interior knots"
+            type="int"
+            value={knots.length}
+            onChange={(k) => setKnots(even(k))}
+            min={1}
+            max={10}
+            suggestions={[1, 3, 5, 10]}
           />
-          {draggable && (
-            <ParamSlider
-              label="interior knots"
-              value={knots.length}
-              onChange={(k) => setKnots(even(k))}
-              min={1}
-              max={10}
-              step={1}
-              withArrows
-            />
-          )}
-          <ParamSwitch label="show scaled basis functions" checked={showBasis} onChange={setShowBasis} />
-          <ParamButton onClick={() => setSeed((s) => s + 1)}>New sample</ParamButton>
-        </>
+        )
       }
-      readout={
+      readouts={
         <>
           <Readout label="basis size" value={String(smoother.A.length)} />
           <Readout label="effective df" value={formatNumber(smoother.edf)} />
@@ -128,15 +126,15 @@ export function SplineExplorer({ initialKnots = 4, draggable = true, initialLogL
         </>
       }
     >
-      <XYChart
-        series={series}
-        segments={basis}
-        xRange={[0, 1]}
-        yRange={[-2, 2]}
-        xLabel="x"
-        yLabel="y"
-        handles={handles}
-      />
-    </Interactive>
+      <Plot x={xAxis} y={yAxis}>
+        <Points {...series[0]} />
+        <Curve {...series[1]} />
+        <Curve {...series[2]} />
+        <Segments segments={basis} />
+        {(handles ?? []).map((h, i) => (
+          <Handle key={i} {...h} />
+        ))}
+      </Plot>
+    </Figure>
   )
 }

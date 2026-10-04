@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { pidLoop } from 'aifn-applied/dynamics/control'
+import { pidLoop } from 'aifn-methods/dynamics/control'
 import { toFlat } from 'aifn/foundation/tensor'
 import { run, trace } from 'aifn/foundation/trace'
 import { transferFunction } from 'aifn/systems'

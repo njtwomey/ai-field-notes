@@ -1,7 +1,5 @@
-import { Diagram } from 'aifn-render'
-import { factor, link, variable } from 'aifn-render'
+import { Diagram, factor, Figure, link, variable } from 'aifn-render'
 import type { DiagramSpec } from 'aifn-render'
-import { Interactive } from 'aifn-render'
 
 const line = (a: string, b: string, label?: string) =>
   link(a, b, false, label ? { label, labelSide: 'left', labelRotate: false } : {})
@@ -85,7 +83,7 @@ const SPEC: DiagramSpec = {
 /** The DARE model: ability, difficulty and discrimination decide whether a participant knows the answer; a gate on that decides the response. */
 export function DareGraph() {
   return (
-    <Interactive
+    <Figure
       title="Factor graph of the difficulty–ability–response model"
       caption="Participant p's ability minus question q's difficulty, blurred by noise of precision τ_q, decides whether p knows the answer (c_pq). The two gates, selected by c_pq, say that a participant who knows gives the true answer y_q and one who does not answers uniformly at random. Responses are observed; the true answers need not be. The labelled edge carries the vote that each response casts for the true answer."
     >
@@ -93,6 +91,6 @@ export function DareGraph() {
         spec={SPEC}
         ariaLabel="Factor graph: ability and difficulty give an advantage, a probit gives knowledge, gates on knowledge give the response from the true answer or uniformly"
       />
-    </Interactive>
+    </Figure>
   )
 }

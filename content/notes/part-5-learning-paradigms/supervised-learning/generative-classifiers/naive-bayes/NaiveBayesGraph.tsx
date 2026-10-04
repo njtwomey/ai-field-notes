@@ -1,8 +1,5 @@
-import { MathText } from 'aifn-render'
-import { Diagram } from 'aifn-render'
-import { link, variable } from 'aifn-render'
+import { Diagram, Figure, link, MathText, variable } from 'aifn-render'
 import type { DiagramSpec } from 'aifn-render'
-import { Interactive } from 'aifn-render'
 
 const FEATURES = ['1', '2', '3', 'd']
 const X = [0, 1.4, 2.8, 5.2]
@@ -20,13 +17,13 @@ const spec: DiagramSpec = {
 /** The class as the common parent of every feature. */
 export function NaiveBayesGraph() {
   return (
-    <Interactive
+    <Figure
       title="Naive Bayes as a graphical model"
       caption={
         <MathText text="The class $y$ is the only parent of each feature $x_j$. With no edges between features, observing $y$ blocks every path between them: the features are conditionally independent given the class." />
       }
     >
       <Diagram spec={spec} ariaLabel="Class node y with arrows to features x_1 to x_d" />
-    </Interactive>
+    </Figure>
   )
 }

@@ -1,14 +1,18 @@
 import { useMemo, useState } from 'react'
 import {
-  Interactive,
-  ParamButton,
-  ParamChoice,
-  Readout,
-  XYChart,
+  Bars,
+  Button,
+  choice,
+  Figure,
   formatNumber,
-  type Handle,
+  Handle,
+  Plot,
+  Points,
+  Readout,
+  useAxis,
+  useFigureState,
   type Vector,
-  type XYSeries,
+  Vectors,
 } from 'aifn-render'
 import { LOSSES, ndcg, rankingLoss, ranks, type LossId } from './ranking-losses'
 
@@ -21,6 +25,7 @@ const PRESETS: Record<Preset, { label: string; rel: number[]; scores: number[] }
 }
 
 const ITEMS = [0, 1, 2, 3, 4, 5]
+const RANKS = ITEMS.map((r) => r + 1)
 const LIMIT = 3
 const X_RANGE: [number, number] = [-0.5, 5.5]
 const Y_RANGE: [number, number] = [-LIMIT, LIMIT]
@@ -41,26 +46,30 @@ export function RankingLossLab({
   losses?: LossId[]
   preset?: Preset
 }) {
-  const [loss, setLoss] = useState<LossId>(initial)
-  const [preset, setPreset] = useState<Preset>(initialPreset)
-  const [scores, setScores] = useState<number[]>(PRESETS[initialPreset].scores)
+  const state = useFigureState({
+    loss: choice<LossId>(
+      losses.map((id) => ({ value: id, label: LOSSES[id].label })),
+      initial,
+      { label: 'loss' },
+    ),
+    preset: choice<Preset>(
+      (Object.keys(PRESETS) as Preset[]).map((p) => ({ value: p, label: PRESETS[p].label })),
+      initialPreset,
+      { label: 'labels' },
+    ),
+  })
+  const preset = state.preset
+  // Scores dragged by hand, stored with the labels they belong to: new labels start from that preset's scores.
+  const [edited, setEdited] = useState<{ preset: Preset; scores: number[] } | null>(null)
+  const scores = edited?.preset === preset ? edited.scores : PRESETS[preset].scores
   const rel = PRESETS[preset].rel
 
-  const value = useMemo(() => rankingLoss(loss, scores, rel), [loss, scores, rel])
+  const value = useMemo(() => rankingLoss(state.loss, scores, rel), [state.loss, scores, rel])
   const pos = useMemo(() => ranks(scores), [scores])
 
-  const series = useMemo(
-    (): XYSeries[] => [
-      {
-        name: 'items',
-        type: 'scatter',
-        x: ITEMS,
-        y: scores,
-        group: rel,
-        groupNames: ['relevance 0', 'relevance 1', 'relevance 2', 'relevance 3'].slice(0, Math.max(...rel) + 1),
-      },
-    ],
-    [scores, rel],
+  const groupNames = useMemo(
+    () => ['relevance 0', 'relevance 1', 'relevance 2', 'relevance 3'].slice(0, Math.max(...rel) + 1),
+    [rel],
   )
 
   const arrows = useMemo((): Vector[] => {
@@ -72,17 +81,17 @@ export function RankingLossLab({
     }))
   }, [value, scores])
 
-  const byRank = useMemo((): XYSeries[] => {
-    const push = Array<number>(ITEMS.length)
-    ITEMS.forEach((i) => (push[pos[i]] = -value.grad[i]))
-    return [{ name: '−∂L/∂s at each rank', type: 'bar', x: ITEMS.map((r) => r + 1), y: push, slot: 2 }]
+  const push = useMemo(() => {
+    const out = Array<number>(ITEMS.length)
+    ITEMS.forEach((i) => (out[pos[i]] = -value.grad[i]))
+    return out
   }, [value, pos])
 
   const handles: Handle[] = ITEMS.map((i) => ({
     kind: 'point',
     at: [i, scores[i]],
     label: `item ${i + 1}`,
-    onDrag: ([, y]) => setScores((prev) => prev.map((v, j) => (j === i ? clamp(y) : v))),
+    onDrag: ([, y]) => setEdited({ preset, scores: scores.map((v, j) => (j === i ? clamp(y) : v)) }),
   }))
 
   const order = [...ITEMS].sort((a, b) => pos[a] - pos[b]).map((i) => `${i + 1}`)
@@ -90,31 +99,21 @@ export function RankingLossLab({
   const topShare =
     total > 0 ? ITEMS.filter((i) => pos[i] < 2).reduce((a, i) => a + Math.abs(value.grad[i]), 0) / total : 0
 
+  const xAxis = useAxis({ label: 'item', range: X_RANGE, integer: true })
+  const yAxis = useAxis({ label: 'score s', range: Y_RANGE })
+  const rankAxis = useAxis({ label: 'rank position (1 = top)', range: RANK_RANGE, integer: true })
+  const pushAxis = useAxis({ label: 'push −∂L/∂s', hold: 'union' })
   return (
-    <Interactive
+    <Figure
       title="Where each ranking loss pushes the scores"
+      state={state}
       caption="Six items for one user or query, with relevance labels shown by marker. Drag any item's score up or down. The arrows show −∂L/∂s for the chosen loss, the direction one gradient step moves each score, scaled so the longest arrow is one unit. The lower panel shows the same push by rank position, top first. Pointwise losses push every item towards its own label, wherever it is ranked. Pairwise losses push each misordered pair apart. Listwise losses and LambdaRank concentrate the push near the top of the list, where the ranking metrics are decided."
       controls={
-        <>
-          <ParamChoice
-            label="loss"
-            value={loss}
-            onChange={setLoss}
-            options={losses.map((id) => ({ value: id, label: LOSSES[id].label }))}
-          />
-          <ParamChoice
-            label="labels"
-            value={preset}
-            onChange={(p) => {
-              setPreset(p)
-              setScores(PRESETS[p].scores)
-            }}
-            options={(Object.keys(PRESETS) as Preset[]).map((p) => ({ value: p, label: PRESETS[p].label }))}
-          />
-          <ParamButton onClick={() => setScores(PRESETS[preset].scores)}>Reset scores</ParamButton>
-        </>
+        <Button variant="outline" size="sm" onClick={() => setEdited(null)}>
+          Reset scores
+        </Button>
       }
-      readout={
+      readouts={
         <>
           <Readout label="loss" value={formatNumber(value.loss)} />
           <Readout label="NDCG of this order" value={formatNumber(ndcg(scores, rel))} />
@@ -124,26 +123,17 @@ export function RankingLossLab({
       }
     >
       <div className="space-y-4">
-        <XYChart
-          height={300}
-          series={series}
-          vectors={arrows}
-          handles={handles}
-          xRange={X_RANGE}
-          yRange={Y_RANGE}
-          integerX
-          xLabel="item"
-          yLabel="score s"
-        />
-        <XYChart
-          height={200}
-          series={byRank}
-          xRange={RANK_RANGE}
-          integerX
-          xLabel="rank position (1 = top)"
-          yLabel="push −∂L/∂s"
-        />
+        <Plot x={xAxis} y={yAxis} height={300}>
+          <Points name="items" x={ITEMS} y={scores} group={rel} groupNames={groupNames} />
+          <Vectors vectors={arrows} />
+          {handles.map((h, i) => (
+            <Handle key={i} {...h} />
+          ))}
+        </Plot>
+        <Plot x={rankAxis} y={pushAxis} height={200}>
+          <Bars name="−∂L/∂s at each rank" x={RANKS} y={push} slot={2} />
+        </Plot>
       </div>
-    </Interactive>
+    </Figure>
   )
 }

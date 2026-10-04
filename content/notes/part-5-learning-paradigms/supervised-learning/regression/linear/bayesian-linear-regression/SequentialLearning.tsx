@@ -1,23 +1,26 @@
 import { useMemo, useState, type ReactNode } from 'react'
 import {
-  Heatmap,
-  Interactive,
-  ParamSlider,
-  Readout,
-  XYChart,
+  Figure,
   formatNumber,
-  useParam,
-  type Handle,
-  type XYSeries,
+  Handle,
+  int,
+  Plot,
+  Raster,
+  Readout,
+  seriesLayers,
+  useAxis,
+  useFigureState,
+  type SeriesSpec,
 } from 'aifn-render'
-import { linspace, rng } from '@/lib/math'
 import { cholesky, posterior } from './blr'
+import { linspace, toFlat } from 'aifn/foundation/tensor'
+import { normal, stream, uniform } from 'aifn/foundation/random'
 
 /** Prior precision α and noise precision β, as in Bishop's straight-line example. */
 const ALPHA = 2
 const BETA = 25
 const MAX_POINTS = 20
-const GRID = linspace(-1, 1, 41)
+const GRID = toFlat(linspace(-1, 1, 41))
 const LINE_X = [-1, 1]
 const MAX_SAMPLES = 50
 
@@ -26,20 +29,22 @@ const MAX_SAMPLES = 50
  * prior for point n + 1; lines drawn from it close in on the data.
  */
 export function SequentialLearning() {
-  const n = useParam(0, { min: 0, max: MAX_POINTS, step: 1 })
-  const count = useParam(6, { min: 1, max: MAX_SAMPLES, step: 1 })
+  const state = useFigureState({
+    n: int(0, { min: 0, max: MAX_POINTS, step: 1, label: 'points observed', format: (v) => String(v) }),
+    count: int(6, { min: 1, max: MAX_SAMPLES, step: 1, label: 'draws', format: (v) => String(v) }),
+    seed: int(2, { min: 1, max: 20, step: 1, label: 'seed' }),
+  })
   // Seed 2 starts with typical points; seed 1 opens with a 3.4σ outlier, a misleading first step.
-  const [seed, setSeed] = useState(2)
   const [truth, setTruth] = useState<[number, number]>([-0.3, 0.5])
 
   // Inputs and unit noise are fixed per seed, so dragging the true line moves the data without reshuffling it.
   const draws = useMemo(() => {
-    const g = rng(seed)
-    return Array.from({ length: MAX_POINTS }, () => ({ x: 2 * g.uniform() - 1, e: g.normal() }))
-  }, [seed])
+    const g = stream(state.seed)
+    return Array.from({ length: MAX_POINTS }, () => ({ x: 2 * uniform(g) - 1, e: normal(g) }))
+  }, [state.seed])
   const data = useMemo(
-    () => draws.slice(0, n.value).map((d) => ({ x: d.x, y: truth[0] + truth[1] * d.x + d.e / Math.sqrt(BETA) })),
-    [draws, n.value, truth],
+    () => draws.slice(0, state.n).map((d) => ({ x: d.x, y: truth[0] + truth[1] * d.x + d.e / Math.sqrt(BETA) })),
+    [draws, state.n, truth],
   )
 
   const r = useMemo(() => {
@@ -84,17 +89,17 @@ export function SequentialLearning() {
   // Sample k uses its own stream, so raising the count adds lines without moving the earlier ones.
   const lines = useMemo(() => {
     const l = cholesky(r.cov)
-    return Array.from({ length: count.value }, (_, k) => {
-      const g = rng((1000 + seed) * 1000 + k)
-      const [z0, z1] = [g.normal(), g.normal()]
+    return Array.from({ length: state.count }, (_, k) => {
+      const g = stream((1000 + state.seed) * 1000 + k)
+      const [z0, z1] = [normal(g), normal(g)]
       return [r.post.mean[0] + l[0][0] * z0, r.post.mean[1] + l[1][0] * z0 + l[1][1] * z1]
     })
-  }, [r, seed, count.value])
+  }, [r, state.seed, state.count])
   const many = lines.length > 1
 
-  const series: XYSeries[] = [
+  const series: SeriesSpec[] = [
     // One shared name, so the legend shows a single entry that toggles every sample.
-    ...lines.map((w): XYSeries => ({
+    ...lines.map((w): SeriesSpec => ({
       name: 'samples from the posterior',
       type: 'line',
       x: LINE_X,
@@ -124,19 +129,17 @@ export function SequentialLearning() {
       onDrag: ([w0, w1]) => setTruth([Math.max(-1, Math.min(1, w0)), Math.max(-1, Math.min(1, w1))]),
     },
   ]
+  const wAxis = useAxis({ label: 'w₀ (intercept)', range: [-1, 1] })
+  const w1Axis = useAxis({ label: 'w₁ (slope)', range: [-1, 1] })
   const sd = [Math.sqrt(r.cov[0][0]), Math.sqrt(r.cov[1][1])]
-  const weightMap = (z: number[][], dragHandles?: Handle[]) => (
-    <Heatmap
-      x={GRID}
-      y={GRID}
-      z={z}
-      range={[0, 1]}
-      xLabel="w₀ (intercept)"
-      yLabel="w₁ (slope)"
-      valueLabel="relative density"
-      handles={dragHandles}
-      height={300}
-    />
+  // The three weight-space maps share one pair of axes.
+  const weightMap = (z: number[][], dragHandles: Handle[] = []) => (
+    <Plot x={wAxis} y={w1Axis} height={300}>
+      <Raster x={GRID} y={GRID} z={z} range={[0, 1]} valueLabel="relative density" />
+      {dragHandles.map((h, i) => (
+        <Handle key={i} {...h} />
+      ))}
+    </Plot>
   )
   const panel = (title: string, body: ReactNode) => (
     <div className="min-w-0 space-y-1">
@@ -145,18 +148,14 @@ export function SequentialLearning() {
     </div>
   )
 
+  const xAxis = useAxis({ label: 'x', range: [-1, 1] })
+  const yAxis = useAxis({ label: 'y', range: [-1.5, 1.5] })
   return (
-    <Interactive
+    <Figure
       title="Learning a line one point at a time"
+      state={state}
       caption="Bayes' theorem one point at a time, over the intercept w₀ and slope w₁ (dark = probable), with prior N(0, 0.5 I) and noise precision β = 25. Top left: the prior, which is the posterior from the earlier points. Top right: the likelihood of the newest point, a band of lines passing near it. Bottom left: their product, the new posterior. Bottom right: lines drawn from the posterior (light; the draws slider sets how many), with the newest point marked. Step through the points with the arrows; each posterior becomes the next prior. Drag the true weights on the posterior to move the line that generates the data."
-      controls={
-        <>
-          <ParamSlider label="points observed" param={n} format={(v) => String(v)} withArrows />
-          <ParamSlider label="draws" param={count} withArrows format={(v) => String(v)} />
-          <ParamSlider label="seed" value={seed} onChange={setSeed} min={1} max={20} step={1} />
-        </>
-      }
-      readout={
+      readouts={
         <>
           <Readout
             label="posterior mean (w₀, w₁)"
@@ -169,7 +168,7 @@ export function SequentialLearning() {
     >
       <div className="grid gap-x-4 gap-y-6 md:grid-cols-2">
         {panel(
-          n.value === 0 ? 'prior' : `prior: the posterior after ${n.value - 1} point${n.value === 2 ? '' : 's'}`,
+          state.n === 0 ? 'prior' : `prior: the posterior after ${state.n - 1} point${state.n === 2 ? '' : 's'}`,
           weightMap(r.prior),
         )}
         {panel(
@@ -183,14 +182,16 @@ export function SequentialLearning() {
           ),
         )}
         {panel(
-          `posterior after ${n.value} point${n.value === 1 ? '' : 's'} = prior × likelihood, normalised`,
+          `posterior after ${state.n} point${state.n === 1 ? '' : 's'} = prior × likelihood, normalised`,
           weightMap(r.z, handles),
         )}
         {panel(
           'lines drawn from the posterior',
-          <XYChart series={series} xLabel="x" yLabel="y" xRange={[-1, 1]} yRange={[-1.5, 1.5]} height={300} />,
+          <Plot x={xAxis} y={yAxis} height={300}>
+            {seriesLayers(series)}
+          </Plot>,
         )}
       </div>
-    </Interactive>
+    </Figure>
   )
 }

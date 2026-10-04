@@ -1,15 +1,5 @@
-import { useMemo, useState } from 'react'
-import {
-  Interactive,
-  ParamChoice,
-  ParamSlider,
-  Readout,
-  XYChart,
-  formatNumber,
-  useParam,
-  type Handle,
-  type XYSeries,
-} from 'aifn-render'
+import { useMemo } from 'react'
+import { choice, Curve, Figure, formatNumber, Handle, int, Plot, Readout, useAxis, useFigureState } from 'aifn-render'
 
 const GB = 1e9
 const MAX_S = 16384
@@ -45,71 +35,66 @@ function activations(s: number, b: number, h: number, a: number, layers: number,
 }
 
 export function TrainingMemory() {
-  const [preset, setPreset] = useState<Preset>('7')
-  const [batch, setBatch] = useState(1)
-  const [tp, setTp] = useState<Tp>('1')
-  const len = useParam(4096, { min: 256, max: MAX_S, step: 256 })
-  const { h, a, layers } = SHAPES[preset]
-  const t = Number(tp)
-  const state = (16 * 12 * layers * h * h) / t
+  const state = useFigureState({
+    preset: choice<Preset>(PRESETS, '7', { label: 'model' }),
+    tp: choice<Tp>(TPS, '1', { label: 'tensor-parallel degree t' }),
+    batch: int(1, { min: 1, max: 16, step: 1, label: 'micro-batch size b' }),
+    len: int(4096, { min: 256, max: MAX_S, step: 256, label: 'sequence length s' }),
+  })
+  const { h, a, layers } = SHAPES[state.preset]
+  const t = Number(state.tp)
+  const modelState = (16 * 12 * layers * h * h) / t
 
-  const series = useMemo((): XYSeries[] => {
-    const act = LENGTHS.map((s) => activations(s, batch, h, a, layers, t))
+  const series = useMemo(() => {
+    const act = LENGTHS.map((s) => activations(s, state.batch, h, a, layers, t))
     return [
       {
         name: 'weights, gradients, Adam (16 bytes each)',
-        type: 'line',
         x: LENGTHS,
-        y: LENGTHS.map(() => state / GB),
+        y: LENGTHS.map(() => modelState / GB),
         slot: 0,
       },
-      { name: 'activations, stored', type: 'line', x: LENGTHS, y: act.map((v) => v.full / GB), slot: 1 },
+      { name: 'activations, stored', x: LENGTHS, y: act.map((v) => v.full / GB), slot: 1 },
       {
         name: 'activations, selective recompute',
-        type: 'line',
         x: LENGTHS,
         y: act.map((v) => v.selective / GB),
         slot: 2,
       },
-      { name: 'activations, full recompute', type: 'line', x: LENGTHS, y: act.map((v) => v.recompute / GB), slot: 3 },
-      { name: '80 GB device', type: 'line', x: [LENGTHS[0], MAX_S], y: [80, 80], muted: true, dashed: true },
-    ]
-  }, [batch, h, a, layers, t, state])
+      { name: 'activations, full recompute', x: LENGTHS, y: act.map((v) => v.recompute / GB), slot: 3 },
+      { name: '80 GB device', x: [LENGTHS[0], MAX_S], y: [80, 80], muted: true, dashed: true },
+    ] as const
+  }, [state.batch, h, a, layers, t, modelState])
 
-  const now = activations(len.value, batch, h, a, layers, t)
-  const handles: Handle[] = [{ kind: 'x', at: len.value, label: 's', onDrag: len.set }]
+  const now = activations(state.len, state.batch, h, a, layers, t)
 
+  const xAxis = useAxis({ label: 'sequence length s (tokens)', range: [LENGTHS[0], MAX_S] })
+  const yAxis = useAxis({ label: 'GB per device', hold: 'union', log: true })
   return (
-    <Interactive
+    <Figure
       title="Training memory per device against sequence length"
+      purpose="Change the model, the batch size and the tensor-parallel degree to compare model-state and activation memory against sequence length."
+      state={state}
       caption="Model state is fixed by the parameter count. Stored activations grow linearly in sequence length s from the 34sbh term and quadratically from the 5as²b attention term. Selective recomputation drops the quadratic term; full recomputation keeps only each layer's input. Tensor parallelism with sequence parallelism divides everything by t. Drag the vertical line to read the values at a length."
-      controls={
+
+      readouts={
         <>
-          <ParamChoice label="model" value={preset} onChange={setPreset} options={PRESETS} />
-          <ParamChoice label="tensor-parallel degree t" value={tp} onChange={setTp} options={TPS} />
-          <ParamSlider label="micro-batch size b" value={batch} onChange={setBatch} min={1} max={16} step={1} />
-          <ParamSlider label="sequence length s" param={len} />
-        </>
-      }
-      readout={
-        <>
-          <Readout label="model state" value={`${formatNumber(state / GB)} GB`} />
+          <Readout label="model state" value={`${formatNumber(modelState / GB)} GB`} />
           <Readout label="activations stored" value={`${formatNumber(now.full / GB)} GB`} />
           <Readout label="selective" value={`${formatNumber(now.selective / GB)} GB`} />
           <Readout label="full recompute" value={`${formatNumber(now.recompute / GB)} GB`} />
-          <Readout label="5as/h against 34" value={formatNumber((5 * a * len.value) / h)} />
+          <Readout label="5as/h against 34" value={formatNumber((5 * a * state.len) / h)} />
         </>
       }
     >
-      <XYChart
-        series={series}
-        xLabel="sequence length s (tokens)"
-        yLabel="GB per device"
-        xRange={[LENGTHS[0], MAX_S]}
-        yLog
-        handles={handles}
-        height={320}
-      />
-    </Interactive>
+      <Plot x={xAxis} y={yAxis} height={320}>
+        <Curve {...series[0]} />
+        <Curve {...series[1]} />
+        <Curve {...series[2]} />
+        <Curve {...series[3]} />
+        <Curve {...series[4]} />
+        <Handle {...state.handle('len', { label: 's' })} />
+      </Plot>
+    </Figure>
   )
 }

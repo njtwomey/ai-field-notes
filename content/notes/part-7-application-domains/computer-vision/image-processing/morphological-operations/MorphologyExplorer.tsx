@@ -1,14 +1,14 @@
-import { useMemo, useState } from 'react'
-import { Heatmap, Interactive, ParamChoice, ParamSlider, Readout } from 'aifn-render'
-import { rng } from '@/lib/math'
+import { useMemo } from 'react'
+import { choice, Figure, int, Plot, Raster, Readout, useAxis, useFigureState } from 'aifn-render'
 import { AXIS, SIZE, type Image } from '../_shared/image'
+import { stream, uniform } from 'aifn/foundation/random'
 
 type Op = 'erode' | 'dilate' | 'open' | 'close' | 'open-close' | 'gradient'
 type Shape = 'square' | 'disk'
 
 /** Binary shapes with a one-pixel line, a narrow gap and salt-and-pepper noise (2% of pixels flipped). */
 const INPUT: Image = (() => {
-  const g = rng(11)
+  const g = stream(11)
   return Array.from({ length: SIZE }, (_, r) =>
     Array.from({ length: SIZE }, (_, c) => {
       let v = 0
@@ -19,7 +19,7 @@ const INPUT: Image = (() => {
       if (r >= 40 && r <= 52 && c >= 38 && c <= 58) v = 1
       // A one-pixel line.
       if (r === 20 && c >= 32 && c <= 58) v = 1
-      return g.uniform() < 0.02 ? 1 - v : v
+      return uniform(g) < 0.02 ? 1 - v : v
     }),
   )
 })()
@@ -75,52 +75,43 @@ const area = (img: Image) => img.reduce((a, row) => a + row.reduce((s, v) => s +
 
 /** Binary erosion, dilation, opening and closing of a noisy image with a square or disk structuring element. */
 export function MorphologyExplorer() {
-  const [op, setOp] = useState<Op>('open')
-  const [shape, setShape] = useState<Shape>('square')
-  const [radius, setRadius] = useState(1)
-  const se = useMemo(() => offsets(shape, radius), [shape, radius])
-  const out = useMemo(() => apply(op, se), [op, se])
+  const state = useFigureState({
+    op: choice<Op>(
+      [
+        { value: 'erode', label: 'erode' },
+        { value: 'dilate', label: 'dilate' },
+        { value: 'open', label: 'open' },
+        { value: 'close', label: 'close' },
+        { value: 'open-close', label: 'open, close' },
+        { value: 'gradient', label: 'gradient' },
+      ],
+      'open',
+      { label: 'operation' },
+    ),
+    shape: choice<Shape>(
+      [
+        { value: 'square', label: 'square' },
+        { value: 'disk', label: 'disk' },
+      ],
+      'square',
+      { label: 'structuring element' },
+    ),
+    radius: int(1, { min: 1, max: 3, step: 1, label: 'radius', format: (v) => `${v} (${2 * v + 1} × ${2 * v + 1})` }),
+  })
+  const se = useMemo(() => offsets(state.shape, state.radius), [state.shape, state.radius])
+  const out = useMemo(() => apply(state.op, se), [state.op, se])
 
+  const xAxis = useAxis({ label: 'column' })
+  const yAxis = useAxis({ label: 'row' })
+  const xAxis2 = useAxis({ label: 'column' })
+  const yAxis2 = useAxis({ label: 'row' })
   return (
-    <Interactive
+    <Figure
       title="Erosion, dilation, opening and closing"
+      state={state}
       caption="Left: a binary image with a one-pixel line, a two-pixel gap and salt-and-pepper noise. Right: the result. Erosion shrinks shapes and deletes anything thinner than the structuring element; dilation grows them and fills small holes. Opening (erode, then dilate) removes specks and thin lines but restores the shapes that survive. Closing (dilate, then erode) fills holes and gaps. The gradient, dilation minus erosion, outlines the shapes."
-      controls={
-        <>
-          <ParamChoice
-            label="operation"
-            value={op}
-            onChange={setOp}
-            options={[
-              { value: 'erode', label: 'erode' },
-              { value: 'dilate', label: 'dilate' },
-              { value: 'open', label: 'open' },
-              { value: 'close', label: 'close' },
-              { value: 'open-close', label: 'open, close' },
-              { value: 'gradient', label: 'gradient' },
-            ]}
-          />
-          <ParamChoice
-            label="structuring element"
-            value={shape}
-            onChange={setShape}
-            options={[
-              { value: 'square', label: 'square' },
-              { value: 'disk', label: 'disk' },
-            ]}
-          />
-          <ParamSlider
-            label="radius"
-            value={radius}
-            onChange={setRadius}
-            min={1}
-            max={3}
-            step={1}
-            format={(v) => `${v} (${2 * v + 1} × ${2 * v + 1})`}
-          />
-        </>
-      }
-      readout={
+
+      readouts={
         <>
           <Readout label="element size" value={`${se.length} pixels`} />
           <Readout label="foreground before" value={String(area(INPUT))} />
@@ -129,29 +120,13 @@ export function MorphologyExplorer() {
       }
     >
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-        <Heatmap
-          x={AXIS}
-          y={AXIS}
-          z={INPUT}
-          range={[0, 1]}
-          xLabel="column"
-          yLabel="row"
-          valueLabel="pixel"
-          height={320}
-          ariaLabel="Binary input image"
-        />
-        <Heatmap
-          x={AXIS}
-          y={AXIS}
-          z={out}
-          range={[0, 1]}
-          xLabel="column"
-          yLabel="row"
-          valueLabel="pixel"
-          height={320}
-          ariaLabel="Result of the morphological operation"
-        />
+        <Plot x={xAxis} y={yAxis} height={320} ariaLabel={'Binary input image'}>
+          <Raster x={AXIS} y={AXIS} z={INPUT} range={[0, 1]} valueLabel={'pixel'} />
+        </Plot>
+        <Plot x={xAxis2} y={yAxis2} height={320} ariaLabel={'Result of the morphological operation'}>
+          <Raster x={AXIS} y={AXIS} z={out} range={[0, 1]} valueLabel={'pixel'} />
+        </Plot>
       </div>
-    </Interactive>
+    </Figure>
   )
 }

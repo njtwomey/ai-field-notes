@@ -1,17 +1,19 @@
-import { useMemo, useState } from 'react'
+import { useMemo } from 'react'
 import {
-  Interactive,
-  ParamButton,
-  ParamChoice,
-  ParamSlider,
-  Readout,
-  XYChart,
+  choice,
+  Figure,
   formatNumber,
-  type XYSeries,
+  int,
+  Plot,
+  Readout,
+  seriesLayers,
+  type SeriesSpec,
+  slider,
+  useAxis,
+  useFigureState,
 } from 'aifn-render'
-import { rng } from '@/lib/math'
-import { normalQuantile, studentTCdf } from '@/lib/math/special'
-import { studentTQuantile } from '@/lib/math/tests'
+import { normal, stream } from 'aifn/foundation/random'
+import { normalQuantile, studentTCdf, studentTQuantile } from 'aifn/numerics/special'
 
 type Method = 't' | 'z'
 
@@ -24,22 +26,34 @@ const SIGMA = 1
  * coverage equals the nominal level; with the normal quantile and the estimated s it falls short for small n.
  */
 export function Coverage() {
-  const [n, setN] = useState(5)
-  const [level, setLevel] = useState(0.95)
-  const [method, setMethod] = useState<Method>('t')
-  const [seed, setSeed] = useState(1)
+  const state = useFigureState({
+    n: int(5, { min: 2, max: 50, step: 1, label: 'sample size n' }),
+    level: slider(0.5, 0.99, 0.95, { step: 0.01, label: 'confidence level', format: (v) => `${Math.round(100 * v)}%` }),
+    method: choice<Method>(
+      [
+        { value: 't', label: 't, n − 1 df' },
+        { value: 'z', label: 'normal' },
+      ],
+      't',
+      { label: 'quantile' },
+    ),
+    seed: int(1, { ge: 0, label: 'seed' }),
+  })
 
   const result = useMemo(() => {
-    const r = rng(seed)
-    const q = method === 't' ? studentTQuantile(1 - (1 - level) / 2, n - 1) : normalQuantile(1 - (1 - level) / 2)
+    const r = stream(state.seed)
+    const q =
+      state.method === 't'
+        ? studentTQuantile(1 - (1 - state.level) / 2, state.n - 1)
+        : normalQuantile(1 - (1 - state.level) / 2)
     const hit: { x: number[]; y: number[] } = { x: [], y: [] }
     const miss: { x: number[]; y: number[] } = { x: [], y: [] }
     let covered = 0
     for (let i = 1; i <= SHOWN; i++) {
-      const xs = Array.from({ length: n }, () => MU + SIGMA * r.normal())
-      const mean = xs.reduce((a, b) => a + b, 0) / n
-      const s = Math.sqrt(xs.reduce((a, b) => a + (b - mean) ** 2, 0) / (n - 1))
-      const half = (q * s) / Math.sqrt(n)
+      const xs = Array.from({ length: state.n }, () => MU + SIGMA * normal(r))
+      const mean = xs.reduce((a, b) => a + b, 0) / state.n
+      const s = Math.sqrt(xs.reduce((a, b) => a + (b - mean) ** 2, 0) / (state.n - 1))
+      const half = (q * s) / Math.sqrt(state.n)
       const ok = Math.abs(mean - MU) <= half
       if (ok) covered++
       // NaN breaks the line, so one series draws many separate intervals.
@@ -48,44 +62,24 @@ export function Coverage() {
       target.y.push(mean - half, mean + half, NaN)
     }
     // Exact long-run coverage: P(|T| ≤ q) with T ~ t(n − 1), whichever q is used.
-    const longRun = 2 * studentTCdf(q, n - 1) - 1
-    const series: XYSeries[] = [
+    const longRun = 2 * studentTCdf(q, state.n - 1) - 1
+    const series: SeriesSpec[] = [
       { name: 'covers μ', type: 'line', ...hit, slot: 0 },
       { name: 'misses μ', type: 'line', ...miss, slot: 1 },
       { name: 'true mean μ', type: 'line', x: [0, SHOWN + 1], y: [MU, MU], slot: 2, dashed: true },
     ]
     return { series, covered, longRun, q }
-  }, [n, level, method, seed])
+  }, [state.n, state.level, state.method, state.seed])
 
+  const xAxis = useAxis({ label: 'sample', range: [0, SHOWN + 1] })
+  const yAxis = useAxis({ label: 'interval for μ', hold: 'union' })
   return (
-    <Interactive
+    <Figure
       title="Fifty intervals from fifty samples"
+      state={state}
       caption="Each vertical line is one interval computed from a fresh sample of size n. The procedure covers the true mean in a fixed fraction of samples; any single interval either covers it or does not. With the normal quantile and an estimated standard deviation, the intervals are too narrow when n is small."
-      controls={
-        <>
-          <ParamSlider label="sample size n" value={n} onChange={setN} min={2} max={50} step={1} />
-          <ParamSlider
-            label="confidence level"
-            value={level}
-            onChange={setLevel}
-            min={0.5}
-            max={0.99}
-            step={0.01}
-            format={(v) => `${Math.round(100 * v)}%`}
-          />
-          <ParamChoice
-            label="quantile"
-            value={method}
-            onChange={setMethod}
-            options={[
-              { value: 't', label: 't, n − 1 df' },
-              { value: 'z', label: 'normal' },
-            ]}
-          />
-          <ParamButton onClick={() => setSeed((s) => s + 1)}>New samples</ParamButton>
-        </>
-      }
-      readout={
+
+      readouts={
         <>
           <Readout label="covered here" value={`${result.covered} of ${SHOWN}`} />
           <Readout label="long-run coverage" value={`${formatNumber(100 * result.longRun)}%`} />
@@ -93,7 +87,9 @@ export function Coverage() {
         </>
       }
     >
-      <XYChart height={300} series={result.series} xRange={[0, SHOWN + 1]} xLabel="sample" yLabel="interval for μ" />
-    </Interactive>
+      <Plot x={xAxis} y={yAxis} height={300}>
+        {seriesLayers(result.series)}
+      </Plot>
+    </Figure>
   )
 }

@@ -1,6 +1,4 @@
-import { Interactive } from 'aifn-render'
-import { Diagram } from 'aifn-render'
-import { op } from 'aifn-render'
+import { Diagram, Figure, op } from 'aifn-render'
 import type { DiagramSpec } from 'aifn-render'
 
 const spec: DiagramSpec = {
@@ -69,7 +67,7 @@ const spec: DiagramSpec = {
 /** One N-BEATS block and its two residual branches. */
 export function NBeatsBlockDiagram() {
   return (
-    <Interactive
+    <Figure
       title="An N-BEATS block and its two residual branches"
       caption="A fully connected stack produces two coefficient vectors. Each weights a set of basis vectors: one over the look-back window (the backcast) and one over the horizon (the partial forecast). The backcast is subtracted from the block's input before the next block sees it. The partial forecast is added to the running total."
     >
@@ -77,6 +75,6 @@ export function NBeatsBlockDiagram() {
         spec={spec}
         ariaLabel="N-BEATS block: input x through four fully connected layers to backcast and forecast coefficients, each weighting a basis; backcast subtracted from the input for the next block, forecast added to the running sum"
       />
-    </Interactive>
+    </Figure>
   )
 }

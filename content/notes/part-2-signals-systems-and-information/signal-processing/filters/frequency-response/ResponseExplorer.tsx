@@ -1,17 +1,8 @@
-import { useMemo, useState } from 'react'
-import {
-  Interactive,
-  ParamChoice,
-  ParamSlider,
-  Readout,
-  XYChart,
-  formatNumber,
-  useParam,
-  type Handle,
-  type XYSeries,
-} from 'aifn-render'
-import { db, freqz, lfilter, unwrap } from '@/lib/dsp'
-import { iirLowpass } from '../_shared/design'
+import { useMemo } from 'react'
+import { choice, Curve, Figure, float, formatNumber, Handle, Plot, Readout, useAxis, useFigureState } from 'aifn-render'
+import { toFlat } from 'aifn/foundation/tensor'
+import { unwrapPhase } from 'aifn/signal'
+import { applyFilter, db, iirLowpass, response as freqz } from '../_shared/design'
 
 type Preset = 'smoother' | 'average' | 'recursive' | 'butter'
 
@@ -32,21 +23,27 @@ const SHOW = 60
  * to see the output scaled by |H| and shifted by the phase ∠H.
  */
 export function ResponseExplorer() {
-  const [preset, setPreset] = useState<Preset>('butter')
-  const w0 = useParam(0.2, { min: 0.01, max: 0.99, step: 0.01 })
-  const { b, a } = PRESETS[preset]
+  const state = useFigureState({
+    preset: choice<Preset>(
+      (Object.keys(PRESETS) as Preset[]).map((k) => ({ value: k, label: PRESETS[k].label })),
+      'butter',
+      { label: 'filter' },
+    ),
+    w0: float(0.2, { min: 0.01, max: 0.99, step: 0.01, label: 'test frequency ω₀ (×π)' }),
+  })
+  const { b, a } = PRESETS[state.preset]
 
   const response = useMemo(() => {
     const f = freqz(b, a, 512)
     return {
       x: f.omega.map((w) => w / Math.PI),
       mag: f.magnitude.map((m) => db(m, -80)),
-      phase: unwrap(f.phase),
+      phase: toFlat(unwrapPhase(f.phase)),
     }
   }, [b, a])
 
   const at = useMemo(() => {
-    const omega = w0.value * Math.PI
+    const omega = state.w0 * Math.PI
     // H(e^{iω₀}) = B(e^{iω₀}) / A(e^{iω₀}), evaluated directly.
     const H = (coef: number[]) =>
       coef.reduce((acc, c, k) => [acc[0] + c * Math.cos(omega * k), acc[1] - c * Math.sin(omega * k)], [0, 0])
@@ -56,7 +53,7 @@ export function ResponseExplorer() {
     const re = (nr * dr + ni * di) / d
     const im = (ni * dr - nr * di) / d
     const input = Array.from({ length: T0 + SHOW }, (_, n) => Math.cos(omega * n))
-    const output = lfilter(b, a, input)
+    const output = applyFilter(b, a, input)
     const n = Array.from({ length: SHOW }, (_, i) => T0 + i)
     return {
       gain: Math.hypot(re, im),
@@ -65,60 +62,49 @@ export function ResponseExplorer() {
       input: n.map((k) => input[k]),
       output: n.map((k) => output[k]),
     }
-  }, [b, a, w0.value])
+  }, [b, a, state.w0])
 
-  const handles: Handle[] = [{ kind: 'x', at: w0.value, label: 'ω₀', onDrag: (x) => w0.set(x) }]
-  const magSeries: XYSeries[] = [{ name: '|H| (dB)', type: 'line', x: response.x, y: response.mag, slot: 0 }]
-  const phaseSeries: XYSeries[] = [{ name: '∠H (unwrapped)', type: 'line', x: response.x, y: response.phase, slot: 0 }]
-  const timeSeries: XYSeries[] = [
-    { name: 'input cos(ω₀n)', type: 'line', x: at.n, y: at.input, slot: 1, dashed: true },
-    { name: 'output (steady state)', type: 'line', x: at.n, y: at.output, slot: 0 },
-  ]
+  const magSeries = [{ name: '|H| (dB)', x: response.x, y: response.mag, slot: 0 }] as const
+  const phaseSeries = [{ name: '∠H (unwrapped)', x: response.x, y: response.phase, slot: 0 }] as const
+  const timeSeries = [
+    { name: 'input cos(ω₀n)', x: at.n, y: at.input, slot: 1, dashed: true },
+    { name: 'output (steady state)', x: at.n, y: at.output, slot: 0 },
+  ] as const
 
+  const xAxis = useAxis({ label: 'ω / π', range: [0, 1] })
+  const yAxis = useAxis({ label: 'magnitude (dB)', range: [-80, 5] })
+  const xAxis2 = useAxis({ label: 'ω / π', range: [0, 1] })
+  const yAxis2 = useAxis({ label: 'phase (rad)', hold: 'union' })
+  const xAxis3 = useAxis({ label: 'n', range: [T0, T0 + SHOW - 1] })
+  const yAxis3 = useAxis({ label: 'amplitude', range: [-1.2, 1.2] })
   return (
-    <Interactive
+    <Figure
       title="What a frequency response means"
+      state={state}
       caption="A sinusoid passes through a linear time-invariant filter as a sinusoid of the same frequency, scaled by |H(e^{iω₀})| and shifted by ∠H(e^{iω₀}). Drag ω₀ along the magnitude response and compare the input (dashed) with the output after the start-up transient has died away. The phase delay −∠H/ω₀ is the shift in samples."
-      controls={
-        <>
-          <ParamChoice
-            label="filter"
-            value={preset}
-            onChange={setPreset}
-            options={(Object.keys(PRESETS) as Preset[]).map((k) => ({ value: k, label: PRESETS[k].label }))}
-          />
-          <ParamSlider label="test frequency ω₀ (×π)" param={w0} withArrows />
-        </>
-      }
-      readout={
+
+      readouts={
         <>
           <Readout label="|H(e^{iω₀})|" value={formatNumber(at.gain)} />
           <Readout label="gain (dB)" value={formatNumber(20 * Math.log10(at.gain))} />
           <Readout label="∠H (rad)" value={formatNumber(at.phase)} />
-          <Readout label="phase delay (samples)" value={formatNumber(-at.phase / (w0.value * Math.PI))} />
+          <Readout label="phase delay (samples)" value={formatNumber(-at.phase / (state.w0 * Math.PI))} />
         </>
       }
     >
       <div className="grid gap-4 md:grid-cols-2">
-        <XYChart
-          series={magSeries}
-          xLabel="ω / π"
-          yLabel="magnitude (dB)"
-          xRange={[0, 1]}
-          yRange={[-80, 5]}
-          handles={handles}
-          height={240}
-        />
-        <XYChart series={phaseSeries} xLabel="ω / π" yLabel="phase (rad)" xRange={[0, 1]} height={240} />
+        <Plot x={xAxis} y={yAxis} height={240}>
+          <Curve {...magSeries[0]} />
+          <Handle {...state.handle('w0', { label: 'ω₀' })} />
+        </Plot>
+        <Plot x={xAxis2} y={yAxis2} height={240}>
+          <Curve {...phaseSeries[0]} />
+        </Plot>
       </div>
-      <XYChart
-        series={timeSeries}
-        xLabel="n"
-        yLabel="amplitude"
-        xRange={[T0, T0 + SHOW - 1]}
-        yRange={[-1.2, 1.2]}
-        height={220}
-      />
-    </Interactive>
+      <Plot x={xAxis3} y={yAxis3} height={220}>
+        <Curve {...timeSeries[0]} />
+        <Curve {...timeSeries[1]} />
+      </Plot>
+    </Figure>
   )
 }

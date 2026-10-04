@@ -1,20 +1,11 @@
 import { useMemo } from 'react'
-import {
-  Interactive,
-  ParamSlider,
-  Readout,
-  XYChart,
-  formatNumber,
-  useParam,
-  type Handle,
-  type XYSeries,
-} from 'aifn-render'
-import { linspace } from '@/lib/math'
+import { Curve, Figure, float, formatNumber, Handle, Plot, Points, Readout, useAxis, useFigureState } from 'aifn-render'
+import { linspace, toFlat } from 'aifn/foundation/tensor'
 
 const FS = 10
 const F_MAX = 3 * FS
-const FREQS = linspace(0, F_MAX, 601)
-const TIMES = linspace(0, 1, 801)
+const FREQS = toFlat(linspace(0, F_MAX, 601))
+const TIMES = toFlat(linspace(0, 1, 801))
 /** f folded into [0, f_s/2]: the frequency a real sinusoid appears to have after sampling at f_s. */
 const fold = (f: number) => Math.abs(f - FS * Math.round(f / FS))
 
@@ -23,63 +14,63 @@ const fold = (f: number) => Math.abs(f - FS * Math.round(f / FS))
  * f_s/2 and its alias pass through the same samples.
  */
 export function FoldingDiagram() {
-  const f = useParam(13, { min: 0, max: F_MAX, step: 0.25 })
-  const apparent = fold(f.value)
+  const state = useFigureState({
+    f: float(13, { min: 0, max: F_MAX, step: 0.25, label: 'true frequency f (Hz)' }),
+  })
+  const apparent = fold(state.f)
 
-  const left: XYSeries[] = useMemo(
-    () => [{ name: 'apparent frequency', type: 'line', x: FREQS, y: FREQS.map(fold), slot: 0 }],
-    [],
-  )
-  const handles: Handle[] = [{ kind: 'x', at: f.value, label: 'f', onDrag: (v) => f.set(v) }]
+  const left = useMemo(() => [{ name: 'apparent frequency', x: FREQS, y: FREQS.map(fold), slot: 0 }] as const, [])
 
-  const right = useMemo((): XYSeries[] => {
+  const right = useMemo(() => {
     const n = Array.from({ length: FS + 1 }, (_, i) => i / FS)
     // The alias has the same samples; for a cosine with zero phase, cos(2π f t) and cos(2π f_a t) agree at t = n/f_s.
     return [
       {
-        name: `true: ${formatNumber(f.value)} Hz`,
-        type: 'line',
+        name: `true: ${formatNumber(state.f)} Hz`,
         x: TIMES,
-        y: TIMES.map((t) => Math.cos(2 * Math.PI * f.value * t)),
+        y: TIMES.map((t) => Math.cos(2 * Math.PI * state.f * t)),
         slot: 0,
       },
       {
         name: `alias: ${formatNumber(apparent)} Hz`,
-        type: 'line',
         x: TIMES,
         y: TIMES.map((t) => Math.cos(2 * Math.PI * apparent * t)),
         slot: 1,
         dashed: true,
       },
-      { name: 'samples', type: 'scatter', x: n, y: n.map((t) => Math.cos(2 * Math.PI * f.value * t)), emphasis: true },
-    ]
-  }, [f.value, apparent])
+      { name: 'samples', x: n, y: n.map((t) => Math.cos(2 * Math.PI * state.f * t)), emphasis: true },
+    ] as const
+  }, [state.f, apparent])
 
+  const xAxis = useAxis({ label: 'true frequency (Hz)', range: [0, F_MAX] })
+  const yAxis = useAxis({ label: 'apparent frequency (Hz)', range: [0, FS / 2 + 0.5] })
+  const xAxis2 = useAxis({ label: 't (s)', range: [0, 1] })
+  const yAxis2 = useAxis({ label: 'x(t)', range: [-1.4, 1.4] })
   return (
-    <Interactive
+    <Figure
       title="Frequencies fold back"
+      state={state}
       caption="Sampling at f_s = 10 Hz maps every frequency onto [0, f_s/2]: the map folds back and forth like a triangle wave. Drag the line on the left or use the slider. On the right, the true cosine and its alias at the folded frequency pass through exactly the same samples, so after sampling they cannot be told apart."
-      controls={<ParamSlider label="true frequency f (Hz)" param={f} withArrows />}
-      readout={
+
+      readouts={
         <>
-          <Readout label="true f" value={`${formatNumber(f.value)} Hz`} />
+          <Readout label="true f" value={`${formatNumber(state.f)} Hz`} />
           <Readout label="apparent" value={`${formatNumber(apparent)} Hz`} />
-          <Readout label="nearest multiple of f_s" value={`${FS * Math.round(f.value / FS)} Hz`} />
+          <Readout label="nearest multiple of f_s" value={`${FS * Math.round(state.f / FS)} Hz`} />
         </>
       }
     >
       <div className="grid gap-4 md:grid-cols-2">
-        <XYChart
-          series={left}
-          xLabel="true frequency (Hz)"
-          yLabel="apparent frequency (Hz)"
-          xRange={[0, F_MAX]}
-          yRange={[0, FS / 2 + 0.5]}
-          handles={handles}
-          height={280}
-        />
-        <XYChart series={right} xLabel="t (s)" yLabel="x(t)" xRange={[0, 1]} yRange={[-1.4, 1.4]} height={280} />
+        <Plot x={xAxis} y={yAxis} height={280}>
+          <Curve {...left[0]} />
+          <Handle {...state.handle('f', { label: 'f' })} />
+        </Plot>
+        <Plot x={xAxis2} y={yAxis2} height={280}>
+          <Curve {...right[0]} />
+          <Curve {...right[1]} />
+          <Points {...right[2]} />
+        </Plot>
       </div>
-    </Interactive>
+    </Figure>
   )
 }

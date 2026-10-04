@@ -3,7 +3,7 @@
  * key a different one when the algorithm draws; `seek(i)` equals `run(i)`, from scratch and from a trace's
  * checkpoints; `extend` equals a longer trace; and a state cloned with `structuredClone` (a worker boundary, then
  * `revive` for its tensors) steps the same as the original, so states are plain data. The applications' twin is
- * `aifn-js/applications/test/protocol.ts` (`expectProtocol`).
+ * `aifn-js/methods/test/protocol.ts` (`expectProtocol`).
  *
  * ```ts
  * checkProtocol(kmeans(data, { k: 3 }), undefined, { steps: 20, record: { loss: (s) => s.loss } })

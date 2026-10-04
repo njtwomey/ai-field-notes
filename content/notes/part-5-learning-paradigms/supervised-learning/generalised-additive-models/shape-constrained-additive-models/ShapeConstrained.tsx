@@ -1,6 +1,5 @@
-import { useMemo, useState } from 'react'
-import { Interactive, ParamButton, ParamSlider, Readout, XYChart, formatNumber, type XYSeries } from 'aifn-render'
-import { linspace, rng } from '@/lib/math'
+import { useMemo } from 'react'
+import { Curve, Figure, float, formatNumber, int, Plot, Points, Readout, useAxis, useFigureState } from 'aifn-render'
 import {
   addScaled,
   cholesky,
@@ -14,11 +13,13 @@ import {
   psplineRow,
   type Matrix,
 } from '../_shared/terms-psplines'
+import { linspace, toFlat } from 'aifn/foundation/tensor'
+import { normal, stream, uniform } from 'aifn/foundation/random'
 
 const N = 60
 const K = 20
 const NOISE = 0.25
-const GRID = linspace(0, 1, 121)
+const GRID = toFlat(linspace(0, 1, 121))
 const truth = (x: number) => 2.5 * x ** 3
 // pyGAM uses 1e9; a smaller weight keeps the dense solve well conditioned and leaves violations below TOL.
 const CONSTRAINT_WEIGHT = 1e6
@@ -57,18 +58,20 @@ function fitShape(BtB: Matrix, Bty: number[], lambda: number, kind: Kind) {
 const violations = (beta: number[], D: Matrix) => D.filter((row) => dot(row, beta) < -TOL).length
 
 export function ShapeConstrained() {
-  const [logLambda, setLogLambda] = useState(0)
-  const [seed, setSeed] = useState(5)
+  const state = useFigureState({
+    logLambda: float(0, { min: -3, max: 3, step: 0.1, label: 'log₁₀ λ', format: (v) => v.toFixed(1) }),
+    seed: int(5, { ge: 0, label: 'seed' }),
+  })
 
   const data = useMemo(() => {
-    const r = rng(seed)
-    const x = Array.from({ length: N }, () => r.uniform())
-    const y = x.map((xi) => truth(xi) + NOISE * r.normal())
+    const r = stream(state.seed)
+    const x = Array.from({ length: N }, () => uniform(r))
+    const y = x.map((xi) => truth(xi) + NOISE * normal(r))
     const B = x.map((xi) => psplineRow(xi, 0, 1, K))
     return { x, y, BtB: crossprod(B), Bty: crossprodY(B, y) }
-  }, [seed])
+  }, [state.seed])
 
-  const lambda = 10 ** logLambda
+  const lambda = 10 ** state.logLambda
   const fits = useMemo(
     () => (['none', 'monotone', 'convex'] as const).map((kind) => fitShape(data.BtB, data.Bty, lambda, kind)),
     [data, lambda],
@@ -76,18 +79,21 @@ export function ShapeConstrained() {
   const Bgrid = useMemo(() => GRID.map((g) => psplineRow(g, 0, 1, K)), [])
   const curve = (beta: number[]) => Bgrid.map((row) => dot(row, beta))
 
-  const series: XYSeries[] = [
-    { name: 'data', type: 'scatter', x: data.x, y: data.y, muted: true },
-    { name: 'true f', type: 'line', x: GRID, y: GRID.map(truth), muted: true, dashed: true },
-    { name: 'unconstrained', type: 'line', x: GRID, y: curve(fits[0].beta), slot: 0 },
-    { name: 'monotone increasing', type: 'line', x: GRID, y: curve(fits[1].beta), slot: 1 },
-    { name: 'convex', type: 'line', x: GRID, y: curve(fits[2].beta), slot: 2 },
-  ]
+  const series = [
+    { name: 'data', x: data.x, y: data.y, muted: true },
+    { name: 'true f', x: GRID, y: GRID.map(truth), muted: true, dashed: true },
+    { name: 'unconstrained', x: GRID, y: curve(fits[0].beta), slot: 0 },
+    { name: 'monotone increasing', x: GRID, y: curve(fits[1].beta), slot: 1 },
+    { name: 'convex', x: GRID, y: curve(fits[2].beta), slot: 2 },
+  ] as const
   const count = (D: Matrix) => fits.map((f) => violations(f.beta, D)).join(' / ')
 
+  const xAxis = useAxis({ label: 'x', range: [0, 1] })
+  const yAxis = useAxis({ label: 'y', range: [-0.8, 3.2] })
   return (
-    <Interactive
+    <Figure
       title="Monotone and convex P-splines"
+      state={state}
       caption={
         <>
           Sixty noisy points from the increasing, convex curve f(x) = 2.5x³ (dashed), fitted with 20 cubic B-splines and
@@ -99,21 +105,8 @@ export function ShapeConstrained() {
           the left edge, because convexity says nothing about the sign of the slope.
         </>
       }
-      controls={
-        <>
-          <ParamSlider
-            label="log₁₀ λ"
-            value={logLambda}
-            onChange={setLogLambda}
-            min={-3}
-            max={3}
-            step={0.1}
-            format={(v) => v.toFixed(1)}
-          />
-          <ParamButton onClick={() => setSeed((s) => s + 1)}>New sample</ParamButton>
-        </>
-      }
-      readout={
+
+      readouts={
         <>
           <Readout label="Δβ < 0 (none / mono / convex)" value={count(D1)} />
           <Readout label="Δ²β < 0 (none / mono / convex)" value={count(D2)} />
@@ -125,7 +118,13 @@ export function ShapeConstrained() {
         </>
       }
     >
-      <XYChart series={series} xRange={[0, 1]} yRange={[-0.8, 3.2]} xLabel="x" yLabel="y" height={340} />
-    </Interactive>
+      <Plot x={xAxis} y={yAxis} height={340}>
+        <Points {...series[0]} />
+        <Curve {...series[1]} />
+        <Curve {...series[2]} />
+        <Curve {...series[3]} />
+        <Curve {...series[4]} />
+      </Plot>
+    </Figure>
   )
 }

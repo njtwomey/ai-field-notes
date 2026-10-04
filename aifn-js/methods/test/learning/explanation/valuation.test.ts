@@ -6,9 +6,9 @@
 import { describe, expect, it } from 'vitest'
 import { stream } from 'aifn/foundation/random'
 import { rocCurve } from 'aifn/learning/metrics'
-import { blobs, flippedMask, withLabelNoise } from 'aifn-applied/data/synthetic'
-import { logisticRegression } from 'aifn-applied/learning/generalised/glm'
-import { dataValuationStudy, VALUATION_METHODS, type ValuationSnapshot } from 'aifn-applied/learning/explanation'
+import { blobs, flippedMask, withLabelNoise } from 'aifn-methods/data/synthetic'
+import { logisticRegression } from 'aifn-methods/learning/generalised/glm'
+import { dataValuationStudy, VALUATION_METHODS, type ValuationSnapshot } from 'aifn-methods/learning/explanation'
 
 describe('data valuation study', () => {
   it('finds planted label noise with every method', () => {

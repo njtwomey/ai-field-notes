@@ -1,17 +1,20 @@
 import { useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
-import { useTheme } from 'aifn-render'
 import {
-  Interactive,
-  ParamButton,
-  ParamChoice,
-  ParamSlider,
-  ParamSwitch,
+  Button,
+  Figure,
+  choice,
+  Handle,
+  int,
+  Plot,
   Readout,
-  XYChart,
   seriesColor,
-  useParam,
-  type Handle,
-  type XYSeries,
+  seriesLayers,
+  type SeriesSpec,
+  setting,
+  slider,
+  useAxis,
+  useFigureState,
+  useTheme,
 } from 'aifn-render'
 import { cn } from '@/lib/utils'
 import { isRelevant } from './ranking'
@@ -113,11 +116,27 @@ export function RankingDuel({
 }: RankingDuelProps) {
   const start = PRESETS[preset]
   const { resolved: mode } = useTheme()
-  const [lists, setLists] = useState<[number[], number[]]>([start.a, start.b])
-  const [graded, setGraded] = useState(start.graded)
-  const [metric, setMetric] = useState<MetricId>(initialMetric ?? start.metric)
-  const k = useParam(start.k, { min: 1, max: N, step: 1 })
-  const totalParam = useParam(start.total, { min: 1, max: N, step: 1 })
+  const [rawLists, setLists] = useState<[number[], number[]]>([start.a, start.b])
+  const state = useFigureState({
+    k: slider(1, N, start.k, { step: 1, label: 'cut-off k' }),
+    total: int(start.total, { min: 1, max: N, step: 1, label: 'relevant documents in the collection (R)' }),
+    graded: setting(start.graded, 'graded relevance (0–3)'),
+    metric: choice<MetricId>(
+      METRICS.map((m) => ({ value: m.id, label: m.label('k') })),
+      initialMetric ?? start.metric,
+      { label: 'metric' },
+    ),
+  })
+  const { graded, metric } = state
+  const setMetric = (id: MetricId) => state.set('metric', id)
+  const k = state.bind('k')
+  const totalParam = state.bind('total')
+  // With graded relevance off, every grade above 1 reads as 1 (relevant).
+  const lists = useMemo(
+    (): [number[], number[]] =>
+      graded ? rawLists : [rawLists[0].map((g) => Math.min(g, 1)), rawLists[1].map((g) => Math.min(g, 1))],
+    [rawLists, graded],
+  )
 
   const found = lists.map((g) => g.filter(isRelevant).length)
   // R can never be below the number of relevant documents either list has already retrieved.
@@ -129,7 +148,7 @@ export function RankingDuel({
   const load = (id: PresetId) => {
     const p = PRESETS[id]
     setLists([p.a, p.b])
-    setGraded(p.graded)
+    state.set('graded', p.graded)
     setMetric(p.metric)
     k.set(p.k)
     totalParam.set(p.total)
@@ -152,11 +171,6 @@ export function RankingDuel({
       next[list] = moved
       return next
     })
-
-  const setGradedMode = (on: boolean) => {
-    setGraded(on)
-    if (!on) setLists((ls) => [ls[0].map((g) => Math.min(g, 1)), ls[1].map((g) => Math.min(g, 1))])
-  }
 
   // ---- The strips: pointer gestures on the SVG ----
   const svg = useRef<SVGSVGElement>(null)
@@ -342,7 +356,7 @@ export function RankingDuel({
   const curves = useMemo(
     () =>
       curvesFor(spec).flatMap((m, j) =>
-        lists.map((g, list): XYSeries => ({
+        lists.map((g, list): SeriesSpec => ({
           name: `${m.label('k')} ${NAMES[list]}`,
           type: 'line',
           x: KS,
@@ -360,8 +374,10 @@ export function RankingDuel({
   // Ranks are integers; scores get three decimals so that columns line up.
   const valueText = (x: number) => (!Number.isFinite(x) ? 'none' : Number.isInteger(x) ? String(x) : x.toFixed(3))
 
+  const xAxis = useAxis({ label: 'cut-off k', range: [1, N] })
+  const yAxis = useAxis({ label: spec.usesK ? spec.label('k') : 'P@k (solid), R@k (dashed)', range: [0, 1] })
   return (
-    <Interactive
+    <Figure
       title={title}
       caption={
         <>
@@ -373,35 +389,20 @@ export function RankingDuel({
           lecture &ldquo;Evaluation Overview&rdquo; (UNC Chapel Hill).
         </>
       }
+      state={state}
       controls={
         <>
-          <ParamSlider label="cut-off k" param={k} format={(v) => String(v)} withArrows />
-          <ParamSlider
-            label="relevant documents in the collection (R)"
-            param={totalParam}
-            format={(v) => String(Math.max(v, floor))}
-            withArrows
-          />
-          <ParamSwitch label="graded relevance (0–3)" checked={graded} onChange={setGradedMode} />
-          <div className="sm:col-span-2 lg:col-span-3">
-            <ParamChoice
-              label="metric"
-              value={metric}
-              onChange={setMetric}
-              options={METRICS.map((m) => ({ value: m.id, label: m.label(k.value) }))}
-            />
-          </div>
           <div className="flex flex-wrap items-end gap-2 sm:col-span-2 lg:col-span-3">
             <span className="w-full text-xs text-muted-foreground">presets</span>
             {presets.map((id) => (
-              <ParamButton key={id} onClick={() => load(id)}>
+              <Button variant="outline" size="sm" key={id} onClick={() => load(id)}>
                 {PRESETS[id].label}
-              </ParamButton>
+              </Button>
             ))}
           </div>
         </>
       }
-      readout={
+      readouts={
         <>
           <Readout label={current.m.label(k.value)} value={`A ${valueText(current.a)} · B ${valueText(current.b)}`} />
           <Readout label="verdict" value={winnerText(current.v)} />
@@ -413,16 +414,12 @@ export function RankingDuel({
       <div className="grid gap-6 md:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
         {strips}
         <div className="flex min-w-0 flex-col gap-3">
-          <XYChart
-            height={260}
-            xLabel="cut-off k"
-            yLabel={spec.usesK ? spec.label('k') : 'P@k (solid), R@k (dashed)'}
-            xRange={[1, N]}
-            yRange={[0, 1]}
-            series={curves}
-            handles={handles}
-            ariaLabel="Scores of lists A and B as the cut-off k grows"
-          />
+          <Plot x={xAxis} y={yAxis} height={260} ariaLabel={'Scores of lists A and B as the cut-off k grows'}>
+            {seriesLayers(curves)}
+            {(handles ?? []).map((h, i) => (
+              <Handle key={i} {...h} />
+            ))}
+          </Plot>
           <table className="w-full font-sans text-xs">
             <thead>
               <tr className="border-b text-muted-foreground">
@@ -464,7 +461,7 @@ export function RankingDuel({
           </table>
         </div>
       </div>
-    </Interactive>
+    </Figure>
   )
 }
 

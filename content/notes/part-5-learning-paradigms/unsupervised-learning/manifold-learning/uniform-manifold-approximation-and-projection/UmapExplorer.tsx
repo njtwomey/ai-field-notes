@@ -1,20 +1,10 @@
 import { useMemo, useState } from 'react'
-import { digits } from 'aifn-applied/data/synthetic'
-import { fuzzyGraph, jointProbabilities, tsneSteps, umapSteps } from 'aifn-applied/unsupervised/embedding/neighbour'
+import { digits } from 'aifn-methods/data/synthetic'
+import { fuzzyGraph, jointProbabilities, tsneSteps, umapSteps } from 'aifn-methods/unsupervised/embedding/neighbour'
 import { stream } from 'aifn/foundation/random'
 import { fromData, toFlat, toRows } from 'aifn/foundation/tensor'
 import { trace } from 'aifn/foundation/trace'
-import {
-  ControlGroup,
-  Figure,
-  NumberSelector,
-  Player,
-  Plot,
-  Points,
-  Readout,
-  Select,
-  useAxis,
-} from 'aifn-render'
+import { ControlGroup, Figure, NumberSelector, Player, Plot, Points, Readout, Select, useAxis } from 'aifn-render'
 
 const METHOD_OPTIONS = [
   { value: 'umap', label: 'UMAP (Fuzzy Simplicial Set)' },

@@ -1,5 +1,4 @@
-import { Interactive } from 'aifn-render'
-import { Diagram } from 'aifn-render'
+import { Diagram, Figure } from 'aifn-render'
 import type { DiagramSpec } from 'aifn-render'
 
 const spec: DiagramSpec = {
@@ -60,7 +59,7 @@ const spec: DiagramSpec = {
 /** One PinSage convolution: transform each sampled neighbour, pool with random-walk weights, concatenate, transform. */
 export function ConvolveDiagram() {
   return (
-    <Interactive
+    <Figure
       title="One PinSage convolution"
       caption="Each of the T sampled neighbours passes through the same dense layer. The results are averaged with weights from the random-walk visit counts. The pooled vector is concatenated with the node's own vector, passed through a second dense layer and scaled to unit length. Stacking K such modules, each with its own weights, and a final two-layer network gives the embedding."
     >
@@ -68,6 +67,6 @@ export function ConvolveDiagram() {
         spec={spec}
         ariaLabel="PinSage convolve module: neighbour embeddings through a shared dense layer, importance pooling with random-walk weights, concatenation with the node's embedding, dense layer and L2 normalisation"
       />
-    </Interactive>
+    </Figure>
   )
 }

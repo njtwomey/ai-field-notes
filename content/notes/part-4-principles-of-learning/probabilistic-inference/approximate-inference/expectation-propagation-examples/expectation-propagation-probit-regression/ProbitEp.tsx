@@ -1,16 +1,20 @@
 import { useMemo, useState } from 'react'
 import {
-  Heatmap,
-  Interactive,
-  ParamButton,
-  ParamChoice,
-  ParamSlider,
-  ParamSwitch,
-  Readout,
+  Button,
+  choice,
+  Curve,
+  Figure,
   formatNumber,
-  useParam,
-  type Handle,
-  type HeatmapOverlay,
+  Handle,
+  Player,
+  Plot,
+  Points,
+  Raster,
+  Readout,
+  seriesLayers,
+  type SeriesSpec,
+  useAxis,
+  useFigureState,
 } from 'aifn-render'
 import { grid } from '../_shared/ep'
 import { ellipse, epProbit, exactProbitGrid, laplaceProbit, predictive, type V2 } from '../_shared/probit'
@@ -39,8 +43,11 @@ const CHOICES = INITIAL.map((_, i) => ({ value: String(i), label: `${i + 1}` }))
 export function ProbitEp() {
   const [points, setPoints] = useState<V2[]>(INITIAL)
   const [labels, setLabels] = useState(LABELS)
-  const [active, setActive] = useState('6')
-  const step = useParam(INITIAL.length * 3, { min: 0, max: INITIAL.length * SWEEPS, step: 1 })
+  const state = useFigureState({
+    active: choice(CHOICES, '6', { label: 'point to move' }),
+  })
+  // Site updates made: the walk-through position. It counts updates, so it keeps its meaning when the data change.
+  const [step, setStep] = useState(0)
 
   const r = useMemo(() => {
     const logp = exactProbitGrid(points, labels, PRIOR_VAR, W1, W2)
@@ -53,17 +60,15 @@ export function ProbitEp() {
   }, [points, labels])
 
   const current =
-    step.value === 0
-      ? { mean: [0, 0] as V2, cov: [PRIOR_VAR, 0, PRIOR_VAR] as [number, number, number] }
-      : r.steps[step.value - 1]
+    step === 0 ? { mean: [0, 0] as V2, cov: [PRIOR_VAR, 0, PRIOR_VAR] as [number, number, number] } : r.steps[step - 1]
   const epEllipse = ellipse(current.mean, current.cov)
   const laEllipse = ellipse(r.laplace.mean, r.laplace.cov)
-  const weightOverlay: HeatmapOverlay[] = [
-    { name: 'EP (2 sd)', type: 'line', x: epEllipse.x, y: epEllipse.y, slot: 2 },
-    { name: 'Laplace (2 sd)', type: 'line', x: laEllipse.x, y: laEllipse.y, slot: 3 },
-    { name: 'EP mean', type: 'scatter', x: [current.mean[0]], y: [current.mean[1]], slot: 2 },
-    { name: 'Laplace mean', type: 'scatter', x: [r.laplace.mean[0]], y: [r.laplace.mean[1]], slot: 3 },
-  ]
+  const weightOverlay = [
+    { name: 'EP (2 sd)', x: epEllipse.x, y: epEllipse.y, slot: 2 },
+    { name: 'Laplace (2 sd)', x: laEllipse.x, y: laEllipse.y, slot: 3 },
+    { name: 'EP mean', x: [current.mean[0]], y: [current.mean[1]], slot: 2 },
+    { name: 'Laplace mean', x: [r.laplace.mean[0]], y: [r.laplace.mean[1]], slot: 3 },
+  ] as const
 
   const prob = XG.map((b) => XG.map((a) => predictive(current.mean, current.cov, [a, b])))
   // Decision boundaries wᵀx = 0 through the origin, drawn across the plot.
@@ -72,9 +77,9 @@ export function ProbitEp() {
     const d: V2 = [-m[1] / n, m[0] / n]
     return { x: [-5 * d[0], 5 * d[0]], y: [-5 * d[1], 5 * d[1]] }
   }
-  const idx = Number(active)
+  const idx = Number(state.active)
   const others = points.map((p, i) => ({ p, i })).filter(({ i }) => i !== idx)
-  const dataOverlay: HeatmapOverlay[] = [
+  const dataOverlay: SeriesSpec[] = [
     { name: 'EP boundary', type: 'line', ...boundary(current.mean), slot: 2 },
     { name: 'Laplace boundary', type: 'line', ...boundary(r.laplace.mean), slot: 3 },
     {
@@ -86,51 +91,43 @@ export function ProbitEp() {
       groupNames: ['y = −1', 'y = +1'],
     },
   ]
-  const handles: Handle[] = [
-    {
-      kind: 'point',
-      at: points[idx],
-      label: `point ${idx + 1}`,
-      onDrag: ([a, b]) =>
-        setPoints((ps) =>
-          ps.map((p, j) =>
-            j === idx
-              ? [
-                  Math.round(Math.min(2.9, Math.max(-2.9, a)) * 20) / 20,
-                  Math.round(Math.min(2.9, Math.max(-2.9, b)) * 20) / 20,
-                ]
-              : p,
-          ),
-        ),
-    },
-  ]
-  const s = step.value === 0 ? null : r.steps[step.value - 1]
+  const s = step === 0 ? null : r.steps[step - 1]
   const where = s ? `sweep ${s.sweep + 1}, site ${s.site + 1}${s.ok ? '' : ' (skipped)'}` : 'prior'
 
+  const xAxis = useAxis({ label: 'w₁' })
+  const yAxis = useAxis({ label: 'w₂' })
+  const xAxis2 = useAxis({ label: 'x₁' })
+  const yAxis2 = useAxis({ label: 'x₂' })
   return (
-    <Interactive
+    <Figure
       title="EP for probit regression, site by site"
+      state={state}
       caption="Left: the exact posterior density of the weights (shaded), with the 2-sd ellipses and means of EP after the chosen number of site updates and of the Laplace approximation. Right: the data, EP's predictive probability of y = +1 (shaded, 0.5 in the middle of the scale) and both decision boundaries wᵀx = 0. Choose a point, then drag it on the right-hand chart (the ink marker) or flip its label."
       controls={
         <>
-          <ParamSlider label="site updates" param={step} withArrows format={(v) => String(v)} />
-          <ParamChoice label="point to move" value={active} onChange={setActive} options={CHOICES} />
-          <ParamSwitch
-            label={`point ${idx + 1} has label +1`}
-            checked={labels[idx] > 0}
-            onChange={(c) => setLabels((ls) => ls.map((l, j) => (j === idx ? (c ? 1 : -1) : l)))}
+          <Player
+            value={step}
+            onChange={setStep}
+            count={INITIAL.length * SWEEPS + 1}
+            label="site updates"
+            format={(k) => `${k} of ${INITIAL.length * SWEEPS}`}
           />
-          <ParamButton
+          <Button variant="outline" size="sm" onClick={() => setLabels((ls) => ls.map((l, j) => (j === idx ? -l : l)))}>
+            Flip label of point {idx + 1} (now {labels[idx] > 0 ? '+1' : '−1'})
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
             onClick={() => {
               setPoints(INITIAL)
               setLabels(LABELS)
             }}
           >
             Reset data
-          </ParamButton>
+          </Button>
         </>
       }
-      readout={
+      readouts={
         <>
           <Readout label="position" value={where} />
           <Readout label="EP mean" value={`(${formatNumber(current.mean[0])}, ${formatNumber(current.mean[1])})`} />
@@ -146,30 +143,35 @@ export function ProbitEp() {
       }
     >
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-        <Heatmap
-          x={W1}
-          y={W2}
-          z={r.exact}
-          xLabel="w₁"
-          yLabel="w₂"
-          overlay={weightOverlay}
-          valueLabel="exact density (relative)"
-          height={340}
-        />
-        <Heatmap
-          x={XG}
-          y={XG}
-          z={prob}
-          xLabel="x₁"
-          yLabel="x₂"
-          scale="diverging"
-          range={[0, 1]}
-          overlay={dataOverlay}
-          handles={handles}
-          valueLabel="p(y = +1)"
-          height={340}
-        />
+        <Plot x={xAxis} y={yAxis} height={340}>
+          <Raster x={W1} y={W2} z={r.exact} valueLabel={'exact density (relative)'} />
+          <Curve {...weightOverlay[0]} live />
+          <Curve {...weightOverlay[1]} live />
+          <Points {...weightOverlay[2]} live />
+          <Points {...weightOverlay[3]} live />
+        </Plot>
+        <Plot x={xAxis2} y={yAxis2} height={340}>
+          <Raster x={XG} y={XG} z={prob} scale={'diverging'} range={[0, 1]} valueLabel={'p(y = +1)'} />
+          {seriesLayers(dataOverlay, { live: true })}
+          <Handle
+            kind="point"
+            at={points[idx]}
+            label={`point ${idx + 1}`}
+            onDrag={([a, b]) =>
+              setPoints((ps) =>
+                ps.map((p, j) =>
+                  j === idx
+                    ? [
+                        Math.round(Math.min(2.9, Math.max(-2.9, a)) * 20) / 20,
+                        Math.round(Math.min(2.9, Math.max(-2.9, b)) * 20) / 20,
+                      ]
+                    : p,
+                ),
+              )
+            }
+          />
+        </Plot>
       </div>
-    </Interactive>
+    </Figure>
   )
 }

@@ -113,7 +113,10 @@ export function projectGroupSums(groups: ArrayLike<number>, targets: VectorLike)
     const g = groups[i]
     if (g === -1) continue
     if (!(Number.isInteger(g) && g >= 0 && g < b.length))
-      throw new DomainError('projectGroupSums', `projectGroupSums: group ${g} of coordinate ${i} is not −1 or in 0 … ${b.length - 1}`)
+      throw new DomainError(
+        'projectGroupSums',
+        `projectGroupSums: group ${g} of coordinate ${i} is not −1 or in 0 … ${b.length - 1}`,
+      )
     size[g]++
   }
   return (x) => {
@@ -122,6 +125,10 @@ export function projectGroupSums(groups: ArrayLike<number>, targets: VectorLike)
       throw new ShapeError('projectGroupSums', `projectGroupSums: ${v.length} coordinates for ${groups.length} groups`)
     const sum = new Float64Array(b.length)
     for (let i = 0; i < v.length; i++) if (groups[i] >= 0) sum[groups[i]] += v[i]
-    return vec(v.map((vi, i) => (groups[i] >= 0 && size[groups[i]] > 0 ? vi + (b[groups[i]] - sum[groups[i]]) / size[groups[i]] : vi)))
+    return vec(
+      v.map((vi, i) =>
+        groups[i] >= 0 && size[groups[i]] > 0 ? vi + (b[groups[i]] - sum[groups[i]]) / size[groups[i]] : vi,
+      ),
+    )
   }
 }

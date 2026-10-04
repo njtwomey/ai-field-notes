@@ -1,9 +1,9 @@
-import { spectralClustering, kmeans as aifnKmeans } from 'aifn-applied/unsupervised/clustering'
+import { spectralClustering, kmeans as aifnKmeans } from 'aifn-methods/unsupervised/clustering'
 import { dataset } from 'aifn/learning/estimators'
 import { fromData, toFlat, toRows } from 'aifn/foundation/tensor'
-import type { Point } from '@/lib/math/cluster'
+import type { Vec2 as Point } from 'aifn/numerics/linalg'
 
-/** Lloyd's algorithm from k-means++ starts, backed by aifn-applied. */
+/** Lloyd's algorithm from k-means++ starts, backed by aifn-methods. */
 export function kmeans(points: Point[], k: number, seeds = 5): number[] {
   const flat = Float64Array.from(points.flat())
   const x = fromData(flat, [points.length, 2])
@@ -13,7 +13,7 @@ export function kmeans(points: Point[], k: number, seeds = 5): number[] {
 
 /**
  * Ng–Jordan–Weiss spectral clustering into two clusters with a Gaussian similarity of width sigma,
- * backed by aifn-applied.
+ * backed by aifn-methods.
  */
 export function spectralTwo(points: Point[], sigma: number) {
   const flat = Float64Array.from(points.flat())

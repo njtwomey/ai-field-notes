@@ -1,6 +1,6 @@
 import { expect, test } from 'vitest'
 import { runProgram } from 'aifn/interpreter'
-import { prelude } from 'aifn-applied/interpreter'
+import { prelude } from 'aifn-methods/interpreter'
 
 test('fitLinear recovers a line from a program', () => {
   const r = runProgram(

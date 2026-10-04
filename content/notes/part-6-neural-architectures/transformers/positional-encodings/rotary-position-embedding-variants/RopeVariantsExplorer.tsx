@@ -64,7 +64,7 @@ export function RopeVariantsExplorer() {
 
     // Focal pair single channel
     const ropeSingle = Float64Array.from(xs, (d) => Math.cos(d * thetaFocal))
-    const xposSingle = Float64Array.from(xs, (d) => (zetaFocal ** d) * Math.cos(d * thetaFocal))
+    const xposSingle = Float64Array.from(xs, (d) => zetaFocal ** d * Math.cos(d * thetaFocal))
     const envUpper = Float64Array.from(xs, (d) => zetaFocal ** d)
     const envLower = Float64Array.from(xs, (d) => -(zetaFocal ** d))
 
@@ -77,7 +77,7 @@ export function RopeVariantsExplorer() {
 
     const xposAgg = Float64Array.from(xs, (d) => {
       let sum = 0
-      for (let i = 0; i < numPairs; i++) sum += (zetas[i] ** d) * Math.cos(d * freqs[i])
+      for (let i = 0; i < numPairs; i++) sum += zetas[i] ** d * Math.cos(d * freqs[i])
       return sum / numPairs
     })
 
@@ -87,7 +87,8 @@ export function RopeVariantsExplorer() {
   // ── 2. 2D RoPE computations ─────────────────────────────────────────────────
   const numPairs2D = 32
   const freqs2D = useMemo(
-    () => Float64Array.from({ length: numPairs2D }, (_, i) => base2d ** ((-2 * (i % (numPairs2D / 2))) / (numPairs2D / 2))),
+    () =>
+      Float64Array.from({ length: numPairs2D }, (_, i) => base2d ** ((-2 * (i % (numPairs2D / 2))) / (numPairs2D / 2))),
     [base2d, numPairs2D],
   )
 
@@ -220,49 +221,14 @@ export function RopeVariantsExplorer() {
                 max={numPairs - 1}
                 step={1}
               />
-              <Slider
-                label="Decay constant γ"
-                value={gamma}
-                onChange={setGamma}
-                min={0.1}
-                max={1.5}
-                step={0.05}
-              />
-              <Slider
-                label="Base frequency b"
-                value={base}
-                onChange={setBase}
-                min={1000}
-                max={50000}
-                step={1000}
-              />
-              <Slider
-                label="Sequence horizon"
-                value={maxDist}
-                onChange={setMaxDist}
-                min={128}
-                max={1024}
-                step={64}
-              />
+              <Slider label="Decay constant γ" value={gamma} onChange={setGamma} min={0.1} max={1.5} step={0.05} />
+              <Slider label="Base frequency b" value={base} onChange={setBase} min={1000} max={50000} step={1000} />
+              <Slider label="Sequence horizon" value={maxDist} onChange={setMaxDist} min={128} max={1024} step={64} />
             </ControlRow>
           ) : (
             <ControlRow label="2D grid geometry">
-              <Slider
-                label="Patch radius"
-                value={gridSize}
-                onChange={setGridSize}
-                min={8}
-                max={25}
-                step={1}
-              />
-              <Slider
-                label="2D frequency base"
-                value={base2d}
-                onChange={setBase2d}
-                min={20}
-                max={500}
-                step={20}
-              />
+              <Slider label="Patch radius" value={gridSize} onChange={setGridSize} min={8} max={25} step={1} />
+              <Slider label="2D frequency base" value={base2d} onChange={setBase2d} min={20} max={500} step={20} />
             </ControlRow>
           )}
         </>
@@ -275,7 +241,10 @@ export function RopeVariantsExplorer() {
                   <Readout label="frequency θ_i" value={fmt(thetaFocal, 4)} />
                   <Readout label="wavelength λ" value={`${fmt((2 * Math.PI) / thetaFocal, 1)} tokens`} />
                   <Readout label="xPos scale ζ_i" value={fmt(zetaFocal, 4)} />
-                  <Readout label="half-life (50% decay)" value={`${fmt(Math.log(0.5) / Math.log(zetaFocal), 1)} tokens`} />
+                  <Readout
+                    label="half-life (50% decay)"
+                    value={`${fmt(Math.log(0.5) / Math.log(zetaFocal), 1)} tokens`}
+                  />
                 </>
               ),
               extrapolation: (
@@ -284,19 +253,22 @@ export function RopeVariantsExplorer() {
                     label="RoPE tail variance"
                     value={safePairIdx < numPairs / 3 ? 'high (undamped ripples)' : 'low (slow drift)'}
                   />
-                  <Readout
-                    label={`xPos envelope at d=${maxDist}`}
-                    value={fmt(zetaFocal ** maxDist, 5)}
-                  />
+                  <Readout label={`xPos envelope at d=${maxDist}`} value={fmt(zetaFocal ** maxDist, 5)} />
                 </>
               ),
             }
           : {
               'receptive field comparison': (
                 <>
-                  <Readout label="scheme" value={scheme2d === 'axial' ? 'Axial (separable)' : 'Mixed (omnidirectional)'} />
+                  <Readout
+                    label="scheme"
+                    value={scheme2d === 'axial' ? 'Axial (separable)' : 'Mixed (omnidirectional)'}
+                  />
                   <Readout label="on-axis response at r=5" value={fmt(crossSections.onAxis[Math.min(5, gridSize)])} />
-                  <Readout label="diagonal response at r=5" value={fmt(crossSections.diagonal[Math.min(5, gridSize)])} />
+                  <Readout
+                    label="diagonal response at r=5"
+                    value={fmt(crossSections.diagonal[Math.min(5, gridSize)])}
+                  />
                   <Readout
                     label="diagonal-to-axial ratio"
                     value={`${fmt(
@@ -355,12 +327,7 @@ export function RopeVariantsExplorer() {
           <Plot x={radDistAxis} y={radScoreAxis} title="directional cross-sections: on-axis vs diagonal">
             <Curve name="zero response" x={[0, gridSize]} y={[0, 0]} muted dashed thin />
             <Curve name="on-axis response (Δy = 0)" x={crossSections.rs} y={crossSections.onAxis} emphasis />
-            <Curve
-              name="diagonal response (Δx = Δy)"
-              x={crossSections.rs}
-              y={crossSections.diagonal}
-              dashed
-            />
+            <Curve name="diagonal response (Δx = Δy)" x={crossSections.rs} y={crossSections.diagonal} dashed />
           </Plot>
         </Plots>
       )}

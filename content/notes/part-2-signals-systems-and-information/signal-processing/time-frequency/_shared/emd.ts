@@ -6,8 +6,9 @@
  * stopping rule. `eemd`, `ceemdan` and `vmd` follow Wu & Huang (2009), PyEMD's CEEMDAN (the local-mean form of
  * Colominas et al. 2014) and Dragomiretskiy & Zosso (2014, vmdpy). Checked against PyEMD and vmdpy.
  */
-import { fftInPlace, isPowerOfTwo } from '@/lib/dsp'
-import { rng } from '@/lib/math'
+import { normal, stream } from 'aifn/foundation/random'
+import { fftParts } from './tf'
+import { isPowerOfTwo } from 'aifn/foundation/fourier'
 
 export type Extrema = {
   /** Indices of local maxima and minima. */
@@ -375,8 +376,8 @@ export function emd(x: ArrayLike<number>, { maxImfs = -1, rule = { kind: 'pyemd'
 
 /** White Gaussian noise realisations, one per trial, from a seeded generator. */
 export function whiteNoise(trials: number, n: number, seed: number): Float64Array[] {
-  const r = rng(seed)
-  return Array.from({ length: trials }, () => Float64Array.from({ length: n }, r.normal))
+  const g = stream(seed)
+  return Array.from({ length: trials }, () => Float64Array.from({ length: n }, () => normal(g)))
 }
 
 const std = (x: ArrayLike<number>) => {
@@ -513,7 +514,7 @@ export function vmd(x: ArrayLike<number>, opts: VmdOptions): VmdResult {
   for (let i = 0; i < half; i++) re[i] = x[half - 1 - i]
   for (let i = 0; i < N; i++) re[half + i] = x[i]
   for (let i = 0; i < half; i++) re[half + N + i] = x[N - 1 - i]
-  fftInPlace(re, im)
+  fftParts(re, im)
   // Work on the fftshifted spectrum: index j ↔ frequency j/T − 1/2. Keep the non-negative half only.
   const shift = (j: number) => (j + T / 2) % T
   const fr = new Float64Array(T)
@@ -598,7 +599,7 @@ export function vmd(x: ArrayLike<number>, opts: VmdOptions): VmdResult {
       tr[shift(j)] = hr[j]
       ti[shift(j)] = hi[j]
     }
-    fftInPlace(tr, ti, true)
+    fftParts(tr, ti, true)
     return Float64Array.from({ length: N }, (_, i) => tr[T / 4 + i] / T)
   })
   const pos = Float64Array.from({ length: T / 2 }, (_, j) => freqs[T / 2 + j])

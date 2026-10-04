@@ -35,7 +35,17 @@ import { softmaxCrossEntropy } from 'aifn/learning/losses'
 import { ndcg } from 'aifn/learning/metrics'
 import { sinusoidalPositions } from 'aifn/nn/attention'
 import { relu } from 'aifn/nn/functional'
-import { Conv1d, dropout, milPool, MilPooling, type Context, type ConvParams, type MilPooled, type MilPoolingKind, type MilPoolingParams } from 'aifn/nn/layers'
+import {
+  Conv1d,
+  dropout,
+  milPool,
+  MilPooling,
+  type Context,
+  type ConvParams,
+  type MilPooled,
+  type MilPoolingKind,
+  type MilPoolingParams,
+} from 'aifn/nn/layers'
 import { methodTraining, type TrainingMethod } from 'aifn/nn/training'
 import { softmax } from 'aifn/numerics/special'
 
@@ -85,7 +95,12 @@ export function milletModel(spec: MilletSpec): MilletModel {
   const d = widths[widths.length - 1]
   const convs = widths.map((w, l) => Conv1d(l === 0 ? 1 : widths[l - 1], w, kernels[l]))
   const pool = MilPooling(d, classes, pooling)
-  const pe = positional ? sinusoidalPositions(Array.from({ length: t }, (_, j) => j + 1), d) : null
+  const pe = positional
+    ? sinusoidalPositions(
+        Array.from({ length: t }, (_, j) => j + 1),
+        d,
+      )
+    : null
   return {
     spec,
     init: (s) => ({
@@ -103,7 +118,8 @@ export function milletModel(spec: MilletSpec): MilletModel {
       // [N, d, t] → [N, t, d]: one embedding per time point.
       let z: Value = transpose(h, [0, 2, 1])
       if (pe) z = add(z, pe)
-      if (rate > 0 && options.ctx?.train && options.ctx.stream) z = dropout(child(options.ctx.stream, 'dropout'), z, rate)
+      if (rate > 0 && options.ctx?.train && options.ctx.stream)
+        z = dropout(child(options.ctx.stream, 'dropout'), z, rate)
       return milPool(pooling, p.pool, z, options.mask)
     },
   }
@@ -177,7 +193,12 @@ function accuracyOf(logits: Tensor, y: ArrayLike<number>): number {
 }
 
 /** The interpretation of one series for one class: [t] scores (class-agnostic attention for `attention` pooling). */
-export function milletInterpretation(model: MilletModel, params: MilletParams, series: ArrayLike<number>, label: Size): Float64Array {
+export function milletInterpretation(
+  model: MilletModel,
+  params: MilletParams,
+  series: ArrayLike<number>,
+  label: Size,
+): Float64Array {
   const t = model.spec.length
   const out = model.forward(params, fromData(Float64Array.from(series), [1, t]))
   const v = toFlat(out.interpretation as Tensor)
@@ -187,10 +208,17 @@ export function milletInterpretation(model: MilletModel, params: MilletParams, s
 }
 
 /** Logits [c] of one series with some time points dropped from the bag (`kept[j] = 1` keeps j). */
-export function milletLogits(model: MilletModel, params: MilletParams, series: ArrayLike<number>, kept?: Uint8Array): Float64Array {
+export function milletLogits(
+  model: MilletModel,
+  params: MilletParams,
+  series: ArrayLike<number>,
+  kept?: Uint8Array,
+): Float64Array {
   const t = model.spec.length
   const mask = kept ? fromData(Float64Array.from(kept), [1, t]) : undefined
-  return Float64Array.from(toFlat(model.forward(params, fromData(Float64Array.from(series), [1, t]), { mask }).logits as Tensor))
+  return Float64Array.from(
+    toFlat(model.forward(params, fromData(Float64Array.from(series), [1, t]), { mask }).logits as Tensor),
+  )
 }
 
 /**
@@ -278,7 +306,12 @@ export function* milletRun(options: MilletRunOptions): Generator<MilletSnapshot,
     method,
   )
   let state = alg.init({ params: model.init(child(root, 'init')) as MilletParams & Params }, child(root, 'train'))
-  const history = { step: [] as number[], loss: [] as number[], trainAccuracy: [] as number[], testAccuracy: [] as number[] }
+  const history = {
+    step: [] as number[],
+    loss: [] as number[],
+    trainAccuracy: [] as number[],
+    testAccuracy: [] as number[],
+  }
   const checkpoints: MilletCheckpoint[] = []
   const record = (k: Size) => {
     const lt = model.forward(state.params, train.x).logits as Tensor
@@ -293,7 +326,12 @@ export function* milletRun(options: MilletRunOptions): Generator<MilletSnapshot,
     steps,
     done,
     spec: model.spec,
-    history: { step: [...history.step], loss: [...history.loss], trainAccuracy: [...history.trainAccuracy], testAccuracy: [...history.testAccuracy] },
+    history: {
+      step: [...history.step],
+      loss: [...history.loss],
+      trainAccuracy: [...history.trainAccuracy],
+      testAccuracy: [...history.testAccuracy],
+    },
     checkpoints: [...checkpoints],
     ...(scores ? { scores } : {}),
   })
@@ -314,5 +352,9 @@ export function* milletRun(options: MilletRunOptions): Generator<MilletSnapshot,
 }
 
 /** The softmax probabilities [c] of one series, for readouts. */
-export const milletProbabilities = (model: MilletModel, params: MilletParams, series: ArrayLike<number>): Float64Array =>
+export const milletProbabilities = (
+  model: MilletModel,
+  params: MilletParams,
+  series: ArrayLike<number>,
+): Float64Array =>
   Float64Array.from(toFlat(softmax(fromData(milletLogits(model, params, series), [model.spec.classes])) as Tensor))

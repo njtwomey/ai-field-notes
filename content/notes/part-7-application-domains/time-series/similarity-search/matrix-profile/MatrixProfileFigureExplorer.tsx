@@ -2,15 +2,8 @@ import { useMemo, useState } from 'react'
 import { stream } from 'aifn/foundation/random'
 import { toFlat } from 'aifn/foundation/tensor'
 import { trace } from 'aifn/foundation/trace'
-import {
-  discords,
-  distanceProfile,
-  matrixProfile,
-  motifs,
-  scrimpProfile,
-  scrimpSteps,
-} from 'aifn/signal/similarity'
-import { motifSeries } from 'aifn-applied/data/synthetic'
+import { discords, distanceProfile, matrixProfile, motifs, scrimpProfile, scrimpSteps } from 'aifn/signal/similarity'
+import { motifSeries } from 'aifn-methods/data/synthetic'
 import {
   Figure,
   ControlGroup,
@@ -43,12 +36,10 @@ export function MatrixProfileFigureExplorer() {
 
   const run = useMemo(
     () =>
-      trace(
-        scrimpSteps(series.y, m, { diagonalsPerStep: 12, prescrimp: true }),
-        undefined,
-        100000,
-        { keep: 'all', stream: stream('content/scrimp') },
-      ),
+      trace(scrimpSteps(series.y, m, { diagonalsPerStep: 12, prescrimp: true }), undefined, 100000, {
+        keep: 'all',
+        stream: stream('content/scrimp'),
+      }),
     [series, m],
   )
 
@@ -114,28 +105,14 @@ export function MatrixProfileFigureExplorer() {
             step={5}
             suggestions={[30, 90, 200, 400]}
           />
-          <Player
-            label="SCRIMP++ diagonals"
-            value={at}
-            onChange={setStep}
-            count={run.steps.length}
-          />
+          <Player label="SCRIMP++ diagonals" value={at} onChange={setStep} count={run.steps.length} />
         </ControlGroup>
       }
       readouts={
         <>
-          <Readout
-            label="Top motif pair"
-            value={top ? `[${top.a}, ${top.b}] (dist: ${fmt(top.distance)})` : '—'}
-          />
-          <Readout
-            label="Top discord"
-            value={odd ? `[${odd.at}] (dist: ${fmt(odd.distance)})` : '—'}
-          />
-          <Readout
-            label="SCRIMP++ progress"
-            value={`${Math.round((100 * at) / (run.steps.length - 1))}%`}
-          />
+          <Readout label="Top motif pair" value={top ? `[${top.a}, ${top.b}] (dist: ${fmt(top.distance)})` : '—'} />
+          <Readout label="Top discord" value={odd ? `[${odd.at}] (dist: ${fmt(odd.distance)})` : '—'} />
+          <Readout label="SCRIMP++ progress" value={`${Math.round((100 * at) / (run.steps.length - 1))}%`} />
         </>
       }
       caption="Top: synthetic time series with planted motifs (highlighted in color) and anomaly discord, plus dashed movable probe subsequence. Middle: exact STOMP matrix profile (dashed) against anytime SCRIMP++ profile. Bottom: MASS distance profile showing distances from the probe window across all time offsets."

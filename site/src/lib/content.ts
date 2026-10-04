@@ -1,6 +1,14 @@
 import type { ComponentType } from 'react'
 import { contentErrors, glossary, groups, notes, references, stats, taxonomy } from 'virtual:content'
-import type { CategoryNode, GlossaryEntry, GlossaryKind, NoteKind, NoteMeta, Reference, TopicGroup } from '@/lib/content-schema'
+import type {
+  CategoryNode,
+  GlossaryEntry,
+  GlossaryKind,
+  NoteKind,
+  NoteMeta,
+  Reference,
+  TopicGroup,
+} from '@/lib/content-schema'
 
 export { contentErrors, glossary, groups, notes, references, stats, taxonomy }
 export type { CategoryNode, GlossaryEntry, GlossaryKind, NoteKind, NoteMeta, Reference, TopicGroup }
@@ -151,11 +159,7 @@ export function topicOf(note: NoteMeta): CategoryNode {
 export function groupById(idOrNum: string | number): TopicGroup | undefined {
   const str = String(idOrNum).toLowerCase()
   return groups.find(
-    (g, idx) =>
-      g.id === str ||
-      String(g.num) === str ||
-      `part-${idx + 1}` === str ||
-      g.title.toLowerCase() === str,
+    (g, idx) => g.id === str || String(g.num) === str || `part-${idx + 1}` === str || g.title.toLowerCase() === str,
   )
 }
 

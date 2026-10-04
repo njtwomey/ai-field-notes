@@ -1,5 +1,5 @@
 /**
- * `aifn-applied/gym`: sequential decisions on one protocol (docs/aifn-gym.md): environments (`./environments`: bandits,
+ * `aifn-methods/gym`: sequential decisions on one protocol (docs/aifn-gym.md): environments (`./environments`: bandits,
  * finite MDPs, classic control) and agents (`./agents`: bandit policies, tabular learners, planners) meet in the loops
  * of `rollout.ts` (`rollout`, `episodes`, `compare`); `train.ts` trains headlessly (`train`, `training`) and replays
  * or evaluates any training episode (`replay`, `evaluateEpisode`). `mdp.ts` holds the finite-MDP tables both sides

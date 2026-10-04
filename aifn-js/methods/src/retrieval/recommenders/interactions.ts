@@ -1,5 +1,5 @@
 /**
- * Interaction data and evaluation for the recommenders of `aifn-applied/retrieval/recommenders`: user–item
+ * Interaction data and evaluation for the recommenders of `aifn-methods/retrieval/recommenders`: user–item
  * interactions as index arrays, the dense user × item matrix they imply, top-k lists that skip items already seen,
  * and the held-out evaluation (recall@k, NDCG@k, hit rate, catalogue coverage) through `aifn/learning/metrics`.
  */

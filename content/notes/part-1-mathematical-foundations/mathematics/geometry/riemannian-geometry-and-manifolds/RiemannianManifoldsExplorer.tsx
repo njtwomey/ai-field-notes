@@ -35,7 +35,11 @@ export function RiemannianManifoldsExplorer() {
   // e_east (along longitude), e_north (along latitude)
   const basis = useMemo(() => {
     const east = [-Math.sin(longitude), Math.cos(longitude), 0]
-    const north = [-Math.sin(latitude) * Math.cos(longitude), -Math.sin(latitude) * Math.sin(longitude), Math.cos(latitude)]
+    const north = [
+      -Math.sin(latitude) * Math.cos(longitude),
+      -Math.sin(latitude) * Math.sin(longitude),
+      Math.cos(latitude),
+    ]
     return { east, north }
   }, [latitude, longitude])
 
@@ -68,11 +72,7 @@ export function RiemannianManifoldsExplorer() {
       }
     }
 
-    const unitV = [
-      tangentV.v3D[0] / s,
-      tangentV.v3D[1] / s,
-      tangentV.v3D[2] / s,
-    ]
+    const unitV = [tangentV.v3D[0] / s, tangentV.v3D[1] / s, tangentV.v3D[2] / s]
 
     const path: [number, number, number][] = []
     for (let i = 0; i <= steps; i++) {
@@ -136,20 +136,15 @@ export function RiemannianManifoldsExplorer() {
   // Geodesic distance vs Euclidean cord distance
   const geodesicDist = velocitySpeed
   const euclidCordDist = Math.sqrt(
-    (geodesic.expP[0] - p3D[0]) ** 2 +
-      (geodesic.expP[1] - p3D[1]) ** 2 +
-      (geodesic.expP[2] - p3D[2]) ** 2,
+    (geodesic.expP[0] - p3D[0]) ** 2 + (geodesic.expP[1] - p3D[1]) ** 2 + (geodesic.expP[2] - p3D[2]) ** 2,
   )
 
   const euclidTangentDist = Math.sqrt(
-    (geodesic.euclidP[0] - p3D[0]) ** 2 +
-      (geodesic.euclidP[1] - p3D[1]) ** 2 +
-      (geodesic.euclidP[2] - p3D[2]) ** 2,
+    (geodesic.euclidP[0] - p3D[0]) ** 2 + (geodesic.euclidP[1] - p3D[1]) ** 2 + (geodesic.euclidP[2] - p3D[2]) ** 2,
   )
 
-  const euclidConstraintViolation = Math.sqrt(
-    geodesic.euclidP[0] ** 2 + geodesic.euclidP[1] ** 2 + geodesic.euclidP[2] ** 2,
-  ) - 1.0
+  const euclidConstraintViolation =
+    Math.sqrt(geodesic.euclidP[0] ** 2 + geodesic.euclidP[1] ** 2 + geodesic.euclidP[2] ** 2) - 1.0
 
   const retractionError = Math.sqrt(
     (geodesic.retractP[0] - geodesic.expP[0]) ** 2 +
@@ -222,23 +217,14 @@ export function RiemannianManifoldsExplorer() {
           <>
             <Readout label="intrinsic geodesic distance d_M(p, exp(v))" value={`${fmt(geodesicDist, 3)} rad`} />
             <Readout label="Euclidean chord length in R³" value={fmt(euclidCordDist, 3)} />
-            <Readout
-              label="chord-to-arc contraction"
-              value={`${fmt((1 - euclidCordDist / geodesicDist) * 100, 1)}%`}
-            />
+            <Readout label="chord-to-arc contraction" value={`${fmt((1 - euclidCordDist / geodesicDist) * 100, 1)}%`} />
           </>
         ),
         'approximation errors': (
           <>
             <Readout label="Euclidean tangent step norm" value={fmt(euclidTangentDist, 3)} />
-            <Readout
-              label="Euclidean constraint violation (||p+v|| − 1)"
-              value={fmt(euclidConstraintViolation, 4)}
-            />
-            <Readout
-              label="retraction approximation error ||R_p(v) − exp_p(v)||"
-              value={fmt(retractionError, 4)}
-            />
+            <Readout label="Euclidean constraint violation (||p+v|| − 1)" value={fmt(euclidConstraintViolation, 4)} />
+            <Readout label="retraction approximation error ||R_p(v) − exp_p(v)||" value={fmt(retractionError, 4)} />
           </>
         ),
       }}
@@ -291,12 +277,7 @@ export function RiemannianManifoldsExplorer() {
           <Curve name="v_north axis" x={[0, 0]} y={[-2.5, 2.5]} muted dashed thin />
           <Curve name="injectivity radius r = π" x={tangentCircle.xs} y={tangentCircle.ys} muted dashed thin />
           {/* Tangent vector arrow */}
-          <Curve
-            name="tangent vector v"
-            x={[0, tangentV.vEast]}
-            y={[0, tangentV.vNorth]}
-            emphasis
-          />
+          <Curve name="tangent vector v" x={[0, tangentV.vEast]} y={[0, tangentV.vNorth]} emphasis />
           <Handle
             kind="point"
             at={[tangentV.vEast, tangentV.vNorth]}

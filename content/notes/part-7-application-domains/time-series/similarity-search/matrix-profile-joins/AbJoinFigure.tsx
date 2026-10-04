@@ -1,5 +1,17 @@
 import { useMemo } from 'react'
-import { Interactive, ParamSlider, Readout, XYChart, formatNumber, useParam, type XYSeries } from 'aifn-render'
+import {
+  Curve,
+  Figure,
+  formatNumber,
+  int,
+  Plot,
+  Points,
+  Readout,
+  seriesLayers,
+  type SeriesSpec,
+  useAxis,
+  useFigureState,
+} from 'aifn-render'
 import { abJoin } from '../_shared/matrix-profile'
 import { sharedAndNovel } from '../_shared/synthetic'
 
@@ -10,13 +22,15 @@ const N = 400
  * part of B with no counterpart anywhere in A.
  */
 export function AbJoinFigure() {
-  const m = useParam(40, { min: 16, max: 64, step: 4 })
-  const seed = useParam(1, { min: 1, max: 20, step: 1 })
+  const state = useFigureState({
+    m: int(40, { min: 16, max: 64, step: 4, label: 'subsequence length m', format: (v) => String(v) }),
+    seed: int(1, { min: 1, max: 20, step: 1, label: 'seed', format: (v) => String(v) }),
+  })
 
   const r = useMemo(() => {
-    const s = sharedAndNovel(N, seed.value)
-    const ab = abJoin(s.a, s.b, m.value)
-    const ba = abJoin(s.b, s.a, m.value)
+    const s = sharedAndNovel(N, state.seed)
+    const ab = abJoin(s.a, s.b, state.m)
+    const ba = abJoin(s.b, s.a, state.m)
     let shared = 0
     ab.profile.forEach((v, i) => {
       if (v < ab.profile[shared]) shared = i
@@ -36,57 +50,57 @@ export function AbJoinFigure() {
       match: ab.index[shared],
       novelFound: novel,
     }
-  }, [m.value, seed.value])
+  }, [state.m, state.seed])
 
   const t = r.a.map((_, i) => i)
-  const span = (s: number) => Array.from({ length: m.value }, (_, k) => s + k)
-  const piece = (name: string, x: number[], s: number, slot: number): XYSeries => ({
+  const span = (s: number) => Array.from({ length: state.m }, (_, k) => s + k)
+  const piece = (name: string, x: number[], s: number, slot: number): SeriesSpec => ({
     name,
     type: 'line',
     x: span(s),
     y: span(s).map((i) => x[i]),
     slot,
   })
-  const seriesA: XYSeries[] = [
+  const seriesA: SeriesSpec[] = [
     { name: 'A', type: 'line', x: t, y: r.a, muted: true },
     piece('shared pattern', r.a, r.shared, 1),
   ]
-  const seriesB: XYSeries[] = [
+  const seriesB: SeriesSpec[] = [
     { name: 'B', type: 'line', x: t, y: r.b, muted: true },
     piece('shared pattern', r.b, r.match, 1),
     piece('novel in B', r.b, r.novelFound, 2),
   ]
   const idx = Array.from(r.ab.profile, (_, i) => i)
-  const profiles: XYSeries[] = [
+  const profiles = [
     {
       name: 'P_AB: each A subsequence to its nearest in B',
-      type: 'line',
       x: idx,
       y: Array.from(r.ab.profile),
       slot: 0,
     },
     {
       name: 'P_BA: each B subsequence to its nearest in A',
-      type: 'line',
       x: idx,
       y: Array.from(r.ba.profile),
       slot: 3,
     },
-    { name: 'shared (min of P_AB)', type: 'scatter', x: [r.shared], y: [r.ab.profile[r.shared]], slot: 1 },
-    { name: 'novel (max of P_BA)', type: 'scatter', x: [r.novelFound], y: [r.ba.profile[r.novelFound]], slot: 2 },
-  ]
+    { name: 'shared (min of P_AB)', x: [r.shared], y: [r.ab.profile[r.shared]], slot: 1 },
+    { name: 'novel (max of P_BA)', x: [r.novelFound], y: [r.ba.profile[r.novelFound]], slot: 2 },
+  ] as const
 
+  const xAxis = useAxis({ label: 'time', hold: 'union' })
+  const yAxis = useAxis({ label: 'A', hold: 'union' })
+  const xAxis2 = useAxis({ label: 'time', hold: 'union' })
+  const yAxis2 = useAxis({ label: 'B', hold: 'union' })
+  const xAxis3 = useAxis({ label: 'subsequence start', hold: 'union' })
+  const yAxis3 = useAxis({ label: 'distance', range: [0, undefined], hold: 'union' })
   return (
-    <Interactive
+    <Figure
       title="Joining two series"
+      state={state}
       caption="Two series of smooth noise. Both contain the same bump-and-dip pattern at different places; only B also contains a sawtooth. Bottom: the two AB-join profiles. P_AB gives, for each length-m subsequence of A, the z-normalised distance to its nearest subsequence of B; P_BA is the reverse. The minimum of P_AB is the pattern the two series share, and its index points to the copy in B. The maximum of P_BA is the subsequence of B least like anything in A: the novel sawtooth. The two joins are not symmetric: P_AB never sees the sawtooth, because no subsequence of A needs it as a neighbour."
-      controls={
-        <>
-          <ParamSlider label="subsequence length m" param={m} format={(v) => String(v)} withArrows />
-          <ParamSlider label="seed" param={seed} format={(v) => String(v)} withArrows />
-        </>
-      }
-      readout={
+
+      readouts={
         <>
           <Readout label="shared pattern planted at" value={`A ${r.planted.a}, B ${r.planted.b}`} />
           <Readout label="min of P_AB at" value={`A ${r.shared} → B ${r.match}`} />
@@ -97,10 +111,19 @@ export function AbJoinFigure() {
       }
     >
       <div className="space-y-4">
-        <XYChart series={seriesA} xLabel="time" yLabel="A" height={150} />
-        <XYChart series={seriesB} xLabel="time" yLabel="B" height={150} />
-        <XYChart series={profiles} xLabel="subsequence start" yLabel="distance" height={200} yRange={[0, undefined]} />
+        <Plot x={xAxis} y={yAxis} height={150}>
+          {seriesLayers(seriesA)}
+        </Plot>
+        <Plot x={xAxis2} y={yAxis2} height={150}>
+          {seriesLayers(seriesB)}
+        </Plot>
+        <Plot x={xAxis3} y={yAxis3} height={200}>
+          <Curve {...profiles[0]} />
+          <Curve {...profiles[1]} />
+          <Points {...profiles[2]} />
+          <Points {...profiles[3]} />
+        </Plot>
       </div>
-    </Interactive>
+    </Figure>
   )
 }

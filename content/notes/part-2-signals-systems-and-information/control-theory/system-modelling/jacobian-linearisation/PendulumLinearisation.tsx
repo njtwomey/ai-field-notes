@@ -1,5 +1,16 @@
 import { useMemo } from 'react'
-import { Interactive, ParamSlider, Readout, XYChart, formatNumber, useParam, type XYSeries } from 'aifn-render'
+import {
+  Figure,
+  formatNumber,
+  Handle,
+  Plot,
+  Readout,
+  seriesLayers,
+  type SeriesSpec,
+  slider,
+  useAxis,
+  useFigureState,
+} from 'aifn-render'
 import { rk4 } from '../../_shared/control'
 
 const G_OVER_L = 9.81
@@ -21,36 +32,37 @@ function simulate(theta0: number, linear: boolean) {
 }
 
 export function PendulumLinearisation() {
-  const theta0 = useParam(30, { min: 2, max: 175, step: 1 })
+  const state = useFigureState({
+    theta0: slider(2, 175, 30, { step: 1, label: 'initial angle θ₀ (degrees)', format: (v) => `${v}°` }),
+  })
 
   const { series, maxError } = useMemo(() => {
-    const rad = (theta0.value * Math.PI) / 180
+    const rad = (state.theta0 * Math.PI) / 180
     const nl = simulate(rad, false)
     const lin = simulate(rad, true)
     const deg = (v: number[]) => v.map((r) => (r * 180) / Math.PI)
-    const s: XYSeries[] = [
+    const s: SeriesSpec[] = [
       { name: 'nonlinear pendulum', type: 'line', x: nl.t, y: deg(nl.y), slot: 0 },
       { name: 'linearisation', type: 'line', x: lin.t, y: deg(lin.y), slot: 1, dashed: true },
     ]
     const err = Math.max(...nl.y.map((v, i) => Math.abs(v - lin.y[i])))
     return { series: s, maxError: (err * 180) / Math.PI }
-  }, [theta0.value])
+  }, [state.theta0])
 
+  const xAxis = useAxis({ label: 'time t (s)', range: [0, T_END] })
+  const yAxis = useAxis({ label: 'angle θ (degrees)', range: [-180, 180] })
   return (
-    <Interactive
+    <Figure
       title="Where the linear pendulum stops being accurate"
+      state={state}
       caption="The damped pendulum released from rest at angle θ₀, simulated with the full sin θ (solid) and with its linearisation about the hanging equilibrium, sin θ ≈ θ (dashed). Drag the starting point on the vertical axis or use the slider. Below about 20° the curves are indistinguishable. At larger angles the true pendulum swings more slowly than the linear model predicts, so the two drift out of phase; the linear period 2π/3.12 ≈ 2.0 s does not depend on amplitude, the true one does."
-      controls={<ParamSlider label="initial angle θ₀ (degrees)" param={theta0} format={(v) => `${v}°`} />}
-      readout={<Readout label="largest gap over 8 s" value={`${formatNumber(maxError)}°`} />}
+
+      readouts={<Readout label="largest gap over 8 s" value={`${formatNumber(maxError)}°`} />}
     >
-      <XYChart
-        series={series}
-        xLabel="time t (s)"
-        yLabel="angle θ (degrees)"
-        xRange={[0, T_END]}
-        yRange={[-180, 180]}
-        handles={[{ kind: 'point', at: [0, theta0.value], onDrag: ([, y]) => theta0.set(y), label: 'θ₀' }]}
-      />
-    </Interactive>
+      <Plot x={xAxis} y={yAxis}>
+        {seriesLayers(series)}
+        <Handle kind="point" at={[0, state.theta0]} onDrag={([, y]) => state.set('theta0', y)} label="θ₀" />
+      </Plot>
+    </Figure>
   )
 }

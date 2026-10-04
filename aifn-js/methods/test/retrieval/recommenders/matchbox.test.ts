@@ -7,7 +7,7 @@ import {
   matchboxRun,
   matchboxUpdate,
   type MatchboxRun,
-} from 'aifn-applied/retrieval/recommenders'
+} from 'aifn-methods/retrieval/recommenders'
 
 const last = <T>(g: Generator<T, T>): T => {
   let r = g.next()

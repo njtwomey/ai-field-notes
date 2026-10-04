@@ -4,7 +4,7 @@ import {
   adaBoostSteps,
   gradientBoosting,
   gradientBoostingSteps,
-} from 'aifn-applied/learning/trees-and-ensembles/boosting'
+} from 'aifn-methods/learning/trees-and-ensembles/boosting'
 import { tensor, toFlat } from 'aifn/foundation/tensor'
 import { dataset } from 'aifn/learning/estimators'
 import { expectProtocol } from '../../../protocol'

@@ -1,7 +1,7 @@
 # aifn (aifn-js/core)
 
 The core of the AI Field Notes library: tested, traceable, tensor-native numerics and the protocols the applications
-implement. What belongs here, and what belongs in `aifn-applied`, is set by `../README.md`; the plan is
+implement. What belongs here, and what belongs in `aifn-methods`, is set by `../README.md`; the plan is
 `docs/aifn-plan.md`. This file is the contract every core module follows; applications follow it too.
 
 ## Layout
@@ -37,7 +37,7 @@ implement. What belongs here, and what belongs in `aifn-applied`, is set by `../
 
 ## Layers
 
-A module may import (values or types) only from modules in strictly lower tiers, and never from `aifn-applied`. The
+A module may import (values or types) only from modules in strictly lower tiers, and never from `aifn-methods`. The
 tiers are listed in `../modules.json`; the table is in `../README.md`, generated from it, and
 `node scripts/aifn-layers.ts` (run by `make lint` and `make test`, and so by `make check`) fails on any import that
 goes up or across a tier, on a relative import into another module's folder, and on a module missing from the file.
@@ -292,7 +292,7 @@ reason. Code written now should follow them; existing code is brought into line 
   `importanceEffectiveSampleSize` in `aifn/probability/stats`.
 - Protocol types: `LogDensity` (an unnormalised log-density; the old name `Target` is gone) and the other protocols in
   `aifn/foundation/contracts`.
-- Optimisation test surfaces (`rosenbrock`, `himmelblau`, …) are data, in `aifn-applied/data/objectives`.
+- Optimisation test surfaces (`rosenbrock`, `himmelblau`, …) are data, in `aifn-methods/data/objectives`.
 
 A module that needs one of these imports it; it does not keep a private copy.
 
@@ -314,8 +314,8 @@ A module that needs one of these imports it; it does not keep a private copy.
 ## The lab
 
 `make lab` starts the lab (http://localhost:5190/). Each module adds specimens in
-`aifn-js/lab/src/specimens/<family>/<module>.tsx` (figures in `_<module>/`; applications under `specimens/applied/`),
-and generic views of aifn objects live in `aifn-js/lab/src/views/`, registered by `kind` and drawn by `Show`. A
+`aifn-js/sandbox/lab/src/specimens/<family>/<module>.tsx` (figures in `_<module>/`; applications under `specimens/applied/`),
+and generic views of aifn objects live in `aifn-js/sandbox/lab/src/views/`, registered by `kind` and drawn by `Show`. A
 specimen's page is `/<family>/<module>/<specimen-slug>` and a figure on it is `#<figure-id>` (the slug of its title),
 e.g. `/foundation/tensor/broadcasting`; `/ui-kit` shows every control and chart. `make lab-check` renders every page
-and checks paths and figure ids are unique; `make lab-shots` screenshots pages (`aifn-js/lab/README.md`).
+and checks paths and figure ids are unique; `make lab-shots` screenshots pages (`aifn-js/sandbox/lab/README.md`).

@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { digitGlyphs } from 'aifn-applied/data/synthetic'
+import { digitGlyphs } from 'aifn-methods/data/synthetic'
 import {
   capacityCurve,
   corruptPattern,
@@ -8,7 +8,7 @@ import {
   modernHopfieldEnergy,
   modernHopfieldUpdate,
   overlaps,
-} from 'aifn-applied/generative/boltzmann'
+} from 'aifn-methods/generative/boltzmann'
 import { child, stream } from 'aifn/foundation/random'
 import { fromData, toFlat } from 'aifn/foundation/tensor'
 import {
@@ -81,15 +81,7 @@ export function HopfieldComparisonExplorer() {
   )
 
   const pictures = useMemo(
-    () =>
-      tiles(
-        Float64Array.from([...recall.cue, ...state0, ...recall.modern.state]),
-        3,
-        7,
-        5,
-        3,
-        (v) => (v + 1) / 2,
-      ),
+    () => tiles(Float64Array.from([...recall.cue, ...state0, ...recall.modern.state]), 3, 7, 5, 3, (v) => (v + 1) / 2),
     [recall, state0],
   )
 
@@ -153,10 +145,7 @@ export function HopfieldComparisonExplorer() {
       }
       readouts={
         <>
-          <Readout
-            label="Classical energy"
-            value={fmt(recall.classical.energies[currentSweep])}
-          />
+          <Readout label="Classical energy" value={fmt(recall.classical.energies[currentSweep])} />
           <Readout label="Classical overlap" value={fmt(ov[cueDigit] ?? NaN)} />
           <Readout label="Classical converged" value={recall.classical.converged ? 'yes' : 'no'} />
           <Readout label="Modern attention weight" value={fmt(recall.modern.weights[cueDigit] ?? NaN)} />

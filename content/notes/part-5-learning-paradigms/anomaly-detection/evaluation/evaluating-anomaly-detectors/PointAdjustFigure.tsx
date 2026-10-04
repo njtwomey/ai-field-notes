@@ -1,12 +1,24 @@
 import { useMemo } from 'react'
-import { Interactive, ParamSlider, Readout, XYChart, formatNumber, useParam, type XYSeries } from 'aifn-render'
-import { linspace } from '@/lib/math'
-import { binomialPmf } from '@/lib/math/tests'
+import {
+  Curve,
+  Figure,
+  float,
+  formatNumber,
+  Handle,
+  int,
+  Plot,
+  Readout,
+  slider,
+  useAxis,
+  useFigureState,
+} from 'aifn-render'
+import { Binomial } from 'aifn/probability/distributions'
+import { linspace, toFlat } from 'aifn/foundation/tensor'
 
 /** Series length and number of labelled anomalous segments. */
 const N = 10000
 const SEGMENTS = 5
-const RATES = linspace(0.0005, 0.2, 400)
+const RATES = toFlat(linspace(0.0005, 0.2, 400))
 
 const f1 = (precision: number, recall: number) =>
   precision + recall > 0 ? (2 * precision * recall) / (precision + recall) : 0
@@ -22,7 +34,8 @@ function expectedScores(L: number, p: number, K: number) {
   const need = Math.max(1, Math.ceil((K / 100) * L))
   // E[TP per segment] = Σ_d P(D = d)·(L if d ≥ need else d), with D ~ Binom(L, p) flagged points.
   let tpK = 0
-  for (let d = 0; d <= L; d++) tpK += binomialPmf(d, L, p) * (d >= need ? L : d)
+  const flagged = Binomial(L, p)
+  for (let d = 0; d <= L; d++) tpK += flagged.prob(d) * (d >= need ? L : d)
   const detected = 1 - Math.pow(1 - p, L)
   const tpPa = L * detected
   const point = f1(positives / N, p)
@@ -32,50 +45,61 @@ function expectedScores(L: number, p: number, K: number) {
 }
 
 export function PointAdjustFigure() {
-  const L = useParam(100, { min: 1, max: 400, step: 1 })
-  const p = useParam(0.05, { min: 0.0005, max: 0.2, step: 0.0005 })
-  const K = useParam(20, { min: 0, max: 100, step: 5 })
+  const state = useFigureState({
+    L: int(100, {
+      min: 1,
+      max: 400,
+      step: 1,
+      suggestions: [10, 50, 100, 400],
+      label: 'segment length L',
+      format: (v) => String(v),
+    }),
+    p: float(0.05, {
+      gt: 0,
+      max: 0.2,
+      scale: 'log10',
+      suggestions: [0.001, 0.01, 0.05, 0.1],
+      label: 'flag rate p',
+      format: (v) => v.toFixed(4),
+    }),
+    K: slider(0, 100, 20, { step: 5, label: 'PA%K threshold K (%)', format: (v) => String(v) }),
+  })
 
-  const curves = useMemo(() => RATES.map((r) => expectedScores(L.value, r, K.value)), [L.value, K.value])
+  const curves = useMemo(() => RATES.map((r) => expectedScores(state.L, r, state.K)), [state.L, state.K])
   const series = useMemo(
-    (): XYSeries[] => [
-      { name: 'point-wise F1', type: 'line', x: RATES, y: curves.map((c) => c.point), slot: 0 },
-      { name: 'point-adjusted F1', type: 'line', x: RATES, y: curves.map((c) => c.pa), slot: 1 },
-      { name: `PA%K F1 (K = ${K.value}%)`, type: 'line', x: RATES, y: curves.map((c) => c.paK), slot: 2 },
-    ],
-    [curves, K.value],
+    () =>
+      [
+        { name: 'point-wise F1', x: RATES, y: curves.map((c) => c.point), slot: 0 },
+        { name: 'point-adjusted F1', x: RATES, y: curves.map((c) => c.pa), slot: 1 },
+        { name: `PA%K F1 (K = ${state.K}%)`, x: RATES, y: curves.map((c) => c.paK), slot: 2 },
+      ] as const,
+    [curves, state.K],
   )
-  const at = expectedScores(L.value, p.value, K.value)
+  const at = expectedScores(state.L, state.p, state.K)
 
+  const xAxis = useAxis({ label: 'flag rate p', range: [0, 0.2] })
+  const yAxis = useAxis({ label: 'expected F1', range: [0, 1] })
   return (
-    <Interactive
+    <Figure
       title="A random detector under point adjustment"
+      state={state}
       caption={`A series of ${N.toLocaleString()} points holds ${SEGMENTS} anomalous segments of L points each. The "detector" ignores the data and flags each point independently with probability p. The curves are its F1, computed from expected counts, as p varies. Point-wise, a random detector scores little. Point adjustment credits a whole segment once any point in it is flagged, so long segments hand the random detector a high F1. PA%K credits the segment only when at least K% of it is flagged. Drag the vertical line to set p.`}
-      controls={
+
+      readouts={
         <>
-          <ParamSlider label="segment length L" param={L} format={(v) => String(v)} />
-          <ParamSlider label="flag rate p" param={p} format={(v) => v.toFixed(4)} />
-          <ParamSlider label="PA%K threshold K (%)" param={K} format={(v) => String(v)} />
-        </>
-      }
-      readout={
-        <>
-          <Readout label="anomalous share" value={formatNumber((SEGMENTS * L.value) / N)} />
+          <Readout label="anomalous share" value={formatNumber((SEGMENTS * state.L) / N)} />
           <Readout label="point-wise F1" value={formatNumber(at.point)} />
           <Readout label="point-adjusted F1" value={formatNumber(at.pa)} />
           <Readout label="PA%K F1" value={formatNumber(at.paK)} />
         </>
       }
     >
-      <XYChart
-        series={series}
-        xLabel="flag rate p"
-        yLabel="expected F1"
-        xRange={[0, 0.2]}
-        yRange={[0, 1]}
-        handles={[{ kind: 'x', at: p.value, label: 'p', onDrag: p.set }]}
-        height={320}
-      />
-    </Interactive>
+      <Plot x={xAxis} y={yAxis} height={320}>
+        <Curve {...series[0]} />
+        <Curve {...series[1]} />
+        <Curve {...series[2]} />
+        <Handle {...state.handle('p', { label: 'p' })} />
+      </Plot>
+    </Figure>
   )
 }

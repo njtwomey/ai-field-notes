@@ -1,4 +1,4 @@
-/** The functions of `aifn-applied/gym/agents/control`. */
+/** The functions of `aifn-methods/gym/agents/control`. */
 
 import { definer, entries, type Entry, type FunctionInfo } from 'aifn/foundation/registry'
 import * as swingUp from './swing-up'

@@ -1,5 +1,5 @@
 import { useMemo } from 'react'
-import { Heatmap, Interactive, ParamSlider, Readout, XYChart, useParam, type XYSeries } from 'aifn-render'
+import { Figure, int, Plot, Raster, Readout, seriesLayers, type SeriesSpec, useAxis, useFigureState } from 'aifn-render'
 import { selfJoin } from '../_shared/matrix-profile'
 import { twoScales } from '../_shared/synthetic'
 
@@ -12,10 +12,12 @@ const CAP = 0.5
  * z-normalised distance) so rows of different lengths share one scale. Dark cells are good motifs at that length.
  */
 export function PanMatrixProfileFigure() {
-  const seed = useParam(3, { min: 1, max: 20, step: 1 })
+  const state = useFigureState({
+    seed: int(3, { min: 1, max: 20, step: 1, label: 'seed', format: (v) => String(v) }),
+  })
 
   const r = useMemo(() => {
-    const { x, short, long } = twoScales(N, seed.value)
+    const { x, short, long } = twoScales(N, state.seed)
     const z: number[][] = []
     const best: number[] = []
     for (const m of LENGTHS) {
@@ -27,10 +29,10 @@ export function PanMatrixProfileFigure() {
       best.push(b)
     }
     return { x, short, long, z, best }
-  }, [seed.value])
+  }, [state.seed])
 
   const t = r.x.map((_, i) => i)
-  const planted = (name: string, starts: number[], length: number, slot: number): XYSeries[] =>
+  const planted = (name: string, starts: number[], length: number, slot: number): SeriesSpec[] =>
     starts.map((s) => ({
       name,
       type: 'line',
@@ -38,22 +40,28 @@ export function PanMatrixProfileFigure() {
       y: Array.from({ length }, (_, k) => r.x[s + k]),
       slot,
     }))
-  const top: XYSeries[] = [
+  const top: SeriesSpec[] = [
     { name: 'series', type: 'line', x: t, y: r.x, muted: true },
     ...planted('short pattern (length 20)', r.short, 20, 1),
     ...planted('long pattern (length 72)', r.long, 72, 2),
   ]
   const overlay = useMemo(
-    () => [{ name: 'best motif at each length', type: 'scatter' as const, x: r.best, y: LENGTHS, emphasis: true }],
+    () =>
+      [{ name: 'best motif at each length', type: 'scatter' as const, x: r.best, y: LENGTHS, emphasis: true }] as const,
     [r.best],
   )
 
+  const xAxis = useAxis({ label: 'time', hold: 'union' })
+  const yAxis = useAxis({ label: 'x', hold: 'union' })
+  const xAxis2 = useAxis({ label: 'subsequence start i' })
+  const yAxis2 = useAxis({ label: 'length m' })
   return (
-    <Interactive
+    <Figure
       title="Motifs at every length"
+      state={state}
       caption="Top: smooth noise with a short sawtooth planted twice (length 20) and a long wave planted twice (length 72). Bottom: the pan matrix profile. Row m is the matrix profile for subsequence length m, divided by 2√m so that every row lies between 0 and 1 (values above 0.5 are drawn at 0.5, as are positions too late to start a subsequence of that length). Dark cells are subsequences with a close match at that length. Diamonds mark the top motif of each row. The sawtooth is darkest at short lengths; the long wave darkens only as m approaches its own length. A single fixed m would show only one of the two."
-      controls={<ParamSlider label="seed" param={seed} format={(v) => String(v)} withArrows />}
-      readout={
+
+      readouts={
         <>
           <Readout label="short pattern at" value={r.short.join(', ')} />
           <Readout label="long pattern at" value={r.long.join(', ')} />
@@ -63,19 +71,14 @@ export function PanMatrixProfileFigure() {
       }
     >
       <div className="space-y-4">
-        <XYChart series={top} xLabel="time" yLabel="x" height={180} />
-        <Heatmap
-          x={t}
-          y={LENGTHS}
-          z={r.z}
-          range={[0, CAP]}
-          overlay={overlay}
-          xLabel="subsequence start i"
-          yLabel="length m"
-          valueLabel="P / 2√m"
-          height={320}
-        />
+        <Plot x={xAxis} y={yAxis} height={180}>
+          {seriesLayers(top)}
+        </Plot>
+        <Plot x={xAxis2} y={yAxis2} height={320}>
+          <Raster x={t} y={LENGTHS} z={r.z} range={[0, CAP]} valueLabel={'P / 2√m'} />
+          {seriesLayers(overlay, { live: true })}
+        </Plot>
       </div>
-    </Interactive>
+    </Figure>
   )
 }

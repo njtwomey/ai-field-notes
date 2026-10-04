@@ -1,4 +1,4 @@
-/** The registry of `aifn-applied/generative/boltzmann`. */
+/** The registry of `aifn-methods/generative/boltzmann`. */
 
 import { definer, entries, type Entry, type FunctionInfo } from 'aifn/foundation/registry'
 import * as dbn from './dbn'

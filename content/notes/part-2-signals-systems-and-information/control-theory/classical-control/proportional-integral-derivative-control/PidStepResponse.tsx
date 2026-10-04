@@ -1,14 +1,17 @@
-import { useMemo, useState } from 'react'
+import { useMemo } from 'react'
 import {
-  Interactive,
-  ParamButton,
-  ParamSlider,
-  ParamSwitch,
-  Readout,
-  XYChart,
+  Button,
+  Curve,
+  Figure,
   formatNumber,
-  useParam,
-  type XYSeries,
+  Plot,
+  Readout,
+  seriesLayers,
+  type SeriesSpec,
+  setting,
+  slider,
+  useAxis,
+  useFigureState,
 } from 'aifn-render'
 import { rk4 } from '../../_shared/control'
 
@@ -78,44 +81,48 @@ const TU = (2 * Math.PI) / Math.sqrt(3)
 const ZN = { kp: 4.8, ki: 4.8 / (TU / 2), kd: 4.8 * (TU / 8) }
 
 export function PidStepResponse() {
-  const kp = useParam(1, { min: 0, max: 10, step: 0.05 })
-  const ki = useParam(0, { min: 0, max: 5, step: 0.05 })
-  const kd = useParam(0, { min: 0, max: 4, step: 0.05 })
-  const [limit, setLimit] = useState(false)
-  const [antiWindup, setAntiWindup] = useState(false)
+  const state = useFigureState({
+    kp: slider(0, 10, 1, { step: 0.05, label: 'proportional gain Kp' }),
+    ki: slider(0, 5, 0, { step: 0.05, label: 'integral gain Ki' }),
+    kd: slider(0, 4, 0, { step: 0.05, label: 'derivative gain Kd' }),
+    limit: setting(false, `actuator limit |u| ≤ ${U_MAX}`),
+    antiWindup: setting(false, 'anti-windup'),
+  })
+  const { kp, ki, kd, limit, antiWindup } = state
 
-  const result = useMemo(
-    () => simulate(kp.value, ki.value, kd.value, limit, antiWindup),
-    [kp.value, ki.value, kd.value, limit, antiWindup],
-  )
+  const result = useMemo(() => simulate(kp, ki, kd, limit, antiWindup), [kp, ki, kd, limit, antiWindup])
   const m = metrics(result)
-  const series: XYSeries[] = [
-    { name: 'reference r', type: 'line', x: [0, T_END], y: [1, 1], muted: true },
-    { name: 'output y', type: 'line', x: result.t, y: result.y, slot: 0 },
-  ]
-  const control: XYSeries[] = [{ name: 'control u', type: 'line', x: result.t, y: result.u, slot: 1 }]
+  const series = [
+    { name: 'reference r', x: [0, T_END], y: [1, 1], muted: true },
+    { name: 'output y', x: result.t, y: result.y, slot: 0 },
+  ] as const
+  const control: SeriesSpec[] = [{ name: 'control u', type: 'line', x: result.t, y: result.u, slot: 1 }]
   const setAll = (p: number, i: number, d: number) => {
-    kp.set(p)
-    ki.set(i)
-    kd.set(d)
+    state.set('kp', p)
+    state.set('ki', i)
+    state.set('kd', d)
   }
 
+  const xAxis = useAxis({ label: 'time t', range: [0, T_END] })
+  const yAxis = useAxis({ label: 'output y', range: [-0.5, 2.5] })
+  const xAxis2 = useAxis({ label: 'time t', range: [0, T_END] })
+  const yAxis2 = useAxis({ label: 'control u', hold: 'union' })
   return (
-    <Interactive
+    <Figure
       title="PID control of a third-order lag"
+      state={state}
       caption={`Unit step response of the plant 1/(s+1)³ under PID control, with a load disturbance of ${DIST} added to the plant input at t = ${T_DIST}. With P only the output settles short of the reference, with error 1/(1+Kp). Integral gain drives that error to zero, faster for larger Ki, and does the same for the disturbance, at the cost of more overshoot. Derivative gain adds damping. The Ziegler–Nichols settings (Kp = 4.8, Ki = 2.65, Kd = 2.18) respond fast but overshoot by about half. With the actuator limited to |u| ≤ ${U_MAX}, the integrator keeps accumulating while the input is saturated and the overshoot grows (windup); anti-windup stops the integration while saturated.`}
       controls={
         <>
-          <ParamSlider label="proportional gain Kp" param={kp} />
-          <ParamSlider label="integral gain Ki" param={ki} />
-          <ParamSlider label="derivative gain Kd" param={kd} />
-          <ParamSwitch label={`actuator limit |u| ≤ ${U_MAX}`} checked={limit} onChange={setLimit} />
-          <ParamSwitch label="anti-windup" checked={antiWindup} onChange={setAntiWindup} />
-          <ParamButton onClick={() => setAll(4, 0, 0)}>P only</ParamButton>
-          <ParamButton onClick={() => setAll(ZN.kp, ZN.ki, ZN.kd)}>Ziegler–Nichols</ParamButton>
+          <Button variant="outline" size="sm" onClick={() => setAll(4, 0, 0)}>
+            P only
+          </Button>
+          <Button variant="outline" size="sm" onClick={() => setAll(ZN.kp, ZN.ki, ZN.kd)}>
+            Ziegler–Nichols
+          </Button>
         </>
       }
-      readout={
+      readouts={
         m && m.settled ? (
           <>
             <Readout label="overshoot of final value" value={`${formatNumber(m.overshoot)} %`} />
@@ -132,16 +139,14 @@ export function PidStepResponse() {
       }
     >
       <div className="space-y-2">
-        <XYChart
-          series={series}
-          xLabel="time t"
-          yLabel="output y"
-          xRange={[0, T_END]}
-          yRange={[-0.5, 2.5]}
-          height={260}
-        />
-        <XYChart series={control} xLabel="time t" yLabel="control u" xRange={[0, T_END]} height={170} />
+        <Plot x={xAxis} y={yAxis} height={260}>
+          <Curve {...series[0]} />
+          <Curve {...series[1]} />
+        </Plot>
+        <Plot x={xAxis2} y={yAxis2} height={170}>
+          {seriesLayers(control)}
+        </Plot>
       </div>
-    </Interactive>
+    </Figure>
   )
 }

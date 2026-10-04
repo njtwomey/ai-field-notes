@@ -1,6 +1,4 @@
-import { Interactive } from 'aifn-render'
-import { Diagram } from 'aifn-render'
-import { op } from 'aifn-render'
+import { Diagram, Figure, op } from 'aifn-render'
 import type { DiagramSpec } from 'aifn-render'
 
 const spec: DiagramSpec = {
@@ -51,7 +49,7 @@ const spec: DiagramSpec = {
 /** The critic turns each transition into a TD error, which both trains the critic and scores the actor's action. */
 export function ActorCriticDiagram() {
   return (
-    <Interactive
+    <Figure
       title="One-step actor-critic"
       caption="The actor chooses the action. The critic values states, and after each transition forms the TD error δ = R + γV(S′) − V(S). The same δ updates the critic (dashed) and serves as the actor's advantage estimate: actions followed by a positive δ become more likely."
     >
@@ -59,6 +57,6 @@ export function ActorCriticDiagram() {
         spec={spec}
         ariaLabel="Actor-critic: the actor sends action A_t to the environment; the next state and reward go to actor and critic; the critic's TD error updates the critic and the actor"
       />
-    </Interactive>
+    </Figure>
   )
 }

@@ -1,5 +1,5 @@
 /**
- * `aifn-applied/evaluation/text`: text metrics.
+ * `aifn-methods/evaluation/text`: text metrics.
  */
 
 export {

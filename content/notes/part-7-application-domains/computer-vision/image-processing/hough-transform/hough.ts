@@ -2,8 +2,8 @@
  * The Hough transform for lines on small synthetic images. Coordinates are pixels with the origin at the image centre
  * and y pointing up, so a line is x cos θ + y sin θ = ρ with θ in [0°, 180°) and |ρ| at most the half-diagonal.
  */
-import { rng } from '@/lib/math'
 import { gradients, type Image } from '../_shared/image'
+import { normal, stream, uniform } from 'aifn/foundation/random'
 
 export const N = 128
 const HALF = (N - 1) / 2
@@ -61,8 +61,8 @@ function shade(scene: Exclude<Scene, 'points'>, x: number, y: number): number {
 
 /** The scene's image with seeded Gaussian pixel noise; row r holds y = r - 63.5, so row 0 is the bottom. */
 export function sceneImage(scene: Exclude<Scene, 'points'>, noise: number, seed: number): Image {
-  const g = rng(seed)
-  return AXIS.map((y) => AXIS.map((x) => shade(scene, x, y) + noise * g.normal()))
+  const g = stream(seed)
+  return AXIS.map((y) => AXIS.map((x) => shade(scene, x, y) + noise * normal(g)))
 }
 
 /**
@@ -96,29 +96,29 @@ export function edgePoints(img: Image, threshold: number): EdgePoint[] {
 
 /** Three noisy line segments and uniform clutter, seeded. `noise` is the perpendicular scatter in pixels. */
 export function pointCloud(noise: number, clutter: number, seed: number): EdgePoint[] {
-  const g = rng(seed)
+  const g = stream(seed)
   const out: EdgePoint[] = []
   const thetas: number[] = []
   while (thetas.length < 3) {
-    const t = 180 * g.uniform()
+    const t = 180 * uniform(g)
     // Keep the three directions at least 25° apart (mod 180°), so the lines are distinct.
     if (thetas.every((s) => Math.min(Math.abs(t - s), 180 - Math.abs(t - s)) > 25)) thetas.push(t)
   }
   for (const t of thetas) {
-    const rho = -35 + 70 * g.uniform()
+    const rho = -35 + 70 * uniform(g)
     // |ρ| ≤ 35 always meets the square of half-width 58, so the chord exists.
     const [a, b] = clipLine(t, rho, 58)!
     const n = [Math.cos(t * DEG), Math.sin(t * DEG)]
     // A sub-segment covering 50–75% of the chord, with 40 points spread along it.
-    const lo = 0.25 * g.uniform()
-    const hi = lo + 0.5 + 0.25 * g.uniform()
+    const lo = 0.25 * uniform(g)
+    const hi = lo + 0.5 + 0.25 * uniform(g)
     for (let i = 0; i < 40; i++) {
-      const s = lo + (hi - lo) * g.uniform()
-      const e = noise * g.normal()
+      const s = lo + (hi - lo) * uniform(g)
+      const e = noise * normal(g)
       out.push({ x: a[0] + s * (b[0] - a[0]) + e * n[0], y: a[1] + s * (b[1] - a[1]) + e * n[1] })
     }
   }
-  for (let i = 0; i < clutter; i++) out.push({ x: (g.uniform() - 0.5) * (N - 1), y: (g.uniform() - 0.5) * (N - 1) })
+  for (let i = 0; i < clutter; i++) out.push({ x: (uniform(g) - 0.5) * (N - 1), y: (uniform(g) - 0.5) * (N - 1) })
   return out.filter((p) => Math.abs(p.x) <= HALF && Math.abs(p.y) <= HALF)
 }
 

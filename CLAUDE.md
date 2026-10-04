@@ -210,9 +210,13 @@ stale.
   (`bg-muted`, `text-muted-foreground`, …), never raw hex, except data colours from the palette.
 - `EChart.tsx` is the only file that touches ECharts. Register new ECharts chart types or components once in
   `viz/echarts.ts` (tree-shaken build). All chart styling defaults live in `viz/theme.ts`.
-- Build figures from the existing primitives: `XYChart`, `Heatmap`, `Interactive` (the standard frame: title,
-  controls, figure, readout, caption), `ParamSlider`, `ParamChoice`, `ParamSwitch`, `ParamButton`, `Readout`. Add a new
-  primitive to `viz/` and export it from `viz/index.ts` rather than styling ECharts inside a note.
+- Build figures with the v2 API from `aifn-render`: `Figure` (title, controls, readouts, caption), one
+  `useFigureState` per figure (`slider`, `int`, `float`, `choice`, `setting`, `toggle` fields: control rows, URL state,
+  reset), `Plot` with `useAxis` models and layers (`Curve`, `Points`, `Bars`, `Area`, `Raster`, `Contours`, `Density`,
+  `Mass`, `Histogram`, `Segments`, `Vectors`, `Annotation`, …), `Plots` for shared axes, `Player` for walk-throughs and
+  `Readout`. Maths comes from `aifn` (`aifn/...`), never site-local code. The legacy `XYChart`, `Heatmap`,
+  `Interactive`, `Param*` and the site maths (`@/lib/math`, `@/lib/dsp`, `@/lib/distributions`) are removed;
+  `make doctor` fails on any import of them (`aifn-js/render/MIGRATING-NOTES.md` maps old to new).
 - Data colours follow `design/palette.json`:
   - Categorical slots are assigned in fixed order by entity, never by rank, never cycled. Pass `slot` explicitly when
     series can be toggled, so that colours do not shift.
@@ -220,28 +224,24 @@ stale.
     series get shapes automatically.
   - Sequential scales use one hue, light to dark. Signed values use `scale="diverging"`, which has a neutral midpoint.
   - Highlighted marks such as centroids use `emphasis` (ink colour), not a palette slot.
-- Interactive performance:
-  - `ParamSlider` debounces `onChange` (default 60 ms, `debounceMs` to change). The thumb moves immediately and the
-    final value always commits on release. Do not add debouncing in widgets.
-  - Chart components memoise their ECharts option. Memo dependencies must be values, not inline arrays or objects
-    (`range={[0, 3]}` is a new array each render), or every render redraws the whole chart.
-  - Put small, fast-changing parts of a chart (a marker, a cursor) in `EChart`'s `patch` prop, keyed by series `id`,
-    so they update without redrawing the rest. `Heatmap`'s `marker` works this way.
+- Interactive performance: sliders and handles share one scheduler (`useComputed`), so do not debounce in widgets.
+  Keep layer data memoised: a layer redraws when its props change by identity. Pass `live` to fast-changing overlays
+  (a marker, a cursor) so they patch without moving the axes.
 - Direct manipulation: when a parameter has an obvious place on a chart (a mean, a threshold, a start point, a
   centroid, a vector tip, a rank on a spectrum), bind it to a draggable handle as well as its slider. Do this by
   default, without being asked. The handle must be the thing itself, not a proxy: dragging a distribution's mean line
   to reshape the whole curve feels wrong, so distribution parameters stay on sliders.
-  - Pass `handles` (see `site/src/components/viz/handles.ts`: `point`, `x` or `y`) to `XYChart`, `Heatmap` or
-    `EChart`. Each handle's `onDrag` writes the same state the slider reads; `useParam` clamps and snaps it to the
-    slider's range, and `ParamSlider param={…}` binds the slider.
+  - Put `<Handle {...state.handle('k', { label })} />` in the `Plot` (`axis: 'y'` for a horizontal guide,
+    `['kx', 'ky']` for a point). It writes the same field the control row reads; a field moved only by its handle is
+    `slider(…, { onChart: true })`.
   - There are no update loops: charts emit only on pointer events, never when their props change. Axes freeze during a
     drag, so a range that depends on the dragged value cannot rescale under the pointer; they refit on release.
   - With one handle, pressing anywhere on the plot moves it. With several, the nearest within `GRAB_RADIUS` wins.
-    Prefer handles to `onPlotClick`/`onCellClick`, and say in the caption what can be dragged.
-- A slider that walks through a sequence (iterations, updates, sweeps, rounds, steps, frames) gets `withArrows`, so
-  the reader can step one at a time.
-- In-browser computation must stay light enough for slider drags. Seeded randomness uses `rng(seed)` from
-  `site/src/lib/math`, never `Math.random`. Anything heavier becomes a Python `@figure` builder.
+    Prefer handles to `onPlotClick`, and say in the caption what can be dragged.
+- A walk-through (iterations, updates, sweeps, steps, frames) computes its trace up front and scrubs it with one
+  `Player` per figure, opening at step 0. Sliders step by default.
+- In-browser computation must stay light enough for slider drags. Seeded randomness uses `stream(seed)` from
+  `aifn/foundation/random`, never `Math.random`. Anything heavier becomes a Python `@figure` builder.
 - Tailwind generates only the classes it finds. `site/src/index.css` has `@source '../../content'` so that classes used
   in note widgets exist. Any new directory holding TSX outside `site/` needs its own `@source`.
 - **Diagrams are not charts.** Architecture diagrams, flow charts and graphical models use `Diagram`
@@ -254,8 +254,8 @@ stale.
   value such as a probability. Reusable pieces (`op`, `gate`, `projector` encoder/decoder trapezoids, `reparam`, and
   `variable`, `factor`, `link` for graphical models) live in `components.ts`; add a component there rather than
   repeating a pattern. Specs used by several notes live in `diagram/specs/`. `/lab/diagrams` is the test bench.
-- `XYChart equalAspect` gives equal pixel length per unit on both axes, for any ranges. Use it whenever a shape or
-  angle matters: an ellipse, a normal vector against a boundary. Arrows are drawn with the `vectors` prop.
+- `useAxis({ equal: x })` on y gives equal pixel length per unit on both axes, for any ranges. Use it whenever a shape
+  or angle matters: an ellipse, a normal vector against a boundary. Arrows are drawn with `Vectors`.
 - Reusable static images go in `content/assets/` and are placed with `<Asset name="…" />`. Never copy an image into
   several notes.
 

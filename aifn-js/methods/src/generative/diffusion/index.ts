@@ -1,5 +1,5 @@
 /**
- * `aifn-applied/generative/diffusion`: diffusion models on toy data (plan §8.2).
+ * `aifn-methods/generative/diffusion`: diffusion models on toy data (plan §8.2).
  *
  * - Schedules: `linearSchedule` (Ho et al.), `cosineSchedule` (Nichol & Dhariwal), `scheduleFromBetas`, each with
  *   β, α, ᾱ and SNR per step; `alphaBarAt`, `betaAt`. Continuous forward SDEs with their marginals: `vpSde`,

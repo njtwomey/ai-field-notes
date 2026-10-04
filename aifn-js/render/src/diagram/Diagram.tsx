@@ -12,6 +12,7 @@ import { chrome, seriesColor, useTheme, type Mode } from '@render/design'
 import { FrameContext, useElementSize } from '@render/viz'
 import { parseEnd } from './ends'
 import { layeredLayout } from './layout'
+import { nodeSize } from './size'
 import { MathText } from './MathText'
 import type {
   DiagramEdge,
@@ -28,20 +29,6 @@ import type {
 type Pt = { x: number; y: number }
 type Box = { x0: number; y0: number; x1: number; y1: number }
 
-const DEFAULT_SIZE: Record<NonNullable<PlacedNode['shape']>, [number, number]> = {
-  box: [2.4, 0.8],
-  pill: [2.4, 0.8],
-  circle: [0.9, 0.9],
-  latent: [0.9, 0.9],
-  noise: [0.9, 0.9],
-  op: [0.5, 0.5],
-  factor: [0.26, 0.26],
-  encoder: [1.6, 2],
-  decoder: [1.6, 2],
-  stack: [2.4, 0.8],
-  dot: [0.14, 0.14],
-  text: [1.8, 0.6],
-}
 const ROUND = new Set(['circle', 'latent', 'noise', 'op', 'dot'])
 const ACCENT_SLOT = 0
 /** Ratio of the narrow to the wide side of an encoder or decoder trapezoid. */
@@ -56,10 +43,7 @@ const TRANSITION =
   'fill 180ms ease, stroke 180ms ease, stroke-width 180ms ease, opacity 180ms ease, fill-opacity 180ms ease'
 const TEXT_TRANSITION = 'color 180ms ease, opacity 180ms ease'
 
-function size(n: PlacedNode): [number, number] {
-  const [w, h] = DEFAULT_SIZE[n.shape ?? 'box']
-  return [n.w ?? w, n.h ?? h]
-}
+const size = (n: PlacedNode): [number, number] => nodeSize(n)
 
 function extent(n: PlacedNode): Box {
   const [w, h] = size(n)
@@ -288,21 +272,26 @@ type Fit = { key: string; size: [number, number] }
 
 /** Lay out if asked, apply `spread` to every position and grow nodes to the measured label sizes. */
 function prepare(source: DiagramSpec, fit: Record<string, Fit>): Omit<DiagramSpec, 'nodes'> & { nodes: PlacedNode[] } {
-  const spec = source.layout === 'layered' ? layeredLayout(source) : source
+  const fitted = (n: DiagramNode): [number, number] => {
+    const [w, h] = nodeSize(n)
+    // A size measured for a different label or shape under the same id (a new tree reusing node ids) is stale.
+    const cached = fit[n.id]
+    const f = cached && cached.key === fitKey(n) ? cached.size : undefined
+    const round = ROUND.has(n.shape ?? 'box')
+    // Circles grow evenly; trapezoids need extra width because their narrow end is only TAPER of the height.
+    const [fw, fh] = f ? (round ? [Math.max(f[0], f[1]), Math.max(f[0], f[1])] : f) : [0, 0]
+    return [Math.max(w, fw), Math.max(h, fh)]
+  }
+  // The layered layout spaces nodes by their fitted sizes, so labels that grow a node push its neighbours apart.
+  const spec = source.layout === 'layered' ? layeredLayout(source, fitted) : source
   const [sx, sy] = Array.isArray(spec.spread) ? spec.spread : [spec.spread ?? 1, spec.spread ?? 1]
   return {
     ...spec,
     nodes: spec.nodes.map((n) => {
       if (n.x === undefined || n.y === undefined)
         throw new Error(`diagram node ${n.id}: no position (give x and y, or use layout: 'layered')`)
-      const [w, h] = size(n as PlacedNode)
-      // A size measured for a different label or shape under the same id (a new tree reusing node ids) is stale.
-      const cached = fit[n.id]
-      const f = cached && cached.key === fitKey(n) ? cached.size : undefined
-      const round = ROUND.has(n.shape ?? 'box')
-      // Circles grow evenly; trapezoids need extra width because their narrow end is only TAPER of the height.
-      const [fw, fh] = f ? (round ? [Math.max(f[0], f[1]), Math.max(f[0], f[1])] : f) : [0, 0]
-      return { ...n, x: n.x * sx, y: n.y * sy, w: Math.max(w, fw), h: Math.max(h, fh) }
+      const [w, h] = fitted(n)
+      return { ...n, x: n.x * sx, y: n.y * sy, w, h }
     }),
     edges: spec.edges?.map((e) => ({ ...e, via: e.via?.map(([x, y]) => [x * sx, y * sy] as [number, number]) })),
     groups: spec.groups?.map((g) =>

@@ -22,6 +22,7 @@ export {
   type CurveProps,
   type PointsProps,
   type RugProps,
+  type Segment,
   type SegmentsProps,
   type SignedAreaProps,
   type VectorsProps,
@@ -37,4 +38,6 @@ export {
   type SupportBandProps,
 } from './layers/distributions'
 export { Contours, Raster, type ContoursProps, type RasterProps } from './layers/raster'
+export { Pixels, Shapes, type FilledShape, type PixelsProps, type ShapesProps } from './layers/shapes'
+export { seriesLayers, type SeriesSpec } from './series'
 export { Probe, type ProbeProps } from './layers/probe'

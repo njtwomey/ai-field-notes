@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { Heatmap, Interactive, ParamSlider, Readout, formatNumber } from 'aifn-render'
+import { Figure, formatNumber, int, Player, Plot, Raster, Readout, useAxis, useFigureState } from 'aifn-render'
 
 /**
  * Ring all-reduce on N workers, each holding N chunks. Cell (chunk c, worker i) counts how many workers' gradients have
@@ -23,35 +23,34 @@ function simulate(n: number, steps: number): number[][] {
 }
 
 export function RingAllReduce() {
-  const [n, setN] = useState(4)
-  const [step, setStep] = useState(0)
+  const state = useFigureState({ n: int(4, { min: 2, max: 8, label: 'workers N' }) })
+  const n = state.n
+  // The walk-through restarts at step 0 when N changes: the position remembers the N it belongs to.
+  const [pos, setPos] = useState({ n, step: 0 })
   const total = 2 * (n - 1)
-  const s = Math.min(step, total)
+  const s = pos.n === n ? Math.min(pos.step, total) : 0
   const z = useMemo(() => simulate(n, s), [n, s])
   const axis = useMemo(() => Array.from({ length: n }, (_, i) => i + 1), [n])
   const phase = s === 0 ? 'start' : s <= n - 1 ? 'reduce-scatter' : 'all-gather'
 
+  const xAxis = useAxis({ label: 'chunk', key: n, hold: 'initial' })
+  const yAxis = useAxis({ label: 'worker', key: n, hold: 'initial' })
   return (
-    <Interactive
+    <Figure
       title="Ring all-reduce, one step at a time"
+      purpose="Step through ring all-reduce and see each worker's chunks summed in reduce-scatter and copied in all-gather."
       caption="Each worker's gradient is split into N chunks. In every step, each worker sends one chunk to its right-hand neighbour. During reduce-scatter the neighbour adds the chunk to its own copy; after N − 1 steps each worker holds one chunk summed over all N workers. During all-gather the finished chunks travel round the ring and are copied. Colour counts the workers summed into each copy."
+      state={state}
       controls={
-        <>
-          <ParamSlider
-            label="workers N"
-            value={n}
-            onChange={(v) => {
-              setN(v)
-              setStep(0)
-            }}
-            min={2}
-            max={8}
-            step={1}
-          />
-          <ParamSlider label="step" value={s} onChange={setStep} min={0} max={total} step={1} withArrows />
-        </>
+        <Player
+          value={s}
+          onChange={(step) => setPos({ n, step })}
+          count={total + 1}
+          label="step"
+          format={(k) => `step ${k} of ${total}`}
+        />
       }
-      readout={
+      readouts={
         <>
           <Readout label="phase" value={phase} />
           <Readout label="data sent per worker" value={`${s} × S/N = ${formatNumber(s / n)} S`} />
@@ -59,17 +58,9 @@ export function RingAllReduce() {
         </>
       }
     >
-      <Heatmap
-        x={axis}
-        y={axis}
-        z={z}
-        xLabel="chunk"
-        yLabel="worker"
-        scale="sequential"
-        range={[1, n]}
-        valueLabel="workers summed"
-        height={280}
-      />
-    </Interactive>
+      <Plot x={xAxis} y={yAxis} height={280}>
+        <Raster x={axis} y={axis} z={z} scale={'sequential'} range={[1, n]} valueLabel={'workers summed'} />
+      </Plot>
+    </Figure>
   )
 }

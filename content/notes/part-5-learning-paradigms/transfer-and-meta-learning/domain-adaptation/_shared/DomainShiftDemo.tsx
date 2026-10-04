@@ -1,6 +1,8 @@
-import { useMemo, useState } from 'react'
-import { Interactive, ParamSlider, Readout, XYChart, formatNumber, useParam, type XYSeries } from 'aifn-render'
-import { linspace, rng, sigmoid } from '@/lib/math'
+import { useMemo } from 'react'
+import { Curve, Figure, float, formatNumber, Handle, Plot, Points, Readout, useAxis, useFigureState } from 'aifn-render'
+import { linspace, toFlat } from 'aifn/foundation/tensor'
+import { normal, stream, uniform } from 'aifn/foundation/random'
+import { sigmoid } from 'aifn/numerics/special'
 
 // Covariate shift in two dimensions. The labelling rule p(y = 1 | x) is the same in both domains and has a curved
 // boundary, so a linear classifier is misspecified and its best line depends on where the inputs fall.
@@ -12,16 +14,16 @@ const SRC_SD = 0.9
 const TGT_SD = 0.6
 const boundary = (x1: number) => 0.35 * x1 * x1 - 0.6
 const pTrue = (x1: number, x2: number) => sigmoid(5 * (x2 - boundary(x1)))
-const GRID = linspace(-4, 4, 81)
+const GRID = toFlat(linspace(-4, 4, 81))
 
 const DATA = (() => {
-  const r = rng(3)
-  const pair = () => [r.normal(), r.normal()] as [number, number]
+  const r = stream(3)
+  const pair = () => [normal(r), normal(r)] as [number, number]
   const src = Array.from({ length: N_SRC }, () => {
     const [a, b] = pair()
     return [SRC_MEAN[0] + SRC_SD * a, SRC_MEAN[1] + SRC_SD * b] as [number, number]
   })
-  const y = src.map(([a, b]) => (r.uniform() < pTrue(a, b) ? 1 : 0))
+  const y = src.map(([a, b]) => (uniform(r) < pTrue(a, b) ? 1 : 0))
   // Standard normal draws for the target; the target mean moves them, so dragging never reshuffles the sample.
   const tgt = Array.from({ length: N_TGT }, pair)
   const test = Array.from({ length: N_TEST }, pair)
@@ -94,13 +96,15 @@ const line = (theta: number[]) => GRID.map((x1) => -(theta[0] + theta[1] * x1) /
  * importance weights from a domain classifier, and the domain classifier's estimate of the divergence.
  */
 export function DomainShiftDemo({ initial = [1, 0.3] }: { initial?: [number, number] }) {
-  const mx = useParam(initial[0], { min: -3, max: 3, step: 0.05 })
-  const my = useParam(initial[1], { min: -2, max: 2, step: 0.05 })
-  const [lambda, setLambda] = useState(1)
+  const state = useFigureState({
+    mx: float(initial[0], { min: -3, max: 3, step: 0.05, label: 'target mean, x₁' }),
+    my: float(initial[1], { min: -2, max: 2, step: 0.05, label: 'target mean, x₂' }),
+    lambda: float(1, { min: 0, max: 1, step: 0.05, label: 'weight exponent λ' }),
+  })
 
   const result = useMemo(() => {
-    const tgt = DATA.tgt.map(([a, b]) => [mx.value + TGT_SD * a, my.value + TGT_SD * b] as [number, number])
-    const test = DATA.test.map(([a, b]) => [mx.value + TGT_SD * a, my.value + TGT_SD * b] as [number, number])
+    const tgt = DATA.tgt.map(([a, b]) => [state.mx + TGT_SD * a, state.my + TGT_SD * b] as [number, number])
+    const test = DATA.test.map(([a, b]) => [state.mx + TGT_SD * a, state.my + TGT_SD * b] as [number, number])
 
     // Domain classifier on half of each sample (0 = source, 1 = target), error on the other half.
     const half = N_SRC / 2
@@ -112,7 +116,7 @@ export function DomainShiftDemo({ initial = [1, 0.3] }: { initial?: [number, num
     const domainError = heldX.filter((x, i) => (dot(eta, quadratic(x)) > 0 ? 1 : 0) !== heldY[i]).length / heldX.length
 
     // With equal sample sizes, p_t(x) / p_s(x) = P(target | x) / P(source | x) = exp(logit), flattened by λ.
-    const raw = DATA.src.map((x) => Math.exp(lambda * dot(eta, quadratic(x))))
+    const raw = DATA.src.map((x) => Math.exp(state.lambda * dot(eta, quadratic(x))))
     const meanW = raw.reduce((a, b) => a + b, 0) / raw.length
     const w = raw.map((v) => v / meanW)
     const ess = w.reduce((a, b) => a + b, 0) ** 2 / w.reduce((a, b) => a + b * b, 0)
@@ -121,20 +125,19 @@ export function DomainShiftDemo({ initial = [1, 0.3] }: { initial?: [number, num
     const plain = logistic(F, DATA.y, new Array(N_SRC).fill(1), 1e-3)
     const weighted = logistic(F, DATA.y, w, 1e-3)
 
-    const series: XYSeries[] = [
+    const series = [
       {
         name: 'source',
-        type: 'scatter',
         x: DATA.src.map((p) => p[0]),
         y: DATA.src.map((p) => p[1]),
         group: DATA.y,
         groupNames: ['source, y = 0', 'source, y = 1'],
       },
-      { name: 'target (unlabelled)', type: 'scatter', x: tgt.map((p) => p[0]), y: tgt.map((p) => p[1]), muted: true },
-      { name: 'true boundary', type: 'line', x: GRID, y: GRID.map(boundary), emphasis: true },
-      { name: 'trained on source', type: 'line', x: GRID, y: line(plain), slot: 2 },
-      { name: 'importance-weighted', type: 'line', x: GRID, y: line(weighted), slot: 3, dashed: true },
-    ]
+      { name: 'target (unlabelled)', x: tgt.map((p) => p[0]), y: tgt.map((p) => p[1]), muted: true },
+      { name: 'true boundary', x: GRID, y: GRID.map(boundary), emphasis: true },
+      { name: 'trained on source', x: GRID, y: line(plain), slot: 2 },
+      { name: 'importance-weighted', x: GRID, y: line(weighted), slot: 3, dashed: true },
+    ] as const
     return {
       series,
       sourceError: expectedError(plain, DATA.src),
@@ -144,20 +147,17 @@ export function DomainShiftDemo({ initial = [1, 0.3] }: { initial?: [number, num
       proxyA: 2 * (1 - 2 * domainError),
       ess,
     }
-  }, [mx.value, my.value, lambda])
+  }, [state.mx, state.my, state.lambda])
 
+  const xAxis = useAxis({ label: 'x₁', range: [-4, 4] })
+  const yAxis = useAxis({ label: 'x₂', range: [-3, 3], equal: xAxis })
   return (
-    <Interactive
+    <Figure
       title="Covariate shift, a domain classifier and importance weights"
+      state={state}
       caption="Drag the target mean, or use the sliders. The labelling rule is the same in both domains, but the true boundary is curved, so the best line for the source is not the best line for the target. A logistic domain classifier separates source from target inputs: its held-out error gives the proxy distance 2(1 − 2ε), and its odds give the importance weights. Far shifts leave few effective samples and no weighting can recover."
-      controls={
-        <>
-          <ParamSlider label="target mean, x₁" param={mx} />
-          <ParamSlider label="target mean, x₂" param={my} />
-          <ParamSlider label="weight exponent λ" value={lambda} onChange={setLambda} min={0} max={1} step={0.05} />
-        </>
-      }
-      readout={
+
+      readouts={
         <>
           <Readout label="source error" value={formatNumber(result.sourceError)} />
           <Readout label="target error, source fit" value={formatNumber(result.targetPlain)} />
@@ -168,25 +168,22 @@ export function DomainShiftDemo({ initial = [1, 0.3] }: { initial?: [number, num
         </>
       }
     >
-      <XYChart
-        series={result.series}
-        xLabel="x₁"
-        yLabel="x₂"
-        xRange={[-4, 4]}
-        yRange={[-3, 3]}
-        equalAspect
-        handles={[
-          {
-            kind: 'point',
-            at: [mx.value, my.value],
-            label: 'target mean',
-            onDrag: ([a, b]) => {
-              mx.set(a)
-              my.set(b)
-            },
-          },
-        ]}
-      />
-    </Interactive>
+      <Plot x={xAxis} y={yAxis}>
+        <Points {...result.series[0]} />
+        <Points {...result.series[1]} />
+        <Curve {...result.series[2]} />
+        <Curve {...result.series[3]} />
+        <Curve {...result.series[4]} />
+        <Handle
+          kind="point"
+          at={[state.mx, state.my]}
+          label="target mean"
+          onDrag={([a, b]) => {
+            state.set('mx', a)
+            state.set('my', b)
+          }}
+        />
+      </Plot>
+    </Figure>
   )
 }

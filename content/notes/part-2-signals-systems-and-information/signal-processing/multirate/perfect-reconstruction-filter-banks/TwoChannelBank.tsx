@@ -1,5 +1,4 @@
-import { Interactive } from 'aifn-render'
-import { Diagram } from 'aifn-render'
+import { Diagram, Figure } from 'aifn-render'
 import type { DiagramNode, DiagramSpec } from 'aifn-render'
 
 const filt = (id: string, x: number, y: number, label: string, tone: number): DiagramNode => ({
@@ -60,7 +59,7 @@ const spec: DiagramSpec = {
 /** The two-channel analysis–synthesis filter bank. */
 export function TwoChannelBank() {
   return (
-    <Interactive
+    <Figure
       title="A two-channel filter bank"
       caption="The analysis filters H₀ (lowpass) and H₁ (highpass) split the input, and each branch keeps every second sample. The synthesis side inserts zeros between samples, filters with G₀ and G₁ and adds the branches. The downsamplers create aliasing in each branch; perfect reconstruction chooses the four filters so that the aliasing cancels in the sum."
     >
@@ -68,6 +67,6 @@ export function TwoChannelBank() {
         spec={spec}
         ariaLabel="The input splits into a lowpass branch H0 and a highpass branch H1, each downsampled by 2, then upsampled by 2, filtered by G0 and G1, and summed to give the reconstruction"
       />
-    </Interactive>
+    </Figure>
   )
 }

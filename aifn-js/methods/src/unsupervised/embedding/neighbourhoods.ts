@@ -1,5 +1,5 @@
 /**
- * Shared by the embeddings of `aifn-applied/unsupervised/embedding`: squared distances between points (by
+ * Shared by the embeddings of `aifn-methods/unsupervised/embedding`: squared distances between points (by
  * `aifn/numerics/linalg`) and their k-nearest-neighbour graphs.
  */
 

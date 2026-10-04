@@ -1,6 +1,6 @@
 import { useMemo } from 'react'
-import { Interactive, ParamSlider, Readout, XYChart, formatNumber, useParam, type XYSeries } from 'aifn-render'
-import { rng } from '@/lib/math'
+import { Curve, Figure, formatNumber, int, Plot, Readout, useAxis, useFigureState } from 'aifn-render'
+import { normal as drawNormal, stream } from 'aifn/foundation/random'
 
 const ITERS = 300
 const FLOOR = 1e-12
@@ -53,13 +53,15 @@ function conjugateGradient(m: number, b: Float64Array, iters: number, visit: (x:
 
 /** Error of Jacobi, Gauss–Seidel and conjugate gradient on the 2-D Poisson problem, in the energy norm. */
 export function SolverRace() {
-  const m = useParam(20, { min: 6, max: 40, step: 2 })
+  const state = useFigureState({
+    m: int(20, { min: 6, max: 40, step: 2, label: 'grid side m' }),
+  })
 
   const result = useMemo(() => {
-    const M = m.value
+    const M = state.m
     const n = M * M
-    const { normal } = rng(3)
-    const b = Float64Array.from({ length: n }, () => normal())
+    const g = stream(3)
+    const b = Float64Array.from({ length: n }, () => drawNormal(g))
     // Reference solution: CG run far past convergence (it terminates in at most n steps in exact arithmetic).
     let xStar = new Float64Array(n)
     conjugateGradient(M, b, 4 * M + 400, (x) => (xStar = Float64Array.from(x)))
@@ -109,21 +111,24 @@ export function SolverRace() {
     const bound = STEPS.map((k) => Math.max(FLOOR, Math.min(1, 2 * q ** k)))
     const cgIters = cg.findIndex((v) => v < 1e-6)
     return { jac, gs, cg, bound, kappa, n, cgIters }
-  }, [m.value])
+  }, [state.m])
 
-  const series: XYSeries[] = [
-    { name: 'Jacobi', type: 'line', x: STEPS, y: result.jac, slot: 0 },
-    { name: 'Gauss–Seidel', type: 'line', x: STEPS, y: result.gs, slot: 1 },
-    { name: 'conjugate gradient', type: 'line', x: STEPS, y: result.cg, slot: 2 },
-    { name: 'CG bound 2((√κ−1)/(√κ+1))ᵏ', type: 'line', x: STEPS, y: result.bound, slot: 2, dashed: true },
-  ]
+  const series = [
+    { name: 'Jacobi', x: STEPS, y: result.jac, slot: 0 },
+    { name: 'Gauss–Seidel', x: STEPS, y: result.gs, slot: 1 },
+    { name: 'conjugate gradient', x: STEPS, y: result.cg, slot: 2 },
+    { name: 'CG bound 2((√κ−1)/(√κ+1))ᵏ', x: STEPS, y: result.bound, slot: 2, dashed: true },
+  ] as const
 
+  const xAxis = useAxis({ label: 'iteration k', range: [0, ITERS] })
+  const yAxis = useAxis({ label: '‖x − xₖ‖_A / ‖x‖_A', range: [FLOOR, 2], log: true })
   return (
-    <Interactive
+    <Figure
       title="Stationary iterations against conjugate gradient"
+      state={state}
       caption="The 2-D Poisson equation on an m × m grid (n = m² unknowns), solved from x = 0. The curves show the relative error in the energy norm. Jacobi and Gauss–Seidel shrink the error by a factor near 1 − c/κ per step and stall as the grid grows; conjugate gradient shrinks it at the √κ rate of its bound, and faster in practice."
-      controls={<ParamSlider label="grid side m" param={m} />}
-      readout={
+
+      readouts={
         <>
           <Readout label="unknowns n" value={formatNumber(result.n)} />
           <Readout label="κ(A)" value={formatNumber(result.kappa)} />
@@ -131,15 +136,12 @@ export function SolverRace() {
         </>
       }
     >
-      <XYChart
-        height={320}
-        xLabel="iteration k"
-        yLabel="‖x − xₖ‖_A / ‖x‖_A"
-        series={series}
-        xRange={[0, ITERS]}
-        yLog
-        yRange={[FLOOR, 2]}
-      />
-    </Interactive>
+      <Plot x={xAxis} y={yAxis} height={320}>
+        <Curve {...series[0]} />
+        <Curve {...series[1]} />
+        <Curve {...series[2]} />
+        <Curve {...series[3]} />
+      </Plot>
+    </Figure>
   )
 }

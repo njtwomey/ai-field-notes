@@ -1,4 +1,4 @@
-"""Reference values for the linear latent-variable models of aifn-applied/unsupervised/embedding/linear: scikit-learn's
+"""Reference values for the linear latent-variable models of aifn-methods/unsupervised/embedding/linear: scikit-learn's
 `FactorAnalysis` at convergence (model covariance and mean log-likelihood), probabilistic PCA in closed form (numpy,
 maximum-likelihood covariance with 1/n) and scikit-learn's `PCA` covariance rescaled to 1/n, and `FastICA` (parallel,
 log-cosh, unit-variance whitening by SVD) from a given initial unmixing matrix after a fixed number of iterations."""

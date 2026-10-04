@@ -63,10 +63,10 @@ export type FigureProps = {
   id?: string
   /**
    * The figure's one point, in one line under the title (DESIGN.md §2.1), e.g. "KL divergence is the expected
-   * log-ratio, so its value is the net signed area under p log(p/q)". Required: `make lab-check` fails a figure
-   * without one (a `ReactNode` can still be empty).
+   * log-ratio, so its value is the net signed area under p log(p/q)". Optional in the type: a note's prose already
+   * explains its figures. The lab requires one (`make lab-check` fails a lab figure without it).
    */
-  purpose: ReactNode
+  purpose?: ReactNode
   /** Further detail under the purpose: what the figure shows. */
   description?: ReactNode
   /**
@@ -186,25 +186,31 @@ export function Figure({
       data-figure-nested={nested ? '' : undefined}
       // Every part keeps its natural height (shrink-0): the chart area never overlaps the readouts or the caption.
       className={cn(
-        'flex shrink-0 scroll-mt-16 flex-col gap-2.5 rounded-xl border bg-card p-3.5 text-card-foreground ring-ring/60 transition-shadow duration-500 *:shrink-0 data-highlight:ring-2',
+        // not-prose: a figure is UI chrome, so prose typography (in a note) never reaches its labels and readouts.
+        'not-prose flex shrink-0 scroll-mt-16 flex-col gap-2.5 rounded-xl border bg-card p-3.5 text-card-foreground ring-ring/60 transition-shadow duration-500 *:shrink-0 data-highlight:ring-2',
         className,
       )}
     >
       <header className="flex flex-wrap items-start justify-between gap-x-4 gap-y-1">
         <div className="min-w-0 space-y-1">
           <AnchorTitle id={figureId}>{title}</AnchorTitle>
-          {purpose && <p className="max-w-4xl text-sm text-foreground/90 leading-relaxed">{purpose}</p>}
-          {description && <p className="max-w-4xl text-xs sm:text-sm text-muted-foreground leading-relaxed">{description}</p>}
-          <div ref={setAbout} className="max-w-4xl text-xs sm:text-sm text-muted-foreground leading-relaxed empty:hidden" />
+          {purpose && <p className="max-w-4xl text-sm leading-relaxed text-foreground/90">{purpose}</p>}
+          {description && (
+            <p className="max-w-4xl text-xs leading-relaxed text-muted-foreground sm:text-sm">{description}</p>
+          )}
+          <div
+            ref={setAbout}
+            className="max-w-4xl text-xs leading-relaxed text-muted-foreground empty:hidden sm:text-sm"
+          />
         </div>
-        <div className="flex items-center gap-1.5 shrink-0">
+        <div className="flex shrink-0 items-center gap-1.5">
           {state && <ResetButton disabled={state.isDefault} onClick={state.reset} />}
           <SizePicker size={size} onChange={choose} />
           <CopyData data={exportData} />
         </div>
       </header>
       {(state || controls) && (
-        <div className="flex flex-col gap-2 w-full">
+        <div className="flex w-full flex-col gap-2">
           {state && <FigureControls state={state} />}
           {controls && wrapInControlGroup(controls)}
         </div>
@@ -238,7 +244,7 @@ export function Figure({
         <div ref={setViewReadouts} className="flex flex-wrap gap-x-5 gap-y-1 text-xs empty:hidden" />
         {hoverReadout && <HoverReadout hover={hover} />}
       </div>
-      {caption && <p className="max-w-4xl text-sm text-muted-foreground leading-relaxed">{caption}</p>}
+      {caption && <p className="max-w-4xl text-sm leading-relaxed text-muted-foreground">{caption}</p>}
     </section>
   )
 }
@@ -517,7 +523,7 @@ function AnchorTitle({ id, children }: { id: string; children: ReactNode }) {
     <a
       href={`#${id}`}
       onClick={handleClick}
-      className="group/anchor !mt-0 !mb-0 flex cursor-pointer items-center gap-1.5 font-sans text-sm font-semibold leading-tight text-foreground no-underline transition-colors hover:text-primary select-none"
+      className="group/anchor !mt-0 !mb-0 flex cursor-pointer items-center gap-1.5 font-sans text-sm leading-tight font-semibold text-foreground no-underline transition-colors select-none hover:text-primary"
       title="Link to this figure"
     >
       <span>{children}</span>

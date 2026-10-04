@@ -1,7 +1,5 @@
-import { Diagram } from 'aifn-render'
-import { projector } from 'aifn-render'
+import { Diagram, Figure, projector } from 'aifn-render'
 import type { DiagramSpec } from 'aifn-render'
-import { Interactive } from 'aifn-render'
 
 const box = (id: string, x: number, y: number, label: string, tone: number | 'neutral', w = 2.8, h = 1.1) => ({
   id,
@@ -59,7 +57,7 @@ const spec: DiagramSpec = {
 /** The two-stage pipeline of Campbell and Kautz (2014). */
 export function FontPipeline() {
   return (
-    <Interactive
+    <Figure
       title="From font files to a manifold of fonts"
       caption="Stage 1 matches every character across all fonts at once, so that sample i of an outline is the same place on the glyph in every font. Stage 2 stacks the matched outlines of all characters into one vector per font and fits a GP-LVM. Any latent point x then generates a complete font through the Gaussian process mean."
     >
@@ -67,6 +65,6 @@ export function FontPipeline() {
         spec={spec}
         ariaLabel="Pipeline from TrueType fonts through character matching to a GP-LVM font manifold"
       />
-    </Interactive>
+    </Figure>
   )
 }

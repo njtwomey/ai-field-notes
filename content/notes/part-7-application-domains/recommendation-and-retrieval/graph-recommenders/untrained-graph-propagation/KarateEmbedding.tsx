@@ -1,16 +1,19 @@
-import { useMemo, useState } from 'react'
+import { useMemo } from 'react'
 import {
-  Interactive,
-  ParamChoice,
-  ParamSlider,
-  Readout,
-  XYChart,
+  choice,
+  Figure,
   formatNumber,
-  useParam,
+  int,
+  Plot,
+  Readout,
   type Segment,
-  type XYSeries,
+  Segments,
+  seriesLayers,
+  type SeriesSpec,
+  useAxis,
+  useFigureState,
 } from 'aifn-render'
-import { rng } from '@/lib/math'
+import { normal, stream, type Stream, uniform } from 'aifn/foundation/random'
 
 /** Zachary's karate club: 34 members, 78 friendships (0-indexed, as in networkx's karate_club_graph). */
 const EDGES: [number, number][] = [
@@ -114,8 +117,8 @@ const AHAT: Matrix = (() => {
 const matmul = (X: Matrix, Y: Matrix): Matrix =>
   X.map((row) => Y[0].map((_, j) => row.reduce((s, x, k) => s + x * Y[k][j], 0)))
 
-const gaussian = (rows: number, cols: number, scale: number, r: ReturnType<typeof rng>): Matrix =>
-  Array.from({ length: rows }, () => Array.from({ length: cols }, () => scale * r.normal()))
+const gaussian = (rows: number, cols: number, scale: number, r: Stream): Matrix =>
+  Array.from({ length: rows }, () => Array.from({ length: cols }, () => scale * normal(r)))
 
 type Mode = 'gcn' | 'linear'
 
@@ -125,7 +128,7 @@ type Mode = 'gcn' | 'linear'
  * projection of the identity, i.e. random points.
  */
 function embed(mode: Mode, K: number, seed: number): Matrix {
-  const r = rng(seed)
+  const r = stream(seed)
   if (K === 0) return gaussian(N, 2, 1, r)
   if (mode === 'linear') {
     let H = gaussian(N, 2, 1, r)
@@ -201,8 +204,8 @@ function silhouette(Z: Matrix): number {
 
 /** A force-directed reference layout (Fruchterman–Reingold), computed once. */
 const FORCE: Matrix = (() => {
-  const r = rng(3)
-  const P = Array.from({ length: N }, () => [r.uniform() - 0.5, r.uniform() - 0.5])
+  const r = stream(3)
+  const P = Array.from({ length: N }, () => [uniform(r) - 0.5, uniform(r) - 0.5])
   const k = 1 / Math.sqrt(N)
   for (let it = 0; it < 300; it++) {
     const t = 0.1 * (1 - it / 300)
@@ -235,7 +238,7 @@ const FORCE: Matrix = (() => {
   return standardise(P)
 })()
 
-const graphSeries = (Z: Matrix): { series: XYSeries[]; segments: Segment[] } => ({
+const graphSeries = (Z: Matrix): { series: SeriesSpec[]; segments: Segment[] } => ({
   series: [
     {
       name: 'members',
@@ -251,39 +254,42 @@ const graphSeries = (Z: Matrix): { series: XYSeries[]; segments: Segment[] } => 
 
 /** Zachary's karate club embedded by an untrained GCN or by linear propagation, coloured by the real split. */
 export function KarateEmbedding() {
-  const layers = useParam(3, { min: 0, max: 4, step: 1 })
-  const seed = useParam(1, { min: 1, max: 50, step: 1 })
-  const [mode, setMode] = useState<Mode>('gcn')
+  const state = useFigureState({
+    layers: int(3, { min: 0, max: 4, step: 1, label: 'propagation layers K', format: (v) => String(v) }),
+    seed: int(1, { min: 1, max: 50, step: 1, label: 'random seed', format: (v) => String(v) }),
+    mode: choice<Mode>(
+      [
+        { value: 'gcn', label: 'tanh GCN' },
+        { value: 'linear', label: 'linear Â^K R' },
+      ],
+      'gcn',
+      { label: 'propagation' },
+    ),
+  })
 
-  const Z = useMemo(() => standardise(embed(mode, layers.value, seed.value)), [mode, layers.value, seed.value])
+  const Z = useMemo(
+    () => standardise(embed(state.mode, state.layers, state.seed)),
+    [state.mode, state.layers, state.seed],
+  )
   const view = useMemo(() => graphSeries(Z), [Z])
   const reference = useMemo(() => graphSeries(FORCE), [])
   const meanProbe = useMemo(() => {
     let s = 0
-    for (let k = 1; k <= SEEDS; k++) s += probeAccuracy(embed(mode, layers.value, 1000 + k))
+    for (let k = 1; k <= SEEDS; k++) s += probeAccuracy(embed(state.mode, state.layers, 1000 + k))
     return s / SEEDS
-  }, [mode, layers.value])
+  }, [state.mode, state.layers])
 
+  const xAxis = useAxis({ label: 'dimension 1', hold: 'union' })
+  const yAxis = useAxis({ label: 'dimension 2', hold: 'union' })
+  const xAxis2 = useAxis({ hold: 'union' })
+  const yAxis2 = useAxis({ hold: 'union' })
   return (
-    <Interactive
+    <Figure
       title="An untrained GCN on Zachary's karate club"
+      state={state}
       caption="Each member of the club is placed at the 2-D output of a graph network whose weights were never trained, and coloured by the faction they joined when the club split. Grey lines are friendships. With 0 layers the points are a random projection and the factions are mixed; each propagation layer averages every node with its neighbours, and after two or three layers the two factions separate. Linear propagation, Â^K R with a random projection R, does the same without any non-linearity. Step the layers and the random seed with the arrows; the right panel is a force-directed drawing of the same graph for reference."
-      controls={
-        <>
-          <ParamSlider label="propagation layers K" param={layers} format={(v) => String(v)} withArrows />
-          <ParamSlider label="random seed" param={seed} format={(v) => String(v)} withArrows />
-          <ParamChoice
-            label="propagation"
-            value={mode}
-            onChange={setMode}
-            options={[
-              { value: 'gcn', label: 'tanh GCN' },
-              { value: 'linear', label: 'linear Â^K R' },
-            ]}
-          />
-        </>
-      }
-      readout={
+
+      readouts={
         <>
           <Readout label="linear-probe accuracy, this seed" value={formatNumber(probeAccuracy(Z))} />
           <Readout label={`mean over ${SEEDS} seeds`} value={formatNumber(meanProbe)} />
@@ -292,9 +298,15 @@ export function KarateEmbedding() {
       }
     >
       <div className="grid gap-4 md:grid-cols-2">
-        <XYChart series={view.series} segments={view.segments} xLabel="dimension 1" yLabel="dimension 2" height={320} />
-        <XYChart series={reference.series} segments={reference.segments} bare height={320} />
+        <Plot x={xAxis} y={yAxis} height={320}>
+          {seriesLayers(view.series)}
+          <Segments segments={view.segments} />
+        </Plot>
+        <Plot x={xAxis2} y={yAxis2} height={320} bare>
+          {seriesLayers(reference.series)}
+          <Segments segments={reference.segments} />
+        </Plot>
       </div>
-    </Interactive>
+    </Figure>
   )
 }

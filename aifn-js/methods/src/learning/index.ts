@@ -1,5 +1,5 @@
 /**
- * `aifn-applied/learning`: supervised models over the estimator protocol of `aifn/learning/estimators`. Groups:
+ * `aifn-methods/learning`: supervised models over the estimator protocol of `aifn/learning/estimators`. Groups:
  * generalised (glm, gam, ordinal), trees-and-ensembles (bagging, boosting); modules: linear, generative-classifiers,
  * kernel-methods, gaussian-processes, neighbours, reductions, preprocessing, mixture-density. `learningModelRegistry` lists every
  * registered estimator factory of the area (supervised models and preprocessing transformers) by key.
@@ -42,7 +42,7 @@ export { oneVersusRest } from './reductions'
 export { standardScaler } from './preprocessing'
 export { isotonicRegressor, type IsotonicParams, type IsotonicRegressor } from './isotonic'
 
-/** Every registered estimator factory of `aifn-applied/learning`, keyed by `info.key` (kind `model`). */
+/** Every registered estimator factory of `aifn-methods/learning`, keyed by `info.key` (kind `model`). */
 export const learningModelRegistry = entries(
   'model',
   linear,

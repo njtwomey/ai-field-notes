@@ -1,8 +1,8 @@
 /**
- * `aifn-applied/learning/generalised/ordinal`: ordinal regression. Latent-variable models (cumulative-link,
+ * `aifn-methods/learning/generalised/ordinal`: ordinal regression. Latent-variable models (cumulative-link,
  * continuation-ratio and adjacent-category, on `aifn/probability/likelihoods`' ordinal likelihoods), threshold losses
  * and their linear model (all-threshold and immediate-threshold), Frank and Hall's binary decomposition, and deep
- * ordinal heads (CORAL and cumulative link) on an MLP. GP ordinal regression is `aifn-applied/learning/gaussian-processes`'
+ * ordinal heads (CORAL and cumulative link) on an MLP. GP ordinal regression is `aifn-methods/learning/gaussian-processes`'
  * `gpOrdinalRegression`.
  */
 

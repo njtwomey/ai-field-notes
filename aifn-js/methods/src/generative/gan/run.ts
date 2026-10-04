@@ -1,5 +1,5 @@
 /**
- * A GAN training run as a generator of plain-data snapshots, for a worker to stream (as `aifn-applied/gym`'s
+ * A GAN training run as a generator of plain-data snapshots, for a worker to stream (as `aifn-methods/gym`'s
  * `training`): the losses at every step, and at checkpoints the generated points from fixed latents, the
  * discriminator on a grid, the generator's gradient at a subset of the generated points, and, when the data's density
  * is known, the optimal discriminator and the mode coverage.

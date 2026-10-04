@@ -1,5 +1,5 @@
 /**
- * `aifn-applied/retrieval/losses`: ranking and retrieval losses (pointwise, pairwise and listwise; sampled softmax,
+ * `aifn-methods/retrieval/losses`: ranking and retrieval losses (pointwise, pairwise and listwise; sampled softmax,
  * negative sampling, NCE, in-batch softmax, triplet, contrastive), collected in `retrievalLossRegistry`.
  */
 

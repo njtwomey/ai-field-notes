@@ -1,8 +1,8 @@
+import { normal, stream, uniform } from 'aifn/foundation/random'
 /**
  * Small greyscale images (row-major Float64Array, values nominally in [0, 255]) for image-quality figures: a synthetic
  * test image, distortions tuned to a target mean squared error, and PSNR and SSIM.
  */
-import { rng } from '@/lib/math'
 
 export const SIZE = 64
 export const PEAK = 255
@@ -78,8 +78,8 @@ export function distort(img: Image, kind: Distortion, target: number, seed = 1):
     return img.map((v) => m + s * (v - m))
   }
   if (kind === 'noise') {
-    const g = rng(seed)
-    const z = Float64Array.from({ length: n2 }, () => g.normal())
+    const g = stream(seed)
+    const z = Float64Array.from({ length: n2 }, () => normal(g))
     // Rescale the realised noise so the MSE is exactly the target.
     const scale = Math.sqrt(target / (z.reduce((s, v) => s + v * v, 0) / n2))
     return img.map((v, i) => v + scale * z[i])
@@ -89,9 +89,9 @@ export function distort(img: Image, kind: Distortion, target: number, seed = 1):
     return blur(img, s)
   }
   // Salt and pepper: corrupt a growing prefix of a fixed random order of pixels.
-  const g = rng(seed)
-  const order = Array.from({ length: n2 }, (_, i) => i).sort(() => g.uniform() - 0.5)
-  const values = order.map(() => (g.uniform() < 0.5 ? 0 : PEAK))
+  const g = stream(seed)
+  const order = Array.from({ length: n2 }, (_, i) => i).sort(() => uniform(g) - 0.5)
+  const values = order.map(() => (uniform(g) < 0.5 ? 0 : PEAK))
   const corrupt = (f: number) => {
     const out = Float64Array.from(img)
     const count = Math.round(f * n2)

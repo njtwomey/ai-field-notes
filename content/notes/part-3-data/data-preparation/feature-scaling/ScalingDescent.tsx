@@ -1,21 +1,23 @@
-import { useMemo, useState } from 'react'
+import { useMemo } from 'react'
 import {
-  Interactive,
-  ParamSlider,
-  ParamSwitch,
-  Readout,
-  XYChart,
+  Curve,
+  Figure,
   formatNumber,
-  useParam,
-  type XYSeries,
+  Plot,
+  Points,
+  Readout,
+  setting,
+  slider,
+  useAxis,
+  useFigureState,
 } from 'aifn-render'
-import { linspace } from '@/lib/math'
-import { eigSym } from '@/lib/math/mat2'
+import { linspace, toFlat } from 'aifn/foundation/tensor'
+import { eigh2 } from 'aifn/numerics/linalg'
 
 const START: [number, number] = [-1, 1.5]
 const MAX_STEPS = 5000
 const TOL = 1e-6
-const ANGLES = linspace(0, 2 * Math.PI, 97)
+const ANGLES = toFlat(linspace(0, 2 * Math.PI, 97))
 
 /**
  * Gradient descent on the least-squares loss of two features with correlation ρ, the second measured in units s times
@@ -24,7 +26,10 @@ const ANGLES = linspace(0, 2 * Math.PI, 97)
 function descend(scale: number, rho: number, standardise: boolean) {
   const s = standardise ? 1 : scale
   const [p, q, r] = [1, rho * s, s * s]
-  const eig = eigSym(p, q, r)
+  const eig = eigh2([
+    [p, q],
+    [q, r],
+  ])
   const eta = 1 / eig.values[0]
   const opt: [number, number] = [1, 1 / s]
   const loss = (w: [number, number]) => {
@@ -59,33 +64,37 @@ function descend(scale: number, rho: number, standardise: boolean) {
 
 /** How the units of one feature change the shape of the loss and the speed of gradient descent. */
 export function ScalingDescent() {
-  const scale = useParam(5, { min: 1, max: 10, step: 0.5 })
-  const rho = useParam(0, { min: 0, max: 0.9, step: 0.05 })
-  const [standardise, setStandardise] = useState(false)
-  const run = useMemo(() => descend(scale.value, rho.value, standardise), [scale.value, rho.value, standardise])
+  const state = useFigureState({
+    scale: slider(1, 10, 5, { step: 0.5, label: 'scale ratio s' }),
+    rho: slider(0, 0.9, 0, { step: 0.05, label: 'correlation ρ' }),
+    standardise: setting(false, 'standardise features'),
+  })
+  const run = useMemo(
+    () => descend(state.scale, state.rho, state.standardise),
+    [state.scale, state.rho, state.standardise],
+  )
 
   const series = useMemo(
-    (): XYSeries[] => [
-      { name: 'loss contours', type: 'line', x: run.cx, y: run.cy, muted: true },
-      { name: 'gradient descent', type: 'line', x: run.path.map((w) => w[0]), y: run.path.map((w) => w[1]), slot: 0 },
-      { name: 'minimum', type: 'scatter', x: [run.opt[0]], y: [run.opt[1]], emphasis: true },
-    ],
+    () =>
+      [
+        { name: 'loss contours', x: run.cx, y: run.cy, muted: true },
+        { name: 'gradient descent', x: run.path.map((w) => w[0]), y: run.path.map((w) => w[1]), slot: 0 },
+        { name: 'minimum', x: [run.opt[0]], y: [run.opt[1]], emphasis: true },
+      ] as const,
     [run],
   )
   const converged = run.steps < MAX_STEPS
 
+  const xAxis = useAxis({ label: 'w₁', range: [-1.5, 2] })
+  const yAxis = useAxis({ label: 'w₂', range: [-1, 2], equal: xAxis })
   return (
-    <Interactive
+    <Figure
       title="Gradient descent before and after standardising"
+      purpose="Change the scale ratio and correlation of two features and compare gradient descent paths with and without standardisation."
+      state={state}
       caption="Least squares with two features. The second feature is measured in units s times larger than the first, and the two have correlation ρ. Gradient descent uses the learning rate 1/λ_max, where λ_max is the largest eigenvalue of the Hessian. Unscaled, the contours are long thin ellipses and descent crawls along the valley. Standardised, with ρ = 0 they are circles and descent reaches the minimum in one step; correlation alone still stretches them."
-      controls={
-        <>
-          <ParamSlider label="scale ratio s" param={scale} />
-          <ParamSlider label="correlation ρ" param={rho} />
-          <ParamSwitch label="standardise features" checked={standardise} onChange={setStandardise} />
-        </>
-      }
-      readout={
+
+      readouts={
         <>
           <Readout label="condition number κ" value={formatNumber(run.kappa)} />
           <Readout label="steps to reduce the loss by 10⁶" value={converged ? String(run.steps) : `> ${MAX_STEPS}`} />
@@ -93,16 +102,16 @@ export function ScalingDescent() {
       }
     >
       <div className="mx-auto w-full max-w-md">
-        <XYChart
-          series={series}
-          xLabel="w₁"
-          yLabel="w₂"
-          xRange={[-1.5, 2]}
-          yRange={[-1, 2]}
-          equalAspect
-          ariaLabel="Loss contours and the gradient descent path in the plane of the two coefficients"
-        />
+        <Plot
+          x={xAxis}
+          y={yAxis}
+          ariaLabel={'Loss contours and the gradient descent path in the plane of the two coefficients'}
+        >
+          <Curve {...series[0]} />
+          <Curve {...series[1]} />
+          <Points {...series[2]} />
+        </Plot>
       </div>
-    </Interactive>
+    </Figure>
   )
 }

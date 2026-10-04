@@ -1,5 +1,5 @@
 /**
- * The registry of `aifn-applied/timeseries`: the fits as traceable algorithms (each with the one-call function that
+ * The registry of `aifn-methods/timeseries`: the fits as traceable algorithms (each with the one-call function that
  * runs it), and the model properties, simulators, forecasts and decompositions as functions, each linked to the notes
  * it serves.
  */

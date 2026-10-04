@@ -1,5 +1,5 @@
 /**
- * The registry of the `aifn-applied/learning/generalised` group's shared layer: IRLS and backfitting as traceable
+ * The registry of the `aifn-methods/learning/generalised` group's shared layer: IRLS and backfitting as traceable
  * algorithms, and the penalised-fit and residual functions.
  */
 

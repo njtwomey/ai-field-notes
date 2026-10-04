@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { compare, rollout } from 'aifn-applied/gym'
+import { compare, rollout } from 'aifn-methods/gym'
 import {
   epsilonGreedy,
   exp3,
@@ -14,8 +14,8 @@ import {
   thompsonGaussian,
   ucb1,
   uniformPolicy,
-} from 'aifn-applied/gym/agents'
-import { bernoulliBandit, gaussianBandit, linearBandit } from 'aifn-applied/gym/environments'
+} from 'aifn-methods/gym/agents'
+import { bernoulliBandit, gaussianBandit, linearBandit } from 'aifn-methods/gym/environments'
 import type { Agent } from 'aifn/foundation/contracts'
 import { stream } from 'aifn/foundation/random'
 import { toFlat } from 'aifn/foundation/tensor'

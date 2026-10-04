@@ -1,4 +1,4 @@
-/** The language models of `aifn-applied/neural/language-models`, registered as models. */
+/** The language models of `aifn-methods/neural/language-models`, registered as models. */
 
 import { bool, int, oneOf, real, space } from 'aifn/foundation/space'
 import { defineModel } from 'aifn/learning/estimators'

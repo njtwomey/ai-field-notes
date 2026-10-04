@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { FONT_CLASSES, fontTable, fontVectors, fonts, glyphContours } from 'aifn-applied/data/real/fonts'
+import { FONT_CLASSES, fontTable, fontVectors, fonts, glyphContours } from 'aifn-methods/data/real/fonts'
 import { toFlat, toRows } from 'aifn/foundation/tensor'
 
 const table = fontVectors()

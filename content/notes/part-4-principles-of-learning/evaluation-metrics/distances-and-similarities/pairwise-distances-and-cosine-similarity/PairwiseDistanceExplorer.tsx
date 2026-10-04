@@ -32,7 +32,12 @@ const CANDIDATES: [number, number][] = [
   [1.8, 1.6],
 ]
 
-const CANDIDATE_NAMES = ['A (mostly horizontal)', 'B (diagonal 45°)', 'C (mostly vertical)', 'D (same ray as B, farther)']
+const CANDIDATE_NAMES = [
+  'A (mostly horizontal)',
+  'B (diagonal 45°)',
+  'C (mostly vertical)',
+  'D (same ray as B, farther)',
+]
 
 function minkowskiDist(x1: number, y1: number, x2: number, y2: number, p: number): number {
   const dx = Math.abs(x1 - x2)
@@ -226,8 +231,14 @@ export function PairwiseDistanceExplorer() {
       readouts={{
         'nearest neighbour rankings': (
           <>
-            <Readout label={`nearest under L_${pVal >= 90 ? '∞' : pVal}`} value={`${distances[nearestIdx].name} (${fmt(distances[nearestIdx].lp)})`} />
-            <Readout label="nearest under cosine similarity" value={`${distances[nearestCosIdx].name} (cosθ = ${fmt(distances[nearestCosIdx].cosSim)})`} />
+            <Readout
+              label={`nearest under L_${pVal >= 90 ? '∞' : pVal}`}
+              value={`${distances[nearestIdx].name} (${fmt(distances[nearestIdx].lp)})`}
+            />
+            <Readout
+              label="nearest under cosine similarity"
+              value={`${distances[nearestCosIdx].name} (cosθ = ${fmt(distances[nearestCosIdx].cosSim)})`}
+            />
           </>
         ),
         'distances from query to candidate B': (
@@ -244,10 +255,7 @@ export function PairwiseDistanceExplorer() {
               label="cosine distance d(0°, 90°)"
               value={`${fmt(triangleCosine.dUW)} > ${fmt(triangleCosine.sumIntermediate)} (violates!)`}
             />
-            <Readout
-              label="verdict"
-              value="cosine distance is a semi-metric, not a true metric"
-            />
+            <Readout label="verdict" value="cosine distance is a semi-metric, not a true metric" />
           </>
         ),
       }}
@@ -259,27 +267,11 @@ export function PairwiseDistanceExplorer() {
           <Curve name="x axis" x={[-2.2, 2.5]} y={[0, 0]} muted dashed thin />
           <Curve name="y axis" x={[0, 0]} y={[-2.2, 2.5]} muted dashed thin />
           {/* Query ray from origin */}
-          <Curve
-            name="query direction ray"
-            x={[0, query[0] * 2]}
-            y={[0, query[1] * 2]}
-            muted
-            thin
-          />
+          <Curve name="query direction ray" x={[0, query[0] * 2]} y={[0, query[1] * 2]} muted thin />
           {/* Level set contour around query */}
-          <Curve
-            name={`L_${pVal >= 90 ? '∞' : pVal} level contour`}
-            x={queryContour.x}
-            y={queryContour.y}
-            emphasis
-          />
+          <Curve name={`L_${pVal >= 90 ? '∞' : pVal} level contour`} x={queryContour.x} y={queryContour.y} emphasis />
           {/* Candidates */}
-          <Points
-            name="candidate points"
-            x={candX}
-            y={candY}
-            size={8}
-          />
+          <Points name="candidate points" x={candX} y={candY} size={8} />
           {/* Draggable query point */}
           <Handle
             kind="point"
@@ -299,12 +291,7 @@ export function PairwiseDistanceExplorer() {
             dashed
             thin
           />
-          <Curve
-            name={`unit ball (p = ${pVal >= 90 ? '∞' : pVal})`}
-            x={unitBall.x}
-            y={unitBall.y}
-            emphasis
-          />
+          <Curve name={`unit ball (p = ${pVal >= 90 ? '∞' : pVal})`} x={unitBall.x} y={unitBall.y} emphasis />
         </Plot>
       </Plots>
     </Figure>

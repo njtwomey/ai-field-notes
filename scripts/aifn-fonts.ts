@@ -1,9 +1,9 @@
 /**
- * Vendor the manifold-of-fonts glyph data into aifn as a dataset (`aifn-applied/data/real/fonts`).
+ * Vendor the manifold-of-fonts glyph data into aifn as a dataset (`aifn-methods/data/real/fonts`).
  *
  * The source of truth is the site's Python builder, `python/mlc/figures/fonts.py` (figure `manifold-of-fonts/glyphs`),
  * which writes `site/public/generated/figures/manifold-of-fonts/glyphs.json`. aifn must not import the site, so this
- * script copies that JSON into `aifn-js/applications/src/data/real/fonts/glyphs.ts` with a provenance header: the
+ * script copies that JSON into `aifn-js/methods/src/data/real/fonts/glyphs.ts` with a provenance header: the
  * pinned google/fonts commit, the licence of every font (from the path of its file in `fonts.py`: `ofl/` is the SIL
  * Open Font License 1.1, `apache/` the Apache License 2.0), the builder's cache hash and the repository commit of the
  * JSON. The integer outline vectors are stored as one base64 string of little-endian int16 (every value fits), which
@@ -22,7 +22,7 @@ const root = path.resolve(import.meta.dirname, '..')
 const dir = path.join(root, 'site', 'public', 'generated', 'figures', 'manifold-of-fonts')
 const source = path.join(dir, 'glyphs.json')
 const builder = path.join(root, 'python', 'mlc', 'figures', 'fonts.py')
-const out = path.join(root, 'aifn-js', 'applications', 'src', 'data', 'real', 'fonts', 'glyphs.ts')
+const out = path.join(root, 'aifn-js', 'methods', 'src', 'data', 'real', 'fonts', 'glyphs.ts')
 
 type Font = { family: string; style: string; cls: string; weight: number; width: number; italic: boolean }
 type Data = {

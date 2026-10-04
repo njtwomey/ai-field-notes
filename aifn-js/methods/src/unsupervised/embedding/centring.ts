@@ -1,5 +1,5 @@
 /**
- * Shared by the embeddings of `aifn-applied/unsupervised/embedding`: double centring and the classical-MDS core.
+ * Shared by the embeddings of `aifn-methods/unsupervised/embedding`: double centring and the classical-MDS core.
  */
 
 import { eigh } from 'aifn/numerics/linalg'

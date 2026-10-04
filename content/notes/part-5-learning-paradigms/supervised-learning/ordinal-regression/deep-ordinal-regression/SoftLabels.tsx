@@ -1,6 +1,18 @@
-import { useMemo, useState } from 'react'
-import { MathText } from 'aifn-render'
-import { Interactive, ParamChoice, ParamSlider, Readout, XYChart, formatNumber, type XYSeries } from 'aifn-render'
+import { useMemo } from 'react'
+import {
+  Bars,
+  choice,
+  Curve,
+  Figure,
+  float,
+  formatNumber,
+  int,
+  MathText,
+  Plot,
+  Readout,
+  useAxis,
+  useFigureState,
+} from 'aifn-render'
 import { useClassColors } from '../_shared/classColor'
 
 type Distance = 'absolute' | 'squared'
@@ -32,45 +44,41 @@ function crossEntropy(target: number[], c: number): number {
  * shows why this matters: against a one-hot target, cross-entropy charges every wrong class the same.
  */
 export function SoftLabels() {
-  const [k, setK] = useState(7)
-  const [y, setY] = useState(3)
-  const [alpha, setAlpha] = useState(1)
-  const [distance, setDistance] = useState<Distance>('absolute')
-  const truth = Math.min(y, k) - 1
-  const colors = useClassColors(k)
+  const state = useFigureState({
+    k: int(7, { min: 3, max: 10, step: 1, label: 'classes K' }),
+    alpha: float(1, { min: 0.1, max: 4, step: 0.05, label: 'sharpness α' }),
+    distance: choice<Distance>(DISTANCES, 'absolute', { label: 'distance φ' }),
+    y: int(3, { min: 1, max: 10, label: 'true class y (at most K)' }),
+  })
+  const truth = Math.min(state.y, state.k) - 1
+  const colors = useClassColors(state.k)
 
   const { target, left, right, meanDistance } = useMemo(() => {
-    const target = sord(k, truth, alpha, distance)
+    const target = sord(state.k, truth, state.alpha, state.distance)
     const oneHot = target.map((_, j) => (j === truth ? 1 : 0))
-    const smooth = target.map((_, j) => (j === truth ? 0.9 : 0) + 0.1 / k)
+    const smooth = target.map((_, j) => (j === truth ? 0.9 : 0) + 0.1 / state.k)
     const classes = target.map((_, j) => j + 1)
-    const left: XYSeries[] = [
-      { name: 'SORD target', type: 'bar', x: classes, y: target, pointColors: colors },
-      { name: 'uniform label smoothing (ε = 0.1)', type: 'line', x: classes, y: smooth, slot: 1, dashed: true },
-    ]
-    const right: XYSeries[] = [
-      { name: 'one-hot target', type: 'line', x: classes, y: classes.map((_, c) => crossEntropy(oneHot, c)), slot: 2 },
-      { name: 'SORD target', type: 'line', x: classes, y: classes.map((_, c) => crossEntropy(target, c)), slot: 0 },
-    ]
+    const left = { classes, target, smooth }
+    const right = [
+      { name: 'one-hot target', x: classes, y: classes.map((_, c) => crossEntropy(oneHot, c)), slot: 2 },
+      { name: 'SORD target', x: classes, y: classes.map((_, c) => crossEntropy(target, c)), slot: 0 },
+    ] as const
     const meanDistance = target.reduce((s, t, j) => s + t * Math.abs(j - truth), 0)
     return { target, left, right, meanDistance }
-  }, [k, truth, alpha, distance, colors])
+  }, [state.k, truth, state.alpha, state.distance, colors])
 
+  const xAxis = useAxis({ label: 'predicted class c', range: [1, state.k] })
+  const yAxis = useAxis({ label: 'cross-entropy', range: [0, undefined], hold: 'union' })
+  const kAxis = useAxis({ label: 'class k', range: [0.5, state.k + 0.5], integer: true })
+  const tAxis = useAxis({ label: 'target probability', range: [0, 1] })
   return (
-    <Interactive
+    <Figure
       title="Soft ordinal labels"
+      state={state}
       caption={
         <MathText text="Left: the SORD target for the true class $y$, $t_k \propto \exp(-\alpha\,\phi(k, y))$, beside uniform label smoothing, which spreads its mass evenly whatever the distance. Right: the cross-entropy of each target against a confident prediction that puts 0.9 on class $c$. With a one-hot target every wrong $c$ costs the same; with the SORD target the cost grows with the distance from $y$. Larger $\alpha$ sharpens the target towards one-hot." />
       }
-      controls={
-        <>
-          <ParamSlider label="classes K" value={k} onChange={setK} min={3} max={10} step={1} />
-          <ParamSlider label="true class y" value={Math.min(y, k)} onChange={setY} min={1} max={k} step={1} />
-          <ParamSlider label="sharpness α" value={alpha} onChange={setAlpha} min={0.1} max={4} step={0.05} />
-          <ParamChoice label="distance φ" value={distance} onChange={setDistance} options={DISTANCES} />
-        </>
-      }
-      readout={
+      readouts={
         <>
           <Readout label="target mass on y" value={formatNumber(target[truth])} />
           <Readout label="expected |k − y| under the target" value={formatNumber(meanDistance)} />
@@ -78,26 +86,15 @@ export function SoftLabels() {
       }
     >
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-        <XYChart
-          series={left}
-          xRange={[0.5, k + 0.5]}
-          integerX
-          yRange={[0, 1]}
-          xLabel="class k"
-          yLabel="target probability"
-          height={280}
-          ariaLabel="Soft ordinal target distribution"
-        />
-        <XYChart
-          series={right}
-          xRange={[1, k]}
-          yRange={[0, undefined]}
-          xLabel="predicted class c"
-          yLabel="cross-entropy"
-          height={280}
-          ariaLabel="Cross-entropy against a confident prediction"
-        />
+        <Plot x={kAxis} y={tAxis} height={280} ariaLabel="Soft ordinal target distribution">
+          <Bars name="SORD target" x={left.classes} y={left.target} colors={colors} />
+          <Curve name="uniform label smoothing (ε = 0.1)" x={left.classes} y={left.smooth} slot={1} dashed />
+        </Plot>
+        <Plot x={xAxis} y={yAxis} height={280} ariaLabel={'Cross-entropy against a confident prediction'}>
+          <Curve {...right[0]} />
+          <Curve {...right[1]} />
+        </Plot>
       </div>
-    </Interactive>
+    </Figure>
   )
 }

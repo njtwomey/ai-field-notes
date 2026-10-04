@@ -40,7 +40,11 @@ function mobiusAdd(u: [number, number], v: [number, number]): [number, number] {
 }
 
 // Generate circular arc geodesic connecting u and v orthogonal to unit circle
-function poincareGeodesic(u: [number, number], v: [number, number], steps = 30): { xs: Float64Array; ys: Float64Array } {
+function poincareGeodesic(
+  u: [number, number],
+  v: [number, number],
+  steps = 30,
+): { xs: Float64Array; ys: Float64Array } {
   const d2U = u[0] ** 2 + u[1] ** 2
   const d2V = v[0] ** 2 + v[1] ** 2
 
@@ -183,7 +187,9 @@ export function PoincareDiskExplorer() {
   const siblingA = translatedNodes[4] // Feline
   const siblingB = translatedNodes[5] // Canine
   const siblingHypDist = poincareDist(siblingA.pos, siblingB.pos)
-  const siblingEuclidDist = Math.sqrt((siblingA.pos[0] - siblingB.pos[0]) ** 2 + (siblingA.pos[1] - siblingB.pos[1]) ** 2)
+  const siblingEuclidDist = Math.sqrt(
+    (siblingA.pos[0] - siblingB.pos[0]) ** 2 + (siblingA.pos[1] - siblingB.pos[1]) ** 2,
+  )
 
   // Axes
   const diskAxisX = useAxis({ label: 'Poincaré u₁', range: [-1.15, 1.15] })
@@ -275,13 +281,7 @@ export function PoincareDiskExplorer() {
             size={7}
           />
           {/* Highlighted focal node */}
-          <Points
-            name={`focal: ${focal.label}`}
-            x={[focal.pos[0]]}
-            y={[focal.pos[1]]}
-            size={11}
-            emphasis
-          />
+          <Points name={`focal: ${focal.label}`} x={[focal.pos[0]]} y={[focal.pos[1]]} size={11} emphasis />
           <Handle
             kind="point"
             at={focal.pos}

@@ -1,60 +1,81 @@
 import { useMemo, useState } from 'react'
-import { Interactive, ParamButton, ParamSlider, Readout, XYChart, formatNumber, type XYSeries } from 'aifn-render'
-import { distribution } from '@/lib/distributions'
-import { linspace, rng } from '@/lib/math'
-import { invertCdf } from '@/lib/math/special'
+import {
+  Area,
+  Button,
+  Curve,
+  Figure,
+  float,
+  formatNumber,
+  Handle,
+  Plot,
+  Readout,
+  slider,
+  useAxis,
+  useFigureState,
+} from 'aifn-render'
+import { Beta } from 'aifn/probability/distributions'
+import { linspace, toFlat } from 'aifn/foundation/tensor'
+import { stream, uniform } from 'aifn/foundation/random'
 
-const beta = distribution('beta')
 const MAX_FLIPS = 1000
 // One fixed stream of uniforms: flip i lands heads when u[i] < p, so changing p re-reads the same coin tosses.
 const UNIFORMS = (() => {
-  const r = rng(7)
-  return Array.from({ length: MAX_FLIPS }, () => r.uniform())
+  const r = stream(7)
+  return Array.from({ length: MAX_FLIPS }, () => uniform(r))
 })()
 
 /** A Beta prior on a coin's bias, updated flip by flip into a Beta posterior. */
 export function CoinPosterior() {
-  const [a, setA] = useState(2)
-  const [b, setB] = useState(2)
-  const [p, setP] = useState(0.7)
+  const state = useFigureState({
+    a: float(2, { min: 0.5, max: 30, step: 0.5, label: 'prior α' }),
+    b: float(2, { min: 0.5, max: 30, step: 0.5, label: 'prior β' }),
+    p: slider(0.05, 0.95, 0.7, { step: 0.05, label: 'true bias p' }),
+  })
   const [n, setN] = useState(0)
 
-  const heads = useMemo(() => UNIFORMS.slice(0, n).filter((u) => u < p).length, [n, p])
+  const heads = useMemo(() => UNIFORMS.slice(0, n).filter((u) => u < state.p).length, [n, state.p])
   const tails = n - heads
-  const post = { a: a + heads, b: b + tails }
+  const post = { a: state.a + heads, b: state.b + tails }
 
-  const series = useMemo((): XYSeries[] => {
-    const xs = linspace(0.002, 0.998, 400)
-    const prior = xs.map((x) => beta.density(x, { a, b }))
-    const posterior = xs.map((x) => beta.density(x, { a: a + heads, b: b + tails }))
-    const top = Math.max(...posterior, ...prior.filter(Number.isFinite))
+  const series = useMemo(() => {
+    const xs = toFlat(linspace(0.002, 0.998, 400))
+    const priorLaw = Beta(state.a, state.b)
+    const postLaw = Beta(state.a + heads, state.b + tails)
+    const prior = xs.map((x) => priorLaw.prob(x))
+    const posterior = xs.map((x) => postLaw.prob(x))
     return [
-      { name: `prior Beta(${a}, ${b})`, type: 'line', x: xs, y: prior, slot: 0, dashed: true },
-      { name: 'posterior', type: 'line', x: xs, y: posterior, slot: 1, area: true },
-      { name: 'true bias p', type: 'line', x: [p, p], y: [0, top], slot: 2, dashed: true },
-    ]
-  }, [a, b, heads, tails, p])
+      { name: `prior Beta(${state.a}, ${state.b})`, x: xs, y: prior, slot: 0, dashed: true },
+      { name: 'posterior', x: xs, y: posterior, slot: 1 },
+    ] as const
+  }, [state.a, state.b, heads, tails])
 
-  const [lo, hi] = [0.025, 0.975].map((u) => invertCdf((x) => beta.cdf(x, post), u, 0, 1))
+  const postLaw = Beta(post.a, post.b)
+  const [lo, hi] = [0.025, 0.975].map((u) => postLaw.quantile(u))
 
+  const xAxis = useAxis({ label: 'bias p', range: [0, 1] })
+  const yAxis = useAxis({ label: 'density', range: [0, undefined], hold: 'union' })
   return (
-    <Interactive
+    <Figure
       title="Learning a coin's bias"
-      caption="The prior (dashed) is Beta(α, β). Each flip adds 1 to α for heads or to β for tails, and the posterior (shaded) narrows around the true bias. A strong prior, with large α and β, needs more flips to move."
+      state={state}
+      caption="The prior (dashed) is Beta(α, β). Each flip adds 1 to α for heads or to β for tails, and the posterior (shaded) narrows around the true bias. A strong prior, with large α and β, needs more flips to move. Drag the vertical line at the true bias p to change it."
       controls={
         <>
-          <ParamSlider label="prior α" value={a} onChange={setA} min={0.5} max={30} step={0.5} />
-          <ParamSlider label="prior β" value={b} onChange={setB} min={0.5} max={30} step={0.5} />
-          <ParamSlider label="true bias p" value={p} onChange={setP} min={0.05} max={0.95} step={0.05} />
-          <ParamButton onClick={() => setN((v) => Math.min(v + 1, MAX_FLIPS))}>Flip 1</ParamButton>
-          <ParamButton onClick={() => setN((v) => Math.min(v + 10, MAX_FLIPS))}>Flip 10</ParamButton>
-          <ParamButton onClick={() => setN((v) => Math.min(v + 100, MAX_FLIPS))}>Flip 100</ParamButton>
-          <ParamButton onClick={() => setN(0)} disabled={n === 0}>
+          <Button variant="outline" size="sm" onClick={() => setN((v) => Math.min(v + 1, MAX_FLIPS))}>
+            Flip 1
+          </Button>
+          <Button variant="outline" size="sm" onClick={() => setN((v) => Math.min(v + 10, MAX_FLIPS))}>
+            Flip 10
+          </Button>
+          <Button variant="outline" size="sm" onClick={() => setN((v) => Math.min(v + 100, MAX_FLIPS))}>
+            Flip 100
+          </Button>
+          <Button variant="outline" size="sm" onClick={() => setN(0)} disabled={n === 0}>
             Reset
-          </ParamButton>
+          </Button>
         </>
       }
-      readout={
+      readouts={
         <>
           <Readout label="flips" value={`${n} (${heads} heads, ${tails} tails)`} />
           <Readout label="posterior" value={`Beta(${formatNumber(post.a)}, ${formatNumber(post.b)})`} />
@@ -63,7 +84,11 @@ export function CoinPosterior() {
         </>
       }
     >
-      <XYChart height={300} series={series} xLabel="bias p" yLabel="density" xRange={[0, 1]} yRange={[0, undefined]} />
-    </Interactive>
+      <Plot x={xAxis} y={yAxis} height={300}>
+        <Curve {...series[0]} />
+        <Area {...series[1]} />
+        <Handle {...state.handle('p', { label: 'true bias p' })} />
+      </Plot>
+    </Figure>
   )
 }

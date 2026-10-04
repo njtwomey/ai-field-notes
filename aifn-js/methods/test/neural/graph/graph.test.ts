@@ -1,7 +1,7 @@
 /** Semi-supervised node classification on Zachary's karate club: every layer kind learns the split from four labels. */
 import { describe, expect, it } from 'vitest'
-import { karateClub } from 'aifn-applied/data/real'
-import { nodeClassificationRun, type NodeSnapshot } from 'aifn-applied/neural/graph'
+import { karateClub } from 'aifn-methods/data/real'
+import { nodeClassificationRun, type NodeSnapshot } from 'aifn-methods/neural/graph'
 
 const last = <T>(g: Generator<T>): T => {
   let out: T | undefined

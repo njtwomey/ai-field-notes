@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { classifierOutputs } from 'aifn-applied/data/synthetic'
+import { classifierOutputs } from 'aifn-methods/data/synthetic'
 import { stream } from 'aifn/foundation/random'
 import { tensor, toFlat, toRows, type Tensor } from 'aifn/foundation/tensor'
 import {

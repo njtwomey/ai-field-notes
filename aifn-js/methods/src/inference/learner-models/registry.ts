@@ -1,5 +1,5 @@
 /**
- * The registry of `aifn-applied/inference/learner-models`.
+ * The registry of `aifn-methods/inference/learner-models`.
  */
 
 import { definer, entries, type Entry, type FunctionInfo } from 'aifn/foundation/registry'

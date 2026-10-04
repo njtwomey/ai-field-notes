@@ -1,22 +1,25 @@
-import { useMemo, useState } from 'react'
+import { useMemo } from 'react'
 import {
-  Interactive,
-  ParamButton,
-  ParamSlider,
-  Readout,
-  XYChart,
+  Curve,
+  Figure,
+  float,
   formatNumber,
-  useParam,
-  type Handle,
-  type XYSeries,
+  Handle,
+  int,
+  Plot,
+  Points,
+  Readout,
+  useAxis,
+  useFigureState,
 } from 'aifn-render'
-import { linspace, rng } from '@/lib/math'
 import { evaluate, logDet, makeBasis, penalise, smooth } from '../../regression/nonlinear-regression/_shared/splines'
+import { linspace, toFlat } from 'aifn/foundation/tensor'
+import { normal, stream, uniform } from 'aifn/foundation/random'
 
 const N = 100
 const KNOTS = Array.from({ length: 16 }, (_, i) => (i + 1) / 17)
-const LOG_LAMBDAS = linspace(-8, 1, 37)
-const GRID = linspace(0, 1, 101)
+const LOG_LAMBDAS = toFlat(linspace(-8, 1, 37))
+const GRID = toFlat(linspace(0, 1, 101))
 const truth = (x: number) => Math.sin(2 * Math.PI * x)
 
 /** Rescale a criterion to [0, 1] over the grid so that GCV and REML share one axis. */
@@ -27,16 +30,18 @@ const unit = (v: number[]) => {
 }
 
 export function SmoothingSelection() {
-  const [noise, setNoise] = useState(0.3)
-  const [seed, setSeed] = useState(5)
-  const logLambda = useParam(-3, { min: -8, max: 1, step: 0.05 })
+  const state = useFigureState({
+    logLambda: float(-3, { min: -8, max: 1, step: 0.05, label: 'log₁₀ λ', format: (v) => v.toFixed(2) }),
+    noise: float(0.3, { min: 0.05, max: 1.5, step: 0.05, label: 'noise σ' }),
+    seed: int(5, { ge: 0, label: 'seed' }),
+  })
 
   const data = useMemo(() => {
-    const r = rng(seed)
-    const x = Array.from({ length: N }, () => r.uniform())
-    const eps = Array.from({ length: N }, () => r.normal())
-    return { x, y: x.map((xi, i) => truth(xi) + noise * eps[i]) }
-  }, [seed, noise])
+    const r = stream(state.seed)
+    const x = Array.from({ length: N }, () => uniform(r))
+    const eps = Array.from({ length: N }, () => normal(r))
+    return { x, y: x.map((xi, i) => truth(xi) + state.noise * eps[i]) }
+  }, [state.seed, state.noise])
   const basis = useMemo(() => makeBasis(data.x, KNOTS, 0, 1), [data])
   const p = basis.BtB.length
 
@@ -58,23 +63,27 @@ export function SmoothingSelection() {
     return { gcv: unit(gcv), reml: unit(reml), gcvBest: best(gcv), remlBest: best(reml) }
   }, [basis, data, p])
 
-  const smoother = useMemo(() => penalise(basis, 10 ** logLambda.value), [basis, logLambda.value])
+  const smoother = useMemo(() => penalise(basis, 10 ** state.logLambda), [basis, state.logLambda])
   const fit = useMemo(() => smooth(smoother, data.y), [smoother, data])
 
-  const criteria: XYSeries[] = [
-    { name: 'GCV', type: 'line', x: LOG_LAMBDAS, y: curves.gcv, slot: 0 },
-    { name: 'REML', type: 'line', x: LOG_LAMBDAS, y: curves.reml, slot: 1 },
-  ]
-  const handles: Handle[] = [{ kind: 'x', at: logLambda.value, label: 'λ', onDrag: logLambda.set }]
-  const fitSeries: XYSeries[] = [
-    { name: 'data', type: 'scatter', x: data.x, y: data.y, muted: true },
-    { name: 'true curve', type: 'line', x: GRID, y: GRID.map(truth), slot: 2, dashed: true },
-    { name: 'fit at chosen λ', type: 'line', x: GRID, y: evaluate(smoother, fit.coef, GRID), slot: 3 },
-  ]
+  const criteria = [
+    { name: 'GCV', x: LOG_LAMBDAS, y: curves.gcv, slot: 0 },
+    { name: 'REML', x: LOG_LAMBDAS, y: curves.reml, slot: 1 },
+  ] as const
+  const fitSeries = [
+    { name: 'data', x: data.x, y: data.y, muted: true },
+    { name: 'true curve', x: GRID, y: GRID.map(truth), slot: 2, dashed: true },
+    { name: 'fit at chosen λ', x: GRID, y: evaluate(smoother, fit.coef, GRID), slot: 3 },
+  ] as const
 
+  const xAxis = useAxis({ label: 'log₁₀ λ', range: [-8, 1] })
+  const yAxis = useAxis({ label: 'criterion (rescaled)', range: [0, 1] })
+  const xAxis2 = useAxis({ label: 'x', range: [0, 1] })
+  const yAxis2 = useAxis({ label: 'y', range: [-3, 3] })
   return (
-    <Interactive
+    <Figure
       title="Choosing λ by GCV and REML"
+      state={state}
       caption={
         <>
           A penalised cubic spline with 20 basis functions fitted to 100 noisy points. The left panel plots both
@@ -83,14 +92,8 @@ export function SmoothingSelection() {
           then lands on a much smaller λ that follows the noise.
         </>
       }
-      controls={
-        <>
-          <ParamSlider label="log₁₀ λ" param={logLambda} format={(v) => v.toFixed(2)} />
-          <ParamSlider label="noise σ" value={noise} onChange={setNoise} min={0.05} max={1.5} step={0.05} />
-          <ParamButton onClick={() => setSeed((s) => s + 1)}>New sample</ParamButton>
-        </>
-      }
-      readout={
+
+      readouts={
         <>
           <Readout label="effective df" value={formatNumber(smoother.edf)} />
           <Readout label="GCV best log₁₀ λ" value={curves.gcvBest.toFixed(2)} />
@@ -99,17 +102,17 @@ export function SmoothingSelection() {
       }
     >
       <div className="grid gap-2 md:grid-cols-2">
-        <XYChart
-          series={criteria}
-          xRange={[-8, 1]}
-          yRange={[0, 1]}
-          xLabel="log₁₀ λ"
-          yLabel="criterion (rescaled)"
-          handles={handles}
-          height={260}
-        />
-        <XYChart series={fitSeries} xRange={[0, 1]} yRange={[-3, 3]} xLabel="x" yLabel="y" height={260} />
+        <Plot x={xAxis} y={yAxis} height={260}>
+          <Curve {...criteria[0]} />
+          <Curve {...criteria[1]} />
+          <Handle {...state.handle('logLambda', { label: 'λ' })} />
+        </Plot>
+        <Plot x={xAxis2} y={yAxis2} height={260}>
+          <Points {...fitSeries[0]} />
+          <Curve {...fitSeries[1]} />
+          <Curve {...fitSeries[2]} />
+        </Plot>
       </div>
-    </Interactive>
+    </Figure>
   )
 }

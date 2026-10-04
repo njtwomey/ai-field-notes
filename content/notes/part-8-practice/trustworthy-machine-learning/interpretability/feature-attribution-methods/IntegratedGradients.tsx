@@ -1,15 +1,20 @@
 import { useMemo } from 'react'
 import {
-  Heatmap,
-  Interactive,
-  ParamSlider,
-  Readout,
+  Curve,
+  Figure,
+  float,
   formatNumber,
-  useParam,
-  type Handle,
-  type HeatmapOverlay,
+  Handle,
+  int,
+  Plot,
+  Points,
+  Raster,
+  Readout,
+  useAxis,
+  useFigureState,
 } from 'aifn-render'
-import { linspace, sigmoid } from '@/lib/math'
+import { linspace, toFlat } from 'aifn/foundation/tensor'
+import { sigmoid } from 'aifn/numerics/special'
 
 // A small nonlinear model with an interaction term: f(x) = σ(2 x₁ + x₂ + 1.5 x₁ x₂ − 1).
 const score = (x1: number, x2: number) => 2 * x1 + x2 + 1.5 * x1 * x2 - 1
@@ -22,7 +27,7 @@ function grad(x1: number, x2: number): [number, number] {
 
 const LO = -2
 const HI = 2
-const AXIS = linspace(LO, HI, 41)
+const AXIS = toFlat(linspace(LO, HI, 41))
 const GRID = AXIS.map((y) => AXIS.map((x) => f(x, y)))
 const RANGE: [number, number] = [0, 1]
 
@@ -31,60 +36,54 @@ const RANGE: [number, number] = [0, 1]
  * The input and the baseline are draggable; the readouts compare the attributions' sum with f(x) − f(baseline).
  */
 export function IntegratedGradients() {
-  const x1 = useParam(1.5, { min: LO, max: HI, step: 0.05 })
-  const x2 = useParam(1, { min: LO, max: HI, step: 0.05 })
-  const b1 = useParam(0, { min: LO, max: HI, step: 0.05 })
-  const b2 = useParam(0, { min: LO, max: HI, step: 0.05 })
-  const steps = useParam(8, { min: 1, max: 64, step: 1 })
+  const state = useFigureState({
+    steps: int(8, { min: 1, max: 64, step: 1, label: 'Riemann steps m' }),
+    x1: float(1.5, { min: LO, max: HI, step: 0.05, label: 'input x₁' }),
+    x2: float(1, { min: LO, max: HI, step: 0.05, label: 'input x₂' }),
+    b1: float(0, { min: LO, max: HI, step: 0.05, label: 'baseline x′₁' }),
+    b2: float(0, { min: LO, max: HI, step: 0.05, label: 'baseline x′₂' }),
+  })
 
   const ig = useMemo(() => {
-    const d1 = x1.value - b1.value
-    const d2 = x2.value - b2.value
+    const d1 = state.x1 - state.b1
+    const d2 = state.x2 - state.b2
     let s1 = 0
     let s2 = 0
     const px: number[] = []
     const py: number[] = []
-    for (let k = 0; k < steps.value; k++) {
-      const a = (k + 0.5) / steps.value
-      const p1 = b1.value + a * d1
-      const p2 = b2.value + a * d2
+    for (let k = 0; k < state.steps; k++) {
+      const a = (k + 0.5) / state.steps
+      const p1 = state.b1 + a * d1
+      const p2 = state.b2 + a * d2
       const [g1, g2] = grad(p1, p2)
       s1 += g1
       s2 += g2
       px.push(p1)
       py.push(p2)
     }
-    return { a1: (d1 * s1) / steps.value, a2: (d2 * s2) / steps.value, px, py }
-  }, [x1.value, x2.value, b1.value, b2.value, steps.value])
+    return { a1: (d1 * s1) / state.steps, a2: (d2 * s2) / state.steps, px, py }
+  }, [state.x1, state.x2, state.b1, state.b2, state.steps])
 
-  const [g1, g2] = grad(x1.value, x2.value)
-  const gxi1 = (x1.value - b1.value) * g1
-  const gxi2 = (x2.value - b2.value) * g2
-  const delta = f(x1.value, x2.value) - f(b1.value, b2.value)
+  const [g1, g2] = grad(state.x1, state.x2)
+  const gxi1 = (state.x1 - state.b1) * g1
+  const gxi2 = (state.x2 - state.b2) * g2
+  const delta = f(state.x1, state.x2) - f(state.b1, state.b2)
 
-  const overlay: HeatmapOverlay[] = [
-    { name: 'path', type: 'line', x: [b1.value, x1.value], y: [b2.value, x2.value] },
-    { name: 'Riemann points', type: 'scatter', x: ig.px, y: ig.py },
-  ]
-  const handles: Handle[] = [
-    { kind: 'point', at: [x1.value, x2.value], label: 'input x', onDrag: ([a, b]) => (x1.set(a), x2.set(b)) },
-    { kind: 'point', at: [b1.value, b2.value], label: 'baseline', onDrag: ([a, b]) => (b1.set(a), b2.set(b)) },
-  ]
+  const overlay = [
+    { name: 'path', x: [state.b1, state.x1], y: [state.b2, state.x2] },
+    { name: 'Riemann points', x: ig.px, y: ig.py },
+  ] as const
 
+  const xAxis = useAxis({ label: 'x₁' })
+  const yAxis = useAxis({ label: 'x₂' })
   return (
-    <Interactive
+    <Figure
       title="Integrated gradients on a two-feature model"
+      purpose="Drag the input and the baseline and change the number of Riemann steps to see how integrated gradients split the change in output between the two features."
+      state={state}
       caption="The background is the model output f(x) = σ(2x₁ + x₂ + 1.5x₁x₂ − 1). Drag the input and the baseline. Integrated gradients average the gradient at the Riemann points along the straight path and multiply by the displacement. Their sum approaches f(x) − f(baseline) as the number of steps grows. Gradient × (x − baseline) uses only the gradient at the input, so it misses most of the change when the input sits where the sigmoid has flattened."
-      controls={
-        <>
-          <ParamSlider label="Riemann steps m" param={steps} format={(v) => String(v)} />
-          <ParamSlider label="input x₁" param={x1} />
-          <ParamSlider label="input x₂" param={x2} />
-          <ParamSlider label="baseline x′₁" param={b1} />
-          <ParamSlider label="baseline x′₂" param={b2} />
-        </>
-      }
-      readout={
+
+      readouts={
         <>
           <Readout label="f(x) − f(x′)" value={formatNumber(delta)} />
           <Readout label="IG₁, IG₂" value={`${formatNumber(ig.a1)}, ${formatNumber(ig.a2)}`} />
@@ -93,19 +92,27 @@ export function IntegratedGradients() {
         </>
       }
     >
-      <Heatmap
-        x={AXIS}
-        y={AXIS}
-        z={GRID}
-        range={RANGE}
-        scale="sequential"
-        xLabel="x₁"
-        yLabel="x₂"
-        valueLabel="f(x)"
-        overlay={overlay}
-        handles={handles}
-        ariaLabel="Heatmap of a two-feature model with the straight path from a baseline to an input"
-      />
-    </Interactive>
+      <Plot
+        x={xAxis}
+        y={yAxis}
+        ariaLabel={'Heatmap of a two-feature model with the straight path from a baseline to an input'}
+      >
+        <Raster x={AXIS} y={AXIS} z={GRID} scale={'sequential'} range={RANGE} valueLabel={'f(x)'} />
+        <Curve {...overlay[0]} live />
+        <Points {...overlay[1]} live />
+        <Handle
+          kind="point"
+          at={[state.x1, state.x2]}
+          label="input x"
+          onDrag={([a, b]) => (state.set('x1', a), state.set('x2', b))}
+        />
+        <Handle
+          kind="point"
+          at={[state.b1, state.b2]}
+          label="baseline"
+          onDrag={([a, b]) => (state.set('b1', a), state.set('b2', b))}
+        />
+      </Plot>
+    </Figure>
   )
 }

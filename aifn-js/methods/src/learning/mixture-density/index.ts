@@ -1,5 +1,5 @@
 /**
- * `aifn-applied/learning/mixture-density`: the mixture density network (Bishop, 1994): an MLP whose outputs are the
+ * `aifn-methods/learning/mixture-density`: the mixture density network (Bishop, 1994): an MLP whose outputs are the
  * weights, means and scales of a Gaussian mixture over the target, trained on the mixture negative log-likelihood of
  * `aifn/learning/losses` (`mdnModel`, `mdnLoss`, `mdnPredict`); the squared-error network of the same body for
  * comparison; `mdnTraining` (Adam, a step-through algorithm); `mixtureDensityRun`, a streaming run that trains both side

@@ -1,7 +1,7 @@
 /**
  * Box–Cox and Yeo–Johnson power transforms, with λ chosen by maximum likelihood, as scipy's `boxcox`/`yeojohnson` and
  * `boxcox_normmax`. The column transformer built on them (scikit-learn's `PowerTransformer`) is an application:
- * `powerTransform` in `aifn-applied/learning`.
+ * `powerTransform` in `aifn-methods/learning`.
  */
 
 import type { Scalar } from 'aifn/foundation/contracts'

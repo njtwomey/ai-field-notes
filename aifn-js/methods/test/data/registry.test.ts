@@ -7,9 +7,9 @@ import {
   modify,
   objectiveRegistry,
   type Dataset,
-} from 'aifn-applied/data'
-import { fontDatasetRegistry } from 'aifn-applied/data/real/fonts'
-import { moons, regression1d } from 'aifn-applied/data/synthetic'
+} from 'aifn-methods/data'
+import { fontDatasetRegistry } from 'aifn-methods/data/real/fonts'
+import { moons, regression1d } from 'aifn-methods/data/synthetic'
 import { child, stream } from 'aifn/foundation/random'
 import { defaults } from 'aifn/foundation/space'
 import { isTensor, toFlat } from 'aifn/foundation/tensor'

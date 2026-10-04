@@ -1,24 +1,26 @@
 import { useMemo, useState } from 'react'
-import { MathText } from 'aifn-render'
 import {
-  Interactive,
-  ParamChoice,
-  ParamSlider,
-  Readout,
-  XYChart,
+  choice,
+  Curve,
+  Figure,
   formatNumber,
-  type Handle,
-  type XYSeries,
+  Handle,
+  int,
+  MathText,
+  Plot,
+  Readout,
+  useAxis,
+  useFigureState,
 } from 'aifn-render'
-import { linspace } from '@/lib/math'
 import { intervalOf, softplus } from '../_shared/ordinal'
+import { linspace, toFlat } from 'aifn/foundation/tensor'
 
 type Surrogate = 'hinge' | 'logistic'
 const SURROGATES = [
   { value: 'hinge' as const, label: 'hinge' },
   { value: 'logistic' as const, label: 'logistic' },
 ]
-const S = linspace(-6, 6, 481)
+const S = toFlat(linspace(-6, 6, 481))
 const GAP = 0.2
 
 /** The surrogate penalty for a margin z: the score should sit on the correct side of a threshold by z. */
@@ -44,8 +46,10 @@ function losses(kind: Surrogate, th: number[], y: number, s: number) {
  * past the neighbouring thresholds.
  */
 export function ThresholdLosses() {
-  const [kind, setKind] = useState<Surrogate>('hinge')
-  const [y, setY] = useState(2)
+  const state = useFigureState({
+    y: int(2, { min: 1, max: 5, step: 1, label: 'true class y' }),
+    kind: choice<Surrogate>(SURROGATES, 'hinge', { label: 'surrogate' }),
+  })
   const [theta, setTheta] = useState([-3, -1, 1, 3])
 
   const setThreshold = (j: number) => (v: number) =>
@@ -58,33 +62,31 @@ export function ThresholdLosses() {
     })
 
   const [t0, t1, t2, t3] = theta
-  const series = useMemo<XYSeries[]>(() => {
+  const series = useMemo(() => {
     const th = [t0, t1, t2, t3]
-    const rows = S.map((s) => losses(kind, th, y - 1, s))
+    const rows = S.map((s) => losses(state.kind, th, state.y - 1, s))
     return [
-      { name: 'all threshold', type: 'line', x: S, y: rows.map((r) => r.all), slot: 0 },
-      { name: 'immediate threshold', type: 'line', x: S, y: rows.map((r) => r.immediate), slot: 1 },
-      { name: 'absolute error', type: 'line', x: S, y: rows.map((r) => r.error), slot: 2, dashed: true },
-    ]
-  }, [kind, y, t0, t1, t2, t3])
+      { name: 'all threshold', x: S, y: rows.map((r) => r.all), slot: 0 },
+      { name: 'immediate threshold', x: S, y: rows.map((r) => r.immediate), slot: 1 },
+      { name: 'absolute error', x: S, y: rows.map((r) => r.error), slot: 2, dashed: true },
+    ] as const
+  }, [state.kind, state.y, t0, t1, t2, t3])
 
   const handles: Handle[] = theta.map((t, j) => ({ kind: 'x', at: t, label: `θ${j + 1}`, onDrag: setThreshold(j) }))
   // A score far into the worst class, to compare how the two losses grow with distance.
-  const far = losses(kind, theta, y - 1, y <= 3 ? 5.5 : -5.5)
+  const far = losses(state.kind, theta, state.y - 1, state.y <= 3 ? 5.5 : -5.5)
 
+  const xAxis = useAxis({ label: 'score s', range: [-6, 6] })
+  const yAxis = useAxis({ label: 'loss', range: [0, undefined], hold: 'union' })
   return (
-    <Interactive
+    <Figure
       title="Immediate-threshold and all-threshold losses"
+      state={state}
       caption={
         <MathText text="Five classes and thresholds $\theta_1 < \dots < \theta_4$. For the chosen true class, the chart plots each loss against the score $s$; the dashed step is the absolute error of the class $s$ falls in. Immediate-threshold only penalises the two thresholds that bound the true class, so its slope stays the same however many thresholds $s$ crosses. All-threshold adds a penalty for every threshold on the wrong side, so its slope rises by one at each threshold crossed. With the hinge it never falls below the absolute error; with the logistic surrogate it never falls below $\log 2$ times the absolute error. Drag the thresholds." />
       }
-      controls={
-        <>
-          <ParamSlider label="true class y" value={y} onChange={setY} min={1} max={5} step={1} />
-          <ParamChoice label="surrogate" value={kind} onChange={setKind} options={SURROGATES} />
-        </>
-      }
-      readout={
+
+      readouts={
         <>
           <Readout label="at the far end: absolute error" value={far.error} />
           <Readout label="all threshold" value={formatNumber(far.all)} />
@@ -92,16 +94,14 @@ export function ThresholdLosses() {
         </>
       }
     >
-      <XYChart
-        series={series}
-        handles={handles}
-        xRange={[-6, 6]}
-        yRange={[0, undefined]}
-        xLabel="score s"
-        yLabel="loss"
-        height={320}
-        ariaLabel="Threshold losses against the score"
-      />
-    </Interactive>
+      <Plot x={xAxis} y={yAxis} height={320} ariaLabel={'Threshold losses against the score'}>
+        <Curve {...series[0]} />
+        <Curve {...series[1]} />
+        <Curve {...series[2]} />
+        {(handles ?? []).map((h, i) => (
+          <Handle key={i} {...h} />
+        ))}
+      </Plot>
+    </Figure>
   )
 }

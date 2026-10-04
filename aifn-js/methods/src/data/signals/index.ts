@@ -1,5 +1,5 @@
 /**
- * `aifn-applied/data/signals`: test signals: chirps and tones; and registered generators of series with a known power
+ * `aifn-methods/data/signals`: test signals: chirps and tones; and registered generators of series with a known power
  * spectrum (`SpectralTruth`): sinusoids in noise, AR and ARMA processes, unevenly sampled sinusoids and a coupled
  * pair with known coherence; deterministic test signals: the Donoho–Johnstone test functions and a synthetic voiced
  * sound with its true f₀.

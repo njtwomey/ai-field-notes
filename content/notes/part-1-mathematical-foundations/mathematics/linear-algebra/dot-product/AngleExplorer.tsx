@@ -1,6 +1,16 @@
 import { useMemo, useState } from 'react'
-import { Interactive, Readout, XYChart, formatNumber, type Handle, type XYSeries } from 'aifn-render'
-import { linspace } from '@/lib/math'
+import {
+  Figure,
+  formatNumber,
+  Handle,
+  Plot,
+  Readout,
+  seriesLayers,
+  type SeriesSpec,
+  useAxis,
+  Vectors,
+} from 'aifn-render'
+import { linspace, toFlat } from 'aifn/foundation/tensor'
 
 type Vec = [number, number]
 const R = 4
@@ -18,7 +28,7 @@ export function AngleExplorer() {
     const ok = nx > 1e-9 && ny > 1e-9
     const cos = ok ? dot / (nx * ny) : NaN
     const theta = ok ? Math.acos(Math.min(1, Math.max(-1, cos))) : NaN
-    const series: XYSeries[] = []
+    const series: SeriesSpec[] = []
     if (ok) {
       // Foot of the perpendicular from y onto the line through x.
       const foot: Vec = [(dot / (nx * nx)) * x[0], (dot / (nx * nx)) * x[1]]
@@ -37,7 +47,7 @@ export function AngleExplorer() {
       // The angle as a small arc, turning from x towards y the short way.
       const a = Math.atan2(x[1], x[0])
       const cross = x[0] * y[1] - x[1] * y[0]
-      const ts = linspace(0, theta, 40)
+      const ts = toFlat(linspace(0, theta, 40))
       const arc = Math.min(0.6, 0.35 * Math.min(nx, ny))
       series.push({
         name: 'angle θ',
@@ -50,16 +60,13 @@ export function AngleExplorer() {
     return { dot, nx, ny, cos, theta, series }
   }, [x, y])
 
-  const handles: Handle[] = [
-    { kind: 'point', at: x, label: 'x', onDrag: ([a, b]) => setX([clamp(a), clamp(b)]) },
-    { kind: 'point', at: y, label: 'y', onDrag: ([a, b]) => setY([clamp(a), clamp(b)]) },
-  ]
-
+  const xAxis = useAxis({ label: 'x₁', range: [-R, R] })
+  const yAxis = useAxis({ label: 'x₂', range: [-R, R], equal: xAxis })
   return (
-    <Interactive
+    <Figure
       title="Alignment, length and angle"
       caption="Drag the tips of x and y. The solid segment along the dashed line is the shadow of y on the line through x; its signed length is ‖y‖ cos θ, and the dot product is that length times ‖x‖. At a right angle the shadow vanishes and the dot product is 0. Past a right angle the shadow points backwards and the dot product turns negative. Cosine similarity stays the same when either vector is stretched."
-      readout={
+      readouts={
         <>
           <Readout label="xᵀy" value={formatNumber(r.dot)} />
           <Readout label="‖x‖" value={formatNumber(r.nx)} />
@@ -74,20 +81,18 @@ export function AngleExplorer() {
     >
       {/* Equal-aspect charts take their height from their width; keep square plots a readable size. */}
       <div className="mx-auto w-full max-w-lg">
-        <XYChart
-          equalAspect
-          xRange={[-R, R]}
-          yRange={[-R, R]}
-          xLabel="x₁"
-          yLabel="x₂"
-          series={r.series}
-          vectors={[
-            { from: [0, 0], to: x },
-            { from: [0, 0], to: y },
-          ]}
-          handles={handles}
-        />
+        <Plot x={xAxis} y={yAxis}>
+          {seriesLayers(r.series)}
+          <Vectors
+            vectors={[
+              { from: [0, 0], to: x },
+              { from: [0, 0], to: y },
+            ]}
+          />
+          <Handle kind="point" at={x} label="x" onDrag={([a, b]) => setX([clamp(a), clamp(b)])} />
+          <Handle kind="point" at={y} label="y" onDrag={([a, b]) => setY([clamp(a), clamp(b)])} />
+        </Plot>
       </div>
-    </Interactive>
+    </Figure>
   )
 }

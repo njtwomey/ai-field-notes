@@ -1,5 +1,5 @@
 /**
- * The registry of `aifn-applied/neural/ode-mixtures`: stochastic vector field mixtures, their losses, realised paths
+ * The registry of `aifn-methods/neural/ode-mixtures`: stochastic vector field mixtures, their losses, realised paths
  * and per-instance work, the streamed runs and the forward-evaluation study, as functions.
  */
 

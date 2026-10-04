@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { Interactive, Readout, XYChart, formatNumber, type Handle, type Vec2, type XYSeries } from 'aifn-render'
+import { Curve, Figure, formatNumber, Handle, Plot, Points, Readout, useAxis, type Vec2 } from 'aifn-render'
 
 const BASE_X = [1, 2, 3, 4, 5, 6, 7, 8]
 const BASE_Y = [3.1, 3.9, 6.8, 6.2, 9.5, 10.1, 13.4, 12.9]
@@ -40,37 +40,28 @@ export function InfluenceDrag() {
     const cook = (rStd * rStd * h) / (P * (1 - h))
     const dfbetas = (f.slope - BASE_FIT.slope) / Math.sqrt(s2i / f.sxx)
     const line = (a: number, b: number) => X_RANGE.map((xv) => a + b * xv)
-    const series: XYSeries[] = [
-      { name: 'fixed points', type: 'scatter', x: BASE_X, y: BASE_Y, slot: 0 },
-      { name: 'fit with the movable point', type: 'line', x: X_RANGE, y: line(f.intercept, f.slope), slot: 1 },
+    const series = [
+      { name: 'fixed points', x: BASE_X, y: BASE_Y, slot: 0 },
+      { name: 'fit with the movable point', x: X_RANGE, y: line(f.intercept, f.slope), slot: 1 },
       {
         name: 'fit without it',
-        type: 'line',
         x: X_RANGE,
         y: line(BASE_FIT.intercept, BASE_FIT.slope),
         muted: true,
         dashed: true,
       },
-      { name: 'movable point', type: 'scatter', x: [pt[0]], y: [pt[1]], emphasis: true },
-    ]
+      { name: 'movable point', x: [pt[0]], y: [pt[1]], emphasis: true },
+    ] as const
     return { h, tExt, cook, dfbetas, slope: f.slope, series }
   }, [pt])
 
-  const handles: Handle[] = [
-    {
-      kind: 'point',
-      at: pt,
-      label: 'movable point',
-      onDrag: ([x, y]) =>
-        setPt([Math.min(Math.max(x, X_RANGE[0]), X_RANGE[1]), Math.min(Math.max(y, Y_RANGE[0]), Y_RANGE[1])]),
-    },
-  ]
-
+  const xAxis = useAxis({ label: 'x', range: X_RANGE })
+  const yAxis = useAxis({ label: 'y', range: Y_RANGE })
   return (
-    <Interactive
+    <Figure
       title="Leverage, outliers and influence"
       caption="Drag the dark point anywhere on the plot. Its leverage h depends only on how far its x lies from the mean of x. A high-leverage point on the line of the other points changes nothing (Cook's distance near 0). The same point moved off the line drags the fit toward it (Cook's distance far above 1). A point near the centre with a large residual is an outlier but moves the slope little."
-      readout={
+      readouts={
         <>
           <Readout label="leverage h" value={formatNumber(r.h)} />
           <Readout label="studentised residual" value={formatNumber(r.tExt)} />
@@ -80,15 +71,20 @@ export function InfluenceDrag() {
         </>
       }
     >
-      <XYChart
-        height={320}
-        series={r.series}
-        xRange={X_RANGE}
-        yRange={Y_RANGE}
-        xLabel="x"
-        yLabel="y"
-        handles={handles}
-      />
-    </Interactive>
+      <Plot x={xAxis} y={yAxis} height={320}>
+        <Points {...r.series[0]} />
+        <Curve {...r.series[1]} />
+        <Curve {...r.series[2]} />
+        <Points {...r.series[3]} />
+        <Handle
+          kind="point"
+          at={pt}
+          label="movable point"
+          onDrag={([x, y]) =>
+            setPt([Math.min(Math.max(x, X_RANGE[0]), X_RANGE[1]), Math.min(Math.max(y, Y_RANGE[0]), Y_RANGE[1])])
+          }
+        />
+      </Plot>
+    </Figure>
   )
 }

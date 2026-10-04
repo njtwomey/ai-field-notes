@@ -26,7 +26,7 @@ const ROLES = ['transform', 'estimator', 'test', 'construction', 'property', 'fi
 it('every application function is a function named by its key, with a role and real links', async () => {
   const found = new Map<unknown, string>()
   for (const mod of modules.sort()) {
-    const ns = (await import(`aifn-applied/${mod}`)) as Record<string, unknown>
+    const ns = (await import(`aifn-methods/${mod}`)) as Record<string, unknown>
     for (const v of Object.values(ns)) {
       const candidates =
         v !== null && typeof v === 'object' && !isEntry(v) && Object.getPrototypeOf(v) === Object.prototype

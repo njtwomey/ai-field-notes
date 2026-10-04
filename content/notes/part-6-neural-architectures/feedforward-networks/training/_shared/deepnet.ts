@@ -6,7 +6,7 @@
  * h_l = h_{l-1} + α (gain / √n) W_l φ(h_{l-1}), whose branch output has mean zero. The backward pass starts from a
  * random N(0, 1) gradient at the top and applies the chain rule down to the input. No biases.
  */
-import { rng } from '@/lib/math'
+import { normal, stream } from 'aifn/foundation/random'
 
 export const WIDTH = 128
 export const BATCH = 32
@@ -41,8 +41,8 @@ export const INIT_LABEL: Record<InitScheme, string> = {
 export type Draws = { weights: Float64Array[]; input: Float64Array; topGrad: Float64Array }
 
 export function draws(seed: number): Draws {
-  const r = rng(seed)
-  const fill = (size: number) => Float64Array.from({ length: size }, r.normal)
+  const g = stream(seed)
+  const fill = (size: number) => Float64Array.from({ length: size }, () => normal(g))
   return {
     weights: Array.from({ length: MAX_DEPTH }, () => fill(WIDTH * WIDTH)),
     input: fill(WIDTH * BATCH),

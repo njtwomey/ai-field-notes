@@ -1,19 +1,8 @@
 import { useMemo, useState } from 'react'
 import { stream } from 'aifn/foundation/random'
 import { trace } from 'aifn/foundation/trace'
-import {
-  beamSearch,
-  greedyDecoding,
-  samplingDecoding,
-  type BeamState,
-  type DecodingState,
-} from 'aifn/nn/decoding'
-import {
-  charCorpus,
-  decodeChars,
-  encodeChars,
-  kneserNey,
-} from 'aifn-applied/neural/language-models'
+import { beamSearch, greedyDecoding, samplingDecoding, type BeamState, type DecodingState } from 'aifn/nn/decoding'
+import { charCorpus, decodeChars, encodeChars, kneserNey } from 'aifn-methods/neural/language-models'
 import {
   Annotation,
   Bars,
@@ -109,7 +98,7 @@ export function DecodingStrategiesExplorer() {
     for (const n of st.tree) byStep.set(n.step, [...(byStep.get(n.step) ?? []), n])
     const y = new Map<number, number>()
     for (const nodes of byStep.values()) {
-      [...nodes].sort((a, b) => b.logProb - a.logProb).forEach((n, r) => y.set(n.id, -r))
+      ;[...nodes].sort((a, b) => b.logProb - a.logProb).forEach((n, r) => y.set(n.id, -r))
     }
     const kept = st.tree.filter((n) => n.kept)
     const pruned = st.tree.filter((n) => !n.kept)
@@ -239,7 +228,7 @@ export function DecodingStrategiesExplorer() {
       caption="Interactive generation from prompt 'mary had a ' over a 4-gram Kneser–Ney language model. For sampling: grey bars represent raw model probabilities; coloured bars show the truncated, temperature-scaled sampling distribution. For beam search: tracked paths with pruned candidates."
     >
       <div className="mb-3 rounded border border-border bg-muted/30 px-3 py-2 font-mono text-sm leading-relaxed break-words whitespace-pre-wrap">
-        <span className="text-muted-foreground font-semibold">Generated: </span>
+        <span className="font-semibold text-muted-foreground">Generated: </span>
         <span className="text-muted-foreground">{decodeChars(CORPUS, promptIds)}</span>
         <span>{decodeChars(CORPUS, current.slice(promptIds.length))}</span>
       </div>
@@ -247,9 +236,19 @@ export function DecodingStrategiesExplorer() {
         <Plot x={bx} y={by} title="Beam search expansion tree">
           <Segments segments={tree.prunedEdges} width={1} />
           <Segments segments={tree.keptEdges} slot={0} width={1.5} />
-          <Points name="pruned" x={tree.pruned.map((n) => n.step)} y={tree.pruned.map((n) => tree.y.get(n.id)!)} muted />
+          <Points
+            name="pruned"
+            x={tree.pruned.map((n) => n.step)}
+            y={tree.pruned.map((n) => tree.y.get(n.id)!)}
+            muted
+          />
           <Points name="kept" x={tree.kept.map((n) => n.step)} y={tree.kept.map((n) => tree.y.get(n.id)!)} slot={0} />
-          <Curve name="best hypothesis" x={tree.bestPath.map((n) => n.step)} y={tree.bestPath.map((n) => tree.y.get(n.id)!)} emphasis />
+          <Curve
+            name="best hypothesis"
+            x={tree.bestPath.map((n) => n.step)}
+            y={tree.bestPath.map((n) => tree.y.get(n.id)!)}
+            emphasis
+          />
           {tree.kept
             .filter((n) => n.step > 0)
             .map((n) => (

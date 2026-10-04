@@ -1,5 +1,4 @@
-import { Interactive } from 'aifn-render'
-import { Diagram } from 'aifn-render'
+import { Diagram, Figure } from 'aifn-render'
 import type { DiagramSpec } from 'aifn-render'
 
 const spec: DiagramSpec = {
@@ -29,7 +28,7 @@ const spec: DiagramSpec = {
 /** Presentation as a confounder: the policy's view of relevance sets exposure, and exposure drives clicks. */
 export function ConfoundingDag() {
   return (
-    <Interactive
+    <Figure
       title="Why logged clicks are confounded"
       caption="True relevance R causes clicks C. The logging policy π₀ decides exposure and position Z from its estimate of relevance and from past popularity P, and Z also causes clicks. A click is therefore correlated with anything that raised an item's position, not only with relevance. Clicks feed the next round's popularity, closing a feedback loop. Shaded nodes are observed; the double circle is latent."
     >
@@ -37,6 +36,6 @@ export function ConfoundingDag() {
         spec={spec}
         ariaLabel="Causal graph: relevance to click, relevance to policy, policy to position, position to click, popularity to policy, click to popularity"
       />
-    </Interactive>
+    </Figure>
   )
 }

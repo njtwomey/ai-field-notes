@@ -3,7 +3,10 @@
  * analog prototypes by the bilinear transform, and group delay. Frequencies are in radians per sample, ω ∈ [0, π].
  * Results match scipy.signal (firwin, kaiserord, kaiser_beta, butter, cheby1, cheby2, group_delay).
  */
-import { kaiser as kaiserWindow, makeWindow, type WindowName } from '@/lib/dsp'
+import { angle, complexAbs, toFlat, type Tensor } from 'aifn/foundation/tensor'
+import { freqz, lfilter } from 'aifn/signal/filters'
+import { getWindow, type WindowName } from 'aifn/signal/windows'
+import { transferFunction } from 'aifn/systems'
 
 type C = { re: number; im: number }
 const c = (re: number, im = 0): C => ({ re, im })
@@ -95,7 +98,7 @@ export function iirLowpass(
 /** Window-method low-pass FIR of `taps` coefficients and cutoff ω_c, scaled to unit gain at DC (scipy.signal.firwin). */
 export function firLowpass(taps: number, cutoff: number, win: WindowName | { kaiser: number } = 'hamming'): number[] {
   const m = (taps - 1) / 2
-  const w = typeof win === 'string' ? makeWindow(win, taps) : kaiserWindow(taps, win.kaiser)
+  const w = toFlat(getWindow(typeof win === 'string' ? win : { name: 'kaiser', beta: win.kaiser }, taps))
   const h = Array.from({ length: taps }, (_, n) => {
     const t = n - m
     const ideal = t === 0 ? cutoff / Math.PI : Math.sin(cutoff * t) / (Math.PI * t)
@@ -127,4 +130,24 @@ export function groupDelay(b: number[], a: number[] = [1], omega: number[]): num
     const ta = div(at(a, w, true), at(a, w, false)).re
     return tb - ta
   })
+}
+
+/** Decibels, 20 log₁₀ of a magnitude, floored at `floor` dB so zeros stay finite. */
+export const db = (magnitude: number, floor = -200) => Math.max(floor, 20 * Math.log10(Math.max(magnitude, 1e-300)))
+
+/** The difference equation a[0] y[n] = Σ b[k] x[n−k] − Σ_{k≥1} a[k] y[n−k], from rest (aifn's lfilter). */
+export const applyFilter = (b: number[], a: number[], x: ArrayLike<number>): number[] =>
+  toFlat(lfilter({ b, a }, x).y as Tensor)
+
+/**
+ * Frequency response H(e^{iω}) = B(e^{iω}) / A(e^{iω}) at `count` frequencies ω from 0 to π inclusive (aifn's freqz):
+ * ω, |H| and the wrapped phase ∠H in radians.
+ */
+export function response(b: number[], a: number[] = [1], count = 512) {
+  const h = freqz(transferFunction(b, a, { dt: 1 }), { n: count, includeNyquist: true, axis: 'rad/sample' })
+  return {
+    omega: toFlat(h.f),
+    magnitude: toFlat(complexAbs(h.values) as Tensor),
+    phase: toFlat(angle(h.values) as Tensor),
+  }
 }

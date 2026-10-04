@@ -9,7 +9,7 @@ import { stream } from 'aifn/foundation/random'
 import { toFlat } from 'aifn/foundation/tensor'
 import { auroc as rocAuc } from 'aifn/learning/metrics'
 import { spearman } from 'aifn/probability/stats'
-import { plantedAnomalies } from 'aifn-applied/data/synthetic'
+import { plantedAnomalies } from 'aifn-methods/data/synthetic'
 import {
   anomalyFunctions,
   anomalyScores,
@@ -28,7 +28,7 @@ import {
   pcaReconstructionScore,
   rankNormalise,
   supportVectorDataDescription,
-} from 'aifn-applied/unsupervised/anomaly'
+} from 'aifn-methods/unsupervised/anomaly'
 import { fixture } from '../../fixtures'
 import { expectInfo } from '../../registry'
 

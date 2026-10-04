@@ -1,16 +1,19 @@
 import { useMemo, useState } from 'react'
 import {
-  Interactive,
-  ParamChoice,
-  ParamSlider,
-  Readout,
-  XYChart,
+  choice,
+  Curve,
+  Figure,
   formatNumber,
-  useParam,
-  type Handle,
-  type XYSeries,
+  Handle,
+  Plot,
+  Points,
+  Readout,
+  Segments,
+  slider,
+  useAxis,
+  useFigureState,
 } from 'aifn-render'
-import { rng } from '@/lib/math'
+import { normal as drawNormal, stream } from 'aifn/foundation/random'
 import { directionField, rk4Step } from '../_shared/ode'
 
 type Field = 'rotation' | 'saddle' | 'sink' | 'pendulum' | 'damped'
@@ -49,7 +52,8 @@ function patch([cx, cy]: [number, number]) {
 }
 
 const CLOUD: [number, number][] = (() => {
-  const { normal } = rng(7)
+  const rs = stream(7)
+  const normal = () => drawNormal(rs)
   return Array.from({ length: 250 }, () => [1.1 * normal(), 1.1 * normal()] as [number, number])
 })()
 
@@ -75,57 +79,61 @@ function area(poly: [number, number][]) {
 }
 
 export function FlowCloud() {
-  const [field, setField] = useState<Field>('pendulum')
-  const time = useParam(2, { min: 0, max: 6, step: 0.1 })
+  const state = useFigureState({
+    field: choice<Field>(
+      (Object.keys(FIELDS) as Field[]).map((k) => ({ value: k, label: FIELDS[k].label })),
+      'pendulum',
+      { label: 'vector field' },
+    ),
+    time: slider(0, 6, 2, { step: 0.1, label: 'time t' }),
+  })
   const [centre, setCentre] = useState<[number, number]>([1, 0.5])
-  const { f, div } = FIELDS[field]
+  const { f, div } = FIELDS[state.field]
 
   const arrows = useMemo(() => directionField(f, RANGE, RANGE, 13, 13), [f])
   const moved = useMemo(() => {
     const p = patch(centre)
-    const boundary = flow(f, p.boundary, time.value)
+    const boundary = flow(f, p.boundary, state.time)
     const path: [number, number][] = [centre]
     const g = (_t: number, q: number[]) => f(q[0], q[1])
     let q: number[] = centre
-    for (let k = 0; k < Math.round(time.value / H); k++) {
+    for (let k = 0; k < Math.round(state.time / H); k++) {
       q = rk4Step(g, 0, q, H)
       if (k % 5 === 4) path.push(q as [number, number])
     }
     return {
       boundary,
-      inside: flow(f, p.inside, time.value),
-      cloud: flow(f, CLOUD, time.value),
+      inside: flow(f, p.inside, state.time),
+      cloud: flow(f, CLOUD, state.time),
       path,
       area: area(boundary),
     }
-  }, [f, centre, time.value])
+  }, [f, centre, state.time])
 
-  const series = useMemo<XYSeries[]>(
-    () => [
-      { name: 'cloud', type: 'scatter', x: moved.cloud.map((p) => p[0]), y: moved.cloud.map((p) => p[1]), muted: true },
-      {
-        name: 'patch boundary',
-        type: 'line',
-        x: [...moved.boundary, moved.boundary[0]].map((p) => p[0]),
-        y: [...moved.boundary, moved.boundary[0]].map((p) => p[1]),
-        slot: 0,
-      },
-      {
-        name: 'patch points',
-        type: 'scatter',
-        x: moved.inside.map((p) => p[0]),
-        y: moved.inside.map((p) => p[1]),
-        slot: 0,
-      },
-      {
-        name: 'path of the centre',
-        type: 'line',
-        x: moved.path.map((p) => p[0]),
-        y: moved.path.map((p) => p[1]),
-        slot: 1,
-      },
-      { name: 'start', type: 'scatter', x: [centre[0]], y: [centre[1]], emphasis: true },
-    ],
+  const series = useMemo(
+    () =>
+      [
+        { name: 'cloud', x: moved.cloud.map((p) => p[0]), y: moved.cloud.map((p) => p[1]), muted: true },
+        {
+          name: 'patch boundary',
+          x: [...moved.boundary, moved.boundary[0]].map((p) => p[0]),
+          y: [...moved.boundary, moved.boundary[0]].map((p) => p[1]),
+          slot: 0,
+        },
+        {
+          name: 'patch points',
+          x: moved.inside.map((p) => p[0]),
+          y: moved.inside.map((p) => p[1]),
+          slot: 0,
+        },
+        {
+          name: 'path of the centre',
+          x: moved.path.map((p) => p[0]),
+          y: moved.path.map((p) => p[1]),
+          slot: 1,
+        },
+        { name: 'start', x: [centre[0]], y: [centre[1]], emphasis: true },
+      ] as const,
     [moved, centre],
   )
   const handles = useMemo<Handle[]>(
@@ -139,24 +147,17 @@ export function FlowCloud() {
     ],
     [centre],
   )
-  const predicted = SIDE * SIDE * Math.exp(div * time.value)
+  const predicted = SIDE * SIDE * Math.exp(div * state.time)
 
+  const xAxis = useAxis({ label: 'x₁', range: RANGE })
+  const yAxis = useAxis({ label: 'x₂', range: RANGE, equal: xAxis })
   return (
-    <Interactive
+    <Figure
       title="A flow moves every point at once"
+      state={state}
       caption="A square patch of points and a Gaussian cloud (grey) are carried by the flow φₜ of the chosen vector field. Step the time to watch the patch stretch, shear and turn. Drag the black point to move where the patch starts. The patch area always equals its starting area times exp(t · div f): it is preserved where the divergence is 0 and shrinks where it is negative."
-      controls={
-        <>
-          <ParamChoice
-            label="vector field"
-            value={field}
-            onChange={setField}
-            options={(Object.keys(FIELDS) as Field[]).map((k) => ({ value: k, label: FIELDS[k].label }))}
-          />
-          <ParamSlider label="time t" param={time} withArrows />
-        </>
-      }
-      readout={
+
+      readouts={
         <>
           <Readout label="div f" value={formatNumber(div)} />
           <Readout label="patch area" value={formatNumber(moved.area)} />
@@ -165,17 +166,18 @@ export function FlowCloud() {
       }
     >
       <div className="mx-auto w-full max-w-lg">
-        <XYChart
-          series={series}
-          segments={arrows}
-          handles={handles}
-          xRange={RANGE}
-          yRange={RANGE}
-          xLabel="x₁"
-          yLabel="x₂"
-          equalAspect
-        />
+        <Plot x={xAxis} y={yAxis}>
+          <Points {...series[0]} />
+          <Curve {...series[1]} />
+          <Points {...series[2]} />
+          <Curve {...series[3]} />
+          <Points {...series[4]} />
+          <Segments segments={arrows} />
+          {(handles ?? []).map((h, i) => (
+            <Handle key={i} {...h} />
+          ))}
+        </Plot>
       </div>
-    </Interactive>
+    </Figure>
   )
 }

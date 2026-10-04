@@ -118,7 +118,10 @@ export function FlashAttentionTiling() {
           <>
             <Readout label="tiles completed" value={`${at.t} of ${at.tiles.length}`} />
             <Readout label="skipped (causal mask)" value={String(at.skipped)} />
-            <Readout label="current tile" value={at.tile ? `[${at.tile.queries.join('..')}, ${at.tile.keys.join('..')}]` : 'done'} />
+            <Readout
+              label="current tile"
+              value={at.tile ? `[${at.tile.queries.join('..')}, ${at.tile.keys.join('..')}]` : 'done'}
+            />
             <Readout label="max error so far" value={worst > 0 ? worst.toExponential(2) : '0.00'} />
           </>
         ),

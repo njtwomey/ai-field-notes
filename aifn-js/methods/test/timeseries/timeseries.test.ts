@@ -24,7 +24,7 @@ import {
   stateSpaceEm,
   stl,
   undifference,
-} from 'aifn-applied/timeseries'
+} from 'aifn-methods/timeseries'
 import { simulateStateSpace } from 'aifn/inference/filtering'
 // The statsmodels/scipy references live in core's `inference/filtering` fixture (generated with the Kalman checks).
 import { fixture } from '../../../core/test/fixtures'

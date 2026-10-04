@@ -175,7 +175,7 @@ agents, { replicates, steps, stream?, points? })` runs replicate k of every agen
   `encode(state)`, `decode(x)`. x and u are vectors; both functions are written with tensor primitives, so they
   accept traced values: `jacobian`, `grad`, and later iLQR and MPC differentiate through them.
   `AgentRequires.model` takes `'dynamics'`.
-- **`pendulumEnvironment(options)`** (`aifn-applied/gym/environments/control`) is Gymnasium's `Pendulum-v1`: state
+- **`pendulumEnvironment(options)`** (`aifn-methods/gym/environments/control`) is Gymnasium's `Pendulum-v1`: state
   (θ, θ̇) with θ = 0 upright; observation box (cos θ, sin θ, θ̇) ∈ [−1, 1]² × [−8, 8]; θ̈ = (3g/2l) sin θ + (3/ml²) u
   − c θ̇ with g = 10, m = l = 1 and damping c = 0 by default; reward −(θ² + 0.1 θ̇² + 0.001 u²) with θ wrapped to
   [−π, π) and u clipped; horizon 200 steps of dt = 0.05 s; reset θ ~ U[−π, π), θ̇ ~ U[−1, 1), or a fixed `start`.
@@ -187,7 +187,7 @@ agents, { replicates, steps, stream?, points? })` runs replicate k of every agen
   θ̇ ← θ̇ + dt θ̈ and then θ ← θ + dt θ̇, so trajectories agree to O(dt) per step but not exactly. RK4 was chosen because
   it is core's traceable solver and keeps the unforced, undamped energy to O(dt⁴) per unit time.
   `step` calls `model.transition`, so the simulated and the modelled dynamics are one definition.
-- **Agents** (`aifn-applied/gym/agents/control`): `lineariseDynamics(model, x̄, ū)` gives A = ∂f/∂x and B = ∂f/∂u of the
+- **Agents** (`aifn-methods/gym/agents/control`): `lineariseDynamics(model, x̄, ū)` gives A = ∂f/∂x and B = ∂f/∂u of the
   discrete transition by `jacobian`; `pendulumLqr` solves `dlqr` (`aifn/dynamics/control`) with Q = diag(1, 0.1) and
   R = 0.001 (the reward's weights). `swingUpAgent({ swingUp, energyGain, switchAngle, r })` reads the plant and solves the gain in `init(env)`, then pumps energy with
   u = k (e* − e) sign(θ̇) (Åström and Furuta, 2000) and hands over to u = −K (θ, θ̇) once |θ| < 0.6. With
@@ -202,7 +202,7 @@ agents, { replicates, steps, stream?, points? })` runs replicate k of every agen
 
 ### 3c. Classic control: the cart-pole (2026-10-01)
 
-- **`cartPoleEnvironment(options)`** (`aifn-applied/gym/environments/control`) is Gymnasium's `CartPole-v1`. The state
+- **`cartPoleEnvironment(options)`** (`aifn-methods/gym/environments/control`) is Gymnasium's `CartPole-v1`. The state
   and observation are (x, ẋ, θ, θ̇) as a box, with θ from upright and positive towards +x. There are two discrete
   actions, push left and push right, each a force of ±10 N. The reward is +1 per step. An episode is `terminated`
   when |θ| > 12° or |x| > 2.4 m, and the rollout truncates it at 500 steps. Every state element starts uniform on
@@ -212,7 +212,7 @@ agents, { replicates, steps, stream?, points? })` runs replicate k of every agen
   written once with tensor primitives. `step` runs it on numbers, which is fast enough for a few hundred thousand
   steps in the browser. `model.transition(x, u)` runs the same step on values, with u a force in newtons, so
   `lineariseDynamics` and `jacobian` work on it.
-- **Agents** (`aifn-applied/gym/agents/control`):
+- **Agents** (`aifn-methods/gym/agents/control`):
   - `lqrBangBangAgent({ r })`. Its `init` linearises the model about the origin by autodiff and solves `dlqr` with
     Q = I and R = r. It pushes towards the sign of −K o. It holds 500 steps from every tested start, at jitter 0.05
     and 0.1.
@@ -234,7 +234,7 @@ agents, { replicates, steps, stream?, points? })` runs replicate k of every agen
 
 ### 3d. Function approximation: the deep Q-network (2026-10-01)
 
-- **`dqnAgent(options)`** (`aifn-applied/gym/agents/dqn.ts`) is DQN after Mnih et al. (2015) on the schedule of
+- **`dqnAgent(options)`** (`aifn-methods/gym/agents/dqn.ts`) is DQN after Mnih et al. (2015) on the schedule of
   Stable-Baselines3's `DQN`, for a box observation and discrete actions (`requires: { observation: 'box', action:
 'discrete', families: ['control'] }`). The Q-network is `qNetwork(sizes, activation, layerNorm)`: dense layers from
   aifn nn (`Linear`, optional `LayerNorm`, `ActivationLayer`) with PyTorch's default initialisation (weights and biases
@@ -330,9 +330,9 @@ environment randomness.
 | ----------------------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
 | core `aifn/foundation/contracts` (`gym.ts`)                                   | `Domain`, `Environment`, `Step`, `Transition`, `Agent`, models, oracle, render specs |
 | core `aifn/foundation/space` (`domain.ts`)                                    | `discreteDomain`, `boxDomain`, `domainContains`, `sampleDomain`, …                   |
-| `aifn-applied/gym` (`index.ts`, `rollout.ts`, `mdp.ts`)                       | `rollout`, `episodes`, `compare`; `TabularMdp` and its helpers; the two registries   |
-| `aifn-applied/gym/environments` (`bandits`, `gridworlds`)                     | bandits; grid MDPs and `mdpEnvironment`; child `control` (the pendulum)              |
-| `aifn-applied/gym/agents` (`random`, `bandits`, `tabular`, `planning`, `dqn`) | random; bandit policies; tabular learners; planners; DQN; child `control`            |
+| `aifn-methods/gym` (`index.ts`, `rollout.ts`, `mdp.ts`)                       | `rollout`, `episodes`, `compare`; `TabularMdp` and its helpers; the two registries   |
+| `aifn-methods/gym/environments` (`bandits`, `gridworlds`)                     | bandits; grid MDPs and `mdpEnvironment`; child `control` (the pendulum)              |
+| `aifn-methods/gym/agents` (`random`, `bandits`, `tabular`, `planning`, `dqn`) | random; bandit policies; tabular learners; planners; DQN; child `control`            |
 | lab `applied/gym`                                                             | bandit regret and round-by-round, maze, cliff, planning and pendulum pages           |
 
 Registry addresses read `gym/environments/<key>` and `gym/agents/<key>`; `gym/index.ts` exports
@@ -439,7 +439,7 @@ One agent, about half a day; each step ends green (`make check`).
 1. **Contracts**: `Domain`, `Environment`, `Step`, `Transition`, `Agent`, `EnvironmentModel`, `EnvironmentOracle`,
    `RenderSpec` in core contracts; `Domain` helpers (`contains`, `uniform(domain, stream)` for a random agent,
    `size` of a discrete domain). Contract tests.
-2. **Rollout**: `rollout`, `episodes`, `compare` in `aifn-applied/gym` (`gym/rollout.ts`). A protocol test (as for Algorithms):
+2. **Rollout**: `rollout`, `episodes`, `compare` in `aifn-methods/gym` (`gym/rollout.ts`). A protocol test (as for Algorithms):
    purity, clone/revive of every state, common random numbers across agents, `terminated` vs `truncated` honoured.
 3. **Bandits**: port the three environments and twelve policies; delete `BanditEnvironment`, `banditRun`,
    `regretCurves` (break freely). Regret against the existing fixtures must be identical for the same seeds.
@@ -503,6 +503,6 @@ Then, as separate work: classic control environments (step 7 of §7) and functio
   (`{ kind: 'discrete', n, names? }`), declared by the environment and read by agents (size, names), used by the random
   agent and by the registry to pair agents with environments; room left in `Domain` for a continuous `box`;
   observations discrete for now too.
-- **One organisation (owner, 2026-10-01)**: all of it lives under `gym` (§4a): `aifn-applied/gym` replaces
+- **One organisation (owner, 2026-10-01)**: all of it lives under `gym` (§4a): `aifn-methods/gym` replaces
   `decisions/bandits`, `decisions/reinforcement-learning` and `data/environments`; the core contract file is
   `contracts/gym.ts`; the lab has one module, `applied/gym`.

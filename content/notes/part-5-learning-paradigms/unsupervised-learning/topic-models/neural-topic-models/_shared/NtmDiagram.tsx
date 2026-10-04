@@ -1,7 +1,5 @@
-import { useMemo, useState } from 'react'
-import { MathText } from 'aifn-render'
-import { Diagram } from 'aifn-render'
-import { Interactive, ParamChoice } from 'aifn-render'
+import { useMemo } from 'react'
+import { choice, Diagram, Figure, MathText, useFigureState } from 'aifn-render'
 import { ntmSpec, type NtmDecoder, type NtmInput } from './specs'
 
 type Variant = 'nvdm' | 'avitm' | 'prodlda' | 'etm' | 'ctm' | 'zeroshot'
@@ -53,32 +51,29 @@ const VARIANTS: Record<Variant, { label: string; decoder: NtmDecoder; input: Ntm
 
 /** The encoder–decoder architecture of a neural topic model, with a choice of variant. */
 export function NtmDiagram({ variants, initial }: { variants: Variant[]; initial?: Variant }) {
-  const [variant, setVariant] = useState<Variant>(initial ?? variants[0])
-  const v = VARIANTS[variant]
+  const state = useFigureState({
+    model: choice<Variant>(
+      variants.map((id) => ({ value: id, label: VARIANTS[id].label })),
+      initial ?? variants[0],
+      { label: 'model', when: () => variants.length > 1 },
+    ),
+  })
+  const v = VARIANTS[state.model]
   const spec = useMemo(() => ntmSpec(v.decoder, v.input), [v.decoder, v.input])
   return (
-    <Interactive
+    <Figure
       title="A neural topic model"
+      state={state}
       caption={
         <MathText
           text={`${v.caption} The reparameterisation block writes $\\hvec_d = \\muvec + \\sigmavec \\odot \\epsilonvec$, so gradients reach the encoder; the KL term acts on the encoder's output and the reconstruction term on the decoder's.`}
         />
-      }
-      controls={
-        variants.length > 1 ? (
-          <ParamChoice
-            label="model"
-            value={variant}
-            onChange={setVariant}
-            options={variants.map((id) => ({ value: id, label: VARIANTS[id].label }))}
-          />
-        ) : undefined
       }
     >
       <Diagram
         spec={spec}
         ariaLabel={`Architecture of ${v.label}: encoder, reparameterised Gaussian latent, decoder`}
       />
-    </Interactive>
+    </Figure>
   )
 }

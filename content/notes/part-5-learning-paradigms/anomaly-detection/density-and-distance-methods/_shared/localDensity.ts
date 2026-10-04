@@ -3,7 +3,7 @@ import {
   localOutlierFactor,
   localOutlierScore,
   type LocalOutlierFactor,
-} from 'aifn-applied/unsupervised/anomaly'
+} from 'aifn-methods/unsupervised/anomaly'
 import { fromData } from 'aifn/foundation/tensor'
 import { stream, normal } from 'aifn/foundation/random'
 
@@ -37,7 +37,7 @@ export function fitDensity(points: Pt[], k: number): DensityModel {
   }
 }
 
-/** Scores of a new point q against the fitted set, backed by aifn-applied. */
+/** Scores of a new point q against the fitted set, backed by aifn-methods. */
 export function scorePoint(m: DensityModel, q: Pt): { knn: number; lof: number } {
   const qTensor = fromData(Float64Array.from(q), [1, 2])
   const knn = knnScore(m._model.train, qTensor, { k: m.k })[0]

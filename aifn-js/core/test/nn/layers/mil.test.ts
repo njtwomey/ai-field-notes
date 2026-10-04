@@ -47,7 +47,9 @@ describe('milPool', () => {
     const kept = [0, 2, 3]
     const Zk = fromData(
       Float64Array.from(
-        Array.from({ length: B }, (_, b) => kept.flatMap((j) => Array.from(dense.data(Z).slice((b * t + j) * d, (b * t + j + 1) * d)))).flat(),
+        Array.from({ length: B }, (_, b) =>
+          kept.flatMap((j) => Array.from(dense.data(Z).slice((b * t + j) * d, (b * t + j + 1) * d))),
+        ).flat(),
       ),
       [B, kept.length, d],
     )

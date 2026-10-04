@@ -1,5 +1,4 @@
-import { Interactive } from 'aifn-render'
-import { Diagram } from 'aifn-render'
+import { Diagram, Figure } from 'aifn-render'
 import type { DiagramSpec } from 'aifn-render'
 
 const spec: DiagramSpec = {
@@ -57,7 +56,7 @@ const spec: DiagramSpec = {
 /** Model reference adaptive control: an outer adaptation loop around an ordinary feedback loop. */
 export function MracDiagram() {
   return (
-    <Interactive
+    <Figure
       title="Model reference adaptive control"
       caption="The inner loop is ordinary feedback: the controller with parameters θ drives the plant. The reference model states the response the closed loop should have to the command r. The outer loop compares the plant output y with the model output y_m and the adaptation law adjusts θ from the error e, by the MIT rule or a Lyapunov design."
     >
@@ -65,6 +64,6 @@ export function MracDiagram() {
         spec={spec}
         ariaLabel="The command r drives a reference model and a controller; the controller drives the plant; the difference between plant output y and model output y_m drives an adaptation law that adjusts the controller parameters"
       />
-    </Interactive>
+    </Figure>
   )
 }

@@ -1,11 +1,23 @@
-import { useMemo, useState } from 'react'
-import { Interactive, ParamChoice, ParamSlider, Readout, XYChart, formatNumber, type XYSeries } from 'aifn-render'
-import { linspace } from '@/lib/math'
-import { normalPdf } from '@/lib/math/special'
+import { useMemo } from 'react'
+import {
+  choice,
+  Figure,
+  formatNumber,
+  Plot,
+  Readout,
+  seriesLayers,
+  slider,
+  type SeriesSpec,
+  useAxis,
+  useFigureState,
+  when,
+} from 'aifn-render'
+import { linspace, toFlat } from 'aifn/foundation/tensor'
+import { normalPdf } from 'aifn/numerics/special'
 
 type View = 'fit' | 'pair'
 
-const XS = linspace(-14, 14, 1121)
+const XS = toFlat(linspace(-14, 14, 1121))
 const DX = XS[1] - XS[0]
 /** Densities below this count as zero inside logarithms, so the numerical integrals stay finite. */
 const FLOOR = 1e-300
@@ -45,9 +57,9 @@ function reverseFit(p: number[], separation: number): { m: number; s: number } {
         if (value < best.value) best = { m, s, value }
       }
   }
-  search(linspace(0, separation + 1, 25), linspace(0.3, 2 + separation, 25))
+  search(toFlat(linspace(0, separation + 1, 25)), toFlat(linspace(0.3, 2 + separation, 25)))
   const { m, s } = best
-  search(linspace(Math.max(0, m - 0.2), m + 0.2, 21), linspace(Math.max(0.2, s - 0.2), s + 0.2, 21))
+  search(toFlat(linspace(Math.max(0, m - 0.2), m + 0.2, 21)), toFlat(linspace(Math.max(0.2, s - 0.2), s + 0.2, 21)))
   return best
 }
 
@@ -56,10 +68,20 @@ function reverseFit(p: number[], separation: number): { m: number; s: number } {
  * "pair": two Gaussians with the divergence computed in both directions.
  */
 export function KlAsymmetry() {
-  const [view, setView] = useState<View>('fit')
-  const [separation, setSeparation] = useState(2.5)
-  const [mu2, setMu2] = useState(1)
-  const [sigma2, setSigma2] = useState(0.6)
+  const state = useFigureState({
+    view: choice<View>(
+      [
+        { value: 'fit', label: 'fit a Gaussian' },
+        { value: 'pair', label: 'two Gaussians' },
+      ],
+      'fit',
+      { label: 'view' },
+    ),
+    separation: slider(0, 4, 2.5, { step: 0.1, label: 'mode separation d (modes at ±d)', when: when('view', 'fit') }),
+    mu2: slider(-3, 3, 1, { step: 0.1, label: 'mean of q', when: when('view', 'pair') }),
+    sigma2: slider(0.2, 3, 0.6, { step: 0.05, label: 'standard deviation of q', when: when('view', 'pair') }),
+  })
+  const { separation, mu2, sigma2 } = state
 
   const fit = useMemo(() => {
     const p = XS.map((x) => 0.5 * normalPdf(x - separation) + 0.5 * normalPdf(x + separation))
@@ -68,7 +90,7 @@ export function KlAsymmetry() {
     const reverse = reverseFit(p, separation)
     const qf = gauss(forward.m, forward.s)
     const qr = gauss(reverse.m, reverse.s)
-    const series: XYSeries[] = [
+    const series: SeriesSpec[] = [
       { name: 'target p (mixture)', type: 'line', x: XS, y: p, area: true, slot: 0 },
       { name: 'q minimising KL(p ‖ q)', type: 'line', x: XS, y: qf, slot: 1 },
       { name: 'q minimising KL(q ‖ p)', type: 'line', x: XS, y: qr, dashed: true, slot: 2 },
@@ -82,58 +104,26 @@ export function KlAsymmetry() {
   }, [separation])
 
   const pair = useMemo(() => {
-    const series: XYSeries[] = [
+    const series: SeriesSpec[] = [
       { name: 'p = N(0, 1)', type: 'line', x: XS, y: gauss(0, 1), area: true, slot: 0 },
       { name: 'q', type: 'line', x: XS, y: gauss(mu2, sigma2), slot: 1 },
     ]
     return { series, pq: klGauss(0, 1, mu2, sigma2), qp: klGauss(mu2, sigma2, 0, 1) }
   }, [mu2, sigma2])
 
+  const xAxis = useAxis({ label: 'x', range: [-7, 7] })
+  const yAxis = useAxis({ label: 'density', range: [0, undefined], hold: 'union' })
   return (
-    <Interactive
+    <Figure
       title="Forward and reverse KL"
+      state={state}
       caption={
-        view === 'fit'
+        state.view === 'fit'
           ? 'The target p is an equal mixture of two unit Gaussians. The best single Gaussian under forward KL(p ‖ q) matches the mean and variance of p and covers both modes. Under reverse KL(q ‖ p) the best Gaussian sits on one mode, because q is penalised for mass where p is small but not for missing a mode. Separate the modes to see the two fits diverge.'
           : 'p is a standard Gaussian and q is another Gaussian. The two directions of KL differ. A q narrower than p makes KL(p ‖ q) grow quickly, because p puts mass where q is tiny.'
       }
-      controls={
-        <>
-          <ParamChoice
-            label="view"
-            value={view}
-            onChange={setView}
-            options={[
-              { value: 'fit', label: 'fit a Gaussian' },
-              { value: 'pair', label: 'two Gaussians' },
-            ]}
-          />
-          {view === 'fit' ? (
-            <ParamSlider
-              label="mode separation d (modes at ±d)"
-              value={separation}
-              onChange={setSeparation}
-              min={0}
-              max={4}
-              step={0.1}
-            />
-          ) : (
-            <>
-              <ParamSlider label="mean of q" value={mu2} onChange={setMu2} min={-3} max={3} step={0.1} />
-              <ParamSlider
-                label="standard deviation of q"
-                value={sigma2}
-                onChange={setSigma2}
-                min={0.2}
-                max={3}
-                step={0.05}
-              />
-            </>
-          )}
-        </>
-      }
-      readout={
-        view === 'fit' ? (
+      readouts={
+        state.view === 'fit' ? (
           <>
             <Readout
               label="forward fit"
@@ -152,14 +142,9 @@ export function KlAsymmetry() {
         )
       }
     >
-      <XYChart
-        height={300}
-        xLabel="x"
-        yLabel="density"
-        series={view === 'fit' ? fit.series : pair.series}
-        xRange={[-7, 7]}
-        yRange={[0, undefined]}
-      />
-    </Interactive>
+      <Plot x={xAxis} y={yAxis} height={300}>
+        {seriesLayers(state.view === 'fit' ? fit.series : pair.series)}
+      </Plot>
+    </Figure>
   )
 }

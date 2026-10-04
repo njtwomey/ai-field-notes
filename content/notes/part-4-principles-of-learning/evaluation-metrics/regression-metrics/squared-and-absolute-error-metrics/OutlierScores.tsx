@@ -1,15 +1,15 @@
 import { useMemo, useState } from 'react'
-import { Interactive, ParamButton, Readout, XYChart, formatNumber, type Handle, type XYSeries } from 'aifn-render'
-import { rng } from '@/lib/math'
+import { Button, Curve, Figure, formatNumber, Handle, Plot, Points, Readout, useAxis } from 'aifn-render'
 import { concordance, mae, mse, pearson, r2, spearman } from './scores'
+import { normal, stream } from 'aifn/foundation/random'
 
 const RANGE: [number, number] = [0, 12]
 // Fourteen well-predicted points: predictions scatter around the truth with standard deviation 0.5.
 const BASE = (() => {
-  const g = rng(11)
+  const g = stream(11)
   return Array.from({ length: 14 }, (_, i) => {
     const truth = 1 + (8 * i) / 13
-    return { truth, pred: truth + 0.5 * g.normal() }
+    return { truth, pred: truth + 0.5 * normal(g) }
   })
 })()
 
@@ -41,34 +41,28 @@ export function OutlierScores() {
     return { without: score(y0, p0), with: score([...y0, point[0]], [...p0, point[1]]) }
   }, [point])
 
-  const series: XYSeries[] = [
-    { name: 'perfect prediction', type: 'line', x: RANGE, y: RANGE, dashed: true, muted: true },
-    { name: 'predictions', type: 'scatter', x: BASE.map((b) => b.truth), y: BASE.map((b) => b.pred), slot: 0 },
-  ]
-  const handles: Handle[] = [
-    {
-      kind: 'point',
-      at: point,
-      label: 'movable prediction',
-      onDrag: ([x, y]) => setPoint([Math.min(12, Math.max(0, x)), Math.min(12, Math.max(0, y))]),
-    },
-  ]
+  const series = [
+    { name: 'perfect prediction', x: RANGE, y: RANGE, dashed: true, muted: true },
+    { name: 'predictions', x: BASE.map((b) => b.truth), y: BASE.map((b) => b.pred), slot: 0 },
+  ] as const
   const pair = (key: keyof typeof r.with) => `${formatNumber(r.with[key])} (${formatNumber(r.without[key])})`
 
+  const xAxis = useAxis({ label: 'true value y', range: RANGE })
+  const yAxis = useAxis({ label: 'prediction ŷ', range: RANGE, equal: xAxis })
   return (
-    <Interactive
+    <Figure
       title="One prediction, six scores"
       caption="Each point is a prediction plotted against the true value; the dashed line is perfect prediction. Drag the white point. Mean squared error, R², Pearson's r and the concordance coefficient all react sharply when it leaves the line, because they square the miss. Mean absolute error grows only in proportion. Spearman's ρ changes only when the point's rank among the predictions changes. Values in brackets are the scores without the movable point."
       controls={
         <div className="flex flex-wrap gap-2">
           {PRESETS.map((p) => (
-            <ParamButton key={p.label} onClick={() => setPoint(p.at)}>
+            <Button variant="outline" size="sm" key={p.label} onClick={() => setPoint(p.at)}>
               {p.label}
-            </ParamButton>
+            </Button>
           ))}
         </div>
       }
-      readout={
+      readouts={
         <>
           <Readout label="MSE" value={pair('mse')} />
           <Readout
@@ -84,16 +78,17 @@ export function OutlierScores() {
       }
     >
       <div className="mx-auto w-full max-w-lg">
-        <XYChart
-          series={series}
-          handles={handles}
-          xLabel="true value y"
-          yLabel="prediction ŷ"
-          xRange={RANGE}
-          yRange={RANGE}
-          equalAspect
-        />
+        <Plot x={xAxis} y={yAxis}>
+          <Curve {...series[0]} />
+          <Points {...series[1]} />
+          <Handle
+            kind="point"
+            at={point}
+            label="movable prediction"
+            onDrag={([x, y]) => setPoint([Math.min(12, Math.max(0, x)), Math.min(12, Math.max(0, y))])}
+          />
+        </Plot>
       </div>
-    </Interactive>
+    </Figure>
   )
 }

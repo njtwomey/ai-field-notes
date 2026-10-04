@@ -1,7 +1,50 @@
 /** Test signals and time-frequency helpers shared by the time-frequency notes. */
-import { fftInPlace, isPowerOfTwo } from '@/lib/dsp'
+import { fft, ifft, isPowerOfTwo, rfft } from 'aifn/foundation/fourier'
+import { complex, complexAbs, imagPart, realPart, tensor, toFlat } from 'aifn/foundation/tensor'
+import { getWindow } from 'aifn/signal/windows'
 
 const TAU = 2 * Math.PI
+
+/**
+ * The complex FFT of (re, im), written back into the two arrays. The inverse is unscaled (no 1/N), so callers divide
+ * by N where they need the true inverse.
+ */
+export function fftParts(re: Float64Array, im: Float64Array, inverse = false): void {
+  const z = complex(tensor(re), tensor(im))
+  const out = inverse ? ifft(z, { norm: 'forward' }) : fft(z)
+  re.set(toFlat(realPart(out)))
+  im.set(toFlat(imagPart(out)))
+}
+
+/** One-sided magnitude spectrum |X[k]|, k = 0 … nfft/2, of x zero-padded to nfft samples. */
+export function magnitudeSpectrum(x: ArrayLike<number>, nfft = x.length): number[] {
+  const padded = new Float64Array(nfft)
+  padded.set(Array.from(x).slice(0, nfft))
+  return toFlat(complexAbs(rfft(padded)))
+}
+
+/** Decibels, 20 log₁₀ of a magnitude, floored so that zeros stay finite. */
+export const db = (magnitude: number, floor = -200) => Math.max(floor, 20 * Math.log10(Math.max(magnitude, 1e-300)))
+
+/**
+ * Magnitude spectrogram: Hann-windowed frames of `size` samples every `hop` samples, each zero-padded to `nfft`.
+ * Returns each frame's one-sided magnitude spectrum and the frame's centre in samples.
+ */
+export function spectrogram(x: ArrayLike<number>, size: number, hop: number, nfft = size) {
+  const w = toFlat(getWindow('hann', size, { periodic: true }))
+  const frames: number[][] = []
+  const centres: number[] = []
+  for (let start = 0; start + size <= x.length; start += hop) {
+    frames.push(
+      magnitudeSpectrum(
+        Float64Array.from(w, (wi, i) => x[start + i] * wi),
+        nfft,
+      ),
+    )
+    centres.push(start + size / 2)
+  }
+  return { frames, centres }
+}
 
 /** Linear chirp cos(2π(f0 t + (f1 − f0) t² / (2T))) over n samples at rate fs, sweeping f0 → f1 Hz. */
 export function chirp(n: number, fs: number, f0: number, f1: number, amplitude = 1): Float64Array {
@@ -24,7 +67,7 @@ export function analytic(x: ArrayLike<number>): { re: Float64Array; im: Float64A
   if (!isPowerOfTwo(n)) throw new Error('analytic: length must be a power of two')
   const re = Float64Array.from(x)
   const im = new Float64Array(n)
-  fftInPlace(re, im)
+  fftParts(re, im)
   for (let k = 1; k < n / 2; k++) {
     re[k] *= 2
     im[k] *= 2
@@ -33,7 +76,7 @@ export function analytic(x: ArrayLike<number>): { re: Float64Array; im: Float64A
     re[k] = 0
     im[k] = 0
   }
-  fftInPlace(re, im, true)
+  fftParts(re, im, true)
   for (let i = 0; i < n; i++) {
     re[i] /= n
     im[i] /= n
@@ -65,7 +108,7 @@ export function wignerVille(z: { re: ArrayLike<number>; im: ArrayLike<number> })
       re[idx] = ar * br - ai * bi
       im[idx] = ar * bi + ai * br
     }
-    fftInPlace(re, im)
+    fftParts(re, im)
     // The lag sequence is conjugate-symmetric, so the transform is real.
     rows.push(Float64Array.from(re))
   }

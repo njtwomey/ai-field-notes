@@ -1,5 +1,5 @@
 /**
- * The registry of `aifn-applied/inference/sequence-models`.
+ * The registry of `aifn-methods/inference/sequence-models`.
  */
 
 import { definer, entries, type AlgorithmInfo, type Entry, type FunctionInfo } from 'aifn/foundation/registry'

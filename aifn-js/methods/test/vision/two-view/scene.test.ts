@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { fundamentalProblem, homographyProblem, twoViewScene } from 'aifn-applied/vision/two-view'
+import { fundamentalProblem, homographyProblem, twoViewScene } from 'aifn-methods/vision/two-view'
 import { applyHomography, sampsonDistance } from 'aifn/numerics/geometry'
 import { ransacFit } from 'aifn/numerics/robust'
 import { stream } from 'aifn/foundation/random'

@@ -1,5 +1,4 @@
-import { Interactive } from 'aifn-render'
-import { Diagram } from 'aifn-render'
+import { Diagram, Figure } from 'aifn-render'
 import type { DiagramSpec } from 'aifn-render'
 
 const term = (id: string, y: number, label: string) => ({ id, x: 4.8, y, w: 1.7, h: 0.8, label, tone: 0 })
@@ -48,7 +47,7 @@ const spec: DiagramSpec = {
 /** The parallel form of the PID controller inside a unity-feedback loop. */
 export function PidDiagram() {
   return (
-    <Interactive
+    <Figure
       title="The parallel PID controller"
       caption="The error e feeds three branches in parallel: a gain on the present error, an integrator that accumulates past error, and a differentiator that extrapolates the error forward. Their sum is the plant input u. The measured output y is subtracted from the reference r to close the loop."
     >
@@ -56,6 +55,6 @@ export function PidDiagram() {
         spec={spec}
         ariaLabel="Error e splits into proportional, integral and derivative branches, which are summed into the plant input u; the plant output y is fed back and subtracted from the reference r"
       />
-    </Interactive>
+    </Figure>
   )
 }

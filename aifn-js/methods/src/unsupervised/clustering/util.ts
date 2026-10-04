@@ -1,5 +1,5 @@
 /**
- * Private helpers for `aifn-applied/unsupervised/clustering`: float64 views (tensor's `dense.data`), the nearest-row
+ * Private helpers for `aifn-methods/unsupervised/clustering`: float64 views (tensor's `dense.data`), the nearest-row
  * search Lloyd's steps use, pairwise distances (`aifn/numerics/linalg`) and small tensors.
  */
 

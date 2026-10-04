@@ -1,4 +1,4 @@
-/** The functions of `aifn-applied/evaluation/text` besides its metrics: the scores with their parts, and alignments. */
+/** The functions of `aifn-methods/evaluation/text` besides its metrics: the scores with their parts, and alignments. */
 
 import { definer, entries, type Entry, type FunctionInfo } from 'aifn/foundation/registry'
 import * as text from './text'

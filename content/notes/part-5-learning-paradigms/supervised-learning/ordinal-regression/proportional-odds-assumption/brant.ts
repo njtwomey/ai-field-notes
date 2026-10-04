@@ -1,6 +1,5 @@
-import { sigmoid } from '@/lib/math'
-import { incompleteGamma } from '@/lib/math/special'
 import { logistic1d } from '../_shared/ordinal'
+import { regularisedGammaP, sigmoid } from 'aifn/numerics/special'
 
 const K = 4
 
@@ -50,6 +49,6 @@ export function brant(x: number[], y: number[]) {
   )
   const det = S[0][0] * S[1][1] - S[0][1] * S[1][0]
   const chi2 = (S[1][1] * d[0] * d[0] - 2 * S[0][1] * d[0] * d[1] + S[0][0] * d[1] * d[1]) / det
-  const p = 1 - incompleteGamma((K - 2) / 2, chi2 / 2)
+  const p = 1 - regularisedGammaP((K - 2) / 2, chi2 / 2)
   return { fits, slopes: b, se: b.map((_, j) => Math.sqrt(slopeCov[j][j])), chi2, p }
 }

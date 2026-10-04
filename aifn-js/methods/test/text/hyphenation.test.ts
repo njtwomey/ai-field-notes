@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { stream } from 'aifn/foundation/random'
-import { mobyHyphenation } from 'aifn-applied/data/real/hyphenation'
+import { mobyHyphenation } from 'aifn-methods/data/real/hyphenation'
 import {
   BiRnnTagger,
   gapLabels,
@@ -16,7 +16,7 @@ import {
   windowSaliency,
   WindowTagger,
   windowProbabilities,
-} from 'aifn-applied/text/hyphenation'
+} from 'aifn-methods/text/hyphenation'
 import { parseHyphenated } from 'aifn/text/hyphenation'
 
 const words = ['hy-phen-a-tion', 'ta-ble', 'peo-ple', 'win-ter'].map((w) => parseHyphenated(w))

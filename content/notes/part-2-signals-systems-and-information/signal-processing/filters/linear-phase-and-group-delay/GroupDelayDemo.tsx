@@ -1,16 +1,8 @@
-import { useMemo, useState } from 'react'
-import {
-  Interactive,
-  ParamChoice,
-  ParamSlider,
-  Readout,
-  XYChart,
-  formatNumber,
-  useParam,
-  type XYSeries,
-} from 'aifn-render'
-import { freqz, lfilter, unwrap } from '@/lib/dsp'
-import { firLowpass, groupDelay, iirLowpass } from '../_shared/design'
+import { useMemo } from 'react'
+import { choice, Curve, Figure, float, formatNumber, Plot, Readout, useAxis, useFigureState } from 'aifn-render'
+import { toFlat } from 'aifn/foundation/tensor'
+import { unwrapPhase } from 'aifn/signal'
+import { applyFilter, firLowpass, groupDelay, iirLowpass, response as freqz } from '../_shared/design'
 
 const LENGTH = 400
 const CENTRE = 120
@@ -30,15 +22,21 @@ type Key = keyof typeof FILTERS
  * carrier's phase is shifted by the phase delay.
  */
 export function GroupDelayDemo() {
-  const [key, setKey] = useState<Key>('butter')
-  const carrier = useParam(0.2, { min: 0.05, max: 0.45, step: 0.01 })
-  const { b, a } = FILTERS[key]
+  const state = useFigureState({
+    key: choice<Key>(
+      (Object.keys(FILTERS) as Key[]).map((k) => ({ value: k, label: FILTERS[k].label })),
+      'butter',
+      { label: 'filter' },
+    ),
+    carrier: float(0.2, { min: 0.05, max: 0.45, step: 0.01, label: 'carrier ω₀ (×π)' }),
+  })
+  const { b, a } = FILTERS[state.key]
 
   const r = useMemo(() => {
-    const w0 = carrier.value * Math.PI
+    const w0 = state.carrier * Math.PI
     const envelope = Array.from({ length: LENGTH }, (_, n) => Math.exp(-0.5 * ((n - CENTRE) / WIDTH) ** 2))
     const x = envelope.map((e, n) => e * Math.cos(w0 * n))
-    const y = Array.from(lfilter(b, a, x))
+    const y = applyFilter(b, a, x)
     // Output envelope: the local maximum of |y| over one carrier period, whose peak locates the delayed envelope.
     const period = Math.max(2, Math.round((2 * Math.PI) / w0))
     const env = y.map((_, n) => {
@@ -59,33 +57,26 @@ export function GroupDelayDemo() {
       const [dr, di] = H(a)
       return Math.atan2(ni * dr - nr * di, nr * dr + ni * di)
     })
-    const phase = unwrap(phases)[phases.length - 1]
+    const phase = toFlat(unwrapPhase(phases))[phases.length - 1]
     return { x, y, env, tg, tp: -phase / w0, measured: peak - CENTRE }
-  }, [b, a, carrier.value])
+  }, [b, a, state.carrier])
 
   const n = Array.from({ length: LENGTH }, (_, i) => i)
-  const series: XYSeries[] = [
-    { name: 'input burst', type: 'line', x: n, y: r.x, muted: true },
-    { name: 'output', type: 'line', x: n, y: r.y, slot: 0 },
-    { name: 'output envelope', type: 'line', x: n, y: r.env, slot: 1, dashed: true },
-  ]
+  const series = [
+    { name: 'input burst', x: n, y: r.x, muted: true },
+    { name: 'output', x: n, y: r.y, slot: 0 },
+    { name: 'output envelope', x: n, y: r.env, slot: 1, dashed: true },
+  ] as const
 
+  const xAxis = useAxis({ label: 'n', range: [0, LENGTH - 1] })
+  const yAxis = useAxis({ label: 'amplitude', range: [-1.1, 1.1] })
   return (
-    <Interactive
+    <Figure
       title="Group delay moves the envelope"
+      state={state}
       caption="A Gaussian tone burst at carrier frequency ω₀ passes through a filter. The envelope of the output is delayed by the group delay −dφ/dω at ω₀; the carrier inside it is shifted by the phase delay −φ/ω₀. For the linear-phase FIR filter the two are equal, 20 samples at every frequency. For the Butterworth filter the group delay depends on ω₀ and grows sharply near its cutoff at 0.35π, so different frequencies arrive at different times."
-      controls={
-        <>
-          <ParamChoice
-            label="filter"
-            value={key}
-            onChange={setKey}
-            options={(Object.keys(FILTERS) as Key[]).map((k) => ({ value: k, label: FILTERS[k].label }))}
-          />
-          <ParamSlider label="carrier ω₀ (×π)" param={carrier} withArrows />
-        </>
-      }
-      readout={
+
+      readouts={
         <>
           <Readout label="group delay at ω₀" value={`${formatNumber(r.tg)} samples`} />
           <Readout label="phase delay at ω₀" value={`${formatNumber(r.tp)} samples`} />
@@ -93,14 +84,11 @@ export function GroupDelayDemo() {
         </>
       }
     >
-      <XYChart
-        series={series}
-        xLabel="n"
-        yLabel="amplitude"
-        xRange={[0, LENGTH - 1]}
-        yRange={[-1.1, 1.1]}
-        height={300}
-      />
-    </Interactive>
+      <Plot x={xAxis} y={yAxis} height={300}>
+        <Curve {...series[0]} />
+        <Curve {...series[1]} />
+        <Curve {...series[2]} />
+      </Plot>
+    </Figure>
   )
 }

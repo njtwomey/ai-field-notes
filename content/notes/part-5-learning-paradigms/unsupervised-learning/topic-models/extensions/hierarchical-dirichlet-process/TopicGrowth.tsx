@@ -1,7 +1,19 @@
 import { useMemo, useState } from 'react'
-import { Interactive, ParamSlider, Readout, XYChart, formatNumber, useParam } from 'aifn-render'
-import { rng } from '@/lib/math'
-import { categorical } from '../_shared/random'
+import {
+  Bars,
+  Curve,
+  Figure,
+  formatNumber,
+  Handle,
+  int,
+  Player,
+  Plot,
+  Readout,
+  slider,
+  useAxis,
+  useFigureState,
+} from 'aifn-render'
+import { categorical, stream } from 'aifn/foundation/random'
 
 const MAX_DOCS = 200
 
@@ -16,7 +28,7 @@ type Franchise = {
 
 /** The Chinese restaurant franchise under the prior: words sit at tables, tables order topics from a shared menu. */
 function simulate(alpha0: number, gamma: number, words: number, seed: number): Franchise {
-  const r = rng(seed)
+  const r = stream(seed)
   const dishTables: number[] = []
   let tableCount = 0
   const out: Franchise = { topics: [], tables: [], uses: [] }
@@ -49,13 +61,17 @@ const expectedTopics = (m: number, gamma: number) => {
 }
 
 export function TopicGrowth() {
-  const docs = useParam(40, { min: 1, max: MAX_DOCS, step: 1 })
-  const [alpha0, setAlpha0] = useState(2)
-  const [gamma, setGamma] = useState(3)
-  const [words, setWords] = useState(50)
-  const [seed, setSeed] = useState(1)
+  const state = useFigureState({
+    alpha0: slider(0.2, 10, 2, { step: 0.1, label: 'document concentration α₀' }),
+    gamma: slider(0.2, 10, 3, { step: 0.1, label: 'top-level concentration γ' }),
+    words: int(50, { ge: 5, le: 200, suggestions: [10, 50, 100, 200], label: 'words per document' }),
+    seed: int(1, { ge: 0, label: 'seed' }),
+  })
+  const { alpha0, gamma, words, seed } = state
+  // Documents seen, minus one: the walk-through position, also moved by the document line on the chart.
+  const [docIndex, setDocIndex] = useState(0)
   const sim = useMemo(() => simulate(alpha0, gamma, words, seed), [alpha0, gamma, words, seed])
-  const D = docs.value
+  const D = docIndex + 1
   const xs = Array.from({ length: D }, (_, d) => d + 1)
   const expected = useMemo(() => sim.tables.map((m) => expectedTopics(m, gamma)), [sim, gamma])
 
@@ -65,34 +81,25 @@ export function TopicGrowth() {
     return c
   }, [sim, D])
 
+  const xAxis = useAxis({ label: 'documents', range: [1, MAX_DOCS] })
+  const yAxis = useAxis({ label: 'count', range: [0, undefined], hold: 'union' })
+  const xAxis2 = useAxis({ label: 'topic (order of first use)', hold: 'union' })
+  const yAxis2 = useAxis({ label: 'documents using it', range: [0, undefined], hold: 'union' })
   return (
-    <Interactive
+    <Figure
       title="The number of topics grows with the data"
-      caption="Documents arrive one at a time under the HDP prior (the Chinese restaurant franchise, no words observed). Left: topics in use (solid) and tables in the franchise, divided by 10 (dashed), against the number of documents, with the expected number of topics given the tables, the sum of γ/(γ + i − 1) over tables i (grey). Right: how many of the documents so far use each topic, in order of first appearance. Early topics are shared by most documents; new topics keep appearing, but ever more slowly. Drag the document line or step through documents with the arrows."
+      state={state}
+      caption="Documents arrive one at a time under the HDP prior (the Chinese restaurant franchise, no words observed). Left: topics in use (solid) and tables in the franchise, divided by 10 (dashed), against the number of documents, with the expected number of topics given the tables, the sum of γ/(γ + i − 1) over tables i (grey). Right: how many of the documents so far use each topic, in order of first appearance. Early topics are shared by most documents; new topics keep appearing, but ever more slowly. Drag the document line or play through the documents."
       controls={
-        <>
-          <ParamSlider label="documents D" param={docs} withArrows />
-          <ParamSlider
-            label="document concentration α₀"
-            value={alpha0}
-            onChange={setAlpha0}
-            min={0.2}
-            max={10}
-            step={0.1}
-          />
-          <ParamSlider
-            label="top-level concentration γ"
-            value={gamma}
-            onChange={setGamma}
-            min={0.2}
-            max={10}
-            step={0.1}
-          />
-          <ParamSlider label="words per document" value={words} onChange={setWords} min={5} max={200} step={5} />
-          <ParamSlider label="seed" value={seed} onChange={setSeed} min={1} max={10} step={1} />
-        </>
+        <Player
+          value={docIndex}
+          onChange={setDocIndex}
+          count={MAX_DOCS}
+          label="documents D"
+          format={(k) => String(k + 1)}
+        />
       }
-      readout={
+      readouts={
         <>
           <Readout label="topics in use" value={sim.topics[D - 1]} />
           <Readout label="expected given tables" value={formatNumber(expected[D - 1])} />
@@ -105,42 +112,21 @@ export function TopicGrowth() {
       }
     >
       <div className="grid gap-4 lg:grid-cols-2">
-        <XYChart
-          height={300}
-          xLabel="documents"
-          yLabel="count"
-          xRange={[1, MAX_DOCS]}
-          yRange={[0, undefined]}
-          handles={[{ kind: 'x', at: D, onDrag: docs.set, label: 'D' }]}
-          series={[
-            { name: 'topics', type: 'line', x: xs, y: sim.topics.slice(0, D), slot: 0 },
-            {
-              name: 'tables ÷ 10',
-              type: 'line',
-              x: xs,
-              y: sim.tables.slice(0, D).map((t) => t / 10),
-              slot: 1,
-              dashed: true,
-            },
-            { name: 'expected topics', type: 'line', x: xs, y: expected.slice(0, D), muted: true },
-          ]}
-        />
-        <XYChart
-          height={300}
-          xLabel="topic (order of first use)"
-          yLabel="documents using it"
-          yRange={[0, undefined]}
-          series={[
-            {
-              name: 'documents per topic',
-              type: 'bar',
-              x: docsPerTopic.map((_, k) => k + 1),
-              y: docsPerTopic,
-              slot: 0,
-            },
-          ]}
-        />
+        <Plot x={xAxis} y={yAxis} height={300}>
+          <Curve name="topics" x={xs} y={sim.topics.slice(0, D)} slot={0} />
+          <Curve name="tables ÷ 10" x={xs} y={sim.tables.slice(0, D).map((t) => t / 10)} slot={1} dashed />
+          <Curve name="expected topics" x={xs} y={expected.slice(0, D)} muted />
+          <Handle
+            kind="x"
+            at={D}
+            label="D"
+            onDrag={(x) => setDocIndex(Math.min(MAX_DOCS, Math.max(1, Math.round(x))) - 1)}
+          />
+        </Plot>
+        <Plot x={xAxis2} y={yAxis2} height={300}>
+          <Bars name="documents per topic" x={docsPerTopic.map((_, k) => k + 1)} y={docsPerTopic} slot={0} />
+        </Plot>
       </div>
-    </Interactive>
+    </Figure>
   )
 }

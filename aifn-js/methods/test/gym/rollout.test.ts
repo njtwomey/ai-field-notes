@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { compare, episodes, greedyActions, rollout } from 'aifn-applied/gym'
+import { compare, episodes, greedyActions, rollout } from 'aifn-methods/gym'
 import {
   qLearningAgent,
   randomAgent,
@@ -7,8 +7,8 @@ import {
   uniformPolicy,
   valueIteration,
   type TabularAgentState,
-} from 'aifn-applied/gym/agents'
-import { bernoulliBandit, mazeEnvironment } from 'aifn-applied/gym/environments'
+} from 'aifn-methods/gym/agents'
+import { bernoulliBandit, mazeEnvironment } from 'aifn-methods/gym/environments'
 import type { Agent } from 'aifn/foundation/contracts'
 import { child, stream } from 'aifn/foundation/random'
 import { toFlat } from 'aifn/foundation/tensor'

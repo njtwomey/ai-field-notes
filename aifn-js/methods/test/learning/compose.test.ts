@@ -2,7 +2,7 @@
 // with the learning area's transformers and models.
 // These cases moved here from the core tests so that core's tests never import an application.
 import { describe, expect, expectTypeOf, it } from 'vitest'
-import { oneHotEncoder, polynomialFeatures, splineFeatures, standardScaler } from 'aifn-applied/learning/preprocessing'
+import { oneHotEncoder, polynomialFeatures, splineFeatures, standardScaler } from 'aifn-methods/learning/preprocessing'
 import { columns, pipeline } from 'aifn/learning/compose'
 import type { AnyUnivariate } from 'aifn/foundation/contracts'
 import {
@@ -14,7 +14,7 @@ import {
   type Supervised,
 } from 'aifn/learning/estimators'
 import { accuracy, logLoss } from 'aifn/learning/metrics'
-import { logisticRegression } from 'aifn-applied/learning/generalised/glm'
+import { logisticRegression } from 'aifn-methods/learning/generalised/glm'
 import { child, normals, stream } from 'aifn/foundation/random'
 import { bsplineBasis } from 'aifn/numerics/interpolate'
 import { add, fromData, linspace, matmul, mul, tensor, toFlat, toRows, type Tensor } from 'aifn/foundation/tensor'

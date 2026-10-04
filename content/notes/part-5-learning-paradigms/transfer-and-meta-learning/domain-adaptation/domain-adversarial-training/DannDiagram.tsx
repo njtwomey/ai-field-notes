@@ -1,5 +1,4 @@
-import { Interactive } from 'aifn-render'
-import { Diagram } from 'aifn-render'
+import { Diagram, Figure } from 'aifn-render'
 import type { DiagramSpec } from 'aifn-render'
 
 const spec: DiagramSpec = {
@@ -47,7 +46,7 @@ const spec: DiagramSpec = {
 /** The DANN architecture: a shared feature extractor feeding a label predictor and, through a gradient reversal layer, a domain classifier. */
 export function DannDiagram() {
   return (
-    <Interactive
+    <Figure
       title="Domain-adversarial neural network"
       caption="The label predictor is trained on labelled source examples. The domain classifier is trained on features of source and target examples to tell them apart. The gradient reversal layer (GRL) passes features forward unchanged and multiplies the domain loss gradient by −λ on the way back, so the feature extractor is pushed to make the two domains indistinguishable while keeping the labels predictable."
     >
@@ -55,6 +54,6 @@ export function DannDiagram() {
         spec={spec}
         ariaLabel="Input x to feature extractor to features f; f to label predictor with loss L_y; f through gradient reversal layer to domain classifier with loss L_d"
       />
-    </Interactive>
+    </Figure>
   )
 }

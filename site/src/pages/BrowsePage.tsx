@@ -93,9 +93,7 @@ export function BrowsePage() {
     }[] = []
 
     for (const p of relevantParts) {
-      const catsInPart = categoryGroups.filter(([catPath]) =>
-        catPath === p.path || catPath.startsWith(`${p.path}/`),
-      )
+      const catsInPart = categoryGroups.filter(([catPath]) => catPath === p.path || catPath.startsWith(`${p.path}/`))
       if (catsInPart.length > 0) {
         const totalNotes = catsInPart.reduce((sum, [, list]) => sum + list.length, 0)
         sections.push({ part: p, categories: catsInPart, totalNotes })
@@ -135,7 +133,7 @@ export function BrowsePage() {
                   <button
                     type="button"
                     onClick={() => set({ part: undefined })}
-                    className="text-xs text-muted-foreground hover:text-foreground underline"
+                    className="text-xs text-muted-foreground underline hover:text-foreground"
                   >
                     (show all parts)
                   </button>

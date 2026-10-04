@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import { child, stream } from 'aifn/foundation/random'
-import { biasVariance, biasVarianceSweep, fitAndPredict } from 'aifn-applied/theory/bias-variance'
-import { empiricalRademacher, shatteringTable } from 'aifn-applied/theory/capacity'
-import { concentrationStudy, mcdiarmidStudy, runningMeans, standardisedSums } from 'aifn-applied/theory/concentration'
-import { doubleDescent } from 'aifn-applied/theory/double-descent'
-import { drawTrainingSet, targetFunction } from 'aifn-applied/theory'
+import { biasVariance, biasVarianceSweep, fitAndPredict } from 'aifn-methods/theory/bias-variance'
+import { empiricalRademacher, shatteringTable } from 'aifn-methods/theory/capacity'
+import { concentrationStudy, mcdiarmidStudy, runningMeans, standardisedSums } from 'aifn-methods/theory/concentration'
+import { doubleDescent } from 'aifn-methods/theory/double-descent'
+import { drawTrainingSet, targetFunction } from 'aifn-methods/theory'
 
 describe('bias–variance by resampling', () => {
   it('adds up to the Monte Carlo test error', () => {

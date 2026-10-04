@@ -14,9 +14,9 @@ import {
   transitionAt,
   type ReplayBuffer,
   randomAgent,
-} from 'aifn-applied/gym/agents'
-import { cartPoleEnvironment } from 'aifn-applied/gym/environments'
-import { agentAfter, evaluateEpisode, replay, rollout, train, training } from 'aifn-applied/gym'
+} from 'aifn-methods/gym/agents'
+import { cartPoleEnvironment } from 'aifn-methods/gym/environments'
+import { agentAfter, evaluateEpisode, replay, rollout, train, training } from 'aifn-methods/gym'
 import { stream } from 'aifn/foundation/random'
 import { fromData, revive } from 'aifn/foundation/tensor'
 import { Mlp } from 'aifn/nn/layers'

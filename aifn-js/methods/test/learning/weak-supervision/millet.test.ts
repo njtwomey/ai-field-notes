@@ -6,8 +6,8 @@ import { describe, expect, it } from 'vitest'
 import { stream } from 'aifn/foundation/random'
 import { fromData, toFlat, type Tensor } from 'aifn/foundation/tensor'
 import { ndcg } from 'aifn/learning/metrics'
-import { webTraffic } from 'aifn-applied/data/synthetic'
-import { milletRun, replicatePad, type MilletSnapshot } from 'aifn-applied/learning/weak-supervision'
+import { webTraffic } from 'aifn-methods/data/synthetic'
+import { milletRun, replicatePad, type MilletSnapshot } from 'aifn-methods/learning/weak-supervision'
 
 describe('replicatePad', () => {
   it('repeats the first and last values', () => {
@@ -22,7 +22,8 @@ describe('milletRun', () => {
     const train = webTraffic(stream('train'), { perClass: 12, classes, samplesPerDay: 12 })
     const test = webTraffic(stream('test'), { perClass: 6, classes, samplesPerDay: 12 })
     let last: MilletSnapshot | undefined
-    for (const s of milletRun({ train, test, pooling: 'conjunctive', steps: 120, evaluate: 6, stepSize: 0.02 })) last = s
+    for (const s of milletRun({ train, test, pooling: 'conjunctive', steps: 120, evaluate: 6, stepSize: 0.02 }))
+      last = s
     expect(last!.done).toBe(true)
     expect(last!.history.trainAccuracy.at(-1)!).toBeGreaterThan(0.6)
     expect(Number.isFinite(last!.scores!.aopcr)).toBe(true)

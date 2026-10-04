@@ -1,6 +1,6 @@
 import { useMemo } from 'react'
-import { ParamSlider, Readout, formatNumber, useParam } from 'aifn-render'
-import { ConstrainedExplorer, SensitivityPanel, type ConstrainedProblem } from './ConstrainedExplorer'
+import { formatNumber, Readout, slider, useFigureState } from 'aifn-render'
+import { ConstrainedExplorer, tField, SensitivityPanel, type ConstrainedProblem } from './ConstrainedExplorer'
 
 const SQRT5 = Math.sqrt(5)
 
@@ -23,35 +23,36 @@ const optimum = (c: number) => (c * c) / 5
 const multiplier = (c: number) => (2 * c) / 5
 
 export function ClosestPointOnLine() {
-  const c = useParam(5, { min: 0.5, max: 8, step: 0.1 })
-  const p = useMemo(() => problem(c.value), [c.value])
+  const state = useFigureState({
+    t: tField([-4, 4], -1.5, 0.01, 'position t along the line'),
+    c: slider(0.5, 8, 5, { step: 0.1, label: 'constraint level c' }),
+  })
+  const p = useMemo(() => problem(state.c), [state.c])
   return (
     <ConstrainedExplorer
+      state={state}
       problem={p}
       title="The closest point on a line, and the multiplier as a slope"
       caption="Left: circles x² + y² = const (grey), the line x + 2y = c, and the arrow of ∇f against the line's normal (1, 2). Drag the point along the line, or set its position t. Right, top: f along the line. Right, bottom: the optimal value f*(c) = c²/5 against the level c; drag the vertical line or use the slider to move the constraint. The dashed tangent has slope λ = 2c/5, the multiplier at the optimum."
-      initialT={-1.5}
-      tStep={0.01}
       xLabel="x"
       yLabel="y"
       tLabel="position t along the line"
       tSymbol="t"
       fLabel="f"
-      controls={<ParamSlider label="constraint level c" param={c} />}
       readout={() => (
         <>
           <Readout
             label="optimum (c/5, 2c/5)"
-            value={`(${formatNumber(c.value / 5)}, ${formatNumber((2 * c.value) / 5)})`}
+            value={`(${formatNumber(state.c / 5)}, ${formatNumber((2 * state.c) / 5)})`}
           />
-          <Readout label="f*(c) = c²/5" value={formatNumber(optimum(c.value))} />
-          <Readout label="λ* = 2c/5" value={formatNumber(multiplier(c.value))} />
+          <Readout label="f*(c) = c²/5" value={formatNumber(optimum(state.c))} />
+          <Readout label="λ* = 2c/5" value={formatNumber(multiplier(state.c))} />
         </>
       )}
       profileHeight={220}
       extra={
         <SensitivityPanel
-          param={c}
+          param={state.bind('c')}
           optimum={optimum}
           multiplier={multiplier}
           xLabel="constraint level c"

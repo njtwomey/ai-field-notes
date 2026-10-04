@@ -1,6 +1,5 @@
-import { Diagram } from 'aifn-render'
+import { Diagram, Figure } from 'aifn-render'
 import type { DiagramSpec } from 'aifn-render'
-import { Interactive } from 'aifn-render'
 
 const spec: DiagramSpec = {
   nodes: [
@@ -36,11 +35,11 @@ const spec: DiagramSpec = {
 /** The GP-LVM augmented with inducing variables, the model on which the variational bound is built. */
 export function AugmentedModel() {
   return (
-    <Interactive
+    <Figure
       title="The augmented model behind the bound"
       caption="Each output dimension d has latent function values f_d at the N latent points and M inducing values u_d at inducing inputs Z. The inducing inputs are variational parameters, not random variables. The latent points X are integrated out under a factorised Gaussian q(X); the double circles are the quantities integrated out."
     >
       <Diagram spec={spec} ariaLabel="Graphical model of the Bayesian GP-LVM with inducing variables" />
-    </Interactive>
+    </Figure>
   )
 }

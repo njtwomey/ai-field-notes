@@ -1,13 +1,16 @@
-import { useMemo, useState } from 'react'
+import { useMemo } from 'react'
 import {
-  Interactive,
-  ParamChoice,
-  ParamSlider,
-  Readout,
-  XYChart,
+  choice,
+  Curve,
+  Figure,
   formatNumber,
-  useParam,
-  type Handle,
+  Handle,
+  Plot,
+  Readout,
+  seriesLayers,
+  slider,
+  useAxis,
+  useFigureState,
 } from 'aifn-render'
 import { blobs, type Point } from '../../_shared/datasets'
 import { clusterSeries } from '../../_shared/groups'
@@ -38,29 +41,30 @@ function data(): Point[] {
 
 export function DendrogramCut() {
   const points = useMemo(() => data(), [])
-  const [linkage, setLinkage] = useState<Linkage>('single')
-  const merges = useMemo(() => agglomerate(points, linkage), [points, linkage])
+  const state = useFigureState({
+    linkage: choice<Linkage>(LINKAGES, 'single', { label: 'linkage' }),
+    cutAt: slider(0, 1, 0.55, { step: 0.005, label: 'cut height (fraction of the tallest merge)' }),
+  })
+  const merges = useMemo(() => agglomerate(points, state.linkage), [points, state.linkage])
   const top = merges[merges.length - 1].height
   // The cut is a fraction of the tallest merge, so it stays meaningful when the linkage rescales the tree.
-  const cutAt = useParam(0.55, { min: 0, max: 1, step: 0.005 })
-  const height = cutAt.value * top
+  const height = state.cutAt * top
   const labels = useMemo(() => cut(points.length, merges, height), [points, merges, height])
   const tree = useMemo(() => dendrogram(points.length, merges), [points, merges])
   const k = new Set(labels).size
-  const handles: Handle[] = [{ kind: 'y', at: height, label: 'cut', onDrag: (y) => cutAt.set(y / top) }]
   const n = points.length
 
+  const xAxis = useAxis({ label: 'leaf order', range: [-1, n] })
+  const yAxis = useAxis({ label: 'merge height', range: [0, top * 1.05] })
+  const xAxis2 = useAxis({ label: 'x₁', range: [-1.5, 5.5] })
+  const yAxis2 = useAxis({ label: 'x₂', range: [-1.5, 5] })
   return (
-    <Interactive
+    <Figure
       title="Cutting a dendrogram"
+      state={state}
       caption="Each horizontal bar joins two clusters at the height of their linkage distance. Drag the cut line up or down, or use the slider: every bar below the line is applied, and the clusters are what remains. Single linkage chains the two lower blobs together along the bridge of points; complete, average and Ward linkage separate them."
-      controls={
-        <>
-          <ParamChoice label="linkage" value={linkage} onChange={setLinkage} options={LINKAGES} />
-          <ParamSlider label="cut height (fraction of the tallest merge)" param={cutAt} />
-        </>
-      }
-      readout={
+
+      readouts={
         <>
           <Readout label="cut height" value={formatNumber(height)} />
           <Readout label="clusters" value={k} />
@@ -68,24 +72,14 @@ export function DendrogramCut() {
       }
     >
       <div className="grid gap-4 md:grid-cols-2">
-        <XYChart
-          height={340}
-          xLabel="leaf order"
-          yLabel="merge height"
-          xRange={[-1, n]}
-          yRange={[0, top * 1.05]}
-          handles={handles}
-          series={[{ name: 'dendrogram', type: 'line', x: tree.x, y: tree.y, emphasis: true }]}
-        />
-        <XYChart
-          height={340}
-          xLabel="x₁"
-          yLabel="x₂"
-          xRange={[-1.5, 5.5]}
-          yRange={[-1.5, 5]}
-          series={clusterSeries(points, labels, 'other points')}
-        />
+        <Plot x={xAxis} y={yAxis} height={340}>
+          <Curve name="dendrogram" x={tree.x} y={tree.y} emphasis />
+          <Handle kind="y" at={height} label="cut" onDrag={(y) => state.set('cutAt', y / top)} />
+        </Plot>
+        <Plot x={xAxis2} y={yAxis2} height={340}>
+          {seriesLayers(clusterSeries(points, labels, 'other points'))}
+        </Plot>
       </div>
-    </Interactive>
+    </Figure>
   )
 }

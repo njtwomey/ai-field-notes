@@ -13,7 +13,7 @@ import {
   formatNumber,
   useAxis,
 } from 'aifn-render'
-import { decodeThroughput, servingMemory } from 'aifn-applied/neural/quantisation'
+import { decodeThroughput, servingMemory } from 'aifn-methods/neural/quantisation'
 
 const fmt = (v: number) => (Number.isFinite(v) ? formatNumber(v) : '—')
 const SERVE_BITS = [16, 8, 6, 4, 3, 2]

@@ -1,5 +1,5 @@
 /**
- * The registry of `aifn-applied/inference/rating-models`.
+ * The registry of `aifn-methods/inference/rating-models`.
  */
 
 import { definer, entries, type AlgorithmInfo, type Entry, type FunctionInfo } from 'aifn/foundation/registry'

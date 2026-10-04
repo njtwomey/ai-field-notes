@@ -4,7 +4,7 @@ import { stream } from 'aifn/foundation/random'
 import { lsa, nearestByCosine, termTermMatrix } from 'aifn/text/representations'
 import { tokenise } from 'aifn/text/tokenise'
 import { tokenId } from 'aifn/text/vocabulary'
-import { topicCorpus, TOPIC_CORPUS_TOPICS } from 'aifn-applied/text/corpora'
+import { topicCorpus, TOPIC_CORPUS_TOPICS } from 'aifn-methods/text/corpora'
 
 describe('topicCorpus', () => {
   const c = topicCorpus(stream(0), { sentences: 300 })

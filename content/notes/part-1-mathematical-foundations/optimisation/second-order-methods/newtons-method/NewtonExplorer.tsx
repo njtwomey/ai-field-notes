@@ -1,18 +1,21 @@
-import { useMemo, useState } from 'react'
+import { useMemo } from 'react'
 import {
-  Interactive,
-  ParamChoice,
-  ParamSlider,
-  ParamSwitch,
-  Readout,
-  XYChart,
+  Curve,
+  Figure,
   formatNumber,
-  useParam,
-  type Handle,
+  Handle,
+  Plot,
+  Points,
+  Readout,
   type Segment,
-  type XYSeries,
+  Segments,
+  setting,
+  slider,
+  useAxis,
+  useFigureState,
+  variants,
 } from 'aifn-render'
-import { linspace } from '@/lib/math'
+import { linspace, toFlat } from 'aifn/foundation/tensor'
 
 type FunctionId = 'logcosh' | 'well' | 'cycle'
 
@@ -84,38 +87,45 @@ function newton(p: Problem, x0: number, damped: boolean) {
 }
 
 export function NewtonExplorer() {
-  const [id, setId] = useState<FunctionId>('logcosh')
-  const [damped, setDamped] = useState(false)
-  const p = PROBLEMS[id]
-  const start = useParam(p.start, { min: p.range[0], max: p.range[1], step: 0.01 })
-  const choose = (next: FunctionId) => {
-    setId(next)
-    start.set(PROBLEMS[next].start)
-  }
+  const state = useFigureState({
+    fn: variants(
+      Object.fromEntries(
+        (Object.keys(PROBLEMS) as FunctionId[]).map((k) => {
+          const q = PROBLEMS[k]
+          const start = slider(q.range[0], q.range[1], q.start, { step: 0.01, label: 'start x₀' })
+          return [k, { label: q.label, params: { start } }]
+        }),
+      ) as Record<FunctionId, { label: string; params: { start: ReturnType<typeof slider> } }>,
+      { label: 'function' },
+    ),
+    damped: setting(false, 'damped (backtracking)'),
+  })
+  const p = PROBLEMS[state.fn.key]
+  const start = state.fn.values.start
+  const damped = state.damped
 
-  const xs = useMemo(() => newton(p, start.value, damped), [p, start.value, damped])
+  const xs = useMemo(() => newton(p, start, damped), [p, start, damped])
   const [lo, hi] = p.range
 
-  const series = useMemo((): XYSeries[] => {
-    const grid = linspace(lo, hi, 241)
-    const x0 = start.value
+  const series = useMemo(() => {
+    const grid = toFlat(linspace(lo, hi, 241))
+    const x0 = start
     const f0 = p.f(x0)
     const g0 = p.d1(x0)
     const h0 = p.d2(x0)
     const inRange = xs.filter((x) => x >= lo && x <= hi)
     return [
-      { name: 'f', type: 'line', x: grid, y: grid.map(p.f), slot: 0 },
+      { name: 'f', x: grid, y: grid.map(p.f), slot: 0 },
       {
         name: 'quadratic model at start',
-        type: 'line',
         x: grid,
         y: grid.map((x) => f0 + g0 * (x - x0) + 0.5 * h0 * (x - x0) ** 2),
         slot: 2,
         dashed: true,
       },
-      { name: 'iterates', type: 'scatter', x: inRange, y: inRange.map(p.f), slot: 1 },
-    ]
-  }, [p, lo, hi, xs, start.value])
+      { name: 'iterates', x: inRange, y: inRange.map(p.f), slot: 1 },
+    ] as const
+  }, [p, lo, hi, xs, start])
 
   const segments = useMemo((): Segment[] => {
     const out: Segment[] = []
@@ -129,7 +139,7 @@ export function NewtonExplorer() {
   }, [xs, p, lo, hi])
 
   const [yMin, yMax] = useMemo(() => {
-    const ys = linspace(lo, hi, 241).map(p.f)
+    const ys = toFlat(linspace(lo, hi, 241)).map(p.f)
     const min = Math.min(...ys)
     const max = Math.max(...ys)
     const pad = 0.1 * (max - min)
@@ -137,19 +147,17 @@ export function NewtonExplorer() {
   }, [p, lo, hi])
 
   const gradients = useMemo(
-    (): XYSeries[] => [
-      {
-        name: '|f′(x_k)|',
-        type: 'line',
-        x: xs.map((_, k) => k),
-        y: xs.map((x) => (Number.isFinite(x) ? Math.max(Math.abs(p.d1(x)), FLOOR) : FLOOR)),
-        slot: 1,
-      },
-    ],
+    () =>
+      [
+        {
+          name: '|f′(x_k)|',
+          x: xs.map((_, k) => k),
+          y: xs.map((x) => (Number.isFinite(x) ? Math.max(Math.abs(p.d1(x)), FLOOR) : FLOOR)),
+          slot: 1,
+        },
+      ] as const,
     [xs, p],
   )
-
-  const handles: Handle[] = [{ kind: 'x', at: start.value, label: 'start', onDrag: start.set }]
 
   const last = xs[xs.length - 1]
   const diverged = !Number.isFinite(last) || Math.abs(last) > LIMIT
@@ -164,43 +172,35 @@ export function NewtonExplorer() {
         : 'converged to a maximum'
       : 'not converged'
 
+  const xAxis = useAxis({ label: 'x', range: p.range })
+  const yAxis = useAxis({ label: 'f(x)', range: [yMin, yMax] })
+  const xAxis2 = useAxis({ label: 'iteration k', hold: 'union' })
+  const yAxis2 = useAxis({ label: '|f′(x_k)|', hold: 'union', log: true })
   return (
-    <Interactive
+    <Figure
       title="Newton's method in one dimension"
+      state={state}
       caption="Left: the function, the quadratic model at the start (dashed) and the Newton iterates joined in order. Drag the vertical line, or use the slider, to move the start. Each pure Newton step jumps to the stationary point of the current quadratic model. Right: |f′| per iteration on a log scale; quadratic convergence shows as a curve that bends sharply downward. Damped Newton halves the step until the function decreases enough, and steps along −f′ where the curvature is negative."
-      controls={
+      readouts={
         <>
-          <ParamChoice
-            label="function"
-            value={id}
-            onChange={choose}
-            options={(Object.keys(PROBLEMS) as FunctionId[]).map((k) => ({ value: k, label: PROBLEMS[k].label }))}
-          />
-          <ParamSlider label="start x₀" param={start} />
-          <ParamSwitch label="damped (backtracking)" checked={damped} onChange={setDamped} />
-        </>
-      }
-      readout={
-        <>
-          <Readout label="f″(x₀)" value={formatNumber(p.d2(start.value))} />
+          <Readout label="f″(x₀)" value={formatNumber(p.d2(start))} />
           <Readout label="last iterate" value={diverged ? '∞' : formatNumber(last)} />
           <Readout label="outcome" value={status} />
         </>
       }
     >
       <div className="grid gap-4 md:grid-cols-2">
-        <XYChart
-          height={340}
-          series={series}
-          segments={segments}
-          xRange={p.range}
-          yRange={[yMin, yMax]}
-          handles={handles}
-          xLabel="x"
-          yLabel="f(x)"
-        />
-        <XYChart height={340} series={gradients} yLog xLabel="iteration k" yLabel="|f′(x_k)|" />
+        <Plot x={xAxis} y={yAxis} height={340}>
+          <Curve {...series[0]} />
+          <Curve {...series[1]} />
+          <Points {...series[2]} />
+          <Segments segments={segments} />
+          <Handle {...state.handle('fn.start', { label: 'start' })} />
+        </Plot>
+        <Plot x={xAxis2} y={yAxis2} height={340}>
+          <Curve {...gradients[0]} />
+        </Plot>
       </div>
-    </Interactive>
+    </Figure>
   )
 }

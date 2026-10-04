@@ -1,5 +1,5 @@
 /**
- * `aifn-applied/learning/weak-supervision`: learning without clean labels. Label models that combine noisy votes
+ * `aifn-methods/learning/weak-supervision`: learning without clean labels. Label models that combine noisy votes
  * (majority vote, Dawid–Skene EM, the data-programming label model of Snorkel); classifiers from positive and
  * unlabelled data (Elkan–Noto, uPU, nnPU), from label proportions and from complementary labels; attention-based
  * multiple-instance learning; and noise-rate estimation by confident learning.

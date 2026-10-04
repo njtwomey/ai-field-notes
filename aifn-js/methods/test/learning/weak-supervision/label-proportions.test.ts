@@ -9,7 +9,7 @@ import { describe, expect, it } from 'vitest'
 import { stream } from 'aifn/foundation/random'
 import { dense, toFlat, type Tensor } from 'aifn/foundation/tensor'
 import { trace } from 'aifn/foundation/trace'
-import { halfKernel, xor } from 'aifn-applied/data/synthetic'
+import { halfKernel, xor } from 'aifn-methods/data/synthetic'
 import {
   alterProportionSvm,
   bagsByProportion,
@@ -18,7 +18,7 @@ import {
   lpllpGammaSearch,
   lpllpSteps,
   meanMap,
-} from 'aifn-applied/learning/weak-supervision'
+} from 'aifn-methods/learning/weak-supervision'
 
 const CONFIG = {
   A: [0.6, 0.4, 0.5],

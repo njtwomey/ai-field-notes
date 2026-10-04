@@ -1,4 +1,4 @@
-import { averagePathLength } from 'aifn-applied/unsupervised/anomaly'
+import { averagePathLength } from 'aifn-methods/unsupervised/anomaly'
 import { stream, uniform as drawUniform } from 'aifn/foundation/random'
 
 export type Pt = [number, number]
@@ -7,7 +7,7 @@ export type Segment = { from: [number, number]; to: [number, number] }
 
 type Node = { size: number } | { dim: 0 | 1; split: number; left: Node; right: Node }
 
-/** Average leaf depth of a random binary tree with n leaves, delegated to aifn-applied. */
+/** Average leaf depth of a random binary tree with n leaves, delegated to aifn-methods. */
 export const avgPathLength = averagePathLength
 
 /**

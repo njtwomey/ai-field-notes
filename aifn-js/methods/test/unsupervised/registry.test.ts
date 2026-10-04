@@ -1,5 +1,5 @@
 import { describe, it } from 'vitest'
-import { unsupervisedModelRegistry } from 'aifn-applied/unsupervised'
+import { unsupervisedModelRegistry } from 'aifn-methods/unsupervised'
 import { expectModelProtocol } from '../registry'
 
 describe('unsupervisedModelRegistry', () => {

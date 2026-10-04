@@ -1,19 +1,24 @@
 import { useMemo, useState } from 'react'
 import {
-  Interactive,
-  Readout,
-  StepControls,
-  XYChart,
+  Figure,
   formatNumber,
-  type Handle,
+  Handle,
+  Player,
+  Plot,
+  Readout,
   type Segment,
-  type XYSeries,
+  seriesLayers,
+  type SeriesSpec,
+  slider,
+  useAxis,
+  useFigureState,
+  Vectors,
 } from 'aifn-render'
 
 type Vec = [number, number]
 const R = 4
 const STEPS = 3
-const snap = (v: number) => Math.round(Math.min(Math.max(v, -R), R) * 10) / 10
+const coord = (initial: number) => slider(-R, R, initial, { step: 0.1, onChart: true })
 const fmt = (v: Vec) => `(${formatNumber(v[0])}, ${formatNumber(v[1])})`
 
 const STAGES = [
@@ -25,8 +30,9 @@ const STAGES = [
 
 /** Gram–Schmidt on two vectors in the plane, one step at a time. */
 export function GramSchmidtStepper() {
-  const [v1, setV1] = useState<Vec>([3, 1])
-  const [v2, setV2] = useState<Vec>([1.5, 2.5])
+  const state = useFigureState({ v1x: coord(3), v1y: coord(1), v2x: coord(1.5), v2y: coord(2.5) })
+  const v1: Vec = useMemo(() => [state.v1x, state.v1y], [state.v1x, state.v1y])
+  const v2: Vec = useMemo(() => [state.v2x, state.v2y], [state.v2x, state.v2y])
   const [step, setStep] = useState(0)
 
   const r = useMemo(() => {
@@ -42,7 +48,7 @@ export function GramSchmidtStepper() {
 
   const { series, vectors } = useMemo(() => {
     // The inputs are thin muted segments from the origin; the arrows are the orthonormal outputs.
-    const series: XYSeries[] = [
+    const series: SeriesSpec[] = [
       { name: 'input v₁', type: 'line', x: [0, v1[0]], y: [0, v1[1]], muted: true },
       { name: 'input v₂', type: 'line', x: [0, v2[0]], y: [0, v2[1]], muted: true },
     ]
@@ -65,35 +71,15 @@ export function GramSchmidtStepper() {
     return { series, vectors }
   }, [r, step, v1, v2])
 
-  const reset = () => setStep(0)
-  const handles: Handle[] = [
-    {
-      kind: 'point',
-      at: v1,
-      label: 'v₁',
-      onDrag: ([x, y]) => setV1([snap(x), snap(y)]),
-    },
-    {
-      kind: 'point',
-      at: v2,
-      label: 'v₂',
-      onDrag: ([x, y]) => setV2([snap(x), snap(y)]),
-    },
-  ]
-
+  const xAxis = useAxis({ label: 'x₁', range: [-R, R] })
+  const yAxis = useAxis({ label: 'x₂', range: [-R, R], equal: xAxis })
   return (
-    <Interactive
+    <Figure
       title="Gram–Schmidt, one step at a time"
+      state={state}
       caption={`${STAGES[step]} Drag the ends of v₁ and v₂ to change the inputs at any step. The arrows are the orthonormal basis q₁, q₂. Make v₂ nearly parallel to v₁ and w₂ becomes tiny: dividing by its length is where rounding errors grow.`}
-      controls={
-        <StepControls
-          onStep={() => setStep((s) => Math.min(s + 1, STEPS))}
-          onRun={() => setStep(STEPS)}
-          onReset={reset}
-          done={step === STEPS}
-        />
-      }
-      readout={
+      controls={<Player value={step} onChange={setStep} count={STEPS + 1} label="step" />}
+      readouts={
         <>
           <Readout label="r₁₁ = ‖v₁‖" value={formatNumber(r.n1)} />
           <Readout label="r₁₂ = q₁ᵀv₂" value={step >= 2 ? formatNumber(r.r12) : '·'} />
@@ -104,17 +90,13 @@ export function GramSchmidtStepper() {
       }
     >
       <div className="mx-auto w-full max-w-lg">
-        <XYChart
-          equalAspect
-          xRange={[-R, R]}
-          yRange={[-R, R]}
-          xLabel="x₁"
-          yLabel="x₂"
-          series={series}
-          vectors={vectors}
-          handles={handles}
-        />
+        <Plot x={xAxis} y={yAxis}>
+          {seriesLayers(series)}
+          <Vectors vectors={vectors} />
+          <Handle {...state.handle(['v1x', 'v1y'], { label: 'v₁' })} />
+          <Handle {...state.handle(['v2x', 'v2y'], { label: 'v₂' })} />
+        </Plot>
       </div>
-    </Interactive>
+    </Figure>
   )
 }

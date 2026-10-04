@@ -1,5 +1,5 @@
-import { useMemo, useState } from 'react'
-import { Heatmap, Interactive, ParamChoice, Readout, formatNumber, type HeatmapOverlay } from 'aifn-render'
+import { useMemo } from 'react'
+import { choice, Figure, formatNumber, Plot, Points, Raster, Readout, useAxis, useFigureState } from 'aifn-render'
 
 /**
  * Toy two-dimensional "contextual embeddings": each word is a unit vector at an angle, and related words sit at nearby
@@ -35,8 +35,18 @@ type Candidate = keyof typeof CANDIDATES
 
 /** Pairwise cosine similarities, with each token's best match marked: the greedy matching behind BERTScore. */
 export function GreedyMatching() {
-  const [choice, setChoice] = useState<Candidate>('paraphrase')
-  const cand = CANDIDATES[choice]
+  const state = useFigureState({
+    candidate: choice<Candidate>(
+      [
+        { value: 'paraphrase', label: 'a kitten sits down' },
+        { value: 'exact', label: 'the cat sat' },
+        { value: 'wrong', label: 'a dog sat' },
+      ],
+      'paraphrase',
+      { label: 'candidate' },
+    ),
+  })
+  const cand = CANDIDATES[state.candidate]
 
   const r = useMemo(() => {
     // z[i][j]: candidate token i (rows) against reference token j (columns).
@@ -52,40 +62,29 @@ export function GreedyMatching() {
     return { z, rowBest, colBest, precision, recall, f }
   }, [cand])
 
-  const overlay: HeatmapOverlay[] = [
+  const overlay = [
     {
       name: 'best reference match for each candidate token (precision)',
-      type: 'scatter',
       x: r.rowBest,
       y: cand.map((_, i) => i),
       slot: 1,
     },
     {
       name: 'best candidate match for each reference token (recall)',
-      type: 'scatter',
       x: REFERENCE.map((_, j) => j),
       y: r.colBest,
       emphasis: true,
     },
-  ]
+  ] as const
 
+  const xAxis = useAxis({ label: `reference token (${REFERENCE.join(' · ')})` })
+  const yAxis = useAxis({ label: 'candidate token index' })
   return (
-    <Interactive
+    <Figure
       title="Greedy matching of token embeddings"
       caption={`Rows are candidate tokens (${cand.join(', ')}), columns reference tokens (${REFERENCE.join(', ')}); each cell is the cosine similarity of their embeddings. Precision averages each row's maximum, recall each column's maximum. Toy two-dimensional embeddings stand in for a pretrained model's contextual vectors, so the paraphrase scores high although it shares no word with the reference.`}
-      controls={
-        <ParamChoice
-          label="candidate"
-          value={choice}
-          onChange={setChoice}
-          options={[
-            { value: 'paraphrase', label: 'a kitten sits down' },
-            { value: 'exact', label: 'the cat sat' },
-            { value: 'wrong', label: 'a dog sat' },
-          ]}
-        />
-      }
-      readout={
+      state={state}
+      readouts={
         <>
           <Readout label="precision" value={formatNumber(r.precision)} />
           <Readout label="recall" value={formatNumber(r.recall)} />
@@ -94,19 +93,19 @@ export function GreedyMatching() {
       }
     >
       <div className="mx-auto w-full max-w-xl">
-        <Heatmap
-          x={REFERENCE.map((_, j) => j)}
-          y={cand.map((_, i) => i)}
-          z={r.z}
-          range={[-1, 1]}
-          scale="diverging"
-          xLabel={`reference token (${REFERENCE.join(' · ')})`}
-          yLabel="candidate token index"
-          valueLabel="cosine"
-          overlay={overlay}
-          height={300}
-        />
+        <Plot x={xAxis} y={yAxis} height={300}>
+          <Raster
+            x={REFERENCE.map((_, j) => j)}
+            y={cand.map((_, i) => i)}
+            z={r.z}
+            scale={'diverging'}
+            range={[-1, 1]}
+            valueLabel={'cosine'}
+          />
+          <Points {...overlay[0]} live />
+          <Points {...overlay[1]} live />
+        </Plot>
       </div>
-    </Interactive>
+    </Figure>
   )
 }

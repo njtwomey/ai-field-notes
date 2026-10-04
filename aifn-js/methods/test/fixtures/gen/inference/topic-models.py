@@ -1,4 +1,4 @@
-"""Reference values for aifn-applied/inference/topic-models: pLSA expectation-maximisation (Hofmann, 1999) written
+"""Reference values for aifn-methods/inference/topic-models: pLSA expectation-maximisation (Hofmann, 1999) written
 directly in NumPy from given initial distributions, on a small random corpus; P(w | z), P(z | d) and the
 log-likelihood after a fixed number of steps."""
 

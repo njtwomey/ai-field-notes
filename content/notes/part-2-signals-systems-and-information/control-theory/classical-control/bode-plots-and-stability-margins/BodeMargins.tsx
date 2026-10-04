@@ -1,5 +1,16 @@
 import { useMemo } from 'react'
-import { Interactive, ParamSlider, Readout, XYChart, formatNumber, useParam, type XYSeries } from 'aifn-render'
+import {
+  Curve,
+  Figure,
+  float,
+  formatNumber,
+  Plot,
+  Readout,
+  seriesLayers,
+  type SeriesSpec,
+  useAxis,
+  useFigureState,
+} from 'aifn-render'
 import { bode, feedbackStep, logspace } from '../../_shared/control'
 
 const LOG_W: [number, number] = [-2, 2]
@@ -31,12 +42,22 @@ const at = (f: number[], lw: number) => {
 }
 
 export function BodeMargins() {
-  const logK = useParam(0, { min: -1, max: 1.2, step: 0.01 })
-  const delay = useParam(0, { min: 0, max: 1.5, step: 0.05 })
-  const k = 10 ** logK.value
+  const state = useFigureState({
+    logK: float(0, {
+      min: -1,
+      max: 1.2,
+      step: 0.01,
+      label: 'gain K',
+      points_per_decade: 2,
+      logTransform: 'value-is-log',
+      format: (v) => formatNumber(10 ** v),
+    }),
+    delay: float(0, { min: 0, max: 1.5, step: 0.05, label: 'delay τ (s)' }),
+  })
+  const k = 10 ** state.logK
 
   const view = useMemo(() => {
-    const tf = { num: [k], den: DEN, delay: delay.value }
+    const tf = { num: [k], den: DEN, delay: state.delay }
     const { mag, phase } = bode(tf, W)
     const lc = crossing(mag, 0)
     const l180 = crossing(phase, -180)
@@ -44,11 +65,11 @@ export function BodeMargins() {
     const gm = l180 === null ? null : -at(mag, l180)
     const step = feedbackStep(tf, 1, 30, 0.01)
     return { mag, phase, lc, l180, pm, gm, step }
-  }, [k, delay.value])
+  }, [k, state.delay])
 
-  const guide = (name: string, lw: number | null, y: [number, number], slot: number): XYSeries[] =>
+  const guide = (name: string, lw: number | null, y: [number, number], slot: number): SeriesSpec[] =>
     lw === null ? [] : [{ name, type: 'line', x: [lw, lw], y, slot, dashed: true }]
-  const magSeries: XYSeries[] = [
+  const magSeries: SeriesSpec[] = [
     { name: '|L(iω)| (dB)', type: 'line', x: LW, y: view.mag, slot: 0 },
     { name: '0 dB', type: 'line', x: LOG_W, y: [0, 0], muted: true },
     ...guide('gain crossover ωc', view.lc, [-80, 60], 1),
@@ -57,7 +78,7 @@ export function BodeMargins() {
       ? [{ name: 'gain margin', type: 'line' as const, x: [view.l180, view.l180], y: [-view.gm, 0], emphasis: true }]
       : []),
   ]
-  const phaseSeries: XYSeries[] = [
+  const phaseSeries: SeriesSpec[] = [
     { name: '∠L(iω) (degrees)', type: 'line', x: LW, y: view.phase, slot: 0 },
     { name: '−180°', type: 'line', x: LOG_W, y: [-180, -180], muted: true },
     ...guide('gain crossover ωc', view.lc, [-360, -45], 1),
@@ -75,23 +96,25 @@ export function BodeMargins() {
       : []),
   ]
   const stable = view.pm !== null && view.pm > 0 && (view.gm === null || view.gm > 0)
-  const stepSeries: XYSeries[] = [
-    { name: 'reference', type: 'line', x: [0, 30], y: [1, 1], muted: true },
-    { name: 'closed-loop output', type: 'line', x: view.step.t, y: view.step.y, slot: 0 },
-  ]
+  const stepSeries = [
+    { name: 'reference', x: [0, 30], y: [1, 1], muted: true },
+    { name: 'closed-loop output', x: view.step.t, y: view.step.y, slot: 0 },
+  ] as const
   const fmtW = (lw: number | null) => (lw === null ? '—' : `${formatNumber(10 ** lw)} rad/s`)
 
+  const xAxis = useAxis({ label: 'log₁₀ ω', range: LOG_W })
+  const yAxis = useAxis({ label: 'magnitude (dB)', range: [-80, 60] })
+  const xAxis2 = useAxis({ label: 'log₁₀ ω', range: LOG_W })
+  const yAxis2 = useAxis({ label: 'phase (degrees)', range: [-360, -45] })
+  const xAxis3 = useAxis({ label: 'time t (s)', range: [0, 30] })
+  const yAxis3 = useAxis({ label: 'output y', range: [-0.5, 2.5] })
   return (
-    <Interactive
+    <Figure
       title="Gain and phase margins"
+      state={state}
       caption="Bode plot of L(s) = K e^(−sτ) / (s(s+1)(0.2s+1)) and the closed-loop step response. The gain margin (bar on the magnitude plot) is how far |L| is below 0 dB where the phase reaches −180°. The phase margin (bar on the phase plot) is how far the phase is above −180° where |L| crosses 0 dB. Raising K lifts the magnitude curve without changing the phase, so the gain crossover moves right, towards the phase crossover, and both margins shrink; at K = 6 they vanish. A delay leaves the magnitude alone and subtracts ωτ from the phase, eating phase margin. Smaller margins show up as more overshoot and ringing."
-      controls={
-        <>
-          <ParamSlider label="gain K" param={logK} format={(v) => formatNumber(10 ** v)} />
-          <ParamSlider label="delay τ (s)" param={delay} />
-        </>
-      }
-      readout={
+
+      readouts={
         <>
           <Readout label="gain crossover ωc" value={fmtW(view.lc)} />
           <Readout label="phase margin" value={view.pm === null ? '—' : `${formatNumber(view.pm)}°`} />
@@ -102,31 +125,17 @@ export function BodeMargins() {
       }
     >
       <div className="space-y-2">
-        <XYChart
-          series={magSeries}
-          xLabel="log₁₀ ω"
-          yLabel="magnitude (dB)"
-          xRange={LOG_W}
-          yRange={[-80, 60]}
-          height={220}
-        />
-        <XYChart
-          series={phaseSeries}
-          xLabel="log₁₀ ω"
-          yLabel="phase (degrees)"
-          xRange={LOG_W}
-          yRange={[-360, -45]}
-          height={220}
-        />
-        <XYChart
-          series={stepSeries}
-          xLabel="time t (s)"
-          yLabel="output y"
-          xRange={[0, 30]}
-          yRange={[-0.5, 2.5]}
-          height={200}
-        />
+        <Plot x={xAxis} y={yAxis} height={220}>
+          {seriesLayers(magSeries)}
+        </Plot>
+        <Plot x={xAxis2} y={yAxis2} height={220}>
+          {seriesLayers(phaseSeries)}
+        </Plot>
+        <Plot x={xAxis3} y={yAxis3} height={200}>
+          <Curve {...stepSeries[0]} />
+          <Curve {...stepSeries[1]} />
+        </Plot>
       </div>
-    </Interactive>
+    </Figure>
   )
 }

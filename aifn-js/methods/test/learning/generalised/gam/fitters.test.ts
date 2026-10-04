@@ -11,9 +11,9 @@ import {
   smoothingProfile,
   type GamFitMethod,
   type GamProblem,
-} from 'aifn-applied/learning/generalised/gam'
-import { additiveData, ADDITIVE_SHAPES, type AdditiveFamily } from 'aifn-applied/data/synthetic'
-import { datasetRegistry, type AdditiveTruth } from 'aifn-applied/data'
+} from 'aifn-methods/learning/generalised/gam'
+import { additiveData, ADDITIVE_SHAPES, type AdditiveFamily } from 'aifn-methods/data/synthetic'
+import { datasetRegistry, type AdditiveTruth } from 'aifn-methods/data'
 import { valueAndGrad } from 'aifn/foundation/autodiff'
 import { stream } from 'aifn/foundation/random'
 import { fromData, linspace, toFlat, type Tensor, type Value } from 'aifn/foundation/tensor'

@@ -1,5 +1,5 @@
 /**
- * `aifn-applied/gym/agents/policy`: policy-gradient and actor–critic agents with neural networks. On-policy, for
+ * `aifn-methods/gym/agents/policy`: policy-gradient and actor–critic agents with neural networks. On-policy, for
  * discrete actions: REINFORCE with a learned baseline, A2C and PPO (`on-policy.ts`). Off-policy, for one continuous
  * action: DDPG (`ddpg.ts`). Offline, from logged transitions: conservative Q-learning against offline DQN
  * (`offline.ts`).

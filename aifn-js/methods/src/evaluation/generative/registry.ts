@@ -1,4 +1,4 @@
-/** The functions of `aifn-applied/evaluation/generative` besides its metrics. */
+/** The functions of `aifn-methods/evaluation/generative` besides its metrics. */
 
 import { definer, entries, type Entry, type FunctionInfo } from 'aifn/foundation/registry'
 import * as generative from './generative'

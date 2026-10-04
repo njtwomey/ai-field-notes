@@ -1,4 +1,4 @@
-/** The registry of `aifn-applied/unsupervised/embedding/neighbour`: t-SNE and UMAP as traceable algorithms. */
+/** The registry of `aifn-methods/unsupervised/embedding/neighbour`: t-SNE and UMAP as traceable algorithms. */
 
 import { definer, entries, type AlgorithmInfo, type Entry, type FunctionInfo } from 'aifn/foundation/registry'
 import * as pacmap from './pacmap'

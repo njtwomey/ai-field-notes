@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { stream } from 'aifn/foundation/random'
 import { add, fromData, logsumexp, neg, toFlat, unwrap, type Tensor } from 'aifn/foundation/tensor'
 import { softmax } from 'aifn/numerics/special'
-import { annulus, moons } from 'aifn-applied/data/synthetic'
+import { annulus, moons } from 'aifn-methods/data/synthetic'
 import {
   classEnergy,
   classifier,
@@ -11,7 +11,7 @@ import {
   logitShift,
   classifierLogits,
   type JemRun,
-} from 'aifn-applied/generative/energy'
+} from 'aifn-methods/generative/energy'
 
 const net = classifier(2, 3, { hidden: [8] })
 const params = net.layer.init(stream(1))

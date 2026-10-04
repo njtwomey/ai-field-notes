@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { caviNormalGamma, normalGammaPosterior, type NormalGammaPrior } from 'aifn-applied/inference/conjugate-models'
+import { caviNormalGamma, normalGammaPosterior, type NormalGammaPrior } from 'aifn-methods/inference/conjugate-models'
 import { toFlat } from 'aifn/foundation/tensor'
 import { trace } from 'aifn/foundation/trace'
 import { fixture } from '../../fixtures'

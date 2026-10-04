@@ -1,15 +1,23 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
-  Heatmap,
-  Interactive,
-  ParamButton,
-  ParamChoice,
-  ParamSlider,
-  ParamSwitch,
-  Readout,
+  Button,
+  choice,
+  Curve,
+  Figure,
+  float,
   formatNumber,
-  type HeatmapOverlay,
+  int,
+  Plot,
   type PlotPointer,
+  Points,
+  Raster,
+  Readout,
+  seriesLayers,
+  type SeriesSpec,
+  setting,
+  slider,
+  useAxis,
+  useFigureState,
 } from 'aifn-render'
 import {
   AXIS,
@@ -60,38 +68,80 @@ function segmentsPath(lines: { theta: number; rho: number }[]): { x: number[]; y
 
 /** Linked views of the Hough transform: an image with its edge points, and the (θ, ρ) accumulator they vote into. */
 export function HoughExplorer() {
-  const [scene, setScene] = useState<Scene>('corridor')
-  const [show, setShow] = useState<'edges' | 'image'>('edges')
-  const [pixelNoise, setPixelNoise] = useState(0.04)
-  const [threshold, setThreshold] = useState(0.2)
-  const [positionNoise, setPositionNoise] = useState(1)
-  const [clutter, setClutter] = useState(80)
-  const [dTheta, setDTheta] = useState(1)
-  const [dRho, setDRho] = useState(1.5)
-  const [lines, setLines] = useState(DEFAULT_LINES.corridor)
-  const [directional, setDirectional] = useState(false)
-  const [logScale, setLogScale] = useState(true)
-  const [seed, setSeed] = useState(1)
+  const state = useFigureState({
+    scene: choice<Scene>(SCENES, 'corridor', { label: 'image' }),
+    show: choice<'edges' | 'image'>(
+      [
+        { value: 'edges', label: 'edge points' },
+        { value: 'image', label: 'image' },
+      ],
+      'edges',
+      { label: 'left panel', when: (v) => v.scene !== 'points' },
+    ),
+    pixelNoise: slider(0, 0.3, 0.04, {
+      step: 0.01,
+      label: 'pixel noise σ',
+      format: (v) => v.toFixed(2),
+      when: (v) => v.scene !== 'points',
+    }),
+    threshold: slider(0.05, 0.8, 0.2, {
+      step: 0.05,
+      label: 'edge threshold (share of the largest gradient)',
+      format: (v) => v.toFixed(2),
+      when: (v) => v.scene !== 'points',
+    }),
+    positionNoise: slider(0, 4, 1, {
+      step: 0.25,
+      label: 'position noise σ (pixels)',
+      when: (v) => v.scene === 'points',
+    }),
+    clutter: int(80, {
+      min: 0,
+      max: 300,
+      suggestions: [0, 40, 80, 150, 300],
+      label: 'clutter points',
+      when: (v) => v.scene === 'points',
+    }),
+    dTheta: slider(1, 6, 1, { step: 1, label: 'θ bin width (degrees)' }),
+    dRho: float(1.5, { min: 1, max: 6, step: 0.5, label: 'ρ bin width (pixels)' }),
+    lines: int(DEFAULT_LINES.corridor, { min: 1, max: 20, label: 'lines to keep' }),
+    directional: setting(false, 'vote along the gradient direction only'),
+    logScale: setting(true, 'log colour scale'),
+    seed: int(1, { ge: 0, label: 'seed' }),
+  })
+  const { scene, show, pixelNoise, threshold, positionNoise, clutter } = state
   const [added, setAdded] = useState<EdgePoint[]>([])
   const [hover, setHover] = useState<Hover>(null)
 
-  const cloud = scene === 'points'
+  // A new scene starts from its own line count, without the points added to the last one.
+  const lastScene = useRef(scene)
+  useEffect(() => {
+    if (lastScene.current === scene) return
+    lastScene.current = scene
+    state.set('lines', DEFAULT_LINES[scene])
+    setAdded([])
+    setHover(null)
+  }, [scene, state])
+
   const image = useMemo(
-    () => (scene === 'points' ? null : sceneImage(scene, pixelNoise, seed)),
-    [scene, pixelNoise, seed],
+    () => (scene === 'points' ? null : sceneImage(scene, pixelNoise, state.seed)),
+    [scene, pixelNoise, state.seed],
   )
   const detected = useMemo(
-    () => (image ? edgePoints(image, threshold) : pointCloud(positionNoise, clutter, seed)),
-    [image, threshold, positionNoise, clutter, seed],
+    () => (image ? edgePoints(image, threshold) : pointCloud(positionNoise, clutter, state.seed)),
+    [image, threshold, positionNoise, clutter, state.seed],
   )
   const points = useMemo(() => [...detected, ...added], [detected, added])
   const shown = useMemo(() => (image && show === 'image' ? image : rasterise(detected)), [image, show, detected])
 
-  const g = useMemo(() => grid(dTheta, dRho), [dTheta, dRho])
-  const voteWindow = directional ? DIRECTION_WINDOW : null
+  const g = useMemo(() => grid(state.dTheta, state.dRho), [state.dTheta, state.dRho])
+  const voteWindow = state.directional ? DIRECTION_WINDOW : null
   const { acc, votes } = useMemo(() => accumulate(g, points, voteWindow), [g, points, voteWindow])
-  const z = useMemo(() => (logScale ? acc.map((row) => row.map((v) => Math.log1p(v))) : acc), [acc, logScale])
-  const peaks = useMemo(() => findPeaks(g, acc, lines), [g, acc, lines])
+  const z = useMemo(
+    () => (state.logScale ? acc.map((row) => row.map((v) => Math.log1p(v))) : acc),
+    [acc, state.logScale],
+  )
+  const peaks = useMemo(() => findPeaks(g, acc, state.lines), [g, acc, state.lines])
 
   // Everything the hover changes is an overlay or the marker, which the charts patch without redrawing their grids.
   const hoveredCell = hover?.kind === 'cell' ? hover : null
@@ -106,19 +156,19 @@ export function HoughExplorer() {
     )
   }, [hoveredCell, points, g, voteWindow])
 
-  const imageOverlay = useMemo((): HeatmapOverlay[] => {
+  const imageOverlay = useMemo(() => {
     const found = segmentsPath(peaks)
     const probe = hoveredCell ? segmentsPath([{ theta: g.thetas[hoveredCell.j], rho: g.rhos[hoveredCell.k] }]) : null
     const lit = hoveredCell ? voters : hoveredPoint ? [hoveredPoint] : []
     return [
-      { name: 'detected lines', type: 'line', x: found.x, y: found.y, emphasis: true },
-      { name: 'line of hovered cell', type: 'line', x: probe?.x ?? [], y: probe?.y ?? [], slot: 1 },
-      { name: 'hovered point or voters', type: 'scatter', x: lit.map((p) => p.x), y: lit.map((p) => p.y), slot: 1 },
-      { name: 'added points', type: 'scatter', x: added.map((p) => p.x), y: added.map((p) => p.y), slot: 2 },
-    ]
+      { name: 'detected lines', x: found.x, y: found.y, emphasis: true },
+      { name: 'line of hovered cell', x: probe?.x ?? [], y: probe?.y ?? [], slot: 1 },
+      { name: 'hovered point or voters', x: lit.map((p) => p.x), y: lit.map((p) => p.y), slot: 1 },
+      { name: 'added points', x: added.map((p) => p.x), y: added.map((p) => p.y), slot: 2 },
+    ] as const
   }, [peaks, hoveredCell, hoveredPoint, voters, added, g])
 
-  const houghOverlay = useMemo((): HeatmapOverlay[] => {
+  const houghOverlay = useMemo((): SeriesSpec[] => {
     const curve = hoveredPoint
       ? {
           x: g.thetas,
@@ -159,13 +209,6 @@ export function HoughExplorer() {
     setHover((h) => (h?.kind === 'cell' && h.j === j && h.k === k ? h : { kind: 'cell', j, k }))
   }
 
-  const changeScene = (s: Scene) => {
-    setScene(s)
-    setLines(DEFAULT_LINES[s])
-    setAdded([])
-    setHover(null)
-  }
-
   const marker: [number, number] | undefined = hoveredCell
     ? [g.thetas[hoveredCell.j], g.rhos[hoveredCell.k]]
     : undefined
@@ -175,9 +218,14 @@ export function HoughExplorer() {
       ? `(${formatNumber(hoveredPoint.x)}, ${formatNumber(hoveredPoint.y)})${hoveredPoint.snapped ? ', an edge point' : ''}`
       : 'none'
 
+  const xAxis = useAxis({ label: 'x (pixels)' })
+  const yAxis = useAxis({ label: 'y (pixels)', equal: xAxis })
+  const xAxis2 = useAxis({ label: 'θ (degrees)' })
+  const yAxis2 = useAxis({ label: 'ρ (pixels)' })
   return (
-    <Interactive
+    <Figure
       title="Hough voting on edge points"
+      state={state}
       caption={
         <>
           Left: an image or its edge points, with the origin at the centre and y up, and the detected lines drawn over
@@ -189,65 +237,13 @@ export function HoughExplorer() {
         </>
       }
       controls={
-        <>
-          <ParamChoice label="image" value={scene} onChange={changeScene} options={SCENES} />
-          {cloud ? (
-            <>
-              <ParamSlider
-                label="position noise σ (pixels)"
-                value={positionNoise}
-                onChange={setPositionNoise}
-                min={0}
-                max={4}
-                step={0.25}
-              />
-              <ParamSlider label="clutter points" value={clutter} onChange={setClutter} min={0} max={300} step={10} />
-            </>
-          ) : (
-            <>
-              <ParamChoice
-                label="left panel"
-                value={show}
-                onChange={setShow}
-                options={[
-                  { value: 'edges', label: 'edge points' },
-                  { value: 'image', label: 'image' },
-                ]}
-              />
-              <ParamSlider
-                label="pixel noise σ"
-                value={pixelNoise}
-                onChange={setPixelNoise}
-                min={0}
-                max={0.3}
-                step={0.01}
-                format={(v) => v.toFixed(2)}
-              />
-              <ParamSlider
-                label="edge threshold (share of the largest gradient)"
-                value={threshold}
-                onChange={setThreshold}
-                min={0.05}
-                max={0.8}
-                step={0.05}
-                format={(v) => v.toFixed(2)}
-              />
-            </>
-          )}
-          <ParamSlider label="θ bin width (degrees)" value={dTheta} onChange={setDTheta} min={1} max={6} step={1} />
-          <ParamSlider label="ρ bin width (pixels)" value={dRho} onChange={setDRho} min={1} max={6} step={0.5} />
-          <ParamSlider label="lines to keep" value={lines} onChange={setLines} min={1} max={20} step={1} withArrows />
-          <ParamSwitch label="vote along the gradient direction only" checked={directional} onChange={setDirectional} />
-          <ParamSwitch label="log colour scale" checked={logScale} onChange={setLogScale} />
-          <div className="flex gap-2 self-end">
-            <ParamButton onClick={() => setSeed((s) => s + 1)}>new noise</ParamButton>
-            <ParamButton onClick={() => setAdded([])} disabled={added.length === 0}>
-              clear added points
-            </ParamButton>
-          </div>
-        </>
+        <div className="flex gap-2 self-end">
+          <Button variant="outline" size="sm" onClick={() => setAdded([])} disabled={added.length === 0}>
+            clear added points
+          </Button>
+        </div>
       }
-      readout={
+      readouts={
         <>
           <Readout label="edge points" value={String(points.length)} />
           <Readout label="accumulator" value={`${g.thetas.length} × ${g.rhos.length}`} />
@@ -258,36 +254,39 @@ export function HoughExplorer() {
       }
     >
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-        <Heatmap
-          x={AXIS}
-          y={AXIS}
-          z={shown}
-          range={SHOWN_RANGE}
-          fillOpacity={0.85}
-          xLabel="x (pixels)"
-          yLabel="y (pixels)"
-          valueLabel={image && show === 'image' ? 'intensity' : 'edge'}
-          overlay={imageOverlay}
+        <Plot
+          x={xAxis}
+          y={yAxis}
+          ariaLabel={'Image plane with edge points and detected lines'}
           onPointer={onImagePointer}
-          equalAspect
-          colorBar={false}
-          ariaLabel="Image plane with edge points and detected lines"
-        />
-        <Heatmap
-          x={g.thetas}
-          y={g.rhos}
-          z={z}
-          xLabel="θ (degrees)"
-          yLabel="ρ (pixels)"
-          valueLabel={logScale ? 'log(1 + votes)' : 'votes'}
-          overlay={houghOverlay}
-          marker={marker}
-          onPointer={onHoughPointer}
+        >
+          <Raster
+            x={AXIS}
+            y={AXIS}
+            z={shown}
+            range={SHOWN_RANGE}
+            fillOpacity={0.85}
+            valueLabel={image && show === 'image' ? 'intensity' : 'edge'}
+            colorBar={false}
+          />
+          <Curve {...imageOverlay[0]} live />
+          <Curve {...imageOverlay[1]} live />
+          <Points {...imageOverlay[2]} live />
+          <Points {...imageOverlay[3]} live />
+        </Plot>
+        <Plot
+          x={xAxis2}
+          y={yAxis2}
           height={340}
-          ariaLabel="Hough accumulator over theta and rho"
-        />
+          ariaLabel={'Hough accumulator over theta and rho'}
+          onPointer={onHoughPointer}
+        >
+          <Raster x={g.thetas} y={g.rhos} z={z} valueLabel={state.logScale ? 'log(1 + votes)' : 'votes'} />
+          {seriesLayers(houghOverlay, { live: true })}
+          {marker && <Points x={[marker[0]]} y={[marker[1]]} emphasis live />}
+        </Plot>
       </div>
-    </Interactive>
+    </Figure>
   )
 }
 

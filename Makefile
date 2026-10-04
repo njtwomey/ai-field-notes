@@ -3,7 +3,7 @@
 # Python sources that ruff lints and formats; Pyright reads its include list from pyproject.toml.
 PY_SRC := python aifn-js/core/test/fixtures aifn-js/methods/test/fixtures
 
-.PHONY: help install dev contracts assets content doctor links wrap lint aifn-layers aifn-names catalog catalog-check format typecheck test bench aifn-package fixtures fixtures-check lab-check lab-shots lab check build preview clean
+.PHONY: help install dev contracts assets content doctor links wrap lint aifn-layers aifn-names catalog catalog-check format typecheck test bench aifn-package fixtures fixtures-check lab-check lab-shots lab examples-check examples-shots examples-thumbs examples check build preview clean
 
 help: ## List targets
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  \033[36m%-10s\033[0m %s\n", $$1, $$2}'
@@ -36,7 +36,8 @@ doctor: ## Check the content tree (SCOPE="taxonomy/path slug ..." limits per-not
 
 lint: aifn-layers aifn-names ## Lint TypeScript, Python and note prose
 	npx oxlint
-	node aifn-js/lab/check.ts --imports-only
+	node aifn-js/sandbox/lab/check.ts --imports-only
+	node aifn-js/examples/check.ts --imports-only
 	git ls-files -z -co --exclude-standard | xargs -0 sh -c 'for f; do [ -f "$$f" ] && printf "%s\0" "$$f"; done' _ | xargs -0 npx prettier --check --ignore-unknown
 	node scripts/wrap-mdx.ts --check
 	uv run ruff check $(PY_SRC)
@@ -83,14 +84,27 @@ fixtures-check: ## Regenerate every aifn-js fixture in memory and fail if any di
 	uv run python aifn-js/core/test/fixtures/generate.py --check $(FIXTURES)
 
 lab-check: ## Render every aifn lab specimen on the server and report any that throw
-	node aifn-js/lab/check.ts
+	node aifn-js/sandbox/lab/check.ts
 
 lab-shots: ## Screenshot aifn lab pages and figures to .scratch/lab-shots (ARGS="--only module/slug --theme dark ...")
-	node aifn-js/lab/screenshot.ts $(ARGS)
+	node aifn-js/sandbox/lab/screenshot.ts $(ARGS)
 
 lab: ## Start the aifn lab (standalone explorer for aifn) → http://localhost:5190/
 	@echo "aifn lab → http://localhost:5190/  (pages at /<module>/<specimen>, figures at #<figure-id>; UI kit at /ui-kit)"
-	npx vite --config aifn-js/lab/vite.config.ts
+	npx vite --config aifn-js/sandbox/lab/vite.config.ts
+
+examples-check: ## Render every aifn-render example recipe on the server and report any that throw
+	node aifn-js/examples/check.ts
+
+examples-shots: ## Screenshot example recipes to .scratch/examples-shots (ARGS="--only lines/line-chart --theme dark ...")
+	node aifn-js/sandbox/lab/screenshot.ts --app examples $(ARGS)
+
+examples-thumbs: ## Rebuild the gallery thumbnails in aifn-js/examples/public/thumbs (ARGS="--only lines" for a section)
+	node aifn-js/sandbox/lab/screenshot.ts --app examples --thumbs --no-sliders $(ARGS)
+
+examples: ## Start the aifn-render examples (a gallery of rendering recipes) → http://localhost:5192/
+	@echo "aifn-render examples → http://localhost:5192/  (recipes at /<section>/<slug>)"
+	npx vite --config aifn-js/examples/vite.config.ts
 
 check: contracts lint doctor typecheck test catalog-check ## Everything CI runs before a build (cheap checks first)
 	uv run mlc check

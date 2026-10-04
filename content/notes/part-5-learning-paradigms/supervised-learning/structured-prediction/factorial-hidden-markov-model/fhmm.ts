@@ -1,9 +1,9 @@
+import { normal, stream, uniform } from 'aifn/foundation/random'
 /**
  * An additive factorial HMM with binary chains: appliance m is off (0) or on (1), draws power P_m when on, and the
  * meter reads x_n = Σ_m P_m y_n^(m) + ε with ε ~ N(0, σ²). Exact inference runs forward–backward on the 2^M product
  * states; structured mean field runs one small forward–backward per chain against the others' expected power.
  */
-import { rng } from '@/lib/math'
 
 export type Appliance = { name: string; power: number; turnOn: number; turnOff: number }
 
@@ -21,19 +21,19 @@ const chainTransition = (a: Appliance) => [
 const stationaryOn = (a: Appliance) => a.turnOn / (a.turnOn + a.turnOff)
 
 export function simulate(apps: Appliance[], n: number, sigma: number, seed: number) {
-  const g = rng(seed)
+  const g = stream(seed)
   const states = apps.map((a) => {
     const s: number[] = []
-    let on = g.uniform() < stationaryOn(a) ? 1 : 0
+    let on = uniform(g) < stationaryOn(a) ? 1 : 0
     for (let t = 0; t < n; t++) {
-      if (t > 0) on = g.uniform() < chainTransition(a)[on][1] ? 1 : 0
+      if (t > 0) on = uniform(g) < chainTransition(a)[on][1] ? 1 : 0
       s.push(on)
     }
     return s
   })
   const x = Array.from(
     { length: n },
-    (_, t) => apps.reduce((s, a, m) => s + a.power * states[m][t], 0) + sigma * g.normal(),
+    (_, t) => apps.reduce((s, a, m) => s + a.power * states[m][t], 0) + sigma * normal(g),
   )
   return { states, x }
 }

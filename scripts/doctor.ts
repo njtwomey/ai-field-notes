@@ -148,6 +148,46 @@ for (const rel of sourceFiles) {
   }
 }
 
+// The legacy rendering path (aifn-render's compat layer) and the site's own maths are gone: notes, the site, the
+// examples and the sandbox use Figure, useFigureState, Plot + layers and aifn. Cheap, so it scans the whole tree.
+const removedModule =
+  /^(aifn-render\/compat|@render\/compat|@\/lib\/(math|dsp|distributions))(\/|$)|\/lib\/(math|dsp|distributions)(\/|$)/
+const legacyNames = new Set(
+  'XYChart XYSeries XYRect XYChartProps Series Heatmap HeatmapOverlay HeatmapProps ImagePlot ImagePlotLine GlyphPlot GlyphShape Interactive InteractiveProps ParamSlider ParamChoice ParamSwitch ParamButton MarginalPanels useDebouncedCallback GradientEstimators'.split(
+    ' ',
+  ),
+)
+const legacyFiles = [
+  ...fs.globSync('notes/**/*.{ts,tsx,mdx}', { cwd: contentDir }).map((f) => path.join(contentDir, f)),
+  ...['site/src', 'aifn-js/examples/src', 'aifn-js/sandbox']
+    .flatMap((dir) => fs.globSync(`${dir}/**/*.{ts,tsx,mdx}`, { cwd: root }))
+    .filter((f) => !f.includes('node_modules'))
+    .map((f) => path.join(root, f)),
+]
+for (const file of legacyFiles) {
+  const source = fs.readFileSync(file, 'utf8')
+  const where = path.relative(root, file)
+  for (const [, names, spec] of source.matchAll(
+    /import\s+(?:type\s+)?(?:\{([^}]*)\}|[\w*\s]+)\s*from\s*['"]([^'"]+)['"]/g,
+  )) {
+    if (removedModule.test(spec))
+      errors.push(`${where}: imports removed module "${spec}"; see aifn-js/render/MIGRATING-NOTES.md`)
+    if (!/^(aifn-render|@render|@lab)(\/|$)/.test(spec)) continue
+    for (const raw of names?.split(',') ?? []) {
+      const name = raw
+        .trim()
+        .replace(/^type\s+/, '')
+        .split(/\s+as\s+/)[0]
+      if (legacyNames.has(name)) errors.push(`${where}: imports legacy "${name}" from "${spec}"; use the v2 API`)
+    }
+  }
+  if (file.endsWith('.mdx'))
+    for (const [, name] of source.matchAll(
+      /<(XYChart|Heatmap|Interactive|ImagePlot|GlyphPlot|MarginalPanels|Param(?:Slider|Choice|Switch|Button))\b/g,
+    ))
+      errors.push(`${where}: uses legacy <${name}>; use the v2 API`)
+}
+
 // Every hard-coded note URL must name a real note. The build checks relations and <NoteLink to>, but not a markdown
 // link such as [x](/n/slug), an href, a noteUrl('slug') call or a string holding /n/slug in TSX.
 const noteUrlPattern = /(?:\/n\/|noteUrl\(\s*['"`]|prefetchNote\(\s*['"`])([a-z0-9]+(?:-[a-z0-9]+)*)/g

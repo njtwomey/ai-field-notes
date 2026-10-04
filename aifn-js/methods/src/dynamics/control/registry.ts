@@ -1,5 +1,5 @@
 /**
- * The registry of `aifn-applied/dynamics/control`: the PID loop as a traceable algorithm.
+ * The registry of `aifn-methods/dynamics/control`: the PID loop as a traceable algorithm.
  */
 
 import { definer, entries, type AlgorithmInfo, type Entry } from 'aifn/foundation/registry'

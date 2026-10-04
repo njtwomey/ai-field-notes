@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { cmaEs, type CmaEsState } from 'aifn/optim/derivative-free'
-import { rastrigin, type TestFunction } from 'aifn-applied/data/objectives'
+import { rastrigin, type TestFunction } from 'aifn-methods/data/objectives'
 import { stream } from 'aifn/foundation/random'
 import { tensor, toFlat, type Tensor } from 'aifn/foundation/tensor'
 import { trace } from 'aifn/foundation/trace'
@@ -50,20 +50,15 @@ export function CmaEsExplorer() {
 
   const t = useMemo(
     () =>
-      trace(
-        cmaEs(RASTRIGIN.value, { sigma, populationSize: 12 }),
-        { x0: [3, 3] },
-        120,
-        {
-          record: {
-            'f(mean)': (s) => s.value,
-            'best f': (s) => s.bestValue,
-            'step size σ': (s) => s.sigma,
-            x: (s) => s.x,
-          },
-          stream: stream(`cmaes-${seed}`),
+      trace(cmaEs(RASTRIGIN.value, { sigma, populationSize: 12 }), { x0: [3, 3] }, 120, {
+        record: {
+          'f(mean)': (s) => s.value,
+          'best f': (s) => s.bestValue,
+          'step size σ': (s) => s.sigma,
+          x: (s) => s.x,
         },
-      ),
+        stream: stream(`cmaes-${seed}`),
+      }),
     [sigma, seed],
   )
 
@@ -109,34 +104,15 @@ export function CmaEsExplorer() {
       caption="Left: the Rastrigin landscape with its lattice of local minima. CMA-ES samples candidate populations (blue dots) from N(m, σ²C), moves the mean along successful steps, and adapts the covariance C and step size σ. Right: best objective value found over generations. With large initial σ (e.g. 2.0–3.0), the search steps over local basins to reach the global minimum (0,0); with small initial σ (e.g. 0.3), it is trapped in the nearest local minimum."
     >
       <ControlRow>
-        <Slider
-          label="Initial step size σ"
-          value={sigma}
-          min={0.2}
-          max={3.5}
-          step={0.1}
-          onChange={setSigma}
-        />
-        <Slider
-          label="Seed"
-          value={seed}
-          min={1}
-          max={20}
-          step={1}
-          onChange={setSeed}
-        />
+        <Slider label="Initial step size σ" value={sigma} min={0.2} max={3.5} step={0.1} onChange={setSigma} />
+        <Slider label="Seed" value={seed} min={1} max={20} step={1} onChange={setSeed} />
       </ControlRow>
 
       <ControlRow>
-        <Player
-          label="Generation"
-          value={currentStep}
-          count={totalSteps}
-          onChange={setStep}
-        />
+        <Player label="Generation" value={currentStep} count={totalSteps} onChange={setStep} />
       </ControlRow>
 
-      <div className="flex flex-wrap gap-4 text-xs font-mono text-muted-foreground my-2">
+      <div className="my-2 flex flex-wrap gap-4 font-mono text-xs text-muted-foreground">
         <Readout label="generation" value={`${currentStep} / ${totalSteps - 1}`} />
         <Readout label="best f" value={formatNumber(currentState.bestValue)} />
         <Readout label="current σ" value={formatNumber(currentState.sigma)} />
@@ -163,13 +139,7 @@ export function CmaEsExplorer() {
 
         <Plot x={xGen} y={yMetric} title="Best f(x) over generations">
           <Curve name="best f(x)" x={iterIndices} y={bestSeries.map((v) => Math.max(v, 1e-12))} slot={0} />
-          <Points
-            name="current"
-            x={[currentStep]}
-            y={[Math.max(currentState.bestValue, 1e-12)]}
-            emphasis
-            size={7}
-          />
+          <Points name="current" x={[currentStep]} y={[Math.max(currentState.bestValue, 1e-12)]} emphasis size={7} />
         </Plot>
       </Plots>
     </Figure>

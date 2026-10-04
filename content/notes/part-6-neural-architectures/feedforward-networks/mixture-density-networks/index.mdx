@@ -14,7 +14,9 @@ updated: 2026-10-03
 import { MdnExplorer } from './MdnExplorer'
 
 <Definition>
-A **mixture density network** (MDN) <Cite id="bishop1994" /> parameterises a conditional probability density $p(\yvec \mid \xvec)$ as a mixture of $K$ parametric distributions (typically Gaussians), whose parameters are determined by the outputs of a feed-forward neural network:
+A **mixture density network** (MDN) <Cite id="bishop1994" /> parameterises a conditional probability density
+$p(\yvec \mid \xvec)$ as a mixture of $K$ parametric distributions (typically Gaussians), whose parameters are
+determined by the outputs of a feed-forward neural network:
 
 $$
 p(\yvec \mid \xvec) = \sum_{k=1}^K \pi_k(\xvec) \, \mathcal{N}\big(\yvec; \, \muvec_k(\xvec), \, \sigma_k^2(\xvec)\Imat\big),
@@ -34,18 +36,25 @@ $$
 \mathcal{L}_{\text{MSE}}(\thetavec) = \frac{1}{2N}\sum_{i=1}^N \norm{\yvec_i - f(\xvec_i; \thetavec)}^2.
 $$
 
-Given sufficient capacity and data, the function $f^*(\xvec)$ that globally minimises MSE is the **conditional expectation**:
+Given sufficient capacity and data, the function $f^*(\xvec)$ that globally minimises MSE is the **conditional
+expectation**:
 
 $$
 f^*(\xvec) = \expect[\yvec \mid \xvec] = \int \yvec \, p(\yvec \mid \xvec) \, \mathrm{d}\yvec.
 $$
 
-When the underlying physical or mathematical process is one-to-one (unimodal), the conditional mean is an excellent predictor. However, many real-world problems are **inverse problems** that are many-to-one in the forward direction, making the inverse mapping one-to-many:
-- **Kinematics**: Reaching a 2D coordinate $(x, y)$ with a robotic arm can be accomplished by either an "elbow-up" or "elbow-down" joint configuration.
+When the underlying physical or mathematical process is one-to-one (unimodal), the conditional mean is an excellent
+predictor. However, many real-world problems are **inverse problems** that are many-to-one in the forward direction,
+making the inverse mapping one-to-many:
+- **Kinematics**: Reaching a 2D coordinate $(x, y)$ with a robotic arm can be accomplished by either an "elbow-up" or
+  "elbow-down" joint configuration.
 - **Acoustics & speech**: Multiple articulatory vocal tract shapes can produce identical acoustic spectra.
-- **Folded mappings**: As shown in Bishop's classic benchmark $x = t + 0.3 \sin(2\pi t)$, inverting $x \mapsto t$ produces three distinct valid branches for $x \in [0.2, 0.8]$.
+- **Folded mappings**: As shown in Bishop's classic benchmark $x = t + 0.3 \sin(2\pi t)$, inverting $x \mapsto t$
+  produces three distinct valid branches for $x \in [0.2, 0.8]$.
 
-In these settings, the average $\expect[\yvec \mid \xvec]$ of two or more valid configurations frequently lies in a region of near-zero probability. In robotics, averaging elbow-up and elbow-down commands the arm to punch straight through an obstacle, reaching neither solution.
+In these settings, the average $\expect[\yvec \mid \xvec]$ of two or more valid configurations frequently lies in a
+region of near-zero probability. In robotics, averaging elbow-up and elbow-down commands the arm to punch straight
+through an obstacle, reaching neither solution.
 
 <MdnExplorer />
 
@@ -54,13 +63,15 @@ In these settings, the average $\expect[\yvec \mid \xvec]$ of two or more valid 
 An MDN maps an input $\xvec \in \reals^M$ through standard hidden layers to three distinct linear output heads:
 
 ### 1. Mixing coefficients $\pi_k(\xvec)$
-The mixing coefficients represent probabilities and must sum to 1. They are parameterised by passing raw logits $z_k^\pi$ through a <NoteLink to="softmax-and-log-sum-exp">softmax</NoteLink>:
+The mixing coefficients represent probabilities and must sum to 1. They are parameterised by passing raw logits
+$z_k^\pi$ through a <NoteLink to="softmax-and-log-sum-exp">softmax</NoteLink>:
 $$
 \pi_k(\xvec) = \frac{\exp(z_k^\pi)}{\sum_{j=1}^K \exp(z_j^\pi)}.
 $$
 
 ### 2. Component variances $\sigma_k^2(\xvec)$
-Variances must strictly satisfy $\sigma_k > 0$. They are computed by taking the exponential (or softplus) of the variance outputs $z_k^\sigma$:
+Variances must strictly satisfy $\sigma_k > 0$. They are computed by taking the exponential (or softplus) of the
+variance outputs $z_k^\sigma$:
 $$
 \sigma_k(\xvec) = \exp(z_k^\sigma).
 $$
@@ -71,14 +82,18 @@ $$
 \mu_{k, d}(\xvec) = z_{k, d}^\mu.
 $$
 
-For a target $\yvec \in \reals^D$ and $K$ mixture components, the network outputs $K + K + (K \times D) = K(D + 2)$ values.
+For a target $\yvec \in \reals^D$ and $K$ mixture components, the network outputs $K + K + (K \times D) = K(D + 2)$
+values.
 
 ## Maximum Likelihood Training
 
-The network parameters $\thetavec$ are trained end-to-end by minimising the negative log-likelihood (NLL) of the training dataset:
+The network parameters $\thetavec$ are trained end-to-end by minimising the negative log-likelihood (NLL) of the
+training dataset:
 
 $$
 \mathcal{L}_{\text{NLL}}(\thetavec) = -\sum_{i=1}^N \log \left[ \sum_{k=1}^K \pi_k(\xvec_i) \, \mathcal{N}\big(\yvec_i; \, \muvec_k(\xvec_i), \, \sigma_k^2(\xvec_i)\Imat\big) \right].
 $$
 
-Using the log-sum-exp trick ensures numerical stability when calculating the sum of exponential likelihoods across components. Gradients flow simultaneously into the mixture weights, means, and variances, dynamically specializing each Gaussian component to track individual solution branches.
+Using the log-sum-exp trick ensures numerical stability when calculating the sum of exponential likelihoods across
+components. Gradients flow simultaneously into the mixture weights, means, and variances, dynamically specializing each
+Gaussian component to track individual solution branches.

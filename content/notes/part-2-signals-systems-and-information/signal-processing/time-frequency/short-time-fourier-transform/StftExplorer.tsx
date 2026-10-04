@@ -1,7 +1,6 @@
 import { useMemo } from 'react'
-import { Heatmap, Interactive, ParamSlider, Readout, formatNumber, useParam } from 'aifn-render'
-import { binFrequencies, db, stft } from '@/lib/dsp'
-import { chirp } from '../_shared/tf'
+import { Figure, formatNumber, int, Plot, Raster, Readout, useAxis, useFigureState } from 'aifn-render'
+import { chirp, db, spectrogram } from '../_shared/tf'
 
 const FS = 8000
 const N = 4096
@@ -23,13 +22,15 @@ const SIGNAL = (() => {
  * locate the click and follow the chirp; long windows separate the two tones.
  */
 export function StftExplorer() {
-  const exponent = useParam(8, { min: 5, max: 10, step: 1 })
-  const size = 2 ** exponent.value
+  const state = useFigureState({
+    exponent: int(8, { min: 5, max: 10, step: 1, label: 'window length (samples)', format: (v) => String(2 ** v) }),
+  })
+  const size = 2 ** state.exponent
   const hop = size / 4
 
   const r = useMemo(() => {
-    const { frames, centres } = stft(SIGNAL, size, hop, 'hann', size)
-    const freqs = binFrequencies(size, FS)
+    const { frames, centres } = spectrogram(SIGNAL, size, hop)
+    const freqs = Array.from({ length: size / 2 + 1 }, (_, k) => (k * FS) / size)
     let peak = 0
     for (const f of frames) for (const v of f) peak = Math.max(peak, v)
     // Rows are frequency bins, columns frames; dB relative to the loudest cell, floored at −FLOOR dB.
@@ -37,14 +38,14 @@ export function StftExplorer() {
     return { z, times: centres.map((c) => c / FS), freqs }
   }, [size, hop])
 
+  const xAxis = useAxis({ label: 'time (s)' })
+  const yAxis = useAxis({ label: 'frequency (Hz)' })
   return (
-    <Interactive
+    <Figure
       title="The window length trades time for frequency"
+      state={state}
       caption="A chirp sweeping from 300 Hz to 3.5 kHz, two tones at 1.2 and 1.3 kHz in the first half, and a click at 0.4 s, sampled at 8 kHz. Each column is the magnitude spectrum of one Hann-windowed frame, with frames every quarter window. A short window places the click in a thin vertical line but smears the two tones into one band; a long window separates the tones and blurs the click and the chirp. No single length shows everything sharply."
-      controls={
-        <ParamSlider label="window length (samples)" param={exponent} format={(v) => String(2 ** v)} withArrows />
-      }
-      readout={
+      readouts={
         <>
           <Readout label="window duration" value={`${formatNumber((1000 * size) / FS)} ms`} />
           <Readout label="bin spacing f_s/L" value={`${formatNumber(FS / size)} Hz`} />
@@ -53,16 +54,9 @@ export function StftExplorer() {
         </>
       }
     >
-      <Heatmap
-        x={r.times}
-        y={r.freqs}
-        z={r.z}
-        range={[-FLOOR, 0]}
-        xLabel="time (s)"
-        yLabel="frequency (Hz)"
-        valueLabel="dB"
-        height={380}
-      />
-    </Interactive>
+      <Plot x={xAxis} y={yAxis} height={380}>
+        <Raster x={r.times} y={r.freqs} z={r.z} range={[-FLOOR, 0]} valueLabel={'dB'} />
+      </Plot>
+    </Figure>
   )
 }

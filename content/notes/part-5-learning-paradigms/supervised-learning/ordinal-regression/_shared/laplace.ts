@@ -1,10 +1,10 @@
+import { normal, stream, uniform } from 'aifn/foundation/random'
+import { normalCdf } from 'aifn/numerics/special'
 /**
  * Gaussian-process ordinal regression with the Laplace approximation (Chu & Ghahramani 2005), for one input. The
  * likelihood of class y given the latent f is Φ((b_y − f)/σ) − Φ((b_{y−1} − f)/σ), with b_{−1} = −∞ and b_{K−1} = +∞.
  * The Newton iteration and predictive equations follow Rasmussen & Williams, Algorithms 3.1 and 3.2.
  */
-import { rng } from '@/lib/math'
-import { normalCdf } from '@/lib/math/special'
 
 type Mat = number[][]
 
@@ -183,9 +183,9 @@ export function fitGpOrdinalWith<T>(
 
 /** 30 inputs on [−3, 3] with a smooth latent function, Gaussian noise of 0.3, and true thresholds (−1, 0, 1). */
 export function gpOrdinalData(seed = 3) {
-  const r = rng(seed)
-  const x = Array.from({ length: 30 }, () => -3 + 6 * r.uniform()).sort((p, q) => p - q)
+  const r = stream(seed)
+  const x = Array.from({ length: 30 }, () => -3 + 6 * uniform(r)).sort((p, q) => p - q)
   const truth = (v: number) => 1.4 * Math.sin(1.2 * v) + 0.3 * v
-  const y = x.map((v) => [-1, 0, 1].filter((t) => t < truth(v) + 0.3 * r.normal()).length)
+  const y = x.map((v) => [-1, 0, 1].filter((t) => t < truth(v) + 0.3 * normal(r)).length)
   return { x, y, truth }
 }

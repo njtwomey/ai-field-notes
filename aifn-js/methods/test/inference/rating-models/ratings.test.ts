@@ -12,8 +12,8 @@ import {
   itemInformation,
   plackettLuce,
   type PairedResult,
-} from 'aifn-applied/inference/rating-models'
-import { irtResponses, plackettLuceRankings, tournament } from 'aifn-applied/data/synthetic'
+} from 'aifn-methods/inference/rating-models'
+import { irtResponses, plackettLuceRankings, tournament } from 'aifn-methods/data/synthetic'
 import { fixture } from '../../fixtures'
 
 type Fixture = {

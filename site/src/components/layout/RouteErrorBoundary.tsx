@@ -30,7 +30,7 @@ export function RouteErrorBoundary() {
     <div className="flex min-h-svh flex-col bg-background text-foreground">
       <SiteHeader />
       <main className="mx-auto flex w-full max-w-3xl flex-1 flex-col items-center justify-center px-4 py-16 text-center">
-        <div className="mb-4 inline-flex items-center gap-1.5 rounded-full border border-amber-500/30 bg-amber-500/10 px-3 py-1 text-xs font-mono font-medium text-amber-600 dark:text-amber-400">
+        <div className="mb-4 inline-flex items-center gap-1.5 rounded-full border border-amber-500/30 bg-amber-500/10 px-3 py-1 font-mono text-xs font-medium text-amber-600 dark:text-amber-400">
           <AlertTriangle className="size-3.5" />
           <span>OB-1 · Caught Exception</span>
         </div>
@@ -58,7 +58,7 @@ export function RouteErrorBoundary() {
           </Link>
           <Link
             to="/"
-            className="inline-flex h-8 items-center justify-center rounded-lg px-2.5 text-sm font-medium hover:bg-muted text-muted-foreground hover:text-foreground"
+            className="inline-flex h-8 items-center justify-center rounded-lg px-2.5 text-sm font-medium text-muted-foreground hover:bg-muted hover:text-foreground"
           >
             <Home className="mr-1.5 size-4" />
             Home
@@ -85,10 +85,10 @@ export function RouteErrorBoundary() {
 
           {stack && (
             <details className="mt-3 text-xs">
-              <summary className="cursor-pointer select-none text-muted-foreground hover:text-foreground">
+              <summary className="cursor-pointer text-muted-foreground select-none hover:text-foreground">
                 Stack trace
               </summary>
-              <pre className="mt-2 max-h-60 overflow-x-auto rounded-lg bg-background/80 p-3 font-mono text-[11px] leading-relaxed text-muted-foreground border">
+              <pre className="mt-2 max-h-60 overflow-x-auto rounded-lg border bg-background/80 p-3 font-mono text-[11px] leading-relaxed text-muted-foreground">
                 {stack}
               </pre>
             </details>

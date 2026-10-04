@@ -1,17 +1,18 @@
-import { useMemo, useState } from 'react'
+import { useMemo } from 'react'
 import {
-  Heatmap,
-  Interactive,
-  ParamButton,
-  ParamChoice,
-  ParamSlider,
+  choice,
+  Figure,
+  float,
+  Handle,
+  int,
+  Plot,
+  Raster,
   Readout,
-  useParam,
-  XYChart,
-  type Handle,
-  type XYSeries,
+  seriesLayers,
+  type SeriesSpec,
+  useAxis,
+  useFigureState,
 } from 'aifn-render'
-import { linspace } from '@/lib/math'
 import {
   exhaustive,
   minimumDistance,
@@ -22,8 +23,9 @@ import {
   type Code,
   type CodeName,
 } from './codes'
+import { linspace, toFlat } from 'aifn/foundation/tensor'
 
-const P_GRID = linspace(0, 0.5, 26)
+const P_GRID = toFlat(linspace(0, 0.5, 26))
 const P_RANGE: [number, number] = [0, 0.5]
 const Y_RANGE: [number | undefined, number | undefined] = [0, 1]
 const ENTRY_RANGE: [number, number] = [-1, 1]
@@ -44,21 +46,23 @@ const pct = (v: number) => `${(100 * v).toFixed(1)}%`
  * decoding the true class when each binary classifier errs independently with probability p.
  */
 export function CodeExplorer() {
-  const [k, setK] = useState(4)
-  const [chosen, setChosen] = useState<CodeName>('exhaustive')
-  const [length, setLength] = useState(10)
-  const [seed, setSeed] = useState(1)
-  const p = useParam(0.1, { min: 0, max: 0.5, step: 0.01 })
+  const state = useFigureState({
+    k: int(4, { min: 3, max: 7, step: 1, label: 'classes, K' }),
+    chosen: choice<CodeName>(CODES, 'exhaustive', { label: 'code shown' }),
+    p: float(0.1, { min: 0, max: 0.5, step: 0.01, label: 'bit error rate, p' }),
+    length: int(10, { min: 3, max: 40, step: 1, label: 'random code length, L' }),
+    seed: int(1, { ge: 0, label: 'seed' }),
+  })
 
   const codes = useMemo(
     (): Record<Exclude<CodeName, 'random'>, Code> => ({
-      ovr: oneVersusRest(k),
-      ovo: oneVersusOne(k),
-      exhaustive: exhaustive(k),
+      ovr: oneVersusRest(state.k),
+      ovo: oneVersusOne(state.k),
+      exhaustive: exhaustive(state.k),
     }),
-    [k],
+    [state.k],
   )
-  const random = useMemo(() => randomCode(k, length, seed), [k, length, seed])
+  const random = useMemo(() => randomCode(state.k, state.length, state.seed), [state.k, state.length, state.seed])
   const all = useMemo((): Record<CodeName, Code> => ({ ...codes, random }), [codes, random])
 
   const fixedEvaluators = useMemo(
@@ -69,7 +73,7 @@ export function CodeExplorer() {
     }),
     [codes],
   )
-  const randomEvaluator = useMemo(() => successProbability(random, seed + 1000), [random, seed])
+  const randomEvaluator = useMemo(() => successProbability(random, state.seed + 1000), [random, state.seed])
   const evaluators = useMemo(
     () => ({ ...fixedEvaluators, random: randomEvaluator }),
     [fixedEvaluators, randomEvaluator],
@@ -81,7 +85,7 @@ export function CodeExplorer() {
   )
   const randomCurve = useMemo(() => P_GRID.map((q) => randomEvaluator.at(q)), [randomEvaluator])
 
-  const series = useMemo((): XYSeries[] => {
+  const series = useMemo((): SeriesSpec[] => {
     const curves = [...fixedCurves, randomCurve]
     return CODES.map((c, slot) => ({
       name: `${c.label} (L = ${all[c.value][0].length})`,
@@ -92,7 +96,7 @@ export function CodeExplorer() {
     }))
   }, [fixedCurves, randomCurve, all])
 
-  const code = all[chosen]
+  const code = all[state.chosen]
   const heat = useMemo(
     () => ({
       x: code[0].map((_, s) => s + 1),
@@ -102,13 +106,16 @@ export function CodeExplorer() {
   )
   const d = useMemo(() => minimumDistance(code), [code])
   const correctable = Math.max(0, Math.floor((d - 1) / 2))
-  const success = useMemo(() => evaluators[chosen].at(p.value), [evaluators, chosen, p.value])
+  const success = useMemo(() => evaluators[state.chosen].at(state.p), [evaluators, state.chosen, state.p])
 
-  const handles: Handle[] = [{ kind: 'x', at: p.value, label: 'bit error rate p', onDrag: p.set }]
-
+  const xAxis = useAxis({ label: 'column (binary classifier)' })
+  const yAxis = useAxis({ label: 'class' })
+  const xAxis2 = useAxis({ label: 'bit error rate p', range: P_RANGE })
+  const yAxis2 = useAxis({ label: 'P(correct class)', range: Y_RANGE })
   return (
-    <Interactive
+    <Figure
       title="Redundant codes buy robustness to bit errors"
+      state={state}
       caption={
         <>
           Each row of the matrix is a class's codeword and each column one binary classifier (red +1, blue −1, grey 0:
@@ -119,31 +126,15 @@ export function CodeExplorer() {
           exactly; longer ones use 300 simulated inputs per class. Drag the vertical line to move p.
         </>
       }
-      controls={
-        <>
-          <ParamSlider label="classes, K" value={k} onChange={setK} min={3} max={7} step={1} withArrows />
-          <ParamChoice label="code shown" value={chosen} onChange={setChosen} options={CODES} />
-          <ParamSlider param={p} label="bit error rate, p" />
-          <ParamSlider
-            label="random code length, L"
-            value={length}
-            onChange={setLength}
-            min={3}
-            max={40}
-            step={1}
-            withArrows
-          />
-          <ParamButton onClick={() => setSeed((s) => s + 1)}>New random code</ParamButton>
-        </>
-      }
-      readout={
+
+      readouts={
         <>
           <Readout label="columns L" value={code[0].length} />
           <Readout label="minimum distance d" value={d} />
           <Readout label="guaranteed corrections ⌊(d − 1)/2⌋" value={correctable} />
-          <Readout label="rate log₂K / L" value={(Math.log2(k) / code[0].length).toFixed(3)} />
+          <Readout label="rate log₂K / L" value={(Math.log2(state.k) / code[0].length).toFixed(3)} />
           <Readout
-            label={`P(correct class) at p = ${p.value.toFixed(2)}${evaluators[chosen].exact ? '' : ' (simulated)'}`}
+            label={`P(correct class) at p = ${state.p.toFixed(2)}${evaluators[state.chosen].exact ? '' : ' (simulated)'}`}
             value={pct(success)}
           />
         </>
@@ -152,34 +143,28 @@ export function CodeExplorer() {
       <div className="grid gap-4 lg:grid-cols-2">
         <div>
           <p className="mb-1 text-center text-sm font-medium">
-            Code matrix: {CODES.find((c) => c.value === chosen)?.label}
+            Code matrix: {CODES.find((c) => c.value === state.chosen)?.label}
           </p>
-          <Heatmap
-            x={heat.x}
-            y={heat.y}
-            z={code}
-            xLabel="column (binary classifier)"
-            yLabel="class"
-            valueLabel="entry"
-            scale="diverging"
-            range={ENTRY_RANGE}
-            scaleTicks={ENTRY_TICKS}
-            height={300}
-          />
+          <Plot x={xAxis} y={yAxis} height={300}>
+            <Raster
+              x={heat.x}
+              y={heat.y}
+              z={code}
+              scale={'diverging'}
+              range={ENTRY_RANGE}
+              scaleTicks={ENTRY_TICKS}
+              valueLabel={'entry'}
+            />
+          </Plot>
         </div>
         <div>
           <p className="mb-1 text-center text-sm font-medium">Probability of decoding the true class</p>
-          <XYChart
-            series={series}
-            xLabel="bit error rate p"
-            yLabel="P(correct class)"
-            xRange={P_RANGE}
-            yRange={Y_RANGE}
-            handles={handles}
-            height={300}
-          />
+          <Plot x={xAxis2} y={yAxis2} height={300}>
+            {seriesLayers(series)}
+            <Handle {...state.handle('p', { label: 'bit error rate p' })} />
+          </Plot>
         </div>
       </div>
-    </Interactive>
+    </Figure>
   )
 }

@@ -1,7 +1,5 @@
-import { Diagram } from 'aifn-render'
-import { factor, link, variable } from 'aifn-render'
+import { Diagram, factor, Figure, link, variable } from 'aifn-render'
 import type { DiagramSpec } from 'aifn-render'
-import { Interactive } from 'aifn-render'
 
 const line = (a: string, b: string, label?: string) =>
   link(a, b, false, label ? { label, labelSide: 'left', labelRotate: false } : {})
@@ -40,7 +38,7 @@ const SPEC: DiagramSpec = {
 /** The Bayes point machine as a factor graph, with the EP site of each point on its edge into the weights. */
 export function BpmGraph() {
   return (
-    <Interactive
+    <Figure
       title="Factor graph of the Bayes point machine"
       caption="One weight vector w with a N(0, I) prior is shared by every point. Point n forms the activation aₙ = wᵀxₙ and its label yₙ has probability Φ(yₙaₙ/β). Inputs and labels are observed. EP replaces each probit factor by a Gaussian site in aₙ, which reaches w as the message t̃ₙ(w)."
     >
@@ -48,6 +46,6 @@ export function BpmGraph() {
         spec={SPEC}
         ariaLabel="Factor graph: weight prior, inner product with each observed input, probit factor to each observed label"
       />
-    </Interactive>
+    </Figure>
   )
 }

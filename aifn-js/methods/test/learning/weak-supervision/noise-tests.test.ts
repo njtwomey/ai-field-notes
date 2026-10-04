@@ -8,7 +8,7 @@
 import { describe, expect, it } from 'vitest'
 import { child, stream } from 'aifn/foundation/random'
 import { fromRows, toFlat, type Tensor } from 'aifn/foundation/tensor'
-import { classConditionalNoise, noiseLayoutAnchors, noiseLayoutPosterior } from 'aifn-applied/data/synthetic'
+import { classConditionalNoise, noiseLayoutAnchors, noiseLayoutPosterior } from 'aifn-methods/data/synthetic'
 import {
   classConditionalNoiseTest,
   localLogistic,
@@ -16,7 +16,7 @@ import {
   noiseTestPower,
   noiseTestSimulation,
   type NoiseTestCell,
-} from 'aifn-applied/learning/weak-supervision'
+} from 'aifn-methods/learning/weak-supervision'
 import { fixture } from '../../fixtures'
 
 type Local = { bandwidth: number; degree: 1 | 2; at: number[]; coefficients: number[]; covariance: number[][] }
@@ -59,7 +59,8 @@ describe('the noise layouts', () => {
     for (const layout of ['gaussians', 'xor', 'asymmetric-xor'] as const) {
       const eta = noiseLayoutPosterior(layout)
       for (const a of noiseLayoutAnchors(stream(layout), layout, 8)) expect(eta(a)).toBeCloseTo(0.5, 8)
-      for (const a of noiseLayoutAnchors(stream(layout), layout, 8, 0.05)) expect(Math.abs(eta(a) - 0.5)).toBeLessThanOrEqual(0.05)
+      for (const a of noiseLayoutAnchors(stream(layout), layout, 8, 0.05))
+        expect(Math.abs(eta(a) - 0.5)).toBeLessThanOrEqual(0.05)
     }
   })
 
@@ -82,7 +83,9 @@ function cell(label: string, alpha: number, beta: number, R: number, k: number, 
     const d = classConditionalNoise(child(stream(label), r), { n, alpha, beta, truth: false })
     return { x: d.x, y: d.y }
   })
-  const anchors = Array.from({ length: R }, (_, r) => fromRows(noiseLayoutAnchors(child(stream(`${label}/a`), r), 'gaussians', k)))
+  const anchors = Array.from({ length: R }, (_, r) =>
+    fromRows(noiseLayoutAnchors(child(stream(`${label}/a`), r), 'gaussians', k)),
+  )
   return { label, datasets, anchors }
 }
 

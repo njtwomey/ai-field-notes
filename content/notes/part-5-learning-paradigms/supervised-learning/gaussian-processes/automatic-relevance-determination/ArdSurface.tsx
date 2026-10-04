@@ -1,21 +1,25 @@
-import { useMemo, useState } from 'react'
+import { useMemo } from 'react'
 import {
-  Heatmap,
-  Interactive,
-  ParamButton,
-  ParamChoice,
-  ParamSlider,
-  Readout,
+  Button,
+  choice,
+  Figure,
   formatNumber,
-  useParam,
-  type Handle,
+  Handle,
+  int,
+  Plot,
+  Raster,
+  Readout,
+  slider,
+  useAxis,
+  useFigureState,
 } from 'aifn-render'
-import { linspace, rng } from '@/lib/math'
 import { addDiagonal, cholesky, forward, logDet, gridMaximum } from '../_shared/gp'
+import { linspace, toFlat } from 'aifn/foundation/tensor'
+import { normal, stream, uniform } from 'aifn/foundation/random'
 
 const N = 40
 const NOISE = 0.2
-const LOG_ELL = linspace(-1, 2, 36)
+const LOG_ELL = toFlat(linspace(-1, 2, 36))
 const DEPTH = 40
 
 type Target = 'x1' | 'both'
@@ -25,11 +29,9 @@ const TARGETS = [
 ]
 
 function makeData(seed: number, target: Target) {
-  const g = rng(seed)
-  const x = Array.from({ length: N }, () => [-2 + 4 * g.uniform(), -2 + 4 * g.uniform()])
-  const y = x.map(
-    ([a, b]) => Math.sin(1.5 * a) + (target === 'both' ? 0.8 * Math.cos(1.5 * b) : 0) + NOISE * g.normal(),
-  )
+  const g = stream(seed)
+  const x = Array.from({ length: N }, () => [-2 + 4 * uniform(g), -2 + 4 * uniform(g)])
+  const y = x.map(([a, b]) => Math.sin(1.5 * a) + (target === 'both' ? 0.8 * Math.cos(1.5 * b) : 0) + NOISE * normal(g))
   return { x, y }
 }
 
@@ -45,10 +47,17 @@ function logEvidence(x: number[][], y: number[], ell1: number, ell2: number): nu
 
 /** The marginal likelihood over the two ARD length-scales of a GP on two inputs. */
 export function ArdSurface() {
-  const [target, setTarget] = useState<Target>('x1')
-  const seed = useParam(2, { min: 1, max: 20, step: 1 })
-  const log1 = useParam(0, { min: -1, max: 2, step: 0.01 })
-  const log2 = useParam(0, { min: -1, max: 2, step: 0.01 })
+  const fmtPow = (v: number) => formatNumber(10 ** v)
+  const state = useFigureState({
+    target: choice<Target>(TARGETS, 'x1', { label: 'target depends on' }),
+    log1: slider(-1, 2, 0, { step: 0.01, label: 'length-scale ℓ₁', format: fmtPow }),
+    log2: slider(-1, 2, 0, { step: 0.01, label: 'length-scale ℓ₂', format: fmtPow }),
+    seed: int(2, { min: 1, max: 20, label: 'data seed' }),
+  })
+  const target = state.target
+  const seed = { value: state.seed }
+  const log1 = { value: state.log1, set: (v: number) => state.set('log1', v) }
+  const log2 = { value: state.log2, set: (v: number) => state.set('log2', v) }
   const data = useMemo(() => makeData(seed.value, target), [seed.value, target])
 
   const surface = useMemo(() => {
@@ -62,42 +71,31 @@ export function ArdSurface() {
     () => logEvidence(data.x, data.y, 10 ** log1.value, 10 ** log2.value),
     [data, log1.value, log2.value],
   )
-  const handles: Handle[] = [
-    {
-      kind: 'point',
-      at: [log1.value, log2.value],
-      label: '(ℓ₁, ℓ₂)',
-      onDrag: ([a, b]) => {
-        log1.set(a)
-        log2.set(b)
-      },
-    },
-  ]
-  const fmtPow = (v: number) => formatNumber(10 ** v)
   const bestEll1 = LOG_ELL[surface.best.j]
   const bestEll2 = LOG_ELL[surface.best.i]
 
+  const xAxis = useAxis({ label: 'log₁₀ ℓ₁', hold: 'union' })
+  const yAxis = useAxis({ label: 'log₁₀ ℓ₂', hold: 'union' })
   return (
-    <Interactive
+    <Figure
       title="Switching off an irrelevant input"
+      state={state}
       caption="Forty points with two inputs in [−2, 2]². The target is sin 1.5x₁ plus noise, or, with the second choice, also depends on x₂. The heatmap is the log marginal likelihood of a GP with one length-scale per input, over log₁₀ ℓ₁ (horizontal) and log₁₀ ℓ₂ (vertical). Drag the point to set both. When the target ignores x₂, the surface keeps rising as ℓ₂ grows and flattens into a plateau at the top: the best model makes the kernel constant along x₂. When x₂ matters, the maximum moves to a finite ℓ₂."
       controls={
         <>
-          <ParamChoice label="target depends on" value={target} onChange={setTarget} options={TARGETS} />
-          <ParamSlider label="length-scale ℓ₁" param={log1} format={fmtPow} />
-          <ParamSlider label="length-scale ℓ₂" param={log2} format={fmtPow} />
-          <ParamSlider label="data seed" param={seed} format={(v) => String(v)} />
-          <ParamButton
+          <Button
+            variant="outline"
+            size="sm"
             onClick={() => {
               log1.set(bestEll1)
               log2.set(bestEll2)
             }}
           >
             Go to the maximum
-          </ParamButton>
+          </Button>
         </>
       }
-      readout={
+      readouts={
         <>
           <Readout label="ln p(y | ℓ₁, ℓ₂)" value={formatNumber(here)} />
           <Readout label="grid maximum ℓ₁, ℓ₂" value={`${fmtPow(bestEll1)}, ${fmtPow(bestEll2)}`} />
@@ -106,19 +104,18 @@ export function ArdSurface() {
       }
     >
       <div className="mx-auto w-full max-w-xl">
-        <Heatmap
-          x={LOG_ELL}
-          y={LOG_ELL}
-          z={surface.z}
-          range={surface.range}
-          scale="sequential"
-          xLabel="log₁₀ ℓ₁"
-          yLabel="log₁₀ ℓ₂"
-          valueLabel="ln p(y | ℓ₁, ℓ₂)"
-          handles={handles}
-          height={380}
-        />
+        <Plot x={xAxis} y={yAxis} height={380}>
+          <Raster
+            x={LOG_ELL}
+            y={LOG_ELL}
+            z={surface.z}
+            scale={'sequential'}
+            range={surface.range}
+            valueLabel={'ln p(y | ℓ₁, ℓ₂)'}
+          />
+          <Handle {...state.handle(['log1', 'log2'], { label: '(ℓ₁, ℓ₂)' })} />
+        </Plot>
       </div>
-    </Interactive>
+    </Figure>
   )
 }

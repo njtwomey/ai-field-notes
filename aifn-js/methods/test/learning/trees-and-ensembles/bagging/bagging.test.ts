@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { forestGrowth, randomForest } from 'aifn-applied/learning/trees-and-ensembles/bagging'
+import { forestGrowth, randomForest } from 'aifn-methods/learning/trees-and-ensembles/bagging'
 import { stream } from 'aifn/foundation/random'
 import { toFlat } from 'aifn/foundation/tensor'
 import { classProbabilities, dataset } from 'aifn/learning/estimators'

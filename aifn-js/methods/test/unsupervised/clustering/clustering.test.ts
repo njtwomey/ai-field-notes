@@ -21,7 +21,7 @@ import {
   optics,
   spectralClustering,
   CORE,
-} from 'aifn-applied/unsupervised/clustering'
+} from 'aifn-methods/unsupervised/clustering'
 import { leaves } from 'aifn/graph'
 import { pairwiseDistances } from 'aifn/numerics/linalg'
 import { kmeansPlusPlus } from 'aifn/numerics/neighbours'

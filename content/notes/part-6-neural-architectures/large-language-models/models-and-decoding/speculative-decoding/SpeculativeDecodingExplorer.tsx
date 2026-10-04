@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react'
 import { stream } from 'aifn/foundation/random'
 import { trace } from 'aifn/foundation/trace'
 import { expectedTokensPerCall, speculativeDecoding } from 'aifn/nn/decoding'
-import { charCorpus, decodeChars, encodeChars, kneserNey } from 'aifn-applied/neural/language-models'
+import { charCorpus, decodeChars, encodeChars, kneserNey } from 'aifn-methods/neural/language-models'
 import {
   Annotation,
   Bars,
@@ -159,7 +159,7 @@ export function SpeculativeDecodingExplorer() {
       caption="Draft tokens from a fast 2-gram model verified by a 6-gram model from prompt 'the '. Left: acceptance probabilities min(1, p/q) per draft token; green bars were accepted, grey rejected or skipped. Right: cumulative generated tokens vs target calls; above the dashed line demonstrates acceleration over standard autoregressive decoding."
     >
       <div className="mb-3 rounded border border-border bg-muted/30 px-3 py-2 font-mono text-sm leading-relaxed break-words whitespace-pre-wrap">
-        <span className="text-muted-foreground font-semibold">Prompt: </span>
+        <span className="font-semibold text-muted-foreground">Prompt: </span>
         <span className="text-muted-foreground">{decodeChars(CORPUS, prompt)}</span>
         <span>{decodeChars(CORPUS, at.tokens.slice(prompt.length))}</span>
       </div>

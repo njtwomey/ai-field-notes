@@ -9,7 +9,7 @@ import {
   sarimaFitSteps,
   sarimaLogLikelihood,
   simulateSarima,
-} from 'aifn-applied/timeseries'
+} from 'aifn-methods/timeseries'
 import { stream } from 'aifn/foundation/random'
 import { toFlat } from 'aifn/foundation/tensor'
 import { expectProtocol } from '../protocol'

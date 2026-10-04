@@ -1,22 +1,25 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import {
-  GlyphPlot,
-  Heatmap,
-  Interactive,
-  ParamButton,
-  ParamChoice,
-  ParamSlider,
-  Readout,
+  Annotation,
+  Button,
+  choice,
+  Figure,
+  type FilledShape,
   formatNumber,
-  useParam,
-  type GlyphShape,
-  type Handle,
-  type HeatmapOverlay,
+  Handle,
+  Plot,
+  Raster,
+  Readout,
+  seriesLayers,
+  type SeriesSpec,
+  Shapes,
+  slider,
+  useAxis,
+  useFigureState,
   type Vec2,
 } from 'aifn-render'
 import type { FontInfo, FontManifoldData, GlyphLayout } from '@/generated/contracts'
 import { useFigure } from '@/lib/generated'
-import { linspace } from '@/lib/math'
 import {
   centre,
   gplvmFitter,
@@ -26,15 +29,22 @@ import {
   type Point,
   type Predictor,
 } from '../_shared/gplvm'
+import { linspace, toFlat } from 'aifn/foundation/tensor'
 
 const LIM = 3
 const GRID = 41
-const AXIS = linspace(-LIM, LIM, GRID)
+const AXIS = toFlat(linspace(-LIM, LIM, GRID))
 const ITERATIONS = 300
 /** Words in the interpolation strip, and their spacing in font units. */
 const STRIP = 6
 const STRIP_COL = 4400
 const STRIP_ROW = 1000
+/** Fixed ranges of the glyph plots, in font units. */
+const WORD_X: [number, number] = [-80, 4200]
+const WORD_Y: [number, number] = [-60, 800]
+const REST_Y: [number, number] = [-260, 780]
+const STRIP_X: [number, number] = [-100, 3 * STRIP_COL - 300]
+const STRIP_Y: [number, number] = [-STRIP_ROW - 120, 800]
 /** Milliseconds of fitting per animation frame, so the page stays responsive while the model learns. */
 const FRAME_BUDGET = 12
 
@@ -239,10 +249,15 @@ function project(m: Model, dims: { tip: number; stem: number }, start: Point, ta
 /** A manifold of real fonts, learned in the browser: drag the latent point, or drag the foot serif of the "P". */
 export function FontManifold() {
   const { data, error } = useFigure<FontManifoldData>('manifold-of-fonts/glyphs')
-  const [subset, setSubset] = useState<Subset>('all')
-  const [pair, setPair] = useState<Pair>('style')
-  const x1 = useParam(0, { min: -LIM, max: LIM, step: 0.01 })
-  const x2 = useParam(0, { min: -LIM, max: LIM, step: 0.01 })
+  const state = useFigureState({
+    x1: slider(-LIM, LIM, 0, { step: 0.01, label: 'latent x₁' }),
+    x2: slider(-LIM, LIM, 0, { step: 0.01, label: 'latent x₂' }),
+    subset: choice<Subset>(SUBSETS, 'all', { label: 'learn from' }),
+    pair: choice<Pair>(PAIRS, 'style', { label: 'interpolate' }),
+  })
+  const { subset, pair } = state
+  const x1 = { value: state.x1, set: (v: number) => state.set('x1', v) }
+  const x2 = { value: state.x2, set: (v: number) => state.set('x2', v) }
   const here: Point = [x1.value, x2.value]
   // The font the latent point is nearest: after a refit, the point moves to where that font now sits.
   const follow = useRef<string>('Libre Baskerville Regular')
@@ -291,7 +306,7 @@ export function FontManifold() {
     if (!model || !ends || !data) return undefined
     const a = model.state.X[model.idx.indexOf(ends[0])]
     const b = model.state.X[model.idx.indexOf(ends[1])]
-    const shapes: GlyphShape[] = []
+    const shapes: FilledShape[] = []
     const path: Point[] = []
     for (let s = 0; s < STRIP; s++) {
       const u = s / (STRIP - 1)
@@ -304,12 +319,21 @@ export function FontManifold() {
     return { shapes, path }
   }, [model, ends, data, glyphs])
 
+  const wordX = useAxis({ range: WORD_X })
+  const wordY = useAxis({ range: WORD_Y, equal: wordX })
+  const restX = useAxis({ range: [-80, Math.max(rest?.width ?? 1, 1) * 1.02] })
+  const restY = useAxis({ range: REST_Y, equal: restX })
+  const stripX = useAxis({ range: STRIP_X })
+  const stripY = useAxis({ range: STRIP_Y, equal: stripX })
+  const xAxis = useAxis({ label: 'x₁' })
+  const yAxis = useAxis({ label: 'x₂' })
+
   if (error) return <p className="text-sm text-destructive">{error.message}</p>
   if (!data || !fit || !word || !rest || !nearest) {
     return (
-      <Interactive title="A manifold of real fonts, learned in your browser">
+      <Figure title="A manifold of real fonts, learned in your browser">
         <p className="text-sm text-muted-foreground">Loading the fonts…</p>
-      </Interactive>
+      </Figure>
     )
   }
 
@@ -320,7 +344,7 @@ export function FontManifold() {
   const tip: Vec2 = [vector![dims.tip] + pShift, vector![dims.tip + 1]]
 
   const classOf = fit.idx.map((i) => CLASSES.indexOf(data.fonts[i].cls))
-  const overlay: HeatmapOverlay[] = [
+  const overlay: SeriesSpec[] = [
     {
       name: 'training font',
       type: 'scatter',
@@ -341,17 +365,6 @@ export function FontManifold() {
           },
         ]
       : []),
-  ]
-  const latentHandles: Handle[] = [
-    {
-      kind: 'point',
-      at: here,
-      label: 'font',
-      onDrag: ([a, b]) => {
-        x1.set(a)
-        x2.set(b)
-      },
-    },
   ]
   const glyphHandles: Handle[] | undefined = model
     ? [
@@ -382,12 +395,12 @@ export function FontManifold() {
   ].map(([family, style]) => data.fonts.findIndex((f) => f.family === family && f.style === style))
 
   const sd = model ? model.p.sd(here) / model.state.sf : undefined
-  const wordX: [number, number] = [-80, 4200]
   const D = data.vectors[0].length
 
   return (
-    <Interactive
+    <Figure
       title="A manifold of real fonts, learned in your browser"
+      state={state}
       caption={
         <>
           {fit.idx.length} font instances from the Google Fonts repository, each a vector of {D.toLocaleString()}{' '}
@@ -403,28 +416,32 @@ export function FontManifold() {
       }
       controls={
         <>
-          <ParamSlider label="latent x₁" param={x1} />
-          <ParamSlider label="latent x₂" param={x2} />
-          <ParamChoice label="learn from" value={subset} onChange={setSubset} options={SUBSETS} />
           <div className="flex flex-wrap items-end gap-2 sm:col-span-2">
             {tour.map((i) => (
-              <ParamButton key={i} onClick={() => tourTo(i)} disabled={i < 0 || !fit.idx.includes(i)}>
+              <Button
+                variant="outline"
+                size="sm"
+                key={i}
+                onClick={() => tourTo(i)}
+                disabled={i < 0 || !fit.idx.includes(i)}
+              >
                 {i >= 0 ? fontName(data.fonts[i]) : '—'}
-              </ParamButton>
+              </Button>
             ))}
-            <ParamButton
+            <Button
+              variant="outline"
+              size="sm"
               onClick={() => {
                 x1.set(LIM)
                 x2.set(LIM)
               }}
             >
               Far from every font
-            </ParamButton>
+            </Button>
           </div>
-          <ParamChoice label="interpolate" value={pair} onChange={setPair} options={PAIRS} />
         </>
       }
-      readout={
+      readouts={
         <>
           <Readout
             label="fit"
@@ -443,47 +460,46 @@ export function FontManifold() {
       }
     >
       <div className="grid items-center gap-4 md:grid-cols-[6fr_5fr]">
-        <Heatmap
-          x={AXIS}
-          y={AXIS}
-          z={model?.sdGrid ?? FLAT}
-          range={[0, 1]}
-          scale="sequential"
-          xLabel="x₁"
-          yLabel="x₂"
-          valueLabel="posterior sd ÷ σ_f"
-          overlay={overlay}
-          handles={latentHandles}
-          height={330}
-        />
+        <Plot x={xAxis} y={yAxis} height={330}>
+          <Raster
+            x={AXIS}
+            y={AXIS}
+            z={model?.sdGrid ?? FLAT}
+            scale={'sequential'}
+            range={[0, 1]}
+            valueLabel={'posterior sd ÷ σ_f'}
+          />
+          {seriesLayers(overlay, { live: true })}
+          <Handle {...state.handle(['x1', 'x2'], { label: 'font' })} />
+        </Plot>
         <div className="flex flex-col gap-3">
-          <GlyphPlot
-            shapes={[{ contours: word.contours }]}
-            xRange={wordX}
-            yRange={[-60, 800]}
-            guides={[0, data.cap_height]}
-            handles={glyphHandles}
-            ariaLabel={`The word ${data.display} in the generated font`}
-          />
-          <GlyphPlot
-            shapes={[{ contours: rest.contours, tone: 'muted' }]}
-            xRange={[-80, Math.max(rest.width, 1) * 1.02]}
-            yRange={[-260, 780]}
-            ariaLabel="The other training capitals in the generated font"
-          />
+          <Plot x={wordX} y={wordY} bare fitHeight ariaLabel={`The word ${data.display} in the generated font`}>
+            <Annotation y={0} muted />
+            <Annotation y={data.cap_height} muted />
+            <Shapes shapes={[{ contours: word.contours }]} />
+            {(glyphHandles ?? []).map((h, i) => (
+              <Handle key={i} {...h} />
+            ))}
+          </Plot>
+          <Plot x={restX} y={restY} bare fitHeight ariaLabel="The other training capitals in the generated font">
+            <Shapes shapes={[{ contours: rest.contours, tone: 'muted' }]} />
+          </Plot>
         </div>
       </div>
       {strip && (
         <div className="w-full">
-          <GlyphPlot
-            shapes={strip.shapes}
-            xRange={[-100, 3 * STRIP_COL - 300]}
-            yRange={[-STRIP_ROW - 120, 800]}
+          <Plot
+            x={stripX}
+            y={stripY}
+            bare
+            fitHeight
             ariaLabel="The word generated along a straight line between two training fonts"
-          />
+          >
+            <Shapes shapes={strip.shapes} />
+          </Plot>
         </div>
       )}
-    </Interactive>
+    </Figure>
   )
 }
 

@@ -9,7 +9,7 @@ import {
   sineMap,
   tentMap,
   type Map1,
-} from 'aifn-applied/dynamics/maps'
+} from 'aifn-methods/dynamics/maps'
 import { histogram } from 'aifn/probability/stats'
 import { toFlat } from 'aifn/foundation/tensor'
 import {
@@ -81,7 +81,8 @@ export function BifurcationDiagram() {
   const [n, setN] = usePlayhead(COBWEB_N + 1)
 
   const rs = useMemo(
-    () => Array.from({ length: NR }, (_, i) => family.range[0] + ((family.range[1] - family.range[0]) * (i + 0.5)) / NR),
+    () =>
+      Array.from({ length: NR }, (_, i) => family.range[0] + ((family.range[1] - family.range[0]) * (i + 0.5)) / NR),
     [family],
   )
 
@@ -90,11 +91,12 @@ export function BifurcationDiagram() {
     const rr = toFlat(d.r)
     const xx = toFlat(d.x)
     const columns = rs
-      .map((rv) =>
-        histogram(
-          xx.filter((_, k) => rr[k] === rv),
-          { bins: NX, range: [0, 1] },
-        ).counts,
+      .map(
+        (rv) =>
+          histogram(
+            xx.filter((_, k) => rr[k] === rv),
+            { bins: NX, range: [0, 1] },
+          ).counts,
       )
       .map((c) => toFlat(c))
     const z = Array.from({ length: NX }, (_, i) => columns.map((c) => Math.log1p(c[i])))

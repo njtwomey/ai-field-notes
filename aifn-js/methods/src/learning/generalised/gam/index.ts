@@ -1,5 +1,5 @@
 /**
- * `aifn-applied/learning/generalised/gam`: generalised additive models: terms (smooths, cyclic, thin-plate, tensor
+ * `aifn-methods/learning/generalised/gam`: generalised additive models: terms (smooths, cyclic, thin-plate, tensor
  * products, factor and linear terms, shape constraints) and their bases, the penalised problem (`gamProblem`: design,
  * smoothing parameters by REML, GCV or fixed, the P-IRLS optimum), fitters that solve it step by step (P-IRLS,
  * backfitting, gradient descent, SGD, Adam, L-BFGS), the model at any coefficients (`gamModel`) and the estimator

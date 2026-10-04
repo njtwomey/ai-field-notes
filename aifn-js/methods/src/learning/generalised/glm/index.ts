@@ -1,5 +1,5 @@
 /**
- * `aifn-applied/learning/generalised/glm`: generalised linear models: `glm` with any family and link,
+ * `aifn-methods/learning/generalised/glm`: generalised linear models: `glm` with any family and link,
  * negative-binomial regression with θ by maximum likelihood, multinomial logistic regression, and logistic regression.
  */
 

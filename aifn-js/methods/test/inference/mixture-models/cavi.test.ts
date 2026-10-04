@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { caviGaussianMixture, mixturePredictiveDensity } from 'aifn-applied/inference/mixture-models'
+import { caviGaussianMixture, mixturePredictiveDensity } from 'aifn-methods/inference/mixture-models'
 import { child, normal, normals, stream } from 'aifn/foundation/random'
 import { toFlat, type Tensor } from 'aifn/foundation/tensor'
 import { run, trace } from 'aifn/foundation/trace'

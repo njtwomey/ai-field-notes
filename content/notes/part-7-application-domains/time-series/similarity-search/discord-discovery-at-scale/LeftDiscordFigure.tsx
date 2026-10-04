@@ -1,5 +1,17 @@
 import { useMemo } from 'react'
-import { Interactive, ParamSlider, Readout, XYChart, formatNumber, useParam, type XYSeries } from 'aifn-render'
+import {
+  Curve,
+  Figure,
+  formatNumber,
+  int,
+  Plot,
+  Points,
+  Readout,
+  seriesLayers,
+  type SeriesSpec,
+  useAxis,
+  useFigureState,
+} from 'aifn-render'
 import { selfJoin } from '../_shared/matrix-profile'
 import { beats } from '../_shared/synthetic'
 
@@ -20,17 +32,19 @@ const argmax = (a: ArrayLike<number>, from: number) => {
  * out: the left discord that DAMP searches for.
  */
 export function LeftDiscordFigure() {
-  const seed = useParam(1, { min: 1, max: 20, step: 1 })
+  const state = useFigureState({
+    seed: int(1, { min: 1, max: 20, step: 1, label: 'seed', format: (v) => String(v) }),
+  })
 
   const r = useMemo(() => {
-    const { x, starts } = beats(N, seed.value, 0.03, [5, 10])
+    const { x, starts } = beats(N, state.seed, 0.03, [5, 10])
     const p = selfJoin(x, M)
     return { x, twins: [starts[5], starts[10]], p, full: argmax(p.profile, PREFIX), left: argmax(p.left, PREFIX) }
-  }, [seed.value])
+  }, [state.seed])
 
   const t = r.x.map((_, i) => i)
   const span = (s: number) => Array.from({ length: M }, (_, k) => s + k)
-  const top: XYSeries[] = [
+  const top: SeriesSpec[] = [
     { name: 'series', type: 'line', x: t, y: r.x, muted: true },
     ...r.twins.map((s) => ({
       name: 'abnormal beat',
@@ -42,24 +56,28 @@ export function LeftDiscordFigure() {
   ]
   const idx = Array.from(r.p.profile, (_, i) => i).slice(PREFIX)
   const keep = (a: Float64Array) => Array.from(a).slice(PREFIX)
-  const bottom: XYSeries[] = [
-    { name: 'matrix profile', type: 'line', x: idx, y: keep(r.p.profile), slot: 0 },
-    { name: 'left matrix profile', type: 'line', x: idx, y: keep(r.p.left), slot: 1 },
+  const bottom = [
+    { name: 'matrix profile', x: idx, y: keep(r.p.profile), slot: 0 },
+    { name: 'left matrix profile', x: idx, y: keep(r.p.left), slot: 1 },
     {
       name: 'maximum of each',
-      type: 'scatter',
       x: [r.full, r.left],
       y: [r.p.profile[r.full], r.p.left[r.left]],
       emphasis: true,
     },
-  ]
+  ] as const
 
+  const xAxis = useAxis({ label: 'time', hold: 'union' })
+  const yAxis = useAxis({ label: 'x', hold: 'union' })
+  const xAxis2 = useAxis({ label: 'subsequence start i', hold: 'union' })
+  const yAxis2 = useAxis({ label: 'distance', range: [0, undefined], hold: 'union' })
   return (
-    <Interactive
+    <Figure
       title="The left matrix profile catches twin anomalies"
+      state={state}
       caption={`Top: heartbeat-like beats in which the same abnormal beat occurs twice. Bottom: the matrix profile and the left matrix profile for m = ${M}, after a training prefix of ${PREFIX} samples. The two abnormal beats match each other, so the full matrix profile is low at both and its maximum falls elsewhere. The left matrix profile compares each subsequence only with earlier ones. The first abnormal beat has no earlier match, so the left profile peaks there. The second one matches the first and stays low: once an anomaly has been seen, a repeat of it is no longer new.`}
-      controls={<ParamSlider label="seed" param={seed} format={(v) => String(v)} withArrows />}
-      readout={
+
+      readouts={
         <>
           <Readout label="abnormal beats start at" value={r.twins.join(', ')} />
           <Readout label="matrix profile maximum at" value={r.full} />
@@ -69,9 +87,15 @@ export function LeftDiscordFigure() {
       }
     >
       <div className="space-y-4">
-        <XYChart series={top} xLabel="time" yLabel="x" height={200} />
-        <XYChart series={bottom} xLabel="subsequence start i" yLabel="distance" height={220} yRange={[0, undefined]} />
+        <Plot x={xAxis} y={yAxis} height={200}>
+          {seriesLayers(top)}
+        </Plot>
+        <Plot x={xAxis2} y={yAxis2} height={220}>
+          <Curve {...bottom[0]} />
+          <Curve {...bottom[1]} />
+          <Points {...bottom[2]} />
+        </Plot>
       </div>
-    </Interactive>
+    </Figure>
   )
 }

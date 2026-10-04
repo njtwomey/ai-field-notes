@@ -1,14 +1,16 @@
-import { useMemo, useState } from 'react'
+import { useMemo } from 'react'
 import {
-  Interactive,
-  ParamChoice,
-  ParamSlider,
-  Readout,
-  XYChart,
+  choice,
+  Figure,
+  float,
   formatNumber,
-  useParam,
-  type Handle,
-  type XYSeries,
+  Handle,
+  Plot,
+  Readout,
+  seriesLayers,
+  type SeriesSpec,
+  useAxis,
+  useFigureState,
 } from 'aifn-render'
 
 /**
@@ -79,13 +81,15 @@ const Y_RANGE: [number | undefined, number | undefined] = [1000, 200000]
 
 /** Recall against throughput for four FAISS indexes, with a draggable recall target. */
 export function RecallQps() {
-  const [metric, setMetric] = useState<Metric>('r10')
-  const target = useParam(0.95, { min: 0.5, max: 1, step: 0.005 })
-  const col = metric === 'r10' ? 0 : 1
+  const state = useFigureState({
+    metric: choice<Metric>([...METRICS], 'r10', { label: 'recall measure' }),
+    target: float(0.95, { min: 0.5, max: 1, step: 0.005, label: 'recall target' }),
+  })
+  const col = state.metric === 'r10' ? 0 : 1
 
   const series = useMemo(
-    (): XYSeries[] => [
-      ...RUNS.map((r, i): XYSeries => ({
+    (): SeriesSpec[] => [
+      ...RUNS.map((r, i): SeriesSpec => ({
         name: r.name,
         type: 'line',
         x: r.rows.map((row) => row[col]),
@@ -97,24 +101,21 @@ export function RecallQps() {
     [col],
   )
   const best = RUNS.map((r) => {
-    const ok = r.rows.filter((row) => row[col] >= target.value)
+    const ok = r.rows.filter((row) => row[col] >= state.target)
     if (!ok.length) return { name: r.name, text: 'never reaches it' }
     const top = ok.reduce((a, b) => (b[2] > a[2] ? b : a))
     return { name: r.name, text: `${formatNumber(top[2])} QPS (${r.knob} ${top[3]})` }
   })
-  const handles: Handle[] = [{ kind: 'x', at: target.value, label: 'recall target', onDrag: (x) => target.set(x) }]
 
+  const xAxis = useAxis({ label: state.metric === 'r10' ? '10-recall@10' : '1-recall@1', range: X_RANGE })
+  const yAxis = useAxis({ label: 'queries per second', range: Y_RANGE, log: true })
   return (
-    <Interactive
+    <Figure
       title="Recall against queries per second"
+      state={state}
       caption="Each curve sweeps one search-time parameter of one index; up and to the right is better, and the upper-right envelope is the Pareto frontier. Measured with FAISS on 100 000 synthetic vectors of dimension 64, one thread. Drag the recall target to read off the fastest setting of each index that reaches it. Plain IVF-PQ saturates below 0.77: its 16-byte codes cannot resolve the nearest neighbours however many lists it scans, and re-ranking with the exact vectors (RFlat) removes that ceiling."
-      controls={
-        <>
-          <ParamChoice label="recall measure" value={metric} onChange={setMetric} options={[...METRICS]} />
-          <ParamSlider label="recall target" param={target} />
-        </>
-      }
-      readout={
+
+      readouts={
         <>
           {best.map((b) => (
             <Readout key={b.name} label={b.name} value={b.text} />
@@ -123,16 +124,10 @@ export function RecallQps() {
         </>
       }
     >
-      <XYChart
-        series={series}
-        xLabel={metric === 'r10' ? '10-recall@10' : '1-recall@1'}
-        yLabel="queries per second"
-        xRange={X_RANGE}
-        yRange={Y_RANGE}
-        yLog
-        handles={handles}
-        height={380}
-      />
-    </Interactive>
+      <Plot x={xAxis} y={yAxis} height={380}>
+        {seriesLayers(series)}
+        <Handle {...state.handle('target', { label: 'recall target' })} />
+      </Plot>
+    </Figure>
   )
 }

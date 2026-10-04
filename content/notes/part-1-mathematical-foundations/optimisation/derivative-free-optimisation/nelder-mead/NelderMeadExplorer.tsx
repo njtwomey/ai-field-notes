@@ -1,17 +1,18 @@
 import { useMemo, useState } from 'react'
 import {
-  Heatmap,
-  Interactive,
-  ParamSlider,
-  Readout,
-  XYChart,
+  Curve,
+  Figure,
   formatNumber,
-  useParam,
-  type Handle,
-  type HeatmapOverlay,
-  type XYSeries,
+  Handle,
+  int,
+  Plot,
+  Points,
+  Raster,
+  Readout,
+  useAxis,
+  useFigureState,
 } from 'aifn-render'
-import { linspace } from '@/lib/math'
+import { linspace, toFlat } from 'aifn/foundation/tensor'
 
 type Vec = [number, number]
 type Move = 'start' | 'reflect' | 'expand' | 'contract outside' | 'contract inside' | 'shrink'
@@ -67,11 +68,13 @@ const clamp = (v: number, [lo, hi]: Vec) => Math.round(Math.min(Math.max(v, lo),
 
 export function NelderMeadExplorer() {
   const [start, setStart] = useState<Vec>([-1.2, 1])
-  const iteration = useParam(10, { min: 0, max: ITERATIONS, step: 1 })
+  const state = useFigureState({
+    iteration: int(10, { min: 0, max: ITERATIONS, step: 1, label: 'iteration', format: (v) => String(v) }),
+  })
 
   const grid = useMemo(() => {
-    const x = linspace(X_RANGE[0], X_RANGE[1], GRID)
-    const y = linspace(Y_RANGE[0], Y_RANGE[1], GRID)
+    const x = toFlat(linspace(X_RANGE[0], X_RANGE[1], GRID))
+    const y = toFlat(linspace(Y_RANGE[0], Y_RANGE[1], GRID))
     return { x, y, z: y.map((yv) => x.map((xv) => Math.log10(rosenbrock([xv, yv]) + 0.1))) }
   }, [])
 
@@ -80,55 +83,50 @@ export function NelderMeadExplorer() {
     () => history.map((h) => h.simplex.reduce((a, b) => (rosenbrock(b) < rosenbrock(a) ? b : a))),
     [history],
   )
-  const current = history[iteration.value]
+  const current = history[state.iteration]
 
-  const overlay = useMemo((): HeatmapOverlay[] => {
-    const trail = bestPath.slice(0, iteration.value + 1)
+  const overlay = useMemo(() => {
+    const trail = bestPath.slice(0, state.iteration + 1)
     const s = current.simplex
     return [
-      { name: 'best vertex so far', type: 'line', x: trail.map((p) => p[0]), y: trail.map((p) => p[1]), slot: 1 },
+      { name: 'best vertex so far', x: trail.map((p) => p[0]), y: trail.map((p) => p[1]), slot: 1 },
       {
         name: 'simplex',
-        type: 'line',
         x: [...s.map((p) => p[0]), s[0][0]],
         y: [...s.map((p) => p[1]), s[0][1]],
         slot: 2,
         showPoints: true,
       },
-      { name: 'minimum', type: 'scatter', x: [1], y: [1], emphasis: true },
-    ]
-  }, [bestPath, current, iteration.value])
+      { name: 'minimum', x: [1], y: [1], emphasis: true },
+    ] as const
+  }, [bestPath, current, state.iteration])
 
   const curve = useMemo(
-    (): XYSeries[] => [
-      {
-        name: 'best f',
-        type: 'line',
-        x: bestPath.map((_, k) => k),
-        y: bestPath.map((p) => Math.max(rosenbrock(p), FLOOR)),
-        slot: 1,
-      },
-    ],
+    () =>
+      [
+        {
+          name: 'best f',
+          x: bestPath.map((_, k) => k),
+          y: bestPath.map((p) => Math.max(rosenbrock(p), FLOOR)),
+          slot: 1,
+        },
+      ] as const,
     [bestPath],
   )
 
-  const handles: Handle[] = [
-    {
-      kind: 'point',
-      at: start,
-      label: 'start',
-      onDrag: ([x, y]) => setStart([clamp(x, X_RANGE), clamp(y, Y_RANGE)]),
-    },
-  ]
-  const iterationHandle: Handle[] = [{ kind: 'x', at: iteration.value, label: 'iteration', onDrag: iteration.set }]
-  const best = bestPath[iteration.value]
+  const best = bestPath[state.iteration]
 
+  const xAxis = useAxis({ label: 'x' })
+  const yAxis = useAxis({ label: 'y' })
+  const xAxis2 = useAxis({ label: 'iteration', hold: 'union' })
+  const yAxis2 = useAxis({ label: 'best f', hold: 'union', log: true })
   return (
-    <Interactive
+    <Figure
       title="Nelder–Mead on the Rosenbrock function"
+      state={state}
       caption="Left: log₁₀(f + 0.1) for f(x, y) = (1 − x)² + 100(y − x²)², the simplex at the chosen iteration, and the path of its best vertex. Drag the start point; the first simplex has sides 0.4 along the axes. Right: the best function value per iteration on a log scale; drag the vertical line, or step the slider, to replay. Watch the simplex stretch along the valley with expansions and shrink across it with contractions."
-      controls={<ParamSlider label="iteration" param={iteration} withArrows format={(v) => String(v)} />}
-      readout={
+
+      readouts={
         <>
           <Readout label="move" value={current.move} />
           <Readout label="best vertex" value={`(${formatNumber(best[0])}, ${formatNumber(best[1])})`} />
@@ -137,19 +135,23 @@ export function NelderMeadExplorer() {
       }
     >
       <div className="grid gap-4 md:grid-cols-2">
-        <Heatmap
-          x={grid.x}
-          y={grid.y}
-          z={grid.z}
-          xLabel="x"
-          yLabel="y"
-          valueLabel="log₁₀(f + 0.1)"
-          overlay={overlay}
-          handles={handles}
-          height={340}
-        />
-        <XYChart height={340} series={curve} yLog handles={iterationHandle} xLabel="iteration" yLabel="best f" />
+        <Plot x={xAxis} y={yAxis} height={340}>
+          <Raster x={grid.x} y={grid.y} z={grid.z} valueLabel={'log₁₀(f + 0.1)'} />
+          <Curve {...overlay[0]} live />
+          <Curve {...overlay[1]} live />
+          <Points {...overlay[2]} live />
+          <Handle
+            kind="point"
+            at={start}
+            label="start"
+            onDrag={([x, y]) => setStart([clamp(x, X_RANGE), clamp(y, Y_RANGE)])}
+          />
+        </Plot>
+        <Plot x={xAxis2} y={yAxis2} height={340}>
+          <Curve {...curve[0]} />
+          <Handle {...state.handle('iteration', { label: 'iteration' })} />
+        </Plot>
       </div>
-    </Interactive>
+    </Figure>
   )
 }

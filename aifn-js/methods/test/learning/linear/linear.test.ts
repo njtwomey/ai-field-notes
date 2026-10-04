@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { perceptron, perceptronSteps } from 'aifn-applied/learning/linear'
+import { perceptron, perceptronSteps } from 'aifn-methods/learning/linear'
 import { tensor } from 'aifn/foundation/tensor'
 import { dataset } from 'aifn/learning/estimators'
 import { expectProtocol } from '../../protocol'

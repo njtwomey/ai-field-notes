@@ -1,15 +1,19 @@
-import { useMemo, useState } from 'react'
+import { useMemo } from 'react'
 import {
-  Interactive,
-  ParamSlider,
-  ParamSwitch,
-  Readout,
-  XYChart,
+  Curve,
+  Figure,
   formatNumber,
-  useParam,
-  type XYSeries,
+  Handle,
+  Plot,
+  Readout,
+  seriesLayers,
+  type SeriesSpec,
+  setting,
+  slider,
+  useAxis,
+  useFigureState,
 } from 'aifn-render'
-import { rng } from '@/lib/math'
+import { stream, uniform } from 'aifn/foundation/random'
 
 // Homogeneous online transfer learning (Zhao & Hoi, 2010) on a stream of 2-D points. The source classifier h is a
 // fixed line; the target learner f is a linear passive-aggressive classifier; the ensemble mixes the two with
@@ -22,8 +26,8 @@ const ETA = 0.5
 const SOURCE_SCALE = 3
 
 const STREAM = (() => {
-  const r = rng(2)
-  return Array.from({ length: T }, () => ({ x: [2 * r.uniform() - 1, 2 * r.uniform() - 1], flip: r.uniform() < NOISE }))
+  const r = stream(2)
+  return Array.from({ length: T }, () => ({ x: [2 * uniform(r) - 1, 2 * uniform(r) - 1], flip: uniform(r) < NOISE }))
 })()
 
 const clip01 = (z: number) => Math.min(1, Math.max(0, (z + 1) / 2))
@@ -85,63 +89,67 @@ const line = (th: number[]) =>
   Math.abs(th[1]) < 1e-9 ? { x: [], y: [] } : { x: [-1, 1], y: [-1, 1].map((x) => -(th[0] * x + th[2]) / th[1]) }
 
 export function OtlStream() {
-  const [shift, setShift] = useState(30)
-  const [revert, setRevert] = useState(false)
-  const t = useParam(100, { min: 0, max: T, step: 10 })
+  const state = useFigureState({
+    shift: slider(0, 90, 30, { step: 5, label: 'shift angle (degrees)' }),
+    t: slider(0, T, 100, { step: 10, label: 'time t', format: (v) => String(v) }),
+    revert: setting(false, 'target reverts to the source concept at t = 200'),
+  })
 
-  const sim = useMemo(() => simulate(shift, revert), [shift, revert])
+  const sim = useMemo(() => simulate(state.shift, state.revert), [state.shift, state.revert])
 
-  const scatter = useMemo<XYSeries[]>(() => {
-    const lo = Math.max(0, t.value - 80)
-    const pts = STREAM.slice(lo, t.value)
-    const f = sim.rec.f[t.value]
-    const current = revert && t.value > T / 2 ? sim.us : sim.ut
+  const scatter = useMemo<SeriesSpec[]>(() => {
+    const lo = Math.max(0, state.t - 80)
+    const pts = STREAM.slice(lo, state.t)
+    const f = sim.rec.f[state.t]
+    const current = state.revert && state.t > T / 2 ? sim.us : sim.ut
     return [
       {
         name: 'recent points',
         type: 'scatter',
         x: pts.map((p) => p.x[0]),
         y: pts.map((p) => p.x[1]),
-        group: sim.labels.slice(lo, t.value).map((y) => (y > 0 ? 1 : 0)),
+        group: sim.labels.slice(lo, state.t).map((y) => (y > 0 ? 1 : 0)),
         groupNames: ['y = −1', 'y = +1'],
       },
       { name: 'target concept', type: 'line', ...line([current[0], current[1], 0]), emphasis: true },
       { name: 'source classifier h', type: 'line', ...line([sim.us[0], sim.us[1], 0]), slot: 2 },
       { name: 'target learner f', type: 'line', ...line(f), slot: 3, dashed: true },
     ]
-  }, [sim, t.value, revert])
+  }, [sim, state.t, state.revert])
 
-  const mistakes = useMemo<XYSeries[]>(
-    () => [
-      { name: 'source classifier h', type: 'line', x: sim.rec.t, y: sim.rec.Mh, slot: 2 },
-      { name: 'target learner f', type: 'line', x: sim.rec.t, y: sim.rec.Mf, slot: 3 },
-      { name: 'OTL ensemble', type: 'line', x: sim.rec.t, y: sim.rec.M, slot: 4 },
-      { name: 'mistake bound', type: 'line', x: sim.rec.t, y: sim.rec.bound, dashed: true, muted: true },
-    ],
+  const mistakes = useMemo(
+    () =>
+      [
+        { name: 'source classifier h', x: sim.rec.t, y: sim.rec.Mh, slot: 2 },
+        { name: 'target learner f', x: sim.rec.t, y: sim.rec.Mf, slot: 3 },
+        { name: 'OTL ensemble', x: sim.rec.t, y: sim.rec.M, slot: 4 },
+        { name: 'mistake bound', x: sim.rec.t, y: sim.rec.bound, dashed: true, muted: true },
+      ] as const,
     [sim],
   )
-  const weights = useMemo<XYSeries[]>(
-    () => [
-      { name: 'weight on h', type: 'line', x: sim.rec.t, y: sim.rec.wh, slot: 2 },
-      { name: 'weight on f', type: 'line', x: sim.rec.t, y: sim.rec.wh.map((w) => 1 - w), slot: 3 },
-    ],
+  const weights = useMemo(
+    () =>
+      [
+        { name: 'weight on h', x: sim.rec.t, y: sim.rec.wh, slot: 2 },
+        { name: 'weight on f', x: sim.rec.t, y: sim.rec.wh.map((w) => 1 - w), slot: 3 },
+      ] as const,
     [sim],
   )
-  const handle = [{ kind: 'x' as const, at: t.value, label: 'time', onDrag: t.set }]
-  const i = t.value
+  const i = state.t
 
+  const xAxis = useAxis({ label: 'x₁', range: [-1, 1] })
+  const yAxis = useAxis({ label: 'x₂', range: [-1, 1], equal: xAxis })
+  const xAxis2 = useAxis({ label: 't', range: [0, T] })
+  const yAxis2 = useAxis({ label: 'cumulative mistakes', hold: 'union' })
+  const xAxis3 = useAxis({ label: 't', range: [0, T] })
+  const yAxis3 = useAxis({ label: 'ensemble weight', range: [0, 1] })
   return (
-    <Interactive
+    <Figure
       title="Online transfer learning on a shifted stream"
+      state={state}
       caption="The target concept is the source concept rotated by the shift angle, with 5% label noise. The ensemble puts its weight on whichever of h and f has had the smaller squared loss so far, so it follows h while f is still learning and switches to f once f is better. Its mistakes stay under 4 min(Σh, Σf) + 8 ln 2 (dashed). Step through time with the arrows or drag the time line."
-      controls={
-        <>
-          <ParamSlider label="shift angle (degrees)" value={shift} onChange={setShift} min={0} max={90} step={5} />
-          <ParamSlider label="time t" param={t} withArrows format={(v) => String(v)} />
-          <ParamSwitch label="target reverts to the source concept at t = 200" checked={revert} onChange={setRevert} />
-        </>
-      }
-      readout={
+
+      readouts={
         <>
           <Readout label="mistakes of h" value={sim.rec.Mh[i]} />
           <Readout label="mistakes of f" value={sim.rec.Mf[i]} />
@@ -152,27 +160,24 @@ export function OtlStream() {
       }
     >
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-        <XYChart series={scatter} xLabel="x₁" yLabel="x₂" xRange={[-1, 1]} yRange={[-1, 1]} equalAspect />
+        <Plot x={xAxis} y={yAxis}>
+          {seriesLayers(scatter)}
+        </Plot>
         <div className="flex flex-col gap-2">
-          <XYChart
-            series={mistakes}
-            xLabel="t"
-            yLabel="cumulative mistakes"
-            xRange={[0, T]}
-            height={200}
-            handles={handle}
-          />
-          <XYChart
-            series={weights}
-            xLabel="t"
-            yLabel="ensemble weight"
-            xRange={[0, T]}
-            yRange={[0, 1]}
-            height={170}
-            handles={handle}
-          />
+          <Plot x={xAxis2} y={yAxis2} height={200}>
+            <Curve {...mistakes[0]} />
+            <Curve {...mistakes[1]} />
+            <Curve {...mistakes[2]} />
+            <Curve {...mistakes[3]} />
+            <Handle kind={'x' as const} at={state.t} label="time" onDrag={(v: number) => state.set('t', v)} />
+          </Plot>
+          <Plot x={xAxis3} y={yAxis3} height={170}>
+            <Curve {...weights[0]} />
+            <Curve {...weights[1]} />
+            <Handle kind={'x' as const} at={state.t} label="time" onDrag={(v: number) => state.set('t', v)} />
+          </Plot>
         </div>
       </div>
-    </Interactive>
+    </Figure>
   )
 }

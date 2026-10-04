@@ -544,6 +544,9 @@ export const SignedArea = defineLayer<SignedAreaProps>({
 
 // ── Segments ─────────────────────────────────────────────────────────────────────────────────────────────────────────
 
+/** One segment from `from` to `to` in data coordinates (a residual, a matched pair, an edge). */
+export type Segment = { from: [number, number]; to: [number, number] }
+
 export type SegmentsProps = CommonProps & {
   segments: readonly { from: readonly [number, number]; to: readonly [number, number] }[]
   width?: number

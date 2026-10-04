@@ -1,5 +1,5 @@
 /**
- * `aifn-applied/text/corpora`: toy corpora for the text pipeline: the hand-worked corpora of the notes and a seeded
+ * `aifn-methods/text/corpora`: toy corpora for the text pipeline: the hand-worked corpora of the notes and a seeded
  * sentence generator with inflection.
  */
 

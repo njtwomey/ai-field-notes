@@ -1,14 +1,18 @@
 import { useMemo, useState } from 'react'
 import {
-  Heatmap,
-  Interactive,
-  ParamButton,
-  Readout,
-  XYChart,
+  Area,
+  Bars,
+  Button,
+  Curve,
+  Figure,
   formatNumber,
-  type Handle,
+  Handle,
+  Plot,
+  Raster,
+  Readout,
   type Segment,
-  type XYSeries,
+  useAxis,
+  Vectors,
 } from 'aifn-render'
 import { jsDiv, klDiv, monotonePlan, normalise, tvDist } from '../_shared/ot'
 
@@ -79,10 +83,11 @@ export function HistogramTransport() {
   }, [a, b])
 
   const bars = useMemo(
-    (): XYSeries[] => [
-      { name: 'a (source)', type: 'bar', x: BINS, y: a, slot: 0 },
-      { name: 'b (target, drawn downwards)', type: 'bar', x: BINS, y: b.map((v) => -v), slot: 1 },
-    ],
+    () =>
+      [
+        { name: 'a (source)', x: BINS, y: a, slot: 0 },
+        { name: 'b (target, drawn downwards)', x: BINS, y: b.map((v) => -v), slot: 1 },
+      ] as const,
     [a, b],
   )
   const handles: Handle[] = [
@@ -100,15 +105,15 @@ export function HistogramTransport() {
     })),
   ]
 
-  const cdfSeries = useMemo((): XYSeries[] => {
+  const cdfSeries = useMemo(() => {
     const sa = steps(r.cdfA)
     const sb = steps(r.cdfB)
     const sg = steps(r.gap)
     return [
-      { name: '|A − B| (area = EMD)', type: 'line', x: sg.x, y: sg.y, muted: true, area: true },
-      { name: 'CDF of a', type: 'line', x: sa.x, y: sa.y, slot: 0 },
-      { name: 'CDF of b', type: 'line', x: sb.x, y: sb.y, slot: 1 },
-    ]
+      { name: '|A − B| (area = EMD)', x: sg.x, y: sg.y, muted: true },
+      { name: 'CDF of a', x: sa.x, y: sa.y, slot: 0 },
+      { name: 'CDF of b', x: sb.x, y: sb.y, slot: 1 },
+    ] as const
   }, [r])
 
   const preset = (k: keyof typeof PRESETS) => () => {
@@ -116,18 +121,30 @@ export function HistogramTransport() {
     setB(PRESETS[k].b)
   }
 
+  const xAxis = useAxis({ label: 'bin', range: X_RANGE })
+  const yAxis = useAxis({ label: 'mass', range: Y_RANGE })
+  const xAxis2 = useAxis({ label: 'target bin j' })
+  const yAxis2 = useAxis({ label: 'source bin i' })
+  const xAxis3 = useAxis({ label: 'bin', range: CDF_X })
+  const yAxis3 = useAxis({ label: 'cumulative mass', range: [0, 1.05] })
   return (
-    <Interactive
+    <Figure
       title="Moving one histogram onto another"
       caption="Drag the top of any bar of a, or the bottom of any bar of b, to change its mass. Each histogram is rescaled to total mass 1. Arrows show mass that moves between bins, from the middle of a source bar to the middle of a target bar; the matrix shows how much. The EMD is the shaded area between the two CDFs. With the disjoint presets, total variation and Jensen–Shannon stay at their maxima while the EMD grows with the gap."
       controls={
         <>
-          <ParamButton onClick={preset('overlapping')}>Overlapping</ParamButton>
-          <ParamButton onClick={preset('near')}>Disjoint, near</ParamButton>
-          <ParamButton onClick={preset('far')}>Disjoint, far</ParamButton>
+          <Button variant="outline" size="sm" onClick={preset('overlapping')}>
+            Overlapping
+          </Button>
+          <Button variant="outline" size="sm" onClick={preset('near')}>
+            Disjoint, near
+          </Button>
+          <Button variant="outline" size="sm" onClick={preset('far')}>
+            Disjoint, far
+          </Button>
         </>
       }
-      readout={
+      readouts={
         <>
           <Readout label="EMD (bins)" value={formatNumber(r.emd)} />
           <Readout label="mass moved" value={formatNumber(r.moved)} />
@@ -137,36 +154,24 @@ export function HistogramTransport() {
         </>
       }
     >
-      <XYChart
-        height={300}
-        series={bars}
-        vectors={r.vectors}
-        xRange={X_RANGE}
-        yRange={Y_RANGE}
-        xLabel="bin"
-        yLabel="mass"
-        handles={handles}
-      />
+      <Plot x={xAxis} y={yAxis} height={300}>
+        <Bars {...bars[0]} />
+        <Bars {...bars[1]} />
+        <Vectors vectors={r.vectors} />
+        {(handles ?? []).map((h, i) => (
+          <Handle key={i} {...h} />
+        ))}
+      </Plot>
       <div className="grid gap-4 md:grid-cols-2">
-        <Heatmap
-          height={280}
-          x={BINS}
-          y={BINS}
-          z={r.z}
-          range={[0, 0.3]}
-          xLabel="target bin j"
-          yLabel="source bin i"
-          valueLabel="mass P_ij"
-        />
-        <XYChart
-          height={280}
-          series={cdfSeries}
-          xRange={CDF_X}
-          yRange={[0, 1.05]}
-          xLabel="bin"
-          yLabel="cumulative mass"
-        />
+        <Plot x={xAxis2} y={yAxis2} height={280}>
+          <Raster x={BINS} y={BINS} z={r.z} range={[0, 0.3]} valueLabel={'mass P_ij'} />
+        </Plot>
+        <Plot x={xAxis3} y={yAxis3} height={280}>
+          <Area {...cdfSeries[0]} />
+          <Curve {...cdfSeries[1]} />
+          <Curve {...cdfSeries[2]} />
+        </Plot>
       </div>
-    </Interactive>
+    </Figure>
   )
 }

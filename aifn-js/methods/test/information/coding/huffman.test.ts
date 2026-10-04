@@ -20,7 +20,7 @@ import {
   prefixEncode,
   sourceExtension,
   type HuffmanTies,
-} from 'aifn-applied/information/coding'
+} from 'aifn-methods/information/coding'
 import { fixture } from '../../fixtures'
 import { expectProtocol } from '../../protocol'
 

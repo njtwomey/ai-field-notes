@@ -1,6 +1,21 @@
-import { useMemo, useState } from 'react'
-import { Interactive, ParamChoice, ParamSlider, Readout, XYChart, formatNumber, useParam } from 'aifn-render'
-import { rng } from '@/lib/math'
+import { useMemo } from 'react'
+import {
+  choice,
+  Curve,
+  Figure,
+  float,
+  formatNumber,
+  Handle,
+  int,
+  Plot,
+  Points,
+  Readout,
+  seriesLayers,
+  slider,
+  useAxis,
+  useFigureState,
+} from 'aifn-render'
+import { normal, stream, uniform } from 'aifn/foundation/random'
 
 const WORDS = ['valve', 'tube', 'circuit', 'transistor', 'chip', 'software', 'network', 'data'] as const
 type Word = (typeof WORDS)[number]
@@ -17,10 +32,10 @@ const softmax = (b: number[]) => {
 
 /** Natural parameters of one "computing" topic over 12 slices: smooth trends plus a small seeded random walk. */
 function trueTopic(): number[][] {
-  const r = rng(7)
+  const r = stream(7)
   const walk = new Array<number>(V).fill(0)
   return SLICES.map((t) => {
-    for (let w = 0; w < V; w++) walk[w] += 0.08 * r.normal()
+    for (let w = 0; w < V; w++) walk[w] += 0.08 * normal(r)
     const trend = [
       1.6 - 0.3 * t,
       2 - 0.35 * t,
@@ -37,11 +52,11 @@ function trueTopic(): number[][] {
 
 /** Word counts per slice: N tokens drawn from the slice's topic. */
 function sampleCounts(p: number[][], n: number, seed: number): number[][] {
-  const r = rng(seed)
+  const r = stream(seed)
   return p.map((pt) => {
     const c = new Array<number>(V).fill(0)
     for (let i = 0; i < n; i++) {
-      let u = r.uniform()
+      let u = uniform(r)
       let w = 0
       while (w < V - 1 && (u -= pt[w]) > 0) w++
       c[w]++
@@ -78,36 +93,42 @@ function smoothWord(obs: number[], obsVar: number[], s2: number): number[] {
 }
 
 export function TopicDrift() {
-  const [word, setWord] = useState<Word>('transistor')
-  const [tokens, setTokens] = useState(60)
-  const [drift, setDrift] = useState(0.3)
-  const slice = useParam(4, { min: 1, max: T, step: 1 })
-  const wi = WORDS.indexOf(word)
+  const state = useFigureState({
+    slice: slider(1, T, 4, { step: 1, label: 'time slice t' }),
+    tokens: int(60, { min: 10, max: 600, step: 10, label: 'tokens per slice N' }),
+    drift: float(0.3, { min: 0.02, max: 2, step: 0.02, label: 'drift standard deviation σ' }),
+    word: choice<Word>(
+      WORDS.map((w) => ({ value: w, label: w })),
+      'transistor',
+      { label: 'word' },
+    ),
+  })
+  const wi = WORDS.indexOf(state.word)
 
   const truth = useMemo(() => trueTopic().map(softmax), [])
-  const counts = useMemo(() => sampleCounts(truth, tokens, 3), [truth, tokens])
-  const raw = useMemo(() => counts.map((c) => c.map((n) => n / tokens)), [counts, tokens])
+  const counts = useMemo(() => sampleCounts(truth, state.tokens, 3), [truth, state.tokens])
+  const raw = useMemo(() => counts.map((c) => c.map((n) => n / state.tokens)), [counts, state.tokens])
   const smoothed = useMemo(() => {
     const perWord = WORDS.map((_, w) =>
       smoothWord(
-        counts.map((c) => Math.log((c[w] + 0.5) / (tokens + V / 2))),
+        counts.map((c) => Math.log((c[w] + 0.5) / (state.tokens + V / 2))),
         counts.map((c) => 1 / (c[w] + 0.5)),
-        drift * drift,
+        state.drift * state.drift,
       ),
     )
     return SLICES.map((_, t) => softmax(perWord.map((b) => b[t])))
-  }, [counts, tokens, drift])
+  }, [counts, state.tokens, state.drift])
   const pooled = useMemo(() => {
     const tot = WORDS.map((_, w) => counts.reduce((s, c) => s + c[w], 0))
-    return tot.map((n) => n / (tokens * T))
-  }, [counts, tokens])
+    return tot.map((n) => n / (state.tokens * T))
+  }, [counts, state.tokens])
 
   const mae = (est: (t: number, w: number) => number) => {
     let e = 0
     for (let t = 0; t < T; t++) for (let w = 0; w < V; w++) e += Math.abs(est(t, w) - truth[t][w])
     return e / (T * V)
   }
-  const t0 = slice.value - 1
+  const t0 = state.slice - 1
   const top = (p: number[]) =>
     p
       .map((v, w) => [v, w] as const)
@@ -115,35 +136,20 @@ export function TopicDrift() {
       .slice(0, 3)
       .map(([, w]) => WORDS[w])
       .join(', ')
-  const handle = [{ kind: 'x' as const, at: slice.value, onDrag: slice.set, label: 'slice' }]
 
+  const xAxis = useAxis({ label: 'time slice t', range: [1, T] })
+  const yAxis = useAxis({ label: 'p(word | topic, t)', range: [0, undefined], hold: 'union' })
+  const xAxis2 = useAxis({ label: 'time slice t', range: [1, T] })
+  const yAxis2 = useAxis({ label: `p(${state.word} | topic, t)`, range: [0, undefined], hold: 'union' })
   return (
-    <Interactive
+    <Figure
       title="A topic drifting across time slices"
+      state={state}
       caption="One topic over 12 time slices. Left: the true word probabilities, softmax of natural parameters that follow a random walk. Right, for one word: the per-slice frequency among N tokens (points), the Kalman-smoothed estimate that the dynamic topic model's variational update computes (dashed), and the single static topic that LDA would fit to the pooled corpus (grey). With few tokens per slice the raw frequencies are noisy and smoothing borrows strength from neighbouring slices. A very small drift variance flattens the topic towards the static fit; a very large one reproduces the raw frequencies. Drag the slice line on either chart, or step it with the arrows."
-      controls={
+
+      readouts={
         <>
-          <ParamSlider label="time slice t" param={slice} withArrows />
-          <ParamSlider label="tokens per slice N" value={tokens} onChange={setTokens} min={10} max={600} step={10} />
-          <ParamSlider
-            label="drift standard deviation σ"
-            value={drift}
-            onChange={setDrift}
-            min={0.02}
-            max={2}
-            step={0.02}
-          />
-          <ParamChoice
-            label="word"
-            value={word}
-            onChange={setWord}
-            options={WORDS.map((w) => ({ value: w, label: w }))}
-          />
-        </>
-      }
-      readout={
-        <>
-          <Readout label={`top words at t = ${slice.value} (true)`} value={top(truth[t0])} />
+          <Readout label={`top words at t = ${state.slice} (true)`} value={top(truth[t0])} />
           <Readout label="top words (smoothed)" value={top(smoothed[t0])} />
           <Readout label="mean abs. error, raw" value={formatNumber(mae((t, w) => raw[t][w]))} />
           <Readout label="smoothed" value={formatNumber(mae((t, w) => smoothed[t][w]))} />
@@ -152,36 +158,26 @@ export function TopicDrift() {
       }
     >
       <div className="grid gap-4 lg:grid-cols-2">
-        <XYChart
-          height={300}
-          xLabel="time slice t"
-          yLabel="p(word | topic, t)"
-          xRange={[1, T]}
-          yRange={[0, undefined]}
-          handles={handle}
-          series={WORDS.map((w, i) => ({
-            name: w,
-            type: 'line' as const,
-            x: SLICES,
-            y: truth.map((p) => p[i]),
-            slot: i,
-          }))}
-        />
-        <XYChart
-          height={300}
-          xLabel="time slice t"
-          yLabel={`p(${word} | topic, t)`}
-          xRange={[1, T]}
-          yRange={[0, undefined]}
-          handles={handle}
-          series={[
-            { name: 'true', type: 'line', x: SLICES, y: truth.map((p) => p[wi]), emphasis: true },
-            { name: 'per-slice frequency', type: 'scatter', x: SLICES, y: raw.map((p) => p[wi]), slot: 0 },
-            { name: 'smoothed (DTM)', type: 'line', x: SLICES, y: smoothed.map((p) => p[wi]), slot: 1, dashed: true },
-            { name: 'static (LDA)', type: 'line', x: SLICES, y: SLICES.map(() => pooled[wi]), muted: true },
-          ]}
-        />
+        <Plot x={xAxis} y={yAxis} height={300}>
+          {seriesLayers(
+            WORDS.map((w, i) => ({
+              name: w,
+              type: 'line' as const,
+              x: SLICES,
+              y: truth.map((p) => p[i]),
+              slot: i,
+            })),
+          )}
+          <Handle kind={'x' as const} at={state.slice} onDrag={(v: number) => state.set('slice', v)} label="slice" />
+        </Plot>
+        <Plot x={xAxis2} y={yAxis2} height={300}>
+          <Curve name="true" x={SLICES} y={truth.map((p) => p[wi])} emphasis />
+          <Points name="per-slice frequency" x={SLICES} y={raw.map((p) => p[wi])} slot={0} />
+          <Curve name="smoothed (DTM)" x={SLICES} y={smoothed.map((p) => p[wi])} slot={1} dashed />
+          <Curve name="static (LDA)" x={SLICES} y={SLICES.map(() => pooled[wi])} muted />
+          <Handle kind={'x' as const} at={state.slice} onDrag={(v: number) => state.set('slice', v)} label="slice" />
+        </Plot>
       </div>
-    </Interactive>
+    </Figure>
   )
 }

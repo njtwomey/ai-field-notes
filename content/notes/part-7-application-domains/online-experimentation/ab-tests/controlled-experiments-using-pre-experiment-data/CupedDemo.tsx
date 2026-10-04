@@ -1,6 +1,19 @@
-import { useMemo, useState } from 'react'
-import { Interactive, ParamSlider, Readout, XYChart, formatNumber, type XYSeries } from 'aifn-render'
-import { rng } from '@/lib/math'
+import { useMemo } from 'react'
+import {
+  Curve,
+  Figure,
+  float,
+  formatNumber,
+  int,
+  Plot,
+  Readout,
+  seriesLayers,
+  type SeriesSpec,
+  slider,
+  useAxis,
+  useFigureState,
+} from 'aifn-render'
+import { normal, stream, type Stream } from 'aifn/foundation/random'
 
 const N = 200
 const EXPERIMENTS = 400
@@ -9,14 +22,14 @@ const BINS = 31
 type Arm = { x: number[]; y: number[] }
 
 /** One arm of standardised users: pre-period X ~ N(0, 1), post-period Y = ρX + √(1 − ρ²)ε + effect. */
-function drawArm(g: ReturnType<typeof rng>, rho: number, effect: number): Arm {
+function drawArm(g: Stream, rho: number, effect: number): Arm {
   const x: number[] = []
   const y: number[] = []
   const s = Math.sqrt(1 - rho * rho)
   for (let i = 0; i < N; i++) {
-    const xi = g.normal()
+    const xi = normal(g)
     x.push(xi)
-    y.push(rho * xi + s * g.normal() + effect)
+    y.push(rho * xi + s * normal(g) + effect)
   }
   return { x, y }
 }
@@ -64,30 +77,32 @@ const sd = (v: number[]) => {
  * Right: the raw and CUPED estimates over 400 experiments.
  */
 export function CupedDemo() {
-  const [rho, setRho] = useState(0.7)
-  const [effect, setEffect] = useState(0.1)
-  const [seed, setSeed] = useState(1)
+  const state = useFigureState({
+    rho: slider(0, 0.95, 0.7, { step: 0.05, label: 'correlation ρ of X and Y' }),
+    effect: float(0.1, { min: 0, max: 0.3, step: 0.01, label: 'true effect (sd units)' }),
+    seed: int(1, { min: 1, max: 20, step: 1, label: 'seed' }),
+  })
 
   const r = useMemo(() => {
-    const g = rng(seed * 7919 + Math.round(rho * 1000))
-    const shown = { t: drawArm(g, rho, effect), c: drawArm(g, rho, 0) }
+    const g = stream(state.seed * 7919 + Math.round(state.rho * 1000))
+    const shown = { t: drawArm(g, state.rho, state.effect), c: drawArm(g, state.rho, 0) }
     const one = estimate(shown.t, shown.c)
     const raws: number[] = []
     const cupeds: number[] = []
     for (let e = 0; e < EXPERIMENTS; e++) {
-      const est = estimate(drawArm(g, rho, effect), drawArm(g, rho, 0))
+      const est = estimate(drawArm(g, state.rho, state.effect), drawArm(g, state.rho, 0))
       raws.push(est.raw)
       cupeds.push(est.cuped)
     }
     const spread = 4.5 * Math.sqrt(2 / N)
-    const hr = histogram(raws, effect - spread, effect + spread)
-    const hc = histogram(cupeds, effect - spread, effect + spread)
+    const hr = histogram(raws, state.effect - spread, state.effect + spread)
+    const hc = histogram(cupeds, state.effect - spread, state.effect + spread)
     const lineAt = (arm: Arm) => {
       const mx = mean(arm.x)
       const my = mean(arm.y)
       return { x: [-3, 3], y: [my + one.theta * (-3 - mx), my + one.theta * (3 - mx)] }
     }
-    const scatter: XYSeries[] = [
+    const scatter: SeriesSpec[] = [
       {
         name: 'users',
         type: 'scatter',
@@ -100,58 +115,43 @@ export function CupedDemo() {
       { name: 'treatment, slope θ', type: 'line', ...lineAt(shown.t), slot: 1 },
     ]
     const peak = Math.max(...hc.y, ...hr.y)
-    const hist: XYSeries[] = [
-      { name: 'raw difference', type: 'line', x: hr.x, y: hr.y, slot: 2 },
-      { name: 'CUPED', type: 'line', x: hc.x, y: hc.y, slot: 3 },
-      { name: 'true effect', type: 'line', x: [effect, effect], y: [0, peak * 1.05], emphasis: true, dashed: true },
-    ]
+    const hist = [
+      { name: 'raw difference', x: hr.x, y: hr.y, slot: 2 },
+      { name: 'CUPED', x: hc.x, y: hc.y, slot: 3 },
+      { name: 'true effect', x: [state.effect, state.effect], y: [0, peak * 1.05], emphasis: true, dashed: true },
+    ] as const
     return { one, scatter, hist, sdRaw: sd(raws), sdCuped: sd(cupeds) }
-  }, [rho, effect, seed])
+  }, [state.rho, state.effect, state.seed])
 
+  const xAxis = useAxis({ label: 'pre-experiment X', range: [-3, 3] })
+  const yAxis = useAxis({ label: 'outcome Y', range: [-3.5, 3.5] })
+  const xAxis2 = useAxis({ label: 'estimated effect', hold: 'union' })
+  const yAxis2 = useAxis({ label: 'density over experiments', range: [0, undefined], hold: 'union' })
   return (
-    <Interactive
+    <Figure
       title="CUPED removes the variance explained by the pre-period"
+      state={state}
       caption="Left: one simulated experiment with 200 users per arm. Each point is a user's pre-experiment metric X and in-experiment metric Y, both standardised. The raw estimate is the difference in mean Y. CUPED draws a line of slope θ = cov(X, Y)/var(X) through each arm's means and reports the vertical gap between them, which corrects for one arm happening to contain heavier users. Right: the two estimators over 400 experiments. Both are centred on the true effect; the CUPED estimates are narrower by the factor √(1 − ρ²)."
-      controls={
-        <>
-          <ParamSlider label="correlation ρ of X and Y" value={rho} onChange={setRho} min={0} max={0.95} step={0.05} />
-          <ParamSlider
-            label="true effect (sd units)"
-            value={effect}
-            onChange={setEffect}
-            min={0}
-            max={0.3}
-            step={0.01}
-          />
-          <ParamSlider label="seed" value={seed} onChange={setSeed} min={1} max={20} step={1} />
-        </>
-      }
-      readout={
+
+      readouts={
         <>
           <Readout label="this experiment: raw" value={formatNumber(r.one.raw)} />
           <Readout label="this experiment: CUPED" value={formatNumber(r.one.cuped)} />
           <Readout label="sd ratio, simulated" value={formatNumber(r.sdCuped / r.sdRaw)} />
-          <Readout label="√(1 − ρ²)" value={formatNumber(Math.sqrt(1 - rho * rho))} />
+          <Readout label="√(1 − ρ²)" value={formatNumber(Math.sqrt(1 - state.rho * state.rho))} />
         </>
       }
     >
       <div className="grid gap-4 md:grid-cols-2">
-        <XYChart
-          height={320}
-          series={r.scatter}
-          xRange={[-3, 3]}
-          yRange={[-3.5, 3.5]}
-          xLabel="pre-experiment X"
-          yLabel="outcome Y"
-        />
-        <XYChart
-          height={320}
-          series={r.hist}
-          yRange={[0, undefined]}
-          xLabel="estimated effect"
-          yLabel="density over experiments"
-        />
+        <Plot x={xAxis} y={yAxis} height={320}>
+          {seriesLayers(r.scatter)}
+        </Plot>
+        <Plot x={xAxis2} y={yAxis2} height={320}>
+          <Curve {...r.hist[0]} />
+          <Curve {...r.hist[1]} />
+          <Curve {...r.hist[2]} />
+        </Plot>
       </div>
-    </Interactive>
+    </Figure>
   )
 }

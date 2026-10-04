@@ -1,4 +1,4 @@
-/** The signal generators of `aifn-applied/data/signals`. */
+/** The signal generators of `aifn-methods/data/signals`. */
 
 import { definer, entries, type Entry, type FunctionInfo } from 'aifn/foundation/registry'
 import * as signals from './signals'

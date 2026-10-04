@@ -1,6 +1,17 @@
 import { useMemo } from 'react'
-import { Interactive, ParamSlider, Readout, XYChart, formatNumber, useParam, type XYSeries } from 'aifn-render'
-import { rng } from '@/lib/math'
+import {
+  Figure,
+  float,
+  formatNumber,
+  int,
+  Plot,
+  Readout,
+  seriesLayers,
+  type SeriesSpec,
+  useAxis,
+  useFigureState,
+} from 'aifn-render'
+import { normal, stream, uniform } from 'aifn/foundation/random'
 
 type Vec = [number, number]
 const N = 150
@@ -19,25 +30,27 @@ const coverage = (queries: Vec[], ref: Vec[], r: number[]) =>
  * recall is the share of real samples inside the generated support.
  */
 export function ManifoldPrecisionRecall() {
-  const shift = useParam(0.5, { min: 0, max: 3, step: 0.1 })
-  const spread = useParam(0.7, { min: 0.2, max: 1.8, step: 0.05 })
-  const outliers = useParam(0, { min: 0, max: 20, step: 1 })
-  const k = useParam(3, { min: 1, max: 10, step: 1 })
+  const state = useFigureState({
+    shift: float(0.5, { min: 0, max: 3, step: 0.1, label: 'generated shift' }),
+    spread: float(0.7, { min: 0.2, max: 1.8, step: 0.05, label: 'generated spread' }),
+    outliers: int(0, { min: 0, max: 20, step: 1, label: 'generated outliers', format: (v) => String(v) }),
+    k: int(3, { min: 1, max: 10, step: 1, label: 'neighbours k', format: (v) => String(v) }),
+  })
 
   const r = useMemo(() => {
-    const g = rng(11)
-    const real: Vec[] = Array.from({ length: N }, () => [g.normal(), g.normal()])
+    const g = stream(11)
+    const real: Vec[] = Array.from({ length: N }, () => [normal(g), normal(g)])
     const gen: Vec[] = Array.from({ length: N }, () => [
-      shift.value + spread.value * g.normal(),
-      spread.value * g.normal(),
+      state.shift + state.spread * normal(g),
+      state.spread * normal(g),
     ])
-    for (let i = 0; i < outliers.value; i++) gen[i] = [8 * g.uniform() - 4, 8 * g.uniform() - 4]
-    const precision = coverage(gen, real, radii(real, k.value))
-    const recall = coverage(real, gen, radii(gen, k.value))
+    for (let i = 0; i < state.outliers; i++) gen[i] = [8 * uniform(g) - 4, 8 * uniform(g) - 4]
+    const precision = coverage(gen, real, radii(real, state.k))
+    const recall = coverage(real, gen, radii(gen, state.k))
     return { real, gen, precision, recall }
-  }, [shift.value, spread.value, outliers.value, k.value])
+  }, [state.shift, state.spread, state.outliers, state.k])
 
-  const pts = (name: string, p: Vec[], slot: number): XYSeries => ({
+  const pts = (name: string, p: Vec[], slot: number): SeriesSpec => ({
     name,
     type: 'scatter',
     x: p.map((v) => v[0]),
@@ -45,19 +58,15 @@ export function ManifoldPrecisionRecall() {
     slot,
   })
 
+  const xAxis = useAxis({ range: RANGE })
+  const yAxis = useAxis({ range: RANGE, equal: xAxis })
   return (
-    <Interactive
+    <Figure
       title="Precision and recall for a generator"
+      state={state}
       caption="Real samples come from a standard Gaussian; generated samples from a shifted Gaussian with adjustable spread, plus optional uniformly scattered outliers. Precision measures fidelity (generated samples that look real); recall measures diversity (how much of the real distribution the generator covers). Shrinking the spread keeps precision high but lowers recall, like mode collapse. Adding a few outliers lowers precision but can raise recall, because each outlier's large ball covers real samples far from any typical generated point."
-      controls={
-        <>
-          <ParamSlider label="generated shift" param={shift} />
-          <ParamSlider label="generated spread" param={spread} />
-          <ParamSlider label="generated outliers" param={outliers} format={(v) => String(v)} />
-          <ParamSlider label="neighbours k" param={k} format={(v) => String(v)} withArrows />
-        </>
-      }
-      readout={
+
+      readouts={
         <>
           <Readout label="precision" value={formatNumber(r.precision)} />
           <Readout label="recall" value={formatNumber(r.recall)} />
@@ -65,13 +74,10 @@ export function ManifoldPrecisionRecall() {
       }
     >
       <div className="mx-auto w-full max-w-md">
-        <XYChart
-          series={[pts('real', r.real, 0), pts('generated', r.gen, 1)]}
-          xRange={RANGE}
-          yRange={RANGE}
-          equalAspect
-        />
+        <Plot x={xAxis} y={yAxis}>
+          {seriesLayers([pts('real', r.real, 0), pts('generated', r.gen, 1)])}
+        </Plot>
       </div>
-    </Interactive>
+    </Figure>
   )
 }

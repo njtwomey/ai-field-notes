@@ -1,4 +1,4 @@
-/** The functions of `aifn-applied/information/projection`. */
+/** The functions of `aifn-methods/information/projection`. */
 
 import { definer, entries, type Entry, type FunctionInfo } from 'aifn/foundation/registry'
 import * as projection from './projection'

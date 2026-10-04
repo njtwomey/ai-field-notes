@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { trueSkillEp } from 'aifn-applied/inference/rating-models'
+import { trueSkillEp } from 'aifn-methods/inference/rating-models'
 import { trace } from 'aifn/foundation/trace'
 import {
   Figure,

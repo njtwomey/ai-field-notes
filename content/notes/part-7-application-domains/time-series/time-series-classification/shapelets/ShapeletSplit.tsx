@@ -1,16 +1,19 @@
 import { useMemo, useState } from 'react'
 import {
-  Interactive,
-  ParamSlider,
-  Readout,
-  XYChart,
+  Figure,
+  float,
   formatNumber,
-  useParam,
-  type Handle,
-  type XYSeries,
+  Handle,
+  int,
+  Plot,
+  Readout,
+  seriesLayers,
+  type SeriesSpec,
+  useAxis,
+  useFigureState,
 } from 'aifn-render'
-import { rng } from '@/lib/math'
 import { bestSplit, informationGain, subsequenceDistance } from '../_shared/tsc'
+import { normal, stream, uniform } from 'aifn/foundation/random'
 
 const PER_CLASS = 8
 const LENGTH = 60
@@ -21,15 +24,15 @@ const SHOWN = 3
  * bump instead. The best shapelet is searched among all subsequences of the first two class-1 series.
  */
 function dataset(seed: number, noise: number) {
-  const g = rng(seed)
+  const g = stream(seed)
   const make = (label: number) => {
     const x: number[] = []
     let level = 0
     for (let t = 0; t < LENGTH; t++) {
-      level = 0.8 * level + 0.3 * g.normal()
-      x.push(level + noise * g.normal())
+      level = 0.8 * level + 0.3 * normal(g)
+      x.push(level + noise * normal(g))
     }
-    const at = 5 + Math.floor(g.uniform() * (LENGTH - 20))
+    const at = 5 + Math.floor(uniform(g) * (LENGTH - 20))
     for (let k = 0; k < 10; k++) {
       x[at + k] +=
         label === 1
@@ -54,13 +57,15 @@ function dataset(seed: number, noise: number) {
 }
 
 export function ShapeletSplit() {
-  const length = useParam(12, { min: 6, max: 24, step: 2 })
-  const noise = useParam(0.2, { min: 0, max: 0.8, step: 0.05 })
-  const seed = useParam(2, { min: 1, max: 20, step: 1 })
+  const state = useFigureState({
+    length: int(12, { min: 6, max: 24, step: 2, label: 'shapelet length', format: (v) => String(v) }),
+    noise: float(0.2, { min: 0, max: 0.8, step: 0.05, label: 'noise' }),
+    seed: int(2, { min: 1, max: 20, step: 1, label: 'seed', format: (v) => String(v) }),
+  })
 
   const r = useMemo(() => {
-    const { series, labels } = dataset(seed.value, noise.value)
-    const m = length.value
+    const { series, labels } = dataset(state.seed, state.noise)
+    const m = state.length
     // Exhaustive search over candidates from two class-1 series, as in the original algorithm but on a small pool.
     let best = { gain: -1, threshold: 0, shapelet: [] as number[], source: 0, start: 0, distances: [] as number[] }
     for (const source of [PER_CLASS, PER_CLASS + 1]) {
@@ -73,16 +78,16 @@ export function ShapeletSplit() {
     }
     const positions = series.map((s) => subsequenceDistance(s, best.shapelet).position)
     return { series, labels, ...best, positions }
-  }, [length.value, noise.value, seed.value])
+  }, [state.length, state.noise, state.seed])
 
   // A dragged threshold belongs to the data it was dragged on; new data starts at its own best split.
-  const key = `${length.value}-${noise.value}-${seed.value}`
+  const key = `${state.length}-${state.noise}-${state.seed}`
   const [dragged, setDragged] = useState<{ key: string; value: number } | null>(null)
   const t = dragged?.key === key ? dragged.value : r.threshold
   const gain = informationGain(r.distances, r.labels, t)
   const correct = r.distances.filter((d, i) => (d < t ? 1 : 0) === r.labels[i]).length
 
-  const panel = (label: number): XYSeries[] => {
+  const panel = (label: number): SeriesSpec[] => {
     const idx = r.labels
       .map((y, i) => (y === label ? i : -1))
       .filter((i) => i >= 0)
@@ -91,7 +96,7 @@ export function ShapeletSplit() {
       const offset = 4 * k
       const s = r.series[i]
       const p = r.positions[i]
-      const span = Array.from({ length: length.value }, (_, j) => p + j)
+      const span = Array.from({ length: state.length }, (_, j) => p + j)
       return [
         { name: 'series', type: 'line' as const, x: s.map((_, j) => j), y: s.map((v) => v + offset), muted: true },
         {
@@ -104,29 +109,27 @@ export function ShapeletSplit() {
       ]
     })
   }
-  const orderline: XYSeries[] = [0, 1].map((c) => ({
+  const orderline: SeriesSpec[] = [0, 1].map((c) => ({
     name: `class ${c}`,
     type: 'scatter' as const,
     x: r.distances.filter((_, i) => r.labels[i] === c),
     y: r.distances.filter((_, i) => r.labels[i] === c).map(() => c),
     slot: c,
   }))
-  const handles: Handle[] = [
-    { kind: 'x', at: t, label: 'split', onDrag: (x) => setDragged({ key, value: Math.max(0, x) }) },
-  ]
 
+  const xAxis = useAxis({ label: 't', hold: 'union' })
+  const yAxis = useAxis({ hold: 'union' })
+  const xAxis2 = useAxis({ label: 't', hold: 'union' })
+  const yAxis2 = useAxis({ hold: 'union' })
+  const xAxis3 = useAxis({ label: 'distance to the shapelet', hold: 'union' })
+  const yAxis3 = useAxis({ label: 'class', range: [-0.5, 1.5] })
   return (
-    <Interactive
+    <Figure
       title="A shapelet splits two classes"
+      state={state}
       caption="Class 1 series contain a sharp spike-and-dip, class 0 a smooth bump, each at a random position in noise. The shapelet is the subsequence, searched among two class-1 series, whose distance to every series best separates the classes. Top: three series of each class with their best-matching window highlighted. Bottom: each series placed on the orderline by its distance to the shapelet; the split sends distances below the threshold to class 1. Drag the split to see accuracy and information gain change; change the shapelet length or the noise."
-      controls={
-        <>
-          <ParamSlider label="shapelet length" param={length} format={(v) => String(v)} withArrows />
-          <ParamSlider label="noise" param={noise} />
-          <ParamSlider label="seed" param={seed} format={(v) => String(v)} withArrows />
-        </>
-      }
-      readout={
+
+      readouts={
         <>
           <Readout label="best information gain" value={`${formatNumber(r.gain)} bits`} />
           <Readout label="gain at this split" value={`${formatNumber(gain)} bits`} />
@@ -138,21 +141,21 @@ export function ShapeletSplit() {
       <div className="grid gap-4 md:grid-cols-2">
         <div className="min-w-0 space-y-1">
           <div className="text-center text-xs text-muted-foreground">class 0 (smooth bump)</div>
-          <XYChart series={panel(0)} xLabel="t" height={220} bare />
+          <Plot x={xAxis} y={yAxis} height={220} bare>
+            {seriesLayers(panel(0))}
+          </Plot>
         </div>
         <div className="min-w-0 space-y-1">
           <div className="text-center text-xs text-muted-foreground">class 1 (spike and dip)</div>
-          <XYChart series={panel(1)} xLabel="t" height={220} bare />
+          <Plot x={xAxis2} y={yAxis2} height={220} bare>
+            {seriesLayers(panel(1))}
+          </Plot>
         </div>
       </div>
-      <XYChart
-        series={orderline}
-        xLabel="distance to the shapelet"
-        yLabel="class"
-        yRange={[-0.5, 1.5]}
-        handles={handles}
-        height={200}
-      />
-    </Interactive>
+      <Plot x={xAxis3} y={yAxis3} height={200}>
+        {seriesLayers(orderline)}
+        <Handle kind="x" at={t} label="split" onDrag={(x) => setDragged({ key, value: Math.max(0, x) })} />
+      </Plot>
+    </Figure>
   )
 }

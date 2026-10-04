@@ -1,22 +1,23 @@
 import { useMemo, useState } from 'react'
-import { Heatmap, Interactive, ParamSlider, Readout, StepControls, XYChart, formatNumber } from 'aifn-render'
-import { useDerivedState } from '@/lib/use-derived-state'
 import {
-  K,
-  TRUE_TOPICS,
-  V,
-  corpus,
-  distanceToTruth,
-  initialise,
-  logLikelihood,
-  sweep,
-  topicWord,
-  type State,
-} from './gibbs'
+  Curve,
+  Figure,
+  formatNumber,
+  int,
+  Player,
+  Plot,
+  Raster,
+  Readout,
+  slider,
+  useAxis,
+  useFigureState,
+} from 'aifn-render'
+import { K, TRUE_TOPICS, V, corpus, distanceToTruth, initialise, logLikelihood, sweep, topicWord } from './gibbs'
 
 const WORDS = Array.from({ length: V }, (_, w) => w + 1)
 const TOPICS = Array.from({ length: K }, (_, k) => k + 1)
-const RUN = 25
+/** Sweeps computed up front for the walk-through. */
+const SWEEPS = 60
 
 /** Topic labels are arbitrary; greedily pair each learned topic with its closest unused true topic for display. */
 function alignToTruth(phi: number[][]): number[][] {
@@ -34,90 +35,69 @@ function alignToTruth(phi: number[][]): number[][] {
   return slot.map((k) => phi[k])
 }
 
-type Run = State & { history: number[] }
+/** What the figure shows after each sweep: the aligned topic–word table, the log-likelihood, the distance to the truth. */
+type Snapshot = { shown: number[][]; ll: number; distance: number }
 
 export function GibbsBars() {
   const docs = useMemo(() => corpus(200, 40, 5), [])
-  const [alpha, setAlpha] = useState(0.3)
-  const [beta, setBeta] = useState(0.1)
-  const [seed, setSeed] = useState(1)
-  const initial = useMemo((): Run => {
-    const s = initialise(docs, seed)
-    return { ...s, history: [logLikelihood(s, beta)] }
-  }, [docs, seed, beta])
-  const [state, setState, reset] = useDerivedState(initial)
-  const advance = (s: Run, sweeps: number): Run => {
-    let next: Run = s
-    for (let i = 0; i < sweeps; i++) {
-      const t = sweep(docs, next, alpha, beta)
-      next = { ...t, history: [...next.history, logLikelihood(t, beta)] }
+  const state = useFigureState({
+    alpha: slider(0.05, 2, 0.3, { step: 0.05, label: 'α (document–topic prior)' }),
+    beta: slider(0.01, 1, 0.1, { step: 0.01, label: 'β (topic–word prior)' }),
+    seed: int(1, { ge: 0, label: 'seed' }),
+  })
+  const { alpha, beta, seed } = state
+  const trace = useMemo(() => {
+    const snap = (s: ReturnType<typeof initialise>): Snapshot => {
+      const phi = topicWord(s, beta)
+      return { shown: alignToTruth(phi), ll: logLikelihood(s, beta), distance: distanceToTruth(phi) }
     }
-    return next
-  }
-  const phi = topicWord(state, beta)
-  const shown = alignToTruth(phi)
-  const sweeps = state.history.map((_, i) => i)
+    let s = initialise(docs, seed)
+    const out = [snap(s)]
+    for (let i = 0; i < SWEEPS; i++) {
+      s = sweep(docs, s, alpha, beta)
+      out.push(snap(s))
+    }
+    return out
+  }, [docs, seed, alpha, beta])
+  // Sweeps made: the walk-through position. It counts sweeps, so it keeps its meaning when the priors change.
+  const [step, setStep] = useState(0)
+  const now = trace[step]
+  const sweeps = useMemo(() => trace.slice(0, step + 1).map((_, i) => i), [trace, step])
+  const history = useMemo(() => trace.slice(0, step + 1).map((t) => t.ll), [trace, step])
 
+  const xAxis = useAxis({ label: 'word' })
+  const yAxis = useAxis({ label: 'true topic' })
+  const xAxis2 = useAxis({ label: 'word' })
+  const yAxis2 = useAxis({ label: 'learned topic' })
+  const xAxis3 = useAxis({ label: 'sweep', range: [0, SWEEPS] })
+  const yAxis3 = useAxis({ label: 'log p(w | z)', hold: 'union' })
   return (
-    <Interactive
+    <Figure
       title="Collapsed Gibbs sampling recovers the bars topics"
-      caption="The vocabulary is nine words on a 3 × 3 grid. The six true topics (left) are the three rows and three columns of the grid. 200 documents of 40 words were generated from them. Starting from random assignments, each sweep resamples every token's topic. Step through the first sweeps: the learned topic–word distributions (middle, matched to the true topics for display) sharpen into bars within about 20 sweeps, and the log-likelihood (right) levels off."
+      state={state}
+      caption="The vocabulary is nine words on a 3 × 3 grid. The six true topics (left) are the three rows and three columns of the grid. 200 documents of 40 words were generated from them. Starting from random assignments, each sweep resamples every token's topic. Play through the first sweeps: the learned topic–word distributions (middle, matched to the true topics for display) sharpen into bars within about 20 sweeps, and the log-likelihood (right) levels off."
       controls={
-        <>
-          <ParamSlider
-            label="α (document–topic prior)"
-            value={alpha}
-            onChange={setAlpha}
-            min={0.05}
-            max={2}
-            step={0.05}
-          />
-          <ParamSlider label="β (topic–word prior)" value={beta} onChange={setBeta} min={0.01} max={1} step={0.01} />
-          <ParamSlider label="seed" value={seed} onChange={setSeed} min={1} max={10} step={1} />
-          <StepControls
-            onStep={() => setState((s) => advance(s, 1))}
-            onRun={() => setState((s) => advance(s, RUN))}
-            onReset={reset}
-            done={state.sweep >= 500}
-          />
-        </>
+        <Player value={step} onChange={setStep} count={SWEEPS + 1} label="sweeps" format={(k) => `${k} of ${SWEEPS}`} />
       }
-      readout={
+      readouts={
         <>
-          <Readout label="sweeps" value={state.sweep} />
-          <Readout label="log p(w | z)" value={formatNumber(state.history[state.history.length - 1])} />
-          <Readout label="mean distance to nearest true topic" value={formatNumber(distanceToTruth(phi))} />
+          <Readout label="sweeps" value={step} />
+          <Readout label="log p(w | z)" value={formatNumber(now.ll)} />
+          <Readout label="mean distance to nearest true topic" value={formatNumber(now.distance)} />
         </>
       }
     >
       <div className="grid gap-4 lg:grid-cols-3">
-        <Heatmap
-          x={WORDS}
-          y={TOPICS}
-          z={TRUE_TOPICS}
-          xLabel="word"
-          yLabel="true topic"
-          range={[0, 0.4]}
-          valueLabel="φ"
-          height={280}
-        />
-        <Heatmap
-          x={WORDS}
-          y={TOPICS}
-          z={shown}
-          xLabel="word"
-          yLabel="learned topic"
-          range={[0, 0.4]}
-          valueLabel="φ"
-          height={280}
-        />
-        <XYChart
-          height={280}
-          xLabel="sweep"
-          yLabel="log p(w | z)"
-          series={[{ name: 'log-likelihood', type: 'line', x: sweeps, y: state.history, slot: 0 }]}
-        />
+        <Plot x={xAxis} y={yAxis} height={280}>
+          <Raster x={WORDS} y={TOPICS} z={TRUE_TOPICS} range={[0, 0.4]} valueLabel={'φ'} />
+        </Plot>
+        <Plot x={xAxis2} y={yAxis2} height={280}>
+          <Raster x={WORDS} y={TOPICS} z={now.shown} range={[0, 0.4]} valueLabel={'φ'} />
+        </Plot>
+        <Plot x={xAxis3} y={yAxis3} height={280}>
+          <Curve name="log-likelihood" x={sweeps} y={history} slot={0} />
+        </Plot>
       </div>
-    </Interactive>
+    </Figure>
   )
 }

@@ -242,7 +242,8 @@ dataset(
   {
     key: 'webTraffic',
     name: 'WebTraffic (MILLET)',
-    summary: 'A week of seasonal synthetic web traffic per series with one of nine signatures injected at a known place.',
+    summary:
+      'A week of seasonal synthetic web traffic per series with one of nine signatures injected at a known place.',
     task: 'classification',
     output: 'dataset',
     knobs: space({

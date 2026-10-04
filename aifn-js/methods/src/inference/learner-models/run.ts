@@ -24,7 +24,7 @@ import {
   type LearnerModelKind,
 } from './zilm'
 
-/** Simulated learners with their truth (the shape of `aifn-applied/data/synthetic` `learnerResponses`). */
+/** Simulated learners with their truth (the shape of `aifn-methods/data/synthetic` `learnerResponses`). */
 export interface LearnerData {
   responses: Tensor
   conditions: Tensor

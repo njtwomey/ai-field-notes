@@ -196,21 +196,9 @@ export function BitsErrorExplorer() {
         </Plot>
         <Plot x={xb} y={ys} title="SQNR (dB) vs bit width b">
           {VARIANTS.map((v, idx) => (
-            <Curve
-              key={v.key}
-              name={v.label}
-              x={BITS}
-              y={curves[idx]}
-              slot={idx}
-              showPoints
-            />
+            <Curve key={v.key} name={v.label} x={BITS} y={curves[idx]} slot={idx} showPoints />
           ))}
-          <Points
-            name="selected bit width"
-            x={[bits]}
-            y={[err.sqnr]}
-            emphasis
-          />
+          <Points name="selected bit width" x={[bits]} y={[err.sqnr]} emphasis />
         </Plot>
       </Plots>
     </Figure>

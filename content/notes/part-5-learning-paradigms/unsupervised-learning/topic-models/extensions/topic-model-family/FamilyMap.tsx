@@ -1,7 +1,5 @@
-import { MathText } from 'aifn-render'
-import { Diagram } from 'aifn-render'
+import { Diagram, Figure, MathText } from 'aifn-render'
 import type { DiagramEdge, DiagramNode, DiagramSpec } from 'aifn-render'
-import { Interactive } from 'aifn-render'
 
 type Column = { id: string; title: string; models: string[]; tone: number }
 
@@ -57,13 +55,13 @@ const spec: DiagramSpec = { nodes, edges }
 
 export function FamilyMap() {
   return (
-    <Interactive
+    <Figure
       title="The topic model family"
       caption={
         <MathText text="LDA adds Dirichlet priors to pLSA. Each extension below it changes one assumption of LDA, grouped by what it changes: when a document was written, who or what produced it, how topics co-occur, how many topics there are and how they are arranged, how long documents are, and how the posterior is computed." />
       }
     >
       <Diagram spec={spec} ariaLabel="LDA and the families of models that extend it" />
-    </Interactive>
+    </Figure>
   )
 }

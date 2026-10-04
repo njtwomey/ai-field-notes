@@ -1,5 +1,5 @@
 /**
- * `aifn-applied/learning/mixture-of-experts`: the mixture of experts and the hierarchical mixture of experts as
+ * `aifn-methods/learning/mixture-of-experts`: the mixture of experts and the hierarchical mixture of experts as
  * statistical models (Jacobs, Jordan, Nowlan and Hinton, 1991; Jordan and Jacobs, 1994) over the core layer of
  * `aifn/nn/experts`: linear or MLP experts, any routing gate or a two-level hierarchy, the conditional-mixture or
  * blended-output objective; fitted by EM (`moeEm`, a step-through algorithm) or by Adam with auxiliary losses

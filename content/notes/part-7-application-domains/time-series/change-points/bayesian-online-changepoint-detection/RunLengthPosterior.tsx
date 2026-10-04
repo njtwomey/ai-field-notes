@@ -1,6 +1,6 @@
-import { arRegimes, meanShifts, poissonShifts, varianceShifts } from 'aifn-applied/data/synthetic'
-import { coalMining } from 'aifn-applied/data/real'
-import type { Dataset } from 'aifn-applied/data'
+import { arRegimes, meanShifts, poissonShifts, varianceShifts } from 'aifn-methods/data/synthetic'
+import { coalMining } from 'aifn-methods/data/real'
+import type { Dataset } from 'aifn-methods/data'
 import {
   bocpd,
   bocpdForecast,

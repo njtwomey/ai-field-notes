@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { banana, funnel, gaussianMixtureTarget, gaussianTarget, nonCentredFunnel } from 'aifn-applied/data/targets'
+import { banana, funnel, gaussianMixtureTarget, gaussianTarget, nonCentredFunnel } from 'aifn-methods/data/targets'
 import type { LogDensity } from 'aifn/foundation/contracts'
 import { tensor, toFlat, type Tensor } from 'aifn/foundation/tensor'
 import { Normal } from 'aifn/probability/distributions'

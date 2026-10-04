@@ -1,20 +1,32 @@
-import { useMemo, useState } from 'react'
-import { MathText } from 'aifn-render'
-import { Heatmap, Interactive, ParamChoice, ParamSlider, ParamSwitch, Readout, formatNumber } from 'aifn-render'
-import type { HeatmapOverlay } from 'aifn-render'
-import { linspace } from '@/lib/math'
-import { logGamma } from '@/lib/math/special'
+import { useMemo } from 'react'
+import {
+  choice,
+  Curve,
+  Figure,
+  formatNumber,
+  MathText,
+  Plot,
+  Raster,
+  Readout,
+  setting,
+  slider,
+  useAxis,
+  useFigureState,
+} from 'aifn-render'
+import { linspace as linspaceTensor, toFlat } from 'aifn/foundation/tensor'
+import { logGamma } from 'aifn/numerics/special'
 
 type View = 'simplex' | 'softmax'
 
+const linspace = (a: number, b: number, n: number) => toFlat(linspaceTensor(a, b, n))
 const N = 64
 const SIMPLEX_AXIS = linspace(0.5 / N, 1 - 0.5 / N, N)
 const SOFTMAX_AXIS = linspace(-6, 6, N)
 // Integration grid for the total variation distance, in the softmax basis where both densities are smooth.
 const TV_AXIS = linspace(-20, 20, 201)
 const TV_CELL = (TV_AXIS[1] - TV_AXIS[0]) ** 2
-const EDGE: HeatmapOverlay[] = [{ name: 'simplex edge', type: 'line', x: [0, 1], y: [1, 0], emphasis: true }]
-const NO_OVERLAY: HeatmapOverlay[] = []
+const EDGE_X = [0, 1]
+const EDGE_Y = [1, 0]
 
 type Gauss2 = { m: [number, number]; c11: number; c12: number; c22: number }
 
@@ -61,11 +73,21 @@ function logSoftmax(y1: number, y2: number): [number, number, number] {
 
 /** Laplace approximation of a three-topic Dirichlet by a logistic normal, on the simplex or in the softmax basis. */
 export function LaplaceDirichlet() {
-  const [a1, setA1] = useState(2)
-  const [a2, setA2] = useState(1)
-  const [a3, setA3] = useState(1)
-  const [view, setView] = useState<View>('simplex')
-  const [diagonal, setDiagonal] = useState(true)
+  const state = useFigureState({
+    a1: slider(0.3, 10, 2, { step: 0.1, label: 'α₁' }),
+    a2: slider(0.3, 10, 1, { step: 0.1, label: 'α₂' }),
+    a3: slider(0.3, 10, 1, { step: 0.1, label: 'α₃' }),
+    view: choice<View>(
+      [
+        { value: 'simplex', label: 'simplex θ' },
+        { value: 'softmax', label: 'softmax basis h' },
+      ],
+      'simplex',
+      { label: 'coordinates' },
+    ),
+    diagonal: setting(true, 'diagonal covariance (ProdLDA)'),
+  })
+  const { a1, a2, a3, view, diagonal } = state
 
   const { dirichlet, normal, range, tv, mu, diag } = useMemo(() => {
     const alpha = [a1, a2, a3]
@@ -112,33 +134,22 @@ export function LaplaceDirichlet() {
   const axis = view === 'simplex' ? SIMPLEX_AXIS : SOFTMAX_AXIS
   const xLabel = view === 'simplex' ? 'θ₁' : 'h₁ − h₃'
   const yLabel = view === 'simplex' ? 'θ₂' : 'h₂ − h₃'
-  const overlay = view === 'simplex' ? EDGE : NO_OVERLAY
   const fmt = (xs: number[]) => `(${xs.map((x) => formatNumber(x)).join(', ')})`
 
+  const xAxis = useAxis({ label: xLabel, key: view })
+  const yAxis = useAxis({ label: yLabel, key: view, equal: xAxis })
+  const xAxis2 = useAxis({ label: xLabel, key: view })
+  const yAxis2 = useAxis({ label: yLabel, key: view, equal: xAxis2 })
+  const edge = view === 'simplex' && <Curve name="simplex edge" x={EDGE_X} y={EDGE_Y} emphasis live />
+
   return (
-    <Interactive
+    <Figure
       title="The Laplace approximation of a Dirichlet"
+      state={state}
       caption={
         <MathText text="Left: the density of $\Dir(\alphavec)$ for three topics. Right: its Laplace approximation, a logistic normal whose Gaussian lives in the softmax basis $\thetavec = \operatorname{softmax}(\hvec)$. On the simplex, $\theta_3 = 1 - \theta_1 - \theta_2$ and the blank triangle beyond the edge is outside the simplex. In the softmax basis the Dirichlet is always unimodal, which is why the approximation is taken there. With the diagonal switched off, the covariance is the full $\Pmat\,\diag(1/\alphavec)\,\Pmat$; ProdLDA keeps only its diagonal. Colours share one scale, capped at the 98th percentile." />
       }
-      controls={
-        <>
-          <ParamSlider label="α₁" value={a1} onChange={setA1} min={0.3} max={10} step={0.1} />
-          <ParamSlider label="α₂" value={a2} onChange={setA2} min={0.3} max={10} step={0.1} />
-          <ParamSlider label="α₃" value={a3} onChange={setA3} min={0.3} max={10} step={0.1} />
-          <ParamChoice
-            label="coordinates"
-            value={view}
-            onChange={setView}
-            options={[
-              { value: 'simplex', label: 'simplex θ' },
-              { value: 'softmax', label: 'softmax basis h' },
-            ]}
-          />
-          <ParamSwitch label="diagonal covariance (ProdLDA)" checked={diagonal} onChange={setDiagonal} />
-        </>
-      }
-      readout={
+      readouts={
         <>
           <Readout label="μ₀" value={fmt(mu)} />
           <Readout label="diag Σ₀" value={fmt(diag)} />
@@ -149,35 +160,19 @@ export function LaplaceDirichlet() {
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <div>
           <p className="mb-1 text-center text-xs text-muted-foreground">Dirichlet</p>
-          <Heatmap
-            x={axis}
-            y={axis}
-            z={dirichlet}
-            range={range}
-            overlay={overlay}
-            xLabel={xLabel}
-            yLabel={yLabel}
-            valueLabel="density"
-            height={300}
-            ariaLabel="Dirichlet density"
-          />
+          <Plot x={xAxis} y={yAxis} height={300} ariaLabel="Dirichlet density">
+            <Raster x={axis} y={axis} z={dirichlet} range={range} valueLabel="density" />
+            {edge}
+          </Plot>
         </div>
         <div>
           <p className="mb-1 text-center text-xs text-muted-foreground">Laplace approximation (logistic normal)</p>
-          <Heatmap
-            x={axis}
-            y={axis}
-            z={normal}
-            range={range}
-            overlay={overlay}
-            xLabel={xLabel}
-            yLabel={yLabel}
-            valueLabel="density"
-            height={300}
-            ariaLabel="Logistic-normal density of the Laplace approximation"
-          />
+          <Plot x={xAxis2} y={yAxis2} height={300} ariaLabel="Logistic-normal density of the Laplace approximation">
+            <Raster x={axis} y={axis} z={normal} range={range} valueLabel="density" />
+            {edge}
+          </Plot>
         </div>
       </div>
-    </Interactive>
+    </Figure>
   )
 }

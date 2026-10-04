@@ -1,5 +1,16 @@
 import { useMemo } from 'react'
-import { Interactive, ParamSlider, Readout, XYChart, formatNumber, useParam, type XYSeries } from 'aifn-render'
+import {
+  Figure,
+  float,
+  formatNumber,
+  Plot,
+  Readout,
+  seriesLayers,
+  type SeriesSpec,
+  slider,
+  useAxis,
+  useFigureState,
+} from 'aifn-render'
 
 type Vec = [number, number]
 type Mat = [[number, number], [number, number]]
@@ -35,23 +46,25 @@ const trace = (m: Mat) => {
 
 /** AB and BA applied to the same shape, for a rotation A and a stretch-and-shear B. */
 export function Composition() {
-  const angle = useParam(60, { min: -180, max: 180, step: 5 })
-  const stretch = useParam(1.5, { min: 0.25, max: 2, step: 0.05 })
-  const shear = useParam(0.5, { min: -1, max: 1, step: 0.05 })
+  const state = useFigureState({
+    angle: slider(-180, 180, 60, { step: 5, label: 'rotation angle of A (degrees)' }),
+    stretch: float(1.5, { min: 0.25, max: 2, step: 0.05, label: 'stretch of B' }),
+    shear: float(0.5, { min: -1, max: 1, step: 0.05, label: 'shear of B' }),
+  })
 
   const r = useMemo(() => {
-    const t = (angle.value * Math.PI) / 180
+    const t = (state.angle * Math.PI) / 180
     const A: Mat = [
       [Math.cos(t), -Math.sin(t)],
       [Math.sin(t), Math.cos(t)],
     ]
     const B: Mat = [
-      [stretch.value, shear.value],
+      [state.stretch, state.shear],
       [0, 1],
     ]
     const AB = mul(A, B)
     const BA = mul(B, A)
-    const series: XYSeries[] = [
+    const series: SeriesSpec[] = [
       {
         name: 'shape',
         type: 'line',
@@ -67,20 +80,17 @@ export function Composition() {
     ]
     const gap = Math.max(...AB.flat().map((v, i) => Math.abs(v - BA.flat()[i])))
     return { A, B, AB, BA, gap, series }
-  }, [angle.value, stretch.value, shear.value])
+  }, [state.angle, state.stretch, state.shear])
 
+  const xAxis = useAxis({ label: 'x₁', range: [-R, R] })
+  const yAxis = useAxis({ label: 'x₂', range: [-R, R], equal: xAxis })
   return (
-    <Interactive
+    <Figure
       title="Order matters"
+      state={state}
       caption="A rotates by the chosen angle. B stretches the first coordinate and shears. The dashed letter F is the input. A B applies B first and then A; B A applies them the other way round. The two images differ unless the angle is a multiple of 180° or B is the identity (stretch 1, shear 0), the only cases here in which the two maps commute."
-      controls={
-        <>
-          <ParamSlider label="rotation angle of A (degrees)" param={angle} />
-          <ParamSlider label="stretch of B" param={stretch} />
-          <ParamSlider label="shear of B" param={shear} />
-        </>
-      }
-      readout={
+
+      readouts={
         <>
           <Readout label="A B" value={show(r.AB)} />
           <Readout label="B A" value={show(r.BA)} />
@@ -90,8 +100,10 @@ export function Composition() {
     >
       {/* Equal-aspect charts take their height from their width; keep square plots a readable size. */}
       <div className="mx-auto w-full max-w-lg">
-        <XYChart equalAspect xRange={[-R, R]} yRange={[-R, R]} xLabel="x₁" yLabel="x₂" series={r.series} />
+        <Plot x={xAxis} y={yAxis}>
+          {seriesLayers(r.series)}
+        </Plot>
       </div>
-    </Interactive>
+    </Figure>
   )
 }

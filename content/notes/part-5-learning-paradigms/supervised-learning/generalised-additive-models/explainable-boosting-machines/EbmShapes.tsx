@@ -1,15 +1,20 @@
-import { useMemo, useState } from 'react'
+import { useMemo } from 'react'
 import {
-  Interactive,
-  ParamButton,
-  ParamChoice,
-  ParamSlider,
-  Readout,
-  XYChart,
+  Curve,
+  Figure,
+  float,
   formatNumber,
-  type XYSeries,
+  int,
+  Plot,
+  Readout,
+  useAxis,
+  useFigureState,
+  type AxisModel,
 } from 'aifn-render'
-import { linspace, mean, rng } from '@/lib/math'
+import { linspace, toFlat } from 'aifn/foundation/tensor'
+import { normal, stream, type Stream, uniform } from 'aifn/foundation/random'
+
+const mean = (xs: readonly number[]) => xs.reduce((a, b) => a + b, 0) / xs.length
 
 const N = 500
 const N_TEST = 1000
@@ -20,16 +25,16 @@ const TRUE: [(x: number) => number, (x: number) => number] = [
   (x) => Math.sin(2 * Math.PI * x),
   (x) => 4 * (x - 0.5) ** 2 - 1 / 3,
 ]
-const GRID = linspace(0, 1, 101)
+const GRID = toFlat(linspace(0, 1, 101))
 const bin = (x: number) => Math.min(BINS - 1, Math.floor(x * BINS))
 
 type Sample = { bins: [number[], number[]]; y: number[] }
 
-function sample(r: ReturnType<typeof rng>, n: number): Sample {
-  const x = Array.from({ length: n }, () => [r.uniform(), r.uniform()])
+function sample(r: Stream, n: number): Sample {
+  const x = Array.from({ length: n }, () => [uniform(r), uniform(r)])
   return {
     bins: [x.map(([a]) => bin(a)), x.map(([, b]) => bin(b))],
-    y: x.map(([a, b]) => TRUE[0](a) + TRUE[1](b) + NOISE * r.normal()),
+    y: x.map(([a, b]) => TRUE[0](a) + TRUE[1](b) + NOISE * normal(r)),
   }
 }
 
@@ -74,44 +79,44 @@ function boost(train: Sample, test: Sample, nu: number) {
 }
 
 export function EbmShapes() {
-  const [nu, setNu] = useState<'0.01' | '0.1' | '1'>('0.01')
-  const [logRounds, setLogRounds] = useState(2)
-  const [seed, setSeed] = useState(2)
+  const state = useFigureState({
+    rounds: int(100, { ge: 1, le: ROUNDS, scale: 'log10', suggestions: [1, 10, 100, 1000, ROUNDS], label: 'rounds' }),
+    nu: float(0.01, { gt: 0, le: 1, scale: 'log10', suggestions: [0.01, 0.1, 1], label: 'learning rate ν' }),
+    seed: int(2, { ge: 0, label: 'seed' }),
+  })
+  const { nu, seed } = state
 
   const samples = useMemo(() => {
-    const r = rng(seed)
+    const r = stream(seed)
     return { train: sample(r, N), test: sample(r, N_TEST) }
   }, [seed])
-  const run = useMemo(() => boost(samples.train, samples.test, Number(nu)), [samples, nu])
-  const rounds = Math.min(ROUNDS, Math.max(1, Math.round(10 ** logRounds)))
-  const state = run.history[rounds - 1]
+  const run = useMemo(() => boost(samples.train, samples.test, nu), [samples, nu])
+  const rounds = Math.min(ROUNDS, Math.max(1, Math.round(state.rounds)))
+  const current = run.history[rounds - 1]
   const bestTest = run.history.reduce((b, h, i) => (h.testRmse < run.history[b].testRmse ? i : b), 0)
 
+  const axes: [AxisModel, AxisModel][] = [
+    [useAxis({ label: 'x₁', range: [0, 1] }), useAxis({ label: 'f₁(x₁)', range: [-1.4, 1.4] })],
+    [useAxis({ label: 'x₂', range: [0, 1] }), useAxis({ label: 'f₂(x₂)', range: [-1.4, 1.4] })],
+  ]
   const panel = (j: 0 | 1) => {
     // Centre each shape over the training points, as EBM reports it; the intercept carries the mean.
-    const c = mean(run.trainBins[j].map((b) => state.shapes[j][b]))
+    const c = mean(run.trainBins[j].map((b) => current.shapes[j][b]))
     const trueMean = mean(GRID.map(TRUE[j]))
     const xs = Array.from({ length: BINS }, (_, b) => [b / BINS, (b + 1) / BINS]).flat()
-    const ys = state.shapes[j].flatMap((v) => [v - c, v - c])
-    const series: XYSeries[] = [
-      { name: 'true effect', type: 'line', x: GRID, y: GRID.map((g) => TRUE[j](g) - trueMean), slot: 2, dashed: true },
-      { name: `f${j === 0 ? '₁' : '₂'} (step function)`, type: 'line', x: xs, y: ys, slot: 1 },
-    ]
+    const ys = current.shapes[j].flatMap((v) => [v - c, v - c])
     return (
-      <XYChart
-        series={series}
-        xRange={[0, 1]}
-        yRange={[-1.4, 1.4]}
-        xLabel={j === 0 ? 'x₁' : 'x₂'}
-        yLabel={j === 0 ? 'f₁(x₁)' : 'f₂(x₂)'}
-        height={240}
-      />
+      <Plot x={axes[j][0]} y={axes[j][1]} height={240}>
+        <Curve name="true effect" x={GRID} y={GRID.map((g) => TRUE[j](g) - trueMean)} slot={2} dashed />
+        <Curve name={`f${j === 0 ? '₁' : '₂'} (step function)`} x={xs} y={ys} slot={1} />
+      </Plot>
     )
   }
 
   return (
-    <Interactive
+    <Figure
       title="Cyclic boosting builds an additive model of step functions"
+      state={state}
       caption={
         <>
           Five hundred points from y = sin(2πx₁) + 4(x₂ − ½)² + noise with standard deviation 0.4. Each feature is cut
@@ -121,36 +126,11 @@ export function EbmShapes() {
           ragged sooner. The test error is measured on a thousand fresh points; its floor is the noise, 0.4.
         </>
       }
-      controls={
-        <>
-          <ParamSlider
-            label="rounds"
-            value={logRounds}
-            onChange={setLogRounds}
-            min={0}
-            max={Math.log10(ROUNDS)}
-            step={0.02}
-            format={(v) => String(Math.min(ROUNDS, Math.round(10 ** v)))}
-            withArrows
-          />
-          <ParamChoice
-            label="learning rate ν"
-            value={nu}
-            onChange={setNu}
-            options={[
-              { value: '0.01', label: '0.01' },
-              { value: '0.1', label: '0.1' },
-              { value: '1', label: '1' },
-            ]}
-          />
-          <ParamButton onClick={() => setSeed((s) => s + 1)}>New sample</ParamButton>
-        </>
-      }
-      readout={
+      readouts={
         <>
           <Readout label="rounds" value={String(rounds)} />
-          <Readout label="train RMSE" value={formatNumber(state.trainRmse)} />
-          <Readout label="test RMSE" value={formatNumber(state.testRmse)} />
+          <Readout label="train RMSE" value={formatNumber(current.trainRmse)} />
+          <Readout label="test RMSE" value={formatNumber(current.testRmse)} />
           <Readout
             label="best test RMSE (round)"
             value={`${formatNumber(run.history[bestTest].testRmse)} (${bestTest + 1})`}
@@ -162,6 +142,6 @@ export function EbmShapes() {
         {panel(0)}
         {panel(1)}
       </div>
-    </Interactive>
+    </Figure>
   )
 }

@@ -2,8 +2,7 @@
  * A simulated smart home, the document segmentation of Chen, Diethe and Flach, and a collapsed Gibbs sampler for their
  * one-topic-per-document model with unigrams and (optionally) bigrams.
  */
-import { rng } from '@/lib/math'
-import { categorical, type Rng } from '../_shared/random'
+import { categorical, normal, stream, uniform, type Stream } from 'aifn/foundation/random'
 
 export const LOCATIONS = ['bedroom', 'bathroom', 'kitchen', 'lounge', 'hall'] as const
 
@@ -67,11 +66,11 @@ export type Event = { t: number; word: number; sensor: number; activity: number 
 type Span = { a: number; s: number; e: number }
 
 /** One day's schedule, in minutes after midnight, with seeded jitter. */
-function schedule(r: Rng): Span[] {
-  const j = (sd: number) => sd * r.normal()
+function schedule(r: Stream): Span[] {
+  const j = (sd: number) => sd * normal(r)
   const spans: Span[] = []
   const wake = 420 + j(25)
-  const nightToilet = 120 + r.uniform() * 180
+  const nightToilet = 120 + uniform(r) * 180
   spans.push({ a: 0, s: 0, e: nightToilet }, { a: 1, s: nightToilet, e: nightToilet + 5 })
   spans.push({ a: 0, s: nightToilet + 5, e: wake })
   let t = wake
@@ -83,7 +82,7 @@ function schedule(r: Rng): Span[] {
   add(2, 14 + j(3))
   add(3, 10 + j(2))
   add(4, 20 + j(4))
-  const out = r.uniform() < 0.6
+  const out = uniform(r) < 0.6
   add(5, 540 - t + j(15))
   if (out) {
     add(6, 3)
@@ -103,16 +102,16 @@ function schedule(r: Rng): Span[] {
 }
 
 /** Events of one day: Poisson firings of each activity's sensors; each firing is ON then OFF 0.2–2 minutes later. */
-function simulateDay(r: Rng, offset: number): Event[] {
+function simulateDay(r: Stream, offset: number): Event[] {
   const events: Event[] = []
   for (const { a, s, e } of schedule(r)) {
     for (const [sensor, rate] of RATES[a]) {
-      let t = s - Math.log(1 - r.uniform()) / rate
+      let t = s - Math.log(1 - uniform(r)) / rate
       while (t < e) {
-        const off = Math.min(t + 0.2 + 1.8 * r.uniform(), e)
+        const off = Math.min(t + 0.2 + 1.8 * uniform(r), e)
         events.push({ t: offset + t, word: 2 * sensor, sensor, activity: a })
         events.push({ t: offset + off, word: 2 * sensor + 1, sensor, activity: a })
-        t -= Math.log(1 - r.uniform()) / rate
+        t -= Math.log(1 - uniform(r)) / rate
       }
     }
   }
@@ -122,7 +121,7 @@ function simulateDay(r: Rng, offset: number): Event[] {
 export const DAYS = 14
 
 export function simulate(seed: number): Event[] {
-  const r = rng(seed)
+  const r = stream(seed)
   return Array.from({ length: DAYS }, (_, d) => simulateDay(r, d * 1440)).flat()
 }
 
@@ -166,14 +165,14 @@ export function fit(
   const alpha = 50 / K
   const gamma = 5 / V
   const beta = 5 / V
-  const r = rng(seed)
+  const r = stream(seed)
   const words = docs.map(([s, e]) => events.slice(s, e + 1).map((ev) => ev.word))
   const nk = new Array<number>(K).fill(0)
   const uni = Array.from({ length: K }, () => new Array<number>(V).fill(0))
   const uniTot = new Array<number>(K).fill(0)
   const bi = Array.from({ length: K }, () => new Float64Array(V * V))
   const biTot = Array.from({ length: K }, () => new Float64Array(V))
-  const z = words.map(() => Math.floor(r.uniform() * K))
+  const z = words.map(() => Math.floor(uniform(r) * K))
 
   const apply = (d: number, k: number, sign: number) => {
     nk[k] += sign

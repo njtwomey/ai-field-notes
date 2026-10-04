@@ -1,10 +1,10 @@
+import { normal, stream, uniform } from 'aifn/foundation/random'
+import { normalQuantile } from 'aifn/numerics/special'
 /**
  * Skill-rating arithmetic shared by the skill-rating notes: Gaussian tails with good relative accuracy, the TrueSkill
  * v and w functions, a two-player TrueSkill update, Elo, Bradley–Terry by Zermelo's MM iteration, and simulated
  * match streams. Everything is small enough to recompute on every slider move.
  */
-import { rng } from '@/lib/math'
-import { normalQuantile } from '@/lib/math/special'
 
 /** Standard normal density. */
 export const phi = (z: number) => Math.exp(-0.5 * z * z) / Math.sqrt(2 * Math.PI)
@@ -155,15 +155,15 @@ export type Game = { i: number; j: number; /** 1 if i won, 0 if j won. */ y: num
 
 /** A stream of games between random pairs, with outcomes drawn from the Thurstone model with performance noise β. */
 export function simulateGames(skills: number[], n: number, beta: number, seed: number): Game[] {
-  const r = rng(seed)
+  const r = stream(seed)
   const games: Game[] = []
   const m = skills.length
   for (let g = 0; g < n; g++) {
-    const i = Math.floor(r.uniform() * m)
-    let j = Math.floor(r.uniform() * (m - 1))
+    const i = Math.floor(uniform(r) * m)
+    let j = Math.floor(uniform(r) * (m - 1))
     if (j >= i) j += 1
-    const pi = skills[i] + beta * r.normal()
-    const pj = skills[j] + beta * r.normal()
+    const pi = skills[i] + beta * normal(r)
+    const pj = skills[j] + beta * normal(r)
     games.push({ i, j, y: pi > pj ? 1 : 0 })
   }
   return games

@@ -1,4 +1,4 @@
-/** The registry of `aifn-applied/information/coding`: source codes and code bounds. */
+/** The registry of `aifn-methods/information/coding`: source codes and code bounds. */
 
 import { definer, entries, type AlgorithmInfo, type Entry, type FunctionInfo } from 'aifn/foundation/registry'
 import * as coding from './coding'

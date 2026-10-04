@@ -1,5 +1,5 @@
+import { normal, stream, uniform } from 'aifn/foundation/random'
 /** Small 2-D helpers shared by the approximate nearest-neighbour widgets. */
-import { rng } from '@/lib/math'
 
 export type P = [number, number]
 
@@ -29,21 +29,21 @@ export function rankBy(pts: P[], q: P): number[] {
 
 /** `n` points from a mixture of `clusters` round Gaussian blobs with centres uniform in [-3, 3]². */
 export function blobs(n: number, clusters: number, spread: number, seed: number): P[] {
-  const g = rng(seed)
-  const centres = Array.from({ length: clusters }, (): P => [6 * g.uniform() - 3, 6 * g.uniform() - 3])
+  const g = stream(seed)
+  const centres = Array.from({ length: clusters }, (): P => [6 * uniform(g) - 3, 6 * uniform(g) - 3])
   return Array.from({ length: n }, (): P => {
-    const c = centres[Math.floor(g.uniform() * clusters)]
-    return [c[0] + spread * g.normal(), c[1] + spread * g.normal()]
+    const c = centres[Math.floor(uniform(g) * clusters)]
+    return [c[0] + spread * normal(g), c[1] + spread * normal(g)]
   })
 }
 
 /** Lloyd's algorithm in 2-D from k-means++-style farthest-first seeding; returns centres and assignments. */
 export function kmeans2d(pts: P[], k: number, seed: number, iters = 25): { centres: P[]; assign: number[] } {
-  const g = rng(seed)
-  const centres: P[] = [pts[Math.floor(g.uniform() * pts.length)]]
+  const g = stream(seed)
+  const centres: P[] = [pts[Math.floor(uniform(g) * pts.length)]]
   while (centres.length < k) {
     const d = pts.map((p) => Math.min(...centres.map((c) => dist2(p, c))))
-    let t = g.uniform() * d.reduce((a, b) => a + b, 0)
+    let t = uniform(g) * d.reduce((a, b) => a + b, 0)
     const next = d.findIndex((v) => (t -= v) <= 0)
     centres.push(pts[next === -1 ? pts.length - 1 : next])
   }

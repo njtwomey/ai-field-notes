@@ -14,13 +14,18 @@ updated: 2026-10-03
 import { GrokkingExplorer } from './GrokkingExplorer'
 
 <Definition>
-**Grokking** (or delayed generalisation) is the empirical phenomenon in which a model trained on an algorithmic task quickly reaches zero empirical risk on the training set, suffers near-chance accuracy on unseen test data for a prolonged plateau, and then abruptly transitions to near-perfect generalisation after many thousands of additional gradient steps <Cite id="power2022" />.
+**Grokking** (or delayed generalisation) is the empirical phenomenon in which a model trained on an algorithmic task
+quickly reaches zero empirical risk on the training set, suffers near-chance accuracy on unseen test data for a
+prolonged plateau, and then abruptly transitions to near-perfect generalisation after many thousands of additional
+gradient steps <Cite id="power2022" />.
 
-Mathematically, let $\mathcal{D}_{\text{train}} \subset \mathbb{Z}_p \times \mathbb{Z}_p$ be a fraction of all pairs $(a, b)$ under a modular operation $a \circ b \pmod p$ (for prime $p$). Grokking occurs when:
+Mathematically, let $\mathcal{D}_{\text{train}} \subset \mathbb{Z}_p \times \mathbb{Z}_p$ be a fraction of all pairs
+$(a, b)$ under a modular operation $a \circ b \pmod p$ (for prime $p$). Grokking occurs when:
 $$
 \lim_{t \to t_{\text{mem}}} \mathcal{R}_{\text{train}}(\thetavec_t) = 0 \quad \text{while} \quad \mathcal{R}_{\text{test}}(\thetavec_t) \approx 1 - \frac{1}{p},
 $$
-and for some delayed step $t_{\text{grok}} \gg t_{\text{mem}}$ under $\ell_2$ weight regularisation $\frac{\lambda}{2}\norm{\thetavec}_2^2$:
+and for some delayed step $t_{\text{grok}} \gg t_{\text{mem}}$ under $\ell_2$ weight regularisation
+$\frac{\lambda}{2}\norm{\thetavec}_2^2$:
 $$
 \mathcal{R}_{\text{test}}(\thetavec_t) \to 0 \quad \text{as } t \ge t_{\text{grok}}.
 $$
@@ -28,13 +33,23 @@ $$
 
 ## Intuition
 
-In classical learning theory, training past the point where training error hits zero is considered dangerous: once a model has memorised its training samples, further optimization risks severe overfitting. Early stopping is therefore widely used to halt optimization when validation loss begins to rise.
+In classical learning theory, training past the point where training error hits zero is considered dangerous: once a
+model has memorised its training samples, further optimization risks severe overfitting. Early stopping is therefore
+widely used to halt optimization when validation loss begins to rise.
 
-Grokking turns this conventional wisdom upside down. For clean algorithmic tasks—such as modular addition, polynomial evaluation, or permutation groups—a high-capacity network can fit the training set in two completely different ways:
-1. **Memorisation circuit**: A memorising solution fits each training point independently using high-norm, unstructured parameter vectors. This circuit forms quickly because gradient descent rapidly minimizes cross-entropy on observed pairs without needing global coordination.
-2. **Generalising circuit**: A structured, mathematically symmetric solution (such as computing trigonometric sums in a discrete Fourier basis) that simultaneously solves all $p^2$ pairs. Finding this global structure requires coordinating weights across all units, which takes much longer.
+Grokking turns this conventional wisdom upside down. For clean algorithmic tasks—such as modular addition, polynomial
+evaluation, or permutation groups—a high-capacity network can fit the training set in two completely different ways:
+1. **Memorisation circuit**: A memorising solution fits each training point independently using high-norm, unstructured
+   parameter vectors. This circuit forms quickly because gradient descent rapidly minimizes cross-entropy on observed
+   pairs without needing global coordination.
+2. **Generalising circuit**: A structured, mathematically symmetric solution (such as computing trigonometric sums in a
+   discrete Fourier basis) that simultaneously solves all $p^2$ pairs. Finding this global structure requires
+   coordinating weights across all units, which takes much longer.
 
-Because the generalising circuit requires far smaller parameter magnitudes $\norm{\thetavec}_2$, <NoteLink to="decoupled-weight-decay">weight decay (AdamW)</NoteLink> exerts a continuous inward pressure. As the high-norm memorisation weights slowly decay, the model abruptly "discovers" the compact, symmetrical Fourier mechanism, causing test accuracy to suddenly spike from random guessing to 100%.
+Because the generalising circuit requires far smaller parameter magnitudes $\norm{\thetavec}_2$,
+<NoteLink to="decoupled-weight-decay">weight decay (AdamW)</NoteLink> exerts a continuous inward pressure. As the
+high-norm memorisation weights slowly decay, the model abruptly "discovers" the compact, symmetrical Fourier mechanism,
+causing test accuracy to suddenly spike from random guessing to 100%.
 
 <GrokkingExplorer />
 
@@ -43,36 +58,50 @@ Because the generalising circuit requires far smaller parameter magnitudes $\nor
 Mechanistic interpretability studies <Cite id="nanda2023" /> decompose grokking into three distinct dynamical phases:
 
 ### 1. Memorisation ($t \le t_{\text{mem}}$)
-The model rapidly drives training cross-entropy to zero. Because only a fraction (e.g. 50%) of all $(a, b)$ combinations are observed, the unconstrained weights memorize specific pairs. Test accuracy remains indistinguishable from random guessing ($1/p$).
+The model rapidly drives training cross-entropy to zero. Because only a fraction (e.g. 50%) of all $(a, b)$ combinations
+are observed, the unconstrained weights memorize specific pairs. Test accuracy remains indistinguishable from random
+guessing ($1/p$).
 
 ### 2. Weight norm compression ($t_{\text{mem}} < t < t_{\text{grok}}$)
-Although the training loss is already near zero, training is not finished. Gradient updates continue because decoupled weight decay actively penalises parameter magnitude:
+Although the training loss is already near zero, training is not finished. Gradient updates continue because decoupled
+weight decay actively penalises parameter magnitude:
 $$
 \thetavec_{t+1} = (1 - \eta \lambda)\thetavec_t - \eta \nabla_{\thetavec} L_{\text{task}}(\thetavec_t).
 $$
-This constant penalty shrinks unnecessary weights, pruning random memorisation pathways while slowly reinforcing features that share parameters across many training examples.
+This constant penalty shrinks unnecessary weights, pruning random memorisation pathways while slowly reinforcing
+features that share parameters across many training examples.
 
 ### 3. Generalisation transition ($t \approx t_{\text{grok}}$)
-Once the effective weight norm drops below a critical threshold, the generalising Fourier circuit cleanly out-competes the remnants of the memorisation circuit. Test loss plummets exponentially, and test accuracy transitions to 100% within a narrow window of steps.
+Once the effective weight norm drops below a critical threshold, the generalising Fourier circuit cleanly out-competes
+the remnants of the memorisation circuit. Test loss plummets exponentially, and test accuracy transitions to 100% within
+a narrow window of steps.
 
 ## The Mechanistic Fourier Mechanism
 
 Why does modular arithmetic admit such a compact neural circuit?
 
-Consider modular addition: $(a + b) \pmod p$. In $\mathbb{Z}_p$, translation corresponds to rotation around a circle. By Euler's formula and the angle-sum trigonometric identities:
+Consider modular addition: $(a + b) \pmod p$. In $\mathbb{Z}_p$, translation corresponds to rotation around a circle. By
+Euler's formula and the angle-sum trigonometric identities:
 $$
 \cos\left(\frac{2\pi k (a + b)}{p}\right) = \cos\left(\frac{2\pi k a}{p}\right)\cos\left(\frac{2\pi k b}{p}\right) - \sin\left(\frac{2\pi k a}{p}\right)\sin\left(\frac{2\pi k b}{p}\right).
 $$
 
 A one-hidden-layer network with embedding matrix $\Emat \in \reals^{p \times d}$ can implement this by:
-1. Mapping residue $a$ to its Fourier components $\left[\cos\left(\frac{2\pi k a}{p}\right), \sin\left(\frac{2\pi k a}{p}\right)\right]$ for a small set of frequencies $k \in \{1, \dots, \lfloor p/2 \rfloor\}$.
-2. Concatenating $[\Emat_a, \Emat_b]$ and passing them through quadratic or $\mathrm{ReLU}$ activations to compute the cross-terms $\cos \omega a \cos \omega b$ and $\sin \omega a \sin \omega b$.
-3. Linearly projecting the hidden activations into the output logits to produce the highest score for residue $(a + b) \pmod p$.
+1. Mapping residue $a$ to its Fourier components
+   $\left[\cos\left(\frac{2\pi k a}{p}\right), \sin\left(\frac{2\pi k a}{p}\right)\right]$ for a small set of
+   frequencies $k \in \{1, \dots, \lfloor p/2 \rfloor\}$.
+2. Concatenating $[\Emat_a, \Emat_b]$ and passing them through quadratic or $\mathrm{ReLU}$ activations to compute the
+   cross-terms $\cos \omega a \cos \omega b$ and $\sin \omega a \sin \omega b$.
+3. Linearly projecting the hidden activations into the output logits to produce the highest score for residue
+   $(a + b) \pmod p$.
 
-As visualised in the lower-left projection plot above, the network's learned embedding vectors naturally organise into a circular ring along the dominant Fourier basis vectors once grokking occurs.
+As visualised in the lower-left projection plot above, the network's learned embedding vectors naturally organise into a
+circular ring along the dominant Fourier basis vectors once grokking occurs.
 
 ## Why Early Stopping Fails Here
 
-If early stopping had been applied when validation loss first stalled or began rising (near step 150), training would have halted with 0% validation accuracy, concluding that neural networks are incapable of learning modular addition. 
+If early stopping had been applied when validation loss first stalled or began rising (near step 150), training would
+have halted with 0% validation accuracy, concluding that neural networks are incapable of learning modular addition. 
 
-Grokking demonstrates that in regularised over-parameterised systems, optimization dynamics can undergo late-stage structural transitions that are invisible to short-horizon evaluation metrics.
+Grokking demonstrates that in regularised over-parameterised systems, optimization dynamics can undergo late-stage
+structural transitions that are invisible to short-horizon evaluation metrics.

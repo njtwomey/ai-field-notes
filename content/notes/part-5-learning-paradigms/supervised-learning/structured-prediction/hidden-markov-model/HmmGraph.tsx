@@ -1,8 +1,5 @@
-import { useState } from 'react'
-import { Diagram } from 'aifn-render'
-import { link, variable } from 'aifn-render'
+import { Diagram, Figure, link, setting, useFigureState, variable } from 'aifn-render'
 import type { DiagramSpec } from 'aifn-render'
-import { Interactive, ParamSwitch } from 'aifn-render'
 import { POSITIONS, at, chainEnds, labelNodes, potentialChain } from '../_shared/chain-graph'
 
 function directedChain(): DiagramSpec {
@@ -19,19 +16,21 @@ const POTENTIALS = potentialChain()
 
 /** The HMM as a directed graph, and the same chain in potential form with the observations absorbed. */
 export function HmmGraph() {
-  const [potentials, setPotentials] = useState(false)
-  const g = potentials ? POTENTIALS : DIRECTED
+  const state = useFigureState({
+    potentials: setting(false, 'potential form'),
+  })
+  const g = state.potentials ? POTENTIALS : DIRECTED
   return (
-    <Interactive
+    <Figure
       title="The HMM as a graph"
+      state={state}
       caption={
-        potentials
+        state.potentials
           ? 'Potential form: each square is a factor. The node potential below each state absorbs its emission, and the edge potential between two states is the transition matrix.'
           : 'Each hidden state depends on the one before it and emits one observation. Shaded nodes are observed.'
       }
-      controls={<ParamSwitch label="potential form" checked={potentials} onChange={setPotentials} />}
     >
       <Diagram spec={{ ...g, unit: 48 }} ariaLabel="Hidden Markov model chain" />
-    </Interactive>
+    </Figure>
   )
 }

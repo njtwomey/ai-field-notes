@@ -1,5 +1,5 @@
 /**
- * `aifn-applied/neural/ode`: the neural ODE family on small problems (`odeModel`: NODE, augmented, second-order, the
+ * `aifn-methods/neural/ode`: the neural ODE family on small problems (`odeModel`: NODE, augmented, second-order, the
  * ResNet it discretises; `odeRun` with `reflectionData`), a continuous normalising flow (`cnf`, `cnfRun`) and a latent
  * ODE on irregular trajectories (`trajectories`, `latentOde`, `latentOdeRun`). The differentiable solves, trace
  * estimators and regularisers are core (`aifn/dynamics/ode`, `aifn/nn/layers` `OdeBlock`).

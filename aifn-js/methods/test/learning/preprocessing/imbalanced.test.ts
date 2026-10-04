@@ -11,7 +11,7 @@ import {
   removeTomekLinks,
   smote,
   type Resampled,
-} from 'aifn-applied/learning/preprocessing'
+} from 'aifn-methods/learning/preprocessing'
 import { fixture } from '../../fixtures'
 
 type F = {

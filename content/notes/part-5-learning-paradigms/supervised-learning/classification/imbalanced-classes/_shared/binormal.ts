@@ -1,9 +1,9 @@
+import { normalCdf, normalPdf } from 'aifn/numerics/special'
 /**
  * The binormal model shared by the imbalanced-classes figures. A score s is N(0, 1) for negatives and N(d, 1) for
  * positives, and a fraction π of cases is positive. The posterior is then exactly logistic in s,
  * logit P(y = 1 | s) = logit π + d s − d²/2, so every quantity below is in closed form.
  */
-import { normalCdf, normalPdf } from '@/lib/math/special'
 
 export const logit = (p: number) => Math.log(p / (1 - p))
 export const expit = (z: number) => 1 / (1 + Math.exp(-z))

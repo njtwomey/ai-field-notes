@@ -14,17 +14,8 @@ import {
   useAxis,
 } from 'aifn-render'
 import { stream } from 'aifn/foundation/random'
-import {
-  gaussianRing,
-  moons,
-  pinwheel,
-  spirals,
-} from 'aifn-applied/data/synthetic'
-import {
-  ganRun,
-  type GanCheckpoint,
-  type GanRun,
-} from 'aifn-applied/generative/gan'
+import { gaussianRing, moons, pinwheel, spirals } from 'aifn-methods/data/synthetic'
+import { ganRun, type GanCheckpoint, type GanRun } from 'aifn-methods/generative/gan'
 import type { AdversarialGame } from 'aifn/learning/losses'
 
 const DATASETS = [
@@ -200,57 +191,26 @@ export function GanExplorer() {
       </ControlRow>
 
       <ControlRow label="Training progression">
-        <Player
-          count={Math.max(1, numCheckpoints)}
-          value={currentIdx}
-          onChange={setCheckpointIndex}
-        />
+        <Player count={Math.max(1, numCheckpoints)} value={currentIdx} onChange={setCheckpointIndex} />
       </ControlRow>
 
       <Plots>
         <Plot x={planeAxisX} y={planeAxisY} title="Real data, generator samples & discriminator field">
           {fieldMatrix.length > 0 && gridAxis.length > 0 && (
-            <Raster
-              x={gridAxis}
-              y={gridAxis}
-              z={fieldMatrix}
-              scale="diverging"
-            />
+            <Raster x={gridAxis} y={gridAxis} z={fieldMatrix} scale="diverging" />
           )}
-          <Points
-            x={realPoints.x}
-            y={realPoints.y}
-            slot={0}
-            size={4}
-            thin={true}
-          />
-          <Points
-            x={fakePoints.x}
-            y={fakePoints.y}
-            slot={1}
-            size={5}
-          />
+          <Points x={realPoints.x} y={realPoints.y} slot={0} size={4} thin={true} />
+          <Points x={fakePoints.x} y={fakePoints.y} slot={1} size={5} />
         </Plot>
 
         <Plot x={lossX} y={lossY} title="Adversarial training losses">
-          <Curve
-            x={lossSteps}
-            y={genLoss}
-            slot={0}
-          />
-          <Curve
-            x={lossSteps}
-            y={critLoss}
-            slot={1}
-          />
+          <Curve x={lossSteps} y={genLoss} slot={0} />
+          <Curve x={lossSteps} y={critLoss} slot={1} />
         </Plot>
       </Plots>
 
       <ControlRow label="Diagnostics">
-        <Readout
-          label="Current step"
-          value={currentCheckpoint ? currentCheckpoint.step : '—'}
-        />
+        <Readout label="Current step" value={currentCheckpoint ? currentCheckpoint.step : '—'} />
         <Readout
           label="Modes covered"
           value={
@@ -267,10 +227,7 @@ export function GanExplorer() {
               : '—'
           }
         />
-        <Readout
-          label="Critic steps"
-          value={criticSteps}
-        />
+        <Readout label="Critic steps" value={criticSteps} />
       </ControlRow>
     </Figure>
   )

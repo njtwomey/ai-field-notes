@@ -3,7 +3,8 @@
  * few thousand). Distances are z-normalised Euclidean: d² = 2m(1 − ρ), with ρ the Pearson correlation of the two
  * subsequences. Indices are 0-based.
  */
-import { fft, ifft, nextPowerOfTwo } from '@/lib/dsp'
+import { convolve } from 'aifn/foundation/convolution'
+import { toFlat } from 'aifn/foundation/tensor'
 
 export type Stats = { mean: Float64Array; sd: Float64Array }
 
@@ -43,18 +44,9 @@ export const zDistance = (qt: number, m: number, mi: number, si: number, mj: num
 export function slidingDotProduct(q: ArrayLike<number>, x: ArrayLike<number>): Float64Array {
   const m = q.length
   const n = x.length
-  const size = nextPowerOfTwo(n + m)
-  const reversed = Array.from({ length: m }, (_, k) => q[m - 1 - k])
-  const X = fft(x, size)
-  const Q = fft(reversed, size)
-  const re = new Float64Array(size)
-  const im = new Float64Array(size)
-  for (let k = 0; k < size; k++) {
-    re[k] = X.re[k] * Q.re[k] - X.im[k] * Q.im[k]
-    im[k] = X.re[k] * Q.im[k] + X.im[k] * Q.re[k]
-  }
-  const product = ifft(re, im).re
-  return product.slice(m - 1, n)
+  const reversed = Float64Array.from({ length: m }, (_, k) => q[m - 1 - k])
+  const product = toFlat(convolve(Float64Array.from(x), reversed, { method: 'fft' }))
+  return Float64Array.from(product.slice(m - 1, n))
 }
 
 /** MASS: the distance profile of query q against every subsequence of x. */

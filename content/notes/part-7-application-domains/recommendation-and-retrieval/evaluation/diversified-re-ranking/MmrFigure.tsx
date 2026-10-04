@@ -1,12 +1,12 @@
 import { useMemo } from 'react'
-import { Interactive, ParamSlider, Readout, XYChart, formatNumber, useParam, type XYSeries } from 'aifn-render'
-import { rng } from '@/lib/math'
+import { Curve, Figure, float, formatNumber, int, Plot, Points, Readout, useAxis, useFigureState } from 'aifn-render'
+import { normal, stream } from 'aifn/foundation/random'
 
 type Item = { x: number; y: number; rel: number; group: number }
 
 /** Twenty-four candidate items in a 2-D embedding space, in three taste clusters of decreasing relevance. */
 const ITEMS: Item[] = (() => {
-  const r = rng(5)
+  const r = stream(5)
   const centres = [
     { x: 0.25, y: 0.7, rel: 0.9 },
     { x: 0.75, y: 0.7, rel: 0.7 },
@@ -15,9 +15,9 @@ const ITEMS: Item[] = (() => {
   return Array.from({ length: 24 }, (_, i) => {
     const c = centres[i % 3]
     return {
-      x: c.x + 0.07 * r.normal(),
-      y: c.y + 0.07 * r.normal(),
-      rel: Math.min(1, Math.max(0, c.rel + 0.08 * r.normal())),
+      x: c.x + 0.07 * normal(r),
+      y: c.y + 0.07 * normal(r),
+      rel: Math.min(1, Math.max(0, c.rel + 0.08 * normal(r))),
       group: i % 3,
     }
   })
@@ -47,9 +47,11 @@ function mmr(lambda: number, k: number): number[] {
 
 /** MMR re-ranking of a candidate set: the trade-off weight λ and the list built one pick at a time. */
 export function MmrFigure() {
-  const lambda = useParam(0.7, { min: 0, max: 1, step: 0.05 })
-  const k = useParam(6, { min: 1, max: 10, step: 1 })
-  const chosen = useMemo(() => mmr(lambda.value, k.value), [lambda.value, k.value])
+  const state = useFigureState({
+    lambda: float(0.7, { min: 0, max: 1, step: 0.05, label: 'relevance weight λ' }),
+    k: int(6, { min: 1, max: 10, step: 1, label: 'list length k', format: (v) => String(v) }),
+  })
+  const chosen = useMemo(() => mmr(state.lambda, state.k), [state.lambda, state.k])
 
   const meanRel = chosen.reduce((s, i) => s + ITEMS[i].rel, 0) / chosen.length
   let pairs = 0
@@ -61,10 +63,9 @@ export function MmrFigure() {
     }
   const clusters = new Set(chosen.map((i) => ITEMS[i].group)).size
 
-  const series: XYSeries[] = [
+  const series = [
     {
       name: 'candidates',
-      type: 'scatter',
       x: ITEMS.map((it) => it.x),
       y: ITEMS.map((it) => it.y),
       group: ITEMS.map((it) => it.group),
@@ -72,24 +73,21 @@ export function MmrFigure() {
     },
     {
       name: 'selected, in order',
-      type: 'line',
       x: chosen.map((i) => ITEMS[i].x),
       y: chosen.map((i) => ITEMS[i].y),
       emphasis: true,
     },
-  ]
+  ] as const
 
+  const xAxis = useAxis({ label: 'embedding dimension 1', range: [0, 1] })
+  const yAxis = useAxis({ label: 'embedding dimension 2', range: [0, 1], equal: xAxis })
   return (
-    <Interactive
+    <Figure
       title="Maximal marginal relevance"
+      state={state}
       caption="Twenty-four candidates in an embedding space, in three clusters; cluster A is the most relevant. MMR adds one item at a time, choosing the item with the best trade-off between relevance and similarity to the items already chosen. The ink path joins the selected items in the order chosen. With λ = 1 the list is the top items by relevance, all from cluster A; lowering λ pulls in items from the other clusters. Step the list length with the arrows."
-      controls={
-        <>
-          <ParamSlider label="relevance weight λ" param={lambda} />
-          <ParamSlider label="list length k" param={k} format={(v) => String(v)} withArrows />
-        </>
-      }
-      readout={
+
+      readouts={
         <>
           <Readout label="mean relevance" value={formatNumber(meanRel)} />
           <Readout label="intra-list diversity" value={pairs ? formatNumber(dist / pairs) : '–'} />
@@ -97,14 +95,10 @@ export function MmrFigure() {
         </>
       }
     >
-      <XYChart
-        series={series}
-        xLabel="embedding dimension 1"
-        yLabel="embedding dimension 2"
-        xRange={[0, 1]}
-        yRange={[0, 1]}
-        equalAspect
-      />
-    </Interactive>
+      <Plot x={xAxis} y={yAxis}>
+        <Points {...series[0]} />
+        <Curve {...series[1]} />
+      </Plot>
+    </Figure>
   )
 }

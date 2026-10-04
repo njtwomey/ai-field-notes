@@ -3,7 +3,7 @@
  * (Rabiner 1989, "A tutorial on hidden Markov models", Proc. IEEE 77(2), §III; Durbin, Eddy, Krogh & Mitchison 1998,
  * "Biological Sequence Analysis", ch. 3), log-space sum-product and max-product on a chain of log-potentials (which
  * the linear-chain CRF runs), and chain-shaped discrete factor graphs. Named chain models (the HMM, the CRF) are
- * applications in `aifn-applied/inference/sequence-models`; they build the potentials these engines take.
+ * applications in `aifn-methods/inference/sequence-models`; they build the potentials these engines take.
  *
  * Notation (Twomey, Diethe & Flach 2016): positions n = 0 … N − 1, states k = 0 … K − 1. α_n is the forward message
  * into position n and β_n the backward message; the posterior marginal is ∝ α_n ⊙ ψ_n ⊙ β_n with ψ_n the node

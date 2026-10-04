@@ -1,6 +1,4 @@
-import { Interactive } from 'aifn-render'
-import { Diagram } from 'aifn-render'
-import { op } from 'aifn-render'
+import { Diagram, Figure, op } from 'aifn-render'
 import type { DiagramNode, DiagramSpec } from 'aifn-render'
 
 const box = (id: string, x: number, y: number, label: string, tone: number, w = 2.3): DiagramNode => ({
@@ -101,11 +99,11 @@ const spec: DiagramSpec = {
 /** Serial and parallel pre-norm blocks side by side. */
 export function BlockLayouts() {
   return (
-    <Interactive
+    <Figure
       title="Serial and parallel blocks"
       caption="Left: the usual pre-norm block, in which the feed-forward network reads the stream after attention has written to it. Right: the parallel block, in which both sublayers read the same normalised input and their outputs are added to the stream together. The parallel block has one sequential step per layer instead of two."
     >
       <Diagram spec={spec} ariaLabel="Serial and parallel transformer blocks" />
-    </Interactive>
+    </Figure>
   )
 }

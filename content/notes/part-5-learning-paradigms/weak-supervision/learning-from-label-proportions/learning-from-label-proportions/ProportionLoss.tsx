@@ -1,6 +1,18 @@
 import { useMemo } from 'react'
-import { Interactive, ParamSlider, Readout, XYChart, formatNumber, useParam, type XYSeries } from 'aifn-render'
-import { rng, sigmoid } from '@/lib/math'
+import {
+  Figure,
+  float,
+  formatNumber,
+  int,
+  Plot,
+  Readout,
+  seriesLayers,
+  type SeriesSpec,
+  useAxis,
+  useFigureState,
+} from 'aifn-render'
+import { normal, stream, uniform } from 'aifn/foundation/random'
+import { sigmoid } from 'aifn/numerics/special'
 
 const TOTAL = 480
 const MEAN: [number, number] = [0.9, 0.4]
@@ -16,18 +28,18 @@ type Data = { x1: number[]; x2: number[]; y: number[]; bag: number[]; pi: number
  * uniform draw, alternating so the classes stay balanced overall.
  */
 function makeBags(size: number, spread: number, seed: number): Data {
-  const g = rng(seed)
+  const g = stream(seed)
   const bags = Math.max(2, Math.floor(TOTAL / size))
   const d: Data = { x1: [], x2: [], y: [], bag: [], pi: [] }
   for (let k = 0; k < bags; k++) {
-    const offset = spread * g.uniform() * (k % 2 === 0 ? 1 : -1)
+    const offset = spread * uniform(g) * (k % 2 === 0 ? 1 : -1)
     const positives = Math.round((0.5 + offset) * size)
     d.pi.push(positives / size)
     for (let i = 0; i < size; i++) {
       const label = i < positives ? 1 : 0
       const sign = label === 1 ? 1 : -1
-      d.x1.push(sign * MEAN[0] + g.normal())
-      d.x2.push(sign * MEAN[1] + g.normal())
+      d.x1.push(sign * MEAN[0] + normal(g))
+      d.x2.push(sign * MEAN[1] + normal(g))
       d.y.push(label)
       d.bag.push(k)
     }
@@ -66,7 +78,7 @@ const accuracy = (d: Data, w: Weights) =>
   d.y.filter((y, i) => (w[0] * d.x1[i] + w[1] * d.x2[i] + w[2] > 0 ? 1 : 0) === y).length / d.y.length
 
 /** The line w₁x₁ + w₂x₂ + b = 0 across the plot, or nothing when the weights are all zero. */
-function boundary(name: string, w: Weights, slot: number): XYSeries[] {
+function boundary(name: string, w: Weights, slot: number): SeriesSpec[] {
   if (Math.abs(w[1]) < 1e-9 && Math.abs(w[0]) < 1e-9) return []
   if (Math.abs(w[1]) < 1e-9) {
     const x = -w[2] / w[0]
@@ -81,11 +93,13 @@ function boundary(name: string, w: Weights, slot: number): XYSeries[] {
  * instance given its bag's proportion as a soft label, and with the true instance labels.
  */
 export function ProportionLoss() {
-  const size = useParam(16, { min: 4, max: 96, step: 4 })
-  const spread = useParam(0.4, { min: 0, max: 0.5, step: 0.05 })
-  const seed = useParam(2, { min: 1, max: 20, step: 1 })
+  const state = useFigureState({
+    size: int(16, { min: 4, max: 96, step: 4, label: 'bag size', format: (v) => String(v) }),
+    spread: float(0.4, { min: 0, max: 0.5, step: 0.05, label: 'spread of proportions δ' }),
+    seed: int(2, { min: 1, max: 20, step: 1, label: 'seed', format: (v) => String(v) }),
+  })
 
-  const data = useMemo(() => makeBags(size.value, spread.value, seed.value), [size.value, spread.value, seed.value])
+  const data = useMemo(() => makeBags(state.size, state.spread, state.seed), [state.size, state.spread, state.seed])
 
   const r = useMemo(() => {
     const bags = data.pi.length
@@ -121,7 +135,7 @@ export function ProportionLoss() {
   const pred = data.x1.map((_, i) =>
     r.proportion[0] * data.x1[i] + r.proportion[1] * data.x2[i] + r.proportion[2] > 0 ? 1 : 0,
   )
-  const series: XYSeries[] = [
+  const series: SeriesSpec[] = [
     {
       name: 'instances',
       type: 'scatter',
@@ -136,18 +150,15 @@ export function ProportionLoss() {
   ]
   const errors = pred.filter((v, i) => v !== data.y[i]).length
 
+  const xAxis = useAxis({ label: 'x₁', range: X_RANGE })
+  const yAxis = useAxis({ label: 'x₂', range: Y_RANGE, equal: xAxis })
   return (
-    <Interactive
+    <Figure
       title="Recovering instance labels from bag proportions"
+      state={state}
       caption="Two Gaussian classes are split into bags of equal size. Each bag reveals only its fraction of class 1. Three logistic regressions are fitted by gradient descent: one matches each bag's mean predicted probability to its proportion (the proportion loss), one gives every instance its bag's proportion as a soft label, and one sees the true labels. When the proportions differ across bags, the proportion loss recovers the oracle's boundary and nearly its Brier score. The soft-label fit finds a similar direction here, because the classes are symmetric, but its probabilities are pulled towards the bag proportions, so its Brier score is worse. As the spread of proportions shrinks, the bags carry less information and the proportion-loss fit weakens; at zero spread every bag says one half, the loss is flat at the starting point and no boundary is learnt."
-      controls={
-        <>
-          <ParamSlider label="bag size" param={size} format={(v) => String(v)} />
-          <ParamSlider label="spread of proportions δ" param={spread} />
-          <ParamSlider label="seed" param={seed} format={(v) => String(v)} />
-        </>
-      }
-      readout={
+
+      readouts={
         <>
           <Readout label="bags" value={String(r.bags)} />
           <Readout
@@ -162,15 +173,9 @@ export function ProportionLoss() {
         </>
       }
     >
-      <XYChart
-        series={series}
-        xLabel="x₁"
-        yLabel="x₂"
-        xRange={X_RANGE}
-        yRange={Y_RANGE}
-        equalAspect
-        ariaLabel="Scatter of instances by true class with three fitted decision boundaries"
-      />
-    </Interactive>
+      <Plot x={xAxis} y={yAxis} ariaLabel={'Scatter of instances by true class with three fitted decision boundaries'}>
+        {seriesLayers(series)}
+      </Plot>
+    </Figure>
   )
 }

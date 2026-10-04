@@ -1,15 +1,19 @@
-import { useMemo, useState } from 'react'
+import { useMemo } from 'react'
 import {
-  Interactive,
-  ParamChoice,
-  ParamSlider,
-  Readout,
-  XYChart,
+  choice,
+  Curve,
+  Figure,
   formatNumber,
-  useParam,
-  type XYSeries,
+  int,
+  Plot,
+  Points,
+  Readout,
+  seriesLayers,
+  type SeriesSpec,
+  useAxis,
+  useFigureState,
 } from 'aifn-render'
-import { rng } from '@/lib/math'
+import { normal, stream, uniform } from 'aifn/foundation/random'
 
 const N = 480
 
@@ -22,13 +26,13 @@ type Scenario = 'motif' | 'discord'
  * stretch is unusual, and in a repeating signal every stretch is a motif.
  */
 function series(scenario: Scenario, seed: number) {
-  const g = rng(seed)
+  const g = stream(seed)
   if (scenario === 'motif') {
     const x: number[] = []
     let level = 0
     for (let t = 0; t < N; t++) {
-      level += 0.02 * g.normal()
-      x.push(level + 0.4 * g.normal())
+      level += 0.02 * normal(g)
+      x.push(level + 0.4 * normal(g))
     }
     const shape = Array.from({ length: 40 }, (_, k) => {
       const u = k / 40
@@ -52,11 +56,11 @@ function series(scenario: Scenario, seed: number) {
   const x: number[] = []
   let abnormalAt = 0
   for (let i = 0; x.length < N; i++) {
-    const length = 40 + Math.floor(g.uniform() * 7) - 3
+    const length = 40 + Math.floor(uniform(g) * 7) - 3
     if (i === 6) abnormalAt = x.length
     x.push(...beat(length, i === 6))
   }
-  return { x: x.slice(0, N).map((v) => v + 0.03 * g.normal()), planted: [abnormalAt] }
+  return { x: x.slice(0, N).map((v) => v + 0.03 * normal(g)), planted: [abnormalAt] }
 }
 
 /** Naive matrix profile, O(n² m): fine at this size, and the definition is visible in the code. */
@@ -100,13 +104,22 @@ function matrixProfile(x: number[], m: number) {
 }
 
 export function MatrixProfileExplorer() {
-  const [scenario, setScenario] = useState<Scenario>('motif')
-  const m = useParam(40, { min: 8, max: 80, step: 4 })
-  const seed = useParam(3, { min: 1, max: 20, step: 1 })
+  const state = useFigureState({
+    scenario: choice<Scenario>(
+      [
+        { value: 'motif', label: 'pattern planted twice' },
+        { value: 'discord', label: 'heartbeat with one abnormal beat' },
+      ],
+      'motif',
+      { label: 'series' },
+    ),
+    m: int(40, { min: 8, max: 80, step: 4, label: 'subsequence length m', format: (v) => String(v) }),
+    seed: int(3, { min: 1, max: 20, step: 1, label: 'seed', format: (v) => String(v) }),
+  })
 
   const r = useMemo(() => {
-    const s = series(scenario, seed.value)
-    const { profile, index } = matrixProfile(s.x, m.value)
+    const s = series(state.scenario, state.seed)
+    const { profile, index } = matrixProfile(s.x, state.m)
     let motif = 0
     let discord = 0
     profile.forEach((v, i) => {
@@ -114,56 +127,46 @@ export function MatrixProfileExplorer() {
       if (v > profile[discord]) discord = i
     })
     return { ...s, profile, index, motif, pair: index[motif], discord }
-  }, [scenario, m.value, seed.value])
+  }, [state.scenario, state.m, state.seed])
 
   const t = r.x.map((_, i) => i)
-  const span = (start: number) => Array.from({ length: m.value }, (_, k) => start + k)
-  const highlight = (name: string, start: number, slot: number): XYSeries => ({
+  const span = (start: number) => Array.from({ length: state.m }, (_, k) => start + k)
+  const highlight = (name: string, start: number, slot: number): SeriesSpec => ({
     name,
     type: 'line',
     x: span(start),
     y: span(start).map((i) => r.x[i]),
     slot,
   })
-  const top: XYSeries[] = [
+  const top: SeriesSpec[] = [
     { name: 'series', type: 'line', x: t, y: r.x, muted: true },
     highlight('motif pair', r.motif, 1),
     highlight('motif pair', r.pair, 1),
     highlight('discord', r.discord, 2),
   ]
-  const bottom: XYSeries[] = [
-    { name: 'matrix profile', type: 'line', x: r.profile.map((_, i) => i), y: r.profile, slot: 0 },
+  const bottom = [
+    { name: 'matrix profile', x: r.profile.map((_, i) => i), y: r.profile, slot: 0 },
     {
       name: 'motif (minimum)',
-      type: 'scatter',
       x: [r.motif, r.pair],
       y: [r.profile[r.motif], r.profile[r.pair]],
       slot: 1,
     },
-    { name: 'discord (maximum)', type: 'scatter', x: [r.discord], y: [r.profile[r.discord]], slot: 2 },
-  ]
+    { name: 'discord (maximum)', x: [r.discord], y: [r.profile[r.discord]], slot: 2 },
+  ] as const
 
+  const xAxis = useAxis({ label: 'time', hold: 'union' })
+  const yAxis = useAxis({ label: 'x', hold: 'union' })
+  const xAxis2 = useAxis({ label: 'subsequence start i', hold: 'union' })
+  const yAxis2 = useAxis({ label: 'P[i]', hold: 'union' })
   return (
-    <Interactive
+    <Figure
       title="Motifs and discords from one profile"
+      state={state}
       caption="Top: a time series. Bottom: its matrix profile, the distance from each length-m subsequence to its nearest non-overlapping neighbour after z-normalisation. With a pattern planted twice in noise, the two lowest points of the profile find the pair: the top motif. With a repeating heartbeat-like signal, every normal beat has a close neighbour, so the one abnormal beat is the highest point: the top discord. The window may land a few samples off the planted start when the pattern has quiet edges. Change m: too short and chance fragments match, far too long and the pattern is diluted."
-      controls={
-        <>
-          <ParamChoice
-            label="series"
-            value={scenario}
-            onChange={setScenario}
-            options={[
-              { value: 'motif', label: 'pattern planted twice' },
-              { value: 'discord', label: 'heartbeat with one abnormal beat' },
-            ]}
-          />
-          <ParamSlider label="subsequence length m" param={m} format={(v) => String(v)} withArrows />
-          <ParamSlider label="seed" param={seed} format={(v) => String(v)} withArrows />
-        </>
-      }
-      readout={
-        scenario === 'motif' ? (
+
+      readouts={
+        state.scenario === 'motif' ? (
           <>
             <Readout label="motif pair found at" value={`${Math.min(r.motif, r.pair)}, ${Math.max(r.motif, r.pair)}`} />
             <Readout label="pattern planted at" value={r.planted.join(', ')} />
@@ -179,9 +182,15 @@ export function MatrixProfileExplorer() {
       }
     >
       <div className="space-y-4">
-        <XYChart series={top} xLabel="time" yLabel="x" height={220} />
-        <XYChart series={bottom} xLabel="subsequence start i" yLabel="P[i]" height={220} />
+        <Plot x={xAxis} y={yAxis} height={220}>
+          {seriesLayers(top)}
+        </Plot>
+        <Plot x={xAxis2} y={yAxis2} height={220}>
+          <Curve {...bottom[0]} />
+          <Points {...bottom[1]} />
+          <Points {...bottom[2]} />
+        </Plot>
       </div>
-    </Interactive>
+    </Figure>
   )
 }

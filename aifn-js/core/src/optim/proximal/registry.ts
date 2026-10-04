@@ -58,7 +58,8 @@ algorithm(
   {
     key: 'alternatingProjectionsSteps',
     name: 'Alternating projections',
-    summary: 'Cycle through the projections onto convex sets until the point stops moving: a point of their intersection.',
+    summary:
+      'Cycle through the projections onto convex sets until the point stops moving: a point of their intersection.',
     problem: 'system',
     state: { iterate: 'x', flags: ['converged'] },
     notes: ['label-propagation-for-label-proportions'],

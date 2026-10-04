@@ -1,4 +1,4 @@
-/** The Bayes point machine by expectation propagation, part of `aifn-applied/inference/classifier-models`. */
+/** The Bayes point machine by expectation propagation, part of `aifn-methods/inference/classifier-models`. */
 
 import type { Status } from 'aifn/foundation/contracts'
 import { normalCdf } from 'aifn/numerics/special'

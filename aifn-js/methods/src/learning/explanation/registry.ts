@@ -1,4 +1,4 @@
-/** The registry of `aifn-applied/learning/explanation`: studies of explanation methods. */
+/** The registry of `aifn-methods/learning/explanation`: studies of explanation methods. */
 
 import { definer, entries, type Entry, type FunctionInfo } from 'aifn/foundation/registry'
 import * as valuation from './valuation'

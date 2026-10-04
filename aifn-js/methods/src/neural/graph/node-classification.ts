@@ -129,7 +129,7 @@ export function nodeClassificationTraining(
 export interface NodeClassificationOptions {
   /**
    * The graph, the node features x [V, F] and the node classes y [V] (every node's, for the accuracy curves; only
-   * `train`'s are used to fit), e.g. `aifn-applied/data/real`'s `karateClub()`.
+   * `train`'s are used to fit), e.g. `aifn-methods/data/real`'s `karateClub()`.
    */
   data: { graph: Graph; x: Tensor; y?: Tensor }
   /** The labelled nodes. */

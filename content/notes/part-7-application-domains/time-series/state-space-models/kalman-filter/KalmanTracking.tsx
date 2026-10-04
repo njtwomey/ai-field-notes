@@ -1,4 +1,4 @@
-import { constantVelocityModel } from 'aifn-applied/timeseries'
+import { constantVelocityModel } from 'aifn-methods/timeseries'
 import {
   kalmanFilter,
   kalmanFilterSteps,
@@ -275,14 +275,7 @@ export function KalmanTracking() {
             <Plot x={px} y={py} renderer="canvas">
               <Curve name="truth" x={tracks.truth.x} y={tracks.truth.y} muted dashed />
               <Points name="measurements" x={tracks.seen.x} y={tracks.seen.y} slot={0} live />
-              <Curve
-                name="filter"
-                x={tracks.filter.x}
-                y={tracks.filter.y}
-                slot={1}
-                thin={smoothing}
-                live
-              />
+              <Curve name="filter" x={tracks.filter.x} y={tracks.filter.y} slot={1} thin={smoothing} live />
               {tracks.ahead.x.length > 0 && <Points name="to come" x={tracks.ahead.x} y={tracks.ahead.y} muted />}
               {ellipses.prior && <Curve name="prior 95%" {...ellipses.prior} slot={1} dashed />}
               {ellipses.predict && (

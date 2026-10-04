@@ -1,10 +1,10 @@
 /**
- * `aifn-applied/neural/ode-mixtures`: neural ODEs with stochastic vector field mixtures (Twomey, Kozłowski &
+ * `aifn-methods/neural/ode-mixtures`: neural ODEs with stochastic vector field mixtures (Twomey, Kozłowski &
  * Santos-Rodríguez, 2020, ECAI). `svfm` (VF and SVF units, K components, pick and stick or forward filtering, the
  * moments carried over the grid), the losses (`svfmObjective`: MDLoss, TLoss, VLoss, FLoss), realised paths and the
  * per-instance work of solving them (`samplePaths`, `instanceWork`), the streamed run (`svfmRun`) and the
  * forward-evaluation study (`nfeStudy`). The row-wise adaptive solver is core (`aifn/dynamics/ode`
- * `dormandPrinceRows`); the datasets are `aifn-applied/data` (`odeFailureCase`, `floorplanWalks`).
+ * `dormandPrinceRows`); the datasets are `aifn-methods/data` (`odeFailureCase`, `floorplanWalks`).
  */
 
 export {

@@ -1,15 +1,18 @@
 import { useMemo, useState } from 'react'
 import {
-  Interactive,
-  ParamSlider,
-  Readout,
-  XYChart,
+  Figure,
+  float,
   formatNumber,
-  useParam,
-  type Handle,
-  type XYSeries,
+  Handle,
+  int,
+  Plot,
+  Readout,
+  seriesLayers,
+  type SeriesSpec,
+  useAxis,
+  useFigureState,
 } from 'aifn-render'
-import { rng } from '@/lib/math'
+import { stream, uniform } from 'aifn/foundation/random'
 
 const HORIZON = 400
 const START_MEANS = [0.6, 0.45, 0.3]
@@ -24,7 +27,7 @@ type Trajectory = {
 /** One run of the index policy μ̂ + √(c ln t / n) on Bernoulli arms; every arm is pulled once first. */
 function runUcb(means: number[], c: number, seed: number): Trajectory {
   const k = means.length
-  const r = rng(seed)
+  const r = stream(seed)
   const n = new Array<number>(k).fill(0)
   const s = new Array<number>(k).fill(0)
   const out: Trajectory = { n: [n.slice()], s: [s.slice()] }
@@ -38,7 +41,7 @@ function runUcb(means: number[], c: number, seed: number): Trajectory {
       }
     }
     // Draw a reward for every arm each round and keep the pulled one, so moving one arm's mean leaves the others' draws.
-    const draws = means.map((m) => (r.uniform() < m ? 1 : 0))
+    const draws = means.map((m) => (uniform(r) < m ? 1 : 0))
     n[arm] += 1
     s[arm] += draws[arm]
     out.n.push(n.slice())
@@ -53,34 +56,36 @@ function runUcb(means: number[], c: number, seed: number): Trajectory {
  */
 export function UcbStepper() {
   const [means, setMeans] = useState(START_MEANS)
-  const seed = useParam(3, { min: 1, max: 40, step: 1 })
-  const c = useParam(2, { min: 0.05, max: 6, step: 0.05 })
-  const round = useParam(60, { min: 3, max: HORIZON, step: 1 })
+  const state = useFigureState({
+    round: int(60, { min: 3, max: HORIZON, step: 1, label: 'round t', format: (v) => String(v) }),
+    c: float(2, { min: 0.05, max: 6, step: 0.05, label: 'exploration constant c (UCB1: 2)' }),
+    seed: int(3, { min: 1, max: 40, step: 1, label: 'seed', format: (v) => String(v) }),
+  })
 
   const meansKey = means.join(',')
   const traj = useMemo(
-    () => runUcb(meansKey.split(',').map(Number), c.value, seed.value),
-    [meansKey, c.value, seed.value],
+    () => runUcb(meansKey.split(',').map(Number), state.c, state.seed),
+    [meansKey, state.c, state.seed],
   )
-  const t = round.value
+  const t = state.round
   const n = traj.n[t]
   const s = traj.s[t]
   const next = t + 1
-  const radius = n.map((v) => Math.sqrt((c.value * Math.log(next)) / v))
+  const radius = n.map((v) => Math.sqrt((state.c * Math.log(next)) / v))
   const est = n.map((v, i) => s[i] / v)
   const index = est.map((m, i) => m + radius[i])
   const chosen = index.indexOf(Math.max(...index))
   const best = Math.max(...means)
 
-  const armSeries: XYSeries[] = [
-    ...means.map((_, i): XYSeries => ({
+  const armSeries: SeriesSpec[] = [
+    ...means.map((_, i): SeriesSpec => ({
       name: `arm ${i + 1}: interval`,
       type: 'line',
       x: [i + 1, i + 1],
       y: [est[i] - radius[i], index[i]],
       slot: i,
     })),
-    ...means.map((_, i): XYSeries => ({
+    ...means.map((_, i): SeriesSpec => ({
       name: `arm ${i + 1}: index and mean`,
       type: 'scatter',
       x: [i + 1, i + 1],
@@ -98,22 +103,22 @@ export function UcbStepper() {
   }))
 
   const ts = useMemo(() => Array.from({ length: HORIZON }, (_, i) => i + 1), [])
-  const countSeries: XYSeries[] = [
-    ...means.map((_, i): XYSeries => ({
+  const countSeries: SeriesSpec[] = [
+    ...means.map((_, i): SeriesSpec => ({
       name: `N${i + 1}(t)`,
       type: 'line',
       x: ts,
       y: ts.map((v) => traj.n[v][i]),
       slot: i,
     })),
-    ...means.flatMap((m, i): XYSeries[] =>
+    ...means.flatMap((m, i): SeriesSpec[] =>
       m < best
         ? [
             {
               name: `c ln t / Δ² for arm ${i + 1}`,
               type: 'line',
               x: ts,
-              y: ts.map((v) => (c.value * Math.log(v)) / (best - m) ** 2),
+              y: ts.map((v) => (state.c * Math.log(v)) / (best - m) ** 2),
               slot: i,
               dashed: true,
             },
@@ -122,18 +127,17 @@ export function UcbStepper() {
     ),
   ]
 
+  const xAxis = useAxis({ label: 'arm', range: [0.5, 3.5] })
+  const yAxis = useAxis({ label: 'reward', range: [0, 1.6] })
+  const xAxis2 = useAxis({ label: 'round t', range: [0, HORIZON] })
+  const yAxis2 = useAxis({ label: 'pulls', range: [0, undefined], hold: 'union' })
   return (
-    <Interactive
+    <Figure
       title="UCB1 round by round"
+      state={state}
       caption="Three Bernoulli arms whose true means are the draggable diamonds. Left: after t rounds, each arm's empirical mean (lower dot) and index (upper dot), the top of a confidence interval of half-width √(c ln t / N). The arm with the highest index is pulled next. Right: pull counts; drag the vertical line to move through the rounds. A suboptimal arm's count tracks the dashed curve c ln t / Δ², the count at which its index falls below the best mean. With c near 0 the policy is greedy and can lock onto a wrong arm; with large c it explores for longer."
-      controls={
-        <>
-          <ParamSlider label="round t" param={round} format={(v) => String(v)} withArrows />
-          <ParamSlider label="exploration constant c (UCB1: 2)" param={c} />
-          <ParamSlider label="seed" param={seed} format={(v) => String(v)} withArrows />
-        </>
-      }
-      readout={
+
+      readouts={
         <>
           {index.map((v, i) => (
             <Readout
@@ -147,23 +151,17 @@ export function UcbStepper() {
       }
     >
       <div className="grid gap-4 md:grid-cols-[1fr_2fr]">
-        <XYChart
-          series={armSeries}
-          xLabel="arm"
-          yLabel="reward"
-          xRange={[0.5, 3.5]}
-          yRange={[0, 1.6]}
-          handles={handles}
-        />
-        <XYChart
-          series={countSeries}
-          xLabel="round t"
-          yLabel="pulls"
-          xRange={[0, HORIZON]}
-          yRange={[0, undefined]}
-          handles={[{ kind: 'x', at: t, label: 'round', onDrag: (x) => round.set(Math.round(x)) }]}
-        />
+        <Plot x={xAxis} y={yAxis}>
+          {seriesLayers(armSeries)}
+          {(handles ?? []).map((h, i) => (
+            <Handle key={i} {...h} />
+          ))}
+        </Plot>
+        <Plot x={xAxis2} y={yAxis2}>
+          {seriesLayers(countSeries)}
+          <Handle kind="x" at={t} label="round" onDrag={(x) => state.set('round', Math.round(x))} />
+        </Plot>
       </div>
-    </Interactive>
+    </Figure>
   )
 }

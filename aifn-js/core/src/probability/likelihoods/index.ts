@@ -14,7 +14,7 @@
  * - `linkRegistry` and `likelihoodRegistry`: the links and families with their metadata.
  *
  * All are compositions of primitives, so they are differentiable. The fitting machinery (IRLS, smoothing selection)
- * stays in `aifn-applied/learning/generalised`.
+ * stays in `aifn-methods/learning/generalised`.
  */
 
 export {

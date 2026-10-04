@@ -24,8 +24,29 @@
 import type { MatrixLike, Size, Status } from 'aifn/foundation/contracts'
 import { valueAndGrad } from 'aifn/foundation/autodiff'
 import { DomainError, ShapeError } from 'aifn/foundation/errors'
-import { child, integers, normal, permutation, stream as makeStream, uniform, type Stream } from 'aifn/foundation/random'
-import { dense, fromData, logsumexp, matmul, mul, reshape, sub, sum, toFlat, unwrap, type Tensor, type Value } from 'aifn/foundation/tensor'
+import {
+  child,
+  integers,
+  normal,
+  permutation,
+  stream as makeStream,
+  uniform,
+  type Stream,
+} from 'aifn/foundation/random'
+import {
+  dense,
+  fromData,
+  logsumexp,
+  matmul,
+  mul,
+  reshape,
+  sub,
+  sum,
+  toFlat,
+  unwrap,
+  type Tensor,
+  type Value,
+} from 'aifn/foundation/tensor'
 import type { Algorithm } from 'aifn/foundation/trace'
 import { pointAffinity, randomWalkMatrix, spreadingResolvent } from 'aifn/graph/propagation'
 import { lstsq } from 'aifn/numerics/linalg'
@@ -60,7 +81,8 @@ export function readBags(bags: ArrayLike<number>, proportions: MatrixLike, where
   const sizes = new Float64Array(B)
   for (let i = 0; i < b.length; i++) {
     if (b[i] === -1) continue
-    if (!(b[i] >= 0 && b[i] < B)) throw new DomainError(where, `${where}: bag ${b[i]} of point ${i} is not −1 or in 0 … ${B - 1}`)
+    if (!(b[i] >= 0 && b[i] < B))
+      throw new DomainError(where, `${where}: bag ${b[i]} of point ${i} is not −1 or in 0 … ${B - 1}`)
     sizes[b[i]]++
   }
   const pi = new Float64Array(B * C)
@@ -78,7 +100,12 @@ export function readBags(bags: ArrayLike<number>, proportions: MatrixLike, where
 }
 
 /** The class proportions [B, C] of bags given each point's true label: what an LLP oracle reveals. */
-export function bagProportionsOf(bags: ArrayLike<number>, labels: ArrayLike<number>, bagCount: Size, classes: Size): Tensor {
+export function bagProportionsOf(
+  bags: ArrayLike<number>,
+  labels: ArrayLike<number>,
+  bagCount: Size,
+  classes: Size,
+): Tensor {
   const out = new Float64Array(bagCount * classes)
   const size = new Float64Array(bagCount)
   for (let i = 0; i < bags.length; i++) {
@@ -111,8 +138,10 @@ export function bagsByProportion(
   const K = P.n
   const n = labels.length
   const sizes = options.sizes ?? Array.from({ length: B }, (_, k) => Math.floor(n / B) + (k < n % B ? 1 : 0))
-  if (sizes.length !== B) throw new ShapeError('bagsByProportion', `bagsByProportion: ${sizes.length} sizes for ${B} bags`)
-  if (sizes.reduce((a, v) => a + v, 0) > n) throw new DomainError('bagsByProportion', 'bagsByProportion: the bags hold more points than there are')
+  if (sizes.length !== B)
+    throw new ShapeError('bagsByProportion', `bagsByProportion: ${sizes.length} sizes for ${B} bags`)
+  if (sizes.reduce((a, v) => a + v, 0) > n)
+    throw new DomainError('bagsByProportion', 'bagsByProportion: the bags hold more points than there are')
   const pools = Array.from({ length: K }, (_, c) => {
     const members = Array.from({ length: n }, (_, i) => i).filter((i) => labels[i] === c)
     const order = toFlat(permutation(child(s, 'class', c), members.length))
@@ -202,7 +231,8 @@ function argmaxRows(F: Float64Array, n: number, C: number): Int32Array {
 function bagMass(F: Float64Array, info: BagProportions): Float64Array {
   const { bags, bagCount: B, classes: C } = info
   const mass = new Float64Array(B * C)
-  for (let i = 0; i < bags.length; i++) if (bags[i] >= 0) for (let c = 0; c < C; c++) mass[bags[i] * C + c] += F[i * C + c]
+  for (let i = 0; i < bags.length; i++)
+    if (bags[i] >= 0) for (let c = 0; c < C; c++) mass[bags[i] * C + c] += F[i * C + c]
   return mass
 }
 
@@ -237,7 +267,8 @@ export function lpllpSteps(
   const info = readBags(bags, proportions, 'lpllpSteps')
   const X = dense.toMatrixF64(x, 'lpllpSteps')
   const n = X.m
-  if (info.bags.length !== n) throw new ShapeError('lpllpSteps', `lpllpSteps: ${info.bags.length} bag indices for ${n} points`)
+  if (info.bags.length !== n)
+    throw new ShapeError('lpllpSteps', `lpllpSteps: ${info.bags.length} bag indices for ${n} points`)
   const C = info.classes
   const { tolerance = 1e-4, projectionTolerance = 1e-9, maxProjections = 2000 } = options
   const P = dense.data(lpllpGraph(x, options).propagation)
@@ -434,7 +465,12 @@ function svmDual(K: Float64Array, y: Int32Array, C: number, warm?: Float64Array)
   const Q = new Float64Array(n * n)
   for (let i = 0; i < n; i++) for (let j = 0; j < n; j++) Q[i * n + j] = sign[i] * sign[j] * (K[i * n + j] + 1)
   const s = boxQuadprog(
-    { Q: fromData(Q, [n, n]), c: new Float64Array(n).fill(-1), lower: new Float64Array(n), upper: new Float64Array(n).fill(C) },
+    {
+      Q: fromData(Q, [n, n]),
+      c: new Float64Array(n).fill(-1),
+      lower: new Float64Array(n),
+      upper: new Float64Array(n).fill(C),
+    },
     { tolerance: 1e-6, maxSteps: 200, x0: warm },
   )
   const alpha = Float64Array.from(toFlat(s.x))
@@ -517,7 +553,12 @@ export function alterProportionSvm(
 }
 
 /** Random Fourier features of the RBF kernel exp(−γ‖x − x′‖²): z(x) = √(2/D) cos(Ωᵀx + b), Ω ~ N(0, 2γI). */
-function fourierFeatures(s: Stream, X: { data: ArrayLike<number>; m: number; n: number }, D: Size, gamma: number): Float64Array {
+function fourierFeatures(
+  s: Stream,
+  X: { data: ArrayLike<number>; m: number; n: number },
+  D: Size,
+  gamma: number,
+): Float64Array {
   const omega = Array.from({ length: D * X.n }, (_, k) => Math.sqrt(2 * gamma) * normal(child(s, 'omega', k)))
   const phase = Array.from({ length: D }, (_, k) => 2 * Math.PI * uniform(child(s, 'phase', k)))
   const out = new Float64Array(X.m * D)
@@ -551,7 +592,8 @@ export function meanMap(
   const n = X.m
   const C = info.classes
   const B = info.bagCount
-  const raw = features === 'rbf' ? fourierFeatures(child(s, 'features'), X, dimension, gamma) : Float64Array.from(X.data)
+  const raw =
+    features === 'rbf' ? fourierFeatures(child(s, 'features'), X, dimension, gamma) : Float64Array.from(X.data)
   const d0 = features === 'rbf' ? dimension : X.n
   const D = d0 + 1
   const phi = new Float64Array(n * D)
@@ -570,7 +612,8 @@ export function meanMap(
   const prior = new Float64Array(C)
   let bagged = 0
   for (let b = 0; b < B; b++) bagged += info.sizes[b]
-  for (let b = 0; b < B; b++) for (let c = 0; c < C; c++) prior[c] += (info.sizes[b] / bagged) * info.proportions[b * C + c]
+  for (let b = 0; b < B; b++)
+    for (let c = 0; c < C; c++) prior[c] += (info.sizes[b] / bagged) * info.proportions[b * C + c]
   // n μ_XY as a [D, C] matrix (column y: n p(y) μ_y).
   const stat = new Float64Array(D * C)
   for (let c = 0; c < C; c++) for (let j = 0; j < D; j++) stat[j * C + c] = n * prior[c] * U[c * D + j]
@@ -594,7 +637,8 @@ export function meanMap(
   const theta = dense.data(run.final.x as Tensor)
   const scores = dense.matMul(phi, theta, n, D, C)
   const labels = argmaxRows(scores, n, C)
-  const decision = C === 2 ? Float64Array.from({ length: n }, (_, i) => scores[i * 2 + 1] - scores[i * 2]) : new Float64Array(n)
+  const decision =
+    C === 2 ? Float64Array.from({ length: n }, (_, i) => scores[i * 2 + 1] - scores[i * 2]) : new Float64Array(n)
   return { labels, decision, scores: fromData(scores, [n, C]) }
 }
 
@@ -607,7 +651,7 @@ export type LlpMethod = 'lpllp' | 'invcal' | 'alter-svm' | 'meanmap' | 'proporti
 export interface LlpComparisonOptions {
   /**
    * One labelled dataset per repeat (features [n, d] and labels 0/1), e.g. draws of the Gaussian XOR (the paper's
-   * Table 1) or the half-kernel (Table 2) from `aifn-applied/data/synthetic`.
+   * Table 1) or the half-kernel (Table 2) from `aifn-methods/data/synthetic`.
    */
   datasets: readonly { x: Tensor; y: Tensor }[]
   /** Bag sizes to try (each run splits the n points into ⌈n / size⌉ bags); default [75, 30, 10]. */

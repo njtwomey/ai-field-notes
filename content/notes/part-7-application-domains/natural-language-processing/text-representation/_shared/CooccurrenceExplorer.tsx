@@ -1,5 +1,5 @@
-import { useMemo, useState } from 'react'
-import { Interactive, ParamChoice, ParamSlider, Readout, formatNumber, sequential } from 'aifn-render'
+import { useMemo } from 'react'
+import { choice, Figure, formatNumber, int, Readout, sequential, useFigureState } from 'aifn-render'
 import { cn } from '@/lib/utils'
 
 const TOY_CORPUS = [
@@ -60,16 +60,32 @@ function cosine(a: number[], b: number[]) {
 
 /** Word–context matrix of a thirteen-sentence corpus, as raw counts or PPMI, with the cosines they imply. */
 export function CooccurrenceExplorer() {
-  const [span, setSpan] = useState(2)
-  const [measure, setMeasure] = useState<'count' | 'ppmi'>('ppmi')
-  const [alpha, setAlpha] = useState<'1' | '0.75'>('1')
+  const state = useFigureState({
+    span: int(2, { min: 1, max: 4, step: 1, label: 'window (tokens each side)' }),
+    measure: choice<'count' | 'ppmi'>(
+      [
+        { value: 'count', label: 'count' },
+        { value: 'ppmi', label: 'PPMI (bits)' },
+      ],
+      'ppmi',
+      { label: 'cell value' },
+    ),
+    alpha: choice<'1' | '0.75'>(
+      [
+        { value: '1', label: '1 (none)' },
+        { value: '0.75', label: '0.75' },
+      ],
+      '1',
+      { label: 'context smoothing α' },
+    ),
+  })
 
   const { M, W, max } = useMemo(() => {
-    const counts = cooccurrence(span)
-    const weights = measure === 'count' ? counts : ppmi(counts, Number(alpha))
+    const counts = cooccurrence(state.span)
+    const weights = state.measure === 'count' ? counts : ppmi(counts, Number(state.alpha))
     const peak = Math.max(...ROWS.flatMap((r) => weights[INDEX.get(r)!]))
     return { M: counts, W: weights, max: peak || 1 }
-  }, [span, measure, alpha])
+  }, [state.span, state.measure, state.alpha])
 
   const row = (w: string) => W[INDEX.get(w)!]
   const total = M.flat().reduce((a, b) => a + b, 0)
@@ -77,41 +93,12 @@ export function CooccurrenceExplorer() {
     sequential[Math.min(sequential.length - 1, Math.floor((v / max) * (sequential.length - 1)))]
 
   return (
-    <Interactive
+    <Figure
       title="Word–context matrix: counts against PPMI"
+      state={state}
       caption="Each row is a word's vector over contexts: how often each context word falls within the window around it, in the thirteen sentences listed in the note. Raw counts are dominated by 'the', so every noun looks like every other. PPMI keeps only contexts that co-occur more than chance. Context smoothing (α = 0.75) lowers the PMI of rare contexts."
-      controls={
-        <>
-          <ParamSlider
-            label="window (tokens each side)"
-            value={span}
-            onChange={setSpan}
-            min={1}
-            max={4}
-            step={1}
-            debounceMs={0}
-          />
-          <ParamChoice
-            label="cell value"
-            value={measure}
-            onChange={setMeasure}
-            options={[
-              { value: 'count', label: 'count' },
-              { value: 'ppmi', label: 'PPMI (bits)' },
-            ]}
-          />
-          <ParamChoice
-            label="context smoothing α"
-            value={alpha}
-            onChange={setAlpha}
-            options={[
-              { value: '1', label: '1 (none)' },
-              { value: '0.75', label: '0.75' },
-            ]}
-          />
-        </>
-      }
-      readout={
+
+      readouts={
         <>
           <Readout label="pairs |D|" value={total} />
           <Readout label="cos(cat, dog)" value={formatNumber(cosine(row('cat'), row('dog')))} />
@@ -148,7 +135,7 @@ export function CooccurrenceExplorer() {
                     )}
                     style={v === 0 ? undefined : { backgroundColor: shade(v) }}
                   >
-                    {v === 0 ? '·' : measure === 'count' ? v : v.toFixed(1)}
+                    {v === 0 ? '·' : state.measure === 'count' ? v : v.toFixed(1)}
                   </td>
                 ))}
               </tr>
@@ -156,6 +143,6 @@ export function CooccurrenceExplorer() {
           </tbody>
         </table>
       </div>
-    </Interactive>
+    </Figure>
   )
 }

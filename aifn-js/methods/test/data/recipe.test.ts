@@ -13,7 +13,7 @@ import {
   recipeSpace,
   type Dataset,
   type RecipeInput,
-} from 'aifn-applied/data'
+} from 'aifn-methods/data'
 import { clamp, defaults } from 'aifn/foundation/space'
 import { toFlat } from 'aifn/foundation/tensor'
 

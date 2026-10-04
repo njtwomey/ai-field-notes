@@ -8,7 +8,7 @@
  *
  * Trees are `aifn/graph` binary trees whose nodes carry the split (`feature`, −1 at a leaf; `threshold`, the left child
  * taking x[feature] ≤ threshold), the training `weight` reaching the node (its cover) and the node's `value` vector
- * (the explained output is `value[output]`), as the decision trees of `aifn-applied` are.
+ * (the explained output is `value[output]`), as the decision trees of `aifn-methods` are.
  */
 
 import type { MatrixLike, Size, VectorLike } from 'aifn/foundation/contracts'

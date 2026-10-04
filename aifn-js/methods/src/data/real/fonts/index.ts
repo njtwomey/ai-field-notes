@@ -1,8 +1,8 @@
 /**
- * `aifn-applied/data/real/fonts`: capital letters of 66 real font instances as outline vectors in dense
+ * `aifn-methods/data/real/fonts`: capital letters of 66 real font instances as outline vectors in dense
  * correspondence (the manifold-of-fonts data), as a dataset of fonts. A separate module so that the 800 KB table is
  * loaded only by pages that use it (and so the dataset has its own registry, `fontDatasetRegistry`, outside
- * `aifn-applied/data`'s `datasetRegistry`).
+ * `aifn-methods/data`'s `datasetRegistry`).
  */
 
 import { entries } from 'aifn/foundation/registry'

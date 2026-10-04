@@ -28,7 +28,7 @@ import {
   warp,
   warpRankWeight,
   warpWeights,
-} from 'aifn-applied/retrieval/losses'
+} from 'aifn-methods/retrieval/losses'
 import { fork, integers, stream } from 'aifn/foundation/random'
 import { fixture } from '../../fixtures'
 

@@ -1,4 +1,4 @@
-"""Golden values for aifn-applied learning/linear and learning/generalised/glm (logistic regression).
+"""Golden values for aifn-methods learning/linear and learning/generalised/glm (logistic regression).
 
 From scikit-learn's LinearRegression, Ridge and LogisticRegression.
 """

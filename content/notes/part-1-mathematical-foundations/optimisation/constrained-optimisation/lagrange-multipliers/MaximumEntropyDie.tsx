@@ -1,5 +1,5 @@
 import { useMemo } from 'react'
-import { Interactive, ParamSlider, Readout, XYChart, formatNumber, useParam, type XYSeries } from 'aifn-render'
+import { Bars, Curve, Figure, float, formatNumber, Plot, Readout, useAxis, useFigureState } from 'aifn-render'
 import { SensitivityPanel } from './ConstrainedExplorer'
 
 const FACES = [1, 2, 3, 4, 5, 6]
@@ -31,23 +31,28 @@ const maxEntropy = (mu: number) => {
 }
 
 export function MaximumEntropyDie() {
-  const mu = useParam(4.5, { min: 1.2, max: 5.8, step: 0.05 })
-  const l1 = multiplierFor(mu.value)
+  const state = useFigureState({
+    mu: float(4.5, { min: 1.2, max: 5.8, step: 0.05, label: 'target mean μ' }),
+  })
+  const l1 = multiplierFor(state.mu)
   const { p, z } = gibbs(l1)
-  const entropy = Math.log(z) + l1 * mu.value
-  const series = useMemo((): XYSeries[] => {
-    const probs = gibbs(multiplierFor(mu.value)).p
+  const entropy = Math.log(z) + l1 * state.mu
+  const series = useMemo(() => {
+    const probs = gibbs(multiplierFor(state.mu)).p
     return [
-      { name: 'maximum-entropy pₖ', type: 'bar', x: FACES, y: probs, slot: 0 },
-      { name: 'uniform 1/6', type: 'line', x: [0.5, 6.5], y: [1 / 6, 1 / 6], muted: true, dashed: true },
-    ]
-  }, [mu.value])
+      { name: 'maximum-entropy pₖ', x: FACES, y: probs, slot: 0 },
+      { name: 'uniform 1/6', x: [0.5, 6.5], y: [1 / 6, 1 / 6], muted: true, dashed: true },
+    ] as const
+  }, [state.mu])
+  const xAxis = useAxis({ label: 'face k', range: [0, 7] })
+  const yAxis = useAxis({ label: 'pₖ', range: [0, 1] })
   return (
-    <Interactive
+    <Figure
       title="Maximum entropy on a die with a known mean"
+      state={state}
       caption="Left: the distribution on the faces 1 to 6 with the largest entropy among those with mean μ. It has the form pₖ ∝ exp(−λ₁k), where λ₁ is the multiplier of the mean constraint. Set μ with the slider, or drag the vertical line on the right. Right: the maximum entropy H*(μ); the dashed tangent has slope λ₁. At μ = 3.5 the constraint costs nothing, λ₁ = 0, and the answer is uniform."
-      controls={<ParamSlider label="target mean μ" param={mu} />}
-      readout={
+
+      readouts={
         <>
           <Readout label="p" value={`(${p.map((v) => v.toFixed(3)).join(', ')})`} />
           <Readout label="λ₁ (mean)" value={formatNumber(l1)} />
@@ -58,9 +63,12 @@ export function MaximumEntropyDie() {
       }
     >
       <div className="grid gap-4 md:grid-cols-2">
-        <XYChart height={300} series={series} xRange={[0, 7]} yRange={[0, 1]} xLabel="face k" yLabel="pₖ" />
+        <Plot x={xAxis} y={yAxis} height={300}>
+          <Bars {...series[0]} />
+          <Curve {...series[1]} />
+        </Plot>
         <SensitivityPanel
-          param={mu}
+          param={state.bind('mu')}
           optimum={maxEntropy}
           multiplier={multiplierFor}
           xLabel="target mean μ"
@@ -69,6 +77,6 @@ export function MaximumEntropyDie() {
           height={300}
         />
       </div>
-    </Interactive>
+    </Figure>
   )
 }

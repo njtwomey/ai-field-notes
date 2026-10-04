@@ -1,18 +1,8 @@
 import { useMemo, useState } from 'react'
-import { rateDistortionCurve } from 'aifn-applied/information/channels'
+import { rateDistortionCurve } from 'aifn-methods/information/channels'
 import { binaryEntropy } from 'aifn/numerics/special'
 import { toFlat } from 'aifn/foundation/tensor'
-import {
-  ControlRow,
-  Curve,
-  Figure,
-  formatNumber,
-  Plot,
-  Points,
-  Readout,
-  Slider,
-  useAxis,
-} from 'aifn-render'
+import { ControlRow, Curve, Figure, formatNumber, Plot, Points, Readout, Slider, useAxis } from 'aifn-render'
 
 const h2 = (p: number) => binaryEntropy(p, 2)
 
@@ -71,7 +61,7 @@ export function RateDistortionExplorer() {
         />
       </ControlRow>
 
-      <div className="flex flex-wrap gap-4 text-xs font-mono text-muted-foreground my-2">
+      <div className="my-2 flex flex-wrap gap-4 font-mono text-xs text-muted-foreground">
         <Readout label="lossless rate R(0) = H(p)" value={`${formatNumber(entropyH)} bits`} />
         <Readout label="max distortion D_max" value={formatNumber(Math.min(p, 1 - p))} />
         <Readout label="evaluated points" value={points.x.length} />

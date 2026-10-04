@@ -1,8 +1,8 @@
 /** The GPLVM (`gplvm.ts`) on the fonts data: gradients, the fit as an Algorithm, the latent-to-outline map. */
 import { describe, expect, it } from 'vitest'
-import { fonts } from 'aifn-applied/data/real/fonts'
-import { fitGplvm, gplvmFitSteps, gplvmModel, gplvmProblem } from 'aifn-applied/learning/gaussian-processes'
-import { pca } from 'aifn-applied/unsupervised/embedding/linear'
+import { fonts } from 'aifn-methods/data/real/fonts'
+import { fitGplvm, gplvmFitSteps, gplvmModel, gplvmProblem } from 'aifn-methods/learning/gaussian-processes'
+import { pca } from 'aifn-methods/unsupervised/embedding/linear'
 import { fromData, tensor, toFlat, toRows } from 'aifn/foundation/tensor'
 import { run, trace } from 'aifn/foundation/trace'
 import { dataset } from 'aifn/learning/estimators'

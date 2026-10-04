@@ -1,4 +1,4 @@
-import { Interactive } from 'aifn-render'
+import { Figure } from 'aifn-render'
 import { Diagram } from 'aifn-render'
 import type { DiagramNode, DiagramSpec } from 'aifn-render'
 
@@ -78,14 +78,15 @@ const spec: DiagramSpec = {
 /** The distillation loss: soft targets from the teacher, hard targets from the labels. */
 export function DistillationDiagram() {
   return (
-    <Interactive
+    <Figure
       title="The distillation loss"
+      purpose="Trace how the teacher's and the student's logits combine into the distillation loss."
       caption="The teacher and the student see the same input. Both sets of logits are softened by the temperature T; the soft term compares the teacher's softened distribution p(T) with the student's q(T). The hard term compares the student's ordinary softmax q(1) with the true label. Only the student's weights are trained, and it runs at T = 1 when deployed."
     >
       <Diagram
         spec={spec}
         ariaLabel="An input goes to a frozen teacher and a student; softened softmaxes of both logits feed the soft loss, the student's plain softmax and the label feed the hard loss; their sum trains the student"
       />
-    </Interactive>
+    </Figure>
   )
 }

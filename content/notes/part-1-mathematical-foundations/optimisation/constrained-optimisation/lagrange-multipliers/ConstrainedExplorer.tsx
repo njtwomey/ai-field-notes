@@ -1,19 +1,25 @@
 import { useMemo, type ReactNode } from 'react'
 import {
-  Interactive,
-  ParamSlider,
-  Readout,
-  XYChart,
+  Figure,
+  float,
   formatNumber,
-  useParam,
-  type Handle,
+  Handle,
+  type FigureState,
+  type NumberDef,
   type Param,
+  Plot,
+  Readout,
   type Segment,
+  Segments,
+  seriesLayers,
+  type SeriesSpec,
+  useAxis,
+  useFigureState,
   type Vec2,
-  type XYSeries,
+  Vectors,
 } from 'aifn-render'
-import { linspace } from '@/lib/math'
 import { contour, contours, quantileLevels, sampleGrid } from './contours'
+import { linspace, toFlat } from 'aifn/foundation/tensor'
 
 /**
  * One objective f(x, y) and one constraint curve g(x, y) = 0 in the plane. The curve is given by a parametrisation
@@ -55,7 +61,7 @@ const norm = (a: Vec2) => Math.hypot(a[0], a[1])
 /** Everything that depends on the problem only: samples of the curve, f along it, stationary points and contours. */
 function analyse(problem: ConstrainedProblem) {
   const { f, curve, tRange, closed, xRange, yRange } = problem
-  const ts = linspace(tRange[0], tRange[1], SAMPLES)
+  const ts = toFlat(linspace(tRange[0], tRange[1], SAMPLES))
   const points = ts.map(curve)
   const values = points.map(([x, y]) => f(x, y))
   const stationary: Stationary[] = []
@@ -121,12 +127,22 @@ function nearestT(ts: number[], points: Vec2[], [x, y]: Vec2): number {
   return ts[best]
 }
 
+/** The position t of the point along the constraint curve, as a state field. */
+export const tField = (
+  range: [number, number],
+  initial: number,
+  step: number | undefined,
+  label: string,
+  format: (t: number) => string = formatNumber,
+) => float(initial, { min: range[0], max: range[1], step, label, format })
+
 export type ConstrainedExplorerProps = {
   problem: ConstrainedProblem
   title: string
   caption: ReactNode
-  initialT: number
-  tStep: number
+  /** The opening t and its step, for the explorer's own state (unused when `state` is given). */
+  initialT?: number
+  tStep?: number
   xLabel: string
   yLabel: string
   tLabel: string
@@ -134,8 +150,11 @@ export type ConstrainedExplorerProps = {
   tSymbol: string
   fLabel: string
   formatT?: (t: number) => string
-  /** Extra controls that reshape the problem, shown after the slider for t. */
-  controls?: ReactNode
+  /**
+   * The figure's state when the caller adds its own fields (the parameters that reshape the problem): it must hold
+   * `t: tField(…)`. Omitted, the explorer keeps a state with `t` alone.
+   */
+  state?: FigureState<{ t: NumberDef }>
   /** Extra readouts computed from the dragged point. */
   readout?: (s: PointState) => ReactNode
   /** Fixed reference points on the main chart, e.g. an unconstrained optimum. */
@@ -162,16 +181,17 @@ export function ConstrainedExplorer({
   tSymbol,
   fLabel,
   formatT = formatNumber,
-  controls,
   readout,
   markers,
   extra,
   profileHeight = 320,
+  state: shared,
 }: ConstrainedExplorerProps) {
-  const t = useParam(initialT, { min: problem.tRange[0], max: problem.tRange[1], step: tStep })
+  const own = useFigureState({ t: tField(problem.tRange, initialT ?? problem.tRange[0], tStep, tLabel, formatT) })
+  const state = shared ?? own
   const a = useMemo(() => analyse(problem), [problem])
   const { f, gradF, gradG, curve, xRange, yRange } = problem
-  const [px, py] = curve(t.value)
+  const [px, py] = curve(state.t)
   const value = f(px, py)
   const gf = gradF(px, py)
   const gg = gradG(px, py)
@@ -183,12 +203,12 @@ export function ConstrainedExplorer({
   const cosAngle = regular && norm(gf) > 1e-12 ? dot(gf, gg) / (norm(gf) * ggNorm) : NaN
   const angle = (Math.acos(Math.max(-1, Math.min(1, cosAngle))) * 180) / Math.PI
   const h = (problem.tRange[1] - problem.tRange[0]) * 1e-5
-  const slope = (f(...curve(t.value + h)) - f(...curve(t.value - h))) / (2 * h)
+  const slope = (f(...curve(state.t + h)) - f(...curve(state.t - h))) / (2 * h)
 
-  const series = useMemo((): XYSeries[] => {
+  const series = useMemo((): SeriesSpec[] => {
     const level = contour(a.grid, value)
     const others = a.stationary.filter((s) => !a.optima.includes(s))
-    const out: XYSeries[] = [
+    const out: SeriesSpec[] = [
       { name: '__contours', type: 'line', x: a.background.x, y: a.background.y, muted: true },
       { name: 'constraint', type: 'line', x: a.curveX, y: a.curveY, slot: 0 },
       { name: 'level set', type: 'line', x: level.x, y: level.y, slot: 1, dashed: true },
@@ -240,9 +260,9 @@ export function ConstrainedExplorer({
     return [{ from: [px - 1.2 * ux, py - 1.2 * uy], to: [px + 1.2 * ux, py + 1.2 * uy] }]
   }, [px, py, ggx, ggy, length])
 
-  const profile = useMemo((): XYSeries[] => {
+  const profile = useMemo((): SeriesSpec[] => {
     const others = a.stationary.filter((s) => !a.optima.includes(s))
-    const out: XYSeries[] = [{ name: fLabel, type: 'line', x: a.ts, y: a.values, slot: 0 }]
+    const out: SeriesSpec[] = [{ name: fLabel, type: 'line', x: a.ts, y: a.values, slot: 0 }]
     if (others.length) {
       out.push({
         name: 'stationary',
@@ -262,31 +282,20 @@ export function ConstrainedExplorer({
         emphasis: true,
       })
     }
-    out.push({ name: 'point', type: 'scatter', x: [t.value], y: [value], slot: 1 })
+    out.push({ name: 'point', type: 'scatter', x: [state.t], y: [value], slot: 1 })
     return out
-  }, [a, t.value, value, fLabel, problem.goal])
+  }, [a, state.t, value, fLabel, problem.goal])
 
-  const handles: Handle[] = [
-    {
-      kind: 'point',
-      at: [px, py],
-      label: 'point on the constraint',
-      onDrag: (p) => t.set(nearestT(a.ts, a.points, p)),
-    },
-  ]
-  const profileHandles: Handle[] = [{ kind: 'x', at: t.value, label: tSymbol, onDrag: t.set }]
-
+  const xAxis = useAxis({ label: xLabel, range: xRange })
+  const yAxis = useAxis({ label: yLabel, range: yRange, equal: xAxis })
+  const xAxis2 = useAxis({ label: tLabel, range: problem.tRange })
+  const yAxis2 = useAxis({ label: fLabel, hold: 'union' })
   return (
-    <Interactive
+    <Figure
       title={title}
+      state={state}
       caption={caption}
-      controls={
-        <>
-          <ParamSlider label={tLabel} param={t} format={formatT} />
-          {controls}
-        </>
-      }
-      readout={
+      readouts={
         <>
           <Readout label="(x, y)" value={`(${formatNumber(px)}, ${formatNumber(py)})`} />
           <Readout label={fLabel} value={formatNumber(value)} />
@@ -306,35 +315,31 @@ export function ConstrainedExplorer({
               value={`${formatNumber(a.best.value)} at ${tSymbol} = ${formatT(a.best.t)}`}
             />
           )}
-          {readout?.({ t: t.value, point: [px, py], value, lambda, gradF: gf, gradG: gg, stationary: a.stationary })}
+          {readout?.({ t: state.t, point: [px, py], value, lambda, gradF: gf, gradG: gg, stationary: a.stationary })}
         </>
       }
     >
       <div className="grid gap-4 md:grid-cols-2">
-        <XYChart
-          series={series}
-          vectors={vectors}
-          segments={normal}
-          handles={handles}
-          xRange={xRange}
-          yRange={yRange}
-          equalAspect
-          xLabel={xLabel}
-          yLabel={yLabel}
-        />
-        <div className="flex flex-col gap-4">
-          <XYChart
-            height={profileHeight}
-            series={profile}
-            handles={profileHandles}
-            xRange={problem.tRange}
-            xLabel={tLabel}
-            yLabel={fLabel}
+        <Plot x={xAxis} y={yAxis}>
+          {seriesLayers(series)}
+          <Segments segments={normal} />
+          <Vectors vectors={vectors} />
+          <Handle
+            kind="point"
+            at={[px, py]}
+            label="point on the constraint"
+            onDrag={(p) => state.set('t', nearestT(a.ts, a.points, p))}
           />
+        </Plot>
+        <div className="flex flex-col gap-4">
+          <Plot x={xAxis2} y={yAxis2} height={profileHeight}>
+            {seriesLayers(profile)}
+            <Handle {...state.handle('t', { label: tSymbol })} />
+          </Plot>
           {extra}
         </div>
       </div>
-    </Interactive>
+    </Figure>
   )
 }
 
@@ -366,11 +371,11 @@ export function SensitivityPanel({
   height = 220,
 }: SensitivityPanelProps) {
   const curve = useMemo(() => {
-    const x = linspace(param.min, param.max, 201)
+    const x = toFlat(linspace(param.min, param.max, 201))
     return { x, y: x.map(optimum) }
   }, [param.min, param.max, optimum])
   const c = param.value
-  const series = useMemo((): XYSeries[] => {
+  const series = useMemo((): SeriesSpec[] => {
     const f0 = optimum(c)
     const slope = multiplier(c)
     const half = 0.18 * (param.max - param.min)
@@ -387,15 +392,12 @@ export function SensitivityPanel({
       { name: 'level', type: 'scatter', x: [c], y: [f0], slot: 1 },
     ]
   }, [curve, c, optimum, multiplier, param.min, param.max, yLabel])
-  const handles: Handle[] = [{ kind: 'x', at: c, label: symbol, onDrag: param.set }]
+  const xAxis = useAxis({ label: xLabel, range: [param.min, param.max] })
+  const yAxis = useAxis({ label: yLabel, hold: 'union' })
   return (
-    <XYChart
-      height={height}
-      series={series}
-      handles={handles}
-      xRange={[param.min, param.max]}
-      xLabel={xLabel}
-      yLabel={yLabel}
-    />
+    <Plot x={xAxis} y={yAxis} height={height}>
+      {seriesLayers(series)}
+      <Handle kind="x" at={c} label={symbol} onDrag={param.set} />
+    </Plot>
   )
 }

@@ -1,5 +1,4 @@
-import { Interactive } from 'aifn-render'
-import { Diagram } from 'aifn-render'
+import { Diagram, Figure } from 'aifn-render'
 import type { DiagramNode, DiagramSpec } from 'aifn-render'
 
 const IDX = ['1', '2', '3', 'N']
@@ -51,7 +50,7 @@ const spec: DiagramSpec = {
 /** Two encoders into one space, trained so that the matching pairs sit on the diagonal of the similarity matrix. */
 export function ClipDiagram() {
   return (
-    <Interactive
+    <Figure
       title="CLIP's contrastive objective"
       caption="A batch of N image–caption pairs is embedded by the two encoders into unit vectors in one shared space. Every image is scored against every caption. The N matching pairs lie on the diagonal of the N × N logit matrix, and the loss is a softmax classification of the diagonal entry in each row and each column."
     >
@@ -59,6 +58,6 @@ export function ClipDiagram() {
         spec={spec}
         ariaLabel="CLIP: text encoder produces caption vectors v_1 to v_N, image encoder produces image vectors u_1 to u_N, and their N by N matrix of scaled dot products has the matching pairs on the diagonal"
       />
-    </Interactive>
+    </Figure>
   )
 }

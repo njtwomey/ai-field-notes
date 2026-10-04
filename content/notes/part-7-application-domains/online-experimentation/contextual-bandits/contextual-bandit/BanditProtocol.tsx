@@ -1,5 +1,4 @@
-import { Interactive } from 'aifn-render'
-import { Diagram } from 'aifn-render'
+import { Diagram, Figure } from 'aifn-render'
 import type { DiagramSpec } from 'aifn-render'
 
 const spec: DiagramSpec = {
@@ -49,7 +48,7 @@ const spec: DiagramSpec = {
 /** The interaction protocol of a contextual bandit. */
 export function BanditProtocol() {
   return (
-    <Interactive
+    <Figure
       title="One round of a contextual bandit"
       caption="The environment reveals a context. The policy picks an arm, possibly at random with probability p_t, and only that arm's reward is observed. The learner updates its estimates before the next context arrives. Logging the context, arm, propensity p_t and reward makes the round reusable for evaluating other policies offline."
     >
@@ -57,6 +56,6 @@ export function BanditProtocol() {
         spec={spec}
         ariaLabel="The environment draws a context; the policy chooses an arm; the chosen arm's reward is observed and used to update the policy; the round is logged with its propensity"
       />
-    </Interactive>
+    </Figure>
   )
 }

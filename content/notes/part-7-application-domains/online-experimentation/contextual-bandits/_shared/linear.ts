@@ -3,7 +3,7 @@
  * and the greedy ridge policy, run on seeded problems. Two dimensions keep every matrix 2×2 and closed-form, and let the
  * figures draw the parameter space.
  *
- * The random source is passed in (`rng(seed)` from '@/lib/math' in the widgets), so this module has no imports.
+ * The random source is passed in (a seeded `stream` adapter in the widgets), so this module has no imports.
  */
 
 export type Rand = { uniform: () => number; normal: () => number }

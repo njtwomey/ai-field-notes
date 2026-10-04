@@ -1,13 +1,16 @@
 import { useMemo } from 'react'
 import {
-  Interactive,
-  ParamSlider,
-  Readout,
-  XYChart,
+  Curve,
+  Figure,
+  float,
   formatNumber,
-  useParam,
-  type Handle,
-  type XYSeries,
+  Handle,
+  Plot,
+  Points,
+  Readout,
+  slider,
+  useAxis,
+  useFigureState,
 } from 'aifn-render'
 import { grid, logNormalCdf, normalLogPdf, normalPdf, probitTilted, stepTilted, toNat, vFn, wFn } from '../_shared/ep'
 
@@ -26,64 +29,65 @@ const W_CURVE = TS.map(wFn)
  * that EP stores, with the v and w functions that give the moments in closed form.
  */
 export function TruncatedMoments() {
-  const mu = useParam(-1, { min: -4, max: 5, step: 0.05 })
-  const sd = useParam(1, { min: 0.3, max: 3, step: 0.05 })
-  const noise = useParam(0, { min: 0, max: 2, step: 0.05 })
-  const eps = useParam(0, { min: -3, max: 4, step: 0.05 })
+  const state = useFigureState({
+    mu: float(-1, { min: -4, max: 5, step: 0.05, label: 'cavity mean μ' }),
+    sd: float(1, { min: 0.3, max: 3, step: 0.05, label: 'cavity sd σ' }),
+    eps: slider(-3, 4, 0, { step: 0.05, label: 'threshold ε' }),
+    noise: float(0, { min: 0, max: 2, step: 0.05, label: 'noise s (0 = hard step)' }),
+  })
 
   const r = useMemo(() => {
-    const variance = sd.value ** 2
-    const s2 = noise.value ** 2
+    const variance = state.sd ** 2
+    const s2 = state.noise ** 2
     // A hard step is the probit factor with no noise; the two share one formula with σ² + s² in the denominator.
-    const t = s2 > 0 ? probitTilted(mu.value, variance, 1, eps.value, s2) : stepTilted(mu.value, variance, eps.value)
-    const z = (mu.value - eps.value) / Math.sqrt(variance + s2)
+    const t = s2 > 0 ? probitTilted(state.mu, variance, 1, state.eps, s2) : stepTilted(state.mu, variance, state.eps)
+    const z = (state.mu - state.eps) / Math.sqrt(variance + s2)
     const factor = XS.map((x) =>
-      s2 > 0 ? Math.exp(logNormalCdf((x - eps.value) / Math.sqrt(s2))) : x > eps.value ? 1 : 0,
+      s2 > 0 ? Math.exp(logNormalCdf((x - state.eps) / Math.sqrt(s2))) : x > state.eps ? 1 : 0,
     )
-    const cavity = XS.map((x) => normalPdf(x, mu.value, variance))
+    const cavity = XS.map((x) => normalPdf(x, state.mu, variance))
     const Z = Math.exp(t.logZ)
     const tilted = XS.map((_, i) => (cavity[i] * factor[i]) / Z)
     const q = XS.map((x) => normalPdf(x, t.mean, t.variance))
     // The site is Z q / cavity: it matches the factor where the cavity has mass and ignores it elsewhere.
     const site = XS.map((x) =>
-      Math.min(5, Math.exp(t.logZ + normalLogPdf(x, t.mean, t.variance) - normalLogPdf(x, mu.value, variance))),
+      Math.min(5, Math.exp(t.logZ + normalLogPdf(x, t.mean, t.variance) - normalLogPdf(x, state.mu, variance))),
     )
     const nat = toNat(t)
     const siteTau = nat.tau - 1 / variance
-    const siteNu = nat.nu - mu.value / variance
+    const siteNu = nat.nu - state.mu / variance
     return { t, z, factor, cavity, tilted, q, site, siteTau, siteNu, Z }
-  }, [mu.value, sd.value, noise.value, eps.value])
+  }, [state.mu, state.sd, state.noise, state.eps])
 
-  const densities: XYSeries[] = [
-    { name: 'cavity', type: 'line', x: XS, y: r.cavity, muted: true },
-    { name: 'tilted (exact)', type: 'line', x: XS, y: r.tilted, emphasis: true },
-    { name: 'projection q', type: 'line', x: XS, y: r.q, slot: 0 },
-  ]
-  const factors: XYSeries[] = [
-    { name: 'factor', type: 'line', x: XS, y: r.factor, emphasis: true },
-    { name: 'site', type: 'line', x: XS, y: r.site, slot: 4, dashed: true },
-    { name: 'cavity (scaled)', type: 'line', x: XS, y: r.cavity.map((c) => c * sd.value * 2.5), muted: true },
-  ]
-  const vw: XYSeries[] = [
-    { name: 'v(t)', type: 'line', x: TS, y: V_CURVE, slot: 0 },
-    { name: 'w(t)', type: 'line', x: TS, y: W_CURVE, slot: 1 },
-    { name: 'current t', type: 'scatter', x: [r.z, r.z], y: [vFn(r.z), wFn(r.z)], emphasis: true },
-  ]
-  const handles: Handle[] = [{ kind: 'x', at: eps.value, onDrag: eps.set, label: 'threshold ε' }]
+  const densities = [
+    { name: 'cavity', x: XS, y: r.cavity, muted: true },
+    { name: 'tilted (exact)', x: XS, y: r.tilted, emphasis: true },
+    { name: 'projection q', x: XS, y: r.q, slot: 0 },
+  ] as const
+  const factors = [
+    { name: 'factor', x: XS, y: r.factor, emphasis: true },
+    { name: 'site', x: XS, y: r.site, slot: 4, dashed: true },
+    { name: 'cavity (scaled)', x: XS, y: r.cavity.map((c) => c * state.sd * 2.5), muted: true },
+  ] as const
+  const vw = [
+    { name: 'v(t)', x: TS, y: V_CURVE, slot: 0 },
+    { name: 'w(t)', x: TS, y: W_CURVE, slot: 1 },
+    { name: 'current t', x: [r.z, r.z], y: [vFn(r.z), wFn(r.z)], emphasis: true },
+  ] as const
 
+  const xAxis = useAxis({ label: 'x', range: X_RANGE })
+  const yAxis = useAxis({ label: 'density', range: Y_DENSITY })
+  const xAxis2 = useAxis({ label: 'x', range: X_RANGE })
+  const yAxis2 = useAxis({ label: 'factor value', range: Y_FACTOR })
+  const xAxis3 = useAxis({ label: 't = (μ − ε)/√(σ² + s²)', range: T_RANGE })
+  const yAxis3 = useAxis({ range: Y_VW })
   return (
-    <Interactive
+    <Figure
       title="Moments of a Gaussian times a step"
+      state={state}
       caption="The cavity N(μ, σ²) is multiplied by the factor 𝟙(x > ε), or by Φ((x − ε)/s) when the noise s is above zero. Left: the exact tilted density and the Gaussian q with its mean and variance. Right: the factor and the Gaussian site Z·q/cavity that EP stores in its place. Drag the threshold ε on either chart. Move μ below ε and the site narrows: it copies the factor only where the cavity has mass."
-      controls={
-        <>
-          <ParamSlider label="cavity mean μ" param={mu} />
-          <ParamSlider label="cavity sd σ" param={sd} />
-          <ParamSlider label="threshold ε" param={eps} />
-          <ParamSlider label="noise s (0 = hard step)" param={noise} />
-        </>
-      }
-      readout={
+
+      readouts={
         <>
           <Readout label="t" value={formatNumber(r.z)} />
           <Readout label="Z = Φ(t)" value={formatNumber(r.Z)} />
@@ -97,26 +101,24 @@ export function TruncatedMoments() {
       }
     >
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-        <XYChart
-          series={densities}
-          xLabel="x"
-          yLabel="density"
-          xRange={X_RANGE}
-          yRange={Y_DENSITY}
-          handles={handles}
-          height={280}
-        />
-        <XYChart
-          series={factors}
-          xLabel="x"
-          yLabel="factor value"
-          xRange={X_RANGE}
-          yRange={Y_FACTOR}
-          handles={handles}
-          height={280}
-        />
+        <Plot x={xAxis} y={yAxis} height={280}>
+          <Curve {...densities[0]} />
+          <Curve {...densities[1]} />
+          <Curve {...densities[2]} />
+          <Handle {...state.handle('eps', { label: 'threshold ε' })} />
+        </Plot>
+        <Plot x={xAxis2} y={yAxis2} height={280}>
+          <Curve {...factors[0]} />
+          <Curve {...factors[1]} />
+          <Curve {...factors[2]} />
+          <Handle {...state.handle('eps', { label: 'threshold ε' })} />
+        </Plot>
       </div>
-      <XYChart series={vw} xLabel="t = (μ − ε)/√(σ² + s²)" xRange={T_RANGE} yRange={Y_VW} height={220} />
-    </Interactive>
+      <Plot x={xAxis3} y={yAxis3} height={220}>
+        <Curve {...vw[0]} />
+        <Curve {...vw[1]} />
+        <Points {...vw[2]} />
+      </Plot>
+    </Figure>
   )
 }

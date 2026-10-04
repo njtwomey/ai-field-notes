@@ -1,7 +1,5 @@
-import { useMemo, useState } from 'react'
-import { Interactive, ParamSlider, Readout } from 'aifn-render'
-import { MathText } from 'aifn-render'
-import { Diagram } from 'aifn-render'
+import { useMemo } from 'react'
+import { Diagram, Figure, int, MathText, Readout, useFigureState } from 'aifn-render'
 import type { DiagramEdge, DiagramNode, DiagramSpec } from 'aifn-render'
 
 /** A tree-shaped factor graph: variables x1..x4, pairwise factors a, b, c and unary factors on x1 and x3. */
@@ -91,20 +89,23 @@ function spec(step: number): DiagramSpec {
 
 /** Step through the two sweeps of the sum-product algorithm on a small tree. */
 export function MessageSchedule() {
-  const [step, setStep] = useState(3)
-  const diagram = useMemo(() => spec(step), [step])
-  const now = MESSAGES.filter(([s]) => s === step)
+  const state = useFigureState({
+    step: int(3, { min: 0, max: LAST, step: 1, label: 'step' }),
+  })
+  const diagram = useMemo(() => spec(state.step), [state.step])
+  const now = MESSAGES.filter(([s]) => s === state.step)
     .map(([, from, to]) => `$\\mu_{${texName(from)} \\to ${texName(to)}}$`)
     .join(', ')
-  const marginals = Object.keys(VARS).filter((v) => hasMarginal(v, step))
+  const marginals = Object.keys(VARS).filter((v) => hasMarginal(v, state.step))
   return (
-    <Interactive
+    <Figure
       title="The two sweeps of the sum-product algorithm"
+      state={state}
       caption="The root is x₂ (outlined). Each step sends every message whose sender has heard from all its other neighbours; the step's messages are solid, earlier ones dashed. The inward sweep (blue) ends when x₂ has heard from every factor, so its marginal is ready. The outward sweep (orange) sends messages back to the leaves. A variable is shaded once its marginal is available; after six steps every edge has carried one message each way."
-      controls={<ParamSlider label="step" value={step} onChange={setStep} min={0} max={LAST} step={1} withArrows />}
-      readout={
+
+      readouts={
         <>
-          <Readout label="messages this step" value={step === 0 ? 'none' : <MathText text={now} />} />
+          <Readout label="messages this step" value={state.step === 0 ? 'none' : <MathText text={now} />} />
           <Readout
             label="marginals ready"
             value={marginals.length ? <MathText text={marginals.map((v) => `$${texName(v)}$`).join(', ')} /> : 'none'}
@@ -113,6 +114,6 @@ export function MessageSchedule() {
       }
     >
       <Diagram spec={diagram} ariaLabel="A tree factor graph with messages drawn as curved arrows along its edges" />
-    </Interactive>
+    </Figure>
   )
 }

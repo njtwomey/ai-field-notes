@@ -1,5 +1,5 @@
 /**
- * `aifn-applied/learning/transfer`: transfer, continual and meta-learning set-ups on small problems. Alignment penalties
+ * `aifn-methods/learning/transfer`: transfer, continual and meta-learning set-ups on small problems. Alignment penalties
  * (MMD², CORAL, the gradient-reversal layer) and unsupervised domain adaptation (source only, MMD, CORAL, DANN) with a
  * streamed run; label-shift estimation (BBSE, EM) and posterior correction; continual learning (naive fine-tuning,
  * EWC, experience replay); MAML (second and first order) on sinusoid regression against a pretrained baseline; prototypical networks trained

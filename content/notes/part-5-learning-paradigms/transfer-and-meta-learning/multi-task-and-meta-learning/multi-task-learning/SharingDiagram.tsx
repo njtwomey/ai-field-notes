@@ -1,5 +1,4 @@
-import { Interactive } from 'aifn-render'
-import { Diagram } from 'aifn-render'
+import { Diagram, Figure } from 'aifn-render'
 import type { DiagramSpec } from 'aifn-render'
 
 const hard: DiagramSpec = {
@@ -91,7 +90,7 @@ const soft: DiagramSpec = {
 /** Hard and soft parameter sharing, side by side. */
 export function SharingDiagram() {
   return (
-    <Interactive
+    <Figure
       title="Hard and soft parameter sharing"
       caption="Left: hard sharing. Every task uses the same hidden layers and has its own output head, so the shared weights receive gradients from every task. Right: soft sharing. Each task has its own network, and a penalty pulls the weights of the networks towards one another."
     >
@@ -102,6 +101,6 @@ export function SharingDiagram() {
           ariaLabel="Soft sharing: three separate networks coupled by a penalty on the distance between their weights"
         />
       </div>
-    </Interactive>
+    </Figure>
   )
 }

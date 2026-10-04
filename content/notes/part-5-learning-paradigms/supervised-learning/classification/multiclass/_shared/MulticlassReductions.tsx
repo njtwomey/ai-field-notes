@@ -1,21 +1,25 @@
 import { useMemo, useState } from 'react'
 import {
-  Heatmap,
-  Interactive,
-  ParamChoice,
-  ParamSlider,
+  Curve,
+  Figure,
+  Handle,
+  Plot,
+  Points,
+  Raster,
   Readout,
+  choice,
   formatNumber,
-  useParam,
-  type Handle,
-  type HeatmapOverlay,
+  int,
+  slider,
+  useAxis,
+  useFigureState,
 } from 'aifn-render'
-import { linspace } from '@/lib/math'
+import { linspace, toFlat } from 'aifn/foundation/tensor'
 import { CONTESTED, UNASSIGNED, decide, expectedAccuracy, fit, makeData, type Method, type Vec2 } from './reductions'
 
 const LO = -4
 const HI = 4
-const GRID = linspace(LO, HI, 61)
+const GRID = toFlat(linspace(LO, HI, 61))
 const PER_CLASS = 40
 const CLASS_NAMES = ['class 1', 'class 2', 'class 3', 'class 4']
 /** Class 2 sits between classes 1 and 3, so no line separates it from the rest. */
@@ -52,15 +56,15 @@ function boundary([w0, w1, w2]: [number, number, number]): { x: number[]; y: num
  * error-correcting output code with Hamming decoding, and multinomial logistic regression.
  */
 export function MulticlassReductions({ initial = 'ovr-argmax' }: { initial?: Method }) {
-  const [method, setMethod] = useState<Method>(initial)
   const [centres, setCentres] = useState<Vec2[]>(START)
-  const spread = useParam(0.8, { min: 0.3, max: 1.6, step: 0.05 })
-  const seed = useParam(3, { min: 1, max: 20, step: 1 })
+  const state = useFigureState({
+    method: choice<Method>(METHODS, initial, { label: 'method' }),
+    spread: slider(0.3, 1.6, 0.8, { step: 0.05, label: 'class spread (standard deviation)' }),
+    seed: int(3, { min: 1, max: 20, label: 'data seed' }),
+  })
+  const { method, spread, seed } = state
 
-  const data = useMemo(
-    () => makeData(seed.value, centres, PER_CLASS, spread.value),
-    [seed.value, centres, spread.value],
-  )
+  const data = useMemo(() => makeData(seed, centres, PER_CLASS, spread), [seed, centres, spread])
   const fitted = useMemo(() => fit(data, method), [data, method])
 
   const { z, unassigned, contested } = useMemo(() => {
@@ -71,40 +75,20 @@ export function MulticlassReductions({ initial = 'ovr-argmax' }: { initial?: Met
   }, [fitted, data.k])
   const accuracy = useMemo(() => expectedAccuracy(fitted, data), [fitted, data])
 
-  const overlay = useMemo<HeatmapOverlay[]>(() => {
-    const points: HeatmapOverlay = {
-      name: 'training point',
-      type: 'scatter',
-      x: data.x.map((p) => p[0]),
-      y: data.x.map((p) => p[1]),
-      values: data.y,
-      group: data.y,
-      groupNames: CLASS_NAMES,
-    }
-    // One-versus-rest draws each binary boundary in its class's colour: the claimed side of line k is class k's.
-    const lines: HeatmapOverlay[] =
-      method === 'ovr-argmax' || method === 'ovr-claimed'
-        ? fitted.weights.map((w, k) => ({
-            name: `${k + 1} vs rest, score 0`,
-            type: 'line',
-            slot: k,
-            ...boundary(w),
-          }))
-        : []
-    return [points, ...lines]
-  }, [data, fitted, method])
+  const points = useMemo(() => ({ x: data.x.map((p) => p[0]), y: data.x.map((p) => p[1]) }), [data])
+  // One-versus-rest draws each binary boundary in its class's colour: the claimed side of line k is class k's.
+  const lines = useMemo(
+    () => (method === 'ovr-argmax' || method === 'ovr-claimed' ? fitted.weights.map((w) => boundary(w)) : []),
+    [fitted, method],
+  )
 
-  const handles: Handle[] = centres.map((c, k) => ({
-    kind: 'point',
-    at: c,
-    label: `mean ${k + 1}`,
-    onDrag: ([a, b]) => setCentres((cs) => cs.map((old, j): Vec2 => (j === k ? [clamp(a), clamp(b)] : old))),
-  }))
-
+  const xAxis = useAxis({ label: 'x₁', range: [LO, HI] })
+  const yAxis = useAxis({ label: 'x₂', range: [LO, HI] })
   const pct = (v: number) => `${formatNumber(100 * v)}%`
   return (
-    <Interactive
+    <Figure
       title="Four classes, five multiclass rules"
+      state={state}
       caption={
         <>
           Four Gaussian classes of 40 points each; every binary classifier is a ridge-penalised linear logistic
@@ -117,14 +101,7 @@ export function MulticlassReductions({ initial = 'ovr-argmax' }: { initial?: Met
           cluster.
         </>
       }
-      controls={
-        <>
-          <ParamChoice label="method" value={method} onChange={setMethod} options={METHODS} />
-          <ParamSlider label="class spread (standard deviation)" param={spread} />
-          <ParamSlider label="data seed" param={seed} format={(v) => String(v)} />
-        </>
-      }
-      readout={
+      readouts={
         <>
           <Readout label="training accuracy" value={pct(accuracy)} />
           <Readout label="plane unassigned" value={pct(unassigned)} />
@@ -136,21 +113,35 @@ export function MulticlassReductions({ initial = 'ovr-argmax' }: { initial?: Met
         </>
       }
     >
-      <Heatmap
-        x={GRID}
-        y={GRID}
-        z={z}
-        scale="categorical"
-        categoryNames={CLASS_NAMES}
-        fillOpacity={0.45}
-        overlay={overlay}
-        handles={handles}
-        xLabel="x₁"
-        yLabel="x₂"
-        valueLabel="predicted"
+      <Plot
+        x={xAxis}
+        y={yAxis}
         height={440}
         ariaLabel="Predicted class over the plane for the chosen multiclass rule, with the training points"
-      />
-    </Interactive>
+      >
+        <Raster
+          x={GRID}
+          y={GRID}
+          z={z}
+          scale="categorical"
+          categoryNames={CLASS_NAMES}
+          fillOpacity={0.45}
+          valueLabel="predicted"
+        />
+        <Points name="training point" x={points.x} y={points.y} group={data.y} groupNames={CLASS_NAMES} live />
+        {lines.map((l, k) => (
+          <Curve key={k} name={`${k + 1} vs rest, score 0`} x={l.x} y={l.y} slot={k} live />
+        ))}
+        {centres.map((c, k) => (
+          <Handle
+            key={k}
+            kind="point"
+            at={c}
+            label={`mean ${k + 1}`}
+            onDrag={([a, b]) => setCentres((cs) => cs.map((old, j): Vec2 => (j === k ? [clamp(a), clamp(b)] : old)))}
+          />
+        ))}
+      </Plot>
+    </Figure>
   )
 }

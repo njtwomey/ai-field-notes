@@ -1,4 +1,4 @@
-"""Golden values for aifn-applied/information/coding: Huffman codes from a heapq reference, and brute-force optima."""
+"""Golden values for aifn-methods/information/coding: Huffman codes from a heapq reference, and brute-force optima."""
 
 import heapq
 import itertools

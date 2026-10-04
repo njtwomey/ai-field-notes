@@ -1,13 +1,16 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import {
-  Interactive,
-  ParamButton,
-  ParamSlider,
+  Button,
+  Figure,
+  float,
+  Handle,
+  Plot,
   Readout,
-  XYChart,
-  useParam,
-  type Handle,
-  type XYSeries,
+  seriesLayers,
+  type SeriesSpec,
+  slider,
+  useAxis,
+  useFigureState,
 } from 'aifn-render'
 
 const G = 9.81
@@ -72,8 +75,10 @@ function cycloidFit(L: number, H: number): { theta: number; r: number } {
 /** A race of frictionless beads from rest at the origin to (L, H) along four curves; the cycloid always wins. */
 export function BeadRace() {
   const [end, setEnd] = useState<Vec>([1, 0.5])
-  const p = useParam(0.5, { min: 0.3, max: 1.5, step: 0.05 })
-  const t = useParam(0, { min: 0, max: 2.5, step: 0.01 })
+  const state = useFigureState({
+    t: slider(0, 2.5, 0, { step: 0.01, label: 'time t (s)', format: (v) => `${v.toFixed(2)} s` }),
+    p: float(0.5, { min: 0.3, max: 1.5, step: 0.05, label: 'power-curve exponent p' }),
+  })
   const [playing, setPlaying] = useState(false)
   const [L, H] = end
 
@@ -82,7 +87,7 @@ export function BeadRace() {
     // The circle through both ends that leaves the origin vertically: centre (R, 0), R = (L² + H²)/2L.
     const R = (L * L + H * H) / (2 * L)
     const phi = Math.atan2(H / R, (R - L) / R)
-    const pw = p.value
+    const pw = state.p
     const curves: Curve[] = [
       { name: 'straight line', slot: 0, pos: (s) => [L * s, H * s], m: 2 },
       { name: 'circular arc', slot: 1, pos: (s) => [R - R * Math.cos(phi * s), R * Math.sin(phi * s)], m: 2 },
@@ -103,18 +108,18 @@ export function BeadRace() {
     const traces = curves.map(trace)
     const depth = Math.max(...traces.flatMap((tr) => tr.points.map((q) => q[1])))
     return { curves, traces, theta, radius: r, depth, cycloidTime: theta * Math.sqrt(r / G) }
-  }, [L, H, p.value])
+  }, [L, H, state.p])
 
   const longest = Math.max(...r.traces.map((tr) => tr.total))
 
   // Play at 1/SLOW speed from the current time until every bead has arrived.
-  const setTime = useRef(t.set)
-  setTime.current = t.set
+  const setTime = useRef((v: number) => state.set('t', v))
+  setTime.current = (v: number) => state.set('t', v)
   useEffect(() => {
     if (!playing) return
     let frame = 0
     const start = performance.now()
-    const from = t.value >= longest ? 0 : t.value
+    const from = state.t >= longest ? 0 : state.t
     const tick = (now: number) => {
       const next = from + (now - start) / 1000 / SLOW
       setTime.current(Math.min(next, longest))
@@ -128,48 +133,37 @@ export function BeadRace() {
   }, [playing, longest])
 
   // Plot with y pointing up, so the curves descend on the page.
-  const series: XYSeries[] = [
-    ...r.curves.map((c, i): XYSeries => ({
+  const series: SeriesSpec[] = [
+    ...r.curves.map((c, i): SeriesSpec => ({
       name: c.name,
       type: 'line',
       x: r.traces[i].points.map((q) => q[0]),
       y: r.traces[i].points.map((q) => -q[1]),
       slot: c.slot,
     })),
-    ...r.curves.map((c, i): XYSeries => {
-      const [bx, by] = beadAt(r.traces[i], t.value)
+    ...r.curves.map((c, i): SeriesSpec => {
+      const [bx, by] = beadAt(r.traces[i], state.t)
       return { name: c.name, type: 'scatter', x: [bx], y: [-by], slot: c.slot }
     }),
   ]
 
-  const handles: Handle[] = [
-    {
-      kind: 'point',
-      at: [L, -H],
-      label: 'end',
-      // Keep L/H ≤ 4 so the cycloid, which dips below the end point for flat ends, stays in view.
-      onDrag: ([x, y]) => {
-        const nx = Math.min(2, Math.max(0.3, x))
-        setEnd([nx, Math.min(1.2, Math.max(0.2, nx / 4, -y))])
-        setPlaying(false)
-      },
-    },
-  ]
-
   const fmt = (s: number) => `${s.toFixed(3)} s`
   const pad = 0.05
+  const xAxis = useAxis({ label: 'x (m)', range: [-pad, L + pad] })
+  const yAxis = useAxis({ label: 'height (m)', range: [-(r.depth + pad), pad], equal: xAxis })
   return (
-    <Interactive
+    <Figure
       title="The race to the bottom"
+      state={state}
       caption="Four frictionless beads start from rest at the origin and slide to the same end point: along the straight line, a circular arc that leaves vertically, a power curve y = H(x/L)^p, and the cycloid. The cycloid is always fastest. It drops steeply at first, so its bead builds speed early, and that beats the shorter but shallower paths. Press Play (quarter speed) or step the clock with the arrows; drag the end point or change p."
       controls={
         <>
-          <ParamSlider label="time t (s)" param={t} format={(v) => `${v.toFixed(2)} s`} withArrows />
-          <ParamSlider label="power-curve exponent p" param={p} />
-          <ParamButton onClick={() => setPlaying((v) => !v)}>{playing ? 'Pause' : 'Play'}</ParamButton>
+          <Button variant="outline" size="sm" onClick={() => setPlaying((v) => !v)}>
+            {playing ? 'Pause' : 'Play'}
+          </Button>
         </>
       }
-      readout={
+      readouts={
         <>
           {r.curves.map((c, i) => (
             <Readout key={c.slot} label={c.name} value={fmt(r.traces[i].total)} />
@@ -179,16 +173,20 @@ export function BeadRace() {
       }
     >
       <div className="mx-auto w-full max-w-xl">
-        <XYChart
-          series={series}
-          xLabel="x (m)"
-          yLabel="height (m)"
-          xRange={[-pad, L + pad]}
-          yRange={[-(r.depth + pad), pad]}
-          equalAspect
-          handles={handles}
-        />
+        <Plot x={xAxis} y={yAxis}>
+          {seriesLayers(series)}
+          <Handle
+            kind="point"
+            at={[L, -H]}
+            label="end"
+            onDrag={([x, y]) => {
+              const nx = Math.min(2, Math.max(0.3, x))
+              setEnd([nx, Math.min(1.2, Math.max(0.2, nx / 4, -y))])
+              setPlaying(false)
+            }}
+          />
+        </Plot>
       </div>
-    </Interactive>
+    </Figure>
   )
 }

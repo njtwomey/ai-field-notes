@@ -1,5 +1,5 @@
 import { describe, it } from 'vitest'
-import { neuralModelRegistry } from 'aifn-applied/neural'
+import { neuralModelRegistry } from 'aifn-methods/neural'
 import { expectModelProtocol } from '../registry'
 
 describe('neural model registry', () => {

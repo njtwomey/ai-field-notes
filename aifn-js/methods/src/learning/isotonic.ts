@@ -50,9 +50,7 @@ function bisectRight(arr: ArrayLike<number>, x: number): number {
 /**
  * Fit an isotonic regression model using the Pool Adjacent Violators Algorithm (PAVA).
  */
-export function isotonicRegressor(
-  params: IsotonicParams = {},
-): Estimator<WeightedData, IsotonicRegressor> {
+export function isotonicRegressor(params: IsotonicParams = {}): Estimator<WeightedData, IsotonicRegressor> {
   const { increasing = true, outOfBounds = 'clip', interpolation = 'linear' } = params
 
   return {

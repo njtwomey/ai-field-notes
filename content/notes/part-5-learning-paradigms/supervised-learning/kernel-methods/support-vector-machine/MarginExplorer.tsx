@@ -1,7 +1,18 @@
 import { useMemo } from 'react'
-import { Interactive, ParamNumberField, ParamSlider, Readout, XYChart, formatNumber, useParam, type XYSeries } from 'aifn-render'
-import { rng } from '@/lib/math'
+import {
+  Figure,
+  float,
+  formatNumber,
+  Plot,
+  Readout,
+  seriesLayers,
+  type SeriesSpec,
+  int,
+  useAxis,
+  useFigureState,
+} from 'aifn-render'
 import { linearKernel, trainSvm, type Point } from '../_shared/svm'
+import { normal, stream } from 'aifn/foundation/random'
 
 const N = 50
 const BOX = 4
@@ -29,22 +40,30 @@ function clipLine(w: Point, b: number, c: number): { x: number[]; y: number[] } 
 
 /** A linear soft-margin SVM on two Gaussian clouds: boundary, margins and support vectors as C varies. */
 export function MarginExplorer() {
-  const logC = useParam(0, { min: -2, max: 3, step: 0.05 })
-  const gap = useParam(1.2, { min: 0, max: 2.5, step: 0.05 })
-  const seed = useParam(3, { min: 1, max: 20, step: 1 })
-  const C = 10 ** logC.value
+  const state = useFigureState({
+    gap: float(1.2, { min: 0, max: 2.5, step: 0.05, label: 'class separation' }),
+    C: float(1, {
+      min: 0.01,
+      max: 1000,
+      scale: 'log10',
+      suggestions: [0.01, 0.1, 1, 10, 100, 1000],
+      label: 'C (penalty on slack)',
+    }),
+    seed: int(3, { min: 1, max: 100, label: 'data seed' }),
+  })
+  const { C } = state
 
   const data = useMemo(() => {
-    const g = rng(seed.value)
+    const g = stream(state.seed)
     const x: Point[] = []
     const y: number[] = []
     for (let i = 0; i < N; i++) {
       const label = i < N / 2 ? -1 : 1
-      x.push([label * gap.value * 0.7 + 0.9 * g.normal(), label * gap.value * 0.7 + 0.9 * g.normal()])
+      x.push([label * state.gap * 0.7 + 0.9 * normal(g), label * state.gap * 0.7 + 0.9 * normal(g)])
       y.push(label)
     }
     return { x, y }
-  }, [gap.value, seed.value])
+  }, [state.gap, state.seed])
 
   const r = useMemo(() => {
     const fit = trainSvm(data.x, data.y, C, linearKernel)
@@ -64,7 +83,7 @@ export function MarginExplorer() {
   const boundary = clipLine(r.w, r.fit.b, 0)
   const plus = clipLine(r.w, r.fit.b, 1)
   const minus = clipLine(r.w, r.fit.b, -1)
-  const series: XYSeries[] = [
+  const series: SeriesSpec[] = [
     {
       name: 'points',
       type: 'scatter',
@@ -85,24 +104,14 @@ export function MarginExplorer() {
     },
   ]
 
+  const xAxis = useAxis({ label: 'x₁', range: RANGE })
+  const yAxis = useAxis({ label: 'x₂', range: Y_RANGE, equal: xAxis })
   return (
-    <Interactive
+    <Figure
       title="The maximum-margin boundary and its support vectors"
+      state={state}
       caption="Two classes of 25 points each. The solid line is the decision boundary w·x + b = 0 and the dashed lines are the margins w·x + b = ±1. Diamonds mark the support vectors, the points with αᵢ > 0: those on the margin, inside it, or misclassified. Only they determine the boundary. A small C tolerates margin violations cheaply, so the margin is wide and many points are support vectors. A large C penalises violations heavily, the margin narrows, and with separable data the solution approaches the hard-margin SVM."
-      controls={
-        <>
-          <ParamNumberField
-            label="C (penalty on slack)"
-            param={logC}
-            logTransform="value-is-log"
-            step={0.5}
-            points_per_decade={2}
-          />
-          <ParamSlider label="class separation" param={gap} />
-          <ParamNumberField label="data seed" param={seed} type="int" min={1} max={100} step={1} />
-        </>
-      }
-      readout={
+      readouts={
         <>
           <Readout label="support vectors" value={`${r.sv.length} (${r.atBound} at αᵢ = C)`} />
           <Readout label="margin width 2/‖w‖" value={formatNumber(2 / r.norm)} />
@@ -112,8 +121,10 @@ export function MarginExplorer() {
       }
     >
       <div className="mx-auto w-full max-w-lg">
-        <XYChart series={series} xLabel="x₁" yLabel="x₂" xRange={RANGE} yRange={Y_RANGE} equalAspect />
+        <Plot x={xAxis} y={yAxis}>
+          {seriesLayers(series)}
+        </Plot>
       </div>
-    </Interactive>
+    </Figure>
   )
 }

@@ -1,14 +1,5 @@
 import { useMemo } from 'react'
-import {
-  Interactive,
-  ParamSlider,
-  Readout,
-  XYChart,
-  formatNumber,
-  useParam,
-  type Handle,
-  type XYSeries,
-} from 'aifn-render'
+import { Curve, Figure, float, formatNumber, Handle, int, Plot, Readout, useAxis, useFigureState } from 'aifn-render'
 
 const K_MAX = 40
 const KS = Array.from({ length: K_MAX }, (_, i) => i + 1)
@@ -52,48 +43,42 @@ function pluralityAccuracy(k: number, p: number, m: number): number {
 
 /** Majority-vote (self-consistency) accuracy against the number of sampled reasoning chains. */
 export function SelfConsistency() {
-  const p = useParam(0.4, { min: 0.05, max: 0.95, step: 0.01 })
-  const m = useParam(3, { min: 1, max: 5, step: 1 })
-  const k = useParam(9, { min: 1, max: K_MAX, step: 1 })
+  const state = useFigureState({
+    p: float(0.4, { min: 0.05, max: 0.95, step: 0.01, label: 'one-chain accuracy p' }),
+    m: int(3, { min: 1, max: 5, step: 1, label: 'distinct wrong answers m', format: (v) => String(v) }),
+    k: int(9, { min: 1, max: K_MAX, step: 1, label: 'chains sampled k', format: (v) => String(v) }),
+  })
 
-  const curve = useMemo(() => KS.map((kk) => pluralityAccuracy(kk, p.value, m.value)), [p.value, m.value])
+  const curve = useMemo(() => KS.map((kk) => pluralityAccuracy(kk, state.p, state.m)), [state.p, state.m])
 
-  const series: XYSeries[] = [
-    { name: 'majority vote of k chains', type: 'line', x: KS, y: curve, slot: 0 },
-    { name: 'one chain (p)', type: 'line', x: [1, K_MAX], y: [p.value, p.value], slot: 1, dashed: true },
-  ]
-  const handles: Handle[] = [{ kind: 'x', at: k.value, label: 'k', onDrag: k.set }]
-  const wrongEach = (1 - p.value) / m.value
-  const acc = curve[k.value - 1]
+  const series = [
+    { name: 'majority vote of k chains', x: KS, y: curve, slot: 0 },
+    { name: 'one chain (p)', x: [1, K_MAX], y: [state.p, state.p], slot: 1, dashed: true },
+  ] as const
+  const wrongEach = (1 - state.p) / state.m
+  const acc = curve[state.k - 1]
 
+  const xAxis = useAxis({ label: 'chains sampled k', range: [1, K_MAX] })
+  const yAxis = useAxis({ label: 'accuracy', range: [0, 1] })
   return (
-    <Interactive
+    <Figure
       title="Self-consistency: majority vote over sampled chains"
+      state={state}
       caption="Each sampled chain of thought is independently correct with probability p. A wrong chain gives one of m distinct wrong answers, each with probability (1 − p)/m. The line is the probability that the most common answer among k chains is correct, with ties broken at random. The vote converges to the correct answer when p exceeds (1 − p)/m, even when p is below one half, and to a wrong answer otherwise. Drag the line labelled k, or use its slider."
-      controls={
-        <>
-          <ParamSlider label="one-chain accuracy p" param={p} />
-          <ParamSlider label="distinct wrong answers m" param={m} format={(v) => String(v)} />
-          <ParamSlider label="chains sampled k" param={k} format={(v) => String(v)} />
-        </>
-      }
-      readout={
+
+      readouts={
         <>
           <Readout label="accuracy with k chains" value={formatNumber(acc)} />
-          <Readout label="gain over one chain" value={formatNumber(acc - p.value)} />
+          <Readout label="gain over one chain" value={formatNumber(acc - state.p)} />
           <Readout label="each wrong answer (1 − p)/m" value={formatNumber(wrongEach)} />
         </>
       }
     >
-      <XYChart
-        series={series}
-        xLabel="chains sampled k"
-        yLabel="accuracy"
-        xRange={[1, K_MAX]}
-        yRange={[0, 1]}
-        height={300}
-        handles={handles}
-      />
-    </Interactive>
+      <Plot x={xAxis} y={yAxis} height={300}>
+        <Curve {...series[0]} />
+        <Curve {...series[1]} />
+        <Handle {...state.handle('k', { label: 'k' })} />
+      </Plot>
+    </Figure>
   )
 }

@@ -1,5 +1,5 @@
 /**
- * `aifn-applied/retrieval/recommenders`: recommender models on user–item interactions. Popularity and neighbourhood
+ * `aifn-methods/retrieval/recommenders`: recommender models on user–item interactions. Popularity and neighbourhood
  * collaborative filtering; matrix factorisation by SGD and by alternating least squares, and implicit-feedback ALS
  * (Hu–Koren–Volinsky); gradient-trained models (logistic MF, BPR, factorisation machines, field-aware FM, Wide & Deep,
  * DeepFM, NCF, two-tower, SASRec); Matchbox (Bayesian bilinear ordinal ratings with feature traits, by ADF);

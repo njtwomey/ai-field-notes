@@ -1,5 +1,5 @@
 import { Pause, Play } from 'lucide-react'
-import { ParamButton } from 'aifn-render'
+import { Button } from 'aifn-render'
 
 export function PlayButton({
   playing,
@@ -11,8 +11,8 @@ export function PlayButton({
   disabled?: boolean
 }) {
   return (
-    <ParamButton onClick={onToggle} disabled={disabled}>
+    <Button variant="outline" size="sm" onClick={onToggle} disabled={disabled}>
       {playing ? <Pause /> : <Play />} {playing ? 'Pause' : 'Play'}
-    </ParamButton>
+    </Button>
   )
 }

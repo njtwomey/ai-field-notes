@@ -1,42 +1,51 @@
-import { useMemo, useState } from 'react'
+import { useMemo } from 'react'
 import {
-  Interactive,
-  ParamChoice,
-  ParamSlider,
-  Readout,
-  XYChart,
+  choice,
+  Figure,
   formatNumber,
-  useParam,
-  type XYSeries,
+  int,
+  Plot,
+  Readout,
+  seriesLayers,
+  type SeriesSpec,
+  useAxis,
+  useFigureState,
 } from 'aifn-render'
-import { linspace, rng } from '@/lib/math'
+import { linspace, toFlat } from 'aifn/foundation/tensor'
+import { normal, stream, uniform } from 'aifn/foundation/random'
 
 const STEP_CHOICES = ['4', '16', '64', '256', '4096'] as const
 type Steps = (typeof STEP_CHOICES)[number]
 /** Longest walk drawn as an exact step function; longer walks are sampled at this many points for drawing only. */
 const DRAWN_STEPS = 256
-const T = linspace(0, 1, 101)
+const T = toFlat(linspace(0, 1, 101))
 
 /** Scaled simple random walks W(t) = S⌊nt⌋/√n on [0, 1]: jagged for small n, Brownian-looking for large n. */
 export function ScaledWalks() {
-  const [steps, setSteps] = useState<Steps>('16')
-  const n = Number(steps)
+  const state = useFigureState({
+    steps: choice<Steps>(
+      STEP_CHOICES.map((s) => ({ value: s, label: s })),
+      '16',
+      { label: 'steps n' },
+    ),
+    paths: int(3, { min: 1, max: 30, step: 1, label: 'paths', format: (v) => String(v) }),
+  })
+  const n = Number(state.steps)
 
-  const paths = useParam(3, { min: 1, max: 30, step: 1 })
-  const count = paths.value
+  const count = state.paths
 
-  const series = useMemo((): XYSeries[] => {
+  const series = useMemo((): SeriesSpec[] => {
     const many = count > 1
-    const out: XYSeries[] = []
+    const out: SeriesSpec[] = []
     const stride = Math.max(1, n / DRAWN_STEPS)
     for (let p = 0; p < count; p++) {
       // Each walk has its own stream, so adding walks leaves the existing ones unchanged.
-      const { uniform } = rng(40 + p)
+      const rs = stream(40 + p)
       const x = [0]
       const y = [0]
       let s = 0
       for (let k = 1; k <= n; k++) {
-        s += uniform() < 0.5 ? 1 : -1
+        s += uniform(rs) < 0.5 ? 1 : -1
         if (stride === 1) {
           // The walk is constant between steps, so draw it as a step function.
           x.push(k / n, k / n)
@@ -53,25 +62,20 @@ export function ScaledWalks() {
     return out
   }, [n, count])
 
+  const xAxis = useAxis({ label: 't', range: [0, 1] })
+  const yAxis = useAxis({ label: 'W(t)', range: [-3, 3] })
   return (
-    <Interactive
+    <Figure
       title="Scaled random walks converge to Brownian motion"
+      state={state}
       caption="Simple random walks with n steps of ±1, squeezed into time [0, 1] and scaled by 1/√n, drawn as light lines; the paths slider sets how many. At every n the value at time t has mean 0 and variance ⌊nt⌋/n ≈ t; the dashed curves are ±2√t, and about 95% of the walks lie between them at any t. As n grows the steps vanish and the paths take the rough, self-similar look of Brownian motion. Walks with more than 256 steps are drawn at 256 evenly spaced times."
-      controls={
-        <>
-          <ParamChoice
-            label="steps n"
-            value={steps}
-            onChange={setSteps}
-            options={STEP_CHOICES.map((s) => ({ value: s, label: s }))}
-          />
-          <ParamSlider label="paths" param={paths} withArrows format={(v) => String(v)} />
-        </>
-      }
-      readout={<Readout label="step size in space 1/√n" value={formatNumber(1 / Math.sqrt(n))} />}
+
+      readouts={<Readout label="step size in space 1/√n" value={formatNumber(1 / Math.sqrt(n))} />}
     >
-      <XYChart height={300} xLabel="t" yLabel="W(t)" series={series} xRange={[0, 1]} yRange={[-3, 3]} />
-    </Interactive>
+      <Plot x={xAxis} y={yAxis} height={300}>
+        {seriesLayers(series)}
+      </Plot>
+    </Figure>
   )
 }
 
@@ -82,16 +86,18 @@ const FINE = 2 ** 14
  * settles at t = 1 (quadratic variation); the sum of absolute increments grows like √(2^k) (infinite total variation).
  */
 export function QuadraticVariation() {
-  const [k, setK] = useState(4)
+  const state = useFigureState({
+    k: int(4, { min: 1, max: 14, step: 1, label: 'k (2ᵏ intervals)' }),
+  })
   const path = useMemo(() => {
-    const { normal } = rng(11)
+    const rs = stream(11)
     const b = new Float64Array(FINE + 1)
     const sd = Math.sqrt(1 / FINE)
-    for (let i = 1; i <= FINE; i++) b[i] = b[i - 1] + sd * normal()
+    for (let i = 1; i <= FINE; i++) b[i] = b[i - 1] + sd * normal(rs)
     return b
   }, [])
 
-  const m = 2 ** k
+  const m = 2 ** state.k
   const { series, qv, tv } = useMemo(() => {
     const stride = FINE / m
     let q = 0
@@ -115,19 +121,22 @@ export function QuadraticVariation() {
       fx.push(i / FINE)
       fy.push(path[i])
     }
-    const s: XYSeries[] = [
+    const s: SeriesSpec[] = [
       { name: 'Brownian path', type: 'line', x: fx, y: fy, muted: true },
       { name: `partition with ${m} intervals`, type: 'line', x: xs, y: ys, slot: 0 },
     ]
     return { series: s, qv: q, tv: v }
   }, [path, m])
 
+  const xAxis = useAxis({ label: 't', range: [0, 1] })
+  const yAxis = useAxis({ label: 'B(t)', hold: 'union' })
   return (
-    <Interactive
+    <Figure
       title="Quadratic variation of a Brownian path"
+      state={state}
       caption="A Brownian path on [0, 1] and its values on a partition into 2ᵏ equal intervals. As the partition refines, the sum of squared increments settles at 1, the length of the time interval. The sum of absolute increments keeps growing like √(2ᵏ · 2/π): the path has infinite length."
-      controls={<ParamSlider label="k (2ᵏ intervals)" value={k} onChange={setK} min={1} max={14} step={1} withArrows />}
-      readout={
+
+      readouts={
         <>
           <Readout label="Σ (ΔB)²" value={formatNumber(qv)} />
           <Readout label="Σ |ΔB|" value={formatNumber(tv)} />
@@ -135,7 +144,9 @@ export function QuadraticVariation() {
         </>
       }
     >
-      <XYChart height={300} xLabel="t" yLabel="B(t)" series={series} xRange={[0, 1]} />
-    </Interactive>
+      <Plot x={xAxis} y={yAxis} height={300}>
+        {seriesLayers(series)}
+      </Plot>
+    </Figure>
   )
 }

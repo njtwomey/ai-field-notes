@@ -1,5 +1,5 @@
 /**
- * `aifn-applied/dynamics/pde`: method-of-lines finite differences on a uniform 1-D grid, each solver a traceable
+ * `aifn-methods/dynamics/pde`: method-of-lines finite differences on a uniform 1-D grid, each solver a traceable
  * `Algorithm` in time whose state reports the solution, its mass and the scheme's stability number against its limit
  * (CFL).
  *

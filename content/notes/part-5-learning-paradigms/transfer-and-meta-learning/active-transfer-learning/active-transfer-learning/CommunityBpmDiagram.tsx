@@ -1,5 +1,4 @@
-import { Interactive } from 'aifn-render'
-import { Diagram } from 'aifn-render'
+import { Diagram, Figure } from 'aifn-render'
 import type { DiagramSpec } from 'aifn-render'
 
 // The hierarchical "community" multi-class Bayes point machine of Diethe, Twomey and Flach (2015, 2016), drawn as a
@@ -70,7 +69,7 @@ const spec: DiagramSpec = {
 
 export function CommunityBpmDiagram() {
   return (
-    <Interactive
+    <Figure
       title="The community Bayes point machine"
       caption="Each individual r in the community has their own weights w, drawn from a shared Gaussian whose mean μ and precision τ are learnt from everyone. A score s = wᵀx gets Gaussian noise, and the label is the class with the largest noisy score. To personalise, the posterior over μ (and optionally τ) from the community becomes the prior for a new individual, whose weights are then updated online as labels arrive."
     >
@@ -78,6 +77,6 @@ export function CommunityBpmDiagram() {
         spec={spec}
         ariaLabel="Hierarchical Bayes point machine: community mean and precision generate per-individual weights, which with features give noisy scores and labels"
       />
-    </Interactive>
+    </Figure>
   )
 }

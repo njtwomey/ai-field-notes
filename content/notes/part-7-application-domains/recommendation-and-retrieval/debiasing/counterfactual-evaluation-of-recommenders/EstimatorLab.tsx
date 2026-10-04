@@ -1,15 +1,20 @@
-import { useMemo, useState } from 'react'
+import { useMemo } from 'react'
 import {
-  Interactive,
-  ParamChoice,
-  ParamSlider,
-  Readout,
-  XYChart,
+  choice,
+  Curve,
+  Figure,
+  float,
   formatNumber,
-  useParam,
-  type XYSeries,
+  Handle,
+  int,
+  Plot,
+  Points,
+  Readout,
+  slider,
+  useAxis,
+  useFigureState,
 } from 'aifn-render'
-import { rng } from '@/lib/math'
+import { stream, uniform } from 'aifn/foundation/random'
 
 /*
  * A recommender with C = 4 contexts (viewed products, drawn uniformly) and K = 6 candidate items. Each (context, item)
@@ -51,16 +56,16 @@ type Log = { N: number[][]; S: number[][] }
 function simulate(n: number, logging: number[], seed: number): Log[] {
   const cum = logging.map((_, a) => logging.slice(0, a + 1).reduce((s, v) => s + v, 0))
   return Array.from({ length: REPS }, (_, j) => {
-    const r = rng(seed * 7919 + j * 104729 + 17)
+    const r = stream(seed * 7919 + j * 104729 + 17)
     const N = MU.map(() => new Array<number>(K).fill(0))
     const S = MU.map(() => new Array<number>(K).fill(0))
     for (let i = 0; i < n; i++) {
-      const x = Math.floor(r.uniform() * C)
-      const u = r.uniform()
+      const x = Math.floor(uniform(r) * C)
+      const u = uniform(r)
       let a = 0
       while (a < K - 1 && u > cum[a]) a++
       N[x][a]++
-      if (r.uniform() < MU[x][a]) S[x][a]++
+      if (uniform(r) < MU[x][a]) S[x][a]++
     }
     return { N, S }
   })
@@ -110,24 +115,30 @@ const summary = (xs: number[]) => {
  * production recommender, with a draggable clip threshold.
  */
 export function EstimatorLab() {
-  const [size, setSize] = useState<Size>('1000')
-  const skew = useParam(3, { min: 0, max: 5, step: 0.1 })
-  const misspec = useParam(1, { min: 0, max: 1, step: 0.05 })
-  const clip = useParam(10, { min: 1, max: M_MAX, step: 0.5 })
-  const seed = useParam(1, { min: 1, max: 30, step: 1 })
-  const n = Number(size)
+  const state = useFigureState({
+    skew: float(3, { min: 0, max: 5, step: 0.1, label: 'propensity skew β' }),
+    misspec: float(1, { min: 0, max: 1, step: 0.05, label: 'reward-model misspecification' }),
+    clip: slider(1, M_MAX, 10, { step: 0.5, label: 'clip threshold M' }),
+    size: choice<Size>(
+      SIZES.map((v) => ({ value: v, label: Number(v).toLocaleString() })),
+      '1000',
+      { label: 'impressions per log n' },
+    ),
+    seed: int(1, { min: 1, max: 30, step: 1, label: 'seed', format: (v) => String(v) }),
+  })
+  const n = Number(state.size)
 
-  const logging = useMemo(() => softmax(POPULARITY.map((s) => skew.value * s)), [skew.value])
+  const logging = useMemo(() => softmax(POPULARITY.map((s) => state.skew * s)), [state.skew])
   const weights = useMemo(() => TARGET.map((p) => p.map((q, a) => q / logging[a])), [logging])
-  const logs = useMemo(() => simulate(n, logging, seed.value), [n, logging, seed.value])
+  const logs = useMemo(() => simulate(n, logging, state.seed), [n, logging, state.seed])
   const muHat = useMemo(
-    () => MU.map((row) => row.map((m, a) => (1 - misspec.value) * m + misspec.value * WRONG[a])),
-    [misspec.value],
+    () => MU.map((row) => row.map((m, a) => (1 - state.misspec) * m + state.misspec * WRONG[a])),
+    [state.misspec],
   )
 
   const reps = useMemo(
-    () => logs.map((log) => estimates(log, n, weights, muHat, clip.value)),
-    [logs, n, weights, muHat, clip.value],
+    () => logs.map((log) => estimates(log, n, weights, muHat, state.clip)),
+    [logs, n, weights, muHat, state.clip],
   )
   // Clipped IPS over a grid of thresholds: only the clipped sum depends on M.
   const clipCurve = useMemo(
@@ -150,59 +161,48 @@ export function EstimatorLab() {
   const productionCtr = logging.reduce((s, p, a) => s + p * mean(MU.map((row) => row[a])), 0)
   const maxWeight = Math.max(...weights.flat())
 
-  const strip: XYSeries[] = [
+  const strip = [
     {
       name: 'estimates',
-      type: 'scatter',
       x: ESTIMATORS.flatMap((_, i) => reps.map((_, j) => i + 1 + 0.6 * (((j * 0.618034) % 1) - 0.5))),
       y: ESTIMATORS.flatMap(({ key }) => reps.map((r) => r[key])),
       group: ESTIMATORS.flatMap((_, i) => reps.map(() => i)),
       groupNames: ESTIMATORS.map((e) => e.label),
     },
-    { name: 'true value V(π)', type: 'line', x: [0.5, 5.5], y: [TRUE_VALUE, TRUE_VALUE], emphasis: true, dashed: true },
+    { name: 'true value V(π)', x: [0.5, 5.5], y: [TRUE_VALUE, TRUE_VALUE], emphasis: true, dashed: true },
     {
       name: 'production CTR V(π₀)',
-      type: 'line',
       x: [0.5, 5.5],
       y: [productionCtr, productionCtr],
       muted: true,
       dashed: true,
     },
-  ]
-  const tradeOff: XYSeries[] = [
-    { name: 'CIPS RMSE', type: 'line', x: M_GRID, y: clipCurve.map((s) => s.rmse), slot: 1 },
-    { name: 'CIPS |bias|', type: 'line', x: M_GRID, y: clipCurve.map((s) => Math.abs(s.bias)), slot: 5 },
-    { name: 'CIPS sd', type: 'line', x: M_GRID, y: clipCurve.map((s) => s.sd), slot: 6 },
-    { name: 'IPS RMSE', type: 'line', x: [1, M_MAX], y: [stats.ips.rmse, stats.ips.rmse], slot: 0, dashed: true },
+  ] as const
+  const tradeOff = [
+    { name: 'CIPS RMSE', x: M_GRID, y: clipCurve.map((s) => s.rmse), slot: 1 },
+    { name: 'CIPS |bias|', x: M_GRID, y: clipCurve.map((s) => Math.abs(s.bias)), slot: 5 },
+    { name: 'CIPS sd', x: M_GRID, y: clipCurve.map((s) => s.sd), slot: 6 },
+    { name: 'IPS RMSE', x: [1, M_MAX], y: [stats.ips.rmse, stats.ips.rmse], slot: 0, dashed: true },
     {
       name: 'SNIPS RMSE',
-      type: 'line',
       x: [1, M_MAX],
       y: [stats.snips.rmse, stats.snips.rmse],
       slot: 2,
       dashed: true,
     },
-  ]
+  ] as const
 
+  const xAxis = useAxis({ label: 'estimator', range: [0.5, 5.5] })
+  const yAxis = useAxis({ label: 'estimated click rate', hold: 'union' })
+  const xAxis2 = useAxis({ label: 'clip threshold M', range: [1, M_MAX] })
+  const yAxis2 = useAxis({ label: 'error', range: [0, undefined], hold: 'union' })
   return (
-    <Interactive
+    <Figure
       title="Counterfactual estimator lab"
+      state={state}
       caption="A production recommender shows one of six items on each of four product pages, with probabilities set by item popularity alone; the propensity skew β sharpens them. A new recommender, which follows the true click rates, is evaluated from 200 simulated logs. Top: the 200 estimates from each estimator against the true click rate of the new recommender (dashed ink) and the production click rate (dashed grey), which is what the log’s own average reports. Bottom: bias, spread and RMSE of clipped IPS as the clip threshold M varies; drag the guide to set M. The reward model used by the direct method and doubly robust blends the true click rates with a model that ignores the page; misspecification 1 is the page-blind model. Raise the skew and IPS spreads out; clip hard and the estimate falls below the truth; misspecify the model and the direct method is confidently wrong while doubly robust stays centred."
-      controls={
-        <>
-          <ParamSlider label="propensity skew β" param={skew} />
-          <ParamSlider label="reward-model misspecification" param={misspec} />
-          <ParamSlider label="clip threshold M" param={clip} />
-          <ParamChoice
-            label="impressions per log n"
-            value={size}
-            onChange={setSize}
-            options={SIZES.map((v) => ({ value: v, label: Number(v).toLocaleString() }))}
-          />
-          <ParamSlider label="seed" param={seed} format={(v) => String(v)} />
-        </>
-      }
-      readout={
+
+      readouts={
         <>
           <Readout label="true value V(π)" value={formatNumber(TRUE_VALUE)} />
           <Readout label="production CTR V(π₀)" value={formatNumber(productionCtr)} />
@@ -221,16 +221,20 @@ export function EstimatorLab() {
       }
     >
       <div className="grid gap-4">
-        <XYChart series={strip} xLabel="estimator" yLabel="estimated click rate" xRange={[0.5, 5.5]} />
-        <XYChart
-          series={tradeOff}
-          xLabel="clip threshold M"
-          yLabel="error"
-          xRange={[1, M_MAX]}
-          yRange={[0, undefined]}
-          handles={[{ kind: 'x', at: clip.value, label: 'M', onDrag: (x) => clip.set(x) }]}
-        />
+        <Plot x={xAxis} y={yAxis}>
+          <Points {...strip[0]} />
+          <Curve {...strip[1]} />
+          <Curve {...strip[2]} />
+        </Plot>
+        <Plot x={xAxis2} y={yAxis2}>
+          <Curve {...tradeOff[0]} />
+          <Curve {...tradeOff[1]} />
+          <Curve {...tradeOff[2]} />
+          <Curve {...tradeOff[3]} />
+          <Curve {...tradeOff[4]} />
+          <Handle {...state.handle('clip', { label: 'M' })} />
+        </Plot>
       </div>
-    </Interactive>
+    </Figure>
   )
 }

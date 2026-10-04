@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { blobs, checkerboard, gaussians, moons, regression1d, xor } from 'aifn-applied/data/synthetic'
-import { classCounts, type ClassificationTruth, type Dataset } from 'aifn-applied/data'
+import { blobs, checkerboard, gaussians, moons, regression1d, xor } from 'aifn-methods/data/synthetic'
+import { classCounts, type ClassificationTruth, type Dataset } from 'aifn-methods/data'
 import {
   flippedMask,
   rotation2d,
@@ -12,7 +12,7 @@ import {
   withOutliers,
   withPrevalence,
   withTransform,
-} from 'aifn-applied/data/synthetic'
+} from 'aifn-methods/data/synthetic'
 import { stream } from 'aifn/foundation/random'
 import { tensor, toFlat } from 'aifn/foundation/tensor'
 

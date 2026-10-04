@@ -4,20 +4,20 @@ import { fromData, toFlat, toRows, type Tensor } from 'aifn/foundation/tensor'
 import { stream } from 'aifn/foundation/random'
 import { grid2d } from 'aifn/numerics/geometry'
 import { rbf } from 'aifn/learning/kernels'
-import { blobs, moons, circles, xor } from 'aifn-applied/data/synthetic'
+import { blobs, moons, circles, xor } from 'aifn-methods/data/synthetic'
 import {
   gaussianNaiveBayes,
   linearDiscriminant,
   quadraticDiscriminant,
-} from 'aifn-applied/learning/generative-classifiers'
-import { kNearestNeighbours } from 'aifn-applied/learning/neighbours'
-import { logisticRegression } from 'aifn-applied/learning/generalised/glm'
-import { perceptron } from 'aifn-applied/learning/linear'
-import { supportVectorMachine, crammerSinger } from 'aifn-applied/learning/kernel-methods'
-import { decisionTree } from 'aifn-applied/learning/trees-and-ensembles'
-import { randomForest } from 'aifn-applied/learning/trees-and-ensembles/bagging'
-import { adaBoost, gradientBoosting } from 'aifn-applied/learning/trees-and-ensembles/boosting'
-import { oneVersusOne, oneVersusRest, outputCode, exhaustiveCode } from 'aifn-applied/learning/reductions'
+} from 'aifn-methods/learning/generative-classifiers'
+import { kNearestNeighbours } from 'aifn-methods/learning/neighbours'
+import { logisticRegression } from 'aifn-methods/learning/generalised/glm'
+import { perceptron } from 'aifn-methods/learning/linear'
+import { supportVectorMachine, crammerSinger } from 'aifn-methods/learning/kernel-methods'
+import { decisionTree } from 'aifn-methods/learning/trees-and-ensembles'
+import { randomForest } from 'aifn-methods/learning/trees-and-ensembles/bagging'
+import { adaBoost, gradientBoosting } from 'aifn-methods/learning/trees-and-ensembles/boosting'
+import { oneVersusOne, oneVersusRest, outputCode, exhaustiveCode } from 'aifn-methods/learning/reductions'
 import {
   Contours,
   ControlGroup,
@@ -249,7 +249,9 @@ export function DecisionRegionsGallery() {
             for (const t of toFlat(svm.supportVectors)) sv.add(members[t])
           })
           const list = [...sv]
-          return <Points name="support vectors" x={list.map((i) => rows[i][0])} y={list.map((i) => rows[i][1])} emphasis />
+          return (
+            <Points name="support vectors" x={list.map((i) => rows[i][0])} y={list.map((i) => rows[i][1])} emphasis />
+          )
         }
       } catch {
         // ignore
@@ -301,11 +303,7 @@ export function DecisionRegionsGallery() {
               onChange={setModelChoice}
               options={Object.entries(CLASSIFIERS).map(([value, { label }]) => ({ value, label }))}
             />
-            <Switch
-              label="Show Decision Boundaries"
-              checked={showBoundary}
-              onChange={setShowBoundary}
-            />
+            <Switch label="Show Decision Boundaries" checked={showBoundary} onChange={setShowBoundary} />
           </ControlGroup>
         </>
       }
@@ -318,15 +316,9 @@ export function DecisionRegionsGallery() {
         ),
         'Probe Readout': (
           <>
-            <Readout
-              label="query decision"
-              value={data.names[queryResult.label] ?? `Class ${queryResult.label}`}
-            />
+            <Readout label="query decision" value={data.names[queryResult.label] ?? `Class ${queryResult.label}`} />
             {queryResult.probs && (
-              <Readout
-                label="posteriors P(y | q)"
-                value={queryResult.probs.map((p) => p.toFixed(2)).join(' : ')}
-              />
+              <Readout label="posteriors P(y | q)" value={queryResult.probs.map((p) => p.toFixed(2)).join(' : ')} />
             )}
           </>
         ),

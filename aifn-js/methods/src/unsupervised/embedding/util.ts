@@ -1,5 +1,5 @@
 /**
- * Shared helpers of `aifn-applied/unsupervised/embedding`: float64 views of tensors (tensor's `dense.data`), shape checks
+ * Shared helpers of `aifn-methods/unsupervised/embedding`: float64 views of tensors (tensor's `dense.data`), shape checks
  * and small tensors.
  */
 

@@ -1,16 +1,19 @@
 import { useMemo, useState } from 'react'
 import {
-  Heatmap,
-  Interactive,
-  ParamChoice,
-  ParamSlider,
-  Readout,
+  choice,
+  Curve,
+  Figure,
   formatNumber,
-  useParam,
-  type Handle,
-  type HeatmapOverlay,
+  Handle,
+  Plot,
+  Raster,
+  Readout,
+  slider,
+  useAxis,
+  useFigureState,
+  Vectors,
 } from 'aifn-render'
-import { linspace } from '@/lib/math'
+import { linspace, toFlat } from 'aifn/foundation/tensor'
 
 type Vec = [number, number]
 type Fn = { f: (x: number, y: number) => number; grad: (x: number, y: number) => Vec }
@@ -48,16 +51,26 @@ const FUNCTIONS: Record<'bowl' | 'saddle' | 'hills', Fn> = {
     },
   },
 }
-const AXIS = linspace(-2.5, 2.5, 51)
+const AXIS = toFlat(linspace(-2.5, 2.5, 51))
 const ARROW = 0.9
 
 /** A surface, the gradient at a dragged point, and the rate of change along a chosen direction. */
 export function GradientField() {
-  const [name, setName] = useState<keyof typeof FUNCTIONS>('bowl')
+  const state = useFigureState({
+    name: choice<keyof typeof FUNCTIONS>(
+      [
+        { value: 'bowl', label: 'bowl' },
+        { value: 'saddle', label: 'saddle' },
+        { value: 'hills', label: 'two hills' },
+      ],
+      'bowl',
+      { label: 'function' },
+    ),
+    direction: slider(0, 360, 45, { step: 1, label: 'direction u (degrees)' }),
+  })
   const [point, setPoint] = useState<Vec>([1.2, 0.6])
-  const direction = useParam(45, { min: 0, max: 360, step: 1 })
-  const angle = direction.value
-  const fn = FUNCTIONS[name]
+  const angle = state.direction
+  const fn = FUNCTIONS[state.name]
 
   const z = useMemo(() => AXIS.map((y) => AXIS.map((x) => fn.f(x, y))), [fn])
   const g = fn.grad(...point)
@@ -74,50 +87,29 @@ export function GradientField() {
     [point, g, norm],
   )
   const overlay = useMemo(
-    (): HeatmapOverlay[] => [
-      {
-        name: 'direction u',
-        type: 'line',
-        x: [point[0], point[0] + ARROW * u[0]],
-        y: [point[1], point[1] + ARROW * u[1]],
-        slot: 1,
-      },
-    ],
+    () =>
+      [
+        {
+          name: 'direction u',
+          x: [point[0], point[0] + ARROW * u[0]],
+          y: [point[1], point[1] + ARROW * u[1]],
+          slot: 1,
+        },
+      ] as const,
     [point, u],
   )
 
   const clamp = (v: number) => Math.round(Math.min(Math.max(v, AXIS[0]), AXIS[AXIS.length - 1]) * 100) / 100
-  const handles: Handle[] = [
-    { kind: 'point', at: point, label: 'point', onDrag: ([x, y]) => setPoint([clamp(x), clamp(y)]) },
-    {
-      kind: 'point',
-      at: [point[0] + ARROW * u[0], point[1] + ARROW * u[1]],
-      label: 'u',
-      onDrag: ([x, y]) =>
-        direction.set(((((Math.atan2(y - point[1], x - point[0]) * 180) / Math.PI) % 360) + 360) % 360),
-    },
-  ]
 
+  const xAxis = useAxis({ label: 'x' })
+  const yAxis = useAxis({ label: 'y' })
   return (
-    <Interactive
+    <Figure
       title="The gradient points uphill"
+      state={state}
       caption="Drag the round handle to choose a point. The arrow shows the direction of ∇f; its length in the readout is the steepest rate of increase. The orange segment is a direction u; drag its end, or use the slider, to turn it. The rate of change along u is ∇f · u, largest when u lines up with the arrow and zero when u runs along the contour."
-      controls={
-        <>
-          <ParamChoice
-            label="function"
-            value={name}
-            onChange={setName}
-            options={[
-              { value: 'bowl', label: 'bowl' },
-              { value: 'saddle', label: 'saddle' },
-              { value: 'hills', label: 'two hills' },
-            ]}
-          />
-          <ParamSlider label="direction u (degrees)" param={direction} />
-        </>
-      }
-      readout={
+
+      readouts={
         <>
           <Readout label="∇f" value={`(${formatNumber(g[0])}, ${formatNumber(g[1])})`} />
           <Readout label="‖∇f‖" value={formatNumber(norm)} />
@@ -126,19 +118,21 @@ export function GradientField() {
       }
     >
       <div className="mx-auto w-full max-w-2xl">
-        <Heatmap
-          x={AXIS}
-          y={AXIS}
-          z={z}
-          xLabel="x"
-          yLabel="y"
-          valueLabel="f"
-          vectors={vectors}
-          overlay={overlay}
-          handles={handles}
-          height={420}
-        />
+        <Plot x={xAxis} y={yAxis} height={420}>
+          <Raster x={AXIS} y={AXIS} z={z} valueLabel={'f'} />
+          <Curve {...overlay[0]} live />
+          <Vectors vectors={vectors} />
+          <Handle kind="point" at={point} label="point" onDrag={([x, y]) => setPoint([clamp(x), clamp(y)])} />
+          <Handle
+            kind="point"
+            at={[point[0] + ARROW * u[0], point[1] + ARROW * u[1]]}
+            label="u"
+            onDrag={([x, y]) =>
+              state.set('direction', ((((Math.atan2(y - point[1], x - point[0]) * 180) / Math.PI) % 360) + 360) % 360)
+            }
+          />
+        </Plot>
       </div>
-    </Interactive>
+    </Figure>
   )
 }

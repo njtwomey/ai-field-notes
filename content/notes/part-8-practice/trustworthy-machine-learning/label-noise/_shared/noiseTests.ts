@@ -1,3 +1,5 @@
+import { normal, stream, uniform } from 'aifn/foundation/random'
+import { normalCdf } from 'aifn/numerics/special'
 /**
  * Simulation and test statistics for class-conditional label noise, shared by the label-noise notes.
  *
@@ -5,8 +7,6 @@
  * Yang et al. (2024) for the local-likelihood test (local linear logistic regression, sandwich variance).
  * Labels are 1 / 0 here; α = P(ỹ = 0 | y = 1) and β = P(ỹ = 1 | y = 0).
  */
-import { rng } from '@/lib/math'
-import { normalCdf } from '@/lib/math/special'
 
 export type Pt = [number, number]
 export type Sample = { X: Pt[]; y: number[]; u: number[] }
@@ -15,17 +15,17 @@ const sigmoid = (z: number) => 1 / (1 + Math.exp(-Math.max(-30, Math.min(30, z))
 
 /** Clean data from a two-class mixture; `u` is one uniform per point, reused for flips (common random numbers). */
 function sampleFrom(centres: [Pt[], Pt[]], n: number, seed: number): Sample {
-  const r = rng(seed)
+  const r = stream(seed)
   const X: Pt[] = []
   const y: number[] = []
   const u: number[] = []
   for (let i = 0; i < n; i++) {
-    const label = r.uniform() < 0.5 ? 1 : 0
+    const label = uniform(r) < 0.5 ? 1 : 0
     const comps = centres[label]
-    const c = comps[Math.floor(r.uniform() * comps.length)]
-    X.push([c[0] + r.normal(), c[1] + r.normal()])
+    const c = comps[Math.floor(uniform(r) * comps.length)]
+    X.push([c[0] + normal(r), c[1] + normal(r)])
     y.push(label)
-    u.push(r.uniform())
+    u.push(uniform(r))
   }
   return { X, y, u }
 }
@@ -171,9 +171,9 @@ export function localTest(X: Pt[], y: number[], anchors: Pt[], h: number): TestR
 
 /** k anchors on the line x₂ = −x₁ with x₁ uniform on [−4, 4], where the two-Gaussian posterior is exactly 1/2. */
 export function lineAnchors(k: number, seed: number): Pt[] {
-  const r = rng(seed)
+  const r = stream(seed)
   return Array.from({ length: k }, () => {
-    const t = -4 + 8 * r.uniform()
+    const t = -4 + 8 * uniform(r)
     return [t, -t] as Pt
   })
 }
@@ -183,14 +183,14 @@ export function lineAnchors(k: number, seed: number): Pt[] {
  * η − 1/2 along the line and bisect it.
  */
 export function xorAnchors(k: number, seed: number): Pt[] {
-  const r = rng(seed)
+  const r = stream(seed)
   const out: Pt[] = []
   const f = (p: Pt) => xorPosterior(p) - 0.5
   const inBox = (p: Pt) => Math.abs(p[0]) <= 4 && Math.abs(p[1]) <= 4
   let guard = 0
   while (out.length < k && guard++ < 1000) {
-    const p: Pt = [-4 + 8 * r.uniform(), -4 + 8 * r.uniform()]
-    const ang = 2 * Math.PI * r.uniform()
+    const p: Pt = [-4 + 8 * uniform(r), -4 + 8 * uniform(r)]
+    const ang = 2 * Math.PI * uniform(r)
     const d: Pt = [Math.cos(ang), Math.sin(ang)]
     const at = (t: number): Pt => [p[0] + t * d[0], p[1] + t * d[1]]
     const crossings: number[] = []
@@ -198,7 +198,7 @@ export function xorAnchors(k: number, seed: number): Pt[] {
       if (inBox(at(t)) && inBox(at(t + 0.1)) && f(at(t)) * f(at(t + 0.1)) < 0) crossings.push(t)
     }
     if (!crossings.length) continue
-    let lo = crossings[Math.floor(r.uniform() * crossings.length)]
+    let lo = crossings[Math.floor(uniform(r) * crossings.length)]
     let hi = lo + 0.1
     for (let it = 0; it < 40; it++) {
       const m = (lo + hi) / 2

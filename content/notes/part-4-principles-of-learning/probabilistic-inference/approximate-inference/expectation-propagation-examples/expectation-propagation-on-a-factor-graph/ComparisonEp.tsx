@@ -1,5 +1,15 @@
 import { useMemo } from 'react'
-import { Interactive, ParamSlider, Readout, XYChart, formatNumber, useParam, type XYSeries } from 'aifn-render'
+import {
+  Figure,
+  float,
+  formatNumber,
+  Plot,
+  Readout,
+  seriesLayers,
+  type SeriesSpec,
+  useAxis,
+  useFigureState,
+} from 'aifn-render'
 import { comparisonEp } from '../_shared/comparisons'
 import { grid, logNormalCdf, normalLogPdf, normalPdf, toMoments } from '../_shared/ep'
 
@@ -44,20 +54,22 @@ function exactMarginals(noiseVar: number) {
  * from the two games are revised in turn until they agree.
  */
 export function ComparisonEp() {
-  const step = useParam(1, { min: 0, max: GAMES.length * SWEEPS, step: 1 })
-  const noise = useParam(1, { min: 0.1, max: 3, step: 0.05 })
+  const state = useFigureState({
+    step: float(1, { min: 0, max: GAMES.length * SWEEPS, step: 1, label: 'factor updates', format: (v) => String(v) }),
+    noise: float(1, { min: 0.1, max: 3, step: 0.05, label: 'performance noise σ_n²' }),
+  })
 
   const r = useMemo(
     () => ({
-      steps: comparisonEp(3, GAMES, { mean: 0, variance: 1 }, noise.value, SWEEPS),
-      exact: exactMarginals(noise.value),
+      steps: comparisonEp(3, GAMES, { mean: 0, variance: 1 }, state.noise, SWEEPS),
+      exact: exactMarginals(state.noise),
     }),
-    [noise.value],
+    [state.noise],
   )
 
-  const cur = step.value === 0 ? null : r.steps[step.value - 1]
+  const cur = state.step === 0 ? null : r.steps[state.step - 1]
   const marginals = cur ? cur.marginals : NAMES.map(() => ({ mean: 0, variance: 1 }))
-  const series: XYSeries[] = [
+  const series: SeriesSpec[] = [
     ...marginals.map((m, j) => ({
       name: `EP s_${NAMES[j]}`,
       type: 'line' as const,
@@ -79,17 +91,15 @@ export function ComparisonEp() {
     cur && g ? `sweep ${cur.sweep + 1}, game ${cur.game + 1} (${NAMES[g.winner]} beat ${NAMES[g.loser]})` : 'prior'
   const msg = cur ? cur.messages.map((m) => toMoments(m)) : null
 
+  const xAxis = useAxis({ label: 'skill', range: X_RANGE })
+  const yAxis = useAxis({ label: 'density', range: Y_RANGE })
   return (
-    <Interactive
+    <Figure
       title="Messages on the comparison graph"
+      state={state}
       caption="Skill marginals after the chosen number of factor updates (solid) against the exact marginals from a grid over all three skills (dashed). Update 1 processes A's win over B with B's prior as its cavity. Update 2 processes B's win over C, with B already lowered by the first game. Update 3 revisits game 1 with the new cavity for B; after two sweeps nothing changes. Raise the performance noise σ_n² and the games say less."
-      controls={
-        <>
-          <ParamSlider label="factor updates" param={step} withArrows format={(v) => String(v)} />
-          <ParamSlider label="performance noise σ_n²" param={noise} />
-        </>
-      }
-      readout={
+
+      readouts={
         <>
           <Readout label="position" value={where} />
           {cur && msg && g && (
@@ -108,7 +118,9 @@ export function ComparisonEp() {
         </>
       }
     >
-      <XYChart series={series} xLabel="skill" yLabel="density" xRange={X_RANGE} yRange={Y_RANGE} />
-    </Interactive>
+      <Plot x={xAxis} y={yAxis}>
+        {seriesLayers(series)}
+      </Plot>
+    </Figure>
   )
 }

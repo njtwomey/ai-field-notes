@@ -1,5 +1,5 @@
 /**
- * The registry of `aifn-applied/learning/gaussian-processes`: GP regression and classification functions, the GPLVM
+ * The registry of `aifn-methods/learning/gaussian-processes`: GP regression and classification functions, the GPLVM
  * fit as a traceable algorithm. (The sparse GP and RVM algorithms register themselves in `sparse.ts` and `rvm.ts`.)
  */
 

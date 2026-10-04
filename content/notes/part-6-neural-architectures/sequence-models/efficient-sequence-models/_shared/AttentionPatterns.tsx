@@ -1,6 +1,6 @@
-import { useMemo, useState } from 'react'
-import { Heatmap, Interactive, ParamChoice, ParamSlider, ParamSwitch, Readout, formatNumber } from 'aifn-render'
-import { rng } from '@/lib/math'
+import { useMemo } from 'react'
+import { choice, Figure, formatNumber, int, Plot, Raster, Readout, setting, useAxis, useFigureState } from 'aifn-render'
+import { stream, uniform } from 'aifn/foundation/random'
 
 export type Pattern = 'full' | 'sliding' | 'dilated' | 'strided' | 'longformer' | 'bigbird'
 
@@ -49,26 +49,37 @@ function mask(pattern: Pattern, o: Options): number[][] {
   )
   if (pattern === 'bigbird') {
     // r random keys per query, drawn from the keys the query may see. Fixed seed, so the pattern is stable.
-    const u = rng(11)
+    const u = stream(11)
     for (let i = 0; i < n; i++) {
       const hi = causal ? i + 1 : n
-      for (let k = 0; k < r; k++) m[i][Math.floor(u.uniform() * hi)] = 1
+      for (let k = 0; k < r; k++) m[i][Math.floor(uniform(u) * hi)] = 1
     }
   }
   if (causal) for (let i = 0; i < n; i++) for (let j = i + 1; j < n; j++) m[i][j] = 0
   return m
 }
 
+/** Patterns with a local window of half-width w. */
+const WINDOWED: Pattern[] = ['sliding', 'dilated', 'longformer', 'bigbird']
+
 /** Sparse attention patterns as query-by-key masks, with the fraction of the full n × n score matrix each one keeps. */
 export function AttentionPatterns({ initial = 'sliding' }: { initial?: Pattern }) {
-  const [pattern, setPattern] = useState<Pattern>(initial)
-  const [n, setN] = useState(64)
-  const [w, setW] = useState(4)
-  const [dilation, setDilation] = useState(2)
-  const [stride, setStride] = useState(8)
-  const [g, setG] = useState(2)
-  const [r, setR] = useState(2)
-  const [causal, setCausal] = useState(false)
+  const state = useFigureState({
+    pattern: choice<Pattern>(PATTERNS, initial, { label: 'pattern' }),
+    causal: setting(false, 'causal'),
+    n: int(64, { min: 16, max: 128, step: 8, suggestions: [16, 32, 64, 128], label: 'sequence length n' }),
+    w: int(4, { min: 1, max: 16, label: 'half-width w', when: (v) => WINDOWED.includes(v.pattern as Pattern) }),
+    dilation: int(2, { min: 2, max: 4, label: 'dilation', when: (v) => v.pattern === 'dilated' }),
+    stride: int(8, { min: 2, max: 16, label: 'stride', when: (v) => v.pattern === 'strided' }),
+    g: int(2, {
+      min: 0,
+      max: 8,
+      label: 'global tokens g',
+      when: (v) => v.pattern === 'longformer' || v.pattern === 'bigbird',
+    }),
+    r: int(2, { min: 0, max: 6, label: 'random keys r', when: (v) => v.pattern === 'bigbird' }),
+  })
+  const { pattern, n, w, dilation, stride, g, r, causal } = state
 
   const z = useMemo(
     () => mask(pattern, { n, w, dilation, stride, g, r, causal }),
@@ -76,33 +87,15 @@ export function AttentionPatterns({ initial = 'sliding' }: { initial?: Pattern }
   )
   const pos = useMemo(() => Array.from({ length: n }, (_, i) => i), [n])
   const pairs = z.reduce((a, row) => a + row.reduce((s, v) => s + v, 0), 0)
-  const usesWindow = pattern === 'sliding' || pattern === 'dilated' || pattern === 'longformer' || pattern === 'bigbird'
 
+  const xAxis = useAxis({ label: 'key position j', hold: 'union' })
+  const yAxis = useAxis({ label: 'query position i', hold: 'union' })
   return (
-    <Interactive
+    <Figure
       title="Attention patterns"
       caption="Each row is one query position and each column one key position; a filled cell is a score that is computed. The fraction of cells filled is the fraction of the n × n score matrix, and of the score and weighted-sum arithmetic, that the pattern keeps. Sliding windows keep a band of half-width w. Dilated windows skip keys. Strided attention (Sparse Transformer) adds every stride-th key. Global tokens fill whole rows and columns. BigBird adds r random keys per query. The causal switch removes every key after its query."
-      controls={
-        <>
-          <ParamChoice label="pattern" value={pattern} onChange={setPattern} options={PATTERNS} />
-          <ParamSwitch label="causal" checked={causal} onChange={setCausal} />
-          <ParamSlider label="sequence length n" value={n} onChange={setN} min={16} max={128} step={8} />
-          {usesWindow && <ParamSlider label="half-width w" value={w} onChange={setW} min={1} max={16} step={1} />}
-          {pattern === 'dilated' && (
-            <ParamSlider label="dilation" value={dilation} onChange={setDilation} min={2} max={4} step={1} />
-          )}
-          {pattern === 'strided' && (
-            <ParamSlider label="stride" value={stride} onChange={setStride} min={2} max={16} step={1} />
-          )}
-          {(pattern === 'longformer' || pattern === 'bigbird') && (
-            <ParamSlider label="global tokens g" value={g} onChange={setG} min={0} max={8} step={1} />
-          )}
-          {pattern === 'bigbird' && (
-            <ParamSlider label="random keys r" value={r} onChange={setR} min={0} max={6} step={1} />
-          )}
-        </>
-      }
-      readout={
+      state={state}
+      readouts={
         <>
           <Readout label="scores computed" value={`${pairs} of ${n * n}`} />
           <Readout label="FLOPs and memory vs full" value={`${formatNumber((100 * pairs) / (n * n))}%`} />
@@ -111,16 +104,9 @@ export function AttentionPatterns({ initial = 'sliding' }: { initial?: Pattern }
         </>
       }
     >
-      <Heatmap
-        x={pos}
-        y={pos}
-        z={z}
-        range={[0, 1]}
-        xLabel="key position j"
-        yLabel="query position i"
-        valueLabel="computed"
-        height={400}
-      />
-    </Interactive>
+      <Plot x={xAxis} y={yAxis} height={400}>
+        <Raster x={pos} y={pos} z={z} range={[0, 1]} valueLabel={'computed'} />
+      </Plot>
+    </Figure>
   )
 }

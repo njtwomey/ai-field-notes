@@ -4,8 +4,8 @@
  * are at most a few dozen rows, so dense loops are enough; the data may have thousands of columns, which enter only
  * through YYᵀ and the predictive mean.
  */
-import { rng } from '@/lib/math'
 import { cholesky, cholSolve, logDet, type Matrix } from '../../_shared/gp'
+import { normal, stream } from 'aifn/foundation/random'
 
 export type Point = [number, number]
 
@@ -135,8 +135,8 @@ export function pcaScores(Y: Matrix): Point[] {
 }
 
 export function randomLatent(n: number, seed: number, scale = 0.3): Point[] {
-  const g = rng(seed)
-  return Array.from({ length: n }, (): Point => [scale * g.normal(), scale * g.normal()])
+  const g = stream(seed)
+  return Array.from({ length: n }, (): Point => [scale * normal(g), scale * normal(g)])
 }
 
 /** Log posterior and its gradients in X and in the log hyperparameters. */

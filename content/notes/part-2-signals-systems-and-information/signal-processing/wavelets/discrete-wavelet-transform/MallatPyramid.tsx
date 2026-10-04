@@ -1,5 +1,4 @@
-import { Interactive } from 'aifn-render'
-import { Diagram } from 'aifn-render'
+import { Diagram, Figure } from 'aifn-render'
 import type { DiagramEdge, DiagramNode, DiagramSpec } from 'aifn-render'
 
 const STEP = 3.6
@@ -59,7 +58,7 @@ const spec: DiagramSpec = {
 /** Mallat's algorithm: a cascade of two-channel splits applied to the lowpass branch. */
 export function MallatPyramid() {
   return (
-    <Interactive
+    <Figure
       title="Mallat's pyramid, three levels"
       caption="Each level filters the current approximation with the lowpass filter h and the highpass filter g and keeps every second sample. The highpass output is kept as the detail coefficients d_j; the lowpass output a_j is split again. A signal of N samples gives N/2 + N/4 + N/8 detail coefficients and N/8 approximation coefficients: N in total."
     >
@@ -67,6 +66,6 @@ export function MallatPyramid() {
         spec={spec}
         ariaLabel="Three levels of the discrete wavelet transform: at each level the approximation is filtered by h and g and downsampled by two; the g branch gives the detail coefficients and the h branch feeds the next level"
       />
-    </Interactive>
+    </Figure>
   )
 }

@@ -1,5 +1,5 @@
 import { useMemo } from 'react'
-import { Interactive, ParamSlider, Readout, XYChart, formatNumber, useParam, type XYSeries } from 'aifn-render'
+import { Curve, Figure, float, formatNumber, Handle, Plot, Points, Readout, useAxis, useFigureState } from 'aifn-render'
 
 /**
  * Time-optimal control of the double integrator ẋ₁ = x₂, ẋ₂ = u with |u| ≤ 1, solved in closed form: one arc with
@@ -45,34 +45,35 @@ function solve(x1: number, x2: number) {
 const CURVE_V = Array.from({ length: 121 }, (_, i) => -3 + (6 * i) / 120)
 
 export function BangBang() {
-  const x1 = useParam(2, { min: -4, max: 4, step: 0.05 })
-  const x2 = useParam(1, { min: -3, max: 3, step: 0.05 })
-  const sol = useMemo(() => solve(x1.value, x2.value), [x1.value, x2.value])
+  const state = useFigureState({
+    x1: float(2, { min: -4, max: 4, step: 0.05, label: 'initial position x₁' }),
+    x2: float(1, { min: -3, max: 3, step: 0.05, label: 'initial velocity x₂' }),
+  })
+  const sol = useMemo(() => solve(state.x1, state.x2), [state.x1, state.x2])
 
-  const phase: XYSeries[] = [
+  const phase = [
     {
       name: 'switching curve x₁ = −½x₂|x₂|',
-      type: 'line',
       x: CURVE_V.map((v) => -0.5 * v * Math.abs(v)),
       y: CURVE_V,
       muted: true,
     },
-    { name: 'optimal trajectory', type: 'line', x: sol.p, y: sol.v, slot: 0 },
-    { name: 'origin', type: 'scatter', x: [0], y: [0], emphasis: true },
-  ]
-  const input: XYSeries[] = [{ name: 'u(t)', type: 'line', x: sol.t, y: sol.u, slot: 1 }]
+    { name: 'optimal trajectory', x: sol.p, y: sol.v, slot: 0 },
+    { name: 'origin', x: [0], y: [0], emphasis: true },
+  ] as const
+  const input = [{ name: 'u(t)', x: sol.t, y: sol.u, slot: 1 }] as const
 
+  const xAxis = useAxis({ label: 'position x₁', range: [-6, 6] })
+  const yAxis = useAxis({ label: 'velocity x₂', range: [-4, 4], equal: xAxis })
+  const xAxis2 = useAxis({ label: 'time t', hold: 'union' })
+  const yAxis2 = useAxis({ label: 'input u', range: [-1.5, 1.5] })
   return (
-    <Interactive
+    <Figure
       title="Time-optimal control is bang-bang"
+      state={state}
       caption="The fastest way to bring a unit mass to rest at the origin with a force bounded by |u| ≤ 1. Drag the initial state (position x₁, velocity x₂). The minimum principle allows only u = +1 or u = −1 with at most one switch. Each arc is a parabola; the switch happens where the first parabola meets the switching curve (grey), the only curve along which full thrust in one direction ends exactly at the origin."
-      controls={
-        <>
-          <ParamSlider label="initial position x₁" param={x1} />
-          <ParamSlider label="initial velocity x₂" param={x2} />
-        </>
-      }
-      readout={
+
+      readouts={
         <>
           <Readout label="first arc" value={`u = ${sol.sigma > 0 ? '+1' : '−1'}`} />
           <Readout label="switch time" value={formatNumber(sol.t1)} />
@@ -81,27 +82,24 @@ export function BangBang() {
       }
     >
       <div className="grid gap-4 md:grid-cols-2">
-        <XYChart
-          series={phase}
-          xLabel="position x₁"
-          yLabel="velocity x₂"
-          xRange={[-6, 6]}
-          yRange={[-4, 4]}
-          equalAspect
-          handles={[
-            {
-              kind: 'point',
-              at: [x1.value, x2.value],
-              onDrag: ([p, v]) => {
-                x1.set(p)
-                x2.set(v)
-              },
-              label: 'initial state',
-            },
-          ]}
-        />
-        <XYChart series={input} xLabel="time t" yLabel="input u" yRange={[-1.5, 1.5]} height={260} />
+        <Plot x={xAxis} y={yAxis}>
+          <Curve {...phase[0]} />
+          <Curve {...phase[1]} />
+          <Points {...phase[2]} />
+          <Handle
+            kind="point"
+            at={[state.x1, state.x2]}
+            onDrag={([p, v]) => {
+              state.set('x1', p)
+              state.set('x2', v)
+            }}
+            label="initial state"
+          />
+        </Plot>
+        <Plot x={xAxis2} y={yAxis2} height={260}>
+          <Curve {...input[0]} />
+        </Plot>
       </div>
-    </Interactive>
+    </Figure>
   )
 }

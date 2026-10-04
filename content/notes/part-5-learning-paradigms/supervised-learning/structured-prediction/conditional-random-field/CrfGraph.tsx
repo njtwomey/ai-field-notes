@@ -1,9 +1,5 @@
-import { useState } from 'react'
-import { MathText } from 'aifn-render'
-import { Diagram } from 'aifn-render'
-import { link, variable } from 'aifn-render'
+import { Diagram, Figure, link, MathText, setting, useFigureState, variable } from 'aifn-render'
 import type { DiagramSpec } from 'aifn-render'
-import { Interactive, ParamSwitch } from 'aifn-render'
 import { at, chainEnds, labelNodes, potentialChain } from '../_shared/chain-graph'
 
 /** Undirected chain of labels, every label also joined to the whole observed sequence x. */
@@ -25,23 +21,25 @@ const FACTORS = potentialChain()
 
 /** The linear-chain CRF as an undirected graph conditioned on x, and as a factor graph of its potentials. */
 export function CrfGraph() {
-  const [factors, setFactors] = useState(false)
-  const g = factors ? FACTORS : UNDIRECTED
+  const state = useFigureState({
+    factors: setting(false, 'factor graph'),
+  })
+  const g = state.factors ? FACTORS : UNDIRECTED
   return (
-    <Interactive
+    <Figure
       title="The linear-chain CRF as a graph"
+      state={state}
       caption={
         <MathText
           text={
-            factors
+            state.factors
               ? 'Factor graph: a node potential $\\psivec_n$ on each label and an edge potential $\\Psimat_n$ between neighbours. Both are computed from $\\xvec$, which is fixed.'
               : 'Labels form an undirected chain. The observation sequence $\\xvec$ (shaded) is conditioned on and can reach every position.'
           }
         />
       }
-      controls={<ParamSwitch label="factor graph" checked={factors} onChange={setFactors} />}
     >
       <Diagram spec={{ ...g, unit: 48 }} ariaLabel="Linear-chain CRF" />
-    </Interactive>
+    </Figure>
   )
 }

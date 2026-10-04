@@ -1,5 +1,5 @@
 /**
- * `aifn-applied/timeseries` against direct numpy/scipy references (`fixtures/timeseries.json`, written by
+ * `aifn-methods/timeseries` against direct numpy/scipy references (`fixtures/timeseries.json`, written by
  * `fixtures/gen/timeseries.py`): exact ARMA and seasonal ARIMA log-likelihoods as dense Gaussian densities, their
  * maximum-likelihood fits by scipy.optimize, the GARCH(1,1) likelihood and fit, and differencing.
  */
@@ -13,7 +13,7 @@ import {
   fitSarima,
   garchLogLikelihood,
   sarimaLogLikelihood,
-} from 'aifn-applied/timeseries'
+} from 'aifn-methods/timeseries'
 import { fixture } from '../fixtures'
 
 type ArmaCase = {

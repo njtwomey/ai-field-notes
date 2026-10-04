@@ -1,16 +1,20 @@
-import { useMemo, useState } from 'react'
+import { useMemo } from 'react'
 import {
-  Interactive,
-  ParamChoice,
-  ParamSlider,
-  Readout,
-  XYChart,
+  Curve,
+  Figure,
   formatNumber,
-  type Handle,
-  type XYSeries,
+  Handle,
+  int,
+  Plot,
+  Points,
+  Readout,
+  slider,
+  useAxis,
+  useFigureState,
+  variants,
 } from 'aifn-render'
-import { linspace } from '@/lib/math'
-import { logFactorial } from '@/lib/math/special'
+import { linspace, toFlat } from 'aifn/foundation/tensor'
+import { logFactorial } from 'aifn/numerics/special'
 
 type Fn = {
   label: string
@@ -21,7 +25,9 @@ type Fn = {
   a: [number, number]
 }
 
-const FUNCTIONS: Record<'sin' | 'exp' | 'log' | 'geometric', Fn> = {
+type FnId = 'sin' | 'exp' | 'log' | 'geometric'
+
+const FUNCTIONS: Record<FnId, Fn> = {
   sin: {
     label: 'sin x',
     f: Math.sin,
@@ -50,35 +56,36 @@ const FUNCTIONS: Record<'sin' | 'exp' | 'log' | 'geometric', Fn> = {
 
 /** A function and its Taylor polynomial of order n about a. */
 export function TaylorExplorer() {
-  const [name, setName] = useState<keyof typeof FUNCTIONS>('sin')
-  const [order, setOrder] = useState(3)
-  const [a, setA] = useState(0)
-  const fn = FUNCTIONS[name]
-  const centre = Math.min(Math.max(a, fn.a[0]), fn.a[1])
-  // The expansion point as a vertical line on the chart, bound to the same state and step as its slider.
-  const handles: Handle[] = [
-    {
-      kind: 'x',
-      at: centre,
-      label: 'a',
-      onDrag: (x) => setA(Number((Math.round(Math.min(Math.max(x, fn.a[0]), fn.a[1]) / 0.05) * 0.05).toFixed(2))),
-    },
-  ]
+  const state = useFigureState({
+    name: variants(
+      Object.fromEntries(
+        (Object.keys(FUNCTIONS) as FnId[]).map((k) => {
+          const f = FUNCTIONS[k]
+          const a = slider(f.a[0], f.a[1], 0, { step: 0.05, label: 'expansion point a' })
+          return [k, { label: f.label, params: { a } }]
+        }),
+      ) as Record<FnId, { label: string; params: { a: ReturnType<typeof slider> } }>,
+      { choiceLabel: 'function' },
+    ),
+    order: int(3, { min: 0, max: 15, step: 1, label: 'order n', format: (v) => String(v) }),
+  })
+  const fn = FUNCTIONS[state.name.key]
+  const centre = state.name.values.a
 
   const r = useMemo(() => {
-    const coef = Array.from({ length: order + 1 }, (_, k) => fn.derivative(k, centre) / Math.exp(logFactorial(k)))
+    const coef = Array.from({ length: state.order + 1 }, (_, k) => fn.derivative(k, centre) / Math.exp(logFactorial(k)))
     const taylor = (x: number) => coef.reduce((s, c, k) => s + c * (x - centre) ** k, 0)
-    const xs = linspace(fn.domain[0], fn.domain[1], 400)
+    const xs = toFlat(linspace(fn.domain[0], fn.domain[1], 400))
     const fy = xs.map(fn.f)
     const finite = fy.filter(Number.isFinite)
     const lo = Math.min(...finite)
     const hi = Math.max(...finite)
     const pad = 0.3 * (hi - lo || 1)
-    const series: XYSeries[] = [
-      { name: fn.label, type: 'line', x: xs, y: fy, slot: 0 },
-      { name: `order ${order} Taylor polynomial`, type: 'line', x: xs, y: xs.map(taylor), slot: 1, dashed: true },
-      { name: 'expansion point', type: 'scatter', x: [centre], y: [fn.f(centre)], emphasis: true },
-    ]
+    const series = [
+      { name: fn.label, x: xs, y: fy, slot: 0 },
+      { name: `order ${state.order} Taylor polynomial`, x: xs, y: xs.map(taylor), slot: 1, dashed: true },
+      { name: 'expansion point', x: [centre], y: [fn.f(centre)], emphasis: true },
+    ] as const
     const at = centre + 0.5
     return {
       series,
@@ -86,57 +93,27 @@ export function TaylorExplorer() {
       errorAt: at,
       error: Math.abs(fn.f(at) - taylor(at)),
     }
-  }, [fn, order, centre])
+  }, [fn, state.order, centre])
 
+  const xAxis = useAxis({ label: 'x', range: fn.domain })
+  const yAxis = useAxis({ label: 'y', range: r.yRange })
   return (
-    <Interactive
+    <Figure
       title="Polynomials that hug a function"
+      state={state}
       caption="The dashed curve matches the function's value and first n derivatives at the expansion point. Raise the order and the match extends further. For log(1 + x) and 1/(1 − x) it never extends past the nearest singularity, however high the order. Drag the vertical line labelled a, or use the slider, to move the expansion point."
-      controls={
-        <>
-          <ParamChoice
-            label="function"
-            value={name}
-            onChange={setName}
-            options={Object.entries(FUNCTIONS).map(([value, f]) => ({
-              value: value as keyof typeof FUNCTIONS,
-              label: f.label,
-            }))}
-          />
-          <ParamSlider
-            label="order n"
-            value={order}
-            onChange={setOrder}
-            min={0}
-            max={15}
-            step={1}
-            format={(v) => String(v)}
-          />
-          <ParamSlider
-            label="expansion point a"
-            value={centre}
-            onChange={setA}
-            min={fn.a[0]}
-            max={fn.a[1]}
-            step={0.05}
-          />
-        </>
-      }
-      readout={
+      readouts={
         <>
           <Readout label={`error at a + 0.5 = ${formatNumber(r.errorAt)}`} value={formatNumber(r.error)} />
         </>
       }
     >
-      <XYChart
-        height={320}
-        series={r.series}
-        xRange={fn.domain}
-        yRange={r.yRange}
-        xLabel="x"
-        yLabel="y"
-        handles={handles}
-      />
-    </Interactive>
+      <Plot x={xAxis} y={yAxis} height={320}>
+        <Curve {...r.series[0]} />
+        <Curve {...r.series[1]} />
+        <Points {...r.series[2]} />
+        <Handle {...state.handle('name.a', { label: 'a' })} />
+      </Plot>
+    </Figure>
   )
 }

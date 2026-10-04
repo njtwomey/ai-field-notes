@@ -1,5 +1,5 @@
 /**
- * `aifn-applied/learning/trees-and-ensembles`: decision trees and their ensembles. The shared layer holds CART
+ * `aifn-methods/learning/trees-and-ensembles`: decision trees and their ensembles. The shared layer holds CART
  * (growth, split search, cost-complexity pruning, importances) and the `decisionTree` and `regressionTree` estimators;
  * children: bagging, boosting.
  */

@@ -1,5 +1,5 @@
 /**
- * `aifn-applied/unsupervised/anomaly`: anomaly detectors. Isolation forest; k-nearest-neighbour distances and the local
+ * `aifn-methods/unsupervised/anomaly`: anomaly detectors. Isolation forest; k-nearest-neighbour distances and the local
  * outlier factor; the one-class SVM and support vector data description; Mahalanobis distances under the classical or
  * the robust (MCD) estimate; PCA reconstruction error; score ensembles; thresholds by quantile or peaks over threshold;
  * and `anomalyScores`, every detector behind one call.

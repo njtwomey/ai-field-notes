@@ -1,6 +1,4 @@
-import { Interactive } from 'aifn-render'
-import { Diagram } from 'aifn-render'
-import { op } from 'aifn-render'
+import { Diagram, Figure, op } from 'aifn-render'
 import type { DiagramSpec } from 'aifn-render'
 
 const spec: DiagramSpec = {
@@ -36,7 +34,7 @@ const spec: DiagramSpec = {
 /** The basic residual block: two convolutions on one branch, the input carried unchanged on the other. */
 export function ResidualBlockDiagram() {
   return (
-    <Interactive
+    <Figure
       title="A basic residual block"
       caption="The residual branch computes F(x) with two 3 × 3 convolutions; the shortcut carries x past them and the two are added before the final ReLU. With the branch's weights at zero the block is the identity."
     >
@@ -44,6 +42,6 @@ export function ResidualBlockDiagram() {
         spec={spec}
         ariaLabel="Residual block: x splits into a shortcut and a branch of two convolutions; the branch output is added to x and passed through a ReLU to give y"
       />
-    </Interactive>
+    </Figure>
   )
 }

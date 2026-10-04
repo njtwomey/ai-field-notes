@@ -161,7 +161,7 @@ export type GrokkingRunOptions = Omit<ModularMlpConfig, 'p'> & {
 }
 
 /**
- * Train the modular MLP by full-batch AdamW on the training pairs of a modular-arithmetic table (`aifn-applied/data`'s
+ * Train the modular MLP by full-batch AdamW on the training pairs of a modular-arithmetic table (`aifn-methods/data`'s
  * `modularArithmetic`), yielding a snapshot at every checkpoint (step 0 first) with the training and test accuracy,
  * loss and weight norm so far.
  */

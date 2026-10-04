@@ -1,4 +1,4 @@
-/** Bagging and random forests of CART trees, part of `aifn-applied/learning/trees-and-ensembles/bagging`. */
+/** Bagging and random forests of CART trees, part of `aifn-methods/learning/trees-and-ensembles/bagging`. */
 
 import type { Status } from 'aifn/foundation/contracts'
 import type {

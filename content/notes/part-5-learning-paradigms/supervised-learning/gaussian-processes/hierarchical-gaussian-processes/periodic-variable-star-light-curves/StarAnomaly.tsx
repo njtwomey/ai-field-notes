@@ -1,17 +1,19 @@
-import { useMemo, useState } from 'react'
+import { useMemo } from 'react'
 import {
-  Interactive,
-  ParamChoice,
-  ParamSlider,
-  Readout,
-  XYChart,
+  choice,
+  Figure,
+  float,
   formatNumber,
-  useParam,
-  type XYSeries,
+  Plot,
+  Readout,
+  seriesLayers,
+  type SeriesSpec,
+  useAxis,
+  useFigureState,
 } from 'aifn-render'
-import { rng } from '@/lib/math'
 import { gram, makeKernel, samples } from '../../_shared/gp'
 import { anomalyScore, classModel } from '../_shared/hgp'
+import { normal as drawNormal, stream } from 'aifn/foundation/random'
 
 const T = 40
 const PHASE = Array.from({ length: T }, (_, i) => i / T)
@@ -46,14 +48,14 @@ const KF = makeKernel('matern32', { ell: ELL_F, sf: SF })
 
 /** Each star's own smooth deviation from its class template and its noise, fixed once so only the anomaly moves. */
 const DEVIATIONS: number[][][] = (() => {
-  const r = rng(3)
+  const r = stream(3)
   const cov = gram(KF, PHASE, PHASE)
   return CLASSES.map(() =>
     samples(
       PHASE.map(() => 0),
       cov,
-      Array.from({ length: PER_CLASS }, () => PHASE.map(() => r.normal())),
-    ).map((h) => h.map((v) => v + SN * r.normal())),
+      Array.from({ length: PER_CLASS }, () => PHASE.map(() => drawNormal(r))),
+    ).map((h) => h.map((v) => v + SN * drawNormal(r))),
   )
 })()
 
@@ -84,13 +86,15 @@ function anomaly(kind: Kind, d: number): number[] {
  * of its whole curve under a hierarchical GP fitted to the other stars of its class.
  */
 export function StarAnomaly() {
-  const d = useParam(0.5, { min: 0, max: 1, step: 0.01 })
-  const [kind, setKind] = useState<Kind>('blend')
+  const state = useFigureState({
+    kind: choice<Kind>(KIND_OPTIONS, 'blend', { label: 'distortion' }),
+    d: float(0.5, { min: 0, max: 1, step: 0.01, label: 'distortion amount d' }),
+  })
 
   const r = useMemo(() => {
     const curves = CLASSES.map((_, c) =>
       DEVIATIONS[c].map((h, i) =>
-        c === 0 && i === PER_CLASS - 1 ? anomaly(kind, d.value) : PHASE.map((p, k) => TEMPLATES[c](p) + h[k]),
+        c === 0 && i === PER_CLASS - 1 ? anomaly(state.kind, state.d) : PHASE.map((p, k) => TEMPLATES[c](p) + h[k]),
       ),
     )
     // Leave one out: each star is scored under the class model of the other five.
@@ -111,16 +115,16 @@ export function StarAnomaly() {
     const held = classModel(KG, KF, SN * SN, PHASE, curves[0].slice(0, PER_CLASS - 1))
     const sd = held.chol.map((row) => Math.sqrt(row.reduce((s, v) => s + v * v, 0)))
     return { curves, scores, held, sd }
-  }, [kind, d.value])
+  }, [state.kind, state.d])
 
   const anomalyScoreValue = r.scores[0][PER_CLASS - 1]
   const normal = r.scores.flatMap((s, c) => (c === 0 ? s.slice(0, PER_CLASS - 1) : s))
   const rank = 1 + normal.filter((s) => s > anomalyScoreValue).length
 
-  const curveSeries: XYSeries[] = [
+  const curveSeries: SeriesSpec[] = [
     ...r.curves[0]
       .slice(0, PER_CLASS - 1)
-      .map((y, i): XYSeries => ({ name: `Cepheid-like star ${i + 1}`, type: 'line', x: PHASE, y, muted: true })),
+      .map((y, i): SeriesSpec => ({ name: `Cepheid-like star ${i + 1}`, type: 'line', x: PHASE, y, muted: true })),
     { name: 'class model mean', type: 'line', x: PHASE, y: r.held.mean, emphasis: true },
     {
       name: 'class model ± 2 sd',
@@ -141,8 +145,8 @@ export function StarAnomaly() {
     { name: 'distorted star', type: 'line', x: PHASE, y: r.curves[0][PER_CLASS - 1], slot: 3 },
   ]
 
-  const scoreSeries: XYSeries[] = [
-    ...CLASSES.map((name, c): XYSeries => ({
+  const scoreSeries: SeriesSpec[] = [
+    ...CLASSES.map((name, c): SeriesSpec => ({
       name,
       type: 'scatter',
       x: r.scores[c].map((_, i) => c * PER_CLASS + i + 1).filter((_, i) => c !== 0 || i < PER_CLASS - 1),
@@ -152,17 +156,17 @@ export function StarAnomaly() {
     { name: 'distorted star', type: 'scatter', x: [PER_CLASS], y: [anomalyScoreValue], slot: 3 },
   ]
 
+  const xAxis = useAxis({ label: 'phase φ', range: PHASE_RANGE })
+  const yAxis = useAxis({ label: 'brightness', hold: 'union' })
+  const xAxis2 = useAxis({ label: 'star', range: STAR_RANGE })
+  const yAxis2 = useAxis({ label: 'anomaly score S', hold: 'union' })
   return (
-    <Interactive
+    <Figure
       title="Scoring phase-folded light curves with a class HGP"
+      state={state}
       caption="Eighteen synthetic stars, six per class, each on 40 phase points. Left: the five undistorted Cepheid-like stars (grey), the predictive mean and ±2 sd band of a new replicate under the HGP fitted to them (ink), and the sixth star distorted by the slider. Right: every star's anomaly score S(y) = −ln p(y | other stars of its class), computed leave-one-out. Both kernels are Matérn 3/2 and the hyperparameters are the generating values. The phase-shift distortion moves the curve by d/2 of a cycle; a small shift is flagged more strongly than a large change of shape, because the model compares curves point by point in phase."
-      controls={
-        <>
-          <ParamChoice label="distortion" value={kind} onChange={setKind} options={KIND_OPTIONS} />
-          <ParamSlider label="distortion amount d" param={d} />
-        </>
-      }
-      readout={
+
+      readouts={
         <>
           <Readout label="score of distorted star" value={formatNumber(anomalyScoreValue)} />
           <Readout label="highest score among the other 17" value={formatNumber(Math.max(...normal))} />
@@ -171,9 +175,13 @@ export function StarAnomaly() {
       }
     >
       <div className="grid gap-4 md:grid-cols-2">
-        <XYChart series={curveSeries} xLabel="phase φ" yLabel="brightness" xRange={PHASE_RANGE} height={320} />
-        <XYChart series={scoreSeries} xLabel="star" yLabel="anomaly score S" xRange={STAR_RANGE} height={320} />
+        <Plot x={xAxis} y={yAxis} height={320}>
+          {seriesLayers(curveSeries)}
+        </Plot>
+        <Plot x={xAxis2} y={yAxis2} height={320}>
+          {seriesLayers(scoreSeries)}
+        </Plot>
       </div>
-    </Interactive>
+    </Figure>
   )
 }

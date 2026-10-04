@@ -17,12 +17,7 @@ export type RampPickerProps = {
  * Visual display and picker for continuous data color ramps: sequential (0 → 1 magnitude)
  * or diverging (−1 … 0 … +1 signed deviation).
  */
-export function RampPicker({
-  label = 'Colour ramp',
-  value = 'sequential',
-  onChange,
-  className,
-}: RampPickerProps) {
+export function RampPicker({ label = 'Colour ramp', value = 'sequential', onChange, className }: RampPickerProps) {
   const { resolved } = useTheme()
   const colours = value === 'sequential' ? sequential(resolved) : diverging(resolved)
 
@@ -38,7 +33,7 @@ export function RampPicker({
               className={cn(
                 'rounded px-2 py-0.5 text-[11px] font-medium transition-colors',
                 value === 'sequential'
-                  ? 'bg-primary/10 text-primary font-semibold'
+                  ? 'bg-primary/10 font-semibold text-primary'
                   : 'text-muted-foreground hover:text-foreground',
               )}
             >
@@ -50,7 +45,7 @@ export function RampPicker({
               className={cn(
                 'rounded px-2 py-0.5 text-[11px] font-medium transition-colors',
                 value === 'diverging'
-                  ? 'bg-primary/10 text-primary font-semibold'
+                  ? 'bg-primary/10 font-semibold text-primary'
                   : 'text-muted-foreground hover:text-foreground',
               )}
             >

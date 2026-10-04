@@ -1,6 +1,4 @@
-import { Interactive } from 'aifn-render'
-import { Diagram } from 'aifn-render'
-import { op } from 'aifn-render'
+import { Diagram, Figure, op } from 'aifn-render'
 import type { DiagramSpec } from 'aifn-render'
 
 const cols: [string, number, string][] = [
@@ -60,7 +58,7 @@ const spec: DiagramSpec = {
 /** Additive attention: at each decoder step, a fresh weighted average of all encoder annotations. */
 export function AttentionDiagram() {
   return (
-    <Interactive
+    <Figure
       title="One decoder step with additive attention"
       caption="The alignment model scores every encoder annotation against the previous decoder state, and a softmax over source positions turns the scores into weights. The context is the weighted sum of the annotations. The decoder state reads the context, its previous state and the previous output token; the weights are recomputed at every step."
     >
@@ -68,6 +66,6 @@ export function AttentionDiagram() {
         spec={spec}
         ariaLabel="Bahdanau attention: encoder annotations h_j weighted by alpha_ij and summed into context c_i, which feeds decoder state s_i; weights come from an alignment model reading s_(i-1) and h_j"
       />
-    </Interactive>
+    </Figure>
   )
 }

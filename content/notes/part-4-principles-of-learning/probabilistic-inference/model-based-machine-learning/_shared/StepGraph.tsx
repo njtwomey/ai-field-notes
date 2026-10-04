@@ -1,8 +1,6 @@
 import { useMemo } from 'react'
-import { MathText } from 'aifn-render'
-import { Diagram } from 'aifn-render'
+import { Diagram, Figure, float, MathText, useFigureState } from 'aifn-render'
 import type { DiagramNode, DiagramSpec } from 'aifn-render'
-import { Interactive, ParamSlider, useParam } from 'aifn-render'
 
 /** One assumption: the node and group ids it adds (or removes), and a sentence saying what it assumes. */
 export type GraphStep = { add: string[]; remove?: string[]; text: string }
@@ -29,7 +27,15 @@ export function StepGraph({
   ariaLabel: string
   labelsFrom?: number
 }) {
-  const step = useParam(steps.length - 1, { min: 0, max: steps.length - 1, step: 1 })
+  const state = useFigureState({
+    step: float(steps.length - 1, {
+      min: 0,
+      max: steps.length - 1,
+      step: 1,
+      label: 'assumption',
+      format: (v) => `${v + 1} of ${steps.length}`,
+    }),
+  })
 
   const anchors = useMemo((): DiagramNode[] => {
     const xs = spec.nodes.map((n) => n.x ?? 0)
@@ -51,12 +57,12 @@ export function StepGraph({
 
   const shown = useMemo((): DiagramSpec => {
     const ids = new Set<string>()
-    for (const s of steps.slice(0, step.value + 1)) {
+    for (const s of steps.slice(0, state.step + 1)) {
       s.add.forEach((id) => ids.add(id))
       s.remove?.forEach((id) => ids.delete(id))
     }
-    const fresh = new Set(step.value > 0 ? steps[step.value].add : [])
-    const labels = labelsFrom === undefined || step.value >= labelsFrom
+    const fresh = new Set(state.step > 0 ? steps[state.step].add : [])
+    const labels = labelsFrom === undefined || state.step >= labelsFrom
     return {
       ...spec,
       nodes: [
@@ -71,20 +77,14 @@ export function StepGraph({
         .map((g) => (g.around ? { ...g, around: g.around.filter((n) => ids.has(n)) } : g))
         .filter((g) => !g.around || g.around.length > 0),
     }
-  }, [spec, steps, step.value, labelsFrom, anchors])
+  }, [spec, steps, state.step, labelsFrom, anchors])
 
   return (
-    <Interactive
-      title={title}
-      caption={caption}
-      controls={
-        <ParamSlider label="assumption" param={step} format={(v) => `${v + 1} of ${steps.length}`} withArrows />
-      }
-    >
+    <Figure title={title} state={state} caption={caption}>
       <Diagram spec={shown} ariaLabel={ariaLabel} />
       <p className="min-h-10 text-sm text-muted-foreground">
-        <MathText text={steps[step.value].text} />
+        <MathText text={steps[state.step].text} />
       </p>
-    </Interactive>
+    </Figure>
   )
 }

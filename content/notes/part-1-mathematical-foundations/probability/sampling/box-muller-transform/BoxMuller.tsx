@@ -1,15 +1,19 @@
 import { useMemo, useState } from 'react'
 import {
-  Interactive,
-  ParamSlider,
-  Readout,
-  XYChart,
+  Figure,
+  float,
   formatNumber,
-  type Handle,
+  Handle,
+  Plot,
+  Readout,
+  seriesLayers,
+  type SeriesSpec,
+  useAxis,
+  useFigureState,
   type Vec2,
-  type XYSeries,
 } from 'aifn-render'
-import { linspace, rng } from '@/lib/math'
+import { linspace, toFlat } from 'aifn/foundation/tensor'
+import { stream, uniform } from 'aifn/foundation/random'
 
 /** Bands of u₁ that map to rings of the Gaussian plane: small u₁ gives a large radius. */
 const BANDS = [1 / 3, 2 / 3, 1]
@@ -30,8 +34,8 @@ const inverse = ([z1, z2]: Vec2): Vec2 => {
 
 const clampU = (v: number) => Math.min(Math.max(v, 0.002), 0.998)
 
-const circle = (r: number, name: string): XYSeries => {
-  const t = linspace(0, 2 * Math.PI, 97)
+const circle = (r: number, name: string): SeriesSpec => {
+  const t = toFlat(linspace(0, 2 * Math.PI, 97))
   return {
     name,
     type: 'line',
@@ -44,13 +48,23 @@ const circle = (r: number, name: string): XYSeries => {
 
 /** Uniform pairs in the unit square on the left, their Box–Muller images on the right, coloured by the band of u₁. */
 export function BoxMuller() {
-  const [logN, setLogN] = useState(3)
+  const state = useFigureState({
+    logN: float(3, {
+      min: 2,
+      max: 3.5,
+      step: 0.1,
+      label: 'pairs',
+      points_per_decade: 2,
+      logTransform: 'value-is-log',
+      format: (v) => Math.round(10 ** v).toLocaleString(),
+    }),
+  })
   const [u, setU] = useState<Vec2>([0.25, 0.1])
 
   const { uniforms, normals, moments } = useMemo(() => {
-    const n = Math.round(10 ** logN)
-    const r = rng(5)
-    const us: Vec2[] = Array.from({ length: n }, () => [Math.max(r.uniform(), 1e-12), r.uniform()])
+    const n = Math.round(10 ** state.logN)
+    const r = stream(5)
+    const us: Vec2[] = Array.from({ length: n }, () => [Math.max(uniform(r), 1e-12), uniform(r)])
     const zs = us.map(boxMuller)
     const groups = us.map(([u1]) => band(u1))
     const m = zs.reduce((s, z) => s + z[0], 0) / n
@@ -64,7 +78,7 @@ export function BoxMuller() {
         y: us.map((p) => p[1]),
         group: groups,
         groupNames: BAND_NAMES,
-      } satisfies XYSeries,
+      } satisfies SeriesSpec,
       normals: {
         name: 'normal pairs',
         type: 'scatter',
@@ -72,10 +86,10 @@ export function BoxMuller() {
         y: zs.map((p) => p[1]),
         group: groups,
         groupNames: BAND_NAMES,
-      } satisfies XYSeries,
+      } satisfies SeriesSpec,
       moments: { mean: m, variance: v, product: c },
     }
-  }, [logN])
+  }, [state.logN])
 
   // The radii that the band edges u₁ = 1/3 and u₁ = 2/3 map to.
   const rings = useMemo(
@@ -86,27 +100,18 @@ export function BoxMuller() {
     [],
   )
   const z = boxMuller(u)
-  const leftHandles: Handle[] = [{ kind: 'point', at: u, onDrag: (p) => setU([clampU(p[0]), clampU(p[1])]) }]
-  const rightHandles: Handle[] = [
-    { kind: 'point', at: z, onDrag: (p) => setU(((v) => [clampU(v[0]), clampU(v[1])] as Vec2)(inverse(p))) },
-  ]
 
+  const xAxis = useAxis({ label: 'u₁', range: [0, 1] })
+  const yAxis = useAxis({ label: 'u₂', range: [0, 1], equal: xAxis })
+  const xAxis2 = useAxis({ label: 'z₁', range: [-4, 4] })
+  const yAxis2 = useAxis({ label: 'z₂', range: [-4, 4], equal: xAxis2 })
   return (
-    <Interactive
+    <Figure
       title="Two uniforms in, two Gaussians out"
+      state={state}
       caption="Each uniform pair (u₁, u₂) on the left maps to one point on the right. The band of u₁ sets the ring: small u₁ gives a large radius √(−2 log u₁). u₂ sets the angle 2πu₂. The dashed circles are the images of u₁ = 1/3 and u₁ = 2/3. Drag the black point on either side to see where a single pair goes."
-      controls={
-        <ParamSlider
-          label="pairs"
-          value={logN}
-          onChange={setLogN}
-          min={2}
-          max={3.5}
-          step={0.1}
-          format={(v) => Math.round(10 ** v).toLocaleString()}
-        />
-      }
-      readout={
+
+      readouts={
         <>
           <Readout label="(u₁, u₂)" value={`(${formatNumber(u[0])}, ${formatNumber(u[1])})`} />
           <Readout label="radius √(−2 log u₁)" value={formatNumber(Math.hypot(z[0], z[1]))} />
@@ -118,25 +123,15 @@ export function BoxMuller() {
       }
     >
       <div className="grid gap-4 md:grid-cols-2">
-        <XYChart
-          series={[uniforms]}
-          xRange={[0, 1]}
-          yRange={[0, 1]}
-          equalAspect
-          xLabel="u₁"
-          yLabel="u₂"
-          handles={leftHandles}
-        />
-        <XYChart
-          series={[normals, ...rings]}
-          xRange={[-4, 4]}
-          yRange={[-4, 4]}
-          equalAspect
-          xLabel="z₁"
-          yLabel="z₂"
-          handles={rightHandles}
-        />
+        <Plot x={xAxis} y={yAxis}>
+          {seriesLayers([uniforms])}
+          <Handle kind="point" at={u} onDrag={(p) => setU([clampU(p[0]), clampU(p[1])])} />
+        </Plot>
+        <Plot x={xAxis2} y={yAxis2}>
+          {seriesLayers([normals, ...rings])}
+          <Handle kind="point" at={z} onDrag={(p) => setU(((v) => [clampU(v[0]), clampU(v[1])] as Vec2)(inverse(p)))} />
+        </Plot>
       </div>
-    </Interactive>
+    </Figure>
   )
 }

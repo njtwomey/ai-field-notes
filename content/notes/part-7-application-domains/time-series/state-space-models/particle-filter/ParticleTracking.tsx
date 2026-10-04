@@ -1,17 +1,19 @@
-import { useMemo, useState } from 'react'
+import { useMemo } from 'react'
 import {
-  Heatmap,
-  Interactive,
-  ParamChoice,
-  ParamSlider,
-  Readout,
-  XYChart,
+  choice,
+  Curve,
+  Figure,
   formatNumber,
-  useParam,
-  type HeatmapOverlay,
-  type XYSeries,
+  int,
+  Plot,
+  Raster,
+  Readout,
+  seriesLayers,
+  type SeriesSpec,
+  useAxis,
+  useFigureState,
 } from 'aifn-render'
-import { rng } from '@/lib/math'
+import { normal as drawNormal, stream, uniform as drawUniform } from 'aifn/foundation/random'
 
 const STEPS = 50
 const Q = 10
@@ -31,14 +33,14 @@ const T = Array.from({ length: STEPS }, (_, i) => i + 1)
 const clip = (v: number) => Math.max(-30, Math.min(30, v))
 
 function simulate(seed: number) {
-  const g = rng(seed)
-  let z = Math.sqrt(P0) * g.normal()
+  const g = stream(seed)
+  let z = Math.sqrt(P0) * drawNormal(g)
   const truth: number[] = []
   const obs: number[] = []
   for (let t = 1; t <= STEPS; t++) {
-    z = f(z, t) + Math.sqrt(Q) * g.normal()
+    z = f(z, t) + Math.sqrt(Q) * drawNormal(g)
     truth.push(z)
-    obs.push(h(z) + Math.sqrt(R) * g.normal())
+    obs.push(h(z) + Math.sqrt(R) * drawNormal(g))
   }
   return { truth, obs }
 }
@@ -62,8 +64,8 @@ function resample(cumulative: number[], scheme: Scheme, uniform: () => number): 
 
 /** Bootstrap particle filter: propagate through the dynamics, weight by the likelihood, resample. */
 function particleFilter(obs: number[], n: number, scheme: Scheme, when: When, seed: number) {
-  const g = rng(seed)
-  let particles = Array.from({ length: n }, () => Math.sqrt(P0) * g.normal())
+  const g = stream(seed)
+  let particles = Array.from({ length: n }, () => Math.sqrt(P0) * drawNormal(g))
   // Log-weights, so that without resampling they can fall far below the smallest double without underflowing.
   let logW = new Array<number>(n).fill(0)
   // Ancestry, for drawing lineages: history[t][i] is particle i at step t + 1 after propagation, and parent[t][i] is
@@ -75,7 +77,7 @@ function particleFilter(obs: number[], n: number, scheme: Scheme, when: When, se
   const ess: number[] = []
   const density: number[][] = BIN_CENTRES.map(() => new Array<number>(STEPS).fill(0))
   for (let t = 1; t <= STEPS; t++) {
-    particles = particles.map((z) => f(z, t) + Math.sqrt(Q) * g.normal())
+    particles = particles.map((z) => f(z, t) + Math.sqrt(Q) * drawNormal(g))
     history.push(particles)
     parent.push(lastIdx)
     lastIdx = Array.from({ length: n }, (_, i) => i)
@@ -98,7 +100,7 @@ function particleFilter(obs: number[], n: number, scheme: Scheme, when: When, se
     }
     const cumulative: number[] = []
     w.reduce((a, v, i) => (cumulative[i] = a + v), 0)
-    const idx = resample(cumulative, scheme, g.uniform)
+    const idx = resample(cumulative, scheme, () => drawUniform(g))
     lastIdx = idx
     particles = idx.map((i) => particles[i])
     logW = new Array<number>(n).fill(0)
@@ -151,24 +153,50 @@ const rmse = (est: number[], truth: number[]) =>
   Math.sqrt(est.reduce((a, e, t) => a + (e - truth[t]) ** 2, 0) / est.length)
 
 export function ParticleTracking() {
-  const [n, setN] = useState('1000')
-  const [scheme, setScheme] = useState<Scheme>('systematic')
-  const [when, setWhen] = useState<When>('always')
-  const seed = useParam(7, { min: 1, max: 20, step: 1 })
-  const shown = useParam(10, { min: 1, max: 50, step: 1 })
+  const state = useFigureState({
+    n: choice(
+      [
+        { value: '10', label: '10' },
+        { value: '100', label: '100' },
+        { value: '1000', label: '1000' },
+        { value: '5000', label: '5000' },
+      ],
+      '1000',
+      { label: 'particles N' },
+    ),
+    when: choice<When>(
+      [
+        { value: 'always', label: 'every step' },
+        { value: 'adaptive', label: 'ESS < N/2' },
+        { value: 'never', label: 'never' },
+      ],
+      'always',
+      { label: 'resample' },
+    ),
+    scheme: choice<Scheme>(
+      [
+        { value: 'systematic', label: 'systematic' },
+        { value: 'multinomial', label: 'multinomial' },
+      ],
+      'systematic',
+      { label: 'resampling scheme' },
+    ),
+    shown: int(10, { min: 1, max: 50, step: 1, label: 'lineages', format: (v) => String(v) }),
+    seed: int(7, { min: 1, max: 20, step: 1, label: 'seed', format: (v) => String(v) }),
+  })
 
-  const world = useMemo(() => simulate(seed.value), [seed.value])
+  const world = useMemo(() => simulate(state.seed), [state.seed])
   const ekf = useMemo(() => extendedKalman(world.obs), [world])
   const pf = useMemo(
-    () => particleFilter(world.obs, Number(n), scheme, when, seed.value + 1000),
-    [world, n, scheme, when, seed.value],
+    () => particleFilter(world.obs, Number(state.n), state.scheme, state.when, state.seed + 1000),
+    [world, state.n, state.scheme, state.when, state.seed],
   )
 
-  const lines = useMemo(() => lineages(pf.history, pf.parent, shown.value), [pf, shown.value])
+  const lines = useMemo(() => lineages(pf.history, pf.parent, state.shown), [pf, state.shown])
 
-  const overlay: HeatmapOverlay[] = useMemo(
+  const overlay: SeriesSpec[] = useMemo(
     () => [
-      ...lines.map((y): HeatmapOverlay => ({
+      ...lines.map((y): SeriesSpec => ({
         name: 'particle lineages',
         type: 'line',
         x: T,
@@ -182,49 +210,19 @@ export function ParticleTracking() {
     ],
     [lines, world, pf, ekf],
   )
-  const essSeries: XYSeries[] = [{ name: 'effective sample size / N', type: 'line', x: T, y: pf.ess, slot: 0 }]
+  const essSeries = [{ name: 'effective sample size / N', x: T, y: pf.ess, slot: 0 }] as const
 
+  const xAxis = useAxis({ label: 'step t' })
+  const yAxis = useAxis({ label: 'state z' })
+  const xAxis2 = useAxis({ label: 'step t', hold: 'union' })
+  const yAxis2 = useAxis({ label: 'ESS / N', range: [0, 1] })
   return (
-    <Interactive
+    <Figure
       title="Particles tracking a nonlinear state"
+      state={state}
       caption="The state follows strongly nonlinear dynamics and is observed through z²/20 plus noise, so each observation fits both z and −z. The shading is the particle filter's estimate of the filtering distribution at each step (each column scaled to a maximum of 1). It is often bimodal, with modes at ±z, and the filter keeps both until the dynamics break the tie. The extended Kalman filter keeps one Gaussian and frequently locks onto the wrong sign. Without resampling, the weights collapse onto a few particles within a few steps. The light lines are the ancestral lineages of particles spread evenly through the final population, traced back through the resampling steps; the lineages slider sets how many are drawn (at most N). With resampling at every step they coalesce into one or a few ancestors a few steps back: this is path degeneracy."
-      controls={
-        <>
-          <ParamChoice
-            label="particles N"
-            value={n}
-            onChange={setN}
-            options={[
-              { value: '10', label: '10' },
-              { value: '100', label: '100' },
-              { value: '1000', label: '1000' },
-              { value: '5000', label: '5000' },
-            ]}
-          />
-          <ParamChoice
-            label="resample"
-            value={when}
-            onChange={setWhen}
-            options={[
-              { value: 'always', label: 'every step' },
-              { value: 'adaptive', label: 'ESS < N/2' },
-              { value: 'never', label: 'never' },
-            ]}
-          />
-          <ParamChoice
-            label="resampling scheme"
-            value={scheme}
-            onChange={setScheme}
-            options={[
-              { value: 'systematic', label: 'systematic' },
-              { value: 'multinomial', label: 'multinomial' },
-            ]}
-          />
-          <ParamSlider label="lineages" param={shown} format={(v) => String(v)} withArrows />
-          <ParamSlider label="seed" param={seed} format={(v) => String(v)} withArrows />
-        </>
-      }
-      readout={
+
+      readouts={
         <>
           <Readout label="RMSE, particle filter" value={formatNumber(rmse(pf.mean, world.truth))} />
           <Readout label="RMSE, EKF" value={formatNumber(rmse(ekf, world.truth))} />
@@ -233,19 +231,14 @@ export function ParticleTracking() {
       }
     >
       <div className="space-y-4">
-        <Heatmap
-          x={T}
-          y={BIN_CENTRES}
-          z={pf.density}
-          range={[0, 1]}
-          overlay={overlay}
-          xLabel="step t"
-          yLabel="state z"
-          valueLabel="filtering density (column max 1)"
-          height={320}
-        />
-        <XYChart series={essSeries} xLabel="step t" yLabel="ESS / N" yRange={[0, 1]} height={160} />
+        <Plot x={xAxis} y={yAxis} height={320}>
+          <Raster x={T} y={BIN_CENTRES} z={pf.density} range={[0, 1]} valueLabel={'filtering density (column max 1)'} />
+          {seriesLayers(overlay, { live: true })}
+        </Plot>
+        <Plot x={xAxis2} y={yAxis2} height={160}>
+          <Curve {...essSeries[0]} />
+        </Plot>
       </div>
-    </Interactive>
+    </Figure>
   )
 }

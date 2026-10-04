@@ -25,7 +25,7 @@ import {
   reverseSdeSampler,
   vpSde,
   type SamplerState,
-} from 'aifn-applied/generative/diffusion'
+} from 'aifn-methods/generative/diffusion'
 
 const MIXTURE = gaussianMixtureData(
   [0.35, 0.35, 0.3],
@@ -172,36 +172,16 @@ export function ScoreBasedExplorer() {
       </ControlRow>
 
       <ControlRow label="Reverse time progression">
-        <Player
-          count={Math.max(1, numSteps)}
-          value={currentStep}
-          onChange={setStepIndex}
-        />
+        <Player count={Math.max(1, numSteps)} value={currentStep} onChange={setStepIndex} />
       </ControlRow>
 
       <Plots>
         <Plot x={plotX} y={plotY} title="State space: evolving smoothed density p_t(x) & particle flows">
-          <Raster
-            x={GX}
-            y={GX}
-            z={densityRaster}
-            scale="sequential"
-          />
+          <Raster x={GX} y={GX} z={densityRaster} scale="sequential" />
           {pathLines.map((line, idx) => (
-            <Curve
-              key={idx}
-              x={line.x}
-              y={line.y}
-              slot={0}
-              thin={true}
-            />
+            <Curve key={idx} x={line.x} y={line.y} slot={0} thin={true} />
           ))}
-          <Points
-            x={currentPoints.x}
-            y={currentPoints.y}
-            slot={1}
-            size={6}
-          />
+          <Points x={currentPoints.x} y={currentPoints.y} slot={1} size={6} />
         </Plot>
       </Plots>
 

@@ -1,13 +1,16 @@
-import { useMemo, useState } from 'react'
+import { useMemo } from 'react'
 import {
-  Heatmap,
-  Interactive,
-  ParamChoice,
-  ParamSlider,
-  Readout,
-  XYChart,
+  choice,
+  Curve,
+  Figure,
   formatNumber,
-  useParam,
+  Handle,
+  int,
+  Plot,
+  Raster,
+  Readout,
+  useAxis,
+  useFigureState,
 } from 'aifn-render'
 import {
   coranking,
@@ -58,16 +61,18 @@ function embed(method: Method, x: Rows, d: number[][]): Rows {
 }
 
 export function CoRanking() {
-  const [dataset, setDataset] = useState<DatasetId>('swiss-roll')
-  const [method, setMethod] = useState<Method>('pca')
-  const k = useParam(10, { min: 1, max: K_MAX, step: 1 })
+  const state = useFigureState({
+    dataset: choice<DatasetId>(DATASETS, 'swiss-roll', { label: 'data' }),
+    method: choice<Method>(METHODS, 'pca', { label: 'method' }),
+    k: int(10, { min: 1, max: K_MAX, step: 1, label: 'K (neighbourhood size)' }),
+  })
   const data = useMemo(() => {
-    const m = manifold(dataset, N)
+    const m = manifold(state.dataset, N)
     const d = distances(m.x)
     return { x: m.x, d, r: ranks(d) }
-  }, [dataset])
+  }, [state.dataset])
   const result = useMemo(() => {
-    const y = embed(method, data.x, data.d)
+    const y = embed(state.method, data.x, data.d)
     const q = coranking(data.r, ranks(distances(y)))
     const bins = Math.ceil((N - 1) / BIN)
     const z = Array.from({ length: bins }, (_, a) =>
@@ -82,21 +87,20 @@ export function CoRanking() {
     const curves = ks.map((kk) => rankQuality(q, kk))
     const centres = Array.from({ length: bins }, (_, b) => b * BIN + BIN / 2)
     return { q, z, ks, curves, centres }
-  }, [data, method])
-  const now = rankQuality(result.q, k.value)
+  }, [data, state.method])
+  const now = rankQuality(result.q, state.k)
 
+  const xAxis = useAxis({ label: 'rank in embedding' })
+  const yAxis = useAxis({ label: 'rank in data' })
+  const xAxis2 = useAxis({ label: 'K', hold: 'union' })
+  const yAxis2 = useAxis({ label: 'quality', range: [0, 1] })
   return (
-    <Interactive
+    <Figure
       title="Co-ranking matrix and rank-based quality"
+      state={state}
       caption="Left: the co-ranking matrix of 240 points, binned in blocks of 10 ranks and coloured by log₁₀(1 + count). Row: rank of a neighbour in the data; column: its rank in the embedding. A perfect embedding puts every pair on the diagonal. Mass below the diagonal in the left columns is intruders (close in the embedding, far in the data); mass to the right in the top rows is extrusions. Right: trustworthiness, continuity and the fraction of K nearest neighbours kept, against K. Drag the vertical line to change K. On the Swiss roll, Isomap, t-SNE and UMAP beat PCA for small K and lose to it for large K: a large neighbourhood in the data includes points on the next layer of the roll, which a correct unrolling moves far away. On the blobs, t-SNE and UMAP keep small neighbourhoods best."
-      controls={
-        <>
-          <ParamChoice label="data" value={dataset} onChange={setDataset} options={DATASETS} />
-          <ParamChoice label="method" value={method} onChange={setMethod} options={METHODS} />
-          <ParamSlider label="K (neighbourhood size)" param={k} />
-        </>
-      }
-      readout={
+
+      readouts={
         <>
           <Readout label="trustworthiness T(K)" value={formatNumber(now.trust)} />
           <Readout label="continuity C(K)" value={formatNumber(now.cont)} />
@@ -105,29 +109,22 @@ export function CoRanking() {
       }
     >
       <div className="grid gap-4 md:grid-cols-2">
-        <Heatmap
-          x={result.centres}
-          y={result.centres}
-          z={result.z}
-          xLabel="rank in embedding"
-          yLabel="rank in data"
-          valueLabel="log₁₀(1 + pairs)"
-          scale="sequential"
-          height={340}
-        />
-        <XYChart
-          height={340}
-          xLabel="K"
-          yLabel="quality"
-          yRange={[0, 1]}
-          handles={[{ kind: 'x', at: k.value, onDrag: k.set, label: 'K' }]}
-          series={[
-            { name: 'trustworthiness', type: 'line', x: result.ks, y: result.curves.map((c) => c.trust), slot: 0 },
-            { name: 'continuity', type: 'line', x: result.ks, y: result.curves.map((c) => c.cont), slot: 1 },
-            { name: 'Q_NX (neighbours kept)', type: 'line', x: result.ks, y: result.curves.map((c) => c.qnx), slot: 2 },
-          ]}
-        />
+        <Plot x={xAxis} y={yAxis} height={340}>
+          <Raster
+            x={result.centres}
+            y={result.centres}
+            z={result.z}
+            scale={'sequential'}
+            valueLabel={'log₁₀(1 + pairs)'}
+          />
+        </Plot>
+        <Plot x={xAxis2} y={yAxis2} height={340}>
+          <Curve name="trustworthiness" x={result.ks} y={result.curves.map((c) => c.trust)} slot={0} />
+          <Curve name="continuity" x={result.ks} y={result.curves.map((c) => c.cont)} slot={1} />
+          <Curve name="Q_NX (neighbours kept)" x={result.ks} y={result.curves.map((c) => c.qnx)} slot={2} />
+          <Handle {...state.handle('k', { label: 'K' })} />
+        </Plot>
       </div>
-    </Interactive>
+    </Figure>
   )
 }

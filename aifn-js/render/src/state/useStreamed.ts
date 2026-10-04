@@ -1,5 +1,5 @@
 /**
- * `useStreamed(task)`: run a streaming worker task (a generator, such as `aifn-applied/gym` `training`) and follow its
+ * `useStreamed(task)`: run a streaming worker task (a generator, such as `aifn-methods/gym` `training`) and follow its
  * partial answers. Each new task (by identity) cancels the one in flight; `null` runs nothing. The value is the latest
  * partial or final answer, so a figure fills in while the worker computes. `stop()` cancels the task in flight and keeps
  * the last partial answer as the value, with `stopped` set.

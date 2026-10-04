@@ -1,6 +1,16 @@
 import { useMemo } from 'react'
-import { Interactive, ParamSlider, Readout, XYChart, formatNumber, useParam, type XYSeries } from 'aifn-render'
-import { linspace } from '@/lib/math'
+import {
+  Figure,
+  float,
+  formatNumber,
+  Plot,
+  Readout,
+  seriesLayers,
+  type SeriesSpec,
+  useAxis,
+  useFigureState,
+} from 'aifn-render'
+import { linspace, toFlat } from 'aifn/foundation/tensor'
 
 /** Four zero-mean densities scaled to the same standard deviation σ, with their differential entropies in nats. */
 function family(sigma: number) {
@@ -31,19 +41,24 @@ function family(sigma: number) {
  * for every σ, because changing σ adds log σ to every entropy.
  */
 export function FixedVariance() {
-  const sigma = useParam(1, { min: 0.5, max: 2, step: 0.05 })
-  const members = useMemo(() => family(sigma.value), [sigma.value])
-  const xs = useMemo(() => linspace(-4 * sigma.value, 4 * sigma.value, 401), [sigma.value])
-  const series: XYSeries[] = useMemo(
+  const state = useFigureState({
+    sigma: float(1, { min: 0.5, max: 2, step: 0.05, label: 'standard deviation σ' }),
+  })
+  const members = useMemo(() => family(state.sigma), [state.sigma])
+  const xs = useMemo(() => toFlat(linspace(-4 * state.sigma, 4 * state.sigma, 401)), [state.sigma])
+  const series: SeriesSpec[] = useMemo(
     () => members.map((m, i) => ({ name: m.name, type: 'line', x: xs, y: xs.map(m.pdf), slot: i })),
     [members, xs],
   )
+  const xAxis = useAxis({ label: 'x', hold: 'union' })
+  const yAxis = useAxis({ label: 'density', hold: 'union' })
   return (
-    <Interactive
+    <Figure
       title="Same variance, different entropy"
+      state={state}
       caption="Four densities with mean 0 and the same standard deviation σ. Among all densities on the real line with a given variance, the Gaussian has the largest entropy; the others are more concentrated somewhere, which lowers their entropy. Changing σ shifts every entropy by the same log σ, so the ranking and the gaps never change."
-      controls={<ParamSlider label="standard deviation σ" param={sigma} />}
-      readout={
+
+      readouts={
         <>
           {members.map((m) => (
             <Readout key={m.name} label={`${m.name} entropy`} value={formatNumber(m.entropy)} />
@@ -51,7 +66,9 @@ export function FixedVariance() {
         </>
       }
     >
-      <XYChart series={series} xLabel="x" yLabel="density" height={300} />
-    </Interactive>
+      <Plot x={xAxis} y={yAxis} height={300}>
+        {seriesLayers(series)}
+      </Plot>
+    </Figure>
   )
 }

@@ -1,5 +1,5 @@
-"""Golden values for aifn-applied/learning/generalised/ordinal (and the GP ordinal model of
-aifn-applied/learning/gaussian-processes), each written out directly in numpy/scipy:
+"""Golden values for aifn-methods/learning/generalised/ordinal (and the GP ordinal model of
+aifn-methods/learning/gaussian-processes), each written out directly in numpy/scipy:
 
 - maximum-likelihood fits of the cumulative-link (logit and probit), continuation-ratio and adjacent-category models,
   minimised by scipy's BFGS in (β, θ); the cumulative model's θ is kept increasing through θ₁ = u₁,

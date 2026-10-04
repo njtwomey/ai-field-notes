@@ -1,5 +1,5 @@
 import { describe, it } from 'vitest'
-import { caviNormalGamma } from 'aifn-applied/inference/conjugate-models'
+import { caviNormalGamma } from 'aifn-methods/inference/conjugate-models'
 import { expectProtocol } from '../../protocol'
 
 describe('caviNormalGamma', () => {

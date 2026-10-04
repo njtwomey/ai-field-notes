@@ -1,7 +1,5 @@
-import { Diagram } from 'aifn-render'
-import { factor, link, variable } from 'aifn-render'
+import { Diagram, factor, Figure, link, variable } from 'aifn-render'
 import type { DiagramSpec } from 'aifn-render'
-import { Interactive } from 'aifn-render'
 
 const line = (a: string, b: string, label?: string) =>
   link(a, b, false, label ? { label, labelSide: 'right', labelRotate: false } : {})
@@ -62,7 +60,7 @@ const SPEC: DiagramSpec = {
 /** Matchbox's bilinear model as a factor graph, for one rating of one item by one user. */
 export function MatchboxGraph() {
   return (
-    <Interactive
+    <Figure
       title="Factor graph of Matchbox for one rating"
       caption="User features xᵢ and item features yⱼ map through weight matrices U and V to trait vectors s and t. Each trait pair is multiplied, the products are summed into an affinity r̃, Gaussian noise gives the latent rating r, and the user's own thresholds bᵤ turn r into the observed star rating ℓ. Every factor passes Gaussian messages exactly except the product factor and the threshold factors."
     >
@@ -70,6 +68,6 @@ export function MatchboxGraph() {
         spec={SPEC}
         ariaLabel="Factor graph of Matchbox: feature weights sum to user and item traits, which multiply and sum to a noisy rating compared with user thresholds"
       />
-    </Interactive>
+    </Figure>
   )
 }

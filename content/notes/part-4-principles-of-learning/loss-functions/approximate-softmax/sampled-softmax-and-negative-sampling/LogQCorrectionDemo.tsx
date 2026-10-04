@@ -1,6 +1,6 @@
-import { useMemo, useState } from 'react'
-import { Interactive, ParamButton, ParamSlider, Readout, XYChart, formatNumber, type XYSeries } from 'aifn-render'
-import { rng } from '@/lib/math'
+import { useMemo } from 'react'
+import { Curve, Figure, float, formatNumber, int, Plot, Readout, useAxis, useFigureState } from 'aifn-render'
+import { normal, stream, uniform } from 'aifn/foundation/random'
 
 const M = 1000
 const POSITIVE_SCORE = 2
@@ -15,8 +15,8 @@ const REFERENCE_Y = [1, 1]
 
 /** Scores of the catalogue's M negatives for one query, independent of popularity. */
 function drawScores(seed: number, spread: number): number[] {
-  const r = rng(seed)
-  return Array.from({ length: M }, () => spread * r.normal())
+  const r = stream(seed)
+  return Array.from({ length: M }, () => spread * normal(r))
 }
 
 /**
@@ -39,7 +39,7 @@ function simulate(scores: number[], alpha: number, m: number, seed: number) {
   const fullLoss = -Math.log(ePos / zFull)
 
   const trials = Math.max(200, Math.min(4000, Math.round(80000 / m)))
-  const r = rng(seed)
+  const r = stream(seed)
   const sample = new Int32Array(m)
   const plainBins = Array<number>(10).fill(0)
   const fixedBins = Array<number>(10).fill(0)
@@ -50,7 +50,7 @@ function simulate(scores: number[], alpha: number, m: number, seed: number) {
     let dFixed = ePos
     for (let k = 0; k < m; k++) {
       // Inverse-CDF draw by binary search.
-      const u = r.uniform()
+      const u = uniform(r)
       let lo = 0
       let hi = M - 1
       while (lo < hi) {
@@ -83,45 +83,35 @@ function simulate(scores: number[], alpha: number, m: number, seed: number) {
 
 /** Sampled softmax on a Zipf catalogue: how the logQ correction removes the popularity bias of sampled negatives. */
 export function LogQCorrectionDemo() {
-  const [logM, setLogM] = useState(4)
-  const [alpha, setAlpha] = useState(1)
-  const [spread, setSpread] = useState(1)
-  const [seed, setSeed] = useState(1)
-  const m = 2 ** logM
-  const scores = useMemo(() => drawScores(seed, spread), [seed, spread])
-  const r = useMemo(() => simulate(scores, alpha, m, seed + 7), [scores, alpha, m, seed])
+  const state = useFigureState({
+    logM: int(4, { min: 0, max: 10, step: 1, label: 'sampled negatives m', format: (v) => String(2 ** v) }),
+    alpha: float(1, { min: 0, max: 1.5, step: 0.05, label: 'Zipf exponent α' }),
+    spread: float(1, { min: 0, max: 2, step: 0.1, label: 'score spread σ' }),
+    seed: int(1, { ge: 0, label: 'seed' }),
+  })
+  const m = 2 ** state.logM
+  const scores = useMemo(() => drawScores(state.seed, state.spread), [state.seed, state.spread])
+  const r = useMemo(() => simulate(scores, state.alpha, m, state.seed + 7), [scores, state.alpha, m, state.seed])
 
   const series = useMemo(
-    (): XYSeries[] => [
-      { name: 'full softmax', type: 'line', x: REFERENCE_X, y: REFERENCE_Y, muted: true, dashed: true },
-      { name: 'sampled, no correction', type: 'line', x: BIN_X, y: r.plain, slot: 0 },
-      { name: 'sampled, logQ-corrected', type: 'line', x: BIN_X, y: r.fixed, slot: 1 },
-    ],
+    () =>
+      [
+        { name: 'full softmax', x: REFERENCE_X, y: REFERENCE_Y, muted: true, dashed: true },
+        { name: 'sampled, no correction', x: BIN_X, y: r.plain, slot: 0 },
+        { name: 'sampled, logQ-corrected', x: BIN_X, y: r.fixed, slot: 1 },
+      ] as const,
     [r],
   )
 
+  const xAxis = useAxis({ label: 'log₁₀ popularity rank (1 = most popular)', range: X_RANGE })
+  const yAxis = useAxis({ label: 'push-down ÷ full softmax', range: Y_RANGE, log: true })
   return (
-    <Interactive
+    <Figure
       title="The logQ correction removes the popularity bias"
+      state={state}
       caption="A catalogue of 1000 negatives has Zipf popularity q_j ∝ rank^(−α) and scores that ignore popularity; the positive scores 2. Each line shows, per popularity bin, the expected push-down on the negatives' scores under sampled softmax with m negatives drawn from q, divided by the push-down of the full softmax. The dashed line at 1 is the full softmax. Without the correction the ratio grows in proportion to q_j, so the most popular items are pushed down far too hard. With the correction the ratio tends to 1 as m grows. At small m the corrected pushes still follow popularity, because a softmax over a few candidates gives almost all of its push to whichever negative was drawn."
-      controls={
-        <>
-          <ParamSlider
-            label="sampled negatives m"
-            value={logM}
-            onChange={setLogM}
-            min={0}
-            max={10}
-            step={1}
-            format={(v) => String(2 ** v)}
-            withArrows
-          />
-          <ParamSlider label="Zipf exponent α" value={alpha} onChange={setAlpha} min={0} max={1.5} step={0.05} />
-          <ParamSlider label="score spread σ" value={spread} onChange={setSpread} min={0} max={2} step={0.1} />
-          <ParamButton onClick={() => setSeed((s) => s + 1)}>New scores and samples</ParamButton>
-        </>
-      }
-      readout={
+
+      readouts={
         <>
           <Readout label="popularity share of the top 10 items" value={formatNumber(r.topShare)} />
           <Readout label="full loss" value={formatNumber(r.fullLoss)} />
@@ -130,15 +120,11 @@ export function LogQCorrectionDemo() {
         </>
       }
     >
-      <XYChart
-        series={series}
-        xLabel="log₁₀ popularity rank (1 = most popular)"
-        yLabel="push-down ÷ full softmax"
-        xRange={X_RANGE}
-        yRange={Y_RANGE}
-        yLog
-        height={320}
-      />
-    </Interactive>
+      <Plot x={xAxis} y={yAxis} height={320}>
+        <Curve {...series[0]} />
+        <Curve {...series[1]} />
+        <Curve {...series[2]} />
+      </Plot>
+    </Figure>
   )
 }

@@ -34,7 +34,7 @@ fn(
     name: 'k-d tree',
     summary: 'Median splits on the coordinate of largest spread, with a bounding box at every node.',
     role: 'construction',
-    notes: ['nearest-neighbour-search', 'tree-based-approximate-nearest-neighbours'],
+    notes: ['k-d-tree', 'space-partitioning-trees', 'tree-based-approximate-nearest-neighbours'],
     cite: ['bentley1975', 'friedman1977'],
   },
   trees.kdTree,
@@ -45,9 +45,22 @@ fn(
     name: 'Ball tree',
     summary: 'The k-d splits with a centroid and covering radius at every node, for bounds in any metric.',
     role: 'construction',
-    notes: ['nearest-neighbour-search', 'tree-based-approximate-nearest-neighbours'],
+    notes: ['ball-tree', 'space-partitioning-trees'],
+    cite: ['omohundro1989', 'uhlmann1991'],
   },
   trees.ballTree,
+)
+fn(
+  {
+    key: 'vpTree',
+    name: 'Vantage-point tree',
+    summary:
+      'Splits each node at the median distance from a vantage point; children keep the shell of distances that holds them.',
+    role: 'construction',
+    notes: ['vantage-point-tree', 'space-partitioning-trees'],
+    cite: ['yianilos1993'],
+  },
+  trees.vpTree,
 )
 fn(
   {

@@ -9,7 +9,7 @@ import { stream } from 'aifn/foundation/random'
 import { toFlat } from 'aifn/foundation/tensor'
 import { run, trace } from 'aifn/foundation/trace'
 import { tokenise } from 'aifn/text/tokenise'
-import { topicCorpus } from 'aifn-applied/text/corpora'
+import { topicCorpus } from 'aifn-methods/text/corpora'
 import {
   correlatedTopicSteps,
   groupByLabel,
@@ -22,7 +22,7 @@ import {
   topicModelRun,
   type TopicMethod,
   type TopicSnapshot,
-} from 'aifn-applied/inference/topic-models'
+} from 'aifn-methods/inference/topic-models'
 import { fixture } from '../../fixtures'
 import { expectInfo } from '../../registry'
 

@@ -1,5 +1,4 @@
-import { Interactive } from 'aifn-render'
-import { Diagram } from 'aifn-render'
+import { Diagram, Figure } from 'aifn-render'
 import type { DiagramNode, DiagramSpec } from 'aifn-render'
 
 const v = (id: string, x: number, y: number, extra: Partial<DiagramNode> = {}): DiagramNode => ({
@@ -50,7 +49,7 @@ const spec: DiagramSpec = {
 /** A causal graph with a confounder, a mediator and a collider. */
 export function AdjustmentDag() {
   return (
-    <Interactive
+    <Figure
       title="What to adjust for"
       caption="The treatment W affects the outcome Y directly and through the mediator M. The confounder X causes both, opening the back-door path W ← X → Y (highlighted); adjusting for X (shaded) blocks it. Adjusting for M would remove part of the effect being estimated. The collider C is caused by both W and Y; the path through it is blocked until C is adjusted for, which opens it."
     >
@@ -58,6 +57,6 @@ export function AdjustmentDag() {
         spec={spec}
         ariaLabel="Causal graph: X points to W and Y; W points to Y, to the mediator M and to the collider C; M points to Y; Y points to C"
       />
-    </Interactive>
+    </Figure>
   )
 }

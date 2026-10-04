@@ -1,6 +1,17 @@
 import { useMemo, useState } from 'react'
-import { Interactive, ParamSlider, Readout, XYChart, formatNumber, type Handle, type XYSeries } from 'aifn-render'
-import { linspace } from '@/lib/math'
+import {
+  Figure,
+  float,
+  formatNumber,
+  Handle,
+  Plot,
+  Readout,
+  seriesLayers,
+  type SeriesSpec,
+  useAxis,
+  useFigureState,
+} from 'aifn-render'
+import { linspace, toFlat } from 'aifn/foundation/tensor'
 
 type Vec = [number, number]
 const R = 3.2
@@ -35,20 +46,22 @@ const jacobian = (a: number, [x, y]: Vec): [[number, number], [number, number]] 
  * parallelogram spanned by the Jacobian's columns (dashed): the Jacobian is the local linear approximation.
  */
 export function Warp() {
-  const [a, setA] = useState(0.6)
+  const state = useFigureState({
+    a: float(0.6, { min: 0, max: 0.95, step: 0.01, label: 'warp strength a' }),
+  })
   const [point, setPoint] = useState<Vec>([0.8, 0.4])
 
   const r = useMemo(() => {
-    const lines: XYSeries[] = []
-    const ts = linspace(-R, R, 60)
-    for (const c of linspace(-R, R, 13)) {
-      const h = ts.map((t) => warp(a, [t, c]))
-      const v = ts.map((t) => warp(a, [c, t]))
+    const lines: SeriesSpec[] = []
+    const ts = toFlat(linspace(-R, R, 60))
+    for (const c of toFlat(linspace(-R, R, 13))) {
+      const h = ts.map((t) => warp(state.a, [t, c]))
+      const v = ts.map((t) => warp(state.a, [c, t]))
       lines.push({ name: 'warped grid', type: 'line', x: h.map((p) => p[0]), y: h.map((p) => p[1]), slot: 0 })
       lines.push({ name: 'warped grid', type: 'line', x: v.map((p) => p[0]), y: v.map((p) => p[1]), slot: 0 })
     }
     // The square [x, x+h] × [y, y+h], traced around its edge, and its exact image.
-    const edge = linspace(0, 1, 20)
+    const edge = toFlat(linspace(0, 1, 20))
     const [x0, y0] = point
     const square: Vec[] = [
       ...edge.map((t): Vec => [x0 + H * t, y0]),
@@ -56,9 +69,9 @@ export function Warp() {
       ...edge.map((t): Vec => [x0 + H * (1 - t), y0 + H]),
       ...edge.map((t): Vec => [x0, y0 + H * (1 - t)]),
     ]
-    const image = square.map((p) => warp(a, p))
-    const J = jacobian(a, point)
-    const f0 = warp(a, point)
+    const image = square.map((p) => warp(state.a, p))
+    const J = jacobian(state.a, point)
+    const f0 = warp(state.a, point)
     const corners: Vec[] = [
       [0, 0],
       [H, 0],
@@ -70,7 +83,7 @@ export function Warp() {
       f0[0] + J[0][0] * dx + J[0][1] * dy,
       f0[1] + J[1][0] * dx + J[1][1] * dy,
     ])
-    const series: XYSeries[] = [
+    const series: SeriesSpec[] = [
       ...lines,
       { name: 'image of the square', type: 'line', x: image.map((p) => p[0]), y: image.map((p) => p[1]), slot: 1 },
       {
@@ -83,29 +96,20 @@ export function Warp() {
       },
     ]
     return { series, J, det: J[0][0] * J[1][1] - J[0][1] * J[1][0] }
-  }, [a, point])
+  }, [state.a, point])
 
   // The handle sits at f(point), in output coordinates; dragging it places the square's corner at the input that maps
   // under the pointer.
-  const handles: Handle[] = [
-    {
-      kind: 'point',
-      at: warp(a, point),
-      label: 'square',
-      onDrag: (p) => {
-        const [x, y] = unwarp(a, p)
-        const clamp = (v: number) => Math.min(Math.max(v, -R), R)
-        setPoint([clamp(x), clamp(y)])
-      },
-    },
-  ]
 
+  const xAxis = useAxis({ label: 'f₁', range: [-R - 1, R + 1] })
+  const yAxis = useAxis({ label: 'f₂', range: [-R - 1, R + 1], equal: xAxis })
   return (
-    <Interactive
+    <Figure
       title="The Jacobian is the local linear map"
+      state={state}
       caption="The blue grid is the plane after the warp f(x, y) = (x + a sin y, y + a sin x). Drag the round handle to move a small square: its exact image is the orange curve, and the Jacobian's parallelogram (dashed) nearly matches it. det J is the factor by which area is scaled there."
-      controls={<ParamSlider label="warp strength a" value={a} onChange={setA} min={0} max={0.95} step={0.01} />}
-      readout={
+
+      readouts={
         <>
           <Readout
             label="J"
@@ -116,16 +120,20 @@ export function Warp() {
       }
     >
       <div className="mx-auto w-full max-w-lg">
-        <XYChart
-          equalAspect
-          xRange={[-R - 1, R + 1]}
-          yRange={[-R - 1, R + 1]}
-          series={r.series}
-          xLabel="f₁"
-          yLabel="f₂"
-          handles={handles}
-        />
+        <Plot x={xAxis} y={yAxis}>
+          {seriesLayers(r.series)}
+          <Handle
+            kind="point"
+            at={warp(state.a, point)}
+            label="square"
+            onDrag={(p) => {
+              const [x, y] = unwarp(state.a, p)
+              const clamp = (v: number) => Math.min(Math.max(v, -R), R)
+              setPoint([clamp(x), clamp(y)])
+            }}
+          />
+        </Plot>
       </div>
-    </Interactive>
+    </Figure>
   )
 }

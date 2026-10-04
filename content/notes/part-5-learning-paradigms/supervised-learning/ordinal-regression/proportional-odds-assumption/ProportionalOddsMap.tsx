@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { Interactive, ParamChoice, Readout, formatNumber } from 'aifn-render'
+import { choice, Figure, formatNumber, Readout, useFigureState } from 'aifn-render'
 import { MAP_CAPTION, negativeShare } from '../_shared/mapText'
 import { OrdinalDataControls } from '../_shared/OrdinalDataControls'
 import { OrdinalMap } from '../_shared/OrdinalMap'
@@ -22,8 +22,10 @@ const MODEL = { proportional: 'cumulative-logit', separate: 'binary-decompositio
 export function ProportionalOddsMap() {
   const { spec, setSpec, resolution, setResolution, fill, setFill } = useOrdinalData({ shape: 'linear' })
   const [query, setQuery] = useState<Point>([0, 1.5])
-  const [which, setWhich] = useState<Fit>('proportional')
-  const { fitted, data: d, fitting } = useFit(spec, MODEL[which])
+  const state = useFigureState({
+    which: choice<Fit>(FITS, 'proportional', { label: 'fit' }),
+  })
+  const { fitted, data: d, fitting } = useFit(spec, MODEL[state.which])
   const grid = useGrid(d.range, resolution)
 
   const brant = useMemo(() => brantTest(d.train.x, d.train.y, d.k), [d])
@@ -42,8 +44,9 @@ export function ProportionalOddsMap() {
   )
 
   return (
-    <Interactive
+    <Figure
       title="Proportional odds on shared data"
+      state={state}
       caption={`Proportional odds fits one slope vector for every cumulative split, so its class boundaries are parallel lines. The alternative fits a separate logistic regression to each split y > k, the fits Brant's test compares; their boundaries can tilt and cross, and where they cross a class probability is negative. On the linear data the test does not reject; on the arc and the spiral it rejects decisively. ${MAP_CAPTION} Metrics are computed on ${TEST_PER_CLASS} held-out points per class.`}
       controls={
         <>
@@ -55,12 +58,9 @@ export function ProportionalOddsMap() {
             fill={fill}
             setFill={setFill}
           />
-          <div className="sm:col-span-2">
-            <ParamChoice label="fit" value={which} onChange={setWhich} options={FITS} />
-          </div>
         </>
       }
-      readout={
+      readouts={
         <>
           {fitting && <Readout label="fitting" value="…" />}
           <Readout label={`Brant χ² (${brant.df} df)`} value={formatNumber(brant.chi2)} />
@@ -78,6 +78,6 @@ export function ProportionalOddsMap() {
       }
     >
       <OrdinalMap fitted={fitted} data={d} resolution={resolution} fill={fill} query={query} setQuery={setQuery} />
-    </Interactive>
+    </Figure>
   )
 }

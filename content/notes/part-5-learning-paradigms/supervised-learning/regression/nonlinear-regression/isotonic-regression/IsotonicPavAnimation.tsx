@@ -243,40 +243,14 @@ export function IsotonicPavAnimation() {
       <Plots rows={2} heights={[2.2, 1]}>
         <Plot x={xAxis} y={yAxis}>
           {/* Final isotonic step curve */}
-          {showFinal && (
-            <Curve
-              name="final isotonic fit"
-              x={finalCurve.x}
-              y={finalCurve.y}
-              slot={0}
-              thin
-              muted
-            />
-          )}
+          {showFinal && <Curve name="final isotonic fit" x={finalCurve.x} y={finalCurve.y} slot={0} thin muted />}
 
           {/* OLS linear regression for comparison */}
-          {showLinear && (
-            <Curve
-              name="OLS linear regression"
-              x={ols.x}
-              y={ols.y}
-              slot={1}
-              dashed
-              muted
-            />
-          )}
+          {showLinear && <Curve name="OLS linear regression" x={ols.x} y={ols.y} slot={1} dashed muted />}
 
           {/* Current active block segments */}
           {blockSegments.map((seg, idx) => (
-            <Curve
-              key={`block-${idx}`}
-              name={`block ${idx}`}
-              x={seg.x}
-              y={seg.y}
-              slot={2}
-              width={3}
-              emphasis
-            />
+            <Curve key={`block-${idx}`} name={`block ${idx}`} x={seg.x} y={seg.y} slot={2} width={3} emphasis />
           ))}
 
           {/* Processed points */}
@@ -289,22 +263,11 @@ export function IsotonicPavAnimation() {
           />
 
           {/* Unprocessed / pending points */}
-          <Points
-            name="pending observations"
-            x={activePoints.pendingX}
-            y={activePoints.pendingY}
-            muted
-          />
+          <Points name="pending observations" x={activePoints.pendingX} y={activePoints.pendingY} muted />
 
           {/* Current point added */}
           {step.event === 'add' && step.next > 0 && (
-            <Points
-              name="newly added point"
-              x={[data.x[step.next - 1]]}
-              y={[data.y[step.next - 1]]}
-              slot={3}
-              live
-            />
+            <Points name="newly added point" x={[data.x[step.next - 1]]} y={[data.y[step.next - 1]]} slot={3} live />
           )}
         </Plot>
 

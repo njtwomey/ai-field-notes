@@ -1,5 +1,5 @@
 /**
- * The functions of `aifn-applied/algorithms/dynamic-programming`: knapsacks as worked dynamic programs (each
+ * The functions of `aifn-methods/algorithms/dynamic-programming`: knapsacks as worked dynamic programs (each
  * `…Program` is the problem for `aifn/optim/programming`'s `dp` algorithm; the plain function solves it).
  */
 

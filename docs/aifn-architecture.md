@@ -15,8 +15,8 @@ Decisions that need the owner are collected in §10, each with a recommendation.
 planned is in "Status (2026-10-01)" below and in a status line at the head of each section.
 
 > **Decided (2026-09-30): core and applications.** aifn-js holds two workspace packages:
-> `aifn-js/core` (package `aifn`, imported as `aifn/<family>/<module>`) and `aifn-js/applications` (package `aifn-applied`,
-> imported as `aifn-applied/<area>`). Details and the per-module classification: `.scratch/aifn/core-vs-apps.md`.
+> `aifn-js/core` (package `aifn`, imported as `aifn/<family>/<module>`) and `aifn-js/methods` (package `aifn-methods`,
+> imported as `aifn-methods/<area>`). Details and the per-module classification: `.scratch/aifn/core-vs-apps.md`.
 >
 > - **Core** holds what passes all of: C1 its interface names no model, problem or dataset; C2 at least two areas (or
 >   core modules) use it; C3 it is testable against a reference or a law; C4 it is Tensor-native; C5 it does not change
@@ -65,7 +65,7 @@ planned is in "Status (2026-10-01)" below and in a status line at the head of ea
 > `…Steps` and `sampleHiddenPath` (forward filtering, backward sampling) on a `ChainPotentials` (node potentials
 > N × K, transition K × K), `chainForwardBackward`/`chainViterbi` on log-potentials, and `factorChain`/`chainSumProduct`
 > on chain-shaped factor graphs. The HMM (`Hmm`, `hmm`, `hmmChain` building its potentials from observations,
-> `hmmModel`, the casino, sampling) and the linear-chain CRF live in `aifn-applied/inference/sequence-models`, and so
+> `hmmModel`, the casino, sampling) and the linear-chain CRF live in `aifn-methods/inference/sequence-models`, and so
 > do future named chain models (factorial HMM, MEMM).
 
 ## Status (2026-10-01)
@@ -75,7 +75,7 @@ for the owner. Open items are in R (`.scratch/aifn/refinement.md`, "Open" sectio
 
 | Section                | Built                                                                                                                                                                                                | Planned                                                                                            |
 | ---------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
-| §2 Shape of the system | aifn-js as `core/` (`aifn`, 12 families, 124 modules) and `applications/` (`aifn-applied`, 15 areas); aifn-lab                                                                                       | aifn-py; the site consuming aifn                                                                   |
+| §2 Shape of the system | aifn-js as `core/` (`aifn`, 12 families, 124 modules) and `applications/` (`aifn-methods`, 15 areas); aifn-lab                                                                                       | aifn-py; the site consuming aifn                                                                   |
 | §3 Numerical core      | brand, dtypes incl. `complex128`, promotion, errors; 134 primitives; three interpreters; custom rules; implicit differentiation; linalg rules; plain-data randomness; Algorithm/Trace; the DSP spine | a `Kernels` seam object for WASM                                                                   |
 | §4 Shared objects      | every row, typed once in `aifn/foundation/contracts`                                                                                                                                                 | `toWire`/`fromWire` converters (phase 6)                                                           |
 | §5 Registries, catalog | 19 kinds, `generated/catalog.json` (`make catalog`, `make catalog-check`)                                                                                                                            | the site's "In aifn" backlinks (phase 8); fixture coverage as a gate                               |
@@ -97,8 +97,8 @@ Module names and paths that changed since this document was drafted:
   picks it when a model compiles.
 - Ordinal models: the likelihoods (cumulative, continuation-ratio, adjacent-category) are
   `aifn/probability/likelihoods` (`ordinal.ts`) and the metrics (ordinal MAE, ranked probability score, C-index) are
-  `aifn/learning/metrics` (`ordinal.ts`); the models are applications, in `aifn-applied/learning/generalised/ordinal`
-  (thresholds, ordinal GLMs, deep heads) and `aifn-applied/learning/gaussian-processes/ordinal.ts`.
+  `aifn/learning/metrics` (`ordinal.ts`); the models are applications, in `aifn-methods/learning/generalised/ordinal`
+  (thresholds, ordinal GLMs, deep heads) and `aifn-methods/learning/gaussian-processes/ordinal.ts`.
 - KL rules are a static table, `klRegistry` in `aifn/probability/distributions` (keyed `p|q`, read by `kl`); the
   former `registerKl` is gone.
 - Polynomials are `aifn/numerics/polynomial` (`polynomialRoots` on the one `hqr`, in linalg's `eig`).
@@ -127,7 +127,7 @@ aifn-js (package aifn): numerics and models, no React, no DOM ◀── generate
             autodiff, random, space, trace)                                                          fixtures,
     tier 1  numerics   2  graph   3  probability, optim, systems                                        figure data,
     tier 4  inference, dynamics, signal, transport   5  learning   6  nn                                examples
-aifn-applied: 17 areas over core (learning, …, data)
+aifn-methods: 17 areas over core (learning, …, data)
 ```
 
 **Status:** built, except aifn-py (phase 6) and the site's use of aifn (phase 8). The tier list in the diagram above
@@ -190,9 +190,9 @@ implements it.
 | ------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
 | `Space` (serialisable parameter schema: real, int, choice, bool, nested, variants; conditions as data)             | `aifn/foundation/space`                                                 | five parameter descriptions: lab controls, search spaces, recipes, hyperparameters, distribution ranges |
 | `Distribution`, `LogDensity`, `Bijector`                                                                           | `aifn/probability/{distributions,bijectors}`                            | two distribution protocols; mcmc's `Target`; compose's target maps                                      |
-| `Objective` (value built from primitives, optional domain and known minimisers)                                    | `aifn/optim`; test surfaces in `aifn-applied/data/objectives`           | three objective shapes; test surfaces become registered objectives                                      |
+| `Objective` (value built from primitives, optional domain and known minimisers)                                    | `aifn/optim`; test surfaces in `aifn-methods/data/objectives`           | three objective shapes; test surfaces become registered objectives                                      |
 | `Model` + capabilities (`decide`, `scores`, `predictive`, `expect`, `transform`, `sample`), declared per estimator | `aifn/learning/estimators` (`defineModel`)                              | uneven conformance (C §3); separate `probabilities` methods                                             |
-| `Dataset`, `Recipe`, truth as a `Model`                                                                            | contracts (types); `aifn-applied/data` (generators, recipe interpreter) | two dataset types; hand-kept recipe lists; truth that re-implements densities                           |
+| `Dataset`, `Recipe`, truth as a `Model`                                                                            | contracts (types); `aifn-methods/data` (generators, recipe interpreter) | two dataset types; hand-kept recipe lists; truth that re-implements densities                           |
 | `Metric`, `Loss` (functions with metadata; one capability vocabulary)                                              | `aifn/learning/{metrics,losses}`                                        | two metric types and two `defineMetric`s                                                                |
 | `Kernel`, `Graph`, `Tree`, `Curve`, confusion results                                                              | `aifn/learning/kernels`, `aifn/graph`, `aifn/learning/metrics`          | hand-kept wire mirrors                                                                                  |
 | `Signal`, `Spectrum`, `TimeFrequency`, `Filter`, `FilterBank`                                                      | `aifn/signal` (shared `signal.ts`) and its modules                      | `Tensor \| ArrayLike` signals with no sample rate                                                       |

@@ -1,18 +1,21 @@
 import { useMemo } from 'react'
 import {
-  Interactive,
-  ParamSlider,
-  Readout,
-  XYChart,
+  Curve,
+  Figure,
   formatNumber,
-  useParam,
-  type Handle,
+  Handle,
+  Plot,
+  Readout,
   type Segment,
+  Segments,
+  slider,
+  useAxis,
+  useFigureState,
 } from 'aifn-render'
-import { linspace } from '@/lib/math'
 import { rocExample } from '../../_shared/rocExample'
+import { linspace, toFlat } from 'aifn/foundation/tensor'
 
-const PC = linspace(0, 1, 201)
+const PC = toFlat(linspace(0, 1, 201))
 
 /**
  * Drummond and Holte's cost curves for the thresholds of one scoring classifier. Each ROC point (FPR, TPR) becomes the
@@ -20,7 +23,9 @@ const PC = linspace(0, 1, 201)
  * curve, and corresponds to the ROC convex hull.
  */
 export function CostCurvePlot() {
-  const pc = useParam(0.5, { min: 0, max: 1, step: 0.005 })
+  const state = useFigureState({
+    pc: slider(0, 1, 0.5, { step: 0.005, label: 'probability cost PC(+)' }),
+  })
   const data = useMemo(() => rocExample(), [])
 
   const lines = data.curve.map(([fpr, tpr]) => ({ fpr, fnr: 1 - tpr }))
@@ -32,43 +37,38 @@ export function CostCurvePlot() {
   )
 
   const best = lines.reduce((a, b) =>
-    b.fnr * pc.value + b.fpr * (1 - pc.value) < a.fnr * pc.value + a.fpr * (1 - pc.value) ? b : a,
+    b.fnr * state.pc + b.fpr * (1 - state.pc) < a.fnr * state.pc + a.fpr * (1 - state.pc) ? b : a,
   )
-  const cost = best.fnr * pc.value + best.fpr * (1 - pc.value)
-  const handles: Handle[] = [{ kind: 'x', at: pc.value, label: 'operating point PC(+)', onDrag: (x) => pc.set(x) }]
+  const cost = best.fnr * state.pc + best.fpr * (1 - state.pc)
 
+  const xAxis = useAxis({ label: 'probability cost PC(+)', range: [0, 1] })
+  const yAxis = useAxis({ label: 'normalised expected cost', range: [0, 1] })
   return (
-    <Interactive
+    <Figure
       title="Cost curves of one scoring classifier"
+      state={state}
       caption="Each thin line is one threshold of the classifier from the ROC convex hull figure: its normalised expected cost as the probability cost PC(+) runs from 0 to 1. The thick line is their lower envelope, the best achievable cost at each operating point; it is the dual of the ROC convex hull. The dashed lines are the trivial classifiers. Drag the vertical line to an operating point to read off the best threshold and its cost."
-      controls={<ParamSlider label="probability cost PC(+)" param={pc} />}
-      readout={
+
+      readouts={
         <>
           <Readout
             label="best threshold (FPR, TPR)"
             value={`(${formatNumber(best.fpr)}, ${formatNumber(1 - best.fnr)})`}
           />
           <Readout label="normalised expected cost" value={formatNumber(cost)} />
-          <Readout label="trivial classifier" value={formatNumber(Math.min(pc.value, 1 - pc.value))} />
+          <Readout label="trivial classifier" value={formatNumber(Math.min(state.pc, 1 - state.pc))} />
           <Readout label="area under the envelope" value={formatNumber(auc)} />
         </>
       }
     >
-      <XYChart
-        height={340}
-        xLabel="probability cost PC(+)"
-        yLabel="normalised expected cost"
-        xRange={[0, 1]}
-        yRange={[0, 1]}
-        handles={handles}
-        segments={segments}
-        series={[
-          { name: 'always negative', type: 'line', x: [0, 1], y: [0, 1], dashed: true, muted: true },
-          { name: 'always positive', type: 'line', x: [0, 1], y: [1, 0], dashed: true, muted: true },
-          { name: 'best threshold here', type: 'line', x: [0, 1], y: [best.fpr, best.fnr], slot: 1 },
-          { name: 'lower envelope', type: 'line', x: PC, y: envelope, emphasis: true },
-        ]}
-      />
-    </Interactive>
+      <Plot x={xAxis} y={yAxis} height={340}>
+        <Curve name="always negative" x={[0, 1]} y={[0, 1]} dashed muted />
+        <Curve name="always positive" x={[0, 1]} y={[1, 0]} dashed muted />
+        <Curve name="best threshold here" x={[0, 1]} y={[best.fpr, best.fnr]} slot={1} />
+        <Curve name="lower envelope" x={PC} y={envelope} emphasis />
+        <Segments segments={segments} />
+        <Handle {...state.handle('pc', { label: 'operating point PC(+)' })} />
+      </Plot>
+    </Figure>
   )
 }

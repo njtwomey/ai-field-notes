@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { knapsack, knapsackProgram, unboundedKnapsack } from 'aifn-applied/algorithms/dynamic-programming'
+import { knapsack, knapsackProgram, unboundedKnapsack } from 'aifn-methods/algorithms/dynamic-programming'
 import { dynamicProgram, editDistance, lcs, needlemanWunsch, smithWaterman } from 'aifn/optim/programming'
 import { toFlat } from 'aifn/foundation/tensor'
 import { expectProtocol } from '../../protocol'

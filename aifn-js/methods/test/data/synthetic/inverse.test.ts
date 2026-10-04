@@ -6,8 +6,8 @@
 import { describe, expect, it } from 'vitest'
 import { stream } from 'aifn/foundation/random'
 import { tensor, toFlat, type Tensor } from 'aifn/foundation/tensor'
-import { datasetRegistry, type InverseTruth } from 'aifn-applied/data'
-import { bishopInverse, twoLinkArm, twoLinkInverse, twoLinkJoints } from 'aifn-applied/data/synthetic'
+import { datasetRegistry, type InverseTruth } from 'aifn-methods/data'
+import { bishopInverse, twoLinkArm, twoLinkInverse, twoLinkJoints } from 'aifn-methods/data/synthetic'
 
 const flat = (t: Tensor) => Array.from(toFlat(t))
 const truthOf = (d: { meta: { truth?: unknown } }) => d.meta.truth as InverseTruth

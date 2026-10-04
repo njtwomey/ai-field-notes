@@ -9,14 +9,14 @@ import { normals, stream } from 'aifn/foundation/random'
 import { fromRows, toFlat } from 'aifn/foundation/tensor'
 import { dataset } from 'aifn/learning/estimators'
 import { trace } from 'aifn/foundation/trace'
-import { blobs } from 'aifn-applied/data/synthetic'
+import { blobs } from 'aifn-methods/data/synthetic'
 import {
   diffusionMap,
   selfOrganisingMap,
   selfOrganisingMapSteps,
   somGrid,
-} from 'aifn-applied/unsupervised/embedding/manifold'
-import { pacmap, pacmapPairs, pacmapWeights } from 'aifn-applied/unsupervised/embedding/neighbour'
+} from 'aifn-methods/unsupervised/embedding/manifold'
+import { pacmap, pacmapPairs, pacmapWeights } from 'aifn-methods/unsupervised/embedding/neighbour'
 
 describe('diffusionMap', () => {
   const X = normals(stream('dm'), [25, 3])

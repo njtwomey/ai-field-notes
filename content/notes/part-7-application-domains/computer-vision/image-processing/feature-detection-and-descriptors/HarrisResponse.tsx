@@ -1,5 +1,5 @@
-import { useMemo, useState } from 'react'
-import { Heatmap, Interactive, ParamChoice, ParamSlider, Readout, type HeatmapOverlay } from 'aifn-render'
+import { useMemo } from 'react'
+import { choice, Figure, float, Plot, Points, Raster, Readout, slider, useAxis, useFigureState } from 'aifn-render'
 import { AXIS, SIZE, gaussianBlur, gradients, testImage, type Image } from '../_shared/image'
 
 type Method = 'harris' | 'shi-tomasi'
@@ -52,107 +52,81 @@ function peaks(R: Image, threshold: number): { x: number[]; y: number[] } {
 
 /** Harris (or Shi–Tomasi) corner response on a test image, with detected corners overlaid. */
 export function HarrisResponse() {
-  const [method, setMethod] = useState<Method>('harris')
-  const [k, setK] = useState(0.05)
-  const [sigma, setSigma] = useState(1.5)
-  const [frac, setFrac] = useState(0.05)
+  const state = useFigureState({
+    method: choice<Method>(
+      [
+        { value: 'harris', label: 'Harris' },
+        { value: 'shi-tomasi', label: 'Shi–Tomasi' },
+      ],
+      'harris',
+      { label: 'response' },
+    ),
+    k: float(0.05, {
+      min: 0.01,
+      max: 0.24,
+      step: 0.01,
+      label: 'Harris k',
+      format: (v) => v.toFixed(2),
+      when: (v) => v.method === 'harris',
+    }),
+    sigma: float(1.5, { min: 0.7, max: 3, step: 0.1, label: 'window σ (pixels)', format: (v) => v.toFixed(1) }),
+    frac: slider(0.01, 0.3, 0.05, {
+      step: 0.01,
+      label: 'threshold (fraction of max |R|)',
+      format: (v) => v.toFixed(2),
+    }),
+  })
 
-  const tensor = useMemo(() => structureTensor(sigma), [sigma])
-  const R = useMemo(() => response(tensor, method, k), [tensor, method, k])
+  const tensor = useMemo(() => structureTensor(state.sigma), [state.sigma])
+  const R = useMemo(() => response(tensor, state.method, state.k), [tensor, state.method, state.k])
   const bound = useMemo(() => R.reduce((m, row) => row.reduce((mm, v) => Math.max(mm, Math.abs(v)), m), 1e-12), [R])
-  const corners = useMemo(() => peaks(R, frac * bound), [R, frac, bound])
+  const corners = useMemo(() => peaks(R, state.frac * bound), [R, state.frac, bound])
   const edgeCount = useMemo(
-    () => R.reduce((n, row) => n + row.filter((v) => v < -frac * bound).length, 0),
-    [R, frac, bound],
+    () => R.reduce((n, row) => n + row.filter((v) => v < -state.frac * bound).length, 0),
+    [R, state.frac, bound],
   )
-  const overlay: HeatmapOverlay[] = [{ name: 'corners', type: 'scatter', x: corners.x, y: corners.y, emphasis: true }]
+  const overlay = [{ name: 'corners', x: corners.x, y: corners.y, emphasis: true }] as const
 
+  const xAxis = useAxis({ label: 'column' })
+  const yAxis = useAxis({ label: 'row' })
+  const xAxis2 = useAxis({ label: 'column' })
+  const yAxis2 = useAxis({ label: 'row' })
   return (
-    <Interactive
+    <Figure
       title="Corner response from the structure tensor"
+      state={state}
       caption="Left: the test image. Right: the corner response at every pixel, with detected corners (local maxima above the threshold) as diamonds. Harris's R = det M − k (tr M)² is positive at corners, negative along edges (one large eigenvalue) and near zero on flat regions. Raising k makes the detector stricter: points where one eigenvalue dominates turn negative. Shi–Tomasi uses the smaller eigenvalue, which is never negative. A wider integration window σ blurs the response and merges nearby corners."
-      controls={
-        <>
-          <ParamChoice
-            label="response"
-            value={method}
-            onChange={setMethod}
-            options={[
-              { value: 'harris', label: 'Harris' },
-              { value: 'shi-tomasi', label: 'Shi–Tomasi' },
-            ]}
-          />
-          {method === 'harris' && (
-            <ParamSlider
-              label="Harris k"
-              value={k}
-              onChange={setK}
-              min={0.01}
-              max={0.24}
-              step={0.01}
-              format={(v) => v.toFixed(2)}
-            />
-          )}
-          <ParamSlider
-            label="window σ (pixels)"
-            value={sigma}
-            onChange={setSigma}
-            min={0.7}
-            max={3}
-            step={0.1}
-            format={(v) => v.toFixed(1)}
-          />
-          <ParamSlider
-            label="threshold (fraction of max |R|)"
-            value={frac}
-            onChange={setFrac}
-            min={0.01}
-            max={0.3}
-            step={0.01}
-            format={(v) => v.toFixed(2)}
-          />
-        </>
-      }
-      readout={
+
+      readouts={
         <>
           <Readout label="corners detected" value={String(corners.x.length)} />
-          {method === 'harris' && (
+          {state.method === 'harris' && (
             <>
               <Readout label="edge pixels (R below −threshold)" value={String(edgeCount)} />
-              <Readout label="largest eigenvalue ratio accepted" value={maxRatio(k)} />
+              <Readout label="largest eigenvalue ratio accepted" value={maxRatio(state.k)} />
             </>
           )}
         </>
       }
     >
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-        <Heatmap
-          x={AXIS}
-          y={AXIS}
-          z={INPUT}
-          range={[0, 1]}
-          xLabel="column"
-          yLabel="row"
-          valueLabel="intensity"
-          overlay={overlay}
-          height={320}
-          ariaLabel="Test image with detected corners"
-        />
-        <Heatmap
-          x={AXIS}
-          y={AXIS}
-          z={R}
-          scale={method === 'harris' ? 'diverging' : 'sequential'}
-          range={method === 'harris' ? [-bound, bound] : [0, bound]}
-          xLabel="column"
-          yLabel="row"
-          valueLabel="response"
-          overlay={overlay}
-          height={320}
-          ariaLabel="Corner response"
-        />
+        <Plot x={xAxis} y={yAxis} height={320} ariaLabel={'Test image with detected corners'}>
+          <Raster x={AXIS} y={AXIS} z={INPUT} range={[0, 1]} valueLabel={'intensity'} />
+          <Points {...overlay[0]} live />
+        </Plot>
+        <Plot x={xAxis2} y={yAxis2} height={320} ariaLabel={'Corner response'}>
+          <Raster
+            x={AXIS}
+            y={AXIS}
+            z={R}
+            scale={state.method === 'harris' ? 'diverging' : 'sequential'}
+            range={state.method === 'harris' ? [-bound, bound] : [0, bound]}
+            valueLabel={'response'}
+          />
+          <Points {...overlay[0]} live />
+        </Plot>
       </div>
-    </Interactive>
+    </Figure>
   )
 }
 

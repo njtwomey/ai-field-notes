@@ -1,6 +1,4 @@
-import { Interactive } from 'aifn-render'
-import { Diagram } from 'aifn-render'
-import { merge, op } from 'aifn-render'
+import { Diagram, Figure, merge, op } from 'aifn-render'
 import type { DiagramEdge, DiagramNode } from 'aifn-render'
 
 const box = (id: string, x: number, y: number, label: string, tone: number): DiagramNode => ({
@@ -59,11 +57,11 @@ const spec = {
 /** The three placements of normalisation in a residual block. */
 export function NormPlacements() {
   return (
-    <Interactive
+    <Figure
       title="Where the normalisation sits"
       caption="One residual block in each arrangement; the sublayer F is attention or the feed-forward network. Post-norm normalises the sum, so the identity path from input to output passes through a normalisation. Pre-norm normalises only the branch input, so the identity path is exact and the residual stream is a plain sum of branch outputs. Peri-norm (sandwich) also normalises the branch output before it is added."
     >
       <Diagram spec={spec} ariaLabel="Post-norm, pre-norm and peri-norm residual blocks" />
-    </Interactive>
+    </Figure>
   )
 }

@@ -1,5 +1,4 @@
-import { Interactive } from 'aifn-render'
-import { Diagram } from 'aifn-render'
+import { Diagram, Figure } from 'aifn-render'
 import type { DiagramEdge, DiagramGroup, DiagramNode, DiagramSpec } from 'aifn-render'
 
 const v = (id: string, x: number, y: number, label: string, extra: Partial<DiagramNode> = {}): DiagramNode => ({
@@ -66,7 +65,7 @@ const spec: DiagramSpec = {
 /** Three ways to model J related groups, as plate diagrams. */
 export function PoolingPlates() {
   return (
-    <Interactive
+    <Figure
       title="No pooling, complete pooling and partial pooling"
       caption="Each group j has an observed estimate y_j (shaded) with known standard error σ_j. No pooling gives every group its own unrelated θ_j. Complete pooling uses one θ for all groups, outside the plate. Partial pooling, the hierarchical model, draws each θ_j from a population with mean μ and spread τ, which are themselves estimated from all J groups."
     >
@@ -74,6 +73,6 @@ export function PoolingPlates() {
         spec={spec}
         ariaLabel="Three plate diagrams: separate theta_j per group; one shared theta; and theta_j drawn from a population with hyperparameters mu and tau"
       />
-    </Interactive>
+    </Figure>
   )
 }

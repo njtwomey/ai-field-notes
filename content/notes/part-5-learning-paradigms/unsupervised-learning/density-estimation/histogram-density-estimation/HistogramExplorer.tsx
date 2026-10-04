@@ -1,18 +1,22 @@
-import { useMemo, useState } from 'react'
+import { useMemo } from 'react'
 import {
-  Interactive,
-  ParamButton,
-  ParamSlider,
-  Readout,
-  XYChart,
+  Bars,
+  Button,
+  Curve,
+  Figure,
+  float,
   formatNumber,
-  useParam,
-  type Handle,
+  Handle,
+  int,
+  Plot,
+  Readout,
+  useAxis,
+  useFigureState,
 } from 'aifn-render'
-import { linspace } from '@/lib/math'
 import { DOMAIN, ise, sample, summary, trueDensity } from '../../_shared/density'
+import { linspace, toFlat } from 'aifn/foundation/tensor'
 
-const GRID = linspace(DOMAIN[0], DOMAIN[1], 400)
+const GRID = toFlat(linspace(DOMAIN[0], DOMAIN[1], 400))
 const TRUTH = GRID.map(trueDensity)
 
 /** Density histogram with bins [origin + kh, origin + (k+1)h) covering the plotting domain. */
@@ -31,34 +35,39 @@ function histogram(data: number[], h: number, origin: number) {
 }
 
 export function HistogramExplorer() {
-  const [n, setN] = useState(200)
-  const width = useParam(0.5, { min: 0.05, max: 1.5, step: 0.01 })
-  const origin = useParam(0, { min: -1.5, max: 1.5, step: 0.01 })
-  const data = useMemo(() => sample(n, 23), [n])
+  const state = useFigureState({
+    width: float(0.5, { min: 0.05, max: 1.5, step: 0.01, label: 'bin width h' }),
+    origin: float(0, { min: -1.5, max: 1.5, step: 0.01, label: 'bin edge position' }),
+    n: int(200, { min: 20, max: 1000, step: 10, label: 'sample size n' }),
+  })
+  const data = useMemo(() => sample(state.n, 23), [state.n])
   const stats = useMemo(() => summary(data), [data])
-  const hist = useMemo(() => histogram(data, width.value, origin.value), [data, width.value, origin.value])
+  const hist = useMemo(() => histogram(data, state.width, state.origin), [data, state.width, state.origin])
   const error = ise(GRID, GRID.map(hist.at))
-  const scott = 3.49 * stats.sd * n ** (-1 / 3)
-  const fd = 2 * stats.iqr * n ** (-1 / 3)
-  const sturges = (stats.max - stats.min) / (Math.ceil(Math.log2(n)) + 1)
-  const handles: Handle[] = [{ kind: 'x', at: origin.value, label: 'bin edge', onDrag: (x) => origin.set(x) }]
+  const scott = 3.49 * stats.sd * state.n ** (-1 / 3)
+  const fd = 2 * stats.iqr * state.n ** (-1 / 3)
+  const sturges = (stats.max - stats.min) / (Math.ceil(Math.log2(state.n)) + 1)
 
+  const xAxis = useAxis({ label: 'x', range: DOMAIN })
+  const yAxis = useAxis({ label: 'density', range: [0, undefined], hold: 'union' })
   return (
-    <Interactive
+    <Figure
       title="Bin width and bin origin"
+      state={state}
       caption="A density histogram of a sample from a two-component Gaussian mixture (dashed). Drag the vertical line to move one bin edge, which shifts the whole grid of bins: with wide bins the shape changes noticeably, even though the data do not. The bin width trades bias (wide bins flatten the narrow mode) against variance (narrow bins are noisy). The buttons apply the Freedman–Diaconis and Scott rules."
       controls={
         <>
-          <ParamSlider label="bin width h" param={width} />
-          <ParamSlider label="bin edge position" param={origin} />
-          <ParamSlider label="sample size n" value={n} onChange={setN} min={20} max={1000} step={10} />
           <div className="flex gap-2">
-            <ParamButton onClick={() => width.set(fd)}>Freedman–Diaconis</ParamButton>
-            <ParamButton onClick={() => width.set(scott)}>Scott</ParamButton>
+            <Button variant="outline" size="sm" onClick={() => state.set('width', fd)}>
+              Freedman–Diaconis
+            </Button>
+            <Button variant="outline" size="sm" onClick={() => state.set('width', scott)}>
+              Scott
+            </Button>
           </div>
         </>
       }
-      readout={
+      readouts={
         <>
           <Readout label="integrated squared error" value={formatNumber(error)} />
           <Readout label="Freedman–Diaconis h" value={formatNumber(fd)} />
@@ -67,18 +76,11 @@ export function HistogramExplorer() {
         </>
       }
     >
-      <XYChart
-        height={340}
-        xLabel="x"
-        yLabel="density"
-        xRange={DOMAIN}
-        yRange={[0, undefined]}
-        handles={handles}
-        series={[
-          { name: 'histogram', type: 'bar', x: hist.centres, y: hist.heights, slot: 0 },
-          { name: 'true density', type: 'line', x: GRID, y: TRUTH, dashed: true, slot: 1 },
-        ]}
-      />
-    </Interactive>
+      <Plot x={xAxis} y={yAxis} height={340}>
+        <Bars name="histogram" x={hist.centres} y={hist.heights} slot={0} />
+        <Curve name="true density" x={GRID} y={TRUTH} dashed slot={1} />
+        <Handle {...state.handle('origin', { label: 'bin edge' })} />
+      </Plot>
+    </Figure>
   )
 }

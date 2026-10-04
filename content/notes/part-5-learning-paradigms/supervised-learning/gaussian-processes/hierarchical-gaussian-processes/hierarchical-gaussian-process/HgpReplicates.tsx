@@ -1,20 +1,23 @@
-import { useMemo, useState } from 'react'
+import { useMemo } from 'react'
 import {
-  Interactive,
-  ParamButton,
-  ParamChoice,
-  ParamSlider,
-  Readout,
-  XYChart,
+  Button,
+  choice,
+  Curve,
+  Figure,
+  float,
   formatNumber,
-  useParam,
-  type XYSeries,
+  Plot,
+  Points,
+  Readout,
+  useAxis,
+  useFigureState,
 } from 'aifn-render'
-import { linspace, rng } from '@/lib/math'
 import { makeKernel, samples, gram } from '../../_shared/gp'
 import { hgpLogMarginal, hgpPosterior, type Replicate } from '../_shared/hgp'
+import { linspace, toFlat } from 'aifn/foundation/tensor'
+import { normal, stream, uniform } from 'aifn/foundation/random'
 
-const GRID = linspace(0, 10, 101)
+const GRID = toFlat(linspace(0, 10, 101))
 const X_RANGE: [number, number] = [0, 10]
 const Y_RANGE: [number | undefined, number | undefined] = [-3, 3]
 const N_REP = 4
@@ -29,17 +32,17 @@ const trueG = (x: number) => Math.sin(1.1 * x) + 0.5 * Math.cos(0.45 * x + 1)
 
 /** Four replicates of one latent curve: the shared g, a smooth Matérn 3/2 deviation per replicate, and noise. */
 const DATA: Replicate[] = (() => {
-  const r = rng(7)
+  const r = stream(7)
   const dev = makeKernel('matern32', { ell: 1.5, sf: 0.4 })
   return COVERAGE.map(([a, b]) => {
-    const x = Array.from({ length: 12 }, () => a + (b - a) * r.uniform()).sort((p, q) => p - q)
-    const z = x.map(() => r.normal())
+    const x = Array.from({ length: 12 }, () => a + (b - a) * uniform(r)).sort((p, q) => p - q)
+    const z = x.map(() => normal(r))
     const [h] = samples(
       x.map(() => 0),
       gram(dev, x, x),
       [z],
     )
-    return { x, y: x.map((xi, i) => trueG(xi) + h[i] + 0.1 * r.normal()) }
+    return { x, y: x.map((xi, i) => trueG(xi) + h[i] + 0.1 * normal(r)) }
   })
 })()
 
@@ -90,56 +93,72 @@ function maximise(start: Theta): Theta {
  * hyperparameters on sliders and a button that maximises the marginal likelihood.
  */
 export function HgpReplicates() {
-  const sg = useParam(1, { min: 0.1, max: 2, step: 0.01 })
-  const logEllG = useParam(0, { min: -0.5, max: 1, step: 0.01 })
-  const sf = useParam(0.4, { min: 0, max: 1.5, step: 0.01 })
-  const logEllF = useParam(0.2, { min: -0.7, max: 1, step: 0.01 })
-  const sn = useParam(0.1, { min: 0.02, max: 0.8, step: 0.01 })
-  const [focus, setFocus] = useState('3')
-  const j = Number(focus)
+  const state = useFigureState({
+    focus: choice(REPLICATE_OPTIONS, '3', { label: 'replicate shown' }),
+    sg: float(1, { min: 0.1, max: 2, step: 0.01, label: 'shared sd σ_g' }),
+    logEllG: float(0, {
+      min: -0.5,
+      max: 1,
+      step: 0.01,
+      label: 'shared length-scale ℓ_g',
+      points_per_decade: 2,
+      logTransform: 'value-is-log',
+      format: (v) => formatNumber(10 ** v),
+    }),
+    sf: float(0.4, { min: 0, max: 1.5, step: 0.01, label: 'replicate sd σ_f' }),
+    logEllF: float(0.2, {
+      min: -0.7,
+      max: 1,
+      step: 0.01,
+      label: 'replicate length-scale ℓ_f',
+      points_per_decade: 2,
+      logTransform: 'value-is-log',
+      format: (v) => formatNumber(10 ** v),
+    }),
+    sn: float(0.1, { min: 0.02, max: 0.8, step: 0.01, label: 'noise sd τ^(−1/2)' }),
+  })
+  const j = Number(state.focus)
   const theta: Theta = {
-    sg: sg.value,
-    logEllG: logEllG.value,
-    sf: sf.value,
-    logEllF: logEllF.value,
-    sn: sn.value,
+    sg: state.sg,
+    logEllG: state.logEllG,
+    sf: state.sf,
+    logEllF: state.logEllF,
+    sn: state.sn,
   }
 
   const post = useMemo(() => {
     const { kg, kf } = kernels({
-      sg: sg.value,
-      logEllG: logEllG.value,
-      sf: sf.value,
-      logEllF: logEllF.value,
-      sn: sn.value,
+      sg: state.sg,
+      logEllG: state.logEllG,
+      sf: state.sf,
+      logEllF: state.logEllF,
+      sn: state.sn,
     })
-    return hgpPosterior(kg, kf, sn.value ** 2, DATA, GRID)
-  }, [sg.value, logEllG.value, sf.value, logEllF.value, sn.value])
+    return hgpPosterior(kg, kf, state.sn ** 2, DATA, GRID)
+  }, [state.sg, state.logEllG, state.sf, state.logEllF, state.sn])
 
   const fit = () => {
     const best = maximise(theta)
-    sg.set(best.sg)
-    logEllG.set(best.logEllG)
-    sf.set(best.sf)
-    logEllF.set(best.logEllF)
-    sn.set(best.sn)
+    state.set('sg', best.sg)
+    state.set('logEllG', best.logEllG)
+    state.set('sf', best.sf)
+    state.set('logEllF', best.logEllF)
+    state.set('sn', best.sn)
   }
 
   const gSd = post.g.variance.map(Math.sqrt)
   const fj = post.f[j]
   const fSd = fj.variance.map(Math.sqrt)
   const others = DATA.filter((_, i) => i !== j)
-  const series: XYSeries[] = [
+  const series = [
     {
       name: 'other replicates',
-      type: 'scatter',
       x: others.flatMap((r) => r.x),
       y: others.flatMap((r) => r.y),
       muted: true,
     },
     {
       name: 'g ± 2 sd',
-      type: 'line',
       x: GRID,
       y: post.g.mean.map((m, i) => m + 2 * gSd[i]),
       muted: true,
@@ -147,16 +166,14 @@ export function HgpReplicates() {
     },
     {
       name: 'g − 2 sd',
-      type: 'line',
       x: GRID,
       y: post.g.mean.map((m, i) => m - 2 * gSd[i]),
       muted: true,
       dashed: true,
     },
-    { name: 'shared g (mean)', type: 'line', x: GRID, y: post.g.mean, emphasis: true },
+    { name: 'shared g (mean)', x: GRID, y: post.g.mean, emphasis: true },
     {
       name: `f${j + 1} ± 2 sd`,
-      type: 'line',
       x: GRID,
       y: fj.mean.map((m, i) => m + 2 * fSd[i]),
       slot: j,
@@ -164,35 +181,33 @@ export function HgpReplicates() {
     },
     {
       name: `f${j + 1} − 2 sd`,
-      type: 'line',
       x: GRID,
       y: fj.mean.map((m, i) => m - 2 * fSd[i]),
       slot: j,
       dashed: true,
     },
-    { name: `replicate f${j + 1} (mean)`, type: 'line', x: GRID, y: fj.mean, slot: j },
-    { name: `replicate ${j + 1} data`, type: 'scatter', x: DATA[j].x, y: DATA[j].y, slot: j },
-  ]
+    { name: `replicate f${j + 1} (mean)`, x: GRID, y: fj.mean, slot: j },
+    { name: `replicate ${j + 1} data`, x: DATA[j].x, y: DATA[j].y, slot: j },
+  ] as const
 
-  const s2g = sg.value ** 2
-  const s2f = sf.value ** 2
-  const s2n = sn.value ** 2
+  const s2g = state.sg ** 2
+  const s2f = state.sf ** 2
+  const s2n = state.sn ** 2
+  const xAxis = useAxis({ label: 'x', range: X_RANGE })
+  const yAxis = useAxis({ label: 'y', range: Y_RANGE })
   return (
-    <Interactive
+    <Figure
       title="Replicates sharing one latent function"
+      state={state}
       caption="Four replicates of one curve, twelve noisy points each; replicate 4 is observed only on [0, 5]. The ink line is the posterior mean of the shared function g (squared exponential kernel k_g), with dashed grey lines two posterior standard deviations either side. The coloured line and band are the posterior of the chosen replicate f_j (Matérn 3/2 deviation kernel k_f). With σ_f = 0 every replicate equals g (complete pooling). A large σ_f relative to σ_n lets f_j follow its own points and shrinks it toward g only where it has no data, as on the right half of replicate 4. The button maximises ln p(ŷ) over all five sliders."
       controls={
         <>
-          <ParamChoice label="replicate shown" value={focus} onChange={setFocus} options={REPLICATE_OPTIONS} />
-          <ParamSlider label="shared sd σ_g" param={sg} />
-          <ParamSlider label="shared length-scale ℓ_g" param={logEllG} format={(v) => formatNumber(10 ** v)} />
-          <ParamSlider label="replicate sd σ_f" param={sf} />
-          <ParamSlider label="replicate length-scale ℓ_f" param={logEllF} format={(v) => formatNumber(10 ** v)} />
-          <ParamSlider label="noise sd τ^(−1/2)" param={sn} />
-          <ParamButton onClick={fit}>Maximise marginal likelihood</ParamButton>
+          <Button variant="outline" size="sm" onClick={fit}>
+            Maximise marginal likelihood
+          </Button>
         </>
       }
-      readout={
+      readouts={
         <>
           <Readout label="ln p(ŷ)" value={formatNumber(post.logMarginal)} />
           <Readout label="shared share σ_g²/(σ_g²+σ_f²+τ⁻¹)" value={formatNumber(s2g / (s2g + s2f + s2n))} />
@@ -200,7 +215,16 @@ export function HgpReplicates() {
         </>
       }
     >
-      <XYChart series={series} xLabel="x" yLabel="y" xRange={X_RANGE} yRange={Y_RANGE} height={380} />
-    </Interactive>
+      <Plot x={xAxis} y={yAxis} height={380}>
+        <Points {...series[0]} />
+        <Curve {...series[1]} />
+        <Curve {...series[2]} />
+        <Curve {...series[3]} />
+        <Curve {...series[4]} />
+        <Curve {...series[5]} />
+        <Curve {...series[6]} />
+        <Points {...series[7]} />
+      </Plot>
+    </Figure>
   )
 }

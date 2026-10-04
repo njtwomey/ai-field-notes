@@ -1,5 +1,4 @@
-import { Interactive } from 'aifn-render'
-import { Diagram } from 'aifn-render'
+import { Diagram, Figure } from 'aifn-render'
 import type { DiagramNode, DiagramSpec } from 'aifn-render'
 
 const IN: [string, number, string][] = [
@@ -51,7 +50,7 @@ const spec: DiagramSpec = {
 /** Multi-head attention: h projected attentions in parallel, concatenated and mixed by one output projection. */
 export function MultiHeadDiagram() {
   return (
-    <Interactive
+    <Figure
       title="Multi-head attention"
       caption="Read from the bottom. Each head projects the queries, keys and values into its own subspace with its own matrices and runs scaled dot-product attention there, so each head produces its own attention weights. The h head outputs are concatenated back to width h times d_v and mixed by the output projection."
     >
@@ -59,6 +58,6 @@ export function MultiHeadDiagram() {
         spec={spec}
         ariaLabel="Multi-head attention: Q, K and V each projected per head, scaled dot-product attention per head, heads concatenated and multiplied by W_O"
       />
-    </Interactive>
+    </Figure>
   )
 }

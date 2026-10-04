@@ -9,7 +9,7 @@ import {
   probabilityFlowSampler,
   vpSde,
   type SamplerState,
-} from 'aifn-applied/generative/diffusion'
+} from 'aifn-methods/generative/diffusion'
 import { normals, stream } from 'aifn/foundation/random'
 import { fromData, linspace, toFlat, type Tensor } from 'aifn/foundation/tensor'
 import { trace, type Trace } from 'aifn/foundation/trace'

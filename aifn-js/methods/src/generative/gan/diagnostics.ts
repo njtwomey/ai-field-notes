@@ -4,7 +4,7 @@
  * (Goodfellow et al., 2014, Proposition 1) with p_g estimated by a Gaussian KDE of generated points.
  *
  * The known density is any labelled mixture p(x) = Σⱼ πⱼ p(x | j) with a log density per mode: the `model` of a
- * classification truth of `aifn-applied/data` (a ring or grid of Gaussians, a pinwheel), whose classes are the modes.
+ * classification truth of `aifn-methods/data` (a ring or grid of Gaussians, a pinwheel), whose classes are the modes.
  */
 
 import { multivariateKde } from 'aifn/probability/stats'

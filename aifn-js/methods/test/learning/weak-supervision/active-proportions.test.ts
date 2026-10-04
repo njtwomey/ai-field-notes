@@ -8,8 +8,12 @@ import { describe, expect, it } from 'vitest'
 import { child, stream } from 'aifn/foundation/random'
 import { toFlat, type Tensor } from 'aifn/foundation/tensor'
 import { trace } from 'aifn/foundation/trace'
-import { xor } from 'aifn-applied/data/synthetic'
-import { activeProportionsCurves, activeProportionsSteps, type ActiveStrategy } from 'aifn-applied/learning/weak-supervision'
+import { xor } from 'aifn-methods/data/synthetic'
+import {
+  activeProportionsCurves,
+  activeProportionsSteps,
+  type ActiveStrategy,
+} from 'aifn-methods/learning/weak-supervision'
 
 function problem(seed = 1) {
   const d = xor(stream(seed), { kind: 'gaussian', sd: 0.25, n: [80, 80] })
@@ -20,7 +24,16 @@ function problem(seed = 1) {
   ;[...ones.slice(0, 12), ...zeros.slice(0, 4)].forEach((i) => (bags[i] = 0))
   ;[...ones.slice(12, 16), ...zeros.slice(4, 16)].forEach((i) => (bags[i] = 1))
   const test = [...ones.slice(40), ...zeros.slice(40)]
-  return { x: d.x as Tensor, labels: y, bags, proportions: [[0.25, 0.75], [0.75, 0.25]], test }
+  return {
+    x: d.x as Tensor,
+    labels: y,
+    bags,
+    proportions: [
+      [0.25, 0.75],
+      [0.75, 0.25],
+    ],
+    test,
+  }
 }
 
 describe('a query', () => {
@@ -37,10 +50,13 @@ describe('a query', () => {
       }
       const truth = s1.query.reduce((a, i) => a + p.labels[i], 0) / 5
       expect(s1.answer).toBeCloseTo(truth, 12)
-      if (strategy === 'us-exact') for (const i of s1.query) expect(s1.proportions[2 * s1.bags[i] + 1]).toBe(p.labels[i])
+      if (strategy === 'us-exact')
+        for (const i of s1.query) expect(s1.proportions[2 * s1.bags[i] + 1]).toBe(p.labels[i])
       else expect(s1.proportions[2 * s1.bags[s1.query[0]] + 1]).toBeCloseTo(truth, 12)
       if (strategy === 'us-lp' || strategy === 'us-exact') {
-        const ranked = [...s0.uncertainty.keys()].filter((i) => s0.uncertainty[i] < Infinity).sort((a, b) => s0.uncertainty[a] - s0.uncertainty[b] || a - b)
+        const ranked = [...s0.uncertainty.keys()]
+          .filter((i) => s0.uncertainty[i] < Infinity)
+          .sort((a, b) => s0.uncertainty[a] - s0.uncertainty[b] || a - b)
         expect([...s1.query].sort((a, b) => a - b)).toEqual(ranked.slice(0, 5).sort((a, b) => a - b))
       }
       if (strategy === 'us-mass') {
@@ -60,7 +76,13 @@ describe('accuracy curves', () => {
       const d = xor(child(stream('active'), r), { kind: 'gaussian', sd: 0.25, n: [80, 80] })
       return { x: d.x as Tensor, y: d.y as Tensor }
     })
-    const it = activeProportionsCurves({ datasets, strategies: ['us-exact', 'us-lp'], bagSize: 5, queries: 3, gamma: 4 })
+    const it = activeProportionsCurves({
+      datasets,
+      strategies: ['us-exact', 'us-lp'],
+      bagSize: 5,
+      queries: 3,
+      gamma: 4,
+    })
     let s = it.next()
     while (!s.done) s = it.next()
     const { mean } = s.value

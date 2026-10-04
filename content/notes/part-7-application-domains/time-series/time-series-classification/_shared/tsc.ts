@@ -1,9 +1,9 @@
+import { normalQuantile } from 'aifn/numerics/special'
 /**
  * Small time-series classification helpers shared by the shapelet, DTW and SAX notes: z-normalisation, subsequence
  * distance, information gain of a split, DTW with a Sakoe–Chiba window and its warping path, the LB_Keogh envelope,
  * PAA and SAX. Figure-sized inputs only.
  */
-import { normalQuantile } from '@/lib/math/special'
 
 export function znorm(x: number[]): number[] {
   const n = x.length

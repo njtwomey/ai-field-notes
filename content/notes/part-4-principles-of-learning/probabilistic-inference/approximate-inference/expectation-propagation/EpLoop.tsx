@@ -1,6 +1,5 @@
-import { Diagram } from 'aifn-render'
+import { Diagram, Figure } from 'aifn-render'
 import type { DiagramSpec } from 'aifn-render'
-import { Interactive } from 'aifn-render'
 
 const SPEC: DiagramSpec = {
   unit: 40,
@@ -39,7 +38,7 @@ const SPEC: DiagramSpec = {
 /** The EP loop for one site: cavity, tilted distribution, projection and site update. */
 export function EpLoop() {
   return (
-    <Interactive
+    <Figure
       title="One EP update"
       caption="Remove site i from the approximation to get the cavity; multiply the cavity by the exact factor tᵢ to get the tilted distribution; project that back onto the family by matching expected sufficient statistics; store the ratio of the projection to the cavity as the new site. Every other site is untouched. EP repeats this for i = 1, …, n until no site changes."
     >
@@ -47,6 +46,6 @@ export function EpLoop() {
         spec={SPEC}
         ariaLabel="Cycle: approximation q, remove site i to get the cavity, multiply by factor t_i to get the tilted distribution, project by matching moments, divide by the cavity to get the new site, back to q"
       />
-    </Interactive>
+    </Figure>
   )
 }

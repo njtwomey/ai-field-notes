@@ -1,4 +1,4 @@
-/** The environment constructors of the `aifn-applied/gym/environments` group's shared layer. */
+/** The environment constructors of the `aifn-methods/gym/environments` group's shared layer. */
 
 import { definer, entries, type Entry, type FunctionInfo } from 'aifn/foundation/registry'
 import * as gridworlds from './gridworlds'

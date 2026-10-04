@@ -1,10 +1,10 @@
 /**
- * `aifn-applied/data/synthetic`: seeded synthetic datasets: points (blobs, moons, circles, spirals, …), regression,
+ * `aifn-methods/data/synthetic`: seeded synthetic datasets: points (blobs, moons, circles, spirals, …), regression,
  * 2-d densities for generative models (ring and grid of Gaussians, pinwheel, Swiss-roll slice, annulus), inverse
  * problems with multi-valued answers (Bishop's folded sine, two-link arm kinematics),
  * sequences, piecewise series with known changepoints, learners with zero-inflated responses, images, paired views
  * (image and caption) and recommender interactions; and modifiers (noise, outliers, shifts, missingness, linear maps).
- * Recipes, which replay generators and modifiers by key, are in `aifn-applied/data`.
+ * Recipes, which replay generators and modifiers by key, are in `aifn-methods/data`.
  */
 
 export {

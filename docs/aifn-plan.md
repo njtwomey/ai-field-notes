@@ -60,12 +60,12 @@ internals, and every iterative algorithm can be stepped, scrubbed, replicated, p
 ## 3. Organisation: by what things do
 
 _Superseded in part._ The plan had flat import paths (`aifn/linalg`, `aifn/pgm`) and no core. The built library is
-two packages, `aifn` (core) and `aifn-applied` (applications), and import paths follow the nested tree
-(`aifn/numerics/linalg`, `aifn-applied/inference/sequence-models`). The family lists below are the plan's inventory of
+two packages, `aifn` (core) and `aifn-methods` (applications), and import paths follow the nested tree
+(`aifn/numerics/linalg`, `aifn-methods/inference/sequence-models`). The family lists below are the plan's inventory of
 what each part does; module homes are in `aifn-js/modules.json` and the table that follows. The order is an explicit stack of tiers: a
 module may import only from strictly lower tiers. `scripts/aifn-layers.ts` enforces it in `make lint` (and so in
 `make check`); the source of truth is `aifn-js/modules.json`, from which this table and the README's are generated
-(`node scripts/aifn-layers.ts --write`). The 12 application modules have moved to `aifn-applied` (`aifn-js/README.md`).
+(`node scripts/aifn-layers.ts --write`). The 12 application modules have moved to `aifn-methods` (`aifn-js/README.md`).
 
 <!-- aifn-layers:start -->
 
@@ -527,7 +527,7 @@ A standalone app for developing and exploring aifn, separate from the site for n
 
 ## 13. Testing
 
-- vitest in `aifn-js/core/test` and `aifn-js/applications/test`, mirroring the source tree, run by `make test` (and
+- vitest in `aifn-js/core/test` and `aifn-js/methods/test`, mirroring the source tree, run by `make test` (and
   so `make check`). Golden values come from `make fixtures`: generators in each package's `test/fixtures/gen`, run by
   one runner, `aifn-js/core/test/fixtures/generate.py`; `make fixtures-check` regenerates in memory and reports drift.
 - Python generates the test cases. An aifn-py command (`uv run aifn fixtures`) writes JSON fixtures from

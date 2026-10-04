@@ -1,14 +1,16 @@
-import { useMemo, useState } from 'react'
+import { useMemo } from 'react'
 import {
-  Interactive,
-  ParamChoice,
-  ParamSlider,
-  Readout,
-  XYChart,
+  choice,
+  Curve,
+  Figure,
+  float,
   formatNumber,
-  useParam,
-  type Handle,
-  type XYSeries,
+  Handle,
+  Plot,
+  Points,
+  Readout,
+  useAxis,
+  useFigureState,
 } from 'aifn-render'
 
 type Preset = 'one' | 'two'
@@ -48,57 +50,48 @@ function evaluate(s: number[], y: number[], temperature: number) {
  * exp(−L) and ApproxNDCG change smoothly. The bound stays below both metrics everywhere.
  */
 export function MetricSteps() {
-  const [preset, setPreset] = useState<Preset>('one')
-  const score = useParam(-0.5, { min: X_MIN, max: X_MAX, step: 0.01 })
-  const [temperature, setTemperature] = useState(0.5)
-  const y = LABELS[preset]
+  const state = useFigureState({
+    score: float(-0.5, { min: X_MIN, max: X_MAX, step: 0.01, label: 'score of item 1' }),
+    temperature: float(0.5, { min: 0.05, max: 2, step: 0.05, label: 'ApproxNDCG temperature T' }),
+    preset: choice<Preset>(
+      (Object.keys(LABELS) as Preset[]).map((p) => ({ value: p, label: PRESET_LABEL[p] })),
+      'one',
+      { label: 'labels' },
+    ),
+  })
+  const y = LABELS[state.preset]
 
-  const series = useMemo((): XYSeries[] => {
-    const rows = GRID.map((x) => evaluate([x, ...OTHERS], y, temperature))
+  const series = useMemo(() => {
+    const rows = GRID.map((x) => evaluate([x, ...OTHERS], y, state.temperature))
     return [
-      { name: 'NDCG', type: 'line', x: GRID, y: rows.map((r) => r.ndcg), slot: 0 },
-      { name: 'reciprocal rank', type: 'line', x: GRID, y: rows.map((r) => r.rr), slot: 1 },
-      { name: 'ApproxNDCG', type: 'line', x: GRID, y: rows.map((r) => r.approxNdcg), slot: 2 },
+      { name: 'NDCG', x: GRID, y: rows.map((r) => r.ndcg), slot: 0 },
+      { name: 'reciprocal rank', x: GRID, y: rows.map((r) => r.rr), slot: 1 },
+      { name: 'ApproxNDCG', x: GRID, y: rows.map((r) => r.approxNdcg), slot: 2 },
       {
         name: 'exp(−softmax CE), a lower bound',
-        type: 'line',
         x: GRID,
         y: rows.map((r) => r.bound),
         slot: 3,
         dashed: true,
       },
-      { name: 'other items’ scores', type: 'scatter', x: OTHERS, y: OTHERS.map(() => 0.02), muted: true },
-    ]
-  }, [y, temperature])
+      { name: 'other items’ scores', x: OTHERS, y: OTHERS.map(() => 0.02), muted: true },
+    ] as const
+  }, [y, state.temperature])
 
-  const now = useMemo(() => evaluate([score.value, ...OTHERS], y, temperature), [score.value, y, temperature])
+  const now = useMemo(
+    () => evaluate([state.score, ...OTHERS], y, state.temperature),
+    [state.score, y, state.temperature],
+  )
 
-  const handles: Handle[] = [{ kind: 'x', at: score.value, label: 'score of item 1', onDrag: score.set }]
-
+  const xAxis = useAxis({ label: 'score of item 1', range: X_RANGE })
+  const yAxis = useAxis({ label: 'value', range: Y_RANGE })
   return (
-    <Interactive
+    <Figure
       title="Metrics step, surrogates slide"
+      state={state}
       caption="Five items; item 1 is relevant and the grey marks show the fixed scores of the other four. Drag the vertical line (or use the slider) to move item 1's score. NDCG and reciprocal rank change only when item 1 passes another item, so their gradient is zero between the jumps. The softmax cross-entropy bound exp(−L) rises smoothly and stays below both metrics. ApproxNDCG replaces each rank indicator by a sigmoid: a small temperature tracks NDCG closely but flattens between the jumps, a large one is smooth but biased."
-      controls={
-        <>
-          <ParamSlider label="score of item 1" param={score} />
-          <ParamSlider
-            label="ApproxNDCG temperature T"
-            value={temperature}
-            onChange={setTemperature}
-            min={0.05}
-            max={2}
-            step={0.05}
-          />
-          <ParamChoice
-            label="labels"
-            value={preset}
-            onChange={setPreset}
-            options={(Object.keys(LABELS) as Preset[]).map((p) => ({ value: p, label: PRESET_LABEL[p] }))}
-          />
-        </>
-      }
-      readout={
+
+      readouts={
         <>
           <Readout label="rank of item 1" value={`${now.rank} of ${now.n}`} />
           <Readout label="NDCG" value={formatNumber(now.ndcg)} />
@@ -109,15 +102,14 @@ export function MetricSteps() {
         </>
       }
     >
-      <XYChart
-        height={320}
-        series={series}
-        handles={handles}
-        xRange={X_RANGE}
-        yRange={Y_RANGE}
-        xLabel="score of item 1"
-        yLabel="value"
-      />
-    </Interactive>
+      <Plot x={xAxis} y={yAxis} height={320}>
+        <Curve {...series[0]} />
+        <Curve {...series[1]} />
+        <Curve {...series[2]} />
+        <Curve {...series[3]} />
+        <Points {...series[4]} />
+        <Handle {...state.handle('score', { label: 'score of item 1' })} />
+      </Plot>
+    </Figure>
   )
 }

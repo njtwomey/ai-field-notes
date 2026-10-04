@@ -1,4 +1,4 @@
-/** The registry of `aifn-applied/unsupervised/clustering`: the clustering procedures as traceable algorithms. */
+/** The registry of `aifn-methods/unsupervised/clustering`: the clustering procedures as traceable algorithms. */
 
 import { definer, entries, type AlgorithmInfo, type Entry, type FunctionInfo } from 'aifn/foundation/registry'
 import * as centroid from './centroid'

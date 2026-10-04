@@ -1,6 +1,6 @@
 /** A small HNSW (Malkov and Yashunin, Algorithms 1 to 5) in 2-D, instrumented to record a query's search path. */
-import { rng } from '@/lib/math'
 import { dist2, type P } from '../_shared/geometry'
+import { stream, uniform } from 'aifn/foundation/random'
 
 export type Hnsw = {
   points: P[]
@@ -66,10 +66,10 @@ function selectNeighbours(g: Hnsw, cands: Scored[], m: number): number[] {
 }
 
 export function build(points: P[], m: number, efConstruction: number, seed: number): Hnsw {
-  const r = rng(seed)
+  const r = stream(seed)
   const mL = 1 / Math.log(m)
   const mMax0 = 2 * m
-  const level = points.map(() => Math.floor(-Math.log(Math.max(r.uniform(), 1e-12)) * mL))
+  const level = points.map(() => Math.floor(-Math.log(Math.max(uniform(r), 1e-12)) * mL))
   const maxLevel = Math.max(...level)
   const g: Hnsw = {
     points,

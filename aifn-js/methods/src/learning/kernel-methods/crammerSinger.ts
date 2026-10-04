@@ -1,5 +1,5 @@
 /**
- * The Crammer–Singer multiclass SVM (Crammer and Singer, 2001, JMLR 2), part of `aifn-applied/learning/kernel-methods`,
+ * The Crammer–Singer multiclass SVM (Crammer and Singer, 2001, JMLR 2), part of `aifn-methods/learning/kernel-methods`,
  * solved by LIBLINEAR's sequential dual method (Keerthi et al., 2008, KDD).
  */
 

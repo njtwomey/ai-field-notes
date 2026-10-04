@@ -3,18 +3,7 @@ import { beliefPropagationSteps, decodeBeliefs, type BeliefPropagationState } fr
 import { discreteFactor, discreteFactorGraph, type DiscreteFactorGraph } from 'aifn/inference/model'
 import { variableElimination } from 'aifn/inference/exact'
 import { trace } from 'aifn/foundation/trace'
-import {
-  Figure,
-  ControlGroup,
-  Select,
-  NumberSelector,
-  Player,
-  Plot,
-  Bars,
-  Points,
-  Readout,
-  useAxis,
-} from 'aifn-render'
+import { Figure, ControlGroup, Select, NumberSelector, Player, Plot, Bars, Points, Readout, useAxis } from 'aifn-render'
 
 const NAMES = ['a', 'b', 'c', 'd', 'e']
 const CARDS = [2, 2, 2, 2, 2]
@@ -69,12 +58,7 @@ export function TreeBpExplorer() {
       defaultSize="L"
       controls={
         <ControlGroup>
-          <Select
-            label="Semiring"
-            options={MODES}
-            value={mode}
-            onChange={(m) => setMode(m as 'sum' | 'max')}
-          />
+          <Select label="Semiring" options={MODES} value={mode} onChange={(m) => setMode(m as 'sum' | 'max')} />
           <NumberSelector
             label="Message step"
             value={step}
@@ -84,12 +68,7 @@ export function TreeBpExplorer() {
             step={1}
             suggestions={[0, 4, 8, run.steps.length - 1]}
           />
-          <Player
-            label="Step through messages"
-            value={step}
-            onChange={setStep}
-            count={run.steps.length}
-          />
+          <Player label="Step through messages" value={step} onChange={setStep} count={run.steps.length} />
         </ControlGroup>
       }
       readouts={

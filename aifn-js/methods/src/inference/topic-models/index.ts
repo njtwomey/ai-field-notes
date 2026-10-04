@@ -1,5 +1,5 @@
 /**
- * `aifn-applied/inference/topic-models`: topic models. Latent Dirichlet allocation (the model, its match, collapsed
+ * `aifn-methods/inference/topic-models`: topic models. Latent Dirichlet allocation (the model, its match, collapsed
  * Gibbs sampling, labelled LDA through allowed topic sets, estimates, and its engine `ldaEngine` / `ldaEngines` for
  * `infer`); pLSA by EM; LSA and NMF topics; a correlated topic model (MAP EM); and the hierarchical Dirichlet process (`hdpGibbs`, the number of topics
  * inferred); a dynamic topic model whose topics drift over time slices (`dynamicTopicSteps`, `dynamicTopicRun`); and

@@ -1,6 +1,6 @@
 /** Toy data for the GP-LVM figures. */
-import { rng } from '@/lib/math'
 import { centre } from './gplvm'
+import { normal, stream } from 'aifn/foundation/random'
 
 export const LOOP_N = 40
 
@@ -10,11 +10,11 @@ export const LOOP_N = 40
  * carry most of the variance, trace a figure of eight; the third separates the two branches where they cross.
  */
 export function loopData(): number[][] {
-  const g = rng(3)
+  const g = stream(3)
   const Y = Array.from({ length: LOOP_N }, (_, n) => {
     const t = (2 * Math.PI * n) / LOOP_N
     return [Math.sin(t), 0.8 * Math.sin(2 * t), 0.6 * Math.cos(t), 0.3 * Math.cos(3 * t)].map(
-      (v) => v + 0.03 * g.normal(),
+      (v) => v + 0.03 * normal(g),
     )
   })
   return centre(Y).Y

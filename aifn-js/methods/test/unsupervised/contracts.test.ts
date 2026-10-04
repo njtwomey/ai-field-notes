@@ -12,9 +12,9 @@ import {
   miniBatchKMeans,
   type KMeansInit,
   type KMeansState,
-} from 'aifn-applied/unsupervised/clustering'
-import { isomap, tsne } from 'aifn-applied/unsupervised/embedding'
-import { pca } from 'aifn-applied/unsupervised/embedding/linear'
+} from 'aifn-methods/unsupervised/clustering'
+import { isomap, tsne } from 'aifn-methods/unsupervised/embedding'
+import { pca } from 'aifn-methods/unsupervised/embedding/linear'
 import type * as C from 'aifn/foundation/contracts'
 import { stream } from 'aifn/foundation/random'
 import { tensor, type Tensor } from 'aifn/foundation/tensor'

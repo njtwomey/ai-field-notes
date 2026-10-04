@@ -15,9 +15,9 @@ import {
   treeGrowthSteps,
   type DecisionTree,
   type GrowthOrder,
-} from 'aifn-applied/learning/trees-and-ensembles'
+} from 'aifn-methods/learning/trees-and-ensembles'
 import { run } from 'aifn/foundation/trace'
-import { moons, withLabelNoise } from 'aifn-applied/data/synthetic'
+import { moons, withLabelNoise } from 'aifn-methods/data/synthetic'
 import { leaves, preOrder } from 'aifn/graph'
 import { stream } from 'aifn/foundation/random'
 import { tensor, toFlat, type Tensor } from 'aifn/foundation/tensor'

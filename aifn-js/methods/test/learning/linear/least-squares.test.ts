@@ -3,7 +3,7 @@
  * logistic regression tests in learning/generalised/glm).
  */
 import { describe, expect, expectTypeOf, it } from 'vitest'
-import { linearRegression } from 'aifn-applied/learning/linear'
+import { linearRegression } from 'aifn-methods/learning/linear'
 import { stream } from 'aifn/foundation/random'
 import { tensor, toFlat, toRows, type Tensor } from 'aifn/foundation/tensor'
 import { asTensor, dataset, evaluate, hasPredictive, type AnyUnivariate, type InputOf } from 'aifn/learning/estimators'

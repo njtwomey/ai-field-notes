@@ -1,14 +1,16 @@
-import { useMemo, useState } from 'react'
+import { useMemo } from 'react'
 import {
-  Interactive,
-  ParamChoice,
-  ParamSlider,
-  Readout,
-  XYChart,
+  choice,
+  Figure,
+  int,
   formatNumber,
-  useParam,
-  type Handle,
-  type XYSeries,
+  Curve,
+  Handle,
+  Plot,
+  Plots,
+  useAxis,
+  Readout,
+  useFigureState,
 } from 'aifn-render'
 
 // NVIDIA A100 80 GB SXM: 2.039 TB/s memory bandwidth, 312 TFLOP/s dense bf16, 80 GB of memory.
@@ -43,19 +45,21 @@ function step(batch: number, weightBytes: number, kvPerToken: number, context: n
 }
 
 export function ServingRoofline() {
-  const batch = useParam(16, { min: 1, max: MAX_BATCH, step: 1 })
-  const [context, setContext] = useState(1024)
-  const [bits, setBits] = useState<Bits>('16')
-  const [kvHeads, setKvHeads] = useState<KvHeads>('32')
+  const state = useFigureState({
+    batch: int(16, { min: 1, max: MAX_BATCH, label: 'batch size' }),
+    context: int(1024, { min: 128, max: 8192, step: 128, label: 'tokens of context per sequence' }),
+    bits: choice<Bits>(BITS, '16', { label: 'weight precision' }),
+    kvHeads: choice<KvHeads>(KV_HEADS, '32', { label: 'KV heads' }),
+  })
 
-  const weightBytes = (PARAMS * Number(bits)) / 8
-  const kvPerToken = 2 * LAYERS * Number(kvHeads) * HEAD_DIM * 2
-  const maxBatch = Math.floor((CAPACITY - weightBytes) / (context * kvPerToken))
+  const weightBytes = (PARAMS * Number(state.bits)) / 8
+  const kvPerToken = 2 * LAYERS * Number(state.kvHeads) * HEAD_DIM * 2
+  const maxBatch = Math.floor((CAPACITY - weightBytes) / (state.context * kvPerToken))
 
   const { throughput, latency } = useMemo(() => {
-    const t = BATCHES.map((b) => step(b, weightBytes, kvPerToken, context).time)
+    const t = BATCHES.map((b) => step(b, weightBytes, kvPerToken, state.context).time)
     const fits = (b: number) => b <= maxBatch
-    const split = (name: string, y: number[], slot: number): XYSeries[] => [
+    const split = (name: string, y: number[], slot: number) => [
       { name, type: 'line', x: BATCHES.filter(fits), y: y.filter((_, i) => fits(BATCHES[i])), slot },
       {
         name: 'does not fit in 80 GB',
@@ -77,57 +81,41 @@ export function ServingRoofline() {
         1,
       ),
     }
-  }, [weightBytes, kvPerToken, context, maxBatch])
+  }, [weightBytes, kvPerToken, state.context, maxBatch])
 
-  const now = step(batch.value, weightBytes, kvPerToken, context)
-  const handles: Handle[] = [{ kind: 'x', at: batch.value, label: 'batch', onDrag: batch.set }]
+  const now = step(state.batch, weightBytes, kvPerToken, state.context)
+  const batchAxis = useAxis({ label: 'batch size', range: [1, MAX_BATCH] })
+  const throughputAxis = useAxis({ label: 'tokens per second', range: [0, undefined], hold: 'union' })
+  const latencyAxis = useAxis({ label: 'ms per token', range: [0, undefined], hold: 'union' })
 
   return (
-    <Interactive
+    <Figure
       title="Decode throughput and latency of a 7B model on one A100"
+      purpose="Change the batch size, context, weight precision and KV heads to see decode throughput and latency and what limits them."
+      state={state}
       caption="Each decode step reads every weight and every cached key and value once, and does two operations per weight per sequence. At small batch sizes the weights dominate the traffic, so throughput grows almost linearly with batch size at little cost in latency. At larger batches the KV cache dominates, and throughput levels off. Grey marks batch sizes whose cache does not fit in memory. Drag either vertical line to change the batch size."
-      controls={
-        <>
-          <ParamSlider label="batch size" param={batch} />
-          <ParamSlider
-            label="tokens of context per sequence"
-            value={context}
-            onChange={setContext}
-            min={128}
-            max={8192}
-            step={128}
-          />
-          <ParamChoice label="weight precision" value={bits} onChange={setBits} options={BITS} />
-          <ParamChoice label="KV heads" value={kvHeads} onChange={setKvHeads} options={KV_HEADS} />
-        </>
-      }
-      readout={
+
+      readouts={
         <>
           <Readout label="step time" value={`${formatNumber(1000 * now.time)} ms`} />
-          <Readout label="throughput" value={`${formatNumber(batch.value / now.time)} tokens/s`} />
+          <Readout label="throughput" value={`${formatNumber(state.batch / now.time)} tokens/s`} />
           <Readout label="limited by" value={now.memoryBound ? 'memory bandwidth' : 'arithmetic'} />
           <Readout label="largest batch that fits" value={formatNumber(Math.max(maxBatch, 0))} />
         </>
       }
     >
-      <XYChart
-        series={throughput}
-        xLabel="batch size"
-        yLabel="tokens per second"
-        xRange={[1, MAX_BATCH]}
-        yRange={[0, undefined]}
-        handles={handles}
-        height={220}
-      />
-      <XYChart
-        series={latency}
-        xLabel="batch size"
-        yLabel="ms per token"
-        xRange={[1, MAX_BATCH]}
-        yRange={[0, undefined]}
-        handles={handles}
-        height={220}
-      />
-    </Interactive>
+      <Plots rows={2}>
+        <Plot x={batchAxis} y={throughputAxis}>
+          <Curve {...throughput[0]} />
+          <Curve {...throughput[1]} />
+          <Handle {...state.handle('batch', { label: 'batch' })} />
+        </Plot>
+        <Plot x={batchAxis} y={latencyAxis}>
+          <Curve {...latency[0]} />
+          <Curve {...latency[1]} />
+          <Handle {...state.handle('batch', { label: 'batch' })} />
+        </Plot>
+      </Plots>
+    </Figure>
   )
 }

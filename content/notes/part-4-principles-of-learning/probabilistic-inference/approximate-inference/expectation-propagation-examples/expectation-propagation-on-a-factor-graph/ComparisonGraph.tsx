@@ -1,7 +1,5 @@
-import { Diagram } from 'aifn-render'
-import { factor, link, variable } from 'aifn-render'
+import { Diagram, factor, Figure, link, variable } from 'aifn-render'
 import type { DiagramSpec } from 'aifn-render'
-import { Interactive } from 'aifn-render'
 
 const SPEC: DiagramSpec = {
   unit: 40,
@@ -29,7 +27,7 @@ const SPEC: DiagramSpec = {
 /** Three players, two games: A beat B and B beat C. Squares are factors, circles skills. */
 export function ComparisonGraph() {
   return (
-    <Interactive
+    <Figure
       title="Factor graph for two comparisons"
       caption="Each skill has a Gaussian prior factor (top). Each game is a probit factor on the difference of two skills (bottom). EP sends a Gaussian message from each game factor to each of its players; player B receives one from each game, and each depends on the other through B's cavity."
     >
@@ -37,6 +35,6 @@ export function ComparisonGraph() {
         spec={SPEC}
         ariaLabel="Factor graph: prior factors above skills s_A, s_B, s_C; factor f1 joins s_A and s_B; factor f2 joins s_B and s_C"
       />
-    </Interactive>
+    </Figure>
   )
 }

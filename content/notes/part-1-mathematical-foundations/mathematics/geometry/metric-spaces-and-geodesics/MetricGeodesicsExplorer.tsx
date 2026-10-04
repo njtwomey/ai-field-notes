@@ -235,20 +235,9 @@ export function MetricGeodesicsExplorer() {
             thin
           />
           {/* Minimal geodesic curve */}
-          <Curve
-            name="minimal geodesic path γ(t)"
-            x={geodesicPath.xs}
-            y={geodesicPath.ys}
-            emphasis
-          />
+          <Curve name="minimal geodesic path γ(t)" x={geodesicPath.xs} y={geodesicPath.ys} emphasis />
           {/* Triangle test point C */}
-          <Points
-            name="test point C"
-            x={[pointC[0]]}
-            y={[pointC[1]]}
-            size={7}
-            muted
-          />
+          <Points name="test point C" x={[pointC[0]]} y={[pointC[1]]} size={7} muted />
           <Curve
             name="triangle detour A → C → B"
             x={[pointA[0], pointC[0], pointB[0]]}

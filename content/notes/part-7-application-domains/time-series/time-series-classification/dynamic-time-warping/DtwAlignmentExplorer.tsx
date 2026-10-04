@@ -2,13 +2,7 @@ import { useMemo, useState } from 'react'
 import { linspace, toFlat, toRows, type Tensor } from 'aifn/foundation/tensor'
 import { trace } from 'aifn/foundation/trace'
 import { dynamicProgram } from 'aifn/optim/programming'
-import {
-  dtw,
-  dtwProgram,
-  keoghEnvelope,
-  lbKeogh,
-  lbKim,
-} from 'aifn/signal/similarity'
+import { dtw, dtwProgram, keoghEnvelope, lbKeogh, lbKim } from 'aifn/signal/similarity'
 import {
   Figure,
   ControlGroup,
@@ -126,12 +120,7 @@ export function DtwAlignmentExplorer() {
             value={cost}
             onChange={(v) => setCost(v as 'squared' | 'absolute')}
           />
-          <Player
-            label="Fill DP table"
-            value={at}
-            onChange={setStep}
-            count={run.steps.length}
-          />
+          <Player label="Fill DP table" value={at} onChange={setStep} count={run.steps.length} />
         </ControlGroup>
       }
       readouts={

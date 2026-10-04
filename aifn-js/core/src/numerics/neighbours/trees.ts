@@ -3,11 +3,14 @@
  * search trees used for associative searching", CACM 18(9); Friedman, Bentley and Finkel 1977, ACM TOMS 3(3)) and the
  * ball tree (Omohundro 1989, "Five balltree construction algorithms", ICSI TR-89-063; Uhlmann 1991), built as
  * scikit-learn's `KDTree` and `BallTree` are: each node splits its points at the median of the coordinate with the
- * largest spread, down to leaves of at most `leafSize` points.
+ * largest spread, down to leaves of at most `leafSize` points. The vantage-point tree (Yianilos 1993, "Data structures
+ * and algorithms for nearest neighbor search in general metric spaces", SODA) instead splits a node's points at the
+ * median distance from one of them, the vantage point.
  *
- * A k-d node keeps the bounding box of its points, a ball node the centroid and the radius that covers them. The search
+ * A k-d node keeps the bounding box of its points, a ball node the centroid and the radius that covers them, and a
+ * vantage-point node the shell [lo, hi] of distances from its parent's vantage point that holds its points. The search
  * is depth first, nearer child first, and skips a node whose lower bound on the distance to any of its points (the
- * distance from the query to the box, or to the ball's surface) already exceeds the k-th best distance found. The
+ * distance from the query to the box, to the ball's surface, or to the shell) already exceeds the k-th best distance found. The
  * answer is exact; what the tree saves is distance evaluations, which `visits` records node by node.
  */
 
@@ -36,7 +39,10 @@ export interface SpaceTreeNode {
   readonly left: number
   readonly right: number
   readonly depth: number
-  /** k-d tree: the split coordinate and value (points with a smaller rank go left); −1 and NaN at a leaf. */
+  /**
+   * k-d tree: the split coordinate and value (points with a smaller rank go left); −1 and NaN at a leaf. Vantage-point
+   * tree: `dim` is −1 and `split` is the median distance μ from the vantage point at an internal node.
+   */
   readonly dim: number
   readonly split: number
   /** k-d tree: the bounding box of the node's points. */
@@ -45,11 +51,19 @@ export interface SpaceTreeNode {
   /** Ball tree: the centroid of the node's points and the largest distance from it to one of them. */
   readonly centre?: readonly number[]
   readonly radius?: number
+  /** Vantage-point tree, internal node: the index of its vantage point (its points nearer than `split` go left). */
+  readonly vantage?: number
+  /**
+   * Vantage-point tree, below the root: the parent's vantage point and the least and greatest distance from it to one
+   * of this node's points. Every point of the node lies in that shell.
+   */
+  readonly anchor?: readonly number[]
+  readonly shell?: readonly [number, number]
 }
 
 /** A built k-d tree or ball tree over n points of width d. */
 export interface SpaceTree {
-  readonly kind: 'kd-tree' | 'ball-tree'
+  readonly kind: 'kd-tree' | 'ball-tree' | 'vp-tree'
   readonly n: Size
   readonly d: Size
   /** The points, row-major n × d (a copy). */
@@ -62,7 +76,7 @@ export interface SpaceTree {
   readonly metric: TreeMetric
 }
 
-/** Options of {@link kdTree} and {@link ballTree}. */
+/** Options of {@link kdTree}, {@link ballTree} and {@link vpTree}. */
 export interface SpaceTreeOptions {
   /** Most points in a leaf (default 40, as scikit-learn; small values make deep trees for drawing). */
   leafSize?: Size
@@ -71,7 +85,7 @@ export interface SpaceTreeOptions {
 }
 
 function build(kind: SpaceTree['kind'], x: MatrixLike, options: SpaceTreeOptions): SpaceTree {
-  const where = kind === 'kd-tree' ? 'kdTree' : 'ballTree'
+  const where = kind === 'kd-tree' ? 'kdTree' : kind === 'ball-tree' ? 'ballTree' : 'vpTree'
   const { leafSize = 40, metric = 'euclidean' } = options
   if (!(Number.isInteger(leafSize) && leafSize >= 1))
     throw new DomainError(where, `${where}: leafSize must be a positive integer`)
@@ -81,7 +95,9 @@ function build(kind: SpaceTree['kind'], x: MatrixLike, options: SpaceTreeOptions
   const order = Int32Array.from({ length: n }, (_, i) => i)
   const nodes: SpaceTreeNode[] = []
   const at = (i: number, c: number) => data[order[i] * d + c]
-  const make = (start: number, end: number, depth: number): number => {
+  // The vantage-point tree measures shells in the underlying metric (squared Euclidean is not one).
+  const base = metric === 'sqeuclidean' ? 'euclidean' : metric
+  const make = (start: number, end: number, depth: number, anchor?: number[], shell?: [number, number]): number => {
     const id = nodes.length
     nodes.push(null as unknown as SpaceTreeNode)
     const lower = new Array<number>(d).fill(Infinity)
@@ -91,8 +107,20 @@ function build(kind: SpaceTree['kind'], x: MatrixLike, options: SpaceTreeOptions
         lower[c] = Math.min(lower[c], at(i, c))
         upper[c] = Math.max(upper[c], at(i, c))
       }
-    const shape: { lower?: number[]; upper?: number[]; centre?: number[]; radius?: number } = {}
-    if (kind === 'kd-tree') {
+    const shape: {
+      lower?: number[]
+      upper?: number[]
+      centre?: number[]
+      radius?: number
+      anchor?: number[]
+      shell?: [number, number]
+    } = {}
+    if (kind === 'vp-tree') {
+      if (anchor) {
+        shape.anchor = anchor
+        shape.shell = shell
+      }
+    } else if (kind === 'kd-tree') {
       shape.lower = lower
       shape.upper = upper
     } else {
@@ -105,6 +133,30 @@ function build(kind: SpaceTree['kind'], x: MatrixLike, options: SpaceTreeOptions
     }
     if (end - start <= leafSize) {
       nodes[id] = { start, end, left: -1, right: -1, depth, dim: -1, split: NaN, ...shape }
+      return id
+    }
+    if (kind === 'vp-tree') {
+      // Vantage point: the node's point farthest from its centroid (a corner of the cloud, whose distances spread most),
+      // ties to the smaller index; the node's points are sorted by distance to it and split at the median.
+      const centre = new Array<number>(d).fill(0)
+      for (let i = start; i < end; i++) for (let c = 0; c < d; c++) centre[c] += at(i, c) / (end - start)
+      let v = order[start]
+      let far = -1
+      for (let i = start; i < end; i++) {
+        const r = distanceOf(base, centre, 0, data, order[i], d)
+        if (r > far || (r === far && order[i] < v)) [far, v] = [r, order[i]]
+      }
+      const vp = Array.from(data.subarray(v * d, (v + 1) * d))
+      const dist = new Map<number, number>()
+      for (let i = start; i < end; i++) dist.set(order[i], distanceOf(base, vp, 0, data, order[i], d))
+      const slice = Array.from(order.subarray(start, end)).sort((a, b) => dist.get(a)! - dist.get(b)! || a - b)
+      order.set(slice, start)
+      const mid = start + Math.floor((end - start) / 2)
+      const mu = dist.get(order[mid])!
+      const shellOf = (a: number, b: number): [number, number] => [dist.get(order[a])!, dist.get(order[b - 1])!]
+      const left = make(start, mid, depth + 1, vp, shellOf(start, mid))
+      const right = make(mid, end, depth + 1, vp, shellOf(mid, end))
+      nodes[id] = { start, end, left, right, depth, dim: -1, split: mu, vantage: v, ...shape }
       return id
     }
     let dim = 0
@@ -134,12 +186,29 @@ export function ballTree(x: MatrixLike, options: SpaceTreeOptions = {}): SpaceTr
 }
 
 /**
- * A lower bound on the distance from q to any point of a node: the distance to its box (k-d) or to its ball's surface
- * (ball tree), 0 when the query is inside.
+ * A vantage-point tree over the rows of x (n × d): each node picks the point farthest from its centroid as vantage point
+ * and splits its points at the median distance μ from it; a child keeps the shell of distances that holds its points.
+ * Only the triangle inequality is used, so any of the tree metrics works.
+ */
+export function vpTree(x: MatrixLike, options: SpaceTreeOptions = {}): SpaceTree {
+  return build('vp-tree', x, options)
+}
+
+/**
+ * A lower bound on the distance from q to any point of a node: the distance to its box (k-d), to its ball's surface
+ * (ball tree), or to the shell of distances from the parent's vantage point that holds its points (vantage-point tree:
+ * max(0, lo − s, s − hi) for s the query's distance to that point, by the triangle inequality); 0 when the query is
+ * inside, and 0 at a vantage-point tree's root.
  */
 export function nodeLowerBound(tree: SpaceTree, node: number, q: ArrayLike<number>): number {
   const nd = tree.nodes[node]
   const { d, metric } = tree
+  if (tree.kind === 'vp-tree') {
+    if (!nd.anchor || !nd.shell) return 0
+    const s = distanceOf(metric === 'sqeuclidean' ? 'euclidean' : metric, q, 0, nd.anchor, 0, d)
+    const gap = Math.max(0, nd.shell[0] - s, s - nd.shell[1])
+    return metric === 'sqeuclidean' ? gap * gap : gap
+  }
   if (tree.kind === 'ball-tree') {
     const base = metric === 'sqeuclidean' ? 'euclidean' : metric
     const gap = Math.max(

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { isingInference, isingLattice } from 'aifn-applied/inference/lattice-models'
+import { isingInference, isingLattice } from 'aifn-methods/inference/lattice-models'
 import { expectProtocol } from '../../protocol'
 
 describe('isingInference', () => {

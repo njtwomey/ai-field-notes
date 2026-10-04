@@ -100,10 +100,7 @@ export function VqVaeExplorer() {
     const rand = pseudoRandom(123)
 
     // Initial codebook randomly scattered in a tight box [-0.5, 0.5]
-    let cb: [number, number][] = Array.from({ length: K }, () => [
-      (rand() - 0.5) * 1.2,
-      (rand() - 0.5) * 1.2,
-    ])
+    let cb: [number, number][] = Array.from({ length: K }, () => [(rand() - 0.5) * 1.2, (rand() - 0.5) * 1.2])
 
     const lr = 0.22
 
@@ -286,14 +283,7 @@ export function VqVaeExplorer() {
               max={30}
               step={1}
             />
-            <Slider
-              label="Commitment weight β"
-              value={beta}
-              onChange={setBeta}
-              min={0.05}
-              max={1.0}
-              step={0.05}
-            />
+            <Slider label="Commitment weight β" value={beta} onChange={setBeta} min={0.05} max={1.0} step={0.05} />
           </ControlRow>
         </>
       }
@@ -375,12 +365,7 @@ export function VqVaeExplorer() {
             dashed
             thin
           />
-          <Bars
-            name="assigned frequency"
-            x={codeIndices}
-            y={usages}
-            opacity={0.65}
-          />
+          <Bars name="assigned frequency" x={codeIndices} y={usages} opacity={0.65} />
         </Plot>
       </Plots>
     </Figure>

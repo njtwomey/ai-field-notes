@@ -10,7 +10,7 @@ import {
   hmmModel,
   linearChainCrf,
   sampleHmm,
-} from 'aifn-applied/inference/sequence-models'
+} from 'aifn-methods/inference/sequence-models'
 import { forwardBackward, viterbi } from 'aifn/inference/exact'
 import { infer } from 'aifn/inference/engines'
 import { child, stream, uniform } from 'aifn/foundation/random'

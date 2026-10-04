@@ -1,7 +1,5 @@
-import { Diagram } from 'aifn-render'
-import { factor, link, variable } from 'aifn-render'
+import { Diagram, factor, Figure, link, variable } from 'aifn-render'
 import type { DiagramSpec } from 'aifn-render'
-import { Interactive } from 'aifn-render'
 
 const line = (a: string, b: string, label?: string) =>
   link(a, b, false, label ? { label, labelSide: 'left', labelRotate: false } : {})
@@ -69,7 +67,7 @@ const SPEC: DiagramSpec = {
 /** The clinical-trial model: a selector variable switching between two gated sub-models of the same data. */
 export function TrialGraph() {
   return (
-    <Interactive
+    <Figure
       title="The clinical trial as a gated factor graph"
       caption="The selector e says whether the treatment has an effect. Inside the gate e = true, the control and treated groups have separate recovery rates; inside e = false, one rate serves both. The observed outcomes connect to a factor in each gate; only the gate matching e is on. The message from each gate to e is that sub-model's evidence."
     >
@@ -77,6 +75,6 @@ export function TrialGraph() {
         spec={SPEC}
         ariaLabel="Gated factor graph: selector e chooses between separate recovery rates and a shared rate, both explaining the observed outcomes"
       />
-    </Interactive>
+    </Figure>
   )
 }

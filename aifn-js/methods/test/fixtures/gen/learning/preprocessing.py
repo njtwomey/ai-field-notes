@@ -1,4 +1,4 @@
-"""Golden values for aifn-applied/learning/preprocessing's imbalanced-class resamplers (imbalanced-learn): the
+"""Golden values for aifn-methods/learning/preprocessing's imbalanced-class resamplers (imbalanced-learn): the
 borderline-SMOTE danger set, ADASYN's per-row synthetic counts, Tomek links and the class counts after resampling,
 on seeded overlapping Gaussian classes. Random draws differ between libraries, so only the deterministic parts and
 the counts are compared."""

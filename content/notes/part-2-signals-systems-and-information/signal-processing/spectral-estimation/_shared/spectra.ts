@@ -1,15 +1,26 @@
 /**
  * Spectral-estimation helpers for the spectral-estimation notes. A power spectral density here is the two-sided
  * S(ω) = Σ_m r[m] e^{−iωm} of a real, unit-spaced signal, evaluated for ω ∈ [0, π]; unit-variance white noise has
- * S(ω) = 1. The DFT and windows come from site/src/lib/dsp.ts.
+ * S(ω) = 1. The DFT and windows come from aifn.
  */
-import { fft, nextPowerOfTwo, makeWindow, type WindowName } from '@/lib/dsp'
-import { rng } from '@/lib/math'
+import { nextPowerOfTwo, rfft } from 'aifn/foundation/fourier'
+import { imagPart, realPart, toFlat, type Tensor } from 'aifn/foundation/tensor'
+import { getWindow, type WindowName } from 'aifn/signal/windows'
+import { normal, stream } from 'aifn/foundation/random'
+
+/** A periodic window of n samples, as plain numbers. */
+export const windowOf = (win: WindowName, n: number): number[] => toFlat(getWindow(win, n, { periodic: true }))
+
+/** Real and imaginary parts of X[k], k = 0..nfft/2, of a real signal zero-padded (or cut) to nfft samples. */
+export function halfSpectrum(x: number[], nfft: number) {
+  const z = rfft(Float64Array.from(x), { n: nfft }) as Tensor
+  return { re: toFlat(realPart(z)), im: toFlat(imagPart(z)) }
+}
 
 /** Standard-normal white noise of length n. */
 export function whiteNoise(n: number, seed: number): number[] {
-  const g = rng(seed)
-  return Array.from({ length: n }, () => g.normal())
+  const g = stream(seed)
+  return Array.from({ length: n }, () => normal(g))
 }
 
 /** An AR(p) process x[n] = Σ a_k x[n−k] + e[n], driven by unit-variance white noise, with a burn-in discarded. */
@@ -43,9 +54,9 @@ export function arSpectrum(a: number[], sigma2: number, omega: number[]): number
  * integral over [−π, π) divided by 2π is the variance.
  */
 export function periodogram(x: number[], win: WindowName = 'rectangular', nfft = nextPowerOfTwo(x.length)) {
-  const w = makeWindow(win, x.length, true)
+  const w = windowOf(win, x.length)
   const u = w.reduce((s, v) => s + v * v, 0)
-  const { re, im } = fft(
+  const { re, im } = halfSpectrum(
     x.map((v, i) => v * w[i]),
     nfft,
   )
@@ -218,7 +229,7 @@ export function multitaper(x: number[], nw: number, k: number, nfft = nextPowerO
   const half = nfft / 2 + 1
   const sum = new Array<number>(half).fill(0)
   for (const v of tapers) {
-    const { re, im } = fft(
+    const { re, im } = halfSpectrum(
       x.map((val, i) => val * v[i]),
       nfft,
     )

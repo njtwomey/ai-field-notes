@@ -19,8 +19,8 @@ import {
   flatOf,
   type Propagation,
   type SvfmParams,
-} from 'aifn-applied/neural/ode-mixtures'
-import { floorplanWalks, FLOORPLAN, odeFailureCase } from 'aifn-applied/data/synthetic'
+} from 'aifn-methods/neural/ode-mixtures'
+import { floorplanWalks, FLOORPLAN, odeFailureCase } from 'aifn-methods/data/synthetic'
 import { valueAndGrad } from 'aifn/foundation/autodiff'
 import { child, stream } from 'aifn/foundation/random'
 import {

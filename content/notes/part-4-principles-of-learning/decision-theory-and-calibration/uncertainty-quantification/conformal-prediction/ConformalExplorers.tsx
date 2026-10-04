@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { classifierOutputs, quantileModelOutputs } from 'aifn-applied/data/synthetic'
+import { classifierOutputs, quantileModelOutputs } from 'aifn-methods/data/synthetic'
 import { child, stream } from 'aifn/foundation/random'
 import { toFlat, toRows, type Tensor } from 'aifn/foundation/tensor'
 import {
@@ -243,10 +243,7 @@ export function CoverageLawExplorer() {
             <Readout label="Mean empirical coverage" value={fmt(meanCoverage)} />
             <Readout label="Target 1 − α" value={fmt(1 - alpha)} />
             <Readout label="Beta theoretical mean" value={law ? fmt((n + 1 - l) / (n + 1)) : 'every answer included'} />
-            <Readout
-              label="Draws below 1 − α"
-              value={fmt(sim.filter((c) => c < 1 - alpha).length / sim.length)}
-            />
+            <Readout label="Draws below 1 − α" value={fmt(sim.filter((c) => c < 1 - alpha).length / sim.length)} />
           </>
         ),
       }}

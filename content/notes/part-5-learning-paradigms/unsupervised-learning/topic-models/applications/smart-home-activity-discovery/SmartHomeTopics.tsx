@@ -1,5 +1,16 @@
-import { useMemo, useState } from 'react'
-import { Interactive, ParamSlider, Readout, XYChart, formatNumber, useParam, type Segment } from 'aifn-render'
+import { useMemo } from 'react'
+import {
+  Figure,
+  formatNumber,
+  int,
+  Plot,
+  Points,
+  Readout,
+  type Segment,
+  Segments,
+  useAxis,
+  useFigureState,
+} from 'aifn-render'
 import { ACTIVITIES, DAYS, SENSORS, fit, segment, simulate, topicToActivity } from './smarthome'
 
 const TOPIC_ROW = -1.5
@@ -7,15 +18,17 @@ const TRUTH_ROW = -3
 
 /** A fortnight of simulated sensor events, segmented into documents and clustered into activity-topics. */
 export function SmartHomeTopics() {
-  const [threshold, setThreshold] = useState(5)
-  const [K, setK] = useState(7)
-  const [seed, setSeed] = useState(1)
-  const day = useParam(3, { min: 1, max: DAYS, step: 1 })
+  const state = useFigureState({
+    day: int(3, { min: 1, max: DAYS, step: 1, label: 'day' }),
+    threshold: int(5, { min: 0, max: 60, step: 1, label: 'minimum document duration t_th (min)' }),
+    K: int(7, { min: 3, max: 10, step: 1, label: 'topics K' }),
+    seed: int(1, { min: 1, max: 10, step: 1, label: 'seed' }),
+  })
 
-  const events = useMemo(() => simulate(seed), [seed])
-  const docs = useMemo(() => segment(events, threshold), [events, threshold])
-  const model = useMemo(() => fit(events, docs, K, false, seed, 25), [events, docs, K, seed])
-  const toActivity = useMemo(() => topicToActivity(events, docs, model.z, K), [events, docs, model, K])
+  const events = useMemo(() => simulate(state.seed), [state.seed])
+  const docs = useMemo(() => segment(events, state.threshold), [events, state.threshold])
+  const model = useMemo(() => fit(events, docs, state.K, false, state.seed, 25), [events, docs, state.K, state.seed])
+  const toActivity = useMemo(() => topicToActivity(events, docs, model.z, state.K), [events, docs, model, state.K])
 
   const docOf = useMemo(() => {
     const out = new Array<number>(events.length)
@@ -37,7 +50,7 @@ export function SmartHomeTopics() {
     [events],
   )
 
-  const lo = (day.value - 1) * 1440
+  const lo = (state.day - 1) * 1440
   const idx = events.flatMap((ev, i) => (ev.t >= lo && ev.t < lo + 1440 && ev.word % 2 === 0 ? [i] : []))
   const hour = (i: number) => (events[i].t - lo) / 60
   const bounds: Segment[] = docs
@@ -55,26 +68,15 @@ export function SmartHomeTopics() {
     return { k, activity: ACTIVITIES[toActivity[k]], docs: model.docCount[k], top }
   })
 
+  const xAxis = useAxis({ label: 'hour of day', range: [0, 24] })
+  const yAxis = useAxis({ label: 'sensor · topic · truth', range: [-4, 15] })
   return (
-    <Interactive
+    <Figure
       title="Activity discovery from a fortnight of smart-home sensor events"
+      state={state}
       caption="A simulated resident's 14 days in a five-room home with 14 binary sensors. Top rows: the ON events of one day, one row per sensor (numbered from the bed at 1 to the front door at 14). Vertical lines are document boundaries from the segmentation algorithm: a new document starts when the location changes and the current document has lasted longer than the threshold. The model gives each document one topic, fitted to all 14 days by collapsed Gibbs sampling on sensor-event unigrams. Row −1.5 colours each event by its document's topic, named after the activity that produced most of that topic's events; row −3 shows the true activity. A threshold of zero gives one document per room visit and the best agreement; longer thresholds merge short visits, which lowers the number of fragments per activity but mixes activities within documents. Step through the days with the arrows."
-      controls={
-        <>
-          <ParamSlider label="day" param={day} withArrows />
-          <ParamSlider
-            label="minimum document duration t_th (min)"
-            value={threshold}
-            onChange={setThreshold}
-            min={0}
-            max={60}
-            step={1}
-          />
-          <ParamSlider label="topics K" value={K} onChange={setK} min={3} max={10} step={1} />
-          <ParamSlider label="seed" value={seed} onChange={setSeed} min={1} max={10} step={1} />
-        </>
-      }
-      readout={
+
+      readouts={
         <>
           <Readout label="documents (14 days)" value={docs.length} />
           <Readout label="documents today" value={docsToday} />
@@ -83,39 +85,24 @@ export function SmartHomeTopics() {
         </>
       }
     >
-      <XYChart
-        height={380}
-        xLabel="hour of day"
-        yLabel="sensor · topic · truth"
-        xRange={[0, 24]}
-        yRange={[-4, 15]}
-        segments={bounds}
-        series={[
-          {
-            name: 'sensor ON events',
-            type: 'scatter',
-            x: idx.map(hour),
-            y: idx.map((i) => events[i].sensor + 1),
-            muted: true,
-          },
-          {
-            name: 'topic',
-            type: 'scatter',
-            x: idx.map(hour),
-            y: idx.map(() => TOPIC_ROW),
-            group: idx.map((i) => toActivity[model.z[docOf[i]]]),
-            groupNames: [...ACTIVITIES],
-          },
-          {
-            name: 'truth',
-            type: 'scatter',
-            x: idx.map(hour),
-            y: idx.map(() => TRUTH_ROW),
-            group: idx.map((i) => events[i].activity),
-            groupNames: [...ACTIVITIES],
-          },
-        ]}
-      />
+      <Plot x={xAxis} y={yAxis} height={380}>
+        <Points name="sensor ON events" x={idx.map(hour)} y={idx.map((i) => events[i].sensor + 1)} muted />
+        <Points
+          name="topic"
+          x={idx.map(hour)}
+          y={idx.map(() => TOPIC_ROW)}
+          group={idx.map((i) => toActivity[model.z[docOf[i]]])}
+          groupNames={[...ACTIVITIES]}
+        />
+        <Points
+          name="truth"
+          x={idx.map(hour)}
+          y={idx.map(() => TRUTH_ROW)}
+          group={idx.map((i) => events[i].activity)}
+          groupNames={[...ACTIVITIES]}
+        />
+        <Segments segments={bounds} />
+      </Plot>
       <table className="mt-3 w-full text-xs">
         <thead className="text-muted-foreground">
           <tr className="text-left">
@@ -136,6 +123,6 @@ export function SmartHomeTopics() {
           ))}
         </tbody>
       </table>
-    </Interactive>
+    </Figure>
   )
 }

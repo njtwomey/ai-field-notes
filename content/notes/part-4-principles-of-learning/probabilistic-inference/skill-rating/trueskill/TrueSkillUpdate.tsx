@@ -1,24 +1,33 @@
-import { useMemo, useState } from 'react'
-import { MathText } from 'aifn-render'
-import { Diagram } from 'aifn-render'
-import { factor, link, variable } from 'aifn-render'
-import type { DiagramSpec } from 'aifn-render'
+import { useMemo } from 'react'
 import {
-  Interactive,
-  ParamChoice,
-  ParamSlider,
-  Readout,
-  XYChart,
+  Area,
+  choice,
+  Curve,
+  Diagram,
+  factor,
+  Figure,
+  float,
   formatNumber,
-  useParam,
+  int,
+  link,
+  MathText,
+  Plot,
+  Readout,
   type Segment,
-  type XYSeries,
+  Segments,
+  seriesLayers,
+  type SeriesSpec,
+  slider,
+  useAxis,
+  useFigureState,
+  variable,
 } from 'aifn-render'
-import { linspace } from '@/lib/math'
+import type { DiagramSpec } from 'aifn-render'
 import { TS_DEFAULTS, drawMargin, gauss, trueSkill1v1, type Outcome } from '../_shared/skill'
+import { linspace, toFlat } from 'aifn/foundation/tensor'
 
 const SKILL_RANGE: [number, number] = [0, 50]
-const SKILL_X = linspace(SKILL_RANGE[0], SKILL_RANGE[1], 301)
+const SKILL_X = toFlat(linspace(SKILL_RANGE[0], SKILL_RANGE[1], 301))
 
 const STEPS = [
   'Priors. Each skill is a Gaussian belief $\\Gauss(\\mu_i, \\sigma_i^2 + \\tau^2)$.',
@@ -70,32 +79,42 @@ function graph(step: number): DiagramSpec {
 }
 
 export function TrueSkillUpdate() {
-  const muA = useParam(30, { min: 5, max: 45, step: 0.5 })
-  const sA = useParam(4, { min: 0.5, max: 12, step: 0.1 })
-  const muB = useParam(22, { min: 5, max: 45, step: 0.5 })
-  const sB = useParam(6, { min: 0.5, max: 12, step: 0.1 })
-  const beta = useParam(TS_DEFAULTS.beta, { min: 0.5, max: 12, step: 0.05 })
-  const pDraw = useParam(0.1, { min: 0, max: 0.6, step: 0.01 })
-  const step = useParam(3, { min: 0, max: 3, step: 1 })
-  const [outcome, setOutcome] = useState<Outcome>('loss')
+  const state = useFigureState({
+    step: int(3, { min: 0, max: 3, step: 1, label: 'message step', format: (v) => String(v) }),
+    outcome: choice<Outcome>(
+      [
+        { value: 'win', label: 'A wins' },
+        { value: 'draw', label: 'draw' },
+        { value: 'loss', label: 'B wins' },
+      ],
+      'loss',
+      { label: 'outcome' },
+    ),
+    pDraw: slider(0, 0.6, 0.1, { step: 0.01, label: 'draw probability (sets ε)' }),
+    muA: float(30, { min: 5, max: 45, step: 0.5, label: 'μ of A' }),
+    sA: float(4, { min: 0.5, max: 12, step: 0.1, label: 'σ of A' }),
+    muB: float(22, { min: 5, max: 45, step: 0.5, label: 'μ of B' }),
+    sB: float(6, { min: 0.5, max: 12, step: 0.1, label: 'σ of B' }),
+    beta: float(TS_DEFAULTS.beta, { min: 0.5, max: 12, step: 0.05, label: 'performance noise β' }),
+  })
 
   const r = useMemo(() => {
-    const eps = drawMargin(pDraw.value, beta.value)
-    const u = trueSkill1v1({ mu: muA.value, sigma: sA.value }, { mu: muB.value, sigma: sB.value }, outcome, {
-      beta: beta.value,
+    const eps = drawMargin(state.pDraw, state.beta)
+    const u = trueSkill1v1({ mu: state.muA, sigma: state.sA }, { mu: state.muB, sigma: state.sB }, state.outcome, {
+      beta: state.beta,
       tau: TS_DEFAULTS.tau,
       eps,
     })
     return { u, eps }
-  }, [muA.value, sA.value, muB.value, sB.value, beta.value, pDraw.value, outcome])
+  }, [state.muA, state.sA, state.muB, state.sB, state.beta, state.pDraw, state.outcome])
 
   const { u, eps } = r
-  const k = step.value
+  const k = state.step
   const sdA = Math.sqrt(u.var1)
   const sdB = Math.sqrt(u.var2)
 
-  const skillSeries = useMemo<XYSeries[]>(() => {
-    const curve = (name: string, m: number, s: number, slot: number, dashed = false): XYSeries => ({
+  const skillSeries = useMemo<SeriesSpec[]>(() => {
+    const curve = (name: string, m: number, s: number, slot: number, dashed = false): SeriesSpec => ({
       name,
       type: 'line',
       x: SKILL_X,
@@ -103,44 +122,42 @@ export function TrueSkillUpdate() {
       slot,
       dashed,
     })
-    const out: XYSeries[] = []
+    const out: SeriesSpec[] = []
     const prior = k === 3
-    out.push(curve(prior ? 'A prior' : 'A skill', muA.value, sdA, 0, prior))
-    out.push(curve(prior ? 'B prior' : 'B skill', muB.value, sdB, 1, prior))
+    out.push(curve(prior ? 'A prior' : 'A skill', state.muA, sdA, 0, prior))
+    out.push(curve(prior ? 'B prior' : 'B skill', state.muB, sdB, 1, prior))
     if (k === 1 || k === 2) {
-      out.push(curve('A performance', muA.value, Math.sqrt(u.var1 + beta.value ** 2), 0, true))
-      out.push(curve('B performance', muB.value, Math.sqrt(u.var2 + beta.value ** 2), 1, true))
+      out.push(curve('A performance', state.muA, Math.sqrt(u.var1 + state.beta ** 2), 0, true))
+      out.push(curve('B performance', state.muB, Math.sqrt(u.var2 + state.beta ** 2), 1, true))
     }
     if (k === 3) {
       out.push(curve('A posterior', u.p1.mu, u.p1.sigma, 0))
       out.push(curve('B posterior', u.p2.mu, u.p2.sigma, 1))
     }
     return out
-  }, [k, muA.value, muB.value, sdA, sdB, u, beta.value])
+  }, [k, state.muA, state.muB, sdA, sdB, u, state.beta])
 
   const diff = useMemo(() => {
     const lo = u.t - 4 * u.c
     const hi = u.t + 4 * u.c
-    const xs = linspace(lo, hi, 401)
-    const inside = (d: number) => (outcome === 'win' ? d > eps : outcome === 'loss' ? d < -eps : Math.abs(d) <= eps)
-    const series: XYSeries[] = [
-      { name: 'prior of d', type: 'line', x: xs, y: xs.map((d) => gauss(d, u.t, u.c)), muted: true, dashed: true },
+    const xs = toFlat(linspace(lo, hi, 401))
+    const inside = (d: number) =>
+      state.outcome === 'win' ? d > eps : state.outcome === 'loss' ? d < -eps : Math.abs(d) <= eps
+    const series = [
+      { name: 'prior of d', x: xs, y: xs.map((d) => gauss(d, u.t, u.c)), muted: true, dashed: true },
       {
         name: 'truncated by the outcome',
-        type: 'line',
         x: xs,
         y: xs.map((d) => (inside(d) ? gauss(d, u.t, u.c) / u.pOutcome : 0)),
         slot: 2,
-        area: true,
       },
       {
         name: 'moment-matched Gaussian',
-        type: 'line',
         x: xs,
         y: xs.map((d) => gauss(d, u.dMean, Math.sqrt(u.dVar))),
         emphasis: true,
       },
-    ]
+    ] as const
     const top = Math.max(...series[1].y, ...series[2].y)
     const segments: Segment[] =
       eps > 0
@@ -151,36 +168,21 @@ export function TrueSkillUpdate() {
         : []
     segments.push({ from: [0, 0], to: [0, top] })
     return { series, segments, range: [lo, hi] as [number, number] }
-  }, [u, eps, outcome])
+  }, [u, eps, state.outcome])
 
   const spec = useMemo(() => graph(k), [k])
 
+  const xAxis = useAxis({ label: 'skill', range: SKILL_RANGE })
+  const yAxis = useAxis({ label: 'density', hold: 'union' })
+  const xAxis2 = useAxis({ label: 'performance difference d', range: diff.range })
+  const yAxis2 = useAxis({ label: 'density', hold: 'union' })
   return (
-    <Interactive
+    <Figure
       title="One TrueSkill update, message by message"
+      state={state}
       caption="Set the two skill beliefs and the outcome, then step through the messages. The lower chart shows the performance difference d = p_A − p_B: its Gaussian prior (dashed), the part the outcome allows (shaded, between the grey lines at ±ε for a draw), and the Gaussian with the same mean and variance (dark). An unexpected result gives a large v, so large shifts in both means; the player with the larger σ moves further."
-      controls={
-        <>
-          <ParamSlider label="message step" param={step} format={(v) => String(v)} withArrows />
-          <ParamChoice
-            label="outcome"
-            value={outcome}
-            onChange={setOutcome}
-            options={[
-              { value: 'win', label: 'A wins' },
-              { value: 'draw', label: 'draw' },
-              { value: 'loss', label: 'B wins' },
-            ]}
-          />
-          <ParamSlider label="draw probability (sets ε)" param={pDraw} />
-          <ParamSlider label="μ of A" param={muA} />
-          <ParamSlider label="σ of A" param={sA} />
-          <ParamSlider label="μ of B" param={muB} />
-          <ParamSlider label="σ of B" param={sB} />
-          <ParamSlider label="performance noise β" param={beta} />
-        </>
-      }
-      readout={
+
+      readouts={
         <>
           <Readout label="P(outcome)" value={formatNumber(u.pOutcome)} />
           <Readout label="t" value={formatNumber(u.t)} />
@@ -201,19 +203,19 @@ export function TrueSkillUpdate() {
           <p className="min-h-10 text-xs text-muted-foreground">
             <MathText text={STEPS[k]} />
           </p>
-          <XYChart series={skillSeries} xLabel="skill" yLabel="density" xRange={SKILL_RANGE} height={240} />
+          <Plot x={xAxis} y={yAxis} height={240}>
+            {seriesLayers(skillSeries)}
+          </Plot>
           {k >= 2 && (
-            <XYChart
-              series={diff.series}
-              segments={diff.segments}
-              xLabel="performance difference d"
-              yLabel="density"
-              xRange={diff.range}
-              height={200}
-            />
+            <Plot x={xAxis2} y={yAxis2} height={200}>
+              <Curve {...diff.series[0]} />
+              <Area {...diff.series[1]} />
+              <Curve {...diff.series[2]} />
+              <Segments segments={diff.segments} />
+            </Plot>
           )}
         </div>
       </div>
-    </Interactive>
+    </Figure>
   )
 }

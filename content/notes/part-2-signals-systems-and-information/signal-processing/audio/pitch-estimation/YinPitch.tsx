@@ -1,13 +1,18 @@
 import { useMemo } from 'react'
 import {
-  Interactive,
-  ParamSlider,
-  ParamSwitch,
-  Readout,
-  XYChart,
+  Curve,
+  Figure,
+  Handle,
+  float,
   formatNumber,
-  useParam,
-  type XYSeries,
+  int,
+  Plot,
+  Points,
+  Readout,
+  setting,
+  slider,
+  useAxis,
+  useFigureState,
 } from 'aifn-render'
 import { harmonicTone } from '../_shared/audio'
 
@@ -21,15 +26,17 @@ const MIN_LAG = 32 // up to 500 Hz
  * for comparison. YIN takes the first dip below the threshold and refines it by parabolic interpolation.
  */
 export function YinPitch() {
-  const f0 = useParam(220, { min: 60, max: 450, step: 1 })
-  const noise = useParam(0.1, { min: 0, max: 1.5, step: 0.05 })
-  const threshold = useParam(0.1, { min: 0.02, max: 0.5, step: 0.01 })
-  const drop = useParam(0, { min: 0, max: 1, step: 1 })
+  const state = useFigureState({
+    f0: int(220, { min: 60, max: 450, step: 1, label: 'f₀ (Hz)' }),
+    noise: float(0.1, { min: 0, max: 1.5, step: 0.05, label: 'noise level' }),
+    threshold: slider(0.02, 0.5, 0.1, { step: 0.01, label: 'YIN threshold' }),
+    drop: setting(false, 'remove the fundamental'),
+  })
 
   const r = useMemo(() => {
     // Harmonics 1..10 at amplitude 1/h, optionally without the fundamental, plus white noise.
-    const x = harmonicTone(f0.value, FS, W + MAX_LAG + 2, 10, noise.value, 4, (h) =>
-      drop.value && h === 1 ? 0 : 1 / h,
+    const x = harmonicTone(state.f0, FS, W + MAX_LAG + 2, 10, state.noise, 4, (h) =>
+      state.drop && h === 1 ? 0 : 1 / h,
     )
     const d = Array.from({ length: MAX_LAG }, (_, tau) => {
       let s = 0
@@ -44,7 +51,7 @@ export function YinPitch() {
     })
     let tau = -1
     for (let t = MIN_LAG; t < MAX_LAG - 1; t++) {
-      if (dPrime[t] < threshold.value) {
+      if (dPrime[t] < state.threshold) {
         while (t + 1 < MAX_LAG - 1 && dPrime[t + 1] < dPrime[t]) t++
         tau = t
         break
@@ -61,41 +68,38 @@ export function YinPitch() {
     })
     const acfLag = acf.slice(MIN_LAG).reduce((best, v, i) => (v > acf[best] ? i + MIN_LAG : best), MIN_LAG)
     return { dPrime, tau, refined, acf: acf.map((v) => v / acf[0]), acfLag }
-  }, [f0.value, noise.value, threshold.value, drop.value])
+  }, [state.f0, state.noise, state.threshold, state.drop])
 
   const lags = Array.from({ length: MAX_LAG }, (_, t) => t)
-  const series: XYSeries[] = [
-    { name: 'YIN d′(τ)', type: 'line', x: lags, y: r.dPrime, slot: 0 },
-    { name: 'normalised autocorrelation', type: 'line', x: lags, y: r.acf, slot: 1 },
-    { name: 'threshold', type: 'line', x: [0, MAX_LAG], y: [threshold.value, threshold.value], dashed: true, slot: 2 },
-    { name: 'YIN choice', type: 'scatter', x: [r.tau], y: [r.dPrime[r.tau]], emphasis: true },
-  ]
+  const series = [
+    { name: 'YIN d′(τ)', x: lags, y: r.dPrime, slot: 0 },
+    { name: 'normalised autocorrelation', x: lags, y: r.acf, slot: 1 },
+    { name: 'threshold', x: [0, MAX_LAG], y: [state.threshold, state.threshold], dashed: true, slot: 2 },
+    { name: 'YIN choice', x: [r.tau], y: [r.dPrime[r.tau]], emphasis: true },
+  ] as const
 
+  const xAxis = useAxis({ label: 'lag τ (samples)', hold: 'union' })
+  const yAxis = useAxis({ label: 'value', range: [-1, 2] })
   return (
-    <Interactive
+    <Figure
       title="YIN against the autocorrelation"
-      caption="One 512-sample frame of a harmonic tone at 16 kHz with added noise. The autocorrelation (orange) has nearly equal peaks at every multiple of the period, and its largest peak in the search range is often a multiple, an octave or sub-harmonic error. YIN's cumulative mean normalised difference (blue) is 1 at lag 0 and dips towards 0 at each period; taking the first dip below the threshold picks the period itself, and parabolic interpolation refines it below one sample. Removing the fundamental does not change the period, and YIN still finds it."
-      controls={
+      state={state}
+      caption="One 512-sample frame of a harmonic tone at 16 kHz with added noise. The autocorrelation (orange) has nearly equal peaks at every multiple of the period, and its largest peak in the search range is often a multiple, an octave or sub-harmonic error. YIN's cumulative mean normalised difference (blue) is 1 at lag 0 and dips towards 0 at each period; taking the first dip below the threshold picks the period itself, and parabolic interpolation refines it below one sample. Removing the fundamental does not change the period, and YIN still finds it. Drag the dashed threshold line to move it."
+      readouts={
         <>
-          <ParamSlider label="f₀ (Hz)" param={f0} />
-          <ParamSlider label="noise level" param={noise} />
-          <ParamSlider label="YIN threshold" param={threshold} />
-          <ParamSwitch
-            label="remove the fundamental"
-            checked={drop.value === 1}
-            onChange={(v) => drop.set(v ? 1 : 0)}
-          />
-        </>
-      }
-      readout={
-        <>
-          <Readout label="true period" value={`${formatNumber(FS / f0.value)} samples`} />
+          <Readout label="true period" value={`${formatNumber(FS / state.f0)} samples`} />
           <Readout label="YIN" value={`${formatNumber(FS / r.refined)} Hz`} />
           <Readout label="autocorrelation peak" value={`${formatNumber(FS / r.acfLag)} Hz`} />
         </>
       }
     >
-      <XYChart series={series} xLabel="lag τ (samples)" yLabel="value" yRange={[-1, 2]} height={320} />
-    </Interactive>
+      <Plot x={xAxis} y={yAxis} height={320}>
+        <Curve {...series[0]} />
+        <Curve {...series[1]} />
+        <Curve {...series[2]} />
+        <Points {...series[3]} />
+        <Handle {...state.handle('threshold', { axis: 'y', label: 'threshold' })} />
+      </Plot>
+    </Figure>
   )
 }

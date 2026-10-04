@@ -1,4 +1,4 @@
-import { Interactive } from 'aifn-render'
+import { Figure } from 'aifn-render'
 import { Diagram } from 'aifn-render'
 import type { DiagramSpec } from 'aifn-render'
 
@@ -74,14 +74,15 @@ const spec: DiagramSpec = {
 /** One DP-SGD step: sample, clip per example, add noise, step. */
 export function DpSgdStep() {
   return (
-    <Interactive
+    <Figure
       title="One step of DP-SGD"
+      purpose="Follow one DP-SGD step: sampling a lot, clipping each gradient, adding Gaussian noise and averaging."
       caption="Each example joins the lot independently with probability q. Its gradient is computed on its own and clipped to norm at most C, which bounds how much any one example can move the sum. Gaussian noise with standard deviation σC is added to the sum, which is divided by the expected lot size L and used for an ordinary gradient step. The accountant turns q, σ and the number of steps T into the privacy guarantee (ε, δ)."
     >
       <Diagram
         spec={spec}
         ariaLabel="Examples are Poisson-sampled into a lot; per-example gradients are clipped to norm C, summed, noised with Gaussian noise, divided by L and used for a gradient step; a privacy accountant tracks epsilon and delta"
       />
-    </Interactive>
+    </Figure>
   )
 }

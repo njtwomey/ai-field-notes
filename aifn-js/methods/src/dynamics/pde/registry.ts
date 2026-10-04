@@ -1,5 +1,5 @@
 /**
- * The registry of `aifn-applied/dynamics/pde`: the method-of-lines solvers as traceable algorithms.
+ * The registry of `aifn-methods/dynamics/pde`: the method-of-lines solvers as traceable algorithms.
  */
 
 import { definer, entries, type AlgorithmInfo, type Entry } from 'aifn/foundation/registry'

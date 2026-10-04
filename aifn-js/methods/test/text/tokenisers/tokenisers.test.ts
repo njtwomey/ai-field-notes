@@ -2,7 +2,7 @@
 import { describe, expect, it } from 'vitest'
 import { decodeIds, encodeText, vocabularySize } from 'aifn/text/pipeline'
 import { tokeniserStatistics } from 'aifn/text/statistics'
-import { TOKENISER_CORPUS, TOKENISER_KINDS, tokeniserSuite } from 'aifn-applied/text/tokenisers'
+import { TOKENISER_CORPUS, TOKENISER_KINDS, tokeniserSuite } from 'aifn-methods/text/tokenisers'
 
 describe('tokeniserSuite', () => {
   const suite = tokeniserSuite(TOKENISER_CORPUS, { vocabularySize: 300 })

@@ -1,16 +1,21 @@
-import { useMemo, useState } from 'react'
+import { useMemo } from 'react'
 import {
-  Interactive,
-  ParamChoice,
-  ParamSlider,
+  Curve,
+  Figure,
+  float,
+  Handle,
+  Plot,
+  Points,
   Readout,
-  XYChart,
-  useParam,
-  type Handle,
   type Segment,
-  type XYSeries,
+  Segments,
+  seriesLayers,
+  type SeriesSpec,
+  useAxis,
+  useFigureState,
+  variants,
 } from 'aifn-render'
-import { linspace } from '@/lib/math'
+import { linspace, toFlat } from 'aifn/foundation/tensor'
 
 type FnId = 'sqrt2' | 'cosx' | 'double'
 
@@ -98,17 +103,25 @@ const errors = (xs: number[], root: number) => xs.map((x) => Math.max(FLOOR, Mat
 
 /** Newton, secant and bisection on the same equation: the Newton path on f, and the error of each method per step. */
 export function RootFindingRace() {
-  const [id, setId] = useState<FnId>('sqrt2')
-  const p = PROBLEMS[id]
-  const x0 = useParam(p.x0, { min: p.view[0], max: p.view[1], step: 0.01 })
+  const state = useFigureState({
+    fn: variants(
+      Object.fromEntries(
+        (Object.keys(PROBLEMS) as FnId[]).map((k) => {
+          const q = PROBLEMS[k]
+          const x0 = float(q.x0, { min: q.view[0], max: q.view[1], step: 0.01, label: 'start x₀' })
+          return [k, { label: q.label, params: { x0 } }]
+        }),
+      ) as Record<FnId, { label: string; params: { x0: ReturnType<typeof float> } }>,
+      { label: 'equation f(x) = 0' },
+    ),
+  })
+  const p = PROBLEMS[state.fn.key]
+  const x0 = state.fn.values.x0
 
-  const runs = useMemo(
-    () => ({ newton: newton(p, x0.value), secant: secant(p, x0.value), bisection: bisection(p) }),
-    [p, x0.value],
-  )
+  const runs = useMemo(() => ({ newton: newton(p, x0), secant: secant(p, x0), bisection: bisection(p) }), [p, x0])
 
-  const errorSeries = useMemo((): XYSeries[] => {
-    const s: XYSeries[] = [
+  const errorSeries = useMemo((): SeriesSpec[] => {
+    const s: SeriesSpec[] = [
       {
         name: 'Newton',
         type: 'line',
@@ -130,18 +143,18 @@ export function RootFindingRace() {
     return s
   }, [runs, p])
 
-  const grid = useMemo(() => linspace(p.view[0], p.view[1], 200), [p])
+  const grid = useMemo(() => toFlat(linspace(p.view[0], p.view[1], 200)), [p])
   const fSeries = useMemo(
-    (): XYSeries[] => [
-      { name: 'f(x)', type: 'line', x: grid, y: grid.map(p.f), emphasis: true },
-      {
-        name: 'Newton iterates',
-        type: 'scatter',
-        x: runs.newton.slice(0, 5),
-        y: runs.newton.slice(0, 5).map(() => 0),
-        slot: 0,
-      },
-    ],
+    () =>
+      [
+        { name: 'f(x)', x: grid, y: grid.map(p.f), emphasis: true },
+        {
+          name: 'Newton iterates',
+          x: runs.newton.slice(0, 5),
+          y: runs.newton.slice(0, 5).map(() => 0),
+          slot: 0,
+        },
+      ] as const,
     [grid, p, runs.newton],
   )
   // Tangent steps: from (x_k, f(x_k)) down the tangent to (x_{k+1}, 0), for the first few iterates.
@@ -153,28 +166,18 @@ export function RootFindingRace() {
         ]
       : [],
   )
-  const handles: Handle[] = [{ kind: 'x', at: x0.value, label: 'x₀', onDrag: x0.set }]
 
   const last = runs.newton.at(-1) ?? NaN
+  const xAxis = useAxis({ label: 'x', range: p.view })
+  const yAxis = useAxis({ label: 'f(x)', hold: 'union' })
+  const xAxis2 = useAxis({ label: 'step k', range: [0, ITERS] })
+  const yAxis2 = useAxis({ label: '|xₖ − x*|', range: [FLOOR, 10], log: true })
   return (
-    <Interactive
+    <Figure
       title="Newton, secant and bisection"
+      state={state}
       caption="Left: f with Newton's tangent steps from the start x₀; drag x₀ along the axis. Right: the error |xₖ − x*| after each step, on a log scale. Bisection halves its error each step. Newton's error is squared near a simple root, doubling the correct digits; the secant method is in between. At the double root of (x − 1)²(x + 2) Newton only halves the error, and bisection cannot start because f does not change sign."
-      controls={
-        <>
-          <ParamChoice
-            label="equation f(x) = 0"
-            value={id}
-            onChange={(v: FnId) => {
-              setId(v)
-              x0.set(PROBLEMS[v].x0)
-            }}
-            options={(Object.keys(PROBLEMS) as FnId[]).map((k) => ({ value: k, label: PROBLEMS[k].label }))}
-          />
-          <ParamSlider label="start x₀" param={x0} />
-        </>
-      }
-      readout={
+      readouts={
         <>
           <Readout label="root x*" value={p.root.toPrecision(16)} />
           <Readout label={`Newton after ${runs.newton.length - 1} steps`} value={last.toPrecision(16)} />
@@ -182,25 +185,16 @@ export function RootFindingRace() {
       }
     >
       <div className="grid gap-4 md:grid-cols-2">
-        <XYChart
-          height={300}
-          xLabel="x"
-          yLabel="f(x)"
-          series={fSeries}
-          segments={tangents}
-          xRange={p.view}
-          handles={handles}
-        />
-        <XYChart
-          height={300}
-          xLabel="step k"
-          yLabel="|xₖ − x*|"
-          series={errorSeries}
-          xRange={[0, ITERS]}
-          yLog
-          yRange={[FLOOR, 10]}
-        />
+        <Plot x={xAxis} y={yAxis} height={300}>
+          <Curve {...fSeries[0]} />
+          <Points {...fSeries[1]} />
+          <Segments segments={tangents} />
+          <Handle {...state.handle('fn.x0', { label: 'x₀' })} />
+        </Plot>
+        <Plot x={xAxis2} y={yAxis2} height={300}>
+          {seriesLayers(errorSeries)}
+        </Plot>
       </div>
-    </Interactive>
+    </Figure>
   )
 }

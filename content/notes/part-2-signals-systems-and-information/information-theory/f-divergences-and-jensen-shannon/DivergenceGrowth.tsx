@@ -1,20 +1,11 @@
 import { useMemo } from 'react'
-import {
-  Interactive,
-  ParamSlider,
-  Readout,
-  XYChart,
-  formatNumber,
-  useParam,
-  type Handle,
-  type XYSeries,
-} from 'aifn-render'
-import { linspace } from '@/lib/math'
-import { normalCdf, normalPdf } from '@/lib/math/special'
+import { Curve, Figure, float, formatNumber, Handle, Plot, Readout, useAxis, useFigureState } from 'aifn-render'
+import { linspace, toFlat } from 'aifn/foundation/tensor'
+import { normalCdf, normalPdf } from 'aifn/numerics/special'
 
 const MU_MAX = 5
-const MU_GRID = linspace(0, MU_MAX, 101)
-const X_GRID = linspace(-6, MU_MAX + 6, 601)
+const MU_GRID = toFlat(linspace(0, MU_MAX, 101))
+const X_GRID = toFlat(linspace(-6, MU_MAX + 6, 601))
 
 /** Jensen–Shannon divergence in nats between N(0, 1) and N(μ, 1), by the trapezoidal rule on a fine grid. */
 function jensenShannon(mu: number): number {
@@ -41,72 +32,72 @@ const JS_CURVE = MU_GRID.map(jensenShannon)
  * saturates at log 2, and total variation and squared Hellinger at 1, once the distributions stop overlapping.
  */
 export function DivergenceGrowth() {
-  const mu = useParam(1.5, { min: 0, max: MU_MAX, step: 0.05 })
+  const state = useFigureState({
+    mu: float(1.5, { min: 0, max: MU_MAX, step: 0.05, label: 'separation μ' }),
+  })
 
-  const densities = useMemo((): XYSeries[] => {
+  const densities = useMemo(() => {
     const xs = X_GRID.filter((_, i) => i % 3 === 0)
     return [
-      { name: 'p = N(0, 1)', type: 'line', x: xs, y: xs.map(normalPdf), slot: 0 },
-      { name: 'q = N(μ, 1)', type: 'line', x: xs, y: xs.map((x) => normalPdf(x - mu.value)), slot: 1 },
+      { name: 'p = N(0, 1)', x: xs, y: xs.map((v: number) => normalPdf(v)), slot: 0 },
+      { name: 'q = N(μ, 1)', x: xs, y: xs.map((x) => normalPdf(x - state.mu)), slot: 1 },
       {
         name: 'mixture m = (p + q)/2',
-        type: 'line',
         x: xs,
-        y: xs.map((x) => 0.5 * (normalPdf(x) + normalPdf(x - mu.value))),
+        y: xs.map((x) => 0.5 * (normalPdf(x) + normalPdf(x - state.mu))),
         dashed: true,
         muted: true,
       },
-    ]
-  }, [mu.value])
+    ] as const
+  }, [state.mu])
 
-  const curves: XYSeries[] = [
-    { name: 'KL(p ‖ q)', type: 'line', x: MU_GRID, y: MU_GRID.map(kl), slot: 0 },
-    { name: 'Jensen–Shannon', type: 'line', x: MU_GRID, y: JS_CURVE, slot: 1 },
-    { name: 'total variation', type: 'line', x: MU_GRID, y: MU_GRID.map(totalVariation), slot: 2 },
-    { name: 'squared Hellinger', type: 'line', x: MU_GRID, y: MU_GRID.map(hellingerSq), slot: 3 },
-    { name: 'log 2', type: 'line', x: [0, MU_MAX], y: [Math.LN2, Math.LN2], dashed: true, muted: true },
-  ]
+  const curves = [
+    { name: 'KL(p ‖ q)', x: MU_GRID, y: MU_GRID.map(kl), slot: 0 },
+    { name: 'Jensen–Shannon', x: MU_GRID, y: JS_CURVE, slot: 1 },
+    { name: 'total variation', x: MU_GRID, y: MU_GRID.map(totalVariation), slot: 2 },
+    { name: 'squared Hellinger', x: MU_GRID, y: MU_GRID.map(hellingerSq), slot: 3 },
+    { name: 'log 2', x: [0, MU_MAX], y: [Math.LN2, Math.LN2], dashed: true, muted: true },
+  ] as const
   // μ is a location on both charts' horizontal axes, so dragging it moves q.
-  const onDrag = (x: number) => mu.set(x)
-  const densityHandles: Handle[] = [{ kind: 'x', at: mu.value, label: 'μ', onDrag }]
-  const curveHandles: Handle[] = [{ kind: 'x', at: mu.value, label: 'μ', onDrag }]
-  const js = jensenShannon(mu.value)
+  const onDrag = (x: number) => state.set('mu', x)
+  const js = jensenShannon(state.mu)
 
+  const xAxis = useAxis({ label: 'x', range: [-4, MU_MAX + 4] })
+  const yAxis = useAxis({ label: 'density', range: [0, 0.45] })
+  const xAxis2 = useAxis({ label: 'separation μ', range: [0, MU_MAX] })
+  const yAxis2 = useAxis({ label: 'divergence', range: [0, 2.5] })
   return (
-    <Interactive
+    <Figure
       title="Bounded and unbounded divergences"
+      state={state}
       caption="p = N(0, 1) is fixed and q = N(μ, 1) moves away from it. Left: the two densities and their mixture m, which the Jensen–Shannon divergence compares both against. Right: four divergences against μ. KL grows as μ²/2 without limit. Jensen–Shannon levels off at log 2 ≈ 0.693 nats, and total variation and squared Hellinger at 1, once the densities no longer overlap. Drag μ on either chart."
-      controls={<ParamSlider label="separation μ" param={mu} />}
-      readout={
+
+      readouts={
         <>
-          <Readout label="KL" value={formatNumber(kl(mu.value))} />
+          <Readout label="KL" value={formatNumber(kl(state.mu))} />
           <Readout label="Jensen–Shannon" value={formatNumber(js)} />
-          <Readout label="total variation" value={formatNumber(totalVariation(mu.value))} />
-          <Readout label="squared Hellinger" value={formatNumber(hellingerSq(mu.value))} />
-          <Readout label="χ²" value={formatNumber(Math.expm1(mu.value * mu.value))} />
+          <Readout label="total variation" value={formatNumber(totalVariation(state.mu))} />
+          <Readout label="squared Hellinger" value={formatNumber(hellingerSq(state.mu))} />
+          <Readout label="χ²" value={formatNumber(Math.expm1(state.mu * state.mu))} />
         </>
       }
     >
       <div className="grid gap-4 md:grid-cols-2">
-        <XYChart
-          series={densities}
-          xLabel="x"
-          yLabel="density"
-          xRange={[-4, MU_MAX + 4]}
-          yRange={[0, 0.45]}
-          handles={densityHandles}
-          height={300}
-        />
-        <XYChart
-          series={curves}
-          xLabel="separation μ"
-          yLabel="divergence"
-          xRange={[0, MU_MAX]}
-          yRange={[0, 2.5]}
-          handles={curveHandles}
-          height={300}
-        />
+        <Plot x={xAxis} y={yAxis} height={300}>
+          <Curve {...densities[0]} />
+          <Curve {...densities[1]} />
+          <Curve {...densities[2]} />
+          <Handle kind="x" at={state.mu} label="μ" onDrag={onDrag} />
+        </Plot>
+        <Plot x={xAxis2} y={yAxis2} height={300}>
+          <Curve {...curves[0]} />
+          <Curve {...curves[1]} />
+          <Curve {...curves[2]} />
+          <Curve {...curves[3]} />
+          <Curve {...curves[4]} />
+          <Handle kind="x" at={state.mu} label="μ" onDrag={onDrag} />
+        </Plot>
       </div>
-    </Interactive>
+    </Figure>
   )
 }

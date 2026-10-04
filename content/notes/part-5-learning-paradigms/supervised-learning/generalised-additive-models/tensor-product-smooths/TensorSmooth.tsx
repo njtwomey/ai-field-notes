@@ -1,16 +1,18 @@
-import { useMemo, useState } from 'react'
+import { useMemo } from 'react'
 import {
-  Heatmap,
-  Interactive,
-  ParamButton,
-  ParamSlider,
-  ParamSwitch,
-  Readout,
-  XYChart,
+  Curve,
+  Figure,
+  float,
   formatNumber,
-  type XYSeries,
+  int,
+  Plot,
+  Raster,
+  Readout,
+  setting,
+  useAxis,
+  useFigureState,
+  type AxisModel,
 } from 'aifn-render'
-import { linspace, mean, rng } from '@/lib/math'
 import {
   addScaled,
   cholesky,
@@ -26,10 +28,14 @@ import {
   rowKron,
   traceSolve,
 } from '../_shared/terms-psplines'
+import { linspace, toFlat } from 'aifn/foundation/tensor'
+import { normal, stream, uniform } from 'aifn/foundation/random'
+
+const mean = (xs: readonly number[]) => xs.reduce((a, b) => a + b, 0) / xs.length
 
 const N = 400
 const NOISE = 0.3
-const G = linspace(0, 1, 31)
+const G = toFlat(linspace(0, 1, 31))
 // Wiggly in x, linear in z, with an interaction: the x-effect grows with z.
 const truth = (x: number, z: number) => Math.sin(2 * Math.PI * x) * (0.5 + z) + z
 
@@ -44,72 +50,80 @@ function anova(F: number[][]) {
 }
 
 export function TensorSmooth() {
-  const [k1, setK1] = useState(10)
-  const [k2, setK2] = useState(10)
-  const [logL1, setLogL1] = useState(-1.5)
-  const [logL2, setLogL2] = useState(1.5)
-  const [tie, setTie] = useState(false)
-  const [seed, setSeed] = useState(3)
+  const state = useFigureState({
+    logL1: float(-1.5, { min: -3, max: 4, step: 0.1, label: 'log₁₀ λ₁ (x)', format: (v) => v.toFixed(1) }),
+    logL2: float(1.5, {
+      min: -3,
+      max: 4,
+      step: 0.1,
+      label: 'log₁₀ λ₂ (z)',
+      format: (v) => v.toFixed(1),
+      when: (v) => !v.tie,
+    }),
+    k1: int(10, { min: 4, max: 12, step: 1, label: 'k₁ (x basis)' }),
+    k2: int(10, { min: 4, max: 12, step: 1, label: 'k₂ (z basis)' }),
+    tie: setting(false, 'tie λ₂ = λ₁'),
+    seed: int(3, { ge: 0, label: 'seed' }),
+  })
 
   const data = useMemo(() => {
-    const r = rng(seed)
-    const x = Array.from({ length: N }, () => r.uniform())
-    const z = Array.from({ length: N }, () => r.uniform())
-    const y = x.map((xi, i) => truth(xi, z[i]) + NOISE * r.normal())
+    const r = stream(state.seed)
+    const x = Array.from({ length: N }, () => uniform(r))
+    const z = Array.from({ length: N }, () => uniform(r))
+    const y = x.map((xi, i) => truth(xi, z[i]) + NOISE * normal(r))
     return { x, z, y }
-  }, [seed])
+  }, [state.seed])
 
   const model = useMemo(() => {
-    const X = data.x.map((xi, i) => rowKron(psplineRow(xi, 0, 1, k1), psplineRow(data.z[i], 0, 1, k2)))
+    const X = data.x.map((xi, i) => rowKron(psplineRow(xi, 0, 1, state.k1), psplineRow(data.z[i], 0, 1, state.k2)))
     return {
       X,
       XtX: crossprod(X),
       Xty: crossprodY(X, data.y),
       // Penalties on the row-major coefficient matrix: S₁ ⊗ I smooths along x, I ⊗ S₂ along z.
-      S1: kron(gram(diffMatrix(k1, 2)), eye(k2)),
-      S2: kron(eye(k1), gram(diffMatrix(k2, 2))),
+      S1: kron(gram(diffMatrix(state.k1, 2)), eye(state.k2)),
+      S2: kron(eye(state.k1), gram(diffMatrix(state.k2, 2))),
     }
-  }, [data, k1, k2])
+  }, [data, state.k1, state.k2])
 
-  const l1 = 10 ** logL1
-  const l2 = 10 ** (tie ? logL1 : logL2)
+  const l1 = 10 ** state.logL1
+  const l2 = 10 ** (state.tie ? state.logL1 : state.logL2)
 
   const fit = useMemo(() => {
     const L = cholesky(addScaled(model.XtX, [l1, model.S1], [l2, model.S2]))
     const beta = cholSolve(L, model.Xty)
     const edf = traceSolve(L, model.XtX)
     const rss = model.X.reduce((s, row, i) => s + (data.y[i] - dot(row, beta)) ** 2, 0)
-    const Ax = G.map((g) => psplineRow(g, 0, 1, k1))
-    const Az = G.map((g) => psplineRow(g, 0, 1, k2))
+    const Ax = G.map((g) => psplineRow(g, 0, 1, state.k1))
+    const Az = G.map((g) => psplineRow(g, 0, 1, state.k2))
     const F = Az.map((bz) => Ax.map((ax) => dot(rowKron(ax, bz), beta)))
     return { F, edf, gcv: (N * rss) / (N - edf) ** 2 }
-  }, [model, data, l1, l2, k1, k2])
+  }, [model, data, l1, l2, state.k1, state.k2])
 
   const trueF = useMemo(() => G.map((z) => G.map((x) => truth(x, z))), [])
   const rmse = Math.sqrt(mean(fit.F.flat().map((v, i) => (v - trueF.flat()[i]) ** 2)))
   const fitA = anova(fit.F)
   const trueA = useMemo(() => anova(trueF), [trueF])
 
-  const main = (which: 'x' | 'z') => {
-    const series: XYSeries[] = [
-      { name: 'true', type: 'line', x: G, y: which === 'x' ? trueA.fx : trueA.fz, slot: 2, dashed: true },
-      { name: 'fitted', type: 'line', x: G, y: which === 'x' ? fitA.fx : fitA.fz, slot: 1 },
-    ]
-    return (
-      <XYChart
-        series={series}
-        xRange={[0, 1]}
-        yRange={[-1.3, 1.3]}
-        xLabel={which}
-        yLabel={which === 'x' ? 'f₁(x)' : 'f₂(z)'}
-        height={220}
-      />
-    )
+  const mainAxes: Record<'x' | 'z', [AxisModel, AxisModel]> = {
+    x: [useAxis({ label: 'x', range: [0, 1] }), useAxis({ label: 'f₁(x)', range: [-1.3, 1.3] })],
+    z: [useAxis({ label: 'z', range: [0, 1] }), useAxis({ label: 'f₂(z)', range: [-1.3, 1.3] })],
   }
+  const main = (which: 'x' | 'z') => (
+    <Plot x={mainAxes[which][0]} y={mainAxes[which][1]} height={220}>
+      <Curve name="true" x={G} y={which === 'x' ? trueA.fx : trueA.fz} slot={2} dashed />
+      <Curve name="fitted" x={G} y={which === 'x' ? fitA.fx : fitA.fz} slot={1} />
+    </Plot>
+  )
 
+  const xAxis = useAxis({ label: 'x' })
+  const yAxis = useAxis({ label: 'z' })
+  const xAxis2 = useAxis({ label: 'x' })
+  const yAxis2 = useAxis({ label: 'z' })
   return (
-    <Interactive
+    <Figure
       title="A tensor-product smooth with one λ per margin"
+      state={state}
       caption={
         <>
           Four hundred noisy points from f(x, z) = sin(2πx)(½ + z) + z, fitted with a tensor product of two cubic
@@ -121,35 +135,9 @@ export function TensorSmooth() {
           main effects f₁ and f₂ and the interaction f₁₂, each against its true counterpart.
         </>
       }
-      controls={
+      readouts={
         <>
-          <ParamSlider
-            label="log₁₀ λ₁ (x)"
-            value={logL1}
-            onChange={setLogL1}
-            min={-3}
-            max={4}
-            step={0.1}
-            format={(v) => v.toFixed(1)}
-          />
-          <ParamSlider
-            label="log₁₀ λ₂ (z)"
-            value={tie ? logL1 : logL2}
-            onChange={setLogL2}
-            min={-3}
-            max={4}
-            step={0.1}
-            format={(v) => v.toFixed(1)}
-          />
-          <ParamSlider label="k₁ (x basis)" value={k1} onChange={setK1} min={4} max={12} step={1} withArrows />
-          <ParamSlider label="k₂ (z basis)" value={k2} onChange={setK2} min={4} max={12} step={1} withArrows />
-          <ParamSwitch label="tie λ₂ = λ₁" checked={tie} onChange={setTie} />
-          <ParamButton onClick={() => setSeed((s) => s + 1)}>New sample</ParamButton>
-        </>
-      }
-      readout={
-        <>
-          <Readout label="coefficients k₁k₂" value={String(k1 * k2)} />
+          <Readout label="coefficients k₁k₂" value={String(state.k1 * state.k2)} />
           <Readout label="effective df" value={formatNumber(fit.edf)} />
           <Readout label="GCV" value={formatNumber(fit.gcv)} />
           <Readout label="RMSE vs truth" value={formatNumber(rmse)} />
@@ -157,33 +145,15 @@ export function TensorSmooth() {
       }
     >
       <div className="grid gap-2 md:grid-cols-2">
-        <Heatmap
-          x={G}
-          y={G}
-          z={fit.F}
-          xLabel="x"
-          yLabel="z"
-          scale="diverging"
-          range={[-2.5, 2.5]}
-          valueLabel="f(x, z)"
-          height={300}
-          ariaLabel="Fitted surface"
-        />
-        <Heatmap
-          x={G}
-          y={G}
-          z={fitA.fxz}
-          xLabel="x"
-          yLabel="z"
-          scale="diverging"
-          range={[-0.8, 0.8]}
-          valueLabel="f₁₂(x, z)"
-          height={300}
-          ariaLabel="Fitted interaction"
-        />
+        <Plot x={xAxis} y={yAxis} height={300} ariaLabel={'Fitted surface'}>
+          <Raster x={G} y={G} z={fit.F} scale={'diverging'} range={[-2.5, 2.5]} valueLabel={'f(x, z)'} />
+        </Plot>
+        <Plot x={xAxis2} y={yAxis2} height={300} ariaLabel={'Fitted interaction'}>
+          <Raster x={G} y={G} z={fitA.fxz} scale={'diverging'} range={[-0.8, 0.8]} valueLabel={'f₁₂(x, z)'} />
+        </Plot>
         {main('x')}
         {main('z')}
       </div>
-    </Interactive>
+    </Figure>
   )
 }

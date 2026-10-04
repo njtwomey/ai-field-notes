@@ -1,13 +1,16 @@
-import { useMemo, useState } from 'react'
+import { useMemo } from 'react'
 import {
-  Interactive,
-  ParamChoice,
-  ParamSlider,
-  Readout,
-  XYChart,
+  Figure,
+  float,
   formatNumber,
-  useParam,
-  type XYSeries,
+  Handle,
+  Plot,
+  Readout,
+  seriesLayers,
+  type SeriesSpec,
+  useAxis,
+  useFigureState,
+  variants,
 } from 'aifn-render'
 import { formatComplex, polyAdd, roots, type Complex, type Vec } from '../../_shared/control'
 
@@ -68,13 +71,29 @@ const LOG_K: [number, number] = [-3, 3]
 const maxRe = (zs: Complex[]) => Math.max(...zs.map((z) => z.re))
 
 export function RootLocus() {
-  const [key, setKey] = useState<PlantKey>('three')
-  const plant: Plant = PLANTS[key]
-  const logK = useParam(plant.initial, { min: LOG_K[0], max: LOG_K[1], step: 0.01 })
-  const choose = (k: PlantKey) => {
-    setKey(k)
-    logK.set(PLANTS[k].initial)
-  }
+  // One gain per plant (a variants case each), so switching plant restores that plant's own gain.
+  const gain = (p: PlantKey) => ({
+    label: PLANTS[p].label,
+    params: {
+      logK: float(PLANTS[p].initial, {
+        min: LOG_K[0],
+        max: LOG_K[1],
+        step: 0.01,
+        label: 'gain K',
+        points_per_decade: 2,
+        logTransform: 'value-is-log',
+        format: (v) => formatNumber(10 ** v),
+      }),
+    },
+  })
+  const cases = Object.fromEntries((Object.keys(PLANTS) as PlantKey[]).map((p) => [p, gain(p)])) as Record<
+    PlantKey,
+    ReturnType<typeof gain>
+  >
+  const state = useFigureState({
+    plant: variants(cases, { choiceLabel: 'open loop', initial: 'three' }),
+  })
+  const plant: Plant = PLANTS[state.plant.key]
 
   // The locus: roots for a dense sweep of K, each warm-started from the previous so branches stay continuous.
   const locus = useMemo(() => {
@@ -107,13 +126,13 @@ export function RootLocus() {
     return { ks, rows, crossings }
   }, [plant])
 
-  const k = 10 ** logK.value
+  const k = 10 ** state.plant.values.logK
   const now = useMemo(() => roots(closedLoop(plant, k)), [plant, k])
   const stable = maxRe(now) < 0
   // The handle is the closed-loop pole with the largest real part (upper one of a pair).
   const handlePole = [...now].sort((a, b) => b.re - a.re || b.im - a.im)[0]
 
-  const series = useMemo<XYSeries[]>(() => {
+  const series = useMemo<SeriesSpec[]>(() => {
     const branches = locus.rows[0].map((_, j) => ({
       name: 'root locus',
       type: 'line' as const,
@@ -164,26 +183,18 @@ export function RootLocus() {
         }
       }),
     )
-    logK.set(Math.log10(bestK))
+    state.set('plant.logK', Math.log10(bestK))
   }
 
   const uniquePoles = now.filter((z) => z.im >= -1e-9)
+  const xAxis = useAxis({ label: 'real part', range: plant.x })
+  const yAxis = useAxis({ label: 'imaginary part', range: plant.y, equal: xAxis })
   return (
-    <Interactive
+    <Figure
       title="Closed-loop poles as the gain grows"
+      state={state}
       caption="The closed-loop poles of 1 + K·G(s) = 0 for every K > 0 (lines). They start at the open-loop poles when K is small and end at the open-loop zeros, or run off to infinity along asymptotes. The large dots are the poles at the current gain; drag one along the locus, or use the slider, to change K. The loop is stable while every pole is left of the imaginary axis. The second plant is unstable on its own and needs K > 1; the third shows a zero pulling two poles off the imaginary axis."
-      controls={
-        <>
-          <ParamChoice
-            label="open loop"
-            value={key}
-            onChange={choose}
-            options={(Object.keys(PLANTS) as PlantKey[]).map((p) => ({ value: p, label: PLANTS[p].label }))}
-          />
-          <ParamSlider label="gain K" param={logK} format={(v) => formatNumber(10 ** v)} />
-        </>
-      }
-      readout={
+      readouts={
         <>
           <Readout label="K" value={formatNumber(k)} />
           <Readout
@@ -201,16 +212,11 @@ export function RootLocus() {
       }
     >
       <div className="mx-auto w-full max-w-xl">
-        <XYChart
-          series={series}
-          xLabel="real part"
-          yLabel="imaginary part"
-          xRange={plant.x}
-          yRange={plant.y}
-          equalAspect
-          handles={[{ kind: 'point', at: [handlePole.re, handlePole.im], onDrag: dragTo, label: 'closed-loop pole' }]}
-        />
+        <Plot x={xAxis} y={yAxis}>
+          {seriesLayers(series)}
+          <Handle kind="point" at={[handlePole.re, handlePole.im]} onDrag={dragTo} label="closed-loop pole" />
+        </Plot>
       </div>
-    </Interactive>
+    </Figure>
   )
 }

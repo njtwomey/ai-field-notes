@@ -1,4 +1,4 @@
-import { incompleteBeta, invertCdf, logGamma } from '@/lib/math/special'
+import { logGamma, regularisedBeta, regularisedBetaInverse } from 'aifn/numerics/special'
 
 /** Beta(a, b) density; handles the boundary so that a U-shaped density does not produce NaN at 0 or 1. */
 export function betaPdf(x: number, a: number, b: number): number {
@@ -6,9 +6,9 @@ export function betaPdf(x: number, a: number, b: number): number {
   return Math.exp(logGamma(a + b) - logGamma(a) - logGamma(b) + (a - 1) * Math.log(x) + (b - 1) * Math.log(1 - x))
 }
 
-export const betaCdf = (x: number, a: number, b: number) => incompleteBeta(x, a, b)
+export const betaCdf = (x: number, a: number, b: number) => regularisedBeta(a, b, x)
 
-export const betaQuantile = (p: number, a: number, b: number) => invertCdf((x) => betaCdf(x, a, b), p, 0, 1)
+export const betaQuantile = (p: number, a: number, b: number) => regularisedBetaInverse(a, b, p)
 
 /**
  * Shortest interval holding mass `level`: minimise q(p + level) − q(p) over the lower-tail mass p ∈ [0, 1 − level]

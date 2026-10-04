@@ -1,14 +1,9 @@
 import { useMemo, useState } from 'react'
 import { stream } from 'aifn/foundation/random'
 import { fromData, toFlat } from 'aifn/foundation/tensor'
-import type { InverseTruth } from 'aifn-applied/data'
-import { bishopInverse } from 'aifn-applied/data/synthetic'
-import {
-  mdnModel,
-  mdnPredict,
-  mixtureDensityRun,
-  type MdnSnapshot,
-} from 'aifn-applied/learning/mixture-density'
+import type { InverseTruth } from 'aifn-methods/data'
+import { bishopInverse } from 'aifn-methods/data/synthetic'
+import { mdnModel, mdnPredict, mixtureDensityRun, type MdnSnapshot } from 'aifn-methods/learning/mixture-density'
 import {
   ControlGroup,
   Curve,
@@ -26,16 +21,13 @@ import {
   useAxis,
 } from 'aifn-render'
 
-const TASKS = [
-  { value: 'bishop', label: 'Folded sine wave (multimodal inverse branches)' },
-]
+const TASKS = [{ value: 'bishop', label: 'Folded sine wave (multimodal inverse branches)' }]
 
 const X_RANGE: [number, number] = [-0.15, 1.15]
 const T_RANGE: [number, number] = [-0.1, 1.1]
 const G = 91
 
-const grid = (lo: number, hi: number, n: number) =>
-  Array.from({ length: n }, (_, i) => lo + ((hi - lo) * i) / (n - 1))
+const grid = (lo: number, hi: number, n: number) => Array.from({ length: n }, (_, i) => lo + ((hi - lo) * i) / (n - 1))
 
 const XS = grid(...X_RANGE, G)
 const TS = grid(...T_RANGE, G)
@@ -249,7 +241,13 @@ export function MdnExplorer() {
         </Plot>
         <Plot x={sliceT} y={sliceP}>
           {evaluation && (
-            <Curve name="conditional density p(t | x₀)" x={evaluation.slice.t} y={evaluation.slice.p} slot={2} emphasis />
+            <Curve
+              name="conditional density p(t | x₀)"
+              x={evaluation.slice.t}
+              y={evaluation.slice.p}
+              slot={2}
+              emphasis
+            />
           )}
         </Plot>
       </Plots>

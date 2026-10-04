@@ -3,7 +3,7 @@ import { expect } from 'vitest'
 import type { Distribution } from 'aifn/foundation/contracts'
 import { isTensor, tensor, toFlat, type Tensor } from 'aifn/foundation/tensor'
 import { classProbabilities } from 'aifn/learning/estimators'
-import type { DecisionTree } from 'aifn-applied/learning/trees-and-ensembles'
+import type { DecisionTree } from 'aifn-methods/learning/trees-and-ensembles'
 import { fixture } from '../fixtures'
 
 export type TreeFx = {

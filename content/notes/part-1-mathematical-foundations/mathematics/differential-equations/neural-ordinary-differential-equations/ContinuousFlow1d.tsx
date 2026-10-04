@@ -1,13 +1,15 @@
 import { useMemo } from 'react'
-import { Interactive, ParamSlider, Readout, XYChart, formatNumber, useParam, type XYSeries } from 'aifn-render'
-import { linspace, rng } from '@/lib/math'
-import { normalPdf } from '@/lib/math/special'
+import { Bars, Curve, Figure, float, formatNumber, Plot, Readout, slider, useAxis, useFigureState } from 'aifn-render'
+import { normal as drawNormal, stream } from 'aifn/foundation/random'
 import { histogramDensity } from '../_shared/ode'
+import { linspace, toFlat } from 'aifn/foundation/tensor'
+import { normalPdf } from 'aifn/numerics/special'
 
 const H = 0.02
-const Z0 = linspace(-4, 4, 321)
+const Z0 = toFlat(linspace(-4, 4, 321))
 const SAMPLES = (() => {
-  const { normal } = rng(3)
+  const rs = stream(3)
+  const normal = () => drawNormal(rs)
   return Float64Array.from({ length: 4000 }, () => normal())
 })()
 const LO = -5
@@ -18,14 +20,16 @@ const HI = 5
  * with its log-density, d log p / dt = −f′(z), which is the instantaneous change of variables.
  */
 export function ContinuousFlow1d() {
-  const time = useParam(1, { min: 0, max: 2, step: 0.1 })
-  const a = useParam(1, { min: -1.5, max: 1.5, step: 0.1 })
-  const c = useParam(0, { min: -1, max: 1, step: 0.1 })
+  const state = useFigureState({
+    time: slider(0, 2, 1, { step: 0.1, label: 'time t' }),
+    a: float(1, { min: -1.5, max: 1.5, step: 0.1, label: 'strength a' }),
+    c: float(0, { min: -1, max: 1, step: 0.1, label: 'drift c' }),
+  })
 
   const result = useMemo(() => {
-    const f = (z: number) => a.value * Math.tanh(2 * z) + c.value
-    const df = (z: number) => (2 * a.value) / Math.cosh(2 * z) ** 2
-    const steps = Math.round(time.value / H)
+    const f = (z: number) => state.a * Math.tanh(2 * z) + state.c
+    const df = (z: number) => (2 * state.a) / Math.cosh(2 * z) ** 2
+    const steps = Math.round(state.time / H)
     // RK4 on the pair (z, log p): both right-hand sides depend on z only.
     const advance = (z: number, lp: number) => {
       for (let k = 0; k < steps; k++) {
@@ -49,37 +53,38 @@ export function ContinuousFlow1d() {
     for (let i = 1; i < curve.length; i++)
       mass += 0.5 * (Math.exp(curve[i][1]) + Math.exp(curve[i - 1][1])) * (curve[i][0] - curve[i - 1][0])
     return { curve, hist: histogramDensity(pushed, LO, HI, 60), mass }
-  }, [time.value, a.value, c.value])
+  }, [state.time, state.a, state.c])
 
-  const series = useMemo<XYSeries[]>(
-    () => [
-      { name: 'pushed samples (histogram)', type: 'bar', x: result.hist.x, y: result.hist.y, muted: true },
-      { name: 'base density N(0, 1)', type: 'line', x: Z0, y: Z0.map(normalPdf), slot: 1, dashed: true },
-      {
-        name: 'p_t from d log p/dt = −f′(z)',
-        type: 'line',
-        x: result.curve.map((p) => p[0]),
-        y: result.curve.map((p) => Math.exp(p[1])),
-        slot: 0,
-      },
-    ],
+  const series = useMemo(
+    () =>
+      [
+        { name: 'pushed samples (histogram)', x: result.hist.x, y: result.hist.y, muted: true },
+        { name: 'base density N(0, 1)', x: Z0, y: Z0.map((v: number) => normalPdf(v)), slot: 1, dashed: true },
+        {
+          name: 'p_t from d log p/dt = −f′(z)',
+          x: result.curve.map((p) => p[0]),
+          y: result.curve.map((p) => Math.exp(p[1])),
+          slot: 0,
+        },
+      ] as const,
     [result],
   )
 
+  const xAxis = useAxis({ label: 'z', range: [LO, HI] })
+  const yAxis = useAxis({ label: 'density', range: [0, undefined], hold: 'union' })
   return (
-    <Interactive
+    <Figure
       title="Instantaneous change of variables in one dimension"
+      state={state}
       caption="Samples from N(0, 1) follow ż = a·tanh(2z) + c. The histogram shows where they end up. The curve is computed without samples: each grid point is moved by the ODE while its log-density falls at rate f′(z). The two agree. With a > 0 the field pushes mass away from 0 and splits the density in two; with a < 0 it squeezes the density into a spike."
-      controls={
-        <>
-          <ParamSlider label="time t" param={time} withArrows />
-          <ParamSlider label="strength a" param={a} />
-          <ParamSlider label="drift c" param={c} />
-        </>
-      }
-      readout={<Readout label="mass under the curve" value={formatNumber(result.mass)} />}
+
+      readouts={<Readout label="mass under the curve" value={formatNumber(result.mass)} />}
     >
-      <XYChart height={300} xLabel="z" yLabel="density" series={series} xRange={[LO, HI]} yRange={[0, undefined]} />
-    </Interactive>
+      <Plot x={xAxis} y={yAxis} height={300}>
+        <Bars {...series[0]} />
+        <Curve {...series[1]} />
+        <Curve {...series[2]} />
+      </Plot>
+    </Figure>
   )
 }

@@ -13,7 +13,7 @@
  *   relevance determination (ARD) in every stationary kernel except `periodic`.
  * - Evaluation: `gram(k, X, Y?)`, `kernelDiagonal(k, X)`, `kernelProfile(k, lags)` (k(τ, 0) in one dimension). Inputs
  *   are [n, d] or [n] (one-dimensional). Everything is built from `aifn/foundation/tensor` primitives, so Gram matrices are
- *   differentiable in the inputs and in hyperparameters (`k.withParams(traced)`), e.g. for `aifn-applied/learning/gp`'s
+ *   differentiable in the inputs and in hyperparameters (`k.withParams(traced)`), e.g. for `aifn-methods/learning/gp`'s
  *   marginal likelihood gradient.
  * - Hyperparameters are a pytree (`k.params`, walked by `aifn/foundation/pytree`); `logParams(k)` and
  *   `kernelFromLog(k, θ)` move them to and from log space for fitting.

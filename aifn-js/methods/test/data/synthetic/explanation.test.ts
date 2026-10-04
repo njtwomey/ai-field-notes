@@ -14,7 +14,7 @@ import {
   feasibilityTask,
   plantedMask,
   plantedPatterns,
-} from 'aifn-applied/data/synthetic'
+} from 'aifn-methods/data/synthetic'
 
 describe('explanation test beds', () => {
   it('feasibility task leaves the gap empty', () => {

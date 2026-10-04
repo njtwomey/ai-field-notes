@@ -1,13 +1,16 @@
-import { useMemo, useState } from 'react'
+import { useMemo } from 'react'
 import {
-  Interactive,
-  ParamSlider,
-  Readout,
-  XYChart,
+  Annotation,
+  Curve,
+  Figure,
+  float,
   formatNumber,
-  useParam,
-  type Handle,
-  type XYSeries,
+  Handle,
+  int,
+  Plot,
+  Readout,
+  useAxis,
+  useFigureState,
 } from 'aifn-render'
 
 const MAX_N = 128
@@ -23,49 +26,28 @@ const STAGES = [
 ]
 
 export function ZeroMemory() {
-  const [billions, setBillions] = useState(7.5)
-  const n = useParam(64, { min: 1, max: MAX_N, step: 1 })
+  const state = useFigureState({
+    billions: float(7.5, { min: 0.5, max: 200, step: 0.5, label: 'parameters Ψ (billions)' }),
+    n: int(64, { min: 1, max: MAX_N, label: 'data-parallel devices N' }),
+  })
 
-  const series = useMemo((): XYSeries[] => {
-    const lines: XYSeries[] = STAGES.map((s, slot) => ({
-      name: s.name,
-      type: 'line',
-      x: NS,
-      y: NS.map((k) => billions * s.bytes(k)),
-      slot,
-    }))
-    lines.push({
-      name: `${DEVICE_GB} GB device`,
-      type: 'line',
-      x: [1, MAX_N],
-      y: [DEVICE_GB, DEVICE_GB],
-      muted: true,
-      dashed: true,
-    })
-    return lines
-  }, [billions])
+  const stages = useMemo(
+    () => STAGES.map((s, slot) => ({ name: s.name, x: NS, y: NS.map((k) => state.billions * s.bytes(k)), slot })),
+    [state.billions],
+  )
 
-  const at = (i: number) => `${formatNumber(billions * STAGES[i].bytes(n.value))} GB`
-  const handles: Handle[] = [{ kind: 'x', at: n.value, label: 'N', onDrag: n.set }]
+  const at = (i: number) => `${formatNumber(state.billions * STAGES[i].bytes(state.n))} GB`
+  const devices = useAxis({ label: 'data-parallel devices N', range: [1, MAX_N] })
+  const memory = useAxis({ label: 'GB per device', log: true, hold: 'union' })
 
   return (
-    <Interactive
+    <Figure
       title="Model-state memory per device under ZeRO"
+      purpose="Change the parameter count and the number of devices to compare model-state memory per device under each ZeRO stage."
+      state={state}
       caption="Mixed-precision Adam keeps 16 bytes per parameter: 2 for 16-bit weights, 2 for 16-bit gradients and 12 for the 32-bit master weights and two moments. Each ZeRO stage shards one more of these across the N data-parallel devices. Only stage 3 keeps falling as 1/N. Activations are not included. Drag the vertical line to change N."
-      controls={
-        <>
-          <ParamSlider
-            label="parameters Ψ (billions)"
-            value={billions}
-            onChange={setBillions}
-            min={0.5}
-            max={200}
-            step={0.5}
-          />
-          <ParamSlider label="data-parallel devices N" param={n} />
-        </>
-      }
-      readout={
+
+      readouts={
         <>
           <Readout label="data parallel" value={at(0)} />
           <Readout label="stage 1" value={at(1)} />
@@ -74,15 +56,13 @@ export function ZeroMemory() {
         </>
       }
     >
-      <XYChart
-        series={series}
-        xLabel="data-parallel devices N"
-        yLabel="GB per device"
-        xRange={[1, MAX_N]}
-        yLog
-        handles={handles}
-        height={320}
-      />
-    </Interactive>
+      <Plot x={devices} y={memory} height={320}>
+        {stages.map((line) => (
+          <Curve key={line.slot} {...line} />
+        ))}
+        <Annotation y={DEVICE_GB} text={`${DEVICE_GB} GB device`} dashed muted />
+        <Handle {...state.handle('n', { label: 'N' })} />
+      </Plot>
+    </Figure>
   )
 }

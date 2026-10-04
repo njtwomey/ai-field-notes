@@ -1,5 +1,4 @@
-import { Interactive } from 'aifn-render'
-import { Diagram } from 'aifn-render'
+import { Diagram, Figure } from 'aifn-render'
 import type { DiagramSpec } from 'aifn-render'
 
 const sign = (id: string, x: number, y: number, s: string) => ({
@@ -45,7 +44,7 @@ const spec: DiagramSpec = {
 /** The standard single-loop feedback system. */
 export function FeedbackLoopDiagram() {
   return (
-    <Interactive
+    <Figure
       title="The standard feedback loop"
       caption="The controller C acts on the error e between the reference r and the measured output. The plant P turns the input u into the output y, to which the disturbance d adds. The sensor adds noise n. Each signal reaches y through S = 1/(1 + PC) or T = PC/(1 + PC)."
     >
@@ -53,6 +52,6 @@ export function FeedbackLoopDiagram() {
         spec={spec}
         ariaLabel="Reference r minus measured output gives error e, which passes through controller C and plant P; a disturbance adds to the plant output y, and sensor noise adds to the fed-back measurement"
       />
-    </Interactive>
+    </Figure>
   )
 }

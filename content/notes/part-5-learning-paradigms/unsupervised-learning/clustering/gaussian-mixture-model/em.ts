@@ -1,4 +1,5 @@
-import { initialCentres, type CentreInit, type Point } from '@/lib/math/cluster'
+import type { Vec2 as Point } from 'aifn/numerics/linalg'
+import { initialCentres, type CentreInit } from '../_shared/centres'
 import { logsumexp, fromData, toFlat } from 'aifn/foundation/tensor'
 import { softmax } from 'aifn/numerics/special'
 

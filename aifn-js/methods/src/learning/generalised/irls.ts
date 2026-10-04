@@ -1,6 +1,6 @@
 /**
  * Iteratively reweighted least squares (IRLS; Nelder and Wedderburn, 1972; McCullagh and Nelder, 1989, §2.5) for any
- * family and link, with an optional quadratic penalty βᵀPβ (penalised IRLS, as `aifn-applied/learning/gam` uses it;
+ * family and link, with an optional quadratic penalty βᵀPβ (penalised IRLS, as `aifn-methods/learning/gam` uses it;
  * Wood, 2017, "Generalized Additive Models", 2nd ed., §6.1.1). Each step solves the weighted least-squares problem
  * (XᵀWX + P)β = XᵀWz for the working response z = η − o + (y − μ)/μ′(η) and weights W = w μ′(η)²/V(μ); a step that
  * leaves the mean space or raises the penalised deviance is halved towards the previous coefficients.

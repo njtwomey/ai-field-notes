@@ -1,6 +1,6 @@
 import { useMemo } from 'react'
-import { Interactive, ParamSlider, Readout, XYChart, formatNumber, useParam, type XYSeries } from 'aifn-render'
-import { rng } from '@/lib/math'
+import { Figure, float, formatNumber, int, Plot, Points, Readout, useAxis, useFigureState } from 'aifn-render'
+import { normal, stream, uniform } from 'aifn/foundation/random'
 
 const PER_CLASS = 150
 const NOISE = 0.1
@@ -9,15 +9,15 @@ const Y_RANGE: [number | undefined, number | undefined] = [-1, 1.5]
 
 /** Two interleaved half-circles ("two moons"). */
 function moons(seed: number) {
-  const g = rng(seed)
+  const g = stream(seed)
   const x: number[] = []
   const y: number[] = []
   const label: number[] = []
   for (let c = 0; c < 2; c++) {
     for (let i = 0; i < PER_CLASS; i++) {
-      const t = Math.PI * g.uniform()
-      x.push((c === 0 ? Math.cos(t) : 1 - Math.cos(t)) + NOISE * g.normal())
-      y.push((c === 0 ? Math.sin(t) : 0.5 - Math.sin(t)) + NOISE * g.normal())
+      const t = Math.PI * uniform(g)
+      x.push((c === 0 ? Math.cos(t) : 1 - Math.cos(t)) + NOISE * normal(g))
+      y.push((c === 0 ? Math.sin(t) : 0.5 - Math.sin(t)) + NOISE * normal(g))
       label.push(c)
     }
   }
@@ -56,13 +56,15 @@ function solveSpd(A: number[][], b: number[]): number[] {
  * the weighted average of its neighbours' scores, with labelled points clamped to 0 or 1.
  */
 export function HarmonicPropagation() {
-  const perClass = useParam(2, { min: 1, max: 10, step: 1 })
-  const sigma = useParam(0.15, { min: 0.01, max: 1, step: 0.01 })
-  const seed = useParam(4, { min: 1, max: 20, step: 1 })
+  const state = useFigureState({
+    perClass: int(2, { min: 1, max: 10, step: 1, label: 'labelled points per class', format: (v) => String(v) }),
+    sigma: float(0.15, { min: 0.01, max: 1, step: 0.01, label: 'kernel width σ' }),
+    seed: int(4, { min: 1, max: 20, step: 1, label: 'data seed', format: (v) => String(v) }),
+  })
 
-  const data = useMemo(() => moons(seed.value), [seed.value])
-  const labelsPerClass = perClass.value
-  const width = sigma.value
+  const data = useMemo(() => moons(state.seed), [state.seed])
+  const labelsPerClass = state.perClass
+  const width = state.sigma
 
   const r = useMemo(() => {
     const n = data.x.length
@@ -107,41 +109,38 @@ export function HarmonicPropagation() {
     return { L, U, pred, accuracy, nn, undecided: U.filter((i) => Math.abs(f[i] - 0.5) < 1e-3).length }
   }, [data, labelsPerClass, width])
 
-  const before: XYSeries[] = [
-    { name: 'unlabelled', type: 'scatter', x: r.U.map((i) => data.x[i]), y: r.U.map((i) => data.y[i]), muted: true },
+  const before = [
+    { name: 'unlabelled', x: r.U.map((i) => data.x[i]), y: r.U.map((i) => data.y[i]), muted: true },
     {
       name: 'labelled',
-      type: 'scatter',
       x: r.L.map((i) => data.x[i]),
       y: r.L.map((i) => data.y[i]),
       group: r.L.map((i) => data.label[i]),
       groupNames: ['class 0', 'class 1'],
     },
-  ]
-  const after: XYSeries[] = [
+  ] as const
+  const after = [
     {
       name: 'predicted',
-      type: 'scatter',
       x: data.x,
       y: data.y,
       group: r.pred,
       groupNames: ['predicted 0', 'predicted 1'],
     },
-    { name: 'labelled', type: 'scatter', x: r.L.map((i) => data.x[i]), y: r.L.map((i) => data.y[i]), emphasis: true },
-  ]
+    { name: 'labelled', x: r.L.map((i) => data.x[i]), y: r.L.map((i) => data.y[i]), emphasis: true },
+  ] as const
 
+  const xAxis = useAxis({ label: 'x₁', range: X_RANGE })
+  const yAxis = useAxis({ label: 'x₂', range: Y_RANGE })
+  const xAxis2 = useAxis({ label: 'x₁', range: X_RANGE })
+  const yAxis2 = useAxis({ label: 'x₂', range: Y_RANGE })
   return (
-    <Interactive
+    <Figure
       title="Label propagation on two moons"
+      state={state}
       caption="Three hundred points on two interleaved half-circles, of which only a few per class are labelled (left). The graph joins every pair of points with weight exp(−d²/2σ²). The harmonic solution gives each unlabelled point the weighted average score of its neighbours, so labels flow along the dense moons rather than across the gap (right; diamonds are the labelled points). A supervised 1-nearest-neighbour rule using only the labelled points cuts straight across the moons. Too large a σ joins the moons and labels leak across; too small a σ disconnects the graph and leaves points undecided."
-      controls={
-        <>
-          <ParamSlider label="labelled points per class" param={perClass} format={(v) => String(v)} />
-          <ParamSlider label="kernel width σ" param={sigma} />
-          <ParamSlider label="data seed" param={seed} format={(v) => String(v)} />
-        </>
-      }
-      readout={
+
+      readouts={
         <>
           <Readout label="propagation accuracy" value={formatNumber(r.accuracy)} />
           <Readout label="1-NN on labels only" value={formatNumber(r.nn)} />
@@ -150,9 +149,15 @@ export function HarmonicPropagation() {
       }
     >
       <div className="grid gap-4 md:grid-cols-2">
-        <XYChart series={before} xLabel="x₁" yLabel="x₂" xRange={X_RANGE} yRange={Y_RANGE} height={320} />
-        <XYChart series={after} xLabel="x₁" yLabel="x₂" xRange={X_RANGE} yRange={Y_RANGE} height={320} />
+        <Plot x={xAxis} y={yAxis} height={320}>
+          <Points {...before[0]} />
+          <Points {...before[1]} />
+        </Plot>
+        <Plot x={xAxis2} y={yAxis2} height={320}>
+          <Points {...after[0]} />
+          <Points {...after[1]} />
+        </Plot>
       </div>
-    </Interactive>
+    </Figure>
   )
 }

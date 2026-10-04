@@ -1,14 +1,16 @@
 import { useMemo } from 'react'
-import { MathText } from 'aifn-render'
 import {
-  Interactive,
-  ParamSlider,
-  Readout,
-  XYChart,
+  Figure,
+  float,
   formatNumber,
-  useParam,
-  type Handle,
-  type XYSeries,
+  Handle,
+  MathText,
+  Plot,
+  Points,
+  Readout,
+  useAxis,
+  useFigureState,
+  Vectors,
 } from 'aifn-render'
 
 type Word = { w: string; x: number; y: number; g: number }
@@ -46,25 +48,26 @@ const TOP = 5
 
 /** ETM topic–word distribution: β_kv ∝ exp(ρ_vᵀ α_k), here with a two-dimensional topic vector α_k. */
 export function EtmTopicVector() {
-  const ax = useParam(2.2, { min: -4, max: 4, step: 0.05 })
-  const ay = useParam(1.8, { min: -4, max: 4, step: 0.05 })
+  const state = useFigureState({
+    ax: float(2.2, { min: -4, max: 4, step: 0.05, label: 'α₁' }),
+    ay: float(1.8, { min: -4, max: 4, step: 0.05, label: 'α₂' }),
+  })
 
   const beta = useMemo(() => {
-    const logits = WORDS.map((d) => d.x * ax.value + d.y * ay.value)
+    const logits = WORDS.map((d) => d.x * state.ax + d.y * state.ay)
     const m = Math.max(...logits)
     const e = logits.map((l) => Math.exp(l - m))
     const s = e.reduce((a, b) => a + b, 0)
     return e.map((v) => v / s)
-  }, [ax.value, ay.value])
+  }, [state.ax, state.ay])
 
   const order = beta.map((p, i) => [p, i] as const).sort((a, b) => b[0] - a[0])
   const top = order.slice(0, TOP).map(([, i]) => i)
   const entropy = -beta.reduce((h, p) => (p > 0 ? h + p * Math.log(p) : h), 0)
 
-  const series: XYSeries[] = [
+  const series = [
     {
       name: 'words',
-      type: 'scatter',
       x: WORDS.map((d) => d.x),
       y: WORDS.map((d) => d.y),
       group: WORDS.map((d) => d.g),
@@ -72,37 +75,23 @@ export function EtmTopicVector() {
     },
     {
       name: `top ${TOP} words`,
-      type: 'scatter',
       x: top.map((i) => WORDS[i].x),
       y: top.map((i) => WORDS[i].y),
       emphasis: true,
     },
-  ]
-  const handles: Handle[] = [
-    {
-      kind: 'point',
-      at: [ax.value, ay.value],
-      label: 'topic vector α',
-      onDrag: ([x, y]) => {
-        ax.set(x)
-        ay.set(y)
-      },
-    },
-  ]
+  ] as const
 
+  const xAxis = useAxis({ label: 'embedding dimension 1', range: RANGE })
+  const yAxis = useAxis({ label: 'embedding dimension 2', range: RANGE, equal: xAxis })
   return (
-    <Interactive
+    <Figure
       title="A topic is a vector in word-embedding space"
+      state={state}
       caption={
         <MathText text="Each point is a word embedding $\rhovec_v$; the arrow is a topic embedding $\alphavec_k$. Topic $k$ gives word $v$ probability $\beta_{kv} \propto \exp(\rhovec_v^\top\alphavec_k)$, so the top words (ink diamonds) are those furthest along the arrow's direction. Drag the arrow's tip. A longer arrow makes the topic sharper; a short one spreads it over the whole vocabulary. Function words sit near the origin, so their inner product with any topic vector is near zero and they rarely top a topic." />
       }
-      controls={
-        <>
-          <ParamSlider label="α₁" param={ax} />
-          <ParamSlider label="α₂" param={ay} />
-        </>
-      }
-      readout={
+
+      readouts={
         <>
           <Readout
             label="top words"
@@ -116,17 +105,21 @@ export function EtmTopicVector() {
       }
     >
       <div className="mx-auto w-full max-w-md">
-        <XYChart
-          series={series}
-          vectors={[{ from: [0, 0], to: [ax.value, ay.value] }]}
-          handles={handles}
-          xRange={RANGE}
-          yRange={RANGE}
-          xLabel="embedding dimension 1"
-          yLabel="embedding dimension 2"
-          equalAspect
-        />
+        <Plot x={xAxis} y={yAxis}>
+          <Points {...series[0]} />
+          <Points {...series[1]} />
+          <Vectors vectors={[{ from: [0, 0], to: [state.ax, state.ay] }]} />
+          <Handle
+            kind="point"
+            at={[state.ax, state.ay]}
+            label="topic vector α"
+            onDrag={([x, y]) => {
+              state.set('ax', x)
+              state.set('ay', y)
+            }}
+          />
+        </Plot>
       </div>
-    </Interactive>
+    </Figure>
   )
 }

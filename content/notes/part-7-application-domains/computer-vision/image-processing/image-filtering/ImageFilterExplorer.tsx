@@ -1,5 +1,16 @@
-import { useMemo, useState } from 'react'
-import { Heatmap, Interactive, ParamChoice, ParamSlider, ParamSwitch, Readout, formatNumber } from 'aifn-render'
+import { useMemo } from 'react'
+import {
+  choice,
+  Figure,
+  formatNumber,
+  Plot,
+  Raster,
+  Readout,
+  setting,
+  slider,
+  useAxis,
+  useFigureState,
+} from 'aifn-render'
 import {
   AXIS,
   SOBEL_X,
@@ -56,11 +67,43 @@ function apply(img: Image, kernel: KernelName, boxSize: number, sigma: number, b
 
 /** A 64 × 64 test image and the result of filtering it with a chosen kernel and border rule. */
 export function ImageFilterExplorer() {
-  const [kernel, setKernel] = useState<KernelName>('gaussian')
-  const [border, setBorder] = useState<Border>('zero')
-  const [noisy, setNoisy] = useState(true)
-  const [boxSize, setBoxSize] = useState(5)
-  const [sigma, setSigma] = useState(1.5)
+  const state = useFigureState({
+    kernel: choice<KernelName>(
+      [
+        { value: 'box', label: 'box' },
+        { value: 'gaussian', label: 'Gaussian' },
+        { value: 'sobel-x', label: 'Sobel x' },
+        { value: 'sobel-y', label: 'Sobel y' },
+        { value: 'log', label: 'LoG' },
+        { value: 'sharpen', label: 'sharpen' },
+      ],
+      'gaussian',
+      { label: 'kernel' },
+    ),
+    border: choice<Border>(
+      [
+        { value: 'zero', label: 'zero' },
+        { value: 'replicate', label: 'replicate' },
+        { value: 'reflect', label: 'reflect' },
+      ],
+      'zero',
+      { label: 'border' },
+    ),
+    noisy: setting(true, 'add noise (σ = 0.08)'),
+    boxSize: slider(3, 11, 5, {
+      step: 2,
+      label: 'box size k',
+      format: (v) => `${v} × ${v}`,
+      when: (v) => v.kernel === 'box',
+    }),
+    sigma: slider(0.5, 3, 1.5, {
+      step: 0.1,
+      label: 'Gaussian σ (pixels)',
+      format: (v) => v.toFixed(1),
+      when: (v) => v.kernel === 'gaussian' || v.kernel === 'log' || v.kernel === 'sharpen',
+    }),
+  })
+  const { kernel, border, noisy, boxSize, sigma } = state
   const input = noisy ? NOISY : CLEAN
 
   const res = useMemo(() => apply(input, kernel, boxSize, sigma, border), [input, kernel, boxSize, sigma, border])
@@ -68,63 +111,17 @@ export function ImageFilterExplorer() {
   const bound = Math.max(Math.abs(lo), Math.abs(hi), 1e-9)
   const outRange: [number, number] = res.signed ? [-bound, bound] : [Math.min(0, lo), Math.max(1, hi)]
   const k = res.size
-  const usesSigma = kernel === 'gaussian' || kernel === 'log' || kernel === 'sharpen'
 
+  const xAxis = useAxis({ label: 'column' })
+  const yAxis = useAxis({ label: 'row' })
+  const xAxis2 = useAxis({ label: 'column' })
+  const yAxis2 = useAxis({ label: 'row' })
   return (
-    <Interactive
+    <Figure
       title="Filtering an image with a kernel"
       caption="Left: the input. Right: the filtered image. Box and Gaussian kernels average and blur; the Gaussian has no ringing and is isotropic. Sobel kernels respond to horizontal and vertical intensity changes with a sign. The Laplacian of Gaussian (LoG) is zero on flat regions and changes sign across an edge. Unsharp masking adds back what a Gaussian blur removes. Switch the border rule to zero padding and watch a dark frame appear at the image boundary."
-      controls={
-        <>
-          <ParamChoice
-            label="kernel"
-            value={kernel}
-            onChange={setKernel}
-            options={[
-              { value: 'box', label: 'box' },
-              { value: 'gaussian', label: 'Gaussian' },
-              { value: 'sobel-x', label: 'Sobel x' },
-              { value: 'sobel-y', label: 'Sobel y' },
-              { value: 'log', label: 'LoG' },
-              { value: 'sharpen', label: 'sharpen' },
-            ]}
-          />
-          <ParamChoice
-            label="border"
-            value={border}
-            onChange={setBorder}
-            options={[
-              { value: 'zero', label: 'zero' },
-              { value: 'replicate', label: 'replicate' },
-              { value: 'reflect', label: 'reflect' },
-            ]}
-          />
-          <ParamSwitch label="add noise (σ = 0.08)" checked={noisy} onChange={setNoisy} />
-          {kernel === 'box' && (
-            <ParamSlider
-              label="box size k"
-              value={boxSize}
-              onChange={setBoxSize}
-              min={3}
-              max={11}
-              step={2}
-              format={(v) => `${v} × ${v}`}
-            />
-          )}
-          {usesSigma && (
-            <ParamSlider
-              label="Gaussian σ (pixels)"
-              value={sigma}
-              onChange={setSigma}
-              min={0.5}
-              max={3}
-              step={0.1}
-              format={(v) => v.toFixed(1)}
-            />
-          )}
-        </>
-      }
-      readout={
+      state={state}
+      readouts={
         <>
           <Readout label="kernel size" value={`${k} × ${k}`} />
           <Readout label="multiply-adds per pixel, direct" value={String(k * k)} />
@@ -134,30 +131,20 @@ export function ImageFilterExplorer() {
       }
     >
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-        <Heatmap
-          x={AXIS}
-          y={AXIS}
-          z={input}
-          range={[0, 1]}
-          xLabel="column"
-          yLabel="row"
-          valueLabel="intensity"
-          height={320}
-          ariaLabel="Input test image"
-        />
-        <Heatmap
-          x={AXIS}
-          y={AXIS}
-          z={res.out}
-          scale={res.signed ? 'diverging' : 'sequential'}
-          range={outRange}
-          xLabel="column"
-          yLabel="row"
-          valueLabel="output"
-          height={320}
-          ariaLabel="Filtered image"
-        />
+        <Plot x={xAxis} y={yAxis} height={320} ariaLabel={'Input test image'}>
+          <Raster x={AXIS} y={AXIS} z={input} range={[0, 1]} valueLabel={'intensity'} />
+        </Plot>
+        <Plot x={xAxis2} y={yAxis2} height={320} ariaLabel={'Filtered image'}>
+          <Raster
+            x={AXIS}
+            y={AXIS}
+            z={res.out}
+            scale={res.signed ? 'diverging' : 'sequential'}
+            range={outRange}
+            valueLabel={'output'}
+          />
+        </Plot>
       </div>
-    </Interactive>
+    </Figure>
   )
 }

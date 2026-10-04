@@ -1,8 +1,8 @@
+import { stream, uniform } from 'aifn/foundation/random'
 /**
  * Output codes for K classes and the probability that Hamming decoding recovers the true class when every binary
  * classifier is wrong independently with probability p. A code is K rows of L entries in {−1, 0, +1}.
  */
-import { rng } from '@/lib/math'
 
 export type Code = number[][]
 export type CodeName = 'ovr' | 'ovo' | 'exhaustive' | 'random'
@@ -33,11 +33,11 @@ export function exhaustive(k: number): Code {
 
 /** Entries ±1 with probability 1/2 each; a constant column (no binary problem to learn) is redrawn. */
 export function randomCode(k: number, length: number, seed: number): Code {
-  const g = rng(seed)
+  const g = stream(seed)
   const rows: Code = Array.from({ length: k }, () => [])
   for (let s = 0; s < length; s++) {
     let column: number[]
-    do column = Array.from({ length: k }, () => (g.uniform() < 0.5 ? 1 : -1))
+    do column = Array.from({ length: k }, () => (uniform(g) < 0.5 ? 1 : -1))
     while (column.every((v) => v === column[0]))
     column.forEach((v, r) => rows[r].push(v))
   }
@@ -125,9 +125,9 @@ export function successProbability(code: Code, seed: number): Evaluator {
     }
   }
   // Common random numbers: the same uniforms serve every p, so the curve is smooth and never decreases by chance.
-  const g = rng(seed)
-  const flipDraws = Array.from({ length: k * DRAWS }, () => Float64Array.from({ length }, () => g.uniform()))
-  const coinDraws = Array.from({ length: k * DRAWS }, () => Float64Array.from({ length }, () => g.uniform()))
+  const g = stream(seed)
+  const flipDraws = Array.from({ length: k * DRAWS }, () => Float64Array.from({ length }, () => uniform(g)))
+  const coinDraws = Array.from({ length: k * DRAWS }, () => Float64Array.from({ length }, () => uniform(g)))
   const bits = new Int8Array(length)
   return {
     exact: false,

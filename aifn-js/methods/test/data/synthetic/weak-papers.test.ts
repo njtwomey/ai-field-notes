@@ -7,7 +7,7 @@
 import { describe, expect, it } from 'vitest'
 import { stream } from 'aifn/foundation/random'
 import { dense, toFlat } from 'aifn/foundation/tensor'
-import { classConditionalNoise, halfKernel, WEB_TRAFFIC_CLASSES, webTraffic } from 'aifn-applied/data/synthetic'
+import { classConditionalNoise, halfKernel, WEB_TRAFFIC_CLASSES, webTraffic } from 'aifn-methods/data/synthetic'
 
 describe('webTraffic', () => {
   const perDay = 24
@@ -50,7 +50,7 @@ describe('classConditionalNoise', () => {
     const flipped = toFlat(d.flipped)
     let a = 0
     let b = 0
-    for (let i = 0; i < 20000; i++) (clean[i] === 1 ? (a += flipped[i]) : (b += flipped[i]))
+    for (let i = 0; i < 20000; i++) clean[i] === 1 ? (a += flipped[i]) : (b += flipped[i])
     expect(a / 10000).toBeCloseTo(0.05, 1)
     expect(b / 10000).toBeCloseTo(0.2, 1)
   })

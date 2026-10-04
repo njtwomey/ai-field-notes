@@ -1,7 +1,7 @@
 /**
  * The compute worker of `useComputed(…, { mode: 'worker' })`: it evaluates one task at a time (`state/task.ts`),
  * resolving each address to an aifn export by importing that module on first use, and answers with the result made
- * cloneable. A result that is a generator (headless training, `aifn-applied/gym` `training`) streams: every yielded
+ * cloneable. A result that is a generator (headless training, `aifn-methods/gym` `training`) streams: every yielded
  * value is posted as a partial answer, then the last one as the result. aifn is DOM-free, so its modules run here
  * unchanged. A stale job is cancelled by the page, which terminates this worker and starts a fresh one.
  */

@@ -1,15 +1,17 @@
-import { useMemo, useState } from 'react'
+import { useMemo } from 'react'
 import {
-  Interactive,
-  ParamButton,
-  ParamChoice,
-  ParamSlider,
-  Readout,
-  XYChart,
+  choice,
+  Curve,
+  Figure,
+  float,
   formatNumber,
-  type XYSeries,
+  int,
+  Plot,
+  Points,
+  Readout,
+  useAxis,
+  useFigureState,
 } from 'aifn-render'
-import { linspace, rng } from '@/lib/math'
 import { solve } from '../../regression/nonlinear-regression/_shared/splines'
 import {
   crossProduct,
@@ -19,6 +21,8 @@ import {
   times,
   uniformKnots,
 } from '../_shared/core-smoothing'
+import { linspace, toFlat } from 'aifn/foundation/tensor'
+import { normal, stream, uniform } from 'aifn/foundation/random'
 
 type Order = '1' | '2' | '3'
 const ORDER_OPTIONS = [
@@ -27,7 +31,7 @@ const ORDER_OPTIONS = [
   { value: '3' as const, label: 'd = 3' },
 ]
 const N = 100
-const GRID = linspace(0, 1, 201)
+const GRID = toFlat(linspace(0, 1, 201))
 const truth = (x: number) => Math.sin(2 * Math.PI * x) + 2 * x * x
 
 /** Least-squares polynomial of degree deg, by the normal equations (deg ≤ 2 on [0, 1] is well conditioned). */
@@ -39,24 +43,26 @@ function polyFit(x: number[], y: number[], deg: number): number[] {
 }
 
 export function PSplineExplorer() {
-  const [p, setP] = useState(20)
-  const [order, setOrder] = useState<Order>('2')
-  const d = Number(order)
-  const [logLambda, setLogLambda] = useState(0)
-  const [seed, setSeed] = useState(4)
+  const state = useFigureState({
+    p: int(20, { min: 8, max: 40, step: 1, label: 'basis functions p' }),
+    order: choice<Order>(ORDER_OPTIONS, '2', { label: 'difference order' }),
+    logLambda: float(0, { min: -4, max: 8, step: 0.1, label: 'log₁₀ λ', format: (v) => v.toFixed(1) }),
+    seed: int(4, { ge: 0, label: 'seed' }),
+  })
+  const d = Number(state.order)
 
   const data = useMemo(() => {
-    const r = rng(seed)
-    const x = Array.from({ length: N }, () => r.uniform())
-    return { x, y: x.map((xi) => truth(xi) + 0.25 * r.normal()) }
-  }, [seed])
+    const r = stream(state.seed)
+    const x = Array.from({ length: N }, () => uniform(r))
+    return { x, y: x.map((xi) => truth(xi) + 0.25 * normal(r)) }
+  }, [state.seed])
   // K = p − 3 equal spans on [0, 1], knots continued beyond both ends so that every B-spline has the same shape.
-  const t = useMemo(() => uniformKnots(p - 3, 0, 1), [p])
+  const t = useMemo(() => uniformKnots(state.p - 3, 0, 1), [state.p])
   const B = useMemo(() => designMatrix(data.x, t), [data, t])
   const BtB = useMemo(() => crossProduct(B), [B])
   const gridB = useMemo(() => designMatrix(GRID, t), [t])
-  const P = useMemo(() => differencePenalty(p, d), [p, d])
-  const fit = useMemo(() => penalisedFit(B, BtB, data.y, P, 10 ** logLambda), [B, BtB, data, P, logLambda])
+  const P = useMemo(() => differencePenalty(state.p, d), [state.p, d])
+  const fit = useMemo(() => penalisedFit(B, BtB, data.y, P, 10 ** state.logLambda), [B, BtB, data, P, state.logLambda])
   const poly = useMemo(() => polyFit(data.x, data.y, d - 1), [data, d])
 
   const curve = times(gridB, fit.coef)
@@ -67,16 +73,19 @@ export function PSplineExplorer() {
   // Each coefficient sits at its B-spline's peak, the middle interior knot.
   const centres = fit.coef.map((_, k) => t[k + 2])
 
-  const series: XYSeries[] = [
-    { name: 'data', type: 'scatter', x: data.x, y: data.y, muted: true },
-    { name: `least-squares polynomial of degree ${d - 1}`, type: 'line', x: GRID, y: polyCurve, slot: 1, dashed: true },
-    { name: 'P-spline fit', type: 'line', x: GRID, y: curve, slot: 0 },
-    { name: 'coefficients β_k', type: 'scatter', x: centres, y: fit.coef, emphasis: true },
-  ]
+  const series = [
+    { name: 'data', x: data.x, y: data.y, muted: true },
+    { name: `least-squares polynomial of degree ${d - 1}`, x: GRID, y: polyCurve, slot: 1, dashed: true },
+    { name: 'P-spline fit', x: GRID, y: curve, slot: 0 },
+    { name: 'coefficients β_k', x: centres, y: fit.coef, emphasis: true },
+  ] as const
 
+  const xAxis = useAxis({ label: 'x', range: [-0.25, 1.25] })
+  const yAxis = useAxis({ label: 'y', range: [-1.5, 3.5] })
   return (
-    <Interactive
+    <Figure
       title="A P-spline and its polynomial limit"
+      state={state}
       caption={
         <>
           One hundred points from sin(2πx) + 2x² plus noise, fitted with p cubic B-splines on equally spaced knots and a
@@ -85,23 +94,8 @@ export function PSplineExplorer() {
           least-squares polynomial of degree d − 1. The sums Σ xᵏ(ŷ − y) are zero for every k below d, whatever λ and p.
         </>
       }
-      controls={
-        <>
-          <ParamSlider label="basis functions p" value={p} onChange={setP} min={8} max={40} step={1} withArrows />
-          <ParamChoice label="difference order" value={order} onChange={setOrder} options={ORDER_OPTIONS} />
-          <ParamSlider
-            label="log₁₀ λ"
-            value={logLambda}
-            onChange={setLogLambda}
-            min={-4}
-            max={8}
-            step={0.1}
-            format={(v) => v.toFixed(1)}
-          />
-          <ParamButton onClick={() => setSeed((v) => v + 1)}>New sample</ParamButton>
-        </>
-      }
-      readout={
+
+      readouts={
         <>
           <Readout label="edf" value={formatNumber(fit.edf)} />
           <Readout label="max |fit − polynomial|" value={formatNumber(gap)} />
@@ -112,7 +106,12 @@ export function PSplineExplorer() {
         </>
       }
     >
-      <XYChart series={series} xRange={[-0.25, 1.25]} yRange={[-1.5, 3.5]} xLabel="x" yLabel="y" height={340} />
-    </Interactive>
+      <Plot x={xAxis} y={yAxis} height={340}>
+        <Points {...series[0]} />
+        <Curve {...series[1]} />
+        <Curve {...series[2]} />
+        <Points {...series[3]} />
+      </Plot>
+    </Figure>
   )
 }

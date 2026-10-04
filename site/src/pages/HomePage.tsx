@@ -21,10 +21,7 @@ export function HomePage() {
   const buttonRefs = useRef<Record<string, HTMLButtonElement | null>>({})
   const isClickScrolling = useRef(false)
 
-  const totalSubjects = useMemo(
-    () => taxonomy.reduce((sum, p) => sum + p.children.length, 0),
-    [],
-  )
+  const totalSubjects = useMemo(() => taxonomy.reduce((sum, p) => sum + p.children.length, 0), [])
 
   // Scroll-spy: track which section is currently in view
   useEffect(() => {
@@ -78,42 +75,39 @@ export function HomePage() {
   }
 
   return (
-    <main className="px-4 pt-12 pb-24 lg:px-8 max-w-6xl mx-auto">
+    <main className="mx-auto max-w-6xl px-4 pt-12 pb-24 lg:px-8">
       {/* Hero Section */}
       <section className="mx-auto max-w-2xl space-y-5 text-center">
+        <h1 className="font-prose text-4xl font-bold tracking-tight sm:text-5xl">AI Field Notes</h1>
 
-        <h1 className="font-prose text-4xl sm:text-5xl font-bold tracking-tight">
-          AI Field Notes
-        </h1>
-
-        <p className="font-prose text-base sm:text-lg text-muted-foreground leading-relaxed">
+        <p className="font-prose text-base leading-relaxed text-muted-foreground sm:text-lg">
           Machine learning notes from my research career, digitised and made interactive.
         </p>
 
         <button
           type="button"
           onClick={openSearch}
-          className="flex h-11 w-full items-center gap-3 rounded-xl border bg-muted/40 px-4 text-left text-muted-foreground transition-all hover:border-foreground/30 hover:bg-muted shadow-xs"
+          className="flex h-11 w-full items-center gap-3 rounded-xl border bg-muted/40 px-4 text-left text-muted-foreground shadow-xs transition-all hover:border-foreground/30 hover:bg-muted"
         >
           <Search className="size-4.5" aria-hidden />
           <span className="flex-1 text-sm">Search concepts, techniques and tests…</span>
           <Kbd>⌘K</Kbd>
         </button>
 
-        <div className="flex flex-wrap items-center justify-center gap-x-5 gap-y-2 text-xs sm:text-sm text-muted-foreground">
+        <div className="flex flex-wrap items-center justify-center gap-x-5 gap-y-2 text-xs text-muted-foreground sm:text-sm">
           <span>
-            <strong className="text-foreground font-semibold">{notes.length}</strong> notes ·{' '}
-            <strong className="text-foreground font-semibold">8</strong> parts ·{' '}
-            <strong className="text-foreground font-semibold">{totalSubjects}</strong> subjects ·{' '}
-            <strong className="text-foreground font-semibold">{Object.keys(references).length}</strong> references
+            <strong className="font-semibold text-foreground">{notes.length}</strong> notes ·{' '}
+            <strong className="font-semibold text-foreground">8</strong> parts ·{' '}
+            <strong className="font-semibold text-foreground">{totalSubjects}</strong> subjects ·{' '}
+            <strong className="font-semibold text-foreground">{Object.keys(references).length}</strong> references
           </span>
-          <span className="text-muted-foreground/40 hidden sm:inline">|</span>
-          <Link to={browseUrl()} className="inline-flex items-center gap-1 text-foreground hover:underline font-medium">
+          <span className="hidden text-muted-foreground/40 sm:inline">|</span>
+          <Link to={browseUrl()} className="inline-flex items-center gap-1 font-medium text-foreground hover:underline">
             Browse all <ArrowRight className="size-3.5" aria-hidden />
           </Link>
           <Link
             to={browseUrl({ view: 'map' })}
-            className="inline-flex items-center gap-1 text-foreground hover:underline font-medium"
+            className="inline-flex items-center gap-1 font-medium text-foreground hover:underline"
           >
             <Waypoints className="size-3.5" aria-hidden /> Open map
           </Link>
@@ -124,9 +118,9 @@ export function HomePage() {
       <nav
         ref={navContainerRef}
         aria-label="Canon volume index"
-        className="sticky top-14 z-20 mt-10 -mx-4 overflow-x-auto px-4 py-2.5 bg-background/85 backdrop-blur-md border-y border-border/60 shadow-xs lg:mx-0 lg:rounded-xl lg:border"
+        className="sticky top-14 z-20 -mx-4 mt-10 overflow-x-auto border-y border-border/60 bg-background/85 px-4 py-2.5 shadow-xs backdrop-blur-md lg:mx-0 lg:rounded-xl lg:border"
       >
-        <div className="flex items-center gap-1.5 min-w-max mx-auto justify-center">
+        <div className="mx-auto flex min-w-max items-center justify-center gap-1.5">
           {taxonomy.map((part) => {
             const count = notesInCategory(part.path).length
             const isSelected = activePart === part.path
@@ -141,7 +135,7 @@ export function HomePage() {
                 className={cn(
                   'inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs transition-all select-none',
                   isSelected
-                    ? 'bg-foreground text-background font-semibold shadow-xs'
+                    ? 'bg-foreground font-semibold text-background shadow-xs'
                     : 'text-muted-foreground hover:bg-muted hover:text-foreground',
                 )}
                 title={`${part.roman ?? ''}: ${part.title} (${count} notes)`}
@@ -149,8 +143,8 @@ export function HomePage() {
                 <span className={cn('font-mono text-[10px]', isSelected ? 'opacity-90' : 'opacity-70')}>
                   {part.roman ?? ''}
                 </span>
-                <span className="truncate max-w-[130px] sm:max-w-none">{part.title}</span>
-                <span className={cn('text-[10px] font-mono tabular-nums', isSelected ? 'opacity-80' : 'opacity-50')}>
+                <span className="max-w-[130px] truncate sm:max-w-none">{part.title}</span>
+                <span className={cn('font-mono text-[10px] tabular-nums', isSelected ? 'opacity-80' : 'opacity-50')}>
                   {count}
                 </span>
               </button>
@@ -169,17 +163,17 @@ export function HomePage() {
               key={part.path}
               id={part.path}
               aria-labelledby={`heading-${part.path}`}
-              className="scroll-mt-28 pt-8 pb-4 border-t border-border/70 first:border-t-0 first:pt-2"
+              className="scroll-mt-28 border-t border-border/70 pt-8 pb-4 first:border-t-0 first:pt-2"
             >
               {/* Part Header: Clear Distinction */}
               <div className="mb-3 flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
                 <div className="flex flex-wrap items-baseline gap-x-2.5 gap-y-1">
-                  <span className="font-mono text-xs font-bold uppercase tracking-wider text-primary">
+                  <span className="font-mono text-xs font-bold tracking-wider text-primary uppercase">
                     {part.roman ?? `Part ${idx + 1}`}
                   </span>
                   <h2
                     id={`heading-${part.path}`}
-                    className="font-prose text-xl sm:text-2xl font-bold tracking-tight text-foreground"
+                    className="font-prose text-xl font-bold tracking-tight text-foreground sm:text-2xl"
                   >
                     {part.title}
                   </h2>
@@ -190,16 +184,14 @@ export function HomePage() {
 
                 <Link
                   to={browseUrl({ part: part.path })}
-                  className="text-xs text-muted-foreground hover:text-foreground hover:underline inline-flex items-center gap-1"
+                  className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground hover:underline"
                 >
                   Browse {part.roman ? `${part.roman}` : ''} →
                 </Link>
               </div>
 
               {part.description && (
-                <p className="mb-3.5 text-xs text-muted-foreground leading-relaxed max-w-3xl">
-                  {part.description}
-                </p>
+                <p className="mb-3.5 max-w-3xl text-xs leading-relaxed text-muted-foreground">{part.description}</p>
               )}
 
               {/* List of top-level items (Subjects), and inline child-topic pills */}
@@ -211,28 +203,28 @@ export function HomePage() {
                   return (
                     <div
                       key={subject.path}
-                      className="py-2.5 flex flex-col md:flex-row md:items-baseline gap-2 md:gap-4"
+                      className="flex flex-col gap-2 py-2.5 md:flex-row md:items-baseline md:gap-4"
                     >
                       {/* Top-level subject item */}
-                      <div className="flex items-center gap-2 md:w-52 shrink-0">
+                      <div className="flex shrink-0 items-center gap-2 md:w-52">
                         <TopicIcon icon={subject.icon} className="size-3.5 shrink-0 text-muted-foreground" />
                         <Link
                           to={browseUrl({ c: subject.path })}
                           className={cn(
-                            'text-xs font-semibold hover:underline truncate',
+                            'truncate text-xs font-semibold hover:underline',
                             hasNotes ? 'text-foreground' : 'text-muted-foreground',
                           )}
                           title={subject.title}
                         >
                           {subject.title}
                         </Link>
-                        <span className="text-[10px] font-mono tabular-nums text-muted-foreground/70 ml-auto md:ml-1">
+                        <span className="ml-auto font-mono text-[10px] text-muted-foreground/70 tabular-nums md:ml-1">
                           {subjectNotesCount}
                         </span>
                       </div>
 
                       {/* Inline list of child-topics under that level as buttons/pills with note counts at the end */}
-                      <div className="flex flex-wrap items-center gap-1.5 flex-1 min-w-0">
+                      <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5">
                         {subject.children.length > 0 ? (
                           subject.children.map((topic) => {
                             const count = notesInCategory(topic.path).length
@@ -247,8 +239,8 @@ export function HomePage() {
                                     : 'border border-dashed border-border/60 text-muted-foreground/50 hover:bg-muted/20 hover:text-muted-foreground',
                                 )}
                               >
-                                <span className="truncate max-w-[180px] sm:max-w-[220px]">{topic.title}</span>
-                                <span className="font-mono text-[10px] tabular-nums text-muted-foreground">
+                                <span className="max-w-[180px] truncate sm:max-w-[220px]">{topic.title}</span>
+                                <span className="font-mono text-[10px] text-muted-foreground tabular-nums">
                                   {count}
                                 </span>
                               </Link>

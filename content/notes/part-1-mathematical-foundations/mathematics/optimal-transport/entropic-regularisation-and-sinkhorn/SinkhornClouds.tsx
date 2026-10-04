@@ -1,20 +1,25 @@
 import { useMemo, useState } from 'react'
 import {
-  Heatmap,
-  Interactive,
-  ParamSlider,
-  ParamSwitch,
-  Readout,
-  XYChart,
+  Figure,
+  float,
   formatNumber,
-  useParam,
-  type Handle,
-  type HeatmapOverlay,
+  Handle,
+  int,
+  Plot,
+  Points,
+  Raster,
+  Readout,
   type Segment,
-  type XYSeries,
+  Segments,
+  seriesLayers,
+  type SeriesSpec,
+  setting,
+  useAxis,
+  useFigureState,
+  Vectors,
 } from 'aifn-render'
-import { rng } from '@/lib/math'
 import { costMatrix, hungarian, sinkhorn, type Pt } from '../_shared/ot'
+import { normal, stream } from 'aifn/foundation/random'
 
 const N = 7
 const RANGE: [number, number] = [-2.5, 2.5]
@@ -22,9 +27,9 @@ const IDX = Array.from({ length: N }, (_, i) => i + 1)
 const UNIFORM = new Array(N).fill(1 / N)
 
 function initial(): { src: Pt[]; tgt: Pt[] } {
-  const r = rng(11)
-  const src: Pt[] = IDX.map(() => [-1.1 + 0.55 * r.normal(), 0.2 + 0.7 * r.normal()])
-  const tgt: Pt[] = IDX.map(() => [1.1 + 0.45 * r.normal(), -0.1 + 0.8 * r.normal()])
+  const r = stream(11)
+  const src: Pt[] = IDX.map(() => [-1.1 + 0.55 * normal(r), 0.2 + 0.7 * normal(r)])
+  const tgt: Pt[] = IDX.map(() => [1.1 + 0.45 * normal(r), -0.1 + 0.8 * normal(r)])
   const clip = (p: Pt): Pt => [clampR(p[0]), clampR(p[1])]
   return { src: src.map(clip), tgt: tgt.map(clip) }
 }
@@ -39,10 +44,13 @@ const START = initial()
 export function SinkhornClouds() {
   const src = START.src
   const [tgt, setTgt] = useState<Pt[]>(START.tgt)
-  const logEps = useParam(-1, { min: -2, max: 0.5, step: 0.05 })
-  const iters = useParam(30, { min: 0, max: 100, step: 1 })
-  const [showExact, setShowExact] = useState(true)
-  const eps = 10 ** logEps.value
+  const state = useFigureState({
+    eps: float(0.1, { min: 0.01, max: 3, scale: 'log10', suggestions: [0.01, 0.03, 0.1, 0.3, 1], label: 'ε' }),
+    iters: int(30, { min: 0, max: 100, suggestions: [0, 1, 5, 30, 100], label: 'Sinkhorn iterations' }),
+    showExact: setting(true, 'show exact matching'),
+  })
+  const { eps, showExact } = state
+  const iters = { value: state.iters }
 
   const C = useMemo(() => costMatrix(src, tgt, 2), [src, tgt])
   const exact = useMemo(() => {
@@ -55,9 +63,7 @@ export function SinkhornClouds() {
   const z = useMemo(() => sk.P.map((row) => row.map((v) => v * N)), [sk])
 
   const series = useMemo(
-    (): XYSeries[] => [
-      { name: 'source points', type: 'scatter', x: src.map((p) => p[0]), y: src.map((p) => p[1]), slot: 0 },
-    ],
+    () => [{ name: 'source points', x: src.map((p) => p[0]), y: src.map((p) => p[1]), slot: 0 }] as const,
     [src],
   )
   // Sinkhorn links: every pair that carries at least 10 % of a source point's mass.
@@ -75,7 +81,7 @@ export function SinkhornClouds() {
     [showExact, exact, src, tgt],
   )
   const overlay = useMemo(
-    (): HeatmapOverlay[] =>
+    (): SeriesSpec[] =>
       showExact
         ? [{ name: 'exact matching', type: 'scatter', x: exact.col.map((j) => j + 1), y: IDX, emphasis: true }]
         : [],
@@ -89,18 +95,16 @@ export function SinkhornClouds() {
     onDrag: ([x, y]) => setTgt((prev) => prev.map((q, k) => (k === i ? [clampR(x), clampR(y)] : q))),
   }))
 
+  const xAxis = useAxis({ label: 'x₁', range: RANGE })
+  const yAxis = useAxis({ label: 'x₂', range: RANGE, equal: xAxis })
+  const xAxis2 = useAxis({ label: 'target j' })
+  const yAxis2 = useAxis({ label: 'source i' })
   return (
-    <Interactive
+    <Figure
       title="Exact matching against the entropic plan"
-      caption="Blue points are sources; dark points are targets, and each can be dragged. Arrows show the exact optimal matching; grey lines join pairs that carry at least 10% of a source point's mass under the Sinkhorn plan. The matrix shows the Sinkhorn plan, row i being where source point i sends its mass; diamonds mark the exact matching. Small ε gives a plan close to the matching but needs more iterations; large ε blurs every row towards uniform. Step the iterations from 0 to watch the row sums converge."
-      controls={
-        <>
-          <ParamSlider label={`log₁₀ ε (ε = ${formatNumber(eps)})`} param={logEps} />
-          <ParamSlider label="Sinkhorn iterations" param={iters} withArrows />
-          <ParamSwitch label="show exact matching" checked={showExact} onChange={setShowExact} />
-        </>
-      }
-      readout={
+      state={state}
+      caption="Blue points are sources; dark points are targets, and each can be dragged. Arrows show the exact optimal matching; grey lines join pairs that carry at least 10% of a source point's mass under the Sinkhorn plan. The matrix shows the Sinkhorn plan, row i being where source point i sends its mass; diamonds mark the exact matching. Small ε gives a plan close to the matching but needs more iterations; large ε blurs every row towards uniform. Step the iterations up from 0 to watch the row sums converge."
+      readouts={
         <>
           <Readout label="exact cost W₂²" value={formatNumber(exact.cost)} />
           <Readout label="Sinkhorn transport cost ⟨C, P⟩" value={formatNumber(sk.cost)} />
@@ -109,29 +113,19 @@ export function SinkhornClouds() {
       }
     >
       <div className="grid gap-4 md:grid-cols-[3fr_2fr]">
-        <XYChart
-          series={series}
-          segments={segments}
-          vectors={vectors}
-          xRange={RANGE}
-          yRange={RANGE}
-          equalAspect
-          xLabel="x₁"
-          yLabel="x₂"
-          handles={handles}
-        />
-        <Heatmap
-          height={320}
-          x={IDX}
-          y={IDX}
-          z={z}
-          range={[0, 1]}
-          overlay={overlay}
-          xLabel="target j"
-          yLabel="source i"
-          valueLabel="share of source mass"
-        />
+        <Plot x={xAxis} y={yAxis}>
+          <Points {...series[0]} />
+          <Segments segments={segments} />
+          <Vectors vectors={vectors} />
+          {(handles ?? []).map((h, i) => (
+            <Handle key={i} {...h} />
+          ))}
+        </Plot>
+        <Plot x={xAxis2} y={yAxis2} height={320}>
+          <Raster x={IDX} y={IDX} z={z} range={[0, 1]} valueLabel={'share of source mass'} />
+          {seriesLayers(overlay, { live: true })}
+        </Plot>
       </div>
-    </Interactive>
+    </Figure>
   )
 }

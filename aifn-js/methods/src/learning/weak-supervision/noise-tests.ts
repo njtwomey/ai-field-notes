@@ -89,7 +89,11 @@ export function classConditionalNoiseTest(
   let v: number
   if (model === 'parametric') {
     const { theta, H, q, d } = logisticMle(x, y)
-    if (A.n !== d) throw new ShapeError('classConditionalNoiseTest', 'classConditionalNoiseTest: anchors and data differ in dimension')
+    if (A.n !== d)
+      throw new ShapeError(
+        'classConditionalNoiseTest',
+        'classConditionalNoiseTest: anchors and data differ in dimension',
+      )
     const bar = new Float64Array(q)
     estimates = Array.from({ length: k }, (_, a) => {
       let z = theta[0]
@@ -119,16 +123,16 @@ export function classConditionalNoiseTest(
   return {
     kind: 'test-result',
     test: 'classConditionalNoiseTest',
-      method: `${model === 'parametric' ? 'Parametric (logistic MLE)' : 'Local likelihood'} anchor test for class-conditional noise, k = ${k}`,
-      statistic: z,
-      symbol: 'z',
-      pValue: Math.min(1, p),
-      alternative: 'two-sided',
-      tail: 'both',
-      null: Normal(0, 1),
-      estimand: 'mean noisy posterior at the anchors, η̄',
-      estimate: mean,
-      nullValue: 0.5,
+    method: `${model === 'parametric' ? 'Parametric (logistic MLE)' : 'Local likelihood'} anchor test for class-conditional noise, k = ${k}`,
+    statistic: z,
+    symbol: 'z',
+    pValue: Math.min(1, p),
+    alternative: 'two-sided',
+    tail: 'both',
+    null: Normal(0, 1),
+    estimand: 'mean noisy posterior at the anchors, η̄',
+    estimate: mean,
+    nullValue: 0.5,
     n: y.length,
     anchorEstimates: estimates,
     meanEstimate: mean,
@@ -148,7 +152,9 @@ export function noiseTestPower(options: { variance: number; alpha: number; beta:
   const eta = (1 - alpha + beta) / 2
   const vt = 16 * (eta * (1 - eta)) ** 2 * v
   const h = (beta - alpha) / 2
-  const b = (normalCdf((z * Math.sqrt(v) + h) / Math.sqrt(vt)) as number) - (normalCdf((-z * Math.sqrt(v) + h) / Math.sqrt(vt)) as number)
+  const b =
+    (normalCdf((z * Math.sqrt(v) + h) / Math.sqrt(vt)) as number) -
+    (normalCdf((-z * Math.sqrt(v) + h) / Math.sqrt(vt)) as number)
   return 1 - b
 }
 
@@ -201,7 +207,10 @@ export function* noiseTestSimulation(
       const labels = toFlat(y)
       const bandwidth =
         options.model === 'local' && options.bandwidths
-          ? localLogisticBandwidth(child(root, c, r), x, labels, options.bandwidths, { degree: options.degree, subsample: 40 }).bandwidth
+          ? localLogisticBandwidth(child(root, c, r), x, labels, options.bandwidths, {
+              degree: options.degree,
+              subsample: 40,
+            }).bandwidth
           : options.bandwidth
       pValues[c].push(classConditionalNoiseTest(x, labels, cells[c].anchors[r], { ...options, bandwidth }).pValue)
       done++
@@ -211,8 +220,16 @@ export function* noiseTestSimulation(
 }
 
 /** The number of anchors k that reaches power `target` at level `level` for given noise rates and single-anchor v. */
-export function anchorsForPower(options: { variance: number; alpha: number; beta: number; target?: number; level?: number; max?: Size }): number {
+export function anchorsForPower(options: {
+  variance: number
+  alpha: number
+  beta: number
+  target?: number
+  level?: number
+  max?: Size
+}): number {
   const { target = 0.8, max = 4096 } = options
-  for (let k = 1; k <= max; k *= 2) if (noiseTestPower({ ...options, variance: options.variance / k }) >= target) return k
+  for (let k = 1; k <= max; k *= 2)
+    if (noiseTestPower({ ...options, variance: options.variance / k }) >= target) return k
   return Infinity
 }

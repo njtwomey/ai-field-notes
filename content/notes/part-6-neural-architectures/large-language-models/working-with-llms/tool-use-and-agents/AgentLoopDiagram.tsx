@@ -1,5 +1,4 @@
-import { Interactive } from 'aifn-render'
-import { Diagram } from 'aifn-render'
+import { Diagram, Figure } from 'aifn-render'
 import type { DiagramSpec } from 'aifn-render'
 
 const spec: DiagramSpec = {
@@ -33,7 +32,7 @@ const spec: DiagramSpec = {
 /** The agent loop: the model writes, the runtime acts, the result goes back into the context. */
 export function AgentLoopDiagram() {
   return (
-    <Interactive
+    <Figure
       title="The agent loop"
       caption="The model only ever writes text. When the text is a tool call, the runtime executes it and appends the call and its result to the context, and the model runs again. The loop ends when the model writes a final answer or a step limit is reached."
     >
@@ -41,6 +40,6 @@ export function AgentLoopDiagram() {
         spec={spec}
         ariaLabel="Agent loop: context to language model; if the output is a final answer, return it; otherwise the runtime executes the tool call against the tools and appends the result to the context"
       />
-    </Interactive>
+    </Figure>
   )
 }

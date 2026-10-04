@@ -1,7 +1,7 @@
 /**
  * Datasets, recipes and truths (design S §2.8). One `Dataset` shape for estimators, validation and the generators;
  * a recipe is data that a generic interpreter replays through the dataset registry; a truth is a model of the
- * generating process. Today two dataset shapes exist (`aifn/learning/estimators`' generic one and `aifn-applied/data`' concrete
+ * generating process. Today two dataset shapes exist (`aifn/learning/estimators`' generic one and `aifn-methods/data`' concrete
  * one), and truths are bespoke objects; phase 1 moves both onto these.
  */
 

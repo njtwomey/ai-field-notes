@@ -1,22 +1,24 @@
 import { useMemo } from 'react'
 import {
-  Interactive,
-  ParamSlider,
-  Readout,
-  XYChart,
+  Figure,
+  float,
   formatNumber,
-  useParam,
-  type Handle,
-  type XYSeries,
+  Handle,
+  Plot,
+  Readout,
+  seriesLayers,
+  type SeriesSpec,
+  useAxis,
+  useFigureState,
 } from 'aifn-render'
-import { linspace } from '@/lib/math'
+import { linspace, toFlat } from 'aifn/foundation/tensor'
 
 // Rubin's (1981) eight schools: estimated coaching effects y_j and their standard errors σ_j, in SAT points.
 const Y = [28, 8, -3, 7, -1, 1, 18, 12]
 const SIGMA = [15, 10, 16, 11, 9, 11, 10, 18]
 const NAMES = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H']
 const TAU_MAX = 30
-const TAUS = linspace(0, TAU_MAX, 151)
+const TAUS = toFlat(linspace(0, TAU_MAX, 151))
 
 /** Precision-weighted grand mean μ̂(τ), its variance, and the conditional posterior means of the eight effects. */
 function atTau(tau: number) {
@@ -40,10 +42,12 @@ const LOG_MAX = Math.max(...PATHS.map((p) => p.logPost))
  * varies. At τ = 0 every school gets the pooled mean; as τ grows each estimate returns to its own y_j.
  */
 export function Shrinkage() {
-  const tau = useParam(8, { min: 0, max: TAU_MAX, step: 0.5 })
-  const now = useMemo(() => atTau(tau.value), [tau.value])
+  const state = useFigureState({
+    tau: float(8, { min: 0, max: TAU_MAX, step: 0.5, label: 'between-school sd τ' }),
+  })
+  const now = useMemo(() => atTau(state.tau), [state.tau])
 
-  const series = useMemo<XYSeries[]>(
+  const series = useMemo<SeriesSpec[]>(
     () => [
       ...NAMES.map((name, j) => ({
         name: `school ${name}`,
@@ -56,14 +60,16 @@ export function Shrinkage() {
     ],
     [],
   )
-  const handles: Handle[] = [{ kind: 'x', at: tau.value, label: 'τ', onDrag: tau.set }]
 
+  const xAxis = useAxis({ label: 'between-school standard deviation τ', range: [0, TAU_MAX] })
+  const yAxis = useAxis({ label: 'E[θ_j | τ, y]', range: [-5, 30] })
   return (
-    <Interactive
+    <Figure
       title="Partial pooling in the eight schools"
+      state={state}
       caption="Each line is one school's conditional posterior mean effect as a function of the between-school standard deviation τ. At τ = 0 the model pools completely and every school gets the precision-weighted mean 7.7. As τ grows the shrinkage factor B_j = σ_j²/(σ_j² + τ²) falls and each estimate returns to the school's own result. Schools with large standard errors (A, C, H) are pulled hardest. Drag the τ line or use the slider."
-      controls={<ParamSlider label="between-school sd τ" param={tau} />}
-      readout={
+
+      readouts={
         <>
           <Readout label="grand mean μ̂(τ)" value={formatNumber(now.mu)} />
           <Readout label="school A: y = 28 →" value={formatNumber(now.theta[0])} />
@@ -72,15 +78,10 @@ export function Shrinkage() {
         </>
       }
     >
-      <XYChart
-        height={320}
-        series={series}
-        xRange={[0, TAU_MAX]}
-        yRange={[-5, 30]}
-        xLabel="between-school standard deviation τ"
-        yLabel="E[θ_j | τ, y]"
-        handles={handles}
-      />
-    </Interactive>
+      <Plot x={xAxis} y={yAxis} height={320}>
+        {seriesLayers(series)}
+        <Handle {...state.handle('tau', { label: 'τ' })} />
+      </Plot>
+    </Figure>
   )
 }

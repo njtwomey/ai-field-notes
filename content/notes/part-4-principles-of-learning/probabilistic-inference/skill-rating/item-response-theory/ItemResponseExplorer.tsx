@@ -1,15 +1,19 @@
-import { useMemo, useState } from 'react'
+import { useMemo } from 'react'
 import {
-  Interactive,
-  ParamChoice,
-  ParamSlider,
-  Readout,
-  XYChart,
+  choice,
+  Figure,
   formatNumber,
-  type Handle,
-  type XYSeries,
+  Handle,
+  Plot,
+  Readout,
+  row,
+  seriesLayers,
+  slider,
+  type SeriesSpec,
+  useAxis,
+  useFigureState,
 } from 'aifn-render'
-import { linspace } from '@/lib/math'
+import { linspace, toFlat } from 'aifn/foundation/tensor'
 
 type Form = '1PL' | '2PL' | '3PL' | '4PL'
 type Item = { a: number; b: number; c: number; d: number }
@@ -21,7 +25,25 @@ const START: Item[] = [
   { a: 1.5, b: 0.0, c: 0.2, d: 0.95 },
   { a: 2.0, b: 1.0, c: 0.2, d: 0.95 },
 ]
-const THETA = linspace(-4, 4, 321)
+const ANSWERS = [
+  { value: 'right' as const, label: 'right' },
+  { value: 'wrong' as const, label: 'wrong' },
+  { value: 'none' as const, label: 'skip' },
+]
+type Shown = { sel: string; form: string }
+/** One item's parameters as fields, shown while the item is selected and its form uses them. */
+const itemFields = <const J extends '1' | '2' | '3'>(j: J, it: Item) => {
+  const sel = String(Number(j) - 1)
+  const uses = (from: number) => (v: Readonly<Record<string, unknown>>) =>
+    (v as Shown).sel === sel && FORMS.indexOf((v as Shown).form as Form) >= from
+  return {
+    [`b${j}`]: slider(-3, 3, it.b, { step: 0.05, label: 'difficulty b', when: uses(0) }),
+    [`a${j}`]: slider(0.2, 3, it.a, { step: 0.05, label: 'discrimination a', when: uses(1) }),
+    [`c${j}`]: slider(0, 0.4, it.c, { step: 0.01, label: 'guessing floor c', when: uses(2) }),
+    [`d${j}`]: slider(0.6, 1, it.d, { step: 0.01, label: 'ceiling d', when: uses(3) }),
+  } as Record<`${'a' | 'b' | 'c' | 'd'}${J}`, ReturnType<typeof slider>>
+}
+const THETA = toFlat(linspace(-4, 4, 321))
 const X_RANGE: [number, number] = [-4, 4]
 const PRIOR_SD = 1
 
@@ -86,20 +108,50 @@ function posterior(items: Item[], answers: Answer[]) {
 }
 
 export function ItemResponseExplorer() {
-  const [form, setForm] = useState<Form>('3PL')
-  const [items, setItems] = useState<Item[]>(START)
-  const [sel, setSel] = useState<'0' | '1' | '2'>('1')
-  const [answers, setAnswers] = useState<Answer[]>(['right', 'right', 'wrong'])
-  const i = Number(sel)
-  const k = FORMS.indexOf(form)
+  const state = useFigureState({
+    form: choice<Form>(
+      FORMS.map((f) => ({ value: f, label: f })),
+      '3PL',
+      { label: 'form' },
+    ),
+    sel: choice<'0' | '1' | '2'>(
+      [
+        { value: '0', label: 'item 1' },
+        { value: '1', label: 'item 2' },
+        { value: '2', label: 'item 3' },
+      ],
+      '1',
+      { label: 'item to edit' },
+    ),
+    ...itemFields('1', START[0]),
+    ...itemFields('2', START[1]),
+    ...itemFields('3', START[2]),
+    answers: row('answers to items 1, 2, 3', {
+      ans1: choice(ANSWERS, 'right', { label: 'item 1' }),
+      ans2: choice(ANSWERS, 'right', { label: 'item 2' }),
+      ans3: choice(ANSWERS, 'wrong', { label: 'item 3' }),
+    }),
+  })
+  const v = state.values
+  const items = useMemo(
+    (): Item[] => [
+      { a: v.a1, b: v.b1, c: v.c1, d: v.d1 },
+      { a: v.a2, b: v.b2, c: v.c2, d: v.d2 },
+      { a: v.a3, b: v.b3, c: v.c3, d: v.d3 },
+    ],
+    [v.a1, v.b1, v.c1, v.d1, v.a2, v.b2, v.c2, v.d2, v.a3, v.b3, v.c3, v.d3],
+  )
+  const { ans1, ans2, ans3 } = state.answers
+  const answers = useMemo((): Answer[] => [ans1, ans2, ans3], [ans1, ans2, ans3])
+  const i = Number(state.sel)
+  const k = FORMS.indexOf(state.form)
 
-  const setParam = (key: keyof Item, v: number) =>
-    setItems((prev) => prev.map((it, j) => (j === i ? { ...it, [key]: v } : it)))
+  const setParam = (key: keyof Item, value: number) => state.set(`${key}${i + 1}`, value)
   const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v))
 
-  const eff = useMemo(() => items.map((it) => effective(it, form)), [items, form])
+  const eff = useMemo(() => items.map((it) => effective(it, state.form)), [items, state.form])
 
-  const icc = useMemo<XYSeries[]>(
+  const icc = useMemo<SeriesSpec[]>(
     () =>
       eff.map((it, j) => ({
         name: `item ${j + 1}`,
@@ -110,10 +162,10 @@ export function ItemResponseExplorer() {
       })),
     [eff],
   )
-  const infoSeries = useMemo<XYSeries[]>(() => {
+  const infoSeries = useMemo<SeriesSpec[]>(() => {
     const per = eff.map((it) => THETA.map((t) => info(it, t)))
     return [
-      ...per.map<XYSeries>((y, j) => ({ name: `item ${j + 1}`, type: 'line', x: THETA, y, slot: j })),
+      ...per.map<SeriesSpec>((y, j) => ({ name: `item ${j + 1}`, type: 'line', x: THETA, y, slot: j })),
       {
         name: 'test',
         type: 'line',
@@ -134,14 +186,14 @@ export function ItemResponseExplorer() {
       ),
     [items, answers],
   )
-  const postSeries = useMemo<XYSeries[]>(
+  const postSeries = useMemo<SeriesSpec[]>(
     () =>
-      FORMS.map<XYSeries>((f, q) =>
-        f === form
+      FORMS.map<SeriesSpec>((f, q) =>
+        f === state.form
           ? { name: `${f} (shown)`, type: 'line', x: THETA, y: posts[q].dens, emphasis: true }
           : { name: f, type: 'line', x: THETA, y: posts[q].dens, muted: true, dashed: true },
       ),
-    [posts, form],
+    [posts, state.form],
   )
 
   const cur = items[i]
@@ -172,111 +224,41 @@ export function ItemResponseExplorer() {
   const est = (v: number | null, s: number | null) =>
     v === null ? 'unbounded' : `${formatNumber(v)} ± ${formatNumber(s ?? 0)}`
 
+  const xAxis = useAxis({ label: 'ability θ', range: X_RANGE })
+  const yAxis = useAxis({ label: 'P(correct)', range: [0, 1] })
+  const xAxis2 = useAxis({ label: 'ability θ', range: X_RANGE })
+  const yAxis2 = useAxis({ label: 'information', range: [0, undefined], hold: 'union' })
+  const xAxis3 = useAxis({ label: 'ability θ', range: X_RANGE })
+  const yAxis3 = useAxis({ label: 'posterior density', hold: 'union' })
   return (
-    <Interactive
+    <Figure
       title="Item characteristic curves, information and a three-item test"
+      state={state}
       caption="Pick a form and an item. On the top chart, drag the vertical line to move the item's difficulty b, and in 3PL and 4PL drag the horizontal lines to set the guessing floor c and the ceiling d; the discrimination a is a slider. Forms that drop a parameter set it back to its default (a = 1, c = 0, d = 1). The middle chart shows each item's information and the test information: guessing and slipping lower the peak, and the 3PL peak moves above b. The bottom chart is the posterior of ability for the answers chosen, with a standard normal prior, under the chosen form (solid) and the other forms (dashed). The default items and answers are those of the worked 2PL example in the note on ability estimation: in 2PL the EAP is 0.312."
-      controls={
+      readouts={
         <>
-          <ParamChoice
-            label="form"
-            value={form}
-            onChange={setForm}
-            options={FORMS.map((f) => ({ value: f, label: f }))}
-          />
-          <ParamChoice
-            label="item to edit"
-            value={sel}
-            onChange={setSel}
-            options={[
-              { value: '0', label: 'item 1' },
-              { value: '1', label: 'item 2' },
-              { value: '2', label: 'item 3' },
-            ]}
-          />
-          <ParamSlider
-            label="difficulty b"
-            value={cur.b}
-            onChange={(v) => setParam('b', v)}
-            min={-3}
-            max={3}
-            step={0.05}
-          />
-          {k >= 1 && (
-            <ParamSlider
-              label="discrimination a"
-              value={cur.a}
-              onChange={(v) => setParam('a', v)}
-              min={0.2}
-              max={3}
-              step={0.05}
-            />
-          )}
-          {k >= 2 && (
-            <ParamSlider
-              label="guessing floor c"
-              value={cur.c}
-              onChange={(v) => setParam('c', v)}
-              min={0}
-              max={0.4}
-              step={0.01}
-            />
-          )}
-          {k >= 3 && (
-            <ParamSlider
-              label="ceiling d"
-              value={cur.d}
-              onChange={(v) => setParam('d', v)}
-              min={0.6}
-              max={1}
-              step={0.01}
-            />
-          )}
-          {answers.map((ans, j) => (
-            <ParamChoice
-              key={j}
-              label={`answer to item ${j + 1}`}
-              value={ans}
-              onChange={(v) => setAnswers((prev) => prev.map((x, q) => (q === j ? v : x)))}
-              options={[
-                { value: 'right', label: 'right' },
-                { value: 'wrong', label: 'wrong' },
-                { value: 'none', label: 'skip' },
-              ]}
-            />
-          ))}
-        </>
-      }
-      readout={
-        <>
-          <Readout label={`${form} MLE ± SE`} value={est(p.mle, p.se)} />
-          <Readout label={`${form} EAP ± posterior sd`} value={est(p.eap, p.psd)} />
-          {FORMS.filter((f) => f !== form).map((f) => (
+          <Readout label={`${state.form} MLE ± SE`} value={est(p.mle, p.se)} />
+          <Readout label={`${state.form} EAP ± posterior sd`} value={est(p.eap, p.psd)} />
+          {FORMS.filter((f) => f !== state.form).map((f) => (
             <Readout key={f} label={`${f} EAP`} value={formatNumber(posts[FORMS.indexOf(f)].eap)} />
           ))}
         </>
       }
     >
       <div className="space-y-2">
-        <XYChart
-          series={icc}
-          xLabel="ability θ"
-          yLabel="P(correct)"
-          xRange={X_RANGE}
-          yRange={[0, 1]}
-          height={260}
-          handles={handles}
-        />
-        <XYChart
-          series={infoSeries}
-          xLabel="ability θ"
-          yLabel="information"
-          xRange={X_RANGE}
-          yRange={[0, undefined]}
-          height={200}
-        />
-        <XYChart series={postSeries} xLabel="ability θ" yLabel="posterior density" xRange={X_RANGE} height={200} />
+        <Plot x={xAxis} y={yAxis} height={260}>
+          {seriesLayers(icc)}
+          {handles.map((h, i) => (
+            <Handle key={i} {...h} />
+          ))}
+        </Plot>
+        <Plot x={xAxis2} y={yAxis2} height={200}>
+          {seriesLayers(infoSeries)}
+        </Plot>
+        <Plot x={xAxis3} y={yAxis3} height={200}>
+          {seriesLayers(postSeries)}
+        </Plot>
       </div>
-    </Interactive>
+    </Figure>
   )
 }

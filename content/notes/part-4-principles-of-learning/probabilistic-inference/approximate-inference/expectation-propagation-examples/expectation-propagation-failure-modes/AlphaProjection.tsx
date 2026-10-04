@@ -1,14 +1,5 @@
-import { useMemo, useState } from 'react'
-import {
-  Interactive,
-  ParamChoice,
-  ParamSlider,
-  Readout,
-  XYChart,
-  formatNumber,
-  useParam,
-  type XYSeries,
-} from 'aifn-render'
+import { useMemo } from 'react'
+import { choice, Curve, Figure, float, formatNumber, Plot, Readout, useAxis, useFigureState } from 'aifn-render'
 import { grid, normalLogPdf, normalPdf } from '../_shared/ep'
 
 // Integrate well beyond the plotted range: a broad q (variance about 5.5) has mass past ±8 that would bias D_α.
@@ -95,39 +86,39 @@ function nelderMead(f: (p: [number, number]) => number, start: [number, number])
  * KL(q ‖ p), the objective of variational Bayes.
  */
 export function AlphaProjection() {
-  const alpha = useParam(1, { min: 0, max: 1, step: 0.05 })
-  const [start, setStart] = useState<Start>('wide')
+  const state = useFigureState({
+    alpha: float(1, { min: 0, max: 1, step: 0.05, label: 'α' }),
+    start: choice<Start>(START_OPTIONS, 'wide', { label: 'search starts at' }),
+  })
 
   const r = useMemo(() => {
-    const [m, logS] = minimise((p) => divergence(alpha.value, p), STARTS[start])
+    const [m, logS] = minimise((p) => divergence(state.alpha, p), STARTS[state.start])
     const v = Math.exp(2 * logS)
-    return { m, v, d: divergence(alpha.value, [m, logS]), q: XS.map((x) => normalPdf(x, m, v)) }
-  }, [alpha.value, start])
+    return { m, v, d: divergence(state.alpha, [m, logS]), q: XS.map((x) => normalPdf(x, m, v)) }
+  }, [state.alpha, state.start])
 
-  const series: XYSeries[] = [
-    { name: 'target p', type: 'line', x: XS, y: TARGET, emphasis: true },
-    { name: 'closest Gaussian q', type: 'line', x: XS, y: r.q, slot: 0 },
-  ]
+  const series = [
+    { name: 'target p', x: XS, y: TARGET, emphasis: true },
+    { name: 'closest Gaussian q', x: XS, y: r.q, slot: 0 },
+  ] as const
   const label =
-    alpha.value >= 1
+    state.alpha >= 1
       ? 'KL(p ‖ q): EP'
-      : alpha.value <= 0
+      : state.alpha <= 0
         ? 'KL(q ‖ p): VB'
-        : alpha.value === 0.5
+        : state.alpha === 0.5
           ? 'Hellinger (α = ½)'
           : 'α-divergence'
 
+  const xAxis = useAxis({ label: 'θ', range: X_RANGE })
+  const yAxis = useAxis({ label: 'density', range: Y_RANGE })
   return (
-    <Interactive
+    <Figure
       title="Mass-covering to mode-seeking: the α-divergence"
+      state={state}
       caption="A two-mode target p and the Gaussian q that minimises D_α(p ‖ q), found by local search from the chosen start. At α = 1 (EP's divergence, KL(p ‖ q)) q matches the mean and variance of p and covers both modes, with much of its mass in the valley. As α falls, q narrows. Started wide, the search locks onto a mode below about α = 0.3; started at a mode, it stays there for α up to about 0.5. Which mode depends on the start. α = 0 is KL(q ‖ p), the divergence that variational Bayes minimises."
-      controls={
-        <>
-          <ParamSlider label="α" param={alpha} />
-          <ParamChoice label="search starts at" value={start} onChange={setStart} options={START_OPTIONS} />
-        </>
-      }
-      readout={
+
+      readouts={
         <>
           <Readout label="divergence" value={label} />
           <Readout label="q mean, variance" value={`${formatNumber(r.m)}, ${formatNumber(r.v)}`} />
@@ -135,7 +126,10 @@ export function AlphaProjection() {
         </>
       }
     >
-      <XYChart series={series} xLabel="θ" yLabel="density" xRange={X_RANGE} yRange={Y_RANGE} />
-    </Interactive>
+      <Plot x={xAxis} y={yAxis}>
+        <Curve {...series[0]} />
+        <Curve {...series[1]} />
+      </Plot>
+    </Figure>
   )
 }

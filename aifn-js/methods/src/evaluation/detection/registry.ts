@@ -1,4 +1,4 @@
-/** The functions of `aifn-applied/evaluation/detection` besides its metrics. */
+/** The functions of `aifn-methods/evaluation/detection` besides its metrics. */
 
 import { definer, entries, type Entry, type FunctionInfo } from 'aifn/foundation/registry'
 import * as detection from './detection'

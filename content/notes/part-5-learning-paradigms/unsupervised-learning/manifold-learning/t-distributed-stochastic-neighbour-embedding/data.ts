@@ -1,4 +1,4 @@
-import { rng } from '@/lib/math'
+import { normal, stream } from 'aifn/foundation/random'
 
 export const DIM = 10
 export const PER_CLUSTER = 40
@@ -9,7 +9,7 @@ export const CLUSTER_NAMES = ['A (tight)', 'B (tight, near A)', 'C (wide)', 'D (
  * 12 away from the others. PCA shows these differences; t-SNE largely hides them.
  */
 export function clusters(): { x: number[][]; labels: number[] } {
-  const r = rng(8)
+  const r = stream(8)
   const unit = (k: number) => Array.from({ length: DIM }, (_, m) => (m === k ? 1 : 0))
   const centres = [
     new Array<number>(DIM).fill(0),
@@ -22,7 +22,7 @@ export function clusters(): { x: number[][]; labels: number[] } {
   const labels: number[] = []
   centres.forEach((c, j) => {
     for (let i = 0; i < PER_CLUSTER; i++) {
-      x.push(c.map((v) => v + sd[j] * r.normal()))
+      x.push(c.map((v) => v + sd[j] * normal(r)))
       labels.push(j)
     }
   })

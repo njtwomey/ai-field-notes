@@ -16,7 +16,7 @@ import { evaluateRanking, interactionsFromRows, type Interactions, type Scorer }
 import { neuralRecommender, type NeuralKind, type NeuralOptions } from './models'
 import { itemKnn, popularity, userKnn } from './neighbourhood'
 
-/** Implicit-feedback data as the generators of `aifn-applied/data` produce it. */
+/** Implicit-feedback data as the generators of `aifn-methods/data` produce it. */
 export type RecommenderData = {
   users: Size
   items: Size

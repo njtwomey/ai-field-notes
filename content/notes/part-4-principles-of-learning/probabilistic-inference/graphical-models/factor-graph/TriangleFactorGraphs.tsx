@@ -1,8 +1,5 @@
-import { MathText } from 'aifn-render'
-import { Diagram } from 'aifn-render'
-import { factor, link, variable } from 'aifn-render'
+import { Diagram, factor, Figure, link, MathText, variable } from 'aifn-render'
 import type { DiagramSpec } from 'aifn-render'
-import { Interactive } from 'aifn-render'
 
 const VARIABLES = [variable('1', 1.2, 0, '$x_1$'), variable('2', 0, 2, '$x_2$'), variable('3', 2.4, 2, '$x_3$')]
 
@@ -44,7 +41,7 @@ const PANELS: { caption: string; spec: DiagramSpec }[] = [
 /** The same triangle as an undirected graph and as the factor graphs of two different factorisations. */
 export function TriangleFactorGraphs() {
   return (
-    <Interactive
+    <Figure
       title="One undirected graph, two factor graphs"
       caption="Circles are variables and squares are factors. The triangle on the left fits both factorisations; the factor graphs tell them apart."
     >
@@ -58,6 +55,6 @@ export function TriangleFactorGraphs() {
           </div>
         ))}
       </div>
-    </Interactive>
+    </Figure>
   )
 }

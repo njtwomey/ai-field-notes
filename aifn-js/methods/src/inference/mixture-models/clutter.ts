@@ -1,6 +1,6 @@
 /**
  * Minka's clutter problem (Minka, 2001, "A family of algorithms for approximate Bayesian inference", §3.3), part of
- * `aifn-applied/inference/mixture-models`: its structure in the model language, its tilted moments for EP, sampling,
+ * `aifn-methods/inference/mixture-models`: its structure in the model language, its tilted moments for EP, sampling,
  * and the exact posterior on a grid.
  */
 

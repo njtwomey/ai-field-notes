@@ -98,9 +98,7 @@ export function NumberField(props: NumberFieldProps) {
           {label}
         </ControlLabel>
         {headerText ? (
-          <span className="shrink-0 font-mono text-xs text-muted-foreground tabular-nums">
-            {headerText}
-          </span>
+          <span className="shrink-0 font-mono text-xs text-muted-foreground tabular-nums">{headerText}</span>
         ) : null}
       </div>
       <ButtonGroup className="w-full">
@@ -147,12 +145,12 @@ export function NumberField(props: NumberFieldProps) {
             >
               <ChevronDown className="size-3.5" />
             </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-auto min-w-24 max-h-60 overflow-y-auto">
+            <DropdownMenuContent align="end" className="max-h-60 w-auto min-w-24 overflow-y-auto">
               {suggestions.map((s) => (
                 <DropdownMenuItem
                   key={s}
                   onClick={() => commit(s)}
-                  className={cn('justify-end font-mono text-xs tabular-nums', s === value && 'font-semibold bg-accent')}
+                  className={cn('justify-end font-mono text-xs tabular-nums', s === value && 'bg-accent font-semibold')}
                 >
                   {format(s)}
                 </DropdownMenuItem>
@@ -177,4 +175,3 @@ export const NumericControl = NumberField
 export const ParamNumberField = NumberField
 
 const finite = (x: number | undefined) => (x !== undefined && Number.isFinite(x) ? x : undefined)
-

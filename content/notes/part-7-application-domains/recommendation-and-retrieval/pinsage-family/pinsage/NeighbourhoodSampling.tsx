@@ -1,10 +1,19 @@
 import { useMemo } from 'react'
-import { MathText } from 'aifn-render'
-import { Diagram } from 'aifn-render'
-import { link, variable } from 'aifn-render'
+import {
+  Diagram,
+  Figure,
+  int,
+  link,
+  MathText,
+  Plot,
+  Readout,
+  seriesLayers,
+  useAxis,
+  useFigureState,
+  variable,
+} from 'aifn-render'
 import type { DiagramEdge, DiagramNode } from 'aifn-render'
-import { Interactive, ParamSlider, Readout, XYChart, useParam } from 'aifn-render'
-import { rng } from '@/lib/math'
+import { stream, uniform } from 'aifn/foundation/random'
 
 /** A toy pin–board graph: each board lists the pins saved to it. Pin 1 is the query. */
 const BOARDS: number[][] = [
@@ -34,8 +43,8 @@ type Walk = { pins: number[]; boards: number[] }
 
 /** Walks from the query: each step goes pin → random board of that pin → random pin of that board. */
 function simulateWalks(length: number): Walk[] {
-  const r = rng(11 + length)
-  const pick = <T,>(xs: T[]) => xs[Math.floor(r.uniform() * xs.length)]
+  const r = stream(11 + length)
+  const pick = <T,>(xs: T[]) => xs[Math.floor(uniform(r) * xs.length)]
   return Array.from({ length: MAX_WALKS }, () => {
     const walk: Walk = { pins: [QUERY], boards: [] }
     let pin = QUERY
@@ -51,13 +60,15 @@ function simulateWalks(length: number): Walk[] {
 
 /** Random-walk neighbourhood sampling and importance pooling, as in PinSage, on a nine-pin, five-board graph. */
 export function NeighbourhoodSampling() {
-  const walks = useParam(12, { min: 0, max: MAX_WALKS, step: 1 })
-  const length = useParam(2, { min: 1, max: 4, step: 1 })
-  const top = useParam(3, { min: 1, max: 6, step: 1 })
-  const n = walks.value
-  const T = top.value
+  const state = useFigureState({
+    walks: int(12, { min: 0, max: MAX_WALKS, step: 1, label: 'walks simulated', format: (v) => String(v) }),
+    length: int(2, { min: 1, max: 4, step: 1, label: 'steps per walk', format: (v) => String(v) }),
+    top: int(3, { min: 1, max: 6, step: 1, label: 'neighbourhood size T', format: (v) => String(v) }),
+  })
+  const n = state.walks
+  const T = state.top
 
-  const all = useMemo(() => simulateWalks(length.value), [length.value])
+  const all = useMemo(() => simulateWalks(state.length), [state.length])
 
   const counts = useMemo(() => {
     const c = new Array<number>(PINS + 1).fill(0)
@@ -108,7 +119,7 @@ export function NeighbourhoodSampling() {
         y: PIN_IDS.map((p) => (hood.has(p) ? 0 : counts[p])),
         muted: true,
       },
-    ]
+    ] as const
   }, [counts, neighbours])
 
   const path = last
@@ -120,20 +131,17 @@ export function NeighbourhoodSampling() {
     ? neighbours.map((p) => `$p_${p}$: ${(counts[p] / pooledTotal).toFixed(2)}`).join(', ')
     : 'empty'
 
+  const xAxis = useAxis({ label: 'pin', range: [0, PINS + 1] })
+  const yAxis = useAxis({ label: 'visits', range: [0, undefined], hold: 'union' })
   return (
-    <Interactive
+    <Figure
       title="Random-walk neighbourhoods and importance pooling"
+      state={state}
       caption={
         <MathText text="Pins sit on the bottom row and boards on the top; an edge means the pin is saved to the board. Every walk starts at the query pin $p_1$ (coloured) and repeats a step pin → random board → random pin of that board. Each pin reached is counted. Step through the walks with the arrows: the latest walk is drawn with arrows, the counts are the bars, and the $T$ most-visited pins other than $p_1$ (shaded) form the neighbourhood. Their pooling weights are the counts divided by the neighbourhood's total. Longer walks reach pins that share no board with $p_1$, such as $p_7$ and $p_8$." />
       }
-      controls={
-        <>
-          <ParamSlider label="walks simulated" param={walks} format={(v) => String(v)} withArrows />
-          <ParamSlider label="steps per walk" param={length} format={(v) => String(v)} withArrows />
-          <ParamSlider label="neighbourhood size T" param={top} format={(v) => String(v)} withArrows />
-        </>
-      }
-      readout={
+
+      readouts={
         <>
           <Readout label="latest walk" value={<MathText text={path} />} />
           <Readout label="pooling weights" value={<MathText text={weights} />} />
@@ -144,15 +152,14 @@ export function NeighbourhoodSampling() {
         spec={spec}
         ariaLabel="Bipartite graph of nine pins and five boards with the latest random walk from pin 1 highlighted"
       />
-      <XYChart
-        series={barSeries}
-        xLabel="pin"
-        yLabel="visits"
-        xRange={[0, PINS + 1]}
-        yRange={[0, undefined]}
+      <Plot
+        x={xAxis}
+        y={yAxis}
         height={220}
-        ariaLabel="Visit counts per pin, with the top-T neighbourhood highlighted"
-      />
-    </Interactive>
+        ariaLabel={'Visit counts per pin, with the top-T neighbourhood highlighted'}
+      >
+        {seriesLayers(barSeries)}
+      </Plot>
+    </Figure>
   )
 }

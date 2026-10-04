@@ -9,7 +9,7 @@
  *
  * Names are resolved through the snapshot (old public path → defining file, taken with the TypeScript checker), then
  * through the moves (defining file → its new file), then to the new file's public path: the node directory holding
- * it, `aifn/<family>/<module>` or `aifn-applied/<area>/…`. Relative imports are resolved from the importer's old
+ * it, `aifn/<family>/<module>` or `aifn-methods/<area>/…`. Relative imports are resolved from the importer's old
  * location and rewritten the same way: `./x` when the target sits in the importer's module, `../x` for an ancestor's
  * shared file, else the target's public path.
  */
@@ -106,7 +106,7 @@ function snapshot() {
     const r = rel(file)
     out.files[r] = ownersOf(path.resolve(file))
     const m = /^(core|applications)\/src\/(.+)\/index\.ts$/.exec(r)
-    if (m) out.paths[`${m[1] === 'core' ? 'aifn' : 'aifn-applied'}/${m[2]}`] = out.files[r]
+    if (m) out.paths[`${m[1] === 'core' ? 'aifn' : 'aifn-methods'}/${m[2]}`] = out.files[r]
   }
   fs.mkdirSync(path.dirname(snapshotFile), { recursive: true })
   fs.writeFileSync(snapshotFile, JSON.stringify(out, null, 1))
@@ -201,7 +201,7 @@ class Moves {
 function publicPath(r: string): string {
   const dir = path.posix.dirname(r)
   if (dir.startsWith('core/src/')) return `aifn/${dir.slice('core/src/'.length)}`
-  if (dir.startsWith('applications/src/')) return `aifn-applied/${dir.slice('applications/src/'.length)}`
+  if (dir.startsWith('applications/src/')) return `aifn-methods/${dir.slice('applications/src/'.length)}`
   throw new Error(`no public path for ${r}`)
 }
 
@@ -238,7 +238,7 @@ const legacyDirs = (() => {
   const families = new Set(spec.core.families.map((f) => f.family))
   const out = new Set<string>()
   for (const a of spec.aliases) {
-    const m = /^(aifn|aifn-applied)\/(.+)$/.exec(a.path)!
+    const m = /^(aifn|aifn-methods)\/(.+)$/.exec(a.path)!
     if (m[1] === 'aifn' && families.has(m[2])) continue
     out.add(`${m[1] === 'aifn' ? 'core' : 'applications'}/src/${m[2]}`)
   }
@@ -310,7 +310,7 @@ function rewriteFile(mv: Moves, r: string): boolean {
       owners = mv.snap.paths[spec]
       if (!owners) {
         // A path of the new tree: names cut out of its files since are found through the export rows.
-        const dir = `${spec.startsWith('aifn-applied/') ? 'applications/src/' + spec.slice(13) : 'core/src/' + spec.slice(5)}`
+        const dir = `${spec.startsWith('aifn-methods/') ? 'applications/src/' + spec.slice(13) : 'core/src/' + spec.slice(5)}`
         const found: Record<string, Named> = {}
         const nb = (isImport ? st.importClause?.namedBindings : st.exportClause) as
           ts.NamedImportBindings | ts.NamedExportBindings | undefined

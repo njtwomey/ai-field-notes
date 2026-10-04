@@ -1,6 +1,6 @@
 import { useMemo } from 'react'
-import { ParamSlider, Readout, formatNumber, useParam } from 'aifn-render'
-import { ConstrainedExplorer, type ConstrainedProblem } from './ConstrainedExplorer'
+import { formatNumber, Readout, slider, useFigureState } from 'aifn-render'
+import { ConstrainedExplorer, tField, type ConstrainedProblem } from './ConstrainedExplorer'
 
 type Vec3 = [number, number, number]
 
@@ -54,10 +54,13 @@ function decompose(x: Vec3, a: Vec3) {
 const fmt3 = (v: Vec3) => `(${v.map((x) => formatNumber(Math.abs(x) < 1e-9 ? 0 : x)).join(', ')})`
 
 export function CircleInSpace() {
-  const a1 = useParam(2, { min: -2, max: 2, step: 0.05 })
-  const a2 = useParam(1, { min: -2, max: 2, step: 0.05 })
-  const a3 = useParam(0, { min: -2, max: 2, step: 0.05 })
-  const a: Vec3 = [a1.value, a2.value, a3.value]
+  const state = useFigureState({
+    t: tField([0, 360], 140, 0.5, 'angle θ (degrees)', (v) => `${formatNumber(v)}°`),
+    a1: slider(-2, 2, 2, { step: 0.05, label: 'a₁' }),
+    a2: slider(-2, 2, 1, { step: 0.05, label: 'a₂' }),
+    a3: slider(-2, 2, 0, { step: 0.05, label: 'a₃' }),
+  })
+  const a: Vec3 = [state.a1, state.a2, state.a3]
   const rel: Vec3 = [a[0] - CENTRE[0], a[1] - CENTRE[1], a[2] - CENTRE[2]]
   const alpha0 = dot3(rel, U)
   const alpha1 = dot3(rel, V)
@@ -69,11 +72,10 @@ export function CircleInSpace() {
   )
   return (
     <ConstrainedExplorer
+      state={state}
       problem={p}
       title="Two constraints: the closest point to a on a circle in space"
       caption="The plane x₁ + x₂ + x₃ = 1 meets the unit sphere in a circle. Left: the plane seen face on, with contours of f(x) = ‖x − a‖² (grey), the circle, and the in-plane parts of ∇f (arrow) and of the sphere's normal (thin line); the plane's own normal points out of the page. Drag the point around the circle, and move a with the sliders. Right: f along the circle. The readouts fit ∇f by λ₁∇g₁ + λ₂∇g₂ in three dimensions; the residual vanishes only at the closest and farthest points."
-      initialT={140}
-      tStep={0.5}
       xLabel="s₁ along (1, −1, 0)/√2"
       yLabel="s₂ along (1, 1, −2)/√6"
       tLabel="angle θ (degrees)"
@@ -81,13 +83,6 @@ export function CircleInSpace() {
       fLabel="f"
       formatT={(v) => `${formatNumber(v)}°`}
       markers={markers}
-      controls={
-        <>
-          <ParamSlider label="a₁" param={a1} />
-          <ParamSlider label="a₂" param={a2} />
-          <ParamSlider label="a₃" param={a3} />
-        </>
-      }
       readout={({ point }) => {
         const x = lift(point[0], point[1])
         const d = decompose(x, a)

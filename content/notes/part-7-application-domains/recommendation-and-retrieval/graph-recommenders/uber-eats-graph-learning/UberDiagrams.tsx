@@ -1,5 +1,4 @@
-import { Interactive } from 'aifn-render'
-import { Diagram } from 'aifn-render'
+import { Diagram, Figure } from 'aifn-render'
 import type { DiagramEdge, DiagramNode, DiagramSpec, Tone } from 'aifn-render'
 
 const user = (id: string, y: number, label: string): DiagramNode => ({
@@ -63,7 +62,7 @@ const bipartite: DiagramSpec = {
 /** The user–dish bipartite graph with order-count edge weights. */
 export function BipartiteDiagram() {
   return (
-    <Interactive
+    <Figure
       title="The user–dish graph"
       caption="Users and dishes are the two node types; an edge joins a user to every dish they ordered, weighted by how many times they ordered it (ratings also inform the weights). A second graph does the same for users and restaurants, and each city gets its own graphs because different cities are only loosely connected. Redrawn from Liu et al. (2019), Uber Engineering."
     >
@@ -71,7 +70,7 @@ export function BipartiteDiagram() {
         spec={bipartite}
         ariaLabel="Bipartite graph of three users and four dishes with order counts on the edges"
       />
-    </Interactive>
+    </Figure>
   )
 }
 
@@ -128,7 +127,7 @@ const tree: DiagramSpec = {
 /** The two-layer computation that embeds node A. */
 export function ComputationTree() {
   return (
-    <Interactive
+    <Figure
       title="Embedding one node with two layers"
       caption="To embed node A, collect nodes one and two hops away. A type-specific projection maps users, dishes and restaurants to vectors of one size. Each layer pools a node's neighbours (weighted by the edges), projects the pooled vector with W, projects the node's own vector with B, and concatenates the two; layer 2 repeats this with new matrices to produce A's embedding. Redrawn from Liu et al. (2019), Uber Engineering."
     >
@@ -136,7 +135,7 @@ export function ComputationTree() {
         spec={tree}
         ariaLabel="Two-layer GraphSAGE computation: projected features, weighted pooling, W and B projections, concatenation, twice"
       />
-    </Interactive>
+    </Figure>
   )
 }
 
@@ -179,7 +178,7 @@ const pipeline: DiagramSpec = {
 /** From order tables to embeddings served to the ranker. */
 export function PipelineDiagram() {
   return (
-    <Interactive
+    <Figure
       title="Data and training pipeline"
       caption="Jobs pull order data from Hive into Parquet files on HDFS, with every node and edge property versioned by timestamp so that back-dated graphs can be built. The latest properties at a chosen date are stored in Cypher format; Spark runs Cypher queries to produce one graph per city; the graphs are converted to NetworkX and consumed by TensorFlow on GPUs, which trains the model and writes embeddings to a lookup table read by the ranker at request time. Redrawn from Liu et al. (2019), Uber Engineering."
     >
@@ -187,6 +186,6 @@ export function PipelineDiagram() {
         spec={pipeline}
         ariaLabel="Pipeline: Hive to Parquet on HDFS to Cypher format to Spark per-city graphs to NetworkX to TensorFlow to an embedding lookup table used by the ranker"
       />
-    </Interactive>
+    </Figure>
   )
 }

@@ -1,5 +1,5 @@
 import { describe, it } from 'vitest'
-import { ldaCollapsedGibbs } from 'aifn-applied/inference/topic-models'
+import { ldaCollapsedGibbs } from 'aifn-methods/inference/topic-models'
 import { expectProtocol } from '../../protocol'
 
 describe('ldaCollapsedGibbs', () => {

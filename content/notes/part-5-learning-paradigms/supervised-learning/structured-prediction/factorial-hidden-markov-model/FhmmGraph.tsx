@@ -1,9 +1,5 @@
-import { useState } from 'react'
-import { MathText } from 'aifn-render'
-import { Diagram } from 'aifn-render'
-import { link, variable } from 'aifn-render'
+import { Diagram, Figure, link, MathText, setting, useFigureState, variable } from 'aifn-render'
 import type { DiagramEdge, DiagramNode } from 'aifn-render'
-import { Interactive, ParamSwitch } from 'aifn-render'
 import { POSITIONS } from '../_shared/chain-graph'
 
 const CHAINS = [1, 2, 3]
@@ -51,22 +47,24 @@ const MORALISED = { unit: 44, nodes: NODES, edges: [...DIRECTED, ...MORAL] }
 
 /** M = 3 hidden chains share each observation; moralising shows how observing x_n couples them. */
 export function FhmmGraph() {
-  const [moral, setMoral] = useState(false)
+  const state = useFigureState({
+    moral: setting(false, 'couple chains given x'),
+  })
   return (
-    <Interactive
+    <Figure
       title="The factorial HMM as a graph"
+      state={state}
       caption={
         <MathText
           text={
-            moral
+            state.moral
               ? 'The dashed edges join the parents of each observed $x_n$. Conditioning on $x_n$ couples the states $y^{(1)}_n, \\dots, y^{(M)}_n$ of every chain, so the posterior does not factorise over chains.'
               : 'Three hidden chains $\\yvec^{(1)}, \\yvec^{(2)}, \\yvec^{(3)}$ evolve independently. Each observation $x_n$ (shaded) has the states of all chains at position $n$ as parents.'
           }
         />
       }
-      controls={<ParamSwitch label="couple chains given x" checked={moral} onChange={setMoral} />}
     >
-      <Diagram spec={moral ? MORALISED : PLAIN} ariaLabel="Factorial hidden Markov model with three chains" />
-    </Interactive>
+      <Diagram spec={state.moral ? MORALISED : PLAIN} ariaLabel="Factorial hidden Markov model with three chains" />
+    </Figure>
   )
 }

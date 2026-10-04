@@ -1,23 +1,26 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
 import {
-  Interactive,
-  ParamButton,
-  ParamSlider,
-  Readout,
-  XYChart,
+  Figure,
   formatNumber,
-  useParam,
-  type Handle,
-  type XYSeries,
+  Handle,
+  int,
+  Player,
+  Plot,
+  Readout,
+  seriesLayers,
+  type SeriesSpec,
+  useAxis,
+  useFigureState,
 } from 'aifn-render'
-import { linspace, rng } from '@/lib/math'
-import { logGamma } from '@/lib/math/special'
 import { sampleBeta } from '../_shared/bandits'
+import { seededRand } from '../_shared/rand'
+import { linspace, toFlat } from 'aifn/foundation/tensor'
+import { logGamma } from 'aifn/numerics/special'
 
 const HORIZON = 500
 const START_MEANS = [0.55, 0.45, 0.3]
 /** Interior grid for densities and the probability that each arm is best. */
-const GRID = linspace(0.0025, 0.9975, 200)
+const GRID = toFlat(linspace(0.0025, 0.9975, 200))
 const DX = GRID[1] - GRID[0]
 
 function betaPdf(a: number, b: number): number[] {
@@ -54,8 +57,8 @@ type Trajectory = {
 
 function runThompson(means: number[], seed: number): Trajectory {
   const k = means.length
-  const env = rng(seed * 7919)
-  const agent = rng(seed * 104729 + 1)
+  const env = seededRand(seed * 7919)
+  const agent = seededRand(seed * 104729 + 1)
   const n = new Array<number>(k).fill(0)
   const s = new Array<number>(k).fill(0)
   const out: Trajectory = { n: [], s: [], draws: [], chosen: [], best: [] }
@@ -80,22 +83,17 @@ function runThompson(means: number[], seed: number): Trajectory {
  */
 export function TsPosterior() {
   const [means, setMeans] = useState(START_MEANS)
-  const [round, setRound] = useState(0)
-  const [playing, setPlaying] = useState(false)
-  const seed = useParam(2, { min: 1, max: 40, step: 1 })
+  const state = useFigureState({
+    seed: int(2, { min: 1, max: 40, step: 1, label: 'seed' }),
+  })
 
   const meansKey = means.join(',')
-  const traj = useMemo(() => runThompson(meansKey.split(',').map(Number), seed.value), [meansKey, seed.value])
-
-  const isPlaying = playing && round < HORIZON
-  useEffect(() => {
-    if (!isPlaying) return
-    // Early rounds play one at a time; later rounds, where little changes, play faster.
-    const id = setInterval(() => {
-      setRound((r) => Math.min(HORIZON, r + Math.max(1, Math.floor(r / 25))))
-    }, 120)
-    return () => clearInterval(id)
-  }, [isPlaying])
+  const traj = useMemo(() => runThompson(meansKey.split(',').map(Number), state.seed), [meansKey, state.seed])
+  // The round, stored with the problem it belongs to: a new seed or mean restarts the walk-through at round 0.
+  const problem = `${meansKey}/${state.seed}`
+  const [pos, setPos] = useState({ problem, round: 0 })
+  const round = pos.problem === problem ? pos.round : 0
+  const setRound = (r: number) => setPos({ problem, round: r })
 
   const t = round
   const n = traj.n[t]
@@ -104,8 +102,8 @@ export function TsPosterior() {
   const chosen = traj.chosen[t]
   const pBest = traj.best[t]
 
-  const density: XYSeries[] = [
-    ...means.map((_, i): XYSeries => ({
+  const density: SeriesSpec[] = [
+    ...means.map((_, i): SeriesSpec => ({
       name: `arm ${i + 1}: Beta(${1 + s[i]}, ${1 + n[i] - s[i]})`,
       type: 'line',
       x: GRID,
@@ -113,7 +111,7 @@ export function TsPosterior() {
       slot: i,
       area: true,
     })),
-    ...means.map((_, i): XYSeries => ({
+    ...means.map((_, i): SeriesSpec => ({
       name: `arm ${i + 1}: draw θ̃`,
       type: 'scatter',
       x: [draws[i]],
@@ -126,14 +124,13 @@ export function TsPosterior() {
     kind: 'x',
     at: m,
     label: `μ${i + 1}`,
-    onDrag: (x) => {
-      setMeans((prev) => prev.map((v, j) => (j === i ? Math.min(0.95, Math.max(0.05, Math.round(x * 100) / 100)) : v)))
-      setRound(0)
-    },
+    // A new mean is a new problem, so the walk-through restarts at round 0.
+    onDrag: (x) =>
+      setMeans((prev) => prev.map((v, j) => (j === i ? Math.min(0.95, Math.max(0.05, Math.round(x * 100) / 100)) : v))),
   }))
 
   const rounds = useMemo(() => Array.from({ length: HORIZON + 1 }, (_, i) => i), [])
-  const history: XYSeries[] = means.map((_, i) => ({
+  const history: SeriesSpec[] = means.map((_, i) => ({
     name: `P(arm ${i + 1} is best)`,
     type: 'line',
     x: rounds,
@@ -141,38 +138,17 @@ export function TsPosterior() {
     slot: i,
   }))
 
+  const xAxis = useAxis({ label: 'mean θ', range: [0, 1] })
+  const yAxis = useAxis({ label: 'posterior density', range: [0, undefined], hold: 'union' })
+  const xAxis2 = useAxis({ label: 'round t', range: [0, HORIZON] })
+  const yAxis2 = useAxis({ label: 'P(best | data)', range: [0, 1] })
   return (
-    <Interactive
+    <Figure
       title="Thompson sampling, one round at a time"
-      caption="Three Bernoulli arms with uniform Beta(1, 1) priors. Top: each arm's posterior after t rounds, the draw θ̃ from each posterior (dots on the axis) and the pulled arm, whose draw is largest. The vertical guides are the true means; drag one to change the problem. Press Play or step with the arrows. Early on the posteriors overlap and every arm is drawn highest sometimes; as the best arm's posterior sharpens it wins almost every draw. Bottom: the posterior probability that each arm is best, which is exactly the probability that Thompson sampling pulls it next. Drag the guide to move through the rounds."
-      controls={
-        <>
-          <ParamSlider
-            label="round t"
-            value={t}
-            onChange={(v) => {
-              setPlaying(false)
-              setRound(v)
-            }}
-            min={0}
-            max={HORIZON}
-            step={1}
-            format={(v) => String(v)}
-            withArrows
-          />
-          <ParamSlider label="seed" param={seed} format={(v) => String(v)} withArrows />
-          <ParamButton
-            onClick={() => {
-              if (isPlaying) return setPlaying(false)
-              if (round >= HORIZON) setRound(0)
-              setPlaying(true)
-            }}
-          >
-            {isPlaying ? 'Pause' : 'Play'}
-          </ParamButton>
-        </>
-      }
-      readout={
+      state={state}
+      caption="Three Bernoulli arms with uniform Beta(1, 1) priors. Top: each arm's posterior after t rounds, the draw θ̃ from each posterior (dots on the axis) and the pulled arm, whose draw is largest. The vertical guides are the true means; drag one to change the problem. Play the rounds with the player or step through them. Early on the posteriors overlap and every arm is drawn highest sometimes; as the best arm's posterior sharpens it wins almost every draw. Bottom: the posterior probability that each arm is best, which is exactly the probability that Thompson sampling pulls it next. Drag the guide to move through the rounds."
+      controls={<Player value={round} onChange={setRound} count={HORIZON + 1} label="round t" />}
+      readouts={
         <>
           {means.map((_, i) => (
             <Readout
@@ -185,34 +161,16 @@ export function TsPosterior() {
         </>
       }
     >
-      <XYChart
-        series={density}
-        xLabel="mean θ"
-        yLabel="posterior density"
-        xRange={[0, 1]}
-        yRange={[0, undefined]}
-        handles={handles}
-        height={300}
-      />
-      <XYChart
-        series={history}
-        xLabel="round t"
-        yLabel="P(best | data)"
-        xRange={[0, HORIZON]}
-        yRange={[0, 1]}
-        height={220}
-        handles={[
-          {
-            kind: 'x',
-            at: t,
-            label: 'round',
-            onDrag: (x) => {
-              setPlaying(false)
-              setRound(Math.max(0, Math.min(HORIZON, Math.round(x))))
-            },
-          },
-        ]}
-      />
-    </Interactive>
+      <Plot x={xAxis} y={yAxis} height={300}>
+        {seriesLayers(density)}
+        {(handles ?? []).map((h, i) => (
+          <Handle key={i} {...h} />
+        ))}
+      </Plot>
+      <Plot x={xAxis2} y={yAxis2} height={220}>
+        {seriesLayers(history)}
+        <Handle kind="x" at={t} label="round" onDrag={(x) => setRound(Math.max(0, Math.min(HORIZON, Math.round(x))))} />
+      </Plot>
+    </Figure>
   )
 }

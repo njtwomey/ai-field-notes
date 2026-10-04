@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { kNearestNeighbours } from 'aifn-applied/learning/neighbours'
+import { kNearestNeighbours } from 'aifn-methods/learning/neighbours'
 import { toRows } from 'aifn/foundation/tensor'
 import { dataset, hasPredictive } from 'aifn/learning/estimators'
 import { close, fx, X3, XQ, Y3 } from '../shared'

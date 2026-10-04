@@ -1,7 +1,7 @@
 /** Channel capacity and rate–distortion by Blahut–Arimoto against known closed forms (BSC 1 − H₂(p), BEC 1 − ε, the Z
  * channel, R(D) = H₂(p) − H₂(D) for a binary source under Hamming distortion). */
 import { describe, expect, it } from 'vitest'
-import { channelCapacity, rateDistortion } from 'aifn-applied/information/channels'
+import { channelCapacity, rateDistortion } from 'aifn-methods/information/channels'
 import { binaryEntropy } from 'aifn/numerics/special'
 
 const close = (a: number, b: number, tol = 1e-12) =>

@@ -1,5 +1,5 @@
 /**
- * `aifn-applied/learning/generative-classifiers`: generative classifiers: naive Bayes (Gaussian, Bernoulli,
+ * `aifn-methods/learning/generative-classifiers`: generative classifiers: naive Bayes (Gaussian, Bernoulli,
  * multinomial) and linear and quadratic discriminant analysis.
  */
 

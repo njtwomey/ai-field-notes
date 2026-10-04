@@ -23,11 +23,11 @@ export function TopicRail({ params, onNavigate }: { params: BrowseParams; onNavi
       <Link
         to={browseUrl({ ...params, c: undefined, part: undefined })}
         onClick={onNavigate}
-        className={cn(item(!params.c && !params.part), 'text-sm py-1.5')}
+        className={cn(item(!params.c && !params.part), 'py-1.5 text-sm')}
       >
         <Layers className="size-4 shrink-0" aria-hidden />
         <span className="flex-1 font-medium">All notes</span>
-        <span className="text-xs tabular-nums text-muted-foreground">{notes.length}</span>
+        <span className="text-xs text-muted-foreground tabular-nums">{notes.length}</span>
       </Link>
 
       <div className="space-y-4 pt-1">
@@ -41,7 +41,7 @@ export function TopicRail({ params, onNavigate }: { params: BrowseParams; onNavi
                 to={browseUrl({ ...params, part: part.path, c: undefined })}
                 onClick={onNavigate}
                 className={cn(
-                  'group flex items-center justify-between gap-1 rounded-md px-2 py-1 text-[11px] font-semibold uppercase tracking-wider transition-colors select-none',
+                  'group flex items-center justify-between gap-1 rounded-md px-2 py-1 text-[11px] font-semibold tracking-wider uppercase transition-colors select-none',
                   isPartActive
                     ? 'bg-muted text-foreground'
                     : 'text-muted-foreground/80 hover:bg-muted/60 hover:text-foreground',
@@ -52,13 +52,13 @@ export function TopicRail({ params, onNavigate }: { params: BrowseParams; onNavi
                   {part.roman ? `${part.roman} · ` : ''}
                   {part.title}
                 </span>
-                <span className="text-[10px] font-mono tabular-nums text-muted-foreground/70 group-hover:text-foreground">
+                <span className="font-mono text-[10px] text-muted-foreground/70 tabular-nums group-hover:text-foreground">
                   {partNotesCount}
                 </span>
               </Link>
 
               {/* Top-level pillars (Subjects) directly under the Part */}
-              <div className="space-y-0.5 pl-1.5 border-l border-border/40 ml-2">
+              <div className="ml-2 space-y-0.5 border-l border-border/40 pl-1.5">
                 {part.children.map((subject) => {
                   const open = params.c === subject.path || params.c?.startsWith(`${subject.path}/`)
                   const n = count(subject.path)

@@ -13,7 +13,7 @@ import {
   te,
   thinPlate,
   ebmBoosting,
-} from 'aifn-applied/learning/generalised/gam'
+} from 'aifn-methods/learning/generalised/gam'
 import { poissonFamily } from 'aifn/probability/likelihoods'
 import { child, normals, stream, uniform } from 'aifn/foundation/random'
 import { poisson as poissonDraws } from 'aifn/probability/samplers'

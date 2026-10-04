@@ -11,7 +11,7 @@ import {
   orbit,
   standardMap,
   tentMap,
-} from 'aifn-applied/dynamics/maps'
+} from 'aifn-methods/dynamics/maps'
 import { mul, sub, toFlat, toRows } from 'aifn/foundation/tensor'
 import { run, trace } from 'aifn/foundation/trace'
 import { expectProtocol } from '../../protocol'

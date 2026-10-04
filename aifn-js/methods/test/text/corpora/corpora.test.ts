@@ -1,10 +1,10 @@
-/** `aifn-applied/text/corpora`: the named corpora, the seeded generator and their registration. */
+/** `aifn-methods/text/corpora`: the named corpora, the seeded generator and their registration. */
 import { describe, expect, it } from 'vitest'
 import { child, stream } from 'aifn/foundation/random'
 import { defaults } from 'aifn/foundation/space'
 import { tokenise } from 'aifn/text/tokenise'
 import { bpe, bpeEncode } from 'aifn/text/subword'
-import { corpusDatasets, namedCorpus, NAMED_CORPORA, toyCorpus } from 'aifn-applied/text/corpora'
+import { corpusDatasets, namedCorpus, NAMED_CORPORA, toyCorpus } from 'aifn-methods/text/corpora'
 import { expectInfo } from '../../registry'
 
 describe('corpora', () => {

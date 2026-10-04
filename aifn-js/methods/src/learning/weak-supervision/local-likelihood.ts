@@ -112,7 +112,8 @@ export function localLogistic(
   if (!(h > 0)) throw new DomainError('localLogistic', 'localLogistic: the bandwidth must be positive')
   const { data, n, d } = rowsOf(x, 'localLogistic')
   if (y.length !== n) throw new ShapeError('localLogistic', `localLogistic: ${y.length} labels for ${n} points`)
-  if (at.length !== d) throw new ShapeError('localLogistic', `localLogistic: the point has ${at.length} coordinates, not ${d}`)
+  if (at.length !== d)
+    throw new ShapeError('localLogistic', `localLogistic: the point has ${at.length} coordinates, not ${d}`)
   const q = localPolynomialBasis(new Float64Array(d), degree).length
   const design = new Float64Array(n * q)
   const w = new Float64Array(n)
@@ -154,7 +155,14 @@ export function localLogistic(
 }
 
 /** A⁻¹ (Σᵢ sᵢ tᵢᵀ) B⁻¹ for score rows s, t (n × q). */
-function sandwich(Ainv: ArrayLike<number>, s: Float64Array, Binv: ArrayLike<number>, t: Float64Array, n: number, q: number) {
+function sandwich(
+  Ainv: ArrayLike<number>,
+  s: Float64Array,
+  Binv: ArrayLike<number>,
+  t: Float64Array,
+  n: number,
+  q: number,
+) {
   const C = new Float64Array(q * q)
   for (let i = 0; i < n; i++)
     for (let j = 0; j < q; j++) for (let k = 0; k < q; k++) C[j * q + k] += s[i * q + j] * t[i * q + k]
@@ -189,10 +197,15 @@ export function localLogisticBandwidth(
       const keep = Array.from({ length: n }, (_, j) => j).filter((j) => j !== i)
       const xs = new Float64Array(keep.length * d)
       keep.forEach((j, r) => xs.set(data.subarray(j * d, (j + 1) * d), r * d))
-      const fit = localLogistic(fromData(xs, [keep.length, d]), keep.map((j) => y[j]), data.subarray(i * d, (i + 1) * d), {
-        bandwidth: h,
-        degree,
-      })
+      const fit = localLogistic(
+        fromData(xs, [keep.length, d]),
+        keep.map((j) => y[j]),
+        data.subarray(i * d, (i + 1) * d),
+        {
+          bandwidth: h,
+          degree,
+        },
+      )
       const p = Math.min(1 - 1e-12, Math.max(1e-12, fit.estimate))
       loss -= y[i] === 1 ? Math.log(p) : Math.log(1 - p)
     }

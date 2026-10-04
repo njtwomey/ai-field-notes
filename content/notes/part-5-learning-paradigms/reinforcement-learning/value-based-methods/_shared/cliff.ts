@@ -1,4 +1,4 @@
-import { rng } from '@/lib/math'
+import { stream, uniform } from 'aifn/foundation/random'
 
 /**
  * Cliff walking (Sutton and Barto, Example 6.6): a 12 × 4 grid, start at the bottom-left, goal at the bottom-right,
@@ -35,14 +35,14 @@ export type Training = { returns: number[]; Q: number[][] }
 
 /** One training run: `episodes` episodes of ε-greedy control with step size α and γ = 1. */
 export function train(method: Method, episodes: number, eps: number, alpha: number, seed: number): Training {
-  const r = rng(seed)
+  const r = stream(seed)
   const Q = Array.from({ length: N_STATES }, () => [0, 0, 0, 0])
   // ε-greedy with random tie-breaking, so an untrained agent does not always walk the same way.
   const act = (s: number) => {
-    if (r.uniform() < eps) return Math.floor(r.uniform() * 4)
+    if (uniform(r) < eps) return Math.floor(uniform(r) * 4)
     const best = Math.max(...Q[s])
     const ties = [0, 1, 2, 3].filter((a) => Q[s][a] === best)
-    return ties[Math.floor(r.uniform() * ties.length)]
+    return ties[Math.floor(uniform(r) * ties.length)]
   }
   const returns: number[] = []
   for (let e = 0; e < episodes; e++) {

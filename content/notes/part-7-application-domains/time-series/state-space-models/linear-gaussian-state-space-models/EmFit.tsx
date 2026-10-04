@@ -1,6 +1,18 @@
 import { useMemo } from 'react'
-import { Interactive, ParamSlider, Readout, XYChart, formatNumber, useParam, type XYSeries } from 'aifn-render'
-import { rng } from '@/lib/math'
+import {
+  Curve,
+  Figure,
+  formatNumber,
+  int,
+  Plot,
+  Points,
+  Readout,
+  seriesLayers,
+  type SeriesSpec,
+  useAxis,
+  useFigureState,
+} from 'aifn-render'
+import { normal, stream } from 'aifn/foundation/random'
 
 const T = 200
 const ITERATIONS = 150
@@ -13,14 +25,14 @@ const P0 = 1
 type Params = { a: number; q: number; r: number }
 
 function simulate(seed: number) {
-  const g = rng(seed)
+  const g = stream(seed)
   let z = 0
   const truth: number[] = []
   const x: number[] = []
   for (let t = 0; t < T; t++) {
-    z = TRUTH.a * z + Math.sqrt(TRUTH.q) * g.normal()
+    z = TRUTH.a * z + Math.sqrt(TRUTH.q) * normal(g)
     truth.push(z)
-    x.push(z + Math.sqrt(TRUTH.r) * g.normal())
+    x.push(z + Math.sqrt(TRUTH.r) * normal(g))
   }
   return { truth, x }
 }
@@ -86,11 +98,13 @@ function mStep(x: number[], s: ReturnType<typeof eStep>): Params {
 }
 
 export function EmFit() {
-  const iteration = useParam(10, { min: 0, max: ITERATIONS, step: 1 })
-  const seed = useParam(7, { min: 1, max: 20, step: 1 })
+  const state = useFigureState({
+    iteration: int(10, { min: 0, max: ITERATIONS, step: 1, label: 'EM iteration k', format: (v) => String(v) }),
+    seed: int(7, { min: 1, max: 20, step: 1, label: 'seed', format: (v) => String(v) }),
+  })
 
   const run = useMemo(() => {
-    const data = simulate(seed.value)
+    const data = simulate(state.seed)
     const history: (Params & { logLik: number; ms: number[] })[] = []
     let params: Params = START
     for (let k = 0; k <= ITERATIONS; k++) {
@@ -99,16 +113,16 @@ export function EmFit() {
       params = mStep(data.x, s)
     }
     return { data, history }
-  }, [seed.value])
+  }, [state.seed])
 
-  const k = iteration.value
+  const k = state.iteration
   const now = run.history[k]
   const its = run.history.map((_, i) => i)
-  const likelihood: XYSeries[] = [
-    { name: 'log-likelihood', type: 'line', x: its, y: run.history.map((h) => h.logLik), slot: 0 },
-    { name: 'iteration k', type: 'scatter', x: [k], y: [now.logLik], emphasis: true },
-  ]
-  const params: XYSeries[] = [
+  const likelihood = [
+    { name: 'log-likelihood', x: its, y: run.history.map((h) => h.logLik), slot: 0 },
+    { name: 'iteration k', x: [k], y: [now.logLik], emphasis: true },
+  ] as const
+  const params: SeriesSpec[] = [
     { name: 'a', type: 'line', x: its, y: run.history.map((h) => h.a), slot: 0 },
     { name: 'q', type: 'line', x: its, y: run.history.map((h) => h.q), slot: 1 },
     { name: 'r', type: 'line', x: its, y: run.history.map((h) => h.r), slot: 2 },
@@ -118,23 +132,25 @@ export function EmFit() {
   ]
   const shown = 100
   const time = Array.from({ length: shown }, (_, t) => t + 1)
-  const series: XYSeries[] = [
-    { name: 'observations', type: 'scatter', x: time, y: run.data.x.slice(0, shown), muted: true },
-    { name: 'true state', type: 'line', x: time, y: run.data.truth.slice(0, shown), emphasis: true },
-    { name: 'smoothed state at iteration k', type: 'line', x: time, y: now.ms.slice(0, shown), slot: 0 },
-  ]
+  const series = [
+    { name: 'observations', x: time, y: run.data.x.slice(0, shown), muted: true },
+    { name: 'true state', x: time, y: run.data.truth.slice(0, shown), emphasis: true },
+    { name: 'smoothed state at iteration k', x: time, y: now.ms.slice(0, shown), slot: 0 },
+  ] as const
 
+  const xAxis = useAxis({ label: 't', hold: 'union' })
+  const yAxis = useAxis({ label: 'state', hold: 'union' })
+  const xAxis2 = useAxis({ label: 'iteration', hold: 'union' })
+  const yAxis2 = useAxis({ label: 'log-likelihood', hold: 'union' })
+  const xAxis3 = useAxis({ label: 'iteration', hold: 'union' })
+  const yAxis3 = useAxis({ label: 'value', range: [0, undefined], hold: 'union' })
   return (
-    <Interactive
+    <Figure
       title="Fitting a linear-Gaussian model by EM"
+      state={state}
       caption={`Data: 200 steps of z_t = a z_{t−1} + w_t, x_t = z_t + v_t with a = ${TRUTH.a}, q = ${TRUTH.q}, r = ${TRUTH.r}. EM starts from a = ${START.a}, q = ${START.q}, r = ${START.r}. Each iteration runs the Kalman smoother (E-step) and then updates a, q and r in closed form (M-step). The log-likelihood rises at every iteration. It rises fast at first, as a is corrected, then slowly, as EM trades process noise q against measurement noise r: many (q, r) pairs explain the data almost equally well. With 200 points the maximum-likelihood estimates differ from the true values by sampling error.`}
-      controls={
-        <>
-          <ParamSlider label="EM iteration k" param={iteration} format={(v) => String(v)} withArrows />
-          <ParamSlider label="seed" param={seed} format={(v) => String(v)} withArrows />
-        </>
-      }
-      readout={
+
+      readouts={
         <>
           <Readout label="a" value={formatNumber(now.a)} />
           <Readout label="q" value={formatNumber(now.q)} />
@@ -144,12 +160,21 @@ export function EmFit() {
       }
     >
       <div className="space-y-4">
-        <XYChart series={series} xLabel="t" yLabel="state" height={220} />
+        <Plot x={xAxis} y={yAxis} height={220}>
+          <Points {...series[0]} />
+          <Curve {...series[1]} />
+          <Curve {...series[2]} />
+        </Plot>
         <div className="grid gap-4 sm:grid-cols-2">
-          <XYChart series={likelihood} xLabel="iteration" yLabel="log-likelihood" height={200} />
-          <XYChart series={params} xLabel="iteration" yLabel="value" yRange={[0, undefined]} height={200} />
+          <Plot x={xAxis2} y={yAxis2} height={200}>
+            <Curve {...likelihood[0]} />
+            <Points {...likelihood[1]} />
+          </Plot>
+          <Plot x={xAxis3} y={yAxis3} height={200}>
+            {seriesLayers(params)}
+          </Plot>
         </div>
       </div>
-    </Interactive>
+    </Figure>
   )
 }

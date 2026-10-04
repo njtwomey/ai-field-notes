@@ -1,4 +1,4 @@
-/** The registry of `aifn-applied/theory/concentration`. */
+/** The registry of `aifn-methods/theory/concentration`. */
 
 import { definer, entries, type Entry, type FunctionInfo } from 'aifn/foundation/registry'
 import * as c from './concentration'

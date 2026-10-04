@@ -1,16 +1,20 @@
 import { useMemo, useState } from 'react'
 import {
-  Interactive,
-  ParamButton,
-  ParamSlider,
-  Readout,
-  XYChart,
+  Button,
+  Curve,
+  Figure,
+  float,
   formatNumber,
-  type Handle,
+  Handle,
+  Plot,
+  Points,
+  Readout,
   type Segment,
-  type XYSeries,
+  Segments,
+  useAxis,
+  useFigureState,
 } from 'aifn-render'
-import { rng } from '@/lib/math'
+import { stream, uniform as drawUniform } from 'aifn/foundation/random'
 
 const PAIRS = 4
 const R = 1.35
@@ -32,8 +36,8 @@ const PRESETS = {
 }
 
 function random(seed: number): number[] {
-  const r = rng(seed)
-  return Array.from({ length: 2 * PAIRS }, () => 2 * Math.PI * r.uniform())
+  const r = stream(seed)
+  return Array.from({ length: 2 * PAIRS }, () => 2 * Math.PI * drawUniform(r))
 }
 
 /**
@@ -67,23 +71,32 @@ function metrics(points: Pt[], tau: number) {
 export function AlignUniform() {
   const [angles, setAngles] = useState<number[]>(PRESETS.spread)
   const [seed, setSeed] = useState(1)
-  const [logTau, setLogTau] = useState(-0.7)
-  const tau = 10 ** logTau
+  const state = useFigureState({
+    logTau: float(-0.7, {
+      min: -2,
+      max: 0,
+      step: 0.05,
+      label: 'InfoNCE temperature τ',
+      points_per_decade: 2,
+      logTransform: 'value-is-log',
+      format: (v) => formatNumber(10 ** v),
+    }),
+  })
+  const tau = 10 ** state.logTau
 
   const points = useMemo(() => angles.map(at), [angles])
   const m = useMemo(() => metrics(points, tau), [points, tau])
 
-  const series: XYSeries[] = [
-    { name: 'unit circle', type: 'line', x: CIRCLE_X, y: CIRCLE_Y, muted: true },
+  const series = [
+    { name: 'unit circle', x: CIRCLE_X, y: CIRCLE_Y, muted: true },
     {
       name: 'embedding',
-      type: 'scatter',
       x: points.map((p) => p[0]),
       y: points.map((p) => p[1]),
       group: GROUP,
       groupNames: GROUP_NAMES,
     },
-  ]
+  ] as const
   const segments: Segment[] = Array.from({ length: PAIRS }, (_, p) => ({ from: points[2 * p], to: points[2 * p + 1] }))
   const handles: Handle[] = points.map((p, i) => ({
     kind: 'point',
@@ -91,37 +104,39 @@ export function AlignUniform() {
     onDrag: ([x, y]) => setAngles((a) => a.map((v, j) => (j === i ? Math.atan2(y, x) : v))),
   }))
 
+  const xAxis = useAxis({ range: [-R, R] })
+  const yAxis = useAxis({ range: [-R, R], equal: xAxis })
   return (
-    <Interactive
+    <Figure
       title="Alignment and uniformity on the unit circle"
+      state={state}
       caption="Eight normalised embeddings: four inputs, each seen through two augmentations that share a colour and marker shape. Drag any point along the circle. Alignment is small when the two views of each input sit together. Uniformity is small (more negative) when all eight points spread around the circle. A collapsed encoder is perfectly aligned but has the worst uniformity."
       controls={
         <>
-          <ParamSlider
-            label="InfoNCE temperature τ"
-            value={logTau}
-            onChange={setLogTau}
-            min={-2}
-            max={0}
-            step={0.05}
-            format={(v) => formatNumber(10 ** v)}
-          />
           <div className="flex flex-wrap gap-2">
-            <ParamButton onClick={() => setAngles(PRESETS.spread)}>Aligned and spread</ParamButton>
-            <ParamButton onClick={() => setAngles(PRESETS.collapsed)}>Collapsed</ParamButton>
-            <ParamButton onClick={() => setAngles(PRESETS.misaligned)}>Spread, not aligned</ParamButton>
-            <ParamButton
+            <Button variant="outline" size="sm" onClick={() => setAngles(PRESETS.spread)}>
+              Aligned and spread
+            </Button>
+            <Button variant="outline" size="sm" onClick={() => setAngles(PRESETS.collapsed)}>
+              Collapsed
+            </Button>
+            <Button variant="outline" size="sm" onClick={() => setAngles(PRESETS.misaligned)}>
+              Spread, not aligned
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
               onClick={() => {
                 setSeed((s) => s + 1)
                 setAngles(random(seed + 1))
               }}
             >
               Random
-            </ParamButton>
+            </Button>
           </div>
         </>
       }
-      readout={
+      readouts={
         <>
           <Readout label="alignment (lower is better)" value={formatNumber(m.align)} />
           <Readout label="uniformity (lower is better)" value={formatNumber(m.uniform)} />
@@ -129,15 +144,14 @@ export function AlignUniform() {
         </>
       }
     >
-      <XYChart
-        series={series}
-        segments={segments}
-        handles={handles}
-        xRange={[-R, R]}
-        yRange={[-R, R]}
-        equalAspect
-        bare
-      />
-    </Interactive>
+      <Plot x={xAxis} y={yAxis} bare>
+        <Curve {...series[0]} />
+        <Points {...series[1]} />
+        <Segments segments={segments} />
+        {(handles ?? []).map((h, i) => (
+          <Handle key={i} {...h} />
+        ))}
+      </Plot>
+    </Figure>
   )
 }

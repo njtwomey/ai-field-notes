@@ -1,4 +1,4 @@
-/** The registry of `aifn-applied/generative/flows`. */
+/** The registry of `aifn-methods/generative/flows`. */
 
 import { definer, entries, type Entry, type FunctionInfo } from 'aifn/foundation/registry'
 import * as realnvp from './realnvp'

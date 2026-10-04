@@ -1,15 +1,17 @@
-import { useMemo, useState } from 'react'
+import { useMemo } from 'react'
 import {
-  Interactive,
-  ParamChoice,
-  ParamSlider,
-  Readout,
-  XYChart,
+  choice,
+  Figure,
   formatNumber,
-  useParam,
-  type XYSeries,
+  int,
+  Plot,
+  Readout,
+  seriesLayers,
+  type SeriesSpec,
+  useAxis,
+  useFigureState,
 } from 'aifn-render'
-import { linspace } from '@/lib/math'
+import { linspace, toFlat } from 'aifn/foundation/tensor'
 
 /**
  * A one-dimensional Gaussian mixture pushed through the DDPM forward process. Every marginal is analytic:
@@ -19,7 +21,7 @@ const T = 1000
 const PI = [0.3, 0.5, 0.2]
 const MU = [-2, 0.5, 2.5]
 const SD = [0.3, 0.5, 0.25]
-const X = linspace(-4, 4, 401)
+const X = toFlat(linspace(-4, 4, 401))
 const DX = X[1] - X[0]
 
 const ALPHA_BAR = (() => {
@@ -51,9 +53,18 @@ function marginal(x: number, ab: number) {
 type View = 'density' | 'score'
 
 export function NoisedMixture({ initialView = 'density' }: { initialView?: View }) {
-  const step = useParam(100, { min: 0, max: T, step: 10 })
-  const [view, setView] = useState<View>(initialView)
-  const ab = ALPHA_BAR[step.value]
+  const state = useFigureState({
+    step: int(100, { min: 0, max: T, step: 10, label: 'step t' }),
+    view: choice<View>(
+      [
+        { value: 'density', label: 'density' },
+        { value: 'score', label: 'score' },
+      ],
+      initialView,
+      { label: 'show' },
+    ),
+  })
+  const ab = ALPHA_BAR[state.step]
 
   const data = useMemo(() => {
     const now = X.map((x) => marginal(x, ab))
@@ -63,8 +74,8 @@ export function NoisedMixture({ initialView = 'density' }: { initialView?: View 
     return { now, start, prior, kl }
   }, [ab])
 
-  const series = useMemo<XYSeries[]>(() => {
-    if (view === 'density')
+  const series = useMemo<SeriesSpec[]>(() => {
+    if (state.view === 'density')
       return [
         { name: 'data q(x₀)', type: 'line', x: X, y: data.start.map((m) => m.p), muted: true },
         { name: 'N(0, 1)', type: 'line', x: X, y: data.prior, emphasis: true, dashed: true },
@@ -74,27 +85,20 @@ export function NoisedMixture({ initialView = 'density' }: { initialView?: View 
       { name: 'score of N(0, 1): −x', type: 'line', x: X, y: X.map((x) => -x), emphasis: true, dashed: true },
       { name: '∇ log q(x_t)', type: 'line', x: X, y: data.now.map((m) => m.score), slot: 1 },
     ]
-  }, [view, data])
+  }, [state.view, data])
 
+  const xAxis = useAxis({ label: 'x', range: [-4, 4] })
+  const yAxis = useAxis({
+    label: state.view === 'density' ? 'density' : 'score',
+    range: state.view === 'density' ? [0, 0.5] : [-12, 12],
+  })
   return (
-    <Interactive
+    <Figure
       title="The forward diffusion of a Gaussian mixture"
+      state={state}
       caption="Data from a three-component mixture are noised by x_t = √ᾱ_t x₀ + √(1 − ᾱ_t) ε with the linear schedule of Ho et al. (T = 1000). The marginal q(x_t) stays a Gaussian mixture: the components shrink towards 0 and widen until they merge into N(0, 1). The score view shows ∇ log q(x_t), the vector field a reverse-time sampler follows; it points towards the modes and approaches −x as t grows."
-      controls={
-        <>
-          <ParamSlider label="step t" param={step} withArrows />
-          <ParamChoice
-            label="show"
-            value={view}
-            onChange={setView}
-            options={[
-              { value: 'density', label: 'density' },
-              { value: 'score', label: 'score' },
-            ]}
-          />
-        </>
-      }
-      readout={
+
+      readouts={
         <>
           <Readout label="ᾱ_t" value={formatNumber(ab)} />
           <Readout label="signal scale √ᾱ_t" value={formatNumber(Math.sqrt(ab))} />
@@ -103,13 +107,9 @@ export function NoisedMixture({ initialView = 'density' }: { initialView?: View 
         </>
       }
     >
-      <XYChart
-        series={series}
-        xLabel="x"
-        yLabel={view === 'density' ? 'density' : 'score'}
-        xRange={[-4, 4]}
-        yRange={view === 'density' ? [0, 0.5] : [-12, 12]}
-      />
-    </Interactive>
+      <Plot x={xAxis} y={yAxis}>
+        {seriesLayers(series)}
+      </Plot>
+    </Figure>
   )
 }

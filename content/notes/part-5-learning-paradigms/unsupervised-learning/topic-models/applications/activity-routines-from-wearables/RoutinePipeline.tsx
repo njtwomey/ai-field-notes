@@ -1,7 +1,5 @@
-import { MathText } from 'aifn-render'
-import { Diagram } from 'aifn-render'
+import { Diagram, Figure, MathText } from 'aifn-render'
 import type { DiagramSpec } from 'aifn-render'
-import { Interactive } from 'aifn-render'
 
 const box = (id: string, x: number, y: number, label: string, tone: number | 'neutral') => ({
   id,
@@ -36,13 +34,13 @@ const spec: DiagramSpec = {
 
 export function RoutinePipeline() {
   return (
-    <Interactive
+    <Figure
       title="From acceleration to daily routines"
       caption={
         <MathText text="Short-window features are turned into discrete tokens, either activity labels from a supervised classifier or cluster indices from $k$-means. Soft token counts over 30-minute windows form documents. LDA's topics are activity patterns, and the topic proportions of successive windows trace the routines of the day." />
       }
     >
       <Diagram spec={spec} ariaLabel="Pipeline from accelerometer data to topic activations over a day" />
-    </Interactive>
+    </Figure>
   )
 }

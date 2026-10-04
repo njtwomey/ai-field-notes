@@ -25,10 +25,7 @@ export function WassersteinExplorer() {
   const n = sampleSize
   const levels = useMemo(() => Array.from({ length: n }, (_, i) => (i + 0.5) / n), [n])
 
-  const u = useMemo(
-    () => toFlat(normals(stream('w1-u-explorer'), n)).sort((a, b) => a - b),
-    [n],
-  )
+  const u = useMemo(() => toFlat(normals(stream('w1-u-explorer'), n)).sort((a, b) => a - b), [n])
   const v = useMemo(
     () =>
       toFlat(normals(stream('w1-v-explorer'), n))
@@ -53,22 +50,8 @@ export function WassersteinExplorer() {
       caption="On the real line, the optimal transport plan is uniquely given by the monotone coupling matching quantiles. Left: quantile functions F⁻¹(q) for source and target distributions; W₁ is exactly the shaded area between the two curves: ∫₀¹ |F_u⁻¹(q) - F_v⁻¹(q)| dq. Right: optimal transport map pairing each sorted source point u_(i) directly with v_(i)."
     >
       <ControlRow>
-        <Slider
-          label="Target mean shift"
-          value={shift}
-          min={-2.5}
-          max={2.5}
-          step={0.1}
-          onChange={setShift}
-        />
-        <Slider
-          label="Target scale σ"
-          value={scale}
-          min={0.3}
-          max={2.5}
-          step={0.1}
-          onChange={setScale}
-        />
+        <Slider label="Target mean shift" value={shift} min={-2.5} max={2.5} step={0.1} onChange={setShift} />
+        <Slider label="Target scale σ" value={scale} min={0.3} max={2.5} step={0.1} onChange={setScale} />
         <Select
           label="Sample size N"
           value={String(sampleSize)}
@@ -81,7 +64,7 @@ export function WassersteinExplorer() {
         />
       </ControlRow>
 
-      <div className="flex flex-wrap gap-4 text-xs font-mono text-muted-foreground my-2">
+      <div className="my-2 flex flex-wrap gap-4 font-mono text-xs text-muted-foreground">
         <Readout label="W₁ (area)" value={formatNumber(w1)} />
         <Readout label="W₂ (empirical)" value={formatNumber(w2)} />
         <Readout label="W₂ (Gaussian truth)" value={formatNumber(w2Gaussian)} />
@@ -91,14 +74,7 @@ export function WassersteinExplorer() {
 
       <Plots cols={2}>
         <Plot x={qAxis} y={valAxis} title="Quantile functions F⁻¹(q) & W₁ area">
-          <Area
-            name="|F_u⁻¹ − F_v⁻¹| (W₁ area)"
-            x={levels}
-            y={v}
-            base={u}
-            line={false}
-            opacity={0.2}
-          />
+          <Area name="|F_u⁻¹ − F_v⁻¹| (W₁ area)" x={levels} y={v} base={u} line={false} opacity={0.2} />
           <Curve name="F_u⁻¹(q) (Source N(0, 1))" x={levels} y={u} slot={0} />
           <Curve name="F_v⁻¹(q) (Target N(μ, σ²))" x={levels} y={v} slot={1} />
         </Plot>

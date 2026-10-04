@@ -1,16 +1,18 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import {
-  ImagePlot,
-  Interactive,
-  ParamChoice,
-  ParamSlider,
-  ParamSwitch,
-  Readout,
+  choice,
+  Figure,
+  float,
   formatNumber,
-  useParam,
-  type Handle,
-  type ImagePlotLine,
+  Curve,
+  Handle,
+  Pixels,
+  Plot,
   type PlotPointer,
+  Readout,
+  setting,
+  useAxis,
+  useFigureState,
 } from 'aifn-render'
 import {
   H,
@@ -64,12 +66,47 @@ const originalColumn = (v: View, r: number, x: number) =>
   v.src[r * v.width + Math.min(Math.max(Math.round(x), 0), v.width - 1)]
 const clamp = (v: number, lo: number, hi: number) => Math.min(Math.max(v, lo), hi)
 
-const seamLine = (name: string, seam: ArrayLike<number>, extra: Partial<ImagePlotLine> = {}): ImagePlotLine => ({
+const seamLine = (name: string, seam: ArrayLike<number>, extra: Partial<ImageLine> = {}): ImageLine => ({
   name,
   x: Array.from(seam),
   y: ROWS,
   ...extra,
 })
+
+/** A path over an image in pixel coordinates (x = column, y = row), e.g. a seam. */
+type ImageLine = { name: string; x: number[]; y: number[]; slot?: number; emphasis?: boolean; dashed?: boolean }
+
+type ImageViewProps = {
+  width: number
+  rgb?: ArrayLike<number>
+  values?: ArrayLike<number>
+  scale?: 'sequential' | 'diverging'
+  range?: [number, number]
+  lines?: ImageLine[]
+  handles?: Handle[]
+  onPointer?: (e: PlotPointer) => void
+  ariaLabel: string
+}
+
+/**
+ * An image of H rows on pixel axes, row 0 at the top, with paths and handles over it. Every panel spans EXTENT
+ * columns, so images of different widths share one pixel size.
+ */
+function ImageView({ width, rgb, values, scale, range, lines, handles, onPointer, ariaLabel }: ImageViewProps) {
+  const x = useAxis({ range: [-0.5, EXTENT - 0.5], nice: false })
+  const y = useAxis({ range: [-0.5, H - 0.5], nice: false, inverse: true, equal: x })
+  return (
+    <Plot x={x} y={y} bare fitHeight onPointer={onPointer} ariaLabel={ariaLabel}>
+      <Pixels width={width} height={H} rgb={rgb} values={values} scale={scale} range={range} />
+      {lines?.map((l) => (
+        <Curve key={l.name} name={l.name} x={l.x} y={l.y} slot={l.slot} emphasis={l.emphasis} dashed={l.dashed} live />
+      ))}
+      {handles?.map((h, i) => (
+        <Handle key={i} {...h} />
+      ))}
+    </Plot>
+  )
+}
 
 function Panel({ title, children }: { title: ReactNode; children: ReactNode }) {
   return (
@@ -82,33 +119,67 @@ function Panel({ title, children }: { title: ReactNode; children: ReactNode }) {
 
 /** Seam carving on generated images, with the energy map and the cumulative cost M of the image being carved. */
 export function SeamCarvingExplorer() {
-  const [image, setImage] = useState<ImageId>('landscape')
-  const [energy, setEnergy] = useState<Energy>('backward')
-  const [mode, setMode] = useState<BoxMode>('off')
-  const [compare, setCompare] = useState(true)
-  const width = useParam(90, { min: W - MAX_REMOVE, max: W + MAX_INSERT, step: 1 })
+  const state = useFigureState({
+    width: float(90, {
+      min: W - MAX_REMOVE,
+      max: W + MAX_INSERT,
+      step: 1,
+      label: 'width',
+      format: (v) =>
+        v < W ? `${v} px (${W - v} removed)` : v > W ? `${v} px (${v - W} inserted)` : `${v} px (original)`,
+    }),
+    image: choice<ImageId>(
+      [
+        { value: 'landscape', label: 'landscape' },
+        { value: 'shapes', label: 'shapes' },
+        { value: 'checkerboard', label: 'checkerboard' },
+        { value: 'text', label: 'text' },
+        { value: 'line', label: 'straight line' },
+      ],
+      'landscape',
+      { label: 'image' },
+    ),
+    energy: choice<Energy>(
+      [
+        { value: 'backward', label: 'backward' },
+        { value: 'forward', label: 'forward' },
+      ],
+      'backward',
+      { label: 'energy' },
+    ),
+    mode: choice<BoxMode>(
+      [
+        { value: 'off', label: 'off' },
+        { value: 'protect', label: 'protect' },
+        { value: 'remove', label: 'remove' },
+      ],
+      'off',
+      { label: 'box' },
+    ),
+    compare: setting(true, 'compare with plain scaling'),
+  })
   // The box as drawn while dragging, and the box the removal sequence uses, committed when the drag ends.
   const [box, setBox] = useState<Box>(DEFAULT_BOX)
   const [committed, setCommitted] = useState<Box>(DEFAULT_BOX)
   const draft = useRef(box)
   const [hover, setHover] = useState<{ r: number; c: number; panel: 'image' | 'energy' | 'cost' } | null>(null)
 
-  const wanted: Settings = { image, energy, mode, box: committed }
+  const wanted: Settings = { image: state.image, energy: state.energy, mode: state.mode, box: committed }
   const key = keyOf(wanted)
   const [ready, setReady] = useState(() => ({ key, seq: sequenceFor(wanted) }))
   const busy = ready.key !== key
   useEffect(() => {
     if (!busy) return
-    const settings: Settings = { image, energy, mode, box: committed }
+    const settings: Settings = { image: state.image, energy: state.energy, mode: state.mode, box: committed }
     // Wait a frame so "recomputing…" can paint before the carving blocks the main thread.
     const id = setTimeout(() => setReady({ key, seq: sequenceFor(settings) }), 16)
     return () => clearTimeout(id)
-  }, [busy, key, image, energy, mode, committed])
+  }, [busy, key, state.image, state.energy, state.mode, committed])
 
   const seq = ready.seq
-  const w = width.value
+  const w = state.width
   const view = useMemo(() => viewAt(seq, w), [seq, w])
-  const plain = useMemo(() => (compare ? scaled(seq.rgb, w) : null), [compare, seq, w])
+  const plain = useMemo(() => (state.compare ? scaled(seq.rgb, w) : null), [state.compare, seq, w])
 
   const at = hover && hover.r < H && hover.c < view.width ? hover : null
   const [atR, atC] = at ? [at.r, at.c] : [-1, -1]
@@ -122,13 +193,13 @@ export function SeamCarvingExplorer() {
   const bottom = box.r1 + 0.5
 
   const lines = useMemo(() => {
-    const out: ImagePlotLine[] = [seamLine('next seam', view.seam, { slot: 1 })]
+    const out: ImageLine[] = [seamLine('next seam', view.seam, { slot: 1 })]
     if (through) out.push(seamLine('seam through pixel', through.seam, { emphasis: true, dashed: true }))
     return out
   }, [view, through])
   const imageLines = useMemo(
     () =>
-      mode === 'off'
+      state.mode === 'off'
         ? lines
         : [
             ...lines,
@@ -136,10 +207,10 @@ export function SeamCarvingExplorer() {
               name: 'box',
               x: [left, right, right, left, left],
               y: [top, top, bottom, bottom, top],
-              slot: mode === 'protect' ? 2 : 7,
+              slot: state.mode === 'protect' ? 2 : 7,
             },
           ],
-    [lines, mode, left, right, top, bottom],
+    [lines, state.mode, left, right, top, bottom],
   )
 
   const setDraft = (next: Box) => {
@@ -152,10 +223,10 @@ export function SeamCarvingExplorer() {
     kind: 'x',
     at: w - 0.5,
     label: 'width',
-    onDrag: (x) => width.set(Math.round(x + 0.5)),
+    onDrag: (x) => state.set('width', Math.round(x + 0.5)),
   }
   const handles: Handle[] =
-    mode === 'off'
+    state.mode === 'off'
       ? [widthHandle]
       : [
           widthHandle,
@@ -212,8 +283,9 @@ export function SeamCarvingExplorer() {
       : null
 
   return (
-    <Interactive
+    <Figure
       title="Seam carving an image"
+      state={state}
       caption={
         <>
           Drag the dashed line at the image's right edge, or use the slider, to set the width. Left of the original 128
@@ -226,51 +298,7 @@ export function SeamCarvingExplorer() {
           chose between.
         </>
       }
-      controls={
-        <>
-          <ParamSlider
-            label="width"
-            param={width}
-            withArrows
-            format={(v) =>
-              v < W ? `${v} px (${W - v} removed)` : v > W ? `${v} px (${v - W} inserted)` : `${v} px (original)`
-            }
-          />
-          <ParamChoice
-            label="image"
-            value={image}
-            onChange={setImage}
-            options={[
-              { value: 'landscape', label: 'landscape' },
-              { value: 'shapes', label: 'shapes' },
-              { value: 'checkerboard', label: 'checkerboard' },
-              { value: 'text', label: 'text' },
-              { value: 'line', label: 'straight line' },
-            ]}
-          />
-          <ParamChoice
-            label="energy"
-            value={energy}
-            onChange={setEnergy}
-            options={[
-              { value: 'backward', label: 'backward' },
-              { value: 'forward', label: 'forward' },
-            ]}
-          />
-          <ParamChoice
-            label="box"
-            value={mode}
-            onChange={setMode}
-            options={[
-              { value: 'off', label: 'off' },
-              { value: 'protect', label: 'protect' },
-              { value: 'remove', label: 'remove' },
-            ]}
-          />
-          <ParamSwitch label="compare with plain scaling" checked={compare} onChange={setCompare} />
-        </>
-      }
-      readout={
+      readouts={
         <>
           <Readout label="width" value={`${w} px`} />
           <Readout label={k < 0 ? 'seams removed' : 'seams inserted'} value={String(Math.abs(k))} />
@@ -285,11 +313,9 @@ export function SeamCarvingExplorer() {
     >
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
         <Panel title="Seam-carved image">
-          <ImagePlot
+          <ImageView
             width={view.width}
-            height={H}
             rgb={view.rgb}
-            xExtent={EXTENT}
             lines={imageLines}
             handles={handles}
             onPointer={pointer('image')}
@@ -298,11 +324,9 @@ export function SeamCarvingExplorer() {
         </Panel>
         {plain && (
           <Panel title="Plain scaling to the same width">
-            <ImagePlot
+            <ImageView
               width={w}
-              height={H}
               rgb={plain}
-              xExtent={EXTENT}
               handles={[widthHandle]}
               ariaLabel="The original image scaled to the same width"
             />
@@ -310,7 +334,7 @@ export function SeamCarvingExplorer() {
         )}
         <Panel
           title={
-            energy === 'backward' ? (
+            state.energy === 'backward' ? (
               'Energy e (gradient magnitude)'
             ) : (
               <>
@@ -319,31 +343,27 @@ export function SeamCarvingExplorer() {
             )
           }
         >
-          <ImagePlot
+          <ImageView
             width={view.width}
-            height={H}
             values={view.shown}
-            scale={mode === 'remove' ? 'diverging' : 'sequential'}
+            scale={state.mode === 'remove' ? 'diverging' : 'sequential'}
             range={seq.shownRange}
-            xExtent={EXTENT}
             lines={lines}
             onPointer={pointer('energy')}
             ariaLabel="Energy map of the current image"
           />
         </Panel>
         <Panel title="Cumulative minimum cost M">
-          <ImagePlot
+          <ImageView
             width={view.width}
-            height={H}
             values={M}
             range={seq.costRange}
-            xExtent={EXTENT}
             lines={lines}
             onPointer={pointer('cost')}
             ariaLabel="Cumulative minimum cost M with the next seam"
           />
         </Panel>
       </div>
-    </Interactive>
+    </Figure>
   )
 }

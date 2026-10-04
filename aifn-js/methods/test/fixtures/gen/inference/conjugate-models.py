@@ -1,4 +1,4 @@
-"""Golden values for aifn-applied/inference/conjugate-models: the normal-gamma log evidence by numerical
+"""Golden values for aifn-methods/inference/conjugate-models: the normal-gamma log evidence by numerical
 integration (scipy), and data sets."""
 
 from typing import cast

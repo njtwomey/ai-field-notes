@@ -1,13 +1,16 @@
-import { useMemo, useState } from 'react'
+import { useMemo } from 'react'
 import {
-  Interactive,
-  ParamSlider,
-  ParamSwitch,
-  Readout,
-  XYChart,
+  Curve,
+  Figure,
+  float,
   formatNumber,
-  useParam,
-  type XYSeries,
+  int,
+  Plot,
+  Readout,
+  Segments,
+  setting,
+  useAxis,
+  useFigureState,
 } from 'aifn-render'
 import { dlqr, type Mat } from '../../_shared/control'
 
@@ -121,41 +124,44 @@ function runSaturatedLqr(umax: number) {
 const T = Array.from({ length: STEPS + 1 }, (_, k) => k * H)
 
 export function MpcHorizon() {
-  const horizon = useParam(3, { min: 1, max: 30, step: 1 })
-  const umax = useParam(1, { min: 0.25, max: 3, step: 0.05 })
-  const at = useParam(0, { min: 0, max: STEPS - 1, step: 1 })
-  const [terminal, setTerminal] = useState(true)
+  const state = useFigureState({
+    horizon: int(3, { min: 1, max: 30, step: 1, label: 'horizon N (steps)', format: (v) => String(v) }),
+    umax: float(1, { min: 0.25, max: 3, step: 0.05, label: 'input limit u_max' }),
+    terminal: setting(true, 'terminal cost xᵀPx'),
+    at: float(0, { min: 0, max: STEPS - 1, step: 1, label: 'show plan at step k', format: (v) => String(v) }),
+  })
 
-  const mpc = useMemo(() => runMpc(horizon.value, umax.value, terminal), [horizon.value, umax.value, terminal])
-  const sat = useMemo(() => runSaturatedLqr(umax.value), [umax.value])
+  const mpc = useMemo(
+    () => runMpc(state.horizon, state.umax, state.terminal),
+    [state.horizon, state.umax, state.terminal],
+  )
+  const sat = useMemo(() => runSaturatedLqr(state.umax), [state.umax])
 
-  const k = at.value
+  const k = state.at
   const plan = mpc.plans[k]
-  const position: XYSeries[] = [
-    { name: 'target', type: 'line', x: [0, STEPS * H], y: [0, 0], muted: true },
-    { name: 'MPC', type: 'line', x: T, y: mpc.pos, slot: 0 },
-    { name: 'saturated LQR', type: 'line', x: T, y: sat.pos, slot: 1, dashed: true },
-    { name: `plan made at step k`, type: 'line', x: plan.map((_, j) => (k + j) * H), y: plan, slot: 2 },
-  ]
-  const input: XYSeries[] = [
-    { name: 'MPC input', type: 'line', x: T.slice(0, STEPS), y: mpc.u, slot: 0 },
-    { name: 'saturated LQR input', type: 'line', x: T.slice(0, STEPS), y: sat.u, slot: 1, dashed: true },
-  ]
+  const position = [
+    { name: 'target', x: [0, STEPS * H], y: [0, 0], muted: true },
+    { name: 'MPC', x: T, y: mpc.pos, slot: 0 },
+    { name: 'saturated LQR', x: T, y: sat.pos, slot: 1, dashed: true },
+    { name: `plan made at step k`, x: plan.map((_, j) => (k + j) * H), y: plan, slot: 2 },
+  ] as const
+  const input = [
+    { name: 'MPC input', x: T.slice(0, STEPS), y: mpc.u, slot: 0 },
+    { name: 'saturated LQR input', x: T.slice(0, STEPS), y: sat.u, slot: 1, dashed: true },
+  ] as const
   const overshoot = Math.max(0, ...mpc.pos)
 
+  const xAxis = useAxis({ label: 'time t (s)', range: [0, STEPS * H] })
+  const yAxis = useAxis({ label: 'position', range: [-6, 5] })
+  const xAxis2 = useAxis({ label: 'time t (s)', range: [0, STEPS * H] })
+  const yAxis2 = useAxis({ label: 'input u', hold: 'union' })
   return (
-    <Interactive
+    <Figure
       title="Receding horizon with an input limit"
+      state={state}
       caption="A unit mass starts at position −5, at rest, and must be brought to 0 with a force limited to |u| ≤ u_max; sample time 0.2 s, stage cost position² + 0.01·u². At every step MPC solves a quadratic program over the next N inputs, applies the first, and re-plans. The coloured segment is the plan made at step k: the controller only ever executes its first move. The dashed curve clips the unconstrained LQR input at the limit instead, and overshoots because it does not know the limit is coming. Short horizons without a terminal cost can fail to converge at all; the terminal cost xᵀPx from the LQR makes even N = 1 behave like saturated LQR, and a longer horizon lets the controller brake in time."
-      controls={
-        <>
-          <ParamSlider label="horizon N (steps)" param={horizon} format={(v) => String(v)} withArrows />
-          <ParamSlider label="input limit u_max" param={umax} />
-          <ParamSwitch label="terminal cost xᵀPx" checked={terminal} onChange={setTerminal} />
-          <ParamSlider label="show plan at step k" param={at} format={(v) => String(v)} withArrows />
-        </>
-      }
-      readout={
+
+      readouts={
         <>
           <Readout label="cost, MPC" value={formatNumber(mpc.cost)} />
           <Readout label="cost, saturated LQR" value={formatNumber(sat.cost)} />
@@ -165,26 +171,23 @@ export function MpcHorizon() {
       }
     >
       <div className="space-y-2">
-        <XYChart
-          series={position}
-          xLabel="time t (s)"
-          yLabel="position"
-          xRange={[0, STEPS * H]}
-          yRange={[-6, 5]}
-          height={260}
-        />
-        <XYChart
-          series={input}
-          segments={[
-            { from: [0, umax.value], to: [STEPS * H, umax.value] },
-            { from: [0, -umax.value], to: [STEPS * H, -umax.value] },
-          ]}
-          xLabel="time t (s)"
-          yLabel="input u"
-          xRange={[0, STEPS * H]}
-          height={180}
-        />
+        <Plot x={xAxis} y={yAxis} height={260}>
+          <Curve {...position[0]} />
+          <Curve {...position[1]} />
+          <Curve {...position[2]} />
+          <Curve {...position[3]} />
+        </Plot>
+        <Plot x={xAxis2} y={yAxis2} height={180}>
+          <Curve {...input[0]} />
+          <Curve {...input[1]} />
+          <Segments
+            segments={[
+              { from: [0, state.umax], to: [STEPS * H, state.umax] },
+              { from: [0, -state.umax], to: [STEPS * H, -state.umax] },
+            ]}
+          />
+        </Plot>
       </div>
-    </Interactive>
+    </Figure>
   )
 }

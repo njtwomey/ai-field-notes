@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { banditProblem, logBandit, type BanditProblem } from 'aifn-applied/data/synthetic'
+import { banditProblem, logBandit, type BanditProblem } from 'aifn-methods/data/synthetic'
 import { child, stream } from 'aifn/foundation/random'
 import { mean, std, tensor, toFlat } from 'aifn/foundation/tensor'
 import {

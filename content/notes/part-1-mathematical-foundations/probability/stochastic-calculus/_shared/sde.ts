@@ -1,9 +1,9 @@
+import { normal, stream, uniform } from 'aifn/foundation/random'
 /**
  * Small numerical helpers shared by the stochastic-calculus widgets: Gaussian densities, histograms, Euler–Maruyama
  * paths, and the variance-preserving (Ornstein–Uhlenbeck) noising of a two-mode Gaussian mixture, whose density and
  * score are analytic at every time.
  */
-import { rng } from '@/lib/math'
 
 export const gaussPdf = (x: number, m: number, v: number) =>
   Math.exp(-((x - m) ** 2) / (2 * v)) / Math.sqrt(2 * Math.PI * v)
@@ -37,7 +37,7 @@ export function eulerMaruyama(
   steps: number,
   seed: number,
 ): Float64Array[] {
-  const { normal } = rng(seed)
+  const rs = stream(seed)
   const h = (t1 - t0) / steps
   const sq = Math.sqrt(Math.abs(h))
   let x = Float64Array.from(start)
@@ -45,7 +45,7 @@ export function eulerMaruyama(
   for (let k = 0; k < steps; k++) {
     const t = t0 + k * h
     const next = new Float64Array(x.length)
-    for (let i = 0; i < x.length; i++) next[i] = x[i] + f(x[i], t) * h + g(x[i], t) * sq * normal()
+    for (let i = 0; i < x.length; i++) next[i] = x[i] + f(x[i], t) * h + g(x[i], t) * sq * normal(rs)
     out.push(next)
     x = next
   }
@@ -54,8 +54,8 @@ export function eulerMaruyama(
 
 /** Standard normal draws, seeded. */
 export function normals(n: number, seed: number, mean = 0, sd = 1): number[] {
-  const { normal } = rng(seed)
-  return Array.from({ length: n }, () => mean + sd * normal())
+  const rs = stream(seed)
+  return Array.from({ length: n }, () => mean + sd * normal(rs))
 }
 
 /**
@@ -82,10 +82,10 @@ export function vpMixture(x: number, t: number, beta = BETA) {
 
 /** Draws from the data mixture. */
 export function sampleMixture(n: number, seed: number): number[] {
-  const { uniform, normal } = rng(seed)
+  const rs = stream(seed)
   return Array.from({ length: n }, () => {
-    const k = uniform() < MIX.pi[0] ? 0 : 1
-    return MIX.mu[k] + MIX.sd[k] * normal()
+    const k = uniform(rs) < MIX.pi[0] ? 0 : 1
+    return MIX.mu[k] + MIX.sd[k] * normal(rs)
   })
 }
 
@@ -121,7 +121,7 @@ export type ReverseKind = 'sde' | 'ode' | 'noscore'
  * - 'noscore': the forward drift run backwards with noise, i.e. the reverse SDE without its score term.
  */
 export function reverseParticles(kind: ReverseKind, start: number[], steps: number, seed: number): Float64Array[] {
-  const { normal } = rng(seed)
+  const rs = stream(seed)
   const h = T_END / steps
   const sq = Math.sqrt(BETA * h)
   let x = Float64Array.from(start)
@@ -133,10 +133,10 @@ export function reverseParticles(kind: ReverseKind, start: number[], steps: numb
       const xi = x[i]
       // Moving from t to t − h: x ← x − h·drift(x, t) (+ noise), with f = −½βx.
       const f = -0.5 * BETA * xi
-      if (kind === 'noscore') next[i] = xi - h * f + sq * normal()
+      if (kind === 'noscore') next[i] = xi - h * f + sq * normal(rs)
       else {
         const s = vpMixture(xi, t).score
-        next[i] = kind === 'sde' ? xi - h * (f - BETA * s) + sq * normal() : xi - h * (f - 0.5 * BETA * s)
+        next[i] = kind === 'sde' ? xi - h * (f - BETA * s) + sq * normal(rs) : xi - h * (f - 0.5 * BETA * s)
       }
     }
     out.push(next)
@@ -147,14 +147,14 @@ export function reverseParticles(kind: ReverseKind, start: number[], steps: numb
 
 /** Forward VP noising of data samples on the same time grid, with the exact Gaussian transition. out[k] is at k·h. */
 export function forwardParticles(data: number[], steps: number, seed: number): Float64Array[] {
-  const { normal } = rng(seed)
+  const rs = stream(seed)
   const h = T_END / steps
   const decay = Math.exp((-BETA * h) / 2)
   const sd = Math.sqrt(1 - decay * decay)
   let x = Float64Array.from(data)
   const out = [x]
   for (let k = 0; k < steps; k++) {
-    const next = x.map((xi) => decay * xi + sd * normal())
+    const next = x.map((xi) => decay * xi + sd * normal(rs))
     out.push(next)
     x = next
   }

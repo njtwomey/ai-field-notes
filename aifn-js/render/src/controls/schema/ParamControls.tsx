@@ -148,6 +148,13 @@ export function LeafControl({
           scale={def.scale}
           step={def.step}
           suggestions={def.suggestions}
+          spacing={def.spacing}
+          increment={def.increment}
+          points={def.points}
+          points_per_decade={def.points_per_decade}
+          logTransform={def.logTransform}
+          headerValue={def.headerValue}
+          format={def.format}
         />
       )
     case 'choice': {
@@ -174,8 +181,6 @@ export function LeafControl({
       )
   }
 }
-
-
 
 /**
  * The control rows of a figure state (DESIGN.md §4): each `row` and each `variants` field is one labelled row, in
@@ -220,7 +225,7 @@ function FigureControlsImpl({ state }: { state: FigureState<ParamDefs> }) {
   }
   const set = (path: string, value: ParamValue) => state.set(path, value)
   return (
-    <div className="flex flex-col gap-2.5 w-full">
+    <div className="flex w-full flex-col gap-2.5">
       {rows.map((r) => (
         <ControlGroup
           key={r.key}

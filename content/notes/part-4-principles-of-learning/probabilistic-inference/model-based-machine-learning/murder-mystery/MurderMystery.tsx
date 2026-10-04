@@ -1,17 +1,21 @@
-import { useMemo, useState } from 'react'
-import { Diagram } from 'aifn-render'
-import { factor, link, variable } from 'aifn-render'
-import type { DiagramSpec } from 'aifn-render'
+import { useMemo } from 'react'
 import {
-  Interactive,
-  ParamChoice,
-  ParamSlider,
-  Readout,
-  XYChart,
+  choice,
+  Curve,
+  Diagram,
+  factor,
+  Figure,
+  float,
   formatNumber,
-  useParam,
-  type XYSeries,
+  link,
+  Plot,
+  Points,
+  Readout,
+  useAxis,
+  useFigureState,
+  variable,
 } from 'aifn-render'
+import type { DiagramSpec } from 'aifn-render'
 
 type Weapon = 'unknown' | 'revolver' | 'dagger'
 type Hair = 'unknown' | 'found' | 'absent'
@@ -36,55 +40,52 @@ const STEPS = [0, 1, 2]
 
 /** Toggle the evidence and watch the belief about the murderer change, one factor message at a time. */
 export function MurderMystery() {
-  const prior = useParam(0.3, { min: 0.05, max: 0.95, step: 0.05 })
-  const [weapon, setWeapon] = useState<Weapon>('revolver')
-  const [hair, setHair] = useState<Hair>('found')
+  const state = useFigureState({
+    prior: float(0.3, { min: 0.05, max: 0.95, step: 0.05, label: 'prior P(Grey)', format: (v) => v.toFixed(2) }),
+    weapon: choice<Weapon>(
+      [
+        { value: 'unknown', label: 'not yet' },
+        { value: 'revolver', label: 'revolver' },
+        { value: 'dagger', label: 'dagger' },
+      ],
+      'revolver',
+      { label: 'weapon found' },
+    ),
+    hair: choice<Hair>(
+      [
+        { value: 'unknown', label: 'not checked' },
+        { value: 'found', label: 'found' },
+        { value: 'absent', label: 'not found' },
+      ],
+      'found',
+      { label: 'grey hair at the scene' },
+    ),
+  })
 
   const { steps, points } = useMemo(() => {
-    const wMsg: [number, number] = [weaponLik(weapon, 'grey'), weaponLik(weapon, 'auburn')]
-    const hMsg: [number, number] = [hairLik(hair, 'grey'), hairLik(hair, 'auburn')]
-    const steps = [posterior(prior.value, []), posterior(prior.value, [wMsg]), posterior(prior.value, [wMsg, hMsg])]
-    const points: XYSeries[] = [
-      { name: 'P(Grey)', type: 'line', x: STEPS, y: steps, slot: 0 },
-      { name: 'after each clue', type: 'scatter', x: STEPS, y: steps, emphasis: true },
-    ]
+    const wMsg: [number, number] = [weaponLik(state.weapon, 'grey'), weaponLik(state.weapon, 'auburn')]
+    const hMsg: [number, number] = [hairLik(state.hair, 'grey'), hairLik(state.hair, 'auburn')]
+    const steps = [posterior(state.prior, []), posterior(state.prior, [wMsg]), posterior(state.prior, [wMsg, hMsg])]
+    const points = [
+      { name: 'P(Grey)', x: STEPS, y: steps, slot: 0 },
+      { name: 'after each clue', x: STEPS, y: steps, emphasis: true },
+    ] as const
     return { steps, points }
-  }, [prior.value, weapon, hair])
+  }, [state.prior, state.weapon, state.hair])
   const final = steps[2]
-  const weaponSeen = weapon !== 'unknown'
-  const hairSeen = hair !== 'unknown'
+  const weaponSeen = state.weapon !== 'unknown'
+  const hairSeen = state.hair !== 'unknown'
   const spec = useMemo((): DiagramSpec => graph(final, weaponSeen, hairSeen), [final, weaponSeen, hairSeen])
 
+  const xAxis = useAxis({ label: 'clues included (0 = prior, 1 = weapon, 2 = weapon and hair)', range: [0, 2] })
+  const yAxis = useAxis({ label: 'P(Grey is the murderer)', range: [0, 1] })
   return (
-    <Interactive
+    <Figure
       title="Updating the belief about the murderer"
+      state={state}
       caption="Choose the evidence. The murderer node is shaded by the posterior probability that Grey did it, and observed clues are filled. The chart follows P(Grey) from the prior, through the weapon factor's message, to the hair factor's message. The probabilities of each clue under each suspect are those of Model-Based Machine Learning, chapter 1."
-      controls={
-        <>
-          <ParamSlider label="prior P(Grey)" param={prior} format={(v) => v.toFixed(2)} />
-          <ParamChoice
-            label="weapon found"
-            value={weapon}
-            onChange={setWeapon}
-            options={[
-              { value: 'unknown', label: 'not yet' },
-              { value: 'revolver', label: 'revolver' },
-              { value: 'dagger', label: 'dagger' },
-            ]}
-          />
-          <ParamChoice
-            label="grey hair at the scene"
-            value={hair}
-            onChange={setHair}
-            options={[
-              { value: 'unknown', label: 'not checked' },
-              { value: 'found', label: 'found' },
-              { value: 'absent', label: 'not found' },
-            ]}
-          />
-        </>
-      }
-      readout={
+
+      readouts={
         <>
           <Readout label="prior" value={formatNumber(steps[0])} />
           <Readout label="after weapon" value={formatNumber(steps[1])} />
@@ -98,16 +99,12 @@ export function MurderMystery() {
           spec={spec}
           ariaLabel="Factor graph: a prior factor on the murderer, and two factors linking the murderer to the weapon and to the hair"
         />
-        <XYChart
-          series={points}
-          xLabel="clues included (0 = prior, 1 = weapon, 2 = weapon and hair)"
-          yLabel="P(Grey is the murderer)"
-          xRange={[0, 2]}
-          yRange={[0, 1]}
-          height={260}
-        />
+        <Plot x={xAxis} y={yAxis} height={260}>
+          <Curve {...points[0]} />
+          <Points {...points[1]} />
+        </Plot>
       </div>
-    </Interactive>
+    </Figure>
   )
 }
 

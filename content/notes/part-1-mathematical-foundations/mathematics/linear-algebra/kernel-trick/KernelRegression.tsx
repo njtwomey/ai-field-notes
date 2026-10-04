@@ -1,16 +1,20 @@
-import { useMemo, useState } from 'react'
+import { useMemo } from 'react'
 import {
-  Heatmap,
-  Interactive,
-  ParamChoice,
-  ParamSlider,
-  Readout,
-  XYChart,
+  choice,
+  Curve,
+  Figure,
+  float,
   formatNumber,
-  useParam,
-  type XYSeries,
+  int,
+  Plot,
+  Points,
+  Raster,
+  Readout,
+  useAxis,
+  useFigureState,
 } from 'aifn-render'
-import { linspace, rng } from '@/lib/math'
+import { linspace, toFlat } from 'aifn/foundation/tensor'
+import { normal, stream, uniform } from 'aifn/foundation/random'
 
 type KernelName = 'rbf' | 'polynomial' | 'linear'
 const KERNELS = [
@@ -20,13 +24,13 @@ const KERNELS = [
 ]
 
 const N = 30
-const GRID = linspace(-3.2, 3.2, 161)
+const GRID = toFlat(linspace(-3.2, 3.2, 161))
 
 /** Noisy samples of a smooth curve, sorted by x so that the Gram matrix shows locality along its diagonal. */
 function makeData(seed: number) {
-  const g = rng(seed)
-  const x = Array.from({ length: N }, () => -3 + 6 * g.uniform()).sort((a, b) => a - b)
-  const y = x.map((v) => Math.sin(1.5 * v) + 0.3 * v + 0.25 * g.normal())
+  const g = stream(seed)
+  const x = Array.from({ length: N }, () => -3 + 6 * uniform(g)).sort((a, b) => a - b)
+  const y = x.map((v) => Math.sin(1.5 * v) + 0.3 * v + 0.25 * normal(g))
   return { x, y }
 }
 
@@ -67,69 +71,71 @@ function solveSpd(M: number[][], y: number[]): number[] {
 
 /** Kernel ridge regression: a linear model in the kernel's feature space, fitted through the N × N Gram matrix. */
 export function KernelRegression() {
-  const [name, setName] = useState<KernelName>('rbf')
-  const width = useParam(0.6, { min: 0.1, max: 3, step: 0.05 })
-  const logLambda = useParam(-2, { min: -5, max: 1, step: 0.1 })
-  const seed = useParam(3, { min: 1, max: 20, step: 1 })
-  const data = useMemo(() => makeData(seed.value), [seed.value])
+  const state = useFigureState({
+    name: choice<KernelName>(KERNELS, 'rbf', { label: 'kernel' }),
+    width: float(0.6, { min: 0.1, max: 3, step: 0.05, label: 'RBF width ℓ' }),
+    logLambda: float(-2, { min: -5, max: 1, step: 0.1, label: 'log₁₀ λ (ridge penalty)' }),
+    seed: int(3, { min: 1, max: 20, step: 1, label: 'data seed' }),
+  })
+  const data = useMemo(() => makeData(state.seed), [state.seed])
 
   const r = useMemo(() => {
     const { x, y } = data
-    const lambda = 10 ** logLambda.value
-    const K = x.map((a) => x.map((b) => kernel(name, a, b, width.value)))
+    const lambda = 10 ** state.logLambda
+    const K = x.map((a) => x.map((b) => kernel(state.name, a, b, state.width)))
     const alpha = solveSpd(
       K.map((row, i) => row.map((v, j) => v + (i === j ? lambda : 0))),
       y,
     )
-    const fit = GRID.map((g) => x.reduce((s, xi, i) => s + alpha[i] * kernel(name, g, xi, width.value), 0))
+    const fit = GRID.map((g) => x.reduce((s, xi, i) => s + alpha[i] * kernel(state.name, g, xi, state.width), 0))
     const fitted = x.map((_, i) => K[i].reduce((s, k, j) => s + alpha[j] * k, 0))
     const rmse = Math.sqrt(fitted.reduce((s, f, i) => s + (f - y[i]) ** 2, 0) / N)
-    const series: XYSeries[] = [
-      { name: 'training data', type: 'scatter', x, y, slot: 0 },
-      { name: 'f(x) = Σ αᵢ k(x, xᵢ)', type: 'line', x: GRID, y: fit, slot: 1 },
-    ]
+    const series = [
+      { name: 'training data', x, y, slot: 0 },
+      { name: 'f(x) = Σ αᵢ k(x, xᵢ)', x: GRID, y: fit, slot: 1 },
+    ] as const
     const peak = Math.max(...K.flat().map(Math.abs))
     return { K, series, rmse, peak, alphaMax: Math.max(...alpha.map(Math.abs)) }
-  }, [data, name, width.value, logLambda.value])
+  }, [data, state.name, state.width, state.logLambda])
 
   const index = Array.from({ length: N }, (_, i) => i + 1)
+  const xAxis = useAxis({ label: 'x', range: [-3.2, 3.2] })
+  const yAxis = useAxis({ label: 'y', range: [-3, 3] })
+  const xAxis2 = useAxis({ label: 'point j (sorted by x)' })
+  const yAxis2 = useAxis({ label: 'point i' })
   return (
-    <Interactive
+    <Figure
       title="A linear model in feature space, fitted through the Gram matrix"
+      state={state}
       caption="Kernel ridge regression solves (K + λI)α = y for the N × N Gram matrix K and predicts f(x) = Σ αᵢ k(x, xᵢ). The model is linear in the kernel's features but not in x. The right panel shows K with the points sorted by x: the Gaussian kernel makes each point similar only to its neighbours, and the width sets how far that reaches. A narrow width with small λ chases the noise; a wide one smooths it away. The polynomial kernel can only produce cubics, and the linear kernel only straight lines."
-      controls={
-        <>
-          <ParamChoice label="kernel" value={name} onChange={setName} options={KERNELS} />
-          <ParamSlider label="RBF width ℓ" param={width} />
-          <ParamSlider label="log₁₀ λ (ridge penalty)" param={logLambda} />
-          <ParamSlider label="data seed" param={seed} />
-        </>
-      }
-      readout={
+
+      readouts={
         <>
           <Readout label="training RMSE" value={formatNumber(r.rmse)} />
           <Readout label="largest |αᵢ|" value={formatNumber(r.alphaMax)} />
           <Readout
             label="features used"
-            value={name === 'rbf' ? 'infinitely many' : name === 'polynomial' ? '4' : '1'}
+            value={state.name === 'rbf' ? 'infinitely many' : state.name === 'polynomial' ? '4' : '1'}
           />
         </>
       }
     >
       <div className="grid gap-4 md:grid-cols-2">
-        <XYChart height={340} xLabel="x" yLabel="y" series={r.series} xRange={[-3.2, 3.2]} yRange={[-3, 3]} />
-        <Heatmap
-          x={index}
-          y={index}
-          z={r.K}
-          scale={name === 'rbf' ? 'sequential' : 'diverging'}
-          range={name === 'rbf' ? [0, 1] : [-r.peak, r.peak]}
-          xLabel="point j (sorted by x)"
-          yLabel="point i"
-          valueLabel="k(xᵢ, xⱼ)"
-          height={340}
-        />
+        <Plot x={xAxis} y={yAxis} height={340}>
+          <Points {...r.series[0]} />
+          <Curve {...r.series[1]} />
+        </Plot>
+        <Plot x={xAxis2} y={yAxis2} height={340}>
+          <Raster
+            x={index}
+            y={index}
+            z={r.K}
+            scale={state.name === 'rbf' ? 'sequential' : 'diverging'}
+            range={state.name === 'rbf' ? [0, 1] : [-r.peak, r.peak]}
+            valueLabel={'k(xᵢ, xⱼ)'}
+          />
+        </Plot>
       </div>
-    </Interactive>
+    </Figure>
   )
 }

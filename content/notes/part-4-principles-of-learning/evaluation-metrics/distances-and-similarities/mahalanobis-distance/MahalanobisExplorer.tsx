@@ -45,15 +45,7 @@ export function MahalanobisExplorer() {
   const mu: [number, number] = [0, 0]
 
   // Covariance decomposition
-  const {
-    lambda1,
-    lambda2,
-    v1,
-    v2,
-    invCov,
-    sqrtCov,
-    invSqrtCov,
-  } = useMemo(() => {
+  const { lambda1, lambda2, v1, v2, invCov, sqrtCov, invSqrtCov } = useMemo(() => {
     const sxx = sigmaX * sigmaX
     const syy = sigmaY * sigmaY
     const sxy = rho * sigmaX * sigmaY
@@ -106,9 +98,7 @@ export function MahalanobisExplorer() {
     const dx = pt[0] - mu[0]
     const dy = pt[1] - mu[1]
     const euc = Math.hypot(dx, dy)
-    const mahalanobisSq =
-      dx * (invCov.sxx * dx + invCov.sxy * dy) +
-      dy * (invCov.sxy * dx + invCov.syy * dy)
+    const mahalanobisSq = dx * (invCov.sxx * dx + invCov.sxy * dy) + dy * (invCov.sxy * dx + invCov.syy * dy)
     const mah = Math.sqrt(Math.max(0, mahalanobisSq))
 
     // Whitened coordinate z = Σ^(-1/2) d
@@ -123,8 +113,7 @@ export function MahalanobisExplorer() {
 
   // Inversion detection
   const hasInversion =
-    (distA.euc > distB.euc && distA.mah < distB.mah) ||
-    (distA.euc < distB.euc && distA.mah > distB.mah)
+    (distA.euc > distB.euc && distA.mah < distB.mah) || (distA.euc < distB.euc && distA.mah > distB.mah)
 
   // Ellipse generation for data space (1, 2, 3 standard deviations)
   const ellipsePoints = useMemo(() => {
@@ -196,30 +185,9 @@ export function MahalanobisExplorer() {
       controls={
         <>
           <ControlRow>
-            <Slider
-              label="σ_x (scale 1)"
-              value={sigmaX}
-              min={0.5}
-              max={2.5}
-              step={0.1}
-              onChange={setSigmaX}
-            />
-            <Slider
-              label="σ_y (scale 2)"
-              value={sigmaY}
-              min={0.5}
-              max={2.5}
-              step={0.1}
-              onChange={setSigmaY}
-            />
-            <Slider
-              label="correlation ρ"
-              value={rho}
-              min={-0.92}
-              max={0.92}
-              step={0.04}
-              onChange={setRho}
-            />
+            <Slider label="σ_x (scale 1)" value={sigmaX} min={0.5} max={2.5} step={0.1} onChange={setSigmaX} />
+            <Slider label="σ_y (scale 2)" value={sigmaY} min={0.5} max={2.5} step={0.1} onChange={setSigmaY} />
+            <Slider label="correlation ρ" value={rho} min={-0.92} max={0.92} step={0.04} onChange={setRho} />
           </ControlRow>
           <ControlRow>
             <Select
@@ -267,18 +235,8 @@ export function MahalanobisExplorer() {
                 }
               }}
             />
-            <Readout
-              label="eigenvalues (λ₁, λ₂)"
-              value={`(${fmt(lambda1, 2)}, ${fmt(lambda2, 2)})`}
-            />
-            <Readout
-              label="ranking status"
-              value={
-                hasInversion
-                  ? 'Inverted! d_E ≠ D_M order'
-                  : 'Consistent ranking'
-              }
-            />
+            <Readout label="eigenvalues (λ₁, λ₂)" value={`(${fmt(lambda1, 2)}, ${fmt(lambda2, 2)})`} />
+            <Readout label="ranking status" value={hasInversion ? 'Inverted! d_E ≠ D_M order' : 'Consistent ranking'} />
           </ControlRow>
         </>
       }
@@ -299,14 +257,8 @@ export function MahalanobisExplorer() {
         ),
         'Nearest neighbour status': (
           <>
-            <Readout
-              label="Euclidean nearest"
-              value={distA.euc < distB.euc ? 'Point A' : 'Point B'}
-            />
-            <Readout
-              label="Mahalanobis nearest"
-              value={distA.mah < distB.mah ? 'Point A' : 'Point B'}
-            />
+            <Readout label="Euclidean nearest" value={distA.euc < distB.euc ? 'Point A' : 'Point B'} />
+            <Readout label="Mahalanobis nearest" value={distA.mah < distB.mah ? 'Point A' : 'Point B'} />
             <Readout
               label="geometric insight"
               value={
@@ -328,52 +280,27 @@ export function MahalanobisExplorer() {
 
           {/* Covariance ellipses */}
           {ellipsePoints.map((el) => (
-            <Curve
-              key={el.k}
-              name={`${el.k}σ contour`}
-              x={el.xs}
-              y={el.ys}
-              dashed={el.k > 1}
-              thin
-            />
+            <Curve key={el.k} name={`${el.k}σ contour`} x={el.xs} y={el.ys} dashed={el.k > 1} thin />
           ))}
 
           {/* Principal eigenvector rays */}
           <Curve
             name="Major axis"
-            x={[
-              -2.5 * Math.sqrt(lambda1) * v1[0],
-              2.5 * Math.sqrt(lambda1) * v1[0],
-            ]}
-            y={[
-              -2.5 * Math.sqrt(lambda1) * v1[1],
-              2.5 * Math.sqrt(lambda1) * v1[1],
-            ]}
+            x={[-2.5 * Math.sqrt(lambda1) * v1[0], 2.5 * Math.sqrt(lambda1) * v1[0]]}
+            y={[-2.5 * Math.sqrt(lambda1) * v1[1], 2.5 * Math.sqrt(lambda1) * v1[1]]}
             muted
             thin
           />
           <Curve
             name="Minor axis"
-            x={[
-              -2.5 * Math.sqrt(lambda2) * v2[0],
-              2.5 * Math.sqrt(lambda2) * v2[0],
-            ]}
-            y={[
-              -2.5 * Math.sqrt(lambda2) * v2[1],
-              2.5 * Math.sqrt(lambda2) * v2[1],
-            ]}
+            x={[-2.5 * Math.sqrt(lambda2) * v2[0], 2.5 * Math.sqrt(lambda2) * v2[0]]}
+            y={[-2.5 * Math.sqrt(lambda2) * v2[1], 2.5 * Math.sqrt(lambda2) * v2[1]]}
             muted
             thin
           />
 
           {/* Sample scatter cloud */}
-          <Points
-            name="Sample cloud"
-            x={dataCloud.xs}
-            y={dataCloud.ys}
-            size={4}
-            muted
-          />
+          <Points name="Sample cloud" x={dataCloud.xs} y={dataCloud.ys} size={4} muted />
 
           {/* Center μ */}
           <Points name="Mean μ" x={[mu[0]]} y={[mu[1]]} size={7} />
@@ -408,24 +335,11 @@ export function MahalanobisExplorer() {
 
           {/* Circular contours */}
           {circlePoints.map((c) => (
-            <Curve
-              key={c.k}
-              name={`${c.k}σ circle`}
-              x={c.xs}
-              y={c.ys}
-              dashed={c.k > 1}
-              thin
-            />
+            <Curve key={c.k} name={`${c.k}σ circle`} x={c.xs} y={c.ys} dashed={c.k > 1} thin />
           ))}
 
           {/* Whitened scatter cloud */}
-          <Points
-            name="Whitened cloud"
-            x={whitenedCloud.xs}
-            y={whitenedCloud.ys}
-            size={4}
-            muted
-          />
+          <Points name="Whitened cloud" x={whitenedCloud.xs} y={whitenedCloud.ys} size={4} muted />
 
           {/* Center origin */}
           <Points name="Origin" x={[0]} y={[0]} size={7} />

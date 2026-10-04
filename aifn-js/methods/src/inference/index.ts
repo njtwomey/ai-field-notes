@@ -1,5 +1,5 @@
 /**
- * `aifn-applied/inference`: named probabilistic models on the engines of `aifn/inference`: sequence models (HMM
+ * `aifn-methods/inference`: named probabilistic models on the engines of `aifn/inference`: sequence models (HMM
  * problems, the linear-chain CRF), topic models (LDA), rating models (TrueSkill), learner models (IRT-ZILM), lattice
  * models (Ising), mixture models, conjugate models and classifier models (the Bayes point machine).
  */

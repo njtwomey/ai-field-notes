@@ -25,13 +25,7 @@ export function Controls({
           : 'grid-cols-[repeat(auto-fill,minmax(13rem,1fr))]'
 
   return (
-    <div
-      className={cn(
-        'grid items-end gap-x-4 gap-y-2.5 w-full *:w-full *:max-w-none',
-        gridCols,
-        className,
-      )}
-    >
+    <div className={cn('grid w-full items-end gap-x-4 gap-y-2.5 *:w-full *:max-w-none', gridCols, className)}>
       {children}
     </div>
   )
@@ -50,7 +44,7 @@ export function ControlRow({
   className?: string
 }) {
   return (
-    <div className={cn('col-span-full flex flex-col gap-1.5 w-full', className)}>
+    <div className={cn('col-span-full flex w-full flex-col gap-1.5', className)}>
       {label && <div className="text-xs font-medium text-muted-foreground">{label}</div>}
       <Controls>{children}</Controls>
     </div>
@@ -126,29 +120,29 @@ export function ControlGroup({
           }
           className={cn(
             'flex items-center justify-between gap-2 select-none',
-            collapsible && 'cursor-pointer group hover:text-foreground',
-            !isCollapsed && 'border-b border-border/30 pb-1 mb-2',
+            collapsible && 'group cursor-pointer hover:text-foreground',
+            !isCollapsed && 'mb-2 border-b border-border/30 pb-1',
           )}
         >
-          <div className="flex items-center gap-1.5 min-w-0">
+          <div className="flex min-w-0 items-center gap-1.5">
             {collapsible && (
               <span className="text-muted-foreground transition-transform group-hover:text-foreground">
                 {isCollapsed ? <ChevronRight className="size-3" /> : <ChevronDown className="size-3" />}
               </span>
             )}
             {Icon && <Icon className="size-3 shrink-0 text-muted-foreground" />}
-            <div className="min-w-0 flex items-baseline gap-2">
+            <div className="flex min-w-0 items-baseline gap-2">
               {title && (
-                <span className="font-sans text-[11px] font-semibold tracking-wider uppercase text-muted-foreground/90 group-hover:text-foreground">
+                <span className="font-sans text-[11px] font-semibold tracking-wider text-muted-foreground/90 uppercase group-hover:text-foreground">
                   {title}
                 </span>
               )}
-              {description && <p className="font-sans text-[11px] text-muted-foreground/75 truncate">{description}</p>}
+              {description && <p className="truncate font-sans text-[11px] text-muted-foreground/75">{description}</p>}
             </div>
           </div>
-          <div className="flex items-center gap-2 shrink-0">
+          <div className="flex shrink-0 items-center gap-2">
             {badge && (
-              <span className="font-mono text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground font-medium">
+              <span className="rounded bg-muted px-1.5 py-0.5 font-mono text-[10px] font-medium text-muted-foreground">
                 {badge}
               </span>
             )}
@@ -166,5 +160,3 @@ export function ControlGroup({
     </div>
   )
 }
-
-

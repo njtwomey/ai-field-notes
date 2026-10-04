@@ -1,5 +1,5 @@
 /**
- * aifn-applied/evaluation: hand-checked cases of the detection, segmentation, text, quality, generative, fairness and
+ * aifn-methods/evaluation: hand-checked cases of the detection, segmentation, text, quality, generative, fairness and
  * beyond-accuracy metrics, mostly the worked examples of the site's notes.
  */
 import { describe, expect, it } from 'vitest'
@@ -13,7 +13,7 @@ import {
   meanIou,
   panopticFromMatches,
   panopticQuality,
-} from 'aifn-applied/evaluation/detection'
+} from 'aifn-methods/evaluation/detection'
 import {
   bleuScore,
   chrFScore,
@@ -26,10 +26,10 @@ import {
   editAlignment,
   bertScore,
   backretrieval,
-} from 'aifn-applied/evaluation/text'
-import { demographicParityDifference, equalisedOddsDifference } from 'aifn-applied/evaluation/fairness'
-import { frechetDistance, generativePrecisionRecall, inceptionScore, kid } from 'aifn-applied/evaluation/generative'
-import { giniCoefficient } from 'aifn-applied/evaluation/beyond-accuracy'
+} from 'aifn-methods/evaluation/text'
+import { demographicParityDifference, equalisedOddsDifference } from 'aifn-methods/evaluation/fairness'
+import { frechetDistance, generativePrecisionRecall, inceptionScore, kid } from 'aifn-methods/evaluation/generative'
+import { giniCoefficient } from 'aifn-methods/evaluation/beyond-accuracy'
 import {
   psnr,
   siSdr,
@@ -38,7 +38,7 @@ import {
   ergas,
   spectralAngle,
   permutationInvariantScore,
-} from 'aifn-applied/evaluation/quality'
+} from 'aifn-methods/evaluation/quality'
 
 describe('detection and segmentation', () => {
   it('reproduces the box and AP examples', () => {

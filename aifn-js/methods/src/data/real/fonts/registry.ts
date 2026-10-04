@@ -1,4 +1,4 @@
-/** The functions of `aifn-applied/data/real/fonts` besides its dataset. */
+/** The functions of `aifn-methods/data/real/fonts` besides its dataset. */
 
 import { definer, entries, type Entry, type FunctionInfo } from 'aifn/foundation/registry'
 import * as fonts from './fonts'

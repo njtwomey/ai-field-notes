@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { gradientDescent, type FirstOrderState } from 'aifn/optim/first-order'
-import { rosenbrock, type TestFunction } from 'aifn-applied/data/objectives'
+import { rosenbrock, type TestFunction } from 'aifn-methods/data/objectives'
 import { tensor, toFlat, type Tensor } from 'aifn/foundation/tensor'
 import { trace } from 'aifn/foundation/trace'
 import {
@@ -50,19 +50,14 @@ export function LineSearchExplorer() {
 
   const t = useMemo(
     () =>
-      trace(
-        gradientDescent(ROSEN.objective, { lineSearch: kind, stepSize: alpha0 }),
-        { x0: ROSEN.start },
-        150,
-        {
-          record: {
-            'f(x)': (s) => s.value,
-            'step α': (s) => s.stepSize,
-            trials: (s) => s.lineSearch?.trials.length ?? 0,
-            x: (s) => s.x,
-          },
+      trace(gradientDescent(ROSEN.objective, { lineSearch: kind, stepSize: alpha0 }), { x0: ROSEN.start }, 150, {
+        record: {
+          'f(x)': (s) => s.value,
+          'step α': (s) => s.stepSize,
+          trials: (s) => s.lineSearch?.trials.length ?? 0,
+          x: (s) => s.x,
         },
-      ),
+      }),
     [kind, alpha0],
   )
 
@@ -127,26 +122,14 @@ export function LineSearchExplorer() {
             { value: 'strong-wolfe', label: 'Strong Wolfe' },
           ]}
         />
-        <Slider
-          label="Initial trial step α₀"
-          value={alpha0}
-          min={0.005}
-          max={0.2}
-          step={0.005}
-          onChange={setAlpha0}
-        />
+        <Slider label="Initial trial step α₀" value={alpha0} min={0.005} max={0.2} step={0.005} onChange={setAlpha0} />
       </ControlRow>
 
       <ControlRow>
-        <Player
-          label="Iteration"
-          value={currentStep}
-          count={totalSteps}
-          onChange={setStep}
-        />
+        <Player label="Iteration" value={currentStep} count={totalSteps} onChange={setStep} />
       </ControlRow>
 
-      <div className="flex flex-wrap gap-4 text-xs font-mono text-muted-foreground my-2">
+      <div className="my-2 flex flex-wrap gap-4 font-mono text-xs text-muted-foreground">
         <Readout label="step" value={`${currentStep} / ${totalSteps - 1}`} />
         <Readout label="f(x)" value={formatNumber(currentState.value)} />
         <Readout label="accepted α" value={currentState.stepSize ? formatNumber(currentState.stepSize) : '—'} />

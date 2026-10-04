@@ -1,14 +1,17 @@
 import { useMemo, useState } from 'react'
 import {
-  Interactive,
-  ParamButton,
-  ParamSlider,
-  Readout,
-  XYChart,
+  Button,
+  Curve,
+  Figure,
   formatNumber,
-  useParam,
-  type Handle,
-  type XYSeries,
+  Handle,
+  Player,
+  Plot,
+  Points,
+  Readout,
+  slider,
+  useAxis,
+  useFigureState,
 } from 'aifn-render'
 import { grid } from '../_shared/ep'
 import { gpcEp, gpcEpPredict, gpcLaplace, seKernel } from '../_shared/gpc'
@@ -27,41 +30,44 @@ const SWEEPS = 8
  */
 export function GpcEp() {
   const [xs, setXs] = useState(INITIAL)
-  const sweep = useParam(1, { min: 0, max: SWEEPS, step: 1 })
-  const ell = useParam(1, { min: 0.3, max: 3, step: 0.05 })
-  const sf = useParam(2, { min: 0.5, max: 5, step: 0.1 })
+  const state = useFigureState({
+    ell: slider(0.3, 3, 1, { step: 0.05, label: 'length-scale ℓ' }),
+    sf: slider(0.5, 5, 2, { step: 0.1, label: 'signal sd σ_f' }),
+  })
+  // EP sweeps made: the walk-through position. It counts sweeps, so it keeps its meaning when the inputs change.
+  const [sweep, setSweep] = useState(0)
 
   const r = useMemo(() => {
-    const k = seKernel(ell.value, sf.value)
+    const k = seKernel(state.ell, state.sf)
     const states = gpcEp(xs, LABELS, k, SWEEPS)
     return {
       states,
       preds: states.map((s) => gpcEpPredict(xs, k, s.tau, s.nu, XS)),
       laplace: gpcLaplace(xs, LABELS, k, XS),
     }
-  }, [xs, ell.value, sf.value])
+  }, [xs, state.ell, state.sf])
 
-  const state = r.states[sweep.value]
-  const ep = r.preds[sweep.value]
+  const site = r.states[sweep]
+  const ep = r.preds[sweep]
   const la = r.laplace.predict
   const band = (m: number[], v: number[], sign: 1 | -1) => m.map((mi, i) => mi + sign * 2 * Math.sqrt(v[i]))
-  const pseudo = state.tau
-    .map((t, i) => ({ x: xs[i], y: t > 0 ? state.nu[i] / t : NaN }))
+  const pseudo = site.tau
+    .map((t, i) => ({ x: xs[i], y: t > 0 ? site.nu[i] / t : NaN }))
     .filter((p) => Number.isFinite(p.y))
 
-  const latent: XYSeries[] = [
-    { name: 'EP mean', type: 'line', x: XS, y: ep.mean, slot: 0 },
-    { name: 'EP ± 2 sd', type: 'line', x: XS, y: band(ep.mean, ep.variance, 1), slot: 0, dashed: true },
-    { name: 'EP ± 2 sd', type: 'line', x: XS, y: band(ep.mean, ep.variance, -1), slot: 0, dashed: true },
-    { name: 'Laplace mean', type: 'line', x: XS, y: la.mean, slot: 1 },
-    { name: 'Laplace ± 2 sd', type: 'line', x: XS, y: band(la.mean, la.variance, 1), slot: 1, dashed: true },
-    { name: 'Laplace ± 2 sd', type: 'line', x: XS, y: band(la.mean, la.variance, -1), slot: 1, dashed: true },
-    { name: 'site means ν̃/τ̃', type: 'scatter', x: pseudo.map((p) => p.x), y: pseudo.map((p) => p.y), slot: 2 },
-  ]
-  const probability: XYSeries[] = [
-    { name: 'EP', type: 'line', x: XS, y: ep.prob, slot: 0 },
-    { name: 'Laplace', type: 'line', x: XS, y: la.prob, slot: 1 },
-  ]
+  const latent = [
+    { name: 'EP mean', x: XS, y: ep.mean, slot: 0 },
+    { name: 'EP ± 2 sd', x: XS, y: band(ep.mean, ep.variance, 1), slot: 0, dashed: true },
+    { name: 'EP ± 2 sd', x: XS, y: band(ep.mean, ep.variance, -1), slot: 0, dashed: true },
+    { name: 'Laplace mean', x: XS, y: la.mean, slot: 1 },
+    { name: 'Laplace ± 2 sd', x: XS, y: band(la.mean, la.variance, 1), slot: 1, dashed: true },
+    { name: 'Laplace ± 2 sd', x: XS, y: band(la.mean, la.variance, -1), slot: 1, dashed: true },
+    { name: 'site means ν̃/τ̃', x: pseudo.map((p) => p.x), y: pseudo.map((p) => p.y), slot: 2 },
+  ] as const
+  const probability = [
+    { name: 'EP', x: XS, y: ep.prob, slot: 0 },
+    { name: 'Laplace', x: XS, y: la.prob, slot: 1 },
+  ] as const
   const handles: Handle[] = xs.map((x, i) => ({
     kind: 'point',
     at: [x, LABELS[i] > 0 ? 1 : 0],
@@ -71,19 +77,29 @@ export function GpcEp() {
   }))
   const at0 = XS.indexOf(0)
 
+  const xAxis = useAxis({ label: 'x', range: X_RANGE })
+  const yAxis = useAxis({ label: 'latent f', range: F_RANGE })
+  const yAxis2 = useAxis({ label: 'p(y = +1)', range: P_RANGE })
   return (
-    <Interactive
+    <Figure
       title="EP for Gaussian process classification, sweep by sweep"
+      state={state}
       caption="Top: the latent function f with ±2 sd bands under EP after the chosen number of sweeps, and under the Laplace approximation. The dots are the sites' means ν̃/τ̃: EP's posterior is exactly GP regression on these pseudo-targets with noise variances 1/τ̃. Bottom: the predictive probability of class +1. The labelled points sit at 0 and 1; drag them sideways. EP's latent function is larger in magnitude than Laplace's, and its probabilities more confident."
       controls={
         <>
-          <ParamSlider label="EP sweeps" param={sweep} withArrows format={(v) => String(v)} />
-          <ParamSlider label="length-scale ℓ" param={ell} />
-          <ParamSlider label="signal sd σ_f" param={sf} />
-          <ParamButton onClick={() => setXs(INITIAL)}>Reset points</ParamButton>
+          <Player
+            value={sweep}
+            onChange={setSweep}
+            count={SWEEPS + 1}
+            label="EP sweeps"
+            format={(k) => `${k} of ${SWEEPS}`}
+          />
+          <Button variant="outline" size="sm" onClick={() => setXs(INITIAL)}>
+            Reset points
+          </Button>
         </>
       }
-      readout={
+      readouts={
         <>
           <Readout
             label="f(0): EP mean, sd"
@@ -100,16 +116,22 @@ export function GpcEp() {
         </>
       }
     >
-      <XYChart series={latent} xLabel="x" yLabel="latent f" xRange={X_RANGE} yRange={F_RANGE} height={300} />
-      <XYChart
-        series={probability}
-        xLabel="x"
-        yLabel="p(y = +1)"
-        xRange={X_RANGE}
-        yRange={P_RANGE}
-        handles={handles}
-        height={240}
-      />
-    </Interactive>
+      <Plot x={xAxis} y={yAxis} height={300}>
+        <Curve {...latent[0]} />
+        <Curve {...latent[1]} />
+        <Curve {...latent[2]} />
+        <Curve {...latent[3]} />
+        <Curve {...latent[4]} />
+        <Curve {...latent[5]} />
+        <Points {...latent[6]} />
+      </Plot>
+      <Plot x={xAxis} y={yAxis2} height={240}>
+        <Curve {...probability[0]} />
+        <Curve {...probability[1]} />
+        {handles.map((h, i) => (
+          <Handle key={i} {...h} />
+        ))}
+      </Plot>
+    </Figure>
   )
 }

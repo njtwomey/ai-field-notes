@@ -1,5 +1,5 @@
 /**
- * The registry of `aifn-applied/generative/diffusion`: the forward chain, the four samplers and denoiser training as
+ * The registry of `aifn-methods/generative/diffusion`: the forward chain, the four samplers and denoiser training as
  * traceable algorithms; schedules, forward SDEs, predictors and the Gaussian-mixture toy (exact score) as functions.
  */
 

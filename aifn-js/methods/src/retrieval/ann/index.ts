@@ -1,5 +1,5 @@
 /**
- * `aifn-applied/retrieval/ann`: a recall-against-speed benchmark of the nearest-neighbour indexes of
+ * `aifn-methods/retrieval/ann`: a recall-against-speed benchmark of the nearest-neighbour indexes of
  * `aifn/numerics/neighbours` (k-d tree, LSH, IVF, PQ, HNSW), streamed method by method.
  */
 

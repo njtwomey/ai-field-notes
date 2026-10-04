@@ -1,6 +1,18 @@
-import { useMemo, useState } from 'react'
-import { Interactive, ParamChoice, ParamSlider, XYChart, useParam, type Handle, type Param } from 'aifn-render'
-import { rng } from '@/lib/math'
+import { useMemo } from 'react'
+import {
+  choice,
+  Figure,
+  Handle,
+  int,
+  type Param,
+  Plot,
+  seriesLayers,
+  slider,
+  useAxis,
+  useFigureState,
+  when,
+} from 'aifn-render'
+import { normal, stream, uniform } from 'aifn/foundation/random'
 import type { Point } from '../../_shared/datasets'
 import { clusterSeries } from '../../_shared/groups'
 import { covariance, eigSymmetric } from '../../_shared/linalg'
@@ -48,10 +60,10 @@ const K_MAX = 8
 /** A seeded subsample of `n` of the rows, in their original order. */
 function subsample(rows: Rows, n: number, seed: number): Rows {
   if (n >= rows.length) return rows
-  const r = rng(seed)
+  const r = stream(seed)
   const order = rows.map((_, i) => i)
   for (let i = 0; i < n; i++) {
-    const j = i + Math.floor(r.uniform() * (rows.length - i))
+    const j = i + Math.floor(uniform(r) * (rows.length - i))
     ;[order[i], order[j]] = [order[j], order[i]]
   }
   return order
@@ -66,23 +78,23 @@ function subsample(rows: Rows, n: number, seed: number): Rows {
  */
 function structuredData(kind: Structured, n: number, d: number, seed: number): Rows {
   if (kind === 'iris') return standardise(subsample(IRIS, n, seed))
-  const r = rng(seed)
+  const r = stream(seed)
   const centres = [
     [0, 0],
     [6, 0],
     [3, 5.2],
-  ].map((t) => Array.from({ length: d }, (_, j) => (j < 2 ? t[j] : 2 * r.normal())))
-  return standardise(Array.from({ length: n }, (_, i) => centres[i % 3].map((c) => c + r.normal())))
+  ].map((t) => Array.from({ length: d }, (_, j) => (j < 2 ? t[j] : 2 * normal(r))))
+  return standardise(Array.from({ length: n }, (_, i) => centres[i % 3].map((c) => c + normal(r))))
 }
 
 /** Data with no groups, the same size and dimension: uniform over the structured data's box, or one Gaussian. */
 function nullData(kind: Null, like: Rows, seed: number): Rows {
-  const r = rng(seed)
+  const r = stream(seed)
   const d = like[0].length
   const rows =
     kind === 'uniform'
-      ? uniformInBox(like.length, boundingBox(like), r.uniform)
-      : like.map(() => Array.from({ length: d }, () => r.normal()))
+      ? uniformInBox(like.length, boundingBox(like), () => uniform(r))
+      : like.map(() => Array.from({ length: d }, () => normal(r)))
   return standardise(rows)
 }
 
@@ -101,9 +113,9 @@ function project(x: Rows): Point[] {
 function useTree(x: Rows, linkage: Linkage, seed: number) {
   return useMemo(() => {
     const merges = agglomerate(x, linkage)
-    const r = rng(seed)
-    const refs = referenceTrees(x, linkage, B_GAP, r.uniform)
-    const subs = subsampleTrees(x, linkage, B_STABILITY, 0.8, r.uniform)
+    const r = stream(seed)
+    const refs = referenceTrees(x, linkage, B_GAP, () => uniform(r))
+    const subs = subsampleTrees(x, linkage, B_STABILITY, 0.8, () => uniform(r))
     // The gap statistic's rule: the smallest k with Gap(k) ≥ Gap(k + 1) − s(k + 1).
     const gaps = Array.from({ length: K_MAX + 1 }, (_, i) => gap(x, cutK(x.length, merges, i + 1), i + 1, refs))
     const chosen = gaps.findIndex((g, i) => i < K_MAX && g.gap >= gaps[i + 1].gap - gaps[i + 1].s) + 1
@@ -118,7 +130,7 @@ function useTree(x: Rows, linkage: Linkage, seed: number) {
       tree: dendrogram(x.length, merges),
       top: merges[merges.length - 1].height,
       coph: copheneticCorrelation(x, merges),
-      hopkins: hopkins(x, Math.max(5, Math.round(x.length / 10)), 10, r.uniform),
+      hopkins: hopkins(x, Math.max(5, Math.round(x.length / 10)), 10, () => uniform(r)),
       points,
       xRange: pad(points.map((p) => p[0])),
       yRange: pad(points.map((p) => p[1])),
@@ -170,32 +182,25 @@ function Side({
     return [0, Math.ceil((t.top * 1.02) / unit) * unit] as [number, number]
   }, [t.top])
   const treeSeries = useMemo(
-    () => [{ name: 'dendrogram', type: 'line' as const, x: t.tree.x, y: t.tree.y, emphasis: true }],
+    () => [{ name: 'dendrogram', type: 'line' as const, x: t.tree.x, y: t.tree.y, emphasis: true }] as const,
     [t.tree],
   )
   const scatter = useMemo(() => clusterSeries(t.points, c.labels, 'singletons and small'), [t.points, c.labels])
-  const handles: Handle[] = [{ kind: 'y', at: c.height, label: 'cut', onDrag: (y) => cutAt.set(y / t.top) }]
   const pc = dims > 2
+  const xAxis = useAxis({ label: 'leaf order', range: xRange })
+  const yAxis = useAxis({ label: 'merge height', range: yRange })
+  const xAxis2 = useAxis({ label: pc ? 'PC 1' : 'x₁', range: t.xRange })
+  const yAxis2 = useAxis({ label: pc ? 'PC 2' : 'x₂', range: t.yRange })
   return (
     <div className="flex min-w-0 flex-col gap-2">
       <div className="text-sm font-medium">{title}</div>
-      <XYChart
-        height={240}
-        xLabel="leaf order"
-        yLabel="merge height"
-        xRange={xRange}
-        yRange={yRange}
-        handles={handles}
-        series={treeSeries}
-      />
-      <XYChart
-        height={240}
-        xLabel={pc ? 'PC 1' : 'x₁'}
-        yLabel={pc ? 'PC 2' : 'x₂'}
-        xRange={t.xRange}
-        yRange={t.yRange}
-        series={scatter}
-      />
+      <Plot x={xAxis} y={yAxis} height={240}>
+        {seriesLayers(treeSeries)}
+        <Handle kind="y" at={c.height} label="cut" onDrag={(y) => cutAt.set(y / t.top)} />
+      </Plot>
+      <Plot x={xAxis2} y={yAxis2} height={240}>
+        {seriesLayers(scatter)}
+      </Plot>
     </div>
   )
 }
@@ -203,23 +208,28 @@ function Side({
 const fmt = (v: number | undefined | null) => (v == null || !Number.isFinite(v) ? '—' : v.toFixed(2))
 
 export function StructureOrNoise() {
-  const [kind, setKind] = useState<Structured>('iris')
-  const [nullKind, setNullKind] = useState<Null>('uniform')
-  const [linkage, setLinkage] = useState<Linkage>('ward')
-  const nPoints = useParam(150, { min: 30, max: 150, step: 10 })
-  const dim = useParam(4, { min: 2, max: 10, step: 1 })
-  const seed = useParam(1, { min: 1, max: 50, step: 1 })
-  const cutA = useParam(0.6, { min: 0, max: 1, step: 0.005 })
-  const cutB = useParam(0.6, { min: 0, max: 1, step: 0.005 })
+  const state = useFigureState({
+    kind: choice(STRUCTURED, 'iris', { label: 'structured data' }),
+    nullKind: choice(NULLS, 'uniform', { label: 'random data' }),
+    linkage: choice(LINKAGES, 'ward', { label: 'linkage' }),
+    nPoints: int(150, { min: 30, max: 150, step: 10, label: 'points', suggestions: [30, 60, 100, 150] }),
+    dim: int(4, { min: 2, max: 10, step: 1, label: 'dimension', when: when('kind', 'blobs') }),
+    seed: int(1, { min: 1, max: 50, label: 'seed' }),
+    cutA: slider(0, 1, 0.6, { step: 0.005, label: 'cut, structured (fraction of top merge)' }),
+    cutB: slider(0, 1, 0.6, { step: 0.005, label: 'cut, random (fraction of top merge)' }),
+  })
+  const { kind, nullKind, linkage } = state
+  const nPoints = state.nPoints
+  const dim = state.dim
+  const seed = state.seed
+  const cutA = state.bind('cutA')
+  const cutB = state.bind('cutB')
 
-  const d = kind === 'iris' ? 4 : dim.value
-  const xa = useMemo(
-    () => structuredData(kind, nPoints.value, dim.value, seed.value),
-    [kind, nPoints.value, dim.value, seed.value],
-  )
-  const xb = useMemo(() => nullData(nullKind, xa, seed.value + 1000), [nullKind, xa, seed.value])
-  const ta = useTree(xa, linkage, seed.value + 1)
-  const tb = useTree(xb, linkage, seed.value + 2)
+  const d = kind === 'iris' ? 4 : dim
+  const xa = useMemo(() => structuredData(kind, nPoints, dim, seed), [kind, nPoints, dim, seed])
+  const xb = useMemo(() => nullData(nullKind, xa, seed + 1000), [nullKind, xa, seed])
+  const ta = useTree(xa, linkage, seed + 1)
+  const tb = useTree(xb, linkage, seed + 2)
   const ca = useCut(xa, ta, cutA)
   const cb = useCut(xb, tb, cutB)
 
@@ -239,21 +249,10 @@ export function StructureOrNoise() {
   ]
 
   return (
-    <Interactive
+    <Figure
       title="Structure or noise? The same pipeline on both"
       caption={`Left: data with groups (Iris, or three Gaussian clusters). Right: the same number of points in the same ${d} dimensions with no groups. Both go through one pipeline: standardise, build the tree, cut it. Drag the cut line on either dendrogram, or use the sliders; the scatter plots show the first two principal components when d > 2. The two trees look alike, and a cut always returns clusters. The jump ratio and the cophenetic correlation differ only in degree. The gap rule, which compares with uniform reference data, chooses k = 1 for noise, and cluster stability under subsampling is high only for real groups (check the cluster sizes: single linkage peels off stable outliers from noise too). A single Gaussian is not uniform, so the Hopkins statistic and the gap at the cut rate it as clustered: the null reference decides what counts as structure.`}
-      controls={
-        <>
-          <ParamChoice label="structured data" value={kind} onChange={setKind} options={STRUCTURED} />
-          <ParamChoice label="random data" value={nullKind} onChange={setNullKind} options={NULLS} />
-          <ParamChoice label="linkage" value={linkage} onChange={setLinkage} options={LINKAGES} />
-          <ParamSlider label="points" param={nPoints} />
-          <ParamSlider label={kind === 'iris' ? 'dimension (Iris has 4)' : 'dimension'} param={dim} />
-          <ParamSlider label="seed" param={seed} />
-          <ParamSlider label="cut, structured (fraction of top merge)" param={cutA} />
-          <ParamSlider label="cut, random (fraction of top merge)" param={cutB} />
-        </>
-      }
+      state={state}
     >
       <div className="grid gap-6 md:grid-cols-2">
         <Side title="Structured data" t={ta} c={ca} cutAt={cutA} dims={d} />
@@ -277,6 +276,6 @@ export function StructureOrNoise() {
           ))}
         </tbody>
       </table>
-    </Interactive>
+    </Figure>
   )
 }

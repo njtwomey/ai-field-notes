@@ -17,13 +17,7 @@ export type SwatchPickerProps = {
  * A categorical color swatch picker: displays the 10 data palette slots for the current theme,
  * highlighting the active slot with a checkmark and showing its hex value.
  */
-export function SwatchPicker({
-  label = 'Colour slot',
-  value,
-  onChange,
-  colours,
-  className,
-}: SwatchPickerProps) {
+export function SwatchPicker({ label = 'Colour slot', value, onChange, colours, className }: SwatchPickerProps) {
   const { resolved } = useTheme()
   const swatches = colours ?? palette.categorical[resolved]
   const activeColor = swatches[value % swatches.length]
@@ -42,8 +36,8 @@ export function SwatchPicker({
               title={`Slot ${i}: ${hex}`}
               aria-label={`Slot ${i}: ${hex}`}
               className={cn(
-                'relative size-7 rounded-md transition-all hover:scale-110 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring ring-1 ring-foreground/10',
-                selected && 'ring-2 ring-foreground scale-105 shadow-xs',
+                'relative size-7 rounded-md ring-1 ring-foreground/10 transition-all hover:scale-110 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-hidden',
+                selected && 'scale-105 shadow-xs ring-2 ring-foreground',
               )}
               style={{ backgroundColor: hex }}
             >

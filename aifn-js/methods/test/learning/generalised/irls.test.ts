@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { irls } from 'aifn-applied/learning/generalised'
+import { irls } from 'aifn-methods/learning/generalised'
 import { binomialFamily, likelihood, link } from 'aifn/probability/likelihoods'
 import { child, normals, stream } from 'aifn/foundation/random'
 import { fromData, toFlat, type Tensor } from 'aifn/foundation/tensor'

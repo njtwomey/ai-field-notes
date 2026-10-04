@@ -1,7 +1,7 @@
-import { useMemo, useState } from 'react'
-import { Heatmap, Interactive, ParamChoice, ParamSlider, Readout, formatNumber, useParam } from 'aifn-render'
-import { stft } from '@/lib/dsp'
-import { rng } from '@/lib/math'
+import { useMemo } from 'react'
+import { choice, Figure, float, formatNumber, int, Plot, Raster, Readout, useAxis, useFigureState } from 'aifn-render'
+import { stft } from '../_shared/audio'
+import { normal, stream } from 'aifn/foundation/random'
 
 const FS = 8000
 const LENGTH = 2 * FS
@@ -17,13 +17,22 @@ type Method = 'subtraction' | 'wiener'
  * Wiener rule applies SNR/(1+SNR) with the decision-directed a priori SNR.
  */
 export function SpectralSubtraction() {
-  const [method, setMethod] = useState<Method>('subtraction')
-  const snrDb = useParam(0, { min: -10, max: 15, step: 1 })
-  const alpha = useParam(2, { min: 1, max: 5, step: 0.1 })
-  const floor = useParam(0.02, { min: 0, max: 0.3, step: 0.01 })
+  const state = useFigureState({
+    method: choice<Method>(
+      [
+        { value: 'subtraction', label: 'power subtraction' },
+        { value: 'wiener', label: 'Wiener, decision-directed' },
+      ],
+      'subtraction',
+      { label: 'method' },
+    ),
+    snrDb: int(0, { min: -10, max: 15, step: 1, label: 'input SNR (dB)' }),
+    alpha: float(2, { min: 1, max: 5, step: 0.1, label: 'over-subtraction α' }),
+    floor: float(0.02, { min: 0, max: 0.3, step: 0.01, label: 'spectral floor β' }),
+  })
 
   const r = useMemo(() => {
-    const g = rng(8)
+    const g = stream(8)
     // A tone gliding from 200 to 300 Hz with 8 harmonics, silent for the first LEAD seconds.
     const clean = Array.from({ length: LENGTH }, (_, n) => {
       const t = n / FS
@@ -35,8 +44,8 @@ export function SpectralSubtraction() {
       return s
     })
     const cleanPower = clean.reduce((a, v) => a + v * v, 0) / (LENGTH * (1 - LEAD / (LENGTH / FS)))
-    const sigma = Math.sqrt(cleanPower / 10 ** (snrDb.value / 10))
-    const noisy = clean.map((v) => v + sigma * g.normal())
+    const sigma = Math.sqrt(cleanPower / 10 ** (state.snrDb / 10))
+    const noisy = clean.map((v) => v + sigma * normal(g))
     const X = stft(noisy, SIZE, HOP).frames
     const S = stft(clean, SIZE, HOP).frames
     const leadFrames = Math.floor((LEAD * FS - SIZE) / HOP) + 1
@@ -50,7 +59,7 @@ export function SpectralSubtraction() {
       const prevClean = enhanced.at(-1) ?? new Array<number>(bins).fill(0)
       const out = Array.from(frame, (m, k) => {
         const p = m * m
-        if (method === 'subtraction') return Math.sqrt(Math.max(p - alpha.value * noisePower[k], floor.value * p))
+        if (state.method === 'subtraction') return Math.sqrt(Math.max(p - state.alpha * noisePower[k], state.floor * p))
         // Decision-directed a priori SNR (Ephraim–Malah), then the Wiener gain.
         const post = p / noisePower[k]
         const prio = 0.98 * ((prevClean[k] * prevClean[k]) / noisePower[k]) + 0.02 * Math.max(post - 1, 0)
@@ -77,29 +86,19 @@ export function SpectralSubtraction() {
       before: snr(Xarr),
       after: snr(enhanced),
     }
-  }, [method, snrDb.value, alpha.value, floor.value])
+  }, [state.method, state.snrDb, state.alpha, state.floor])
 
+  const xAxis = useAxis({ label: 'time (s)' })
+  const yAxis = useAxis({ label: 'frequency (Hz)' })
+  const xAxis2 = useAxis({ label: 'time (s)' })
+  const yAxis2 = useAxis({ label: 'frequency (Hz)' })
   return (
-    <Interactive
+    <Figure
       title="Spectral subtraction and the Wiener rule"
+      state={state}
       caption="A gliding harmonic tone in white noise; the first 0.3 s is noise only and gives the noise estimate. Top: the noisy spectrogram. Bottom: after enhancement. Plain subtraction (α = 1, no floor) leaves isolated random peaks wherever the noise happened to exceed its average: musical noise. Over-subtraction and a spectral floor suppress them at the cost of thinning the signal. The Wiener rule with a decision-directed a priori SNR smooths the gain over time and gives much less musical noise. The readouts compare magnitudes with the clean signal's."
-      controls={
-        <>
-          <ParamChoice
-            label="method"
-            value={method}
-            onChange={setMethod}
-            options={[
-              { value: 'subtraction', label: 'power subtraction' },
-              { value: 'wiener', label: 'Wiener, decision-directed' },
-            ]}
-          />
-          <ParamSlider label="input SNR (dB)" param={snrDb} />
-          <ParamSlider label="over-subtraction α" param={alpha} />
-          <ParamSlider label="spectral floor β" param={floor} />
-        </>
-      }
-      readout={
+
+      readouts={
         <>
           <Readout label="magnitude SNR, noisy" value={`${formatNumber(r.before)} dB`} />
           <Readout label="magnitude SNR, enhanced" value={`${formatNumber(r.after)} dB`} />
@@ -107,27 +106,13 @@ export function SpectralSubtraction() {
       }
     >
       <div className="space-y-4">
-        <Heatmap
-          x={r.times}
-          y={r.freqs}
-          z={r.noisyDb}
-          range={[-60, 0]}
-          xLabel="time (s)"
-          yLabel="frequency (Hz)"
-          valueLabel="dB"
-          height={220}
-        />
-        <Heatmap
-          x={r.times}
-          y={r.freqs}
-          z={r.enhancedDb}
-          range={[-60, 0]}
-          xLabel="time (s)"
-          yLabel="frequency (Hz)"
-          valueLabel="dB"
-          height={220}
-        />
+        <Plot x={xAxis} y={yAxis} height={220}>
+          <Raster x={r.times} y={r.freqs} z={r.noisyDb} range={[-60, 0]} valueLabel={'dB'} />
+        </Plot>
+        <Plot x={xAxis2} y={yAxis2} height={220}>
+          <Raster x={r.times} y={r.freqs} z={r.enhancedDb} range={[-60, 0]} valueLabel={'dB'} />
+        </Plot>
       </div>
-    </Interactive>
+    </Figure>
   )
 }

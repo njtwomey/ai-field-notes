@@ -1,6 +1,6 @@
 import { useMemo } from 'react'
-import { Interactive, ParamSlider, Readout, XYChart, formatNumber, useParam, type XYSeries } from 'aifn-render'
-import { linspace } from '@/lib/math'
+import { Curve, Figure, float, formatNumber, Plot, Readout, slider, useAxis, useFigureState } from 'aifn-render'
+import { linspace, toFlat } from 'aifn/foundation/tensor'
 
 const toRad = (deg: number) => (deg * Math.PI) / 180
 const toDeg = (rad: number) => (rad * 180) / Math.PI
@@ -26,49 +26,51 @@ function boundary(g: (t: number) => number, phi: number): number | null {
  * rival's logit is that loss's training decision boundary.
  */
 export function AngularMargins() {
-  const phiDeg = useParam(90, { min: 30, max: 120, step: 5 })
-  const mCos = useParam(0.35, { min: 0, max: 0.8, step: 0.05 })
-  const mArc = useParam(0.5, { min: 0, max: 1, step: 0.05 })
+  const state = useFigureState({
+    phiDeg: slider(30, 120, 90, {
+      step: 5,
+      label: 'angle between class weights φ (degrees)',
+      format: (v) => v.toFixed(0),
+    }),
+    mCos: float(0.35, { min: 0, max: 0.8, step: 0.05, label: 'CosFace margin m' }),
+    mArc: slider(0, 1, 0.5, { step: 0.05, label: 'ArcFace margin m (radians)' }),
+  })
 
   const r = useMemo(() => {
-    const phi = toRad(phiDeg.value)
-    const theta = linspace(0, phi, 181)
+    const phi = toRad(state.phiDeg)
+    const theta = toFlat(linspace(0, phi, 181))
     const deg = theta.map(toDeg)
     // cos(θ + m) stops decreasing once θ + m > π; the widget's ranges keep θ + m below π.
     const soft = (t: number) => Math.cos(t)
-    const cosface = (t: number) => Math.cos(t) - mCos.value
-    const arcface = (t: number) => Math.cos(t + mArc.value)
-    const series: XYSeries[] = [
-      { name: 'normalised softmax: cos θ', type: 'line', x: deg, y: theta.map(soft), slot: 0 },
-      { name: 'CosFace: cos θ − m', type: 'line', x: deg, y: theta.map(cosface), slot: 1 },
-      { name: 'ArcFace: cos(θ + m)', type: 'line', x: deg, y: theta.map(arcface), slot: 2 },
+    const cosface = (t: number) => Math.cos(t) - state.mCos
+    const arcface = (t: number) => Math.cos(t + state.mArc)
+    const series = [
+      { name: 'normalised softmax: cos θ', x: deg, y: theta.map(soft), slot: 0 },
+      { name: 'CosFace: cos θ − m', x: deg, y: theta.map(cosface), slot: 1 },
+      { name: 'ArcFace: cos(θ + m)', x: deg, y: theta.map(arcface), slot: 2 },
       {
         name: 'rival class: cos(φ − θ)',
-        type: 'line',
         x: deg,
         y: theta.map((t) => Math.cos(phi - t)),
         emphasis: true,
         dashed: true,
       },
-    ]
+    ] as const
     const b = [boundary(soft, phi), boundary(cosface, phi), boundary(arcface, phi)].map((v) =>
       v === null ? 'none' : `${formatNumber(toDeg(v))}°`,
     )
     return { series, b }
-  }, [phiDeg.value, mCos.value, mArc.value])
+  }, [state.phiDeg, state.mCos, state.mArc])
 
+  const xAxis = useAxis({ label: "angle θ to class 1's weight (degrees)", hold: 'union' })
+  const yAxis = useAxis({ label: 'logit / s', range: [-1.2, 1] })
   return (
-    <Interactive
+    <Figure
       title="Where each margin puts the training decision boundary"
+      state={state}
       caption="Two class weight vectors lie φ apart, and a feature lies between them at angle θ from class 1. Each coloured curve is class 1's logit divided by the scale s; the dashed curve is class 2's. During training, class 1 wins where its curve is above the dashed one. Normalised softmax splits the angle in half. ArcFace moves the boundary toward class 1 by exactly m/2 radians, whatever φ is; CosFace moves it by an amount that depends on φ. At test time both classes use plain cosine, so the training margin leaves a gap between the classes."
-      controls={
-        <>
-          <ParamSlider label="angle between class weights φ (degrees)" param={phiDeg} format={(v) => v.toFixed(0)} />
-          <ParamSlider label="CosFace margin m" param={mCos} />
-          <ParamSlider label="ArcFace margin m (radians)" param={mArc} />
-        </>
-      }
-      readout={
+
+      readouts={
         <>
           <Readout label="softmax boundary θ" value={r.b[0]} />
           <Readout label="CosFace boundary θ" value={r.b[1]} />
@@ -76,7 +78,12 @@ export function AngularMargins() {
         </>
       }
     >
-      <XYChart series={r.series} xLabel="angle θ to class 1's weight (degrees)" yLabel="logit / s" yRange={[-1.2, 1]} />
-    </Interactive>
+      <Plot x={xAxis} y={yAxis}>
+        <Curve {...r.series[0]} />
+        <Curve {...r.series[1]} />
+        <Curve {...r.series[2]} />
+        <Curve {...r.series[3]} />
+      </Plot>
+    </Figure>
   )
 }

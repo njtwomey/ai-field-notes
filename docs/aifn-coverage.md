@@ -1,6 +1,6 @@
 # aifn coverage of the field notes
 
-Survey of 2026-10-01. Read-only: no code changed. It asks what aifn (core `aifn`, applications `aifn-applied`) and the
+Survey of 2026-10-01. Read-only: no code changed. It asks what aifn (core `aifn`, applications `aifn-methods`) and the
 lab still lack in order to give every note an interactive exposition. Sources: the 1,223 `content/notes/**/index.mdx`
 files, `aifn-js/generated/catalog.json` (721 entries), `aifn-js/modules.json`, the aifn source tree, the lab
 (`aifn-lab/src`) and `.scratch/aifn/refinement.md`. Working log: `.scratch/aifn/progress/coverage-survey.md`.

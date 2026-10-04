@@ -1,6 +1,6 @@
 import { useMemo } from 'react'
-import { Interactive, ParamSlider, Readout, XYChart, formatNumber, useParam, type XYSeries } from 'aifn-render'
-import { rng } from '@/lib/math'
+import { Curve, Figure, float, formatNumber, Plot, Readout, useAxis, useFigureState } from 'aifn-render'
+import { normal, stream } from 'aifn/foundation/random'
 
 const N = 32
 const T = 60
@@ -10,10 +10,10 @@ const vecMat = (v: number[], m: number[][]) => m[0].map((_, j) => v.reduce((s, v
 
 /** A random recurrent matrix rescaled to spectral radius 1, a fixed input sequence and a unit adjoint. */
 const BASE = (() => {
-  const r = rng(7)
-  const g = Array.from({ length: N }, () => Array.from({ length: N }, () => r.normal()))
+  const r = stream(7)
+  const g = Array.from({ length: N }, () => Array.from({ length: N }, () => normal(r)))
   // Gelfand's formula: the mean log growth of a generic vector under repeated multiplication is log ρ(G).
-  let u = Array.from({ length: N }, () => r.normal())
+  let u = Array.from({ length: N }, () => normal(r))
   let logGrowth = 0
   const steps = 400
   for (let s = 0; s < steps; s++) {
@@ -24,8 +24,8 @@ const BASE = (() => {
   }
   const radius = Math.exp(logGrowth / steps)
   const w = g.map((row) => row.map((a) => a / radius))
-  const x = Array.from({ length: T }, () => Array.from({ length: N }, () => 0.5 * r.normal()))
-  const v = Array.from({ length: N }, () => r.normal())
+  const x = Array.from({ length: T }, () => Array.from({ length: N }, () => 0.5 * normal(r)))
+  const v = Array.from({ length: N }, () => normal(r))
   const norm = Math.hypot(...v)
   return { w, x, v: v.map((vi) => vi / norm) }
 })()
@@ -68,36 +68,44 @@ const LAGS = Array.from({ length: T }, (_, k) => k)
 
 /** Norm of the backpropagated gradient against the number of time steps it travels. */
 export function GradientDecay() {
-  const rho = useParam(1, { min: 0.5, max: 2, step: 0.05 })
-  const { tanhNorms, linNorms } = useMemo(() => adjointNorms(rho.value), [rho.value])
+  const state = useFigureState({
+    rho: float(1, { min: 0.5, max: 2, step: 0.05, label: 'spectral radius ρ' }),
+  })
+  const { tanhNorms, linNorms } = useMemo(() => adjointNorms(state.rho), [state.rho])
 
-  const series: XYSeries[] = [
-    { name: 'tanh RNN', type: 'line', x: LAGS, y: tanhNorms.map(clip), slot: 0 },
-    { name: 'linear RNN', type: 'line', x: LAGS, y: linNorms.map(clip), slot: 1 },
+  const series = [
+    { name: 'tanh RNN', x: LAGS, y: tanhNorms.map(clip), slot: 0 },
+    { name: 'linear RNN', x: LAGS, y: linNorms.map(clip), slot: 1 },
     {
       name: 'ρᵏ',
-      type: 'line',
       x: LAGS,
-      y: LAGS.map((k) => clip(rho.value ** k)),
+      y: LAGS.map((k) => clip(state.rho ** k)),
       muted: true,
       dashed: true,
     },
-  ]
+  ] as const
 
+  const xAxis = useAxis({ label: 'steps back in time k', hold: 'union' })
+  const yAxis = useAxis({ label: 'gradient norm', hold: 'union', log: true })
   return (
-    <Interactive
+    <Figure
       title="Gradients through time"
+      state={state}
       caption="A 32-unit RNN with random recurrent weights scaled to spectral radius ρ runs for 60 steps. A unit gradient at the last step is propagated backwards with the Jacobians diag(φ′(aₜ)) W. Its norm after k steps is the size of the signal that reaches a state k steps in the past. The linear network follows ρᵏ up to a constant: it vanishes for ρ < 1 and explodes for ρ > 1. The tanh network multiplies by φ′ ≤ 1 at every step, so its gradient is usually smaller than the linear one. For large ρ its units saturate and φ′ shrinks, so the gradient grows far more slowly than ρᵏ, but it can still grow."
-      controls={<ParamSlider label="spectral radius ρ" param={rho} />}
-      readout={
+
+      readouts={
         <>
           <Readout label="‖gradient‖ after 30 steps, tanh" value={formatNumber(tanhNorms[30])} />
           <Readout label="linear" value={formatNumber(linNorms[30])} />
-          <Readout label="ρ³⁰" value={formatNumber(rho.value ** 30)} />
+          <Readout label="ρ³⁰" value={formatNumber(state.rho ** 30)} />
         </>
       }
     >
-      <XYChart series={series} xLabel="steps back in time k" yLabel="gradient norm" yLog height={320} />
-    </Interactive>
+      <Plot x={xAxis} y={yAxis} height={320}>
+        <Curve {...series[0]} />
+        <Curve {...series[1]} />
+        <Curve {...series[2]} />
+      </Plot>
+    </Figure>
   )
 }

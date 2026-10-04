@@ -1,5 +1,5 @@
 /**
- * The registered things of `aifn-applied/data` (design S §2.8, §3.1): dataset generators, dataset modifiers,
+ * The registered things of `aifn-methods/data` (design S §2.8, §3.1): dataset generators, dataset modifiers,
  * test objectives and test log densities, each defined where it is written (with
  * `aifn/foundation/registry`'s `definer`) and collected by `data/index.ts`. `generate` and `modify` call an entry with
  * or without a stream, as its `info.random` says.

@@ -1,19 +1,9 @@
-import { useMemo, useState } from 'react'
-import {
-  Interactive,
-  ParamChoice,
-  ParamSlider,
-  Readout,
-  XYChart,
-  formatNumber,
-  useParam,
-  type Handle,
-  type XYSeries,
-} from 'aifn-render'
-import { linspace } from '@/lib/math'
+import { useMemo } from 'react'
+import { choice, Curve, Figure, float, formatNumber, Handle, Plot, Readout, useAxis, useFigureState } from 'aifn-render'
+import { linspace, toFlat } from 'aifn/foundation/tensor'
 
 type Word = 'rib' | 'rob'
-const P_AXIS = linspace(0.01, 0.99, 99)
+const P_AXIS = toFlat(linspace(0.01, 0.99, 99))
 
 /**
  * The label-bias example of Lafferty, McCallum and Pereira. Two paths leave the start on "r": 1→2→3 spells "rib",
@@ -37,59 +27,52 @@ function probabilities(p: number, w: number, word: Word) {
 }
 
 export function LabelBias() {
-  const p = useParam(0.6, { min: 0.01, max: 0.99, step: 0.01 })
-  const w = useParam(4, { min: 0, max: 8, step: 0.1 })
-  const [word, setWord] = useState<Word>('rob')
+  const state = useFigureState({
+    word: choice<Word>(
+      [
+        { value: 'rob', label: 'r o b' },
+        { value: 'rib', label: 'r i b' },
+      ],
+      'rob',
+      { label: 'observed word x' },
+    ),
+    p: float(0.6, { min: 0.01, max: 0.99, step: 0.01, label: 'training share of rib, p' }),
+    w: float(4, { min: 0, max: 8, step: 0.1, label: 'CRF evidence weight w' }),
+  })
 
-  const series = useMemo((): XYSeries[] => {
-    const curves = P_AXIS.map((q) => probabilities(q, w.value, word))
+  const series = useMemo(() => {
+    const curves = P_AXIS.map((q) => probabilities(q, state.w, state.word))
     return [
-      { name: 'MEMM: P(correct path | x)', type: 'line', x: P_AXIS, y: curves.map((c) => c.memm[word]), slot: 1 },
-      { name: 'CRF: P(correct path | x)', type: 'line', x: P_AXIS, y: curves.map((c) => c.crf[word]), slot: 0 },
-    ]
-  }, [w.value, word])
+      { name: 'MEMM: P(correct path | x)', x: P_AXIS, y: curves.map((c) => c.memm[state.word]), slot: 1 },
+      { name: 'CRF: P(correct path | x)', x: P_AXIS, y: curves.map((c) => c.crf[state.word]), slot: 0 },
+    ] as const
+  }, [state.w, state.word])
 
-  const here = probabilities(p.value, w.value, word)
+  const here = probabilities(state.p, state.w, state.word)
   const decode = (d: { rib: number; rob: number }) => (d.rib >= d.rob ? 'rib' : 'rob')
-  const handles: Handle[] = [{ kind: 'x', at: p.value, label: 'p', onDrag: (x) => p.set(x) }]
 
+  const xAxis = useAxis({ label: 'training share of rib, p', range: [0, 1] })
+  const yAxis = useAxis({ label: 'P(correct path | x)', range: [0, 1] })
   return (
-    <Interactive
+    <Figure
       title="Label bias"
+      state={state}
       caption="Two words, rib and rob, share their first and last letters. In training, a fraction p of the words starting with r were rib. An MEMM decides between the two paths at the first letter and then passes probability 1 along each path, because each middle state has only one successor, so the second letter cannot change its mind. A CRF weighs the evidence of the second letter (weight w) against the same prior, over whole paths. Choose the observed word and drag p."
-      controls={
-        <>
-          <ParamChoice
-            label="observed word x"
-            value={word}
-            onChange={setWord}
-            options={[
-              { value: 'rob', label: 'r o b' },
-              { value: 'rib', label: 'r i b' },
-            ]}
-          />
-          <ParamSlider label="training share of rib, p" param={p} />
-          <ParamSlider label="CRF evidence weight w" param={w} />
-        </>
-      }
-      readout={
+
+      readouts={
         <>
           <Readout label="MEMM decodes" value={decode(here.memm)} />
-          <Readout label="MEMM P(correct)" value={formatNumber(here.memm[word])} />
+          <Readout label="MEMM P(correct)" value={formatNumber(here.memm[state.word])} />
           <Readout label="CRF decodes" value={decode(here.crf)} />
-          <Readout label="CRF P(correct)" value={formatNumber(here.crf[word])} />
+          <Readout label="CRF P(correct)" value={formatNumber(here.crf[state.word])} />
         </>
       }
     >
-      <XYChart
-        series={series}
-        xLabel="training share of rib, p"
-        yLabel="P(correct path | x)"
-        xRange={[0, 1]}
-        yRange={[0, 1]}
-        handles={handles}
-        height={300}
-      />
-    </Interactive>
+      <Plot x={xAxis} y={yAxis} height={300}>
+        <Curve {...series[0]} />
+        <Curve {...series[1]} />
+        <Handle {...state.handle('p', { label: 'p' })} />
+      </Plot>
+    </Figure>
   )
 }

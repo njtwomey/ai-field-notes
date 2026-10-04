@@ -1,4 +1,4 @@
-import { supportVectorMachine, type SupportVectorMachineModel } from 'aifn-applied/learning/kernel-methods'
+import { supportVectorMachine, type SupportVectorMachineModel } from 'aifn-methods/learning/kernel-methods'
 import { rbf, linearKernel as aifnLinearKernel } from 'aifn/learning/kernels'
 import { dataset } from 'aifn/learning/estimators'
 import { fromData, toFlat } from 'aifn/foundation/tensor'
@@ -23,13 +23,16 @@ export type SvmFit = {
 }
 
 /**
- * Solves min ½ αᵀQα − 1ᵀα subject to 0 ≤ α ≤ C and yᵀα = 0, backed by aifn-applied.
+ * Solves min ½ αᵀQα − 1ᵀα subject to 0 ≤ α ≤ C and yᵀα = 0, backed by aifn-methods.
  */
 export function trainSvm(x: Point[], y: number[], C: number, kernel: Kernel2, tol = 1e-4, maxIter = 20000): SvmFit {
   const n = x.length
   const flat = Float64Array.from(x.flat())
   const X = fromData(flat, [n, 2])
-  const y01 = fromData(Float64Array.from(y, (v) => (v > 0 ? 1 : 0)), [n])
+  const y01 = fromData(
+    Float64Array.from(y, (v) => (v > 0 ? 1 : 0)),
+    [n],
+  )
   // Detect if RBF or linear
   const isLinear = kernel === linearKernel
   const aifnKernel = isLinear ? aifnLinearKernel() : rbf({ lengthscale: 1 })
@@ -48,7 +51,7 @@ export function trainSvm(x: Point[], y: number[], C: number, kernel: Kernel2, to
   }
 }
 
-/** f(x) = Σ αᵢ yᵢ k(xᵢ, x) + b, backed by aifn-applied model.score when available. */
+/** f(x) = Σ αᵢ yᵢ k(xᵢ, x) + b, backed by aifn-methods model.score when available. */
 export function decision(fit: SvmFit, x: Point[], y: number[], kernel: Kernel2, at: Point): number {
   if (fit._model) {
     const atTensor = fromData(Float64Array.from(at), [1, 2])

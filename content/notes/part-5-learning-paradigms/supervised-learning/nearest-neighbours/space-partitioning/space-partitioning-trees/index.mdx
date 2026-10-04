@@ -1,0 +1,108 @@
+---
+title: Space-partitioning trees
+kind: overview
+summary: 'A space-partitioning tree splits a point set recursively into regions, each with a cheap lower bound on its distance to a query. Search goes depth first, nearer child first, skipping any region whose bound exceeds the $k$-th best distance. Trees differ in region shape.'
+tags: [nearest-neighbours, trees, algorithms, similarity-search, indexing]
+aliases: [space partitioning, spatial index, spatial data structure, metric tree, metric index, branch and bound search]
+requires: [nearest-neighbour-search]
+related: [curse-of-dimensionality-for-neighbours]
+references: [bentley1975, friedman1977, finkel1974, omohundro1989, uhlmann1991, yianilos1993, beygelzimer2006, samet2006]
+status: draft
+updated: 2026-10-04
+---
+
+import { TreeBuild, TreeSearch } from '../_shared/TreeSearch'
+
+<Definition>
+A **space-partitioning tree** stores points $\xvec_1, \dots, \xvec_n$ in a binary tree. Every node owns a region of
+space and the points in it, and its two children split those points. Every node also supports a **lower bound**
+$\ell(\qvec)$: no point of the node is closer to a query $\qvec$ than $\ell(\qvec)$. Exact $k$-nearest-neighbour search
+runs depth first and skips every node whose bound exceeds the current $k$-th best distance.
+</Definition>
+
+## Components
+
+**The problem.** A scan computes all $n$ distances from $\qvec$, at cost $O(nd)$ per query. Most of those points are
+far from $\qvec$. A tree groups the points so that whole groups can be ruled out with one cheap test.
+
+**The mental model.** A tree of nested regions, each labelled with a lower bound on its distance to the query.
+
+- The search keeps the $k$ best points found so far. Their largest distance is $r$, the radius of a ball around
+  $\qvec$ that must contain the answer.
+- A region whose lower bound exceeds $r$ lies wholly outside that ball, so none of its points can be an answer.
+- Searching near regions first makes $r$ small early, so more far regions are ruled out.
+
+**The three ingredients.** Every tree in the family fixes the same three things.
+
+| ingredient | question it answers | k-d tree | ball tree | vantage-point tree |
+| --- | --- | --- | --- | --- |
+| region | what does a node own? | axis-aligned box | ball | inside or outside a sphere |
+| split rule | how is a node divided? | median of the widest coordinate | median of the widest coordinate | median distance from one point |
+| bound $\ell(\qvec)$ | how far is the query from the region at least? | distance to the box | distance to the ball | distance to the shell |
+
+## Data flow
+
+### Building
+
+```text
+build(points):
+    if |points| ≤ m:            # m = leaf size
+        return leaf(points)
+    left, right ← split(points)  # the tree's split rule, at a median, so the halves are equal
+    node ← region data for points (box, ball or shell)
+    return node(build(left), build(right))
+```
+
+Median splits halve the points at every level, so the tree has depth $\lceil \log_2(n/m) \rceil$ and the build costs
+$O(n \log n)$.
+
+<TreeBuild index="kd" />
+
+### Searching
+
+The search is one recursive function. Each call makes exactly one of three decisions about a node.
+
+```text
+r ← ∞                                    # k-th best distance so far (∞ until k points are held)
+search(node):
+    if bound(node) > r:   PRUNE           # no point inside can beat the k-th best: skip the subtree
+    elif node is a leaf:  SCAN            # compute its points' distances, keep the k best, update r
+    else:                 DESCEND
+        a, b ← the two children, ordered by bound (smaller first)
+        search(a)
+        search(b)                         # backtracking: runs after a's whole subtree, with a smaller r
+search(root)
+```
+
+**Backtracking.** The recursion stack is the backtracking. A call to `search(a)` runs to completion before
+`search(b)` starts, and it may scan leaves that shrink $r$. Control then returns up the stack to the nearest node
+whose second child is still pending, and that child is tested against the new, smaller $r$. The first leaf reached is
+usually the one around $\qvec$; the rest of the search mostly proves that no other region can do better.
+
+**Pruning.** Pruning happens in one place: the first line of `search`. It is always safe. A pruned node has
+$\ell(\qvec) > r$, so every point $\xvec$ in it has $\norm{\qvec - \xvec} \ge \ell(\qvec) > r$. The $k$ points already
+held are all within $r$, so no point of the node can replace any of them. The answer is therefore exact for any valid
+lower bound; a tighter bound only prunes more.
+
+<TreeSearch index="kd" />
+
+## Variants
+
+| tree | region | bound from | needs | reference |
+| --- | --- | --- | --- | --- |
+| <NoteLink to="k-d-tree">$k$-d tree</NoteLink> | axis-aligned box | coordinate gaps to the box | coordinates | <Cite id="bentley1975" /> |
+| <NoteLink to="ball-tree">ball tree</NoteLink> | ball (centre, radius) | triangle inequality | a metric | <Cite id="omohundro1989" /> |
+| <NoteLink to="vantage-point-tree">vantage-point tree</NoteLink> | inside or outside a sphere | triangle inequality | a metric | <Cite id="yianilos1993" /> |
+| cover tree | nested covers by scale | triangle inequality | a metric | <Cite id="beygelzimer2006" /> |
+| quadtree, octree | $2^d$ equal boxes per node | coordinate gaps to the box | $d \le 3$ in practice | <Cite id="finkel1974" /> |
+
+- **Speed.** With low intrinsic dimension a query computes about $O(\log n)$ distances <Cite id="friedman1977" />.
+- **Dimension.** As the dimension grows, the ball of radius $r$ around $\qvec$ meets almost every region, nothing is
+  pruned, and the search approaches a scan; see the <NoteLink to="curse-of-dimensionality-for-neighbours">curse of
+  dimensionality for neighbours</NoteLink>.
+- **Approximation.** Stopping early, or pruning when $\ell(\qvec) > r / (1 + \epsilon)$, gives the approximate versions
+  in <NoteLink to="tree-based-approximate-nearest-neighbours">tree-based approximate nearest-neighbour
+  search</NoteLink>.
+- **Metric trees.** Ball, vantage-point and cover trees bound distances by the triangle inequality only, so they work
+  for any metric, including ones without coordinates <Cite id="uhlmann1991" />. Samet's book surveys the whole family
+  <Cite id="samet2006" />.

@@ -22,7 +22,7 @@ import {
   yeoJohnson,
   yeoJohnsonInverse,
   yeoJohnsonLambda,
-} from 'aifn-applied/learning/preprocessing'
+} from 'aifn-methods/learning/preprocessing'
 import { normals, stream } from 'aifn/foundation/random'
 import { matmul, tensor, toFlat, toRows, transpose, type Tensor } from 'aifn/foundation/tensor'
 

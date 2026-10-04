@@ -1,5 +1,5 @@
 import { describe, it } from 'vitest'
-import { bayesPointMachine } from 'aifn-applied/inference/classifier-models'
+import { bayesPointMachine } from 'aifn-methods/inference/classifier-models'
 import { expectProtocol } from '../../protocol'
 
 describe('bayesPointMachine', () => {

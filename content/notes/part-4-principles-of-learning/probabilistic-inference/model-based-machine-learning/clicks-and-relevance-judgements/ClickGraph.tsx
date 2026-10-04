@@ -1,7 +1,5 @@
-import { Diagram } from 'aifn-render'
-import { factor, link, variable } from 'aifn-render'
+import { Diagram, factor, Figure, link, variable } from 'aifn-render'
 import type { DiagramSpec } from 'aifn-render'
-import { Interactive } from 'aifn-render'
 
 const line = (a: string, b: string, label?: string) =>
   link(a, b, false, label ? { label, labelSide: 'left', labelRotate: false } : {})
@@ -48,7 +46,7 @@ const SPEC: DiagramSpec = {
 /** The click model: one latent score seen through a judge's label and through a click record. */
 export function ClickGraph() {
   return (
-    <Interactive
+    <Figure
       title="Factor graph of the click model"
       caption="Each query–document pair has a latent score sᵢ. A judge sees it with noise and reports the label whose thresholds bracket it (observed, shaded). Users see it with other noise; their click record enters as a fixed Gaussian factor, the moment-matched Beta posterior of the click rate. The score mean, noise precisions and thresholds are shared across pairs and learned."
     >
@@ -56,6 +54,6 @@ export function ClickGraph() {
         spec={SPEC}
         ariaLabel="Factor graph: latent score with a judged branch ending in an observed label and a click branch ending in a soft-evidence factor"
       />
-    </Interactive>
+    </Figure>
   )
 }

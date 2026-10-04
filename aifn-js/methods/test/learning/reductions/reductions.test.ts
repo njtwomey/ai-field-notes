@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { logisticRegression } from 'aifn-applied/learning/generalised/glm'
+import { logisticRegression } from 'aifn-methods/learning/generalised/glm'
 import {
   codeDistance,
   dichotomyTree,
@@ -10,7 +10,7 @@ import {
   oneVersusRest,
   outputCode,
   randomCode,
-} from 'aifn-applied/learning/reductions'
+} from 'aifn-methods/learning/reductions'
 import { stream } from 'aifn/foundation/random'
 import { toFlat, toRows } from 'aifn/foundation/tensor'
 import { classProbabilities, dataset } from 'aifn/learning/estimators'

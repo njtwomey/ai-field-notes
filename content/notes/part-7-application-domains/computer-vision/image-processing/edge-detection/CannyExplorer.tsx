@@ -1,5 +1,5 @@
-import { useMemo, useState } from 'react'
-import { Heatmap, Interactive, ParamChoice, ParamSlider, Readout } from 'aifn-render'
+import { useMemo } from 'react'
+import { choice, Figure, float, Plot, Raster, Readout, slider, useAxis, useFigureState } from 'aifn-render'
 import { AXIS, SIZE, gradients, testImage, type Image } from '../_shared/image'
 
 type Stage = 'magnitude' | 'nms' | 'edges'
@@ -69,64 +69,42 @@ const count = (img: Image) => img.reduce((a, row) => a + row.filter((v) => v > 0
 
 /** The stages of the Canny detector on a noisy test image. */
 export function CannyExplorer() {
-  const [stage, setStage] = useState<Stage>('edges')
-  const [sigma, setSigma] = useState(1.2)
-  const [high, setHigh] = useState(0.1)
-  const [ratio, setRatio] = useState(0.4)
-  const low = high * ratio
+  const state = useFigureState({
+    stage: choice<Stage>(
+      [
+        { value: 'magnitude', label: '1. gradient' },
+        { value: 'nms', label: '2. suppression' },
+        { value: 'edges', label: '3. hysteresis' },
+      ],
+      'edges',
+      { label: 'stage' },
+    ),
+    sigma: float(1.2, { min: 0, max: 3, step: 0.1, label: 'smoothing σ (pixels)', format: (v) => v.toFixed(1) }),
+    high: slider(0.02, 0.3, 0.1, { step: 0.01, label: 'high threshold', format: (v) => v.toFixed(2) }),
+    ratio: float(0.4, { min: 0.1, max: 1, step: 0.05, label: 'low / high', format: (v) => v.toFixed(2) }),
+  })
+  const low = state.high * state.ratio
 
-  const { mag, dir } = useMemo(() => magnitudeAndDirection(sigma), [sigma])
+  const { mag, dir } = useMemo(() => magnitudeAndDirection(state.sigma), [state.sigma])
   const thin = useMemo(() => nonMaxSuppress(mag, dir), [mag, dir])
-  const edges = useMemo(() => hysteresis(thin, low, high), [thin, low, high])
-  const strongOnly = useMemo(() => count(thin.map((row) => row.map((m) => (m >= high ? 1 : 0)))), [thin, high])
-  const shown = stage === 'magnitude' ? mag : stage === 'nms' ? thin : edges
+  const edges = useMemo(() => hysteresis(thin, low, state.high), [thin, low, state.high])
+  const strongOnly = useMemo(
+    () => count(thin.map((row) => row.map((m) => (m >= state.high ? 1 : 0)))),
+    [thin, state.high],
+  )
+  const shown = state.stage === 'magnitude' ? mag : state.stage === 'nms' ? thin : edges
 
+  const xAxis = useAxis({ label: 'column' })
+  const yAxis = useAxis({ label: 'row' })
+  const xAxis2 = useAxis({ label: 'column' })
+  const yAxis2 = useAxis({ label: 'row' })
   return (
-    <Interactive
+    <Figure
       title="The stages of the Canny edge detector"
+      state={state}
       caption="Left: a test image with Gaussian noise of standard deviation 0.06. Right: one stage of the detector. The gradient magnitude marks edges as ridges several pixels wide. Non-maximum suppression thins each ridge to one pixel. Hysteresis keeps a pixel above the low threshold only if it connects to a pixel above the high threshold. A small σ lets noise through; a large σ rounds corners and merges nearby edges."
-      controls={
-        <>
-          <ParamChoice
-            label="stage"
-            value={stage}
-            onChange={setStage}
-            options={[
-              { value: 'magnitude', label: '1. gradient' },
-              { value: 'nms', label: '2. suppression' },
-              { value: 'edges', label: '3. hysteresis' },
-            ]}
-          />
-          <ParamSlider
-            label="smoothing σ (pixels)"
-            value={sigma}
-            onChange={setSigma}
-            min={0}
-            max={3}
-            step={0.1}
-            format={(v) => v.toFixed(1)}
-          />
-          <ParamSlider
-            label="high threshold"
-            value={high}
-            onChange={setHigh}
-            min={0.02}
-            max={0.3}
-            step={0.01}
-            format={(v) => v.toFixed(2)}
-          />
-          <ParamSlider
-            label="low / high"
-            value={ratio}
-            onChange={setRatio}
-            min={0.1}
-            max={1}
-            step={0.05}
-            format={(v) => v.toFixed(2)}
-          />
-        </>
-      }
-      readout={
+
+      readouts={
         <>
           <Readout label="low threshold" value={low.toFixed(3)} />
           <Readout label="pixels above high" value={String(strongOnly)} />
@@ -135,29 +113,19 @@ export function CannyExplorer() {
       }
     >
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-        <Heatmap
-          x={AXIS}
-          y={AXIS}
-          z={INPUT}
-          range={[0, 1]}
-          xLabel="column"
-          yLabel="row"
-          valueLabel="intensity"
-          height={320}
-          ariaLabel="Noisy input image"
-        />
-        <Heatmap
-          x={AXIS}
-          y={AXIS}
-          z={shown}
-          range={stage === 'edges' ? [0, 1] : [0, 0.4]}
-          xLabel="column"
-          yLabel="row"
-          valueLabel={stage === 'edges' ? 'edge' : 'gradient magnitude'}
-          height={320}
-          ariaLabel="Canny detector stage"
-        />
+        <Plot x={xAxis} y={yAxis} height={320} ariaLabel={'Noisy input image'}>
+          <Raster x={AXIS} y={AXIS} z={INPUT} range={[0, 1]} valueLabel={'intensity'} />
+        </Plot>
+        <Plot x={xAxis2} y={yAxis2} height={320} ariaLabel={'Canny detector stage'}>
+          <Raster
+            x={AXIS}
+            y={AXIS}
+            z={shown}
+            range={state.stage === 'edges' ? [0, 1] : [0, 0.4]}
+            valueLabel={state.stage === 'edges' ? 'edge' : 'gradient magnitude'}
+          />
+        </Plot>
       </div>
-    </Interactive>
+    </Figure>
   )
 }

@@ -1,14 +1,17 @@
-import { useMemo, useState } from 'react'
+import { useMemo } from 'react'
 import {
-  Heatmap,
-  Interactive,
-  ParamButton,
-  ParamChoice,
-  ParamSlider,
-  ParamSwitch,
-  Readout,
+  Button,
+  choice,
+  Figure,
   formatNumber,
-  useParam,
+  Plot,
+  Raster,
+  Readout,
+  setting,
+  slider,
+  type SliderDef,
+  useAxis,
+  useFigureState,
 } from 'aifn-render'
 
 type Matrix = number[][]
@@ -118,19 +121,39 @@ const COLS4 = [0, 1, 2, 3]
 const COLS8 = [0, 1, 2, 3, 4, 5, 6, 7]
 const ROWS = [0, 1, 2, 3]
 const STAGES = 14
+const STAGE_LABELS = forward(E0, 1, false, true).map((s) => s.label)
+
+type Feature = 0 | 1 | 2 | 3
+type EmbeddingKey = `${Token}${Feature}`
+const FEATURES: readonly Feature[] = [0, 1, 2, 3]
+const key = (t: Token, j: Feature): EmbeddingKey => `${t}${j}`
+/** One slider per embedding component, shown for the token being edited. */
+const EMBEDDING_FIELDS = Object.fromEntries(
+  TOKENS.flatMap((t, i) =>
+    FEATURES.map((j) => [
+      key(t, j),
+      slider(-1, 1, E0[i][j], { step: 0.05, label: `${t} embedding, feature ${j}`, when: (v) => v.token === t }),
+    ]),
+  ),
+) as Record<EmbeddingKey, SliderDef>
 
 /** A worked encoder block on four tokens: pick a stage to see its matrix; edit a token's embedding to follow it through. */
 export function LayerExplorer() {
-  const stage = useParam(6, { min: 0, max: STAGES - 1, step: 1 })
-  const [emb, setEmb] = useState<Matrix>(E0)
-  const [token, setToken] = useState<Token>('cat')
-  const qkScale = useParam(1, { min: 0, max: 4, step: 0.1 })
-  const [causal, setCausal] = useState(false)
-  const [positions, setPositions] = useState(true)
+  const state = useFigureState({
+    stage: slider(0, STAGES - 1, 6, { step: 1, label: 'stage', format: (v) => STAGE_LABELS[v] }),
+    token: choice<Token>(TOKEN_OPTIONS, 'cat', { label: 'token to edit and read' }),
+    ...EMBEDDING_FIELDS,
+    qkScale: slider(0, 4, 1, { step: 0.1, label: 'query–key scale' }),
+    causal: setting(false, 'causal mask'),
+    positions: setting(true, 'positional encoding'),
+  })
+  const { token, causal, positions } = state
+  const emb: Matrix = TOKENS.map((t) => FEATURES.map((j) => state[key(t, j)]))
   const row = TOKENS.indexOf(token)
 
-  const stages = useMemo(() => forward(emb, qkScale.value, causal, positions), [emb, qkScale.value, causal, positions])
-  const current = stages[stage.value]
+  // Matrices of 4 × 8 at most: recomputed on every render.
+  const stages = forward(emb, state.qkScale, causal, positions)
+  const current = stages[state.stage]
   const weights = current.kind === 'weights'
   const bound = useMemo(() => {
     const max = Math.max(...current.m.flat().map(Math.abs), 1e-9)
@@ -139,37 +162,24 @@ export function LayerExplorer() {
   const lo = weights ? 0 : -bound
   const hi = weights ? 1 : bound
   const range = useMemo<[number, number]>(() => [lo, hi], [lo, hi])
-  const setComponent = (j: number) => (v: number) =>
-    setEmb((e) => e.map((r, i) => (i === row ? r.map((x, k) => (k === j ? v : x)) : r)))
 
+  const xAxis = useAxis({ label: current.xLabel })
+  const yAxis = useAxis({ label: 'position t' })
   return (
-    <Interactive
+    <Figure
       title="One encoder block, matrix by matrix"
+      state={state}
       caption="Four tokens at positions 0 to 3 pass through one post-norm encoder block with one head, d = 4 and the weights given in the text. Step through the stages to see each intermediate matrix; row t is the token at position t. Edit a token's embedding and watch the change spread: it alters that token's row until attention, then every row. The query–key scale multiplies W_Q and so sharpens or flattens the attention weights."
       controls={
-        <>
-          <div className="sm:col-span-2 lg:col-span-3">
-            <ParamSlider label="stage" param={stage} format={(v) => stages[v].label} withArrows />
-          </div>
-          <ParamChoice label="token to edit and read" value={token} onChange={setToken} options={TOKEN_OPTIONS} />
-          {[0, 1, 2, 3].map((j) => (
-            <ParamSlider
-              key={j}
-              label={`${token} embedding, feature ${j}`}
-              value={emb[row][j]}
-              onChange={setComponent(j)}
-              min={-1}
-              max={1}
-              step={0.05}
-            />
-          ))}
-          <ParamSlider label="query–key scale" param={qkScale} />
-          <ParamSwitch label="causal mask" checked={causal} onChange={setCausal} />
-          <ParamSwitch label="positional encoding" checked={positions} onChange={setPositions} />
-          <ParamButton onClick={() => setEmb(E0)}>Reset embeddings</ParamButton>
-        </>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => TOKENS.forEach((t, i) => FEATURES.forEach((j) => state.set(key(t, j), E0[i][j])))}
+        >
+          Reset embeddings
+        </Button>
       }
-      readout={
+      readouts={
         <>
           <Readout
             label={`row for "${token}"`}
@@ -179,17 +189,16 @@ export function LayerExplorer() {
         </>
       }
     >
-      <Heatmap
-        x={current.m[0].length === 8 ? COLS8 : COLS4}
-        y={ROWS}
-        z={current.m}
-        scale={weights ? 'sequential' : 'diverging'}
-        range={range}
-        xLabel={current.xLabel}
-        yLabel="position t"
-        valueLabel={current.key}
-        height={300}
-      />
-    </Interactive>
+      <Plot x={xAxis} y={yAxis} height={300}>
+        <Raster
+          x={current.m[0].length === 8 ? COLS8 : COLS4}
+          y={ROWS}
+          z={current.m}
+          scale={weights ? 'sequential' : 'diverging'}
+          range={range}
+          valueLabel={current.key}
+        />
+      </Plot>
+    </Figure>
   )
 }

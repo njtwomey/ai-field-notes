@@ -42,6 +42,8 @@ export type AxisOptions = {
   format?: (v: number) => string
   /** Whole-number ticks only (steps, counts, iterations), at a regular 1-2-5 spacing. */
   integer?: boolean
+  /** Values increase downwards (y) or leftwards (x), e.g. image rows with row 0 at the top. */
+  inverse?: boolean
 }
 
 type Listener = () => void

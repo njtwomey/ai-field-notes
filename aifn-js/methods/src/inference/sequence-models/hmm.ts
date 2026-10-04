@@ -1,6 +1,6 @@
 /**
  * Hidden Markov models (Rabiner 1989, "A tutorial on hidden Markov models", Proc. IEEE 77(2)), part of
- * `aifn-applied/inference/sequence-models`: the `Hmm` type and its constructor, its chain of potentials for the
+ * `aifn-methods/inference/sequence-models`: the `Hmm` type and its constructor, its chain of potentials for the
  * generic engines of `aifn/inference/exact` (`forwardBackward(hmmChain(h, x))`, `viterbi`, `sampleHiddenPath`), the
  * occasionally dishonest casino, sampling, and the HMM in the model language (a chain group, so
  * `aifn/inference/engines`' `infer` runs forward–backward by its shape).

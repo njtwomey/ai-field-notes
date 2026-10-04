@@ -1,14 +1,17 @@
-import { useMemo, useState } from 'react'
+import { useMemo } from 'react'
 import {
-  Interactive,
-  ParamChoice,
-  ParamSlider,
-  Readout,
-  XYChart,
+  Curve,
+  Figure,
+  float,
   formatNumber,
-  useParam,
+  Plot,
+  Points,
+  Readout,
   type Segment,
-  type XYSeries,
+  useAxis,
+  useFigureState,
+  variants,
+  Vectors,
 } from 'aifn-render'
 import { carg, freqResponse, logspace, polyAdd, roots, type TF } from '../../_shared/control'
 
@@ -29,10 +32,26 @@ type LoopKey = keyof typeof LOOPS
 const W = logspace(-3, 3, 1200)
 
 export function NyquistPlot() {
-  const [key, setKey] = useState<LoopKey>('lag')
-  const loop: Loop = LOOPS[key]
-  const logK = useParam(loop.initial, { min: -1, max: 1.5, step: 0.01 })
-  const k = 10 ** logK.value
+  // One gain per loop (a variants case each), so switching loop restores that loop's own gain.
+  const gain = (l: LoopKey) => ({
+    label: LOOPS[l].label,
+    params: {
+      logK: float(LOOPS[l].initial, {
+        min: -1,
+        max: 1.5,
+        step: 0.01,
+        label: 'gain K',
+        points_per_decade: 2,
+        logTransform: 'value-is-log',
+        format: (v) => formatNumber(10 ** v),
+      }),
+    },
+  })
+  const state = useFigureState({
+    loop: variants({ lag: gain('lag'), unstable: gain('unstable') }, { choiceLabel: 'loop' }),
+  })
+  const loop: Loop = LOOPS[state.loop.key]
+  const k = 10 ** state.loop.values.logK
 
   const view = useMemo(() => {
     const pos = W.map((w) => freqResponse(loop.tf, w))
@@ -62,11 +81,11 @@ export function NyquistPlot() {
     const cx = (Math.min(...xs) + Math.max(...xs)) / 2
     const cy = 0
     const half = 1.15 * Math.max((Math.max(...xs) - Math.min(...xs)) / 2, Math.max(...ys.map(Math.abs)), 0.6)
-    const series: XYSeries[] = [
-      { name: 'L(iω), ω > 0', type: 'line', x: re, y: im, slot: 0 },
-      { name: 'L(iω), ω < 0', type: 'line', x: re, y: im.map((v) => -v), slot: 0, dashed: true },
-      { name: 'critical point −1', type: 'scatter', x: [-1], y: [0], emphasis: true },
-    ]
+    const series = [
+      { name: 'L(iω), ω > 0', x: re, y: im, slot: 0 },
+      { name: 'L(iω), ω < 0', x: re, y: im.map((v) => -v), slot: 0, dashed: true },
+      { name: 'critical point −1', x: [-1], y: [0], emphasis: true },
+    ] as const
     // Arrows showing the direction of travel for increasing ω, on both halves.
     const arrows: Segment[] = []
     for (const i of [Math.floor(W.length * 0.5), Math.floor(W.length * 0.58)]) {
@@ -84,25 +103,14 @@ export function NyquistPlot() {
   }, [loop, k])
 
   const P = loop.openLoopRhpPoles
+  const xAxis = useAxis({ label: 'Re L', range: view.x })
+  const yAxis = useAxis({ label: 'Im L', range: view.y, equal: xAxis })
   return (
-    <Interactive
+    <Figure
       title="Counting encirclements of −1"
+      state={state}
       caption="The Nyquist plot of the loop transfer function L(s) = K·G(s): the image of the imaginary axis, solid for positive frequencies and dashed for negative ones (a mirror image). Arrows show increasing ω. The closed loop has Z = N + P poles in the right half-plane, where N counts clockwise encirclements of −1 and P counts open-loop poles in the right half-plane. For K/(s+1)³ the curve crosses the negative real axis at −K/8, so K > 8 gives two clockwise encirclements. For K/((s−1)(s+2)), which is unstable on its own, the loop needs one anticlockwise encirclement, which happens once K > 2."
-      controls={
-        <>
-          <ParamChoice
-            label="loop"
-            value={key}
-            onChange={(v) => {
-              setKey(v)
-              logK.set(LOOPS[v].initial)
-            }}
-            options={(Object.keys(LOOPS) as LoopKey[]).map((l) => ({ value: l, label: LOOPS[l].label }))}
-          />
-          <ParamSlider label="gain K" param={logK} format={(v) => formatNumber(10 ** v)} />
-        </>
-      }
-      readout={
+      readouts={
         <>
           <Readout label="open-loop RHP poles P" value={P} />
           <Readout label="clockwise encirclements N" value={view.clockwise} />
@@ -112,16 +120,13 @@ export function NyquistPlot() {
       }
     >
       <div className="mx-auto w-full max-w-lg">
-        <XYChart
-          series={view.series}
-          vectors={view.arrows}
-          xLabel="Re L"
-          yLabel="Im L"
-          xRange={view.x}
-          yRange={view.y}
-          equalAspect
-        />
+        <Plot x={xAxis} y={yAxis}>
+          <Curve {...view.series[0]} />
+          <Curve {...view.series[1]} />
+          <Points {...view.series[2]} />
+          <Vectors vectors={view.arrows} />
+        </Plot>
       </div>
-    </Interactive>
+    </Figure>
   )
 }

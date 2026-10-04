@@ -1,5 +1,5 @@
 /**
- * `aifn-applied/neural/graph`: semi-supervised node classification with a two-layer graph neural network (GCN, GAT or
+ * `aifn-methods/neural/graph`: semi-supervised node classification with a two-layer graph neural network (GCN, GAT or
  * GraphSAGE from `aifn/nn/graph`), trained by Adam on a few labelled nodes; `nodeClassificationRun` streams a run.
  */
 

@@ -1,5 +1,5 @@
 /**
- * `aifn-applied/inference/rating-models`: skill rating. Online ratings from paired results: Elo, Glicko and Glicko-2
+ * `aifn-methods/inference/rating-models`: skill rating. Online ratings from paired results: Elo, Glicko and Glicko-2
  * (`elo.ts`); batch comparison models fitted by MM: Bradley–Terry and Plackett–Luce (`paired.ts`); item response
  * theory, 1PL and 2PL by penalised maximum likelihood (`irt.ts`); and TrueSkill: closed-form updates, expectation
  * propagation and its structure in the model language (`examples.ts`); and rating dynamics: every system as an online

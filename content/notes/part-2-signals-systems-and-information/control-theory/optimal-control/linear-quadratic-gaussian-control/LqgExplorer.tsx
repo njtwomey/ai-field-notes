@@ -189,63 +189,31 @@ export function LqgExplorer() {
       </ControlRow>
 
       <ControlRow label="Closed-loop execution">
-        <Player
-          count={numSteps}
-          value={currentStep}
-          onChange={setPlayhead}
-        />
+        <Player count={numSteps} value={currentStep} onChange={setPlayhead} />
       </ControlRow>
 
       <Plots>
         <Plot x={timeAxisX} y={stateAxisY} title="State trajectories: true p(t), estimated p̂(t) & full-state LQR">
-          <Curve
-            x={curT}
-            y={curP}
-            slot={0}
-          />
-          <Curve
-            x={curT}
-            y={curPHat}
-            slot={1}
-          />
-          <Curve
-            x={curT}
-            y={curStateP}
-            slot={2}
-            thin={true}
-          />
-          <Points
-            x={curT}
-            y={curY}
-            slot={3}
-            size={3}
-            thin={true}
-          />
+          <Curve x={curT} y={curP} slot={0} />
+          <Curve x={curT} y={curPHat} slot={1} />
+          <Curve x={curT} y={curStateP} slot={2} thin={true} />
+          <Points x={curT} y={curY} slot={3} size={3} thin={true} />
         </Plot>
 
         <Plot x={costAxisX} y={costAxisY} title="Control input u(t) and average quadratic cost J(t)">
-          <Curve
-            x={curT}
-            y={curU}
-            slot={0}
-          />
-          <Curve
-            x={curT}
-            y={curCost}
-            slot={1}
-          />
+          <Curve x={curT} y={curU} slot={0} />
+          <Curve x={curT} y={curCost} slot={1} />
         </Plot>
       </Plots>
 
       <ControlRow label="Diagnostics">
         <Readout
           label="Position error |p - p̂|"
-          value={formatNumber(Number(Math.abs(estimateLoop.p[currentStep] - estimateLoop.pHat[currentStep]).toFixed(3)))}
+          value={formatNumber(
+            Number(Math.abs(estimateLoop.p[currentStep] - estimateLoop.pHat[currentStep]).toFixed(3)),
+          )}
         />
-        <Readout
-          label="Mean cost J"
-          value={formatNumber(Number(estimateLoop.cost[currentStep].toFixed(2)))}
-        />
+        <Readout label="Mean cost J" value={formatNumber(Number(estimateLoop.cost[currentStep].toFixed(2)))} />
         <Readout
           label="LQR gain K"
           value={`[${formatNumber(Number(kGain[0].toFixed(2)))}, ${formatNumber(Number(kGain[1].toFixed(2)))}]`}

@@ -1,15 +1,18 @@
-import { useMemo, useState } from 'react'
+import { useMemo } from 'react'
 import {
-  Interactive,
-  ParamChoice,
-  ParamSlider,
-  Readout,
-  XYChart,
+  Bars,
+  choice,
+  Curve,
+  Figure,
+  float,
   formatNumber,
-  useParam,
-  type XYSeries,
+  int,
+  Plot,
+  Readout,
+  useAxis,
+  useFigureState,
 } from 'aifn-render'
-import { rng } from '@/lib/math'
+import { normal, stream } from 'aifn/foundation/random'
 
 const M = 12
 const YEARS = 8
@@ -68,59 +71,59 @@ const lagCorrelation = (xs: number[], h: number) => {
 
 /** Generate additive or multiplicative seasonal data and decompose it either way. */
 export function DecompositionExplorer() {
-  const [truth, setTruth] = useState<Form>('multiplicative')
-  const [form, setForm] = useState<Form>('additive')
-  const noise = useParam(1, { min: 0, max: 5, step: 0.1 })
-  const seed = useParam(2, { min: 1, max: 30, step: 1 })
+  const state = useFigureState({
+    truth: choice<Form>(
+      [
+        { value: 'additive', label: 'additive' },
+        { value: 'multiplicative', label: 'multiplicative' },
+      ],
+      'multiplicative',
+      { label: 'data generated as' },
+    ),
+    form: choice<Form>(
+      [
+        { value: 'additive', label: 'additive' },
+        { value: 'multiplicative', label: 'multiplicative' },
+      ],
+      'additive',
+      { label: 'decomposition' },
+    ),
+    noise: float(1, { min: 0, max: 5, step: 0.1, label: 'noise sd' }),
+    seed: int(2, { min: 1, max: 30, step: 1, label: 'seed', format: (v) => String(v) }),
+  })
 
   const r = useMemo(() => {
-    const g = rng(seed.value)
+    const g = stream(state.seed)
     const level = TIMES.map((t) => 50 + 1.2 * t + 8 * Math.sin((2 * Math.PI * t) / 60))
     const y = level.map((l, t) => {
       const s = SHAPE[t % M]
-      const e = noise.value * g.normal()
-      return truth === 'additive' ? l + 15 * s + e : l * (1 + 0.2 * s) + e
+      const e = state.noise * normal(g)
+      return state.truth === 'additive' ? l + 15 * s + e : l * (1 + 0.2 * s) + e
     })
-    const d = decompose(y, form)
+    const d = decompose(y, state.form)
     const rem = inner(d.remainder)
-    const data: XYSeries[] = [
-      { name: 'data y_t', type: 'line', x: TIMES, y, slot: 0 },
-      { name: 'trend (2×12 moving average)', type: 'line', x: INNER, y: inner(d.trend), emphasis: true },
-    ]
-    const seasonal: XYSeries[] = [{ name: 'seasonal', type: 'line', x: TIMES, y: d.seasonal, slot: 1 }]
-    const remainder: XYSeries[] = [{ name: 'remainder', type: 'bar', x: INNER, y: inner(d.remainder), slot: 2 }]
+    const data = [
+      { name: 'data y_t', x: TIMES, y, slot: 0 },
+      { name: 'trend (2×12 moving average)', x: INNER, y: inner(d.trend), emphasis: true },
+    ] as const
+    const seasonal = [{ name: 'seasonal', x: TIMES, y: d.seasonal, slot: 1 }] as const
+    const remainder = [{ name: 'remainder', x: INNER, y: inner(d.remainder), slot: 2 }] as const
     return { data, seasonal, remainder, lag12: lagCorrelation(rem, M), sd: spread(rem) }
-  }, [truth, form, noise.value, seed.value])
+  }, [state.truth, state.form, state.noise, state.seed])
 
+  const xAxis = useAxis({ label: 'month t', hold: 'union' })
+  const yAxis = useAxis({ label: 'y_t', hold: 'union' })
+  const xAxis2 = useAxis({ label: 'month t', hold: 'union' })
+  const yAxis2 = useAxis({ label: state.form === 'additive' ? 'S_t' : 'S_t (ratio)', hold: 'union' })
+  const xAxis3 = useAxis({ label: 'month t', hold: 'union' })
+  const yAxis3 = useAxis({ label: 'remainder', hold: 'union' })
   return (
-    <Interactive
+    <Figure
       title="Classical decomposition"
+      state={state}
       caption="Monthly data over eight years: a rising trend with a slow wave, an annual seasonal pattern, and Gaussian noise. The data are generated with additive seasonality (a fixed swing) or multiplicative seasonality (a swing proportional to the level). The decomposition estimates the trend with a centred 2×12 moving average, then averages the detrended values month by month. Fitting an additive decomposition to multiplicative data forces one average swing on every year. The remainder then holds a seasonal pattern of its own, large at both ends of the series where the true swing is furthest from the average, and its lag-12 autocorrelation is high. The matching form leaves only noise."
-      controls={
-        <>
-          <ParamChoice
-            label="data generated as"
-            value={truth}
-            onChange={setTruth}
-            options={[
-              { value: 'additive', label: 'additive' },
-              { value: 'multiplicative', label: 'multiplicative' },
-            ]}
-          />
-          <ParamChoice
-            label="decomposition"
-            value={form}
-            onChange={setForm}
-            options={[
-              { value: 'additive', label: 'additive' },
-              { value: 'multiplicative', label: 'multiplicative' },
-            ]}
-          />
-          <ParamSlider label="noise sd" param={noise} />
-          <ParamSlider label="seed" param={seed} format={(v) => String(v)} withArrows />
-        </>
-      }
-      readout={
+
+      readouts={
         <>
           <Readout label="remainder sd" value={formatNumber(r.sd)} />
           <Readout label="remainder autocorrelation at lag 12" value={formatNumber(r.lag12)} />
@@ -128,15 +131,17 @@ export function DecompositionExplorer() {
       }
     >
       <div className="space-y-3">
-        <XYChart series={r.data} xLabel="month t" yLabel="y_t" height={220} />
-        <XYChart
-          series={r.seasonal}
-          xLabel="month t"
-          yLabel={form === 'additive' ? 'S_t' : 'S_t (ratio)'}
-          height={130}
-        />
-        <XYChart series={r.remainder} xLabel="month t" yLabel="remainder" height={130} />
+        <Plot x={xAxis} y={yAxis} height={220}>
+          <Curve {...r.data[0]} />
+          <Curve {...r.data[1]} />
+        </Plot>
+        <Plot x={xAxis2} y={yAxis2} height={130}>
+          <Curve {...r.seasonal[0]} />
+        </Plot>
+        <Plot x={xAxis3} y={yAxis3} height={130}>
+          <Bars {...r.remainder[0]} />
+        </Plot>
       </div>
-    </Interactive>
+    </Figure>
   )
 }

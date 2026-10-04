@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { blahutArimotoCapacity } from 'aifn-applied/information/channels'
+import { blahutArimotoCapacity } from 'aifn-methods/information/channels'
 import { binaryEntropy } from 'aifn/numerics/special'
 import { toFlat } from 'aifn/foundation/tensor'
 import { trace } from 'aifn/foundation/trace'
@@ -19,12 +19,7 @@ import {
 
 const h2 = (p: number) => binaryEntropy(p, 2)
 
-type ChannelName =
-  | 'binary symmetric'
-  | 'binary erasure'
-  | 'Z channel'
-  | 'noisy typewriter (5)'
-  | 'asymmetric 3 × 3'
+type ChannelName = 'binary symmetric' | 'binary erasure' | 'Z channel' | 'noisy typewriter (5)' | 'asymmetric 3 × 3'
 
 function channelOf(name: ChannelName, e: number): { W: number[][]; exact?: number } {
   switch (name) {
@@ -136,17 +131,10 @@ export function ChannelCapacityExplorer() {
             { value: 'asymmetric 3 × 3', label: 'Asymmetric 3×3 Channel' },
           ]}
         />
-        <Slider
-          label="Noise transition error e"
-          value={noise}
-          min={0.01}
-          max={0.99}
-          step={0.01}
-          onChange={setNoise}
-        />
+        <Slider label="Noise transition error e" value={noise} min={0.01} max={0.99} step={0.01} onChange={setNoise} />
       </ControlRow>
 
-      <div className="flex flex-wrap gap-4 text-xs font-mono text-muted-foreground my-2">
+      <div className="my-2 flex flex-wrap gap-4 font-mono text-xs text-muted-foreground">
         <Readout label="capacity (bits)" value={formatNumber(capacityBits)} />
         {exact !== undefined && <Readout label="analytical closed form" value={formatNumber(exact)} />}
         <Readout label="iterations" value={last.t} />

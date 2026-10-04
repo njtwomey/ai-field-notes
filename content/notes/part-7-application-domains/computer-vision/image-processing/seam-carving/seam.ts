@@ -1,8 +1,8 @@
+import { normal, stream, uniform } from 'aifn/foundation/random'
 /**
  * Seam carving on small colour images. An image is row-major RGB in [0, 1]: channel k of pixel (r, c) is
  * `rgb[3 * (r * width + c) + k]`. Every image here has H rows; widths vary as seams are removed or inserted.
  */
-import { rng } from '@/lib/math'
 
 export const H = 96
 export const W = 128
@@ -26,13 +26,13 @@ type Rgb3 = [number, number, number]
 const mix = (a: Rgb3, b: Rgb3, t: number): Rgb3 => [0, 1, 2].map((k) => a[k] + (b[k] - a[k]) * t) as Rgb3
 
 function paint(f: (r: number, c: number) => Rgb3, noise = 0.008, seed = 3): Float32Array {
-  const g = rng(seed)
+  const g = stream(seed)
   const out = new Float32Array(H * W * 3)
   for (let r = 0; r < H; r++)
     for (let c = 0; c < W; c++) {
       const v = f(r, c)
       // A little seeded noise breaks exact ties between equal-cost seams in flat regions.
-      for (let k = 0; k < 3; k++) out[3 * (r * W + c) + k] = Math.min(1, Math.max(0, v[k] + noise * g.normal()))
+      for (let k = 0; k < 3; k++) out[3 * (r * W + c) + k] = Math.min(1, Math.max(0, v[k] + noise * normal(g)))
     }
   return out
 }
@@ -77,17 +77,17 @@ function checkerboard(): Float32Array {
 
 /** Lines of glyph-like marks: no column is free of strokes, so every seam cuts letters. */
 function text(): Float32Array {
-  const g = rng(11)
+  const g = stream(11)
   const ink = new Uint8Array(H * W)
   for (let line = 0; line < 7; line++) {
     const top = 6 + line * 13
-    let c = 4 + Math.floor(g.uniform() * 6)
+    let c = 4 + Math.floor(uniform(g) * 6)
     while (c < W - 8) {
-      const letters = 2 + Math.floor(g.uniform() * 5)
+      const letters = 2 + Math.floor(uniform(g) * 5)
       for (let l = 0; l < letters && c < W - 6; l++) {
         // A 5 × 8 glyph: one or two vertical strokes and up to three horizontal bars.
-        const strokes = [g.uniform() < 0.8 ? 0 : -1, g.uniform() < 0.5 ? 4 : -1, g.uniform() < 0.2 ? 2 : -1]
-        const bars = [g.uniform() < 0.5 ? 0 : -1, g.uniform() < 0.5 ? 4 : -1, g.uniform() < 0.5 ? 7 : -1]
+        const strokes = [uniform(g) < 0.8 ? 0 : -1, uniform(g) < 0.5 ? 4 : -1, uniform(g) < 0.2 ? 2 : -1]
+        const bars = [uniform(g) < 0.5 ? 0 : -1, uniform(g) < 0.5 ? 4 : -1, uniform(g) < 0.5 ? 7 : -1]
         for (let dr = 0; dr < 8; dr++)
           for (let dc = 0; dc < 5; dc++) if (strokes.includes(dc) || bars.includes(dr)) ink[(top + dr) * W + c + dc] = 1
         c += 7
@@ -100,8 +100,8 @@ function text(): Float32Array {
 
 /** A straight dark line across a smooth background, with a patch of texture that seams avoid. */
 function line(): Float32Array {
-  const g = rng(17)
-  const texture = Float32Array.from({ length: H * W }, () => g.uniform())
+  const g = stream(17)
+  const texture = Float32Array.from({ length: H * W }, () => uniform(g))
   return paint((r, c) => {
     // Distance from the line through (0, 18) and (95, 110).
     const d = Math.abs((110 - 18) * r - 95 * (c - 18)) / Math.hypot(92, 95)

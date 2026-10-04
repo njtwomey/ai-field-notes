@@ -1,4 +1,4 @@
-/** The registry of `aifn-applied/theory/capacity`. */
+/** The registry of `aifn-methods/theory/capacity`. */
 
 import { definer, entries, type Entry, type FunctionInfo } from 'aifn/foundation/registry'
 import * as c from './capacity'

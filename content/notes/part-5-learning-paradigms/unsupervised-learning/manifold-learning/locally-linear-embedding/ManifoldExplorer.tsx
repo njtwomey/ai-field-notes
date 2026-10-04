@@ -1,8 +1,8 @@
 import { useMemo, useState } from 'react'
 import { dataset } from 'aifn/learning/estimators'
-import { swissRoll } from 'aifn-applied/data/synthetic'
-import { classicalMds, kernelPca, metricMds, pca } from 'aifn-applied/unsupervised/embedding/linear'
-import { isomap, laplacianEigenmaps, locallyLinearEmbedding } from 'aifn-applied/unsupervised/embedding/manifold'
+import { swissRoll } from 'aifn-methods/data/synthetic'
+import { classicalMds, kernelPca, metricMds, pca } from 'aifn-methods/unsupervised/embedding/linear'
+import { isomap, laplacianEigenmaps, locallyLinearEmbedding } from 'aifn-methods/unsupervised/embedding/manifold'
 import { rbf } from 'aifn/learning/kernels'
 import { pairwiseDistances } from 'aifn/numerics/linalg'
 import { stream } from 'aifn/foundation/random'
@@ -89,12 +89,7 @@ export function ManifoldExplorer() {
       defaultSize="L"
       controls={
         <ControlGroup>
-          <Select
-            label="Method"
-            options={METHOD_OPTIONS}
-            value={method}
-            onChange={(v) => setMethod(v as MethodKey)}
-          />
+          <Select label="Method" options={METHOD_OPTIONS} value={method} onChange={(v) => setMethod(v as MethodKey)} />
           {isNeighbourMethod && (
             <NumberSelector
               label="Neighbours k"

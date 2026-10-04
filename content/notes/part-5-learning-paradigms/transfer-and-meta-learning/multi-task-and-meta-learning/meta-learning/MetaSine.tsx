@@ -1,15 +1,20 @@
-import { useMemo, useState } from 'react'
+import { useMemo } from 'react'
 import {
-  Interactive,
-  ParamButton,
-  ParamSlider,
-  Readout,
-  XYChart,
+  Figure,
+  float,
   formatNumber,
-  useParam,
-  type XYSeries,
+  Handle,
+  int,
+  Plot,
+  Readout,
+  seriesLayers,
+  type SeriesSpec,
+  slider,
+  useAxis,
+  useFigureState,
 } from 'aifn-render'
-import { linspace, rng } from '@/lib/math'
+import { linspace, toFlat } from 'aifn/foundation/tensor'
+import { normal, stream, uniform } from 'aifn/foundation/random'
 
 // Sine-wave regression tasks as in Finn et al. (2017): y = A sin(x − φ), A ∈ [0.1, 5], φ ∈ [0, π], x ∈ [−5, 5].
 // The model is a network with one tanh hidden layer. Three initialisations are adapted to a new task by the same
@@ -17,16 +22,16 @@ import { linspace, rng } from '@/lib/math'
 const HIDDEN = 20
 const INNER_LR = 0.01
 const MAX_STEPS = 10
-const X_GRID = linspace(-5, 5, 101)
+const X_GRID = toFlat(linspace(-5, 5, 101))
 
 type Net = { w1: Float64Array; b1: Float64Array; w2: Float64Array; b2: number }
 
 const clone = (p: Net): Net => ({ w1: p.w1.slice(), b1: p.b1.slice(), w2: p.w2.slice(), b2: p.b2 })
 
 function initNet(seed: number): Net {
-  const r = rng(seed)
-  const w1 = Float64Array.from({ length: HIDDEN }, () => r.normal())
-  const w2 = Float64Array.from({ length: HIDDEN }, () => r.normal() / Math.sqrt(HIDDEN))
+  const r = stream(seed)
+  const w1 = Float64Array.from({ length: HIDDEN }, () => normal(r))
+  const w2 = Float64Array.from({ length: HIDDEN }, () => normal(r) / Math.sqrt(HIDDEN))
   return { w1, b1: new Float64Array(HIDDEN), w2, b2: 0 }
 }
 
@@ -72,12 +77,12 @@ function step(p: Net, xs: number[], ys: number[], lr: number) {
  * tasks, i.e. ordinary pretraining.
  */
 function metaTrain(inner: number, epsilon: number, iterations: number, seed: number): Net {
-  const r = rng(seed)
+  const r = stream(seed)
   const p = initNet(seed + 1)
   for (let it = 0; it < iterations; it++) {
-    const A = 0.1 + 4.9 * r.uniform()
-    const phase = Math.PI * r.uniform()
-    const xs = Array.from({ length: 10 }, () => -5 + 10 * r.uniform())
+    const A = 0.1 + 4.9 * uniform(r)
+    const phase = Math.PI * uniform(r)
+    const xs = Array.from({ length: 10 }, () => -5 + 10 * uniform(r))
     const ys = xs.map((x) => A * Math.sin(x - phase))
     const q = clone(p)
     for (let s = 0; s < inner; s++) step(q, xs, ys, INNER_LR)
@@ -105,22 +110,24 @@ function initialisations() {
 const NAMES = ['meta-learned (Reptile)', 'pretrained on pooled tasks', 'random initialisation'] as const
 
 export function MetaSine() {
-  const [amplitude, setAmplitude] = useState(3)
-  const [phase, setPhase] = useState(1)
-  const [k, setK] = useState(10)
-  const [draw, setDraw] = useState(0)
-  const steps = useParam(1, { min: 0, max: MAX_STEPS, step: 1 })
+  const state = useFigureState({
+    amplitude: float(3, { min: 0.1, max: 5, step: 0.1, label: 'task amplitude A' }),
+    phase: slider(0, 3.1, 1, { step: 0.05, label: 'task phase φ' }),
+    k: int(10, { min: 2, max: 20, step: 1, label: 'support points K' }),
+    steps: int(1, { min: 0, max: MAX_STEPS, step: 1, label: 'gradient steps', format: (v) => String(v) }),
+    draw: int(0, { ge: 0, label: 'seed' }),
+  })
 
   const support = useMemo(() => {
-    const r = rng(100 + draw)
-    const xs = Array.from({ length: k }, () => -5 + 10 * r.uniform())
-    return { xs, ys: xs.map((x) => amplitude * Math.sin(x - phase)) }
-  }, [k, draw, amplitude, phase])
+    const r = stream(100 + state.draw)
+    const xs = Array.from({ length: state.k }, () => -5 + 10 * uniform(r))
+    return { xs, ys: xs.map((x) => state.amplitude * Math.sin(x - state.phase)) }
+  }, [state.k, state.draw, state.amplitude, state.phase])
 
   // Adapt each initialisation for MAX_STEPS steps once; the step slider only chooses which snapshot to show.
   const paths = useMemo(() => {
     const inits = initialisations()
-    const truth = X_GRID.map((x) => amplitude * Math.sin(x - phase))
+    const truth = X_GRID.map((x) => state.amplitude * Math.sin(x - state.phase))
     return [inits.meta, inits.pretrained, inits.scratch].map((p0) => {
       const p = clone(p0)
       const curves: number[][] = []
@@ -133,43 +140,39 @@ export function MetaSine() {
       }
       return { curves, mse }
     })
-  }, [support, amplitude, phase])
+  }, [support, state.amplitude, state.phase])
 
-  const s = steps.value
-  const fitSeries = useMemo<XYSeries[]>(
+  const s = state.steps
+  const fitSeries = useMemo<SeriesSpec[]>(
     () => [
-      { name: 'task', type: 'line', x: X_GRID, y: X_GRID.map((x) => amplitude * Math.sin(x - phase)), emphasis: true },
+      {
+        name: 'task',
+        type: 'line',
+        x: X_GRID,
+        y: X_GRID.map((x) => state.amplitude * Math.sin(x - state.phase)),
+        emphasis: true,
+      },
       ...paths.map((p, i) => ({ name: NAMES[i], type: 'line' as const, x: X_GRID, y: p.curves[s], slot: i })),
-      { name: `${k} support points`, type: 'scatter', x: support.xs, y: support.ys, emphasis: true },
+      { name: `${state.k} support points`, type: 'scatter', x: support.xs, y: support.ys, emphasis: true },
     ],
-    [paths, s, amplitude, phase, support, k],
+    [paths, s, state.amplitude, state.phase, support, state.k],
   )
-  const lossSeries = useMemo<XYSeries[]>(() => {
+  const lossSeries = useMemo<SeriesSpec[]>(() => {
     const t = Array.from({ length: MAX_STEPS + 1 }, (_, i) => i)
     return paths.map((p, i) => ({ name: NAMES[i], type: 'line' as const, x: t, y: p.mse, slot: i }))
   }, [paths])
 
+  const xAxis = useAxis({ label: 'x', range: [-5, 5] })
+  const yAxis = useAxis({ label: 'y', range: [-6, 6] })
+  const xAxis2 = useAxis({ label: 'gradient steps', range: [0, MAX_STEPS] })
+  const yAxis2 = useAxis({ label: 'mean squared error', range: [0, undefined], hold: 'union' })
   return (
-    <Interactive
+    <Figure
       title="Adapting to a new sine wave from three initialisations"
+      state={state}
       caption="Each initialisation takes the same gradient steps (learning rate 0.01) on the support points of a new task. The meta-learned initialisation was trained by Reptile, a first-order relative of MAML, over 6000 random sine tasks; the pretrained one by plain SGD on the same tasks, which learns their average and adapts slowly. Step through the updates with the arrows or drag the line on the loss chart."
-      controls={
-        <>
-          <ParamSlider
-            label="task amplitude A"
-            value={amplitude}
-            onChange={setAmplitude}
-            min={0.1}
-            max={5}
-            step={0.1}
-          />
-          <ParamSlider label="task phase φ" value={phase} onChange={setPhase} min={0} max={3.1} step={0.05} />
-          <ParamSlider label="support points K" value={k} onChange={setK} min={2} max={20} step={1} />
-          <ParamSlider label="gradient steps" param={steps} withArrows format={(v) => String(v)} />
-          <ParamButton onClick={() => setDraw((d) => d + 1)}>New support points</ParamButton>
-        </>
-      }
-      readout={
+
+      readouts={
         <>
           {paths.map((p, i) => (
             <Readout key={NAMES[i]} label={`MSE, ${NAMES[i]}`} value={formatNumber(p.mse[s])} />
@@ -178,17 +181,14 @@ export function MetaSine() {
       }
     >
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-        <XYChart series={fitSeries} xLabel="x" yLabel="y" xRange={[-5, 5]} yRange={[-6, 6]} height={300} />
-        <XYChart
-          series={lossSeries}
-          xLabel="gradient steps"
-          yLabel="mean squared error"
-          xRange={[0, MAX_STEPS]}
-          yRange={[0, undefined]}
-          height={300}
-          handles={[{ kind: 'x', at: s, label: 'step', onDrag: steps.set }]}
-        />
+        <Plot x={xAxis} y={yAxis} height={300}>
+          {seriesLayers(fitSeries)}
+        </Plot>
+        <Plot x={xAxis2} y={yAxis2} height={300}>
+          {seriesLayers(lossSeries)}
+          <Handle kind="x" at={s} label="step" onDrag={(v: number) => state.set('steps', v)} />
+        </Plot>
       </div>
-    </Interactive>
+    </Figure>
   )
 }

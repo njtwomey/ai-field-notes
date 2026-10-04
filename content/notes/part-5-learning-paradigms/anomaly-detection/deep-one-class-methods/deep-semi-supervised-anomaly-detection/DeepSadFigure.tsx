@@ -1,14 +1,6 @@
 import { useDeferredValue, useMemo, useState } from 'react'
-import {
-  Heatmap,
-  Interactive,
-  ParamSlider,
-  Readout,
-  useParam,
-  type Handle,
-  type HeatmapOverlay,
-} from 'aifn-render'
-import { linspace, rng } from '@/lib/math'
+import { Figure, float, Handle, Plot, Points, Raster, Readout, useAxis, useFigureState } from 'aifn-render'
+import { normal as drawNormal, stream, uniform as drawUniform } from 'aifn/foundation/random'
 import {
   auc,
   embed,
@@ -21,15 +13,22 @@ import {
   uniformAnomalies,
   type Point,
 } from '../_shared/deepOneClass'
+import { linspace, toFlat } from 'aifn/foundation/tensor'
+
+/** Uniform and normal draws from one aifn stream, in the shape the shared helpers take. */
+const rand = (seed: number) => {
+  const s = stream(seed)
+  return { uniform: () => drawUniform(s), normal: () => drawNormal(s) }
+}
 
 const LIM = 4
-const AXIS = linspace(-LIM, LIM, 41)
+const AXIS = toFlat(linspace(-LIM, LIM, 41))
 const LOG_RANGE: [number, number] = [-3, 1]
 const log10 = (v: number) => Math.log10(Math.max(v, 1e-12))
 
 /** Normal data, an unseen anomaly class between the two blobs, and uniform anomalies for testing. */
 const DATA = (() => {
-  const r = rng(1)
+  const r = rand(1)
   const x = normalData('blobs', 150, r)
   const testNormal = normalData('blobs', 100, r)
   const uniform = uniformAnomalies(100, LIM, x, 0.5, r)
@@ -42,11 +41,19 @@ const clamp = (v: number) => Math.max(-LIM, Math.min(LIM, v))
 /** Deep SAD: Deep SVDD plus an inverse-distance term that pushes a few labelled anomalies away from c. */
 export function DeepSadFigure() {
   const [labelled, setLabelled] = useState<Point[]>(START)
-  const eta = useParam(1, { min: 0, max: 5, step: 0.1 })
-  const deferred = useDeferredValue({ labelled, eta: eta.value })
+  const state = useFigureState({
+    eta: float(1, {
+      min: 0,
+      max: 5,
+      step: 0.1,
+      label: 'η (weight of labelled anomalies)',
+      format: (v) => v.toFixed(1),
+    }),
+  })
+  const deferred = useDeferredValue({ labelled, eta: state.eta })
 
   const r = useMemo(() => {
-    const net = initNet([2, 16, 16, 2], false, rng(7))
+    const net = initNet([2, 16, 16, 2], false, rand(7))
     const c = initialCentre(net, DATA.x)
     const snaps = train(net, DATA.x, c, {
       objective: { kind: 'semi-supervised', eta: deferred.eta, labelled: deferred.labelled },
@@ -72,15 +79,15 @@ export function DeepSadFigure() {
   }, [deferred])
 
   const overlay = useMemo(
-    (): HeatmapOverlay[] => [
-      { name: 'unlabelled normal data', type: 'scatter', x: DATA.x.map((p) => p[0]), y: DATA.x.map((p) => p[1]) },
-      {
-        name: 'unseen anomalies (test)',
-        type: 'scatter',
-        x: DATA.cluster.slice(3).map((p) => p[0]),
-        y: DATA.cluster.slice(3).map((p) => p[1]),
-      },
-    ],
+    () =>
+      [
+        { name: 'unlabelled normal data', x: DATA.x.map((p) => p[0]), y: DATA.x.map((p) => p[1]) },
+        {
+          name: 'unseen anomalies (test)',
+          x: DATA.cluster.slice(3).map((p) => p[0]),
+          y: DATA.cluster.slice(3).map((p) => p[1]),
+        },
+      ] as const,
     [],
   )
 
@@ -91,16 +98,15 @@ export function DeepSadFigure() {
     onDrag: ([a, b]) => setLabelled((prev) => prev.map((q, j) => (j === i ? [clamp(a), clamp(b)] : q))),
   }))
 
+  const xAxis = useAxis({ label: 'x₁' })
+  const yAxis = useAxis({ label: 'x₂' })
   return (
-    <Interactive
+    <Figure
       title="Deep SAD: a few labelled anomalies reshape the score"
+      state={state}
       caption="The network and centre of the Deep SVDD figure, trained for 200 epochs on 150 unlabelled normal points plus the three labelled anomalies, drawn as large round markers. The colour is log₁₀ ‖φ(x) − c‖². A cluster of unseen anomalies sits between the two normal blobs, where a network trained on the blobs alone interpolates between them and gives many of the anomalies low scores. At η = 0 the labels are ignored and the model is Deep SVDD. Raise η, or drag the labelled anomalies, and watch the high-score region follow them. The readout counts how many of the unseen cluster exceed the 95th percentile of the training scores."
-      controls={
-        <>
-          <ParamSlider label="η (weight of labelled anomalies)" param={eta} format={(v) => v.toFixed(1)} />
-        </>
-      }
-      readout={
+
+      readouts={
         <>
           <Readout label="unseen cluster flagged" value={`${Math.round(100 * r.flagged)} %`} />
           <Readout label="AUC, cluster" value={r.aucCluster.toFixed(3)} />
@@ -109,19 +115,15 @@ export function DeepSadFigure() {
       }
     >
       <div className="mx-auto w-full max-w-lg">
-        <Heatmap
-          x={AXIS}
-          y={AXIS}
-          z={r.z}
-          range={LOG_RANGE}
-          overlay={overlay}
-          handles={handles}
-          xLabel="x₁"
-          yLabel="x₂"
-          valueLabel="log₁₀ s(x)"
-          height={420}
-        />
+        <Plot x={xAxis} y={yAxis} height={420}>
+          <Raster x={AXIS} y={AXIS} z={r.z} range={LOG_RANGE} valueLabel={'log₁₀ s(x)'} />
+          <Points {...overlay[0]} live />
+          <Points {...overlay[1]} live />
+          {(handles ?? []).map((h, i) => (
+            <Handle key={i} {...h} />
+          ))}
+        </Plot>
       </div>
-    </Interactive>
+    </Figure>
   )
 }

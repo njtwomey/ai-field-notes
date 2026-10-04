@@ -1,5 +1,5 @@
 import { useMemo } from 'react'
-import { Interactive, ParamSlider, Readout, XYChart, formatNumber, useParam, type XYSeries } from 'aifn-render'
+import { Bars, Figure, float, formatNumber, Plot, Points, Readout, useAxis, useFigureState } from 'aifn-render'
 
 const SIDE = 3
 const N = SIDE * SIDE
@@ -100,34 +100,34 @@ function loopy(J: number, h: number, damping: number) {
 }
 
 export function LoopyIsing() {
-  const J = useParam(0.5, { min: -1.5, max: 1.5, step: 0.05 })
-  const h = useParam(0.1, { min: -0.5, max: 0.5, step: 0.01 })
-  const damping = useParam(0, { min: 0, max: 0.9, step: 0.05 })
+  const state = useFigureState({
+    J: float(0.5, { min: -1.5, max: 1.5, step: 0.05, label: 'coupling J' }),
+    h: float(0.1, { min: -0.5, max: 0.5, step: 0.01, label: 'field h' }),
+    damping: float(0, { min: 0, max: 0.9, step: 0.05, label: 'damping' }),
+  })
 
-  const truth = useMemo(() => exact(J.value, h.value), [J.value, h.value])
-  const bp = useMemo(() => loopy(J.value, h.value, damping.value), [J.value, h.value, damping.value])
+  const truth = useMemo(() => exact(state.J, state.h), [state.J, state.h])
+  const bp = useMemo(() => loopy(state.J, state.h, state.damping), [state.J, state.h, state.damping])
 
-  const series: XYSeries[] = useMemo(
-    () => [
-      { name: 'exact P(xᵢ = +1)', type: 'bar', x: NODES, y: truth.marginals, slot: 0 },
-      { name: 'loopy BP belief', type: 'scatter', x: NODES, y: bp.marginals, slot: 1 },
-    ],
+  const series = useMemo(
+    () =>
+      [
+        { name: 'exact P(xᵢ = +1)', x: NODES, y: truth.marginals, slot: 0 },
+        { name: 'loopy BP belief', x: NODES, y: bp.marginals, slot: 1 },
+      ] as const,
     [truth, bp],
   )
   const maxError = Math.max(...truth.marginals.map((p, i) => Math.abs(p - bp.marginals[i])))
 
+  const xAxis = useAxis({ label: 'node', hold: 'union' })
+  const yAxis = useAxis({ label: 'P(xᵢ = +1)', range: [0, 1] })
   return (
-    <Interactive
+    <Figure
       title="Loopy belief propagation on a 3 × 3 Ising grid"
+      state={state}
       caption="Spins xᵢ ∈ {−1, +1} on a 3 × 3 grid (nodes numbered row by row; node 5 is the centre), with coupling J between neighbours and field h on every node. Bars are the exact marginals from all 512 configurations; points are loopy BP beliefs after parallel updates. For weak coupling the two agree closely. Strong positive coupling makes loopy BP overconfident, because evidence circulates around the grid's cycles and is counted repeatedly. Strong negative coupling (antiferromagnetic) makes the undamped messages oscillate; damping restores convergence but not accuracy."
-      controls={
-        <>
-          <ParamSlider label="coupling J" param={J} />
-          <ParamSlider label="field h" param={h} />
-          <ParamSlider label="damping" param={damping} />
-        </>
-      }
-      readout={
+
+      readouts={
         <>
           <Readout label="iterations" value={bp.converged ? bp.iterations : `no convergence in ${MAX_ITERS}`} />
           <Readout label="largest marginal error" value={formatNumber(maxError)} />
@@ -136,7 +136,10 @@ export function LoopyIsing() {
         </>
       }
     >
-      <XYChart series={series} xLabel="node" yLabel="P(xᵢ = +1)" yRange={[0, 1]} height={280} />
-    </Interactive>
+      <Plot x={xAxis} y={yAxis} height={280}>
+        <Bars {...series[0]} />
+        <Points {...series[1]} />
+      </Plot>
+    </Figure>
   )
 }

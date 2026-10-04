@@ -1,6 +1,6 @@
-import { useMemo, useState } from 'react'
-import { Interactive, ParamSlider, Readout, XYChart, formatNumber, type XYSeries } from 'aifn-render'
-import { normalQuantile, studentTCdf } from '@/lib/math/special'
+import { useMemo } from 'react'
+import { Curve, Figure, float, formatNumber, int, Plot, Readout, useAxis, useFigureState } from 'aifn-render'
+import { normalQuantile, studentTCdf } from 'aifn/numerics/special'
 
 const N_MAX = 60
 
@@ -9,51 +9,41 @@ const N_MAX = 60
  * With normal data the statistic is exactly t with n − 1 degrees of freedom, so its size is P(|T| > z₁₋α/₂).
  */
 export function PlugInSize() {
-  const [alpha, setAlpha] = useState(0.05)
-  const [n, setN] = useState(10)
+  const state = useFigureState({
+    alpha: float(0.05, { min: 0.01, max: 0.1, step: 0.005, label: 'significance level α' }),
+    n: int(10, { min: 2, max: N_MAX, step: 1, label: 'sample size n' }),
+  })
 
   const result = useMemo(() => {
-    const crit = normalQuantile(1 - alpha / 2)
+    const crit = normalQuantile(1 - state.alpha / 2)
     const size = (m: number) => 2 * (1 - studentTCdf(crit, m - 1))
     const ns = Array.from({ length: N_MAX - 1 }, (_, i) => i + 2)
-    const series: XYSeries[] = [
-      { name: 'z-test with s: actual size', type: 'line', x: ns, y: ns.map(size), slot: 0 },
-      { name: 't-test: size α', type: 'line', x: [2, N_MAX], y: [alpha, alpha], slot: 1, dashed: true },
-    ]
+    const series = [
+      { name: 'z-test with s: actual size', x: ns, y: ns.map(size), slot: 0 },
+      { name: 't-test: size α', x: [2, N_MAX], y: [state.alpha, state.alpha], slot: 1, dashed: true },
+    ] as const
     return { series, size }
-  }, [alpha])
+  }, [state.alpha])
 
+  const xAxis = useAxis({ label: 'sample size n', hold: 'union' })
+  const yAxis = useAxis({ label: 'P(reject | H₀)', range: [0, undefined], hold: 'union' })
   return (
-    <Interactive
+    <Figure
       title="Plugging s into a z-test"
+      state={state}
       caption="The z-test assumes the population standard deviation σ is known. Replacing it with the sample standard deviation s and still using the normal critical value rejects a true null too often, because s is itself uncertain. The t-test uses the t distribution and has exactly size α for normal data."
-      controls={
+
+      readouts={
         <>
-          <ParamSlider
-            label="significance level α"
-            value={alpha}
-            onChange={setAlpha}
-            min={0.01}
-            max={0.1}
-            step={0.005}
-          />
-          <ParamSlider label="sample size n" value={n} onChange={setN} min={2} max={N_MAX} step={1} />
-        </>
-      }
-      readout={
-        <>
-          <Readout label="actual size at this n" value={formatNumber(result.size(n))} />
-          <Readout label="inflation" value={`${formatNumber(result.size(n) / alpha)}×`} />
+          <Readout label="actual size at this n" value={formatNumber(result.size(state.n))} />
+          <Readout label="inflation" value={`${formatNumber(result.size(state.n) / state.alpha)}×`} />
         </>
       }
     >
-      <XYChart
-        height={280}
-        series={result.series}
-        xLabel="sample size n"
-        yLabel="P(reject | H₀)"
-        yRange={[0, undefined]}
-      />
-    </Interactive>
+      <Plot x={xAxis} y={yAxis} height={280}>
+        <Curve {...result.series[0]} />
+        <Curve {...result.series[1]} />
+      </Plot>
+    </Figure>
   )
 }

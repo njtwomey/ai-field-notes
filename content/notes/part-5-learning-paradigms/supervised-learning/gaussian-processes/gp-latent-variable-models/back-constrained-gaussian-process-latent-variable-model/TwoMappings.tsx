@@ -1,7 +1,5 @@
-import { Diagram } from 'aifn-render'
-import { projector } from 'aifn-render'
+import { Diagram, Figure, projector } from 'aifn-render'
 import type { DiagramSpec } from 'aifn-render'
-import { Interactive } from 'aifn-render'
 
 const spec: DiagramSpec = {
   nodes: [
@@ -33,7 +31,7 @@ const spec: DiagramSpec = {
 /** The back-constrained GP-LVM as an encoder and a probabilistic decoder. */
 export function TwoMappings() {
   return (
-    <Interactive
+    <Figure
       title="Two mappings"
       caption="The back constraint is a smooth map from each observation to its latent point, so observations close in the data get latent points close together. The Gaussian process maps latent points back to the data, so latent points close together produce similar observations. The parameters A of the back constraint replace the latent points as the quantities optimised; the objective is still the GP-LVM likelihood."
     >
@@ -41,6 +39,6 @@ export function TwoMappings() {
         spec={spec}
         ariaLabel="Back-constrained GP-LVM: a back-constraint encoder and a Gaussian process decoder"
       />
-    </Interactive>
+    </Figure>
   )
 }

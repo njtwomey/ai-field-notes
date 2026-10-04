@@ -1,5 +1,5 @@
 /**
- * `aifn-applied/inference/mixture-models`: mixture models: the clutter problem (model, tilted moments, EP, exact posterior)
+ * `aifn-methods/inference/mixture-models`: mixture models: the clutter problem (model, tilted moments, EP, exact posterior)
  * and CAVI for Gaussian mixtures.
  */
 

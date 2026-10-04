@@ -1,4 +1,4 @@
-"""Reference values for aifn-applied/retrieval/recommenders: implicit-feedback ALS from the `implicit` library (exact
+"""Reference values for aifn-methods/retrieval/recommenders: implicit-feedback ALS from the `implicit` library (exact
 least-squares solver in float64, from given initial factors, confidences 1 + alpha r passed as the matrix values) after
 a few sweeps; explicit ALS-WR (Zhou et al., 2008) by a direct NumPy implementation; and item-based cosine similarities
 with scikit-learn."""

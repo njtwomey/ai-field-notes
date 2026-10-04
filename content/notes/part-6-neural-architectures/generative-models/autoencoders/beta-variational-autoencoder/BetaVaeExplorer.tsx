@@ -34,7 +34,7 @@ export function BetaVaeExplorer() {
   // For excessive beta (> 8), capacity collapses and z2 shrinks to 0.
   const entanglementAngle = useMemo(() => {
     if (beta < 1.0) return Math.PI / 4 // 45 deg, fully coupled
-    return (Math.PI / 4) / (1 + 0.8 * (beta - 1.0) ** 1.5)
+    return Math.PI / 4 / (1 + 0.8 * (beta - 1.0) ** 1.5)
   }, [beta])
 
   const z2Variance = useMemo(() => {
@@ -80,8 +80,8 @@ export function BetaVaeExplorer() {
       const z1 = traversalAxis === 'z1' ? val : fixedCoord
       const z2 = traversalAxis === 'z2' ? val : fixedCoord
       // Invert the decoder map to find reconstructed (v1, v2)
-      const v1Rec = z1 * cosP + (z2 * invScale2) * sinP
-      const v2Rec = -z1 * sinP + (z2 * invScale2) * cosP
+      const v1Rec = z1 * cosP + z2 * invScale2 * sinP
+      const v2Rec = -z1 * sinP + z2 * invScale2 * cosP
       return { val, v1Rec, v2Rec }
     })
   }, [traversalAxis, fixedCoord, traversalValues, entanglementAngle, z2Variance])
@@ -128,14 +128,7 @@ export function BetaVaeExplorer() {
       controls={
         <>
           <ControlRow label="Model regularisation">
-            <Slider
-              label="KL weight β"
-              value={beta}
-              onChange={setBeta}
-              min={0.2}
-              max={12.0}
-              step={0.2}
-            />
+            <Slider label="KL weight β" value={beta} onChange={setBeta} min={0.2} max={12.0} step={0.2} />
             <Select
               label="Preset configuration"
               value={String(beta)}
@@ -194,54 +187,24 @@ export function BetaVaeExplorer() {
     >
       <Plots cols={3}>
         <Plot x={latentXAxis} y={latentYAxis} title="latent space q(z | x) (color = factor 1)">
-          <Points
-            name="latent codes"
-            x={z1Values}
-            y={z2Values}
-            size={4}
-          />
+          <Points name="latent codes" x={z1Values} y={z2Values} size={4} />
           {/* Traversal path in latent space */}
           <Curve
             name="traversal trajectory"
-            x={
-              traversalAxis === 'z1'
-                ? Float64Array.from([-1.8, 1.8])
-                : Float64Array.from([fixedCoord, fixedCoord])
-            }
-            y={
-              traversalAxis === 'z1'
-                ? Float64Array.from([fixedCoord, fixedCoord])
-                : Float64Array.from([-1.8, 1.8])
-            }
+            x={traversalAxis === 'z1' ? Float64Array.from([-1.8, 1.8]) : Float64Array.from([fixedCoord, fixedCoord])}
+            y={traversalAxis === 'z1' ? Float64Array.from([fixedCoord, fixedCoord]) : Float64Array.from([-1.8, 1.8])}
             emphasis
           />
         </Plot>
         <Plot x={outputXAxis} y={outputYAxis} title="decoded traversal in output space">
           <Curve name="neutral axes" x={[-2.4, 2.4]} y={[0, 0]} muted dashed thin />
           <Curve name="neutral vertical" x={[0, 0]} y={[-2.4, 2.4]} muted dashed thin />
-          <Points
-            name="decoded steps"
-            x={recXs}
-            y={recYs}
-            size={8}
-            emphasis
-          />
-          <Curve
-            name="traversal line in output"
-            x={recXs}
-            y={recYs}
-            emphasis
-          />
+          <Points name="decoded steps" x={recXs} y={recYs} size={8} emphasis />
+          <Curve name="traversal line in output" x={recXs} y={recYs} emphasis />
         </Plot>
         <Plot x={rateAxis} y={distAxis} title="rate–distortion trade-off">
           <Curve name="R–D frontier" x={rdCurveR} y={rdCurveD} muted />
-          <Points
-            name={`operating point (β=${fmt(beta, 1)})`}
-            x={[currentRate]}
-            y={[currentDist]}
-            size={9}
-            emphasis
-          />
+          <Points name={`operating point (β=${fmt(beta, 1)})`} x={[currentRate]} y={[currentDist]} size={9} emphasis />
         </Plot>
       </Plots>
     </Figure>

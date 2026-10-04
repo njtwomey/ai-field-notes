@@ -1,14 +1,16 @@
 import { useMemo, useState } from 'react'
 import {
-  Interactive,
-  ParamSlider,
-  ParamSwitch,
-  Readout,
-  XYChart,
+  Figure,
   formatNumber,
-  useParam,
-  type Handle,
-  type XYSeries,
+  Handle,
+  int,
+  Plot,
+  Readout,
+  seriesLayers,
+  type SeriesSpec,
+  setting,
+  useAxis,
+  useFigureState,
 } from 'aifn-render'
 import type { Vec2 } from '../_shared/splines'
 
@@ -61,19 +63,21 @@ const closeLoop = (P: Vec2[]): Vec2[] => [...P, P[0]]
 /** Chaikin subdivision of a draggable closed polygon, converging to a uniform quadratic B-spline. */
 export function ChaikinSubdivision() {
   const [points, setPoints] = useState<Vec2[]>(START)
-  const rounds = useParam(2, { min: 0, max: 6, step: 1 })
-  const [limit, setLimit] = useState(true)
+  const state = useFigureState({
+    rounds: int(2, { min: 0, max: 6, step: 1, label: 'Rounds of subdivision', format: (v) => String(v) }),
+    limit: setting(true, 'limit curve'),
+  })
 
   const r = useMemo(() => {
     let refined = points
-    for (let k = 0; k < rounds.value; k++) refined = chaikin(refined)
+    for (let k = 0; k < state.rounds; k++) refined = chaikin(refined)
     const curve = quadraticLimit(points)
     // Distance from each refined vertex to the limit curve, measured to a fine polyline through it.
     const fine = closeLoop(quadraticLimit(points, 120))
     const gap = Math.max(
       ...refined.map((q) => Math.min(...fine.slice(1).map((b, i) => segmentDistance(q, fine[i], b)))),
     )
-    const series: XYSeries[] = [
+    const series: SeriesSpec[] = [
       {
         name: 'control polygon',
         type: 'line',
@@ -83,15 +87,15 @@ export function ChaikinSubdivision() {
         dashed: true,
       },
     ]
-    if (rounds.value > 0)
+    if (state.rounds > 0)
       series.push({
-        name: `after ${rounds.value} round${rounds.value > 1 ? 's' : ''}`,
+        name: `after ${state.rounds} round${state.rounds > 1 ? 's' : ''}`,
         type: 'line',
         x: closeLoop(refined).map((q) => q[0]),
         y: closeLoop(refined).map((q) => q[1]),
         slot: 0,
       })
-    if (limit)
+    if (state.limit)
       series.push({
         name: 'quadratic B-spline (limit)',
         type: 'line',
@@ -101,7 +105,7 @@ export function ChaikinSubdivision() {
         dashed: true,
       })
     return { series, count: refined.length, gap }
-  }, [points, rounds.value, limit])
+  }, [points, state.rounds, state.limit])
 
   const handles: Handle[] = points.map((q, i) => ({
     kind: 'point',
@@ -112,24 +116,27 @@ export function ChaikinSubdivision() {
       ),
   }))
 
+  const xAxis = useAxis({ range: X })
+  const yAxis = useAxis({ range: Y, equal: xAxis })
   return (
-    <Interactive
+    <Figure
       title="Chaikin's corner cutting"
+      state={state}
       caption="Drag the control points. Each round replaces every edge by its points at 1/4 and 3/4, cutting every corner. Step through the rounds: the polygon converges to the uniform quadratic B-spline of the original points (dashed), and the largest gap between polygon vertices and the limit curve falls by about 4 each round."
-      controls={
-        <>
-          <ParamSlider label="Rounds of subdivision" param={rounds} withArrows format={(v) => String(v)} />
-          <ParamSwitch label="limit curve" checked={limit} onChange={setLimit} />
-        </>
-      }
-      readout={
+
+      readouts={
         <>
           <Readout label="vertices" value={r.count} />
           <Readout label="max vertex distance to limit" value={formatNumber(r.gap)} />
         </>
       }
     >
-      <XYChart series={r.series} xRange={X} yRange={Y} equalAspect handles={handles} ariaLabel="Chaikin subdivision" />
-    </Interactive>
+      <Plot x={xAxis} y={yAxis} ariaLabel={'Chaikin subdivision'}>
+        {seriesLayers(r.series)}
+        {(handles ?? []).map((h, i) => (
+          <Handle key={i} {...h} />
+        ))}
+      </Plot>
+    </Figure>
   )
 }

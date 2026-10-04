@@ -1,5 +1,4 @@
-import { Interactive } from 'aifn-render'
-import { Diagram } from 'aifn-render'
+import { Diagram, Figure } from 'aifn-render'
 import type { DiagramSpec } from 'aifn-render'
 
 const spec: DiagramSpec = {
@@ -46,7 +45,7 @@ const spec: DiagramSpec = {
 /** NeuMF: a GMF branch (element-wise product) and an MLP branch on separate embeddings, fused by a final layer. */
 export function NcfDiagram() {
   return (
-    <Interactive
+    <Figure
       title="Neural matrix factorisation (NeuMF)"
       caption="The GMF branch multiplies a user and an item embedding element-wise; the MLP branch concatenates a second pair of embeddings and passes them through hidden layers. The last layers of both branches are concatenated and mapped to a probability. With the MLP branch removed and the output weights fixed to 1, the model is matrix factorisation."
     >
@@ -54,6 +53,6 @@ export function NcfDiagram() {
         spec={spec}
         ariaLabel="NeuMF: separate GMF and MLP embeddings for user and item, an element-wise product and an MLP, fused by a sigmoid layer"
       />
-    </Interactive>
+    </Figure>
   )
 }

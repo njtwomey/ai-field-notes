@@ -1,5 +1,5 @@
 /**
- * `aifn-applied/gym/environments/control`: classic-control environments with continuous observations and
+ * `aifn-methods/gym/environments/control`: classic-control environments with continuous observations and
  * differentiable dynamics models, stepped on core's ODE solvers. The inverted pendulum (Gymnasium's `Pendulum-v1`).
  */
 

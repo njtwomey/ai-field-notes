@@ -1,10 +1,12 @@
-import { useMemo, useState } from 'react'
-import { Interactive, ParamButton, ParamChoice, ParamSlider, Readout, XYChart, type XYSeries } from 'aifn-render'
-import { linspace, rng, sigmoid } from '@/lib/math'
+import { useMemo } from 'react'
+import { choice, Curve, Figure, int, Plot, Readout, slider, useAxis, useFigureState } from 'aifn-render'
+import { linspace, toFlat } from 'aifn/foundation/tensor'
+import { normal, stream, uniform } from 'aifn/foundation/random'
+import { sigmoid } from 'aifn/numerics/special'
 
 const N = 20000
 const SLOPE = 1
-const GRID = linspace(-3, 3, 61)
+const GRID = toFlat(linspace(-3, 3, 61))
 const X_RANGE: [number, number] = [-3, 3]
 const Y_RANGE: [number, number] = [1e-4, 1]
 
@@ -19,14 +21,14 @@ type Impressions = { x: Float64Array; y: Uint8Array; u: Float64Array }
 
 /** N impressions with one feature x ~ N(0, 1) and clicks y ~ Bernoulli(σ(a + x)); u decides which negatives are kept. */
 function simulate(seed: number, intercept: number): Impressions {
-  const r = rng(seed)
+  const r = stream(seed)
   const x = new Float64Array(N)
   const y = new Uint8Array(N)
   const u = new Float64Array(N)
   for (let n = 0; n < N; n++) {
-    x[n] = r.normal()
-    y[n] = r.uniform() < sigmoid(intercept + SLOPE * x[n]) ? 1 : 0
-    u[n] = r.uniform()
+    x[n] = normal(r)
+    y[n] = uniform(r) < sigmoid(intercept + SLOPE * x[n]) ? 1 : 0
+    u[n] = uniform(r)
   }
   return { x, y, u }
 }
@@ -74,14 +76,20 @@ const pct = (v: number) => `${(100 * v).toFixed(2)}%`
  * to all clicks and a fraction w of non-clicks, then corrected analytically or refit with importance weights 1/w.
  */
 export function NegativeSubsamplingCalibration() {
-  const [keep, setKeep] = useState(0.05)
-  const [base, setBase] = useState<Base>('medium')
-  const [seed, setSeed] = useState(7)
-  const intercept = BASES[base].intercept
+  const state = useFigureState({
+    keep: slider(0.01, 1, 0.05, { step: 0.01, label: 'fraction of non-clicks kept, w' }),
+    base: choice<Base>(
+      (Object.keys(BASES) as Base[]).map((b) => ({ value: b, label: BASES[b].label })),
+      'medium',
+      { label: 'base rate' },
+    ),
+    seed: int(7, { ge: 0, label: 'seed' }),
+  })
+  const intercept = BASES[state.base].intercept
 
-  const data = useMemo(() => simulate(seed, intercept), [seed, intercept])
-  const raw = useMemo(() => fitLogistic(data, keep, 1), [data, keep])
-  const weighted = useMemo(() => fitLogistic(data, keep, 1 / keep), [data, keep])
+  const data = useMemo(() => simulate(state.seed, intercept), [state.seed, intercept])
+  const raw = useMemo(() => fitLogistic(data, state.keep, 1), [data, state.keep])
+  const weighted = useMemo(() => fitLogistic(data, state.keep, 1 / state.keep), [data, state.keep])
 
   const stats = useMemo(() => {
     let clicks = 0
@@ -91,68 +99,50 @@ export function NegativeSubsamplingCalibration() {
     let sumWeighted = 0
     for (let n = 0; n < N; n++) {
       clicks += data.y[n]
-      if (data.y[n] === 1 || data.u[n] < keep) kept++
+      if (data.y[n] === 1 || data.u[n] < state.keep) kept++
       const q = sigmoid(raw[0] + raw[1] * data.x[n])
       sumRaw += q
-      sumCorrected += recalibrate(q, keep)
+      sumCorrected += recalibrate(q, state.keep)
       sumWeighted += sigmoid(weighted[0] + weighted[1] * data.x[n])
     }
     return { clicks, kept, raw: sumRaw / N, corrected: sumCorrected / N, weighted: sumWeighted / N }
-  }, [data, keep, raw, weighted])
+  }, [data, state.keep, raw, weighted])
 
-  const series = useMemo((): XYSeries[] => {
+  const series = useMemo(() => {
     const rawCurve = GRID.map((x) => sigmoid(raw[0] + raw[1] * x))
     return [
       {
         name: 'true click probability',
-        type: 'line',
         x: GRID,
         y: GRID.map((x) => sigmoid(intercept + SLOPE * x)),
         emphasis: true,
       },
-      { name: 'fit on subsampled data', type: 'line', x: GRID, y: rawCurve, slot: 0 },
+      { name: 'fit on subsampled data', x: GRID, y: rawCurve, slot: 0 },
       {
         name: 'recalibrated q / (q + (1 − q)/w)',
-        type: 'line',
         x: GRID,
-        y: rawCurve.map((q) => recalibrate(q, keep)),
+        y: rawCurve.map((q) => recalibrate(q, state.keep)),
         slot: 1,
       },
       {
         name: 'refit with negatives weighted 1/w',
-        type: 'line',
         x: GRID,
         y: GRID.map((x) => sigmoid(weighted[0] + weighted[1] * x)),
         slot: 2,
         dashed: true,
       },
-    ]
-  }, [raw, weighted, intercept, keep])
+    ] as const
+  }, [raw, weighted, intercept, state.keep])
 
+  const xAxis = useAxis({ label: 'feature x', range: X_RANGE })
+  const yAxis = useAxis({ label: 'P(click | x)', range: Y_RANGE, log: true })
   return (
-    <Interactive
+    <Figure
       title="Negative subsampling inflates predicted click-through rates"
+      state={state}
       caption="Twenty thousand simulated impressions with one feature x and a known logistic click model (black). A logistic regression is fit to every click and a fraction w of the non-clicks. Its predictions are too high by a factor of about 1/w in the odds. The recalibration formula maps them back onto the true curve without refitting. Refitting with each kept non-click weighted by 1/w also recovers the curve, but its estimate is noisier at small w. The y-axis is logarithmic."
-      controls={
-        <>
-          <ParamSlider
-            label="fraction of non-clicks kept, w"
-            value={keep}
-            onChange={setKeep}
-            min={0.01}
-            max={1}
-            step={0.01}
-          />
-          <ParamChoice
-            label="base rate"
-            value={base}
-            onChange={setBase}
-            options={(Object.keys(BASES) as Base[]).map((b) => ({ value: b, label: BASES[b].label }))}
-          />
-          <ParamButton onClick={() => setSeed((s) => s + 1)}>New sample</ParamButton>
-        </>
-      }
-      readout={
+
+      readouts={
         <>
           <Readout label="observed CTR" value={pct(stats.clicks / N)} />
           <Readout label="mean prediction, subsampled fit" value={pct(stats.raw)} />
@@ -161,20 +151,17 @@ export function NegativeSubsamplingCalibration() {
           <Readout label="training rows" value={`${stats.kept} of ${N}`} />
           <Readout
             label="intercept shift"
-            value={`${(raw[0] - weighted[0]).toFixed(2)} (−ln w = ${(-Math.log(keep)).toFixed(2)})`}
+            value={`${(raw[0] - weighted[0]).toFixed(2)} (−ln w = ${(-Math.log(state.keep)).toFixed(2)})`}
           />
         </>
       }
     >
-      <XYChart
-        height={320}
-        series={series}
-        xRange={X_RANGE}
-        yRange={Y_RANGE}
-        yLog
-        xLabel="feature x"
-        yLabel="P(click | x)"
-      />
-    </Interactive>
+      <Plot x={xAxis} y={yAxis} height={320}>
+        <Curve {...series[0]} />
+        <Curve {...series[1]} />
+        <Curve {...series[2]} />
+        <Curve {...series[3]} />
+      </Plot>
+    </Figure>
   )
 }

@@ -1,6 +1,17 @@
-import { useMemo, useState } from 'react'
-import { Interactive, ParamSlider, Readout, XYChart, formatNumber, type Segment, type XYSeries } from 'aifn-render'
-import { rng } from '@/lib/math'
+import { useMemo } from 'react'
+import {
+  Figure,
+  float,
+  formatNumber,
+  Plot,
+  Points,
+  Readout,
+  type Segment,
+  Segments,
+  useAxis,
+  useFigureState,
+} from 'aifn-render'
+import { normal, stream, type Stream, uniform } from 'aifn/foundation/random'
 
 const N = 600
 const H = Math.sqrt(3) / 2
@@ -15,15 +26,15 @@ const X_RANGE: [number, number] = [-0.05, 1.05]
 const Y_RANGE: [number, number] = [-0.05, H + 0.05]
 
 /** Gamma(α, 1) draw by Marsaglia and Tsang's method, boosted for α < 1. */
-function gammaSample(alpha: number, r: ReturnType<typeof rng>): number {
-  if (alpha < 1) return gammaSample(alpha + 1, r) * Math.pow(Math.max(r.uniform(), 1e-300), 1 / alpha)
+function gammaSample(alpha: number, r: Stream): number {
+  if (alpha < 1) return gammaSample(alpha + 1, r) * Math.pow(Math.max(uniform(r), 1e-300), 1 / alpha)
   const d = alpha - 1 / 3
   const c = 1 / Math.sqrt(9 * d)
   for (;;) {
-    const z = r.normal()
+    const z = normal(r)
     const v = (1 + c * z) ** 3
     if (v <= 0) continue
-    const u = r.uniform()
+    const u = uniform(r)
     if (Math.log(u) < 0.5 * z * z + d - d * v + d * Math.log(v)) return d * v
   }
 }
@@ -35,49 +46,55 @@ const toPlane = (t: number[]): [number, number] => [
 
 /** Samples from a three-category Dirichlet, drawn on the triangle of probability vectors. */
 export function SimplexSamples() {
-  const [a1, setA1] = useState(2)
-  const [a2, setA2] = useState(2)
-  const [a3, setA3] = useState(2)
+  const state = useFigureState({
+    a1: float(2, { min: 0.1, max: 20, step: 0.1, label: 'α₁' }),
+    a2: float(2, { min: 0.1, max: 20, step: 0.1, label: 'α₂' }),
+    a3: float(2, { min: 0.1, max: 20, step: 0.1, label: 'α₃' }),
+  })
 
-  const series = useMemo((): XYSeries[] => {
-    const alpha = [a1, a2, a3]
-    const r = rng(11)
+  const series = useMemo(() => {
+    const alpha = [state.a1, state.a2, state.a3]
+    const r = stream(11)
     const points = Array.from({ length: N }, () => {
       const g = alpha.map((a) => gammaSample(a, r))
       const total = g[0] + g[1] + g[2]
       return toPlane(g.map((x) => x / total))
     })
-    const total = a1 + a2 + a3
+    const total = state.a1 + state.a2 + state.a3
     const mean = toPlane(alpha.map((a) => a / total))
     return [
-      { name: 'samples', type: 'scatter', x: points.map((p) => p[0]), y: points.map((p) => p[1]), slot: 0 },
-      { name: 'mean', type: 'scatter', x: [mean[0]], y: [mean[1]], emphasis: true },
-    ]
-  }, [a1, a2, a3])
+      { name: 'samples', x: points.map((p) => p[0]), y: points.map((p) => p[1]), slot: 0 },
+      { name: 'mean', x: [mean[0]], y: [mean[1]], emphasis: true },
+    ] as const
+  }, [state.a1, state.a2, state.a3])
 
-  const a0 = a1 + a2 + a3
+  const a0 = state.a1 + state.a2 + state.a3
+  const xAxis = useAxis({ range: X_RANGE })
+  const yAxis = useAxis({ range: Y_RANGE, equal: xAxis })
   return (
-    <Interactive
+    <Figure
       title="Dirichlet samples on the simplex"
+      state={state}
       caption="Each point is a probability vector θ = (θ₁, θ₂, θ₃). The bottom-left corner is θ = (1, 0, 0), the bottom-right (0, 1, 0) and the top (0, 0, 1). Equal α below 1 pushes samples to the corners and edges (sparse vectors); α = 1 is uniform on the triangle; large α concentrates them around the mean α/α₀."
-      controls={
-        <>
-          <ParamSlider label="α₁" value={a1} onChange={setA1} min={0.1} max={20} step={0.1} />
-          <ParamSlider label="α₂" value={a2} onChange={setA2} min={0.1} max={20} step={0.1} />
-          <ParamSlider label="α₃" value={a3} onChange={setA3} min={0.1} max={20} step={0.1} />
-        </>
-      }
-      readout={
+
+      readouts={
         <>
           <Readout label="concentration α₀" value={formatNumber(a0)} />
-          <Readout label="mean θ" value={`(${[a1, a2, a3].map((a) => formatNumber(a / a0)).join(', ')})`} />
+          <Readout
+            label="mean θ"
+            value={`(${[state.a1, state.a2, state.a3].map((a) => formatNumber(a / a0)).join(', ')})`}
+          />
         </>
       }
     >
       {/* Equal aspect sets the height from the width, so cap the width: the whole simplex and the sliders fit on screen. */}
       <div className="mx-auto w-full max-w-md">
-        <XYChart series={series} segments={OUTLINE} xRange={X_RANGE} yRange={Y_RANGE} equalAspect bare />
+        <Plot x={xAxis} y={yAxis} bare>
+          <Points {...series[0]} />
+          <Points {...series[1]} />
+          <Segments segments={OUTLINE} />
+        </Plot>
       </div>
-    </Interactive>
+    </Figure>
   )
 }

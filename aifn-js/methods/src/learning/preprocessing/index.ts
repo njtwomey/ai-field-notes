@@ -1,5 +1,5 @@
 /**
- * `aifn-applied/learning/preprocessing`: preprocessing transforms fitted with `fit({ x, y? })`: scalers, encoders,
+ * `aifn-methods/learning/preprocessing`: preprocessing transforms fitted with `fit({ x, y? })`: scalers, encoders,
  * imputers, power transforms, feature maps (polynomial, spline, random Fourier) and whitening; and resamplers for
  * imbalanced classes (random over- and under-sampling, SMOTE, borderline-SMOTE, ADASYN, Tomek links).
  */

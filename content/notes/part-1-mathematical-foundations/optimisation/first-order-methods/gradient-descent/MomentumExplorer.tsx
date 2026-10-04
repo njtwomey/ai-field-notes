@@ -1,13 +1,17 @@
 import { useMemo, useState } from 'react'
 import {
-  Heatmap,
-  Interactive,
-  ParamSlider,
-  Readout,
-  XYChart,
+  Figure,
+  float,
   formatNumber,
-  type Handle,
-  type HeatmapOverlay,
+  Handle,
+  int,
+  Plot,
+  Raster,
+  Readout,
+  seriesLayers,
+  type SeriesSpec,
+  useAxis,
+  useFigureState,
 } from 'aifn-render'
 import type { LogisticValley } from '@/generated/contracts'
 import { useFigure } from '@/lib/generated'
@@ -40,21 +44,34 @@ function stepsTo(excessLoss: number[], tol: number): number | undefined {
 
 export function MomentumExplorer() {
   const { data, error } = useFigure<LogisticValley>('gradient-descent/logistic-valley')
-  const [logLr, setLogLr] = useState(-1)
-  const [beta, setBeta] = useState(0.9)
-  const [steps, setSteps] = useState(200)
+  const state = useFigureState({
+    logLr: float(-1, {
+      min: -2.5,
+      max: 0,
+      step: 0.01,
+      label: 'step size η',
+      points_per_decade: 2,
+      logTransform: 'value-is-log',
+      format: (v) => formatNumber(10 ** v),
+    }),
+    beta: float(0.9, { min: 0, max: 0.99, step: 0.01, label: 'momentum β' }),
+    steps: int(200, { min: 10, max: 400, step: 5, label: 'steps' }),
+  })
   const [start, setStart] = useState<Vec>([4, 0])
 
   const f = useMemo(() => (data ? crossEntropy(data.data.x, (data.data.group ?? []).map(Number)) : undefined), [data])
-  const lr = 10 ** logLr
+  const lr = 10 ** state.logLr
   const runs = useMemo(
-    () => (f ? { plain: descend(f, start, lr, steps), heavy: descend(f, start, lr, steps, beta) } : undefined),
-    [f, start, lr, steps, beta],
+    () =>
+      f
+        ? { plain: descend(f, start, lr, state.steps), heavy: descend(f, start, lr, state.steps, state.beta) }
+        : undefined,
+    [f, start, lr, state.steps, state.beta],
   )
 
-  const overlay = useMemo((): HeatmapOverlay[] => {
+  const overlay = useMemo((): SeriesSpec[] => {
     if (!runs || !data) return []
-    const line = (name: string, path: Vec[], slot: number): HeatmapOverlay => ({
+    const line = (name: string, path: Vec[], slot: number): SeriesSpec => ({
       name,
       type: 'line',
       x: path.map((p) => p[0]),
@@ -78,7 +95,7 @@ export function MomentumExplorer() {
       series: [
         { name: 'plain', type: 'line' as const, x: plain.map((_, i) => i), y: plain, slot: 1 },
         {
-          name: `momentum β = ${formatNumber(beta)}`,
+          name: `momentum β = ${formatNumber(state.beta)}`,
           type: 'line' as const,
           x: heavy.map((_, i) => i),
           y: heavy,
@@ -86,7 +103,7 @@ export function MomentumExplorer() {
         },
       ],
     }
-  }, [runs, data, beta])
+  }, [runs, data, state.beta])
 
   const startHandle: Handle[] | undefined = data && [
     {
@@ -97,31 +114,24 @@ export function MomentumExplorer() {
     },
   ]
 
+  // Axes before any early return: hooks run in the same order on every render.
+  const xAxis = useAxis({ label: 'w' })
+  const yAxis = useAxis({ label: 'b' })
+  const xAxis2 = useAxis({ label: 'step', hold: 'union' })
+  const yAxis2 = useAxis({ label: 'L − L*', hold: 'union', log: true })
+
   if (error) return <p className="text-sm text-destructive">{error.message}</p>
   if (!data || !runs || !curves) return null
 
-  const fmtSteps = (n: number | undefined) => (n === undefined ? `> ${steps}` : String(n))
+  const fmtSteps = (n: number | undefined) => (n === undefined ? `> ${state.steps}` : String(n))
 
   return (
-    <Interactive
+    <Figure
       title="Momentum in a narrow valley"
+      state={state}
       caption="Left: log₁₀ cross-entropy of a 1-D logistic regression over weight w and bias b. The feature is not centred, so the valley is long and thin. Both optimisers use the same step size and start; drag the dot to move the start. Plain gradient descent reaches the valley floor quickly, then crawls along it. Momentum keeps its speed along the floor. With β near 1 it overshoots, and its loss rises and falls."
-      controls={
-        <>
-          <ParamSlider
-            label="step size η"
-            value={logLr}
-            onChange={setLogLr}
-            min={-2.5}
-            max={0}
-            step={0.01}
-            format={(v) => formatNumber(10 ** v)}
-          />
-          <ParamSlider label="momentum β" value={beta} onChange={setBeta} min={0} max={0.99} step={0.01} />
-          <ParamSlider label="steps" value={steps} onChange={setSteps} min={10} max={400} step={5} />
-        </>
-      }
-      readout={
+
+      readouts={
         <>
           <Readout label="plain excess loss" value={runs.plain.diverged ? '∞' : formatNumber(curves.plain.at(-1)!)} />
           <Readout
@@ -134,19 +144,17 @@ export function MomentumExplorer() {
       }
     >
       <div className="grid gap-4 md:grid-cols-2">
-        <Heatmap
-          x={data.surface.x}
-          y={data.surface.y}
-          z={data.surface.z}
-          xLabel="w"
-          yLabel="b"
-          valueLabel="log₁₀ cross-entropy"
-          overlay={overlay}
-          handles={startHandle}
-          height={340}
-        />
-        <XYChart height={340} series={curves.series} yLog xLabel="step" yLabel="L − L*" />
+        <Plot x={xAxis} y={yAxis} height={340}>
+          <Raster x={data.surface.x} y={data.surface.y} z={data.surface.z} valueLabel={'log₁₀ cross-entropy'} />
+          {seriesLayers(overlay, { live: true })}
+          {(startHandle ?? []).map((h, i) => (
+            <Handle key={i} {...h} />
+          ))}
+        </Plot>
+        <Plot x={xAxis2} y={yAxis2} height={340}>
+          {seriesLayers(curves.series)}
+        </Plot>
       </div>
-    </Interactive>
+    </Figure>
   )
 }
