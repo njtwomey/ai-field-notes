@@ -48,6 +48,9 @@ function requested(mode: string, bags: number, purity: number): number[][] {
   return pi.map((p) => [1 - p, p])
 }
 
+/** No points moved: one constant, so the bags derived from it keep their identity across renders. */
+const NO_MOVES: Record<number, number> = {}
+
 export function LpllpShowcase() {
   const state = useFigureState({
     data: row('1 · data', {
@@ -112,7 +115,7 @@ export function LpllpShowcase() {
   // Points moved between bags by clicking (point → bag), reset when the bags are remade.
   const bagKey = `${dataset}/${n}/${seed}/${mode}/${count}/${purity}`
   const [moves, setMoves] = useState<{ key: string; to: Record<number, number> }>({ key: bagKey, to: {} })
-  const moved = moves.key === bagKey ? moves.to : {}
+  const moved = moves.key === bagKey ? moves.to : NO_MOVES
   const bags = useMemo(() => {
     const b = Int32Array.from(made.bags)
     for (const [i, k] of Object.entries(moved)) b[Number(i)] = k

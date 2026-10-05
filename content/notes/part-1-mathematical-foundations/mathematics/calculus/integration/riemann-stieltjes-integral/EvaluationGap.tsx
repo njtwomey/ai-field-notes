@@ -59,8 +59,9 @@ export function EvaluationGap() {
     ),
     k: int(6, { min: 1, max: K_MAX, step: 1, label: 'k (2ᵏ steps)' }),
   })
-  const g = useMemo(() => fineGrid(state.kind), [state.kind])
-  const now = useMemo(() => sums(g, state.k), [g, state.k])
+  const { kind, k, set } = state
+  const g = useMemo(() => fineGrid(kind), [kind])
+  const now = useMemo(() => sums(g, k), [g, k])
 
   const series = useMemo(() => {
     const ks = Array.from({ length: K_MAX }, (_, i) => i + 1)
@@ -73,8 +74,8 @@ export function EvaluationGap() {
   }, [g])
 
   const handles = useMemo(
-    () => [{ kind: 'x' as const, at: state.k, label: 'k', onDrag: (x: number) => state.set('k', Math.round(x)) }],
-    [state.bind('k')],
+    () => [{ kind: 'x' as const, at: k, label: 'k', onDrag: (x: number) => set('k', Math.round(x)) }],
+    [k, set],
   )
 
   const xAxis = useAxis({ label: 'k (2ᵏ steps)', range: [1, K_MAX] })

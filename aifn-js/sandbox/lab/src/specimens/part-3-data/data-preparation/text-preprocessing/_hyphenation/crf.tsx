@@ -445,10 +445,15 @@ function WordFigure({
   decisionSelect: ReactNode
 }) {
   const [typed, setTyped] = useState('hyphenation')
-  const word = typed
-    .toLowerCase()
-    .replace(/[^a-z]/g, '')
-    .slice(0, LONGEST)
+  // A memo, so the React compiler can treat the word as a stable value in the memos below.
+  const word = useMemo(
+    () =>
+      typed
+        .toLowerCase()
+        .replace(/[^a-z]/g, '')
+        .slice(0, LONGEST),
+    [typed],
+  )
   const valid = word.length >= 2
   const truth = valid ? data.truth.hyphens(word) : null
   const crf = snap?.crf ?? null

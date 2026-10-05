@@ -49,7 +49,8 @@ export { ParallelCoordinatesPanel, type ParallelCoordinatesPanelProps } from './
 export { AndrewsCurvesPanel, type AndrewsCurvesPanelProps } from './AndrewsCurvesView'
 export { histogramBars, type HistogramBars } from './histogram'
 export { HypothesisTestPanel, type HypothesisTestPanelProps } from './HypothesisTestView'
-export { AttentionPanel, attentionPattern, type AttentionPanelProps, type AttentionPattern } from './AttentionView'
+export { AttentionPanel, type AttentionPanelProps } from './AttentionView'
+export { attentionPattern, type AttentionPattern } from './attention-pattern'
 export { TrainControls, type TrainControlsProps } from './TrainControls'
 export { useTrainedRun, type TrainedRun } from './useTrainedRun'
 export {

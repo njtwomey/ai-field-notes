@@ -69,6 +69,16 @@ type RunSettings = {
   queries: number
 }
 
+/** The data and the active-learning problem that a run's dataset, size and seed fix. */
+function makeProblem(dataset: Dataset, n: number, seed: number) {
+  const data = dataOf(dataset, n, `lab/active/${dataset}/${seed}`)
+  const problem = activeProportionsProblem(stream(`lab/active/split/${seed}`), {
+    x: data.x as Tensor,
+    y: data.y as Tensor,
+  })
+  return { data, problem }
+}
+
 export function ActiveRunFigure() {
   const state = useFigureState({
     data: dataFields(),
@@ -91,16 +101,8 @@ export function ActiveRunFigure() {
     bagSize: state.query.bagSize,
     queries: state.query.queries,
   }
-  const make = (s: RunSettings) => {
-    const data = dataOf(s.dataset, s.n, `lab/active/${s.dataset}/${s.seed}`)
-    const problem = activeProportionsProblem(stream(`lab/active/split/${s.seed}`), {
-      x: data.x as Tensor,
-      y: data.y as Tensor,
-    })
-    return { data, problem }
-  }
   const trained = useTrainedRun(settings, (s): Task<ActiveProportionsState[]> => {
-    const { problem } = make(s)
+    const { problem } = makeProblem(s.dataset, s.n, s.seed)
     return call<ActiveProportionsState[]>('applied/learning/weak-supervision/activeProportionsRun', problem, {
       strategy: s.strategy,
       bagSize: s.bagSize,
@@ -110,7 +112,11 @@ export function ActiveRunFigure() {
     })
   })
   const shown = trained.trained ?? settings
-  const { data, problem } = useMemo(() => make(shown), [JSON.stringify(shown)]) // oxlint-disable-line react-hooks/exhaustive-deps
+  const { dataset: shownDataset, n: shownN, seed: shownSeed } = shown
+  const { data, problem } = useMemo(
+    () => makeProblem(shownDataset, shownN, shownSeed),
+    [shownDataset, shownN, shownSeed],
+  )
   const rows = useMemo(() => toRows(data.x as Tensor) as number[][], [data])
   const truth = useMemo(() => Array.from(toFlat(data.y as Tensor)), [data])
   const states = trained.run.value ?? []

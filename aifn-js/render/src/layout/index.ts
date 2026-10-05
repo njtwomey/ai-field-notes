@@ -18,7 +18,7 @@ export {
   registerMathMacros,
   getGlobalMathMacros,
   RenderMathContext,
-  RenderMathProvider,
   useRenderMathMacros,
   renderKatex,
 } from './math-macros'
+export { RenderMathProvider } from './RenderMathProvider'

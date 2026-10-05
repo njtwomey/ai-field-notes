@@ -41,6 +41,7 @@ export function ProjectionAxis() {
   const state = useFigureState({
     angle: slider(-90, 90, -30, { step: 1, label: 'direction of u (degrees)', format: (v) => `${v}°` }),
   })
+  const { angle, set } = state
   const data = useMemo(() => {
     const pts = sample()
     const sxx = pts.reduce((s, p) => s + p[0] * p[0], 0) / N
@@ -70,7 +71,7 @@ export function ProjectionAxis() {
   }, [])
 
   const fit = useMemo(() => {
-    const u: [number, number] = [Math.cos(rad(state.angle)), Math.sin(rad(state.angle))]
+    const u: [number, number] = [Math.cos(rad(angle)), Math.sin(rad(angle))]
     const proj = data.pts.map(([x, y]) => {
       const z = u[0] * x + u[1] * y
       return [u[0] * z, u[1] * z] as [number, number]
@@ -83,7 +84,7 @@ export function ProjectionAxis() {
       { name: 'projection', x: proj.map((p) => p[0]), y: proj.map((p) => p[1]), slot: 1 },
     ] as const
     return { u, variance, error: data.total - variance, residuals, series }
-  }, [state.angle, data])
+  }, [angle, data])
 
   const vectors = useMemo<Segment[]>(() => [{ from: [0, 0], to: [ARROW * fit.u[0], ARROW * fit.u[1]] }], [fit.u])
   const tipHandle = useMemo<Handle[]>(
@@ -92,14 +93,14 @@ export function ProjectionAxis() {
         kind: 'point',
         at: [ARROW * fit.u[0], ARROW * fit.u[1]],
         label: 'u',
-        onDrag: ([x, y]) => state.set('angle', fold((Math.atan2(y, x) * 180) / Math.PI)),
+        onDrag: ([x, y]) => set('angle', fold((Math.atan2(y, x) * 180) / Math.PI)),
       },
     ],
-    [fit.u, state.bind('angle')],
+    [fit.u, set],
   )
   const angleHandle = useMemo<Handle[]>(
-    () => [{ kind: 'x', at: state.angle, label: 'direction', onDrag: (x) => state.set('angle', x) }],
-    [state.bind('angle')],
+    () => [{ kind: 'x', at: angle, label: 'direction', onDrag: (x) => set('angle', x) }],
+    [angle, set],
   )
 
   const xAxis = useAxis({ label: 'x₁', range: [-5, 5] })
@@ -138,7 +139,7 @@ export function ProjectionAxis() {
         <Plot x={xAxis2} y={yAxis2} height={320}>
           <Curve name="projected variance" x={data.thetas} y={data.variance} slot={1} />
           <Curve name="reconstruction MSE" x={data.thetas} y={data.error} slot={2} />
-          <Points name="current u" x={[state.angle, state.angle]} y={[fit.variance, fit.error]} emphasis />
+          <Points name="current u" x={[angle, angle]} y={[fit.variance, fit.error]} emphasis />
           {(angleHandle ?? []).map((h, i) => (
             <Handle key={i} {...h} />
           ))}

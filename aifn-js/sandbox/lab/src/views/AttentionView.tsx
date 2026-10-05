@@ -1,34 +1,12 @@
 import { useMemo, useState } from 'react'
-import { toFlat, type Tensor } from 'aifn/foundation/tensor'
+import { toFlat } from 'aifn/foundation/tensor'
 import { PanelSlot } from '@lab/layout'
 import { choice } from '@lab/state'
 import { Bars, Curve, Plot, Plots, Raster, Readout, Segments, useAxis } from '@lab/viz'
 import { cn } from '@lab/lib/utils'
+import type { AttentionPattern } from './attention-pattern'
 import { formatValue } from './format'
 import { registerView } from './registry'
-
-/**
- * Attention weights over a token sequence, as returned by `aifn/nn/attention` (`multiHeadAttention`'s `weights`), with
- * the tokens they are over: the object the attention view draws.
- */
-export type AttentionPattern = {
-  readonly kind: 'attention'
-  /** Key tokens (the columns). */
-  readonly keys: readonly string[]
-  /** Query tokens (the rows); default the keys (self-attention). */
-  readonly queries?: readonly string[]
-  /** Weights [h, Tq, Tk] or [Tq, Tk]; each row sums to one over the keys it may see. */
-  readonly weights: Tensor
-  /** The mask [Tq, Tk]: 1 where a query may attend, 0 where not (drawn as empty, crossed cells). */
-  readonly mask?: Tensor | null
-  /** The first `cached` keys come from a key–value cache (marked in the token strip). */
-  readonly cached?: number
-}
-
-/** An attention pattern for the view. */
-export function attentionPattern(p: Omit<AttentionPattern, 'kind'>): AttentionPattern {
-  return { kind: 'attention', ...p }
-}
 
 export type AttentionPanelProps = {
   pattern: AttentionPattern
@@ -57,7 +35,10 @@ export function AttentionPanel({ pattern, head, focus }: AttentionPanelProps) {
   const queries = pattern.queries ?? keys
   const [H, Tq, Tk] = weights.shape.length === 3 ? weights.shape : [1, ...weights.shape]
   const shown = head === undefined ? (H <= 4 ? 'all' : 0) : head
-  const heads = shown === 'all' ? Array.from({ length: H }, (_, h) => h) : [Math.min(shown, H - 1)]
+  const heads = useMemo(
+    () => (shown === 'all' ? Array.from({ length: H }, (_, h) => h) : [Math.min(shown, H - 1)]),
+    [shown, H],
+  )
   const [hover, setHover] = useState<number | null>(null)
   const row = Math.min(hover ?? focus ?? Tq - 1, Tq - 1)
 

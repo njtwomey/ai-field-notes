@@ -51,22 +51,21 @@ export function BootstrapIntervals() {
     seed: int(1, { ge: 0, label: 'seed' }),
   })
 
+  const { n, B, stat, seed } = state
   const r = useMemo(() => {
-    const f = state.stat === 'mean' ? mean : median
-    const g = stream(state.seed)
-    const x = Array.from({ length: state.n }, () => Math.exp(normal(g)))
+    const f = stat === 'mean' ? mean : median
+    const g = stream(seed)
+    const x = Array.from({ length: n }, () => Math.exp(normal(g)))
     const theta = f(x)
-    const reps = Array.from({ length: state.B }, () =>
-      f(Array.from({ length: state.n }, () => x[Math.floor(uniform(g) * state.n)])),
-    )
+    const reps = Array.from({ length: B }, () => f(Array.from({ length: n }, () => x[Math.floor(uniform(g) * n)])))
     const sorted = [...reps].sort((a, b) => a - b)
     const m = mean(reps)
-    const se = Math.sqrt(reps.reduce((a, t) => a + (t - m) ** 2, 0) / (state.B - 1))
+    const se = Math.sqrt(reps.reduce((a, t) => a + (t - m) ** 2, 0) / (B - 1))
     const pct: [number, number] = [quantile(sorted, ALPHA / 2), quantile(sorted, 1 - ALPHA / 2)]
     const basic: [number, number] = [2 * theta - pct[1], 2 * theta - pct[0]]
     // BCa: bias correction z0 from the fraction of replicates below θ̂, acceleration a from the jackknife.
     const below = reps.filter((t) => t < theta).length + 0.5 * reps.filter((t) => t === theta).length
-    const z0 = normalQuantile(Math.min(Math.max(below / state.B, 1 / state.B), 1 - 1 / state.B))
+    const z0 = normalQuantile(Math.min(Math.max(below / B, 1 / B), 1 - 1 / B))
     const jack = x.map((_, i) => f(x.filter((__, j) => j !== i)))
     const jm = mean(jack)
     const num = jack.reduce((a, t) => a + (jm - t) ** 3, 0)
@@ -77,11 +76,11 @@ export function BootstrapIntervals() {
     const bca: [number, number] = [quantile(sorted, adj(-zq)), quantile(sorted, adj(zq))]
 
     const lo = sorted[0]
-    const hi = sorted[state.B - 1]
+    const hi = sorted[B - 1]
     const width = (hi - lo) / BINS || 1
     const counts = new Array<number>(BINS).fill(0)
     for (const t of reps) counts[Math.min(BINS - 1, Math.floor((t - lo) / width))]++
-    const density = counts.map((c) => c / (state.B * width))
+    const density = counts.map((c) => c / (B * width))
     const top = Math.max(...density)
     const level = (k: number) => top * (1.08 + 0.08 * k)
     const bar = (name: string, [a, b]: [number, number], k: number, slot: number): SeriesSpec => ({
@@ -114,7 +113,7 @@ export function BootstrapIntervals() {
       bar('BCa', bca, 2, 3),
     ]
     return { theta, se, pct, basic, bca, z0, acc, series, top: level(3) * 1.04, bias: m - theta }
-  }, [state.n, state.B, state.stat, state.seed])
+  }, [n, B, stat, seed])
 
   const fmt = ([a, b]: [number, number]) => `[${formatNumber(a)}, ${formatNumber(b)}]`
   const xAxis = useAxis({ label: 'value of the statistic', hold: 'union' })

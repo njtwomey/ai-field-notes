@@ -121,7 +121,7 @@ function tidyAxes(axes: unknown): unknown {
 const HANDLES_ID = '__handles'
 
 /** An option ECharts rejected, named by what it held: the bare ECharts errors ("Error" from an assert) say nothing. */
-export class ChartError extends Error {
+class ChartError extends Error {
   override name = 'ChartError'
 }
 

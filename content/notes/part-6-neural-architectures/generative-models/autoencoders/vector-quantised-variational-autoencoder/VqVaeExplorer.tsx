@@ -174,7 +174,7 @@ export function VqVaeExplorer() {
         distSq: focalDist,
       },
     }
-  }, [kCodes, datasetKind, trainStep, dataPoints, deadCodeReset, focal])
+  }, [kCodes, trainStep, dataPoints, deadCodeReset, focal])
 
   // Voronoi cell raster for continuous 2D space
   const GRID_SIZE = 35

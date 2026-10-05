@@ -1,6 +1,7 @@
 import { useMemo } from 'react'
 import { formatNumber, Readout, slider, useFigureState } from 'aifn-render'
-import { ConstrainedExplorer, tField, SensitivityPanel, type ConstrainedProblem } from './ConstrainedExplorer'
+import { ConstrainedExplorer, SensitivityPanel, type ConstrainedProblem } from './ConstrainedExplorer'
+import { tField } from './t-field'
 
 const PI = Math.PI
 

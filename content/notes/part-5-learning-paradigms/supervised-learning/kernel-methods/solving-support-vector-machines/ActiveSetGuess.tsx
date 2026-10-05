@@ -34,10 +34,11 @@ const guess = (t: number) => choice<Status>(OPTIONS, START[t], { label: `x${t + 
 /** Guess each point's status, solve the linear KKT equations that the guess implies, and check the rest. */
 export function ActiveSetGuess() {
   const state = useFigureState({ x1: guess(0), x2: guess(1), x3: guess(2), x4: guess(3), x5: guess(4), x6: guess(5) })
-  const status: Status[] = [state.x1, state.x2, state.x3, state.x4, state.x5, state.x6]
+  const { x1, x2, x3, x4, x5, x6 } = state
+  const status: Status[] = useMemo(() => [x1, x2, x3, x4, x5, x6], [x1, x2, x3, x4, x5, x6])
   const setGuess = (guesses: Status[]) =>
     guesses.forEach((g, t) => state.set(`x${t + 1}` as 'x1' | 'x2' | 'x3' | 'x4' | 'x5' | 'x6', g))
-  const r = useMemo(() => activeSet(X, Y, C0, status), [state.x1, state.x2, state.x3, state.x4, state.x5, state.x6])
+  const r = useMemo(() => activeSet(X, Y, C0, status), [status])
   const series = useMemo(
     () => (r.ok ? [...svmSeries(X, Y, r.w, r.b), ...slackSeries(X, Y, r.w, r.b)] : svmSeries(X, Y, [0, 0], 0)),
     [r],

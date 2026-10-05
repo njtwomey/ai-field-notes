@@ -103,21 +103,23 @@ export function CrfTemplatesSpecimen() {
     optimiser: crfOptimiserField('2 · optimiser', { C: 10, c1: 0.2, c2: 0.01 }, 'sentences'),
   })
   const options = crfTrainingOptions(trainState.optimiser)
-  const settings: Settings = { source, minFrequency: trainState.features.minFrequency, ...options }
+  const { minFrequency } = trainState.features
+  const settings: Settings = { source, minFrequency, ...options }
   const training = useTrainedRun(settings, (s) => trainTask(s, train))
   const snap = training.run.value ?? null
   const fresh = snap && training.trained && !training.stale
 
   // Before training (or after an edit), an untrained CRF over the index of the current templates, so the strings show.
+  const parsedTemplates = parsed.templates
   const preview = useMemo(() => {
-    if (!parsed.templates) return null
+    if (!parsedTemplates) return null
     const index = featureIndex(
-      parsed.templates,
+      parsedTemplates,
       train.map((s) => s.rows),
-      { minFrequency: settings.minFrequency },
+      { minFrequency },
     )
     return templateCrf(index, LABELS)
-  }, [parsed.templates, train, settings.minFrequency])
+  }, [parsedTemplates, train, minFrequency])
   const model: TemplateCrf | null = fresh ? snap.crf : (preview ?? snap?.crf ?? null)
   const trained = Boolean(fresh)
 

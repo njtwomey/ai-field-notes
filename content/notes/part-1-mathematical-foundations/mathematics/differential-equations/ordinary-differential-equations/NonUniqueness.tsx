@@ -23,20 +23,21 @@ export function NonUniqueness() {
   const state = useFigureState({
     c: slider(0, 4, 1, { step: 0.05, label: 'departure time c' }),
   })
+  const { c, set } = state
   const series = useMemo<SeriesSpec[]>(
     () => [
       ...FAMILY.map((f) => ({ name: 'other solutions', type: 'line' as const, x: T, y: solution(f), muted: true })),
       { name: 'x(t) = 0', type: 'line', x: T, y: T.map(() => 0), slot: 1, dashed: true },
-      { name: 'solution leaving 0 at t = c', type: 'line', x: T, y: solution(state.c), slot: 0 },
+      { name: 'solution leaving 0 at t = c', type: 'line', x: T, y: solution(c), slot: 0 },
     ],
-    [state.c],
+    [c],
   )
   const handles = useMemo<Handle[]>(
-    () => [{ kind: 'x', at: state.c, label: 'c', onDrag: (v: number) => state.set('c', v) }],
-    [state.bind('c')],
+    () => [{ kind: 'x', at: c, label: 'c', onDrag: (v: number) => set('c', v) }],
+    [c, set],
   )
   const t = 3
-  const x = t <= state.c ? 0 : (t - state.c) ** 2 / 4
+  const x = t <= c ? 0 : (t - c) ** 2 / 4
   const xAxis = useAxis({ label: 't', range: [0, 4] })
   const yAxis = useAxis({ label: 'x', range: [-0.2, 4] })
   return (
@@ -48,7 +49,7 @@ export function NonUniqueness() {
       readouts={
         <>
           <Readout label="x(3)" value={formatNumber(x)} />
-          <Readout label="ẋ(3)" value={formatNumber(t <= state.c ? 0 : (t - state.c) / 2)} />
+          <Readout label="ẋ(3)" value={formatNumber(t <= c ? 0 : (t - c) / 2)} />
           <Readout label="√x(3)" value={formatNumber(Math.sqrt(x))} />
         </>
       }

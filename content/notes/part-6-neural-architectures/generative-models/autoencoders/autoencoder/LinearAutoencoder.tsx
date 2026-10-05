@@ -43,6 +43,7 @@ export function LinearAutoencoder() {
   const state = useFigureState({
     angle: slider(-90, 90, -20, { step: 1, label: 'direction of u (degrees)', format: (v) => `${v}°` }),
   })
+  const { angle, set } = state
 
   const data = useMemo(() => {
     const pts = sample(11)
@@ -58,7 +59,7 @@ export function LinearAutoencoder() {
   }, [])
 
   const fit = useMemo(() => {
-    const th = (state.angle * Math.PI) / 180
+    const th = (angle * Math.PI) / 180
     const u: [number, number] = [Math.cos(th), Math.sin(th)]
     const recon = data.pts.map(([x, y]) => {
       const z = u[0] * x + u[1] * y
@@ -72,7 +73,7 @@ export function LinearAutoencoder() {
       { name: 'reconstruction x̂', x: recon.map((p) => p[0]), y: recon.map((p) => p[1]), slot: 1 },
     ] as const
     return { u, mse, residuals, series }
-  }, [state.angle, data])
+  }, [angle, data])
 
   const vectors = useMemo<Segment[]>(() => [{ from: [0, 0], to: [ARROW * fit.u[0], ARROW * fit.u[1]] }], [fit.u])
   const handles = useMemo<Handle[]>(
@@ -80,11 +81,11 @@ export function LinearAutoencoder() {
       {
         kind: 'point',
         at: [ARROW * fit.u[0], ARROW * fit.u[1]],
-        onDrag: ([x, y]) => state.set('angle', fold((Math.atan2(y, x) * 180) / Math.PI)),
+        onDrag: ([x, y]) => set('angle', fold((Math.atan2(y, x) * 180) / Math.PI)),
         label: 'u',
       },
     ],
-    [fit.u, state.bind('angle')],
+    [fit.u, set],
   )
 
   const xAxis = useAxis({ label: 'x₁', range: [-6, 6] })

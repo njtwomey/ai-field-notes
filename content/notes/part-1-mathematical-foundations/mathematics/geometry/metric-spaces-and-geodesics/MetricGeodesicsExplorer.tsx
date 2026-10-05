@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useCallback, useMemo, useState } from 'react'
 import {
   ControlRow,
   Curve,
@@ -26,11 +26,14 @@ export function MetricGeodesicsExplorer() {
   const [obstacleSigma, setObstacleSigma] = useState(0.6)
 
   // Obstacle center at origin (0, 0)
-  const costAt = (x: number, y: number) => {
-    if (metricKind !== 'conformal') return 1.0
-    const r2 = x * x + y * y
-    return 1.0 + obstacleHeight * Math.exp(-r2 / (2 * obstacleSigma * obstacleSigma))
-  }
+  const costAt = useCallback(
+    (x: number, y: number) => {
+      if (metricKind !== 'conformal') return 1.0
+      const r2 = x * x + y * y
+      return 1.0 + obstacleHeight * Math.exp(-r2 / (2 * obstacleSigma * obstacleSigma))
+    },
+    [metricKind, obstacleHeight, obstacleSigma],
+  )
 
   // Numerical geodesic via path relaxation: discretise path into N segments and minimise path length
   const geodesicPath = useMemo(() => {
@@ -92,7 +95,7 @@ export function MetricGeodesicsExplorer() {
     }
 
     return { xs, ys, length }
-  }, [pointA, pointB, metricKind, obstacleHeight, obstacleSigma])
+  }, [pointA, pointB, metricKind, obstacleHeight, costAt])
 
   // Metric cost raster for conformal metric background
   const GRID_SIZE = 35
@@ -112,7 +115,7 @@ export function MetricGeodesicsExplorer() {
       z.push(row)
     }
     return z
-  }, [gridCoords, metricKind, obstacleHeight, obstacleSigma])
+  }, [gridCoords, costAt])
 
   // Direct distance between any two points under chosen metric
   const distanceBetween = (p1: [number, number], p2: [number, number]) => {

@@ -211,11 +211,15 @@ export function CounterfactualExplorer() {
         toFlat(gradientMethods.wachter.path).slice(2 * t, 2 * t + 2),
       )
     : null
-  const diceRows = gradientMethods
-    ? Array.from({ length: 3 }, (_, k) =>
-        Array.from(toFlat(gradientMethods.dice.counterfactuals).slice(2 * k, 2 * k + 2)),
-      )
-    : []
+  const diceRows = useMemo(
+    () =>
+      gradientMethods
+        ? Array.from({ length: 3 }, (_, k) =>
+            Array.from(toFlat(gradientMethods.dice.counterfactuals).slice(2 * k, 2 * k + 2)),
+          )
+        : [],
+    [gradientMethods],
+  )
 
   // ── Counterfactual Summary Metrics ──
   const ends = useMemo(() => {

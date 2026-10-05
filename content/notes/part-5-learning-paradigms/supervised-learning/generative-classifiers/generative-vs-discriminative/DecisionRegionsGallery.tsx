@@ -216,23 +216,15 @@ export function DecisionRegionsGallery() {
     }
   }, [data, fittedModel])
 
-  // Dynamic overlay: highlight k-NN neighbours or SVM support vectors
-  const overlay = useMemo(() => {
-    const rows = toRows(data.x)
+  // Dynamic overlay: highlight k-NN neighbours or SVM support vectors. The indices are computed inside try/catch
+  // (a model without the expected fields draws no overlay); the marks are built from them outside it.
+  const highlight = useMemo((): { name: string; idx: number[] } | null => {
     if (modelChoice === 'knn') {
       try {
         const qTensor = fromData(Float64Array.from(query), [1, 2])
         const knnModel = fittedModel as unknown as { neighbours(q: Tensor): { index: Tensor } }
         if (typeof knnModel.neighbours === 'function') {
-          const idx = toFlat(knnModel.neighbours(qTensor).index)
-          return (
-            <Points
-              name="7 nearest neighbours"
-              x={idx.map((i) => rows[i][0])}
-              y={idx.map((i) => rows[i][1])}
-              emphasis
-            />
-          )
+          return { name: '7 nearest neighbours', idx: toFlat(knnModel.neighbours(qTensor).index) }
         }
       } catch {
         // ignore
@@ -248,10 +240,7 @@ export function DecisionRegionsGallery() {
             const members = toFlat(data.y).flatMap((c, i) => (code[c][l] !== 0 ? [i] : []))
             for (const t of toFlat(svm.supportVectors)) sv.add(members[t])
           })
-          const list = [...sv]
-          return (
-            <Points name="support vectors" x={list.map((i) => rows[i][0])} y={list.map((i) => rows[i][1])} emphasis />
-          )
+          return { name: 'support vectors', idx: [...sv] }
         }
       } catch {
         // ignore
@@ -259,6 +248,18 @@ export function DecisionRegionsGallery() {
     }
     return null
   }, [modelChoice, fittedModel, query, data])
+  const overlay = useMemo(() => {
+    if (!highlight) return null
+    const rows = toRows(data.x)
+    return (
+      <Points
+        name={highlight.name}
+        x={highlight.idx.map((i) => rows[i][0])}
+        y={highlight.idx.map((i) => rows[i][1])}
+        emphasis
+      />
+    )
+  }, [highlight, data])
 
   const xAxis = useAxis({ label: 'x₀', range: xr })
   const yAxis = useAxis({ label: 'x₁', range: yr, equal: xAxis })

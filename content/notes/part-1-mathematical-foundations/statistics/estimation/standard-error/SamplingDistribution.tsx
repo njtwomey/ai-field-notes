@@ -32,14 +32,15 @@ export function SamplingDistribution() {
     seed: int(1, { ge: 0, label: 'seed' }),
   })
 
+  const { seed, n, source } = state
   const result = useMemo(() => {
-    const r = stream(state.seed)
+    const r = stream(seed)
     const means = Array.from({ length: REPEATS }, () => {
       let total = 0
-      for (let i = 0; i < state.n; i++) total += draw[state.source](r)
-      return total / state.n
+      for (let i = 0; i < n; i++) total += draw[source](r)
+      return total / n
     })
-    const se = 1 / Math.sqrt(state.n)
+    const se = 1 / Math.sqrt(n)
     const lo = 1 - 4.5 * se
     const hi = 1 + 4.5 * se
     const width = (hi - lo) / BINS
@@ -61,7 +62,7 @@ export function SamplingDistribution() {
       { name: 'N(μ, σ²/n)', x: xs, y: xs.map((x) => normalPdf((x - 1) / se) / se), slot: 1 },
     ] as const
     return { series, spread, se }
-  }, [state.n, state.source, state.seed])
+  }, [n, source, seed])
 
   const xAxis = useAxis({ label: 'sample mean', hold: 'union' })
   const yAxis = useAxis({ label: 'density', range: [0, undefined], hold: 'union' })

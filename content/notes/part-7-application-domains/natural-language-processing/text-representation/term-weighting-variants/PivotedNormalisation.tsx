@@ -25,6 +25,7 @@ export function PivotedNormalisation() {
   })
   const s = state.slope
   const p = state.pivot
+  const { set } = state
 
   const series = useMemo(
     () =>
@@ -36,8 +37,8 @@ export function PivotedNormalisation() {
     [s, p],
   )
   const handles = useMemo<Handle[]>(
-    () => [{ kind: 'x', at: p, onDrag: (v: number) => state.set('pivot', v), label: 'pivot' }],
-    [p, (v: number) => state.set('pivot', v)],
+    () => [{ kind: 'x', at: p, onDrag: (v: number) => set('pivot', v), label: 'pivot' }],
+    [p, set],
   )
 
   // A document's score is proportional to 1/normaliser, so the change in its score is Z / Z'.

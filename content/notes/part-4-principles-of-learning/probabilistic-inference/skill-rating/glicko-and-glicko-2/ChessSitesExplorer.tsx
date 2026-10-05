@@ -119,8 +119,10 @@ export function ChessSitesExplorer() {
 
   const focus = pinned !== null && pinned < P ? pinned : medianPlayer
 
-  const atDay = (t: RatingTrace) => t.mean.subarray(effectiveDay * P, (effectiveDay + 1) * P)
-  const now = useMemo(() => traces.map(atDay), [traces, effectiveDay, P])
+  const now = useMemo(
+    () => traces.map((t: RatingTrace) => t.mean.subarray(effectiveDay * P, (effectiveDay + 1) * P)),
+    [traces, effectiveDay, P],
+  )
   const maps = useMemo(() => [ratingScaleMap(now[0], now[1]), ratingScaleMap(now[0], now[2])], [now])
   const truthMaps = useMemo(() => now.map((r) => ratingScaleMap(relative, r)), [now, relative])
   const hist = useMemo(() => now.map(histogram), [now])

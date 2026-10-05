@@ -7,7 +7,7 @@
  * and global registry so consumers can easily provide or extend symbols.
  */
 import katex from 'katex'
-import { createContext, useContext, useMemo, type ReactNode } from 'react'
+import { createContext, useContext, useMemo } from 'react'
 
 const LOWER = 'abcdefghijklmnopqrstuvwxyz'.split('')
 const UPPER = LOWER.map((c) => c.toUpperCase())
@@ -187,13 +187,6 @@ export function getGlobalMathMacros(): Record<string, string> {
 
 /** React Context for scoped mathematical macros. */
 export const RenderMathContext = createContext<Record<string, string> | undefined>(undefined)
-
-/** Provider to supply or override mathematical macros for a subtree. */
-export function RenderMathProvider({ macros, children }: { macros?: Record<string, string>; children: ReactNode }) {
-  const parentMacros = useContext(RenderMathContext)
-  const merged = useMemo(() => ({ ...(parentMacros ?? {}), ...(macros ?? {}) }), [parentMacros, macros])
-  return <RenderMathContext.Provider value={merged}>{children}</RenderMathContext.Provider>
-}
 
 /**
  * Hook to retrieve effective mathematical macros (merging global registry and current React context).

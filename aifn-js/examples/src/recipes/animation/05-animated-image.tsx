@@ -1,5 +1,5 @@
 import { Figure, Pixels, Player, Plot, Readout, useAxis, usePlayhead } from 'aifn-render'
-import { useEffect, useMemo, useRef } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { Recipe } from '@examples/recipe'
 
 export const recipe: Recipe = {
@@ -40,20 +40,32 @@ function diffuse(): Float32Array[] {
 
 // region
 export default function AnimatedImage() {
-  const frames = useMemo(diffuse, [])
+  const frames = useMemo(() => diffuse(), [])
   const [frame, setFrame] = usePlayhead(FRAMES)
-  // The frame's cost: render, commit and the chart's patch (child effects run first); a ref, so measuring adds no render
-  const cost = useRef(0)
-  const start = performance.now()
-  useEffect(() => void (cost.current = performance.now() - start))
+  // A frame's cost: from the Player's step through render, commit and the chart's patch (child effects run first).
+  // It is measured into a ref and shown with the next step, so measuring adds no render of its own.
+  const started = useRef(0)
+  const measured = useRef(0)
+  const [lastCost, setLastCost] = useState(0)
+  const step = useCallback(
+    (f: number) => {
+      setLastCost(measured.current)
+      started.current = performance.now()
+      setFrame(f)
+    },
+    [setFrame],
+  )
+  useEffect(() => {
+    if (started.current > 0) measured.current = performance.now() - started.current
+  }, [frame])
   const x = useAxis({ label: 'column' })
   const y = useAxis({ label: 'row', inverse: true, equal: x })
   return (
     <Figure
       title="Heat spreading on a plate"
       purpose="Two hot discs diffuse across an insulated plate."
-      controls={<Player value={frame} onChange={setFrame} count={FRAMES} label="frame" />}
-      readouts={<Readout label="last frame" value={`${cost.current.toFixed(1)} ms`} />}
+      controls={<Player value={frame} onChange={step} count={FRAMES} label="frame" />}
+      readouts={<Readout label="last frame" value={`${lastCost.toFixed(1)} ms`} />}
       caption="Press play: 60 frames a second. The readout is the previous frame's cost."
     >
       <Plot x={x} y={y}>

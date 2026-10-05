@@ -63,14 +63,12 @@ export function HeatParticles() {
     c1: float(-1.5, { min: -3.5, max: 3.5, step: 0.05, label: 'bump 1 centre' }),
     c2: float(1, { min: -3.5, max: 3.5, step: 0.05, label: 'bump 2 centre' }),
   })
-  const c = useMemo<[number, number]>(() => [state.c1, state.c2], [state.c1, state.c2])
-  const t = T_GRID[state.frame]
+  const { c1, c2, frame, tracked, set } = state
+  const c = useMemo<[number, number]>(() => [c1, c2], [c1, c2])
+  const t = T_GRID[frame]
 
   const start = useMemo(() => Float64Array.from({ length: N }, (_, i) => c[WALK.side[i]] + WALK.offset[i]), [c])
-  const positions = useMemo(
-    () => Float64Array.from(start, (x0, i) => x0 + WALK.disp[state.frame][i]),
-    [start, state.frame],
-  )
+  const positions = useMemo(() => Float64Array.from(start, (x0, i) => x0 + WALK.disp[frame][i]), [start, frame])
   const stats = useMemo(() => {
     let m = 0
     for (const x of positions) m += x
@@ -91,8 +89,8 @@ export function HeatParticles() {
 
   const field = useMemo(() => T_GRID.map((tt) => X_GRID.map((x) => density(x, tt, c))), [c])
   const paths = useMemo<SeriesSpec[]>(() => {
-    const many = state.tracked > 1
-    return Array.from({ length: state.tracked }, (_, k) => {
+    const many = tracked > 1
+    return Array.from({ length: tracked }, (_, k) => {
       // 97 is coprime to N, so walkers are distinct, and adding walkers keeps the ones already drawn.
       const i = (k * 97) % N
       return {
@@ -104,13 +102,13 @@ export function HeatParticles() {
         thin: many,
       }
     })
-  }, [start, state.tracked])
+  }, [start, tracked])
   const handles = useMemo<Handle[]>(
     () => [
-      { kind: 'x', at: state.c1, onDrag: (v: number) => state.set('c1', v) },
-      { kind: 'x', at: state.c2, onDrag: (v: number) => state.set('c2', v) },
+      { kind: 'x', at: c1, onDrag: (v: number) => set('c1', v) },
+      { kind: 'x', at: c2, onDrag: (v: number) => set('c2', v) },
     ],
-    [state.bind('c1'), state.bind('c2')],
+    [c1, c2, set],
   )
   // Mixture variance: within-bump variance plus the spread of the two centres.
   const predicted = S0 * S0 + 2 * D * t + ((c[0] - c[1]) / 2) ** 2

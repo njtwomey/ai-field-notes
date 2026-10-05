@@ -1,6 +1,7 @@
 import { useMemo } from 'react'
 import { formatNumber, Readout, slider, useFigureState } from 'aifn-render'
-import { ConstrainedExplorer, tField, type ConstrainedProblem } from './ConstrainedExplorer'
+import { ConstrainedExplorer, type ConstrainedProblem } from './ConstrainedExplorer'
+import { tField } from './t-field'
 
 /**
  * Minimise the variance wᵀΣw of a two-asset portfolio subject to w₁ + w₂ = 1, with Σ built from the two volatilities

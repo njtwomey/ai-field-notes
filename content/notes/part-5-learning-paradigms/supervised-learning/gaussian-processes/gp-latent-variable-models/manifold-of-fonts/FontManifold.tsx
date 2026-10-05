@@ -256,9 +256,10 @@ export function FontManifold() {
     pair: choice<Pair>(PAIRS, 'style', { label: 'interpolate' }),
   })
   const { subset, pair } = state
-  const x1 = { value: state.x1, set: (v: number) => state.set('x1', v) }
-  const x2 = { value: state.x2, set: (v: number) => state.set('x2', v) }
-  const here: Point = [x1.value, x2.value]
+  const { x1: latent1, x2: latent2 } = state
+  const x1 = { value: latent1, set: (v: number) => state.set('x1', v) }
+  const x2 = { value: latent2, set: (v: number) => state.set('x2', v) }
+  const here: Point = [latent1, latent2]
   // The font the latent point is nearest: after a refit, the point moves to where that font now sits.
   const follow = useRef<string>('Libre Baskerville Regular')
   const fit = useManifoldFit(data, subset, (m) => {
@@ -281,19 +282,19 @@ export function FontManifold() {
     if (!fit) return undefined
     let best = { i: fit.idx[0], d: Infinity }
     fit.X.forEach((p, k) => {
-      const d = Math.hypot(p[0] - x1.value, p[1] - x2.value)
+      const d = Math.hypot(p[0] - latent1, p[1] - latent2)
       if (d < best.d) best = { i: fit.idx[k], d }
     })
     return best
-  }, [fit, x1.value, x2.value])
+  }, [fit, latent1, latent2])
   useEffect(() => {
     if (data && nearest && fit?.model) follow.current = fontName(data.fonts[nearest.i])
   }, [data, nearest, fit])
 
   const vector = useMemo(() => {
-    if (model) return model.generate([x1.value, x2.value])
+    if (model) return model.generate([latent1, latent2])
     return data && nearest ? data.vectors[nearest.i] : undefined
-  }, [model, data, nearest, x1.value, x2.value])
+  }, [model, data, nearest, latent1, latent2])
 
   const word = useMemo(
     () => (vector && data ? setLine(vector, glyphs, data.display) : undefined),
@@ -373,7 +374,7 @@ export function FontManifold() {
           at: tip,
           label: 'serif',
           onDrag: ([a, b]) => {
-            const next = project(model, dims, [x1.value, x2.value], [a - pShift, b])
+            const next = project(model, dims, [latent1, latent2], [a - pShift, b])
             x1.set(next[0])
             x2.set(next[1])
           },

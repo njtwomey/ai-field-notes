@@ -137,8 +137,9 @@ export function SolverComparison() {
       format: (v) => formatNumber(10 ** v),
     }),
   })
-  const h = 10 ** state.logH
-  const p: Problem = PROBLEMS[state.problem]
+  const { logH, problem, set } = state
+  const h = 10 ** logH
+  const p: Problem = PROBLEMS[problem]
 
   const runs = useMemo(() => METHODS.map((m) => solve(p, m, h)), [p, h])
   const exactT = useMemo(() => toFlat(linspace(0, p.T, 400)), [p])
@@ -163,8 +164,8 @@ export function SolverComparison() {
     [p],
   )
   const handles = useMemo<Handle[]>(
-    () => [{ kind: 'x', at: state.logH, label: 'h', onDrag: (v: number) => state.set('logH', v) }],
-    [state.bind('logH')],
+    () => [{ kind: 'x', at: logH, label: 'h', onDrag: (v: number) => set('logH', v) }],
+    [logH, set],
   )
 
   const xAxis = useAxis({ label: 't', range: [0, p.T] })

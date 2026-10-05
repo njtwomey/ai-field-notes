@@ -48,14 +48,16 @@ export function SquareGeometry() {
     b: slider(B.min, B.max, 10, { step: B.step, label: 'b' }),
     c: slider(C.min, C.max, 39, { step: C.step, label: 'c (area of the gnomon)' }),
   })
+  const { b, c, set } = state
   const { resolved: mode } = useTheme()
   const col = (slot: number) => seriesColor(mode, slot)
-  const h = state.b / 2
-  const side = Math.sqrt(state.c + h * h)
+  const h = b / 2
+  // A memo, so the React compiler can treat side as a stable value in the memos below.
+  const side = useMemo(() => Math.sqrt(c + h * h), [c, h])
   const x = side - h
 
-  const bVal = state.b
-  const cVal = state.c
+  const bVal = b
+  const cVal = c
   const bHalf = formatNumber(h)
   const bHalfSq = formatNumber(h * h)
   const totalArea = formatNumber(cVal + h * h)
@@ -186,9 +188,9 @@ export function SquareGeometry() {
       }
       readouts={
         <>
-          <Readout label="gnomon area c" value={formatNumber(state.c)} />
+          <Readout label="gnomon area c" value={formatNumber(c)} />
           <Readout label="missing corner (b/2)²" value={formatNumber(h * h)} />
-          <Readout label="completed square c + (b/2)²" value={formatNumber(state.c + h * h)} />
+          <Readout label="completed square c + (b/2)²" value={formatNumber(c + h * h)} />
           <Readout label="its side x + b/2" value={formatNumber(side)} />
           <Readout label="x" value={formatNumber(x)} />
         </>
@@ -238,8 +240,8 @@ export function SquareGeometry() {
               at={[-h, -cVal - h * h]}
               label="vertex"
               onDrag={([vx, vy]) => {
-                state.set('b', -2 * vx)
-                state.set('c', -vy - vx * vx)
+                set('b', -2 * vx)
+                set('c', -vy - vx * vx)
               }}
             />
           </Plot>

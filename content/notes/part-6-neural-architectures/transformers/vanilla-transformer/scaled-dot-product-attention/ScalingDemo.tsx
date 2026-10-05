@@ -90,10 +90,10 @@ export function ScalingDemo() {
     return { raw, scaled, rawSd: sample.rawSd[i], scaledSd: scaledSd[i] }
   }, [sample, scaledSd, d])
 
-  const setLogD = (v: number) => state.set('logD', v)
+  const { set } = state
   const handles = useMemo(
-    () => [{ kind: 'x' as const, at: d, label: 'd', onDrag: (x: number) => setLogD(Math.log2(Math.max(x, 1))) }],
-    [d, setLogD],
+    () => [{ kind: 'x' as const, at: d, label: 'd', onDrag: (x: number) => set('logD', Math.log2(Math.max(x, 1))) }],
+    [d, set],
   )
 
   const rawSeries = useMemo(

@@ -1,7 +1,7 @@
 import { useMemo, type ReactNode } from 'react'
+import { tField } from './t-field'
 import {
   Figure,
-  float,
   formatNumber,
   Handle,
   type FigureState,
@@ -126,15 +126,6 @@ function nearestT(ts: number[], points: Vec2[], [x, y]: Vec2): number {
   })
   return ts[best]
 }
-
-/** The position t of the point along the constraint curve, as a state field. */
-export const tField = (
-  range: [number, number],
-  initial: number,
-  step: number | undefined,
-  label: string,
-  format: (t: number) => string = formatNumber,
-) => float(initial, { min: range[0], max: range[1], step, label, format })
 
 export type ConstrainedExplorerProps = {
   problem: ConstrainedProblem

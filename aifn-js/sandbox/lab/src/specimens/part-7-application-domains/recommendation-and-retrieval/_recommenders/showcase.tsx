@@ -135,20 +135,29 @@ export function RecommenderShowcase() {
       const row_ = shot.scores.subarray(u * I, (u + 1) * I)
       let lo = Infinity
       let hi = -Infinity
-      for (const v of row_) ((lo = Math.min(lo, v)), (hi = Math.max(hi, v)))
+      for (const v of row_) {
+        lo = Math.min(lo, v)
+        hi = Math.max(hi, v)
+      }
       return Array.from(row_, (v) => (hi > lo ? (v - lo) / (hi - lo) : 0.5))
     })
   }, [shot, U, I])
   const trainDots = useMemo(() => {
     const x: number[] = []
     const y: number[] = []
-    for (let r = 0; r < trainRows.length; r += 2) (y.push(trainRows[r]), x.push(trainRows[r + 1]))
+    for (let r = 0; r < trainRows.length; r += 2) {
+      y.push(trainRows[r])
+      x.push(trainRows[r + 1])
+    }
     return { x, y }
   }, [trainRows])
   const testDots = useMemo(() => {
     const x: number[] = []
     const y: number[] = []
-    for (let r = 0; r < testRows.length; r += 2) (y.push(testRows[r]), x.push(testRows[r + 1]))
+    for (let r = 0; r < testRows.length; r += 2) {
+      y.push(testRows[r])
+      x.push(testRows[r + 1])
+    }
     return { x, y }
   }, [testRows])
 

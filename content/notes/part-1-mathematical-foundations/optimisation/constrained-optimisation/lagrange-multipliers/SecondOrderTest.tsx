@@ -1,6 +1,7 @@
 import { useMemo } from 'react'
 import { formatNumber, Readout, slider, useFigureState } from 'aifn-render'
-import { ConstrainedExplorer, tField, type ConstrainedProblem } from './ConstrainedExplorer'
+import { ConstrainedExplorer, type ConstrainedProblem } from './ConstrainedExplorer'
+import { tField } from './t-field'
 
 const DEG = Math.PI / 180
 

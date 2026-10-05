@@ -112,12 +112,10 @@ export function SsmKernel() {
       format: (v) => formatNumber(10 ** v),
     }),
   })
-  const delta = 10 ** state.logDelta
+  const { mode, alpha, omega, disc, logDelta, set } = state
+  const delta = 10 ** logDelta
 
-  const sim = useMemo(
-    () => simulate(state.mode, state.alpha, state.omega, delta, state.disc),
-    [state.mode, state.alpha, state.omega, delta, state.disc],
-  )
+  const sim = useMemo(() => simulate(mode, alpha, omega, delta, disc), [mode, alpha, omega, delta, disc])
   const radius = abs(sim.a)
   const memory = radius < 1 ? -1 / Math.log(radius) : Infinity
 
@@ -126,26 +124,26 @@ export function SsmKernel() {
       [
         {
           name: 'eigenvalue λ',
-          x: state.mode === 'complex' ? [-state.alpha, -state.alpha] : [-state.alpha],
-          y: state.mode === 'complex' ? [state.omega, -state.omega] : [0],
+          x: mode === 'complex' ? [-alpha, -alpha] : [-alpha],
+          y: mode === 'complex' ? [omega, -omega] : [0],
           slot: 0,
         },
       ] as const,
-    [state.mode, state.alpha, state.omega],
+    [mode, alpha, omega],
   )
   const handles = useMemo<Handle[]>(
     () => [
       {
         kind: 'point',
-        at: [-state.alpha, state.mode === 'complex' ? state.omega : 0],
+        at: [-alpha, mode === 'complex' ? omega : 0],
         label: 'λ',
         onDrag: ([x, y]) => {
-          state.set('alpha', -x)
-          if (state.mode === 'complex') state.set('omega', Math.abs(y))
+          set('alpha', -x)
+          if (mode === 'complex') set('omega', Math.abs(y))
         },
       },
     ],
-    [state.bind('alpha'), state.bind('omega'), state.mode],
+    [alpha, omega, mode, set],
   )
   const kernelSeries = useMemo(() => [{ name: 'kernel K_k', x: STEPS, y: sim.kernel, slot: 0 }] as const, [sim.kernel])
   const responseSeries = useMemo(

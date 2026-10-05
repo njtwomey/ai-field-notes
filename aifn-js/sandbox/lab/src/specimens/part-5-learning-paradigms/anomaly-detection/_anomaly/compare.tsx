@@ -110,7 +110,10 @@ export function AnomalyComparison() {
     const s = scores.train
     let lo = Infinity
     let hi = -Infinity
-    for (const v of s) ((lo = Math.min(lo, v)), (hi = Math.max(hi, v)))
+    for (const v of s) {
+      lo = Math.min(lo, v)
+      hi = Math.max(hi, v)
+    }
     const B = 30
     const w = (hi - lo) / B || 1
     const edges = Array.from({ length: B + 1 }, (_, b) => lo + b * w)

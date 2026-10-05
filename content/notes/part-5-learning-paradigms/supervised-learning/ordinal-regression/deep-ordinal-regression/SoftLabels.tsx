@@ -65,7 +65,7 @@ export function SoftLabels() {
     ] as const
     const meanDistance = target.reduce((s, t, j) => s + t * Math.abs(j - truth), 0)
     return { target, left, right, meanDistance }
-  }, [state.k, truth, state.alpha, state.distance, colors])
+  }, [state.k, truth, state.alpha, state.distance])
 
   const xAxis = useAxis({ label: 'predicted class c', range: [1, state.k] })
   const yAxis = useAxis({ label: 'cross-entropy', range: [0, undefined], hold: 'union' })

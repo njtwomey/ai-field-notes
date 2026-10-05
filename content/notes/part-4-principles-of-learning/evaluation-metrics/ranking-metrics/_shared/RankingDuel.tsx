@@ -367,7 +367,12 @@ export function RankingDuel({
       ),
     [lists, total, maxGrade, spec],
   )
-  const handles = useMemo<Handle[]>(() => [{ kind: 'x', at: k.value, onDrag: k.set, label: `k = ${k.value}` }], [k])
+  const { set } = state
+  const kAt = k.value
+  const handles = useMemo<Handle[]>(
+    () => [{ kind: 'x', at: kAt, onDrag: (v: number) => set('k', v), label: `k = ${kAt}` }],
+    [kAt, set],
+  )
   const runs = verdictRuns(curveMetrics[0], lists, total, maxGrade)
 
   const winnerText = (v: Verdict) => (v === 'tie' ? 'tie' : `${v} is better`)

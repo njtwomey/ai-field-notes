@@ -114,27 +114,28 @@ export function DensityTransport() {
     frame: slider(0, FRAMES - 1, 20, { step: 1, label: 'time t', format: (fr) => formatNumber(T_GRID[fr]) }),
     c: float(0.2, { min: -2, max: 2, step: 0.05, label: 'start centre c' }),
   })
+  const { field, c, frame, set } = state
 
   const sim = useMemo(() => {
     // Dense starting grid over ±5 standard deviations, so the moved grid still covers the mass.
-    const start = toFlat(linspace(state.c - 5 * S0, state.c + 5 * S0, 401))
-    const lp0 = start.map((x) => Math.log(normalPdf((x - state.c) / S0) / S0))
-    const curve = push(state.field, state.c, start, lp0)
+    const start = toFlat(linspace(c - 5 * S0, c + 5 * S0, 401))
+    const lp0 = start.map((x) => Math.log(normalPdf((x - c) / S0) / S0))
+    const curve = push(field, c, start, lp0)
     const particles = push(
-      state.field,
-      state.c,
-      Float64Array.from(U, (u) => state.c + S0 * u),
+      field,
+      c,
+      Float64Array.from(U, (u) => c + S0 * u),
     ).xs
     const tracks = push(
-      state.field,
-      state.c,
-      Q.map((q) => state.c + S0 * q),
+      field,
+      c,
+      Q.map((q) => c + S0 * q),
     ).xs
     const density = curve.xs.map((xs, f) => onGrid(xs, curve.lps[f].map(Math.exp), X_GRID))
     return { curve, particles, tracks, density }
-  }, [state.field, state.c])
+  }, [field, c])
 
-  const f = state.frame
+  const f = frame
   const xsF = sim.curve.xs[f]
   const psF = sim.curve.lps[f].map(Math.exp)
   let mass = 0
@@ -166,10 +167,7 @@ export function DensityTransport() {
       })),
     [sim],
   )
-  const handles = useMemo<Handle[]>(
-    () => [{ kind: 'x', at: state.c, onDrag: (v: number) => state.set('c', v) }],
-    [state.bind('c')],
-  )
+  const handles = useMemo<Handle[]>(() => [{ kind: 'x', at: c, onDrag: (v: number) => set('c', v) }], [c, set])
 
   const xAxis = useAxis({ label: 'x', range: [LO, HI] })
   const yAxis = useAxis({ label: 'density', range: [0, undefined], hold: 'union' })
@@ -183,7 +181,7 @@ export function DensityTransport() {
 
       readouts={
         <>
-          <Readout label="field" value={FIELDS[state.field].formula} />
+          <Readout label="field" value={FIELDS[field].formula} />
           <Readout label="total mass" value={formatNumber(mass)} />
         </>
       }

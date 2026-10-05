@@ -54,46 +54,47 @@ export function ClassicThree() {
     centre: float(0.35, { min: 0.1, max: 0.9, step: 0.01, label: 'bump position' }),
     time: slider(0, 2, 0.3, { step: 0.05, label: 'time t', when: (v) => v.equation !== 'laplace' }),
   })
-  const b = useMemo(() => sineCoefficients(bump(state.centre)), [state.centre])
+  const { centre, equation, time, set } = state
+  const b = useMemo(() => sineCoefficients(bump(centre)), [centre])
 
-  const initial = useMemo(() => X.map(bump(state.centre)), [state.centre])
+  const initial = useMemo(() => X.map(bump(centre)), [centre])
   const profile = useMemo(() => {
-    if (state.equation === 'laplace') return []
+    if (equation === 'laplace') return []
     return X.map((x) =>
       b.reduce((s, bn, k) => {
         const n = k + 1
         const w = n * Math.PI
-        const factor = state.equation === 'heat' ? Math.exp(-D * w * w * state.time) : Math.cos(w * state.time)
+        const factor = equation === 'heat' ? Math.exp(-D * w * w * time) : Math.cos(w * time)
         return s + bn * factor * Math.sin(w * x)
       }, 0),
     )
-  }, [b, state.equation, state.time])
+  }, [b, equation, time])
 
   const laplace = useMemo(() => {
-    if (state.equation !== 'laplace') return null
+    if (equation !== 'laplace') return null
     // Rows are y values (z[i][j] at (x[j], y[i])); the top edge y = 1 carries the bump.
     const z = GRID.map((y) =>
       GRID.map((x) => b.reduce((s, bn, k) => s + bn * Math.sin((k + 1) * Math.PI * x) * sinhRatio(k + 1, y), 0)),
     )
     return z
-  }, [b, state.equation])
+  }, [b, equation])
 
   const series = useMemo(
     () =>
       [
         { name: 'initial shape', x: X, y: initial, muted: true, dashed: true },
         {
-          name: state.equation === 'heat' ? 'temperature u(x, t)' : 'displacement u(x, t)',
+          name: equation === 'heat' ? 'temperature u(x, t)' : 'displacement u(x, t)',
           x: X,
           y: profile,
           slot: 0,
         },
       ] as const,
-    [initial, profile, state.equation],
+    [initial, profile, equation],
   )
   const handles = useMemo<Handle[]>(
-    () => [{ kind: 'x', at: state.centre, label: 'bump', onDrag: (v: number) => state.set('centre', v) }],
-    [state.bind('centre')],
+    () => [{ kind: 'x', at: centre, label: 'bump', onDrag: (v: number) => set('centre', v) }],
+    [centre, set],
   )
 
   const area = profile.length ? profile.reduce((s, v) => s + v, 0) * (X[1] - X[0]) : 0
@@ -112,10 +113,10 @@ export function ClassicThree() {
     <Figure
       title="The heat, wave and Laplace equations"
       state={state}
-      caption={`${captions[state.equation]} Drag the vertical line or use the slider to move the bump.`}
+      caption={`${captions[equation]} Drag the vertical line or use the slider to move the bump.`}
 
       readouts={
-        state.equation === 'laplace' ? (
+        equation === 'laplace' ? (
           <Readout label="u at the centre (0.5, 0.5)" value={formatNumber(laplace ? laplace[25][25] : 0)} />
         ) : (
           <>
@@ -125,7 +126,7 @@ export function ClassicThree() {
         )
       }
     >
-      {state.equation === 'laplace' && laplace ? (
+      {equation === 'laplace' && laplace ? (
         <Plot x={xAxis} y={yAxis} height={380}>
           <Raster x={GRID} y={GRID} z={laplace} scale={'sequential'} range={[0, 1]} valueLabel={'u'} />
           {(handles ?? []).map((h, i) => (
