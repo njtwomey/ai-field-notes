@@ -45,29 +45,25 @@ export function AaSimulator() {
     seed: int(1, { ge: 0, label: 'seed' }),
   })
 
+  // Plain values, so the memo's dependencies are exactly what its body reads (the React compiler can keep it).
+  const { n, rate, experiments, alpha, seed } = state
   const r = useMemo(() => {
-    const draws = stream(state.seed)
+    const draws = stream(seed)
     const uniform = () => drawUniform(draws)
     const pValues: number[] = []
     const diffs: number[] = []
     let significant = 0
     let covered = 0
-    for (let e = 0; e < state.experiments; e++) {
-      const t = twoProportionZ(
-        sampleBinomial(state.n, state.rate, uniform),
-        state.n,
-        sampleBinomial(state.n, state.rate, uniform),
-        state.n,
-        state.alpha,
-      )
+    for (let e = 0; e < experiments; e++) {
+      const t = twoProportionZ(sampleBinomial(n, rate, uniform), n, sampleBinomial(n, rate, uniform), n, alpha)
       pValues.push(t.p)
       diffs.push(t.diff)
-      if (t.p < state.alpha) significant++
+      if (t.p < alpha) significant++
       if (t.ci[0] <= 0 && t.ci[1] >= 0) covered++
     }
-    const sdTheory = Math.sqrt((2 * state.rate * (1 - state.rate)) / state.n)
-    const meanDiff = diffs.reduce((s, d) => s + d, 0) / state.experiments
-    const sdObserved = Math.sqrt(diffs.reduce((s, d) => s + (d - meanDiff) ** 2, 0) / (state.experiments - 1))
+    const sdTheory = Math.sqrt((2 * rate * (1 - rate)) / n)
+    const meanDiff = diffs.reduce((s, d) => s + d, 0) / experiments
+    const sdObserved = Math.sqrt(diffs.reduce((s, d) => s + (d - meanDiff) ** 2, 0) / (experiments - 1))
 
     const pCounts = new Array(P_BINS).fill(0)
     for (const p of pValues) pCounts[Math.min(P_BINS - 1, Math.floor(p * P_BINS))]++
@@ -75,7 +71,7 @@ export function AaSimulator() {
       {
         name: 'A/A p-values',
         x: pCounts.map((_, i) => (i + 0.5) / P_BINS),
-        y: pCounts.map((c) => (c * P_BINS) / state.experiments),
+        y: pCounts.map((c) => (c * P_BINS) / experiments),
         slot: 0,
       },
       { name: 'uniform', x: [0, 1], y: [1, 1], dashed: true, slot: 2 },
@@ -94,7 +90,7 @@ export function AaSimulator() {
       {
         name: 'observed B − A',
         x: dCounts.map((_, i) => 100 * (-span + (i + 0.5) * width)),
-        y: dCounts.map((c) => c / (state.experiments * width * 100)),
+        y: dCounts.map((c) => c / (experiments * width * 100)),
         slot: 0,
       },
       {
@@ -105,7 +101,7 @@ export function AaSimulator() {
       },
     ] as const
     return { significant, covered, sdTheory, sdObserved, pSeries, dSeries }
-  }, [state.n, state.rate, state.experiments, state.alpha, state.seed])
+  }, [n, rate, experiments, alpha, seed])
 
   const [lo, hi] = useMemo(() => expectedRange(state.experiments, state.alpha), [state.experiments, state.alpha])
 

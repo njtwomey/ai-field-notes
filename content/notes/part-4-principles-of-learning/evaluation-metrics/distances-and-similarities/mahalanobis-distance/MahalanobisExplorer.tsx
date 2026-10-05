@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useCallback, useMemo, useState } from 'react'
 import {
   ControlRow,
   Curve,
@@ -34,6 +34,9 @@ const STANDARD_NORMAL_SAMPLES: [number, number][] = (() => {
   return samples
 })()
 
+/** The distribution's mean: fixed at the origin, so it is a constant, not state. */
+const MU: readonly [number, number] = [0, 0]
+
 export function MahalanobisExplorer() {
   const [sigmaX, setSigmaX] = useState(1.8)
   const [sigmaY, setSigmaY] = useState(0.9)
@@ -42,7 +45,6 @@ export function MahalanobisExplorer() {
   const [pointB, setPointB] = useState<[number, number]>([0.2, 1.4])
 
   // Center is fixed at origin for canonical clarity
-  const mu: [number, number] = [0, 0]
 
   // Covariance decomposition
   const { lambda1, lambda2, v1, v2, invCov, sqrtCov, invSqrtCov } = useMemo(() => {
@@ -94,22 +96,25 @@ export function MahalanobisExplorer() {
   }, [sigmaX, sigmaY, rho])
 
   // Distance calculator helper
-  const calcDistances = (pt: [number, number]) => {
-    const dx = pt[0] - mu[0]
-    const dy = pt[1] - mu[1]
-    const euc = Math.hypot(dx, dy)
-    const mahalanobisSq = dx * (invCov.sxx * dx + invCov.sxy * dy) + dy * (invCov.sxy * dx + invCov.syy * dy)
-    const mah = Math.sqrt(Math.max(0, mahalanobisSq))
+  const calcDistances = useCallback(
+    (pt: [number, number]) => {
+      const dx = pt[0] - MU[0]
+      const dy = pt[1] - MU[1]
+      const euc = Math.hypot(dx, dy)
+      const mahalanobisSq = dx * (invCov.sxx * dx + invCov.sxy * dy) + dy * (invCov.sxy * dx + invCov.syy * dy)
+      const mah = Math.sqrt(Math.max(0, mahalanobisSq))
 
-    // Whitened coordinate z = Σ^(-1/2) d
-    const zx = invSqrtCov.sxx * dx + invSqrtCov.sxy * dy
-    const zy = invSqrtCov.sxy * dx + invSqrtCov.syy * dy
+      // Whitened coordinate z = Σ^(-1/2) d
+      const zx = invSqrtCov.sxx * dx + invSqrtCov.sxy * dy
+      const zy = invSqrtCov.sxy * dx + invSqrtCov.syy * dy
 
-    return { euc, mah, z: [zx, zy] as [number, number] }
-  }
+      return { euc, mah, z: [zx, zy] as [number, number] }
+    },
+    [invCov, invSqrtCov],
+  )
 
-  const distA = useMemo(() => calcDistances(pointA), [pointA, invCov, invSqrtCov])
-  const distB = useMemo(() => calcDistances(pointB), [pointB, invCov, invSqrtCov])
+  const distA = useMemo(() => calcDistances(pointA), [pointA, calcDistances])
+  const distB = useMemo(() => calcDistances(pointB), [pointB, calcDistances])
 
   // Inversion detection
   const hasInversion =
@@ -126,8 +131,8 @@ export function MahalanobisExplorer() {
         const phi = (2 * Math.PI * i) / (steps - 1)
         const c1 = k * Math.sqrt(lambda1) * Math.cos(phi)
         const c2 = k * Math.sqrt(lambda2) * Math.sin(phi)
-        xs[i] = mu[0] + c1 * v1[0] + c2 * v2[0]
-        ys[i] = mu[1] + c1 * v1[1] + c2 * v2[1]
+        xs[i] = MU[0] + c1 * v1[0] + c2 * v2[0]
+        ys[i] = MU[1] + c1 * v1[1] + c2 * v2[1]
       }
       return { k, xs, ys }
     })
@@ -155,8 +160,8 @@ export function MahalanobisExplorer() {
     const ys = new Float64Array(STANDARD_NORMAL_SAMPLES.length)
     for (let i = 0; i < STANDARD_NORMAL_SAMPLES.length; i++) {
       const [zx, zy] = STANDARD_NORMAL_SAMPLES[i]
-      xs[i] = mu[0] + (sqrtCov.sxx * zx + sqrtCov.sxy * zy)
-      ys[i] = mu[1] + (sqrtCov.sxy * zx + sqrtCov.syy * zy)
+      xs[i] = MU[0] + (sqrtCov.sxx * zx + sqrtCov.sxy * zy)
+      ys[i] = MU[1] + (sqrtCov.sxy * zx + sqrtCov.syy * zy)
     }
     return { xs, ys }
   }, [sqrtCov])
@@ -303,11 +308,11 @@ export function MahalanobisExplorer() {
           <Points name="Sample cloud" x={dataCloud.xs} y={dataCloud.ys} size={4} muted />
 
           {/* Center μ */}
-          <Points name="Mean μ" x={[mu[0]]} y={[mu[1]]} size={7} />
+          <Points name="Mean μ" x={[MU[0]]} y={[MU[1]]} size={7} />
 
           {/* Vectors to A and B */}
-          <Curve name="Chord to A" x={[mu[0], pointA[0]]} y={[mu[1], pointA[1]]} thin />
-          <Curve name="Chord to B" x={[mu[0], pointB[0]]} y={[mu[1], pointB[1]]} thin dashed />
+          <Curve name="Chord to A" x={[MU[0], pointA[0]]} y={[MU[1], pointA[1]]} thin />
+          <Curve name="Chord to B" x={[MU[0], pointB[0]]} y={[MU[1], pointB[1]]} thin dashed />
 
           {/* Point A */}
           <Points name="Point A" x={[pointA[0]]} y={[pointA[1]]} size={10} emphasis />
