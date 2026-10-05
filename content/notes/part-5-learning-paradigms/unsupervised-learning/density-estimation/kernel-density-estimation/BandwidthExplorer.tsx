@@ -16,7 +16,7 @@ import {
 } from 'aifn-render'
 import { DOMAIN, ise, sample, summary, trueDensity } from '../../_shared/density'
 import { kde, KERNEL_OPTIONS, silverman, type Kernel } from './kde'
-import { linspace, toFlat } from 'aifn/foundation/tensor'
+import { linspace, toFlat } from 'aifn-compute/foundation/tensor'
 
 const GRID = toFlat(linspace(DOMAIN[0], DOMAIN[1], 160))
 const TRUTH = GRID.map(trueDensity)

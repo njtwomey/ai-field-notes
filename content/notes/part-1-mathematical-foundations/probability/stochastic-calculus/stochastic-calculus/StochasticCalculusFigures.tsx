@@ -13,7 +13,7 @@ import {
   useFigureState,
 } from 'aifn-render'
 import type { DiagramSpec } from 'aifn-render'
-import { normal, stream } from 'aifn/foundation/random'
+import { normal, stream } from 'aifn-compute/foundation/random'
 
 const FINE = 2 ** 16
 const KS = Array.from({ length: 16 }, (_, i) => i + 1)

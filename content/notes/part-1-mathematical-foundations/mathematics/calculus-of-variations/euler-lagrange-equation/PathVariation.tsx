@@ -12,7 +12,7 @@ import {
   useAxis,
   useFigureState,
 } from 'aifn-render'
-import { linspace, toFlat } from 'aifn/foundation/tensor'
+import { linspace, toFlat } from 'aifn-compute/foundation/tensor'
 
 type Functional = 'length' | 'energy'
 type Direction = 'sine' | 'double' | 'bump' | 'endpoint'

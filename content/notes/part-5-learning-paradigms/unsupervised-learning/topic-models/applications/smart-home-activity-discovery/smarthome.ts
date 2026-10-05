@@ -2,7 +2,7 @@
  * A simulated smart home, the document segmentation of Chen, Diethe and Flach, and a collapsed Gibbs sampler for their
  * one-topic-per-document model with unigrams and (optionally) bigrams.
  */
-import { categorical, normal, stream, uniform, type Stream } from 'aifn/foundation/random'
+import { categorical, normal, stream, uniform, type Stream } from 'aifn-compute/foundation/random'
 
 export const LOCATIONS = ['bedroom', 'bathroom', 'kitchen', 'lounge', 'hall'] as const
 

@@ -1,7 +1,7 @@
 import { useMemo } from 'react'
 import { Curve, Figure, float, formatNumber, int, Plot, Readout, slider, useAxis, useFigureState } from 'aifn-render'
-import { imagPart, realPart, toFlat } from 'aifn/foundation/tensor'
-import { hilbert } from 'aifn/signal'
+import { imagPart, realPart, toFlat } from 'aifn-compute/foundation/tensor'
+import { hilbert } from 'aifn-compute/signal'
 
 const FS = 1000
 const N = 1024

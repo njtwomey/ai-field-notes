@@ -1,6 +1,6 @@
 import { useMemo } from 'react'
 import { Curve, Figure, float, formatNumber, Plot, Readout, slider, useAxis, useFigureState } from 'aifn-render'
-import { linspace, toFlat } from 'aifn/foundation/tensor'
+import { linspace, toFlat } from 'aifn-compute/foundation/tensor'
 
 const toRad = (deg: number) => (deg * Math.PI) / 180
 const toDeg = (rad: number) => (rad * 180) / Math.PI

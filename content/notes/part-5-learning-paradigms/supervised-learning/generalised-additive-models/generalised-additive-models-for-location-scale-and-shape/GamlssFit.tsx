@@ -15,9 +15,9 @@ import {
 } from 'aifn-render'
 import { GROWTH_TRUTH, growthChart } from 'aifn-methods/data/synthetic'
 import { gamlssModel, gamlssProblem, gamlssTrace, s } from 'aifn-methods/learning/generalised/gam'
-import { stream } from 'aifn/foundation/random'
-import { fromData, linspace, toFlat } from 'aifn/foundation/tensor'
-import { distributionalFamily, type DistributionalFamilyName } from 'aifn/probability/likelihoods'
+import { stream } from 'aifn-compute/foundation/random'
+import { fromData, linspace, toFlat } from 'aifn-compute/foundation/tensor'
+import { distributionalFamily, type DistributionalFamilyName } from 'aifn-compute/probability/likelihoods'
 
 const AGES = toFlat(linspace(0, 18, 91))
 const AGE_GRID = fromData(Float64Array.from(AGES), [AGES.length, 1])

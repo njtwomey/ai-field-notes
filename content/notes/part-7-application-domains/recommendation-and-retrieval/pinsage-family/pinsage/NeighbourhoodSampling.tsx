@@ -13,7 +13,7 @@ import {
   variable,
 } from 'aifn-render'
 import type { DiagramEdge, DiagramNode } from 'aifn-render'
-import { stream, uniform } from 'aifn/foundation/random'
+import { stream, uniform } from 'aifn-compute/foundation/random'
 
 /** A toy pin–board graph: each board lists the pins saved to it. Pin 1 is the query. */
 const BOARDS: number[][] = [

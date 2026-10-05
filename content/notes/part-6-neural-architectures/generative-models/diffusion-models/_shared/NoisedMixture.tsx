@@ -11,7 +11,7 @@ import {
   useAxis,
   useFigureState,
 } from 'aifn-render'
-import { linspace, toFlat } from 'aifn/foundation/tensor'
+import { linspace, toFlat } from 'aifn-compute/foundation/tensor'
 
 /**
  * A one-dimensional Gaussian mixture pushed through the DDPM forward process. Every marginal is analytic:

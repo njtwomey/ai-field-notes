@@ -10,8 +10,8 @@ import {
   useAxis,
   useFigureState,
 } from 'aifn-render'
-import { linspace, toFlat } from 'aifn/foundation/tensor'
-import { normalCdf, normalPdf, normalQuantile } from 'aifn/numerics/special'
+import { linspace, toFlat } from 'aifn-compute/foundation/tensor'
+import { normalCdf, normalPdf, normalQuantile } from 'aifn-compute/numerics/special'
 
 /**
  * One observation X, H₀: X ~ N(0, 1) against H₁: X ~ N(0, σ₁²). The likelihood ratio depends on x only through x², so

@@ -13,7 +13,7 @@ import {
   useFigureState,
   Vectors,
 } from 'aifn-render'
-import { linspace, toFlat } from 'aifn/foundation/tensor'
+import { linspace, toFlat } from 'aifn-compute/foundation/tensor'
 
 type Vec = [number, number]
 type Fn = { f: (x: number, y: number) => number; grad: (x: number, y: number) => Vec }

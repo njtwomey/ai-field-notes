@@ -12,7 +12,7 @@ import {
   useFigureState,
 } from 'aifn-render'
 import { stft } from '../_shared/audio'
-import { stream, uniform } from 'aifn/foundation/random'
+import { stream, uniform } from 'aifn-compute/foundation/random'
 
 const FS = 8000
 const SIZE = 512

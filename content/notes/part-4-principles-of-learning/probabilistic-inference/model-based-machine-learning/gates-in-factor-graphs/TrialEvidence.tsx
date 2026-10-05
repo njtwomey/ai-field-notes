@@ -1,6 +1,6 @@
 import { useMemo } from 'react'
 import { Curve, Figure, formatNumber, int, Plot, Readout, useAxis, useFigureState } from 'aifn-render'
-import { logGamma } from 'aifn/numerics/special'
+import { logGamma } from 'aifn-compute/numerics/special'
 
 const logBeta = (a: number, b: number) => logGamma(a) + logGamma(b) - logGamma(a + b)
 /** log p(k successes in a given order out of n | Beta(1, 1) rate) = log B(1 + k, 1 + n − k). */

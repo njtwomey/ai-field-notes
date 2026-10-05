@@ -1,7 +1,7 @@
 import { useMemo } from 'react'
 import { Curve, Figure, int, Plot, Points, Readout, useAxis, useFigureState } from 'aifn-render'
-import { dft } from 'aifn/foundation/fourier'
-import { complexAbs, linspace, toFlat } from 'aifn/foundation/tensor'
+import { dft } from 'aifn-compute/foundation/fourier'
+import { complexAbs, linspace, toFlat } from 'aifn-compute/foundation/tensor'
 
 // A short sequence: a decaying oscillation, 8 samples.
 const X = Array.from({ length: 8 }, (_, n) => 0.8 ** n * Math.cos(0.9 * n))

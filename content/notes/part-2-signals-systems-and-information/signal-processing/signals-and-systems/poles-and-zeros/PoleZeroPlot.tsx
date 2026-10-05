@@ -11,9 +11,9 @@ import {
   type SeriesSpec,
   useAxis,
 } from 'aifn-render'
-import { freqz, lfilter, magnitude } from 'aifn/signal'
-import { transferFunction } from 'aifn/systems'
-import { linspace, toFlat, type Tensor } from 'aifn/foundation/tensor'
+import { freqz, lfilter, magnitude } from 'aifn-compute/signal'
+import { transferFunction } from 'aifn-compute/systems'
+import { linspace, toFlat, type Tensor } from 'aifn-compute/foundation/tensor'
 
 type Point = [number, number]
 const CIRCLE = toFlat(linspace(0, 2 * Math.PI, 181))

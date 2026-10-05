@@ -13,8 +13,8 @@ import {
   useAxis,
   useFigureState,
 } from 'aifn-render'
-import { normal, stream } from 'aifn/foundation/random'
-import { normalCdf, normalPdf, normalQuantile } from 'aifn/numerics/special'
+import { normal, stream } from 'aifn-compute/foundation/random'
+import { normalCdf, normalPdf, normalQuantile } from 'aifn-compute/numerics/special'
 
 const EXPERIMENTS = 4000
 /** Bins per critical distance z·s, so the significance threshold falls on a bin edge and no bin is split. */

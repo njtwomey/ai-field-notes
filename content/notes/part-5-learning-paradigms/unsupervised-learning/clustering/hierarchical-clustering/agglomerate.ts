@@ -1,5 +1,5 @@
 import { linkage as aifnLinkage, cutTree } from 'aifn-methods/unsupervised/clustering'
-import { fromData, toFlat } from 'aifn/foundation/tensor'
+import { fromData, toFlat } from 'aifn-compute/foundation/tensor'
 
 export type Linkage = 'single' | 'complete' | 'average' | 'ward'
 

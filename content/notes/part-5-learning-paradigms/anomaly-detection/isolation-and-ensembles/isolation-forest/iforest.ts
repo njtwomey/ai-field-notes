@@ -1,5 +1,5 @@
 import { averagePathLength } from 'aifn-methods/unsupervised/anomaly'
-import { stream, uniform as drawUniform } from 'aifn/foundation/random'
+import { stream, uniform as drawUniform } from 'aifn-compute/foundation/random'
 
 export type Pt = [number, number]
 export type Box = { x0: number; x1: number; y0: number; y1: number }

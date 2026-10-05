@@ -14,8 +14,8 @@ import {
   useFigureState,
 } from 'aifn-render'
 import { addDiagonal, cholesky, forward, logDet, gridMaximum } from '../_shared/gp'
-import { linspace, toFlat } from 'aifn/foundation/tensor'
-import { normal, stream, uniform } from 'aifn/foundation/random'
+import { linspace, toFlat } from 'aifn-compute/foundation/tensor'
+import { normal, stream, uniform } from 'aifn-compute/foundation/random'
 
 const N = 40
 const NOISE = 0.2

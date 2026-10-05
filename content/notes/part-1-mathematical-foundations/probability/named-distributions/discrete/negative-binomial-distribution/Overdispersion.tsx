@@ -1,6 +1,6 @@
 import { useMemo } from 'react'
 import { Curve, Figure, float, formatNumber, Plot, Points, Readout, useAxis, useFigureState } from 'aifn-render'
-import { NegativeBinomial, Poisson } from 'aifn/probability/distributions'
+import { NegativeBinomial, Poisson } from 'aifn-compute/probability/distributions'
 
 /** A negative binomial and a Poisson with the same mean, as the dispersion parameter r varies. */
 export function Overdispersion() {

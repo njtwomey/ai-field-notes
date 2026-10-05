@@ -14,7 +14,7 @@ import {
   useFigureState,
 } from 'aifn-render'
 import { fitDensity, scorePoint, twoDensityData, type Pt } from './localDensity'
-import { linspace, toFlat } from 'aifn/foundation/tensor'
+import { linspace, toFlat } from 'aifn-compute/foundation/tensor'
 
 type Score = 'knn' | 'lof'
 

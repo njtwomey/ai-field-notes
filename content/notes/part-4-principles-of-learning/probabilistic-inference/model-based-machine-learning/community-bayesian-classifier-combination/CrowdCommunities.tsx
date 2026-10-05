@@ -1,6 +1,6 @@
 import { useMemo } from 'react'
 import { choice, Curve, Figure, formatNumber, Plot, Raster, Readout, useAxis, useFigureState } from 'aifn-render'
-import { stream, uniform } from 'aifn/foundation/random'
+import { stream, uniform } from 'aifn-compute/foundation/random'
 import {
   accuracy,
   argmax,

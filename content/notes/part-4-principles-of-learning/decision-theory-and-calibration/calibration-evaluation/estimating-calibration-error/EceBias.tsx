@@ -12,7 +12,7 @@ import {
   useAxis,
   useFigureState,
 } from 'aifn-render'
-import { normal, stream, uniform } from 'aifn/foundation/random'
+import { normal, stream, uniform } from 'aifn-compute/foundation/random'
 
 const sigmoid = (z: number) => 1 / (1 + Math.exp(-z))
 const DATASETS = 200

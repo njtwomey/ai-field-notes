@@ -17,7 +17,7 @@ import {
   useFigureState,
 } from 'aifn-render'
 import { db, groupDelay, iirLowpass, response as freqz } from '../_shared/design'
-import { linspace, toFlat } from 'aifn/foundation/tensor'
+import { linspace, toFlat } from 'aifn-compute/foundation/tensor'
 
 type Family = 'butter' | 'cheby1' | 'cheby2'
 const CIRCLE = toFlat(linspace(0, 2 * Math.PI, 181))

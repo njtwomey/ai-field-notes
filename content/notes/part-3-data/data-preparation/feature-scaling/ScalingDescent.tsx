@@ -11,8 +11,8 @@ import {
   useAxis,
   useFigureState,
 } from 'aifn-render'
-import { linspace, toFlat } from 'aifn/foundation/tensor'
-import { eigh2 } from 'aifn/numerics/linalg'
+import { linspace, toFlat } from 'aifn-compute/foundation/tensor'
+import { eigh2 } from 'aifn-compute/numerics/linalg'
 
 const START: [number, number] = [-1, 1.5]
 const MAX_STEPS = 5000

@@ -1,6 +1,6 @@
 import { useMemo } from 'react'
 import { Curve, Figure, float, formatNumber, Handle, Plot, Readout, slider, useAxis, useFigureState } from 'aifn-render'
-import { linspace, toFlat } from 'aifn/foundation/tensor'
+import { linspace, toFlat } from 'aifn-compute/foundation/tensor'
 
 const R = toFlat(linspace(0, 2, 401))
 const clip = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v))

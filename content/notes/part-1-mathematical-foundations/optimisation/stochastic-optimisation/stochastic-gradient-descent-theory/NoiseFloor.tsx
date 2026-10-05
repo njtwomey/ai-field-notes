@@ -1,6 +1,6 @@
 import { useMemo } from 'react'
 import { Curve, Figure, float, formatNumber, int, Plot, Readout, useAxis, useFigureState } from 'aifn-render'
-import { normal as drawNormal, stream } from 'aifn/foundation/random'
+import { normal as drawNormal, stream } from 'aifn-compute/foundation/random'
 
 /** f(x) = ½(λ₁x₁² + λ₂x₂²) with gradient noise of standard deviation σ in each coordinate; x* = 0. */
 const LAMBDA = [1, 0.2] as const

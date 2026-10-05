@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
 import { banditProblem, logBandit, type BanditProblem } from 'aifn-methods/data/synthetic'
-import { child, stream } from 'aifn/foundation/random'
-import { mean, std, tensor, toFlat } from 'aifn/foundation/tensor'
+import { child, stream } from 'aifn-compute/foundation/random'
+import { mean, std, tensor, toFlat } from 'aifn-compute/foundation/tensor'
 import {
   clippedIps,
   directMethod,
@@ -11,7 +11,7 @@ import {
   switchDoublyRobust,
   type BanditLog,
   type OffPolicyEstimate,
-} from 'aifn/learning/off-policy'
+} from 'aifn-compute/learning/off-policy'
 import {
   Annotation,
   ControlRow,

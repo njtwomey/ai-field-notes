@@ -19,7 +19,7 @@ import {
   type AutoencoderRun,
 } from 'aifn-methods/generative/autoencoders'
 import { moons, pinwheel } from 'aifn-methods/data/synthetic'
-import { stream } from 'aifn/foundation/random'
+import { stream } from 'aifn-compute/foundation/random'
 
 const fmt = (v: number, digits = 3) => (Number.isFinite(v) ? formatNumber(Number(v.toPrecision(digits))) : '—')
 

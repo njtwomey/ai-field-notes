@@ -1,10 +1,10 @@
 import { useMemo, useState } from 'react'
 import { Figure, ControlGroup, NumberSelector, Plots, Plot, Points, Bars, Handle, Readout, useAxis } from 'aifn-render'
-import { dataset } from 'aifn/learning/estimators'
+import { dataset } from 'aifn-compute/learning/estimators'
 import { BORDER, CORE, dbscan, optics } from 'aifn-methods/unsupervised/clustering'
 import { moons } from 'aifn-methods/data/synthetic'
-import { stream } from 'aifn/foundation/random'
-import { toFlat, toRows, type Tensor } from 'aifn/foundation/tensor'
+import { stream } from 'aifn-compute/foundation/random'
+import { toFlat, toRows, type Tensor } from 'aifn-compute/foundation/tensor'
 
 const columns = (x: Tensor) => {
   const rows = toRows(x)

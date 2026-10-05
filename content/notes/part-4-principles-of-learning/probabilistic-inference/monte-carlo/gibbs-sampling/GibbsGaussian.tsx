@@ -14,8 +14,8 @@ import {
   useFigureState,
 } from 'aifn-render'
 import { autocorrelation, effectiveSampleSize, splitRhat } from '../../_shared/mcmc'
-import { linspace, toFlat } from 'aifn/foundation/tensor'
-import { normal, stream } from 'aifn/foundation/random'
+import { linspace, toFlat } from 'aifn-compute/foundation/tensor'
+import { normal, stream } from 'aifn-compute/foundation/random'
 
 const PATH_SWEEPS = 25
 /** Sample points drawn in all, shared evenly between the chains. */

@@ -15,9 +15,9 @@ import {
 import { GridView } from 'aifn-render/gym'
 import { greedyPath, valueIteration } from 'aifn-methods/gym/agents'
 import { mazeEnvironment } from 'aifn-methods/gym/environments'
-import { stream } from 'aifn/foundation/random'
-import { toFlat } from 'aifn/foundation/tensor'
-import { trace } from 'aifn/foundation/trace'
+import { stream } from 'aifn-compute/foundation/random'
+import { toFlat } from 'aifn-compute/foundation/tensor'
+import { trace } from 'aifn-compute/foundation/trace'
 import { MAZE_OPTIONS, type MazeName } from './mazes'
 
 const MAX_SWEEPS = 300

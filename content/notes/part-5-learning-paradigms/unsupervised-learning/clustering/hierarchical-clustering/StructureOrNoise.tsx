@@ -12,7 +12,7 @@ import {
   useFigureState,
   when,
 } from 'aifn-render'
-import { normal, stream, uniform } from 'aifn/foundation/random'
+import { normal, stream, uniform } from 'aifn-compute/foundation/random'
 import type { Point } from '../../_shared/datasets'
 import { clusterSeries } from '../../_shared/groups'
 import { covariance, eigSymmetric } from '../../_shared/linalg'

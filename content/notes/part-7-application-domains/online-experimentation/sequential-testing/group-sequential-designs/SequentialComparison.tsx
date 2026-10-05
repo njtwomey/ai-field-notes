@@ -1,7 +1,7 @@
 import { useMemo } from 'react'
 import { choice, Curve, Figure, formatNumber, int, Plot, Readout, useAxis, useFigureState } from 'aifn-render'
 import { TABLES, type Alpha } from './tables'
-import { normalCdf, normalQuantile } from 'aifn/numerics/special'
+import { normalCdf, normalQuantile } from 'aifn-compute/numerics/special'
 
 const Z_MAX = 6
 const ALPHAS: { value: Alpha; label: string }[] = [

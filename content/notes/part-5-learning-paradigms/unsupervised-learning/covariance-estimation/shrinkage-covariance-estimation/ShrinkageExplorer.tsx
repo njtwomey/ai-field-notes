@@ -14,8 +14,8 @@ import {
   useFigureState,
 } from 'aifn-render'
 import { eigSymmetric, type Matrix } from '../../_shared/linalg'
-import { linspace, toFlat } from 'aifn/foundation/tensor'
-import { normal, stream } from 'aifn/foundation/random'
+import { linspace, toFlat } from 'aifn-compute/foundation/tensor'
+import { normal, stream } from 'aifn-compute/foundation/random'
 
 const P = 40
 const RHO = 0.5

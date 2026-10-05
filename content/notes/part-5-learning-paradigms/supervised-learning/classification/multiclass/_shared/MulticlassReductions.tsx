@@ -14,7 +14,7 @@ import {
   useAxis,
   useFigureState,
 } from 'aifn-render'
-import { linspace, toFlat } from 'aifn/foundation/tensor'
+import { linspace, toFlat } from 'aifn-compute/foundation/tensor'
 import { CONTESTED, UNASSIGNED, decide, expectedAccuracy, fit, makeData, type Method, type Vec2 } from './reductions'
 
 const LO = -4

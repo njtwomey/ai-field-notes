@@ -1,5 +1,5 @@
-import { normal, stream, uniform } from 'aifn/foundation/random'
-import { normalQuantile } from 'aifn/numerics/special'
+import { normal, stream, uniform } from 'aifn-compute/foundation/random'
+import { normalQuantile } from 'aifn-compute/numerics/special'
 /**
  * Skill-rating arithmetic shared by the skill-rating notes: Gaussian tails with good relative accuracy, the TrueSkill
  * v and w functions, a two-player TrueSkill update, Elo, Bradley–Terry by Zermelo's MM iteration, and simulated

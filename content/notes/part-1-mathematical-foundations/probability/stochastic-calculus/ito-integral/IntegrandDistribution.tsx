@@ -12,7 +12,7 @@ import {
   useFigureState,
 } from 'aifn-render'
 import { gaussPdf, histogram } from '../_shared/sde'
-import { normal, stream } from 'aifn/foundation/random'
+import { normal, stream } from 'aifn-compute/foundation/random'
 
 type Integrand = 'constant' | 'steps' | 'ramp' | 'fade' | 'path'
 

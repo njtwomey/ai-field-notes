@@ -12,7 +12,7 @@ import {
   formatNumber,
   useAxis,
 } from 'aifn-render'
-import { stream } from 'aifn/foundation/random'
+import { stream } from 'aifn-compute/foundation/random'
 import { implicitFeedback } from 'aifn-methods/data/synthetic'
 import {
   recommenderRun,

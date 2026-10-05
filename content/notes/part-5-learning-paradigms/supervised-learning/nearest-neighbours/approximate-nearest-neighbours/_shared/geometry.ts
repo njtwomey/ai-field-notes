@@ -1,4 +1,4 @@
-import { normal, stream, uniform } from 'aifn/foundation/random'
+import { normal, stream, uniform } from 'aifn-compute/foundation/random'
 /** Small 2-D helpers shared by the approximate nearest-neighbour widgets. */
 
 export type P = [number, number]

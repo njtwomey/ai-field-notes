@@ -11,7 +11,7 @@ import {
   useFigureState,
 } from 'aifn-render'
 import { forwardBackward, rankOne, type Mat, type Vec } from '../_shared/chain-crf'
-import { normal, stream } from 'aifn/foundation/random'
+import { normal, stream } from 'aifn-compute/foundation/random'
 
 const N = 10
 const K = 3

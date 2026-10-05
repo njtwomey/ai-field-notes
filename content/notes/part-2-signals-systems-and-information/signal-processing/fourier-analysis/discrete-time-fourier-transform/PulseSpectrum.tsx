@@ -1,6 +1,6 @@
 import { useMemo } from 'react'
 import { Curve, Figure, formatNumber, int, Plot, Readout, useAxis, useFigureState } from 'aifn-render'
-import { linspace, toFlat } from 'aifn/foundation/tensor'
+import { linspace, toFlat } from 'aifn-compute/foundation/tensor'
 
 const OMEGA = toFlat(linspace(-3 * Math.PI, 3 * Math.PI, 1801))
 

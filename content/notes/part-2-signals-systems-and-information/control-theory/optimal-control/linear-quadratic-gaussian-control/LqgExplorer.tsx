@@ -12,10 +12,10 @@ import {
   formatNumber,
   useAxis,
 } from 'aifn-render'
-import { stream } from 'aifn/foundation/random'
-import { toFlat } from 'aifn/foundation/tensor'
-import { trace } from 'aifn/foundation/trace'
-import { lqg, lqgSimulation, type LqgSimulationState } from 'aifn/dynamics/control'
+import { stream } from 'aifn-compute/foundation/random'
+import { toFlat } from 'aifn-compute/foundation/tensor'
+import { trace } from 'aifn-compute/foundation/trace'
+import { lqg, lqgSimulation, type LqgSimulationState } from 'aifn-compute/dynamics/control'
 
 const DT = 0.1
 const A = [

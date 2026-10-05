@@ -9,8 +9,8 @@ import {
   modernHopfieldUpdate,
   overlaps,
 } from 'aifn-methods/generative/boltzmann'
-import { child, stream } from 'aifn/foundation/random'
-import { fromData, toFlat } from 'aifn/foundation/tensor'
+import { child, stream } from 'aifn-compute/foundation/random'
+import { fromData, toFlat } from 'aifn-compute/foundation/tensor'
 import {
   Figure,
   ControlGroup,

@@ -13,7 +13,7 @@ import {
   useFigureState,
 } from 'aifn-render'
 import { rocExample } from '../../_shared/rocExample'
-import { linspace, toFlat } from 'aifn/foundation/tensor'
+import { linspace, toFlat } from 'aifn-compute/foundation/tensor'
 
 const PC = toFlat(linspace(0, 1, 201))
 

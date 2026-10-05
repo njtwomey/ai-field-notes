@@ -13,7 +13,7 @@ import {
 } from 'aifn-render'
 import { Phi, gaussPdf, grid } from '../_shared/gaussian'
 import { predict, prior, update, type Belief } from '../_shared/probit'
-import { stream as randomStream, uniform } from 'aifn/foundation/random'
+import { stream as randomStream, uniform } from 'aifn-compute/foundation/random'
 
 /** Features: 0 bias, 1–3 the ad (A, B, C), 4–5 the display position (top, side). */
 const ADS = ['ad A', 'ad B', 'ad C']

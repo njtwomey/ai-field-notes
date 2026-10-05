@@ -1,9 +1,9 @@
 import { useMemo, useState } from 'react'
-import { cmaEs, type CmaEsState } from 'aifn/optim/derivative-free'
+import { cmaEs, type CmaEsState } from 'aifn-compute/optim/derivative-free'
 import { rastrigin, type TestFunction } from 'aifn-methods/data/objectives'
-import { stream } from 'aifn/foundation/random'
-import { tensor, toFlat, type Tensor } from 'aifn/foundation/tensor'
-import { trace } from 'aifn/foundation/trace'
+import { stream } from 'aifn-compute/foundation/random'
+import { tensor, toFlat, type Tensor } from 'aifn-compute/foundation/tensor'
+import { trace } from 'aifn-compute/foundation/trace'
 import {
   ControlRow,
   Curve,

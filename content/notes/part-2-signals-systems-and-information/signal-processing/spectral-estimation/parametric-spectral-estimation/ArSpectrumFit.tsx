@@ -1,7 +1,7 @@
 import { useMemo } from 'react'
 import { choice, Curve, Figure, formatNumber, int, Plot, Readout, useAxis, useFigureState } from 'aifn-render'
 import { arProcess, arSpectrum, autocovariance, burg, levinsonDurbin, periodogram, powerDb } from '../_shared/spectra'
-import { linspace, toFlat } from 'aifn/foundation/tensor'
+import { linspace, toFlat } from 'aifn-compute/foundation/tensor'
 
 const OMEGA = toFlat(linspace(0, Math.PI, 513))
 // AR(4) with two sharp peaks close together at 0.20π and 0.26π (pole radius 0.97).

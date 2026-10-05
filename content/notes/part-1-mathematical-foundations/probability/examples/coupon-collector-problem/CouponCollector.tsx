@@ -1,6 +1,6 @@
 import { useMemo } from 'react'
 import { Bars, Curve, Figure, formatNumber, int, Plot, Points, Readout, useAxis, useFigureState } from 'aifn-render'
-import { stream, uniform as drawUniform } from 'aifn/foundation/random'
+import { stream, uniform as drawUniform } from 'aifn-compute/foundation/random'
 
 const harmonic = (n: number) => Array.from({ length: n }, (_, k) => 1 / (k + 1)).reduce((a, b) => a + b, 0)
 

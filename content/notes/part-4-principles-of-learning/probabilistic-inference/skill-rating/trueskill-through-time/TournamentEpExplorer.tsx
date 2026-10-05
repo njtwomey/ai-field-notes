@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { trueSkillEp } from 'aifn-methods/inference/rating-models'
-import { trace } from 'aifn/foundation/trace'
+import { trace } from 'aifn-compute/foundation/trace'
 import {
   Figure,
   ControlGroup,

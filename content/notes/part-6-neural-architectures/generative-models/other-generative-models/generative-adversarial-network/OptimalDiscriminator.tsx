@@ -1,6 +1,6 @@
 import { useMemo } from 'react'
 import { Area, Curve, Figure, float, formatNumber, Plot, Readout, useAxis, useFigureState } from 'aifn-render'
-import { linspace, toFlat } from 'aifn/foundation/tensor'
+import { linspace, toFlat } from 'aifn-compute/foundation/tensor'
 
 /** Data N(0, 1) against a Gaussian generator N(m, s²); D* = p_data / (p_data + p_g) and JS by numerical integration. */
 const X = toFlat(linspace(-6, 6, 481))

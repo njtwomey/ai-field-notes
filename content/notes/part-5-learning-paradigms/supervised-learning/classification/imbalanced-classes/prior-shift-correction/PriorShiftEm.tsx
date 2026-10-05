@@ -1,8 +1,8 @@
 import { useMemo } from 'react'
 import { Curve, Figure, float, formatNumber, int, Plot, Readout, useAxis, useFigureState } from 'aifn-render'
-import { normal, stream, uniform } from 'aifn/foundation/random'
+import { normal, stream, uniform } from 'aifn-compute/foundation/random'
 import { expit, logit, posterior, rates, sample, scoreForPosterior } from '../_shared/binormal'
-import { linspace, toFlat } from 'aifn/foundation/tensor'
+import { linspace, toFlat } from 'aifn-compute/foundation/tensor'
 
 const N = 5000
 const ITERATIONS = 30

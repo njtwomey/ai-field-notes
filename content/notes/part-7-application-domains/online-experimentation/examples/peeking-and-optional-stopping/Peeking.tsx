@@ -13,8 +13,8 @@ import {
   useFigureState,
 } from 'aifn-render'
 import { BOUNDARIES } from './boundaries'
-import { normal, stream } from 'aifn/foundation/random'
-import { normalQuantile } from 'aifn/numerics/special'
+import { normal, stream } from 'aifn-compute/foundation/random'
+import { normalQuantile } from 'aifn-compute/numerics/special'
 
 type Design = 'naive' | 'pocock' | 'obf'
 

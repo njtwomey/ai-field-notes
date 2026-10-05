@@ -11,8 +11,8 @@ import {
   useAxis,
   useFigureState,
 } from 'aifn-render'
-import { linspace, toFlat } from 'aifn/foundation/tensor'
-import { normal, stream, uniform } from 'aifn/foundation/random'
+import { linspace, toFlat } from 'aifn-compute/foundation/tensor'
+import { normal, stream, uniform } from 'aifn-compute/foundation/random'
 
 const STEP_CHOICES = ['4', '16', '64', '256', '4096'] as const
 type Steps = (typeof STEP_CHOICES)[number]

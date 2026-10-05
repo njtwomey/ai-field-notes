@@ -1,9 +1,9 @@
 import { useMemo } from 'react'
 import { Curve, Figure, formatNumber, int, Plot, Points, Readout, useAxis, useFigureState } from 'aifn-render'
-import { fft, ifft } from 'aifn/foundation/fourier'
-import { complexAbs, realPart, toFlat, type Tensor } from 'aifn/foundation/tensor'
-import { lfilter } from 'aifn/signal/filters'
-import { getWindow } from 'aifn/signal/windows'
+import { fft, ifft } from 'aifn-compute/foundation/fourier'
+import { complexAbs, realPart, toFlat, type Tensor } from 'aifn-compute/foundation/tensor'
+import { lfilter } from 'aifn-compute/signal/filters'
+import { getWindow } from 'aifn-compute/signal/windows'
 
 const FS = 16000
 const N = 1024

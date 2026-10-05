@@ -1,6 +1,6 @@
 /** Toy data for the GP-LVM figures. */
 import { centre } from './gplvm'
-import { normal, stream } from 'aifn/foundation/random'
+import { normal, stream } from 'aifn-compute/foundation/random'
 
 export const LOOP_N = 40
 

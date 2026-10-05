@@ -11,8 +11,8 @@ import {
   useAxis,
   useFigureState,
 } from 'aifn-render'
-import { linspace, toFlat } from 'aifn/foundation/tensor'
-import { normal, stream, uniform } from 'aifn/foundation/random'
+import { linspace, toFlat } from 'aifn-compute/foundation/tensor'
+import { normal, stream, uniform } from 'aifn-compute/foundation/random'
 
 const GRID = toFlat(linspace(-4, 4, 201))
 /** Capped because each draw costs D × 201 cosines, recomputed while D is dragged. */

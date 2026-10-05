@@ -2,7 +2,7 @@ import { useMemo } from 'react'
 import { Curve, Figure, formatNumber, Handle, int, Plot, Points, Readout, useAxis, useFigureState } from 'aifn-render'
 import type { PointCloud2d } from '@/generated/contracts'
 import { useFigure } from '@/lib/generated'
-import type { Vec2 as Point } from 'aifn/numerics/linalg'
+import type { Vec2 as Point } from 'aifn-compute/numerics/linalg'
 import { converge } from './lloyd'
 
 const K_MAX = 8

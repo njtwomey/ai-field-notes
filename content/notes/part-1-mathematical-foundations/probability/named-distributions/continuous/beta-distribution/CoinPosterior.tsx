@@ -13,9 +13,9 @@ import {
   useAxis,
   useFigureState,
 } from 'aifn-render'
-import { Beta } from 'aifn/probability/distributions'
-import { linspace, toFlat } from 'aifn/foundation/tensor'
-import { stream, uniform } from 'aifn/foundation/random'
+import { Beta } from 'aifn-compute/probability/distributions'
+import { linspace, toFlat } from 'aifn-compute/foundation/tensor'
+import { stream, uniform } from 'aifn-compute/foundation/random'
 
 const MAX_FLIPS = 1000
 // One fixed stream of uniforms: flip i lands heads when u[i] < p, so changing p re-reads the same coin tosses.

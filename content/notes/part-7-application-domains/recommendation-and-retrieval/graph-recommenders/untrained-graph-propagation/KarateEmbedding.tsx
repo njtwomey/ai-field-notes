@@ -13,7 +13,7 @@ import {
   useAxis,
   useFigureState,
 } from 'aifn-render'
-import { normal, stream, type Stream, uniform } from 'aifn/foundation/random'
+import { normal, stream, type Stream, uniform } from 'aifn-compute/foundation/random'
 
 /** Zachary's karate club: 34 members, 78 friendships (0-indexed, as in networkx's karate_club_graph). */
 const EDGES: [number, number][] = [

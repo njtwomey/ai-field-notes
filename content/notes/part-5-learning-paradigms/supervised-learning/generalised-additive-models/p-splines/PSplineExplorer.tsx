@@ -21,8 +21,8 @@ import {
   times,
   uniformKnots,
 } from '../_shared/core-smoothing'
-import { linspace, toFlat } from 'aifn/foundation/tensor'
-import { normal, stream, uniform } from 'aifn/foundation/random'
+import { linspace, toFlat } from 'aifn-compute/foundation/tensor'
+import { normal, stream, uniform } from 'aifn-compute/foundation/random'
 
 type Order = '1' | '2' | '3'
 const ORDER_OPTIONS = [

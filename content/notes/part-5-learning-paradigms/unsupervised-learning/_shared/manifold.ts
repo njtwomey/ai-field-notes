@@ -4,7 +4,7 @@
  */
 import { symmetricEigen } from './eigen'
 import { affinities, squaredDistances, tsne } from './tsne'
-import { normal, stream, uniform } from 'aifn/foundation/random'
+import { normal, stream, uniform } from 'aifn-compute/foundation/random'
 
 export type Rows = number[][]
 

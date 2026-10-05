@@ -1,10 +1,10 @@
 import { useMemo } from 'react'
 import { Curve, Figure, formatNumber, int, Plot, Readout, useAxis, useFigureState } from 'aifn-render'
-import { rfft } from 'aifn/foundation/fourier'
-import { complexAbs, toFlat, type Tensor } from 'aifn/foundation/tensor'
-import { freqz, lfilter } from 'aifn/signal/filters'
-import { getWindow } from 'aifn/signal/windows'
-import { transferFunction } from 'aifn/systems'
+import { rfft } from 'aifn-compute/foundation/fourier'
+import { complexAbs, toFlat, type Tensor } from 'aifn-compute/foundation/tensor'
+import { freqz, lfilter } from 'aifn-compute/signal/filters'
+import { getWindow } from 'aifn-compute/signal/windows'
+import { transferFunction } from 'aifn-compute/systems'
 import { autocorrelation, levinsonDurbin } from '../_shared/stat'
 
 const FS = 8000

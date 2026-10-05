@@ -13,7 +13,7 @@ import {
   useAxis,
   useFigureState,
 } from 'aifn-render'
-import { normal, stream } from 'aifn/foundation/random'
+import { normal, stream } from 'aifn-compute/foundation/random'
 
 const N = 300
 const T = Array.from({ length: N }, (_, n) => n)

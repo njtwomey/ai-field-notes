@@ -15,7 +15,7 @@ import {
   useAxis,
   useFigureState,
 } from 'aifn-render'
-import { stream, uniform as drawUniform } from 'aifn/foundation/random'
+import { stream, uniform as drawUniform } from 'aifn-compute/foundation/random'
 import { mosaic } from '../_shared/spins'
 import { barsAndStripes, hiddenProbs, sample, trainRbm, visibleProbs, type Method, type Rbm } from './rbm'
 

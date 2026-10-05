@@ -13,8 +13,8 @@ import {
   useFigureState,
 } from 'aifn-render'
 import { evaluate, logDet, makeBasis, penalise, smooth } from '../../regression/nonlinear-regression/_shared/splines'
-import { linspace, toFlat } from 'aifn/foundation/tensor'
-import { normal, stream, uniform } from 'aifn/foundation/random'
+import { linspace, toFlat } from 'aifn-compute/foundation/tensor'
+import { normal, stream, uniform } from 'aifn-compute/foundation/random'
 
 const N = 100
 const KNOTS = Array.from({ length: 16 }, (_, i) => (i + 1) / 17)

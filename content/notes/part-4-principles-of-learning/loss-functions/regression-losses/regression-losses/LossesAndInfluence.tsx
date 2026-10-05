@@ -10,7 +10,7 @@ import {
   useAxis,
   useFigureState,
 } from 'aifn-render'
-import { linspace, toFlat } from 'aifn/foundation/tensor'
+import { linspace, toFlat } from 'aifn-compute/foundation/tensor'
 
 const R = toFlat(linspace(-4, 4, 321))
 const DATA = [1, 2, 3, 6, 18]

@@ -11,8 +11,8 @@ import {
   useAxis,
   useFigureState,
 } from 'aifn-render'
-import { stream, uniform as drawUniform } from 'aifn/foundation/random'
-import type { Stream } from 'aifn/foundation/random'
+import { stream, uniform as drawUniform } from 'aifn-compute/foundation/random'
+import type { Stream } from 'aifn-compute/foundation/random'
 
 type DistId = 'bernoulli' | 'exponential' | 'cauchy'
 

@@ -26,7 +26,7 @@ import {
   vpMixture,
   type ReverseKind,
 } from '../_shared/sde'
-import { linspace, toFlat } from 'aifn/foundation/tensor'
+import { linspace, toFlat } from 'aifn-compute/foundation/tensor'
 
 const STEPS = 250
 const PARTICLES = 2000

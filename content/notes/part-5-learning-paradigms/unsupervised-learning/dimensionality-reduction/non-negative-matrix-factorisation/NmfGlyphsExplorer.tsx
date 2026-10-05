@@ -15,11 +15,11 @@ import {
 } from 'aifn-render'
 import { strokeGlyphs } from 'aifn-methods/data/synthetic'
 import { pca } from 'aifn-methods/unsupervised/embedding/linear'
-import { dataset } from 'aifn/learning/estimators'
-import { nmfSteps, type NmfLoss, type NmfSolver } from 'aifn/numerics/factorisation'
-import { stream } from 'aifn/foundation/random'
-import { toFlat } from 'aifn/foundation/tensor'
-import { trace } from 'aifn/foundation/trace'
+import { dataset } from 'aifn-compute/learning/estimators'
+import { nmfSteps, type NmfLoss, type NmfSolver } from 'aifn-compute/numerics/factorisation'
+import { stream } from 'aifn-compute/foundation/random'
+import { toFlat } from 'aifn-compute/foundation/tensor'
+import { trace } from 'aifn-compute/foundation/trace'
 
 const SOLVERS: { value: string; label: string; solver: NmfSolver; loss: NmfLoss }[] = [
   { value: 'mu-f', label: 'multiplicative, squared error', solver: 'multiplicative', loss: 'frobenius' },

@@ -13,8 +13,8 @@ import {
   useAxis,
   useFigureState,
 } from 'aifn-render'
-import { linspace, toFlat } from 'aifn/foundation/tensor'
-import { normal, stream, uniform } from 'aifn/foundation/random'
+import { linspace, toFlat } from 'aifn-compute/foundation/tensor'
+import { normal, stream, uniform } from 'aifn-compute/foundation/random'
 
 /**
  * A one-dimensional energy-based model: E_θ(x) = x²/18 + Σ_k θ_k φ_k(x), with nine Gaussian bumps φ_k of width 0.6

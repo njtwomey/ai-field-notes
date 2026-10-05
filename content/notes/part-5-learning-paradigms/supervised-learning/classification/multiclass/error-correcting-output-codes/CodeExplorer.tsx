@@ -23,7 +23,7 @@ import {
   type Code,
   type CodeName,
 } from './codes'
-import { linspace, toFlat } from 'aifn/foundation/tensor'
+import { linspace, toFlat } from 'aifn-compute/foundation/tensor'
 
 const P_GRID = toFlat(linspace(0, 0.5, 26))
 const P_RANGE: [number, number] = [0, 0.5]

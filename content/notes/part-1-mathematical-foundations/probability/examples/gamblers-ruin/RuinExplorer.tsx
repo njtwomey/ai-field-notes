@@ -14,7 +14,7 @@ import {
   useAxis,
   useFigureState,
 } from 'aifn-render'
-import { stream, uniform as drawUniform } from 'aifn/foundation/random'
+import { stream, uniform as drawUniform } from 'aifn-compute/foundation/random'
 
 /** P(reach N before 0 | start at i), winning each unit bet with probability p. */
 function winProbability(i: number, N: number, p: number): number {

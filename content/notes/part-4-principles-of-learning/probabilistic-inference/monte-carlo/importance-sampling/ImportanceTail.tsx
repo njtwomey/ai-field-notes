@@ -13,9 +13,9 @@ import {
   useAxis,
   useFigureState,
 } from 'aifn-render'
-import { linspace, toFlat } from 'aifn/foundation/tensor'
-import { normal, stream } from 'aifn/foundation/random'
-import { normalCdf } from 'aifn/numerics/special'
+import { linspace, toFlat } from 'aifn-compute/foundation/tensor'
+import { normal, stream } from 'aifn-compute/foundation/random'
+import { normalCdf } from 'aifn-compute/numerics/special'
 
 const N = 1000
 const XS = toFlat(linspace(-4, 8, 481))

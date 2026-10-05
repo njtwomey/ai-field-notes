@@ -1,8 +1,8 @@
 /** Starting centres for k-means and Gaussian mixtures: k distinct data points at random, or k-means++. */
-import { stream, uniform } from 'aifn/foundation/random'
-import { fromData, toRows } from 'aifn/foundation/tensor'
-import type { Vec2 } from 'aifn/numerics/linalg'
-import { kmeansPlusPlus } from 'aifn/numerics/neighbours'
+import { stream, uniform } from 'aifn-compute/foundation/random'
+import { fromData, toRows } from 'aifn-compute/foundation/tensor'
+import type { Vec2 } from 'aifn-compute/numerics/linalg'
+import { kmeansPlusPlus } from 'aifn-compute/numerics/neighbours'
 
 export type CentreInit = 'random' | 'kmeans++'
 

@@ -1,6 +1,6 @@
 import { useMemo } from 'react'
 import { Figure, Plot, Readout, seriesLayers, type SeriesSpec, useAxis } from 'aifn-render'
-import { stream, uniform } from 'aifn/foundation/random'
+import { stream, uniform } from 'aifn-compute/foundation/random'
 import { corrupt, randomPattern } from '../_shared/spins'
 import { denseRecall, softmaxUpdate } from './dense'
 

@@ -12,8 +12,8 @@ import {
   useAxis,
   useFigureState,
 } from 'aifn-render'
-import { normalCdf } from 'aifn/numerics/special'
-import { linspace, toFlat } from 'aifn/foundation/tensor'
+import { normalCdf } from 'aifn-compute/numerics/special'
+import { linspace, toFlat } from 'aifn-compute/foundation/tensor'
 
 const X = toFlat(linspace(-3, 5, 241))
 const D_GRID = toFlat(linspace(0.005, 0.5, 100))

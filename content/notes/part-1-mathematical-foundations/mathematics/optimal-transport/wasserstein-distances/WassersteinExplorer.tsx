@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
-import { wasserstein1d } from 'aifn/transport'
-import { normals, stream } from 'aifn/foundation/random'
-import { toFlat } from 'aifn/foundation/tensor'
+import { wasserstein1d } from 'aifn-compute/transport'
+import { normals, stream } from 'aifn-compute/foundation/random'
+import { toFlat } from 'aifn-compute/foundation/tensor'
 import {
   Area,
   ControlRow,

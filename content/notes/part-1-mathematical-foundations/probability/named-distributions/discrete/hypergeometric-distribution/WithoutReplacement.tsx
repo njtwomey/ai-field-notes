@@ -1,6 +1,6 @@
 import { useMemo } from 'react'
 import { Curve, Figure, formatNumber, int, Plot, Points, Readout, slider, useAxis, useFigureState } from 'aifn-render'
-import { Binomial, Hypergeometric } from 'aifn/probability/distributions'
+import { Binomial, Hypergeometric } from 'aifn-compute/probability/distributions'
 
 /** Drawing without replacement (hypergeometric) against with replacement (binomial) as the population grows. */
 export function WithoutReplacement() {

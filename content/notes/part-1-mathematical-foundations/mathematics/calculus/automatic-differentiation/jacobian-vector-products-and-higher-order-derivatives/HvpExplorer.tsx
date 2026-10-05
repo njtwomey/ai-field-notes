@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
-import { grad, gradCheck, hessian, hvp, jvp } from 'aifn/foundation/autodiff'
-import { logGamma, sigmoid, softplus } from 'aifn/numerics/special'
+import { grad, gradCheck, hessian, hvp, jvp } from 'aifn-compute/foundation/autodiff'
+import { logGamma, sigmoid, softplus } from 'aifn-compute/numerics/special'
 import {
   diag,
   dot,
@@ -16,7 +16,7 @@ import {
   transpose,
   type Tensor,
   type Value,
-} from 'aifn/foundation/tensor'
+} from 'aifn-compute/foundation/tensor'
 import {
   ControlGroup,
   Curve,

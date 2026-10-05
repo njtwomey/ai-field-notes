@@ -1,5 +1,5 @@
-import { normal, stream, uniform } from 'aifn/foundation/random'
-import { normalCdf, normalPdf, sigmoid } from 'aifn/numerics/special'
+import { normal, stream, uniform } from 'aifn-compute/foundation/random'
+import { normalCdf, normalPdf, sigmoid } from 'aifn-compute/numerics/special'
 /**
  * Shared data, models and metrics for the ordinal regression notes. Every figure in the category draws from the same
  * seeded datasets, so a model can be compared with another on identical points.

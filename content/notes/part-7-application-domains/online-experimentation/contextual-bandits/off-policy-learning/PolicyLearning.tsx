@@ -12,9 +12,9 @@ import {
   useAxis,
   useFigureState,
 } from 'aifn-render'
-import { stream } from 'aifn/foundation/random'
+import { stream } from 'aifn-compute/foundation/random'
 import { BEST_VALUE, logData, thresholdValue } from '../_shared/ope'
-import { linspace, toFlat } from 'aifn/foundation/tensor'
+import { linspace, toFlat } from 'aifn-compute/foundation/tensor'
 
 const THETAS = toFlat(linspace(0, 1, 201))
 const SIZES = ['200', '1000', '5000'] as const

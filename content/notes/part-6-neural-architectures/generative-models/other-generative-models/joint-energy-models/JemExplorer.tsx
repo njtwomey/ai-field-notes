@@ -13,7 +13,7 @@ import {
   formatNumber,
   useAxis,
 } from 'aifn-render'
-import { normals, stream } from 'aifn/foundation/random'
+import { normals, stream } from 'aifn-compute/foundation/random'
 import { moons, pinwheel } from 'aifn-methods/data/synthetic'
 import { jemRun, type JemCheckpoint, type JemRun, type JemTrack } from 'aifn-methods/generative/energy'
 

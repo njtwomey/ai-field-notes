@@ -14,7 +14,7 @@ import {
   useFigureState,
 } from 'aifn-render'
 import { forwardBackward, rankOne, viterbi, type Mat } from '../_shared/chain-crf'
-import { normal, stream } from 'aifn/foundation/random'
+import { normal, stream } from 'aifn-compute/foundation/random'
 
 const N = 6
 const POSITIONS = Array.from({ length: N }, (_, i) => i + 1)

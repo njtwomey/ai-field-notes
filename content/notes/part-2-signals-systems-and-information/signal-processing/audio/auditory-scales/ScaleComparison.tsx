@@ -11,7 +11,7 @@ import {
   useAxis,
   useFigureState,
 } from 'aifn-render'
-import { hzToMel } from 'aifn/signal/audio'
+import { hzToMel } from 'aifn-compute/signal/audio'
 
 const bark = (f: number) => 13 * Math.atan(0.00076 * f) + 3.5 * Math.atan((f / 7500) ** 2)
 const erbNumber = (f: number) => 21.4 * Math.log10(1 + (4.37 * f) / 1000)

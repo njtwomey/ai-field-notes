@@ -13,7 +13,7 @@ import {
   useFigureState,
   type Vec2,
 } from 'aifn-render'
-import { linspace, toFlat } from 'aifn/foundation/tensor'
+import { linspace, toFlat } from 'aifn-compute/foundation/tensor'
 
 const RANGE: [number, number] = [-3, 3]
 const ANGLES = toFlat(linspace(0, 2 * Math.PI, 97))

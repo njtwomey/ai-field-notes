@@ -13,7 +13,7 @@ import {
   useAxis,
   useFigureState,
 } from 'aifn-render'
-import { normal as drawNormal, stream, uniform as drawUniform } from 'aifn/foundation/random'
+import { normal as drawNormal, stream, uniform as drawUniform } from 'aifn-compute/foundation/random'
 import {
   auc,
   embed,
@@ -27,7 +27,7 @@ import {
   type Point,
   type Shape,
 } from '../_shared/deepOneClass'
-import { linspace, toFlat } from 'aifn/foundation/tensor'
+import { linspace, toFlat } from 'aifn-compute/foundation/tensor'
 
 /** Uniform and normal draws from one aifn stream, in the shape the shared helpers take. */
 const rand = (seed: number) => {

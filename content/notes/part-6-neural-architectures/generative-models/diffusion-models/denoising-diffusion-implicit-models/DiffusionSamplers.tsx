@@ -10,9 +10,9 @@ import {
   vpSde,
   type SamplerState,
 } from 'aifn-methods/generative/diffusion'
-import { normals, stream } from 'aifn/foundation/random'
-import { fromData, linspace, toFlat, type Tensor } from 'aifn/foundation/tensor'
-import { trace, type Trace } from 'aifn/foundation/trace'
+import { normals, stream } from 'aifn-compute/foundation/random'
+import { fromData, linspace, toFlat, type Tensor } from 'aifn-compute/foundation/tensor'
+import { trace, type Trace } from 'aifn-compute/foundation/trace'
 import { useMemo, useState } from 'react'
 import {
   ControlRow,

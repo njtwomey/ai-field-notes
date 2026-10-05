@@ -1,8 +1,8 @@
 import { useMemo } from 'react'
 import { choice, Curve, Figure, int, Plot, Readout, slider, useAxis, useFigureState } from 'aifn-render'
-import { linspace, toFlat } from 'aifn/foundation/tensor'
-import { normal, stream, uniform } from 'aifn/foundation/random'
-import { sigmoid } from 'aifn/numerics/special'
+import { linspace, toFlat } from 'aifn-compute/foundation/tensor'
+import { normal, stream, uniform } from 'aifn-compute/foundation/random'
+import { sigmoid } from 'aifn-compute/numerics/special'
 
 const N = 20000
 const SLOPE = 1

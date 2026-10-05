@@ -46,9 +46,9 @@ const rect = (x: Vec2, y: Vec2): FilledShape =>
 const swap = (pts: Vec2[]): Vec2[] => pts.map(([u, v]) => [v, u])
 const xsOf = (pts: Vec2[]) => pts.map((p) => p[0])
 const ysOf = (pts: Vec2[]) => pts.map((p) => p[1])
-import { linspace, toFlat } from 'aifn/foundation/tensor'
-import { normal, stream } from 'aifn/foundation/random'
-import { normalCdf, normalPdf, sigmoid } from 'aifn/numerics/special'
+import { linspace, toFlat } from 'aifn-compute/foundation/tensor'
+import { normal, stream } from 'aifn-compute/foundation/random'
+import { normalCdf, normalPdf, sigmoid } from 'aifn-compute/numerics/special'
 
 type MapId = 'custom' | 'affine' | 'exp' | 'logistic' | 'ramp'
 

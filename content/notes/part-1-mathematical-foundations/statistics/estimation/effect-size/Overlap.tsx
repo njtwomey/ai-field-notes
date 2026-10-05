@@ -1,7 +1,7 @@
 import { useMemo } from 'react'
 import { Area, Curve, Figure, float, formatNumber, Plot, Readout, useAxis, useFigureState } from 'aifn-render'
-import { linspace, toFlat } from 'aifn/foundation/tensor'
-import { normalCdf, normalPdf } from 'aifn/numerics/special'
+import { linspace, toFlat } from 'aifn-compute/foundation/tensor'
+import { normalCdf, normalPdf } from 'aifn-compute/numerics/special'
 
 /** Two unit-variance normal groups whose means differ by d, with three readings of the same d. */
 export function Overlap() {

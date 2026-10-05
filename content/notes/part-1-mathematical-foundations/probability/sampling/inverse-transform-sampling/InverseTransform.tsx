@@ -14,9 +14,9 @@ import {
   useAxis,
   useFigureState,
 } from 'aifn-render'
-import { Cauchy, Exponential, Gumbel, Logistic } from 'aifn/probability/distributions'
-import { linspace, toFlat } from 'aifn/foundation/tensor'
-import { stream, uniform } from 'aifn/foundation/random'
+import { Cauchy, Exponential, Gumbel, Logistic } from 'aifn-compute/probability/distributions'
+import { linspace, toFlat } from 'aifn-compute/foundation/tensor'
+import { stream, uniform } from 'aifn-compute/foundation/random'
 
 /** Four standard laws with closed-form quantile functions, each with the x range its panels show. */
 const FAMILIES = {

@@ -1,5 +1,5 @@
 /** The seeded random source the bandit figures pass to `bandits.ts`: an aifn stream behind the `Rand` interface. */
-import { normal, stream, uniform } from 'aifn/foundation/random'
+import { normal, stream, uniform } from 'aifn-compute/foundation/random'
 import type { Rand } from './bandits'
 
 /** A `Rand` drawing from `stream(seed)`: the same seed gives the same draws on every device. */

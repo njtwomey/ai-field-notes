@@ -1,6 +1,6 @@
 import { useMemo } from 'react'
 import { Curve, Figure, formatNumber, Handle, int, Plot, Readout, slider, useAxis, useFigureState } from 'aifn-render'
-import { linspace, toFlat } from 'aifn/foundation/tensor'
+import { linspace, toFlat } from 'aifn-compute/foundation/tensor'
 
 const ANGLES = toFlat(linspace(0, 180, 181))
 const X_RANGE: [number, number] = [0, 180]

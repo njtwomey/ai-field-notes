@@ -12,8 +12,8 @@ import {
   useAxis,
   useFigureState,
 } from 'aifn-render'
-import { linspace, toFlat } from 'aifn/foundation/tensor'
-import { sigmoid } from 'aifn/numerics/special'
+import { linspace, toFlat } from 'aifn-compute/foundation/tensor'
+import { sigmoid } from 'aifn-compute/numerics/special'
 
 type Label = '1' | '0'
 

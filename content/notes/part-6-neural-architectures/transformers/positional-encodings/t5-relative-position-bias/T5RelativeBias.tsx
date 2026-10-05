@@ -1,6 +1,6 @@
 import { useMemo } from 'react'
-import { positionMask, positionRange, t5RelativeBucket } from 'aifn/nn/attention'
-import { toFlat } from 'aifn/foundation/tensor'
+import { positionMask, positionRange, t5RelativeBucket } from 'aifn-compute/nn/attention'
+import { toFlat } from 'aifn-compute/foundation/tensor'
 import { Curve, Figure, Plot, Plots, Raster, Readout, row, setting, slider, useAxis, useFigureState } from 'aifn-render'
 
 const BIAS_T = 24

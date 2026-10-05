@@ -12,8 +12,8 @@ import {
   useAxis,
   useFigureState,
 } from 'aifn-render'
-import { normal, stream, uniform } from 'aifn/foundation/random'
-import { studentTCdf } from 'aifn/numerics/special'
+import { normal, stream, uniform } from 'aifn-compute/foundation/random'
+import { studentTCdf } from 'aifn-compute/numerics/special'
 
 type Shape = 'normal' | 'skewed'
 

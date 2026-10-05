@@ -10,7 +10,7 @@ import {
   useAxis,
   useFigureState,
 } from 'aifn-render'
-import { linspace, toFlat } from 'aifn/foundation/tensor'
+import { linspace, toFlat } from 'aifn-compute/foundation/tensor'
 
 // Minimal sample sizes: a line, a homography, the seven- and eight-point fundamental matrix.
 const MODELS = [

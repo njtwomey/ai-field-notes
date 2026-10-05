@@ -14,8 +14,8 @@ import {
   useAxis,
   useFigureState,
 } from 'aifn-render'
-import { linspace, toFlat } from 'aifn/foundation/tensor'
-import { normal, stream, type Stream } from 'aifn/foundation/random'
+import { linspace, toFlat } from 'aifn-compute/foundation/tensor'
+import { normal, stream, type Stream } from 'aifn-compute/foundation/random'
 
 type V = [number, number]
 /** Symmetric 2×2 matrix stored as [s11, s12, s22]. */

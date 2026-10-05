@@ -1,8 +1,8 @@
 import { useMemo, useState } from 'react'
-import { linspace, toFlat, toRows, type Tensor } from 'aifn/foundation/tensor'
-import { trace } from 'aifn/foundation/trace'
-import { dynamicProgram } from 'aifn/optim/programming'
-import { dtw, dtwProgram, keoghEnvelope, lbKeogh, lbKim } from 'aifn/signal/similarity'
+import { linspace, toFlat, toRows, type Tensor } from 'aifn-compute/foundation/tensor'
+import { trace } from 'aifn-compute/foundation/trace'
+import { dynamicProgram } from 'aifn-compute/optim/programming'
+import { dtw, dtwProgram, keoghEnvelope, lbKeogh, lbKim } from 'aifn-compute/signal/similarity'
 import {
   Figure,
   ControlGroup,

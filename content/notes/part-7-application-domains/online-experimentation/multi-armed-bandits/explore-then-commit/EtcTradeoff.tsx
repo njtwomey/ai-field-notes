@@ -12,7 +12,7 @@ import {
   useAxis,
   useFigureState,
 } from 'aifn-render'
-import { normalCdf } from 'aifn/numerics/special'
+import { normalCdf } from 'aifn-compute/numerics/special'
 
 /**
  * Explore-then-commit on two unit-variance Gaussian arms with gap Δ: the exact expected regret

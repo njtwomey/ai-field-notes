@@ -1,5 +1,5 @@
 /** A two-state hidden Markov model with six-sided dice: state 0 is the fair die, state 1 the loaded die. */
-import { stream, uniform as drawUniform } from 'aifn/foundation/random'
+import { stream, uniform as drawUniform } from 'aifn-compute/foundation/random'
 
 export type Casino = {
   /** P(fair → loaded) per roll. */

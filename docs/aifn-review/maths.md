@@ -1,5 +1,11 @@
 # aifn core review, area 2: numerics, probability, optim, graph
 
+> **Historical (2026-10-05):** the engine no longer lives in this repository. It is the aifn-engine project
+> (https://github.com/njtwomey/aifn-engine, docs at https://njtwomey.github.io/aifn-engine/), installed here as the
+> released packages `aifn-compute`, `aifn-methods` and `aifn-render`. Paths below under `aifn-js/core`, `aifn-js/methods`
+> and `aifn-js/render` refer to the old in-tree copy (now `packages/compute`, `packages/methods` and `packages/render`
+> in the engine); the lab moved from `aifn-js/sandbox/lab` to `lab/` here.
+
 Scope: `aifn-js/core/src/{numerics,probability,optim,graph}/**` and their tests (about 37k lines). Reviewer log:
 `.scratch/aifn/progress/review-maths.md`. Rules and format: `.scratch/aifn/progress/review-common.md`. Items already
 open in `.scratch/aifn/refinement.md` are cited, not re-reported.

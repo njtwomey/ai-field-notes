@@ -1,4 +1,4 @@
-import { normalQuantile } from 'aifn/numerics/special'
+import { normalQuantile } from 'aifn-compute/numerics/special'
 /**
  * Small time-series classification helpers shared by the shapelet, DTW and SAX notes: z-normalisation, subsequence
  * distance, information gain of a split, DTW with a Sakoe–Chiba window and its warping path, the LB_Keogh envelope,

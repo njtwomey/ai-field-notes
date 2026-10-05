@@ -1,5 +1,11 @@
 # aifn review: the methods package, with the rendering package in view (2026-10-04)
 
+> **Historical (2026-10-05):** the engine no longer lives in this repository. It is the aifn-engine project
+> (https://github.com/njtwomey/aifn-engine, docs at https://njtwomey.github.io/aifn-engine/), installed here as the
+> released packages `aifn-compute`, `aifn-methods` and `aifn-render`. Paths below under `aifn-js/core`, `aifn-js/methods`
+> and `aifn-js/render` refer to the old in-tree copy (now `packages/compute`, `packages/methods` and `packages/render`
+> in the engine); the lab moved from `aifn-js/sandbox/lab` to `lab/` here.
+
 Scope: `aifn-js/methods` (`aifn-methods`, 17 areas, about 92k lines) against the core rule C1–C6
 (`docs/aifn-integration-plan.md` §1). Also reviewed: `aifn-js/render` (`aifn-render`), the examples gallery
 (`aifn-js/examples`), the old lab's `views/` and `kit/` (`aifn-js/sandbox/lab`), the note widgets and `_shared` helpers

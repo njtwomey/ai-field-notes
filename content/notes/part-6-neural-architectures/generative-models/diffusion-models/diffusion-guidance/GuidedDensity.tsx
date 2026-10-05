@@ -1,6 +1,6 @@
 import { useMemo } from 'react'
 import { Area, Curve, Figure, float, formatNumber, Plot, Readout, useAxis, useFigureState } from 'aifn-render'
-import { linspace, toFlat } from 'aifn/foundation/tensor'
+import { linspace, toFlat } from 'aifn-compute/foundation/tensor'
 
 /**
  * Two equally likely classes, p(x | A) = N(−1, 1) and p(x | B) = N(1, 1). Classifier-free guidance with weight w

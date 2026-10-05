@@ -12,7 +12,7 @@ import {
   useAxis,
 } from 'aifn-render'
 import { overlap, type Box } from '../_shared/boxes'
-import { linspace, toFlat } from 'aifn/foundation/tensor'
+import { linspace, toFlat } from 'aifn-compute/foundation/tensor'
 
 type Vec = [number, number]
 const VIEW: [number, number] = [0, 12]

@@ -1,8 +1,8 @@
 import { useMemo } from 'react'
 import { Figure, formatNumber, int, Plot, Raster, Readout, useAxis, useFigureState } from 'aifn-render'
-import { rfft } from 'aifn/foundation/fourier'
-import { complexAbs, toFlat } from 'aifn/foundation/tensor'
-import { getWindow } from 'aifn/signal'
+import { rfft } from 'aifn-compute/foundation/fourier'
+import { complexAbs, toFlat } from 'aifn-compute/foundation/tensor'
+import { getWindow } from 'aifn-compute/signal'
 import { morletCwt } from '../_shared/wavelets'
 
 /** Decibels, 20 log₁₀ of a magnitude, floored so zeros stay finite. */

@@ -1,7 +1,7 @@
 import { useMemo } from 'react'
 import { Bars, Curve, Figure, float, formatNumber, Plot, Readout, setting, useAxis, useFigureState } from 'aifn-render'
 import { covariance, eigSymmetric } from '../../_shared/linalg'
-import { normal, stream } from 'aifn/foundation/random'
+import { normal, stream } from 'aifn-compute/foundation/random'
 
 const N = 200
 const D = 10

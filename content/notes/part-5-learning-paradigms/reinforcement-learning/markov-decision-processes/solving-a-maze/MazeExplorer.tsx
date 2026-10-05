@@ -4,8 +4,8 @@ import { GridView, GymTrainer, trainingRun, type GridOverlay } from 'aifn-render
 import { gymSetup, greedyActions, optimalValues, qFromValues } from 'aifn-methods/gym'
 import { greedyPath, valuesFromQ, type TdAgentState } from 'aifn-methods/gym/agents'
 import type { MdpEnvironment } from 'aifn-methods/gym/environments'
-import { stream } from 'aifn/foundation/random'
-import { toFlat } from 'aifn/foundation/tensor'
+import { stream } from 'aifn-compute/foundation/random'
+import { toFlat } from 'aifn-compute/foundation/tensor'
 import { MAZE_OPTIONS, mazeRows, presetWalls, wallsConnect, type MazeName } from './mazes'
 
 const MAX_STEPS = 1000

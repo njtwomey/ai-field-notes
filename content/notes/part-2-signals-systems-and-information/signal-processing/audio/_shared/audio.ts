@@ -1,9 +1,9 @@
 /** Audio feature helpers shared by the audio notes: mel filter banks, power spectrograms, the DCT, and synthesis. */
-import { nextPowerOfTwo, rfft } from 'aifn/foundation/fourier'
-import { normal, stream } from 'aifn/foundation/random'
-import { complexAbs, toFlat, type Tensor } from 'aifn/foundation/tensor'
-import { hzToMel, melToHz } from 'aifn/signal/audio'
-import { getWindow, type WindowName } from 'aifn/signal/windows'
+import { nextPowerOfTwo, rfft } from 'aifn-compute/foundation/fourier'
+import { normal, stream } from 'aifn-compute/foundation/random'
+import { complexAbs, toFlat, type Tensor } from 'aifn-compute/foundation/tensor'
+import { hzToMel, melToHz } from 'aifn-compute/signal/audio'
+import { getWindow, type WindowName } from 'aifn-compute/signal/windows'
 
 export type MelNorm = 'htk' | 'slaney'
 

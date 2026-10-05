@@ -23,9 +23,9 @@ import {
   psplineRow,
   type Matrix,
 } from '../_shared/terms-psplines'
-import { linspace, toFlat } from 'aifn/foundation/tensor'
-import { normal, stream, uniform } from 'aifn/foundation/random'
-import { normalCdf, normalPdf } from 'aifn/numerics/special'
+import { linspace, toFlat } from 'aifn-compute/foundation/tensor'
+import { normal, stream, uniform } from 'aifn-compute/foundation/random'
+import { normalCdf, normalPdf } from 'aifn-compute/numerics/special'
 
 const mean = (xs: readonly number[]) => xs.reduce((a, b) => a + b, 0) / xs.length
 

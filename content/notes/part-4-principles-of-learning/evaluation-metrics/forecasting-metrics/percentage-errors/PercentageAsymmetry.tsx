@@ -13,7 +13,7 @@ import {
   useAxis,
   useFigureState,
 } from 'aifn-render'
-import { linspace, toFlat } from 'aifn/foundation/tensor'
+import { linspace, toFlat } from 'aifn-compute/foundation/tensor'
 
 const ACTUAL = 100
 const FORECASTS = toFlat(linspace(0, 300, 301))

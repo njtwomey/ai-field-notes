@@ -13,7 +13,7 @@ import {
   useAxis,
   useFigureState,
 } from 'aifn-render'
-import { linspace, toFlat } from 'aifn/foundation/tensor'
+import { linspace, toFlat } from 'aifn-compute/foundation/tensor'
 
 const log2 = (x: number) => Math.log(x) / Math.LN2
 const entropy = (ps: number[]) => -ps.reduce((s, p) => (p > 0 ? s + p * log2(p) : s), 0)

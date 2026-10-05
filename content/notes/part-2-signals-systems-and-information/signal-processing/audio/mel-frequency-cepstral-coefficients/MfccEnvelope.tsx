@@ -12,9 +12,9 @@ import {
   useAxis,
   useFigureState,
 } from 'aifn-render'
-import { toFlat, type Tensor } from 'aifn/foundation/tensor'
-import { lfilter } from 'aifn/signal/filters'
-import { getWindow } from 'aifn/signal/windows'
+import { toFlat, type Tensor } from 'aifn-compute/foundation/tensor'
+import { lfilter } from 'aifn-compute/signal/filters'
+import { getWindow } from 'aifn-compute/signal/windows'
 import { dct, magnitudeSpectrum, melFilterBank } from '../_shared/audio'
 
 const FS = 16000

@@ -16,7 +16,7 @@ import {
   useFigureState,
 } from 'aifn-render'
 import { averageRunLength } from './arl'
-import { normal, stream } from 'aifn/foundation/random'
+import { normal, stream } from 'aifn-compute/foundation/random'
 
 const T = 300
 const TIMES = Array.from({ length: T }, (_, t) => t + 1)

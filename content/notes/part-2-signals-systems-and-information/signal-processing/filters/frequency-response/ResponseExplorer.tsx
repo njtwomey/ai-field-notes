@@ -1,7 +1,7 @@
 import { useMemo } from 'react'
 import { choice, Curve, Figure, float, formatNumber, Handle, Plot, Readout, useAxis, useFigureState } from 'aifn-render'
-import { toFlat } from 'aifn/foundation/tensor'
-import { unwrapPhase } from 'aifn/signal'
+import { toFlat } from 'aifn-compute/foundation/tensor'
+import { unwrapPhase } from 'aifn-compute/signal'
 import { applyFilter, db, iirLowpass, response as freqz } from '../_shared/design'
 
 type Preset = 'smoother' | 'average' | 'recursive' | 'butter'

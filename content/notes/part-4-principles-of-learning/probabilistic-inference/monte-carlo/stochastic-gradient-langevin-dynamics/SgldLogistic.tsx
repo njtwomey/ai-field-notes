@@ -17,8 +17,8 @@ import {
   useFigureState,
 } from 'aifn-render'
 import { splitRhat } from '../../_shared/mcmc'
-import { linspace, toFlat } from 'aifn/foundation/tensor'
-import { normal, stream, uniform } from 'aifn/foundation/random'
+import { linspace, toFlat } from 'aifn-compute/foundation/tensor'
+import { normal, stream, uniform } from 'aifn-compute/foundation/random'
 
 /** Bayesian logistic regression without intercept: y ~ Bern(σ(wᵀx)), w ~ N(0, τ²I), N = 50 points. */
 const N = 50

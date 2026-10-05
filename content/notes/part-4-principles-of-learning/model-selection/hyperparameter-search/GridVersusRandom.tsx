@@ -1,7 +1,7 @@
 import { useMemo } from 'react'
 import { Curve, Figure, formatNumber, int, Plot, Points, Raster, Readout, useAxis, useFigureState } from 'aifn-render'
-import { linspace, toFlat } from 'aifn/foundation/tensor'
-import { stream, uniform } from 'aifn/foundation/random'
+import { linspace, toFlat } from 'aifn-compute/foundation/tensor'
+import { stream, uniform } from 'aifn-compute/foundation/random'
 
 const AXIS = toFlat(linspace(0, 1, 81))
 /** Validation score: a narrow peak in the important hyperparameter u, a gentle slope in the unimportant v. */

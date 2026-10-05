@@ -7,8 +7,8 @@ import {
   linearSchedule,
   sampleMixture,
 } from 'aifn-methods/generative/diffusion'
-import { stream } from 'aifn/foundation/random'
-import { toRows, type Tensor } from 'aifn/foundation/tensor'
+import { stream } from 'aifn-compute/foundation/random'
+import { toRows, type Tensor } from 'aifn-compute/foundation/tensor'
 import {
   Figure,
   ControlGroup,

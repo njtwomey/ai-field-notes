@@ -15,8 +15,8 @@ import {
   useFigureState,
 } from 'aifn-render'
 import { dist2, kmeans1d, nearest1d, type P } from './geometry'
-import { normal, stream, uniform } from 'aifn/foundation/random'
-import { eigh2 } from 'aifn/numerics/linalg'
+import { normal, stream, uniform } from 'aifn-compute/foundation/random'
+import { eigh2 } from 'aifn-compute/numerics/linalg'
 
 const N = 400
 const RANGE: [number, number] = [-5, 5]

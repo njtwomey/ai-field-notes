@@ -1,6 +1,6 @@
 import { useMemo } from 'react'
 import { Area, Curve, Figure, float, formatNumber, Handle, Plot, Readout, useAxis, useFigureState } from 'aifn-render'
-import { linspace, toFlat } from 'aifn/foundation/tensor'
+import { linspace, toFlat } from 'aifn-compute/foundation/tensor'
 
 const LOG_2PI = Math.log(2 * Math.PI)
 const normal = (z: number, m: number, v: number) => Math.exp(-((z - m) ** 2) / (2 * v)) / Math.sqrt(2 * Math.PI * v)

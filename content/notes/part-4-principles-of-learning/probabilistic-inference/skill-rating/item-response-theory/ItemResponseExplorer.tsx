@@ -13,7 +13,7 @@ import {
   useAxis,
   useFigureState,
 } from 'aifn-render'
-import { linspace, toFlat } from 'aifn/foundation/tensor'
+import { linspace, toFlat } from 'aifn-compute/foundation/tensor'
 
 type Form = '1PL' | '2PL' | '3PL' | '4PL'
 type Item = { a: number; b: number; c: number; d: number }

@@ -11,7 +11,7 @@ import {
   useFigureState,
 } from 'aifn-render'
 import { letters, minDist, paa, paaDistance, sax, saxBreakpoints, znorm } from '../_shared/tsc'
-import { normal, stream } from 'aifn/foundation/random'
+import { normal, stream } from 'aifn-compute/foundation/random'
 
 const N = 64
 

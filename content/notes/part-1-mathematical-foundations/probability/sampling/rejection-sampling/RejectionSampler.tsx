@@ -11,8 +11,8 @@ import {
   useAxis,
   useFigureState,
 } from 'aifn-render'
-import { linspace, toFlat } from 'aifn/foundation/tensor'
-import { stream, uniform } from 'aifn/foundation/random'
+import { linspace, toFlat } from 'aifn-compute/foundation/tensor'
+import { stream, uniform } from 'aifn-compute/foundation/random'
 
 const bump = (x: number, mu: number, sd: number) => Math.exp(-0.5 * ((x - mu) / sd) ** 2)
 const unnormalised = (x: number) => 0.6 * bump(x, 0.3, 0.08) + 0.4 * bump(x, 0.72, 0.1)

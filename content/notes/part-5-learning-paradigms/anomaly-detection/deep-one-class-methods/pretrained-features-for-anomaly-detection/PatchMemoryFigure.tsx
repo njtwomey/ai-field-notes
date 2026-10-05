@@ -1,6 +1,6 @@
 import { useDeferredValue, useMemo, useState } from 'react'
 import { choice, Figure, Handle, Plot, Points, Raster, Readout, setting, useAxis, useFigureState } from 'aifn-render'
-import { normal as drawNormal, stream, uniform as drawUniform } from 'aifn/foundation/random'
+import { normal as drawNormal, stream, uniform as drawUniform } from 'aifn-compute/foundation/random'
 import {
   CENTRES,
   SIZE,

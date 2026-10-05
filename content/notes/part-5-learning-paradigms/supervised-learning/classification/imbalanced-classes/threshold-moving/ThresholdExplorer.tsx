@@ -15,7 +15,7 @@ import {
   useFigureState,
 } from 'aifn-render'
 import { metricsAt, negativeDensity, positiveDensity, posterior, scoreForPosterior } from '../_shared/binormal'
-import { linspace, toFlat } from 'aifn/foundation/tensor'
+import { linspace, toFlat } from 'aifn-compute/foundation/tensor'
 
 const S = toFlat(linspace(-4, 7, 301))
 

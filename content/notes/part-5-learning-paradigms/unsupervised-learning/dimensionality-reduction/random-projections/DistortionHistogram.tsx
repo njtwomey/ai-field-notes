@@ -1,6 +1,6 @@
 import { useMemo } from 'react'
 import { Bars, choice, Figure, formatNumber, int, Plot, Readout, useAxis, useFigureState } from 'aifn-render'
-import { normal, stream, uniform } from 'aifn/foundation/random'
+import { normal, stream, uniform } from 'aifn-compute/foundation/random'
 
 const N = 60
 const D = 1000

@@ -1,6 +1,6 @@
 import { useMemo } from 'react'
 import { choice, Curve, Figure, float, formatNumber, Handle, Plot, Readout, useAxis, useFigureState } from 'aifn-render'
-import { linspace, toFlat } from 'aifn/foundation/tensor'
+import { linspace, toFlat } from 'aifn-compute/foundation/tensor'
 
 type Word = 'rib' | 'rob'
 const P_AXIS = toFlat(linspace(0.01, 0.99, 99))

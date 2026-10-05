@@ -1,8 +1,8 @@
 import { useMemo } from 'react'
 import { choice, Figure, float, Plot, Points, Raster, Readout, int, useAxis, useFigureState } from 'aifn-render'
 import { decision, rbfKernel, trainSvm, type Point } from '../_shared/svm'
-import { linspace, toFlat } from 'aifn/foundation/tensor'
-import { normal, stream, uniform } from 'aifn/foundation/random'
+import { linspace, toFlat } from 'aifn-compute/foundation/tensor'
+import { normal, stream, uniform } from 'aifn-compute/foundation/random'
 
 type Shape = 'circles' | 'moons' | 'xor'
 const SHAPES = [

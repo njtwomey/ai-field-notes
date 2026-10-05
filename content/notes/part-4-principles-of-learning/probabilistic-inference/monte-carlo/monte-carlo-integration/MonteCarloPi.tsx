@@ -1,7 +1,7 @@
 import { useMemo } from 'react'
 import { Curve, Figure, formatNumber, int, Plot, Points, Readout, useAxis, useFigureState } from 'aifn-render'
-import { linspace, toFlat } from 'aifn/foundation/tensor'
-import { stream, uniform } from 'aifn/foundation/random'
+import { linspace, toFlat } from 'aifn-compute/foundation/tensor'
+import { stream, uniform } from 'aifn-compute/foundation/random'
 
 const MAX_SHOWN = 1500
 const SIGMA = 4 * Math.sqrt((Math.PI / 4) * (1 - Math.PI / 4))

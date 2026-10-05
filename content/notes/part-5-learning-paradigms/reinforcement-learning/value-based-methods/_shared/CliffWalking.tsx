@@ -16,8 +16,8 @@ import { GridView } from 'aifn-render/gym'
 import { train } from 'aifn-methods/gym'
 import { greedyPath, greedyPolicy, qLearningAgent, sarsaAgent, type TdAgentState } from 'aifn-methods/gym/agents'
 import { cliffWalkingEnvironment } from 'aifn-methods/gym/environments'
-import { stream } from 'aifn/foundation/random'
-import { toFlat } from 'aifn/foundation/tensor'
+import { stream } from 'aifn-compute/foundation/random'
+import { toFlat } from 'aifn-compute/foundation/tensor'
 
 const EPISODES = 500
 const RUNS = 10

@@ -15,7 +15,7 @@ import {
 } from 'aifn-render'
 import type { PointCloud2d } from '@/generated/contracts'
 import { useFigure } from '@/lib/generated'
-import type { Vec2 as Point } from 'aifn/numerics/linalg'
+import type { Vec2 as Point } from 'aifn-compute/numerics/linalg'
 import { CENTRE_INIT_OPTIONS, type CentreInit } from '../_shared/centres'
 import { ellipse, initialise, moveMean, seek, step, type EmState } from './em'
 

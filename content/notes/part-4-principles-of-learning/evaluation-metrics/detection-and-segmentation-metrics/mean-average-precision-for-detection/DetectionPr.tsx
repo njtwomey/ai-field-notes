@@ -1,8 +1,8 @@
 import { useMemo } from 'react'
 import { Curve, Figure, formatNumber, int, Plot, Points, Readout, slider, useAxis, useFigureState } from 'aifn-render'
 import { apAllPoint, apSampled, interpolated, prCurve } from '../_shared/ap'
-import { linspace, toFlat } from 'aifn/foundation/tensor'
-import { normal, stream, uniform } from 'aifn/foundation/random'
+import { linspace, toFlat } from 'aifn-compute/foundation/tensor'
+import { normal, stream, uniform } from 'aifn-compute/foundation/random'
 
 const OBJECTS = 12
 const BACKGROUND = 6

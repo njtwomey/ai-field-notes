@@ -12,7 +12,7 @@ import {
   useAxis,
   useFigureState,
 } from 'aifn-render'
-import { normal, stream } from 'aifn/foundation/random'
+import { normal, stream } from 'aifn-compute/foundation/random'
 
 /** Rows of Q and K: n queries attend over n keys. */
 const N = 16

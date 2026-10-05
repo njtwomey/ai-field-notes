@@ -11,7 +11,7 @@ import {
   useFigureState,
 } from 'aifn-render'
 import { gaussPdf, normals } from '../_shared/sde'
-import { linspace, toFlat } from 'aifn/foundation/tensor'
+import { linspace, toFlat } from 'aifn-compute/foundation/tensor'
 
 const N = 5000
 const LO = -4

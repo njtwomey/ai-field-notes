@@ -14,8 +14,8 @@ import {
 } from 'aifn-render'
 import { sampleBeta } from '../_shared/bandits'
 import { seededRand } from '../_shared/rand'
-import { linspace, toFlat } from 'aifn/foundation/tensor'
-import { logGamma } from 'aifn/numerics/special'
+import { linspace, toFlat } from 'aifn-compute/foundation/tensor'
+import { logGamma } from 'aifn-compute/numerics/special'
 
 const HORIZON = 500
 const START_MEANS = [0.55, 0.45, 0.3]

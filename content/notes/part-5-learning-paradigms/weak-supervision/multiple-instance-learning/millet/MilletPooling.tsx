@@ -16,8 +16,8 @@ import {
   useAxis,
   useFigureState,
 } from 'aifn-render'
-import { normal, stream } from 'aifn/foundation/random'
-import { sigmoid } from 'aifn/numerics/special'
+import { normal, stream } from 'aifn-compute/foundation/random'
+import { sigmoid } from 'aifn-compute/numerics/special'
 
 const T = 240
 const MOTIF = 24

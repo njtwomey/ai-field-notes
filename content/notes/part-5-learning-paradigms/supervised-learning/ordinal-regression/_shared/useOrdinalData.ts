@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { DEFAULT_DATA, type DataSpec } from './ordinal'
-import { linspace, toFlat } from 'aifn/foundation/tensor'
+import { linspace, toFlat } from 'aifn-compute/foundation/tensor'
 
 export type Resolution = 'low' | 'medium' | 'high'
 

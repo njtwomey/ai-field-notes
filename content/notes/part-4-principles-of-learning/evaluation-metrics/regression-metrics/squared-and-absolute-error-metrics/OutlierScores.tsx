@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
 import { Button, Curve, Figure, formatNumber, Handle, Plot, Points, Readout, useAxis } from 'aifn-render'
 import { concordance, mae, mse, pearson, r2, spearman } from './scores'
-import { normal, stream } from 'aifn/foundation/random'
+import { normal, stream } from 'aifn-compute/foundation/random'
 
 const RANGE: [number, number] = [0, 12]
 // Fourteen well-predicted points: predictions scatter around the truth with standard deviation 0.5.

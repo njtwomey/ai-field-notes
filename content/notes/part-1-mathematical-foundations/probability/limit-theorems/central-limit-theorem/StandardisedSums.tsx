@@ -11,10 +11,10 @@ import {
   useAxis,
   useFigureState,
 } from 'aifn-render'
-import { normal, stream, uniform } from 'aifn/foundation/random'
-import type { Stream } from 'aifn/foundation/random'
-import { linspace, toFlat } from 'aifn/foundation/tensor'
-import { normalCdf, normalPdf } from 'aifn/numerics/special'
+import { normal, stream, uniform } from 'aifn-compute/foundation/random'
+import type { Stream } from 'aifn-compute/foundation/random'
+import { linspace, toFlat } from 'aifn-compute/foundation/tensor'
+import { normalCdf, normalPdf } from 'aifn-compute/numerics/special'
 
 type DistId = 'uniform' | 'exponential' | 'lognormal'
 

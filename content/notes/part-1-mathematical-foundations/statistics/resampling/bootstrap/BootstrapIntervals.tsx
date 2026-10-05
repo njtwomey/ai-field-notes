@@ -11,8 +11,8 @@ import {
   useAxis,
   useFigureState,
 } from 'aifn-render'
-import { normal, stream, uniform } from 'aifn/foundation/random'
-import { normalCdf, normalQuantile } from 'aifn/numerics/special'
+import { normal, stream, uniform } from 'aifn-compute/foundation/random'
+import { normalCdf, normalQuantile } from 'aifn-compute/numerics/special'
 
 type Stat = 'mean' | 'median'
 

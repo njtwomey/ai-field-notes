@@ -15,7 +15,7 @@ import {
   useAxis,
   useFigureState,
 } from 'aifn-render'
-import { normal, stream, uniform } from 'aifn/foundation/random'
+import { normal, stream, uniform } from 'aifn-compute/foundation/random'
 
 const WORDS = ['valve', 'tube', 'circuit', 'transistor', 'chip', 'software', 'network', 'data'] as const
 type Word = (typeof WORDS)[number]

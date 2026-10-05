@@ -16,7 +16,7 @@ import {
   Vectors,
 } from 'aifn-render'
 import { gaussPdf } from '../_shared/sde'
-import { linspace, toFlat } from 'aifn/foundation/tensor'
+import { linspace, toFlat } from 'aifn-compute/foundation/tensor'
 
 const XS = toFlat(linspace(-5, 5, 501))
 const DX = XS[1] - XS[0]

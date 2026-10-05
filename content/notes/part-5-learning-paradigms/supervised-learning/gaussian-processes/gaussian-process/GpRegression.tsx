@@ -24,8 +24,8 @@ import {
   samplesFromFactor,
   type KernelName,
 } from '../_shared/gp'
-import { linspace, toFlat } from 'aifn/foundation/tensor'
-import { normal, stream } from 'aifn/foundation/random'
+import { linspace, toFlat } from 'aifn-compute/foundation/tensor'
+import { normal, stream } from 'aifn-compute/foundation/random'
 
 const GRID = toFlat(linspace(-5, 5, 101))
 const X_RANGE: [number, number] = [-5, 5]

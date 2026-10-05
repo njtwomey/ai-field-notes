@@ -1,8 +1,8 @@
 import { useMemo } from 'react'
 import { Curve, Figure, float, formatNumber, int, Plot, Points, Readout, useAxis, useFigureState } from 'aifn-render'
 import { basis, fitRvm } from './rvm'
-import { linspace, toFlat } from 'aifn/foundation/tensor'
-import { normal, stream, uniform } from 'aifn/foundation/random'
+import { linspace, toFlat } from 'aifn-compute/foundation/tensor'
+import { normal, stream, uniform } from 'aifn-compute/foundation/random'
 
 const GRID = toFlat(linspace(-15, 15, 241))
 const X_RANGE: [number, number] = [-15, 15]

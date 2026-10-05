@@ -1,4 +1,4 @@
-import { normal, stream, uniform } from 'aifn/foundation/random'
+import { normal, stream, uniform } from 'aifn-compute/foundation/random'
 /**
  * Seam carving on small colour images. An image is row-major RGB in [0, 1]: channel k of pixel (r, c) is
  * `rgb[3 * (r * width + c) + k]`. Every image here has H rows; widths vary as seams are removed or inserted.

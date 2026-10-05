@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
 import { rateDistortionCurve } from 'aifn-methods/information/channels'
-import { binaryEntropy } from 'aifn/numerics/special'
-import { toFlat } from 'aifn/foundation/tensor'
+import { binaryEntropy } from 'aifn-compute/numerics/special'
+import { toFlat } from 'aifn-compute/foundation/tensor'
 import { ControlRow, Curve, Figure, formatNumber, Plot, Points, Readout, Slider, useAxis } from 'aifn-render'
 
 const h2 = (p: number) => binaryEntropy(p, 2)

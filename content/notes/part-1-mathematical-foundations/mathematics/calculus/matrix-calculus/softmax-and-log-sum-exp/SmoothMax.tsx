@@ -1,6 +1,6 @@
 import { useMemo } from 'react'
 import { Curve, Figure, float, formatNumber, Handle, Plot, Readout, useAxis, useFigureState } from 'aifn-render'
-import { linspace, toFlat } from 'aifn/foundation/tensor'
+import { linspace, toFlat } from 'aifn-compute/foundation/tensor'
 
 const XS = toFlat(linspace(-4, 4, 300))
 /** τ·log(e^{a/τ} + e^{b/τ}), computed stably by factoring out the larger term. */

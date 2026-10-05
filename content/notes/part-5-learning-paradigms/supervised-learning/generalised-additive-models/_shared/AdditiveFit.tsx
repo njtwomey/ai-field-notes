@@ -19,9 +19,9 @@ import {
   smooth,
   type Smoother,
 } from '../../regression/nonlinear-regression/_shared/splines'
-import { linspace, toFlat } from 'aifn/foundation/tensor'
-import { normal, stream } from 'aifn/foundation/random'
-import { normalCdf } from 'aifn/numerics/special'
+import { linspace, toFlat } from 'aifn-compute/foundation/tensor'
+import { normal, stream } from 'aifn-compute/foundation/random'
+import { normalCdf } from 'aifn-compute/numerics/special'
 
 const mean = (xs: readonly number[]) => xs.reduce((a, b) => a + b, 0) / xs.length
 

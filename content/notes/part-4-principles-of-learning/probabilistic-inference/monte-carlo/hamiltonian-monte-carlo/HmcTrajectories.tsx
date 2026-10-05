@@ -1,8 +1,8 @@
 import { banana, funnel, nonCentredFunnel } from 'aifn-methods/data/targets'
-import { hmc, type HmcState, type LogDensity } from 'aifn/inference/stochastic'
-import { stream } from 'aifn/foundation/random'
-import { linspace, tensor, toFlat, type Tensor } from 'aifn/foundation/tensor'
-import { trace, type Trace } from 'aifn/foundation/trace'
+import { hmc, type HmcState, type LogDensity } from 'aifn-compute/inference/stochastic'
+import { stream } from 'aifn-compute/foundation/random'
+import { linspace, tensor, toFlat, type Tensor } from 'aifn-compute/foundation/tensor'
+import { trace, type Trace } from 'aifn-compute/foundation/trace'
 import { useMemo, useState } from 'react'
 import {
   Bars,

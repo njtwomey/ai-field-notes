@@ -18,10 +18,10 @@ import {
   type ConjugatePredictive,
   type Regressed,
   type RunStats,
-} from 'aifn/inference/filtering'
-import { stream } from 'aifn/foundation/random'
-import { toFlat } from 'aifn/foundation/tensor'
-import { extend, seek, trace, type Trace } from 'aifn/foundation/trace'
+} from 'aifn-compute/inference/filtering'
+import { stream } from 'aifn-compute/foundation/random'
+import { toFlat } from 'aifn-compute/foundation/tensor'
+import { extend, seek, trace, type Trace } from 'aifn-compute/foundation/trace'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   Bars,

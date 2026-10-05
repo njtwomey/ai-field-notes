@@ -1,7 +1,7 @@
 import { useMemo } from 'react'
 import { Bars, Figure, formatNumber, Handle, int, Plot, Points, Readout, useAxis, useFigureState } from 'aifn-render'
-import { convolve } from 'aifn/foundation/convolution'
-import { tensor, toFlat } from 'aifn/foundation/tensor'
+import { convolve } from 'aifn-compute/foundation/convolution'
+import { tensor, toFlat } from 'aifn-compute/foundation/tensor'
 
 // A short input and a decaying impulse response, both starting at index 0.
 const X = [1, 2, 1.5, 0.5, -1, -0.5, 0.25]

@@ -13,7 +13,7 @@ import {
   useAxis,
   useFigureState,
 } from 'aifn-render'
-import { linspace, toFlat } from 'aifn/foundation/tensor'
+import { linspace, toFlat } from 'aifn-compute/foundation/tensor'
 import { expit, logit } from '../_shared/binormal'
 
 const P = toFlat(linspace(0.0005, 0.9995, 400))

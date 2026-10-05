@@ -15,9 +15,9 @@ import {
   useAxis,
   useFigureState,
 } from 'aifn-render'
-import { normal, stream, uniform } from 'aifn/foundation/random'
+import { normal, stream, uniform } from 'aifn-compute/foundation/random'
 import { decision, makeData, trainOcSvm, zeroContour, type Point, type Shape } from './ocsvm'
-import { linspace, toFlat } from 'aifn/foundation/tensor'
+import { linspace, toFlat } from 'aifn-compute/foundation/tensor'
 
 const SHAPES = [
   { value: 'blob' as const, label: 'one blob' },

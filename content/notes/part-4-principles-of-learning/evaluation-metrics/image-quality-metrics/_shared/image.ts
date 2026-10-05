@@ -1,4 +1,4 @@
-import { normal, stream, uniform } from 'aifn/foundation/random'
+import { normal, stream, uniform } from 'aifn-compute/foundation/random'
 /**
  * Small greyscale images (row-major Float64Array, values nominally in [0, 255]) for image-quality figures: a synthetic
  * test image, distortions tuned to a target mean squared error, and PSNR and SSIM.

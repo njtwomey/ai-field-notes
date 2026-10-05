@@ -1,6 +1,6 @@
 import { useMemo } from 'react'
 import { Bars, Figure, float, formatNumber, int, Plot, Points, Readout, useAxis, useFigureState } from 'aifn-render'
-import { normal, stream } from 'aifn/foundation/random'
+import { normal, stream } from 'aifn-compute/foundation/random'
 
 const V = 12
 const TOKENS = Array.from({ length: V }, (_, i) => i + 1)

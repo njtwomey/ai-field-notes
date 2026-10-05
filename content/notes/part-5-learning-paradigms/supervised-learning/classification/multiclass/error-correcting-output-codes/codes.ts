@@ -1,4 +1,4 @@
-import { stream, uniform } from 'aifn/foundation/random'
+import { stream, uniform } from 'aifn-compute/foundation/random'
 /**
  * Output codes for K classes and the probability that Hamming decoding recovers the true class when every binary
  * classifier is wrong independently with probability p. A code is K rows of L entries in {−1, 0, +1}.

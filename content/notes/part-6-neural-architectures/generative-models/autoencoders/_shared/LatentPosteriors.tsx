@@ -10,7 +10,7 @@ import {
   useAxis,
   useFigureState,
 } from 'aifn-render'
-import { linspace, toFlat } from 'aifn/foundation/tensor'
+import { linspace, toFlat } from 'aifn-compute/foundation/tensor'
 
 /**
  * A one-dimensional linear-Gaussian VAE with everything in closed form: prior p(z) = N(0, 1), decoder

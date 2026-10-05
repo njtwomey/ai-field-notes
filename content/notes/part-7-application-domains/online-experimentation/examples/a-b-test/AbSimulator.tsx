@@ -14,9 +14,9 @@ import {
   useAxis,
   useFigureState,
 } from 'aifn-render'
-import { stream, uniform as drawUniform } from 'aifn/foundation/random'
+import { stream, uniform as drawUniform } from 'aifn-compute/foundation/random'
 import { requiredN, sampleBinomial, twoProportionZ, zTestPower } from '../_shared/ab'
-import { normalPdf, normalQuantile } from 'aifn/numerics/special'
+import { normalPdf, normalQuantile } from 'aifn-compute/numerics/special'
 
 const SIMULATIONS = 400
 const pct = (v: number) => `${(100 * v).toFixed(2)}%`

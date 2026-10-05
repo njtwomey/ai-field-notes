@@ -13,7 +13,7 @@ import {
   useFigureState,
 } from 'aifn-render'
 import { intervalOf, softplus } from '../_shared/ordinal'
-import { linspace, toFlat } from 'aifn/foundation/tensor'
+import { linspace, toFlat } from 'aifn-compute/foundation/tensor'
 
 type Surrogate = 'hinge' | 'logistic'
 const SURROGATES = [

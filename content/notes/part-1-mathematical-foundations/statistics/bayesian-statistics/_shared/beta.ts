@@ -1,4 +1,4 @@
-import { logGamma, regularisedBeta, regularisedBetaInverse } from 'aifn/numerics/special'
+import { logGamma, regularisedBeta, regularisedBetaInverse } from 'aifn-compute/numerics/special'
 
 /** Beta(a, b) density; handles the boundary so that a U-shaped density does not produce NaN at 0 or 1. */
 export function betaPdf(x: number, a: number, b: number): number {

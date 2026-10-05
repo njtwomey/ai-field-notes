@@ -1,6 +1,6 @@
 import { useMemo } from 'react'
 import { choice, Curve, Figure, float, formatNumber, Handle, Plot, Readout, useAxis, useFigureState } from 'aifn-render'
-import { normalCdf, normalQuantile } from 'aifn/numerics/special'
+import { normalCdf, normalQuantile } from 'aifn-compute/numerics/special'
 
 type Lift = 'value' | 'rate'
 

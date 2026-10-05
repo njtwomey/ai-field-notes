@@ -1,4 +1,4 @@
-import { logGamma } from 'aifn/numerics/special'
+import { logGamma } from 'aifn-compute/numerics/special'
 /**
  * Coordinate ascent variational inference for xᵢ ~ N(μ, τ⁻¹) with the conjugate prior μ | τ ~ N(μ₀, (λ₀τ)⁻¹),
  * τ ~ Gamma(a₀, b₀) (shape, rate), following Bishop (2006, §10.1.3). The exact Normal-Gamma posterior is included for

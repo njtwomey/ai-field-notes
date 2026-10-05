@@ -1,6 +1,6 @@
 import { useMemo } from 'react'
 import { choice, Curve, Figure, float, formatNumber, Handle, Plot, Readout, useAxis, useFigureState } from 'aifn-render'
-import { linspace, toFlat } from 'aifn/foundation/tensor'
+import { linspace, toFlat } from 'aifn-compute/foundation/tensor'
 
 const P = toFlat(linspace(0.01, 1, 200))
 const VIEW = [

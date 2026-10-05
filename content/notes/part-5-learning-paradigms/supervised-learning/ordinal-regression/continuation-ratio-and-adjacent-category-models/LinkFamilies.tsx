@@ -15,8 +15,8 @@ import {
 } from 'aifn-render'
 import { useClassColors } from '../_shared/classColor'
 import { adjacentProbs, continuationProbs, cumulativeProbs } from '../_shared/ordinal'
-import { linspace, toFlat } from 'aifn/foundation/tensor'
-import { sigmoid } from 'aifn/numerics/special'
+import { linspace, toFlat } from 'aifn-compute/foundation/tensor'
+import { sigmoid } from 'aifn-compute/numerics/special'
 
 type Family = 'cumulative' | 'continuation' | 'adjacent'
 const FAMILIES = [

@@ -13,8 +13,8 @@ import {
   useFigureState,
   variants,
 } from 'aifn-render'
-import { linspace, toFlat } from 'aifn/foundation/tensor'
-import { logFactorial } from 'aifn/numerics/special'
+import { linspace, toFlat } from 'aifn-compute/foundation/tensor'
+import { logFactorial } from 'aifn-compute/numerics/special'
 
 type Fn = {
   label: string

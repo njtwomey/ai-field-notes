@@ -1,7 +1,7 @@
 import { useMemo } from 'react'
 import { Bars, Figure, formatNumber, int, Plot, Points, Readout, useAxis, useFigureState } from 'aifn-render'
-import { convolve } from 'aifn/foundation/convolution'
-import { toFlat } from 'aifn/foundation/tensor'
+import { convolve } from 'aifn-compute/foundation/convolution'
+import { toFlat } from 'aifn-compute/foundation/tensor'
 
 const X = [1, 1, 1, 1, 1, 1]
 const H = [1, 0.75, 0.5, 0.25]

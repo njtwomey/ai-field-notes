@@ -1,10 +1,10 @@
 import { useMemo, useState } from 'react'
-import { Normal } from 'aifn/probability/distributions'
+import { Normal } from 'aifn-compute/probability/distributions'
 import { clutterEp, clutterLogLikelihood, clutterPosterior, sampleClutter } from 'aifn-methods/inference/mixture-models'
-import { epLogEvidence, expectationPropagation } from 'aifn/inference/expectation-propagation'
-import { child, stream } from 'aifn/foundation/random'
-import { linspace, toFlat } from 'aifn/foundation/tensor'
-import { trace } from 'aifn/foundation/trace'
+import { epLogEvidence, expectationPropagation } from 'aifn-compute/inference/expectation-propagation'
+import { child, stream } from 'aifn-compute/foundation/random'
+import { linspace, toFlat } from 'aifn-compute/foundation/tensor'
+import { trace } from 'aifn-compute/foundation/trace'
 import {
   Figure,
   ControlGroup,

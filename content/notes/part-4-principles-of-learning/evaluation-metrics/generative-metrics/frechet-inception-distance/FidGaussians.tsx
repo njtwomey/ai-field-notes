@@ -13,7 +13,7 @@ import {
   useFigureState,
 } from 'aifn-render'
 import { frechet2d, type Cov, type Vec } from '../_shared/fid'
-import { linspace, toFlat } from 'aifn/foundation/tensor'
+import { linspace, toFlat } from 'aifn-compute/foundation/tensor'
 
 const RANGE: [number, number] = [-5, 5]
 const ANGLES = toFlat(linspace(0, 2 * Math.PI, 97))

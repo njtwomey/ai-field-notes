@@ -14,7 +14,7 @@ import {
   useFigureState,
 } from 'aifn-render'
 import { klBernoulli, klUpper } from '../_shared/bandits'
-import { linspace, toFlat } from 'aifn/foundation/tensor'
+import { linspace, toFlat } from 'aifn-compute/foundation/tensor'
 
 const GRID = toFlat(linspace(0.0005, 0.9995, 400))
 const COUNTS = Array.from({ length: 200 }, (_, i) => i + 1)

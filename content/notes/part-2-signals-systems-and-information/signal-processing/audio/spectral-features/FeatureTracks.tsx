@@ -1,7 +1,7 @@
 import { useMemo } from 'react'
 import { Curve, Figure, float, formatNumber, Plot, Readout, useAxis, useFigureState } from 'aifn-render'
 import { chirp, harmonicTone, powerSpectrogram } from '../_shared/audio'
-import { normal, stream } from 'aifn/foundation/random'
+import { normal, stream } from 'aifn-compute/foundation/random'
 
 const FS = 16000
 const LENGTH = 16000

@@ -12,7 +12,7 @@ import {
   useAxis,
   useFigureState,
 } from 'aifn-render'
-import { stream, uniform } from 'aifn/foundation/random'
+import { stream, uniform } from 'aifn-compute/foundation/random'
 
 type Vec3 = [number, number, number]
 const BOX = 1.2

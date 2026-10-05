@@ -3,10 +3,10 @@
  * analog prototypes by the bilinear transform, and group delay. Frequencies are in radians per sample, ω ∈ [0, π].
  * Results match scipy.signal (firwin, kaiserord, kaiser_beta, butter, cheby1, cheby2, group_delay).
  */
-import { angle, complexAbs, toFlat, type Tensor } from 'aifn/foundation/tensor'
-import { freqz, lfilter } from 'aifn/signal/filters'
-import { getWindow, type WindowName } from 'aifn/signal/windows'
-import { transferFunction } from 'aifn/systems'
+import { angle, complexAbs, toFlat, type Tensor } from 'aifn-compute/foundation/tensor'
+import { freqz, lfilter } from 'aifn-compute/signal/filters'
+import { getWindow, type WindowName } from 'aifn-compute/signal/windows'
+import { transferFunction } from 'aifn-compute/systems'
 
 type C = { re: number; im: number }
 const c = (re: number, im = 0): C => ({ re, im })

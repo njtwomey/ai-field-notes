@@ -11,8 +11,8 @@ import {
   useAxis,
   useFigureState,
 } from 'aifn-render'
-import { linspace, toFlat } from 'aifn/foundation/tensor'
-import { erf, logGamma } from 'aifn/numerics/special'
+import { linspace, toFlat } from 'aifn-compute/foundation/tensor'
+import { erf, logGamma } from 'aifn-compute/numerics/special'
 
 const GRID = toFlat(linspace(0.0005, 0.9995, 600))
 const erfc = (x: number) => 1 - erf(x)

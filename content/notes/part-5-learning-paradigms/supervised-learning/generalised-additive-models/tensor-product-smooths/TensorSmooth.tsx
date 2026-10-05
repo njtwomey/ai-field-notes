@@ -28,8 +28,8 @@ import {
   rowKron,
   traceSolve,
 } from '../_shared/terms-psplines'
-import { linspace, toFlat } from 'aifn/foundation/tensor'
-import { normal, stream, uniform } from 'aifn/foundation/random'
+import { linspace, toFlat } from 'aifn-compute/foundation/tensor'
+import { normal, stream, uniform } from 'aifn-compute/foundation/random'
 
 const mean = (xs: readonly number[]) => xs.reduce((a, b) => a + b, 0) / xs.length
 

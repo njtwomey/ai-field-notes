@@ -19,7 +19,7 @@ import {
   Vectors,
 } from 'aifn-render'
 import { contour, contours, quantileLevels, sampleGrid } from './contours'
-import { linspace, toFlat } from 'aifn/foundation/tensor'
+import { linspace, toFlat } from 'aifn-compute/foundation/tensor'
 
 /**
  * One objective f(x, y) and one constraint curve g(x, y) = 0 in the plane. The curve is given by a parametrisation

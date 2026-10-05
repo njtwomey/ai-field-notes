@@ -1,6 +1,6 @@
 import { dbscan as aifnDbscan, CORE } from 'aifn-methods/unsupervised/clustering'
-import { fromData, toFlat } from 'aifn/foundation/tensor'
-import { dataset } from 'aifn/learning/estimators'
+import { fromData, toFlat } from 'aifn-compute/foundation/tensor'
+import { dataset } from 'aifn-compute/learning/estimators'
 import type { Point } from '../../_shared/datasets'
 
 export type DbscanResult = { labels: number[]; core: boolean[]; clusters: number }

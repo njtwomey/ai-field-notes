@@ -14,8 +14,8 @@ import {
   useFigureState,
 } from 'aifn-render'
 import { solve } from '../_shared/splines'
-import { linspace, toFlat } from 'aifn/foundation/tensor'
-import { normal, stream, uniform } from 'aifn/foundation/random'
+import { linspace, toFlat } from 'aifn-compute/foundation/tensor'
+import { normal, stream, uniform } from 'aifn-compute/foundation/random'
 
 const N = 80
 const GRID = toFlat(linspace(0, 1, 101))

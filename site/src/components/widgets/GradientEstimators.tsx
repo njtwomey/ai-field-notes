@@ -1,7 +1,7 @@
 import { useMemo } from 'react'
-import { normal, stream } from 'aifn/foundation/random'
-import { toFlat } from 'aifn/foundation/tensor'
-import { normalCdf, normalPdf } from 'aifn/numerics/special'
+import { normal, stream } from 'aifn-compute/foundation/random'
+import { toFlat } from 'aifn-compute/foundation/tensor'
+import { normalCdf, normalPdf } from 'aifn-compute/numerics/special'
 import {
   Curve,
   Figure,

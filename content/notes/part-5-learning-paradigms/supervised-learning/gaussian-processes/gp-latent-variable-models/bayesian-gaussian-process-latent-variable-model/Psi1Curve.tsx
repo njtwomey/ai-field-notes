@@ -1,7 +1,7 @@
 import { useMemo } from 'react'
 import { Curve, Figure, float, formatNumber, Plot, Points, Readout, useAxis, useFigureState } from 'aifn-render'
-import { linspace, toFlat } from 'aifn/foundation/tensor'
-import { normal, stream } from 'aifn/foundation/random'
+import { linspace, toFlat } from 'aifn-compute/foundation/tensor'
+import { normal, stream } from 'aifn-compute/foundation/random'
 
 const GRID = toFlat(linspace(-4, 4, 161))
 const MC_AT = toFlat(linspace(-3.5, 3.5, 15))

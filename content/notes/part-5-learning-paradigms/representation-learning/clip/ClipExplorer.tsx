@@ -14,8 +14,8 @@ import {
   formatNumber,
   useAxis,
 } from 'aifn-render'
-import { stream } from 'aifn/foundation/random'
-import { slice, toFlat } from 'aifn/foundation/tensor'
+import { stream } from 'aifn-compute/foundation/random'
+import { slice, toFlat } from 'aifn-compute/foundation/tensor'
 import { pairedShapes } from 'aifn-methods/data/synthetic'
 import {
   contrastiveTrainingRun,

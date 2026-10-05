@@ -1,4 +1,4 @@
-import { normal, stream } from 'aifn/foundation/random'
+import { normal, stream } from 'aifn-compute/foundation/random'
 /**
  * Small greyscale-image helpers for the image-processing notes. An image is row-major, `img[r][c]`, with values in
  * [0, 1]. Everything here is light enough to recompute on a 64 × 64 image during a slider drag.

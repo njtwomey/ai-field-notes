@@ -17,7 +17,7 @@ import {
 import { useDerivedState } from '@/lib/use-derived-state'
 import { nearest, type P } from '../_shared/geometry'
 import { build, search } from './hnsw'
-import { stream, uniform } from 'aifn/foundation/random'
+import { stream, uniform } from 'aifn-compute/foundation/random'
 
 const N = 180
 const M = 4

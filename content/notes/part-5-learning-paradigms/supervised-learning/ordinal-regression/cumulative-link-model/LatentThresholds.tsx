@@ -16,8 +16,8 @@ import {
   type SeriesSpec,
 } from 'aifn-render'
 import { useClassColors } from '../_shared/classColor'
-import { linspace, toFlat } from 'aifn/foundation/tensor'
-import { normalCdf, normalPdf, sigmoid } from 'aifn/numerics/special'
+import { linspace, toFlat } from 'aifn-compute/foundation/tensor'
+import { normalCdf, normalPdf, sigmoid } from 'aifn-compute/numerics/special'
 
 type Link = 'logit' | 'probit'
 const LINKS = [

@@ -10,10 +10,10 @@ import {
   useAxis,
   useFigureState,
 } from 'aifn-render'
-import { convolve } from 'aifn/foundation/convolution'
-import { rfft } from 'aifn/foundation/fourier'
-import { complexAbs, toFlat } from 'aifn/foundation/tensor'
-import { getWindow } from 'aifn/signal'
+import { convolve } from 'aifn-compute/foundation/convolution'
+import { rfft } from 'aifn-compute/foundation/fourier'
+import { complexAbs, toFlat } from 'aifn-compute/foundation/tensor'
+import { getWindow } from 'aifn-compute/signal'
 
 /** Decibels, 20 log₁₀ of a magnitude, floored so zeros stay finite. */
 const db = (magnitude: number, floor: number) => Math.max(floor, 20 * Math.log10(Math.max(magnitude, 1e-300)))

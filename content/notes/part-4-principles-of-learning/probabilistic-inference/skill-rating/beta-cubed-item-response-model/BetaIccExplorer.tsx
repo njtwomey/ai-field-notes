@@ -1,7 +1,7 @@
 import { useMemo } from 'react'
 import { Area, Curve, Figure, float, formatNumber, Handle, Plot, Readout, useAxis, useFigureState } from 'aifn-render'
-import { linspace, toFlat } from 'aifn/foundation/tensor'
-import { logGamma, regularisedBeta } from 'aifn/numerics/special'
+import { linspace, toFlat } from 'aifn-compute/foundation/tensor'
+import { logGamma, regularisedBeta } from 'aifn-compute/numerics/special'
 
 const THETA = toFlat(linspace(0.005, 0.995, 100))
 const P_GRID = toFlat(linspace(0.0025, 0.9975, 200))

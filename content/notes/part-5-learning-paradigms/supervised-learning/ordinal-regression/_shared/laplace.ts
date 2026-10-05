@@ -1,5 +1,5 @@
-import { normal, stream, uniform } from 'aifn/foundation/random'
-import { normalCdf } from 'aifn/numerics/special'
+import { normal, stream, uniform } from 'aifn-compute/foundation/random'
+import { normalCdf } from 'aifn-compute/numerics/special'
 /**
  * Gaussian-process ordinal regression with the Laplace approximation (Chu & Ghahramani 2005), for one input. The
  * likelihood of class y given the latent f is Φ((b_y − f)/σ) − Φ((b_{y−1} − f)/σ), with b_{−1} = −∞ and b_{K−1} = +∞.

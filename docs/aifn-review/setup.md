@@ -1,5 +1,11 @@
 # aifn review: setup (tooling, packaging, layering, fixtures, Makefile, docs)
 
+> **Historical (2026-10-05):** the engine no longer lives in this repository. It is the aifn-engine project
+> (https://github.com/njtwomey/aifn-engine, docs at https://njtwomey.github.io/aifn-engine/), installed here as the
+> released packages `aifn-compute`, `aifn-methods` and `aifn-render`. Paths below under `aifn-js/core`, `aifn-js/methods`
+> and `aifn-js/render` refer to the old in-tree copy (now `packages/compute`, `packages/methods` and `packages/render`
+> in the engine); the lab moved from `aifn-js/sandbox/lab` to `lab/` here.
+
 Reviewer: setup agent, 2026-10-01. Scope: configuration and tooling, not library maths. Log:
 `.scratch/aifn/progress/review-setup.md`. Scratch checks: `.scratch/tmp/fixture_repro.py` (regenerates every fixture in
 memory and compares it with the committed JSON) and `.scratch/tmp/fixture_diff.py <node> [0|1]` (shows where one

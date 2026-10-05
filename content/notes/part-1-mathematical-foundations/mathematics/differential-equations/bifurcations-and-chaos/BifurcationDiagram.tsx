@@ -10,8 +10,8 @@ import {
   tentMap,
   type Map1,
 } from 'aifn-methods/dynamics/maps'
-import { histogram } from 'aifn/probability/stats'
-import { toFlat } from 'aifn/foundation/tensor'
+import { histogram } from 'aifn-compute/probability/stats'
+import { toFlat } from 'aifn-compute/foundation/tensor'
 import {
   ControlGroup,
   ControlRow,

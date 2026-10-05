@@ -13,14 +13,14 @@ import { polynomialFeatures, splineFeatures, standardScaler } from 'aifn-methods
 import { decisionTree } from 'aifn-methods/learning/trees-and-ensembles'
 import { randomForest } from 'aifn-methods/learning/trees-and-ensembles/bagging'
 import { gradientBoosting } from 'aifn-methods/learning/trees-and-ensembles/boosting'
-import { type Params } from 'aifn/foundation/pytree'
-import { stream } from 'aifn/foundation/random'
-import { fromData, toFlat, toRows, unwrap, type Tensor } from 'aifn/foundation/tensor'
-import { trace } from 'aifn/foundation/trace'
-import { pipeline } from 'aifn/learning/compose'
-import { classProbabilities, dataset, type Distribution, type Supervised } from 'aifn/learning/estimators'
-import { rbf } from 'aifn/learning/kernels'
-import { binaryCrossEntropyWithLogits } from 'aifn/learning/losses'
+import { type Params } from 'aifn-compute/foundation/pytree'
+import { stream } from 'aifn-compute/foundation/random'
+import { fromData, toFlat, toRows, unwrap, type Tensor } from 'aifn-compute/foundation/tensor'
+import { trace } from 'aifn-compute/foundation/trace'
+import { pipeline } from 'aifn-compute/learning/compose'
+import { classProbabilities, dataset, type Distribution, type Supervised } from 'aifn-compute/learning/estimators'
+import { rbf } from 'aifn-compute/learning/kernels'
+import { binaryCrossEntropyWithLogits } from 'aifn-compute/learning/losses'
 import {
   binaryRates,
   brierScore,
@@ -28,14 +28,14 @@ import {
   logLoss,
   precisionRecallCurve,
   rocCurve,
-} from 'aifn/learning/metrics'
-import { Mlp } from 'aifn/nn/layers'
-import { xavierUniform } from 'aifn/nn/init'
-import { trainingLoop } from 'aifn/nn/training'
-import { contourLines, grid2d } from 'aifn/numerics/geometry'
-import { logit, sigmoid } from 'aifn/numerics/special'
-import { adamRule } from 'aifn/optim/first-order'
-import { histogram } from 'aifn/probability/stats'
+} from 'aifn-compute/learning/metrics'
+import { Mlp } from 'aifn-compute/nn/layers'
+import { xavierUniform } from 'aifn-compute/nn/init'
+import { trainingLoop } from 'aifn-compute/nn/training'
+import { contourLines, grid2d } from 'aifn-compute/numerics/geometry'
+import { logit, sigmoid } from 'aifn-compute/numerics/special'
+import { adamRule } from 'aifn-compute/optim/first-order'
+import { histogram } from 'aifn-compute/probability/stats'
 import {
   Bars,
   ControlGroup,

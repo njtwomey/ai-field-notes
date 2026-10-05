@@ -11,7 +11,7 @@ import {
   useAxis,
   useFigureState,
 } from 'aifn-render'
-import { linspace, toFlat } from 'aifn/foundation/tensor'
+import { linspace, toFlat } from 'aifn-compute/foundation/tensor'
 
 // Rubin's (1981) eight schools: estimated coaching effects y_j and their standard errors σ_j, in SAT points.
 const Y = [28, 8, -3, 7, -1, 1, 18, 12]

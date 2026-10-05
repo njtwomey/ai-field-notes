@@ -12,8 +12,8 @@ import {
   useFigureState,
   type Vec2,
 } from 'aifn-render'
-import { linspace, toFlat } from 'aifn/foundation/tensor'
-import { stream, uniform } from 'aifn/foundation/random'
+import { linspace, toFlat } from 'aifn-compute/foundation/tensor'
+import { stream, uniform } from 'aifn-compute/foundation/random'
 
 /** Bands of u₁ that map to rings of the Gaussian plane: small u₁ gives a large radius. */
 const BANDS = [1 / 3, 2 / 3, 1]

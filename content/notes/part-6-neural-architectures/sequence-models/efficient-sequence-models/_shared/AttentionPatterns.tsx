@@ -1,6 +1,6 @@
 import { useMemo } from 'react'
 import { choice, Figure, formatNumber, int, Plot, Raster, Readout, setting, useAxis, useFigureState } from 'aifn-render'
-import { stream, uniform } from 'aifn/foundation/random'
+import { stream, uniform } from 'aifn-compute/foundation/random'
 
 export type Pattern = 'full' | 'sliding' | 'dilated' | 'strided' | 'longformer' | 'bigbird'
 

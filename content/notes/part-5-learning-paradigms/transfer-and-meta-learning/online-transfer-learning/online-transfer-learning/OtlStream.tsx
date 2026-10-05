@@ -13,7 +13,7 @@ import {
   useAxis,
   useFigureState,
 } from 'aifn-render'
-import { stream, uniform } from 'aifn/foundation/random'
+import { stream, uniform } from 'aifn-compute/foundation/random'
 
 // Homogeneous online transfer learning (Zhao & Hoi, 2010) on a stream of 2-D points. The source classifier h is a
 // fixed line; the target learner f is a linear passive-aggressive classifier; the ensemble mixes the two with

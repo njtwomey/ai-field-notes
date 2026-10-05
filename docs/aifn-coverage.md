@@ -1,5 +1,11 @@
 # aifn coverage of the field notes
 
+> **Historical (2026-10-05):** the engine no longer lives in this repository. It is the aifn-engine project
+> (https://github.com/njtwomey/aifn-engine, docs at https://njtwomey.github.io/aifn-engine/), installed here as the
+> released packages `aifn-compute`, `aifn-methods` and `aifn-render`. Paths below under `aifn-js/core`, `aifn-js/methods`
+> and `aifn-js/render` refer to the old in-tree copy (now `packages/compute`, `packages/methods` and `packages/render`
+> in the engine); the lab moved from `aifn-js/sandbox/lab` to `lab/` here.
+
 Survey of 2026-10-01. Read-only: no code changed. It asks what aifn (core `aifn`, applications `aifn-methods`) and the
 lab still lack in order to give every note an interactive exposition. Sources: the 1,223 `content/notes/**/index.mdx`
 files, `aifn-js/generated/catalog.json` (721 entries), `aifn-js/modules.json`, the aifn source tree, the lab

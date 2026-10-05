@@ -1,8 +1,8 @@
 import { useMemo, useState } from 'react'
 import { Bars, ControlRow, Figure, Plot, Plots, Readout, Select, formatNumber, useAxis } from 'aifn-render'
-import { normals, stream } from 'aifn/foundation/random'
-import { fromData, toFlat, type Tensor } from 'aifn/foundation/tensor'
-import { exactShapley, interventionalValue, kernelShap, lime, type ScalarModel } from 'aifn/learning/explain'
+import { normals, stream } from 'aifn-compute/foundation/random'
+import { fromData, toFlat, type Tensor } from 'aifn-compute/foundation/tensor'
+import { exactShapley, interventionalValue, kernelShap, lime, type ScalarModel } from 'aifn-compute/learning/explain'
 
 const METHODS = [
   { value: 'exactshap', label: 'Exact Shapley (all 2⁶ coalitions)' },

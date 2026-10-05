@@ -14,8 +14,8 @@ import {
   useFigureState,
 } from 'aifn-render'
 import { addDiagonal, cholesky, gram, makeKernel, samplesFromFactor, type Kernel } from '../_shared/gp'
-import { linspace, toFlat } from 'aifn/foundation/tensor'
-import { normal, stream } from 'aifn/foundation/random'
+import { linspace, toFlat } from 'aifn-compute/foundation/tensor'
+import { normal, stream } from 'aifn-compute/foundation/random'
 
 type KernelName =
   'se' | 'matern12' | 'matern32' | 'matern52' | 'rq' | 'periodic' | 'linear' | 'se-x-periodic' | 'se-plus-linear'

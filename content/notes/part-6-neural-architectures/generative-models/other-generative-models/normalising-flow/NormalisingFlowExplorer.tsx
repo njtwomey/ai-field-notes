@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { ControlRow, Figure, Plot, Plots, Points, Raster, Readout, Select, formatNumber, useAxis } from 'aifn-render'
-import { stream } from 'aifn/foundation/random'
+import { stream } from 'aifn-compute/foundation/random'
 import { moons, pinwheel, spirals, gaussianRing } from 'aifn-methods/data/synthetic'
 import { realNvpRun, type RealNvpCheckpoint, type RealNvpRun } from 'aifn-methods/generative/flows'
 

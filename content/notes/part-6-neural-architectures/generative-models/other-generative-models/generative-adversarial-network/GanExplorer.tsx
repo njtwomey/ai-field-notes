@@ -13,10 +13,10 @@ import {
   formatNumber,
   useAxis,
 } from 'aifn-render'
-import { stream } from 'aifn/foundation/random'
+import { stream } from 'aifn-compute/foundation/random'
 import { gaussianRing, moons, pinwheel, spirals } from 'aifn-methods/data/synthetic'
 import { ganRun, type GanCheckpoint, type GanRun } from 'aifn-methods/generative/gan'
-import type { AdversarialGame } from 'aifn/learning/losses'
+import type { AdversarialGame } from 'aifn-compute/learning/losses'
 
 const DATASETS = [
   { value: 'ring', label: '8 Gaussians on a ring (mode collapse test)' },

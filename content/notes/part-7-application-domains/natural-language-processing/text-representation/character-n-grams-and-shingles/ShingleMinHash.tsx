@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
 import { choice, Curve, Figure, formatNumber, int, Plot, Readout, Textarea, useAxis, useFigureState } from 'aifn-render'
 import { jaccard, minhash, shingles } from '../_shared/text'
-import { stream, uniform } from 'aifn/foundation/random'
+import { stream, uniform } from 'aifn-compute/foundation/random'
 
 const PRESETS = {
   rose: { label: 'a rose', a: 'a rose is a rose is a rose', b: 'a rose is a flower which is a rose' },

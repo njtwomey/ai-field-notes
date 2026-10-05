@@ -1,5 +1,5 @@
-import { normal, stream, type Stream, uniform } from 'aifn/foundation/random'
-import { logGamma } from 'aifn/numerics/special'
+import { normal, stream, type Stream, uniform } from 'aifn-compute/foundation/random'
+import { logGamma } from 'aifn-compute/numerics/special'
 
 export const V = 9
 export const K = 6

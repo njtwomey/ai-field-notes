@@ -1,4 +1,4 @@
-import { normal, stream, uniform } from 'aifn/foundation/random'
+import { normal, stream, uniform } from 'aifn-compute/foundation/random'
 /** Seeded toy data sets for the unsupervised-learning widgets. */
 
 export type Point = [number, number]

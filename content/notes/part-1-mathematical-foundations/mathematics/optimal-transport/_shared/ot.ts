@@ -2,8 +2,8 @@ import {
   sinkhorn as aifnSinkhorn,
   monotonePlan as aifnMonotonePlan,
   wasserstein1d as aifnWasserstein1d,
-} from 'aifn/transport'
-import { fromData, toFlat, toRows } from 'aifn/foundation/tensor'
+} from 'aifn-compute/transport'
+import { fromData, toFlat, toRows } from 'aifn-compute/foundation/tensor'
 
 export type Pt = [number, number]
 

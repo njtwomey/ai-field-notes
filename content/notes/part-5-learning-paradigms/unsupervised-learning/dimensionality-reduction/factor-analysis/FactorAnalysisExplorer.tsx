@@ -15,10 +15,10 @@ import {
 } from 'aifn-render'
 import { latentFactors, latentFactorModel } from 'aifn-methods/data/synthetic'
 import { factorAnalysis, probabilisticPca, latentGaussianSteps } from 'aifn-methods/unsupervised/embedding/linear'
-import { dataset } from 'aifn/learning/estimators'
-import { stream } from 'aifn/foundation/random'
-import { toFlat, type Tensor } from 'aifn/foundation/tensor'
-import { trace } from 'aifn/foundation/trace'
+import { dataset } from 'aifn-compute/learning/estimators'
+import { stream } from 'aifn-compute/foundation/random'
+import { toFlat, type Tensor } from 'aifn-compute/foundation/tensor'
+import { trace } from 'aifn-compute/foundation/trace'
 
 export function FactorAnalysisExplorer() {
   const [n, setN] = useState(400)

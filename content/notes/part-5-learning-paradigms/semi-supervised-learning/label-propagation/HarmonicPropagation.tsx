@@ -1,6 +1,6 @@
 import { useMemo } from 'react'
 import { Figure, float, formatNumber, int, Plot, Points, Readout, useAxis, useFigureState } from 'aifn-render'
-import { normal, stream, uniform } from 'aifn/foundation/random'
+import { normal, stream, uniform } from 'aifn-compute/foundation/random'
 
 const PER_CLASS = 150
 const NOISE = 0.1

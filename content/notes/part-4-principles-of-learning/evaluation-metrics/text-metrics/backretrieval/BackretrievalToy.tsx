@@ -17,7 +17,7 @@ import {
   type Vec2,
   Vectors,
 } from 'aifn-render'
-import { normal, stream } from 'aifn/foundation/random'
+import { normal, stream } from 'aifn-compute/foundation/random'
 
 const RANGE: [number, number] = [-3.5, 3.5]
 const UNIT: [number, number] = [0, 1]

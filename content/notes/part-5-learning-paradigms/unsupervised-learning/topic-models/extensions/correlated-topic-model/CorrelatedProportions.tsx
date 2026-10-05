@@ -1,10 +1,10 @@
 import { useMemo } from 'react'
 import { Figure, formatNumber, Plot, Points, Readout, slider, useAxis, useFigureState } from 'aifn-render'
-import { normal, stream } from 'aifn/foundation/random'
-import { tensor, toFlat } from 'aifn/foundation/tensor'
-import { softmax } from 'aifn/numerics/special'
-import { dirichlet } from 'aifn/probability/samplers'
-import { correlation } from 'aifn/probability/stats'
+import { normal, stream } from 'aifn-compute/foundation/random'
+import { tensor, toFlat } from 'aifn-compute/foundation/tensor'
+import { softmax } from 'aifn-compute/numerics/special'
+import { dirichlet } from 'aifn-compute/probability/samplers'
+import { correlation } from 'aifn-compute/probability/stats'
 
 const K = 5
 const SAMPLES = 400

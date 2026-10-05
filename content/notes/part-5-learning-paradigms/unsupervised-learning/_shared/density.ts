@@ -1,5 +1,5 @@
-import { normal, stream, uniform } from 'aifn/foundation/random'
-import { normalPdf } from 'aifn/numerics/special'
+import { normal, stream, uniform } from 'aifn-compute/foundation/random'
+import { normalPdf } from 'aifn-compute/numerics/special'
 /** A bimodal test density for the density-estimation widgets, with samplers and summary statistics. */
 
 /** 0.7 N(0, 1) + 0.3 N(3, 0.5²): a broad mode and a narrow one, so no single bandwidth suits both. */

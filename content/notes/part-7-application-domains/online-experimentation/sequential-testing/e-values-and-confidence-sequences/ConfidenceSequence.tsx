@@ -13,8 +13,8 @@ import {
   useAxis,
   useFigureState,
 } from 'aifn-render'
-import { normal, stream } from 'aifn/foundation/random'
-import { normalQuantile } from 'aifn/numerics/special'
+import { normal, stream } from 'aifn-compute/foundation/random'
+import { normalQuantile } from 'aifn-compute/numerics/special'
 
 const N = 2000
 const STREAMS = 200

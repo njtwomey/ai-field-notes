@@ -1,5 +1,11 @@
 # aifn core review, area 3: the remaining core families
 
+> **Historical (2026-10-05):** the engine no longer lives in this repository. It is the aifn-engine project
+> (https://github.com/njtwomey/aifn-engine, docs at https://njtwomey.github.io/aifn-engine/), installed here as the
+> released packages `aifn-compute`, `aifn-methods` and `aifn-render`. Paths below under `aifn-js/core`, `aifn-js/methods`
+> and `aifn-js/render` refer to the old in-tree copy (now `packages/compute`, `packages/methods` and `packages/render`
+> in the engine); the lab moved from `aifn-js/sandbox/lab` to `lab/` here.
+
 Scope: `aifn-js/core/src/{inference,dynamics,signal,systems,transport,learning,nn,text,interpreter}` and their tests
 (about 40k lines). Reviewer log: `.scratch/aifn/progress/review-models.md`. Every finding below was confirmed by a
 scratch check (`.scratch/tmp/review-models/p1–p6.test.ts`) or by a precise argument. Items already open in

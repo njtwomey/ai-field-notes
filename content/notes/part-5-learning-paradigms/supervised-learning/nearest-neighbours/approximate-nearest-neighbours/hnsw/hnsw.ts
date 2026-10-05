@@ -1,6 +1,6 @@
 /** A small HNSW (Malkov and Yashunin, Algorithms 1 to 5) in 2-D, instrumented to record a query's search path. */
 import { dist2, type P } from '../_shared/geometry'
-import { stream, uniform } from 'aifn/foundation/random'
+import { stream, uniform } from 'aifn-compute/foundation/random'
 
 export type Hnsw = {
   points: P[]

@@ -8,10 +8,10 @@
  * space-partitioning category.
  */
 import { useMemo, useState, type ReactNode } from 'react'
-import { stream, type Stream } from 'aifn/foundation/random'
-import { fromData, toRows, type Tensor } from 'aifn/foundation/tensor'
-import { treeFromParents } from 'aifn/graph'
-import { ballTree, kdTree, treeQuery, vpTree, type SpaceTree } from 'aifn/numerics/neighbours'
+import { stream, type Stream } from 'aifn-compute/foundation/random'
+import { fromData, toRows, type Tensor } from 'aifn-compute/foundation/tensor'
+import { treeFromParents } from 'aifn-compute/graph'
+import { ballTree, kdTree, treeQuery, vpTree, type SpaceTree } from 'aifn-compute/numerics/neighbours'
 import { anisotropicBlobs, blobs, circles, moons, spirals, swissRoll2d, xor } from 'aifn-methods/data/synthetic'
 import {
   choice,

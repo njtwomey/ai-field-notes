@@ -1,7 +1,7 @@
 import { useMemo } from 'react'
 import { Curve, Figure, formatNumber, Plot, Points, Readout, slider, useAxis, useFigureState } from 'aifn-render'
 import { rocExample } from '../../_shared/rocExample'
-import { linspace, toFlat } from 'aifn/foundation/tensor'
+import { linspace, toFlat } from 'aifn-compute/foundation/tensor'
 
 /**
  * The same classifier in precision-recall space and in precision-recall-gain space, at a chosen prevalence π. The

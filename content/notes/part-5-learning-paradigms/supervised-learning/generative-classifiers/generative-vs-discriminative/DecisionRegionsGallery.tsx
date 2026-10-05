@@ -1,9 +1,9 @@
 import { useMemo, useState } from 'react'
-import { dataset, classProbabilities, hasPredictive, type Distribution } from 'aifn/learning/estimators'
-import { fromData, toFlat, toRows, type Tensor } from 'aifn/foundation/tensor'
-import { stream } from 'aifn/foundation/random'
-import { grid2d } from 'aifn/numerics/geometry'
-import { rbf } from 'aifn/learning/kernels'
+import { dataset, classProbabilities, hasPredictive, type Distribution } from 'aifn-compute/learning/estimators'
+import { fromData, toFlat, toRows, type Tensor } from 'aifn-compute/foundation/tensor'
+import { stream } from 'aifn-compute/foundation/random'
+import { grid2d } from 'aifn-compute/numerics/geometry'
+import { rbf } from 'aifn-compute/learning/kernels'
 import { blobs, moons, circles, xor } from 'aifn-methods/data/synthetic'
 import {
   gaussianNaiveBayes,

@@ -1,6 +1,6 @@
 import { useMemo } from 'react'
 import { Curve, Figure, float, formatNumber, int, Plot, Points, Readout, useAxis, useFigureState } from 'aifn-render'
-import { Binomial } from 'aifn/probability/distributions'
+import { Binomial } from 'aifn-compute/probability/distributions'
 
 /** P(S ≥ k) for S ~ Binomial(n, p). */
 const binomialUpper = (k: number, n: number, p: number) => Binomial(n, p).survival(k - 1) as number

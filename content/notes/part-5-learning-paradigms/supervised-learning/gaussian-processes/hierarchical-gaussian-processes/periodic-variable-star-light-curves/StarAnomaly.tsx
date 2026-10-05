@@ -13,7 +13,7 @@ import {
 } from 'aifn-render'
 import { gram, makeKernel, samples } from '../../_shared/gp'
 import { anomalyScore, classModel } from '../_shared/hgp'
-import { normal as drawNormal, stream } from 'aifn/foundation/random'
+import { normal as drawNormal, stream } from 'aifn-compute/foundation/random'
 
 const T = 40
 const PHASE = Array.from({ length: T }, (_, i) => i / T)

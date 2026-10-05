@@ -14,7 +14,7 @@ import {
 } from 'aifn-render'
 import { useClassColors } from '../_shared/classColor'
 import { softplus } from '../_shared/ordinal'
-import { sigmoid } from 'aifn/numerics/special'
+import { sigmoid } from 'aifn-compute/numerics/special'
 
 /** The worked example: class k (1-based) sits at score k − 1; classes 1, 3 and 4 have three examples each. */
 const SCORES = [0, 1, 2, 3]

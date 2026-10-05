@@ -28,7 +28,8 @@ make install     # npm install + uv sync
 make dev         # Vite dev server → http://localhost:5173/ai-field-notes/
 make assets      # contracts + run examples + build figure data (cached) + manifest
 make contracts   # pydantic → JSON Schema → site/src/generated/contracts.ts
-make check       # doctor, lint, typecheck, tests, registry check, contract drift
+make check       # doctor + make ci; run before every push
+make ci          # lint, typecheck, tests, catalog and registry checks, contract drift (what CI runs; no doctor)
 make doctor      # content tree: slugs, folders vs taxonomy, figure/example ids, cross-note imports
 make build       # assets + production build into dist/
 make format      # prettier + ruff + note prose rewrap
@@ -71,7 +72,8 @@ make doctor SCOPE="maths/optimal-transport kalman-filter"  # doctor for one bran
 - Scope the doctor to the work in hand. Compiling every note's MDX and rendering its maths is what makes a full run
   slow (about a minute), so `make doctor SCOPE="<taxonomy path | slug> ..."` checks only the notes under those paths
   or with those slugs (seconds); whole-tree checks that are cheap still run. Changes confined to one branch of the
-  taxonomy need only that branch. Before a push, `make check` runs everything unscoped, as CI and the deploy do.
+  taxonomy need only that branch. Before every push, run `make check` (the doctor unscoped plus `make ci`) and
+  `npm run build`: CI runs only `make ci` and the build, not the doctor.
 - `plugins/content-index.ts` (Vite plugin) reads every note's frontmatter and validates it with zod schemas from
   `site/src/lib/content-schema.ts`. It checks categories, relation slugs, `<NoteLink to>` targets, `<Cite id>` keys and
   `<Gloss name>` names. Any error fails dev and build with the offending file named. It exposes two virtual modules:
@@ -147,6 +149,26 @@ python/mlc/core/contracts.py ──mlc schema──▶ contracts.schema.json ─
 - **Caching:** a run or figure rebuilds only when the hash of its sources, `mlc.core`, `uv.lock` and its arguments
   changes. Generated assets are **committed**. CI does not re-run examples; it only checks that they are current.
 
+### The engine: aifn-compute, aifn-methods, aifn-render
+
+The figure engine is the aifn-engine project (https://github.com/njtwomey/aifn-engine, docs at
+https://njtwomey.github.io/aifn-engine/), installed as three packages from its GitHub release tarballs (pinned in
+`package.json`): `aifn-compute` (numerics, models, autodiff), `aifn-methods` (named methods, datasets, environments)
+and `aifn-render` (figures, controls, diagrams, state). Import them by name and only through their `exports`; there are
+no aliases or tsconfig paths for them. Upgrade by changing the three URLs together.
+
+- There must be one copy each of `react`, `aifn-compute` and `aifn-methods` (`npm ls react aifn-compute aifn-methods`):
+  compute registers its primitives on import and throws on a second registration.
+- Worker-backed figures (`useComputed` with `mode: 'worker'`, `GymTrainer`) start `aifn-render`'s
+  `state/compute.worker.js`, which Vite bundles; nothing is configured here.
+- `make catalog-check` (in `make check`) imports every module in the two packages' `exports` and checks that each
+  registry entry's `notes` slugs, `glossary` keys and `cite` keys exist in `content/`. The engine cannot check these.
+- The engine's own lints, tests, examples gallery and Python golden fixtures live in the engine repository.
+- **The lab** (`lab/`, `make lab` → http://localhost:5190/, `make lab-check`, `make lab-shots`) is a standalone explorer
+  of the engine and a consumer of the packages like the site. It imports its own folder as `@lab/*` and never imports
+  the site. An engine internal it needs that the packages do not export is copied into `lab/src/drawing/` until the
+  engine exports it.
+
 ### Contracts: generated, never mirrored by hand
 
 `python/mlc/core/contracts.py` is the only definition of every shape that crosses from Python to the site. TypeScript
@@ -214,9 +236,10 @@ stale.
   `useFigureState` per figure (`slider`, `int`, `float`, `choice`, `setting`, `toggle` fields: control rows, URL state,
   reset), `Plot` with `useAxis` models and layers (`Curve`, `Points`, `Bars`, `Area`, `Raster`, `Contours`, `Density`,
   `Mass`, `Histogram`, `Segments`, `Vectors`, `Annotation`, …), `Plots` for shared axes, `Player` for walk-throughs and
-  `Readout`. Maths comes from `aifn` (`aifn/...`), never site-local code. The legacy `XYChart`, `Heatmap`,
-  `Interactive`, `Param*` and the site maths (`@/lib/math`, `@/lib/dsp`, `@/lib/distributions`) are removed;
-  `make doctor` fails on any import of them (`aifn-js/render/MIGRATING-NOTES.md` maps old to new).
+  `Readout`. Maths comes from `aifn-compute` (`aifn-compute/...`) and `aifn-methods`, never site-local code. The
+  legacy `XYChart`, `Heatmap`, `Interactive`, `Param*` and the site maths (`@/lib/math`, `@/lib/dsp`,
+  `@/lib/distributions`) are removed; `make doctor` fails on any import of them (the migration notes in the engine
+  docs, https://njtwomey.github.io/aifn-engine/, map old to new).
 - Data colours follow `design/palette.json`:
   - Categorical slots are assigned in fixed order by entity, never by rank, never cycled. Pass `slot` explicitly when
     series can be toggled, so that colours do not shift.
@@ -241,9 +264,12 @@ stale.
 - A walk-through (iterations, updates, sweeps, steps, frames) computes its trace up front and scrubs it with one
   `Player` per figure, opening at step 0. Sliders step by default.
 - In-browser computation must stay light enough for slider drags. Seeded randomness uses `stream(seed)` from
-  `aifn/foundation/random`, never `Math.random`. Anything heavier becomes a Python `@figure` builder.
+  `aifn-compute/foundation/random`, never `Math.random`. Anything heavier becomes a Python `@figure` builder.
 - Tailwind generates only the classes it finds. `site/src/index.css` has `@source '../../content'` so that classes used
-  in note widgets exist. Any new directory holding TSX outside `site/` needs its own `@source`.
+  in note widgets exist, and `@source '../../node_modules/aifn-render'` for the engine's components. Any new directory
+  holding TSX outside `site/` needs its own `@source`. The site keeps its own design tokens rather than importing
+  `aifn-render/theme.css`: it defines tokens the theme lacks (`--provenance`, `--chart-*`) and its dark sidebar colours
+  differ.
 - **Diagrams are not charts.** Architecture diagrams, flow charts and graphical models use `Diagram`
   (`site/src/components/diagram/`): a hand-specified SVG diagram, not auto-layout. Nodes are placed on a grid (centres,
   grid units), groups are drawn around nodes or at rectangles (plates are groups labelled bottom-right), and edges are
@@ -368,7 +394,8 @@ Frontmatter (validated; see `site/src/lib/content-schema.ts`): `title`, `kind`, 
 - `base: '/ai-field-notes/'` in `vite.config.ts` is the only place the path is set. The router and generated-asset URLs
   derive it from `import.meta.env.BASE_URL`.
 - The build copies `index.html` to `404.html` so that GitHub Pages serves deep links to the SPA.
-- `.github/workflows/deploy.yml` runs `make check` and `npm run build`, then publishes `dist/` to Pages.
+- `.github/workflows/deploy.yml` runs `make ci` (everything in `make check` except the slow doctor, which runs locally
+  before each push) and `npm run build`, then publishes `dist/` to Pages.
 
 ## Gotchas
 

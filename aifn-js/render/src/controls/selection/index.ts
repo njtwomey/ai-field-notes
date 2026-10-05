@@ -1,6 +1,0 @@
-export { Select, type SelectProps } from './Select'
-export { Combobox, type ComboboxProps } from './Combobox'
-export { MultiCombobox, type MultiComboboxProps } from './MultiCombobox'
-export { Choice, SEARCHABLE_FROM, type ChoiceProps } from './Choice'
-export { normalise, type NormalOption, type Option, type Options } from './options'
-export { Segmented, type SegmentedProps } from './Segmented'

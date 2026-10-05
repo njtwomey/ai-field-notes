@@ -15,8 +15,8 @@ import {
   useFigureState,
 } from 'aifn-render'
 import { scores, type Scores } from '../_shared/partitions'
-import { linspace, toFlat } from 'aifn/foundation/tensor'
-import { normal, stream, uniform } from 'aifn/foundation/random'
+import { linspace, toFlat } from 'aifn-compute/foundation/tensor'
+import { normal, stream, uniform } from 'aifn-compute/foundation/random'
 
 type Mode = 'noise' | 'merge' | 'split'
 

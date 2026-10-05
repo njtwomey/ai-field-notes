@@ -1,5 +1,5 @@
 import { oneClassSvm, oneClassScore, type OneClassModel } from 'aifn-methods/unsupervised/anomaly'
-import { fromData } from 'aifn/foundation/tensor'
+import { fromData } from 'aifn-compute/foundation/tensor'
 
 export type Point = [number, number]
 

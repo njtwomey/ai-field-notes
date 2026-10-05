@@ -6,7 +6,7 @@
  * h_l = h_{l-1} + α (gain / √n) W_l φ(h_{l-1}), whose branch output has mean zero. The backward pass starts from a
  * random N(0, 1) gradient at the top and applies the chain rule down to the input. No biases.
  */
-import { normal, stream } from 'aifn/foundation/random'
+import { normal, stream } from 'aifn-compute/foundation/random'
 
 export const WIDTH = 128
 export const BATCH = 32

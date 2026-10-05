@@ -12,9 +12,9 @@ import {
   useFigureState,
   Vectors,
 } from 'aifn-render'
-import { linspace, toFlat } from 'aifn/foundation/tensor'
-import { normal, stream } from 'aifn/foundation/random'
-import { regularisedGammaP } from 'aifn/numerics/special'
+import { linspace, toFlat } from 'aifn-compute/foundation/tensor'
+import { normal, stream } from 'aifn-compute/foundation/random'
+import { regularisedGammaP } from 'aifn-compute/numerics/special'
 
 const BINS = 10
 const GRID = toFlat(linspace(-4, 4, 161))

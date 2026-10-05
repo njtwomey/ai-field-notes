@@ -1,6 +1,6 @@
 import { useMemo } from 'react'
 import { Figure, formatNumber, int, Plot, Raster, Readout, slider, useAxis, useFigureState } from 'aifn-render'
-import { logFactorial } from 'aifn/numerics/special'
+import { logFactorial } from 'aifn-compute/numerics/special'
 
 /** The joint pmf of a three-category multinomial, over the counts of the first two categories. */
 export function MultinomialSimplex() {

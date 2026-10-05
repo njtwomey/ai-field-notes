@@ -1,4 +1,4 @@
-import { normal, stream, uniform } from 'aifn/foundation/random'
+import { normal, stream, uniform } from 'aifn-compute/foundation/random'
 /**
  * Small numerical helpers shared by the stochastic-calculus widgets: Gaussian densities, histograms, Euler–Maruyama
  * paths, and the variance-preserving (Ornstein–Uhlenbeck) noising of a two-mode Gaussian mixture, whose density and

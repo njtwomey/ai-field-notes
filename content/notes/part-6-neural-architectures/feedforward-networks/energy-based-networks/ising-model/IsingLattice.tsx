@@ -18,7 +18,7 @@ import {
   useFigureState,
   variants,
 } from 'aifn-render'
-import { stream, uniform as drawUniform } from 'aifn/foundation/random'
+import { stream, uniform as drawUniform } from 'aifn-compute/foundation/random'
 import { PlayButton } from '../_shared/Playback'
 import { usePlayLoop } from '../_shared/usePlayLoop'
 import {
@@ -35,7 +35,7 @@ import {
   type Rule,
   type SpinUpdate,
 } from '../_shared/spins'
-import { linspace, toFlat } from 'aifn/foundation/tensor'
+import { linspace, toFlat } from 'aifn-compute/foundation/tensor'
 
 const L = 64
 const HISTORY = 1500

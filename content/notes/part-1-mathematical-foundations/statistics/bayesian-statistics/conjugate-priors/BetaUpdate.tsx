@@ -1,7 +1,7 @@
 import { useMemo } from 'react'
 import { Area, Curve, Figure, formatNumber, int, Plot, Readout, slider, useAxis, useFigureState } from 'aifn-render'
 import { betaPdf, betaQuantile } from '../_shared/beta'
-import { linspace, toFlat } from 'aifn/foundation/tensor'
+import { linspace, toFlat } from 'aifn-compute/foundation/tensor'
 
 const GRID = toFlat(linspace(0.001, 0.999, 400))
 

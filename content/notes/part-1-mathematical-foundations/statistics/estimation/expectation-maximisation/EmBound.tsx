@@ -13,7 +13,7 @@ import {
   useFigureState,
 } from 'aifn-render'
 import { iterate, linkage, mixture, rate, type EmProblem } from './problems'
-import { linspace, toFlat } from 'aifn/foundation/tensor'
+import { linspace, toFlat } from 'aifn-compute/foundation/tensor'
 
 const PROBLEMS = { linkage, mixture }
 type Name = keyof typeof PROBLEMS

@@ -1,6 +1,6 @@
 import { useMemo } from 'react'
 import { Curve, Figure, float, formatNumber, Plot, Readout, useAxis, useFigureState } from 'aifn-render'
-import { stream, type Stream, uniform } from 'aifn/foundation/random'
+import { stream, type Stream, uniform } from 'aifn-compute/foundation/random'
 
 const N = 5
 const EPISODES = 100

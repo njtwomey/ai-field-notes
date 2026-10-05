@@ -1,7 +1,7 @@
 import { useMemo } from 'react'
 import { Curve, Figure, float, formatNumber, Handle, Plot, Readout, slider, useAxis, useFigureState } from 'aifn-render'
 import { auroc, averagePrecision, metricsAt } from '../_shared/binormal'
-import { linspace, toFlat } from 'aifn/foundation/tensor'
+import { linspace, toFlat } from 'aifn-compute/foundation/tensor'
 
 const LOG_PI = toFlat(linspace(-3, Math.log10(0.5), 70))
 

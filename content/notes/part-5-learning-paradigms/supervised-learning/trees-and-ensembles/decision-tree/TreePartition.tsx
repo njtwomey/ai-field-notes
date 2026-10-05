@@ -12,8 +12,8 @@ import {
   useFigureState,
 } from 'aifn-render'
 import { countLeaves, fitTree, predictTree, type Criterion } from '../_shared/trees'
-import { linspace, toFlat } from 'aifn/foundation/tensor'
-import { stream, uniform } from 'aifn/foundation/random'
+import { linspace, toFlat } from 'aifn-compute/foundation/tensor'
+import { stream, uniform } from 'aifn-compute/foundation/random'
 
 const N_TRAIN = 300
 const N_TEST = 2000

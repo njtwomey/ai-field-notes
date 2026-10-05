@@ -17,8 +17,8 @@ import {
   useFigureState,
 } from 'aifn-render'
 import { bsplineRow, evaluate, makeBasis, penalise, smooth } from './splines'
-import { linspace, toFlat } from 'aifn/foundation/tensor'
-import { normal, stream, uniform } from 'aifn/foundation/random'
+import { linspace, toFlat } from 'aifn-compute/foundation/tensor'
+import { normal, stream, uniform } from 'aifn-compute/foundation/random'
 
 const N = 80
 const NOISE = 0.3

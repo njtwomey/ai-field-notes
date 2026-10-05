@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
-import { stream } from 'aifn/foundation/random'
-import { fromData, toFlat } from 'aifn/foundation/tensor'
+import { stream } from 'aifn-compute/foundation/random'
+import { fromData, toFlat } from 'aifn-compute/foundation/tensor'
 import type { InverseTruth } from 'aifn-methods/data'
 import { bishopInverse } from 'aifn-methods/data/synthetic'
 import { mdnModel, mdnPredict, mixtureDensityRun, type MdnSnapshot } from 'aifn-methods/learning/mixture-density'

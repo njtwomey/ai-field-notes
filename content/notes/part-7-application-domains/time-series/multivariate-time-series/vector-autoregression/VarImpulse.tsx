@@ -12,7 +12,7 @@ import {
   useAxis,
   useFigureState,
 } from 'aifn-render'
-import { cholesky2, eig2, type Mat2 } from 'aifn/numerics/linalg'
+import { cholesky2, eig2, type Mat2 } from 'aifn-compute/numerics/linalg'
 
 const H = 20
 const CIRCLE = Array.from({ length: 121 }, (_, i) => (2 * Math.PI * i) / 120)

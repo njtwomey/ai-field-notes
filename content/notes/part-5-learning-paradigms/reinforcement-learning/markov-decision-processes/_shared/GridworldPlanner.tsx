@@ -18,8 +18,8 @@ import { GridView } from 'aifn-render/gym'
 import { GRID_ACTION_NAMES } from 'aifn-methods/gym'
 import { policyIteration, valueIteration } from 'aifn-methods/gym/agents'
 import { gridworldEnvironment } from 'aifn-methods/gym/environments'
-import { toFlat } from 'aifn/foundation/tensor'
-import { trace } from 'aifn/foundation/trace'
+import { toFlat } from 'aifn-compute/foundation/tensor'
+import { trace } from 'aifn-compute/foundation/trace'
 
 type Vec2 = [number, number]
 

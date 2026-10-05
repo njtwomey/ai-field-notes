@@ -1,4 +1,4 @@
-import { normalCdf, normalPdf } from 'aifn/numerics/special'
+import { normalCdf, normalPdf } from 'aifn-compute/numerics/special'
 /**
  * The binormal model shared by the imbalanced-classes figures. A score s is N(0, 1) for negatives and N(d, 1) for
  * positives, and a fraction π of cases is positive. The posterior is then exactly logistic in s,

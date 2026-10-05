@@ -1,4 +1,4 @@
-import { normal, stream } from 'aifn/foundation/random'
+import { normal, stream } from 'aifn-compute/foundation/random'
 /**
  * ARMA helpers for the figures in time-series/arima-models. Conventions follow the notes:
  * x_t = φ₁x_{t−1} + … + φ_p x_{t−p} + ε_t + θ₁ε_{t−1} + … + θ_q ε_{t−q}, with ε_t ~ N(0, 1).

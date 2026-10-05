@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
-import { toFlat } from 'aifn/foundation/tensor'
-import { trace } from 'aifn/foundation/trace'
-import { poolAdjacentViolatorsSteps, type PavState } from 'aifn/learning/calibration'
+import { toFlat } from 'aifn-compute/foundation/tensor'
+import { trace } from 'aifn-compute/foundation/trace'
+import { poolAdjacentViolatorsSteps, type PavState } from 'aifn-compute/learning/calibration'
 import {
   ControlGroup,
   ControlRow,

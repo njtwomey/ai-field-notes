@@ -10,10 +10,10 @@ import {
   smote,
   type Resampled,
 } from 'aifn-methods/learning/preprocessing'
-import { child, stream } from 'aifn/foundation/random'
-import { fromData, toFlat, type Tensor } from 'aifn/foundation/tensor'
-import { dataset } from 'aifn/learning/estimators'
-import { auroc, averagePrecision, balancedAccuracy, precision, recall } from 'aifn/learning/metrics'
+import { child, stream } from 'aifn-compute/foundation/random'
+import { fromData, toFlat, type Tensor } from 'aifn-compute/foundation/tensor'
+import { dataset } from 'aifn-compute/learning/estimators'
+import { auroc, averagePrecision, balancedAccuracy, precision, recall } from 'aifn-compute/learning/metrics'
 import {
   Contours,
   ControlRow,

@@ -3,7 +3,7 @@
  * and y pointing up, so a line is x cos θ + y sin θ = ρ with θ in [0°, 180°) and |ρ| at most the half-diagonal.
  */
 import { gradients, type Image } from '../_shared/image'
-import { normal, stream, uniform } from 'aifn/foundation/random'
+import { normal, stream, uniform } from 'aifn-compute/foundation/random'
 
 export const N = 128
 const HALF = (N - 1) / 2

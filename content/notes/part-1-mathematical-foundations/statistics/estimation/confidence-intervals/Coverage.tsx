@@ -12,8 +12,8 @@ import {
   useAxis,
   useFigureState,
 } from 'aifn-render'
-import { normal, stream } from 'aifn/foundation/random'
-import { normalQuantile, studentTCdf, studentTQuantile } from 'aifn/numerics/special'
+import { normal, stream } from 'aifn-compute/foundation/random'
+import { normalQuantile, studentTCdf, studentTQuantile } from 'aifn-compute/numerics/special'
 
 type Method = 't' | 'z'
 

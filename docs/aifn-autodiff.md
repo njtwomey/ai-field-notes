@@ -1,5 +1,11 @@
 # How `grad` works in aifn
 
+> **Historical (2026-10-05):** the engine no longer lives in this repository. It is the aifn-engine project
+> (https://github.com/njtwomey/aifn-engine, docs at https://njtwomey.github.io/aifn-engine/), installed here as the
+> released packages `aifn-compute`, `aifn-methods` and `aifn-render`. Paths below under `aifn-js/core`, `aifn-js/methods`
+> and `aifn-js/render` refer to the old in-tree copy (now `packages/compute`, `packages/methods` and `packages/render`
+> in the engine); the lab moved from `aifn-js/sandbox/lab` to `lab/` here.
+
 This explains automatic differentiation as aifn implements it, step by step, with worked examples. The code lives
 under `aifn-js/core/src/foundation/`: `tensor/trace.ts` (the hook every primitive goes through), `tensor/primitive.ts`
 (primitives and their rules), and in `autodiff/`: `reverse.ts` (the reverse interpreter: records and the backward

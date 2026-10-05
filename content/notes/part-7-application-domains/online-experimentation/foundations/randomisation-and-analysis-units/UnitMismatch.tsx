@@ -12,7 +12,7 @@ import {
   useAxis,
   useFigureState,
 } from 'aifn-render'
-import { normalCdf, normalQuantile } from 'aifn/numerics/special'
+import { normalCdf, normalQuantile } from 'aifn-compute/numerics/special'
 
 const M_MAX = 50
 const ALPHAS = [

@@ -1,6 +1,6 @@
 import { useMemo } from 'react'
-import { toFlat } from 'aifn/foundation/tensor'
-import { alibiBias, alibiSlopes, positionMask, positionRange } from 'aifn/nn/attention'
+import { toFlat } from 'aifn-compute/foundation/tensor'
+import { alibiBias, alibiSlopes, positionMask, positionRange } from 'aifn-compute/nn/attention'
 import {
   Curve,
   Figure,

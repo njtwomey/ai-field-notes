@@ -10,7 +10,7 @@ import {
   useAxis,
   Vectors,
 } from 'aifn-render'
-import { linspace, toFlat } from 'aifn/foundation/tensor'
+import { linspace, toFlat } from 'aifn-compute/foundation/tensor'
 
 type Vec = [number, number]
 const R = 4

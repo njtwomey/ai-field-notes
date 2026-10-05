@@ -11,8 +11,8 @@ import {
   useAxis,
   useFigureState,
 } from 'aifn-render'
-import { linspace, toFlat } from 'aifn/foundation/tensor'
-import { logGamma, normalPdf, studentTCdf, studentTQuantile } from 'aifn/numerics/special'
+import { linspace, toFlat } from 'aifn-compute/foundation/tensor'
+import { logGamma, normalPdf, studentTCdf, studentTQuantile } from 'aifn-compute/numerics/special'
 
 /** Student t density with ν degrees of freedom. */
 function tPdf(t: number, df: number): number {

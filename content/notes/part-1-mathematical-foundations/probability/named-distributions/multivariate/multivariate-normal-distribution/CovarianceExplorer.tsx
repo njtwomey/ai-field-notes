@@ -16,9 +16,9 @@ import {
   Vectors,
   when,
 } from 'aifn-render'
-import { linspace, toFlat } from 'aifn/foundation/tensor'
-import { normal, stream } from 'aifn/foundation/random'
-import { eigh2, type Vec2 } from 'aifn/numerics/linalg'
+import { linspace, toFlat } from 'aifn-compute/foundation/tensor'
+import { normal, stream } from 'aifn-compute/foundation/random'
+import { eigh2, type Vec2 } from 'aifn-compute/numerics/linalg'
 
 const N = 400
 // Fixed standard-normal pairs z; every sample is μ + R D z, so any change deforms the same cloud smoothly.

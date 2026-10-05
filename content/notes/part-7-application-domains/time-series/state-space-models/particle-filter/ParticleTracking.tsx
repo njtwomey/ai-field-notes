@@ -13,7 +13,7 @@ import {
   useAxis,
   useFigureState,
 } from 'aifn-render'
-import { normal as drawNormal, stream, uniform as drawUniform } from 'aifn/foundation/random'
+import { normal as drawNormal, stream, uniform as drawUniform } from 'aifn-compute/foundation/random'
 
 const STEPS = 50
 const Q = 10

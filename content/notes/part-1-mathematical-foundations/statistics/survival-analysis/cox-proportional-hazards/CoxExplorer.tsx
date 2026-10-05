@@ -8,9 +8,9 @@ import {
   coxSurvival,
   harrellConcordance,
 } from 'aifn-methods/learning/survival'
-import { stream } from 'aifn/foundation/random'
-import { toFlat } from 'aifn/foundation/tensor'
-import { kaplanMeier, logRankTest } from 'aifn/probability/tests'
+import { stream } from 'aifn-compute/foundation/random'
+import { toFlat } from 'aifn-compute/foundation/tensor'
+import { kaplanMeier, logRankTest } from 'aifn-compute/probability/tests'
 import {
   Area,
   ControlRow,

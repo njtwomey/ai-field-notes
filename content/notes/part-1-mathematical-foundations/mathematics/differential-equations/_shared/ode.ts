@@ -1,6 +1,6 @@
 import type { Segment } from 'aifn-render'
-import { solveIvp } from 'aifn/dynamics/ode'
-import { fromData, toFlat, toRows } from 'aifn/foundation/tensor'
+import { solveIvp } from 'aifn-compute/dynamics/ode'
+import { fromData, toFlat, toRows } from 'aifn-compute/foundation/tensor'
 
 export type Vec = number[]
 /** Right-hand side of ẋ = f(t, x). */

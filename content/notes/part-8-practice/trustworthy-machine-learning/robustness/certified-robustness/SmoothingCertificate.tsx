@@ -12,9 +12,9 @@ import {
   useAxis,
   useFigureState,
 } from 'aifn-render'
-import { linspace, toFlat } from 'aifn/foundation/tensor'
-import { normal, stream } from 'aifn/foundation/random'
-import { normalQuantile, regularisedBeta } from 'aifn/numerics/special'
+import { linspace, toFlat } from 'aifn-compute/foundation/tensor'
+import { normal, stream } from 'aifn-compute/foundation/random'
+import { normalQuantile, regularisedBeta } from 'aifn-compute/numerics/special'
 
 const R = 3
 const N = 2000

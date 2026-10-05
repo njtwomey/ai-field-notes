@@ -14,8 +14,8 @@ import {
 } from 'aifn-render'
 import { fitShared1d, nonParallelSample } from '../_shared/ordinal'
 import { brant } from './brant'
-import { linspace, toFlat } from 'aifn/foundation/tensor'
-import { sigmoid } from 'aifn/numerics/special'
+import { linspace, toFlat } from 'aifn-compute/foundation/tensor'
+import { sigmoid } from 'aifn-compute/numerics/special'
 
 const X = toFlat(linspace(-3, 3, 121))
 const K = 4

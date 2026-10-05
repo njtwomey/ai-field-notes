@@ -11,8 +11,8 @@ import {
   useAxis,
   useFigureState,
 } from 'aifn-render'
-import { Normal, StudentT } from 'aifn/probability/distributions'
-import { linspace, toFlat } from 'aifn/foundation/tensor'
+import { Normal, StudentT } from 'aifn-compute/probability/distributions'
+import { linspace, toFlat } from 'aifn-compute/foundation/tensor'
 
 const GAUSSIAN = Normal(0, 1)
 

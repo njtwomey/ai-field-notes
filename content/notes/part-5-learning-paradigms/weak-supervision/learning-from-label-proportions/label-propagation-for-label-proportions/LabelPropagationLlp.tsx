@@ -1,6 +1,6 @@
 import { useMemo } from 'react'
 import { choice, Figure, float, formatNumber, int, Plot, Points, Readout, useAxis, useFigureState } from 'aifn-render'
-import { normal, stream, uniform } from 'aifn/foundation/random'
+import { normal, stream, uniform } from 'aifn-compute/foundation/random'
 
 const RANGE: [number, number] = [-4, 14]
 const Y_RANGE: [number | undefined, number | undefined] = [-4, 14]

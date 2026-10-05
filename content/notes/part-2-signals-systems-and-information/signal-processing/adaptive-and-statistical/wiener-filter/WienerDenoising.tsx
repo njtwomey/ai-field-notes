@@ -1,10 +1,10 @@
 import { useMemo } from 'react'
 import { Curve, Figure, float, formatNumber, int, Plot, Readout, useAxis, useFigureState } from 'aifn-render'
-import { complexAbs, toFlat, type Tensor } from 'aifn/foundation/tensor'
-import { freqz } from 'aifn/signal/filters'
-import { transferFunction } from 'aifn/systems'
+import { complexAbs, toFlat, type Tensor } from 'aifn-compute/foundation/tensor'
+import { freqz } from 'aifn-compute/signal/filters'
+import { transferFunction } from 'aifn-compute/systems'
 import { solve, toeplitz } from '../_shared/stat'
-import { normal, stream } from 'aifn/foundation/random'
+import { normal, stream } from 'aifn-compute/foundation/random'
 
 const N = 400
 const SHOW = 120

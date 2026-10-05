@@ -14,8 +14,8 @@ import {
   useFigureState,
 } from 'aifn-render'
 import { avgPathLength, buildForest, isolationScore, type Box, type Pt } from './iforest'
-import { linspace, toFlat } from 'aifn/foundation/tensor'
-import { normal, stream, uniform } from 'aifn/foundation/random'
+import { linspace, toFlat } from 'aifn-compute/foundation/tensor'
+import { normal, stream, uniform } from 'aifn-compute/foundation/random'
 
 const REGION: Box = { x0: -3, x1: 8, y0: -3, y1: 7 }
 const X_RANGE: [number, number] = [REGION.x0, REGION.x1]

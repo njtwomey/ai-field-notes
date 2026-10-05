@@ -13,8 +13,8 @@ import {
   useFigureState,
 } from 'aifn-render'
 import { histogram, joinPaths } from '../_shared/sde'
-import { linspace, toFlat } from 'aifn/foundation/tensor'
-import { normal, stream } from 'aifn/foundation/random'
+import { linspace, toFlat } from 'aifn-compute/foundation/tensor'
+import { normal, stream } from 'aifn-compute/foundation/random'
 
 /** Geometric Brownian motion dX = μX dt + σX dW on [0, 1] from X₀ = 1; exact solution exp((μ − σ²/2)t + σW_t). */
 const MU = 1

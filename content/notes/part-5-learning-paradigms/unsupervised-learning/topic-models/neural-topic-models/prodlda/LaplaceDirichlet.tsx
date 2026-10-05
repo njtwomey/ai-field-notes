@@ -13,8 +13,8 @@ import {
   useAxis,
   useFigureState,
 } from 'aifn-render'
-import { linspace as linspaceTensor, toFlat } from 'aifn/foundation/tensor'
-import { logGamma } from 'aifn/numerics/special'
+import { linspace as linspaceTensor, toFlat } from 'aifn-compute/foundation/tensor'
+import { logGamma } from 'aifn-compute/numerics/special'
 
 type View = 'simplex' | 'softmax'
 

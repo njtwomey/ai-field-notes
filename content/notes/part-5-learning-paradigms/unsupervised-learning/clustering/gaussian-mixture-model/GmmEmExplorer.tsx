@@ -17,10 +17,10 @@ import {
 } from 'aifn-render'
 import { blobs } from 'aifn-methods/data/synthetic'
 import { gaussianMixtureSteps, type CovarianceType } from 'aifn-methods/unsupervised/clustering'
-import { covarianceEllipse } from 'aifn/numerics/geometry'
-import { stream } from 'aifn/foundation/random'
-import { fromData, toFlat, toRows, type Tensor } from 'aifn/foundation/tensor'
-import { trace } from 'aifn/foundation/trace'
+import { covarianceEllipse } from 'aifn-compute/numerics/geometry'
+import { stream } from 'aifn-compute/foundation/random'
+import { fromData, toFlat, toRows, type Tensor } from 'aifn-compute/foundation/tensor'
+import { trace } from 'aifn-compute/foundation/trace'
 
 const fmt = (v: number | null | undefined, digits = 3): string => {
   if (v == null || !Number.isFinite(v)) return '—'

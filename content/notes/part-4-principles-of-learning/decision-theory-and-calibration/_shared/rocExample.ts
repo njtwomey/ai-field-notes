@@ -1,5 +1,5 @@
 import { rocHull, rocPoints, type Point } from './calibration'
-import { normal, stream } from 'aifn/foundation/random'
+import { normal, stream } from 'aifn-compute/foundation/random'
 
 /**
  * A small scored test set shared by the ROC-analysis figures: 25 negatives with scores N(0, 1) and 25 positives with

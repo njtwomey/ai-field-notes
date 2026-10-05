@@ -27,7 +27,7 @@ import {
   Poisson,
   StudentT,
   type Univariate,
-} from 'aifn/probability/distributions'
+} from 'aifn-compute/probability/distributions'
 
 export type ParamSpec = { key: string; label: string; min: number; max: number; step: number; value: number }
 export type Params = Record<string, number>

@@ -1,8 +1,8 @@
 import { useMemo } from 'react'
 import { Curve, Figure, float, formatNumber, int, Plot, Readout, slider, useAxis, useFigureState } from 'aifn-render'
 import { periodogram, powerDb } from '../_shared/spectra'
-import { linspace, toFlat } from 'aifn/foundation/tensor'
-import { normal, stream, uniform } from 'aifn/foundation/random'
+import { linspace, toFlat } from 'aifn-compute/foundation/tensor'
+import { normal, stream, uniform } from 'aifn-compute/foundation/random'
 
 const N = 240
 const W1 = 0.3 * Math.PI

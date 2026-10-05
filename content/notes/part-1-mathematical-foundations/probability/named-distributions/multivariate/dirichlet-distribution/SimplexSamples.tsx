@@ -11,7 +11,7 @@ import {
   useAxis,
   useFigureState,
 } from 'aifn-render'
-import { normal, stream, type Stream, uniform } from 'aifn/foundation/random'
+import { normal, stream, type Stream, uniform } from 'aifn-compute/foundation/random'
 
 const N = 600
 const H = Math.sqrt(3) / 2

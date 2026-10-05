@@ -1,9 +1,9 @@
 # Common tasks. `make help` lists them.
 .DEFAULT_GOAL := help
 # Python sources that ruff lints and formats; Pyright reads its include list from pyproject.toml.
-PY_SRC := python aifn-js/core/test/fixtures aifn-js/methods/test/fixtures
+PY_SRC := python
 
-.PHONY: help install dev contracts assets content doctor links wrap lint aifn-layers aifn-names catalog catalog-check format typecheck test bench aifn-package fixtures fixtures-check lab-check lab-shots lab examples-check examples-shots examples-thumbs examples check build preview clean
+.PHONY: ci help install dev contracts assets content doctor links wrap lint catalog-check format typecheck test lab-check lab-shots lab check build preview clean
 
 help: ## List targets
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  \033[36m%-10s\033[0m %s\n", $$1, $$2}'
@@ -34,26 +34,16 @@ wrap: ## Rewrap note prose to 120 characters, verified by parse and render (SCOP
 doctor: ## Check the content tree (SCOPE="taxonomy/path slug ..." limits per-note checks to those notes)
 	node scripts/doctor.ts $(SCOPE)
 
-lint: aifn-layers aifn-names ## Lint TypeScript, Python and note prose
+lint: ## Lint TypeScript, Python and note prose
 	npx oxlint
-	node aifn-js/sandbox/lab/check.ts --imports-only
-	node aifn-js/examples/check.ts --imports-only
+	node lab/check.ts --imports-only
 	git ls-files -z -co --exclude-standard | xargs -0 sh -c 'for f; do [ -f "$$f" ] && printf "%s\0" "$$f"; done' _ | xargs -0 npx prettier --check --ignore-unknown
 	node scripts/wrap-mdx.ts --check
 	uv run ruff check $(PY_SRC)
 	uv run ruff format --check $(PY_SRC)
 
-aifn-names: ## Check that no two aifn modules export different values under one name (allowlist in the test)
-	npx vitest run --config aifn-js/methods/vitest.config.ts test/names.test.ts
-
-catalog: ## Collect every aifn registry entry into aifn-js/generated/catalog.json and check its note, glossary and reference links
+catalog-check: ## Check that every registry entry of the installed aifn-compute and aifn-methods links to notes, glossary keys and references that exist
 	node scripts/aifn-catalog.ts
-
-catalog-check: ## Check that the aifn catalog is fresh and its links exist; report fixture coverage
-	node scripts/aifn-catalog.ts --check
-
-aifn-layers: ## Check aifn-js imports: core tiers, the application area DAG, core never imports applications (aifn-js/modules.json)
-	node scripts/aifn-layers.ts
 
 format: ## Format TypeScript, Python and note prose
 	git ls-files -z -co --exclude-standard | xargs -0 sh -c 'for f; do [ -f "$$f" ] && printf "%s\0" "$$f"; done' _ | xargs -0 npx prettier --write --ignore-unknown --log-level warn
@@ -65,51 +55,25 @@ typecheck: ## Type-check TypeScript and Python
 	npx tsc -b
 	uv run pyright
 
-test: aifn-layers aifn-names ## Run the aifn-js tests (core and applications) and the Python core tests
-	npx vitest run --config aifn-js/core/vitest.config.ts
-	@# The name lint (test/names.test.ts) already ran as the aifn-names prerequisite; make runs a prerequisite once.
-	npx vitest run --config aifn-js/methods/vitest.config.ts --exclude test/names.test.ts
+test: ## Run the Python core tests (the engine's own tests run in its repository)
 	uv run pytest
 
-bench: ## Run the aifn core micro-benchmarks (reported, not gated; not part of check)
-	npx vitest bench --run --config aifn-js/core/vitest.config.ts
-
-aifn-package: ## Build aifn (aifn-js/core) as a publishable package in aifn-js/core/dist (ARGS="--version x.y.z")
-	node scripts/aifn-package.ts $(ARGS)
-
-fixtures: ## Regenerate aifn-js golden test values from Python (FIXTURES="numerics/linalg numerics ..." for some)
-	uv run python aifn-js/core/test/fixtures/generate.py $(FIXTURES)
-
-fixtures-check: ## Regenerate every aifn-js fixture in memory and fail if any differs from its committed file (slow; not in check)
-	uv run python aifn-js/core/test/fixtures/generate.py --check $(FIXTURES)
-
 lab-check: ## Render every aifn lab specimen on the server and report any that throw
-	node aifn-js/sandbox/lab/check.ts
+	node lab/check.ts
 
 lab-shots: ## Screenshot aifn lab pages and figures to .scratch/lab-shots (ARGS="--only module/slug --theme dark ...")
-	node aifn-js/sandbox/lab/screenshot.ts $(ARGS)
+	node lab/screenshot.ts $(ARGS)
 
-lab: ## Start the aifn lab (standalone explorer for aifn) → http://localhost:5190/
+lab: ## Start the aifn lab (an explorer for the aifn engine packages) → http://localhost:5190/
 	@echo "aifn lab → http://localhost:5190/  (pages at /<module>/<specimen>, figures at #<figure-id>; UI kit at /ui-kit)"
-	npx vite --config aifn-js/sandbox/lab/vite.config.ts
+	npx vite --config lab/vite.config.ts
 
-examples-check: ## Render every aifn-render example recipe on the server and report any that throw
-	node aifn-js/examples/check.ts
-
-examples-shots: ## Screenshot example recipes to .scratch/examples-shots (ARGS="--only lines/line-chart --theme dark ...")
-	node aifn-js/sandbox/lab/screenshot.ts --app examples $(ARGS)
-
-examples-thumbs: ## Rebuild the gallery thumbnails in aifn-js/examples/public/thumbs (ARGS="--only lines" for a section)
-	node aifn-js/sandbox/lab/screenshot.ts --app examples --thumbs --no-sliders $(ARGS)
-
-examples: ## Start the aifn-render examples (a gallery of rendering recipes) → http://localhost:5192/
-	@echo "aifn-render examples → http://localhost:5192/  (recipes at /<section>/<slug>)"
-	npx vite --config aifn-js/examples/vite.config.ts
-
-check: contracts lint doctor typecheck test catalog-check ## Everything CI runs before a build (cheap checks first)
+ci: contracts lint typecheck test catalog-check ## What CI runs before a build: make check without the doctor
 	uv run mlc check
 	@# In CI the tree starts clean, so any change after regenerating means the committed contracts were stale.
 	@if [ -n "$$CI" ]; then git diff --quiet -- site/src/generated || (echo "contracts out of date: run make contracts" && exit 1); fi
+
+check: doctor ci ## Everything: the doctor (slow; local only, before every push) plus what CI runs
 
 build: assets content ## Production build into dist/
 	npm run build

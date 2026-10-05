@@ -1,6 +1,6 @@
 import { useMemo } from 'react'
 import { choice, Curve, Figure, formatNumber, Plot, Readout, useAxis, useFigureState } from 'aifn-render'
-import { normal, stream, type Stream } from 'aifn/foundation/random'
+import { normal, stream, type Stream } from 'aifn-compute/foundation/random'
 
 // A stack of residual blocks with feed-forward branches only, at initialisation. Width D, hidden 4D, T tokens.
 const D = 32

@@ -1,7 +1,7 @@
 import { useMemo } from 'react'
 import { Curve, Figure, float, formatNumber, Plot, Points, Readout, slider, useAxis, useFigureState } from 'aifn-render'
-import { linspace, toFlat } from 'aifn/foundation/tensor'
-import { erf } from 'aifn/numerics/special'
+import { linspace, toFlat } from 'aifn-compute/foundation/tensor'
+import { erf } from 'aifn-compute/numerics/special'
 
 const DX = 0.05
 const X = toFlat(linspace(-3, 3, Math.round(6 / DX) + 1))

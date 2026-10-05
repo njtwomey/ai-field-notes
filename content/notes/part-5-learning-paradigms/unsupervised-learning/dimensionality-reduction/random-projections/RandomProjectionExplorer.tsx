@@ -14,13 +14,13 @@ import {
   Readout,
   useAxis,
 } from 'aifn-render'
-import { normals, stream } from 'aifn/foundation/random'
+import { normals, stream } from 'aifn-compute/foundation/random'
 import {
   distanceDistortion,
   johnsonLindenstraussDimension,
   johnsonLindenstraussEpsilon,
   randomProjection,
-} from 'aifn/numerics/factorisation'
+} from 'aifn-compute/numerics/factorisation'
 
 const KINDS = [
   { value: 'gaussian', label: 'Gaussian N(0, 1/k)' },

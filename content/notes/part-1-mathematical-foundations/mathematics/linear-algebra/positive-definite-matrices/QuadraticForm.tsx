@@ -1,7 +1,7 @@
 import { useMemo } from 'react'
 import { Figure, formatNumber, Plot, Raster, Readout, slider, useAxis, useFigureState, Vectors } from 'aifn-render'
-import { linspace, toFlat } from 'aifn/foundation/tensor'
-import { eigh2 } from 'aifn/numerics/linalg'
+import { linspace, toFlat } from 'aifn-compute/foundation/tensor'
+import { eigh2 } from 'aifn-compute/numerics/linalg'
 
 const GRID = toFlat(linspace(-2, 2, 41))
 const entry = (initial: number, label: string) => slider(-2, 2, initial, { step: 0.05, label })

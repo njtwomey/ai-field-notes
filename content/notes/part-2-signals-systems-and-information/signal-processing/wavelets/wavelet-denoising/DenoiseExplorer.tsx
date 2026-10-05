@@ -1,7 +1,7 @@
 import { useMemo } from 'react'
 import { choice, Curve, Figure, float, formatNumber, Plot, Readout, slider, useAxis, useFigureState } from 'aifn-render'
 import { FILTERS, wavedec, waverec, type Family } from '../_shared/wavelets'
-import { normal, stream } from 'aifn/foundation/random'
+import { normal, stream } from 'aifn-compute/foundation/random'
 
 type Rule = 'soft' | 'hard'
 

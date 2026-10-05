@@ -16,7 +16,7 @@ import {
   useAxis,
   useFigureState,
 } from 'aifn-render'
-import { stream, uniform } from 'aifn/foundation/random'
+import { stream, uniform } from 'aifn-compute/foundation/random'
 import { train, visibleMarginal, type Negative } from './bm'
 
 /** Seeded uniform draws. */

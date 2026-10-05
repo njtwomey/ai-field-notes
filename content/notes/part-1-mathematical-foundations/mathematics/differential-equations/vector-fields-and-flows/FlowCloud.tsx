@@ -13,7 +13,7 @@ import {
   useAxis,
   useFigureState,
 } from 'aifn-render'
-import { normal as drawNormal, stream } from 'aifn/foundation/random'
+import { normal as drawNormal, stream } from 'aifn-compute/foundation/random'
 import { directionField, rk4Step } from '../_shared/ode'
 
 type Field = 'rotation' | 'saddle' | 'sink' | 'pendulum' | 'damped'

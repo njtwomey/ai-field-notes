@@ -1,5 +1,11 @@
 # aifn core review: `foundation/`
 
+> **Historical (2026-10-05):** the engine no longer lives in this repository. It is the aifn-engine project
+> (https://github.com/njtwomey/aifn-engine, docs at https://njtwomey.github.io/aifn-engine/), installed here as the
+> released packages `aifn-compute`, `aifn-methods` and `aifn-render`. Paths below under `aifn-js/core`, `aifn-js/methods`
+> and `aifn-js/render` refer to the old in-tree copy (now `packages/compute`, `packages/methods` and `packages/render`
+> in the engine); the lab moved from `aifn-js/sandbox/lab` to `lab/` here.
+
 Area 1 of the core review (2026-10-01): `aifn-js/core/src/foundation/**` and `aifn-js/core/test/foundation/**`. Rules
 and format: `.scratch/aifn/progress/review-common.md`. Log: `.scratch/aifn/progress/review-foundation.md`.
 

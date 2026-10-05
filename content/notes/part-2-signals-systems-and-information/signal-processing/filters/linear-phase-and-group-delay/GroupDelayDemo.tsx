@@ -1,7 +1,7 @@
 import { useMemo } from 'react'
 import { choice, Curve, Figure, float, formatNumber, Plot, Readout, useAxis, useFigureState } from 'aifn-render'
-import { toFlat } from 'aifn/foundation/tensor'
-import { unwrapPhase } from 'aifn/signal'
+import { toFlat } from 'aifn-compute/foundation/tensor'
+import { unwrapPhase } from 'aifn-compute/signal'
 import { applyFilter, firLowpass, groupDelay, iirLowpass, response as freqz } from '../_shared/design'
 
 const LENGTH = 400

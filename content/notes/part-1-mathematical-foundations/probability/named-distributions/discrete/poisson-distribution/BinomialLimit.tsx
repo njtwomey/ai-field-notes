@@ -1,6 +1,6 @@
 import { useMemo } from 'react'
 import { Curve, Figure, formatNumber, int, Plot, Points, Readout, slider, useAxis, useFigureState } from 'aifn-render'
-import { Binomial, Poisson } from 'aifn/probability/distributions'
+import { Binomial, Poisson } from 'aifn-compute/probability/distributions'
 
 /** Binomial(n, λ/n) against Poisson(λ) as n grows, with the total-variation distance and Le Cam's bound. */
 export function BinomialLimit() {

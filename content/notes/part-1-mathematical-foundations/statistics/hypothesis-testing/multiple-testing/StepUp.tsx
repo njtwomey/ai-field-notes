@@ -11,8 +11,8 @@ import {
   useAxis,
   useFigureState,
 } from 'aifn-render'
-import { normal, stream } from 'aifn/foundation/random'
-import { normalCdf } from 'aifn/numerics/special'
+import { normal, stream } from 'aifn-compute/foundation/random'
+import { normalCdf } from 'aifn-compute/numerics/special'
 
 type Test = { p: number; effect: boolean }
 

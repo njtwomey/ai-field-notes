@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { doubleDescent, type DoubleDescentResult } from 'aifn-methods/theory/double-descent'
-import { stream } from 'aifn/foundation/random'
+import { stream } from 'aifn-compute/foundation/random'
 import {
   Figure,
   ControlGroup,

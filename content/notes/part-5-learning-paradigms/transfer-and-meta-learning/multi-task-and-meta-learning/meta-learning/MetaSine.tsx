@@ -13,8 +13,8 @@ import {
   useAxis,
   useFigureState,
 } from 'aifn-render'
-import { linspace, toFlat } from 'aifn/foundation/tensor'
-import { normal, stream, uniform } from 'aifn/foundation/random'
+import { linspace, toFlat } from 'aifn-compute/foundation/tensor'
+import { normal, stream, uniform } from 'aifn-compute/foundation/random'
 
 // Sine-wave regression tasks as in Finn et al. (2017): y = A sin(x − φ), A ∈ [0.1, 5], φ ∈ [0, π], x ∈ [−5, 5].
 // The model is a network with one tanh hidden layer. Three initialisations are adapted to a new task by the same

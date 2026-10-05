@@ -12,7 +12,7 @@ import {
   useFigureState,
 } from 'aifn-render'
 import { linearKernel, trainSvm, type Point } from '../_shared/svm'
-import { normal, stream } from 'aifn/foundation/random'
+import { normal, stream } from 'aifn-compute/foundation/random'
 
 const N = 50
 const BOX = 4

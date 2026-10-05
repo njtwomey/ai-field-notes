@@ -1,7 +1,7 @@
 import { useMemo } from 'react'
 import { Curve, Figure, formatNumber, Handle, int, Plot, Readout, useAxis, useFigureState } from 'aifn-render'
 import { eloExpected } from '../_shared/skill'
-import { stream, uniform } from 'aifn/foundation/random'
+import { stream, uniform } from 'aifn-compute/foundation/random'
 
 const N = 400
 const JUMP_AT = 150

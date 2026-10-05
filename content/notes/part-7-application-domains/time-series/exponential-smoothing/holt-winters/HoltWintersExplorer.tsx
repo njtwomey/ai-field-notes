@@ -13,7 +13,7 @@ import {
   useFigureState,
 } from 'aifn-render'
 import { rmse, smooth, type Seasonality } from '../_shared/smoothing'
-import { normal, stream } from 'aifn/foundation/random'
+import { normal, stream } from 'aifn-compute/foundation/random'
 
 const M = 12
 const TRAIN = 6 * M

@@ -13,9 +13,9 @@ import {
   useAxis,
   useFigureState,
 } from 'aifn-render'
-import { toFlat } from 'aifn/foundation/tensor'
-import { getWindow } from 'aifn/signal'
-import { normal, stream } from 'aifn/foundation/random'
+import { toFlat } from 'aifn-compute/foundation/tensor'
+import { getWindow } from 'aifn-compute/signal'
+import { normal, stream } from 'aifn-compute/foundation/random'
 
 const FS = 8000
 const N = 4000

@@ -10,7 +10,7 @@ import {
   useAxis,
   useFigureState,
 } from 'aifn-render'
-import { linspace, toFlat } from 'aifn/foundation/tensor'
+import { linspace, toFlat } from 'aifn-compute/foundation/tensor'
 
 /** Four zero-mean densities scaled to the same standard deviation σ, with their differential entropies in nats. */
 function family(sigma: number) {

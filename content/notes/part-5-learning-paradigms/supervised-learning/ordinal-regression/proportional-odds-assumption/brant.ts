@@ -1,5 +1,5 @@
 import { logistic1d } from '../_shared/ordinal'
-import { regularisedGammaP, sigmoid } from 'aifn/numerics/special'
+import { regularisedGammaP, sigmoid } from 'aifn-compute/numerics/special'
 
 const K = 4
 

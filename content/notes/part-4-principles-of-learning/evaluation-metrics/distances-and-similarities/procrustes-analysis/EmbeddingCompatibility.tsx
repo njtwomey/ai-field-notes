@@ -15,8 +15,8 @@ import {
   useAxis,
   useFigureState,
 } from 'aifn-render'
-import { normal, stream } from 'aifn/foundation/random'
-import { apply2, svd2, type Mat2, type Vec2 } from 'aifn/numerics/linalg'
+import { normal, stream } from 'aifn-compute/foundation/random'
+import { apply2, svd2, type Mat2, type Vec2 } from 'aifn-compute/numerics/linalg'
 
 const N = 10
 const RANGE = 3

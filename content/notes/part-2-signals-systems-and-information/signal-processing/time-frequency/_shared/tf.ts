@@ -1,7 +1,7 @@
 /** Test signals and time-frequency helpers shared by the time-frequency notes. */
-import { fft, ifft, isPowerOfTwo, rfft } from 'aifn/foundation/fourier'
-import { complex, complexAbs, imagPart, realPart, tensor, toFlat } from 'aifn/foundation/tensor'
-import { getWindow } from 'aifn/signal/windows'
+import { fft, ifft, isPowerOfTwo, rfft } from 'aifn-compute/foundation/fourier'
+import { complex, complexAbs, imagPart, realPart, tensor, toFlat } from 'aifn-compute/foundation/tensor'
+import { getWindow } from 'aifn-compute/signal/windows'
 
 const TAU = 2 * Math.PI
 

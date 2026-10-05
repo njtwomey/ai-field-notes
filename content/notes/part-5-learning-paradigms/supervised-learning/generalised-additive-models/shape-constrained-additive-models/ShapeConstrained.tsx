@@ -13,8 +13,8 @@ import {
   psplineRow,
   type Matrix,
 } from '../_shared/terms-psplines'
-import { linspace, toFlat } from 'aifn/foundation/tensor'
-import { normal, stream, uniform } from 'aifn/foundation/random'
+import { linspace, toFlat } from 'aifn-compute/foundation/tensor'
+import { normal, stream, uniform } from 'aifn-compute/foundation/random'
 
 const N = 60
 const K = 20

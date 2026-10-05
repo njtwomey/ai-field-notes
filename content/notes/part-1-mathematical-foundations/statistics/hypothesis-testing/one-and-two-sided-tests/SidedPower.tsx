@@ -1,7 +1,7 @@
 import { useMemo } from 'react'
 import { Curve, Figure, float, formatNumber, Handle, int, Plot, Readout, useAxis, useFigureState } from 'aifn-render'
-import { linspace, toFlat } from 'aifn/foundation/tensor'
-import { normalCdf, normalQuantile } from 'aifn/numerics/special'
+import { linspace, toFlat } from 'aifn-compute/foundation/tensor'
+import { normalCdf, normalQuantile } from 'aifn-compute/numerics/special'
 
 /** Power of the one-sided (H₁: μ > μ₀) and two-sided z-tests as functions of the true standardised effect δ. */
 export function SidedPower() {

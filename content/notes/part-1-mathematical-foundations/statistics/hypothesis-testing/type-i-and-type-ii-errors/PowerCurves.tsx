@@ -13,8 +13,8 @@ import {
   useAxis,
   useFigureState,
 } from 'aifn-render'
-import { linspace, toFlat } from 'aifn/foundation/tensor'
-import { normalCdf, normalPdf, normalQuantile } from 'aifn/numerics/special'
+import { linspace, toFlat } from 'aifn-compute/foundation/tensor'
+import { normalCdf, normalPdf, normalQuantile } from 'aifn-compute/numerics/special'
 
 type Sides = 'two' | 'one'
 

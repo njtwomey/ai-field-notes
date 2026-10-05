@@ -14,8 +14,8 @@ import {
   useFigureState,
   Vectors,
 } from 'aifn-render'
-import { normal, stream } from 'aifn/foundation/random'
-import { eigh2 } from 'aifn/numerics/linalg'
+import { normal, stream } from 'aifn-compute/foundation/random'
+import { eigh2 } from 'aifn-compute/numerics/linalg'
 
 const N = 80
 const ARROW = 3

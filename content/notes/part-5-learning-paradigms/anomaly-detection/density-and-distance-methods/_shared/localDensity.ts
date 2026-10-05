@@ -4,8 +4,8 @@ import {
   localOutlierScore,
   type LocalOutlierFactor,
 } from 'aifn-methods/unsupervised/anomaly'
-import { fromData } from 'aifn/foundation/tensor'
-import { stream, normal } from 'aifn/foundation/random'
+import { fromData } from 'aifn-compute/foundation/tensor'
+import { stream, normal } from 'aifn-compute/foundation/random'
 
 export type Pt = [number, number]
 

@@ -14,8 +14,8 @@ import {
   useFigureState,
 } from 'aifn-render'
 import { fitTree, predictTree, type TreeNode } from '../_shared/trees'
-import { linspace, toFlat } from 'aifn/foundation/tensor'
-import { normal, stream, uniform } from 'aifn/foundation/random'
+import { linspace, toFlat } from 'aifn-compute/foundation/tensor'
+import { normal, stream, uniform } from 'aifn-compute/foundation/random'
 
 const N_TRAIN = 80
 const N_TEST = 400

@@ -4,6 +4,7 @@ import tailwindcss from '@tailwindcss/vite'
 import react from '@vitejs/plugin-react'
 import { defineConfig } from 'vite'
 import { contentIndex } from './plugins/content-index.ts'
+import { engineDeps } from './plugins/engine-deps.ts'
 import { mdxOptions } from './plugins/mdx-options.ts'
 
 const contentDir = path.resolve(import.meta.dirname, 'content')
@@ -53,11 +54,9 @@ export default defineConfig({
       '@content': contentDir,
       '@design': path.resolve(import.meta.dirname, 'design'),
       '@python': path.resolve(import.meta.dirname, 'python'),
-      '@render': path.resolve(import.meta.dirname, 'aifn-js/render/src'),
-      'aifn-render': path.resolve(import.meta.dirname, 'aifn-js/render/src'),
-      'aifn-methods': path.resolve(import.meta.dirname, 'aifn-js/methods/src'),
-      aifn: path.resolve(import.meta.dirname, 'aifn-js/core/src'),
     },
   },
+  // The engine packages are pre-bundled whole at start-up (plugins/engine-deps.ts says why).
+  optimizeDeps: { include: engineDeps(import.meta.dirname) },
   server: { fs: { allow: [import.meta.dirname] } },
 })

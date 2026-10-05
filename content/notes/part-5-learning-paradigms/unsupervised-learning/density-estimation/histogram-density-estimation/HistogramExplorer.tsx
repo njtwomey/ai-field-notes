@@ -14,7 +14,7 @@ import {
   useFigureState,
 } from 'aifn-render'
 import { DOMAIN, ise, sample, summary, trueDensity } from '../../_shared/density'
-import { linspace, toFlat } from 'aifn/foundation/tensor'
+import { linspace, toFlat } from 'aifn-compute/foundation/tensor'
 
 const GRID = toFlat(linspace(DOMAIN[0], DOMAIN[1], 400))
 const TRUTH = GRID.map(trueDensity)

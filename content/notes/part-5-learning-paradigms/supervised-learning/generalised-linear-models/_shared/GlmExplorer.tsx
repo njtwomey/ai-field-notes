@@ -16,9 +16,9 @@ import {
   useFigureState,
   variants,
 } from 'aifn-render'
-import { normal, stream, uniform } from 'aifn/foundation/random'
+import { normal, stream, uniform } from 'aifn-compute/foundation/random'
 import { FAMILIES, LINKS, irls, simulate, type FamilyName, type LinkName } from './glm'
-import { linspace, toFlat } from 'aifn/foundation/tensor'
+import { linspace, toFlat } from 'aifn-compute/foundation/tensor'
 
 const N = 100
 const GRID = toFlat(linspace(-2, 2, 81))

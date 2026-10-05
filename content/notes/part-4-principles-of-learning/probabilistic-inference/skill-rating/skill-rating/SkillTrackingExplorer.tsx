@@ -7,8 +7,8 @@ import {
   type RaterSpec,
   type RatingTrace,
 } from 'aifn-methods/inference/rating-models'
-import { trackingMetrics, type TrackingMetrics } from 'aifn/inference/filtering'
-import { stream } from 'aifn/foundation/random'
+import { trackingMetrics, type TrackingMetrics } from 'aifn-compute/inference/filtering'
+import { stream } from 'aifn-compute/foundation/random'
 import {
   Area,
   ControlRow,

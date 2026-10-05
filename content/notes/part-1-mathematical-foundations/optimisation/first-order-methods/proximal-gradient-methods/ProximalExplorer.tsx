@@ -1,9 +1,9 @@
 import { useMemo, useState } from 'react'
-import { fista, ista, proxL1 } from 'aifn/optim/proximal'
-import { type IterateState, type ObjectiveFn } from 'aifn/optim'
-import { child, normals, stream } from 'aifn/foundation/random'
-import { toFlat } from 'aifn/foundation/tensor'
-import { trace } from 'aifn/foundation/trace'
+import { fista, ista, proxL1 } from 'aifn-compute/optim/proximal'
+import { type IterateState, type ObjectiveFn } from 'aifn-compute/optim'
+import { child, normals, stream } from 'aifn-compute/foundation/random'
+import { toFlat } from 'aifn-compute/foundation/tensor'
+import { trace } from 'aifn-compute/foundation/trace'
 import { Bars, ControlRow, Curve, Figure, formatNumber, Plot, Plots, Readout, Slider, useAxis } from 'aifn-render'
 
 export function ProximalExplorer() {

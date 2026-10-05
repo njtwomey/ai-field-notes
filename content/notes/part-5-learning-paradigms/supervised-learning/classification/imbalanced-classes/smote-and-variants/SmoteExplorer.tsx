@@ -11,7 +11,7 @@ import {
   useAxis,
   useFigureState,
 } from 'aifn-render'
-import { normal, stream, uniform } from 'aifn/foundation/random'
+import { normal, stream, uniform } from 'aifn-compute/foundation/random'
 
 type Pt = [number, number]
 type Method = 'smote' | 'borderline' | 'adasyn'

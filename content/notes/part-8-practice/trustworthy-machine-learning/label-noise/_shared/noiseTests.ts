@@ -1,5 +1,5 @@
-import { normal, stream, uniform } from 'aifn/foundation/random'
-import { normalCdf } from 'aifn/numerics/special'
+import { normal, stream, uniform } from 'aifn-compute/foundation/random'
+import { normalCdf } from 'aifn-compute/numerics/special'
 /**
  * Simulation and test statistics for class-conditional label noise, shared by the label-noise notes.
  *

@@ -13,9 +13,9 @@ import {
   useAxis,
   useFigureState,
 } from 'aifn-render'
-import { lstsq } from 'aifn/numerics/linalg'
-import { linspace, tensor, toFlat } from 'aifn/foundation/tensor'
-import { normal, stream, uniform } from 'aifn/foundation/random'
+import { lstsq } from 'aifn-compute/numerics/linalg'
+import { linspace, tensor, toFlat } from 'aifn-compute/foundation/tensor'
+import { normal, stream, uniform } from 'aifn-compute/foundation/random'
 
 const TRUE_SLOPE = 1.5
 const TRUE_INTERCEPT = -0.5

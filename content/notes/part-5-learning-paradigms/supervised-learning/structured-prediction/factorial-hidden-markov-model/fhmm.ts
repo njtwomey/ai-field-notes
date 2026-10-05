@@ -1,4 +1,4 @@
-import { normal, stream, uniform } from 'aifn/foundation/random'
+import { normal, stream, uniform } from 'aifn-compute/foundation/random'
 /**
  * An additive factorial HMM with binary chains: appliance m is off (0) or on (1), draws power P_m when on, and the
  * meter reads x_n = Σ_m P_m y_n^(m) + ε with ε ~ N(0, σ²). Exact inference runs forward–backward on the 2^M product

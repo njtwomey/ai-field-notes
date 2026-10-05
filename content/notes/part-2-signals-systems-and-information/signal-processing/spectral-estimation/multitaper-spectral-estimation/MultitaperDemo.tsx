@@ -12,7 +12,7 @@ import {
   useFigureState,
 } from 'aifn-render'
 import { arProcess, arSpectrum, multitaper, periodogram, powerDb } from '../_shared/spectra'
-import { linspace, toFlat } from 'aifn/foundation/tensor'
+import { linspace, toFlat } from 'aifn-compute/foundation/tensor'
 
 const N = 128
 const OMEGA = toFlat(linspace(0, Math.PI, 257))

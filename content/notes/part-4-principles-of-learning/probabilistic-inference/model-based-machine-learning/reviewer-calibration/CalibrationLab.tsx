@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { Button, Curve, Figure, formatNumber, Handle, Plot, Points, Readout, useAxis } from 'aifn-render'
-import { normal, stream } from 'aifn/foundation/random'
+import { normal, stream } from 'aifn-compute/foundation/random'
 import { calibrate, makeConference, scoreReviews, spearman, topK } from '../_shared/reviewers'
 
 const MU = 5

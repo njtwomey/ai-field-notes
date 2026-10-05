@@ -17,7 +17,7 @@ import {
   useFigureState,
 } from 'aifn-render'
 import { vmd } from '../_shared/emd'
-import { normal, stream } from 'aifn/foundation/random'
+import { normal, stream } from 'aifn-compute/foundation/random'
 
 const N = 512
 const MAX_ITER = 150

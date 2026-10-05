@@ -11,7 +11,7 @@ import {
   useAxis,
   useFigureState,
 } from 'aifn-render'
-import { eigh2, type Vec2 } from 'aifn/numerics/linalg'
+import { eigh2, type Vec2 } from 'aifn-compute/numerics/linalg'
 
 type Sym = [number, number, number] // [[p, q], [q, r]]
 

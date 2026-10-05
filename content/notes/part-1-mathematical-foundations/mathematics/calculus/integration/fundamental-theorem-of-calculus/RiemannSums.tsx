@@ -12,7 +12,7 @@ import {
   useAxis,
   useFigureState,
 } from 'aifn-render'
-import { linspace, toFlat } from 'aifn/foundation/tensor'
+import { linspace, toFlat } from 'aifn-compute/foundation/tensor'
 
 type Rule = 'left' | 'midpoint' | 'right'
 type Fn = { label: string; f: (x: number) => number; F: (x: number) => number; range: [number, number] }

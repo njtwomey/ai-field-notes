@@ -14,7 +14,7 @@ import {
   useAxis,
   useFigureState,
 } from 'aifn-render'
-import { stream, uniform } from 'aifn/foundation/random'
+import { stream, uniform } from 'aifn-compute/foundation/random'
 
 /*
  * A recommender with C = 4 contexts (viewed products, drawn uniformly) and K = 6 candidate items. Each (context, item)

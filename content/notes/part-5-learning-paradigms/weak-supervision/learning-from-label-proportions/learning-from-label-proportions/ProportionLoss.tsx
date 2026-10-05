@@ -11,8 +11,8 @@ import {
   useAxis,
   useFigureState,
 } from 'aifn-render'
-import { normal, stream, uniform } from 'aifn/foundation/random'
-import { sigmoid } from 'aifn/numerics/special'
+import { normal, stream, uniform } from 'aifn-compute/foundation/random'
+import { sigmoid } from 'aifn-compute/numerics/special'
 
 const TOTAL = 480
 const MEAN: [number, number] = [0.9, 0.4]

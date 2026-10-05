@@ -14,9 +14,9 @@ import {
   useAxis,
   useFigureState,
 } from 'aifn-render'
-import { stream, uniform as drawUniform } from 'aifn/foundation/random'
+import { stream, uniform as drawUniform } from 'aifn-compute/foundation/random'
 import { sampleBinomial, twoProportionZ } from '../_shared/ab'
-import { normalCdf } from 'aifn/numerics/special'
+import { normalCdf } from 'aifn-compute/numerics/special'
 
 const SRM_ALPHA = 0.001
 /** 1 − Φ(z) loses all precision below about 1e-16, so smaller p-values are shown as this floor. */

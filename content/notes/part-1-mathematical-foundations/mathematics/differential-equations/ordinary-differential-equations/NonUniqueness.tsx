@@ -11,7 +11,7 @@ import {
   useAxis,
   useFigureState,
 } from 'aifn-render'
-import { linspace, toFlat } from 'aifn/foundation/tensor'
+import { linspace, toFlat } from 'aifn-compute/foundation/tensor'
 
 const T = toFlat(linspace(0, 4, 161))
 const FAMILY = [0.5, 1.5, 2.5, 3.5]

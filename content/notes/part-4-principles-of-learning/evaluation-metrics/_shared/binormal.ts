@@ -1,4 +1,4 @@
-import { normalCdf } from 'aifn/numerics/special'
+import { normalCdf } from 'aifn-compute/numerics/special'
 /**
  * The binormal model used by the classification-metric figures: negative scores ~ N(0, 1), positive scores ~ N(d, 1),
  * a fraction π of the population positive, and "predict positive" when the score exceeds a threshold t. Everything is

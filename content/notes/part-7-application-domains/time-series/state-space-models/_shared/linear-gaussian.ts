@@ -1,4 +1,4 @@
-import { normal, stream } from 'aifn/foundation/random'
+import { normal, stream } from 'aifn-compute/foundation/random'
 /**
  * Linear-Gaussian state-space model z_t = A z_{t−1} + w_t, x_t = C z_t + v_t, with w_t ~ N(0, Q) and v_t ~ N(0, R),
  * plus the Kalman filter and the Rauch–Tung–Striebel smoother. Plain arrays keep the code close to the equations;

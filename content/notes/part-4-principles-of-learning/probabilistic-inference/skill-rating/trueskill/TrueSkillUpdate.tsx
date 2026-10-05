@@ -24,7 +24,7 @@ import {
 } from 'aifn-render'
 import type { DiagramSpec } from 'aifn-render'
 import { TS_DEFAULTS, drawMargin, gauss, trueSkill1v1, type Outcome } from '../_shared/skill'
-import { linspace, toFlat } from 'aifn/foundation/tensor'
+import { linspace, toFlat } from 'aifn-compute/foundation/tensor'
 
 const SKILL_RANGE: [number, number] = [0, 50]
 const SKILL_X = toFlat(linspace(SKILL_RANGE[0], SKILL_RANGE[1], 301))

@@ -1,7 +1,7 @@
-import type { Vec2 as Point } from 'aifn/numerics/linalg'
+import type { Vec2 as Point } from 'aifn-compute/numerics/linalg'
 import { initialCentres, type CentreInit } from '../_shared/centres'
-import { logsumexp, fromData, toFlat } from 'aifn/foundation/tensor'
-import { softmax } from 'aifn/numerics/special'
+import { logsumexp, fromData, toFlat } from 'aifn-compute/foundation/tensor'
+import { softmax } from 'aifn-compute/numerics/special'
 
 /** Smallest allowed variance. Without it a component can collapse onto one point and the likelihood diverges. */
 const VARIANCE_FLOOR = 1e-3

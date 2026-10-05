@@ -1,8 +1,12 @@
 import { useMemo, useState } from 'react'
-import { beliefPropagationSteps, decodeBeliefs, type BeliefPropagationState } from 'aifn/inference/message-passing'
-import { discreteFactor, discreteFactorGraph, type DiscreteFactorGraph } from 'aifn/inference/model'
-import { variableElimination } from 'aifn/inference/exact'
-import { trace } from 'aifn/foundation/trace'
+import {
+  beliefPropagationSteps,
+  decodeBeliefs,
+  type BeliefPropagationState,
+} from 'aifn-compute/inference/message-passing'
+import { discreteFactor, discreteFactorGraph, type DiscreteFactorGraph } from 'aifn-compute/inference/model'
+import { variableElimination } from 'aifn-compute/inference/exact'
+import { trace } from 'aifn-compute/foundation/trace'
 import { Figure, ControlGroup, Select, NumberSelector, Player, Plot, Bars, Points, Readout, useAxis } from 'aifn-render'
 
 const NAMES = ['a', 'b', 'c', 'd', 'e']

@@ -12,7 +12,7 @@ import {
   useAxis,
   useFigureState,
 } from 'aifn-render'
-import { apply2, eig2, type Mat2, type Vec2 } from 'aifn/numerics/linalg'
+import { apply2, eig2, type Mat2, type Vec2 } from 'aifn-compute/numerics/linalg'
 
 const R = 4
 const entry = (initial: number, label: string) => slider(-1.5, 1.5, initial, { step: 0.05, label })

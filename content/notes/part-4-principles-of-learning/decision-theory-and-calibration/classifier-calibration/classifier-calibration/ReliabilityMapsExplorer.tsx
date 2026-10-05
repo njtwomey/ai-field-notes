@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
 import { classifierOutputs } from 'aifn-methods/data/synthetic'
-import { stream } from 'aifn/foundation/random'
-import { tensor, toFlat, toRows, type Tensor } from 'aifn/foundation/tensor'
+import { stream } from 'aifn-compute/foundation/random'
+import { tensor, toFlat, toRows, type Tensor } from 'aifn-compute/foundation/tensor'
 import {
   betaCalibration,
   dirichletCalibration,
@@ -10,9 +10,9 @@ import {
   plattScaling,
   temperatureScaling,
   topLabelConfidence,
-} from 'aifn/learning/calibration'
-import { expectedCalibrationError, maximumCalibrationError, reliabilityDiagram } from 'aifn/learning/metrics'
-import { softmax } from 'aifn/numerics/special'
+} from 'aifn-compute/learning/calibration'
+import { expectedCalibrationError, maximumCalibrationError, reliabilityDiagram } from 'aifn-compute/learning/metrics'
+import { softmax } from 'aifn-compute/numerics/special'
 import {
   Figure,
   ControlRow,

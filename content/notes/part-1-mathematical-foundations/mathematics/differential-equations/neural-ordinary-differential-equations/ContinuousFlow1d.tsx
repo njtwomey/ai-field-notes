@@ -1,9 +1,9 @@
 import { useMemo } from 'react'
 import { Bars, Curve, Figure, float, formatNumber, Plot, Readout, slider, useAxis, useFigureState } from 'aifn-render'
-import { normal as drawNormal, stream } from 'aifn/foundation/random'
+import { normal as drawNormal, stream } from 'aifn-compute/foundation/random'
 import { histogramDensity } from '../_shared/ode'
-import { linspace, toFlat } from 'aifn/foundation/tensor'
-import { normalPdf } from 'aifn/numerics/special'
+import { linspace, toFlat } from 'aifn-compute/foundation/tensor'
+import { normalPdf } from 'aifn-compute/numerics/special'
 
 const H = 0.02
 const Z0 = toFlat(linspace(-4, 4, 321))

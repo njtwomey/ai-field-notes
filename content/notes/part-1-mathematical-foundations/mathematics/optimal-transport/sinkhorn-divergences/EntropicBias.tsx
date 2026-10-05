@@ -13,8 +13,8 @@ import {
   useFigureState,
 } from 'aifn-render'
 import { sinkhorn } from '../_shared/ot'
-import { linspace, toFlat } from 'aifn/foundation/tensor'
-import { normal, stream } from 'aifn/foundation/random'
+import { linspace, toFlat } from 'aifn-compute/foundation/tensor'
+import { normal, stream } from 'aifn-compute/foundation/random'
 
 const N = 24
 const ITERS = 200

@@ -13,8 +13,8 @@ import {
   useFigureState,
   variants,
 } from 'aifn-render'
-import { Binomial, Exponential, Poisson } from 'aifn/probability/distributions'
-import { linspace, toFlat } from 'aifn/foundation/tensor'
+import { Binomial, Exponential, Poisson } from 'aifn-compute/probability/distributions'
+import { linspace, toFlat } from 'aifn-compute/foundation/tensor'
 
 type DistId = 'exponential' | 'poisson' | 'binomial'
 

@@ -1,7 +1,7 @@
 import { useMemo } from 'react'
 import { choice, Figure, int, Plot, Raster, Readout, useAxis, useFigureState } from 'aifn-render'
 import { applyBank, harmonicTone, melFilterBank, powerSpectrogram } from '../_shared/audio'
-import { normal, stream } from 'aifn/foundation/random'
+import { normal, stream } from 'aifn-compute/foundation/random'
 
 const FS = 16000
 const LENGTH = FS // one second

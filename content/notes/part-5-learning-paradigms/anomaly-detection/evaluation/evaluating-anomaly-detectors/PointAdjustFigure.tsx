@@ -12,8 +12,8 @@ import {
   useAxis,
   useFigureState,
 } from 'aifn-render'
-import { Binomial } from 'aifn/probability/distributions'
-import { linspace, toFlat } from 'aifn/foundation/tensor'
+import { Binomial } from 'aifn-compute/probability/distributions'
+import { linspace, toFlat } from 'aifn-compute/foundation/tensor'
 
 /** Series length and number of labelled anomalous segments. */
 const N = 10000

@@ -1,8 +1,8 @@
 import { useMemo, useState } from 'react'
 import { blahutArimotoCapacity } from 'aifn-methods/information/channels'
-import { binaryEntropy } from 'aifn/numerics/special'
-import { toFlat } from 'aifn/foundation/tensor'
-import { trace } from 'aifn/foundation/trace'
+import { binaryEntropy } from 'aifn-compute/numerics/special'
+import { toFlat } from 'aifn-compute/foundation/tensor'
+import { trace } from 'aifn-compute/foundation/trace'
 import {
   Bars,
   ControlRow,

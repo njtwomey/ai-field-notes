@@ -10,7 +10,7 @@ import {
   useFigureState,
   variants,
 } from 'aifn-render'
-import { linspace, toFlat } from 'aifn/foundation/tensor'
+import { linspace, toFlat } from 'aifn-compute/foundation/tensor'
 
 type FamilyId = 'bernoulli' | 'poisson' | 'exponential'
 

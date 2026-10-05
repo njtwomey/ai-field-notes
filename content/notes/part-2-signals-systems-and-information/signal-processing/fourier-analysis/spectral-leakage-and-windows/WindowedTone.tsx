@@ -12,9 +12,9 @@ import {
   useAxis,
   useFigureState,
 } from 'aifn-render'
-import { rfft } from 'aifn/foundation/fourier'
-import { complexAbs, toFlat } from 'aifn/foundation/tensor'
-import { getWindow } from 'aifn/signal/windows'
+import { rfft } from 'aifn-compute/foundation/fourier'
+import { complexAbs, toFlat } from 'aifn-compute/foundation/tensor'
+import { getWindow } from 'aifn-compute/signal/windows'
 
 const N = 64
 const PAD = 1024

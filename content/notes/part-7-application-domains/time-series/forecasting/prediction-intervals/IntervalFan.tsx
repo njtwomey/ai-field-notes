@@ -12,8 +12,8 @@ import {
   useAxis,
   useFigureState,
 } from 'aifn-render'
-import { normal, stream, type Stream, uniform } from 'aifn/foundation/random'
-import { normalQuantile } from 'aifn/numerics/special'
+import { normal, stream, type Stream, uniform } from 'aifn-compute/foundation/random'
+import { normalQuantile } from 'aifn-compute/numerics/special'
 
 const N_HISTORY = 200
 const SHOWN = 40

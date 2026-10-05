@@ -14,8 +14,8 @@ import {
   useAxis,
   useFigureState,
 } from 'aifn-render'
-import { linspace, toFlat } from 'aifn/foundation/tensor'
-import { normal, stream } from 'aifn/foundation/random'
+import { linspace, toFlat } from 'aifn-compute/foundation/tensor'
+import { normal, stream } from 'aifn-compute/foundation/random'
 
 /** Schedules of Song et al. (2021): β(t) linear from 0.1 to 20 on [0, 1]; σ(t) = 0.01 · 5000ᵗ, from 0.01 to 50. */
 const B_MIN = 0.1

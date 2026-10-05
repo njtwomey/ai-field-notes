@@ -1,8 +1,8 @@
 import { useMemo } from 'react'
 import { Curve, Figure, float, formatNumber, Handle, Plot, Points, Readout, useAxis, useFigureState } from 'aifn-render'
-import { linspace, toFlat } from 'aifn/foundation/tensor'
-import { normal, stream, uniform } from 'aifn/foundation/random'
-import { sigmoid } from 'aifn/numerics/special'
+import { linspace, toFlat } from 'aifn-compute/foundation/tensor'
+import { normal, stream, uniform } from 'aifn-compute/foundation/random'
+import { sigmoid } from 'aifn-compute/numerics/special'
 
 // Covariate shift in two dimensions. The labelling rule p(y = 1 | x) is the same in both domains and has a curved
 // boundary, so a linear classifier is misspecified and its best line depends on where the inputs fall.

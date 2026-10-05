@@ -1,7 +1,7 @@
 import { useMemo } from 'react'
 import { Curve, Figure, float, formatNumber, int, Plot, Points, Readout, useAxis, useFigureState } from 'aifn-render'
-import { rfft } from 'aifn/foundation/fourier'
-import { complexAbs, toFlat } from 'aifn/foundation/tensor'
+import { rfft } from 'aifn-compute/foundation/fourier'
+import { complexAbs, toFlat } from 'aifn-compute/foundation/tensor'
 
 const FS = 1000
 const F1 = 100

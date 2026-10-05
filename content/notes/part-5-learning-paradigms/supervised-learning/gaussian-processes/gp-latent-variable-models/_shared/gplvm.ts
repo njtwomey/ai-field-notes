@@ -5,7 +5,7 @@
  * through YYᵀ and the predictive mean.
  */
 import { cholesky, cholSolve, logDet, type Matrix } from '../../_shared/gp'
-import { normal, stream } from 'aifn/foundation/random'
+import { normal, stream } from 'aifn-compute/foundation/random'
 
 export type Point = [number, number]
 

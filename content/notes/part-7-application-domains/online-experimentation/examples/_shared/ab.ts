@@ -1,4 +1,4 @@
-import { normalCdf, normalQuantile } from 'aifn/numerics/special'
+import { normalCdf, normalQuantile } from 'aifn-compute/numerics/special'
 /** Helpers shared by the A/A, A/B and sample-ratio-mismatch examples: binomial draws and the two-proportion z-test. */
 
 /**

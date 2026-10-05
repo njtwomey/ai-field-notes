@@ -1,12 +1,12 @@
 import { useMemo, useState } from 'react'
-import { dataset } from 'aifn/learning/estimators'
+import { dataset } from 'aifn-compute/learning/estimators'
 import { swissRoll } from 'aifn-methods/data/synthetic'
 import { classicalMds, kernelPca, metricMds, pca } from 'aifn-methods/unsupervised/embedding/linear'
 import { isomap, laplacianEigenmaps, locallyLinearEmbedding } from 'aifn-methods/unsupervised/embedding/manifold'
-import { rbf } from 'aifn/learning/kernels'
-import { pairwiseDistances } from 'aifn/numerics/linalg'
-import { stream } from 'aifn/foundation/random'
-import { toFlat, toRows, type Tensor } from 'aifn/foundation/tensor'
+import { rbf } from 'aifn-compute/learning/kernels'
+import { pairwiseDistances } from 'aifn-compute/numerics/linalg'
+import { stream } from 'aifn-compute/foundation/random'
+import { toFlat, toRows, type Tensor } from 'aifn-compute/foundation/tensor'
 import {
   Figure,
   ControlGroup,

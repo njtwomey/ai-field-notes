@@ -1,7 +1,7 @@
 import { useMemo } from 'react'
 import { choice, Figure, int, Plot, Raster, Readout, useAxis, useFigureState } from 'aifn-render'
 import { AXIS, SIZE, type Image } from '../_shared/image'
-import { stream, uniform } from 'aifn/foundation/random'
+import { stream, uniform } from 'aifn-compute/foundation/random'
 
 type Op = 'erode' | 'dilate' | 'open' | 'close' | 'open-close' | 'gradient'
 type Shape = 'square' | 'disk'

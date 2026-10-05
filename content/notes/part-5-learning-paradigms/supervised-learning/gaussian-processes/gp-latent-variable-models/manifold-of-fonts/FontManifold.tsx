@@ -29,7 +29,7 @@ import {
   type Point,
   type Predictor,
 } from '../_shared/gplvm'
-import { linspace, toFlat } from 'aifn/foundation/tensor'
+import { linspace, toFlat } from 'aifn-compute/foundation/tensor'
 
 const LIM = 3
 const GRID = 41

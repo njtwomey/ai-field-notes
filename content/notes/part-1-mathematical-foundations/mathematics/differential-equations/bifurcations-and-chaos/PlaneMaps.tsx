@@ -1,7 +1,7 @@
 import { useMemo } from 'react'
 import { henonMap, lyapunovSpectrum, orbit, standardMap, type MapN } from 'aifn-methods/dynamics/maps'
-import { histogram } from 'aifn/probability/stats'
-import { toFlat, toRows } from 'aifn/foundation/tensor'
+import { histogram } from 'aifn-compute/probability/stats'
+import { toFlat, toRows } from 'aifn-compute/foundation/tensor'
 import {
   ControlGroup,
   ControlRow,

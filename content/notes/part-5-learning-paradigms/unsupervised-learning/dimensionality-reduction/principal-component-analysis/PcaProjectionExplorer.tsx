@@ -13,11 +13,11 @@ import {
   type Vec2,
   type Vector,
 } from 'aifn-render'
-import { dataset } from 'aifn/learning/estimators'
+import { dataset } from 'aifn-compute/learning/estimators'
 import { gaussians } from 'aifn-methods/data/synthetic'
 import { pca } from 'aifn-methods/unsupervised/embedding/linear'
-import { stream } from 'aifn/foundation/random'
-import { fromData, toFlat, toRows } from 'aifn/foundation/tensor'
+import { stream } from 'aifn-compute/foundation/random'
+import { fromData, toFlat, toRows } from 'aifn-compute/foundation/tensor'
 
 export function PcaProjectionExplorer() {
   const [angle, setAngle] = useState(0.5)

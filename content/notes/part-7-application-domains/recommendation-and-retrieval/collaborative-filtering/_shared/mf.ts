@@ -1,4 +1,4 @@
-import { normal, stream, uniform } from 'aifn/foundation/random'
+import { normal, stream, uniform } from 'aifn-compute/foundation/random'
 
 /** A small synthetic ratings problem: U users, M items, ratings 1–5 from a rank-2 taste model plus noise. */
 export type Ratings = {

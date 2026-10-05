@@ -14,9 +14,9 @@ import {
   useFigureState,
   Vectors,
 } from 'aifn-render'
-import { linspace, toFlat } from 'aifn/foundation/tensor'
-import { normal, stream } from 'aifn/foundation/random'
-import { eigh2 } from 'aifn/numerics/linalg'
+import { linspace, toFlat } from 'aifn-compute/foundation/tensor'
+import { normal, stream } from 'aifn-compute/foundation/random'
+import { eigh2 } from 'aifn-compute/numerics/linalg'
 
 const N = 100
 const ARROW = 3

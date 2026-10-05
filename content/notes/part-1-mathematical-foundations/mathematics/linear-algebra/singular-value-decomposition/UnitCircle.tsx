@@ -12,8 +12,8 @@ import {
   useFigureState,
   Vectors,
 } from 'aifn-render'
-import { svd2 } from 'aifn/numerics/linalg'
-import { linspace, toFlat } from 'aifn/foundation/tensor'
+import { svd2 } from 'aifn-compute/numerics/linalg'
+import { linspace, toFlat } from 'aifn-compute/foundation/tensor'
 
 const R = 3.5
 const entry = (initial: number, label: string) => slider(-2, 2, initial, { step: 0.05, label })

@@ -1,7 +1,7 @@
 import { useMemo } from 'react'
 import { Curve, Figure, float, formatNumber, Plot, Readout, useAxis, useFigureState } from 'aifn-render'
-import { linspace, toFlat } from 'aifn/foundation/tensor'
-import { normalPdf } from 'aifn/numerics/special'
+import { linspace, toFlat } from 'aifn-compute/foundation/tensor'
+import { normalPdf } from 'aifn-compute/numerics/special'
 
 const X_RANGE: [number, number] = [-5, 5]
 const GRID = toFlat(linspace(-5, 5, 401))

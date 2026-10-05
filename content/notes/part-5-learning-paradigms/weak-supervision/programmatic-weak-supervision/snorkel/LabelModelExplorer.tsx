@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
 import { Bars, ControlRow, Figure, Plot, Plots, Points, Readout, Select, formatNumber, useAxis } from 'aifn-render'
-import { stream } from 'aifn/foundation/random'
-import { toFlat } from 'aifn/foundation/tensor'
+import { stream } from 'aifn-compute/foundation/random'
+import { toFlat } from 'aifn-compute/foundation/tensor'
 import { labellingFunctions } from 'aifn-methods/data/synthetic'
 import { labelModelReport } from 'aifn-methods/learning/weak-supervision'
 

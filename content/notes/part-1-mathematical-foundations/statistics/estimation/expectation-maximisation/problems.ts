@@ -1,4 +1,4 @@
-import { normal, stream, uniform } from 'aifn/foundation/random'
+import { normal, stream, uniform } from 'aifn-compute/foundation/random'
 /**
  * One-parameter EM problems for the bound figure. Each has an exact log-likelihood ℓ(θ), the EM map θ ↦ M(θ), and the
  * KL divergence between the E-step distribution built at θ_q and the exact posterior at θ. The bound built at θ_q is

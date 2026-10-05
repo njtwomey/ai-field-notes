@@ -12,8 +12,8 @@ import {
   useAxis,
   useFigureState,
 } from 'aifn-render'
-import { tTestPower } from 'aifn/probability/tests'
-import { linspace, toFlat } from 'aifn/foundation/tensor'
+import { tTestPower } from 'aifn-compute/probability/tests'
+import { linspace, toFlat } from 'aifn-compute/foundation/tensor'
 
 /**
  * Power against a mean difference δ (in units of the outcome's standard deviation σ) for two designs with the same

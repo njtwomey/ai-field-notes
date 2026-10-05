@@ -27,7 +27,7 @@ import {
   type Factors,
   type Prior,
 } from './cavi'
-import { normal, stream } from 'aifn/foundation/random'
+import { normal, stream } from 'aifn-compute/foundation/random'
 
 /** Half-steps of coordinate ascent computed ahead of time; the player walks through them a sweep at a time. */
 const MAX_SWEEPS = 25

@@ -2,7 +2,7 @@ import { useMemo } from 'react'
 import { formatNumber, Readout, slider, useFigureState } from 'aifn-render'
 import { ConstrainedExplorer, type ConstrainedProblem } from './ConstrainedExplorer'
 import { tField } from './t-field'
-import { eigh2 } from 'aifn/numerics/linalg'
+import { eigh2 } from 'aifn-compute/numerics/linalg'
 
 const DEG = Math.PI / 180
 

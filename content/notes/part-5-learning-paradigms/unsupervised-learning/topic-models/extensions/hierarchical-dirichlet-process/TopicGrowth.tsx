@@ -13,7 +13,7 @@ import {
   useAxis,
   useFigureState,
 } from 'aifn-render'
-import { categorical, stream } from 'aifn/foundation/random'
+import { categorical, stream } from 'aifn-compute/foundation/random'
 
 const MAX_DOCS = 200
 

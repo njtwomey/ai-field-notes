@@ -14,8 +14,8 @@ import {
   useFigureState,
   Vectors,
 } from 'aifn-render'
-import { linspace, toFlat } from 'aifn/foundation/tensor'
-import { eigh2 } from 'aifn/numerics/linalg'
+import { linspace, toFlat } from 'aifn-compute/foundation/tensor'
+import { eigh2 } from 'aifn-compute/numerics/linalg'
 
 const T = 400
 const SHOWN = 200

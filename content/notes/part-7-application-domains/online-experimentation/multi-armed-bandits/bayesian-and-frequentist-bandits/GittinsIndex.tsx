@@ -12,7 +12,7 @@ import {
   useAxis,
   useFigureState,
 } from 'aifn-render'
-import { regularisedBetaInverse } from 'aifn/numerics/special'
+import { regularisedBetaInverse } from 'aifn-compute/numerics/special'
 
 /** Pseudo-counts a + b at which the index is computed. */
 const COUNTS = [2, 3, 4, 5, 6, 8, 10, 12, 16, 20, 25, 32, 40, 50, 64, 80, 100]

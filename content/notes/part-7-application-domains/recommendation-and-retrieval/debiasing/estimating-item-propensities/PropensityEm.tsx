@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { Curve, Figure, float, formatNumber, Player, Plot, Raster, Readout, useAxis, useFigureState } from 'aifn-render'
-import { logGamma } from 'aifn/numerics/special'
+import { logGamma } from 'aifn-compute/numerics/special'
 
 /** Click counts C_ui for 4 users × 5 items. User 3 clicked item 5 six times, far above what the margins predict. */
 const C = [

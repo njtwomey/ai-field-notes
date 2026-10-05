@@ -12,7 +12,7 @@ import {
 } from 'aifn-render'
 import { anytimeProfile, distanceMatrix, selfJoin } from '../_shared/matrix-profile'
 import { beats } from '../_shared/synthetic'
-import { stream, uniform } from 'aifn/foundation/random'
+import { stream, uniform } from 'aifn-compute/foundation/random'
 
 const N = 400
 const M = 32

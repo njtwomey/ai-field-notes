@@ -5,7 +5,7 @@
  *
  * The random source is passed in (a seeded `stream` in the widgets).
  */
-import { type Stream, uniform } from 'aifn/foundation/random'
+import { type Stream, uniform } from 'aifn-compute/foundation/random'
 
 export const K = 3
 

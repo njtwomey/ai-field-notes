@@ -2,9 +2,9 @@ import { useMemo, useState } from 'react'
 import { Figure, ControlGroup, NumberSelector, Player, Plots, Plot, Curve, Readout, useAxis } from 'aifn-render'
 import { cocktailParty } from 'aifn-methods/data/synthetic'
 import { fastIca, pca } from 'aifn-methods/unsupervised/embedding/linear'
-import { dataset } from 'aifn/learning/estimators'
-import { stream } from 'aifn/foundation/random'
-import { toFlat } from 'aifn/foundation/tensor'
+import { dataset } from 'aifn-compute/learning/estimators'
+import { stream } from 'aifn-compute/foundation/random'
+import { toFlat } from 'aifn-compute/foundation/tensor'
 
 const column = (v: ArrayLike<number>, n: number, d: number, c: number) =>
   Array.from({ length: n }, (_, i) => v[i * d + c])

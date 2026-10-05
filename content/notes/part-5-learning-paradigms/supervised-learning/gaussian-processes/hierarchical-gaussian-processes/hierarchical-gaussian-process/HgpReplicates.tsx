@@ -14,8 +14,8 @@ import {
 } from 'aifn-render'
 import { makeKernel, samples, gram } from '../../_shared/gp'
 import { hgpLogMarginal, hgpPosterior, type Replicate } from '../_shared/hgp'
-import { linspace, toFlat } from 'aifn/foundation/tensor'
-import { normal, stream, uniform } from 'aifn/foundation/random'
+import { linspace, toFlat } from 'aifn-compute/foundation/tensor'
+import { normal, stream, uniform } from 'aifn-compute/foundation/random'
 
 const GRID = toFlat(linspace(0, 10, 101))
 const X_RANGE: [number, number] = [0, 10]

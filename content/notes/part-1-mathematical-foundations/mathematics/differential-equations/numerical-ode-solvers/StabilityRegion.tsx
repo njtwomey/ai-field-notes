@@ -1,6 +1,6 @@
 import { useMemo } from 'react'
-import { amplification, stabilityRegion, type StabilityMethod } from 'aifn/dynamics/ode'
-import { toFlat, toRows } from 'aifn/foundation/tensor'
+import { amplification, stabilityRegion, type StabilityMethod } from 'aifn-compute/dynamics/ode'
+import { toFlat, toRows } from 'aifn-compute/foundation/tensor'
 import {
   choice,
   Contours,

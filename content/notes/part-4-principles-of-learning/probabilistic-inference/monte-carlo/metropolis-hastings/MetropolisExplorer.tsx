@@ -16,8 +16,8 @@ import {
   useFigureState,
 } from 'aifn-render'
 import { effectiveSampleSize, splitRhat } from '../../_shared/mcmc'
-import { linspace, toFlat } from 'aifn/foundation/tensor'
-import { normal, stream, uniform } from 'aifn/foundation/random'
+import { linspace, toFlat } from 'aifn-compute/foundation/tensor'
+import { normal, stream, uniform } from 'aifn-compute/foundation/random'
 
 type Target = 'banana' | 'bimodal'
 type Starts = 'same' | 'spread'

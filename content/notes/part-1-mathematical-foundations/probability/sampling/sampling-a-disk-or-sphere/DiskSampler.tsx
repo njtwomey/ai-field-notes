@@ -1,7 +1,7 @@
 import { useMemo } from 'react'
 import { Figure, int, Plot, Readout, seriesLayers, type SeriesSpec, useAxis, useFigureState } from 'aifn-render'
-import { linspace, toFlat } from 'aifn/foundation/tensor'
-import { stream, uniform } from 'aifn/foundation/random'
+import { linspace, toFlat } from 'aifn-compute/foundation/tensor'
+import { stream, uniform } from 'aifn-compute/foundation/random'
 
 /** The circle that splits the unit disc into two halves of equal area. */
 const HALF = Math.SQRT1_2

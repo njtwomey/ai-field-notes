@@ -1,6 +1,6 @@
 import { useMemo } from 'react'
 import { Curve, Figure, float, formatNumber, Handle, int, Plot, Readout, useAxis, useFigureState } from 'aifn-render'
-import { tTestPower } from 'aifn/probability/tests'
+import { tTestPower } from 'aifn-compute/probability/tests'
 
 /** Power of the pooled two-sample t-test against a standardised difference d, as the total N is split n₁ + n₂. */
 export function Allocation() {

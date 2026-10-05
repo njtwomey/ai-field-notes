@@ -1,6 +1,6 @@
 /**
  * Codemod: move note widgets off `aifn-render/compat` and the site's maths (`@/lib/math…`, `@/lib/dsp`) onto
- * Plot v2 (`Figure`, `useFigureState`, `Plot` + layers) and `aifn`. The mapping is aifn-js/render/MIGRATING-NOTES.md.
+ * Plot v2 (`Figure`, `useFigureState`, `Plot` + layers) and `aifn`. The mapping is in the engine docs (https://njtwomey.github.io/aifn-engine/).
  *
  *   node scripts/migrate-notes.ts --dry-run [paths…]   # report per file what it would change and what is left
  *   node scripts/migrate-notes.ts [paths…]             # rewrite in place and format with prettier
@@ -55,7 +55,7 @@ type MathRule =
 
 const special = (name: string, arity = 1, to = name, reorder?: number[]): [string, MathRule] => [
   name,
-  { kind: 'fn', module: 'aifn/numerics/special', name: to, arity, reorder },
+  { kind: 'fn', module: 'aifn-compute/numerics/special', name: to, arity, reorder },
 ]
 /** Site maths → aifn, where the mapping is 1:1 (same values; at most a rename, an argument order or a wrapper). */
 const MATHS: Record<string, Record<string, MathRule>> = {
@@ -78,33 +78,33 @@ const MATHS: Record<string, Record<string, MathRule>> = {
   ]),
   '@/lib/math/tests': Object.fromEntries([special('studentTQuantile', 2)]),
   '@/lib/math/mat2': {
-    Vec2: { kind: 'type', module: 'aifn/numerics/linalg', name: 'Vec2' },
-    Mat2: { kind: 'type', module: 'aifn/numerics/linalg', name: 'Mat2' },
-    Eig2: { kind: 'type', module: 'aifn/numerics/linalg', name: 'Eig2' },
-    apply: { kind: 'fn', module: 'aifn/numerics/linalg', name: 'apply2', arity: 2 },
-    det: { kind: 'fn', module: 'aifn/numerics/linalg', name: 'det2', arity: 1 },
-    eig2: { kind: 'fn', module: 'aifn/numerics/linalg', name: 'eig2', arity: 1 },
+    Vec2: { kind: 'type', module: 'aifn-compute/numerics/linalg', name: 'Vec2' },
+    Mat2: { kind: 'type', module: 'aifn-compute/numerics/linalg', name: 'Mat2' },
+    Eig2: { kind: 'type', module: 'aifn-compute/numerics/linalg', name: 'Eig2' },
+    apply: { kind: 'fn', module: 'aifn-compute/numerics/linalg', name: 'apply2', arity: 2 },
+    det: { kind: 'fn', module: 'aifn-compute/numerics/linalg', name: 'det2', arity: 1 },
+    eig2: { kind: 'fn', module: 'aifn-compute/numerics/linalg', name: 'eig2', arity: 1 },
     // The site's symmetric (p, q, r) forms take the matrix [[p, q], [q, r]] in aifn (same values; eigh2 signs vectors).
     eigSym: {
       kind: 'fn',
-      module: 'aifn/numerics/linalg',
+      module: 'aifn-compute/numerics/linalg',
       name: 'eigh2',
       arity: 3,
       pack: ([p, q, r]) => `[[${p}, ${q}], [${q}, ${r}]]`,
     },
     cholesky2: {
       kind: 'fn',
-      module: 'aifn/numerics/linalg',
+      module: 'aifn-compute/numerics/linalg',
       name: 'cholesky2',
       arity: 3,
       pack: ([p, q, r]) => `[[${p}, ${q}], [${q}, ${r}]]`,
     },
   },
   '@/lib/dsp': {
-    hzToMel: { kind: 'fn', module: 'aifn/signal/audio', name: 'hzToMel', arity: 1 },
-    melToHz: { kind: 'fn', module: 'aifn/signal/audio', name: 'melToHz', arity: 1 },
-    isPowerOfTwo: { kind: 'fn', module: 'aifn/foundation/fourier', name: 'isPowerOfTwo', arity: 1 },
-    nextPowerOfTwo: { kind: 'fn', module: 'aifn/foundation/fourier', name: 'nextPowerOfTwo', arity: 1 },
+    hzToMel: { kind: 'fn', module: 'aifn-compute/signal/audio', name: 'hzToMel', arity: 1 },
+    melToHz: { kind: 'fn', module: 'aifn-compute/signal/audio', name: 'melToHz', arity: 1 },
+    isPowerOfTwo: { kind: 'fn', module: 'aifn-compute/foundation/fourier', name: 'isPowerOfTwo', arity: 1 },
+    nextPowerOfTwo: { kind: 'fn', module: 'aifn-compute/foundation/fourier', name: 'nextPowerOfTwo', arity: 1 },
   },
 }
 
@@ -430,7 +430,7 @@ function migrateMathsName(c: Ctx, rule: MathRule, local: string): boolean {
       )
     }
     if (local !== 'linspace') return false
-    c.add('aifn/foundation/tensor', 'linspace', 'toFlat')
+    c.add('aifn-compute/foundation/tensor', 'linspace', 'toFlat')
   } else if (!migrateRng(c, local, refs, at)) return false
   c.edits.push(...edits)
   return true
@@ -481,7 +481,7 @@ function migrateRng(c: Ctx, local: string, refs: Node[], write: (n: Node, t: str
     write(n, t)
   }
   const sf = c.sf
-  const RANDOM = 'aifn/foundation/random'
+  const RANDOM = 'aifn-compute/foundation/random'
   const name = Object.fromEntries(
     ['stream', 'uniform', 'normal', 'Stream'].map((n) => [n, taken(sf, n, RANDOM) ? RNG_ALIAS[n] : n]),
   )
@@ -1624,7 +1624,7 @@ function phaseImports(c: Ctx, touched: boolean) {
     const typeOnly = imp.isTypeOnly()
     const adds = typeOnly ? undefined : c.adds.get(mod)
     const managed =
-      touched && (RENDER_MODULES.has(mod) || mod === 'react' || mod.startsWith('aifn/') || c.adds.has(mod))
+      touched && (RENDER_MODULES.has(mod) || mod === 'react' || mod.startsWith('aifn-compute/') || c.adds.has(mod))
     if (!managed || imp.getDefaultImport() || imp.getNamespaceImport()) continue
     if (handled.has(`${mod}|${typeOnly}`)) continue
     handled.add(`${mod}|${typeOnly}`)

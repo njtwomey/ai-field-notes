@@ -1,7 +1,7 @@
 import { useMemo } from 'react'
 import { choice, Figure, float, formatNumber, int, Plot, Raster, Readout, useAxis, useFigureState } from 'aifn-render'
 import { stft } from '../_shared/audio'
-import { normal, stream } from 'aifn/foundation/random'
+import { normal, stream } from 'aifn-compute/foundation/random'
 
 const FS = 8000
 const LENGTH = 2 * FS

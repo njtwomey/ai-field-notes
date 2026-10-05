@@ -13,8 +13,8 @@ import {
   type SeriesSpec,
 } from 'aifn-render'
 import { cholesky, posterior } from './blr'
-import { linspace, toFlat } from 'aifn/foundation/tensor'
-import { normal, stream, uniform } from 'aifn/foundation/random'
+import { linspace, toFlat } from 'aifn-compute/foundation/tensor'
+import { normal, stream, uniform } from 'aifn-compute/foundation/random'
 
 /** Prior precision α and noise precision β, as in Bishop's straight-line example. */
 const ALPHA = 2

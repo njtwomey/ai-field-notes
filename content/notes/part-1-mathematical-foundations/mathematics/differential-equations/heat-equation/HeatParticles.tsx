@@ -16,10 +16,10 @@ import {
   useAxis,
   useFigureState,
 } from 'aifn-render'
-import { normal as drawNormal, stream, uniform as drawUniform } from 'aifn/foundation/random'
+import { normal as drawNormal, stream, uniform as drawUniform } from 'aifn-compute/foundation/random'
 import { histogramDensity } from '../_shared/ode'
-import { linspace, toFlat } from 'aifn/foundation/tensor'
-import { normalPdf } from 'aifn/numerics/special'
+import { linspace, toFlat } from 'aifn-compute/foundation/tensor'
+import { normalPdf } from 'aifn-compute/numerics/special'
 
 const D = 0.5
 const DT = 0.01

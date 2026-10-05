@@ -1,5 +1,11 @@
 # aifn: a shared library for the field notes
 
+> **Historical (2026-10-05):** the engine no longer lives in this repository. It is the aifn-engine project
+> (https://github.com/njtwomey/aifn-engine, docs at https://njtwomey.github.io/aifn-engine/), installed here as the
+> released packages `aifn-compute`, `aifn-methods` and `aifn-render`. Paths below under `aifn-js/core`, `aifn-js/methods`
+> and `aifn-js/render` refer to the old in-tree copy (now `packages/compute`, `packages/methods` and `packages/render`
+> in the engine); the lab moved from `aifn-js/sandbox/lab` to `lab/` here.
+
 Status: **built through phase 5** (2026-10-01; §0). This document is the original plan; the target design that
 replaced parts of it is `docs/aifn-architecture.md`, and where the two differ the architecture document and
 `aifn-js/modules.json` win. Points that needed the owner's decision are marked **[decide]**. Evidence for every claim

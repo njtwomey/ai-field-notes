@@ -16,7 +16,7 @@ import {
 } from 'aifn-render'
 import { useClassColors } from '../_shared/classColor'
 import { fitGpOrdinal, gpOrdinalData } from '../_shared/laplace'
-import { linspace, toFlat } from 'aifn/foundation/tensor'
+import { linspace, toFlat } from 'aifn-compute/foundation/tensor'
 
 const XS = toFlat(linspace(-3.2, 3.2, 129))
 const DATA = gpOrdinalData()

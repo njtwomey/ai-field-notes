@@ -16,7 +16,7 @@ import {
 import { moons, type Point } from '../../_shared/datasets'
 import { clusterSeries } from '../../_shared/groups'
 import { dbscan } from './dbscan'
-import { stream, uniform } from 'aifn/foundation/random'
+import { stream, uniform } from 'aifn-compute/foundation/random'
 
 /** Two moons plus a sprinkling of uniform background noise. */
 function data(): Point[] {

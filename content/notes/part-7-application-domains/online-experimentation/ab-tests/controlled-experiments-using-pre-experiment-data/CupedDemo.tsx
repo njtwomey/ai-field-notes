@@ -13,7 +13,7 @@ import {
   useAxis,
   useFigureState,
 } from 'aifn-render'
-import { normal, stream, type Stream } from 'aifn/foundation/random'
+import { normal, stream, type Stream } from 'aifn-compute/foundation/random'
 
 const N = 200
 const EXPERIMENTS = 400

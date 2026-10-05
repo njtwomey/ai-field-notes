@@ -1,7 +1,7 @@
 import { useMemo } from 'react'
 import { Curve, Figure, float, formatNumber, Handle, int, Plot, Readout, useAxis, useFigureState } from 'aifn-render'
-import { linspace, toFlat } from 'aifn/foundation/tensor'
-import { normalQuantile } from 'aifn/numerics/special'
+import { linspace, toFlat } from 'aifn-compute/foundation/tensor'
+import { normalQuantile } from 'aifn-compute/numerics/special'
 
 const FRACTIONS = toFlat(linspace(0.005, 0.5, 100))
 // Two-sided 5% test with 80% power.

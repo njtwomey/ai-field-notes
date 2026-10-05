@@ -1,4 +1,4 @@
-import { normal, stream } from 'aifn/foundation/random'
+import { normal, stream } from 'aifn-compute/foundation/random'
 
 export type Embedding = [number, number][]
 

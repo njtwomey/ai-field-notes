@@ -1,8 +1,8 @@
 import { useMemo } from 'react'
 import { Area, Curve, Figure, float, formatNumber, Plot, Points, Readout, useAxis, useFigureState } from 'aifn-render'
-import { linspace, toFlat } from 'aifn/foundation/tensor'
-import { normal, stream } from 'aifn/foundation/random'
-import { normalPdf } from 'aifn/numerics/special'
+import { linspace, toFlat } from 'aifn-compute/foundation/tensor'
+import { normal, stream } from 'aifn-compute/foundation/random'
+import { normalPdf } from 'aifn-compute/numerics/special'
 
 // Shimodaira's (2000) example: y = −x + x³ + noise, training inputs from N(0.5, 0.5²), a linear model.
 const N = 100

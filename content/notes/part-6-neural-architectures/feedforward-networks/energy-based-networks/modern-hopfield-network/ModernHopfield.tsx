@@ -12,7 +12,7 @@ import {
   useAxis,
   useFigureState,
 } from 'aifn-render'
-import { stream, uniform } from 'aifn/foundation/random'
+import { stream, uniform } from 'aifn-compute/foundation/random'
 import { GLYPH_SIZE, LETTERS, glyph } from '../_shared/glyphs'
 import { corrupt, overlap } from '../_shared/spins'
 import { attentionWeights, denseRecall, softmaxUpdate, type Separation } from './dense'

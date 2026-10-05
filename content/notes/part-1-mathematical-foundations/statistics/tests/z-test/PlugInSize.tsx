@@ -1,6 +1,6 @@
 import { useMemo } from 'react'
 import { Curve, Figure, float, formatNumber, int, Plot, Readout, useAxis, useFigureState } from 'aifn-render'
-import { normalQuantile, studentTCdf } from 'aifn/numerics/special'
+import { normalQuantile, studentTCdf } from 'aifn-compute/numerics/special'
 
 const N_MAX = 60
 

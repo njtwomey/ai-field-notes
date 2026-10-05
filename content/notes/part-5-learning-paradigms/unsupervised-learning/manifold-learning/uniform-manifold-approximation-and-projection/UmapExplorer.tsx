@@ -1,9 +1,9 @@
 import { useMemo, useState } from 'react'
 import { digits } from 'aifn-methods/data/synthetic'
 import { fuzzyGraph, jointProbabilities, tsneSteps, umapSteps } from 'aifn-methods/unsupervised/embedding/neighbour'
-import { stream } from 'aifn/foundation/random'
-import { fromData, toFlat, toRows } from 'aifn/foundation/tensor'
-import { trace } from 'aifn/foundation/trace'
+import { stream } from 'aifn-compute/foundation/random'
+import { fromData, toFlat, toRows } from 'aifn-compute/foundation/tensor'
+import { trace } from 'aifn-compute/foundation/trace'
 import { ControlGroup, Figure, NumberSelector, Player, Plot, Points, Readout, Select, useAxis } from 'aifn-render'
 
 const METHOD_OPTIONS = [

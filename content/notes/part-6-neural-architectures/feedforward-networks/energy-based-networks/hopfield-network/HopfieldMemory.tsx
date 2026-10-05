@@ -21,7 +21,7 @@ import {
   useFigureState,
   variants,
 } from 'aifn-render'
-import { stream, uniform } from 'aifn/foundation/random'
+import { stream, uniform } from 'aifn-compute/foundation/random'
 import { GLYPH_SIZE, glyph } from '../_shared/glyphs'
 import { corrupt, hebbian, mosaic, overlap, pixelBox, runAsync, stateAt } from '../_shared/spins'
 

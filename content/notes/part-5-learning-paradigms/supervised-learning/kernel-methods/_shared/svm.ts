@@ -1,7 +1,7 @@
 import { supportVectorMachine, type SupportVectorMachineModel } from 'aifn-methods/learning/kernel-methods'
-import { rbf, linearKernel as aifnLinearKernel } from 'aifn/learning/kernels'
-import { dataset } from 'aifn/learning/estimators'
-import { fromData, toFlat } from 'aifn/foundation/tensor'
+import { rbf, linearKernel as aifnLinearKernel } from 'aifn-compute/learning/kernels'
+import { dataset } from 'aifn-compute/learning/estimators'
+import { fromData, toFlat } from 'aifn-compute/foundation/tensor'
 
 export type Point = [number, number]
 export type Kernel2 = (a: Point, b: Point) => number

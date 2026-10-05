@@ -14,8 +14,8 @@ import {
   useFigureState,
 } from 'aifn-render'
 import { joinPaths } from '../_shared/sde'
-import { linspace, toFlat } from 'aifn/foundation/tensor'
-import { normal, stream } from 'aifn/foundation/random'
+import { linspace, toFlat } from 'aifn-compute/foundation/tensor'
+import { normal, stream } from 'aifn-compute/foundation/random'
 
 const PATHS = 2000
 const MAX_SHOWN = 50

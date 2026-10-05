@@ -13,7 +13,7 @@ import {
   useFigureState,
 } from 'aifn-render'
 import { jsDiv, klDiv, tvDist } from '../_shared/ot'
-import { linspace, toFlat } from 'aifn/foundation/tensor'
+import { linspace, toFlat } from 'aifn-compute/foundation/tensor'
 
 type Shape = 'uniform' | 'gaussian'
 

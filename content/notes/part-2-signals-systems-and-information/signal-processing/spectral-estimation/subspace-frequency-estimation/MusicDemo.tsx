@@ -1,8 +1,8 @@
 import { useMemo } from 'react'
 import { Figure, int, Plot, Readout, seriesLayers, type SeriesSpec, useAxis, useFigureState } from 'aifn-render'
 import { periodogram, powerDb, symmetricEigen } from '../_shared/spectra'
-import { linspace, toFlat } from 'aifn/foundation/tensor'
-import { normal, stream, uniform } from 'aifn/foundation/random'
+import { linspace, toFlat } from 'aifn-compute/foundation/tensor'
+import { normal, stream, uniform } from 'aifn-compute/foundation/random'
 
 const GRID = toFlat(linspace(0, Math.PI, 2001))
 const CENTRE = 0.3 * Math.PI

@@ -18,8 +18,8 @@ import {
   useFigureState,
 } from 'aifn-render'
 import { splitRhat } from '../../_shared/mcmc'
-import { linspace, toFlat } from 'aifn/foundation/tensor'
-import { normal, stream, uniform } from 'aifn/foundation/random'
+import { linspace, toFlat } from 'aifn-compute/foundation/tensor'
+import { normal, stream, uniform } from 'aifn-compute/foundation/random'
 
 /** Target: an equal-width mixture of three isotropic Gaussians in the plane. */
 const MEANS: [number, number][] = [

@@ -13,8 +13,8 @@ import {
   formatNumber,
   useAxis,
 } from 'aifn-render'
-import { normals, stream } from 'aifn/foundation/random'
-import { mul, toFlat } from 'aifn/foundation/tensor'
+import { normals, stream } from 'aifn-compute/foundation/random'
+import { mul, toFlat } from 'aifn-compute/foundation/tensor'
 import {
   ddimSampler,
   gaussianMixtureData,

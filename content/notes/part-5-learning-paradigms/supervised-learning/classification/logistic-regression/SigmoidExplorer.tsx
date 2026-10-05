@@ -1,7 +1,7 @@
 import { useMemo } from 'react'
 import { Annotation, Curve, Figure, Handle, Plot, slider, useAxis, useFigureState } from 'aifn-render'
-import { linspace, toFlat } from 'aifn/foundation/tensor'
-import { sigmoid } from 'aifn/numerics/special'
+import { linspace, toFlat } from 'aifn-compute/foundation/tensor'
+import { sigmoid } from 'aifn-compute/numerics/special'
 
 const X = toFlat(linspace(-6, 6, 121))
 

@@ -14,8 +14,8 @@ import {
   useAxis,
   useFigureState,
 } from 'aifn-render'
-import { linspace, toFlat } from 'aifn/foundation/tensor'
-import { normalCdf, normalPdf, sigmoid } from 'aifn/numerics/special'
+import { linspace, toFlat } from 'aifn-compute/foundation/tensor'
+import { normalCdf, normalPdf, sigmoid } from 'aifn-compute/numerics/special'
 
 type Activation = { id: string; name: string; shown: boolean; f: (x: number) => number; df: (x: number) => number }
 

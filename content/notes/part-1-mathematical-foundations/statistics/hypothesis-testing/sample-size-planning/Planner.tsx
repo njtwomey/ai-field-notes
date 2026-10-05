@@ -1,7 +1,7 @@
 import { useMemo } from 'react'
 import { Curve, Figure, float, formatNumber, Handle, int, Plot, Readout, useAxis, useFigureState } from 'aifn-render'
-import { normalQuantile } from 'aifn/numerics/special'
-import { tTestPower } from 'aifn/probability/tests'
+import { normalQuantile } from 'aifn-compute/numerics/special'
+import { tTestPower } from 'aifn-compute/probability/tests'
 
 const N_MIN = 5
 const N_MAX = 500

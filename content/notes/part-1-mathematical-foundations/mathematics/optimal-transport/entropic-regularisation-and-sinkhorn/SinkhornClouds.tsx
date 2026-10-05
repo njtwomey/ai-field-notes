@@ -19,7 +19,7 @@ import {
   Vectors,
 } from 'aifn-render'
 import { costMatrix, hungarian, sinkhorn, type Pt } from '../_shared/ot'
-import { normal, stream } from 'aifn/foundation/random'
+import { normal, stream } from 'aifn-compute/foundation/random'
 
 const N = 7
 const RANGE: [number, number] = [-2.5, 2.5]

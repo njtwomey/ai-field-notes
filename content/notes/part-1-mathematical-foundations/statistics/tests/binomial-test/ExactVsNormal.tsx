@@ -12,9 +12,9 @@ import {
   useAxis,
   useFigureState,
 } from 'aifn-render'
-import { Binomial } from 'aifn/probability/distributions'
-import { linspace, toFlat } from 'aifn/foundation/tensor'
-import { normalCdf, normalPdf } from 'aifn/numerics/special'
+import { Binomial } from 'aifn-compute/probability/distributions'
+import { linspace, toFlat } from 'aifn-compute/foundation/tensor'
+import { normalCdf, normalPdf } from 'aifn-compute/numerics/special'
 
 /**
  * Two-sided binomial test of H₀: p = p₀ for s successes in n trials. The exact p-value sums the probabilities of all

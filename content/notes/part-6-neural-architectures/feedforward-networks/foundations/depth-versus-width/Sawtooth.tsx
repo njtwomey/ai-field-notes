@@ -10,7 +10,7 @@ import {
   useAxis,
   useFigureState,
 } from 'aifn-render'
-import { linspace, toFlat } from 'aifn/foundation/tensor'
+import { linspace, toFlat } from 'aifn-compute/foundation/tensor'
 
 const relu = (x: number) => Math.max(0, x)
 /** The tent map as a width-2 ReLU layer: 2x on [0, ½], 2 − 2x on [½, 1]. */

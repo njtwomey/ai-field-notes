@@ -1,6 +1,6 @@
 import { useMemo } from 'react'
 import { Curve, Figure, float, formatNumber, Plot, Readout, slider, useAxis, useFigureState } from 'aifn-render'
-import { logChoose } from 'aifn/numerics/special'
+import { logChoose } from 'aifn-compute/numerics/special'
 
 const NS = Array.from({ length: 60 }, (_, i) => 10 * (i + 1))
 const FLOOR = 1e-12

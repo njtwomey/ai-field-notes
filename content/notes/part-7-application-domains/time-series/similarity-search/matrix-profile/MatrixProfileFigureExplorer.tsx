@@ -1,8 +1,15 @@
 import { useMemo, useState } from 'react'
-import { stream } from 'aifn/foundation/random'
-import { toFlat } from 'aifn/foundation/tensor'
-import { trace } from 'aifn/foundation/trace'
-import { discords, distanceProfile, matrixProfile, motifs, scrimpProfile, scrimpSteps } from 'aifn/signal/similarity'
+import { stream } from 'aifn-compute/foundation/random'
+import { toFlat } from 'aifn-compute/foundation/tensor'
+import { trace } from 'aifn-compute/foundation/trace'
+import {
+  discords,
+  distanceProfile,
+  matrixProfile,
+  motifs,
+  scrimpProfile,
+  scrimpSteps,
+} from 'aifn-compute/signal/similarity'
 import { motifSeries } from 'aifn-methods/data/synthetic'
 import {
   Figure,

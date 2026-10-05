@@ -1,8 +1,8 @@
 import { useMemo } from 'react'
 import { Bars, choice, Curve, Figure, formatNumber, int, Plot, Readout, useAxis, useFigureState } from 'aifn-render'
-import { normal, stream, uniform, type Stream } from 'aifn/foundation/random'
-import { linspace, toFlat } from 'aifn/foundation/tensor'
-import { normalPdf } from 'aifn/numerics/special'
+import { normal, stream, uniform, type Stream } from 'aifn-compute/foundation/random'
+import { linspace, toFlat } from 'aifn-compute/foundation/tensor'
+import { normalPdf } from 'aifn-compute/numerics/special'
 
 type Source = 'normal' | 'exponential' | 'uniform'
 

@@ -11,7 +11,7 @@ import {
   settlingGames,
   type RatingTrace,
 } from 'aifn-methods/inference/rating-models'
-import { child, standardNormals, stream } from 'aifn/foundation/random'
+import { child, standardNormals, stream } from 'aifn-compute/foundation/random'
 import {
   Area,
   Bars,

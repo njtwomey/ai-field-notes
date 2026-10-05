@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
 import { classifierOutputs, quantileModelOutputs } from 'aifn-methods/data/synthetic'
-import { child, stream } from 'aifn/foundation/random'
-import { toFlat, toRows, type Tensor } from 'aifn/foundation/tensor'
+import { child, stream } from 'aifn-compute/foundation/random'
+import { toFlat, toRows, type Tensor } from 'aifn-compute/foundation/tensor'
 import {
   conformalClassification,
   conformalisedQuantileRegression,
@@ -9,9 +9,9 @@ import {
   setCoverage,
   splitConformalRegression,
   type ClassificationScore,
-} from 'aifn/learning/conformal'
-import { softmax } from 'aifn/numerics/special'
-import { Beta } from 'aifn/probability/distributions'
+} from 'aifn-compute/learning/conformal'
+import { softmax } from 'aifn-compute/numerics/special'
+import { Beta } from 'aifn-compute/probability/distributions'
 import {
   Annotation,
   Area,

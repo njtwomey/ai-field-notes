@@ -6,7 +6,7 @@ import {
   type LearnerModelResult,
   type LearnerModelRunResult,
 } from 'aifn-methods/inference/learner-models'
-import { stream } from 'aifn/foundation/random'
+import { stream } from 'aifn-compute/foundation/random'
 import {
   Bars,
   ControlRow,

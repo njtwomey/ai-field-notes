@@ -13,9 +13,9 @@ import {
   formatNumber,
   useAxis,
 } from 'aifn-render'
-import { child, normal, stream, uniform } from 'aifn/foundation/random'
-import { fromData, toFlat, type Tensor } from 'aifn/foundation/tensor'
-import { quantisationError, quantisationParams, type QuantisationParams } from 'aifn/nn/quantise'
+import { child, normal, stream, uniform } from 'aifn-compute/foundation/random'
+import { fromData, toFlat, type Tensor } from 'aifn-compute/foundation/tensor'
+import { quantisationError, quantisationParams, type QuantisationParams } from 'aifn-compute/nn/quantise'
 
 const fmt = (v: number) => (Number.isFinite(v) ? formatNumber(v) : '—')
 const BITS = [2, 3, 4, 5, 6, 7, 8]

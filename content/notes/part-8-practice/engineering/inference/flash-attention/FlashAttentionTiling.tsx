@@ -1,8 +1,8 @@
 import { useMemo, useState } from 'react'
-import { normal, stream } from 'aifn/foundation/random'
-import { toFlat, unwrap, type Tensor } from 'aifn/foundation/tensor'
-import { trace } from 'aifn/foundation/trace'
-import { flashAttentionSteps, scaledDotProductAttention } from 'aifn/nn/attention'
+import { normal, stream } from 'aifn-compute/foundation/random'
+import { toFlat, unwrap, type Tensor } from 'aifn-compute/foundation/tensor'
+import { trace } from 'aifn-compute/foundation/trace'
+import { flashAttentionSteps, scaledDotProductAttention } from 'aifn-compute/nn/attention'
 import {
   Bars,
   ControlGroup,

@@ -18,8 +18,8 @@ import {
 } from 'aifn-render'
 import type { SolverDatasets } from '@/generated/contracts'
 import { useFigure } from '@/lib/generated'
-import { stream, uniform } from 'aifn/foundation/random'
-import { sigmoid } from 'aifn/numerics/special'
+import { stream, uniform } from 'aifn-compute/foundation/random'
+import { sigmoid } from 'aifn-compute/numerics/special'
 
 type Vec = [number, number]
 type Problem = { x1: number[]; x2: number[]; y: number[]; lambda: number }

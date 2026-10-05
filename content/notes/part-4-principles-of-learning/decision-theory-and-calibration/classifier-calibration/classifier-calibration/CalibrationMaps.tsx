@@ -1,8 +1,8 @@
 import { useMemo } from 'react'
 import { choice, Curve, Figure, formatNumber, int, Plot, Points, Readout, useAxis, useFigureState } from 'aifn-render'
 import { expit, fitBeta, fitIsotonic, fitPlatt, logLoss, logit } from '../../_shared/calibration'
-import { linspace, toFlat } from 'aifn/foundation/tensor'
-import { normal, stream, uniform } from 'aifn/foundation/random'
+import { linspace, toFlat } from 'aifn-compute/foundation/tensor'
+import { normal, stream, uniform } from 'aifn-compute/foundation/random'
 
 type Distortion = 'calibrated' | 'overconfident' | 'underconfident' | 'shifted' | 'wavy'
 const GRID = toFlat(linspace(0.005, 0.995, 100))

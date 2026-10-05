@@ -16,9 +16,9 @@ import {
   useFigureState,
 } from 'aifn-render'
 import { eventTable, logRank, median, stepPath } from './survival'
-import { linspace, toFlat } from 'aifn/foundation/tensor'
-import { stream, uniform } from 'aifn/foundation/random'
-import { normalCdf } from 'aifn/numerics/special'
+import { linspace, toFlat } from 'aifn-compute/foundation/tensor'
+import { stream, uniform } from 'aifn-compute/foundation/random'
+import { normalCdf } from 'aifn-compute/numerics/special'
 
 const N = 60
 const T_MAX = 24

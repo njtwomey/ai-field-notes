@@ -13,8 +13,8 @@ import {
   useFigureState,
 } from 'aifn-render'
 import { blobs, dist2, kmeans2d, nearest, rankBy, type P } from '../_shared/geometry'
-import { linspace, toFlat } from 'aifn/foundation/tensor'
-import { normal, stream } from 'aifn/foundation/random'
+import { linspace, toFlat } from 'aifn-compute/foundation/tensor'
+import { normal, stream } from 'aifn-compute/foundation/random'
 
 const N = 1200
 const NLIST = 24

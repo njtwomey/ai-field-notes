@@ -1,8 +1,8 @@
 import { useMemo, useState } from 'react'
 import { feasibilityTask } from 'aifn-methods/data/synthetic'
 import { comparisonModel, fullBatchComparison } from 'aifn-methods/neural/full-batch'
-import { stream } from 'aifn/foundation/random'
-import { fromData, toFlat, type Tensor } from 'aifn/foundation/tensor'
+import { stream } from 'aifn-compute/foundation/random'
+import { fromData, toFlat, type Tensor } from 'aifn-compute/foundation/tensor'
 import {
   denseFunction,
   denseOutput,
@@ -15,9 +15,9 @@ import {
   wachterCounterfactual,
   type Actionability,
   type DenseNetwork,
-} from 'aifn/learning/explain'
-import { sigmoid } from 'aifn/numerics/special'
-import { multivariateKde } from 'aifn/probability/stats'
+} from 'aifn-compute/learning/explain'
+import { sigmoid } from 'aifn-compute/numerics/special'
+import { multivariateKde } from 'aifn-compute/probability/stats'
 import {
   ControlGroup,
   Contours,

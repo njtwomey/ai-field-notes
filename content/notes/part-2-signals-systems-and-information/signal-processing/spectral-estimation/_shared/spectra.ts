@@ -3,10 +3,10 @@
  * S(ω) = Σ_m r[m] e^{−iωm} of a real, unit-spaced signal, evaluated for ω ∈ [0, π]; unit-variance white noise has
  * S(ω) = 1. The DFT and windows come from aifn.
  */
-import { nextPowerOfTwo, rfft } from 'aifn/foundation/fourier'
-import { imagPart, realPart, toFlat, type Tensor } from 'aifn/foundation/tensor'
-import { getWindow, type WindowName } from 'aifn/signal/windows'
-import { normal, stream } from 'aifn/foundation/random'
+import { nextPowerOfTwo, rfft } from 'aifn-compute/foundation/fourier'
+import { imagPart, realPart, toFlat, type Tensor } from 'aifn-compute/foundation/tensor'
+import { getWindow, type WindowName } from 'aifn-compute/signal/windows'
+import { normal, stream } from 'aifn-compute/foundation/random'
 
 /** A periodic window of n samples, as plain numbers. */
 export const windowOf = (win: WindowName, n: number): number[] => toFlat(getWindow(win, n, { periodic: true }))

@@ -12,7 +12,7 @@ import {
   useFigureState,
 } from 'aifn-render'
 import { effectiveSampleSize, splitRhat } from '../../_shared/mcmc'
-import { normal, stream } from 'aifn/foundation/random'
+import { normal, stream } from 'aifn-compute/foundation/random'
 
 /** Trace points drawn per chain; longer chains are thinned for drawing only. */
 const TRACE_POINTS = 400

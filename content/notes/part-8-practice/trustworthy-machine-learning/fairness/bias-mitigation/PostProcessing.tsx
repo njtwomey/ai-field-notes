@@ -12,8 +12,8 @@ import {
   useAxis,
   useFigureState,
 } from 'aifn-render'
-import { linspace, toFlat } from 'aifn/foundation/tensor'
-import { normalCdf, normalQuantile } from 'aifn/numerics/special'
+import { linspace, toFlat } from 'aifn-compute/foundation/tensor'
+import { normalCdf, normalQuantile } from 'aifn-compute/numerics/special'
 
 /**
  * Binormal scores in each group: negatives ~ N(m, 1), positives ~ N(m + d, 1), with group B's scores offset by m = −0.5.

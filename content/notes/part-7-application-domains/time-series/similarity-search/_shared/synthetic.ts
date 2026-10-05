@@ -1,4 +1,4 @@
-import { normal, stream, type Stream, uniform } from 'aifn/foundation/random'
+import { normal, stream, type Stream, uniform } from 'aifn-compute/foundation/random'
 /** Synthetic series for the matrix-profile figures. Seeded, so every figure is reproducible. */
 
 /** A heartbeat-like shape of the given length: small P bump, sharp R spike, S dip and a broad T wave. */

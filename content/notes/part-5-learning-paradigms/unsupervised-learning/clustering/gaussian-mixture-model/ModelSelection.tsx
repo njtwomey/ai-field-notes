@@ -13,7 +13,7 @@ import {
 } from 'aifn-render'
 import type { FittedMixture, ModelSelectionTable, PointCloud2d } from '@/generated/contracts'
 import { useFigure } from '@/lib/generated'
-import type { Vec2 as Point } from 'aifn/numerics/linalg'
+import type { Vec2 as Point } from 'aifn-compute/numerics/linalg'
 import { eStep, ellipse, type Mixture } from './em'
 
 /** k means and k diagonal variances in 2-D, plus k − 1 free weights. */

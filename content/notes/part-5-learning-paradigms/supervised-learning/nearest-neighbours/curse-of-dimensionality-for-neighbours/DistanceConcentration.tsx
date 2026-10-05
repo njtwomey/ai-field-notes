@@ -13,7 +13,7 @@ import {
   useAxis,
   useFigureState,
 } from 'aifn-render'
-import { stream, uniform } from 'aifn/foundation/random'
+import { stream, uniform } from 'aifn-compute/foundation/random'
 
 const DIMS = [1, 2, 3, 5, 10, 20, 50, 100, 200, 500, 1000]
 const LOG_DIMS = DIMS.map((d) => Math.log10(d))

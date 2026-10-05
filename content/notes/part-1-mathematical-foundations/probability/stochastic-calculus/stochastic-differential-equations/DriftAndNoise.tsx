@@ -15,9 +15,9 @@ import {
   when,
 } from 'aifn-render'
 import { joinPaths } from '../_shared/sde'
-import { linspace, toFlat } from 'aifn/foundation/tensor'
-import { normalCdf } from 'aifn/numerics/special'
-import { normal, stream } from 'aifn/foundation/random'
+import { linspace, toFlat } from 'aifn-compute/foundation/tensor'
+import { normalCdf } from 'aifn-compute/numerics/special'
+import { normal, stream } from 'aifn-compute/foundation/random'
 
 /** Brownian paths simulated once; the paths slider draws the first few. */
 const MAX_PATHS = 50

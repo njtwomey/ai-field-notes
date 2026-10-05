@@ -16,7 +16,7 @@ import {
   useFigureState,
   useTheme,
 } from 'aifn-render'
-import { linspace, toFlat } from 'aifn/foundation/tensor'
+import { linspace, toFlat } from 'aifn-compute/foundation/tensor'
 
 const B = { min: 1, max: 12, step: 0.5 }
 const C = { min: 1, max: 60, step: 1 }

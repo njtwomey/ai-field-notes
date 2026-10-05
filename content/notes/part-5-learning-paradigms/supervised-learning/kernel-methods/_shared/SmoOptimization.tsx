@@ -1,11 +1,11 @@
 import { useMemo, useState } from 'react'
 import { moons } from 'aifn-methods/data/synthetic'
 import { dualDecision, smoSteps, type SmoState } from 'aifn-methods/learning/kernel-methods'
-import { stream } from 'aifn/foundation/random'
-import { fromData, toFlat, toRows } from 'aifn/foundation/tensor'
-import { trace } from 'aifn/foundation/trace'
-import { grid2d } from 'aifn/numerics/geometry'
-import { rbf } from 'aifn/learning/kernels'
+import { stream } from 'aifn-compute/foundation/random'
+import { fromData, toFlat, toRows } from 'aifn-compute/foundation/tensor'
+import { trace } from 'aifn-compute/foundation/trace'
+import { grid2d } from 'aifn-compute/numerics/geometry'
+import { rbf } from 'aifn-compute/learning/kernels'
 import {
   Contours,
   ControlGroup,

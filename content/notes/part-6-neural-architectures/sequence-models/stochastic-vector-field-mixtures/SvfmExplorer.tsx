@@ -20,7 +20,7 @@ import {
   type SvfmRun,
 } from 'aifn-methods/neural/ode-mixtures'
 import { odeFailureCase } from 'aifn-methods/data/synthetic'
-import { stream } from 'aifn/foundation/random'
+import { stream } from 'aifn-compute/foundation/random'
 
 const TASKS = [
   { value: 'splitting', label: '1D Trajectory Splitting (one-to-many)' },

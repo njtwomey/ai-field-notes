@@ -14,9 +14,14 @@ import {
   useFigureState,
   variants,
 } from 'aifn-render'
-import { fromData, linspace, toFlat, toRows } from 'aifn/foundation/tensor'
-import { bsplineBasis, clampedKnots } from 'aifn/numerics/interpolate'
-import { distributionalFamily, link, type DistributionalFamilyName, type LinkName } from 'aifn/probability/likelihoods'
+import { fromData, linspace, toFlat, toRows } from 'aifn-compute/foundation/tensor'
+import { bsplineBasis, clampedKnots } from 'aifn-compute/numerics/interpolate'
+import {
+  distributionalFamily,
+  link,
+  type DistributionalFamilyName,
+  type LinkName,
+} from 'aifn-compute/probability/likelihoods'
 
 const GRID = toFlat(linspace(0, 1, 121))
 const DEGREE = 3

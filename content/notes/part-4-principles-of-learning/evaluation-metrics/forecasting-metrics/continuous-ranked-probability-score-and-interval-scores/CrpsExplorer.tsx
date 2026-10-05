@@ -1,7 +1,7 @@
 import { useMemo } from 'react'
 import { Area, Curve, Figure, float, formatNumber, Handle, Plot, Readout, useAxis, useFigureState } from 'aifn-render'
-import { linspace, toFlat } from 'aifn/foundation/tensor'
-import { normalCdf } from 'aifn/numerics/special'
+import { linspace, toFlat } from 'aifn-compute/foundation/tensor'
+import { normalCdf } from 'aifn-compute/numerics/special'
 
 const Z = toFlat(linspace(-4, 4, 401))
 const SIGMAS = toFlat(linspace(0.1, 3, 146))

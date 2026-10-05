@@ -1,7 +1,7 @@
 import { spectralClustering, kmeans as aifnKmeans } from 'aifn-methods/unsupervised/clustering'
-import { dataset } from 'aifn/learning/estimators'
-import { fromData, toFlat, toRows } from 'aifn/foundation/tensor'
-import type { Vec2 as Point } from 'aifn/numerics/linalg'
+import { dataset } from 'aifn-compute/learning/estimators'
+import { fromData, toFlat, toRows } from 'aifn-compute/foundation/tensor'
+import type { Vec2 as Point } from 'aifn-compute/numerics/linalg'
 
 /** Lloyd's algorithm from k-means++ starts, backed by aifn-methods. */
 export function kmeans(points: Point[], k: number, seeds = 5): number[] {

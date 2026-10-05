@@ -13,7 +13,7 @@ import {
   useFigureState,
 } from 'aifn-render'
 import { bestSplit, informationGain, subsequenceDistance } from '../_shared/tsc'
-import { normal, stream, uniform } from 'aifn/foundation/random'
+import { normal, stream, uniform } from 'aifn-compute/foundation/random'
 
 const PER_CLASS = 8
 const LENGTH = 60

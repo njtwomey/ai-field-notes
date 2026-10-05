@@ -1,6 +1,6 @@
 import { useMemo } from 'react'
 import { Area, Curve, Figure, float, formatNumber, Plot, Readout, useAxis, useFigureState } from 'aifn-render'
-import { linspace, toFlat } from 'aifn/foundation/tensor'
+import { linspace, toFlat } from 'aifn-compute/foundation/tensor'
 
 const ZS = toFlat(linspace(-10, 10, 401))
 const DZ = ZS[1] - ZS[0]

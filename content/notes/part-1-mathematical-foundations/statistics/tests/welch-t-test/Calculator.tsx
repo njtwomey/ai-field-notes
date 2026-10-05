@@ -1,6 +1,6 @@
 import { useMemo } from 'react'
 import { Figure, float, formatNumber, int, Readout, useFigureState } from 'aifn-render'
-import { studentTCdf } from 'aifn/numerics/special'
+import { studentTCdf } from 'aifn-compute/numerics/special'
 
 type Result = { t: number; df: number; p: number }
 

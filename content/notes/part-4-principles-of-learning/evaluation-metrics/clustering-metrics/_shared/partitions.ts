@@ -1,4 +1,4 @@
-import { logFactorial } from 'aifn/numerics/special'
+import { logFactorial } from 'aifn-compute/numerics/special'
 /**
  * Scores comparing two partitions of the same n items: pair counting (Rand, adjusted Rand, Fowlkes–Mallows) and
  * information theory (mutual information, NMI, AMI, homogeneity, completeness, V-measure). Natural logarithms throughout,

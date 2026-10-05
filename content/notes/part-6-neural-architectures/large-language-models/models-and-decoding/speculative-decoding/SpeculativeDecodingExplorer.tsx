@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
-import { stream } from 'aifn/foundation/random'
-import { trace } from 'aifn/foundation/trace'
-import { expectedTokensPerCall, speculativeDecoding } from 'aifn/nn/decoding'
+import { stream } from 'aifn-compute/foundation/random'
+import { trace } from 'aifn-compute/foundation/trace'
+import { expectedTokensPerCall, speculativeDecoding } from 'aifn-compute/nn/decoding'
 import { charCorpus, decodeChars, encodeChars, kneserNey } from 'aifn-methods/neural/language-models'
 import {
   Annotation,

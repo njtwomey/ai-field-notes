@@ -1,6 +1,6 @@
 import { useMemo } from 'react'
 import { Bars, Curve, Figure, float, formatNumber, int, Plot, Readout, useAxis, useFigureState } from 'aifn-render'
-import { Binomial } from 'aifn/probability/distributions'
+import { Binomial } from 'aifn-compute/probability/distributions'
 
 /** P(S = k) for S ~ Binomial(n, p). */
 const binomialPmf = (k: number, n: number, p: number) => Binomial(n, p).prob(k) as number

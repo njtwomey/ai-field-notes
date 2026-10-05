@@ -1,9 +1,9 @@
 import { useMemo } from 'react'
 import { Curve, Figure, formatNumber, int, Plot, Readout, useAxis, useFigureState } from 'aifn-render'
-import { convolve } from 'aifn/foundation/convolution'
-import { fromData, toFlat, type Tensor } from 'aifn/foundation/tensor'
+import { convolve } from 'aifn-compute/foundation/convolution'
+import { fromData, toFlat, type Tensor } from 'aifn-compute/foundation/tensor'
 import { db, response as freqz } from '../_shared/design'
-import { normal, stream } from 'aifn/foundation/random'
+import { normal, stream } from 'aifn-compute/foundation/random'
 
 const N = 300
 

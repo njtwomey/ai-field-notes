@@ -13,7 +13,7 @@ import {
   useFigureState,
 } from 'aifn-render'
 import { iccBetaThree, iccTwoPL, runExperiment } from './instanceIrt'
-import { linspace, toFlat } from 'aifn/foundation/tensor'
+import { linspace, toFlat } from 'aifn-compute/foundation/tensor'
 
 type Model = '2PL' | 'beta3'
 type Colour = 'difficulty' | 'discrimination' | 'label'

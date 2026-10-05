@@ -26,7 +26,7 @@ import {
   type SurfaceId,
   type Vec,
 } from './optimisers'
-import { linspace, toFlat } from 'aifn/foundation/tensor'
+import { linspace, toFlat } from 'aifn-compute/foundation/tensor'
 
 const GRID = 81
 const TOL = 1e-3

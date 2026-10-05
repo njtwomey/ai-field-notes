@@ -1,4 +1,4 @@
-import { normal, stream } from 'aifn/foundation/random'
+import { normal, stream } from 'aifn-compute/foundation/random'
 /**
  * Multiclass classification on 2-D toy data from linear logistic classifiers: one-versus-rest, one-versus-one, an
  * exhaustive error-correcting output code, and multinomial logistic regression. Everything here is small enough to

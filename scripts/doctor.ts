@@ -148,8 +148,8 @@ for (const rel of sourceFiles) {
   }
 }
 
-// The legacy rendering path (aifn-render's compat layer) and the site's own maths are gone: notes, the site, the
-// examples and the sandbox use Figure, useFigureState, Plot + layers and aifn. Cheap, so it scans the whole tree.
+// The legacy rendering path (aifn-render's compat layer) and the site's own maths are gone: notes, the site and the
+// lab use Figure, useFigureState, Plot + layers and aifn-compute. Cheap, so it scans the whole tree.
 const removedModule =
   /^(aifn-render\/compat|@render\/compat|@\/lib\/(math|dsp|distributions))(\/|$)|\/lib\/(math|dsp|distributions)(\/|$)/
 const legacyNames = new Set(
@@ -159,7 +159,7 @@ const legacyNames = new Set(
 )
 const legacyFiles = [
   ...fs.globSync('notes/**/*.{ts,tsx,mdx}', { cwd: contentDir }).map((f) => path.join(contentDir, f)),
-  ...['site/src', 'aifn-js/examples/src', 'aifn-js/sandbox']
+  ...['site/src', 'lab/src']
     .flatMap((dir) => fs.globSync(`${dir}/**/*.{ts,tsx,mdx}`, { cwd: root }))
     .filter((f) => !f.includes('node_modules'))
     .map((f) => path.join(root, f)),
@@ -171,7 +171,9 @@ for (const file of legacyFiles) {
     /import\s+(?:type\s+)?(?:\{([^}]*)\}|[\w*\s]+)\s*from\s*['"]([^'"]+)['"]/g,
   )) {
     if (removedModule.test(spec))
-      errors.push(`${where}: imports removed module "${spec}"; see aifn-js/render/MIGRATING-NOTES.md`)
+      errors.push(
+        `${where}: imports removed module "${spec}"; see the migration notes in the engine docs, https://njtwomey.github.io/aifn-engine/`,
+      )
     if (!/^(aifn-render|@render|@lab)(\/|$)/.test(spec)) continue
     for (const raw of names?.split(',') ?? []) {
       const name = raw

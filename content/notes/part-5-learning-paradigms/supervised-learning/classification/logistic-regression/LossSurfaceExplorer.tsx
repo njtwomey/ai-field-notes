@@ -16,7 +16,7 @@ import {
 } from 'aifn-render'
 import type { LossSurface } from '@/generated/contracts'
 import { useFigure } from '@/lib/generated'
-import { sigmoid } from 'aifn/numerics/special'
+import { sigmoid } from 'aifn-compute/numerics/special'
 
 const mean = (xs: readonly number[]) => xs.reduce((a, b) => a + b, 0) / xs.length
 

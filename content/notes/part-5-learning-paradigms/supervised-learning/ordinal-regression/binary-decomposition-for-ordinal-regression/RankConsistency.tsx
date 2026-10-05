@@ -17,8 +17,8 @@ import {
 } from 'aifn-render'
 import { useClassColors } from '../_shared/classColor'
 import { exceedanceProbs, fitShared1d, logistic1d, nonParallelSample } from '../_shared/ordinal'
-import { linspace, toFlat } from 'aifn/foundation/tensor'
-import { sigmoid } from 'aifn/numerics/special'
+import { linspace, toFlat } from 'aifn-compute/foundation/tensor'
+import { sigmoid } from 'aifn-compute/numerics/special'
 
 type Heads = 'independent' | 'shared'
 const HEADS = [

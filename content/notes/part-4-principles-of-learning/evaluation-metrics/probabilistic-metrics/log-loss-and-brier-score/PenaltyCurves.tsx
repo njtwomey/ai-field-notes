@@ -1,5 +1,5 @@
 import { Curve, Figure, formatNumber, Handle, Plot, Readout, slider, useAxis, useFigureState } from 'aifn-render'
-import { linspace, toFlat } from 'aifn/foundation/tensor'
+import { linspace, toFlat } from 'aifn-compute/foundation/tensor'
 
 const P = toFlat(linspace(0.005, 1, 200))
 

@@ -6,9 +6,9 @@
  * stopping rule. `eemd`, `ceemdan` and `vmd` follow Wu & Huang (2009), PyEMD's CEEMDAN (the local-mean form of
  * Colominas et al. 2014) and Dragomiretskiy & Zosso (2014, vmdpy). Checked against PyEMD and vmdpy.
  */
-import { normal, stream } from 'aifn/foundation/random'
+import { normal, stream } from 'aifn-compute/foundation/random'
 import { fftParts } from './tf'
-import { isPowerOfTwo } from 'aifn/foundation/fourier'
+import { isPowerOfTwo } from 'aifn-compute/foundation/fourier'
 
 export type Extrema = {
   /** Indices of local maxima and minima. */

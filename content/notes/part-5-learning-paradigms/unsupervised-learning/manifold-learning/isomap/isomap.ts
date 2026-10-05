@@ -1,6 +1,6 @@
 import type { Point } from '../../_shared/datasets'
 import { eigSymmetric } from '../../_shared/linalg'
-import { normal, stream, uniform } from 'aifn/foundation/random'
+import { normal, stream, uniform } from 'aifn-compute/foundation/random'
 
 /**
  * Points along a spiral with radius 0.5 + 2t at angle π/2 + 3πt, for t uniform in [0, 1]. Successive turns are about

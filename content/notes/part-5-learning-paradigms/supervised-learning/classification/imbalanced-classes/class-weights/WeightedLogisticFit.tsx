@@ -13,9 +13,9 @@ import {
   useFigureState,
 } from 'aifn-render'
 import { expit } from '../_shared/binormal'
-import { linspace, toFlat } from 'aifn/foundation/tensor'
-import { normal, stream, uniform } from 'aifn/foundation/random'
-import { normalPdf } from 'aifn/numerics/special'
+import { linspace, toFlat } from 'aifn-compute/foundation/tensor'
+import { normal, stream, uniform } from 'aifn-compute/foundation/random'
+import { normalPdf } from 'aifn-compute/numerics/special'
 
 const N = 10000
 const D = 2

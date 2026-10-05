@@ -1,7 +1,7 @@
 import { useMemo } from 'react'
 import { Bars, choice, Figure, formatNumber, int, Plot, Readout, slider, useAxis, useFigureState } from 'aifn-render'
-import { toFlat } from 'aifn/foundation/tensor'
-import { getWindow } from 'aifn/signal/windows'
+import { toFlat } from 'aifn-compute/foundation/tensor'
+import { getWindow } from 'aifn-compute/signal/windows'
 import { magnitudeSpectrum } from '../_shared/audio'
 
 const FS = 16000

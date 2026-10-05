@@ -1,4 +1,4 @@
-import { regularisedGammaP, sigmoid } from 'aifn/numerics/special'
+import { regularisedGammaP, sigmoid } from 'aifn-compute/numerics/special'
 /**
  * Brant's test for inputs of any dimension D: a separate binary logit per cumulative split, the joint covariance of
  * their slopes, and a Wald test that all K − 1 slope vectors are equal, on D(K − 2) degrees of freedom.

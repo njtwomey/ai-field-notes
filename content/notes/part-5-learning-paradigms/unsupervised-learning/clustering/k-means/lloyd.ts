@@ -1,7 +1,7 @@
-import { assignNearest, lloydUpdate, kmeansPlusPlus } from 'aifn/numerics/neighbours'
-import { fromData, toFlat, toRows } from 'aifn/foundation/tensor'
-import { stream } from 'aifn/foundation/random'
-import type { Vec2 as Point } from 'aifn/numerics/linalg'
+import { assignNearest, lloydUpdate, kmeansPlusPlus } from 'aifn-compute/numerics/neighbours'
+import { fromData, toFlat, toRows } from 'aifn-compute/foundation/tensor'
+import { stream } from 'aifn-compute/foundation/random'
+import type { Vec2 as Point } from 'aifn-compute/numerics/linalg'
 import type { CentreInit } from '../_shared/centres'
 
 export type State = { centroids: Point[]; labels: number[]; inertia: number; iteration: number; done: boolean }

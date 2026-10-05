@@ -12,7 +12,7 @@ import {
   useAxis,
   useFigureState,
 } from 'aifn-render'
-import { normalQuantile } from 'aifn/numerics/special'
+import { normalQuantile } from 'aifn-compute/numerics/special'
 
 const MAX_DAYS = 56
 const K = normalQuantile(0.975) + normalQuantile(0.8)

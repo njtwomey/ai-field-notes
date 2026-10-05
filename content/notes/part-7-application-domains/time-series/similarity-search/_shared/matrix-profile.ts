@@ -3,8 +3,8 @@
  * few thousand). Distances are z-normalised Euclidean: d² = 2m(1 − ρ), with ρ the Pearson correlation of the two
  * subsequences. Indices are 0-based.
  */
-import { convolve } from 'aifn/foundation/convolution'
-import { toFlat } from 'aifn/foundation/tensor'
+import { convolve } from 'aifn-compute/foundation/convolution'
+import { toFlat } from 'aifn-compute/foundation/tensor'
 
 export type Stats = { mean: Float64Array; sd: Float64Array }
 

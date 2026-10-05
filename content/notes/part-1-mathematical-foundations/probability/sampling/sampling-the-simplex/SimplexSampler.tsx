@@ -1,6 +1,6 @@
 import { useMemo } from 'react'
 import { choice, Figure, int, Plot, Readout, seriesLayers, type SeriesSpec, useAxis, useFigureState } from 'aifn-render'
-import { stream, uniform } from 'aifn/foundation/random'
+import { stream, uniform } from 'aifn-compute/foundation/random'
 
 type Method = 'uniforms' | 'exponentials' | 'spacings'
 

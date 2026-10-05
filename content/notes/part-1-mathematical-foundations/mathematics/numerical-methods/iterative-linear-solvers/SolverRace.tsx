@@ -1,6 +1,6 @@
 import { useMemo } from 'react'
 import { Curve, Figure, formatNumber, int, Plot, Readout, useAxis, useFigureState } from 'aifn-render'
-import { normal as drawNormal, stream } from 'aifn/foundation/random'
+import { normal as drawNormal, stream } from 'aifn-compute/foundation/random'
 
 const ITERS = 300
 const FLOOR = 1e-12

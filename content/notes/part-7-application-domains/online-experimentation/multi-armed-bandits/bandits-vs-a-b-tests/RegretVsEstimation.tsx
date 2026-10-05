@@ -16,7 +16,7 @@ import {
 } from 'aifn-render'
 import { ALGORITHMS, DEFAULT_TUNING, checkpoints, makePolicy, type AlgorithmId } from '../_shared/bandits'
 import { seededRand } from '../_shared/rand'
-import { normalCdf } from 'aifn/numerics/special'
+import { normalCdf } from 'aifn-compute/numerics/special'
 
 type DesignId = 'uniform' | 'etc' | 'ucb1' | 'ts' | 'tsfloor'
 /** Designs that are algorithms of the category keep that algorithm's colour slot; the floored variant takes a free one. */

@@ -16,7 +16,7 @@ import {
 } from 'aifn-render'
 import { loopData, LOOP_N } from './data'
 import { fitGplvm, pcaScores, predictor, randomLatent, type Point } from './gplvm'
-import { linspace, toFlat } from 'aifn/foundation/tensor'
+import { linspace, toFlat } from 'aifn-compute/foundation/tensor'
 
 const ITERATIONS = 400
 const EVERY = 10

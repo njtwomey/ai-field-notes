@@ -1,7 +1,7 @@
 import { useMemo } from 'react'
 import { Figure, float, formatNumber, int, Plot, Points, Raster, Readout, useAxis, useFigureState } from 'aifn-render'
 import { forwardBackward, viterbi, type Mat, type Vec } from '../_shared/chain-crf'
-import { normal, stream, uniform } from 'aifn/foundation/random'
+import { normal, stream, uniform } from 'aifn-compute/foundation/random'
 
 const N = 30
 const K = 3

@@ -14,8 +14,8 @@ import {
   useFigureState,
 } from 'aifn-render'
 import { costMatrix, hungarian, type Pt } from '../_shared/ot'
-import { linspace, toFlat } from 'aifn/foundation/tensor'
-import { normal, stream, uniform } from 'aifn/foundation/random'
+import { linspace, toFlat } from 'aifn-compute/foundation/tensor'
+import { normal, stream, uniform } from 'aifn-compute/foundation/random'
 
 type View = 'densities' | 'clouds'
 

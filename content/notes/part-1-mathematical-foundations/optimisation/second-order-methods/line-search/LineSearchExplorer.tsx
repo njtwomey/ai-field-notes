@@ -1,8 +1,8 @@
 import { useMemo, useState } from 'react'
-import { gradientDescent, type FirstOrderState } from 'aifn/optim/first-order'
+import { gradientDescent, type FirstOrderState } from 'aifn-compute/optim/first-order'
 import { rosenbrock, type TestFunction } from 'aifn-methods/data/objectives'
-import { tensor, toFlat, type Tensor } from 'aifn/foundation/tensor'
-import { trace } from 'aifn/foundation/trace'
+import { tensor, toFlat, type Tensor } from 'aifn-compute/foundation/tensor'
+import { trace } from 'aifn-compute/foundation/trace'
 import {
   ControlRow,
   Curve,

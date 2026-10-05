@@ -12,10 +12,10 @@ import {
   useAxis,
   useFigureState,
 } from 'aifn-render'
-import { stream, uniform as drawUniform } from 'aifn/foundation/random'
-import { Binomial } from 'aifn/probability/distributions'
+import { stream, uniform as drawUniform } from 'aifn-compute/foundation/random'
+import { Binomial } from 'aifn-compute/probability/distributions'
 import { sampleBinomial, twoProportionZ } from '../_shared/ab'
-import { normalPdf } from 'aifn/numerics/special'
+import { normalPdf } from 'aifn-compute/numerics/special'
 
 /** P(S ≤ k) for S ~ Binomial(n, p). */
 const binomialLower = (k: number, n: number, p: number) => Binomial(n, p).cdf(k) as number

@@ -13,8 +13,8 @@ import {
   useAxis,
   useFigureState,
 } from 'aifn-render'
-import { linspace, toFlat } from 'aifn/foundation/tensor'
-import { sigmoid } from 'aifn/numerics/special'
+import { linspace, toFlat } from 'aifn-compute/foundation/tensor'
+import { sigmoid } from 'aifn-compute/numerics/special'
 
 // A small nonlinear model with an interaction term: f(x) = σ(2 x₁ + x₂ + 1.5 x₁ x₂ − 1).
 const score = (x1: number, x2: number) => 2 * x1 + x2 + 1.5 * x1 * x2 - 1

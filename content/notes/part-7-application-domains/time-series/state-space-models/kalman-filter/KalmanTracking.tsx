@@ -7,12 +7,12 @@ import {
   rtsSmoother,
   rtsSmootherSteps,
   simulateStateSpace,
-} from 'aifn/inference/filtering'
-import { trace } from 'aifn/foundation/trace'
-import { stream } from 'aifn/foundation/random'
-import { toFlat, type Tensor } from 'aifn/foundation/tensor'
-import { covarianceEllipse } from 'aifn/numerics/geometry'
-import { ChiSquare } from 'aifn/probability/distributions'
+} from 'aifn-compute/inference/filtering'
+import { trace } from 'aifn-compute/foundation/trace'
+import { stream } from 'aifn-compute/foundation/random'
+import { toFlat, type Tensor } from 'aifn-compute/foundation/tensor'
+import { covarianceEllipse } from 'aifn-compute/numerics/geometry'
+import { ChiSquare } from 'aifn-compute/probability/distributions'
 import { useMemo, useState } from 'react'
 import {
   Curve,

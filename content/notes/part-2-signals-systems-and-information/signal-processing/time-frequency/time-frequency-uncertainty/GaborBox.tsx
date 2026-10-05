@@ -1,8 +1,8 @@
 import { useMemo } from 'react'
 import { Area, choice, Figure, formatNumber, int, Plot, Readout, useAxis, useFigureState } from 'aifn-render'
-import { fft } from 'aifn/foundation/fourier'
-import { complexAbs, toFlat } from 'aifn/foundation/tensor'
-import { getWindow } from 'aifn/signal/windows'
+import { fft } from 'aifn-compute/foundation/fourier'
+import { complexAbs, toFlat } from 'aifn-compute/foundation/tensor'
+import { getWindow } from 'aifn-compute/signal/windows'
 
 type Shape = 'gaussian' | 'hann' | 'blackman'
 

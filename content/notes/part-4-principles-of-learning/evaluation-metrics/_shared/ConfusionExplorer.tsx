@@ -1,8 +1,8 @@
 import { useMemo } from 'react'
 import { Area, Figure, float, formatNumber, Handle, Plot, Readout, slider, useAxis, useFigureState } from 'aifn-render'
 import { METRIC_LABELS, expectedCounts, metricsFrom, type MetricKey } from './binormal'
-import { linspace, toFlat } from 'aifn/foundation/tensor'
-import { normalPdf } from 'aifn/numerics/special'
+import { linspace, toFlat } from 'aifn-compute/foundation/tensor'
+import { normalPdf } from 'aifn-compute/numerics/special'
 
 const N = 1000
 const X = toFlat(linspace(-4, 7, 221))

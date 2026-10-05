@@ -1,5 +1,5 @@
-import { normal, stream, uniform } from 'aifn/foundation/random'
-import { logGamma } from 'aifn/numerics/special'
+import { normal, stream, uniform } from 'aifn-compute/foundation/random'
+import { logGamma } from 'aifn-compute/numerics/special'
 /**
  * Item response theory on classifiers, small enough to recompute on every slider move. A two-class dataset in two
  * features is simulated with some test labels flipped; a population of simple classifiers of varying skill is trained
