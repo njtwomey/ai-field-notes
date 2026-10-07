@@ -1,0 +1,166 @@
+---
+title: Neural ray casting
+kind: technique
+summary: 'A coordinate network trained to replace a ray caster: an MLP maps a camera position $(x, y)$ and a ray angle $\varphi$ to the distance of the first wall along that ray. Fitted to one world, its weights represent that world, as an image-fitting network stores one image.'
+tags: [games, implicit-neural-representations, rendering]
+aliases:
+  [
+    implicit neural representation,
+    coordinate network,
+    coordinate-based MLP,
+    neural field,
+    neural depth field,
+    neural ray caster,
+  ]
+requires: [ray-casting, multilayer-perceptron]
+related: [positional-encoding, random-fourier-features, universal-approximation-theorem, adam, score-function-estimator, mixture-density-networks]
+code: neural-ray-casting
+references: [elfes1989, fridovichkeil2022, williams1992, bishop1994, stanley2007, sitzmann2020, tancik2020, mildenhall2020, rahaman2019, xie2022fields, kingma2015]
+status: draft
+updated: 2026-10-07
+---
+
+import { NeuralRaycaster } from './NeuralRaycaster'
+import { SweepTable } from './SweepTable'
+
+<Definition>
+A **coordinate network**, or implicit neural representation, is a network $f_\theta$ fitted to one signal: it takes a
+coordinate and returns the signal's value there, so the weights $\theta$ store the signal <Cite id="xie2022fields" />.
+Here the signal is what a camera sees in a grid world: $f_\theta(x, y, \varphi) \approx d(x, y, \varphi)$, the distance
+from the point $(x, y)$ to the first wall along the ray at angle $\varphi$. One query per screen column renders a view,
+as the <NoteLink to="ray-casting">ray caster</NoteLink> does with one traced ray per column.
+</Definition>
+
+<NeuralRaycaster />
+
+## Problem
+
+An image-fitting network maps a pixel's coordinates $(u, v)$ to its colour and is trained on every pixel of one image
+<Cite id="stanley2007" /> <Cite id="sitzmann2020" />. The aim is a faithful fit, not generalisation to other images. The
+same construction applies to any function of a few coordinates. The depth function $d(x, y, \varphi)$ of a world is
+known exactly, because the ray caster computes it, so the training set is unlimited: poses are drawn uniformly over the
+free floor and angles uniformly over $[-\pi, \pi)$, and the ray caster labels each one.
+
+The function is hard to fit. As $\varphi$ sweeps past the edge of a column, $d$ jumps from the column's distance to the
+distance of the wall behind it. These jumps lie along curves in $(x, y, \varphi)$ space, and every column and corner
+adds more.
+
+## Mechanism
+
+**Two forms.** The *ray* form, $(x, y, \varphi) \mapsto d$, has one output and renders a view of $R$ columns with $R$
+queries at angles $\varphi_i = \theta + \alpha_i$, where $\theta$ is the heading and $\alpha_i$ the column's angle from
+it. The *view* form, $(x, y, \theta) \mapsto (d_1, \dots, d_R)$, has $R$ outputs and renders a view with one query. Both
+fit the same function. The view form must learn the dependence on $\alpha_i$ separately in each output, while the ray
+form shares it across columns.
+
+**Encoding.** A <Gloss name="mlp" /> with smooth or piecewise-linear activations fits the low-frequency content of its
+target first and its high-frequency content much later: the spectral bias of neural networks <Cite id="rahaman2019" />.
+Jumps in distance are high-frequency content. The fix is to feed the network fixed
+<NoteLink to="sinusoidal-positional-encoding">sinusoids</NoteLink> of its inputs at octave frequencies
+<Cite id="mildenhall2020" /> <Cite id="tancik2020" />. With $u = x/w$ and $v = y/h$ the position scaled to $[0, 1]$ by
+the map's width $w$ and height $h$, the encoding with $L$ octaves is
+
+$$
+\gamma(u, v, \varphi) = \big(\sin 2^k \pi u,\ \cos 2^k \pi u,\ \sin 2^k \pi v,\ \cos 2^k \pi v,\ \sin 2^k \varphi,\
+\cos 2^k \varphi\big)_{k = 0}^{L - 1},
+$$
+
+$6L$ features. The angle's frequencies are integers, so every feature is periodic in $\varphi$ with period $2\pi$. A
+linear function of $\gamma$ is a <NoteLink to="fourier-series">Fourier series</NoteLink> truncated at frequency
+$2^{L-1}$, so the first layer can already express detail at the scale of $1/2^{L-1}$ of the map, about one cell for
+$L = 6$ on a 16-cell map.
+
+**Target and loss.** The network outputs $\log d$ and is trained by <Gloss name="adam" /> on the <Gloss name="mse">mean
+squared error</Gloss> of $\log d$ over minibatches of 1024 rays <Cite id="kingma2015" />. The logarithm weighs a
+relative error the same at every distance. That suits the rendering, since a wall slice's height is proportional to
+$1/d$, so a near wall's error moves many pixels and a far wall's few.
+
+## Classifying the wall
+
+A network that regresses $d$ smooths every occlusion edge. Near an edge, nearby inputs have targets on both sides of
+the jump, and the squared error is smallest for a prediction between them, a distance at which there is no wall.
+
+Every wall face of a grid world lies on a grid line: a vertical line $x = c$ or a horizontal line $y = c$, with $c$ an
+integer. The distance along a ray from $(x, y)$ at angle $\varphi$ to a given line follows from the ray's equation,
+$(x + d\cos\varphi,\ y + d\sin\varphi)$:
+
+$$
+d = \frac{c - x}{\cos\varphi} \quad \text{for } x = c, \qquad d = \frac{c - y}{\sin\varphi} \quad \text{for } y = c.
+$$
+
+A **wall-line classifier** therefore predicts only which line the ray stops on, one class for each of the $w + 1$
+vertical and $h + 1$ horizontal lines, and computes $d$ from that line. Lines at $d \le 0$ lie behind the camera, and
+their scores are masked before the <Gloss name="softmax">softmax</Gloss>. The label of a training ray is the line its
+hit lies on, so training is classification with the <Gloss name="cross-entropy">cross-entropy</Gloss> loss. Within one
+wall the distance is exact, so walls are straight. At an occlusion edge the most probable class changes, so the
+predicted distance jumps rather than passing through the values between. The remaining errors are rays assigned to the
+wrong line near an edge. On the 9 × 9 maze, a network with two hidden layers of 64 units puts 99 % of held-out rays
+within 10 % of the true distance, against 78 % for the same network regressing $d$ with the same training budget.
+
+## The trained models
+
+The figure's default mode and the table use models trained offline in PyTorch, with the code in the Code tab, and
+exported to ONNX. Every exported model takes rays $(x, y, \varphi)$ and returns distances, so the page runs each the
+same way with ONNX Runtime Web. Each model is fitted to one map. The training set is 200 000 rays at uniform positions
+on the free floor and uniform angles, labelled by the ray caster; training runs 3000 steps of
+<NoteLink to="adam">Adam</NoteLink> <Cite id="kingma2015" />. The score is the share of rays within 10 % of the true
+distance, over 300 held-out views of 48 rays. A wall slice's height is proportional to $1/d$, so a ray within 10 % of
+its distance draws a slice within about 10 % of the right height.
+
+**Distance regression.** The network outputs $\log d$ and is trained on the absolute error of $\log d$. The absolute
+error is minimised by the median of the targets near an input rather than their mean, which blurs an occlusion edge
+less than the squared error does, but a continuous network still cannot jump. The variants are the Fourier-feature MLP
+of the figure's own training mode, at 64 × 2 and 256 × 4 units; SIREN, whose sine activations represent high
+frequencies directly <Cite id="sitzmann2020" />; and a <NoteLink to="mixture-density-networks">mixture</NoteLink> of
+four candidate distances, trained by its likelihood <Cite id="bishop1994" />. The mixture predicts the most probable
+candidate, so near an edge it picks the near wall or the far wall instead of averaging them.
+
+**Wall-line classifier.** The classifier of the previous section, at 64 × 2 and 256 × 4 units. Its distances are exact
+whenever it names the right line, and its errors are near edges, where it names a neighbouring line. A larger map has
+more lines and more edges, which is where it falls behind the density field.
+
+**Density field and volume rendering.** A network learns the map itself as a density $\sigma(x, y) \ge 0$, and the
+distance is rendered along the ray as in NeRF <Cite id="mildenhall2020" />. The ray is sampled at $K$ points $t_k$,
+eight per unit of length, with spacing $\delta$. The probability of passing a sample is $e^{-\sigma_k \delta}$, so the
+ray stops at sample $k$ with probability $T_k \alpha_k$, where $\alpha_k = 1 - e^{-\sigma_k \delta}$ and
+$T_k = \prod_{j<k} (1 - \alpha_j)$ is the probability of reaching it; the distance is the expected stopping point
+$\sum_k T_k \alpha_k t_k$. The density comes from feature grids at several resolutions, up to 32, 64 or 128 cells
+across the map, read by bilinear interpolation and passed through a small MLP. Occlusion is the renderer's work, so
+edges are sharp; the errors that remain come from the sample spacing and from the interpolation, which round corners
+and blur walls by a fraction of a cell.
+
+**Learned map with exact ray casting.** The map is one number per cell, the probability $o_c$ that cell $c$ is wall, and
+there is no network. Which cells a ray enters, and the distance $t_k$ at which it enters each, depend only on the ray,
+so they are computed once by the grid traversal. The ray stops in the $k$-th cell it enters with probability
+$p_k = o_k \prod_{j<k} (1 - o_j)$, and the expected distance $\sum_k p_k t_k$ is differentiable in every $o_c$, so the
+map is fitted by <NoteLink to="gradient-descent">gradient descent</NoteLink> on the same loss as the other models. A
+ray's distance is evidence that each cell before the hit is empty and the hit cell is wall, the rule of occupancy-grid
+mapping from range sensors <Cite id="elfes1989" />; a grid of free values in place of a network is also the approach of
+Plenoxels <Cite id="fridovichkeil2022" />. Prediction rounds the map to walls and empty cells and ray-casts it exactly,
+so a correct map gives exact views. The cells align with the walls and the distances are exact cell-face distances, so
+neither the smoothing of regression nor the blur of sampling arises.
+
+**<Gloss name="rl">Reinforcement learning</Gloss>.** Two models learn from a reward instead of from gradients of the
+loss. The *map by <Gloss name="reinforce" />* is the learned map trained as a policy: each step samples 32 maps, each
+cell an independent <NoteLink to="bernoulli-distribution">Bernoulli</NoteLink> draw with $P(\text{wall}) = o_c$,
+ray-casts each exactly, which no gradient passes through, and rewards each with $R = -\operatorname{mean} \abs{\log
+\hat d - \log d}$ over a batch of rays, plus a small bonus for wall cells joined side by side (straight runs and tight
+corners) and a penalty for wall cells that touch only at a corner. The
+<NoteLink to="score-function-estimator">score-function estimate</NoteLink> of the
+<NoteLink to="policy-gradient-theorem">policy gradient</NoteLink>,
+$\nabla \expect[R] = \expect[(R - b) \nabla \log p(\text{map})]$, moves each $o_c$ towards the maps that scored above
+the baseline $b$, the mean reward of the other samples <Cite id="williams1992" />. The *wall-line policy* is the
+wall-line classifier trained as a <NoteLink to="contextual-bandit">contextual bandit</NoteLink>: it samples a line for
+each ray and is rewarded by $-\abs{\log \hat d - \log d}$, without being told the correct line. On the 9 × 9 maze the
+map by REINFORCE reaches 100 % in 14 seconds, as the map fitted by gradient does, while the bandit reaches 87 % against
+the classifier's 99 %: a reward of one number per guess carries less information than the label.
+
+<SweepTable />
+
+## Cost
+
+The default network has 36 inputs, two hidden layers of 64 units and one output: 6593 parameters, against 256 bytes for
+the 16 × 16 map it represents. Each column costs a forward pass of about 6600 multiply-adds against the ray caster's few
+dozen cell steps. The network is therefore a far larger and slower description of this world than the grid. Coordinate
+networks pay off where no compact explicit description exists, as for real scenes known only through photographs
+<Cite id="mildenhall2020" />.
