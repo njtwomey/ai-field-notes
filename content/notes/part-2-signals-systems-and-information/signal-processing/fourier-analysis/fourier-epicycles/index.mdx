@@ -1,0 +1,226 @@
+---
+title: Fourier epicycles
+kind: concept
+summary: 'A closed curve $z(t) = x(t) + i y(t)$ is a sum of rotating arrows $c_k e^{i 2\pi k t}$ with $c_k = \int_0^1 z(t) e^{-i 2\pi k t}\,dt$, computed by the DFT of samples. Chained tip to tail, the arrows draw the curve. Keeping the $K$ largest $\abs{c_k}$ gives the best $K$-term fit.'
+tags: [signal-processing, fourier, worked-example]
+aliases:
+  [
+    epicycles,
+    Fourier drawing,
+    drawing with circles,
+    complex Fourier series of a curve,
+    Fourier descriptors,
+    Fourier series of a closed curve,
+  ]
+requires: [fourier-series, discrete-fourier-transform]
+related: [parseval-theorem, fast-fourier-transform]
+references: [sanderson2019, polster2018, granlund1972, oppenheim2010]
+status: draft
+updated: 2026-10-07
+---
+
+import { EpicycleDrawing } from './EpicycleDrawing'
+
+_Inspired by the 3Blue1Brown video "But what is a Fourier series? From heat flow to drawing with circles"
+<Cite id="sanderson2019" /> and the Mathologer video "Epicycles, complex Fourier series and Homer Simpson's orbit"
+<Cite id="polster2018" />._
+
+<Definition>
+A closed curve in the plane, traced once as $t$ runs over $[0, 1)$, is a periodic complex function
+$z(t) = x(t) + i\,y(t)$ with period 1. Its complex Fourier series is
+
+$$
+z(t) = \sum_{k=-\infty}^{\infty} c_k\, e^{i 2\pi k t}, \qquad c_k = \int_0^1 z(t)\, e^{-i 2\pi k t}\,dt,
+\qquad c_k \in \complex.
+$$
+
+Each term $c_k e^{i 2\pi k t}$ is an arrow of length $\abs{c_k}$ that starts at angle $\arg c_k$ and turns $k$ times per
+cycle. Placed tip to tail, the arrows form a chain of circles riding on circles, epicycles, and the last tip traces the
+curve.
+</Definition>
+
+<EpicycleDrawing />
+
+## Coefficients by orthogonality
+
+The exponentials $e^{i 2\pi k t}$ for integer $k$ are orthonormal on $[0, 1)$:
+
+$$
+\int_0^1 e^{i 2\pi k t}\, \overline{e^{i 2\pi m t}}\,dt = \int_0^1 e^{i 2\pi (k - m) t}\,dt =
+\begin{cases} 1 & k = m, \\ 0 & k \ne m. \end{cases}
+$$
+
+For $k \ne m$ the integrand turns $k - m$ whole times around the unit circle, and its integral over whole turns is
+zero. Multiply the series for $z(t)$ by $e^{-i 2\pi m t}$ and integrate over one cycle. Every term with $k \ne m$
+integrates to zero, and the term with $k = m$ integrates to $c_m$:
+
+$$
+\int_0^1 z(t)\, e^{-i 2\pi m t}\,dt = \sum_{k} c_k \int_0^1 e^{i 2\pi (k - m) t}\,dt = c_m.
+$$
+
+The coefficient $c_m$ is the projection of the curve onto the $m$-th exponential. The derivation is the one for a real
+<NoteLink to="fourier-series">Fourier series</NoteLink>; nothing in it requires $z$ to be real.
+
+The constant term $c_0 = \int_0^1 z(t)\,dt$ is the mean position of the curve, its centroid when the curve is traced at
+constant speed. The chain of arrows starts there.
+
+## From samples to coefficients: the DFT
+
+A curve is stored as $N$ points $z_n = z(n/N)$, for $n = 0, \dots, N-1$. Replacing the integral by the Riemann sum
+over these points gives
+
+$$
+c_k \approx \frac{1}{N} \sum_{n=0}^{N-1} z_n\, e^{-i 2\pi k n / N} = \frac{1}{N}\, Z[k],
+$$
+
+where $Z[k]$ is the <Gloss name="dft" /> of the complex sequence $z_0, \dots, z_{N-1}$. The approximation is exact when
+$z$ has no frequencies with $\abs{k} \ge N/2$. The <Gloss name="fft" /> computes all $N$
+coefficients in $O(N \log N)$ operations.
+
+The DFT cannot tell frequency $k$ from $k + N$: both give the same samples, an instance of
+<NoteLink to="aliasing">aliasing</NoteLink>. Bin $k$ of the DFT is therefore assigned to
+the frequency of smallest magnitude, $k \in \set{-N/2, \dots, N/2 - 1}$, so that the arrows turn as slowly as the
+samples allow. Bins $N/2 + 1, \dots, N - 1$ are the negative frequencies $-N/2 + 1, \dots, -1$.
+
+## Arrows that turn
+
+Write $c_k = \abs{c_k} e^{i \varphi_k}$ with phase $\varphi_k = \arg c_k$. Then
+
+$$
+c_k\, e^{i 2\pi k t} = \abs{c_k}\, e^{i (\varphi_k + 2\pi k t)}.
+$$
+
+The term is a point on a circle of radius $\abs{c_k}$. At $t = 0$ it sits at angle $\varphi_k$. As $t$ runs from 0
+to 1 its angle grows by $2\pi k$: it makes $\abs{k}$ full turns, anticlockwise for $k > 0$ and clockwise for $k < 0$.
+The partial sum $c_0 + c_{k_1} e^{i 2\pi k_1 t} + c_{k_2} e^{i 2\pi k_2 t} + \cdots$ is reached by walking along the
+arrows in turn: each arrow is attached to the tip of the previous one, so the circle it sweeps is centred on a point
+that is itself moving. The name comes from Ptolemaic astronomy, where a planet moves on a small circle, the epicycle,
+whose centre moves on a larger circle, the deferent.
+
+### Why negative frequencies are needed
+
+For a real signal $x(t)$ the coefficients satisfy $c_{-k} = \overline{c_k}$, so the arrows for $k$ and $-k$ are
+mirror images and their sum $2 \abs{c_k} \cos(2\pi k t + \varphi_k)$ stays on the real line. A closed curve is a
+complex signal and has no such symmetry. The arrows for $k$ and $-k$ are independent, and both are needed: the
+ellipse below has a coefficient at $k = -1$ that no combination of positive frequencies can replace.
+
+## Worked example: an ellipse
+
+Take the ellipse $z(t) = a \cos(2\pi t) + i\, b \sin(2\pi t)$ with semi-axes $a, b > 0$. Substitute
+$\cos\theta = (e^{i\theta} + e^{-i\theta})/2$ and $\sin\theta = (e^{i\theta} - e^{-i\theta})/(2i)$, with
+$\theta = 2\pi t$:
+
+$$
+z(t) = \frac{a}{2}\paren{e^{i\theta} + e^{-i\theta}} + \frac{b}{2}\paren{e^{i\theta} - e^{-i\theta}}
+= \frac{a + b}{2}\, e^{i 2\pi t} + \frac{a - b}{2}\, e^{-i 2\pi t}.
+$$
+
+The ellipse has exactly two nonzero coefficients, $c_1 = (a + b)/2$ and $c_{-1} = (a - b)/2$. With $a = 2$ and $b = 1$,
+an arrow of length $3/2$ turns once anticlockwise and an arrow of length $1/2$ on its tip turns once clockwise. At
+$t = 0$ both point along the real axis and the tip is at $3/2 + 1/2 = 2$, the end of the major axis. At $t = 1/4$ they
+point in opposite directions, $i\,3/2$ and $-i\,1/2$, and the tip is at $i$, the end of the minor axis.
+
+Two limits follow from the same formula. A circle ($a = b$) has $c_{-1} = 0$: one arrow. A segment from $-a$ to $a$
+($b = 0$) has $c_1 = c_{-1} = a/2$: two equal arrows turning in opposite directions, whose sum stays on the real axis
+and runs back and forth along it. Without the clockwise arrow neither the ellipse nor the segment can be drawn.
+
+## The order of the arrows
+
+The tip of the chain is the sum of all the arrows, and addition of complex numbers commutes. Chaining the same arrows
+in any order puts the tip at the same point at every $t$, so every order traces the same curve. Only the joints in
+between move differently. Sorting by magnitude, largest first, puts the large slow circles at the base and the small
+circles near the tip; sorting by frequency $0, 1, -1, 2, -2, \dots$ makes each circle turn faster than the one it rides
+on. The figure offers both, a third order by signed frequency, and a random order.
+
+## Truncation and energy
+
+A drawing uses finitely many arrows. Let $S$ be a set of frequencies and $z_S(t) = \sum_{k \in S} c_k e^{i 2\pi k t}$
+the partial sum over $S$. The error $z - z_S$ is the sum of the dropped terms. By orthonormality its mean squared size
+is
+
+$$
+\int_0^1 \abs{z(t) - z_S(t)}^2\,dt
+= \int_0^1 \abs{\sum_{k \notin S} c_k e^{i 2\pi k t}}^2 dt
+= \sum_{k \notin S} \sum_{m \notin S} c_k \overline{c_m} \int_0^1 e^{i 2\pi (k - m) t}\,dt
+= \sum_{k \notin S} \abs{c_k}^2.
+$$
+
+This is <NoteLink to="parseval-theorem">Parseval's theorem</NoteLink> applied to the error. The squared error is the
+sum of $\abs{c_k}^2$ over the dropped terms, whichever terms are kept. Among all sets $S$ with $K$ frequencies, the
+error is therefore smallest when $S$ holds the $K$ coefficients of largest magnitude. Truncating by magnitude is the
+best $K$-term approximation in mean square; truncating at the lowest frequencies $\abs{k} \le K/2$ is not, unless the
+largest coefficients happen to be the slowest.
+
+The energy of the curve about its centroid is $E = \sum_{k \ne 0} \abs{c_k}^2$, the mean squared distance of the
+curve from $c_0$. The share of energy kept by $S$ is $\sum_{k \in S, k \ne 0} \abs{c_k}^2 / E$. The root mean square
+error, as a fraction of the root mean square radius $\sqrt{E}$, is the square root of the share dropped. Keeping 99% of
+the energy leaves an RMS error of 10% of the RMS radius; keeping 99.99% leaves 1%.
+
+<Derivation title="The coefficients are the best weights for a fixed set of frequencies">
+For a fixed set $S$ and any weights $a_k$, write $a_k = c_k + d_k$. The error of $\sum_{k \in S} a_k e^{i 2\pi k t}$ is
+$\sum_{k \in S} (-d_k) e^{i 2\pi k t} + \sum_{k \notin S} c_k e^{i 2\pi k t}$, a sum of distinct exponentials, so by
+the same orthonormality argument its mean squared size is
+
+$$
+\sum_{k \in S} \abs{d_k}^2 + \sum_{k \notin S} \abs{c_k}^2.
+$$
+
+The first sum is zero only when every $d_k = 0$. The Fourier coefficients are the least-squares weights for any set of
+exponentials, so a truncated series never benefits from re-fitting its kept coefficients.
+</Derivation>
+
+## Corners, smooth curves and convergence
+
+How fast $\abs{c_k}$ decays with $\abs{k}$ depends on how smooth $z(t)$ is. A curve with a corner is continuous but its
+tangent jumps, and its coefficients decay like $1/k^2$. A curve whose derivatives of every order are continuous has
+coefficients that decay faster than any power of $1/k$, and a curve that is analytic in $t$ has coefficients that
+decay geometrically. A smooth shape such as a heart is drawn well by a dozen arrows. A letter with sharp corners needs
+hundreds.
+
+At a corner the partial sums round the point off, and small ripples run along the straight edges next to it. The
+ripples are the <NoteLink to="fourier-series">Gibbs phenomenon</NoteLink> of the derivative: the velocity $z'(t)$ jumps
+at the corner, so the partial sums of $z'$ overshoot there, and the curve wobbles. The curve itself converges
+uniformly, because $\sum_k \abs{c_k}$ is finite when $\abs{c_k}$ decays like $1/k^2$.
+
+## Parameterising by arc length
+
+The same shape can be traced at different speeds, and each speed gives a different function $z(t)$ and different
+coefficients. A pointer moving across a screen is sampled at equal times, so its samples bunch where the hand slowed
+down. A font outline flattened from <NoteLink to="bezier-curves">Bézier curves</NoteLink> has many vertices on curves
+and two on each straight edge. Using such points directly as $z_n$ makes the coefficients describe the drawing speed as
+well as the shape, and changes in speed add high-frequency content.
+
+Resampling the curve at equal arc length before the DFT fixes the speed: $\abs{z'(t)} = L$ for a curve of length $L$.
+The coefficients then depend only on the shape, its starting point and its direction. Starting at $t_0$ instead of 0
+multiplies $c_k$ by $e^{i 2\pi k t_0}$ and leaves every $\abs{c_k}$ unchanged; reversing the direction swaps $c_k$ and
+$c_{-k}$; rotating by $\theta$ and scaling by $s$ multiplies every $c_k$ by $s e^{i\theta}$; translating changes $c_0$
+alone. Coefficients normalised for these effects are shape features, called Fourier descriptors, and have been used
+to recognise hand-printed characters <Cite id="granlund1972" />.
+
+## Several contours in one path
+
+A Fourier series traces one closed path. A letter such as B has three contours: the outline and two holes. A
+reader's drawing may also lift the pen. The contours are joined into one path by bridges: from the nearest point of the
+path built so far, a straight segment runs to the nearest point of the next contour, the path goes once around that
+contour, and returns along the same segment. Each bridge is traversed twice in opposite directions, so it encloses no
+area, and with enough terms it is drawn as a thin hairline. With few terms the bridges are blurred along with
+everything else. The alternative is one series per contour, each with its own chain of arrows, drawn at the same time.
+
+## Assumptions
+
+- The curve is closed. An open stroke is closed by a straight segment from its end back to its start, or traced out
+  and back, which adds corners at the joins.
+- The samples are dense enough: frequencies with $\abs{k} \ge N/2$ alias onto lower ones.
+- The figure centres every shape, a drawing included, on its centroid and scales it so that its largest radius is 1,
+  so $c_0 = 0$ and the chain starts at the origin.
+
+## Pitfalls
+
+- **Bins are not frequencies.** DFT bin $m$ with $m > N/2$ is frequency $m - N$. Drawing bin $m$ as $m$ turns per
+  cycle gives the right curve at the sample times $n/N$ and wild loops between them.
+- **Truncating by frequency and by magnitude differ.** Keeping $\abs{k} \le K$ is a low-pass filter; keeping the $K$
+  largest $\abs{c_k}$ is the best $K$-term fit. For a curve with corners the two differ.
+- **Equal-time samples carry speed.** Without arc-length resampling, the same shape drawn quickly and slowly gives
+  different coefficients.
+- **Bridges show.** Joining contours adds doubled segments, which appear in the drawing. Choosing short bridges keeps
+  them unobtrusive.

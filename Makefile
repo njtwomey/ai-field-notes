@@ -3,7 +3,7 @@
 # Python sources that ruff lints and formats; Pyright reads its include list from pyproject.toml.
 PY_SRC := python
 
-.PHONY: ci help install dev contracts assets content doctor links wrap lint catalog-check format typecheck test lab-check lab-shots lab check build preview clean
+.PHONY: ci help install dev contracts assets content doctor links wrap lint catalog-check format typecheck test lab-check lab-shots lab check pre-push build preview clean
 
 help: ## List targets
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  \033[36m%-10s\033[0m %s\n", $$1, $$2}'
@@ -74,6 +74,12 @@ ci: contracts lint typecheck test catalog-check ## What CI runs before a build: 
 	@if [ -n "$$CI" ]; then git diff --quiet -- site/src/generated || (echo "contracts out of date: run make contracts" && exit 1); fi
 
 check: doctor ci ## Everything: the doctor (slow; local only, before every push) plus what CI runs
+
+pre-push: check ## Run before every push: make check, the lockfile checks and the production build CI deploys
+	uv lock --check
+	npm ci --dry-run --ignore-scripts > /dev/null
+	npm run build
+	@git diff --quiet -- site/src/generated || echo "note: site/src/generated changed; commit it with the push, or CI fails on stale contracts"
 
 build: assets content ## Production build into dist/
 	npm run build

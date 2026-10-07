@@ -1,0 +1,131 @@
+---
+title: Diversified recommendation on YouTube
+kind: case-study
+summary: 'YouTube diversified its homepage feed with a determinantal point process after the pointwise ranker. A kernel from quality scores and Jaccard distances, two parameters fitted on 40,000 impressions, and windowed greedy inference beat three heuristics in live tests.'
+tags: [recommender-systems, diversity, re-ranking, industrial-systems, point-processes]
+aliases: [YouTube DPP, practical diversified recommendations, deep Gramian kernel, windowed DPP ranking]
+requires: [determinantal-point-process, diversified-re-ranking]
+partOf: [multi-stage-recommendation]
+related: [beyond-accuracy-metrics]
+references: [wilhelm2018dpp, chen2018dpp]
+status: draft
+updated: 2026-10-05
+---
+
+import { WindowedFeed } from './WindowedFeed'
+
+<Callout variant="credit" title="Provenance: Wilhelm et al. (CIKM 2018)">
+This note follows *Practical Diversified Recommendations on YouTube with Determinantal Point Processes* by Mark
+Wilhelm, Ajith Ramanathan, Alexander Bonomo, Sagar Jain, Ed H. Chi and Jennifer Gillenwater of Google
+<Cite id="wilhelm2018dpp" />. The problem framing, kernel, training procedure, ranking algorithm and results are
+theirs. This site added the toy feed figure and the links to the underlying theory. It is included because it is a
+clear, honest account of taking a principled model into a large production system, and worth keeping in these records.
+</Callout>
+
+## At a glance
+
+<SpecTable
+  columns={['YouTube DPP (2018)']}
+  rows={{
+    Surface: ['YouTube mobile homepage feed; later all surfaces (TV, desktop, Live)'],
+    'Place in the stack': ['after the pointwise scorer, before the business-policy layer'],
+    'Input set': ['N = 100 videos per request'],
+    Inputs: ['a personalised quality score q per video; a sparse content embedding φ'],
+    Kernel: ['L_ii = q_i², L_ij = α q_i q_j exp(−D_ij / 2σ²)'],
+    Fitting: ['grid search over α and σ on about 40,000 homepage impressions'],
+    Inference: ['greedy size-k MAP in windows of about a dozen videos'],
+    'Live result': ['+0.63% satisfied homepage watchers, +0.52% watch time'],
+  }}
+/>
+
+## Architecture
+
+**The problem.** A pointwise scorer predicts $q_i \approx P(y_i = 1 \mid \text{features of item } i)$, the chance that
+the user interacts with video $i$, and the feed is sorted by $q$. Similar videos get similar scores, so they sit next
+to each other: once a basketball video is on the page, another one is worth less, yet sorting by $q$ shows a run of
+them. Wilhelm et al. call two items similar when they are negatively correlated as interactions,
+$P(y_i = 1, y_j = 1) < P(y_i = 1)\, P(y_j = 1)$, which is exactly the dependence a
+<NoteLink to="determinantal-point-process" /> models.
+
+**Why not heuristics.** Before DPPs, YouTube's policy layer enforced rules such as a cap on videos from one uploader.
+The paper lists what goes wrong with rules of that kind: they ignore $q$, so they demote high-scoring and low-scoring
+videos alike; every parameter needs a grid search that grows exponentially with the number of parameters; they have to
+be retuned whenever the upstream models change; and they define no probability model, so they cannot score held-out
+data. They also treat diversity as a goal that competes with utility, while the DPP treats redundancy as lost utility.
+
+**Where the DPP sits.** The DPP is a last-layer model after the pointwise scorer. The teams improving $q$ and the
+embeddings keep working independently, and the DPP consumes whatever they produce. The business-policy layer still runs
+last.
+
+**The kernel.** For each of the $N = 100$ videos the system supplies $q_i$ and a sparse embedding $\phivec_i$. With a
+distance $D_{ij}$ computed from the embeddings,
+
+$$
+L_{ii} = q_i^2, \qquad L_{ij} = \alpha\, q_i q_j \exp\!\Bigl(-\frac{D_{ij}}{2\sigma^2}\Bigr) \quad (i \ne j).
+$$
+
+At $\alpha = 1$ this is the quality-times-similarity kernel with a Gaussian similarity. $\alpha < 1$ shrinks every
+similarity and treats all items as more diverse; $\alpha > 1$ makes them more alike and favours small sets, which fits
+users who interact with few videos of a feed. Above 1 the matrix can lose positive semi-definiteness, so any negative
+eigenvalues are set to zero, projecting $\Lmat$ back to the nearest <Gloss name="positive-semi-definite">positive
+semi-definite</Gloss> matrix. Of many embeddings tried (audio, frames, thumbnails, text), the best distance was the
+Jaccard distance between sparse sets of item tokens.
+
+## Training
+
+Each training example is one homepage impression: the ordered list of videos shown and the subset $Y$ the user
+interacted with. Wilhelm et al. used about 40,000 impressions from one day, and note the partial-label bias: only
+videos the old system chose to show can be observed.
+
+**Two parameters by grid search.** For $(\alpha, \sigma)$ they reranked each impression and measured the cumulative
+gain $G = \sum_i y_i / j_i$, where $j_i$ is the new rank of item $i$. The best region had mid-range $\sigma$ and
+$\alpha$ in the upper half of its range; there the kernels were mostly positive semi-definite and only an occasional
+example needed projection.
+
+**A learned kernel.** Grid search does not scale to more parameters, but a DPP has a likelihood. With kernel parameters
+$\wvec$ and $M$ impressions,
+
+$$
+\log \mathcal{L}(\wvec) = \sum_{m=1}^M \Bigl[\log\det\bigl(\Lmat(\wvec)_{Y_m}\bigr) - \log\det\bigl(\Lmat(\wvec) +
+\Imat\bigr)\Bigr],
+$$
+
+maximised by gradient ascent. The *deep Gramian kernel* replaces the scalar score by a vector $\qvec_i$ and sets
+
+$$
+L_{ij} = f(\qvec_i)\, \gvec(\phivec_i)^\top \gvec(\phivec_j)\, f(\qvec_j) + \delta\, \indicator[i = j],
+$$
+
+with $f$ a shallow network, $\gvec$ a deeper one that re-embeds the content, and a small $\delta$. The Gram form makes
+$\Lmat$ positive semi-definite by construction, so no projection is needed.
+
+## What is distinctive
+
+**Windowed greedy ranking.** A feed is an ordered list, not a set. The serving algorithm asks the DPP for the most
+likely set of $k$ videos, $\max_{\abs{Y} = k} \det(\Lmat_Y)$, by the greedy algorithm: add, $k$ times, the video that
+most increases the determinant. Those $k$ videos, in the order greedy chose them, fill the top of the feed. The same is
+repeated on the remaining videos until the feed is full, with $k$ about a dozen against a feed of several hundred. The
+windows reflect that repulsion matters between videos seen together: videos 1 and 100 can be similar without harm.
+
+<WindowedFeed />
+
+**Diversity in service of utility.** The objective is the user's interactions, not a diversity score. Parameters are
+chosen by how well the reranked feed puts the videos users engaged with near the top, so the amount of diversity is
+learned from behaviour rather than set by hand.
+
+## Comparison
+
+In live experiments of about a week, three heuristics each lowered the "satisfied homepage watchers" metric, which
+counts sessions from the homepage with significant watch time: fuzzy de-duplication (−0.05%), a sliding-window cap on
+similar items (−0.26%) and a smooth penalty on scores of items similar to those already placed (−0.41%). The DPP raised
+it by 0.63% and overall watch time by 0.52%; the deep Gramian kernel raised it by 1.72% but changed rankings enough to
+disturb secondary business metrics and had not been deployed.
+
+Direct interactions on the homepage barely moved. Watch time *originating* from the homepage rose, through the related
+videos panel. Two long-term holdbacks, one rotating daily and one fixed, showed the effect growing over months for users
+who kept seeing diversified feeds: a <NoteLink to="novelty-and-primacy-effects">learning effect</NoteLink> in which
+users come back because the homepage keeps serving them.
+
+The authors list the limits: the DPP is not personalised beyond $q$, since $\alpha$ and $\sigma$ are shared by all
+users; how diversity needs vary by genre or by time is not modelled. Chen, Zhang and Zhou's fast greedy MAP algorithm
+<Cite id="chen2018dpp" /> makes the windowed greedy step cheap at this scale.

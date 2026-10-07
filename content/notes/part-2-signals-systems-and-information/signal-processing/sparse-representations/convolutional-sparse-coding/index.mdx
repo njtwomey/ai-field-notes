@@ -1,0 +1,211 @@
+---
+title: Convolutional sparse coding
+kind: concept
+summary: 'Convolutional sparse coding writes a whole signal as $\yvec \approx \sum_k \zvec_k * \dvec_k$: $K$ short filters $\dvec_k$, each convolved with a sparse activation map $\zvec_k$. One filter serves every position, so a shape that recurs at any shift costs one filter rather than one atom per shift.'
+tags: [signal-processing, sparsity, worked-example]
+aliases:
+  [
+    CSC,
+    shift-invariant sparse coding,
+    convolutional dictionary learning,
+    convolutional lasso,
+    convolutional basis pursuit denoising,
+  ]
+requires: [dictionary-learning, convolution]
+partOf: [sparse-approximation]
+related: [matched-filter, proximal-gradient-methods]
+references: [grosse2007, moody2001, goldberger2000, zeiler2010, bristow2013, wohlberg2016, garciacardona2018, papyan2017, beck2009, aharon2006]
+status: draft
+updated: 2026-10-07
+---
+
+import { ConvolutionalHeartbeat } from './ConvolutionalHeartbeat'
+
+<Definition>
+A signal $\yvec \in \reals^N$ has a **convolutional sparse representation** over $K$ filters
+$\dvec_1, \dots, \dvec_K \in \reals^L$ when
+
+$$
+\yvec \approx \sum_{k=1}^K \zvec_k * \dvec_k,
+$$
+
+where each **activation map** $\zvec_k \in \reals^M$, $M = N - L + 1$, has few non-zero entries and $*$ is the full
+<NoteLink to="convolution">convolution</NoteLink>, $(\zvec * \dvec)[n] = \sum_m z[m]\, d[n - m]$, of length
+$M + L - 1 = N$. A non-zero $z_k[m]$ places a copy of filter $k$, scaled by $z_k[m]$, on samples $m$ to $m + L - 1$.
+**Convolutional sparse coding** finds the maps for given filters, here by the convolutional lasso
+
+$$
+\min_{\zvec_1, \dots, \zvec_K} \; \tfrac{1}{2}\norm{\yvec - \sum_k \zvec_k * \dvec_k}^2 + \lambda \sum_k \norm{\zvec_k}_1,
+$$
+
+and **convolutional dictionary learning** also fits the filters, each constrained to $\norm{\dvec_k} \le 1$.
+</Definition>
+
+## Intuition
+
+<NoteLink to="dictionary-learning">Dictionary learning</NoteLink> on a long signal cuts it into windows and learns
+atoms for the windows. The windows start wherever the cutting puts them, so one wave of the signal appears at every
+offset within a window. An atom has a fixed offset, so the dictionary spends atoms on the same wave at different
+offsets. On a synthetic electrocardiogram of 15 beats, a dictionary of 24 atoms of 32 samples, trained on windows that
+start every 8 samples and coded with 3 atoms per window, uses about 20 non-zero coefficients per beat.
+
+Convolutional sparse coding removes the offset from the atom. A filter is placed by an activation, and an activation can
+sit at any sample, so a wave needs one filter however it falls. On the same trace, with a quarter of its beats ectopic,
+3 filters of 48 samples and $\lambda = 0.2$ code the signal with 4 to 5 non-zero activations per beat, and the rebuild
+is closer to the clean trace than the window dictionary's: an RMS error of 0.049 to 0.053 against 0.054 to 0.059, over
+three random traces whose noise has RMS 0.079. With $\lambda = 0.4$ the code falls to about 2 activations per beat, at
+an RMS error of about 0.07. The filters are whole beats rather than copies of one wave at many offsets.
+
+## Details
+
+### Sparse coding over every shift
+
+Let $\Tmat_k \in \reals^{N \times M}$ be the matrix whose column $m$ is $\dvec_k$ shifted down by $m$ samples, so that
+$\Tmat_k\zvec_k = \zvec_k * \dvec_k$. Each $\Tmat_k$ is a banded Toeplitz matrix. Stacking them,
+$\Dmat = [\Tmat_1, \dots, \Tmat_K] \in \reals^{N \times KM}$ and $\zvec = (\zvec_1, \dots, \zvec_K)$, gives
+
+$$
+\sum_k \zvec_k * \dvec_k = \Dmat\zvec.
+$$
+
+Convolutional sparse coding is therefore ordinary <NoteLink to="sparse-approximation">sparse approximation</NoteLink>
+over a structured dictionary of $KM$ atoms, every shift of every filter. Every method for sparse approximation applies.
+The structure changes two things.
+
+- **Cost.** $\Dmat$ has $NKM$ entries, but it is never formed. Applying it is $K$ convolutions, $O(KNL)$ operations
+  directly or $O(KN \log N)$ with the <Gloss name="fft">fast Fourier transform</Gloss>.
+- **Coherence.** Neighbouring shifts of one smooth filter are nearly parallel, so the
+  <Gloss name="mutual-coherence" /> of $\Dmat$ is close to 1 and the global uniqueness guarantee covers almost no
+  signals. Papyan, Sulam and Elad replace the global count of non-zeros by a local one, the largest number in any
+  window of $2L - 1$ samples, and prove uniqueness and recovery when that local count is small
+  <Cite id="papyan2017" />. A signal with sparse events, such as one beat per stretch of the trace, meets the local
+  condition even when its total count of non-zeros is large.
+
+### Coding by proximal gradient descent
+
+Write $f(\zvec) = \frac{1}{2}\norm{\yvec - \Dmat\zvec}^2$ with residual $\rvec = \yvec - \Dmat\zvec$. Its gradient is
+$\nabla f = -\Dmat^\top\rvec$, whose block for map $k$ is $-\Tmat_k^\top\rvec$. Entry $m$ of $\Tmat_k^\top\rvec$ is the
+inner product of $\rvec$ with column $m$ of $\Tmat_k$:
+
+$$
+(\Tmat_k^\top\rvec)[m] = \sum_n r[n]\, d_k[n - m] = \sum_{l=0}^{L-1} r[m + l]\, d_k[l] = (\rvec \star \dvec_k)[m],
+$$
+
+the cross-correlation of the residual with the filter over the $M$ lags at which the filter lies inside the signal.
+Correlation is the adjoint of convolution. The gradient therefore costs $K$ correlations, and each map's gradient is
+large where the residual looks like the filter, as in a <NoteLink to="matched-filter">matched filter</NoteLink>.
+
+The $\ell_1$ penalty is separable, and its <NoteLink to="proximal-gradient-methods">proximal operator</NoteLink> is soft
+thresholding, $S_\tau(v) = \operatorname{sign}(v)\max(\abs{v} - \tau, 0)$. A proximal gradient step with step size
+$\eta$ is
+
+$$
+\zvec_k \leftarrow S_{\lambda\eta}\big(\zvec_k + \eta\, (\rvec \star \dvec_k)\big), \qquad k = 1, \dots, K,
+$$
+
+and <Gloss name="fista" /> adds an extrapolation between steps <Cite id="beck2009" />. The step must satisfy
+$\eta \le 1/L_f$, where $L_f = \lambda_{\max}(\Dmat^\top\Dmat)$ is the Lipschitz constant of $\nabla f$. Young's
+inequality, $\norm{\zvec * \dvec} \le \norm{\dvec}_1 \norm{\zvec}$, bounds it by $\sum_k \norm{\dvec_k}_1^2$, but that
+bound is loose for smooth filters. The figure estimates $L_f$ by power iteration on $\Dmat^\top\Dmat$, which needs only
+convolutions and correlations, and uses $\eta = 1/(1.1\,\hat{L}_f)$ because power iteration approaches the eigenvalue
+from below.
+
+### Updating the filters
+
+With the maps fixed, the model is linear in the $KL$ filter taps. Filter tap $l$ of filter $k$ multiplies the map
+$\zvec_k$ shifted by $l$, so the design matrix $\Amat \in \reals^{N \times KL}$ has column $(k, l)$ equal to that
+shifted map. The least-squares filters solve the normal equations $\Amat^\top\Amat\,\dvec = \Amat^\top\yvec$, and both
+sides are correlations:
+
+$$
+(\Amat^\top\Amat)_{(a, l), (b, l')} = \sum_m z_a[m + l' - l]\, z_b[m], \qquad (\Amat^\top\yvec)_{(k, l)} = \sum_m z_k[m]\, y[m + l].
+$$
+
+The system has $KL$ unknowns, 144 for three filters of 48 taps, whatever the length of the signal. This is the
+convolutional form of the <Gloss name="mod" /> of dictionary learning.
+
+The filters need a constraint. Replacing $(\dvec_k, \zvec_k)$ by $(c\,\dvec_k, \zvec_k/c)$ leaves the synthesis
+unchanged and divides the penalty $\lambda\norm{\zvec_k}_1$ by $c$, so without a bound the filters grow and the maps
+shrink towards zero. Constraining $\norm{\dvec_k} \le 1$ removes this freedom <Cite id="garciacardona2018" />. The
+constrained least squares is solved by projected FISTA on the normal equations: a gradient step, then any filter longer
+than 1 is scaled back to unit norm, the projection onto the unit ball. The step $1/L_G$ uses the Gershgorin bound
+$L_G = \max_i \sum_j \abs{(\Amat^\top\Amat)_{ij}}$ on the largest eigenvalue.
+
+Learning alternates the two stages. Each round updates the filters for the current maps, then recodes from the current
+maps for a fixed number of FISTA steps. The filter update starts from the current filters and the coding from the
+current maps, so neither stage increases the objective beyond what a finite number of steps leaves. The objective is
+not convex in filters and maps together, and the learnt filters depend on the start.
+
+### Worked example
+
+Take one filter $\dvec = (1, 2, 1)$ and the signal $\yvec = (0, 0, 1, 2, 1, 0, 0, 0, -1, -2, -1, 0)$, so $N = 12$,
+$L = 3$ and $M = 10$. The signal is one copy of $\dvec$ starting at sample 2 and one copy of $-\dvec$ starting at sample
+8. The two copies do not overlap. Restricted to activations $z[2] = a$ and $z[8] = b$, the objective separates:
+
+$$
+\tfrac{1}{2}\norm{\dvec}^2 (a - 1)^2 + \lambda\abs{a} + \tfrac{1}{2}\norm{\dvec}^2 (b + 1)^2 + \lambda\abs{b},
+$$
+
+with $\norm{\dvec}^2 = 6$. Setting the derivative of the first term to zero for $a > 0$ gives
+$6(a - 1) + \lambda = 0$, so $a = 1 - \lambda/6$, and by symmetry $b = -(1 - \lambda/6)$. With $\lambda = 0.1$, the
+activations are $\pm 0.9833$, and FISTA from zero reaches them, with the other eight entries of the map at exactly
+zero. The penalty shrinks each activation by $\lambda/\norm{\dvec}^2$: a larger $\lambda$ gives smaller activations, and
+from $\lambda = 6$ upwards both are zero.
+
+### A heartbeat
+
+The figure learns filters from a synthetic electrocardiogram of 900 samples, about 15 beats of 54 to 66 samples. Each
+beat is a small P wave, a sharp QRS complex and a broad T wave, and a fraction of the beats are ectopic: wide, with no P
+wave. Slow baseline wander is not sparse over short filters, so it is removed first by subtracting a moving average
+over 121 samples. The initial filters are random stretches of the trace.
+
+The figure also offers a recorded trace, chosen by its start time; from 170 s the stretch holds seven premature
+ventricular beats among sixteen. The recording is five minutes of lead MLII of record 208 of the MIT-BIH Arrhythmia
+Database <Cite id="moody2001" />, distributed by PhysioNet <Cite id="goldberger2000" /> under the Open Data Commons
+Attribution License. It is decimated from 360 Hz to 90 Hz, so that a beat spans about 53 samples, and about one beat in
+five is a premature ventricular beat, wide and with no P wave.
+
+<ConvolutionalHeartbeat />
+
+After a few rounds the activation maps show the structure of the trace. With the defaults, each beat is placed by
+about one activation, and the stems line up with the beats. One filter becomes the wide ectopic beat and fires only at
+the ectopic beats: over three random traces it put 98 to 100 percent of its activation there. The other two become
+variants of the normal beat, a QRS complex followed by its T wave, and share the normal beats between them. The zoom
+shows how a beat is rebuilt from a few scaled copies of the filters. Lowering $\lambda$ adds small activations that fit
+finer detail and some of the noise; raising it leaves one activation per beat or fewer.
+
+### Solvers and history
+
+The direct convolutions used here suit short filters and signals of a few thousand samples. For long signals and images,
+solvers work in the Fourier domain, where convolution is a product and the coding subproblem of the
+<Gloss name="admm">alternating direction method of multipliers</Gloss> has a closed form at each frequency
+<Cite id="bristow2013" /> <Cite id="wohlberg2016" />. Garcia-Cardona and Wohlberg compare these solvers and the filter
+updates <Cite id="garciacardona2018" />.
+
+Grosse and colleagues introduced shift-invariant sparse coding to learn features of audio for classification
+<Cite id="grosse2007" />. Zeiler and colleagues stacked convolutional sparse coding layers into deconvolutional networks
+for images <Cite id="zeiler2010" />. A dictionary of windows learnt by <Gloss name="k-svd" /> <Cite id="aharon2006" />
+can only approximate this structure, with a separate atom for each offset of a shape that it meets.
+
+## Assumptions
+
+- The signal is a sum of a few shapes, each repeated at arbitrary positions with arbitrary amplitudes. A shape that
+  stretches or compresses, such as a beat at a different heart rate, is only approximated by a fixed filter.
+- The noise is spread over all positions and frequencies, so the penalty drops it with the small activations.
+- Components that are not sparse over short filters, such as baseline wander, are removed beforehand or modelled
+  separately.
+
+## Pitfalls
+
+- **The penalty sets the sparsity.** Too small a $\lambda$ fits the noise with many small activations; too large a
+  $\lambda$ removes small waves first. The figure's default, $\lambda = 0.4$, suits noise of standard deviation about
+  0.08 on beats of height 1.
+- **The filter length decides what a filter is.** A filter much shorter than a beat learns parts of a beat; a filter
+  longer than the gap between beats can only be placed once per gap and absorbs pieces of the neighbouring beats.
+- **Filters are defined up to a shift within their support.** A wave can sit anywhere inside its filter's $L$ taps,
+  with the activation shifted to match, so two runs can learn the same wave at different offsets. Compare filters up
+  to a shift.
+- **Boundaries.** An activation places a whole filter inside the signal, so a wave cut by either end of the signal is
+  fitted only partly, by a filter placed further in, or is left in the residual.
+- **Local minima.** Filters and maps are fitted jointly by a non-convex problem; different seeds can split the beat
+  differently. Rerun with several starts and keep the lowest objective.

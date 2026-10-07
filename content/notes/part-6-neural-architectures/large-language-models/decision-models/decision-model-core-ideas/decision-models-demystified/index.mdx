@@ -1,0 +1,248 @@
+---
+title: Decision models, demystified
+kind: concept
+summary: 'A decision model is an ordinary language model whose prompt lists the allowed answers, each with a letter; the server reads how strongly it wants to write each letter next. Training nudges those strengths towards the right letter with a penalty that rewards honest probabilities.'
+tags: [decision-models, large-language-models, fine-tuning, calibration, worked-example]
+aliases: [how decision models work, decision models explained, decision models for beginners, how decision models are trained, decision model training explained]
+requires: [autoregressive-transformer-language-model]
+partOf: [decision-models]
+related: [answer-token-scoring, shared-prefix-decision-batching, decision-model-input-output-contract, training-decision-models, calibrating-decision-models, reinforcement-learning-for-calibrated-decisions]
+references: [bespoke2026nimble, together2026tev1, typesafe2026models, typesafe2026jaggedness, gao2026openjev, hu2022]
+status: draft
+updated: 2026-10-05
+---
+
+import { Demystify } from './Demystify'
+import { HonestPenalty } from './HonestPenalty'
+
+<Definition>
+A **decision model** is an ordinary <Gloss name="language-model">language model</Gloss> used in a particular way. It is
+given one prompt that contains the text to judge, a question about it, and the allowed answers, each labelled with a
+letter. The model is not asked to write anything. Instead, the server looks at how strongly the model wants to write
+each of those letters as the first word of its reply, keeps those numbers, and turns them into probabilities that add up
+to 1. Training shows the model many such prompts with the correct letter and nudges it to give that letter more
+probability, using a penalty that is lowest when the probabilities are honest.
+</Definition>
+
+## Intuition
+
+A language model, at every step, scores every word it could write next. A chatbot picks one, writes it, and repeats
+until it has a reply. A decision model stops before the first pick. If the prompt ends with the answers labelled
+`A` to `E` and the instruction "reply with the letter", the model's scores for the words `A`, `B`, `C`, `D` and `E` at
+that point already say which answer it prefers and by how much. Reading those five scores is the whole trick.
+
+Everything else serves that trick: the answers are written into the prompt, so the model knows what each letter means;
+the server reads only the letters' scores, so the answer is always one of them; and the model is fine-tuned so that its
+scores for the letters are good ones.
+
+## Inference: making a decision
+
+### One question, step by step
+
+Take one message and one question with four categories.
+
+1. **Write the prompt.** The server writes the instruction, the text, the question and the answers as plain text:
+
+   ```text
+   Choose the best answer. Reply with its letter only.
+
+   Text: Hi, I was charged twice this month. Can you refund one of the payments?
+   Question: Which team should handle this message?
+   A: billing
+   B: technical
+   C: account
+   D: sales
+
+   Answer:
+   ```
+
+   Real servers write the same content as JSON inside the model's chat format (see
+   <NoteLink to="decision-model-input-output-contract" />), but nothing about the idea changes.
+2. **Read it once.** The model reads the whole prompt in a single pass, as it would before starting any reply. At the
+   end it has a score for each of its roughly 250,000 possible next words.
+3. **Keep the letters.** The server looks up the scores of `A`, `B`, `C` and `D` and ignores every other word, such
+   as "Sure" or "The".
+4. **Turn scores into probabilities.** A softmax rescales the four scores so they are positive and add up to 1, for
+   example billing 0.89, account 0.07, technical 0.03, sales 0.01.
+5. **Look the letter up.** `A` was billing, so the answer is billing with probability 0.89. The model never wrote a
+   word.
+
+<Demystify />
+
+### How the answers get in, and why the mapping is one to one
+
+There is no special machinery for the answers: no extra layer, no cross-attention to a list of categories, no
+sampling of five tokens. The answers are words in the prompt, next to their letters, and the model reads them with
+the same attention it uses for every other word. That is how it knows that `A` means billing.
+
+The one-to-one mapping between letters and answers is bookkeeping done by the server, outside the model:
+
+- **The server chooses the letters.** It labels the answers `A`, `B`, `C`, … in the order they were listed, and
+  remembers which letter means which answer.
+- **Each letter must be one word to the model.** The server checks that each letter is a single token, so it has
+  exactly one score to read, and that no two letters share a token
+  <Cite id="bespoke2026nimble" />.
+- **The server reads exactly those letters.** The probabilities are computed over the offered letters only, so the
+  answer cannot be anything else.
+
+The model's only job is to give the right letter the highest score. A general chat model often wants to reply "Sure,
+the answer is…", which puts little weight on any letter. Fine-tuning on many examples of prompt and correct letter
+teaches it to put its weight on the letters and on the right one (see <NoteLink to="training-decision-models" />).
+
+### Scenarios
+
+| what you ask | how it is set up | what comes back |
+| --- | --- | --- |
+| a yes-or-no question | two letters: `A` = no, `B` = yes | the probability of yes |
+| one of several categories | one letter per category | the top category and every category's probability |
+| a rating, say 0 to 4 | one letter per level | each level's probability and their weighted average, which can fall between levels |
+| a message no category fits | add "none of these" as one more letter | "none of these", if the model is confident none fits |
+| several questions about one text | the text and every question's answer list once; then one short line per question saying which to answer | one answer per question, from one read of the text |
+| more answers than letters | two- or three-letter codes that are still single tokens, or split the list | as for categories |
+| a question that needs working out | do the working in code; ask the model simpler questions | a more reliable answer |
+
+**A yes-or-no question** is the smallest case: two letters, and the answer is how likely "yes" is.
+
+**A rating** uses one letter per level. The probabilities say how likely each level is, and the server also returns
+their weighted average, for example 1.4 on a 0 to 4 scale. That number is not a level itself.
+
+**When nothing fits**, the probabilities still add up to 1 over the letters offered, because the server only ever
+compares the offered letters with each other. A message about a lost parcel, asked to choose between billing,
+technical, account and sales, still gets a confident-looking answer. Offering "none of these" gives the model a
+letter to put its weight on.
+
+**Several questions about the same text** do not need several full reads. The prompt lists the text and *all* the
+questions with their answer lists, and only the last line, which names the question to answer, changes. The server
+reads the long shared part once and then runs each short last line against it (see
+<NoteLink to="shared-prefix-decision-batching" />). Each answer is still worked out on its own: no answer can see
+another, so if two answers must agree, the calling code checks it.
+
+**Questions that need steps**, such as arithmetic, counting or comparing dates, are weak points, because the model
+gets no chance to think aloud before the letter. The documented remedy is to compute in code and ask the model
+simpler, literal questions <Cite id="typesafe2026jaggedness" />.
+
+**The order of the answers** decides their letters. Reversing the list moves the letters but should not move the
+probabilities attached to each answer. A model that likes the letter `A` for its own sake breaks this, which is why
+answers are worth checking with the options reordered.
+
+### How it differs from a chatbot
+
+| | chatbot | decision model |
+| --- | --- | --- |
+| output | text, written word by word | one probability per allowed answer |
+| passes through the model | one per word written | one, for the prompt |
+| can the answer be malformed? | yes; it has to be parsed | no; it is always one of the letters |
+| confidence | not given | the probabilities themselves |
+| can it reason first? | yes | no |
+
+## Training: teaching the model to decide
+
+Any instruction-following language model can be read this way, but an untuned one is poor at it. It mostly wants to
+reply "Sure, …", so the letters get little of its probability, and not always in the right order. Training changes
+that one example at a time:
+
+- show the model a prompt whose right answer is `B`;
+- see how much probability it gave `B`;
+- adjust the model slightly so that `B` would get more and the other letters less.
+
+After a few thousand examples the model puts nearly all its probability on letters, and on the right ones. Nothing about
+the model's shape changes. It is the same network, fine-tuned on one kind of example. The open models
+<NoteLink to="nimble">Nimble</NoteLink> and <NoteLink to="tev1">Tev1</NoteLink> are such fine-tunes
+<Cite id="bespoke2026nimble" /> <Cite id="together2026tev1" />; how the closed model <NoteLink to="jev">Jev</NoteLink>
+is trained is unpublished <Cite id="typesafe2026models" />.
+
+### One training example, step by step
+
+1. **Write the prompt** exactly as the server will at serving time: the instruction, the text, the question, the
+   answers with their letters. The correct answer is recorded separately; it is never in the prompt.
+2. **Read it once** and look up the probabilities of the letters, exactly as at serving time. Say the answers are
+   billing (`A`), technical (`B`) and account (`C`), the right one is billing, and the model says `A` 0.5, `B` 0.2,
+   `C` 0.3.
+3. **Score the reply.** The log-loss penalty is $-\log(\text{probability of the right letter})$, here
+   $-\log 0.5 \approx 0.69$. Had the model said 0.9 it would be 0.11; had it said 0.1 it would be 2.3.
+4. **Nudge the model.** Backpropagation works out, for every adjustable weight, which small change would lower the
+   penalty, and makes it. The open models change only a small add-on of extra weights (a <Gloss name="lora" /> adapter)
+   and leave the original model untouched <Cite id="hu2022" />.
+5. **Repeat** for the next example. Nimble and Tev1 each went through their training examples once
+   <Cite id="bespoke2026nimble" /> <Cite id="together2026tev1" />.
+
+### Why this makes probabilities honest
+
+Imagine ten messages that look the same to the model, seven of them really about billing and three about account
+changes. The model cannot tell them apart, so whatever it says for one it says for all ten. If it says billing with
+probability $p$, its total log-loss penalty is
+
+$$
+7 \times (-\log p) + 3 \times (-\log(1 - p)),
+$$
+
+and that is lowest at $p = 0.7$. Saying 0.95 is punished hard on the three account messages; saying 0.5 is punished on
+the seven billing ones. The penalty is lowest when the model says how often it is actually right. Penalties with this
+property are called <NoteLink to="proper-scoring-rule">proper scoring rules</NoteLink>, and log loss is one; so is
+squared error.
+
+A penalty that only counts right and wrong does not have it. Counting mistakes, the best the model can do with seven
+billing messages in ten is to say billing every time, with full certainty. A model trained that way learns to sound
+sure.
+
+<HonestPenalty />
+
+### Why a trained model can still be overconfident
+
+Log loss pushes towards honest probabilities *on the examples the model is trained on*. Two things spoil that on new
+messages:
+
+- **Few examples, seen once.** A model can fit its training examples better than it can generalise, and becomes surer
+  than it should be on messages it has not seen. Nimble's first release said its top answer had probability 0.89 on
+  average while 73% of those answers were right <Cite id="bespoke2026nimble" />.
+- **Different messages at serving time.** Probabilities that were honest for training data drift when the messages
+  change.
+
+So the last step of training is a check and a small correction on examples kept aside: measure how often the model is
+right at each level of probability, and if it is overconfident, soften every probability by one fitted number, the
+temperature. How to measure it and fit the correction is on <NoteLink to="calibrating-decision-models" />.
+
+### Where the examples come from
+
+| what you have | how it becomes training data |
+| --- | --- |
+| your own labelled decisions | each one becomes a prompt plus its correct letter |
+| rules you can write as code | generate cases and let the rules give the answer |
+| examples that differ in one fact | pairs in which one changed fact flips the answer, so the model learns which facts matter (Nimble's approach) |
+| public labelled datasets | convert each item to the prompt format (Tev1's approach) |
+| a stronger model's probabilities | train towards its probabilities instead of a single right letter, which copies its uncertainty too |
+| people who disagree | train on the spread of their answers, so 60/40 disagreement becomes a 0.6/0.4 target |
+
+Two habits matter whatever the source. Shuffle the order of the answers, so the right one is not usually `A`. And keep
+every variant of one source in the same split, so the test set is genuinely new.
+
+### When there is no right answer to show
+
+Sometimes training has no correct answer, only a way to check the model's pick after the fact: an agent acted on the
+decision and it worked or failed. That is <Gloss name="rl">reinforcement learning</Gloss>. The same lesson applies: a
+reward of 1 for right and 0 for wrong teaches the model to sound certain, so the reward has to charge for overconfidence
+as well. A simple honest reward is twice "was it right" minus the sum of the squared probabilities; its average works
+out to a proper scoring rule. Models that reason before deciding are trained in two stages, first making the read-out
+probabilities honest and then rewarding better reasoning with the same honest score <Cite id="gao2026openjev" />. The
+details are on <NoteLink to="reinforcement-learning-for-calibrated-decisions" />.
+
+## Assumptions
+
+- **The training prompts match the serving prompts word for word.** The model learns one format; change it and the
+  learning does not carry over.
+- **Each answer is a single word to the model.** Letters normally are; the server checks.
+- **The labels are right.** The model learns to be honest about the labels it is shown. Wrong labels give confidently
+  wrong answers.
+
+## Pitfalls
+
+- **Reading the probabilities as certainty.** They are the model's weights over the answers offered. Whether 0.9
+  really means right nine times in ten has to be checked on labelled examples (see
+  <NoteLink to="calibrating-decision-models" />).
+- **Forgetting "none of these".** Without it, every message gets one of the offered answers.
+- **Expecting it to reason.** It answers in one step. Break hard questions into easy ones.
+- **Training on right-or-wrong only.** It rewards certainty, not honesty.
+- **Checking calibration on the training examples.** The model looks better there than it is. Use examples it has not
+  seen.
+- **One correction for every kind of question.** Yes-or-no questions, ratings and categories can be off by different
+  amounts; check each kind separately.

@@ -1,0 +1,260 @@
+---
+title: Basis pursuit
+kind: concept
+summary: 'Basis pursuit replaces the sparsest exact representation $\yvec = \Dmat\xvec$ by the one of least $\ell_1$ norm, a linear program. Its penalised form, basis pursuit denoising (the lasso), is solved by soft thresholding; iterative hard thresholding keeps the $s$ largest coefficients instead.'
+tags: [signal-processing, sparsity, convexity, nonsmooth-optimisation, worked-example]
+aliases:
+  [
+    BP,
+    l1 minimisation,
+    ℓ1 minimisation,
+    basis pursuit denoising,
+    BPDN,
+    iterative hard thresholding,
+    IHT,
+    iterative soft thresholding,
+    sparse recovery by linear programming,
+  ]
+requires: [vector-norms, linear-programming]
+partOf: [sparse-approximation]
+related: [lasso, proximal-gradient-methods, matching-pursuit, compressed-sensing, wavelet-denoising]
+references: [chen1998, natarajan1995, donoho2003, tropp2004, tibshirani1996, daubechies2004, beck2009, blumensath2009, donoho1994, elad2010]
+status: draft
+updated: 2026-10-07
+---
+
+import { NormBalls } from './NormBalls'
+import { SoftThreshold } from './SoftThreshold'
+import { SparseDenoising } from './SparseDenoising'
+
+<Definition>
+Let $\Dmat \in \reals^{m \times k}$ be a dictionary whose $k$ columns $\dvec_1, \dots, \dvec_k$ are the atoms, with
+$k > m$ in the usual overcomplete case, and let $\yvec \in \reals^m$ be a signal. **Basis pursuit** is the convex
+problem
+
+$$
+\min_{\xvec \in \reals^k} \norm{\xvec}_1 \quad \text{subject to} \quad \Dmat\xvec = \yvec,
+$$
+
+the exact representation of $\yvec$ whose coefficients have the least $\ell_1$ norm
+$\norm{\xvec}_1 = \sum_j \abs{x_j}$ <Cite id="chen1998" />. **Basis pursuit denoising** drops the exact fit for a
+penalty:
+
+$$
+\min_{\xvec} \tfrac{1}{2}\norm{\yvec - \Dmat\xvec}^2 + \lambda\norm{\xvec}_1, \qquad \lambda > 0.
+$$
+
+**Iterative hard thresholding** attacks $\min \norm{\yvec - \Dmat\xvec}^2$ subject to at most $s$ non-zero
+coefficients directly.
+</Definition>
+
+## Intuition
+
+The sparsest representation minimises the count $\norm{\xvec}_0$ of non-zero coefficients. That count is not convex,
+and finding its minimum over all supports is NP-hard in general <Cite id="natarajan1995" />. The $\ell_1$ norm is the
+closest convex stand-in: on the box $\abs{x_j} \le 1$ it is the largest convex function below $\norm{\xvec}_0$.
+
+The ball $\norm{\xvec}_1 \le r$ is a cross-polytope: a diamond in two dimensions, an octahedron in three. Its corners
+lie on the coordinate axes, and its edges and low-dimensional faces hold vectors with few non-zero entries. The
+solutions of $\Dmat\xvec = \yvec$ form an affine set. Growing the ball from the origin until it first touches that set
+finds the basis pursuit solution, and the first contact is usually at a corner or a low-dimensional face. The round
+$\ell_2$ ball has no corners, so its first contact, the <NoteLink to="pseudoinverse">minimum-norm solution</NoteLink>
+$\Dmat^\top(\Dmat\Dmat^\top)^{-1}\yvec$, is almost never sparse.
+
+<NormBalls />
+
+## A worked example
+
+Take three unit atoms in $\reals^2$: the two spikes and a diagonal,
+
+$$
+\Dmat = \begin{bmatrix} 1 & 0 & 1/\sqrt{2} \\ 0 & 1 & 1/\sqrt{2} \end{bmatrix}, \qquad \yvec = \begin{bmatrix} 1 \\ 1 \end{bmatrix}.
+$$
+
+Every solution of $\Dmat\xvec = \yvec$ has the form $\xvec = (1 - t/\sqrt{2},\ 1 - t/\sqrt{2},\ t)$ for some
+$t \in \reals$.
+
+- The two spikes alone, $t = 0$, give $\xvec = (1, 1, 0)$ with $\norm{\xvec}_1 = 2$.
+- The diagonal alone, $t = \sqrt{2}$, gives $\xvec = (0, 0, \sqrt{2})$ with $\norm{\xvec}_1 = \sqrt{2} \approx 1.41$.
+- The minimum $\ell_2$ norm solution is $\Dmat^\top(\Dmat\Dmat^\top)^{-1}\yvec$. Here
+  $\Dmat\Dmat^\top = \begin{bmatrix} 3/2 & 1/2 \\ 1/2 & 3/2 \end{bmatrix}$, which maps $(\tfrac12, \tfrac12)$ to
+  $\yvec$, so the solution is $\Dmat^\top(\tfrac12, \tfrac12) = (\tfrac12, \tfrac12, \tfrac{1}{\sqrt{2}})$. It uses all
+  three atoms, with $\norm{\xvec}_2 = 1$ and $\norm{\xvec}_1 = 1 + 1/\sqrt{2} \approx 1.71$.
+
+For $0 \le t \le \sqrt{2}$ the $\ell_1$ norm is $2 - t(\sqrt{2} - 1)$, which decreases in $t$; outside that interval
+it increases. Basis pursuit therefore picks $t = \sqrt{2}$: one atom, the sparsest representation.
+
+## Basis pursuit as a linear program
+
+The $\ell_1$ norm is not linear, but splitting each coefficient into a positive and a negative part makes the problem a
+<NoteLink to="linear-programming">linear program</NoteLink>. Write $\xvec = \uvec - \vvec$ with $\uvec, \vvec \ge
+\zeros$ and solve
+
+$$
+\min_{\uvec, \vvec} \ones^\top(\uvec + \vvec) \quad \text{subject to} \quad \Dmat(\uvec - \vvec) = \yvec,\ \ \uvec \ge \zeros,\ \vvec \ge \zeros.
+$$
+
+The program has $2k$ variables and $m$ equality constraints. Any feasible $(\uvec, \vvec)$ gives a feasible
+$\xvec = \uvec - \vvec$ with $\norm{\xvec}_1 = \sum_j \abs{u_j - v_j} \le \ones^\top(\uvec + \vvec)$. At an optimum,
+$u_j v_j = 0$ for every $j$: if both were positive, subtracting $\min(u_j, v_j)$ from each would keep
+$\uvec - \vvec$ and the constraints unchanged and lower the objective by $2\min(u_j, v_j)$. So at an optimum the bound
+holds with equality, and the optimal values and solutions of the two problems coincide.
+
+The linear program also bounds the sparsity of its answer. The feasible set
+$\set{\wvec \ge \zeros : [\Dmat, -\Dmat]\,\wvec = \yvec}$ is a polyhedron in standard form, and the simplex method ends
+at a vertex. A vertex is a basic solution, with at most $m$ positive entries. Basis pursuit therefore has a solution
+with at most $m$ non-zero coefficients, whatever $k$ is.
+
+## When basis pursuit finds the sparsest representation
+
+Let the atoms have unit norm and let $\mu = \max_{i \ne j} \abs{\dvec_i^\top\dvec_j}$ be the
+<Gloss name="mutual-coherence">mutual coherence</Gloss> of $\Dmat$. If $\yvec = \Dmat\xvec^\star$ and $\xvec^\star$ has
+$s$ non-zeros with
+
+$$
+s < \tfrac{1}{2}\paren{1 + 1/\mu},
+$$
+
+then $\xvec^\star$ is the unique sparsest representation of $\yvec$, and basis pursuit returns it
+<Cite id="donoho2003" /> <Cite id="tropp2004" />. The same condition guarantees that
+<NoteLink to="matching-pursuit">orthogonal matching pursuit</NoteLink> finds it in $s$ steps.
+
+<Derivation title="Proof: the null space property and the coherence bound">
+**Null space property.** Basis pursuit recovers every $\xvec^\star$ with support $S$ of size at most $s$ if every
+non-zero $\hvec$ with $\Dmat\hvec = \zeros$ has $\norm{\hvec_S}_1 < \norm{\hvec_{S^c}}_1$ for every such $S$. Every
+other solution of $\Dmat\xvec = \yvec$ is $\xvec^\star + \hvec$ for a non-zero $\hvec$ in the null space. Because
+$\xvec^\star$ is zero off $S$,
+
+$$
+\norm{\xvec^\star + \hvec}_1 = \norm{\xvec^\star_S + \hvec_S}_1 + \norm{\hvec_{S^c}}_1
+\ge \norm{\xvec^\star_S}_1 - \norm{\hvec_S}_1 + \norm{\hvec_{S^c}}_1 > \norm{\xvec^\star}_1,
+$$
+
+so $\xvec^\star$ is the unique minimiser.
+
+**Coherence implies the property.** Let $\Dmat\hvec = \zeros$. Taking the inner product with the unit atom $\dvec_i$
+gives $h_i = -\sum_{j \ne i} h_j\, \dvec_i^\top\dvec_j$, so $\abs{h_i} \le \mu\paren{\norm{\hvec}_1 - \abs{h_i}}$ and
+$\abs{h_i} \le \frac{\mu}{1 + \mu}\norm{\hvec}_1$. Summing over a support $S$ of size $s$,
+
+$$
+\norm{\hvec_S}_1 \le \frac{s\mu}{1 + \mu}\norm{\hvec}_1 < \tfrac{1}{2}\norm{\hvec}_1
+\quad \text{when} \quad s < \frac{1 + \mu}{2\mu} = \tfrac{1}{2}\paren{1 + 1/\mu}.
+$$
+
+Then $\norm{\hvec_S}_1 < \norm{\hvec}_1 - \norm{\hvec_S}_1 = \norm{\hvec_{S^c}}_1$, which is the null space property.
+Uniqueness among <NoteLink to="sparse-approximation">sparse representations</NoteLink> follows from the same bound: two
+distinct representations with fewer than $\frac{1}{2}(1 + 1/\mu)$ non-zeros each would differ by a null-space vector
+$\hvec$ with fewer than $1 + 1/\mu$ non-zeros, but the inequality $\abs{h_i} \le \frac{\mu}{1+\mu}\norm{\hvec}_1$ summed
+over the support of $\hvec$ gives $1 \le \norm{\hvec}_0\,\frac{\mu}{1 + \mu}$, so $\hvec$ has at least $1 + 1/\mu$
+non-zeros.
+</Derivation>
+
+The bound is pessimistic. The dictionary of 64 cosines and 64 spikes in the denoising figure below has
+$\mu = \sqrt{2/64}\cos(\pi/128) \approx 0.177$, so the guarantee covers only $s \le 3$. Basis pursuit nevertheless
+recovers most signals with several times that many non-zeros; the bound covers the worst support, not a typical one.
+
+## Basis pursuit denoising
+
+A measured signal carries noise, $\yvec = \Dmat\xvec^\star + \varepsilonvec$. An exact fit then represents
+the noise as well, and with $k > m$ atoms it always can. <Gloss name="bpdn" /> trades the fit against the $\ell_1$
+norm with a weight $\lambda$ <Cite id="chen1998" />. It is the same problem as the
+<NoteLink to="lasso">lasso</NoteLink> of statistics, with the dictionary as design matrix <Cite id="tibshirani1996" />.
+
+**When every coefficient is zero.** The objective is convex, so $\xvec$ is a minimiser exactly when zero is in its
+<NoteLink to="subgradients">subdifferential</NoteLink>:
+$\zeros \in -\Dmat^\top(\yvec - \Dmat\xvec) + \lambda\,\partial\norm{\xvec}_1$. At $\xvec = \zeros$ the subdifferential
+of the norm is the whole box $[-1, 1]^k$, so $\zeros$ is optimal exactly when each
+$\abs{\dvec_j^\top\yvec} \le \lambda$:
+
+$$
+\xvec = \zeros \iff \lambda \ge \norm{\Dmat^\top\yvec}_\infty.
+$$
+
+Below that value, an atom can enter the solution only if its correlation with the residual reaches $\lambda$; at a
+solution, every non-zero coefficient has $\abs{\dvec_j^\top(\yvec - \Dmat\xvec)} = \lambda$ exactly.
+
+**Soft thresholding.** For one coordinate and $\Dmat$ the identity, the problem is
+$\min_x \tfrac12(x - v)^2 + \lambda\abs{x}$. On $x > 0$ the derivative $x - v + \lambda$ vanishes at $x = v - \lambda$,
+which is positive only if $v > \lambda$. On $x < 0$ the root is $x = v + \lambda$, valid only if $v < -\lambda$. At
+$x = 0$ the subgradient condition is $0 \in -v + \lambda[-1, 1]$, which holds exactly when $\abs{v} \le \lambda$. The
+minimiser is the soft threshold
+
+$$
+S_\lambda(v) = \sgn(v)\max\paren{\abs{v} - \lambda, 0} = \prox_{\lambda\abs{\cdot}}(v).
+$$
+
+Soft thresholding moves every input towards zero by $\lambda$ and sets every input within $\lambda$ of zero to zero.
+In an orthonormal basis ($\Dmat^\top\Dmat = \I$, $k = m$) the whole problem separates into coordinates of
+$\Dmat^\top\yvec$, and its solution is $S_\lambda$ applied to the transform coefficients. That is
+<NoteLink to="wavelet-denoising">wavelet shrinkage</NoteLink> when $\Dmat$ is a wavelet basis
+<Cite id="donoho1994" />.
+
+<SoftThreshold />
+
+**Iterative soft thresholding.** In an overcomplete dictionary the coordinates do not separate. Write
+$f(\xvec) = \tfrac12\norm{\yvec - \Dmat\xvec}^2$, whose gradient $\Dmat^\top(\Dmat\xvec - \yvec)$ is Lipschitz with
+constant $L = \sigma_{\max}(\Dmat)^2$, the squared largest singular value. Around the current iterate $\xvec_t$, $f$ is
+bounded above by the quadratic
+
+$$
+f(\xvec) \le f(\xvec_t) + \nabla f(\xvec_t)^\top(\xvec - \xvec_t) + \tfrac{L}{2}\norm{\xvec - \xvec_t}^2 .
+$$
+
+Adding $\lambda\norm{\xvec}_1$ to the bound and minimising completes the square into one soft-thresholding problem per
+coordinate:
+
+$$
+\xvec_{t+1} = S_{\lambda/L}\paren{\xvec_t + \tfrac{1}{L}\Dmat^\top(\yvec - \Dmat\xvec_t)}.
+$$
+
+Each step is a gradient step on the fit followed by soft thresholding. This is the
+<Gloss name="ista" /> <Cite id="daubechies2004" />, a <NoteLink to="proximal-gradient-methods">proximal gradient
+method</NoteLink>. Because each step minimises an upper bound that touches the objective at $\xvec_t$, the objective
+never increases, and its gap to the optimum falls as $O(1/t)$. <Gloss name="fista" /> extrapolates from the last two
+iterates before each step and closes the gap as $O(1/t^2)$ <Cite id="beck2009" />.
+
+## Iterative hard thresholding
+
+<Gloss name="iht" /> keeps the gradient step and replaces soft thresholding by hard thresholding $H_s$, which keeps
+the $s$ entries of largest magnitude and zeroes the rest <Cite id="blumensath2009" />:
+
+$$
+\xvec_{t+1} = H_s\paren{\xvec_t + \tfrac{1}{L}\Dmat^\top(\yvec - \Dmat\xvec_t)}.
+$$
+
+$H_s$ is the Euclidean projection onto the set of vectors with at most $s$ non-zeros, so this is projected gradient
+descent on a non-convex set. With step $1/L$ the squared error never increases, because $H_s(\zvec)$ is the closest
+$s$-sparse vector to the gradient step $\zvec$ and the quadratic bound above holds for it. The limit is a local
+minimiser, not necessarily the global one. Hard thresholding does not shrink the coefficients it keeps, so the lasso's
+bias is absent, but $s$ must be chosen.
+
+The figure below denoises a signal of 64 samples that is three cosines plus two spikes, over a dictionary of the 64
+cosines of the <Gloss name="dct" /> and the 64 spikes.
+
+<SparseDenoising />
+
+## Assumptions
+
+- **A sparse model.** The signal must be close to a combination of few atoms of $\Dmat$. A signal that is dense over
+  $\Dmat$ gets a poor sparse approximation from every method.
+- **A representable signal.** Basis pursuit requires $\yvec$ in the range of $\Dmat$; otherwise the linear program is
+  infeasible. An overcomplete dictionary whose atoms span $\reals^m$ represents every signal.
+- **Comparable atom norms.** The $\ell_1$ norm penalises coefficient size, so an atom of large norm needs a small
+  coefficient and is cheap to use. Scale the atoms to unit norm before solving.
+- **Noise of known scale.** For white Gaussian noise of standard deviation $\sigma$ and unit-norm atoms, $\lambda$ of
+  order $\sigma\sqrt{2\log k}$ sets to zero the coefficients that noise alone would produce <Cite id="donoho1994" />.
+
+## Pitfalls
+
+- **Fitting the noise.** Basis pursuit's exact fit reproduces the noise. With $k > m$ atoms it typically uses $m$ of
+  them, the vertex bound of the linear program.
+- **Shrinkage bias.** The lasso shrinks every kept coefficient by about $\lambda$, so its reconstruction error grows
+  with $\lambda$ even once the support is right. Refitting the chosen atoms by least squares removes the bias.
+- **Ties.** When two atoms play symmetric roles, the $\ell_1$ minimiser is a whole face of the polytope and is not
+  unique. An interior-point solver returns a point inside that face, which is not sparse.
+- **Hard thresholding's local minima.** The first step of iterative hard thresholding keeps the $s$ atoms most
+  correlated with $\yvec$. An atom that correlates well with the signal without being part of it can be kept, and the
+  iteration may settle on a wrong support.
+- **Reading the coherence bound as a limit.** The guarantee $s < \frac{1}{2}(1 + 1/\mu)$ is sufficient, not necessary;
+  for the dictionary of cosines and spikes above it covers 3 non-zeros, while recovery typically succeeds with many
+  more <Cite id="elad2010" />.

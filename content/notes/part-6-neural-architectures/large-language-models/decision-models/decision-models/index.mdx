@@ -1,0 +1,138 @@
+---
+title: Decision models
+kind: overview
+summary: 'A decision model takes a text and typed questions about it, and returns one answer per question from a fixed set, with a probability for every allowed answer. It reads the input once and writes nothing, so latency depends on input length alone.'
+tags: [decision-models, large-language-models, classification, calibration]
+aliases: [system one models, decision language models, typed decision models]
+requires: [autoregressive-transformer-language-model]
+related: [prompting, classifier-calibration, key-value-cache, cumulative-link-model]
+references: [gao2026openjev, typesafe2026launch, typesafe2026models, typesafe2026primer, typesafe2026jaggedness, bespoke2026nimble, together2026tev1, ollama2026decision, aimultiple2026decision]
+status: draft
+updated: 2026-10-05
+---
+
+import { DecisionFlow } from './DecisionFlow'
+
+<Callout variant="note" title="An emerging area">
+The first decision models were released in September 2026. Much is unpublished, above all how Jev is trained. This
+section separates what the vendors and evaluators state from what is derived here, and each note says which is which.
+</Callout>
+
+<Definition>
+A **decision model** maps a *state* (a text, a JSON object or an array) and a set of named, typed questions to one
+answer per question, chosen from the answers the question allows, with a probability for every allowed answer
+<Cite id="typesafe2026models" />. Question types are a choice among options, a yes-or-no question, and a score on an
+ordered rubric. The model writes no text: one read of the input produces every answer.
+</Definition>
+
+## Components
+
+<DecisionFlow />
+
+- **Plain-language introduction.** <NoteLink to="decision-models-demystified" />: inference, with one question traced
+  from prompt to answer and how the setup changes for yes-or-no questions, ratings, several questions and answers that
+  do not fit; and training, with one example traced and why the training penalty makes probabilities honest.
+
+- **Interface.** A request carries the state and the questions; each question has a type, instructions and criteria
+  for each allowed answer. TypeSafe defined it as `POST /v1/systemone`; Ollama serves the open models at the same path
+  <Cite id="ollama2026decision" />.
+- **Readout.** <NoteLink to="answer-token-scoring" />: each allowed answer gets a single-token code, and the
+  probabilities are a softmax of the codes' next-token logits at the end of the prompt. The answer is always one of the
+  options offered.
+- **Sharing.** <NoteLink to="shared-prefix-decision-batching" />: the state and schema come first and are read once;
+  each question's short ending runs against the stored read.
+- **Training.** <NoteLink to="training-decision-models" />: supervised LoRA fine-tuning with a candidate-only or a
+  completion loss, on contrastive or converted data.
+- **Calibrated rewards.** <NoteLink to="reinforcement-learning-for-calibrated-decisions" />: Jev's unpublished
+  post-training method, and which rewards keep probabilities calibrated under reinforcement learning.
+- **Calibration.** <NoteLink to="calibrating-decision-models" />: temperatures per question type, order debiasing and
+  thresholds chosen from error costs.
+- **Building one.** <NoteLink to="building-a-decision-model" />: the six-stage recipe for an open model.
+
+## Data flow
+
+1. The client sends the state and the questions.
+2. The server renders one prompt: instructions, the state and the schema of every question, then the selector for one
+   question.
+3. One forward pass reads the shared part and stores its internal state.
+4. Each question's ending runs against that state; the logits of its answer codes at the last position are read.
+5. A softmax over each question's codes gives its probabilities; ordinary code maps the top code back to its option and
+   computes the expected level for a score.
+
+## Variants
+
+| model | maker | weights | how it is trained |
+| --- | --- | --- | --- |
+| <NoteLink to="jev">Jev</NoteLink> | TypeSafe AI | closed, hosted | RLCD, unpublished <Cite id="typesafe2026primer" /> |
+| <NoteLink to="nimble">Nimble</NoteLink> 9B | Bespoke Labs | open | <Gloss name="lora" />, candidate loss, 2,676 contrastive examples <Cite id="bespoke2026nimble" /> |
+| <NoteLink to="tev1">Tev1</NoteLink> 4B and 0.8B | Together AI | open, experimental | LoRA, completion loss, 37,840 examples <Cite id="together2026tev1" /> |
+| OpenJev-RLCD | Gao and Wang | open code, Qwen3-1.7B | reasoning, then a read-out decision trained by <Gloss name="rl" /> with a proper score <Cite id="gao2026openjev" /> |
+
+AIMultiple's benchmark of October 2026 covers 19 decision models, including these four checkpoints
+<Cite id="aimultiple2026decision" />. <NoteLink to="decision-models-compared" /> sets the measured results side by
+side.
+
+## Why it is fast
+
+A text-generating model reads the prompt in one parallel pass, then writes its answer one token at a time, each token
+another pass through every layer; a reasoning model writes its reasoning first. A decision model does the read and
+stops. Its latency is the time to read the input, it bills no output tokens, its answer cannot be malformed, and its
+probabilities cost nothing extra. The saving is the writing that no longer happens, so it is large against a reasoning
+model and small against a model that answers in a few tokens.
+
+## Limits
+
+The same mechanism sets the limits. With nothing written there is nowhere to work through intermediate steps, and the
+answer can only be one of the options offered.
+
+- **Steps.** Arithmetic, counting, comparing dates and indirect questions are weak; the documented remedy is to
+  compute in code and ask literal questions <Cite id="typesafe2026jaggedness" />.
+- **Independence.** No answer sees another, so consistency between answers is checked in code.
+- **Closed answer sets.** Probabilities sum to 1 over the options offered, so a question that may have no right answer
+  needs a "none" option. Extraction becomes a choice over candidate values found by other means.
+- **Calibration is not automatic.** Independent tests of Jev found well-calibrated choices but poorly placed yes-or-no
+  probabilities; Nimble's raw probabilities were overconfident; Tev1's are unevaluated. Thresholds are tuned on the
+  task's own data.
+- **Multi-step tasks.** On AIMultiple's browser tasks the best decision model completed 20 of 50 against 47 and 42 for
+  two text models <Cite id="aimultiple2026decision" />.
+
+## Ratings on an ordinal scale
+
+A score question, such as a 1 to 5 Likert scale, is answered like a choice: each level gets a letter, and the
+probabilities are a softmax over the levels' logits. Nimble's server compiles a score into exactly that, a list of
+level values, and returns the probability-weighted average level <Cite id="bespoke2026nimble" />. The levels are
+treated as unordered categories, and three things follow.
+
+- **Nothing ties neighbouring levels together.** The model may put 0.5 on level 1, 0.5 on level 5 and nothing in
+  between, a shape no single reading of the text supports.
+- **Every mistake costs the same in training.** Log loss looks only at the probability of the correct level, so
+  answering 5 when the truth is 1 is charged no more than answering 2.
+- **The average can land on a level the model rejected.** The probabilities $(0.5, 0, 0, 0, 0.5)$ average to 3, a
+  level given no probability at all.
+
+TypeSafe lists score levels as weak in numerical calibration for Jev <Cite id="typesafe2026jaggedness" />.
+
+An ordinal model uses the order. The <NoteLink to="cumulative-link-model" /> gives each answer one latent score $s$ and
+ordered cut-points $\theta_1 < \theta_2 < \dots < \theta_{L-1}$, and passes their difference through a sigmoid:
+
+$$
+P(Y \le \ell) = \sigma(\theta_\ell - s), \qquad P(Y = \ell) = \sigma(\theta_\ell - s) - \sigma(\theta_{\ell - 1} - s),
+$$
+
+with $\sigma(\theta_0 - s) = 0$ and $\sigma(\theta_L - s) = 1$. Raising $s$ moves probability smoothly up the scale,
+the level probabilities form a single bump, and a far-off level can only gain probability by way of the levels
+between.
+
+There are three ways to connect this to a decision model, from cheapest to most involved.
+
+| approach | what is read from the model | what is fitted or trained |
+| --- | --- | --- |
+| cut-points on the existing readout | the level probabilities, summarised as one score $s$ (the average level, or a fitted weighted sum of the level logits) | the cut-points $\theta_\ell$, fitted on labelled ratings after training, much as a temperature is |
+| one yes-or-no question per cut-point | "Is the rating above $\ell$?" for $\ell = 1, \dots, L - 1$, each giving $P(Y > \ell)$; the questions share one read of the text | nothing new; the answers must fall as $\ell$ rises, which is enforced by sorting or <NoteLink to="isotonic-regression">isotonic regression</NoteLink>, as in <NoteLink to="binary-decomposition-for-ordinal-regression" /> |
+| an ordinal readout trained in | one logit, used as $s$ | the model and the cut-points together, by the log loss of the cumulative-link probabilities above |
+
+A fourth option keeps the level letters but changes the training penalty to one that compares cumulative
+probabilities, such as the ranked probability score $\sum_\ell (\hat F(\ell) - \indicator[y \le \ell])^2$, where
+$\hat F$ is the predicted cumulative distribution. It is a proper scoring rule and charges a distant mistake more than a
+near one (see <NoteLink to="ordinal-classification-metrics" />). None of the public decision models is documented as
+doing any of these.

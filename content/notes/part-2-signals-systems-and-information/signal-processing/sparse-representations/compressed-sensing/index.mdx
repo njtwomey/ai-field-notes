@@ -1,0 +1,282 @@
+---
+title: Compressed sensing
+kind: concept
+summary: 'Compressed sensing recovers a vector $\xvec \in \reals^n$ with $s$ non-zeros from $m < n$ linear measurements $\yvec = \Amat\xvec$ by a sparse solver such as basis pursuit. Random measurement matrices succeed with $m$ of order $s \log(n/s)$, far fewer than $n$.'
+tags: [signal-processing, sparsity, inverse-problems, sampling, worked-example]
+aliases:
+  [
+    compressive sensing,
+    compressive sampling,
+    sparse signal recovery,
+    restricted isometry property,
+    Donoho–Tanner phase transition,
+  ]
+requires: [vector-norms]
+partOf: [sparse-approximation]
+related: [sampling-theorem, aliasing, matching-pursuit, lasso, linear-programming]
+references:
+  [candes2006, donoho2006, candes2008, candes2005, foucart2013, donoho2009, natarajan1995, lustig2007, duarte2008, blumensath2009]
+status: draft
+updated: 2026-10-07
+---
+
+import { FewSamples } from './FewSamples'
+import { PhaseTransition } from './PhaseTransition'
+
+<Definition>
+A vector $\xvec \in \reals^n$ is **$s$-sparse** when at most $s$ of its entries are non-zero. Compressed sensing
+measures it through a matrix $\Amat \in \reals^{m \times n}$ with $m < n$,
+
+$$
+\yvec = \Amat\xvec + \evec, \qquad \norm{\evec}_2 \le \eta,
+$$
+
+and recovers it by **basis pursuit**, the solution of least $\ell_1$ norm that fits the measurements:
+
+$$
+\hat\xvec = \argmin_{\zvec \in \reals^n} \norm{\zvec}_1 \quad \text{subject to} \quad \norm{\Amat\zvec - \yvec}_2 \le \eta.
+$$
+
+When $\Amat$ satisfies the <Gloss name="rip" /> of order $2s$ with a small enough constant, $\hat\xvec = \xvec$ for
+every $s$-sparse $\xvec$ and $\eta = 0$, and the error grows at most in proportion to $\eta$ otherwise. A random
+Gaussian $\Amat$ has the property with high probability once $m \ge C\, s \ln(en/s)$ for an absolute constant $C$
+<Cite id="candes2006" /> <Cite id="donoho2006" />. A signal that is sparse in an orthonormal basis $\Psimat$,
+$\xvec = \Psimat\cvec$ with $\cvec$ sparse, is handled the same way with $\Amat\Psimat$ in place of $\Amat$.
+</Definition>
+
+## Intuition
+
+A system of $m$ equations in $n > m$ unknowns has infinitely many solutions: any vector of the null space of $\Amat$ can
+be added to one of them. Linear algebra alone cannot pick the right one. Sparsity can. The set of $s$-sparse vectors is
+a union of $\binom{n}{s}$ coordinate subspaces of dimension $s$, much smaller than $\reals^n$, and a generic null space
+of dimension $n - m$ misses all of them when $m$ is large enough compared with $s$.
+
+The count of what is unknown sets the scale. An $s$-sparse vector is fixed by $s$ values and by which $s$ of the $n$
+positions hold them. The values cost $s$ numbers. The positions are one choice among $\binom{n}{s}$, about
+$s \log_2(n/s)$ bits. So $m$ must grow like $s \log(n/s)$, not like $n$.
+
+The <NoteLink to="sampling-theorem">sampling theorem</NoteLink> makes a different assumption: the signal's frequencies
+lie in a known low band, and evenly spaced samples at twice the band edge determine it. Compressed sensing assumes that
+only a few frequencies are present, anywhere in the spectrum, without saying which. Evenly spaced samples are then a
+poor choice. Two cosines whose frequencies differ by a multiple of the sampling rate give identical samples, an instance
+of <NoteLink to="aliasing">aliasing</NoteLink>, and no method can tell them apart. Samples at random times break these
+coincidences.
+
+<FewSamples />
+
+The figure shows a signal of $n = 128$ samples made of $s$ cosines: its <Gloss name="dct" /> has $s$ non-zero
+coefficients. The measurements are $m$ of its samples. With $\Cmat$ the orthogonal $n \times n$ DCT matrix, the signal
+is $\xvec = \Cmat^\top\cvec$, and the measurement matrix $\Amat$ is the $m$ rows of $\Cmat^\top$ at the sampled times.
+
+The least-energy solution, $\min \norm{\cvec}_2$ subject to $\Amat\cvec = \yvec$, fails in a revealing way. The rows of
+$\Amat$ are rows of an orthogonal matrix, so $\Amat\Amat^\top = \Imat$ and the <NoteLink to="pseudoinverse">minimum-norm
+solution</NoteLink> is $\hat\cvec = \Amat^\top(\Amat\Amat^\top)^{-1}\yvec = \Amat^\top\yvec$. Write $\Smat$ for the
+$m \times n$ matrix that selects the sampled times, so that $\Amat = \Smat\Cmat^\top$. The reconstructed signal is
+
+$$
+\Cmat^\top\hat\cvec = \Cmat^\top\Cmat\,\Smat^\top\yvec = \Smat^\top\yvec,
+$$
+
+the samples put back in place with zeros at every unobserved time. The $\ell_2$ norm spreads energy over all
+coefficients and has no reason to fill the gaps. The $\ell_1$ norm prefers few large coefficients, and with enough
+random samples the fewest coefficients that fit are the true ones.
+
+## When is the sparse solution unique?
+
+Suppose two different $s$-sparse vectors $\xvec$ and $\xvec'$ give the same measurements. Then $\Amat(\xvec - \xvec') =
+\zeros$, and $\xvec - \xvec'$ is a non-zero vector in the null space of $\Amat$ with at most $2s$ non-zeros. Conversely,
+any null-space vector $\hvec$ with at most $2s$ non-zeros splits into two $s$-sparse halves, $\hvec = \xvec - \xvec'$,
+that $\Amat$ cannot tell apart. So every $s$-sparse vector is the unique $s$-sparse solution of its measurements exactly
+when no non-zero null-space vector has $2s$ or fewer non-zeros.
+
+The **spark** of $\Amat$ is the smallest number of its columns that are linearly dependent. A null-space vector with $k$
+non-zeros is a linear dependence among $k$ columns, so the condition reads
+
+$$
+\operatorname{spark}(\Amat) > 2s.
+$$
+
+Any $m + 1$ vectors in $\reals^m$ are dependent, so $\operatorname{spark}(\Amat) \le m + 1$, and uniqueness needs
+$m \ge 2s$. A Gaussian matrix attains the bound: every $m$ of its columns are independent with probability 1, so
+$m = 2s$ measurements determine every $s$-sparse vector.
+
+The condition guards against the worst case over all $s$-sparse vectors. A single sparse vector whose non-zero values
+are drawn from a continuous distribution is, with probability 1, the only solution with $s$ or fewer non-zeros as long
+as $s < m$: the measurements $\yvec$ lie in the span of its $s$ columns, and a different set of $s$ columns spans a
+different subspace that a generic $\yvec$ in the first one misses. Recovering every sparse vector and recovering a
+typical one are different demands, and they have different thresholds.
+
+Finding the sparse solution is another matter. The direct search over supports
+solves the problem $\min \norm{\xvec}_0$ subject to $\Amat\xvec = \yvec$, which is NP-hard in general
+<Cite id="natarajan1995" />, and it is unstable: a little noise can change which support fits best.
+
+## Tractable stand-ins for the sparsest solution
+
+Practical recovery replaces the count of non-zeros by a tractable stand-in:
+
+- <NoteLink to="basis-pursuit">Basis pursuit</NoteLink> minimises $\norm{\xvec}_1$, the closest convex function to the
+  count on the unit cube. It is a <NoteLink to="linear-programming">linear program</NoteLink>. Its noisy form,
+  <Gloss name="bpdn" />, is the <NoteLink to="lasso">lasso</NoteLink>.
+- <NoteLink to="matching-pursuit">Orthogonal matching pursuit</NoteLink> (<Gloss name="omp" form="short" />) adds one
+  column at a time, the one most correlated with the residual, and refits by least squares.
+- <Gloss name="iht" /> takes a gradient step on $\frac{1}{2}\norm{\yvec - \Amat\xvec}^2$ and keeps the $s$ largest
+  entries <Cite id="blumensath2009" />.
+
+These methods need more than $2s$ measurements. The rest of the theory says how many more, and for which matrices.
+
+## The restricted isometry property
+
+$\Amat$ has the restricted isometry property of order $s$ with constant $\delta_s \in [0, 1)$ when
+
+$$
+(1 - \delta_s)\norm{\xvec}_2^2 \le \norm{\Amat\xvec}_2^2 \le (1 + \delta_s)\norm{\xvec}_2^2 \quad \text{for every } s\text{-sparse } \xvec
+$$
+
+<Cite id="candes2005" />. Every set of $s$ columns then acts almost as an orthonormal set. A small $\delta_{2s}$ means
+that $\Amat$ keeps the distance between any two $s$-sparse vectors, since their difference is $2s$-sparse. It is a
+quantitative form of $\operatorname{spark}(\Amat) > 2s$: $\delta_{2s} < 1$ is exactly that condition.
+
+The central guarantee: if $\delta_{2s} < 4/\sqrt{41} \approx 0.62$, then for every $\xvec \in \reals^n$ and every error
+with $\norm{\evec}_2 \le \eta$, the basis pursuit solution satisfies
+
+$$
+\norm{\hat\xvec - \xvec}_2 \le C\, \frac{\sigma_s(\xvec)_1}{\sqrt{s}} + D\,\eta,
+$$
+
+where $\sigma_s(\xvec)_1$ is the $\ell_1$ norm of $\xvec$ with its $s$ largest entries removed, and $C$ and $D$ depend
+only on $\delta_{2s}$ <Cite id="foucart2013" />. An exactly $s$-sparse vector measured without noise is recovered
+exactly. A compressible vector, whose sorted entries decay quickly, is recovered almost as well as its best $s$-term
+approximation, and noise enters linearly. Similar guarantees hold for orthogonal matching pursuit and iterative hard
+thresholding under smaller constants.
+
+## Why random matrices work
+
+Computing $\delta_s$ for a given matrix is itself intractable, and no deterministic construction is known that reaches
+$m$ of order $s\log(n/s)$. Random matrices reach it with high probability. Draw the entries of $\Amat$ independently
+from $\Gauss(0, 1/m)$. For one fixed unit vector $\xvec$, each measurement $\avec_i^\top\xvec$ is $\Gauss(0, 1/m)$, so
+$\norm{\Amat\xvec}_2^2$ is an average of $m$ independent squared standard normals and concentrates at 1:
+
+$$
+\prob\big(\abs{\norm{\Amat\xvec}_2^2 - 1} > t\big) \le 2\exp\big(-c\, m\, t^2\big), \qquad 0 < t < 1,
+$$
+
+for an absolute constant $c$. One vector is easy. The property must hold for all $s$-sparse vectors at once, and a union
+bound over a finite net of them gives the scaling.
+
+<Derivation title="From one vector to all s-sparse vectors">
+
+Fix a support $T$ of size $s$. The unit vectors supported on $T$ form a sphere of dimension $s - 1$. A net of points
+with every unit vector within $\varepsilon$ of one of them needs at most $(1 + 2/\varepsilon)^s$ points. If the
+concentration bound holds on the net with $t = \delta/2$ and $\varepsilon$ a small constant, a standard approximation
+argument extends it to the whole sphere with constant $\delta$. The supports number $\binom{n}{s} \le (en/s)^s$. The
+union bound over all supports and all net points gives a failure probability of at most
+
+$$
+2 \left(\frac{en}{s}\right)^s \left(1 + \frac{2}{\varepsilon}\right)^s \exp\!\big(-c'\, m\, \delta^2\big),
+$$
+
+which is small once $c' m \delta^2$ exceeds $s\ln(en/s) + s\ln(1 + 2/\varepsilon)$ by a margin. So
+$m \ge C\, \delta^{-2} s \ln(en/s)$ suffices for $\delta_s \le \delta$ with high probability
+<Cite id="foucart2013" />. The logarithm comes from the number of supports. The same argument works for any
+distribution whose squared projections concentrate this way, such as random signs.
+
+</Derivation>
+
+The count of supports also gives a matching lower bound. The binomial coefficient satisfies
+
+$$
+\binom{n}{s} = \prod_{i=0}^{s-1} \frac{n - i}{s - i} \ge \left(\frac{n}{s}\right)^s,
+$$
+
+because $(n - i)/(s - i) \ge n/s$ for $0 \le i < s \le n$. Naming the support therefore takes at least $s \log_2(n/s)$
+bits. Any method that recovers every $s$-sparse vector stably from $m$ measurements needs $m \ge c\, s\ln(en/s)$ for an
+absolute constant $c$ <Cite id="foucart2013" />, so random matrices are optimal up to the constant.
+
+## Incoherent sampling
+
+Often the measurements cannot be random combinations: a scanner or a sensor measures in a fixed basis. Let the sensing
+basis be $\Phimat$ (orthonormal rows $\phivec_i^\top$) and the sparsity basis $\Psimat$ (orthonormal columns
+$\psivec_k$). The **coherence** between them is
+
+$$
+\mu(\Phimat, \Psimat) = \sqrt{n}\, \max_{i, k} \abs{\inner{\phivec_i}{\psivec_k}} \in [1, \sqrt{n}].
+$$
+
+It is $\sqrt{n}$ when a sensing vector equals a sparsity vector and 1 when every sensing vector is spread evenly over
+the sparsity basis. Measuring $m$ randomly chosen rows of $\Phimat$ recovers every $s$-sparse coefficient vector with
+high probability when
+
+$$
+m \ge C\, \mu(\Phimat, \Psimat)^2\, s \ln n
+$$
+
+<Cite id="candes2006" /> <Cite id="candes2008" />. Time samples (spikes, $\phivec_i = \evec_i$) and
+<NoteLink to="fourier-series">Fourier coefficients</NoteLink> have $\mu = 1$, the best case. In the figure the sparsity
+basis is the DCT, whose vectors have entries $\sqrt{2/n}\cos(\cdot)$ for every frequency above zero, so
+$\mu = \sqrt{n}\sqrt{2/n} = \sqrt{2}$. A sample in time sees every cosine, and a few random samples see enough of each.
+
+## Phase transitions
+
+For Gaussian matrices and large $n$, success is not gradual. Fix the undersampling ratio $\delta = m/n$ and the
+sparsity ratio $\rho = s/m$. As $n$ grows, the probability that basis pursuit recovers a random $s$-sparse vector tends
+to 1 below a curve $\rho^\star(\delta)$ and to 0 above it <Cite id="donoho2009" />. The curve is the same for many
+random matrix ensembles, and it can be computed from the geometry of random polytopes. Below it, $\ell_1$ recovery
+succeeds for almost every sparse vector. This is a weaker demand than the restricted isometry property, which asks for
+all of them at once, so the curve lies well above what the guarantees promise. As $\delta \to 1$ the curve rises
+towards $\rho = 1$, past the line $m = 2s$ that bounds recovery of every sparse vector.
+
+<PhaseTransition />
+
+At $n = 64$ the transition is blurred but visible. For orthogonal matching pursuit a wrong pick is final: it never
+removes an atom, so a single wrong atom among the first $s$ means failure. The figure stops each run at that point,
+which is why its failing cells fill quickly.
+
+## Worked example: how many samples for the first figure
+
+The first figure has $n = 128$ and $s = 5$.
+
+- Uniqueness needs $m \ge 2s = 10$ for a generic matrix.
+- The counting bound gives $s\log_2(n/s) = 5 \log_2 25.6 \approx 23$ bits for the support alone.
+- The scaling $s\ln(en/s) = 5(1 + \ln 25.6) \approx 21$ sets the order of $m$, up to the unknown constant.
+- The coherence of time samples with the DCT is $\sqrt{2}$, which doubles the coherence bound compared with sampling
+  Fourier coefficients.
+
+In the figure, with seeds 1 to 10 and random samples, basis pursuit recovered the signal 7 times at $m = 24$ and every
+time from $m = 28$, under a quarter of the signal. Orthogonal matching pursuit did the same from $m = 28$. With evenly
+spaced samples basis pursuit succeeded 4 times at $m = 32$ and 8 times at $m = 48$: cosines above the Nyquist rate of
+the evenly spaced samples alias onto lower ones.
+
+## Applications
+
+- **Magnetic resonance imaging.** A scanner measures Fourier coefficients of the image one line at a time, and scan
+  time grows with their number. Images are sparse in a wavelet basis, so a random subset of Fourier lines and $\ell_1$
+  reconstruction shorten scans several-fold <Cite id="lustig2007" />.
+- **Single-pixel camera.** One photodiode measures inner products of the scene with random patterns set on a mirror
+  array, one pattern per measurement, and the image is recovered from far fewer measurements than pixels
+  <Cite id="duarte2008" />.
+- **Analogue-to-digital conversion** of wideband signals with few active frequencies, and sparse channel estimation, use
+  the same model.
+
+## Assumptions
+
+- The signal is sparse or compressible in a known basis or dictionary $\Psimat$. Recovery quality is tied to the best
+  $s$-term approximation in that basis.
+- The measurements are linear, and the matrix $\Amat\Psimat$ is known exactly.
+- The measurement matrix is random or incoherent with the sparsity basis. The guarantees are probabilistic over the
+  draw of $\Amat$, not over the signal.
+- The noise is bounded, $\norm{\evec}_2 \le \eta$, with $\eta$ known for the constrained form, or a penalty
+  $\lambda$ is tuned for the lasso form.
+
+## Pitfalls
+
+- **Structured, coherent measurements.** Evenly spaced samples, or measurements aligned with the sparsity basis, break
+  the guarantees. Randomness or incoherence is what makes few measurements enough.
+- **The wrong sparsity basis.** A signal sparse in wavelets but measured and reconstructed with a Fourier prior is not
+  sparse to the solver. The figure's cosines are exactly sparse in the DCT; real signals are only compressible.
+- **Too few measurements for the sparsity.** Near the phase transition success drops sharply. Below $m = 2s$ no
+  method recovers every $s$-sparse vector, and above the $\ell_1$ transition only an intractable search over supports
+  recovers a typical one.
+- **Reading the theorem as a recipe.** The constants $C$ and $c$ are loose. Phase-transition experiments, not the
+  bounds, tell how many measurements a problem of a given size needs.
+- **Off-grid sparsity.** A frequency between two DCT bins is not sparse in the DCT; its coefficients decay slowly and
+  the reconstruction blurs it.

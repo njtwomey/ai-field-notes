@@ -1,0 +1,237 @@
+---
+title: Dictionary learning
+kind: concept
+summary: 'Dictionary learning fits a dictionary $\Dmat$ of unit-norm atoms and sparse codes $\Xmat$ so that training signals $\Ymat \approx \Dmat\Xmat$, by minimising $\tfrac{1}{2}\norm{\Ymat - \Dmat\Xmat}_F^2$ with at most $s$ non-zeros per code. It alternates sparse coding with a dictionary update (MOD or K-SVD).'
+tags: [signal-processing, sparsity, unsupervised, matrix-factorisation, worked-example]
+aliases:
+  [
+    sparse dictionary learning,
+    K-SVD,
+    method of optimal directions,
+    learning an overcomplete dictionary,
+    sparse coding with a learnt dictionary,
+  ]
+requires: [matching-pursuit, singular-value-decomposition]
+partOf: [sparse-approximation]
+related: [k-means, principal-component-analysis, non-negative-matrix-factorisation, independent-component-analysis]
+references: [moody2001, goldberger2000, aharon2006, engan1999, olshausen1996, elad2006, elad2010, natarajan1995]
+status: draft
+updated: 2026-10-07
+---
+
+import { LearningDirections } from './LearningDirections'
+import { HeartbeatDictionary } from './HeartbeatDictionary'
+import { PatchDictionary } from './PatchDictionary'
+
+<Definition>
+Let $\Ymat \in \reals^{m \times n}$ hold $n$ training signals $\yvec_1, \dots, \yvec_n \in \reals^m$ as columns.
+Dictionary learning seeks a dictionary $\Dmat \in \reals^{m \times k}$ whose $k$ columns $\dvec_1, \dots, \dvec_k$ (the
+atoms) have unit norm, and codes $\Xmat \in \reals^{k \times n}$, that solve
+
+$$
+\min_{\Dmat, \Xmat} \; \tfrac{1}{2}\norm{\Ymat - \Dmat\Xmat}_F^2
+\quad \text{subject to} \quad \norm{\xvec_i}_0 \le s \text{ for } i = 1, \dots, n, \quad \norm{\dvec_j} = 1 \text{ for } j = 1, \dots, k.
+$$
+
+Here $\xvec_i$ is column $i$ of $\Xmat$, the code of $\yvec_i$, and $\norm{\xvec_i}_0$ counts its non-zero entries. The
+sparsity $s$ is fixed in advance and is much smaller than $m$. The dictionary is overcomplete when $k > m$.
+</Definition>
+
+## Intuition
+
+A fixed dictionary, such as the cosines of the <Gloss name="dct" /> or a wavelet basis, is chosen before the data are
+seen. It represents a class of signals sparsely only if the class happens to suit it: cosines suit smooth signals and
+spread a sharp edge over many coefficients. Dictionary learning chooses the atoms from the data, so that each training
+signal is close to a combination of a few of them.
+
+A code with $s$ non-zeros places $\Dmat\xvec_i$ in the span of $s$ atoms. The model therefore says that the signals lie
+near a union of $\binom{k}{s}$ subspaces of dimension $s$, one for each choice of atoms. With $m = 2$, $k = 3$ and
+$s = 1$, the subspaces are three lines through the origin, and learning the dictionary means finding the three lines
+that the points lie near.
+
+<LearningDirections />
+
+The fit alternates two stages, as k-means alternates assignment and averaging. With the dictionary fixed, each signal is
+coded by a <NoteLink to="sparse-approximation">sparse approximation</NoteLink> method, usually <Gloss name="omp" />.
+With the supports of the codes fixed, the atoms are moved to fit the signals that use them. Each stage lowers the
+objective or leaves it unchanged, so the objective decreases until it settles. The objective is not convex, so where it
+settles depends on the starting dictionary.
+
+## Details
+
+### The two stages
+
+Write the objective as $f(\Dmat, \Xmat) = \tfrac{1}{2}\norm{\Ymat - \Dmat\Xmat}_F^2$. Minimising it over both factors at
+once is hard: for a fixed $\Dmat$, finding the best code with $s$ non-zeros is itself NP-hard in general
+<Cite id="natarajan1995" />. The alternating scheme <Cite id="aharon2006" /> splits the problem into two easier ones.
+
+1. **Sparse coding.** With $\Dmat$ fixed, $f$ is a sum over signals,
+   $\sum_i \tfrac{1}{2}\norm{\yvec_i - \Dmat\xvec_i}^2$, so each code can be found separately. Orthogonal matching
+   pursuit with $s$ steps gives an approximate minimiser for each signal.
+2. **Dictionary update.** With the codes, or at least their supports, fixed, $f$ is minimised over $\Dmat$. The method
+   of optimal directions and <Gloss name="k-svd" /> differ only in this stage.
+
+Orthogonal matching pursuit is greedy and does not always find the best code. A new code can even fit worse than the
+code from the previous round. Keeping the better of the two makes the coding stage non-increasing. Both dictionary
+updates below are also non-increasing, so the objective decreases monotonically. It is bounded below by zero, so the
+sequence of objective values converges.
+
+### The method of optimal directions
+
+The <Gloss name="mod" /> <Cite id="engan1999" /> updates the whole dictionary at once, holding $\Xmat$ fixed. The
+objective is a convex quadratic in $\Dmat$. Its gradient is
+
+$$
+\nabla_\Dmat f = -(\Ymat - \Dmat\Xmat)\Xmat^\top.
+$$
+
+Setting the gradient to zero gives the normal equations $\Dmat\Xmat\Xmat^\top = \Ymat\Xmat^\top$. When
+$\Xmat\Xmat^\top$ is invertible, which needs every atom to be used,
+
+$$
+\Dmat = \Ymat\Xmat^\top(\Xmat\Xmat^\top)^{-1}.
+$$
+
+This is the least-squares fit of the signals by the codes, row by row: row $r$ of $\Dmat$ regresses row $r$ of $\Ymat$
+on the $k$ rows of $\Xmat$. The new atoms need not have unit norm. Scaling atom $j$ by $1/\norm{\dvec_j}$ and row $j$ of
+$\Xmat$ by $\norm{\dvec_j}$ leaves every product $\dvec_j x_{ji}$, and therefore $\Dmat\Xmat$ and $f$, unchanged. The
+update keeps the supports, because it changes no entry of $\Xmat$ from zero to non-zero.
+
+### K-SVD
+
+K-SVD <Cite id="aharon2006" /> is a dictionary-learning algorithm, not a matrix factorisation. It is distinct from the
+<Gloss name="svd" /> of the data matrix $\Ymat$,
+whose singular vectors are orthogonal and are not sparse codes. K-SVD uses a rank-one SVD of a small residual matrix as
+one step of each atom update. Aharon et al. named it after k-means: k-means updates its $k$ centroids by computing $k$
+means, and K-SVD updates its $k$ atoms by computing $k$ singular value decompositions, one per atom.
+
+K-SVD updates one atom at a time, together with the non-zero coefficients that multiply it. Let
+$\xvec^j$ denote row $j$ of $\Xmat$: the coefficients of atom $j$ in every code. The product $\Dmat\Xmat$ is a sum of
+$k$ rank-one matrices, $\Dmat\Xmat = \sum_l \dvec_l \xvec^l$. Separating atom $j$,
+
+$$
+\Ymat - \Dmat\Xmat = \Big(\Ymat - \sum_{l \ne j} \dvec_l \xvec^l\Big) - \dvec_j \xvec^j = \Emat_j - \dvec_j\xvec^j.
+$$
+
+The matrix $\Emat_j$ is the error that remains when atom $j$ is removed. Minimising
+$\norm{\Emat_j - \dvec_j\xvec^j}_F^2$ over $\dvec_j$ and $\xvec^j$ is a best rank-one approximation of $\Emat_j$. By
+the Eckart–Young theorem, the best rank-one approximation of a matrix is $\sigma_1\uvec_1\vvec_1^\top$, built from its
+largest singular value and singular vectors. This rank-one SVD is the step that gives K-SVD its name.
+
+The unrestricted rank-one fit would fill in every entry of $\xvec^j$, so every signal would use atom $j$ and the codes
+would no longer be sparse. K-SVD therefore restricts the fit to $\omega_j = \{i : x_{ji} \ne 0\}$, the signals that
+already use atom $j$. Let $\Emat_j^R$ hold the columns of $\Emat_j$ in $\omega_j$ and $\xvec^j_R$ the matching entries
+of $\xvec^j$. With the singular value decomposition $\Emat_j^R = \Umat\Sigmamat\Vmat^\top$, the update is
+
+$$
+\dvec_j = \uvec_1, \qquad \xvec^j_R = \sigma_1 \vvec_1^\top.
+$$
+
+The atom has unit norm because $\uvec_1$ does. Entries of $\xvec^j$ outside $\omega_j$ stay zero, so every code keeps
+its support and its sparsity. The objective cannot increase: the old pair $(\dvec_j, \xvec^j_R)$ is one rank-one
+candidate, and the update is the best one. K-SVD sweeps $j = 1, \dots, k$, and each atom's update uses the coefficients
+already updated for the atoms before it.
+
+Updating coefficients with the atom is the difference from the method of optimal directions, which holds $\Xmat$ fixed
+while it moves $\Dmat$. K-SVD usually reaches a lower objective in the same number of rounds <Cite id="aharon2006" />.
+Each round costs one singular value decomposition per atom, of an $m \times \abs{\omega_j}$ matrix.
+
+### Unused atoms
+
+An atom that no signal uses has $\omega_j$ empty and receives no update, and $\Xmat\Xmat^\top$ is then singular. The
+common remedy <Cite id="aharon2006" /> replaces the atom with the training signal that the current dictionary represents
+worst, scaled to unit norm. The replacement points the dictionary at the part of the data it fits least.
+
+### Local minima
+
+The objective is not jointly convex in $\Dmat$ and $\Xmat$. Any solution has equivalent copies: flipping the sign of
+atom $j$ and of row $j$ of $\Xmat$ leaves $\Dmat\Xmat$ unchanged, and so does permuting the atoms together with the rows
+of $\Xmat$. Take a solution $(\Dmat, \Xmat)$ with objective below $\tfrac{1}{2}\norm{\Ymat}_F^2$ and its copy
+$(-\Dmat, -\Xmat)$. If the problem were convex, the midpoint of two minimisers would be a minimiser too. The midpoint is
+$(\mathbf{0}, \mathbf{0})$, whose objective is $\tfrac{1}{2}\norm{\Ymat}_F^2$, larger than at either end. The problem
+also has genuinely different local minima. In the first figure, some starts leave two atoms on one line and a line
+without an atom; no single update moves an atom across, because each step only refits the signals an atom already
+serves.
+
+The usual starting dictionary is $k$ training signals drawn at random and scaled to unit norm. Running from several
+starts and keeping the lowest objective is the standard guard. Training on many more signals than atoms ($n \gg k$)
+makes the objective smoother and the minima more alike.
+
+### Relation to k-means and principal component analysis
+
+With $s = 1$, each signal uses one atom. Orthogonal matching pursuit then picks the atom with the largest
+$\abs{\dvec_j^\top\yvec_i}$, the line through the origin closest in angle to $\yvec_i$, and sets
+$x_{ji} = \dvec_j^\top\yvec_i$. The K-SVD update for atom $j$ becomes the top left singular vector of the signals
+assigned to it: the direction of largest second moment of that cluster. This is
+<NoteLink to="k-means">k-means</NoteLink> with lines through the origin in place of centres. If the coefficients are
+further fixed at 1 and the unit norm is dropped, so that each signal is approximated by an atom itself, the update
+becomes the mean of the assigned signals and the algorithm is exactly k-means; Aharon et al. derive K-SVD as this
+generalisation <Cite id="aharon2006" />.
+
+At the other extreme, with $s = k \le m$ there is no sparsity constraint. Every code may use every atom, the model is a
+single $k$-dimensional subspace, and the best dictionary spans the top $k$ left singular vectors of $\Ymat$: uncentred
+<Gloss name="pca" />. Dictionary learning sits between the two. It uses more atoms than any one signal needs, and
+different signals use different subsets.
+
+### Image patches
+
+Small image patches are the classic training set. Olshausen and Field learnt a dictionary from patches of natural images
+under a sparsity penalty and found localised, oriented, band-pass atoms that resemble the receptive fields of simple
+cells in the primary visual cortex <Cite id="olshausen1996" />. Elad and Aharon denoised images by coding every
+overlapping patch over a K-SVD dictionary, learnt from the noisy image itself, and averaging the overlapping estimates
+<Cite id="elad2006" />. The figure below learns a dictionary from $6 \times 6$ patches of a synthetic image with
+straight edges, a curved edge and stripes. Each patch has its mean removed first, so the atoms model texture and edges
+and the constant level is coded separately.
+
+<PatchDictionary />
+
+The learnt atoms become edges at the angles that occur in the image, stripes with the stripes' period and orientation,
+and corners. With the same number $s$ of atoms per tile, the learnt dictionary rebuilds the image with a smaller error
+than the 35 non-constant cosine atoms, even with fewer atoms. Elad's book develops the theory and the image applications
+in full <Cite id="elad2010" />.
+
+### Windows of a one-dimensional signal
+
+A one-dimensional signal gives training signals in the same way. Cut it into overlapping windows of $L$ samples, remove
+each window's mean, and use the windows as the columns of $\Ymat$. To rebuild the signal, code every window, synthesise
+it, and average the overlapping estimates at each sample, as for image patches. An electrocardiogram suits this. Every
+heartbeat repeats a few waves: the small P wave, the sharp QRS complex and the broad T wave. A few atoms per window
+describe a beat, and white noise, which is spread over all directions, is mostly left out of the rebuild.
+
+The figure offers a synthetic trace and a recorded one. The recording is five minutes of lead MLII of record 208 of the
+MIT-BIH Arrhythmia Database <Cite id="moody2001" />, distributed by PhysioNet <Cite id="goldberger2000" /> under the
+Open Data Commons Attribution License. It is decimated from 360 Hz to 90 Hz, so that a beat spans about 53 samples, and
+about one beat in five is a premature ventricular beat, wide and with no P wave.
+
+<HeartbeatDictionary />
+
+The windows start at every eighth sample, so the same wave appears at many positions within a window. A dictionary for
+windows has no notion of shift: it spends several atoms on one wave at different offsets. Convolutional sparse coding
+removes this redundancy by coding the whole signal as a sum of short atoms placed at any position, so one atom serves
+every shift.
+
+## Assumptions
+
+- The signals have sparse codes over some dictionary of $k$ atoms: each lies near the span of $s$ atoms, with $s$ small.
+- The sparsity $s$ and the number of atoms $k$ are chosen in advance. Neither is learnt by the objective.
+- There are many more training signals than atoms, $n \gg k$, so the atoms are fitted to structure rather than to
+  individual signals.
+- The scale of an atom is fixed by the unit-norm constraint. Without it, scaling an atom up and its coefficients down
+  would change nothing, and $\Dmat$ would not be identifiable even up to sign and order.
+
+## Pitfalls
+
+- **Memorising the training set.** With $k \ge n$, the dictionary can contain every training signal, and $s = 1$ fits
+  them exactly with objective zero. Such a dictionary describes the training signals rather than the class they come
+  from, and represents new signals poorly. Judge a dictionary on held-out signals.
+- **Comparing dictionaries.** Two runs that find the same atoms list them in different orders and with different signs.
+  Match atoms by the absolute value of their inner products before comparing them.
+- **Local minima.** A single run can settle with duplicated atoms or a cluster without an atom. Restart from several
+  initial dictionaries and keep the best objective.
+- **Unused and duplicated atoms.** Without replacement, unused atoms stay where they started. Two nearly equal atoms
+  raise the dictionary's <Gloss name="mutual-coherence">mutual coherence</Gloss>, which weakens the guarantees of the
+  pursuit methods used to code with it.
+- **Cost.** Every round codes all $n$ signals. For large training sets, online and mini-batch variants update the
+  dictionary from a few signals at a time.
+- **The constant level of patches.** Without mean removal, most patches of an image are dominated by their brightness,
+  and several atoms are spent on nearly constant patterns.

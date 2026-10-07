@@ -1,0 +1,289 @@
+---
+title: Determinantal point process
+kind: concept
+summary: 'A determinantal point process is a distribution over subsets of a ground set in which $P(Y = S) = \det(\Lmat_S) / \det(\Lmat + \Imat)$ for a positive semi-definite kernel $\Lmat$. Similar items repel: a subset''s probability is the squared volume its feature vectors span.'
+tags: [probability, point-processes, diversity, sampling, kernels, worked-example]
+aliases: [L-ensemble, determinantal process, fermionic point process, k-DPP, projection DPP, spectral DPP sampler]
+requires: [determinant, eigendecomposition, positive-definite-matrices]
+related: [poisson-process, diversified-re-ranking, schur-complement, cholesky-decomposition, gram-schmidt, gaussian-process]
+references: [macchi1975, hough2006, kulesza2012dpp, tremblay2018dpp, poulson2019dpp, launay2020dpp, chen2018dpp, wilhelm2018dpp]
+status: draft
+updated: 2026-10-05
+---
+
+import { SubsetVolume } from './SubsetVolume'
+import { DppSampler } from './DppSampler'
+
+<Definition>
+A **<Gloss name="dpp" />** on a ground set $\Ycal = \set{1, \dots, N}$ is a random subset $Y \subseteq \Ycal$. In
+its *L-ensemble* form it is given by a symmetric <Gloss name="positive-semi-definite" /> matrix $\Lmat \in
+\reals^{N \times N}$:
+
+$$
+P(Y = S) = \frac{\det(\Lmat_S)}{\det(\Lmat + \Imat)}, \qquad S \subseteq \Ycal,
+$$
+
+where $\Lmat_S$ is the submatrix of rows and columns indexed by $S$ and $\det(\Lmat_\emptyset) = 1$. Equivalently, a
+*marginal kernel* $\Kmat = \Lmat(\Lmat + \Imat)^{-1}$, with eigenvalues in $[0, 1]$, gives every inclusion
+probability: $P(A \subseteq Y) = \det(\Kmat_A)$. Macchi introduced the process to model fermions, particles that
+cannot share a state <Cite id="macchi1975" />; Kulesza and Taskar brought it to machine learning as a model of diverse
+subsets <Cite id="kulesza2012dpp" />.
+</Definition>
+
+## Intuition
+
+Write $\Lmat = \Bmat^\top \Bmat$, so that item $i$ is a column vector $\bvec_i$ and $L_{ij} = \bvec_i^\top \bvec_j$. The
+<NoteLink to="determinant">determinant</NoteLink> of a Gram matrix is the squared volume of the parallelotope its
+vectors span:
+
+$$
+\det(\Lmat_S) = \operatorname{vol}^2\bigl(\set{\bvec_i : i \in S}\bigr).
+$$
+
+A long vector is a good item. Two vectors pointing the same way span almost no area, so a subset that contains both is
+improbable however good each is. A <NoteLink to="poisson-process" /> or any set of independent
+<NoteLink to="bernoulli-distribution">coin flips</NoteLink> has no such interaction; a DPP is the simplest model in
+which items repel.
+
+<SubsetVolume />
+
+## Details
+
+### The normaliser
+
+The probabilities sum to 1 because $\sum_{S \subseteq \Ycal} \det(\Lmat_S) = \det(\Lmat + \Imat)$. The determinant is
+linear in each column. Column $j$ of $\Lmat + \Imat$ is $\lvec_j + \evec_j$, so expanding every column gives $2^N$
+terms, one for each choice $S$ of columns that keep $\lvec_j$ while the rest keep $\evec_j$:
+
+$$
+\det(\Lmat + \Imat) = \sum_{S \subseteq \Ycal} \det\bigl[\,\lvec_j \text{ for } j \in S,\ \evec_j \text{ for } j \notin S\,\bigr]
+= \sum_{S \subseteq \Ycal} \det(\Lmat_S).
+$$
+
+Each term's columns $\evec_j$ select row $j$ and column $j$ alone, so expanding along them leaves the minor
+$\det(\Lmat_S)$. The sum over $2^N$ subsets costs one $N \times N$ determinant.
+
+### Repulsion
+
+For two items, $P(\set{i, j} \subseteq Y) = K_{ii} K_{jj} - K_{ij}^2 \le P(i \in Y)\, P(j \in Y)$. Every pair is
+negatively correlated, more so the larger $\abs{K_{ij}}$. A DPP can only repel: it cannot model items that tend to
+appear together.
+
+### Quality and diversity
+
+Split each vector into a length and a direction, $\bvec_i = q_i \phivec_i$ with $\norm{\phivec_i} = 1$. Then
+$L_{ij} = q_i \, S_{ij} \, q_j$ with similarity $S_{ij} = \phivec_i^\top \phivec_j$, and
+
+$$
+\det(\Lmat_S) = \Bigl(\prod_{i \in S} q_i^2\Bigr) \det(\Smat_S).
+$$
+
+The first factor rewards good items; the second rewards items unlike each other. Diversified recommendation uses this
+form, with $q_i$ from a relevance model and $\Smat$ from item embeddings <Cite id="wilhelm2018dpp" />.
+
+### The size of a sample
+
+Let $\Lmat = \sum_n \lambda_n \vvec_n \vvec_n^\top$ be the <NoteLink to="eigendecomposition" />. Then $\Kmat$ has the
+same eigenvectors with eigenvalues $\lambda_n / (\lambda_n + 1)$, and the sample size is distributed as a sum of
+independent Bernoulli variables with those means. In particular
+
+$$
+\expect\abs{Y} = \operatorname{tr}\Kmat = \sum_{n=1}^N \frac{\lambda_n}{\lambda_n + 1}.
+$$
+
+Scaling $\Lmat$ by $\alpha$ scales every $\lambda_n$ and so sets the typical size. A *k-DPP* conditions on
+$\abs{Y} = k$, for applications that need a fixed number of items <Cite id="kulesza2012dpp" />.
+
+### Sampling: the spectral algorithm
+
+Sampling looks hard: there are $2^N$ subsets. Hough, Krishnapur, Peres and Virág showed that a DPP is a mixture of
+simpler processes, which gives an exact sampler in two phases <Cite id="hough2006" />.
+
+**Why it works.** By the Cauchy–Binet formula, with $\Vmat_{S,J}$ the rows $S$ and columns $J$ of the eigenvector
+matrix,
+
+$$
+\det(\Lmat_S) = \sum_{\abs{J} = \abs{S}} \det(\Vmat_{S,J})^2 \prod_{n \in J} \lambda_n .
+$$
+
+Divide by $\det(\Lmat + \Imat) = \prod_n (1 + \lambda_n)$ and regroup:
+
+$$
+P(Y = S) = \sum_{J \subseteq \Ycal}
+\underbrace{\prod_{n \in J} \frac{\lambda_n}{1 + \lambda_n} \prod_{n \notin J} \frac{1}{1 + \lambda_n}}_{\text{choose eigenvectors } J}
+\;\underbrace{\det(\Vmat_{S,J})^2 \, \indicator[\abs{S} = \abs{J}]}_{\text{an elementary DPP}} .
+$$
+
+The first factor is the probability of keeping each eigenvector $n$ independently with probability
+$\lambda_n / (1 + \lambda_n)$. The second is an *elementary* (projection) DPP with kernel
+$\Kmat^J = \Vmat_{:,J} \Vmat_{:,J}^\top$, which always returns exactly $\abs{J}$ items.
+
+**The algorithm** <Cite id="kulesza2012dpp" />:
+
+```text
+input: eigenpairs (λₙ, vₙ) of L
+phase 1:  V ← { vₙ : keep n with probability λₙ / (λₙ + 1) }   # fixes |Y| = |V|
+phase 2:  Y ← ∅
+          while V is not empty:
+              pick i with probability Σ_{v ∈ V} v_i² / |V|   # = K^V_ii / |V|
+              Y ← Y ∪ {i}
+              # project away from e_i:
+              V ← an orthonormal basis of { v ∈ span V : v_i = 0 }
+return Y
+```
+
+The update in phase 2 removes the component of the kept subspace along item $i$. Points similar to $i$ have rows of
+$\Vmat$ that resemble row $i$, so their probability falls with it. In the figure below the colour drains around each
+pick, which is the repulsion seen happening.
+
+<Derivation title="Why phase 2 samples the elementary DPP">
+Let $\Vmat$ ($N \times k$) have orthonormal columns. The elementary DPP gives a $k$-set $S$ probability
+$\det(\Vmat_S)^2$, with $\Vmat_S$ the $k \times k$ submatrix of rows $S$; these sum to 1 by Cauchy–Binet on
+$\det(\Vmat^\top\Vmat) = 1$.
+
+The first pick is $i$ with probability $\norm{\Vmat_{i,:}}^2 / k$. Rotate the basis (the process depends only on the
+span) so that one column $\uvec$ carries all of row $i$, $\norm{\Vmat_{i,:}} = \abs{u_i}$, and the other $k - 1$
+columns $\Vmat'$ have $i$-th entry 0. Expanding $\det(\Vmat_S)$ along row $i$ gives
+$\det(\Vmat_S)^2 = u_i^2 \det(\Vmat'_{S \setminus i})^2$: what remains is the elementary DPP of
+$\Vmat'$, the basis that phase 2 keeps.
+
+By induction, an ordered sequence $i_1, \dots, i_k$ has probability
+$\prod_t \norm{\Vmat^{(t)}_{i_t,:}}^2 / (k - t + 1) = \det(\Vmat_S)^2 / k!$. Summing over the $k!$ orders of $S$ gives
+$\det(\Vmat_S)^2$.
+</Derivation>
+
+<DppSampler />
+
+**Cost.** The eigendecomposition costs $O(N^3)$ once and is reused for every sample. Phase 2 as written
+re-orthonormalises $k$ vectors of length $N$ after each of its $k$ picks, $O(N k^3)$ per sample with $k = \abs{Y}$.
+When $\Lmat = \Bmat^\top\Bmat$ with $\Bmat$ of size $D \times N$ and $D \ll N$, the same algorithm runs on the
+$D \times D$ matrix $\Bmat\Bmat^\top$, and the cost no longer grows as $N^3$ <Cite id="kulesza2012dpp" />.
+
+### Phase 2 by Gram–Schmidt on the rows
+
+Phase 2 can orthogonalise the other way. Write the kept eigenvectors as the columns of $\Vmat$ ($N \times k$) and let
+$\yvec_i \in \reals^k$ be row $i$, so the elementary kernel is $K^V_{ij} = \yvec_i^\top \yvec_j$. After the points $S$
+have been picked, the next pick is $i$ with probability
+
+$$
+P(i \mid S) = \frac{K^V_{ii} - \Kmat^V_{i,S} (\Kmat^V_S)^{-1} \Kmat^V_{S,i}}{k - \abs{S}}
+= \frac{\bigl\lVert \yvec_i - \Pmat_S \yvec_i \bigr\rVert^2}{k - \abs{S}},
+$$
+
+where $\Pmat_S$ projects onto the span of the picked rows $\set{\yvec_j : j \in S}$. The numerator is the Schur
+complement of the elementary kernel, which is the squared residual of row $i$ after the picked rows are projected out.
+Tremblay, Barthelmé and Amblard sample this way <Cite id="tremblay2018dpp" />:
+
+```text
+r_i ← ‖y_i‖² for every i;  E ← []        # E: orthonormalised picked rows
+repeat k times:
+    pick i with probability r_i / (k − |E|)
+    # one Gram–Schmidt step, on a k-vector:
+    e ← y_i − Σ_{e' ∈ E} (e'ᵀ y_i) e';  e ← e / ‖e‖
+    E ← E ∪ {e}
+    r_j ← r_j − (eᵀ y_j)²  for every j                  # update every residual
+```
+
+Each pick costs $O(Nk)$, so phase 2 costs $O(Nk^2)$ instead of $O(Nk^3)$. The probabilities are those of the elimination
+version at every step, so the two give identical samples from identical random numbers; the figure's two spectral modes
+show this. The residual $r_i$ is the quantity $d_i^2$ that greedy <Gloss name="map-estimate" /> maximises below,
+computed for the elementary kernel: the sampler draws in proportion to it, the greedy search takes its largest value.
+
+### Sampling without an eigendecomposition
+
+The chain rule gives a third exact sampler that works on $\Kmat$ directly <Cite id="poulson2019dpp" />
+<Cite id="launay2020dpp" />. Visit the items in a fixed order and decide each in turn. Item $j$ joins with its current
+inclusion probability $K_{jj}$, and the kernel of the remaining items is then conditioned on the outcome:
+
+$$
+\Kmat \leftarrow \Kmat - \frac{\Kmat_{:,j} \Kmat_{j,:}}{K_{jj}} \;\text{ if } j \in Y, \qquad
+\Kmat \leftarrow \Kmat - \frac{\Kmat_{:,j} \Kmat_{j,:}}{K_{jj} - 1} \;\text{ if } j \notin Y .
+$$
+
+Both updates are one step of Gaussian elimination with pivot $K_{jj}$ or $K_{jj} - 1$, so a whole sample costs one
+modified <Gloss name="lu" /> (or, for symmetric $\Kmat$, $\Lmat\Dmat\Lmat^\top$) factorisation, $O(N^3)$, with no
+eigendecomposition. Joining lowers the probabilities of similar items, since $K_{ii} - K_{ij}^2 / K_{jj} \le K_{ii}$.
+Being left out raises them, since $K_{ii} + K_{ij}^2 / (1 - K_{jj}) \ge K_{ii}$. Poulson shows that dense and sparse
+factorisation codes can be reused almost unchanged <Cite id="poulson2019dpp" />.
+
+<Derivation title="Why the two conditional kernels are Schur complements">
+Let $A$ be a set of items not containing $j$, $\bvec = \Kmat_{A,j}$ and $c = K_{jj}$. Joining: by the Schur complement,
+$P(A \cup \set{j} \subseteq Y) = \det(\Kmat_{A \cup j}) = c \det(\Kmat_A - \bvec\bvec^\top / c)$. Dividing by
+$P(j \in Y) = c$ gives $P(A \subseteq Y \mid j \in Y) = \det(\Kmat_A - \bvec\bvec^\top / c)$, so the conditional
+process is a DPP with that kernel.
+
+Being left out: $P(A \subseteq Y, j \notin Y) = \det(\Kmat_A) - \det(\Kmat_{A \cup j})$. The determinant is linear in
+its last row, and the last row $(\bvec^\top, c - 1)$ is the last row of $\Kmat_{A \cup j}$ plus $(0, \dots, 0, -1)$.
+Expanding, then taking the Schur complement of the pivot $c - 1$,
+
+$$
+\det\begin{pmatrix} \Kmat_A & \bvec \\ \bvec^\top & c - 1 \end{pmatrix} = \det(\Kmat_{A \cup j}) - \det(\Kmat_A)
+= (c - 1)\det\Bigl(\Kmat_A - \frac{\bvec\bvec^\top}{c - 1}\Bigr) .
+$$
+
+Hence $P(A \subseteq Y, j \notin Y) = -(c - 1) \det(\cdot) = (1 - c) \det(\Kmat_A - \bvec\bvec^\top / (c - 1))$, and
+dividing by $P(j \notin Y) = 1 - c$ gives the second kernel.
+</Derivation>
+
+The three samplers draw from the same distribution. The spectral ones pay for the eigendecomposition once and then
+sample cheaply, which suits many samples from one kernel. The sequential one pays $O(N^3)$ per sample but needs only
+$\Kmat$ and a factorisation routine, which suits one sample from a kernel that changes, and kernels that are not
+symmetric.
+
+### Finding the most likely subset
+
+Recommendation and summarisation need one good diverse set rather than a random one: the mode
+$\argmax_S \det(\Lmat_S)$. Finding it exactly is NP-hard <Cite id="kulesza2012dpp" />, so the set is built greedily,
+adding at each step the item that multiplies the determinant most.
+
+By the <NoteLink to="schur-complement" />, adding item $i$ to $S$ multiplies the determinant by
+
+$$
+\frac{\det(\Lmat_{S \cup \set{i}})}{\det(\Lmat_S)} = L_{ii} - \Lmat_{i,S} \Lmat_S^{-1} \Lmat_{S,i} = d_i^2 ,
+$$
+
+the squared distance from $\bvec_i$ to the span of the vectors already chosen. Chen, Zhang and Zhou keep the
+<NoteLink to="cholesky-decomposition" /> $\Lmat_S = \Cmat\Cmat^\top$ and, for every candidate, the vector
+$\cvec_i = \Cmat^{-1}\Lmat_{S,i}$, so that $d_i^2 = L_{ii} - \norm{\cvec_i}^2$. After item $j$ joins,
+
+$$
+e_i = \frac{L_{ji} - \cvec_j^\top \cvec_i}{d_j}, \qquad \cvec_i \leftarrow (\cvec_i, e_i), \qquad
+d_i^2 \leftarrow d_i^2 - e_i^2 ,
+$$
+
+which costs $O(Nk)$ per step and $O(Nk^2)$ for $k$ items, instead of a determinant per candidate per step
+<Cite id="chen2018dpp" />. Switch the figure to greedy MAP to watch the gains $d_i^2$ collapse around each pick.
+
+## Worked example
+
+Two items with $\Lmat = \begin{pmatrix} 1 & \rho \\ \rho & 1 \end{pmatrix}$: equal quality, similarity $\rho$. Then
+$\det(\Lmat + \Imat) = 4 - \rho^2$ and
+
+| $S$ | $\det(\Lmat_S)$ | $\rho = 0$ | $\rho = 0.9$ |
+| --- | --- | --- | --- |
+| $\emptyset$ | 1 | 0.250 | 0.313 |
+| $\set{1}$ | 1 | 0.250 | 0.313 |
+| $\set{2}$ | 1 | 0.250 | 0.313 |
+| $\set{1, 2}$ | $1 - \rho^2$ | 0.250 | 0.060 |
+
+With $\rho = 0$ the items are independent fair coins. With $\rho = 0.9$ each item appears with probability
+$0.313 + 0.060 = 0.373$, and both together with probability 0.060, against $0.373^2 = 0.139$ were they independent.
+The kernel moved probability from the redundant pair to the empty set and the singletons.
+
+## Assumptions
+
+- **A symmetric positive semi-definite kernel.** Every principal minor must be non-negative to be a probability. A
+  similarity that is not positive semi-definite (cosine similarity of arbitrary scores, a thresholded graph) has to be
+  projected or replaced.
+- **Only repulsion.** All pairs are negatively correlated, so a DPP cannot express items that belong together.
+- **A finite ground set** in this note. Continuous DPPs on $\reals^d$ exist and model, for example, the eigenvalues of
+  random matrices <Cite id="hough2006" />; sampling them needs the kernel's spectral expansion.
+
+## Pitfalls
+
+- **Scale sets the size.** Multiplying $\Lmat$ by $\alpha$ changes the expected sample size, not only the "strength" of
+  repulsion. Compare kernels at a fixed expected size or use a k-DPP.
+- **Learning the kernel.** Fitting $\Lmat$ by <Gloss name="mle">maximum likelihood</Gloss> is non-convex. Low-rank
+  factorisations $\Lmat = \Bmat^\top\Bmat$ make it tractable and are the usual choice <Cite id="kulesza2012dpp" />.
+- **MAP is not a sample.** Greedy MAP returns one deterministic set. A slate shown many times to many users may need
+  samples, so that the same items do not always win.

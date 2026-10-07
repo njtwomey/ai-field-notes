@@ -1,0 +1,356 @@
+---
+title: Reinforcement learning for calibrated decisions
+kind: concept
+summary: 'RLCD is TypeSafe''s unpublished post-training method for Jev, aimed at calibrated answer probabilities. A correctness reward alone drives a policy to certainty; a reward whose expectation is a proper score, such as $2c - \norm{\pivec}^2$, keeps it calibrated.'
+tags: [decision-models, large-language-models, calibration, reinforcement-learning, proper-scoring-rules]
+aliases: [RLCD, calibrated decision rewards, calibration rewards for language models, OpenJev-RLCD, calibrate then reinforce]
+requires: [answer-token-scoring, proper-scoring-rule, policy-gradient-theorem]
+partOf: [decision-models]
+related: [cumulative-link-model, binary-decomposition-for-ordinal-regression, structured-ordinal-regression-modelling, reinforcement-learning-from-human-feedback, training-decision-models, calibrating-decision-models, log-loss-and-brier-score, classifier-calibration]
+references: [gao2026openjev, epstein1969, mccullagh1980, frank2001, twomey2019ordinal, cao2020coral, gao2026openjevcode, rogge2026, typesafe2026primer, typesafe2026launch, typesafe2026models, guo2026justaskjev, damani2025, baniharouni2025, shao2024grpo, williams1992, gneiting2007, brier1950, porcedda2026, deusser2026]
+status: draft
+updated: 2026-10-05
+---
+
+import { OrdinalReward } from './OrdinalReward'
+import { RewardCalibration } from './RewardCalibration'
+
+<Callout variant="warning" title="An exploratory note">
+TypeSafe has not published RLCD's reward, algorithm or data. This note states what TypeSafe has said, derives which
+rewards *could* produce calibrated decisions, and describes OpenJev-RLCD, an open implementation by Gao and Wang that
+reaches the same rewards and reports results <Cite id="gao2026openjev" />. OpenJev-RLCD is a reconstruction: its
+authors claim nothing about <NoteLink to="jev">Jev</NoteLink>'s internal algorithm.
+</Callout>
+
+<Definition>
+**<Gloss name="rlcd" />** is the post-training method TypeSafe AI names for its decision model Jev, presented as a third
+way to post-train a pretrained <Gloss name="language-model">language model</Gloss> beside <Gloss name="rlhf" /> and
+<Gloss name="rlvr" /> <Cite id="typesafe2026primer" />. Its target is an *output contract*: the model returns a choice
+among fixed options with a probability for each, and "higher probability should correspond to a greater chance that the
+answer is correct" <Cite id="typesafe2026primer" />. In decision-theoretic terms the target is a calibrated predictive
+distribution $\pivec(\cdot \mid \xvec)$ over the options, as sharp as the evidence allows.
+</Definition>
+
+## What is published
+
+- The method's name, its output contract and its contrast with RLHF and RLVR <Cite id="typesafe2026primer" />.
+- That Jev's launch combined a new architecture, a "parallel sampler" and RLCD <Cite id="typesafe2026launch" />.
+- That Jev is not fine-tuned on customer data <Cite id="typesafe2026models" />.
+
+TypeSafe has not published the reward, the policy-gradient algorithm, what counts as an action, the training data or
+the base model. A paper titled after RLCD uses Jev as a black box and does not describe the method
+<Cite id="guo2026justaskjev" />. Gao and Wang published a working RLCD for reasoning models, with code, run logs and
+an API-compatible server <Cite id="gao2026openjev" /> <Cite id="gao2026openjevcode" />; it is described below.
+
+## Intuition
+
+A decision model maps a prompt $\xvec$ to a distribution $\pivec = (\pi_1, \dots, \pi_K)$ over $K$ options (see
+<NoteLink to="answer-token-scoring" />). Let $\pvec = (p_1, \dots, p_K)$ be the true distribution of the correct option
+given $\xvec$. The output contract asks for $\pivec = \pvec$.
+
+<Gloss name="rl">Reinforcement learning</Gloss> optimises the expected reward. The reward decides which $\pivec$
+maximises it. Two familiar rewards fail the contract:
+
+- **A correctness reward**, $R = \indicator[a = y]$ for a sampled answer $a \sim \pivec$ and the correct option $y$,
+  has expectation $\sum_k \pi_k p_k$. That is linear in $\pivec$, so its maximum over the probability simplex is a
+  vertex: all probability on $\argmax_k p_k$. RLVR-style training of a decision therefore pushes it towards
+  certainty, whatever the evidence.
+- **A preference reward**, as in RLHF, rewards the answer people prefer. TypeSafe's primer argues that preference
+  training concentrates probability on a favoured style and drops other outputs <Cite id="typesafe2026primer" />.
+  Neither target is the probability of being right.
+
+A reward meets the contract when its expected value is a <NoteLink to="proper-scoring-rule" /> of $\pivec$: a score
+$S(\pivec, y)$ whose expectation $\expect_{y \sim \pvec}[S(\pivec, y)]$ is maximised at $\pivec = \pvec$
+<Cite id="gneiting2007" />. The log score $\log \pi_y$ and the <NoteLink to="log-loss-and-brier-score">Brier
+score</NoteLink> $-\norm{\pivec - \evec_y}^2$ <Cite id="brier1950" /> are the standard examples.
+
+## Details
+
+### With the label, the reward is supervised learning
+
+For a one-token decision model the policy *is* the distribution $\pivec$, read in one pass. When the correct option $y$
+is known, a reward $S(\pivec, y)$ that scores the whole distribution needs no sampling: the expected gradient is the
+exact gradient $\nabla_{\thetavec} S(\pivec_{\thetavec}, y)$. With the log score it is the gradient of cross-entropy, so
+reinforcement learning with a log-score reward and full labels *is* supervised training on those labels (see
+<NoteLink to="training-decision-models" />). Reinforcement learning adds something only when training sees less than the
+label: a check on a sampled answer, a judge's verdict, or the outcome of acting on the decision.
+
+### A proper reward from a verifier
+
+Suppose training can sample an answer $a \sim \pivec$ and learn only whether it was correct, $c = \indicator[a = y]$.
+Consider the reward
+
+$$
+R(a, c) = 2c - \norm{\pivec}^2 .
+$$
+
+The penalty $\norm{\pivec}^2 = \sum_k \pi_k^2$ needs no label; it is computed from the policy. Since
+$\expect_{a \sim \pivec}[\indicator[a = y]] = \pi_y$,
+
+$$
+\expect_{a \sim \pivec}[R] = 2\pi_y - \norm{\pivec}^2 = 1 - \norm{\pivec - \evec_y}^2 ,
+$$
+
+which is one minus the Brier score. Taking the expectation over $y \sim \pvec$ as well,
+
+$$
+\expect[R] = 2\langle \pvec, \pivec \rangle - \norm{\pivec}^2 = \norm{\pvec}^2 - \norm{\pivec - \pvec}^2 ,
+$$
+
+which is maximised exactly at $\pivec = \pvec$. The correctness term rewards putting probability on the right answer;
+the penalty charges for sharpness that the evidence does not support. Without the penalty the optimum is the vertex
+found above.
+
+<Derivation title="Every proper score has a verifier-only reward">
+A proper score can be written as $S(\pivec, y) = G(\pivec) + \partial_y G(\pivec) - \langle \nabla G(\pivec), \pivec
+\rangle$ for a convex $G$ (the Savage representation) <Cite id="gneiting2007" />. Only $\partial_y G$ depends on the
+label. Since $\expect_{a \sim \pivec}[c\, \partial_a G(\pivec) / \pi_a] = \partial_y G(\pivec)$, the reward
+
+$$
+R(a, c) = G(\pivec) - \langle \nabla G(\pivec), \pivec \rangle + c\, \frac{\partial_a G(\pivec)}{\pi_a}
+$$
+
+has expectation $S(\pivec, y)$ over the sampled answer. For the Brier score, $G(\pivec) = \norm{\pivec}^2$ and
+$\partial_a G / \pi_a = 2$, which gives $R = 2c - \norm{\pivec}^2$: the importance weight $1/\pi_a$ cancels. For the
+log score, $G(\pivec) = \sum_k \pi_k \log \pi_k$ and the weight $(\log \pi_a + 1) / \pi_a$ does not cancel, so the
+reward has high variance when the sampled answer was unlikely. The Brier score is the natural choice when the feedback
+is a check on one sampled answer.
+</Derivation>
+
+Gao and Wang reach the same reward from the other direction <Cite id="gao2026openjev" />. Its expectation splits as
+
+$$
+\expect[2c - \norm{\pivec}^2] = \underbrace{2\langle \pvec, \pivec \rangle - 1}_{2 P(\text{correct}) - 1}
+\; + \; \underbrace{1 - \norm{\pivec}^2}_{\text{Gini impurity of } \pivec} ,
+$$
+
+so the calibrated reward is the RLVR objective plus a bonus for spread whose coefficient must be exactly 1. Any
+smaller coefficient moves the optimum away from $\pvec$; a coefficient of 0, plain RLVR, puts it at the mode.
+
+### Confidence that is also the policy
+
+Damani and co-authors train a reasoning model to state a confidence $\hat c$ alongside its answer, with the reward
+$\indicator[a = y] - (\hat c - \indicator[a = y])^2$ <Cite id="damani2025" />. Because $\hat c$ is a separate output,
+the Brier term is maximised by the true probability that the answer is correct. Bani-Harouni and co-authors use the log
+score of a stated confidence in the same way <Cite id="baniharouni2025" />.
+
+In a one-token decision model there is no separate confidence: the probability of the sampled answer, $\pi_a$, is both
+how the answer was chosen and how confident the model is. For a yes-or-no decision with $\pi = \pi_{\text{yes}}$ and
+$p = p_{\text{yes}}$, the same reward with $\hat c = \pi_a$ has expected value
+
+$$
+\expect[R] = \pi p + (1 - \pi)(1 - p) - \bigl[p(1 - \pi)^2 + (1 - p)\pi^2\bigr],
+$$
+
+Setting $\partial \expect[R] / \partial \pi = (2p - 1) + 2(p - \pi)$ to zero gives
+
+$$
+\pi^\star = 2p - \tfrac12 , \quad \text{clipped to } [0, 1].
+$$
+
+At $p = 0.7$ the optimum is $\pi^\star = 0.9$: the correctness term still pays for sharpness. Coupling the confidence
+to the policy breaks the calibration guarantee; the reward $2c - \norm{\pivec}^2$ restores it.
+
+<RewardCalibration />
+
+### A construction for verifier feedback
+
+Combining the pieces gives one concrete reading of RLCD for a single-pass decision model trained from checks on
+sampled answers. It is a construction, not TypeSafe's method.
+
+```text
+input: base model θ₀; tasks (state, question, options, checker);
+       group size G; KL weight β
+θ ← θ₀
+repeat:
+    sample a batch of (state, question) pairs
+    for each pair, one forward pass:
+        π ← softmax(code logits)             # all K probabilities
+        sample G answers a₁ … a_G ~ π
+        cᵢ ← checker(aᵢ)                     # correct or not
+        Rᵢ ← 2 cᵢ − ‖π‖²                     # proper in expectation
+        Aᵢ ← Rᵢ − mean of the other R's     # group baseline
+    gradient ← mean of  Aᵢ ∇ log π(aᵢ)  +  ∇(−‖π‖²)  −  β ∇ KL(π ‖ π_θ₀)
+    θ ← θ + η · gradient
+```
+
+- The group baseline is the device of <Gloss name="grpo" /> <Cite id="shao2024grpo" />, which removes the need for a
+  value network; the score-function gradient is <Gloss name="reinforce" /> <Cite id="williams1992" />.
+- The penalty's gradient is exact, because $\norm{\pivec}^2$ is known.
+- The <Gloss name="kl" /> term to the starting model is the RLHF safeguard against drifting from the pretrained language
+  prior.
+- Sampling is only needed when checking is expensive. A one-pass model already has all $K$ probabilities; if a
+  checker could judge all $K$ options cheaply, the label would be known and supervised training on it would do.
+
+What the "checker" can be:
+
+| feedback | what is observed | reward |
+| --- | --- | --- |
+| rules in code over the state | the correct option | log or Brier score; supervised |
+| a checker of one proposed answer | correct or not, for the sampled answer | $2c - \norm{\pivec}^2$ |
+| a judge model with probabilities | a soft target $\bar\pvec$ | $-\norm{\pivec - \bar\pvec}^2$ or cross-entropy to $\bar\pvec$ |
+| an environment (an agent acted on the decision) | success, possibly delayed | $2c - \norm{\pivec}^2$ with $c$ the outcome |
+
+### An open implementation for reasoning models
+
+Gao and Wang's OpenJev-RLCD applies the same idea to a model that reasons before it decides
+<Cite id="gao2026openjev" />. A question $\xvec$ has $K$ options and an outcome $Y \sim \qvec(\cdot \mid \xvec)$. The
+model samples a rationale $r \sim \pi_{\thetavec}(\cdot \mid \xvec)$ that ends in the marker `Answer:`, and then the
+answer distribution it commits to is *read*, not sampled: $\uvec_{\thetavec}(\xvec, r)$, the softmax of the option
+tokens' logits at that point, as in <NoteLink to="answer-token-scoring" />. With an empty rationale this is a
+single-pass decision model, and training it with the Brier score is supervised training, as derived above.
+
+**Score each rationale, not the mixture.** The model's overall decision is the mixture
+$\pvec = \expect_r \uvec(r)$. For the Brier score $J(\uvec, \qvec) = 2\uvec^\top\qvec - \norm{\uvec}^2$,
+
+$$
+J(\pvec, \qvec) = \expect_r J\bigl(\uvec(r), \qvec\bigr) + \expect_r \norm{\uvec(r) - \pvec}^2 ,
+$$
+
+because $J$ is affine in $\uvec$ apart from $-\norm{\uvec}^2$. Scoring the mixture of several samples therefore pays a
+bonus for rationales that disagree, whether or not the disagreement is grounded; a policy can collect it by randomising
+its conclusions. Scoring each rationale's own distribution removes the bonus. When the outcome does not depend on the
+model's rationale, the optimum is then $\uvec(\xvec, r) = \qvec(\xvec)$ for every rationale, so a single query is
+calibrated.
+
+**Two failure modes.** Trained end to end, this per-rationale objective failed in two ways.
+
+- *Reasoning switched off.* Hedging after an empty rationale is learned faster than hedging after reasoning, so the
+  policy gradient moved all rationales to the bare `Answer:` marker within about 100 steps on MMLU-Pro. A KL anchor
+  to the starting model prevented this.
+- *The readout drowned.* The score-function term's gradient was 7 to 12 times larger than the pathwise term's, and it
+  dominated the optimiser; more weight on it made every metric worse.
+
+**Calibrate, then reinforce.** The recipe separates the two roles:
+
+```text
+each step: sample rationales r₁ … r_M ~ π_θ(· | x) up to "Answer:"
+           read uᵢ = u_θ(x, rᵢ); observe Y
+           Rᵢ ← J(uᵢ, Y)          # a strictly proper score of uᵢ
+stage 1:   L ← −(1/M) Σᵢ Rᵢ        # pathwise only: rationales not reinforced
+stage 2:   from the stage-1 model θ₁:
+           Aᵢ ← (1/M)(Rᵢ − β log π_θ(rᵢ)/π_θ₁(rᵢ)) − leave-one-out mean
+           L ← −(1/M) Σᵢ Rᵢ − c Σᵢ stopgrad(Aᵢ) log π_θ(rᵢ | x)
+           # c = 0.3, β = 0.04
+```
+
+Stage 1 trains the decision the model reports after its own reasoning; stage 2 reinforces the reasoning with the same
+proper score as reward, anchored at the calibrated model.
+
+**Results.** With Qwen3-1.7B, 400 steps per stage and three seeds, each method's single-query decision after
+<NoteLink to="temperature-scaling">temperature scaling</NoteLink> compared as follows <Cite id="gao2026openjev" />:
+
+| task | method | accuracy | Brier | decided at the error budget | fitted $T$ |
+| --- | --- | --- | --- | --- | --- |
+| GSM8K answer verification (budget 5%) | <Gloss name="sft" /> | 70.4% | 0.382 | 6% | 2.1 |
+| | GRPO | 91.8% | 0.150 | 19% | 7.2 |
+| | RLCD, two stages | 92.2% | 0.135 | 81% | 1.4 |
+| MMLU-Pro (budget 20%) | SFT | 42.3% | 0.711 | 16% | 1.6 |
+| | GRPO | 42.4% | 0.753 | 0% | 11.1 |
+| | RLCD, two stages | 47.7% | 0.658 | 28% | 1.6 |
+
+GRPO matched RLCD's accuracy on answer verification, but its confidence separated right from wrong answers so poorly
+that temperature scaling could not repair it; a fitted $T$ near 1 means calibrated as trained. Stage 1 carried most of
+the gain on both tasks, and the Brier and log scores worked about equally well. Stage 2 helped where reasoning changes
+the answer (verification) and was neutral where it does not (MMLU-Pro). Continuing from the calibrated checkpoint with
+GRPO's correctness reward re-inflated confidence on MMLU-Pro, raising the fitted $T$ from 1.4 to 3.8.
+
+**Where reinforcement learning cannot help.** On ChaosNLI the target is the spread of 100 annotators' labels, so the
+uncertainty is aleatoric and no rationale can reduce it. The per-rationale objective switched reasoning off and matched
+cross-entropy on direct answers (<Gloss name="js">Jensen–Shannon divergence</Gloss> 0.075 against 0.074), as the
+analysis predicts: with an explicit readout and labels from the world, the RLCD gradient equals the Brier gradient in
+expectation. When uncertainty is disagreement rather than missing computation, a fast single-pass scorer trained with
+cross-entropy is the right model.
+
+### Ordinal answers: rewards on a rating scale
+
+A score question, such as a rating from 1 to 5, has ordered answers. The rewards above treat its levels as unordered
+options. They are still proper, but they are blind to order: with the truth at 2, favouring 3 costs exactly as much as
+favouring 5, so a near miss earns no credit and training gets no signal pulling probability towards the right part of
+the scale. The overview's section on ordinal ratings describes the readout side of this problem (see
+<NoteLink to="decision-models" />); this section is about the reward.
+
+**Reduce the rating to its cut-points.** A rating $y \in \set{1, \dots, L}$ is the same information as $L - 1$ yes-or-no
+answers, one per cut-point: "is the rating above $\ell$?" for $\ell = 1, \dots, L - 1$. This is the reduction behind
+binary decomposition <Cite id="frank2001" />, behind the up-to-$k$ codes of structured
+<NoteLink to="ordinal-regression">ordinal regression</NoteLink>, in which the number of bits on which two ratings differ
+is exactly their distance <Cite id="twomey2019ordinal" />, and behind the <Gloss name="clm">cumulative link
+model</Gloss>, which gives each cut-point the probability $P(y \le \ell) = \sigma(\theta_\ell - s)$ from one score $s$
+<Cite id="mccullagh1980" />. A model's level probabilities $\pivec$ give each cut-point a probability through the
+cumulative sum $F(\ell) = \sum_{k \le \ell} \pi_k$.
+
+**Sum a proper reward over the cut-points.** Scoring each cut-point's yes-or-no answer with the Brier score and adding
+them gives the ranked probability score <Cite id="epstein1969" />:
+
+$$
+\mathrm{RPS}(\pivec, y) = \sum_{\ell=1}^{L-1} \bigl(F(\ell) - \indicator[y \le \ell]\bigr)^2 .
+$$
+
+Each term is a proper score for its own event, and the true distribution makes every term's expectation best at once,
+so the sum is proper: a reward of $-\mathrm{RPS}$ is maximised in expectation by the true level probabilities. It is
+also order-aware. Moving probability from the truth to a level $d$ steps away changes $F$ at $d$ cut-points, so the
+penalty grows with the distance of the mistake.
+
+**The same score as an expectation over sampled answers.** For independent draws $X, X'$ from $\pivec$ on the levels
+$1, \dots, L$,
+
+$$
+\mathrm{RPS}(\pivec, y) = \expect\abs{X - y} - \tfrac12 \expect\abs{X - X'} ,
+$$
+
+the kernel form of the <Gloss name="crps">continuous ranked probability score</Gloss> restricted to integer levels
+<Cite id="gneiting2007" />. That gives a reward for reinforcement learning that needs neither the labels' full
+distribution nor the cumulative sums: sample two answers $a, a'$ from the model, ask a checker how far $a$ is from the
+truth, and reward
+
+$$
+R = -\abs{a - y} + \tfrac12 \abs{a - a'} .
+$$
+
+Its expectation is $-\mathrm{RPS}$. The first term rewards answers close to the truth. The second rewards spread, and
+plays the part that $-\norm{\pivec}^2$ plays in $2c - \norm{\pivec}^2$: without it, the best policy puts all its
+probability on the median level, which is the ordinal version of a correctness reward making a model overconfident.
+
+<OrdinalReward />
+
+**Rewarding the expected level is not enough.** Clients often read a rating as its expected level
+$\sum_\ell \ell\, \pi_\ell$, a Likert-style index. A reward of $-(\sum_\ell \ell \pi_\ell - y)^2$ is proper for the
+mean only: every distribution with the right mean scores equally well, so the spread of $\pivec$ is left unconstrained
+and its probabilities are not calibrated. The ranked probability score calibrates the whole distribution, and the
+expected level read from it is then the right mean as well.
+
+**Where the order is enforced.** The reward makes training order-aware; the readout decides whether the model can
+express the order. The level codes of an ordinary score question can put probability on 1 and 5 with nothing between.
+Reading the $L - 1$ cut-point questions from one shared score, as the cumulative link model and CORAL do
+<Cite id="cao2020coral" />, guarantees that $P(y > \ell)$ falls as $\ell$ rises, and the cut-point questions share one
+read of the state like any other questions (see <NoteLink to="shared-prefix-decision-batching" />).
+
+| feedback available | reward | proper | sensitive to order |
+| --- | --- | --- | --- |
+| the true level | $-\log \pi_y$ or the Brier score | yes | no |
+| the true level | $-\mathrm{RPS}(\pivec, y)$ | yes | yes |
+| right or wrong for a sampled level | $2c - \norm{\pivec}^2$ | yes | no |
+| distance $\abs{a - y}$ for sampled levels $a, a'$ | $-\abs{a - y} + \tfrac12 \abs{a - a'}$ | yes, in expectation | yes |
+| distance for one sampled level | $-\abs{a - y}$ | no; rewards a point mass at the median | yes |
+| the true level, scored on the expected level | $-(\sum_\ell \ell \pi_\ell - y)^2$ | for the mean only | yes |
+
+## Assumptions
+
+- **Calibration is in expectation over the training distribution.** A proper reward makes $\pivec = \pvec$ optimal
+  on the prompts it is trained on. On new tasks the probabilities are calibrated only as far as the model generalises.
+- **The model can represent $\pvec$.** A restricted model settles on the proper score's best approximation, which is
+  calibrated only on average.
+- **The checker is right.** A checker that errs at rate $\varepsilon$ calibrates $\pivec$ to the checker's verdicts,
+  not to the truth.
+
+## Pitfalls
+
+- **Correctness-only rewards.** Training a decision model with an RLVR-style reward makes it overconfident by design.
+- **Scoring the mixture of samples.** Rewarding a group of samples by a proper score of their average pays the samples
+  for disagreeing; score each sample's own distribution instead <Cite id="gao2026openjev" />.
+- **Per-type calibration.** One reward over a mix of question types can leave each type miscalibrated in a different
+  direction. Porcedda found Jev's choice answers less calibrated than its yes-or-no and score answers on items whose
+  true probability is known <Cite id="porcedda2026" />, and Deußer and co-authors found Jev's yes-or-no probabilities
+  ranked examples well but sat poorly against a 0.5 threshold <Cite id="deusser2026" />.
+- **Calling a decoding trick RLCD.** A public checkpoint named "Qwen-2.5-1B-RLCD" demonstrates answer-token scoring
+  and describes no reinforcement learning <Cite id="rogge2026" />. The name says nothing about training.

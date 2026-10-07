@@ -118,7 +118,19 @@ export function SearchCommand() {
     if (results[0]) prefetchNote(results[0].slug)
   }, [results])
 
+  // cmdk's onSelect carries no event, so the modifier is recorded as the click or Enter passes the root (capture phase).
+  const newTab = useRef(false)
+  const recordModifier = (e: { metaKey: boolean; ctrlKey: boolean }) => {
+    newTab.current = e.metaKey || e.ctrlKey
+  }
+
   const go = (to: string) => {
+    if (newTab.current) {
+      // ⌘/Ctrl-click or ⌘/Ctrl-Enter: open in a new tab, as a link would, and leave the palette open.
+      newTab.current = false
+      window.open(import.meta.env.BASE_URL.replace(/\/$/, '') + to, '_blank', 'noopener')
+      return
+    }
     setOpen(false)
     setQuery('')
     setPicked(undefined)
@@ -156,7 +168,13 @@ export function SearchCommand() {
         description="Search all notes"
         className="sm:max-w-3xl"
       >
-        <Command shouldFilter={false} value={active} onValueChange={setSelected}>
+        <Command
+          shouldFilter={false}
+          value={active}
+          onValueChange={setSelected}
+          onClickCapture={recordModifier}
+          onKeyDownCapture={(e) => e.key === 'Enter' && recordModifier(e)}
+        >
           <CommandInput
             autoFocus
             placeholder="Search notes · # for tags · / for topics"

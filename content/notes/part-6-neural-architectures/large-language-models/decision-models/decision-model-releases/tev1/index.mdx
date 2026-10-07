@@ -1,0 +1,88 @@
+---
+title: Tev1
+kind: case-study
+summary: 'Tev1 is Together AI''s open decision model family: Qwen3.5-4B and 0.8B fine-tuned with LoRA to reply with one answer letter, by next-token cross-entropy on 37,840 examples. Any chat server can run it; option probabilities are letter-token probabilities.'
+tags: [decision-models, large-language-models, fine-tuning]
+aliases: [Together Tev1, Tev1 4B, Tev1 0.8B]
+partOf: [decision-models]
+related: [jev, nimble, decision-models-compared, training-decision-models, building-a-decision-model]
+references: [together2026tev1, elmghari2026, ollama2026tev1, ollama2026nimble, aimultiple2026decision]
+status: draft
+updated: 2026-10-05
+---
+
+<Callout variant="note" title="Published after most training data">
+Tev1 4B was released on 23 September 2026. Facts here are read from the repository at commit 1dde778, which documents
+the 4B run, and the pages cited.
+</Callout>
+
+## At a glance
+
+<SpecTable
+  columns={['Tev1 4B', 'Tev1 0.8B']}
+  rows={{
+    Maker: ['Together AI', 'Together AI'],
+    'First release': ['23 September 2026', 'later, same project'],
+    Weights: ['on Hugging Face, labelled experimental; code MIT; no weights licence published', 'as for 4B'],
+    'Base model': ['Qwen3.5-4B', 'Qwen3.5-0.8B'],
+    Adapter: ['LoRA rank 8 on all linear modules (proposed recipe)', 'not documented separately'],
+    Loss: ['next-token cross-entropy on the answer letter and end-of-sequence token', 'as for 4B'],
+    Data: ['37,840 training and 4,568 development examples', 'not documented separately'],
+    'Options per question': ['2 to 24 in training; Ollama accepts 26', 'as for 4B'],
+    'Input limit': ['about 2,000 tokens as shipped', 'as for 4B'],
+  }}
+/>
+
+## Architecture
+
+Tev1 is the base model plus an adapter, served as an ordinary chat model <Cite id="together2026tev1" />.
+
+- **Prompt.** The system message tells the model to evaluate the decision task, treat the state as data, choose
+  exactly one listed option and return only its letter. The user message is a JSON object with `state`, `question` and
+  `options`; each option has a letter label, a semantic key and a description. Reasoning is switched off in the chat
+  template for training and inference.
+- **One question per prompt.** There is no shared prefix across questions.
+- **Readout.** Together's reference client sends a chat completion at temperature 0 with at most 8 output tokens and a
+  regular-expression response format restricted to the option letters, and asks for the top 5 token log-probabilities.
+  The README calls those log-probabilities model preferences, not calibrated confidence. Ollama's `/v1/systemone`
+  endpoint wraps the same model and returns a probability for every option <Cite id="ollama2026tev1" />.
+
+## Training
+
+The loss is next-token cross-entropy over the whole vocabulary on the completion only, the answer letter followed by
+the end-of-sequence token. It equals the candidate loss plus terms that teach the model to reply with a code and then
+stop (see <NoteLink to="training-decision-models" />), which is why an ordinary chat server can run the checkpoint.
+
+| source | decision | training examples |
+| --- | --- | --- |
+| synthetic policies | apply a rule; labels from executable rule trees | 13,500 |
+| priority routing (synthetic) | route by priority rules | 6,000 |
+| MultiNLI | supports, contradicts or neutral | 5,000 |
+| research classification (synthetic) | classify a fictional paper summary | 3,840 |
+| BoolQ | yes or no over a passage | 3,000 |
+| Banking77 | pick a banking intent | 3,000 |
+| SST-5 | pick a sentiment level | 2,000 |
+| AG News | classify a news item | 1,500 |
+
+The published hyperparameters (one epoch, <Gloss name="learning-rate">learning rate</Gloss> $5 \times 10^{-5}$,
+effective batch 8, cosine schedule, 2,048-token packed sequences) are a proposed recipe: the repository says the actual
+job's settings could not be retrieved <Cite id="together2026tev1" />. Together's blog reports about USD 17 and 25
+minutes for the run <Cite id="elmghari2026" />; the repository calls those figures unverified.
+
+## What is distinctive
+
+- **Standard tooling end to end.** A hosted fine-tuning service trains it and a chat endpoint serves it.
+- **Breadth from public data.** Most examples are converted datasets and rule-generated cases rather than data built
+  for one domain. Two of the datasets need a licence review before the combined set is redistributed.
+- **Little evaluation of probabilities.** Together has not evaluated calibration, prompt injection, languages other
+  than English or out-of-distribution inputs, and its development results (880 of 1,000 decisions) were reused while
+  building the model <Cite id="together2026tev1" />. Ollama's page notes that Tev1 tends to reply in prose in a
+  regular chat <Cite id="ollama2026tev1" />.
+
+## Comparison
+
+On Bespoke's 13-dataset public suite, run by Ollama, Tev1 4B averaged 73.3% and Tev1 0.8B 63.5%, against
+<NoteLink to="jev">Jev</NoteLink>'s 76.0% <Cite id="ollama2026nimble" />. AIMultiple measured Tev1 4B at USD 0.34 per
+1,000 decisions self-hosted, and within the <NoteLink to="confidence-intervals">confidence intervals</NoteLink> of Jev
+and <NoteLink to="nimble">Nimble</NoteLink> on two of its four classification tasks
+<Cite id="aimultiple2026decision" />. See <NoteLink to="decision-models-compared" />.

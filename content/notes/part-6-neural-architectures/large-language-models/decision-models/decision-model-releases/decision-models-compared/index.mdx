@@ -1,0 +1,86 @@
+---
+title: Jev, Nimble and Tev1 compared
+kind: case-study
+summary: 'Jev, Nimble and Tev1 share one interface and differ in openness, loss, data and serving. Jev and Nimble are within half a point on the one benchmark all three ran; independent tests find overlapping accuracy and Jev cheapest per decision.'
+tags: [decision-models, large-language-models, benchmarks]
+aliases: [decision model comparison, Jev vs Nimble vs Tev1]
+partOf: [decision-models]
+related: [jev, nimble, tev1, building-a-decision-model]
+references: [typesafe2026models, typesafe2026launch, bespoke2026nimble, together2026tev1, ollama2026nimble, aimultiple2026decision]
+status: draft
+updated: 2026-10-05
+---
+
+## At a glance
+
+<SpecTable
+  columns={['Jev 1.13', 'Nimble 9B', 'Tev1 4B']}
+  rows={{
+    Weights: ['closed, hosted', 'open', 'open, experimental'],
+    'Base model': ['not published', 'Qwen3.5-9B', 'Qwen3.5-4B'],
+    Readout: ['not published', 'code logits, softmax over codes', 'letter-token probabilities'],
+    Loss: ['RLCD, unpublished', 'candidate cross-entropy', 'completion cross-entropy'],
+    'Training examples': ['not published', '2,676', '37,840'],
+    'Shared read across questions': ['yes', 'MLX scorer and hosted endpoint', 'no'],
+    'Options per question': ['up to 255', '26 (255 experimental)', '2 to 24 trained'],
+    'Input limit (tokens)': ['32k state + question', '8,192', 'about 2,000'],
+    Calibration: ['vendor claims; mixed independent results', 'one fitted temperature', 'not evaluated'],
+  }}
+/>
+
+## Architecture
+
+All three return one typed answer per question with a probability per allowed answer, from one read of the prompt and
+without generating text. <NoteLink to="nimble">Nimble</NoteLink> and <NoteLink to="tev1">Tev1</NoteLink> are
+<Gloss name="lora" /> fine-tunes of Qwen3.5 that read the probabilities of single-token answer codes (see
+<NoteLink to="answer-token-scoring" />). <NoteLink to="jev">Jev</NoteLink>'s internals are unpublished
+<Cite id="typesafe2026launch" />.
+
+## Training
+
+Nimble and Tev1 differ in loss and data at once: a candidate-only loss on a small contrastive set against a
+full-vocabulary loss on a large converted set (see <NoteLink to="training-decision-models" />). Neither uses
+<Gloss name="rl">reinforcement learning</Gloss> or Jev's outputs <Cite id="bespoke2026nimble" />
+<Cite id="together2026tev1" />. Jev uses <Gloss name="rlcd" />, whose mechanism is unpublished.
+
+## What is distinctive
+
+| | strength | weakness |
+| --- | --- | --- |
+| Jev | highest mean accuracy measured; cheapest per decision; long inputs; 255 options | closed; cannot be fine-tuned; method unpublished |
+| Nimble | open; documented calibration fit; shared reads on Apple Silicon | 26 options on Ollama; temperature not carried by the weights |
+| Tev1 | trains and serves with standard tools; small (0.8B option) | short inputs; probabilities unevaluated |
+
+## Comparison
+
+**Agreement with human labels.** Bespoke's public suite draws 3,880 records from 13 human-labelled datasets
+<Cite id="ollama2026nimble" />.
+
+| model | mean accuracy | run by |
+| --- | --- | --- |
+| Jev 1.13 | 76.0% | Bespoke, through TypeSafe's API |
+| Nimble 9B | 75.7% | Ollama |
+| Tev1 4B | 73.3% | Ollama |
+| Tev1 0.8B | 63.5% | Ollama |
+
+Jev led on choice and yes-or-no questions and Nimble on score questions, where accuracy counts only
+<Gloss name="exact-match">exact matches</Gloss> with the human level.
+
+**Independent classification.** AIMultiple scored 19 <NoteLink to="decision-models">decision models</NoteLink> on four
+tasks built from records published in July to September 2026 <Cite id="aimultiple2026decision" />. The three models' 95%
+intervals overlapped on two of the four. On paper topics a <Gloss name="tf-idf" />
+<NoteLink to="logistic-regression">logistic regression</NoteLink> trained on 28,595 labelled papers scored 70.4%
+balanced accuracy, and no decision model scored significantly higher.
+
+**Multi-step tasks.** On 50 browser tasks two text models completed 47 and 42, the best decision model 20, and Jev 12
+to 20 across six runs <Cite id="aimultiple2026decision" />. Nimble and Tev1 could not start 24 tasks because Ollama
+caps a question at 26 options.
+
+**Latency and cost.** Bespoke timed a median 106 ms per decision for Nimble on an H100 and 247 ms for Jev through its
+API <Cite id="bespoke2026nimble" />. AIMultiple found Jev cheapest per decision: USD 0.039 per 1,000 decisions,
+against about nine times that for Nimble and USD 0.34 for Tev1 4B, both self-hosted on a rented A100
+<Cite id="aimultiple2026decision" />.
+
+**What cannot be concluded.** The models differ in size, loss and data together, so no result isolates the loss or
+the data. TypeSafe's headline speed and cost ratios come from its own workflow evaluation, and Bespoke's guide notes
+that TypeSafe has published no result on a public dataset <Cite id="bespoke2026nimble" />.

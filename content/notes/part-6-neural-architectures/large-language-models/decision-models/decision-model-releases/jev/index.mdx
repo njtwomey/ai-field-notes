@@ -1,0 +1,105 @@
+---
+title: Jev
+kind: case-study
+summary: 'Jev is TypeSafe AI''s closed decision model, a hosted API since September 2026. It answers typed questions with a probability per allowed answer, reads the state once for all questions, and is post-trained with RLCD, an unpublished method.'
+tags: [decision-models, large-language-models, calibration]
+aliases: [TypeSafe Jev, Jev 1.13]
+partOf: [decision-models]
+related: [nimble, tev1, decision-models-compared, reinforcement-learning-for-calibrated-decisions]
+references: [gao2026openjev, typesafe2026launch, typesafe2026models, typesafe2026primer, typesafe2026confidence, typesafe2026jaggedness, typesafe2026parallel, deusser2026, liu2026sysone, porcedda2026, guo2026justaskjev, aimultiple2026decision, ollama2026nimble]
+status: draft
+updated: 2026-10-05
+---
+
+<Callout variant="note" title="Published after most training data">
+Jev was released on 15 September 2026. Every fact here comes from TypeSafe's pages and the evaluations cited, as read on
+5 October 2026. Details not stated should be checked against those sources before they are relied on.
+</Callout>
+
+## At a glance
+
+<SpecTable
+  columns={['Jev 1.13']}
+  rows={{
+    Maker: ['TypeSafe AI'],
+    'First release': ['15 September 2026, early access'],
+    Weights: ['closed; hosted API only; the same weights for every account'],
+    'Base model, size': ['not published'],
+    'Training method': ['RLCD; reward and algorithm not published'],
+    'Input limit': ['64k tokens per request; 32k for the state plus the longest question'],
+    'Options per question': ['up to 255'],
+    Price: ['USD 0.042 per million input tokens; output not billed'],
+    'Fine-tuning': ['not offered'],
+  }}
+/>
+
+## Interface
+
+A request to `POST /v1/systemone` carries a **state** (a string, a JSON object or an array) and a set of named questions
+<Cite id="typesafe2026models" />. Each question has a type, instructions and, usually, criteria describing each allowed
+answer.
+
+| type | asks | returns |
+| --- | --- | --- |
+| choice | one option from a named set | the option, a probability per option, a confidence |
+| noul | yes or no (TypeSafe's name for the type) | the probability of yes |
+| score | a level on an ordered rubric numbered from 0 | the expected level, a probability per level, a confidence |
+
+Questions are answered independently: no answer sees another. Probabilities are normalised over the options supplied.
+The confidence is a summary of the probabilities, $(p_{\max} - 1/n) / (1 - 1/n)$ for a choice with $n$ options and
+$\abs{2p - 1}$ for a yes-or-no question <Cite id="typesafe2026confidence" />. Ollama serves the open models
+<NoteLink to="nimble">Nimble</NoteLink> and <NoteLink to="tev1">Tev1</NoteLink> at the same path, so TypeSafe's SDK can
+be pointed at a local server.
+
+## Architecture
+
+TypeSafe names three components: "a new model architecture", a "parallel sampler" that generates all outputs in a
+single query, and RLCD <Cite id="typesafe2026launch" />. Jev "ingests the state once and evaluates every question
+against it in parallel" <Cite id="typesafe2026models" />. Nothing more is published. The open models reproduce the
+behaviour with an ordinary <NoteLink to="transformer">transformer</NoteLink>, <NoteLink to="answer-token-scoring" /> and
+<NoteLink to="shared-prefix-decision-batching" />; whether Jev works that way is not confirmed.
+
+TypeSafe's cookbook measured 0.27 s and USD 0.000497 for 13 questions on a 53,777-character article as one request,
+against 2.71 s and USD 0.006090 as 13 sequential requests <Cite id="typesafe2026parallel" />.
+
+## Training
+
+TypeSafe presents <NoteLink to="reinforcement-learning-for-calibrated-decisions" /> as a third kind of post-training,
+targeting decisions whose probabilities match how often they are right <Cite id="typesafe2026primer" />. The reward,
+algorithm and data are unpublished, and searches on 5 October 2026 found no TypeSafe paper. Customisation happens in
+the request, through the state, instructions and criteria, not by fine-tuning <Cite id="typesafe2026models" />.
+Gao and Wang published an open, working RLCD for reasoning models that reproduces the interface; they compare with Jev
+only by behaviour and claim nothing about its training <Cite id="gao2026openjev" />.
+
+## What is distinctive
+
+- **Calibration as the product.** Jev is sold on its probabilities, not only its answers.
+- **Independent checks are mixed.** On 37 datasets Jev's choice probabilities were well calibrated, while its
+  yes-or-no probabilities ranked examples well but sat poorly against a 0.5 threshold; tuned thresholds raised
+  micro-F1 on one legal dataset from 0.50 to 0.75 <Cite id="deusser2026" />. On items with a known true probability,
+  its choice answers were less calibrated than its yes-or-no and score answers <Cite id="porcedda2026" />. On
+  agent-security decisions, favourable average calibration hid attacks confidently classified as safe
+  <Cite id="liu2026sysone" />.
+- **Zero-shot uses.** Researchers use Jev as a black-box judge; one study detects alignment failures with a generic
+  question at a median <Gloss name="auroc" /> of 0.886 <Cite id="guo2026justaskjev" />.
+
+## Known limits
+
+TypeSafe's jaggedness page lists Jev's documented weaknesses and the workaround for each
+<Cite id="typesafe2026jaggedness" />:
+
+| limit | workaround |
+| --- | --- |
+| reads questions literally | state the exact condition; put boundary cases in the criteria |
+| arithmetic, counting, numeric closeness | compute in code; count with one question per item |
+| comparing dates and times | extract the parts as choices and compare in code |
+| indirection and double negatives | ask directly, naming the relevant part of the state |
+| accuracy falls as irrelevant state grows | filter in code first |
+| option order moves a choice towards the first option | reorder the options and check the answer holds |
+| score levels are weak in numerical calibration | treat the expected level as a ranking signal |
+
+## Comparison
+
+See <NoteLink to="decision-models-compared" />. On Bespoke's 13-dataset public suite Jev averaged 76.0% against
+Nimble's 75.7% and Tev1 4B's 73.3% <Cite id="ollama2026nimble" />. AIMultiple measured Jev's hosted API as cheaper per
+decision than self-hosted Nimble or Tev1 <Cite id="aimultiple2026decision" />.

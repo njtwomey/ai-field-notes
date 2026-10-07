@@ -1,0 +1,116 @@
+---
+title: Calibrating decision models
+kind: technique
+summary: 'A decision model''s option probabilities are made usable after training: a temperature fitted on held-out data per checkpoint and question type, option-order debiasing, and thresholds for yes-or-no gates set from the cost of each error.'
+tags: [decision-models, large-language-models, calibration, decision-theory]
+aliases: [decision model calibration, post-hoc calibration of decision models, threshold tuning for decision models]
+requires: [answer-token-scoring, temperature-scaling, bayes-decision-rule]
+partOf: [decision-models]
+related: [reliability-diagrams-and-consistency-bars, estimating-calibration-error, threshold-choice-methods, reinforcement-learning-for-calibrated-decisions]
+references: [bespoke2026nimble, together2026tev1, guo2017, zheng2024pride, zhao2021, deusser2026, liu2026sysone, typesafe2026jaggedness, typesafe2026confidence]
+status: draft
+updated: 2026-10-05
+---
+
+<Definition>
+**Calibrating a decision model** adjusts its option probabilities $\qvec$ after training so that, among answers given
+probability $q$, a fraction $q$ is correct, and then turns them into actions. Three steps are used: a temperature $T$
+in $\qvec = \operatorname{softmax}(\zvec_{\Ccal} / T)$ fitted on held-out data <Cite id="guo2017" />; removing the
+model's preference for particular codes or positions <Cite id="zheng2024pride" />; and a decision threshold for each
+yes-or-no gate chosen from the costs of its two errors.
+</Definition>
+
+## Problem
+
+A fine-tuned decision model's probabilities are not calibrated by construction.
+<NoteLink to="nimble">Nimble</NoteLink>'s original release was overconfident: on 300 outside examples its mean top
+probability was 0.89 while 73% of its top answers were right <Cite id="bespoke2026nimble" />. Together has not evaluated
+<NoteLink to="tev1">Tev1</NoteLink>'s calibration and describes its letter probabilities as preferences rather than
+confidence <Cite id="together2026tev1" />. <NoteLink to="jev">Jev</NoteLink>'s choice probabilities were well calibrated
+across 37 datasets, but its yes-or-no probabilities sat poorly against a 0.5 threshold <Cite id="deusser2026" />.
+
+## Mechanism
+
+### Mental model
+
+- **Temperature:** one number that stretches or shrinks every logit gap. It changes how sure the model sounds, never
+  which answer wins.
+- **Debiasing:** estimate how much the model likes each code regardless of content, and divide that out.
+- **Threshold:** a probability is not a decision. The cut-off that minimises cost depends on the costs.
+
+### Temperature per checkpoint and per question type
+
+<NoteLink to="temperature-scaling" /> fits $T$ by minimising log loss on held-out examples. Nimble's fit,
+$T = 2.179$, was chosen on one set of 300 examples and accepted on a second set from other sources
+<Cite id="bespoke2026nimble" />:
+
+| measure on the acceptance set | $T = 1$ | $T = 2.179$ |
+| --- | --- | --- |
+| <Gloss name="ece">expected calibration error</Gloss> | 0.128 | 0.066 |
+| log loss | 0.692 | 0.555 |
+| Brier score | 0.348 | 0.295 |
+| top answers correct (of 300) | 220 | 220 |
+
+Accuracy is unchanged because dividing every logit by one positive number keeps their order. The fit did not help every
+question type: on Nimble's 64 held-out score questions, calibration error rose from 0.105 to 0.177. A question type
+whose logits are on a different scale needs its own temperature, so $T$ is indexed by type:
+$\qvec = \operatorname{softmax}(\zvec_{\Ccal} / T_{\text{type}})$.
+
+Four rules follow from Nimble's record:
+
+1. Fit on examples used neither for training nor for choosing the checkpoint; accept the fit on a second set.
+2. Report calibration per question type, not only overall.
+3. Refit for every checkpoint. Nimble's later checkpoint ships unfitted at $T = 1$.
+4. Apply $T$ in the serving code. The weights do not carry it, so another runtime serving the same weights returns
+   uncalibrated probabilities unless it applies $T$ too.
+
+### Removing code and position bias
+
+A model may prefer a code for its letter or its place in the list. Two corrections exist.
+
+- **Permutation averaging.** Score the question under $P$ orderings of the options and average each option's
+  probability across orderings. It costs $P$ reads; with <NoteLink to="shared-prefix-decision-batching" /> the
+  orderings cannot share the schema, so the cost is close to $P$ separate reads.
+- **Prior estimation.** Zheng and co-authors' PriDe estimates the model's prior over codes by permuting options on a few
+  sample questions, then divides each new question's probabilities by that prior and renormalises
+  <Cite id="zheng2024pride" />. <NoteLink to="prompting">Contextual calibration</NoteLink> does the same with a
+  content-free input such as "N/A" in place of the text <Cite id="zhao2021" />.
+
+TypeSafe reports that option order can move Jev's choice towards the first option and recommends reordering options
+to check that an answer holds <Cite id="typesafe2026jaggedness" />.
+
+### Thresholds for gates
+
+A yes-or-no decision used as a gate acts when $q_{\text{yes}} \ge t$. With calibrated $q$, a <Gloss name="fp">false
+positive</Gloss> costing $c_{\text{FP}}$ and a <Gloss name="fn">false negative</Gloss> costing $c_{\text{FN}}$, the
+<NoteLink to="bayes-decision-rule" /> acts when the expected cost of acting is lower:
+
+$$
+(1 - q_{\text{yes}})\, c_{\text{FP}} < q_{\text{yes}}\, c_{\text{FN}}
+\iff q_{\text{yes}} > t^\star = \frac{c_{\text{FP}}}{c_{\text{FP}} + c_{\text{FN}}} .
+$$
+
+The threshold 0.5 is right only when the two errors cost the same and the probabilities are calibrated. When they are
+not calibrated but rank well, the threshold is tuned directly on the task's labelled data. Deußer and co-authors raised
+Jev's micro-F1 on one legal dataset from 0.50 to 0.75 by tuning thresholds on training data <Cite id="deusser2026" />.
+
+### Confidence summaries are not probabilities
+
+Servers return a "confidence" derived from $\qvec$ with server-specific formulas <Cite id="typesafe2026confidence" />.
+A threshold set on one server's confidence does not transfer to another's. Thresholds belong on $\qvec$ itself.
+
+## Cost
+
+A temperature costs one scalar optimisation per question type on a few hundred labelled examples. Permutation averaging
+multiplies serving cost by the number of orderings. Threshold tuning needs labelled examples of the task with known
+error costs.
+
+## Trade-offs
+
+- **Average calibration can hide subgroup failures.** Liu found favourable average calibration on agent-security
+  decisions alongside attacks that the models confidently classified as safe <Cite id="liu2026sysone" />. Calibration
+  is checked on the subgroups that matter, not only overall.
+- **A temperature cannot fix ranking.** If wrong answers get high probability because the model misreads the
+  evidence, no monotone map repairs it. Calibration error after the fit is then a training problem.
+- **Fitted values age.** Every new checkpoint, prompt template or question type invalidates the fitted temperature and
+  thresholds.

@@ -1,0 +1,151 @@
+---
+title: Building a decision model
+kind: technique
+summary: 'An open decision model is built in six stages: freeze the prompt contract, build contrastive data with family-level splits, fine-tune a LoRA adapter, optionally add reinforcement learning with a proper reward, fit temperatures, and evaluate on a frozen test set.'
+tags: [decision-models, large-language-models, fine-tuning, calibration, worked-example]
+aliases: [replicating Jev, training your own decision model, decision model recipe, fine-tuning a decision model]
+requires: [answer-token-scoring, training-decision-models]
+partOf: [decision-models]
+related: [shared-prefix-decision-batching, reinforcement-learning-for-calibrated-decisions, calibrating-decision-models, nimble, tev1, jev]
+references: [gao2026openjev, bespoke2026nimble, together2026tev1, elmghari2026, typesafe2026models, typesafe2026launch, typesafe2026jaggedness, hu2022, aimultiple2026decision]
+status: draft
+updated: 2026-10-05
+---
+
+import { DecisionPipeline } from './DecisionPipeline'
+
+<Definition>
+**Building a decision model** means adapting an open <Gloss name="language-model">language model</Gloss> so that, for a
+state and a typed question, the logits of single-token answer codes at the end of the prompt give calibrated
+probabilities over the allowed answers. <NoteLink to="jev">Jev</NoteLink> is closed and is not fine-tuned on customer
+data <Cite id="typesafe2026models" />, so a domain-specific decision model starts from an open base, as
+<NoteLink to="nimble">Nimble</NoteLink> and <NoteLink to="tev1">Tev1</NoteLink> did <Cite id="bespoke2026nimble" />
+<Cite id="together2026tev1" />. The recipe below combines their published practice with the calibration results derived
+in <NoteLink to="reinforcement-learning-for-calibrated-decisions" />.
+</Definition>
+
+## Problem
+
+The published facts fix most of a recipe. The base model, the prompt layout, the losses, the adapter settings, the data
+designs and the calibration step of two open models are documented. Four things are not, and have to be chosen:
+
+| unknown | what is known | the choice made here |
+| --- | --- | --- |
+| Jev's reward and algorithm | the target: calibrated probabilities over fixed options; an open reconstruction, OpenJev-RLCD <Cite id="gao2026openjev" /> | a proper score of each read-out distribution; calibrate, then reinforce |
+| Jev's architecture and "parallel sampler" | it reads the state once for all questions <Cite id="typesafe2026launch" /> | a standard <NoteLink to="transformer">transformer</NoteLink> with shared-prefix batching |
+| which loss is better | no controlled comparison exists | the <NoteLink to="training-decision-models">candidate loss</NoteLink> when serving with a custom scorer; the completion loss on hosted services |
+| how much data | 2,676 examples (Nimble) and 37,840 (Tev1) both reached useful accuracy | start with a few thousand task decisions plus contrastive pairs |
+
+## Mechanism
+
+<DecisionPipeline />
+
+### 1. Freeze the prompt contract
+
+1. **Interface.** List the question types (choice, yes or no, score), the maximum number of options, and the longest
+   state. Add an explicit "none" option to any question that may have no correct answer: probabilities are normalised
+   over the options offered.
+2. **Base model.** Nimble used Qwen3.5-9B and Tev1 Qwen3.5-4B and 0.8B. Record the exact revision.
+3. **Codes.** Use `A`, `B`, `C`, … and check that each is exactly one token at the answer boundary under this
+   tokenizer.
+4. **Layout.** Put the instructions, the state and the schema of *all* questions first and the selector for one
+   question last, so that questions can share one read (see <NoteLink to="shared-prefix-decision-batching" />). Render
+   through the chat template with the generation prompt added and reasoning switched off.
+5. **Contract file.** Save the base revision, the system prompt and a hash of the prompt-building code, and have the
+   scorer refuse a mismatch, as Nimble does <Cite id="bespoke2026nimble" />.
+
+### 2. Build the decision data
+
+- **The task's own decisions** with labels, as many as exist.
+- **Contrastive pairs** in Nimble's style: two examples that share a question and a policy and differ in one fact that
+  flips the answer. Keep a pair only if deleting either evidence sentence leaves the deciding fact unknown.
+- **Converted public datasets** in Tev1's style for breadth: <Gloss name="nli">natural-language inference</Gloss>,
+  yes-or-no reading comprehension, intent and topic classification.
+- **Rule-generated cases** whose labels come from executable rules, for policies that can be written as code.
+- **Augmentation:** shuffle option order and code assignment, so that no code carries a prior.
+- **Splits by family:** every variant of one source in one split. Hold out four disjoint sets: development, a
+  temperature fit set, a fit acceptance set, and a frozen test set that is scored once.
+
+### 3. Fine-tune with the candidate loss
+
+```python
+import torch.nn.functional as F
+from peft import LoraConfig, get_peft_model
+from transformers import AutoModelForCausalLM, AutoTokenizer
+
+tok = AutoTokenizer.from_pretrained(BASE, revision=REV)
+model = get_peft_model(
+    AutoModelForCausalLM.from_pretrained(BASE, revision=REV,
+                                         torch_dtype="bfloat16"),
+    LoraConfig(r=16, lora_alpha=32, lora_dropout=0.05, target_modules="all-linear"),
+)
+
+def candidate_loss(example):
+    prompt = tok.apply_chat_template(render(example), add_generation_prompt=True,
+                                     enable_thinking=False, tokenize=False)
+    ids = tok(prompt, return_tensors="pt").input_ids
+    codes = [tok.convert_tokens_to_ids(c) for c in example.codes]  # one token each
+    z = model(ids).logits[0, -1, codes]                     # code logits only
+    return F.cross_entropy(z[None], example.label_index[None])  # −log q_y
+```
+
+Both public recipes use one epoch at a <Gloss name="learning-rate">learning rate</Gloss> of $5 \times 10^{-5}$ with an
+effective batch of 8 and <Gloss name="lora" /> on all linear layers <Cite id="bespoke2026nimble" />
+<Cite id="together2026tev1" /> <Cite id="hu2022" />. On a hosted fine-tuning service, the completion loss (the answer
+letter plus the stop token) replaces the custom loop; Together reports about USD 17 for its run
+<Cite id="elmghari2026" />.
+
+### 4. Optionally, reinforcement learning with a proper reward
+
+<Gloss name="rl">Reinforcement learning</Gloss> is worth adding in two cases. Where training feedback is weaker than a
+label (a check on a proposed answer, a judge, an outcome after acting), sample answers from $\pivec$, score each with
+$R = 2c - \norm{\pivec}^2$, and update with a group baseline; this reward's expectation is the Brier score, so it does
+not push the model towards overconfidence as a correctness reward does. Where the model reasons before it decides,
+follow OpenJev-RLCD's *calibrate, then reinforce*: first train the read-out distribution after the model's own
+rationales with a proper score, then reinforce the rationales with the same score as reward and a <Gloss name="kl" />
+anchor <Cite id="gao2026openjev" />. On answer verification with a 1.7B model, that recipe let one query decide 81% of
+items at a 5% error rate, against 19% for <Gloss name="grpo" />. For a single-pass model with labels, supervised
+training on them is the same objective with less noise.
+
+### 5. Calibrate and set thresholds
+
+Fit a temperature per question type on the fit set by minimising log loss, accept it on the acceptance set, and apply
+it in the serving code. For yes-or-no gates, set the threshold from the error costs, $t^\star = c_{\text{FP}} /
+(c_{\text{FP}} + c_{\text{FN}})$, or tune it on labelled task data. See <NoteLink to="calibrating-decision-models" />.
+
+### 6. Evaluate
+
+Score every candidate model on the same records through the same prompt and scoring path. Report per question type:
+accuracy, negative log-likelihood, Brier score, <NoteLink to="calibration-error">calibration error</NoteLink> and, for
+score questions, the absolute error of the expected level. Add three checks that the averages hide:
+
+- **Order robustness:** the answer under a permutation of the options.
+- **Subgroups:** calibration on the slices that carry the risk.
+- **Known limits:** arithmetic, date comparison, counting and long irrelevant state, which TypeSafe documents as weak
+  for Jev <Cite id="typesafe2026jaggedness" />; route such questions to code before they reach the model.
+
+## Cost
+
+| stage | compute | people |
+| --- | --- | --- |
+| contract and data | none to modest (generating pairs with a text model) | most of the effort: rules, checks, splits |
+| LoRA fine-tune | one <Gloss name="gpu" />, one epoch over thousands of short prompts | |
+| RL stage | sampling plus a checker per answer | designing the checker |
+| calibration | seconds | labelled fit and acceptance sets |
+| serving | one read per state; a GPU or a recent laptop for 4B to 9B | |
+
+AIMultiple found Jev's hosted API cheaper per decision than self-hosted Nimble or Tev1 at the throughput it measured
+<Cite id="aimultiple2026decision" />. A self-built model pays off through control of the data, the domain and the
+deployment, not through price.
+
+## Trade-offs
+
+- **Hard labels or soft targets.** Hard labels are cheap and auditable. Soft targets from a stronger model carry its
+  calibration, and its errors, and may be barred by its terms.
+- **Narrow or broad data.** A small contrastive set teaches the decisions that matter in one domain. A broad mix
+  generalises further and needs more data.
+- **Custom scorer or standard server.** The candidate loss with a custom scorer gives exact probabilities and shared
+  reads. The completion loss runs on any chat server and leaves sharing to the server's prefix cache.
+- **Single pass or a text model.** A decision model cannot work through steps or write values. AIMultiple's browser
+  tasks were completed far more often by text models than by any decision model <Cite id="aimultiple2026decision" />.
+  <NoteLink to="decision-models">Decision models</NoteLink> suit high-volume, fixed-option judgements on short states.

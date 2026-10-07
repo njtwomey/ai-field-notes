@@ -1,0 +1,216 @@
+---
+title: Sparse approximation
+kind: overview
+summary: 'Sparse approximation writes a signal $\yvec \in \reals^m$ as $\Dmat\xvec$ over a dictionary of $k$ atoms, with few non-zero coefficients in $\xvec$. The sparsest $\xvec$ is NP-hard to find in general. Greedy pursuits, $\ell_1$ relaxation and thresholding find it when the atoms are incoherent.'
+tags: [signal-processing, sparsity, worked-example]
+aliases:
+  [
+    sparse representation,
+    sparse coding,
+    overcomplete representation,
+    l0 minimisation,
+    best s-term approximation,
+    atomic decomposition,
+  ]
+requires: [vector-norms, orthogonal-projection, rank-and-null-space]
+related: [lasso, discrete-wavelet-transform, wavelet-denoising, principal-component-analysis]
+references:
+  [mallat2009, elad2010, natarajan1995, donoho2003, tropp2004, welch1974, chen1998, mallat1993, aharon2006, donoho2006]
+status: draft
+updated: 2026-10-07
+---
+
+import { BasisSparsity } from './BasisSparsity'
+import { MixtureSeparation } from './MixtureSeparation'
+import { SolverComparison } from './SolverComparison'
+
+<Definition>
+A **dictionary** is a matrix $\Dmat \in \reals^{m \times k}$ whose columns $\dvec_1, \dots, \dvec_k$ are **atoms**,
+usually of unit norm. A **sparse approximation** of a signal $\yvec \in \reals^m$ is a coefficient vector
+$\xvec \in \reals^k$ with few non-zero entries such that $\Dmat\xvec$ is close to $\yvec$. The number of non-zeros is
+$\norm{\xvec}_0 = \abs{\{j : x_j \ne 0\}}$, and the set of their indices is the **support** of $\xvec$. The exact
+problem is
+
+$$
+\min_{\xvec} \norm{\xvec}_0 \quad \text{subject to} \quad \Dmat\xvec = \yvec,
+$$
+
+and the approximate problems bound the error, $\norm{\yvec - \Dmat\xvec} \le \varepsilon$, or the sparsity,
+$\norm{\xvec}_0 \le s$. A vector with at most $s$ non-zeros is **$s$-sparse**.
+</Definition>
+
+## Sparsity depends on the dictionary
+
+A signal is sparse only relative to a dictionary. A sum of two sinusoids sampled at 64 points has 64 non-zero samples,
+but only a few large coefficients in a basis of cosines. A piecewise-constant signal has few non-zero coefficients in
+the <NoteLink to="wavelet-families">Haar wavelet</NoteLink> basis, whose atoms are steps. A train of isolated pulses is
+already sparse in the basis of spikes, the columns of the identity.
+
+For an orthonormal basis $\Bmat = [\bvec_1, \dots, \bvec_m]$, the best $s$-term approximation has a closed form. The
+coefficients are $c_j = \bvec_j^\top\yvec$, and $\yvec = \sum_j c_j \bvec_j$. Keeping the terms with indices in a set
+$S$ of size $s$ leaves the error
+
+$$
+\norm{\yvec - \sum_{j \in S} c_j \bvec_j}^2 = \norm{\sum_{j \notin S} c_j \bvec_j}^2 = \sum_{j \notin S} c_j^2,
+$$
+
+where the second equality holds because the $\bvec_j$ are orthonormal (Parseval's identity). The error is smallest when
+the dropped coefficients are the smallest, so the best $s$-term approximation keeps the $s$ coefficients of largest
+magnitude. This operation is **hard thresholding**, $H_s(\cvec)$. The relative error after $s$ terms,
+$\sqrt{\sum_{j \notin S} c_j^2} \big/ \norm{\yvec}$, measures how compressible the signal is in that basis
+<Cite id="mallat2009" />.
+
+<BasisSparsity />
+
+The fourth signal in the figure, a smooth signal plus four spikes, is dense in all three bases. Its smooth part spreads
+over many spikes, and each spike spreads over all 64 cosines. The signal is sparse only in a dictionary that holds both
+kinds of atom.
+
+## Overcomplete dictionaries
+
+A dictionary with $k > m$ atoms is **overcomplete**. The union of two orthonormal bases, $\Dmat = [\Bmat_1, \Bmat_2]$
+with $k = 2m$, is the simplest case. Overcompleteness lets one dictionary serve signals of several kinds, and lets a
+signal that mixes kinds have a short code. Its cost is that $\Dmat\xvec = \yvec$ has infinitely many solutions: the
+null space of $\Dmat$ has dimension at least $k - m$, and adding any null-space vector to a solution gives another. The
+coefficients are no longer inner products with the atoms, and choosing the sparsest solution is a combinatorial search.
+Finding the sparsest $\xvec$ is NP-hard for a general $\Dmat$ <Cite id="natarajan1995" />.
+
+The figure below builds a signal from a few cosines and a few spikes and codes it with orthogonal matching pursuit over
+three dictionaries: the spikes, the cosines, and their union. Over either basis the error falls slowly with the number
+of atoms. Over the union it falls to zero once the pursuit has picked as many atoms as the signal holds, and the code
+splits the signal into a cosine part and a spike part. The union of two bases is coded more sparsely than either basis
+because each part is sparse in one of them.
+
+<MixtureSeparation />
+
+**Worked example.** Take $m = 3$ and four unit atoms: the spikes $\evec_1, \evec_2, \evec_3$ and the diagonal
+$\dvec_4 = (\evec_1 + \evec_2)/\sqrt{2}$. The signal $\yvec = (1, 1, 0)$ has the representation $\xvec = (1, 1, 0, 0)$,
+with two non-zeros and $\norm{\xvec}_1 = 2$, and the representation $\xvec' = (0, 0, 0, \sqrt{2})$, with one non-zero
+and $\norm{\xvec'}_1 = \sqrt{2} \approx 1.41$. Every combination $t\xvec + (1 - t)\xvec'$ is also a representation. The
+sparsest one, $\xvec'$, also has the smallest $\ell_1$ norm. It is also the first atom that a greedy search picks,
+because the correlations of $\yvec$ with the four atoms are $1, 1, 0$ and $2/\sqrt{2} \approx 1.41$.
+
+## When the sparsest representation is unique
+
+The **spark** of $\Dmat$ is the smallest number of columns that are linearly dependent. Suppose $\yvec = \Dmat\xvec =
+\Dmat\xvec'$ with $\xvec \ne \xvec'$ both $s$-sparse. Then $\Dmat(\xvec - \xvec') = \zeros$ and $\xvec - \xvec'$ has at
+most $2s$ non-zeros, so some $2s$ columns are dependent and $2s \ge \operatorname{spark}(\Dmat)$. Conversely, if
+$s < \operatorname{spark}(\Dmat)/2$, no two different $s$-sparse vectors have the same image, and an $s$-sparse
+representation is the unique sparsest one <Cite id="donoho2003" />.
+
+The spark is itself expensive to compute. The **<Gloss name="mutual-coherence" />** bounds it with a quantity that is
+cheap:
+
+$$
+\mu(\Dmat) = \max_{i \ne j} \frac{\abs{\dvec_i^\top\dvec_j}}{\norm{\dvec_i}\norm{\dvec_j}},
+$$
+
+the largest absolute cosine between two atoms. Normalise the atoms and take any $p$ of them as the columns of
+$\Dmat_S$. Their Gram matrix $\Gmat = \Dmat_S^\top\Dmat_S$ has unit diagonal and off-diagonal entries of magnitude at
+most $\mu$. By the Gershgorin circle theorem every eigenvalue of $\Gmat$ lies within $(p - 1)\mu$ of 1, so
+$\lambda_{\min}(\Gmat) \ge 1 - (p - 1)\mu$. When $p < 1 + 1/\mu$ this is positive, $\Gmat$ is invertible and the $p$
+columns are independent. Hence $\operatorname{spark}(\Dmat) \ge 1 + 1/\mu$, and
+
+$$
+\norm{\xvec}_0 < \tfrac{1}{2}\left(1 + \frac{1}{\mu(\Dmat)}\right)
+$$
+
+guarantees that $\xvec$ is the unique sparsest representation of $\Dmat\xvec$ <Cite id="donoho2003" />. The same
+condition guarantees that orthogonal matching pursuit and basis pursuit both find it <Cite id="tropp2004" />.
+
+Coherence cannot be made arbitrarily small. For $k$ unit atoms in $\reals^m$ the Welch bound gives
+$\mu \ge \sqrt{(k - m)/(m(k - 1))}$, about $1/\sqrt{m}$ when $k = 2m$ <Cite id="welch1974" />. The spikes and the
+orthonormal <Gloss name="dct" /> cosines in $\reals^{64}$ have $\mu = \sqrt{2/64} \approx 0.18$, so the guarantee covers
+signals of at most 3 atoms. The bound is a worst case. In the solver figure below, with the default seed, orthogonal
+matching pursuit and basis pursuit both recover 12 cosines plus 12 spikes exactly, 24 atoms, and both fail at 16 plus 16.
+
+## Components
+
+The methods split by how they search for the support.
+
+| Approach                     | Method                                                                 | Problem solved                                                             | Typical cost per signal                |
+| ---------------------------- | ---------------------------------------------------------------------- | -------------------------------------------------------------------------- | -------------------------------------- |
+| Greedy                       | <NoteLink to="matching-pursuit">matching pursuit</NoteLink>             | picks one atom per step, subtracts its projection                          | one correlation $\Dmat^\top\rvec$ per step |
+| Greedy                       | orthogonal matching pursuit                                            | picks one atom per step, refits all chosen atoms by least squares          | a least-squares solve per step          |
+| Convex relaxation            | <NoteLink to="basis-pursuit">basis pursuit</NoteLink>                   | $\min \norm{\xvec}_1$ subject to $\Dmat\xvec = \yvec$, a linear program    | a linear program                        |
+| Convex relaxation            | basis pursuit denoising (the lasso)                                    | $\min \frac{1}{2}\norm{\yvec - \Dmat\xvec}^2 + \lambda\norm{\xvec}_1$      | proximal gradient steps                 |
+| Thresholding                 | iterative hard thresholding                                            | $\min \norm{\yvec - \Dmat\xvec}^2$ subject to $\norm{\xvec}_0 \le s$       | gradient steps                          |
+| Learning the dictionary      | <NoteLink to="dictionary-learning">dictionary learning</NoteLink>       | $\Dmat$ and the codes of many signals jointly                              | sparse coding of every signal per round |
+| Sensing with few measurements | <NoteLink to="compressed-sensing">compressed sensing</NoteLink>         | a sparse $\xvec$ from $m \ll k$ random measurements                        | any of the solvers above                |
+
+**Greedy pursuits** build the support one atom at a time. Each step picks the atom most correlated with the current
+residual $\rvec = \yvec - \Dmat\xvec$. <Gloss name="matching-pursuit">Matching pursuit</Gloss> moves the residual's
+projection onto that atom into its coefficient <Cite id="mallat1993" />. <Gloss name="omp" /> refits every chosen atom
+by least squares, so the residual is orthogonal to all of them.
+
+**Convex relaxation** replaces $\norm{\xvec}_0$ by $\norm{\xvec}_1 = \sum_j \abs{x_j}$, the largest convex function that
+lies below it on the cube $\norm{\xvec}_\infty \le 1$. <Gloss name="basis-pursuit">Basis pursuit</Gloss> is the exact
+form, a linear program; <Gloss name="bpdn" /> trades the fit against the $\ell_1$ norm with a weight $\lambda$
+<Cite id="chen1998" />. The worked example above shows why the $\ell_1$ norm favours sparse solutions: the sparse
+representation $\xvec'$ has the smaller $\ell_1$ norm.
+
+**Thresholding** methods alternate a gradient step on $\frac{1}{2}\norm{\yvec - \Dmat\xvec}^2$ with a projection onto
+sparse vectors. Soft thresholding gives the <Gloss name="ista" /> for the lasso; hard thresholding
+to $s$ entries gives <Gloss name="iht" />.
+
+**The dictionary** is fixed in all of these. A fixed dictionary comes from analysis: cosines for smooth signals,
+wavelets for piecewise-smooth ones, a union for mixtures. Dictionary learning fits the atoms to a set of training
+signals instead <Cite id="aharon2006" />.
+
+**Compressed sensing** uses the same solvers on a different matrix. The measurements are $m$ random linear combinations
+of a signal that is sparse in a known basis, and the solvers recover the signal from far fewer measurements than its
+length <Cite id="donoho2006" />.
+
+## Data flow
+
+A sparse-approximation pipeline has three stages:
+
+1. Choose a dictionary $\Dmat$: a fixed basis, a union of bases, or a learned dictionary. The atoms are normalised so
+   that correlations compare shapes rather than scales.
+2. Code each signal: a pursuit or a solver returns $\xvec$, given a sparsity $s$, a tolerance $\varepsilon$ or a
+   penalty $\lambda$.
+3. Use the code. The support and coefficients compress the signal; the synthesis $\Dmat\xvec$ is a denoised signal,
+   because noise spreads over all atoms and is dropped with the small coefficients; the parts $\Dmat_{S_1}\xvec_{S_1}$
+   and $\Dmat_{S_2}\xvec_{S_2}$ over the atoms of two sub-dictionaries separate a signal into its components.
+
+The figure below runs every solver on one signal. Over the spikes alone or the cosines alone, the code is dense. Over
+the union, the code separates the cosine part from the spike part, and each solver fails in its own way when the
+signal has too many atoms or when its parameter is set badly. Matching pursuit with a small step budget leaves a
+residual; the lasso with a large $\lambda$ shrinks every coefficient towards zero; iterative hard thresholding with $s$
+below the true number of atoms settles on a wrong support.
+
+<SolverComparison />
+
+## Variants
+
+- **Error-constrained and sparsity-constrained forms.** The approximate problem either bounds the error and minimises
+  $\norm{\xvec}_0$, or bounds $\norm{\xvec}_0 \le s$ and minimises the error. Greedy pursuits handle both by their
+  stopping rule.
+- **Analysis sparsity.** The synthesis model above builds $\yvec$ from few atoms. The analysis model asks that
+  $\Omegamat\yvec$ be sparse for an analysis operator $\Omegamat$, such as finite differences for
+  piecewise-constant signals. The two models coincide for an orthonormal basis and differ for overcomplete ones
+  <Cite id="elad2010" />.
+- **Structured sparsity.** Group sparsity selects predefined groups of atoms together, and tree sparsity follows the
+  parent-child structure of wavelet coefficients.
+- **Many signals.** Coding the columns of a matrix $\Ymat$ independently gives a code matrix $\Xmat$ with
+  $\Ymat \approx \Dmat\Xmat$, the step that dictionary learning alternates with its dictionary update.
+
+## Assumptions
+
+- The signal is close to a combination of few atoms of $\Dmat$. Recovery guarantees need the atoms to be incoherent,
+  or, for compressed sensing, the <Gloss name="rip" />.
+- The atoms are normalised, or the pursuits normalise the correlations, so that a large atom is not preferred for its
+  scale.
+- Noise is spread over all atoms. Noise that is itself sparse in $\Dmat$, such as impulses over a dictionary that
+  contains spikes, is coded as signal.
+
+## Pitfalls
+
+- A sparse code over a fixed basis is only as good as the basis. Signals that mix kinds need a union of bases or a
+  learned dictionary.
+- The coherence bound is a worst case. A method can recover far more atoms than $\frac{1}{2}(1 + 1/\mu)$ on typical
+  signals, and can also fail below that count when the signal has noise.
+- The $\ell_1$ penalty shrinks every kept coefficient by $\lambda$. Refitting the selected atoms by least squares
+  removes that bias.
+- The tolerance and the sparsity are linked to the noise level. A tolerance below the noise norm makes a pursuit fit
+  the noise with extra atoms.

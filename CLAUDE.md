@@ -28,7 +28,8 @@ make install     # npm install + uv sync
 make dev         # Vite dev server → http://localhost:5173/ai-field-notes/
 make assets      # contracts + run examples + build figure data (cached) + manifest
 make contracts   # pydantic → JSON Schema → site/src/generated/contracts.ts
-make check       # doctor + make ci; run before every push
+make check       # doctor + make ci
+make pre-push    # make check + lockfile checks + npm run build; run before every push
 make ci          # lint, typecheck, tests, catalog and registry checks, contract drift (what CI runs; no doctor)
 make doctor      # content tree: slugs, folders vs taxonomy, figure/example ids, cross-note imports
 make build       # assets + production build into dist/
@@ -72,8 +73,8 @@ make doctor SCOPE="maths/optimal-transport kalman-filter"  # doctor for one bran
 - Scope the doctor to the work in hand. Compiling every note's MDX and rendering its maths is what makes a full run
   slow (about a minute), so `make doctor SCOPE="<taxonomy path | slug> ..."` checks only the notes under those paths
   or with those slugs (seconds); whole-tree checks that are cheap still run. Changes confined to one branch of the
-  taxonomy need only that branch. Before every push, run `make check` (the doctor unscoped plus `make ci`) and
-  `npm run build`: CI runs only `make ci` and the build, not the doctor.
+  taxonomy need only that branch. Before every push, run `make pre-push`: `make check` (the doctor unscoped plus
+  `make ci`), the uv and npm lockfile checks, and `npm run build`. CI runs only `make ci` and the build, not the doctor.
 - `plugins/content-index.ts` (Vite plugin) reads every note's frontmatter and validates it with zod schemas from
   `site/src/lib/content-schema.ts`. It checks categories, relation slugs, `<NoteLink to>` targets, `<Cite id>` keys and
   `<Gloss name>` names. Any error fails dev and build with the offending file named. It exposes two virtual modules:
@@ -387,6 +388,8 @@ Frontmatter (validated; see `site/src/lib/content-schema.ts`): `title`, `kind`, 
 - Never stage, commit or push unless the user expressly asks for it in the current message. Permission is atomic: one
   request covers one action (one commit, or one push) and does not carry over to later work. "Commit" does not imply
   "push", and making a repository does not imply pushing to it.
+- Before every push, run `make pre-push` and push only if it passes. Skip it only when the user explicitly waives it
+  for that push.
 - `docs/field-notes-survey.md` is a volatile local planning file, excluded via `.git/info/exclude`. Never add it.
 
 ## Deployment

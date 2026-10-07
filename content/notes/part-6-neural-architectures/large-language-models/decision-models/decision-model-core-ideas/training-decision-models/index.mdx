@@ -1,0 +1,163 @@
+---
+title: Training decision models
+kind: technique
+summary: 'A decision model is fine-tuned so the correct answer code''s logit wins at the end of the prompt. Nimble uses cross-entropy over the candidate codes; Tev1 uses next-token cross-entropy on the letter and stop token, which adds a term moving probability onto codes.'
+tags: [decision-models, large-language-models, fine-tuning, classification]
+aliases: [decision model fine-tuning, candidate-only cross-entropy, candidate loss, decision supervised fine-tuning]
+requires: [answer-token-scoring, cross-entropy-and-perplexity, transfer-learning-and-fine-tuning]
+partOf: [decision-models]
+related: [decision-models-demystified, knowledge-distillation, reinforcement-learning-for-calibrated-decisions, calibrating-decision-models, building-a-decision-model]
+references: [bespoke2026nimble, together2026tev1, elmghari2026, hu2022, hinton2015, aimultiple2026decision]
+status: draft
+updated: 2026-10-05
+---
+
+<Definition>
+**Training a decision model** is <Gloss name="sft">supervised fine-tuning</Gloss> of a
+<Gloss name="language-model">language model</Gloss> on examples $(\xvec, y)$, where $\xvec$ is a rendered prompt that
+ends at the answer boundary and $y$ is the code of the correct option. With $\zvec$ the next-token logits at that
+position and $\Ccal$ the set of codes for the question, the two published losses are the **candidate loss** $-\log q_y$,
+with $q$ the softmax over $\Ccal$ <Cite id="bespoke2026nimble" />, and the **completion loss**
+$-\log p(y \mid \xvec) - \log p(\langle\text{eos}\rangle \mid \xvec, y)$, with $p$ the softmax over the whole vocabulary
+<Cite id="together2026tev1" />. Both public models train a <Gloss name="lora" /> adapter <Cite id="hu2022" /> for one
+epoch.
+</Definition>
+
+## Problem
+
+A pretrained or instruction-tuned language model already ranks option letters, but poorly for a fixed prompt format:
+untuned Qwen3.5-9B agreed with Bespoke's reference labels on 66% of its held-out examples, and the same model with
+<NoteLink to="nimble">Nimble</NoteLink>'s adapter on 90% <Cite id="bespoke2026nimble" />. Fine-tuning teaches three
+things: the prompt contract, the mapping from evidence to option, and how much probability to put on each option.
+
+## Mechanism
+
+### The candidate loss
+
+For one example, with $q_k = \exp(z_k) / \sum_{j \in \Ccal} \exp(z_j)$ for $k \in \Ccal$,
+
+$$
+\ell_{\text{cand}} = -\log q_y = -z_y + \log \sum_{j \in \Ccal} \exp(z_j) .
+$$
+
+Its gradient with respect to the logits is
+
+$$
+\frac{\partial \ell_{\text{cand}}}{\partial z_v} =
+\begin{cases} q_v - \indicator[v = y], & v \in \Ccal, \\ 0, & v \notin \Ccal. \end{cases}
+$$
+
+Every gradient goes to ranking the offered codes against each other. Tokens outside $\Ccal$ receive none, so the loss
+neither raises nor lowers the probability of replying with prose. The model is meant to be served by a scorer that reads
+code logits; whether it would emit a code when generating freely is not trained <Cite id="bespoke2026nimble" />.
+
+### The completion loss
+
+The completion is the answer letter followed by the end-of-sequence token, and the loss is next-token cross-entropy on
+those two tokens only, with the prompt tokens masked out <Cite id="together2026tev1" />. Write
+$m = \sum_{j \in \Ccal} p(j \mid \xvec)$ for the mass on codes. Since $p(y \mid \xvec) = q_y \, m$ (see
+<NoteLink to="answer-token-scoring" />),
+
+$$
+\ell_{\text{comp}} = -\log p(y \mid \xvec) - \log p(\langle\text{eos}\rangle \mid \xvec, y)
+= \underbrace{-\log q_y}_{\ell_{\text{cand}}} \;\underbrace{-\, \log m}_{\text{reply with a code}}
+\;\underbrace{-\, \log p(\langle\text{eos}\rangle \mid \xvec, y)}_{\text{then stop}} .
+$$
+
+The completion loss is the candidate loss plus two format terms. The first raises the mass on codes; the second teaches
+the model to stop after one letter. Together they let an ordinary chat-completions server run the checkpoint. The
+decision itself, $q_y$, gets the same objective as under the candidate loss; the shared parameters now also serve the
+format terms. The completion loss's gradient at the answer position is $p(v \mid \xvec) - \indicator[v = y]$ for every
+token $v$.
+
+<Derivation title="The format term fades once the model answers with codes">
+Write $\log m = \log \sum_{j \in \Ccal} \exp(z_j) - \log \sum_{u \in \Vcal} \exp(z_u)$. Differentiating,
+
+$$
+\frac{\partial (-\log m)}{\partial z_v} = p(v \mid \xvec) - \indicator[v \in \Ccal]\, q_v
+= \begin{cases} -q_v\,(1 - m), & v \in \Ccal, \\ p(v \mid \xvec), & v \notin \Ccal, \end{cases}
+$$
+
+using $p(v \mid \xvec) = q_v m$ for a code. Both cases are bounded by $1 - m$ in total: the codes' entries sum to
+$-(1 - m)$ and the other tokens' entries sum to $1 - m$. Once the model replies with a code whatever the content,
+$m \to 1$ and the format term stops contributing. From then on the completion loss trains the decision as the
+candidate loss does, apart from the stop token. The format term matters early in training and on prompts unlike the
+training data.
+</Derivation>
+
+No published result isolates the effect of the loss. Nimble and Tev1 differ in size (9B against 4B parameters) and in
+data as well, so the gap between them on public benchmarks cannot be assigned to the loss.
+
+### Soft targets
+
+Neither public model uses teacher probabilities. With a teacher distribution $\bar\qvec$ over the codes, for example
+saved Jev outputs, the <NoteLink to="knowledge-distillation">distillation</NoteLink> loss
+<Cite id="hinton2015" /> replaces the one-hot label:
+
+$$
+\ell_{\text{soft}} = -\sum_{k \in \Ccal} \bar q_k \log q_k, \qquad
+\frac{\partial \ell_{\text{soft}}}{\partial z_v} = q_v - \bar q_v \quad (v \in \Ccal).
+$$
+
+The optimum is $\qvec = \bar\qvec$: the student copies the teacher's probabilities, its calibration included. Nimble
+names distillation from saved <NoteLink to="jev">Jev</NoteLink> probabilities as possible future work
+<Cite id="bespoke2026nimble" />. A provider's terms may bar using its outputs to train a competing model; AIMultiple
+avoided two text models as labellers for that reason <Cite id="aimultiple2026decision" />.
+
+### Data
+
+The two public models take opposite routes.
+
+| | Nimble 9B | <NoteLink to="tev1">Tev1 4B</NoteLink> |
+| --- | --- | --- |
+| examples | 2,676 | 37,840 |
+| source | synthetic contrastive pairs in 10 domains | 5 public datasets converted to the format, plus rule-generated policy, routing and paper-topic cases |
+| labels | rules in code applied to model-checked facts | dataset labels and executable rule trees |
+| question types | choice 856, yes or no 888, score 932 | choice, 2 to 24 options |
+
+Nimble's pairs share a question and a policy and differ in one fact, edited in at most eight words, that flips the
+correct answer. A pair is kept only if deleting either evidence sentence leaves the deciding fact unknown. The pairs
+force the model to decide on the evidence that should change the decision rather than on surface cues
+<Cite id="bespoke2026nimble" />. Tev1 gets breadth from existing labelled datasets <Cite id="together2026tev1" />.
+
+Both keep every variant of one source in the same split. Randomising the order of options and the assignment of codes
+across examples removes a cue the model could otherwise learn: that the answer tends to be `A`.
+
+### Optimisation
+
+| setting | Nimble 9B | Tev1 4B (proposed recipe) |
+| --- | --- | --- |
+| base | Qwen3.5-9B | Qwen3.5-4B |
+| LoRA rank, alpha, <NoteLink to="dropout">dropout</NoteLink> | 16, 32, 0.05 | 8, 16, 0 |
+| LoRA targets | every linear layer of the language model | all linear modules |
+| epochs, <Gloss name="learning-rate">learning rate</Gloss> | 1 (335 updates), $5 \times 10^{-5}$ | 1, $5 \times 10^{-5}$ |
+| effective batch | 8 | 8 |
+| schedule | linear, 101 warm-up steps | cosine, warm-up ratio 0.03 |
+| sequence limit | 2,048 tokens | 2,048 tokens, packed |
+
+Together reports a cost of about USD 17 and 25 minutes on its fine-tuning service <Cite id="elmghari2026" />; its
+repository says the actual job's settings could not be retrieved <Cite id="together2026tev1" />.
+
+### The prompt contract
+
+The prompt at serving time must be the training prompt token for token: the system message, the JSON layout, the code
+assignment and the reasoning mode. Nimble saves a contract file with the base model revision, the system prompt and a
+hash of the prompt-building code, and its scorer refuses an adapter whose hash differs <Cite id="bespoke2026nimble" />.
+Changing the base model changes the tokenizer, so the single-token check on every code has to be run again.
+
+## Cost
+
+One epoch of LoRA on a few thousand to a few tens of thousands of short prompts fits on one <Gloss name="gpu" />.
+Nimble's final fit ran on one H100 in BF16 <Cite id="bespoke2026nimble" />. The candidate loss needs a custom training
+loop that reads logits at one position; the completion loss runs on any hosted fine-tuning service.
+
+## Trade-offs
+
+- **Candidate loss:** gradients spent only on the decision; training matches serving exactly. Needs a custom trainer
+  and a server that reads code logits.
+- **Completion loss:** runs anywhere and yields a checkpoint any chat server can serve. Spends capacity on format, and
+  the served probabilities renormalise over codes, a quantity the loss does not target on its own.
+- **Neither is calibrated by construction.** Cross-entropy is a <NoteLink to="proper-scoring-rule" />, so its
+  minimiser on the training distribution is calibrated. A one-epoch fine-tune on a few thousand examples is far from
+  that minimiser on new data: Nimble's raw probabilities were overconfident <Cite id="bespoke2026nimble" />. See
+  <NoteLink to="calibrating-decision-models" />.

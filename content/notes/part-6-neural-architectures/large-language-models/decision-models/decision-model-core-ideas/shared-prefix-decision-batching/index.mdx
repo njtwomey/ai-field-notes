@@ -1,0 +1,101 @@
+---
+title: Shared-prefix decision batching
+kind: technique
+summary: 'Several questions about one text share a single read of it. The text and the full question schema come first and each question''s selector last, so the prefix''s key-value cache is computed once and every question''s short ending runs against it in a batch.'
+tags: [decision-models, large-language-models, inference, efficiency]
+aliases: [parallel questions, prefix caching for decisions, shared state read, parallel sampler]
+requires: [answer-token-scoring, key-value-cache]
+partOf: [decision-models]
+related: [speculative-decoding]
+references: [rogge2026, bespoke2026nimble, typesafe2026parallel, typesafe2026models, typesafe2026launch, zheng2024]
+status: draft
+updated: 2026-10-05
+---
+
+import { DecisionLatency } from './DecisionLatency'
+
+<Definition>
+**Shared-prefix decision batching** answers $Q$ questions about one state with one read of the state. The prompt for
+question $i$ is $\xvec_i = (\avec, \bvec_i)$: a prefix $\avec$ shared by every question (instructions, the state, the
+schema of all questions) and a short ending $\bvec_i$ that names question $i$. The <Gloss name="kv-cache" /> of
+$\avec$ is computed once; the $Q$ endings are then run as one batch against it, and each ending's last position gives
+that question's code logits for <NoteLink to="answer-token-scoring" />.
+</Definition>
+
+## Problem
+
+Asking $Q$ questions about a text of $S$ tokens with separate prompts reads the text $Q$ times. The answers are
+independent, so the reads repeat the same work: a causal <NoteLink to="transformer">transformer</NoteLink>'s state for a
+token depends only on the tokens before it, and the prefix $\avec$ is the same in every prompt.
+
+## Mechanism
+
+### Mental model
+
+- **Layout:** everything that does not depend on the question goes first. The question selector goes last.
+- **Read once:** one pass over $\avec$ stores every layer's keys and values for every prefix token.
+- **Branch:** each ending $\bvec_i$ attends to the stored prefix and to itself. The endings do not see each other.
+
+### Why the cached prefix gives the same answer
+
+In a causal transformer the hidden state at position $t$ depends only on tokens $1, \dots, t$. Every token of
+$\avec$ precedes every token of $\bvec_i$, so the prefix's keys and values are identical in all $Q$ prompts. Reusing
+them is exact, not an approximation. TypeSafe measured the same answers from one 13-question request as from 13
+single-question requests <Cite id="typesafe2026parallel" />.
+
+The schema of every question is in $\avec$, so each question sees the others' descriptions. The ending only selects
+which one to answer. <NoteLink to="nimble">Nimble</NoteLink>'s prompt builder ends with `Requested field: "<name>"` for
+exactly this reason <Cite id="bespoke2026nimble" />.
+
+### The recipe
+
+Niels Rogge described the decoding that Nimble adopted <Cite id="rogge2026" />:
+
+```text
+cache ← forward(prefix a)                  # instructions, state, schema: once
+for each question i, batched:
+    h_i ← forward(ending b_i, past = cache)  # only the ending's tokens
+    z_i ← W_out[codes_i] · h_i[last]         # code rows of the output matrix
+    q_i ← softmax(z_i / T)
+    answer_i ← argmax q_i
+```
+
+Serving systems that reuse prefixes across requests, such as SGLang's radix-tree cache <Cite id="zheng2024" />, give
+the same saving without a custom scorer when the requests share a prefix byte for byte.
+
+Models with recurrent layers keep more than keys and values. Qwen3.5 mixes attention with
+<NoteLink to="linear-attention">linear-attention</NoteLink> layers, and Nimble's MLX scorer stores their convolution and
+recurrent states with the attention cache <Cite id="bespoke2026nimble" />.
+
+## Cost
+
+<DecisionLatency />
+
+With a read rate of $R$ tokens per second, a fixed call cost $c$ and a suffix of $L$ tokens per question, the three
+ways of answering $Q$ questions cost roughly
+
+| path | latency |
+| --- | --- |
+| separate reads | $Q\,(c + (S + L)/R)$ |
+| shared read | $c + S/R + c_{\text{share}} + c + QL/R$ |
+| text model, $n_{\text{out}}$ tokens per answer at $d$ seconds each | $c + (S + QL)/R + Q\, n_{\text{out}}\, d$ |
+
+The shared read grows with $Q$ only through the short endings. The text model grows with every token it writes. Measured
+on <NoteLink to="jev">Jev</NoteLink>, 13 questions about a 53,777-character article took 0.27 s as one request against
+2.71 s as 13 sequential requests <Cite id="typesafe2026parallel" />. Nimble's guide measured 0.853 s against 6.180 s for
+8 questions on 1,953 shared tokens, and 0.139 s against 0.102 s for 1 question on 239 tokens: with one question the
+bookkeeping costs more than it saves <Cite id="bespoke2026nimble" />.
+
+## Trade-offs
+
+- **Prompt order is fixed by the cache.** Anything placed after the selector cannot be shared. Per-question criteria
+  go in the shared schema.
+- **No consistency between answers.** Each ending sees the prefix, never another question's answer. Constraints
+  between answers (two fields that cannot both be "yes") are checked in calling code.
+- **Not every server shares.** Nimble's CUDA scorer and Ollama read the full prompt once per question
+  <Cite id="bespoke2026nimble" />. The interface is the same; only the latency differs.
+- **Memory.** The prefix cache is held while the batch runs. For long states the cache, not the compute, limits how
+  many requests a device serves at once.
+- **What Jev does is unpublished.** TypeSafe says Jev "ingests the state once and evaluates every question against it
+  in parallel" <Cite id="typesafe2026models" /> and names a "parallel sampler" <Cite id="typesafe2026launch" />.
+  Shared-prefix batching reproduces that behaviour and latency profile; TypeSafe has not said it is the mechanism.

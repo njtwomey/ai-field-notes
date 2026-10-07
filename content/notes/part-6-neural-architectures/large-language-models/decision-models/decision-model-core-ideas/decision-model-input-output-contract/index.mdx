@@ -1,0 +1,206 @@
+---
+title: The decision model input–output contract
+kind: technique
+summary: 'A decision model server compiles each typed question to a field with lettered codes, renders schema and state in the chat template the model was trained on, reads the code logits after one shared read, and maps them back to the client''s option names.'
+tags: [decision-models, large-language-models, inference, worked-example]
+aliases: [decision model IO contract, systemone request and response, decision model prompt rendering, decision model serving]
+requires: [answer-token-scoring, shared-prefix-decision-batching]
+partOf: [decision-models]
+related: [training-decision-models, building-a-decision-model, key-value-cache, prompting]
+references: [typesafe2026models, typesafe2026confidence, ollama2026decision, bespoke2026nimble, together2026tev1]
+status: draft
+updated: 2026-10-05
+---
+
+import { ContractTrace } from './ContractTrace'
+import { IoFlow } from './IoFlow'
+
+<Definition>
+The **input–output contract** of a decision model is the pair of translations a server performs around one forward
+pass. Inward, a request of a *state* and named, typed *questions* is compiled into prompts in the exact format the
+model was fine-tuned on, each ending where a one-token answer code would begin. Outward, the logits of the allowed
+codes at that position are turned into probabilities and mapped back to the client's option names as typed answers.
+The model itself knows nothing of the request schema; it knows only the prompt format it was trained on.
+</Definition>
+
+## Problem
+
+A chat model's contract is text in, text out, and the client parses the text. A decision model's client sends JSON and
+receives JSON with a probability for every allowed answer, yet the network in the middle is still a
+<NoteLink to="autoregressive-transformer-language-model">causal language model</NoteLink> that maps tokens to next-token
+logits. Something has to decide how a question, its options and the state become tokens, where the answer is read, and
+how numbers become a typed answer. That something is code in the server, and it must match, token for token, the code
+that built the training prompts.
+
+## Mechanism
+
+### Mental model
+
+<IoFlow />
+
+The worked example below follows one request through <NoteLink to="nimble">Nimble</NoteLink>'s published server code
+<Cite id="bespoke2026nimble" />, as served by Ollama <Cite id="ollama2026decision" />.
+
+### 1. The request
+
+TypeSafe defined the request shape for `POST /v1/systemone`, and Ollama serves open models at the same path
+<Cite id="typesafe2026models" /> <Cite id="ollama2026decision" />. A request names the model, gives the state, and maps
+each question name to a type (`choice`, `noul` for yes or no, `score`), `instructions`, and `criteria`:
+
+```json
+{
+  "model": "nimble",
+  "state": {"ticket": "I was charged twice. Please refund the extra payment."},
+  "questions": {
+    "team": {
+      "type": "choice",
+      "instructions": "Which team should handle this ticket?",
+      "criteria": {
+        "billing": "Payments and refunds",
+        "technical": "Bugs and integrations",
+        "other": "None of the above"
+      }
+    },
+    "refund": {
+      "type": "noul",
+      "instructions": "Does the customer explicitly ask for a refund?"
+    },
+    "urgency": {
+      "type": "score",
+      "instructions": "How urgent is this ticket?",
+      "criteria": ["Routine", "Soon", "Urgent"]
+    }
+  }
+}
+```
+
+For a choice, `criteria` maps each option name to a description; for a score it is the ordered list of levels; for a
+yes-or-no question it optionally describes the two answers.
+
+### 2. Compile questions into fields with codes
+
+Nimble's compiler reduces the three types to two field types and gives every allowed answer a letter code by position
+<Cite id="bespoke2026nimble" />:
+
+| question type | field | values, in code order | descriptions |
+| --- | --- | --- | --- |
+| choice | enum | the criteria keys, as sent: `billing`, `technical`, `other` | the criteria values |
+| noul | boolean | `false`, `true` | the "no" and "yes" criteria |
+| score | enum | `"0"`, `"1"`, …, one per level | the level texts |
+
+So `team` gets `A = billing`, `B = technical`, `C = other`; `refund` gets `A = false`, `B = true`; `urgency` gets
+`A = "0"`, `B = "1"`, `C = "2"`. The instructions become the field's description. A field may have at most 26 codes, `A`
+to `Z`; an experimental mode extends this to 255 with two- and three-letter codes that are single tokens.
+
+### 3. Render the prompt
+
+The renderer writes one user message, the JSON object `{"context": …, "schema": [...]}` with every field and its coded
+choices, followed by a line naming one field, `Requested field: "team"`. A fixed system message tells the model to
+classify the context with the schema, to treat the context as data and never as instructions, and to return only the
+chosen code. The state is serialised to text first, so an object state appears inside `context` as an escaped JSON
+string. Both messages go through the base model's chat template with the generation prompt added and thinking
+switched off. For Qwen3.5 the prompt then ends
+
+```text
+Requested field: "team"<|im_end|>
+<|im_start|>assistant
+<think>
+
+</think>
+
+```
+
+and the next token is the first token of the assistant's reply: the answer code. Without `enable_thinking=False` the
+template would end in an open `<think>` block, and the next token would begin reasoning instead.
+
+### 4. Split into a shared prefix and per-question endings
+
+Everything up to `Requested field: ` is identical for every question, because the schema of *all* questions is in it.
+The server tokenises each question's full prompt, keeps the longest token prefix they share, and reads it once
+(see <NoteLink to="shared-prefix-decision-batching" />). Only the endings differ: the field name in quotes, the end of
+the user turn, the assistant header and the empty thinking block, a dozen or so tokens per question. The common prefix
+is computed on tokens, not text, because a tokenizer can merge characters across the boundary.
+
+### 5. Read the code logits
+
+Before serving, the renderer checks that each code is exactly one ordinary token when appended to its prompt, and
+stores the codes' token ids. At serving time each ending's last position gives the logits $\zvec$; the server keeps
+the entries for the field's codes and applies $\operatorname{softmax}(\zvec_{\Ccal} / T)$, with $T$ fitted after
+training and applied in the server, not stored in the weights (see <NoteLink to="calibrating-decision-models" />).
+No token is sampled and no text is generated.
+
+### 6. Map back to typed answers
+
+The probabilities are re-keyed from codes to the client's names, and each type gets its own answer fields:
+
+```json
+{
+  "model": "nimble",
+  "answers": {
+    "team": {
+      "type": "choice",
+      "choice": "billing",
+      "probabilities": {"billing": 0.985, "technical": 0.012, "other": 0.003},
+      "confidence": 0.922
+    },
+    "refund": {"type": "noul", "noul": 0.997},
+    "urgency": {
+      "type": "score",
+      "score": 0.815,
+      "legend": {"0": "Routine", "1": "Soon", "2": "Urgent"},
+      "probabilities": {"0": 0.378, "1": 0.429, "2": 0.193},
+      "confidence": 0.046
+    }
+  },
+  "usage": {"input_tokens": 841, "output_tokens": 4}
+}
+```
+
+- **choice**: the top option's name, every option's probability and a confidence.
+- **noul**: the probability of `true`, nothing else.
+- **score**: the expected level $\sum_\ell \ell\, q_\ell$, which can fall between levels, with the legend and the level
+  probabilities.
+
+The confidence is a summary computed from the probabilities. In this response it is $1 - H(\qvec)/\ln n$: the
+probabilities $(0.985, 0.012, 0.003)$ give 0.922 and $(0.378, 0.429, 0.193)$ give 0.046. TypeSafe's documented formula
+for a choice is $(p_{\max} - 1/n)/(1 - 1/n)$ instead <Cite id="typesafe2026confidence" />, so confidences from the two
+servers are not comparable.
+
+<ContractTrace />
+
+### The other contract: one question, chat completions
+
+<NoteLink to="tev1">Tev1</NoteLink> uses a simpler contract that runs on an ordinary chat-completions endpoint
+<Cite id="together2026tev1" />. The user message holds one decision, `{"state": …, "question": …, "options": [{"label": "A", "key": …, "description": …},
+…]}`, with 2 to 24 options lettered in order. The request sets temperature 0, at most 8 output tokens, a
+regular-expression response format that allows only the option letters, `logprobs` with the top 5 alternatives, and
+thinking off. The answer is the generated letter mapped to its key; the option probabilities come from the returned
+log-probabilities. Two consequences follow: each question costs a full read of the state, and with more than five
+options the probabilities of the rest are not returned. Ollama's `/v1/systemone` wraps the same model in the typed
+contract and returns every option's probability.
+
+## Cost
+
+| step | work | where it runs |
+| --- | --- | --- |
+| compile and render | string building; one tokenisation per question | <Gloss name="cpu" />, per request |
+| single-token code check | one tokenisation per code | once per schema; cacheable |
+| shared prefix | one forward pass over instructions, state and schema | <Gloss name="gpu" />, once per request |
+| endings | one batched pass over about a dozen tokens per question | GPU, once per request |
+| read and decode | $K$ rows of the output matrix, a softmax, a re-keying | negligible |
+
+## Trade-offs
+
+- **The prompt format is part of the model.** A server that renders a different JSON layout, system message, code
+  assignment or thinking mode is serving a model it was not trained for. Nimble's scorer refuses an adapter whose
+  stored prompt-builder hash differs <Cite id="bespoke2026nimble" />.
+- **Codes carry position, not meaning.** The code an option receives depends on where it was listed. A model biased
+  towards `A` shifts probability to whatever is listed first; reorder the options to check that an answer holds.
+- **Names are only text.** The model sees option names and descriptions as words in the schema. Opaque names (`opt_1`)
+  give it nothing to match against the state; descriptive criteria do.
+- **Limits are enforced, not truncated.** Nimble rejects a prompt longer than its limit rather than cutting the state,
+  and rejects more than 26 options. A client has to filter the state and split large option sets itself.
+- **The state is serialised inside the prompt.** An object state is JSON-encoded and then escaped inside `context`,
+  which costs extra tokens for every quote; plain text or compact JSON keeps the prefix short.
+- **Output tokens are a server convention.** Nothing is generated, yet the example response reports 4 output tokens;
+  what each server counts there is its own choice.

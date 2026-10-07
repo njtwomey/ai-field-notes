@@ -1,0 +1,134 @@
+---
+title: Answer-token scoring
+kind: technique
+summary: 'Answer-token scoring reads a decision from one forward pass of a language model. Each allowed answer gets a one-token code, and the probabilities are a softmax of the codes'' next-token logits at the end of the prompt. The answer is always one of the options.'
+tags: [decision-models, large-language-models, classification, calibration]
+aliases: [candidate logit scoring, option-letter scoring, single-pass decision readout, restricted softmax]
+requires: [autoregressive-transformer-language-model, softmax-and-log-sum-exp]
+partOf: [decision-models]
+related: [decoding-strategies, temperature-scaling, shared-prefix-decision-batching, training-decision-models]
+references: [rogge2026, bespoke2026nimble, together2026tev1, typesafe2026confidence, typesafe2026jaggedness, zheng2024pride, kadavath2022]
+status: draft
+updated: 2026-10-05
+---
+
+import { AnswerScoring } from './AnswerScoring'
+
+<Definition>
+**Answer-token scoring** turns a <Gloss name="language-model">language model</Gloss> into a classifier over options
+supplied with the question. The prompt lists options $o_1, \dots, o_K$, each labelled with a code $c_k$ that is one
+token of the vocabulary $\Vcal$, and ends where the answer would begin. One forward pass gives the next-token logits
+$\zvec \in \reals^{\abs{\Vcal}}$ at that position. The decision probabilities are a softmax over the code logits alone,
+
+$$
+q_k = \frac{\exp(z_{c_k} / T)}{\sum_{j=1}^{K} \exp(z_{c_j} / T)}, \qquad k = 1, \dots, K,
+$$
+
+with a temperature $T > 0$, and the answer is $o_{\hat k}$ with $\hat k = \argmax_k q_k$.
+<NoteLink to="nimble">Nimble</NoteLink> and <NoteLink to="tev1">Tev1</NoteLink> read their decisions this way
+<Cite id="bespoke2026nimble" /> <Cite id="together2026tev1" />.
+</Definition>
+
+## Problem
+
+A generated answer to a classification question costs one forward pass per output token. It must also be parsed, and
+it can fail to parse, name an option that was never offered, or refuse. The probability of the answer is not returned
+unless the server exposes token log-probabilities, and then it is the probability of a string, not of an option.
+
+Answer-token scoring removes the generation. It needs one pass over the prompt and reads every option's probability
+from that pass.
+
+## Mechanism
+
+### Mental model
+
+- **Prompt:** the text to judge, the question, the options with their codes, and an instruction to reply with one
+  code. The prompt ends at the first position of the reply.
+- **Read:** one forward pass. The output layer's scores at the last position are the model's preferences for the next
+  token.
+- **Decide:** keep the scores of the $K$ codes, discard the rest, and take a softmax.
+
+### Laying out the prompt
+
+The codes are usually the letters `A`, `B`, `C`, and so on. Each code must be exactly one token under the model's
+tokenizer *at the answer boundary*: a letter that tokenizes as one token after a space may be two tokens after a
+newline. Nimble's prompt builder checks this for every code and refuses a schema that fails
+<Cite id="bespoke2026nimble" />. A chat model is prompted through its chat template with the generation prompt added
+and reasoning switched off, so that the next token is the first token of the reply.
+
+### Reading the probabilities
+
+Let $p(v \mid \xvec) = \exp(z_v) / \sum_{u \in \Vcal} \exp(z_u)$ be the full next-token distribution for prompt
+$\xvec$. At $T = 1$ the decision is that distribution conditioned on the next token being a code:
+
+$$
+q_k = \frac{\exp(z_{c_k})}{\sum_j \exp(z_{c_j})}
+    = \frac{\exp(z_{c_k}) / \sum_u \exp(z_u)}{\sum_j \exp(z_{c_j}) / \sum_u \exp(z_u)}
+    = \frac{p(c_k \mid \xvec)}{\sum_j p(c_j \mid \xvec)} .
+$$
+
+The denominator $m = \sum_j p(c_j \mid \xvec)$ is the probability mass the model puts on any code. The decision
+discards $m$. A model that would rather reply "The" than any letter still returns a full distribution over the
+options.
+
+Only $K$ rows of the output projection are needed. Nimble's scorers multiply the final hidden state by the code
+tokens' rows of the output matrix alone, and skip the rest of a vocabulary of about 250,000 tokens
+<Cite id="bespoke2026nimble" />.
+
+<AnswerScoring />
+
+### Question types
+
+The three question types of the <NoteLink to="jev">Jev</NoteLink> interface all reduce to one readout.
+
+- **Choice:** $K$ options, probabilities $q_1, \dots, q_K$.
+- **Yes or no:** two codes, `A` for no and `B` for yes. The answer is $q_{\text{yes}}$.
+- **Score:** levels $0, \dots, L - 1$ of an ordered rubric as codes. The returned score is the expected level
+  $\hat s = \sum_{\ell} \ell \, q_\ell$. Level probabilities $(0.378, 0.429, 0.193)$ give
+  $\hat s = 0 \times 0.378 + 1 \times 0.429 + 2 \times 0.193 = 0.815$.
+
+The expected level minimises expected squared error against the true level when $q$ is the true distribution. It is
+not a level itself: $0.815$ names no rubric level.
+
+### Confidence summaries
+
+Servers add a single "confidence" number derived from $\qvec$. TypeSafe documents, for $n$ options and the largest
+probability $p_{\max}$ <Cite id="typesafe2026confidence" />,
+
+$$
+\text{confidence} = \frac{p_{\max} - 1/n}{1 - 1/n},
+$$
+
+which is 0 for a uniform $\qvec$ and 1 for a point mass. Ollama's example responses match a different summary,
+$1 - H(\qvec) / \ln n$ with $H$ the entropy. The probabilities $(0.985, 0.012, 0.003)$ give $0.977$ under the first
+and $0.922$ under the second. Neither is a probability of being correct. A threshold tuned on one summary does not
+transfer to the other, and computing the summary from $\qvec$ in calling code avoids the difference.
+
+## Cost
+
+| | forward passes | output projection | parse step |
+| --- | --- | --- | --- |
+| generated answer of $n_{\text{out}}$ tokens | $1 + n_{\text{out}}$ | $\abs{\Vcal}$ rows per token | yes; can fail |
+| answer-token scoring | 1 | $K$ rows | none |
+
+Latency is the time to read the prompt. Several questions about one text can share most of that read; see
+<NoteLink to="shared-prefix-decision-batching" />.
+
+## Trade-offs
+
+- **No working space.** Nothing is written before the answer, so a question that needs intermediate steps
+  (arithmetic, comparing dates, counting) has to be split into questions whose answers code combines
+  <Cite id="typesafe2026jaggedness" />.
+- **Normalised over the options offered.** The probabilities sum to 1 even when no option fits. A question that may
+  have no correct answer needs an explicit "none" option.
+- **The discarded mass.** A low $m$ says the prompt did not lead the model to answer with a code. Whether $m$ means
+  anything depends on training: a model trained only on code logits never learned to raise it (see
+  <NoteLink to="training-decision-models" />).
+- **Order and label bias.** A model can prefer a code for its letter or position, independent of the content.
+  Language models used as multiple-choice selectors show this bias <Cite id="zheng2024pride" />, and TypeSafe reports
+  a lean towards the first option in Jev <Cite id="typesafe2026jaggedness" />. Permuting the options and averaging
+  the probabilities over the permutations removes it at the cost of extra passes.
+- **Calibration is not given.** The softmax produces numbers in $[0, 1]$ that sum to 1. Whether they match how often
+  each answer is right depends on training and on a fitted temperature; see
+  <NoteLink to="calibrating-decision-models" />. Pretrained language models' option probabilities are often well
+  calibrated before instruction tuning and less so after <Cite id="kadavath2022" />.

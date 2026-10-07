@@ -1,0 +1,250 @@
+---
+title: Matching pursuit
+kind: concept
+summary: 'Matching pursuit approximates a signal $\yvec \approx \Dmat\xvec$ over a dictionary of unit atoms one atom at a time: each step picks the atom most correlated with the residual and subtracts its projection. Orthogonal matching pursuit refits all chosen atoms by least squares after each pick.'
+tags: [signal-processing, sparsity, greedy-algorithms, worked-example]
+aliases:
+  [
+    orthogonal matching pursuit,
+    OMP,
+    greedy pursuit,
+    greedy sparse approximation,
+    pursuit algorithm,
+    time-frequency atomic decomposition,
+  ]
+requires: [orthogonal-projection, vector-norms]
+partOf: [sparse-approximation]
+related: [gram-schmidt, least-angle-regression, feature-selection]
+references: [mallat1993, pati1993, tropp2004, donoho2003, natarajan1995, mallat2009, elad2010]
+status: draft
+updated: 2026-10-07
+---
+
+import { PursuitGeometry } from './PursuitGeometry'
+import { PursuitOnSignal } from './PursuitOnSignal'
+
+<Definition>
+Let $\Dmat = [\dvec_1, \dots, \dvec_k]$ be an $m \times k$ dictionary of unit-norm atoms $\dvec_j \in \reals^m$, usually
+with $k > m$, and let $\yvec \in \reals^m$ be a signal. Both pursuits start from $\xvec_0 = \zeros$ and the residual
+$\rvec_0 = \yvec$, and at step $t = 0, 1, \dots$ pick the atom most correlated with the residual,
+
+$$
+j_t = \argmax_j \abs{\dvec_j^\top \rvec_t}.
+$$
+
+- **Matching pursuit** <Cite id="mallat1993" /> adds the residual's projection onto that atom alone:
+  $x_{j_t} \leftarrow x_{j_t} + \dvec_{j_t}^\top \rvec_t$ and
+  $\rvec_{t+1} = \rvec_t - (\dvec_{j_t}^\top \rvec_t)\,\dvec_{j_t}$.
+- **Orthogonal matching pursuit** <Cite id="pati1993" /> adds $j_t$ to a support $S_{t+1} = S_t \cup \{j_t\}$ and refits
+  every coefficient on it by least squares,
+  $\xvec_{S_{t+1}} = \argmin_{\mathbf{z}} \norm{\yvec - \Dmat_{S_{t+1}}\mathbf{z}}$, with
+  $\rvec_{t+1} = \yvec - \Dmat_{S_{t+1}}\xvec_{S_{t+1}}$.
+
+Both stop after a set number of atoms $s$ or when $\norm{\rvec_t}$ falls below a tolerance.
+</Definition>
+
+## Intuition
+
+A sparse code of $\yvec$ uses a few atoms. Finding the best few atoms exactly means searching over subsets, which is
+NP-hard in general <Cite id="natarajan1995" />. A pursuit builds the subset one atom at a time instead. At each step it
+asks which single atom explains most of what is still unexplained, the residual, and takes it.
+
+The two pursuits differ in what they do with an atom once it is chosen. Matching pursuit keeps every earlier coefficient
+fixed and only adds the new atom's share. The residual is then orthogonal to the last atom but not to the earlier ones,
+so an atom can be picked again later. <Gloss name="omp" /> recomputes all coefficients on the chosen atoms. Its residual
+is orthogonal to every chosen atom, so no atom is picked twice, and after $s$ steps $\xvec$ has exactly $s$ non-zeros.
+
+<PursuitGeometry />
+
+## The greedy choice
+
+Fix an atom $\dvec$ with $\norm{\dvec} = 1$ and a residual $\rvec$. The coefficient $\alpha$ that best explains
+$\rvec$ by $\dvec$ alone minimises
+
+$$
+\norm{\rvec - \alpha\dvec}^2 = \norm{\rvec}^2 - 2\alpha\,\dvec^\top\rvec + \alpha^2.
+$$
+
+Setting the derivative $-2\dvec^\top\rvec + 2\alpha$ to zero gives $\alpha = \dvec^\top\rvec$, the
+<NoteLink to="orthogonal-projection">orthogonal projection</NoteLink> of $\rvec$ onto the line spanned by $\dvec$.
+Substituting back,
+
+$$
+\norm{\rvec - (\dvec^\top\rvec)\,\dvec}^2 = \norm{\rvec}^2 - (\dvec^\top\rvec)^2.
+$$
+
+The atom that removes the most energy from the residual is therefore the one with the largest $\abs{\dvec^\top\rvec}$.
+This is the selection rule of both pursuits. For atoms that are not unit-norm the same argument gives the normalised
+score $\abs{\dvec_j^\top\rvec} / \norm{\dvec_j}$.
+
+## Matching pursuit: energy and convergence
+
+Applying the identity above at every step and summing from $t = 0$ to $T - 1$ gives an energy balance:
+
+$$
+\norm{\yvec}^2 = \sum_{t=0}^{T-1} (\dvec_{j_t}^\top \rvec_t)^2 + \norm{\rvec_T}^2.
+$$
+
+The residual norm never increases, and each step removes the squared correlation it found. When the atoms span
+$\reals^m$, the quantity $\beta = \min_{\norm{\uvec} = 1} \max_j \abs{\dvec_j^\top\uvec}$ is positive: no unit vector is
+orthogonal to every atom, and the minimum over the unit sphere is attained. Every step then removes at least a fraction
+$\beta^2$ of the residual's energy,
+
+$$
+\norm{\rvec_{t+1}}^2 \le (1 - \beta^2)\,\norm{\rvec_t}^2,
+$$
+
+so $\norm{\rvec_t}$ falls geometrically to zero <Cite id="mallat1993" />. It does not reach zero in finitely many steps
+in general. In the plane with two atoms at angle $\theta$, each step leaves the residual orthogonal to the atom just
+used, and the angle between that residual and the other atom is $90° - \theta$. The next step keeps the fraction
+$\abs{\cos\theta}$ of the residual's norm. Atoms close in angle give a slow zigzag.
+
+## Orthogonal matching pursuit: refitting
+
+Orthogonal matching pursuit solves a least-squares problem on the current support $S$. Its normal equations are
+
+$$
+\Dmat_S^\top(\yvec - \Dmat_S\xvec_S) = \Dmat_S^\top\rvec = \zeros.
+$$
+
+The residual is orthogonal to every chosen atom, so every chosen atom has correlation zero and cannot be picked again.
+The support grows by one atom per step, and the approximation $\Dmat_S\xvec_S$ is the orthogonal projection of $\yvec$
+onto the span of the chosen atoms. Once the chosen atoms span $\reals^m$ the residual is zero, so the method stops after
+at most $m$ steps.
+
+Each least-squares refit can reuse the previous one. Adding an atom adds one column to $\Dmat_S$, and its QR
+factorisation grows by one step of the <NoteLink to="gram-schmidt">Gram–Schmidt process</NoteLink>. A step costs
+$O(mk)$ for the correlations and $O(m\,\abs{S})$ for the update <Cite id="elad2010" />.
+
+## Worked example in the plane
+
+Take three unit atoms in $\reals^2$ at angles $0°$, $70°$ and $125°$,
+$\dvec_1 = (1, 0)$, $\dvec_2 = (0.342, 0.940)$ and $\dvec_3 = (-0.574, 0.819)$, and the signal $\yvec = (1.3, 1.1)$ with
+$\norm{\yvec} = 1.703$. This is the opening state of the first figure.
+
+1. **Step 1, both pursuits.** The correlations are $\dvec_1^\top\yvec = 1.300$, $\dvec_2^\top\yvec = 1.478$ and
+   $\dvec_3^\top\yvec = 0.155$. Both pick $\dvec_2$ with coefficient $1.478$. The residual is
+   $\rvec_1 = \yvec - 1.478\,\dvec_2 = (0.794, -0.289)$, and $\norm{\rvec_1}^2 = 2.900 - 1.478^2 = 0.715$, so
+   $\norm{\rvec_1} = 0.845$.
+2. **Step 2, matching pursuit.** The correlations of $\rvec_1$ are $0.794$, $0$ and $-0.692$. Matching pursuit picks
+   $\dvec_1$ with coefficient $0.794$, and $\norm{\rvec_2}^2 = 0.715 - 0.794^2 = 0.084$, so $\norm{\rvec_2} = 0.289$.
+   The new residual $(0, -0.289)$ is orthogonal to $\dvec_1$ but not to $\dvec_2$, so step 3 picks $\dvec_2$ again. From
+   here matching pursuit alternates between $\dvec_1$ and $\dvec_2$ and keeps the fraction $\cos 70° = 0.342$ of the
+   norm per step.
+3. **Step 2, orthogonal matching pursuit.** It also picks $\dvec_1$, then solves
+   $x_1\dvec_1 + x_2\dvec_2 = \yvec$ on the support $\{1, 2\}$. The second coordinate gives
+   $x_2 = 1.1 / 0.940 = 1.171$ and the first gives $x_1 = 1.3 - 0.342 \times 1.171 = 0.900$. The residual is zero after
+   two steps, and the coefficient of $\dvec_2$ has dropped from $1.478$ to $1.171$.
+
+The two pursuits choose the same atoms here. Matching pursuit needs 22 steps to bring the residual below
+$10^{-10}\norm{\yvec}$ because it never revises the first coefficient. The spare atom $\dvec_3$ is never used.
+
+## Pursuit on a signal
+
+The second figure codes a signal of $m = 64$ samples over $k = 128$ atoms: the 64 cosines of the orthonormal
+<Gloss name="dct" /> and the 64 spikes (unit impulses). A cosine spreads its energy over all samples and a spike
+concentrates it in one, so a signal made of a few of each has no sparse code in either half alone. Over the union it is
+sparse.
+
+The correlation bars show what each step sees. At step 0 the largest bars usually stand at the atoms the signal was
+built from, because their contributions add up while the other atoms meet the signal only through small
+cross-correlations. After each pick of orthogonal matching pursuit the chosen bar drops to zero and the next one stands
+out. Matching pursuit leaves small correlations on the atoms it has already used and returns to them.
+
+<PursuitOnSignal />
+
+## When the greedy choice is right
+
+The pursuits pick the right atoms when the atoms are nearly orthogonal to each other. The
+<Gloss name="mutual-coherence">mutual coherence</Gloss> of a dictionary of unit atoms is the largest absolute inner
+product between two different atoms,
+
+$$
+\mu = \max_{i \ne j} \abs{\dvec_i^\top\dvec_j}.
+$$
+
+**Exact recovery.** Suppose $\yvec = \Dmat\xvec^\star$ where $\xvec^\star$ has $s$ non-zeros on a support $S^\star$ and
+
+$$
+s < \tfrac{1}{2}\left(1 + \frac{1}{\mu}\right).
+$$
+
+Then $\xvec^\star$ is the unique sparsest representation of $\yvec$ <Cite id="donoho2003" />, and orthogonal matching
+pursuit picks an atom of $S^\star$ at every step and returns $\xvec^\star$ after $s$ steps <Cite id="tropp2004" />.
+
+The proof compares the correlations of right and wrong atoms. Suppose the steps so far chose only atoms of $S^\star$.
+Then $\yvec$ and the current approximation both lie in the span of $\{\dvec_i : i \in S^\star\}$, so the residual is
+$\rvec = \sum_{i \in S^\star} b_i \dvec_i$ for some coefficients $b_i$. Let $b_{\max} = \max_i \abs{b_i} > 0$, attained
+at $i^\star$. For the atom $i^\star$,
+
+$$
+\abs{\dvec_{i^\star}^\top\rvec} \ge \abs{b_{i^\star}} - \sum_{i \ne i^\star} \abs{b_i}\,\abs{\dvec_{i^\star}^\top\dvec_i}
+\ge b_{\max}\bigl(1 - (s - 1)\mu\bigr).
+$$
+
+For an atom $j \notin S^\star$, every term is a cross-correlation,
+
+$$
+\abs{\dvec_j^\top\rvec} \le \sum_{i \in S^\star} \abs{b_i}\,\abs{\dvec_j^\top\dvec_i} \le s\mu\,b_{\max}.
+$$
+
+The atom of $S^\star$ wins whenever $1 - (s - 1)\mu > s\mu$, which rearranges to $s < \frac{1}{2}(1 + 1/\mu)$.
+Orthogonal matching pursuit never picks an atom twice, so after $s$ steps its support is $S^\star$. The least-squares
+fit on $S^\star$ is exact because $\yvec$ lies in that span, and it is unique because the same bound makes the atoms of
+$S^\star$ linearly independent. The argument for matching pursuit is the same, except that it may revisit the atoms of
+$S^\star$ and converges to $\xvec^\star$ only in the limit.
+
+<Derivation title="Why the atoms of the support are linearly independent">
+Let $\Gmat = \Dmat_{S^\star}^\top\Dmat_{S^\star}$ be the $s \times s$ Gram matrix of the atoms in $S^\star$. Its
+diagonal entries are $1$ and each off-diagonal entry has magnitude at most $\mu$. Each row's off-diagonal entries sum in
+magnitude to at most $(s - 1)\mu$. The condition $s < \frac{1}{2}(1 + 1/\mu)$ gives $(2s - 1)\mu < 1$, so
+$(s - 1)\mu < 1$, and $\Gmat$ is strictly diagonally dominant. By the Gershgorin circle theorem every eigenvalue of
+$\Gmat$ lies within $(s - 1)\mu$ of $1$, so every eigenvalue is positive and $\Gmat$ is invertible. Then
+$\Dmat_{S^\star}\mathbf{z} = \zeros$ implies $\mathbf{z}^\top\Gmat\mathbf{z} = 0$ and $\mathbf{z} = \zeros$: the atoms
+are linearly independent.
+</Derivation>
+
+The condition is sufficient, not necessary. The cosines and spikes of the second figure have
+$\mu = \sqrt{2/64} = 0.177$, so the guarantee covers $s \le 3$. In the figure, orthogonal matching pursuit recovers
+signals of 8 cosines and 8 spikes in 96 of 99 seeds, and signals of 12 and 12 in 41 of 99. The coherence bound describes
+the worst arrangement of atoms, and a signal with randomly placed atoms rarely meets it.
+
+## Variants and uses
+
+Matching pursuit was introduced with dictionaries of Gabor atoms, windowed sinusoids at many positions, scales and
+frequencies. The atoms it picks form an adaptive time–frequency decomposition of the signal
+<Cite id="mallat1993" />. With such structured dictionaries, the correlations at each step can be updated by fast
+transforms rather than computed from scratch <Cite id="mallat2009" />.
+
+Orthogonal least squares, also called least-squares orthogonal matching pursuit, picks the atom whose addition minimises
+the residual after refitting, not the atom with the largest correlation. It chooses better atoms at a higher cost per
+step <Cite id="elad2010" />. In regression, where $\Dmat$ is a design matrix and the atoms are features, orthogonal
+matching pursuit is forward stepwise <NoteLink to="feature-selection">feature selection</NoteLink> by correlation with
+the residual. <NoteLink to="least-angle-regression">Least angle regression</NoteLink> follows the same correlations but
+moves the coefficients continuously, and with one modification it traces the <NoteLink to="lasso">lasso</NoteLink> path.
+<NoteLink to="basis-pursuit">Basis pursuit</NoteLink> replaces the greedy search by a convex problem, the representation
+of least $\ell_1$ norm, which finds the sparsest code under the same coherence condition <Cite id="donoho2003" />.
+
+## Assumptions
+
+- The signal has a sparse or compressible code in the dictionary: a few coefficients carry most of its energy.
+- The atoms are scaled to unit norm, or the selection uses the normalised correlation
+  $\abs{\dvec_j^\top\rvec} / \norm{\dvec_j}$.
+- Guaranteed recovery needs low coherence: $s < \frac{1}{2}(1 + 1/\mu)$ for $s$ non-zeros.
+- Convergence of matching pursuit to $\yvec$ needs atoms that span $\reals^m$.
+
+## Pitfalls
+
+- **A greedy choice is final.** Orthogonal matching pursuit never removes an atom. When a wrong atom correlates with
+  $\yvec$ better than any right atom, as happens with coherent atoms or dense signals, the wrong atom stays and more
+  atoms are needed to cancel it.
+- **Matching pursuit's coefficients are not a least-squares fit.** After $t$ steps the coefficients on the atoms used do
+  not minimise the residual for those atoms. A final least-squares refit on the chosen atoms improves the approximation
+  at no cost in sparsity.
+- **Unnormalised atoms bias the choice.** Scoring by $\abs{\dvec_j^\top\rvec}$ without dividing by $\norm{\dvec_j}$
+  favours long atoms regardless of direction.
+- **With noise, the stopping rule sets the sparsity.** Run to a small tolerance, either pursuit keeps picking atoms to
+  fit the noise. For noise of standard deviation $\sigma$ per sample, stopping when $\norm{\rvec} \le \sigma\sqrt{m}$
+  stops near the noise level.
+- **The coherence bound is pessimistic.** Failing it does not mean the pursuit fails; passing it guarantees success only
+  for exactly sparse, noise-free signals.

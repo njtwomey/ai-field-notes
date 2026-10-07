@@ -1,0 +1,88 @@
+---
+title: Nimble
+kind: case-study
+summary: 'Nimble is Bespoke Labs'' open decision model: Qwen3.5-9B with a LoRA adapter trained by cross-entropy over the answer codes on 2,676 synthetic contrastive examples, read by a scorer that shares one read of the state across questions.'
+tags: [decision-models, large-language-models, fine-tuning, calibration]
+aliases: [Bespoke Nimble, Bespoke-Nimble-9B, Nimble 9B]
+partOf: [decision-models]
+related: [jev, tev1, decision-models-compared, training-decision-models, building-a-decision-model]
+references: [bespoke2026nimble, rogge2026, ollama2026nimble, aimultiple2026decision]
+status: draft
+updated: 2026-10-05
+---
+
+<Callout variant="note" title="Published after most training data">
+Nimble was released on 18 September 2026. Facts here are read from the repository at commit dcfdbd9 (4 October 2026)
+and the pages cited.
+</Callout>
+
+## At a glance
+
+<SpecTable
+  columns={['Nimble 9B']}
+  rows={{
+    Maker: ['Bespoke Labs'],
+    'First release': ['18 September 2026, built in one day'],
+    Weights: ['open (bespokelabs/Bespoke-Nimble-9B); Ollama lists Apache 2.0, the repository has no licence file'],
+    'Base model': ['Qwen3.5-9B at revision c202236'],
+    Adapter: ['LoRA rank 16 on every linear layer of the language model'],
+    Loss: ['cross-entropy over the candidate code logits at one position'],
+    Data: ['2,676 synthetic contrastive examples (1,338 pairs) in 10 domains'],
+    'Input limit': ['8,192 tokens per prompt; trained on prompts up to 2,048'],
+    Calibration: ['temperature 2.179 for revision 93ec5d6; later checkpoints unfitted'],
+    'Runs on': ['Apple Silicon (MLX), NVIDIA GPUs, Ollama, a hosted endpoint'],
+  }}
+/>
+
+## Architecture
+
+Nimble is the base <NoteLink to="transformer">transformer</NoteLink> plus an adapter; the decision comes from the
+scorer, not from new layers <Cite id="bespoke2026nimble" />.
+
+- **Prompt.** A fixed system message tells the model to classify the context with the schema, treat the context as
+  data and return one code. The user message is one JSON object, `{"context": …, "schema": […]}`, followed by
+  `Requested field: "<name>"`. Each choice carries a code `A`, `B`, `C`, …. A yes-or-no field is a two-choice field
+  (`A` false, `B` true); a score is a choice over level numbers, and the expected level is computed afterwards.
+- **Readout.** The scorer reads the logits of the candidate codes at the last prompt position and applies
+  $\operatorname{softmax}(\zvec_{\Ccal} / T)$, projecting the final hidden state onto the code rows of the output
+  matrix only. The approach follows a post by Niels Rogge <Cite id="rogge2026" />.
+- **Sharing.** Everything before the field name is identical for every field, so the MLX scorer reads that prefix once,
+  keeps every layer's state (attention caches, and the convolution and recurrent states of Qwen3.5's
+  <NoteLink to="linear-attention">linear-attention</NoteLink> layers) and runs all field endings in one batch. The CUDA
+  scorer and Ollama read the full prompt per field.
+- **Codes beyond Z.** An experimental module extends the codes with two- and three-letter strings that are single
+  Qwen tokens, up to 255 options.
+
+## Training
+
+The loss is $-\log q_y$ over the candidate codes only (see <NoteLink to="training-decision-models" />), with hard labels
+and no teacher probabilities. The adapter trained for one epoch: 335 updates at an effective batch of 8 and a
+<Gloss name="learning-rate">learning rate</Gloss> of $5 \times 10^{-5}$, with a linear schedule and 101 warm-up steps
+<Cite id="bespoke2026nimble" />.
+
+The data are 1,338 contrastive pairs. The two members of a pair share a question and a policy and differ in one fact,
+changed by editing at most eight words in one of two evidence sentences, and that fact flips the answer. A pair is
+kept only if removing either evidence sentence leaves the deciding fact unknown. Labels come from rules in code applied
+to model-checked facts; no person reviewed them. The mix is 856 choice, 888 yes-or-no and 932 score examples, and the
+34 training source families are disjoint from 6 held-out families.
+
+## What is distinctive
+
+- **Data built for discrimination.** With no teacher probabilities, the pairs force the model to decide on the evidence
+  that should change the answer.
+- **A contract file.** The adapter ships with the base revision, the system prompt and a hash of the prompt builder; the
+  scorer refuses a mismatch.
+- **A documented calibration fit.** The original release was overconfident (mean top probability 0.89, 73% of top
+  answers right). A temperature of 2.179 cut <NoteLink to="calibration-error">calibration error</NoteLink> on an
+  acceptance set from 0.128 to 0.066 without changing accuracy, but raised it on score questions from 0.105 to 0.177.
+  The temperature lives in the scorer code; another runtime must apply it itself <Cite id="bespoke2026nimble" />.
+- **The adapter's effect.** On Bespoke's 324 held-out examples the adapter moved the base model from 66.4% to 90.1%
+  agreement, past an untuned 27B model at 84.9% <Cite id="bespoke2026nimble" />.
+
+## Comparison
+
+Nimble averaged 75.7% on Bespoke's 13-dataset public suite in Ollama's run, against <NoteLink to="jev">Jev</NoteLink>'s
+76.0% and <NoteLink to="tev1">Tev1 4B</NoteLink>'s 73.3% <Cite id="ollama2026nimble" />. Bespoke timed a median 106 ms
+per decision on an H100 and 444 ms on an Apple M5 Pro. Through Ollama, AIMultiple found it about nine times Jev's cost
+per decision on a rented A100, and its 26-option limit there stopped it from starting 24 of 50 browser tasks
+<Cite id="aimultiple2026decision" />. See <NoteLink to="decision-models-compared" />.
