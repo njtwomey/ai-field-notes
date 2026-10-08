@@ -1,0 +1,426 @@
+---
+title: QLoRA and the memory cost of fine-tuning
+kind: technique
+summary: Full fine-tuning with Adam in mixed precision needs about 16 bytes per parameter before activations. QLoRA stores the frozen base in 4-bit NormalFloat, about 0.52 bytes per parameter, dequantises it to bf16 for each product, and trains LoRA adapters on every linear layer.
+tags: [deep-learning, large-language-models, fine-tuning, parameter-efficient-fine-tuning, memory, quantisation, worked-example]
+aliases:
+  [
+    QLoRA,
+    quantised LoRA,
+    quantized LoRA,
+    4-bit NormalFloat,
+    NF4,
+    NormalFloat,
+    double quantisation,
+    paged optimisers,
+    fine-tuning memory,
+    memory of fine-tuning,
+    LoftQ,
+    QA-LoRA,
+  ]
+requires: [low-rank-adaptation, model-quantisation, mixed-precision-training]
+related: [gradient-checkpointing, zero-and-sharded-optimisers, adam]
+partOf: [adapting-pretrained-language-models]
+references:
+  [
+    dettmers2023,
+    rajbhandari2020,
+    micikevicius2018,
+    dettmers2022optim,
+    korthikanti2022,
+    grattafiori2024,
+    yoshida2023,
+    li2024loftq,
+    meng2024pissa,
+    xu2024qalora,
+    dettmers2021bitsandbytes,
+    mangrulkar2022,
+    han2023unsloth,
+  ]
+status: draft
+updated: 2026-10-07
+---
+
+import { MemoryBudget } from './MemoryBudget'
+
+<Definition>
+<Gloss name="qlora" /> fine-tunes a <Gloss name="llm">large language model</Gloss> whose frozen pretrained weights are
+stored in a 4-bit data type, <Gloss name="nf4" />. Weights are quantised in blocks of 64, each with its own scale, and
+the scales are themselves quantised to 8 bits (**double quantisation**). In every forward and backward pass, each weight
+block is dequantised to bfloat16 and multiplied in 16-bit arithmetic. Gradients flow through the frozen weights into
+<NoteLink to="low-rank-adaptation">low-rank adapters</NoteLink> on every linear layer, which are the only trained
+parameters. Optimiser states live in paged memory that can spill to the host when the accelerator runs out
+<Cite id="dettmers2023" />.
+</Definition>
+
+## Problem
+
+Fine-tuning fails most often for lack of accelerator memory, not of compute. The memory has two parts: the **model
+state**, which scales with the number of parameters $P$, and the **activations**, which scale with the batch size and
+sequence length. Both have to be counted before choosing a method.
+
+### Model state: 16 bytes per parameter
+
+<NoteLink to="mixed-precision-training">Mixed-precision training</NoteLink> with <NoteLink to="adam">Adam</NoteLink>
+keeps, for every trained parameter <Cite id="rajbhandari2020" />:
+
+| Item                                    | Format    | Bytes |
+| --------------------------------------- | --------- | ----- |
+| Weight used in forward and backward     | bf16      | 2     |
+| Gradient                                | bf16      | 2     |
+| Master copy of the weight               | fp32      | 4     |
+| Adam first moment $\mvec$               | fp32      | 4     |
+| Adam second moment $\vvec$              | fp32      | 4     |
+| **Total**                               |           | 16    |
+
+Each line has a reason. The forward and backward passes need the weights and produce one gradient per weight. Adam
+keeps two running averages per weight. The 32-bit master copy exists because a 16-bit weight cannot absorb a small
+update: in bfloat16, an update smaller than about $\abs{w} / 256$ rounds away entirely, so updates are accumulated in
+32 bits and cast to 16 bits for each pass <Cite id="micikevicius2018" />. The optimiser's three 32-bit numbers are
+three quarters of the total.
+
+Variants change the constant, not the structure. Dropping the master copy and keeping bf16 weights with fp32 moments
+gives 12 bytes. 8-bit Adam stores each moment in one byte with block-wise scales, so the two moments take 2 bytes
+instead of 8 <Cite id="dettmers2022optim" />.
+
+### Activations
+
+The backward pass needs intermediate values from the forward pass. For a transformer layer with hidden width $h$,
+sequence length $s$, batch size $b$ and $a$ attention heads, storing them in 16 bits takes about
+
+$$
+sbh \paren{34 + \frac{5as}{h}} \text{ bytes per layer}
+$$
+
+for a <Gloss name="gpt" />-style layer <Cite id="korthikanti2022" />. The second term is the $s \times s$ attention
+matrix of each head. Fused attention kernels that recompute it in the backward pass remove that term and leave about
+$34\,sbh$ bytes.
+
+For a model of width $h = 4096$ with 32 layers, one sequence of $s = 2048$ tokens gives
+$34 \times 2048 \times 4096 \times 32 \approx 9.1$ GB, and the figure grows linearly with $b$ and $s$. The coefficient
+34 is for the layer of that paper; a gated feed-forward layer of a different width changes it, but not the scaling.
+
+<NoteLink to="gradient-checkpointing">Gradient checkpointing</NoteLink> stores only each layer's input,
+$2\,sbh$ bytes, about 16.8 MB per layer and 0.54 GB for all 32 layers in the example. Each layer's interior is
+recomputed when the backward pass reaches it. The cost is one extra forward pass per step. That is a third more compute
+for full fine-tuning, and about half more for LoRA, whose backward pass skips the weight gradients of the frozen
+layers.
+
+One more term grows with the vocabulary. The output layer produces $s \times V$ logits for a vocabulary of $V$ tokens.
+For $V = 128{,}256$ and $s = 2048$, storing them in 32 bits for the
+<NoteLink to="cross-entropy-and-perplexity">cross-entropy</NoteLink> takes $2048 \times 128{,}256 \times 4 \approx 1.05$
+GB per sequence.
+
+### What LoRA removes, and what it does not
+
+LoRA freezes the $P$ pretrained parameters and trains $P_A \ll P$ adapter parameters. The frozen weights need no
+gradient, master copy or optimiser state, so the model state falls from $16P$ to
+
+$$
+M_{\text{LoRA}} = 2P + 16 P_A \text{ bytes}.
+$$
+
+The frozen weights in 16 bits now dominate. For an 8-billion-parameter model they are 16 GB, and for a 70-billion one
+141 GB, still more than one accelerator holds.
+
+LoRA does not reduce activations. To reach an adapter in the first block, the gradient must flow back through every
+later block, and each block's backward pass needs that block's activations. For LLaMA 7B at batch size 1, Dettmers et
+al. measured 567 MB of activation gradients against 26 MB of LoRA parameters. With gradient checkpointing the
+activation gradients fell to about 18 MB per sequence <Cite id="dettmers2023" />.
+
+QLoRA attacks the remaining $2P$ term: it stores the frozen weights in about 4 bits.
+
+## Mechanism
+
+### A storage type and a compute type
+
+QLoRA separates how a weight is stored from how it is used. Storage is 4-bit NF4. Computation is bfloat16. For a
+linear layer with frozen weight $\Wmat_0$ and adapter factors $\Amat, \Bmat$, the forward pass computes
+
+$$
+\hvec = \operatorname{dequant}\paren{\Qcal(\Wmat_0)}\, \xvec + s \Bmat \Amat \xvec,
+$$
+
+where $\Qcal(\Wmat_0)$ is the stored 4-bit form and $s$ is the adapter scale. Write
+$\hat\Wmat_0 = \operatorname{dequant}(\Qcal(\Wmat_0))$ for the dequantised bf16 matrix. Dequantisation runs inside the
+matrix kernel, one block at a time, so the full bf16 matrix need never exist in memory at once.
+
+The backward pass needs the gradient with respect to the layer input, $\partial \mathcal{L} / \partial \xvec =
+\hat\Wmat_0^{\tr} \gvec + s \Amat^{\tr} \Bmat^{\tr} \gvec$, where $\gvec = \partial \mathcal{L} / \partial \hvec$. It
+uses $\hat\Wmat_0$ again but never forms $\partial \mathcal{L} / \partial \Wmat_0$. The 4-bit weights are never
+updated, which avoids the central difficulty of training in low precision: an update smaller than half a quantisation
+step would round to nothing (see <NoteLink to="model-quantisation">neural network quantisation</NoteLink>). All
+updates go to the 16-bit adapters.
+
+### Block-wise absmax quantisation
+
+Split each weight matrix into contiguous blocks of $B = 64$ values. For a block $\wvec \in \reals^{B}$, store the
+**absmax** $c = \max_i \abs{w_i}$ and, for each weight, the 4-bit index of the code value nearest to $w_i / c$:
+
+$$
+q_i = \argmin_{j \in \set{0, \dots, 15}} \abs{\frac{w_i}{c} - v_j}, \qquad \hat w_i = c\, v_{q_i},
+$$
+
+where $v_0, \dots, v_{15} \in [-1, 1]$ are the 16 levels of the data type. Small blocks keep one outlier from widening
+the step of millions of other weights. They cost storage for the scales: a 32-bit $c$ per 64 weights adds
+$32 / 64 = 0.5$ bits per weight.
+
+### NormalFloat: levels at the quantiles of a normal distribution
+
+Pretrained weights are close to zero-mean normal. Dettmers et al. applied the Shapiro–Wilk test to the weights of each
+hidden unit of LLaMA 7B and rejected normality at the 5% level for 7.5% of units, against 5% expected by chance
+<Cite id="dettmers2023" />. After division by its absmax, every block has roughly the same distribution up to scale, so
+one fixed set of levels can serve every block.
+
+The question is where to place 16 levels for normal data. A uniform grid, as in 4-bit integers, spaces levels evenly,
+but most weights lie near zero. The outer levels are rarely used and the crowded centre is coarsely resolved.
+
+NormalFloat places the levels so that each is used equally often. If code $j$ is chosen with probability $p_j$, the
+codes carry an <NoteLink to="entropy">entropy</NoteLink> of
+
+$$
+\entropy = -\sum_{j=0}^{15} p_j \log_2 p_j \le \log_2 16 = 4 \text{ bits},
+$$
+
+with equality exactly when every $p_j = 1/16$. A 4-bit code can carry at most 4 bits of information about the weight,
+and it reaches that only if all 16 codes are equally likely. **Quantile quantisation** achieves this. It cuts the
+distribution into 16 bins of equal probability and puts a level inside each. For the standard normal distribution with
+quantile function $\Phi^{-1}$, a $k$-bit version places level $i$ midway between two adjacent quantiles
+<Cite id="dettmers2023" />:
+
+$$
+v_i = \frac{1}{2} \paren{\Phi^{-1}\paren{\frac{i}{2^k + 1}} + \Phi^{-1}\paren{\frac{i + 1}{2^k + 1}}},
+$$
+
+and then rescales the levels to $[-1, 1]$. The outermost quantiles, $\Phi^{-1}(0)$ and $\Phi^{-1}(1)$, are
+infinite, so the implementation trims the range slightly to keep the end levels finite
+<Cite id="dettmers2021bitsandbytes" />. Equal-probability bins are narrow where the
+<NoteLink to="gaussian-distribution">normal density</NoteLink> is high and wide in the tails, so the levels crowd near
+zero.
+
+A symmetric set of 16 levels has no level at zero. Zero matters: padding and pruned weights must be exact. NF4
+therefore builds the negative and positive halves separately, with 8 levels for the positive half and 7 for the negative
+half, and shares one exact zero. The 16 levels, rounded to three decimals, are
+
+$$
+-1,\ -0.696,\ -0.525,\ -0.395,\ -0.284,\ -0.185,\ -0.091,\ 0,\ 0.080,\ 0.161,\ 0.246,\ 0.338,\ 0.441,\ 0.563,\ 0.723,\ 1.
+$$
+
+The spacing near zero is about 0.08 of the block's absmax. Near $\pm 1$ it is about 0.3.
+
+**How optimal is it?** Dettmers et al. call NF4 information-theoretically optimal for normal weights. Two caveats apply.
+First, absmax scaling maps the largest weight of every block exactly to $\pm 1$, so in a block of 64 the two end levels
+together receive at least $1/64$ of the values whatever the distribution, and the distribution of the other 63 values
+after scaling depends on the block size <Cite id="yoshida2023" />. Second, equal use of codes maximises their entropy,
+which is not the same as minimising reconstruction error. Yoshida derives levels that minimise the expected absolute
+error instead and finds that they do better for larger blocks <Cite id="yoshida2023" />.
+
+The practical gain over a uniform grid is still real. Quantising blocks of 64 standard normal values, and dividing the
+<Gloss name="mse">mean squared error</Gloss> by the variance, gives:
+
+| Levels                                  | Relative squared error | Code entropy |
+| --------------------------------------- | ---------------------- | ------------ |
+| 4-bit integers, $\set{-7, \dots, 7}/7$  | 0.0116                 | 3.50 bits    |
+| NF4                                     | 0.0085                 | 3.88 bits    |
+
+NF4 has 27% less squared error. Across several model families from 125 million to 13 billion parameters, Dettmers et
+al. measured a mean perplexity of 27.41 for NF4 with double quantisation, against 29.48 and 31.07 for two 4-bit float
+formats and 34.34 for 4-bit integers <Cite id="dettmers2023" />.
+
+### Double quantisation
+
+With 32-bit scales and blocks of 64, the scales add 0.5 bits per weight, an eighth of the 4 bits spent on the weights
+themselves. Double quantisation quantises the scales. The block scales $c$ are grouped in blocks of 256, their mean is
+subtracted, and each is stored as an 8-bit float with one 32-bit constant per group of 256. The overhead per weight
+becomes
+
+$$
+\frac{8}{64} + \frac{32}{64 \times 256} = 0.125 + 0.002 = 0.127 \text{ bits},
+$$
+
+a saving of $0.5 - 0.127 = 0.373$ bits per weight, about 3 GB for a 65-billion-parameter model
+<Cite id="dettmers2023" />. The stored cost of a quantised weight is
+
+$$
+4 + 0.127 = 4.127 \text{ bits} \approx 0.516 \text{ bytes}.
+$$
+
+### Paged optimisers
+
+With gradient checkpointing, activation memory still rises briefly while a long sequence is processed. On an
+accelerator that is nearly full, one such spike ends the run with an out-of-memory error. Paged optimisers allocate the
+optimiser states in unified memory, which the driver moves page by page between accelerator and host memory. When the
+accelerator runs out, optimiser pages are evicted to host memory, and they are paged back for the update step. The
+optimiser states are touched only once per step, so moving them is cheap. Dettmers et al. found paged optimisers
+necessary to fit 33B and 65B models on single 24 GB and 48 GB accelerators. At batch size 16 they trained as fast as
+regular optimisers <Cite id="dettmers2023" />.
+
+### Adapters on every linear layer
+
+The adapters are a small share of memory, so QLoRA places them on every linear layer of every block. With adapters on
+the query and value projections only, LoRA did not match full fine-tuning of LLaMA 7B. With adapters on all linear
+layers it did, and the rank then made little difference <Cite id="dettmers2023" />.
+
+## Worked example: memory for 8B and 70B models
+
+Take <NoteLink to="llama-family">Llama 3</NoteLink> 8B and 70B <Cite id="grattafiori2024" />.
+
+| Model | Width $h$ | Blocks | Feed-forward width | Linear-layer weights $P_{\text{lin}}$ | Embedding and output $P_{\text{emb}}$ | Total $P$ |
+| ----- | --------- | ------ | ------------------ | -------------------------------------- | -------------------------------------- | --------- |
+| 8B    | 4096      | 32     | 14,336             | $6.98 \times 10^9$                     | $1.05 \times 10^9$                     | $8.03 \times 10^9$ |
+| 70B   | 8192      | 80     | 28,672             | $68.45 \times 10^9$                    | $2.10 \times 10^9$                     | $70.55 \times 10^9$ |
+
+Both models have a vocabulary of $V = 128{,}256$ and separate input embedding and output matrices, so
+$P_{\text{emb}} = 2Vh$. The adapters are LoRA at rank 16 on all seven linear layers of every block, which gives
+$P_A = 41.9 \times 10^6$ for the 8B model and $207 \times 10^6$ for the 70B model (the
+<NoteLink to="low-rank-adaptation">low-rank adaptation</NoteLink> note derives the 8B count). The adapters are
+counted at 16 bytes per parameter in every case. For QLoRA, the linear layers are quantised and the embedding and output
+matrices stay in bf16, as is common.
+
+**Full fine-tuning,** $16P$:
+
+$$
+16 \times 8.03 \times 10^9 = 128 \text{ GB}, \qquad 16 \times 70.55 \times 10^9 = 1{,}129 \text{ GB}.
+$$
+
+**LoRA on a bf16 base,** $2P + 16P_A$:
+
+$$
+2 \times 8.03 \times 10^9 + 16 \times 41.9 \times 10^6 = 16.1 + 0.67 = 16.7 \text{ GB},
+$$
+
+$$
+2 \times 70.55 \times 10^9 + 16 \times 207 \times 10^6 = 141.1 + 3.3 = 144.4 \text{ GB}.
+$$
+
+**QLoRA,** $0.516\, P_{\text{lin}} + 2 P_{\text{emb}} + 16 P_A$:
+
+$$
+0.516 \times 6.98 \times 10^9 + 2 \times 1.05 \times 10^9 + 0.67 \text{ GB} = 3.60 + 2.10 + 0.67 = 6.4 \text{ GB},
+$$
+
+$$
+0.516 \times 68.45 \times 10^9 + 2 \times 2.10 \times 10^9 + 3.3 \text{ GB} = 35.3 + 4.2 + 3.3 = 42.8 \text{ GB}.
+$$
+
+| Method        | 8B model state | 70B model state | Fits on, with checkpointed activations           |
+| ------------- | -------------- | --------------- | ------------------------------------------------ |
+| Full, Adam    | 128 GB         | 1,129 GB        | 8B: two or more 80 GB devices, sharded; 70B: a cluster |
+| LoRA, bf16    | 16.7 GB        | 144 GB          | 8B: one 24 GB device; 70B: two or more 80 GB devices |
+| QLoRA         | 6.4 GB         | 42.8 GB         | 8B: one 12–16 GB device; 70B: one 80 GB device, or 48 GB with short sequences |
+
+Full fine-tuning across several devices needs the model state sharded, as in
+<NoteLink to="zero-and-sharded-optimisers">ZeRO</NoteLink>. Activations come on top of every figure: with
+checkpointing, about 0.9 GB per 2048-token sequence for the 8B model plus the logits, and more for long sequences or
+large batches. The 0.9 GB is 0.54 GB of layer inputs and 0.36 GB for the one layer being recomputed, whose
+intermediate tensors take about $(7.5h + 4f) \times 2$ bytes per token for a feed-forward width $f$.
+
+<MemoryBudget />
+
+## Cost
+
+- **Compute.** Every weight block is dequantised in the forward pass and again in the backward pass. LoRA on a bf16
+  base does not pay this, so a QLoRA step is slower than a LoRA step on the same hardware. Gradient checkpointing, which
+  QLoRA usually needs, adds about a third more compute.
+- **Starting point.** The model starts at $\hat\Wmat_0$, not at $\Wmat_0$. The adapter must learn the task and also
+  make up for whatever the quantisation error $\hat\Wmat_0 - \Wmat_0$ costs.
+
+## Quality
+
+Dettmers et al. compared QLoRA with 16-bit training <Cite id="dettmers2023" />.
+
+- On <Gloss name="glue" /> with <Gloss name="roberta" />-large and on Super-NaturalInstructions with <Gloss name="t5" />
+  models up to 3 billion parameters, QLoRA with NF4 matched 16-bit LoRA and 16-bit full fine-tuning.
+- Fine-tuning LLaMA 7B to 65B on Alpaca and <NoteLink to="instruction-tuning-and-alignment">FLAN</NoteLink> v2, NF4 with
+  double quantisation gave a mean 5-shot <Gloss name="mmlu" /> accuracy of 53.1%, against 53.0% for 16-bit LoRA. 4-bit
+  floats gave 52.2%.
+- The Guanaco 65B chatbot, trained with QLoRA for 24 hours on one accelerator, reached 99.3% of ChatGPT's score on the
+  Vicuna benchmark as judged by GPT-4. The same paper found such chatbot benchmarks unreliable.
+
+Later work found that the quantisation error is not always free.
+
+- **The starting point matters at low bit widths.** <Gloss name="loftq" /> chooses the quantised weight $\Qmat$ and the
+  adapter initialisation together, alternately quantising $\Wmat_0 - \Bmat\Amat$ and taking the best rank-$r$
+  approximation of $\Wmat_0 - \Qmat$ by <NoteLink to="singular-value-decomposition">singular value
+  decomposition</NoteLink>, which reduces $\norm{\Wmat_0 - \Qmat - \Bmat\Amat}_F$. At 4 bits the gain over QLoRA was
+  small: perplexity 5.16 against 5.22 for Llama 2 13B on WikiText-2. At 2 bits QLoRA failed to converge on Llama 2 7B,
+  while LoftQ reached a perplexity of 7.85 <Cite id="li2024loftq" />.
+- **Some tasks feel the error.** With the base quantised, <Gloss name="pissa" />'s principal-direction initialisation
+  reached 86.05% on GSM8K with Llama 3 70B, against 81.73% for QLoRA <Cite id="meng2024pissa" />.
+
+QLoRA at 4 bits is close to 16-bit LoRA on the tasks measured. Reasoning-heavy tasks and bit widths below 4 are where to
+check.
+
+## Merging and deployment
+
+The adapter was trained on top of $\hat\Wmat_0$. Four ways to deploy it follow, and they differ in what the deployed
+model computes.
+
+1. **Keep the 4-bit base and the separate adapter.** The deployed model is exactly the trained one. It pays the
+   dequantisation and adapter costs at every token.
+2. **Merge into the dequantised weights in bf16,** $\hat\Wmat_0 + s\Bmat\Amat$. Exact up to bf16 rounding, at 16-bit
+   size.
+3. **Merge into the original weights,** $\Wmat_0 + s\Bmat\Amat$. This differs from the trained model by
+   $\Wmat_0 - \hat\Wmat_0$. Any part of the adapter that learned to cancel quantisation error now adds error instead.
+   Usually small at 4 bits, but it has to be evaluated.
+4. **Re-quantise the merged weights to 4 bits.** A stored code changes only if the update carries the weight across a
+   decision boundary between two levels, half a level spacing away. Near zero the NF4 spacing is about 0.08 of the
+   block's absmax, and in a block of 64 normal weights the absmax is about 2.6 standard deviations. An update entry
+   must therefore be of order $0.1$ standard deviations of the weights to move a code. Smaller updates mostly vanish.
+
+<Gloss name="qa-lora" /> avoids the last problem by restricting the adapter so that it merges exactly into the
+group-wise quantisation parameters, leaving a model that is still quantised <Cite id="xu2024qalora" />.
+
+## Tools
+
+- **bitsandbytes** provides the NF4 and 4-bit float layers, double quantisation, and 8-bit and paged optimisers
+  <Cite id="dettmers2021bitsandbytes" />. Hugging Face Transformers exposes it through a quantisation configuration.
+- **PEFT** adds LoRA adapters to a quantised model, prepares it for training (casting norms to 32 bits and enabling
+  gradient checkpointing), offers LoftQ initialisation, and merges adapters after training
+  <Cite id="mangrulkar2022" />.
+- **Unsloth** reimplements the forward and backward passes of common model families with hand-written kernels for LoRA
+  and QLoRA. Its authors report about twice the speed and up to 70% less memory than standard implementations
+  <Cite id="han2023unsloth" />.
+
+A QLoRA set-up with these libraries takes a few lines:
+
+```python
+import torch
+from transformers import AutoModelForCausalLM, BitsAndBytesConfig
+from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
+
+quant = BitsAndBytesConfig(
+    load_in_4bit=True,
+    bnb_4bit_quant_type="nf4",          # NormalFloat levels
+    bnb_4bit_use_double_quant=True,     # quantise the block scales
+    bnb_4bit_compute_dtype=torch.bfloat16,
+)
+model = AutoModelForCausalLM.from_pretrained(base_model_id, quantization_config=quant)
+model = prepare_model_for_kbit_training(model)
+model = get_peft_model(model, LoraConfig(r=16, lora_alpha=32, target_modules="all-linear", task_type="CAUSAL_LM"))
+```
+
+Paged optimisers are selected in the trainer, for example by the optimiser name `paged_adamw_8bit`.
+
+## Trade-offs
+
+| Choice                        | Gains                                      | Costs                                              |
+| ----------------------------- | ------------------------------------------ | -------------------------------------------------- |
+| QLoRA over LoRA on bf16 base  | model state 38% of LoRA's at 8B, 30% at 70B | slower steps; starts from quantised weights |
+| NF4 over 4-bit integers       | lower error on normal weights              | a lookup table instead of integer arithmetic       |
+| Double quantisation           | 0.373 bits per weight                      | negligible extra dequantisation work               |
+| Gradient checkpointing        | activations shrink to layer inputs         | about a third more compute                         |
+| Paged optimisers              | survive memory spikes                      | slow if paging happens every step                  |
+
+## Pitfalls
+
+- **Counting only the weights.** A model that fits in memory for inference may not fit for training. Add the
+  adapters' 16 bytes per parameter, the activations at the longest sequence in the data, and the logits.
+- **Compute type left at 32 bits.** Set the compute type to bf16 explicitly. In 32 bits every dequantised product runs
+  more slowly and the memory saving shrinks.
+- **Paging as a crutch.** If the optimiser pages on every step, throughput collapses. Shorten the longest sequences,
+  lower the batch size, or use gradient accumulation instead.
+- **Merging without checking.** Merging into the original weights or re-quantising after merging changes the model,
+  as derived above. Evaluate the model in the form in which it will be served.
+- **Comparing against an unquantised baseline only.** Evaluate the quantised base model before fine-tuning. A drop
+  that appears at that point is quantisation error, not a failure of the fine-tuning data.

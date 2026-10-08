@@ -1,0 +1,396 @@
+---
+title: Direct preference optimisation
+kind: concept
+summary: 'DPO fine-tunes a language model on preference pairs with the loss $-\log\sigma(\beta\log\frac{\pi_{\thetavec}(y_w)}{\pi_{\text{ref}}(y_w)} - \beta\log\frac{\pi_{\thetavec}(y_l)}{\pi_{\text{ref}}(y_l)})$. It solves the KL-regularised RLHF objective without a reward model or sampling, because the policy''s log-ratio to the reference is an implicit reward.'
+tags: [language-models, alignment, preference-learning, fine-tuning, worked-example]
+aliases: [DPO, direct preference optimization, implicit reward, IPO, KTO, ORPO, SimPO, online DPO, iterative DPO, DPOTrainer]
+requires: [kullback-leibler-divergence, logistic-regression, autoregressive-transformer-language-model]
+partOf: [adapting-pretrained-language-models]
+related: [reward-models, reinforcement-learning-from-human-feedback, instruction-tuning-and-alignment, trust-region-and-proximal-policy-optimisation]
+references: [vonwerra2020, rafailov2023, azar2024, ethayarajh2024, hong2024orpo, meng2024simpo, razin2025, pal2024smaug, pang2024irpo, xu2024dpoppo, ivison2024, tajwar2024, xiong2024iterative, guo2024oaif, rafailov2024overoptimisation, tunstall2023, hf2026trldpo, hf2026trlkto]
+status: draft
+updated: 2026-10-07
+---
+
+import { LikelihoodDisplacement } from './LikelihoodDisplacement'
+
+<Definition>
+**Direct preference optimisation** (DPO) fine-tunes a <Gloss name="language-model">language-model</Gloss> policy
+$\pi_{\thetavec}(y \mid x)$ on preference pairs $(x, y_w, y_l)$, in which response $y_w$ was preferred to response $y_l$
+for prompt $x$. It minimises
+
+$$
+L_{\text{DPO}}(\thetavec) = -\expect_{(x, y_w, y_l)}\brack{\log\sigma\paren{\beta\log\frac{\pi_{\thetavec}(y_w \mid x)}{\pi_{\text{ref}}(y_w \mid x)} - \beta\log\frac{\pi_{\thetavec}(y_l \mid x)}{\pi_{\text{ref}}(y_l \mid x)}}},
+$$
+
+where $\sigma$ is the logistic sigmoid, $\pi_{\text{ref}}$ is a frozen reference policy (usually the supervised
+fine-tuned model) and $\beta > 0$ sets how far $\pi_{\thetavec}$ may move from it. DPO optimises the same
+KL-regularised objective as reinforcement learning from human feedback, without training a separate reward model and
+without sampling from the policy during training <Cite id="rafailov2023" />.
+</Definition>
+
+## Intuition
+
+DPO turns preference learning into classification on a fixed dataset. For each pair it asks one question: relative to
+the reference model, has the policy raised the probability of the chosen response more than that of the rejected one?
+The quantity
+
+$$
+\hat r_{\thetavec}(x, y) = \beta\log\frac{\pi_{\thetavec}(y \mid x)}{\pi_{\text{ref}}(y \mid x)}
+$$
+
+plays the part of a reward and is called the **implicit reward**. The DPO loss is the
+<Gloss name="bradley-terry">Bradley–Terry</Gloss> loss of a <NoteLink to="reward-models">reward model</NoteLink>,
+applied to $\hat r_{\thetavec}$. The language model is its own reward model.
+
+A training step costs about as much as a supervised step on two sequences, plus forward passes of the frozen reference
+on the same two sequences. The reference log-probabilities can be computed once before training, after which the
+reference model need not be kept in memory <Cite id="hf2026trldpo" />. Nothing is generated during training. This is why
+DPO is usually the first preference method tried after <NoteLink to="supervised-fine-tuning">supervised
+fine-tuning</NoteLink>.
+
+## Derivation
+
+**The objective.** <Gloss name="rlhf" /> seeks, for each prompt $x$, a distribution $\pi$ over responses that earns a
+high reward $r(x, y)$ without moving far from $\pi_{\text{ref}}$:
+
+$$
+\max_{\pi}\ \expect_{y \sim \pi(\cdot \mid x)}\brack{r(x, y)} - \beta\,\KL\paren{\pi(\cdot \mid x) \,\|\, \pi_{\text{ref}}(\cdot \mid x)}.
+$$
+
+**The optimal policy.** Define the normaliser $Z(x) = \sum_y\pi_{\text{ref}}(y \mid x)\exp(r(x, y)/\beta)$ and the
+distribution $\pi^*(y \mid x) = \pi_{\text{ref}}(y \mid x)\exp(r(x, y)/\beta)/Z(x)$. Taking logarithms of the
+definition gives $r(x, y) = \beta\log(\pi^*(y \mid x)/\pi_{\text{ref}}(y \mid x)) + \beta\log Z(x)$. Substituting
+this into the objective, for any $\pi$,
+
+$$
+\expect_{\pi}\brack{r - \beta\log\frac{\pi}{\pi_{\text{ref}}}} = \expect_{\pi}\brack{\beta\log\frac{\pi^*}{\pi_{\text{ref}}} + \beta\log Z(x) - \beta\log\frac{\pi}{\pi_{\text{ref}}}} = \beta\log Z(x) - \beta\,\KL\paren{\pi \,\|\, \pi^*}.
+$$
+
+$Z(x)$ does not depend on $\pi$, and the <Gloss name="kl" /> divergence is non-negative and zero only at $\pi = \pi^*$.
+So $\pi^*$ is the unique maximiser: the optimal policy reweights the reference by $\exp(r/\beta)$.
+
+**From policy to reward.** The same identity read backwards says that any policy $\pi$ with the support of
+$\pi_{\text{ref}}$ is optimal for the reward $\beta\log(\pi/\pi_{\text{ref}}) + \beta\log Z(x)$. Every reward
+defines one optimal policy, and every policy defines its reward up to a function of $x$ alone.
+
+**Bradley–Terry cancels the normaliser.** Under the Bradley–Terry model, the probability that $y_w$ is preferred is
+$\sigma(r(x, y_w) - r(x, y_l))$. Writing both rewards through the policy, the term $\beta\log Z(x)$ appears in each and
+cancels in the difference:
+
+$$
+P(y_w \succ y_l \mid x) = \sigma\paren{\beta\log\frac{\pi(y_w \mid x)}{\pi_{\text{ref}}(y_w \mid x)} - \beta\log\frac{\pi(y_l \mid x)}{\pi_{\text{ref}}(y_l \mid x)}}.
+$$
+
+$Z(x)$ sums over every possible response and cannot be computed. Its cancellation is what makes DPO tractable.
+Parameterising $\pi$ as $\pi_{\thetavec}$ and maximising the likelihood of the observed preferences gives
+$L_{\text{DPO}}$. Fitting the policy is fitting a reward model whose optimal policy is the policy itself
+<Cite id="rafailov2023" />. A fuller treatment of the RLHF side is in
+<NoteLink to="reinforcement-learning-from-human-feedback">reinforcement learning from human feedback</NoteLink>.
+
+**Sequences.** For a response of $T$ tokens, $\log\pi_{\thetavec}(y \mid x) = \sum_{t=1}^T\log\pi_{\thetavec}(y_t \mid x,
+y_{<t})$, the same sum as in the supervised loss. The implicit reward is therefore a sum over tokens of per-token
+log-ratios, and its magnitude grows with response length.
+
+## The gradient
+
+Write the margin $z = \hat r_{\thetavec}(x, y_w) - \hat r_{\thetavec}(x, y_l)$, so that the loss of one pair is
+$-\log\sigma(z)$. Since $\tfrac{d}{dz}\brack{-\log\sigma(z)} = -\sigma(-z)$ and
+$\nabla_{\thetavec}z = \beta\paren{\nabla_{\thetavec}\log\pi_{\thetavec}(y_w \mid x) - \nabla_{\thetavec}\log\pi_{\thetavec}(y_l \mid x)}$,
+
+$$
+\nabla_{\thetavec}L_{\text{DPO}} = -\beta\,\expect\brack{\sigma\paren{\hat r_{\thetavec}(x, y_l) - \hat r_{\thetavec}(x, y_w)}\paren{\nabla_{\thetavec}\log\pi_{\thetavec}(y_w \mid x) - \nabla_{\thetavec}\log\pi_{\thetavec}(y_l \mid x)}}.
+$$
+
+A gradient step raises the log-probability of $y_w$ and lowers that of $y_l$. Each pair is weighted by
+$\sigma(-z)$, the probability that the implicit reward model assigns to the wrong order. A misordered pair has weight
+near 1. A pair already ordered by a wide margin has weight near 0 and stops pulling. Rafailov et al. found that a
+version without this weight, which pushes every pair equally, can make the language model degenerate
+<Cite id="rafailov2023" />.
+
+The gradient fixes only the difference between the two log-probabilities. Nothing in it requires
+$\log\pi_{\thetavec}(y_w \mid x)$ to rise. This gap is the source of the failure described under
+[likelihood displacement](#likelihood-displacement).
+
+## Choosing the hyperparameters
+
+**$\beta$.** The loss depends on the log-ratios only through $\beta$ times their difference. To reach a given margin
+$z$, the policy must move the difference of log-ratios by $z/\beta$. A small $\beta$ lets the policy move far from the
+reference; a large $\beta$ holds it close. The usual range is 0.01 to 0.5.
+<NoteLink to="adapting-pretrained-language-models">TRL</NoteLink>'s default is 0.1 <Cite id="hf2026trldpo" />, the value
+used for Zephyr-7B <Cite id="tunstall2023" />.
+
+**Learning rate.** DPO uses learning rates one to two orders of magnitude below
+supervised fine-tuning. Zephyr-7B used a peak learning rate of $2 \times 10^{-5}$ for <Gloss name="sft" /> and
+$5 \times 10^{-7}$ for DPO, 40 times smaller <Cite id="tunstall2023" />. Meng et al. searched DPO learning rates in
+$\{3, 5, 6, 10\} \times 10^{-7}$ and $\beta$ in $\{0.01, 0.05, 0.1\}$, and found that the best learning rate differed
+between methods and strongly affected benchmark scores <Cite id="meng2024simpo" />. TRL's default is $10^{-6}$ for full
+fine-tuning. Training a <Gloss name="lora" /> adapter tolerates larger rates, about $10^{-5}$
+<Cite id="hf2026trldpo" />.
+
+**Epochs.** Training accuracy on the preference pairs often reaches 1 within an epoch. Zephyr-7B overfitted the training
+pairs in this sense after one epoch, yet its benchmark scores still improved with three epochs of DPO. When the SFT
+model had been trained for more than one epoch, longer DPO training made the model worse <Cite id="tunstall2023" />.
+Rafailov et al. found that direct alignment methods overoptimise as RLHF does: past some KL divergence from the
+reference, quality falls, often before one epoch is complete <Cite id="rafailov2024overoptimisation" />. Select
+checkpoints by evaluating generations, not by the training loss.
+
+**The reference model.** The derivation assumes $\pi_{\text{ref}}$ is the policy whose KL divergence is penalised, and
+the preference data are best drawn from it. When the pairs come from other models, Rafailov et al. first fine-tuned the
+reference on the preferred responses, by maximum likelihood, to reduce the mismatch <Cite id="rafailov2023" />.
+
+## Reading the training metrics
+
+TRL's `DPOTrainer` logs the following per interval, averaged over pairs <Cite id="hf2026trldpo" />:
+
+| Metric | Meaning | At the start |
+| --- | --- | --- |
+| `loss` | the DPO loss | $\log 2 = 0.693$ |
+| `rewards/chosen` | mean $\hat r_{\thetavec}(x, y_w)$ | 0 |
+| `rewards/rejected` | mean $\hat r_{\thetavec}(x, y_l)$ | 0 |
+| `rewards/margins` | mean of chosen minus rejected | 0 |
+| `rewards/accuracies` | fraction of pairs with chosen above rejected | 0, as no margin is yet positive |
+| `logps/chosen`, `logps/rejected` | log-probability of the responses under the policy | the reference's values |
+
+At the start the policy equals the reference, so every implicit reward is 0 and the loss is
+$-\log\sigma(0) = \log 2$ whatever $\beta$ is. The loss alone says little: it depends only on the margins. The
+patterns below combine the metrics.
+
+- **Healthy.** `rewards/margins` grows steadily and evaluation `rewards/accuracies` rises above one half and levels off.
+  `rewards/rejected` falls, and `rewards/chosen` stays near 0 or rises. Ethayarajh et al. describe the same target for
+  their related method: ideally only the rejected rewards fall <Cite id="ethayarajh2024" />.
+- **Both falling.** `rewards/chosen` and `rewards/rejected` both fall, with the rejected falling faster, so the margin
+  still grows. This is the most common pattern in practice and is the subject of the next section. A learning rate that
+  is too high makes it worse <Cite id="ethayarajh2024" />.
+- **Overfitting.** Training accuracy approaches 1 and training margins keep growing while evaluation accuracy and
+  margins stall. More epochs will not help the held-out pairs.
+- **Runaway.** Margins grow very large, `logps/chosen` collapses, and sampled responses become long, repetitive or
+  malformed. $\beta$ is too small or the learning rate too high.
+- **Nothing learned.** Margins stay near 0. Check that chosen and rejected are not swapped and that the learning rate is
+  not far too small.
+
+Offline DPO does not log the KL divergence from the reference, because it samples nothing. Estimate it on held-out
+prompts by sampling $y \sim \pi_{\thetavec}(\cdot \mid x)$ and averaging
+$\log\pi_{\thetavec}(y \mid x) - \log\pi_{\text{ref}}(y \mid x)$.
+
+## Likelihood displacement
+
+<Gloss name="likelihood-displacement" /> is the fall of $\log\pi_{\thetavec}(y_w \mid x)$ during DPO training. Pal et
+al. showed that the DPO loss can decrease while the probability of the preferred response falls, provided the
+probability of the rejected response falls faster. In practice it happened most when the two responses of a pair
+differed in few tokens <Cite id="pal2024smaug" />. Razin et al. showed that the probability mass released can move to
+responses with the opposite meaning. Training a model to prefer "No" over "Never" sharply raised the probability of
+"Yes". Training Llama-3-8B-Instruct to prefer refusals over harmful completions lowered its refusal rate on unsafe
+prompts from 74.4% to 33.4%. The displacement was driven by pairs whose chosen and rejected responses have similar
+hidden representations, and removing the pairs with the most similar representations mitigated it
+<Cite id="razin2025" />.
+
+Remedies act on the missing pressure on $y_w$:
+
+- **Add the supervised loss on the chosen response.** Pang et al. added the negative log-likelihood of $y_w$ to the
+  DPO loss and found the term crucial for reasoning tasks <Cite id="pang2024irpo" />. In TRL, pass
+  `loss_type=["sigmoid", "sft"]` with weights in `loss_weights` <Cite id="hf2026trldpo" />.
+- **Penalise any fall.** DPO-Positive subtracts $\lambda\max\paren{0, \log(\pi_{\text{ref}}(y_w \mid x)/\pi_{\thetavec}(y_w
+  \mid x))}$ from the margin inside the sigmoid, which is active only when the policy has lowered the chosen response
+  below the reference <Cite id="pal2024smaug" />.
+- **Curate pairs.** Remove pairs whose responses are near-duplicates, and lower the learning rate.
+
+<LikelihoodDisplacement />
+
+## Variants
+
+Each variant changes one assumption of DPO. All are available in TRL <Cite id="vonwerra2020" />.
+
+| Method | Data | Reference model | Main change | TRL |
+| --- | --- | --- | --- | --- |
+| DPO | pairs | yes | the baseline | `DPOTrainer` |
+| <Gloss name="ipo" /> | pairs | yes | squared loss to a finite target margin | `DPOTrainer`, `loss_type="ipo"` |
+| <Gloss name="kto" /> | single responses labelled good or bad | yes | prospect-theory value of each response | `KTOTrainer` |
+| <Gloss name="orpo" /> | pairs | no | odds-ratio term added to the SFT loss | `trl.experimental.orpo` |
+| <Gloss name="simpo" /> | pairs | no | mean per-token log-probability, target margin | `trl.experimental.cpo`, `loss_type="simpo"` |
+| Online DPO | prompts and a judge | yes | pairs sampled from the current policy | `trl.experimental.online_dpo` |
+
+### Identity preference optimisation
+
+**Why.** Bradley–Terry turns a preference probability $p$ into a reward difference $\log(p/(1 - p))$, which is
+infinite when $p = 1$. A pair preferred every time it was labelled, which is the usual case when each pair has one
+label, therefore drives the optimal policy to $\pi(y_l \mid x) = 0$ whatever $\beta$ is. The KL penalty stops
+regularising exactly when the data are most deterministic, and a small sample makes an empirical $p = 1$ likely even
+when the true $p$ is 0.8 <Cite id="azar2024" />.
+
+**Objective.** With
+$h_{\thetavec} = \log\frac{\pi_{\thetavec}(y_w \mid x)\,\pi_{\text{ref}}(y_l \mid x)}{\pi_{\thetavec}(y_l \mid x)\,\pi_{\text{ref}}(y_w \mid x)}$,
+the difference of log-ratios, IPO minimises
+
+$$
+L_{\text{IPO}}(\thetavec) = \expect\brack{\paren{h_{\thetavec} - \frac{1}{2\tau}}^2}.
+$$
+
+The loss regresses the gap onto the finite target $1/(2\tau)$, so a perfectly separated pair stops being pushed once
+its gap reaches the target <Cite id="azar2024" />. In TRL, `beta` plays the role of $\tau$ <Cite id="hf2026trldpo" />.
+
+### Kahneman–Tversky optimisation
+
+**Why.** Pairs are expensive. Thumbs-up and thumbs-down labels on single responses are cheap and plentiful. Prospect
+theory describes how people value an outcome relative to a reference point, with losses weighing more than gains.
+Ethayarajh et al. built a loss on that value function <Cite id="ethayarajh2024" />.
+
+**Objective.** Each example is a prompt, a response and a label. With $r_{\thetavec}(x, y) = \log(\pi_{\thetavec}(y
+\mid x)/\pi_{\text{ref}}(y \mid x))$ and a reference point $z_0$, an estimate of
+$\KL(\pi_{\thetavec} \,\|\, \pi_{\text{ref}})$ from mismatched prompt and response pairs in the batch that is not
+differentiated,
+
+$$
+v(x, y) = \begin{cases}\lambda_D\,\sigma\paren{\beta\,(r_{\thetavec}(x, y) - z_0)} & y \text{ desirable,} \\ \lambda_U\,\sigma\paren{\beta\,(z_0 - r_{\thetavec}(x, y))} & y \text{ undesirable,}\end{cases}
+\qquad L_{\text{KTO}} = \expect\brack{\lambda_y - v(x, y)},
+$$
+
+where $\lambda_y$ is $\lambda_D$ or $\lambda_U$ according to the label <Cite id="ethayarajh2024" />. A desirable
+response gains value when its log-ratio exceeds the policy's average divergence, and an undesirable one when its
+log-ratio falls below it.
+
+**Practice.** KTO matched or exceeded pairwise methods such as DPO at scales from 1 to 30 billion parameters. It matched
+DPO with up to 90% fewer desirable examples <Cite id="ethayarajh2024" />. With $n_D$ desirable and $n_U$ undesirable
+examples, set the weights so that $\lambda_D n_D/(\lambda_U n_U)$ lies between 1 and 4/3. The KL estimate needs at least
+4 examples per device step, and for $\beta = 0.1$ the learning rate should not exceed $10^{-6}$
+<Cite id="hf2026trlkto" />.
+
+### Odds ratio preference optimisation
+
+**Why.** Supervised fine-tuning on chosen responses also raises the probability of similar rejected responses, because
+it has no term that pushes them down. Hong et al. observed rejected responses reaching higher log-probabilities than
+chosen ones during SFT. ORPO adds a small penalty for the rejected style to the SFT loss, in one stage and without a
+reference model <Cite id="hong2024orpo" />.
+
+**Objective.** Let $P_{\thetavec}(y \mid x) = \exp\paren{\frac{1}{T}\sum_{t=1}^{T}\log\pi_{\thetavec}(y_t \mid x,
+y_{<t})}$ be the geometric-mean token probability and
+$\operatorname{odds}_{\thetavec}(y \mid x) = P_{\thetavec}(y \mid x)/(1 - P_{\thetavec}(y \mid x))$. Then
+
+$$
+L_{\text{ORPO}} = \expect\brack{L_{\text{SFT}}(x, y_w) - \lambda\log\sigma\paren{\log\frac{\operatorname{odds}_{\thetavec}(y_w \mid x)}{\operatorname{odds}_{\thetavec}(y_l \mid x)}}},
+$$
+
+with $L_{\text{SFT}}$ the negative mean log-likelihood of $y_w$ and $\lambda$ between 0.1 and 0.25 in the paper's
+experiments <Cite id="hong2024orpo" />. In TRL's `ORPOTrainer`, the argument `beta` is $\lambda$
+<Cite id="vonwerra2020" />.
+
+### Simple preference optimisation
+
+**Why.** DPO's implicit reward is a sum of log-ratios over tokens, while generation favours responses with a high
+average log-probability per token. A response can have the higher DPO reward and the lower average likelihood, and the
+summed reward can be raised by length. SimPO uses the average log-probability itself as the reward. It needs no
+reference model, which saves memory and compute <Cite id="meng2024simpo" />.
+
+**Objective.**
+
+$$
+L_{\text{SimPO}} = -\expect\brack{\log\sigma\paren{\frac{\beta}{\abs{y_w}}\log\pi_{\thetavec}(y_w \mid x) - \frac{\beta}{\abs{y_l}}\log\pi_{\thetavec}(y_l \mid x) - \gamma}},
+$$
+
+where $\abs{y}$ is the number of tokens and $\gamma > 0$ is a target reward margin. The authors recommend $\beta$
+between 2.0 and 2.5 and $\gamma$ between 0.5 and 1.5. Removing the length normalisation biased the model towards long,
+lower-quality responses. SimPO outperformed DPO by up to 6.4 points on AlpacaEval 2 and 7.5 points on Arena-Hard.
+Without a KL term, it relies on a small learning rate and diverse preference data to stay close to the starting model
+<Cite id="meng2024simpo" />.
+
+### Online and iterative DPO
+
+**Why.** Offline pairs are usually generated by other models, and the policy drifts from them as it trains. The data
+are off-policy from the first step <Cite id="guo2024oaif" />.
+
+**Method.** Sample two or more responses per prompt from the current policy, label them with a reward model or a
+language-model judge, and take a DPO step on the fresh pairs. Guo et al. sampled two responses from the current model at
+every iteration and asked a language model which was better. In human evaluation this beat both offline direct alignment
+and RLHF <Cite id="guo2024oaif" />. Xiong et al. analysed the KL-regularised problem and derived an iterative DPO that
+alternates sampling and DPO training, with finite-sample guarantees <Cite id="xiong2024iterative" />. Pang et al. ran
+iterations of DPO with the added negative log-likelihood term on pairs of correct and incorrect chains of thought, and
+raised Llama-2-70B-Chat's GSM8K accuracy from 55.6% to 81.6% <Cite id="pang2024irpo" />. TRL's `OnlineDPOTrainer` takes
+prompts and one or more reward functions or reward models <Cite id="vonwerra2020" />.
+
+## Evidence: DPO compared with PPO
+
+- Rafailov et al. found DPO better than <Gloss name="ppo" />-based RLHF at controlling sentiment, and as good or better
+  on summarisation and single-turn dialogue <Cite id="rafailov2023" />.
+- Xu et al. argued that DPO can find solutions that exploit responses outside the preference data, and that its results
+  depend on the distribution shift between the model's outputs and the preference data. With advantage normalisation,
+  large batches and an exponential moving average of the reference model, PPO surpassed DPO on every testbed they ran,
+  dialogue and competitive programming included <Cite id="xu2024dpoppo" />.
+- Ivison et al. varied data, algorithm, reward model and prompts. Better preference data gave the largest gains, up to
+  8% on instruction following and truthfulness. PPO outperformed DPO by up to 2.5% in maths and 1.2% in general domains
+  <Cite id="ivison2024" />.
+- Tajwar et al. found that methods that sample from the current policy, or that push down the likelihood of specific
+  responses as DPO does, outperform offline maximum-likelihood objectives <Cite id="tajwar2024" />.
+
+DPO is the cheaper and more stable first step. Pairs sampled from the model being trained close much of the gap. When a
+reward can be computed, such as the correctness of a maths answer, on-policy <Gloss name="rl">reinforcement
+learning</Gloss> such as <NoteLink to="group-relative-policy-optimisation">group relative policy optimisation</NoteLink>
+optimises it directly.
+
+## Training one in practice
+
+```python
+from datasets import load_dataset
+from trl import DPOConfig, DPOTrainer
+
+# Each row: {"prompt": ..., "chosen": ..., "rejected": ...}, as text or as chat messages.
+dataset = load_dataset("trl-lib/ultrafeedback_binarized")
+
+trainer = DPOTrainer(
+    model="my-org/my-sft-model",  # the SFT checkpoint; it also becomes the frozen reference
+    args=DPOConfig(output_dir="dpo", beta=0.1, learning_rate=5e-7, num_train_epochs=1),
+    train_dataset=dataset["train"],
+    eval_dataset=dataset["test"],
+)
+trainer.train()
+```
+
+With `ref_model` left unset, the trainer uses the initial state of `model` as $\pi_{\text{ref}}$. Setting
+`precompute_ref_log_probs=True` computes the reference log-probabilities once, so the reference model does not stay in
+memory <Cite id="hf2026trldpo" />.
+
+## Worked example
+
+Take $\beta = 0.1$.
+
+**A healthy pair.** The policy has raised $\log\pi_{\thetavec}(y_w \mid x)$ by 3 nats relative to the reference and
+lowered $\log\pi_{\thetavec}(y_l \mid x)$ by 7 nats. The implicit rewards are $0.1 \times 3 = 0.3$ and
+$0.1 \times (-7) = -0.7$, the margin is 1.0, the loss is $-\log\sigma(1) = 0.313$ and the gradient weight is
+$\sigma(-1) = 0.269$.
+
+**A displaced pair.** The policy has lowered $\log\pi_{\thetavec}(y_w \mid x)$ by 2 nats and
+$\log\pi_{\thetavec}(y_l \mid x)$ by 12 nats. The implicit rewards are $-0.2$ and $-1.2$, the margin is again 1.0 and
+the loss is again 0.313. The loss cannot tell the two pairs apart. Only `logps/chosen` and `rewards/chosen` show that
+the second policy is less likely than the reference to produce the preferred response.
+
+**Saturation.** At margins of 0.2, 1, 2 and 4 the loss is 0.598, 0.313, 0.127 and 0.018 and the gradient weight is
+0.450, 0.269, 0.119 and 0.018. With $\beta = 0.1$, a margin of 4 needs a 40-nat difference of log-ratios, after which
+the pair has almost no effect.
+
+**Length.** A 400-token response whose per-token log-ratio averages 0.01 nats has a sequence log-ratio of 4 nats and
+an implicit reward of 0.4. A 40-token response needs a per-token log-ratio of 0.1 nats, ten times larger, to earn the
+same reward.
+
+**IPO target.** With $\tau = 0.1$, IPO drives the difference of log-ratios of every pair towards $1/(2 \times 0.1) = 5$
+nats and no further.
+
+## Assumptions
+
+- **Bradley–Terry preferences.** The derivation assumes preferences come from one scalar reward through the logistic
+  link. Deterministic preferences break the regularisation, which IPO repairs.
+- **A shared reference.** The KL penalty is measured against $\pi_{\text{ref}}$, and the data should come from it or
+  near it. Off-policy pairs make DPO an approximation to the objective it was derived from.
+- **Full support.** Every response the policy could produce must have non-zero probability under $\pi_{\text{ref}}$, or
+  the log-ratio is undefined.
+
+## Pitfalls
+
+- **Treating rising margins as progress.** Margins can grow while the chosen responses become less likely and while
+  generations get worse. Watch `logps/chosen` and sample outputs.
+- **Copying SFT <Gloss name="learning-rate">learning rates</Gloss>.** Rates suited to supervised fine-tuning are far too
+  large for DPO and quickly collapse the policy.
+- **Comparing $\beta$ across losses.** $\beta$ means different things in DPO, IPO, ORPO and SimPO, and in TRL the same
+  argument name carries each meaning. Retune when switching.
+- **Length exploitation.** The summed implicit reward rewards length. Compare models with length-controlled metrics and
+  consider a length-normalised loss.
+- **Stale reference.** Running DPO from a model other than the one the reference represents breaks the derivation's
+  assumptions and inflates the initial KL divergence.

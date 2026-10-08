@@ -1,0 +1,306 @@
+---
+title: Bootstrapping a language model for a new task
+kind: example
+summary: 'A support team adapts an open 8-billion-parameter instruct model to turn tickets into JSON records. The evaluation comes first. Then come data, LoRA fine-tuning with memory, compute and cost arithmetic, optional preference and verifiable-reward stages, and deployment.'
+tags: [worked-example, language-models, large-language-models, fine-tuning]
+aliases: [fine-tuning a language model end to end, LLM fine-tuning walkthrough, structured extraction by fine-tuning, support ticket extraction, fine-tuning memory estimate]
+requires: [supervised-fine-tuning, low-rank-adaptation]
+partOf: [adapting-pretrained-language-models]
+related: [language-model-evaluation, model-quantisation, key-value-cache]
+references: [grattafiori2024, dettmers2023, schulman2025lora, vonwerra2020, kaplan2020]
+status: draft
+updated: 2026-10-07
+---
+
+<Definition>
+A company receives 50,000 support tickets a day as free text. Each ticket must become a <Gloss name="json" /> record
+with six fields: `category` (one of 12 labels), `priority` (`low`, `normal`, `high` or `urgent`), `product` (one of 30
+product lines, or `unknown`), `order_id` (a string of the form `AB-12345678`, or null), `refund_requested` (true or
+false) and `language` (a two-letter language code). The record must validate against a JSON Schema. The team has 18
+months of past tickets, some with category and priority set by support agents, one 80 GB H100 <Gloss name="gpu" />,
+and a budget of annotation hours. The business requires that at least 90% of tickets have all six fields correct. The
+starting model is Llama 3.1 8B Instruct. Decide whether fine-tuning is needed, then plan the data, the training run, its
+memory, compute and cost, and deployment.
+</Definition>
+
+## Setup
+
+**The model.** Llama 3.1 8B has $L = 32$ transformer layers of width $d = 4{,}096$, feed-forward width $f = 14{,}336$,
+32 query heads and 8 key-value heads of dimension 128, so the key and value projections have width $d_{kv} = 1{,}024$.
+The vocabulary has $V = 128{,}256$ tokens and the input and <NoteLink to="embeddings-and-output-heads">output
+embeddings</NoteLink> are separate <Cite id="grattafiori2024" />. Each layer has seven weight matrices: the query, key,
+value and output projections of attention, and the gate, up and down projections of the <Gloss name="swiglu" />
+feed-forward block. Counting them gives the parameter count:
+
+$$
+\Psi = L\,\big(2d^2 + 2d\,d_{kv} + 3df\big) + 2Vd = 6.98 \times 10^9 + 1.05 \times 10^9 = 8.03 \times 10^9,
+$$
+
+ignoring the normalisation weights, which add $2.7 \times 10^5$. The input embedding is a table lookup, so its $Vd$
+parameters count towards memory but cost no arithmetic.
+
+**The tokens.** Measured on the team's own tickets, the lengths are assumed to be: a fixed instruction with the schema
+of 300 tokens, a ticket of 250 tokens on average, and an output record of 80 tokens. A training example therefore has a
+prompt of $P = 550$ tokens and a completion of $C = 80$ tokens.
+
+**The metrics.** For a set of $n$ tickets:
+
+- **validity**: the fraction of outputs that parse and satisfy the schema;
+- **field accuracy**: for each field, the fraction of tickets on which it equals the gold value;
+- **record exact match** (EM): the fraction of tickets with all six fields correct, the business metric
+  (see <NoteLink to="hamming-jaccard-and-exact-match">exact match</NoteLink>);
+- **macro-F1** on `category`, which weights the 12 labels equally so that rare ones count
+  (see <NoteLink to="precision-recall-and-f-score">F-score</NoteLink>).
+
+## Solution
+
+### Step 1: build the evaluation before any training
+
+**Split by time.** The most recent month of tickets is the test set and the month before it the development set. A
+random split would place tickets from the same weeks, products and incidents in both training and test data, and
+overstate accuracy on next month's tickets. The time split measures what deployment faces: tickets that arrive after
+the training data, under <NoteLink to="dataset-shift">dataset shift</NoteLink>.
+
+**Size the test set from the precision needed.** The <NoteLink to="standard-error">standard error</NoteLink> of a
+proportion $\hat p$ on $n$ independent tickets is $\sqrt{\hat p(1 - \hat p)/n}$
+(<NoteLink to="binomial-distribution">binomial distribution</NoteLink>). For $n = 600$:
+
+| Record EM $\hat p$ | Standard error | Half-width of a 95% interval |
+| --- | --- | --- |
+| 0.80 | 0.0163 | $\pm 3.2$ points |
+| 0.90 | 0.0122 | $\pm 2.4$ points |
+
+A 600-ticket test set can tell 0.80 from 0.90, but not 0.90 from 0.91. Two systems scored on the same tickets are
+compared on the tickets where they disagree, which is more sensitive than comparing two separate intervals
+(<NoteLink to="metric-confidence-intervals">confidence intervals for metrics</NoteLink>). The development set has 400
+tickets and is used for every decision during training. The test set is scored once per candidate system.
+
+**Label the evaluation sets carefully.** Two annotators label each test ticket independently, and a third resolves
+disagreements. The fraction of tickets on which the two agree shows how noisy one person's labels are, and
+<NoteLink to="cohens-kappa">Cohen's kappa</NoteLink> corrects that fraction for agreement expected by chance
+<Cite id="cohen1960" />. The development tickets are labelled once. At an assumed 90 seconds per ticket, with a third
+annotator needed on an assumed 20% of test tickets, labelling takes $(2 \times 600 + 0.2 \times 600 + 400) \times
+90\ \text{s} = 43$ hours.
+
+**Score the prompting baselines.** Three baselines use the same evaluation code:
+
+1. **Zero-shot**: the instruction and the schema, with decoding constrained to the schema, so that validity is 1 by
+   construction. Constrained decoding masks, at each step, every token that would make the output invalid
+   <Cite id="willard2023" />.
+2. **Few-shot** with $k = 8$ demonstrations: each adds a ticket and its record, $250 + 80 = 330$ tokens, so the prompt
+   grows from 550 to $550 + 8 \times 330 = 3{,}190$ tokens, 5.8 times longer. At 50,000 tickets a day that is
+   $50{,}000 \times 2{,}640 = 1.32 \times 10^8$ extra prompt tokens a day.
+3. **A larger model** with the few-shot prompt, if policy allows sending tickets to it.
+
+If a baseline meets 0.90 record EM on the development set, and the test set confirms it, the work stops here. The rest
+of this example assumes that the cheap baselines fall short, and that the per-field errors show the model choosing the
+wrong `category` and `priority` labels, which are conventions of this company rather than facts the model could know.
+That is a gap in behaviour and format, the case for <NoteLink to="supervised-fine-tuning">supervised
+fine-tuning</NoteLink>.
+
+### Step 2: build the training data
+
+**Sources.** Past tickets from the 16 months before the development month carry agent-assigned `category` and
+`priority`. The other four fields are drafted by the larger model of baseline 3. Two of them are also checked by rules:
+`order_id` against its pattern and the order database, `language` against a language detector. A 10% audit sample of 400
+tickets is labelled by hand, $400 \times 90\ \text{s} = 10$ hours, to measure the error rate of these labels.
+
+**Size.** The training set has 4,000 tickets. Supervised fine-tuning changes format and behaviour with few examples:
+LIMA used 1,000 for a general assistant <Cite id="zhou2023lima" />. The constraint here is the rarest label. A category
+with 2% of tickets has 80 examples in 4,000, so rare categories are oversampled from the history until each has at
+least 100. Whether more data would help is measured, not assumed: train on 500, 1,000, 2,000 and 4,000 tickets, and
+if development EM is still rising at 4,000, more labelled tickets are worth buying.
+
+**Cleaning.**
+
+- Drop records that fail the schema.
+- Remove exact and near-duplicate tickets, such as automated alerts that repeat with a different timestamp, with
+  MinHash signatures <Cite id="broder1997" /> and <NoteLink to="locality-sensitive-hashing">locality-sensitive
+  hashing</NoteLink>.
+- Remove personal data that the model does not need to see.
+- Decontaminate: no training ticket may come from the development or test months, and no training ticket may be a near
+  duplicate of a test ticket. A test ticket seen in training measures memory, not the task
+  (<NoteLink to="data-leakage">data leakage</NoteLink>).
+- Drop the few tickets whose prompt and completion exceed the maximum sequence length. Truncating them would cut the
+  record at the end of the sequence, and the model would learn to stop mid-record.
+
+**Token counts.** One epoch processes $4{,}000 \times (550 + 80) = 2.52 \times 10^6$ tokens, of which
+$4{,}000 \times 80 = 3.2 \times 10^5$ are completion tokens that carry the loss.
+
+### Step 3: fine-tune with low-rank adapters
+
+<NoteLink to="low-rank-adaptation">Low-rank adaptation</NoteLink> freezes each weight matrix
+$\Wmat_0 \in \reals^{d_{\text{out}} \times d_{\text{in}}}$ and learns $\Wmat_0 + \tfrac{\alpha}{r}\Bmat\Amat$, with
+$\Bmat \in \reals^{d_{\text{out}} \times r}$ and $\Amat \in \reals^{r \times d_{\text{in}}}$ <Cite id="hu2022" />.
+
+| Setting | Value | Reason |
+| --- | --- | --- |
+| Target matrices | all seven per layer | Adapters on every linear layer were needed to match 16-bit full fine-tuning <Cite id="dettmers2023" />; attention-only adapters underperform <Cite id="schulman2025lora" /> |
+| Rank $r$ | 16 | With adapters on all layers, rank had no clear effect on final performance <Cite id="dettmers2023" />; the dataset is small |
+| Scale $\alpha$ | 32 | The scaling $\alpha/r$ multiplies the update; $\alpha = 32$ follows <Cite id="schulman2025lora" /> |
+| Adapter <NoteLink to="dropout">dropout</NoteLink> | 0.05 | Helped at 7 and 13 billion parameters <Cite id="dettmers2023" /> |
+| <Gloss name="learning-rate">Learning rate</Gloss> | $1 \times 10^{-4}$, swept over $\{5 \times 10^{-5}, 10^{-4}, 2 \times 10^{-4}\}$ | About 10 times the full fine-tuning rate <Cite id="schulman2025lora" />; the TRL fine-tuning library suggests about $10^{-4}$ for adapters <Cite id="vonwerra2020" />; QLoRA used $2 \times 10^{-4}$ at 7B <Cite id="dettmers2023" /> |
+| Schedule | linear decay, warm-up over the first 3% of steps | Warm-up avoids large first steps from an untuned optimiser state |
+| Effective batch | 16 sequences: 8 per micro-batch, 2 accumulation steps | QLoRA used 16 at 7B <Cite id="dettmers2023" />; low-rank adapters lose more than full fine-tuning at large batch sizes <Cite id="schulman2025lora" /> |
+| Epochs | 3, keeping the checkpoint with the best development EM | Each epoch has $4{,}000 / 16 = 250$ steps, 750 in total; the development set is scored every 50 steps |
+| Maximum length | 1,024 tokens | Covers $P + C = 630$ with room for long tickets |
+| Loss | on completion tokens only | The prompt is input; TRL masks it by default for prompt–completion data <Cite id="vonwerra2020" /> |
+
+**Adapter size.** A matrix of shape $d_{\text{out}} \times d_{\text{in}}$ gets $r(d_{\text{in}} + d_{\text{out}})$
+adapter parameters. Per layer, with $r = 16$:
+
+$$
+r\big[\,2(d + d) + 2(d + d_{kv}) + 3(d + f)\,\big] = 16\,\big[16{,}384 + 10{,}240 + 55{,}296\big] = 1{,}310{,}720.
+$$
+
+Over 32 layers, $\Psi_{\text{a}} = 4.19 \times 10^7$ trainable parameters, 0.52% of $\Psi$.
+
+**Memory.** The run holds four things on the GPU.
+
+1. **Frozen weights** in bfloat16: $2\Psi = 16.06$ GB.
+2. **Adapter state**: 32-bit weights, gradients and two <NoteLink to="adam">Adam</NoteLink> moments, 16 bytes per
+   adapter parameter: $16 \times 4.19 \times 10^7 = 0.67$ GB.
+3. **Activations**. A micro-batch holds at most $T = 8 \times 1{,}024 = 8{,}192$ tokens. With
+   <NoteLink to="gradient-checkpointing">gradient checkpointing</NoteLink>, each layer stores only its input, $d$
+   numbers per token in 2 bytes: $T \cdot d \cdot 2 \cdot L = 2.15$ GB. In the backward pass one layer at a time is
+   recomputed with all its intermediate tensors: queries, keys and values ($1.5d$ numbers per token), the attention
+   output, residual and normalised inputs (about $6d$), and four tensors of width $f$ in the feed-forward block. That is
+   roughly $(7.5d + 4f) \times 2 = 176$ kB per token, or 1.44 GB for the micro-batch <Cite id="korthikanti2022" />.
+4. **Logits**. Materialising $T \times V$ logits in 32 bits takes $8{,}192 \times 128{,}256 \times 4 = 4.2$ GB. A
+   chunked loss computed only at completion positions avoids most of it; TRL's supervised trainer does this by default
+   <Cite id="vonwerra2020" />.
+
+The total is about $16.06 + 0.67 + 2.15 + 1.44 = 20.3$ GB, or 24.5 GB if the logits are materialised. It fits one 80 GB
+GPU with room to spare, and would fit a 40 GB one. On a 24 GB GPU it leaves under 4 GB for the framework's own buffers
+and for longer tickets, and none if the logits are materialised; storing the base weights in 4 bits by
+<NoteLink to="quantised-low-rank-adaptation">quantised low-rank adaptation</NoteLink> frees about 10 GB. Full
+fine-tuning would need $16\Psi = 128$ GB for weights, gradients and optimiser state alone, sharded across several GPUs
+by <Gloss name="zero" />.
+
+**Compute.** A forward pass costs about $2\Psi$ <Gloss name="flop">floating-point operations</Gloss> per token
+<Cite id="kaplan2020" />. Counting all of $\Psi$, the embedding lookup included, overstates this by about 7%, which errs
+on the safe side. The backward pass computes gradients with respect to activations, another $2\Psi$. It skips gradients
+for the frozen weights, which in full fine-tuning cost a further $2\Psi$; the adapter gradients cost about
+$2\Psi_{\text{a}}$, negligible. Checkpointing recomputes the forward pass, $2\Psi$. The total is
+$6\Psi = 4.8 \times 10^{10}$ per token. Three epochs process $7.56 \times 10^6$ tokens:
+
+$$
+6 \times 8.03 \times 10^9 \times 7.56 \times 10^6 = 3.6 \times 10^{17}\ \text{FLOP}.
+$$
+
+An H100 is rated at 1,979 teraFLOP/s in bfloat16 with structured sparsity, so about 990 teraFLOP/s for dense matrices
+<Cite id="nvidia2022h100" />. A fine-tuning run reaches a fraction of that peak, its model FLOP utilisation
+<Cite id="chowdhery2022" />. At an assumed 30%, about 300 teraFLOP/s, the run takes $3.6 \times 10^{17} / 3 \times
+10^{14} = 1{,}200$ s, about 20 minutes. Padding to the longest sequence in a micro-batch wastes part of this; packing
+sequences together recovers it.
+
+**Cost.** At an assumed \$3 per GPU-hour, one run costs about \$1. The learning-rate sweep (3 runs) and the learning
+curve (4 runs on 500 to 4,000 tickets, together 1.9 times one full run) take under 2 GPU-hours. The annotation took
+$43 + 10 = 53$ hours of people's time. Data and evaluation, not GPU time, dominate the cost of this project.
+
+### Step 4: evaluate and analyse the errors
+
+Decode greedily with the same schema constraint as in deployment, and score the development set with the evaluation
+code of step 1. Before training, two checks catch most setup errors. The first training loss must be far below
+$\ln V = 11.76$ nats, the loss of a uniform prediction; a loss near it means the chat template or the labels are
+misaligned. The model's first sampled outputs must already resemble the prompt baseline's.
+
+Read the per-field accuracies and the <NoteLink to="confusion-matrix">confusion matrix</NoteLink> of `category`. Then
+read 100 development errors and sort each into one of three bins: the model is wrong, the label is wrong, or the ticket
+is ambiguous. A large share of wrong labels means the next gain comes from relabelling, not from training. A large
+share of ambiguous tickets means the label definitions need rewriting. The inter-annotator kappa of step 1 shows how
+much of the remaining error is disagreement between people.
+
+Fine-tuning on one task can lower performance on others. An unmerged adapter confines any such loss to the traffic
+routed through it: unloading the adapter restores the original instruct model. A merged model has no such switch, so
+it serves only this task.
+
+### Step 5, optional: preference optimisation on the model's own samples
+
+This step targets errors that the fine-tuned model makes only sometimes. For each of the 4,000 training prompts, sample
+4 records at temperature 0.7 from the fine-tuned model: $16{,}000 \times 80 = 1.28 \times 10^6$ generated tokens, a few
+minutes in an inference engine. Score each sample by the fraction of its six fields that are correct, with 0 for an
+invalid record. Pair the best and the worst sample of each prompt. Prompts whose four samples score the same give no
+pair.
+
+Train with <NoteLink to="direct-preference-optimisation">direct preference optimisation</NoteLink>: $\beta = 0.1$,
+learning rate $10^{-5}$ for adapters, one epoch <Cite id="vonwerra2020" />. The supervised adapter is merged into the
+weights first, and a new adapter is trained on top, so the reference model is the merged supervised model. Its
+log-probabilities on all pairs are computed once before training, so it need not stay in memory. The loss starts at
+$\ln 2 = 0.693$. If `logps/chosen` falls steeply, the probability of correct records is draining away
+<Cite id="razin2025" />; adding a likelihood term on the chosen records counters it.
+
+### Step 6, optional: reinforcement learning with a verifiable reward
+
+Every field has a gold value, so a program can score any record:
+
+$$
+R(y) = \begin{cases} -1 & \text{if } y \text{ fails to parse or violates the schema}, \\ \frac{1}{6}\sum_{j=1}^{6}
+\indicator[y_j = y_j^{\star}] & \text{otherwise}, \end{cases}
+$$
+
+where $y_j$ is field $j$ of the output and $y_j^{\star}$ its gold value. The reward compares every field to gold,
+including null values. A checker that skipped `order_id` whenever the gold value was null would never penalise a null
+output, and would teach the model to emit null when unsure. Train with
+<NoteLink to="group-relative-policy-optimisation">group relative policy optimisation</NoteLink>, $G = 8$ samples per
+prompt, as in <NoteLink to="reinforcement-learning-with-verifiable-rewards">reinforcement learning with verifiable
+rewards</NoteLink>.
+
+A group whose 8 rewards are equal has zero advantage and gives no gradient. If the fine-tuned model gets a prompt fully
+right with probability $p$ per sample, all 8 samples are fully right with probability $p^8$: 0.43 for $p = 0.9$ and 0.66
+for $p = 0.95$. For $p$ above $0.5^{1/8} = 0.917$, more than half of the groups give no gradient. Keep only prompts on
+which the fine-tuned model's samples disagree, as in the dynamic sampling of <Gloss name="dapo" />
+<Cite id="yu2025dapo" />. One pass over 4,000 prompts generates $4{,}000 \times 8 \times 80 = 2.56 \times 10^6$ tokens.
+Watch the reward on held-out tickets, the fraction of groups with zero reward variance, the entropy and the completion
+length. A record has a fixed structure, so its length should not grow; growth means the model is padding fields.
+
+### Step 7: deploy
+
+**Merge, then quantise.** The adapter is folded into the weights, $\Wmat = \Wmat_0 + \tfrac{\alpha}{r}\Bmat\Amat$, in
+bfloat16. The merged model can be served at 16 bits (16 GB) or <NoteLink to="model-quantisation">quantised</NoteLink>
+to 4 bits with AWQ or GPTQ (about 5 GB) <Cite id="lin2024" /> <Cite id="frantar2023" />. Merging into weights that are
+already quantised would round the update to the quantisation grid, so the order is merge, then quantise. The test set
+is scored again after each step.
+
+**Serve.** vLLM serves the model with outputs constrained to the JSON schema, and can serve the unmerged adapter
+alongside others on one base model <Cite id="vllm2023" />. The <Gloss name="kv-cache" /> of one token holds a key and a
+value of $8 \times 128$ numbers per layer in 2 bytes: $2 \times 32 \times 8 \times 128 \times 2 = 131{,}072$ bytes. A
+630-token request needs $630 \times 131{,}072$ bytes $= 78.75$ MiB. With 16 GB of weights and about 55 GiB left for the
+cache, one GPU holds about $55 \times 1{,}024 / 78.75 = 715$ requests at once. The average load is
+$50{,}000 / 86{,}400 = 0.58$ tickets per second.
+
+**Monitor.** Log validity and the label distribution, send a weekly random sample to annotators, and rescore it. A fall
+in accuracy on new tickets is the signal to relabel recent data and repeat steps 2 to 4.
+
+## What it illustrates
+
+- **Evaluation before training.** Every choice of data and hyperparameters is judged by its effect on the development
+  set, and the precision of that judgement is fixed by the set's size (<NoteLink to="language-model-evaluation">language
+  model evaluation</NoteLink>).
+- **Prompting before fine-tuning.** Prompting is tried first, and fine-tuning is used because the gap is a company
+  convention, a matter of behaviour and format rather than knowledge
+  (<NoteLink to="adapting-pretrained-language-models">adapting pretrained language models</NoteLink>).
+- **Memory accounting.** Frozen weights dominate the memory of low-rank adaptation; the adapter's state is under 1 GB
+  (<NoteLink to="parameter-efficient-fine-tuning">parameter-efficient fine-tuning</NoteLink>).
+- **Annotation, not GPU time, dominates the cost.** The fine-tuning run costs about a dollar at the assumed price,
+  against 53 hours of annotation.
+- **Rewards from programs.** A task whose outputs can be checked turns its metric into a reward, and the reward must
+  check exactly what the metric does (<NoteLink to="reward-models">reward models</NoteLink>).
+- **Serving.** Once the weights are loaded, the <NoteLink to="key-value-cache">key-value cache</NoteLink> of each
+  request sets how many requests one GPU holds.
+
+## Variations
+
+- **No labels at all.** The larger model labels every ticket, people audit a sample, and the small model learns from
+  the audited labels. This is distillation through data, and its ceiling is the teacher's accuracy on the audited
+  sample.
+- **A field that is knowledge.** If `product` had to match a catalogue that changes every month, the catalogue would be
+  retrieved into the prompt (<NoteLink to="retrieval-augmented-generation">retrieval-augmented generation</NoteLink>).
+  A fine-tuned model would need retraining at every change.
+- **A 24 GB GPU.** The base weights are stored in 4 bits and the adapters train at higher precision. The weights then
+  take about 3.6 GB for the linear layers plus 2.1 GB for the two 16-bit embedding matrices, instead of 16 GB.
+- **A free-text field.** A one-sentence summary has no single correct value, so no program can check it. Preference
+  pairs judged by people or by a <NoteLink to="language-model-as-a-judge">judge model</NoteLink> replace the verifiable
+  reward.
+- **A large, distant domain.** With hundreds of thousands of examples far from pretraining text, full fine-tuning learns
+  more than low-rank adapters <Cite id="biderman2024" />, and its 128 GB of state is sharded across several GPUs.

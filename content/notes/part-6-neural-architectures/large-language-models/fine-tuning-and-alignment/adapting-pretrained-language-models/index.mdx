@@ -1,0 +1,248 @@
+---
+title: Adapting pretrained language models
+kind: overview
+summary: 'A pretrained language model is adapted to a new task by prompting, retrieval, supervised fine-tuning of all or some weights, preference optimisation, or reinforcement learning against a checkable reward. Each changes something different at its own cost in data, memory and risk.'
+tags: [language-models, large-language-models, fine-tuning, alignment, reinforcement-learning]
+aliases: [LLM adaptation, adapting an LLM, fine-tuning large language models, LLM fine-tuning, LLM post-training pipeline, fine-tuning tools, TRL, Unsloth, Axolotl, LLaMA-Factory, OpenRLHF, verl, torchtune, training signals]
+requires: [autoregressive-transformer-language-model]
+related: [instruction-tuning-and-alignment, reinforcement-learning-from-human-feedback, transfer-learning-and-fine-tuning, prompting, retrieval-augmented-generation, knowledge-distillation, model-quantisation, language-model-evaluation]
+references: [ouyang2022, lambert2024, deepseek2025r1, vonwerra2020, mangrulkar2022, kwon2023]
+status: draft
+updated: 2026-10-07
+---
+
+<Definition>
+**Adapting** a pretrained <Gloss name="language-model">language model</Gloss> means changing its behaviour on a target
+task, starting from weights learned by <NoteLink to="autoregressive-transformer-language-model">next-token
+prediction</NoteLink> on a large corpus. The methods differ in what they change and in how much training they need.
+Prompting and in-context learning change only the input. Retrieval adds documents to the input. Supervised fine-tuning
+updates weights so that the model imitates demonstrations, either all weights or a small added set. Preference
+optimisation updates weights so that preferred responses become more probable than rejected ones.
+<Gloss name="rl">Reinforcement learning</Gloss> with verifiable rewards updates weights to raise a score that a program
+assigns to the model's own sampled responses.
+</Definition>
+
+## Components
+
+- <NoteLink to="supervised-fine-tuning">Supervised fine-tuning</NoteLink>: maximum likelihood of responses given
+  prompts, with data formats, chat templates, loss masking and packing.
+- <NoteLink to="parameter-efficient-fine-tuning">Parameter-efficient fine-tuning</NoteLink>: training a small set of
+  added or selected parameters while the pretrained weights stay frozen.
+- <NoteLink to="low-rank-adaptation">Low-rank adaptation</NoteLink>: the update $\Wmat_0 + \Bmat\Amat$ with
+  $\Bmat\Amat$ of rank $r$, its scaling, its targets and merging.
+- <NoteLink to="quantised-low-rank-adaptation">Quantised low-rank adaptation</NoteLink>: low-rank adapters on a 4-bit
+  base model, and the memory accounting of fine-tuning.
+- <NoteLink to="reward-models">Reward models</NoteLink>: scalar scorers fitted to preference comparisons.
+- <NoteLink to="direct-preference-optimisation">Direct preference optimisation</NoteLink>: a classification loss on
+  preference pairs that needs no reward model, and its variants.
+- <NoteLink to="reinforcement-learning-with-verifiable-rewards">Reinforcement learning with verifiable
+  rewards</NoteLink>: policy optimisation against a reward computed by a program.
+- <NoteLink to="group-relative-policy-optimisation">Group relative policy optimisation</NoteLink>: a policy-gradient
+  method that compares each sampled response with the others for the same prompt instead of using a value network.
+- <NoteLink to="bootstrapping-a-language-model-for-a-new-task">Bootstrapping a language model for a new task</NoteLink>:
+  a worked example from the evaluation set to deployment, with memory, token and cost arithmetic.
+
+<NoteLink to="instruction-tuning-and-alignment">Instruction tuning and alignment</NoteLink> covers how these stages turn
+a text continuer into an assistant. <NoteLink to="reinforcement-learning-from-human-feedback">Reinforcement learning
+from human feedback</NoteLink> covers the reward-model and <Gloss name="ppo" /> loop.
+
+## What each method changes
+
+A model can fall short on a task in four separate ways. **Knowledge** is facts: a product catalogue, this year's prices,
+the contents of a customer's account. **Behaviour** is what the model does with a request: follow a procedure, ask for a
+missing detail, decline. **Format** is the shape of the output: a <Gloss name="json" /> record, a fixed label set, a
+house style. **Reasoning** is reaching a correct answer through intermediate steps, as in arithmetic and code.
+
+| Method | Weights changed | Data | Changes best | Recurring cost |
+| --- | --- | --- | --- | --- |
+| <NoteLink to="prompting">Prompting</NoteLink> and <NoteLink to="in-context-learning">in-context learning</NoteLink> | none | an instruction and a few demonstrations | format, task framing | prompt tokens on every request |
+| <NoteLink to="retrieval-augmented-generation">Retrieval</NoteLink> | none | a document collection and a retriever | private, recent or citable knowledge | retrieval and longer prompts |
+| Supervised fine-tuning | all, or a small added set | prompt–response demonstrations | format, behaviour, narrow skills | none at inference |
+| Preference optimisation | all, or a small added set | pairs of a preferred and a rejected response | the choice among acceptable responses | none at inference |
+| Reinforcement learning with verifiable rewards | all, or a small added set | prompts and a checking program | accuracy on checkable tasks | none at inference |
+
+**Fine-tuning adds knowledge poorly.** Ovadia et al. compared retrieval with continued training on the same documents
+and found that retrieval outperformed fine-tuning, both for facts the model had seen in pretraining and for new ones
+<Cite id="ovadia2024" />. Gekhman et al. fine-tuned on question–answer pairs whose answers the model did not know. Those
+examples were learned more slowly than examples consistent with what the model knew, and as they were learned, the
+model's tendency to hallucinate rose linearly <Cite id="gekhman2024" />. Knowledge that changes or must be cited belongs
+in a retrieval index.
+
+**Supervised fine-tuning changes format and behaviour with little data.** LIMA fine-tuned a 65-billion-parameter model
+on 1,000 curated prompt–response pairs. Its authors concluded that almost all knowledge is learned in pretraining, and
+that fine-tuning mostly selects the format in which to use it <Cite id="zhou2023lima" />. InstructGPT's supervised stage
+used about 13,000 prompts <Cite id="ouyang2022" />.
+
+**Preference optimisation acts on choices among responses.** Its data compare a preferred and a rejected response to
+the same prompt. It teaches which of several acceptable responses is better: more helpful, more concise, safer. Its loss
+raises the probability of the preferred response relative to the rejected one. When both responses are sampled from the
+policy, the stage reorders responses that the model already produces.
+
+**Reinforcement learning with verifiable rewards improves accuracy where answers can be checked.** A program assigns the
+reward: an <Gloss name="exact-match">exact match</Gloss> on a final number, a passing unit test, a valid record.
+DeepSeek-R1-Zero was trained this way from a base model without supervised data, and its accuracy on mathematics and
+coding problems rose during training <Cite id="deepseek2025r1" />. Yue et al. measured pass@$k$, the probability that at
+least one of $k$ samples is correct. Models trained with verifiable rewards beat their base models at $k = 1$, but the
+base models scored higher at large $k$ <Cite id="yue2025" />. Reinforcement learning of this kind mainly raises the
+probability of correct answers that the starting model could already sample.
+
+## Choosing a method
+
+Each question below is asked only when the method before it falls short on a held-out evaluation. The evaluation is
+built first: a set of real inputs with known good outputs, a metric and a score for the cheapest method. The
+<NoteLink to="bootstrapping-a-language-model-for-a-new-task">worked example</NoteLink> builds one, and
+<NoteLink to="language-model-evaluation">language model evaluation</NoteLink> covers metrics and contamination.
+
+1. **Does a prompt suffice?** A capable instruction-tuned model with a clear instruction, the output schema and a few
+   demonstrations is the baseline. Few-shot prompting needs no training <Cite id="brown2020" />. Its cost recurs: every
+   request carries the instruction and the demonstrations.
+2. **Is the gap missing knowledge?** Add retrieval. The documents stay current without retraining, and the response
+   can cite them.
+3. **Is the gap format or behaviour on a well-defined task?** Use supervised fine-tuning on demonstrations. Start with a
+   <NoteLink to="parameter-efficient-fine-tuning">parameter-efficient</NoteLink> method such as <Gloss name="lora" />.
+   Full fine-tuning learns more on large datasets far from pretraining, such as code and mathematics, and it also
+   forgets more of what the model could do before <Cite id="biderman2024" />.
+4. **Is one acceptable response better than another, and is that easier to judge than to write?** Use preference
+   optimisation on pairs, by <Gloss name="dpo" /> or a <NoteLink to="reward-models">reward model</NoteLink> with
+   reinforcement learning.
+5. **Can a program check the answer?** Use reinforcement learning with verifiable rewards, starting from a model that
+   already solves some of the prompts. A prompt that the model never solves gives no reward signal.
+
+A larger model that already does the task well is a source of training data. Its outputs, filtered for quality, become
+demonstrations for a smaller model: this is <NoteLink to="knowledge-distillation">distillation</NoteLink> through data.
+Zephyr built a 7-billion-parameter chat model from the outputs and preference judgements of larger models
+<Cite id="tunstall2023" />. DeepSeek-R1's reasoning traces, used as fine-tuning data, improved smaller open models
+<Cite id="deepseek2025r1" />. Self-Instruct generated instruction data from a model's own outputs, with filtering
+<Cite id="wang2023selfinstruct" />.
+
+## The standard pipeline
+
+The model being trained is the **policy** $\pi_{\thetavec}(y \mid x)$: a distribution over responses $y$ given a prompt
+$x$, with parameters $\thetavec$. The **reference** $\pi_{\text{ref}}$ is a frozen copy of the policy taken at the start
+of a stage. Preference and reinforcement-learning stages penalise the divergence
+$\KL\big(\pi_{\thetavec}(\cdot \mid x) \,\|\, \pi_{\text{ref}}(\cdot \mid x)\big)$, weighted by a coefficient $\beta$,
+so that the policy stays where its training signal is reliable. A **reward** $r(x, y)$ is a scalar score of a response:
+a learned reward model's output, or a program's verdict.
+
+| Recipe | Stages | Reference in the later stages |
+| --- | --- | --- |
+| InstructGPT <Cite id="ouyang2022" /> | <Gloss name="sft" />, reward model, PPO | the supervised model |
+| Tülu 3 <Cite id="lambert2024" /> | SFT, DPO, <Gloss name="rlvr" /> | the model at the start of each stage |
+| DeepSeek-R1-Zero <Cite id="deepseek2025r1" /> | reinforcement learning from the base model | the base model |
+
+The order follows the data. Supervised fine-tuning puts the model in the right format, so that its samples are
+worth comparing. Preference optimisation then ranks samples of that model. Reinforcement learning needs a policy that
+sometimes succeeds. Tülu 3 introduced the name reinforcement learning with verifiable rewards and released the data and
+code of all three stages <Cite id="lambert2024" />. DeepSeek-R1, unlike R1-Zero, began with a small supervised stage
+before reinforcement learning, which made its outputs more readable <Cite id="deepseek2025r1" />.
+
+An open instruct model has already passed through this pipeline. Fine-tuning it starts a new stage whose reference is
+the instruct model. With an adapter, the reference costs no memory: disabling the adapter recovers the weights the stage
+started from. This requires a fresh adapter for each stage. If the supervised adapter is merged into the weights and a
+new adapter is trained for the preference stage, disabling the new adapter recovers the merged supervised model, which
+is the right reference. If the preference stage instead keeps training the supervised adapter, disabling it recovers the
+model from before supervised fine-tuning, which is the wrong reference.
+
+## Costs
+
+**Data.** Prompting needs a handful of demonstrations. Supervised fine-tuning needs hundreds to tens of thousands of
+demonstrations of the target behaviour. Preference optimisation needs pairs, which can come from sampling the policy
+and ranking the samples with people, a judge model or a rule. Reinforcement learning with verifiable rewards needs only
+prompts and a checker, but the checker must reward exactly what the task requires.
+
+**Memory.** Training holds the weights, their gradients, the optimiser state and the activations of the batch. With
+mixed-precision <Gloss name="adamw" />, each trained parameter costs 16 bytes: 2 for 16-bit weights, 2 for 16-bit
+gradients, and 12 for a 32-bit master copy and the two 32-bit moment estimates <Cite id="rajbhandari2020" />. A frozen
+parameter costs only its storage. For a model of $\Psi$ parameters, before activations:
+
+| Method | Bytes | $\Psi = 8 \times 10^9$ |
+| --- | --- | --- |
+| Full fine-tuning, mixed-precision AdamW | $16\Psi$ | 128 GB |
+| LoRA on a 16-bit base | $2\Psi + 16\Psi_{\text{a}}$ | 16 GB plus 0.7 GB for $\Psi_{\text{a}} = 4.2 \times 10^7$ |
+| LoRA on a 4-bit base | about $0.52\Psi + 16\Psi_{\text{a}}$ | about 4.1 GB plus 0.7 GB |
+
+Here $\Psi_{\text{a}}$ is the number of adapter parameters, about 0.5% of $\Psi$ for rank-16 adapters on every linear
+layer. Full fine-tuning of an 8-billion-parameter model exceeds one 80 GB <Gloss name="gpu" /> and needs its state
+sharded across several, as in <NoteLink to="zero-and-sharded-optimisers">ZeRO</NoteLink>. The 4-bit row stores 4 bits
+per weight plus 0.127 bits of quantisation constants, with every weight matrix quantised <Cite id="dettmers2023" />; the
+<NoteLink to="quantised-low-rank-adaptation">quantised low-rank adaptation</NoteLink> note derives it. Activations add
+memory in proportion to the tokens in a batch. <NoteLink to="gradient-checkpointing">Gradient checkpointing</NoteLink>
+cuts this by recomputing them in the backward pass.
+
+**Compute.** A forward pass costs about $2\Psi$ <Gloss name="flop">floating-point operations</Gloss> per token, and
+training about $6\Psi$ <Cite id="kaplan2020" />. Preference and reinforcement-learning stages run more models. A
+<Gloss name="rlhf" /> run with PPO holds four: the policy, the reference, the reward model and a value model
+<Cite id="hu2024openrlhf" />. <Gloss name="grpo" /> drops the value model by comparing samples within a group
+<Cite id="shao2024grpo" />, and verifiable rewards replace the reward model with a program. Reinforcement learning also
+generates its training data: each step samples several responses per prompt, one token at a time. That generation is run
+by an inference engine such as vLLM <Cite id="kwon2023" />.
+
+## Risks
+
+- **Forgetting.** Fine-tuning on one task can lower performance on others. Biderman et al. found that LoRA kept the
+  base model's performance outside the target domain better than full fine-tuning did <Cite id="biderman2024" />. See
+  <NoteLink to="continual-learning">continual learning</NoteLink>.
+- **Loss of safety behaviour.** Qi et al. broke the safety guardrails of GPT-3.5 Turbo by fine-tuning it on 10 harmful
+  examples, and fine-tuning on benign data also weakened them <Cite id="qi2024" />. A fine-tuned model needs its
+  safety evaluation repeated.
+- **<Gloss name="reward-hacking">Reward overoptimisation</Gloss>.** A learned reward is a proxy. Gao et al. found that
+  as the policy moved away from its starting point, the reward model's score kept rising while a gold-standard reward
+  rose and then fell <Cite id="gao2023overoptimisation" />. Response length is a common exploit: a reward that depended
+  on length alone reproduced most of the gains of RLHF in several settings <Cite id="singhal2024" />.
+- **<Gloss name="likelihood-displacement">Likelihood displacement</Gloss>.** Under DPO, the probability of the preferred
+  responses often falls during training, and the mass it loses can move to other responses, including ones opposite in
+  meaning to the preferred one <Cite id="razin2025" />.
+- **<Gloss name="entropy-collapse">Entropy collapse</Gloss>.** In reinforcement learning on reasoning tasks, the
+  policy's entropy falls early, and accuracy stops improving once little entropy is left <Cite id="cui2025" />.
+- **Contamination.** Training data that contains evaluation items inflates every score. Deduplicate the training set
+  against the evaluation set before training.
+
+## Tools
+
+| Tool | Role |
+| --- | --- |
+| TRL <Cite id="vonwerra2020" /> | Hugging Face library of post-training trainers built on Transformers: `SFTTrainer`, `DPOTrainer`, `RewardTrainer`, `GRPOTrainer` and others. |
+| PEFT <Cite id="mangrulkar2022" /> | Library of parameter-efficient methods, LoRA among them, that wraps a Transformers model and saves, loads and merges adapters. |
+| Unsloth <Cite id="han2023unsloth" /> | Fine-tuning library with custom kernels that lower the time and memory of LoRA, quantised low-rank adaptation (QLoRA), full fine-tuning and reinforcement learning. |
+| Axolotl <Cite id="axolotl2023" /> | Fine-tuning driven by one YAML file per run, covering full, LoRA and QLoRA training, preference methods and GRPO, on one or many GPUs. |
+| LLaMA-Factory <Cite id="zheng2024llamafactory" /> | Unified fine-tuning of many open model families from a command line or a web interface. |
+| torchtune <Cite id="torchtune2024" /> | PyTorch-native fine-tuning recipes. Its repository states that development wound down in 2025. |
+| OpenRLHF <Cite id="hu2024openrlhf" /> | Distributed RLHF framework on Ray, vLLM and DeepSpeed, for PPO, GRPO and related methods across many GPUs. |
+| verl <Cite id="sheng2025" /> | Reinforcement-learning library for language models implementing HybridFlow, with vLLM or SGLang rollouts and FSDP or Megatron training. |
+| vLLM <Cite id="kwon2023" /> <Cite id="vllm2023" /> | Inference engine with paged attention memory. It generates rollouts for RL, serves many LoRA adapters on one base model, and constrains outputs to a JSON schema. |
+
+The tools divide by scale. One task on one GPU fits TRL with PEFT, or Unsloth. Repeatable multi-GPU runs from a config
+file fit Axolotl or LLaMA-Factory. Reinforcement learning across many GPUs, where generation and training must share
+hardware, fits verl or OpenRLHF. Serving the result fits vLLM.
+
+## Reading the training signals
+
+Each stage logs a few numbers. Each number has a value it should take at step 0, which checks the setup, and a healthy
+trajectory. The names below are those TRL logs <Cite id="vonwerra2020" />.
+
+**Starting values.** In supervised fine-tuning, the loss is the mean negative log-likelihood per target token, in nats.
+A loss near $\ln V$, with $V$ the vocabulary size, means the model predicts uniformly: $\ln 128{,}256 = 11.76$ for a
+Llama 3 tokeniser. A pretrained model on well-formatted data starts far lower, so a value near $\ln V$ points to a
+broken chat template or misaligned labels. In DPO, the policy equals the reference at step 0, so every implicit reward
+$\beta \log(\pi_{\thetavec}/\pi_{\text{ref}})$ is 0 and the loss is $-\log\sigma(0) = \ln 2 = 0.693$. In GRPO, a group
+of $G$ samples whose rewards are all equal has zero advantage and contributes no gradient. If a prompt is solved with
+probability $p$ per sample, independently, a group of binary rewards is uniform with probability $p^G + (1 - p)^G$:
+0.43 for $p = 0.9$ and $G = 8$.
+
+| Stage | Signal | Healthy | Unhealthy, and the likely cause |
+| --- | --- | --- | --- |
+| SFT | training `loss` | falls fast, then slowly; steps down at each epoch as examples repeat | near zero: memorising; spikes or NaN: <Gloss name="learning-rate">learning rate</Gloss> too high; flat: learning rate too low or every token masked |
+| SFT | evaluation loss | falls, then flattens | rises while training loss falls: overfitting; use fewer epochs |
+| SFT | task metric on a development set | rises | disagrees with evaluation loss: select checkpoints by the metric |
+| DPO | `loss` | falls from 0.693 | near zero within an epoch: pairs too easy to tell apart |
+| DPO | `rewards/margins`, `rewards/accuracies` | margin grows; accuracy rises above 0.5 | accuracy at 1.0 early: same cause |
+| DPO | `logps/chosen` | roughly level | falls steeply: likelihood displacement <Cite id="razin2025" />; raise $\beta$ or add a likelihood term on the chosen responses |
+| DPO and RL | response length of samples | stable, or changing for a reason | grows without a quality gain: length exploitation <Cite id="singhal2024" /> |
+| RL | `reward` | rises, then plateaus | rises while the held-out metric is flat: reward overoptimisation <Cite id="gao2023overoptimisation" /> |
+| RL | `reward_std`, `frac_reward_zero_std` | most groups have mixed rewards | most groups uniform: prompts too easy or too hard; filter them <Cite id="yu2025dapo" /> |
+| RL | `kl` to the reference | grows slowly | jumps: unstable updates; large with no held-out gain: overoptimisation |
+| RL | `entropy` | declines slowly | near zero early: exploration lost <Cite id="cui2025" /> |
+| RL | `completions/mean_length`, `completions/clipped_ratio` | stable, or growing with accuracy | growing on wrong answers or hitting the length limit: length bias of the loss <Cite id="liu2025drgrpo" /> |
+
+The training loss and the reward measure progress on the training distribution only. The decision to keep a model
+rests on the held-out evaluation built before training, scored by the same metric as the baseline.

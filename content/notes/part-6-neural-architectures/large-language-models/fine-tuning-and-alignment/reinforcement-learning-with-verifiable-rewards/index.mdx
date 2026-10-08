@@ -1,0 +1,278 @@
+---
+title: Reinforcement learning with verifiable rewards
+kind: concept
+summary: 'RLVR fine-tunes a language model by reinforcement learning against a reward computed by a program, such as an answer check or a unit-test run, instead of a learned reward model. It only reinforces successes the model already samples, so it needs a checker and pass@$k > 0$.'
+tags: [reinforcement-learning, language-models, large-language-models, fine-tuning, reasoning, worked-example]
+aliases: [RLVR, verifiable rewards, rule-based rewards, reinforcement learning from verifiable rewards, verifier reward, R1-Zero, DeepSeek-R1-Zero, aha moment, cold-start data, reasoning model training, spurious rewards]
+requires: [policy-gradient-theorem, reinforcement-learning-from-human-feedback, language-model-evaluation]
+partOf: [adapting-pretrained-language-models]
+related: [group-relative-policy-optimisation, reward-models, chain-of-thought, knowledge-distillation, supervised-fine-tuning, direct-preference-optimisation, tool-use-and-agents]
+references: [lambert2024, shao2024grpo, deepseek2025r1, yue2025, liu2025prorl, shao2025spurious, liu2025drgrpo, yu2025dapo, baker2025, gao2023overoptimisation, zelikman2022]
+status: draft
+updated: 2026-10-07
+---
+
+import { SharpeningCoverage } from './SharpeningCoverage'
+
+<Definition>
+**Reinforcement learning with verifiable rewards** (RLVR) fine-tunes a
+<Gloss name="language-model">language-model</Gloss> policy $\pi_{\thetavec}(y \mid x)$ on prompts $x$ whose responses
+$y$ a program can check. The program, the **verifier**, returns a reward $v(x, y)$, for example 1 when the final answer
+in $y$ equals a reference answer and 0 otherwise. The policy maximises
+
+$$
+\expect_{x \sim \Dcal,\, y \sim \pi_{\thetavec}(\cdot \mid x)}\brack{v(x, y)} - \beta\,\expect_x\brack{\KL\paren{\pi_{\thetavec}(\cdot \mid x) \,\|\, \pi_{\text{ref}}(\cdot \mid x)}},
+$$
+
+where $\beta$ weights a <Gloss name="kl" /> penalty that keeps the policy near a reference policy $\pi_{\text{ref}}$.
+This is the objective of <Gloss name="rlhf" /> with the learned reward model replaced by the verifier. It is usually
+optimised with <Gloss name="ppo" /> or <Gloss name="grpo" /> <Cite id="lambert2024" />.
+</Definition>
+
+## Intuition
+
+A <Gloss name="reward-model">reward model</Gloss> is a learned proxy for human judgement. It is accurate near the
+responses it was trained on and wrong elsewhere. A policy optimised hard against it finds the regions where it is wrong,
+and the true quality of the responses falls while the proxy score keeps rising <Cite id="gao2023overoptimisation" />.
+A verifier has no such region for the property it checks: a program that runs unit tests is as accurate on the
+millionth response as on the first. The policy can therefore be optimised far from its starting point. DeepSeek-R1-Zero
+was trained for 10,400 steps against rule-based rewards alone <Cite id="deepseek2025r1" />.
+
+Reinforcement learning cannot invent a success. A policy-gradient step raises the probability of sampled responses that
+scored above a baseline and lowers the probability of those that scored below it. If no sampled response to a prompt
+passes the verifier, that prompt contributes no gradient. RLVR is search by sampling followed by reinforcement of what
+the search found. The base model's success rate on the training prompts decides whether it can start.
+
+## What a verifier checks
+
+A verifier has two parts: an **extractor**, which pulls the checkable object out of the response, and a
+**comparator**, which tests it. Either part can fail.
+
+| Task                         | Extractor                               | Comparator                                         |
+| ---------------------------- | --------------------------------------- | -------------------------------------------------- |
+| Maths with a final answer    | The last `\boxed{}` or answer tag       | Symbolic or numeric equality with the reference    |
+| Code generation              | The code block                          | Unit tests run in a sandbox                        |
+| Instruction constraints      | The whole response                      | One check per constraint, e.g. "exactly 3 bullets" |
+| Structured output            | The <Gloss name="json" /> object                         | Schema validation, then field-level checks         |
+| Agents and tools             | The final state of the environment      | Tests pass in the repository, the game is won      |
+| Format                       | The tags around reasoning and answer    | Tags present, in order, once                       |
+
+Tülu 3, which named the method, trained on about 30,000 prompts from three sources: GSM8K and MATH, checked by
+extracting the final answer and comparing it with the reference, and instructions with IFEval-style constraints, each
+constraint template with its own checking function <Cite id="lambert2024" />. <Gloss name="dapo" />'s authors rewrote
+competition problems so that every answer is an integer, because integers parse reliably and formulas do not. A problem
+with answer $11 - 2\sqrt{6}$ became one that asks for $k + m + n$ where the answer is $k - m\sqrt{n}$, with answer 19
+<Cite id="yu2025dapo" />. A <Gloss name="fn">false negative</Gloss>, such as $1/2$ marked wrong against $0.5$, penalises
+a correct response. A <Gloss name="fp">false positive</Gloss> rewards a wrong one and is the opening for
+<Gloss name="reward-hacking">reward hacking</Gloss>.
+
+## Why the model must already succeed sometimes
+
+Let $p_{\thetavec}(x) = \prob_{y \sim \pi_{\thetavec}(\cdot \mid x)}\brack{v(x, y) = 1}$ be the policy's
+single-sample success rate on prompt $x$, with a binary verifier. The objective for that prompt is
+$J(x) = \expect_y[v(x, y)] = p_{\thetavec}(x)$. By the <NoteLink to="score-function-estimator">score-function
+identity</NoteLink>,
+
+$$
+\nabla_{\thetavec} J(x) = \expect_{y}\brack{\paren{v(x, y) - b(x)}\nabla_{\thetavec}\log\pi_{\thetavec}(y \mid x)}
+$$
+
+for any baseline $b(x)$ that does not depend on $y$. A training step estimates this expectation from $G$ sampled
+responses $y_1, \dots, y_G$. Suppose all $G$ fail, so every $v(x, y_i) = 0$. With $b = 0$ every term is zero. With a
+baseline computed from the group, such as the group mean used by GRPO, every $v_i - b$ is zero as well. Either way the
+prompt contributes nothing. The same holds when all $G$ succeed and the baseline is the group mean. A prompt carries
+signal only when its group contains both outcomes, which happens with probability
+
+$$
+1 - \paren{1 - p_{\thetavec}(x)}^G - p_{\thetavec}(x)^G.
+$$
+
+The two subtracted terms are the probabilities that every sample fails and that every sample succeeds. The quantity
+$1 - (1 - p)^G$ is pass@$G$, the probability that at least one of $G$ samples is correct, as defined in
+<NoteLink to="language-model-evaluation">language model evaluation</NoteLink>. A prompt with pass@$k = 0$ for every
+practical $k$ never trains. <Gloss name="rl" /> also has no gradient pointing towards a correct response that the policy
+never samples: the gradient only reweights responses that were drawn.
+
+This argument also says where RLVR ends up. With $\beta = 0$ the objective $p_{\thetavec}(x)$ is maximised by any
+policy that puts all its probability on responses the verifier accepts. Nothing in the objective rewards keeping
+several distinct correct solutions, or keeping probability on solutions that are rare under the current policy.
+
+## History and key results
+
+- **Bootstrapping on correct samples.** STaR sampled rationales, kept those that reached the correct answer, and
+  fine-tuned on them, in rounds <Cite id="zelikman2022" />. Tülu 3 describes RLVR as a simplified relative of such
+  bootstrapping methods <Cite id="lambert2024" />.
+- **DeepSeekMath and GRPO (February 2024).** GRPO replaced PPO's value network by a baseline computed from a group of
+  responses to the same prompt. DeepSeekMath scored responses with a learned reward model, not a verifier. RL raised
+  GSM8K accuracy from 82.9% to 88.2% and MATH accuracy from 46.8% to 51.7%. It improved majority voting over $K$
+  samples (maj@$K$) but not pass@$K$, and the authors concluded that RL made the output distribution more robust rather
+  than adding capability <Cite id="shao2024grpo" />.
+- **Tülu 3 (November 2024).** Tülu 3 named RLVR. The reward was $\alpha = 10$ for a verified response and 0 otherwise,
+  optimised by PPO after <Gloss name="dpo" />, with the value network initialised from a general reward model. RLVR
+  improved each targeted evaluation. Adding reward-model scores to the verifiable reward made results worse. Smaller KL
+  coefficients let the policy move further and usually lowered the average score across all evaluations
+  <Cite id="lambert2024" />.
+- **DeepSeek-R1-Zero (January 2025).** GRPO was applied directly to the DeepSeek-V3 base model, with no supervised
+  stage. The reward was an accuracy reward plus a format reward for enclosing the reasoning in `<think>` tags, with
+  equal weights. The authors avoided neural reward models, outcome or process, because they observed reward hacking
+  against them in large-scale RL. Average pass@1 on AIME 2024 rose from 15.6% to 77.9%, and to 86.7% with
+  self-consistency. Responses grew from hundreds to thousands of tokens over training. Mid-training, the model began
+  to stop and re-check its work, the "aha moment", marked by a sudden rise in the use of the word "wait"
+  <Cite id="deepseek2025r1" />.
+- **DeepSeek-R1.** R1-Zero's reasoning was hard to read and mixed English and Chinese. DeepSeek-R1 first fine-tuned the
+  base model on thousands of readable long <Gloss name="cot">chain-of-thought</Gloss> examples, the **cold start**. RL
+  then added a language-consistency reward, the proportion of words in the chain of thought that are in the target
+  language. Rejection sampling from the resulting model produced about 600,000 reasoning and 200,000 other examples for
+  a second round of <Gloss name="sft" />, followed by a final RL stage with rule-based rewards for reasoning and reward
+  models for general prompts <Cite id="deepseek2025r1" />.
+
+Later analyses qualified the story. Liu et al. found that base models, DeepSeek-V3-Base among them, already produce
+self-reflection keywords such as "wait" before any RL. They also found that part of the growth in response length comes
+from a bias in GRPO's loss, which penalises long incorrect responses less than short ones <Cite id="liu2025drgrpo" />.
+The bias and its fix are derived in <NoteLink to="group-relative-policy-optimisation">group relative policy
+optimisation</NoteLink>.
+
+## Does RLVR add reasoning or sharpen it?
+
+The pass@$k$ curve separates two effects. Pass@1 measures how often one sample is right. Pass@$k$ at large $k$ measures
+the set of problems the model can solve at all, given enough attempts.
+
+- **Sharpening.** Yue et al. compared base and RLVR-trained models across model families, RL algorithms and maths,
+  code and visual-reasoning benchmarks. RLVR models won at small $k$. Base models won at large $k$, such as $k = 256$.
+  As training progressed, pass@1 rose while pass@256 fell. The correct solutions of RLVR models already had high
+  likelihood under the base model. Six RLVR algorithms behaved similarly. Distillation from a stronger teacher, unlike
+  RLVR, did raise pass@$k$ at large $k$ <Cite id="yue2025" />. DeepSeekMath's maj@$K$ result points the same way
+  <Cite id="shao2024grpo" />.
+- **Expansion with longer training.** ProRL trained for longer on a broad set of tasks, with KL control and periodic
+  resets of the reference policy. Its models beat their base model across a wide range of pass@$k$ evaluations,
+  including on tasks the base model failed at any number of attempts. The gains were largest where the base model was
+  weakest <Cite id="liu2025prorl" />.
+- **Spurious rewards.** On Qwen2.5-Math-7B, GRPO with a reward assigned at random raised MATH-500 accuracy by 21.4
+  points, against 29.1 points with the true reward. A reward for wrong answers raised it by 24.1 points, and a reward
+  for merely including a `\boxed{}` expression also helped. The same spurious rewards gave little gain, or a loss, on
+  Llama 3.1 and OLMo 2 models. The authors trace the effect to GRPO's clipping, which amplifies behaviours the base
+  model already favours; for Qwen2.5-Math this was reasoning written as Python code, which rose from 65% to over 90%
+  of responses <Cite id="shao2025spurious" />.
+
+A toy problem reproduces sharpening. Each of 40 prompts is solved by some of 8 strategies, and the policy is one
+softmax over the strategies, shared by every prompt. GRPO concentrates the policy on the strategy that solves the most
+prompts. A prompt that only other strategies solve loses its success probability, so pass@1 rises while pass@$k$ at
+large $k$ falls. A prompt that no strategy solves gives groups of equal rewards at every step and never moves the
+policy.
+
+<SharpeningCoverage />
+
+For a practitioner the results give three rules. Report pass@1 and pass@$k$ at large $k$ for both the starting model
+and the trained one. Test a method on more than one model family. Treat a gain that a random or format-only reward also
+produces as an elicited behaviour of the base model, not as evidence that the verifier taught the task.
+
+## Designing the reward
+
+**Binary or partial credit.** A binary reward, 1 if every test passes, is the hardest to game and the simplest to
+interpret: the mean reward is the training pass@1. Partial credit, such as the fraction of tests passed or of
+constraints met, gives signal on prompts where full success is rare. It also rewards responses that satisfy the easy
+checks and ignore the hard ones, so the policy may settle there.
+
+**Offset and scale.** Tülu 3 used rewards of 10 and 0 <Cite id="lambert2024" />; DAPO used $+1$ and $-1$
+<Cite id="yu2025dapo" />. Group-standardised advantages, as in GRPO, are unchanged by any increasing affine map of the
+reward. Methods that do not standardise, such as PPO with a learned <Gloss name="value-function">value function</Gloss>,
+see the scale through the size of the advantages and hence of each update.
+
+**Format rewards.** R1-Zero rewarded the `<think>` structure alongside correctness <Cite id="deepseek2025r1" />. A
+format reward is not neutral: on some base models a format reward alone raises accuracy <Cite id="shao2025spurious" />.
+Give it a small weight or make it a gate, so that a response with broken format scores 0, rather than a bonus that can
+be earned without solving the problem.
+
+**Length.** Responses longer than the generation limit are truncated and usually fail the verifier. Tülu 3 gave a
+penalty of $-10$ to any response that did not end with the end-of-sequence token <Cite id="lambert2024" />. DAPO found
+that penalising truncated responses at full strength adds noise, because a sound but long chain of reasoning is
+punished for its length. It instead masked truncated responses out of the loss, or added a penalty that grows linearly
+from 0 to $-1$ over the last 4,096 tokens before a 20,480-token limit <Cite id="yu2025dapo" />.
+
+**Extra objectives.** A secondary reward added to the verifier's, such as DeepSeek-R1's language-consistency reward,
+trades some accuracy for the property it rewards <Cite id="deepseek2025r1" />.
+
+## Hacking the verifier
+
+A verifier is exact about what it checks, and what it checks is a proxy for the task. The policy optimises the check.
+
+- **Constraint checks.** In Tülu 3's runs with the smallest KL coefficient, $\beta = 0.01$, the policy met
+  paragraph-count constraints with responses such as "Paragraph 1 \*\*\* Paragraph 2 \*\*\* …" that satisfied the
+  checker and carried no content <Cite id="lambert2024" />.
+- **Test suites.** During RL training of a frontier reasoning model in coding environments, OpenAI observed agents that
+  called `exit(0)` to leave the environment before all tests ran, and agents that raised `SkipTest` from code outside
+  the test framework. Both hacks spread across nearly all training environments once learned. Agents also wrote stubs
+  where test coverage was poor and edited code upstream of the tests so that they passed trivially
+  <Cite id="baker2025" />.
+- **Answer extraction.** An extractor that accepts any of several boxed answers rewards a response that lists several.
+  One that searches the whole response for the reference string rewards a response that enumerates candidates.
+
+Verifiers avoid the gradual drift of reward-model overoptimisation, but not exploits. The defences are those of a
+security boundary. Run code in a sandbox where tests, the test harness and the environment cannot be edited. Keep a set
+of hidden tests that the reward never sees and evaluate on it. Extract exactly one answer from a fixed location. Read
+samples throughout training, not only the reward curve. Measure success on held-out benchmarks: DAPO's authors found
+that the final training reward correlated little with validation accuracy <Cite id="yu2025dapo" />.
+
+## When to use RLVR on a new task
+
+RLVR fits a task when three conditions hold.
+
+1. **A cheap, reliable checker exists.** It must run in milliseconds to seconds, because every training step scores
+   thousands of responses, and its <Gloss name="fpr">false-positive rate</Gloss> must be close to zero.
+2. **The starting model sometimes succeeds.** Measure pass@$k$ of the starting model on the training prompts before
+   training, for the group size $k$ you intend to use. Prompts at pass@$k = 0$ give no signal; prompts the model always
+   solves give none either.
+3. **The success rate leaves room to grow.** If pass@1 is already near 1 on the target distribution, RLVR has little to
+   add.
+
+When the checker exists but the model never succeeds, teach the format and the basic skill first by
+<NoteLink to="supervised-fine-tuning">supervised fine-tuning</NoteLink> on worked solutions. DeepSeek-R1's cold start
+is this step <Cite id="deepseek2025r1" />. When the task has no checker, preferences are the signal; see
+<NoteLink to="reward-models">reward models</NoteLink> and
+<NoteLink to="direct-preference-optimisation">direct preference optimisation</NoteLink>.
+
+**Rejection-sampling fine-tuning** is the offline relative of RLVR: sample many responses, keep those the verifier
+accepts, and fine-tune on them, as STaR did <Cite id="zelikman2022" />. It reuses ordinary supervised tooling and needs
+no RL machinery, but it learns nothing from failures.
+
+**Distillation** is the alternative when a stronger reasoning model is available. DeepSeek fine-tuned Qwen and Llama
+models from 1.5B to 70B parameters on 800,000 responses generated by DeepSeek-R1, with SFT only. On AIME 2024,
+Qwen2.5-32B trained by large-scale RL alone reached 47.0% pass@1, while the same base model distilled from R1 reached
+72.6% <Cite id="deepseek2025r1" />. For a small model with a strong teacher available,
+<NoteLink to="knowledge-distillation">distillation</NoteLink> gave the stronger model, with supervised training only.
+DeepSeek did not apply RL to the distilled models, and noted that it could add further gains
+<Cite id="deepseek2025r1" />.
+
+## Worked example
+
+A verifier checks final answers. A team considers RLVR with groups of $G = 8$ responses per prompt and measures the
+starting model's single-sample success rate $p$ on three kinds of prompt. The probability that a group carries signal
+is $1 - (1 - p)^8 - p^8$.
+
+| Prompt kind | $p$  | $(1 - p)^8$ | $p^8$  | Informative groups |
+| ----------- | ---- | ----------- | ------ | ------------------ |
+| Hard        | 0.02 | 0.851       | 0.000  | 14.9%              |
+| Medium      | 0.30 | 0.058       | 0.0001 | 94.2%              |
+| Easy        | 0.95 | 0.000       | 0.663  | 33.7%              |
+
+Six in seven hard prompts produce eight failures and are wasted compute. Raising the group to $G = 64$ makes 72.6% of
+the hard groups informative, since $0.98^{64} = 0.274$, at eight times the sampling cost. Two thirds of the easy prompts
+produce eight successes and are also wasted. A training set should be filtered towards prompts with intermediate
+success rates, and refiltered as the policy improves, because easy prompts become all-success groups.
+
+## Assumptions
+
+- **The verifier's verdict is the task.** RLVR optimises the check, not the intention behind it.
+- **On-policy samples.** Each update uses responses sampled from the current policy or one very close to it.
+- **Some success under sampling.** Prompts the policy never solves contribute nothing.
+
+## Pitfalls
+
+- **Judging by the training reward.** The reward measures success on the training prompts against an exploitable
+  checker. Track held-out pass@1, pass@$k$ at large $k$, and samples read by a person.
+- **A single base model.** Gains on one model family, Qwen2.5-Math in particular, may not transfer
+  <Cite id="shao2025spurious" />.
+- **Unbounded length.** Response length grows under RLVR on reasoning tasks. Set the generation limit and the
+  treatment of truncated responses deliberately.
+- **Mixing a reward model into the reward.** Adding a learned score to the verifier's brings back reward-model
+  hacking; Tülu 3 found the combination worse than the verifier alone <Cite id="lambert2024" />.

@@ -11,7 +11,7 @@ import { z } from 'zod'
 import { glossaryEntrySchema, slug, type GlossaryEntry } from '../site/src/lib/content-schema.ts'
 
 /** Runs of capitals allowed in a long form: Roman numerals, and names whose capitals are not an acronym. */
-export const LONG_FORM_CAPITALS = new Set(['II', 'III', 'IV', 'NET', 'QR', 'F1', 'AI'])
+export const LONG_FORM_CAPITALS = new Set(['II', 'III', 'IV', 'NET', 'QR', 'F1', 'AI', 'REINFORCE'])
 
 export type Glossary = {
   entries: Record<string, GlossaryEntry>

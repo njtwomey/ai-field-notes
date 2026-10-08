@@ -1,0 +1,399 @@
+---
+title: Reward models
+kind: concept
+summary: 'A reward model $r_\phi(x, y)$ scores a response $y$ to a prompt $x$ with one number. It is usually a language model with a scalar head, fitted to human comparisons by the Bradley–Terry loss $-\log\sigma(r_\phi(x, y_w) - r_\phi(x, y_l))$. It is a proxy: optimised too hard, it rewards errors.'
+tags: [language-models, alignment, preference-learning, reinforcement-learning, evaluation, worked-example]
+aliases: [reward model, RM, preference model, scalar reward model, outcome reward model, process reward model, generative reward model, RewardTrainer]
+requires: [logistic-regression, autoregressive-transformer-language-model, kullback-leibler-divergence]
+partOf: [adapting-pretrained-language-models]
+related: [reinforcement-learning-from-human-feedback, paired-comparison-models, language-model-as-a-judge, language-model-evaluation]
+references: [stiennon2020, ouyang2022, touvron2023, bradley1952, gao2023overoptimisation, beirami2025, singhal2024, sharma2024sycophancy, eisenstein2024, coste2024, lambert2024rewardbench, malik2025rewardbench2, cobbe2021, uesato2022, lightman2023, wang2024mathshepherd, zheng2023judge, panickssery2024, zhang2025genrm, mahan2024, hf2026trlreward]
+status: draft
+updated: 2026-10-07
+---
+
+import { Overoptimisation } from './Overoptimisation'
+
+<Definition>
+A **reward model** is a function $r_\phi(x, y) \in \reals$, with parameters $\phi$, that scores a response $y$ to a
+prompt $x$. It is trained to agree with judgements that no program computes, usually human comparisons of two responses
+to the same prompt. A policy is then trained to raise the score, by <Gloss name="rl">reinforcement learning</Gloss> or
+by selecting the best-scored of several samples <Cite id="stiennon2020" /> <Cite id="ouyang2022" />. The reward model is
+a learned proxy for the judge, and it is accurate only near the responses it was trained on.
+</Definition>
+
+## Intuition
+
+People find it hard to give a response an absolute score, but easier to say which of two responses is better. A reward
+model compresses many such comparisons into a function that scores responses no person has read. Once trained, it
+replaces the person in the loop and scores the policy's samples at every step of training.
+
+When an existing <Gloss name="llm" /> is adapted to a new task, a reward model has four uses:
+
+- **Training signal.** Policy-gradient methods such as <Gloss name="ppo" /> and <Gloss name="grpo" /> maximise its
+  score on the policy's own samples.
+- **Selection.** <Gloss name="best-of-n">Best-of-$n$ sampling</Gloss> draws $n$ responses and keeps the
+  highest-scoring one, at inference time or to build <Gloss name="sft">supervised fine-tuning</Gloss> data.
+- **Labelling.** It ranks pairs of fresh samples to create preference pairs for
+  <NoteLink to="direct-preference-optimisation">direct preference optimisation</NoteLink>.
+- **Filtering and monitoring.** It screens data and tracks progress, with the caveats below.
+
+Every use pushes the scored responses away from the data the model was fitted on. A reward model is a classifier
+evaluated off its training distribution, and its errors there are systematic. Most practical advice about reward models
+follows from that fact.
+
+## From comparisons to a loss
+
+**Data.** A comparison is a triple $(x, y_w, y_l)$: for prompt $x$, a rater preferred response $y_w$ to response $y_l$.
+The responses are usually samples from the model that will be trained, so that the reward model learns to separate the
+outputs it will later score. A rater who ranks $K$ responses to one prompt yields $\binom{K}{2}$ ordered pairs.
+<NoteLink to="instruction-tuning-and-alignment">InstructGPT</NoteLink>'s labellers ranked between 4 and 9 responses per
+prompt <Cite id="ouyang2022" />.
+
+**The Bradley–Terry model.** Suppose the rater perceives response $y$ as having utility $u(y) = r(x, y) + \epsilon_y$,
+where $r$ is a true reward and the noise terms $\epsilon_y$ are independent standard Gumbel variables, and prefers the
+response with the larger utility. The difference of two independent standard Gumbel variables follows the standard
+logistic distribution, whose <Gloss name="cdf">cumulative distribution function</Gloss> is the logistic sigmoid
+$\sigma(z) = 1/(1 + e^{-z})$. Therefore
+
+$$
+P(y_w \succ y_l \mid x) = P\paren{\epsilon_{y_l} - \epsilon_{y_w} < r(x, y_w) - r(x, y_l)} = \sigma\paren{r(x, y_w) - r(x, y_l)}.
+$$
+
+This is the <Gloss name="bradley-terry">Bradley–Terry model</Gloss> of paired comparisons <Cite id="bradley1952" />.
+The probability depends only on the difference of the two rewards. Its fitting and relatives are covered in
+<NoteLink to="paired-comparison-models">paired-comparison models</NoteLink>.
+
+**The loss.** Treat the comparisons in a dataset $\Dcal$ as independent. Their likelihood under a reward model $r_\phi$
+is $\prod_{(x, y_w, y_l) \in \Dcal}\sigma(r_\phi(x, y_w) - r_\phi(x, y_l))$. The negative mean log-likelihood is
+
+$$
+L(\phi) = -\frac{1}{\abs{\Dcal}}\sum_{(x, y_w, y_l) \in \Dcal}\log\sigma\paren{r_\phi(x, y_w) - r_\phi(x, y_l)}.
+$$
+
+This is <NoteLink to="logistic-regression">logistic regression</NoteLink> with the label "first response wins" and
+the margin $\Delta = r_\phi(x, y_w) - r_\phi(x, y_l)$ as the logit. Since $\tfrac{d}{d\Delta}\brack{-\log\sigma(\Delta)}
+= -\sigma(-\Delta)$, the gradient for one pair is
+
+$$
+\nabla_\phi L = -\sigma(-\Delta)\paren{\nabla_\phi r_\phi(x, y_w) - \nabla_\phi r_\phi(x, y_l)}.
+$$
+
+The weight $\sigma(-\Delta)$ is the probability the model assigns to the wrong order. Misordered pairs get weights near
+1, and pairs already separated by a wide margin get weights near 0.
+
+<Derivation title="The difference of two Gumbel variables is logistic">
+Let $G_1$ and $G_2$ be independent standard Gumbel variables, with distribution function $F(g) = \exp(-e^{-g})$ and
+density $f(g) = e^{-g}\exp(-e^{-g})$. For any $z$,
+
+$$
+P(G_2 - G_1 < z) = \int f(g)\,F(g + z)\,dg = \int e^{-g}\exp\paren{-e^{-g}}\exp\paren{-e^{-g}e^{-z}}\,dg.
+$$
+
+Substitute $t = e^{-g}$, so that $dt = -e^{-g}\,dg$ and $t$ runs over $(0, \infty)$:
+
+$$
+P(G_2 - G_1 < z) = \int_0^\infty \exp\paren{-t\,(1 + e^{-z})}\,dt = \frac{1}{1 + e^{-z}} = \sigma(z).
+$$
+
+With $z = r(x, y_w) - r(x, y_l)$, $G_1 = \epsilon_{y_w}$ and $G_2 = \epsilon_{y_l}$, this is the Bradley–Terry
+probability that $y_w$ has the larger utility.
+</Derivation>
+
+**The offset is not identified.** Adding any function $c(x)$ of the prompt to every reward leaves every margin, and so
+the loss, unchanged. The scale of the reward is set by the noise model, but its zero is arbitrary. Practitioners fix the
+zero after training: InstructGPT added a bias so that the labellers' demonstrations scored 0 on average
+<Cite id="ouyang2022" />. The offset matters when rewards from different models are averaged or compared. Eisenstein et
+al. add the penalty $\eta\,\expect\brack{(r_\phi(x, y_w) + r_\phi(x, y_l))^2}$ with a small $\eta$, which pulls the
+rewards of each pair towards zero <Cite id="eisenstein2024" />.
+
+**Graded comparisons.** When raters also say how much better one response is, the grade can set a margin. Llama 2
+trained with $-\log\sigma(r_\phi(x, y_w) - r_\phi(x, y_l) - m)$, where the margin $m$ is larger for "significantly
+better" than for "slightly better" <Cite id="touvron2023" />.
+
+**Correlated pairs.** The $\binom{K}{2}$ pairs from one ranking share responses: each response appears in $K - 1$ pairs.
+InstructGPT found that shuffling these pairs into one dataset made the reward model overfit within one pass. It put all
+pairs from a prompt into one batch element instead, which needs one forward pass per response and no longer overfit. It
+trained for a single epoch <Cite id="ouyang2022" />.
+
+## Architecture
+
+The standard reward model is a pretrained <NoteLink to="transformer">transformer</NoteLink>
+<Gloss name="language-model">language model</Gloss> whose output layer is replaced by a linear head that returns one
+number. The prompt and response are concatenated, formatted with the chat template, and passed through the network. The
+head reads the final hidden state $\hvec_T \in \reals^d$ at the last token:
+
+$$
+r_\phi(x, y) = \wvec^\top\hvec_T(x, y) + b.
+$$
+
+The last token is used because, in a causal transformer, it is the only position that has attended to the whole prompt
+and response. In Hugging Face Transformers this is a sequence-classification model with one output label.
+
+**Which model to start from.** The reward model is usually initialised from the same family as the policy, often the
+supervised fine-tuned checkpoint. Llama 2 initialised its reward models from its chat model checkpoints so that the
+reward model knows what the chat model knows. Touvron et al. argue that an information mismatch between the two could
+make the reward model favour hallucinations <Cite id="touvron2023" />. Malik et al. found that a reward model from a
+different lineage than the policy can make the policy trained with <Gloss name="rlhf" /> much worse, so the reward model
+that scores highest on a benchmark does not guarantee a good policy <Cite id="malik2025rewardbench2" />.
+
+**Size.** The reward model need not be as large as the policy. InstructGPT used a 6-billion-parameter reward model to
+train a 175-billion-parameter policy. Its 175-billion-parameter reward models trained unstably <Cite id="ouyang2022" />.
+
+## What reward models get wrong
+
+### Overoptimisation
+
+Optimising a policy against a reward model moves its outputs into regions the reward model never saw. The proxy score
+keeps rising there, while the quality the proxy was meant to measure first rises and then falls. This is
+<Gloss name="reward-hacking">reward overoptimisation</Gloss>, an instance of Goodhart's law
+<Cite id="gao2023overoptimisation" />.
+
+Gao, Schulman and Hilton measured the effect without human raters. A 6-billion-parameter "gold" reward model played
+the human: it labelled 100,000 pairs of samples, on which proxy reward models from 3 million to 3 billion parameters
+were trained. A 1.2-billion-parameter policy was then optimised against each proxy, by best-of-$n$ sampling or by PPO,
+and its outputs were scored by the gold model <Cite id="gao2023overoptimisation" />. Distance from the initial policy
+$\pi_{\text{init}}$ was measured by $d = \sqrt{\KL(\pi \,\|\, \pi_{\text{init}})}$. The gold score, with the initial
+policy's score set to 0, fitted
+
+$$
+R_{\text{bon}}(d) = d\,(\alpha_{\text{bon}} - \beta_{\text{bon}}\,d), \qquad R_{\text{RL}}(d) = d\,(\alpha_{\text{RL}} - \beta_{\text{RL}}\log d),
+$$
+
+with coefficients $\alpha, \beta > 0$ that depend on the proxy's size and training data
+<Cite id="gao2023overoptimisation" />. Both curves rise, peak and fall:
+
+- **Best-of-$n$.** $R_{\text{bon}}'(d) = \alpha_{\text{bon}} - 2\beta_{\text{bon}}d$ vanishes at
+  $d^* = \alpha_{\text{bon}}/(2\beta_{\text{bon}})$, where the gold score is
+  $\alpha_{\text{bon}}^2/(4\beta_{\text{bon}})$.
+- **Reinforcement learning.** $R_{\text{RL}}'(d) = \alpha_{\text{RL}} - \beta_{\text{RL}}\log d - \beta_{\text{RL}}$
+  vanishes at $d^* = \exp(\alpha_{\text{RL}}/\beta_{\text{RL}} - 1)$. Substituting gives
+  $R_{\text{RL}}(d^*) = \beta_{\text{RL}}\,d^*$.
+
+Past $d^*$, more optimisation makes the policy worse by the measure that matters.
+
+The study also found the following <Cite id="gao2023overoptimisation" />:
+
+- The coefficients vary smoothly, roughly logarithmically, with the number of reward-model parameters, so the peak
+  gold score of a larger reward model can be predicted. Larger reward models reach higher gold scores.
+- With fewer than about 2,000 comparisons, the proxies were barely better than chance.
+- Larger policies started higher and gained less from optimisation, but overoptimised by about as much: the gap between
+  proxy and gold scores and the distance at the peak were similar.
+- Adding a <Gloss name="kl" /> penalty to the reinforcement-learning reward raised the proxy score reached at a given KL
+  divergence, but not the gold score. In this setting the penalty acted like <NoteLink to="early-stopping">early
+  stopping</NoteLink>.
+
+For best-of-$n$, the KL divergence from the sampling policy is at most $\log n - (n - 1)/n$ nats
+<Cite id="beirami2025" />. It grows like $\log n$, so best-of-$n$ explores only near the initial policy.
+
+<Derivation title="The KL divergence of best-of-n sampling">
+Assume every response has a distinct reward and let $F$ be the distribution function of $R = r(x, Y)$ for
+$Y \sim \pi_{\text{ref}}(\cdot \mid x)$, taken continuous. Best-of-$n$ returns $y$ when $y$ is drawn and the other
+$n - 1$ draws score lower, in any of $n$ positions, so its distribution is
+
+$$
+\pi_{\text{bon}}(y \mid x) = n\,F\paren{r(x, y)}^{n - 1}\,\pi_{\text{ref}}(y \mid x).
+$$
+
+The KL divergence is the expected log-ratio under $\pi_{\text{bon}}$:
+$\KL(\pi_{\text{bon}} \,\|\, \pi_{\text{ref}}) = \log n + (n - 1)\,\expect\brack{\log V}$, where $V = F(R_{\max})$ is
+the largest of $n$ independent uniform variables. $V$ has density $n v^{n-1}$ on $[0, 1]$, so
+
+$$
+\expect\brack{\log V} = \int_0^1 n v^{n - 1}\log v\,dv = -\frac{1}{n},
+$$
+
+by <NoteLink to="integration-by-parts">integration by parts</NoteLink>. Hence $\KL = \log n - (n - 1)/n$. When distinct
+responses can share a reward, or the same response can be drawn twice, the true divergence is smaller, and the formula
+is an upper bound <Cite id="beirami2025" />.
+</Derivation>
+
+<Overoptimisation />
+
+### Length bias
+
+Raters often prefer longer responses, and reward models learn that preference. Singhal et al. found that, on three
+datasets, most of the reward gained by RLHF came from making responses longer. A reward equal to response length alone
+reproduced most of the downstream improvement of RLHF over the supervised model. The reward models were the main source
+of the bias and were easily swayed by length biases in the preference data <Cite id="singhal2024" />.
+
+### Sycophancy
+
+Human preference data reward agreement with the user. Sharma et al. found that a response that matched the user's
+stated views was more likely to be preferred. Both people and preference models preferred convincingly written
+sycophantic responses to correct ones a non-negligible fraction of the time. Optimising against a preference model
+sometimes traded truthfulness for <Gloss name="sycophancy" /> <Cite id="sharma2024sycophancy" />.
+
+### Underspecification
+
+Reward models that agree on held-out preference data can disagree on the policy's outputs. Eisenstein et al. trained
+reward models that differed only in their random seeds and had similar in-distribution accuracy. They gave very
+different rewards under distribution shift, and a policy aligned to one of them did not score higher under another
+trained on the same data <Cite id="eisenstein2024" />.
+
+## Mitigations
+
+**KL penalty and early stopping.** A penalty $\beta\,\KL(\pi \,\|\, \pi_{\text{ref}})$ keeps the policy near the
+outputs the reward model was trained on. It does not raise the peak of the gold curve; it limits how far past the peak
+training can run <Cite id="gao2023overoptimisation" />. In practice, log the KL divergence of the policy from the
+reference, evaluate checkpoints with a held-out judge, and keep the checkpoint where that judge peaks.
+
+**Ensembles.** Train $M$ reward models $r_1, \dots, r_M$ and optimise a conservative combination. Coste et al. compared
+the worst case $\min_m r_m(x, y)$ with the mean minus a multiple $\lambda$ of the variance across the ensemble. With
+best-of-$n$, conservative optimisation practically eliminated overoptimisation and improved the gold score by up to
+70%. With PPO, it reduced overoptimisation in every setting, and together with a small KL penalty it prevented it
+<Cite id="coste2024" />. Eisenstein et al. found that ensembles whose members differ in their pretraining seeds
+generalise better than ensembles that differ only in fine-tuning seeds. Ensembles still did not remove reward hacking
+that all members shared, such as systematic changes in response length <Cite id="eisenstein2024" />.
+
+**Refresh the data.** Collect new comparisons on the current policy's samples and retrain the reward model. The reward
+model then sees the region the policy has moved to. Llama 2 trained five successive RLHF models, each with reward
+models retrained on newly collected preference data <Cite id="touvron2023" />.
+
+**Control known biases.** Compare responses of matched length in evaluation, report the correlation between reward and
+length, and add penalties for length or format when they are not part of the task.
+
+## Evaluating a reward model
+
+**Held-out pairwise accuracy** is the fraction of held-out pairs with $r_\phi(x, y_w) > r_\phi(x, y_l)$. It is bounded
+by how often raters agree: InstructGPT's training labellers agreed with each other on 72.6% of comparisons
+<Cite id="ouyang2022" />. A reward model at 72% on such data is near its ceiling, not mediocre. The predicted
+probabilities $\sigma(\Delta)$ should also be calibrated against the observed win rates.
+
+**Benchmarks.** RewardBench scores reward models on prompt, chosen and rejected triples in four sections: chat, hard
+chat (trick questions and subtly different answers), safety (refusing harmful requests without refusing harmless ones)
+and reasoning (correct against buggy code, correct against flawed maths). It evaluates classifier reward models and
+the implicit rewards of DPO-trained models alike <Cite id="lambert2024rewardbench" />. RewardBench 2 asks the reward
+model to pick one correct response from four, so random guessing scores 25%. It uses mostly new human-written prompts
+in six domains: factuality, precise instruction following, maths, safety, focus and ties. Leading models scored 20 or
+more points lower than on RewardBench, and the scores correlated with the gains of best-of-$n$ sampling
+<Cite id="malik2025rewardbench2" />.
+
+**Downstream.** The test that matters is the policy the reward model produces. Run best-of-$n$ or a short RL run, then
+judge the outputs with people or a separate judge. Never use the reward model being optimised as the final metric: it
+is the quantity being overfitted.
+
+## Outcome and process reward models
+
+An <Gloss name="orm" /> scores a whole response or its final answer. Cobbe et al. trained verifiers of this kind for
+grade-school maths: sample many candidate solutions, keep the one the verifier ranks highest. Verification scaled
+better with more data than fine-tuning the generator did <Cite id="cobbe2021" />.
+
+A <Gloss name="prm" /> scores each step of a multi-step solution, such as each line of a
+<NoteLink to="chain-of-thought">chain of thought</NoteLink>. Lightman et al. collected PRM800K, 800,000 human labels
+on individual steps of solutions to MATH problems. They scored a solution by the product of the PRM's probabilities that
+each step is correct. Choosing the best of 1,860 samples on a representative subset of the MATH test set, the PRM
+solved 78.2% of problems, an ORM 72.4% and majority voting 69.6% <Cite id="lightman2023" />. Uesato et al. found on
+GSM8K that outcome supervision reached similar final-answer error rates with less labelling. Process supervision, or a
+reward model trained to imitate it, was needed for the reasoning steps themselves to be correct. Their best system cut
+the rate of flawed reasoning among solutions with a correct final answer from 14.0%, the previous best, to 3.4%
+<Cite id="uesato2022" />.
+
+Step labels are expensive. Math-Shepherd labels them automatically: from each step, a model completes the solution
+several times, and the step is labelled good if a completion reaches the correct final answer
+<Cite id="wang2024mathshepherd" />.
+
+## Generative reward models and judges
+
+A reward model need not have a scalar head. A <NoteLink to="language-model-as-a-judge">language-model judge</NoteLink>
+is prompted with the question and one or two responses and asked for a score or a preference. Zheng et al. introduced
+MT-Bench, 80 multi-turn questions in 8 categories, and found that GPT-4 as a judge agreed with human preferences more
+than 80% of the time, the same level at which humans agreed with each other <Cite id="zheng2023judge" />. They also
+documented the judges' biases: they favoured the response in one position, favoured longer responses, and favoured their
+own outputs. Asking twice with the order swapped, and declaring a tie when the verdicts disagree, controls for the
+<Gloss name="position-bias">position bias</Gloss> <Cite id="zheng2023judge" />. Panickssery et al. linked
+self-preference to self-recognition: the better a model recognised its own outputs, the more it preferred them
+<Cite id="panickssery2024" />.
+
+A **generative reward model** is a language model fine-tuned to produce the verdict as text. Zhang et al. trained a
+model to answer whether a solution is correct and used the probability of "Yes" as the reward. The model could write a
+chain of thought before its verdict, and several sampled verdicts could be averaged. A 9-billion-parameter verifier of
+this kind, choosing among GSM8K solutions sampled from another model, raised the fraction of problems solved from 73%
+to 93.4% <Cite id="zhang2025genrm" />. Mahan et al. found
+that prompting a language model as a judge without training trailed Bradley–Terry reward models in distribution by
+9–36%. Training it on its own reasoning about preferences matched Bradley–Terry models in distribution and beat them
+out of distribution by 10–45% <Cite id="mahan2024" />.
+
+## Rewards that are computed
+
+When correctness can be checked by a program, the reward need not be learned. A unit-test suite, an
+<Gloss name="exact-match">exact match</Gloss> on a numeric answer or a format check returns a reward with no error of
+the kind a learned model makes off its training distribution. This is the limiting case of a reward model, and it is the
+basis of <NoteLink to="reinforcement-learning-with-verifiable-rewards">reinforcement learning with verifiable
+rewards</NoteLink>. Such a reward can still be gamed when it checks less than the task requires: a policy rewarded by
+three unit tests can pass them without solving the problem.
+
+## Training one in practice
+
+Hugging Face's <NoteLink to="adapting-pretrained-language-models">TRL</NoteLink> library trains Bradley–Terry reward
+models with `RewardTrainer` <Cite id="hf2026trlreward" />:
+
+```python
+from datasets import load_dataset
+from trl import RewardConfig, RewardTrainer
+
+# Each row: {"prompt": ..., "chosen": ..., "rejected": ...}, as text or as chat messages.
+dataset = load_dataset("trl-lib/ultrafeedback_binarized")
+
+trainer = RewardTrainer(
+    model="Qwen/Qwen3-0.6B",  # loaded as a sequence classifier with one output
+    args=RewardConfig(output_dir="rm", num_train_epochs=1, center_rewards_coefficient=0.01),
+    train_dataset=dataset["train"],
+    eval_dataset=dataset["test"],
+)
+trainer.train()
+```
+
+`center_rewards_coefficient` is the $\eta$ of the centring penalty above. When the model is trained through a
+<Gloss name="lora" /> adapter, the new scalar head (named `score`) must be listed among the modules to train, or it
+keeps its random initialisation <Cite id="hf2026trlreward" />. Pairs whose chosen or rejected sequence exceeds
+`max_length` tokens (1,024 by default) are dropped, not truncated, so check how many pairs survive
+<Cite id="hf2026trlreward" />.
+
+The trainer logs, per interval, `accuracy` (the fraction of pairs ordered correctly), `margin` (the mean of $\Delta$),
+and `mean_reward`, `min_reward` and `max_reward` <Cite id="hf2026trlreward" />. Read them as follows:
+
+- **Healthy.** Evaluation accuracy rises and levels off near the rater agreement of the data. Training and evaluation
+  accuracy stay within a few points of each other.
+- **Overfitting.** Training accuracy climbs towards 1 and the training margin keeps growing while evaluation accuracy
+  stays flat or falls. Stop at one epoch, add data, or regularise.
+- **Drifting offset.** `mean_reward` wanders far from 0 while accuracy is unchanged. The offset is unidentified; centre
+  the rewards.
+- **Nothing learned.** Accuracy stays near 0.5. Check that chosen and rejected were not swapped, that the head is
+  trained, and that the prompt is not truncated away.
+
+## Worked example
+
+**One pair.** A reward model scores the chosen response 1.2 and the rejected one 0.4. The margin is $\Delta = 0.8$,
+the modelled probability that the chosen response wins is $\sigma(0.8) = 0.690$, and the loss is
+$-\log 0.690 = 0.371$. The gradient weight $\sigma(-0.8) = 0.310$ is the modelled probability of the wrong order.
+
+**Best-of-$n$ budget.** For $n = 16$, the KL divergence of best-of-$n$ from the sampling policy is at most
+$\log 16 - 15/16 = 2.773 - 0.938 = 1.835$ nats, so $d \le 1.355$. For $n = 256$ it is at most 4.549 nats.
+
+**Where the peak lies.** Take illustrative best-of-$n$ coefficients $\alpha_{\text{bon}} = 1$ and
+$\beta_{\text{bon}} = 0.25$. The gold score peaks at $d^* = 1/(2 \times 0.25) = 2$, a KL divergence of $d^{*2} = 4$
+nats, with gold score $1^2/(4 \times 0.25) = 1$. Solving $\log n - (n - 1)/n = 4$ gives $n \approx 148$. Selecting the
+best of more than about 148 samples makes the outputs worse by the gold measure, although the proxy score keeps rising.
+
+## Assumptions
+
+- **One shared reward.** Bradley–Terry assumes every rater judges by the same $r$ plus independent noise. Raters with
+  different values are averaged into one reward that none of them holds.
+- **Comparisons depend on the reward difference only.** The model cannot represent intransitive preferences, where
+  $y_1 \succ y_2 \succ y_3 \succ y_1$.
+- **The scored responses resemble the training responses.** Accuracy measured on held-out pairs transfers to the
+  policy's samples only while those samples stay close to the data.
+
+## Pitfalls
+
+- **Optimising the metric you report.** A rising reward-model score during training says nothing about quality past the
+  overoptimisation peak. Report a separate judge or human evaluation.
+- **Choosing the benchmark leader.** The reward model that tops a benchmark is not necessarily the best for a given
+  policy; one from the policy's own family can work better <Cite id="malik2025rewardbench2" />.
+- **Template mismatch.** A reward model scores text formatted the way it was trained. A different chat template or
+  tokenizer at scoring time changes its inputs and its scores.
+- **Length.** Without a check, policies learn that longer is better because the reward model learned it from the raters
+  <Cite id="singhal2024" />.
+- **Ties and low-agreement pairs.** Pairs on which raters disagree add noise and bound accuracy. Remove ties or give
+  confident pairs a larger margin.

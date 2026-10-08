@@ -1,0 +1,393 @@
+---
+title: Low-rank adaptation
+kind: technique
+summary: LoRA freezes a pretrained weight matrix $\Wmat_0 \in \reals^{d \times k}$ and trains a low-rank update, $\Wmat = \Wmat_0 + (\alpha / r) \Bmat \Amat$, with $\Bmat \in \reals^{d \times r}$ zero at the start. It trains $r(d + k)$ parameters instead of $dk$ and merges into $\Wmat_0$ for inference at no extra cost.
+tags: [deep-learning, large-language-models, fine-tuning, parameter-efficient-fine-tuning, low-rank, worked-example]
+aliases:
+  [
+    LoRA,
+    low-rank adapters,
+    LoRA adapters,
+    rsLoRA,
+    rank-stabilised LoRA,
+    LoRA+,
+    DoRA,
+    weight-decomposed low-rank adaptation,
+    PiSSA,
+    VeRA,
+    multi-LoRA serving,
+    adapter merging,
+  ]
+requires: [rank-and-null-space, backpropagation, transformer]
+related: [transfer-learning-and-fine-tuning, singular-value-decomposition, continual-learning]
+partOf: [adapting-pretrained-language-models]
+references:
+  [
+    hu2022,
+    li2018intrinsic,
+    aghajanyan2021,
+    biderman2024,
+    kalajdzievski2023,
+    schulman2025lora,
+    hayou2024,
+    liu2024dora,
+    meng2024pissa,
+    kopiczko2024,
+    sheng2024slora,
+    chen2024punica,
+    vllm2023,
+    dettmers2023,
+    mangrulkar2022,
+    grattafiori2024,
+    rajbhandari2020,
+    eckart1936,
+  ]
+status: draft
+updated: 2026-10-07
+---
+
+import { LowRankExplorer } from './LowRankExplorer'
+
+<Definition>
+<Gloss name="lora" /> adapts a pretrained network by freezing each chosen weight matrix
+$\Wmat_0 \in \reals^{d \times k}$ and learning an additive update of rank at most $r$. For a layer input
+$\xvec \in \reals^k$, the adapted layer computes
+
+$$
+\hvec = \Wmat_0 \xvec + \frac{\alpha}{r} \Bmat \Amat \xvec, \qquad \Bmat \in \reals^{d \times r},\; \Amat \in \reals^{r \times k},\; r \ll \min(d, k),
+$$
+
+where $\hvec \in \reals^d$ is the layer output and $\alpha > 0$ is a fixed scale. $\Bmat$ starts at zero and $\Amat$ at
+random values, so training starts exactly at the pretrained model. Only $\Amat$ and $\Bmat$ are trained. After training,
+the update $(\alpha / r) \Bmat \Amat$ can be added into $\Wmat_0$, which leaves a model of the original shape and speed
+<Cite id="hu2022" />.
+</Definition>
+
+## Problem
+
+Full fine-tuning updates every parameter of a pretrained model. With <NoteLink to="adam">Adam</NoteLink> in
+<NoteLink to="mixed-precision-training">mixed precision</NoteLink>, each trained parameter costs about 16 bytes of
+accelerator memory: a 16-bit weight, a 16-bit gradient, a 32-bit master copy and two 32-bit moment estimates
+<Cite id="rajbhandari2020" />. An 8-billion-parameter model therefore needs about 128 GB for its training state before
+any activations are stored, more than one 80 GB accelerator holds. The
+<NoteLink to="quantised-low-rank-adaptation">memory of fine-tuning</NoteLink> note derives this accounting in full.
+
+Full fine-tuning also produces a full copy of the model for every task. A 16-bit checkpoint of an 8-billion-parameter
+model takes 16 GB. A hundred task-specific variants take 1.6 TB on disk and cannot share accelerator memory at serving
+time.
+
+LoRA addresses both costs. Gradients and optimiser states exist only for the small factors $\Amat$ and $\Bmat$, and a
+task is stored as those factors alone. On <Gloss name="gpt-3" /> 175B, Hu et al. reduced training memory from 1.2 TB to
+350 GB and the per-task checkpoint from 350 GB to 35 MB <Cite id="hu2022" />.
+
+## Mechanism
+
+### The low-rank update and its parameter count
+
+Each column of $\Bmat \Amat$ is a linear combination of the $r$ columns of $\Bmat$, so
+<NoteLink to="rank-and-null-space">$\rank(\Bmat \Amat) \le r$</NoteLink>. The update has
+
+$$
+\underbrace{d r}_{\Bmat} + \underbrace{r k}_{\Amat} = r(d + k)
+$$
+
+trainable parameters, against $dk$ for an unconstrained update of the same matrix. The saving factor is
+
+$$
+\frac{dk}{r(d + k)}, \qquad \text{which for a square matrix } (d = k) \text{ is } \frac{d}{2r}.
+$$
+
+A $4096 \times 4096$ attention projection has $4096^2 = 16{,}777{,}216$ weights. A rank-16 update of it has
+$16 \times (4096 + 4096) = 131{,}072$ parameters, $4096 / 32 = 128$ times fewer.
+
+The update is a bottleneck. The input $\xvec$ is first projected to $r$ numbers, $\Amat \xvec$, and then expanded back
+to $d$ outputs by $\Bmat$. Computing $\Bmat (\Amat \xvec)$ in that order costs $r(d + k)$ multiply-adds per token,
+against $dk$ for $\Wmat_0 \xvec$. The product $\Bmat \Amat$ is never formed during training.
+
+### Why a low-rank update can be enough
+
+The **intrinsic dimension** of a training problem is the smallest number of free parameters, in a random subspace
+$\thetavec = \thetavec_0 + \Pmat \zvec$ with $\zvec \in \reals^{D}$, at which training reaches 90% of the performance of
+training all parameters <Cite id="li2018intrinsic" />. Aghajanyan et al. measured it for fine-tuning pretrained language
+models. Optimising 200 parameters, projected randomly into the full parameter space, brought <Gloss name="roberta" /> to
+90% of its full fine-tuning performance on the MRPC paraphrase task. Longer pretraining lowered the intrinsic dimension,
+and larger models had lower intrinsic dimension after the same number of pretraining updates
+<Cite id="aghajanyan2021" />. A pretrained model already holds most of what a downstream task needs, and fine-tuning has
+to move it only a short way in a few directions.
+
+LoRA makes the analogous assumption per weight matrix: the change $\Delta\Wmat$ that adapts the model has low rank. Hu
+et al. found that ranks as low as 1 to 8 on the query and value projections of GPT-3 matched full fine-tuning on the
+tasks they tested. The learned update was not a copy of the dominant directions of $\Wmat_0$. It amplified directions
+that $\Wmat_0$ represented only weakly, by a factor of about 21.5 at $r = 4$ <Cite id="hu2022" />.
+
+The assumption has limits. Biderman et al. took the difference between fully fine-tuned and pretrained weights of
+Llama 2 7B on code and mathematics and found that it needed a rank 10 to 100 times larger than typical LoRA ranks to
+explain 90% of its variance <Cite id="biderman2024" />. Low rank suits tasks that reuse the model's knowledge, such as
+a new output format, a style or a narrow classification. It suits less well tasks that add much new knowledge, such as a
+new programming language or domain.
+
+### Initialisation: zero $\Bmat$, random $\Amat$
+
+Write $s = \alpha / r$ and $\zvec = \Amat \xvec \in \reals^r$, so that $\hvec = \Wmat_0 \xvec + s \Bmat \zvec$. Let
+$\gvec = \partial \mathcal{L} / \partial \hvec$ be the gradient of the loss with respect to the layer output, supplied
+by <NoteLink to="backpropagation">backpropagation</NoteLink>. For one input, the gradients of the factors are
+
+$$
+\frac{\partial \mathcal{L}}{\partial \Bmat} = s\, \gvec \zvec^{\tr} = s\, \gvec (\Amat \xvec)^{\tr}, \qquad
+\frac{\partial \mathcal{L}}{\partial \Amat} = s\, \Bmat^{\tr} \gvec \xvec^{\tr}.
+$$
+
+The first follows because $\hvec$ depends on $B_{ij}$ only through $h_i$, with $\partial h_i / \partial B_{ij} = s z_j$.
+The second follows by applying the chain rule through $\zvec$: $\partial \mathcal{L} / \partial \zvec = s \Bmat^{\tr}
+\gvec$, and $\zvec = \Amat \xvec$ is linear in $\Amat$.
+
+Three initialisations are possible, and only one works.
+
+- **Both zero.** Then $\partial \mathcal{L} / \partial \Bmat = s \gvec (\zeros)^{\tr} = \zeros$ and
+  $\partial \mathcal{L} / \partial \Amat = \zeros$. The factors are at a stationary point and never move.
+- **Both random.** Then $s \Bmat \Amat \neq \zeros$, and the model starts at a randomly perturbed copy of the pretrained
+  one. Training first has to undo the damage.
+- **$\Bmat = \zeros$, $\Amat$ random.** Then $s \Bmat \Amat = \zeros$, so the adapted model computes exactly the
+  pretrained function. $\partial \mathcal{L} / \partial \Amat = \zeros$, but $\partial \mathcal{L} / \partial \Bmat
+  = s \gvec (\Amat \xvec)^{\tr}$ is non-zero whenever $\Amat \xvec \neq \zeros$. $\Bmat$ moves first, in the random
+  $r$-dimensional subspace of inputs that $\Amat$ selects, and $\Amat$ starts to move once $\Bmat$ is non-zero.
+
+Hu et al. draw $\Amat$ from a Gaussian <Cite id="hu2022" />. The <Gloss name="peft" form="short" /> library draws it
+from a Kaiming-uniform distribution by default <Cite id="mangrulkar2022" />.
+
+### The scale $\alpha / r$, and why rsLoRA uses $\alpha / \sqrt{r}$
+
+The scale $s$ multiplies every update. Hu et al. chose $s = \alpha / r$, set $\alpha$ to the first rank they tried and
+did not tune it. With Adam, they note, tuning $\alpha$ is roughly the same as tuning the
+<Gloss name="learning-rate">learning rate</Gloss> <Cite id="hu2022" />. Whether $1/r$ is the right dependence on rank
+depends on the optimiser, which a one-step calculation shows.
+
+Start from $\Bmat = \zeros$ and take one step on a single example. Let the entries of $\Amat$ be independent with mean
+zero and variance $\sigma^2$, so that $\expect \norm{\Amat \xvec}^2 = r \sigma^2 \norm{\xvec}^2$: a sum of $r$ squared
+projections.
+
+**Plain <NoteLink to="gradient-descent">gradient descent</NoteLink>.** With learning rate $\eta$,
+$\Bmat_1 = -\eta s \gvec (\Amat \xvec)^{\tr}$. The adapter's new output on the same input is
+
+$$
+s \Bmat_1 \Amat \xvec = -\eta s^2 \norm{\Amat \xvec}^2 \gvec \approx -\eta s^2 r \sigma^2 \norm{\xvec}^2 \gvec.
+$$
+
+With $s = \alpha / r$ the change is proportional to $\eta \alpha^2 / r$: doubling the rank halves the initial speed of
+learning, and a large rank learns too slowly to use its extra capacity. With $s = \alpha / \sqrt r$ the change is
+proportional to $\eta \alpha^2$, whatever the rank. Kalajdzievski proved the general form of this result. The adapter's
+activations and gradients stay of constant size as $r$ grows, without collapsing or exploding, if and only if
+$s \propto 1 / \sqrt r$. He called the choice $s = \alpha / \sqrt r$ <Gloss name="rslora" form="full" />.
+Fine-tuning Llama 2 7B at ranks from 4 to 2048 with the $1/r$ scale gave about the same loss at every rank. With the
+$1/\sqrt r$ scale, higher ranks reached lower loss <Cite id="kalajdzievski2023" />.
+
+**Adam.** Adam's first step, after bias correction, moves each coordinate by exactly $\eta$ in the direction of the
+negative gradient sign. So $(\Bmat_1)_{ij} = -\eta \sgn(g_i z_j)$, whatever the value of $s$. Entry $i$ of the
+adapter's new output is
+
+$$
+s \sum_{j=1}^{r} (\Bmat_1)_{ij} z_j = -\eta s \sgn(g_i) \sum_{j=1}^{r} \abs{z_j}.
+$$
+
+All $r$ terms have the same sign, so the sum grows in proportion to $r$, and $s = \alpha / r$ makes the first step's
+effect independent of the rank. This is consistent with the observation by Schulman et al. that, with the $1/r$ scale
+and Adam, the best learning rate is almost independent of the rank <Cite id="schulman2025lora" />. Later steps are not
+pure sign steps, and the high-rank gains that Kalajdzievski measured with <Gloss name="adamw" /> show that $1/r$ still
+under-uses large ranks.
+
+In practice, $s = \alpha / r$ is the default. When the rank changes by a large factor, retune the learning rate, or use
+$s = \alpha / \sqrt r$ (`use_rslora=True` in PEFT <Cite id="mangrulkar2022" />). Biderman et al. recommend
+$\alpha = 2r$ <Cite id="biderman2024" />.
+
+<LowRankExplorer />
+
+### Which matrices to adapt
+
+A <NoteLink to="transformer">transformer</NoteLink> block of a modern decoder has seven linear layers: the query, key,
+value and output projections of attention ($\Wmat_q, \Wmat_k, \Wmat_v, \Wmat_o$), and the gate, up and down
+projections of the <NoteLink to="gated-feed-forward-layers">gated feed-forward layer</NoteLink>. In Llama 3 8B the
+feed-forward layers hold 81% of the block's weights.
+
+Hu et al. adapted only $\Wmat_q$ and $\Wmat_v$. Under a fixed budget of 18 million parameters on GPT-3, spreading rank
+over $\Wmat_q$ and $\Wmat_v$ beat putting all of it into one matrix type <Cite id="hu2022" />. Later work found that
+attention-only adapters underfit:
+
+- <Gloss name="qlora" /> could not match full fine-tuning of LLaMA 7B with adapters on the query and value projections.
+  With adapters on every linear layer it could, and the rank then made little difference <Cite id="dettmers2023" />.
+- Schulman et al. found that adapters on the feed-forward layers alone, at rank 128, beat attention-only adapters at
+  rank 256 with a similar parameter count. Adding attention adapters to feed-forward adapters gave no further gain
+  <Cite id="schulman2025lora" />.
+
+The default today is to adapt every linear layer of every block (`target_modules="all-linear"` in PEFT
+<Cite id="mangrulkar2022" />). The embedding table and the output layer are usually left frozen.
+
+### Choosing the rank
+
+The rank sets the capacity of the update: the number of independent directions per matrix in which the model can
+change. Ranks of 8 to 64 are common. The right rank depends on how much the task asks the model to learn.
+
+For a single matrix the capacity limit is exact. Let $\sigma_1 \ge \sigma_2 \ge \dots$ be the singular values of the
+change $\Delta\Wmat$ that the task needs. No update of rank $r$ brings $\tfrac12 \norm{s \Bmat \Amat - \Delta\Wmat}_F^2$
+below $\tfrac12 \sum_{i > r} \sigma_i^2$, the energy in the singular values past the $r$th. The best rank-$r$ update
+keeps the top $r$ singular triplets of $\Delta\Wmat$ <Cite id="eckart1936" />.
+
+- Narrow tasks that reuse the model's knowledge, such as classification, extraction or a fixed output format, are
+  usually served by ranks of 8 to 16.
+- Tasks that add knowledge need more. For code <NoteLink to="instruction-tuning-and-alignment">instruction
+  tuning</NoteLink> of Llama 2 7B, rank 16 reached a <NoteLink to="language-model-evaluation">HumanEval</NoteLink> pass
+  rate of 0.358 against 0.497 for full fine-tuning; rank 256 came close to full fine-tuning <Cite id="biderman2024" />.
+- <NoteLink to="reinforcement-learning-with-verifiable-rewards">Reinforcement learning</NoteLink> with a scalar reward
+  conveys little information per episode. Schulman et al. found that rank 1 matched full fine-tuning in policy-gradient
+  training <Cite id="schulman2025lora" />.
+
+A practical test: if the LoRA training loss plateaus above the loss of a short full fine-tuning run on the same data,
+the update is capacity-limited. Raise the rank or adapt more matrices.
+
+### Reading a trained adapter
+
+A trained adapter is a set of explicit matrices, so it can be inspected. For each adapted matrix, form
+$\Delta \Wmat = s \Bmat \Amat$ and compute its <NoteLink to="singular-value-decomposition">singular value
+decomposition</NoteLink>, which costs only $O(r^2 (d + k))$ from the factors.
+
+- **Spectrum.** If the singular values of $\Delta\Wmat$ fall off quickly, the update uses fewer directions than $r$
+  allows and a smaller rank would do. If all $r$ are of similar size, the rank may be binding.
+- **Relative size.** The ratio $\norm{\Delta \Wmat}_F / \norm{\Wmat_0}_F$ per layer shows where the model changed most.
+- **Stability across ranks.** Hu et al. trained adapters of rank 8 and rank 64 and compared their column spaces. The top
+  few directions agreed closely, and the rest of the rank-64 directions looked like noise <Cite id="hu2022" />.
+
+### Merging, and serving many adapters
+
+After training, the update can be folded into the frozen weight once:
+
+$$
+\Wmat = \Wmat_0 + \frac{\alpha}{r} \Bmat \Amat.
+$$
+
+The merged model has the original shape, so inference costs exactly what the pretrained model costs. Adapter layers
+that insert small networks between existing layers add depth, and therefore latency, at every token. LoRA does not.
+Subtracting the same product unmerges it, up to rounding.
+
+Leaving the adapter unmerged allows one base model to serve many tasks. A batch can then mix requests for different
+adapters. The base product $\Wmat_0 \Xmat$ is computed once for the whole batch, and each request adds its own
+$s \Bmat \Amat \xvec$ through small batched products. Punica's batched kernel for mixed adapters gave 12 times the
+throughput of serving systems without it, at 2 ms extra latency per token <Cite id="chen2024punica" />. S-LoRA keeps
+all adapters in host memory, pages the active ones into accelerator memory alongside the
+<NoteLink to="key-value-cache">key-value cache</NoteLink>, and serves thousands of adapters on one base model
+<Cite id="sheng2024slora" />. vLLM accepts an adapter per request, with limits on the number of adapters resident at
+once and on their largest rank <Cite id="vllm2023" />.
+
+### Variants
+
+- **LoRA+** gives $\Bmat$ a larger learning rate than $\Amat$. Hayou et al. show that equal learning rates make feature
+  learning inefficient when the model is wide. The best ratio $\eta_B / \eta_A$ depended on the model: about $2^4$ for
+  RoBERTa and $2^1$ to $2^2$ for Llama. They report gains of 1 to 2 percentage points and up to twice the training speed
+  <Cite id="hayou2024" />.
+- **<Gloss name="dora" />** writes each weight column as a magnitude times a unit direction. It trains the magnitudes
+  $\mvec$ directly and the direction through LoRA:
+  $\Wmat = \mvec \odot (\Wmat_0 + \Bmat\Amat) / \norm{\Wmat_0 + \Bmat\Amat}_c$, where $\norm{\cdot}_c$ is the norm of
+  each column. In full fine-tuning, the changes in magnitude and in direction were negatively correlated ($-0.62$); in
+  LoRA they were positively correlated ($0.83$). DoRA moved the correlation to $-0.31$ and improved on LoRA at the same
+  rank <Cite id="liu2024dora" />. It costs more per training step and is merged for inference.
+- **<Gloss name="pissa" />** initialises the adapter from the top $r$ singular triplets of $\Wmat_0$,
+  $\Bmat \Amat = \Umat_r \Sigmamat_r \Vmat_r^{\tr}$, and freezes the residual
+  $\Wmat_0 - \Umat_r \Sigmamat_r \Vmat_r^{\tr}$. The model still starts exactly at the pretrained function, but training
+  moves the principal directions of the weight instead of a random subspace. On GSM8K, Mistral 7B reached 72.86%
+  accuracy with PiSSA against 67.7% with LoRA <Cite id="meng2024pissa" />.
+- **<Gloss name="vera" />** shares one pair of frozen random matrices across all layers and trains only two scaling
+  vectors per layer, $\Delta \Wmat = \diag(\bvec) \Bmat \diag(\dvec) \Amat$. Each layer then trains $d + r$
+  parameters instead of $r(d + k)$ <Cite id="kopiczko2024" />.
+
+The <NoteLink to="quantised-low-rank-adaptation">QLoRA</NoteLink> note covers LoRA on a quantised base model, and the
+<NoteLink to="parameter-efficient-fine-tuning">parameter-efficient fine-tuning</NoteLink> note covers methods that are
+not low-rank.
+
+## Cost
+
+### Worked example: Llama 3 8B
+
+<NoteLink to="llama-family">Llama 3 8B</NoteLink> has 32 blocks with model width 4096. Attention has 32 query heads and
+8 key-value heads of width 128, so the key and value projections map 4096 inputs to $8 \times 128 = 1024$ outputs. The
+feed-forward width is 14,336 <Cite id="grattafiori2024" />. LoRA at $r = 16$ on every linear layer of one block trains:
+
+| Matrix            | Shape $d \times k$       | Full update $dk$ | LoRA $r(d + k)$ |
+| ----------------- | ------------------------ | ---------------- | --------------- |
+| $\Wmat_q$         | $4096 \times 4096$       | 16,777,216       | 131,072         |
+| $\Wmat_k$         | $1024 \times 4096$       | 4,194,304        | 81,920          |
+| $\Wmat_v$         | $1024 \times 4096$       | 4,194,304        | 81,920          |
+| $\Wmat_o$         | $4096 \times 4096$       | 16,777,216       | 131,072         |
+| gate, up, each    | $14336 \times 4096$      | 58,720,256       | 294,912         |
+| down              | $4096 \times 14336$      | 58,720,256       | 294,912         |
+| **Block total**   |                          | 218,103,808      | 1,310,720       |
+
+Over 32 blocks, LoRA trains $32 \times 1{,}310{,}720 = 41{,}943{,}040$ parameters. That is 0.6% of the
+$6.98 \times 10^9$ weights it adapts and 0.52% of the model's $8.03 \times 10^9$ parameters.
+
+- **Training state.** At 16 bytes per trained parameter, the adapters' weights, gradients and Adam state take
+  $16 \times 41.9 \times 10^6 \approx 0.67$ GB, against $16 \times 8.03 \times 10^9 \approx 128$ GB for full
+  fine-tuning. The frozen 16-bit base still takes $2 \times 8.03 \times 10^9 \approx 16$ GB.
+- **Storage.** The adapter in 16 bits takes $2 \times 41.9 \times 10^6 \approx 84$ MB, against 16 GB for a full
+  checkpoint.
+- **Compute.** A training step costs about one forward pass $F$ plus a backward pass of about $2F$: one $F$ for the
+  gradients with respect to activations and one for the gradients with respect to weights. LoRA skips the weight
+  gradients of the frozen matrices, so a step costs about $2F$ instead of $3F$, plus the adapters' 0.6% extra. Hu et al.
+  measured a 25% speed-up on GPT-3 <Cite id="hu2022" />.
+
+LoRA does not reduce activation memory. Gradients must still flow back through every frozen layer to reach the adapters
+in earlier blocks, so every block's activations are kept or recomputed as in full fine-tuning.
+
+## Trade-offs
+
+### LoRA learns less and forgets less
+
+Biderman et al. compared LoRA with full fine-tuning of Llama 2 7B on code and mathematics, both for instruction tuning
+(about 100,000 prompt–response pairs) and for continued pretraining (up to 20 billion tokens)
+<Cite id="biderman2024" />.
+
+- **Learns less.** LoRA underperformed full fine-tuning on the target domain at typical ranks. The gap was larger for
+  code than for mathematics, and larger for continued pretraining than for instruction tuning. On mathematics
+  instruction tuning, rank 64 reached 62.4% on GSM8K against 64.2% for full fine-tuning.
+- **Forgets less.** LoRA kept more of the base model's performance on tasks outside the target domain, measured on
+  HellaSwag, WinoGrande and ARC-Challenge. It limited forgetting more than <Gloss name="weight-decay">weight
+  decay</Gloss> or <NoteLink to="dropout">dropout</NoteLink> did, and kept generations more diverse.
+
+Both effects follow from the constraint. In each adapted matrix, LoRA can change the model only within an
+$r$-dimensional subspace of outputs and of inputs, so it moves the weights a shorter distance from the pretrained point.
+That limits what the model can absorb, and it also limits how much of its prior behaviour it can overwrite. Biderman et
+al. recommend LoRA for instruction tuning rather than continued pretraining. Schulman et al. reach a compatible
+conclusion: LoRA matches full fine-tuning when its capacity exceeds what the dataset contains and it adapts every
+layer, and falls behind once the dataset outgrows it <Cite id="schulman2025lora" />.
+
+| Choice                  | Gains                                           | Costs                                             |
+| ----------------------- | ----------------------------------------------- | ------------------------------------------------- |
+| LoRA over full tuning   | about an eighth of the model-state memory        | lower ceiling on large or knowledge-heavy tasks   |
+| Higher rank             | capacity for harder tasks                        | more memory; drifts further from the base         |
+| All linear layers       | matches full tuning where attention-only fails   | several times the adapter parameters              |
+| Merged adapter          | zero inference overhead                          | one task per model copy                           |
+| Unmerged adapters       | many tasks on one base model                     | small per-token cost; batching kernels needed     |
+
+## Pitfalls
+
+- **Learning rate copied from full fine-tuning.** The best LoRA learning rate is about 10 times the best full
+  fine-tuning rate <Cite id="schulman2025lora" />. QLoRA used $2 \times 10^{-4}$ for 7B and 13B models and $10^{-4}$ for
+  33B and 65B models <Cite id="dettmers2023" />. A rate tuned for full fine-tuning leaves LoRA undertrained.
+- **Attention-only targets.** Adapting only $\Wmat_q$ and $\Wmat_v$, the original default, underfits instruction
+  tuning. Adapt every linear layer.
+- **Changing the rank without retuning.** Under $s = \alpha / r$ with plain gradient descent, a larger rank learns
+  more slowly. Retune the learning rate or $\alpha$, or use rsLoRA.
+- **Large batches.** LoRA pays a larger loss penalty than full fine-tuning as the batch grows past some size, whatever
+  the rank <Cite id="schulman2025lora" />.
+- **Dropout.** LoRA dropout zeroes parts of the adapter's input only, $\hvec = \Wmat_0 \xvec + s \Bmat \Amat
+  \operatorname{dropout}(\xvec)$. QLoRA found a rate of 0.05 useful for 7B and 13B models and not for 33B and 65B
+  models <Cite id="dettmers2023" />.
+- **Merging into a quantised base.** An adapter trained on a quantised base learned to correct the quantised weights,
+  not the originals. Merging it into 16-bit original weights, or re-quantising the merged weights, changes the model.
+  The <NoteLink to="quantised-low-rank-adaptation">QLoRA</NoteLink> note derives when the change matters.
+- **Rounding at merge.** Adding $\Delta\Wmat$ to a 16-bit $\Wmat_0$ rounds each sum. In bfloat16 an increment smaller
+  than about $\abs{w} / 256$ of a weight $w$ can be lost entirely (see
+  <NoteLink to="mixed-precision-training">mixed-precision training</NoteLink>). Merge in 32 bits and evaluate the merged
+  model, not only the unmerged one.
+- **New tokens.** A token added to the vocabulary, such as a chat-template marker, gets a new embedding row. If the
+  embedding table is frozen, that row stays at its random initial value. Train the new rows, or the whole embedding and
+  output layers, alongside the adapters.
+- **Wrong base.** An adapter is a correction to one specific set of weights. Applied to another checkpoint, even
+  another release of the same model, it adds an update that was never trained for it.

@@ -1,0 +1,350 @@
+---
+title: Group relative policy optimisation
+kind: technique
+summary: 'GRPO is PPO without a value network. It samples $G$ responses per prompt, gives every token of response $i$ the advantage $(r_i - \bar r)/s_r$, its reward standardised within the group, and maximises a clipped importance-ratio objective, optionally with a KL penalty to a reference.'
+tags: [reinforcement-learning, policy-methods, language-models, large-language-models, fine-tuning, reasoning, worked-example]
+aliases: [GRPO, group relative policy optimization, group-relative advantage, critic-free policy optimisation, Dr. GRPO, DAPO, clip-higher, dynamic sampling, token-level loss, overlong reward shaping, RLOO, REINFORCE leave-one-out, global advantage normalisation, k3 estimator, GRPOTrainer]
+requires: [trust-region-and-proximal-policy-optimisation, policy-gradient-theorem]
+partOf: [adapting-pretrained-language-models]
+related: [actor-critic, score-function-estimator, kullback-leibler-divergence, reinforcement-learning-from-human-feedback, direct-preference-optimisation]
+references: [shao2024grpo, deepseek2025r1, liu2025drgrpo, yu2025dapo, ahmadian2024, kool2019, hu2025reinforcepp, hu2025orz, schulman2020kl, tang2025kl, cui2025, hf2026trlgrpo, sheng2025, hu2024openrlhf, kwon2023]
+status: draft
+updated: 2026-10-07
+---
+
+<Definition>
+**Group relative policy optimisation** (GRPO) is a policy-gradient method for <Gloss name="language-model">language
+models</Gloss>. For each prompt $x$ it samples a group of $G$ responses $y_1, \dots, y_G$ from the current policy
+$\pi_{\text{old}}$ and scores them with rewards $r_1, \dots, r_G$. Every token of response $i$ receives the same
+advantage, the reward standardised within the group, $\hat A_i = (r_i - \bar r)/s_r$, where $\bar r$ and $s_r$ are the
+group's mean and standard deviation. The parameters $\thetavec$ maximise
+
+$$
+J(\thetavec) = \expect\brack{\frac{1}{G}\sum_{i=1}^{G}\frac{1}{\abs{y_i}}\sum_{t=1}^{\abs{y_i}}\paren{\min\paren{\rho_{i,t}\hat A_i,\ \operatorname{clip}\paren{\rho_{i,t}, 1 - \varepsilon, 1 + \varepsilon}\hat A_i} - \beta\,\hat k_{i,t}}},
+$$
+
+where $\rho_{i,t} = \pi_{\thetavec}(y_{i,t} \mid x, y_{i,<t})/\pi_{\text{old}}(y_{i,t} \mid x, y_{i,<t})$ is the
+probability ratio of token $t$, $\abs{y_i}$ is the length of response $i$ in tokens, and $\hat k_{i,t}$ estimates the
+<Gloss name="kl" /> from a frozen reference policy $\pi_{\text{ref}}$ <Cite id="shao2024grpo" />.
+</Definition>
+
+## Problem
+
+<Gloss name="ppo" />, as used in <Gloss name="rlhf" />, needs four networks of similar size: the policy, a frozen
+reference, a reward model and a value network. The value network is the critic of an
+<NoteLink to="actor-critic">actor-critic</NoteLink> method: it predicts, at every token, the reward the response will
+finally receive, and <Gloss name="gae" /> turns those predictions into per-token advantages. For a language model the
+critic is costly and hard to train. It is usually as large as the policy, so it doubles the trained weights and
+optimiser state. The reward arrives only at the last token, so the critic must predict a final verdict from a partial
+response <Cite id="shao2024grpo" />. In long reasoning, later text often revises or contradicts earlier text, which
+makes that prediction harder still <Cite id="deepseek2025r1" />.
+
+With a programmatic reward, as in <NoteLink to="reinforcement-learning-with-verifiable-rewards">reinforcement learning
+with verifiable rewards</NoteLink>, the reward model is not needed either. GRPO removes the critic. Only the policy is
+trained, and the reference is kept only if the KL term is used.
+
+## Mechanism
+
+### From the policy gradient to a group baseline
+
+Treat a whole response as one action. For one prompt the objective is
+$J(x) = \expect_{y \sim \pi_{\thetavec}}[r(x, y)]$, and the <NoteLink to="policy-gradient-theorem">policy
+gradient</NoteLink> with a baseline $b$ is
+
+$$
+\nabla_{\thetavec} J(x) = \expect_{y}\brack{\paren{r(x, y) - b}\nabla_{\thetavec}\log\pi_{\thetavec}(y \mid x)}.
+$$
+
+The baseline leaves the gradient unbiased if it does not depend on $y$, because
+$\expect_y[\nabla\log\pi_{\thetavec}(y \mid x)] = \nabla\sum_y\pi_{\thetavec}(y \mid x) = \nabla 1 = 0$. The best simple
+choice is close to the expected reward $V(x) = \expect_y[r(x, y)]$, which a critic would estimate. With $G$ samples of
+the same prompt, the other samples estimate it directly. The **leave-one-out** baseline for response $i$ is
+$b_i = \frac{1}{G - 1}\sum_{j \ne i} r_j$. The responses are drawn independently, so $b_i$ does not depend on $y_i$ and
+the estimate stays unbiased. This is REINFORCE leave-one-out (<Gloss name="rloo" />) <Cite id="kool2019" />
+<Cite id="ahmadian2024" />.
+
+GRPO subtracts the group mean $\bar r = \frac1G\sum_j r_j$ instead, which includes $r_i$ itself. Writing
+$\bar r = \frac{1}{G}\paren{r_i + (G - 1)b_i}$ gives
+
+$$
+r_i - \bar r = \frac{G - 1}{G}\paren{r_i - b_i}.
+$$
+
+The mean-centred advantage is the leave-one-out advantage scaled by $(G - 1)/G$. It is therefore an unbiased gradient
+estimate up to that constant factor, which the learning rate absorbs.
+
+GRPO then divides by the group's standard deviation $s_r$. With a binary reward and a fraction $\hat p$ of correct
+responses in the group, $\bar r = \hat p$ and $s_r = \sqrt{\hat p(1 - \hat p)}$, so
+
+$$
+\hat A_{\text{correct}} = \sqrt{\frac{1 - \hat p}{\hat p}}, \qquad \hat A_{\text{wrong}} = -\sqrt{\frac{\hat p}{1 - \hat p}}.
+$$
+
+A rare success gets a large positive advantage. The division multiplies the whole group's contribution by $1/s_r$, which
+depends on the sampled rewards, so the estimate is no longer an unbiased estimate of $\nabla J$. Implementations differ
+in whether $s_r$ divides by $G$ or $G - 1$, and add a small constant to avoid division by zero.
+
+**Every token gets the same advantage.** The log-probability of a response is the sum over its tokens,
+$\log\pi_{\thetavec}(y_i \mid x) = \sum_t\log\pi_{\thetavec}(y_{i,t} \mid x, y_{i,<t})$, so
+$\hat A_i\nabla\log\pi_{\thetavec}(y_i \mid x)$ is a sum of per-token terms that share $\hat A_i$. A critic would
+give each token its own advantage. GRPO does no credit assignment within a response. A variant with a process reward
+model, which scores each reasoning step, gives each token the sum of the standardised step rewards from its step onwards
+<Cite id="shao2024grpo" />.
+
+### The clipped objective
+
+Sampling $G$ long responses per prompt is the expensive part of a step. The clipped ratio of
+<NoteLink to="trust-region-and-proximal-policy-optimisation">PPO</NoteLink> lets one batch of samples support several
+gradient steps: once a token's probability has moved by a factor $1 \pm \varepsilon$ in the direction its advantage
+favours, the clip stops that token from pushing further. On the first gradient step after sampling,
+$\pi_{\thetavec} = \pi_{\text{old}}$, every $\rho_{i,t} = 1$, the clip is inactive, and the gradient of $J$ is the
+policy gradient above, with each response's terms divided by $\abs{y_i}$. In DeepSeek-R1's first <Gloss name="rl" />
+stage, each rollout of 8,192 responses was split into 16 minibatches for a single pass, with $\varepsilon = 10$, so the
+clip almost never acted <Cite id="deepseek2025r1" />.
+
+### The KL term and the k3 estimator
+
+GRPO puts the KL penalty in the loss. PPO-based RLHF instead subtracts a per-token KL penalty from the reward, which
+then enters the advantages. DeepSeek notes that the reward-side penalty accumulates over the response and so also
+penalises length <Cite id="deepseek2025r1" />. The exact per-token KL divergence needs the full next-token distributions
+of both models. GRPO estimates it from the sampled token alone, with
+$q = \pi_{\text{ref}}(y_{i,t} \mid \cdot)/\pi_{\thetavec}(y_{i,t} \mid \cdot)$:
+
+$$
+\hat k_{i,t} = q - \log q - 1,
+$$
+
+the estimator called $k_3$ by Schulman <Cite id="schulman2020kl" /> <Cite id="shao2024grpo" />.
+
+**It is unbiased.** For a token $a$ sampled from $\pi_{\thetavec}$,
+$\expect[q] = \sum_a\pi_{\thetavec}(a)\,\pi_{\text{ref}}(a)/\pi_{\thetavec}(a) = \sum_a\pi_{\text{ref}}(a) = 1$, and
+$\expect[-\log q] = \sum_a\pi_{\thetavec}(a)\log(\pi_{\thetavec}(a)/\pi_{\text{ref}}(a)) = \KL(\pi_{\thetavec} \,\|\, \pi_{\text{ref}})$.
+So $\expect[\hat k] = 1 + \KL - 1 = \KL(\pi_{\thetavec} \,\|\, \pi_{\text{ref}})$. The first sum needs
+$\pi_{\thetavec}(a) > 0$ wherever $\pi_{\text{ref}}(a) > 0$, which a softmax policy satisfies.
+
+**It is non-negative.** The tangent line of $\log$ at 1 lies above it, $\log q \le q - 1$, so $q - 1 - \log q \ge 0$,
+with equality only at $q = 1$. The simpler unbiased estimate $-\log q$ is negative whenever the sampled token is more
+probable under the reference, which makes it noisy. $k_3$ adds $q - 1$, a term with mean zero that is negatively
+correlated with $-\log q$. In Schulman's Gaussian example with a true KL divergence of 0.005, the standard deviation of
+$-\log q$ was 20 times the true value and that of $k_3$ was 1.42 times <Cite id="schulman2020kl" />.
+
+**Its gradient is not the KL gradient.** GRPO differentiates $\hat k$ as a loss. For one token,
+$\nabla_{\thetavec}\hat k = (1 - q)\nabla_{\thetavec}\log\pi_{\thetavec}(a)$, and its expectation is
+
+$$
+\sum_a\pi_{\thetavec}(a)\paren{1 - \frac{\pi_{\text{ref}}(a)}{\pi_{\thetavec}(a)}}\nabla\log\pi_{\thetavec}(a) = -\sum_a\pi_{\text{ref}}(a)\nabla\log\pi_{\thetavec}(a) = \nabla_{\thetavec}\KL(\pi_{\text{ref}} \,\|\, \pi_{\thetavec}).
+$$
+
+An unbiased estimate of $\KL(\pi_{\thetavec} \,\|\, \pi_{\text{ref}})$ has the gradient, in expectation, of the
+divergence in the other direction. Over a sequence the per-token losses also ignore how the policy's change at one token
+alters the distribution of later tokens. Tang and Munos show that differentiating KL estimates as losses generally does
+not give the KL gradient <Cite id="tang2025kl" />. Both directions are zero only at
+$\pi_{\thetavec} = \pi_{\text{ref}}$, so the term still pulls towards the reference. Differentiating
+$k_2 = \frac12(\log q)^2$ instead gives $\log(\pi_{\thetavec}(a)/\pi_{\text{ref}}(a))\nabla\log\pi_{\thetavec}(a)$,
+whose expectation is the gradient of $\KL(\pi_{\thetavec} \,\|\, \pi_{\text{ref}})$; REINFORCE++ uses it for this reason
+<Cite id="hu2025reinforcepp" />.
+
+**Often switched off.** In reasoning training the policy is meant to move far from its starting point. DAPO removes the
+KL term for that reason <Cite id="yu2025dapo" />, Open-Reasoner-Zero trains without it <Cite id="hu2025orz" />, and
+TRL's GRPO trainer defaults to $\beta = 0$, which also means the reference model is never loaded
+<Cite id="hf2026trlgrpo" />. DeepSeek-R1-Zero used $\beta = 0.001$ and replaced the reference with the current policy
+every 400 steps <Cite id="deepseek2025r1" />. DeepSeekMath used $\beta = 0.04$ <Cite id="shao2024grpo" />.
+
+## Biases and fixes
+
+**Dr. GRPO.** Liu et al. identify two biases in GRPO's objective <Cite id="liu2025drgrpo" />.
+
+- **Length.** Dividing response $i$'s terms by $\abs{y_i}$ gives each token of a short response more weight than each
+  token of a long one. A correct short response is reinforced more per token than a correct long one, which favours
+  brevity among correct answers. A wrong long response is penalised less per token than a wrong short one, which
+  favours length among wrong answers. Response length keeps growing even after the reward stops improving.
+- **Difficulty.** Dividing by $s_r$ gives more weight to prompts whose groups are nearly all correct or nearly all
+  wrong, because their $s_r$ is small.
+
+<Gloss name="dr-grpo" /> ("GRPO done right") removes both divisions: the advantage is $r_i - \bar r$ and the token sum
+is divided by a constant, such as the generation limit, instead of $\abs{y_i}$. This recovers the
+policy gradient with a group-mean baseline. The authors found the same length normalisation in open-source PPO
+implementations for language models, which average the loss over each response's tokens. With Dr. GRPO the length of
+incorrect responses fell while accuracy stayed similar <Cite id="liu2025drgrpo" />.
+
+**DAPO.** <Gloss name="dapo" /> adds four changes to GRPO, without a KL term and with rewards of $+1$ and $-1$
+<Cite id="yu2025dapo" />.
+
+- **Clip-higher.** With $\varepsilon = 0.2$ and a positive advantage, a token at probability 0.01 can rise only to 0.012
+  within the clip, while a token at 0.9 has no effective limit. The upper clip therefore holds back unlikely tokens, the
+  ones that explore. DAPO decouples the bounds, with $\varepsilon_{\text{low}} = 0.2$ and
+  $\varepsilon_{\text{high}} = 0.28$, which kept the policy's entropy from collapsing. Raising
+  $\varepsilon_{\text{low}}$ instead would let unlikely tokens be pushed to zero.
+- **Dynamic sampling.** A group whose rewards are all equal has zero advantages and gives no gradient. As training
+  progresses more prompts are solved every time, and the effective batch shrinks. DAPO over-samples prompts and drops
+  every group with all responses correct or all wrong, until the batch is full.
+- **Token-level loss.** DAPO divides the sum over all tokens of the group by the total number of tokens,
+  $\sum_i\abs{y_i}$, instead of averaging within each response first. Every token then has equal weight, so repetitive
+  or meaningless text in long responses is penalised in full.
+- **Overlong reward shaping.** Truncated responses are either masked out of the loss or given a penalty that rises
+  linearly from 0 to $-1$ over the last $L_{\text{cache}} = 4{,}096$ tokens before the limit $L_{\max} = 20{,}480$.
+
+On Qwen2.5-32B base, AIME 2024 accuracy averaged over 32 samples rose from 30% with naive GRPO to 36% with overlong
+filtering, 38% with clip-higher, 41% with soft overlong punishment, 42% with the token-level loss and 50% with dynamic
+sampling. DeepSeek-R1-Zero's recipe reached 47% on the same base model, with twice as many training steps
+<Cite id="yu2025dapo" />.
+
+**Normalising over the batch.** REINFORCE++ standardises advantages over the whole batch instead of within each group,
+which its authors argue removes the bias of per-prompt normalisation <Cite id="hu2025reinforcepp" />.
+
+**Keeping a critic.** A critic is not inherently worse. DeepSeek found PPO far behind GRPO with the usual GAE setting
+$\lambda = 0.95$, and close to it with $\lambda = 1$ <Cite id="deepseek2025r1" />. Open-Reasoner-Zero used PPO with
+$\lambda = 1$, $\gamma = 1$ and no KL term, and reported that the learned critic gave low values to repetitive text
+<Cite id="hu2025orz" />.
+
+| Method      | Baseline                | Advantage scale | Token weights          | Critic | KL term                     |
+| ----------- | ----------------------- | --------------- | ---------------------- | ------ | --------------------------- |
+| PPO (RLHF)  | Learned value, with GAE | Batch std       | $1/\abs{y_i}$, usually | Yes    | In the reward               |
+| RLOO        | Mean of the other $G-1$ | None            | 1 (sequence sum)       | No     | In the reward               |
+| GRPO        | Group mean              | Group std       | $1/\abs{y_i}$          | No     | $k_3$ in the loss           |
+| Dr. GRPO    | Group mean              | None            | Constant               | No     | Optional                    |
+| DAPO        | Group mean              | Group std       | $1/\sum_j\abs{y_j}$    | No     | None                        |
+| REINFORCE++ | Group mean or none      | Batch std       | Token-level            | No     | $k_1$ in the reward, or $k_2$ loss |
+
+## Worked example
+
+A maths prompt gets $G = 8$ responses. The verifier marks responses 1, 4 and 7 correct, so the rewards are
+$(1, 0, 0, 1, 0, 0, 1, 0)$ and $\hat p = 3/8 = 0.375$.
+
+- **GRPO.** $\bar r = 0.375$ and $s_r = \sqrt{0.375 \times 0.625} = 0.484$. A correct response has
+  $\hat A = 0.625/0.484 = 1.29$ and a wrong one $\hat A = -0.375/0.484 = -0.77$. The advantages sum to zero:
+  $3 \times 1.29 = 5 \times 0.77 = 3.87$. With the $G - 1$ convention, $s_r = 0.518$ and the advantages are $1.21$ and
+  $-0.72$.
+- **RLOO.** A correct response's baseline is the mean of the other seven, $2/7$, so $\hat A = 1 - 0.286 = 0.71$. A
+  wrong response's baseline is $3/7$, so $\hat A = -0.43$. These are the mean-centred values $0.625$ and $-0.375$
+  times $8/7$.
+- **Dr. GRPO.** $\hat A = 0.625$ and $-0.375$.
+
+**A harder prompt.** With one correct response in eight, $\hat p = 0.125$ and $s_r = 0.331$. GRPO gives the correct
+response $0.875/0.331 = 2.65$ and each wrong one $-0.38$. Dr. GRPO gives $0.875$ and $-0.125$. Standardisation has
+multiplied this group's weight by $1/0.331 = 3.0$, against $1/0.484 = 2.1$ for the first group, so the harder prompt
+counts about 1.5 times as much relative to Dr. GRPO.
+
+**An easy prompt.** All eight correct: $\bar r = 1$, every $r_i - \bar r = 0$, and the prompt contributes no gradient.
+DAPO's dynamic sampling would drop it and sample another prompt.
+
+**Length.** Suppose the first group's correct responses have 200 and 800 tokens and two of its wrong responses have 300
+and 1,200. GRPO weights each token by $\hat A_i/\abs{y_i}$: $1.29/200 = 0.0065$ against $1.29/800 = 0.0016$ for the
+correct ones, and $-0.77/300 = -0.0026$ against $-0.77/1200 = -0.0006$ for the wrong ones. Each token of the long
+wrong response is penalised four times less than each token of the short one. Under DAPO's token-level loss, every
+token's weight is $\hat A_i$ divided by the same total, so the four responses' tokens are weighted by $1.29$ and
+$-0.77$ alone.
+
+## Settings in practice
+
+|                     | DeepSeekMath                 | DeepSeek-R1-Zero                | DAPO                                  | TRL default |
+| ------------------- | ---------------------------- | ------------------------------- | ------------------------------------- | ----------- |
+| Group size $G$      | 64                           | 16                              | 16                                    | 8           |
+| Batch per step      | 1,024                        | 32 prompts, 512 responses       | 512 prompts                           |             |
+| Learning rate       | $10^{-6}$                    | $3 \times 10^{-6}$              | $10^{-6}$, constant after warm-up     |             |
+| KL coefficient      | 0.04                         | 0.001                           | 0                                     | 0           |
+| Clip                | not stated                   | not stated; 10 in R1's RL stage | $0.2$ low, $0.28$ high                | 0.2         |
+| Response limit      | 1,024 tokens                 | 32,768, then 65,536             | 20,480 tokens                         |             |
+
+Sources: DeepSeekMath <Cite id="shao2024grpo" />, DeepSeek-R1 <Cite id="deepseek2025r1" />, DAPO
+<Cite id="yu2025dapo" />, TRL documentation <Cite id="hf2026trlgrpo" />. Sampling temperature is usually 1 during
+rollouts, so that the samples are drawn from the policy that the gradient assumes; DeepSeek-R1-Zero used 1
+<Cite id="deepseek2025r1" />.
+
+**Rollouts dominate the cost.** Each step generates $G$ responses for every prompt, often thousands of tokens each.
+Training frameworks generate with a dedicated inference engine, usually vLLM, whose paged
+attention cache serves large batches efficiently <Cite id="kwon2023" />. After each update the new weights are copied
+into the inference engine. The engine's log-probabilities differ slightly from the trainer's, so TRL offers an
+importance-sampling correction for the mismatch <Cite id="hf2026trlgrpo" />.
+
+## Reading the training curves
+
+TRL logs each of these under the name in brackets <Cite id="hf2026trlgrpo" />.
+
+| Metric                                         | Healthy                                         | Warning                                                          |
+| ---------------------------------------------- | ----------------------------------------------- | ---------------------------------------------------------------- |
+| Mean reward (`reward`)                         | Rises, then flattens                            | Rises while held-out accuracy does not                           |
+| Zero-variance groups (`frac_reward_zero_std`)  | A minority of groups                            | Approaches 1: prompts are all solved or all failed               |
+| Response length (`completions/mean_length`)    | Grows with reward on reasoning tasks            | Keeps growing after the reward flattens; repetition              |
+| Truncated fraction (`completions/clipped_ratio`) | Small                                         | Rising: responses hit the limit and fail                         |
+| Entropy (`entropy`)                            | Flat or slowly rising                           | Falls fast: samples in a group become identical                  |
+| KL to reference (`kl`)                         | Grows smoothly                                  | Jumps: unstable updates                                          |
+| Clipped fraction (`clip_ratio/region_mean`)    | Small                                           | Large: updates leave the trust region                            |
+
+- **Reward.** DAPO found that the final training reward correlated little with validation accuracy
+  <Cite id="yu2025dapo" />. Evaluate pass@1 on held-out prompts at fixed intervals.
+- **Zero-variance groups.** Each such group is wasted compute. A rising fraction of all-correct groups means the
+  prompts are too easy for the current policy; a high fraction of all-wrong groups means they are too hard. Refilter the
+  prompts, raise $G$, or use dynamic sampling.
+- **Length.** DAPO treats a rise in length as room for exploration, and also saw it stall or fall for long periods; it
+  judges a run by length together with validation accuracy <Cite id="yu2025dapo" />. Length that keeps growing while
+  the reward is flat is the signature of GRPO's length bias <Cite id="liu2025drgrpo" />.
+- **Entropy.** <Gloss name="entropy-collapse">Entropy collapse</Gloss> ends exploration: the group's responses become
+  near-copies, their rewards become equal, and the advantages vanish. DAPO observed it with naive GRPO and PPO and found
+  that a slow upward trend in entropy went with improving performance; very high entropy came with gibberish and
+  repetition <Cite id="yu2025dapo" />. Cui et al. fitted downstream performance as $R = -a e^{H} + b$ in the policy
+  entropy $H$, so performance saturates as entropy runs out <Cite id="cui2025" />.
+- **Clipping.** DeepSeek reports that too small a clip range truncates the gradients of many tokens and degrades
+  performance, while too large a range makes training unstable <Cite id="deepseek2025r1" />. With clip-higher, watch the
+  upper and lower clipped fractions separately (`clip_ratio/high_mean`, `clip_ratio/low_mean`).
+
+## Tools
+
+- **TRL** provides `GRPOTrainer`. A reward function receives the completions and any dataset columns as keyword
+  arguments and returns one float per completion. Options select the loss aggregation (`loss_type`: `"grpo"`,
+  `"dr_grpo"`, `"dapo"` and others), the reward scaling (`scale_rewards`: per group, per batch or none), the upper clip
+  (`epsilon_high`) and generation with vLLM (`use_vllm`, in the training process or as a separate server)
+  <Cite id="hf2026trlgrpo" />.
+- **verl** is the open-source implementation of HybridFlow, a framework for reinforcement learning on language models
+  <Cite id="sheng2025" />. It implements PPO, GRPO, DAPO, RLOO, <Gloss name="reinforce" />++ and Dr. GRPO, with vLLM or
+  SGLang for rollouts. DAPO was built on it <Cite id="yu2025dapo" />.
+- **OpenRLHF** schedules the policy, reference, reward and critic models across <Gloss name="gpu" plural /> with Ray and
+  generates with vLLM. It implements PPO, REINFORCE++, RLOO, GRPO and Dr. GRPO <Cite id="hu2024openrlhf" />.
+
+A minimal TRL run with a verifier reward, Dr. GRPO's loss and DAPO's upper clip, in the API documented at the time of
+writing:
+
+```python
+from datasets import load_dataset
+from trl import GRPOConfig, GRPOTrainer
+
+def correct(completions, answer, **kwargs):
+    # 1.0 when the text after the last "Answer:" equals the reference answer, else 0.0.
+    return [1.0 if c.rsplit("Answer:", 1)[-1].strip() == a else 0.0 for c, a in zip(completions, answer)]
+
+dataset = load_dataset("json", data_files="train.jsonl", split="train")  # columns: prompt, answer
+config = GRPOConfig(
+    output_dir="grpo-run",
+    num_generations=8,         # G
+    beta=0.0,                  # no KL term, no reference model
+    loss_type="dr_grpo",
+    scale_rewards=False,       # advantage r_i - mean(r)
+    epsilon_high=0.28,
+    max_completion_length=1024,
+    use_vllm=True,
+)
+trainer = GRPOTrainer(model="Qwen/Qwen2.5-0.5B-Instruct", reward_funcs=correct, args=config, train_dataset=dataset)
+trainer.train()
+```
+
+## Cost
+
+- **Memory.** One trained model with its optimiser state. A reference model for inference only if $\beta > 0$. No
+  critic, and no <NoteLink to="reward-models">reward model</NoteLink> when the reward is a program. PPO trains a critic
+  of the policy's size as well.
+- **Compute.** $G$ responses per prompt. Generation usually takes most of the time of a step, so the cost grows with
+  $G$ and with response length.
+- **Samples per useful prompt.** Groups with equal rewards are discarded or wasted, so the cost of each informative
+  prompt rises as the policy saturates the training set.
+
+## Trade-offs
+
+- **Against PPO.** GRPO needs no critic and no GAE tuning. It needs several samples per prompt, and it gives every token
+  of a response the same advantage, so it cannot tell which step of a long response helped.
+- **Against RLOO.** The baselines differ only by the factor $(G - 1)/G$ and by GRPO's division by $s_r$. RLOO keeps the
+  estimate unbiased; GRPO reweights prompts by their difficulty.
+- **Group size.** A larger $G$ makes more groups informative on hard prompts and gives a better baseline, at a
+  proportional cost in sampling.
+- **Against direct preference optimisation.** <NoteLink to="direct-preference-optimisation">DPO</NoteLink> learns
+  offline from fixed preference pairs. GRPO learns online from the policy's own samples, which lets it find and
+  reinforce responses that no dataset contains, at the cost of generation during training.

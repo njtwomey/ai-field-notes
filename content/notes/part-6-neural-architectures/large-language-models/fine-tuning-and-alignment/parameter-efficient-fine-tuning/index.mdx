@@ -1,0 +1,348 @@
+---
+title: Parameter-efficient fine-tuning
+kind: overview
+summary: 'Parameter-efficient fine-tuning freezes a pretrained model and trains a small added or selected set of parameters: adapters, soft prompts, scaling vectors, biases or low-rank updates. Gradients and optimiser state shrink to that set, often under 1%; activations do not.'
+tags: [deep-learning, nlp, language-models, fine-tuning, memory, worked-example]
+aliases:
+  [
+    delta tuning,
+    adapter tuning,
+    bottleneck adapters,
+    prefix tuning,
+    prompt tuning,
+    soft prompts,
+    P-tuning,
+    BitFit,
+    diff pruning,
+    sparse fine-tuning,
+    Hugging Face PEFT,
+  ]
+requires: [transformer, backpropagation]
+partOf: [adapting-pretrained-language-models]
+related:
+  [
+    transfer-learning-and-fine-tuning,
+    memory-footprint-of-training,
+    prompting,
+    pruning-and-sparsity,
+    bias-terms-and-dropout-in-modern-transformers,
+  ]
+references: [houlsby2019, hu2022, he2022unified, lester2021, li2021prefix, liu2022ia3, benzaken2022, biderman2024, schulman2025lora, mangrulkar2022]
+status: draft
+updated: 2026-10-07
+---
+
+import {
+  AdapterDiagram,
+  Ia3Diagram,
+  LoraDiagram,
+  PeftOverview,
+  PrefixTuningDiagram,
+  PromptTuningDiagram,
+  ReftDiagram,
+  SubsetsDiagram,
+} from './PeftDiagrams'
+
+<Definition>
+<Gloss name="peft">Parameter-efficient fine-tuning (PEFT)</Gloss> adapts a pretrained model to a new task by training a
+small set of parameters while the pretrained weights stay frozen. The trained parameters are either added (adapter
+modules, soft prompts, scaling vectors, low-rank weight updates) or selected from the existing ones (bias terms, a
+sparse subset of weights). Typical methods train between 0.001% and a few percent of the parameters. Each task is then
+stored as a small set of weights applied to one shared base model.
+</Definition>
+
+## Why freeze the model
+
+Full fine-tuning of a 7-billion-parameter model in mixed precision with <NoteLink to="adam">Adam</NoteLink> holds about
+16 bytes per parameter for weights, gradients and optimiser state, about 112 GB before activations (see
+<NoteLink to="memory-footprint-of-training">memory footprint of training</NoteLink>). It also produces a full copy of
+the model for every task. Freezing the pretrained weights changes three things.
+
+- **Training memory.** Gradients and optimiser state exist only for the trained parameters. Frozen weights need only
+  their 2-byte 16-bit copy.
+- **Storage and serving.** A task is a file of the trained parameters. <Gloss name="lora" /> on
+  <Gloss name="gpt-3" /> 175B shrank each task's checkpoint from 350 GB to 35 MB, and one copy of the base model in
+  memory served every task <Cite id="hu2022" />.
+- **Forgetting.** A restricted update moves the model less. LoRA forgot less of the base model's abilities outside the
+  target domain than full fine-tuning did, and it also learned less in the target domain <Cite id="biderman2024" />.
+
+Freezing does not remove the forward and backward passes through the frozen network, nor the activations they store.
+Both remain, and at long sequence lengths activations dominate memory.
+
+## Components
+
+The counts below are for one <NoteLink to="transformer">transformer block</NoteLink> of width $d$ with attention
+projections $\Wmat_q, \Wmat_k, \Wmat_v, \Wmat_o \in \reals^{d \times d}$ and a gated feed-forward network with three
+matrices of size $d \times d_{\text{ff}}$, as in Llama. One block has $4d^2 + 3 d\, d_{\text{ff}}$ weights. A model has
+$L$ blocks. Llama 2 7B has $d = 4096$, $d_{\text{ff}} = 11008$ and $L = 32$, so one block holds 202 million weights and
+the model 6.74 billion <Cite id="touvron2023" />.
+
+<PeftOverview />
+
+### Adapters
+
+An adapter is a small bottleneck network inserted into each block. Houlsby et al. placed one after the attention
+sublayer and one after the feed-forward sublayer <Cite id="houlsby2019" />:
+
+$$
+\hvec \leftarrow \hvec + \Wmat_{\text{up}}\, f\big(\Wmat_{\text{down}} \hvec\big), \qquad
+\Wmat_{\text{down}} \in \reals^{m \times d},\; \Wmat_{\text{up}} \in \reals^{d \times m},\; m \ll d,
+$$
+
+with a nonlinearity $f$. One adapter with biases has $2md + d + m$ parameters, so a block with two has $2(2md + d + m)$.
+The up-projection starts near zero, so the adapter starts as the identity. On <Gloss name="glue" />, adapters came
+within 0.4% of full fine-tuning of <Gloss name="bert" /> while adding 3.6% parameters per task
+<Cite id="houlsby2019" />. The added layers run in sequence with the rest of the block. At batch size 1, where the
+hardware is not saturated, they raised the latency of a <Gloss name="gpt-2" /> medium forward pass by 20% to 30%
+<Cite id="hu2022" />. Because $f$ is nonlinear, an adapter cannot be folded into the base weights.
+
+<AdapterDiagram />
+
+### Soft prompts: prompt tuning, P-tuning and prefix tuning
+
+**Prompt tuning** prepends $\ell$ trainable vectors to the input embeddings. These "virtual tokens" are the only trained
+parameters: $\ell d$ for the whole model, not per block. On <Gloss name="t5" />, prompt tuning lagged full fine-tuning
+on SuperGLUE at small sizes and matched it only at 11 billion parameters <Cite id="lester2021" />. **P-tuning** mixes
+trainable continuous prompt embeddings with discrete prompt tokens, producing them with a small prompt encoder
+<Cite id="liu2021ptuning" />.
+
+<PromptTuningDiagram />
+
+**Prefix tuning** prepends $\ell$ trainable key vectors and $\ell$ trainable value vectors to the attention of every
+block: $2\ell d$ parameters per block and $2L\ell d$ in total, about 0.1% of the model. It matched fine-tuning on
+table-to-text generation with full data and outperformed it with little data <Cite id="li2021prefix" />. Prefixes are
+trained through a small reparameterising network for stability, then kept as plain vectors. Deep prompts at every
+layer, as in P-tuning v2, matched fine-tuning across models from 300 million to 10 billion parameters with 0.1% to 3%
+of parameters trained <Cite id="liu2022ptuningv2" />.
+
+<PrefixTuningDiagram />
+
+Soft prompts occupy sequence positions. They add $\ell$ keys and values to every attention computation, take $\ell$
+positions of the context window, and cannot be merged. Hu et al. found prefix tuning hard to optimise, with quality
+that changed non-monotonically as the number of trainable parameters grew <Cite id="hu2022" />.
+
+### Scaling vectors
+
+<Gloss name="ia3" /> learns three vectors per block that rescale activations element-wise: $\lvec_k \in \reals^{d_k}$ on
+the keys, $\lvec_v \in \reals^{d_v}$ on the values, and $\lvec_{\text{ff}} \in \reals^{d_{\text{ff}}}$ on the
+feed-forward intermediate activation <Cite id="liu2022ia3" />. The vectors start at ones, so the model starts unchanged.
+A <NoteLink to="decoder-only-transformers">decoder-only model</NoteLink> gains $L(d_k + d_v + d_{\text{ff}})$
+parameters, about 0.01% of the model. Each rescaling follows a matrix product, and
+$\lvec \odot (\Wmat \xvec) = (\diag(\lvec)\, \Wmat)\, \xvec$, so the vectors can be folded into the weights. Unmerged,
+each sequence in a batch can carry its own task vectors. The T-Few recipe built on IA3 outperformed
+<Gloss name="icl">in-context learning</Gloss> with GPT-3 on the RAFT few-shot benchmark <Cite id="liu2022ia3" />.
+
+<Ia3Diagram />
+
+### Selected subsets
+
+**BitFit** trains only the bias terms: 0.08% to 0.09% of <Gloss name="bert" /> parameters. It was competitive with full
+fine-tuning on small and medium datasets <Cite id="benzaken2022" />. Llama-family models have no biases in their linear
+layers (see <NoteLink to="bias-terms-and-dropout-in-modern-transformers">bias terms in modern transformers</NoteLink>),
+so BitFit has nothing to train on them.
+
+**Partial fine-tuning** trains a chosen group of existing tensors: the top few blocks, the normalisation gains, or the
+embeddings of new tokens.
+
+**Sparse fine-tuning** trains a sparse difference $\deltavec$ added to the frozen weights. Diff pruning learns
+$\deltavec$ with a differentiable relaxation of an $L_0$ penalty and matched full fine-tuning on GLUE while changing
+0.5% of the parameters per task <Cite id="guo2021" />. It keeps a dense $\deltavec$ during training, so it saves storage
+but not training memory. Lottery-ticket sparse fine-tuning first fine-tunes fully, keeps the parameters that moved most,
+and retrains only those from the original weights. Sparse differences for different tasks or languages can be added
+together <Cite id="ansell2022" />. A sparse difference has the base model's shape, so merging it is an addition.
+
+<SubsetsDiagram />
+
+### Low-rank updates
+
+LoRA freezes a weight matrix $\Wmat_0 \in \reals^{d \times k}$ and learns $\Delta \Wmat = (\alpha / r)\, \Bmat \Amat$
+with $\Bmat \in \reals^{d \times r}$ and $\Amat \in \reals^{r \times k}$: $r(d + k)$ parameters per matrix
+<Cite id="hu2022" />. On the query and value projections of a block that is $4rd$. On all seven matrices of a gated
+block it is $8rd + 3r(d + d_{\text{ff}})$. After training, $\Delta \Wmat$ is added to $\Wmat_0$ and the model has its
+original shape and speed. Relatives change the factorisation, the initialisation or the rank per matrix, and
+<NoteLink to="quantised-low-rank-adaptation">quantised low-rank adaptation</NoteLink> stores the frozen base in 4 bits.
+<NoteLink to="low-rank-adaptation">Low-rank adaptation</NoteLink> covers the method and its relatives.
+
+<LoraDiagram />
+
+### Representation interventions
+
+Representation fine-tuning edits hidden states rather than weights. LoReFT learns a low-rank edit of the hidden
+representation at chosen layers and positions, and it used 15 to 65 times fewer parameters than LoRA for comparable or
+better results on the reported benchmarks <Cite id="wu2024reft" />. The edit depends on the position, so it is not a
+weight change and cannot be merged.
+
+<ReftDiagram />
+
+## Data flow
+
+Every method above adds a correction to some hidden state $\hvec$:
+
+$$
+\hvec \leftarrow \hvec + \Delta \hvec.
+$$
+
+He et al. classified the methods by which hidden state is modified, the function that computes $\Delta \hvec$, whether
+that function reads the sublayer's input (parallel) or its output (sequential), and how $\Delta \hvec$ is scaled
+<Cite id="he2022unified" />. A LoRA update on $\Wmat_q$ is a parallel linear correction to the queries,
+$\Delta \hvec = (\alpha / r)\, \Bmat \Amat \xvec$. A Houlsby adapter is a sequential nonlinear correction to a
+sublayer's output. IA3 is a multiplicative correction, $\Delta \hvec = (\lvec - \ones) \odot \hvec$.
+
+**Prefix tuning is a gated parallel adapter.** Take one <NoteLink to="multi-head-attention">attention head</NoteLink>
+with query $\qvec$, keys $\kvec_1, \dots, \kvec_n$ and values $\vvec_1, \dots, \vvec_n$ from the $n$ context tokens, and
+prefix keys $\pvec_1, \dots, \pvec_\ell$ with prefix values $\uvec_1, \dots, \uvec_\ell$. Fold the $1/\sqrt{d_k}$ scale
+into $\qvec$. Write
+
+$$
+a = \sum_{i=1}^{\ell} e^{\qvec^{\tr} \pvec_i}, \qquad b = \sum_{j=1}^{n} e^{\qvec^{\tr} \kvec_j}, \qquad
+\lambda(\qvec) = \frac{a}{a + b}.
+$$
+
+<NoteLink to="scaled-dot-product-attention">Softmax attention</NoteLink> over the concatenated keys returns
+
+$$
+\frac{\sum_i e^{\qvec^{\tr} \pvec_i} \uvec_i + \sum_j e^{\qvec^{\tr} \kvec_j} \vvec_j}{a + b} =
+\big(1 - \lambda(\qvec)\big)\, \frac{\sum_j e^{\qvec^{\tr} \kvec_j} \vvec_j}{b} +
+\lambda(\qvec)\, \frac{\sum_i e^{\qvec^{\tr} \pvec_i} \uvec_i}{a}.
+$$
+
+The first fraction is the head's output without the prefix, $\operatorname{Attn}(\qvec)$, and the second is attention
+over the prefix alone, $\operatorname{Attn}_P(\qvec)$. The head output therefore becomes
+
+$$
+\operatorname{Attn}(\qvec) + \lambda(\qvec) \big(\operatorname{Attn}_P(\qvec) - \operatorname{Attn}(\qvec)\big).
+$$
+
+This is a correction computed in parallel from the query: a "down-projection" onto the $\ell$ prefix keys, a softmax
+nonlinearity, an "up-projection" through the prefix values, and a gate $\lambda(\qvec)$ <Cite id="he2022unified" />. The
+gate comes from the softmax normaliser shared by prefix and context. As the context grows, $b$ grows with $n$ while $a$
+stays fixed, so $\lambda(\qvec)$ shrinks and a fixed prefix has less influence on long inputs.
+
+**When a correction can be merged.** A correction that is a fixed linear function of a layer's input can be absorbed
+into that layer's weights. LoRA ($\Wmat_0 + \Delta \Wmat$), IA3 ($\diag(\lvec)\, \Wmat$), BitFit (new biases) and
+sparse differences ($\Wmat_0 + \deltavec$) all merge, and the merged model has zero inference overhead. Adapters (a
+nonlinear $f$), prefix tuning (a softmax gate over extra positions), prompt tuning (extra input positions) and
+representation edits (position-specific) do not. Unmerged corrections have one advantage: a server can keep one base
+model in memory and apply a different correction to each request in the same batch. S-LoRA served thousands of LoRA
+adapters concurrently this way <Cite id="sheng2024slora" />.
+
+**Where the parameters are best spent.** He et al. found that modifying the feed-forward sublayer used added parameters
+better than modifying attention at larger budgets, while attention modifications such as prefix tuning were best when
+only about 0.1% of the parameters were added. Parallel insertion beat sequential insertion
+<Cite id="he2022unified" />. For LoRA on large decoder models, attention-only LoRA underperformed LoRA on the
+feed-forward layers, even when given a higher rank to match its parameter count <Cite id="schulman2025lora" />.
+
+## Parameter counts and memory
+
+For Llama 2 7B (6.74 billion parameters):
+
+| Method | Trainable per block | Total trainable | Share of model |
+| --- | --- | --- | --- |
+| Full fine-tuning | $4d^2 + 3d\, d_{\text{ff}}$ | 6.74 B | 100% |
+| LoRA, $r = 16$, all linear layers | $8rd + 3r(d + d_{\text{ff}})$ | 40.0 M | 0.59% |
+| Houlsby adapters, $m = 64$ | $2(2md + d + m)$ | 33.8 M | 0.50% |
+| Prefix tuning, $\ell = 20$ | $2\ell d$ | 5.24 M | 0.078% |
+| LoRA, $r = 8$, $\Wmat_q$ and $\Wmat_v$ | $4rd$ | 4.19 M | 0.062% |
+| IA3 | $2d + d_{\text{ff}}$ | 614,400 | 0.0091% |
+| Prompt tuning, $\ell = 20$ | $\ell d$ for the whole model | 81,920 | 0.0012% |
+| BitFit | biases only | none in Llama 2 | 0 |
+
+IA3 here uses $d_k = d_v = d$, because Llama 2 7B gives every head its own keys and values. A model with
+<NoteLink to="multi-query-and-grouped-query-attention">grouped-query attention</NoteLink> has smaller $d_k$ and $d_v$.
+
+**Memory.** Mixed-precision Adam holds 16 bytes per trained parameter. A frozen parameter in 16-bit precision needs 2.
+For $P$ parameters of which $P_t$ are trained, model state takes $2(P - P_t) + 16 P_t \approx 2P + 16 P_t$ bytes. Full
+fine-tuning of Llama 2 7B needs $16 \times 6.74 \times 10^9 = 108$ GB. LoRA with $r = 16$ on all linear layers needs
+$2 \times 6.74 \times 10^9 + 16 \times 4.0 \times 10^7 = 13.5 + 0.64 = 14.1$ GB. Almost all of what remains is the
+frozen weights, which is why <NoteLink to="quantised-low-rank-adaptation">quantised low-rank adaptation</NoteLink>
+compresses them to 4 bits. On GPT-3 175B, LoRA reduced training memory from 1.2 TB to 350 GB <Cite id="hu2022" />.
+
+**Activations are not reduced.** Backpropagation to a trainable parameter needs the stored activations of every layer
+between it and the loss. Adapters and LoRA sit in every block, so every block's activations are kept, as in full
+fine-tuning. Prompt tuning's only parameters sit at the input, so the gradient must travel through the entire network.
+For a 7-billion-parameter model a single 4096-token sequence stores on the order of 100 GB of activations without
+recomputation (see <NoteLink to="memory-footprint-of-training">memory footprint of training</NoteLink>).
+<NoteLink to="gradient-checkpointing">Gradient checkpointing</NoteLink> and small micro-batches are as necessary with
+PEFT as without.
+
+**Compute.** A training step costs about $2P$ operations per token forward and $4P$ backward: $2P$ for gradients with
+respect to activations and $2P$ for gradients with respect to weights. PEFT skips almost all of the weight gradients,
+so a step costs about $4P$ instead of $6P$ per token, a third less. Hu et al. measured a 25% training speed-up for LoRA
+on GPT-3 175B <Cite id="hu2022" />.
+
+## Quality relative to full fine-tuning
+
+Published comparisons depend on model size, data size and how much each method was tuned.
+
+- **Small encoders on classification.** Adapters, BitFit and diff pruning came within a fraction of a point of full
+  fine-tuning on GLUE <Cite id="houlsby2019" /> <Cite id="benzaken2022" /> <Cite id="guo2021" />.
+- **Soft prompts need scale.** Prompt tuning matched full fine-tuning only at around 11 billion parameters
+  <Cite id="lester2021" />. Prompts at every layer narrowed the gap at smaller sizes <Cite id="liu2022ptuningv2" />.
+- **LoRA on instruction data.** LoRA matched full fine-tuning when it was applied to all layers and its capacity
+  exceeded the information in the dataset. In <Gloss name="rl">reinforcement learning</Gloss>, which supplies little
+  information per episode, even rank 1 matched <Cite id="schulman2025lora" />.
+- **LoRA on large new-domain data.** For code and mathematics, on
+  <NoteLink to="instruction-tuning-and-alignment">instruction tuning</NoteLink> with about 100,000 examples and on
+  continued pretraining with up to 20 billion tokens, LoRA underperformed full fine-tuning substantially. The weight
+  changes of full fine-tuning had rank 10 to 100 times that of typical LoRA configurations <Cite id="biderman2024" />.
+- **Claimed improvements are fragile.** In a comparison of 15 methods on models up to 11 billion parameters, methods
+  reported to beat LoRA lost that advantage with little hyperparameter tuning and few epochs
+  <Cite id="lialin2023" />.
+
+## Comparison
+
+| Method | Trainable parameters sit in | Merge into weights | Inference overhead unmerged | Typical quality |
+| --- | --- | --- | --- | --- |
+| Adapters | new bottleneck layers in each block | no | extra sequential layers; noticeable at batch size 1 | near full fine-tuning on encoder tasks |
+| Prompt tuning | input embeddings of $\ell$ virtual tokens | no | $\ell$ extra positions | near full fine-tuning only at about 11 B parameters |
+| Prefix tuning, deep prompts | keys and values of $\ell$ positions in every block | no | $\ell$ extra keys and values per layer | good at tiny budgets; hard to optimise |
+| IA3 | scaling vectors on keys, values and feed-forward activations | yes | element-wise products | strong in few-shot settings |
+| BitFit | existing biases | yes | none | good on small encoder tasks; not applicable without biases |
+| Sparse fine-tuning | a sparse subset of existing weights | yes (addition) | none | near full fine-tuning on GLUE |
+| LoRA and relatives | low-rank factors beside chosen weight matrices | yes | a small extra product per adapted matrix | matches full fine-tuning when applied to all layers with enough capacity; behind on large new-domain data |
+| Representation fine-tuning | low-rank edits of hidden states | no | edits at chosen positions | strong per parameter on reported benchmarks |
+
+## Choosing a method
+
+- **Default.** LoRA on all linear layers, with a <Gloss name="learning-rate">learning rate</Gloss> about ten times the
+  full-fine-tuning rate <Cite id="schulman2025lora" />.
+- **Too little memory for the 16-bit base.** Quantise the frozen base and train LoRA on top (see
+  <NoteLink to="quantised-low-rank-adaptation">quantised low-rank adaptation</NoteLink>).
+- **Many tasks on one server.** Keep adapters unmerged and batch requests across them.
+- **Large datasets in a new domain.** Full fine-tuning, or LoRA with a high rank, learns more and forgets more
+  <Cite id="biderman2024" />.
+- **Before training anything.** Check whether <NoteLink to="prompting">prompting</NoteLink> with examples already solves
+  the task, and measure retention of general abilities after training, as the PEFT documentation advises
+  <Cite id="hf2026peftmethods" />.
+
+Some methods keep full-parameter learning and save memory in other ways. GaLore projects gradients onto a low-rank
+subspace for the optimiser, cutting optimiser memory by up to 65.5% while updating every weight
+<Cite id="zhao2024galore" />. It changes how full fine-tuning is stored, not which parameters it trains.
+
+## Tools
+
+**Hugging Face PEFT** implements LoRA and its variants, IA3, prompt tuning, prefix tuning, P-tuning, LoHa, LoKr,
+orthogonal fine-tuning and others behind one interface <Cite id="mangrulkar2022" /> <Cite id="hf2026peftmethods" />. A
+configuration names the method and the target modules, `get_peft_model` wraps a Transformers model, and
+`merge_and_unload` folds a mergeable adapter into the base weights <Cite id="hf2026peftlora" />:
+
+```python
+from peft import LoraConfig, get_peft_model
+
+config = LoraConfig(r=16, lora_alpha=32, lora_dropout=0.05, target_modules="all-linear", task_type="CAUSAL_LM")
+model = get_peft_model(base_model, config)
+model.print_trainable_parameters()  # trainable count and share of the model
+# ... train ...
+merged = model.merge_and_unload()  # a plain Transformers model with W0 + (alpha / r) B A
+```
+
+`print_trainable_parameters` is the first check of a configuration: its count should match the formulas above. Several
+adapters can be loaded on one base, and a batch can route each sequence to a different adapter
+<Cite id="hf2026peftlora" />. TRL's trainers accept a PEFT configuration directly <Cite id="hf2026trlsft" />.
+
+**Other tools.** The Adapters library implements ten adapter methods with operators to stack and combine them
+<Cite id="poth2023" />. Unsloth <Cite id="han2023unsloth" />, Axolotl <Cite id="axolotl2023" /> and LLaMA-Factory
+<Cite id="zheng2024llamafactory" /> wrap Transformers, PEFT and TRL into configured training runs for LoRA, QLoRA and
+full fine-tuning. <NoteLink to="supervised-fine-tuning">Supervised fine-tuning</NoteLink> covers the loss these runs
+optimise, and <NoteLink to="bootstrapping-a-language-model-for-a-new-task">bootstrapping a language model for a new
+task</NoteLink> walks through a complete one.

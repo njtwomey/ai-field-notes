@@ -1,0 +1,399 @@
+---
+title: Supervised fine-tuning
+kind: technique
+summary: 'Supervised fine-tuning trains a pretrained language model by next-token cross-entropy on target responses; prompt tokens are input but masked from the loss. On a stronger model''s outputs it minimises the forward KL divergence from that model, which is sequence-level distillation.'
+tags: [nlp, language-models, fine-tuning, training, worked-example]
+aliases:
+  [
+    instruction fine-tuning,
+    loss masking,
+    prompt masking,
+    completion-only loss,
+    assistant-only loss,
+    sequence packing,
+    rejection-sampling fine-tuning,
+    sequence-level distillation,
+  ]
+requires: [autoregressive-transformer-language-model, cross-entropy-and-perplexity]
+partOf: [adapting-pretrained-language-models]
+related:
+  [
+    instruction-tuning-and-alignment,
+    knowledge-distillation,
+    transfer-learning-and-fine-tuning,
+    continual-learning,
+    learning-rate-schedules,
+    tokenisation,
+  ]
+references: [zhou2023lima, touvron2023, lambert2024, ouyang2022, kim2016, howard2023]
+status: draft
+updated: 2026-10-07
+---
+
+<Definition>
+<Gloss name="sft">Supervised fine-tuning (SFT)</Gloss> continues training a pretrained
+<Gloss name="language-model">language model</Gloss> $\pi_{\thetavec}$ on pairs of a prompt $x$ and a target response
+$y$. The loss is the next-token cross-entropy of the response tokens given the prompt and the earlier response tokens.
+The prompt tokens are fed to the model but excluded from the loss by setting their labels to an ignore value. The result
+is a model that produces responses like the targets when it sees prompts formatted like the training prompts
+<Cite id="touvron2023" />.
+</Definition>
+
+## Problem
+
+A pretrained language model continues text. It has learned facts, syntax and many skills from its corpus, but it has
+not learned to answer a request in a fixed format, to stop at the end of an answer, or to perform a narrow task with a
+house style. A new task supplies examples of the desired behaviour: questions with answers, documents with extractions,
+conversations with good assistant turns. SFT turns those examples into a training signal for the whole network.
+
+SFT is usually the first adaptation step. It is also the simplest. It needs no <NoteLink to="reward-models">reward
+model</NoteLink>, no sampling during training and no preference labels. Preference optimisation
+(<NoteLink to="direct-preference-optimisation">direct preference optimisation</NoteLink>,
+<NoteLink to="reinforcement-learning-from-human-feedback">reinforcement learning from human feedback</NoteLink>) and
+<Gloss name="rl">reinforcement learning</Gloss> against checkable answers
+(<NoteLink to="reinforcement-learning-with-verifiable-rewards">reinforcement learning with verifiable
+rewards</NoteLink>) usually start from an SFT model.
+
+## Mechanism
+
+### The masked objective
+
+Tokenise the prompt and response together into one sequence $s_1, \dots, s_T$. Let $m_t = 1$ if token $s_t$ belongs
+to the response and $m_t = 0$ if it belongs to the prompt. At each position the model produces logits
+$\zvec_t \in \reals^V$ over a vocabulary of $V$ tokens, from which $\pi_{\thetavec}(\cdot \mid s_{<t}) =
+\operatorname{softmax}(\zvec_t)$. The masked loss for one sequence is
+
+$$
+\Lcal(\thetavec) = -\frac{1}{N} \sum_{t=2}^{T} m_t \log \pi_{\thetavec}(s_t \mid s_{<t}), \qquad N = \sum_{t=2}^{T} m_t.
+$$
+
+Since the response tokens are exactly the positions with $m_t = 1$, the sum equals $-\log \pi_{\thetavec}(y \mid x) =
+-\sum_{j=1}^{\abs{y}} \log \pi_{\thetavec}(y_j \mid x, y_{<j})$. The loss is the negative log-likelihood of the response
+given the prompt, averaged per response token.
+
+In code, the labels are a copy of the input tokens with every prompt position replaced by `-100`. PyTorch's
+cross-entropy ignores targets equal to `-100` in both the sum and the count $N$, and the Hugging Face trainers build
+these labels from a prompt–completion split or from the assistant turns of a conversation <Cite id="hf2026trlsft" />.
+
+**How masking changes the gradient.** Write $\pvec_t = \operatorname{softmax}(\zvec_t)$ and $\evec_{s_t}$ for the
+one-hot vector of the observed token. The derivative of $-\log p_{t, s_t}$ with respect to the logits is $\pvec_t -
+\evec_{s_t}$, so
+
+$$
+\frac{\partial \Lcal}{\partial \zvec_t} = \frac{m_t}{N} \big(\pvec_t - \evec_{s_t}\big), \qquad
+\nabla_{\thetavec} \Lcal = \frac{1}{N} \sum_{t} m_t \, \Big(\frac{\partial \zvec_t}{\partial \thetavec}\Big)^{\tr}
+\big(\pvec_t - \evec_{s_t}\big).
+$$
+
+A prompt position sends no error signal from its own prediction. The prompt still shapes every response term: the
+Jacobian $\partial \zvec_t / \partial \thetavec$ at a response position depends on the prompt through attention, and
+gradients flow back through the keys and values computed at prompt positions. The prompt is context, never a target.
+
+Without the mask, the gradient gains the term $\nabla_{\thetavec}\big(-\log \pi_{\thetavec}(x)\big)$, which trains the
+model to generate prompts. With a per-token average over the whole sequence, the response then carries a fraction
+$\abs{y} / (\abs{x} + \abs{y})$ of the loss. A 500-token prompt with a 20-token answer leaves 4% of the signal on the
+answer. A system prompt repeated verbatim in every example is memorised within a few steps, and its falling loss looks
+like progress while measuring nothing about the task. Loss on the prompt is not always harmful: with very few examples
+and long instructions, keeping it acts as a regulariser and can improve results <Cite id="shi2024" />. The masked loss
+is the default.
+
+### Normalising over a batch
+
+A batch holds $B$ sequences with $n_i$ response tokens each and per-token losses $\ell_{it}$. Two normalisations are
+common:
+
+$$
+\Lcal_{\text{token}} = \frac{\sum_{i=1}^{B} \sum_{t} \ell_{it}}{\sum_{i=1}^{B} n_i}, \qquad
+\Lcal_{\text{seq}} = \frac{1}{B} \sum_{i=1}^{B} \frac{1}{n_i} \sum_{t} \ell_{it}.
+$$
+
+$\Lcal_{\text{token}}$ weights every response token equally, so long responses dominate. $\Lcal_{\text{seq}}$ weights
+every example equally, so each token of a short response counts for more. Gradient accumulation that averages
+per-micro-batch token means produces neither, and the effective weighting then changes with the accumulation setting
+and the number of devices. Tülu 3 traced a gap between two training stacks to this effect and switched to a summed
+loss with a retuned <Gloss name="learning-rate">learning rate</Gloss> <Cite id="lambert2024" />.
+
+### Chat templates and special tokens
+
+A chat model sees a conversation as one token sequence. The **chat template** inserts role markers and turn delimiters
+around each message, for example in the ChatML format:
+
+```text
+<|im_start|>system
+You answer arithmetic questions with a number.<|im_end|>
+<|im_start|>user
+What is 7 times 8?<|im_end|>
+<|im_start|>assistant
+56<|im_end|>
+```
+
+Only `56<|im_end|>` carries labels. Every token up to and including `<|im_start|>assistant` and the newline after it
+is masked. The end-of-turn token is part of the target, because predicting it is how the model learns to stop.
+
+The template used in training must be the template used at inference, token for token. The model learns to begin an
+answer after the exact token sequence that opens an assistant turn. A different marker, a missing newline or a
+duplicated beginning-of-sequence token puts the prompt off the training distribution. Models fine-tuned from the same
+base with different templates perform much worse when given the wrong one <Cite id="hf2026chattemplates" />. A
+template applied as text and then tokenised with the tokeniser's default special tokens adds a second
+beginning-of-sequence token <Cite id="hf2026chattemplates" />.
+
+Fine-tuning a base model into a chat model often adds new special tokens. Their embedding rows are new and untrained,
+so they must be trainable, and the embedding and output matrices must be resized to the new vocabulary. LIMA added a
+dedicated end-of-turn token rather than reusing the end-of-sequence token, to avoid the meaning the pretrained model
+attached to the old one <Cite id="zhou2023lima" />.
+
+### Padding, truncation and packing
+
+Sequences in a batch have different lengths. **Padding** appends pad tokens up to the longest sequence, with attention
+mask 0 and label `-100`. When the pad token is the same token as the end-of-turn token, masking "all pad tokens" by
+token id also masks the real end-of-turn label, and the model never learns to stop.
+
+**Truncation** cuts sequences longer than the maximum length. Cutting the end removes the end of the response and its
+stop token. Cutting the start removes the system prompt or the question. Examples that do not fit are better dropped
+or split at turn boundaries.
+
+**Packing** concatenates several short examples into one sequence of fixed length, so that no compute is spent on
+padding. In common datasets up to half of all tokens can be padding <Cite id="krell2021" />. Naive packing lets tokens
+of one example attend to the examples before it in the same row and continues the position indices across the
+boundary. Each example then sees a different, irrelevant context. Correct packing restarts the position indices at
+each example and restricts attention to a block-diagonal mask, which variable-length attention kernels implement
+without materialising the mask <Cite id="krell2021" /> <Cite id="kundu2024" />. Llama 2's SFT concatenated prompts and
+answers to fill 4096-token sequences, separating prompt and answer with a special token and zeroing the loss on prompt
+tokens <Cite id="touvron2023" />.
+
+### SFT on a stronger model's outputs is distillation
+
+Much SFT data is generated by a stronger model, the teacher $q(y \mid x)$, rather than written by people. Let the
+student be $\pi_{\thetavec}$. The forward <Gloss name="kl" /> divergence from teacher to student, averaged over
+prompts, is
+
+$$
+\expect_{x}\Big[\KL\big(q(\cdot \mid x) \,\|\, \pi_{\thetavec}(\cdot \mid x)\big)\Big] =
+\expect_{x}\, \expect_{y \sim q(\cdot \mid x)}\big[\log q(y \mid x)\big] -
+\expect_{x}\, \expect_{y \sim q(\cdot \mid x)}\big[\log \pi_{\thetavec}(y \mid x)\big].
+$$
+
+The first term is the negative entropy of the teacher and does not depend on $\thetavec$. The second is the expected SFT
+loss on teacher samples. Minimising the SFT loss on responses sampled from the teacher therefore minimises a Monte Carlo
+estimate of the forward KL divergence from teacher to student. This is <NoteLink to="knowledge-distillation">knowledge
+distillation</NoteLink> at the level of whole sequences.
+
+Two consequences follow from the form of the divergence.
+
+- **Forward KL covers mass.** The student pays a large penalty wherever the teacher puts probability and the student
+  does not. A student too small to represent the teacher spreads its probability over all of the teacher's behaviours,
+  including ones it cannot execute well.
+- **The decoding temperature sets the target.** Teacher responses decoded greedily or at low temperature concentrate
+  $q$ on its mode $\hat y(x)$. The student then learns the teacher's mode rather than its distribution. Kim and Rush
+  introduced this as sequence-level knowledge distillation for translation, training the student on the teacher's
+  <Gloss name="beam-search">beam-search</Gloss> outputs <Cite id="kim2016" />.
+
+The student is trained on teacher prefixes and generates from its own. Its errors produce prefixes the teacher never
+wrote, and SFT gives no signal on them. On-policy distillation samples responses from the student and scores each
+token with the teacher's distribution <Cite id="agarwal2024" />.
+
+## Data
+
+**Quality over quantity.** LIMA fine-tuned a 65-billion-parameter LLaMa model on 1,000 curated prompts and responses.
+In a human study its answers were judged equivalent or preferred to GPT-4's in 43% of cases. The authors concluded that
+almost all knowledge is learned in pretraining and that SFT mainly teaches the format of responses
+<Cite id="zhou2023lima" />. Llama 2's team stopped collecting SFT annotations at 27,540 examples because tens of
+thousands of high-quality examples were enough, and found that annotation vendors differed markedly in downstream
+quality <Cite id="touvron2023" />. A few thousand clean, diverse, consistent examples usually beat a large noisy set.
+Every inconsistency in the targets is learned as faithfully as the signal.
+
+**Sources of instruction data.**
+
+- Human-written demonstrations, as in <NoteLink to="instruction-tuning-and-alignment">InstructGPT</NoteLink>
+  <Cite id="ouyang2022" /> and LIMA <Cite id="zhou2023lima" />.
+- Existing labelled datasets rewritten as instructions by templates. The Flan Collection found that mixing zero-shot,
+  few-shot and <Gloss name="cot" /> templates improved all three settings <Cite id="longpre2023" />.
+- Synthetic instructions. Self-Instruct prompted <Gloss name="gpt-3" /> with seed tasks to generate new instructions,
+  inputs and outputs, filtered near-duplicates, and fine-tuned GPT-3 on the result, improving it by 33 points absolute
+  on Super-NaturalInstructions <Cite id="wang2023selfinstruct" />. Alpaca applied the same recipe with a stronger
+  teacher to produce 52,000 demonstrations for <Gloss name="llama" /> 7B, for under 500 dollars of generation cost
+  <Cite id="taori2023" />.
+- Curated mixtures. Tülu 3 combined public and synthetic sets by skill, with persona-driven synthetic prompts for maths,
+  code and instruction following, and decontaminated every set against its evaluations <Cite id="lambert2024" />.
+
+**Distillation from a stronger model has a ceiling.** Models fine-tuned on ChatGPT outputs imitated its style well
+enough to fool crowd raters, but closed little of the gap in factuality and on tasks not heavily covered by the
+imitation data <Cite id="gudibande2023" />. Distillation transfers behaviour the student can already nearly perform. It
+does not transfer knowledge the base model lacks.
+
+**Rejection sampling.** When answers can be checked, sample several responses per prompt, keep those that pass the
+check, and fine-tune on them. STaR iterated this loop on the model's own chain-of-thought rationales
+<Cite id="zelikman2022" />. Rejection-sampling fine-tuning raised LLaMA-7B on GSM8K from 35.9% after ordinary SFT to
+49.3%, with gains driven by the number of distinct correct reasoning paths <Cite id="yuan2023" />. The accepted samples
+are draws from the model's distribution conditioned on being correct, which is
+<NoteLink to="rejection-sampling">rejection sampling</NoteLink> of $q(y \mid x)\, \indicator[y \text{ correct}]$.
+
+<Derivation title="Fine-tuning on one's own correct samples ascends the log-probability of success">
+Let $R(x, y) \in \{0, 1\}$ indicate a correct response, and let $P_{\thetavec}(x) = \expect_{y \sim \pi_{\thetavec}}[R(x,
+y)]$ be the probability that the model answers $x$ correctly. Draw responses from the current model and average the
+log-likelihood gradient over the accepted ones. Its expectation is
+
+$$
+\frac{\expect_{y \sim \pi_{\thetavec}}\big[R(x, y)\, \nabla_{\thetavec} \log \pi_{\thetavec}(y \mid x)\big]}
+{\expect_{y \sim \pi_{\thetavec}}\big[R(x, y)\big]} = \frac{\nabla_{\thetavec} P_{\thetavec}(x)}{P_{\thetavec}(x)} =
+\nabla_{\thetavec} \log P_{\thetavec}(x),
+$$
+
+using the score-function identity $\expect_{y \sim \pi}[R\, \nabla \log \pi] = \nabla \expect_{y \sim \pi}[R]$. One
+round of rejection-sampling fine-tuning is therefore a policy-gradient step on $\log P_{\thetavec}(x)$ with a 0/1
+reward, taken off-policy once the model has moved away from the policy that produced the samples. This is the bridge to
+<NoteLink to="reinforcement-learning-with-verifiable-rewards">reinforcement learning with verifiable rewards</NoteLink>.
+</Derivation>
+
+**Deduplication and decontamination.** Duplicated examples are effectively trained for more epochs and are memorised
+first. Near-duplicate removal on pretraining corpora reduced verbatim regurgitation tenfold and removed train–test
+overlap that affected over 4% of validation sets <Cite id="lee2022" />. Decontamination removes training examples that
+overlap with evaluation sets. Tülu 3 flagged a test example as contaminated when more than half of its tokens fell in
+8-grams shared with one training example <Cite id="lambert2024" />. N-gram matching misses paraphrases and translations:
+a 13-billion-parameter model trained on rephrased test items reached GPT-4-level scores on <Gloss name="mmlu" /> and
+<NoteLink to="language-model-evaluation">HumanEval</NoteLink> <Cite id="yang2023" />. Synthetic data inherits the
+contamination of the model that wrote it <Cite id="yang2023" />.
+
+## Hyperparameters
+
+Fine-tuning uses learning rates one to two orders of magnitude below pretraining, warm-up over the first few percent of
+steps, and a linear or cosine decay (see <NoteLink to="learning-rate-schedules">learning-rate schedules</NoteLink>).
+Published full-fine-tuning recipes:
+
+| Model | Examples | Peak learning rate | Schedule | Epochs |
+| --- | --- | --- | --- | --- |
+| InstructGPT 1.3B and 6B | about 13,000 | $9.65 \times 10^{-6}$ | cosine to 10%, no warm-up | 16 |
+| InstructGPT 175B | about 13,000 | $5.03 \times 10^{-6}$ | cosine to 10%, no warm-up | 16 |
+| LIMA 65B | 1,000 | $1 \times 10^{-5}$ | linear to $10^{-6}$, no warm-up | 15 |
+| Llama 2-Chat 7B to 70B | 27,540 | $2 \times 10^{-5}$ | cosine | 2 |
+| Tülu 3 8B | about 940,000 | $5 \times 10^{-6}$ | linear, 3% warm-up | 2 |
+| Tülu 3 70B | about 940,000 | $2 \times 10^{-6}$ | linear, 3% warm-up | 2 |
+
+Sources: <Cite id="ouyang2022" /> <Cite id="zhou2023lima" /> <Cite id="touvron2023" /> <Cite id="lambert2024" />. Larger
+models take smaller rates. Adapter methods take larger ones: the best learning rate for
+<NoteLink to="low-rank-adaptation"><Gloss name="lora" /></NoteLink> was about ten times the best full-fine-tuning rate
+across model sizes, and about fifteen times for runs of around 100 steps <Cite id="schulman2025lora" />. TRL's defaults
+are $2 \times 10^{-5}$ for full fine-tuning and suggest about $10^{-4}$ for adapters <Cite id="hf2026trlsft" />.
+
+The optimiser is almost always <Gloss name="adamw" />. Large datasets need one to three epochs. Small curated datasets
+are run for more epochs with heavy regularisation and checkpoint selection on generated outputs: InstructGPT and LIMA
+used residual <NoteLink to="dropout">dropout</NoteLink> of 0.2 to 0.3 <Cite id="ouyang2022" />
+<Cite id="zhou2023lima" />.
+
+## Reading the training curves
+
+Log the training loss, an evaluation loss on held-out examples, the gradient norm, and a generation-based task metric
+on held-out prompts. Each pattern below has a common cause.
+
+- **High starting loss.** An instruction-tuned model evaluated on data in its own template starts with a low loss. A
+  starting loss far above the base model's loss on similar text points to a template or tokenisation mismatch, or to
+  new special tokens with untrained embeddings.
+- **Fast early drop, then a slow decline.** The tokens that a format fixes (role markers, stock openings, the stop
+  token) become nearly certain within the first steps, so their loss vanishes early. The slower decline after that is
+  the content.
+- **Staircase drops at epoch boundaries.** The training loss falls abruptly at the start of each new epoch, when the
+  model sees examples it has seen before. Howard and Whitaker attribute the step to memorisation of each example after
+  a single exposure; the evaluation loss worsened at the same time while their task metric kept improving
+  <Cite id="howard2023" />.
+- **Training loss near zero.** The model reproduces its training responses nearly verbatim. With a small dataset this
+  is memorisation, and the evaluation loss rises at the same time.
+- **Evaluation loss rising while the task metric improves.** InstructGPT's SFT models overfit on validation loss after
+  one epoch, yet further epochs improved reward-model scores and human preference <Cite id="ouyang2022" />. LIMA found
+  held-out perplexity anticorrelated with generation quality and selected checkpoints by reading outputs
+  <Cite id="zhou2023lima" />. The evaluation loss scores the model on the reference wording token by token. A model
+  that commits to its own valid phrasing assigns lower probability to other phrasings, which raises the loss on
+  reference text without making its own answers worse.
+- **The gap between loss and task metric.** The per-token loss averages over every response token, and most are easy.
+  The answer that the task metric scores can be a handful of tokens. Report the metric on generated outputs
+  (<Gloss name="exact-match">exact match</Gloss>, unit tests passed, judge scores) and choose checkpoints by it.
+- **<NoteLink to="training-stability-at-scale">Loss spikes</NoteLink>.** An isolated spike with a gradient-norm spike
+  usually comes from one bad batch: a very long or corrupted example, or a mislabelled one. Repeated spikes or a loss
+  that climbs and stays high mean the learning rate is too high. Gradient clipping at a norm of 1.0, the usual default,
+  limits the damage of a single batch <Cite id="hf2026trlsft" />.
+
+## Catastrophic forgetting
+
+Fine-tuning on a narrow task degrades skills the model had before, which <NoteLink to="continual-learning">continual
+learning</NoteLink> calls catastrophic forgetting. Continual instruction tuning of models from 1 to 7 billion parameters
+showed forgetting of domain knowledge, reasoning and reading comprehension, and prior general instruction tuning
+reduced it <Cite id="luo2023" />. Fine-tuning a safety-tuned model on benign data also weakened its refusals, and ten
+adversarial examples were enough to remove them <Cite id="qi2024" />.
+
+**Measuring it.** Evaluate the base model and each checkpoint on a fixed suite outside the target task: general
+knowledge, maths, instruction following, refusals of harmful requests. Forgetting is the drop from the base model. A
+cheaper running proxy is the KL divergence between the fine-tuned and base models' next-token distributions on a fixed
+set of general prompts.
+
+**Limiting it.**
+
+- Train less: lower learning rate, fewer epochs, <NoteLink to="early-stopping">early stopping</NoteLink> on the general
+  suite as well as the task metric.
+- Mix general instruction data or replayed pretraining text into the task data. InstructGPT mixed pretraining gradients
+  into its reinforcement-learning stage for this reason <Cite id="ouyang2022" />.
+- Restrict the update. LoRA forgot less than full fine-tuning and also learned less, and it limited forgetting more
+  than <Gloss name="weight-decay">weight decay</Gloss> or dropout did <Cite id="biderman2024" />.
+- Regularise towards the base weights, as in
+  <NoteLink to="regularisation-based-continual-learning">regularisation-based continual learning</NoteLink>.
+
+## Cost
+
+Full SFT has the memory cost of training. Mixed-precision <Gloss name="adam" /> holds about 16 bytes per parameter for
+weights, gradients and optimiser state, so a 7-billion-parameter model needs about 112 GB before activations (see
+<NoteLink to="memory-footprint-of-training">memory footprint of training</NoteLink>).
+<NoteLink to="parameter-efficient-fine-tuning">Parameter-efficient fine-tuning</NoteLink> and
+<NoteLink to="quantised-low-rank-adaptation">quantised low-rank adaptation</NoteLink> remove most of the gradient and
+optimiser terms.
+
+Compute is about $6 P D$ <Gloss name="flop">floating-point operations</Gloss> for $P$ parameters and $D$ training
+tokens, counting prompt tokens: masking removes prompt positions from the loss, not from the forward and backward
+passes. A 7-billion-parameter model trained for 2 epochs on 10 million tokens needs
+$6 \times 7 \times 10^9 \times 2 \times 10^7 = 8.4 \times 10^{17}$ operations, under an hour on one accelerator
+sustaining $3 \times 10^{14}$ operations per second.
+
+## Trade-offs
+
+- **Imitation only.** SFT reproduces its targets, errors included. It cannot learn that one response is better than
+  another; preference optimisation and reinforcement learning can.
+- **Data defines the ceiling.** Responses written or generated for SFT bound the quality of the result. Distillation
+  copies a teacher's style more easily than its knowledge.
+- **<NoteLink to="autoregressive-transformer-language-model">Exposure bias</NoteLink>.** The model trains on reference
+  prefixes and generates from its own, so errors in long outputs compound.
+- **Forgetting against learning.** Settings that learn the new task faster (higher learning rate, more epochs, full
+  fine-tuning) also forget more.
+
+## Worked example
+
+A batch holds two examples. Example A has a 100-token prompt and a 10-token response with mean loss 2.0 nats per
+response token. Example B has a 20-token prompt and a 90-token response with mean loss 1.0. Both prompts have mean loss
+3.0 per token.
+
+- **Masked, token mean.** $(10 \times 2.0 + 90 \times 1.0) / 100 = 1.10$ nats. Example A carries 10% of the weight.
+- **Masked, sequence mean.** $(2.0 + 1.0) / 2 = 1.50$ nats. Example A carries 50% of the weight.
+- **Unmasked, token mean.** $(100 \times 3.0 + 10 \times 2.0 + 20 \times 3.0 + 90 \times 1.0) / 220 = 470 / 220 = 2.14$
+  nats. Response tokens carry $100 / 220 = 45\%$ of the weight, and Example A's answer carries $10 / 220 = 4.5\%$.
+
+The three numbers describe the same model on the same batch. Losses computed under different conventions are not
+comparable, and a switch of convention between runs changes the effective learning rate of each example.
+
+## Pitfalls
+
+- **Template drift.** A chat template that differs between training and serving, or a doubled beginning-of-sequence
+  token, silently lowers quality.
+- **Unlabelled stop token.** Masking the end-of-turn token, often through a pad token that equals it, produces a model
+  that does not stop.
+- **Packing without boundaries.** Packed examples that attend across boundaries learn spurious context.
+- **Selecting checkpoints by evaluation loss.** Evaluation loss can rise while generated outputs improve.
+- **Contaminated evaluation.** Synthetic data and public instruction sets often contain benchmark items or paraphrases
+  of them.
+- **Forgetting unmeasured.** A gain on the target task can hide losses in general ability and safety that only a
+  separate evaluation shows.
+
+## Tools
+
+TRL's `SFTTrainer` applies chat templates, builds the masked labels (`completion_only_loss`, `assistant_only_loss`),
+packs with position-index resets, and accepts a PEFT configuration for adapter training <Cite id="hf2026trlsft" />.
+Transformers' `apply_chat_template` renders a conversation with the model's own template
+<Cite id="hf2026chattemplates" />. <NoteLink to="parameter-efficient-fine-tuning">Parameter-efficient
+fine-tuning</NoteLink> lists the adapter libraries and training front ends.
+<NoteLink to="bootstrapping-a-language-model-for-a-new-task">Bootstrapping a language model for a new task</NoteLink>
+walks through a complete run.
