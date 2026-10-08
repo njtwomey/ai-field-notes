@@ -10,8 +10,8 @@ the page runs every model the same way.
 from pathlib import Path
 
 import numpy as np
-import onnx
-import onnxruntime as ort
+import onnx  # pyright: ignore[reportMissingImports]  (uv group "onnx", for exporting only)
+import onnxruntime as ort  # pyright: ignore[reportMissingImports]
 import torch
 from torch import nn
 
