@@ -6,12 +6,15 @@ tags: [deep-learning, generative-models, representation-learning, vector-quantis
 aliases: [vector-quantised variational autoencoder, vector quantized VAE, VQ-VAE-2, codebook, commitment loss, straight-through estimator, neural discrete representation learning]
 requires: [variational-autoencoder]
 related: [k-means, quantisation, autoregressive-generative-models, latent-diffusion, gumbel-max-trick]
-references: [oord2017, razavi2019, bengio2013b, esser2021]
+references: [oord2017, razavi2019, bengio2013b, esser2021, lee2022rqvae]
 status: draft
-updated: 2026-09-27
+updated: 2026-10-09
 ---
 
 import { VqVaeDiagram } from './VqVaeDiagram'
+import { VqLossForces } from './VqLossForces'
+import { VqVaeTraining } from './VqVaeTraining'
+import { CodebookCollapse } from './CodebookCollapse'
 
 <Definition>
 A **vector-quantised variational autoencoder** (VQ-VAE) has an encoder $\zvec_e(\xvec)$, a **codebook** of $K$
@@ -63,6 +66,7 @@ $$
 
 It does not depend on any parameter and drops out of training. The ELBO reduces to the reconstruction term.
 
+
 ## The three loss terms
 
 **Reconstruction.** $-\log p_{\thetavec}(\xvec \mid \zvec_q)$ trains the decoder and, through the straight-through
@@ -75,15 +79,186 @@ $\zvec_q \leftarrow \zvec_e + \mathrm{sg}[\zvec_q - \zvec_e]$: the forward value
 sees only $\zvec_e$. The approach is the straight-through estimator of Bengio et al. <Cite id="bengio2013b" />. It is
 biased but works because $\zvec_q$ and $\zvec_e$ are close, which the next two terms ensure.
 
+In PyTorch, `detach()` is the stop-gradient:
+
+```python
+# Forward: the code z_q. Backward: the identity onto z_e.
+z_q = z_e + (z_q - z_e).detach()
+```
+
 **Codebook loss.** $\norm{\mathrm{sg}[\zvec_e] - \evec_{k^\star}}^2$ moves the selected codebook vector towards the
 encoder outputs assigned to it. The reconstruction gradient never reaches the codebook, because the straight-through
 copy bypasses it, so this term is the only one that trains the codebook. It is a stochastic version of the
 <NoteLink to="k-means">k-means</NoteLink> centroid update. Replacing it by an exponential moving average of the
 assigned encoder outputs is a common alternative <Cite id="oord2017" />.
 
+```python
+# The gradient reaches the codebook only.
+codebook_loss = F.mse_loss(z_q, z_e.detach())
+```
+
+The moving-average alternative drops the codebook loss and sets each code to a running mean after every batch. With
+`onehot` the $[N, K]$ indicator of which code each of the $N$ encoder outputs chose and `decay` around 0.99:
+
+```python
+# [K] running count of the outputs assigned to each code
+counts = decay * counts + (1 - decay) * onehot.sum(0)
+# [K, D] running sum of the outputs assigned to each code
+sums = decay * sums + (1 - decay) * onehot.T @ z_e.detach()
+# each code at the running mean of its outputs
+codebook.weight.data = sums / (counts + 1e-5).unsqueeze(1)
+```
+
 **Commitment loss.** $\beta\norm{\zvec_e - \mathrm{sg}[\evec_{k^\star}]}^2$ keeps the encoder outputs near their chosen
 codes. Without it, the encoder output could drift far from every codebook vector while the codebook chases it. Van den
 Oord et al. used $\beta = 0.25$ and found results robust to values from 0.1 to 2 <Cite id="oord2017" />.
+
+```python
+# The gradient reaches the encoder only.
+commitment_loss = beta * F.mse_loss(z_e, z_q.detach())
+```
+
+`F.mse_loss` averages over elements, where the paper's norms and log-likelihood sum over them. Averaging divides the
+reconstruction term by the number of image values and the codebook and commitment terms by the number of latent
+values. The division changes the balance between the terms, and so what a given $\beta$ means.
+
+In the figure below, one encoder output and three codes move under each term separately or together. The figure in the
+next section trains a whole VQ-VAE, where $\beta$ sets how far the encoder outputs stray from the codes.
+
+<VqLossForces />
+
+## Worked example
+
+A codebook has $K = 3$ entries in $D = 2$: $\evec_1 = (0, 0)$, $\evec_2 = (1, 0)$ and $\evec_3 = (0, 1)$. The encoder
+outputs $\zvec_e = (0.8, 0.3)$. The squared distances are
+
+$$
+\begin{aligned}
+\norm{\zvec_e - \evec_1}^2 &= 0.64 + 0.09 = 0.73, \\
+\norm{\zvec_e - \evec_2}^2 &= 0.04 + 0.09 = 0.13, \\
+\norm{\zvec_e - \evec_3}^2 &= 0.64 + 0.49 = 1.13.
+\end{aligned}
+$$
+
+The nearest entry is $\evec_2$, so $\zvec_q = (1, 0)$ and the index 2 is stored. The codebook loss is $0.13$; its
+gradient moves $\evec_2$ towards $(0.8, 0.3)$. With $\beta = 0.25$ the commitment loss is $0.25 \times 0.13 = 0.0325$;
+its gradient moves $\zvec_e$ towards $(1, 0)$. The decoder receives $(1, 0)$, and whatever gradient reaches $(1, 0)$ is
+applied unchanged to $\zvec_e$.
+
+## A VQ-VAE in PyTorch
+
+For images, the encoder is a stack of strided convolutions that shrinks each side by 4 or 8, followed by a few
+residual blocks and a $1 \times 1$ convolution to the code dimension $D$. The decoder mirrors it, with transposed
+convolutions that enlarge each side back to the image size. On $128 \times 128$ <Gloss name="imagenet" /> images, van
+den Oord et al. used two stride-2 convolutions, giving a $32 \times 32$ grid of codes from a codebook of $K = 512$
+<Cite id="oord2017" />. Audio models use one-dimensional convolutions over time in the same way. Recommender systems
+that turn items into code tuples use multilayer perceptrons on item embeddings.
+
+```python
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+
+
+class Encoder(nn.Module):
+    """[B, 3, 128, 128] images to [B, D, 32, 32] grids of vectors."""
+
+    def __init__(self, D=64, hidden=128):
+        super().__init__()
+        self.net = nn.Sequential(
+            # 128 → 64
+            nn.Conv2d(3, hidden, 4, stride=2, padding=1),
+            nn.ReLU(),
+            # 64 → 32
+            nn.Conv2d(hidden, hidden, 4, stride=2, padding=1),
+            nn.ReLU(),
+            # one D-vector per grid position
+            nn.Conv2d(hidden, D, 1),
+        )
+
+    def forward(self, x):
+        return self.net(x)
+
+
+class Decoder(nn.Module):
+    """[B, D, 32, 32] grids of codes to [B, 3, 128, 128] images."""
+
+    def __init__(self, D=64, hidden=128):
+        super().__init__()
+        self.net = nn.Sequential(
+            nn.Conv2d(D, hidden, 3, padding=1),
+            nn.ReLU(),
+            # 32 → 64
+            nn.ConvTranspose2d(hidden, hidden, 4, stride=2, padding=1),
+            nn.ReLU(),
+            # 64 → 128
+            nn.ConvTranspose2d(hidden, 3, 4, stride=2, padding=1),
+        )
+
+    def forward(self, z_q):
+        return self.net(z_q)
+```
+
+The quantiser holds the codebook as an `nn.Embedding`: a $K \times D$ table whose row $k$ is the code $\evec_k$. It
+quantises every grid position independently, so it flattens the grid into rows, finds each row's nearest code, and
+reshapes back.
+
+```python
+class VectorQuantiser(nn.Module):
+    def __init__(self, K=512, D=64, beta=0.25):
+        super().__init__()
+        self.codebook = nn.Embedding(K, D)
+        self.codebook.weight.data.uniform_(-1 / K, 1 / K)
+        self.beta = beta
+
+    def forward(self, z_e):  # z_e: [B, D, H, W]
+        B, D, H, W = z_e.shape
+        # [B·H·W, D]: one row per grid position
+        flat = z_e.permute(0, 2, 3, 1).reshape(-1, D)
+        e = self.codebook.weight  # [K, D]
+        # ‖z − e‖² = ‖z‖² − 2 z·e + ‖e‖², every row against
+        # every code at once: [B·H·W, K]
+        dist = (
+            flat.pow(2).sum(1, keepdim=True)
+            - 2 * flat @ e.T
+            + e.pow(2).sum(1)
+        )
+        idx = dist.argmin(1)  # [B·H·W] code indices
+        z_q = self.codebook(idx)  # [B·H·W, D] lookup
+        z_q = z_q.view(B, H, W, D).permute(0, 3, 1, 2)
+
+        codebook_loss = F.mse_loss(z_q, z_e.detach())
+        commitment_loss = F.mse_loss(z_e, z_q.detach())
+        z_q = z_e + (z_q - z_e).detach()  # straight-through
+        vq_loss = codebook_loss + self.beta * commitment_loss
+        return z_q, idx.view(B, H, W), vq_loss
+```
+
+One training step encodes, quantises, decodes and adds the reconstruction term. Squared error is the Gaussian
+log-likelihood up to a constant and a scale.
+
+```python
+encoder, quantiser, decoder = Encoder(), VectorQuantiser(), Decoder()
+parameters = [
+    *encoder.parameters(),
+    *quantiser.parameters(),
+    *decoder.parameters(),
+]
+optimiser = torch.optim.Adam(parameters, lr=2e-4)
+
+for x in loader:  # x: [B, 3, 128, 128]
+    z_q, idx, vq_loss = quantiser(encoder(x))
+    x_hat = decoder(z_q)
+    loss = F.mse_loss(x_hat, x) + vq_loss
+    optimiser.zero_grad()
+    loss.backward()
+    optimiser.step()
+```
+
+The figure trains the same model at toy scale: two-dimensional data, a two-dimensional latent and multilayer
+perceptrons in place of the convolutions.
+
+<VqVaeTraining />
 
 ## The prior, fitted afterwards
 
@@ -92,6 +267,28 @@ After the autoencoder is trained, every training image is encoded to its grid of
 likelihood on these grids. To generate, sample a grid of indices from the prior, look up the codebook vectors and decode
 <Cite id="oord2017" />. The two-stage split means the autoencoder handles local detail and the prior handles global
 structure, on a grid many times smaller than the image.
+
+Generation turns sampled integers back into vectors with the same `nn.Embedding` lookup that the quantiser uses, then
+runs the decoder's transposed convolutions to enlarge the grid to an image.
+
+```python
+# 1. Encode the training set to grids of indices:
+#    [images, 32, 32], integers in 0 … K − 1.
+with torch.no_grad():
+    grids = torch.cat([quantiser(encoder(x))[1] for x in loader])
+
+# 2. Fit an autoregressive prior to the flattened grids by
+#    cross-entropy on each next index. `train_prior` stands for
+#    any such model: a PixelCNN, or a transformer over the 1024
+#    indices of a grid.
+prior = train_prior(grids.flatten(1))
+
+# 3. Generate: sample indices, look up their codes, decode.
+idx = prior.sample(16).view(16, 32, 32)  # [16, 32, 32]
+z_q = quantiser.codebook(idx)  # [16, 32, 32, D]
+z_q = z_q.permute(0, 3, 1, 2)  # [16, D, 32, 32]
+images = decoder(z_q)  # [16, 3, 128, 128]
+```
 
 ## VQ-VAE-2
 
@@ -102,33 +299,43 @@ the bottom one conditioned on the top. The model generated <Gloss name="imagenet
 were competitive with <Gloss name="gan" plural /> of the time <Cite id="razavi2019" />.
 
 Later work kept the two-stage recipe and changed its parts. VQGAN adds an adversarial and a perceptual loss to the
-autoencoder and fits a transformer as the prior <Cite id="esser2021" />. The same learned discrete codes serve as image
-tokens for large autoregressive image and multimodal models.
+autoencoder and fits a transformer as the prior <Cite id="esser2021" />. The
+<NoteLink to="residual-quantised-variational-autoencoder">RQ-VAE</NoteLink> quantises each latent vector in several
+stages, each coding the error the earlier stages left, so a coarser grid of codes holds the same detail
+<Cite id="lee2022rqvae" />. The same learned discrete codes serve as image tokens for large autoregressive image and
+multimodal models.
 
-## Worked example
+## Dead codes and resets
 
-A codebook has $K = 3$ entries in $D = 2$: $\evec_1 = (0, 0)$, $\evec_2 = (1, 0)$ and $\evec_3 = (0, 1)$. The encoder
-outputs $\zvec_e = (0.8, 0.3)$. The squared distances are
+A code that no encoder output chooses has a codebook loss of zero, so it receives no gradient and never moves. Such a
+dead code stays dead for the rest of training, and the model uses fewer than $K$ codes. Codes initialised far from the
+encoder outputs are the usual cause. Two remedies are common: initialise the codebook by
+<NoteLink to="k-means">k-means</NoteLink> on a batch of encoder outputs, or periodically move each unused code onto a
+randomly chosen encoder output. Usage is counted over many batches, so that a code is not reset only because one batch
+missed it:
 
-$$
-\norm{\zvec_e - \evec_1}^2 = 0.73, \qquad \norm{\zvec_e - \evec_2}^2 = 0.04 + 0.09 = 0.13, \qquad \norm{\zvec_e -
-\evec_3}^2 = 0.64 + 0.49 = 1.13.
-$$
+```python
+# After each optimiser step. usage: [K] running count of how
+# often each code was chosen; flat_z_e: this batch's [N, D] rows.
+with torch.no_grad():
+    counts = torch.bincount(idx.flatten(), minlength=K)
+    usage.mul_(0.99).add_(counts, alpha=0.01)
+    dead = (usage < 1e-3).nonzero().squeeze(1)
+    if len(dead) > 0:
+        pick = torch.randint(len(flat_z_e), (len(dead),))
+        quantiser.codebook.weight[dead] = flat_z_e[pick]
+        usage[dead] = 1.0
+```
 
-The nearest entry is $\evec_2$, so $\zvec_q = (1, 0)$ and the index 2 is stored. The codebook loss is $0.13$; its
-gradient moves $\evec_2$ towards $(0.8, 0.3)$. With $\beta = 0.25$ the commitment loss is $0.25 \times 0.13 = 0.0325$;
-its gradient moves $\zvec_e$ towards $(1, 0)$. The decoder receives $(1, 0)$, and whatever gradient reaches $(1, 0)$ is
-applied unchanged to $\zvec_e$.
+The figure isolates the codebook: the encoder outputs are held fixed, and each step is a gradient step on the codebook
+loss.
 
-import { VqVaeExplorer } from './VqVaeExplorer'
-
-<VqVaeExplorer />
+<CodebookCollapse />
 
 ## Pitfalls
 
-- **Codebook collapse.** Only a few codebook vectors get selected, and unselected vectors receive no gradient and
-  never recover. Remedies include initialising the codebook from encoder outputs with k-means, resetting unused
-  entries to random encoder outputs, and lower-dimensional or normalised codes.
+- **Codebook collapse.** Only a few codes get selected, and the rest receive no gradient and never recover. Remedies
+  are k-means initialisation, resets of unused codes, and lower-dimensional or normalised codes.
 - **Bias of the straight-through gradient.** The encoder is updated as if quantisation were absent. The error grows
   with the distance between $\zvec_e$ and $\zvec_q$.
 - **Sampling needs the second stage.** Decoding uniformly random indices gives noise. The generative quality depends

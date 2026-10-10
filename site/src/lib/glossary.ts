@@ -46,10 +46,10 @@ const norm = (s: string) =>
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, ' ')
     .trim()
-const names = glossaryEntries.map((e) => ({
-  e,
-  names: [e.short ?? '', e.key, ...e.aliases, e.long].filter(Boolean).map(norm),
-}))
+const names = glossaryEntries.map((e) => {
+  const ns = [e.short ?? '', e.key, ...e.aliases, e.long].filter(Boolean).map(norm)
+  return { e, names: ns, compact: ns.map((n) => n.replaceAll(' ', '')) }
+})
 
 /**
  * Entries for the search palette: an exact match on a short form, key or alias first, then names that start with the
@@ -58,10 +58,19 @@ const names = glossaryEntries.map((e) => ({
 export function searchGlossary(query: string, limit = 4): GlossaryEntry[] {
   const q = norm(query)
   if (q.length < 2) return []
-  const rank = (ns: string[]) =>
-    ns.includes(q) ? 0 : ns.some((n) => n.startsWith(q)) ? 1 : ns.some((n) => n.includes(q)) ? 2 : 3
+  const qc = q.replaceAll(' ', '')
+  // Names run together ("vq vae" → "vqvae") match a query typed without separators, exactly or as a prefix only:
+  // a substring of a run-together name can straddle a word boundary.
+  const rank = (ns: string[], cs: string[]) =>
+    ns.includes(q) || cs.includes(qc)
+      ? 0
+      : ns.some((n) => n.startsWith(q)) || cs.some((c) => c.startsWith(qc))
+        ? 1
+        : ns.some((n) => n.includes(q))
+          ? 2
+          : 3
   return names
-    .map((x) => ({ e: x.e, r: rank(x.names) }))
+    .map((x) => ({ e: x.e, r: rank(x.names, x.compact) }))
     .filter((x) => x.r < 3)
     .sort((a, b) => a.r - b.r || glossHeadword(a.e).localeCompare(glossHeadword(b.e)))
     .slice(0, limit)

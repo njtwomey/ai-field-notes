@@ -1,0 +1,200 @@
+---
+title: RQ-VAE
+kind: concept
+summary: An RQ-VAE quantises its latent in $D$ stages, each stage choosing a codeword for what the stages before it left. A latent becomes $D$ indices from coarse to fine, every prefix is a coarser reconstruction, and $D$ codebooks of $K$ codewords partition the latent space into up to $K^D$ cells.
+tags: [deep-learning, generative-models, representation-learning, vector-quantisation, discrete-latents, worked-example]
+aliases: [residual-quantised variational autoencoder, residual quantized VAE, RQ-Transformer]
+requires: [vector-quantised-variational-autoencoder]
+related: [additive-and-residual-quantisation, generative-retrieval-for-recommendation, autoregressive-generative-models, k-means]
+references: [lee2022rqvae, oord2017, chen2010rvq, rajput2023tiger]
+status: draft
+updated: 2026-10-09
+---
+
+import { ResidualStages } from './ResidualStages'
+import { RqVaeTraining } from './RqVaeTraining'
+import { SemanticIdMap } from './SemanticIdMap'
+
+<Definition>
+A **residual-quantised variational autoencoder** (RQ-VAE) has an encoder $\zvec_e(\xvec)$, a decoder, and $D$ stages of
+quantisation <Cite id="lee2022rqvae" />. Starting from the residual $\rvec_0 = \zvec_e$, stage $d$ picks the codeword
+nearest to the residual and subtracts it:
+
+$$
+k_d = \argmin_{j}\, \norm{\rvec_{d-1} - \evec_{d,j}}^2, \qquad \rvec_d = \rvec_{d-1} - \evec_{d,k_d}.
+$$
+
+The code of $\xvec$ is the tuple $(k_1, \dots, k_D)$, and the decoder receives the sum of the chosen codewords,
+$\hat\zvec = \evec_{1,k_1} + \dots + \evec_{D,k_D}$. The stages use one shared codebook or one codebook each.
+</Definition>
+
+## From one codeword to a sum of codewords
+
+A <Gloss name="vq-vae" /> replaces the encoder output by one codeword from a codebook of $K$ <Cite id="oord2017" />. The
+quantisation error is the distance to the nearest of $K$ points, and lowering it means a larger codebook. An RQ-VAE
+keeps $K$ small and quantises again: the second stage quantises the error the first one left, the third quantises the
+error after two stages, and so on. This is <NoteLink to="additive-and-residual-quantisation">residual
+quantisation</NoteLink> <Cite id="chen2010rvq" />, applied to the latent of an
+<NoteLink to="autoencoder">autoencoder</NoteLink>.
+
+The partial sum after $d$ stages is
+
+$$
+\hat\zvec^{(d)} = \sum_{i=1}^{d} \evec_{i,k_i} = \zvec_e - \rvec_d,
+$$
+
+so its error is the size of the residual, $\norm{\zvec_e - \hat\zvec^{(d)}}^2 = \norm{\rvec_d}^2$. Every prefix
+$(k_1, \dots, k_d)$ of the code is a code in its own right, for the coarser latent $\hat\zvec^{(d)}$.
+
+## Capacity
+
+Each stage chooses one of $K$ codewords, so $D$ stages can produce $K^D$ distinct sums: residual quantisation with depth
+$D$ partitions the latent space into at most $K^D$ cells <Cite id="lee2022rqvae" />. A VQ-VAE needs a codebook of $K^D$
+vectors for the same number of cells. The RQ-VAE stores $DK$ codewords with per-stage codebooks, or $K$ with a shared
+one, and searches $K$ of them at each stage instead of $K^D$ at once.
+
+Lee et al. used the capacity to shorten the code grid. With a shared codebook of 16,384 codewords and $D = 4$, an
+$256 \times 256$ image became an $8 \times 8 \times 4$ grid of indices, 64 positions with four indices each. VQGAN used
+a $16 \times 16 \times 1$ grid, 256 positions. The two reconstructed about equally well; VQGAN with an $8 \times 8$ grid
+reconstructed far worse <Cite id="lee2022rqvae" />.
+
+## Coarse to fine
+
+The first stage sees the whole encoder output, so its codeword captures the largest distinction. Each later stage sees
+only the error left over, so it adds a smaller correction. Codes that share their first $d$ indices share the coarse
+latent $\hat\zvec^{(d)}$ and differ only in the corrections after it. The set of codes therefore forms a tree: $K$
+branches at stage 1, $K$ more inside each branch at stage 2, and so on, with the whole codes as leaves. Similar inputs
+tend to share long prefixes.
+
+Encoding is greedy. Each stage takes the codeword nearest to its own residual and never revisits an earlier choice.
+Averaged over the data, the error cannot rise from one stage to the next when each codebook is fitted by
+<NoteLink to="k-means">k-means</NoteLink> on the residuals it receives. Each codeword is then the mean of the residuals
+assigned to it, and a mean is at least as close to its points, in total squared distance, as the zero vector, which
+would leave those residuals unchanged. For a single point the error can rise, because the nearest codeword to a small
+residual can be larger than the residual.
+
+<ResidualStages />
+
+## Worked example
+
+Two stages with two codewords each, in two dimensions. Stage 1 has $\evec_{1,1} = (0, 0)$ and $\evec_{1,2} = (2, 2)$;
+stage 2 has $\evec_{2,1} = (0, 0.5)$ and $\evec_{2,2} = (0, -0.5)$. The encoder outputs $\zvec_e = (1.8, 2.4)$.
+
+Stage 1 compares squared distances $1.8^2 + 2.4^2 = 9$ and $0.2^2 + 0.4^2 = 0.2$, chooses $k_1 = 2$, and leaves
+$\rvec_1 = (-0.2, 0.4)$. The coarse latent is $\hat\zvec^{(1)} = (2, 2)$, with error $0.2$.
+
+Stage 2 compares $0.2^2 + 0.1^2 = 0.05$ and $0.2^2 + 0.9^2 = 0.85$, chooses $k_2 = 1$, and leaves
+$\rvec_2 = (-0.2, -0.1)$. The latent is $\hat\zvec^{(2)} = (2, 2.5)$, with error $0.05$, and the code is $(2, 1)$.
+
+A second encoder output $\zvec_e = (2, 2)$ shows the greedy caveat. Stage 1 matches it exactly, with error 0. Stage 2
+has no zero codeword, so it adds $(0, \pm 0.5)$ and the error rises to $0.25$.
+
+## Training
+
+The loss of an RQ-VAE is the VQ-VAE loss with the quantised latent $\hat\zvec = \hat\zvec^{(D)}$ in place of the single
+codeword. Gradients pass the quantisation by the straight-through estimator,
+$\hat\zvec \leftarrow \zvec_e + \mathrm{sg}[\hat\zvec - \zvec_e]$, where $\mathrm{sg}$ is the stop-gradient. Lee et
+al.'s commitment loss sums over the partial sums of every stage <Cite id="lee2022rqvae" />:
+
+$$
+L_{\text{commit}} = \sum_{d=1}^{D} \norm{\zvec_e - \mathrm{sg}[\hat\zvec^{(d)}]}^2.
+$$
+
+Each term pulls the encoder output towards the coarse latent of one stage, so the encoder learns outputs that are
+already well described by the first few codewords. The codebooks are trained by the matching codebook loss, or by moving
+averages of the residuals assigned to each codeword. Starting each codebook from k-means on the residuals of a first
+batch avoids codewords that are never chosen. <Gloss name="tiger" /> initialised its codebooks this way
+<Cite id="rajput2023tiger" />.
+
+**Shared or per-stage codebooks.** Lee et al. shared one codebook across all stages and reported that per-stage
+codebooks did worse at their scale <Cite id="lee2022rqvae" />. A shared codebook must serve corrections of every size,
+from the first stage's large ones to the last stage's small ones, which needs many codewords. With a few codewords per
+stage, as in small models and in <NoteLink to="recommender-systems">recommender systems</NoteLink>, per-stage codebooks
+are the usual choice. TIGER used three stages with 256 codewords each <Cite id="rajput2023tiger" />.
+
+```python
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+
+
+class ResidualQuantiser(nn.Module):
+    """D stages, one codebook of K codewords each, on rows of size L."""
+
+    def __init__(self, depth=3, K=256, L=32, beta=0.25):
+        super().__init__()
+        self.codebooks = nn.ModuleList(
+            nn.Embedding(K, L) for _ in range(depth)
+        )
+        self.beta = beta
+
+    def forward(self, z_e):  # z_e: [N, L]
+        residual = z_e
+        z_hat = torch.zeros_like(z_e)
+        codes, codebook_loss, commitment_loss = [], 0.0, 0.0
+        for book in self.codebooks:
+            e = book.weight  # [K, L]
+            # [N, K] squared distances, then the nearest codeword
+            dist = (
+                residual.pow(2).sum(1, keepdim=True)
+                - 2 * residual @ e.T
+                + e.pow(2).sum(1)
+            )
+            k = dist.argmin(1)  # [N]
+            chosen = book(k)  # [N, L]
+            # Codebook loss: the chosen codeword moves to the residual.
+            codebook_loss += F.mse_loss(chosen, residual.detach())
+            z_hat = z_hat + chosen  # the partial sum after this stage
+            # Commitment: z_e moves to the partial sum (Lee et al.).
+            commitment_loss += F.mse_loss(z_e, z_hat.detach())
+            residual = residual - chosen.detach()
+            codes.append(k)
+        z_q = z_e + (z_hat - z_e).detach()  # straight-through
+        vq_loss = codebook_loss + self.beta * commitment_loss
+        return z_q, torch.stack(codes, 1), vq_loss  # codes: [N, D]
+```
+
+The encoder and decoder are those of a VQ-VAE: convolutions for images, <Gloss name="mlp">multilayer perceptrons</Gloss>
+for item embeddings. A code can be turned back into a latent at any depth by summing the first $d$ looked-up codewords,
+which is how the coarse reconstructions in the figure below are made.
+
+<RqVaeTraining />
+
+## Priors over codes
+
+A generative model over RQ-VAE codes predicts $D$ indices per position instead of one. Flattening them into one long
+sequence multiplies its length by $D$. Lee et al.'s RQ-Transformer splits the work. A spatial
+<NoteLink to="transformer">transformer</NoteLink> reads the positions in order, its input at each position being the sum
+of the codewords chosen at the previous one. A depth transformer then predicts the $D$ indices at the current position
+one after another, from the spatial transformer's output and the codewords already chosen there
+<Cite id="lee2022rqvae" />. On their $8 \times 8 \times 4$ grids, sampling was 4.1 and 5.6 times faster than with
+VQGAN's $16 \times 16$ grids at batch sizes of 100 and 200 <Cite id="lee2022rqvae" />.
+
+## Semantic IDs
+
+In <NoteLink to="generative-retrieval-for-recommendation">generative retrieval</NoteLink>, an RQ-VAE turns each item's
+content embedding into a short code, its <Gloss name="semantic-identifier">semantic ID</Gloss>. TIGER encoded a
+768-dimensional <NoteLink to="sentence-embeddings">sentence embedding</NoteLink> of each item's title, price, brand and
+category with three stages of 256 codewords. A sequence model then generates the next item's semantic ID index by index,
+so items that share a prefix share what the model has learned about that prefix <Cite id="rajput2023tiger" />. Two items
+can receive the same code. TIGER appended a fourth index to tell such items apart: $(7, 1, 4)$ becomes $(7, 1, 4, 0)$
+and $(7, 1, 4, 1)$ <Cite id="rajput2023tiger" />.
+
+The prefix structure of semantic IDs is a nesting of cells. In two dimensions, every point of the plane has a code, and
+the points with a given prefix of length $d$ form one cell of the stage-$d$ partition. Each stage-1 cell is split by the
+stage-2 codebook, shifted to the cell's codeword, and so on down. With $K = 2$ codewords per stage, a code is a string
+of $D$ bits.
+
+<SemanticIdMap />
+
+## Pitfalls
+
+- **Greedy coding.** An early stage's choice is never revised, so a code is not the best sum of $D$ codewords.
+  <Gloss name="beam-search">Beam search</Gloss> over the stages finds better codes at a multiple of the cost.
+- **Unused codewords.** As in a VQ-VAE, a codeword that no residual chooses gets no gradient. Later stages see small
+  residuals that change as the earlier stages learn, so their codewords are easy to strand. Initialisation from
+  residual k-means and resets of unused codewords help.
+- **Collisions.** Different inputs can share a whole code. Where codes serve as identifiers, a collision must be
+  resolved, for example by an extra index.
+- **Late stages matter little.** The share of error each stage removes shrinks with depth. Past a few stages, extra
+  stages add code length and little accuracy.

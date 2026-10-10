@@ -19,7 +19,9 @@ export function RouteErrorBoundary() {
   const stack = error instanceof Error ? error.stack : undefined
 
   const copyDetails = () => {
-    const text = `${errorMessage}\n\n${stack ?? ''}`
+    // The page's URL goes first, so a pasted report says where the error happened.
+    const name = error instanceof Error ? error.name : 'Error'
+    const text = `On this page: ${window.location.href}\nthis error occurred: ${name}: ${errorMessage}\n\n${stack ?? ''}`
     navigator.clipboard?.writeText(text.trim()).then(() => {
       setCopied(true)
       setTimeout(() => setCopied(false), 2000)

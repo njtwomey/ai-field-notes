@@ -10,60 +10,82 @@ import {
 } from '@/lib/content'
 import { plainMath } from '@/lib/math-text'
 
-type Doc = { id: string; title: string; aliases: string; summary: string; tags: string; headings: string }
+/**
+ * How much a match in each field counts. MiniSearch scores every field by BM25 and adds the fields up, each times its
+ * weight, so one word in a title counts five times as much as the same word in the body and the note's total decides
+ * its rank. Aliases are other names for the title; `compact` holds the title and aliases run together (see below).
+ */
+export const SEARCH_WEIGHTS = {
+  title: 5,
+  aliases: 4,
+  compact: 4,
+  summary: 2,
+  tags: 2,
+  headings: 1.5,
+  body: 1,
+} as const
 
-let index: MiniSearch<Doc> | undefined
+/** Search options shared by both indexes: prefix matching, and typos up to this fraction of a term's length. */
+const SEARCH_OPTIONS = { boost: SEARCH_WEIGHTS, prefix: true, fuzzy: 0.2, combineWith: 'AND' } as const
+
+type Field = keyof typeof SEARCH_WEIGHTS
+type Doc = { id: string } & Partial<Record<Field, string>>
+
+const META_FIELDS: Field[] = ['title', 'aliases', 'compact', 'summary', 'tags', 'headings']
 
 /**
- * Two indexes. The metadata index covers title, aliases, summary, tags and headings, which are already loaded, so it
- * answers at once. The body index covers the full text; its data is a separate chunk fetched the first time the
- * palette opens and indexed in small asynchronous chunks, so the palette never waits for it. Body-only matches are
- * appended below the metadata matches once it is ready.
+ * Titles and aliases that contain punctuation or spaces, each run together into one word ("VQ-VAE" → "vqvae",
+ * "k-means" → "kmeans"), so that a query typed without the separators still finds them. The tokenizer splits on
+ * punctuation, so "VQ-VAE" itself is indexed as "vq" and "vae", and "vqvae" matches neither.
+ */
+function compactNames(names: string[]): string {
+  return names
+    .filter((s) => /[^\p{L}\p{N}]/u.test(s.trim()))
+    .map((s) => s.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ''))
+    .join(' ')
+}
+
+const metaDocs = (): Doc[] =>
+  notes.map((n) => ({
+    id: n.slug,
+    title: n.title,
+    aliases: n.aliases.join(' '),
+    compact: compactNames([n.title, ...n.aliases]),
+    summary: plainMath(n.summary),
+    tags: n.tags.join(' '),
+    headings: n.headings.map((h) => h.text).join(' '),
+  }))
+
+let index: MiniSearch<Doc> | undefined
+let fullIndex: MiniSearch<Doc> | undefined
+let fullLoading: Promise<void> | undefined
+
+/**
+ * Two indexes with the same weights. The metadata index covers every field but the body; its data is already loaded,
+ * so it answers at once. The full index adds the body; the bodies are a separate chunk fetched the first time the
+ * palette opens and indexed in small asynchronous chunks, so the palette never waits for it. Once it is ready it
+ * replaces the metadata index, and a body match counts towards the same total as a title or summary match.
  */
 function searchIndex(): MiniSearch<Doc> {
-  if (!index) {
-    index = new MiniSearch<Doc>({
-      fields: ['title', 'aliases', 'summary', 'tags', 'headings'],
-      storeFields: [],
-      searchOptions: {
-        boost: { title: 4, aliases: 3, tags: 2, summary: 1.5, headings: 1 },
-        prefix: true,
-        fuzzy: 0.2,
-        combineWith: 'AND',
-      },
-    })
-    index.addAll(
-      notes.map((n) => ({
-        id: n.slug,
-        title: n.title,
-        aliases: n.aliases.join(' '),
-        summary: plainMath(n.summary),
-        tags: n.tags.join(' '),
-        headings: n.headings.map((h) => h.text).join(' '),
-      })),
-    )
-  }
+  index ??= (() => {
+    const ms = new MiniSearch<Doc>({ fields: META_FIELDS, storeFields: [], searchOptions: SEARCH_OPTIONS })
+    ms.addAll(metaDocs())
+    return ms
+  })()
   return index
 }
 
-let bodyIndex: MiniSearch<{ id: string; body: string }> | undefined
-let bodyLoading: Promise<void> | undefined
-
-/** Fetch and index the note bodies in the background; resolves when full-text search is available. */
+/** Fetch the note bodies and build the full index in the background; resolves when full-text search is available. */
 export function loadBodyIndex(): Promise<void> {
-  bodyLoading ??= import('virtual:search').then(async ({ default: bodies }) => {
-    const ms = new MiniSearch<{ id: string; body: string }>({
-      fields: ['body'],
-      storeFields: [],
-      searchOptions: { prefix: true, fuzzy: 0.1, combineWith: 'AND' },
-    })
+  fullLoading ??= import('virtual:search').then(async ({ default: bodies }) => {
+    const ms = new MiniSearch<Doc>({ fields: [...META_FIELDS, 'body'], storeFields: [], searchOptions: SEARCH_OPTIONS })
     await ms.addAllAsync(
-      Object.entries(bodies).map(([id, body]) => ({ id, body })),
+      metaDocs().map((d) => ({ ...d, body: bodies[d.id] ?? '' })),
       { chunkSize: 25 },
     )
-    bodyIndex = ms
+    fullIndex = ms
   })
-  return bodyLoading
+  return fullLoading
 }
 
 /** Every tag with the number of notes that carry it, most used first. */
@@ -163,7 +185,7 @@ export function suggestTags(fragment: string, limit = 12): { tag: string; count:
 
 /**
  * Notes matching every `#tag` in the query and, if there is text, the text search (ranked); tag-only lists by title.
- * With `fullText`, body-only matches from the background index are appended once it is ready.
+ * With `fullText`, the note bodies are searched too once the background index is ready, weighted by `SEARCH_WEIGHTS`.
  */
 export function search(
   query: string,
@@ -180,22 +202,11 @@ export function search(
       .slice(0, limit)
   }
   const bySlug = new Map(notes.map((n) => [n.slug, n]))
-  const found = searchIndex()
-    .search(text)
-    .map((r) => r.id as string)
-  const seen = new Set(found)
-  // Full-text matches the metadata missed, ranked after every metadata match.
-  const extra =
-    fullText && bodyIndex
-      ? bodyIndex
-          .search(text)
-          .map((r) => r.id as string)
-          .filter((id) => !seen.has(id))
-      : []
+  const found = (fullText && fullIndex ? fullIndex : searchIndex()).search(text).map((r) => r.id as string)
   // A note whose title or an alias is exactly the query leads, whatever its score: "svm" opens with the SVM note.
   const key = exactKey(text)
   const exact = (n: NoteMeta) => exactKey(n.title) === key || n.aliases.some((a) => exactKey(a) === key)
-  const ranked = [...found, ...extra].map((id) => bySlug.get(id)).filter((n): n is NoteMeta => !!n && hasTags(n))
+  const ranked = found.map((id) => bySlug.get(id)).filter((n): n is NoteMeta => !!n && hasTags(n))
   return [...ranked.filter(exact), ...ranked.filter((n) => !exact(n))].slice(0, limit)
 }
 
