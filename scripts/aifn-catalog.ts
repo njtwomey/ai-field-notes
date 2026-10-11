@@ -130,6 +130,23 @@ const walkNotes = (dir: string) => {
   }
 }
 walkNotes(path.join(root, 'content', 'notes'))
+// An entry may name a category instead of a note: a category id that is unique in the taxonomy and has an introducing
+// note (`index` in taxonomy.yaml; `true` means the note shares the id) resolves to that note.
+type TaxonomyNode = { id: string; index?: string | true; children?: TaxonomyNode[] }
+const categoryIndex = new Map<string, string | null>()
+const walkTaxonomy = (nodes: TaxonomyNode[]) => {
+  for (const c of nodes) {
+    const index = c.index === true ? c.id : (c.index ?? null)
+    categoryIndex.set(c.id, categoryIndex.has(c.id) ? null : index)
+    walkTaxonomy(c.children ?? [])
+  }
+}
+walkTaxonomy(parse(fs.readFileSync(path.join(root, 'content', 'taxonomy.yaml'), 'utf8')) as TaxonomyNode[])
+const noteFor = (slug: string) => {
+  if (slugs.has(slug)) return slug
+  const index = categoryIndex.get(slug)
+  return index && slugs.has(index) ? index : undefined
+}
 const glossary = parse(fs.readFileSync(path.join(root, 'content', 'glossary.yaml'), 'utf8')) as Record<
   string,
   { note?: string; aliases?: string[] }
@@ -148,8 +165,9 @@ const notesLinked = new Set<string>()
 for (const row of rows) {
   const where = `${row.kind} '${row.address}'`
   for (const slug of row.notes ?? []) {
-    if (!slugs.has(slug)) errors.push(`${where}: note '${slug}' is not in content/notes`)
-    else notesLinked.add(slug)
+    const note = noteFor(slug)
+    if (!note) errors.push(`${where}: note '${slug}' is not in content/notes or a category with an index note`)
+    else notesLinked.add(note)
   }
   if (row.notes?.length) linked++
   if (row.glossary !== undefined) {
