@@ -1,0 +1,153 @@
+---
+title: Feature stores and point-in-time correctness
+kind: technique
+summary: 'A feature store computes each feature from one definition and serves it twice: as timestamped history for building training sets, and as the latest value for live predictions. Point-in-time joins give each training row the values known at its own time, preventing leakage.'
+tags: [data, feature-engineering, software, mlops, worked-example]
+aliases: [feature store, point-in-time join, as-of join, training-serving skew, offline store, online store, feature platform]
+requires: [feature-construction, data-leakage]
+related: [relational-feature-aggregation, date-and-time-features, data-validation, model-monitoring, drift-detection, automated-feature-engineering]
+references: [hermann2017, feastpit, zinkevich2017, sculley2015, polyzotis2018, breck2017]
+status: draft
+updated: 2026-10-11
+---
+
+import { FeatureStoreDiagram } from './FeatureStoreDiagram'
+
+<Definition>
+A **feature store** is a system that holds the definitions of features and their computed values. An **offline store**
+keeps every value of every feature with the time it refers to, for building training sets. An **online store** keeps
+the latest value per entity, for predictions that must be answered in milliseconds. A **point-in-time join** builds a
+training row from the values that were known at the row's own time, so that training sees exactly what prediction would
+have seen.
+</Definition>
+
+## Problem
+
+A model is trained on features computed from historical data and used on features computed from live data. The two
+computations are often written twice, by different people, in different languages and systems: a SQL query over the
+warehouse for training, and a service that reads recent events for serving. Every difference between them changes what
+a feature means between training and use. The model then predicts from inputs it was not trained on, and nothing fails
+loudly; accuracy just drops. Zinkevich lists this **training-serving skew** among the main causes of models that
+perform worse in use than in evaluation <Cite id="zinkevich2017" />. The historical computation has its own trap: a
+feature computed today for an event last year sees data recorded after that event.
+
+## Mechanism
+
+<FeatureStoreDiagram />
+
+### Feature definitions
+
+A **feature definition** names an entity, the key that identifies it, a data source and a transformation, such as
+"customer, by customer key: the number of orders in the last 30 days, from the orders table". The definition also
+records how often the value is refreshed and how long a value stays valid. Teams look features up by name instead of
+recomputing them. Uber's Michelangelo platform introduced a shared feature store of this kind so that features built by
+one team could be used by others with the same pipelines for training and serving <Cite id="hermann2017" />.
+
+### Offline and online stores
+
+The **offline store** holds the full history: for each entity key, every value of each feature together with its
+**event time**, the moment the value describes, and often a **creation time**, the moment it was written. It is large
+and is read in bulk to build training sets. The **online store** holds only the latest value per entity key in a fast
+key-value database, and is read one entity at a time by the prediction service. Values reach the online store by
+**materialisation**: a batch or streaming job copies the newest offline values, or a stream processor writes them
+directly. Features that depend on the request itself, such as the distance between a user and a shop, are computed
+**on demand** at prediction time from a shared function.
+
+### Point-in-time joins
+
+A training set starts from an **entity table** of rows $(e, t_0, y)$: an entity, the time at which a prediction would
+have been made and the outcome observed afterwards. For each row and each feature, a point-in-time join, also called
+an **as-of join**, returns the value with the latest event time at or before $t_0$:
+
+$$
+x_f(e, t_0) = v_f\paren{e, \tau^*}, \qquad \tau^* = \max\{\tau \in T_f(e) : t_0 - \text{TTL}_f \le \tau \le t_0\},
+$$
+
+where $T_f(e)$ is the set of event times at which feature $f$ has a stored value for entity $e$, $v_f(e, \tau)$ is the
+value with event time $\tau$, and $\text{TTL}_f$ is the feature's time to live. When no value falls in the window, the
+feature is missing. The TTL is measured back from each row's own $t_0$, not from the time the join runs
+<Cite id="feastpit" />.
+
+### Training-serving skew
+
+A feature store removes the most common causes of skew by computing both paths from one definition. Skew still
+arises in four ways:
+
+- **Reimplemented logic.** The training feature is a warehouse query and the serving feature is application code. A
+  rounding rule, a filter on cancelled orders or a time-zone conversion differs between them. The remedy is one
+  implementation used by both paths <Cite id="zinkevich2017" />.
+- **Batch against streaming values.** The training value of "orders in the last hour" is computed by a nightly batch
+  job from complete data; the serving value comes from a stream that has not yet received late events. The two agree
+  only if both use event time and the stream's lag is reflected in training.
+- **Stale caches.** The online store is refreshed every few hours, so at serving time a feature is hours old, while the
+  point-in-time join gives training rows values that are fresh to the second. Training should see the same staleness,
+  for example by joining on $t_0$ minus the refresh lag.
+- **Different defaults.** A missing value is filled with 0 in the training query and with the column mean, or left
+  missing, in the service. The model then sees a value at serving time that never occurred in training.
+
+Logging the features actually used at serving time, and training later models on those logs, guarantees that training
+and serving inputs agree <Cite id="zinkevich2017" />. Comparing the distribution of each feature between training data
+and live requests detects skew that slipped through; see <NoteLink to="data-validation">data validation</NoteLink> and
+<NoteLink to="model-monitoring">model monitoring</NoteLink> <Cite id="breck2017" />.
+
+## Worked example: an as-of join
+
+A feature "orders in the last 30 days" for customer 17 has these values in the offline store:
+
+| Event time  | Value |
+| ----------- | ----- |
+| 1 January   | 2     |
+| 1 February  | 4     |
+| 1 March     | 3     |
+| 1 April     | 6     |
+
+Three training rows ask about customer 17, with a time to live of 45 days:
+
+| Row | $t_0$       | Values with event time $\le t_0$ | Latest within 45 days | Feature |
+| --- | ----------- | -------------------------------- | --------------------- | ------- |
+| 1   | 15 February | 1 January, 1 February            | 1 February            | 4       |
+| 2   | 1 March     | 1 January to 1 March             | 1 March               | 3       |
+| 3   | 30 May      | all four                         | none (1 April is 59 days earlier) | missing |
+
+1. **Row 1.** The 1 March and 1 April values describe later times and are excluded. The latest remaining value is from
+   1 February, 14 days before $t_0$, so the feature is 4.
+2. **Row 2.** A value with event time equal to $t_0$ is included, so the feature is 3. Whether the boundary is
+   inclusive must match serving: if the 1 March value is computed only after midnight, a prediction at midnight would
+   not see it.
+3. **Row 3.** The latest value is 59 days old, beyond the time to live, so the feature is missing rather than a stale 6.
+
+A plain join on the customer key, without times, would give all three rows the latest value, 6, which row 1 and row 2
+could not have known.
+
+## Cost
+
+- **Infrastructure.** Two stores, materialisation jobs, a registry of definitions and monitoring of freshness.
+- **Storage.** The offline store keeps every historical value, which grows with the number of entities, features and
+  refreshes.
+- **Joins.** A point-in-time join sorts or indexes values by entity and time; for many training rows and features it is
+  the most expensive step in building a training set.
+
+## Trade-offs
+
+- **Shared store against one pipeline.** A single model with one pipeline that computes features from logged requests
+  needs no feature store. The store pays off when many models share features or when training and serving code would
+  otherwise diverge.
+- **Freshness against cost.** Streaming features are minutes old and costly to run; batch features are hours old and
+  cheap. The model must be trained with the staleness it will see.
+- **Reuse against fit.** A feature defined for one model and reused by another may not mean what the second model
+  needs, and changing it for one model changes it for all <Cite id="sculley2015" />.
+
+## Pitfalls
+
+- **Joining on the wrong time.** Joining on the time an outcome was recorded instead of the time a prediction would
+  have been made lets features see the period between them.
+- **Backfilled values.** A value recomputed or corrected later, with an event time in the past, was not known at that
+  time. Joining on event time alone returns it; adding the condition that the creation time is at most $t_0$ excludes
+  it <Cite id="feastpit" />.
+- **Late-arriving data.** Events that arrive after their event time are in the offline store but were absent from the
+  online store when predictions were made. Training then sees more complete data than serving did.
+- **Changing a definition in place.** Editing a feature's transformation changes historical values in the offline
+  store and live values in the online store at different times. Definitions need versions, and a changed feature is a
+  new feature <Cite id="polyzotis2018" />.
+- **Upstream tables that change.** A table joined at training time may differ from the same table at serving time
+  <Cite id="zinkevich2017" />; see <NoteLink to="data-leakage">data leakage</NoteLink>.

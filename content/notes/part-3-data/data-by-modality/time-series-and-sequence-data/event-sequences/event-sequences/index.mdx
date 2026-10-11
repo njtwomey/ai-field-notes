@@ -1,0 +1,109 @@
+---
+title: Event sequences and logs
+kind: concept
+summary: 'An event sequence records discrete events at irregular times, such as clicks, purchases or log lines. Models take the event types and the gaps between them as tokens, as counts per interval, or through a point process whose intensity gives the rate of the next event.'
+tags: [data, time-series, sequence-models]
+aliases: [event data, event logs, marked point process, temporal point process, Hawkes process, clickstream, inter-event times, conditional intensity]
+requires: [time-series-sampling-and-alignment, poisson-distribution]
+related: [time-series-windowing, date-and-time-features, interaction-logs, sequential-recommendation-models, survival-and-hazard-functions, exponential-distribution, recurrent-neural-network, change-point-detection]
+references: [hawkes1971, du2016, mei2017, shchur2021]
+status: draft
+updated: 2026-10-11
+---
+
+<Definition>
+An **event sequence** is a list of events $(t_1, m_1), (t_2, m_2), \dots, (t_n, m_n)$ observed over a period
+$[0, T]$, with times $t_1 < t_2 < \dots < t_n$ and **marks** $m_i$ that say what happened: an event type, a user, an
+amount, a line of a log. Unlike a sampled time series, the times themselves are data: when and how often events occur
+is part of what a model must describe.
+</Definition>
+
+## Intuition
+
+A sensor is read on a clock; events happen when they happen. A web session is a burst of clicks followed by silence; a
+server writes a flood of log lines during an incident and few otherwise; a customer buys on a rhythm of their own.
+Turning such records into model inputs means deciding what to keep of the timing. Three representations cover most
+practice: counts per interval, which give up the exact times; sequences of tokens with the gaps between them, which
+keep them as features; and point processes, which model the times directly.
+
+## Counts per interval
+
+Binning counts the events of each type in intervals of width $\Delta$, which gives an ordinary regularly sampled
+series: clicks per minute, transactions per day, errors per hour. Every time-series method then applies.
+
+The width $\Delta$ trades detail against noise. Narrow bins are mostly zeros and the counts are dominated by chance;
+wide bins merge separate bursts and hide their order. Counts of rare events in narrow bins are better modelled as
+counts, with a <NoteLink to="poisson-distribution">Poisson</NoteLink> or negative binomial likelihood, than as
+continuous values.
+
+## Tokens and gaps
+
+A sequence model can read the events one by one. Each event becomes a token for its mark, an embedding of its type, and
+the **inter-event time** $\tau_i = t_i - t_{i-1}$ enters as a feature, often as $\log \tau_i$ because gaps range over
+orders of magnitude. The model predicts the next mark, the next gap, or a label for the whole sequence.
+
+This is how sessions of clicks feed <NoteLink to="sequential-recommendation-models">sequential recommenders</NoteLink>,
+how log lines feed anomaly detectors once each line is reduced to a template, and how patient records feed clinical
+models.
+
+## Point processes
+
+A **temporal point process** models the times themselves. Its **conditional intensity**
+
+$$
+\lambda^*(t) = \lim_{\delta \to 0} \frac{\Pr(\text{an event in } [t, t + \delta) \mid \mathcal{H}_t)}{\delta}
+$$
+
+is the instantaneous rate of events given the history $\mathcal{H}_t$ of events before $t$. The log-likelihood of a
+sequence observed on $[0, T]$ is
+
+$$
+\log p(t_1, \dots, t_n) = \sum_{i=1}^{n} \log \lambda^*(t_i) - \int_0^T \lambda^*(t)\,dt .
+$$
+
+The first term rewards a high rate where events happened; the second penalises a high rate everywhere else.
+
+- A **<NoteLink to="poisson-process">Poisson process</NoteLink>** has a rate that does not depend on the history; with
+  constant rate $\lambda$ the gaps are independent <NoteLink to="exponential-distribution">exponential</NoteLink>
+  variables with mean $1/\lambda$.
+- A **Hawkes process** is self-exciting: each event raises the rate for a while,
+  $\lambda^*(t) = \mu + \sum_{t_i < t} \alpha e^{-\beta (t - t_i)}$, with background rate $\mu > 0$, jump $\alpha \ge 0$
+  and decay $\beta > 0$ <Cite id="hawkes1971" />. Events arrive in clusters, as aftershocks, retweets and cascading
+  failures do. The process stays stable while $\alpha / \beta < 1$, the expected number of events each event triggers.
+- **Neural point processes** compute the intensity from a learned summary of the history. A
+  <NoteLink to="recurrent-neural-network">recurrent network</NoteLink> reads each event's mark and gap and outputs the
+  intensity of the next event and the distribution of its mark <Cite id="du2016" />; the neural Hawkes process lets the
+  network's state decay continuously between events <Cite id="mei2017" />. A review compares the designs
+  <Cite id="shchur2021" />.
+
+## Features from events
+
+For a tabular model, an entity's events up to the prediction time become features.
+
+- **Counts and rates** of each event type over several <NoteLink to="forecasting-setups">look-back windows</NoteLink>:
+  the last hour, day and month.
+- **Recency**: the time since the last event of each type.
+- **Regularity**: the mean and spread of the gaps, or the share of events at each hour of the day.
+- **Sequence features**: the last few event types, or counts of short patterns of types.
+
+These are the event versions of the rolling statistics in
+<NoteLink to="time-series-feature-extraction">feature extraction</NoteLink> and the calendar features in
+<NoteLink to="date-and-time-features">date and time features</NoteLink>.
+
+## The observation window
+
+Every sequence is seen through a window $[0, T]$. Events before the start, and the next event after the end, are not
+seen. The gap after the last observed event is **censored**: it is at least $T - t_n$, not equal to it. Treating it as
+complete makes entities look more active than they are; it is the setting of
+<NoteLink to="survival-and-hazard-functions">survival analysis</NoteLink>.
+
+## Pitfalls
+
+- **Ties and clock resolution.** Events logged to the second, or by different machines, arrive with equal or
+  misordered times. Decide an order rule, and do not read zero gaps as simultaneity.
+- **Events after the prediction time.** Features of an entity must be computed from events before the time of each
+  prediction, not from the whole log.
+- **Logging changes.** A new logging library, a new event type or a change in what is recorded shifts every count;
+  check the counts over time before modelling them.
+- **Activity bias.** Highly active entities contribute most events; per-event metrics describe them, and per-entity
+  metrics are needed to describe a typical one.

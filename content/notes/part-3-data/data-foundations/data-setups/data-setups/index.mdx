@@ -1,0 +1,165 @@
+---
+title: Data setups
+kind: concept
+summary: 'A data setup is the structure of the examples in a learning problem: independent rows, grouped rows, panels, sequences, bags, ranked lists, streams or censored records. It fixes what one row is, which rows depend on each other, and so how the data must be split.'
+tags: [data, model-selection, evaluation, worked-example]
+aliases: [data setup, unit of observation, unit of analysis, data structure, effective sample size, design effect, grouped data, clustered data]
+requires: [cross-validation]
+related: [data-leakage, train-validation-and-test-splits, multiple-instance-learning, time-series-cross-validation, panel-data, event-sequences, forecasting-setups, relational-feature-aggregation, dataset-shift]
+references: [roberts2017cv, kapoor2023, kish1965, dietterich1997, liu2009ltr, gama2014, kalbfleisch2002, bergmeir2018]
+status: draft
+updated: 2026-10-11
+---
+
+import { GroupedSplit } from './GroupedSplit'
+
+<Definition>
+A **data setup** is the structure of the examples in a learning problem. It states what one row of the data is (the
+**unit of observation**), what one prediction is about (the **unit of prediction**), and which rows depend on each
+other: through a shared patient, user or location, through time, or through membership of a bag, a list or a
+censored history. The setup decides which dependencies a model may exploit, how many independent examples the data
+really hold, and how training and test data must be separated.
+</Definition>
+
+## Intuition
+
+Most learning theory assumes that rows are independent draws from one distribution. Real data rarely are. Ten
+heart-rate recordings from one patient resemble each other more than ten recordings from ten patients; this week's
+sales resemble last week's; the documents returned for one query are ranked against each other, not against documents
+for other queries. Each structure changes three things: what a model can learn from the rows, how much information the
+rows contain, and which split of the rows gives an honest estimate of performance on the cases the model will meet.
+The question to ask of every dataset is: when the model is used, what will be new?
+
+## The unit of observation
+
+The **unit of observation** is what one row describes: a patient, a hospital visit, a single measurement, a window of
+sensor data, a user session. The **unit of prediction** is what a prediction is about. The two often differ:
+
+- A model may be trained on visits but asked whether a patient will be readmitted. Its errors must then be counted
+  per patient, not per visit, or patients with many visits dominate the score.
+- A model may be trained on one-second windows of accelerometer data but deployed to label whole activities. Window
+  accuracy and activity accuracy can differ widely.
+- A model may score individual transactions but be judged on how many fraudulent accounts it finds.
+
+Rows that share a unit are not independent. With $n$ rows in groups of $m$ rows each and an **intraclass
+correlation** $\rho$, the share of a row's variance that its group explains, the information in the data equals that
+of
+
+$$
+n_{\text{eff}} = \frac{n}{1 + (m - 1)\rho}
+$$
+
+independent rows; the denominator is Kish's **design effect** <Cite id="kish1965" />. For 300 rows from 30 patients,
+$m = 10$, with $\rho = 0.8$, the effective sample size is $300 / (1 + 9 \times 0.8) = 300 / 8.2 \approx 37$. The data
+behave much more like 30 patients than like 300 rows. <NoteLink to="standard-error">Standard errors</NoteLink>,
+<NoteLink to="confidence-intervals">confidence intervals</NoteLink> and the number of parameters a model can support all
+follow $n_{\text{eff}}$, not $n$.
+
+## Setups
+
+| Setup                   | One row is                         | Rows depend through               | Split so that the test holds        |
+| ----------------------- | ---------------------------------- | --------------------------------- | ----------------------------------- |
+| Independent rows        | one case                           | nothing (assumed)                 | random rows, stratified if needed   |
+| Grouped rows            | one measurement of a unit          | the shared unit                   | whole groups                        |
+| Panels                  | one unit at one time               | the unit and time                 | whole units, later times, or both   |
+| Sequences, time series  | one time step or window            | order and autocorrelation         | later times                         |
+| Bags and sets           | one bag of instances               | instances share the bag's label   | whole bags                          |
+| Pairs, triplets, lists  | one item for one query             | items compared within a query     | whole queries                       |
+| Streams                 | one arriving case                  | time, and a drifting distribution | later times, evaluated in order     |
+| Censored records        | one subject with follow-up         | outcome unknown after censoring   | whole subjects                      |
+
+### Independent rows
+
+Each row is a separate case drawn from the population the model will serve: a loan application, an image, a survey
+response. Random splits are honest, and stratifying by the label keeps rare classes in every fold.
+
+### Grouped and clustered rows
+
+Several rows belong to one unit: measurements of one patient, photos of one person, sentences of one document, pixels of
+one field. Rows of a unit share characteristics that a flexible model can recognise. A random split then lets the model
+score well by recognising units it has already seen, which measures nothing about new units. Splitting by whole groups
+measures performance on new units <Cite id="roberts2017cv" />.
+
+### Panels and longitudinal records
+
+A **panel** observes the same units at several times: customers each month, patients at each visit. It is grouped and
+ordered at once. Whether to split by unit, by time or both depends on deployment: a model for existing customers next
+month is tested on later months of the same customers; a model for new customers on customers it never saw; see
+<NoteLink to="panel-data">panel data</NoteLink>.
+
+### Sequences and time series
+
+Each row is a time step or a window cut from a series, and neighbouring rows are correlated. Training must use only the
+past of each test point; <NoteLink to="time-series-windowing">overlapping windows</NoteLink> on both sides of a split
+leak. Forward-chaining splits are the standard, although for purely <Gloss name="ar">autoregressive models</Gloss> with
+uncorrelated errors ordinary <NoteLink to="cross-validation">cross-validation</NoteLink> can also be valid
+<Cite id="bergmeir2018" />; see <NoteLink to="time-series-cross-validation">time-series cross-validation</NoteLink> and
+<NoteLink to="forecasting-setups">forecasting setups</NoteLink>.
+
+### Bags and sets
+
+A **bag** is a set of instances with one label for the whole set: a molecule's conformations, the patches of a
+pathology slide, the frames of a video. In multiple-instance learning a bag is positive when at least one of its
+instances is <Cite id="dietterich1997" />; see <NoteLink to="multiple-instance-learning">multiple-instance
+learning</NoteLink>. The unit of observation is the bag, and splits keep bags whole.
+
+### Pairs, triplets and lists
+
+Ranking and retrieval data group candidate items by query. A row is a (query, item) pair with a relevance label, and
+relevance is meaningful only relative to the other items for the same query. Losses and metrics are computed within
+each query, and splits keep queries whole <Cite id="liu2009ltr" />. Pairs and triplets for similarity learning have
+the same structure: an anchor and the items compared with it.
+
+### Streams
+
+In a **stream** cases arrive one at a time and a model predicts each before its label arrives. The distribution
+drifts, so a model must be evaluated in arrival order, predicting each case before learning from it
+<Cite id="gama2014" />.
+
+### Censored and truncated records
+
+In survival and <NoteLink to="time-to-event-data">time-to-event data</NoteLink>, a subject's event time is known only to
+lie beyond the end of follow-up when the subject is **censored**. A row records the follow-up time and whether the event
+was observed. Treating censored times as event times, or dropping censored subjects, biases every estimate
+<Cite id="kalbfleisch2002" />. A dataset is **truncated** when subjects enter it only if their event had not yet
+happened, which hides short times altogether.
+
+## Setup, dependence and splitting
+
+The figure shows the consequence of ignoring a grouped setup. Rows come in groups, and the class is a property of the
+group with no relation to where the group lies. No model can predict the class of a new group better than chance.
+
+<GroupedSplit />
+
+Random 5-fold cross-validation reports an accuracy far above chance, because a nearest-neighbour classifier finds rows
+of the same group in the training folds. Grouped cross-validation, which holds out whole groups, reports close to the
+50% that a new group would get. Kapoor and Narayanan found splits that ignore such dependence, together with other
+forms of leakage, behind errors in published machine-learning results across many scientific fields
+<Cite id="kapoor2023" />; see <NoteLink to="data-leakage">data leakage</NoteLink>.
+
+The general rule: split at the level of whatever will be new when the model is used. New patients mean splitting by
+patient; the future means splitting by time; new regions mean splitting by space; new queries mean splitting by query.
+When several apply, the split must respect all of them; see
+<NoteLink to="train-validation-and-test-splits">train, validation and test splits</NoteLink>.
+
+## Assumptions
+
+- **The groups are known.** Grouped splits need a group label. Hidden groups, such as one person under several
+  accounts or several images of one object, defeat them; finding duplicates and linking records is part of preparing
+  the data.
+- **Deployment resembles one of the setups.** A model used both for existing and for new units needs two evaluations,
+  one for each case.
+
+## Pitfalls
+
+- **Counting rows instead of units.** A dataset of 100,000 rows from 40 patients is a study of 40 patients. Reporting
+  its size, or its confidence intervals, in rows overstates the evidence.
+- **Scoring at the wrong unit.** Accuracy per window, per visit or per pixel can differ from accuracy per activity, per
+  patient or per object; report the unit that the decision is made on.
+- **Features that identify the unit.** An identifier, or a feature constant within a group such as a device serial
+  number, lets a model recognise units; it is harmless only when the same units appear in use.
+- **Preprocessing across units.** Normalising each patient with statistics computed over all patients, or building
+  aggregates from rows of other folds, carries information across the split.
+- **Many cutoff times per entity.** Building training rows for one customer at many cutoff times creates a group; the
+  rows must stay together when the data are split; see
+  <NoteLink to="relational-feature-aggregation">relational and aggregate features</NoteLink>.

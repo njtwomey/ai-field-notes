@@ -1,0 +1,127 @@
+---
+title: Normalising time series
+kind: technique
+summary: 'Series in one dataset can differ in level and scale by orders of magnitude. Normalising globally, per series or per window, with statistics from the past only and a transform that forecasts can be mapped back through, lets one model learn from all of them.'
+tags: [data, time-series, forecasting, feature-engineering]
+aliases: [time-series normalisation, time series normalization, instance normalisation, reversible instance normalisation, RevIN, per-series scaling, mean scaling, deseasonalisation]
+requires: [feature-scaling, stationarity]
+related: [time-series-decomposition, differencing-and-unit-roots, power-transforms, deepar, forecasting-setups, time-series-windowing, data-leakage, transformer-forecasters, encoding-targets]
+references: [salinas2020, kim2022revin, passalis2020, hewamalage2021, nie2023]
+status: draft
+updated: 2026-10-11
+---
+
+import { NormaliseSeries } from './NormaliseSeries'
+
+<Definition>
+**Normalising** a time series maps its values $y_t$ to $\tilde y_t = (y_t - m)/s$ with a location $m$ and a scale
+$s > 0$. The statistics can be computed once for the whole dataset (**global**), once for each series (**per series**)
+or afresh for each input window (**per window**, or **instance normalisation**). Forecasts made on the normalised
+scale are mapped back by $\hat y = m + s\,\hat{\tilde y}$, so the transform must be invertible and its statistics known
+at prediction time.
+</Definition>
+
+## When to use it
+
+Normalising matters most for **global models**: one model trained on many series, such as a recurrent or transformer
+forecaster across thousands of products; see <NoteLink to="forecasting-setups">forecasting setups</NoteLink>. Without
+it, two things go wrong.
+
+- **The loss is dominated by the large series.** A squared error of 10 units is negligible for a store selling 1000
+  items a week and is everything for one selling 12. Training on raw values fits the large series and ignores the
+  rest.
+- **Inputs leave the range the network handles well.** <NoteLink to="activation-functions">Activation
+  functions</NoteLink> saturate and initialisations assume inputs of order 1.
+
+A **local model**, fitted to one series at a time, such as an
+<NoteLink to="autoregressive-integrated-moving-average-model">ARIMA model</NoteLink>, needs no normalisation across
+series, but it still benefits from the variance-stabilising transforms below.
+
+## Global scaling
+
+Global scaling pools all series and computes one mean and one standard deviation. It keeps the series' relative sizes,
+which is right when size is information the model should use, and useless when sizes differ by orders of magnitude:
+the small series stay flat at one end of the range.
+
+## Per-series scaling
+
+Per-series scaling gives each series $i$ its own location $m_i$ and scale $s_i$, computed from its training stretch.
+Every series then has values of order 1 and the loss weighs them evenly.
+
+Choices of $s_i$ include the standard deviation, the mean absolute value and the mean. DeepAR divides each series'
+inputs by $\nu_i = 1 + \frac{1}{t_0}\sum_{t=1}^{t_0} z_{i,t}$, one plus the average of its first $t_0$ values, and
+multiplies the predicted distribution's parameters back <Cite id="salinas2020" />; see
+<NoteLink to="deepar">DeepAR</NoteLink>. The added 1 keeps the scale positive for a series that is all zeros.
+
+Per-series statistics computed once are stale for a series that trends. In the figure, the stores whose sales keep
+rising leave the range of their training stretch in the test stretch.
+
+<NormaliseSeries />
+
+## Per-window scaling and reversible instance normalisation
+
+Per-window scaling computes the statistics from the input window alone: the last $L$ values before the forecast
+origin. Each window then starts at the same level and scale, whatever the trend has done since training. **Reversible
+instance normalisation** (RevIN) applies this inside a forecasting network <Cite id="kim2022revin" />.
+
+1. Normalise the input window $\xvec \in \reals^L$ by its own mean $\mu$ and standard deviation $\sigma$:
+   $\tilde x_t = \gamma (x_t - \mu)/\sigma + \beta$, with a learned scale $\gamma$ and shift $\beta$ per variable.
+2. Run the network on $\tilde\xvec$ to produce $\tilde\yvec$.
+3. Map the output back with the same statistics: $\hat y_t = \mu + \sigma(\tilde y_t - \beta)/\gamma$.
+
+The network then models the shape of the series and leaves its level and scale to the statistics of the window. This
+removes much of the shift in distribution between training and test periods that trends and level changes cause.
+Long-horizon forecasters such as <Gloss name="patchtst" /> use it <Cite id="nie2023" />. Deep adaptive input
+normalisation learns the shift and scale as functions of the window instead of using its mean and standard deviation
+<Cite id="passalis2020" />.
+
+The price is that the model cannot use the level itself. A series whose behaviour depends on its absolute size, such
+as demand that saturates at a capacity, loses that information unless the window's statistics are also given to the
+model as inputs.
+
+## Detrending and deseasonalising
+
+Normalisation by $m$ and $s$ removes a level and a scale. Trends and seasons are removed by other transforms, applied
+before the model and inverted after it.
+
+- **Differencing** replaces $y_t$ by $y_t - y_{t-1}$, or by $y_t - y_{t-P}$ for a season of period $P$; see
+  <NoteLink to="differencing-and-unit-roots">differencing and unit roots</NoteLink>.
+- **Decomposition** subtracts an estimated trend and seasonal component and models the remainder; see
+  <NoteLink to="time-series-decomposition">time-series decomposition</NoteLink>.
+
+Whether to deseasonalise depends on the dataset. In an empirical study of recurrent forecasters, the networks modelled
+seasonality directly when all series had similar seasonal patterns, and did better after deseasonalisation when the
+patterns differed <Cite id="hewamalage2021" />.
+
+## Variance-stabilising transforms
+
+Many series have a variance that grows with their level: sales, traffic, counts. A logarithm, or a Box-Cox transform,
+makes the variance roughly constant before scaling; see <NoteLink to="power-transforms">power transforms</NoteLink>.
+For counts that include zeros, $\log(1 + y)$ is the usual choice.
+
+A forecast of the mean on the log scale, mapped back by $\exp$, is a forecast of the median, not of the mean, when
+the errors on the log scale are symmetric; see
+<NoteLink to="encoding-targets">encoding targets</NoteLink>.
+
+## Statistics from the past only
+
+Every statistic used to normalise an input must be available when the forecast is made.
+
+- Per-series statistics come from the training stretch, never from the whole series; the test stretch would otherwise
+  shape its own inputs.
+- Per-window statistics come from the input window, which ends at the forecast origin. Including the values to be
+  forecast in the window's statistics is a <NoteLink to="data-leakage">leak</NoteLink>.
+- Normalising before splitting into training and test stretches leaks the test period's level and spread into
+  training.
+
+## Pitfalls
+
+- **Constant or all-zero windows.** A window with $\sigma = 0$ cannot be divided by its standard deviation; add a small
+  constant, or use a scale such as DeepAR's $1 + $ mean.
+- **Intermittent series.** Series that are mostly zeros have unstable per-window statistics; a scale from a longer
+  history is steadier.
+- **Metrics on the wrong scale.** Errors reported on normalised values are not errors in the original units; report
+  both, or use a scale-free metric such as the
+  <NoteLink to="scaled-errors-and-mean-absolute-scaled-error">mean absolute scaled error</NoteLink>.
+- **Forgetting to invert.** Every transform applied to the target, in order, must be inverted on the forecasts in the
+  reverse order.

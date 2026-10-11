@@ -1,0 +1,180 @@
+---
+title: 'Positional and coordinate encoding'
+kind: technique
+summary: 'A positional encoding turns a location, in a sequence, an image, a graph or on the Earth, into a feature vector. Fourier encodings let a model resolve fine differences between nearby positions; graphs and the globe need encodings that respect their geometry.'
+tags: [data, data-preparation, positional-encoding, feature-engineering]
+aliases: [coordinate encoding, Fourier feature mapping, Fourier features, location encoding, Laplacian positional encoding, random-walk positional encoding, geographic encoding, lat-lon encoding]
+requires: [numeric-encoding, sine-and-cosine]
+related: [positional-encoding, sinusoidal-positional-encoding, rotary-position-embedding, learned-absolute-position-embeddings, relative-position-representations, vision-transformer, random-fourier-features, laplacian-eigenmaps, coordinate-reference-systems, spatial-features, cyclical-encoding]
+references: [vaswani2017, dosovitskiy2021, tancik2020, rahimi2007, mildenhall2020, rahaman2019, sitzmann2020, dwivedi2022, russwurm2024, h3docs]
+status: draft
+updated: 2026-10-11
+---
+
+import { FourierFeatureFit } from './FourierFeatureFit'
+
+<Definition>
+A **positional encoding** maps a location $p$ to a feature vector $\gamma(p)$. The location can be an index in a
+sequence, a pixel's row and column, a point in space, a node in a graph or a place on the Earth. A **Fourier
+encoding** of a coordinate vector $\vvec$ is $\gamma(\vvec) = (\cos 2\pi\Bmat\vvec, \sin 2\pi\Bmat\vvec)$ for a matrix
+of frequencies $\Bmat$, fixed or random. **Learned** encodings give each position its own trained vector. **Relative**
+encodings describe the offset between two positions rather than each position. **Structural** encodings derive a
+node's position from the graph, and **cell** encodings replace a place by the index of the grid cell that contains it.
+</Definition>
+
+## Problem
+
+Positions need encoding for two different reasons.
+
+**Some models cannot see position at all.** Self-attention, set models and graph message passing treat their inputs
+as an unordered collection: permuting the inputs permutes the outputs and changes nothing else. A sentence and the
+same words shuffled look alike, as do two image patches swapped. A positional encoding added to each input tells the
+model where it is <Cite id="vaswani2017" />.
+
+**Some models see position but cannot use it finely.** A <Gloss name="mlp">multilayer perceptron</Gloss> given raw
+coordinates, such as $(x, y)$ of a pixel, learns the low-frequency parts of a function first and the high-frequency
+parts very slowly <Cite id="rahaman2019" />. Asked to map coordinates to colours, it produces a blurred image. Mapping
+the coordinates through sines and cosines of many frequencies first lets the same network fit sharp detail
+<Cite id="tancik2020" />.
+
+The geometry of the positions adds a third concern. Sequence indices lie on a line, angles on a circle, nodes on a
+graph with no coordinates, and places on a sphere. An encoding that ignores the geometry puts neighbours far apart.
+
+## Mechanism
+
+### Positions in sequences
+
+The sinusoidal encoding of the original transformer gives position $t$ the vector with components $\sin(t/10000^{2i/d})$
+and $\cos(t/10000^{2i/d})$ for $i = 0, \dots, d/2 - 1$: a ladder of wavelengths from $2\pi$ to about $2\pi \times 10000$
+<Cite id="vaswani2017" />. Learned absolute embeddings, relative encodings, attention biases and
+<NoteLink to="rotary-position-embedding">rotary embeddings</NoteLink> are alternatives; the
+<NoteLink to="positional-encoding">positional encoding</NoteLink> chapter of the transformer notes compares them.
+
+The data side raises two questions. First, the encoding must match how sequences are cut. When several documents are
+packed into one training sequence, positions can restart at each document boundary; if they do not, the model sees the
+start of one document at the middle of a sequence. Second, learned absolute embeddings exist only for positions seen in
+training, so a model trained on sequences of 512 tokens has no embedding for position 600. Sinusoidal, relative and
+rotary encodings are defined at every position, which is necessary but not enough for a model to generalise to longer
+inputs.
+
+### Positions in images and volumes
+
+An image patch or a voxel has two or three coordinates. The usual encodings treat each axis separately and concatenate
+the results, or learn one vector per patch position, as the <NoteLink to="vision-transformer">vision
+transformer</NoteLink> does. Learned patch embeddings are tied to one grid size; a model applied at a higher resolution
+has its embeddings interpolated to the new grid <Cite id="dosovitskiy2021" />.
+
+### Fourier features of coordinates
+
+For a coordinate $\vvec \in \reals^k$, the Fourier feature mapping is
+
+$$
+\gamma(\vvec) = \paren{\cos(2\pi\Bmat\vvec), \sin(2\pi\Bmat\vvec)}, \qquad \Bmat \in \reals^{m \times k},
+$$
+
+applied elementwise to the $m$ rows of $\Bmat\vvec$. Two choices of $\Bmat$ are common.
+
+- **A ladder of frequencies.** Each coordinate $v$ gets the sines and cosines of $2^0\pi v, 2^1\pi v, \dots,
+  2^{L-1}\pi v$. Neural radiance fields encode each of the three coordinates of a point this way with $L = 10$ before
+  the network that predicts colour and density <Cite id="mildenhall2020" />.
+- **Random frequencies.** The entries of $\Bmat$ are drawn from $\Gauss(0, \sigma^2)$. In the neural tangent kernel view
+  of a wide network trained on $\gamma(\vvec)$, the network then behaves like a kernel method with a stationary kernel
+  whose width is set by $\sigma$: small $\sigma$ gives a smooth fit, large $\sigma$ a detailed one, and too large
+  $\sigma$ overfits <Cite id="tancik2020" />.
+
+The random version is the <NoteLink to="random-fourier-features">random Fourier features</NoteLink> construction of
+Rahimi and Recht, which approximates a Gaussian kernel of lengthscale $\ell$ when the frequencies have standard
+deviation $1/\ell$ <Cite id="rahimi2007" />. Two coordinates $\Delta$ apart then have encodings whose inner product is
+about $\exp(-\Delta^2/2\ell^2)$: 0.61 at $\Delta = \ell$ and 0.01 at $\Delta = 3\ell$. Points more than a few
+lengthscales apart look unrelated to a linear model on the features, and points much closer than $\ell$ look the
+same. The lengthscale is the resolution of the encoding.
+
+<FourierFeatureFit />
+
+With the defaults of the figure, a least-squares line on the raw coordinate has a test error of 0.29. A
+<NoteLink to="ridge-regression">ridge regression</NoteLink> on 200 Fourier features has a test error of 0.19 at
+$\ell = 0.1$, 0.15 at $\ell = 0.03$ and 0.14 at $\ell = 0.01$. At $\ell = 0.003$ the training error falls to 0.03, below
+the noise level of 0.05, and the test error rises back to 0.29: the features are fine enough to fit the noise.
+
+Sine activations are an alternative to a fixed encoding: a network whose layers apply $\sin$ instead of a
+<Gloss name="relu" /> fits fine detail from raw coordinates when its weights are initialised at a suitable scale
+<Cite id="sitzmann2020" />.
+
+### Positions in graphs
+
+A graph has no natural coordinates and no canonical order of its nodes. Structural encodings compute positions from
+the graph itself.
+
+- **Laplacian eigenvectors.** The eigenvectors of the graph Laplacian $\Lmat = \Dmat - \Amat$ with the smallest nonzero
+  eigenvalues vary slowly across the graph, so nearby nodes get similar values. The first $k$ of them give each node $k$
+  coordinates, the same coordinates used by <NoteLink to="laplacian-eigenmaps">Laplacian eigenmaps</NoteLink> and
+  <NoteLink to="spectral-clustering">spectral clustering</NoteLink>. Each eigenvector is defined only up to its sign,
+  and up to a rotation when eigenvalues repeat, so a model must be trained to ignore the choice, for example by flipping
+  signs at random <Cite id="dwivedi2022" />.
+- **Random-walk encodings.** Node $i$ gets the probabilities that a random walk starting at $i$ is back at $i$ after
+  $1, 2, \dots, k$ steps. These depend only on the graph around the node and have no sign ambiguity
+  <Cite id="dwivedi2022" />.
+
+Both are computed once per graph before training. For a graph that changes, they must be recomputed or updated.
+
+### Geographic coordinates
+
+Latitude $\varphi$ and longitude $\lambda$ are angles on a sphere, not coordinates on a plane. Longitude wraps at
+$\pm 180°$, and a degree of longitude spans 111 km at the equator and nothing at the poles. Raw latitude and longitude
+put two points either side of the date line 360 degrees apart.
+
+- **Unit vectors.** The point $(\cos\varphi\cos\lambda, \cos\varphi\sin\lambda, \sin\varphi)$ on the unit sphere is
+  continuous everywhere, including the poles and the date line, and chord distances between such points grow with the
+  distance along the surface.
+- **Multi-scale sinusoids.** Sines and cosines of latitude and longitude at many frequencies give fine spatial
+  detail, as Fourier features do, but they treat the globe as a rectangle and produce artefacts near the poles.
+  Spherical harmonics are defined on the sphere itself and avoid them <Cite id="russwurm2024" />.
+- **Cells.** A hierarchical grid assigns each point the index of the cell containing it. H3 covers the Earth with
+  hexagonal cells at 16 resolutions, from cells with edges of about 1,281 km to edges of about 0.6 m; every resolution
+  also has 12 pentagons <Cite id="h3docs" />. A cell index is a category, encoded like any other (see
+  <NoteLink to="categorical-encoding">categorical encoding</NoteLink>), and indices at several resolutions give
+  features at several scales.
+
+Which coordinate system the data are in, and how to compute distances, is covered in
+<NoteLink to="coordinate-reference-systems">coordinate reference systems</NoteLink>; features built from places, such
+as distances to points of interest, in <NoteLink to="spatial-features">spatial features</NoteLink>.
+
+## Worked example
+
+Two weather stations sit on the equator at longitudes $179.9°$ and $-179.9°$.
+
+- **Raw coordinates.** Their longitudes differ by $359.8°$, so a model on raw longitude treats them as being on
+  opposite sides of the world.
+- **Unit vectors.** The angle between them is $0.2°$, and the chord between their unit vectors is
+  $2\sin(0.1°) = 0.0035$. Multiplied by the Earth's radius of 6,371 km, that is 22 km, their true separation.
+- **H3 cells.** At a resolution whose cells are larger than 22 km, the two stations usually share a cell, or fall in
+  neighbouring cells.
+
+## Cost
+
+Fourier and sinusoidal encodings cost $2m$ features for $m$ frequencies and need no fitting beyond drawing or fixing
+the frequencies. Learned embeddings cost one vector per position and exist only for positions seen in training.
+Laplacian encodings need the $k$ smallest eigenvectors of a sparse matrix; each iteration of an iterative eigensolver
+costs time proportional to the number of edges. Random-walk encodings need $k$ sparse matrix products.
+
+## Trade-offs
+
+- **Resolution against generalisation.** Higher frequencies resolve finer detail and also fit noise; the lengthscale
+  of a Fourier encoding plays the role of a kernel bandwidth.
+- **Fixed against learned.** Fixed encodings are defined everywhere and carry an explicit notion of distance. Learned
+  encodings adapt to the task but only cover the positions seen in training.
+- **Absolute against relative.** Absolute encodings say where something is; relative encodings say how far apart two
+  things are. Tasks that depend on offsets, such as language, favour relative encodings.
+
+## Pitfalls
+
+- **Raw latitude and longitude near the date line or the poles.** Neighbours look far apart. Use unit vectors, cells or
+  spherical encodings.
+- **A Fourier lengthscale chosen without validation.** Too short and the model memorises the training points; too long
+  and it cannot resolve the detail it needs.
+- **Ignoring the sign of Laplacian eigenvectors.** A model trained with one sign choice fails when the solver returns
+  the other.
+- **Cells too fine for the data.** At a fine resolution most cells hold one or two rows, and a cell index then acts as
+  an identifier: it memorises the rows and, if target-encoded, leaks their labels.
+- **Positions that restart silently.** Packing, cropping and tiling change what a position means; the encoding must
+  follow the same convention in training and in use.

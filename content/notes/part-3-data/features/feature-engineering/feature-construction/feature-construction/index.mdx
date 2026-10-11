@@ -1,0 +1,145 @@
+---
+title: Feature construction
+kind: technique
+summary: 'Feature construction builds new inputs from existing ones, such as interactions, ratios, differences, polynomial terms and group statistics, so that a relation the model would struggle to learn becomes a direct input.'
+tags: [data, feature-engineering, regression]
+aliases: [feature creation, feature generation, derived features, engineered features, interaction features]
+requires: [linear-regression, cross-validation]
+related: [basis-expansions, feature-selection, automated-feature-engineering, relational-feature-aggregation, date-and-time-features, data-leakage, gradient-boosting-vs-deep-learning-on-tabular-data]
+references: [domingos2012, kuhn2019, heaton2016, hastie2009]
+status: draft
+updated: 2026-10-11
+---
+
+import { ConstructedFeatures } from './ConstructedFeatures'
+
+<Definition>
+**Feature construction** computes new input columns as functions of existing ones and adds them to, or substitutes
+them for, the original inputs. Common constructions are products of two inputs, ratios and differences, powers, and
+statistics of a group the row belongs to. A constructed feature makes a relation explicit, so that a model with a
+restricted form can use it directly instead of approximating it from the raw inputs.
+</Definition>
+
+## Problem
+
+A model can only use a relation it can represent. A linear model $\hat y = \wvec^\top \xvec + b$ fits a weighted sum
+of its inputs. It cannot represent the product $x_1 x_2$, a ratio $x_1 / x_2$ or a curve in one input. A tree ensemble
+splits one input at a time, so a ratio of two inputs costs it many splits to approximate. A network can approximate
+any of these relations in principle, but needs data and training to do so. Domingos names the choice of features as
+the factor that most often separates projects that succeed from those that fail <Cite id="domingos2012" />.
+
+## Mechanism
+
+Each construction encodes a guess about the structure of the target.
+
+### Interactions
+
+An **interaction** is a product $x_j x_k$. With it, the effect of $x_j$ on the prediction changes with $x_k$:
+$\partial \hat y / \partial x_j = w_j + w_{jk} x_k$. A price elasticity that differs by region, or a drug effect that
+depends on dose and weight together, is an interaction. A product of a numeric input and a one-hot indicator gives the
+numeric input a separate slope in each category.
+
+### Ratios and differences
+
+A **ratio** $x_j / x_k$ expresses one quantity per unit of another: debt per unit of income, clicks per impression,
+weight per square metre of height. A **difference** $x_j - x_k$ measures a change or a gap: today's value minus
+yesterday's, a price minus a reference price. Ratios need a guard against a zero or near-zero denominator, for example
+$x_j / (x_k + c)$ with a small constant $c$ in the units of $x_k$.
+
+### Polynomial terms
+
+A **polynomial expansion** adds all monomials of the inputs up to a degree $p$, such as $x_1^2$, $x_1 x_2$ and
+$x_1^2 x_3$ for $p = 3$. It is the systematic form of interactions and powers; see
+<NoteLink to="basis-expansions">basis expansions</NoteLink>. With $d$ inputs there are $\binom{d + p}{p} - 1$
+monomials, so the expansion grows quickly: $d = 10$ and $p = 3$ give 285 columns.
+
+### Group aggregates
+
+A **group aggregate** describes a row by a statistic of the rows that share one of its values: the mean price in the
+row's postcode, the number of earlier orders by the same customer, a row's value minus its group's mean. Aggregates
+over related tables and time windows are treated in
+<NoteLink to="relational-feature-aggregation">relational and aggregate features</NoteLink>. An aggregate that
+includes the target, such as a group's mean outcome, is target encoding and must be computed out of fold; see
+<NoteLink to="categorical-encoding">categorical encoding</NoteLink>.
+
+### Domain features
+
+A **domain feature** comes from knowledge of how the data arise. Body-mass index is weight divided by height squared;
+a loan's monthly payment follows from its amount, rate and term; a physical law gives the expected value of a
+measurement. A domain feature compresses a relation that would otherwise need several constructed terms, and it
+carries an interpretation.
+
+## Constructing features for a known target
+
+The figure fits <Gloss name="ols">ordinary least squares</Gloss> to a target with a curve in $x_1$, a curve in $x_2$, a
+linear effect of $x_3$ and an interaction $\gamma x_1 x_2$:
+
+$$
+y = \sin(\pi x_1) + x_2^2 + \tfrac{1}{2} x_3 + \gamma x_1 x_2 + \varepsilon, \qquad x_j \sim \mathcal{U}(-1, 1), \quad
+\varepsilon \sim \Gauss(0, \sigma^2).
+$$
+
+Five feature sets are built from the same three inputs: the raw inputs; the raw inputs with their pairwise products;
+all monomials of degree at most 2; all monomials of degree at most 3; and four constructed features
+$\sin(\pi x_1)$, $x_2^2$, $x_3$ and $x_1 x_2$. Each set is scored by 5-fold cross-validated
+<Gloss name="r-squared" />.
+
+<ConstructedFeatures />
+
+The raw inputs reach an $R^2$ of about 0.33 with $\gamma = 1.5$; the residuals against $x_1$ trace a sine curve, and the
+residuals against $x_1 x_2$ slope upwards. Adding the products removes the slope. The degree-3 expansion reaches an
+$R^2$ near the noise ceiling with 19 columns, because $\sin(\pi x_1)$ is close to a cubic on $[-1, 1]$. The four
+constructed features reach the same score with four columns, each with a readable coefficient. A residual plot against
+a candidate feature is the usual way to find what a model is missing: a trend in the residuals is structure that the
+current features do not express.
+
+## Which models need which features
+
+Models differ in which constructions they can synthesise from raw inputs. Heaton trained neural networks,
+<Gloss name="svm">support vector machines</Gloss>, <NoteLink to="random-forest">random forests</NoteLink> and
+gradient-boosted trees on targets that were each one engineered function of the inputs <Cite id="heaton2016" />. Every
+model learned transforms of a single input, such as a logarithm, a power or a square root. No model learned a ratio of
+differences, $(x_1 - x_2)/(x_3 - x_4)$. The tree ensembles also failed on a sum and on a standard deviation across
+inputs. The support vector machine failed on ratios, polynomial ratios, a maximum and a quadratic form. The network
+learned everything except the ratio of differences. The practical reading is:
+
+- **Linear and generalised linear models** need every non-linearity and interaction constructed, or supplied by a
+  basis expansion.
+- **Tree ensembles** split one input at a time. They gain from sums, differences and ratios of several inputs, which
+  their axis-aligned splits approximate only with many steps.
+- **Neural networks** synthesise sums, products and smooth curves, but still gain from ratios and from domain features,
+  especially when data are limited.
+
+## Cost
+
+- **Columns.** A full expansion of degree $p$ in $d$ inputs has $\binom{d + p}{p} - 1$ columns. Fitting cost and the
+  risk of overfitting grow with them; a constructed set chosen with knowledge grows by a handful.
+- **Search.** Each candidate feature must be evaluated, and evaluating many candidates on the same validation data
+  overfits that data. Candidates should be judged by <NoteLink to="cross-validation">cross-validation</NoteLink> inside
+  the training data, as in <NoteLink to="automated-feature-engineering">automated feature discovery</NoteLink>.
+- **Maintenance.** Every constructed feature must be computed identically at training and prediction time. A feature
+  computed one way in the training pipeline and another way in production is a common source of silent error; see
+  <NoteLink to="feature-stores">feature stores</NoteLink>.
+
+## Trade-offs
+
+- **Construction against expansion.** Domain knowledge gives few, interpretable features. A blind expansion needs no
+  knowledge but many columns, regularisation and <NoteLink to="feature-selection">feature selection</NoteLink>.
+- **Construction against flexible models.** A flexible model, such as gradient boosting or a network, can learn some
+  constructions itself given enough data <Cite id="kuhn2019" />. With few rows, a constructed feature substitutes for
+  data the model would otherwise need.
+- **Interpretability.** A coefficient on a domain feature, such as a ratio with a meaning, is easier to explain than
+  a coefficient spread over many monomials.
+
+## Pitfalls
+
+- **Leaking the target through a construction.** A feature computed from the target, or from data recorded after the
+  prediction moment, inflates validation scores; see <NoteLink to="data-leakage">data leakage</NoteLink>. Group means
+  of the target must be fitted out of fold.
+- **Fitting construction parameters on all the data.** A constructed feature with fitted parts, such as a group mean
+  or a binned threshold, is part of the model and must be fitted inside each training fold.
+- **Unscaled products.** Products of inputs on different scales have very different magnitudes. Penalised models then
+  shrink them unequally; standardise inputs before forming products or after; see
+  <NoteLink to="feature-scaling">feature scaling</NoteLink>.
+- **Division by values near zero.** A ratio with a denominator near zero produces extreme values that dominate a
+  linear fit. Clip or offset the denominator, or use a difference of logarithms.

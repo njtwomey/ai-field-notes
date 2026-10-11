@@ -31,6 +31,7 @@ interactive figures and citations.
 make dev                                   # http://localhost:5173/ai-field-notes/
 npm run check:content                      # validate content/ (seconds)
 make doctor SCOPE="<taxonomy path | slug> ..."   # compile + check only those notes; unscoped takes ~1 min
+make stubs SCOPE="<taxonomy path> ..."         # list placeholder notes (status: stub); ARGS="--count"
 make links SCOPE="<slug>"                  # report unmarked glossary/note mentions; ARGS="--apply" to write
 make links ARGS="--term <key|slug>"        # scan the whole tree for one new entry or note
 make wrap SCOPE="<slug>"                   # reflow note prose to 120 columns; ARGS="--check" to report
@@ -103,7 +104,7 @@ Notes are encyclopedia entries. Every sentence carries information and stands on
   at most three colour slots in a scatter, one hue for sequential scales, `scale="diverging"` for signed values,
   `emphasis` for highlighted marks. UI: shadcn components (Base UI, compose with `render`), Tailwind, lucide icons
   only.
-- Known engine quirks: an empty `dense` `Points` layer throws (skip empty layers); a `Raster` paints opaquely, so draw
+- Known engine quirks: a `useFigureState` key named `set` breaks the figure (it shadows `state.set`); an empty `dense` `Points` layer throws (skip empty layers); a `Raster` paints opaquely, so draw
   cell edges with `Segments`; a log axis cannot show zeros or bars starting at 0.
 
 ## Python (only when asked)

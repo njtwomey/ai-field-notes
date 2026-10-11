@@ -3,7 +3,7 @@
 # Python sources that ruff lints and formats; Pyright reads its include list from pyproject.toml.
 PY_SRC := python
 
-.PHONY: ci help install dev contracts assets content doctor links wrap lint catalog-check format typecheck test lab-check lab-shots lab check pre-push build preview clean
+.PHONY: ci help install dev contracts assets content doctor stubs links wrap lint catalog-check format typecheck test lab-check lab-shots lab check pre-push build preview clean
 
 help: ## List targets
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  \033[36m%-10s\033[0m %s\n", $$1, $$2}'
@@ -33,6 +33,9 @@ wrap: ## Rewrap note prose to 120 characters, verified by parse and render (SCOP
 
 doctor: ## Check the content tree (SCOPE="taxonomy/path slug ..." limits per-note checks to those notes)
 	node scripts/doctor.ts $(SCOPE)
+
+stubs: ## List placeholder notes still to write (SCOPE="taxonomy/path ...", ARGS="--count" or "--status draft")
+	node scripts/stubs.ts $(ARGS) $(SCOPE)
 
 lint: ## Lint TypeScript, Python and note prose
 	npx oxlint

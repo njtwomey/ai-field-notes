@@ -1,0 +1,209 @@
+---
+title: 'Train, validation and test splits'
+kind: concept
+summary: 'Data are split so that a model is fitted on one part, tuned on another and assessed on a third. The split must mimic how the model will meet new data: across groups, forward in time or across space when deployment does.'
+tags: [data, data-preparation, model-selection, evaluation]
+aliases: [train-test split, train/test split, holdout set, hold-out set, validation set, test set, development set, dev set, data splitting, grouped split, group split, spatial split, stratified split]
+requires: [cross-validation]
+related: [matching-the-split-to-deployment, temporal-splits, stable-split-assignment, test-set-design, test-set-reuse, out-of-distribution-test-sets, data-leakage, detecting-leakage, time-series-cross-validation, metric-confidence-intervals, dataset-shift, data-setups, spatial-features]
+references: [hastie2009, arlot2010, roberts2017cv, saeb2017, kapoor2023, bergmeir2018, lopezdeprado2018, kohavi1995, dwork2015, recht2019, koh2021]
+status: draft
+updated: 2026-10-11
+---
+
+import { GroupLeakage } from './GroupLeakage'
+import { SplitAssignments } from './SplitAssignments'
+
+<Definition>
+A **split** divides the available examples into disjoint sets with different roles. The **training set** is used to
+fit a model's parameters, the **validation set** to choose among models and settings, and the **test set** to estimate,
+once, how well the final choice performs on data it has not influenced. A split is valid for its purpose when the
+relation between the training and test sets imitates the relation between all the available data and the data the
+model will meet in use <Cite id="hastie2009" />.
+</Definition>
+
+## Intuition
+
+A test score is a prediction about the future: how accurate will this model be on the cases it will actually be given?
+The prediction is only as good as the imitation. If the model will be applied to new patients, the test set must
+contain patients the model never saw. If it will forecast next month, the test set must lie after the training data in
+time. If it will be deployed at a new hospital, the test set should come from a hospital that contributed nothing to
+training.
+
+So the first question in choosing a split is not how many rows to hold out but **what will be new** when the model is
+used; see <NoteLink to="matching-the-split-to-deployment">matching the split to deployment</NoteLink>. A random split
+answers "new rows from the same pool". That is right when the rows are independent draws and deployment draws more of
+them. It is wrong whenever rows share an entity, a time or a place that deployment will not share, and then it gives an
+optimistic score <Cite id="roberts2017cv" />.
+
+| What is new in use | Split that imitates it | Example |
+| --- | --- | --- |
+| Rows from the same pool | Random, or stratified by label | Classifying independent images |
+| Entities (people, devices, documents) | Grouped by entity | Diagnosing new patients from their scans |
+| Time | Temporal, with a gap for the label horizon | Forecasting demand next week |
+| Places | Spatial blocks | Mapping crop yield in an unsurveyed region |
+| Sites, sources, domains | Grouped by site | A model trained at two hospitals used at a third |
+
+## Why three sets
+
+Every choice made by looking at a score is a form of fitting. A model's weights are fitted to the training set. Its
+hyperparameters, its features and the choice between candidate models are fitted to whatever set scored them. If that
+set is also the test set, the test score is the best of several noisy scores, which is biased upwards, and it no longer
+estimates performance on new data <Cite id="kapoor2023" />.
+
+The **validation set** absorbs those choices. The **test set** is consulted once, at the end, to report the chosen
+model's score. When data are scarce, <NoteLink to="cross-validation">cross-validation</NoteLink> replaces the single
+validation set, rotating the validation role through the training data <Cite id="arlot2010" />; the test set is still
+held apart.
+
+## Random and stratified splits
+
+A random split assigns each row to a set independently, or shuffles the rows and cuts the list. For independent,
+identically distributed rows it gives an unbiased estimate of the error on new rows from the same distribution.
+
+**Stratified** splitting draws the sets separately within each class, so that every set has the same class shares as
+the whole. It matters for small datasets and for rare classes: with 2% positives and a test set of 200 rows, a random
+split gives anywhere from about 0 to 9 positives, and the test precision and recall swing accordingly. Stratifying on a
+continuous target, by its quantiles, does the same for regression.
+
+## Grouped splits
+
+Rows that share an entity are not independent. Several scans of one patient, many clicks of one user and successive
+sentences of one document resemble each other more than rows from different entities. A random split puts some of an
+entity's rows in training and others in test, and a flexible model can then score well by recognising the entity rather
+than by learning what generalises to new entities. On wearable-sensor data, cross-validation that split by record often
+greatly overestimated accuracy compared with splitting by subject, and almost half of the clinical prediction studies
+reviewed alongside that comparison had split by record <Cite id="saeb2017" />.
+
+A **grouped** split assigns whole entities to sets, so that no entity appears on both sides. Grouped
+<NoteLink to="cross-validation">k-fold cross-validation</NoteLink> does the same for each fold.
+
+<GroupLeakage />
+
+The figure shows the mechanism with a 1-nearest-neighbour classifier. Its prediction for a row is the label of the
+closest training row. Under a random split, the closest training row is usually a sibling from the same entity, which
+always has the same label, so the estimate approaches 1. On new entities no sibling exists, and the classifier must
+generalise from other entities' labels. The grouped estimate is computed in the same way as the deployment situation
+and tracks it. The size of the gap depends on how much an entity's rows resemble each other and how much the model can
+memorise.
+
+The group to split on is the unit that will be new in use. If a model will be used on new patients at the same
+hospitals, the patient is the group; if it will be used at new hospitals, the hospital is.
+
+## Temporal splits
+
+When a model predicts the future from the past, the test set must lie after the training set. A random split of time
+series lets the model train on data after the moment it predicts, and features computed over time windows carry
+information across the split <Cite id="bergmeir2018" />. A **temporal split** cuts at a time: everything before for
+training, everything after for testing. <NoteLink to="temporal-splits">Temporal splits</NoteLink> covers the variants.
+The time-series version of cross-validation repeats the cut at several points, with an expanding or sliding training
+window; see <NoteLink to="time-series-cross-validation">time-series cross-validation</NoteLink>.
+
+A cut at a single time is not enough when labels look ahead. If the label of the example at time $t$ is the outcome over
+the following $h$ days, such as "did the customer churn within 30 days" or "the return over the next week", then the
+labels of the last training examples are only known at times up to $h$ after the cut, and they overlap the test period.
+Two remedies are used, both named in the financial machine-learning literature <Cite id="lopezdeprado2018" />:
+
+- **Purging** removes from the training set every example whose label window overlaps the test period. With an
+  expanding window this is a **gap** of $h$ between the end of training and the start of testing.
+- **Embargo** additionally removes training examples immediately after a test block, when training data also follow the
+  test period, as in k-fold splits of a time series. Features computed from windows that reach back into the test block
+  would otherwise carry test information into training.
+
+The same reasoning sets the gap at deployment. A model retrained daily on labels that take 30 days to mature can use
+only examples at least 30 days old, and the validation split should impose the same delay.
+
+<SplitAssignments />
+
+## Spatial splits
+
+Observations close in space resemble each other, through shared soil, weather, neighbourhood or sensor. A random split
+of spatial data leaves every test point near training points, which overstates accuracy for prediction in unsampled
+regions. **Spatial blocking** divides the area into blocks, larger than the range over which observations remain
+correlated, and assigns whole blocks to sets <Cite id="roberts2017cv" />. See
+<NoteLink to="spatial-features">spatial features</NoteLink> for measuring that range.
+
+## Stable assignment by hashing
+
+A split decided by a random shuffle changes whenever the data are reloaded in a different order, a row is added or the
+random seed changes. Rows then drift between training and test across experiments, and a test score from last month is
+no longer comparable with one from today.
+
+A **hash-based split** assigns each entity by a hash of its identifier: an entity goes to the test set when
+$\operatorname{hash}(\text{salt} \Vert \text{id}) \bmod 100 < 20$, for a 20% test share. The assignment is
+deterministic, so every run and every machine agrees. New rows of an existing entity land on the same side as its old
+rows, which keeps the split grouped. New entities split in the same proportion.
+<NoteLink to="stable-split-assignment">Stable split assignment</NoteLink> covers combining it with stratification. The
+salt, a fixed string for this split, keeps the assignment independent of other hash-based decisions on the same
+identifiers, such as an <NoteLink to="randomised-controlled-experiments">experiment's</NoteLink> treatment assignment.
+
+## Cross-validation variants
+
+Every split above has a cross-validated form: k-fold, stratified k-fold, grouped k-fold, rolling-origin and
+spatially blocked cross-validation. Cross-validation reuses all the data for validation and averages over $k$ splits,
+which reduces the variance of the estimate at $k$ times the cost <Cite id="kohavi1995" />. Tuning by cross-validation
+and then reporting the best cross-validated score is the same mistake as tuning on the test set; nested
+cross-validation, or a separate test set, scores the tuning procedure itself.
+
+## Split sizes
+
+The size of the test set fixes the precision of the test score. An accuracy $\hat p$ measured on $n$ independent test
+rows has <NoteLink to="standard-error">standard error</NoteLink> $\sqrt{\hat p(1 - \hat p)/n}$, and an approximate 95%
+interval of $\pm 1.96$ standard errors (see <NoteLink to="metric-confidence-intervals">metric confidence
+intervals</NoteLink>):
+
+| Test rows $n$ | Half-width at $\hat p = 0.5$ | Half-width at $\hat p = 0.9$ |
+| --- | --- | --- |
+| 100 | 9.8 points | 5.9 points |
+| 1,000 | 3.1 points | 1.9 points |
+| 10,000 | 1.0 point | 0.6 points |
+
+Halving the interval needs four times the test rows. Two models that differ by one point of accuracy cannot be told
+apart on 1,000 test rows by comparing their separate intervals; a paired comparison on the same rows is more sensitive,
+because most rows are predicted alike by both. With grouped data, the <Gloss name="ess">effective sample size</Gloss> is
+closer to the number of test entities than to the number of test rows.
+
+Common proportions such as 60/20/20 or 80/10/10 are conventions, not results. What matters is that the test set is
+large enough for the precision needed, and the training set large enough that the model fitted on it is close to the
+model fitted on all the data. When data are plentiful, a fixed test set of tens of thousands of rows is often enough
+and the rest can train. <NoteLink to="test-set-design">Test-set design</NoteLink> covers size, subgroup slices and label
+quality.
+
+## Reusing a test set
+
+A test set consulted repeatedly during development stops being a test set: each decision taken on its score fits the
+model a little to it. Public benchmarks are the extreme case, reused by every paper. New test sets collected to the same
+specification as <Gloss name="cifar-10" /> and <Gloss name="imagenet" /> gave accuracies 3 to 15 points lower than the
+original test sets, although the ranking of models was largely preserved <Cite id="recht2019" />. Limiting how often the
+test set is consulted, or answering queries with noise as in the reusable holdout, keeps its estimates valid for longer
+<Cite id="dwork2015" />; see <NoteLink to="test-set-reuse">test-set reuse</NoteLink>.
+
+## Out-of-distribution test sets
+
+A split of the available data can only imitate the shifts that the data contain. When deployment will differ in ways
+no split reproduces, such as a new country, a new sensor or a later year, the honest test is a separately collected
+test set from the new conditions. Benchmarks of in-the-wild shift report large gaps between in-distribution and
+out-of-distribution accuracy for the same models <Cite id="koh2021" />; see
+<NoteLink to="out-of-distribution-test-sets">out-of-distribution test sets</NoteLink> and
+<NoteLink to="dataset-shift">dataset shift</NoteLink>.
+
+## Assumptions
+
+- **A defined deployment.** The right split depends on what will be new in use. Without a statement of that, no split
+  is right or wrong.
+- **Exchangeable units within the split.** A grouped split assumes the entities are independent of each other, a
+  temporal split that the future resembles the recent past, a spatial split that blocks are larger than the correlation
+  range.
+
+## Pitfalls
+
+- **Splitting after preprocessing.** Scalers, encoders, imputers and feature selectors fitted before the split see the
+  test rows. Split first, then fit every data-dependent step on the training set; see
+  <NoteLink to="data-leakage">data leakage</NoteLink>.
+- **Duplicates across the split.** Exact and near-duplicate rows, such as reposted images or repeated records, defeat
+  any split strategy; search for them before splitting; see <NoteLink to="detecting-leakage">detecting
+  leakage</NoteLink>.
+- **Grouping on the wrong unit.** Grouping by visit when the same patient has several visits still leaks the patient.
+- **Stratifying a temporal split.** Shuffling within classes to balance a time-ordered test set reintroduces the future
+  into training.
+- **Test sets too small to answer the question.** A difference of one point between models on 500 test rows is noise.

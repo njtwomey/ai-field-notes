@@ -1,0 +1,143 @@
+---
+title: 'Curating paired data'
+kind: concept
+summary: 'Web-scale image–text pools are curated before training: pairs whose halves disagree are filtered out by a similarity score, concepts are balanced, duplicates and test-set copies are removed, and weak captions may be rewritten. A curated subset beats the whole pool.'
+tags: [data, multimodal, computer-vision, nlp]
+aliases: [data curation, CLIP filtering, CLIP-score filtering, image-text filtering, multimodal data filtering, data balancing, recaptioning, DataComp, MetaCLIP]
+requires: [clip, clip-score]
+related: [cross-modal-pairing, corpus-construction, deduplication-and-record-linkage, benchmark-contamination, image-text-datasets, locality-sensitive-hashing, contrastive-learning]
+references: [gadre2023, schuhmann2022, xu2024metaclip, fang2023dfn, abbas2023, fan2023laclip, li2024recap, hong2024clipfilter, maini2024tmars]
+status: draft
+updated: 2026-10-11
+---
+
+import { ScoreFiltering } from './ScoreFiltering'
+
+<Definition>
+Curating paired data selects a training set from a large pool of collected pairs, such as images with their alt-text or
+videos with their subtitles. Curation removes pairs whose two halves do not describe each other, rebalances how often
+each concept appears, removes duplicates and copies of evaluation data, and may rewrite weak captions. For contrastive
+pretraining, a well-curated subset of a pool trains better models than the whole pool at the same compute.
+</Definition>
+
+## Intuition
+
+Image–text pairs collected from the web are cheap and plentiful, and most of them are poor. An alt-text may be a file
+name, a navigation label, a product code or a sentence about something else on the page. Some images appear thousands of
+times; some concepts ("photo", "logo") dominate while most appear rarely; some images are unsafe; some are copies of the
+test sets a model will be judged on.
+
+A model trained on such a pool learns from every pair equally, so curation decides what the model learns. The DataComp
+benchmark fixed the model, training recipe and compute and let only the training subset vary. Random subsets of its pool
+always did better when larger. Subsets filtered by an image–text similarity score did best at an intermediate size,
+about the 30% of the pool with the highest scores <Cite id="gadre2023" />. Throwing data away helped, provided the
+right data were thrown away.
+
+## A curation pipeline
+
+Curation is a sequence of filters, from cheap rules to model-based scores. The DataComp pool of about 16.8 billion
+downloaded pairs from Common Crawl shows the typical stages <Cite id="gadre2023" />:
+
+1. **Safety.** Captions flagged by a toxicity classifier and images flagged by an explicit-content classifier were
+   removed: about 19% of pairs, leaving about 13.6 billion.
+2. **Evaluation-set deduplication.** Images that were near-duplicates of images in the evaluation sets were removed:
+   about 3% of the 16.8 billion, leaving about 13.1 billion.
+3. **Basic rules.** English captions, captions of more than two words and five characters, images whose shorter side
+   exceeds 200 pixels and whose aspect ratio is below 3.
+4. **Model-based scores.** Image–text similarity, or similarity of images to a target distribution.
+
+Steps 1 and 2 were applied to the released pool; steps 3 and 4 were the filtering baselines that participants competed
+to improve. Balancing, deduplication and caption rewriting, below, are further stages used by other pipelines.
+
+## Filtering by similarity scores
+
+A contrastive model such as <NoteLink to="clip">CLIP</NoteLink> embeds an image $x$ and a text $y$ as unit vectors
+$f(x)$ and $g(y)$. Their cosine similarity $s(x, y) = f(x)^\top g(y)$, the quantity behind
+<NoteLink to="clip-score">CLIPScore</NoteLink>, is high when the text describes the image. Filtering keeps the pairs
+with $s$ above a threshold, or the top fraction of the pool by $s$.
+
+- **LAION-5B** kept English pairs with similarity at least 0.28 under CLIP ViT-B/32, and other pairs with similarity at
+  least 0.26 under a multilingual CLIP. The filter removed about 90% of more than 50 billion candidates, leaving just
+  under 6 billion pairs <Cite id="schuhmann2022" />.
+- **DataComp** found the top 30% by ViT-L/14 similarity to be the best single score filter. Intersecting it with an
+  image-based filter, which clusters image embeddings into 100,000 groups and keeps the groups nearest to
+  <Gloss name="imagenet" /> training images, gave DataComp-1B: 1.4 billion pairs on which a ViT-L/14 CLIP reaches 79.2%
+  zero-shot ImageNet accuracy, 3.7 points above OpenAI's CLIP ViT-L/14 trained with the same compute
+  <Cite id="gadre2023" />.
+- **Data filtering networks** train the scoring model specifically to filter. A scorer's accuracy on downstream tasks
+  does not predict how good its filtered data are: a model with lower ImageNet accuracy, trained on a small high-quality
+  set, can produce better training data <Cite id="fang2023dfn" />.
+
+A threshold is a property of the scoring model. The same pair has different similarities under different models, so a
+threshold such as 0.28 does not transfer from one scorer to another.
+
+<ScoreFiltering />
+
+## Balancing concepts
+
+A pool's concepts follow a long-tailed distribution: a few appear in a large share of pairs and most appear rarely.
+Score filtering does not change this. Balancing caps how many pairs any one concept contributes.
+
+MetaCLIP reconstructs the curation described for the original CLIP data. It matches each caption against a list of
+500,000 metadata entries (words and phrases) by substring matching. In a pool of 1.6 billion pairs with 5.6 billion
+matches, 114,000 entries matched nothing, and the 16,000 entries with more than 20,000 matches, 3.2% of all entries,
+accounted for 94.5% of matches. Balancing keeps every pair of an entry with fewer than $t = 20{,}000$ matches and
+samples a pair of a more frequent entry with probability $t$ divided by that entry's count. Of 54 million captions
+containing "photo", the balanced set keeps 20,000 <Cite id="xu2024metaclip" />.
+
+Balancing matters as much as matching. Trained on 400 million pairs with a ViT-B/32 under a fixed budget, matching alone
+reached 60.8% zero-shot ImageNet accuracy and matching with balancing 65.5%. At 400 million pairs, MetaCLIP reached
+70.8% against CLIP's 68.3% with ViT-B and 76.2% against 75.5% with ViT-L <Cite id="xu2024metaclip" />. Balancing uses no
+learned scorer, so it does not import a scorer's preferences.
+
+## Deduplication
+
+Duplicates waste compute and overweight what they repeat. Exact duplicates are found by hashing URLs, captions or image
+bytes; near duplicates, such as resized or re-encoded copies, by perceptual hashes or nearest neighbours in an embedding
+space (see <NoteLink to="deduplication-and-record-linkage">deduplication and record linkage</NoteLink> and
+<NoteLink to="locality-sensitive-hashing">locality-sensitive hashing</NoteLink>).
+
+Semantic deduplication goes further and removes pairs that differ in pixels but carry the same content. SemDeDup
+clusters embeddings and removes near neighbours within each cluster; on a LAION subset it removed 50% of the data with
+little loss in performance, halving training time <Cite id="abbas2023" />.
+
+Deduplication against evaluation sets is a separate requirement: a model that has seen a test image during training is
+not tested on it. The same problem for text corpora is treated in
+<NoteLink to="benchmark-contamination">benchmark contamination</NoteLink>.
+
+## Caption rewriting
+
+Filtering discards a pair whose caption is weak even when its image is useful. Rewriting keeps the image and improves
+the text. LaCLIP asks a <Gloss name="language-model">language model</Gloss> to rewrite each caption while keeping its
+key concepts and, during training, pairs each image at random with its original caption or a rewrite. Zero-shot ImageNet
+accuracy rose by 8.2 points when training on CC12M and by 2.4 points on LAION-400M <Cite id="fan2023laclip" />.
+Recap-DataComp-1B replaced the captions of 1.3 billion DataComp images with descriptions written by a vision-language
+model built on LLaMA-3-8B <Cite id="li2024recap" />.
+
+A captioning model writes what it sees in its own style and vocabulary. Its errors and hallucinations enter the training
+data, and its uniform style removes the variety of human captions; mixing original and rewritten captions keeps both.
+
+## Assumptions
+
+- The scoring model's notion of a matching pair is the notion the trained model needs.
+- The evaluation tasks used to compare filters represent the uses of the trained model.
+- Concepts in the metadata or clusters used for balancing cover the concepts that matter.
+
+## Pitfalls
+
+- **Filters inherit their scorer's biases.** A study of CLIP filtering in DataComp found that data associated with
+  LGBTQ+ people, older women and younger men are excluded at higher rates, that groups already under-represented lose a
+  larger share, that the explicit-content filter missed sexually explicit material, and that copyrighted content was
+  kept at high rates <Cite id="hong2024clipfilter" />. The figure shows the mechanism: pairs unlike the scorer's
+  training data score lower and are the first correct pairs to go.
+- **Scores reward text in images.** An image that contains its caption's words, such as a poster or a slide, scores high
+  without showing anything; nearly 40% of LAION images contain text that overlaps significantly with the caption.
+  T-MARS masks the text in each image before scoring, so that only visual agreement counts
+  <Cite id="maini2024tmars" />.
+- **Filters tuned to the benchmark.** The image-based filter keeps images that resemble ImageNet; ImageNet accuracy then
+  rewards it. Gains on the target benchmark overstate gains elsewhere.
+- **Circular evaluation.** A dataset filtered by a CLIP score and a generator evaluated by CLIPScore under the same
+  model measure the same preference twice.
+- **Transferring thresholds.** A similarity threshold chosen for one scoring model means something else under another.
+- **Deleted is not gone.** A released index of URLs keeps pointing at whatever the URLs serve later, including content
+  that a later audit flags. Curation is repeated when the pool is refreshed.

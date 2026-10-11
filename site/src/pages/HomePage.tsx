@@ -2,9 +2,11 @@ import { ArrowRight, Search, Waypoints } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router'
 import { TopicIcon } from '@/components/layout/category-icon'
+import { StubToggle } from '@/components/browse/StubToggle'
 import { openSearch } from '@/components/layout/SearchCommand'
 import { Kbd } from '@/components/ui/kbd'
 import { browseUrl, notes, notesInCategory, references, taxonomy } from '@/lib/content'
+import { useHideStubs, withoutStubs } from '@/lib/stubs'
 import { cn } from '@/lib/utils'
 
 /**
@@ -22,6 +24,9 @@ export function HomePage() {
   const isClickScrolling = useRef(false)
 
   const totalSubjects = useMemo(() => taxonomy.reduce((sum, p) => sum + p.children.length, 0), [])
+  const hideStubs = useHideStubs()
+  const countIn = (path: string) => withoutStubs(notesInCategory(path), hideStubs).length
+  const shownNotes = withoutStubs(notes, hideStubs).length
 
   // Scroll-spy: track which section is currently in view
   useEffect(() => {
@@ -96,7 +101,7 @@ export function HomePage() {
 
         <div className="flex flex-wrap items-center justify-center gap-x-5 gap-y-2 text-xs text-muted-foreground sm:text-sm">
           <span>
-            <strong className="font-semibold text-foreground">{notes.length}</strong> notes ·{' '}
+            <strong className="font-semibold text-foreground">{shownNotes}</strong> notes ·{' '}
             <strong className="font-semibold text-foreground">8</strong> parts ·{' '}
             <strong className="font-semibold text-foreground">{totalSubjects}</strong> subjects ·{' '}
             <strong className="font-semibold text-foreground">{Object.keys(references).length}</strong> references
@@ -111,6 +116,7 @@ export function HomePage() {
           >
             <Waypoints className="size-3.5" aria-hidden /> Open map
           </Link>
+          <StubToggle />
         </div>
       </section>
 
@@ -122,7 +128,7 @@ export function HomePage() {
       >
         <div className="mx-auto flex min-w-max items-center justify-center gap-1.5">
           {taxonomy.map((part) => {
-            const count = notesInCategory(part.path).length
+            const count = countIn(part.path)
             const isSelected = activePart === part.path
             return (
               <button
@@ -156,7 +162,7 @@ export function HomePage() {
       {/* Part Sections: Refined, Functional, Compact Chapter Rows */}
       <div className="mt-8 space-y-10">
         {taxonomy.map((part, idx) => {
-          const partNotesCount = notesInCategory(part.path).length
+          const partNotesCount = countIn(part.path)
 
           return (
             <section
@@ -166,29 +172,27 @@ export function HomePage() {
               className="scroll-mt-28 border-t border-border/70 pt-8 pb-4 first:border-t-0 first:pt-2"
             >
               {/* Part Header: Clear Distinction */}
-              <div className="mb-3 flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
-                <div className="flex flex-wrap items-baseline gap-x-2.5 gap-y-1">
-                  <span className="font-mono text-xs font-bold tracking-wider text-primary uppercase">
-                    {part.roman ?? `Part ${idx + 1}`}
-                  </span>
-                  <h2
-                    id={`heading-${part.path}`}
-                    className="font-prose text-xl font-bold tracking-tight text-foreground sm:text-2xl"
-                  >
-                    {part.title}
-                  </h2>
-                  <span className="text-xs text-muted-foreground tabular-nums">
-                    ({partNotesCount} {partNotesCount === 1 ? 'note' : 'notes'})
-                  </span>
-                </div>
-
-                <Link
-                  to={browseUrl({ part: part.path })}
-                  className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground hover:underline"
+              <Link
+                to={browseUrl({ part: part.path })}
+                className="group mb-3 flex flex-wrap items-baseline gap-x-2.5 gap-y-1"
+              >
+                <span className="font-mono text-xs font-bold tracking-wider text-primary uppercase">
+                  {part.roman ?? `Part ${idx + 1}`}
+                </span>
+                <h2
+                  id={`heading-${part.path}`}
+                  className="font-prose text-xl font-bold tracking-tight text-foreground group-hover:underline sm:text-2xl"
                 >
-                  Browse {part.roman ? `${part.roman}` : ''} →
-                </Link>
-              </div>
+                  {part.title}
+                </h2>
+                <span className="text-xs text-muted-foreground tabular-nums">
+                  ({partNotesCount} {partNotesCount === 1 ? 'note' : 'notes'})
+                </span>
+                <ArrowRight
+                  className="size-3.5 self-center text-muted-foreground transition-transform group-hover:translate-x-0.5 group-hover:text-foreground"
+                  aria-hidden
+                />
+              </Link>
 
               {part.description && (
                 <p className="mb-3.5 max-w-3xl text-xs leading-relaxed text-muted-foreground">{part.description}</p>
@@ -197,7 +201,7 @@ export function HomePage() {
               {/* List of top-level items (Subjects), and inline child-topic pills */}
               <div className="divide-y divide-border/30 rounded-lg border border-border/50 bg-card/20 px-3.5 py-0.5">
                 {part.children.map((subject) => {
-                  const subjectNotesCount = notesInCategory(subject.path).length
+                  const subjectNotesCount = countIn(subject.path)
                   const hasNotes = subjectNotesCount > 0
 
                   return (
@@ -227,7 +231,7 @@ export function HomePage() {
                       <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5">
                         {subject.children.length > 0 ? (
                           subject.children.map((topic) => {
-                            const count = notesInCategory(topic.path).length
+                            const count = countIn(topic.path)
                             return (
                               <Link
                                 key={topic.path}

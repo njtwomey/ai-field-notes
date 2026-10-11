@@ -1,0 +1,164 @@
+---
+title: 'Detecting leakage'
+kind: technique
+summary: 'A leakage audit checks when each feature becomes known, searches for duplicates across splits, refits every pipeline step on training data only, and runs controls, such as shuffled labels and feature ablation, whose outcome is known if nothing leaks.'
+tags: [data, data-preparation, model-selection, diagnostics, evaluation]
+aliases: [leakage audit, leakage detection, shuffled-label control, label permutation control, permuted-label control, ablation test for leakage, duplicate search]
+requires: [data-leakage, train-validation-and-test-splits]
+related: [adversarial-validation, point-in-time-correctness, leakage-case-studies, deduplication-and-record-linkage, benchmark-contamination, categorical-encoding, feature-attribution-methods, permutation-tests, dataset-shift]
+references: [kaufman2012, kapoor2023, ambroise2002, barz2020, allamanis2019, zech2018, lapuschkin2019, pan2020adversarial, lopezpaz2017c2st]
+status: draft
+updated: 2026-10-11
+---
+
+import { ShuffledLabelControl } from './ShuffledLabelControl'
+
+<Definition>
+A **leakage audit** is a set of checks that look for information in a model's training data or features that would not
+be available when the model is used <Cite id="kaufman2012" />. It has two parts. **Inspection** examines the data and
+the pipeline directly: when each feature becomes known, whether rows recur across the split, and whether every fitted
+step saw only training data. **Controls** run the pipeline under conditions whose outcome is known in advance if there
+is no leak, such as shuffled labels or a removed feature, and flag any departure.
+</Definition>
+
+## Problem
+
+<NoteLink to="data-leakage">Data leakage</NoteLink> does not announce itself. A leaking pipeline trains, validates and
+reports a score like any other, and the score is better than it should be. The usual symptom, a result that looks too
+good, is weak evidence: genuine improvements also look good. Leakage is widespread in published work. A survey of
+machine-learning-based science found leakage reported in 17 fields, affecting 294 papers <Cite id="kapoor2023" />.
+
+Detection therefore cannot wait for a suspicious score. It is a routine audit, run before a result is trusted, that
+checks each route by which test information can reach the model.
+
+## Mechanism
+
+### Time of availability, feature by feature
+
+The most effective check is also the least automatic: for every feature, establish when its value becomes known, and
+compare that with the moment the prediction is made. A feature that is recorded, revised or completed after the
+prediction moment leaks the future.
+
+For each feature, the audit asks:
+
+- **Who records it, and when?** A field filled in at discharge cannot inform a prediction made at admission.
+- **Can it change after the outcome?** Account status, "number of complaints" and cumulative totals often update when
+  the outcome happens.
+- **Is it derived from the target?** Encodings, aggregates and model outputs computed with the label are leaks unless
+  they are computed out of fold.
+- **Does it exist in production?** Some fields are populated in the historical warehouse but arrive late or never in
+  the live system.
+
+Joins between tables are the commonest source of timing leaks: a join on a key, without a time condition, attaches the
+latest value of a feature rather than the value at prediction time. See
+<NoteLink to="point-in-time-correctness">point-in-time correctness</NoteLink>.
+
+### Pipeline audit
+
+Every step that estimates something from data is part of the model: imputers, scalers, encoders, feature selectors,
+<NoteLink to="dimensionality-reduction">dimensionality reduction</NoteLink>, outlier filters, resampling for
+<NoteLink to="class-imbalance">class imbalance</NoteLink> and the choice of hyperparameters. The audit checks two
+things.
+
+- **Each step is fitted on training data only.** Inside
+  <NoteLink to="cross-validation">cross-validation</NoteLink>, that means refitting each step in each fold. The simplest
+  guarantee is to wrap all the steps in one pipeline object and pass only the pipeline to the cross-validation routine.
+- **Each step's fitted state is as expected.** A scaler's means, an encoder's category table and a selector's chosen
+  features can be printed and compared between folds. A selector that picks the same features in every fold, with
+  scores far above those of random features, deserves a second look; one fitted before the split picks features that
+  are predictive partly by chance on the test rows too <Cite id="ambroise2002" />.
+
+Steps that use the target leak most. <NoteLink to="feature-selection">Feature selection</NoteLink> on all the rows can
+make pure noise look predictive <Cite id="ambroise2002" />, and a <NoteLink to="categorical-encoding">target
+encoding</NoteLink> fitted on all the rows writes each row's own label into its feature.
+
+### Duplicate and near-duplicate search across splits
+
+Rows that appear on both sides of a split let a model score by recall rather than by generalisation. Exact duplicates
+are found by hashing each row, or each normalised record, and intersecting the hashes of the training and
+<NoteLink to="train-validation-and-test-splits">test sets</NoteLink>. Near-duplicates need a similarity measure suited
+to the data: shingles and MinHash for text and code, perceptual hashes or embedding distances for images, and record
+linkage for entities with inconsistent identifiers; see <NoteLink to="deduplication-and-record-linkage">deduplication
+and record linkage</NoteLink>.
+
+Popular benchmarks are not exempt. 3.3% of the <Gloss name="cifar-10" /> test images and 10% of the CIFAR-100 test
+images have near duplicates in the training sets <Cite id="barz2020" />. In code corpora, duplication inflated reported
+metrics by up to 100% compared with de-duplicated test sets <Cite id="allamanis2019" />. For text corpora used to
+pretrain <Gloss name="language-model">language models</Gloss>, the same search is called decontamination; see
+<NoteLink to="benchmark-contamination">benchmark contamination</NoteLink>.
+
+### Ablating suspicious features
+
+When one feature dominates a model's importance ranking, or explanations point at something irrelevant to the task,
+the audit removes the feature, retrains and compares. A large drop in score from removing a feature that should carry
+little information marks it for the timing check above.
+
+The suspicious features are often artefacts of how the data were collected. Chest radiograph classifiers could identify
+the hospital system an image came from, and in one combined dataset the prevalence of pneumonia differed so much
+between hospitals that sorting by hospital alone gave an AUC of 0.86 for pneumonia <Cite id="zech2018" />. An image
+classifier for horses relied in part on a source tag present on many horse images <Cite id="lapuschkin2019" />.
+Attribution methods help find such features; see
+<NoteLink to="feature-attribution-methods">feature attribution methods</NoteLink>.
+
+### Shuffled-label control
+
+Shuffling the labels of the whole dataset, then running the entire pipeline unchanged, destroys every real relation
+between features and labels. A leak-free pipeline can then do no better than chance on held-out data: AUC near 0.5,
+accuracy near the majority-class rate. A pipeline that scores well above chance on shuffled labels has learned
+something about the held-out labels from the held-out rows, which is a leak.
+
+The control tests the whole procedure, not one step, so it catches leaks that inspection misses. It is the logic of a
+<NoteLink to="permutation-tests">permutation test</NoteLink>: repeating it with several shuffles gives the distribution
+of scores under no relation, against which the real score is compared.
+
+<ShuffledLabelControl />
+
+The control detects leaks that carry label information. It does not detect a feature that leaks the target through
+timing, because shuffling the labels breaks that feature's relation to the label as well; the timing check covers that
+case.
+
+### Adversarial validation
+
+**Adversarial validation** trains a classifier to tell training rows from test rows, using the features alone
+<Cite id="pan2020adversarial" />. If the two sets come from the same distribution, no classifier can separate them and
+the cross-validated AUC is near 0.5; an AUC well above 0.5 means the sets differ, and the features the classifier
+relies on show where. This is a classifier two-sample test <Cite id="lopezpaz2017c2st" />.
+
+A difference found this way is not necessarily a leak. It detects any difference between the sets: a row identifier
+that increases with time, a feature populated differently in the test period, or a genuine
+<NoteLink to="dataset-shift">dataset shift</NoteLink> that deployment will also face. Each separating feature needs the
+timing check to tell which. See <NoteLink to="adversarial-validation">adversarial validation</NoteLink>.
+
+### Scores that are too good
+
+A score far above published results, above the agreement between human experts or above what a simple baseline
+suggests is possible is a reason to run the audit, not a result. Comparing with a baseline of the feature most likely
+to leak alone, such as the identifier, the timestamp or the source, measures how much of the score that feature could
+explain.
+
+## Cost
+
+The timing check is manual and scales with the number of features: minutes per feature with the people who know how it
+is recorded. Duplicate search by hashing is linear in the number of rows; near-duplicate search with
+<Gloss name="lsh">locality sensitive hashing</Gloss> or approximate nearest neighbours is close to linear. The
+shuffled-label control, ablations and adversarial validation each cost one or a few extra runs of the pipeline.
+
+## Trade-offs
+
+- **Inspection and controls find different leaks.** Inspection finds leaks that the auditor thinks to look for;
+  controls find leaks in the procedure as a whole but not those that shuffling or ablation removes along with the real
+  signal. A thorough audit uses both.
+- **Controls need repetition.** A single shuffled-label run varies by chance; several runs give its spread.
+- **False alarms.** Adversarial validation and ablation flag features that differ or matter for legitimate reasons.
+  They locate where to look; the timing check decides.
+
+## Pitfalls
+
+- **Auditing the model and not the pipeline.** Leaks enter before the model: in joins, in preprocessing fitted on all
+  the data, in the choice of the split itself.
+- **Shuffling within the pipeline instead of before it.** The control shuffles labels once, before any step runs. A
+  shuffle applied after target encoding or feature selection leaves the leak in place and hides it.
+- **Deduplicating only exact copies.** Re-encoded images, reformatted code and records with typos are duplicates for
+  the model even when their bytes differ.
+- **Treating a clean audit as proof.** The checks cover the known routes. A leak through an unexpected route, such as
+  the order in which files were collected, can pass all of them.

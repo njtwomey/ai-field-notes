@@ -1,0 +1,146 @@
+---
+title: Relational and aggregate features
+kind: technique
+summary: 'Relational features describe an entity, such as a customer, by aggregates of the records related to it in other tables, such as counts, sums and means of past orders over windows of time, computed only from records that existed at the moment of prediction.'
+tags: [data, feature-engineering, worked-example]
+aliases: [aggregate features, aggregation features, group-by features, rollup features, window aggregates, entity features]
+requires: [feature-construction]
+related: [automated-feature-engineering, feature-stores, date-and-time-features, data-leakage, multi-table-data, event-sequences, data-setups]
+references: [kanter2015, lam2017, fey2024, robinson2024, kuhn2019]
+status: draft
+updated: 2026-10-11
+---
+
+import { AggregationDiagram } from './AggregationDiagram'
+
+<Definition>
+A **relational feature** describes an entity by summarising the records linked to it in another table. The entity is
+the subject of the prediction, such as a customer or a machine. The linked records, such as the customer's orders or
+the machine's sensor readings, are grouped by the entity's key and reduced to one value each by an **aggregation
+function**: a count, sum, mean, maximum, the latest value or a trend. Computed over a time window that ends at the
+moment of prediction, the aggregates turn a one-to-many relation into a fixed set of columns.
+</Definition>
+
+## Problem
+
+Most models take one row of features per example. Business and scientific data rarely come as one row per example.
+They come as tables linked by keys, in which one customer has many orders, one order has many items and one patient
+has many visits; see <NoteLink to="multi-table-data">relational and multi-table data</NoteLink>. A model that predicts
+whether a customer will churn needs to see the customer's history, and the history has a different number of rows for
+every customer. Aggregation reduces each history to the same fixed set of numbers.
+
+## Mechanism
+
+### Entities, relations and cutoff times
+
+The **target entity** is the table with one row per example, such as customers. A **child table** has a foreign key
+that points to it, such as orders with a customer key. Every training example also has a **cutoff time** $t_0$: the
+moment at which the prediction would be made. A churn model asked "will this customer leave in the next 30 days?" on
+1 March has $t_0$ = 1 March. Only child records with a time before $t_0$ may contribute to the example's features.
+
+<AggregationDiagram />
+
+### Aggregation functions
+
+For an entity $e$, let $R_e(t_0, w)$ be its child records with times in $[t_0 - w, t_0)$, for a
+window length $w$. An aggregate applies a function to one column $v$ of
+those records:
+
+| Function       | Value                                                | Captures                       |
+| -------------- | ---------------------------------------------------- | ------------------------------ |
+| Count          | $\lvert R_e \rvert$                                  | activity                       |
+| Sum, mean      | $\sum_{r \in R_e} v_r$, its average                  | volume, typical size           |
+| Minimum, maximum | the extremes of $v_r$                              | outliers, best and worst cases |
+| Standard deviation | the spread of $v_r$                              | regularity                     |
+| Distinct count | the number of distinct values of a categorical $v$   | variety                        |
+| Latest         | $v$ of the most recent record                        | current state                  |
+| Time since latest | $t_0$ minus the time of the most recent record    | recency                        |
+| Trend          | the slope of $v_r$ against time                      | growth or decline              |
+| Share          | the fraction of records with a given category        | composition                    |
+
+Several windows, such as 7, 30 and 365 days, show whether activity is rising or falling; the ratio of a 7-day count to
+a 30-day count is itself a useful feature. Recency and elapsed-time features are discussed in
+<NoteLink to="date-and-time-features">date and time features</NoteLink>.
+
+### Stacking aggregations
+
+Aggregates can be stacked along a chain of relations. An order's total is the sum over its items; a customer's mean
+order total is the mean over orders of those sums; a region's median of customers' mean order totals goes one level
+higher. Values can also flow down: a customer row can carry its region's mean, and an order row its customer's count
+of earlier orders. **Deep feature synthesis** generates features by following every relation to a set depth and
+applying every aggregation and transform function on the way <Cite id="kanter2015" />. Its number of candidates grows
+with the number of tables, columns, functions, windows and the depth, which is why automated systems pair generation
+with selection; see <NoteLink to="automated-feature-engineering">automated feature discovery</NoteLink>.
+
+### Learning on the table graph
+
+Aggregation fixes the summaries in advance. **Relational deep learning** instead treats a database as a graph with a
+node for every row of every table and an edge for every key link, and trains a <Gloss name="gnn">graph neural
+network</Gloss> with message passing over it <Cite id="fey2024" />. The network learns its own aggregations, and the
+time stamps of rows restrict messages to the past of each cutoff time. In a study on the RelBench tasks, built on real
+relational databases, such models were more accurate than features engineered by an experienced data scientist for a
+tabular model, with more than ten times less human work <Cite id="robinson2024" />.
+
+## Worked example: a customer's orders
+
+A customer has five orders before the cutoff time $t_0$ = 1 March and one after it:
+
+| Order date | Amount (£) |
+| ---------- | ---------- |
+| 3 January  | 40         |
+| 20 January | 25         |
+| 2 February | 60         |
+| 14 February| 35         |
+| 26 February| 50         |
+| 4 March    | 80         |
+
+The 4 March order is after $t_0$ and is excluded. With a 30-day window, from 30 January to 28 February, three orders
+remain: 60, 35 and 50.
+
+1. **Count, 30 days:** 3.
+2. **Sum, 30 days:** $60 + 35 + 50 = 145$.
+3. **Mean, 30 days:** $145 / 3 \approx 48.3$.
+4. **Count, all history:** 5, for an all-time mean of $210 / 5 = 42$.
+5. **Days since the latest order:** from 26 February to 1 March, 3 days.
+6. **Recent against long-run activity:** the 30-day mean exceeds the all-time mean by $48.3 - 42 = 6.3$, a sign of
+   rising spend.
+
+Had the 4 March order been included, the 30-day count would be 4 and the latest order would be 3 days in the future of
+the prediction. A model trained with that feature would learn from purchases it cannot see when it is used.
+
+## Cost
+
+- **Candidates.** With $T$ child tables, $C$ columns per table, $F$ functions and $W$ windows there are about
+  $T \cdot C \cdot F \cdot W$ features at depth one; stacking multiplies them again.
+- **Computation.** Every training example has its own cutoff time, so the aggregates are recomputed for each
+  (entity, $t_0$) pair. Sorting child records by time and keeping running sums makes this linear in the number of
+  records.
+- **Serving.** At prediction time the same aggregates must be computed on live data within the latency budget, often
+  from precomputed windows; see <NoteLink to="feature-stores">feature stores</NoteLink>.
+
+## Trade-offs
+
+- **Hand-chosen against generated aggregates.** A few aggregates chosen with knowledge of the domain are cheap and
+  interpretable. Generated aggregates find relations nobody thought of, at the price of many candidates and a
+  selection step that can overfit <Cite id="lam2017" />.
+- **Short against long windows.** Short windows react quickly to change and are noisy for rare events; long windows
+  are stable and slow to react.
+- **Fixed aggregates against learned ones.** Graph models on the table graph learn their aggregations end to end but
+  need more data, compute and tooling than a single flat table for a tree ensemble <Cite id="kuhn2019" />.
+
+## Pitfalls
+
+- **Records after the cutoff time.** Aggregating over all of a customer's records, including those after $t_0$, leaks
+  the future into the features; see <NoteLink to="data-leakage">data leakage</NoteLink>. Records that are updated after
+  creation, such as an order later marked as returned, leak in the same way unless their state is taken as of $t_0$.
+- **Joining before aggregating.** Joining two child tables to the parent before aggregating multiplies rows: a customer
+  with 3 orders and 4 support tickets gives 12 joined rows, and the sum of order amounts is counted four times.
+  Aggregate each child table separately, then join.
+- **Empty histories.** An entity with no records in a window has a count of 0 and an undefined mean. Encode the mean as
+  missing together with the count, rather than as 0, which reads as a real value; see
+  <NoteLink to="encoding-missingness">encoding missingness</NoteLink>.
+- **Different history lengths.** A new customer's all-time count is small because the customer is new. Pair counts
+  with the length of the observed history, or use fixed windows.
+- **One cutoff time for all rows.** Building all training rows at one date and all test rows at a later one tests how
+  the model generalises over time; building many cutoff times per entity creates correlated rows of one entity, which
+  must stay on one side of a split; see <NoteLink to="data-setups">data setups</NoteLink>.

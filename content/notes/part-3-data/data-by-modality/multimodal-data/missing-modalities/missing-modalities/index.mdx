@@ -1,0 +1,122 @@
+---
+title: 'Missing and unequal modalities'
+kind: concept
+summary: 'In real multimodal data some examples lack a modality, and modalities differ in how informative, noisy and quickly learned they are. Training and prediction must cope with absent inputs and stop one modality from drowning out the others.'
+tags: [data, multimodal, deep-learning]
+aliases: [missing modality, missing modalities, incomplete modalities, modality dropout, ModDrop, modality imbalance, modality competition]
+requires: [missing-data-and-imputation]
+related: [encoding-missingness, multimodal-data-layouts, dropout, cross-modal-pairing, temporal-synchronisation, multi-task-learning]
+references: [ma2022missing, ma2021smil, lee2023missing, tran2017, neverova2016, wang2020gradientblending, peng2022ogm, wu2024missing]
+status: draft
+updated: 2026-10-11
+---
+
+<Definition>
+A multimodal dataset has missing modalities when some examples lack one or more of their inputs, during training, at
+prediction or both. Its modalities are unequal when they differ in how informative, noisy, plentiful or quickly learned
+they are. Both break the assumption that every example offers every modality on equal terms, and both are handled in how
+the data are prepared and presented as much as in the model.
+</Definition>
+
+## Intuition
+
+A video has no audio track. A patient has blood tests but no scan. A wearable's battery dies halfway through a day. A
+social-media user declines to share their location. Missing modalities arise from sensor limits, cost, privacy and data
+loss, and are the normal state of multimodal data collected outside the laboratory <Cite id="wu2024missing" />.
+
+A model trained only on complete examples learns to use its inputs jointly. When one input is absent at prediction, the
+model receives something it never saw in training, such as a vector of zeros, and its output can be worse than that of a
+model that never had the second modality. Unequal modalities cause a related failure during training: when one modality
+predicts the label easily, a jointly trained model leans on it and under-uses the others.
+
+## Patterns of missingness
+
+Missingness of a whole modality follows the same mechanisms as missing values in a table (see
+<NoteLink to="missing-data-and-imputation">missing data and imputation</NoteLink>). It is missing completely at random
+when a file is lost by accident; at random given other inputs when a camera fails more often at night, which the
+timestamp records; and not at random when a doctor orders a scan because the patient looks ill. In the last case the
+absence of the scan is informative about the label.
+
+A dataset's missingness is described by its patterns, the sets of modalities present, and their frequencies. Three
+modalities give up to seven non-empty patterns. Recording, for each example, a presence indicator per modality keeps
+the pattern available to the model and to the analysis (see <NoteLink to="encoding-missingness">encoding
+missingness</NoteLink>), and a missing input is then represented by a learned placeholder rather than a value that looks
+real, such as a black image or an empty string.
+
+## Missing modalities at training time
+
+There are four main ways to use incomplete training data.
+
+- **Drop incomplete examples.** Simple, wasteful, and biased unless the modality is missing completely at random. When
+  most examples are incomplete, little is left.
+- **Train a model per modality and combine those available.** Late fusion (see
+  <NoteLink to="multimodal-data-layouts">data layouts for fusion</NoteLink>) handles any pattern at prediction by
+  combining the predictions of the present modalities, at the cost of learning no interactions between them.
+- **Impute the missing modality.** Fill it with a learned placeholder or a mean embedding, or generate it from the
+  modalities present, for example with an autoencoder trained to reconstruct one modality from the others
+  <Cite id="tran2017" />. Generated inputs carry the generator's errors, and the model cannot tell them from observed
+  ones unless an indicator says so.
+- **Train for the missing case.** SMIL uses Bayesian meta-learning to train with up to 90% of examples missing a
+  modality <Cite id="ma2021smil" />. Missing-aware prompts add a small learned prompt for each missingness pattern to a
+  pretrained multimodal transformer, with under 1% of the full model's parameters <Cite id="lee2023missing" />.
+
+## Missing modalities at prediction time
+
+A model's robustness to missing inputs is measured by evaluating it under each pattern it will meet. ViLT, a transformer
+trained on images and text of the MM-IMDb movie dataset, reached a macro-F1 of 55.3 with all modalities. When only 30%
+of test examples had text, it fell to 31.2, below the 35.0 of a model trained on images alone. The best way to fuse the
+modalities for robustness differed between datasets, even for the same model <Cite id="ma2022missing" />.
+
+The practical rule follows: the <NoteLink to="train-validation-and-test-splits">test set</NoteLink> reproduces the
+missingness patterns expected in use, results are reported per pattern, and every multimodal model is compared with the
+best single-modality model under the same patterns.
+
+## Modality dropout
+
+Modality dropout removes whole modalities at random during training, so that the model learns to predict from every
+subset. ModDrop dropped individual input channels of a gesture recogniser at random while training their fusion, which
+made the classifier robust to missing signals in one or more channels <Cite id="neverova2016" />. It is
+<NoteLink to="dropout">dropout</NoteLink> applied to inputs grouped by modality.
+
+As a data operation, modality dropout replaces a modality's input by the same placeholder and indicator used for truly
+missing data. The drop probability for each modality, and whether all modalities may be dropped together, are choices:
+dropping each modality with the frequency it is missing in deployment trains the model on the patterns it will meet.
+
+## Modality imbalance
+
+A multimodal network can do worse than its best single-modality part. On the Kinetics action-recognition benchmark,
+late-fusion networks trained jointly were below the best single-modality network in every combination: audio with RGB
+frames reached 71.4% top-1 accuracy against 72.6% for RGB alone, and all three of audio, RGB and optical flow reached
+70.0% <Cite id="wang2020gradientblending" />. The joint networks had higher training accuracy and lower validation
+accuracy. Two causes were identified: more capacity overfits more, and modalities overfit and generalise at different
+rates, so one training schedule suits none of them. Gradient-Blending weights each modality's loss by its estimated
+overfitting <Cite id="wang2020gradientblending" />.
+
+When one modality reduces the loss quickly, the gradients that train the others shrink, and their encoders stay
+under-optimised. On-the-fly gradient modulation tracks each modality's contribution to the objective and slows the
+dominant modality's updates <Cite id="peng2022ogm" />. On the data side, the same imbalance is checked by training and
+evaluating a model per modality alongside the joint model, and by adding a loss on each modality's own prediction, so
+that each encoder learns even when another modality suffices for the training labels.
+
+Modalities are also unequal in quantity. Text and images alone are plentiful while
+<NoteLink to="cross-modal-pairing">paired data</NoteLink> are scarce, so encoders are commonly pretrained on each
+modality separately and then joined on the smaller paired set.
+
+## Assumptions
+
+- The missingness patterns and their frequencies at prediction time are known or can be estimated.
+- A placeholder for a missing modality is distinguishable from any real input.
+- Modalities missing for reasons tied to the label are identified, so that the model's use of their absence is a
+  deliberate choice.
+
+## Pitfalls
+
+- **Missing inputs that look real.** Zeros, black frames and silence are real values of some inputs. Without an
+  indicator, the model confuses absence with content.
+- **A complete test set for an incomplete world.** Evaluating only complete examples hides the drop that missing inputs
+  cause in use.
+- **Absence as a shortcut.** When a modality is missing more often for one class, the model can learn the class from
+  the presence indicator. This is legitimate only if the same relation holds in deployment.
+- **Imputed data evaluated as observed.** Scores on imputed inputs measure the imputer as much as the model.
+- **No single-modality baseline.** A multimodal model that loses to its best single input is only visible when that
+  baseline is reported.

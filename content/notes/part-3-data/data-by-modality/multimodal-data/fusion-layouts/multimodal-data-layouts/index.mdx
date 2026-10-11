@@ -1,0 +1,129 @@
+---
+title: 'Data layouts for fusion'
+kind: concept
+summary: 'How multimodal inputs are arranged decides how a model can fuse them: one concatenated vector for early fusion, separate inputs to separate models for late fusion, per-modality token sequences that interact for intermediate fusion, and one interleaved sequence for documents.'
+tags: [data, multimodal, deep-learning]
+aliases: [early fusion, late fusion, intermediate fusion, mid fusion, hybrid fusion, multimodal fusion, interleaved image-text data, feature-level fusion, decision-level fusion]
+requires: [missing-modalities]
+related: [temporal-synchronisation, cross-modal-pairing, encoder-decoder-cross-attention, stacking, vision-transformer, vector-quantised-variational-autoencoder, feature-scaling, classifier-calibration, clip]
+references: [snoek2005, baltrusaitis2019, nagrani2021, liu2023visual, alayrac2022, laurencon2023, chameleon2024, wang2020gradientblending]
+status: draft
+updated: 2026-10-11
+---
+
+import { FusionLayouts } from './FusionLayouts'
+
+<Definition>
+A data layout for fusion is the arrangement in which multimodal inputs reach a model. In early fusion the modalities'
+features are concatenated into one input. In late fusion each modality goes to its own model and the predictions are
+combined. In intermediate fusion each modality is encoded separately and the encodings interact inside the model. In an
+interleaved layout every modality is turned into tokens placed in one sequence in document order. The layout fixes what
+a training example is, which interactions between modalities a model can learn, and what happens when a modality is
+missing.
+</Definition>
+
+## Intuition
+
+The same recordings can be presented to a model in several ways. A video clip with its soundtrack can be one vector of
+concatenated visual and audio features, two inputs to two classifiers whose votes are averaged, two token sequences that
+attend to each other, or a single sequence of tokens. Each arrangement allows different models and demands different
+preparation: how streams are aligned, how each modality is scaled, how variable-length inputs are padded and masked, and
+how an absent modality is represented. The terms early and late fusion come from multimedia analysis
+<Cite id="snoek2005" />; the survey of Baltrušaitis, Ahuja and Morency adds hybrid and model-based fusion to them
+<Cite id="baltrusaitis2019" />.
+
+<FusionLayouts />
+
+## Early fusion
+
+Early fusion concatenates the modalities' features into one vector per example, or per time step, and passes it to a
+single model.
+
+- **Per example.** Each modality is summarised as a fixed-length feature vector, such as an image embedding and the mean
+  of a sensor window, and the vectors are joined.
+- **Per time step.** The streams are put on a common time grid and their samples at each step are joined. This requires
+  synchronised clocks and a shared rate (see <NoteLink to="temporal-synchronisation">temporal
+  synchronisation</NoteLink>).
+
+Early fusion lets the model combine modalities from its first layer. It also inherits every difference between them.
+Features on different scales need scaling per modality block (see <NoteLink to="feature-scaling">feature
+scaling</NoteLink>); a 2,048-dimensional image embedding beside a three-dimensional accelerometer reading dominates by
+number alone; and an absent modality leaves a hole in the vector that must be filled with a placeholder and flagged
+with an indicator (see <NoteLink to="missing-modalities">missing and unequal modalities</NoteLink>).
+
+## Late fusion
+
+Late fusion trains a model per modality and combines their outputs: by averaging probabilities, by a weighted vote, or
+by a second-level model trained on the first-level outputs (see <NoteLink to="stacking">stacking</NoteLink>).
+
+The layout has two data advantages. A prediction can be made from any subset of modalities, so missing inputs need no
+imputation. Each per-modality model can be trained on its own data, including examples that have only that modality.
+The cost is that no interaction between modalities is learned below the combination step: a sound that means one thing
+with one image and another thing with another cannot be represented. Averaging also assumes the per-modality
+probabilities are comparable, which holds only if each model is calibrated (see
+<NoteLink to="classifier-calibration">classifier calibration</NoteLink>).
+
+## Intermediate fusion
+
+Intermediate fusion encodes each modality with its own encoder, usually into a sequence of tokens, and joins them inside
+the network. The encoders can be pretrained separately, on the plentiful unpaired data of each modality, and the joint
+layers learned on the scarcer <NoteLink to="cross-modal-pairing">paired data</NoteLink>.
+
+- **Cross-attention.** Tokens of one modality attend to tokens of the other (see
+  <NoteLink to="encoder-decoder-cross-attention">cross-attention</NoteLink>).
+- **Attention bottlenecks.** Cross-modal information passes only through a few shared latent tokens, four in the
+  reported experiments, and only in layers after a chosen fusion layer. Each modality must condense what it shares; the
+  restriction improved audio-visual classification while reducing cost <Cite id="nagrani2021" />.
+- **Projection into a <Gloss name="language-model">language model</Gloss>.** LLaVA passes image features through a
+  trained projection into the language model's word-embedding space and inserts the resulting image tokens into the text
+  sequence <Cite id="liu2023visual" />.
+
+As data, an intermediate-fusion example is a set of tensors, one per modality, each with its own length, padding and
+attention mask. Batching pads each modality separately.
+
+## Interleaved sequences
+
+Web pages, books and slide decks mix text and images in an order that carries meaning: a sentence refers to the image
+above it. An interleaved layout keeps that order. Each image becomes a block of tokens placed at its position in the
+text, and a single model reads the whole sequence.
+
+Flamingo trained on the MultiModal MassiveWeb dataset, extracted from about 43 million web pages. A resampler turns each
+image into 64 visual tokens; text tokens cross-attend only to the image that most recently precedes them, and training
+sequences hold up to five images <Cite id="alayrac2022" />. OBELICS provides an open interleaved dataset of 141 million
+web documents with 353 million images and 115 billion text tokens <Cite id="laurencon2023" />. Chameleon fuses at the
+token level: a tokenizer encodes a 512 × 512 image as 1,024 discrete codes from a codebook of 8,192, which share one
+vocabulary with text, so images and text are modelled, and generated, by the same transformer
+<Cite id="chameleon2024" />.
+
+Preparing interleaved data adds steps of its own: inserting image placeholders or codes at the right positions, masking
+which images each text token may see, counting image tokens against the context length, truncating documents without
+cutting an image's tokens in half, and choosing which tokens carry the training loss.
+
+## Choosing a layout
+
+| Layout        | One example is              | Learns interactions | Missing modality at prediction | Needs paired data for |
+| ------------- | --------------------------- | ------------------- | ------------------------------ | --------------------- |
+| Early         | one joint vector            | from the first layer | needs a placeholder           | the whole model       |
+| Late          | one input per model         | no                  | drop that model's vote          | the combination only  |
+| Intermediate  | one tensor per modality     | in the joint layers | needs a placeholder or a mask   | the joint layers      |
+| Interleaved   | one document                | throughout          | the sequence simply lacks it    | the whole model       |
+
+## Assumptions
+
+- Early fusion per time step assumes the streams are synchronised and resampled to a common rate.
+- Late fusion assumes the modalities are informative enough on their own and that their outputs are comparable.
+- Intermediate and interleaved layouts assume enough paired or interleaved data to train the joint layers.
+
+## Pitfalls
+
+- **Look-ahead from resampling.** Upsampling a slow stream by interpolation uses its next sample, which lies in the
+  future of the time step being filled. For forecasting and online prediction, the slow stream is held at its last value
+  instead (see <NoteLink to="forecasting-setups">forecasting setups</NoteLink>).
+- **One modality by size.** In a concatenated vector the larger or larger-scaled block dominates the first layer;
+  scaling per block or projecting each block to a common size first evens them.
+- **Unequal comparisons.** A late-fusion model of two networks has about twice the parameters of either alone, so
+  comparisons with single-modality models should account for capacity <Cite id="wang2020gradientblending" />.
+- **Uncalibrated votes.** Averaging probabilities from an overconfident model and a calibrated one gives the first more
+  say than it has earned.
+- **Truncated documents.** Cutting an interleaved document at a fixed length can split an image's tokens or separate an
+  image from the text that refers to it.

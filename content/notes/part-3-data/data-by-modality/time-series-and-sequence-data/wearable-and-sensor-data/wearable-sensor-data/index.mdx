@@ -1,0 +1,146 @@
+---
+title: Wearable and sensor data
+kind: concept
+summary: 'Wearable and ambient sensors produce multichannel streams of acceleration, rotation, physiology and environment. Preparing them means calibration, orientation, gravity removal, filtering, synchronisation and fusion, then a windowed recognition chain tested on new people.'
+tags: [data, time-series, signal-processing, activity-recognition]
+aliases: [wearable sensor data, accelerometer data, inertial sensor data, IMU data, human activity recognition, HAR, ambient sensors, smart home sensors, sensor fusion, gravity removal]
+requires: [time-series-sampling-and-alignment, time-series-windowing]
+related: [time-series-feature-extraction, time-series-augmentation, context-modulation-and-sensor-transfer, smart-home-activity-discovery, when-is-structure-needed, kalman-filter, infinite-impulse-response-filters, median-filter, zero-phase-filtering, activity-recognition-datasets, temporal-synchronisation]
+references: [bulling2014, lara2013, anguita2013, vanhees2014, banos2014, hammerla2016, dehghani2019, chan2024capture24, twomey2016sphere, twomey2016, twomey2017topologies]
+status: draft
+updated: 2026-10-11
+---
+
+import { ActivityChainDiagram } from './ActivityChainDiagram'
+
+<Definition>
+**Wearable sensors** are worn on the body: accelerometers, gyroscopes and magnetometers, together an inertial
+measurement unit (IMU), and physiological sensors such as optical heart-rate sensors. **Ambient sensors** are fixed in
+the environment: motion detectors, door contacts, power meters, environmental sensors and radio receivers that locate
+a wearable. Both produce multichannel streams that must be calibrated, oriented, filtered, aligned and fused before a
+model can learn from them, most often to recognise what a person is doing <Cite id="bulling2014" />,
+<Cite id="lara2013" />.
+</Definition>
+
+## Intuition
+
+A wrist accelerometer does not record "walking". It records three numbers fifty or a hundred times a second: gravity,
+projected onto axes that turn with the wrist, plus the acceleration of the arm, plus noise, in units that drift with
+temperature. Every property of the person that a model should ignore, such as how the device sits on the wrist, which
+wrist it is on, how strongly the person moves, is mixed into the same numbers as the activity. Preparation removes as
+much of that nuisance variation as can be removed safely, and evaluation checks that the model learned the activity
+and not the person.
+
+<ActivityChainDiagram />
+
+## Sensors and channels
+
+- **Accelerometers** measure specific force along three axes, in units of $g \approx 9.81\ \mathrm{m\,s^{-2}}$. At
+  rest they read gravity: a vector of length 1 $g$ pointing up in the device's frame. They saturate at their range,
+  often $\pm 8\,g$, which hard impacts such as falls can exceed.
+- **Gyroscopes** measure angular velocity in degrees or radians per second, and drift when integrated.
+- **Magnetometers** measure the local magnetic field, which gives a heading but is disturbed by metal and electronics
+  indoors.
+- **Physiological sensors** measure heart rate, skin temperature or electrodermal activity, with artefacts whenever the
+  wearer moves.
+- **Ambient sensors** produce events rather than samples: a motion sensor fires, a door opens. They are
+  <NoteLink to="event-sequences">event sequences</NoteLink> and are often binned or turned into
+  <NoteLink to="date-and-time-features">recency features</NoteLink>.
+
+Human movement is slow by signal-processing standards. One widely used smartphone dataset recorded at 50 Hz, on the
+grounds that 99% of the energy of body motion lies below 15 Hz <Cite id="anguita2013" />.
+
+## Calibration
+
+Low-cost accelerometers have per-axis offsets and gains that differ from device to device and change with
+temperature. At rest, the magnitude of a calibrated accelerometer's reading is 1 $g$ in any orientation. Free-living
+recordings contain many still periods, and fitting an offset and a gain per axis so that their magnitudes are 1 $g$
+calibrates a device from its own data, without a laboratory procedure <Cite id="vanhees2014" />.
+
+## Orientation and placement
+
+The same movement gives different readings when the device is rotated: worn on the other wrist, upside down, or in a
+different pocket. Three responses are common.
+
+- **Orientation-invariant features.** The magnitude $\norm{\avec_t}$ of the acceleration vector $\avec_t \in \reals^3$
+  does not depend on orientation. It loses the direction of movement and the posture that gravity's direction reveals.
+- **Rotation into a common frame.** Combining accelerometer, gyroscope and magnetometer readings in a complementary or
+  <NoteLink to="kalman-filter">Kalman filter</NoteLink> estimates the device's orientation, and rotating the readings
+  into an Earth-fixed frame removes it.
+- **Rotation as augmentation.** Training on randomly rotated copies teaches a model invariance to orientation; see
+  <NoteLink to="time-series-augmentation">time-series augmentation</NoteLink>.
+
+Placement matters more than orientation. A model trained on a hip-worn device rarely works on a wrist-worn one, because
+the wrist moves in ways the hip does not.
+
+## Gravity removal and filtering
+
+An accelerometer reading is the sum of gravity, which changes only as the device turns, and the acceleration of the
+body. A low-pass filter with a cut-off well below the frequencies of movement estimates the gravity component, and the
+remainder is the body acceleration. In the smartphone dataset above, a median filter and a low-pass filter at 20 Hz
+first removed noise, and a Butterworth low-pass filter at 0.3 Hz then separated gravity from body acceleration
+<Cite id="anguita2013" />; see <NoteLink to="median-filter">median filter</NoteLink> and
+<NoteLink to="infinite-impulse-response-filters">IIR filters</NoteLink>. The gravity component is kept as its own
+channel, because its direction gives the posture: lying, sitting or standing.
+
+Offline, filters can run forwards and backwards to avoid shifting the signal in time; see
+<NoteLink to="zero-phase-filtering">zero-phase filtering</NoteLink>. A model that will run in real time must be trained
+on causally filtered signals, as it will see them.
+
+## Sensor fusion
+
+Several sensors on one person, or a person in an instrumented home, must first share one timeline; see
+<NoteLink to="time-series-sampling-and-alignment">sampling and alignment</NoteLink>. They can then be combined at three
+levels.
+
+- **<NoteLink to="multimodal-data-layouts">Early fusion</NoteLink>** concatenates the aligned channels into one input.
+- **Feature fusion** computes features per sensor and concatenates them, which tolerates different sampling rates.
+- **Decision fusion** trains a model per sensor and combines their predictions, which tolerates a sensor that is
+  missing or broken.
+
+The SPHERE challenge asked for <NoteLink to="smart-home-activity-discovery">activities of daily living</NoteLink> in a
+home to be recognised from a wrist-worn accelerometer, video and environmental sensors together
+<Cite id="twomey2016sphere" />. Ambient sensors in homes differ from home to home, which makes transfer between homes
+its own problem; see <NoteLink to="context-modulation-and-sensor-transfer">context modulation and sensor
+topologies</NoteLink> <Cite id="twomey2017topologies" />.
+
+## The activity-recognition chain
+
+1. **Windows.** Cut the aligned streams into windows of 1 to 2 seconds for short activities such as walking or
+   climbing stairs <Cite id="banos2014" />, longer for activities such as cooking; see
+   <NoteLink to="time-series-windowing">windowing</NoteLink>.
+2. **Features or an encoder.** Compute statistics and <NoteLink to="spectral-features">spectral features</NoteLink> per
+   window and channel, or let a convolutional or recurrent network learn them <Cite id="hammerla2016" />; see
+   <NoteLink to="time-series-feature-extraction">feature extraction</NoteLink>.
+3. **Classification.** Predict an activity per window.
+4. **Smoothing.** Activities last longer than a window, so neighbouring predictions should mostly agree. A
+   <Gloss name="hmm">hidden Markov model</Gloss> or a <Gloss name="crf">conditional random field</Gloss> over the window
+   predictions enforces this; whether such structure modelling helps depends on how much context the features already
+   carry <Cite id="twomey2016" />; see <NoteLink to="when-is-structure-needed">when is structure needed</NoteLink>.
+
+## Subjects, settings and splits
+
+People differ in how they move far more than windows of one person differ. Two consequences follow.
+
+- **Hold out people.** The <NoteLink to="train-validation-and-test-splits">test set</NoteLink> must contain people
+  absent from training whenever the model will be used on new people. Splitting windows at random, or by session within
+  each person, measures how well the model recognises people it has seen, and with overlapping windows it also leaks
+  near-copies of test windows <Cite id="dehghani2019" />.
+- **Laboratory versus free living.** Activities performed on instruction in a laboratory are cleaner and less varied
+  than those of daily life, and models trained on them may not generalise to it <Cite id="chan2024capture24" />.
+  Free-living datasets label daily life with wearable cameras and diaries; CAPTURE-24 holds 3883 hours of wrist-worn
+  accelerometer data from 151 people, 2562 of them annotated <Cite id="chan2024capture24" />. See
+  <NoteLink to="activity-recognition-datasets">activity recognition datasets</NoteLink>.
+
+## Pitfalls
+
+- **Units and ranges.** Mixing devices that report in $g$ with ones that report in $\mathrm{m\,s^{-2}}$, or with
+  different ranges, gives channels that disagree by a factor of ten or saturate differently.
+- **Clocks.** A few seconds of offset between a sensor and its labels moves every activity boundary; label alignment
+  matters as much as signal alignment.
+- **Non-wear.** Periods when the device lies on a table look like perfect stillness and must be detected and removed,
+  not labelled as sleep or sitting.
+- **<NoteLink to="class-imbalance">Class imbalance</NoteLink>.** Daily life is mostly sitting, lying and sleeping.
+  Accuracy is dominated by those classes; report per-class or balanced metrics.
+- **Device and placement shift.** A new device model, firmware or wearing position is a new data distribution; test
+  on it before deploying.

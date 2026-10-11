@@ -1,0 +1,116 @@
+---
+title: Time-series feature extraction
+kind: technique
+summary: 'Feature extraction summarises a series or a window of it as a fixed-length vector for an ordinary model: lagged values, rolling statistics, autocorrelations, spectral and shape descriptors, curated sets such as catch22, or the responses of random convolutional kernels.'
+tags: [data, time-series, feature-engineering]
+aliases: [lag features, rolling features, rolling statistics, rolling window features, time-series features, catch22, tsfresh, hctsa]
+requires: [time-series-windowing, autocorrelation-and-partial-autocorrelation]
+related: [periodogram, spectral-features, symbolic-aggregate-approximation, shapelet-transform, matrix-profile, time-series-classification-benchmarks, forecasting-setups, data-leakage, feature-selection, date-and-time-features]
+references: [lubba2019, fulcher2014, christ2018, dempster2020, monteromanso2020]
+status: draft
+updated: 2026-10-11
+---
+
+import { SeriesFeatures } from './SeriesFeatures'
+
+<Definition>
+**Time-series feature extraction** maps a series, or a window $x_1, \dots, x_L$ of one, to a vector
+$\phivec(\xvec) \in \reals^d$ of summary statistics. The vector replaces the raw values as input to a model that
+expects fixed-length inputs, such as a gradient-boosted tree ensemble or a linear classifier. The features are chosen
+by hand, taken from a library, or generated at random.
+</Definition>
+
+## When to use it
+
+- **Classifying or clustering series** of different lengths, or windows of a stream, with a tabular model.
+- **Forecasting with a tabular model**, where each row holds the recent past of a series as features and the value to
+  forecast as the target; see <NoteLink to="forecasting-setups">forecasting setups</NoteLink>.
+- **Describing many series** at once, to group them, to find unusual ones or to choose a forecasting method per series
+  <Cite id="monteromanso2020" />.
+
+Learned representations from deep networks compete with extracted features on large datasets. On small and medium
+datasets, and where each feature must be explained, extracted features remain strong.
+
+## Lags
+
+A **lag feature** is a past value: $x_{t-1}, x_{t-2}, \dots, x_{t-p}$ as inputs for predicting at time $t$. Seasonal
+lags $x_{t-P}, x_{t-2P}$ for a season of period $P$ carry the same point of the previous cycles. A model given $p$ lags
+is a nonlinear autoregression of order $p$.
+
+For a forecast $h$ steps ahead, only values up to the forecast origin are known. A lag feature for target
+$x_{t+h}$ must be at least $h$ steps old; using $x_{t+h-1}$ when forecasting $h > 1$ steps ahead is a
+<NoteLink to="data-leakage">leak</NoteLink> that shows up only at prediction time.
+
+## Rolling and expanding statistics
+
+A **rolling statistic** summarises the last $m$ values: the rolling mean $\frac{1}{m}\sum_{j=0}^{m-1} x_{t-j}$, the
+rolling standard deviation, minimum, maximum, quantiles and counts of events. An **expanding statistic** summarises
+every value since the start. Several <NoteLink to="time-series-windowing">window lengths</NoteLink> at once, such as a
+week, a month and a year, give the model several time scales.
+
+The window must end at the present. A centred window, the default of some libraries' smoothing functions, uses future
+values.
+
+## Autocorrelation features
+
+The <NoteLink to="autocorrelation-and-partial-autocorrelation">autocorrelation</NoteLink> at lag $k$ measures how much
+the series resembles itself $k$ steps earlier. The first few autocorrelations, the lag of the first zero crossing, and
+the height and lag of the largest seasonal peak describe how persistent and how periodic a series is. Partial
+autocorrelations add how many past values matter directly.
+
+## Spectral features
+
+The <NoteLink to="periodogram">periodogram</NoteLink> distributes the series' variance over frequencies. Features from
+it include the dominant frequency, the share of power in chosen bands, the spectral centroid and the spectral entropy,
+which is low for a series dominated by one frequency and high for noise. Audio uses the same family, computed per frame;
+see <NoteLink to="spectral-features">spectral features</NoteLink>.
+
+The figure computes the three families above for series of different kinds.
+
+<SeriesFeatures />
+
+## Shape and symbolic features
+
+Some classes differ by a local shape rather than by a statistic of the whole series: a notch in a heartbeat, a spike
+in a vibration.
+
+- **Shapelets** are short subsequences whose distance to the nearest match in a series separates classes; the
+  <NoteLink to="shapelet-transform">shapelet transform</NoteLink> turns those distances into features.
+- **Symbolic representations** such as <NoteLink to="symbolic-aggregate-approximation">SAX</NoteLink> turn a series
+  into a word, whose counts of subwords become features.
+- **Motif and discord distances** from the <NoteLink to="matrix-profile">matrix profile</NoteLink> describe how
+  repetitive or unusual each part of a series is.
+
+## Feature libraries
+
+Libraries compute hundreds or thousands of features at once.
+
+- **hctsa** collects thousands of features from across the time-series literature, covering correlation structure,
+  distributions, entropy, stationarity and fits of time-series models, and selects among them per task
+  <Cite id="fulcher2014" />.
+- **catch22** is a set of 22 features chosen from a filtered set of 4791 hctsa features to classify well across 93
+  datasets with little redundancy. It cuts computation about 1000-fold for an average loss of 7% in accuracy
+  <Cite id="lubba2019" />.
+- **tsfresh** computes several hundred features and keeps those whose relation to the target passes a hypothesis test,
+  with the <Gloss name="fdr">false discovery rate</Gloss> controlled across features <Cite id="christ2018" />.
+
+A large library needs <NoteLink to="feature-selection">feature selection</NoteLink> or a model that tolerates many
+redundant inputs.
+
+## Random convolutional kernels
+
+ROCKET convolves each series with 10 000 random kernels, of random length, weights, bias, dilation and padding, and
+keeps two features per kernel: the maximum response and the proportion of positive responses. A linear classifier on
+these 20 000 features matched the most accurate time-series classifiers of its time on the UCR archive at a small
+fraction of their training cost <Cite id="dempster2020" />. The kernels are not trained; the dilations let them respond
+to patterns at many time scales.
+
+## Pitfalls
+
+- **Future values in features.** Centred windows, statistics over the whole series, and lags shorter than the horizon
+  all use values unknown at prediction time.
+- **Statistics across the split.** Features normalised or ranked over all series, training and test together, carry
+  test information into training.
+- **Windows of different lengths.** Many features depend on the number of values; compare features computed over
+  windows of the same length, or use length-normalised versions.
+- **Selecting features on the test set.** Feature selection is part of the model and belongs inside cross-validation.

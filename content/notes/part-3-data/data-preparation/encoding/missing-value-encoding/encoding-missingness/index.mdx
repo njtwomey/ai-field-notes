@@ -1,0 +1,142 @@
+---
+title: 'Encoding missingness'
+kind: technique
+summary: 'Whether a value is missing can carry information about the target. An indicator column, a sentinel value, a learned missing token or a tree that routes missing values on its own lets a model use the absence itself, alongside or instead of an imputed value.'
+tags: [data, data-preparation, feature-engineering, missing-data]
+aliases: [missing indicator, missingness indicator, missing-value indicator, indicator method, missing mask, sentinel value, missing incorporated in attributes, missing token]
+requires: [missing-data-and-imputation, linear-regression]
+related: [missingness-mechanisms, categorical-encoding, numeric-encoding, outliers-and-gross-errors, data-validation, data-leakage, gradient-boosting, xgboost-lightgbm-catboost]
+references: [rubin1976, little2019, josse2019, lemorvan2021, perezlebel2022, twala2008, chen2016b]
+status: draft
+updated: 2026-10-11
+---
+
+import { MissingIndicatorFit } from './MissingIndicatorFit'
+
+<Definition>
+For a feature $x_j$ that can be missing, the **missingness indicator** is $m_j = 1$ when $x_j$ is missing and 0
+otherwise. **Encoding missingness** means giving a model access to $m_j$ as well as, or instead of, a filled-in value
+$\tilde x_j$. The common encodings are an **indicator column** next to the imputed value, a **sentinel value** outside
+the feature's range, a **learned missing token** in place of the value's embedding, and **native handling**, where a
+tree learns which branch missing values take.
+</Definition>
+
+## Problem
+
+<NoteLink to="missing-data-and-imputation">Imputation</NoteLink> fills a gap with a plausible value: the mean, the
+median or a prediction from the other features. After imputation, a filled-in row looks like a row in which the value
+was observed, and the fact that it was missing is gone.
+
+That fact can matter. Under Rubin's classification, values are **missing completely at random** (MCAR) when the
+chance of being missing depends on nothing, **missing at random** (MAR) when it depends only on observed values, and
+**missing not at random** (MNAR) when it depends on the missing value itself <Cite id="rubin1976" />
+<Cite id="little2019" />. Incomes are left blank more often when they are high; a laboratory test is ordered only when
+a doctor suspects a condition; a sensor drops out when it overheats. In each case the absence is evidence about the
+target.
+
+For estimating a parameter, MNAR missingness biases most methods. For prediction, the question is simpler: does a
+model that sees $m_j$ predict better than one that does not? When missingness is informative, it does.
+
+## Mechanism
+
+### Indicator columns
+
+Impute $x_j$ as usual and add $m_j$ as an extra feature. A linear model then fits
+
+$$
+f(\xvec) = b + w_j\tilde x_j + v_j m_j + \dots,
+$$
+
+so a row with $x_j$ missing gets the prediction at the imputed value plus a learned shift $v_j$. The shift is whatever
+the missing rows need: for MNAR data with large values hidden, $v_j$ is large and positive. Interactions, such as $m_j$
+times another feature, let the shift vary across rows.
+
+Benchmarks on health databases found that adding the indicator to an imputed feature consistently improved
+prediction, which the authors read as a sign that missingness in such data is rarely ignorable
+<Cite id="perezlebel2022" />.
+
+<MissingIndicatorFit />
+
+Theory says when the indicator is needed. Imputing with a constant, such as the mean, and then learning is consistent
+for prediction when missingness is not informative <Cite id="josse2019" />. With a learner flexible enough, imputing and
+then regressing can be optimal for almost any imputation function and any mechanism, because a flexible enough learner
+can treat the imputed values themselves as a signal that data were missing <Cite id="lemorvan2021" />. An explicit
+indicator makes this easy for learners that are not that flexible, such as linear models.
+
+### Sentinel values
+
+A sentinel replaces a missing value by a value the feature never takes, such as $-999$ for a non-negative quantity.
+
+- **For trees** this works well: a split just below the sentinel separates the missing rows from the rest, so the tree
+  learns their effect.
+- **For linear and distance-based models** it is harmful. The sentinel is a real number to them; a few rows at $-999$
+  dominate the fit and distort the slope for everyone.
+
+Many datasets arrive with sentinels already in them, such as 0, 9999 or "-1" meaning "not recorded". These must be found
+and turned into missing values before anything else (see <NoteLink to="data-validation">data validation</NoteLink>).
+
+### Learned missing tokens
+
+For a categorical feature, missing can simply be another level, with its own one-hot column or target encoding (see
+<NoteLink to="categorical-encoding">categorical encoding</NoteLink>). For neural networks that embed each feature, a
+learned vector per feature can stand in for the embedding of a missing value, in the same way that an "unknown" token
+stands in for an unseen word. The network then learns what the absence means, as it would for any other value.
+
+### Native handling in trees
+
+A <NoteLink to="decision-tree">decision tree</NoteLink> can treat missing values as their own direction at every split.
+**Missingness incorporated in attributes** (MIA) considers, at each candidate split, sending all missing rows left,
+sending them right, or splitting on missing against not missing, and keeps whichever reduces the loss most. It performed
+well across data types and <NoteLink to="missingness-mechanisms">missingness mechanisms</NoteLink>
+<Cite id="twala2008" />, and for prediction it handles both informative and non-informative missingness
+<Cite id="josse2019" />. <Gloss name="xgboost" />'s sparsity-aware split finding learns a default direction for missing
+values at each split in the same spirit <Cite id="chen2016b" />, and other boosting libraries do the same. In the
+health-database benchmarks, boosted trees with native handling matched or beat imputation with indicators, at a much
+lower cost <Cite id="perezlebel2022" />.
+
+## Worked example
+
+Take the figure's defaults: $y = x + \varepsilon$ with noise of standard deviation 0.3 and 30% of the $x$ values hidden
+under MNAR, so that large values are more often missing.
+
+- **Filling.** The observed $x$ values have mean $-0.48$, because the large ones were removed, so every gap is filled
+  with $-0.48$. The rows with $x$ filled in had true $x$ averaging $0.86$, and their $y$ averages $0.83$.
+- **Imputation only.** Least squares fits slope 1.00 and intercept 0.37. A filled row is predicted at
+  $0.37 - 0.48 = -0.11$, nearly a unit below its mean outcome, and the intercept has been pulled up for every observed
+  row as well. The test error is 0.81.
+- **With the indicator.** The fit is slope 1.00, intercept 0.00 and indicator weight 1.31. A filled row is predicted at
+  $-0.48 + 1.31 = 0.83$, which is its mean outcome, and observed rows are no longer disturbed. The test error is 0.52.
+- **Under MCAR** with the same rate, both models have test error 0.66 and the indicator weight is near zero: missing
+  rows are like any other.
+
+The remaining error with the indicator, 0.52 against the noise level of 0.3, is the spread of the true $x$ among the
+missing rows, which no encoding of the absence can recover.
+
+## Cost
+
+An indicator adds one column per feature that can be missing, which can double the width of a dataset with gaps
+everywhere; features that are never missing in training need none. Sentinels and native tree handling add nothing.
+Learned missing tokens add one vector per feature.
+
+## Trade-offs
+
+- **Indicator against native handling.** Indicators work with any model but widen the data. Trees with native
+  handling need no preprocessing at all, which makes them the cheapest strong baseline for data with many gaps.
+- **Simple against elaborate imputation.** For prediction, mean or median imputation with an indicator was as good as
+  iterative or nearest-neighbour imputation in the health benchmarks, and far cheaper <Cite id="perezlebel2022" />.
+  Elaborate imputation matters more for estimation and inference than for prediction.
+- **Using missingness against relying on it.** A model that learns from $m_j$ depends on the process that creates the
+  gaps. If that process changes, so does the meaning of the indicator.
+
+## Pitfalls
+
+- **A changed collection process.** When a field becomes mandatory, or a hospital starts ordering a test routinely, the
+  indicator's learned weight no longer applies. Monitor missing rates after deployment.
+- **Missingness caused by the outcome.** A value recorded only after the event being predicted, such as a test taken
+  because the patient was already diagnosed, makes the indicator a proxy for the label. That is
+  <NoteLink to="data-leakage">leakage</NoteLink>, not information.
+- **Structural gaps treated as unknowns.** "Cigarettes per day" is blank for non-smokers because it does not apply, not
+  because it is unknown. Encode it as 0 with a separate "smoker" feature rather than imputing a smoker's average.
+- **Sentinels in a linear model.** A $-999$ in a linear model or a neural network is an extreme value, not a flag.
+- **Imputing and discarding the mask.** Once the values are filled in, the mask cannot be recovered. Keep it until it
+  is clear it is not needed.

@@ -1,0 +1,107 @@
+---
+title: Time-series augmentation
+kind: technique
+summary: 'Time-series augmentation creates new training series by changes that should keep the label: added noise, scaling, magnitude and time warping, window slicing, rotation of sensor axes, permutation of segments and mixing. Which changes are safe depends on what the label depends on.'
+tags: [data, time-series, deep-learning, regularisation]
+aliases: [time series data augmentation, jittering, magnitude warping, time warping, window slicing, window warping, sensor rotation augmentation]
+requires: [data-augmentation, time-series-windowing]
+related: [spectrogram-augmentation, wearable-sensor-data, augmentation-principles, dynamic-time-warping, time-series-classification-benchmarks, forecasting-setups, image-augmentation]
+references: [um2017, leguennec2016, iwana2021, wen2021augmentation]
+status: draft
+updated: 2026-10-11
+---
+
+<Definition>
+**Time-series augmentation** enlarges a training set of series $\xvec = (x_1, \dots, x_T)$ with labels $y$ by adding
+transformed copies $(g(\xvec), y)$, where each transform $g$ is drawn at random from a family chosen so that the label
+of $g(\xvec)$ is still $y$. It is <NoteLink to="data-augmentation">data augmentation</NoteLink> for series: it encodes
+the invariances a model should have, such as to small noise, to the amplitude of a movement or to a slight change of
+speed.
+</Definition>
+
+## When to use it
+
+Labelled time-series datasets are often small: a few hundred recordings of patients, a few subjects in an
+activity-recognition study, the hundreds of series in many benchmark classification datasets. Deep networks trained on
+so few examples overfit. Augmentation helps most when the training set is small and when the variation it simulates is
+real: different people move at different speeds and strengths, sensors sit at different angles, recordings carry
+different noise.
+
+Augmentation is mostly used for classification. For forecasting, a transform must keep the relation between the input
+window and the target, so it is applied to the window and its target together, and transforms that change the dynamics
+are avoided.
+
+## Transforms of values
+
+Each transform below acts on a series $x_t$, $t = 1, \dots, T$, with random parameters drawn afresh for each copy.
+
+- **Jitter.** Add independent noise: $x'_t = x_t + \varepsilon_t$ with $\varepsilon_t \sim \Gauss(0, \sigma^2)$. It
+  simulates sensor noise. Too large a $\sigma$ hides the pattern that defines the class.
+- **Scaling.** Multiply by one random factor: $x'_t = a\,x_t$ with $a \sim \Gauss(1, \sigma^2)$. It simulates
+  stronger or weaker versions of the same movement or event.
+- **Magnitude warping.** Multiply by a smooth random curve: $x'_t = c(t)\,x_t$, where $c$ is a cubic spline through a
+  few knots whose values are drawn around 1 <Cite id="um2017" />. Different parts of the series are scaled
+  differently.
+- **Rotation.** For a three-axis sensor with readings $\xvec_t \in \reals^3$, apply one random rotation
+  $\xvec'_t = \Rmat\,\xvec_t$ to every reading. It simulates the same device worn at a different angle
+  <Cite id="um2017" />; see <NoteLink to="wearable-sensor-data">wearable sensor data</NoteLink>.
+
+## Transforms of time
+
+- **Time warping.** Resample the series along a smooth, increasing random map of time:
+  $x'_t = x(\tau(t))$, with $\tau$ a smooth curve close to the identity and values between samples found by
+  interpolation <Cite id="um2017" />. Parts of the series play faster and others slower, as when one person walks with
+  a slightly different rhythm.
+- **Window slicing.** Crop a random window covering a fixed share of the series, such as 90%, and stretch it back to
+  the full length <Cite id="leguennec2016" />. At test time, the prediction can be the vote over several slices.
+- **Window warping.** Speed up or slow down one random window, for example by a factor of 2 or of 1/2, and keep the
+  rest <Cite id="leguennec2016" />.
+- **Permutation.** Cut the series into a few segments and shuffle them <Cite id="um2017" />. It suits labels that
+  depend on what happens, not on the order: a motor state of a patient, a type of machine fault. It destroys the label
+  of anything defined by order.
+
+## Mixing and generating series
+
+- **Mixing.** Combine two series of one class, or interpolate two series and their labels as mixup does for images;
+  see <NoteLink to="image-augmentation">image augmentation</NoteLink>. Averaging series after aligning them with
+  <NoteLink to="dynamic-time-warping">dynamic time warping</NoteLink> keeps their shared shape where a plain average
+  would blur it.
+- **Frequency-domain changes.** Perturb the amplitudes or phases of the series' Fourier components, or mask frequency
+  bands; for audio, see <NoteLink to="spectrogram-augmentation">spectrogram augmentation</NoteLink>.
+- **Decomposition.** Split a series into trend, season and remainder, perturb or bootstrap the remainder, and
+  recombine.
+- **Generative models.** Sample new series from a model fitted to the training data. The samples are only as varied
+  and as correct as the model.
+
+Surveys group the methods into these families: transformations, mixing, decomposition and generative models
+<Cite id="iwana2021" />, <Cite id="wen2021augmentation" />.
+
+## What the evidence says
+
+- Augmentation designed around the variation in the data can help a lot. On wearable-sensor recordings of patients
+  with Parkinson's disease, suitable augmentation raised a convolutional network's accuracy for classifying motor state
+  from 77.5% to 86.9% <Cite id="um2017" />.
+- No method helps everywhere. An evaluation of 12 methods on 128 classification datasets with six network types found
+  dramatic differences between architectures <Cite id="iwana2021" />. Window slicing and window warping tended to help,
+  and window warping ranked best on average for three of the networks. Rotation, permutation and time warping reduced
+  accuracy on many of these general-purpose datasets, whose labels often depend on orientation, order or timing. Gains
+  were larger for smaller training sets.
+
+## Choosing transforms
+
+1. List what the label depends on: amplitude, timing, order, frequency, orientation.
+2. Keep only transforms that leave those properties alone. Scaling is safe for an activity and unsafe for a fall
+   detector that thresholds the impact; permutation is safe for a fault type and unsafe for a gesture.
+3. Set each transform's strength so that a person looking at the result would still give it the same label.
+4. Tune the choice and strength on validation data, as with any hyperparameter.
+
+## Pitfalls
+
+- **Augmenting before splitting.** Copies of a test series in the training set leak it; augment the training part
+  only.
+- **Augmenting validation or test data.** Scores then describe the augmented distribution, not the real one; test-time
+  augmentation, where predictions are averaged over copies, is a separate and deliberate choice.
+- **Transforms that change the label.** A rotation applied to data whose orientation defines the class, or a time warp
+  applied to a heart rhythm whose rate defines it, teaches the model the wrong invariance.
+- **Overlapping windows.** Augmenting windows that overlap multiplies near-duplicates; see
+  <NoteLink to="time-series-windowing">windowing</NoteLink>.

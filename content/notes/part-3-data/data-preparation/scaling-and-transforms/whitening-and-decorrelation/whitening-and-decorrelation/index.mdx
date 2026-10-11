@@ -1,0 +1,171 @@
+---
+title: 'Whitening and decorrelation'
+kind: technique
+summary: 'Whitening transforms a set of features so that they have zero mean, unit variance and zero correlation. PCA whitening rotates onto the principal axes and rescales; ZCA whitening then rotates back, staying close to the original features.'
+tags: [data, data-preparation, linear-algebra, dimensionality-reduction]
+aliases: [whitening, whitening transform, sphering, sphering transform, decorrelation, PCA whitening, ZCA whitening, Mahalanobis whitening, zero-phase component analysis, Cholesky whitening]
+requires: [variance-and-covariance, eigendecomposition, feature-scaling]
+related: [principal-component-analysis, mahalanobis-distance, condition-number, batch-normalisation, independent-component-analysis, shrinkage-covariance-estimation, cholesky-decomposition, canonical-correlation-analysis, linear-discriminant-analysis]
+references: [kessy2018, bell1997, krizhevsky2009, coates2011, lecun1998, huang2018dbn, hyvarinen2000]
+status: draft
+updated: 2026-10-11
+---
+
+import { WhiteningPanels } from './WhiteningPanels'
+
+<Definition>
+**Whitening** maps a random vector $\xvec \in \reals^d$ with mean $\muvec$ and covariance $\Sigmamat$ to
+$\zvec = \Wmat^\top(\xvec - \muvec)$, with the $d \times d$ matrix $\Wmat$ chosen so that $\cov(\zvec) = \eye$: the
+whitened features have mean 0, variance 1 and no correlation. Many matrices do this. **PCA whitening** takes
+$\Wmat = \Vmat\Lambdamat^{-1/2}$ from the <NoteLink to="eigendecomposition">eigendecomposition</NoteLink>
+$\Sigmamat = \Vmat\Lambdamat\Vmat^\top$; **ZCA whitening** takes
+$\Wmat = \Vmat\Lambdamat^{-1/2}\Vmat^\top = \Sigmamat^{-1/2}$, which gives the whitened vector closest to the original
+<Cite id="kessy2018" />. In practice $\muvec$ and $\Sigmamat$ are the sample mean and covariance of the training data.
+</Definition>
+
+## Problem
+
+<NoteLink to="feature-scaling">Feature scaling</NoteLink> gives every feature unit variance, but it treats the features
+one at a time and leaves their correlations in place. Two standardised features with correlation $\rho$ still have
+covariance matrix $\begin{pmatrix} 1 & \rho \\ \rho & 1 \end{pmatrix}$, with eigenvalues $1 + \rho$ and $1 - \rho$. Its
+<NoteLink to="condition-number">condition number</NoteLink> $(1 + \rho)/(1 - \rho)$ is 19 for $\rho = 0.9$ and 199 for
+$\rho = 0.99$. <NoteLink to="gradient-descent">Gradient descent</NoteLink> on a least-squares loss over such features is
+slow along the direction of small variance, distances are dominated by the direction of large variance, and two features
+measuring nearly the same thing count twice.
+
+Whitening removes the correlations as well as the scales. After whitening, the covariance is the identity, the
+condition number is 1, and Euclidean distance between whitened vectors equals
+<NoteLink to="mahalanobis-distance">Mahalanobis distance</NoteLink> between the original ones.
+
+## Mechanism
+
+### Centring and decorrelation
+
+Subtracting the mean gives $\xvec - \muvec$ with covariance $\Sigmamat$. For any matrix $\Wmat$, the covariance of
+$\zvec = \Wmat^\top(\xvec - \muvec)$ is $\Wmat^\top\Sigmamat\Wmat$. Whitening asks for
+
+$$
+\Wmat^\top \Sigmamat \Wmat = \eye.
+$$
+
+The covariance matrix is symmetric and <Gloss name="positive-semi-definite">positive semi-definite</Gloss>, so by the
+<NoteLink to="spectral-theorem">spectral theorem</NoteLink> it factors as $\Sigmamat = \Vmat\Lambdamat\Vmat^\top$,
+with orthonormal eigenvectors in the columns of $\Vmat$ and the variances along them, $\lambda_1 \ge \dots \ge
+\lambda_d \ge 0$, on the diagonal of $\Lambdamat$. When all $\lambda_j > 0$, $\Wmat = \Vmat\Lambdamat^{-1/2}$
+satisfies the condition:
+$\Wmat^\top\Sigmamat\Wmat = \Lambdamat^{-1/2}\Vmat^\top\Vmat\Lambdamat\Vmat^\top\Vmat\Lambdamat^{-1/2} = \eye$.
+
+The solution is not unique. If $\Wmat$ whitens, so does $\Wmat\Qmat$ for any orthogonal $\Qmat$, because
+$\Qmat^\top\Wmat^\top\Sigmamat\Wmat\Qmat = \Qmat^\top\Qmat = \eye$. Conversely, any two whitening matrices differ by an
+orthogonal factor. A rotation, or a reflection, of a whitened cloud is still white. The whitening methods differ only in
+which rotation they pick <Cite id="kessy2018" />.
+
+### PCA whitening
+
+PCA whitening uses $\Wmat_{\text{PCA}} = \Vmat\Lambdamat^{-1/2}$. Coordinate $j$ of $\zvec$ is the projection of
+$\xvec - \muvec$ onto the $j$-th principal axis, divided by the standard deviation $\sqrt{\lambda_j}$ along it: the
+<NoteLink to="principal-component-analysis">principal component</NoteLink> scores, rescaled to unit variance. Keeping
+only the first $k$ columns of $\Vmat$ whitens and reduces the dimension in one step.
+
+The output coordinates are the principal axes, not the original features. Coordinate 1 of $\zvec$ mixes all of the
+original features, and the sign of each eigenvector is arbitrary, so a small change in the data can flip or reorder the
+whitened coordinates.
+
+### ZCA whitening
+
+ZCA whitening, also called Mahalanobis whitening, rotates back to the original axes after rescaling:
+
+$$
+\Wmat_{\text{ZCA}} = \Vmat\Lambdamat^{-1/2}\Vmat^\top = \Sigmamat^{-1/2}.
+$$
+
+The matrix is symmetric, and it is the unique symmetric whitening matrix. Coordinate $j$ of $\zvec$ stays associated
+with feature $j$. Among all whitening transforms, ZCA moves the data least: it minimises the expected squared distance
+$\expect\norm{\zvec - (\xvec - \muvec)}^2$ between the whitened and the centred vectors <Cite id="kessy2018" />. A
+variant, ZCA-cor, applies the same construction to the correlation matrix of the standardised features, and so stays
+closest to the standardised data.
+
+<Derivation title="ZCA whitening is the whitening closest to the input">
+Write $\tilde\xvec = \xvec - \muvec$ and $\zvec = \Wmat^\top\tilde\xvec$. Then
+
+$$
+\expect\norm{\zvec - \tilde\xvec}^2 = \expect\norm{\zvec}^2 + \expect\norm{\tilde\xvec}^2 - 2\,\expect[\zvec^\top\tilde\xvec]
+= d + \trace(\Sigmamat) - 2\trace(\Wmat^\top\Sigmamat).
+$$
+
+The first two terms do not depend on which whitening is used, because $\cov(\zvec) = \eye$. Every whitening matrix has
+the form $\Wmat = \Sigmamat^{-1/2}\Qmat$ with $\Qmat$ orthogonal, so the last trace is
+$\trace(\Qmat^\top\Sigmamat^{-1/2}\Sigmamat) = \trace(\Qmat^\top\Sigmamat^{1/2})$. For a positive semi-definite matrix
+$\Amat$ and orthogonal $\Qmat$, $\trace(\Qmat^\top\Amat) \le \trace(\Amat)$, with equality at $\Qmat = \eye$: in the
+eigenbasis of $\Amat$ the trace is $\sum_j a_j q_{jj}$ with $a_j \ge 0$ and $\abs{q_{jj}} \le 1$. The distance is
+therefore smallest for $\Qmat = \eye$, that is $\Wmat = \Sigmamat^{-1/2}$.
+</Derivation>
+
+Other choices exist. **Cholesky whitening** uses the <NoteLink to="cholesky-decomposition">Cholesky factor</NoteLink>
+$\Sigmamat^{-1} = \Lmat\Lmat^\top$ and $\Wmat = \Lmat$, which is triangular: whitened coordinate $j$ depends only on
+features $j$ to $d$, so the transform depends on the order of the features.
+
+<WhiteningPanels />
+
+### Regularising small eigenvalues
+
+Dividing by $\sqrt{\lambda_j}$ amplifies the directions of smallest variance most. In real data those directions often
+hold measurement noise, rounding error or a near-exact linear dependence between features, and whitening scales them up
+to the same size as the main structure. When $n \le d$ the sample covariance is singular and $\Lambdamat^{-1/2}$ does
+not exist.
+
+The usual remedy adds a constant $\epsilon > 0$ to every eigenvalue before the inverse square root,
+$\Wmat = \Vmat(\Lambdamat + \epsilon\eye)^{-1/2}\Vmat^\top$. The whitened covariance is then
+$\Lambdamat(\Lambdamat + \epsilon\eye)^{-1}$: directions with $\lambda_j \gg \epsilon$ are whitened as before, and
+directions with $\lambda_j \ll \epsilon$ are left nearly unscaled. A <NoteLink to="shrinkage-covariance-estimation">
+shrinkage estimate</NoteLink> of $\Sigmamat$ has a similar effect. In a comparison of single-layer feature learners on
+image patches, ZCA whitening with a small $\epsilon$ raised classification accuracy for every learner tested
+<Cite id="coates2011" />. Dropping the smallest directions altogether, by keeping $k < d$ axes in PCA whitening, is the
+other remedy.
+
+### Whitening in networks
+
+LeCun and colleagues recommended inputs that are centred, scaled and decorrelated, because the Hessian of a linear
+layer's squared loss is the input covariance, and an identity covariance makes gradient descent equally fast in every
+direction <Cite id="lecun1998" />. Whitening is the full version of that advice; standardisation and
+<NoteLink to="batch-normalisation">batch normalisation</NoteLink> do only the scaling part. Decorrelated batch
+normalisation applies ZCA whitening to mini-batches inside a network <Cite id="huang2018dbn" />.
+
+For natural images, the pixel covariance has large eigenvalues for smooth, low-frequency patterns and small ones for
+fine detail. ZCA whitening of image patches flattens that spectrum, emphasising edges, and its filters are localised
+centre-surround patterns <Cite id="bell1997" />. ZCA whitening of CIFAR images was a standard preprocessing step for
+convolutional networks and unsupervised feature learning <Cite id="krizhevsky2009" /> <Cite id="coates2011" />.
+Whitening is also the first step of <NoteLink to="independent-component-analysis">independent component
+analysis</NoteLink>, which then searches over the remaining rotation for statistically independent components
+<Cite id="hyvarinen2000" />.
+
+## Cost
+
+Fitting costs $O(nd^2)$ for the sample covariance and $O(d^3)$ for its eigendecomposition. Applying the transform costs
+$O(d^2)$ per row for full whitening and $O(dk)$ for PCA whitening to $k$ axes. For $d$ in the tens of thousands, as for
+raw image pixels, the covariance and the whitening matrix no longer fit comfortably in memory, and whitening is applied
+to small patches instead.
+
+## Trade-offs
+
+- **PCA or ZCA.** PCA whitening reduces dimension and orders the coordinates by variance, at the cost of mixing every
+  feature into every coordinate. ZCA keeps each coordinate tied to one feature and changes the data least, so it suits
+  images and any setting where the output should still look like the input.
+- **Whitening or standardisation.** Standardisation costs $O(d)$ per row and keeps features interpretable. Whitening
+  also removes correlations, which matters for methods that rely on Euclidean geometry or on isotropic noise, and for
+  gradient descent on strongly correlated inputs.
+- **Whitening or a model that handles covariance.** <NoteLink to="linear-discriminant-analysis">Linear discriminant
+  analysis</NoteLink>, <Gloss name="gp">Gaussian processes</Gloss> with learned length scales and Mahalanobis-distance
+  methods build the covariance into the model, and do not need whitened inputs.
+
+## Pitfalls
+
+- **Fitting on all the data.** The mean and covariance are fitted statistics. Estimating them before splitting leaks
+  information about the test rows into every feature; see <NoteLink to="data-leakage">data leakage</NoteLink>.
+- **Amplified noise.** Without regularisation, whitening scales the noisiest directions up to unit variance. A model
+  trained on whitened data then gives noise the same weight as signal.
+- **Too few rows for the dimension.** With $n$ rows the sample covariance has rank at most $n - 1$. When $d$ approaches
+  $n$, its smallest eigenvalues are badly estimated, even when they are not zero.
+- **Trees.** Tree ensembles split one feature at a time. Whitening mixes features, which removes axis-aligned structure
+  that trees could have used, and gains them nothing.
+- **Sparse inputs.** Centring and mixing features turn sparse vectors dense.

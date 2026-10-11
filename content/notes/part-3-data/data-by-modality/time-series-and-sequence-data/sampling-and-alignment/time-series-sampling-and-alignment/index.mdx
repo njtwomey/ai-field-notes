@@ -1,0 +1,195 @@
+---
+title: 'Sampling, alignment and resampling of time series'
+kind: concept
+summary: 'Raw series arrive with their own clocks, rates, gaps and jitter. Preparing them means fixing timestamps, resampling to a common grid by aggregation or interpolation, and aligning series from different sources by estimating their clock offsets.'
+tags: [data, time-series, signal-processing]
+aliases: [time-series resampling, irregular sampling, irregularly sampled time series, sensor synchronisation, clock alignment, upsampling, downsampling]
+requires: [sampling-theorem, autocorrelation-and-partial-autocorrelation]
+related: [temporal-synchronisation, coherence-and-cross-spectra, aliasing, decimation-and-interpolation, sample-rate-conversion, dynamic-time-warping, cubic-spline-interpolation, monotone-and-shape-preserving-interpolation, missing-data-and-imputation, time-series-windowing, wearable-sensor-data, lomb-scargle-periodogram]
+references: [shukla2020, che2018, fritsch1980]
+status: draft
+updated: 2026-10-11
+---
+
+import { ResampleGaps } from './ResampleGaps'
+import { SyncByCrossCorrelation } from './SyncByCrossCorrelation'
+
+<Definition>
+A raw time series is a list of timestamped values $(t_i, y_i)$, $i = 1, \dots, n$, with $t_1 < t_2 < \dots < t_n$.
+Preparing it for a model means three things: making the timestamps mean the same thing everywhere, **resampling** the
+values onto a chosen grid by aggregating or interpolating them, and **aligning** series recorded by different devices
+onto one timeline.
+</Definition>
+
+## Intuition
+
+Most models for time series expect a regular grid: one value per channel every $\Delta$ seconds, with every channel on
+the same grid. Real recordings rarely arrive that way. A phone samples its accelerometer at a rate that drifts with
+load; a hospital records a blood test when a nurse takes one; a smart meter reports only when consumption changes; two
+devices each keep their own clock. Resampling and alignment turn such records into the grid a model expects. Every
+step of that conversion makes an assumption about the values between samples, and those assumptions should be chosen,
+not inherited from a library default.
+
+## Timestamps and time zones
+
+A timestamp needs a reference and a meaning before it can be compared with another.
+
+- **One reference.** Store times in Coordinated Universal Time (UTC), and keep the local time zone as a separate field.
+  Local clocks jump at daylight-saving changes: one local hour occurs twice a year and another never occurs. A series
+  indexed by local time has a duplicated hour and a missing hour.
+- **Local time as a feature.** Human behaviour follows local time: a commute happens at 8:00 local time in every time
+  zone. Convert to local time when building <NoteLink to="date-and-time-features">calendar features</NoteLink>, after
+  the series has been ordered in UTC.
+- **Which event the time records.** A value can carry the time it was measured, the time it was recorded or the time
+  it reached the database. Laboratory results, for example, are often stored with the time of the report rather than
+  of the sample. Only the measurement time places the value correctly; using the arrival time in a model that predicts
+  from the past is a <NoteLink to="data-leakage">leak</NoteLink> when arrival is late, and a needless delay when it is
+  early.
+
+## Regular and irregular sampling
+
+A series is **regularly sampled** when $t_i = t_0 + i\Delta$ for a fixed sampling interval $\Delta$, so that the
+sampling rate is $f_s = 1/\Delta$. Signal processing assumes this; the
+<NoteLink to="sampling-theorem">sampling theorem</NoteLink> then says which frequencies the samples can represent.
+
+A series is **irregularly sampled** when the gaps $t_{i+1} - t_i$ vary. Irregularity has different sources, and each
+calls for different handling <Cite id="shukla2020" />.
+
+- **Jitter.** The intended grid is regular and the actual times scatter around it by a small fraction of $\Delta$.
+  Rounding each time to the nearest grid point is usually enough.
+- **Event-driven sampling.** A value is recorded when something happens: a change of state, a threshold crossing, a
+  clinician's decision. The time of a sample carries information about the process. A model that sees only the
+  resampled values loses it; a model that also sees the sampling pattern can use it.
+- **Gaps.** Long stretches with no samples: a device was off, a patient left the ward, a sensor lost its connection.
+  Gaps are <NoteLink to="missing-data-and-imputation">missing data</NoteLink>, and why they are missing matters as it
+  does for any missing value.
+
+## Resampling
+
+Resampling maps the samples onto a new grid $u_k = u_0 + k\Delta'$. Going to a coarser grid ($\Delta' > \Delta$) is
+**downsampling**; going to a finer grid, or onto any grid from irregular times, is **upsampling** or
+**interpolation**.
+
+### Downsampling by aggregation
+
+Downsampling groups the samples into bins $[u_k, u_k + \Delta')$ and summarises each bin by one value. The summary must
+match what the values measure.
+
+| Values measure                        | Summary of a bin           | Example                                  |
+| ------------------------------------- | -------------------------- | ---------------------------------------- |
+| a level or a rate                     | mean                       | temperature, heart rate, power           |
+| an amount that accumulates            | sum                        | step counts, rainfall, sales             |
+| a state that persists until it changes | last value                 | price at the close, device on or off     |
+| an extreme that matters               | maximum or minimum         | peak load, lowest blood oxygen           |
+| events                                | count                      | clicks, transactions                     |
+
+Averaging over a bin is a crude low-pass filter. It suppresses most of the content above the new
+<NoteLink to="aliasing">Nyquist frequency</NoteLink> $1/(2\Delta')$, but not all of it. When the high-frequency content
+of a signal matters, low-pass filter it properly and then keep every $M$-th sample, as in
+<NoteLink to="decimation-and-interpolation">decimation</NoteLink>. Taking every $M$-th sample without filtering folds
+the high frequencies onto low ones.
+
+### Upsampling by interpolation
+
+Upsampling must invent values between samples. The choice of interpolant is an assumption about the signal between
+them.
+
+- **Previous value** (sample-and-hold) repeats the last sample until the next one. It suits states that persist, such
+  as a price or a setpoint, and it uses only the past.
+- **Linear interpolation** joins neighbouring samples by straight lines.
+- **Monotone cubic interpolation** (PCHIP) fits a smooth curve that never overshoots the neighbouring samples
+  <Cite id="fritsch1980" />; see <NoteLink to="monotone-and-shape-preserving-interpolation">shape-preserving
+  interpolation</NoteLink>.
+- **Cubic splines** fit the smoothest twice-differentiable curve through the samples; see
+  <NoteLink to="cubic-spline-interpolation">cubic spline interpolation</NoteLink>. They can swing beyond the samples.
+- **Band-limited (sinc) interpolation** is exact for a regularly sampled signal with no content above the Nyquist
+  frequency, and is what <NoteLink to="sample-rate-conversion">sample-rate conversion</NoteLink> approximates.
+
+Inside a long gap every interpolant makes up a curve. The figure shows how differently three of them fill the same
+gaps.
+
+<ResampleGaps />
+
+Three practices limit the damage of interpolating across gaps.
+
+1. **Interpolate only short gaps.** Fill gaps up to a stated length and leave longer ones missing.
+2. **Mark what was filled.** Add an indicator that a grid value was interpolated and the time since the last real
+   sample. Recurrent models given these two inputs can learn how much to trust a filled value <Cite id="che2018" />.
+3. **Avoid the grid.** Models for irregular series take the pairs $(t_i, y_i)$ directly: time-aware recurrent networks,
+   <NoteLink to="neural-ordinary-differential-equations">neural ordinary differential equations</NoteLink> and
+   <Gloss name="gp">Gaussian processes</Gloss> <Cite id="shukla2020" />. The
+   <NoteLink to="lomb-scargle-periodogram">Lomb–Scargle periodogram</NoteLink> does the same for spectra.
+
+### Interpolation and the future
+
+Linear, cubic and sinc interpolation at time $u$ use samples after $u$. A forecasting or online model trained on such
+values sees a little of the future at every filled point. For data that a model will receive in real time, fill
+forward with the previous value or with a model fitted to the past only.
+
+## Synchronising several series
+
+Two devices that record the same scene keep separate clocks. Device B's clock reads
+
+$$
+t_B = a + b \, t_A
+$$
+
+when device A's reads $t_A$, where $a$ is the **offset** and $b$ the **rate**. Cheap quartz clocks differ in rate by
+tens of parts per million, so $b - 1 \approx 10^{-5}$: a drift of about a second a day. Offsets can be seconds or
+minutes when devices are started by hand.
+
+### Alignment by cross-correlation
+
+When two streams record related signals, the offset is the lag at which they agree best. The **cross-correlation**
+of two series $x_t$ and $y_t$ of length $n$, the two-series analogue of the
+<NoteLink to="autocorrelation-and-partial-autocorrelation">autocorrelation</NoteLink>,
+
+$$
+r(k) = \frac{1}{n\,s_x s_y} \sum_t (x_t - \bar x)(y_{t+k} - \bar y)
+$$
+
+with sample means $\bar x, \bar y$ and standard deviations $s_x, s_y$, peaks at the lag $k^\star$ by which $y$ follows
+$x$. Moving $y$ back by $k^\star$ samples aligns the two. Its frequency-domain counterpart, the
+<NoteLink to="coherence-and-cross-spectra">cross-spectrum</NoteLink>, gives the delay as the slope of its phase.
+
+<SyncByCrossCorrelation />
+
+Rate differences turn a single offset into one that grows with time. Estimating $k^\star$ in several windows along the
+recording and fitting a straight line to the window offsets against time estimates both $a$ and $b$.
+
+### Alignment by shared events
+
+When the streams do not record related signals, alignment needs an event that every device sees. A deliberate tap, a
+jump or a clap at the start and end of a recording gives a spike in every accelerometer and microphone; a light flash
+appears in every camera. Two such events, at the start and the end, give the offset and the rate. Data-collection
+protocols for wearable and multi-camera recordings often build such events in.
+
+### Aligning labels to signals
+
+Labels are a stream too. Annotations made from video, by a person pressing a key or from a diary arrive with their own
+offset and a human reaction time of a few hundred milliseconds or more. Labels at boundaries between activities are
+therefore least reliable. Common responses are to drop a margin around each boundary from training, or to use windows
+long enough that the error is a small fraction of each; see <NoteLink to="time-series-windowing">windowing</NoteLink>.
+
+## Assumptions
+
+- Interpolation assumes the signal is smooth, or constant, between samples; it cannot recover content faster than the
+  sampling.
+- Aggregation assumes that the chosen summary keeps what the model needs; a mean hides peaks and a last value hides
+  everything before it.
+- Cross-correlation alignment assumes a constant offset over the window used, and signals related by roughly a delay
+  and a gain.
+
+## Pitfalls
+
+- **Library defaults.** Resampling functions default to a summary (often the mean) and an interpolant (often linear or
+  none) that may not suit the data. A sum resampled with a mean, or a state resampled with a linear fill, is wrong
+  without any error being raised.
+- **Silent gaps.** A filled gap looks like data. Without an indicator, a model learns from invented values as if they
+  were measured.
+- **Interpolating across the split.** Interpolation that uses samples after a training–test boundary leaks test data
+  into training, and filling across a gap after the boundary leaks the future into a forecast.
+- **Time-zone and daylight-saving errors.** Merging series kept in different time zones, or in local time, shifts them
+  by whole hours; the shift is easy to miss when signals are daily.
+- **Drift over long recordings.** An offset estimated at the start of a week-long recording can be seconds wrong at the
+  end.

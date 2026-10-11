@@ -2,6 +2,7 @@ import { Layers } from 'lucide-react'
 import { Link } from 'react-router'
 import { TopicIcon } from '@/components/layout/category-icon'
 import { browseUrl, notes, taxonomy, type BrowseParams, type CategoryNode } from '@/lib/content'
+import { useHideStubs } from '@/lib/stubs'
 import { cn } from '@/lib/utils'
 import { inCategory } from './filters'
 
@@ -11,7 +12,9 @@ import { inCategory } from './filters'
  * Expanding a subject reveals its child categories (topics).
  */
 export function TopicRail({ params, onNavigate }: { params: BrowseParams; onNavigate?: () => void }) {
-  const count = (path: string) => notes.filter((n) => inCategory(n, path)).length
+  const hideStubs = useHideStubs()
+  const shown = hideStubs ? notes.filter((n) => n.status !== 'stub') : notes
+  const count = (path: string) => shown.filter((n) => inCategory(n, path)).length
   const item = (active: boolean) =>
     cn(
       'flex items-center gap-2 rounded-md px-2 py-1 text-xs transition-colors hover:bg-muted',
@@ -27,7 +30,7 @@ export function TopicRail({ params, onNavigate }: { params: BrowseParams; onNavi
       >
         <Layers className="size-4 shrink-0" aria-hidden />
         <span className="flex-1 font-medium">All notes</span>
-        <span className="text-xs text-muted-foreground tabular-nums">{notes.length}</span>
+        <span className="text-xs text-muted-foreground tabular-nums">{shown.length}</span>
       </Link>
 
       <div className="space-y-4 pt-1">

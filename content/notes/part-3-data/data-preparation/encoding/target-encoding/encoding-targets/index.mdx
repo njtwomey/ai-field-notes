@@ -1,0 +1,187 @@
+---
+title: 'Encoding targets'
+kind: technique
+summary: 'Encoding targets fixes how the quantity to predict is represented in training and how predictions map back: class indices, one-hot or smoothed vectors, ordinal, hierarchical and multi-label codes, transformed numeric targets, and structured targets such as boxes.'
+tags: [data, data-preparation, loss-functions, classification, regression]
+aliases: [label encoding, one-hot targets, multi-label targets, hierarchical labels, transformed target, log target]
+requires: [categorical-encoding, log-loss-and-brier-score]
+related: [retransformation-bias, ordinal-regression, binary-decomposition-for-ordinal-regression, power-transforms, multi-valued-field-encoding, hamming-jaccard-and-exact-match, knowledge-distillation, classifier-calibration, object-detection, semantic-segmentation, sequence-labelling]
+references: [szegedy2016, muller2019, frank2001, silla2011, tsoumakas2007, duan1983, ren2015, newell2016, ramshaw1995]
+status: draft
+updated: 2026-10-11
+---
+
+import { TransformedTargetFit } from './TransformedTargetFit'
+
+<Definition>
+A **target encoding**, in the sense of this note, is the representation of the quantity a model is trained to predict:
+the vector or number its output is compared with by the loss, and the map from the model's output back to a
+prediction of the original quantity. It covers class indices and one-hot vectors, smoothed labels, ordinal,
+hierarchical and multi-label codes, transformed numeric targets, and structured targets such as bounding boxes, masks
+and keypoint heatmaps. It is distinct from **target encoding** of an input feature, which replaces a category by a
+statistic of the target and is covered in <NoteLink to="categorical-encoding">categorical encoding</NoteLink>.
+</Definition>
+
+## Problem
+
+The representation of the target decides what the model can say and how its errors are counted.
+
+- Classes coded as the integers $0, \dots, K - 1$ and fitted by squared error impose an order and a spacing that the
+  classes do not have.
+- A one-hot target asks for a probability of exactly 1 on the true class, which a softmax reaches only with infinite
+  logits.
+- Labels with structure, such as an order, a hierarchy or several labels at once, lose that structure if coded as
+  independent classes.
+- A skewed numeric target, such as income or a medical cost, lets a few large values dominate a squared error, and a
+  model fitted on its logarithm predicts a different quantity from the one asked for unless the back-transformation is
+  done with care.
+
+## Mechanism
+
+### Class indices and one-hot targets
+
+For $K$ classes, the target is either the index $y \in \set{0, \dots, K - 1}$ or the one-hot vector $\evec_y$. With
+a softmax output $\pvec$ the cross-entropy is $-\sum_k (\evec_y)_k \log p_k = -\log p_y$ (see
+<NoteLink to="log-loss-and-brier-score">log loss</NoteLink>), so the two forms give the same loss; the index form saves
+memory. Binary targets are coded as $\set{0, 1}$ for logistic losses and as $\set{-1, +1}$ for margin losses such as the
+hinge.
+
+### Label smoothing
+
+Label smoothing replaces the one-hot target by
+
+$$
+\qvec = (1 - \varepsilon)\,\evec_y + \frac{\varepsilon}{K}\ones,
+$$
+
+a mixture with the uniform distribution. The cross-entropy with $\qvec$ is $(1 - \varepsilon)$ times the usual loss plus
+$\varepsilon$ times the cross-entropy between the uniform distribution and $\pvec$, which penalises predictions that
+are too confident. Szegedy and colleagues introduced it for ImageNet classification with $\varepsilon = 0.1$ and
+$K = 1000$, and found an improvement of about 0.2 percentage points in both top-1 and top-5 error
+<Cite id="szegedy2016" />.
+
+Label smoothing also changes what the network learns. It makes predictions better
+<NoteLink to="classifier-calibration">calibrated</NoteLink> and pulls the penultimate-layer representations of each
+class into tight, equally spaced clusters. That erases information about which wrong classes are similar to the true
+one, so a teacher trained with label smoothing makes a worse teacher for
+<NoteLink to="knowledge-distillation">knowledge distillation</NoteLink> <Cite id="muller2019" />.
+
+### Ordinal targets
+
+Ordered classes, such as ratings from 1 to 5 or disease stages, sit between classification and regression. One
+encoding writes class $y$ as $K - 1$ binary targets, $\indicator[y > k]$ for $k = 1, \dots, K - 1$: class 3 of 5 becomes
+$(1, 1, 0, 0)$. A binary classifier is trained for each threshold, and the probability of each class is recovered from
+the differences of neighbouring threshold probabilities <Cite id="frank2001" />. The code fills up like a thermometer as
+the class rises, so errors between neighbouring classes cost less than errors between distant ones. See
+<NoteLink to="ordinal-regression">ordinal regression</NoteLink> and
+<NoteLink to="binary-decomposition-for-ordinal-regression">binary decomposition</NoteLink>.
+
+### Hierarchical labels
+
+When labels form a tree or a <Gloss name="dag">directed acyclic graph</Gloss>, such as animal, dog, terrier, a label can
+be encoded by its leaf, by its path, or as a multi-hot vector over all its ancestors. Hierarchical classifiers are flat
+(one classifier over the leaves, ignoring the hierarchy), local (one classifier per node, per parent or per level) or
+global (one model over the whole hierarchy) <Cite id="silla2011" />. Encoding the path lets the model be partly right: a
+terrier predicted as another dog is a smaller error than a terrier predicted as a car. Predictions must be kept
+consistent, so that a node is predicted only when its parent is.
+
+### Multi-label targets
+
+When an example can carry several labels at once, such as the topics of an article, the target is a multi-hot vector
+$\yvec \in \set{0, 1}^L$ over $L$ labels, the output-side version of a
+<NoteLink to="multi-valued-field-encoding">multi-valued field</NoteLink>. The two basic reductions are **binary
+relevance**, one independent binary classifier per label, and **label powerset**, one class per distinct set of labels
+seen in training <Cite id="tsoumakas2007" />. Binary relevance ignores correlations between labels; label powerset keeps
+them but has as many classes as label combinations, most of them rare. A network with $L$ sigmoid outputs and a
+<Gloss name="bce">binary cross-entropy</Gloss> per label is binary relevance with a shared representation. Errors are
+counted per label or per set; see <NoteLink to="hamming-jaccard-and-exact-match">Hamming, Jaccard and exact
+match</NoteLink>.
+
+### Transformed regression targets
+
+A positive, right-skewed target is often modelled on a transformed scale, $z = g(y)$, with $g$ a logarithm,
+$\log(1 + y)$ for counts with zeros, or a <NoteLink to="power-transforms">power transform</NoteLink>. The model fits
+$z$, and a prediction must be mapped back to $y$.
+
+The naive back-transformation $g^{-1}(\hat z)$ does not give the mean of $y$. If $\log y$ given $\xvec$ is Gaussian with
+mean $\mu(\xvec)$ and variance $\sigma^2$, then
+
+$$
+\exp(\mu(\xvec)) = \operatorname{median}(y \mid \xvec), \qquad \expect[y \mid \xvec] = \exp\paren{\mu(\xvec) + \frac{\sigma^2}{2}}.
+$$
+
+The naive prediction is the median, below the mean by the factor $e^{\sigma^2/2}$: 12% below for $\sigma = 0.5$ and 39%
+below for $\sigma = 1$. This gap is the
+<NoteLink to="retransformation-bias">retransformation bias</NoteLink>. Three corrections are common.
+
+- **Parametric.** Multiply by $e^{\hat\sigma^2/2}$, which assumes Gaussian errors on the log scale.
+- **Smearing.** Multiply by the mean of the exponentiated residuals, $\frac1n\sum_i e^{\hat\varepsilon_i}$, which
+  needs no distributional assumption. This is Duan's smearing estimate <Cite id="duan1983" />.
+- **Pushing the distribution forward.** If the model predicts a distribution for $z$, map the whole distribution through
+  $g^{-1}$ and take its mean. For a Gaussian on $\log y$ this gives a <NoteLink to="log-normal-distribution">log-normal
+  distribution</NoteLink> on $y$.
+
+Which prediction to report depends on the loss that judges it. The median minimises expected absolute error, so the
+naive back-transformation is right for absolute error; the mean minimises expected squared error and is right for
+totals, such as a budget summed over many patients.
+
+<TransformedTargetFit />
+
+Standardising a numeric target to zero mean and unit variance, common for neural networks, is an affine map, so its
+back-transformation has no such bias.
+
+### Structured targets
+
+Some targets are not single numbers or classes, and their encoding is part of the method.
+
+- **Bounding boxes.** A detector predicts a box relative to a reference box, an anchor of centre $(x_a, y_a)$, width
+  $w_a$ and height $h_a$, as the offsets $((x - x_a)/w_a, (y - y_a)/h_a, \log(w/w_a), \log(h/h_a))$. The encoding
+  makes the targets comparable across box sizes <Cite id="ren2015" />. See
+  <NoteLink to="object-detection">object detection</NoteLink>.
+- **Masks.** A segmentation target is a class per pixel, or one binary mask per object instance (see
+  <NoteLink to="semantic-segmentation">semantic segmentation</NoteLink>).
+- **Keypoints.** A keypoint is encoded as a heatmap: an image-sized map with a small Gaussian centred on the
+  keypoint's location. The stacked hourglass network regresses one such map per joint with a squared error, using a
+  Gaussian of standard deviation 1 pixel <Cite id="newell2016" />. The predicted location is the heatmap's maximum.
+- **Spans.** A span of text, such as a named entity, is encoded as a tag per token: B for the first token of a span, I
+  for the following tokens and O for tokens outside any span, so that span extraction becomes
+  <NoteLink to="sequence-labelling">sequence labelling</NoteLink> <Cite id="ramshaw1995" />.
+
+## Worked example
+
+**Label smoothing.** With $K = 4$ classes and $\varepsilon = 0.1$, the target for class 1 is
+$(0.925, 0.025, 0.025, 0.025)$. The cross-entropy is smallest when the softmax output equals this target, so the
+logit of the true class need only exceed each other logit by $\log(0.925/0.025) = \log 37 \approx 3.6$. With a one-hot
+target the loss keeps falling as that gap grows, without limit.
+
+**Retransformation.** In the figure, with noise of coefficient of variation 0.6 and a log target, the true mean
+averages 3.04 over the test points. The naive back-transformation averages 2.61, 14% too low, because it estimates the
+median. The pushed-forward mean averages 3.28: closer, and slightly high, because the model assumes log-normal noise
+where the data are gamma-distributed.
+
+## Cost
+
+Index targets cost one integer per example; one-hot, smoothed, ordinal and multi-label codes cost a vector of length
+$K$, $K - 1$ or $L$. Heatmap targets cost an image-sized map per keypoint and dominate memory in pose estimation.
+Back-transformation corrections cost one pass over the training residuals.
+
+## Trade-offs
+
+- **Hard against smoothed labels.** Smoothing regularises and calibrates, at the cost of less informative output
+  probabilities for distillation and ranking.
+- **Flat against structured codes.** Ordinal, hierarchical and multi-label codes use the structure of the labels and
+  give partial credit; flat classes are simpler and work with any classifier.
+- **Transformed against direct targets.** A transformed target suits the skew of the data and keeps predictions in the
+  valid range, but predicts a different summary of $y$ unless corrected. A model with a suitable likelihood, such as a
+  gamma or Poisson <Gloss name="glm">generalised linear model</Gloss>, predicts the mean on the original scale directly.
+
+## Pitfalls
+
+- **Integer class codes as regression targets.** The model then assumes class 3 lies between classes 2 and 4.
+- **Reporting the median as the mean.** Back-transforming a log-scale prediction without correction underestimates
+  totals; summed over many predictions, the shortfall adds up.
+- **Inconsistent hierarchical predictions.** A model that predicts "terrier" but not "dog" contradicts the hierarchy;
+  enforce consistency when decoding.
+- **Label powerset with rare combinations.** Combinations seen once or twice give classes that cannot be learned, and
+  combinations never seen in training cannot be predicted at all.
+- **Label smoothing before distillation.** A smoothed teacher passes on less of what it knows.

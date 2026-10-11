@@ -1,0 +1,217 @@
+---
+title: 'Power and variance-stabilising transforms'
+kind: technique
+summary: 'A power transform raises positive values to a fitted power, or takes their logarithm, to make a skewed distribution more symmetric and its variance less dependent on its mean. Box-Cox needs positive values; Yeo-Johnson accepts any sign.'
+tags: [data, data-preparation, feature-engineering, statistics]
+aliases: [power transform, Box-Cox transform, Box–Cox, Yeo-Johnson transform, Yeo–Johnson, log transform]
+requires: [feature-scaling, log-normal-distribution]
+related: [variance-stabilising-transforms, feature-scaling, stationarity, taylor-series, generalised-linear-model, poisson-regression, negative-binomial-and-overdispersion, poisson-distribution, data-leakage]
+references: [box1964, yeo2000, bartlett1947, anscombe1948, duan1983, warton2011, ohara2010, pedregosa2011]
+status: draft
+updated: 2026-10-11
+---
+
+import { PowerTransformFit } from './PowerTransformFit'
+import { VarianceStabilising } from './VarianceStabilising'
+
+<Definition>
+A **power transform** replaces each value $x$ of a feature or target by $x^\lambda$, suitably shifted and scaled, or
+by $\log x$ when $\lambda = 0$. The **Box–Cox** family is defined for $x > 0$ and the **Yeo–Johnson** family for all
+real $x$; in both, $\lambda$ is usually chosen by maximum likelihood so that the transformed values are as close to
+normal as the family allows <Cite id="box1964" /> <Cite id="yeo2000" />. A **variance-stabilising transform** is a
+fixed transform, such as the square root of counts, chosen so that the variance of the transformed value no longer
+depends on its mean <Cite id="bartlett1947" />.
+</Definition>
+
+## Problem
+
+Many measured quantities are positive and right-skewed: incomes, prices, durations, concentrations, counts. Their
+histograms have a long right tail, and their spread grows with their level. A household income of 200,000 is a
+plausible value, and so is one of 20,000, and a difference of 10,000 means much more at the second than at the first.
+
+Three kinds of method suffer from this.
+
+- **Linear models with Gaussian noise** assume errors of constant variance. When the variance grows with the mean, least
+  squares gives the noisy large values most of the influence and its <NoteLink to="standard-error">standard
+  errors</NoteLink> are wrong.
+- **Methods built on distances and penalties**, such as <Gloss name="knn">k-nearest neighbours</Gloss>, k-means and
+  <NoteLink to="ridge-regression">ridge regression</NoteLink>, let the few values in the tail dominate even after
+  <NoteLink to="feature-scaling">feature scaling</NoteLink>, because standardisation is affine and keeps the tail as
+  long as it was.
+- **Tests and intervals derived under normality** lose their nominal coverage on strongly skewed data.
+
+A transform that compresses large values more than small ones shortens the tail, brings the spread at different levels
+closer together and often makes a relation between variables closer to linear.
+
+## Mechanism
+
+### Logarithms
+
+The logarithm turns ratios into differences: $\log(2x) - \log x = \log 2$ at every $x$. A change from 20,000 to 40,000
+and a change from 200,000 to 400,000 become steps of the same size. If $x$ is
+<NoteLink to="log-normal-distribution">log-normal</NoteLink>, $\log x$ is exactly normal. If the standard deviation
+of $x$ is proportional to its mean, $\log x$ has approximately constant variance (derived below).
+
+The logarithm needs $x > 0$. Data with zeros are often transformed as $\log(x + c)$ for a small constant $c$, most
+commonly $c = 1$. The result depends on $c$, which is arbitrary, and for counts with many zeros no choice of $c$ makes
+the result behave like a normal variable <Cite id="ohara2010" />.
+
+### Box–Cox
+
+Box and Cox embedded the logarithm in a one-parameter family <Cite id="box1964" />:
+
+$$
+x^{(\lambda)} =
+\begin{cases}
+\dfrac{x^\lambda - 1}{\lambda}, & \lambda \ne 0, \\[1ex]
+\log x, & \lambda = 0,
+\end{cases}
+\qquad x > 0.
+$$
+
+Subtracting 1 and dividing by $\lambda$ makes the family continuous in $\lambda$: as $\lambda \to 0$,
+$(x^\lambda - 1)/\lambda \to \log x$. Each member is increasing in $x$, so the order of the values is kept. The
+parameter sets how strongly large values are compressed:
+
+| $\lambda$ | Transform, up to shift and scale | Effect on a right tail |
+| --- | --- | --- |
+| 2 | square | lengthens it |
+| 1 | identity | none |
+| 0.5 | square root | shortens it |
+| 0 | logarithm | shortens it more |
+| −1 | reciprocal | shortens it most |
+
+Values of $\lambda$ below 1 pull in a right tail; values above 1 pull in a left tail.
+
+### Yeo–Johnson
+
+Box–Cox is undefined for $x \le 0$. Yeo and Johnson extended it to the whole real line by applying the Box–Cox form to
+$x + 1$ for non-negative values and a mirrored form to negative values <Cite id="yeo2000" />:
+
+$$
+\psi(x, \lambda) =
+\begin{cases}
+\dfrac{(x + 1)^\lambda - 1}{\lambda}, & x \ge 0,\ \lambda \ne 0, \\[1ex]
+\log(x + 1), & x \ge 0,\ \lambda = 0, \\[1ex]
+-\dfrac{(1 - x)^{2 - \lambda} - 1}{2 - \lambda}, & x < 0,\ \lambda \ne 2, \\[1ex]
+-\log(1 - x), & x < 0,\ \lambda = 2.
+\end{cases}
+$$
+
+The transform is increasing and smooth through $x = 0$, where it is 0 with slope 1. With $\lambda = 1$ it is the
+identity. For non-negative data it is the Box–Cox transform of $x + 1$, which differs from the Box–Cox transform of $x$
+for values near zero.
+
+### Choosing λ by maximum likelihood
+
+Box and Cox chose $\lambda$ by assuming that, for the right $\lambda$, the transformed values are independent draws
+from a normal distribution with some mean $\mu$ and variance $\sigma^2$ <Cite id="box1964" />. The likelihood of the
+original values then includes the Jacobian of the transform, $\prod_i \abs{\mathrm{d}x_i^{(\lambda)}/\mathrm{d}x_i}
+= \prod_i x_i^{\lambda - 1}$. Maximising over $\mu$ and $\sigma^2$ for fixed $\lambda$ gives the sample mean and the
+population variance $\hat\sigma^2(\lambda)$ of the transformed values, and leaves the **profile log-likelihood**
+
+$$
+\ell(\lambda) = -\frac{n}{2} \log \hat\sigma^2(\lambda) + (\lambda - 1) \sum_{i=1}^n \log x_i
+$$
+
+up to a constant. The first term rewards transforms that make the values tightly spread; the second corrects for the
+fact that a transform can shrink every value and so shrink $\hat\sigma^2$ trivially. The estimate $\hat\lambda$
+maximises $\ell$, a one-dimensional problem solved by a bracketing search such as Brent's method. Yeo–Johnson uses the
+same profile with Jacobian term $(\lambda - 1) \sum_i \sgn(x_i) \log(1 + \abs{x_i})$.
+
+In software, each column of a feature matrix gets its own $\hat\lambda$, and the transformed column is usually
+standardised afterwards <Cite id="pedregosa2011" />. Like any fitted preprocessing step, $\hat\lambda$ is estimated
+on the training data and reused unchanged on validation, test and production data.
+
+<PowerTransformFit />
+
+Normality is only the criterion that picks $\lambda$. Most learning methods do not need normal inputs. What they gain
+from the transform is a shorter tail, a more even spread and a more linear relation, which usually come with it.
+
+### Variance-stabilising transforms
+
+For some data the variance is a known function of the mean, $\var(X) = v(\mu)$: counts from a
+<NoteLink to="poisson-distribution">Poisson distribution</NoteLink> have $v(\mu) = \mu$, and a proportion of $m$ trials
+has $v(p) = p(1 - p)/m$. A transform $g$ can then be chosen to make the variance of $g(X)$ constant
+<Cite id="bartlett1947" />; see <NoteLink to="variance-stabilising-transforms">variance-stabilising
+transforms</NoteLink>.
+
+A first-order <NoteLink to="taylor-series">Taylor expansion</NoteLink> of $g$ about $\mu$ gives
+$g(X) \approx g(\mu) + g'(\mu)(X - \mu)$, so
+
+$$
+\var(g(X)) \approx g'(\mu)^2 \, v(\mu).
+$$
+
+Setting this to a constant $c^2$ gives $g'(\mu) = c / \sqrt{v(\mu)}$, and integrating:
+
+| Mean–variance relation | $g$ | Name |
+| --- | --- | --- |
+| $v(\mu) = \mu$ (Poisson) | $2\sqrt{x}$, variance about 1 | square root |
+| $v(\mu) \propto \mu^2$ (constant coefficient of variation) | $\log x$ | logarithm |
+| $v(p) = p(1 - p)/m$ (binomial proportion) | $\arcsin\sqrt{p}$, variance about $1/(4m)$ | arcsine |
+
+The approximation is accurate when the spread of $X$ is small relative to its mean. For small Poisson means Anscombe
+showed that $2\sqrt{x + 3/8}$ keeps the variance closer to 1 <Cite id="anscombe1948" />. Counts with extra variance,
+such as <NoteLink to="negative-binomial-distribution">negative binomial</NoteLink> counts with $v(\mu) = \mu + \mu^2/r$,
+behave like Poisson counts at small means and like the constant-coefficient case at large ones, so neither the square
+root nor the logarithm stabilises them everywhere.
+
+<VarianceStabilising />
+
+For proportions, the **logit** $\log(p/(1 - p))$ maps $(0, 1)$ onto the whole real line and is the link of
+<NoteLink to="logistic-regression">logistic regression</NoteLink>. The arcsine transform was long the default for
+proportions; for binomial data a <NoteLink to="generalised-linear-model">generalised linear model</NoteLink> with a
+logit link models the data directly and is usually more powerful <Cite id="warton2011" />. The same argument applies to
+counts: a Poisson or negative binomial model avoids transforming them at all <Cite id="ohara2010" />.
+
+## Back-transforming predictions
+
+A model fitted to a transformed target $z = g(y)$ predicts on the transformed scale. Mapping a prediction back with
+$g^{-1}$ does not give the mean of $y$, because $g^{-1}$ is non-linear. For the logarithm with normal errors of variance
+$\sigma^2$ on the log scale, $\log y \mid \xvec \sim \Gauss(\mu(\xvec), \sigma^2)$, so
+
+$$
+\expect[y \mid \xvec] = e^{\mu(\xvec) + \sigma^2/2}, \qquad \operatorname{median}(y \mid \xvec) = e^{\mu(\xvec)}.
+$$
+
+The naive back-transform $e^{\hat\mu}$ estimates the median and underestimates the mean by the factor $e^{\sigma^2/2}$.
+With $\sigma = 0.5$ the factor is $e^{0.125} \approx 1.13$: predictions of total cost would be 13% too low on average.
+When the errors are not normal, Duan's **smearing estimate** multiplies $e^{\hat\mu}$ by the average of
+$e^{r_i}$ over the training residuals $r_i$ on the log scale, without assuming a distribution <Cite id="duan1983" />.
+
+Which quantity to report depends on the loss. Under squared error the mean is optimal; under absolute error the median
+is, and the naive back-transform is then correct. Quantiles transform exactly: the $q$ quantile of $y$ is $g^{-1}$ of
+the $q$ quantile of $z$, because $g$ is increasing.
+
+## Cost
+
+Applying a fitted transform costs one elementwise operation per value. Fitting $\lambda$ costs a one-dimensional
+search, each step of which passes once over the column, so the fit is linear in the number of rows per feature.
+
+## Trade-offs
+
+- **Box–Cox or Yeo–Johnson.** Box–Cox needs strictly positive data and treats a variable with a natural zero, such as
+  a price, on its own scale. Yeo–Johnson accepts zeros and negative values, at the price of an implicit shift by 1
+  that makes its result depend on the units of $x$.
+- **Fitted λ or fixed transform.** A fixed log or square root is interpretable and needs no fitting; a fitted
+  $\lambda$ adapts to the data but changes when the data change, which changes what the feature means.
+- **Transform or model.** A transform changes the scale on which the model's errors and effects are additive. For a
+  target, a <NoteLink to="generalised-linear-model">generalised linear model</NoteLink> with a suitable link and
+  variance function keeps predictions on the original scale and needs no back-transform.
+- **Monotone transforms and trees.** Trees and tree ensembles split on thresholds, so any increasing transform of a
+  feature leaves their fitted partitions unchanged. Power transforms of features matter for linear, distance-based and
+  neural models, not for trees; a transform of the target matters for all of them.
+
+## Pitfalls
+
+- **Fitting λ on all the data.** $\hat\lambda$ is a statistic of the data like a mean. Estimated before splitting, it
+  sees the test rows; see <NoteLink to="data-leakage">data leakage</NoteLink>.
+- **Shifting to make values positive.** Adding a constant before Box–Cox changes the result for the smallest values,
+  and a constant chosen from the data is another fitted parameter.
+- **Test values outside the training range.** A Box–Cox transform fitted on positive data fails on a zero or negative
+  value at prediction time.
+- **Reporting effects on the wrong scale.** A coefficient on $\log y$ is a relative effect: a change of $b$ in $\log y$
+  multiplies $y$ by $e^b$. Read as an additive effect on $y$, it is wrong.
+- **Expecting normality.** Maximum likelihood finds the $\lambda$ that makes the data as normal as the family allows.
+  Bimodal or heavy-tailed data stay non-normal after any power transform.

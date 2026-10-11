@@ -1,0 +1,120 @@
+---
+title: Forecasting setups
+kind: concept
+summary: 'A forecasting setup fixes how past values become training examples: the look-back window, the horizon, whether multi-step forecasts are made recursively, directly or all at once, whether one model serves many series, and which covariates are known ahead.'
+tags: [data, time-series, forecasting]
+aliases: [forecasting problem formulation, look-back window, lookback window, forecast horizon, recursive forecasting, direct forecasting, multi-output forecasting, MIMO forecasting, local forecasting model, known future covariates]
+requires: [time-series-windowing]
+related: [time-series-cross-validation, probabilistic-forecasting, hierarchical-forecast-reconciliation, neural-forecasting-models, temporal-fusion-transformer, deepar, series-normalisation, time-series-feature-extraction, prediction-intervals, data-leakage]
+references: [bentaieb2012, monteromanso2021, lim2021, hyndman2021, salinas2020]
+status: draft
+updated: 2026-10-11
+---
+
+import { ForecastExamples } from './ForecastExamples'
+
+<Definition>
+A **forecasting setup** turns series $y_{i,1}, \dots, y_{i,T}$, $i = 1, \dots, N$, into a supervised learning problem.
+At a **forecast origin** $t$, the input is the **look-back window** $y_{i,t-L+1}, \dots, y_{i,t}$ of length $L$, with
+any covariates, and the target is the next $H$ values $y_{i,t+1}, \dots, y_{i,t+H}$, where $H$ is the **horizon**. The
+setup also fixes how the $H$ values are predicted, whether one model serves all $N$ series, and which covariates are
+available at the origin.
+</Definition>
+
+## Intuition
+
+Classical forecasting methods fit one model to one series and extrapolate it. Machine-learning forecasters instead
+learn a function from recent history to the future, trained on many (history, future) pairs cut from the data. Every
+choice in cutting those pairs changes what the model can learn and what it can be asked at prediction time. The same
+network can be a good or a useless forecaster depending on the setup it is trained in.
+
+## Look-back and horizon
+
+The horizon $H$ comes from the decision the forecast serves: a week of daily values to plan staffing, a quarter of
+weekly values to plan stock. The look-back $L$ is a modelling choice. It must cover the longest pattern that matters,
+such as one or two seasonal cycles. A longer look-back gives more context and fewer training examples per series, and
+more weights for the model to learn.
+
+Sliding the origin along a series of length $T$ in steps of $s$ gives about $(T - L - H)/s + 1$ examples.
+
+<ForecastExamples />
+
+## Multi-step strategies
+
+A forecast of $H > 1$ values can be produced in three ways <Cite id="bentaieb2012" />.
+
+- **Recursive** (iterated). Train one model $f$ to predict one step ahead, $\hat y_{t+1} = f(y_{t-L+1}, \dots, y_t)$.
+  To go further, append $\hat y_{t+1}$ to the window and predict again, $H$ times. One model serves every horizon, but
+  each step feeds the model its own errors, which accumulate with the horizon. Training on true past values and
+  predicting from predicted ones is a mismatch between training and use.
+- **Direct**. Train $H$ separate models, $\hat y_{t+h} = f_h(y_{t-L+1}, \dots, y_t)$ for $h = 1, \dots, H$. No errors
+  are fed back, but $H$ models cost $H$ times as much, and their forecasts need not agree with each other.
+- **Multi-output** (multiple-input multiple-output, MIMO). Train one model that outputs the whole vector
+  $(\hat y_{t+1}, \dots, \hat y_{t+H})$. It shares what it learns across horizons and keeps the forecasts coherent.
+  <NoteLink to="n-beats">N-BEATS</NoteLink> and the temporal fusion transformer work this way; DeepAR instead
+  samples recursively.
+
+In a large comparison on the 111 series of the NN5 competition, multi-output strategies forecast best
+<Cite id="bentaieb2012" />. The same study found that removing the season before modelling improved accuracy for every
+strategy; see <NoteLink to="series-normalisation">normalising time series</NoteLink>.
+
+## Local and global models
+
+A **local** model is fitted to each series separately: $N$ series, $N$ models. A **global** model is one function
+fitted to all series at once, so every series contributes training examples to every other.
+
+Global models are not more restrictive than local ones. For any set of series, a global model exists that produces the
+same forecasts as a set of local models, with no assumption that the series are similar
+<Cite id="monteromanso2021" />. The complexity a local method needs grows with the number of series, while a global
+model's stays fixed, so with many series a global model can afford much more capacity, such as a long memory. Global
+linear models matched local methods' accuracy with two orders of magnitude fewer parameters in the same study.
+
+A global model needs the series on a common scale; see
+<NoteLink to="series-normalisation">normalising time series</NoteLink>. It can also take an identifier or static
+attributes of each series as inputs, so that it can still treat series differently.
+
+## Covariates
+
+Covariates are inputs other than the series' own past. Their availability at the forecast origin sorts them into three
+kinds, the split the <NoteLink to="temporal-fusion-transformer">temporal fusion transformer</NoteLink> builds its
+architecture around <Cite id="lim2021" />.
+
+| Kind                | Known for                        | Examples                                          |
+| ------------------- | -------------------------------- | ------------------------------------------------- |
+| Static              | the whole series, never changing | store size, product category, location            |
+| Known-future        | the past and the whole horizon   | calendar, holidays, planned prices and promotions |
+| Observed-only (past) | the past only                    | weather actuals, other products' sales, web traffic |
+
+A known-future covariate enters the model at every step of the horizon. An observed-only covariate enters only in the
+look-back window; using its future values at training time, when they are in the data, and then having to forecast
+them at prediction time is a <NoteLink to="data-leakage">leak</NoteLink>. A weather forecast is a known-future covariate
+only if the forecast as issued at the origin is used, not the weather that followed.
+
+## Backtesting and forecast origins
+
+A setup is evaluated by repeating the forecast from many origins, training only on data before each one; see
+<NoteLink to="time-series-cross-validation">time-series cross-validation</NoteLink>. Errors are reported per horizon
+$h = 1, \dots, H$, because they grow with $h$ <Cite id="hyndman2021" />. Examples whose targets lie after an origin must
+not appear in that origin's training set; with overlapping examples this removes the last $H$ origins before the test
+period from training.
+
+## Point and probabilistic targets
+
+The target can be a point forecast, a set of quantiles or a full predictive distribution. A distribution lets the
+decision that uses the forecast trade off over- and under-forecasting; see
+<NoteLink to="probabilistic-forecasting">probabilistic forecasting</NoteLink>. Global probabilistic models such as
+<NoteLink to="deepar">DeepAR</NoteLink> combine a multi-step setup with a likelihood per step <Cite id="salinas2020" />.
+Series organised in a hierarchy, such as products within stores within regions, add the constraint that forecasts add
+up; see <NoteLink to="hierarchical-forecast-reconciliation">hierarchical forecast reconciliation</NoteLink>.
+
+## Pitfalls
+
+- **Random splits of examples.** Overlapping examples put the test period's values into training as inputs and
+  targets of neighbouring examples.
+- **Covariates unavailable at the origin.** Every input must be known when the forecast is made: actual weather, final
+  prices and revised figures often are not.
+- **Lags shorter than the horizon.** In a direct or tabular setup, a feature such as "yesterday's value" is unknown when
+  forecasting a week ahead; see <NoteLink to="time-series-feature-extraction">feature extraction</NoteLink>.
+- **One origin.** A single test period measures one stretch of luck; average over many origins.
+- **Horizon mismatch.** A model trained for $H = 7$ and used for $H = 28$ by recursion meets inputs it never saw in
+  training.

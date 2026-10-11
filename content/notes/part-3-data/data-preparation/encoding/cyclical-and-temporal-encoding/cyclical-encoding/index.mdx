@@ -1,0 +1,186 @@
+---
+title: 'Cyclical and temporal encoding'
+kind: technique
+summary: 'A cyclical value, such as an hour, a weekday or an angle, wraps around at the end of its period $P$. Encoding it as $(\sin 2\pi v/P, \cos 2\pi v/P)$ puts it on a circle, so the end of the cycle sits next to its start; more harmonics or periodic splines let a model fit several peaks per cycle.'
+tags: [data, data-preparation, feature-engineering, time-series]
+aliases: [sine-cosine encoding, sin-cos encoding, trigonometric encoding, cyclical features, periodic features, Time2Vec, circular encoding]
+requires: [sine-and-cosine, numeric-encoding]
+related: [date-and-time-features, categorical-encoding, fourier-series, discrete-fourier-transform, cyclic-factor-and-by-terms, positional-and-coordinate-encoding, seasonal-autoregressive-integrated-moving-average]
+references: [sklearncyclical, hyndman2021, kazemi2019]
+status: draft
+updated: 2026-10-11
+---
+
+<Definition>
+A **cyclical value** $v$ lives on a circle of **period** $P$: $v$ and $v + P$ mean the same thing. The hour of the day
+has $P = 24$, the day of the week $P = 7$, the month $P = 12$ and a compass bearing $P = 360°$. Its **phase** is
+$\theta = 2\pi v / P$. The **sine–cosine encoding** maps $v$ to the point $(\sin\theta, \cos\theta)$ on the unit circle.
+The **Fourier encoding** with $K$ harmonics adds $\sin k\theta$ and $\cos k\theta$ for $k = 1, \dots, K$. A **periodic
+spline encoding** uses B-splines whose knots wrap around the circle.
+</Definition>
+
+## Problem
+
+Stored as a number, a cyclical value has a false jump. Hour 23 and hour 0 are one hour apart but 23 units apart as
+numbers. A <NoteLink to="linear-regression">linear model</NoteLink> on the raw hour fits one slope across the day, so
+it predicts a large step at midnight that is not in the data. A nearest-neighbour model or a kernel treats 23:00 and
+00:00 as far apart.
+
+<NoteLink to="categorical-encoding">One-hot encoding</NoteLink> removes the jump by treating each hour as a separate
+level. It also removes the order: hour 7 and hour 8 become as unrelated as hour 7 and hour 19, and each level's effect
+is estimated only from its own rows.
+
+An encoding of a cyclical value should keep the order, close the circle, and let the model fit the shape of the effect
+across the cycle with few parameters.
+
+## Mechanism
+
+### Sine–cosine encoding
+
+Two coordinates are needed. With the sine alone, hours 3 and 9 both map to $\sin(\pi/4) \approx 0.71$; with the cosine
+alone, hours 3 and 21 coincide. Together they fix the point on the circle and hence the hour.
+
+The Euclidean distance between two encodings depends only on the circular difference $\Delta$ between the values:
+
+$$
+\norm{(\sin\theta_1, \cos\theta_1) - (\sin\theta_2, \cos\theta_2)} = 2\abs{\sin\paren{\frac{\pi\Delta}{P}}}.
+$$
+
+This is the chord between the two points. It is 0 for equal values, grows with the gap, and is largest, 2, for values
+half a period apart. Distance-based methods then see the cycle correctly.
+
+A linear model on the two coordinates fits
+
+$$
+f(v) = c + a\sin\theta + b\cos\theta = c + R\cos(\theta - \theta^\ast),
+$$
+
+with $R = \sqrt{a^2 + b^2}$ and $\theta^\ast = \operatorname{atan2}(a, b)$. That is one smooth wave per period, with one
+peak at phase $\theta^\ast$ and one trough exactly half a period later. Nothing else can be fitted.
+
+### Several harmonics
+
+Adding the harmonics $k = 2, \dots, K$ gives a truncated <NoteLink to="fourier-series">Fourier series</NoteLink> in the
+phase:
+
+$$
+f(v) = c + \sum_{k=1}^{K} \paren{a_k \sin k\theta + b_k \cos k\theta}.
+$$
+
+With $K$ harmonics the effect can have up to $K$ peaks per cycle, at any positions, with $2K + 1$ parameters. Fourier
+terms of this kind are the standard way to model long seasonal periods in regression-based forecasting, where a seasonal
+dummy per period would need hundreds of parameters <Cite id="hyndman2021" />.
+
+For a value that takes only the $P$ integer levels $0, \dots, P - 1$, harmonics up to $K = P/2$ (for even $P$) give
+exactly $P$ functions including the constant; the sine of the last harmonic is zero at every level and drops out. They
+span every function of the $P$ levels, as the <NoteLink to="discrete-fourier-transform">discrete Fourier
+transform</NoteLink> does, so the model is then as flexible as one-hot encoding. Fewer harmonics give a smoother, more
+constrained effect between the two extremes.
+
+### Periodic splines
+
+A periodic spline encoding places B-spline knots around the circle and lets the splines at the end wrap onto the
+start, so that every basis function is a smooth local bump on the circle. Unlike the global sine waves, each bump
+affects only part of the cycle. A short peak, such as a morning rush hour, can then be fitted without disturbing the
+rest of the day.
+
+In scikit-learn's bike-sharing example, a <NoteLink to="ridge-regression">ridge regression</NoteLink> on hourly demand
+had a <Gloss name="mean-absolute-error">mean absolute error</Gloss> of 0.142 with the raw hour, month and weekday, 0.125
+with one sine–cosine pair for each, 0.099 with one-hot encodings and 0.097 with periodic splines (12 for the hour), all
+as fractions of the maximum demand <Cite id="sklearncyclical" />. Demand has two peaks on working days, at the morning
+and evening commutes, and a single sine–cosine pair can fit only one. The splines matched one-hot encoding with fewer
+columns.
+
+### Ordinal and one-hot alternatives
+
+- **Ordinal value.** Fine for tree models, which split hours into ranges. A range that wraps around, such as 22:00 to
+  02:00, needs two splits, which deeper trees find.
+- **One-hot.** Most flexible: any shape, including sharp spikes, at the cost of $P$ columns and no sharing between
+  neighbouring levels. It suits short periods with plenty of data per level, and fails for fine resolutions such as
+  minute of the day ($P = 1440$).
+- **Sine–cosine or Fourier.** Smooth, few columns, and correct distances; it underfits sharp or multi-peaked effects
+  unless harmonics are added.
+- **Periodic splines.** Smooth and local; the number of splines sets the trade-off between the two.
+
+### Timestamps and durations
+
+A timestamp is not cyclical as a whole. It is a position on a line, the elapsed time, carrying several cycles at once:
+the time of day, the day of the week, the day of the year. A model gets a timestamp as several features: elapsed time
+for trends, encoded as an ordinary number (see <NoteLink to="numeric-encoding">numeric encoding</NoteLink>), and one
+phase per cycle, each encoded as above. Which calendar parts to derive, and in which time zone, is covered in
+<NoteLink to="date-and-time-features">date and time features</NoteLink>.
+
+Two cycles can interact: the hourly pattern on a Sunday differs from that on a Monday. One encoding per cycle cannot
+express that. Encoding the hour of the week ($P = 168$) or adding products of the hour encoding with a working-day
+indicator can. In the bike-sharing example, adding products of the hour splines with a working-day indicator lowered
+the error from 0.097 to 0.078 <Cite id="sklearncyclical" />.
+
+Durations, such as the time since the last purchase, are ordinary non-negative numbers, not cycles.
+
+Time2Vec learns the encoding instead: one linear component $\omega_0\tau + \varphi_0$ and $k$ periodic components
+$\sin(\omega_i\tau + \varphi_i)$, whose frequencies $\omega_i$ and phases $\varphi_i$ are trained with the rest of the
+model <Cite id="kazemi2019" />. The model then finds the periods in the data rather than being told them.
+
+### Calendar values with unequal periods
+
+Some calendar cycles do not have a fixed length. A month has 28 to 31 days, a year 365 or 366, and a year has 52 or 53
+ISO weeks. Dividing by the actual length of the current cycle keeps the phase in $[0, 1)$: the day of the month $d$ in
+a month of $L$ days has phase $2\pi(d - 1)/L$, and the day of the year uses the length of that year. Moving holidays,
+such as Easter, fall on different days of the year from year to year and are better given as indicator features.
+
+### Angles and directions
+
+Bearings, wind directions and joint angles are cyclical with $P = 360°$ or $2\pi$. When a direction comes with a
+magnitude, such as wind speed, the products $s\sin\theta$ and $s\cos\theta$ are the velocity components. They are
+continuous through calm conditions, where the direction is undefined, and are often the better pair of features.
+
+## Worked example
+
+Encode hours with $P = 24$.
+
+- **23:00 and 01:00.** $\Delta = 2$ hours, so the distance is $2\sin(2\pi/24) = 2\sin 15° = 0.52$. The raw values are
+  22 apart.
+- **11:00 and 13:00.** Also $\Delta = 2$ and distance 0.52: the encoding treats both pairs alike, as it should.
+- **00:00 and 12:00.** $\Delta = 12$, half the period, and the distance is 2, the largest possible.
+
+Suppose demand peaks at 08:00 and again at 17:00. A linear model on one sine–cosine pair fits
+$c + R\cos(2\pi(h - h^\ast)/24)$: one peak at $h^\ast$ and a trough at $h^\ast + 12$. With $h^\ast = 8$ the trough falls
+at 20:00, three hours after the evening peak, so the evening peak cannot be fitted. Two harmonics allow two peaks, and
+$K = 12$ harmonics, 24 functions with the constant once the vanishing $\sin 12\theta$ is dropped, fit any hourly profile
+exactly.
+
+## Cost
+
+| Encoding                     | Columns per cyclical value |
+| ---------------------------- | -------------------------- |
+| Raw value                    | 1                          |
+| Sine–cosine                  | 2                          |
+| Fourier, $K$ harmonics       | $2K$                       |
+| Periodic splines             | number of splines          |
+| One-hot, $P$ levels          | $P$ (or $P - 1$)           |
+
+None of the fixed encodings needs fitting beyond knowing the period. Time2Vec adds $2k$ trainable parameters per
+time input.
+
+## Trade-offs
+
+- **Smoothness against sharpness.** Few harmonics or splines share strength between neighbouring values and smooth the
+  effect; one-hot fits any spike but estimates each level alone.
+- **Linear models against flexible ones.** The encoding matters most for linear and additive models. A gradient-boosted
+  ensemble on the ordinal value already fits non-monotone effects, and in scikit-learn's example it beat every linear
+  model on raw features <Cite id="sklearncyclical" />.
+- **Fixed against learned periods.** A known period, such as a day, is best given explicitly. Learned frequencies help
+  when the periods are unknown or not calendar-aligned.
+
+## Pitfalls
+
+- **Dividing by the largest value instead of the period.** Hours run from 0 to 23 but the period is 24. Using
+  $\theta = 2\pi v/23$ puts 23:00 on top of 00:00.
+- **One encoding for a multi-peaked effect.** A single sine–cosine pair forces one peak and one trough half a cycle
+  apart. Check the shape of the effect, or add harmonics.
+- **Splitting sine and cosine in a tree.** Each coordinate alone is ambiguous, so a tree needs splits on both to
+  isolate a range of hours. For trees, the ordinal value is usually simpler.
+- **Mixing time zones.** The phase of the hour depends on whether the timestamp is in UTC or local time. Behaviour
+  follows local time; see <NoteLink to="date-and-time-features">date and time features</NoteLink>.
+- **Encoding a duration as a cycle.** Elapsed time grows without bound and has no period. Encoding it with a period
+  makes distant times look alike.

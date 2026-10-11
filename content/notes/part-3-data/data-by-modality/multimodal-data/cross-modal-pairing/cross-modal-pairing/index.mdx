@@ -1,0 +1,115 @@
+---
+title: 'Cross-modal pairing and alignment'
+kind: concept
+summary: 'Paired multimodal data link an example in one modality to its counterpart in another: an image to its caption, audio to its transcript, a video segment to its narration. Pairs may be exact, loose or wrong, one-to-many, and may also link parts within each pair.'
+tags: [data, multimodal, computer-vision, nlp]
+aliases: [paired data, image-text pairs, cross-modal correspondence, noisy correspondence, weak pairing, visual grounding, phrase grounding, many-to-many correspondence]
+requires: [contrastive-learning]
+related: [clip, paired-data-curation, temporal-synchronisation, multiple-instance-learning, learning-with-noisy-labels, image-text-datasets, image-annotation-formats, speech-transcripts-and-alignment, evaluating-retrieval-systems, train-validation-and-test-splits]
+references: [chen2015cococaptions, sharma2018, jia2021, miech2019, miech2020, huang2021ncr, plummer2015, krishna2017, chun2021, chun2022]
+status: draft
+updated: 2026-10-11
+---
+
+<Definition>
+A paired multimodal dataset links each example in one modality to one or more counterparts in another: an image to its
+captions, a recording to its transcript, a video segment to its narration. The pairing is itself data. It can be written
+for the example or found next to it, correct or wrong, one-to-one or many-to-many, and it can link whole examples or
+parts of them, such as a phrase to an image region or a word to a time interval.
+</Definition>
+
+## Intuition
+
+In a paired dataset the label of an image is its caption. Everything said about labels applies to pairs: they can be
+missing, wrong, ambiguous or noisier in some parts of the data than in others. Contrastive training, the usual way to
+learn from pairs (see <NoteLink to="contrastive-learning">contrastive learning</NoteLink> and
+<NoteLink to="clip">CLIP</NoteLink>), adds a second assumption: every partner in the batch other than an example's own
+is a negative. A wrong pair teaches the model to pull unrelated things together; a missing pair, a second caption that
+also fits, teaches it to push related things apart.
+
+## Kinds of pairs
+
+Pairs differ by how the link between the two halves was made.
+
+- **Written for the example.** Annotators describe each image. <Gloss name="coco" /> Captions provides five independent
+  human captions for each training and validation image, over one and a half million captions for over 330,000 images
+  <Cite id="chen2015cococaptions" />. Such pairs are accurate and expensive, and they describe what annotators were
+  asked to describe.
+- **Found next to the example.** Web pages give images alt-text. Conceptual Captions filtered about 3.3 million such
+  pairs and replaced proper names with general terms, such as "actor" for a named person <Cite id="sharma2018" />.
+  ALIGN used over a billion alt-text pairs with almost no filtering and found that the scale of the corpus made up for
+  its noise <Cite id="jia2021" />.
+- **Recorded at the same time.** A video's narration, a meeting's speech and its slides, a sensor stream and the
+  activity it measures. HowTo100M cut 136 million clips with their narrations from 1.22 million instructional videos; in
+  a manual check of 400 clip–narration pairs, only 51% mentioned at least one object or action visible in the clip
+  <Cite id="miech2019" />. Co-occurrence in time makes these pairs depend on
+  <NoteLink to="temporal-synchronisation">temporal synchronisation</NoteLink>.
+- **Produced by a model.** Transcripts from a speech recogniser, captions from a captioning model. They carry the
+  model's error rate and style (see <NoteLink to="paired-data-curation">curating paired data</NoteLink> on rewriting).
+- **Paired by construction.** Rendered scenes with their scene descriptions, or two views of one object. The pairing is
+  exact, and the data differ from real data.
+
+## Weak and noisy pairs
+
+A pair can fail in several ways: the text describes something else on the page; it describes only part of the image; it
+describes the right event at the wrong moment; or it is boilerplate, such as a file name. Web-collected Conceptual
+Captions is estimated to contain 3% to 20% incorrect pairs <Cite id="huang2021ncr" />.
+
+Wrong pairs are label noise, and the methods of <NoteLink to="learning-with-noisy-labels">learning with noisy
+labels</NoteLink> carry over. The Noisy Correspondence Rectifier uses the observation that networks fit clean pairs
+before noisy ones: it splits training pairs into clean and noisy sets by their loss and then corrects the
+correspondence labels of the noisy set <Cite id="huang2021ncr" />.
+
+Pairs that are right but misaligned in time call for a different treatment. A narrator often describes an action before
+or after it happens. MIL-NCE treats the narrations near a clip as a bag of candidate positives, of which at least one is
+expected to match, and scores the bag as a whole; this is
+<NoteLink to="multiple-instance-learning">multiple-instance learning</NoteLink> applied to pairing
+<Cite id="miech2020" />.
+
+## Grounding regions and segments
+
+A pair-level link says that a caption describes an image; a part-level link says which words describe which pixels.
+Flickr30k Entities adds to Flickr30k's 158,000 captions 244,000 chains linking mentions of the same entity across an
+image's captions, and associates them with 276,000 hand-drawn bounding boxes <Cite id="plummer2015" />. Visual Genome
+annotates over 100,000 images with, on average, 21 objects, 18 attributes and 18 relationships between objects each,
+together with region descriptions <Cite id="krishna2017" />. The time-based equivalents link words to intervals of
+audio (see <NoteLink to="speech-transcripts-and-alignment">speech transcripts and alignment</NoteLink>) and sentences to
+moments in a video.
+
+Part-level links are stored as coordinates in one half of the pair and spans in the other (see
+<NoteLink to="image-annotation-formats">image annotation formats</NoteLink>). Every transform of the image must update
+the coordinates, and a transform can break the text: a crop can remove the region a phrase refers to.
+
+## Many-to-many correspondences
+
+Most pairings are many-to-many in truth and one-to-one in the data. An image fits many captions, and a caption such as
+"a man riding a wave on a surfboard" fits many images. A dataset records only the pairs that were collected; every other
+fitting pair is unrecorded and, in contrastive training and retrieval evaluation, counted as a mismatch.
+
+The effect on evaluation is measurable. ECCV Caption added machine-proposed, human-verified correspondences to COCO's
+validation images and found 3.6 times as many positive image-to-caption associations and 8.5 times as many
+caption-to-image associations as the original annotations record; rankings of 25 models changed when evaluated against
+the extended correspondences <Cite id="chun2022" />. Probabilistic embeddings represent each image and caption as a
+distribution rather than a point, so that one caption can sit close to several images <Cite id="chun2021" />.
+
+## Assumptions
+
+- Each recorded pair is a true correspondence, or its errors can be modelled as label noise.
+- Pairs not recorded are mismatches; this holds only approximately and fails most for generic captions.
+- Part-level coordinates and spans refer to the same version of each half: the same image resolution, crop and text
+  tokenisation.
+
+## Pitfalls
+
+- **Splitting by pair instead of by item.** An image with five captions split across training and test sets leaks the
+  image into the test set. Splits are made by image, by video or by source document (see
+  <NoteLink to="train-validation-and-test-splits">train, validation and test splits</NoteLink>).
+- **Augmentations that change the text's truth.** A horizontal flip makes "on the left" wrong; colour jitter makes "a
+  red car" wrong; a crop can remove the object a caption names. Augmentation of paired data must preserve the pairing or
+  edit the text with it.
+- **<Gloss name="fn">False negatives</Gloss> in retrieval metrics.** Recall at $K$ against one recorded partner
+  understates a model that retrieves an unrecorded but correct partner, and penalises models unequally.
+- **Model-made pairs as ground truth.** Transcripts and captions from models contain the models' errors; evaluating a
+  model against them measures agreement with another model.
+- **Duplicates across splits.** The same image, or the same caption template, can appear many times in web data and in
+  both training and test sets.

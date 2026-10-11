@@ -1,0 +1,150 @@
+---
+title: 'Sets, lists and multi-valued fields'
+kind: technique
+summary: 'A multi-valued field holds a variable number of values per record, such as tags, genres or the items in a basket. Multi-hot vectors, weighted counts, pooled embeddings and set encoders turn it into a fixed-size input without depending on the order in which the values were listed.'
+tags: [data, data-preparation, feature-engineering, embeddings, recommender-systems]
+aliases: [multi-hot encoding, multi-hot vector, multi-label binarizer, bag of items, embedding bag, pooled embeddings, set-valued features, list features]
+requires: [categorical-encoding]
+related: [bag-of-words, term-frequency-inverse-document-frequency, word-embeddings, event-sequences, feature-construction, encoding-targets, scaled-dot-product-attention]
+references: [covington2016youtube, naumov2019dlrm, zaheer2017, zhou2018din, weinberger2009]
+status: draft
+updated: 2026-10-11
+---
+
+<Definition>
+A **multi-valued field** holds a finite collection of values from a vocabulary $V$ for each record: a set
+$S \subseteq V$ when each value appears at most once, a multiset when values repeat, or a list when order matters. The
+**multi-hot encoding** maps $S$ to $\xvec \in \set{0, 1}^{\abs{V}}$ with $x_v = 1$ exactly when $v \in S$. A **pooled
+embedding** gives each value $v$ a vector $\evec_v \in \reals^k$ and maps $S$ to a pooled vector such as the mean
+$\frac{1}{\abs{S}}\sum_{v \in S}\evec_v$. A **set encoder** is a learned function of $S$ that does not depend on the
+order of its elements.
+</Definition>
+
+## Problem
+
+Many records carry a list rather than a single value: the tags of an article, the genres of a film, the diagnosis codes
+of a hospital visit, the products in a basket, the videos a user watched. The length varies from record to record, and
+the order in which the values are stored is usually arbitrary. A model needs a fixed-size input.
+
+The tempting shortcut is to spread the list over numbered columns, "genre 1", "genre 2", "genre 3", and one-hot encode
+each. That makes the encoding depend on the storage order: a film stored as (Comedy, Romance) and one stored as
+(Romance, Comedy) get different features, and the model learns a separate effect of Comedy for each column. Records
+with more values than columns lose the rest.
+
+## Mechanism
+
+### Multi-hot vectors
+
+The multi-hot vector has one column per vocabulary item and a 1 for each item present. It is the
+<NoteLink to="categorical-encoding">one-hot encoding</NoteLink> summed over the items, so it does not depend on order. A
+linear model on it adds one weight per item present:
+
+$$
+f(S) = b + \sum_{v \in S} w_v.
+$$
+
+Each item's effect is estimated from every record that contains it, whatever position it was stored in.
+
+The vocabulary needs the same care as a high-cardinality category. Items seen rarely in training get noisy weights,
+and items never seen are dropped. A minimum count with an "other" column, or
+<NoteLink to="feature-hashing-for-text">feature hashing</NoteLink> into a fixed number of columns, bounds the width
+<Cite id="weinberger2009" />.
+
+The number of items is also in the encoding: a record with twenty tags has twenty active columns and one with two has
+two. If size should not matter, divide by $\abs{S}$; if it should, add $\abs{S}$ as a separate feature so the model can
+use it deliberately.
+
+### Counts and weights
+
+When values repeat, a count per item keeps the multiplicity: the number of times each product was bought or each word
+was used. Text is the standard case: a document is a multiset of tokens, and the
+<NoteLink to="bag-of-words">bag of words</NoteLink> and
+<NoteLink to="term-frequency-inverse-document-frequency">TF-IDF</NoteLink> are multi-hot encodings with counts and
+weights. For histories, weights can decay with the age of each event, so recent items count more.
+
+### Pooled embeddings
+
+With thousands or millions of items, multi-hot vectors are wide and every item's weight is learned independently. An
+embedding table instead gives each item a dense vector $\evec_v \in \reals^k$, learned with the model, and the field
+becomes a pool of the vectors of its items:
+
+- **Sum:** $\sum_{v \in S}\evec_v$, which grows with the number of items.
+- **Mean:** $\frac{1}{\abs{S}}\sum_{v \in S}\evec_v$, which does not.
+- **Max:** the elementwise maximum, which records whether any item is strong in each dimension.
+
+The mean is the multi-hot vector times the embedding matrix, divided by $\abs{S}$, so pooling is a learned linear
+projection of the multi-hot encoding. YouTube's candidate-generation network averaged the embeddings of a user's
+watched videos, and separately of their search tokens, into fixed-width inputs <Cite id="covington2016youtube" />.
+Industrial recommendation models handle every sparse multi-valued feature this way, with one embedding table per field
+and a pooling step <Cite id="naumov2019dlrm" />.
+
+Items with similar effects get similar vectors, so the model shares strength between them, which a multi-hot linear
+model cannot do.
+
+### Ordered lists
+
+When order carries information, as in a session of clicks or a patient's sequence of visits, the field is a sequence,
+not a set. It is usually truncated to the most recent $N$ items and given to a sequence model with a
+<NoteLink to="positional-and-coordinate-encoding">positional encoding</NoteLink>, or encoded as an
+<NoteLink to="event-sequences">event sequence</NoteLink> with times between events.
+
+### Set encoders
+
+A set encoder learns the whole map from a set to a vector. Every function of a set of elements from a countable
+universe that does not depend on order can be written as
+
+$$
+f(S) = \rho\paren{\sum_{v \in S}\phi(v)}
+$$
+
+for suitable functions $\phi$ and $\rho$, which Deep Sets implement as two neural networks with sum pooling between
+them <Cite id="zaheer2017" />. Pooled embeddings are the special case where $\phi$ is a table lookup and $\rho$ is the
+rest of the model.
+
+Attention pooling replaces the fixed sum by a weighted one, with weights computed from the items and from a query, such
+as the candidate item being scored. The Deep Interest Network weights a user's past behaviours by their relevance to
+the advertisement being ranked, so different candidates see different summaries of the same history
+<Cite id="zhou2018din" />.
+
+## Worked example
+
+A vocabulary of four genres is (Action, Comedy, Drama, Romance). A film tagged Comedy and Romance gets the multi-hot
+vector $(0, 1, 0, 1)$, whatever order the tags were stored in.
+
+- **Linear model.** With item weights $\wvec = (0.5, 0.2, -0.1, 0.3)$ and intercept 0, the film scores
+  $0.2 + 0.3 = 0.5$.
+- **Mean pooling.** With two-dimensional embeddings $\evec_{\text{Comedy}} = (1, 0)$ and
+  $\evec_{\text{Romance}} = (0, 1)$, the film's pooled vector is $(0.5, 0.5)$; a film tagged only Comedy gets $(1, 0)$.
+- **Sum pooling.** The same films get $(1, 1)$ and $(1, 0)$: the second film has a smaller vector because it has fewer
+  tags.
+- **Numbered columns.** Stored as genre 1 = Comedy, genre 2 = Romance, and another film as genre 1 = Romance, genre 2 =
+  Comedy, the two films share no active one-hot column, although they have the same genres.
+
+## Cost
+
+A multi-hot vector has $\abs{V}$ columns, of which $\abs{S}$ are nonzero, so sparse storage costs $O(\abs{S})$ per
+record. An embedding table has $\abs{V} \times k$ parameters, and pooling costs $O(\abs{S}k)$ per record. Embedding
+tables for fields with millions of items dominate the memory of large recommendation models.
+
+## Trade-offs
+
+- **Additive against interacting.** A linear model on a multi-hot vector adds item effects. Pairs that matter
+  together, such as two products bought in the same basket, need product features (see
+  <NoteLink to="feature-construction">feature construction</NoteLink>) or a model that forms interactions.
+- **Independent against shared.** Multi-hot weights are interpretable and estimated item by item; embeddings share
+  information between similar items and need more data and training.
+- **Mean against sum.** The mean hides how many items there are; the sum mixes the count into every dimension.
+- **Fixed against attentive pooling.** Attention pooling summarises a long history differently for each query, at a
+  cost proportional to the history length for every prediction.
+
+## Pitfalls
+
+- **Spreading a list over numbered columns.** The encoding then depends on storage order and truncates long lists.
+- **Histories that include the future.** A list of a user's purchases must contain only those made before the moment
+  of prediction. Building it from the full log leaks later behaviour, sometimes the target itself; see
+  <NoteLink to="data-leakage">data leakage</NoteLink> and <NoteLink to="feature-stores">feature stores</NoteLink>.
+- **Treating a multiset as a set.** Deduplicating a basket discards how many of each item was bought.
+- **A vocabulary fixed at training time.** New tags and products appear constantly; without a fallback they are
+  silently dropped.
+- **Unbounded list lengths.** A few records with thousands of items can dominate memory and training time; cap the
+  length, keeping the most recent or most relevant items.

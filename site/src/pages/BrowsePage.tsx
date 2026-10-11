@@ -5,6 +5,7 @@ import { CategoryTrail } from '@/components/note/TaxonomyTrail'
 import { ConceptMap } from '@/components/browse/ConceptMap'
 import { filterNotes, inCategory } from '@/components/browse/filters'
 import { NoteCard } from '@/components/browse/NoteCard'
+import { StubToggle } from '@/components/browse/StubToggle'
 import { TopicRail } from '@/components/browse/TopicRail'
 import { kindIcons } from '@/components/layout/kind-icon'
 import { Button } from '@/components/ui/button'
@@ -26,6 +27,7 @@ import {
   type NoteKind,
 } from '@/lib/content'
 import { noteKinds } from '@/lib/content-schema'
+import { useHideStubs, withoutStubs } from '@/lib/stubs'
 import { cn } from '@/lib/utils'
 
 /**
@@ -51,11 +53,16 @@ export function BrowsePage() {
     setSearch(next, { replace: true })
   }
 
-  const matches = useMemo(() => filterNotes(params), [params.c, params.part, params.kind, params.q]) // eslint-disable-line react-hooks/exhaustive-deps
+  const hideStubs = useHideStubs()
+  const shownTotal = hideStubs ? withoutStubs(notes, true).length : notes.length
+  const matches = useMemo(
+    () => filterNotes({ c: params.c, part: params.part, kind: params.kind, q: params.q, hideStubs }),
+    [params.c, params.part, params.kind, params.q, hideStubs],
+  )
   const kindCounts = useMemo(() => {
-    const scoped = filterNotes({ c: params.c, part: params.part, q: params.q })
+    const scoped = filterNotes({ c: params.c, part: params.part, q: params.q, hideStubs })
     return Object.fromEntries(noteKinds.map((k) => [k, scoped.filter((n) => n.kind === k).length]))
-  }, [params.c, params.part, params.q])
+  }, [params.c, params.part, params.q, hideStubs])
 
   // Group cards under their category so a topic's structure is visible without reading.
   const categoryGroups = useMemo(() => {
@@ -140,7 +147,7 @@ export function BrowsePage() {
                 )}
               </div>
               <p className="mt-1 text-sm text-muted-foreground">
-                {matches.length} of {notes.length} notes
+                {matches.length} of {shownTotal} notes
               </p>
             </div>
             <ToggleGroup
@@ -172,6 +179,7 @@ export function BrowsePage() {
                 className="pl-8"
               />
             </div>
+            <StubToggle />
             {/* One scrolling row on phones; wrapped from sm up. */}
             <div className="-mx-4 flex w-[calc(100%+2rem)] gap-1.5 overflow-x-auto px-4 pb-1 sm:mx-0 sm:w-auto sm:flex-wrap sm:overflow-visible sm:px-0 sm:pb-0">
               <KindChip active={!params.kind} onClick={() => set({ kind: undefined })} label="All" />
@@ -307,7 +315,8 @@ function TopicPicker({ params }: { params: BrowseParams }) {
     : selectedPart
       ? `${selectedPart.roman ? `${selectedPart.roman}: ` : ''}${selectedPart.title}`
       : 'All notes'
-  const count = notes.filter((n) => {
+  const hideStubs = useHideStubs()
+  const count = withoutStubs(notes, hideStubs).filter((n) => {
     if (params.c && !inCategory(n, params.c)) return false
     if (selectedPart && !inCategory(n, selectedPart.path)) return false
     return true

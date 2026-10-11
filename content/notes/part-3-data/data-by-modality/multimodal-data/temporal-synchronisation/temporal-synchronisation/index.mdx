@@ -1,0 +1,164 @@
+---
+title: 'Temporal synchronisation'
+kind: concept
+summary: 'Streams recorded by different devices, such as audio and video or sensors and annotations, carry different clocks, rates and latencies. Synchronisation estimates each clock''s offset and drift against one reference and maps every timestamp onto that reference timeline.'
+tags: [data, time-series, multimodal, signal-processing]
+aliases: [time synchronisation, stream synchronisation, clock synchronisation, clock drift, audio-video sync, lip sync]
+requires: [sampling-theorem]
+related: [time-series-sampling-and-alignment, coherence-and-cross-spectra, sample-rate-conversion, decimation-and-interpolation, dynamic-time-warping, wearable-sensor-data, speech-transcripts-and-alignment, time-series-windowing, cross-modal-pairing, onset-detection-and-beat-tracking]
+references: [knapp1976, mills1991, bannach2009, chung2016syncnet, mariooryad2015]
+status: draft
+updated: 2026-10-11
+---
+
+import { SyncByCrossCorrelation } from './SyncByCrossCorrelation'
+
+<Definition>
+Temporal synchronisation maps the timestamps of several recorded streams onto one reference timeline. Each device's
+clock differs from the reference by an offset and, as the recording goes on, by a drift in rate. Synchronisation
+estimates the offset and drift of every stream, corrects its timestamps, and, when a model needs values at shared
+times, resamples the streams onto a common grid.
+</Definition>
+
+## Intuition
+
+A camera and a microphone record the same clap. The camera's file says the clap happened 3.20 s after it started
+recording; the microphone's file says 2.85 s. Neither is wrong: each device counts time from its own start, with its
+own oscillator. A model that pairs the frame at 3.20 s with the sound at 3.20 s pairs the clap with the sound of
+something else.
+
+Every multimodal dataset built from separate devices has this problem: wearable sensors and a reference camera, a video
+and its transcript, physiological signals and the stimuli that caused them, a sensor stream and the labels an annotator
+made in a separate tool. A label assigned to the wrong moment is a wrong label, and a feature taken from the wrong
+moment is noise. Synchronisation is the step that makes "at the same time" mean the same thing in every stream.
+
+## Clocks, offsets and drift
+
+A device's clock reading $t_\text{dev}$ relates to the reference time $t$ approximately by an affine map,
+
+$$
+t = \tau + (1 + \delta)\, t_\text{dev},
+$$
+
+where $\tau$ (seconds) is the **offset**, the reference time at which the device's clock read zero, and $\delta$
+(dimensionless, usually quoted in parts per million) is the **drift**, the fractional error in the device's rate. A
+drift of 50 parts per million adds $50 \times 10^{-6} \times 3600 = 0.18$ s of error per hour and 4.3 s per day.
+
+Offsets come from devices started at different moments, clocks set by hand or from different sources, and time zones
+and daylight-saving changes in wall-clock timestamps. Drift comes from oscillators that run at slightly different rates
+and change with temperature. Two corrections follow from the affine model:
+
+- **Offset only.** Shift every timestamp by $\tau$. This suffices when recordings are short or the clocks are
+  disciplined, for example by the network time protocol, which estimates the offset between computers from exchanged
+  timestamped messages <Cite id="mills1991" />, or by a shared hardware trigger or timecode.
+- **Offset and drift.** Rescale and shift. Two well-separated reference points, such as a synchronisation event at the
+  start and another at the end, fix both $\tau$ and $\delta$.
+
+The affine model holds only between clock discontinuities. A device that restarts, a clock that a time service steps
+forward or back, or a lost and resumed connection starts a new segment with its own offset.
+
+## Different sampling rates
+
+Streams are sampled at different rates: video at 25 to 60 frames per second, speech at 16 kHz, an inertial sensor at
+50 Hz. Once timestamps share a timeline, there are two ways to combine streams.
+
+- **Resample onto a common grid.** Every stream is interpolated or decimated to the same times, usually the slowest
+  stream's rate. Downsampling needs a low-pass filter first, or high frequencies alias into the result (see
+  <NoteLink to="decimation-and-interpolation">decimation and interpolation</NoteLink> and
+  <NoteLink to="sample-rate-conversion">sample-rate conversion</NoteLink>).
+- **Keep native rates and align windows by time.** Each model input is a time interval, and each stream contributes its
+  own samples from that interval. No information is lost, and each modality's encoder sees its own rate.
+
+Devices also differ in how they timestamp. Some stamp each sample or packet; others record a start time and a nominal
+rate, and the time of sample $k$ is computed as $k / f_s$. In the second case, drift accumulates silently, because the
+nominal rate is not the true one. Irregular sampling, gaps and duplicated samples are treated in
+<NoteLink to="time-series-sampling-and-alignment">sampling, alignment and resampling of time series</NoteLink>.
+
+## Latency and lag
+
+Even with perfect clocks, a stream can record an event late. Audio interfaces, video encoders and network buffers add a
+fixed processing latency. In television broadcasting, lip-sync errors of up to several hundred milliseconds occur, and
+viewers notice errors beyond about 125 ms of audio lagging video or 45 ms of audio leading it
+<Cite id="chung2016syncnet" />.
+
+Human annotation has its own latency. Annotators who rate emotion continuously while watching a recording respond after
+a delay that varies from one to six seconds with the annotator, the dimension rated and the behaviour. Shifting the
+labels back by the estimated delay improved emotion classifiers by more than 7% relative, and even a fixed shift of one
+to three seconds helped <Cite id="mariooryad2015" />.
+
+Lag should be corrected only when it is a property of the measurement. A delay between a stimulus and a physiological
+response, or between a cause and its effect, is part of what a model should learn; removing it removes the signal.
+
+## Alignment by cross-correlation
+
+When two streams observe a shared signal, the offset is the shift that makes them most alike. For records $a_k$ and
+$b_k$ sampled at rate $f_s$, the sample cross-correlation at lag $\ell$ is
+
+$$
+r_{ab}(\ell) = \frac{\sum_k (a_k - \bar a)(b_{k+\ell} - \bar b)}{n\, \hat\sigma_a \hat\sigma_b},
+$$
+
+and the estimated delay of $b$ behind $a$ is $\hat\ell / f_s$, where $\hat\ell$ maximises $r_{ab}(\ell)$ over a search
+range of plausible lags. Interpolating around the peak gives a delay finer than one sample. Weighting the cross-spectrum
+before transforming it back, as in the generalised cross-correlation method, sharpens the peak when the shared signal is
+dominated by a few frequencies <Cite id="knapp1976" />. An equivalent spectral estimate reads the delay from the slope
+of the cross-spectrum's phase (see <NoteLink to="coherence-and-cross-spectra">coherence and cross-spectra</NoteLink>).
+
+Drift shows up as an offset that changes along the recording. Cross-correlating short windows at different points of the
+recording gives one offset per window; a straight line fitted to the offsets against time has slope $\delta$ and
+intercept $\tau$. A single cross-correlation over a drifting recording returns the offset near its middle, with a lower,
+wider peak.
+
+<SyncByCrossCorrelation />
+
+Different modalities rarely record the same signal, so they are correlated through derived signals that both reflect:
+the energy envelope of audio against the frame-to-frame motion energy of video, or the acceleration magnitude of two
+body-worn sensors. When no hand-made signal is shared, a learned one can be. SyncNet trains a joint embedding of mouth
+images and speech audio and finds the offset of a video by sliding the audio features over the video features within
+±1 s and taking the shift of smallest distance <Cite id="chung2016syncnet" />.
+
+## Alignment by shared events
+
+A synchronisation action is a short, distinctive event that every stream records: a clap, a jump, a tap on a table,
+shaking two sensors together. Its time in each stream gives that stream's offset; two such actions, at the start and the
+end, give the drift. The actions can be detected automatically. In recordings of acceleration, sound, force and motion
+tracking from 5 users and 308 minutes, automatically detected synchronisation events kept about 80% of the data within
+0.3 s of correct alignment <Cite id="bannach2009" />. The relation is transitive: a sensor aligned to a second sensor
+that is aligned to a camera is aligned to the camera, so a group of devices can be chained through shared members.
+
+Some streams are related by a time map that is not affine at all: a transcript and the speech it transcribes, two
+performances of one piece, two people walking the same route. Aligning their content is a different task from
+correcting clocks, solved by <NoteLink to="dynamic-time-warping">dynamic time warping</NoteLink> or by forced alignment
+(see <NoteLink to="speech-transcripts-and-alignment">speech transcripts and alignment</NoteLink>). A clock-correction
+step that uses a flexible warp where an affine map is right will fit noise.
+
+## Aligning labels to signals
+
+Labels are a stream with a clock too. Activity labels made on a video and transferred to wearable sensors inherit the
+video-to-sensor alignment; labels typed into a separate application inherit that application's clock; continuous
+ratings inherit the annotator's reaction lag. After alignment, labels are attached to windows of the signal (see
+<NoteLink to="time-series-windowing">windowing</NoteLink>), and transitions remain uncertain by about the residual
+synchronisation error. A common remedy marks a margin around each transition as unlabelled or excludes it from training
+and evaluation.
+
+## Assumptions
+
+- The clock map is affine within each recording segment, with no restarts or steps.
+- The streams share a signal or events that can be observed in each of them.
+- Processing latency is constant within a recording.
+
+## Pitfalls
+
+- **Periodic signals give several peaks.** Walking, music and machinery produce cross-correlation peaks one period
+  apart. Restricting the search range to plausible offsets, or using an aperiodic synchronisation event, removes the
+  ambiguity.
+- **Sign conventions.** Libraries differ in whether a positive lag means the second stream leads or follows. A test with
+  a known shift fixes the convention before real data are aligned.
+- **Ignored drift.** Offset-only correction is exact at the reference point and wrong elsewhere: by 0.18 s an hour later
+  at 50 parts per million, larger than many events of interest.
+- **Non-monotonic timestamps.** Clock steps, daylight-saving changes and buffered writes produce repeated or backward
+  timestamps. Sorting them hides the discontinuity instead of correcting it.
+- **Buffer timestamps.** A timestamp attached to a block of samples may mark its first sample, its last or the moment it
+  was written. Assuming the wrong one adds a constant offset of one block.
+- **Lag that is signal.** Correcting a physiological or causal delay as if it were latency removes the relation a model
+  should learn.

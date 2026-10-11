@@ -1,0 +1,127 @@
+---
+title: Windowing and segmentation
+kind: technique
+summary: 'Windowing cuts a long series into segments, set by a window length and a stride, so that each becomes one example. Each window needs a label rule, windows that straddle a change of label need a decision, and overlapping windows must not straddle the train-test split.'
+tags: [data, time-series, feature-engineering, data-leakage]
+aliases: [sliding window, sliding windows, windowing, framing, segmentation of time series, sessionisation, window length, stride, hop size, overlapping windows]
+requires: [time-series-sampling-and-alignment]
+related: [short-time-fourier-transform, change-point-detection, data-leakage, time-series-feature-extraction, forecasting-setups, wearable-sensor-data, time-series-cross-validation, event-sequences, train-validation-and-test-splits]
+references: [banos2014, dehghani2019, bulling2014, krishnan2014]
+status: draft
+updated: 2026-10-11
+---
+
+import { WindowLayout } from './WindowLayout'
+
+<Definition>
+**Windowing** turns a series $x_1, \dots, x_T$ into examples by cutting it into segments. A **sliding window** of
+length $L$ and stride $s$ yields the windows $x_{j s + 1}, \dots, x_{j s + L}$ for $j = 0, 1, \dots, J - 1$, where
+$J = \lfloor (T - L)/s \rfloor + 1$. Each window becomes one input, with one label or one target. **Segmentation** is
+the general task of choosing the boundaries, of which fixed sliding windows are the simplest case.
+</Definition>
+
+## When to use it
+
+Windowing is the first step whenever a model takes fixed-size inputs from a long recording.
+
+- **Classifying stretches of a stream**, such as activities from a wearable, sleep stages from an electroencephalogram
+  or faults from vibration. Each window gets a class <Cite id="bulling2014" />.
+- **Building features**. Statistics, spectra and shape descriptors are computed per window; see
+  <NoteLink to="time-series-feature-extraction">feature extraction</NoteLink>.
+- **Forecasting**. A window of past values is the input and the values after it are the target; see
+  <NoteLink to="forecasting-setups">forecasting setups</NoteLink>.
+- **Spectral analysis**. The <NoteLink to="short-time-fourier-transform">short-time Fourier transform</NoteLink> frames
+  a signal into overlapping windows in the same way, under the names frame length and hop size, and multiplies each
+  frame by a taper; see <NoteLink to="spectral-leakage-and-windows">spectral leakage and windows</NoteLink>.
+
+## Window length and stride
+
+The window length $L$ sets how much context one example holds. A window must be long enough to contain the pattern
+that identifies its label: one stride of walking, one heartbeat, one cycle of a machine. A longer window holds more
+context, but also more windows contain more than one label, and a decision can be made only once a full window has
+arrived. For activity recognition from body-worn sensors, windows of 1 to 2 seconds gave the best trade-off between
+the speed and the accuracy of recognition across the methods compared by Banos et al. <Cite id="banos2014" />.
+
+The stride $s$ sets how far each window moves. With $s = L$ the windows tile the series without overlap. With $s < L$
+neighbouring windows share $L - s$ samples, a fraction $1 - s/L$ of each window, and a series yields about $L/s$ times
+as many windows. With $s > L$ some samples fall in no window.
+
+The figure lays windows over a series whose label switches between two activities.
+
+<WindowLayout />
+
+## Assigning labels to windows
+
+Labels usually come per sample, or as intervals with a start and an end. A window needs one label, and a rule must say
+which. Common rules are these.
+
+- **Majority**: the label held by most samples of the window.
+- **Last sample**: the label at the end of the window. This matches online use, where a decision is made when a window
+  completes and should describe the present.
+- **Centre sample**: the label at the middle of the window.
+- **Purity threshold**: the majority label if it covers at least a fraction $\pi$ of the window, such as $\pi = 0.8$;
+  otherwise the window is dropped from training.
+- **Soft labels**: the share of each label in the window, used as a target distribution.
+
+Dropping mixed windows makes training cleaner and the test optimistic, because a deployed model meets mixed windows at
+every change of activity. Mixed windows should stay in the test set and be scored with the same rule as in deployment.
+
+A model that predicts a label for every sample, rather than per window, avoids the choice altogether. Sequence models
+and fully convolutional networks do this; see
+<NoteLink to="sequence-labelling">sequence labelling</NoteLink>.
+
+## Event-based and adaptive segmentation
+
+Fixed windows ignore the structure of the signal. Adaptive segmentations put boundaries where the signal itself
+changes.
+
+- **Change points.** A <NoteLink to="change-point-detection">change-point detector</NoteLink> splits the series where
+  its distribution changes; each segment becomes one example.
+- **Events.** Segments start at detected events: a footstep, a heartbeat's R peak, a keystroke, a door sensor firing.
+  Each segment then covers one cycle of the process.
+- **Activity-defined windows.** In smart homes, windows can be defined by sequences of sensor events rather than by
+  time, so that a window holds the same number of events however fast they arrive <Cite id="krishnan2014" />.
+
+## Sessionisation
+
+Logs of user actions are cut into **sessions**: runs of events separated by gaps longer than a threshold, such as 30
+minutes of inactivity for web browsing. A session is a window whose length adapts to the behaviour. The threshold
+decides how many sessions there are, and with it every per-session statistic; see
+<NoteLink to="event-sequences">event sequences</NoteLink>.
+
+## Windows and leakage
+
+Overlapping windows are not independent examples. Two neighbouring windows with $s < L$ share samples, and windows a
+few strides apart share the same subject, the same session and the same slowly varying conditions. A random split of
+windows into training and test sets puts near-copies of test windows into training.
+
+Dehghani et al. compared overlapping and non-overlapping windows for activity recognition under two evaluations
+<Cite id="dehghani2019" />. With windows from every subject in both training and test folds, overlap appeared to help.
+With whole subjects held out, overlap gave no gain, and non-overlapping windows performed as well. The apparent benefit
+came from the evaluation.
+
+The safe rule is to split before windowing: assign whole subjects, sessions or time ranges to training and test, then
+cut windows within each part. Hold out whole subjects when the model must work for new people, and later time ranges
+when it must work in the future; see <NoteLink to="train-validation-and-test-splits">split strategies</NoteLink> and
+<NoteLink to="time-series-cross-validation">time-series cross-validation</NoteLink>.
+
+## Choosing the parameters
+
+1. Set $L$ from the duration of the shortest pattern that identifies a label, then check a few values around it.
+2. Set $s$ from the decision rate needed in deployment; a smaller stride gives more training windows but no new
+   information.
+3. Pick the label rule that matches how predictions will be used, and apply it to the test set too.
+4. Split by subject, session or time before windowing.
+
+## Pitfalls
+
+- **Random splits of overlapping windows.** Near-copies of each test window sit in the training set, and the test
+  score measures memory rather than generalisation <Cite id="dehghani2019" />.
+- **Normalising across windows before splitting.** Statistics computed over the whole recording carry test information
+  into training; see <NoteLink to="series-normalisation">normalising time series</NoteLink>.
+- **Window length tuned on the test set.** $L$ and $s$ are hyperparameters and must be chosen on validation data.
+- **Unequal sampling rates.** A window of $L$ samples is a different duration on devices with different rates. Define
+  windows in seconds and resample first; see
+  <NoteLink to="time-series-sampling-and-alignment">sampling and alignment</NoteLink>.
+- **Edges.** The last $T - (J-1)s - L$ samples fall in no window; padding them in instead adds windows of invented
+  values.

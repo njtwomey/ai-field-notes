@@ -1,0 +1,135 @@
+---
+title: Automated feature discovery
+kind: technique
+summary: 'Automated feature engineering generates many candidate features by applying a library of transformations and aggregations to the inputs, scores the candidates by how much they improve a model, and keeps the best, replacing part of the manual search for features.'
+tags: [data, feature-engineering, automl]
+aliases: [automated feature engineering, automatic feature generation, feature synthesis, deep feature synthesis, expand and reduce, AutoFE]
+requires: [feature-construction, cross-validation, feature-selection]
+related: [relational-feature-aggregation, basis-expansions, gradient-boosting-vs-deep-learning-on-tabular-data, data-leakage, feature-stores]
+references: [kanter2015, lam2017, khurana2016, katz2016, horn2019, zhang2023openfe, krawiec2002, hollmann2023caafe, fey2024, bengio2013, grinsztajn2022]
+status: draft
+updated: 2026-10-11
+---
+
+import { CandidateExplosion } from './CandidateExplosion'
+
+<Definition>
+**Automated feature engineering** searches a space of candidate features built by applying transformation functions,
+such as logarithms, products, ratios and aggregations over related tables, to the existing inputs. Each candidate is
+scored by the improvement it brings to a model on held-out data, and the best are kept. The process has two parts:
+**generation**, which defines and enumerates the candidates, and **selection**, which decides which candidates to keep
+without overfitting the data used to decide.
+</Definition>
+
+## Problem
+
+<NoteLink to="feature-construction">Feature construction</NoteLink> by hand depends on an analyst's knowledge and time.
+The space of possible features is combinatorial: with $d$ inputs and a library of binary operations such as $+$,
+$-$, $\times$ and $\div$, there are $O(d^2)$ features at depth one and $O(d^4)$ when the results are combined again.
+An analyst tries a few dozen of them. A machine can try thousands, provided that it can score them cheaply and that
+the scoring does not reward features that only fit noise.
+
+## Mechanism
+
+### Generation
+
+A generator applies **transformation functions** to inputs and to earlier outputs:
+
+- **Unary** functions of one column: logarithm, square root, square, reciprocal, binning, rank.
+- **Binary** functions of two columns: sum, difference, product, ratio.
+- **Group** functions: a column's mean, count or rank within the groups of a categorical column.
+- **Aggregations** over related tables: counts, sums and means of child records; see
+  <NoteLink to="relational-feature-aggregation">relational and aggregate features</NoteLink>.
+
+Applying the functions repeatedly to their own outputs gives features of greater **depth**, such as
+$\log(x_1 / x_2)$ or the mean of a ratio within a group.
+
+### Deep feature synthesis
+
+**Deep feature synthesis** generates features for relational data by following every key relation from the target
+table to a set depth and applying aggregation and transform functions along the path <Cite id="kanter2015" />.
+The Data Science Machine, built on it, was entered in three data-science competitions with 906 human teams between
+them and beat 615 of those teams. The One Button Machine extends the idea with automated joins across larger databases
+<Cite id="lam2017" />.
+
+### Expand and reduce
+
+The simplest search generates all candidates up to a depth and then selects among them. The autofeat library generates a
+large pool of non-linear features and keeps a small set by repeated sparse regression, to keep a linear model both
+accurate and interpretable <Cite id="horn2019" />. Selection by a sparsity penalty, by
+<NoteLink to="mutual-information">mutual information</NoteLink> or by validated model gain is covered in
+<NoteLink to="feature-selection">feature selection</NoteLink>.
+
+### Guided search
+
+Exhaustive expansion becomes infeasible beyond depth two. Guided methods avoid evaluating every candidate.
+
+- **Tree search over transformations.** Cognito explores a tree whose nodes are datasets and whose edges apply one
+  transformation to every column, expanding the branches that raise validated accuracy <Cite id="khurana2016" />.
+- **Ranking candidates before evaluating them.** ExploreKit trains a meta-model on earlier datasets to predict how much
+  a candidate will help from properties of the candidate and the data, and evaluates only the highest-ranked
+  candidates <Cite id="katz2016" />.
+- **Cheap gain estimates.** OpenFE estimates each candidate's gain by boosting from the predictions of the current
+  model, so a candidate is scored without retraining from scratch, and prunes candidates in two stages from coarse to
+  fine. With features generated this way, a simple model scored above 99% of the teams in two Kaggle competitions
+  <Cite id="zhang2023openfe" />.
+- **Evolutionary search.** Genetic programming represents each feature as an expression tree and evolves a population
+  of trees by mutation and crossover, with the validated accuracy of a model as the fitness <Cite id="krawiec2002" />.
+- **<Gloss name="language-model">Language models</Gloss>.** CAAFE gives a <Gloss name="llm">large language model</Gloss>
+  the description of a dataset and its columns, asks it for code that computes new features with an explanation of each,
+  and keeps a feature only when it improves validated performance <Cite id="hollmann2023caafe" />.
+
+### Learned against engineered features
+
+A neural network learns its own features from raw inputs; representation learning replaces feature engineering for
+images, audio and text <Cite id="bengio2013" />. On tables, tree ensembles on engineered features remain strong against
+networks trained end to end <Cite id="grinsztajn2022" />, which keeps automated generation useful. For relational data,
+graph networks trained on the table graph learn aggregations end to end <Cite id="fey2024" />.
+
+## More candidates than rows
+
+Every generator faces the same constraint: the number of candidates grows much faster than the number of rows. The
+figure generates all monomials of the inputs up to degree 1, 2 and 3 for Friedman's first benchmark, a target that
+depends non-linearly on five of its inputs, and fits each set by <NoteLink to="ridge-regression">ridge
+regression</NoteLink>.
+
+<CandidateExplosion />
+
+With 200 rows and 10 inputs, degree 2 gives 65 candidates and raises the cross-validated $R^2$; degree 3 gives 285
+candidates for 160 training rows per fold, fits the training rows almost perfectly and loses on held-out rows. With
+1000 rows the degree-3 set helps again. A generator that searches by validated gain needs the validation rows to stay
+out of the search, and more candidates demand more rows or more shrinkage.
+
+## Cost
+
+- **Generation.** The candidate count grows with the number of inputs, functions and the depth, roughly as
+  $(\lvert F \rvert d^2)^k$ for $\lvert F \rvert$ binary functions at depth $k$.
+- **Evaluation.** Scoring a candidate by refitting a model with
+  <NoteLink to="cross-validation">cross-validation</NoteLink> costs one fit per fold for each candidate; this is why
+  guided methods estimate gain cheaply or rank candidates before evaluating them.
+- **Selection bias.** The best of many candidates scores well partly by chance. The score of the chosen set on the
+  data used to choose it is optimistic; it must be re-estimated on data the search never saw.
+
+## Trade-offs
+
+- **Breadth against interpretability.** A deep generated feature, such as the mean within a group of the logarithm of a
+  ratio, may predict well and mean little to a reader.
+- **Search against knowledge.** Generated features are limited to the functions in the library. A domain feature that
+  needs an outside fact, such as a holiday calendar or a physical constant, never appears unless someone supplies it;
+  language-model generators partly close the gap by drawing on the dataset's description.
+- **Generation against learned representations.** Generation produces explicit columns that any model can use; a
+  network learns implicit features that only it can use.
+
+## Pitfalls
+
+- **Searching on the test set.** Generation and selection are part of the training procedure. Running them on all the
+  data before splitting leaks the test rows into the features; wrap the whole search in the cross-validation, or
+  validate the final set on untouched data; see <NoteLink to="data-leakage">data leakage</NoteLink>.
+- **Target-derived inputs.** A generator combines every column it is given. A column recorded after the outcome, or an
+  identifier correlated with it, is amplified into many leaking features.
+- **Undefined values.** Ratios divide by zero and logarithms of negative values are undefined; the generator must guard
+  them consistently in training and in production.
+- **Redundant features.** Generated sets contain many near-copies, such as $x_1 x_2$ and $x_1 x_2 + x_1$. They inflate
+  the set without adding information and destabilise feature importances.
+- **Features that cannot be served.** A feature that is cheap to compute in a batch over history may be impossible to
+  compute within the latency budget at prediction time; see <NoteLink to="feature-stores">feature stores</NoteLink>.

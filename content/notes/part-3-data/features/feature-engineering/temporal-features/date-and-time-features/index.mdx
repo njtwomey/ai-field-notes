@@ -1,0 +1,139 @@
+---
+title: Date and time features
+kind: technique
+summary: 'Date and time features turn a timestamp into inputs a model can use: calendar parts such as weekday and month, holiday and event indicators, elapsed times since or until other events, and the local time in the right time zone.'
+tags: [data, feature-engineering, time-series, forecasting]
+aliases: [calendar features, datetime features, timestamp features, holiday features, time since event, recency features]
+requires: [feature-construction, linear-regression]
+related: [cyclical-encoding, categorical-encoding, time-series-feature-extraction, forecasting-setups, event-sequences, time-series-sampling-and-alignment, data-leakage, relational-feature-aggregation]
+references: [hyndman2021, taylor2018, ianatz]
+status: draft
+updated: 2026-10-11
+---
+
+import { WeekdayFeatures } from './WeekdayFeatures'
+
+<Definition>
+**Date and time features** are inputs derived from the timestamp of a record. Calendar parts, such as the hour,
+weekday, month and whether a day is a working day, capture effects that recur on the calendar. Holiday and event
+indicators mark days with known special behaviour. Elapsed times measure the gap since or until another event. Each is
+derived in the time zone where the behaviour happens.
+</Definition>
+
+## Problem
+
+A timestamp stored as a single number, such as seconds since 1970, grows steadily and never repeats. Sales on
+Mondays, traffic at 8 am and electricity demand in January are effects of where a moment falls on the calendar, not of
+how large its timestamp is. A model given only the raw number can fit a trend through it, but it cannot see that two
+Mondays a week apart resemble each other. Date and time features expose the recurring parts of a timestamp and the
+gaps between events, so that a model can learn effects attached to them.
+
+## Mechanism
+
+### Calendar parts
+
+A timestamp splits into parts at several periods:
+
+| Part                     | Values         | Captures                                        |
+| ------------------------ | -------------- | ----------------------------------------------- |
+| Hour of day              | 0–23           | daily cycles: commuting, sleep, opening hours   |
+| Weekday                  | Monday–Sunday  | weekly cycles: working days and weekends        |
+| Day of month             | 1–31           | pay days, billing cycles, month-end effects     |
+| Month or week of year    | 1–12 or 1–53   | annual cycles: weather, school terms, seasons   |
+| Quarter, year            | 1–4, 2019, …   | reporting cycles; a coarse trend                |
+| Working day, weekend     | 0 or 1         | the split that most weekly effects follow       |
+| Days in month            | 28–31          | monthly totals that scale with the month length |
+
+Derived flags are often more useful than the parts themselves: the last working day of a month, the first weekend
+after pay day, or the number of each weekday in a month. Monthly totals depend on how many trading days a month has,
+and counting the Mondays, Tuesdays and so on in each month captures this <Cite id="hyndman2021" />.
+
+How a part is encoded decides what shape its effect can take. Indicator columns, one per value after a reference value,
+let every weekday have its own level; see <NoteLink to="categorical-encoding">categorical encoding</NoteLink>. A sine
+and cosine of the phase within the period give a smooth effect in a few columns and place December next to January;
+see <NoteLink to="cyclical-encoding">cyclical encoding</NoteLink>. A part entered as a single number, such as the
+weekday as 0 to 6, forces a straight-line effect from the first value to the last.
+
+### Holidays and events
+
+A **holiday indicator** is 1 on the days of a holiday and 0 otherwise. Holiday effects often spread over several
+days: shopping rises before Christmas and falls after it, and travel peaks on the days around a long weekend. A window
+of indicators, one for each day from $a$ days before to $b$ days after the holiday, lets each of those days have its
+own effect, as in the Prophet forecasting model <Cite id="taylor2018" />. Moving holidays such as Easter fall on
+different dates each year and must come from a calendar, not from a fixed month and day. With monthly data, a holiday
+that spans two months is split between them in proportion to its days <Cite id="hyndman2021" />.
+
+Other known events are encoded the same way: promotions, product launches, sporting finals and school terms. A
+**spike** indicator marks a single period; a **step** indicator is 0 before an event and 1 from it onwards and models a
+permanent change of level <Cite id="hyndman2021" />.
+
+### Elapsed time
+
+An **elapsed-time feature** measures the gap between the record's time and another event:
+
+- **Time since** an earlier event: days since the customer's last purchase, hours since a machine's last service,
+  the age of an account. Recency is often the strongest single predictor of whether an event repeats.
+- **Time until** a known future event: days until the next holiday, hours until a scheduled departure. Such a feature
+  is legitimate only when the future event is known at the moment of prediction.
+- **Time since the start** of the data: a trend term $t$, in days or months. A model extrapolates a trend term beyond
+  the training range, so its coefficient must be trusted only as far as the trend itself.
+
+Elapsed times are often skewed, with a few very long gaps. A logarithm or a cap keeps them from dominating a linear
+fit; aggregates of event histories over windows are in
+<NoteLink to="relational-feature-aggregation">relational and aggregate features</NoteLink>.
+
+### Time zones and local time
+
+Behaviour follows local time: people commute at 8 am where they live, not at 8 am in the time zone of the server.
+Timestamps should be stored in Coordinated Universal Time (UTC) and converted to the local time of the place where the
+event happened before calendar parts are extracted. The conversion uses a time zone database such as the IANA database,
+which records each region's offsets and daylight-saving rules <Cite id="ianatz" />. Daylight-saving changes create a
+day with 23 hours and a day with 25; hourly counts on those days need care, and an hour of day computed in UTC shifts by
+one hour against local behaviour twice a year.
+
+## A weekly cycle in a daily series
+
+The figure fits a daily series with a trend and a weekly cycle by least squares, using the elapsed days and one of three
+encodings of the weekday. The model is fitted on sixteen weeks and scored on the four weeks that follow.
+
+<WeekdayFeatures />
+
+The elapsed days alone fit the trend and leave the cycle in the residuals. The weekday as a single number 0 to 6 fits a
+straight line across the week, which cannot follow a cycle that rises and falls. Six weekday indicators give each day
+its own level; with the default settings the held-out <Gloss name="rmse" /> falls from about 0.87 with the elapsed days
+alone, and about 0.51 with the weekday as a number, to about 0.32, close to the noise standard deviation of 0.3. The
+weekly shape here has two harmonics; a single sine-cosine pair would capture only the first of them.
+
+## Cost
+
+- **Columns.** Indicators for hour of day and weekday add 23 and 6 columns; their interaction adds another 138. A smooth
+  encoding needs two columns per harmonic.
+- **Calendars.** Holiday and event features need a maintained calendar for every region the data cover, including
+  future dates for forecasting.
+- **Time zones.** Converting each record to local time needs the location of the event, which is not always recorded.
+
+## Trade-offs
+
+- **Indicators against smooth encodings.** Indicators fit any shape across the values of a part but need one column
+  per value and enough data per value. Sine-cosine pairs share strength between neighbouring values and need few
+  columns, but a sharp effect, such as a single holiday or a step at the weekend, needs many harmonics.
+- **Calendar features against lag features.** A model that sees last week's value at the same time already carries much
+  of the weekly pattern; see <NoteLink to="time-series-feature-extraction">time-series feature extraction</NoteLink>.
+  Calendar features still carry effects that lags miss, such as holidays that fall on different weekdays each year.
+- **Year as a category against a trend.** The year as indicators fits each past year exactly and cannot predict an
+  unseen year. A trend term extrapolates, at the risk of extrapolating too far.
+
+## Pitfalls
+
+- **Future information in a feature.** "Days until the customer cancels" is known only after the fact. Every
+  time-until feature must refer to an event scheduled before the prediction time; see
+  <NoteLink to="data-leakage">data leakage</NoteLink>.
+- **Mixed time zones.** Records from several regions with timestamps in UTC give an hour-of-day feature that means
+  different things in different regions.
+- **Unseen values at prediction time.** A month or year indicator that never appeared in training has no fitted
+  coefficient; the encoder must decide what to do with it.
+- **Regional calendars.** Holidays, weekends and working weeks differ between countries; a single calendar applied to
+  global data mislabels days.
+- **Random splits of time-ordered data.** Calendar features evaluated on a random split let the model learn a holiday
+  from the same holiday's other days; evaluate forward in time, as in
+  <NoteLink to="forecasting-setups">forecasting setups</NoteLink>.

@@ -1,0 +1,191 @@
+---
+title: 'Numeric encoding'
+kind: technique
+summary: 'A numeric encoding replaces a number $x$ by a vector of fixed functions of $x$: bin indicators, piecewise-linear hat functions, B-splines or sines and cosines. A model that is linear in the vector is then non-linear in $x$, with the shape of the non-linearity set by the encoding.'
+tags: [data, data-preparation, feature-engineering, splines]
+aliases: [binning, discretisation, discretization, bucketing, piecewise-linear encoding, spline features, spline transformer, periodic embeddings, numerical embeddings, KBinsDiscretizer]
+requires: [linear-regression, b-splines]
+related: [categorical-encoding, cyclical-encoding, positional-and-coordinate-encoding, basis-expansions, regression-splines, p-splines, random-fourier-features, feature-scaling, power-transforms, decision-tree]
+references: [hastie2009, deboor1978, eilers1996, fayyad1993, gorishniy2022, gorishniy2021, tancik2020]
+status: draft
+updated: 2026-10-11
+---
+
+import { NumericEncodingFit } from './NumericEncodingFit'
+
+<Definition>
+A **numeric encoding** maps a real value $x$ to a vector $\phi(x) = (\phi_1(x), \dots, \phi_m(x)) \in \reals^m$ of fixed
+functions of $x$, chosen or fitted before the model is trained. **Binning** uses indicator functions of intervals,
+$\phi_j(x) = \indicator[t_{j} \le x < t_{j+1}]$. A **piecewise-linear encoding** uses functions that are linear between
+breakpoints $t_1 < \dots < t_K$. A **spline encoding** uses the <NoteLink to="b-splines">B-splines</NoteLink> of degree
+$p$ on those knots. A **periodic encoding** uses $\sin(2\pi c_k x)$ and $\cos(2\pi c_k x)$ for frequencies $c_k$. A
+model that is linear in $\phi(x)$ is a weighted sum of the functions, so it can bend wherever the functions bend.
+</Definition>
+
+## Problem
+
+A <NoteLink to="linear-regression">linear model</NoteLink> given a number $x$ as one input fits a straight line in $x$:
+one slope, the same everywhere. Many effects are not lines. Risk can rise with age and then level off, demand can peak
+at a middle price, and a threshold can switch an outcome on. A linear model can only fit such effects if the input
+carries them in a form that is linear in the parameters.
+
+<NoteLink to="decision-tree">Decision trees</NoteLink> and their ensembles do not have this problem. A tree splits $x$
+at learned thresholds, so it fits a step function in $x$ and is unchanged by any increasing transformation of $x$.
+Neural networks can learn any smooth function of $x$ in principle, but a <Gloss name="mlp">multilayer perceptron</Gloss>
+given the raw scalar learns sharp changes slowly; encoding the scalar first improves tabular networks
+<Cite id="gorishniy2022" />. Numeric encodings therefore matter most for linear models, generalised linear and additive
+models, and neural networks.
+
+## Mechanism
+
+### Raw values
+
+The simplest encoding is $\phi(x) = x$, usually after <NoteLink to="feature-scaling">scaling</NoteLink>. A monotone
+transform, such as a logarithm or a <NoteLink to="power-transforms">power transform</NoteLink>, changes which straight
+line fits best but still gives a monotone effect. Raw values extrapolate linearly, which is right for some quantities
+and badly wrong for others.
+
+### Discretisation and binning
+
+Binning cuts the range of $x$ at $K$ edges $t_1 < \dots < t_K$ into $K - 1$ intervals and encodes $x$ by the
+<NoteLink to="categorical-encoding">one-hot</NoteLink> indicator of its interval. A linear model on the indicators fits
+a step function: one constant per bin, equal to the mean target of the training rows in the bin. Binning turns a
+number into a category; everything about categorical encoding then applies.
+
+The edges can be placed in three ways.
+
+- **Equal width.** The edges divide $[\min x, \max x]$ into intervals of equal length. Outliers stretch the range, so
+  most rows can end up in one or two bins.
+- **Equal frequency.** The edges are quantiles of the training values, so each bin holds about the same number of
+  rows. Bins are narrow where data are dense. A value repeated in many rows makes neighbouring quantiles coincide, which
+  gives empty or merged bins.
+- **Supervised.** The edges are chosen to make the target nearly constant within each bin. Fayyad and Irani's method
+  splits an interval at the cut point that minimises the class entropy of the two halves, recurses on each half, and
+  stops when a minimum description length criterion says that a further cut does not pay for itself
+  <Cite id="fayyad1993" />. A shallow decision tree on $x$ alone gives the same kind of edges.
+
+Bin indicators are the B-splines of degree 0, so binning is the first member of the spline family below.
+
+### Piecewise-linear encodings
+
+A step function jumps at every edge. A piecewise-linear encoding gives a continuous function with a change of slope at
+each breakpoint instead. One basis is the **hat functions**: $\phi_j(x)$ is 1 at $t_j$, falls linearly to 0 at
+$t_{j-1}$ and $t_{j+1}$, and is 0 elsewhere. These are the B-splines of degree 1. Any continuous function that is linear
+between the breakpoints is a weighted sum of them.
+
+Gorishniy, Rubachev and Babenko use a cumulative version for neural networks <Cite id="gorishniy2022" />. For bins
+$[t_{j-1}, t_j)$ the $j$-th component is 0 when $x$ is left of the bin, 1 when $x$ is right of it, and
+$(x - t_{j-1})/(t_j - t_{j-1})$ inside it. The vector fills up like a thermometer as $x$ grows. It spans the same
+functions as the hat functions, plus a constant, but it keeps the order of the bins visible in the encoding. The bins
+can come from quantiles or from a decision tree fitted to the target.
+
+### Spline encodings
+
+The B-splines of degree $p$ on $K$ knots give $K + p - 1$ functions <Cite id="deboor1978" />. Each is a piecewise
+polynomial of degree $p$ that is nonzero on only $p + 1$ neighbouring intervals, and together they sum to 1 at every
+$x$ in the training range. A linear model on them is a
+<NoteLink to="regression-splines">regression spline</NoteLink>: a curve with $p - 1$ continuous derivatives that can
+change shape between any two knots <Cite id="hastie2009" />. Cubic splines, $p = 3$, are the usual choice. With many
+knots and a penalty on the differences of neighbouring coefficients, the fit becomes a
+<NoteLink to="p-splines">P-spline</NoteLink>, which is smooth whatever the number of knots
+<Cite id="eilers1996" />.
+
+When the model has an intercept, one B-spline per feature is dropped. The functions sum to 1, the same as the
+intercept's column, so keeping all of them would make the design rank-deficient, as one-hot encoding does.
+
+<NumericEncodingFit />
+
+#### Behaviour outside the training range
+
+The knots cover the training range. A value beyond it needs a rule, and the rule decides the prediction there.
+
+- **Constant.** Every feature keeps its value at the nearest end of the range, so the prediction is flat beyond the
+  data. This is the safe default.
+- **Continue.** The end polynomials are extended. A cubic grows like $x^3$, so predictions can run off quickly.
+- **Linear.** The fit is extended along its tangent at the boundary. Natural cubic splines build this in by requiring
+  the fit to be linear beyond the outermost knots <Cite id="hastie2009" />.
+- **Error.** The encoder refuses values it has not seen, which forces the question to be answered upstream.
+
+Raw values extrapolate along the fitted line and bins hold the edge bin's constant. No encoding knows what happens
+outside the data; each one only fixes what the model will say there.
+
+### Periodic encodings
+
+A periodic encoding uses sines and cosines of $x$:
+
+$$
+\phi(x) = \paren{\sin(2\pi c_1 x), \cos(2\pi c_1 x), \dots, \sin(2\pi c_k x), \cos(2\pi c_k x)}.
+$$
+
+For a cyclical quantity, such as an hour or an angle, the frequencies are multiples of one over the period and the
+encoding wraps around; the <NoteLink to="cyclical-encoding">cyclical encoding</NoteLink> note covers that case. For an
+ordinary number, the frequencies are a spread of scales. Gorishniy and colleagues draw them from a normal distribution
+and train them with the network; a linear layer and a <Gloss name="relu" /> follow <Cite id="gorishniy2022" />. Fixed
+random frequencies give <NoteLink to="random-fourier-features">random Fourier features</NoteLink>, and the spread of the
+frequencies sets how fine a detail the model can fit <Cite id="tancik2020" />.
+
+### Learned numeric embeddings
+
+A neural network can map each scalar feature $x_j$ to a vector $x_j \wvec_j + \bvec_j$ with learned $\wvec_j$ and
+$\bvec_j$, so that every feature becomes a token for a transformer <Cite id="gorishniy2021" />. That embedding is linear
+in $x_j$. Applying it after a piecewise-linear or periodic encoding makes it non-linear, and in Gorishniy and
+colleagues' experiments those combinations improved multilayer perceptrons and transformers on
+<NoteLink to="tabular-benchmark-datasets">tabular benchmarks</NoteLink> <Cite id="gorishniy2022" />.
+
+## Worked example
+
+Take the step function $y = \operatorname{sgn} x$ on $[-2, 2]$ with noise of standard deviation 0.2, as in the figure
+with the step function, degree 0 and uniform knots.
+
+- **Four knots.** The edges fall near $-2, -0.67, 0.67, 2$, so the middle bin $[-0.67, 0.67)$ straddles the jump. About
+  a third of the rows are in it, half with $y = -1$ and half with $y = 1$, and the bin's fitted constant is near 0. Each
+  of those rows is about 1 away from its target, so the <Gloss name="mse">mean squared error</Gloss> is near
+  $\frac13 \times 1 + 0.2^2 \approx 0.37$ and the <Gloss name="rmse">root mean squared error</Gloss> near 0.6. The
+  figure reports 0.68.
+- **Five knots.** An edge now falls at 0, every bin lies on one side of the jump, and the error drops to 0.25, close to
+  the noise level of 0.2.
+- **Cubic splines on five knots.** The fit must be smooth, so it cannot jump. It overshoots on both sides of 0 and the
+  error is 0.45, worse than the five bins.
+
+The encoding that matches the shape of the true function wins. Bins suit thresholds; splines suit smooth curves.
+
+## Cost
+
+| Encoding           | Features per input   | Nonzero per row |
+| ------------------ | -------------------- | --------------- |
+| Raw                | 1                    | 1               |
+| Bins on $K$ edges  | $K - 1$              | 1               |
+| Hat functions      | $K$                  | 2               |
+| B-splines degree $p$ | $K + p - 1$        | $p + 1$         |
+| Periodic, $k$ frequencies | $2k$          | $2k$            |
+
+Fitting the encoder needs one pass over the training column, for its range or quantiles. Supervised bins need a sort
+and a search for each cut. The encoded design is sparse for bins and splines, which keeps linear models cheap even with
+many knots.
+
+## Trade-offs
+
+- **Flexibility against variance.** More bins or knots fit finer shapes and estimate each coefficient from fewer rows.
+  A penalty on neighbouring coefficients, or a number of knots chosen by
+  <NoteLink to="cross-validation">cross-validation</NoteLink>, controls this.
+- **Steps against smoothness.** Bins fit thresholds and jumps exactly when an edge is in the right place, and nothing
+  else well. Splines fit smooth curves and blur jumps.
+- **Interactions.** An encoding of one feature lets the model bend in that feature only. Effects that depend on two
+  features together need product features (see <NoteLink to="feature-construction">feature construction</NoteLink>)
+  or a model that builds them, such as a tree ensemble.
+- **Interpretability.** Bins and splines give a readable curve per feature, which is the basis of
+  <NoteLink to="generalised-additive-model">generalised additive models</NoteLink>. Periodic and learned embeddings do
+  not.
+
+## Pitfalls
+
+- **Fitting the encoder on all the data.** Quantile edges and knots computed on the test rows leak a little; supervised
+  bins computed with the test labels leak a lot. Fit the encoder inside each training fold, as for any
+  data-dependent step (see <NoteLink to="data-leakage">data leakage</NoteLink>).
+- **Ignoring the extrapolation rule.** A cubic spline continued beyond the data can predict values far outside anything
+  seen. Check what the encoder does beyond the training range before deploying it on data that drift.
+- **Equal-width bins with outliers.** One extreme value stretches the range and empties most bins.
+- **Binning before a flexible model.** A tree or boosted ensemble finds its own thresholds. Binning first only throws
+  away the order within each bin.
+- **Too many knots without a penalty.** Each spline coefficient is then fitted from a handful of rows and the curve
+  wiggles between them.
