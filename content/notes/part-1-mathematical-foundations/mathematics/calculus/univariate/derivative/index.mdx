@@ -1,64 +1,285 @@
 ---
 title: Derivative
 kind: concept
-summary: The derivative of a function at a point is the limit of the slope of secant lines as they shrink to that point. It is the slope of the best linear approximation, and the product, quotient and chain rules all follow from its definition.
-tags: [calculus, derivatives, worked-example]
-aliases: [differentiation, rate of change, difference quotient, product rule, quotient rule, chain rule, tangent line]
+summary: The derivative $f'(a)$ is the instantaneous rate of change of $f$ at $a$, the slope of the graph there. It is the limit of the slopes of secant lines through $(a, f(a))$ and $(a + h, f(a + h))$ as $h \to 0$, and gives the best linear approximation $f(a + h) \approx f(a) + f'(a)\,h$.
+tags: [calculus, derivatives, numerical-methods, worked-example]
+aliases: [differentiation, rate of change, slope, difference quotient, secant line, tangent line, product rule, quotient rule, chain rule, Leibniz notation, second derivative, finite differences, central difference]
 related: [taylor-series, gradient]
-references: [spivak2008]
+references: [spivak2008, strang2016calculus, harper-secant, harper-tangent, nocedal2006, higham2002, bertoin2021, baydin2018]
 status: draft
-updated: 2026-09-26
+updated: 2026-10-11
 ---
 
 import { SecantTangent } from './SecantTangent'
+import { DerivativeGraph } from './DerivativeGraph'
+import { FiniteDifferenceError } from './FiniteDifferenceError'
 
 <Definition>
-The derivative of $f : \reals \to \reals$ at $a$ is
+The **derivative** of a function $f : \reals \to \reals$ at a point $a$ is
 
 $$
 f'(a) = \lim_{h \to 0} \frac{f(a + h) - f(a)}{h},
 $$
 
-when the limit exists. The fraction is the difference quotient: the slope of the secant line through $(a, f(a))$ and
-$(a + h, f(a + h))$. A function whose derivative exists at $a$ is differentiable at $a$ <Cite id="spivak2008" />.
+when this limit exists and is finite. The fraction is the **difference quotient**: the slope of the straight line
+through the two points $(a, f(a))$ and $(a + h, f(a + h))$ of the graph. The derivative is the slope of the graph at
+$a$, the rate at which $f$ changes there. A function whose derivative exists at $a$ is **differentiable** at $a$
+<Cite id="spivak2008" />.
 </Definition>
 
-## Secants and tangents
+## The idea: a rate of change at an instant
 
-As $h$ shrinks, the secant's second point slides along the curve towards $(a, f(a))$ and the secant turns into the
-tangent line. The derivative is the tangent's slope. The limit must be the same whether $h$ approaches 0 from above or
-from below.
+A stone dropped from rest falls $s(t) = 5t^2$ metres in its first $t$ seconds, ignoring air resistance. Its speed
+changes all the time. The question is how fast it moves at exactly $t = 2$ seconds.
+
+An average speed needs two times. Between $t = 2$ and $t = 2 + h$ the stone covers $s(2 + h) - s(2)$ metres in $h$
+seconds, so its average speed over that interval is
+
+$$
+\frac{s(2 + h) - s(2)}{h} = \frac{5(4 + 4h + h^2) - 20}{h} = \frac{20h + 5h^2}{h} = 20 + 5h \ \text{m/s}.
+$$
+
+The division by $h$ is allowed because $h \ne 0$. Shorter intervals give averages that settle on one number:
+
+| interval length $h$ (s) | 1 | 0.1 | 0.01 | 0.001 | $-0.1$ |
+| --- | --- | --- | --- | --- | --- |
+| average speed (m/s) | 25 | 20.5 | 20.05 | 20.005 | 19.5 |
+
+No interval, however short, gives the speed at the instant $t = 2$ itself: with $h = 0$ the quotient is $0/0$. The
+averages approach 20 from above when $h > 0$ and from below when $h < 0$. The speed at $t = 2$ is defined as this limit,
+20 m/s. That number is the derivative $s'(2)$. A speedometer reports it.
+
+The same construction applies to any quantity that depends on another. The derivative of a production cost with respect
+to the number of units made is the marginal cost: the extra cost of one more unit, in the limit of small changes. The
+derivative of a training loss with respect to a weight is the change in loss per unit change of that weight.
+
+## Secant lines
+
+Geometrically, the average rate of change is a slope. Take two points on the graph of $f$: $P = (a, f(a))$ and
+$Q = (a + h, f(a + h))$, with $h \ne 0$. The **secant line** is the straight line through $P$ and $Q$. Its run is the
+horizontal distance $h$ between the points, and its rise is the vertical distance $f(a + h) - f(a)$. Its slope is rise
+over run, which is the difference quotient <Cite id="strang2016calculus" />:
+
+$$
+\text{slope of } PQ = \frac{f(a + h) - f(a)}{h}.
+$$
+
+The name comes from the Latin _secare_, to cut: the line cuts the curve at two points <Cite id="harper-secant" />. The
+secant line is unrelated to the trigonometric function $\sec\theta = 1/\cos\theta$, one of the
+<NoteLink to="tangent-and-reciprocal-trigonometric-functions">reciprocal trigonometric functions</NoteLink>, which
+shares the word for a historical reason: on the unit-circle diagram that defines it, $\sec\theta$ is the length of a
+line segment that cuts the circle.
+
+The secant slope depends on two points, so it describes $f$ over an interval. For the falling stone it is the average
+speed over $[2, 2 + h]$. To describe $f$ at the single point $a$, the second point must move towards the first.
+
+## The tangent line as a limit of secants
+
+As $h$ shrinks, $Q$ slides along the curve towards $P$, and the secant pivots about $P$. For a smooth curve the secant
+settles on one line through $P$: the **tangent line**, from the Latin _tangere_, to touch
+<Cite id="harper-tangent" />. Near $P$ the tangent touches the curve without cutting across it, except at an
+inflection point. The tangent's slope is the limit of the secant slopes, which is the derivative, so the tangent line is
+
+$$
+y = f(a) + f'(a)\,(x - a).
+$$
 
 <SecantTangent />
 
+### What the limit means
+
+The difference quotient $q(h) = \tfrac{f(a + h) - f(a)}{h}$ is a function of $h$ defined for every small $h$ except
+$h = 0$. The statement $\lim_{h \to 0} q(h) = L$ means that $q(h)$ is as close to $L$ as desired for every $h$ close
+enough to 0: for every $\varepsilon > 0$ there is a $\delta > 0$ such that $\abs{q(h) - L} < \varepsilon$ whenever
+$0 < \abs{h} < \delta$ <Cite id="spivak2008" />. The value at $h = 0$ is never used. The right panel of the figure above
+plots $q(h)$ against $h$. The derivative is the height that curve approaches at the gap $h = 0$.
+
+The limit must be the same from both sides. The **right derivative** $f'_+(a)$ is the limit of $q(h)$ over $h > 0$
+only, and the **left derivative** $f'_-(a)$ is the limit over $h < 0$. The derivative $f'(a)$ exists exactly when both
+one-sided limits exist, are finite and are equal, and then $f'(a)$ is their common value. A function can fail this in
+two ways: the two one-sided limits differ (a corner), or the quotient grows without bound (a vertical tangent). Both
+cases are treated under differentiability below.
+
 ## The best linear approximation
 
-Write the error of the tangent line as $r(h) = f(a + h) - f(a) - f'(a)\,h$. Dividing by $h$ gives
+The tangent line approximates $f$ near $a$:
+
+$$
+f(a + h) \approx f(a) + f'(a)\,h.
+$$
+
+The approximation is better than any other line's in a precise sense. Write its error as
+$r(h) = f(a + h) - f(a) - f'(a)\,h$. Dividing by $h$ gives
 
 $$
 \frac{r(h)}{h} = \frac{f(a + h) - f(a)}{h} - f'(a) \to 0 \quad \text{as } h \to 0.
 $$
 
-So $f(a + h) = f(a) + f'(a)\,h + o(h)$, where $o(h)$ is a term that vanishes faster than $h$. Conversely, if some number
-$m$ makes $f(a + h) - f(a) - m h = o(h)$, dividing by $h$ shows the difference quotient tends to $m$, so $m = f'(a)$.
-The derivative is therefore the unique slope for which the line $f(a) + m h$ matches $f$ to first order. This form is
-the one that generalises to several variables, where the slope becomes the
-<NoteLink to="gradient">gradient</NoteLink>, and to higher orders, in the <NoteLink to="taylor-series">Taylor
-series</NoteLink>.
+So $f(a + h) = f(a) + f'(a)\,h + o(h)$, where $o(h)$ denotes a term that vanishes faster than $h$: its ratio to $h$
+tends to 0. Conversely, if some number $m$ makes $f(a + h) - f(a) - m h = o(h)$, dividing by $h$ shows that the
+difference quotient tends to $m$, so $m = f'(a)$. The derivative is therefore the unique slope for which a line through
+$(a, f(a))$ matches $f$ to first order. Any other slope $m \ne f'(a)$ leaves an error of about $(f'(a) - m)\,h$, which
+shrinks only as fast as $h$.
 
-A differentiable function is continuous, because $f(a + h) - f(a) = h \cdot \tfrac{f(a + h) - f(a)}{h} \to 0 \cdot f'(a)
-= 0$. The converse fails, as the pitfalls below show.
+For $f(x) = x^2$ the error is exact: $(a + h)^2 = a^2 + 2a\,h + h^2$, so $f'(a) = 2a$ and $r(h) = h^2$. Halving $h$
+quarters the error. For a function with a second derivative the error behaves in the same way,
+$r(h) \approx \tfrac{1}{2} f''(a)\,h^2$, which the <NoteLink to="taylor-series">Taylor series</NoteLink> makes exact.
+This is why a differentiable curve looks straight under magnification: on a window of width $h$ around $a$, the gap
+between curve and tangent is of order $h^2$, a vanishing fraction of the window.
+
+The linear-approximation form is the one that generalises. In several variables the slope becomes the
+<NoteLink to="gradient">gradient</NoteLink>, and the <NoteLink to="matrix-vector-product">linear map</NoteLink> becomes
+the <NoteLink to="jacobian">Jacobian</NoteLink>.
+
+## The derivative as a function
+
+Computing $f'(a)$ at every point $a$ where it exists defines a new function $f'$, the **derivative function**. Its
+value at $x$ is the slope of $f$ at $x$. Where $f$ increases, $f' > 0$; where $f$ decreases, $f' < 0$. At a peak or a
+trough of a differentiable $f$ the tangent is horizontal and $f' = 0$.
+
+<DerivativeGraph />
+
+## Derivatives from first principles
+
+Each derivative below comes from the definition: expand $f(a + h)$, subtract $f(a)$, cancel the factor $h$ (allowed,
+because $h \ne 0$), then let $h \to 0$ in what remains.
+
+**Square, $f(x) = x^2$.**
+
+$$
+\frac{(a + h)^2 - a^2}{h} = \frac{a^2 + 2ah + h^2 - a^2}{h} = \frac{2ah + h^2}{h} = 2a + h \to 2a.
+$$
+
+So $f'(x) = 2x$. The term $h^2$ in the numerator becomes $h$ after dividing and disappears in the limit.
+
+**Cube, $f(x) = x^3$.** Expanding $(a + h)^3 = a^3 + 3a^2h + 3ah^2 + h^3$ gives
+
+$$
+\frac{(a + h)^3 - a^3}{h} = \frac{3a^2h + 3ah^2 + h^3}{h} = 3a^2 + 3ah + h^2 \to 3a^2.
+$$
+
+**Any positive integer power, $f(x) = x^n$.** The binomial theorem expands
+$(a + h)^n = \sum_{k=0}^{n} \binom{n}{k} a^{n-k} h^k$. The $k = 0$ term is $a^n$, which cancels, and the $k = 1$ term
+is $n a^{n-1} h$. Every other term contains $h^2$ or a higher power. Dividing by $h$,
+
+$$
+\frac{(a + h)^n - a^n}{h} = n a^{n-1} + \binom{n}{2} a^{n-2} h + \dots + h^{n-1} \to n a^{n-1}.
+$$
+
+Only the term linear in $h$ survives: the derivative reads off the first-order coefficient of the expansion.
+
+**Reciprocal, $f(x) = 1/x$, for $a \ne 0$.** Put the two fractions over a common denominator:
+
+$$
+\frac{1}{h}\paren{\frac{1}{a + h} - \frac{1}{a}} = \frac{1}{h} \cdot \frac{a - (a + h)}{a(a + h)}
+= \frac{-1}{a(a + h)} \to -\frac{1}{a^2}.
+$$
+
+The derivative is negative everywhere: $1/x$ decreases on each side of 0. At $a = 0$ the function is undefined, so it
+has no derivative there.
+
+**Square root, $f(x) = \sqrt{x}$, for $a > 0$.** Direct substitution gives $0/0$. Multiplying the numerator and
+denominator by the conjugate $\sqrt{a + h} + \sqrt{a}$ (rationalising) turns the difference of roots into a difference
+of squares, $(\sqrt{a + h})^2 - (\sqrt{a})^2 = h$:
+
+$$
+\begin{aligned}
+\frac{\sqrt{a + h} - \sqrt{a}}{h}
+&= \frac{\sqrt{a + h} - \sqrt{a}}{h} \cdot \frac{\sqrt{a + h} + \sqrt{a}}{\sqrt{a + h} + \sqrt{a}}
+= \frac{h}{h\paren{\sqrt{a + h} + \sqrt{a}}} \\
+&= \frac{1}{\sqrt{a + h} + \sqrt{a}} \to \frac{1}{2\sqrt{a}}.
+\end{aligned}
+$$
+
+At $a = 0$ only $h > 0$ is allowed, and the quotient $\sqrt{h}/h = 1/\sqrt{h}$ grows without bound: the graph of
+$\sqrt{x}$ leaves the origin vertically.
+
+The last two results fit the power rule with exponents $-1$ and $\tfrac{1}{2}$: $(x^{-1})' = -x^{-2}$ and
+$(x^{1/2})' = \tfrac{1}{2}x^{-1/2}$. The rule $(x^r)' = r x^{r-1}$ holds for every real $r$, as the table of standard
+derivatives below shows.
+
+## Notation
+
+Three notations are in use, named after Lagrange, Leibniz and Newton.
+
+- **Lagrange:** $f'(x)$, $f''(x)$, $f'''(x)$, then $f^{(n)}(x)$ for the $n$th derivative. It names the derivative as a
+  function, and $f'(a)$ is its value at $a$.
+- **Leibniz:** for $y = f(x)$, the derivative is $\frac{dy}{dx}$, or $\frac{d}{dx} f(x)$, where $\frac{d}{dx}$ is the
+  operator that maps a function to its derivative. Its value at $a$ is written $\left.\frac{dy}{dx}\right|_{x = a}$.
+  The second derivative is $\frac{d^2 y}{dx^2}$.
+- **Newton:** a dot over a quantity that depends on time, $\dot{x} = \frac{dx}{dt}$ and $\ddot{x} = \frac{d^2x}{dt^2}$.
+  It is used for velocities and accelerations in mechanics and for state equations in
+  <NoteLink to="ordinary-differential-equations">ordinary differential equations</NoteLink>.
+
+The Leibniz symbol $\frac{dy}{dx}$ recalls the quotient $\frac{\Delta y}{\Delta x}$ it is the limit of, where
+$\Delta x = h$ and $\Delta y = f(x + h) - f(x)$. It is not a fraction: $dy$ and $dx$ are not numbers in this definition,
+and the symbol is read as a whole. It nevertheless behaves like a fraction in the one-variable rules. The chain rule
+reads $\frac{dy}{dx} = \frac{dy}{du}\frac{du}{dx}$, as if $du$ cancelled, and the derivative of an inverse function
+reads $\frac{dx}{dy} = 1 / \frac{dy}{dx}$. The analogy fails elsewhere. The second derivative $\frac{d^2y}{dx^2}$ is not
+$\paren{\frac{dy}{dx}}^2$. For three variables tied by one equation $F(x, y, z) = 0$, the partial derivatives satisfy
+$\frac{\partial x}{\partial y}\frac{\partial y}{\partial z}\frac{\partial z}{\partial x} = -1$, not $+1$.
+
+### Higher derivatives
+
+The derivative of $f'$ is the **second derivative** $f''$. It measures how fast the slope changes. For the falling
+stone, $s(t) = 5t^2$ gives velocity $\dot{s}(t) = 10t$ m/s and acceleration $\ddot{s}(t) = 10$ m/s², the rate at which
+the velocity changes. On a graph, $f'' > 0$ means the slope increases from left to right and the graph bends upwards; on
+an interval where $f'' \ge 0$, $f$ is <Gloss name="convex-function">convex</Gloss> on that interval and lies above each
+of its tangent lines there. $f'' < 0$ means the graph bends downwards. The second derivative refines the linear
+approximation to a quadratic one, $f(a + h) \approx f(a) + f'(a)\,h + \tfrac{1}{2} f''(a)\,h^2$, and at a point where
+$f'(a) = 0$ the sign of $f''(a)$ tells a minimum ($f''(a) > 0$) from a maximum ($f''(a) < 0$).
+
+## Differentiability
+
+**Differentiable functions are continuous.** If $f'(a)$ exists, then
+
+$$
+f(a + h) - f(a) = h \cdot \frac{f(a + h) - f(a)}{h} \to 0 \cdot f'(a) = 0,
+$$
+
+so $f(a + h) \to f(a)$ as $h \to 0$. A jump in the graph therefore rules out a derivative.
+
+**Continuity is not sufficient.** Three continuous functions show the ways a derivative can fail to exist at 0.
+
+- **A corner: $\abs{x}$.** The difference quotient at 0 is $\abs{h}/h$, which is $+1$ for every $h > 0$ and $-1$ for
+  every $h < 0$. The one-sided derivatives are $f'_+(0) = 1$ and $f'_-(0) = -1$. They differ, so $f'(0)$ does not
+  exist. Every line through the origin with slope between $-1$ and $1$ stays below the graph, and none is the tangent.
+- **A kink: <Gloss name="relu" />, $\max(0, x)$.** The left derivative at 0 is 0 and the right derivative is 1. Deep
+  learning frameworks still need a number at 0, and use a fixed value there, usually 0. Any value in $[0, 1]$ is a
+  <NoteLink to="subgradients">subgradient</NoteLink>: the slope of a line through the kink that stays below the
+  function. Inputs of exactly 0 occur in finite-precision training, and in 16-bit and 32-bit arithmetic the value
+  chosen for $\text{ReLU}'(0)$ can change the computed gradients and the trained network <Cite id="bertoin2021" />.
+- **A vertical tangent: $\sqrt[3]{x}$.** The quotient at 0 is $h^{1/3}/h = h^{-2/3}$, which tends to $+\infty$ from
+  both sides. The secants approach the vertical line $x = 0$, a tangent line with no finite slope. The derivative is
+  required to be a real number, so $\sqrt[3]{x}$ is not differentiable at 0.
+
+Continuous functions can be worse still. The Weierstrass function is continuous everywhere and differentiable nowhere,
+and the sample paths of <NoteLink to="brownian-motion">Brownian motion</NoteLink> share that property.
 
 ## The rules of differentiation
 
-Each rule follows from the definition.
+Derivatives of combinations of functions follow from the derivatives of the parts. Each rule below follows from the
+definition. In each, $f$ and $g$ are differentiable at the point $a$.
 
-**Sums and multiples.** Limits are linear, so $(\alpha f + \beta g)' = \alpha f' + \beta g'$.
-
-**Product rule.** Add and subtract $f(a + h)\,g(a)$ in the numerator:
+**Linearity.** For constants $\alpha$ and $\beta$, the difference quotient of $\alpha f + \beta g$ is $\alpha$ times
+that of $f$ plus $\beta$ times that of $g$. Limits of sums are sums of limits, so
 
 $$
-\frac{f(a+h)g(a+h) - f(a)g(a)}{h} = f(a + h)\,\frac{g(a + h) - g(a)}{h} + g(a)\,\frac{f(a + h) - f(a)}{h}.
+(\alpha f + \beta g)' = \alpha f' + \beta g'.
+$$
+
+**Product rule.** Picture $f(a)\,g(a)$ as the area of a rectangle with sides $f(a)$ and $g(a)$. When $a$ moves by $h$,
+the sides grow by $\Delta f = f(a + h) - f(a)$ and $\Delta g = g(a + h) - g(a)$. The area grows by three strips:
+$f\,\Delta g$ along one side, $g\,\Delta f$ along the other, and the corner $\Delta f\,\Delta g$. Each $\Delta$ is
+proportional to $h$ to first order, so the corner is of order $h^2$ and drops out after dividing by $h$. The algebra
+adds and subtracts $f(a + h)\,g(a)$ in the numerator and groups the terms:
+
+$$
+\begin{aligned}
+\frac{f(a+h)g(a+h) - f(a)g(a)}{h}
+&= f(a + h)\,\frac{g(a + h) - g(a)}{h} \\
+&\quad + g(a)\,\frac{f(a + h) - f(a)}{h}.
+\end{aligned}
 $$
 
 As $h \to 0$, $f(a + h) \to f(a)$ because $f$ is continuous, and the two quotients tend to $g'(a)$ and $f'(a)$. Hence
@@ -67,80 +288,161 @@ $$
 (fg)'(a) = f(a)\,g'(a) + f'(a)\,g(a).
 $$
 
-**Chain rule.** Use the linear approximation twice. Let $k = g(a + h) - g(a) = g'(a)\,h + o(h)$. Then
+**Chain rule.** For a composition $f(g(x))$, rates multiply. If $u = g(x)$ changes 3 times as fast as $x$ and
+$y = f(u)$ changes 2 times as fast as $u$, then $y$ changes 6 times as fast as $x$. The proof uses the linear
+approximation twice. Let $k = g(a + h) - g(a) = g'(a)\,h + o(h)$. Then
 
 $$
 f(g(a + h)) = f(g(a) + k) = f(g(a)) + f'(g(a))\,k + o(k).
 $$
 
-Since $k$ is proportional to $h$ to first order, $o(k)$ is also $o(h)$. Substituting $k$ gives
+Since $k$ is at most a constant times $\abs{h}$ for small $h$, $o(k)$ is also $o(h)$. Substituting $k$ gives
 $f(g(a + h)) = f(g(a)) + f'(g(a))\,g'(a)\,h + o(h)$, and the uniqueness of the linear approximation gives
 
 $$
 (f \circ g)'(a) = f'(g(a))\,g'(a).
 $$
 
-**Quotient rule.** First, for $r(t) = 1/t$,
+The shortcut of writing $\frac{\Delta y}{\Delta x} = \frac{\Delta y}{\Delta u}\frac{\Delta u}{\Delta x}$ and taking
+limits fails when $\Delta u = 0$ for arbitrarily small $h$, as for a constant $g$; the linear-approximation proof has no
+such gap <Cite id="spivak2008" />. The <NoteLink to="multivariable-chain-rule">multivariable chain rule</NoteLink>
+extends the rule to functions of several variables, where the factors become Jacobian matrices.
+<NoteLink to="backpropagation">Backpropagation</NoteLink> applies it to a neural network, one layer at a time.
 
-$$
-\frac{r(t + h) - r(t)}{h} = \frac{1}{h}\paren{\frac{1}{t + h} - \frac{1}{t}} = \frac{-1}{t\,(t + h)} \to -\frac{1}{t^2}.
-$$
-
-The chain rule then gives $(1/g)' = -g'/g^2$, and the product rule applied to $f \cdot (1/g)$ gives
+**Quotient rule.** First, the reciprocal: by the first-principles result $(1/t)' = -1/t^2$ and the chain rule,
+$(1/g)' = -g'/g^2$ wherever $g \ne 0$. The product rule applied to $f \cdot (1/g)$ then gives
 
 $$
 \paren{\frac{f}{g}}' = \frac{f'}{g} - \frac{f\,g'}{g^2} = \frac{f'g - f\,g'}{g^2}.
 $$
 
-## Common derivatives
+## Derivatives of standard functions
 
 | $f(x)$ | $f'(x)$ | Derivation |
 | --- | --- | --- |
-| $x^n$, integer $n \ge 1$ | $n x^{n-1}$ | Expand $(x + h)^n = x^n + n x^{n-1} h + h^2(\dots)$; the quotient is $n x^{n-1} + h(\dots)$. |
+| constant $c$ | $0$ | The quotient is $(c - c)/h = 0$ for every $h$. |
+| $x^n$, integer $n \ge 1$ | $n x^{n-1}$ | Binomial expansion, above. |
+| $x^r$, real $r$, $x > 0$ | $r x^{r-1}$ | $x^r = e^{r \log x}$; the chain rule gives $e^{r \log x} \cdot r/x = r x^{r-1}$. |
 | $e^x$ | $e^x$ | $\tfrac{e^{x+h} - e^x}{h} = e^x\,\tfrac{e^h - 1}{h}$, and $\tfrac{e^h - 1}{h} \to 1$. |
+| $b^x$, $b > 0$ | $b^x \log b$ | $b^x = e^{x \log b}$ and the chain rule. |
 | $\log x$, $x > 0$ | $1/x$ | Differentiate $e^{\log x} = x$ with the chain rule: $e^{\log x}(\log x)' = 1$. |
 | $\sin x$ | $\cos x$ | $\sin(x + h) - \sin x = \sin x\,(\cos h - 1) + \cos x \sin h$; use $\tfrac{\sin h}{h} \to 1$, $\tfrac{\cos h - 1}{h} \to 0$. |
 | $\cos x$ | $-\sin x$ | The same expansion of $\cos(x + h)$. |
+| $\tan x$ | $1/\cos^2 x = \sec^2 x$ | The quotient rule on $\sin x / \cos x$, with $\sin^2 x + \cos^2 x = 1$. |
 
-The limit $(e^h - 1)/h \to 1$ is the defining property of $e$; the <NoteLink to="exponential-and-logarithm">exponential
-and logarithm</NoteLink> note derives it. The rule for $x^n$ extends to every real exponent: $x^r = e^{r \log x}$, so
-the chain rule gives $(x^r)' = e^{r \log x} \cdot r/x = r x^{r-1}$.
+Here $\log$ is the natural logarithm. The limit $(e^h - 1)/h \to 1$ is the defining property of $e$; the
+<NoteLink to="exponential-and-logarithm">exponential and logarithm</NoteLink> note derives it. The trigonometric rows
+hold with $x$ in <NoteLink to="angles-and-radians">radians</NoteLink>, and the
+<NoteLink to="derivatives-of-trigonometric-functions">derivatives of the trigonometric functions</NoteLink> note derives
+them in full. The limit $\tfrac{\sin h}{h} \to 1$ is a statement about radians; with $x$ in degrees,
+$\frac{d}{dx}\sin x = \frac{\pi}{180}\cos x$.
 
-## Worked examples
+## Worked examples with the rules
 
-**A product.** For $f(x) = x^2 e^{-x}$, the product and chain rules give
+**A product.** For $f(x) = x^2 e^{-x}$, the product rule with the chain rule for $e^{-x}$ gives
 
 $$
 f'(x) = 2x\,e^{-x} + x^2 \cdot (-e^{-x}) = x\,e^{-x}(2 - x).
 $$
 
 The derivative is zero at $x = 0$ and $x = 2$. It is negative for $x < 0$, positive between 0 and 2, and negative after
-2, so $f$ has a minimum at 0 and a maximum at 2, where $f(2) = 4e^{-2} \approx 0.541$.
+2, so $f$ has a minimum at 0 and a maximum at 2, where $f(2) = 4e^{-2} \approx 0.541$. The figure above plots this
+function and its derivative.
 
-**The sigmoid.** For $\sigma(x) = 1/(1 + e^{-x})$, the rule $(1/g)' = -g'/g^2$ with $g = 1 + e^{-x}$ gives
+**The sigmoid.** For $\sigma(x) = 1/(1 + e^{-x})$, the reciprocal rule $(1/g)' = -g'/g^2$ with $g = 1 + e^{-x}$ and
+$g' = -e^{-x}$ gives
 
 $$
 \sigma'(x) = \frac{e^{-x}}{(1 + e^{-x})^2} = \frac{1}{1 + e^{-x}} \cdot \frac{e^{-x}}{1 + e^{-x}} = \sigma(x)\,\bigl(1 - \sigma(x)\bigr).
 $$
 
 The derivative is largest at $x = 0$, where it equals $1/4$, and it decays towards 0 in both tails. That decay is why
-saturated sigmoid units pass back almost no gradient in
-<NoteLink to="backpropagation">backpropagation</NoteLink>.
+saturated sigmoid units pass back almost no gradient in backpropagation.
+
+## Numerical derivatives
+
+A derivative can be estimated from values of $f$ alone by keeping $h$ small but nonzero. Two finite differences are
+standard <Cite id="nocedal2006" />:
+
+$$
+D_+(h) = \frac{f(a + h) - f(a)}{h}, \qquad D_0(h) = \frac{f(a + h) - f(a - h)}{2h}.
+$$
+
+$D_+$ is the **forward difference**, the secant slope itself. $D_0$ is the **central difference**, the slope of the
+secant through the two points either side of $a$.
+
+**Truncation error.** For a twice-differentiable $f$, Taylor's theorem gives
+$f(a + h) = f(a) + f'(a)\,h + \tfrac{1}{2}f''(\xi)\,h^2$ for some $\xi$ between $a$ and $a + h$. Substituting,
+
+$$
+D_+(h) = f'(a) + \tfrac{1}{2} f''(\xi)\,h,
+$$
+
+so the error of the forward difference is of order $h$. For the central difference, expand both $f(a + h)$ and
+$f(a - h)$ to third order. The terms $f(a)$ and $\tfrac{1}{2}f''(a)\,h^2$ appear with the same sign in both and cancel
+in the subtraction, which leaves
+
+$$
+D_0(h) = f'(a) + \tfrac{1}{6} f'''(\eta)\,h^2
+$$
+
+for some $\eta$ in $[a - h, a + h]$. The central difference has error of order $h^2$: halving $h$ quarters the error. It
+needs $f(a + h)$ and $f(a - h)$, while the forward difference can reuse a known $f(a)$ and needs only $f(a + h)$.
+
+**Rounding error.** In <NoteLink to="floating-point-arithmetic">floating-point arithmetic</NoteLink> each value of $f$
+carries a relative error up to the unit roundoff $u$, about $1.1 \times 10^{-16}$ in double precision
+<Cite id="higham2002" />. When $h$ is small, $f(a + h)$ and $f(a)$ agree in most of their leading digits, and their
+difference keeps only the last few, which are mostly rounding error. That error, of size about $u\,\abs{f(a)}$, is then
+divided by $h$. The total error of the forward difference is about
+
+$$
+E_+(h) \approx \frac{M}{2}\,h + \frac{2u\,\abs{f(a)}}{h},
+$$
+
+with $M$ a bound on $\abs{f''}$ near $a$. The first term falls with $h$ and the second grows. Setting the derivative of
+$E_+$ to zero gives the best step $h^\ast = 2\sqrt{u\,\abs{f(a)}/M}$, of order $\sqrt{u} \approx 10^{-8}$ when $f$ and
+$f''$ are of order 1, and a best error of the same order. The same argument for the central difference balances
+$h^2$ against $u/h$, which gives $h^\ast$ of order $u^{1/3} \approx 5 \times 10^{-6}$ and an error of order
+$u^{2/3} \approx 10^{-11}$ <Cite id="nocedal2006" />. A step proportional to $\max(1, \abs{a})$ keeps the relative
+size of $h$ fixed when $a$ is large.
+
+<FiniteDifferenceError />
+
+Finite differences cost one or two evaluations of $f$ per input variable, which is too slow for a model with millions
+of parameters. <Gloss name="autodiff" /> instead applies the rules of differentiation to each elementary operation of a
+program. It has no step $h$, so it has neither truncation error nor cancellation, and its result is exact up to
+rounding <Cite id="baydin2018" />. <NoteLink to="forward-mode-autodiff">Forward mode</NoteLink> carries a derivative
+along with each value, for instance with <NoteLink to="dual-numbers">dual numbers</NoteLink>. Reverse mode, used by
+backpropagation, carries derivatives backwards from the output.
 
 ## In machine learning
 
-- **Training** needs the derivative of the loss with respect to every parameter. The rules above, applied
-  mechanically along a computation, are what automatic differentiation implements.
+- **Training** needs the derivative of the loss with respect to every parameter.
+  <NoteLink to="gradient-descent">Gradient descent</NoteLink> moves each parameter against its derivative, because the
+  linear approximation says that a small step $-\eta f'(a)$, for a step size $\eta > 0$, changes $f$ by about
+  $-\eta f'(a)^2 \le 0$.
 - **<NoteLink to="activation-functions">Activation functions</NoteLink>** are chosen partly for their derivatives:
-  <Gloss name="relu" /> has derivative 1 on its active side and does not saturate there, unlike the sigmoid.
-- **Finite differences** approximate $f'(a)$ with a small $h$. The central quotient $\tfrac{f(a + h) - f(a - h)}{2h}$
-  has error of order $h^2$ rather than $h$, and is the standard check on hand-written gradients.
+  ReLU has derivative 1 on its active side and does not saturate there, unlike the sigmoid.
+- **Gradient checking** compares a hand-written or automatic derivative with a central difference at a few random
+  points. For a well-scaled function the central difference is accurate to about $u^{2/3} \approx 10^{-11}$ in double
+  precision, so a disagreement many orders of magnitude larger points to a bug in the derivative code.
 
 ## Pitfalls
 
-- **Continuity is not enough.** $\abs{x}$ is continuous at 0, but its difference quotient is $+1$ for $h > 0$ and $-1$
-  for $h < 0$, so the limit does not exist. ReLU, $\max(0, x)$, has the same kink. Frameworks return a fixed value
-  there (usually 0), which is a valid subgradient.
+- **Secant line and secant function.** The secant line through two points of a graph has nothing to do with the
+  trigonometric $\sec x = 1/\cos x$, apart from the Latin root.
+- **The derivative at a point is a number; the derivative is a function.** $f'(a)$ is the slope at one point, and $f'$
+  collects those slopes for every point. Evaluating before differentiating gives the derivative of a constant, which is
+  0.
+- **Continuity is not enough.** $\abs{x}$, ReLU and $\sqrt[3]{x}$ are continuous at 0 and not differentiable there.
+- **A zero derivative does not mean an extremum.** $f(x) = x^3$ has $f'(0) = 0$ and increases through 0. A stationary
+  point is a candidate for a minimum or maximum, and the second derivative or the sign of $f'$ on each side decides.
+- **A derivative need not be continuous.** $f(x) = x^2 \sin(1/x)$ with $f(0) = 0$ is differentiable everywhere, with
+  $f'(0) = \lim_{h \to 0} h \sin(1/h) = 0$, but $f'(x) = 2x\sin(1/x) - \cos(1/x)$ oscillates between about $-1$ and 1
+  as $x \to 0$ <Cite id="spivak2008" />.
+- **Leibniz notation is not a fraction.** $\frac{d^2y}{dx^2} \ne \paren{\frac{dy}{dx}}^2$, and the cancellation picture
+  fails for partial derivatives.
+- **Degrees.** $(\sin x)' = \cos x$ holds only for $x$ in radians.
 - **Step size in finite differences.** Too large an $h$ gives truncation error; too small an $h$ subtracts nearly equal
-  floating-point numbers and loses precision. In <NoteLink to="floating-point-arithmetic">double precision</NoteLink>
-  $h \approx 10^{-5}$ to $10^{-6}$ is a reasonable choice for the central quotient.
+  floating-point numbers and loses precision. In double precision, $h \approx 10^{-8}$ suits the forward difference and
+  $h \approx 10^{-5}$ to $10^{-6}$ the central difference, for arguments and values of order 1.

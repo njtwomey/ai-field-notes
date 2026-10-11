@@ -8,7 +8,7 @@ requires: [orthogonal-projection]
 related: [qr-decomposition, vector-norms, dot-product]
 references: [trefethen1997, golub2013, bjorck1967]
 status: draft
-updated: 2026-09-26
+updated: 2026-10-11
 ---
 
 import { GramSchmidtStepper } from './GramSchmidtStepper'
@@ -25,11 +25,57 @@ The vectors $\qvec_1, \dots, \qvec_k$ are orthonormal, and for every $j$ the fir
 $\vvec_1, \dots, \vvec_j$ <Cite id="trefethen1997" />.
 </Definition>
 
-## Mechanism
+## The idea
 
-Each step removes from $\vvec_j$ its <NoteLink to="orthogonal-projection">orthogonal projection</NoteLink> onto the
-span of the earlier $\qvec_i$. Because those $\qvec_i$ are orthonormal, the projection is the sum of the
-one-dimensional projections $(\qvec_i^\top\vvec_j)\qvec_i$. Scaling what remains to unit length gives $\qvec_j$.
+Gram–Schmidt builds the orthonormal basis one vector at a time. Each new input vector contributes only the part of it
+that points in a direction the basis does not cover yet.
+
+The first vector sets the first direction. $\qvec_1$ is $\vvec_1$ scaled to unit length.
+
+The second vector $\vvec_2$ splits into two parts: a part along $\qvec_1$, its shadow on $\qvec_1$, and a part
+perpendicular to $\qvec_1$. The shadow adds nothing new, because the direction $\qvec_1$ is already in the basis. The
+perpendicular part is the new direction, and scaled to unit length it becomes $\qvec_2$.
+
+Each term of the formula is one of these parts.
+
+- **$\qvec_i^\top\vvec_j$** is the length of the shadow of $\vvec_j$ on $\qvec_i$, with a sign. Because $\qvec_i$ has
+  unit length, the <NoteLink to="dot-product">dot product</NoteLink> is $\norm{\vvec_j}\cos\theta$, where $\theta$ is
+  the angle between the two vectors.
+- **$(\qvec_i^\top\vvec_j)\,\qvec_i$** is the shadow itself: the shadow's length times the unit direction.
+- **The sum over $i < j$** is the part of $\vvec_j$ that lies in the span of the earlier vectors, its
+  <NoteLink to="orthogonal-projection">orthogonal projection</NoteLink> onto that span.
+- **$\wvec_j$**, what is left after the subtraction, is the part of $\vvec_j$ perpendicular to every earlier direction.
+  Its length $\norm{\wvec_j}$ is the distance from $\vvec_j$ to the span of the earlier vectors.
+- **Dividing by $\norm{\wvec_j}$** makes the new direction a unit vector.
+
+The perpendicular part is never zero for independent inputs. A zero $\wvec_j$ would mean $\vvec_j$ lies entirely in the
+span of the earlier vectors, and so brings no new direction.
+
+In two dimensions, take $\vvec_1 = (3, 4)$ and $\vvec_2 = (1, 2)$. Then $\qvec_1 = (0.6, 0.8)$. The shadow of
+$\vvec_2$ on $\qvec_1$ has length $\qvec_1^\top\vvec_2 = 2.2$ and is the vector $2.2\,\qvec_1 = (1.32, 1.76)$. The rest,
+$\wvec_2 = (-0.32, 0.24)$, has length 0.4: most of $\vvec_2$ points along $\vvec_1$, and only a small part points
+somewhere new. The two parts are perpendicular, so their lengths satisfy Pythagoras' theorem:
+$\norm{\vvec_2}^2 = 5 = 2.2^2 + 0.4^2$. Scaling $\wvec_2$ to unit length gives $\qvec_2 = (-0.8, 0.6)$.
+
+## Why the shadows are taken on the $\qvec_i$
+
+The shadows are taken on the orthonormal $\qvec_i$, not on the original $\vvec_i$. Shadows on orthogonal directions
+do not overlap, so subtracting them one by one removes each part of $\vvec_j$ exactly once. Shadows on directions that
+are not orthogonal overlap, and subtracting them one by one removes the shared part twice.
+
+Take $\vvec_1 = (1, 1, 0)$, $\vvec_2 = (1, 0, 1)$ and $\vvec_3 = (0, 1, 1)$. The angle between $\vvec_1$ and
+$\vvec_2$ is $60°$, so they share a direction. Subtracting the shadows of $\vvec_3$ on $\vvec_1$ and on $\vvec_2$
+gives
+
+$$
+(0, 1, 1) - \tfrac{1}{2}(1, 1, 0) - \tfrac{1}{2}(1, 0, 1) = \paren{-1, \tfrac{1}{2}, \tfrac{1}{2}},
+$$
+
+whose dot product with $\vvec_1$ is $-\tfrac{1}{2}$, not 0. The result is not perpendicular to the earlier vectors.
+Projecting onto the span of non-orthogonal vectors needs a linear system, the normal equations of
+<NoteLink to="orthogonal-projection">orthogonal projection</NoteLink>. With an orthonormal basis that system is the
+identity, and the projection is the plain sum of shadows. Gram–Schmidt keeps the basis orthonormal at every step so
+that each projection stays this simple. The worked example below orthonormalises these three vectors correctly.
 
 ## Why the result is orthonormal
 
@@ -61,21 +107,54 @@ $\qvec_1, \dots, \qvec_j$. The two spans contain each other, so they are equal.
 
 ## Worked example
 
-Take $\vvec_1 = (3, 4)$ and $\vvec_2 = (1, 2)$ in $\reals^2$.
+Orthonormalise $\vvec_1 = (1, 1, 0)$, $\vvec_2 = (1, 0, 1)$ and $\vvec_3 = (0, 1, 1)$ in $\reals^3$.
 
-1. $\norm{\vvec_1} = 5$, so $\qvec_1 = (0.6, 0.8)$.
-2. $\qvec_1^\top\vvec_2 = 0.6 + 1.6 = 2.2$, so $\wvec_2 = (1, 2) - 2.2\,(0.6, 0.8) = (-0.32, 0.24)$.
-3. $\norm{\wvec_2} = 0.4$, so $\qvec_2 = (-0.8, 0.6)$.
+**First vector.** $\norm{\vvec_1} = \sqrt{2}$, so $\qvec_1 = \tfrac{1}{\sqrt{2}}(1, 1, 0)$.
 
-The check $\qvec_1^\top\qvec_2 = -0.48 + 0.48 = 0$ confirms orthogonality.
+**Second vector.**
+
+1. Shadow length: $\qvec_1^\top\vvec_2 = \tfrac{1}{\sqrt{2}}(1 + 0 + 0) = \tfrac{1}{\sqrt{2}}$. The angle between
+   $\vvec_1$ and $\vvec_2$ is $60°$, and $\norm{\vvec_2}\cos 60° = \sqrt{2} \cdot \tfrac{1}{2} = \tfrac{1}{\sqrt{2}}$
+   agrees.
+2. Shadow: $\tfrac{1}{\sqrt{2}}\,\qvec_1 = (\tfrac{1}{2}, \tfrac{1}{2}, 0)$, the point on the line through $\vvec_1$
+   nearest to $\vvec_2$.
+3. New direction: $\wvec_2 = (1, 0, 1) - (\tfrac{1}{2}, \tfrac{1}{2}, 0) = (\tfrac{1}{2}, -\tfrac{1}{2}, 1)$. Its dot
+   product with $\vvec_1$ is $\tfrac{1}{2} - \tfrac{1}{2} + 0 = 0$.
+4. Its length is $\norm{\wvec_2} = \sqrt{\tfrac{1}{4} + \tfrac{1}{4} + 1} = \sqrt{\tfrac{3}{2}}$, which is
+   $\norm{\vvec_2}\sin 60°$, the distance from $\vvec_2$ to the line through $\vvec_1$.
+5. Normalise: $\qvec_2 = \tfrac{1}{\sqrt{6}}(1, -1, 2)$.
+
+**Third vector.**
+
+1. Shadow lengths: $\qvec_1^\top\vvec_3 = \tfrac{1}{\sqrt{2}}$ and
+   $\qvec_2^\top\vvec_3 = \tfrac{1}{\sqrt{6}}(0 - 1 + 2) = \tfrac{1}{\sqrt{6}}$.
+2. Shadows: $\tfrac{1}{\sqrt{2}}\,\qvec_1 = (\tfrac{1}{2}, \tfrac{1}{2}, 0)$ and
+   $\tfrac{1}{\sqrt{6}}\,\qvec_2 = (\tfrac{1}{6}, -\tfrac{1}{6}, \tfrac{1}{3})$. Their sum is the projection of
+   $\vvec_3$ onto the plane spanned by $\vvec_1$ and $\vvec_2$.
+3. New direction: $\wvec_3 = (0, 1, 1) - (\tfrac{1}{2}, \tfrac{1}{2}, 0) - (\tfrac{1}{6}, -\tfrac{1}{6}, \tfrac{1}{3})
+   = (-\tfrac{2}{3}, \tfrac{2}{3}, \tfrac{2}{3})$. Its dot products with $\vvec_1$ and $\vvec_2$ are both 0, unlike the
+   result of subtracting shadows on the $\vvec_i$ in the previous section.
+4. Its length is $\norm{\wvec_3} = \tfrac{2}{\sqrt{3}}$, the distance from $\vvec_3$ to that plane.
+5. Normalise: $\qvec_3 = \tfrac{1}{\sqrt{3}}(-1, 1, 1)$.
+
+**Checks.** The dot products $\qvec_1^\top\qvec_2$, $\qvec_1^\top\qvec_3$ and $\qvec_2^\top\qvec_3$ are proportional to
+$1 - 1 + 0$, $-1 + 1 + 0$ and $-1 - 1 + 2$, all 0. The two shadow lengths of $\vvec_3$ and the length of its new
+direction, $\tfrac{1}{\sqrt{2}}$, $\tfrac{1}{\sqrt{6}}$ and $\tfrac{2}{\sqrt{3}}$, are the coordinates of $\vvec_3$ in
+the new basis, so Pythagoras' theorem holds: $\norm{\vvec_3}^2 = 2 = \tfrac{1}{2} + \tfrac{1}{6} + \tfrac{4}{3}$.
 
 ## Relation to QR
 
 Collect the coefficients as $r_{ij} = \qvec_i^\top\vvec_j$ for $i < j$ and $r_{jj} = \norm{\wvec_j}$. Rearranging the
 definition gives $\vvec_j = \sum_{i \le j} r_{ij}\qvec_i$. In matrix form this is $\Amat = \Qmat\Rmat$, with
 $\Amat = [\vvec_1 \cdots \vvec_k]$, $\Qmat = [\qvec_1 \cdots \qvec_k]$ and $\Rmat$ upper triangular with a positive
-diagonal. This is the <NoteLink to="qr-decomposition">QR decomposition</NoteLink>. In the example above,
-$\Rmat = \begin{bmatrix} 5 & 2.2 \\ 0 & 0.4 \end{bmatrix}$.
+diagonal. This is the <NoteLink to="qr-decomposition">QR decomposition</NoteLink>. In the worked example,
+
+$$
+\Rmat = \begin{bmatrix} \sqrt{2} & \tfrac{1}{\sqrt{2}} & \tfrac{1}{\sqrt{2}} \\ 0 & \sqrt{3/2} & \tfrac{1}{\sqrt{6}} \\
+0 & 0 & \tfrac{2}{\sqrt{3}} \end{bmatrix}:
+$$
+
+the diagonal holds the lengths of the new directions, and the entries above it the shadow lengths.
 
 ## Classical and modified variants
 

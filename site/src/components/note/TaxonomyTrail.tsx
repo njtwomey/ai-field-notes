@@ -1,5 +1,5 @@
-import { BookOpen, Check, ChevronDown, ChevronRight, CornerDownRight, LayoutGrid } from 'lucide-react'
-import { Fragment } from 'react'
+import { BookOpen, Check, ChevronDown, ChevronRight, CornerDownRight, Ellipsis, LayoutGrid } from 'lucide-react'
+import { Fragment, useState } from 'react'
 import { Link, useNavigate } from 'react-router'
 import {
   DropdownMenu,
@@ -28,19 +28,50 @@ import { cn } from '@/lib/utils'
 /**
  * A note's place in the taxonomy as a trail of dropdowns, ending in the note itself. Each category opens its siblings,
  * so a reader can move sideways at any level without going back; the note opens the other notes in its category.
- * On narrow screens only the note crumb shows.
+ * Only the note's category and its parent show at first: the categories above them fold into an ellipsis that expands
+ * the trail in place, and fold again on the next note. On narrow screens only the note crumb shows.
  */
+/** Categories shown before the trail folds: the note's category and its parent. */
+const SHOWN = 2
+
 export function TaxonomyTrail({ note, className }: { note: NoteMeta; className?: string }) {
   const trail = categoryTrail(note.category)
   const Icon = kindIcons[note.kind]
+  // Expanded for one note only, like the browse panel: arriving at another note finds the trail folded.
+  const [expandedFor, setExpandedFor] = useState<string | null>(null)
+  const folded = expandedFor !== note.slug && trail.length > SHOWN
+  const shown = folded ? trail.slice(-SHOWN) : trail
   return (
     <nav aria-label="Breadcrumb" className={cn('flex min-w-0 items-center gap-x-1 text-sm', className)}>
-      {trail.map((c, i) => (
-        <Fragment key={c.path}>
-          <CategoryCrumb node={c} siblings={i === 0 ? taxonomy : trail[i - 1].children} />
+      {folded && (
+        <>
+          <button
+            type="button"
+            onClick={() => setExpandedFor(note.slug)}
+            aria-label={`Show the full path: ${trail
+              .slice(0, -SHOWN)
+              .map((c) => c.title)
+              .join(' › ')}`}
+            title={trail
+              .slice(0, -SHOWN)
+              .map((c) => c.title)
+              .join(' › ')}
+            className={cn(triggerClass, 'hidden text-muted-foreground md:inline-flex')}
+          >
+            <Ellipsis className="size-4" aria-hidden />
+          </button>
           <ChevronRight className="hidden size-3.5 shrink-0 text-muted-foreground md:block" aria-hidden />
-        </Fragment>
-      ))}
+        </>
+      )}
+      {shown.map((c) => {
+        const i = trail.indexOf(c)
+        return (
+          <Fragment key={c.path}>
+            <CategoryCrumb node={c} siblings={i === 0 ? taxonomy : trail[i - 1].children} />
+            <ChevronRight className="hidden size-3.5 shrink-0 text-muted-foreground md:block" aria-hidden />
+          </Fragment>
+        )
+      })}
       <Icon className="ml-1 size-3.5 shrink-0 text-muted-foreground" aria-label={kindLabels[note.kind]} />
       <NoteCrumb note={note} />
     </nav>
@@ -171,11 +202,8 @@ function CategoryCrumb({
 /** The current note, opening the other notes filed in the same category. */
 export function NoteCrumb({ note, className }: { note: NoteMeta; className?: string }) {
   const navigate = useNavigate()
-  // The category's index note leads, set apart; the rest follow alphabetically.
-  const siblings = indexFirst(
-    notesInCategory(note.category, false).sort((a, b) => a.title.localeCompare(b.title)),
-    note.category,
-  )
+  // The category's index note leads, set apart; the rest follow in reading order.
+  const siblings = indexFirst(notesInCategory(note.category, false), note.category)
   const lead = categoryIndexNote(note.category)
   return (
     <DropdownMenu>

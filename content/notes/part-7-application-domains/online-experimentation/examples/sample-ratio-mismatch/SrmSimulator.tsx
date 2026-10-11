@@ -15,7 +15,7 @@ import {
   useFigureState,
 } from 'aifn-render'
 import { stream, uniform as drawUniform } from 'aifn-compute/foundation/random'
-import { sampleBinomial, twoProportionZ } from '../_shared/ab'
+import { sampleBinomial, twoProportionZ } from '../../_shared/ab'
 import { normalCdf } from 'aifn-compute/numerics/special'
 
 const SRM_ALPHA = 0.001

@@ -33,7 +33,7 @@ try {
   console.error(err instanceof Error ? err.message : err)
   process.exit(1)
 }
-const { notes: allNotes, taxonomy, folders } = index
+const { notes: allNotes, taxonomy, folders, unlisted } = index
 const slugs = new Set(allNotes.map((n) => n.slug))
 // Per-note checks run on the scoped notes; whole-tree checks below use allNotes.
 const notes = allNotes.filter(inScope)
@@ -254,6 +254,8 @@ for (const [key, set] of owners) {
   if (set.size > 1) warnings.push(`names: "${key}" is shared by ${[...set].join(', ')}`)
 }
 
+for (const slug of unlisted)
+  warnings.push(`content/reading-order.yaml: "${slug}" is not listed; it is read at the end of its category`)
 for (const w of warnings) console.log(`warning  ${w}`)
 if (empty.length) console.log(`info     ${empty.length} taxonomy categories have no notes yet (planned)`)
 for (const e of errors) console.error(`error    ${e}`)

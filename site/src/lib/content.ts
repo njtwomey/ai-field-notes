@@ -15,6 +15,15 @@ export type { CategoryNode, GlossaryEntry, GlossaryKind, NoteKind, NoteMeta, Ref
 
 export const notesBySlug: ReadonlyMap<string, NoteMeta> = new Map(notes.map((n) => [n.slug, n]))
 
+// `notes` comes in reading order (content/reading-order.yaml), so a note's neighbours in it are its previous and next.
+const readingPosition = new Map(notes.map((n, i) => [n.slug, i]))
+
+/** The notes just before and after a note in the reading order, if any. */
+export function readingNeighbours(slug: string): { prev?: NoteMeta; next?: NoteMeta } {
+  const i = readingPosition.get(slug)
+  return i === undefined ? {} : { prev: notes[i - 1], next: notes[i + 1] }
+}
+
 type MdxModule = { default: ComponentType<{ components?: Record<string, unknown> }> }
 const loaders = import.meta.glob<MdxModule>('@content/notes/**/index.mdx')
 

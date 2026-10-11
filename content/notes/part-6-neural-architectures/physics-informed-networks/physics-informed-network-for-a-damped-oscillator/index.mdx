@@ -1,0 +1,183 @@
+---
+title: Physics-informed network for a damped oscillator
+kind: example
+summary: 'A network sees ten early observations of a damped oscillator. Trained on the data alone it misses the rest of the motion by several times its size; trained also on the equation $x'''' + 2\zeta\omega_0 x'' + \omega_0^2 x = 0$ at points across the interval, it recovers the motion to about 3%.'
+tags: [worked-example, differential-equations, deep-learning, scientific-machine-learning]
+aliases: [damped harmonic oscillator PINN, harmonic oscillator PINN]
+requires: [physics-informed-neural-networks, characteristic-polynomial]
+related: [linear-systems-and-the-matrix-exponential, ordinary-differential-equations, quasi-newton-methods, adam, activation-functions, universal-approximation-theorem]
+references: [moseley2021, raissi2019, lagaris1998, sitzmann2020, rahaman2019]
+status: draft
+updated: 2026-10-11
+---
+
+import { OscillatorPinn } from './OscillatorPinn'
+import { SolutionFamily } from './SolutionFamily'
+
+_The setup follows Ben Moseley's harmonic oscillator example <Cite id="moseley2021" />._
+
+<Definition>
+A mass on a spring with damping moves by
+
+$$
+x''(t) + 2\zeta\omega_0 \, x'(t) + \omega_0^2 \, x(t) = 0, \qquad t \in [0, 1],
+$$
+
+with natural frequency $\omega_0 = 15$ and damping ratio $\zeta = 0.2$. It is released at rest from $x(0) = 1$. Ten
+noise-free observations $x(t_l)$ are given at evenly spaced times from $t = 0$ to $t = 0.24$, about the first half
+swing. The task is to recover $x(t)$ on all of $[0, 1]$ with a neural network, once from the observations alone and
+once from the observations and the equation.
+</Definition>
+
+## Setup
+
+- $x(t)$ is the displacement of the mass from rest and $t$ is time, in dimensionless units.
+- $\omega_0 > 0$ is the natural frequency: the angular frequency at which the mass would swing without damping. With
+  $\omega_0 = 15$ an undamped swing lasts $2\pi/15 \approx 0.42$, so $[0, 1]$ holds about two and a half swings.
+- $\zeta \ge 0$ is the damping ratio. For $\zeta < 1$ the motion oscillates while it decays (underdamped).
+- The network $x_{\thetavec}(t)$ is a <NoteLink to="multilayer-perceptron">multilayer perceptron</NoteLink> with one
+  input, two hidden layers of 32 hyperbolic tangent units and one output, with parameters $\thetavec$. Its input is
+  $2t - 1$, so that $[0, 1]$ maps to $[-1, 1]$.
+
+The **data-only** network minimises the mean squared misfit to the observations,
+
+$$
+L_{\text{data}}(\thetavec) = \frac{1}{10} \sum_{l=1}^{10} \paren{x_{\thetavec}(t_l) - x(t_l)}^2 .
+$$
+
+The **physics-informed** network minimises the same misfit plus $\lambda$ times the mean squared residual at $N_c = 40$
+collocation points $\tau_i$ spread evenly over $[0, 1]$:
+
+$$
+L_{\text{PINN}}(\thetavec) = L_{\text{data}}(\thetavec)
+  + \frac{\lambda}{N_c} \sum_{i=1}^{N_c} r_{\thetavec}(\tau_i)^2, \qquad
+r_{\thetavec}(t) = \frac{x_{\thetavec}''(t)}{\omega_0^2} + \frac{2\zeta}{\omega_0} x_{\thetavec}'(t) + x_{\thetavec}(t),
+$$
+
+with $\lambda = 1$. The residual $r_{\thetavec}$ is the equation divided by $\omega_0^2$, so that its three terms are of
+the size of $x$; undivided, the $\omega_0^2 x$ term would be 225 times larger than the data term. The derivatives
+$x_{\thetavec}'$ and $x_{\thetavec}''$ are the network's own, taken by automatic differentiation in $t$. No
+observation is needed at a collocation point.
+
+Both networks start from the same weights. Each takes 200 steps of <NoteLink to="adam">Adam</NoteLink> with
+<Gloss name="learning-rate">learning rate</Gloss> 0.03, then up to 1000 steps of full-batch <Gloss name="l-bfgs" />.
+
+## What the equation says about the model family
+
+The equation alone does not fix the motion. It fixes a family of motions, and the observations choose one member.
+
+The equation is linear with constant coefficients, so its solutions are combinations of exponentials $e^{\mu t}$.
+Substituting $x = e^{\mu t}$ gives the
+<NoteLink to="characteristic-polynomial">characteristic equation</NoteLink>
+
+$$
+\mu^2 + 2\zeta\omega_0 \mu + \omega_0^2 = 0, \qquad
+\mu = -\zeta\omega_0 \pm i\omega_d, \qquad \omega_d = \omega_0\sqrt{1 - \zeta^2},
+$$
+
+for $\zeta < 1$. The real part $-\zeta\omega_0$ sets the decay and the imaginary part $\omega_d$, the damped frequency,
+sets the swing. Every real solution is
+
+$$
+x(t) = e^{-\zeta\omega_0 t} \paren{A \cos \omega_d t + B \sin \omega_d t}
+$$
+
+for some constants $A$ and $B$. The family is two-dimensional: the equation fixes the decay rate and the frequency, and
+leaves the amplitude and phase free. Every member has zero residual, including $A = B = 0$.
+
+The physics-informed loss therefore splits the work. The residual term pushes the network towards the two-dimensional
+family; among functions in or near the family, the data term prefers the member through the observations. Ten
+observations over half a swing are more than enough to fix two numbers, which is why they suffice once the equation
+supplies the rest. The data-only network has no family to be pushed towards: it fits the observations and, beyond
+them, follows whatever its weights happen to favour.
+
+<SolutionFamily />
+
+If the closed form were known, fitting $A$ and $B$ by least squares would be a two-parameter regression and needs no
+network. The physics-informed network never uses the closed form; it uses only the equation. The oscillator is a check
+of the method, chosen because the closed form exists to measure the error against. Equations without a closed form are
+where the method earns its cost.
+
+## Solution
+
+The observations come from the member with $x(0) = 1$ and $x'(0) = 0$. At $t = 0$ the general solution gives $x(0) = A$,
+so $A = 1$. Its derivative is
+$x'(t) = e^{-\zeta\omega_0 t} \paren{(B\omega_d - \zeta\omega_0 A) \cos \omega_d t - (A\omega_d + \zeta\omega_0 B) \sin \omega_d t}$,
+so $x'(0) = B\omega_d - \zeta\omega_0 A = 0$ and $B = \zeta\omega_0 / \omega_d$. The motion is
+
+$$
+x(t) = e^{-\zeta\omega_0 t} \paren{\cos \omega_d t + \frac{\zeta\omega_0}{\omega_d} \sin \omega_d t}.
+$$
+
+With $\omega_0 = 15$ and $\zeta = 0.2$: $\zeta\omega_0 = 3$, $\omega_d = 15\sqrt{0.96} \approx 14.70$ and
+$B \approx 0.204$. The envelope $e^{-3t}$ falls to $e^{-3} \approx 0.05$ by $t = 1$.
+
+## Simulation
+
+The figure trains both networks in the browser and keeps a checkpoint every ten steps. The error is the relative
+$L_2$ error on 151 evenly spaced times in $[0, 1]$,
+$\norm{x_{\thetavec} - x}_2 / \norm{x}_2$.
+
+<OscillatorPinn />
+
+With the settings above, the two networks end as follows.
+
+| Network            | After 200 Adam steps | After L-BFGS | Mean squared residual on the grid |
+| ------------------ | -------------------- | ------------ | --------------------------------- |
+| Data only          | 422%                 | 650%         | 4.6                               |
+| Physics-informed   | 35%                  | 2.9%         | $7 \times 10^{-5}$                |
+
+The data-only network passes through all ten observations and then leaves the motion entirely: an error of several
+times the motion's own size. More training makes it worse, because L-BFGS fits the observations more exactly and
+nothing constrains the rest of the interval. The physics-informed network carries the oscillation through the two
+swings it never observed. Its residual on the fine grid, between the collocation points, is as small as at the points
+themselves.
+
+Changing one setting at a time from the defaults gives these physics-informed errors after training.
+
+| Change                              | Physics-informed error | What it shows                                                  |
+| ----------------------------------- | ---------------------- | -------------------------------------------------------------- |
+| Sine activation                     | under 0.1%             | an activation that oscillates suits an oscillating solution    |
+| Softplus activation                 | 8%                     | smooth, but a poorer fit to the swing than tanh                |
+| <Gloss name="relu" /> activation                     | 40%                    | $x'' = 0$ almost everywhere; the residual misses the curvature |
+| 10 collocation points               | 28%                    | about four points per swing are too few                        |
+| 5 collocation points                | 27%                    | the equation is enforced at too few places                     |
+| $\lambda = 0.01$                    | 7%                     | the equation is too weak against the data term                 |
+| $\lambda = 100$                     | 0.1%                   | with exact data and an exact equation, more weight helps       |
+| Data up to $t = 0.1$                | 2%                     | even a quarter swing of data fixes the two constants           |
+| Adam only, 3000 steps               | 9%                     | L-BFGS finishes the job far faster                             |
+
+Every row keeps the data-only network above 100% error.
+
+## What it illustrates
+
+- The residual term of a <NoteLink to="physics-informed-neural-networks">physics-informed network</NoteLink> constrains
+  the function wherever there are collocation points, which need no labels. Data constrain it only where there are
+  data.
+- The equation defines a family of solutions, here found through the
+  <NoteLink to="characteristic-polynomial">characteristic polynomial</NoteLink>; the data or conditions choose the
+  member.
+- The residual needs a smooth network: a ReLU network's second derivative is zero almost everywhere, as the
+  <NoteLink to="activation-functions">activation</NoteLink> comparison shows.
+- Fitting data says nothing about where there are none. The data-only network has near-zero training error and an
+  error of several times the signal beyond the data. A network can represent the true motion
+  (<NoteLink to="universal-approximation-theorem">universal approximation</NoteLink>), but nothing in the data-only loss
+  selects it.
+- Adam then <NoteLink to="quasi-newton-methods">L-BFGS</NoteLink> on a fixed, full-batch loss converges in a fraction of
+  the steps Adam alone needs <Cite id="raissi2019" />.
+
+## Variations
+
+- **Unknown damping.** Make $\zeta$ a trainable parameter next to $\thetavec$. The same loss then fits the motion and
+  estimates $\zeta$ from the observations: an inverse problem.
+- **Hard initial conditions.** The trial function $x_{\thetavec}(t) = 1 + t^2 N_{\thetavec}(t)$ meets $x(0) = 1$ and
+  $x'(0) = 0$ for every $\thetavec$ <Cite id="lagaris1998" />. Without observations, the residual alone then determines
+  the motion.
+- **A longer interval or a higher frequency.** More swings in the domain make the target higher in frequency relative
+  to the network's input range. Networks fit low frequencies first <Cite id="rahaman2019" />, so training slows; sine
+  activations <Cite id="sitzmann2020" /> and Fourier-feature inputs counter it.
+- **Noisy observations.** With noise in the data, a large $\lambda$ no longer helps without limit: the equation then
+  acts as a regulariser that smooths the noise, and $\lambda$ trades the fit to the data against the fit to the
+  equation.
+- **A forcing term.** With $x'' + 2\zeta\omega_0 x' + \omega_0^2 x = f(t)$ the residual gains $-f(t)/\omega_0^2$, and
+  the family becomes a particular solution plus the same two-dimensional family.

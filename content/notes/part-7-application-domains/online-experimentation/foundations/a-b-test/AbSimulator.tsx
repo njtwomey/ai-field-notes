@@ -15,7 +15,7 @@ import {
   useFigureState,
 } from 'aifn-render'
 import { stream, uniform as drawUniform } from 'aifn-compute/foundation/random'
-import { requiredN, sampleBinomial, twoProportionZ, zTestPower } from '../_shared/ab'
+import { requiredN, sampleBinomial, twoProportionZ, zTestPower } from '../../_shared/ab'
 import { normalPdf, normalQuantile } from 'aifn-compute/numerics/special'
 
 const SIMULATIONS = 400

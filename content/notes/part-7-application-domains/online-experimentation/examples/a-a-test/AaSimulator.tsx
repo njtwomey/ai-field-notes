@@ -14,7 +14,7 @@ import {
 } from 'aifn-render'
 import { stream, uniform as drawUniform } from 'aifn-compute/foundation/random'
 import { Binomial } from 'aifn-compute/probability/distributions'
-import { sampleBinomial, twoProportionZ } from '../_shared/ab'
+import { sampleBinomial, twoProportionZ } from '../../_shared/ab'
 import { normalPdf } from 'aifn-compute/numerics/special'
 
 /** P(S ≤ k) for S ~ Binomial(n, p). */

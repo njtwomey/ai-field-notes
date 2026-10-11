@@ -2,14 +2,15 @@ import { BookText, ChevronRight, Code2, SquareTerminal } from 'lucide-react'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import type { Heading } from '@/hooks/use-reading-position'
 import type { NoteMeta } from '@/lib/content'
+import { ReadingArrows } from './ReadingNav'
 import { TaxonomyTrail } from './TaxonomyTrail'
 
 export type NoteTab = 'concept' | 'code' | 'outputs'
 
 /**
  * Sticky bar under the site header and the page's only breadcrumb: the taxonomy trail ending in the note's title,
- * then the section being read, a reading-progress line, and (when
- * the note has code) its tabs. The page's h1 is in NoteHeader.
+ * then the section being read and a reading-progress line. At the right end: the note's tabs (when it has code) and the
+ * previous / next arrows of the reading order. The page's h1 is in NoteHeader.
  */
 export function NoteBar({
   note,
@@ -47,21 +48,24 @@ export function NoteBar({
           </a>
         )}
       </div>
-      {note.code && (
-        <Tabs value={tab} onValueChange={(v) => onTab(v as NoteTab)} className="ml-auto shrink-0">
-          <TabsList>
-            <TabsTrigger value="concept">
-              <BookText /> Concept
-            </TabsTrigger>
-            <TabsTrigger value="code">
-              <Code2 /> Code
-            </TabsTrigger>
-            <TabsTrigger value="outputs">
-              <SquareTerminal /> Outputs
-            </TabsTrigger>
-          </TabsList>
-        </Tabs>
-      )}
+      <div className="ml-auto flex shrink-0 items-center gap-3">
+        {note.code && (
+          <Tabs value={tab} onValueChange={(v) => onTab(v as NoteTab)} className="shrink-0">
+            <TabsList>
+              <TabsTrigger value="concept">
+                <BookText /> Concept
+              </TabsTrigger>
+              <TabsTrigger value="code">
+                <Code2 /> Code
+              </TabsTrigger>
+              <TabsTrigger value="outputs">
+                <SquareTerminal /> Outputs
+              </TabsTrigger>
+            </TabsList>
+          </Tabs>
+        )}
+        <ReadingArrows note={note} />
+      </div>
     </div>
   )
 }

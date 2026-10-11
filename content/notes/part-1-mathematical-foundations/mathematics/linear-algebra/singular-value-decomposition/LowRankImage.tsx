@@ -1,23 +1,45 @@
-import { useMemo } from 'react'
-import { Bars, Figure, Handle, int, Plot, Raster, Readout, useAxis, useFigureState } from 'aifn-render'
+import { useContext, useMemo, type ReactNode } from 'react'
+import {
+  Curve,
+  Figure,
+  FrameContext,
+  Handle,
+  int,
+  Plot,
+  Points,
+  Raster,
+  Readout,
+  useAxis,
+  useFigureState,
+} from 'aifn-render'
 import type { ImageSvd } from '@/generated/contracts'
 import { useFigure } from '@/lib/generated'
+
+const PANEL = 300
+const SPECTRUM = 220
+
+/** Plots inside a Figure take the frame's height; this gives the plots inside it a fixed height instead. */
+function FixedHeight({ height, children }: { height: number; children: ReactNode }) {
+  const frame = useContext(FrameContext)
+  return <FrameContext.Provider value={{ ...frame, height }}>{children}</FrameContext.Provider>
+}
 
 /** Rank-k reconstructions of a test image from its SVD, precomputed by python/mlc/figures/svd.py. */
 export function LowRankImage() {
   const { data, error } = useFigure<ImageSvd>('singular-value-decomposition/image')
   // The test image is 64 × 64, so its rank is at most 64.
   const state = useFigureState({
-    k: int(4, { min: 1, max: 64, step: 1, suggestions: [1, 4, 16, 64], label: 'rank k' }),
+    k: int(4, { ge: 1, le: 64, suggestions: [1, 4, 16, 64], label: 'rank k' }),
   })
   const size = data?.s.length ?? 64
   const k = Math.min(state.k, size)
-  const xAxis = useAxis({})
-  const yAxis = useAxis({})
-  const xAxis2 = useAxis({})
-  const yAxis2 = useAxis({})
-  const xAxis3 = useAxis({ label: 'i', hold: 'union' })
-  const yAxis3 = useAxis({ label: 'σᵢ', hold: 'union', log: true })
+  // Square images: equal pixel length per unit on both axes.
+  const xAxis = useAxis({ range: [-0.5, size - 0.5] })
+  const yAxis = useAxis({ range: [-0.5, size - 0.5], equal: xAxis })
+  const xAxis2 = useAxis({ range: [-0.5, size - 0.5] })
+  const yAxis2 = useAxis({ range: [-0.5, size - 0.5], equal: xAxis2 })
+  const xAxis3 = useAxis({ label: 'i', range: [0, size + 1] })
+  const yAxis3 = useAxis({ label: 'σᵢ', log: true, range: [0.01, 100] })
 
   const r = useMemo(() => {
     if (!data) return undefined
@@ -33,10 +55,15 @@ export function LowRankImage() {
     const total = data.s.reduce((acc, s) => acc + s * s, 0)
     const kept = data.s.slice(0, k).reduce((acc, s) => acc + s * s, 0)
     const axis = Array.from({ length: size }, (_, i) => i)
-    const spectrum = [
-      { name: 'kept', x: axis.slice(0, k).map((i) => i + 1), y: data.s.slice(0, k), slot: 0 },
-      { name: 'discarded', x: axis.slice(k).map((i) => i + 1), y: data.s.slice(k), muted: true },
-    ] as const
+    // A log axis cannot show the exact zeros of a rank-deficient image, so the spectrum stops at the last nonzero value.
+    const rank = data.s.filter((v) => v > 1e-9).length
+    const index = axis.slice(0, rank).map((i) => i + 1)
+    const sv = data.s.slice(0, rank)
+    const spectrum = {
+      kept: { x: index.slice(0, k), y: sv.slice(0, k) },
+      discarded: { x: index.slice(k), y: sv.slice(k) },
+      all: { x: index, y: sv },
+    }
     return {
       size,
       axis,
@@ -45,6 +72,7 @@ export function LowRankImage() {
       energy: kept / total,
       error: Math.sqrt((total - kept) / total),
       storage: (k * (2 * size + 1)) / (size * size),
+      rank,
       spectrum,
     }
   }, [data, k])
@@ -55,7 +83,7 @@ export function LowRankImage() {
   return (
     <Figure
       title="Keeping the k largest singular values"
-      caption="The rank-k approximation keeps the first k terms σᵢuᵢvᵢᵀ. The smooth gradient, the disc and the bar appear within a few terms; the diagonal band and the checkerboard need many, because they are not aligned with rows and columns. No other rank-k matrix is closer to the image. Drag the dashed cut on the spectrum to choose k."
+      caption={`The rank-k approximation keeps the first k terms σᵢuᵢvᵢᵀ. The smooth gradient, the disc and the bar appear within a few terms; the diagonal band and the checkerboard need many, because they are not aligned with rows and columns. No other rank-k matrix is closer to the image. Below: the singular values on a log scale, the kept ones in colour. The image has rank ${r.rank}, so its last ${r.size - r.rank} singular values are exactly zero and are not drawn. Drag the dashed cut on the spectrum to choose k.`}
       state={state}
       readouts={
         <>
@@ -65,31 +93,40 @@ export function LowRankImage() {
         </>
       }
     >
-      <div className="grid gap-4 md:grid-cols-3">
+      <div className="grid gap-4 md:grid-cols-2">
         <div>
           <p className="mb-1 text-center text-sm font-medium">Original</p>
-          <Plot x={xAxis} y={yAxis} height={260}>
-            <Raster x={r.axis} y={r.axis} z={r.original} range={[0, 1]} valueLabel={'intensity'} />
-          </Plot>
+          <FixedHeight height={PANEL}>
+            <Plot x={xAxis} y={yAxis}>
+              <Raster x={r.axis} y={r.axis} z={r.original} range={[0, 1]} colorBar={false} valueLabel="intensity" />
+            </Plot>
+          </FixedHeight>
         </div>
         <div>
           <p className="mb-1 text-center text-sm font-medium">Rank {k}</p>
-          <Plot x={xAxis2} y={yAxis2} height={260}>
-            <Raster x={r.axis} y={r.axis} z={r.approx} range={[0, 1]} valueLabel={'intensity'} />
-          </Plot>
+          <FixedHeight height={PANEL}>
+            <Plot x={xAxis2} y={yAxis2}>
+              <Raster x={r.axis} y={r.axis} z={r.approx} range={[0, 1]} colorBar={false} valueLabel="intensity" />
+            </Plot>
+          </FixedHeight>
         </div>
-        <div>
+        <div className="md:col-span-2">
           <p className="mb-1 text-center text-sm font-medium">Singular values</p>
-          <Plot x={xAxis3} y={yAxis3} height={260}>
-            <Bars {...r.spectrum[0]} />
-            <Bars {...r.spectrum[1]} />
-            <Handle
-              kind="x"
-              at={k + 0.5}
-              label="k"
-              onDrag={(x) => state.set('k', Math.min(Math.max(Math.round(x - 0.5), 1), r.size))}
-            />
-          </Plot>
+          <FixedHeight height={SPECTRUM}>
+            <Plot x={xAxis3} y={yAxis3}>
+              <Curve name="spectrum" x={r.spectrum.all.x} y={r.spectrum.all.y} muted silent />
+              <Points name="kept" x={r.spectrum.kept.x} y={r.spectrum.kept.y} slot={0} size={6} />
+              {r.spectrum.discarded.x.length > 0 && (
+                <Points name="discarded" x={r.spectrum.discarded.x} y={r.spectrum.discarded.y} muted size={5} />
+              )}
+              <Handle
+                kind="x"
+                at={k + 0.5}
+                label="k"
+                onDrag={(x) => state.set('k', Math.min(Math.max(Math.round(x - 0.5), 1), r.size))}
+              />
+            </Plot>
+          </FixedHeight>
         </div>
       </div>
     </Figure>

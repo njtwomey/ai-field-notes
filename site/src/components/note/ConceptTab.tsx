@@ -3,6 +3,7 @@ import { createElement, lazy, Suspense, useEffect, useMemo, type ComponentType }
 import { useLocation } from 'react-router'
 import { mdxComponents } from '@/components/content/mdx-components'
 import { loadNote, type NoteMeta } from '@/lib/content'
+import { ReadingFooter } from './ReadingNav'
 import { ReferenceList } from './ReferenceList'
 
 const cache = new Map<string, ComponentType>()
@@ -19,15 +20,18 @@ function noteComponent(slug: string): ComponentType {
 export function ConceptTab({ note }: { note: NoteMeta }) {
   const Body = useMemo(() => noteComponent(note.slug), [note.slug])
   return (
-    <article className="note-prose prose max-w-none prose-neutral dark:prose-invert">
-      <MDXProvider components={mdxComponents}>
-        <Suspense fallback={<p className="text-muted-foreground">Loading…</p>}>
-          {createElement(Body)}
-          <ScrollToHash />
-        </Suspense>
-      </MDXProvider>
-      <ReferenceList note={note} />
-    </article>
+    <>
+      <article className="note-prose prose max-w-none prose-neutral dark:prose-invert">
+        <MDXProvider components={mdxComponents}>
+          <Suspense fallback={<p className="text-muted-foreground">Loading…</p>}>
+            {createElement(Body)}
+            <ScrollToHash />
+          </Suspense>
+        </MDXProvider>
+        <ReferenceList note={note} />
+      </article>
+      <ReadingFooter note={note} />
+    </>
   )
 }
 

@@ -29,6 +29,7 @@ import {
 import { macroExample, macroGroups, macros } from '../content/macros.ts'
 import { plainMath } from '../site/src/lib/math-text.ts'
 import { loadGlossary, type Glossary } from './glossary.ts'
+import { readingOrder } from './reading-order.ts'
 
 const CONTENT_ID = 'virtual:content'
 const SEARCH_ID = 'virtual:search'
@@ -372,6 +373,9 @@ export function buildIndex(
     })
   checkIndex(taxonomy)
 
+  const reading = readingOrder(path.join(contentDir, 'reading-order.yaml'), taxonomy, notes)
+  errors.push(...reading.errors)
+
   // Glossary entries point at real notes and categories, and every string that can hold maths renders.
   const notesByName = new Map<string, string[]>()
   for (const n of notes)
@@ -408,6 +412,9 @@ export function buildIndex(
     cited: n.cited.filter((k) => k in references),
     references: n.references.filter((k) => k in references),
   }))
+  // Notes are listed in reading order everywhere, so the order of this array is the reading order.
+  const position = new Map(reading.order.map((s, i) => [s, i]))
+  safe.sort((a, b) => (position.get(a.slug) ?? Infinity) - (position.get(b.slug) ?? Infinity))
   const glossaryEntries = Object.fromEntries(
     Object.entries(glossary.entries).map(([key, e]) => [
       key,
@@ -426,6 +433,7 @@ export function buildIndex(
     groups,
     bodies,
     folders: found.folders,
+    unlisted: reading.unlisted,
     errors,
   }
 }

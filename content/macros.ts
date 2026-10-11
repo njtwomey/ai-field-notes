@@ -154,6 +154,23 @@ export const macroGroups: MacroGroup[] = [
     },
   },
   {
+    title: 'Trigonometric and hyperbolic functions',
+    description:
+      'Upright names KaTeX lacks; \\sin, \\cos, \\tan, \\sec, \\csc, \\cot, \\arcsin, \\arccos, \\arctan, \\sinh, \\cosh, \\tanh and \\coth are built in.',
+    macros: {
+      '\\arcsec': '\\operatorname{arcsec}',
+      '\\arccsc': '\\operatorname{arccsc}',
+      '\\arccot': '\\operatorname{arccot}',
+      '\\atantwo': '\\operatorname{atan2}',
+      '\\sech': '\\operatorname{sech}',
+      '\\csch': '\\operatorname{csch}',
+      '\\arsinh': '\\operatorname{arsinh}',
+      '\\arcosh': '\\operatorname{arcosh}',
+      '\\artanh': '\\operatorname{artanh}',
+      '\\arcoth': '\\operatorname{arcoth}',
+    },
+  },
+  {
     title: 'Brackets, norms and inner products',
     description: 'Delimiters size themselves to their contents.',
     macros: {
