@@ -2,25 +2,176 @@
 title: 'Physiological signals'
 kind: concept
 summary: 'Electrocardiograms, electroencephalograms and similar recordings need filtering, artefact rejection and attention to lead and montage conventions, and splits by subject.'
-tags: [data, time-series, signal-processing]
-aliases: []
+tags: [data, time-series, signal-processing, biomedical, wearable]
+aliases: [biomedical signals, ecg data, eeg data, biosignals]
 requires: []
-related: [physiological-signal-datasets, wearable-sensor-data]
-references: []
-status: stub
-updated: 2026-10-11
+related: [physiological-signal-datasets, wearable-sensor-data, time-series-gaps, temporal-splits]
+references: [goldberger2000, saeb2017, pan1985]
+status: draft
+updated: 2026-10-12
 ---
 
+import { PhysiologicalSignalsVisualizer } from './PhysiologicalSignalsVisualizer'
+
 <Definition>
-To be written.
+**Physiological signals** are continuous, multi-channel bioelectrical, optical, and mechanical time series—including
+electrocardiograms (ECG), electroencephalograms (EEG), electromyograms (EMG), and photoplethysmograms (PPG)—recorded
+from living organisms to monitor cardiovascular, neurological, and neuromuscular state <Cite id="goldberger2000" />.
+Physiological signals are non-stationary, contaminated by high-amplitude biological and motion artefacts, and subject to
+profound inter-individual anatomical and physiological variability.
 </Definition>
+
+In clinical informatics and wearable health computing, machine learning models analyze physiological streams to detect
+cardiac arrhythmias, classify sleep stages, predict epileptic seizures, and estimate hemodynamic parameters. 
+
+Unlike industrial telemetry from rigid machines, biological signals originate from living, moving subjects. Raw
+recordings contain respiratory baseline wander, 50/60 Hz electrical mains hum, ocular blinks, and motion artefacts that
+frequently dwarf the microvolt-level bioelectrical potentials of interest. Preparing physiological data for machine
+learning requires frequency-domain filtering, artefact rejection, lead montage standardization, and strict subject-wise
+partitioning.
+
+<PhysiologicalSignalsVisualizer />
 
 ## Filtering
 
+Electrophysiological signals occupy specific spectral bands, outside of which recorded voltages represent noise:
+
+### Baseline wander (0.05–0.5 Hz)
+
+Induced by patient respiration, thoracic volume changes, perspiration, and slow shifts in electrode-skin contact
+impedance. Baseline wander causes the isoelectric line to drift across millivolt ranges. 
+
+In diagnostic ECG, low-frequency wander must be removed without phase distortion: non-linear phase high-pass filters
+shift the ST segment relative to the PR segment, falsely creating artificial ST-segment elevations or depressions that
+mimic acute myocardial infarction. Filtering requires either zero-phase Finite Impulse Response (FIR) filters or cubic
+spline baseline subtraction through PR segments.
+
+### Powerline interference (50 Hz / 60 Hz)
+
+Electromagnetic induction from alternating current power lines and medical machinery introduces continuous sinusoidal
+hum into high-impedance leads. This is attenuated using narrow notch (band-stop) filters or adaptive notch cancellation.
+
+### High-frequency muscle tremor (>40–100 Hz)
+
+Electromyographic (EMG) noise from shivering, movement, or postural muscle tension produces high-frequency noise across
+surface leads, attenuated via low-pass filtering (typically cutoff at 40 Hz for routine telemetry or 150 Hz for
+diagnostic 12-lead ECG).
+
+### The Pan-Tompkins pipeline
+
+The classical standard for real-time QRS complex detection is the **Pan-Tompkins algorithm** <Cite id="pan1985" />:
+1. **Bandpass filtering (5–15 Hz):** Attenuates baseline wander and high-frequency noise while passing the dominant
+   spectral energy of ventricular depolarization.
+2. **Derivative filter:** Highlights the steep slope of the QRS complex
+   ($y[n] = \frac{1}{8}(2x[n] + x[n-1] - x[n-3] - 2x[n-4])$).
+3. **Squaring function ($y[n] = x[n]^2$):** Rectifies the signal and non-linearly amplifies large QRS slopes over P and
+   T waves.
+4. **Moving-window integration:** Averages energy over a window matching typical QRS width ($\sim 150\text{ ms}$) prior
+   to dual-threshold peak detection.
+
 ## Artefact rejection
+
+Electrophysiological recordings are frequently corrupted by high-amplitude biological artefacts that cannot be removed
+by simple linear frequency filtering:
+
+- **Ocular artefacts (EOG):** Eyeblinks and saccades generate electro-oculographic potentials ($>100\,\mu\text{V}$) that
+  propagate across the frontal scalp, dominating frontal EEG electrodes (Fp1, Fp2).
+- **Cardiac artefacts in EEG/EMG:** Pulsatile blood flow under scalp electrodes or cardiac dipoles produce rhythmic ECG
+  R-peak spikes in EEG channels.
+- **Motion artefacts in optical PPG:** In photoplethysmography, physical motion shifts the photodiode relative to tissue
+  capillary beds, causing light leakage that swamps optical microvascular pulse waveforms.
+
+### Independent Component Analysis (ICA)
+
+For multi-channel EEG, **Independent Component Analysis (ICA)** decomposes observed sensor voltages
+$\mathbf{X} \in \mathbb{R}^{M \times T}$ into statistically independent spatial source components
+$\mathbf{S} \in \mathbb{R}^{M \times T}$:
+
+$$
+\mathbf{X} = \mathbf{A} \mathbf{S}
+$$
+
+Because eyeblinks and cardiac spikes originate from distinct localized dipole generators, they isolate into individual
+independent components. Algorithms identify and zero-out artefact components ($\mathbf{s}_k \leftarrow \mathbf{0}$)
+before reconstructing clean scalp voltages via $\mathbf{X}_{\text{clean}} = \mathbf{A} \mathbf{S}_{\text{cleaned}}$.
+
+### Signal Quality Index (SQI)
+
+Rather than attempting to clean hopelessly corrupted segments, automated pipelines compute a **Signal Quality Index
+(SQI)** across sliding epochs (e.g., 5-second windows). SQI metrics evaluate:
+- Kurtosis and skewness deviations from Gaussian baselines.
+- Relative power in physiological vs non-physiological spectral bands.
+- Correlation between redundant sensor channels (e.g., optical PPG paired with tri-axial accelerometer streams).
+
+Epochs failing SQI thresholds ($\text{SQI} < \tau$) are flagged as invalid and excluded from model training to prevent
+gradient corruption.
 
 ## Leads and montages
 
+The coordinate geometry of physiological recording defines the anatomical meaning of feature channels:
+
+### 12-Lead ECG
+
+The standard clinical electrocardiogram records cardiac electrical activity from twelve standard leads:
+- **Eindhoven limb leads (I, II, III):** Bipolar frontal-plane potential differences between right arm, left arm, and
+  left leg.
+- **Goldberger augmented leads (aVR, aVL, aVF):** Unipolar frontal-plane recordings referenced against the average of
+  the other two limbs.
+- **Precordial leads (V1–V6):** Unipolar horizontal-plane electrodes positioned across the anterior chest wall,
+  observing cardiac electrical propagation from right ventricle (V1) to lateral left ventricle (V6).
+
+Pretrained convolutional networks and transformers expect specific lead orderings; permuting lead channels or
+substituting a 3-lead ambulatory patch for a 12-lead array breaks spatial feature representations.
+
+### EEG referencing montages
+
+In electroencephalography, voltage is inherently relative: an electrode measures the potential difference between two
+scalp points:
+- **Common Reference montage:** Every electrode is referenced to a single shared physical electrode (e.g., earlobe
+  A1/A2, mastoid, or nose). If the reference electrode picks up muscle or cardiac noise, that noise is injected into
+  every channel.
+- **Average Reference montage:** Each electrode potential is referenced against the instantaneous arithmetic mean of all
+  scalp electrodes ($\Phi_i - \frac{1}{M}\sum_{k=1}^M \Phi_k$).
+- **Bipolar (Longitudinal / "Double Banana") montage:** Channels record potential differences between adjacent spatial
+  pairs along anterior-posterior chains ($Fp1-F3, F3-C3, C3-P3, P3-O1$). Bipolar referencing cancels widespread ambient
+  noise, accentuating sharp focal cortical discharges (such as epileptic spikes).
+
 ## Subject-wise splits
 
+The most common methodological flaw in biomedical machine learning is **record-level (random window) splitting**
+<Cite id="saeb2017" />:
+
+Consider an arrhythmia detection study with 20 patients, each contributing 24 hours of Holter ECG. Slicing these
+recordings into 5-second windows yields hundreds of thousands of training examples. If a researcher shuffles these
+windows uniformly at random into 80% train and 20% test splits:
+1. Every individual patient's unique resting heart rate, baseline PR interval, QRS morphology, and electrode contact
+   impedance appear in both train and test partitions.
+2. The deep neural network learns patient-specific biometric fingerprints rather than generalizable pathophysiological
+   disease patterns.
+3. The resulting cross-validation accuracy often reaches $98\text{--}99\%$.
+4. When the model is evaluated on a prospective cohort of completely new patients, accuracy collapses to
+   $75\text{--}80\%$.
+
+Valid evaluation requires **subject-wise (patient-level) cross-validation**:
+
+$$
+\mathcal{P}_{\text{train}} \cap \mathcal{P}_{\text{test}} = \emptyset
+$$
+
+All recordings from patient $i$ must reside exclusively in either the training set or the test set.
+
 ## Pitfalls
+
+- **Bidirectional zero-phase filtering in streaming inference:** Using `scipy.signal.filtfilt` during offline training
+  runs filters both forward and backward, eliminating phase lag by peeking into future samples. Because production
+  bed-side monitors process data causally, models trained on zero-phase filtered data encounter unexpected phase
+  distortion when deployed.
+- **Lead cable polarity inversions:** Inverting physical lead cables (e.g., swapping right arm and left arm electrodes)
+  flips the electrical axis, turning upward R-peaks into deep S-waves and causing automated arrhythmia classifiers to
+  falsely classify normal sinus beats as ectopic beats.
+- **Resampling without anti-aliasing filters:** Downsampling ECG from 1,000 Hz to 250 Hz using naive decimation
+  (skipping samples) aliases high-frequency noise into the physiological band. Resampling must always employ low-pass
+  anti-aliasing filters.
+- **PPG skin-tone optical attenuation:** Optical photoplethysmography measures light absorption by hemoglobin. Increased
+  epidermal melanin absorbs green optical wavelengths ($525\text{ nm}$), reducing signal-to-noise ratio in individuals
+  with dark skin tones unless sensor hardware dynamically modulates LED drive current.

@@ -1,0 +1,126 @@
+---
+title: 'Multi-agent environments'
+kind: concept
+summary: 'Environments in which several agents act at once, cooperatively, competitively or both, benchmark multi-agent coordination, non-stationarity, and credit assignment.'
+tags: [data, reinforcement-learning, multi-agent, game-theory, pettingzoo]
+aliases: [multi-agent environments, MARL environments, PettingZoo, Dec-POMDP, SMAC, MPE]
+requires: [classic-control-environments]
+related: [classic-control-environments, continuous-control-benchmarks, arcade-and-video-game-environments]
+references: [terry2021pettingzoo, lowe2017maddpg, samvelyan2019smac]
+status: draft
+updated: 2026-10-11
+---
+
+import { MultiAgentEnvironmentsVisualizer } from './MultiAgentEnvironmentsVisualizer'
+
+<Definition>
+A **multi-agent environment** is formulated as a Decentralized Partially Observable Markov Decision Process (Dec-POMDP)
+$\mathcal{M} = \langle \mathcal{N}, \mathcal{S}, \{\mathcal{A}_i\}_{i \in \mathcal{N}}, \mathcal{P}, \{\mathcal{R}_i\}_{i \in \mathcal{N}}, \{\Omega_i\}_{i \in \mathcal{N}}, \gamma \rangle$,
+where $\mathcal{N} = \{1, \dots, N\}$ represents a collection of autonomous agents <Cite id="terry2021pettingzoo" />.
+
+At each time step, all agents simultaneously execute private actions $a_i \in \mathcal{A}_i$, forming a joint action
+vector $\mathbf{a} = (a_1, \dots, a_N) \in \prod_{i=1}^N \mathcal{A}_i$. The underlying state transitions according to
+$\mathbf{s}' \sim \mathcal{P}(\mathbf{s}' \mid \mathbf{s}, \mathbf{a})$, each agent receives an individual reward
+$r_i = \mathcal{R}_i(\mathbf{s}, \mathbf{a})$, and each observes a private local view $o_i \sim \Omega_i(\mathbf{s}')$.
+</Definition>
+
+## What these environments test
+
+Multi-agent reinforcement learning (MARL) benchmarks introduce complex dynamical phenomena absent in single-agent MDPs:
+
+1. **Environment non-stationarity**: From the isolated perspective of agent $i$, the effective transition dynamics:
+
+   $$
+   \mathcal{P}_i(\mathbf{s}' \mid \mathbf{s}, a_i) = \sum_{\mathbf{a}_{-i}} \mathcal{P}(\mathbf{s}' \mid \mathbf{s}, a_i, \mathbf{a}_{-i}) \prod_{j \neq i} \pi_j(a_j \mid o_j)
+   $$
+
+   depend on the policies of all other agents $\mathbf{a}_{-i}$. As other agents learn and adapt, the transition
+   probabilities change constantly over time. Independent Q-Learning (IQL), which treats other agents as static
+   environmental noise, violates the Markov property and frequently diverges or becomes trapped in oscillatory cycles.
+2. **Multi-agent credit assignment**: In cooperative teams where agents receive an identical shared team reward
+   $r_t = \sum_i r_{i, t}$, it is difficult to determine which agent's action contributed to the success (the "lazy
+   agent" problem). Value factorization methods (VDN, QMIX) decompose the centralized action-value
+   $Q_{\text{tot}}(\mathbf{s}, \mathbf{a})$ into individual utilities:
+
+   $$
+   \frac{\partial Q_{\text{tot}}(\mathbf{s}, \mathbf{a})}{\partial Q_i(o_i, a_i)} \ge 0 \quad \forall i \in \mathcal{N},
+   $$
+
+   guaranteeing that a decentralized greedy choice on $Q_i$ aligns with the optimal joint action.
+3. **Centralized Training with Decentralized Execution (CTDE)**: During simulation training, algorithms can utilize
+   global state information $\mathbf{s}$ and the joint action $\mathbf{a}$ to train centralized value functions
+   <Cite id="lowe2017maddpg" />. At test time, agents execute purely decentralized policies $\pi_i(a_i \mid o_i)$ using
+   only local observations.
+
+## Catalogue
+
+### PettingZoo
+The standardized multi-agent equivalent of Gymnasium maintained by the Farama Foundation
+<Cite id="terry2021pettingzoo" />:
+- Supports two API designs:
+  - **Agent-Environment-Cycle (AEC)**: Formulates multi-agent steps sequentially (`env.step(action)`, `env.observe()`),
+    handling turn-taking games (Chess, Go, Poker) without race conditions or execution ambiguity.
+  - **Parallel API**: Standard simultaneous execution matching vectorized Gym workflows: dictionaries mapping
+    `agent_id -> action` and returning `agent_id -> observation`.
+- Encompasses classical games (`classic`), visual Atari games (`atari`), robotic particle worlds (`mpe`), and
+  cooperative swarm games (`butterfly`).
+
+### Multi-Agent Particle Environments (MPE)
+Developed by Lowe et al. <Cite id="lowe2017maddpg" /> for continuous 2D particle dynamics:
+- **`simple_spread` (Cooperative Navigation)**: $N$ cooperative agents must navigate to cover $N$ discrete landmarks
+  while avoiding collisions with teammates.
+- **`simple_tag` (Predator-Prey)**: Three slower, cooperating predators chase one faster, agile prey agent inside an
+  arena with obstacles, requiring predators to learn surrounding pincer tactics.
+- **`simple_adversary`**: Two cooperative agents possess a secret goal landmark and must navigate to it without letting
+  an adversary deduce which landmark is the true target.
+
+### StarCraft Multi-Agent Challenge (SMAC / SMACv2)
+Micromanagement tactical combat benchmarks in StarCraft II developed by Samvelyan et al.
+<Cite id="samvelyan2019smac" />:
+- **Unit control**: Each soldier (Marine, Stalker, Zealot, Colossus) is controlled by a distinct decentralized agent.
+- **Tactical complexity**: Solves challenging real-time coordination problems: focus firing on low-health enemies,
+  shield kiting, retreating injured units, and flanking formations.
+- **Scenarios**: Range from symmetric engagements (`3m`, `8m`, `2s3z`) to heavily unbalanced micro scenarios
+  (`27m_vs_30m`).
+
+### Hanabi
+A cooperative card game with asymmetric partial observability:
+- Players hold cards facing outward: every agent sees all other players' cards, but cannot see their own cards.
+- Actions involve playing cards to form ordered suits or giving informative hints (e.g., "these two cards are blue")
+  within strict information token budgets.
+- Tests Theory of Mind, intent inference, and zero-shot coordination with novel partners.
+
+The interactive visualizer below compares Independent Q-Learning against Centralized Training with Decentralized
+Execution in multi-agent cooperative spread and predator-prey scenarios:
+
+<MultiAgentEnvironmentsVisualizer />
+
+## Interfaces and versions
+
+PettingZoo environments support clean multi-agent interaction loops:
+
+```python
+from pettingzoo.mpe import simple_spread_v3
+
+# Using the Parallel API for simultaneous multi-agent stepping:
+env = simple_spread_v3.parallel_env(N=3, local_ratio=0.5, max_cycles=50)
+observations, infos = env.reset(seed=42)
+
+while env.agents:
+    # Each agent selects an action independently from its local observation:
+    actions = {agent: env.action_space(agent).sample() for agent in env.agents}
+    observations, rewards, terminations, truncations, infos = env.step(actions)
+```
+
+## Known problems and limitations
+
+1. **Combinatorial action space explosion**: The joint action space
+   $|\mathcal{A}_{\text{joint}}| = \prod_{i=1}^N |\mathcal{A}_i|$ grows exponentially with the number of agents. Exact
+   joint $Q$-learning becomes mathematically intractable beyond small teams without strict monotonicity assumptions
+   (e.g. QMIX).
+2. **Relative overgeneralization**: In cooperative games, if an optimal joint action requires all agents to coordinate
+   simultaneously, but exploratory deviations by any single teammate yield catastrophic negative rewards, agents learn
+   suboptimal safe policies (the shadowing phenomenon).
+3. **Evaluation non-transitivity and cycling**: In competitive multi-agent settings, policy strength is non-transitive
+   ($A > B$, $B > C$, but $C > A$, as in Rock-Paper-Scissors). Evaluating agents by fixed Elo ratings or against static
+   heuristic opponents produces misleading progress metrics.

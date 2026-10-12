@@ -6,27 +6,142 @@ tags: [data, fairness]
 aliases: []
 requires: []
 related: [membership-inference, differential-privacy]
-references: []
-status: stub
-updated: 2026-10-11
+references: [gebru2021, bender2018, mitchell2019]
+status: draft
+updated: 2026-10-12
 ---
 
+import { DatasetDocumentationVisualizer } from './DatasetDocumentationVisualizer'
+
 <Definition>
-To be written.
+Dataset documentation is the structured metadata, provenance records, and legal declarations that accompany a machine
+learning dataset throughout its lifecycle. Modeled after component datasheets in hardware engineering, dataset
+documentation articulates why the data was created, who funded it, how instances were sampled and annotated, what
+demographic and operational boundaries exist, and under which legal licenses it may be processed.
 </Definition>
+
+In the early decades of machine learning, datasets were frequently treated as interchangeable, neutral numeric
+commodities downloaded from public FTP servers without attribution or provenance <Cite id="gebru2021, bender2018" />.
+However, undocumented datasets introduce severe liabilities: silent distribution mismatch, copyright infringement,
+privacy violations, and toxic feedback loops. Structured documentation transforms an informal data dump into an
+auditable, legally defensible engineering asset.
+
+<DatasetDocumentationVisualizer />
 
 ## Datasheets for datasets
 
+Timnit Gebru and colleagues proposed **Datasheets for Datasets** as a standard operating procedure to foster
+transparency and accountability across machine learning <Cite id="gebru2021" />. A standard datasheet is organized
+around seven lifecycle sections:
+
+1. **Motivation:** For what purpose was the dataset created? Who created and funded the dataset?
+2. **Composition:** What do the instances represent (e.g., documents, photos, audio clips)? How many instances are
+   included? Are there subpopulation labels, confidential records, or protected demographic attributes?
+3. **Collection Process:** What mechanisms were used to collect data (e.g., API scrapers, sensors, crowd-workers)? Were
+   participants notified or consented? What time window does the data cover?
+4. **Preprocessing, Cleaning and Labeling:** Was raw data filtered, de-identified, tokenized, or normalized? What
+   guidelines were provided to annotators, and what was the measured inter-annotator agreement?
+5. **Uses:** Has the dataset been used for previous tasks? What tasks should the dataset *not* be used for (e.g.,
+   surveillance, high-stakes medical diagnosis without clinical trial validation)?
+6. **Distribution:** How is the dataset distributed (public URL, academic gated repository)? Does an export control or
+   digital rights management regime apply?
+7. **Maintenance:** Who maintains the dataset? Is there an errata schedule, contact address, or mechanism for data
+   subjects to request deletion under GDPR Article 17?
+
 ## Data cards and data statements
+
+Complementary frameworks target specific subfields and operational interfaces <Cite id="bender2018, mitchell2019" />:
+
+- **Data Statements for NLP:** Emily Bender and Batya Friedman formulated *Data Statements* specifically for language
+  datasets <Cite id="bender2018" />. They mandate reporting linguistic variety (dialect, BCP-47 tag), speaker
+  demographics (native status, age, gender, geographic origin), annotator demographics, speech situation (synchronous
+  chat vs scripted reading), and text genre.
+- **Data Cards:** Google's Data Cards framework operationalizes datasheets for enterprise production pipelines,
+  incorporating automated lineage graphs, schema evolution tracking, and model card hooks <Cite id="mitchell2019" />.
+- **Croissant Metadata Format:** The MLCommons Croissant specification embeds machine-readable JSON-LD schemas into
+  dataset distributions, enabling automated dataset loaders (Hugging Face Datasets, TensorFlow Datasets) to verify
+  licensing, splits, and record structures programmatically.
 
 ## Provenance and lineage
 
+Data provenance records the immutable chronological audit trail tracking every transformation applied to raw source
+bits:
+
+$$
+\text{Raw Sensor / Web Feed} \xrightarrow{\text{Extract}} \text{Bronze Lake} \xrightarrow{\text{Anonymize / Filter}} \text{Silver Delta} \xrightarrow{\text{Feature Store}} \text{Training Matrix} \xrightarrow{\text{Fit}} \text{Model Checkpoint}
+$$
+
+Modern MLOps architectures enforce provenance tracking via:
+- **Content-Addressable Hashing:** Storing datasets identified by SHA-256 hashes of immutable artifacts (via Git LFS,
+  DVC, or Content-Addressable Storage).
+- **Data Lineage Graphs:** Utilizing systems like OpenLineage, Marquez, and Delta Lake commit logs to log parent-child
+  DAG relations between input source partitions and trained model weights. If an upstream data provider issues a
+  deletion request or discovers label poisoning, downstream impacted models can be deterministically identified and
+  retrained.
+
 ## Consent and personal data
+
+Datasets containing human behavior, voice, biometric imagery, or personal telemetry must navigate complex global privacy
+regulations (GDPR in Europe, CCPA/CPRA in California, HIPAA in healthcare):
+
+- **Informed Consent:** Terms of service agreements rarely constitute valid ethical consent for downstream machine
+  learning training. Consent documentation must specify whether data subjects were explicitly informed that their
+  contributions would be used to train commercial generative or predictive AI models.
+- **De-identification and Re-identification Risk:** Stating that a dataset is "anonymized" is insufficient.
+  Documentation must specify whether direct identifiers were purged, quasi-identifiers were perturbed ($k$-anonymity,
+  $l$-diversity), or formal differential privacy mechanisms were applied.
+- **Right to Erasure (Unlearning Protocols):** Clear pathways must be documented detailing how individuals can revoke
+  consent and ensure their data points are expunged from subsequent training iterations.
 
 ## Licences
 
+Machine learning datasets inherit legal restrictions from their constituent source materials:
+
+| License Class | Examples | Commercial Use | Derivative Works | Key Obligations & Constraints |
+| :--- | :--- | :--- | :--- | :--- |
+| **Permissive Open Source** | MIT, Apache 2.0, BSD-3-Clause | Allowed | Allowed | Attribution required; Apache provides patent grant. |
+| **Permissive Content** | CC-BY 4.0 | Allowed | Allowed | Strict attribution required; no commercial restriction. |
+| **Public Domain** | CC0, Public Domain Dedication | Allowed | Allowed | Complete waiver of copyright claims worldwide. |
+| **Non-Commercial** | CC-BY-NC 4.0 | Prohibited | Restricted | Training models for revenue-generating services breaches license. |
+| **Share-Alike / Copyleft** | CC-BY-SA, GNU GPL | Conditional | Must Share-Alike | Trained model weights may be legally classified as derivative works. |
+| **Proprietary / Terms of Service** | Scraped Web APIs (Reddit, X) | Conditional | Heavily Restricted | Commercial training frequently violates platform terms of service. |
+
+Ingesting non-commercial (NC) or copyleft datasets into proprietary enterprise model training pipelines creates massive
+legal vulnerability, exposing organizations to copyright infringement lawsuits and court-ordered model destruction
+(algorithmic disgorgement).
+
 ## Versioning
+
+Datasets are living assets. Correcting typos, purging poisoned samples, or appending newly arriving quarters of data
+alters the training distribution.
+- **Semantic Versioning for Data:** Incrementing major versions ($\text{v}2.0.0$) for breaking schema alterations or
+  label ontology revisions; minor versions ($\text{v}1.1.0$) for added rows/partitions; patch versions ($\text{v}1.0.1$)
+  for metadata or typo corrections.
+- **Immutable Release Snapshots:** Never overwrite an existing dataset release under a mutable tag. Every model
+  evaluation benchmark must link to an immutable content hash or frozen version tag (`imagenet-1k@v2012`).
 
 ## Deprecated and withdrawn datasets
 
+Several prominent academic datasets have been formally withdrawn due to severe ethical and privacy violations:
+- **DukeMTMC:** Withdrawn after revelations that students and pedestrians were filmed on campus without knowledge or
+  consent for surveillance research.
+- **TinyImages (80 Million Images):** Formally withdrawn by MIT in 2020 after discovery of racist, misogynistic, and
+  derogatory automated labeling.
+- **MS-Celeb-1M:** Deleted by Microsoft due to scraping of facial imagery without consent.
+
+When a dataset is deprecated or retracted, dataset documentation registries must issue formal "tombstone" notices and
+revocation digests, preventing automated pipelines from downloading cached local mirrors.
+
 ## Pitfalls
+
+- **License Laundering:** Re-hosting scraped copyrighted text or images under a permissive Creative Commons license on
+  public hubs (Hugging Face, Kaggle). Downstream developers who rely on the hub's stated license remain legally liable
+  for underlying copyright infringement.
+- **Documentation Rot:** Writing a comprehensive datasheet at dataset creation and never updating it as maintenance
+  handoffs occur, data sources drift, or user takedown requests accumulate.
+- **Ambiguous Derivative Status:** Assuming that because model weights are matrices of floating-point numbers, they are
+  immune to copyright claims originating from the training data. Recent legal precedent and regulatory orders
+  increasingly treat models trained on unlicensed data as infringing derivative works.
+- **Ignoring Annotator Compensation:** Failing to document annotator hourly pay, geographic distribution, and working
+  conditions. Datasets labeled by severely underpaid crowd-workers exhibit high label variance, subjective shortcuts,
+  and unmonitored label noise.

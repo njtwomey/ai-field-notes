@@ -1,28 +1,119 @@
 ---
 title: 'Matching the split to deployment'
 kind: concept
-summary: 'A split should make the test set new in the way deployment data will be new: in time, in entity, in site. Choosing between group and within-entity splits follows from that question.'
+summary: 'A validation split must make evaluation data new in the exact dimension it will be new in production: across time, entities, or collection sites. Group versus within-entity splits follow directly from this deployment axis.'
 tags: [data, model-selection]
-aliases: []
-requires: []
-related: [train-validation-and-test-splits, dataset-shift]
-references: []
-status: stub
+aliases: [matching the split to deployment, deployment aligned splitting, unit of novelty, group splitting, within entity splitting]
+requires: [train-validation-and-test-splits]
+related: [dataset-shift, out-of-distribution-test-sets, temporal-splits, stable-split-assignment]
+references: [kapoor2023, zech2018]
+status: draft
 updated: 2026-10-11
 ---
 
+import DeploymentSplitMatcher from './DeploymentSplitMatcher';
+
 <Definition>
-To be written.
+**Matching the split to deployment** is the architectural principle dictating that a dataset's partitioning scheme must
+reflect the exact axis of novelty encountered during live deployment. If a model will encounter new time periods, new
+human subjects, or new collection sites in production, the validation and test sets must hold out those respective
+dimensions, rather than relying on uniform random sampling.
 </Definition>
 
-## What is new at deployment
+A validation metric is an honest surrogate for production performance only if the distribution shift between training
+folds and validation folds reproduces the distribution shift between historical training data and live deployment data
+<Cite id="kapoor2023" />.
 
-## New times
+<DeploymentSplitMatcher />
 
-## New entities
+## The fundamental axiom: The unit of novelty
 
-## New sites
+Standard random sampling assumes observations are independent and identically distributed
+($X_i \stackrel{\text{i.i.d.}}{\sim} \mathbb{P}$). In enterprise and scientific applications, however, observations are
+almost always clustered across time, individuals, devices, or geographic collection sites.
+
+Before designing a splitting strategy, practitioners must answer a single operational question: **Along what dimension
+will deployment data be new?**
+
+| Deployment Context | Unit of Novelty | Required Partitioning Strategy | Flawed Common Alternative |
+| :--- | :--- | :--- | :--- |
+| **Forecasting & Churn** | Future time window ($t > T_{\text{train}}$) | Temporal cut-off split | Uniform random row split |
+| **Clinical Diagnosis** | Unseen patients | Group split on `patient_id` | Random split of images/scans |
+| **Multi-Hospital Rollout** | Unseen clinics / scanners | Leave-One-Site-Out (by hospital) | Stratified split pooling all sites |
+| **Speaker Recognition** | Novel speakers | Group split on `speaker_id` | Splitting utterances randomly |
+| **Fleet Predictive Maintenance** | Future time on known turbines | Within-entity chronological split | Group split omitting known machines |
+
+## New times: Temporal splitting
+
+When a machine learning model is deployed to make predictions into the future (such as fraud detection, demand
+forecasting, or credit default), the model operates in a non-stationary world where customer preferences, seasonal
+dynamics, and macroeconomic variables drift continuously.
+
+A uniform random split draws training and validation observations from the exact same time intervals, allowing future
+market conditions to inform past predictions. Temporal splitting enforces strict chronological causality:
+
+$$
+\mathcal{D}_{\text{train}} = \{ (x_i, y_i) : t_i < T_1 \}, \quad \mathcal{D}_{\text{val}} = \{ (x_i, y_i) : T_1 \le t_i < T_2 \}, \quad \mathcal{D}_{\text{test}} = \{ (x_i, y_i) : t_i \ge T_2 \}
+$$
+
+This accurately subjects the model to temporal drift, exposing degradation that uniform random cross-validation
+conceals.
+
+## New entities: Group splitting
+
+In healthcare, behavioral biometrics, and customer analytics, a single entity (such as a patient, user, or animal)
+frequently contributes dozens or hundreds of measurements to the dataset.
+
+If a dataset of chest X-rays or EEG recordings is partitioned via random row splitting:
+1. Radiographs or time epochs from the same patient land in both the training set and the validation set.
+2. High-capacity neural networks readily exploit high-dimensional patient-specific baselines—such as unique bone
+   density, anatomical markers, baseline heart rate, or electrode contact impedances.
+3. The model achieves near-perfect validation accuracy ($> 95\%$) by **recognizing the patient**, entirely bypassing the
+   target clinical pathology.
+
+When evaluated on brand-new patients in a clinical trial, the model fails catastrophically. All observations associated
+with an entity must be assigned atomically to a single fold using **Group K-Fold** cross-validation on `entity_id`.
+
+## New sites and instruments: Domain cluster splitting
+
+Even when patients are cleanly grouped, models can fail to generalize if deployed to new institutions or physical
+environments.
+
+In a landmark multi-center study on deep learning for pneumonia detection on chest radiographs, John Zech et al.
+<Cite id="zech2018" /> showed that convolutional networks trained on data pooled across multiple hospitals achieved high
+in-sample and cross-validated AUC ($0.93$) by inadvertently detecting hospital-specific radiopaque metal markers,
+scanner manufacturers, and department wordings (portable bedside scanners are used predominantly for bedridden ICU
+patients who have an intrinsically higher pneumonia rate).
+
+When the model was evaluated on radiographs from an external, unseen hospital system, performance dropped precipitously
+to $0.65$. When models are targeted for multi-site deployment, validation sets must evaluate **unseen hospital systems
+or collection sites** to measure genuine cross-site generalization.
 
 ## Group versus within-entity splits
 
-## Pitfalls
+A common source of confusion is whether to split across entities or within entities:
+
+### Across-entity (Group) splits
+
+- **When to use**: When the operational goal is **population generalization** to previously unseen individuals, devices,
+  or accounts (e.g., facial verification for new users, speech-to-text for arbitrary speakers, or diagnostic screening).
+- **Behavior**: Forces the model to learn invariant representations that transfer across heterogeneous subjects.
+
+### Within-entity splits
+
+- **When to use**: When the operational goal is **personalized tracking of persistent entities** that are already
+  monitored during training (e.g., forecasting tomorrow's energy consumption for 500 specific industrial plants, or
+  next-session recommendations for tenured power users).
+- **Behavior**: Allows the model to fit entity-specific parameters or embeddings. However, the split within each entity
+  **must remain temporal** (past events train, future events validate) to prevent lookahead leakage.
+
+## Pitfalls and warning signs
+
+1. **The "too-good-to-be-true" validation metric**: When an unstructured model (such as a deep network on audio, sensor
+   time series, or medical scans) achieves $98\%+$ validation accuracy on a complex biological or behavioral
+   classification problem, it is almost certainly exploiting entity or site leakage rather than the stated task
+   <Cite id="kapoor2023" />.
+2. **Ignored cluster dependencies**: Treating multiple records from the same user as independent statistical samples
+   severely underestimates the variance of generalization performance, giving false confidence in brittle models.
+3. **Mismatched evaluation protocols**: Selecting a model based on random cross-validation scores when production
+   deployment encounters temporal drift or novel customer segments guarantees massive deployment surprises.

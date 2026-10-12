@@ -1,0 +1,130 @@
+---
+title: Maximum mean discrepancy
+kind: concept
+summary: 'Maximum mean discrepancy (MMD) is the distance between two distributions’ mean embeddings in a reproducing kernel Hilbert space. With a characteristic kernel it is zero only when the distributions are equal, and it is estimated from samples by averages of kernel evaluations.'
+tags: [kernel-methods, two-sample, distances, worked-example]
+aliases: [MMD, kernel mean embedding, mean embedding, MMD witness function, unbiased MMD estimator, characteristic kernel]
+requires: [two-sample-testing, reproducing-kernel-hilbert-space, expectation]
+related: [median-heuristic, kernel-two-sample-test, energy-distance, classifier-two-sample-test, kernel-inception-distance, feature-alignment-methods, wasserstein-distances, importance-weighting-for-covariate-shift]
+references: [gretton2012, muandet2017, sejdinovic2013, garreau2017, gretton2012b]
+status: draft
+updated: 2026-10-12
+---
+
+import { WitnessField } from './WitnessField'
+
+<Definition>
+Let $k$ be a positive-definite kernel on a set $\Xcal$, with <NoteLink to="reproducing-kernel-hilbert-space" />
+$\Hcal$ and feature map $\phivec(\xvec) = k(\xvec, \cdot)$. The **mean embedding** of a distribution $P$ is
+$\muvec_P = \expect_{X \sim P}\brack{\phivec(X)} \in \Hcal$. The **maximum mean discrepancy** between $P$ and $Q$ is
+$$
+\mathrm{MMD}(P, Q) = \norm{\muvec_P - \muvec_Q}_{\Hcal}
+= \sup_{\norm{f}_{\Hcal} \le 1} \paren{\expect_{P}\brack{f(X)} - \expect_{Q}\brack{f(Y)}} .
+$$
+If the kernel is **characteristic**, as the Gaussian kernel is on $\reals^d$, $\mathrm{MMD}(P, Q) = 0$ only when
+$P = Q$ <Cite id="gretton2012" />.
+</Definition>
+
+## Intuition
+
+The mean embedding summarises a distribution by the average of a kernel bump centred on each of its points. For the
+Gaussian kernel $k(\xvec, \yvec) = \exp(-\norm{\xvec - \yvec}^2 / 2\sigma^2)$, the embedding evaluated at a point
+$\tvec$, $\muvec_P(\tvec) = \expect_P\brack{k(X, \tvec)}$, is the density of $P$ smoothed at scale $\sigma$. Two
+distributions are compared through these smoothed densities.
+
+The supremum form reads MMD as a contest. Among all functions $f$ of bounded size in $\Hcal$, find the one whose mean
+differs most between $P$ and $Q$. That function is the **witness**, $f^\star \propto \muvec_P - \muvec_Q$: positive
+where $P$ is denser at the kernel's scale and negative where $Q$ is. MMD is the mean difference it achieves.
+
+The kernel decides which differences count. The linear kernel $k(\xvec, \yvec) = \xvec^\top\yvec$ embeds a
+distribution as its mean, so its MMD is the distance between means. The polynomial kernel of degree 2 adds the second
+moments. A characteristic kernel embeds every feature of the distribution, so every difference has a witness.
+
+The figure draws samples from $P = \Gauss(\zeros, \Imat)$ and from a Gaussian $Q$ with a movable mean and a
+correlation $\rho$, over the empirical witness. With equal means and $\rho \ne 0$ both marginals are $\Gauss(0, 1)$,
+and the witness picks out the diagonal along which $Q$ stretches.
+
+<WitnessField />
+
+## Details
+
+### MMD from kernel evaluations
+
+Expanding the squared norm with the reproducing property $\inner{\phivec(\xvec)}{\phivec(\yvec)} = k(\xvec, \yvec)$
+gives
+$$
+\mathrm{MMD}^2(P, Q) = \expect\brack{k(X, X')} + \expect\brack{k(Y, Y')} - 2\,\expect\brack{k(X, Y)} ,
+$$
+with $X, X' \sim P$ and $Y, Y' \sim Q$ all independent. Only kernel values between points appear. The embeddings, which
+may be infinite-dimensional, are never formed.
+
+### Two estimators
+
+From samples $x_1, \dots, x_n$ and $y_1, \dots, y_m$, the **unbiased estimator** averages over distinct pairs:
+$$
+\widehat{\mathrm{MMD}}{}^2_u = \frac{1}{n(n - 1)} \sum_{i \ne i'} k(x_i, x_{i'}) +
+\frac{1}{m(m - 1)} \sum_{j \ne j'} k(y_j, y_{j'}) - \frac{2}{nm} \sum_{i, j} k(x_i, y_j) .
+$$
+It is a U-statistic, its expectation is exactly $\mathrm{MMD}^2$, and it can be negative when $P = Q$. The **biased
+estimator** keeps the $i = i'$ and $j = j'$ terms; it is the squared distance between the two empirical mean
+embeddings, so it is never negative, and its expectation exceeds $\mathrm{MMD}^2$ by a term of order $1/n + 1/m$. Both
+cost $O((n + m)^2)$ kernel evaluations <Cite id="gretton2012" />.
+
+### The kernel width
+
+For the Gaussian kernel, the width $\sigma$ sets the scale of differences that MMD sees. As $\sigma \to 0$ the kernel
+matrix approaches the identity and MMD counts only coincident points; as $\sigma \to \infty$ every kernel value
+approaches 1 and the leading term of MMD is the difference of means. The <NoteLink to="median-heuristic">median
+heuristic</NoteLink> sets $\sigma$ to the median distance between pooled points <Cite id="garreau2017" />. Choosing
+$\sigma$ to maximise an estimate of test power on held-out data does better when the difference lives at another scale
+<Cite id="gretton2012b" />.
+
+### Relatives
+
+The <NoteLink to="energy-distance" /> is the squared MMD for the kernel built from Euclidean distances
+<Cite id="sejdinovic2013" />. <NoteLink to="kernel-inception-distance" /> is the squared MMD between image features
+with a polynomial kernel. MMD is used as a training loss to align feature distributions in
+<NoteLink to="feature-alignment-methods">domain adaptation</NoteLink>, and kernel mean matching reweights a sample to
+make its embedding match another's (<NoteLink to="importance-weighting-for-covariate-shift" />). The
+<NoteLink to="wasserstein-distances" /> also compare distributions by a supremum over test functions, with
+1-Lipschitz functions in place of the RKHS ball.
+
+<Derivation title="The supremum equals the norm">
+For $f \in \Hcal$, the reproducing property gives $f(\xvec) = \inner{f}{\phivec(\xvec)}$, and taking
+<NoteLink to="expectation">expectations</NoteLink> gives $\expect_P[f(X)] = \inner{f}{\muvec_P}$. So
+$\expect_P[f(X)] - \expect_Q[f(Y)] = \inner{f}{\muvec_P - \muvec_Q}$. By the <NoteLink to="dot-product">Cauchy–Schwarz
+inequality</NoteLink> this is at most $\norm{f}\,\norm{\muvec_P - \muvec_Q} \le \norm{\muvec_P - \muvec_Q}$ when
+$\norm{f} \le 1$, with equality at $f = (\muvec_P - \muvec_Q)/\norm{\muvec_P - \muvec_Q}$. The supremum is therefore the
+norm, attained by the witness.
+</Derivation>
+
+## Assumptions
+
+- **A bounded or integrable kernel.** The embedding exists when $\expect\brack{\sqrt{k(X, X)}}$ is finite, which
+  holds for every bounded kernel, such as the Gaussian.
+- **A characteristic kernel** for MMD to be a metric on distributions. The Gaussian and Laplace kernels on
+  $\reals^d$ are characteristic; the linear and <NoteLink to="kernel-trick">polynomial kernels</NoteLink> are not.
+
+## Pitfalls
+
+- **The biased estimator is never zero.** It is positive even when $P = Q$, so it cannot be compared with zero
+  directly; a test needs a null law (<NoteLink to="kernel-two-sample-test" />).
+- **Scale and units.** A Gaussian kernel uses one width for every coordinate. Standardise features first, or a
+  coordinate measured in large units dominates the distance.
+- **Quadratic cost.** For large samples, the linear-time estimator evaluates the kernel terms only on disjoint
+  pairs of points, in $O(n + m)$ time, at a cost in power <Cite id="gretton2012" />.
+
+## Worked example
+
+Take $x = (0, 1)$ and $y = (2, 3)$ on the line with the Gaussian kernel of width $\sigma = 1$, so
+$k(a, b) = e^{-(a - b)^2/2}$.
+
+1. **Kernel values.** Points 1 apart give $e^{-0.5} = 0.6065$, 2 apart $e^{-2} = 0.1353$, 3 apart
+   $e^{-4.5} = 0.0111$, and every point with itself gives 1.
+2. **Within-sample terms, unbiased.** Each sample has one distinct pair, 1 apart: both averages are $0.6065$.
+3. **Between-sample term.** The four pairs are 2, 3, 1 and 2 apart:
+   $(0.1353 + 0.0111 + 0.6065 + 0.1353)/4 = 0.2221$.
+4. **Unbiased estimate.** $0.6065 + 0.6065 - 2 \times 0.2221 = 0.7689$.
+5. **Biased estimate.** The within-sample averages now include the self-pairs:
+   $(1 + 1 + 2 \times 0.6065)/4 = 0.8033$ each. So $0.8033 + 0.8033 - 0.4441 = 1.1624$, larger than the unbiased value
+   by the self-pair terms.

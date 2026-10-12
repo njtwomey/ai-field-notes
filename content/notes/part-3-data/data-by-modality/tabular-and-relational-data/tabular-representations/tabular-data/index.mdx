@@ -1,26 +1,144 @@
 ---
 title: 'Tabular data and its representations'
 kind: concept
-summary: 'A table holds rows of mixed-type columns with no spatial or temporal order between columns. Tabular models need each column turned into numbers, and neural ones often embed every column as a token.'
-tags: [data, deep-learning]
-aliases: []
-requires: []
-related: [gradient-boosting-vs-deep-learning-on-tabular-data, categorical-encoding, numeric-encoding]
-references: []
-status: stub
-updated: 2026-10-11
+summary: 'Tabular data combines heterogeneous mixed-type columns lacking spatial order, demanding distinct preprocessing for tree-based models and column tokenization for neural networks.'
+tags: [data, deep-learning, tabular-data, feature-engineering]
+aliases: [tabular data, tabular representations, column embeddings, FT-Transformer, tabular preprocessing]
+requires: [numeric-encoding, categorical-encoding]
+related: [gradient-boosting-vs-deep-learning-on-tabular-data, encoding-missingness]
+references: [grinsztajn2022, gorishniy2021, gorishniy2022]
+status: draft
+updated: 2026-10-12
 ---
 
+import { TabularDataVisualizer } from './TabularDataVisualizer'
+
 <Definition>
-To be written.
+**Tabular data** is structured information arranged in rows of heterogeneous, mixed-type columns where individual
+features possess distinct physical measurement scales, marginal distributions, and semantics. Unlike perceptual
+modalities, tabular datasets lack spatial or temporal grid symmetries, exhibiting permutation invariance across columns
+and requiring fundamentally different feature representations for tree-based ensembles versus deep neural networks.
 </Definition>
+
+Tabular records are the economic engine of industrial machine learning—powering credit scoring, fraud prevention,
+medical diagnostics, demand forecasting, and recommendation ranking. Despite the triumph of deep learning in vision and
+language, tabular data has long resisted deep learning dominance. Tree-based ensembles (such as XGBoost, LightGBM, and
+CatBoost) routinely match or outperform complex neural networks on tabular benchmarks. Understanding how to represent
+tabular features—whether via rank-based splits or continuous column tokenization—is essential to building performant
+tabular systems <Cite id="grinsztajn2022, gorishniy2021, gorishniy2022" />.
+
+<TabularDataVisualizer />
 
 ## What sets tables apart
 
+Tabular datasets possess mathematical properties that distinguish them from vision, audio, and language:
+
+1. **Permutation equivariance of columns**: In computer vision, neighboring pixels share spatial translation
+   equivariance; in language, tokens share sequential grammar. In tabular data, there is no natural spatial or temporal
+   distance between column $j$ and column $k$. Reordering columns via permutation matrix $\mathbf{P} \mathbf{x}$
+   preserves all underlying semantic information.
+2. **Axis-aligned coordinate geometry**: Tabular decisions are predominantly governed by single-feature threshold cuts
+   (e.g. `Income < $30,000` or `CreditScore > 720`). Leo Breiman and Léo Grinsztajn et al. established that decision
+   trees split along single coordinate axes with piecewise step functions, aligning naturally with tabular coordinate
+   geometry <Cite id="grinsztajn2022" />.
+3. **Coordinate rotation sensitivity**: Rotating tabular features by an orthogonal transformation
+   $\mathbf{R} \mathbf{x}$ destroys tree-based model performance, because axis-aligned hyperplanes can no longer
+   approximate diagonal decision boundaries without hundreds of deep staircase splits. In contrast, neural networks are
+   rotation-invariant.
+
+| Inductive Geometric Property | Decision Trees (GBDT) | Deep Neural Networks (MLP / Transformer) |
+| :--- | :--- | :--- |
+| **Separating Hyperplane Geometry** | Piecewise orthogonal cuts: $\mathbb{I}(x_j < \tau)$ along individual coordinates | Continuous, curved manifolds: $\sigma(\mathbf{w}^\top \mathbf{x} + b)$ |
+| **Rotational Transformation ($\mathbf{R}\mathbf{x}$)** | **Highly vulnerable**: Requires hundreds of deep staircase splits to model diagonal boundaries | **Invariant**: Linear layers rotate coordinates effortlessly via orthogonal weight matrices |
+| **Monotonic Coordinate Rescaling** | **Completely invariant**: Splitting criteria depend strictly on ordinal ranks | **Highly sensitive**: Divergent scales cause gradient ill-conditioning and uneven learning |
+
 ## Heterogeneous columns
+
+A single tabular row $\mathbf{x} = (x_1, \dots, x_D)$ typically combines fundamentally conflicting data types:
+- **Continuous / numerical features**: Heavy-tailed, multi-modal distributions with structural zeroes (e.g. total
+  insurance payout, where $95\%$ of values are zero, and the remaining $5\%$ span five orders of magnitude).
+- **High-cardinality categoricals**: Nominal variables with thousands of unique levels (e.g. merchant ID, postal code,
+  ICD-10 medical code) exhibiting severe power-law frequency distributions.
+- **Ordinal and discrete features**: Explicitly ordered categories (e.g. education level, credit risk tier).
+- **Informative missingness**: Missing values indicating non-applicability (e.g. `spouse_age` is null because the
+  applicant is unmarried) rather than random sensor dropouts.
 
 ## Preprocessing for trees and for networks
 
+Because decision trees and neural networks operate with contrasting inductive biases, optimal tabular preprocessing
+diverges sharply across model families <Cite id="grinsztajn2022" />:
+
+| Preprocessing Dimension | Gradient Boosted Decision Trees (GBDT) | Deep Neural Networks (MLP, FT-Transformer) |
+| :--- | :--- | :--- |
+| **Numerical Scaling** | **Completely invariant**: Rank-based split finding is unaffected by scaling, power transforms, or monotonic shifts. | **Critical requirement**: Un-normalized continuous features cause gradient explosion; requires Quantile or Yeo-Johnson transforms. |
+| **Outlier Robustness** | **Immune**: An extreme outlier only affects a single leaf bucket boundary without pulling weights. | **Vulnerable**: Outliers generate massive loss gradients, destabilizing batch normalization and optimization. |
+| **Missing Values** | **Native handling**: Evaluates optimal default split direction (left vs right) during training. | **Imputation required**: Missing values must be imputed (mean, median, iterative) alongside explicit missingness indicator masks. |
+| **Categoricals** | **Native histogram sorting**: LightGBM sorts categories by target statistics; CatBoost computes ordered target encodings. | **Tokenization required**: High-cardinality categories require dense entity embedding lookups or target encoding. |
+
 ## Column embeddings
 
+To overcome the architectural mismatch between unstructured MLPs and tabular geometry, modern tabular deep learning
+treats tabular features as tokens, formalized in the **Feature Tokenizer Transformer (FT-Transformer)**
+<Cite id="gorishniy2021, gorishniy2022" />.
+
+### Categorical tokenization
+
+For categorical column $j$ with cardinality $C_j$, a discrete level $c_j \in \{1, \dots, C_j\}$ is mapped to a
+continuous embedding vector using a learned lookup matrix $\mathbf{W}_j \in \mathbb{R}^{C_j \times d}$:
+
+$$
+\mathbf{e}_{\text{cat}}^{(j)} = \mathbf{W}_j[c_j] + \mathbf{b}_j \in \mathbb{R}^d
+$$
+
+### Numerical tokenization (PLE and periodic embeddings)
+
+Yury Gorishniy et al. proved that standard scalar linear projections $\mathbf{e}_j = \mathbf{w}_j x_j + \mathbf{b}_j$
+severely cripple neural networks on tabular data because linear projections cannot represent multi-modal or
+non-monotonic target relationships <Cite id="gorishniy2022" />.
+
+To unlock neural expressivity, FT-Transformer deploys **Piecewise Linear Embeddings (PLE)** or **Periodic Embeddings**:
+
+1. **Piecewise linear embeddings (PLE)**: The continuous feature range is partitioned into $K$ quantiles with boundary
+   knots $T_1 < T_2 < \dots < T_K$. The feature $x_j$ is encoded as a $K$-dimensional vector of linear interpolation
+   activations, projected into $\mathbb{R}^d$:
+   $$
+   \mathbf{e}_{\text{PLE}}^{(j)}(x_j) = \sum_{k=1}^K \operatorname{LinearClamp}(x_j, T_{k-1}, T_k) \, \mathbf{v}_{j, k} + \mathbf{b}_j
+   $$
+2. **Periodic (Fourier) embeddings**: Continuous values are passed through sinusoidal basis functions parameterized by
+   learned frequency vectors $\mathbf{f}_j$:
+   $$
+   \mathbf{e}_{\text{periodic}}^{(j)}(x_j) = \left[ \sin(2\pi \mathbf{f}_j x_j), \, \cos(2\pi \mathbf{f}_j x_j) \right] \mathbf{W}_j
+   $$
+
+$$
+\mathbf{x} = (x_1, \dots, x_D) \longrightarrow \mathbf{E} = \begin{bmatrix} \mathbf{e}_1 \\ \vdots \\ \mathbf{e}_D \end{bmatrix} \in \mathbb{R}^{D \times d} \xrightarrow{\text{Multi-Head Self-Attention}} \operatorname{Softmax}\left(\frac{\mathbf{Q}\mathbf{K}^\top}{\sqrt{d}}\right) \mathbf{V}
+$$
+
+| Column Modality | Raw Input Value | Tokenization Mechanism | Output Representation |
+| :--- | :--- | :--- | :--- |
+| **Categorical** | Discrete index $c_j \in \{1, \dots, C_j\}$ | Learned lookup table $\mathbf{W}_j[c_j] + \mathbf{b}_j$ | Dense token $\mathbf{e}_{\text{cat}}^{(j)} \in \mathbb{R}^d$ |
+| **Numerical** | Continuous scalar $x_j \in \mathbb{R}$ | Piecewise linear (PLE) or periodic basis | Dense token $\mathbf{e}_{\text{num}}^{(j)} \in \mathbb{R}^d$ |
+
+By tokenizing all continuous and categorical columns into a unified sequence of vectors
+$\mathbf{E} = [\mathbf{e}_1, \dots, \mathbf{e}_D] \in \mathbb{R}^{D \times d}$, self-attention heads automatically
+compute pairwise column interaction weights
+$\mathbf{A}_{jk} = \operatorname{Softmax}(\mathbf{e}_j^\top \mathbf{e}_k / \sqrt{d})$. This discovers high-order
+non-linear feature interactions without manual polynomial expansion.
+
 ## Pitfalls
+
+1. **Unnecessary preprocessing for GBDT**: Spending weeks implementing standard scaling, min-max normalization, or
+   Gaussian power transforms for XGBoost or LightGBM pipelines; decision tree split finding is strictly rank-based and
+   entirely invariant to monotonic transforms.
+2. **One-hot dimensionality explosion in neural networks**: Converting high-cardinality categorical variables
+   ($> 10,000$ levels) into one-hot vectors, creating massive, ultra-sparse weight matrices that exhaust GPU VRAM;
+   high-cardinality levels require dense entity embeddings ($d \approx \min(50, \lfloor C_j^{0.5} \rfloor)$).
+3. **Imposing spatial order via 1D convolutions**: Passing tabular vectors directly into 1D convolutional neural
+   networks; 1D CNNs assume adjacent columns share local translation invariance, which is physically meaningless in
+   tabular data.
+4. **Target leakage through global categorical encoding**: Computing mean target encodings across the full dataset prior
+   to train-test splitting; target statistics must be computed strictly inside cross-validation training folds to
+   prevent severe out-of-fold generalization collapse.
+5. **Ignoring missingness indicators**: Imputing missing values with column medians without adding a corresponding
+   binary missingness indicator column $\mathbb{I}(x_j = \text{null})$; the fact that a field was missing is frequently
+   more predictive than the imputed value itself.

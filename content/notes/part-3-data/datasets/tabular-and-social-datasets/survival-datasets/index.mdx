@@ -1,0 +1,118 @@
+---
+title: 'Survival datasets'
+kind: concept
+summary: 'Survival datasets—including METABRIC, SUPPORT, Rotterdam/GBSG2, and FLCHAIN—benchmark time-to-event regression, right-censoring modeling, and individual hazard estimation across clinical, genomic, and industrial reliability regimes.'
+tags: [data, datasets, survival-analysis, clinical]
+aliases: [survival-benchmarks, metabric-dataset, support-dataset, gbsg2-dataset]
+requires: []
+related: [time-to-event-data, cox-proportional-hazards, censoring]
+references: [curtis2012, katzman2018, cox1972, kalbfleisch2002]
+status: draft
+updated: 2026-10-12
+---
+
+<Definition>
+**Survival datasets** (or time-to-event datasets) are benchmark collections recording the elapsed time $T$ until an
+event of interest occurs (such as disease recurrence, patient mortality, customer churn, or mechanical component
+failure), paired with an event indicator $\delta \in \{0, 1\}$. They formalize evaluation under **right-censoring**,
+where the study concludes or units are lost to follow-up before the event is observed ($T_i = \min(T_i^*, C_i)$)
+<Cite id="cox1972, kalbfleisch2002" />.
+</Definition>
+
+Standard regression losses (MSE, MAE) fail on survival data because treating censored observation times as exact failure
+events introduces systematic downward bias, while dropping censored observations discards informative lower bounds
+($T_i^* > C_i$). Survival benchmarks evaluate semiparametric Cox models, random survival forests, and deep neural
+survival architectures under partial likelihood and ranking losses <Cite id="katzman2018" />.
+
+---
+
+## What These Datasets Measure
+
+Survival benchmarks evaluate models along three core axes:
+1. **Concordance Index (C-Index / Harrell's C)**: Measures ranking discrimination—the proportion of evaluable subject
+   pairs where the model correctly predicts that the unit with higher predicted risk experiences the event first:
+   $$
+   C = \frac{\sum_{i < j} \mathbf{1}_{T_i < T_j} \cdot \mathbf{1}_{\delta_i = 1} \cdot \mathbf{1}_{\hat{r}_i > \hat{r}_j}}{\sum_{i < j} \mathbf{1}_{T_i < T_j} \cdot \mathbf{1}_{\delta_i = 1}}
+   $$
+2. **Time-Dependent Calibration & Brier Score**: Evaluates whether predicted survival curves
+   $\hat{S}(t \mid x) = P(T > t \mid x)$ accurately estimate true survival probabilities across time horizons $t$,
+   re-weighted via Inverse Probability of Censoring Weighting (IPCW).
+3. **High-Dimensional Omics Integration**: Combining clinical baseline covariates (age, grade, stage) with
+   high-dimensional microarrays or RNA-seq expression profiles ($P \gg N$) without overfitting <Cite id="curtis2012" />.
+
+---
+
+## Catalogue of Canonical Survival Benchmarks
+
+| Benchmark / Dataset | Domain | Subjects ($N$) | Features ($D$) | Censoring Rate | Primary Endpoint | Canonical Reference |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| **METABRIC** | Oncology & Genomics | 1,981 patients | 9 clinical + 24k gene probes | $\approx 42.1\%$ | Overall survival time (months) | Curtis et al. <Cite id="curtis2012" /> |
+| **SUPPORT** | Critical Care / ICU | 9,105 patients | 14 physiological / clinical | $\approx 31.9\%$ | Hospitalized patient mortality | Knaus et al. (1995) |
+| **Rotterdam / GBSG2** | Breast Oncology | 2,293 / 686 patients | 7 clinical & hormonal | $\approx 56.8\%$ | Disease-free survival (recurrence/death) | Foekens (2000) / Schumacher (1994) |
+| **FLCHAIN** | Hematology Epidemiology | 7,874 residents | 8 serum / demographic | $\approx 72.5\%$ | Mortality in serum free light chain cohort | Dispenzieri et al. (2012) |
+| **Worcester Heart Attack (WHAS500)** | Cardiology | 500 patients | 14 hospital factors | $\approx 57.0\%$ | Post-myocardial infarction survival | Hosmer et al. (2008) |
+| **Veteran's Administration Lung Cancer** | Oncology Trial | 137 patients | 6 clinical features | $\approx 6.6\%$ | Advanced lung cancer chemotherapy trial | Kalbfleisch & Prentice <Cite id="kalbfleisch2002" /> |
+
+---
+
+## Detailed Benchmark Profiles
+
+### METABRIC: Molecular Taxonomy of Breast Cancer (2012)
+
+Introduced by Curtis et al. <Cite id="curtis2012" /> and adopted as the canonical genomics benchmark in DeepSurv
+<Cite id="katzman2018" />:
+- **Data Scale**: 1,981 breast cancer specimens profiling patient clinical indicators (age, tumor size, histological
+  grade, hormone receptor status) coupled with extensive microarray gene expression profiles and copy-number
+  alterations.
+- **Censoring**: $42.1\%$ censoring rate over extended follow-up exceeding 250 months.
+- **Role in Machine Learning**: Tests whether deep non-linear feature extractors can extract prognostic hazard
+  representations from genomic expression manifolds that outperform standard linear Cox models.
+
+### SUPPORT: Study to Understand Prognoses and Preferences for Outcomes (1995)
+
+Conducted across five major US teaching hospitals to predict survival in severely ill hospitalized patients:
+- **Cohort**: 9,105 patients with acute illness across nine disease categories (e.g. acute respiratory failure,
+  multi-organ failure, coma).
+- **Physiological Measurements**: 14 physiological variables including mean blood pressure, white blood cell count,
+  serum creatinine, and APACHE III score.
+- **Missing Data Challenge**: Features informative clinical missingness, serving as a dual benchmark for time-to-event
+  estimation and missing-data imputation.
+
+### Rotterdam and GBSG2: Generalization Across Clinical Trials
+
+Frequently paired to evaluate survival domain generalization:
+- **Rotterdam Study**: 2,293 primary breast cancer patients treated in the Netherlands.
+- **German Breast Cancer Study Group (GBSG2)**: 686 node-positive breast cancer patients enrolled in a comprehensive
+  multi-center randomized clinical trial.
+- **Transfer Evaluation**: Models are traditionally trained on Rotterdam and evaluated on the independent GBSG2 cohort
+  to verify that predicted hazard ratios do not overfit to single-hospital treatment protocols.
+
+---
+
+## Choosing a Survival Dataset
+
+- **High-Dimensional Genomics & Deep Learning**:
+  - METABRIC (Gene expression profiles + clinical baselines)
+- **Large Clinical Cohort & ICU Physiology**:
+  - SUPPORT (9k patients, continuous laboratory vitals)
+- **Multi-Center Trial Cross-Validation**:
+  - *Rotterdam (Train)*: GBSG2 (Independent OOD Test)
+- **High-Censoring Population Epidemiology**:
+  - FLCHAIN (> 70% right-censoring rate)
+- **Fast Algorithmic Prototyping**:
+  - WHAS500 / Veteran's Lung Cancer (N < 1,000, low dimension)
+
+---
+
+## Known Problems and Benchmark Pitfalls
+
+1. **Informative Censoring (Violation of Non-Informative Censoring)**: Standard survival models assume the censoring
+   distribution $C$ is independent of the failure time $T^*$ given covariates ($T^* \perp C \mid X$). If sickest
+   patients drop out of a clinical study early, censoring is informative, biasing the Kaplan-Meier and Cox estimators
+   <Cite id="kalbfleisch2002" />.
+2. **Competing Risks**: In elderly or multi-morbidity cohorts (such as FLCHAIN), patients may die of cardiovascular
+   events before developing the target hematologic outcome. Treating competing causes of death as simple right-censoring
+   violates survival assumptions and inflates cumulative incidence.
+3. **Small Sample Overfitting in Genomic Profiling**: Datasets with tens of thousands of gene expression features but
+   fewer than 2,000 patients suffer severe risk of discovering spurious genomic correlations unless strong
+   regularization or pathway priors are applied.

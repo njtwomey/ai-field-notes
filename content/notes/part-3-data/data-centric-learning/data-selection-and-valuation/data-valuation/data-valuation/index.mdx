@@ -1,26 +1,171 @@
 ---
 title: 'Data valuation and influence'
 kind: concept
-summary: 'Data valuation assigns each training example a value for a model''s performance: by leave-one-out retraining, by its Shapley value, or by an influence function that approximates the effect of removing it.'
-tags: [data, interpretability]
-aliases: []
-requires: []
-related: [leverage-and-influence, detecting-and-cleaning-label-errors]
-references: []
-status: stub
-updated: 2026-10-11
+summary: 'Data valuation quantifies each training example''s contribution to model performance via Leave-One-Out retraining, Data Shapley values, and Hessian influence functions.'
+tags: [data, interpretability, data-centric-learning]
+aliases: [data valuation, Data Shapley, influence functions, data influence, TMC-Shapley]
+requires: [coresets-and-data-pruning, training-dynamics-diagnostics]
+related: [error-analysis, targeted-data-collection]
+references: [ghorbani2019shapley, koh2017, cook1977]
+status: draft
+updated: 2026-10-12
 ---
 
+import { DataValuationVisualizer } from './DataValuationVisualizer'
+
 <Definition>
-To be written.
+**Data valuation and influence** quantify the marginal contribution of individual training instances to a model's
+downstream generalization performance. While **leave-one-out (LOO)** measures the performance delta when an instance is
+removed, **Data Shapley** computes the unique axiomatic cooperative contribution across all possible training subsets,
+and **influence functions** compute first-order Taylor approximations via the inverse empirical Hessian without
+retraining.
 </Definition>
+
+In large-scale machine learning, data points are not created equal. A small fraction of clean, representative instances
+anchor decision boundaries; a massive middle cohort of canonical points provides redundant confirmation; and a toxic
+tail of mislabeled instances, sensor artifacts, or adversarial poisoning actively degrades generalization. Assigning
+principled mathematical valuations to training records transforms data management from indiscriminate ingestion into
+quantitative auditing, automated noise cleaning, and equitable data monetization
+<Cite id="ghorbani2019shapley, koh2017, cook1977" />.
+
+<DataValuationVisualizer />
 
 ## Leave-one-out values
 
+The most intuitive measure of an example's worth is its **Leave-One-Out (LOO)** score: the difference in validation
+utility when instance $i$ is removed from the training set.
+
+Let $\mathcal{D} = \{z_1, \dots, z_N\}$ denote the training dataset, where $z_i = (\mathbf{x}_i, y_i)$. Let $U(S)$ be a
+utility function (such as validation accuracy or negative validation loss) evaluated on a model trained on subset
+$S \subseteq \mathcal{D}$. The LOO score of instance $i$ is:
+
+$$
+\Delta_{\text{LOO}}(i) = U(\mathcal{D}) - U(\mathcal{D} \setminus \{i\})
+$$
+
+While conceptually straightforward, LOO suffers from two crippling engineering deficiencies:
+
+1. **Computational impossibility**: Computing exact LOO scores across a corpus of $N$ instances requires retraining $N$
+   separate models from scratch. For deep neural networks where a single training run requires hours or days on GPU
+   clusters, computing $\Delta_{\text{LOO}}$ for $N = 10^5\text{--}10^8$ instances is completely intractable.
+2. **The redundancy blind spot**: In real-world datasets, information is frequently duplicated. If a training set
+   contains two identical copies of an essential training example ($z_A$ and $z_B$), removing $z_A$ leaves $z_B$ in the
+   training set, so the model learns identical weights:
+   $$
+   U(\mathcal{D} \setminus \{z_A\}) = U(\mathcal{D}) \implies \Delta_{\text{LOO}}(z_A) = 0
+   $$
+   LOO assigns zero value to both instances, completely obscuring the fact that the underlying information is vital to
+   model performance.
+
 ## Data Shapley
+
+To resolve the redundancy failure of LOO, Amirata Ghorbani and James Zou adapted cooperative game theory to machine
+learning through **Data Shapley** <Cite id="ghorbani2019shapley" />.
+
+In cooperative game theory (Lloyd Shapley, 1953), players form coalitions to generate total payout $U(\mathcal{D})$. The
+Shapley value is the **unique** payout assignment satisfying four fundamental fairness axioms:
+- **Efficiency**: $\sum_{i \in \mathcal{D}} \phi_i = U(\mathcal{D}) - U(\emptyset)$.
+- **Symmetry**: If $U(S \cup \{i\}) = U(S \cup \{j\})$ for all $S \subseteq \mathcal{D} \setminus \{i, j\}$, then
+  $\phi_i = \phi_j$.
+- **Null player**: If $U(S \cup \{i\}) = U(S)$ for all $S \subseteq \mathcal{D} \setminus \{i\}$, then $\phi_i = 0$.
+- **Additivity**: For independent utilities $U_1$ and $U_2$, $\phi_i(U_1 + U_2) = \phi_i(U_1) + \phi_i(U_2)$.
+
+### The Shapley formulation
+
+The Data Shapley value $\phi_i$ measures the average marginal contribution of instance $i$ across all possible subsets:
+
+$$
+\phi_i = \frac{1}{N} \sum_{S \subseteq \mathcal{D} \setminus \{i\}} \frac{1}{\binom{N-1}{|S|}} \left[ U(S \cup \{i\}) - U(S) \right]
+$$
+
+When two identical copies of an essential sample exist, Data Shapley splits the credit equally between them
+($\phi_{z_A} = \phi_{z_B} = \frac{1}{2} U_{\text{unique}}$), avoiding the LOO collapse.
+
+| Valuation Tier | Shapley Signature ($\phi_i$) | Characteristic Data Profile | Prescribed Operational Action |
+| :--- | :--- | :--- | :--- |
+| **High-Value Anchors** | $\phi_i \gg 0$ | Rare class exemplars, subtle decision boundary prototypes, clean signals | Protect from deduplication; prioritize for human verification |
+| **Redundant Core** | $\phi_i \approx 0$ | Standard, easily classified examples with high overlap | Prune or subsample safely without degrading test accuracy |
+| **Toxic Tail** | $\phi_i \ll 0$ | Severe label noise, corrupted inputs, adversarial artifacts | Intercept and quarantine; inspect for label flipping or pipeline errors |
+
+### Truncated Monte Carlo Shapley (TMC-Shapley)
+
+Evaluating $2^N$ subsets is exponential. Ghorbani and Zou introduced **TMC-Shapley**, which samples random permutations
+$\pi \in \Pi(N)$ of the dataset:
+1. Training begins with an empty set and adds examples in permutation order $\pi = (\pi_1, \pi_2, \dots)$.
+2. At each step, record the marginal utility change $\Delta U_i = U(S \cup \{i\}) - U(S)$.
+3. **Truncation**: Once the performance of coalition $S$ reaches within $\epsilon$ of the full dataset utility
+   $U(\mathcal{D})$, further marginal additions contribute zero, and evaluation for that permutation halts.
+
+Averaging marginal contributions across several thousand truncated permutations provides an unbiased, low-variance
+estimate of $\phi_i$.
 
 ## Influence functions
 
+Pang Wei Koh and Percy Liang introduced **influence functions** to deep learning as an efficient, calculus-based
+alternative to retraining <Cite id="koh2017" />, drawing on classical robust statistics <Cite id="cook1977" />.
+
+Rather than removing example $z_i$, consider upweighting its loss by an infinitesimal perturbation $\epsilon$:
+
+$$
+\hat{\boldsymbol{\theta}}_{\epsilon, z_i} = \arg\min_{\boldsymbol{\theta}} \frac{1}{N} \sum_{j=1}^N \ell(z_j; \boldsymbol{\theta}) + \epsilon \, \ell(z_i; \boldsymbol{\theta})
+$$
+
+Using a second-order Taylor expansion around the empirical risk minimizer $\hat{\boldsymbol{\theta}}$, the parameter
+derivative with respect to $\epsilon$ is given by:
+
+$$
+\left. \frac{d \hat{\boldsymbol{\theta}}_{\epsilon, z_i}}{d \epsilon} \right|_{\epsilon=0} = -H_{\hat{\boldsymbol{\theta}}}^{-1} \nabla_{\boldsymbol{\theta}} \ell(z_i; \hat{\boldsymbol{\theta}})
+$$
+
+where
+$H_{\hat{\boldsymbol{\theta}}} = \frac{1}{N} \sum_{j=1}^N \nabla_{\boldsymbol{\theta}}^2 \ell(z_j; \hat{\boldsymbol{\theta}})$
+is the empirical Hessian matrix.
+
+### Test-point influence attribution
+
+Setting $\epsilon = -1/N$ approximates the effect of removing example $z_i$ entirely. Using the chain rule, the
+predicted change in loss on a specific test point $z_{\text{test}} = (\mathbf{x}_{\text{test}}, y_{\text{test}})$ is:
+
+$$
+\begin{aligned}
+\mathcal{I}_{\text{up, loss}}(z_i, z_{\text{test}}) &= \left. \frac{d \ell(z_{\text{test}}; \hat{\boldsymbol{\theta}}_{\epsilon, z_i})}{d \epsilon} \right|_{\epsilon=0} \\
+&= -\nabla_{\boldsymbol{\theta}} \ell(z_{\text{test}}; \hat{\boldsymbol{\theta}})^\top H_{\hat{\boldsymbol{\theta}}}^{-1} \nabla_{\boldsymbol{\theta}} \ell(z_i; \hat{\boldsymbol{\theta}})
+\end{aligned}
+$$
+
+- **Negative influence ($\mathcal{I} < 0$)**: Training sample $z_i$ *helped* the model predict correctly on
+  $z_{\text{test}}$ (removing $z_i$ increases test loss).
+- **Positive influence ($\mathcal{I} > 0$)**: Training sample $z_i$ *hurt* the model on $z_{\text{test}}$ (it acted as a
+  confusing outlier or label error).
+
+Computing $H^{-1}$ directly for a network with $P$ parameters requires inverting a $P \times P$ matrix
+($\mathcal{O}(P^3)$). Koh and Liang bypass this using the **Linear Time Stochastic Second-Order Algorithm (LiSSA)**,
+which computes Inverse Hessian-Vector Products (iHVP) $H^{-1} \mathbf{v}$ via stochastic Taylor series sampling in
+$\mathcal{O}(N P)$ time.
+
 ## Uses of data values
 
+1. **Automated label noise cleaning**: Sorting training records by Data Shapley $\phi_i$ concentrates label errors in
+   the bottom $5\text{--}10\%$ negative tail. Pruning or relabeling these instances monotonically increases validation
+   accuracy <Cite id="ghorbani2019shapley" />.
+2. **Data marketplaces and fair revenue sharing**: When commercial models are trained on federated or user-contributed
+   datasets (e.g. medical imaging consortia), Shapley efficiency guarantees an mathematically unique, ungameable revenue
+   dividend proportional to each institution's true contribution.
+3. **Debugging model predictions and hallucinations**: When an LLM or classifier outputs a catastrophic mistake on a
+   test query $z_{\text{test}}$, querying the top harmful training examples
+   ($\arg\max_i \mathcal{I}_{\text{loss}}(z_i, z_{\text{test}})$) identifies the exact training documents responsible
+   for the blunder.
+
 ## Pitfalls
+
+1. **Hessian non-convexity in deep networks**: Deep neural network loss landscapes are non-convex, with numerous
+   negative or near-zero eigenvalues. Naive Hessian inversion leads to numerical explosion; influence functions require
+   regularized damping $(H + \lambda I)^{-1}$.
+2. **Stochastic permutation variance in Shapley estimation**: Estimating Data Shapley via Monte Carlo sampling produces
+   noisy valuations for boundary samples unless averaged over thousands of permutations.
+3. **Path-dependent SGD violations**: Influence functions assume optimization reaches a stationary point of a convex
+   surrogate. In deep models trained with SGD, learning rate annealing, and dropout, parameter trajectories depend
+   heavily on batch order, introducing discrepancies between predicted influence and actual LOO retraining.
+4. **Adversarial data valuation gaming**: In commercial data sharing, participants who understand the valuation
+   algorithm can craft synthetic points with inflated gradient norms to capture excessive Shapley payout without
+   providing genuine semantic value.

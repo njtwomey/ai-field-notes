@@ -1,28 +1,140 @@
 ---
 title: 'Feature importance measures'
 kind: concept
-summary: 'Importance measures score how much a model relies on each feature: impurity decrease, permutation, dropping a column and refitting, and conditional importance. Correlated and high-cardinality features bias the simpler measures.'
+summary: 'Importance measures score how much a model relies on each feature: impurity decrease, permutation, drop-column refitting, and conditional permutation disentangle predictive influence from cardinality and collinearity biases.'
 tags: [data, feature-engineering, interpretability]
-aliases: []
-requires: []
-related: [feature-attribution-methods, embedded-feature-selection, multicollinearity]
-references: []
-status: stub
+aliases: [feature importance measures, feature importance, permutation importance, mean decrease impurity, mean decrease accuracy, drop-column importance, conditional feature importance]
+requires: [feature-selection]
+related: [embedded-feature-selection, filter-feature-selection, wrapper-feature-selection, selection-inside-cross-validation]
+references: [breiman2001, strobl2007, strobl2008, lundberg2017]
+status: draft
 updated: 2026-10-11
 ---
 
+import ImportanceComparisonExplorer from './ImportanceComparisonExplorer';
+
 <Definition>
-To be written.
+A **feature importance measure** is a quantitative metric scoring the relative contribution or predictive reliance of
+each input feature within a trained machine learning model. Rather than selecting a hard binary subset, importance
+metrics provide continuous rankings that guide post-hoc variable screening, interpretability diagnostics, and
+dimensionality reduction.
 </Definition>
 
-## Impurity importance
+Different importance measures operationalize "importance" through fundamentally distinct mechanisms: accumulated
+in-sample split criteria, out-of-sample prediction degradation under marginal shuffling, retrained performance
+differences upon feature omission, or cooperative game-theoretic attributions.
 
-## Permutation importance
+<ImportanceComparisonExplorer />
+
+## Impurity-based importance (MDI)
+
+Mean Decrease in Impurity (MDI), commonly termed Gini importance in classification trees, aggregates the weighted
+reduction in node impurity achieved by every split that utilizes feature $X_j$ across an ensemble of $T$ decision trees:
+
+$$
+\text{MDI}(X_j) = \frac{1}{T} \sum_{t=1}^T \sum_{\tau \in \mathcal{T}_t : v(\tau) = j} p(\tau) \Delta i(\tau)
+$$
+
+where $\mathcal{T}_t$ is the set of internal nodes in tree $t$, $v(\tau)$ is the feature chosen to split node $\tau$,
+$p(\tau) = \frac{N_\tau}{N}$ is the proportion of training instances reaching node $\tau$, and
+$\Delta i(\tau) = i(\tau) - p_L i(\tau_L) - p_R i(\tau_R)$ is the reduction in impurity (Gini index or variance).
+
+### Advantages and inherent pathologies
+
+- **Speed**: MDI is computed as an instantaneous byproduct of tree induction with zero additional model evaluations.
+- **The cardinality trap**: As demonstrated by Carolin Strobl et al. <Cite id="strobl2007" />, MDI exhibits severe
+  structural bias toward features with many distinct values—specifically continuous variables and high-cardinality
+  discrete categories (such as user IDs or zip codes). Because a feature with $K$ unique categories offers $2^{K-1} - 1$
+  potential split partitions, it has vastly more mathematical degrees of freedom to accidentally separate training
+  labels in-sample, receiving artificially inflated MDI scores even when it represents pure white noise.
+
+## Permutation feature importance (MDA)
+
+Mean Decrease in Accuracy (MDA), or Permutation Feature Importance <Cite id="breiman2001" />, shifts evaluation from
+in-sample split artifacts to out-of-sample predictive degradation on validation or out-of-bag (OOB) data.
+
+### The permutation protocol
+
+1. Given a trained model $f$ and a validation dataset $\mathcal{D}_{\text{val}} = \{(x_i, y_i)\}_{i=1}^n$, compute the
+   baseline generalization loss:
+   $$
+   \mathcal{L}_{\text{orig}} = \frac{1}{n} \sum_{i=1}^n \ell\big(y_i, f(x_i)\big)
+   $$
+2. For candidate feature $X_j$, construct a corrupted dataset $\tilde{\mathcal{D}}^{(j)}$ by randomly shuffling the
+   entries of column $j$, severing its statistical relationship with target $Y$ while preserving its marginal empirical
+   distribution.
+3. Compute the corrupted validation loss
+   $\mathcal{L}_{\text{perm}}^{(j)} = \frac{1}{n} \sum_{i=1}^n \ell\big(y_i, f(\tilde{x}_i^{(j)})\big)$.
+4. The permutation importance is the resulting error increase:
+   $$
+   \text{MDA}(X_j) = \mathcal{L}_{\text{perm}}^{(j)} - \mathcal{L}_{\text{orig}}
+   $$
+
+Because MDA evaluates predictions strictly on unseen hold-out observations, it is immune to the high-cardinality
+overfitting bias that plagues MDI. A high-cardinality noise column will yield $\text{MDA} \approx 0$ (or slightly
+negative due to random test variation).
+
+### Collinear distortion in marginal permutation
+
+When features are strongly correlated ($X_1 \approx X_2$), independently shuffling $X_1$ destroys the joint covariance
+structure $P(X_1, X_2)$, synthesising off-manifold synthetic points that could never occur in reality (e.g., vehicle
+weight = $3000\,\text{kg}$ with engine displacement = $0.5\,\text{L}$). If the model behaves erratically in these
+unpopulated regions, permutation importance can drastically misestimate true operational relevance.
 
 ## Drop-column importance
 
-## Conditional importance
+Drop-column importance measures the performance drop when a feature is omitted and a completely new model is retrained
+from scratch on the remaining $p - 1$ features:
 
-## Bias with correlated and high-cardinality features
+$$
+\text{DropImp}(X_j) = \mathcal{L}_{\text{val}}\big(f_{\mathcal{X} \setminus \{j\}}\big) - \mathcal{L}_{\text{val}}\big(f_{\mathcal{X}}\big)
+$$
 
-## Pitfalls
+### The collinear masking effect
+
+While drop-column importance provides the cleanest theoretical measure of whether a feature contains non-redundant
+predictive signal, it suffers from severe **collinear masking**:
+
+If features $X_1$ and $X_2$ are near-perfect substitutes ($r = 0.98$) that jointly drive the target:
+- Dropping $X_1$ allows the retrained model to rely entirely on $X_2$, resulting in negligible loss increase
+  ($\Delta \mathcal{L} \approx 0$).
+- Dropping $X_2$ allows the model to rely entirely on $X_1$, again yielding $\Delta \mathcal{L} \approx 0$.
+
+Consequently, both core drivers appear completely disposable according to drop-column metrics, misleading practitioners
+into dropping both variables simultaneously and destroying predictive capacity.
+
+## Conditional permutation importance
+
+To resolve the off-manifold artifacts of standard marginal permutation without incurring the collinear masking of
+drop-column refitting, Carolin Strobl et al. <Cite id="strobl2008" /> introduced **conditional permutation importance**.
+
+Instead of shuffling $X_j$ uniformly across the entire dataset, conditional permutation partitions the sample space into
+homogeneous conditioning strata $\mathcal{B}_k$ based on the values of correlated peer features
+$Z \in \text{Corr}(X_j)$. The values of $X_j$ are then permuted **only within each stratum**:
+
+$$
+\tilde{x}_{ij} \sim \text{Permute}\big( \{ x_{kj} : k \in \mathcal{B}(x_i) \} \big)
+$$
+
+By permuting within local neighborhoods, conditional permutation respects the conditional distribution $P(X_j \mid Z)$,
+preventing unrealistic synthetic combinations and accurately isolating the marginal incremental information contributed
+by $X_j$ beyond its correlated peers.
+
+## Shapley values and global attribution
+
+Game-theoretic Shapley values <Cite id="lundberg2017" /> provide a mathematically unified attribution framework by
+allocating credit for an individual prediction across all candidate coalitions of features:
+
+$$
+\phi_j(x) = \sum_{S \subseteq \mathcal{X} \setminus \{X_j\}} \frac{|S|! (p - |S| - 1)!}{p!} \left[ f_x(S \cup \{X_j\}) - f_x(S) \right]
+$$
+
+Global feature importance is then derived by computing the mean absolute Shapley attribution across the entire
+population:
+
+$$
+I_{\text{SHAP}}(X_j) = \frac{1}{n} \sum_{i=1}^n |\phi_j(x_i)|
+$$
+
+This formulation satisfies efficiency, symmetry, and monotonicity, ensuring that redundant or substitute features share
+attribution equitably rather than masking each other out.

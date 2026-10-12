@@ -1,28 +1,134 @@
 ---
 title: 'Label definition'
 kind: concept
-summary: 'A label definition fixes the prediction time, the outcome window and the exclusions. It sets the positive rate, the delay before a label is known, and what the model is actually asked to predict.'
-tags: [data]
-aliases: []
-requires: []
-related: [labelling-and-annotation, point-in-time-correctness]
-references: []
-status: stub
-updated: 2026-10-11
+summary: 'A label definition formalizes prediction time, outcome observation windows, maturity horizons, and cohort exclusions—fixing the empirical base rate, label maturation delays, and exact operational target that a model learns to predict.'
+tags: [data, labelling, target-engineering, point-in-time]
+aliases: [label definition, outcome window, label maturity, target definition]
+requires: [data-generating-process, censoring-and-coarsening]
+related: [labelling-and-annotation, target-exploration, delayed-and-partial-labels]
+references: [chapelle2014, kaplan1958, heckman1979]
+status: draft
+updated: 2026-10-12
 ---
 
+import { LabelDefinitionVisualizer } from './LabelDefinitionVisualizer'
+
 <Definition>
-To be written.
+A **label definition** is the precise operational, temporal, and semantic specification of an outcome variable
+$y \in \mathcal{Y}$. It establishes the prediction time ($t_{\text{pred}}$) at which features are frozen, the outcome
+observation window $[t_{\text{pred}} + \delta, t_{\text{pred}} + \delta + \Delta t]$ during which target events are
+monitored, the required maturation horizon, and explicit cohort exclusion rules.
 </Definition>
 
-## Prediction time
+In real-world machine learning systems, labels do not exist as natural properties of data points; they are manufactured
+mathematical constructs. How an engineering team defines an outcome—such as what constitutes a "churned user", a
+"defaulted loan", or a "successful ad conversion"—fundamentally alters the target base rate, class imbalance, feedback
+delay, and downstream business utility. A flawed label definition guarantees that models optimize for the wrong
+operational objective <Cite id="chapelle2014, kaplan1958" />.
 
-## Outcome window
+<LabelDefinitionVisualizer />
 
-## Exclusions
+## Prediction time and point-in-time correctness
 
-## Positive rate
+The first anchor of any label definition is the **prediction time** $t_{\text{pred}}$: the exact chronological instant
+in the operational workflow when the machine learning system will be invoked in production.
 
-## Label delay
+| Timeline Interval | Time Span | Ingestion Rule | Operational Function |
+| :--- | :--- | :--- | :--- |
+| **Historical Context** | $(-\infty, t_{\text{pred}}]$ | Feature freezing point | Computes feature covariates $\mathbf{x}(t_{\le t_{\text{pred}}})$; strictly prevents look-ahead |
+| **Prediction Timestamp** | Anchor $t_{\text{pred}} = 0$ | Runtime trigger | Exact moment production inference request is evaluated |
+| **Operational Buffer** | $(t_{\text{pred}}, t_{\text{pred}} + \delta]$ | Excluded buffer | Accommodates operational execution latency (e.g. human triage, queue dispatch) |
+| **Outcome Window** | $[t_{\text{pred}} + \delta, t_{\text{pred}} + \delta + \Delta t]$ | Monitored outcome | Duration across which positive ground-truth events are recorded |
 
-## Pitfalls
+1. **Feature freezing**: All input features $\mathbf{x}$ must be computed strictly from information known at or before
+   $t_{\text{pred}}$:
+   $$
+   \mathbf{x}_i = \mathbf{x}(t_{\le t_{\text{pred}, i}})
+   $$
+   Accessing any database field updated even milliseconds after $t_{\text{pred}}$ introduces catastrophic target
+   leakage.
+2. **Buffer windows**: In systems where interventions require execution latency (such as fraud prevention rules
+   requiring human queue reviews or marketing campaigns requiring email scheduling), a buffer $\delta > 0$ is inserted
+   before the outcome window begins to ensure predictions can be acted upon before the outcome materializes.
+
+## Outcome window selection: maturity versus latency
+
+The outcome window $[t_{\text{pred}} + \delta, t_{\text{pred}} + \delta + \Delta t]$ defines the duration over which the
+target event is monitored. Selecting the window duration $\Delta t$ involves a fundamental engineering trade-off:
+
+| Window Horizon ($\Delta t$) | Completeness of Outcome | Training Feedback Latency | Operational Fit |
+| :--- | :--- | :--- | :--- |
+| **Short Window** (e.g. 7 days) | Low ($\approx 40\%$ of lifetime conversions captured) | Fast (training data ready after 7 days) | Rapid iteration; ignores slow, high-value outcomes |
+| **Medium Window** (e.g. 30 days) | Moderate ($\approx 80\%$ captured) | Moderate (1-month training lag) | Standard balance for e-commerce and subscription churn |
+| **Long Window** (e.g. 180 days) | High ($> 98\%$ captured) | Slow (6-month lag before data matures) | Mandatory for credit default and financial risk |
+
+In display advertising and e-commerce, Olivier Chapelle demonstrated that conversions follow heavy-tailed delay
+distributions: while many clicks convert within an hour, a substantial fraction take up to 30 days
+<Cite id="chapelle2014" />. Choosing a short 24-hour window treats slow-converting users as non-converters,
+systematically penalizing high-consideration products.
+
+## Cohort exclusions and the immature censoring trap
+
+Not every historical record is eligible for training. A rigorous label definition codifies explicit exclusion criteria:
+
+1. **Right-censoring**: Instances whose observation window extends into the future:
+   $$
+   t_{\text{pred}} + \delta + \Delta t > t_{\text{current}}
+   $$
+2. **Voluntary termination / competing risks**: Users who closed their accounts voluntarily prior to default, or
+   patients who relocated to another healthcare jurisdiction <Cite id="kaplan1958" />.
+
+> [!CAUTION]
+> **The immature cohort label depression trap**: If recent data is ingested into the training set without filtering uncompleted outcome windows, instances that have not yet had time to convert or default are naively recorded as negative ($y = 0$). In the trailing weeks of the dataset, the perceived positive base rate plummets artificially towards zero. A model trained on this data learns that recent traffic is inherently low-risk, causing severe under-prediction in deployment.
+
+To prevent this trap, all records with uncompleted observation windows must be strictly quarantined from the training
+set until their full maturation horizon $\Delta t$ has elapsed <Cite id="chapelle2014, kaplan1958" />.
+
+## Positive rate and definition sensitivity
+
+Small adjustments to the stringency of a label definition produce drastic non-linear shifts in class balance and loss
+landscape geometry:
+
+| Delinquency Threshold | Natural Base Rate | Class Imbalance Ratio | Supervisory Density & Optimization Impact |
+| :--- | :--- | :--- | :--- |
+| **30-Day Delinquent** | $12.5\%$ | $\approx 7 : 1$ | Dense gradient signal, but high cure rate (many borrowers self-cure without loss) |
+| **60-Day Delinquent** | $5.2\%$ | $\approx 18 : 1$ | Moderate signal; serves as early warning indicator for collections outreach |
+| **90-Day Default** | $1.8\%$ | $\approx 55 : 1$ | Direct alignment with regulatory default definition; requires cost-sensitive weighting |
+| **Final Charge-Off** | $0.4\%$ | $\approx 250 : 1$ | Extreme label rarity; severe gradient instability without rebalancing or focal loss |
+
+- **Milder definitions** ($30$-day delinquency) yield higher positive base rates, providing dense supervisory signal for
+  model convergence. However, many users who are 30 days delinquent cure their payments organically without loss.
+- **Stricter definitions** ($90$-day default or charge-off) capture true business losses, but create extreme class
+  imbalance that destabilizes gradient updates and demands specialized cost-sensitive losses.
+
+The definition must align directly with the downstream business action: if an operations team sends warning
+notifications at day 30, the model must be trained to predict day-30 delinquency, not day-90 default.
+
+## Delayed feedback and survival modeling
+
+When operational requirements demand retraining on recent data without waiting for full window maturation, teams apply
+**delayed feedback survival models** <Cite id="chapelle2014" />:
+
+$$
+P(y = 1, T = t \mid \mathbf{x}) = P(y = 1 \mid \mathbf{x}) \cdot p(T = t \mid y = 1, \mathbf{x})
+$$
+
+Where $P(y = 1 \mid \mathbf{x})$ is the conversion probability and $p(T = t \mid y = 1, \mathbf{x})$ is an exponential
+or Weibull hazard function modeling conversion delay. Instances that have not yet converted are treated as
+right-censored observations in the survival likelihood rather than definitive negatives
+<Cite id="chapelle2014, kaplan1958" />.
+
+## Diagnostic checklist
+
+To formulate robust label definitions:
+
+1. **Pinpoint prediction time $t_{\text{pred}}$**: Specify the exact runtime event triggering model inference; enforce
+   point-in-time feature freezing $X(t_{\le t_{\text{pred}}})$.
+2. **Quantify conversion maturity curves**: Graph cumulative positive events across time horizons; select window
+   duration $\Delta t$ that captures at least $80\%$ of asymptotic conversions <Cite id="chapelle2014" />.
+3. **Quarantine immature cohorts**: Filter out all instances where $t_{\text{pred}} + \Delta t > t_{\text{current}}$ to
+   eliminate artificial zero-label depression <Cite id="kaplan1958" />.
+4. **Audit definition sensitivity**: Measure how adjusting threshold stringency affects class imbalance and business
+   utility.
+5. **Align label with intervention point**: Ensure the outcome horizon precedes or matches the operational intervention
+   SLA.

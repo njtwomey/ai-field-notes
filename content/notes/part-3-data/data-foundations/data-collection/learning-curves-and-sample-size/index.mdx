@@ -6,21 +6,136 @@ tags: [data, learning-theory]
 aliases: []
 requires: []
 related: [metric-confidence-intervals]
-references: []
-status: stub
-updated: 2026-10-11
+references: [cortes1993, guyon1997, kaplan2020]
+status: draft
+updated: 2026-10-12
 ---
 
+import { LearningCurvesVisualizer } from './LearningCurvesVisualizer'
+
 <Definition>
-To be written.
+A learning curve traces model empirical training and generalization error as a mathematical function of training sample
+size $N$. Empirical learning curves follow power-law trajectories that asymptotically approach irreducible Bayes error.
+In parallel, the sample size of the evaluation test set determines the statistical precision and confidence interval
+width of any reported benchmark score.
 </Definition>
+
+Before committing engineering resources or capital to acquire more training data, machine learning teams must answer two
+fundamental sample-size questions <Cite id="cortes1993, guyon1997" />: *How much will additional training data reduce
+generalization error?* and *How large must the test set be to verify whether an observed improvement is real?*
+Extrapolating empirical learning curves provides quantitative ROI forecasts for data acquisition, while test set sizing
+prevents teams from over-interpreting statistical evaluation noise.
+
+<LearningCurvesVisualizer />
 
 ## Learning curves
 
+An empirical learning curve evaluates model performance across geometrically spaced training subsamples
+$N \in \{N_1, N_2, \dots, N_K\}$:
+
+1. **Training Error ($E_{\text{train}}(N)$):** For very small datasets ($N \ll d$), high-capacity models easily memorize
+   all instances, achieving near-zero training error. As sample size $N$ expands, memorization becomes impossible, and
+   training error increases monotonically toward the asymptotic floor.
+2. **Validation Error ($E_{\text{val}}(N)$):** Generalization error begins high due to severe estimator variance
+   (overfitting). As $N$ expands, parameter estimation error diminishes, and validation error decays monotonically
+   toward the asymptotic floor.
+3. **The Generalization Gap:** The difference $\Delta(N) = E_{\text{val}}(N) - E_{\text{train}}(N)$ quantifies model
+   overfitting:
+
+$$
+\lim_{N \to \infty} \Delta(N) = 0, \quad \lim_{N \to \infty} E_{\text{val}}(N) = E_{\infty}
+$$
+
+where $E_{\infty}$ represents the **Bayes error rate**—the irreducible statistical noise inherent in the labeling
+process and unmeasured features.
+
 ## Fitting and extrapolating curves
+
+Empirical studies across classical statistical models and deep neural networks confirm that generalization error decays
+as a power law with sample size <Cite id="cortes1993, kaplan2020" />:
+
+$$
+E_{\text{val}}(N) = E_{\infty} + \beta \cdot N^{-\alpha}
+$$
+
+where:
+- $E_{\infty}$ is the asymptotic irreducible error floor.
+- $\beta > 0$ is a scale parameter reflecting task difficulty and architectural alignment.
+- $\alpha > 0$ is the **scaling exponent** (typically $\alpha \in [0.3, 0.7]$ across image, speech, and text
+  modalities).
+
+By training checkpoints across small, inexpensive data slices (e.g., $10^3, 5 \times 10^3, 2 \times 10^4$ examples),
+engineers fit the parameters $(E_{\infty}, \beta, \alpha)$ using non-linear least squares. The fitted equation enables
+analytical forecasting:
+- If current validation error is $8.5\%$ and the fitted Bayes floor is $E_{\infty} = 8.0\%$, doubling the training
+  dataset from $100{,}000$ to $200{,}000$ will at most reduce error by $0.2\%$, hitting diminishing returns.
+- If the gap $E_{\text{val}} - E_{\infty}$ remains wide, additional data investment yields predictable, high-value
+  returns.
 
 ## How much training data
 
+Determining necessary sample size depends on the statistical regime diagnosed by the curve:
+
+- **High-Bias (Underfitting) Regime:** Both training error and validation error converge rapidly to an unacceptable high
+  plateau ($E_{\text{train}} \approx E_{\text{val}} \gg E_{\text{target}}$). In this regime, the model lacks
+  representation capacity or features lack discriminatory signal. **Collecting more data is completely futile.**
+  Engineering must prioritize feature engineering, deeper architectures, or unconstrained model families.
+- **High-Variance (Overfitting) Regime:** Training error remains substantially lower than validation error
+  ($E_{\text{train}} \ll E_{\text{val}}$). The model possesses sufficient capacity but is under-constrained.
+  **Collecting more data directly shrinks the generalization gap**, driving validation performance toward the training
+  baseline.
+- **Statistical Complexity Bounds:** Vapnik-Chervonenkis (VC) theory establishes that achieving generalization error
+  within $\epsilon$ of the optimal hypothesis requires sample complexity:
+
+$$
+N = \mathcal{O}\left( \frac{d_{\text{VC}} + \log(1/\delta)}{\epsilon^2} \right)
+$$
+
 ## How large a test set
 
+While training set size dictates model capacity, **test set size ($N_{\text{test}}$) dictates measurement certainty**
+<Cite id="guyon1997" />.
+
+For a classification model with true error rate $p$, the observed test error $\hat{p}$ on an IID test set of size
+$N_{\text{test}}$ follows a binomial distribution with standard error:
+
+$$
+\mathrm{SE}(\hat{p}) = \sqrt{\frac{\hat{p}(1 - \hat{p})}{N_{\text{test}}}}
+$$
+
+The two-sided $95\%$ confidence interval width is:
+
+$$
+\pm 1.96 \cdot \sqrt{\frac{\hat{p}(1 - \hat{p})}{N_{\text{test}}}}
+$$
+
+Isabelle Guyon formulated scaling laws for test set sizing <Cite id="guyon1997" />: to detect a statistically
+significant difference $\Delta$ between two competing models with $95\%$ confidence and $80\%$ statistical power:
+
+$$
+N_{\text{test}} \approx \frac{2 \cdot (1.96 + 0.84)^2 \cdot p(1 - p)}{\Delta^2} \approx \frac{15.7 \cdot p(1 - p)}{\Delta^2}
+$$
+
+| Baseline Error $p$ | Desired Detectable Delta $\Delta$ | Required Test Set Size $N_{\text{test}}$ |
+| :--- | :--- | :--- |
+| $10\%$ | $2.0\%$ absolute difference | $\approx 3{,}500$ examples |
+| $10\%$ | $1.0\%$ absolute difference | $\approx 14{,}000$ examples |
+| $5\%$ | $0.5\%$ absolute difference | $\approx 30{,}000$ examples |
+| $1\%$ | $0.1\%$ absolute difference | $\approx 155{,}000$ examples |
+
+Benchmarking models on a tiny test set of 200 examples yields a $95\%$ margin of error of $\pm 4.2\%$. Declaring that
+Model B ($91.5\%$) outperforms Model A ($90.8\%$) on such a test set is pure statistical illusion.
+
 ## Pitfalls
+
+- **Extrapolating Beyond Power-Law Regimes:** Assuming power-law error reductions continue indefinitely without
+  verifying whether the architecture possesses enough parameter capacity to store the additional information.
+- **Data Subsampling Contamination:** Constructing learning curve training slices by sampling with replacement or
+  failing to fix cross-validation seed folds, causing subsample variance to mask the underlying smooth scaling
+  trajectory.
+- **Ignoring Label Noise in the Bayes Floor:** In subjective NLP tasks where human annotator agreement is $85\%$, the
+  Bayes error floor is at least $15\%$. No amount of web scraping or GPU compute will push validation error below $15\%$
+  without cleaning the label ontology.
+- **Clustered / Dependent Test Sets:** Computing binomial test set confidence intervals on test data that contains
+  repeated measurements from the same users or hospitals. Clustered dependence drastically deflates effective sample
+  size, making nominal confidence intervals dangerously narrow.

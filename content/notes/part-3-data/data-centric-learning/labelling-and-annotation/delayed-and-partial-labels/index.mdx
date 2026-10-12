@@ -1,26 +1,253 @@
 ---
 title: 'Delayed and partial labels'
 kind: concept
-summary: 'Labels can arrive late, so recent examples look negative until they mature, and can be partial, with only positives or only some classes annotated.'
-tags: [data, weak-supervision]
-aliases: []
-requires: []
-related: [positive-unlabelled-learning, label-definition]
-references: []
-status: stub
-updated: 2026-10-11
+summary: 'Delayed feedback right-censors recent outcomes into false negatives, while partial supervision supplies incomplete class sets—demanding hazard models, positive-unlabelled corrections, and tri-state loss masking.'
+tags: [data, labelling, weak-supervision, survival-analysis]
+aliases: [delayed labels, partial labels, delayed feedback, positive-unlabelled learning, partial supervision]
+requires: [label-definition, censoring-and-coarsening]
+related: [positive-unlabelled-learning, selective-labels, feedback-loops]
+references: [chapelle2014, elkan2008, bekker2020, cour2011]
+status: draft
+updated: 2026-10-12
 ---
 
+import { DelayedAndPartialLabelsVisualizer } from './DelayedAndPartialLabelsVisualizer'
+
 <Definition>
-To be written.
+**Delayed and partial labels** describe training regimes where the ground-truth outcome is either temporally lagged or
+incompletely observed. Under **delayed feedback**, positive outcomes materialize only after an elapsed duration
+$D \sim f_D(t)$, causing immature recent records to appear negative due to right-censoring. Under **partial
+supervision**, datasets contain either only verified positives alongside unlabelled mixtures (positive-unlabelled
+learning) or a subset of candidate tags with unannotated classes (partial multi-label learning).
 </Definition>
+
+In production machine learning systems, assuming instantaneous, fully-specified ground truth is almost always wrong. In
+online advertising, fraud detection, credit underwriting, medical diagnosis, and large-scale taxonomy tagging, labels
+arrive asynchronously or provide only partial evidence. Treating delayed conversions as negative instances or imputing
+zero for unannotated categories introduces structural sample bias, destroys probability calibration, and starves models
+of legitimate positive signal <Cite id="chapelle2014, elkan2008" />.
+
+<DelayedAndPartialLabelsVisualizer />
 
 ## Label maturity
 
+The temporal arrival of ground truth is governed by a **delay distribution** $D = t_{\text{label}} - t_{\text{event}}$.
+For any event occurring at prediction time $t_{\text{pred}}$, the probability that a positive outcome ($Y=1$) is
+observed within an elapsed observation window $t$ is defined by the cumulative distribution function:
+
+$$
+F_D(t) = P(D \le t \mid Y=1) = \int_0^t f_D(\tau) \, d\tau
+$$
+
+The corresponding survival function $S_D(t) = 1 - F_D(t) = P(D > t \mid Y=1)$ quantifies the probability that a positive
+conversion remains unobserved after elapsed time $t$. The instantaneous conversion intensity is captured by the hazard
+function:
+
+$$
+\lambda_D(t) = \frac{f_D(t)}{S_D(t)}
+$$
+
+| Application Domain | Typical Median Delay | Tail Horizon ($99^{\text{th}}$ Percentile) | Underlying Hazard Dynamics |
+| :--- | :--- | :--- | :--- |
+| **Search Ad Clicks** | 15 minutes | 24 hours | Monotonically decaying exponential hazard |
+| **E-Commerce Conversion** | 3 days | 30 days | Heavy-tailed log-normal or Weibull distribution |
+| **Credit Card Chargeback** | 45 days | 120 days | Regulatory dispute window; multi-modal peaks |
+| **Consumer Loan Default** | 6 months | 24 months | Discrete monthly billing cycle delinquency thresholds |
+
+When an engineering pipeline trains on historical logs with a fixed observation window $\Delta t$, any positive event
+whose delay exceeds $\Delta t$ ($D_i > \Delta t$) is irrevocably lost to right-censoring. If $\Delta t$ is shortened to
+permit faster model iteration, the fraction of lost positives $S_D(\Delta t)$ escalates, systematically shifting the
+observed target base rate downward <Cite id="chapelle2014" />.
+
 ## Recent examples that look negative
+
+In continuous stream learning and daily model retraining, the delay distribution creates a pernicious failure mode:
+**immature false-negative poisoning**.
+
+| Record Entity | Event Timeline Status | Elapsed Duration ($\tau$) | Naive Streaming Status | True Underlying Target |
+| :--- | :--- | :--- | :--- | :--- |
+| **Record A** | Converted at $t_0 + 2\,\text{days}$ | Matured ($\tau > d$) | Observed Positive ($y = 1$) | Positive ($Y = 1$) |
+| **Record B** | In-flight / Conversion pending | Immature ($\tau = 1\,\text{day}$) | **Falsely assigned $y = 0$** | Latent Positive ($Y = 1$) |
+| **Record C** | True non-converter | Matured ($\tau \gg \tau_{\max}$) | Observed Negative ($y = 0$) | True Negative ($Y = 0$) |
+
+If an example is ingested into training before its observation window matures ($t_{\text{elapsed}} < \tau_{\max}$), an
+unobserved positive behaves identically to a true negative ($y = 0$). Training a standard binary cross-entropy loss
+directly on recent logs forces the model to learn that recent features (e.g., newly launched items, recent marketing
+campaigns, or current user sessions) have a near-zero conversion probability.
+
+### Chapelle's delayed feedback model (DFM)
+
+Olivier Chapelle formalized a survival-analytic likelihood that resolves this dilemma without discarding recent training
+records <Cite id="chapelle2014" />. Let $Y \in \{0, 1\}$ denote the latent conversion indicator, and let $D \ge 0$
+denote the conversion delay with conditional density $p(D \mid Y=1, \mathbf{x})$.
+
+For an observed record with elapsed observation time $t$, the system observes a binary indicator
+$Y_{\text{obs}} \in \{0, 1\}$ and elapsed time $t$:
+1. If a conversion was observed ($Y_{\text{obs}} = 1$ at delay $d \le t$):
+   $$
+   P(Y_{\text{obs}}=1, D=d \mid \mathbf{x}) = P(Y=1 \mid \mathbf{x}) \, p(D=d \mid Y=1, \mathbf{x})
+   $$
+2. If no conversion has been observed yet by elapsed time $t$ ($Y_{\text{obs}} = 0$):
+   $$
+   P(Y_{\text{obs}}=0 \mid \mathbf{x}, t) = P(Y=0 \mid \mathbf{x}) + P(Y=1 \mid \mathbf{x}) \, P(D > t \mid Y=1, \mathbf{x})
+   $$
+
+The complete log-likelihood for a dataset of $N$ examples combines both regimes:
+
+$$
+\begin{aligned}
+\log \mathcal{L} &= \sum_{i:\, y_i = 1} \Big[ \log P(Y=1 \mid \mathbf{x}_i) + \log p(D=d_i \mid Y=1, \mathbf{x}_i) \Big] \\
+&\quad + \sum_{i:\, y_i = 0} \log \Big[ 1 - P(Y=1 \mid \mathbf{x}_i) + P(Y=1 \mid \mathbf{x}_i) S_D(t_i \mid \mathbf{x}_i) \Big]
+\end{aligned}
+$$
+
+By modeling conversion probability $P(Y=1 \mid \mathbf{x})$ and delay hazard $S_D(t \mid \mathbf{x})$ jointly (often
+parameterized with exponential or Weibull survival heads), the gradient from unconverted examples is discounted by the
+survival probability $S_D(t_i)$. An unconverted example that is only 2 hours old contributes minimal negative gradient,
+whereas an unconverted example that is 45 days old contributes maximal negative gradient.
 
 ## Positive-unlabelled data
 
+In many classification problems, explicit negative verification is impossible:
+- In drug discovery, known molecule-disease interactions are documented ($s=1$), but unrecorded pairs ($s=0$) include
+  both inactive compounds and unexamined active drugs.
+- In fraud detection or cybersecurity, confirmed intrusions are flagged ($s=1$), while unflagged sessions ($s=0$)
+  contain both legitimate users and undetected breaches.
+- In recommender systems, user clicks indicate interest ($s=1$), but unclicked items ($s=0$) include both uninteresting
+  items and relevant items never surfaced to the user.
+
+This setting is **positive-unlabelled (PU) learning** <Cite id="elkan2008, bekker2020" />. Formally, let
+$y \in \{0, 1\}$ be the true latent class, and let $s \in \{0, 1\}$ be the binary labelling indicator. The dataset
+satisfies the one-sided verification condition:
+
+$$
+s = 1 \implies y = 1, \quad P(y=0 \mid s=1) = 0
+$$
+
+When $s = 0$, the example is drawn from an unlabelled mixture distribution:
+
+$$
+p(\mathbf{x} \mid s=0) = (1 - c) \, p(\mathbf{x} \mid y=1) + p(\mathbf{x} \mid y=0)
+$$
+
+### Selected completely at random (SCAR)
+
+Under the Selected Completely At Random (SCAR) assumption, the probability of an example being labelled depends solely
+on its positive status, independent of its feature values $\mathbf{x}$ <Cite id="elkan2008" />:
+
+$$
+P(s=1 \mid y=1, \mathbf{x}) = P(s=1 \mid y=1) = c
+$$
+
+where $c \in (0, 1]$ is the constant **label frequency** or labelling propensity. Charles Elkan and Keith Noto proved
+that training a standard probabilistic classifier $g(\mathbf{x}) = P(s=1 \mid \mathbf{x})$ to separate labelled examples
+($s=1$) from unlabelled examples ($s=0$) yields a monotonic surrogate of the true posterior:
+
+$$
+P(s=1 \mid \mathbf{x}) = P(s=1 \mid y=1, \mathbf{x}) \, P(y=1 \mid \mathbf{x}) = c \cdot P(y=1 \mid \mathbf{x})
+$$
+
+Consequently, the true class posterior is recovered by simple rescaling:
+
+$$
+P(y=1 \mid \mathbf{x}) = \frac{P(s=1 \mid \mathbf{x})}{c}
+$$
+
+To estimate $c$ without external ground truth, Elkan and Noto leverage a validation set $V_+$ of verified positive
+examples:
+
+$$
+\hat{c} = \frac{1}{|V_+|} \sum_{i \in V_+} g(\mathbf{x}_i)
+$$
+
+| Calibration Stage | Mathematical Quantity | Domain Range | Operational Meaning |
+| :--- | :--- | :--- | :--- |
+| **Apparent Classifier Output** | $g(\mathbf{x}) = P(s=1 \mid \mathbf{x})$ | $[0, c]$ | Predicted probability of being an observed label |
+| **Calibration Scaling Factor** | $1 / c$ | $[1, \infty)$ | Inverse label propensity multiplier |
+| **Calibrated Posterior Estimate** | $P(y=1 \mid \mathbf{x}) = g(\mathbf{x}) / c$ | $[0, 1]$ | Unbiased estimate of true positive probability |
+
+### Selected at random (SAR) and unbiased risk estimators
+
+When the probability of observation depends on observable covariates $\mathbf{x}$—such as search algorithms displaying
+higher-priced goods more frequently—the SCAR assumption is violated. Under Selected At Random (SAR), the propensity
+becomes covariate-dependent: $e_s(\mathbf{x}) = P(s=1 \mid y=1, \mathbf{x})$ <Cite id="bekker2020" />. Calibrating the
+posterior requires propensity score reweighting:
+
+$$
+P(y=1 \mid \mathbf{x}) = \frac{P(s=1 \mid \mathbf{x})}{e_s(\mathbf{x})}
+$$
+
+Furthermore, du Plessis et al. established the **unbiased PU risk estimator**, which expresses the supervised risk
+$\mathcal{R}(g) = \mathbb{E}_{(\mathbf{x}, y)}[\ell(g(\mathbf{x}), y)]$ purely in terms of positive marginals
+$\mathcal{R}_+(g) = \mathbb{E}_{\mathbf{x} \mid y=1}[\ell(g(\mathbf{x}), 1)]$, positive loss under false negative
+assignment $\mathcal{R}_-(g) = \mathbb{E}_{\mathbf{x} \mid y=1}[\ell(g(\mathbf{x}), -1)]$, and unlabelled marginals
+$\mathcal{R}_U^-(g) = \mathbb{E}_{\mathbf{x} \sim U}[\ell(g(\mathbf{x}), -1)]$:
+
+$$
+\mathcal{R}_{\text{PU}}(g) = \pi \, \mathcal{R}_+(g) - \pi \, \mathcal{R}_-(g) + \mathcal{R}_U^-(g)
+$$
+
+where $\pi = P(y=1)$ is the class prior. This formulation guarantees that model optimization does not require imputing
+synthetic negative labels to unlabelled records.
+
 ## Unannotated classes in multi-label sets
 
+In extreme multi-label classification and large-scale vision or clinical datasets (e.g., ICD-10 medical coding, Open
+Images), human annotators or automated pipelines only verify a small subset of candidate classes per document or image
+<Cite id="cour2011" />. 
+
+A standard multi-label target vector contains $K$ classes: $\mathbf{y}_i = (y_{i1}, \dots, y_{iK})$. When annotators are
+tasked with identifying specific tags, unannotated classes are ambiguous:
+- **Positive ($y_{ik} = +1$)**: Explicitly confirmed present.
+- **Negative ($y_{ik} = -1$)**: Explicitly evaluated and confirmed absent.
+- **Unannotated ($y_{ik} = \varnothing$)**: Never evaluated.
+
+### The zero-imputation penalty
+
+The naive engineering default is **negative sampling / zero-imputation**: assuming that any unannotated class is
+negative ($y_{ik} = 0$). In datasets where positive class co-occurrences are common, this assumption causes severe
+optimization pathology. As the label vocabulary scales into thousands of categories, zero-imputation floods gradient
+updates with spurious false-negative signals, destroying model recall on high-frequency concepts <Cite id="cour2011" />.
+
+### Tri-state masked loss formulation
+
+To prevent negative gradient poisoning, multi-label pipelines adopt explicit tri-state supervision
+$\mathbf{y}_i \in \{+1, -1, \varnothing\}^K$ with an observation mask matrix
+$M_{ik} = \mathbb{I}(y_{ik} \ne \varnothing)$. The training objective is restricted strictly to evaluated categories:
+
+$$
+\begin{aligned}
+\mathcal{L}_{\text{partial}}(\hat{\mathbf{y}}_i, \mathbf{y}_i, M_i) &= -\frac{1}{\sum_{k=1}^K M_{ik}} \sum_{k=1}^K M_{ik} \Big[ \mathbb{I}(y_{ik} = +1) \log \sigma(\hat{y}_{ik}) \\
+&\qquad\qquad\qquad\quad + \mathbb{I}(y_{ik} = -1) \log (1 - \sigma(\hat{y}_{ik})) \Big]
+\end{aligned}
+$$
+
+Unannotated entries produce zero loss and zero gradient, preserving head-class representations while allowing candidate
+labels to be resolved during semi-supervised refinement.
+
+The contrast between these two supervision regimes is evident when evaluating partially annotated instances (e.g., an
+image of a sheep on grass where only `"sheep"` is verified):
+
+| Supervision Regime | Loss Formulation | Unannotated Class Treatment | Backpropagation Dynamics |
+| :--- | :--- | :--- | :--- |
+| **Zero-Imputation (Corrupted)** | $\sum_{k=1}^K \text{BCE}(\sigma(\hat{y}_{ik}), y_{ik}^{\text{imputed}})$ | Imputed as negative ($y=0$) | Actively penalizes valid visual detections (e.g., produces negative gradients for grass and field) |
+| **Tri-State Masked Loss (Unbiased)** | $\frac{1}{\sum_k M_{ik}} \sum_{k: M_{ik}=1} \mathcal{L}_{\text{BCE}}(\sigma(\hat{y}_{ik}), y_{ik})$ | Masked ($M_{ik} = 0$) | Zero gradient on unannotated classes; updates propagate strictly through verified supervisory targets |
+
 ## Pitfalls
+
+1. **Uncalibrated continuous retraining**: Ingesting raw streaming events directly into model training without delay
+   compensation causes severe prediction depression on newly deployed entities, creating an artificial negative bias
+   against fresh inventory.
+2. **Naive PU probability thresholding**: Evaluating unadjusted model predictions
+   $g(\mathbf{x}) = P(s=1 \mid \mathbf{x})$ directly with standard decision thresholds (e.g., $\tau = 0.5$) when true
+   positive prevalence is high but labelling frequency $c$ is low. If $c = 0.1$, the maximum attainable model score may
+   be $0.10$, causing zero positive classifications under a naive $0.5$ threshold.
+3. **Assuming exponential delay on non-exponential processes**: Using a single parameter exponential hazard
+   $\lambda e^{-\lambda t}$ when conversion delay exhibits multi-modal weekly spikes (e.g., payroll cycles or weekend
+   shopping delays) creates structural miscalibration at critical elapsed intervals.
+4. **Negative feedback loops from delayed conversion suppression**: If a recommendation engine reduces traffic to new
+   items because their immature conversion labels look negative, those items never accumulate sufficient impressions to
+   convert, permanently suppressing viable catalog candidates.
+5. **Masking without negative verification in partial sets**: If annotators only label positives and never explicitly
+   verify true negatives, masking unannotated classes reduces the loss to positive-only cross-entropy, causing logits to
+   diverge toward $+\infty$ unless bounded by background negative sampling or PU risk regularization.

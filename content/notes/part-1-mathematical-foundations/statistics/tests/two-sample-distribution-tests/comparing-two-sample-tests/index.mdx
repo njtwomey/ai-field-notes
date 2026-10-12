@@ -1,0 +1,78 @@
+---
+title: Comparing two-sample tests
+kind: example
+summary: 'Six two-sample tests, run on repeated pairs of samples from N(0, 1) and from an alternative that differs in mean, spread or shape, estimate each test’s power by simulation. No test is best against every kind of difference.'
+tags: [worked-example, hypothesis-testing, two-sample, simulation]
+aliases: [power comparison of two-sample tests, two-sample test power by simulation]
+requires: [two-sample-testing, type-i-and-type-ii-errors]
+related: [welch-t-test, kolmogorov-smirnov-test, energy-distance, kernel-two-sample-test, classifier-two-sample-test, permutation-tests]
+references: [gretton2012, szekely2013, lopezpaz2017c2st, ramdas2015]
+status: draft
+updated: 2026-10-12
+---
+
+import { PowerRace } from './PowerRace'
+
+<Definition>
+Draw $n$ points from $\Gauss(0, 1)$ and $n$ from an alternative of strength $\delta \ge 0$: the mean shift
+$\Gauss(\delta, 1)$, the change of spread $\Gauss(0, (1 + \delta)^2)$, or the change of shape
+$\tfrac12\Gauss(-a, 1 - a^2) + \tfrac12\Gauss(a, 1 - a^2)$ with $a = 0.95\delta$, which keeps the mean at 0 and the
+variance at 1. Run six <NoteLink to="two-sample-testing">two-sample tests</NoteLink> at level $\alpha = 0.05$ and repeat
+with fresh samples. The share of repetitions in which a test rejects estimates its **power** against that alternative.
+</Definition>
+
+## Setup
+
+The tests, each on the same pair of samples in every repetition:
+
+- **Welch t** (<NoteLink to="welch-t-test" />): difference of means over its standard error.
+- **Mann–Whitney**: the rank-sum test of whether one sample tends to exceed the other.
+- **<NoteLink to="kolmogorov-smirnov-test">Kolmogorov–Smirnov</NoteLink>**: the largest gap between the empirical
+  cdfs, with its exact null law.
+- **Energy** (<NoteLink to="energy-distance" />): the energy distance, with 99 permutations.
+- **<Gloss name="mmd" />** (<NoteLink to="kernel-two-sample-test" />): the unbiased squared MMD with a Gaussian
+  kernel whose width is the median distance between pooled points, with 99 permutations.
+- **Classifier** (<NoteLink to="classifier-two-sample-test" />): 9-nearest neighbours trained on half of each sample,
+  with the <NoteLink to="binomial-test">binomial test</NoteLink> of its held-out accuracy.
+
+With $\delta = 0$ the two samples share a distribution, and the share of rejections estimates each test's
+<Gloss name="fpr">false-positive rate</Gloss>, which should be close to $\alpha$.
+
+## Solution
+
+Power is a probability, and the simulation estimates it by a proportion. After $R$ repetitions, the estimate $\hat
+\beta$ has <NoteLink to="standard-error">standard error</NoteLink> $\sqrt{\hat\beta(1 - \hat\beta)/R}$: about $0.05$ for
+$\hat\beta = 0.5$ and $R = 100$, and about $0.02$ for a false-positive rate near $0.05$. Differences in estimated power
+smaller than about twice the standard error are not resolved by the simulation.
+
+The power of each test has no closed form for most of these pairs of test and alternative, which is why it is
+simulated. The exception is the t-test against a mean shift of normal samples, whose power follows from the
+noncentral <NoteLink to="student-t-distribution">t distribution</NoteLink>.
+
+## Simulation
+
+<PowerRace />
+
+## What it illustrates
+
+- **Every test holds its level.** With $\delta = 0$, every share of rejections settles near $0.05$: the permutation
+  tests and the exact tests are valid whatever the data (<NoteLink to="permutation-tests" />).
+- **No uniformly best test.** Against a mean shift of normal samples, the t-test is close to the best possible, and
+  Mann–Whitney and the energy test nearly match it. Against a change of spread the t-test and Mann–Whitney stay at
+  $\alpha$ while the MMD and energy tests gain power. A test buys power against some alternatives by giving it up
+  against others.
+- **The Kolmogorov–Smirnov supremum is conservative.** It trails the energy test against every alternative here,
+  because it uses one gap where the energy distance adds up all of them.
+- **Half the data is a real cost.** In one dimension with small samples the classifier test, which scores only the
+  held-out half, has the least power. Its advantage is on high-dimensional structured data, where a learned
+  classifier finds features that a fixed kernel misses <Cite id="lopezpaz2017c2st" />.
+
+## Variations
+
+- **Larger samples.** Raising $n$ raises every test's power against every fixed alternative it can detect; the
+  distribution tests reach the change of shape, which the location tests never do.
+- **Heavier tails.** Drawing from a Student t distribution with few degrees of freedom inflates the variance of the
+  mean, which costs the t-test power, while the rank and permutation tests keep theirs.
+- **More dimensions.** Adding coordinates that do not differ lowers the power of the kernel and energy tests against
+  a fixed mean shift <Cite id="ramdas2015" />, and leaves the one-dimensional tests unusable without a reduction to a
+  single score.

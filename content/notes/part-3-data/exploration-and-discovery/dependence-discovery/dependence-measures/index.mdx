@@ -1,30 +1,157 @@
 ---
 title: 'Dependence measures'
 kind: concept
-summary: 'A dependence measure scores how strongly two variables are related. Correlation detects linear or monotone relations; mutual information, distance correlation and kernel measures detect any relation.'
-tags: [data, statistics, information-theory]
-aliases: []
-requires: []
-related: [pearson-correlation, rank-correlation, nominal-association, mutual-information]
-references: []
-status: stub
-updated: 2026-10-11
+summary: 'Dependence measures quantify bivariate associations: Pearson and Spearman detect linear and monotonic trends, whereas Mutual Information, Distance Correlation, and HSIC detect arbitrary non-linear and non-functional relationships.'
+tags: [data, statistics, information-theory, dependence, exploration]
+aliases: [dependence measures, non-linear dependence, statistical association, distance correlation]
+requires: [data-generating-process, exploratory-data-analysis]
+related: [pearson-correlation, rank-correlation, nominal-association, mutual-information, causal-discovery]
+references: [kraskov2004, reshef2011, szekely2007, gretton2005, benjamini1995]
+status: draft
+updated: 2026-10-12
 ---
 
+import { DependenceMeasuresVisualizer } from './DependenceMeasuresVisualizer'
+
 <Definition>
-To be written.
+A **dependence measure** is a statistical functional $D(X, Y) \ge 0$ quantifying the degree of association between
+random variables $X$ and $Y$. Unlike classical linear correlation, an ideal non-parametric dependence measure satisfies
+independence equivalence: $D(X, Y) = 0 \iff X \perp\!\!\!\perp Y$, detecting arbitrary non-linear, non-monotonic, and
+multi-valued manifold relationships.
 </Definition>
 
-## Linear and monotone dependence
+In exploratory data analysis and automated feature screening, practitioners routinely calculate pairwise correlation
+matrices. However, classical linear and rank-based metrics are blind to complex physical, biological, and behavioral
+relationships. Relying exclusively on Pearson or Spearman correlations discards deterministic non-linear predictors,
+misidentifying rich signals as uninformative random noise <Cite id="reshef2011, szekely2007" />.
 
-## Mutual information
+<DependenceMeasuresVisualizer />
 
-## Maximal information coefficient
+## Linear and monotone dependence: classical boundaries
 
-## Distance correlation
+The most widespread association metrics make restrictive structural assumptions about relationship geometry:
 
-## Hilbert-Schmidt independence criterion
+1. **Pearson correlation coefficient ($r$)**: Measures strictly linear co-variation:
+   $$
+   r = \frac{\text{Cov}(X, Y)}{\sigma_X \sigma_Y} = \frac{\sum_{i=1}^N (x_i - \bar{x})(y_i - \bar{y})}{\sqrt{\sum (x_i - \bar{x})^2 \sum (y_i - \bar{y})^2}}
+   $$
+   If $Y = X^2$ over a symmetric interval $[-a, a]$, covariance sums to zero: $r = 0.00$. Pearson correlation fails
+   whenever the relationship curves symmetrically or forms a closed loop.
+2. **Spearman rank correlation ($\rho$) and Kendall's $\tau$**: Compute correlation over ordinal ranks. Rank metrics are
+   invariant to strictly monotonic transformations ($X \to \ln X$ or $X \to X^3$). However, they share Pearson's
+   vulnerability to non-monotonic relationships; on a parabola or circle, Spearman's $\rho \approx 0.00$.
 
-## Screening many pairs
+| Geometry | Functional Form | Pearson $r$ | Spearman $\rho$ | Distance Correlation $\text{dCor}$ | Mutual Information $I(X; Y)$ |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| **Parabola** | $Y = X^2, X \in [-1, 1]$ | $0.00$ | $0.00$ | $0.55$ | $0.75$ |
+| **Circle** | $X^2 + Y^2 = 1$ | $0.00$ | $0.00$ | $0.42$ | $0.62$ |
+| **Sinusoid** | $Y = \sin(2\pi X)$ | $0.00$ | $0.00$ | $0.48$ | $0.80$ |
 
-## Pitfalls
+
+## Mutual Information (MI)
+
+Rooted in information theory, **Mutual Information** measures the reduction in uncertainty of $Y$ given knowledge of
+$X$:
+
+$$
+I(X; Y) = \iint p(x, y) \ln \left( \frac{p(x, y)}{p(x)p(y)} \right) dx \, dy = H(X) + H(Y) - H(X, Y)
+$$
+
+- **Fundamental property**: $I(X; Y) \ge 0$, and crucially:
+  $$
+  I(X; Y) = 0 \iff X \perp\!\!\!\perp Y
+  $$
+  Mutual information is zero if and only if $X$ and $Y$ are truly statistically independent.
+- **Invariance**: Invariant under any smooth, invertible transformation of the coordinates: $I(f(X); g(Y)) = I(X; Y)$.
+- **Estimation on continuous data**: Naive binning into fixed histograms introduces severe discretization bias. Modern
+  pipelines deploy the **Kraskov-Stögbauer-Grassberger (KSG)** estimator <Cite id="kraskov2004" />, which uses adaptive
+  $k$-nearest-neighbor hyper-rectangles in the joint space $\mathbb{R}^2$ to provide asymptotically unbiased estimates
+  without rigid binning.
+
+## Maximal Information Coefficient (MIC)
+
+To standardize mutual information into a normalized score comparable across different relationship shapes, Reshef et al.
+introduced the **Maximal Information Coefficient** <Cite id="reshef2011" />.
+
+For a grid $G$ of size $x \times y$ drawn over the scatter plot:
+
+$$
+\text{MIC}(X, Y) = \max_{x \cdot y < B(N)} \frac{I^*(X, Y \mid G)}{\log_2 \min(x, y)}
+$$
+
+Where $B(N) = N^{0.6}$ bounds grid complexity. MIC satisfies two core desiderata:
+1. **Generality**: Detects any functional or non-functional association as sample size grows.
+2. **Equitability**: Assigns similar scores to relationships with equal noise levels, regardless of whether the
+   underlying relationship is linear, sinusoidal, parabolic, or stepped <Cite id="reshef2011" />.
+
+## Distance Correlation (dCor)
+
+Developed by Székely, Rizzo, and Bakirov, **Distance Correlation** provides an elegant, non-parametric metric that
+resolves Pearson's blind spots while avoiding density estimation <Cite id="szekely2007" />.
+
+### Matrix computation
+
+1. Compute pairwise Euclidean distance matrices $\mathbf{a}, \mathbf{b} \in \mathbb{R}^{N \times N}$ where
+   $a_{ij} = \|\mathbf{x}_i - \mathbf{x}_j\|$ and $b_{ij} = \|\mathbf{y}_i - \mathbf{y}_j\|$.
+2. Perform double-centering:
+   $$
+   A_{ij} = a_{ij} - \bar{a}_{i\cdot} - \bar{a}_{\cdot j} + \bar{a}_{\cdot\cdot}
+   $$
+3. Empirical distance covariance is the Frobenius inner product of the double-centered matrices:
+   $$
+   \text{dCov}^2(X, Y) = \frac{1}{N^2} \sum_{i,j=1}^N A_{ij} B_{ij}
+   $$
+4. Distance correlation scales distance covariance to $[0, 1]$:
+   $$
+   \text{dCor}(X, Y) = \frac{\text{dCov}(X, Y)}{\sqrt{\text{dVar}(X) \text{dVar}(Y)}}
+   $$
+
+Unlike Pearson correlation, $\text{dCor}(X, Y) = 0 \iff X \perp\!\!\!\perp Y$. Furthermore, distance correlation is
+**dimension-free**: $X \in \mathbb{R}^p$ and $Y \in \mathbb{R}^q$ can have completely different dimensionality (for
+example, evaluating dependence between a 512-dimensional embedding and a 1D scalar target) <Cite id="szekely2007" />.
+
+## Hilbert-Schmidt Independence Criterion (HSIC)
+
+The **Hilbert-Schmidt Independence Criterion** measures independence by mapping random variables into Reproducing Kernel
+Hilbert Spaces (RKHS) $\mathcal{F}$ and $\mathcal{G}$ equipped with characteristic positive-definite kernels (e.g.
+Gaussian RBF $k(\mathbf{x}, \mathbf{x}') = \exp(-\gamma \|\mathbf{x} - \mathbf{x}'\|^2)$) <Cite id="gretton2005" />:
+
+$$
+\text{HSIC}(X, Y) = \frac{1}{(N-1)^2} \text{Tr}(\mathbf{K} \mathbf{H} \mathbf{L} \mathbf{H})
+$$
+
+Where $\mathbf{K}, \mathbf{L} \in \mathbb{R}^{N \times N}$ are the kernel Gram matrices of $X$ and $Y$, and
+$\mathbf{H} = \mathbf{I} - \frac{1}{N} \mathbf{1}\mathbf{1}^T$ is the centering matrix. For characteristic kernels,
+$\text{HSIC}(X, Y) = 0 \iff X \perp\!\!\!\perp Y$, providing a powerful kernelized test for non-linear independence
+<Cite id="gretton2005" />.
+
+## Screening feature pairs and multiple testing
+
+When screening $D$ candidate features, an analyst evaluates $\binom{D}{2} = \frac{D(D-1)}{2}$ bivariate pairs. For a
+modest dataset of $D = 100$ features, this involves $4,950$ separate statistical tests.
+
+1. **Feature candidate intake**: Given $D$ features, enumerate all $\binom{D}{2}$ unordered pairs $(X_j, X_k)$.
+2. **Dependence metric evaluation**: Compute non-linear dependence scores ($\text{dCor}$ or KSG mutual information) for
+   each pair.
+3. **Permutation null calibration**: Shuffle target values across $B$ bootstrap permutations to compute empirical null
+   $p$-values.
+4. **Multiple testing control**: Apply Benjamini-Hochberg False Discovery Rate (FDR) adjustments to select statistically
+   robust associations.
+
+> [!WARNING]
+> **False discovery rate inflation**: Computing thousands of non-parametric dependence scores without adjustment guarantees dozens of spurious associations. Practitioners must construct permutation null distributions (shuffling vector $Y$ relative to $X$ to simulate the null hypothesis $X \perp\!\!\!\perp Y$) and enforce Benjamini-Hochberg False Discovery Rate (FDR) corrections at $\alpha = 0.05$ <Cite id="benjamini1995" />.
+
+## Diagnostic checklist
+
+To uncover subtle statistical dependencies across tabular and scientific datasets:
+
+1. **Do not stop at Pearson $r$**: Pair linear correlation with non-linear metrics (Distance Correlation or KSG Mutual
+   Information) to detect curved, cyclic, and symmetric dependencies <Cite id="szekely2007, kraskov2004" />.
+2. **Deploy Distance Correlation for vector targets**: When evaluating associations between multimodal embeddings and
+   multi-attribute outcomes, use dCor to avoid dimensionality reduction <Cite id="szekely2007" />.
+3. **Use KSG for continuous information flow**: Estimate mutual information with the Kraskov-Stögbauer-Grassberger
+   estimator rather than fixed histogram grids <Cite id="kraskov2004" />.
+4. **Benchmark with MIC for equitability**: When comparing heterogeneous relationship types (e.g. power-law vs step
+   function), use MIC to evaluate relative signal strength <Cite id="reshef2011" />.
+5. **Control false discovery rates**: Apply Benjamini-Hochberg FDR corrections across all screened feature pairs to
+   prevent data dredging <Cite id="benjamini1995" />.

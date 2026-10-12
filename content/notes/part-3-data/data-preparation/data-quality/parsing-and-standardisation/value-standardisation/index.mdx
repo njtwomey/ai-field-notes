@@ -2,25 +2,126 @@
 title: 'Value standardisation'
 kind: concept
 summary: 'Value standardisation makes equal things look equal: one unit per quantity, one format per date and number, one time zone, and one spelling per category level.'
-tags: [data]
-aliases: []
-requires: []
-related: []
-references: []
-status: stub
+tags: [data-preparation, data-quality, data-engineering]
+aliases: [canonicalisation, canonicalization, data normalization, unit standardization, category harmonization, date normalization]
+requires: [parsing-and-type-inference]
+related: [data-validation, constraint-based-repair, cleaning-and-evaluation]
+references: [pedregosa2011]
+status: draft
 updated: 2026-10-11
 ---
 
+import { ValueStandardisationVisualizer } from './ValueStandardisationVisualizer'
+
 <Definition>
-To be written.
+**Value standardisation** (or canonicalisation) maps heterogeneous syntactic representations of equivalent domain
+concepts to a single, consistent canonical representation:
+
+$$
+c : \mathcal{X} \longrightarrow \mathcal{X}_{\text{canonical}} \quad \text{such that } x \sim x' \implies c(x) = c(x'),
+$$
+
+where $\sim$ denotes an equivalence relation defined over physical units, date-time formats, numeric notations, or
+categorical spellings.
+
+Standardisation ensures that identical real-world entities evaluate as equal in relational joins, hash groupings,
+distance metrics, and machine learning feature matrices.
 </Definition>
 
-## Units
+## Physical units and dimensional consistency
 
-## Date and number formats
+In multi-source data aggregation (e.g. merging data from international subsidiaries, mobile apps, and IoT sensors),
+measurements often arrive in disparate unit systems.
 
-## Time zones
+### The artificial multimodal mixture hazard
+When physical units are mixed within a single column without explicit unit tags, the resulting distribution becomes an
+artificial multimodal mixture:
+- If an e-commerce platform records shipping weights where American vendors submit pounds (lbs) and European vendors
+  submit kilograms (kg), an identical product ($1\text{ kg} \approx 2.205\text{ lbs}$) appears as two distinct modes
+  separated by a factor of $2.205$.
+- Distance metrics ($L_2$, cosine) and linear regression models assign distorted importance to observations recorded in
+  smaller units (e.g., grams versus kilograms).
 
-## Spelling variants of categories
+All quantitative features must be normalized to a standard system (typically SI units: kilograms, meters, seconds,
+kelvin/celsius).
+
+### Currency conversion and temporal point-in-time joins
+Converting monetary values across currencies requires joining each transaction with the foreign exchange rate valid on
+that exact transaction date:
+
+$$
+\text{Price}_{\text{USD}}(t) = \text{Price}_{\text{Local}}(t) \times \operatorname{FX}_{\text{Local}\to\text{USD}}(t).
+$$
+
+Using a static, modern exchange rate to standardize historical multi-year financial data introduces point-in-time data
+leakage and distorts historical macroeconomic trends.
+
+## Date, time, and number format unification
+
+### Date representations
+Dates written in free-form text exhibit regional ambiguities:
+- `"04/05/2026"` represents **April 5, 2026** in the United States (`MM/DD/YYYY`), but **May 4, 2026** in the United
+  Kingdom and Europe (`DD/MM/YYYY`).
+- Ingestion pipelines must enforce canonical **ISO 8601** format:
+  
+  $$
+  \text{YYYY-MM-DD} \quad \text{(e.g., 2026-04-05)}.
+  $$
+
+ISO 8601 is lexicographically sortable: sorting ISO strings alphabetically preserves correct chronological ordering
+without requiring datetime parsing.
+
+### Numeric formatting
+Global numeric representations vary in punctuation:
+- **Anglo-American notation:** Decimal point `.`, thousands comma `,` (e.g. `1,250,000.50`).
+- **European notation:** Decimal comma `,`, thousands period or space `.` (e.g. `1.250.000,50` or `1 250 000,50`).
+- **Currency symbols and percentage characters:** Ingestion scripts must strip currency markers (`$`, `€`, `£`, `¥`),
+  parse negative accounting representations `(500.00)` to `-500.00`, and divide percentages `25.5%` by 100.
+
+## Time zones and temporal alignment
+
+A datetime without an explicit timezone is an incomplete, ambiguous measurement:
+- Comparing a local timestamp from London (`2026-10-11 20:00:00`) directly with Tokyo (`2026-10-11 20:00:00`) introduces
+  an undetected 8-hour offset error.
+- All timestamps must be ingested and converted immediately to **Coordinated Universal Time (UTC)**:
+  
+  $$
+  \text{YYYY-MM-DDTHH:MM:SSZ} \quad \text{or Unix epoch milliseconds}.
+  $$
+
+### Daylight Saving Time (DST) non-monotonicity
+Local clocks jumping back by one hour during autumn transitions create non-monotonic timestamps: two distinct physical
+events occurring 60 minutes apart receive the identical local clock timestamp (e.g., `01:30 AM`). Storing timestamps in
+UTC preserves strict monotonicity, ensuring causal sequence order in event logs and recurrent neural models.
+
+## Spelling variants and category harmonization
+
+Categorical features collected from user input or federated databases exhibit combinatorial spelling and typographical
+fragmentation.
+
+### Normalisation pipeline
+1. **Unicode normalization:** Decompose and compose accented characters to canonical form (Unicode NFC), converting
+   full-width characters and ligature glyphs (`œ` $\to$ `oe`).
+2. **Case folding and whitespace sanitization:** Lowercase strings (`s.lower()`), strip leading/trailing whitespace
+   (`s.strip()`), and collapse internal multi-spaces (`re.sub(r'\s+', ' ', s)`).
+3. **Punctuation and symbol stripping:** Removing hyphens and underscores (`"smart-phone"` $\to$ `"smart phone"`).
+4. **Controlled taxonomy mapping:** Mapping known synonyms and acronyms to canonical master dictionary keys:
+   
+   $$
+   \{\text{"NYC"}, \text{"New York City"}, \text{"New York, NY"}, \text{"Big Apple"}\} \longrightarrow \text{"New York"}.
+   $$
+
+5. **Fuzzy string clustering:** For high-cardinality long-tail inputs, string metric algorithms (such as Jaro-Winkler or
+   Levenshtein distance) cluster candidate misspellings around high-frequency head categories.
+
+<ValueStandardisationVisualizer />
 
 ## Pitfalls
+
+- **Converting currency with modern exchange rates:** Applying today's exchange rates across historical transactions
+  leaks future exchange movements into training data, generating spurious arbitrage signals.
+- **Converting timestamps to naive datetimes:** Dropping timezone metadata while converting timestamps leaves downstream
+  feature engineering pipelines unable to detect whether an event occurred during daytime or night in the user's local
+  geographical region.
+- **Over-aggressive fuzzy matching:** Clustering short categorical codes (such as airport IATA codes `JFK`, `LGA`,
+  `EWR`) using edit distance will erroneously merge distinct facilities that differ by only one or two characters.

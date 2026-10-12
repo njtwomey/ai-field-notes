@@ -1,26 +1,142 @@
 ---
 title: 'Observational, experimental and logged data'
 kind: concept
-summary: 'Experimental data come from randomised assignment; observational data are found as they happened; logged data record a system''s own decisions and their outcomes. Prediction tolerates found data; estimating the effect of an intervention needs randomisation or strong assumptions.'
+summary: "Experimental data come from randomised assignment; observational data are found as they happened; logged data record a system's own decisions and their outcomes. Prediction tolerates found data; estimating the effect of an intervention needs randomisation or strong assumptions."
 tags: [data, causal-inference]
 aliases: []
 requires: []
 related: [causal-inference-from-observational-data, randomised-controlled-experiments, off-policy-evaluation]
-references: []
-status: stub
-updated: 2026-10-11
+references: [pearl2009, bottou2013, dudik2011]
+status: draft
+updated: 2026-10-12
 ---
 
+import { ObservationalLoggedDataVisualizer } from './ObservationalLoggedDataVisualizer'
+
 <Definition>
-To be written.
+Experimental data is generated through active randomized assignment of treatments, ensuring that interventions are
+independent of unobserved confounders. Observational (or found) data records empirical states and human choices as they
+naturally transpired in the wild, subject to unmeasured confounding. Logged data records algorithmic actions selected by
+an automated software policy along with user responses, providing bandit feedback where action propensities are known
+but counterfactual outcomes remain unobserved.
 </Definition>
+
+Machine learning practitioners routinely train models indiscriminately across experimental AB test logs, passive web
+scrapes, and historical recommendation records <Cite id="pearl2009, bottou2013" />. However, the statistical guarantees
+that govern predictive inference diverge fundamentally from those governing causal intervention. While passive
+prediction tolerates observational correlation, deciding how an autonomous agent should act requires understanding the
+data-generating mechanism through randomized trials or counterfactual off-policy evaluation <Cite id="dudik2011" />.
+
+<ObservationalLoggedDataVisualizer />
 
 ## Randomised data
 
+Randomized Controlled Trials (RCTs) and online A/B experiments are the gold standard for causal discovery:
+
+- **Random Assignment:** A treatment indicator $A \in \{0, 1\}$ is assigned via physical or algorithmic randomization
+  (e.g., hash modulo on `user_id`):
+
+$$
+A \perp (Y(1), Y(0), X)
+$$
+
+Because treatment is independent of potential outcomes and baseline covariates $X$, confounding paths are severed.
+- **Unbiased Average Treatment Effect (ATE):** The causal impact $\tau$ is directly estimated by the difference in
+  sample means without requiring parametric adjustment:
+
+$$
+\tau = \mathbb{E}[Y(1) - Y(0)] = \mathbb{E}[Y \mid A=1] - \mathbb{E}[Y \mid A=0]
+$$
+
+Randomization guarantees internal validity, eliminating selection bias, collider stratification, and confounding.
+
 ## Found data
+
+Found data consists of historical exhaust recorded without experimental intervention: medical health records, social
+media feeds, criminal justice registries, and checkout scans.
+
+In found data, actors choose their own treatments:
+- Sicker patients take more intensive medications.
+- Wealthier consumers buy premium subscriptions.
+- Cautious drivers install vehicle telematics monitors.
+
+Because treatment choice $A$ is confounded by latent variables $U$ ($A \leftarrow U \to Y$), naive predictive models
+confound the treatment effect with baseline selection:
+
+$$
+\mathbb{E}[Y \mid A=1] - \mathbb{E}[Y \mid A=0] = \tau + \underbrace{\left(\mathbb{E}[Y(0) \mid A=1] - \mathbb{E}[Y(0) \mid A=0]\right)}_{\text{Selection Bias}}
+$$
+
+Estimating causal effects from found data requires strict, untestable structural assumptions:
+1. **Conditional Ignorability (Unconfoundedness):** All common causes are observed: $(Y(1), Y(0)) \perp A \mid X$.
+2. **Positivity (Overlap):** Every unit has a non-zero probability of receiving either treatment:
+   $0 < P(A=1 \mid X=x) < 1$ for all $x$.
 
 ## Logged decisions and bandit feedback
 
+Logged data represents a distinct hybrid regime central to modern search engines, ad platforms, and recommender systems
+<Cite id="bottou2013, dudik2011" />:
+- An automated logging policy $\pi_0$ observed context $x$, selected an action $a \sim \pi_0(a \mid x)$, and recorded an
+  outcome $y$.
+- Unlike completely found data, the probability distribution that produced the action—the **propensity score**
+  $p_i = \pi_0(a_i \mid x_i)$—is explicitly known or can be retrieved from logging telemetry.
+- Unlike full feedback in supervised learning, the system receives **partial (bandit) feedback**: it observes the reward
+  for the action that was executed, but receives zero signal regarding what *would* have happened under alternative
+  candidate actions.
+
+To evaluate a new candidate policy $\pi$ without deploying it live, platforms use **Off-Policy Evaluation (OPE)**:
+- **Inverse Propensity Scoring (IPS):**
+
+$$
+\hat{V}_{\text{IPS}}(\pi) = \frac{1}{N} \sum_{i=1}^N \frac{\pi(a_i \mid x_i)}{\pi_0(a_i \mid x_i)} y_i
+$$
+
+- **Doubly Robust (DR) Estimator:** Combines a parametric direct model $\hat{q}(x, a)$ with propensity weighting to
+  achieve variance reduction while preserving asymptotic unbiasedness <Cite id="dudik2011" />:
+
+$$
+\hat{V}_{\text{DR}}(\pi) = \frac{1}{N} \sum_{i=1}^N \left( \hat{q}(x_i, \pi(x_i)) + \frac{\mathbb{I}(a_i = \pi(x_i))}{\pi_0(a_i \mid x_i)} \left(y_i - \hat{q}(x_i, a_i)\right) \right)
+$$
+
 ## Prediction versus intervention
 
+A model trained on observational data learns conditional statistical expectations:
+
+$$
+f(x) \approx \mathbb{E}[Y \mid X=x]
+$$
+
+A model tasked with decision-making requires interventional distributions:
+
+$$
+f(x) \approx \mathbb{E}[Y \mid \operatorname{do}(X=x)]
+$$
+
+The difference between passive observation and active intervention is profound <Cite id="pearl2009" />:
+1. **The Barometer Fallacy:** A regression model predicts storm arrival from falling barometer pressure with high
+   accuracy ($P(\text{Storm} \mid \text{Low Barometer}) \approx 0.9$). But physically intervening on the barometer
+   needle ($\operatorname{do}(\text{Barometer} = \text{High})$) does not alter atmospheric weather. A model deployed to
+   control weather by adjusting the needle causes catastrophic failure.
+2. **The ICU Mortality Paradox:** In observational medical records, patients receiving oxygen ventilators have higher
+   mortality rates than patients not receiving ventilators
+   ($P(\text{Death} \mid \text{Ventilator}=1) > P(\text{Death} \mid \text{Ventilator}=0)$). A pure predictive model
+   concludes that ventilators kill patients, recommending that doctors withhold ventilation from acute respiratory
+   patients.
+
+Deploying predictive models in interventional settings without causal debiasing converts passive correlation into active
+harm.
+
 ## Pitfalls
+
+- **Deterministic Logging Policies:** If the production recommender policy $\pi_0$ is purely deterministic
+  ($p \in \{0, 1\}$), overlap is completely violated: $\pi_0(a \mid x) = 0$ for all unselected items. Offline
+  counterfactual evaluation becomes mathematically impossible. Production rankers must deliberately inject
+  $\epsilon$-exploration or softmax randomization.
+- **Extreme Propensity Variance:** When the logging policy rarely selects a specific action
+  ($\pi_0(a \mid x) = 0.0001$), the IPS weight $1 / \pi_0 \to 10{,}000$, causing massive estimator variance that
+  destabilizes policy gradient updates.
+- **Feedback Loops from Self-Fulfilling Logs:** Training a fraud model on historical fraud flags: transactions that were
+  blocked produce no downstream chargeback labels. The model is retrained solely on approved transactions, blinding it
+  to emerging fraud attack vectors.
+- **Conflating Association with Causation in Feature Selection:** Removing features because they have zero linear
+  correlation with the label, ignoring that their true causal effect is masked by an opposing confounder.

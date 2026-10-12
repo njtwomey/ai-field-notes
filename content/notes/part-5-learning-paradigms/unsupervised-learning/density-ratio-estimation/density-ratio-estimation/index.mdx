@@ -1,0 +1,152 @@
+---
+title: Density ratio estimation
+kind: concept
+summary: 'Density ratio estimation estimates $r(\xvec) = p(\xvec)/q(\xvec)$ from a sample of each density without estimating either one. The ratio reweights a sample from $q$ to stand in for $p$, and it underlies covariate-shift correction, two-sample tests and divergence estimates.'
+tags: [density-ratio-estimation, importance-weighting, kernel-methods, covariate-shift]
+aliases: [density ratio, importance estimation, direct density-ratio estimation, ratio of densities]
+requires: [kernel-density-estimation, importance-sampling]
+related: [two-sample-testing, density-ratio-by-classification, kullback-leibler-importance-estimation-procedure, least-squares-importance-fitting, comparing-density-ratio-estimators, importance-weighting-for-covariate-shift, bregman-divergences-and-scoring-rules, f-divergences-and-jensen-shannon, generative-adversarial-network]
+references: [sugiyama2012book, vapnik1998, shimodaira2000, nguyen2010, gutmann2010, cranmer2020, sugiyama2012bregman, menon2016, kanamori2009ulsif, yamada2013]
+status: draft
+updated: 2026-10-12
+---
+
+import { DividingDensities } from './DividingDensities'
+import { ReweightingDemo } from './ReweightingDemo'
+
+<Definition>
+Let $p(\xvec)$ and $q(\xvec)$ be two probability densities on $\reals^d$, with $q(\xvec) > 0$ wherever
+$p(\xvec) > 0$. Their **density ratio** is $r(\xvec) = p(\xvec)/q(\xvec)$. **Density ratio estimation** builds an
+estimate $\hat r(\xvec)$ from a sample $\xvec_1, \dots, \xvec_{n_p}$ drawn from $p$ and a sample
+$\xvec'_1, \dots, \xvec'_{n_q}$ drawn from $q$. The direct methods fit $\hat r$ itself and never form an estimate of
+$p$ or of $q$ <Cite id="sugiyama2012book" />.
+</Definition>
+
+## Intuition
+
+The ratio converts averages under $q$ into averages under $p$. For any function $f$,
+$$
+\expect_p\brack{f(\xvec)} = \int f(\xvec)\, p(\xvec)\, d\xvec = \int f(\xvec)\, r(\xvec)\, q(\xvec)\, d\xvec =
+\expect_q\brack{r(\xvec) f(\xvec)} .
+$$
+A point drawn from $q$ and given weight $r(\xvec)$ therefore counts as a point drawn from $p$. This is
+<NoteLink to="importance-sampling" /> with $q$ as the proposal. In importance sampling both densities are known
+formulas. In density ratio estimation they are known only through samples, so the weights must be learned.
+
+The first figure fixes $q = \Gauss(0, 1)$ and $p = \Gauss(m, s^2)$, uses the true ratio, and shows what the weights
+do. The weighted histogram of the sample from $q$ follows $p$. Weighted averages of $f$ over that sample agree with
+$\expect_p[f]$, and the plain averages do not. The <Gloss name="ess">effective sample size</Gloss>
+$(\sum_j w_j)^2 / \sum_j w_j^2$, with $w_j = r(\xvec'_j)$, counts how many unweighted points the weighted sample is
+worth. It falls as $p$ moves away from $q$ or becomes wider than $q$, because a few points in the tail of $q$ then
+carry most of the weight.
+
+<ReweightingDemo />
+
+## Details
+
+### Uses
+
+- **Covariate shift.** A model is trained on inputs from $q$ and used on inputs from $p$. Weighting each training
+  loss by $r(\xvec)$ makes the training risk an unbiased estimate of the risk in use <Cite id="shimodaira2000" />;
+  <NoteLink to="importance-weighting-for-covariate-shift" /> covers this case.
+- **Divergences and two-sample tests.** Every $f$-divergence is an expectation of a function of $r$, such as
+  $\KL(p \,\|\, q) = \expect_p[\log r(\xvec)]$, so an estimate of $r$ gives an estimate of the divergence
+  <Cite id="nguyen2010" />. A divergence estimated well above zero is evidence that the two samples come from
+  different distributions, which <NoteLink to="two-sample-testing" /> makes precise.
+- **Mutual information.** Mutual information is the Kullback–Leibler divergence from the product of the marginals to
+  the joint distribution, so it is estimated from the ratio of the joint density to the product of the marginals.
+- **Outlier and change detection.** With $p$ the density of new data and $q$ that of reference data, a small
+  $r(\xvec)$ marks a point that is rare among the new data relative to the reference; comparing a recent window
+  against an older one detects a change <Cite id="sugiyama2012book" />.
+- **Learning by classification.** <Gloss name="nce" /> trains an unnormalised model by classifying data against
+  noise, which estimates the ratio of the data density to the noise density <Cite id="gutmann2010" />. The
+  discriminator of a <NoteLink to="generative-adversarial-network" /> estimates the ratio of the data density to the
+  generator's density. Simulation-based inference estimates likelihood ratios the same way, from simulator output
+  <Cite id="cranmer2020" />.
+
+### Why not divide two density estimates
+
+The plug-in estimate $\hat p(\xvec)/\hat q(\xvec)$, from two <NoteLink to="kernel-density-estimation">kernel density
+estimates</NoteLink>, solves a harder problem than the one asked. A density estimate has to be accurate everywhere,
+including where the ratio is flat and where the ratio is irrelevant. Vapnik's principle advises against solving a
+more general problem as an intermediate step when only a special case is needed <Cite id="vapnik1998" />.
+
+The quotient also amplifies errors. Where $q$ is small, $\hat q$ rests on a handful of points, and a small absolute
+error in $\hat q$ is a large relative error in $1/\hat q$. Beyond the last point of either sample each kernel
+estimate decays as a Gaussian of its bandwidth, so the quotient there is a ratio of two kernel tails. Its value is set
+by the bandwidth and by the outermost few points, not by $p$ and $q$. The second figure shows this on a log scale. The
+error grows with the dimension $d$, because kernel density estimates need a sample that grows exponentially in $d$
+for a fixed accuracy.
+
+<DividingDensities />
+
+### One principle behind the direct methods
+
+Each direct method chooses a model $\hat r$ and a measure of its distance from $r$ whose sample estimate needs no
+knowledge of $p$ or $q$. Let $f$ be a strictly convex, differentiable function on $(0, \infty)$. The **Bregman
+divergence** generated by $f$, averaged under $q$, is
+$$
+\mathrm{BR}_f(r \,\|\, \hat r) = \int q(\xvec) \brack{f(r(\xvec)) - f(\hat r(\xvec)) - f'(\hat r(\xvec))
+\paren{r(\xvec) - \hat r(\xvec)}} d\xvec .
+$$
+It is zero only when $\hat r = r$ wherever $q > 0$, and positive otherwise
+(<NoteLink to="bregman-divergences-and-scoring-rules" />). The term $\int q f(r)$ does not depend on $\hat r$ and is
+dropped. In the term $\int q\, f'(\hat r)\, r$, the product $q\, r$ is $p$. What remains is
+$$
+J_f(\hat r) = \expect_q\brack{f'(\hat r(\xvec))\, \hat r(\xvec) - f(\hat r(\xvec))} -
+\expect_p\brack{f'(\hat r(\xvec))} ,
+$$
+and both expectations are estimated by averages over the two samples. Minimising the sample version of $J_f$ over a
+model class is a density ratio estimator for each choice of $f$ <Cite id="sugiyama2012bregman" />.
+
+| $f(t)$ | $J_f(\hat r)$ up to a constant | Method |
+| --- | --- | --- |
+| $\tfrac{1}{2}(t - 1)^2$ | $\tfrac{1}{2}\expect_q[\hat r^2] - \expect_p[\hat r]$ | <NoteLink to="least-squares-importance-fitting">least-squares importance fitting</NoteLink> |
+| $t \log t - t$ | $\expect_q[\hat r] - \expect_p[\log \hat r]$ | <NoteLink to="kullback-leibler-importance-estimation-procedure"><Gloss name="kliep" /></NoteLink> |
+| $t \log t - (1 + t)\log(1 + t)$ | $\expect_q[\log(1 + \hat r)] + \expect_p[\log(1 + 1/\hat r)]$ | <NoteLink to="density-ratio-by-classification">logistic regression</NoteLink> |
+
+<Derivation title="The three rows">
+For $f(t) = \tfrac{1}{2}(t - 1)^2$, $f'(t) = t - 1$, so $f'(t)\,t - f(t) = \tfrac{1}{2}t^2 - \tfrac{1}{2}$ and
+$J_f = \tfrac{1}{2}\expect_q[\hat r^2] - \expect_p[\hat r] + \tfrac{1}{2}$.
+
+For $f(t) = t \log t - t$, $f'(t) = \log t$, so $f'(t)\,t - f(t) = t$ and $J_f = \expect_q[\hat r] -
+\expect_p[\log \hat r]$.
+
+For $f(t) = t \log t - (1 + t)\log(1 + t)$, $f'(t) = \log t - \log(1 + t) = \log\paren{t/(1 + t)}$. Then
+$f'(t)\,t - f(t) = -t\log(1 + t) + (1 + t)\log(1 + t) = \log(1 + t)$, and
+$-f'(t) = \log\paren{(1 + t)/t} = \log(1 + 1/t)$. With $\hat r = e^{g}$ for a score $g$, the two terms are the
+logistic losses $\log(1 + e^{g})$ on the sample from $q$ (label 0) and $\log(1 + e^{-g})$ on the sample from $p$
+(label 1).
+</Derivation>
+
+The choice of $f$ sets where errors cost most. The squared loss weights errors by $q$ and is bounded below for any
+$\hat r$, which makes it a linear least-squares problem for a linear model. The Kullback–Leibler loss weights the log
+of $\hat r$ by $p$, so it penalises underestimates where $p$ has mass. The logistic loss treats the two samples
+symmetrically. Every proper loss for class-probability estimation gives a density ratio estimator in this way, and
+the correspondence runs in both directions <Cite id="menon2016" />.
+
+### Models and hyperparameters
+
+The kernel methods use the model $\hat r(\xvec) = \sum_{l=1}^b \alpha_l K(\xvec, \cvec_l)$ with the
+<Gloss name="rbf-kernel">Gaussian kernel</Gloss> $K(\xvec, \cvec) = \exp\paren{-\norm{\xvec - \cvec}^2 / 2\sigma^2}$.
+The centres $\cvec_l$ are $b$ points of the sample from $p$, because the ratio is large where $p$ has mass. The width
+$\sigma$ and any penalty are chosen by cross-validation on the objective $J_f$ itself, whose held-out value needs only
+the two samples <Cite id="kanamori2009ulsif" />.
+
+## Assumptions
+
+- **Support.** $q(\xvec) > 0$ wherever $p(\xvec) > 0$. Where $q$ has no mass the ratio is undefined, and no sample
+  from $q$ can reveal what $p$ does there.
+- **Independent samples.** Each sample is drawn independently from its density.
+- **A bounded ratio, in practice.** When $p$ has heavier tails than $q$, $r$ is unbounded and the weights have
+  infinite variance. The **relative density ratio** $p/(\beta p + (1 - \beta) q)$ for some $\beta \in (0, 1)$ is
+  bounded by $1/\beta$ and is estimated by the same methods <Cite id="yamada2013" />.
+
+## Pitfalls
+
+- **Weight collapse.** An estimated ratio can be accurate on average and still put most of the weight on a few
+  points. The effective sample size of the weights shows this before the weights are used.
+- **Errors where it matters.** Each loss is an average under $p$ or $q$. Errors in regions that neither sample
+  visits are not penalised, and an estimator can be wildly wrong there while its loss stays small.
+- **Normalisation.** The mean of $\hat r$ over the sample from $q$ should be close to 1. A large departure means the
+  estimate is biased or the model class is too poor.

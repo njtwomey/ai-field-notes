@@ -5,22 +5,117 @@ summary: 'Batch jobs compute over complete data; stream jobs compute as events a
 tags: [data, software, time-series]
 aliases: []
 requires: []
-related: [point-in-time-correctness]
-references: []
-status: stub
+related: [feature-freshness, training-serving-skew, dataset-versioning-and-lineage]
+references: [akidau2015, polyzotis2018]
+status: draft
 updated: 2026-10-11
 ---
 
+import { BatchStreamProcessingVisualizer } from './BatchStreamProcessingVisualizer'
+
 <Definition>
-To be written.
+**Batch processing** computes aggregations over bounded, static historical datasets that have fully landed on persistent
+storage. **Stream processing** processes unbounded, continuous sequences of events as they arrive in real time, handling
+late and out-of-order arrivals via event-time watermarking <Cite id="akidau2015" />. When the same feature is computed
+via both paradigms, differences in windowing, state retention, and late-data handling cause the two implementations to
+diverge <Cite id="polyzotis2018" />.
 </Definition>
+
+In production machine learning systems, offline training pipelines require processing petabytes of historical logs with
+maximal computational throughput. Concurrently, online inference services require low-latency streaming features that
+reflect events occurring seconds ago. Bridging these paradigms without introducing discrepancy between offline training
+features and online serving features requires understanding event-time semantics.
+
+<BatchStreamProcessingVisualizer />
 
 ## Batch computation
 
+Batch processing operates over bounded, immutable datasets (such as partitioned Parquet tables in Delta Lake or Apache
+Iceberg):
+
+- **Data completeness:** Batch jobs execute only after data for a given temporal partition has been ingested and
+  finalized. All late-arriving records up to the batch window boundary are present before computation begins.
+- **Global optimizations:** Because the entire dataset is accessible, batch query planners (such as Spark Catalyst)
+  execute multi-stage shuffles, broadcast joins, and distributed external merge sorts to achieve maximal compute
+  efficiency.
+- **Role in machine learning:** Batch processing is the standard engine for generating historical training snapshots,
+  backfilling feature store values across multi-year histories, and computing heavy non-real-time aggregates (such as
+  global graph embeddings or user similarity matrices).
+
 ## Event time and watermarks
+
+In stream processing, physical network delays mean that the arrival order of records does not reflect the chronological
+order in which events actually occurred <Cite id="akidau2015" />:
+
+| Event Entity | Event Time ($t_e$) | Processing Time ($t_p$) | Transmission Condition | Feature Aggregation Impact |
+| :--- | :--- | :--- | :--- | :--- |
+| **Event $e_1$** | `12:01` | `12:01` | Immediate cellular transmission | Assigned to $[12:00, 12:05]$ window in both systems |
+| **Event $e_2$** | `12:02` | `12:08` | Queued during client disconnection | Event time restores true sequence; processing time incorrectly drops into later window |
+| **Event $e_3$** | `12:03` | `12:04` | Minor transit jitter | Arrives before delayed $e_2$; event time preserves true chronological sequence |
+
+1. **Event time ($t_e$):** The timestamp recorded on the client device or sensor when the action occurred.
+2. **Processing time ($t_p$):** The wall-clock timestamp of the stream processing node (e.g. Apache Flink or Kafka
+   Streams) when the record is processed.
+
+Aggregating features by processing time corrupts temporal feature values: if a mobile device loses internet connectivity
+in a tunnel and uploads 50 queued events simultaneously upon reconnecting, processing-time aggregation clusters 50
+distinct hourly actions into a single 1-minute window.
+
+### Watermarks
+
+A **watermark** is a temporal metric emitted by the streaming engine that tracks progress in event time. A watermark
+with value $W(t) = T$ provides a probabilistic assertion that no subsequent events with event time $t_e \le T$ will
+arrive:
+
+$$
+W(t) = \max(t_e) - \tau_{\text{slack}}
+$$
+
+- **Window triggers:** When computing rolling window aggregations (e.g., a user's transaction count in the window
+  $[12:00, 12:15]$), the streaming engine holds intermediate state in memory and fires its final aggregation trigger
+  only when the watermark advances past the window end: $W(t) \ge 12:15$.
+- **The slack trade-off:** Increasing the allowed lateness slack $\tau_{\text{slack}}$ captures a higher percentage of
+  delayed events, boosting feature completeness. However, it forces the streaming engine to hold intermediate window
+  states longer in memory and delays the emission of updated features.
 
 ## Late and out-of-order events
 
+Records that arrive with an event time prior to the current watermark ($t_e < W(t)$) are designated as **late events**.
+Streaming pipelines implement three primary strategies for handling late data:
+
+1. **Permanent dropping:** Discard the late event immediately. This caps in-memory state retention but causes the
+   streaming feature to undercount real-world activity.
+2. **Allowed lateness with retractions / upserts:** The engine keeps the window accumulator in managed state (e.g.,
+   RocksDB) for an extended period beyond the watermark (e.g., $\Delta_{\text{allowed}} = 1 \text{ hour}$). When a late
+   event arrives, the engine updates the accumulator and emits an upsert message to the downstream online feature store.
+3. **Dead-letter routing:** Route late records to a side-output stream stored in cloud object storage for subsequent
+   batch reconciliation.
+
 ## One feature computed two ways
 
+A classic architecture pattern in production ML is the **Lambda architecture**, which maintains two parallel paths: a
+real-time streaming pipeline (speed layer) serving online inference, and an offline batch pipeline (batch layer) running
+nightly to compute definitive ground-truth features.
+
+This dual-path design frequently introduces severe training-serving skew <Cite id="polyzotis2018" />:
+
+- **Logic divergence:** The feature is authored twice: once in Java/Scala for Apache Flink, and once in SQL/Python for
+  Apache Spark or Snowflake. Subtle discrepancies in window boundary inclusion (e.g., $[t_0, t_1)$ vs $[t_0, t_1]$)
+  produce conflicting outputs.
+- **Completeness divergence:** The nightly batch job aggregates over all late-arriving events that landed over the past
+  24 hours. The online streaming job, constrained by watermarks and memory bounds, dropped late events. Consequently,
+  the model trains on complete feature states offline, but observes under-counted feature states online.
+- **The unified Kappa alternative:** Modern architectures prioritize unified engines (such as Apache Beam or Apache
+  Flink in unified batch/streaming mode). The exact identical transformation DAG and windowing logic is executed across
+  both historical batch backfills and live event streams, guaranteeing mathematical equivalence.
+
 ## Pitfalls
+
+- **Using processing time for time-sensitive features:** Collapsing bursty network retries into artificial spikes by
+  windowing on server arrival timestamps rather than physical event timestamps.
+- **Unbounded streaming state memory leaks:** Configuring windowed aggregations without setting state Time-To-Live (TTL)
+  or allowed lateness bounds, causing streaming worker nodes to crash with Out-Of-Memory (OOM) errors.
+- **Ignoring batch-stream parity tests:** Maintaining separate batch and streaming feature pipelines without automated
+  CI jobs that continuously assert numerical equality between batch and streaming views.
+- **Lookahead leakage in batch pipelines:** Allowing batch SQL queries to compute rolling aggregates using whole-day
+  partition windows that inadvertently incorporate future events occurring after the target prediction timestamp.

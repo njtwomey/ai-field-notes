@@ -2,25 +2,149 @@
 title: 'Transcripts and alignment'
 kind: concept
 summary: 'Speech data pair audio with text. Transcripts need normalising, and forced alignment finds when each word or phone is spoken, which supports segmentation, diarisation labels and training data for timing.'
-tags: [data, speech]
-aliases: []
+tags: [data, speech, nlp, alignment, asr]
+aliases: [speech transcripts, forced alignment, speech alignment, audio-text alignment]
 requires: []
-related: [word-and-character-error-rates, text-normalisation]
-references: []
-status: stub
-updated: 2026-10-11
+related: [word-and-character-error-rates, text-normalisation, transcript-normalisation, digital-audio, audio-preprocessing]
+references: [graves2006, mcauliffe2017]
+status: draft
+updated: 2026-10-12
 ---
 
+import { SpeechTranscriptsAndAlignmentVisualizer } from './SpeechTranscriptsAndAlignmentVisualizer'
+
 <Definition>
-To be written.
+**Speech transcripts and alignment** establish the structural and temporal mapping between continuous acoustic waveforms
+$\mathbf{x} = [x_1, \dots, x_N]$ and discrete written linguistic sequences $\mathbf{y} = [y_1, \dots, y_U]$
+<Cite id="graves2006, mcauliffe2017" />. In speech engineering, transcripts require phonetic and textual normalization
+to resolve mismatches between written symbols and spoken acoustics, while forced alignment computes frame-level boundary
+timestamps $[t_{\text{start}}, t_{\text{end}}]$ for individual phones, words, and speaker turns.
 </Definition>
+
+In supervised automatic speech recognition (ASR), text-to-speech (TTS), and speech translation, high-quality audio is
+useless without properly aligned textual annotations. A raw audio recording contains continuous acoustic acoustics; a
+raw written transcript contains standard orthography.
+
+Bridging the acoustic-textual gap requires navigating transcription conventions (verbatim vs cleaned prose), verbalizing
+non-standard written tokens via text normalization, employing Viterbi or CTC forced alignment to generate timestamped
+phonetic targets, and evaluating multi-speaker diarization boundaries under standardized evaluation collars.
+
+<SpeechTranscriptsAndAlignmentVisualizer />
 
 ## Transcription conventions
 
+The level of detail captured by human transcribers fundamentally affects model behavior:
+
+### Verbatim transcription
+
+Verbatim transcription records every acoustic event exactly as uttered:
+- **Disfluencies and hesitations:** Transcribes false starts (`"I want to— I need to go"`), word repetitions
+  (`"the the problem"`), and filled pauses (`"um"`, `"uh"`, `"er"`, `"ah"`).
+- **Non-verbal vocalizations:** Tags coughs, laughter, sighs, and throat-clearing (e.g., `[laughter]`, `[applause]`).
+- **Necessity for ASR:** Essential for conversational speech recognition, voicebot turn-taking, and clinical speech
+  assessment. Training an acoustic model on audio containing `"um"` where the transcript omits it forces the model to
+  penalize acoustic truth.
+
+### Non-verbatim (Cleaned) transcription
+
+Non-verbatim transcription cleans spoken utterances into polished, grammatical written prose, removing stutters, filler
+words, and self-corrections. While desirable for reading meeting minutes or court records, non-verbatim transcripts
+introduce severe label noise into speech models.
+
+### Punctuation and capitalization
+
+- **Normalized unpunctuated:** Traditional acoustic modeling targets clean phonetic sequences without punctuation or
+  casing (`the quick brown fox jumps`).
+- **Orthographic truecasing:** Modern end-to-end models (such as Whisper) train directly on punctuated, truecased text
+  (`The quick brown fox jumps.`), requiring the neural network to jointly learn acoustic transcription and semantic
+  punctuation prediction.
+
 ## Text normalisation for speech
+
+Written language uses compact symbolic tokens termed **Non-Standard Words (NSWs)**—including numbers, dates, currency
+signs, abbreviations, and chemical formulas—that do not have a 1:1 letter-to-sound mapping:
+
+- **Text Normalization (TN / Verbalization):** Converts written NSWs into fully articulated spoken words for ASR
+  training and TTS synthesis:
+  - `$50.25` $\to$ `"fifty dollars and twenty-five cents"`
+  - `May 3, 2026` $\to$ `"may third twenty twenty-six"`
+  - `Dr. Smith lives on Main St.` $\to$ `"doctor smith lives on main street"`
+- **Inverse Text Normalization (ITN):** The reverse process performed during ASR inference: converting raw phonetic
+  outputs (`"three hundred kilograms"`) into concise written display text (`"300 kg"`).
+
+Contextual disambiguation presents a major challenge in text normalization: `"2024"` must verbalize as
+`"twenty twenty-four"` when representing a calendar year, but as `"two thousand twenty-four"` when representing a
+numeric count of physical items.
 
 ## Forced alignment
 
+**Forced alignment** is the computational process of aligning an audio recording with its known reference transcript to
+determine the exact start and end timestamps of each word and phonetic unit <Cite id="mcauliffe2017" />:
+
+### HMM-based forced alignment (Montreal Forced Aligner / Kaldi)
+
+1. **Grapheme-to-Phoneme (G2P):** A pronunciation lexicon (such as CMUDict) expands orthographic words into phoneme
+   state sequences (e.g., `"speech"` $\to$ `/s/ /p/ /iː/ /tʃ/`).
+2. **Hidden Markov Model (HMM) lattice:** Each phoneme is modeled as a 3-state HMM (beginning, middle, end states).
+3. **Viterbi trellis search:** An acoustic model computes state likelihoods $P(\mathbf{x}_t \mid s_j)$ across acoustic
+   frames $t$. The Viterbi algorithm searches for the optimal global state alignment constrained strictly to the
+   sequential word order of the transcript.
+
+### Connectionist Temporal Classification (CTC) alignment
+
+Modern neural architectures utilize pretrained CTC models (such as Wav2Vec 2.0 or Conformer) <Cite id="graves2006" />.
+The network outputs frame-level token emission probabilities $P(\pi_t \mid \mathbf{X})$. A constrained forward-backward
+search matches the reference label sequence against the emission matrix, identifying frame timestamps where token
+probabilities peak.
+
+### Applications of forced alignment
+
+- **Dataset quality screening:** Utterances where forced alignment fails or yields negative average frame likelihoods
+  indicate mismatched audio and transcripts, allowing automated pruning of corrupted training data.
+- **Duration modeling in TTS:** Provides ground-truth phone durations $[t_{\text{start}}, t_{\text{end}}]$ required to
+  supervise duration predictors in non-autoregressive neural vocoders (FastSpeech 2, VITS).
+- **Automated subtitling:** Generates word-level karaoke-style closed captions synchronized with video speech.
+
 ## Diarisation labels
 
+In multi-party conversations (podcasts, meetings, medical consultations), annotations must specify not only *what* was
+said, but *who spoke when*:
+
+$$
+\mathcal{D} = \{ (\text{Speaker}_k, t_{\text{start}}, t_{\text{end}}) \}
+$$
+
+### Diarization Error Rate (DER)
+
+Speaker diarization accuracy is evaluated via **Diarization Error Rate (DER)**:
+
+$$
+\text{DER} = \frac{\text{False Alarm Time} + \text{Missed Speech Time} + \text{Speaker Confusion Time}}{\text{Total Reference Speech Time}}
+$$
+
+- **False Alarm:** Detecting speech when the reference transcript indicates silence.
+- **Missed Speech:** Labeling silence when a speaker was actively speaking.
+- **Speaker Confusion:** Detecting speech correctly but assigning it to the wrong speaker identifier.
+
+### The NIST evaluation collar
+
+In natural conversation, turn-taking boundaries are fluid: human annotators differ by tens of milliseconds when marking
+the exact breath onset of a word. 
+
+The standard NIST RT evaluation protocol enforces a forgiveness **collar** (typically $\pm 250\text{ ms}$) around
+reference speaker change boundaries. Any discrepancies occurring within this 250 ms window are forgiven, ensuring that
+DER measures true speaker identity attribution rather than microsecond boundary jitter.
+
 ## Pitfalls
+
+- **Training ASR on non-verbatim transcripts:** Training models on transcripts that omit filler words ("um", "uh")
+  forces acoustic losses to suppress genuine speech sounds, elevating substitution and insertion error rates.
+- **Lexicon Out-of-Vocabulary (OOV) alignment crashes:** In HMM forced alignment, a single unrecognized word (e.g., a
+  foreign surname or technical acronym) lacking a G2P entry causes the alignment search to abort across the entire file.
+  Robust pipelines employ neural G2P fallbacks.
+- **Unsegmented long-form forced alignment drift:** Attempting to force-align a 2-hour podcast in a single pass causes
+  cumulative drift and out-of-memory errors. Audio must be pre-segmented via VAD into 10–30 second chunks prior to
+  alignment.
+- **Neglecting overlapping speech in diarization:** In conversational meetings, $10\text{--}20\%$ of speech occurs
+  during overlapping interruptions. Traditional single-label diarizers force an exclusive speaker label, artificially
+  inflating missed speech errors on overlapping segments.

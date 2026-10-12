@@ -1,26 +1,126 @@
 ---
 title: 'Adversarial validation'
 kind: concept
-summary: 'Adversarial validation trains a classifier to tell training rows from test rows. Good separation means the two differ, by shift or by leakage, and the features the classifier relies on show where.'
+summary: 'Adversarial validation trains a binary classifier to discriminate training samples from test samples. High separability reveals covariate shift or partition leakage, and classifier importances identify the drifting features.'
 tags: [data, model-selection, diagnostics]
-aliases: []
-requires: []
-related: [detecting-leakage, dataset-shift]
-references: []
-status: stub
+aliases: [adversarial validation, adversarial model validation, train test classifier, classifier two sample test]
+requires: [data-leakage]
+related: [detecting-leakage, dataset-shift, out-of-distribution-test-sets, matching-the-split-to-deployment]
+references: [lopezpaz2017c2st]
+status: draft
 updated: 2026-10-11
 ---
 
+import AdversarialValidationInspector from './AdversarialValidationInspector';
+
 <Definition>
-To be written.
+**Adversarial validation** is a diagnostic methodology that evaluates distribution mismatch between training and test
+sets by training a supervised binary classifier to distinguish training observations ($Y_{\text{adv}} = 0$) from test
+observations ($Y_{\text{adv}} = 1$). If the classifier achieves a cross-validated ROC AUC substantially above $0.50$,
+the two partitions violate the identical distribution assumption due to temporal drift, selection bias, or partition
+leakage.
 </Definition>
+
+Rather than testing marginal feature distributions one by one via univariate Kolmogorov-Smirnov or chi-square tests,
+adversarial validation performs a unified, multivariate two-sample hypothesis test across the entire feature space
+simultaneously.
+
+<AdversarialValidationInspector />
 
 ## Training a train-versus-test classifier
 
-## Reading the score
+Given a labelled training set $\mathcal{D}_{\text{train}} = \{(x_i, y_i)\}_{i=1}^{n_{\text{train}}}$ and an unlabelled
+evaluation test set $\mathcal{D}_{\text{test}} = \{x_j\}_{j=1}^{n_{\text{test}}}$, adversarial validation constructs a
+synthetic binary classification task:
 
-## Reading the features
+1. Discard the original target variable $y$.
+2. Assign artificial binary targets:
+   $$
+   y_i^{\text{adv}} = 0 \quad \forall x_i \in \mathcal{D}_{\text{train}}, \qquad y_j^{\text{adv}} = 1 \quad \forall x_j \in \mathcal{D}_{\text{test}}
+   $$
+3. Combine the datasets into an adversarial corpus $\mathcal{D}_{\text{adv}} = \{(x, y^{\text{adv}})\}$.
+4. Train an expressive discriminator $g(x) \in [0, 1]$ (such as LightGBM, XGBoost, or a Random Forest) using stratified
+   cross-validation over $\mathcal{D}_{\text{adv}}$ and measure the out-of-fold ROC AUC.
 
-## Using it to choose a validation set
+## Reading the diagnostic score
 
-## Pitfalls
+Formally, adversarial validation operationalizes a **Classifier Two-Sample Test** (C2ST <Cite id="lopezpaz2017c2st" />),
+testing the null hypothesis:
+
+$$
+H_0: \mathbb{P}_{\text{train}}(X) = \mathbb{P}_{\text{test}}(X)
+$$
+
+### The diagnostic spectrum
+
+- **$\text{ROC AUC} \approx 0.50$ (Indistinguishable)**: The classifier cannot tell train instances apart from test
+  instances. The two datasets are drawn from the same underlying distribution $\mathbb{P}(X)$. Standard random
+  cross-validation or uniform holdout sets will accurately mirror deployment performance.
+- **$\text{ROC AUC} \in [0.60, 0.75]$ (Moderate Drift)**: Subtle distributional shifts exist. While models may transfer,
+  domain adaptation or propensity reweighting will improve validation fidelity.
+- **$\text{ROC AUC} > 0.80$ (Severe Covariate Shift / Leakage)**: The train and test sets occupy largely disjoint
+  regions in feature space. Standard cross-validation on $\mathcal{D}_{\text{train}}$ will severely overestimate
+  out-of-sample performance because validation folds will evaluate in-distribution performance while test measures
+  out-of-distribution extrapolation.
+
+## Inspecting feature culprits
+
+Once the adversarial classifier detects substantial separability ($\text{AUC} \gg 0.50$), feature attribution techniques
+(such as tree split gain or SHAP values) reveal the exact variables driving the mismatch:
+
+1. **Top adversarial features**: Variables with the highest importance in $g(x)$ are those whose distributions diverge
+   most sharply between train and test. Typical culprits include raw chronological timestamps, sequential record IDs,
+   seasonal transaction rates, or novel geographic regions.
+2. **Ablation check**: Dropping the top drifting feature and refitting the adversarial model will immediately lower the
+   adversarial AUC. If removing a small handful of non-essential features returns the AUC to $\approx 0.50$, those
+   features should be stripped from the predictive model pipeline.
+3. **Feature re-engineering**: If a drifting feature is necessary for prediction (e.g., date), it should be transformed
+   into a stationary representation (such as "days since user signup" or "rolling 7-day ratio") that exhibits identical
+   distributions across partitions.
+
+## Designing a representative validation set
+
+When the test distribution is fixed and covariate shift is unavoidable (e.g., predicting the next financial quarter),
+adversarial validation provides an elegant mechanism for constructing a test-representative validation partition:
+
+1. For every training instance $x_i \in \mathcal{D}_{\text{train}}$, evaluate its adversarial prediction score:
+   $$
+   p_i = g(x_i) = \hat{\mathbb{P}}(\text{test} \mid x_i)
+   $$
+2. Training instances with high $p_i$ closely resemble test instances in feature space, whereas instances with
+   $p_i \approx 0$ have no counterpart in the test set.
+3. Select the top $k\%$ of training rows with highest $p_i$ (or sample training instances with probability proportional
+   to $p_i$) to serve as the validation fold.
+
+Validation error measured on this adversarially selected subset will correlate much more strongly with true test set
+performance than an unweighted random split.
+
+## Density ratio estimation and importance weighting
+
+Under the assumption of pure covariate shift (where
+$\mathbb{P}_{\text{train}}(Y \mid X) = \mathbb{P}_{\text{test}}(Y \mid X)$ but
+$\mathbb{P}_{\text{train}}(X) \neq \mathbb{P}_{\text{test}}(X)$), the adversarial classifier provides the Radon-Nikodym
+derivative for importance weighting:
+
+$$
+w(x) = \frac{p_{\text{test}}(x)}{p_{\text{train}}(x)} = \frac{\mathbb{P}(\text{test} \mid x)}{\mathbb{P}(\text{train} \mid x)} \cdot \frac{n_{\text{train}}}{n_{\text{test}}} = \frac{g(x)}{1 - g(x)} \cdot \frac{n_{\text{train}}}{n_{\text{test}}}
+$$
+
+Training the primary task model by minimizing weighted empirical loss:
+
+$$
+\min_\theta \sum_{i \in \mathcal{D}_{\text{train}}} w(x_i) \ell\big(y_i, f_\theta(x_i)\big)
+$$
+
+aligns the empirical training distribution with the target test domain.
+
+## Pitfalls and limitations
+
+1. **Blindness to concept drift**: Adversarial validation inspects only the marginal feature distribution
+   $\mathbb{P}(X)$. If the relationship between features and labels shifts ($\mathbb{P}(Y \mid X)$ changes while
+   $\mathbb{P}(X)$ stays identical), the adversarial AUC will remain $0.50$ despite severe model failure.
+2. **Propensity weight variance**: When train and test distributions have non-overlapping support ($g(x) \to 1$),
+   density ratio weights $w(x) \to \infty$, leading to unstable training gradients. Weights should be clipped at a
+   reasonable upper percentile (e.g., 99th percentile).
+3. **Adversarial overfitting**: The adversarial classifier must be evaluated via out-of-fold cross-validation. In-sample
+   training AUC will report artificial separability on small datasets due to tree capacity.

@@ -3,26 +3,147 @@ title: 'Sequence length and chunking'
 kind: concept
 summary: 'Models take inputs of bounded length. Long sequences are truncated or split into overlapping chunks whose labels and predictions are aggregated, and batches group sequences of similar length with padding masks.'
 tags: [data, nlp, time-series]
-aliases: []
-requires: []
-related: [time-series-windowing]
+aliases: [sequence chunking, sliding window chunking, length bucketing, padding masks, context window truncation]
+requires: [categorical-encoding]
+related: [time-series-windowing, multi-valued-field-encoding]
 references: []
-status: stub
+status: draft
 updated: 2026-10-11
 ---
 
 <Definition>
-To be written.
+**Sequence chunking and length management** is the set of data preparation techniques that adapts variable-length or
+long sequential inputs (text documents, time-series, audio recordings) to finite model context windows $L_{\max}$
+through truncation, sliding-window chunking with stride overlap, and dynamic mini-batch length bucketing to eliminate
+padding waste.
 </Definition>
 
-## Truncation
+Sequence architectures (Transformers, 1D CNNs, RNNs) impose strict constraints on maximum sequence length $L_{\max}$
+(e.g. 512 tokens for standard BERT, 2,048 to 8,192 tokens for modern LLMs). Because transformer self-attention scales
+quadratically $\mathcal{O}(L^2)$ with sequence length, feeding arbitrarily long documents into a single forward pass is
+computationally prohibitive.
 
-## Overlapping chunks
+Adapting long sequences requires strategic truncation or chunking pipelines, paired with principled prediction
+aggregation.
 
-## Aggregating labels and predictions
+import { SequenceChunkingVisualizer } from './SequenceChunkingVisualizer';
 
-## Length bucketing
+<SequenceChunkingVisualizer />
 
-## Padding and masks
+## Context boundaries and truncation
 
-## Pitfalls
+When documents exceed context capacity $L_{\max}$ and processing speed is paramount, naive truncation discards excess
+tokens:
+
+1. **Head truncation:** Retains the first $L_{\max}$ tokens:
+   $$
+   x_{\text{head}} = x[0 : L_{\max}]
+   $$
+   Effective for news articles, abstracts, and encyclopedic entries where the primary topic and thesis statement reside
+   in opening paragraphs.
+2. **Tail truncation:** Retains the final $L_{\max}$ tokens:
+   $$
+   x_{\text{tail}} = x[N - L_{\max} : N]
+   $$
+   Useful for legal proceedings, medical discharge summaries, or customer service chats where final outcomes or
+   resolutions appear at the end.
+3. **Head-and-tail truncation:** Splits available capacity evenly between opening and closing tokens:
+   $$
+   x_{\text{head-tail}} = [x[0 : L/2], x[N - L/2 : N]]
+   $$
+   Captures both the initial context and the concluding outcome, omitting the intermediate body.
+
+While simple, truncation permanently discards any critical evidence located in truncated sections.
+
+## Overlapping sliding-window chunking
+
+To preserve complete document coverage without exceeding context limits, documents are decomposed into **sliding window
+chunks** parameterized by window capacity $W \le L_{\max}$ and stride $S$:
+
+$$
+W_m = x[(m - 1)S : (m - 1)S + W]
+$$
+
+The boundary overlap $O = W - S$ (typically 64 to 128 tokens) provides continuous context across chunk boundaries:
+
+- **Cross-boundary entity preservation:** If a named entity (`"World Health Organization"`) or causal clause is split
+  exactly at token boundary $W$, the overlap guarantees that at least one adjacent chunk captures the complete entity in
+  its local attention window.
+- **Position embedding continuity:** Avoids boundary distortion where tokens at chunk edges receive weak bidirectional
+  attention.
+
+## Aggregating labels and predictions across chunks
+
+Processing a long document produces a set of $M$ independent chunk predictions $\{\hat{y}_1, \dots, \hat{y}_M\}$. The
+pipeline aggregates these chunk outputs into a single document-level prediction:
+
+### 1. Document classification
+- **Mean logit pooling:** Averages predicted class probabilities across chunks:
+  $$
+  \hat{P}(Y = c) = \frac{1}{M} \sum_{m=1}^M \sigma(z_{m, c})
+  $$
+- **Max pooling:** Useful for detection of sparse events (e.g. contract violation or fraud signal present in any chunk):
+  $$
+  \hat{P}(Y = c) = \max_{m} \sigma(z_{m, c})
+  $$
+- **Hierarchical pooling:** Feed the $M$ chunk representation vectors $h_m$ into a secondary lightweight transformer or
+  BiLSTM that learns inter-chunk attention weights.
+
+### 2. Extractive question answering / Span extraction
+For span identification, models predict start and end token logits $(s_i, e_i)$ for each chunk. The pipeline maps
+chunk-local token indices back to global document offsets:
+
+$$
+\text{score}(i, j) = s_i + e_j \quad \text{for } 0 \le j - i \le \text{max\_answer\_length}
+$$
+
+The global answer span is selected as the maximum score across all chunks, resolving overlapping duplicated spans via
+non-maximum suppression.
+
+## Length bucketing and dynamic batching
+
+In standard mini-batch training, variable-length sequences must be aligned into a rectangular tensor $[B, L]$ by
+appending `<PAD>` tokens:
+
+$$
+\text{tensor} = \begin{bmatrix} x_{1, 1} & x_{1, 2} & \dots & x_{1, 8} & \text{PAD} & \dots & \text{PAD} \\ x_{2, 1} & x_{2, 2} & \dots & x_{2, 48} & x_{2, 49} & \dots & x_{2, 512} \end{bmatrix}
+$$
+
+Padding every sequence to the global dataset maximum $L_{\max} = 512$ wastes massive computational capacity: short
+sequences spend $>90\%$ of their attention FLOPs multiplying zeros.
+
+**Length bucketing (Dynamic Batching)** eliminates this waste:
+1. Sort all sequences in the training set by length $L_i$.
+2. Group sequences of similar length into the same mini-batch.
+3. Pad the mini-batch only to the length of the **longest sequence in that specific batch**, rather than the global
+   dataset ceiling.
+4. Shuffle the order of mini-batches so SGD stochasticity is preserved across epochs.
+
+Dynamic length bucketing routinely delivers $2\text{--}4\times$ throughput speedups in NLP and speech training
+pipelines.
+
+## Padding tokens and attention masks
+
+To prevent padding tokens from corrupting representations, models employ binary **attention masks**:
+
+$$
+M_{ij} = \begin{cases} 0 & \text{if token } j \text{ is a valid input} \\ -\infty & \text{if token } j \text{ is a } \text{PAD} \text{ token} \end{cases}
+$$
+
+Adding $M$ to scaled dot-product attention before softmax:
+
+$$
+\operatorname{Attention}(Q, K, V) = \operatorname{softmax}\left(\frac{QK^\top}{\sqrt{d_k}} + M\right) V
+$$
+
+forces softmax attention weights for `<PAD>` positions to $e^{-\infty} = 0$, ensuring that padding tokens never
+influence valid token representations.
+
+## Pitfalls and failure modes
+
+1. **Splitting subwords across chunks:** Stride indices must be aligned to whitespace word boundaries or sentence
+   boundaries. Arbitrarily splitting in the middle of a multi-token subword wordpiece corrupts token embeddings.
+2. **Special token budget:** Always allocate room for model control tokens (`[CLS]`, `[SEP]`, `<bos>`, `<eos>`). A model
+   with context 512 can only accommodate 510 payload tokens if two delimiter tokens are required.
+3. **Evaluation leakage in length sorting:** While sorting by length accelerates training, never sort validation or test
+   sets if doing so alters sequential temporal or causal evaluation ordering.

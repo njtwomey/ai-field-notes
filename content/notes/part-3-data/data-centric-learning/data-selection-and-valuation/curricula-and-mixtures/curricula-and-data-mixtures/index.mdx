@@ -1,28 +1,170 @@
 ---
 title: 'Curricula and data mixtures'
 kind: concept
-summary: 'The order and proportions of training data affect what a model learns. Curricula order examples from easy to hard; data mixtures set how much of each source is seen; data scaling laws relate data quantity to performance.'
-tags: [data, training, large-language-models]
-aliases: []
-requires: []
-related: []
-references: []
-status: stub
-updated: 2026-10-11
+summary: 'Curricula sequence training from easy to hard, while data mixtures and compute-optimal scaling laws balance heterogeneous domains and tokens per parameter.'
+tags: [data, training, large-language-models, scaling-laws]
+aliases: [curriculum learning, data mixtures, self-paced learning, scaling laws, Chinchilla scaling]
+requires: [coresets-and-data-pruning, training-dynamics-diagnostics]
+related: [data-valuation, error-analysis]
+references: [bengio2009curriculum, kumar2010selfpaced, kaplan2020, hoffmann2022, touvron2023b]
+status: draft
+updated: 2026-10-12
 ---
 
+import { CurriculaAndDataMixturesVisualizer } from './CurriculaAndDataMixturesVisualizer'
+
 <Definition>
-To be written.
+**Curricula and data mixtures** govern the sequence, relative proportions, and volume of training data presented to a
+model throughout optimization. **Curriculum learning** orders examples from simple to complex; **self-paced learning**
+automates this progression using the model's instantaneous loss; and **data mixtures** establish sampling distributions
+across heterogeneous domains under compute-optimal scaling laws.
 </Definition>
+
+Stochastic gradient descent is inherently path-dependent: the order in which data is processed, the relative exposure to
+different knowledge domains, and the repetition frequency of high-quality sources fundamentally shape the topology of
+the learned representations. Treating training datasets as homogeneous bags of tokens overlooks massive opportunities to
+stabilize non-convex optimization, break out of poor local minima, and maximize the efficiency of finite compute budgets
+<Cite id="bengio2009curriculum, kumar2010selfpaced, hoffmann2022" />.
+
+<CurriculaAndDataMixturesVisualizer />
 
 ## Curriculum learning
 
+Inspired by biological pedagogy, Yoshua Bengio et al. formalized **Curriculum Learning** as training a model on
+progressively more challenging distributions <Cite id="bengio2009curriculum" />.
+
+Mathematically, a curriculum is a sequence of training distributions $P_1, P_2, \dots, P_T = P_{\text{target}}$ over
+inputs $\mathbf{x}$, defined by reweighting functions $W_t(\mathbf{x})$:
+
+$$
+P_t(\mathbf{x}) \propto W_t(\mathbf{x}) \, P_{\text{target}}(\mathbf{x}), \quad 0 \le W_t(\mathbf{x}) \le W_{t+1}(\mathbf{x}) \le 1
+$$
+
+Bengio et al. established that curriculum learning acts as a **continuation method** for non-convex optimization:
+1. Early in training, $P_1$ smooths the objective landscape, replacing chaotic non-convex valleys with broader,
+   well-behaved convex approximations centered on canonical features.
+2. As $t$ advances, the distribution smoothly morphs into the true target landscape $P_{\text{target}}$, guiding
+   parameter weights into superior basins of attraction that random initialization rarely reaches.
+
+### Pacing functions
+
+A **pacing function** $g(t) \in [\lambda_0, 1]$ dictates the proportion of the easiest training data available to the
+model at training step $t$:
+
+| Pacing Schedule | Mathematical Formulation $g(t)$ | Growth Profile | Optimization Dynamics |
+| :--- | :--- | :--- | :--- |
+| **Root / Concave** | $\sqrt{\frac{t}{T_{\text{pacing}}}}$ | Rapid initial admission, slowing near threshold | Rapidly admits intermediate examples while moderating late-stage exposure to extreme boundaries |
+| **Linear** | $\lambda_0 + (1 - \lambda_0) \frac{t}{T_{\text{pacing}}}$ | Constant expansion rate $\frac{1 - \lambda_0}{T_{\text{pacing}}}$ | Uniform rate of data introduction, maintaining predictable batch diversity |
+| **Step-Wise** | $\lambda_k \cdot \mathbb{I}(t_k \le t < t_{k+1})$ | Piecewise discrete steps | Holds data complexity fixed until loss plateaus, preventing churn during critical convergence |
+
 ## Self-paced learning
+
+Pre-defined curricula rely on human heuristics to define "easiness"—such as sentence length in NLP or bounding box size
+in computer vision. These proxies frequently fail because superficial simplicity does not guarantee low optimization
+difficulty.
+
+M. Pawan Kumar, Benjamin Packer, and Daphne Koller introduced **Self-Paced Learning (SPL)**, where the model dynamically
+selects its own curriculum using its instantaneous loss <Cite id="kumar2010selfpaced" />.
+
+SPL augments the empirical risk objective with binary selection variables
+$\mathbf{v} = (v_1, \dots, v_N)^\top \in \{0, 1\}^N$ and a pacing threshold $\lambda$:
+
+$$
+\min_{\mathbf{w}, \, \mathbf{v} \in \{0, 1\}^N} \sum_{i=1}^N v_i \, \ell(\mathbf{w}; \mathbf{x}_i, y_i) - \lambda \sum_{i=1}^N v_i
+$$
+
+For fixed parameters $\mathbf{w}$, the optimal sample weight $v_i^*$ has a closed-form threshold solution:
+
+$$
+v_i^* = \begin{cases} 1 & \text{if } \ell(\mathbf{w}; \mathbf{x}_i, y_i) < \lambda \\ 0 & \text{otherwise} \end{cases}
+$$
+
+When $\lambda$ is small, only instances with loss below $\lambda$ are incorporated ($v_i = 1$), ignoring hard instances
+($v_i = 0$). By gradually increasing $\lambda$ throughout optimization, the model autonomously incorporates
+progressively harder instances at a pace determined by its current representational maturity.
 
 ## Data mixtures
 
+In modern foundation model pre-training, datasets are composed of diverse, heterogeneous domains: broad web crawls (e.g.
+Common Crawl), programming code repositories, peer-reviewed scientific literature, mathematical texts, and structured
+encyclopedias.
+
+The **data mixture** is defined by a probability simplex $\boldsymbol{\alpha} = (\alpha_1, \dots, \alpha_K)$ such that
+$\sum_{k=1}^K \alpha_k = 1$, governing the sampling probability of each domain during batch construction.
+
+### Temperature scaling of domain sizes
+
+If a training pipeline samples domains strictly proportional to their raw token counts, massive web scrapes
+($80\text{--}90\%$ of the corpus) completely overwhelm high-value, low-volume sources such as mathematical proofs
+($1\text{--}2\%$).
+
+To balance exposure without discarding natural volume differences, mixtures apply **temperature scaling** to raw domain
+token sizes $D_k$:
+
+$$
+\alpha_k = \frac{D_k^{1 / T}}{\sum_{j=1}^K D_j^{1 / T}}
+$$
+
+| Temperature Setting ($T$) | Sampling Behavior | Operational Fit |
+| :--- | :--- | :--- |
+| **$T = 1.0$ (Proportional)** | Proportional to raw token count ($D_k$) | Natural crawl; completely swamps math, reasoning, and code |
+| **$T = 2.0\text{--}3.0$ (Balanced)** | Smoothly boosts minority high-utility domains | Standard industry practice for frontier LLMs (LLaMA, Gemma) |
+| **$T \to \infty$ (Uniform)** | Equal sampling probability $\alpha_k = 1/K$ across all domains | Causes catastrophic over-repetition of tiny specialized datasets |
+
 ## Repetition and epochs
+
+When high-quality tokens (such as formal mathematics or verified code) are exhausted, should training stop, or should
+high-quality domains be repeated over multiple epochs?
+
+Niklas Muennighoff et al. demonstrated in extensive empirical studies that training over multi-epoch repetitions remains
+highly effective up to a critical saturation threshold:
+
+$$
+\text{Effective Token Efficiency} = f(\text{Repetition Count } R)
+$$
+
+- **$1\text{--}4$ Repetitions**: Near-optimal data efficiency. Re-ingesting verified reasoning data up to 4 times
+  delivers $> 90\%$ of the downstream performance gains achievable with completely novel tokens.
+- **$> 5\text{--}8$ Repetitions**: Diminishing returns accelerate into severe capacity saturation. The model memorizes
+  exact token orderings, triggering sharp spikes in validation perplexity and degrading out-of-distribution transfer.
 
 ## Data scaling laws
 
+The relationship between compute, dataset size, and parameter count is codified by neural scaling laws
+<Cite id="kaplan2020, hoffmann2022" />.
+
+Jordan Hoffmann et al. (DeepMind Chinchilla) resolved early architectural misallocations by proving that for a
+compute-optimal pre-training run with budget $C \approx 6ND$ FLOPs, model parameters $N$ and training tokens $D$ should
+scale in **equal proportion** <Cite id="hoffmann2022" />:
+
+$$
+N \propto C^{a}, \quad D \propto C^{b}, \quad a \approx 0.5, \, b \approx 0.5
+$$
+
+The resulting compute-optimal allocation dictates approximately **20 tokens per model parameter** (e.g. a 70-billion
+parameter model is compute-optimal at 1.4 trillion tokens).
+
+| Scaling Regime | Optimization Goal | Token-to-Parameter Ratio | Representative Architectures |
+| :--- | :--- | :--- | :--- |
+| **Compute-Optimal (Chinchilla)** <Cite id="hoffmann2022" /> | Minimizes *training compute* for a given pre-training loss | $\approx 20$ tokens per parameter | Chinchilla 70B trained on 1.4T tokens |
+| **Inference-Optimal / Over-Trained** <Cite id="touvron2023b" /> | Minimizes *lifetime serving cost* by incurring extra pre-training FLOPs | $100\text{--}300+$ tokens per parameter | LLaMA-3 8B trained on 15T tokens |
+
+In customer-facing production systems, the total inference FLOPs over the lifetime of a deployed model dwarfs initial
+training FLOPs by orders of magnitude. Consequently, modern architectures deliberately over-train compact models far
+past the Chinchilla boundary to amortize downstream latency and memory footprints.
+
 ## Pitfalls
+
+1. **Abrupt curriculum cutoffs causing catastrophic forgetting**: Removing simple canonical examples completely once
+   complex boundary examples are unlocked; neural networks rapidly forget basic syntax and low-level perceptual
+   invariants unless anchored by continuous easy replay.
+2. **Excessive mixture temperature causing repetition collapse**: Setting $T > 4$ on small specialized datasets ($< 1$
+   billion tokens) forces the model to repeat identical documents hundreds of times, causing severe memorization and
+   gradient collapse.
+3. **Superficial difficulty proxies**: Designing curricula using heuristic metrics (e.g. sentence length or token count)
+   that correlate with document format rather than cognitive or semantic reasoning complexity.
+4. **Late-stage mixture destabilization**: Altering domain mixture ratios during the final $10\%$ of pre-training
+   without cosine learning rate annealing, causing destructive representation shock.
+5. **Evaluating scaling laws on mismatched tokenizers**: Comparing token scaling laws across models with differing
+   byte-pair encoding (BPE) vocabulary sizes; a model with a 128k vocabulary encodes text in $30\%$ fewer tokens than a
+   32k vocabulary, skewing raw token efficiency comparisons.

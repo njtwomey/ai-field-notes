@@ -1,28 +1,181 @@
 ---
 title: 'Remote-sensing imagery'
 kind: concept
-summary: 'Remote-sensing images record reflected or emitted radiation in many spectral bands from satellites or aircraft. Preparing them involves corrections, cloud masks, band indices and the alignment of images taken at different times.'
-tags: [data, computer-vision]
-aliases: []
-requires: []
-related: [remote-sensing-image-metrics]
-references: []
-status: stub
-updated: 2026-10-11
+summary: 'Remote-sensing images record multi-spectral surface reflectance across satellite sensors, requiring top-of-atmosphere and surface radiometric corrections, cloud masking, spectral band indices (NDVI, NDWI), and temporal composite alignment.'
+tags: [data, computer-vision, geospatial, remote-sensing]
+aliases: [satellite-imagery, multispectral-imagery, earth-observation, ndvi, sentinel-2, landsat]
+requires: [coordinate-reference-systems, vector-and-raster-data]
+related: [spatial-features, digital-images, image-preprocessing]
+references: [rouse1974, drusch2012]
+status: draft
+updated: 2026-10-12
 ---
 
+import { RemoteSensingImageryVisualizer } from './RemoteSensingImageryVisualizer'
+
 <Definition>
-To be written.
+**Remote-sensing imagery** denotes digital raster observations capturing reflected solar irradiance or emitted thermal
+radiation from the Earth's surface across discrete electromagnetic spectral bands, acquired by spaceborne or airborne
+multispectral sensors <Cite id="drusch2012" />. Processing satellite imagery requires converting uncalibrated sensor
+Digital Numbers (DN) through Top-of-Atmosphere (TOA) and Bottom-of-Atmosphere (BOA) surface reflectance, filtering
+atmospheric aerosol scattering, computing biophysical band ratios (such as NDVI <Cite id="rouse1974" />), and
+constructing cloud-free temporal composites.
 </Definition>
 
-## Spectral bands and resolution
+Unlike standard 3-channel RGB computer vision, remote sensing operates on non-standard channel dimensions
+($C \in [4, 13]$ for multispectral systems like Sentinel-2 and Landsat 8/9, up to $C > 200$ for hyperspectral sensors),
+heterogeneous Ground Sampling Distances (GSD) across bands, 12-bit to 16-bit radiometric precision, and heavy
+atmospheric path radiance <Cite id="drusch2012" />.
 
-## Radiometric and atmospheric correction
+<RemoteSensingImageryVisualizer client:load />
 
-## Cloud masks
+## Spectral Bands and Multi-Resolution Imagery
 
-## Band indices
+Multispectral satellites record surface interactions across diagnostic wavelength windows:
+- **Visible Spectrum (B2 Blue $490\text{ nm}$, B3 Green $560\text{ nm}$, B4 Red $665\text{ nm}$)**: Soil, water
+  turbidity, and chlorophyll absorption.
+- **Red Edge (B5 $705\text{ nm}$, B6 $740\text{ nm}$, B7 $783\text{ nm}$)**: The sharp transition interval between
+  photosynthetic absorption and cellular scattering, sensitive to leaf chlorophyll and nitrogen content.
+- **Near-Infrared (NIR B8 $842\text{ nm}$, B8A $865\text{ nm}$)**: Highly reflected ($40\text{--}60\%$) by the spongy
+  mesophyll internal structure of healthy leaves.
+- **Shortwave Infrared (SWIR B11 $1{,}610\text{ nm}$, B12 $2{,}190\text{ nm}$)**: Sensitive to leaf moisture content,
+  soil hydration, and geological mineral composition.
+- **Atmospheric Bands (B1 Coastal Aerosol $443\text{ nm}$, B9 Water Vapour $945\text{ nm}$, B10 Cirrus
+  $1{,}375\text{ nm}$)**: High atmospheric absorption bands used strictly for atmospheric calibration and thin cloud
+  detection.
 
-## Time series of images
+### Resolution Dimensions
+
+Satellite imaging systems trade off four interdependent dimensions <Cite id="drusch2012" />:
+1. **Spatial Resolution (Ground Sampling Distance, GSD)**: The physical dimension of a pixel projected on the ground.
+   Sentinel-2 features multi-resolution bands: $10\text{ m}$ (RGB and NIR B8), $20\text{ m}$ (Red Edge, narrow NIR B8A,
+   SWIR1, SWIR2), and $60\text{ m}$ (coastal, water vapour, cirrus).
+2. **Spectral Resolution**: The number and spectral bandwidth $\Delta \lambda$ of channels. Narrow bands isolate subtle
+   chemical absorption features that broadband RGB merges.
+3. **Temporal Resolution (Revisit Time)**: The elapsed time between repeat passes over the exact same ground footprint
+   (5 days for the twin Sentinel-2A/B constellation; 16 days for Landsat 8; sub-daily for commercial PlanetScope
+   cubesats).
+4. **Radiometric Resolution**: Bit depth quantization (e.g. 12-bit dynamic range $[0, 4095]$ or 16-bit storage
+   $[0, 65535]$), resolving minute reflectance gradations in dark water bodies or shadowed mountain slopes.
+
+---
+
+## Radiometric and Atmospheric Correction
+
+Raw raw satellite telemetry arrives as integer **Digital Numbers (DN)**. Producing physically consistent inputs across
+seasons and sensors requires Level-1 and Level-2 processing:
+
+| Processing Level | Physical Domain | Calibration & Normalization Step | Physical Units |
+| :--- | :--- | :--- | :--- |
+| **Level-0 / Raw** | Raw Digital Numbers (DN) | Uncalibrated sensor voltage measurements | Quantized integer counts |
+| **Level-1B** | Top-Of-Atmosphere Radiance | Sensor calibration (gain, bias, detector dark current) | Spectral radiance ($\text{W} \cdot \text{m}^{-2} \cdot \text{sr}^{-1} \cdot \mu\text{m}^{-1}$) |
+| **Level-1C** | TOA Reflectance ($\rho_{\text{TOA}}$) | Solar zenith angle and Earth-Sun orbital distance correction | Dimensionless apparent planetary reflectance |
+| **Level-2A** | Surface Reflectance ($\rho_{\text{BOA}}$) | Radiative transfer modeling (6S / Sen2Cor) correcting aerosols and water vapour | Bottom-Of-Atmosphere surface reflectance |
+
+### 1. Top-Of-Atmosphere (TOA) Reflectance (Level-1C)
+
+Raw DNs are converted to spectral radiance $L_\lambda = \text{scale} \times \text{DN} + \text{offset}$, then normalized
+for solar zenith angle $\theta_s$ and Earth-Sun orbital distance $d$:
+
+$$
+\rho_{\text{TOA}}(\lambda) = \frac{\pi \cdot L_\lambda \cdot d^2}{\text{ESUN}_\lambda \cdot \cos \theta_s}
+$$
+
+where $\text{ESUN}_\lambda$ is the mean extraterrestrial solar spectral irradiance.
+
+### 2. Bottom-Of-Atmosphere (BOA) Surface Reflectance (Level-2A)
+
+Light traveling through the atmosphere suffers from Rayleigh molecular scattering ($\sigma_R \propto \lambda^{-4}$,
+dominating Blue and Coastal bands) and Mie aerosol scattering:
+
+$$
+L_{\text{TOA}}(\lambda) = L_{\text{path}}(\lambda) + \frac{\rho_{\text{surface}}(\lambda) \cdot T_{\text{down}}(\lambda) \cdot T_{\text{up}}(\lambda) \cdot E_s}{\pi (1 - \rho_{\text{surface}}(\lambda) \cdot S(\lambda))}
+$$
+
+Atmospheric correction algorithms (e.g. Sen2Cor, LaSRC, 6S) estimate Aerosol Optical Depth (AOD) and water vapor from
+specialized absorption bands to invert this equation, isolating the true canopy surface reflectance
+$\rho_{\text{surface}}(\lambda) \in [0, 1]$.
+
+---
+
+## Cloud Detection and Masking
+
+Clouds and their projected ground shadows obscure optical imagery, creating extreme positive outliers in visible bands
+and deep negative outliers in shadow regions.
+- **Cirrus Detection**: The $1.38\ \mu\text{m}$ band (B10) captures solar radiation reflected by high-altitude
+  ice-crystal cirrus clouds before reaching tropospheric water vapor.
+- **Cloud Masking Algorithms**: Machine learning segmenters (such as `s2cloudless` or deep U-Net architectures) output
+  per-pixel cloud probabilities.
+- **Shadow Projection**: Cloud shadows are computed geometrically by projecting cloud mask contours along the solar
+  azimuth and zenith vectors onto the digital elevation model (DEM). Cloud and shadow pixels are masked with `NaN` /
+  `nodata` flags before feature extraction.
+
+---
+
+## Biophysical Band Indices
+
+Combining bands into normalized difference ratios cancels out topography-induced solar illumination variation and
+isolates specific chemical-biophysical properties <Cite id="rouse1974" />:
+
+### Normalized Difference Vegetation Index (NDVI)
+
+Exploits high chlorophyll absorption in Red and high mesophyll reflection in NIR <Cite id="rouse1974" />:
+
+$$
+\text{NDVI} = \frac{\rho_{\text{NIR}} - \rho_{\text{Red}}}{\rho_{\text{NIR}} + \rho_{\text{Red}}} \in [-1, +1]
+$$
+
+Dense healthy vegetation yields $\text{NDVI} \in [0.6, 0.9]$; bare soil yields $[0.1, 0.25]$; open water bodies yield
+negative values ($[-0.5, 0.0]$).
+
+### Enhanced Vegetation Index (EVI)
+
+Incorporates the Blue band to decouple atmospheric aerosol path radiance and resists saturation over dense tropical
+rainforest canopies:
+
+$$
+\text{EVI} = G \cdot \frac{\rho_{\text{NIR}} - \rho_{\text{Red}}}{\rho_{\text{NIR}} + C_1 \rho_{\text{Red}} - C_2 \rho_{\text{Blue}} + L}
+$$
+
+(standard coefficients: $G = 2.5, C_1 = 6.0, C_2 = 7.5, L = 1.0$).
+
+### Water and Burn Indices
+
+- **Normalized Difference Water Index (NDWI)**:
+  $$
+  \text{NDWI} = \frac{\rho_{\text{Green}} - \rho_{\text{NIR}}}{\rho_{\text{Green}} + \rho_{\text{NIR}}}
+  $$
+- **Normalized Burn Ratio (NBR)**:
+  $$
+  \text{NBR} = \frac{\rho_{\text{NIR}} - \rho_{\text{SWIR2}}}{\rho_{\text{NIR}} + \rho_{\text{SWIR2}}}
+  $$
+  Difference between pre-fire and post-fire NBR ($\Delta\text{NBR}$) maps burn severity and wildfire footprint
+  boundaries.
+
+---
+
+## Temporal Compositing and Image Time Series
+
+Because single satellite scenes are frequently contaminated by clouds, operational machine learning pipelines aggregate
+image stacks across temporal windows (e.g. monthly or seasonal intervals):
+- **Maximum NDVI / Greenest Pixel Composite**: Retains the pixel vector $(x, y)$ corresponding to the date with peak
+  NDVI within the window, naturally filtering undetected clouds and shadows.
+- **Median Compositing**: Computes the per-band median across valid (unmasked) cloud-free observations, producing
+  seamless, cloud-free mosaics.
+- **Crop Classification with Temporal Profiles**: Agricultural crop types (maize, soy, winter wheat) cannot be
+  distinguished from a single snapshot, but exhibit distinct phenological green-up and harvest curves across the growing
+  season.
+
+---
 
 ## Pitfalls
+
+1. **Mixing Level-1C (TOA) and Level-2A (BOA) Reflectance**: Training computer vision models on Level-1C
+   top-of-atmosphere data overfits to atmospheric haze, sun elevation, and seasonal atmospheric turbidity rather than
+   true ground reflectance.
+2. **Ignoring Multi-Resolution Resampling Alignment**: Upsampling Sentinel-2 $20\text{ m}$ SWIR bands to match
+   $10\text{ m}$ RGB/NIR bands using naive nearest-neighbor interpolation introduces blocky pixel grid artifacts.
+   Bilinear or bicubic spline resampling matching the optical point spread function (PSF) is required.
+3. **Seasonal Phenology Domain Shift**: Models trained exclusively on summer leaf-on imagery fail completely when
+   evaluated on autumnal leaf-off or winter snow-covered test imagery, mistaking seasonal dormancy for land-use
+   deforestation.

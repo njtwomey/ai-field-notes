@@ -1,32 +1,195 @@
 ---
 title: 'Three-dimensional data'
 kind: concept
-summary: 'Three-dimensional data describe shape and scenes as point clouds, meshes, voxel grids, depth maps or implicit functions. Each needs its own sampling, normalisation and augmentation, respecting rotation and permutation symmetries.'
-tags: [data, computer-vision, geometry]
-aliases: []
+summary: 'Three-dimensional data formalise spatial geometry as unstructured point sets, polygonal boundary meshes, volumetric voxel tensors, range depth maps, or continuous neural implicit fields, dictating distinct permutation, rotational, and scale equivariances.'
+tags: [data, computer-vision, geometry, 3d]
+aliases: [point-clouds, 3d-meshes, voxel-grids, implicit-neural-representations, nerf, 3d-data]
 requires: []
-related: [structure-from-motion, epipolar-geometry-and-stereo]
-references: []
-status: stub
-updated: 2026-10-11
+related: [digital-images, vector-and-raster-data, molecular-representations]
+references: [qi2017pointnet, mildenhall2020]
+status: draft
+updated: 2026-10-12
 ---
 
+import { ThreeDimensionalDataVisualizer } from './ThreeDimensionalDataVisualizer'
+
 <Definition>
-To be written.
+**Three-dimensional (3D) data** formalises physical shape, surface boundary, and spatial scene geometry in Euclidean
+space $\mathbb{R}^3$. It is represented through five primary structural paradigms: unordered **point clouds**
+$\mathbf{P} \in \mathbb{R}^{N \times (3 + C)}$, boundary **polygonal meshes** $\mathcal{M} = (V, F, E)$, regular
+occupancy **voxel tensors** $\mathbf{V} \in \{0, 1\}^{D \times H \times W}$, range **depth maps**
+$D(u, v) \in \mathbb{R}_+$, or continuous coordinate **neural implicit functions**
+$f_\theta: (\mathbf{x}, \mathbf{d}) \mapsto (\sigma, \mathbf{c})$, each imposing distinct inductive biases, permutation
+groups, and Euclidean $E(3)$ / $SE(3)$ symmetry requirements <Cite id="qi2017pointnet, mildenhall2020" />.
 </Definition>
 
-## Point clouds
+Unlike regular 2D pixel lattices where spatial adjacency is implicitly defined by row-column indices, 3D representations
+are often permutation-invariant, irregular in density, self-occluding, and subject to 3D rigid-body rotations and
+translations <Cite id="qi2017pointnet" />.
+
+<ThreeDimensionalDataVisualizer client:load />
+
+## Point Clouds
+
+A point cloud is an unordered set of $N$ discrete spatial measurements
+$\mathbf{P} = \{\mathbf{p}_1, \dots, \mathbf{p}_N\}$, where each point $\mathbf{p}_i = (x_i, y_i, z_i, \mathbf{a}_i)$
+pairs continuous 3D Cartesian coordinates with optional channels $\mathbf{a}_i$ (LiDAR intensity, RGB colour, or
+estimated surface normal unit vector $\mathbf{n}_i \in \mathbb{S}^2$) <Cite id="qi2017pointnet" />.
+
+### Permutation Invariance and PointNet
+
+Because a point cloud is mathematically a set, any valid neural architecture $f: \mathcal{P} \to \mathbb{R}^k$ must be
+invariant to arbitrary permutations $\pi \in S_N$ of point order:
+
+$$
+f(\{\mathbf{p}_{\pi(1)}, \mathbf{p}_{\pi(2)}, \dots, \mathbf{p}_{\pi(N)}\}) = f(\{\mathbf{p}_1, \mathbf{p}_2, \dots, \mathbf{p}_N\})
+$$
+
+PointNet <Cite id="qi2017pointnet" /> enforces exact permutation invariance using a symmetric pooling operator:
+
+$$
+f(\mathbf{P}) = \gamma \left( \max_{i=1}^N \left\{ h(\mathbf{p}_i) \right\} \right)
+$$
+
+where $h: \mathbb{R}^{3+C} \to \mathbb{R}^d$ is an element-wise Multi-Layer Perceptron (shared across all points),
+$\max$ is channel-wise maximum pooling, and $\gamma$ is a post-pooling projection network. PointNet++ extends this by
+grouping points into hierarchical local neighborhoods using metric ball queries of radius $r$.
+
+### Point Sampling: Farthest Point Sampling (FPS)
+
+LiDAR scans produce highly irregular spatial density that decays quadratically with sensor distance
+($\rho \propto \frac{1}{d^2}$). Uniformly subsampling points requires **Farthest Point Sampling (FPS)**:
+1. Initialize the sample set with an arbitrary point $S_1 = \{\mathbf{p}_1\}$.
+2. Iteratively select point $\mathbf{p}^*$ that maximizes the minimum distance to existing sampled points:
+   $$
+   \mathbf{p}^* = \arg\max_{\mathbf{p} \in \mathbf{P} \setminus S_{k-1}} \min_{\mathbf{s} \in S_{k-1}} \|\mathbf{p} - \mathbf{s}\|_2
+   $$
+3. Update $S_k = S_{k-1} \cup \{\mathbf{p}^*\}$ until the target size $K$ is achieved.
+
+FPS guarantees bounded coverage of outer geometric bounds, preventing dense clusters from dominating the representation.
+
+---
 
 ## Meshes
 
-## Voxel grids
+A polygon mesh discretizes a two-dimensional manifold surface embedded in $\mathbb{R}^3$ into vertices, edges, and
+planar faces $\mathcal{M} = (V, F, E)$:
+- **Vertices**: $V = [\mathbf{v}_1, \dots, \mathbf{v}_{|V|}]^\top \in \mathbb{R}^{|V| \times 3}$.
+- **Faces**: $F = \{f_1, \dots, f_{|F|}\}$, where each triangular face $f_k = (i, j, k)$ indexes three vertices in
+  counter-clockwise winding order to define the outward surface normal.
+- **Topology**: Half-edge data structures store incident edges, vertex valences, and boundary loops.
 
-## Depth maps
+### The Laplace-Beltrami Operator
 
-## Implicit representations
+The continuous Laplacian on curved surfaces is discretized on triangle meshes via the **cotangent formula**:
 
-## Sampling and normalisation
+$$
+(\Delta_{\mathcal{M}} f)_i = \frac{1}{2 A_i} \sum_{j \in \mathcal{N}(i)} (\cot \alpha_{ij} + \cot \beta_{ij}) (f_i - f_j)
+$$
 
-## Augmentation
+where $A_i$ is the barycentric dual area around vertex $i$, and $\alpha_{ij}, \beta_{ij}$ are the two angles opposite
+edge $(i, j)$. Mesh convolutions leverage this operator for surface smoothing, geodesic distance estimation, and
+geometric deep learning.
+
+---
+
+## Voxel Grids
+
+A voxel grid quantizes 3D space into a regular volumetric grid of resolution $R = D \times H \times W$:
+- **Occupancy Grid**: Binary tensor $\mathbf{V} \in \{0, 1\}^{R^3}$, where $V_{i, j, k} = 1$ if the cell contains
+  physical matter.
+- **Truncated Signed Distance Function (TSDF)**: Continuous tensor $\mathbf{D} \in \mathbb{R}^{R^3}$, where each voxel
+  stores the metric distance to the nearest surface $d(\mathbf{x})$, truncated to interval $[-\delta, +\delta]$
+  (negative inside objects, positive outside).
+
+### The Cubic Memory Bottleneck
+
+Dense 3D convolutions require $O(R^3)$ memory and operations. A $512^3$ single-precision tensor requires $512\text{ MB}$
+per sample, restricting batch sizes on GPU hardware. Consequently, modern volumetric pipelines use **Sparse Submanifold
+Convolutions** (e.g. Minkowski Engine) that store and evaluate operations only on active, non-empty surface voxels via
+spatial hash tables.
+
+---
+
+## Depth Maps (2.5D Range Images)
+
+A depth map $D(u, v) \in \mathbb{R}_+$ records the distance along the camera optical axis from the optical centre to
+scene surfaces for each pixel $(u, v)$ in an image.
+
+Using known camera intrinsics $\mathbf{K}$:
+
+$$
+\mathbf{K} = \begin{pmatrix} f_x & 0 & c_x \\ 0 & f_y & c_y \\ 0 & 0 & 1 \end{pmatrix}
+$$
+
+any depth pixel $(u, v, D(u, v))$ unprojects deterministically into 3D camera coordinates:
+
+$$
+\begin{pmatrix} X \\ Y \\ Z \end{pmatrix} = D(u, v) \cdot \mathbf{K}^{-1} \begin{pmatrix} u \\ v \\ 1 \end{pmatrix} = \begin{pmatrix} \frac{(u - c_x) D(u, v)}{f_x} \\ \frac{(v - c_y) D(u, v)}{f_y} \\ D(u, v) \end{pmatrix}
+$$
+
+Depth maps represent only the front-facing surfaces directly visible to the sensor, lacking geometry for occluded
+backsides (hence designated $2.5\text{D}$).
+
+---
+
+## Implicit Neural Representations (NeRF)
+
+Instead of discretizing space into explicit primitives, implicit representations model 3D scenes as continuous
+coordinate functions parameterized by neural networks <Cite id="mildenhall2020" />.
+
+### Neural Radiance Fields (NeRF)
+
+NeRF <Cite id="mildenhall2020" /> maps a continuous 3D coordinate $\mathbf{x} = (x, y, z)$ and viewing direction
+$\mathbf{d} = (\theta, \phi)$ to volume density $\sigma \ge 0$ and emitted RGB radiance $\mathbf{c} \in [0, 1]^3$:
+
+$$
+F_\theta: (\mathbf{x}, \mathbf{d}) \mapsto (\sigma, \mathbf{c})
+$$
+
+The expected colour $C(\mathbf{r})$ along camera ray $\mathbf{r}(t) = \mathbf{o} + t\mathbf{d}$ between near bound $t_n$
+and far bound $t_f$ is computed via numerical volume rendering:
+
+$$
+C(\mathbf{r}) = \int_{t_n}^{t_f} T(t) \cdot \sigma(\mathbf{r}(t)) \cdot \mathbf{c}(\mathbf{r}(t), \mathbf{d}) \, dt, \quad T(t) = \exp\left( -\int_{t_n}^t \sigma(\mathbf{r}(s)) \, ds \right)
+$$
+
+where $T(t)$ denotes accumulated transmittance (the probability that the ray travels from $t_n$ to $t$ without hitting
+particles).
+
+---
+
+## Sampling, Normalisation, and Augmentation
+
+### Canonical Normalisation
+
+Before training 3D networks, raw geometry must be centered and scaled into a canonical bounding frame:
+1. **Centering**: Shift coordinates so the centroid lies at the origin:
+   $\mathbf{p}_i' = \mathbf{p}_i - \frac{1}{N}\sum_j \mathbf{p}_j$.
+2. **Unit Sphere Scaling**: Rescale so the maximum bounding radius equals 1:
+   $$
+   \mathbf{p}_i'' = \frac{\mathbf{p}_i'}{\max_j \|\mathbf{p}_j'\|_2}
+   $$
+
+### Geometric Augmentation
+
+- **Azimuth Rotation**: Random rotation about the vertical gravity axis (yaw $\theta \in [0, 2\pi)$):
+  $$
+  \mathbf{R}_z(\theta) = \begin{pmatrix} \cos\theta & -\sin\theta & 0 \\ \sin\theta & \cos\theta & 0 \\ 0 & 0 & 1 \end{pmatrix}
+  $$
+- **Anisotropic Jittering**: Random scaling $\mathbf{s} \sim \mathcal{U}(0.8, 1.25)^3$ and independent Gaussian noise
+  perturbation $\boldsymbol{\epsilon}_i \sim \mathcal{N}(\mathbf{0}, \sigma^2 \mathbf{I})$ clipped to $[-0.05, 0.05]$.
+- **Random Dropout / CutMix**: Zeroing out randomly selected local spatial spheres simulating sensor occlusions.
+
+---
 
 ## Pitfalls
+
+1. **Non-Manifold Mesh Singularities**: Meshes downloaded from 3D model repositories often contain non-manifold
+   geometry: edges shared by more than two faces, inverted face normal windings, and zero-area sliver triangles that
+   crash mesh differential operators.
+2. **Cubic Memory Blowout in Dense Voxels**: Attempting to scale dense 3D CNNs to high resolutions without sparse
+   convolutional libraries leads to GPU out-of-memory errors on small batch sizes.
+3. **Range Occlusion Holes in Depth Maps**: Specular surfaces (mirrors, glass), dark absorbent materials, and steep
+   incidence angles yield no return signal in LiDAR and time-of-flight depth cameras, leaving unmeasured zero/NaN holes
+   that must be handled explicitly.

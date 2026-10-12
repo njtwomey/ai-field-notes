@@ -2,31 +2,166 @@
 title: 'Image augmentation'
 kind: concept
 summary: 'Image augmentation trains on transformed copies of images, by geometric and photometric changes, erasing, mixing images and labels, and learned augmentation policies, to build invariances into a model.'
-tags: [data, computer-vision, deep-learning]
-aliases: []
+tags: [data, computer-vision, deep-learning, augmentation]
+aliases: [image data augmentation, visual augmentation, mixup, cutmix, randaugment]
 requires: []
-related: [data-augmentation]
-references: []
-status: stub
-updated: 2026-10-11
+related: [digital-images, image-preprocessing, data-augmentation, augmentation-principles]
+references: [zhang2018mixup, cubuk2019autoaugment, yun2019cutmix, cubuk2020randaugment]
+status: draft
+updated: 2026-10-12
 ---
 
+import { ImageAugmentationVisualizer } from './ImageAugmentationVisualizer'
+
 <Definition>
-To be written.
+**Image augmentation** is the systematic application of stochastic geometric, photometric, occlusion, and sample-mixing
+transformations to training images and their associated spatial annotations
+<Cite id="cubuk2019autoaugment, zhang2018mixup" />. By synthesizing realistic visual variability, augmentation enforces
+inductive priors—such as translation invariance, scale equivariance, and illumination robustness—preventing deep vision
+networks from memorizing training pixels and regularizing decision manifolds.
 </Definition>
+
+In computer vision, high-capacity neural networks (deep CNNs, Vision Transformers) contain tens or hundreds of millions
+of parameters, easily capable of memorizing every training image. Empirical risk minimization on small or un-augmented
+datasets inevitably leads to severe overfitting.
+
+Modern visual training relies heavily on aggressive data augmentation pipelines. These extend beyond simple horizontal
+flips and crops to include random erasing, inter-sample convex combinations (Mixup and CutMix), automated search
+policies (RandAugment), and test-time ensembling.
+
+<ImageAugmentationVisualizer />
 
 ## Geometric transforms
 
+Geometric transformations alter spatial pixel coordinates while preserving photometric intensity values:
+
+- **Horizontal flip:** Reflects pixels along the vertical center axis. Appropriate for general natural scenes (ImageNet,
+  COCO) where left-right symmetry holds.
+- **Vertical flip:** Reflects along the horizontal axis. Generally invalid for autonomous driving or natural photos
+  (where gravity imposes an upright world), but standard in aerial satellite remote sensing, microscopy, and
+  astronomical imaging.
+- **Random Resized Crop (RRC):** The foundational augmentation in modern vision:
+  1. Samples a random crop area fraction $s \sim \text{Uniform}(0.08, 1.0)$.
+  2. Samples a random aspect ratio $r \sim \text{Uniform}(3/4, 4/3)$.
+  3. Resizes the resulting crop to the target model resolution (e.g., $224 \times 224$).
+  RRC forces the network to recognize objects from partial glimpses and extreme zoom levels.
+- **Affine and perspective distortions:** Random rotation ($\theta \in [-\theta_{\max}, +\theta_{\max}]$), translation,
+  shearing, and homography warping simulate diverse camera vantage points.
+
 ## Photometric transforms
+
+Photometric transformations modify pixel intensity values while leaving spatial coordinates unchanged:
+
+- **Color jitter:** Randomly shifts brightness, contrast, saturation, and hue within bounded intervals:
+  $$
+  I_{\text{jitter}} = \alpha \cdot I + \beta
+  $$
+- **Gaussian blur:** Convolves images with a Gaussian blur kernel of random radius
+  $\sigma \in [\sigma_{\min}, \sigma_{\max}]$, teaching models invariance to camera defocus and motion blur.
+- **Solarization and Inversion:** Inverts pixel values exceeding a defined luminance threshold, forcing networks to rely
+  on geometric structure rather than absolute luminance polarity.
 
 ## Erasing and cutout
 
+Standard convolutional networks often latch onto small, highly discriminative shortcuts (e.g., classifying a dog purely
+by its snout). **Cutout** and **Random Erasing** counter this by randomly masking rectangular regions $[x, y, w, h]$
+with zeros, random noise, or the dataset mean channel color.
+
+By occluding key visual features during training, regional erasing forces the architecture to assemble distributed
+representations across the entire object extent, improving occlusion robustness in dense deployment scenes.
+
 ## Mixup and CutMix
+
+Rather than augmenting images individually, sample-mixing strategies synthesize novel training instances by combining
+pairs of random images and their corresponding ground-truth targets:
+
+### Mixup
+
+Zhang et al. introduced **Mixup**, which constructs virtual training examples via linear convex combinations of pairs
+$(\mathbf{x}_i, \mathbf{y}_i)$ and $(\mathbf{x}_j, \mathbf{y}_j)$ <Cite id="zhang2018mixup" />:
+
+$$
+\tilde{\mathbf{x}} = \lambda \mathbf{x}_i + (1 - \lambda) \mathbf{x}_j
+$$
+
+$$
+\tilde{\mathbf{y}} = \lambda \mathbf{y}_i + (1 - \lambda) \mathbf{y}_j
+$$
+
+where $\lambda \sim \text{Beta}(\alpha, \alpha)$ for hyperparameter $\alpha \in (0, 1]$. 
+
+Mixup enforces the principle that linear interpolations in feature space should correspond to linear interpolations in
+class predictions. This smooths decision boundaries between class manifolds, dampening overconfident predictions and
+improving calibration.
+
+### CutMix
+
+Yun et al. introduced **CutMix** to overcome Mixup's unnatural ghost-like blending <Cite id="yun2019cutmix" />. Instead
+of blending pixels across the entire canvas, CutMix replaces a rectangular bounding box region $\mathbf{M}$ from image
+$\mathbf{x}_i$ with the corresponding patch from image $\mathbf{x}_j$:
+
+$$
+\tilde{\mathbf{x}} = \mathbf{M} \odot \mathbf{x}_i + (\mathbf{1} - \mathbf{M}) \odot \mathbf{x}_j
+$$
+
+$$
+\tilde{\mathbf{y}} = \lambda \mathbf{y}_i + (1 - \lambda) \mathbf{y}_j
+$$
+
+where the mixing proportion $\lambda = 1 - \frac{w h}{W H}$ exactly equals the area proportion of the replaced patch.
+CutMix preserves natural local edge statistics while forcing networks to identify objects from localized sub-regions.
 
 ## Learned policies
 
+Designing augmentation pipelines manually requires tuning dozens of hyperparameters. Automated policies eliminate manual
+tuning:
+
+- **AutoAugment:** Formulates augmentation policy discovery as a reinforcement learning search problem over operations,
+  probabilities, and magnitudes <Cite id="cubuk2019autoaugment" />. Highly effective, but computationally prohibitive
+  ($>15{,}000$ GPU hours of search).
+- **RandAugment:** Drastically simplifies policy tuning to just two global hyperparameters
+  <Cite id="cubuk2020randaugment" />:
+  - $N$: Number of augmentation transformations applied sequentially per image.
+  - $M$: Global magnitude of distortion applied uniformly across all selected operations ($M \in [1, 30]$).
+  RandAugment matches or exceeds AutoAugment accuracy while requiring zero pre-training search compute.
+
 ## Test-time augmentation
+
+**Test-Time Augmentation (TTA)** applies data augmentation at inference time rather than training time:
+1. For an input test image $\mathbf{x}$, generate $K$ augmented variants
+   $\{\mathcal{T}_1(\mathbf{x}), \dots, \mathcal{T}_K(\mathbf{x})\}$ (e.g., original, horizontal flip, multi-scale
+   crops).
+2. Forward all $K$ views through the trained model.
+3. Average the resulting softmax predictions:
+   $$
+   \hat{\mathbf{p}}_{\text{TTA}} = \frac{1}{K} \sum_{k=1}^K f(\mathcal{T}_k(\mathbf{x}))
+   $$
+
+TTA acts as an ensemble over spatial views, consistently improving Top-1 accuracy by $0.5\text{--}1.5\%$. However, it
+multiplies inference latency and compute costs by $K\times$, limiting its use in real-time edge deployment.
 
 ## Augmenting boxes, masks and keypoints
 
+In object detection, instance segmentation, and pose estimation, transforming the input image requires applying
+identical synchronized geometric operations to all ground-truth spatial annotations:
+
+- **Bounding boxes:** Horizontal flipping maps box $[x_{\min}, y_{\min}, x_{\max}, y_{\max}]$ to
+  $[W - x_{\max}, y_{\min}, W - x_{\min}, y_{\max}]$. Affine rotations require calculating the tightest axis-aligned
+  bounding box enclosing the rotated corners.
+- **Segmentation masks:** Binary or integer class masks must be transformed using identical spatial matrices via
+  **nearest-neighbor interpolation** to avoid creating non-existent fractional class labels along boundaries.
+- **Keypoints:** Joint coordinates $(x, y)$ are multiplied by the transformation matrix, with visibility flags updated
+  to invisible if keypoints fall outside the cropped canvas.
+
 ## Pitfalls
+
+- **Semantic label inversion:** Applying horizontal flips to character recognition datasets (OCR, license plate readers)
+  alters class identity (flipping `"d"` produces `"b"`, flipping `"6"` produces an invalid token). Augmentations must
+  strictly preserve task-specific class semantics.
+- **Bilinear interpolation on segmentation masks:** Using bilinear or bicubic interpolation when rotating or scaling
+  segmentation masks introduces interpolated float values between discrete class IDs (e.g., averaging class 0 and class
+  4 produces class 2 along object boundaries).
+- **Augmentation leakage into validation benchmarks:** Applying random crops, flips, or noise to validation and test
+  sets introduces stochastic evaluation noise, corrupting reproducibility and comparison metrics.
+- **Excessive CutMix occlusion:** Pasting an oversized CutMix patch that completely covers a small ground-truth target
+  object results in a training sample where the label claims the target is present, but no target pixels remain visible.

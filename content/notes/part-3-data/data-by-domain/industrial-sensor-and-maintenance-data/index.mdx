@@ -1,0 +1,118 @@
+---
+title: 'Industrial sensor and maintenance data'
+kind: concept
+summary: 'Industrial data pair sensor streams with run-to-failure records and maintenance logs. Labels come from the logs, and sensors are replaced and recalibrated during the record.'
+tags: [data, time-series]
+aliases: []
+requires: []
+related: [driving-and-robotics-data, clinical-and-health-data, data-monitoring]
+references: [saxena2008cmapss, jardine2006]
+status: draft
+updated: 2026-10-11
+---
+
+import { IndustrialMaintenanceVisualizer } from './IndustrialMaintenanceVisualizer'
+
+<Definition>
+**Industrial sensor and maintenance data** pairs continuous physical telemetry streams—including vibration spectra,
+thermal sensors, hydraulic pressures, and rotational speeds captured by SCADA and IoT historians—with discrete
+maintenance event logs from Computerized Maintenance Management Systems (CMMS) <Cite id="jardine2006" />. In Prognostic
+Health Management (PHM), this data trains models to predict an asset's **Remaining Useful Life (RUL)** before
+irreversible physical failure occurs <Cite id="saxena2008cmapss" />.
+</Definition>
+
+Unlike software event streams, industrial sensor data originates from mechanical equipment governed by materials
+science, wear physics, and operational fatigue. Sensor streams capture continuous physical degradation, while
+maintenance databases record human interventions. Effectively processing industrial data requires harmonizing continuous
+telemetry with sparse, unstructured maintenance logs while disentangling sensor recalibration artifacts from actual
+mechanical wear.
+
+<IndustrialMaintenanceVisualizer />
+
+## Run-to-failure records
+
+The gold standard for predictive maintenance research is a **run-to-failure record**, which tracks continuous sensor
+measurements on an asset from initial healthy commissioning ($t = 0$) through gradual degradation until catastrophic
+failure ($t = T$):
+
+- **The NASA C-MAPSS benchmark:** The Commercial Modular Aero-Propulsion System Simulation (C-MAPSS) dataset
+  <Cite id="saxena2008cmapss" /> simulates fleet degradation in turbofan aircraft engines across varying flight
+  altitudes, Mach numbers, and throttle settings, providing the foundational benchmark for industrial prognostic
+  algorithms.
+- **Degradation kinetics:** Mechanical components (such as turbine blades, ball bearings, and gearboxes) do not degrade
+  linearly from day one. Instead, they exhibit a prolonged healthy baseline where no measurable wear exists, followed by
+  an inflection point where micro-fractures propagate exponentially into macroscopic failure.
+
+$$
+RUL(t) = \begin{cases}
+RUL_{\max} & \text{if } t < t_{\text{inflection}} \quad (\text{healthy baseline plateau}) \\
+T - t & \text{if } t \ge t_{\text{inflection}} \quad (\text{active degradation countdown})
+\end{cases}
+$$
+
+| Operational Phase | Cycle Interval | Physical Component State | Target Formulation |
+| :--- | :--- | :--- | :--- |
+| **Healthy Baseline** | $t < t_{\text{inflection}}$ | Pristine alloy; zero measurable fatigue | Constant $RUL_{\max}$ (prevents fitting noise) |
+| **Active Degradation** | $t_{\text{inflection}} \le t < T$ | Micro-fracture growth and vibration wear | Linear countdown $T - t$ to failure |
+| **Terminal Failure** | $t = T$ | Operational threshold breach ($RUL = 0$) | Asset emergency trip or scheduled overhaul |
+
+### Piecewise linear RUL targets
+
+If an algorithm is trained to predict exact linear countdown $RUL(t) = T - t$ on a machine with 300 cycles of life, it
+is forced to distinguish between $RUL = 280$ and $RUL = 260$ on identical, pristine components exhibiting zero physical
+damage. This forces models to overfit to uninformative baseline sensor noise.
+
+To prevent this, prognostic pipelines employ **piecewise linear target clipping** <Cite id="saxena2008cmapss" />:
+
+$$
+RUL_{\text{target}}(t) = \min(RUL_{\text{max}}, T - t)
+$$
+
+Capping maximum target RUL (e.g. $RUL_{\text{max}} = 125$ cycles) forces model capacity to concentrate on the active
+damage propagation phase where genuine degradation signatures emerge.
+
+## Labels from maintenance logs
+
+In operating factories, refineries, and power grids, ground-truth failure timestamps are not recorded by automated
+sensors. Instead, failure annotations are extracted from unstructured technician logs stored in CMMS databases:
+
+- **Preventive vs. corrective maintenance:**
+  - **Corrective maintenance:** The component experienced functional failure in service, causing an unplanned shutdown.
+    This represents a true failure event ($Y = 1$, uncensored).
+  - **Preventive maintenance:** Technicians preemptively replace an operational component according to a scheduled
+    calendar interval (e.g. replacing bearings every 2,000 hours). The component did *not* fail. Treating scheduled
+    preventative swaps as failure events introduces severe right-censoring bias, training models on artificial
+    operational schedules rather than physical wear limits <Cite id="jardine2006" />.
+- **Technician text phenotyping:** CMMS records contain brief, non-standardized technician notes (e.g., "re-torqued
+  flange", "vibration alarm cleared", "replaced worn seal"). Extracting clean labels requires natural language
+  processing to differentiate between routine inspections, sensor swaps, and genuine component breakdowns.
+
+## Sensor replacement and recalibration
+
+Industrial sensors (such as thermocouples, strain gauges, and piezoelectric accelerometers) operate in harsh physical
+environments subject to thermal cycling, vibration, and chemical corrosion:
+
+- **Sensor drift vs. asset wear:** Over months of continuous operation, sensor transducers suffer from calibration drift
+  (gradual baseline voltage shifts). Data pipelines must distinguish between slow sensor drift and true mechanical wear.
+- **Recalibration step jumps:** When an uncalibrated or failing sensor is replaced during routine maintenance, the
+  incoming signal displays an instantaneous step-function jump:
+  $$
+  x_{\text{sensor}}(t) \longrightarrow x_{\text{sensor}}(t) + \Delta
+  $$
+  A model that operates on absolute signal levels interprets the recalibration offset as an acute mechanical breakdown,
+  generating spurious critical alerts.
+- **Differential feature engineering:** Robust maintenance pipelines compute differential metrics—such as rate-of-change
+  $\frac{dx}{dt}$, vibration spectral kurtosis, frequency-band energy ratios, or deviations from fleet peer
+  medians—rather than relying on raw absolute scalar values.
+
+## Pitfalls
+
+- **Confusing scheduled replacements with component failures:** Failing to account for right-censoring in maintenance
+  logs, treating healthy parts replaced under preventive schedules as failures.
+- **Neglecting operating regime normalization:** Evaluating raw sensor values across variable ambient conditions (e.g.
+  varying ambient temperatures or compressor speeds); operating regime shifts produce signal changes that completely
+  mask subtle degradation signatures.
+- **Unclipped RUL targets on pristine assets:** Training regression models to predict exact lifetimes on newly installed
+  equipment where no physical damage signature has manifested.
+- **Ignoring step jumps from sensor maintenance:** Triggering automated shutdown alerts following routine sensor
+  replacements because the model misinterpreted an instrument recalibration offset as mechanical bearing seizure.

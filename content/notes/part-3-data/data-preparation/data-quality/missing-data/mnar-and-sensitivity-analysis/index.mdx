@@ -2,25 +2,179 @@
 title: 'Missing not at random and sensitivity analysis'
 kind: concept
 summary: 'When missingness depends on the missing values themselves, no method is unbiased without assumptions. Selection models, pattern-mixture models and delta adjustments state those assumptions and show how results change with them.'
-tags: [data, statistics]
-aliases: []
-requires: []
-related: [missingness-mechanisms]
-references: []
-status: stub
+tags: [data-preparation, statistics, missing-data, econometrics]
+aliases: [MNAR sensitivity analysis, tipping-point analysis, delta adjustment, selection models, pattern-mixture models, Heckman selection model, non-ignorable missingness]
+requires: [missingness-mechanisms, multiple-imputation, confidence-intervals]
+related: [missing-data-and-imputation, single-imputation, missing-values-at-prediction-time]
+references: [rubin1976, heckman1979, little2019, vanbuuren2011]
+status: draft
 updated: 2026-10-11
 ---
 
+import { MNARSensitivityExplorer } from './MNARSensitivityExplorer'
+
 <Definition>
-To be written.
+When missingness is **missing not at random** (MNAR), the probability of missingness depends directly on the unobserved
+values themselves:
+
+$$
+p(\Rmat \mid \Ymat, \psivec) = p(\Rmat \mid \Ymat_{\text{obs}}, \Ymat_{\text{mis}}, \psivec) \neq p(\Rmat \mid \Ymat_{\text{obs}}, \psivec).
+$$
+
+Because unobserved values $\Ymat_{\text{mis}}$ are never seen, MNAR mechanisms are observationally unidentifiable from
+observed data alone <Cite id="little2019" />. **Sensitivity analysis** formalizes untestable assumptions about
+$\Ymat_{\text{mis}}$ via sensitivity parameters $\delta$, mapping how estimated quantities $\hat{Q}(\delta)$ and
+decision boundaries shift as departures from MAR intensify.
 </Definition>
 
-## Selection models
+## The two factorizations of joint incomplete data
+
+To model data subject to missingness, statistical models express the joint distribution of data $\Ymat$ and missingness
+indicators $\Rmat$ using one of two mathematically complementary factorizations:
+
+1. **Selection models:** Decompose the joint distribution into the substantive data process and the conditional response
+   mechanism:
+   
+   $$
+   p(\Ymat, \Rmat \mid \thetavec, \psivec) = p(\Ymat \mid \thetavec)\, p(\Rmat \mid \Ymat, \psivec).
+   $$
+
+2. **Pattern-mixture models:** Decompose the joint distribution in reverse, modeling the marginal distribution of
+   missingness patterns and the conditional data distribution within each pattern:
+   
+   $$
+   p(\Ymat, \Rmat \mid \phivec, \alphavec) = p(\Rmat \mid \phivec)\, p(\Ymat \mid \Rmat, \alphavec).
+   $$
+
+## Selection models and Heckman's correction
+
+Selection models directly represent the physical intuition of data collection: a complete target variable $Y$ exists in
+nature, but an imperfect observation gate filters whether it is recorded.
+
+### Heckman's two-step selection model
+In econometrics, Heckman (1979) formulated selection bias as an omitted variable specification error
+<Cite id="heckman1979" />. Let $Y_i$ denote a continuous outcome (such as wage) and $Z_i^*$ denote a latent propensity
+to participate:
+
+$$
+\begin{aligned}
+Y_i &= \xvec_i^\top \betavec + \epsilon_{1i}, \\
+Z_i^* &= \wvec_i^\top \gammavec + \epsilon_{2i}, \qquad R_i = \mathbb{I}(Z_i^* > 0),
+\end{aligned}
+$$
+
+where $Y_i$ is observed if and only if $R_i = 1$. The error terms follow a bivariate normal distribution:
+
+$$
+\begin{pmatrix} \epsilon_{1i} \\ \epsilon_{2i} \end{pmatrix} \sim \mathcal{N}\left(\begin{pmatrix} 0 \\ 0 \end{pmatrix}, \begin{pmatrix} \sigma_1^2 & \rho \sigma_1 \\ \rho \sigma_1 & 1 \end{pmatrix}\right).
+$$
+
+When $\rho \neq 0$, the errors are correlated, meaning unobserved factors influencing participation also influence the
+outcome (an MNAR mechanism). Conditioning on observed cases ($R_i = 1$) introduces a non-zero conditional expectation:
+
+$$
+\mathbb{E}[Y_i \mid \xvec_i, \wvec_i, R_i = 1] = \xvec_i^\top \betavec + \rho \sigma_1 \lambda(\wvec_i^\top \gammavec),
+$$
+
+where $\lambda(u) = \frac{\phi(u)}{\Phi(u)}$ is the **inverse Mills ratio** (the hazard rate of the standard normal
+distribution).
+
+Heckman's two-step procedure:
+1. Estimate $\hat{\gammavec}$ via a probit regression of $R_i$ on $\wvec_i$, computing
+   $\hat{\lambda}_i = \lambda(\wvec_i^\top \hat{\gammavec})$.
+2. Fit OLS regression of $Y_i$ on $\xvec_i$ and the generated regressor $\hat{\lambda}_i$:
+   
+   $$
+   Y_i = \xvec_i^\top \betavec + \beta_\lambda \hat{\lambda}_i + \nu_i.
+   $$
+
+The coefficient $\hat{\beta}_\lambda = \rho \sigma_1$ directly tests for non-ignorable selection
+($H_0: \beta_\lambda = 0$).
+
+### Fragility of selection models
+Selection models rely heavily on bivariate normality. If the error distribution is misspecified (e.g., heavy tails or
+skewness), the Heckman estimator becomes severely biased. Moreover, without an **exclusion restriction**—a valid
+instrument variable that belongs in the selection equation $\wvec_i$ but is excluded from the outcome equation
+$\xvec_i$—the inverse Mills ratio $\lambda(\wvec_i^\top \hat{\gammavec})$ is nearly linear across much of its support,
+causing severe collinearity and exploding standard errors.
 
 ## Pattern-mixture models
 
-## Delta adjustment
+Pattern-mixture models structure the problem transparently by acknowledging which parameters are identified by data and
+which are inherently under-identified <Cite id="little2019" />.
 
-## Reporting sensitivity
+For a binary indicator $R \in \{0, 1\}$:
+- For respondents ($R = 1$), the distribution $p(Y \mid R = 1)$ is completely identified from observed data.
+- For non-respondents ($R = 0$), the distribution $p(Y \mid R = 0)$ is **completely unidentified**.
+
+To identify the overall marginal mean $\mathbb{E}[Y] = P(R=1)\mathbb{E}[Y \mid R=1] + P(R=0)\mathbb{E}[Y \mid R=0]$, the
+analyst must supply an explicit identifying restriction. Common restrictions include:
+- **Complete-case missing value (CCMV) restriction:** Assumes non-respondents share the conditional distribution of
+  respondents ($p(Y \mid X, R=0) = p(Y \mid X, R=1)$). This reduces directly to an MAR assumption.
+- **Neighboring case missing value (NCMV) restriction:** In longitudinal data, dropouts at time $t$ are assumed to match
+  subjects who dropped out at adjacent time steps.
+
+## Delta ($\delta$) adjustment and tipping-point analysis
+
+Because fully parametric MNAR models are structurally fragile, modern statistical guidance—including recommendations
+from the National Research Council (2010) for clinical trials—favors **tipping-point sensitivity analysis via
+$\delta$-adjustment** <Cite id="vanbuuren2011" /> <Cite id="little2019" />.
+
+### The $\delta$-adjustment formulation
+1. Impute missing values under a credible baseline MAR model (such as MICE with predictive mean matching) to obtain
+   baseline completed values $\tilde{Y}_{i, \text{mis}}^{\text{MAR}}$.
+2. Apply a systematic shift parameter $\delta$ to all unobserved entries:
+   
+   $$
+   \tilde{Y}_{i, \text{mis}}(\delta) = \tilde{Y}_{i, \text{mis}}^{\text{MAR}} + \delta.
+   $$
+
+   (For binary or log-transformed metrics, $\delta$ represents a log-odds shift or multiplicative ratio).
+3. Re-estimate the substantive quantity of interest $\hat{\Delta}(\delta)$ (e.g. treatment effect) across a continuous
+   sweep of $\delta \in [\delta_{\min}, \delta_{\max}]$.
+
+In a two-arm randomized trial where proportion $p_{\text{mis}}$ of the treatment group drops out, the adjusted treatment
+effect scales linearly with $\delta$:
+
+$$
+\hat{\Delta}(\delta) = \hat{\Delta}_{\text{MAR}} + p_{\text{mis}} \cdot \delta.
+$$
+
+<MNARSensitivityExplorer />
+
+### The tipping point ($\delta^*$)
+The **tipping point** $\delta^*$ is the threshold value of $\delta$ at which the scientific or operational conclusion
+overturns:
+- **Inferential tipping point:** The value of $\delta$ where the $95\%$ confidence interval encompasses zero, causing
+  the finding to lose statistical significance ($p \ge 0.05$).
+- **Point-estimate tipping point:** The value of $\delta$ where the point estimate itself crosses zero
+  ($\hat{\Delta}(\delta) = 0$).
+
+Once $\delta^*$ is calculated, domain experts evaluate whether a discrepancy of magnitude $\delta^*$ is clinically or
+economically plausible. For example:
+- If a drug shows a treatment benefit of $+1.6$ units, and the tipping point requires dropouts to experience a deficit
+  of $\delta^* = -4.5$ units (an implausibly catastrophic deterioration), the finding is highly robust against MNAR
+  departures.
+- If $\delta^* = -0.2$ units (a minor, routine fluctuation), the conclusion is fragile and cannot be trusted without
+  empirical follow-up data.
+
+## Reporting sensitivity in production and research
+
+Rigorous reporting of incomplete data analysis follows a multi-tiered protocol:
+1. **Primary analysis:** Pre-specified primary estimation conducted under an explicit, justifiable MAR model (e.g., MICE
+   with all relevant covariates).
+2. **Tipping-point curve:** A plot displaying the point estimate and confidence interval band across a spectrum of
+   non-ignorable shifts $\delta$.
+3. **Plausibility boundary:** Explicit domain justification comparing the tipping point $\delta^*$ to historical control
+   variances and known clinical bounds.
 
 ## Pitfalls
+
+- **Assuming machine learning models "solve" MNAR:** Tree ensembles (such as XGBoost with native NaN splits) learn to
+  route missingness based on observed correlations. If missingness is driven by unobserved values, tree algorithms
+  reproduce the truncation bias of the training sample without correcting the underlying selection effect.
+- **Applying Heckman corrections without exclusion restrictions:** Including the exact same feature vector $\xvec_i$ in
+  both the probit selection equation and the outcome equation relies entirely on the non-linearity of the normal CDF
+  tail. This produces severe multicollinearity, unstable parameter estimates, and massively inflated standard errors.
+- **Treating sensitivity analysis as a formal hypothesis test:** Sensitivity analysis does not test whether data are
+  MNAR; it assesses how robust a decision is to the assumption that data are MAR.

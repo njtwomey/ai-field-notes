@@ -2,27 +2,163 @@
 title: 'Gaps in time series'
 kind: concept
 summary: 'Gaps in a series are filled forward, interpolated or left marked. A backward fill or a centred interpolation uses future values and leaks, and a maximum staleness bounds how old a forward-filled value may be.'
-tags: [data, time-series]
-aliases: []
+tags: [data, time-series, imputation, leakage]
+aliases: [missing time series, time series missingness, temporal gaps, forward fill]
 requires: []
-related: [time-series-sampling-and-alignment, missing-data-and-imputation]
-references: []
-status: stub
-updated: 2026-10-11
+related: [time-series-sampling-and-alignment, missing-data-and-imputation, look-ahead-bias, intermittent-and-censored-series]
+references: [little2019, che2018]
+status: draft
+updated: 2026-10-12
 ---
 
+import { TimeSeriesGapsVisualizer } from './TimeSeriesGapsVisualizer'
+
 <Definition>
-To be written.
+**Gaps in time series** are intervals of unobserved, missing, or corrupted measurements
+$[t_{\text{start}}, t_{\text{end}}]$ occurring within an otherwise continuous temporal sequence
+<Cite id="little2019" />. Unlike cross-sectional tabular missingness, temporal gaps are fundamentally constrained by the
+arrow of time: online real-time inference requires causal imputation using strictly historical information ($s \le t$),
+whereas acausal backward filling or centred interpolation incorporates future information, introducing fatal look-ahead
+leakage.
 </Definition>
+
+In real-world telemetry, time series rarely arrive on pristine, uninterrupted sampling grids. Hardware sensors lose
+wireless connectivity, IoT devices experience intermittent battery outages, clinical monitors detach from patients
+during transit, and financial exchanges close for weekends and holidays.
+
+How practitioners handle these gaps directly shapes model behavior. Filling missing values forward assumes state
+persistence; interpolating assumes continuous trajectories; and decaying toward global baselines accounts for
+information entropy. Enforcing temporal causality and bounding staleness are mandatory to prevent offline models from
+exploiting future data that will not exist during production serving.
+
+<TimeSeriesGapsVisualizer />
 
 ## Forward fill
 
+The simplest and most pervasive causal imputation method is **forward fill**, also termed **Last Observation Carried
+Forward (LOCF)**:
+
+$$
+x_t^* = x_{\tau} \quad \text{where } \tau = \max \{s \le t : x_s \text{ is observed}\}
+$$
+
+- **Inductive bias:** Forward fill assumes that the underlying physical or economic state remains constant until a new
+  observation is registered. This step-function behavior aligns naturally with discrete, event-driven variables—such as
+  active pricing policies, software configuration flags, central bank interest rates, or user account tiers.
+- **Limitations:** When applied to continuous, mean-reverting, or volatile signals (such as blood glucose levels, stock
+  market returns, or seismic vibrations), forward fill produces artificial flatlines. It artificially depresses sample
+  variance, eliminates high-frequency spectral power, and inflates autocorrelation estimates.
+
 ## Interpolation
+
+When signals are known to govern smooth, continuous physical dynamical systems (such as atmospheric temperature or
+vehicle velocity), practitioners frequently deploy mathematical interpolation across observed boundary points
+$(t_0, x_0)$ and $(t_1, x_1)$:
+
+- **Linear interpolation:** Connects endpoints via a straight line:
+  $$
+  x_t^* = x_0 + \frac{t - t_0}{t_1 - t_0} (x_1 - x_0)
+  $$
+- **Spline interpolation:** Fits piecewise cubic polynomials that match first and second derivatives at knots, creating
+  smooth trajectories.
+
+While interpolation is mathematically rigorous for retrospective, offline scientific studies (e.g., historical climate
+analysis or paleontology), **it cannot be deployed in online real-time forecasting**. At any evaluation time
+$t \in (t_0, t_1)$, the future boundary point $(t_1, x_1)$ has not yet occurred.
 
 ## Look-ahead from backward fills
 
+A catastrophic failure mode in time series engineering is **backward fill** (Next Observation Carried Backward, or NOCB)
+and centred interpolation:
+
+$$
+x_t^* = x_{\tau} \quad \text{where } \tau = \min \{s \ge t : x_s \text{ is observed}\}
+$$
+
+Carrying future values backward in time violates temporal causality:
+
+1. **Information leakage:** If a machine sensor experiences a failure alert at $t=100$, backward-filling that alert
+   across an unobserved gap from $t=80$ to $t=99$ informs the model at $t=85$ that a breakdown is imminent.
+2. **Artificial predictive accuracy:** A predictive maintenance model trained on backward-filled data achieves
+   near-perfect offline accuracy on historical backtests. When deployed into live production, the model completely fails
+   because future observations are unavailable.
+3. **Centred rolling window contamination:** Applying bilateral filters, centred moving averages, or zero-phase digital
+   filtering (`scipy.signal.filtfilt`) across missing gaps injects post-gap target signals into historical features.
+
 ## Maximum staleness
+
+Carrying the last observation forward indefinitely is dangerous. If a heart-rate monitor disconnects for six hours,
+carrying forward the last known pulse rate of 72 bpm falsely presents a stable patient, masking potential cardiac
+arrest.
+
+Production data pipelines resolve this by enforcing a **maximum staleness threshold** $\tau_{\max}$:
+
+$$
+\text{Elapsed Staleness } \delta_t = t - \tau
+$$
+
+$$
+\hat{x}_t = \begin{cases} x_\tau & \text{if } \delta_t \le \tau_{\max} \\ \text{Expired / Null} & \text{if } \delta_t > \tau_{\max} \end{cases}
+$$
+
+When staleness exceeds $\tau_{\max}$:
+- Tabular GBDT models receive an explicit `NaN` or a sentinel value alongside a staleness feature.
+- Production systems route the signal to fallback heuristic controllers or trigger hardware telemetry alarms.
 
 ## Marking gaps
 
+In many domains, **missingness is informative** rather than missing completely at random (MCAR)
+<Cite id="little2019" />. A patient who does not receive arterial blood gas tests is likely breathing comfortably; a
+financial asset that is not traded for hours is suffering an illiquidity crisis.
+
+To allow models to exploit the informational value of gaps, feature pipelines explicitly mark missingness:
+
+### Binary missing indicators
+
+For each channel $j$, append an explicit binary indicator:
+
+$$
+m_{t, j} = \mathbb{I}(x_{t, j} \text{ is observed}) \in \{0, 1\}
+$$
+
+### Elapsed duration features
+
+Track the continuous time delta elapsed since the last valid measurement:
+
+$$
+\delta_{t, j} = \begin{cases} t - \tau_j & \text{if prior observation exists} \\ \Delta t_{\text{init}} & \text{otherwise} \end{cases}
+$$
+
+### Continuous neural decay (GRU-D)
+
+Che et al. formalized learned continuous decay for multivariate time series with missing values in **GRU-D**
+<Cite id="che2018" />. Instead of carrying values forward rigidly, the network computes a continuous exponential decay
+vector $\boldsymbol{\gamma}_t \in (0, 1)^D$:
+
+$$
+\boldsymbol{\gamma}_t = \exp\left( -\max\left(\mathbf{0}, \mathbf{W}_\gamma \boldsymbol{\delta}_t + \mathbf{b}_\gamma\right) \right)
+$$
+
+The effective input vector $\mathbf{x}_t^*$ decays smoothly from the last observed measurement $x_\tau$ toward the
+empirical historical mean $\tilde{x}$:
+
+$$
+x_{t, j}^* = m_{t, j} x_{t, j} + (1 - m_{t, j}) \left( \gamma_{t, j} x_{\tau, j} + (1 - \gamma_{t, j}) \tilde{x}_j \right)
+$$
+
+This allows neural networks to retain recent observations over short gaps while gracefully reverting to population
+baselines over prolonged outages.
+
 ## Pitfalls
+
+- **Applying global interpolation across split boundaries:** Executing `df.interpolate()` or spline smoothing on the
+  entire time series prior to partitioning into train, validation, and test splits leaks future test observations into
+  training folds.
+- **Confounding irregular sampling with missingness:** Assuming that all gaps represent failures. Event-driven IoT
+  architectures transmit data only when sensor deltas exceed deadband thresholds; assuming constant missingness
+  misinterprets intentional bandwidth optimization.
+- **Silent flatlining in safety-critical loops:** Forward-filling sensor values indefinitely without staleness
+  expiration masks sensor hardware disconnections, leading to silent failures in autonomous control loops.
+- **Discontinuous step jumps at gap boundaries:** When a long gap ends with an observation far removed from the
+  forward-filled level, the sudden step change introduces high-frequency transient spikes into velocity and derivative
+  features.

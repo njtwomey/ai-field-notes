@@ -2,27 +2,155 @@
 title: 'Learned imputation'
 kind: concept
 summary: 'Learned imputers fit a model of the joint distribution, such as random forests, low-rank matrix completion, autoencoders or diffusion models, and fill values from it. They are judged against simple fills on the downstream task.'
-tags: [data, deep-learning]
-aliases: []
-requires: []
-related: [missing-data-and-imputation]
-references: []
-status: stub
+tags: [data-preparation, machine-learning, missing-data, deep-learning]
+aliases: [MissForest, matrix completion, GAIN, autoencoder imputation, diffusion imputation, iterative forest imputation]
+requires: [missingness-mechanisms, single-imputation, decision-tree, random-forest]
+related: [missing-data-and-imputation, multiple-imputation, missing-values-at-prediction-time]
+references: [stekhoven2012, candes2009matrix, yoon2018gain, vanbuuren2011]
+status: draft
 updated: 2026-10-11
 ---
 
+import { LearnedImputationExplorer } from './LearnedImputationExplorer'
+
 <Definition>
-To be written.
+**Learned imputation** fits a supervised, low-rank, or generative model $\mathcal{M}_\theta$ to approximate the joint
+probability distribution $p(\Ymat)$ or the set of conditional expectations $\mathbb{E}[Y_j \mid \Ymat_{-j}]$ across
+observed entries $\Ymat_{\text{obs}}$. 
+
+Unlike heuristic single imputers (such as unconditional mean or median fills), learned imputers exploit multivariate
+dependencies and non-linear manifolds to predict or sample unobserved entries:
+
+$$
+\hat{Y}_{i, \text{mis}} \sim p_{\mathcal{M}_\theta}\left(Y_{i, \text{mis}} \mid \yvec_{i, \text{obs}}\right).
+$$
 </Definition>
 
-## Iterative forest imputation
+## Iterative forest imputation (MissForest)
 
-## Matrix completion
+MissForest (Stekhoven & Bühlmann 2012) is a non-parametric, iterative imputation algorithm built on ensembles of
+decision trees <Cite id="stekhoven2012" />. It handles mixed data types (continuous, ordinal, and nominal variables),
+captures complex non-linear feature interactions, and requires no hyperparameter tuning or distribution assumptions.
 
-## Autoencoder imputers
+### Algorithmic procedure
+1. **Initialisation:** Sort the features $\Ymat = [\yvec_1, \dots, \yvec_D]$ in ascending order of missingness
+   proportion. Missing values are initially filled using unconditional mean (continuous) or mode (categorical)
+   imputation to produce $\tilde{\Ymat}^{(0)}$.
+2. **Iterative chained estimation:** For iterations $t = 1, 2, \dots, T_{\max}$:
+   - For each feature $j \in \{1, \dots, D\}$:
+     - Partition feature $\yvec_j$ into observed indices $\mathcal{S}_{\text{obs}}^{(j)}$ and missing indices
+       $\mathcal{S}_{\text{mis}}^{(j)}$.
+     - Train a Random Forest $\mathcal{M}_j$ using the remaining features $\tilde{\Ymat}_{-j}^{(t)}$ as predictors,
+       fitted exclusively on observed rows $\mathcal{S}_{\text{obs}}^{(j)}$.
+     - Predict the missing entries:
+       
+       $$
+       \tilde{\Ymat}_{\text{mis}, j}^{(t)} = \mathcal{M}_j\left(\tilde{\Ymat}_{\text{mis}, -j}^{(t)}\right).
+       $$
+3. **Stopping criterion:** Convergence is assessed by measuring the change in imputed values between consecutive
+   iterations. For continuous variables, normalized root mean square error (NRMSE) is computed:
+   
+   $$
+   \gamma_{\text{cont}} = \sqrt{\frac{\sum_{i \in \mathcal{S}_{\text{mis}}} \left(\tilde{Y}_{ij}^{(t)} - \tilde{Y}_{ij}^{(t-1)}\right)^2}{\sum_{i \in \mathcal{S}_{\text{mis}}} \left(\tilde{Y}_{ij}^{(t)}\right)^2}}.
+   $$
 
-## Diffusion imputers
+   Iteration halts when $\gamma_{\text{cont}}$ (and the proportion of falsely classified categorical entries
+   $\gamma_{\text{cat}}$) increases for the first time, signaling that subsequent passes risk overfitting to residual
+   noise. Typically, convergence is achieved in 4 to 8 iterations.
 
-## Comparing with simple fills
+While highly accurate on complex tabular manifolds, MissForest incurs substantial computational cost: each iteration
+trains $D$ independent random forest ensembles, scaling as $\mathcal{O}(T \cdot D \cdot B \cdot N \log N)$ where $B$ is
+the number of trees per forest.
+
+## Low-rank matrix completion
+
+When data features are linear combinations of a small number of latent factors (such as collaborative filtering ratings,
+multi-sensor telemetry, or genomics arrays), incomplete data matrices can be reconstructed using low-rank matrix
+completion <Cite id="candes2009matrix" />.
+
+Let $\Omega = \{(i, j) : R_{ij} = 1\}$ denote the set of observed matrix coordinates, and let
+$\mathcal{P}_\Omega(\Xmat)$ denote the projection operator that preserves entries in $\Omega$ and zeroes out entries
+outside $\Omega$. Matrix completion seeks the lowest-rank matrix that agrees with the observed data:
+
+$$
+\min_{\Xmat \in \mathbb{R}^{N \times D}} \operatorname{rank}(\Xmat) \quad \text{subject to} \quad \mathcal{P}_\Omega(\Xmat) = \mathcal{P}_\Omega(\Ymat).
+$$
+
+Because matrix rank minimization is NP-hard, Candès & Recht (2009) established that under mild incoherence conditions,
+rank minimization can be solved exactly via its convex relaxation: the **nuclear norm**
+$\|\Xmat\|_* = \sum_k \sigma_k(\Xmat)$ (the sum of singular values) <Cite id="candes2009matrix" />:
+
+$$
+\min_{\Xmat \in \mathbb{R}^{N \times D}} \|\Xmat\|_* + \frac{1}{2\lambda} \left\|\mathcal{P}_\Omega(\Xmat - \Ymat)\right\|_F^2.
+$$
+
+Standard solvers utilize Singular Value Thresholding (SVT) or Alternating Least Squares (ALS) factorizing
+$\Xmat = \Umat \Vmat^\top$ with rank $r \ll \min(N, D)$. Low-rank completion is computationally efficient and scales to
+massive sparse matrices, but it fails to capture non-linear manifold geometry or complex tree-structured interactions.
+
+## Deep generative imputers: autoencoders, GAIN, and diffusion
+
+Modern deep learning architectures formulate imputation as generative modeling conditioned on incomplete observations.
+
+### Denoising autoencoders (DAEs)
+Denoising autoencoders mask a random subset of observed inputs during training and optimize reconstruction loss over the
+artificially corrupted coordinates. At inference time, the observed entries $\yvec_{\text{obs}}$ are fed into the
+network, and the reconstructed output $\hat{\yvec} = g(f(\yvec))$ provides imputed values for missing positions.
+
+### Generative Adversarial Imputation Networks (GAIN)
+GAIN (Yoon et al. 2018) adapts the GAN framework directly to arbitrary missingness patterns <Cite id="yoon2018gain" />:
+- **Generator ($G$):** Takes the observed data $\tilde{\Ymat}$, the binary mask $\Mmat = \mathbf{1} - \Rmat$, and random
+  noise $\Zmat$, outputting completed matrix
+  $\hat{\Ymat} = \Mmat \odot \tilde{\Ymat} + (\mathbf{1} - \Mmat) \odot G(\tilde{\Ymat}, \Mmat, \Zmat)$.
+- **Discriminator ($D$):** Predicts which components of $\hat{\Ymat}$ were genuine observations versus synthetic
+  imputations.
+- **Hint mechanism:** To prevent trivial local minima, a hint vector
+  $\mathbf{H} = \mathbf{B} \odot \Mmat + 0.5(\mathbf{1} - \mathbf{B})$ reveals partial ground truth to the
+  discriminator, ensuring the generator correctly models the true conditional distribution
+  $p(\Ymat_{\text{mis}} \mid \Ymat_{\text{obs}})$.
+
+### Score-based diffusion imputers
+Diffusion models (such as TabDDPM or CSDI) train a forward stochastic differential equation that progressively diffuses
+data toward Gaussian noise, paired with a learned reverse drift network. During sampling, the observed coordinates
+$\mathcal{P}_\Omega(\Ymat)$ are clamped to their known noisy states at each timestep, forcing reverse generation to
+sample directly from the conditional posterior $p(\Ymat_{\text{mis}} \mid \Ymat_{\text{obs}})$.
+
+<LearnedImputationExplorer />
+
+## Evaluating against simple baseline fills
+
+A crucial operational question is whether complex learned imputers justify their computational overhead compared to
+simple baselines (such as median imputation paired with missing indicator flags).
+
+| Scenario | Recommended Imputer | Rationale |
+| :--- | :--- | :--- |
+| **Downstream Gradient Boosted Trees (GBDT)** | Simple median / native NaN routing | Tree algorithms naturally split on missingness indicators; deep imputation adds latency without meaningful AUC/RMSE gain. |
+| **Downstream Linear / Neural Models** | Stochastic regression or MissForest | Neural networks and linear models lack native branching and benefit substantially from faithful non-linear manifold recovery. |
+| **Unsupervised Analysis (PCA, Clustering)** | MissForest or Matrix Completion | Preserving multivariate covariance and metric distances is essential; simple mean fills distort cluster boundaries. |
+| **High-Throughput Online Inference (&lt;10ms)** | Mean / median lookup tables | Iterative forests and diffusion models cannot satisfy strict online latency SLAs. |
+
+In extensive empirical benchmarks on tabular datasets, sophisticated neural imputers frequently underperform MissForest
+or tuned single imputation pipelines due to the inductive bias of decision trees on heterogeneous tabular features.
+
+## Operational latency and deployment architectures
+
+Deploying learned imputers in production environments requires decoupling training from scoring:
+
+1. **Offline batch pipelines:** Imputers such as MissForest or matrix completion are fully viable in offline batch ETL
+   pipelines where hourly or daily latency is acceptable.
+2. **Real-time online serving:** In low-latency scoring services, learned imputers are typically pre-compiled:
+   - Quantized regression trees or compact multi-layer perceptrons (MLPs) predict missing features using fixed input
+     sub-graphs.
+   - Fallback cascading: If a high-latency learned imputer times out, the serving pipeline defaults to pre-computed
+     population medians.
 
 ## Pitfalls
+
+- **Data leakage in cross-validation:** Fitting an iterative imputer like MissForest across the full dataset prior to
+  cross-validation splits causes target and feature leakage across validation folds. The imputer must be wrapped inside
+  a formal pipeline (e.g. `scikit-learn` `Pipeline`) that fits strictly on training folds.
+- **Inference latency bottlenecks:** Attempting to invoke an iterative random forest imputer at prediction time requires
+  evaluating hundreds of decision trees sequentially, introducing unacceptable tail latency.
+- **Overfitting on small samples:** Complex deep generative models (such as autoencoders or GAIN) require substantial
+  training sample sizes to learn stable representations. On small datasets ($N < 5{,}000$), they readily overfit to
+  spurious patterns, underperforming simple $k$-NN or MissForest.

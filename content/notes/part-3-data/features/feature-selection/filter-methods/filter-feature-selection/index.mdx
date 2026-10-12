@@ -1,28 +1,145 @@
 ---
 title: 'Filter methods'
 kind: concept
-summary: 'Filter methods score each feature, or set of features, with a statistic computed without the final model, such as correlation, a test statistic or mutual information, and keep the best scoring.'
+summary: 'Filter methods rank candidate features by evaluating statistical dependencies with the target independently of model training, using correlation, test statistics, mutual information, or distance-based heuristics.'
 tags: [data, feature-engineering]
-aliases: []
-requires: []
-related: [feature-selection, mutual-information]
-references: []
-status: stub
+aliases: [filter feature selection, filter feature selection methods, univariate feature selection, mRMR, minimum redundancy maximum relevance]
+requires: [feature-selection]
+related: [wrapper-feature-selection, embedded-feature-selection, feature-importance-measures, selection-inside-cross-validation, mutual-information]
+references: [guyon2003, peng2005]
+status: draft
 updated: 2026-10-11
 ---
 
+import FilterSelectionExplorer from './FilterSelectionExplorer';
+
 <Definition>
-To be written.
+A **filter method** is a feature selection technique that evaluates the statistical relationship between candidate
+features and the target variable (or among features themselves) before and independently of any downstream learning
+algorithm. Because filtering decouples feature screening from model fitting, it scales gracefully to high-dimensional
+regimes ($p \gg n$) with $\mathcal{O}(p)$ time complexity for univariate criteria, serving as an efficient first-stage
+triage before computationally intensive wrapper or embedded models.
 </Definition>
 
-## Univariate scores
+Filter methods treat the machine learning algorithm as an agnostic downstream consumer. Features are selected or dropped
+solely based on intrinsic data properties: linear correlation, variance, distributional divergence across class labels,
+information-theoretic dependence, or local neighborhood separation.
 
-### Correlation and test statistics
+<FilterSelectionExplorer />
 
-## Mutual information
+## Univariate statistical screening
 
-## Relevance and redundancy
+Univariate filters evaluate each feature $X_j$ in isolation against the response variable $Y$. Features are ordered by
+score, and the top $k$ features or those exceeding a statistical threshold are retained.
 
-## ReliefF
+### Parametric and non-parametric correlation
 
-## Pitfalls
+When predicting a continuous target $Y$, correlation quantifies the strength of bivariate association:
+
+1. **Pearson correlation coefficient $r$**: Assumes bivariate normality and linear relationship:
+   $$
+   r(X_j, Y) = \frac{\sum_{i=1}^n (x_{ij} - \bar{x}_j)(y_i - \bar{y})}{\sqrt{\sum_{i=1}^n (x_{ij} - \bar{x}_j)^2} \sqrt{\sum_{i=1}^n (y_i - \bar{y})^2}}
+   $$
+2. **Spearman rank correlation $\rho$**: Assesses monotonic (not necessarily linear) association by computing Pearson
+   correlation over feature ranks $R(X_j)$ and $R(Y)$, making it robust to heavy tails and outliers:
+   $$
+   \rho(X_j, Y) = 1 - \frac{6 \sum_{i=1}^n d_i^2}{n(n^2 - 1)}, \quad \text{where } d_i = R(x_{ij}) - R(y_i)
+   $$
+
+### Hypothesis testing statistics
+
+When predicting a discrete label $Y \in \{1, \dots, K\}$, standard hypothesis tests assess whether class-conditional
+distributions differ significantly:
+
+- **ANOVA $F$-test**: For continuous features across categorical groups, testing the null hypothesis
+  $H_0: \mu_1 = \mu_2 = \dots = \mu_K$:
+  $$
+  F = \frac{\text{MS}_{\text{between}}}{\text{MS}_{\text{within}}} = \frac{\sum_{k=1}^K n_k (\bar{x}_{kj} - \bar{x}_j)^2 / (K - 1)}{\sum_{k=1}^K \sum_{i=1}^{n_k} (x_{kji} - \bar{x}_{kj})^2 / (n - K)}
+  $$
+- **Chi-square contingency test $\chi^2$**: For non-negative categorical or binned features across classes, evaluating
+  independence in an $R \times C$ contingency table:
+  $$
+  \chi^2 = \sum_{r=1}^R \sum_{c=1}^C \frac{(O_{rc} - E_{rc})^2}{E_{rc}}, \quad E_{rc} = \frac{\sum_k O_{rk} \sum_k O_{kc}}{n}
+  $$
+
+To avoid false discoveries when screening tens of thousands of features, unadjusted $p$-values should be corrected for
+multiple testing using the Benjamini-Hochberg False Discovery Rate (FDR) procedure: rank
+$p_{(1)} \le p_{(2)} \le \dots \le p_{(p)}$ and retain features satisfying
+$p_{(i)} \le \frac{i}{p} \alpha_{\text{FDR}}$.
+
+## Mutual information and non-linear dependence
+
+Linear correlation and standard variance tests fail when dependencies are non-linear or non-monotonic. Mutual
+information (MI) measures general statistical dependence between random variables:
+
+$$
+I(X_j; Y) = \iint p(x, y) \log \frac{p(x, y)}{p(x) p(y)} \, dx \, dy = H(Y) - H(Y \mid X_j)
+$$
+
+Unlike correlation, $I(X_j; Y) = 0$ if and only if $X_j$ and $Y$ are strictly statistically independent. If $Y = X_j^2$
+with $X_j \sim \mathcal{U}(-1, 1)$, Pearson correlation yields $r = 0$, yet mutual information detects strong predictive
+capacity.
+
+For continuous variables, mutual information is estimated non-parametrically using $k$-nearest neighbors via the
+Kraskov-Stögbauer-Grassberger (KSG) estimator:
+
+$$
+I(X; Y) \approx \psi(k) - \frac{1}{n}\sum_{i=1}^n \left[ \psi(n_x(i) + 1) + \psi(n_y(i) + 1) \right] + \psi(n)
+$$
+
+where $\psi$ denotes the digamma function, and $n_x(i), n_y(i)$ count neighbor points within marginal distance
+hypercubes centered on sample $i$.
+
+## Relevance versus redundancy (mRMR)
+
+A foundational flaw in univariate screening is the **redundancy trap**: two features that are individually highly
+correlated with $Y$ (e.g., duplicated sensor readouts or near-synonymous text features) will both achieve top univariate
+scores, leaving redundant columns that waste downstream capacity while failing to capture complementary signals.
+
+The **Minimum Redundancy Maximum Relevance** (mRMR) framework <Cite id="peng2005" /> addresses this by optimizing a
+combined objective that maximizes dependency with the target while penalizing pairwise mutual information among already
+selected features $S$:
+
+### Mutual information difference (MID)
+
+$$
+\max_{X_j \in \Omega \setminus S} \left[ I(X_j; Y) - \frac{1}{|S|} \sum_{X_s \in S} I(X_j; X_s) \right]
+$$
+
+### Mutual information quotient (MIQ)
+
+$$
+\max_{X_j \in \Omega \setminus S} \left[ \frac{I(X_j; Y)}{\frac{1}{|S|} \sum_{X_s \in S} I(X_j; X_s) + \epsilon} \right]
+$$
+
+mRMR uses greedy forward search: it initializes $S$ with the single feature exhibiting maximum $I(X_j; Y)$, then at each
+subsequent step chooses the candidate that provides the greatest incremental information after discounting overlap with
+$S$.
+
+## Distance-based filtering: Relief and ReliefF
+
+Relief and its multiclass generalization ReliefF evaluate features based on their ability to distinguish between samples
+that are close to each other in instance space <Cite id="guyon2003" />.
+
+For each randomly sampled instance $x_i$, ReliefF locates its $k$ nearest neighbors within the same class (the
+**Near-Hits** $\mathcal{H}$) and its $k$ nearest neighbors in each differing class (the **Near-Misses**
+$\mathcal{M}(C)$). Feature weights $W_j$ are iteratively updated:
+
+$$
+W_j \leftarrow W_j - \sum_{h \in \mathcal{H}} \frac{\text{diff}(j, x_i, h)}{m \cdot k} + \sum_{C \neq \text{class}(x_i)} \left[ \frac{P(C)}{1 - P(\text{class}(x_i))} \sum_{m \in \mathcal{M}(C)} \frac{\text{diff}(j, x_i, m)}{m \cdot k} \right]
+$$
+
+Because ReliefF assesses distances in multidimensional instance neighborhoods rather than marginal projections, it can
+detect contextual feature interactions (such as XOR-like problems) that appear completely uniform to purely univariate
+filters.
+
+## Structural pitfalls and selection bias
+
+1. **Blindness to multivariate interactions**: Purely univariate filters evaluate $P(Y \mid X_j)$ rather than
+   $P(Y \mid X_1, \dots, X_p)$. Two features that are individually uncorrelated with $Y$ may be collectively
+   deterministic when combined.
+2. **Model mismatch**: Filtering by linear correlation discard features that possess non-linear predictive boundaries,
+   even when downstream tree models or neural networks could exploit them effortlessly.
+3. **Selection bias via data leakage**: Performing filter ranking or variance thresholding across the entire dataset
+   prior to splitting leaks target labels and sample statistics into test evaluation <Cite id="ambroise2002" />. All
+   filter scoring and feature subset selection must be performed strictly within the training folds of cross-validation.

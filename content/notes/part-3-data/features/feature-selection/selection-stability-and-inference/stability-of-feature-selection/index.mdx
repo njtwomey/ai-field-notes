@@ -1,28 +1,172 @@
 ---
 title: 'Stability and inference after selection'
 kind: concept
-summary: 'A selected feature set varies with the sample. Stability selection keeps features chosen across many subsamples; knockoffs and selective inference control the rate of false selections.'
+summary: 'Feature selection algorithms are inherently sensitive to data perturbations. Stability selection, Boruta shadow features, and knockoffs quantify subset reproducibility and guarantee rigorous false discovery control.'
 tags: [data, feature-engineering, hypothesis-testing]
-aliases: []
-requires: []
-related: [feature-selection, bootstrap]
-references: []
-status: stub
+aliases: [stability of feature selection, feature selection stability, stability selection, Boruta, knockoffs, model-x knockoffs, selective inference, post-selection inference]
+requires: [feature-selection]
+related: [selection-inside-cross-validation, embedded-feature-selection, filter-feature-selection, wrapper-feature-selection]
+references: [meinshausen2010, kursa2010, barber2015, nogueira2018]
+status: draft
 updated: 2026-10-11
 ---
 
+import StabilitySelectionExplorer from './StabilitySelectionExplorer';
+
 <Definition>
-To be written.
+**Feature selection stability** quantifies the reproducibility and robustness of a selected feature subset under
+sampling perturbations of the training data. Because standard feature selection heuristics (such as Lasso, stepwise
+wrappers, or tree splits) can yield drastically different subsets when fit on slightly different subsamples, stability
+techniques—including stability selection, Boruta shadow features, and Model-X knockoffs—control false discovery rates
+and ensure scientific reproducibility.
 </Definition>
 
-## Instability of selection
+In high-dimensional regimes ($p \gg n$) or environments with collinearity, small perturbations in data rows can cause
+selection algorithms to flip-flop between competing collinear variables. Quantifying and enforcing stability transforms
+feature selection from an opportunistic empirical heuristic into a statistically rigorous inference procedure.
+
+<StabilitySelectionExplorer />
+
+## Instability in feature selection
+
+Feature selection algorithms can be mathematically viewed as mapping a dataset $\mathcal{D}$ to a binary indicator
+vector $s \in \{0, 1\}^p$, where $s_j = 1$ denotes feature inclusion. Instability arises when two independent random
+samples $\mathcal{D}_a, \mathcal{D}_b \sim \mathbb{P}^n$ yield subsets with low overlap.
+
+### Measuring subset stability
+
+Historically, stability was evaluated using pairwise Jaccard similarity between two selected sets $S_a, S_b$:
+
+$$
+J(S_a, S_b) = \frac{|S_a \cap S_b|}{|S_a \cup S_b|}
+$$
+
+However, raw Jaccard index is mathematically confounded by subset size: selecting 90 out of 100 features at random
+yields high Jaccard similarity by pure chance.
+
+To resolve this, Sarah Nogueira et al. <Cite id="nogueira2018" /> established a mathematically grounded, Pearson-like
+stability index $\hat{\Phi}$ across $M$ subsample runs:
+
+$$
+\hat{\Phi} = 1 - \frac{\frac{1}{p} \sum_{j=1}^p s_j^2}{\frac{\bar{k}}{p} \left( 1 - \frac{\bar{k}}{p} \right)}
+$$
+
+where $s_j^2 = \frac{M}{M-1} \hat{p}_j (1 - \hat{p}_j)$ is the sample variance of the selection indicator for feature
+$j$, $\hat{p}_j$ is its empirical selection frequency, and $\bar{k} = \sum_{j=1}^p \hat{p}_j$ is the average subset
+size. $\hat{\Phi}$ is bounded in $[-1, 1]$, equals zero under random feature assignment regardless of subset
+cardinality, and reaches $1.0$ if and only if all subsamples select the exact same features.
 
 ## Stability selection
 
-## Boruta
+Developed by Nicolai Meinshausen and Peter Bühlmann <Cite id="meinshausen2010" />, **stability selection** wraps
+subsampling around existing feature selectors (such as Lasso, Elastic Net, or Orthogonal Matching Pursuit) to convert
+unstable point estimators into reliable selections with provable error bounds.
 
-## Knockoffs
+### The subsampling protocol
 
-## Inference after selection
+1. Given dataset $\mathcal{D}$ of $n$ samples, draw $B$ random subsamples $\mathcal{D}_1, \dots, \mathcal{D}_B$, each of
+   size $\lfloor n/2 \rfloor$ without replacement.
+2. Fit the base feature selector on each subsample $b \in \{1, \dots, B\}$, obtaining active subset $\hat{S}_b$.
+3. Compute the empirical selection probability for each feature $j \in \{1, \dots, p\}$:
+   $$
+   \hat{\Pi}_j = \frac{1}{B} \sum_{b=1}^B \mathbb{I}(j \in \hat{S}_b)
+   $$
+4. Retain the stable subset:
+   $$
+   \hat{S}_{\text{stable}} = \left\{ j : \hat{\Pi}_j \ge \pi_{\text{thr}} \right\}
+   $$
+   where $\pi_{\text{thr}} \in (0.5, 1.0)$ is a user-chosen stability threshold (typically $0.75$ or $0.80$).
 
-## Pitfalls
+### Finite-sample false discovery bound
+
+Meinshausen and Bühlmann proved that under exchangeability of noise features, the expected number of falsely selected
+noise variables $\mathbb{E}[V]$ is bounded by:
+
+$$
+\mathbb{E}[V] \le \frac{1}{2\pi_{\text{thr}} - 1} \frac{q^2}{p}
+$$
+
+where $q = \mathbb{E}[|\hat{S}|]$ is the average number of features selected per subsample, and $p$ is the total
+candidate feature count. This gives practitioners a direct mathematical dial to control false discoveries without
+relying on asymptotic assumptions.
+
+## Shadow feature benchmarking: The Boruta algorithm
+
+The Boruta algorithm <Cite id="kursa2010" /> is an all-relevant feature selection method built on Random Forests that
+identifies all features statistically associated with the target, rather than seeking a minimal non-redundant subset.
+
+### The shadow permutation mechanism
+
+1. **Shadow creation**: For every feature $X_j$, construct a synthetic **shadow feature** $\tilde{X}_j$ by permuting its
+   values across rows. This preserves the marginal distribution, mean, and variance of the feature while destroying any
+   relationship with target $Y$.
+2. **Joint model fit**: Concatenate original features with shadow features into an expanded matrix
+   $[X, \tilde{X}] \in \mathbb{R}^{n \times 2p}$.
+3. **Importance scoring**: Train a Random Forest and compute Z-scores of permutation importance for all $2p$ attributes.
+4. **Noise ceiling**: Determine the maximum Z-score achieved across all shadow attributes:
+   $$
+   Z_{\max}^{\text{shadow}} = \max_{j=1,\dots,p} Z(\tilde{X}_j)
+   $$
+5. **Statistical comparison**: In each iteration, test whether an original feature scores significantly higher than
+   $Z_{\max}^{\text{shadow}}$.
+6. Features that consistently outperform the shadow ceiling across successive iterations (evaluated via a two-sided
+   binomial test with Bonferroni correction) are tagged as **Confirmed**; features consistently underperforming are
+   eliminated as **Rejected**.
+
+## Model-X Knockoffs and exact FDR control
+
+Developed by Rina Foygel Barber and Emmanuel Candès <Cite id="barber2015" />, the knockoff framework achieves exact,
+finite-sample False Discovery Rate (FDR) control for arbitrary non-linear and high-dimensional models without requiring
+data splitting.
+
+### Constructing knockoff variables
+
+For feature matrix $X \in \mathbb{R}^{n \times p}$, a knockoff matrix $\tilde{X} \in \mathbb{R}^{n \times p}$ is
+constructed such that:
+1. Knockoffs mimic the exact covariance structure $\Sigma$ of the original features:
+   $$
+   [X, \tilde{X}]^T [X, \tilde{X}] \approx \begin{bmatrix} \Sigma & \Sigma - \text{diag}(s) \\ \Sigma - \text{diag}(s) & \Sigma \end{bmatrix}
+   $$
+2. Knockoffs are constructed without ever looking at the target $Y$, ensuring conditional independence
+   $Y \perp \tilde{X} \mid X$.
+
+### The knockoff statistic and threshold
+
+A feature statistic $W_j = f(X_j, \tilde{X}_j)$ compares the predictive power of original feature $X_j$ against its
+synthetic knockoff $\tilde{X}_j$:
+
+$$
+W_j = |Z_j| - |\tilde{Z}_j|
+$$
+
+Under the null hypothesis that feature $j$ has no true effect on $Y$, original feature $X_j$ and knockoff $\tilde{X}_j$
+are exchangeable, meaning $W_j$ is symmetric around zero. A positive $W_j \gg 0$ indicates genuine predictive power.
+
+The knockoff filter chooses a data-dependent cutoff threshold $\tau$:
+
+$$
+\tau = \min \left\{ t > 0 : \frac{1 + |\{j : W_j \le -t\}|}{|\{j : W_j \ge t\}| \vee 1} \le q \right\}
+$$
+
+Selecting all features with $W_j \ge \tau$ mathematically guarantees that the False Discovery Rate
+$\mathbb{E}\left[ \frac{V}{|S| \vee 1} \right] \le q$ in finite samples.
+
+## Selective inference: The post-selection $p$-value crisis
+
+A ubiquitous pitfall in empirical modeling is computing standard classical $p$-values, $t$-tests, or Wald confidence
+intervals on a feature subset **after** performing data-driven feature selection (such as Lasso or stepwise regression).
+
+Classical inferential theory assumes the hypothesis $H_0: \beta_j = 0$ was formulated *a priori* before inspecting the
+data. When the subset $\hat{S}$ is chosen because its sample coefficients were large, the sampling distribution of
+$\hat{\beta}_j$ is conditioned on the selection event:
+
+$$
+\mathbb{P}\left( \hat{\beta}_j \mid j \in \hat{S} \right) \neq \mathbb{P}\left( \hat{\beta}_j \right)
+$$
+
+The selection event truncates the null distribution, producing catastrophically optimistic $p$-values ($p < 10^{-6}$ on
+pure noise).
+
+Modern **selective inference** (or post-selection inference) resolves this by conditioning the test statistic explicitly
+on the geometric polyhedron representing the Lasso selection event $A y \le b$, deriving exact truncated Gaussian
+distributions that restore rigorous confidence intervals and valid Type I error control.

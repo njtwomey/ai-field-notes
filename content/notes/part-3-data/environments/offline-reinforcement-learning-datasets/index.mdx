@@ -1,0 +1,126 @@
+---
+title: 'Offline reinforcement learning datasets'
+kind: concept
+summary: 'Logged trajectory datasets allow training reinforcement learning policies without live simulator interaction, evaluating algorithms on varying behavioral data quality.'
+tags: [data, reinforcement-learning, datasets, offline-rl, batch-rl]
+aliases: [offline RL datasets, batch reinforcement learning, D4RL, Minari, RL Unplugged, offline trajectories]
+requires: [continuous-control-benchmarks]
+related: [continuous-control-benchmarks, classic-control-environments, arcade-and-video-game-environments]
+references: [fu2020d4rl, kumar2020, kostrikov2022]
+status: draft
+updated: 2026-10-11
+---
+
+import { OfflineRLDatasetsVisualizer } from './OfflineRLDatasetsVisualizer'
+
+<Definition>
+An **offline reinforcement learning dataset** (or batch RL dataset) is a static corpus of logged transition tuples
+$\mathcal{D} = \{(\mathbf{s}_t, \mathbf{a}_t, r_t, \mathbf{s}_{t+1}, d_t)\}_{i=1}^N$ collected by one or more behavioral
+policies $\pi_\beta(\mathbf{a} \mid \mathbf{s}) \sim P(\mathcal{D})$ <Cite id="fu2020d4rl" />. The learning algorithm
+must optimize a policy $\pi_\theta$ to maximize expected discounted return:
+
+$$
+J(\pi_\theta) = \mathbb{E}_{\tau \sim \pi_\theta} \left[ \sum_{t=0}^T \gamma^t r_t \right],
+$$
+
+strictly using the historical data $\mathcal{D}$ without executing any active environment exploration during training.
+</Definition>
+
+## What these environments test
+
+Offline RL mirrors real-world deployment constraints in healthcare, autonomous driving, and industrial manufacturing,
+where active trial-and-error exploration is prohibitively dangerous or expensive:
+
+1. **Out-of-distribution (OOD) action extrapolation**: Standard off-policy temporal-difference learning computes target
+   values via a maximization operator:
+
+   $$
+   y_t = r_t + \gamma \max_{\mathbf{a}'} Q_\phi(\mathbf{s}_{t+1}, \mathbf{a}').
+   $$
+
+   When neural networks parameterize $Q_\phi$, unseen actions outside the behavioral data support
+   $\text{supp}(\pi_\beta)$ receive arbitrarily large, ungrounded value estimates. Because the $\max$ operator greedily
+   selects these hallucinated peaks, policy optimization drives actions into unexplored regimes where the model fails
+   catastrophically upon real deployment.
+2. **Policy stitching**: A key benchmark requirement is the ability to extract and connect fragments from distinct
+   suboptimal trajectories. In maze navigation, if trajectory A travels from $S \to M$ and trajectory B travels from
+   $M \to G$, an offline algorithm must synthesize the optimal trajectory $S \to G$ without ever having observed a
+   complete start-to-goal run.
+3. **Conservative value estimation**: Algorithms like Conservative Q-Learning (CQL <Cite id="kumar2020" />) and Implicit
+   Q-Learning (IQL <Cite id="kostrikov2022" />) test mechanisms that mathematically bound value overestimation by
+   penalizing $Q$-values for out-of-distribution actions or avoiding out-of-sample action queries entirely via expectile
+   regression.
+
+## Catalogue
+
+### D4RL (Datasets for Deep Data-Driven RL)
+Introduced by Fu et al. <Cite id="fu2020d4rl" />, D4RL established the standardized benchmark suite for offline
+reinforcement learning:
+- **Locomotion dataset tiers** (HalfCheetah, Hopper, Walker2d):
+  - `random`: $10^6$ transitions collected by an untrained uniform random policy. Features broad state-action coverage
+    but negligible rewards.
+  - `medium`: $10^6$ transitions from a partially trained policy. Demonstrates stable, consistent, but suboptimal
+    performance.
+  - `medium-replay`: The complete replay buffer logged during the training of a medium policy, containing a mixture of
+    exploratory and progressing behaviors.
+  - `medium-expert`: A 50/50 mixture of suboptimal medium rollouts and fully optimized expert trajectories, testing
+    whether the algorithm can filter out noisy demonstrations.
+  - `expert`: $10^6$ transitions from a converged expert policy. Tests whether an algorithm can match expert performance
+    without deviating into narrow OOD corridors.
+- **AntMaze and Maze2D**: Complex multi-stage navigation tasks designed explicitly to evaluate trajectory stitching.
+- **Franka Kitchen and Adroit**: High-dimensional robotic manipulation tasks with sparse rewards, human teleoperation
+  demonstrations, and complex contact dynamics.
+
+### Minari
+Maintained by the Farama Foundation as Gymnasium's native, modern successor to D4RL:
+- Replaces legacy HDF5 formats with standardized Arrow tables, integrating tight schema validation, deterministic
+  episode splitting, and direct integration with modern Gymnasium wrappers.
+- Tracks environment seeds, step-level metadata, and policy checkpoints to ensure verifiable reproducibility.
+
+### RL Unplugged
+Developed by DeepMind, RL Unplugged provides offline datasets across continuous control (DeepMind Control Suite), visual
+manipulation, discrete Atari games, and physical industrial robotic arms.
+
+### Atari DQN replay dataset
+Contains 50 million transitions logged across 200 million frames during online DQN training across 60 Atari 2600 games.
+It tests offline reinforcement learning over high-dimensional image inputs and discrete action spaces.
+
+The interactive visualizer below compares standard Q-learning against Conservative Q-Learning across different dataset
+coverage regimes:
+
+<OfflineRLDatasetsVisualizer />
+
+## Interfaces and versions
+
+In modern pipelines, offline datasets are loaded and converted into replay buffers directly:
+
+```python
+import minari
+
+# Load standardized offline dataset
+dataset = minari.load_dataset("door-human-v1")
+
+for episode in dataset.iterate_episodes():
+    observations = episode.observations  # (T+1, D)
+    actions = episode.actions            # (T, M)
+    rewards = episode.rewards            # (T,)
+    terminations = episode.terminations  # (T,)
+```
+
+Normalized benchmark returns are conventionally reported on a standardized scale from 0 to 100:
+
+$$
+\text{Score}_{\text{normalized}} = 100 \times \frac{\text{Score}_{\text{agent}} - \text{Score}_{\text{random}}}{\text{Score}_{\text{expert}} - \text{Score}_{\text{random}}}.
+$$
+
+## Known problems and limitations
+
+1. **Narrow support collapse**: On purely expert datasets, behavioral coverage is confined to a razor-thin manifold. If
+   a learned policy deviates by a tiny numerical perturbation, it enters an ungrounded region where it has no data to
+   recover, leading to immediate failure.
+2. **Normalized score distortion**: When evaluating algorithms, averaging normalized scores across diverse tasks can
+   hide severe failure modes (e.g., an algorithm scoring 110 on HalfCheetah but 0 on Hopper due to early termination
+   fragility).
+3. **Unobserved confounding**: Real-world offline logs (e.g., clinical healthcare decisions or algorithmic trading)
+   frequently involve human expert actions driven by unrecorded contextual variables. If an offline algorithm assumes
+   full observability, unobserved confounding can lead to severely biased value estimates.

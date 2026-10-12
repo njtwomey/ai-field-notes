@@ -1,28 +1,200 @@
 ---
 title: 'Augmentation principles'
 kind: concept
-summary: 'Augmentation adds transformed copies of examples whose labels the transform preserves. It encodes invariances the model should have, acts as a regulariser and can be combined with consistency losses on unlabelled data.'
-tags: [data, deep-learning, regularisation]
-aliases: []
-requires: []
-related: [data-augmentation]
-references: []
-status: stub
-updated: 2026-10-11
+summary: 'Data augmentation injects invariant inductive biases, acts as data-dependent regularization, and powers semi-supervised consistency training via sample mixing and label preservation.'
+tags: [data, deep-learning, regularisation, data-centric-learning]
+aliases: [augmentation principles, data augmentation, Mixup, CutMix, consistency training]
+requires: [data-setups, measurement-scales]
+related: [coresets-and-data-pruning, self-supervised-data-design, synthetic-data]
+references: [zhang2018mixup, cubuk2019autoaugment, chen2020]
+status: draft
+updated: 2026-10-12
 ---
 
+import { AugmentationPrinciplesVisualizer } from './AugmentationPrinciplesVisualizer'
+
 <Definition>
-To be written.
+**Data augmentation** is the systematic application of label-preserving stochastic transformations to training data. By
+generating synthetic variations of input records whose underlying ground-truth semantics remain invariant, augmentation
+encodes geometric and physical domain knowledge into representations, acts as an explicit data-dependent regularizer,
+and provides the supervisory signal for semi-supervised consistency training.
 </Definition>
+
+Empirical risk minimization (ERM) assumes that the empirical training distribution
+$\hat{P}(\mathbf{x}, y) = \frac{1}{N} \sum_{i=1}^N \delta_{(\mathbf{x}_i, y_i)}$ accurately approximates the true
+data-generating distribution $P(\mathbf{x}, y)$. In high-dimensional regimes, however, the training set occupies a
+measure-zero set of isolated points within input space. Standard neural networks easily memorize these discrete points,
+producing uncalibrated, erratic predictions in the empty space between samples. Data augmentation expands the empirical
+support along manifold tangent spaces, forcing decision boundaries to respect true operational symmetries
+<Cite id="zhang2018mixup, cubuk2019autoaugment, chen2020" />.
+
+<AugmentationPrinciplesVisualizer />
 
 ## Invariance and equivariance
 
+The primary role of data augmentation is imparting geometric and structural inductive biases to model representations:
+
+### Invariance
+
+A model representation $f(\mathbf{x})$ is **invariant** to a group of transformations $\mathcal{T} = \{T\}$ if
+transforming the input leaves the representation unchanged:
+
+$$
+f(T(\mathbf{x})) = f(\mathbf{x}) \quad \forall T \in \mathcal{T}
+$$
+
+In object classification, document categorization, and sentiment analysis, the target output must remain strictly
+invariant to nuisance transformations—such as spatial translation, minor scaling, font variations, or ambient lighting
+changes.
+
+### Equivariance
+
+A model representation $f(\mathbf{x})$ is **equivariant** to group transformation $g$ if transforming the input
+transforms the output predictably via group action $g$:
+
+$$
+f(T_g(\mathbf{x})) = g \cdot f(\mathbf{x})
+$$
+
+In dense spatial prediction tasks—such as bounding box object detection, semantic segmentation, and robotic keypoint
+tracking—augmentations cannot be applied to inputs in isolation. If an input image undergoes horizontal reflection or a
+$90^\circ$ rotation, the ground-truth target mask or coordinates must transform equivariantly.
+
+| Property | Mathematical Criterion | Vision Task Example | Target Response |
+| :--- | :--- | :--- | :--- |
+| **Invariance** | $f(T_g(\mathbf{x})) = f(\mathbf{x})$ | Image Classification | Predicted label is completely invariant to $T_g$ |
+| **Equivariance** | $f(T_g(\mathbf{x})) = g \cdot f(\mathbf{x})$ | Bounding Box Detection | Coordinates transform predictably by group action $g$ |
+
 ## Label preservation
+
+The foundational requirement of data augmentation is **semantic label preservation**: the stochastic transformation
+$T \sim \mathcal{T}$ must not alter the posterior probability of the true class:
+
+$$
+P(y \mid T(\mathbf{x})) = P(y \mid \mathbf{x})
+$$
+
+When augmentation operators violate label preservation, they poison the training distribution with corrupted ground
+truth:
+
+| Modality / Task | Transform Applied | Semantic Violation (Label Inversion) |
+| :--- | :--- | :--- |
+| **Digit Recognition (MNIST)** | $180^\circ$ vertical rotation | Converts digit `'6'` into `'9'`; destroys label fidelity |
+| **Medical Radiography (CXR)** | Horizontal reflection | Inverts anatomical lateralization (situs inversus vs normal heart orientation) |
+| **Histopathology / Dermatology** | Aggressive hue jittering | Destroys critical diagnostic hematoxylin-eosin staining and erythema signals |
+| **Object Detection** | Extreme random zoom crop | Crops out the target object entirely, leaving pure background labeled as foreground |
+| **Clinical Time Series** | Unbounded temporal scaling | Inverts cardiac arrhythmias (tachycardia vs bradycardia) |
+
+Modern automated augmentation frameworks—such as AutoAugment and RandAugment—tune distortion magnitudes
+($\mathcal{M} \in [1, 10]$) and probability schedules to operate at the boundary of maximal regularization without
+crossing the semantic label corruption threshold <Cite id="cubuk2019autoaugment" />.
 
 ## Augmentation as regularisation
 
+Stochastic data augmentation is mathematically equivalent to adding an explicit, data-dependent analytical regularizer
+to the loss function.
+
+Consider an additive perturbation $T(\mathbf{x}) = \mathbf{x} + \boldsymbol{\delta}$, where
+$\mathbb{E}[\boldsymbol{\delta}] = \mathbf{0}$ and covariance $\text{Cov}(\boldsymbol{\delta}) = \boldsymbol{\Sigma}$.
+Taking a second-order Taylor expansion of the loss $\ell(f(\mathbf{x} + \boldsymbol{\delta}), y)$ around unperturbed
+input $\mathbf{x}$:
+
+$$
+\ell(f(\mathbf{x} + \boldsymbol{\delta}), y) \approx \ell(f(\mathbf{x}), y) + \boldsymbol{\delta}^\top \nabla_{\mathbf{x}} \ell(f(\mathbf{x}), y) + \frac{1}{2} \boldsymbol{\delta}^\top \nabla_{\mathbf{x}}^2 \ell(f(\mathbf{x}), y) \, \boldsymbol{\delta}
+$$
+
+Taking the expectation over the stochastic augmentation distribution $\boldsymbol{\delta}$:
+
+$$
+\mathbb{E}_{\boldsymbol{\delta}}[\ell(f(\mathbf{x} + \boldsymbol{\delta}), y)] \approx \ell(f(\mathbf{x}), y) + \frac{1}{2} \operatorname{Tr}\left( \nabla_{\mathbf{x}}^2 \ell(f(\mathbf{x}), y) \, \boldsymbol{\Sigma} \right)
+$$
+
+For cross-entropy loss, the trace term penalizes the Frobenius norm of the input Jacobian
+$\|\nabla_{\mathbf{x}} f(\mathbf{x})\|_F^2$. Data augmentation explicitly forces the model's prediction function to be
+flat along the transformation manifold, flattening curvature in parameter space and eliminating sharp, brittle minima.
+
 ## Mixing examples
+
+Standard data augmentation perturbs individual examples independently. **Mixing augmentations** interpolate between
+multiple independent training instances, expanding the support beyond discrete input clusters
+<Cite id="zhang2018mixup" />.
+
+### Mixup
+
+Hongyi Zhang et al. introduced **Mixup**, which constructs virtual training instances via convex combinations of pairs
+$(\mathbf{x}_i, \mathbf{y}_i)$ and $(\mathbf{x}_j, \mathbf{y}_j)$ <Cite id="zhang2018mixup" />:
+
+$$
+\tilde{\mathbf{x}} = \lambda \mathbf{x}_i + (1 - \lambda) \mathbf{x}_j, \quad \tilde{\mathbf{y}} = \lambda \mathbf{y}_i + (1 - \lambda) \mathbf{y}_j
+$$
+
+where $\lambda \sim \operatorname{Beta}(\alpha, \alpha)$ with hyperparameter $\alpha \in (0, 1]$.
+
+| Training Objective | Decision Boundary Geometry | Inter-Manifold Confidence | Calibration Behavior |
+| :--- | :--- | :--- | :--- |
+| **Standard ERM** | Sharp step-function boundaries adjacent to training instances | Saturated $100\%$ confidence in empty unobserved regions | Overconfident predictions; fragile to distribution shift |
+| **Mixup Regularization** | Linear transition regions along interpolated convex chords | Soft, linearly calibrated probabilities between manifolds | Graceful degradation; improved calibration error |
+
+Mixup enforces linear behavior between training examples:
+1. It prevents the network from assigning $100\%$ confidence to points in empty space between disparate class manifolds.
+2. It stabilizes adversarial robustness and substantially improves probability calibration under distribution shift.
+
+### CutMix
+
+While Mixup linearly blends pixel intensities—often creating unnatural, ghost-like composite images—**CutMix** cuts and
+pastes rectangular spatial regions between images:
+
+$$
+\tilde{\mathbf{x}} = \mathbf{M} \odot \mathbf{x}_i + (\mathbf{1} - \mathbf{M}) \odot \mathbf{x}_j, \quad \tilde{\mathbf{y}} = \lambda \mathbf{y}_i + (1 - \lambda) \mathbf{y}_j
+$$
+
+where $\mathbf{M} \in \{0, 1\}^{W \times H}$ is a binary rectangular mask, and
+$\lambda = 1 - \frac{\text{Area}(\mathbf{M})}{W \times H}$. CutMix preserves natural local textures while forcing the
+network to identify objects from partial spatial cues without relying on a single localized feature.
 
 ## Consistency training
 
+Data augmentation provides the supervisory backbone for modern semi-supervised learning (SSL) via **consistency
+regularization** (e.g., FixMatch, Unsupervised Data Augmentation).
+
+In consistency training, unlabelled instances $\mathbf{u} \in \mathcal{U}$ are processed through two stochastic
+branches:
+1. **Weak augmentation** $\alpha(\mathbf{u})$: Standard, mild transforms (such as simple cropping and horizontal
+   flipping) that preserve high model confidence.
+2. **Strong augmentation** $\mathcal{A}(\mathbf{u})$: Aggressive transforms (such as RandAugment, CutMix, or CTAugment)
+   that heavily distort the input.
+
+$$
+\mathbf{u} \longrightarrow \begin{cases}
+\alpha(\mathbf{u}) \xrightarrow{\text{Weak}} \hat{y} = \arg\max_k P(k \mid \alpha(\mathbf{u})) \quad \text{if } \max_k P(k \mid \alpha(\mathbf{u})) \ge \tau \\
+\mathcal{A}(\mathbf{u}) \xrightarrow{\text{Strong}} P(\cdot \mid \mathcal{A}(\mathbf{u})) \quad \xrightarrow{\text{Supervised by } \hat{y}} \mathcal{H}\big(\hat{y}, \, P(\cdot \mid \mathcal{A}(\mathbf{u}))\big)
+\end{cases}
+$$
+
+The consistency loss is computed only when the model's confidence on the weakly augmented view exceeds a stringent
+threshold $\tau$ (typically $\tau \ge 0.95$):
+
+$$
+\mathcal{L}_{\text{consistency}} = \mathbb{I}\left( \max_k P(k \mid \alpha(\mathbf{u})) \ge \tau \right) \, \mathcal{H}\left( \arg\max_k P(k \mid \alpha(\mathbf{u})), \, P(\cdot \mid \mathcal{A}(\mathbf{u})) \right)
+$$
+
+This mechanism leverages the model's own high-confidence predictions on easy views to supervise learning on heavily
+distorted views, driving decision boundaries out of high-density unlabelled regions.
+
 ## Pitfalls
+
+1. **Semantic label destruction via excessive distortion**: Pushing augmentation magnitudes beyond physical limits (e.g.
+   cropping out the focal object or over-saturating pixels to pure white/black) forces the network to learn nonsensical
+   noise correlations.
+2. **Inference-time distribution gap**: Applying severe augmentations that do not resemble production data without
+   properly adjusting test-time evaluation; models can suffer a drop in in-domain accuracy if clean canonical features
+   are underrepresented in training batches.
+3. **Miscalibration from soft label mixing**: Mixup softens target probabilities, compressing output logits toward zero.
+   While cross-entropy improves, raw softmax probabilities underestimate true certainty, requiring post-hoc temperature
+   scaling for critical threshold decisions.
+4. **Data pipeline GPU starvation**: Executing CPU-bound Python augmentation routines inside unoptimized DataLoader
+   workers stalls high-throughput GPU tensor cores, reducing end-to-end training efficiency. Augmentation pipelines
+   should be compiled directly into GPU kernels (e.g. via NVIDIA DALI or PyTorch vmap).
+5. **Leakage through augmented validation sets**: Applying data augmentation to validation or test splits before
+   evaluating performance. Augmentation must be applied strictly to training batches; evaluation splits must remain
+   pristine, unperturbed representations of the real world.

@@ -2,25 +2,157 @@
 title: 'Relational and multi-table data'
 kind: concept
 summary: 'Relational data spread an entity''s information across several tables linked by keys. Learning from them needs joins and aggregations, or models that read the table graph directly.'
-tags: [data, feature-engineering]
-aliases: []
+tags: [data, feature-engineering, relational, databases, tabular]
+aliases: [multi-table data, relational learning, relational databases]
 requires: []
-related: [relational-feature-aggregation]
-references: []
-status: stub
-updated: 2026-10-11
+related: [tabular-data, relational-feature-aggregation, automated-feature-engineering, semi-structured-data, tidy-and-reshaped-tables]
+references: [codd1970relational, kanter2015, fey2024]
+status: draft
+updated: 2026-10-12
 ---
 
+import { MultiTableDataVisualizer } from './MultiTableDataVisualizer'
+
 <Definition>
-To be written.
+**Relational and multi-table data** refer to data structured across multiple normalized tabular relations connected by
+primary and foreign key constraints <Cite id="codd1970relational" />. In machine learning, multi-table modeling involves
+predicting properties of a target entity (or links between entities) by synthesizing information dispersed across an
+interconnected schema graph, either through relational feature joins and aggregations or through direct graph
+representation learning.
 </Definition>
+
+In enterprise applications, data is rarely stored in a single monolithic flat table. Relational database management
+systems (RDBMS) such as PostgreSQL, MySQL, and enterprise data warehouses (Snowflake, BigQuery) normalize data into
+separate tables to minimize redundancy, maintain transactional consistency, and prevent update anomalies. A typical
+e-commerce database isolates `Users`, `Orders`, `OrderItems`, `Products`, `Categories`, and `Payments` into distinct
+schemas linked by foreign keys.
+
+Downstream tabular learners, such as gradient-boosted decision trees (GBDTs), require a single rectangular matrix
+$\mathbf{X} \in \mathbb{R}^{N \times D}$ where each row represents the target unit of analysis. Bridging the gap between
+normalized relational schemas and flat feature matrices requires understanding join fan-out, deep relational
+aggregations, point-in-time correctness, and relational graph neural networks.
+
+<MultiTableDataVisualizer />
 
 ## Schemas, keys and relations
 
+Codd's relational model formalizes data as relations (tables) consisting of sets of tuples (rows), where attributes
+(columns) represent named domains <Cite id="codd1970relational" />:
+
+- **Primary keys (PK):** A minimal set of attributes that uniquely identifies each tuple within a relation (e.g.,
+  `user_id` in `Users`).
+- **Foreign keys (FK):** An attribute in a referencing relation whose values must match the primary key of a referenced
+  relation, enforcing referential integrity (e.g., `order.user_id` referencing `Users.user_id`).
+- **Cardinality types:**
+  - **One-to-one (1:1):** Each record in table $A$ links to at most one record in table $B$ (e.g., `User` to
+    `UserProfile`).
+  - **One-to-many (1:N):** A single record in table $A$ references multiple child records in table $B$ (e.g., `User` to
+    `Orders`).
+  - **Many-to-many (M:N):** Entities associate mutually, typically resolved via a junction or bridge table (e.g.,
+    `Orders` and `Products` connected through `OrderItems`).
+
+At the schema level, a relational database forms a directed multigraph
+$\mathcal{G}_{\text{schema}} = (\mathcal{T}, \mathcal{R})$, where vertices $\mathcal{T}$ represent tables and directed
+edges $\mathcal{R}$ represent foreign key relationships. At the instance level, rows and foreign key references
+instantiate a massive heterogeneous information network where rows are typed nodes and foreign key links are typed
+directed edges <Cite id="fey2024" />.
+
 ## Flattening by joins and aggregates
+
+To construct a training dataset for an entity-level prediction task (e.g., predicting customer churn where the target
+unit of analysis is a customer row in `Users`), practitioners must denormalize the surrounding schema into entity-level
+feature columns:
+
+### One-to-one forward joins
+
+When joining along a foreign key toward a referenced table with unique keys ($1:1$ or $N:1$ from child to parent, such
+as joining `Orders` to `Users` to fetch `user.age`), each record joins to exactly one parent record. The row count
+remains invariant, and parent columns append directly to the child table.
+
+### One-to-many backward aggregations
+
+When joining from a parent table toward a child table ($1:N$, such as joining `Users` to `Orders`), an entity references
+a variable-length multiset of child rows $\mathcal{C}_i = \{c_{i,1}, \dots, c_{i,k}\}$. Because a single target row
+cannot store multiple rows without altering its unit of observation, child records must be aggregated into scalar
+summary statistics:
+
+- **Numerical aggregations:** Count $|\mathcal{C}_i|$, sum $\sum x$, arithmetic mean $\bar{x}$, minimum $\min(x)$,
+  maximum $\max(x)$, and standard deviation $\sigma_x$.
+- **Temporal aggregations:** Time elapsed since the most recent child event ($\Delta t_{\text{last}}$), event frequency
+  per unit time, and trend slopes.
+- **Categorical aggregations:** Mode (most frequent category), category entropy, and multi-hot categorical counts.
+
+### Deep Feature Synthesis (DFS)
+
+Kanter and Veeramachaneni formalized automated relational feature extraction in **Deep Feature Synthesis (DFS)**
+<Cite id="kanter2015" />. DFS traverses the relational schema graph along paths of length $d \ge 1$:
+1. At depth $d=1$, DFS computes direct aggregations over immediate child tables (e.g., `MEAN(Orders.amount)` for each
+   user).
+2. At depth $d=2$, DFS chains operations across foreign key hops, performing cumulative operations over grandchild
+   tables (e.g., `SUM(OrderItems.quantity)` or `MEAN(MAX(OrderItems.price))` grouped by user).
+3. Transitive features allow predictive models to extract complex cross-table signals without requiring manual SQL
+   feature engineering.
 
 ## Fan-out and duplication
 
+A catastrophic failure mode in multi-table machine learning occurs when practitioners execute standard SQL joins across
+$1:N$ relationships without aggregating child records:
+
+$$
+\text{Users} \xrightarrow{1:k_1} \text{Orders} \xrightarrow{1:k_2} \text{OrderItems}
+$$
+
+Joining across this two-hop path expands the total row count multiplicatively:
+
+$$
+N_{\text{flattened}} = \sum_{i=1}^{N_{\text{users}}} \sum_{j=1}^{k_{1,i}} k_{2,i,j} \approx N_{\text{users}} \cdot \bar{k}_1 \cdot \bar{k}_2
+$$
+
+If a user has 10 orders and each order has 4 items, naive table joining duplicates that user's demographic features and
+target label across 40 distinct rows. This causes severe statistical distortions:
+- **Distorted loss gradients:** In gradient descent or tree split finding, frequent entities with many child records
+  dominate the objective function, biasing the model toward high-activity outliers while starving rare entities.
+- **Unit of observation collapse:** The prediction task unintentionally shifts from an entity-level decision
+  ($P(\text{churn} \mid \text{user})$) to an item-level decision ($P(\text{churn} \mid \text{item})$), violating the
+  operational deployment scenario.
+- **Catastrophic group leakage:** If denormalized rows are split randomly into train and test sets, the same parent
+  entity appears in both partitions, yielding falsely optimistic evaluation metrics.
+
 ## Learning on the table graph
 
+Rather than manually designing complex SQL aggregation pipelines, modern **Relational Deep Learning (RDL)** treats the
+relational database as a heterogeneous temporal graph and learns representations directly via Graph Neural Networks
+(GNNs) <Cite id="fey2024" />:
+
+In RDL:
+- Each table $\mathcal{T}_k$ corresponds to a distinct node type $\mathcal{V}_k$.
+- Each record $u \in \mathcal{T}_k$ is initialized with an input feature vector $\mathbf{h}_u^{(0)}$ derived from its
+  local scalar columns.
+- Each foreign key reference instantiates a directed typed edge between entities.
+- Relational message passing updates entity representations across foreign key links:
+
+$$
+\mathbf{h}_v^{(l+1)} = \text{Update}\left( \mathbf{h}_v^{(l)}, \bigoplus_{r \in \mathcal{R}} \bigoplus_{u \in \mathcal{N}_r(v)} \text{Message}_r(\mathbf{h}_u^{(l)}, \mathbf{h}_v^{(l)}) \right)
+$$
+
+where $\bigoplus$ represents a permutation-invariant aggregation operator (such as sum, mean, or attention pooling).
+
+Learning directly on the relational graph eliminates the combinatorial memory footprint of flattened denormalized tables
+while allowing gradient backpropagation across multi-hop relationships.
+
 ## Pitfalls
+
+- **Point-in-time join leakage:** Performing relational joins and aggregations without strict temporal filtering allows
+  information from future child records (e.g., transactions executed after the prediction cutoff timestamp) to leak into
+  entity features. All relational joins must enforce temporal cutoff constraints
+  ($\text{child}.\text{timestamp} < t_{\text{cutoff}}$).
+- **Grandchild aggregation explosion:** Setting the relational traversal depth $d > 2$ in automated feature synthesis
+  creates an exponential explosion in candidate features ($D > 1{,}000$), many of which are collinear and
+  computationally expensive to maintain in production feature stores.
+- **Asymmetric fan-out skew:** In real-world enterprise databases, child record distributions are heavily long-tailed.
+  While the median user may have 3 orders, power users or automated API bots can have $50{,}000$ child records.
+  Unbounded aggregations over skewed entities create severe memory spikes and pipeline stragglers in distributed engines
+  (Spark, Trino).
+- **Referential integrity violations in data lakes:** Unlike transactional databases, semi-structured data lakes
+  frequently contain orphan records (child rows whose foreign key references non-existent parent primary keys). Naive
+  inner joins silently drop these entities, biasing the training population toward cleaner system slices.

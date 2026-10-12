@@ -5,20 +5,97 @@ summary: 'Toxicity and safety filters remove content from training corpora. Thei
 tags: [data, fairness, large-language-models]
 aliases: []
 requires: []
-related: [corpus-construction]
-references: []
-status: stub
+related: [protected-attributes-and-proxies, dataset-bias, data-rights-and-deletion]
+references: [dodge2021, gehman2020]
+status: draft
 updated: 2026-10-11
 ---
 
+import { ContentFilteringVisualizer } from './ContentFilteringVisualizer'
+
 <Definition>
-To be written.
+**Content filtering** is the algorithmic, heuristic, and rule-based removal of text or media items deemed toxic,
+sexually explicit, hateful, or harmful from pre-training and fine-tuning datasets. While designed to suppress hate
+speech and illicit material, content filters systematically suffer from demographic and domain-specific false positives,
+inadvertently purging minority sociolects, LGBTQ+ health resources, and marginalized perspectives from training corpora.
 </Definition>
+
+In web-scale corpus construction, raw internet crawls contain extensive quantities of harassment, hate speech,
+pornography, and abusive text. Filtering out hazardous content is essential for ethical deployment and downstream
+safety. However, automated filtering mechanisms are not neutral: they act as demographic gatekeepers, reshaping what
+knowledge and linguistic styles language models internalize.
+
+<ContentFilteringVisualizer />
 
 ## Toxicity and safety filters
 
+Modern data curation pipelines employ two primary classes of automated filters to sanitize pre-training corpora:
+
+1. **Keyword blocklists and regular expressions:**
+   - Static string matchers scan documents against lists of forbidden terms, slurs, obscene phrases, and anatomical
+     words.
+   - For example, in the creation of the Colossal Clean Crawled Corpus (C4), Google's curation pipeline utilized a
+     402-term regex list (`bad-words.py`) to purge any web page containing even a single occurrence of a blocklisted
+     token <Cite id="dodge2021" />.
+2. **Classifier-based scoring models:**
+   - Supervised scoring models—such as Google's Perspective API, fastText classifiers, or dedicated discriminator models
+     <Cite id="gehman2020" />—estimate the probability that a document is offensive, toxic, or sexually suggestive:
+     $$
+     P(\text{toxic} \mid d) > \tau
+     $$
+   - Documents exceeding decision threshold $\tau$ are dropped from the training mixture.
+   - Modern frontier models frequently use smaller language models (such as Llama-Guard or fine-tuned RoBERTa variants)
+     to classify text across standardized taxonomies of harm (e.g., self-harm, cyberattacks, hate speech).
+
 ## False positives by dialect and topic
+
+Toxicity classifiers and static blocklists exhibit severe demographic disparities, penalizing minority linguistic
+registers far more harshly than standard institutional prose:
+
+- **Linguistic profiling of AAVE:** African American Vernacular English (AAVE) frequently employs lexical items,
+  conversational intensifiers, and grammatical structures (such as habitual *be*) that automated classifiers conflate
+  with hostility. Benign social media posts written in AAVE are flagged as toxic or abusive at rates up to two to three
+  times higher than equivalent messages composed in Standard American English (SAE).
+- **Reclaimed terminology:** Marginalized communities often reclaim historical slurs as markers of solidarity and
+  ingroup identity. Static blocklists and context-blind classifiers cannot distinguish between hateful weaponization and
+  benign ingroup reclamation, resulting in wholesale deletion of authentic community discourse.
+- **The Scunthorpe problem:** Unigram and substring matching regularly triggers false positives on harmless vocabulary
+  (e.g., medical anatomy, town names, or political debate).
 
 ## What filtering removes
 
+When safety filters are applied at scale across terabytes of web crawls, their uneven error distributions systematically
+alter the composition of the pre-training corpus:
+
+$$
+\text{Raw Web Crawl} \xrightarrow{\text{Naive Blocklist / Keyword Filters}} \text{Sanitized Corpus}
+$$
+
+In their seminal analysis of the C4 corpus, Jesse Dodge et al. <Cite id="dodge2021" /> quantified the collateral damage
+inflicted by heuristic blocklist filtering:
+
+1. **Suppression of LGBTQ+ resources:** Web pages discussing queer history, civil rights, gender identity, and
+   transgender healthcare were systematically dropped because words such as "lesbian", "gay", or "bisexual" frequently
+   co-occurred on naive adult-content blocklists.
+2. **Loss of reproductive healthcare:** Over 99% of educational documents concerning sexual health, contraception,
+   sexually transmitted infections, and medical anatomy were purged.
+3. **Erasure of anti-racism discourse:** First-person testimonials, civil rights scholarship, and legal discussions
+   quoting or analyzing historical slurs were flagged by string matchers, perversely deleting anti-racist literature
+   while leaving subtle, covert bigotry intact.
+4. **Linguistic flattening:** Because formal academic prose, corporate marketing, and government press releases easily
+   pass keyword filters, the resulting training set over-indexes on formal bureaucratic English. Downstream models
+   become brittle when processing colloquial, regional, or youth speech.
+
 ## Pitfalls
+
+- **Confusing dataset filtering with model safety:** Discarding toxic web text from pre-training data reduces toxic
+  degeneration <Cite id="gehman2020" />, but does not guarantee that models cannot generate harmful completions when
+  adversarially prompted; safety alignment must be reinforced via post-training (RLHF, DPO) and inference guardrails.
+- **Over-reliance on unigram blocklists:** Deploying static regex wordlists without syntax parsing guarantees
+  catastrophic false positive rates on benign medical, legal, and educational resources.
+- **Assuming crowdsourced annotations are objective:** Toxicity classifiers trained on crowdsourced labels inherit the
+  racial and cultural preconceptions of annotators, who routinely rate minority dialects as more aggressive or
+  low-quality.
+- **Loss of downstream comprehension:** Aggressively purging minority sociolects from pre-training data starves language
+  models of the syntactic diversity needed to understand, translate, or assist speakers of non-standard dialects,
+  cementing digital exclusion.

@@ -1,26 +1,123 @@
 ---
 title: 'Test-set design'
 kind: concept
-summary: 'A test set is a measuring instrument. Its size sets the width of score intervals, its slices set which subgroups can be assessed, its labels set the ceiling on measurable accuracy, and its age sets how current the measurement is.'
+summary: 'A test set is an empirical measuring instrument. Its sample size sets confidence interval precision, its slice coverage sets subgroup error resolution, its label fidelity sets the measurable ceiling, and its age sets freshness.'
 tags: [data, evaluation]
-aliases: []
-requires: []
-related: [metric-confidence-intervals, learning-curves-and-sample-size]
-references: []
-status: stub
+aliases: [test set design, test-set design, evaluation set design, test set sizing, slice-based evaluation]
+requires: [train-validation-and-test-splits]
+related: [out-of-distribution-test-sets, test-set-reuse, matching-the-split-to-deployment, metric-confidence-intervals]
+references: [ribeiro2020checklist, kohavi1995]
+status: draft
 updated: 2026-10-11
 ---
 
+import TestSetSizingExplorer from './TestSetSizingExplorer';
+
 <Definition>
-To be written.
+**Test-set design** is the systematic curation and dimensioning of an independent evaluation dataset to serve as a
+reliable, calibrated measuring instrument for machine learning performance. Rather than accepting an arbitrary residual
+partition (such as a random 20% split), intentional test-set design specifies sample size for statistical power,
+guarantees subgroup slice coverage, enforces rigorous label fidelity, and constructs behavioral challenge suites
+<Cite id="ribeiro2020checklist" />.
 </Definition>
 
-## Size and interval width
+A model evaluation is only as trustworthy as the test set measuring it. An undersized test set cannot statistically
+distinguish meaningful model improvements from random sampling noise; an un-sliced test set hides catastrophic failures
+on vulnerable minority populations; and a noisy test set imposes an artificial mathematical ceiling on measurable
+accuracy.
 
-## Slice coverage
+<TestSetSizingExplorer />
 
-## Label quality
+## Test set size and statistical confidence intervals
 
-## Freshness
+A test set is an empirical sample from a data-generating distribution. Any metric evaluated on a finite test set of
+$N_{\text{test}}$ observations is a random variable subject to sampling variance.
 
-## Pitfalls
+For a binary classification error rate $\hat{p}$, the standard error is:
+
+$$
+\text{SE}(\hat{p}) = \sqrt{\frac{\hat{p}(1 - \hat{p})}{N_{\text{test}}}}
+$$
+
+Under the normal approximation, the $95\%$ confidence interval margin of error is
+$E \approx 1.96 \cdot \text{SE}(\hat{p})$. Solving for sample size reveals the required test set dimension:
+
+$$
+N_{\text{test}} \ge \frac{1.96^2 \cdot \hat{p}(1 - \hat{p})}{E^2}
+$$
+
+### Sizing resolution implications
+
+- **Small test sets ($N = 100$)**: If an observed error rate is $5\%$ ($\hat{p} = 0.05$), the $95\%$ confidence interval
+  spans $[1.6\%, 11.2\%]$. A team cannot determine whether an apparent $3\%$ error reduction across model versions
+  reflects a genuine breakthrough or pure sampling fluctuation.
+- **Detecting a 1% delta ($E = 0.005$)**: Confidently establishing that Model A ($95\%$ accuracy) outperforms Model B
+  ($94\%$ accuracy) requires a test set of $N_{\text{test}} \ge 7,300$ observations.
+
+## Subgroup slice coverage and stratified oversampling
+
+Global aggregate metrics (such as overall accuracy or macro F1) can be profoundly deceptive, obscuring severe
+performance degradation on critical sub-populations—a manifestation of **Simpson's paradox**.
+
+Consider a production credit scoring or speech recognition model evaluated on $N = 1,000$ test cases:
+1. If an accent or protected demographic subpopulation accounts for $2\%$ of users, the test set contains only $20$
+   representative instances.
+2. The $95\%$ confidence interval for performance on that subpopulation spans $\pm 18\%$.
+3. The model could fail on $50\%$ of minority requests with negligible impact on global aggregate accuracy ($< 1\%$
+   change), hiding severe operational risk and algorithmic unfairness.
+
+### The stratified slicing protocol
+
+- **Explicit slice taxonomy**: Identify operational slices along demographic, device, temporal, and difficulty
+  dimensions (e.g. low-bandwidth video, noisy background audio, rare clinical diagnoses).
+- **Minimum slice counts**: Size the test set so that every critical slice satisfies a minimum sample threshold
+  ($n_{\text{slice}} \ge 250$ to $500$).
+- **Stratified oversampling**: Intentionally oversample rare, mission-critical slices in the evaluation benchmark,
+  reporting slice-specific scorecards rather than a single collapsed scalar.
+
+## Label quality: The measurable accuracy ceiling
+
+In training datasets, label noise can often be mitigated through loss clipping, label smoothing, or dataset scale. In
+test sets, however, label errors directly corrupt measurement.
+
+If test labels contain an error rate $\epsilon_{\text{test}}$, the observed accuracy of a hypothetical "ground-truth
+perfect" model ($100\%$ true accuracy) is capped at:
+
+$$
+\hat{\text{Acc}}_{\max} = 1 - \epsilon_{\text{test}}
+$$
+
+If human annotators disagree on $5\%$ of ambiguous examples, a measured model accuracy of $95\%$ is already at the
+theoretical ceiling of the instrument. Beyond this point, model "improvements" simply reflect over-tuning to the
+idiosyncrasies of specific crowd-workers.
+
+Test set labels require substantially higher quality standards than training data:
+- **Expert adjudication**: Utilizing certified domain specialists (e.g., board-certified radiologists rather than
+  general crowd-workers).
+- **Multi-annotator consensus**: Requiring independent agreement across 3 to 5 annotators, with formal adjudication for
+  disputed instances.
+
+## Behavioral testing and CheckList suites
+
+Aggregate accuracy evaluates in-distribution correlation but fails to test whether a model understands underlying task
+rules. Marco Tulio Ribeiro et al. <Cite id="ribeiro2020checklist" /> introduced the **CheckList** framework, adapting
+software engineering unit testing to model evaluation:
+
+1. **Minimum Functionality Tests (MFT)**: Simple, targeted test suites that isolate atomic capabilities (e.g., verifying
+   that adding negation—"The product was not great"—inverts sentiment prediction).
+2. **Invariance Tests (INV)**: Perturbations that should produce zero change in model output (e.g., swapping character
+   names from "John" to "Ahmed" in a text classification task, or altering non-informative image background pixels).
+3. **Directional Expectation Tests (DIR)**: Perturbations where the output must move in a monotonic direction (e.g.,
+   appending extreme praise to an existing review must never decrease the positive sentiment probability).
+
+## Freshness, decay, and retirement
+
+Test sets are living measuring instruments that degrade over time:
+
+- **Temporal drift**: A test set created in 2021 measures how well a model operates in 2021. As user slang, seasonal
+  trends, and software versions drift, the historical test set ceases to measure deployment readiness.
+- **Adaptive overfitting (Goodhart's Law)**: When multiple engineering teams iterate against the same public or internal
+  benchmark over months, models inevitably overfit to the test set through trial-and-error hyperparameter selection
+  <Cite id="kohavi1995" />.
+- **Scheduled retirement**: Production teams should maintain rotating test sets, periodically retiring older holdout
+  splits to archival tracking and commissioning fresh, freshly annotated benchmarks.

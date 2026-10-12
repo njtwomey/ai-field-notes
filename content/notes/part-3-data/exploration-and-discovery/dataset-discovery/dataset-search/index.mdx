@@ -1,28 +1,126 @@
 ---
 title: 'Dataset search and data discovery'
 kind: concept
-summary: 'Data discovery finds data relevant to a task: datasets in public repositories, and tables in a data lake that can be joined or unioned with a given table to add rows or features.'
-tags: [data, information-retrieval]
-aliases: []
-requires: []
-related: []
-references: []
-status: stub
-updated: 2026-10-11
+summary: 'Data discovery finds task-relevant data across public repositories and enterprise data lakes—identifying joinable tables (to enrich features) and unionable tables (to expand sample size) using MinHash LSH and schema matching.'
+tags: [data, information-retrieval, data-discovery, data-management, search]
+aliases: [dataset search, data discovery, joinable table search, table union search]
+requires: [data-generating-process, data-profiling]
+related: [data-acquisition, slice-analysis, target-exploration]
+references: [chapman2020, fernandez2018, nargesian2018, broder1997]
+status: draft
+updated: 2026-10-12
 ---
 
+import { DatasetSearchVisualizer } from './DatasetSearchVisualizer'
+
 <Definition>
-To be written.
+**Dataset search and data discovery** is the automated indexing, querying, and retrieval of external and enterprise
+datasets to augment machine learning workflows. It spans metadata-driven keyword retrieval, semantic catalog indexing,
+joinable table search (augmenting feature columns), and unionable table search (augmenting sample rows) across
+heterogeneous data lakes.
 </Definition>
 
-## Dataset repositories and search
+In contemporary machine learning, model performance is constrained less by algorithmic expressiveness than by data
+coverage and feature richness. Enterprise data lakes and public internet repositories contain petabytes of potentially
+transformative information—macroeconomic indicators, regional demographic distributions, weather sensor time series, and
+partner transactional streams. However, these assets remain fragmented across thousands of unstructured tables, varied
+schemas, and disconnected silos <Cite id="chapman2020, fernandez2018" />.
 
-## Metadata and catalogues
+<DatasetSearchVisualizer />
 
-## Joinable table discovery
+## Dataset repositories and metadata search
 
-## Unionable table discovery
+Discovering public datasets relies on structured web metadata and centralized data portals <Cite id="chapman2020" />:
+- **Public data ecosystems**: Google Dataset Search, Hugging Face Hub, Kaggle, Zenodo, and OpenML.
+- **Semantic metadata standards**: Modern search engines crawl HTML pages embedding W3C DCAT (Data Catalog Vocabulary)
+  or Schema.org `Dataset` JSON-LD blocks. The emerging **Croissant** specification extends these standards specifically
+  for machine learning, encoding tensor shapes, column splits, licensing terms, and pre-processing lineage into
+  standardized metadata.
 
-## Data augmentation by joins
+## Enterprise metadata catalogs
 
-## Pitfalls
+Within modern organizations, data discovery moves beyond public keyword search to automated enterprise data catalogs
+(such as Amundsen, DataHub, and Apache Atlas) <Cite id="fernandez2018" />:
+
+| Architecture Layer | Infrastructure & Technologies | Ingestion & Search Mechanism | Downstream Modeling Value |
+| :--- | :--- | :--- | :--- |
+| **Data Lake Storage** | Apache Iceberg, Delta Lake, Snowflake, Parquet | Heterogeneous operational and analytical tables | Unified storage foundation |
+| **Metadata Catalog** | DataHub, Amundsen, Apache Atlas | Automated crawlers extract schemas, lineage, and MinHash signatures | Centralized searchable index of physical assets |
+| **Joinable Search** | LSH MinHash indexes over unique key sets | Discovers candidate tables $T$ where key containment $C(A, B) \ge \tau$ | **Feature Enrichment:** Expands feature dimensionality ($Q \bowtie T$) |
+| **Unionable Search** | Semantic type matchers and distribution embeddings | Identifies candidate tables $T$ with compatible attributes | **Cohort Expansion:** Expands training sample size ($Q \cup T$) |
+
+Catalogs index not only column names and storage formats, but also execution query logs (tracking which tables are
+frequently joined by SQL queries) and automated data profiling summaries.
+
+## Joinable table discovery: feature augmentation
+
+Given a base query table $Q$ with a key column $A$ (e.g. `customer_id` or `zip_code`), **joinable table discovery**
+seeks candidate tables $T$ possessing a column $B$ that overlaps with $A$, allowing feature enrichment via an equi-join
+$Q \bowtie_{A=B} T$ <Cite id="fernandez2018" />.
+
+### Jaccard similarity and containment
+
+1. **Jaccard similarity**: Measures bidirectional set agreement:
+   $$
+   J(A, B) = \frac{|A \cap B|}{|A \cup B|}
+   $$
+2. **Containment**: Measures the fraction of the query key values present within candidate column $B$
+   <Cite id="broder1997" />:
+   $$
+   C(A, B) = \frac{|A \cap B|}{|A|}
+   $$
+   When candidate table $T$ is a vast reference database (e.g. national postal codes with $50,000$ entries) while query
+   table $Q$ contains only $500$ distinct regional zip codes, Jaccard similarity is low ($J \approx 0.01$), but
+   containment is high ($C = 1.00$). High containment confirms that every row in the query table will successfully join
+   with a reference feature.
+
+### Sub-linear retrieval via MinHash and LSH
+
+Evaluating pairwise containment across millions of candidate lake columns is computationally intractable. Systems deploy
+**MinHash and Locality-Sensitive Hashing (LSH)** <Cite id="broder1997" />:
+- Compute $k$ hash functions for each set of values; the probability that two columns share the same minimum hash value
+  equals their Jaccard similarity:
+  $$
+  P(\min h(A) = \min h(B)) = J(A, B)
+  $$
+- Group MinHash signatures into $b$ bands of $r$ rows. Columns hashing to the same bucket in any band are retrieved as
+  joinable candidates in sub-linear $O(1)$ lookup time <Cite id="broder1997" />.
+
+## Unionable table discovery: sample expansion
+
+While joinable discovery adds columns to enrich features, **unionable table discovery** finds candidate tables $T$ whose
+rows can be appended ($Q \cup T$) to expand sample size or add missing sub-populations <Cite id="nargesian2018" />.
+
+Tables are union-compatible if:
+1. **Attribute alignment**: Columns can be mapped $A_i \leftrightarrow B_j$ with compatible semantic types (e.g., both
+   columns represent geographic coordinates or currency amounts).
+2. **Domain compatibility**: Values share semantic coherence, evaluated by measuring Wasserstein distance or word
+   embedding cosine similarity across column contents <Cite id="nargesian2018" />.
+
+## Data augmentation by joins and downstream pitfalls
+
+Automating table joins to enrich feature sets introduces severe operational risks:
+
+> [!CAUTION]
+> **Join fan-out and train-test contamination**: If table $Q$ has a $1$-to-$N$ relationship with candidate table $T$ (e.g. joining customer profiles with multiple order transactions), performing an un-aggregated join duplicates rows in table $Q$. When target labels are associated with rows in $Q$, row duplication artificially duplicates labels. If data is split randomly into train and test sets after the join, identical entity records appear in both partitions, triggering massive data leakage.
+
+1. **Fan-out prevention**: Always aggregate $1$-to-$N$ candidate tables (e.g., compute mean order value, count of
+   visits, or max latency per entity) before joining back to the primary entity table.
+2. **Temporal leakage across joins**: External reference tables often record historical snapshots. Joining a current
+   macroeconomic aggregate or retroactive customer lifetime value into a past transaction row introduces post-event
+   target leakage. Enforce point-in-time joins matching historical event timestamps strictly.
+
+## Diagnostic checklist
+
+To execute dataset discovery across data lakes:
+
+1. **Leverage standardized schemas**: Format public metadata with Schema.org `Dataset` and Croissant schemas to ensure
+   discoverability <Cite id="chapman2020" />.
+2. **Index column signatures via MinHash LSH**: Pre-compute MinHash sketches for all distinct column sets across the
+   data lake to support real-time joinable search <Cite id="broder1997" />.
+3. **Audit containment over Jaccard**: Prioritize containment score $C(A, B)$ when joining against large global
+   reference catalogues <Cite id="broder1997" />.
+4. **Pre-aggregate to prevent join fan-out**: Enforce strictly $1$-to-$1$ or $N$-to-$1$ joins; aggregate one-to-many
+   candidate relations to prevent row multiplication and split contamination.
+5. **Enforce point-in-time join constraints**: Never join external tables without validating that features were strictly
+   observable prior to the event timestamp.

@@ -1,0 +1,104 @@
+---
+title: Median heuristic for kernel width
+kind: technique
+summary: 'The median heuristic sets the width of a radial kernel from the data: the scale is the inverse of a typical distance between points, taken as the median (or the 0.1 or 0.9 quantile) of distances over random pairs. Cross-validating the three candidates usually suffices.'
+tags: [heuristic, kernel-methods, model-selection, hyperparameters, worked-example]
+aliases: [median heuristic, median trick, kernel width selection, kernel bandwidth heuristic, RBF width heuristic]
+requires: [kernel-trick, cross-validation]
+related: [kernel-support-vector-machine, kernel-ridge-regression, maximum-mean-discrepancy, kernel-two-sample-test, covariance-functions, automatic-relevance-determination]
+references: [smola2010kernelwidth, garreau2017]
+status: draft
+updated: 2026-10-12
+---
+
+import { KernelWidthSvm } from './KernelWidthSvm'
+
+<Callout variant="credit" title="Provenance: Smola (2010)">
+This note is adapted from Alex Smola's blog post "Easy Kernel Width Selection" <Cite id="smola2010kernelwidth" />.
+The quantile rule and the advice to cross-validate three candidates are his; the post credits the idea of scaling
+the kernel to typical distances to Bernhard Schölkopf's thesis, "Support Vector Learning" (1997). This site added the
+discussion of conventions, the failure cases, and the support vector machine experiment and worked example.
+</Callout>
+
+<Definition>
+A radial kernel has the form $k(\xvec, \xvec') = \kappa(\lambda\norm{\xvec - \xvec'})$ for a fixed profile $\kappa$
+and a scale $\lambda > 0$, such as the Gaussian <Gloss name="rbf-kernel" />
+$k(\xvec, \xvec') = \exp(-\lambda^2 \norm{\xvec - \xvec'}^2)$. The **median heuristic** draws a few hundred to a few
+thousand random pairs of points from the data, computes their distances, and sets $\lambda$ to the inverse of the
+median distance. Smola's version also takes the inverses of the 0.1 and 0.9 quantiles and chooses among the three by
+<NoteLink to="cross-validation" /> <Cite id="smola2010kernelwidth" />.
+</Definition>
+
+## Problem
+
+The scale $\lambda$ decides what a kernel method can learn. If $\lambda$ is large, $\kappa$ is near zero for almost
+every pair, the kernel matrix is close to the identity, and each point is similar only to itself: the method memorises
+the training set. If $\lambda$ is small, $\kappa$ is near $\kappa(0)$ for every pair, the kernel matrix is close to a
+constant, and the method sees little beyond the mean. Useful values lie in between, but where depends on the units of
+the data, which are arbitrary. A grid search over many orders of magnitude costs one fit per grid point.
+
+## Mechanism
+
+The argument $\lambda\norm{\xvec - \xvec'}$ should be of order 1 for typical pairs, so that the kernel separates near
+pairs from far ones. Setting $\lambda = 1/d_{0.5}$, with $d_{0.5}$ the median pairwise distance, achieves this
+directly. For the Gaussian kernel a pair at the median distance then has kernel value $e^{-1} \approx 0.37$; half of
+all pairs have larger values and half smaller.
+
+Measuring distances in the data, rather than assuming them, is what makes the rule robust. Schölkopf's earlier
+heuristic scaled the kernel by the input dimension $d$, since $d$ independent standardised coordinates give a mean
+squared distance of $2d$. Correlated coordinates break that assumption: a hundred coordinates that move together have
+pairwise distances like those of a few independent ones. The quantiles of observed distances account for this
+automatically <Cite id="smola2010kernelwidth" />.
+
+The three candidates span the useful range. The inverse of the 0.1 quantile gives a local kernel, under which most
+pairs are nearly unrelated. The inverse of the 0.9 quantile gives a smooth kernel, under which most pairs are
+similar. One of the three is usually close enough to the cross-validated optimum that a finer search changes little.
+
+The figure runs the procedure with the engine's RBF support vector machine on its synthetic data sets. It samples
+1000 pairs, takes the three quantiles of their distances, and scores each candidate width by five-fold
+cross-validation, beside a grid of widths spanning two and a half decades.
+
+<KernelWidthSvm />
+
+### Conventions
+
+Kernels are written with different scale parameters, and the heuristic must be translated. For
+$\exp(-\norm{\xvec - \xvec'}^2 / 2\sigma^2)$, setting $\lambda = 1/d_{0.5}$ corresponds to $\sigma = d_{0.5}/\sqrt{2}$.
+Many statistical papers, and the <NoteLink to="kernel-two-sample-test" /> notes on this site, set $\sigma = d_{0.5}$
+directly; the factor $\sqrt 2$ rarely matters next to the spread of the three candidates. Garreau, Jitkrittum and
+Kanagawa study the median heuristic's large-sample behaviour <Cite id="garreau2017" />.
+
+## Cost
+
+Sampling $m$ pairs and computing their distances costs $O(md)$ in $d$ dimensions, and the quantiles cost
+$O(m \log m)$; $m = 1000$ is plenty. Computing all $n^2$ distances is unnecessary: the quantiles of a random sample of
+pairs are accurate to a few percent. Cross-validation then needs three fits in place of a full grid.
+
+## Trade-offs
+
+- **Labels are ignored.** The heuristic looks only at the inputs. When the target varies on a much finer or coarser
+  scale than the inputs are spread, cross-validation over a wider range is needed.
+- **One scale for every coordinate.** A coordinate in large units dominates every distance. Standardise features
+  first, or learn one scale per coordinate, as <NoteLink to="automatic-relevance-determination" /> does.
+- **High dimensions.** Distances between random points concentrate as the dimension grows, so the 0.1, 0.5 and 0.9
+  quantiles approach each other and the three candidates become nearly the same.
+- **Not for every task.** In the <NoteLink to="kernel-two-sample-test" />, the median heuristic is a safe default but
+  can miss a difference at a scale far from the typical distance.
+
+## Worked example
+
+The figure's default: the two-spirals data set with 200 points and noise 0.1, an RBF support vector machine with
+$C = 1$, and seed 1. The engine writes the Gaussian kernel as $\exp(-\norm{\xvec - \xvec'}^2 / 2\ell^2)$, so
+$\lambda = 1/d$ becomes the lengthscale $\ell = d/\sqrt{2}$.
+
+1. **Sample distances.** Over 1000 random pairs of distinct points, the 0.1 quantile is $0.297$, the median $0.739$
+   and the 0.9 quantile $1.300$.
+2. **Convert to widths.** The candidates are $\ell = 0.210$, $0.523$ and $0.920$.
+3. **Cross-validate each.** Five-fold accuracy is $0.865 \pm 0.055$ at $\ell = 0.210$, $0.585 \pm 0.060$ at
+   $0.523$ and $0.530 \pm 0.091$ at $0.920$.
+4. **Compare with the grid.** The best of 13 widths from $0.03$ to $10$ scores $0.875$, within one standard error of
+   the 0.1-quantile candidate.
+5. **Read the result.** The spirals' arms are closer together than a typical pair of points, so the median width
+   blurs neighbouring arms into one and does little better than chance. The 0.1-quantile candidate resolves them. On
+   the two-moons data, whose classes differ at the scale of a typical distance, the same procedure gives $1.000$,
+   $0.990$ and $0.910$, and the median would have done.

@@ -5,32 +5,153 @@ summary: 'Data formats fix how records are laid out on disk: by row, by column, 
 tags: [data, software]
 aliases: []
 requires: []
-related: [data-parallelism]
-references: []
-status: stub
+related: [data-loading-and-shuffling, large-scale-processing, dataset-versioning-and-lineage]
+references: [armbrust2015, mohan2021]
+status: draft
 updated: 2026-10-11
 ---
 
+import { DataStoragePipelineVisualizer } from './DataStoragePipelineVisualizer'
+
 <Definition>
-To be written.
+A **data format** dictates how structured and unstructured records are physically serialized and chunked on persistent
+storage media (local NVMe drives, distributed file systems, or cloud object stores). A **data pipeline** is the
+ingestion subsystem that streams raw bytes from storage, decompresses, decodes, transforms, and batches them into
+accelerator-ready tensors fast enough to saturate GPUs and TPUs without inducing data stalls <Cite id="mohan2021" />.
 </Definition>
+
+Modern accelerators process mathematical operations at multiple teraflops or petaflops. Consequently, machine learning
+systems frequently become I/O-bound rather than compute-bound: an accelerator starved of tensors sits idle while CPU
+cores struggle with filesystem metadata lookups, decompression overhead, or unvectorized deserialization. Selecting the
+correct storage layout and structuring high-throughput streaming pipelines is essential to achieving compute saturation.
+
+<DataStoragePipelineVisualizer />
 
 ## Row formats
 
+**Row-oriented formats**—including CSV and JSON Lines (JSONL)—store records consecutively on disk: all attributes of
+record $i$ are written contiguously, immediately followed by the attributes of record $i+1$.
+
+- **Advantages:** Human-readable, schema-flexible, and straightforward for transactional append operations or
+  small-scale prototyping.
+- **I/O and compute inefficiencies:**
+  - **Text parsing overhead:** Deserializing ASCII strings into IEEE 754 floating-point numbers or 64-bit integers burns
+    significant CPU clock cycles. In interpreted environments like Python, JSON deserialization is subject to global
+    interpreter lock (GIL) contention and heap allocation churn.
+  - **No column pruning:** If a downstream model requires only $5$ columns from a $100$-column JSONL log, the parser
+    must read, tokenize, and parse the full line from storage before discarding unused attributes, multiplying disk read
+    amplification.
+
 ## Columnar formats
+
+**Columnar formats**—predominantly Apache Parquet <Cite id="armbrust2015" /> and Apache ORC—organize records by column
+chunks within discrete horizontal partitions termed row groups (typically 64 MB to 512 MB in size).
+
+| Storage Layout | Physical Disk Organization | Optimal Workload | Trade-offs & Bottlenecks |
+| :--- | :--- | :--- | :--- |
+| **Row-Oriented** (JSONL / CSV / SQLite) | Sequential stream per record: `[Row 1: f1, f2, f3] [Row 2: f1, f2, f3]` | Transactional appends, point lookups, small scripts | No column pruning; severe text deserialization CPU overhead |
+| **Columnar** (Parquet / ORC) | Column chunks partitioned in row groups: `[Col 1: r1, r2...] [Col 2: r1, r2...]` | Analytical queries, feature stores, SQL preprocessing | Projection and predicate pushdown; slow for random sample-by-sample deep learning streaming |
+
+- **Projection pushdown:** Data loaders read only the byte offsets containing the requested feature columns. If a model
+  consumes $10$ features out of a $200$-column feature store, the storage engine reads only $5\%$ of the data volume.
+- **Predicate pushdown:** Row-group headers store min-max summary statistics for each column. Queries filtering records
+  (such as `timestamp >= 2026-01-01`) skip non-matching row groups entirely without reading or decompressing their
+  pages.
+- **Limitations for deep learning:** Iterating over randomized single rows requires seeking across multiple
+  discontiguous byte ranges across different column streams. Parquet is optimal for tabular preprocessing, SQL feature
+  engineering, and offline lakehouse aggregations, but ill-suited for random sample-by-sample deep learning streaming.
 
 ## Array stores
 
+For dense, multidimensional numerical data—such as satellite imagery, climate grids, medical CT/MRI volumes, and neural
+activations—**chunked N-dimensional array stores** (notably Zarr and HDF5) partition tensors into regular spatial and
+temporal hypercubes.
+
+- **Chunk alignment:** Array chunks (e.g. $64 \times 128 \times 128$) map directly to physical binary blobs compressed
+  with algorithms like Blosc or Zstandard. Slices aligned with chunk boundaries can be mapped straight into memory
+  buffers via `memcpy` without custom parsing.
+- **Cloud-native object storage:** While HDF5 relies on complex POSIX file locking that degrades over cloud object
+  storage, Zarr stores each chunk as an independent key in an object store (e.g. S3 or Google Cloud Storage), permitting
+  thousands of parallel workers to stream non-overlapping spatial tiles concurrently.
+
 ## Sharded record formats
+
+In multimodal deep learning, datasets comprise millions of small individual items (e.g., individual JPEG images, audio
+clips, or pre-tokenized text sequences). Storing these as loose files on a standard filesystem causes the **small files
+problem**: opening millions of individual inodes swamps filesystem metadata servers and saturates storage systems with
+latency-bound I/O requests.
+
+**Sharded sequential record formats**—such as WebDataset (sharded POSIX `.tar` archives) and TFRecord (protobuf-encoded
+records with CRC32 checksums)—bundle thousands of records into self-contained sequential shards (typically 100 MB to 1
+GB each):
+
+- **Sequential throughput:** Modern NVMe drives achieve 3,000 to 7,000 MB/s under sustained sequential reads, but drop
+  to a fraction of that bandwidth under random small-file lookups. Sharded records allow readers to consume data via
+  large sequential streaming buffers.
+- **Object store compatibility:** Cloud object storage (S3, GCS) excels at long sequential HTTP GET requests with high
+  bandwidth, but penalizes frequent high-frequency metadata queries. Sharded archives turn millions of file operations
+  into a sequence of predictable streaming requests.
 
 ## Compression and encoding
 
+Efficient storage formats combine structural encodings with fast block compression algorithms:
+
+1. **Lightweight encodings:**
+   - **Dictionary encoding:** Replaces repetitive strings and categorical variables with compact integer keys, storing
+     an index table per page.
+   - **Bit-packing and Run-Length Encoding (RLE):** Collapses repeated sequences of identical values (such as boolean
+     masks or sparse indicator columns) into count-value pairs.
+2. **Block compressors:**
+   - **Snappy and LZ4:** Prioritize decompression speed (>1.5 GB/s per core) over maximum compression ratio. Highly
+     recommended for real-time training pipelines where CPU decompression must not bottleneck data loaders.
+   - **Zstandard (zstd):** Offers higher compression ratios with tunable compression levels; ideal for cold storage and
+     archival foundation model pre-training corpora.
+
 ## Loading pipelines
+
+An efficient training data pipeline orchestrates multiple asynchronous stages to prevent **data stalls**
+<Cite id="mohan2021" />, where matrix multiply units sit idle waiting for input batches:
+
+| Pipeline Stage | Executing Hardware | Primary Operations | Latency & Bandwidth Strategy |
+| :--- | :--- | :--- | :--- |
+| **1. Storage Ingestion** | NVMe SSD / S3 Bucket | Sequential chunk streaming | High-bandwidth sequential I/O (multi-part HTTP GET or POSIX direct I/O) |
+| **2. Prefetch Ring Buffer** | Host RAM | Asynchronous queue decoupling | Absorbs network and disk I/O bursts |
+| **3. Parallel Workers** | Multi-core CPU Workers | Decompress, decode (JPEG/Protobuf), apply transforms | Distribute worker processes across CPU cores to bypass Python GIL |
+| **4. Shuffle Buffer** | Worker Memory | Windowed local pseudo-randomization | Bounds RAM footprint while breaking short-range sample correlations |
+| **5. Batch Collation** | Host RAM | Stack samples into dense tensors | Collate into pinned page-locked host memory (`pin_memory()`) |
+| **6. Device Transfer** | PCIe Bus $\to$ Accelerator HBM | Asynchronous Direct Memory Access (DMA) | Non-blocking transfers overlapped with compute kernel execution |
 
 ### Prefetching and parallel decoding
 
+Because image decompression, audio resynthesis, and data augmentations are computationally expensive, modern frameworks
+run multiple worker processes in parallel (e.g., PyTorch `DataLoader(num_workers=8, prefetch_factor=2)`). Background
+processes pre-render batches into a thread-safe IPC ring buffer, decoupling CPU ingestion jitter from GPU execution
+cycles.
+
 ### Shuffle buffers
+
+Generating an exact uniform random permutation across a 10-terabyte dataset requires holding all indices in local memory
+and performing random seeks across petabytes of remote storage. Streaming pipelines achieve pseudo-random shuffling in
+two hierarchical tiers:
+1. **Shard-level shuffle:** The list of shard URLs/paths is randomly permuted at the start of each training epoch.
+2. **Buffer-level shuffle:** Samples read sequentially from shards populate an in-memory sliding shuffle buffer of
+   capacity $K$ (e.g., $K = 10{,}000$). Each step extracts a randomly sampled item from the buffer and replaces it with
+   the next incoming sample from the shard stream.
 
 ### Streaming from object storage
 
+Rather than downloading multi-terabyte datasets to local machine disks before launching training jobs, distributed
+pipelines stream shards directly from cloud storage buckets over high-speed networks (100 GbE/400 GbE). Ephemeral local
+NVMe drives act as write-through tiered caches, storing frequently accessed shards across successive epochs.
+
 ## Pitfalls
+
+- **Storing datasets as millions of loose files:** Exhausting OS file table inodes and incurring massive metadata
+  latency overheads during dataset initialization and directory traversal.
+- **Using CPU-heavy compression during training:** Compressing training files with high-ratio algorithms (like `gzip -9`
+  or `bzip2`) that consume all available host CPU cores during decompression, starving worker processes.
+- **Synchronous unpinned host-to-device transfers:** Omitting `pin_memory=True` in host data loaders, forcing the
+  operating system to perform synchronous copies from pageable virtual memory to staging RAM before transferring bytes
+  over PCIe to accelerator memory.
+- **Worker process memory leaks:** In multiprocessing data loaders, accumulating uncollected Python object graphs across
+  large batches in worker processes leads to silent out-of-memory (OOM) failures or worker restart stalls.

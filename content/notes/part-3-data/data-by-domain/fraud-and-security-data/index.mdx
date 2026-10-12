@@ -1,0 +1,126 @@
+---
+title: 'Fraud and security data'
+kind: concept
+summary: 'Fraud and intrusion data feature adversaries who adapt, labels that arrive late or are disputed, and extreme rarity of positives.'
+tags: [data, anomaly-detection]
+aliases: []
+requires: []
+related: [financial-data, interaction-logs, data-monitoring]
+references: [dalpozzolo2015, sommer2010]
+status: draft
+updated: 2026-10-11
+---
+
+import { FraudSecurityDataVisualizer } from './FraudSecurityDataVisualizer'
+
+<Definition>
+**Fraud and security data** encompasses the transaction logs, authentication telemetry, network packet metadata, and
+identity signals monitored to detect unauthorized, deceptive, or malicious activity. Unlike passive statistical domains,
+fraud and security environments feature intelligent, adaptive adversaries who actively probe and evade detection models
+<Cite id="sommer2010" />. The domain is characterized by extreme class rarity ($P(\text{fraud}) \ll 0.1\%$) and feedback
+horizons delayed by weeks or months through chargeback resolution cycles <Cite id="dalpozzolo2015" />.
+</Definition>
+
+Machine learning systems operating in fraud and cybersecurity must function under asymmetric adversarial dynamics: while
+legitimate user behavior remains relatively stable, malicious actors continuously alter their infrastructure,
+transaction velocities, and behavioral signatures in direct response to deployed defensive mechanisms.
+
+<FraudSecurityDataVisualizer />
+
+## Adaptive adversaries
+
+In standard machine learning applications, dataset drift occurs passively (e.g. seasonal shopping shifts or changing
+slang). In fraud and security, drift is active, strategic, and adversarial:
+
+- **Evasion and the cat-and-mouse dynamic:** When a deployed model establishes a decision boundary penalizing specific
+  features (such as rapid transaction velocities or data center IP addresses), criminal organizations immediately adapt:
+  - Routing traffic through residential IP proxy networks to mimic legitimate local consumers.
+  - Splitting large illicit transactions into micro-amounts below automated threshold triggers (smurfing / structuring).
+  - Pacing bot automation with synthetic jitter to bypass keystroke-dynamics classifiers.
+- **Goodhart's Law in production:** Any statistical regularities identified during offline training lose predictive
+  efficacy once relied upon for automated enforcement, accelerating feature degradation.
+- **Feedback loops and blind spots:** Fraud systems only inspect or block transactions flagged by current rules;
+  unflagged innovative fraud passes through unscrutinized, starving future training datasets of novel attack vectors.
+
+## Delayed and disputed labels
+
+Acquiring definitive ground-truth labels for training supervised fraud models is constrained by long financial and
+administrative delays <Cite id="dalpozzolo2015" />:
+
+| Lifecycle Stage | Elapsed Time | Operational Mechanism | Feature & Label Impact |
+| :--- | :--- | :--- | :--- |
+| **Transaction Authorized** | $t = 0$ | Unauthorized transaction clears payment gateway | Contextual transaction telemetry recorded |
+| **Statement Generation** | $t = +15\text{--}30\text{ days}$ | Victim inspects monthly credit card statement | Fraud remains completely unobserved |
+| **Dispute Filed** | $t = +30\text{--}45\text{ days}$ | Consumer contacts issuing bank to register chargeback | Provisional inquiry indicator created |
+| **Bank Arbitration** | $t = +45\text{--}90\text{ days}$ | Network investigation and merchant representment | Legal and financial liability determined |
+| **Confirmed Ingestion** | $t = +60\text{--}90\text{ days}$ | Final fraud label committed to analytical warehouse | **True positive ground truth finally lands** |
+
+### Chargeback feedback latency
+
+When a payment card is compromised, the merchant rarely knows immediately. The victim typically discovers the charge
+only upon reviewing their monthly bank statement weeks later. Formal banking dispute workflows (chargebacks) take 30 to
+90 days to settle:
+
+- **The label latency trap:** If a training dataset is constructed from transactions occurring over the past 30 days,
+  un-disputed fraudulent transactions are incorrectly labeled as legitimate ($Y = 0$), contaminating training sets with
+  false negatives.
+- **Cohort maturation:** Reliable supervised model retraining requires using matured historical cohorts (e.g.,
+  transactions older than 90 days) or employing survival analysis and delayed-feedback loss formulations to model label
+  arrival probability.
+
+### Disputed labels and friendly fraud
+
+Not all disputed transactions represent compromised credentials or malicious third parties:
+- **First-party fraud ("Friendly fraud"):** Legitimate cardholders make authorized purchases, consume goods, and
+  subsequently file fraudulent chargebacks claiming unauthorized activity to obtain refunds.
+- **Family / accidental disputes:** Purchases made by children on gaming platforms without account holder awareness.
+- **Label noise:** Treating all bank chargebacks as malicious fraud injects label noise that penalizes legitimate user
+  behaviors.
+
+## Extreme rarity
+
+True malicious transactions represent a tiny fraction of global volume—frequently between $0.01\%$ and $0.1\%$ ($1$ in
+$1{,}000$ to $1$ in $10{,}000$ events):
+
+### The base-rate fallacy
+
+In their seminal analysis of machine learning in network security, Robin Sommer and Vern Paxson <Cite id="sommer2010" />
+identified the **base-rate fallacy** as the primary barrier to automated deployment:
+
+Consider a credit card fraud detector operating on a transaction flow with a base fraud rate of
+$P(\text{fraud}) = 0.001$ ($0.1\%$). Even if the model achieves an outstanding $90\%$ True Positive Rate
+($\text{TPR} = 0.90$) and a $99.5\%$ specificity ($\text{FPR} = 0.005$):
+
+$$
+\text{Precision (PPV)} = \frac{\text{TPR} \cdot P(\text{fraud})}{\text{TPR} \cdot P(\text{fraud}) + \text{FPR} \cdot (1 - P(\text{fraud}))}
+$$
+
+$$
+\text{PPV} = \frac{0.90 \times 0.001}{(0.90 \times 0.001) + (0.005 \times 0.999)} = \frac{0.0009}{0.0009 + 0.004995} \approx 15.3\%
+$$
+
+Despite the model's seemingly elite statistical performance, **$84.7\%$ of all flagged transactions are false
+positives**. In production operations, this floods manual review teams with thousands of benign accounts, generating
+investigator fatigue and alienating legitimate customers whose accounts are frozen.
+
+### Evaluation metrics under severe imbalance
+
+Standard machine learning evaluation metrics are misleading in security contexts:
+- **ROC curves are misleading:** Because the number of true negatives is massive, the False Positive Rate
+  $\text{FPR} = \text{FP} / (\text{FP} + \text{TN})$ remains deceptively tiny even when raw false positives outnumber
+  true alerts 10-to-1.
+- **Precision-Recall (PR) curves:** Quantitative practitioners prioritize PR curves and Average Precision (PR-AUC),
+  which evaluate precision directly against recall across operational alert thresholds.
+- **Asymmetric cost matrices:** The cost of a False Negative (financial fraud loss, chargeback fines) far outweighs the
+  friction of a False Positive (SMS authentication challenge, manual queue review).
+
+## Pitfalls
+
+- **Evaluating security models via ROC-AUC:** Relying on ROC-AUC metrics that mask catastrophic false alarm volumes
+  under extreme class imbalance <Cite id="sommer2010" />.
+- **Training on un-matured transaction cohorts:** Constructing training sets from recent 30-day windows without
+  accounting for 60-day chargeback latency, introducing thousands of false negative labels <Cite id="dalpozzolo2015" />.
+- **Ignoring operational investigator capacity:** Setting alert thresholds purely on statistical optimization without
+  bounding daily alert volumes to the throughput capacity of human review operations.
+- **Neglecting adversarial countermeasures:** Assuming that features predictive in historical offline datasets will
+  remain predictive against active adversaries once the model is deployed.

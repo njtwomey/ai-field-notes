@@ -3,26 +3,159 @@ title: 'Imbalanced regression'
 kind: concept
 summary: 'In imbalanced regression some target ranges are rare, and a model fits them poorly. Density-based weights, resampling of binned targets and stratifying splits on a binned target address it.'
 tags: [data, regression]
-aliases: []
-requires: []
-related: [class-imbalance]
-references: []
-status: stub
+aliases: [continuous imbalance, extreme value regression, SMOTER]
+requires: [sample-weights]
+related: [class-imbalance, stable-split-assignment]
+references: [torgo2013]
+status: draft
 updated: 2026-10-11
 ---
 
 <Definition>
-To be written.
+**Imbalanced regression** occurs when the continuous target variable $y \in \mathbb{R}$ exhibits a non-uniform
+probability density such that values in rare regions (often the extreme tails or isolated modes) carry disproportionate
+operational significance but suffer severe under-prediction under standard mean-squared-error objectives.
 </Definition>
 
-## Rare target ranges
+In standard supervised regression, empirical risk minimization minimizes the unweighted squared loss:
 
-## Density-based weights
+$$
+\mathcal{L}(\theta) = \frac{1}{N} \sum_{i=1}^N (y_i - f_\theta(x_i))^2
+$$
 
-## Resampling binned targets
+Because the overwhelming majority of training instances occupy the high-density bulk of the target distribution,
+minimizing global mean squared error forces the model to hedge toward the global conditional expectation
+$\mathbb{E}[y \mid x]$. Consequently, predictions for extreme, rare target values are pulled sharply toward the central
+mass, resulting in catastrophic underestimation of extreme events like severe insurance claims, catastrophic sensor
+spikes, extreme climate events, or rare financial losses.
+
+import { ImbalancedRegressionExplorer } from './ImbalancedRegressionExplorer';
+
+<ImbalancedRegressionExplorer />
+
+## Rare target ranges and relevance functions
+
+Unlike classification where classes are discrete and cardinality counts directly quantify imbalance, continuous targets
+require defining what constitutes a "rare" or "critical" value. Luis Torgo and Rita Ribeiro formalised this via a
+**continuous relevance function** $\phi(y): \mathbb{R} \to [0, 1]$ <Cite id="torgo2013" />.
+
+The relevance function maps the continuous target space into an importance metric:
+- $\phi(y) = 1$ denotes maximum domain interest (typically extreme tails or low-frequency boundary regions).
+- $\phi(y) = 0$ denotes common, standard baseline values where standard prediction errors are acceptable.
+
+$\phi(y)$ is typically constructed from domain-specified control points using shape-preserving piecewise cubic Hermite
+interpolation (PCHIP) or inverted density estimates. The rare target subspace $\mathcal{D}_R$ is defined by a relevance
+cutoff $t_R \in (0, 1]$:
+
+$$
+\mathcal{D}_R = \{ y \in \mathcal{Y} : \phi(y) \ge t_R \}
+$$
+
+## Density-based sample weights
+
+When retaining the original training dataset without row alteration, sample weighting adjusts the gradient contribution
+of each instance inversely proportional to the local density of its target value $\hat{f}(y)$.
+
+Target density $\hat{f}(y)$ is estimated via univariate kernel density estimation (KDE) with a Gaussian kernel:
+
+$$
+\hat{f}(y) = \frac{1}{N h} \sum_{i=1}^N K\left(\frac{y - y_i}{h}\right)
+$$
+
+where $h$ is the bandwidth chosen via Silverman's rule or cross-validation. The sample weight $w_i$ assigned to training
+example $(x_i, y_i)$ combines relevance and inverse density:
+
+$$
+w_i = \left(\frac{1}{\hat{f}(y_i) + \epsilon}\right)^\alpha \cdot \phi(y_i)
+$$
+
+where $\alpha \in [0.2, 1.0]$ tempers extreme weight dispersion and $\epsilon > 0$ prevents numerical divergence in
+zero-density regions. Training under weighted least squares or gradient boosting with weights $w_i$ amplifies the
+gradient penalty for errors committed on rare target extremes:
+
+$$
+\nabla_\theta \mathcal{L}_w(\theta) = -2 \sum_{i=1}^N w_i (y_i - f_\theta(x_i)) \nabla_\theta f_\theta(x_i)
+$$
+
+This prevents the thousands of central-bulk errors from drowning out the rare-tail gradients.
+
+## Resampling continuous targets: SMOTER and SMOGN
+
+An alternative or complementary strategy to sample reweighting is continuous resampling:
+
+### 1. Continuous random undersampling
+Instances falling in the common region ($\phi(y_i) < t_R$) are randomly subsampled according to an inverse frequency
+schedule, reducing the overwhelming volume of bulk points.
+
+### 2. Synthetic Minority Oversampling Technique for Regression (SMOTER)
+Developed by Torgo et al. <Cite id="torgo2013" />, SMOTER adapts the classification SMOTE algorithm to continuous
+spaces:
+1. Identify all rare training points $\mathcal{S}_R = \{(x_i, y_i) : \phi(y_i) \ge t_R\}$.
+2. For each rare seed $(x_i, y_i)$, compute its $k$-nearest neighbours within $\mathcal{S}_R$ using Euclidean or
+   Mahalanobis distance in feature space.
+3. Randomly select a neighbor $(x_{nn}, y_{nn})$ and generate a synthetic feature vector via convex linear
+   interpolation:
+   $$
+   x_{new} = x_i + \lambda (x_{nn} - x_i), \quad \lambda \sim \mathcal{U}(0, 1)
+   $$
+4. Assign the synthetic target $y_{new}$ via inverse distance weighting:
+   $$
+   y_{new} = y_i + \lambda (y_{nn} - y_i)
+   $$
+
+### 3. SMOGN (SMOTE and Gaussian Noise)
+When candidate neighbours in feature space are distant (measured by a distance threshold based on the local standard
+deviation), linear interpolation risks generating synthetic examples in invalid or unpopulated feature regions. SMOGN
+introduces a safeguard: if $d(x_i, x_{nn})$ is smaller than a half-average threshold, SMOTER interpolation is executed;
+otherwise, perturbation via Gaussian noise centered at $x_i$ is applied.
 
 ## Stratifying on a binned target
 
-## Evaluating by range
+Standard cross-validation and random train/validation/test splits frequently introduce subtle evaluation leakage or
+catastrophic split instability in imbalanced regression. If the rare tail contains only 15 instances across 10,000 rows,
+a naive random 5-fold split may allocate 8 rare instances to fold 1 and zero rare instances to fold 3, leading to
+massive fold-to-fold variance in validation scores.
 
-## Pitfalls
+Continuous target stratification solves this:
+1. **Target binning:** Discretize continuous target $y$ into $B$ ordinal strata (e.g. 10 deciles, or custom bins
+   separated at the 90th, 95th, and 99th percentiles).
+2. **Stratified allocation:** Perform stratified $K$-fold partitioning using the discrete stratum IDs as class labels.
+3. **Guaranteed tail representation:** Ensures that every training, validation, and test partition maintains an
+   identical fraction of rare tail events.
+
+## Evaluating by range and utility-based metrics
+
+A critical trap of imbalanced regression is evaluating models using global metrics like Root Mean Squared Error (RMSE)
+or $R^2$:
+
+$$
+RMSE_{global} = \sqrt{\frac{1}{N} \sum_{i=1}^N (y_i - \hat{y}_i)^2}
+$$
+
+Because rare tail instances comprise only 1% to 5% of $N$, a naive constant model that always predicts the bulk median
+can achieve an impressive $R^2 \approx 0.90$ and low global RMSE while predicting zero extreme events correctly.
+
+Rigorous evaluation demands sliced and utility-based diagnostics:
+
+### Sliced tail metrics
+Partition test data into bulk and rare subsets based on $t_R$:
+
+$$
+RMSE_{rare} = \sqrt{\frac{1}{|\mathcal{D}_R|} \sum_{i \in \mathcal{D}_R} (y_i - \hat{y}_i)^2}, \qquad MAE_{rare} = \frac{1}{|\mathcal{D}_R|} \sum_{i \in \mathcal{D}_R} |y_i - \hat{y}_i|
+$$
+
+### Utility-based regression metrics
+Ribeiro and Torgo define continuous precision, recall, and $F_1^\phi$ by pairing the relevance function $\phi(y)$ with
+an asymmetric loss utility surface $U(\hat{y}, y)$. Over-predicting an extreme event when none occurs carries different
+economic cost than failing to predict an extreme catastrophic event, which symmetric squared error cannot capture.
+
+## Pitfalls and failure modes
+
+1. **Extreme weight explosion:** Inverse density weights $1 / \hat{f}(y)$ on extreme outliers can reach factors of
+   $10^4$ or higher. A single mislabeled noisy outlier in the tail will monopolize tree-split impurity or gradient
+   steps. Always clamp weights with Winsorization or exponent tempering ($\alpha \le 0.5$).
+2. **Synthetic feature manifold violation:** SMOTER generates points by linear interpolation in raw feature space. For
+   tabular data containing categorical encodings, binary flags, or non-convex manifold structures (e.g. valid geospatial
+   boundaries), synthetic points may represent physically impossible feature combinations.
+3. **Evaluating on resampled test sets:** Never apply SMOTER or undersampling to validation or test sets. Test data must
+   reflect the natural real-world operational target density.

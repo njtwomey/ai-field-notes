@@ -1,0 +1,133 @@
+---
+title: 'Knowledge graph datasets'
+kind: concept
+summary: 'Standardized knowledge graph benchmarks and multi-relational link-prediction datasets derived from Freebase, WordNet, YAGO, and Wikidata.'
+tags: [data, datasets, graphs]
+aliases: []
+requires: []
+related: [graph-benchmark-datasets, graph-splits-and-sampling, language-model-corpora]
+references: [bollacker2008freebase, toutanova2015wn18rr]
+status: draft
+updated: 2026-10-12
+---
+
+<Definition>
+**Knowledge graph datasets** are collections of structured relational facts represented as directed multi-relational
+graphs of subject-predicate-object triples $(h, r, t) \in \mathcal{E} \times \mathcal{R} \times \mathcal{E}$, where
+entities $\mathcal{E}$ correspond to real-world concepts or objects, and relations $\mathcal{R}$ denote typed semantic
+associations.
+</Definition>
+
+## What these datasets measure
+
+Knowledge graph benchmarks evaluate multi-relational reasoning and knowledge completion algorithms:
+
+- **Link Prediction / Entity Ranking:** Given an incomplete query $(h, r, ?)$ or $(?, r, t)$, ranking all candidate
+  entities $e \in \mathcal{E}$ according to their predicted likelihood. Evaluated using Mean Reciprocal Rank (MRR) and
+  Hits@$K$ (typically Hits@1, Hits@3, and Hits@10) under the **filtered setting** (removing other known valid true
+  triples from the candidate pool during evaluation).
+- **Relation Prediction:** Given an entity pair $(h, ?, t)$, predicting the semantic relation type connecting them.
+- **Relational Pattern Modeling:** Benchmarking an embedding model's algebraic ability to express core logical patterns:
+  - *Symmetry / Antisymmetry:* $r(h, t) \implies r(t, h)$ (e.g., `spouse_of`) vs. $r(h, t) \implies \neg r(t, h)$ (e.g.,
+    `parent_of`).
+  - *Inversion:* $r_1(h, t) \iff r_2(t, h)$ (e.g., `hypernym` vs. `hyponym`).
+  - *Composition:* $r_1(x, y) \land r_2(y, z) \implies r_3(x, z)$ (e.g., `father_of` $\land$ `brother_of` $\implies$
+    `uncle_of`).
+  - *1-to-$N$, $N$-to-1, and $N$-to-$N$ mappings.*
+- **Inductive vs. Transductive Knowledge Completion:** Evaluating whether embeddings can infer facts over completely
+  unseen entities introduced at test time via textual entity descriptions or graph neighborhood topologies.
+
+---
+
+## Catalogue
+
+The table below contrasts standard link prediction and knowledge completion benchmarks:
+
+| Benchmark | Source Knowledge Base | Number of Entities ($|\mathcal{E}|$) | Relation Types ($|\mathcal{R}|$) | Number
+of Triples (Train / Valid / Test) | Dominant Relational Patterns | Typical Baselines | | :--- | :--- | :--- | :--- |
+:--- | :--- | :--- | | **FB15k-237** | Freebase | 14,541 | 237 | 272,115 / 17,535 / 20,466 | Composition, 1-to-$N$,
+$N$-to-$N$, antisymmetric | RotatE, ComplEx, TuckER, CompGCN | | **WN18RR** | WordNet | 40,943 | 11 | 86,835 / 3,034 /
+3,134 | Hierarchical trees, hypernym / hyponym, strict acyclic | RotatE, MurP, BoxE, ATTH | | **YAGO3-10** | YAGO3
+(Wikipedia + GeoNames) | 123,182 | 37 | 1,079,040 / 5,000 / 5,000 | Multi-relational encyclopedic, high entity degree
+($>10$) | TransE, ComplEx, ConvE | | **Wikidata5M** | Wikidata | 4,594,485 | 822 | 20,614,279 / 5,163 / 5,133 |
+Web-scale open knowledge, text descriptions | KEPLER, SimKGC, BLP | | **ConceptNet** | Common-sense knowledge graph |
+$\sim 8\text{M}$ concepts | 34 relations | Tens of millions of assertions | Common sense (`IsA`, `UsedFor`, `CapableOf`)
+| TransE, ConceptNet-Numberbatch |
+
+---
+
+### FB15k-237
+
+Introduced by Toutanova and Chen in 2015 to fix the severe structural flaws of the original FB15k benchmark
+(<Cite id="toutanova2015wn18rr" />):
+- **Freebase Provenance:** Extracted from Freebase (<Cite id="bollacker2008freebase" />), capturing general world
+  knowledge spanning actors, films, locations, and sports.
+- **Leakage Elimination:** In the original FB15k dataset, Bordes et al. included inverse relation pairs (e.g.,
+  `/film/film/starring` and `/film/actor/film`). A simple memorization rule $r_{\text{inv}}(t, h)$ trivially predicted
+  over $80\%$ of test triples. FB15k-237 removed all redundant inverse relation pairs, leaving 237 distinct relation
+  types.
+- **Relational Diversity:** Requires models to capture complex multi-hop compositional reasoning and dense $N$-to-$N$
+  associations.
+
+### WN18RR
+
+Constructed by Dettmers et al. in 2018 as a leak-free derivative of WordNet WN18:
+- **Lexical Taxonomy:** Built upon the WordNet lexical semantic network of English synsets.
+- **Inverse Pair Removal:** Like FB15k, the original WN18 was trivialized by reciprocal pairs such as `_hypernym` and
+  `_hyponym`. WN18RR eliminated inverse relations, leaving 11 relations (including `_hypernym`,
+  `_derivationally_related_form`, `_instance_hypernym`, `_member_meronym`, and `_synset_domain_topic_of`).
+- **Geometric Hierarchy:** Because WordNet forms a directed acyclic tree hierarchy, hyperbolic geometry embeddings (such
+  as Poincaré and Lorentz space embeddings like MurP) demonstrate superior representational efficiency compared to
+  Euclidean translational models.
+
+### YAGO3-10
+
+Derived from the YAGO (Yet Another Great Ontology) project:
+- **Knowledge Fusion:** Integrates structured infoboxes and category taxonomies from multilingual Wikipedias, WordNet
+  synsets, and geographic metadata from GeoNames.
+- **Density Filter:** YAGO3-10 filters the graph such that every included entity participates in at least 10 distinct
+  relational facts, resulting in 123,182 entities and 37 relations.
+- **Characteristics:** Contains rich biographical, geographical, and institutional relationships (e.g., `graduatedFrom`,
+  `hasWonPrize`, `isLocatedIn`).
+
+### Wikidata5M
+
+Introduced to scale knowledge graph representation learning from closed entity IDs to open web scale:
+- **Web-Scale Magnitude:** Encompasses 4.59 million entities, 822 relation types, and over 20 million relational triples
+  extracted from live Wikidata dumps.
+- **Inductive Text Grounding:** Pairs every entity with its corresponding Wikipedia introductory text paragraph,
+  allowing multimodal text-graph models (like SimKGC) to embed newly added entities zero-shot via bi-encoder language
+  models.
+
+---
+
+## Choosing a dataset
+
+- **Evaluating multi-relational link prediction (MRR / Hits@10)?**:
+  - General world knowledge with dense relations?
+  - Hierarchical, tree-like, or lexical structures?
+  - Dense encyclopedic biographies and facts?
+  - YAGO3-10 (123k entities with $\ge 10$ relations each)
+- **Evaluating web-scale or inductive text-grounded completion?**:
+  - Wikidata5M (4.6M entities paired with textual descriptions)
+- **Evaluating common-sense reasoning for LLMs?**:
+  - ConceptNet (common-sense assertions: `Causes`, `UsedFor`, `CapableOf`)
+
+---
+
+## Known problems
+
+1. **Test-Set Leakage via Inverse Relations:** In uncurated datasets (such as raw FB15k and WN18), inverse relation
+   pairs ($r$ and $r^{-1}$) allow trivial rule lookups to achieve near-perfect Hits@10 scores without learning any
+   underlying relational structure. Always verify that derivative benchmarks have applied inverse pruning filters
+   (<NoteLink to="graph-splits-and-sampling">graph splits</NoteLink>).
+2. **Open-World Negative Sampling:** Knowledge graphs operate under the **Open-World Assumption (OWA)**: unobserved
+   triples $(h, r, t) \notin \mathcal{G}$ are unknown, not necessarily false. Training requires corrupting heads or
+   tails to generate pseudo-negative triples; inevitably, some randomly generated "negatives" are valid facts that were
+   merely missing from the database.
+3. **Severe Hub Entity Skew:** Real-world knowledge graphs follow power-law degree distributions. High-degree hub
+   entities (e.g., United States, Male, English) appear across hundreds of thousands of triples, biasing prediction
+   algorithms toward recommending popular hub entities in ambiguous queries.
+4. **Static Approximations of Dynamic Truth:** Real-world factual knowledge evolves continuously (e.g., heads of state,
+   corporate affiliations, sports rosters). Static benchmarks lack temporal validity timestamps, confounding models when
+   facts change over time.

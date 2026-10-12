@@ -5,22 +5,152 @@ summary: 'Training reads data through loaders that shuffle, batch and prefetch. 
 tags: [data, software, training]
 aliases: []
 requires: []
-related: [data-formats-and-pipelines]
-references: []
-status: stub
+related: [data-formats-and-pipelines, large-scale-processing, dataset-versioning-and-lineage]
+references: [vaswani2017, mohan2021]
+status: draft
 updated: 2026-10-11
 ---
 
+import { DataLoadingShufflingVisualizer } from './DataLoadingShufflingVisualizer'
+
 <Definition>
-To be written.
+A **data loader** is the software abstraction that streams, transforms, and batches training data from persistent
+storage into accelerator memory. It governs **stochastic shuffling**—the mechanism ensuring training examples
+approximate independent and identically distributed (i.i.d.) draws across optimization steps—and orchestrates throughput
+optimizations such as asynchronous prefetching, length bucketing, and host memory pinning to prevent accelerator
+starvation <Cite id="mohan2021" />.
 </Definition>
+
+Stochastic gradient descent (SGD) relies fundamentally on random sample presentation to produce unbiased gradient
+estimates. However, at web scale, generating a mathematically uniform random shuffle across billions of items
+distributed in cloud object storage is computationally intractable without careful hierarchical approximations.
+Concurrently, data loaders must collate variable-length inputs without squandering matrix multiplication FLOPs on
+uninformative padding.
+
+<DataLoadingShufflingVisualizer />
 
 ## Shuffle buffers
 
+In in-memory training workflows on small datasets, generating an exact random permutation $\pi \sim S_N$ across all $N$
+samples is trivial: an array of sample indices is permuted using the Fisher-Yates algorithm, and samples are read in
+index order. 
+
+At large scale, datasets are partitioned into thousands of sharded archives stored on remote object stores. True uniform
+without-replacement sampling would require performing random seeks across petabytes of network storage for every single
+training example, collapsing I/O throughput. Modern streaming loaders resolve this via **in-memory sliding shuffle
+buffers**:
+
+| Buffer Operation | Memory & State Structure | Execution Mechanism | Operational Role |
+| :--- | :--- | :--- | :--- |
+| **Stream Insertion** | Circular buffer in Host RAM | Ingest raw serialized samples sequentially from network/disk | Sustains high-bandwidth streaming without seeks |
+| **Uniform Draw** | Buffer capacity $B$ ($10\text{k}\text{--}50\text{k}$) | Sample index uniformly at random: $i \sim \text{Uniform}(1, B)$ | Breaks serial autocorrelation between adjacent records |
+| **Slot Replacement** | Vacated slot index $i$ | Overwrite index $i$ immediately with next record from stream | Fixed $\mathcal{O}(1)$ memory consumption |
+| **Batch Collation** | Minibatch assembly queue | Yield selected sample to batch collator | Accumulate into dense training batch |
+
+- **Mechanism:** As raw records stream into host memory, they populate a circular buffer of capacity $B$ (e.g.
+  $B = 10{,}000$ to $50{,}000$ items). At each step, a record is drawn uniformly at random from the current buffer and
+  yielded to the batch assembler, and the newly vacated slot is immediately filled with the next incoming sample from
+  the shard stream.
+- **Autocorrelation trade-off:** If buffer capacity $B$ is too small relative to the dataset and shard size, consecutive
+  mini-batches remain autocorrelated: if a single shard contains documents from a specific web domain or images from a
+  specific video clip, consecutive gradient steps encounter closely related samples. This temporal correlation inflates
+  gradient variance, destabilizes batch normalization statistics, and degrades final validation convergence. The buffer
+  size $B$ must be scaled as large as host system RAM permits.
+
 ## Shard order
+
+Because a finite sliding buffer can only pseudo-randomize samples locally, streaming pipelines implement **two-tiered
+hierarchical shuffling**:
+
+1. **Epoch-level shard permutation:** At the start of every training epoch, the full list of shard URLs/identifiers is
+   shuffled:
+   $$
+   \sigma_{\text{shards}} \sim S_M
+   $$
+   This ensures that no two epochs process data shards in the same sequence.
+2. **Buffer-level sample randomization:** Samples drawn sequentially from the newly permuted shard order are mixed
+   within the sliding shuffle buffer.
+
+### Distributed synchronization and seeds
+
+In Distributed Data Parallel (DDP) training across $R$ accelerator ranks (e.g., using PyTorch's `DistributedSampler`),
+shard assignments and random number generator (RNG) seeds must be strictly synchronized:
+
+- **Epoch seed advancement:** The sampler seed must advance deterministically at each epoch boundary:
+   $$
+   \text{seed}_e = \text{seed}_{\text{base}} + \text{epoch}
+   $$
+   If the training loop omits advancing the sampler epoch counter, every epoch repeats the identical batch ordering,
+   undermining the regularization benefits of stochastic training.
+- **Disjoint rank partitioning:** Each distributed worker must consume a strictly disjoint subset of shards or indices:
+   $$
+   \text{ShardIndex} \equiv \text{Rank} \pmod R
+   $$
+   Failing to partition ranks causes multiple GPUs to compute gradients on identical mini-batches during the same
+   training step, squandering distributed compute capacity.
 
 ## Length bucketing
 
+In sequence modeling (natural language processing, speech recognition, and genomics), sequence lengths vary across
+multiple orders of magnitude (e.g., natural text ranging from 10 tokens to 2,048 tokens). 
+
+### The padding penalty
+
+Collating variable-length sequences into a standard dense batch tensor $X \in \mathbb{R}^{B \times L_{\max}}$ requires
+padding every sequence shorter than the batch maximum $L_{\max} = \max_{i \in B} L_i$ with zero/pad tokens. In naive
+random batching, pairing a 32-token sentence with a 1,024-token document forces the shorter sequence to be 97% padding.
+In transformer architectures with quadratic attention $O(L_{\max}^2)$ <Cite id="vaswani2017" />, over 50% to 70% of
+total floating-point operations can be squandered on zero-attention masks.
+
+### Bucket by sequence length
+
+**Length bucketing** clusters sequences of comparable lengths into discrete bins before batch assembly:
+
+1. **Binning:** Divide the sequence length distribution into $K$ discrete intervals (e.g.
+   $[16, 64], [65, 128], [129, 256], \dots$).
+2. **Bucket collation:** Assign incoming examples to length buckets. A batch is formed only when a specific bucket
+   accumulates enough samples to fill its allocation.
+3. **Dynamic token batching:** Rather than fixing a constant sample batch size $B$, modern pipelines specify a fixed
+   budget of active tokens per batch (e.g. $\sum_{i} L_i \le 4{,}096$). Short-sequence batches contain many samples,
+   while long-sequence batches contain few, maintaining constant accelerator memory footprint and eliminating
+   out-of-memory (OOM) spikes.
+4. **Randomized bucket scheduling:** To prevent the model from overfitting to sequence length order (e.g. training
+   exclusively on short sequences early in an epoch and long sequences late), the loader randomly alternates between
+   ready buckets.
+
+Length bucketing slashes padding token overhead from over 50% down to under 5%, directly doubling effective training
+throughput.
+
 ## Loader throughput
 
+Achieving high ingestion throughput requires overlapping CPU preprocessing with GPU execution <Cite id="mohan2021" />:
+
+| Pipeline Domain | Hardware Execution Unit | Parallelized Task | Concurrency & Overlap Mechanism |
+| :--- | :--- | :--- | :--- |
+| **CPU Worker Processes** | Host Multi-Core CPU | Decompress archives, decode tensors, apply augmentations | Multiprocessing pool (`num_workers`) bypassing Python GIL |
+| **Pinned Host Memory** | Page-Locked Host RAM | Stage assembled batch tensors in non-swappable memory | `pin_memory=True` enables direct physical DMA addressing |
+| **PCIe Transfer Stream** | PCIe Bus Controller | Stream pinned tensors to accelerator memory | Non-blocking transfers (`tensor.to(non_blocking=True)`) |
+| **Accelerator Execution** | GPU / TPU Compute Cores | Execute forward and backward propagation kernels | Overlaps execution of Step $t$ with transfer of Step $t+1$ and decoding of Step $t+2$ |
+
+- **Multiprocessing workers (`num_workers`):** Because Python's Global Interpreter Lock (GIL) serializes CPU execution,
+  data decoding must execute in separate background processes. Setting `num_workers` to roughly 2 to 4 workers per
+  accelerator core balances decoding capacity against inter-process communication (IPC) overhead.
+- **Pinned memory (`pin_memory=True`):** Allocates page-locked host RAM. Operating systems cannot swap pinned memory to
+  disk, allowing the host PCIe controller to stream tensors directly into GPU device memory via asynchronous Direct
+  Memory Access (DMA) without CPU intervention.
+- **Non-blocking device transfer:** Initiating tensor copies with `tensor.to(device, non_blocking=True)` overlaps
+  host-to-device PCIe transfers with ongoing accelerator kernel execution from the previous step.
+- **Persistent workers (`persistent_workers=True`):** Prevents the data loader from destroying and respawning worker
+  processes and IPC shared memory rings at the end of each epoch, eliminating startup latency spikes between epochs.
+
 ## Pitfalls
+
+- **Neglecting to increment sampler epoch:** Failing to call `sampler.set_epoch(epoch)` in distributed training, causing
+  the data loader to yield the identical sequence of mini-batches across every epoch.
+- **Insufficient shuffle buffer size:** Setting tiny buffers (e.g. `buffer_size=100` on multi-gigabyte shard archives),
+  allowing severe sample autocorrelation to degrade gradient variance and final test accuracy.
+- **Memory leaks in multiprocessing workers:** Retaining references to large Python object hierarchies inside custom
+  dataset `__getitem__` methods; Python's garbage collector struggles across process fork boundaries, causing slow
+  memory leaks and eventual worker termination.
+- **Fixed batch sizes with variable sequence lengths:** Pairing fixed sample batch sizes with variable sequence lengths,
+  causing peak memory allocations on long batches that trigger out-of-memory (OOM) runtime crashes.

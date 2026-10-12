@@ -1,26 +1,170 @@
 ---
 title: 'Modality tokenisation'
 kind: concept
-summary: 'Transformers take sequences of tokens, so each modality is cut into tokens: image patches, vector-quantised codes, neural audio codec frames, time-series patches and value bins.'
-tags: [data, multimodal, transformer]
-aliases: []
-requires: []
-related: [vision-transformer, tokenisation]
-references: []
-status: stub
-updated: 2026-10-11
+summary: 'Modality tokenisation converts non-text inputs (images, audio, video, sensor series) into discrete or continuous token sequences via 2D spatial patching, residual vector-quantised neural codecs, and subseries windows for unified multimodal transformers.'
+tags: [data, multimodal, transformer, representations]
+aliases: [multimodal-tokenisation, patch-tokenisation, vq-vae, residual-vector-quantization, audio-codecs]
+requires: [digital-images, digital-audio]
+related: [multimodal-data-layouts, vision-transformer, tokenisation, cross-modal-pairing]
+references: [dosovitskiy2021, oord2017, esser2021, defossez2022encodec, nie2023]
+status: draft
+updated: 2026-10-12
 ---
 
+import { ModalityTokenisationVisualizer } from './ModalityTokenisationVisualizer'
+
 <Definition>
-To be written.
+**Modality tokenisation** is the algorithmic transformation of continuous or non-symbolic signals (2D pixel grids,
+continuous audio waveforms, multidimensional time-series streams) into standardized sequences of discrete integer tokens
+$\mathbf{z} \in \{1, \dots, K\}^N$ or continuous vector embeddings $\mathbf{Z} \in \mathbb{R}^{N \times d}$. This
+enables transformer sequence backbones to process heterogeneous perception streams within a unified autoregressive or
+bidirectional attention mechanism <Cite id="dosovitskiy2021, oord2017" />.
 </Definition>
 
-## Image patches
+While natural language text naturally factorizes into discrete linguistic subwords via Byte-Pair Encoding (BPE),
+continuous signals (vision, speech, physiological sensors) exhibit high temporal/spatial redundancy, dense signal rates,
+and no natural whitespace boundaries <Cite id="defossez2022encodec" />. Tokenisation strategies trade off
+spatial/temporal resolution against the quadratic computational scaling $O(N^2)$ of multi-head self-attention
+<Cite id="nie2023" />.
 
-## Vector-quantised codes
+<ModalityTokenisationVisualizer client:load />
 
-## Neural audio codecs
+## Image Patch Tokenisation (ViT)
 
-## Time-series patches and bins
+The Vision Transformer (ViT) <Cite id="dosovitskiy2021" /> processes images without recurrent or convolutional inductive
+biases by flattening images into a sequence of non-overlapping 2D patches:
+1. An input image $\mathbf{X} \in \mathbb{R}^{H \times W \times C}$ is partitioned into a grid of non-overlapping
+   patches of size $P \times P$:
+   $$
+   N = \frac{H \cdot W}{P^2} \text{ patches}
+   $$
+2. Each patch $\mathbf{x}_p^{(i)} \in \mathbb{R}^{P^2 C}$ is linearly projected to hidden dimension $d$ using a
+   learnable projection matrix $\mathbf{E} \in \mathbb{R}^{(P^2 C) \times d}$:
+   $$
+   \mathbf{z}_0 = \left[ \mathbf{x}_{\text{class}}; \, \mathbf{x}_p^{(1)} \mathbf{E}; \, \mathbf{x}_p^{(2)} \mathbf{E}; \dots; \, \mathbf{x}_p^{(N)} \mathbf{E} \right] + \mathbf{E}_{\text{pos}}
+   $$
+   where $\mathbf{E}_{\text{pos}} \in \mathbb{R}^{(N + 1) \times d}$ provides 1D or 2D learnable positional embeddings,
+   and $\mathbf{x}_{\text{class}}$ is a prepended classification token.
+
+Patch size $P$ governs the resolution-compute Pareto frontier: reducing patch size from $16 \times 16$ to $8 \times 8$
+on a $224 \times 224$ image increases token count four-fold from $N = 196$ to $N = 784$, inflating pairwise attention
+FLOPs sixteen-fold ($O(N^2)$) <Cite id="dosovitskiy2021" />.
+
+---
+
+## Vector-Quantised Codebooks (VQ-VAE and VQ-GAN)
+
+To treat images and continuous signals as discrete categorical sequences analogous to text tokens, Vector Quantised
+Variational Autoencoders (VQ-VAE) <Cite id="oord2017" /> and VQ-GAN <Cite id="esser2021" /> quantize continuous latent
+feature maps against a learned discrete codebook:
+
+$$
+\mathcal{C} = \{\mathbf{e}_1, \mathbf{e}_2, \dots, \mathbf{e}_K\} \subset \mathbb{R}^d
+$$
+
+### Nearest-Neighbor Quantization
+
+An encoder $E$ maps an input $\mathbf{x}$ to continuous latent representations
+$\mathbf{z}_e(\mathbf{x}) \in \mathbb{R}^{h \times w \times d}$. Each spatial feature vector $\mathbf{z}_e^{(i, j)}$ is
+mapped to its nearest codebook vector:
+
+$$
+\mathbf{z}_q^{(i, j)} = \mathbf{e}_{k^*}, \quad k^* = \arg\min_{k \in \{1, \dots, K\}} \left\| \mathbf{z}_e^{(i, j)} - \mathbf{e}_k \right\|_2
+$$
+
+The discrete code indices $k^* \in \{1, \dots, K\}$ form a 2D integer token grid of size $h \times w$ (typically
+downsampled by factor $8\times$ or $16\times$ relative to $H \times W$), ready for autoregressive generative modeling
+with standard causal transformers <Cite id="esser2021" />.
+
+### Straight-Through Gradient Estimator (STE)
+
+Because the argmin quantization operator is non-differentiable ($\nabla_{\mathbf{z}_e} \mathbf{z}_q = \mathbf{0}$ almost
+everywhere), backpropagation uses the **Straight-Through Estimator** <Cite id="oord2017" />:
+
+$$
+\mathbf{z}_q = \mathbf{z}_e + \operatorname{sg}\left[ \mathbf{z}_q - \mathbf{z}_e \right]
+$$
+
+where $\operatorname{sg}[\cdot]$ denotes the stop-gradient operator. The complete training objective optimizes
+reconstruction loss, codebook vector alignment, and encoder commitment:
+
+$$
+\mathcal{L}_{\text{VQ}} = \mathcal{L}_{\text{recon}}(\mathbf{x}, \hat{\mathbf{x}}) + \left\| \operatorname{sg}[\mathbf{z}_e(\mathbf{x})] - \mathbf{z}_q \right\|_2^2 + \beta \left\| \mathbf{z}_e(\mathbf{x}) - \operatorname{sg}[\mathbf{z}_q] \right\|_2^2
+$$
+
+where $\beta \in [0.1, 0.5]$ penalizes the encoder from fluctuating faster than codebook embeddings update.
+
+---
+
+## Neural Audio Codecs (Residual Vector Quantization)
+
+Raw audio sampled at $24\text{ kHz}$ or $44.1\text{ kHz}$ contains tens of thousands of samples per second. Single-stage
+VQ codebooks cannot simultaneously capture acoustic pitch, vocal timbre, phonetic formants, and room reverberation
+without massive codebook sizes ($K > 2^{30}$) that suffer from catastrophic codebook collapse
+<Cite id="defossez2022encodec" />.
+
+### Residual Vector Quantization (RVQ)
+
+Neural audio codecs like EnCodec <Cite id="defossez2022encodec" /> and SoundStream structure quantization across $M$
+hierarchical stages:
+1. **Stage 1**: The continuous latent representation $\mathbf{z} \in \mathbb{R}^{d}$ is quantized by the first codebook
+   $\mathcal{C}_1$, yielding residual $\mathbf{r}_1 = \mathbf{z} - \mathbf{e}_{q, 1}$.
+2. **Subsequent Stages $m = 2, \dots, M$**: Each successive codebook quantizes the residual error of the preceding
+   stage:
+   $$
+   \mathbf{e}_{q, m} = \mathcal{Q}_m(\mathbf{r}_{m-1}), \quad \mathbf{r}_m = \mathbf{r}_{m-1} - \mathbf{e}_{q, m}
+   $$
+3. **Quantized Reconstruction**: The aggregated latent vector is the sum of all $M$ codebook vectors:
+   $$
+   \hat{\mathbf{z}} = \sum_{m=1}^M \mathbf{e}_{q, m}
+   $$
+
+At $75\text{ frames/second}$ with $M = 8$ codebooks (each with $K = 1{,}024$ entries, requiring 10 bits), RVQ encodes
+$24\text{ kHz}$ high-fidelity studio audio at only $6.0\text{ kbps}$, representing 1 second of audio as a compact matrix
+of $75 \times 8 = 600$ discrete tokens <Cite id="defossez2022encodec" />.
+
+---
+
+## Time-Series Patches and Value Bins
+
+In multivariate continuous time-series forecasting, point-wise tokenisation (treating each timestamp scalar as an
+individual token) produces prohibitively long sequences that drown semantic trends in high-frequency sensor noise
+<Cite id="nie2023" />.
+
+### Subseries Patching (PatchTST)
+
+PatchTST <Cite id="nie2023" /> groups consecutive time steps into overlapping subseries patches:
+- Given a lookback horizon of length $L$, patches of length $P$ with stride $S$ are extracted:
+  $$
+  N = \left\lfloor \frac{L - P}{S} \right\rfloor + 1 \text{ tokens}
+  $$
+- Each continuous 1D patch $\mathbf{x}_p \in \mathbb{R}^P$ is mapped via a linear layer to embedding space
+  $\mathbb{R}^d$.
+- Patching aggregates local temporal patterns (daily seasonality, transient spikes) into single semantic tokens,
+  reducing sequence length by $\approx S\times$ and allowing transformers to attend across long historical contexts.
+
+### Quantile Value Binning and Numerical Tokenisation
+
+For tabular sensors and autoregressive numerical modeling, continuous values $x \in \mathbb{R}$ are discretized into
+categorical integer tokens using:
+- **Quantile Binning**: Dividing training data into $B$ equal-frequency bins: $b(x) = k$ if $x \in [q_{k-1}, q_k)$,
+  maximizing entropy across vocabulary tokens.
+- **$\mu$-Law Companding**: Logarithmic non-linear companding
+  $F(x) = \operatorname{sgn}(x) \frac{\ln(1 + \mu |x|)}{\ln(1 + \mu)}$, standardly used in speech and physical waveform
+  digitisation.
+
+---
 
 ## Pitfalls
+
+1. **Token Rate Imbalance in Interleaved Multimodal Sequences**: When streaming synchronized video, audio, and text,
+   video generates thousands of tokens per second while text generates fewer than five. Naive concatenation causes
+   visual tokens to monopolize the context window and self-attention compute, starving text reasoning unless visual
+   token pruning or cross-attention perceiver resamplers are used.
+2. **Codebook Collapse in Vector Quantization**: During VQ training, a small subset of codebook vectors can become
+   inactive (dead codes) while a handful of dominant vectors absorb all assignments, degrading effective vocabulary
+   capacity. Codebook renewal mechanisms (reinitializing inactive vectors to randomly sampled encoder outputs) are
+   necessary.
+3. **Information Bottlenecks in Small Patch Sizes**: Setting patch size too large (e.g. $P = 32$) blurs high-frequency
+   spatial edges and thin textual characters in document understanding, causing downstream OCR and vision-language
+   models to hallucinate.

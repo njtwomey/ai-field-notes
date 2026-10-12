@@ -1,4 +1,4 @@
-import { ArrowRight, Search, Waypoints } from 'lucide-react'
+import { ArrowRight, Search } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router'
 import { TopicIcon } from '@/components/layout/category-icon'
@@ -110,12 +110,6 @@ export function HomePage() {
           <Link to={browseUrl()} className="inline-flex items-center gap-1 font-medium text-foreground hover:underline">
             Browse all <ArrowRight className="size-3.5" aria-hidden />
           </Link>
-          <Link
-            to={browseUrl({ view: 'map' })}
-            className="inline-flex items-center gap-1 font-medium text-foreground hover:underline"
-          >
-            <Waypoints className="size-3.5" aria-hidden /> Open map
-          </Link>
           <StubToggle />
         </div>
       </section>
@@ -173,7 +167,7 @@ export function HomePage() {
             >
               {/* Part Header: Clear Distinction */}
               <Link
-                to={browseUrl({ part: part.path })}
+                to={browseUrl({ c: part.path })}
                 className="group mb-3 flex flex-wrap items-baseline gap-x-2.5 gap-y-1"
               >
                 <span className="font-mono text-xs font-bold tracking-wider text-primary uppercase">

@@ -1,26 +1,107 @@
 ---
 title: 'Personal data and identifiability'
 kind: concept
-summary: 'Personal data identify a person directly, by names or numbers, or indirectly, by combinations of quasi-identifiers. Pseudonymised data remain personal; anonymised data must resist linkage with other sources.'
-tags: [data, privacy]
-aliases: []
+summary: 'Personal data identify a person directly by names or IDs, or indirectly by combinations of quasi-identifiers. Pseudonymised data remain personal; anonymised data must resist linkage.'
+tags: [data, privacy, gdpr, data-protection, security]
+aliases: [personal data, personally identifiable information, PII, quasi-identifiers, identifiability, linkage attack]
 requires: []
-related: [differential-privacy, membership-inference]
-references: []
-status: stub
+related: [k-anonymity-and-disclosure-control, pii-detection-and-redaction, data-rights-and-deletion, training-data-extraction]
+references: [sweeney2002k, narayanan2008robust]
+status: draft
 updated: 2026-10-11
 ---
 
+import { IdentifiabilityLinkageVisualizer } from './IdentifiabilityLinkageVisualizer'
+
 <Definition>
-To be written.
+**Personal data** encompasses any information relating to an identified or identifiable natural person (*data subject*).
+An individual is identifiable if they can be distinguished from others in a population, directly or indirectly, through
+unique identifiers or combinations of non-unique auxiliary attributes (*quasi-identifiers*) <Cite id="sweeney2002k" />.
 </Definition>
 
 ## Direct identifiers
 
-## Quasi-identifiers
+A **direct identifier** is an explicit data attribute that unambiguously references an individual without requiring
+auxiliary information:
+- Government identification numbers (Social Security Number, national passport, driving license).
+- Contact endpoints (personal email address, telephone number).
+- Biometric signatures (facial scans, fingerprint hashes, DNA sequences).
+- Full legal names combined with residential street addresses.
 
-## Pseudonymised and anonymised data
+In standard data sanitization pipelines, removing direct identifiers is a mandatory first step. However, treating the
+removal of direct identifiers as sufficient for anonymization is a dangerous failure mode.
+
+## Quasi-identifiers and the uniqueness curse
+
+A **quasi-identifier** is an attribute that does not identify a person in isolation, but whose combination with other
+attributes partitions a population into uniquely identifiable equivalence classes:
+
+$$
+\mathbf{q} = \left[ \text{postal code}, \text{gender}, \text{date of birth} \right]^\top.
+$$
+
+### Sweeney's 87% landmark finding
+In a foundational demographic study of the 1990 US Census, Latanya Sweeney <Cite id="sweeney2002k" /> proved that:
+- Gender partitions a population into $2$ coarse bins.
+- 5-digit ZIP code partitions the US into $\approx 40{,}000$ geographic sectors.
+- Full date of birth provides $\approx 365.25 \times 80 \approx 29{,}220$ discrete calendar dates.
+
+When crossed, the Cartesian product provides $2 \times 40{,}000 \times 29{,}220 \approx 2.3 \times 10^9$ discrete cells.
+Across the US population, **87% of individuals** inhabit an equivalence cell containing exactly one person:
+
+$$
+P\left( \big| \{ i : \mathbf{q}_i = \mathbf{q}_j \} \big| = 1 \right) \approx 0.87.
+$$
+
+Consequently, any de-identified dataset containing only these three ordinary fields allows immediate, deterministic
+re-identification of nearly nine out of ten citizens.
+
+## Pseudonymised versus anonymised data
+
+Under modern legal frameworks (such as GDPR Recital 26 and CCPA), there is a strict operational distinction:
+
+| Attribute | Pseudonymised Data | Anonymised Data |
+| :--- | :--- | :--- |
+| **Mechanism** | Direct identifiers replaced by tokens/hashes; mapping key stored separately. | Data transformed so records cannot be linked to individuals by any reasonable means. |
+| **Reversibility** | Reversible via the secret lookup table or side-channel joins. | Irreversible even in the presence of auxiliary background information. |
+| **Legal Status** | **Remains personal data**. Full GDPR compliance, consent, and rights apply. | **Exempt from data protection law**. Free to share, analyze, and retain indefinitely. |
+
+Hashing an email with SHA-256 (`sha256("user@example.com")`) does not anonymize data; because the hash is deterministic,
+dictionary precomputation attacks (rainbow tables) immediately invert common email addresses.
 
 ## Linkage attacks
 
-## Pitfalls
+A **linkage attack** occurs when an adversary joins two independently published datasets on their shared
+quasi-identifiers to re-identify supposedly anonymous subjects:
+
+$$
+\mathcal{D}_{\text{confidential}} \bowtie_{\mathbf{q}} \mathcal{D}_{\text{public}} \implies \text{Identity} \longleftrightarrow \text{Sensitive Attribute}.
+$$
+
+### Classic case studies
+1. **The Massachusetts GIC Medical Registry (1997)**: The Group Insurance Commission (GIC) published de-identified
+   health records for state employees, containing diagnoses, medications, and procedures, stripping names and SSNs while
+   retaining ZIP, gender, and birth date. Sweeney purchased the public voter registration list for Cambridge,
+   Massachusetts ($20) containing names and identical demographics, joined the datasets on $\mathbf{q} = (\text{ZIP},
+   \text{Gender}, \text{DOB})$, and successfully mailed the medical records of Massachusetts Governor William Weld to
+   his office.
+2. **The Netflix Prize De-anonymization (2008)**: Netflix released 100 million movie ratings from 500,000 subscribers,
+   replacing usernames with random IDs. Narayanan and Shmatikov <Cite id="narayanan2008robust" /> showed that by linking
+   ratings with public IMDb reviews, knowing just six movie ratings and approximate dates uniquely identified 84% of
+   subscribers, exposing private viewing histories and political/sexual preferences.
+
+The interactive visualizer below illustrates how adding quasi-identifiers collapses group sizes and creates uniquely
+identifiable individuals:
+
+<IdentifiabilityLinkageVisualizer />
+
+## Pitfalls and failure modes
+
+1. **The "strip and release" fallacy**: Organizations frequently scrub names, emails, and phone numbers and assume the
+   resulting dataset is anonymous. In high dimensions, sparsity makes almost every individual record unique.
+2. **High-dimensional behavioral exhaust**: Credit card transaction sequences, mobile phone GPS traces, and web browsing
+   histories have astronomical entropy. Studies show that four spatio-temporal points $(x, y, t)$ are sufficient to
+   uniquely identify 95% of individuals in a mobile telecom dataset.
+3. **Temporal auxiliary data accumulation**: Anonymity is non-monotonic: a dataset that is safe against
+   re-identification today may become compromised tomorrow when a new commercial broker dataset or public breach
+   provides the missing linkage key.

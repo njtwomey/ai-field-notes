@@ -6,19 +6,95 @@ tags: [data, model-selection]
 aliases: []
 requires: []
 related: [data-leakage]
-references: []
-status: stub
-updated: 2026-10-11
+references: [gelman2013forking, dwork2015]
+status: draft
+updated: 2026-10-12
 ---
 
+import { ExplorationHygieneVisualizer } from './ExplorationHygieneVisualizer'
+
 <Definition>
-To be written.
+Exploration hygiene is the operational discipline that governs exploratory data analysis (EDA) to prevent data snooping,
+confirmation bias, and information leakage across model evaluation boundaries. It mandates that exploratory
+visualizations, hypothesis formulation, and preprocessing discoveries are conducted strictly on isolated training
+partitions, keeping validation and test sets vaulted in cold storage until final evaluation.
 </Definition>
+
+Exploratory data analysis is universally recognized as the foundational first step of machine learning engineering.
+However, unconstrained visual exploration on unpartitioned datasets introduces the most insidious form of data leakage:
+*human-in-the-loop data snooping* <Cite id="gelman2013forking, dwork2015" />. Even when the training algorithm never
+sees test rows during gradient descent, the human engineer who designed the feature crosses, outlier filtering
+thresholds, and imputation rules saw the test set, unconsciously tuning the model pipeline to test-set idiosyncrasies.
+
+<ExplorationHygieneVisualizer />
 
 ## Exploring training rows only
 
+The golden rule of exploration hygiene is straightforward: **Partition first, explore second.**
+
+1. **Immediate Vaulting:** The moment raw data is ingested, partition it into training, validation, and holdout test
+   sets using a deterministic, leakage-safe split (e.g., grouped by entity or partitioned strictly along temporal
+   boundaries).
+2. **Cold Storage for Test Rows:** Test rows must be physically moved into an access-restricted cold-storage bucket or
+   encrypted partition. No Jupyter notebooks, interactive dashboards, or visual profilers should have read access to
+   test rows during the exploratory phase.
+3. **Exploratory Scope:** All univariate distributions, correlation matrices, dimensionality reduction projections, and
+   missingness audits must be executed strictly on the training partition. If a data quality issue or sensor failure is
+   discovered in training rows, the mitigation pipeline must be fitted on training rows and applied blindly to test rows
+   as an immutable preprocessing transform.
+
 ## Forking paths
+
+Andrew Gelman and Eric Loken coined the term **The Garden of Forking Paths** to explain how scientific findings become
+irreproducible even when researchers do not engage in deliberate p-hacking <Cite id="gelman2013forking" />:
+
+- In exploratory data analysis, every step presents multiple defensible choices:
+  - *Should outliers beyond 3 standard deviations be clipped, log-transformed, or deleted?*
+  - *Should age be modeled as a continuous spline or discretized into four demographic bins?*
+  - *Should rare categories below 1% frequency be grouped into "Other" or target-encoded?*
+- If an analyst makes these decisions while looking at the full dataset (or iterates on them based on test set
+  feedback), the decision path chosen is the one that happens to produce clean separations on the specific sample at
+  hand.
+- Under the null hypothesis where features have zero genuine relationship with the target, testing $K$ contingent
+  exploratory forks inflates the probability of discovering a spurious correlation to:
+
+$$
+P(\text{False Discovery}) = 1 - (1 - \alpha)^K
+$$
+
+For $K = 15$ exploratory decisions at nominal significance $\alpha = 0.05$, the probability of stumbling upon a purely
+noise-driven pattern exceeds $53\%$.
 
 ## Checks fixed in advance
 
+To limit the garden of forking paths without stifling creative exploratory discovery, mature engineering teams enforce
+pre-registered exploratory protocols:
+
+1. **Standardized EDA Checklists:** Defining a fixed battery of invariant diagnostic checks before loading data:
+   - Verification of primary key grain uniqueness.
+   - Missingness rate per column and missingness correlation matrices.
+   - Temporal stability of event frequencies.
+   - Target class prevalence and label imbalance ratios.
+2. **Hypothesis Pre-Registration:** Before testing custom non-linear feature interactions or domain-specific
+   aggregations, engineers document the mechanical rationale (e.g., "Combining pressure and temperature to estimate
+   fluid density based on the ideal gas law"). Pre-registering hypotheses prevents post-hoc rationalization of random
+   noise artifacts.
+3. **The Reusable Holdout:** Cynthia Dwork and colleagues proved that test sets can be repeatedly queried without
+   adaptive overfitting only if queries are mediated through differential privacy mechanisms that add calibrated
+   Laplacian noise to evaluation scores <Cite id="dwork2015" />, bounding the information leaked to the analyst across
+   iterative exploratory cycles.
+
 ## Pitfalls
+
+- **Global Imputation Before Splitting:** Running iterative imputation (such as MICE or MissForest) across the entire
+  dataset before creating train and test splits. The imputation model uses target values from test rows to fill missing
+  features in training rows, creating catastrophic bidirectional leakage.
+- **Global Normalization and Outlier Clipping:** Computing the global mean $\mu$ and standard deviation $\sigma$ (or
+  99th percentile outlier thresholds) across the entire table. The scaler learns the scale and variance of the test set,
+  creating optimistic test metrics.
+- **Iterative Test-Set Hill-Climbing:** Running a model on the test set, inspecting the specific false-positive test
+  instances in a notebook, creating a customized heuristic feature to fix those specific errors, and re-evaluating. The
+  engineer is directly overfitting the holdout set.
+- **Exploratory Data Leakage in Feature Stores:** Materializing aggregate features (e.g., `user_30day_spend`) into an
+  offline feature store without point-in-time temporal constraints, allowing exploratory dashboards to view future
+  information.

@@ -1,0 +1,121 @@
+---
+title: 'Procedurally generated environments'
+kind: concept
+summary: 'Environments that generate new levels for each episode evaluate reinforcement learning generalization by measuring performance on levels the agent never encountered in training.'
+tags: [data, reinforcement-learning, generalisation, procgen, visual-rl]
+aliases: [procedurally generated environments, Procgen, procedural RL, generalization in RL, NLE, Crafter]
+requires: []
+related: [arcade-and-video-game-environments, grid-worlds-and-discrete-environments, continuous-control-benchmarks]
+references: [cobbe2020procgen, kuttler2020, hafner2022]
+status: draft
+updated: 2026-10-11
+---
+
+import { ProceduralGenerationVisualizer } from './ProceduralGenerationVisualizer'
+
+<Definition>
+A **procedurally generated environment** is defined as a probability distribution over Markov Decision Processes
+$\mathcal{D}_{\mathcal{M}}$ parameterized by a random generation seed $z \sim P(\mathcal{Z})$
+<Cite id="cobbe2020procgen" />:
+
+$$
+\mathcal{M}_z = \langle \mathcal{S}_z, \mathcal{A}, \mathcal{P}_z, \mathcal{R}_z, \gamma \rangle, \quad z \sim P(\mathcal{Z}).
+$$
+
+An agent trains on a finite training seed bank $\mathcal{Z}_{\text{train}} \subset \mathcal{Z}$
+($|\mathcal{Z}_{\text{train}}| = K$), while zero-shot generalization is measured on disjoint unseen test seeds
+$\mathcal{Z}_{\text{test}}$ ($\mathcal{Z}_{\text{train}} \cap \mathcal{Z}_{\text{test}} = \emptyset$).
+</Definition>
+
+## What these environments test
+
+In classical reinforcement learning benchmarks (such as Atari 2600 or MuJoCo), the training and evaluation environments
+are identical. This creates a critical experimental vulnerability:
+
+1. **Disentangling optimization from generalization**: Deep neural policies with millions of parameters can achieve
+   near-perfect training return by memorizing precise sequences of timing cues or pixel coordinates. Procedural
+   generation prevents memorization by requiring policies to generalize to entirely unseen map layouts.
+2. **Quantifying the generalization gap**: Generalization capability is formalized as the difference between empirical
+   training return and unseen test return:
+
+   $$
+   \Delta_{\text{gen}}(\pi) = \mathbb{E}_{z \in \mathcal{Z}_{\text{train}}} [J(\pi; \mathcal{M}_z)] - \mathbb{E}_{z \in \mathcal{Z}_{\text{test}}} [J(\pi; \mathcal{M}_z)].
+   $$
+
+3. **Invariance to visual distractors**: Procedural engines alter visual textures, background themes, enemy colors, and
+   lighting across episodes, forcing convolutional vision encoders to learn robust semantic features (e.g.
+   distinguishing a platform from a decorative background) rather than relying on brittle pixel shortcuts.
+4. **Evaluating sample diversity**: Measuring test return as a function of training bank size $K \in [10, 500]$ reveals
+   how many diverse environmental seeds are required for an algorithm to learn generalizable behavior.
+
+## Catalogue
+
+### Procgen Benchmark
+Introduced by Cobbe et al. <Cite id="cobbe2020procgen" />, Procgen consists of 16 diverse 2D arcade games implemented
+directly in C++:
+- **Games**: Includes *CoinRun* (platform navigation), *StarPilot* (space shooting), *BigFish* (grow by eating smaller
+  fish), *CaveFlyer*, *BossFight*, and *Chaser*.
+- **High-throughput simulation**: Employs vectorised native C++ rendering, executing over $100{,}000$ environment steps
+  per second on a single GPU.
+- **Canonical evaluation protocol**: Agents are trained on a restricted training bank of $K=200$ or $K=500$ levels and
+  evaluated on the full distribution $P(\mathcal{Z})$. Standard model-free RL algorithms (such as PPO with an Impala
+  CNN) exhibit a substantial generalization gap unless regularized with data augmentations (Cutout, Random Crop) or L2
+  weight decay.
+
+### NetHack Learning Environment (NLE)
+Built on the legendary 1987 rogue-like dungeon crawler *NetHack* <Cite id="kuttler2020" />:
+- **Procedural dungeons and permadeath**: Every game run generates a new multi-level labyrinth featuring randomly placed
+  rooms, corridors, traps, monsters, and items. Death is permanent; the player restarts from a completely new dungeon.
+- **High-level symbolic complexity**: NetHack renders via ASCII / glyph terminal grids ($80 \times 24$ text tiles) with
+  over $100$ discrete actions (movement, casting spells, quaffing potions, wielding tools). It tests long-horizon
+  memory, common-sense reasoning, and systematic exploration.
+
+### Crafter
+A 2D open-world survival game benchmark developed by Hafner <Cite id="hafner2022" />:
+- **Open-ended survival mechanics**: The agent must manage health, hunger, thirst, and energy meters in a procedurally
+  generated top-down world containing grass, trees, water, stone, and dangerous nighttime creatures.
+- **Hierarchical achievement tree**: Features 22 tiered milestones—from harvesting wood and placing a crafting table to
+  mining iron and discovering diamonds.
+- **Unbiased evaluation metric**: Crafter computes a single unified metric—the geometric mean of success rates across
+  all 22 achievements—benchmarking exploration and skill synthesis without manual reward shaping.
+
+The interactive visualizer below illustrates the relationship between training seed set size $K$, regularization
+techniques, and the resulting RL generalization gap:
+
+<ProceduralGenerationVisualizer />
+
+## Interfaces and versions
+
+In Gymnasium, Procgen environments permit explicit configuration of training and test seed sets:
+
+```python
+import gymnasium as gym
+
+# Training environment restricted to K=200 levels:
+train_env = gym.make(
+    "procgen:procgen-coinrun-v0",
+    num_levels=200,
+    start_level=0,
+    distribution_mode="hard",
+)
+
+# Test environment sampling from the infinite distribution of unseen levels:
+test_env = gym.make(
+    "procgen:procgen-coinrun-v0",
+    num_levels=0,
+    start_level=10000,
+    distribution_mode="hard",
+)
+```
+
+## Known problems and limitations
+
+1. **Unsolvable level generation**: Due to random procedural seed generation, a small percentage of layouts may generate
+   physically impossible topologies (e.g. a required key placed behind a locked door or an exit blocked by
+   indestructible bedrock).
+2. **Heavy-tailed difficulty distributions**: Certain generated seeds present vastly higher obstacle density or tighter
+   timing windows than the median level, introducing high variance into evaluation metrics unless evaluated across
+   thousands of independent episode rollouts.
+3. **Exploration versus generalization conflation**: When an agent fails on an unseen level, it is often difficult to
+   diagnose whether the failure stems from visual misinterpretation (representation failure) or inability to explore an
+   unfamiliar maze branch (exploration failure).

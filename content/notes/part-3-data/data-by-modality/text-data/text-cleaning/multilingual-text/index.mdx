@@ -1,26 +1,128 @@
 ---
 title: 'Multilingual text'
 kind: concept
-summary: 'Text in many languages brings different scripts, languages without spaces between words, transliteration and switching between languages mid-sentence.'
-tags: [data, nlp]
-aliases: []
-requires: []
-related: [tokenisation]
-references: []
-status: stub
+summary: 'Multilingual corpora combine distinct scripts, unsegmented orthographies without whitespace, transliteration, and intra-sentence code-switching that challenge tokenisation and cleaning.'
+tags: [data, nlp, tokenisation, text-cleaning]
+aliases: [multilingual corpora, cross-lingual text, multilingual data, non-Latin scripts, code-switching, scriptio continua]
+requires: [tokenisation, text-cleaning]
+related: [corpus-construction, text-augmentation, byte-pair-encoding, character-n-grams-and-shingles]
+references: [kudo2018, conneau2020xlmr, rust2021, wenzek2020]
+status: draft
 updated: 2026-10-11
 ---
 
+import { MultilingualScriptExplorer } from './MultilingualScriptExplorer'
+
 <Definition>
-To be written.
+**Multilingual text** encompasses corpora composed of multiple human natural languages and orthographic writing systems.
+Unlike monolingual text in Latin scripts, multilingual data incorporates diverse Unicode blocks, writing directions
+(left-to-right and right-to-left), unsegmented writing systems without whitespace boundaries, romanised
+**transliteration**, and intra-sentential **code-switching**. Preprocessing multilingual text requires script-aware
+normalisation, morphological segmentation, and balanced subword vocabularies to avoid computational penalties across
+languages.
 </Definition>
 
-## Scripts
+## Scripts and orthographies
 
-## Word segmentation
+Natural human languages are expressed across dozens of distinct orthographic systems codified by the Unicode Consortium:
 
-## Transliteration
+- **Alphabetic scripts (Latin, Cyrillic, Greek):** Consist of discrete consonant and vowel glyphs arranged
+  left-to-right, separated by whitespace.
+- **Abjads (Arabic, Hebrew):** Consonant-primary scripts written right-to-left (RTL). Short vowels are marked with
+  optional diacritics (harakat in Arabic, niqqud in Hebrew) that are frequently omitted in informal web text, producing
+  homographic ambiguities.
+- **Abugidas (Devanagari, Bengali, Tamil, Thai):** Syllabic alphabets where consonants carry an inherent vowel, modified
+  by vowel diacritics (matras) and consonant conjuncts (ligatures) formed with the Unicode virama (halant, `U+094D`).
+- **Logographic and ideographic scripts (Chinese Hanzi, Japanese Kanji):** Morphosyllabic characters where each glyph
+  represents a morpheme or meaning rather than an individual phoneme.
+
+In web crawls, mixed scripts create homoglyphs and script confusables: visually identical characters that possess
+different Unicode code points (such as Latin `a` `U+0061` versus Cyrillic `а` `U+0430`). Optical character recognition
+models and adversarial spam injections frequently introduce confusable glyphs, which break
+<NoteLink to="tokenisation">subword tokenisation</NoteLink> unless normalised via Unicode security skeletons (UTS #39).
+
+## Word segmentation and scriptio continua
+
+Many world writing systems do not employ spaces between words (*scriptio continua*). Chinese and Japanese Kanji write
+uninterrupted strings of ideographs; Thai, Lao, and Khmer write unbroken sequences of syllabic glyphs without word
+delimiters:
+
+- **Rule-based and maximal matching:** Early segmenters used greedy longest-dictionary-match lookups. These fail on
+  out-of-vocabulary compounds, proper nouns, and ambiguous segmentation boundaries.
+- **Statistical and morphological models:** Tools like Jieba (Chinese), MeCab/Sudachi (Japanese), and PyThaiNLP (Thai)
+  apply <Gloss name="crf">conditional random fields</Gloss> or lattice-based <Gloss name="hmm">hidden Markov
+  models</Gloss> to find optimal word boundaries.
+- **Language-independent subword tokenisation:** SentencePiece processes text directly as raw Unicode sequences without
+  requiring pre-tokenisation whitespace splitting <Cite id="kudo2018" />. While SentencePiece eliminates hard
+  language-specific segmentation pipelines, subword vocabularies trained predominantly on English segment unsegmented
+  scripts into fragmented byte fragments or single characters.
+
+## Transliteration and script mixing
+
+**Transliteration** maps text from its native writing system into an alternative script, most commonly the Latin
+alphabet (romanisation). Examples include Pinyin for Mandarin Chinese, Romaji for Japanese, and Arabizi (Franco-Arab
+chat alphabet) for Arabic dialects.
+
+Arabizi substitutes Latin digits for Arabic consonants that lack direct European phonetic equivalents (for example,
+using `3` for the pharyngeal fricative *`ayn* /ع/ and `7` for the voiceless pharyngeal fricative *haa* /ح/). Informal
+digital communications in South Asia heavily employ Hinglish or Romanised Bengali.
+
+Transliteration presents severe challenges for natural language pipelines:
+1. **Lack of standardised spelling:** Romanised Indic and Arabic dialects follow non-standard phonetic transcriptions;
+   the same word may be spelled a dozen different ways across users.
+2. **Loss of phonemic distinction:** Diacritics, vowel lengths, and tonal contours present in native scripts are
+   stripped during romanisation, producing severe lexical ambiguity.
 
 ## Code-switching
 
+**Code-switching** occurs when a speaker alternates between two or more languages within a single communicative
+exchange, or even within a single sentence:
+
+> *“I was going to the market lekin wahan bahut traffic tha.”*
+
+Here, English (*I was going to the market*) switches directly into Hindi (*lekin wahan bahut traffic tha*).
+Code-switching is prevalent in multilingual communities and social media across South Asia, Southeast Asia, Latin
+America, and North Africa.
+
+Standard text processing pipelines break on code-switched text:
+- **Language identification failure:** Monolingual language classifiers (such as fastText or CLD3) force a single
+  categorical decision per document, misclassifying code-switched text or reporting near-zero confidence
+  <Cite id="wenzek2020" />.
+- **Vocabulary fragmentation:** Subwords optimized for monolingual benchmarks fragment romanised loanwords into isolated
+  subword fragments, sharply increasing sequence length.
+
+## Token fertility and fairness
+
+A central disparity in multilingual <Gloss name="nlp">natural language processing</Gloss> is **token fertility**: the
+average number of subword tokens required to represent a single semantic word or concept <Cite id="rust2021" />.
+
+In the standard UTF-8 encoding:
+- ASCII characters (Latin alphabet) require exactly 1 byte per character.
+- Cyrillic, Greek, Arabic, and Hebrew characters require 2 bytes per character.
+- Devanagari, Indic scripts, and CJK ideographs require 3 bytes per character.
+- Rare historic scripts and emoji require 4 bytes per character.
+
+When tokenisers are trained with a fixed vocabulary budget (such as 32,000 or 128,000 subword tokens) on corpora
+dominated by English and European web dumps, rare scripts receive few dedicated token slots. Non-Latin words are chopped
+into multiple subword pieces or falling back to raw UTF-8 bytes <Cite id="conneau2020xlmr" />:
+
+$$
+\text{Fertility} = \frac{\#\,\text{Subword Tokens}}{\#\,\text{Semantic Words}}.
+$$
+
+While English typically achieves a fertility of $1.1$ to $1.3$ tokens per word, languages like Hindi, Amharic, or
+Burmese frequently exhibit fertilies of $2.5$ to $4.0$. This disparity creates severe computational inequity: models
+process fewer words per context window in high-fertility languages, and inference cost is proportionally inflated.
+
+<MultilingualScriptExplorer />
+
 ## Pitfalls
+
+- **Naive ASCII stripping:** Legacy cleaning scripts that filter out characters outside `[a-zA-Z0-9]` inadvertently wipe
+  out valid text in all non-Latin languages.
+- **Bidirectional (BiDi) text corruption:** Arabic and Hebrew render right-to-left, but embedded numbers, Latin
+  acronyms, and URLs render left-to-right. Concatenating strings or stripping Unicode directionality markers (`U+200E`
+  LRM, `U+200F` RLM) scrambles word order and destroys syntactic validity.
+- **Document-level language filtering:** Filtering Common Crawl dumps by a strict language probability threshold (for
+  example, $P(\text{lang}) \ge 0.8$) discards code-switched dialogues, multilingual dictionaries, and parallel corpora,
+  underrepresenting linguistically diverse communities.

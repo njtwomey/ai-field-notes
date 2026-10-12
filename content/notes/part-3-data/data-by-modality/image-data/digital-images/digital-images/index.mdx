@@ -2,27 +2,152 @@
 title: 'Digital images'
 kind: concept
 summary: 'A digital image is a grid of pixels, each holding one or more channel values at a fixed bit depth, in a colour space, stored in a compressed format with metadata such as orientation.'
-tags: [data, computer-vision]
-aliases: []
+tags: [data, computer-vision, image-processing]
+aliases: [digital images, pixel grid, color spaces, image representation]
 requires: []
-related: [quantisation]
-references: []
-status: stub
-updated: 2026-10-11
+related: [quantisation, image-preprocessing, image-augmentation, specialised-imaging-data]
+references: [wallace1991, gonzalez2018]
+status: draft
+updated: 2026-10-12
 ---
 
+import { DigitalImagesVisualizer } from './DigitalImagesVisualizer'
+
 <Definition>
-To be written.
+A **digital image** is a spatially discretized two-dimensional rectangular array of picture elements (pixels),
+$\mathbf{X} \in \mathbb{R}^{H \times W \times C}$, where each pixel records discrete intensity values across $C$ color
+or spectral channels at a specified bit depth $B$ within a defined color space <Cite id="gonzalez2018" />. In computer
+vision, an image is not merely an abstract numerical matrix: its physical interpretation is governed by sensor optics,
+non-linear gamma curves, lossy compression artifacts, and embedded EXIF orientation metadata.
 </Definition>
+
+In computer vision pipelines, image datasets are collected from diverse sources: mobile phone cameras, web scrapers,
+satellite remote sensing, medical scanners, and industrial inspection optics. 
+
+Before images reach convolutional layers or Vision Transformers, data engineers must manage physical digital properties:
+pixel coordinate systems, memory layouts (HWC vs CHW), non-linear sRGB gamma transfer functions, chromatic subsampling
+in JPEG compression, and silent EXIF orientation rotations.
+
+<DigitalImagesVisualizer />
 
 ## Pixels, channels and bit depth
 
+An image is digitized by sampling continuous optical irradiance onto a discrete pixel sensor grid:
+
+### Spatial resolution and memory layouts
+
+- **Spatial resolution:** Defined by height $H$ and width $W$.
+- **Channel count $C$:**
+  - Grayscale ($C=1$): Monochrome luminance intensity.
+  - Color ($C=3$): Red, Green, and Blue (RGB).
+  - Alpha transparency ($C=4$): RGBA, where the alpha channel encodes opacity masks.
+  - Multispectral ($C > 3$): Capturing non-visible bands (e.g., near-infrared and short-wave infrared).
+- **Tensor dimension layout:**
+  - Channel-Last (`HWC`): Default format in OpenCV, Pillow, and TensorFlow. Pixels are stored as interleaved color
+    triplets ($R_1, G_1, B_1, R_2, G_2, B_2$).
+  - Channel-First (`CHW`): Default tensor format in PyTorch. Channels are stored as planar contiguous memory arrays
+    ($R_1 \dots R_N, G_1 \dots G_N, B_1 \dots B_N$).
+
+### Bit depth
+
+The bit depth $B$ determines the discrete quantization levels available per color channel:
+- **8-bit unsigned integer (`uint8`):** $2^8 = 256$ intensity levels ($[0, 255]$). The standard format for web images,
+  consumer cameras, and standard vision benchmarks (ImageNet, COCO).
+- **16-bit unsigned integer (`uint16`):** $2^{16} = 65{,}536$ intensity levels ($[0, 65535]$). Mandatory in medical
+  radiography (DICOM), satellite imaging, and scientific microscopy to preserve subtle soft-tissue contrast without
+  quantization banding.
+- **32-bit floating point (`float32`):** Normalized representation ($[0.0, 1.0]$) used internally in deep learning
+  networks during backpropagation.
+
 ## Colour spaces
+
+Color spaces define how multi-channel numbers map to physical optical spectra:
+
+### RGB and sRGB
+
+- **Linear RGB:** Directly proportional to physical photon flux hitting the camera sensor. Physical light transport
+  (such as radiance blending in NeRFs or physically based rendering) requires linear RGB.
+- **sRGB (Standard RGB):** Consumer displays and digital cameras apply a non-linear **gamma transfer function**
+  ($\gamma \approx 2.2$) <Cite id="gonzalez2018" />:
+  $$
+  V_{\text{sRGB}} = \begin{cases} 12.92 \, L & \text{if } L \le 0.0031308 \\ 1.055 \, L^{1/2.4} - 0.055 & \text{if } L > 0.0031308 \end{cases}
+  $$
+  Because human visual perception is non-linear—we are vastly more sensitive to relative luminance differences in dark
+  shadows than in bright highlights—gamma compression allocates more of the 256 digital code levels to dark tones,
+  achieving perceptual uniformity.
+
+### YCbCr (Luma-Chroma)
+
+YCbCr decouples achromatic brightness ($Y$, Luma) from chromatic color differences ($Cb$ blue-difference, $Cr$
+red-difference). 
+
+Because the human visual cortex has significantly lower spatial resolving power for color than for brightness,
+compression codecs apply **chroma subsampling**:
+- **4:4:4:** Full-resolution chroma (no downsampling).
+- **4:2:2:** Horizontal chroma downsampled by $2\times$.
+- **4:2:0:** Horizontal and vertical chroma downsampled by $2\times$. Reduces total pixel count by $50\%$ with almost
+  zero perceptible quality loss to human observers.
+
+### CIE LAB and HSV
+
+- **HSV / HSL:** Cylindrical coordinates encoding Hue (dominant wavelength angle $0\text{--}360^\circ$), Saturation
+  (color purity), and Value (brightness). Frequently used for heuristic color segmentation.
+- **CIE LAB:** Perceptually uniform color space where Euclidean distance
+  $\Delta E = \sqrt{\Delta L^{*2} + \Delta a^{*2} + \Delta b^{*2}}$ corresponds directly to human-perceived color
+  difference.
 
 ## Formats and compression
 
+How images are encoded on disk impacts training dataloader throughput and feature fidelity:
+
+### Lossless formats (PNG, TIFF)
+
+- **PNG:** Employs 2D predictive spatial filtering followed by DEFLATE (LZ77 + Huffman) entropy coding. Guarantees
+  exact, bit-for-bit reconstruction. **Mandatory for semantic segmentation masks and discrete label maps**, where pixel
+  values represent categorical class IDs.
+- **TIFF:** Flexible container supporting multi-channel 16-bit/32-bit floating-point arrays, tiled pyramids, and
+  geospatial geo-referencing tags.
+
+### Lossy perceptual formats (JPEG, WebP, AVIF)
+
+- **JPEG:** Slices the image into $8 \times 8$ blocks, applies the 2D Discrete Cosine Transform (DCT), quantizes
+  high-frequency coefficients via a quality-scaled matrix, and encodes with Huffman coding <Cite id="wallace1991" />.
+  - Setting JPEG Quality $Q < 50$ introduces visible $8 \times 8$ grid blocking artifacts and ringing around sharp
+    object silhouettes.
+- **WebP and AVIF:** Utilize directional block intra-prediction derived from video codecs (VP8 and AV1), achieving
+  higher compression ratios and fewer blocking artifacts than legacy JPEG.
+
 ## Orientation and metadata
+
+Modern smartphones and digital cameras include physical gravity orientation sensors that record camera angle into the
+image's embedded **EXIF metadata** (Orientation tags 1 through 8):
+
+- **The EXIF Rotation Trap:** Web browsers and operating system photo viewers automatically read the EXIF orientation
+  tag and display the image right-side up. However, standard low-level image loading libraries (such as raw OpenCV or
+  unconfigured PIL) read raw raster arrays from disk without rotating them.
+- If an unrotated dataset of portrait photos is fed to a neural network, up to $30\%$ of the images enter the network
+  rotated $90^\circ$ or $270^\circ$ sideways.
+- Production dataloaders must apply `PIL.ImageOps.exif_transpose()` during loading to physically bake orientation into
+  the pixel grid.
 
 ## Colour management
 
+Images captured on modern devices often embed **ICC color profiles** (such as Display P3 or Adobe RGB) that define a
+significantly wider color gamut than standard sRGB.
+
+When an image loader ignores embedded ICC profiles and assumes default sRGB coordinates, wide-gamut colors are clipped
+or distorted, causing vibrant real-world colors to appear desaturated and washed out.
+
 ## Pitfalls
+
+- **Saving segmentation masks as lossy JPEGs:** Lossy JPEG compression quantizes high-frequency edges, corrupting
+  integer class labels. A pixel with class label 1 adjacent to class label 10 can become artifact class 4 or 6.
+  Segmentation masks must always be stored in lossless formats (PNG or TIFF).
+- **OpenCV BGR vs PIL RGB channel ordering:** OpenCV reads images into memory in Blue-Green-Red (BGR) order, whereas
+  PIL, torchvision, and matplotlib expect Red-Green-Blue (RGB). Feeding BGR images into an ImageNet-pretrained model
+  swaps the red and blue channels, severely degrading classification accuracy.
+- **Ignoring EXIF orientation metadata:** Training models on raw JPEG files without orientation transposition forces
+  networks to learn sideways and upside-down orientations that do not reflect deployment camera feeds.
+- **Linear processing on gamma-compressed sRGB:** Computing photometric reconstruction loss (e.g., in image restoration,
+  super-resolution, or NeRFs) directly on non-linear sRGB values induces non-linear photometric bias. Photometric losses
+  must be computed in linear RGB space.

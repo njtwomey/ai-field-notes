@@ -2,23 +2,125 @@
 title: 'Memorisation and training-data extraction'
 kind: concept
 summary: 'Models can memorise training records and reproduce them when prompted. Duplicated records are memorised most, so deduplication reduces extraction risk.'
-tags: [data, privacy, large-language-models]
-aliases: []
-requires: []
-related: [membership-inference, near-duplicate-detection]
-references: []
-status: stub
+tags: [data, privacy, large-language-models, security, memorisation]
+aliases: [training data extraction, memorisation in LLMs, eidetic memorisation, extraction attacks, model leakage]
+requires: [personal-data-and-identifiability]
+related: [personal-data-and-identifiability, pii-detection-and-redaction, near-duplicate-detection]
+references: [carlini2021extracting, lee2022dedup, feldman2020]
+status: draft
 updated: 2026-10-11
 ---
 
+import { TrainingDataExtractionVisualizer } from './TrainingDataExtractionVisualizer'
+
 <Definition>
-To be written.
+**Training-data extraction** is an adversarial privacy attack where an unauthorized user queries a trained model
+$f_\theta$ to reconstruct verbatim training sequences $\mathbf{x} = (w_1, \dots, w_T) \in \mathcal{D}_{\text{train}}$
+without having direct access to the training dataset <Cite id="carlini2021extracting" />:
+
+$$
+f_\theta(w_{1:k}) \longrightarrow (w_{k+1}, \dots, w_T) \quad \text{such that } (w_1, \dots, w_T) \in \mathcal{D}_{\text{train}}.
+$$
+
+Extraction exploits the model's capacity for **memorisation**, converting parametric neural weights into an accessible
+search index over private training documents.
 </Definition>
 
-## Memorisation
+## Formalising memorisation
+
+In deep learning, models do not merely generalize over broad statistical distributions; they also memorize specific
+idiosyncratic training examples <Cite id="feldman2020" />:
+
+### 1. Counterfactual memorisation
+Feldman <Cite id="feldman2020" /> formalized memorisation as the marginal causal influence of a training record
+$z = (\mathbf{x}, y)$ on the model's prediction:
+
+$$
+\text{Mem}(z) = \mathbb{E}_{\mathcal{D} \sim \mu} \left[ f_{\mathcal{D} \cup \{z\}}(\mathbf{x}) \right] - \mathbb{E}_{\mathcal{D} \sim \mu} \left[ f_{\mathcal{D}}(\mathbf{x}) \right].
+$$
+
+- If $\text{Mem}(z) \approx 0$, the model learns to predict $z$ through general patterns shared across many other data
+  points.
+- If $\text{Mem}(z) \approx 1$, the model can only predict $z$ correctly if $z$ was explicitly present in the training
+  set, indicating that the instance was memorized in isolation.
+
+### 2. $k$-eidetic memorisation
+Carlini et al. <Cite id="carlini2021extracting" /> defined **$k$-eidetic memorisation** to quantify the threshold of
+memory formation: a sequence $\mathbf{x}$ is $k$-eidetic memorised if it appears at most $k$ times in the entire
+training corpus $\mathcal{D}_{\text{train}}$:
+
+$$
+C(\mathbf{x}) \le k,
+$$
+
+and can nonetheless be generated verbatim by the model. When $k=1$, the model reproduces a sequence observed exactly
+once across billions of training tokens.
 
 ## Extraction attacks
 
-## The effect of duplicates
+Adversaries extract private training sequences through black-box querying:
 
-## Pitfalls
+### 1. Targeted prefix completion
+If an attacker possesses auxiliary context (such as an individual's name, employer, and residential city), they provide
+this prefix to the model:
+```text
+Prompt:   "Dr. Marcus Vance, living at 742 Evergreen Terrace, private SSN is"
+Output:   " ***-**-****"
+```
+If the model memorized the private record during pretraining, greedily sampling the next tokens reconstructs the
+confidential suffix.
+
+### 2. Untargeted generation and perplexity ratio filtering
+Carlini et al. <Cite id="carlini2021extracting" /> demonstrated scalable untargeted extraction:
+1. **Diverse generation**: Generate millions of completions by prompting the model with empty strings, random tokens, or
+   internet common phrases sampled at high temperature ($T \ge 1.0$).
+2. **Perplexity ratio filtering**: To distinguish between common language idioms (which have low perplexity but are
+   public) and memorized private records, the attacker computes the ratio between the target model's loss
+   $\mathcal{L}_{\text{target}}$ and a reference model's loss $\mathcal{L}_{\text{ref}}$ (or compression ratio
+   $\mathcal{L}_{\text{zlib}}$):
+
+   $$
+   \text{Score}(\mathbf{x}) = \frac{\mathcal{L}_{\text{target}}(\mathbf{x})}{\mathcal{L}_{\text{zlib}}(\mathbf{x})} \quad \text{or} \quad \frac{\mathcal{L}_{\text{target}}(\mathbf{x})}{\mathcal{L}_{\text{reference}}(\mathbf{x})}.
+   $$
+
+   Sequences that exhibit unusually low perplexity under the target model but high perplexity under the reference
+   compressor are flagged as memorized training text, extracting thousands of verbatim personal phone numbers, emails,
+   and proprietary code snippets.
+
+### 3. Divergence attacks
+Nasr et al. showed that prompting models with repetitive tokens (e.g., repeating the word *"poem"* hundreds of times)
+causes the output distribution to diverge from conversational alignment, triggering raw memorized training buffers that
+spew verbatim Wikipedia pages, personal blog posts, and private chat logs.
+
+## The effect of duplicates and deduplication
+
+The single most influential factor governing training data extraction risk is **sequence duplication multiplicity** $C$:
+
+- **Super-linear scaling**: The probability of a model memorizing a sequence verbatim scales super-linearly with its
+  duplication count <Cite id="carlini2021extracting" /> <Cite id="lee2022dedup" />:
+
+  $$
+  P(\text{extraction} \mid C) \propto C^\alpha, \quad \text{where } \alpha \approx 1.2\text{--}1.5.
+  $$
+
+- **Web crawl duplication**: Raw web scrapes contain immense duplication: open-source software license boilerplate,
+  Terms of Service notices, corporate contact footers, and error logs repeat tens of thousands of times.
+- **The deduplication remedy**: Katherine Lee et al. <Cite id="lee2022dedup" /> demonstrated that applying exact
+  substring deduplication (suffix arrays) and near-duplicate clustering (MinHash LSH) caps sequence multiplicity to
+  $C = 1$. Deduplication reduces verbatim training data extraction by **over $80\%$** while simultaneously reducing
+  pretraining compute and improving downstream validation perplexity.
+
+The interactive visualizer below demonstrates the super-linear extraction risk curve and illustrates how deduplication
+suppresses memorization:
+
+<TrainingDataExtractionVisualizer />
+
+## Pitfalls and limitations
+
+1. **Parameter scaling amplifies memorization**: Larger parameter architectures (e.g. 70B+ parameters) memorize
+   substantially more training data than smaller architectures (7B) given the same training token budget.
+2. **RLHF alignment does not erase memory**: Safety fine-tuning (RLHF, DPO) trains models to refuse to answer extraction
+   prompts, but the underlying memorized strings remain embedded in the model weights. Adversaries easily bypass
+   alignment using adversarial suffixes, prompt injection, or direct logit probing.
+3. **Synthetic data memorization leakage**: Using LLMs to generate synthetic datasets can inadvertently leak memorized
+   real-world personal data into the synthetic corpus, transferring extraction vulnerabilities into downstream models.

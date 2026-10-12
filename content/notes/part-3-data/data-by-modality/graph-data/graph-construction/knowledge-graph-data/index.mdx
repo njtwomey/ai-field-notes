@@ -2,25 +2,161 @@
 title: 'Knowledge graph data'
 kind: concept
 summary: 'Knowledge graphs store facts as subject-relation-object triples. Inverse relations leak test triples, negative triples must be sampled, and missing edges are unknown rather than false.'
-tags: [data, graphs]
-aliases: []
-requires: []
-related: [knowledge-graph-datasets]
-references: []
-status: stub
-updated: 2026-10-11
+tags: [data, graphs, knowledge-graphs, link-prediction]
+aliases: [knowledge-bases, multi-relational-data, triple-stores]
+requires: [graph-construction]
+related: [graph-features, heterogeneous-and-temporal-graphs]
+references: [bordes2013transe, trouillon2016complex, dettmers2018conve, sun2019rotate]
+status: draft
+updated: 2026-10-12
 ---
 
+import { KnowledgeGraphDataVisualizer } from './KnowledgeGraphDataVisualizer'
+
 <Definition>
-To be written.
+**Knowledge graph data** organizes multi-relational facts as directed labeled multigraphs structured into
+subject-predicate-object triples $(h, r, t) \in \mathcal{V} \times \mathcal{R} \times \mathcal{V}$. Because knowledge
+graphs operate under the Open-World Assumption—where unobserved triples represent unknown rather than false
+assertions—models require negative sampling during training and filtered ranking metrics during evaluation to prevent
+benchmark leakage and false-negative penalties.
 </Definition>
+
+Real-world knowledge bases (such as Wikidata, Freebase, WordNet, and Gene Ontology) capture human knowledge across
+millions of entities and thousands of predicate relation types. However, knowledge graphs present fundamental
+statistical challenges that do not arise in standard homogeneous networks: relations exhibit severe cardinality
+asymmetries (1-to-1, 1-to-N, N-to-1, N-to-M), reciprocal inverse relations easily induce test set data leakage, and
+training objectives must manufacture synthetic negative triples from unannotated open-world universes
+<Cite id="bordes2013transe, dettmers2018conve" />.
+
+<KnowledgeGraphDataVisualizer client:load />
 
 ## Triples
 
+The fundamental atomic unit of a knowledge graph is a fact triple:
+
+$$
+(h, \, r, \, t) \in \mathcal{E} \subset \mathcal{V} \times \mathcal{R} \times \mathcal{V}
+$$
+
+Where $h \in \mathcal{V}$ is the head (subject) entity, $r \in \mathcal{R}$ is the directed relation type, and
+$t \in \mathcal{V}$ is the tail (object) entity (e.g., `(Alan Turing, born_in, London)`).
+
+Knowledge Graph Embedding (KGE) models map discrete entities and relations into continuous vector spaces
+$\mathbf{h}, \mathbf{t} \in \mathbb{R}^d$ and $\mathbf{r} \in \mathbb{R}^k$, defining a scoring function
+$f(h, r, t) \in \mathbb{R}$ that assigns high scores to true facts:
+
+1. **Translational Models (TransE)**: Models relations as spatial translation vectors in Euclidean space
+   <Cite id="bordes2013transe" />:
+   $$
+   \mathbf{h} + \mathbf{r} \approx \mathbf{t} \implies f(h, r, t) = -\|\mathbf{h} + \mathbf{r} - \mathbf{t}\|_{1/2}
+   $$
+   TransE struggles with 1-to-N, N-to-1, and symmetric relations (if $(h, r, t)$ and $(t, r, h)$ hold, TransE forces
+   $\mathbf{r} = \mathbf{0}$ and $\mathbf{h} = \mathbf{t}$).
+2. **Rotational Complex Models (RotatE)**: Treats relations as element-wise rotations in complex vector space
+   $\mathbb{C}^d$ <Cite id="sun2019rotate" />:
+   $$
+   \mathbf{t} = \mathbf{h} \circ \mathbf{r}, \quad |r_i| = 1 \implies f(h, r, t) = -\|\mathbf{h} \circ \mathbf{r} - \mathbf{t}\|
+   $$
+   Enables simultaneous modeling of symmetry, antisymmetry, inversion, and composition.
+3. **Bilinear Models (ComplEx)**: Uses Hermitian inner products over complex embeddings to handle asymmetric relations
+   <Cite id="trouillon2016complex" />:
+   $$
+   f(h, r, t) = \operatorname{Re}\left( \langle \mathbf{h}, \, \mathbf{r}, \, \bar{\mathbf{t}} \rangle \right) = \operatorname{Re}\left( \sum_{i=1}^d h_i r_i \bar{t}_i \right)
+   $$
+
 ## Inverse-relation leakage
+
+A pervasive failure mode in historical knowledge graph benchmarks (such as FB15k and WN18) was **inverse-relation test
+set leakage** <Cite id="dettmers2018conve" />.
+
+Many relations naturally possess semantic inverses:
+- `hypernym` $\leftrightarrow$ `hyponym`
+- `parent_of` $\leftrightarrow$ `child_of`
+- `filmed_in` $\leftrightarrow$ `location_of_film`
+
+Formally, a reciprocal relation pair satisfies:
+
+$$
+(h, \, r, \, t) \iff (t, \, r^{-1}, \, h)
+$$
+
+When researchers split triples randomly into train, validation, and test partitions, over $70\%$ of test triples in
+FB15k and WN18 had their exact inverse relation present in the training set <Cite id="dettmers2018conve" />.
+Consequently, models could achieve near-perfect test scores ($\text{MRR} > 0.90$) by simply memorizing a trivial 1-hop
+lookup rule:
+
+$$
+P\left( (h, r, t) \mid (t, r^{-1}, h) \in \mathcal{D}_{\text{train}} \right) \approx 1.0
+$$
+
+The model learned no multi-hop reasoning, inductive paths, or semantic representations. This discovery necessitated the
+creation of cleaned benchmarks:
+- **FB15k-237**: Stripped all reciprocal relations and redundant paths, dropping trivial inverse test triples.
+- **WN18RR**: Removed all reciprocal hypernym/hyponym and meronym/holonym pairs.
 
 ## Negative triples
 
+Knowledge graphs only document observed positive facts ($\mathcal{D}^+$). Training discriminative or margin-based
+ranking losses requires negative samples ($\mathcal{D}^-$) representing implausible or untrue statements:
+
+$$
+\mathcal{L} = \sum_{(h, r, t) \in \mathcal{D}^+} \sum_{(h', r, t') \in \mathcal{D}^-} \max\left( 0, \, \gamma - f(h, r, t) + f(h', r, t') \right)
+$$
+
+Negatives are generated by corrupting either the head or tail entity:
+
+$$
+\mathcal{D}^- = \left\{ (h', r, t) : h' \in \mathcal{V} \setminus \{h\} \right\} \cup \left\{ (h, r, t') : t' \in \mathcal{V} \setminus \{t\} \right\}
+$$
+
+Selecting corruption strategies depends heavily on relation cardinality:
+- **Uniform Random Corruption**: Corrupts head or tail with equal $50\%$ probability.
+- **Bernoulli Negative Sampling**: In 1-to-N relations (e.g., `(Christopher Nolan, directed, Inception)`), replacing the
+  tail has a high probability of drawing another movie directed by Nolan, inadvertently generating a true fact as a
+  negative (false-negative collision). Bernoulli sampling calculates the average tails per head ($\operatorname{tph}$)
+  and heads per tail ($\operatorname{hpt}$), corrupting the head with probability:
+  $$
+  p_{\text{head}} = \frac{\operatorname{tph}}{\operatorname{tph} + \operatorname{hpt}}, \quad p_{\text{tail}} = 1 - p_{\text{head}}
+  $$
+  For 1-to-N relations ($\operatorname{tph} \gg \operatorname{hpt}$), the model preferentially corrupts the head entity,
+  dramatically reducing false-negative collisions.
+
 ## The open-world assumption
 
+Standard database systems operate under the **Closed-World Assumption (CWA)**: any fact not explicitly recorded in the
+database is formally assumed to be false. In contrast, knowledge graphs adhere strictly to the **Open-World Assumption
+(OWA)**:
+
+$$
+\text{An unobserved triple } (h, r, t) \notin \mathcal{D}^+ \text{ is unknown / unobserved, NOT false.}
+$$
+
+Because knowledge graphs are intrinsically incomplete (even massive knowledge bases like Wikidata miss $>50\%$ of
+biographical or scientific relationships), link prediction evaluation must account for unobserved valid facts:
+
+- **Raw vs. Filtered Evaluation Metrics**: When predicting the tail entity for $(h, r, ?)$, the model scores all
+  candidate entities in $\mathcal{V}$, ranking them in descending score order.
+  - *Raw MRR*: Directly measures the rank of the ground-truth tail $t$. If the model ranks valid alternative answers
+    (e.g., other children of the subject) above $t$, raw evaluation severely penalizes the model.
+  - *Filtered MRR*: Before calculating rank, all other known true triples
+    $(h, r, t') \in \mathcal{D}_{\text{train}} \cup \mathcal{D}_{\text{val}} \cup \mathcal{D}_{\text{test}}$ appearing
+    above target $t$ are removed from the candidate pool:
+    $$
+    \operatorname{Rank}_{\text{filtered}}(t) = \operatorname{Rank}_{\text{raw}}(t) - \sum_{t' \in \mathcal{D}_{\text{true}} \setminus \{t\}} \mathbf{1}_{\{f(h, r, t') > f(h, r, t)\}}
+    $$
+  Filtered metrics provide the only fair, standardized evaluation under open-world conditions.
+
 ## Pitfalls
+
+1. **Benchmarking on Unfiltered Datasets**: Evaluating models on legacy FB15k or WN18 gives completely misleading
+   performance comparisons due to inverse relation leakage. Always benchmark on FB15k-237, WN18RR, or YAGO3-10
+   <Cite id="dettmers2018conve" />.
+2. **Ignoring Filtered Metric Protocols**: Reporting raw MRR or raw Hits@10 instead of filtered metrics severely
+   underestimates performance on 1-to-N and N-to-M relations where models correctly rank un-annotated true facts at top
+   positions.
+3. **Uniform Negative Sampling on Skewed Multi-Relational Graphs**: Using uniform 50/50 corruption on extreme 1-to-N
+   relations (e.g., `citizen_of`) generates constant false-negative collisions, corrupting gradient updates. Use
+   Bernoulli or self-adversarial negative sampling <Cite id="sun2019rotate" />.
+4. **Entity Cold-Start in Transductive KGEs**: Translational and bilinear embedding tables assign fixed vector
+   parameters to specific entity IDs. When deployed on unseen entities at inference time, transductive KGEs fail
+   completely; production systems require inductive text-augmented encoders (such as KG-BERT).

@@ -1,24 +1,150 @@
 ---
 title: 'Exploring unstructured data'
 kind: concept
-summary: 'Images, audio and text are explored by embedding them with a pretrained encoder, then browsing nearest neighbours, clustering and listing outliers in the embedding space.'
-tags: [data, embeddings]
-aliases: []
-requires: []
-related: []
-references: []
-status: stub
-updated: 2026-10-11
+summary: 'Embedding-based exploration maps unstructured images, audio, and text into continuous vector spaces using foundation encoders—enabling semantic nearest-neighbor queries, zero-shot cluster discovery, and isolation of multimodal out-of-distribution outliers.'
+tags: [data, embeddings, nlp, computer-vision, exploration]
+aliases: [embedding-based exploration, exploring unstructured data, vector space exploration]
+requires: [data-generating-process, reading-raw-examples]
+related: [corpus-statistics, clustering-for-exploration, projection-for-exploration]
+references: [radford2021, reimers2019, malkov2018, jegou2011]
+status: draft
+updated: 2026-10-12
 ---
 
+import { EmbeddingBasedExplorationVisualizer } from './EmbeddingBasedExplorationVisualizer'
+
 <Definition>
-To be written.
+**Embedding-based exploration** is the methodology of transforming unstructured data (such as raw text, natural images,
+or audio waveforms) into dense, continuous metric vector spaces $\mathbf{z} = f_\theta(\mathbf{x}) \in \mathbb{R}^d$
+using pre-trained foundation encoders. It enables semantic nearest-neighbor queries, zero-shot cluster discovery, and
+geometric outlier detection without manual annotation.
 </Definition>
 
-## Embedding the data
+Unlike structured tabular datasets—where column headers, types, and summary statistics provide immediate
+visibility—unstructured datasets arrive as high-dimensional pixel matrices, raw character sequences, or digitized audio
+signals. Individual raw features (such as an RGB pixel value or a character byte) carry negligible semantic meaning in
+isolation. Pre-trained deep foundation encoders compress perceptual inputs into continuous latent vector spaces where
+geometric proximity reflects semantic similarity <Cite id="radford2021, reimers2019" />.
 
-## Nearest-neighbour browsing
+<EmbeddingBasedExplorationVisualizer />
 
-## Clusters and outliers
+## Embedding unstructured data on the hypersphere
 
-## Pitfalls
+Unstructured exploration begins by passing raw artifacts through frozen foundation models:
+- **Vision and multimodal**: CLIP <Cite id="radford2021" /> or DINOv2 vision transformers producing image vectors
+  $\mathbf{z} \in \mathbb{R}^{768}$.
+- **Text**: Sentence-BERT <Cite id="reimers2019" /> or text embedding models mapping variable-length sentences into
+  fixed-dimension vectors $\mathbf{z} \in \mathbb{R}^{384}$ or $\mathbb{R}^{1536}$.
+- **Audio**: Audio spectrogram transformers encoding temporal sound snippets into latent acoustic spaces.
+
+### Normalization and metric geometry
+
+Foundation embeddings are almost universally $L_2$-normalized to reside on the surface of the unit hypersphere
+$\mathbb{S}^{d-1}$:
+
+$$
+\tilde{\mathbf{z}} = \frac{\mathbf{z}}{\|\mathbf{z}\|_2}, \quad \|\tilde{\mathbf{z}}\|_2 = 1
+$$
+
+On the unit hypersphere, Euclidean distance is monotonically related to cosine similarity:
+
+$$
+\|\tilde{\mathbf{z}}_i - \tilde{\mathbf{z}}_j\|_2^2 = 2 - 2 \left( \tilde{\mathbf{z}}_i^T \tilde{\mathbf{z}}_j \right) = 2 \left( 1 - \cos(\mathbf{z}_i, \mathbf{z}_j) \right)
+$$
+
+Cosine similarity directly evaluates the directional alignment of semantic feature vectors, rendering comparisons
+invariant to input length or exposure magnitude.
+
+| Angular Separation ($\theta$) | Cosine Similarity $\cos(\theta)$ | Hyperspherical Distance $\|\tilde{\mathbf{z}}_i - \tilde{\mathbf{z}}_j\|_2$ | Semantic Interpretation |
+| :--- | :--- | :--- | :--- |
+| **Acute ($\theta \approx 0^\circ$)** | $\approx +1.0$ | $\approx 0.0$ | Strong semantic equivalence (nearest neighbors) |
+| **Orthogonal ($\theta \approx 90^\circ$)** | $\approx 0.0$ | $\approx \sqrt{2} \approx 1.414$ | Independent / unrelated conceptual domains |
+| **Obtuse ($\theta \approx 180^\circ$)** | $\approx -1.0$ | $\approx 2.0$ | Opposing semantics or inverted functional intent |
+
+## Nearest-neighbor browsing and semantic retrieval
+
+With data embedded into metric vectors, exploration shifts from passive reading to active, semantic search
+<Cite id="malkov2018, jegou2011" />.
+
+### Vector indexing architectures
+
+To query millions of unstructured instances interactively, datasets are indexed using Approximate Nearest Neighbor (ANN)
+structures:
+- **Hierarchical Navigable Small World (HNSW)** <Cite id="malkov2018" />: Graph-based multi-layer indexing providing
+  logarithmic search time $O(\log N)$ with high recall.
+- **Inverted File with Product Quantization (IVF-PQ)** <Cite id="jegou2011" />: Compresses vectors into compact byte
+  codes, allowing billions of embeddings to fit inside RAM.
+
+### Exploratory query patterns
+
+1. **Cross-modal text queries**: Using dual-encoder models (like CLIP <Cite id="radford2021" />), an analyst queries an
+   unlabeled image collection with natural language phrases (e.g., `"scratched camera lens"` or
+   `"receipt with handwritten signature"`). Browsing top-ranked matches verifies the prevalence of rare physical
+   conditions.
+2. **Prototype centroid expansion**: Given three verified positive instances of an obscure defect or fraud pattern
+   $S = \{\mathbf{x}_1, \mathbf{x}_2, \mathbf{x}_3\}$, compute the centroid:
+   $$
+   \mathbf{z}_{\text{prototype}} = \frac{1}{|S|} \sum_{s \in S} \tilde{\mathbf{z}}_s
+   $$
+   Querying the nearest neighbors of $\mathbf{z}_{\text{prototype}}$ rapidly gathers dozens of analogous unstructured
+   instances across the dataset.
+
+## Semantic clusters and out-of-distribution outliers
+
+Beyond local queries, embedding geometry enables macroscopic auditing of dataset balance.
+
+### Zero-shot prompt prototypes
+
+By generating embeddings for candidate class descriptions $\mathbf{w}_c = f_{\text{text}}(\text{"a photo of a " } + c)$,
+practitioners compute zero-shot probabilistic partitions across the entire dataset without training any models
+<Cite id="radford2021" />:
+
+$$
+P(y = c \mid \mathbf{x}) = \frac{\exp\left( \tilde{\mathbf{z}}_{\mathbf{x}}^T \tilde{\mathbf{w}}_c / \tau \right)}{\sum_{k=1}^K \exp\left( \tilde{\mathbf{z}}_{\mathbf{x}}^T \tilde{\mathbf{w}}_k / \tau \right)}
+$$
+
+Plotting histograms of max prediction confidence $\max_c P(y = c \mid \mathbf{x})$ identifies ambiguous instances where
+confidence is near uniform.
+
+### Isolating out-of-distribution (OOD) outliers
+
+To detect anomalies in unstructured data, compute the mean distance to the $k$-nearest neighbors:
+
+$$
+d_k(\mathbf{z}_i) = \frac{1}{k} \sum_{j \in \text{NN}_k(\mathbf{z}_i)} \|\tilde{\mathbf{z}}_i - \tilde{\mathbf{z}}_j\|_2
+$$
+
+Points with high $d_k$ scores inhabit sparse regions of the embedding manifold. Auditing top-$d_k$ outliers reliably
+flags:
+- Corrupted images (blank white frames, black screens, static noise).
+- Non-text documents (scanned binary dumps, mojibake encoding garbage).
+- Audio dropouts or microphone clipping.
+
+## Pitfalls of embedding exploration
+
+While powerful, embedding-based exploration introduces subtle failure modes:
+
+1. **Pre-training inductive bias and blind spots**: Foundation encoders are pre-trained on specific internet corpora.
+   The encoder's metric space only preserves features that were relevant during its pre-training objective
+   <Cite id="radford2021" />. If an industrial inspection task requires distinguishing between subtle $0.1\text{mm}$
+   weld fractures, a generic CLIP encoder may treat the fracture as negligible high-frequency texture noise and map
+   defective and flawless welds to identical vectors.
+2. **The hubness problem**: In high-dimensional spaces ($d \ge 512$), geometric concentration causes certain vectors
+   ("hubs") to appear as near neighbors to a disproportionately large number of unrelated queries. Hubs distort
+   nearest-neighbor audits unless distance scaling or mutual proximity corrections are applied.
+3. **Domain mismatch**: Text encoders trained on standard English Wikipedia produce degraded, collapsed embeddings when
+   applied to biomedical EHR notes, legal contracts, or multi-lingual technical code.
+
+## Diagnostic checklist
+
+To explore unstructured data using embeddings:
+
+1. **Select an aligned encoder**: Match the pre-trained encoder to the target domain (e.g., CLIP for general vision
+   <Cite id="radford2021" />, BioBERT for medical clinical notes).
+2. **Enforce hypersphere normalization**: $L_2$-normalize all output vectors to preserve cosine metric geometry.
+3. **Build an ANN index**: Index vectors using HNSW <Cite id="malkov2018" /> or IVF-PQ <Cite id="jegou2011" /> for
+   real-time exploratory retrieval.
+4. **Audit isolated outliers via k-NN distance**: Sort dataset by $d_k$ distance; review the top $100$ outliers to
+   uncover file corruptions and domain shifts.
+5. **Verify downstream sensitivity**: Test whether subtle domain differences (e.g. defects vs non-defects) produce
+   measurable cosine distance before relying on embeddings for filtering.

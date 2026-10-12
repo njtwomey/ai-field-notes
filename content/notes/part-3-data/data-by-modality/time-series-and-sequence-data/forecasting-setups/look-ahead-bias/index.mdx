@@ -2,25 +2,149 @@
 title: 'Look-ahead bias'
 kind: concept
 summary: 'Look-ahead bias uses information from after the forecast time: statistics of the full series, centred windows, revised data instead of the vintage first published, or only the series that survived.'
-tags: [data, time-series, data-leakage]
-aliases: []
+tags: [data, time-series, data-leakage, forecasting]
+aliases: [lookahead bias, peeking bias, temporal leakage, future leakage]
 requires: []
-related: [point-in-time-correctness, forecasting-setups]
-references: []
-status: stub
-updated: 2026-10-11
+related: [point-in-time-correctness, forecasting-setups, time-series-gaps, temporal-splits, leakage-case-studies]
+references: [croushore2001, lopezdeprado2018]
+status: draft
+updated: 2026-10-12
 ---
 
+import { LookAheadBiasVisualizer } from './LookAheadBiasVisualizer'
+
 <Definition>
-To be written.
+**Look-ahead bias** (also termed **peeking bias** or **temporal leakage**) is the systemic corruption of an offline
+predictive pipeline in which information, statistical parameters, universe memberships, or restated revisions
+originating chronologically after the forecast origin $t_0$ are utilized to engineer features, train models, or evaluate
+performance <Cite id="lopezdeprado2018" />.
 </Definition>
+
+In supervised machine learning with independent and identically distributed ($\text{i.i.d.}$) tabular data, standard
+preprocessing practices—such as computing global feature scaling parameters or performing cross-validation folds—are
+well-understood. In temporal and sequential data, however, the fundamental constraint is the physical arrow of time. At
+forecast origin $t_0$, any information from $t > t_0$ is physically unobserved.
+
+Look-ahead bias is particularly insidious because it rarely throws runtime exceptions. Instead, it artificially inflates
+backtest metrics and cross-validation scores: models learn to exploit subtle future indicators that cannot exist during
+live production deployment, leading to catastrophic performance collapse upon launch.
+
+<LookAheadBiasVisualizer />
 
 ## Full-series statistics
 
+A frequent source of look-ahead bias is computing normalization or preprocessing parameters across the full historical
+time series rather than strictly causal expanding windows:
+
+### Global feature scaling
+
+Computing the sample mean $\hat{\mu}$ and standard deviation $\hat{\sigma}$ across the entire dataset duration $[0, T]$:
+
+$$
+z_t = \frac{x_t - \hat{\mu}_{[0, T]}}{\hat{\sigma}_{[0, T]}}
+$$
+
+If a massive economic shock or structural shift occurs in year 5, the global mean $\hat{\mu}_{[0, T]}$ is pulled
+downward, artificially informing the model at year 1 that future values will be depressed. All feature scalers
+(StandardScaler, MinMaxScaler, QuantileTransformer) must be fitted strictly on historical training periods
+$[0, t_{\text{train}}]$ or computed as rolling causal statistics.
+
+### Global outlier clipping and winsorization
+
+Determining quantile clipping thresholds using future data leaks the historical distribution's eventual extremes. If a
+time series experiences a once-in-a-decade spike at $t=500$, a global 99th percentile calculated on all 1,000 steps
+inflates the upper threshold, altering the scaling of normal observations at $t=50$.
+
+### Global target encoding
+
+Computing the conditional label mean for categorical entities (such as merchant category IDs or user cohorts) across the
+entire dataset incorporates post-event outcomes into historical feature representations. In time series setups, target
+encoding must be calculated as an expanding point-in-time historical average.
+
 ## Centred windows
+
+When filtering, smoothing, or engineering technical indicators, practitioners frequently choose between **trailing**
+(causal) and **centred** (bilateral) rolling windows:
+
+### Trailing (Causal) window
+
+A trailing window computes rolling statistics exclusively over the historical interval $[t - W + 1, t]$:
+
+$$
+\begin{aligned}
+\bar{x}_t^{\text{trailing}} &= \frac{1}{W} \sum_{k=0}^{W-1} x_{t - k} \\
+&= \frac{1}{W} \Big( x_t + x_{t-1} + x_{t-2} + \dots + x_{t - W + 1} \Big)
+\end{aligned}
+$$
+
+Every index $\tau = t - k$ satisfies $\tau \le t$. At prediction time $t$, all evaluated values reside strictly in the
+historical filtration $\mathcal{F}_t = \sigma(x_1, \dots, x_t)$. Trailing filters introduce a phase lag of approximately
+$\frac{W - 1}{2}$ steps, delaying the detection of turning points.
+
+### Centred (Bilateral) window
+
+To eliminate phase lag and obtain zero-phase trend curves, practitioners often compute centred rolling averages with
+span $W = 2M + 1$:
+
+$$
+\begin{aligned}
+\bar{x}_t^{\text{centred}} &= \frac{1}{2M + 1} \sum_{k=-M}^{M} x_{t + k} \\
+&= \frac{1}{2M + 1} \Bigg( \underbrace{\sum_{k=1}^{M} x_{t - k}}_{\text{Past observations } (\tau < t)} + x_t + \underbrace{\sum_{k=1}^{M} x_{t + k}}_{\textbf{Look-ahead leakage! } (\tau > t)} \Bigg)
+\end{aligned}
+$$
+
+The forward summation $\sum_{k=1}^M x_{t+k}$ evaluates measurements up to $M = \lfloor W/2 \rfloor$ steps into the
+unobserved future. At decision point $t_0$, a centred moving average already knows whether the series will trend upward
+or crash in subsequent steps. Feeding centred rolling statistics into forecasting models constitutes direct look-ahead
+leakage.
 
 ## Revised data and vintages
 
+In macroeconomic forecasting, public health tracking, and financial analytics, initial data releases are systematically
+revised over subsequent months and years <Cite id="croushore2001" />:
+
+- **Preliminary releases:** Published immediately following the reporting period, based on partial survey responses and
+  rapid estimates.
+- **Subsequent revisions and restatements:** Updated weeks or months later as comprehensive administrative registries
+  arrive, often followed by multi-year benchmark revisions (e.g., annual seasonal adjustment updates).
+
+If a machine learning practitioner trains a model using current economic time series downloaded from a modern data
+repository, the database serves the **latest revised vintage** for historical timestamps. 
+
+A trading model backtested on revised GDP or corporate earnings figures appears remarkably accurate because it trains on
+data that was literally unknown to market participants at the time the trades had to be placed. Eliminating vintage bias
+requires maintaining **point-in-time databases** that preserve historical data releases exactly as they appeared at each
+historical timestamp $t_0$.
+
 ## Survivorship among series
 
+When forecasting across a dynamic panel of entities (e.g., predicting stock returns, corporate credit default, or
+machinery failure), filtering the historical universe based on present-day survival induces **survivorship bias**
+<Cite id="lopezdeprado2018" />:
+
+$$
+\mathcal{U}_{\text{survivor}} = \{i : \text{entity } i \text{ is operational at final timestamp } T\}
+$$
+
+Filtering out entities that failed, were liquidated, or were decommissioned prior to $T$ produces severe distortions:
+- The historical training population contains only successful, resilient, or long-lived units.
+- Distressed units that collapsed are expunged from the historical record, biasing baseline return distributions upward
+  and underestimating catastrophic failure probabilities.
+
+Point-in-time universe curation requires that at any historical timestamp $t_0$, the eligible entity set
+$\mathcal{U}(t_0)$ comprises exactly those entities active and observable at $t_0$, regardless of their eventual fate.
+
 ## Pitfalls
+
+- **Neglecting purging and embargoing in cross-validation:** In financial and economic forecasting where labels span
+  multi-step forward horizons ($y_t = x_{t+H} - x_t$), adjacent observations overlap. Standard K-fold cross-validation
+  mixes overlapping label horizons across splits. **Purging** removes training samples whose forward label spans overlap
+  the test evaluation window, while **embargoing** adds a buffer period following the test set to account for
+  auto-regressive memory <Cite id="lopezdeprado2018" />.
+- **Publication lag neglect:** Recording quarterly financial statements as effective on the quarter-end calendar date
+  (e.g., December 31) when the SEC 10-K filing was not made public until mid-February.
+- **Global feature selection:** Executing recursive feature elimination, mutual information screening, or tree-based
+  feature selection across the combined historical dataset prior to temporal splitting leaks target dependencies from
+  future evaluation periods into model architecture.
+- **Leakage via backward-filled exogenous series:** Forward-filling missing gaps in exogenous variables is causal;
+  backward-filling propagates future values backward into decision intervals.

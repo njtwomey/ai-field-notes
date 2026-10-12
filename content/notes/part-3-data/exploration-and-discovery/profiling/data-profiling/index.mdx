@@ -1,30 +1,179 @@
 ---
 title: 'Data profiling'
 kind: concept
-summary: 'Data profiling summarises each column of a new dataset, with its type, range, distinct values, missingness and distribution, and the relations between columns, to find errors and structure before modelling.'
-tags: [data, statistics, diagnostics]
-aliases: []
-requires: []
-related: [missing-data-and-imputation]
-references: []
-status: stub
-updated: 2026-10-11
+summary: 'Data profiling evaluates column schemas, storage types, uniqueness ratios, missingness patterns, distributional skewness, and cross-column dependencies to catch structural anomalies before model training.'
+tags: [data, statistics, diagnostics, profiling, quality]
+aliases: [data profiling, tabular profiling, column profiling, dataset profiling]
+requires: [data-generating-process, measurement-error-and-proxies]
+related: [missing-data-and-imputation, target-exploration, baseline-probes, slice-analysis]
+references: [abedjan2015, schelter2018, tukey1977, little1988, rubin1976]
+status: draft
+updated: 2026-10-12
 ---
 
+import { DataProfilingVisualizer } from './DataProfilingVisualizer'
+
 <Definition>
-To be written.
+**Data profiling** is the systematic, automated assessment of a raw dataset's structural, statistical, and relational
+integrity. It computes column-level schemas, distinct value cardinalities, missingness patterns, distributional shapes,
+and cross-column functional dependencies to diagnose anomalies, corrupted encodings, and invalid assumptions prior to
+feature engineering and modeling.
 </Definition>
 
-## Column summaries
+Before fitting models or building feature transformation pipelines, practitioners must understand the raw structural
+properties of incoming data. Tables dumped from relational stores, event logs, or third-party vendors frequently contain
+silent corruptions: mixed data types inside text columns, sentinel values masquerading as legitimate numbers,
+high-cardinality categorical variables that explode parameter counts, and structural missingness that violates standard
+missing-data assumptions <Cite id="abedjan2015, schelter2018" />.
+
+<DataProfilingVisualizer />
+
+## Column summaries: physical versus semantic types
+
+A primary failure in exploratory pipelines is conflating a column's **physical storage format** with its **semantic
+domain type**:
+
+| Physical Format (Engine) | Semantic Type | Diagnostic Rule | Profiling Failure Mode |
+| :--- | :--- | :--- | :--- |
+| `int64` / `string` | Primary Key / Identifier | Uniqueness ratio $u(C) = 1.0$; zero nulls | Treated as continuous regression feature |
+| `int64` / `float64` | Nominal Categorical | Low distinct count; discrete integers (e.g. `status_code` $\in \{1, 2, 3\}$) | Fed into linear models assuming ordinal scaling |
+| `string` / `object` | Timestamp / Event Time | ISO 8601 strings (e.g. `"2026-10-12T10:00:00Z"`) | One-hot encoded or tokenized as free text |
+| `float64` | Disguised Sentinel / Null | Extreme point mass at $-999.0$, $999999.0$, or $0.0$ | Distorts mean, standard deviation, and gradients |
+
+### Sentinel detection
+
+Legacy relational databases and data warehouse ingestion jobs frequently encode missingness using numeric sentinels
+(such as `-1`, `-999`, or `999999`) or string constants (`"N/A"`, `"null"`, `"UNKNOWN"`, `"0000-00-00"`). Automated
+profiling inspects discrete frequency spikes at the boundaries of continuous numeric distributions. If $-999$ accounts
+for $12\%$ of all entries in a `customer_age` column, it must be converted to an explicit `NaN` before computing
+descriptive statistics or fitting models.
 
 ## Distinct values and cardinality
 
-## Missingness patterns
+The cardinality of a column $C$ across $N$ rows is characterized by the number of unique values $|\text{distinct}(C)|$
+and its uniqueness ratio:
 
-## Distribution shapes
+$$
+u(C) = \frac{|\text{distinct}(C)|}{N}
+$$
 
-## Cross-column checks
+```
+ Cardinality Spectrum:
+  [0.00%]----------------------[1.00%]----------------------[20.0%]----------------------[100.0%]
+  Constant /                  Low-Cardinality               High-Cardinality             Primary Key
+  Quasi-Constant              Categorical                   Nominal Categorical          Candidate
+  (Zero Variance)             (One-Hot / Target Enc)        (Embeddings / Hash Trick)    (Drop from Features)
+```
 
-## Profiling reports
+1. **Quasi-constant columns**: If $u(C) \approx 0$ and the mode accounts for $> 99.9\%$ of rows, the feature provides
+   negligible variance and should be dropped to save memory and avoid collinearity.
+2. **Primary key candidates**: If $u(C) = 1.0$ and no nulls exist, the column uniquely identifies rows (e.g.
+   `transaction_id`, `user_uuid`). Keys must be preserved for joins but excluded from feature matrices to prevent
+   extreme memorization leakage.
+3. **High-cardinality nominals**: Columns where $100 < |\text{distinct}(C)| \ll N$ (such as postal codes, merchant
+   categories, or IP subnets) cause severe dimensionality explosion if one-hot encoded, necessitating target encoding,
+   frequency binning, or categorical embeddings.
 
-## Pitfalls
+## Missingness patterns and null correlation
+
+Univariate missingness measures the proportion of absent entries in column $j$:
+
+$$
+m_j = \frac{1}{N} \sum_{i=1}^N \mathbb{I}(x_{ij} \text{ is null})
+$$
+
+Profiling goes beyond univariate null rates to determine whether missingness is Missing Completely at Random (MCAR),
+Missing at Random (MAR), or Missing Not at Random (MNAR) <Cite id="rubin1976, little1988" />:
+
+- **Missingness correlation matrix**: Construct a binary indicator matrix $M \in \{0, 1\}^{N \times D}$ where
+  $M_{ij} = \mathbb{I}(x_{ij} \text{ is null})$. Compute pairwise correlation:
+  $$
+  \rho_{\text{null}}(X_j, X_k) = \text{corr}(M_{\cdot j}, M_{\cdot k})
+  $$
+  A high positive correlation ($\rho_{\text{null}} > 0.8$) indicates that two columns fail together (e.g., an entire
+  optional form section was skipped).
+- **Structural missingness**: When a column is conditioned on another attribute (e.g., `spouse_age` is null if and only
+  if `marital_status != 'married'`). Flagging structural missingness prevents inappropriate imputation that invents
+  non-existent spouses.
+
+## Distribution shapes and Tukey outlier fences
+
+For continuous numeric columns, profiling computes Tukey's five-number summary: minimum, first quartile ($Q_1$), median
+($Q_2$), third quartile ($Q_3$), and maximum <Cite id="tukey1977" />.
+
+The interquartile range ($\text{IQR}$) defines non-parametric outlier fences:
+
+$$
+\text{IQR} = Q_3 - Q_1
+$$
+
+$$
+\text{Fence}_{\text{lower}} = Q_1 - 1.5 \times \text{IQR}, \quad \text{Fence}_{\text{upper}} = Q_3 + 1.5 \times \text{IQR}
+$$
+
+| Distributional Region | Boundary Rule | Statistical Interpretation | Diagnostic Recommendation |
+| :--- | :--- | :--- | :--- |
+| **Extreme Lower Outliers** | $x < Q_1 - 3.0 \times \text{IQR}$ | Measurement corruption or logging anomaly | Quarantine / audit instrumentation |
+| **Mild Lower Outliers** | $Q_1 - 3.0 \text{IQR} \le x < Q_1 - 1.5 \text{IQR}$ | Heavy lower tail variation | Evaluate robust scaling or winsorization |
+| **Central Quartile Range** | $Q_1 \le x \le Q_3$ | Central $50\%$ of empirical mass ($\text{IQR}$) | Core distribution geometry |
+| **Mild Upper Outliers** | $Q_3 + 1.5 \text{IQR} < x \le Q_3 + 3.0 \text{IQR}$ | Heavy upper tail variation | Evaluate robust scaling or winsorization |
+| **Extreme Upper Outliers** | $x > Q_3 + 3.0 \times \text{IQR}$ | Catastrophic leverage points | Quarantine / investigate root cause |
+
+- Values falling beyond $[Q_1 - 3 \times \text{IQR}, Q_3 + 3 \times \text{IQR}]$ are categorized as extreme outliers.
+- **Multimodal distributions**: Profiling flags multimodal densities (e.g. mixture of two Gaussian peaks). Bimodality
+  indicates that the column combines two distinct operational regimes (e.g., domestic vs international shipping weights)
+  that warrant explicit subgroup partitioning.
+
+## Cross-column checks and functional dependencies
+
+Cross-column profiling discovers deterministic relationships and relational integrity violations
+<Cite id="abedjan2015" />:
+
+1. **Exact functional dependencies**: A functional dependency $X_A \to X_B$ holds if every unique value of $X_A$ maps to
+   exactly one value of $X_B$ (e.g., `zip_code` $\to$ `state`). Discovering hidden functional dependencies allows
+   dropping redundant columns without losing predictive information.
+2. **Duplicate and collinear columns**: Computing the Pearson or Spearman correlation matrix flags pairs of columns with
+   $|\rho| > 0.99$. Common causes include redundant ETL aggregations or duplicate copies with slightly different column
+   names.
+3. **Temporal ordering violations**: Verifying logical inequalities across timestamps:
+   $$
+   \mathbb{I}(t_{\text{end}} \ge t_{\text{start}}) = 1, \quad \mathbb{I}(t_{\text{delivery}} \ge t_{\text{order}}) = 1
+   $$
+   Any row violating temporal precedence represents upstream database corruption.
+
+## Automated profiling pipelines and quality gates
+
+In production machine learning systems, data profiling is not merely a one-time exploratory Jupyter notebook step; it is
+an automated quality gate executed before training or inference <Cite id="schelter2018" />.
+
+1. **Raw ingestion stream**: Ingest incoming partitioned batches from upstream event brokers or ETL storage.
+2. **Metric extraction**: Extract column profiles (counts, null rates, quantile sketches, distinct counts) via scalable
+   profiling engines (e.g., Deequ or Great Expectations).
+3. **Profile diff evaluation**: Compare extracted batch metrics against the historical golden baseline reference.
+4. **Automated gate branching**:
+   - **Pass (drift below tolerance thresholds)**: Stream partition directly into downstream feature engineering and
+     model training pipelines.
+   - **Fail (schema mutation, severe null spikes, out-of-range bounds)**: Trigger high-priority automated alerts and
+     isolate the corrupted partition into quarantine storage.
+
+By computing a lightweight profile digest (JSON schema containing column types, min/max bounds, null percentages, and
+quantile sketches) on each new dataset batch, systems compare incoming profiles against historical baselines. If a batch
+exhibits breaking schema mutations, unexpected spikes in missingness, or novel out-of-range categories, the ingestion
+pipeline halts automatically before model corruption occurs <Cite id="schelter2018" />.
+
+## Diagnostic checklist
+
+To execute thorough data profiling on any new tabular dataset:
+
+1. **Audit physical vs semantic types**: Map each column to its true semantic type; flag identifiers and separate
+   continuous numeric features from categorical codes <Cite id="abedjan2015" />.
+2. **Scan for disguised sentinels**: Check discrete frequency spikes at distribution boundaries (e.g. `-999`, `999999`,
+   `"N/A"`).
+3. **Analyze cardinality ratios**: Drop zero-variance quasi-constant columns; identify high-cardinality nominals
+   requiring specialized encoding.
+4. **Inspect missingness matrices**: Calculate null rates and missingness correlations $\rho_{\text{null}}$;
+   differentiate MCAR from structural dependencies <Cite id="little1988, rubin1976" />.
+5. **Compute Tukey outlier fences**: Measure skewness, kurtosis, and points beyond
+   $[Q_1 - 1.5\text{IQR}, Q_3 + 1.5\text{IQR}]$ <Cite id="tukey1977" />.
+6. **Verify cross-column logic**: Enforce temporal precedence constraints and identify redundant functional dependencies
+   <Cite id="schelter2018" />.

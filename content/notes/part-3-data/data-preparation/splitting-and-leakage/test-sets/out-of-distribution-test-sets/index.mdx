@@ -1,26 +1,127 @@
 ---
 title: 'Out-of-distribution test sets'
 kind: concept
-summary: 'Out-of-distribution test sets measure performance beyond the training distribution: challenge sets, held-out sites and periods, and systematically perturbed inputs.'
+summary: 'Out-of-distribution test sets measure generalization beyond training support: challenge sets, held-out domains and periods, synthetic corruptions, and natural adversarial inputs expose shortcut reliance.'
 tags: [data, evaluation, robustness]
-aliases: []
-requires: []
-related: [robustness-to-distribution-shift, distribution-shift-datasets]
-references: []
-status: stub
+aliases: [out of distribution test sets, OOD test sets, distribution shift test sets, challenge sets, corruption robustness]
+requires: [test-set-design]
+related: [matching-the-split-to-deployment, test-set-reuse, adversarial-validation, dataset-shift]
+references: [hendrycks2019, hendrycks2019b, koh2021, recht2019]
+status: draft
 updated: 2026-10-11
 ---
 
+import OodEvaluationExplorer from './OodEvaluationExplorer';
+
 <Definition>
-To be written.
+An **out-of-distribution (OOD) test set** is an evaluation dataset whose joint probability distribution
+$\mathbb{P}_{\text{test}}(X, Y)$ systematically diverges from the training distribution
+$\mathbb{P}_{\text{train}}(X, Y)$ along defined physical, temporal, geographic, or contextual axes. OOD test sets
+evaluate whether a machine learning model learns robust causal representations or merely exploits brittle,
+in-distribution statistical shortcuts <Cite id="koh2021" />.
 </Definition>
 
-## Challenge sets
+Standard machine learning benchmarks evaluate models on in-distribution holdout splits drawn from the exact same
+sampling frame as the training data. While in-distribution testing confirms that a model interpolates effectively within
+its familiar manifold support, it provides no guarantee that the model will survive real-world deployment where
+environments, sensor hardware, weather, and populations drift.
 
-## Held-out sites and periods
+<OodEvaluationExplorer />
 
-## Perturbation sets
+## In-distribution validation versus out-of-distribution reality
 
-## Reading the gap
+Under standard Empirical Risk Minimization (ERM), algorithms optimize expected loss under the assumption that training
+and test samples are identically distributed:
 
-## Pitfalls
+$$
+\min_\theta \mathbb{E}_{(x, y) \sim \mathbb{P}_{\text{train}}} [\ell(y, f_\theta(x))] \implies \text{assumes } \mathbb{P}_{\text{test}} = \mathbb{P}_{\text{train}}
+$$
+
+In production, models inevitably face non-stationary conditions:
+- **Covariate shift**: The marginal feature distribution shifts
+  ($\mathbb{P}_{\text{train}}(X) \neq \mathbb{P}_{\text{test}}(X)$) while conditional labeling rules remain constant.
+- **Concept drift**: The relationship between inputs and targets changes
+  ($\mathbb{P}_{\text{train}}(Y \mid X) \neq \mathbb{P}_{\text{test}}(Y \mid X)$).
+- **Subpopulation shift**: Specific minority groups or edge-case environments become prevalent in deployment.
+
+Relying exclusively on in-distribution test accuracy produces a false sense of security: models with near-identical ID
+accuracy can exhibit wildly divergent robustness when subjected to real-world domain shifts <Cite id="recht2019" />.
+
+## Synthetic perturbation suites: ImageNet-C
+
+To assess mechanical robustness against everyday environmental and sensor noise, Dan Hendrycks and Thomas Dietterich
+<Cite id="hendrycks2019" /> introduced **ImageNet-C**, establishing a standard benchmark for measuring resistance to
+input corruptions.
+
+ImageNet-C applies 15 diverse algorithmic corruptions organized across four operational categories:
+1. **Noise**: Gaussian noise, shot noise, impulse noise.
+2. **Blur**: Defocus blur, glass blur, motion blur, zoom blur.
+3. **Weather**: Snow, frost, fog, brightness variations.
+4. **Digital artifacts**: Contrast attenuation, elastic deformations, pixelation, JPEG compression artifacts.
+
+Each corruption is applied at five discrete severity levels ($s \in \{1, \dots, 5\}$). A model's overall corruption
+vulnerability is summarized via the **Mean Corruption Error (mCE)**, which normalizes corruption error against an
+AlexNet baseline:
+
+$$
+\text{mCE} = \frac{1}{15} \sum_{c=1}^{15} \frac{\sum_{s=1}^5 E_{s, c}^{\text{model}}}{\sum_{s=1}^5 E_{s, c}^{\text{baseline}}}
+$$
+
+Evaluating on synthetic corruptions reveals that standard convolutional networks trained on clean images rely heavily on
+high-frequency textural cues; when high-frequency details are disrupted by mild noise or blur, predictive accuracy drops
+precipitously.
+
+## Real-world distribution shifts: The WILDS benchmark
+
+While synthetic perturbations test sensor noise, Pang Wei Koh et al. <Cite id="koh2021" /> created the **WILDS**
+benchmark to track naturally occurring, multi-modal distribution shifts across scientific and enterprise domains:
+
+- **Camelyon17 (Histopathology)**: Evaluates tumor detection in lymph node tissue sections. The training set contains
+  images from three specific medical centers; the OOD test set evaluates slides from two entirely separate, unseen
+  hospital systems. Variations in tissue preparation staining and scanner optic profiles cause standard models to drop
+  by over $25\%$ in accuracy.
+- **FMoW (Functional Map of the World)**: Satellite remote sensing building and land-use classification. The training
+  set contains images from 2002 to 2015; the OOD test set evaluates imagery from 2016 to 2018 across novel continental
+  regions, forcing models to generalize across temporal modernization and regional architecture shifts.
+- **CivilComments-WILDS**: Toxicity classification in online discourse. Models are evaluated on **worst-group accuracy**
+  across demographic identity mentions (e.g. race, religion, gender), penalizing systems that achieve high overall
+  accuracy by sacrificing performance on marginalized demographics.
+
+## Natural adversarial examples: ImageNet-A
+
+Unlike digital adversarial perturbations (which optimize imperceptible pixel-level noise using gradients), natural
+adversarial examples <Cite id="hendrycks2019b" /> consist of real, unedited, naturally captured photographs that
+systematically fool deep learning vision systems:
+
+- The images contain real objects photographed in unexpected, counter-intuitive settings (e.g., a dragonfly resting on a
+  wooden chair, or a sea lion on a rocky cliff rather than swimming in blue water).
+- Standard ImageNet classifiers rely heavily on background contextual shortcuts (e.g. detecting water textures to
+  predict "sea lion"). When the spurious background is removed or inverted, top-1 accuracy on ResNet-50 crashes from
+  $76.5\%$ to just **$2.2\%$**!
+
+Challenge benchmarks like ImageNet-A demonstrate that high in-distribution validation accuracy often indicates mastery
+of background environmental shortcuts rather than true semantic object recognition.
+
+## Reading the gap: Effective robustness
+
+When evaluating multiple models across in-distribution and out-of-distribution test sets, how should practitioners
+interpret performance gains?
+
+Benjamin Recht et al. <Cite id="recht2019" /> and Rohan Taori et al. discovered an empirical law governing OOD
+generalization: for standard supervised training, plotting out-of-distribution accuracy against in-distribution accuracy
+yields a remarkably stable linear trendline:
+
+$$
+\text{logit}(\text{Acc}_{\text{OOD}}) = \alpha \cdot \text{logit}(\text{Acc}_{\text{ID}}) + \beta
+$$
+
+This distinction separates two forms of robustness:
+- **Relative robustness**: A model achieves higher OOD accuracy merely because it has higher ID accuracy, moving upward
+  along the existing baseline trendline. The model possesses no special resilience to distribution shift; it is simply
+  more capable overall.
+- **Effective robustness**: A model architecture, data augmentation strategy, or pretraining paradigm achieves OOD
+  accuracy strictly **above the baseline trendline**.
+
+Empirically, true effective robustness is rarely achieved through minor architectural tweaks. It emerges predominantly
+from massive, highly diverse multimodal pretraining (such as CLIP or vision-language foundation models), which exposes
+the model to diverse contextual manifolds and neutralizes spurious domain correlations.

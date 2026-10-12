@@ -2,25 +2,134 @@
 title: 'Image dataset bias'
 kind: concept
 summary: 'Image datasets carry capture signatures, backgrounds, and site and scanner effects that correlate with labels. Models learn these shortcuts and fail where the correlation breaks.'
-tags: [data, computer-vision, bias]
-aliases: []
-requires: []
+tags: [data, computer-vision, bias, robust-ml]
+aliases: [visual-dataset-bias, shortcut-learning-vision, spurious-correlations-images]
+requires: [digital-images, image-quality-screening]
 related: [subpopulation-shift-and-shortcuts, dataset-bias]
-references: []
-status: stub
-updated: 2026-10-11
+references: [torralba2011, geirhos2020shortcut, beery2018, zech2018, buolamwini2018]
+status: draft
+updated: 2026-10-12
 ---
 
+import { ImageDatasetBiasVisualizer } from './ImageDatasetBiasVisualizer'
+
 <Definition>
-To be written.
+**Image dataset bias** refers to systematic statistical regularities, confounding acquisition artifacts, demographic
+imbalances, and environmental correlations present in training image collections that do not reflect true invariant
+causal relationships in the target physical world. When deep vision models optimize empirical risk on biased datasets,
+they exploit low-effort spurious correlations as decision shortcuts, suffering catastrophic generalization failures when
+evaluated out-of-distribution.
 </Definition>
+
+In their foundational study, Torralba and Efros demonstrated that standard visual benchmarks could be distinguished by
+simple support vector machines trained solely on background textures and capture signatures—framing the "Name That
+Dataset" game <Cite id="torralba2011" />. Modern deep convolutional networks and vision transformers amplify this
+vulnerability: because empirical risk minimization (ERM) is agnostic to causal structure, optimization converges on
+whatever high-frequency texture, background context, or scanner token minimizes loss with the highest gradient magnitude
+<Cite id="geirhos2020shortcut" />.
+
+<ImageDatasetBiasVisualizer client:load />
 
 ## Capture signatures
 
+Every photographic collection carries the implicit operational signature of the human photographers, robotic platforms,
+or edge sensors that generated it:
+
+- **Canonical Framing and Centering**: Standard web photography exhibits strong center bias, wherein target objects are
+  framed near the optical center at eye level, occupying 30% to 70% of the image frame. When deployed on embedded drones
+  or autonomous vehicles, models trained on centered datasets fail to detect identical objects located at peripheral
+  edges, oblique perspectives, or extreme camera elevations.
+- **Photographer Selection and Pose Bias**: Photographers capture objects in clean, prototypical poses (e.g., cars in
+  three-quarters profile, dogs facing the camera, tools resting on clean workbenches). Rare or inverted orientations
+  (such as overturned vehicles or upside-down instruments) yield immediate misclassifications despite intact object
+  boundaries.
+- **Sensor Vignetting and Lens Distortions**: Specific camera rigs introduce radial luminance fall-off (vignetting),
+  chromatic aberration, and sensor pattern noise (photo-response non-uniformity, PRNU). If specific classes are acquired
+  on specialized hardware (e.g., rare wildlife captured via telephoto field cameras while domestic pets are photographed
+  with smartphones), models inadvertently classify the sensor rather than the animal.
+
 ## Backgrounds
+
+Background confounding occurs when the semantic category of interest strongly co-occurs with specific environmental
+scenes or textures <Cite id="beery2018" />.
+
+Formally, consider an image decomposed into invariant core features $X_c \in \mathcal{X}_c$ (the animal's morphological
+anatomy) and spurious background features $X_s \in \mathcal{X}_s$ (the environmental habitat). Let $Y \in \{0, 1\}$
+denote the label (e.g., $Y=1$ for waterbird, $Y=0$ for landbird). In the training distribution $P_{\text{train}}$,
+background $S \in \{0, 1\}$ (water vs. land) is heavily entangled with $Y$:
+
+$$
+P_{\text{train}}(S = 1 \mid Y = 1) = \rho, \quad P_{\text{train}}(S = 0 \mid Y = 0) = \rho, \quad \rho \gg 0.5
+$$
+
+When $\rho \to 1$, the mutual information between background and label $I(X_s; Y)$ exceeds that of the core visual
+features $I(X_c; Y)$ because broad spatial textures (ocean waves, blue skies, forest canopies) provide low-frequency,
+easily separable representations in early convolutional layers <Cite id="geirhos2020shortcut" />. Consequently, standard
+Empirical Risk Minimization:
+
+$$
+\hat{\theta}_{\text{ERM}} = \arg\min_\theta \frac{1}{N} \sum_{i=1}^N \mathcal{L}(f_\theta(x_i), y_i)
+$$
+
+achieves near-perfect in-distribution accuracy ($>95\%$), but when evaluated on the counterfactual minority subgroup
+$g = (Y=1, S=0)$ (waterbirds photographed on land), accuracy collapses toward zero. Protecting against this failure
+requires Group Distributionally Robust Optimization (Group-DRO), optimizing the worst-case group risk over all
+partitions $\mathcal{G}$:
+
+$$
+\hat{\theta}_{\text{DRO}} = \arg\min_\theta \max_{g \in \mathcal{G}} \mathbb{E}_{(x,y) \sim P_g}[\mathcal{L}(f_\theta(x), y)]
+$$
 
 ## Site and scanner effects
 
+In medical and scientific imaging, site and scanner bias introduces severe false positives and non-generalizable
+clinical predictions <Cite id="zech2018" />.
+
+1. **Hardware Acquisition Differences**: Computed tomography (CT) scanners, magnetic resonance imaging (MRI) units, and
+   digital radiography (X-ray) machines from different manufacturers (GE, Siemens, Philips) operate with distinct
+   detector quantum efficiencies, reconstruction filter kernels, tube voltages ($kV_p$), and slice thicknesses. A model
+   trained on scans from Hospital A readily learns scanner-specific point-spread functions (PSF) and high-frequency
+   noise distributions rather than pathological lesions.
+2. **Clinical Protocol and Radiopaque Confounders**: Hospital sites utilize distinct patient positioning protocols and
+   physical markers:
+   - Radiopaque metal letter tags ('L'/'R') placed by radiology technicians vary in font, size, and placement between
+     institutions.
+   - Intensive care units (ICU) routinely perform supine anteroposterior (AP) bedside portable X-rays on bedridden,
+     critically ill patients, whereas outpatient clinics acquire upright posteroanterior (PA) standing radiographs on
+     ambulatory patients. A model trained without controlling for acquisition posture easily classifies "supine portable
+     projection" as "severe pneumonia" <Cite id="zech2018" />.
+   - Departmental digital watermarks, institutional burn-in annotations, and hospital PACS compression settings
+     introduce perfect spurious discriminators across clinical cohorts.
+
 ## Shortcut features
 
+Deep neural networks exhibit an inductive bias toward simplicity, prioritizing low-complexity statistical patterns over
+structured 3D spatial semantics <Cite id="geirhos2020shortcut" />. Prominent visual shortcuts include:
+
+- **Texture vs. Shape Bias**: Standard ImageNet-trained convolutional networks classify objects based on local surface
+  textures (e.g., elephant skin, leopard spots) rather than global silhouette geometry. Overlaying cat fur texture onto
+  an elephant silhouette causes models to predict "cat" with high confidence.
+- **High-Frequency Spectral Shortcuts**: CNNs exploit imperceptible high-frequency Fourier components that correlate
+  with classes across web scrapes, rendering them vulnerable to benign out-of-distribution corruptions such as blur,
+  noise, or weather shifts <Cite id="hendrycks2021" />.
+- **Subgroup and Demographic Disparities**: Commercial facial analysis systems exhibit pronounced intersectional
+  accuracy disparities when datasets underrepresent darker skin phototypes and female subjects
+  <Cite id="buolamwini2018" />. Light-skinned male faces achieve error rates below 1%, whereas dark-skinned female faces
+  experience error rates exceeding 30%, stemming from severe skintone representation skews and dynamic range sensor
+  calibrations optimized for low-melanin reflectance.
+
 ## Pitfalls
+
+1. **Relying on In-Distribution Validation**: Splitting a single biased dataset randomly into 80% train and 20%
+   validation completely obscures shortcut learning. Because the validation set shares identical capture signatures,
+   background correlations, and scanner artifacts, validation loss appears stellar while real-world deployment fails
+   immediately.
+2. **Multi-Center Leakage via Subject Splitting**: In biomedical imaging, partitioning data at the image level rather
+   than the patient or hospital site level leaks subtle tissue textures, anatomy quirks, and scanner noise into
+   evaluation folds, yielding artificially inflated cross-validation scores.
+3. **Over-Reliance on Pixel Saliency Maps**: Post-hoc attribution heatmaps (Grad-CAM, Integrated Gradients) can appear
+   intuitively focused on the foreground object even when internal intermediate representation manifolds are heavily
+   conditioned on spurious background tokens.
+4. **Ignoring Subpopulation Auditing**: Evaluating models solely on aggregate accuracy masks severe disparate impacts on
+   underrepresented demographic or environmental cohorts. Rigorous quality control requires explicit intersectional
+   performance audits across protected attributes and acquisition metadata <Cite id="buolamwini2018" />.

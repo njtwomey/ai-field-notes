@@ -2,23 +2,124 @@
 title: 'Log parsing'
 kind: concept
 summary: 'Log lines are parsed by extracting templates and the variable fields within them, then grouped into sessions, to turn free-text logs into event sequences.'
-tags: [data]
-aliases: []
-requires: []
-related: [event-sequences]
-references: []
-status: stub
-updated: 2026-10-11
+tags: [data, log-analysis, anomaly-detection, sequence-modeling]
+aliases: [log-template-extraction, log-sessionization, event-stream-parsing]
+requires: [tidy-and-reshaped-tables, text-fields-in-tables]
+related: [event-sequences, document-parsing]
+references: [he2017drain, du2017deeplog, du2016spell, zhu2019logparser]
+status: draft
+updated: 2026-10-12
 ---
 
+import { LogParsingVisualizer } from './LogParsingVisualizer'
+
 <Definition>
-To be written.
+**Log parsing** is the automated transformation of semi-structured, free-text console and operational system log streams
+into structured, discrete event templates and parameterized numerical tuples. It decouples static message boilerplate
+from dynamic runtime parameters and groups event streams into temporal user or transaction sessions for downstream
+sequence modeling and anomaly detection.
 </Definition>
+
+Modern cloud platforms, microservices, and distributed clusters generate terabytes of log records daily. While human
+software engineers inspect individual log lines via textual queries, machine learning models (such as DeepLog or
+LogAnomaly) require structured categorical event identifiers and typed numeric feature vectors
+<Cite id="he2017drain, du2017deeplog" />. Naively feeding raw log strings into standard natural language embeddings
+fails because constant logging boilerplate dominates the text, while mission-critical error states reside in subtle
+parameter shifts or unusual sequence permutations <Cite id="zhu2019logparser" />.
+
+<LogParsingVisualizer client:load />
 
 ## Template extraction
 
+System log lines are produced by print statements embedded within source code (e.g.,
+`logger.info("Connection from %s closed after %d ms", ip, latency)`). The objective of template extraction is to
+reverse-engineer these print statements from unannotated output logs without access to the underlying codebase
+<Cite id="zhu2019logparser" />.
+
+A parsed log message is decomposed into:
+- A **Constant Event Template** (Event ID $E_k$): Invariant tokens representing the software execution branch (e.g.,
+  `"Connection from <*> closed after <*> ms"`).
+- **Variable Parameters** ($V$): Dynamic runtime values bound to wildcards `"<*>"` (e.g., `["192.168.1.10", "42"]`).
+
+The prevailing production algorithm is **Drain** <Cite id="he2017drain" />, which employs a fixed-depth prefix tree to
+achieve streaming, linear-time parsing:
+1. **Depth 1 (Token Count)**: Log lines are routed to child branches based on the total number of whitespace-delimited
+   tokens $L$.
+2. **Depth 2 to $d$ (Prefix Tokens)**: The parser descends through the first $d-1$ non-numeric tokens, filtering
+   candidate templates by static prefix keywords.
+3. **Leaf Node Similarity Search**: The candidate leaf contains a small list of log templates $\{T_j\}$. Drain
+   calculates token-level sequence similarity between the input log $S$ and candidate template $T$:
+   $$
+   \operatorname{sim}(S, T) = \frac{\sum_{i=1}^L \mathbf{1}_{\{S[i] = T[i]\}}}{L}
+   $$
+   Where matching non-parameter tokens increment the numerator. If
+   $\max_j \operatorname{sim}(S, T_j) \ge \tau_{\text{sim}}$, the log is assigned to $T_j$, and tokens where
+   $S[i] \neq T_j[i]$ are generalized to the wildcard `"*"`. If no template meets the threshold, a new template is
+   instantiated.
+
+Alternative methods include **Spell** (which uses Longest Common Subsequence dynamic programming) and clustering-based
+approaches (such as AEL and Logram) <Cite id="du2016spell, zhu2019logparser" />.
+
 ## Variable fields
+
+Once the constant template has been extracted, the variable parameter tokens must be parsed, cleaned, and cast into
+structured feature schemas:
+
+1. **Parameter Typing**: Extracted string tokens are categorized into operational domains:
+   - *Categorical Identifiers*: IP addresses, usernames, UUIDs, hostnames, and block IDs.
+   - *Discrete Status Codes*: HTTP status codes (`200`, `404`, `500`), POSIX return signals, error severities (`INFO`,
+     `WARN`, `ERROR`).
+   - *Continuous Metrics*: Request execution latency (ms), transmitted byte size, CPU load percentage, heap memory
+     allocation.
+2. **Outlier and Anomaly Scoring**: For continuous performance parameters, models establish baseline distributions. For
+   example, assuming execution latencies follow a log-normal distribution $\ln X \sim \mathcal{N}(\mu, \sigma^2)$,
+   anomalous executions are flagged via standardized z-scores:
+   $$
+   z = \frac{\ln x - \mu}{\sigma} > \tau_z, \quad \tau_z \approx 3.0
+   $$
 
 ## Sessionising
 
+To detect macro-level operational failures (such as distributed deadlocks, cascading microservice outages, or
+brute-force authentication attacks), isolated log records must be aggregated into coherent temporal sessions
+<Cite id="du2017deeplog" />.
+
+Sessionization transforms a continuous stream of events $\mathcal{L} = \{(e_1, t_1), (e_2, t_2), \dots\}$ into discrete
+sequence vectors $\mathbf{s} = [e_{i_1}, e_{i_2}, \dots, e_{i_m}]$ via three windowing strategies:
+
+- **Identifier-Based Sessionization**: In microservice architectures, requests carry a trace context header (e.g.,
+  OpenTelemetry `TraceID` or correlation ID). Logs sharing the same identifier across all backend services are grouped
+  into a single transactional sequence, regardless of physical arrival order.
+- **Fixed and Sliding Windows**: When explicit trace IDs are unavailable, continuous logs are grouped into time windows
+  of duration $W$ (e.g., 5 minutes) stepping forward by interval $S$:
+  $$
+  W_k = \left\{ e_i : t_i \in [k \cdot S, \, k \cdot S + W) \right\}
+  $$
+- **Session-Gap Idle Timeout**: In user-facing web services, sequences are partitioned whenever the inactivity gap
+  between successive events exceeds an idle timeout threshold $\tau_{\text{idle}}$:
+  $$
+  t_i - t_{i-1} > \tau_{\text{idle}} \implies \text{Spawn New Session}
+  $$
+
+The resulting discrete event sequences $\mathbf{s} = [E_{4}, E_{12}, E_{12}, E_{89}, E_{2}]$ are modeled via recurrent
+neural networks or transformers (**DeepLog**), which compute conditional transition probabilities
+$P(e_t \mid e_{t-1}, \dots, e_{t-h})$ and flag transitions with low likelihood as operational anomalies
+<Cite id="du2017deeplog" />.
+
 ## Pitfalls
+
+1. **Template Explosion via Dynamic Tokens**: If the similarity threshold $\tau_{\text{sim}}$ is set too high
+   ($\ge 0.85$) or regex preprocessing fails to mask variable tokens (such as timestamps, GUIDs, memory addresses, or
+   file paths), Drain treats each unique parameter value as a new constant keyword. A system processing $10^7$ daily
+   logs can explode from 50 true templates to $>100{,}000$ spurious templates, exhausting memory tables.
+2. **Software Version Semantic Drift**: When backend developers release a software update that alters a log string
+   (e.g., changing `"User %s logged in"` to `"User %s authenticated successfully"`), the parser assigns a brand new
+   Event ID. Sequence models trained on historical logs flag all post-deployment traffic as false-positive anomalies
+   until templates are aliased or re-trained.
+3. **Transaction Fragmentation from Aggressive Timeouts**: Setting the idle session timeout $\tau_{\text{idle}}$ too low
+   ($<30\,\text{s}$) splits long-running batch transactions or user think-time pauses across separate session windows,
+   obscuring causal event chains.
+4. **Ignoring Parameter Confounders in Anomaly Detection**: An anomaly detection model that tracks only Event ID
+   transitions will completely miss resource exhaustion bugs if an application repeatedly executes valid event sequences
+   but experiences a $100\times$ increase in database latency parameters. Comprehensive systems must model template
+   sequences and parameter values jointly <Cite id="du2017deeplog" />.

@@ -1,28 +1,139 @@
 ---
 title: 'Leakage case studies'
 kind: concept
-summary: 'Real leaks follow a few patterns: one patient in both splits, scanner or site artefacts that reveal the label, duplicated code, inverse relations in knowledge graphs, random splits of time series. Each case shows the pattern and its fix.'
+summary: 'Real-world data leakage recurs across distinct structural failure modes: patient overlap, scanner artifacts, duplicated code, inverse graph relations, and shuffled time series collapse models in deployment.'
 tags: [data, data-leakage, case-study]
-aliases: []
-requires: []
-related: [data-leakage]
-references: []
-status: stub
+aliases: [leakage case studies, data leakage case studies, leakage examples, shortcut learning examples]
+requires: [data-leakage]
+related: [matching-the-split-to-deployment, temporal-splits, adversarial-validation, point-in-time-correctness]
+references: [kapoor2023, zech2018, allamanis2019, kaufman2012]
+status: draft
 updated: 2026-10-11
 ---
 
+import LeakageTaxonomyExplorer from './LeakageTaxonomyExplorer';
+
 <Definition>
-To be written.
+**Data leakage case studies** analyze real-world machine learning failures where subtle informational contamination
+between training pipelines and evaluation sets enabled models to exploit unintended shortcut features. Across clinical
+radiology, software engineering, knowledge graph embeddings, and financial forecasting, leakage creates illusory,
+near-perfect validation metrics that collapse upon live deployment <Cite id="kapoor2023" />.
 </Definition>
 
-## Patient overlap
+High-capacity machine learning models (such as deep convolutional networks, transformers, and gradient boosted
+ensembles) act as hyper-efficient opportunistic pattern detectors: given any shortcut feature that correlates with the
+target inside the training partition, the optimizer will exploit it rather than learning the genuine, generalizable
+causal mechanism.
 
-## Scanner and site artefacts
+<LeakageTaxonomyExplorer />
 
-## Duplicated code
+## Patient overlap in medical imaging
 
-## Inverse relations in knowledge graphs
+During the initial phase of the COVID-19 pandemic, dozens of academic preprints reported deep neural networks capable of
+detecting COVID-19 pneumonia from chest radiographs with greater than $99\%$ sensitivity and specificity.
 
-## Random splits of time series
+Subsequent systematic audits revealed a ubiquitous structural flaw <Cite id="kapoor2023" />:
+1. **Longitudinal patient repeat visits**: Patients admitted with acute respiratory distress frequently received chest
+   X-rays every 24 to 48 hours throughout their multi-week hospital stay.
+2. **Random train/test partitioning**: Researchers partitioned image files randomly into $80\%$ train and $20\%$ test.
+   Consequently, dozens of radiographs from the same individual patient were distributed across both training and test
+   partitions.
+3. **Identity memorization**: The deep convolutional networks learned to recognize unique patient anatomical
+   signatures—such as individual rib spacing, cardiac silhouettes, spine curvature, and pre-existing chronic surgical
+   clips.
+4. **The deployment cliff**: When evaluated on chest radiographs from unseen patients in external clinics, accuracy
+   collapsed from $99.2\%$ to near random chance ($61.4\%$).
 
-## Pitfalls
+### The fix: Grouped patient partitioning
+
+All images from an individual human subject must be grouped atomically into a single fold using **Group $K$-Fold**
+cross-validation on a persistent, de-identified patient UUID.
+
+## Scanner and site artifacts (Zech et al. 2018)
+
+In a study on automated pneumonia detection from chest radiographs across multiple hospital networks, John Zech et al.
+<Cite id="zech2018" /> documented a legendary case of hospital site confounding:
+
+1. **Departmental equipment differences**: Hospital A used portable bedside X-ray machines predominantly for bedridden
+   ICU patients who had an intrinsically elevated baseline pneumonia rate. Outpatient clinics in Hospital B used
+   wall-mounted standing scanners for healthy walking patients.
+2. **Burned-in text stickers**: Portable bedside X-ray systems automatically burned the text token `"PORTABLE"` or
+   department abbreviation codes into the upper corner of the image file.
+3. **Shortcut exploitation**: The convolutional neural network learned to detect the specific pixel font and placement
+   of the portable scanner sticker in the image margin, predicting severe pneumonia whenever the portable machine font
+   appeared.
+4. **Generalization failure**: When evaluated on images from an external hospital system (Mount Sinai vs NIH vs
+   Indiana), the model's area under the ROC curve plummeted from an in-sample $0.93$ to $0.65$.
+
+### The fix: Leave-One-Site-Out (LOGO) and margin masking
+
+Models intended for deployment across diverse clinics must be evaluated using Leave-One-Site-Out cross-validation across
+independent hospital networks. Furthermore, non-anatomical margins, corner text burn-ins, and calibration bars must be
+systematically masked or cropped during preprocessing.
+
+## Duplicated code in software engineering benchmarks
+
+Machine learning models of source code (such as code completion, automated docstring generation, and neural bug
+detection) are typically trained on massive corpora scraped from public GitHub repositories.
+
+As demonstrated by Miltiadis Allamanis <Cite id="allamanis2019" />, public code repositories suffer from massive,
+pervasive duplication due to project forking, vendored dependencies, and copy-paste code reuse:
+1. When GitHub repositories are partitioned randomly into train and test sets, identical functions, boilerplate classes,
+   and test suites appear in both partitions.
+2. The code language model achieves impressive exact-match accuracy ($> 80\%$) on benchmarks simply by retrieving
+   verbatim memorized function bodies.
+3. When evaluated on truly novel, out-of-distribution code, performance drops by more than $35\%$.
+
+### The fix: Syntax-aware near-duplicate deduplication
+
+Source code corpora must undergo deduplication at the Abstract Syntax Tree (AST) level prior to dataset splitting.
+Identical and near-duplicate source files must be clustered using MinHash and Locality-Sensitive Hashing (LSH) over
+syntax $n$-grams, ensuring entire clone families remain isolated within a single partition.
+
+## Inverse relations in knowledge graphs (WN18 & FB15k)
+
+For years, the standard evaluation benchmarks for knowledge graph link prediction were WordNet18 (WN18) and Freebase15k
+(FB15k). Models aimed to predict missing relation edges $(h, r, t)$ in relational graphs.
+
+Researchers observed that simple embedding models (such as TransE and ComplEx) achieved extraordinary performance
+($> 94\%$ Hits@10). However, deeper scrutiny revealed structural leakage in the benchmark graph construction:
+1. For nearly every relation triple in the training set (e.g., `(dog, hypernym, canine)`), the test set contained the
+   exact inverse relation triple: `(canine, hyponym, dog)`.
+2. The embedding algorithms did not learn semantic link prediction; they merely learned a trivial 1-to-1 lookup rule
+   mapping relation $r$ to its inverse relation $r^{-1}$.
+
+### The fix: Filtered benchmarks (WN18RR & FB15k-237)
+
+The community replaced these flawed benchmarks with **WN18RR** and **FB15k-237**, which algorithmically identify and
+purge all reversible, symmetric, and inverse relation pairs from the evaluation sets. Performance on the corrected
+benchmarks dropped to $\approx 50\%$, restoring meaningful scientific evaluation.
+
+## Random splitting of autocorrelated time series
+
+In financial market forecasting and sensor telemetry, sequential observations exhibit high auto-correlation: price at
+millisecond $t$ is nearly identical to price at millisecond $t+1$.
+
+Random cross-validation shuffles sequential time rows across training and validation folds:
+1. The validation set is asked to predict price at $t = 100$.
+2. The training set contains observations from $t = 99$ and $t = 101$.
+3. The model achieves $98.5\%$ directional accuracy by simply interpolating between its immediate temporal neighbors
+   <Cite id="kaufman2012" />.
+4. In live execution, future neighbors do not exist; trading algorithms collapse immediately.
+
+### The fix: Purged walk-forward temporal cross-validation
+
+Time series data must be partitioned strictly along chronological boundaries, incorporating forward label horizon gaps,
+pre-test purging, and post-test embargo buffers.
+
+## Systemic warning signs of data leakage
+
+Empirical machine learning teams can detect leakage early by monitoring four hallmark warning signs:
+
+1. **Unrealistic performance on hard problems**: If a model achieves human-surpassing accuracy ($> 98\%$) on an
+   unstructured perceptual or biological task in the very first iteration, assume leakage until proven otherwise.
+2. **Top feature reliance on metadata**: In feature attribution rankings (SHAP or gain), the most influential variables
+   are non-causal identifiers, record timestamps, sequential row indices, or collection site codes.
+3. **The cross-site or cross-cohort performance cliff**: A precipitous drop when transitioning from in-sample
+   cross-validation to external multi-center test data indicates the model relied on partition-specific shortcuts.
+4. **Adversarial validation separability**: Training a binary classifier to discriminate training samples from
+   validation samples achieves $\text{ROC AUC} \gg 0.70$.

@@ -3,22 +3,120 @@ title: 'Count and frequency encoding'
 kind: concept
 summary: 'Count encoding replaces a category level by how often it occurs. Popularity is often predictive, but levels with equal counts collide.'
 tags: [data, feature-engineering]
-aliases: []
-requires: []
-related: [categorical-encoding]
+aliases: [count encoding, frequency encoding, popularity encoding]
+requires: [categorical-encoding]
+related: [mean-target-encoding, high-cardinality-and-unseen-levels]
 references: []
-status: stub
+status: draft
 updated: 2026-10-11
 ---
 
 <Definition>
-To be written.
+**Count and frequency encoding** is a categorical transformation that replaces each discrete category level with its
+marginal frequency of occurrence within the training set, mapping high-cardinality nominal variables into a single
+1-dimensional continuous numerical feature.
 </Definition>
+
+When handling high-cardinality categorical features (such as user IDs, merchant categories, search queries, IP subnets,
+or ZIP codes), standard one-hot encoding introduces thousands of sparse columns, inflating memory and fragmenting
+tree-split depth. Count encoding provides an ultra-lightweight alternative that summarizes the marginal prominence of an
+entity without expanding feature dimensionality.
+
+import { FrequencyEncodingVisualizer } from './FrequencyEncodingVisualizer';
+
+<FrequencyEncodingVisualizer />
 
 ## Counts and frequencies
 
-## Popularity as signal
+For a categorical variable with levels $c \in \mathcal{C}$ across $N$ training observations:
 
-## Collisions
+### 1. Raw count encoding
+Replaces each level $c$ with the absolute number of occurrences:
 
-## Pitfalls
+$$
+x_{\text{count}}(c) = N_c = \sum_{i=1}^N \mathbb{I}(c_i = c)
+$$
+
+### 2. Relative frequency encoding
+Normalizes the count by the total dataset size $N$:
+
+$$
+x_{\text{freq}}(c) = f_c = \frac{N_c}{N} \in (0, 1]
+$$
+
+Normalized frequency is generally preferred over raw counts because it remains invariant to dataset sample size: a
+category comprising $5\%$ of rows remains at $0.05$ whether the pipeline processes $10{,}000$ or $10{,}000{,}000$
+records.
+
+### 3. Log-frequency encoding
+Because empirical frequencies in real-world systems follow heavy Zipfian power laws ($N_c \propto c^{-\alpha}$), taking
+the natural logarithm compresses extreme head values and provides a more linear response for gradient-based models:
+
+$$
+x_{\text{log}}(c) = \ln(N_c + 1)
+$$
+
+## Popularity as an informative signal
+
+In many production machine learning systems, entity frequency is not merely a descriptive metadata attribute—it is
+directly correlated with the target:
+
+- **Fraud detection:** Legitimate transactions concentrate heavily on popular, established merchants (high frequency,
+  low fraud rate), whereas fraudulent transactions disproportionately exploit novel, obscure, or freshly generated
+  merchant accounts (low frequency, high fraud rate).
+- **Search ranking and recommendation:** Popular items receive more clicks, reviews, and organic engagement. Frequency
+  provides an effective prior proxy for item quality and click-through propensity.
+- **Cybersecurity:** Malware processes and botnet command-and-control IP addresses exhibit low, bursty frequencies
+  compared to benign system daemons.
+
+In gradient boosted decision trees (XGBoost, LightGBM), a single split on frequency ($f_c \le \theta$) immediately
+separates head entities from rare tail entities across an entire dataset.
+
+## The collision problem
+
+The primary theoretical drawback of count encoding is the **information loss caused by frequency collisions**.
+
+If two semantically distinct categories happen to occur with equal or near-equal counts in the training set:
+- Category $A$: `"Luxury Sports Cars"` ($N_A = 420$, conversion rate $= 2\%$)
+- Category $B$: `"Organic Dog Treats"` ($N_B = 420$, conversion rate $= 35\%$)
+
+Both categories map to the exact same frequency $f = 420 / N = 0.042$.
+
+Because count encoding only measures *how often* an entity appears rather than *what* it is or *how it relates to the
+target*, the model cannot distinguish between Category $A$ and Category $B$. In feature space, their representations
+collide completely.
+
+## Handling unseen categories and temporal drift
+
+1. **Unseen levels at inference:** When a category appears at test time that was never observed in training, its count
+   is zero ($N_c = 0$), mapping to $f_c = 0.0$. This allows the model to treat novel entities as extreme rare tail cases
+   without throwing runtime exceptions.
+2. **Temporal non-stationarity:** If data is collected across non-stationary time windows where total traffic grows, raw
+   counts $N_c$ drift upward, causing train/test covariate shift. Always use relative frequency $f_c = N_c / N$ or a
+   rolling-window frequency rate (e.g. counts per week).
+3. **Cross-validation leakage:** Frequency maps must be fitted strictly on training folds $D_{\text{train}}$. Computing
+   counts over the combined train and test sets leaks information regarding test distribution frequencies.
+
+## Remedying collisions: Multidimensional encodings
+
+To prevent frequency collisions from destroying model accuracy, count encoding is rarely used in isolation on
+high-stakes features. Best practices pair frequency with complementary encodings:
+
+- **Frequency + Target Encoding:** Frequency captures entity prominence, while target encoding captures conditional
+  outcome rates.
+- **Frequency + Category Embeddings:** Pass frequency as an auxiliary numerical feature alongside dense learned
+  embeddings.
+- **Frequency + Hash Sign:** Combine frequency with feature hashing to distinguish distinct levels that share identical
+  counts.
+
+## Pitfalls and failure modes
+
+1. **Monotonicity assumptions in linear models:** Linear models assume that the log-odds or response varies
+   monotonically with frequency ($w \cdot f_c$). If the true target rate is high for moderate-frequency items but low
+   for both rare and ultra-popular items, a single linear weight fails without polynomial expansion or tree binning.
+2. **Conflating rare categories with missing values:** Both unseen categories and categories with a single instance map
+   near zero ($f_c \approx 0$). If missing values are also imputed to zero, the model cannot distinguish an unrecorded
+   attribute from a rare entity.
+3. **Overfitting small categories:** A category appearing only twice in training has an empirical frequency of $2/N$,
+   which carries high sampling variance. Consider grouping all categories below a minimum frequency threshold (e.g.
+   $N_c < 10$) into an aggregate `"__rare__"` bucket before computing frequencies.

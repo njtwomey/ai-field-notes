@@ -1,24 +1,139 @@
 ---
 title: 'Training-dynamics diagnostics'
 kind: concept
-summary: 'How each example''s loss and prediction change during training separates easy, hard and ambiguous examples and flags likely label errors, through dataset cartography and forgetting events.'
-tags: [data, diagnostics, deep-learning]
-aliases: []
-requires: []
-related: [detecting-and-cleaning-label-errors]
-references: []
-status: stub
-updated: 2026-10-11
+summary: 'Per-example training dynamics—confidence, variability, and forgetting events—partition data into easy, ambiguous, and hard slices, surfacing label errors and redundant samples.'
+tags: [data, diagnostics, deep-learning, data-centric-learning]
+aliases: [training dynamics, dataset cartography, forgetting events, per-example loss, training-dynamics diagnostics]
+requires: [error-analysis, label-definition]
+related: [hard-example-mining, targeted-data-collection, coresets-and-data-pruning]
+references: [swayamdipta2020, toneva2019]
+status: draft
+updated: 2026-10-12
 ---
 
+import { TrainingDynamicsDiagnosticsVisualizer } from './TrainingDynamicsDiagnosticsVisualizer'
+
 <Definition>
-To be written.
+**Training-dynamics diagnostics** measure how individual training examples evolve throughout gradient-based
+optimization. By tracking per-example true-class probabilities, loss trajectories, variability across epochs, and
+forgetting events, these techniques map datasets into functional partitions—separating easy canonical instances,
+high-utility ambiguous boundary examples, and noisy mislabelled outliers.
 </Definition>
+
+Static dataset profiling evaluates data distributions before training; post-hoc error analysis evaluates model mistakes
+only at convergence. However, iterative gradient descent is a physical process that interacts with each training example
+differently over time. How quickly a neural network fits an example, whether its predictions oscillate as decision
+boundaries shift, or whether it repeatedly learns and forgets a point reveals the example's geometric complexity and
+data quality <Cite id="swayamdipta2020, toneva2019" />.
+
+<TrainingDynamicsDiagnosticsVisualizer />
 
 ## Per-example loss curves
 
+During stochastic gradient descent over $E$ training epochs, a model parameterized by $\boldsymbol{\theta}^{(e)}$
+computes an output distribution over classes. For example $i$ with true label $y_i$, the true-class posterior and loss
+at epoch $e$ are:
+
+$$
+p_i^{(e)} = P(y = y_i \mid \mathbf{x}_i; \boldsymbol{\theta}^{(e)}), \quad \ell_i^{(e)} = -\log p_i^{(e)}
+$$
+
+While the dataset-wide mean loss $\frac{1}{N} \sum_{i=1}^N \ell_i^{(e)}$ declines monotonically, individual per-example
+trajectories follow three distinct archetypes:
+
+| Trajectory Archetype | Posterior Evolution $p_i^{(e)}$ | Convergence Behavior | Underlying Data Nature |
+| :--- | :--- | :--- | :--- |
+| **Canonical (Easy)** | Rapidly climbs to $p_i^{(e)} \approx 1$ and plateaus | Learned within initial $2\text{--}5$ epochs; remains stable | Prototypical samples matching dominant class features |
+| **Ambiguous (Boundary)** | Oscillates continuously ($p_i^{(e)} \in [0.3, 0.7]$) | Flips across epochs as mini-batch gradients shift hyperplane | Subtle decision boundary instances, polysemy, contextual nuance |
+| **Mislabeled / Outlier** | Stagnates near $0$, late-epoch spike | Resists optimization until overfitted via brute memorization | Inverted ground truth, corrupted inputs, irreducible Bayes noise |
+
+1. **Canonical (Easy)**: Rapidly reaches $p_i^{(e)} \approx 1$ within the first few epochs and remains flat. The network
+   learns these instances effortlessly because they align with dominant feature directions.
+2. **Ambiguous (Boundary)**: Oscillates continuously across epochs as stochastic mini-batches shift the separating
+   hyperplane back and forth across the example.
+3. **Mislabeled / Outlier**: Resists fitting across early and intermediate epochs ($p_i^{(e)} \approx 0$). In
+   overparameterized deep networks, these examples are only fitted in late training through brute-force parameter
+   memorization.
+
 ## Dataset cartography
+
+Swabha Swayamdipta et al. formalized per-example training dynamics into **Dataset Cartography**, mapping each training
+instance into a two-dimensional coordinate space of **confidence** and **variability** computed across $E$ epochs
+<Cite id="swayamdipta2020" />:
+
+### Mathematical coordinates
+
+1. **Confidence** ($\hat{\mu}_i$): The mean model probability assigned to the true label across training:
+   $$
+   \hat{\mu}_i = \frac{1}{E} \sum_{e=1}^E p_i^{(e)}
+   $$
+2. **Variability** ($\hat{\sigma}_i$): The empirical standard deviation of the true-class probability across epochs:
+   $$
+   \hat{\sigma}_i = \sqrt{\frac{1}{E} \sum_{e=1}^E \left(p_i^{(e)} - \hat{\mu}_i\right)^2}
+   $$
+3. **Correctness** ($c_i$): The proportion of epochs where the model's top-1 prediction matches the true label:
+   $$
+   c_i = \frac{1}{E} \sum_{e=1}^E \mathbb{I}\left(\arg\max_k P(y=k \mid \mathbf{x}_i; \boldsymbol{\theta}^{(e)}) = y_i\right)
+   $$
+
+### Functional data partitions
+
+Because $p_i^{(e)} \in [0, 1]$, the maximum possible variability is bounded by the Bernoulli standard deviation envelope
+$\hat{\sigma}_i \le \sqrt{\hat{\mu}_i (1 - \hat{\mu}_i)}$, forming an inverted parabolic boundary peaking at
+$\hat{\mu} = 0.5, \, \hat{\sigma} = 0.5$. Plotting empirical coordinates reveals three distinct operational clusters:
+
+| Cartography Region | Coordinate Profile | Functional Composition | Downstream Optimization Role |
+| :--- | :--- | :--- | :--- |
+| **Easy-to-Learn** | High confidence ($\hat{\mu} > 0.7$), low variability ($\hat{\sigma} < 0.15$) | Prototypical, canonical instances; dominant class features | Redundant after early epochs; up to $50\%$ can be pruned with negligible loss in test accuracy |
+| **Ambiguous** | Moderate confidence ($0.3 < \hat{\mu} < 0.7$), high variability ($\hat{\sigma} > 0.25$) | Boundary cases, complex syntactic structures, domain intersections | **Highest generalization utility**: training models solely on ambiguous data yields superior out-of-distribution transfer |
+| **Hard-to-Learn** | Low confidence ($\hat{\mu} < 0.3$), low variability ($\hat{\sigma} < 0.15$) | Inverted ground truth, extreme sensor corruption, contradictory prompts | **Label error enrichment**: audit and clean these examples to prevent the model from memorizing noise |
 
 ## Forgetting events
 
+Mariya Toneva et al. investigated training dynamics through the lens of catastrophic forgetting during stochastic
+gradient descent <Cite id="toneva2019" />.
+
+### Formal definition
+
+Let $\hat{y}_i^{(e)} = \arg\max_k P(y=k \mid \mathbf{x}_i; \boldsymbol{\theta}^{(e)})$ be the model's discrete
+prediction for instance $i$ at epoch $e$. Example $i$ undergoes a **forgetting event** at epoch $e$ ($e \ge 2$) if it
+transitioned from being correctly classified to incorrectly classified:
+
+$$
+\text{Forgot}_i^{(e)} = \mathbb{I}\left(\hat{y}_i^{(e-1)} = y_i \land \hat{y}_i^{(e)} \ne y_i\right)
+$$
+
+The cumulative forgetting score across $E$ epochs is:
+
+$$
+F_i = \sum_{e=2}^E \text{Forgot}_i^{(e)}
+$$
+
+### Unforgettable vs frequently forgotten examples
+
+1. **Unforgettable examples ($F_i = 0$)**: Instances that, once learned correctly, are never misclassified in any
+   subsequent training epoch. Across benchmark datasets (including CIFAR-10, SVHN, and ImageNet), unforgettable examples
+   account for **$30\text{--}50\%$** of all training data <Cite id="toneva2019" />. Removing these unforgettable points
+   from the training corpus after an initial warm-up epoch yields zero degradation in final generalization accuracy,
+   enabling massive compute savings.
+2. **Frequently forgotten examples ($F_i \ge 4$)**: Instances that repeatedly flip across the decision boundary. These
+   examples share significant overlap with the ambiguous and hard-to-learn partitions in dataset cartography. They
+   define the fine-grained decision boundary but are also highly susceptible to gradient noise.
+
 ## Pitfalls
+
+1. **Blindly deleting hard-to-learn examples**: Assuming all hard-to-learn points are erroneous. Genuine rare-subgroup
+   examples (e.g. rare disease phenotypes or atypical accents) exhibit low confidence because they are mathematically
+   scarce, not because they are mislabeled. Deleting them destroys minority-slice recall.
+2. **Epoch subsampling distortion**: Recording predictions only once every 10 epochs. Subsampling smooths out
+   high-frequency boundary oscillations, artificially depressing variability $\hat{\sigma}_i$ and misclassifying
+   ambiguous instances as easy or hard.
+3. **Model architecture dependency**: Training dynamics reflect both the data distribution and the model's inductive
+   biases. A convolutional network may find texture-heavy examples easy, whereas a Vision Transformer may find global
+   geometric shapes easier. Cartography maps should be computed with the target model family.
+4. **Pruning easy examples before initial convergence**: Discarding easy-to-learn examples from epoch zero destabilizes
+   initialization. Early gradient updates require canonical examples to establish foundational low-level feature
+   representations.
+5. **Ignoring learning rate schedule interactions**: Evaluating forgetting events during aggressive learning rate decay
+   phases (e.g., step decays); learning rates close to zero freeze weights and mechanically suppress forgetting events,
+   distorting the empirical count.

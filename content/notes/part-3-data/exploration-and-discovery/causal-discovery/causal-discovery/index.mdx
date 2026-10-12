@@ -1,36 +1,196 @@
 ---
 title: 'Causal discovery'
 kind: concept
-summary: 'Causal discovery estimates a causal graph from data, using conditional independences, scores over graphs or asymmetries in the noise, under assumptions such as causal sufficiency and faithfulness.'
-tags: [data, causal-inference, graphical-models]
-aliases: []
-requires: []
-related: [causal-inference-from-observational-data, granger-causality]
-references: []
-status: stub
-updated: 2026-10-11
+summary: 'Causal discovery estimates directed acyclic causal graphs from observational data using conditional independence tests, score-based DAG search, continuous optimization, or non-Gaussian noise asymmetries under faithfulness and sufficiency.'
+tags: [data, causal-inference, graphical-models, discovery]
+aliases: [causal discovery, causal structure learning, DAG discovery, PC algorithm]
+requires: [data-generating-process, dependence-measures]
+related: [causal-inference-from-observational-data, granger-causality, selective-labels, feedback-loops]
+references: [pearl2009, spirtes2000, chickering2002, zheng2018, shimizu2006]
+status: draft
+updated: 2026-10-12
 ---
 
+import { CausalDiscoveryVisualizer } from './CausalDiscoveryVisualizer'
+
 <Definition>
-To be written.
+**Causal discovery** (or causal structure learning) is the algorithmic recovery of the directed acyclic graph (DAG)
+$\mathcal{G} = (\mathbf{V}, \mathbf{E})$ governing a joint observational distribution $P(\mathbf{V})$. It identifies
+direct causal arrows, confounding paths, and unshielded colliders from observational data under explicit structural
+axioms regarding faithfulness, Markov properties, and error distributions.
 </Definition>
 
-## Causal graphs and their assumptions
+Standard predictive models learn correlations $P(Y \mid X)$ that collapse when deployed under external interventions,
+policy changes, or distribution shifts. While randomized controlled trials (RCTs) represent the gold standard for causal
+inference, experiments are frequently unethical, cost-prohibitive, or physically impossible. Causal discovery algorithms
+systematically exploit conditional independencies, penalised graph scores, and non-Gaussian noise asymmetries to
+estimate underlying causal architectures directly from observational measurements <Cite id="pearl2009, spirtes2000" />.
 
-## Constraint-based methods
+<CausalDiscoveryVisualizer />
+
+## Causal graphs and foundational axioms
+
+A causal Bayesian network represents $D$ random variables $\mathbf{V} = \{V_1, \dots, V_D\}$ as nodes in a DAG
+$\mathcal{G}$. The joint distribution factorizes according to the **Causal Markov Condition**:
+
+$$
+P(V_1, \dots, V_D) = \prod_{i=1}^D P(V_i \mid \text{Pa}(V_i))
+$$
+
+Where $\text{Pa}(V_i)$ denotes the set of direct parents (immediate causes) of $V_i$.
+
+Algorithmic causal discovery relies on three foundational assumptions:
+1. **Causal sufficiency**: There are no unobserved common causes (latent confounders) influencing any pair of observed
+   variables in $\mathbf{V}$.
+2. **Causal Markov assumption**: Each variable $V_i$ is conditionally independent of all its non-descendants given its
+   direct causal parents:
+   $$
+   V_i \perp\!\!\!\perp \text{NonDesc}(V_i) \mid \text{Pa}(V_i)
+   $$
+3. **Causal faithfulness**: All conditional independencies present in the joint distribution $P(\mathbf{V})$ are
+   structural consequences of $d$-separation in $\mathcal{G}$. Faithfulness rules out exact algebraic parameter
+   cancellations (such as two opposing causal pathways whose strengths sum exactly to zero) <Cite id="spirtes2000" />.
+
+| Triad Geometry | Graphical Topology | Marginal Relation | Conditional Relation |
+| :--- | :--- | :--- | :--- |
+| **Chain (Mediation)** | $X \to Z \to Y$ | $X \not\perp\!\!\!\perp Y$ (dependent) | $X \perp\!\!\!\perp Y \mid Z$ (blocked given mediator $Z$) |
+| **Fork (Confounding)** | $X \leftarrow Z \to Y$ | $X \not\perp\!\!\!\perp Y$ (dependent) | $X \perp\!\!\!\perp Y \mid Z$ (blocked given confounder $Z$) |
+| **Collider (v-Structure)** | $X \to Z \leftarrow Y$ | $X \perp\!\!\!\perp Y$ (independent) | $X \not\perp\!\!\!\perp Y \mid Z$ (conditioning opens path!) |
+
+Chains and forks share identical conditional independencies ($X \perp\!\!\!\perp Y \mid Z$ and
+$X \not\perp\!\!\!\perp Y$). In stark contrast, the **collider (v-structure)** exhibits the inverted pattern: $X$ and
+$Y$ are marginally independent ($X \perp\!\!\!\perp Y$), but conditioning on collider $Z$ induces an artificial
+dependence ($X \not\perp\!\!\!\perp Y \mid Z$). This mathematical asymmetry forms the cornerstone of constraint-based
+discovery <Cite id="pearl2009" />.
+
+## Constraint-based methods: PC and FCI algorithms
+
+Constraint-based discovery infers causal edges by conducting systematic statistical hypothesis tests of conditional
+independence.
 
 ### The PC algorithm
 
-### FCI and hidden confounders
+The PC algorithm (Peter Spirtes and Clark Glymour <Cite id="spirtes2000" />) operates in four distinct phases:
+1. **Skeleton discovery**: Initialize a complete undirected graph where every variable pair is connected. For each pair
+   $(X, Y)$, test conditional independence $X \perp\!\!\!\perp Y \mid \mathbf{S}$ for conditioning sets $\mathbf{S}$ of
+   increasing cardinality ($|\mathbf{S}| = 0, 1, 2, \dots$). If an independence is found, delete the edge $X - Y$ and
+   store $\mathbf{S}$ as the separation set $\text{SepSet}(X, Y)$.
+2. **Collider orientation**: For every unshielded triple $X - Z - Y$ (where $X$ and $Y$ are not directly adjacent), test
+   whether $Z \in \text{SepSet}(X, Y)$. If $Z \notin \text{SepSet}(X, Y)$, orient the triple as a collider:
+   $$
+   X \to Z \leftarrow Y
+   $$
+3. **Meek orientation propagation**: Apply Meek's four logical orientation rules to orient remaining undirected edges
+   without creating new colliders or directed cycles.
 
-## Score-based methods
+The PC algorithm outputs a Completed Partially Directed Acyclic Graph (CPDAG) representing the **Markov equivalence
+class**—the set of all DAGs that share the exact same skeleton and v-structures <Cite id="spirtes2000" />.
 
-### Greedy equivalence search
+### FCI algorithm and hidden confounding
 
-### Continuous optimisation
+When causal sufficiency does not hold (latent confounders exist), the PC algorithm can output false causal arrows. The
+**Fast Causal Inference (FCI)** algorithm <Cite id="spirtes2000" /> relaxes causal sufficiency. FCI outputs a Partial
+Ancestral Graph (PAG) that distinguishes genuine direct causal edges ($\to$) from edges contaminated by latent common
+causes, marked with bidirected arrows ($\leftrightarrow$).
 
-## Functional causal models
+## Score-based methods and continuous optimization
 
-## Time series
+Score-based methods frame causal discovery as a model selection optimization problem over candidate DAGs.
 
-## Pitfalls
+### Greedy Equivalence Search (GES)
+
+GES evaluates candidate Markov equivalence classes using a penalized likelihood criterion, such as the Bayesian
+Information Criterion (BIC) <Cite id="chickering2002" />:
+
+$$
+\text{BIC}(\mathcal{G}) = -2 \ln L(\hat{\boldsymbol{\theta}}; \mathcal{G}) + k \ln N
+$$
+
+GES begins with the empty graph, greedily adds forward edges that maximize BIC improvement until local optimality, and
+then greedily removes backward edges. Under faithfulness and large samples, GES is guaranteed to return the true Markov
+equivalence class <Cite id="chickering2002" />.
+
+### Continuous optimization: NOTEARS
+
+Traditional DAG search is computationally NP-hard due to the combinatorial explosion of super-exponential acyclic graph
+space. Zheng et al. introduced **NOTEARS**, transforming combinatorial structure learning into a continuous optimization
+problem <Cite id="zheng2018" />.
+
+Given observational data matrix $\mathbf{X} \in \mathbb{R}^{N \times D}$, let $\mathbf{W} \in \mathbb{R}^{D \times D}$
+be the weighted adjacency matrix. Zheng et al. proved that a graph is strictly acyclic if and only if the matrix
+exponential satisfies <Cite id="zheng2018" />:
+
+$$
+h(\mathbf{W}) = \text{Tr}\left( e^{\mathbf{W} \odot \mathbf{W}} \right) - D = 0
+$$
+
+Where $\odot$ is the Hadamard (element-wise) product. Causal discovery becomes a continuous constrained optimization
+problem:
+
+$$
+\min_{\mathbf{W}} \frac{1}{2N} \|\mathbf{X} - \mathbf{X}\mathbf{W}\|_F^2 + \lambda \|\mathbf{W}\|_1 \quad \text{subject to } h(\mathbf{W}) = 0
+$$
+
+Solved via augmented Lagrangian methods, NOTEARS scales causal DAG learning smoothly using standard gradient-based
+optimizers <Cite id="zheng2018" />.
+
+## Functional causal models and non-Gaussian noise
+
+Markov equivalence classes leave many causal directions undirected (e.g. $X - Y$). By leveraging non-Gaussian noise
+distributions, **functional causal models** break equivalence classes and identify unique DAGs
+<Cite id="shimizu2006" />.
+
+### Linear Non-Gaussian Acyclic Models (LiNGAM)
+
+Consider a linear structural equation model:
+
+$$
+X_i = \sum_{j \in \text{Pa}(i)} \beta_{ij} X_j + \varepsilon_i
+$$
+
+Where error terms $\varepsilon_i$ are continuous, mutually independent noise variables.
+- If all $\varepsilon_i$ are Gaussian, the true causal direction between $X$ and $Y$ is mathematically unidentifiable
+  without interventions.
+- **The Darmois-Skitovich theorem**: If noise terms $\varepsilon_i$ are **non-Gaussian** (e.g., Laplace, uniform, or
+  skewed distributions), the full causal DAG is **uniquely identifiable** <Cite id="shimizu2006" />.
+
+When fitting $Y = \beta X + \varepsilon_Y$, the estimated residual $\hat{\varepsilon}_Y$ is statistically independent of
+$X$. However, in the reversed model $X = \tilde{\beta} Y + \tilde{\varepsilon}_X$, the residual $\tilde{\varepsilon}_X$
+is *dependent* on $Y$. LiNGAM uses Independent Component Analysis (FastICA) to extract the unique causal permutation
+matrix <Cite id="shimizu2006" />.
+
+## Time series and temporal ordering
+
+In longitudinal and streaming datasets, physical time provides an immutable asymmetric constraint: causes must precede
+their effects ($t_{\text{cause}} < t_{\text{effect}}$).
+
+### Granger causality
+
+Variable $X$ is said to **Granger-cause** $Y$ if historical values of $X$ provide statistically significant information
+for forecasting $Y$ beyond all information contained in past values of $Y$ alone:
+
+$$
+P(Y_t \mid Y_{<t}, X_{<t}) \neq P(Y_t \mid Y_{<t})
+$$
+
+Evaluated via vector autoregression (VAR) F-tests, Granger causality establishes predictive precedence. However, if an
+unobserved latent cause $Z$ drives both $X$ (with a 1-day lag) and $Y$ (with a 2-day lag), Granger causality falsely
+concludes that $X \to Y$. Genuine causal claims in time series require combining temporal lags with constraint-based
+independence testing.
+
+## Diagnostic checklist
+
+To execute causal discovery on real-world observational datasets:
+
+1. **Verify causal sufficiency assumptions**: Explicitly audit whether unmeasured confounders (e.g., user wealth,
+   geographical weather) influence both treatment and outcome; if unmeasured confounding is plausible, use FCI rather
+   than standard PC <Cite id="spirtes2000" />.
+2. **Test for non-Gaussian noise**: Compute kurtosis and skewness of feature residuals. If distributions deviate
+   significantly from normality, deploy LiNGAM to orient undirected Markov equivalence edges uniquely
+   <Cite id="shimizu2006" />.
+3. **Exploit temporal ordering**: Enforce strict directional constraints ($t_i < t_j$) in the adjacency matrix prior to
+   graph optimization to eliminate reversed causal loops.
+4. **Solve continuous acyclicity via NOTEARS**: When features exceed 30 dimensions, formulate structure learning as
+   continuous augmented Lagrangian optimization <Cite id="zheng2018" />.
+5. **Differentiate predictive features from causal targets**: Never assume high regression weights imply intervention
+   efficacy without verifying graph $d$-separation <Cite id="pearl2009" />.

@@ -1,24 +1,147 @@
 ---
 title: 'Hard-example mining'
 kind: concept
-summary: 'Hard-example mining trains more on the examples a model gets wrong, such as hard negatives in retrieval and detection. Some hard examples are mislabelled, so mining also surfaces label errors.'
-tags: [data, deep-learning]
-aliases: []
-requires: []
-related: [sampled-softmax-and-negative-sampling]
-references: []
-status: stub
-updated: 2026-10-11
+summary: 'Hard-example mining concentrates gradient updates on high-loss instances and semi-hard negatives, but risks amplifying label noise and penalizing unannotated false negatives.'
+tags: [data, deep-learning, metric-learning, optimization]
+aliases: [hard-example mining, OHEM, hard negative mining, semi-hard negatives, negative mining]
+requires: [sampled-softmax-and-negative-sampling, label-definition]
+related: [error-analysis, training-dynamics-diagnostics, targeted-data-collection]
+references: [shrivastava2016ohem, schroff2015]
+status: draft
+updated: 2026-10-12
 ---
 
+import { HardExampleMiningVisualizer } from './HardExampleMiningVisualizer'
+
 <Definition>
-To be written.
+**Hard-example mining** is an optimization and data-curation strategy that prioritizes training on instances where the
+current model incurs the largest loss or produces boundary ambiguities. In classification and object detection, it
+prunes uninformative background candidates via **online hard example mining (OHEM)**; in metric learning and information
+retrieval, it extracts **hard negatives** that lie within a margin distance of positive anchors.
 </Definition>
+
+In complex perception and retrieval tasks, training examples are overwhelmingly trivial. In object detection, thousands
+of candidate bounding boxes encompass empty background; in web-scale search, billions of documents share zero relevance
+with a given query. Uniform random minibatch sampling wastes the vast majority of backward-pass computation on trivial
+examples with near-zero gradients. Hard-example mining filters this background sea to focus parameter updates on
+ambiguous decision boundaries, accelerating convergence and boosting discriminative margins
+<Cite id="shrivastava2016ohem, schroff2015" />.
+
+<HardExampleMiningVisualizer />
 
 ## Online hard example mining
 
+Early machine learning systems relied on offline bootstrapping (such as multi-stage support vector machine training),
+where a model was periodically frozen, evaluated across a vast corpus to cache false positives, and resumed with an
+updated hard cache. Offline mining suffered from severe operational latency and stale cache artifacts.
+
+Abhinav Shrivastava, Abhinav Gupta, and Ross Girshick introduced **Online Hard Example Mining (OHEM)** to unify mining
+and continuous gradient descent <Cite id="shrivastava2016ohem" />.
+
+| Stage | Execution Scope | Computational & Memory Characteristics |
+| :--- | :--- | :--- |
+| **1. Feature Backbone Forward Pass** | Full Minibatch / Image | Computes candidate activations across shared convolutional or transformer backbone |
+| **2. Fast Proposal Evaluation** | $N$ Proposals ($N \gg B$, e.g., $N = 2048$) | Lightweight forward evaluation computing scalar loss $\ell_i$ per proposal |
+| **3. Loss-Guided Sorting & NMS** | High-Loss Proposals | Applies loss-guided Non-Maximum Suppression to eliminate spatially redundant overlaps |
+| **4. Hard Subset Selection** | Top-$B$ Hardest ($B \ll N$, e.g., $B = 32$) | Isolates highest-loss informative exemplars for parameter updates |
+| **5. Targeted Backward Pass** | Selected $B$ Candidates | Propagates gradients strictly through the hard subset, conserving activation memory |
+
+By decoupling the forward pass (which is computationally cheap across candidate region heads) from the backward pass
+(which requires storing heavy activation memory for backpropagation), OHEM achieves two critical advantages:
+1. **Dynamic adaptation**: The mining process automatically tracks the evolving decision boundary of the network at
+   every iteration, eliminating stale caches.
+2. **Computational efficiency**: Gradients are computed solely on high-loss examples, capturing $> 90\%$ of available
+   gradient energy while reducing backward memory footprint by an order of magnitude.
+
 ## Hard negatives
+
+In representation learning, contrastive objectives (such as InfoNCE) and metric learning objectives (such as Siamese
+networks and triplet loss) depend fundamentally on the quality of negative samples <Cite id="schroff2015" />.
+
+For an anchor embedding $\mathbf{a} = f(\mathbf{x}_a)$, a positive counterpart $\mathbf{p} = f(\mathbf{x}_p)$, and a
+negative sample $\mathbf{n} = f(\mathbf{x}_n)$, the standard triplet margin loss is defined as:
+
+$$
+\mathcal{L}_{\text{triplet}}(\mathbf{a}, \mathbf{p}, \mathbf{n}) = \max\left(0, \|\mathbf{a} - \mathbf{p}\|_2^2 - \|\mathbf{a} - \mathbf{n}\|_2^2 + \alpha\right)
+$$
+
+where $\alpha > 0$ defines the required Euclidean safety margin.
+
+Florian Schroff et al. demonstrated in FaceNet that negative samples fall into three distinct geometric regimes based on
+their distance relative to the positive anchor <Cite id="schroff2015" />:
+
+| Negative Regime | Geometric Condition | Triplet Loss $\mathcal{L}$ | Gradient Behavior & Operational Role |
+| :--- | :--- | :--- | :--- |
+| **Easy Negatives** | $\|\mathbf{a} - \mathbf{n}\|_2^2 > \|\mathbf{a} - \mathbf{p}\|_2^2 + \alpha$ | $\mathcal{L} = 0$ | Zero loss; generates no gradient update; wasteful to train on |
+| **Semi-Hard Negatives** | $\|\mathbf{a} - \mathbf{p}\|_2^2 < \|\mathbf{a} - \mathbf{n}\|_2^2 < \|\mathbf{a} - \mathbf{p}\|_2^2 + \alpha$ | $0 < \mathcal{L} < \alpha$ | Negative is further than positive, but within margin $\alpha$; produces stable, non-saturating gradients |
+| **Hard Negatives** | $\|\mathbf{a} - \mathbf{n}\|_2^2 < \|\mathbf{a} - \mathbf{p}\|_2^2$ | $\mathcal{L} > \alpha$ | Negative is closer to anchor than the positive; high gradient magnitude; risks destabilizing early training |
+
+Selecting the **hardest negative** ($\arg\min_n \|\mathbf{a} - \mathbf{n}\|_2^2$) in early training iterations
+frequently triggers representation collapse, forcing all representations onto a single collapsed subspace. FaceNet
+established that restricting negative mining to **semi-hard negatives** provides robust regularization and steady metric
+expansion.
+
+### Mining in dense retrieval
+
+In modern dense retrieval systems, negative mining operates in distinct tiers:
+1. **In-batch negatives**: Other documents within the same GPU batch serve as negatives for a given query. While
+   computationally free, random in-batch negatives are overwhelmingly easy.
+2. **BM25 / lexical hard negatives**: Documents that share substantial lexical overlap (keywords) with the query but
+   lack semantic relevance.
+3. **Model-mined hard negatives**: Documents retrieved at top ranks by an earlier dense checkpoint. Training on these
+   hard negatives forces the student model to discriminate subtle semantic differences.
 
 ## False negatives among hard examples
 
+The central hazard of hard negative mining is **false negative contamination**. In open-world retrieval, recommendation
+engines, and extreme multi-label classification, true labels are sparse: datasets document positive pairs ($y=1$), and
+assume all unannotated pairs are negative.
+
+When an aggressive mining algorithm searches a billion-document corpus for candidate negatives with the highest cosine
+similarity to query $\mathbf{q}$:
+
+$$
+\mathbf{n}^* = \arg\max_{\mathbf{d} \in \mathcal{D}_{\text{unlabelled}}} \cos(f(\mathbf{q}), f(\mathbf{d}))
+$$
+
+The candidates retrieved with extreme similarity (e.g., $\cos > 0.88$) are frequently **unannotated true
+positives**—documents that are fully relevant to the query but lacked an explicit click or human label in the training
+log.
+
+For a query such as $\mathbf{q} = \text{"Symptoms of acute bronchitis"}$, candidate retrieval reveals two sharply
+divergent scenarios:
+
+| Candidate Sample | Cosine Similarity | Retrieved Content Snippet | Semantic Relationship | Optimization Impact |
+| :--- | :--- | :--- | :--- | :--- |
+| **Candidate A** | $\cos = 0.94$ | *"Clinical signs of acute bronchial inflammation..."* | **Unannotated True Positive (False Negative)** | Triplet penalty forcibly repels clinical synonyms, shattering semantic manifolds |
+| **Candidate B** | $\cos = 0.72$ | *"Treatment protocols for chronic asthma..."* | **Legitimate Hard Negative** | Loss correctly sharpens boundary between related respiratory conditions |
+
+When a model is penalized via contrastive loss for assigning high similarity to an unannotated true positive,
+backpropagation forcibly repels two semantically identical concepts. Repeated over millions of iterations,
+false-negative penalties tear apart valid semantic manifolds and degrade retrieval recall.
+
+### Mitigations
+
+1. **Cross-encoder scoring filter**: Before accepting a mined hard negative into training, pass the pair through a
+   computationally heavy cross-encoder (e.g. deep bidirectional transformer). If the cross-encoder relevance score
+   exceeds a conservative threshold $\tau_{\text{relevant}}$, the candidate is flagged as a likely false negative and
+   discarded.
+2. **Margin relaxation**: Dynamically scaling margin penalties down as embedding similarity approaches positive anchor
+   similarity.
+3. **False-negative masking**: Treating unannotated top candidates under positive-unlabelled (PU) risk formulation
+   rather than binary contrastive loss.
+
 ## Pitfalls
+
+1. **Label-noise amplification**: Corrupted or mislabeled examples inevitably produce maximal model loss. Naive
+   loss-based mining preferentially selects label errors, forcing the model to exhaust parameter capacity memorizing
+   corrupted annotations.
+2. **Batch diversity collapse**: Selecting the top-$B$ hardest proposals without non-maximum suppression or diversity
+   clustering selects redundant patches from the same high-loss image region, degrading minibatch gradient variance.
+3. **Early training collapse**: Deploying extreme hard negative mining from epoch zero before feature representations
+   have formed meaningful topological clusters; early hard mining drives gradients toward numerical overflow or manifold
+   collapse.
+4. **Mined negative evaluation leakage**: Evaluating retrieval systems on benchmark datasets where hard negatives were
+   filtered using the same model family, which masks systematic model blind spots.
+5. **Ignoring domain drift in negative pools**: Re-mining hard negatives from static historical snapshots while serving
+   dynamic queries causes mined negatives to decouple from current production traffic distributions.

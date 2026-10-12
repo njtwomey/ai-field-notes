@@ -1,24 +1,98 @@
 ---
 title: 'Dialogue and agent traces'
 kind: concept
-summary: 'Multi-turn conversations and agent trajectories, with tool calls and their results, are training data with structure that flat text loses.'
-tags: [data, large-language-models]
-aliases: []
-requires: []
-related: [instruction-and-preference-data]
-references: []
-status: stub
+summary: 'Multi-turn conversations and agent trajectories encode sequential context, tool calls, environment observations, and reasoning traces that flat single-turn text loses.'
+tags: [data, large-language-models, agents, dialogue]
+aliases: [agent trajectories, multi-turn dialogue data, tool use trajectories, agent execution traces, conversational traces]
+requires: [supervised-fine-tuning, instruction-and-preference-data]
+related: [code-data, corpus-construction, text-cleaning]
+references: [yao2023, schick2023, jimenez2024swebench]
+status: draft
 updated: 2026-10-11
 ---
 
+import { AgentTraceVisualizer } from './AgentTraceVisualizer'
+
 <Definition>
-To be written.
+**Dialogue and agent traces** are structured sequential data records capturing multi-turn conversational exchanges or
+agentic problem-solving rollouts. Unlike flat single-turn text or isolated prompt-response pairs, an agent trajectory
+interleaves autoregressive internal reasoning tokens (**thoughts**), external executable tool invocations (**actions**),
+and non-generative sandbox outputs (**observations**) across discrete environment steps. Curating agent data requires
+turn-level loss masking, sandbox verification, and multi-turn state pruning.
 </Definition>
 
-## Multi-turn structure
+## Multi-turn conversational structure
 
-## Tool calls and results
+Real-world AI deployment rarely operates as isolated single-turn prompts. In complex customer support, collaborative
+editing, and iterative software engineering, dialogues unfold across conversational sequences:
+
+$$
+\mathcal{T} = (u_1, a_1, u_2, a_2, \dots, u_T, a_T),
+$$
+
+where $u_t$ is the $t$-th user turn and $a_t$ is the $t$-th assistant response.
+
+Training models on multi-turn dialogue introduces distinct structural trade-offs:
+- **Cumulative context window pressure:** Later turns inherit all earlier exchanges, consuming context tokens rapidly.
+- **Turn-level credit assignment:** In <Gloss name="sft">supervised fine-tuning</Gloss>, training can calculate
+  cross-entropy loss over every assistant response across the conversation:
+
+  $$
+  \mathcal{L}(\theta) = -\sum_{t=1}^T \sum_{k \in a_t} \log P_\theta(k \mid u_{\le t}, a_{<t}),
+  $$
+
+  or alternatively sample individual sub-dialogues $(u_{\le t}, a_{<t}, a_t)$ as independent examples, computing loss
+  exclusively on the final response $a_t$. Training across all assistant turns simultaneously yields higher sample
+  efficiency, but weights long conversations heavily.
+
+## Tool calls and environment observations
+
+Autonomous agents extend pure language generation by interacting with digital environments (calculators, web browsers,
+Python REPLs, database engines, and operating systems).
+
+Yao et al. formalised this synergy in the ReAct (Reasoning + Acting) architecture, decomposing agent traces into a
+tripartite cycle <Cite id="yao2023" />:
+
+1. **Thought:** The model generates latent <Gloss name="cot">chain-of-thought</Gloss> tokens reflecting on current state
+   and decomposing the sub-task.
+2. **Action:** The model generates a structured tool call formatted as <Gloss name="json" /> or XML (such as
+   `calculator(expression="3.14 * 25")` or `web_search(query="current inflation rate")`).
+3. **Observation:** The execution environment halts generation, runs the tool in an isolated sandbox, and injects the
+   resulting stdout/stderr or API response back into the conversation context as an observation turn.
+
+Schick et al. showed in Toolformer that <Gloss name="language-model">language models</Gloss> can self-annotate API calls
+into plain text in an unsupervised fashion, filtering candidates by whether the injected tool output reduced downstream
+perplexity <Cite id="schick2023" />.
+
+Crucially, in agent training data, **observations must be masked out of loss supervision** (loss weight set to 0, using
+ignore index $-100$). The model must learn to predict thoughts and action calls, but must never be trained to predict
+the external environment's output. Failing to mask observations encourages models to hallucinate tool responses rather
+than dispatching real tool calls.
 
 ## Trajectories as training data
 
+Agent datasets compile complete solution paths from initial user prompt to terminal success or failure:
+
+- **Verification and outcome filtering:** Training on unverified agent rollouts reinforces error-prone trial-and-error
+  behaviors. In software engineering benchmarks like SWE-bench <Cite id="jimenez2024swebench" />, agent trajectories
+  that resolve GitHub issues are retained only if the proposed code patch passes all unit tests within an isolated
+  Docker container.
+- **Error correction and recovery traces:** Agents that only see flawless trajectories struggle when tools return error
+  codes or timeouts. High-value agent datasets intentionally include recovery rollouts: the tool fails with an exception
+  (such as `SyntaxError` or `HTTP 429`), prompting the agent to analyze the error trace, formulate a recovery
+  hypothesis, and dispatch a corrected tool call.
+- **Tree search and <NoteLink to="rejection-sampling">rejection sampling</NoteLink>:** Synthetic agent data is generated
+  via Monte Carlo Tree Search (MCTS) or parallel rejection sampling, rolling out dozens of candidate reasoning
+  trajectories per problem and training the policy solely on the highest-scoring verified path.
+
+<AgentTraceVisualizer />
+
 ## Pitfalls
+
+- **Observation leakage and lookahead bias:** Training trajectories constructed from archived logs must strictly ensure
+  that intermediate tool results do not leak information about future steps or final outcomes.
+- **Schema drift and tool signature misalignment:** Fine-tuning an agent on tool formats that diverge from production
+  API signatures causes runtime schema violations, JSON decoding errors, and failed invocations.
+- **Quadratic quadratic attention bloat in long rollouts:** Trajectories spanning dozens of tool interactions accumulate
+  tens of thousands of tokens, inflating attention compute quadratically. Truncating redundant tool output logs (such as
+  massive SQL query tables or stack traces) is essential to preserve context budgets.

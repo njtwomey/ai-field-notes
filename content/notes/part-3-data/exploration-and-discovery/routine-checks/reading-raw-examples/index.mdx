@@ -6,21 +6,103 @@ tags: [data, diagnostics]
 aliases: []
 requires: []
 related: [exploratory-data-analysis]
-references: []
-status: stub
-updated: 2026-10-11
+references: [anscombe1973, karpathy2019]
+status: draft
+updated: 2026-10-12
 ---
 
+import { ReadingRawExamplesVisualizer } from './ReadingRawExamplesVisualizer'
+
 <Definition>
-To be written.
+Reading raw examples is the qualitative diagnostic practice of directly inspecting individual, unaggregated data
+points—drawn via uniform random sampling, feature extrema, and model error rankings. While summary statistics condense
+millions of observations into scalar moments, reading raw records reveals data entry bugs, sentinel encodings,
+formatting corruptions, and label errors that numerical aggregates conceal.
 </Definition>
+
+A prevalent failure mode among novice machine learning engineers is treating datasets as abstract numerical matrices,
+immediately invoking `df.describe()` and jumping straight to model training. As Andrej Karpathy emphasized in his
+foundational recipe for neural network development, the indispensable first step of any project is to spend hours
+manually inspecting hundreds of raw examples <Cite id="karpathy2019" />. Aggregate metrics are mathematical
+compressions; like Anscombe's famous quartet <Cite id="anscombe1973" />, identical summary statistics can hide
+completely pathological distributions.
+
+<ReadingRawExamplesVisualizer />
 
 ## Random samples
 
+The baseline routine begins by drawing small, uniformly distributed random samples (e.g., 50 to 100 rows) across the
+training split:
+
+- **Bypassing Ingestion Order:** Never inspect data by running `df.head(10)`. The first few rows of a database export
+  reflect chronological sorting, primary key sequences, or batch extraction order. If the table is sorted by date,
+  `df.head()` inspects only obsolete historical records from five years ago; if sorted by user ID, it inspects only
+  early beta-testers.
+- **Mental Sanity Checking:** Reading random rows forces the engineer to evaluate whether feature values conform to
+  physical and operational reality. Does a session duration of $14{,}000$ seconds make sense for a mobile micro-app?
+  Does an e-commerce order with $0$ total spend represent a promotional gift, a canceled order, or a software bug?
+- **Text and Media Artifacts:** In NLP and computer vision, random sampling unmasks raw formatting corruptions:
+  unescaped HTML tags (`&amp;`, `<br/>`), character encoding failures (Mojibake, UTF-8 replacement characters `\ufffd`),
+  corrupted watermarks, and truncated audio files.
+
 ## Extremes of each feature
+
+Summary statistics like means and standard deviations are notoriously vulnerable to extreme values, yet they rarely
+reveal *why* an extreme value exists. Systematic inspection requires sorting each feature and examining its top 10 and
+bottom 10 records:
+
+1. **Sentinel Values (Magic Numbers):** Legacy enterprise systems and sensor microcontrollers encode missingness or
+   sensor failures as arbitrary numerical constants: `-999`, `9999`, `999999`, or `1970-01-01`. In an uncurated column,
+   an engineer who sees a maximum temperature of $9999^\circ\text{C}$ will immediately realize it represents a sensor
+   disconnect code rather than a volcanic eruption.
+2. **Integer Overflow and Underflow:** Unsigned 8-bit integers that wrap from $0$ to $255$, or 32-bit timestamps
+   overflowing to negative integers.
+3. **Unit Incommensurability:** Inspecting the highest values of a `weight` column might reveal entries clustered around
+   $180$ alongside entries clustered around $0.08$. Sorting by extrema immediately reveals that one clinic recorded
+   patient weight in pounds while another recorded in metric tons.
 
 ## Review sorted by loss
 
+Once an initial baseline model is trained, the most informative raw examples to read are those where the model made its
+most egregious errors <Cite id="karpathy2019" />:
+
+$$
+\mathcal{S}_{\text{error}} = \operatorname{arg\,top}_K \left\{ \ell\left(f_\theta(x_i), y_i\right) \right\}
+$$
+
+Sorting the validation split by descending loss unmasks three distinct failure classes:
+- **Mislabeled Ground Truth:** In many real-world benchmarks, the top 1% highest-loss cases are not model failures at
+  all; they are blatant human labeling errors. An image clearly showing a golden retriever is labeled "banana"; a
+  fraudulent transaction is labeled "legitimate". Identifying mislabeled training points cleans the supervisory signal.
+- **Ambiguous and Multi-Object Instances:** An image containing both a dog and a cat where only single-label
+  classification is supported, forcing the model to make an arbitrary guess.
+- **Critical Feature Blindspots:** Instances where the human reviewer immediately understands the correct label from
+  contextual clues that were completely omitted from the model's feature set (e.g., recognizing that an address is a
+  commercial warehouse rather than a residence).
+
 ## What aggregates cannot show
 
+Summary statistics are lossy projections that hide multi-dimensional structure <Cite id="anscombe1973" />:
+
+- **Bimodal Distributions with Empty Centers:** A feature with a mean of $50$ and standard deviation of $15$ might
+  possess a bimodal distribution with dense clusters at $20$ and $80$ and exactly zero mass at $50$. Imputing missing
+  values with the column mean ($50$) injects synthetic data into an empty physical state.
+- **Categorical Cardinality and String Typos:** Summary frequencies miss lexical variants: `New York`, `new york`, `NY`,
+  `N.Y.`, and `New York ` (with trailing whitespace) appear as five separate categories in group-by operations,
+  fragmenting statistical power.
+- **Contradictory Duplicates:** Aggregates miss identical feature vectors $x_i = x_j$ that carry contradictory labels
+  $y_i = 1$ and $y_j = 0$, setting an artificial ceiling on model accuracy.
+
 ## Pitfalls
+
+- **Stopping at the First Clean Batch:** Inspecting 10 rows, seeing no obvious bugs, and concluding the entire
+  100-million-row dataset is clean. Systematic inspection requires stratified sampling across rare subpopulations and
+  edge-case strata.
+- **Human Rationalization Bias:** When a human reviewer encounters an anomalous raw record, their cognitive instinct is
+  to invent an elaborate justification for why the data point is valid, rather than recognizing it as an upstream ETL
+  bug.
+- **Visualizing Embeddings Instead of Raw Inputs:** Inspecting 2D t-SNE or UMAP scatter plots of pre-computed embeddings
+  rather than reading the original raw text strings or looking at uncompressed raw pixels. Latent embeddings smooth over
+  character-level corruptions and tokenization artifacts.
+- **Ignoring Low-Confidence Correct Predictions:** Inspecting only misclassifications while ignoring high-confidence
+  incorrect predictions or borderline cases where the model succeeded by pure chance.

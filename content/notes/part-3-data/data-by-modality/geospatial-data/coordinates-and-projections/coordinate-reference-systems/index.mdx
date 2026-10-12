@@ -1,26 +1,143 @@
 ---
 title: 'Coordinates and projections'
 kind: concept
-summary: 'A coordinate reference system fixes what a pair of numbers means on the Earth. Geographic coordinates give latitude and longitude on an ellipsoid; projections map them to a plane, each distorting area, distance or angle.'
-tags: [data, geometry]
-aliases: []
+summary: 'A coordinate reference system anchors spatial coordinates to the physical Earth. Geographic coordinates define latitude and longitude on a reference ellipsoid, while map projections flatten them onto 2D planes, introducing unavoidable metric distortions.'
+tags: [data, geometry, geospatial]
+aliases: [crs, coordinate-reference-systems, map-projections, wgs84, epsg-4326, web-mercator, utm]
 requires: []
-related: []
-references: []
-status: stub
-updated: 2026-10-11
+related: [vector-and-raster-data, spatial-features, trajectory-data]
+references: [snyder1987, vincenty1975]
+status: draft
+updated: 2026-10-12
 ---
 
+import { CrsVisualizer } from './CrsVisualizer'
+
 <Definition>
-To be written.
+A **Coordinate Reference System** (CRS) provides the mathematical framework that unambiguously grounds coordinate tuples
+to physical locations on the Earth's surface. It comprises an **ellipsoidal datum** that approximates the geoid's
+irregular gravitational shape with a reference ellipsoid of semi-major axis $a$ and flattening $f$, and an optional
+**map projection** $\pi: (\phi, \lambda) \mapsto (x, y)$ that transforms curvilinear angular coordinates into
+two-dimensional planar Cartesian coordinates <Cite id="snyder1987" />.
 </Definition>
 
-## Latitude and longitude
+In spatial machine learning and spatial data engineering, treating latitude and longitude as unprojected Euclidean
+$(x, y)$ coordinates introduces catastrophic geometric distortion: a degree of longitude shrinks towards zero at the
+poles, violating uniform distance assumptions in convolution kernels, nearest-neighbor graphs, and clustering algorithms
+<Cite id="vincenty1975" />.
 
-## Datums and ellipsoids
+<CrsVisualizer client:load />
 
-## Map projections
+## Latitude and Longitude (Geographic Coordinates)
 
-## Distances on the sphere
+Geographic coordinates express positions as spherical or ellipsoidal angles:
+- **Geodetic Latitude ($\phi \in [-90^\circ, +90^\circ]$)**: The angle between the equatorial plane and the normal
+  vector perpendicular to the reference ellipsoid surface at that point.
+- **Geodetic Longitude ($\lambda \in [-180^\circ, +180^\circ]$)**: The angle measured along the equator between the
+  reference Prime Meridian (Greenwich) and the meridian passing through the point.
+
+Coordinates are standardly stored in decimal degrees (e.g., $37.7749^\circ, -122.4194^\circ$) rather than
+degrees-minutes-seconds.
+
+---
+
+## Datums and Reference Ellipsoids
+
+Because the Earth is neither a perfect sphere nor a smooth geometric solid, geodesy models the physical planet using
+hierarchical approximations:
+1. **The Geoid**: The equipotential surface of the Earth's gravity field that closely coincides with mean sea level in
+   the absence of tides and currents.
+2. **The Reference Ellipsoid**: An oblate spheroid rotated around its minor axis, defined by its semi-major equatorial
+   radius $a$ and flattening factor $f = \frac{a - b}{a}$:
+   - **WGS84 (World Geodetic System 1984, EPSG:4326)**: $a = 6{,}378{,}137.0\text{ m}$, $1/f = 298.257223563$. The
+     global standard for GPS satellite navigation.
+   - **GRS80 (Geodetic Reference System 1980)**: Basis for North American NAD83 and European ETRS89.
+3. **Geodetic Datum**: Ties the abstract ellipsoid to fixed physical ground reference stations. While modern geocentric
+   datums place the ellipsoid origin at the Earth's centre of mass, legacy local datums (e.g. ED50 in Europe, Tokyo
+   Datum in Japan) shift the origin to match local terrain, resulting in offsets exceeding $100\text{--}500\text{ m}$ if
+   coordinates are mixed without datum transformations (such as Molodensky or Helmert 7-parameter transforms).
+
+---
+
+## Map Projections
+
+By Gauss's *Theorema Egregium*, a sphere or ellipsoid cannot be mapped onto a flat plane without metric distortion. A
+map projection transforms $(\phi, \lambda)$ onto planar $(x, y)$ coordinates <Cite id="snyder1987" />. Every projection
+trades off preservation across three conflicting geometric properties:
+- **Conformal (Angle-preserving)**: Preserves local infinitesimal angles and shapes
+  ($\frac{\partial x}{\partial \phi} \perp \frac{\partial y}{\partial \lambda}$ and equal local scale in all
+  directions), making local features circular. Area is distorted.
+- **Equal-Area (Equivalent)**: Preserves relative surface areas across all regions (e.g., Albers Equal Area Conic,
+  Gall-Peters). Shapes are sheared.
+- **Equidistant**: Preserves true distance along specific chosen meridians or great circles.
+
+### Web Mercator (EPSG:3857)
+
+Adopted by web mapping platforms (Google Maps, OpenStreetMap, Mapbox) for computational simplicity:
+
+$$
+x = R \lambda, \quad y = R \ln \left( \tan \left( \frac{\pi}{4} + \frac{\phi}{2} \right) \right)
+$$
+
+Web Mercator is conformal, rendering orthogonal roads and city blocks at right angles. However, its linear scale factor
+explodes with latitude:
+
+$$
+k = \sec \phi = \frac{1}{\cos \phi} \implies \text{Area Inflation Factor } k^2 = \sec^2 \phi
+$$
+
+At $\phi = 60^\circ$ (e.g. Scandinavia, Canada), surface areas are exaggerated by $k^2 = 4\times$; at $\phi = 75^\circ$
+(Greenland), areas are inflated by $k^2 \approx 15\times$. Training convolutional networks on raw Web Mercator satellite
+tiles without reprojecting introduces severe latitude-dependent spatial scale bias.
+
+### Universal Transverse Mercator (UTM)
+
+UTM divides the globe between $80^\circ\text{S}$ and $84^\circ\text{N}$ into 60 longitudinal zones, each spanning
+$6^\circ$ of longitude. Each zone applies a conformal Transverse Mercator cylinder centered on the zone's central
+meridian $\lambda_0$, with a central scale reduction factor $k_0 = 0.9996$:
+
+$$
+k(x) \approx k_0 \left( 1 + \frac{x^2}{2 R^2} \right)
+$$
+
+Across the entire $6^\circ$ width, scale variation is constrained between $0.9996$ and $1.0004$ ($< 0.04\%$ distortion),
+making UTM the gold standard for regional computer vision, robotics, and cadastral spatial modeling.
+
+---
+
+## Distances on the Sphere and Ellipsoid
+
+### Haversine Formula (Spherical Approximation)
+
+Assuming a mean spherical radius $R = 6{,}371\text{ km}$, the great-circle distance between $(\phi_1, \lambda_1)$ and
+$(\phi_2, \lambda_2)$ is:
+
+$$
+d = 2 R \arcsin \left( \sqrt{ \sin^2\left(\frac{\Delta \phi}{2}\right) + \cos \phi_1 \cos \phi_2 \sin^2\left(\frac{\Delta \lambda}{2}\right) } \right)
+$$
+
+where $\Delta \phi = \phi_2 - \phi_1$ and $\Delta \lambda = \lambda_2 - \lambda_1$ in radians. The Haversine formula is
+numerically stable for small distances where standard spherical cosine laws suffer from floating-point catastrophic
+cancellation.
+
+### Vincenty's Geodesic Formulae
+
+On the oblate WGS84 ellipsoid, meridional curvature varies from $M = \frac{a(1 - e^2)}{(1 - e^2 \sin^2 \phi)^{3/2}}$ at
+the equator to the poles. Vincenty's iterative algorithm <Cite id="vincenty1975" /> evaluates true ellipsoidal geodesics
+with sub-millimeter precision ($< 0.5\text{ mm}$ error), accounting for Earth's equatorial bulge.
+
+---
 
 ## Pitfalls
+
+1. **Euclidean Metric Calculations on Degree Coordinates**: Using Euclidean distance formulas
+   $\sqrt{(\phi_1 - \phi_2)^2 + (\lambda_1 - \lambda_2)^2}$ or running $k$-means clustering on raw decimal degrees
+   treats a degree of longitude at $60^\circ\text{N}$ ($\approx 55.6\text{ km}$) as equivalent to a degree at the
+   equator ($\approx 111.3\text{ km}$), introducing up to $50\text{--}100\%$ distortion.
+2. **EPSG Axis-Order Transposition**: OGC WFS and standard EPSG:4326 definitions designate axis order as
+   $(\text{Latitude}, \text{Longitude})$ ($(\text{Northing}, \text{Easting})$), whereas GeoJSON, Shapely, and common GIS
+   formats enforce $(\text{Longitude}, \text{Latitude})$ ($x, y$). Swapping axes flips coordinates across the equator
+   and prime meridian, throwing bounding boxes into the ocean.
+3. **Merging Data Across Different Datums Without Reprojection**: Layering spatial points collected under local datums
+   (e.g. NAD27 or OSGB36) directly onto WGS84 (EPSG:4326) maps without geodetic transformation introduces silent
+   systematic location shifts of $100\text{--}400\text{ m}$.

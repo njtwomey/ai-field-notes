@@ -2,25 +2,139 @@
 title: 'Feature crosses'
 kind: concept
 summary: 'A feature cross combines two or more categorical features into one, letting a linear model fit their interaction. Crosses multiply the number of terms, so large systems hash them.'
-tags: [data, feature-engineering, linear-models]
-aliases: []
-requires: []
-related: [field-weighted-factorisation-machines]
-references: []
-status: stub
+tags: [data-preparation, feature-engineering, linear-models, recommender-systems]
+aliases: [feature crossing, interaction features, hashed crosses, Cartesian product features, wide models]
+requires: [one-hot-and-contrast-coding, feature-hashing]
+related: [domain-knowledge-features, category-embeddings, field-weighted-factorisation-machines]
+references: [cheng2016wide, weinberger2009, mcmahan2013adclick]
+status: draft
 updated: 2026-10-11
 ---
 
+import { FeatureCrossesExplorer } from './FeatureCrossesExplorer'
+
 <Definition>
-To be written.
+A **feature cross** (or Cartesian product feature) constructs a synthetic feature by taking the logical conjunction
+(tensor product) of two or more categorical features or discretized continuous variables:
+
+$$
+\phi_{\text{cross}}\left(x_1, x_2\right) = x_1 \otimes x_2.
+$$
+
+For one-hot encoded categorical features $\mathbf{u} \in \{0, 1\}^{C_1}$ and $\mathbf{v} \in \{0, 1\}^{C_2}$, the cross
+produces a sparse binary indicator vector of dimension $C_1 \times C_2$:
+
+$$
+\phi_{(c_1, c_2)}(\mathbf{x}) = \mathbb{I}\left(x_1 = c_1 \wedge x_2 = c_2\right).
+$$
 </Definition>
 
 ## Crossing categorical features
 
+Standard linear models compute predictions as additive linear combinations of individual inputs:
+
+$$
+\hat{y} = \sigma\left(w_0 + \sum_{j=1}^D w_j x_j\right).
+$$
+
+A strictly additive model cannot capture non-linear feature interactions without manual transformation. A classical
+failure is the non-linear XOR interaction:
+- Suppose $x_1 \in \{\text{Mobile}, \text{Desktop}\}$ and $x_2 \in \{\text{Day}, \text{Night}\}$.
+- If conversion rates are high during `[Mobile, Night]` and `[Desktop, Day]`, but low during `[Mobile, Day]` and
+  `[Desktop, Night]`, an additive model assigns independent marginal weights $w_{\text{Mobile}}$ and $w_{\text{Night}}$,
+  failing to isolate the specific interaction.
+
+By introducing the feature cross $x_1 \otimes x_2$, the model learns a dedicated weight
+$w_{\text{Mobile}\times\text{Night}}$ for that specific conjunction:
+
+$$
+\hat{y} = \sigma\left(w_0 + w_1 x_1 + w_2 x_2 + w_{12} (x_1 \otimes x_2)\right).
+$$
+
+This allows linear estimators and logistic regression models to learn non-linear decision boundaries while retaining
+linear inference latency.
+
+### Crossing binned continuous features
+Continuous variables can be crossed after discretization:
+- Consider geographic coordinates `Latitude` and `Longitude`.
+- Discretizing both into $K$ spatial bins (e.g., $100$ bins each) and crossing them
+  ($\text{bin}(\text{Lat}) \times \text{bin}(\text{Long})$) partitions continuous space into a 2D spatial grid of
+  $10{,}000$ cells.
+- A linear model learns an independent weight for each spatial cell, allowing it to fit non-linear pricing heatmaps
+  (such as localized real-estate values) without requiring deep non-linear architectures.
+
 ## Crosses in linear models at scale
 
-## Hashed crosses
+In web-scale click-through rate (CTR) prediction and recommendation systems, linear models trained over billions of
+feature crosses serve as foundational infrastructure <Cite id="cheng2016wide" /> <Cite id="mcmahan2013adclick" />:
+
+### Google's Wide & Deep Learning
+Cheng et al. (2016) introduced Wide & Deep learning to balance **memorization** and **generalization**
+<Cite id="cheng2016wide" />:
+- **Wide component:** A generalized linear model defined over cross-product feature transformations:
+  
+  $$
+  \phi_k(\mathbf{x}) = \prod_{j=1}^D x_j^{c_{kj}}, \quad c_{kj} \in \{0, 1\}.
+  $$
+
+  The wide model excels at *memorization*: capturing high-precision historical co-occurrence rules directly from data
+  (e.g. `User_Installed_App = 'Netflix'` AND `Impression_App = 'Hulu'`).
+- **Deep component:** A deep feedforward neural network operating on continuous dense embeddings, providing
+  *generalization* to previously unseen item combinations.
+
+In production ad serving, wide linear models with billions of cross terms are optimized online using algorithms such as
+FTRL-Proximal (Follow-The-Regularized-Leader), which enforces aggressive $L_1$ sparsity to prune inactive cross weights
+<Cite id="mcmahan2013adclick" />.
 
 ## Growth in the number of terms
 
+While feature crosses grant linear models high expressive capacity, their parameter space explodes combinatorially:
+
+$$
+\text{Dimension of } k\text{-way cross} = \prod_{m=1}^k C_m.
+$$
+
+If a feature cross combines:
+- `user_id` ($10^7$ unique categories)
+- `ad_id` ($10^6$ unique categories)
+- `device_type` ($10^1$ categories)
+
+The full Cartesian product contains $10^{14}$ potential terms. Even with extreme sparsity where 99.999% of combinations
+never occur, storing vocabulary lookup tables across distributed training clusters becomes impossible.
+
+## Hashed crosses
+
+To bound parameter storage in high-cardinality production systems, industrial pipelines combine feature crossing with
+the **hashing trick** <Cite id="weinberger2009" />:
+
+Instead of maintaining a growing string vocabulary dictionary, the algorithm concatenates category tokens with a
+delimiter and hashes the composite string directly into a fixed-size index table of size $B$ (e.g.
+$B = 2^{22} \approx 4.19 \times 10^6$ buckets):
+
+$$
+h(x_1, x_2) = \operatorname{hash}\left(x_1 \circ \text{"::"} \circ x_2\right) \pmod B.
+$$
+
+Combined with a secondary signed hash $\xi(x_1, x_2) \in \{-1, +1\}$, the hashed representation preserves inner product
+expectations:
+
+$$
+\mathbb{E}\left[\langle \tilde{\mathbf{u}}, \tilde{\mathbf{v}} \rangle\right] = \langle \mathbf{u}, \mathbf{v} \rangle.
+$$
+
+### Trade-offs of hashed crosses
+- **Pros:** Zero dictionary synchronization across distributed worker clusters, strictly bounded parameter memory, and
+  instant support for out-of-vocabulary combinations at inference time.
+- **Cons:** Hash collisions can map unrelated pairs (e.g. `[US, Shoes]` and `[JP, Electronics]`) to the same weight
+  bucket, adding residual gradient noise that slightly degrades calibration.
+
+<FeatureCrossesExplorer />
+
 ## Pitfalls
+
+- **Unregularized cross expansion:** Crossing high-cardinality features without $L_1$ regularization (Lasso or FTRL)
+  results in massive overfitting, as millions of singleton pairs memorize sample noise.
+- **Crossing features with low support:** Generating crosses where 95% of cells contain fewer than 5 observations
+  produces noisy gradient updates. Frequency filtering must discard rare cross combinations before model fitting.
+- **Crossing collinear or redundant features:** Crossing features that share strong hierarchical relationships (e.g.
+  `City × Country` or `ZipCode × State`) multiplies parameter counts without providing new interaction signal.

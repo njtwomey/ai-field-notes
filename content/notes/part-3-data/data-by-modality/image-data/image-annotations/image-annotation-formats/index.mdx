@@ -2,29 +2,169 @@
 title: 'Image annotations'
 kind: concept
 summary: 'Image annotations mark what an image contains: class labels, bounding boxes, polygons, masks and keypoints, stored in formats such as COCO, Pascal VOC and YOLO that differ in coordinates and conventions.'
-tags: [data, computer-vision]
-aliases: []
+tags: [data, computer-vision, annotations, object-detection, segmentation]
+aliases: [image annotations, annotation formats, coco format, pascal voc, yolo format]
 requires: []
-related: [object-detection, semantic-segmentation, instance-and-panoptic-segmentation]
-references: []
-status: stub
-updated: 2026-10-11
+related: [object-detection, semantic-segmentation, instance-and-panoptic-segmentation, digital-images, image-preprocessing]
+references: [everingham2010, lin2014, redmon2016]
+status: draft
+updated: 2026-10-12
 ---
 
+import { ImageAnnotationFormatsVisualizer } from './ImageAnnotationFormatsVisualizer'
+
 <Definition>
-To be written.
+**Image annotations** are structured semantic metadata paired with digital images that define object identities, spatial
+locations, boundaries, and articulated pose configurations <Cite id="everingham2010, lin2014" />. Ranging from global
+categorical labels to localized bounding boxes, segmentation polygons, pixel masks, and skeletal keypoints, annotations
+are serialized across competing file formats (PASCAL VOC, COCO, YOLO) that differ fundamentally in coordinate
+conventions, normalization scales, and indexing rules.
 </Definition>
+
+In computer vision, supervised model performance depends as heavily on annotation integrity as on model architecture. An
+object detector cannot learn accurate localization if its training pipeline confounds absolute pixel coordinates with
+normalized ratios, or if keypoint visibility flags are misparsed as zero coordinates.
+
+Navigating image annotations requires understanding coordinate geometries across bounding box standards, memory
+representations for instance and semantic segmentation, loss masking for articulated keypoints, and deterministic
+conversion formulas between datasets.
+
+<ImageAnnotationFormatsVisualizer />
 
 ## Image-level labels
 
+The simplest annotation format assigns global semantic categories to the entire image:
+
+- **Single-label multiclass:** Each image is assigned exactly one mutually exclusive class index $y \in \{1, \dots, C\}$
+  (e.g., ImageNet, CIFAR-10). Modeled via categorical cross-entropy with a softmax output layer.
+- **Multi-label classification:** Each image is assigned a binary indicator vector $\mathbf{y} \in \{0, 1\}^C$
+  indicating the presence or absence of multiple independent concepts (e.g., an image tagged with both `dog` and
+  `bicycle`). Modeled via independent binary cross-entropy (BCE) losses across classes.
+
 ## Bounding boxes
+
+Bounding boxes localize object instances within 2D rectangular enclosures. Three competing format standards dominate
+computer vision <Cite id="everingham2010, lin2014, redmon2016" />:
+
+### 1. PASCAL VOC (`[xmin, ymin, xmax, ymax]`)
+
+- **Format:** Top-left coordinate and bottom-right coordinate.
+- **Units:** Absolute integer pixels.
+- **Convention:** Historically 1-indexed ($[1, W]$) stored in hierarchical XML files (`<bndbox>`).
+
+### 2. COCO (`[xmin, ymin, width, height]`)
+
+- **Format:** Top-left coordinate paired with horizontal width and vertical height.
+- **Units:** Absolute floating-point or integer pixels.
+- **Convention:** 0-indexed ($[0, W-1]$) stored in a unified JSON database.
+
+### 3. YOLO (`[x_center, y_center, width, height]`)
+
+- **Format:** Box centroid coordinate paired with box dimensions.
+- **Units:** **Normalized floating-point ratios** in the range $[0.0, 1.0]$ relative to image width $W$ and height $H$.
+- **Convention:** Stored in individual space-delimited `.txt` files per image:
+  $$
+  x_{\text{center}} = \frac{x_{\min} + x_{\max}}{2 W}, \quad y_{\text{center}} = \frac{y_{\min} + y_{\max}}{2 H}
+  $$
+  $$
+  w = \frac{x_{\max} - x_{\min}}{W}, \quad h = \frac{y_{\max} - y_{\min}}{H}
+  $$
 
 ## Polygons and masks
 
+For complex non-rectangular objects, bounding boxes enclose excessive background pixels. Fine-grained localization
+requires segmentation masks:
+
+- **Semantic segmentation:** A dense 2D integer matrix $\mathbf{M} \in \{0, \dots, C-1\}^{H \times W}$, where each pixel
+  holds a class index. Does not differentiate between multiple distinct instances of the same class. Stored as lossless
+  single-channel PNG images.
+- **Vector polygons:** Outlines instance contours as sequences of vertex coordinates
+  $[x_1, y_1, x_2, y_2, \dots, x_K, y_K]$. Highly compact for smooth geometric shapes, but inefficient for porous or
+  amorphous objects (e.g., trees or crowds).
+- **Run-Length Encoding (RLE):** Compresses binary masks by storing alternating run counts of background (0) and
+  foreground (1) pixels. COCO RLE provides compact, lossless storage for arbitrary complex shapes without storing
+  full-resolution bitmaps.
+- **Panoptic segmentation:** Unifies semantic segmentation and instance segmentation by assigning every pixel both a
+  semantic category and an instance identifier.
+
 ## Keypoints
+
+Articulated pose estimation models human or animal skeletons as a graph of landmark joints connected by kinematic bones
+<Cite id="lin2014" />:
+
+Each keypoint is annotated as a coordinate triplet:
+
+$$
+\mathbf{k}_j = (x_j, y_j, v_j)
+$$
+
+where $v_j \in \{0, 1, 2\}$ is the **visibility flag**:
+- **$v = 0$ (Not labeled / Absent):** The keypoint is unannotated or falls completely outside the cropped image. **Must
+  be masked out of loss gradients ($\text{weight} = 0$)** during training.
+- **$v = 1$ (Labeled but occluded):** The keypoint is present in the scene but occluded by clothing or other objects.
+  Supervised via heatmaps to teach the network spatial structural priors.
+- **$v = 2$ (Labeled and clearly visible):** Fully observable keypoint.
 
 ## Annotation formats
 
+### COCO JSON format
+
+The Microsoft COCO format centralizes an entire dataset's annotations into a single JSON file structured into top-level
+dictionaries: `images`, `annotations`, and `categories`. Every annotation links to an image via `image_id` and a class
+via `category_id`, supporting bounding boxes, segmentation polygons, RLE masks, and keypoints within a unified schema.
+
+### PASCAL VOC XML format
+
+Stores individual XML files for each image. Each object is wrapped in an `<object>` block containing `<name>`, `<pose>`,
+`<truncated>`, `<difficult>`, and `<bndbox>`. While human-readable, parsing thousands of individual XML files creates
+significant disk I/O overhead during dataloading.
+
+### YOLO TXT format
+
+Stores annotations as plain text files with lines formatted as:
+
+```text
+<class_id> <x_center> <y_center> <width> <height>
+```
+
+Its lightweight, normalized representation allows instant loading and makes annotations invariant to uniform image
+resizing.
+
 ## Converting between formats
 
+Translating annotations between formats requires careful coordinate transformations:
+
+### From COCO to PASCAL VOC
+
+$$
+x_{\min} = x_{\text{coco}}, \quad y_{\min} = y_{\text{coco}}
+$$
+
+$$
+x_{\max} = x_{\text{coco}} + w_{\text{coco}}, \quad y_{\max} = y_{\text{coco}} + h_{\text{coco}}
+$$
+
+### From PASCAL VOC to YOLO
+
+$$
+x_{\text{center}} = \frac{x_{\min} + x_{\max}}{2 W_{\text{img}}}, \quad y_{\text{center}} = \frac{y_{\min} + y_{\max}}{2 H_{\text{img}}}
+$$
+
+$$
+w = \frac{x_{\max} - x_{\min}}{W_{\text{img}}}, \quad h = \frac{y_{\max} - y_{\min}}{H_{\text{img}}}
+$$
+
+When converting, coordinates must be clamped to the valid canvas boundaries ($[0, W_{\text{img}}]$ and
+$[0, H_{\text{img}}]$) to eliminate rounding artifacts.
+
 ## Pitfalls
+
+- **Confusing 0-indexed and 1-indexed pixel conventions:** PASCAL VOC historically treats the top-left pixel as
+  $(1, 1)$, while COCO and OpenCV treat it as $(0, 0)$. Omitting this 1-pixel shift introduces subtle systematic
+  boundary biases.
+- **Failing to mask $v=0$ keypoints:** Treating invisible keypoints ($v=0$) as valid targets at $(0, 0)$ forces neural
+  pose estimators to predict joints clustered in the top-left corner of the image canvas.
+- **Axis swapping in normalized coordinates:** Reversing width and height or transposing $(x, y)$ coordinates in YOLO
+  conversions yields invalid out-of-bounds bounding boxes that cause loss functions to output `NaN`s.
+- **Using lossy compression for segmentation masks:** Saving semantic segmentation masks as lossy JPEG files quantizes
+  discrete integer class values, creating phantom intermediate classes along object boundaries.

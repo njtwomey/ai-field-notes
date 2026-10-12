@@ -1,0 +1,137 @@
+---
+title: 'Retail and demand data'
+kind: concept
+summary: 'Retail data record sales, not demand: stock-outs censor it, promotions distort it, products sit in hierarchies and new items have no history.'
+tags: [data, forecasting]
+aliases: []
+requires: []
+related: [intermittent-and-censored-series]
+references: [makridakis2022, wickramasuriya2019, croston1972, hyndman2021]
+status: draft
+updated: 2026-10-12
+---
+
+import { RetailDemandVisualizer } from './RetailDemandVisualizer'
+
+<Definition>
+Retail data captures point-of-sale transactions, inventory positions, and promotional calendars across complex product
+hierarchies. Unlike pure time series with direct observation of target variables, retail transaction logs record *sales
+volume* rather than *consumer demand*, leading to systematic observation censoring during stock-outs, distortion across
+promotional cycles, and extreme sparsity across product catalogs.
+</Definition>
+
+Retail forecasting underpins inventory replenishment, pricing optimization, and logistics across brick-and-mortar stores
+and fulfillment networks <Cite id="makridakis2022" />. However, treating historical checkout scans as ground-truth
+consumer demand introduces fatal feedback loops: when inventory drops to zero, recorded sales fall to zero regardless of
+how many customers intended to purchase the item.
+
+<RetailDemandVisualizer />
+
+## Censored demand
+
+The central statistical challenge in retail telemetry is the wedge between latent demand $D_t$ and observed sales $Y_t$.
+At any point in time $t$ for item $i$, observed sales are bounded by available on-hand inventory $I_t$:
+
+$$
+Y_{it} = \min(D_{it}, I_{it})
+$$
+
+When inventory is strictly positive ($I_{it} > D_{it}$), observed sales reflect true demand: $Y_{it} = D_{it}$. But when
+stock is exhausted ($I_{it} = 0$ or $I_{it} < D_{it}$), the observation is right-censored.
+
+Treating stock-out periods as days of "zero demand" creates a self-fulfilling death spiral:
+1. An item runs out of stock, recording 0 sales for five consecutive days.
+2. A standard supervised model (e.g., gradient boosted trees or autoregressive neural networks) incorporates these
+   zero-valued labels into training.
+3. The model forecasts reduced demand for the subsequent period.
+4. Supply chain planning allocates fewer replenishment units, inducing earlier stock-outs in the next cycle.
+
+To recover unbiased demand estimates, industrial pipelines apply censoring-aware formulations:
+- **Tobit Models and Censored Regression:** Modeling latent demand $D_t^* \sim \mathcal{N}(X_t \beta, \sigma^2)$ where
+  only $Y_t = \min(D_t^*, I_t)$ is observed. The likelihood explicitly integrates over the tail probability
+  $P(D_t^* \ge I_t)$ whenever stock-outs occur.
+- **Expectation-Maximization (EM) Imputation:** Iteratively imputing unobserved demand during stock-out intervals
+  conditioned on store traffic, day-of-week seasonality, and peer-item velocities.
+- **Intermittent Demand Models:** For slow-moving SKUs where demand occurs sporadically with long zero-demand gaps,
+  Croston's decomposition models the inter-arrival time $p$ between non-zero demand events separately from the
+  transaction size $z$ <Cite id="croston1972" />.
+
+## Promotions
+
+Promotions (temporary price reductions, multi-buy discounts, feature advertisements, end-cap displays) cause massive
+non-linear shocks to retail sales patterns:
+
+1. **Price Elasticity and Promotional Lift:** The percentage change in unit volume relative to price changes:
+
+$$
+\epsilon = \frac{\% \Delta Q}{\% \Delta P}
+$$
+
+Promotional lift is rarely symmetric. Steep temporary discounts create sudden demand spikes that exceed baseline volume
+by orders of magnitude. 2. **Pantry Loading (Forward Buying):** For non-perishable consumer packaged goods (detergent,
+canned foods), promotional spikes are followed by a post-promotional demand dip. Consumers purchase multiple units
+during the sale to stockpile, depressing organic purchase rates in subsequent weeks. 3. **Cannibalization and Halo
+Effects:** Discounting Brand A cereal steals demand from competing Brand B cereal within the same subcategory
+(cross-price elasticity / cannibalization). Simultaneously, discounting taco shells increases organic sales of salsa and
+shredded cheese (complementary halo effect). Demand models must ingest cross-SKU promotional flags to disentangle true
+organic baseline shifts from intra-category substitution.
+
+## Product hierarchies
+
+Retail catalogs are structured into strict nested geographic and merchandising hierarchies
+<Cite id="wickramasuriya2019, hyndman2021" />:
+
+$$
+\text{Total Company} \to \text{Division} \to \text{Department} \to \text{Category} \to \text{Subcategory} \to \text{SKU} \times \text{Store}
+$$
+
+At the top levels (e.g., total store revenue), aggregate demand is smooth, Gaussian, and exhibits strong weekly and
+annual seasonality. At the bottom level (e.g., a specific flavor of yogurt in a single rural store), demand is
+intermittent, discrete, and dominated by Poisson or zero-inflated negative binomial noise <Cite id="makridakis2022" />.
+
+To ensure managerial coherence—where sum-of-store forecasts identically equal regional totals—hierarchical
+reconciliation techniques are mandatory:
+
+- **Bottom-Up:** Forecast each SKU-store independently and sum upward. Suffers from high variance and noisy estimators
+  at granular leaves.
+- **Top-Down:** Forecast total department volume and disaggregate downward using historical proportions. Destroys
+  localized store-level stockout signals.
+- **Optimal MinT Reconciliation:** Wickramasuriya et al. formulate reconciliation as a linear projection that minimizes
+  the trace of the aggregate forecast error covariance matrix <Cite id="wickramasuriya2019" />:
+
+$$
+\tilde{\mathbf{y}}_t = \mathbf{S} (\mathbf{S}^\top \mathbf{W}^{-1} \mathbf{S})^{-1} \mathbf{S}^\top \mathbf{W}^{-1} \hat{\mathbf{y}}_t
+$$
+
+where $\mathbf{S}$ is the summing structural matrix encoding the hierarchy, $\hat{\mathbf{y}}_t$ are unconstrained base
+forecasts across all levels, and $\mathbf{W}$ is the base forecast error covariance matrix.
+
+## New items
+
+A substantial fraction of retail revenue stems from newly launched products (seasonal fashion, reformulated snacks,
+hardware revisions) with zero sales history (the cold-start problem).
+
+Because autoregressive lags are undefined for new SKUs, retail machine learning relies on:
+- **Attribute-Based Matching:** Forecasting purely from static metadata: brand, subcategory, package size, launch price,
+  organic/conventional status, and target demographic.
+- **Embedding Space Nearest Neighbors:** Mapping item text descriptions and imagery into pretrained multi-modal vector
+  embeddings, identifying top-$k$ historical reference SKUs with similar launch profiles, and transferring their
+  early-lifecycle demand curves.
+- **Hierarchical Prior Shrinkage:** Initializing Bayesian forecast distributions at the subcategory mean, allowing
+  store-level observations to gradually update the posterior as early sell-through rates materialize.
+
+## Pitfalls
+
+- **Phantom / Ghost Inventory:** ERP systems often record positive on-hand inventory when physical shelves are
+  completely empty due to shoplifting, checkout scanning errors, or warehouse misplacement. Because the system believes
+  inventory is available, zero sales are misclassified as true zero demand rather than a stock-out, preventing automated
+  replenishment triggers.
+- **Return Lag Distortion:** In e-commerce apparel, return rates frequently exceed 30% to 40%. Transaction logs record
+  gross orders immediately, while physical returns arrive 14 to 30 days later. Models trained on gross orders severely
+  over-predict net retained revenue if return probabilities are not modeled separately.
+- **Holiday Calendar Alignment:** Fixed-date calendar features fail across floating holidays (Easter, Ramadan, Lunar New
+  Year, Thanksgiving). Shifting holiday dates distort year-over-year lag comparisons unless aligned using
+  holiday-relative offset features.
+- **Wholesale Bullwhip Effect:** Retail demand volatility amplifies as orders travel upstream to distributors and
+  manufacturers. Distortions caused by batch ordering and safety-stock buffers should not be mistaken for sudden
+  end-consumer demand swings.

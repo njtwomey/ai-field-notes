@@ -1,0 +1,121 @@
+---
+title: 'Continuous control benchmarks'
+kind: concept
+summary: 'Physics-simulated locomotion and manipulation tasks with continuous states and actions, on which continuous-control reinforcement learning algorithms are benchmarked.'
+tags: [data, reinforcement-learning, control-theory, continuous-control, robotics]
+aliases: [continuous control benchmarks, MuJoCo benchmarks, DeepMind Control Suite, locomotion benchmarks, robotic manipulation]
+requires: [classic-control-environments]
+related: [classic-control-environments, offline-reinforcement-learning-datasets, grid-worlds-and-discrete-environments]
+references: [todorov2012, schulman2017, haarnoja2018, lillicrap2016]
+status: draft
+updated: 2026-10-11
+---
+
+import { ContinuousControlVisualizer } from './ContinuousControlVisualizer'
+
+<Definition>
+A **continuous control benchmark** is a simulated physical system formulated as a Markov Decision Process
+$\mathcal{M} = \langle \mathcal{S}, \mathcal{A}, \mathcal{P}, \mathcal{R}, \gamma \rangle$ defined over continuous
+vector spaces:
+
+$$
+\mathcal{S} \subseteq \mathbb{R}^D, \quad \mathcal{A} = [-1, 1]^M,
+$$
+
+where transitions are governed by rigid-body articulated dynamics with contact friction solved by a physics engine such
+as MuJoCo <Cite id="todorov2012" />. Control actions represent normalized motor torques applied to joint actuators.
+</Definition>
+
+## What these environments test
+
+Continuous control tasks represent the primary testbed for deep actor-critic architectures (such as PPO
+<Cite id="schulman2017" />, SAC <Cite id="haarnoja2018" />, and DDPG <Cite id="lillicrap2016" />):
+
+1. **Continuous action spaces**: Discretizing an $M=8$ dimensional action space into $10$ bins per joint yields $10^8$
+   discrete combinations, causing a catastrophic combinatorial explosion. Continuous algorithms must optimize
+   parameterised probability distributions
+   $\pi_\theta(\mathbf{a} \mid \mathbf{s}) = \mathcal{N}(\boldsymbol{\mu}_\theta(\mathbf{s}), \boldsymbol{\Sigma}_\theta(\mathbf{s}))$
+   via policy gradient theorems.
+2. **Contact discontinuities**: Rigid-body collisions, stick-slip friction, and impact forces produce non-smooth,
+   non-differentiable dynamics, challenging gradient-based trajectory optimization and model-based RL.
+3. **Multi-objective reward trade-offs**: Locomotion tasks require maximizing forward velocity while penalizing actuator
+   energy expenditure and joint stress:
+
+   $$
+   r_t = v_{\text{forward}} - c_{\text{ctrl}} \|\mathbf{a}_t\|_2^2 - c_{\text{impact}} \|\mathbf{f}_{\text{contact}}\|_2^2 + r_{\text{alive}}.
+   $$
+
+   If the control penalty $c_{\text{ctrl}}$ is tuned too low, policies learn violently vibrating gaits; if set too high,
+   the agent freezes to avoid actuation penalties.
+
+## Catalogue
+
+### MuJoCo locomotion tasks
+Standardized originally by OpenAI Gym and maintained in Gymnasium, these articulated kinematic models test locomotion:
+
+- **HalfCheetah-v4 ($D=17, M=6$)**: A 2D planar biped with eight rigid bodies and six actuated rotational joints.
+  Because the cheetah cannot fall over (episodes never terminate prematurely), HalfCheetah evaluates pure optimization
+  speed and policy stability without early termination traps.
+- **Hopper-v4 ($D=11, M=3$)**: A single-legged planar monopod with foot, shin, and thigh segments. An episode terminates
+  if the torso tilts ($|\theta| > 0.2\text{ rad}$) or height drops ($z < 0.7\text{ m}$). To survive, algorithms must
+  learn rhythmic hopping with dynamic balance.
+- **Walker2d-v4 ($D=17, M=6$)**: A planar biped with two articulated legs and feet. Evaluates coordinated alternating
+  heel-strike gaits and avoidance of falling forward or backward.
+- **Ant-v4 ($D=27, M=8$)**: A 3D quadruped with a central spherical torso and four two-segment legs. Involves 3D contact
+  dynamics, yaw/pitch stabilization, and coordinated multi-leg crawl gaits.
+- **Humanoid-v4 ($D=376, M=17$)**: A full 3D bipedal humanoid with 17 actuated joints. Highly underactuated and
+  unstable; sample-efficient mastery requires millions of environment interactions.
+
+### DeepMind Control Suite (DMC)
+Developed by Tassa et al., the DeepMind Control Suite provides a standardized, modular alternative based on MuJoCo:
+- Features unit-scaled rewards ($r_t \in [0, 1]$) with smooth bell-shaped reward profiles that eliminate heuristic
+  reward clipping.
+- Provides consistent observation formats, allowing benchmarks to run directly from physical states or high-dimensional
+  camera pixel arrays ($64 \times 64$ RGB images) for visual reinforcement learning.
+
+### Robotic manipulation suites
+- **Meta-World**: 50 distinct robotic manipulation tasks using a simulated Sawyer arm (pushing, drawer opening, button
+  pressing, peg insertion) designed to evaluate multi-task and meta-reinforcement learning.
+- **Robomimic and Panda-Gym**: Franka Emika Panda robotic arms executing precision pick-and-place, insertion, and
+  assembly tasks, often paired with human demonstration datasets.
+
+The interactive visualizer below compares locomotion trajectories, forward speed, and torque penalties across standard
+continuous control benchmarks:
+
+<ContinuousControlVisualizer />
+
+## Interfaces and versions
+
+In modern Gymnasium installations, continuous environments provide bounded box action spaces:
+
+```python
+import gymnasium as gym
+
+env = gym.make("HalfCheetah-v4")
+obs, info = env.reset(seed=42)
+
+# Action space is continuous vector in [-1.0, 1.0]^6
+assert isinstance(env.action_space, gym.spaces.Box)
+
+for _ in range(1000):
+    action = env.action_space.sample()  # Random torque vector
+    obs, reward, terminated, truncated, info = env.step(action)
+    if terminated or truncated:
+        obs, info = env.reset()
+```
+
+- **Frame skipping**: To simulate realistic physical latency, simulators apply each chosen torque vector across multiple
+  internal physics steps (typically `frame_skip=5`, so an MDP step represents
+  $5 \times 0.002\text{ s} = 0.01\text{ s}$).
+
+## Known problems and limitations
+
+1. **Reward hacking and unnatural gaits**: Without careful biomechanical regularization, policies exploit contact
+   physics to discover bizarre gaits—such as dragging bodies upside-down or executing uncontrolled front flips—that
+   achieve high forward velocity at the cost of physical plausibility.
+2. **The sim-to-real gap**: Policies trained in pristine MuJoCo simulations routinely fail on physical robots due to
+   unmodeled joint backlash, motor friction hysteresis, latency jitter, and uncalibrated mass distributions.
+   Transferring policies requires extensive domain randomization of physical parameters.
+3. **Observation dimension asymmetry**: Models that excel at state-based continuous control ($D \le 30$) degrade
+   significantly when trained end-to-end from raw pixels, conflating control failure with representation learning
+   bottlenecks.

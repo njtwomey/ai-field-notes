@@ -1,26 +1,160 @@
 ---
 title: 'Spatial indexing and features'
 kind: concept
-summary: 'Spatial features describe a location by its cell in a hierarchical grid, its distances to places of interest and the statistics of its neighbourhood. Spatial autocorrelation makes nearby examples alike, so splits must keep them apart.'
-tags: [data, feature-engineering]
-aliases: []
-requires: []
-related: [positional-and-coordinate-encoding, train-validation-and-test-splits]
-references: []
-status: stub
-updated: 2026-10-11
+summary: "Spatial features encode geographic location via hierarchical discrete grids (H3, S2), proximity distances, and neighbourhood spatial lags, while spatial autocorrelation (Moran's I) necessitates buffered block cross-validation to prevent leakage."
+tags: [data, feature-engineering, geospatial, statistics]
+aliases: [spatial-features, spatial-indexing, discrete-global-grids, h3-index, morans-i, spatial-autocorrelation, spatial-cross-validation]
+requires: [coordinate-reference-systems]
+related: [vector-and-raster-data, areal-aggregation, train-validation-and-test-splits]
+references: [tobler1970, moran1950]
+status: draft
+updated: 2026-10-12
 ---
 
+import { SpatialFeaturesVisualizer } from './SpatialFeaturesVisualizer'
+
 <Definition>
-To be written.
+**Spatial features** quantify geographic context for tabular and machine learning models, derived from hierarchical
+Discrete Global Grid Systems (DGGS), continuous proximity fields to points of interest (POIs), and spatial lag operators
+$\mathbf{W}\mathbf{y}$ over neighboring observations. Because spatial phenomena obey Tobler's First Law—exhibiting
+non-zero **spatial autocorrelation** ($I \ne 0$)—spatial features violate the independent and identically distributed
+(i.i.d.) assumption, requiring spatial block and buffered cross-validation <Cite id="tobler1970, moran1950" />.
 </Definition>
 
-## Hierarchical grids
+Directly passing raw latitude and longitude to tree-based models (such as XGBoost or LightGBM) restricts models to
+axis-aligned rectangular splits in angular degrees. Constructing rotation-invariant distance metrics, hierarchical
+hexagonal cell indices, and spatial lag convolutions enables models to learn genuine spatial relationships without
+geographic overfitting <Cite id="tobler1970" />.
 
-## Distance and neighbourhood features
+<SpatialFeaturesVisualizer client:load />
 
-## Spatial autocorrelation
+## Hierarchical Grids (Discrete Global Grid Systems)
 
-## Spatial cross-validation
+Discrete Global Grid Systems (DGGS) tessellate the Earth's curved surface into a multi-resolution hierarchy of uniform
+equal-area cells, assigning each cell a 64-bit integer identifier:
+- **Uber H3 (Hexagonal DGGS)**: Based on an icosahedron projected onto the sphere with aperture-7 hexagonal
+  decomposition across 16 hierarchical resolution levels (from resolution 0 with mean area $4.3 \times 10^6\text{ km}^2$
+  down to resolution 15 with mean area $0.89\text{ m}^2$):
+  - *Hexagonal Uniformity*: Every hexagon has exactly 6 neighbors at identical centroid-to-centroid Euclidean distances
+    $\sqrt{3} r$. Unlike square grids (where orthogonal neighbors are distance 1 but diagonal neighbors are distance
+    $\sqrt{2}$), hexagons have no diagonal anisotropy.
+  - *Icosahedral Pentagons*: By Euler's formula $V - E + F = 2$, any spherical hexagonal tessellation requires exactly
+    12 pentagons across the globe. H3 positions these 12 pentagons in oceans to avoid populated landmasses.
+- **Google S2 (Spherical Quadtree)**: Projects the sphere onto the 6 faces of an inscribed cube, recursively dividing
+  each face into a quadtree indexed via the 1D Hilbert space-filling curve. S2 preserves spatial locality in 64-bit
+  integer ranges, allowing fast B-tree range queries.
+- **Geohash**: Hierarchical string encoding derived by interleaving bits of latitude and longitude in base-32. While
+  simple, Geohash suffers from severe boundary discontinuities where two physically adjacent locations across a prime
+  meridian or equator share zero common string prefixes.
+
+---
+
+## Proximity and Neighbourhood Features
+
+Rather than treating coordinates as raw features, spatial feature engineering constructs metric descriptors of the
+surrounding built and natural environment:
+
+### Point-of-Interest (POI) Distance and Density
+
+- **Nearest Neighbor Distance**:
+  $d_{\min}(\mathbf{x}) = \min_{\mathbf{p} \in \mathcal{P}} d_{\text{geodesic}}(\mathbf{x}, \mathbf{p})$ (e.g. distance
+  to nearest transit hub, hospital, or coastline).
+- **Radial Count**:
+  $N_r(\mathbf{x}) = \sum_{\mathbf{p} \in \mathcal{P}} \mathbb{I}[d_{\text{geodesic}}(\mathbf{x}, \mathbf{p}) \le r]$.
+- **Kernel Density Estimation (KDE)**:
+  $$
+  \hat{f}(\mathbf{x}) = \frac{1}{N h^2} \sum_{i=1}^N K\left( \frac{\mathbf{x} - \mathbf{p}_i}{h} \right)
+  $$
+  where $h$ is the bandwidth parameter and $K(\cdot)$ is a radial basis kernel (Gaussian, Epanechnikov).
+
+### Spatial Lag and Distance Decay
+
+The **spatial lag** of variable $y$ at location $i$ is the weighted average of $y$ across all neighboring locations,
+defined by the spatial weight matrix $\mathbf{W} \in \mathbb{R}^{N \times N}$ <Cite id="tobler1970" />:
+
+$$
+[\mathbf{W}\mathbf{y}]_i = \sum_{j=1}^N W_{ij} y_j, \quad W_{ij} = \frac{w_{ij}}{\sum_{k=1}^N w_{ik}}
+$$
+
+where $w_{ij}$ follows a distance decay function:
+- **Inverse Distance Power Law**: $w_{ij} = d_{ij}^{-\alpha}$ ($\alpha \ge 1$), emphasizing immediate
+  micro-neighborhoods.
+- **Negative Exponential**: $w_{ij} = \exp(-\gamma d_{ij})$, decaying smoothly over regional distances.
+
+---
+
+## Spatial Autocorrelation (Moran's I)
+
+Tobler's First Law of Geography states: *"Everything is related to everything else, but near things are more related
+than distant things"* <Cite id="tobler1970" />.
+
+### Global Moran's I
+
+Global Moran's I <Cite id="moran1950" /> measures spatial autocorrelation across continuous variables:
+
+$$
+I = \frac{N}{\sum_{i=1}^N \sum_{j=1}^N w_{ij}} \frac{\sum_{i=1}^N \sum_{j=1}^N w_{ij} (y_i - \bar{y})(y_j - \bar{y})}{\sum_{i=1}^N (y_i - \bar{y})^2}
+$$
+
+- **$I > \mathbb{E}[I]$ (Positive Spatial Autocorrelation)**: Similar values cluster together in space (high values near
+  high values, low near low).
+- **$I < \mathbb{E}[I]$ (Negative Spatial Autocorrelation / Dispersion)**: Spatial checkerboard pattern, where high
+  values are surrounded by low values.
+- **Expected Value under Spatial Randomness**: $\mathbb{E}[I] = -\frac{1}{N - 1}$.
+
+### The Semivariogram
+
+In geostatistics, spatial dependence is mapped by the **semivariogram** $\gamma(h)$ as a function of separation distance
+$h$:
+
+$$
+\gamma(h) = \frac{1}{2 |N(h)|} \sum_{(i, j) \in N(h)} (y_i - y_j)^2
+$$
+
+A typical variogram displays:
+1. **Nugget ($c_0$)**: Microscale measurement noise and short-range variation at $h \to 0$.
+2. **Sill ($c$)**: The asymptotic variance plateau where observations become spatially independent.
+3. **Range ($a$)**: The separation distance beyond which spatial correlation ceases ($\gamma(h) = c$).
+
+---
+
+## Spatial Cross-Validation
+
+Standard random $k$-fold cross-validation assigns instances to train and test folds uniformly at random. When data
+possess spatial autocorrelation ($I \gg 0$), test observations are spatially adjacent to training observations:
+
+$$
+y_{\text{test}} = f(\mathbf{x}_{\text{test}}) + \epsilon_{\text{test}}, \quad \operatorname{Cov}(\epsilon_{\text{test}}, \epsilon_{\text{train}}) > 0
+$$
+
+The model exploits spatially correlated residuals (e.g. unobserved local microclimate or regional wealth) to "cheat",
+producing overly optimistic cross-validation scores that collapse when the model is deployed in a new city or
+unmonitored geographic region <Cite id="tobler1970" />.
+
+```
+Random k-fold:           Spatial Block k-fold:       Buffered Leave-One-Out:
+[T] [x] [T] [T] [x]      [T] [T] [T] | [x] [x] [x]   [T] [T] [Buffer Zone] [x]
+[x] [T] [x] [T] [T]      [T] [T] [T] | [x] [x] [x]   [T] [T] [  (Purged) ] [x]
+(Heavy Spatial Leakage)  (Disjoint Block Clusters)   (Guaranteed Zero Leakage)
+```
+
+### Spatial Partitioning Strategies
+
+1. **Spatial Block Cross-Validation**: Divides the bounding domain into contiguous geographic blocks (or administrative
+   regions), holding out entire contiguous tiles as test folds.
+2. **Buffered Cross-Validation**: When testing on a geographic zone, an exclusion buffer of radius
+   $r_{\text{buffer}} \ge a$ (where $a$ is the variogram range) is purged from the training set. Eliminating training
+   points within range $a$ guarantees that training and test errors are statistically independent.
+
+---
 
 ## Pitfalls
+
+1. **Random Splitting on Autocorrelated Coordinates**: Reporting $R^2 = 0.90$ under standard 5-fold CV on housing prices
+   or species distribution models that collapses to $R^2 = 0.55$ when tested on an unseen neighboring county.
+2. **Boundary Edge Effects**: Computing spatial neighbor counts or KDE without edge corrections causes points near the
+   periphery of the study area to exhibit artificially depressed neighbor statistics simply because observations beyond
+   the administrative boundary were not collected.
+3. **Target Encoding on High-Resolution Spatial Grids**: Applying target encoding to fine-grained cell IDs (e.g. H3
+   resolution 10) without strong regularization leaks label identity directly into training features, overfitting to
+   single households.

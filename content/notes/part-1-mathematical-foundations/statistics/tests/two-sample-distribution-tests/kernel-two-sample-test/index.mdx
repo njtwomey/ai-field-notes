@@ -1,0 +1,87 @@
+---
+title: Kernel two-sample test
+kind: test
+summary: 'The kernel two-sample test rejects that two samples share a distribution when their estimated maximum mean discrepancy is large compared with its values under random relabellings of the pooled sample. With a characteristic kernel it is consistent against all alternatives.'
+tags: [hypothesis-testing, two-sample, kernel-methods, nonparametric, worked-example]
+aliases: [MMD test, kernel MMD test, maximum mean discrepancy test, kernel two-sample test, MMD permutation test]
+requires: [maximum-mean-discrepancy, permutation-tests]
+related: [two-sample-testing, energy-distance, classifier-two-sample-test, comparing-two-sample-tests, drift-detection]
+references: [gretton2012, gretton2012b, garreau2017, liu2020deepkernel, ramdas2015]
+status: draft
+updated: 2026-10-12
+---
+
+import { PermutationBuild } from './PermutationBuild'
+
+<Definition>
+The **kernel two-sample test** compares a sample $x_1, \dots, x_n$ from $P$ with a sample $y_1, \dots, y_m$ from $Q$
+using the estimated squared <NoteLink to="maximum-mean-discrepancy" /> $\widehat{\mathrm{MMD}}{}^2_u$ for a kernel
+$k$. It rejects $P = Q$ when the observed value is large compared with its values after the pooled points are
+relabelled at random <Cite id="gretton2012" />.
+</Definition>
+
+## Hypotheses
+
+$H_0$: $P = Q$. $H_1$: $P \ne Q$. With a characteristic kernel, such as the Gaussian, $\mathrm{MMD}(P, Q) > 0$ under
+every alternative, so the test is consistent: its power tends to 1 as $n$ and $m$ grow, whatever the difference.
+
+## Assumptions
+
+- **Independent samples** of independent draws, so that the pooled sample is exchangeable under $H_0$.
+- **A kernel fixed in advance.** The kernel and its width must not be tuned on the data being tested. Tuning them on
+  a separate split of the data keeps the test valid <Cite id="gretton2012b" />.
+
+## Test statistic
+
+The unbiased estimate
+$$
+\widehat{\mathrm{MMD}}{}^2_u = \frac{1}{n(n - 1)} \sum_{i \ne i'} k(x_i, x_{i'}) +
+\frac{1}{m(m - 1)} \sum_{j \ne j'} k(y_j, y_{j'}) - \frac{2}{nm} \sum_{i, j} k(x_i, y_j) .
+$$
+Every term is an entry of the $(n + m) \times (n + m)$ kernel matrix of the pooled sample, so the matrix is computed
+once and every relabelling reads it.
+
+## Decision rule
+
+Under $H_0$ the labels "first sample" and "second sample" carry no information, and every split of the pooled points
+into groups of sizes $n$ and $m$ is equally likely. Draw $B$ random splits, recompute the statistic on each, and count
+the $b$ splits whose value is at least the observed one. The <NoteLink to="p-value">p-value</NoteLink> is
+$(1 + b)/(1 + B)$, which is valid for any $B$ (<NoteLink to="permutation-tests" />). Reject at level $\alpha$ when it is
+at most $\alpha$.
+
+The figure builds this null one relabelling at a time on two-dimensional data.
+
+<PermutationBuild />
+
+Without permutation, $n\,\widehat{\mathrm{MMD}}{}^2_u$ converges under $H_0$ to an infinite weighted sum of centred
+chi-squared variables, whose weights are the eigenvalues of the centred kernel. Gamma or spectral approximations to
+that law avoid the permutations at some cost in accuracy <Cite id="gretton2012" />.
+
+## Effect size
+
+The estimated $\mathrm{MMD}$ is on the scale of the kernel: for a kernel with values in $[0, 1]$, $\mathrm{MMD}^2$ lies
+in $[0, 2]$. Its size depends on the width $\sigma$, so values are comparable only under the same kernel. The
+empirical witness function shows where the difference lies.
+
+## Pitfalls
+
+- **The width decides the power.** The median heuristic is a robust default <Cite id="garreau2017" /> but can
+  miss a difference at a much smaller or larger scale. Learning the kernel, up to a deep network's features, on a
+  held-out split recovers power on structured data <Cite id="liu2020deepkernel" />.
+- **High dimensions.** For a fixed mean shift, the power of the Gaussian-kernel test falls as irrelevant dimensions
+  are added <Cite id="ramdas2015" />. Reducing the data to the coordinates that matter helps more than more samples.
+- **Cost.** Each relabelling costs $O((n + m)^2)$ additions, so $B$ relabellings cost $O(B(n + m)^2)$. For very
+  large samples the linear-time statistic, with a normal null law, is cheaper <Cite id="gretton2012" />.
+
+## Worked example
+
+Test $x = (0, 1)$ against $y = (2, 3)$ with the Gaussian kernel of width 1, enumerating every relabelling.
+
+1. **Observed statistic.** From the worked example of <NoteLink to="maximum-mean-discrepancy" />,
+   $\widehat{\mathrm{MMD}}{}^2_u = 0.7689$.
+2. **List the splits.** The pooled points $0, 1, 2, 3$ split into two pairs in $\binom{4}{2} = 6$ ordered ways.
+3. **Score each split.** $\set{0, 1}$ against $\set{2, 3}$ and its mirror give $0.7689$; $\set{0, 3}$ against
+   $\set{1, 2}$ and its mirror give $-0.1242$; $\set{0, 2}$ against $\set{1, 3}$ and its mirror give $-0.6447$.
+4. **Count.** Two of the six splits are at least as large as the observed value.
+5. **Conclude.** The exact p-value is $2/6 = 1/3$. The observed split is the most separated one possible, yet with two
+   points per sample no test can reach a p-value below $1/3$.

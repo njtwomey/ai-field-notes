@@ -6,21 +6,110 @@ tags: [data, statistics]
 aliases: []
 requires: []
 related: [data-generating-process, dataset-shift]
-references: []
-status: stub
-updated: 2026-10-11
+references: [pearl2014transportability, sugiyama2007iwcv, kanamori2009ulsif]
+status: draft
+updated: 2026-10-12
 ---
 
+import { TargetPopulationVisualizer } from './TargetPopulationVisualizer'
+
 <Definition>
-To be written.
+The target population is the complete universe of real-world entities, environments, and operating conditions that an
+artificial intelligence model is intended to serve when deployed in production. The accessible (or study) population is
+the constrained subset of entities that could practically be identified, recruited, or recorded during dataset
+construction.
 </Definition>
+
+Machine learning models routinely achieve state-of-the-art accuracy on internal cross-validation benchmarks while
+failing catastrophically upon production deployment <Cite id="pearl2014transportability, sugiyama2007iwcv" />. This
+divergence reflects a breakdown between *internal validity* (statistical soundness within the observed study sample) and
+*external validity* (the degree to which causal and predictive relationships transfer across the gap between the
+accessible population and the target population).
+
+<TargetPopulationVisualizer />
 
 ## Accessible and target populations
 
+Every dataset is a convenience sample drawn from an accessible sub-population rather than the true target population:
+
+1. **The Target Population ($\mathcal{P}_{\text{target}}$):** Defined by business requirements and operating scopes. For
+   example:
+   - *Clinical Diagnostic Tool:* All patients presenting with acute respiratory symptoms across all community hospitals
+     in the national healthcare system over the next decade.
+   - *Autonomous Driving Agent:* All weather conditions, lighting variations, geographic jurisdictions, and roadway
+     geometries the vehicle will encounter in commercial fleet service.
+2. **The Accessible Population ($\mathcal{P}_{\text{accessible}}$):** The entities reachable through existing
+   instrumentation and administrative channels:
+   - Academic medical centers with digital EHR infrastructures (excluding rural clinics and under-resourced hospitals).
+   - High-contrast, sunny daytime test drives in Phoenix, Arizona (excluding blizzards in Chicago).
+3. **The Target-Sample Gap:** When $\mathcal{P}_{\text{accessible}} \subset \mathcal{P}_{\text{target}}$, the training
+   data suffers from *undercoverage*. If the probability distribution over covariates differs
+   ($P_{\text{accessible}}(X) \neq P_{\text{target}}(X)$) or conditional relationships shift
+   ($P_{\text{accessible}}(Y \mid X) \neq P_{\text{target}}(Y \mid X)$), empirical risk minimization on the accessible
+   sample optimizes the wrong objective function.
+
 ## Inclusion and exclusion criteria
+
+To ensure clean labels and experimental tractability, dataset curators establish explicit inclusion and exclusion rules:
+
+- **Inclusion Criteria:** Baseline attributes mandatory for cohort eligibility (e.g., adult patients aged $\ge 18$,
+  users with at least 5 completed transactions, images with minimum resolution $\ge 1080\text{p}$).
+- **Exclusion Criteria:** Disqualifying attributes removed to eliminate confounding noise (e.g., patients with severe
+  multi-morbidity, transactions flagged by heuristic risk rules, audio recordings with background street noise).
+
+While filtering cleans training data, it silently shrinks the accessible population. If an exclusion criterion removes
+the messy, complex tail cases that the deployed system will encounter in daily operations, the model learns a brittle
+mapping optimized exclusively for sterile laboratory inputs.
 
 ## External validity
 
+External validity evaluates whether the model's predictive guarantees *transport* to the target environment
+<Cite id="pearl2014transportability" />:
+
+1. **Covariate Shift (Sampling Selection):** The conditional predictive mechanism remains invariant
+   ($P_{\text{target}}(Y \mid X) = P_{\text{source}}(Y \mid X)$), but the feature density shifts
+   ($P_{\text{target}}(X) \neq P_{\text{source}}(X)$).
+   - *Transport Solution:* Importance weighting using density ratios:
+
+$$
+w(x) = \frac{P_{\text{target}}(x)}{P_{\text{source}}(x)}
+$$
+
+Training risk is reweighted by $w(x_i)$, aligning the training gradient with target population expectations
+<Cite id="sugiyama2007iwcv, kanamori2009ulsif" />. 2. **Positivity Violation (Lack of Common Support):** If there exist
+regions in the target population where the source density is zero ($P_{\text{target}}(x) > 0$ while
+$P_{\text{source}}(x) = 0$), importance weights diverge ($w(x) \to \infty$). In these unobserved regions, the model must
+extrapolate blindly; external validity cannot be mathematically guaranteed. 3. **Concept Shift (Mechanism Violation):**
+The underlying causal or statistical relationship differs between populations
+($P_{\text{target}}(Y \mid X) \neq P_{\text{source}}(Y \mid X)$). For example, a credit risk model trained in an
+economic boom does not transfer to an economic recession because the relationship between debt-to-income ratio and
+default probability changes fundamentally.
+
 ## Stating the population before training
 
+To prevent premature deployment and overconfident extrapolation, modern machine learning engineering mandates explicit
+population specifications prior to dataset ingestion:
+
+- **Datasheets and Model Cards:** Formally documenting target demographic boundaries, supported geographic
+  jurisdictions, sensor hardware versions, and environmental operating ranges (e.g., "Validated exclusively on adult
+  non-ICU patients aged 18–65 in tertiary urban facilities").
+- **Target Distribution Assertions:** Embedding schema checks that compare real-time inference feature distributions
+  against target population baselines using Maximum Mean Discrepancy (MMD) or Population Stability Index (PSI).
+- **Out-of-Scope Fallbacks:** Equipping models with conformal prediction sets or out-of-distribution detectors that
+  trigger graceful rejection when an incoming query falls outside the validated target population boundary.
+
 ## Pitfalls
+
+- **The WEIRD Demographic Trap:** A substantial portion of behavioral, NLP, and computer vision benchmark datasets are
+  collected from Western, Educated, Industrialized, Rich, and Democratic (WEIRD) undergraduate cohorts or US-centric web
+  crawlers. Assuming these benchmarks represent global human linguistic or visual norms leads to severe degradation
+  across international deployments.
+- **Survivorship in Retrospective Cohorts:** In healthcare and churn datasets, defining cohorts based on criteria that
+  require subjects to survive a 1-year follow-up window (immortal time bias) excludes the most vulnerable cases,
+  creating false impressions of model efficacy.
+- **Silent Temporal Drift:** Treating temporal validation splits as representative of the indefinite future. A target
+  population defined in 2024 is non-stationary; consumer preferences, macro-economic conditions, and language
+  conventions drift continuously.
+- **Conflating High Accuracy with External Validity:** Reporting 99% Area Under the ROC Curve (AUROC) on an artificially
+  balanced, heavily pre-filtered benchmark gives zero guarantee of viability when deployed on unfiltered real-world
+  streams where positive class prevalence is 0.01% and input noise is high.

@@ -3,24 +3,94 @@ title: 'Cleaning text'
 kind: concept
 summary: 'Cleaning text makes raw documents usable: fixing character encodings, normalising Unicode, removing markup and boilerplate, and identifying each document''s language.'
 tags: [data, nlp]
-aliases: []
+aliases: [text cleaning, raw text cleaning, document sanitisation]
 requires: []
-related: [text-normalisation, tokenisation]
-references: []
-status: stub
+related: [text-normalisation, tokenisation, corpus-construction]
+references: [speer2019, joulin2017, dodge2021, wenzek2020]
+status: draft
 updated: 2026-10-11
 ---
 
+import { TextCleaningPipeline } from './TextCleaningPipeline'
+
 <Definition>
-To be written.
+**Text cleaning** is the preliminary preparation stage that transforms arbitrary raw byte sequences and web extracts
+into consistent, uncorrupted strings of natural language. It repairs character encoding faults (mojibake), resolves
+HTML/XML entities, standardises Unicode representations into canonical forms, removes non-textual boilerplate and
+markup, and verifies the document's primary natural language <Cite id="speer2019" />.
 </Definition>
+
+Raw text extracted from web dumps, databases, <Gloss name="pdf" plural />, and OCR scans is riddled with corruptions:
+mismatched character encodings, duplicate punctuation, embedded JavaScript tracking code, and invisible zero-width
+formatting characters. Feeding uncleaned text into tokenisers fractures rare or garbled tokens into excessive subword
+fragments, inflating sequence lengths and degrading model attention. Cleaning establishes a uniform baseline before
+vocabulary tokenisation begins.
+
+<TextCleaningPipeline />
 
 ## Character encodings
 
+Computers represent text as sequences of bytes mapped through character encodings:
+
+- **UTF-8 ubiquity:** UTF-8 is the global standard for digital text, encoding characters in 1 to 4 bytes with backward
+  compatibility for 7-bit ASCII.
+- **Mojibake:** Occurs when text written in one encoding (such as Windows-1252 or Latin-1) is decoded as UTF-8, or vice
+  versa. A typographic apostrophe `’` (UTF-8 bytes `0xE2 0x80 0x99`) decoded as Windows-1252 manifests as `â€™`.
+  Libraries like `ftfy` <Cite id="speer2019" /> detect and invert these mismatched encoding permutations systematically.
+- **HTML/XML entities:** Web documents escape non-ASCII characters and reserved symbols into named or numeric entities
+  (such as `&amp;` for `&`, `&#233;` for `é`, and `&#x2019;` for `’`). Decoding unescapes these into native Unicode
+  codepoints.
+
 ## Unicode normalisation
+
+In the Unicode standard, visually identical characters can be encoded through distinct byte sequences. Normalisation
+maps equivalent sequences into unique canonical representations:
+
+- **<NoteLink to="text-normalisation">NFC</NoteLink> (Canonical Decomposition, followed by Canonical Composition):**
+  Combines separate base characters and diacritics into precomposed single codepoints. For example, `e` (U+0065) +
+  combining acute `´` (U+0301) becomes `é` (U+00E9). NFC is the standard format for web protocols and Linux filesystems.
+- **NFD (Canonical Decomposition):** Separates precomposed characters into their individual base glyphs and combining
+  marks. Useful for stripping accents and diacritics prior to ASCII matching.
+- **NFKC (Compatibility Decomposition, followed by Canonical Composition):** Folds formatting distinctions, such as
+  ligatures (replacing `ﬁ` U+FB01 with `fi`), fractions (`⅓` with `1/3`), superscripts (`²` with `2`), and full-width
+  Japanese katakana into their standard ASCII/alphabetic equivalents. NFKC is widely adopted in pretraining pipelines to
+  compress subword vocabulary sizes.
+- **NFKD (Compatibility Decomposition):** Combines compatibility folding with decomposed combining marks.
 
 ## Markup and boilerplate removal
 
+Web pages and digital documents mix informational prose with structural code:
+
+- **HTML and script stripping:** Parsers (such as `trafilatura` or `BeautifulSoup`) strip structural elements
+  (`<script>`, `<style>`, `<nav>`, `<header>`, `<footer>`), extracting only main body paragraphs.
+- **Boilerplate filtering:** Web sites embed legal disclaimers, cookie banners, terms of service, and author bios that
+  duplicate millions of times across disparate pages. Regexes and layout tree heuristics identify and drop repeated
+  peripheral blocks.
+- **Control and invisible characters:** Scraped text contains zero-width spaces (U+200B), non-breaking spaces (U+00A0),
+  line separators (U+2028), and terminal control codes that confuse subword segmenters. Cleaning strips these or maps
+  them to single standard ASCII spaces.
+
 ## Language identification
 
+Pretraining corpora and multilingual models require reliable document-level language labeling:
+
+- **Character $n$-gram profiles:** Fast text classifiers (such as fastText <Cite id="joulin2017" /> or CLD3) extract
+  character $n$-grams (typically $n \in [1, 5]$). Because each language exhibits distinctive character $n$-gram
+  distributions, shallow linear models predict language categories across hundreds of languages in microseconds per
+  document.
+- **Confidence thresholding:** Web pages frequently contain mixed languages (such as English code snippets on Chinese
+  technical forums). Setting a strict confidence threshold (such as $P(\text{lang}) \ge 0.65$) discards ambiguous,
+  poorly translated, or multi-script fragments <Cite id="wenzek2020" />.
+- **Script validation:** Cross-checking predicted language against the document's Unicode script block (such as
+  Cyrillic, Arabic, Devanagari, or Han) catches classification errors before downstream processing.
+
 ## Pitfalls
+
+- **Destructive NFKC folding:** While NFKC simplifies ligatures, it can inadvertently alter technical meaning:
+  mathematical symbols, exponents ($x^2$ folded to $x2$), and chemical formulas lose critical structural distinctions.
+- **Language identifier bias against short text:** Character $n$-gram language detectors require at least 50 to 100
+  characters to achieve reliable accuracy. Short titles and queries frequently misclassify into unrelated low-resource
+  languages.
+- **Accidental stripping of code and markup in code corpora:** Naively stripping tags like `<script>` or
+  `<div class="...">` destroys syntactically valid HTML, JSX, and web development examples in source code pretraining
+  datasets.

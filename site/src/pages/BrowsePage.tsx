@@ -1,17 +1,16 @@
-import { ChevronDown, FolderTree, List, Search, Waypoints } from 'lucide-react'
-import { useMemo, useState } from 'react'
+import { ChevronDown, ChevronRight, FolderTree, Search } from 'lucide-react'
+import { useMemo, useState, type ReactNode } from 'react'
 import { Link, Navigate, useParams, useSearchParams } from 'react-router'
 import { CategoryTrail } from '@/components/note/TaxonomyTrail'
-import { ConceptMap } from '@/components/browse/ConceptMap'
 import { filterNotes, inCategory } from '@/components/browse/filters'
 import { NoteCard } from '@/components/browse/NoteCard'
 import { StubToggle } from '@/components/browse/StubToggle'
 import { TopicRail } from '@/components/browse/TopicRail'
+import { TopicIcon } from '@/components/layout/category-icon'
 import { kindIcons } from '@/components/layout/kind-icon'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from '@/components/ui/sheet'
-import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import {
   browseUrl,
   category,
@@ -25,24 +24,24 @@ import {
   type BrowseParams,
   type CategoryNode,
   type NoteKind,
+  type NoteMeta,
 } from '@/lib/content'
 import { noteKinds } from '@/lib/content-schema'
 import { useHideStubs, withoutStubs } from '@/lib/stubs'
 import { cn } from '@/lib/utils'
 
 /**
- * The explorer: topics on the left, notes as cards (or as a map) on the right, filtered by topic, kind and text. All
- * state lives in the URL, so every view can be linked. Below `lg` the topic rail moves into a sheet opened from one
- * button, so the notes start right under the filters instead of below every topic.
+ * The explorer, one level at a time. With nothing selected it lists the parts; with a part or topic selected it lists
+ * what sits directly under it: the topic's introducing note, its subtopics, then its own notes. Typing a filter or
+ * picking a kind switches to a flat list of the matching notes anywhere under the selection. All state lives in the
+ * URL, so every view can be linked. Below `lg` the topic rail moves into a sheet opened from one button.
  */
 export function BrowsePage() {
   const [search, setSearch] = useSearchParams()
   const params: BrowseParams = {
     c: search.get('c') ?? undefined,
-    part: search.get('part') ?? undefined,
     kind: (search.get('kind') as NoteKind | null) ?? undefined,
     q: search.get('q') ?? undefined,
-    view: search.get('view') === 'map' ? 'map' : 'list',
   }
   const set = (patch: Partial<BrowseParams>) => {
     const next = new URLSearchParams(search)
@@ -54,67 +53,28 @@ export function BrowsePage() {
   }
 
   const hideStubs = useHideStubs()
-  const shownTotal = hideStubs ? withoutStubs(notes, true).length : notes.length
-  const matches = useMemo(
-    () => filterNotes({ c: params.c, part: params.part, kind: params.kind, q: params.q, hideStubs }),
-    [params.c, params.part, params.kind, params.q, hideStubs],
-  )
-  const kindCounts = useMemo(() => {
-    const scoped = filterNotes({ c: params.c, part: params.part, q: params.q, hideStubs })
-    return Object.fromEntries(noteKinds.map((k) => [k, scoped.filter((n) => n.kind === k).length]))
-  }, [params.c, params.part, params.q, hideStubs])
+  const shown = withoutStubs(notes, hideStubs)
+  const count = (path: string) => shown.filter((n) => inCategory(n, path)).length
+  const node = params.c ? category(params.c) : undefined
+  const filtering = !!(params.q || params.kind)
 
-  // Group cards under their category so a topic's structure is visible without reading.
-  const categoryGroups = useMemo(() => {
-    // An index note leads the group of the category it introduces, which may be an ancestor of its own folder.
-    const inView = (path: string) => !params.c || path === params.c || path.startsWith(`${params.c}/`)
-    const byCategory = new Map<string, typeof matches>()
-    for (const n of matches) {
-      const introduces = indexOfCategory(n.slug)
-      const home = introduces && inView(introduces) ? introduces : n.category
-      byCategory.set(home, [...(byCategory.get(home) ?? []), n])
-    }
-    return [...byCategory.entries()]
-      .sort(([a], [b]) => categoryOrder(a) - categoryOrder(b))
-      .map(([path, list]) => [path, indexFirst(list, path)] as const)
-  }, [matches, params.c])
+  const matches = filterNotes({ c: params.c, kind: params.kind, q: params.q, hideStubs })
+  const scoped = filterNotes({ c: params.c, q: params.q, hideStubs })
+  const kindCounts = Object.fromEntries(noteKinds.map((k) => [k, scoped.filter((n) => n.kind === k).length]))
 
-  const selectedPart = params.part
-    ? taxonomy.find(
-        (p) =>
-          p.path === params.part ||
-          String(p.num) === params.part ||
-          `part-${p.num}` === params.part ||
-          p.title.toLowerCase() === params.part?.toLowerCase(),
-      )
-    : undefined
+  // Old links named a part with ?part=…; the part is now a selection like any other topic.
+  const legacyPart = search.get('part')
+  if (legacyPart) {
+    const part = findPart(legacyPart)
+    const next = new URLSearchParams(search)
+    next.delete('part')
+    if (part) next.set('c', part.path)
+    next.delete('view')
+    return <Navigate to={`/browse${next.size ? `?${next}` : ''}`} replace />
+  }
 
-  // When browsing all notes or an entire part, group the categories under the 8 Parts
-  const partSections = useMemo(() => {
-    if (params.c) return null
-    const relevantParts = selectedPart ? [selectedPart] : taxonomy
-    const sections: {
-      part: CategoryNode
-      categories: typeof categoryGroups
-      totalNotes: number
-    }[] = []
-
-    for (const p of relevantParts) {
-      const catsInPart = categoryGroups.filter(([catPath]) => catPath === p.path || catPath.startsWith(`${p.path}/`))
-      if (catsInPart.length > 0) {
-        const totalNotes = catsInPart.reduce((sum, [, list]) => sum + list.length, 0)
-        sections.push({ part: p, categories: catsInPart, totalNotes })
-      }
-    }
-    return sections
-  }, [categoryGroups, params.c, selectedPart])
-
-  const filtered = !!(params.c || params.part || params.kind || params.q)
-  const scopeTitle = params.c
-    ? (category(params.c)?.title ?? params.c)
-    : selectedPart
-      ? `${selectedPart.roman ? `${selectedPart.roman}: ` : ''}${selectedPart.title}`
-      : 'All notes'
+  const title = node ? partTitle(node) : 'All parts'
+  const total = node ? count(node.path) : shown.length
 
   return (
     <main className="px-4 py-8 lg:px-8">
@@ -132,50 +92,24 @@ export function BrowsePage() {
               <CategoryTrail path={params.c} className="-ml-1" />
             </div>
           )}
-          <div className="flex flex-wrap items-end justify-between gap-4">
-            <div>
-              <div className="flex items-center gap-2">
-                <h1 className="font-prose text-3xl font-bold">{scopeTitle}</h1>
-                {params.part && (
-                  <button
-                    type="button"
-                    onClick={() => set({ part: undefined })}
-                    className="text-xs text-muted-foreground underline hover:text-foreground"
-                  >
-                    (show all parts)
-                  </button>
-                )}
-              </div>
-              <p className="mt-1 text-sm text-muted-foreground">
-                {matches.length} of {shownTotal} notes
-              </p>
-            </div>
-            <ToggleGroup
-              value={[params.view ?? 'list']}
-              onValueChange={(v) => v[0] && set({ view: v[0] === 'map' ? 'map' : undefined })}
-              variant="outline"
-              size="sm"
-              spacing={0}
-            >
-              <ToggleGroupItem value="list" className="px-3">
-                <List /> List
-              </ToggleGroupItem>
-              <ToggleGroupItem value="map" className="px-3">
-                <Waypoints /> Map
-              </ToggleGroupItem>
-            </ToggleGroup>
+          <div>
+            <h1 className="font-prose text-3xl font-bold">{title}</h1>
+            {node?.description && <p className="mt-2 max-w-3xl text-muted-foreground">{node.description}</p>}
+            <p className="mt-1 text-sm text-muted-foreground">
+              {filtering ? `${matches.length} of ${total} notes match` : `${total} notes`}
+            </p>
           </div>
 
           <div className="flex flex-wrap items-center gap-3">
             <div className="w-full lg:hidden">
-              <TopicPicker params={params} />
+              <TopicPicker params={params} title={title} total={total} />
             </div>
             <div className="relative w-full sm:w-72">
               <Search className="absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" />
               <Input
                 value={params.q ?? ''}
                 onChange={(e) => set({ q: e.target.value })}
-                placeholder="Filter by title, alias or tag"
+                placeholder={node ? `Filter notes in ${node.title}` : 'Filter by title, alias or tag'}
                 className="pl-8"
               />
             </div>
@@ -196,74 +130,138 @@ export function BrowsePage() {
             </div>
           </div>
 
-          {params.view === 'map' ? (
-            <div className="rounded-lg border">
-              <ConceptMap highlight={filtered ? new Set(matches.map((n) => n.slug)) : new Set()} />
-            </div>
-          ) : matches.length === 0 ? (
-            <p className="rounded-lg border border-dashed p-8 text-center text-sm text-muted-foreground">
-              No notes match. Clear a filter or try another word.
-            </p>
-          ) : partSections ? (
-            <div className="space-y-12">
-              {partSections.map(({ part, categories, totalNotes }) => (
-                <section key={part.title} className="space-y-6">
-                  <div className="flex items-baseline justify-between border-b border-border/70 pb-2">
-                    <div className="flex items-baseline gap-2.5">
-                      <h2 className="font-prose text-xl font-bold tracking-tight">
-                        {part.roman ? `${part.roman}: ` : ''}
-                        {part.title}
-                      </h2>
-                      <span className="text-xs text-muted-foreground tabular-nums">
-                        {totalNotes} {totalNotes === 1 ? 'note' : 'notes'}
-                      </span>
-                    </div>
-                    {!params.part && (
-                      <Link
-                        to={browseUrl({ ...params, part: part.path, c: undefined })}
-                        className="text-xs text-muted-foreground hover:text-foreground hover:underline"
-                      >
-                        Focus this part →
-                      </Link>
-                    )}
-                  </div>
-                  <div className="space-y-8">
-                    {categories.map(([path, list]) => (
-                      <section key={path} className="space-y-3">
-                        <h3 className="text-xs font-semibold tracking-wider text-muted-foreground uppercase">
-                          {groupTitle(path, part.path)}
-                        </h3>
-                        <div className="grid gap-3 sm:grid-cols-2 2xl:grid-cols-3">
-                          {list.map((n) => (
-                            <NoteCard key={n.slug} note={n} lead={category(path)?.index === n.slug} />
-                          ))}
-                        </div>
-                      </section>
-                    ))}
-                  </div>
-                </section>
-              ))}
-            </div>
+          {filtering ? (
+            <Matches matches={matches} selected={params.c} />
+          ) : node ? (
+            <Contents node={node} shown={shown} count={count} />
           ) : (
-            <div className="space-y-8">
-              {categoryGroups.map(([path, list]) => (
-                <section key={path} className="space-y-3">
-                  <h2 className="text-xs font-semibold tracking-wider text-muted-foreground uppercase">
-                    {groupTitle(path, params.c)}
-                  </h2>
-                  <div className="grid gap-3 sm:grid-cols-2 2xl:grid-cols-3">
-                    {list.map((n) => (
-                      <NoteCard key={n.slug} note={n} lead={category(path)?.index === n.slug} />
-                    ))}
-                  </div>
-                </section>
-              ))}
-            </div>
+            <TopicGrid nodes={taxonomy} count={count} />
           )}
         </div>
       </div>
     </main>
   )
+}
+
+/**
+ * What sits directly under a part or topic. The introducing note leads; subtopics follow as cards, since they are the
+ * main structure; then the notes filed in the topic itself, in reading order. A heading names each kind only when
+ * both are present.
+ */
+function Contents({ node, shown, count }: { node: CategoryNode; shown: NoteMeta[]; count: (path: string) => number }) {
+  const lead = node.index ? shown.find((n) => n.slug === node.index) : undefined
+  const own = shown.filter((n) => n.category === node.path && n.slug !== lead?.slug)
+  const both = node.children.length > 0 && own.length > 0
+  if (!lead && !node.children.length && !own.length)
+    return (
+      <p className="rounded-lg border border-dashed p-8 text-center text-sm text-muted-foreground">
+        No notes here yet.
+      </p>
+    )
+  return (
+    <div className="space-y-8">
+      {lead && (
+        <div className="grid gap-3 sm:grid-cols-2 2xl:grid-cols-3">
+          <NoteCard note={lead} lead />
+        </div>
+      )}
+      {node.children.length > 0 && (
+        <section className="space-y-3">
+          {both && <SectionHeading>Topics</SectionHeading>}
+          <TopicGrid nodes={node.children} count={count} />
+        </section>
+      )}
+      {own.length > 0 && (
+        <section className="space-y-3">
+          {both && <SectionHeading>Notes</SectionHeading>}
+          <div className="grid gap-3 sm:grid-cols-2 2xl:grid-cols-3">
+            {own.map((n) => (
+              <NoteCard key={n.slug} note={n} />
+            ))}
+          </div>
+        </section>
+      )}
+    </div>
+  )
+}
+
+/** Parts or subtopics as cards that open them: title, description and the notes inside. */
+function TopicGrid({ nodes, count }: { nodes: CategoryNode[]; count: (path: string) => number }) {
+  return (
+    <div className="grid gap-3 sm:grid-cols-2 2xl:grid-cols-3">
+      {nodes.map((c) => {
+        const n = count(c.path)
+        return (
+          <Link
+            key={c.path}
+            to={browseUrl({ c: c.path })}
+            className={cn(
+              'group flex flex-col gap-1.5 rounded-lg border p-4 transition-colors hover:border-foreground/30 hover:bg-muted/40',
+              n === 0 && 'opacity-60',
+            )}
+          >
+            {c.roman && (
+              <span className="pl-6 text-[11px] font-semibold tracking-wider text-muted-foreground uppercase">
+                {c.roman}
+              </span>
+            )}
+            <div className="flex items-start gap-2">
+              <TopicIcon icon={c.icon} className="mt-0.5 size-4 shrink-0 text-muted-foreground" aria-hidden />
+              <span className="leading-snug font-medium group-hover:underline">{c.title}</span>
+              <ChevronRight className="mt-0.5 ml-auto size-4 shrink-0 text-muted-foreground" aria-hidden />
+            </div>
+            <span className="pl-6 text-xs text-muted-foreground tabular-nums">
+              {n} {n === 1 ? 'note' : 'notes'}
+              {c.children.length > 0 && ` · ${c.children.length} ${c.children.length === 1 ? 'topic' : 'topics'}`}
+            </span>
+            {c.description && <p className="line-clamp-2 pl-6 text-sm text-muted-foreground">{c.description}</p>}
+          </Link>
+        )
+      })}
+    </div>
+  )
+}
+
+/** Filter results: every matching note under the selection, grouped under its topic in taxonomy order. */
+function Matches({ matches, selected }: { matches: NoteMeta[]; selected?: string }) {
+  const groups = useMemo(() => {
+    // An index note leads the group of the category it introduces, which may be an ancestor of its own folder.
+    const inView = (path: string) => !selected || path === selected || path.startsWith(`${selected}/`)
+    const byCategory = new Map<string, NoteMeta[]>()
+    for (const n of matches) {
+      const introduces = indexOfCategory(n.slug)
+      const home = introduces && inView(introduces) ? introduces : n.category
+      byCategory.set(home, [...(byCategory.get(home) ?? []), n])
+    }
+    return [...byCategory.entries()]
+      .sort(([a], [b]) => categoryOrder(a) - categoryOrder(b))
+      .map(([path, list]) => [path, indexFirst(list, path)] as const)
+  }, [matches, selected])
+
+  if (!matches.length)
+    return (
+      <p className="rounded-lg border border-dashed p-8 text-center text-sm text-muted-foreground">
+        No notes match. Clear a filter or try another word.
+      </p>
+    )
+  return (
+    <div className="space-y-8">
+      {groups.map(([path, list]) => (
+        <section key={path} className="space-y-3">
+          <SectionHeading>{groupTitle(path, selected)}</SectionHeading>
+          <div className="grid gap-3 sm:grid-cols-2 2xl:grid-cols-3">
+            {list.map((n) => (
+              <NoteCard key={n.slug} note={n} lead={category(path)?.index === n.slug} />
+            ))}
+          </div>
+        </section>
+      ))}
+    </div>
+  )
+}
+
+function SectionHeading({ children }: { children: ReactNode }) {
+  return <h2 className="text-xs font-semibold tracking-wider text-muted-foreground uppercase">{children}</h2>
 }
 
 function KindChip({
@@ -299,36 +297,15 @@ function KindChip({
 }
 
 /** Below `lg`: the selected topic as one button, opening the topic rail in a sheet that closes on a choice. */
-function TopicPicker({ params }: { params: BrowseParams }) {
+function TopicPicker({ params, title, total }: { params: BrowseParams; title: string; total: number }) {
   const [open, setOpen] = useState(false)
-  const selectedPart = params.part
-    ? taxonomy.find(
-        (p) =>
-          p.path === params.part ||
-          String(p.num) === params.part ||
-          `part-${p.num}` === params.part ||
-          p.title.toLowerCase() === params.part?.toLowerCase(),
-      )
-    : undefined
-  const title = params.c
-    ? (category(params.c)?.title ?? params.c)
-    : selectedPart
-      ? `${selectedPart.roman ? `${selectedPart.roman}: ` : ''}${selectedPart.title}`
-      : 'All notes'
-  const hideStubs = useHideStubs()
-  const count = withoutStubs(notes, hideStubs).filter((n) => {
-    if (params.c && !inCategory(n, params.c)) return false
-    if (selectedPart && !inCategory(n, selectedPart.path)) return false
-    return true
-  }).length
-
   return (
     <Sheet open={open} onOpenChange={setOpen}>
       <SheetTrigger render={<Button variant="outline" className="w-full justify-between" />}>
         <span className="flex min-w-0 items-center gap-2">
           <FolderTree className="size-4 text-muted-foreground" aria-hidden />
           <span className="truncate">{title}</span>
-          <span className="text-xs text-muted-foreground tabular-nums">{count}</span>
+          <span className="text-xs text-muted-foreground tabular-nums">{total}</span>
         </span>
         <ChevronDown className="size-4 opacity-60" aria-hidden />
       </SheetTrigger>
@@ -344,6 +321,20 @@ function TopicPicker({ params }: { params: BrowseParams }) {
   )
 }
 
+/** A part by its path, number, `part-N` or title, as old `?part=` links named it. */
+function findPart(part: string): CategoryNode | undefined {
+  return taxonomy.find(
+    (p) =>
+      p.path === part ||
+      String(p.num) === part ||
+      `part-${p.num}` === part ||
+      p.title.toLowerCase() === part.toLowerCase(),
+  )
+}
+
+/** A topic's title, with its numeral when it is a part. */
+const partTitle = (node: CategoryNode) => `${node.roman ? `${node.roman}: ` : ''}${node.title}`
+
 /**
  * A group's heading: its category trail below the selected topic, which the rail already shows. A group that is the
  * selected category itself keeps its own title.
@@ -354,7 +345,7 @@ function groupTitle(path: string, selected?: string): string {
   return (below.length ? below : trail.slice(-1)).map((c) => c.title).join(' › ')
 }
 
-/** Old category URLs (/c/…) open the explorer filtered to that category. */
+/** Old category URLs (/c/…) open the explorer at that category. */
 export function CategoryRedirect() {
   const path = useParams()['*'] ?? ''
   return <Navigate to={browseUrl({ c: path })} replace />

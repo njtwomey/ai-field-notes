@@ -2,25 +2,184 @@
 title: 'Time-to-event data'
 kind: concept
 summary: 'Time-to-event data record how long until an event, with a censoring indicator for cases still waiting. Time-varying covariates, landmarking and competing risks shape how the table is built.'
-tags: [data, statistics]
-aliases: []
+tags: [data, statistics, survival-analysis, censoring, time-to-event]
+aliases: [survival data, duration data, event history data]
 requires: []
-related: [censoring, survival-and-hazard-functions, cox-proportional-hazards]
-references: []
-status: stub
-updated: 2026-10-11
+related: [censoring, survival-and-hazard-functions, cox-proportional-hazards, panel-data, delayed-and-partial-labels]
+references: [kaplan1958, cox1972, vanhouwelingen2007]
+status: draft
+updated: 2026-10-12
 ---
 
+import { TimeToEventDataVisualizer } from './TimeToEventDataVisualizer'
+
 <Definition>
-To be written.
+**Time-to-event data** (also known as **survival data** or **duration data**) measure the elapsed time
+$T \in \mathbb{R}^+$ from a well-defined temporal origin $t=0$ until the occurrence of a discrete target event (such as
+clinical mortality, customer churn, hardware failure, or credit default) <Cite id="kaplan1958, cox1972" />. The
+distinguishing characteristic of time-to-event data is **censoring**: for a substantial fraction of observations, the
+follow-up window terminates before the event occurs, yielding only an inequality constraint on the true duration
+($T > C$).
 </Definition>
+
+In classical supervised learning, targets are either real-valued scalar regression quantities $y \in \mathbb{R}$ or
+categorical class labels $y \in \{0, 1\}$. Time-to-event data break both paradigms. Treating duration as an ordinary
+regression target ignores the fact that censored cases have not yet experienced the event; conversely, converting the
+task into a binary classification label over a fixed time horizon discards duration granularity and biases against cases
+lost to follow-up.
+
+Proper tabular curation of time-to-event records requires formatting durations and censoring indicators, managing
+dynamic time-varying covariates via counting-process tables, dynamic risk evaluation via landmarking, and accounting for
+competing risks.
+
+<TimeToEventDataVisualizer />
 
 ## Durations and censoring indicators
 
+Each observation in a standard right-censored survival table is represented as a triplet
+$(T_i^*, \delta_i, \mathbf{x}_i)$:
+
+$$
+T_i^* = \min(T_i, C_i)
+$$
+
+$$
+\delta_i = \mathbb{I}(T_i \le C_i) = \begin{cases} 1 & \text{if event observed (uncensored)} \\ 0 & \text{if right-censored} \end{cases}
+$$
+
+where $T_i$ represents the latent true event time, $C_i$ represents the latent censoring time, and
+$\mathbf{x}_i \in \mathbb{R}^D$ is the baseline covariate vector.
+
+### Types of censoring
+
+- **Right censoring:** The most prevalent form in industrial machine learning. The observation period ends at time $C_i$
+  without observing the event. The true event time is known only to satisfy $T_i > C_i$.
+- **Left censoring:** The event occurred at some unknown point prior to observation entry ($T_i < C_i$). For example, a
+  patient tests positive for antibodies at study entry, but the exact infection date is unobserved.
+- **Interval censoring:** The event is known only to have occurred within a bounded time interval $[L_i, R_i]$. This
+  arises frequently in routine medical screenings or periodic machinery inspections.
+
+### Non-informative censoring
+
+Valid statistical modeling of survival data requires the **non-informative (independent) censoring assumption**:
+
+$$
+T_i \perp C_i \mid \mathbf{x}_i
+$$
+
+Conditional on observed features $\mathbf{x}_i$, an individual censored at time $c$ must face the same subsequent risk
+of experiencing the event as individuals who remain under observation past time $c$. If censoring is informative (e.g.,
+severely ill patients systematically drop out of a clinical study due to declining functional status), standard survival
+estimators become severely biased unless explicitly corrected.
+
+### Nonparametric survival estimation (Kaplan-Meier)
+
+The empirical survival function $S(t) = P(T > t)$ is estimated nonparametrically via the product-limit estimator
+<Cite id="kaplan1958" />:
+
+$$
+\hat{S}(t) = \prod_{t_i \le t} \left(1 - \frac{d_i}{n_i}\right)
+$$
+
+where $t_i$ denotes unique event timestamps, $d_i$ is the number of events occurring at $t_i$, and $n_i$ is the size of
+the active **risk set** immediately prior to $t_i$ (the number of individuals alive and uncensored). As individuals are
+censored, they exit the risk set $n_i$ without triggering an event $d_i$, properly adjusting downstream survival
+fractions.
+
 ## Time-varying covariates
+
+In many applications, features evolve dynamically throughout the follow-up window. A patient's blood pressure fluctuates
+across weekly visits, and a subscriber's platform usage shifts across billing periods.
+
+### Counting-process (Start-Stop) format
+
+To incorporate time-varying covariates into tabular survival models (such as extended Cox proportional hazards models
+<Cite id="cox1972" />), the data must be reshaped from a single row per entity into multiple non-overlapping interval
+rows in **start-stop format**:
+
+$$
+\text{Row}_{i, k} = (i, t_{\text{start}}, t_{\text{stop}}, \delta_{i, k}, \mathbf{z}_i(t_{\text{start}}))
+$$
+
+where:
+- Interval $[t_{\text{start}}, t_{\text{stop}})$ defines the window during which the covariate vector
+  $\mathbf{z}_i(t_{\text{start}})$ remained constant.
+- The event indicator $\delta_{i, k} = 0$ for all intermediate intervals, and $\delta_{i, k} = 1$ only in the final
+  interval if the event occurred at $t_{\text{stop}}$.
+- At any event time $t$, an individual enters the risk set $n(t)$ if and only if
+  $t_{\text{start}} \le t < t_{\text{stop}}$.
+
+### Internal vs external covariates
+
+- **External covariates:** Factors whose future path does not depend on the individual's survival status (e.g., seasonal
+  temperature, macro-economic interest rates).
+- **Internal covariates:** Biological or behavioral measurements generated directly by the individual (e.g., organ
+  biomarker levels, user engagement scores). Internal covariates exist only while the entity remains alive and active,
+  requiring careful interpretation when estimating causal interventions.
 
 ## Landmarking
 
+While counting-process formats support semi-parametric hazard modeling, training modern tree-based ensembles (such as
+XGBoost, LightGBM, or Random Survival Forests) directly on longitudinal event sequences is challenging due to interval
+dependencies and varying sequence lengths.
+
+**Landmarking** provides a robust tabular framework for dynamic risk prediction <Cite id="vanhouwelingen2007" />:
+
+1. **Select a landmark time $s > 0$ and prediction horizon $\Delta t$:** For instance, predicting 2-year mortality
+   ($\Delta t = 24\text{ mo}$) dynamically for patients who have already survived to year 1 ($s = 12\text{ mo}$).
+2. **Filter the landmark cohort:** Retain only entities who are event-free and under active observation at time $s$
+   ($T_i^* > s$). Individuals who suffered the event or were censored prior to $s$ are excluded.
+3. **Freeze historical covariates up to $s$:** Aggregate and summarize all dynamic covariates measured over the window
+   $[0, s]$ (e.g., trajectory slope, maximum biomarker value, cumulative visits).
+4. **Define the target over the horizon window:** For the landmark cohort, the target outcome is evaluated over
+   $[s, s + \Delta t]$:
+   - Event observed in $(s, s + \Delta t] \implies Y = 1$
+   - Survives past $s + \Delta t \implies Y = 0$
+   - Censored before $s + \Delta t \implies$ Handled via inverse probability of censoring weighting (IPCW).
+
+Landmarking eliminates immortal time bias, avoids future information leakage, and converts complex longitudinal history
+into fixed-width tabular matrices suitable for standard ML pipelines.
+
 ## Competing risks
 
+In many practical survival settings, an individual can experience one of several mutually exclusive event types, such
+that the occurrence of one event precludes the occurrence of all others. Examples include:
+- A clinical trial where patients can experience disease recurrence or death from unrelated causes.
+- Customer retention where a subscriber can voluntarily churn, face involuntary fraudulent termination, or upgrade to an
+  enterprise tier.
+
+### The fallacy of 1 - KM
+
+A common pitfall is to isolate the primary event of interest (e.g., voluntary churn) and treat all competing events
+(e.g., fraudulent termination) as ordinary right-censoring. 
+
+Treating competing events as censoring violates the independent censoring assumption: an individual whose account is
+terminated for fraud is structurally prevented from ever voluntarily churning. The naive Kaplan-Meier complement
+$1 - \hat{S}_{\text{naive}}(t)$ assumes that "censored" competing cases remain capable of experiencing voluntary churn
+at the same rate as active accounts, severely overestimating the true event probability.
+
+### Cumulative Incidence Function (CIF)
+
+Under competing risks with $K$ causes, the proper quantity of interest is the **Cumulative Incidence Function (CIF)**:
+
+$$
+\text{CIF}_k(t) = P(T \le t, \text{Cause} = k) = \int_0^t S(u^-) h_k(u) \, du
+$$
+
+where $h_k(u)$ is the cause-specific hazard of event $k$, and $S(u^-)$ is the overall event-free survival probability
+across all causes. The subdistribution hazard approach formalized by Fine and Gray directly models covariates against
+the CIF rather than the cause-specific hazard.
+
 ## Pitfalls
+
+- **Converting survival into naive binary classification:** Labeling entities as $Y=1$ if an event occurred within 12
+  months and $Y=0$ otherwise discards censoring timing. An entity censored at month 2 without an event is mislabeled as
+  $Y=0$, introducing severe label contamination.
+- **Immortal time bias:** Conditioned analyses that assign a treatment label based on events occurring after the start
+  of follow-up (e.g., comparing patients who received a heart transplant against those who did not, where transplant
+  recipients had to survive long enough to find a donor) induce artificial survival advantages.
+- **Naive dropping of right-censored cases:** Removing all instances where $\delta_i = 0$ leaves only early-failing
+  units, heavily skewing duration distributions and causing severe underestimation of true survival times.
+- **Look-ahead leakage in landmarking:** Including diagnostic tests, prescriptions, or log-in events that occurred after
+  the landmark cutoff $s$ when assembling feature vectors for the landmark cohort leaks future knowledge into historical
+  predictors.

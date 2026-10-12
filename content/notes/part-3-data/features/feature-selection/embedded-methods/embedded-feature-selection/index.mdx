@@ -1,24 +1,148 @@
 ---
 title: 'Embedded methods'
 kind: concept
-summary: 'Embedded methods select features as part of training: sparsity penalties drive some coefficients to zero, and tree ensembles and permutation tests rank features by how much the model relies on them.'
+summary: 'Embedded methods perform feature selection directly within model training, using sparsity-inducing regularization penalties or internal tree partition splits to eliminate uninformative variables while jointly estimating predictive parameters.'
 tags: [data, feature-engineering, sparsity]
-aliases: []
-requires: []
-related: [feature-selection, feature-attribution-methods]
-references: []
-status: stub
+aliases: [embedded feature selection, embedded methods, sparse regularization, lasso feature selection, tree-based feature selection]
+requires: [feature-selection]
+related: [filter-feature-selection, wrapper-feature-selection, feature-importance-measures, selection-inside-cross-validation]
+references: [tibshirani1996, zou2005, breiman2001, strobl2007]
+status: draft
 updated: 2026-10-11
 ---
 
+import EmbeddedSparsityExplorer from './EmbeddedSparsityExplorer';
+
 <Definition>
-To be written.
+An **embedded method** is a feature selection mechanism built directly into the mathematical optimization or induction
+objective of the learning algorithm itself. Rather than evaluating features in isolation prior to model fitting
+(filters) or iteratively wrapping a search loop around external training procedures (wrappers), embedded approaches
+simultaneously learn model parameters and decide feature inclusion in a single unified training process.
 </Definition>
 
-## Sparsity penalties
+Embedded feature selection combines the computational efficiency of filter methods with the model-aware synergy capture
+of wrapper methods. The two predominant paradigms in machine learning are **sparsity-inducing regularizers** (such as
+$L_1$ penalized linear and generalized linear models) and **structural partitioning trees** (where recursive impurity
+minimization naturally drops features that offer no split advantage).
 
-## Tree-based importances
+<EmbeddedSparsityExplorer />
 
-## Permutation importance
+## Sparsity penalties and linear regularization
 
-## Pitfalls
+In linear regression and generalized linear models, regularized loss minimization augments empirical loss with a penalty
+term $\Omega(w)$:
+
+$$
+\min_{w \in \mathbb{R}^p, b \in \mathbb{R}} \frac{1}{2n} \sum_{i=1}^n \left( y_i - w^T x_i - b \right)^2 + \lambda \Omega(w)
+$$
+
+The choice of penalty norm $\Omega(w)$ governs whether the model performs true feature selection or mere shrinkage.
+
+### Lasso ($L_1$ penalty)
+
+The Least Absolute Shrinkage and Selection Operator (Lasso <Cite id="tibshirani1996" />) penalizes the sum of absolute
+parameter weights:
+
+$$
+\Omega_{\text{Lasso}}(w) = \|w\|_1 = \sum_{j=1}^p |w_j|
+$$
+
+Because the $L_1$ norm is non-differentiable at the coordinate origins $w_j = 0$, its subgradient contains a set-valued
+sign function:
+
+$$
+\partial |w_j| = \begin{cases} \{1\} & \text{if } w_j > 0 \\ \{-1\} & \text{if } w_j < 0 \\ [-1, 1] & \text{if } w_j = 0 \end{cases}
+$$
+
+For an orthogonal design matrix, the coordinate descent update reduces to the closed-form **soft-thresholding
+operator**:
+
+$$
+\hat{w}_j^{\text{Lasso}} = \mathcal{S}_{\lambda}\left( \hat{w}_j^{\text{OLS}} \right) = \text{sign}\left( \hat{w}_j^{\text{OLS}} \right) \max\left( \left|\hat{w}_j^{\text{OLS}}\right| - \lambda, 0 \right)
+$$
+
+Any feature whose unconstrained least-squares magnitude $|\hat{w}_j^{\text{OLS}}| \le \lambda$ has its weight snapped
+strictly to zero, pruning that feature entirely from the model.
+
+### Ridge ($L_2$ penalty) versus Lasso geometry
+
+In contrast to Lasso, Ridge regression uses the squared Euclidean norm
+$\Omega_{\text{Ridge}}(w) = \frac{1}{2} \|w\|_2^2 = \frac{1}{2} \sum_{j=1}^p w_j^2$. Under orthonormal design, Ridge
+applies multiplicative attenuation:
+
+$$
+\hat{w}_j^{\text{Ridge}} = \frac{1}{1 + \lambda} \hat{w}_j^{\text{OLS}}
+$$
+
+Geometrically, the constraint region of Ridge is a smooth hypersphere without corners. The elliptical contours of the
+residual sum of squares almost never touch the coordinate axes at tangent points where $w_j = 0$. Consequently, Ridge
+shrinks coefficients towards zero but **never performs exact feature selection**—all $p$ variables remain in the fitted
+model.
+
+### Elastic Net ($L_1 + L_2$ mixture)
+
+Lasso suffers from two distinct structural limitations:
+1. In high-dimensional regimes where $p > n$, Lasso can select at most $n$ non-zero features before saturating.
+2. If two features $X_j$ and $X_k$ are highly correlated, Lasso arbitrarily retains one and drives the other to zero,
+   yielding unstable active sets across data resamplings.
+
+The Elastic Net <Cite id="zou2005" /> resolves this by blending $L_1$ and $L_2$ regularization:
+
+$$
+\Omega_{\text{ElasticNet}}(w) = \alpha \|w\|_1 + \frac{1 - \alpha}{2} \|w\|_2^2, \quad \alpha \in (0, 1)
+$$
+
+The strictly convex $L_2$ component enforces a **grouping effect**, ensuring that strongly collinear features share
+similar weights and are retained or eliminated together, while the $L_1$ component induces sparsity.
+
+## Tree-based embedded selection
+
+Decision trees (CART, ID3, C4.5) and their ensemble extensions (Random Forests, Gradient Boosted Decision Trees) perform
+greedy embedded feature selection through recursive partitioning.
+
+At each decision node $t$, the algorithm searches over all available features $j$ and candidate thresholds $\theta$ to
+find the split $s^* = (j^*, \theta^*)$ that maximizes the impurity drop:
+
+$$
+\Delta i(s, t) = i(t) - \frac{N_{t_L}}{N_t} i(t_L) - \frac{N_{t_R}}{N_t} i(t_R)
+$$
+
+where $i(t)$ represents Gini impurity, entropy, or mean squared error.
+
+Features that fail to provide sufficient impurity reduction across any node in the tree are never split upon. In shallow
+trees (e.g., max depth 3 or 4) or heavily pruned trees, vast swathes of uninformative features are discarded without
+ever entering the model's decision logic.
+
+### Random forests and feature subsampling
+
+In Random Forests <Cite id="breiman2001" />, each split considers only a random subset of $m \approx \sqrt{p}$ features.
+This random column subsampling prevents dominant features from masking moderately informative variables across all
+trees, distributing split opportunities and providing an embedded mechanism for evaluating feature utility across
+diverse structural contexts.
+
+## Permutation importance and attribution-based filtering
+
+Once embedded models are trained, feature reliance can be quantified through two main metrics:
+
+1. **Mean Decrease in Impurity (MDI)**: Sums the total impurity reduction $\Delta i(s, t)$ achieved by splits on feature
+   $j$ across all trees.
+2. **Mean Decrease in Accuracy / Permutation Importance (MDA)**: Shuffles the values of feature $j$ within out-of-bag
+   (OOB) or validation samples to break its relationship with $Y$. The degradation in model performance directly
+   measures feature importance.
+
+Features whose permutation importance is zero or slightly negative (indicating that random noise performs better than
+the actual column) can be pruned in a second-stage embedded screening pass.
+
+## Pitfalls and structural hazards
+
+1. **Feature scale dependency in $L_1$ regularization**: The Lasso penalty treats a unit difference in $w_j$ identically
+   across all dimensions. If feature $X_1$ is measured in millimeters and $X_2$ in kilometers, their coefficient scales
+   differ by $10^6$, causing the penalty to aggressively zero out $X_2$. Features must always be standardized to zero
+   mean and unit variance prior to regularized fitting.
+2. **Arbitrary collinear dropping in pure Lasso**: In genomic and sensor settings with multicollinear clusters, Lasso
+   arbitrarily picks a single representative feature from each cluster and drops the rest. While mathematically sparse,
+   this active set is scientifically unstable and sensitive to minor sample perturbations.
+3. **Cardinality and continuous split bias in tree MDI**: Gini impurity reduction exhibits severe bias toward continuous
+   variables and high-cardinality categorical variables because they offer exponentially more candidate split points
+   $\theta$, inflating their chance of producing spurious in-sample impurity drops <Cite id="strobl2007" />. Out-of-bag
+   permutation importance (MDA) or honest validation trees should be used instead of raw training Gini.

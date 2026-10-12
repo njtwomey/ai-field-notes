@@ -1,0 +1,142 @@
+---
+title: 'Grid worlds and discrete environments'
+kind: concept
+summary: 'Environments with discrete states and actions, such as grid worlds, frozen lake and taxi, are small enough to solve exactly with dynamic programming and inspect every policy.'
+tags: [data, reinforcement-learning, environments, dynamic-programming, tabular-methods]
+aliases: [grid worlds, tabular RL environments, discrete MDPs, FrozenLake, CliffWalking, Taxi-v3]
+requires: []
+related: [classic-control-environments, continuous-control-benchmarks, offline-reinforcement-learning-datasets]
+references: [sutton2018, dietterich2000, brockman2016]
+status: draft
+updated: 2026-10-11
+---
+
+import { GridWorldsVisualizer } from './GridWorldsVisualizer'
+
+<Definition>
+A **grid world** (or discrete tabular environment) is a Markov Decision Process (MDP)
+$\mathcal{M} = \langle \mathcal{S}, \mathcal{A}, \mathcal{P}, \mathcal{R}, \gamma \rangle$ defined over finite,
+countable state and action spaces ($|\mathcal{S}| < \infty, |\mathcal{A}| < \infty$) <Cite id="sutton2018" />
+<Cite id="brockman2016" />:
+
+$$
+\mathbf{P} \in [0, 1]^{|\mathcal{S}| \times |\mathcal{A}| \times |\mathcal{S}|}, \quad \mathbf{R} \in \mathbb{R}^{|\mathcal{S}| \times |\mathcal{A}|}.
+$$
+
+Because state transitions and reward functions can be stored explicitly as lookup matrices, these environments permit
+exact analytical solutions via Bellman equations and Dynamic Programming, isolating core algorithmic properties from
+function approximation errors.
+</Definition>
+
+## What these environments test
+
+Discrete grid benchmarks serve as foundational sanity checks for reinforcement learning theory:
+
+1. **Exact policy iteration**: Algorithms can be compared directly against the ground-truth optimal value function
+   $V^*(\mathbf{s})$ computed via Value Iteration:
+
+   $$
+   V_{k+1}(s) = \max_{a \in \mathcal{A}} \sum_{s' \in \mathcal{S}} \mathcal{P}(s' \mid s, a) \left[ \mathcal{R}(s, a, s') + \gamma V_k(s') \right].
+   $$
+
+2. **On-policy versus off-policy safety**: Environments with catastrophic failure boundaries (such as cliffs) expose the
+   fundamental behavioral divergence between on-policy algorithms (SARSA) and off-policy algorithms (Q-learning) under
+   exploration noise.
+3. **Stochastic dynamics**: Slippery surfaces test whether temporal-difference learning converges under stochastic
+   transition probabilities where action execution is unreliable.
+4. **Hierarchical task abstractions**: Complex multi-step domains (such as Taxi) evaluate state abstractions, option
+   frameworks, and sub-goal discovery <Cite id="dietterich2000" />.
+
+## Catalogue
+
+### Grid worlds
+Standard rectangular spatial lattices (e.g. $4 \times 4$ up to $20 \times 20$) partitioned into cells:
+- **State space**: Coordinate tuples $s = (x, y) \in \{0, \dots, W-1\} \times \{0, \dots, H-1\}$.
+- **Action space**: Cardinal compass directions
+  $\mathcal{A} = \{\text{North}, \text{South}, \text{East}, \text{West}\}$.
+- **Dynamics**: Attempting to move into an outer boundary or obstacle wall leaves the agent in its current cell.
+
+### Frozen lake (`FrozenLake-v1`)
+A grid of ice tiles where some cells are frozen walkable surfaces ($F$) while others are fatal holes ($H$):
+- **Stochastic transition dynamics**: The ice is slippery. When an action is taken (e.g. Move East), the transition
+  kernel executes the requested action with probability $1/3$, but slips into perpendicular adjacent directions with
+  probability $1/3$ each:
+
+  $$
+  \mathcal{P}(s_{\text{target}} \mid s, a) = \frac{1}{3}, \quad \mathcal{P}(s_{\text{left}} \mid s, a) = \frac{1}{3}, \quad \mathcal{P}(s_{\text{right}} \mid s, a) = \frac{1}{3}.
+  $$
+
+- **Sparse payoff**: Falling into a hole terminates the episode with reward $0$; reaching the goal tile ($G$) yields
+  reward $+1$. Because rewards are zero everywhere else, random exploration struggles to discover the goal on large
+  grids ($8 \times 8$).
+
+### Cliff walking (`CliffWalking-v0`)
+A $4 \times 12$ grid with start state at $(3, 0)$ and goal at $(3, 11)$. The entire bottom row between start and goal
+$(3, 1 \dots 10)$ is an open cliff:
+- **Reward structure**: Each standard step costs $-1$. Stepping into the cliff incurs a catastrophic penalty of $-100$
+  and teleports the agent back to the start cell $(3, 0)$.
+- **The SARSA vs Q-learning dilemma**:
+  - **Q-learning (Off-policy)**: Learns the mathematically optimal shortest path of 13 steps that hugs the edge of the
+    cliff ($y=2$). However, under $\epsilon$-greedy execution, exploratory actions routinely cause the agent to fall off
+    the cliff, yielding poor online return.
+  - **SARSA (On-policy)**: Updates values based on the action actually executed
+    ($Q(S_t, A_t) \leftarrow Q(S_t, A_t) + \alpha [R_{t+1} + \gamma Q(S_{t+1}, A_{t+1}) - Q(S_t, A_t)]$). SARSA factors
+    its own exploration noise into state evaluations, learning the longer but safe path along the upper perimeter
+    ($y=0$), avoiding cliff falls completely.
+
+### Taxi (`Taxi-v3`)
+Introduced by Dietterich <Cite id="dietterich2000" /> to evaluate hierarchical reinforcement learning:
+- **State space**: $5 \times 5 = 25$ grid positions, $5$ passenger locations (four designated colored depots
+  $\{R, G, Y, B\}$ plus "inside taxi"), and $4$ destination depots, yielding:
+
+  $$
+  |\mathcal{S}| = 25 \times 5 \times 4 = 500 \text{ discrete states}.
+  $$
+
+- **Action space**:
+  $\mathcal{A} = \{\text{South}, \text{North}, \text{East}, \text{West}, \text{Pickup}, \text{Dropoff}\}$.
+- **Reward structure**: Step penalty $-1$, successful passenger dropoff $+20$, illegal pickup or dropoff $-10$.
+  Successful navigation requires composing multi-step subtasks: navigate to passenger $\to$ execute pickup $\to$
+  navigate to destination $\to$ execute dropoff.
+
+### MiniGrid / Gymnasium-MiniGrid
+Procedurally generated, partially observable discrete environments:
+- Agents observe egocentric $7 \times 7$ tile patches rather than the global state.
+- Tasks include unlocking color-coded doors with matched keys, pushing movable obstacles, and navigating stochastic
+  mazes, bridging discrete grid logic with deep reinforcement learning and POMDPs.
+
+The interactive visualizer below demonstrates state transitions, cliff-edge risk, and path trade-offs across these
+discrete environments:
+
+<GridWorldsVisualizer />
+
+## Interfaces and versions
+
+In Gymnasium, discrete environments provide direct access to the transition dynamics model for tabular planning
+algorithms:
+
+```python
+import gymnasium as gym
+
+env = gym.make("FrozenLake-v1", is_slippery=True)
+# Direct access to the transition distribution matrix P[state][action]:
+transitions = env.unwrapped.P[current_state][action]
+# Returns list of tuples: [(probability, next_state, reward, terminated)]
+for prob, next_s, r, done in transitions:
+    print(f"P({next_s} | s, a) = {prob}, Reward = {r}")
+```
+
+This transparency enables exact model-based algorithms (Dynamic Programming, Monte Carlo Tree Search, Prioritized
+Sweeping) to run without interacting with the physical environment.
+
+## Known problems and limitations
+
+1. **Combinatorial explosion (Curse of dimensionality)**: While grid worlds work well for small coordinate grids, adding
+   state factors (e.g., multiple passengers, keys, or dynamic obstacles) causes state cardinality to explode
+   exponentially ($|\mathcal{S}| = \prod_i K_i$), making tabular $Q$-tables infeasible.
+2. **Artificial coordinate flattening**: Standard implementations index states as flattened scalars
+   ($s = y \cdot W + x$). A standard tabular agent treats state $12$ and state $13$ as completely unrelated categorical
+   tokens, discarding spatial geometric proximity unless 2D convolutional or tile features are supplied.
+3. **Exploration saturation**: Because discrete grids have small diameters, simple random walks eventually stumble upon
+   the goal on small grids, failing to reflect the extreme exploration bottlenecks of realistic robotic or continuous
+   control tasks.

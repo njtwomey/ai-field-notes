@@ -3,24 +3,130 @@ title: 'Feature hashing'
 kind: concept
 summary: 'Feature hashing maps category levels or tokens to a fixed number of columns by a hash function, with a second hash for the sign. It needs no vocabulary and handles unseen levels, at the cost of collisions and of mapping back to names.'
 tags: [data, feature-engineering]
-aliases: []
-requires: []
-related: [feature-hashing-for-text, categorical-encoding]
-references: []
-status: stub
+aliases: [feature hashing, hashing trick, hashed features, HashingVectorizer]
+requires: [categorical-encoding]
+related: [feature-hashing-for-text, high-cardinality-and-unseen-levels]
+references: [weinberger2009]
+status: draft
 updated: 2026-10-11
 ---
 
 <Definition>
-To be written.
+**Feature hashing** (also known as the **hashing trick**) is a categorical and text encoding technique that maps
+arbitrary discrete string tokens or feature identifiers to fixed-length numerical vector coordinates using a
+pseudo-random hash function, completely bypassing the need to build or store a vocabulary dictionary.
 </Definition>
+
+In web-scale machine learning applications (e.g. ad click-through rate prediction, spam filtering, search ranking, and
+natural language processing), feature spaces frequently encompass millions or billions of distinct identifiers: user
+IDs, search query n-grams, URL paths, and device fingerprints. Maintaining an explicit string-to-index mapping
+dictionary requires gigabytes of shared memory across distributed clusters and fails when new, previously unseen tokens
+arrive in production streams.
+
+Feature hashing solves these challenges by computing vector indices on the fly in $\mathcal{O}(1)$ time.
+
+import { FeatureHashingVisualizer } from './FeatureHashingVisualizer';
+
+<FeatureHashingVisualizer />
 
 ## The hashing trick
 
-## Signed hashes
+Instead of building a vocabulary of size $V$, feature hashing fixes the output dimension to a pre-allocated array of $B$
+buckets (typically $B = 2^b$, such as $B = 2^{20} \approx 10^6$).
 
-## Collisions and table size
+For each categorical string token $s$ with associated value $v$ (where $v = 1$ for binary category presence, or term
+frequency for text), a uniform pseudo-random hash function $h(s)$ (such as MurmurHash3 or CityHash) maps the token
+directly to an integer column index:
 
-## Unseen levels
+$$
+j = h(s) \pmod B
+$$
 
-## Pitfalls
+The feature value $v$ is then accumulated into the $j$-th index of the sparse vector:
+
+$$
+\phi_j(x) = \sum_{s: h(s) \equiv j} v(s)
+$$
+
+Because $h(s)$ is a deterministic mathematical function, any system can compute the exact feature vector for an incoming
+record without consulting a central dictionary.
+
+## Signed hashes and unbiased inner products
+
+When two distinct tokens $s \ne s'$ hash to the same bucket index ($h(s) = h(s')$), an unsigned hash simply adds their
+values together: $\phi_j = v(s) + v(s')$. Over millions of tokens, frequent collisions accumulate systematic positive
+bias in inner products and dot-product similarity metrics.
+
+Kilian Weinberger et al. <Cite id="weinberger2009" /> resolved this by introducing a **second independent hash
+function** $\xi(s): \mathcal{S} \to \{-1, +1\}$ to determine the sign of the contribution:
+
+$$
+\phi_j(x) = \sum_{s: h(s) \equiv j} \xi(s) \cdot v(s)
+$$
+
+### Theoretical guarantee
+Let $\phi(u)$ and $\phi(v)$ be the hashed feature vectors of two instances $u$ and $v$. The expected value of their
+inner product under random hash functions satisfies:
+
+$$
+\mathbb{E}_{\xi, h}[\langle \phi(u), \phi(v) \rangle] = \langle u, v \rangle
+$$
+
+Because $\mathbb{E}[\xi(s)] = 0$ and $\xi(s)$ is independent of $\xi(s')$ for distinct tokens $s \ne s'$:
+
+$$
+\mathbb{E}[\xi(s) \xi(s')] = \mathbb{E}[\xi(s)] \cdot \mathbb{E}[\xi(s')] = 0 \quad \text{for } s \ne s'
+$$
+
+The sign hash transforms destructive additive collisions into **zero-mean unbiased noise**, preserving inner product
+expectations across large linear models, logistic regression, and kernel methods.
+
+## Collisions, table sizing, and the birthday paradox
+
+The primary operational parameter in feature hashing is the table size $B$:
+
+- **The Birthday Paradox:** If $N$ distinct active features are hashed into $B$ buckets, the probability of at least one
+  collision exceeds $50\%$ as soon as $N \approx \sqrt{B}$. For example, with $B = 10{,}000$ buckets, collisions begin
+  occurring with as few as $118$ tokens.
+- **Collision rate scaling:** The expected number of pairwise collisions scales as:
+  $$
+  \mathbb{E}[\text{collisions}] = \frac{N(N - 1)}{2B}
+  $$
+- **Optimal sizing:** For linear models with $L_1$ or $L_2$ regularization, models tolerate moderate collision rates
+  surprisingly well because the learning algorithm naturally adjusts the shared weight $w_j$ or relies on independent
+  non-colliding companion features. Standard practice sets
+  $B \ge 10 \times \text{expected active features per instance}$, frequently using $B = 2^{18}$ to $2^{22}$.
+
+## Unseen levels and streaming efficiency
+
+Feature hashing offers unparalleled operational advantages in large-scale data engineering:
+
+1. **Zero memory overhead:** The transformer maintains zero state dictionaries. Deploying to memory-constrained edge
+   devices or microservices requires zero vocabulary synchronization.
+2. **Infinite streaming vocabularies:** As new users, products, or misspelled search terms appear in production streams,
+   they are hashed directly without altering matrix dimensions or triggering pipeline retraining.
+3. **Multi-task and multi-tenant hashing:** Multiple categorical streams or distinct clients can be hashed into a shared
+   linear model by prepending namespace prefixes (e.g. `hash("client_A:device_mobile")` vs
+   `hash("client_B:device_mobile")`).
+
+## Irreversibility and interpretability trade-off
+
+The fundamental cost of feature hashing is the **loss of interpretability**.
+
+Hash functions are one-way cryptographic or non-invertible mappings. Once a logistic regression model learns a large
+positive weight $w_{42{,}915} = +3.8$, it is mathematically impossible to invert bucket $42{,}915$ back to the original
+string token without maintaining an expensive reverse-lookup index.
+
+If production systems require regulatory auditability, feature importance attribution (e.g. SHAP), or human-readable
+explanation of credit denial reasons, feature hashing is contraindicated.
+
+## Pitfalls and failure modes
+
+1. **Hashing low-cardinality features into small tables:** Applying feature hashing with $B = 8$ to a 10-level
+   categorical variable causes heavy collision interference that degrades simple linear fits compared to standard
+   one-hot encoding.
+2. **Ignoring sign hashing:** Using an unsigned hashing function introduces positive inner-product drift that degrades
+   convergence in gradient descent and support vector machines.
+3. **Non-uniform hash functions:** Using poor hash functions (such as naive modulo arithmetic on integer IDs or Java's
+   default `String.hashCode()`) produces non-uniform bucket clustering, vastly increasing local collision frequency
+   compared to cryptographic or universal hashing functions like MurmurHash3.

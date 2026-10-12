@@ -5,22 +5,124 @@ summary: 'Data tests are unit tests for data pipelines: transforms on known inpu
 tags: [data, software]
 aliases: []
 requires: []
-related: [data-validation]
-references: []
-status: stub
+related: [data-monitoring, training-serving-skew, schema-evolution]
+references: [breck2017, sculley2015]
+status: draft
 updated: 2026-10-11
 ---
 
+import { DataTestsVisualizer } from './DataTestsVisualizer'
+
 <Definition>
-To be written.
+**Data tests** are automated, deterministic assertions embedded within continuous integration (CI) and
+extract-transform-load (ETL) pipelines to verify that data transformations, dimensional joins, and partition assignments
+conform to formal structural invariants <Cite id="breck2017" />. Unlike passive production monitoring, data tests
+execute actively at build and ingest time, failing fast and aborting pipelines before corrupted or leaked data can train
+machine learning models <Cite id="sculley2015" />.
 </Definition>
+
+In conventional software development, unit tests exercise code logic against expected input-output contracts. In machine
+learning engineering, code may be completely bug-free while the data it consumes violates silent mathematical
+assumptions—such as Cartesian row inflation, train-test contamination, or floating-point rounding drift. Establishing
+automated data test suites is the primary defense against technical debt in machine learning pipelines.
+
+<DataTestsVisualizer />
 
 ## Unit tests for transforms
 
+Feature engineering pipelines apply complex mathematical and string transformations to raw variables. Transform
+functions must be unit-tested against deterministic edge cases:
+
+1. **Numerical stability tests:**
+   - **Division by zero:** Verifying that ratio features (e.g., click-through rates or loan-to-value ratios) gracefully
+     yield designated sentinel values or zeros when the denominator is zero.
+   - **Non-finite outputs:** Asserting that logarithms (`log1p`), power transforms, and square roots handle zero,
+     negative inputs, and extreme magnitudes without generating `NaN`, `+Inf`, or `-Inf`.
+   - **Out-of-range bounds:** Verifying that scaling transformers (such as MinMax scalers or probability calibrators)
+     map extreme outliers to expected clipping boundaries.
+2. **Text and string normalization:**
+   - Testing tokenizer and sanitization routines against empty strings, whitespace-only inputs, non-breaking spaces,
+     emoji Unicode sequences, and raw HTML payloads.
+3. **Temporal edge cases:**
+   - Asserting that datetime parsing logic correctly computes elapsed intervals across daylight saving time transitions,
+     leap years, timezone offsets, and cross-midnight boundaries.
+
 ## Join invariants
+
+In feature engineering and data warehousing, base entity records are joined against auxiliary dimension tables and
+historical aggregates. Relational joins introduce subtle failure modes that data tests must guard against:
+
+| Join Invariant Test | Formal Verification Rule | Failure Mechanism | Operational Hazard |
+| :--- | :--- | :--- | :--- |
+| **Row Count Preservation** | $\text{RowCount}(A \bowtie_L B) = \text{RowCount}(A)$ | Unintended $1\text{--}\text{many}$ explosion from non-unique keys in $B$ | Duplicates training records; inflates and skews label distributions |
+| **Mandatory Match Rate** | $\frac{1}{\|A\|} \sum_{i \in A} \mathbb{I}(b_i \text{ is null}) < \epsilon$ | Desynchronized ETL runs or broken upstream primary keys | Triggers widespread silent null imputation across downstream features |
+| **Dimension Key Uniqueness** | $\text{CountDistinct}(\text{key}_B) = \text{RowCount}(B)$ | Multiple historical versions active simultaneously without date fencing | Matches ambiguous feature snapshots to single transaction events |
+
+- **Row-count preservation:** In a left outer join between a primary transaction table $A$ and a dimension feature table
+  $B$ ($A \bowtie_L B$), the output row count must strictly equal the primary table row count:
+  $$
+  \text{RowCount}(A \bowtie_L B) = \text{RowCount}(A)
+  $$
+  If the dimension table contains un-deduplicated foreign keys (e.g., multiple active addresses for a single user
+  identifier), a left join silently duplicates rows in $A$. This alters label proportions, duplicates training examples,
+  and inflates sample counts without generating SQL syntax errors.
+- **Null-rate bounds:** Verifying that mandatory foreign key matches do not produce unexpected nulls:
+  $$
+  \frac{1}{|A|} \sum_{i \in A} \mathbb{I}(b_i \text{ is null}) < \epsilon
+  $$
+  Spikes in post-join null rates immediately reveal desynchronized pipeline execution or broken database keys.
 
 ## Split-overlap assertions
 
+The foundational prerequisite of machine learning evaluation is that training, validation, and test partitions are
+strictly mutually exclusive:
+
+$$
+D_{\text{train}} \cap D_{\text{val}} = \emptyset, \quad D_{\text{train}} \cap D_{\text{test}} = \emptyset
+$$
+
+Automated pipeline tests assert split isolation across three distinct dimensions:
+
+1. **Sample identifier intersection:** Verifying that the intersection of record primary keys or SHA-256 content hashes
+   across splits is empty:
+   $$
+   \mathcal{I}_{\text{train}} \cap \mathcal{I}_{\text{test}} = \emptyset
+   $$
+2. **Group-level entity leakage:** When datasets contain multiple records per real-world entity (e.g., multiple medical
+   images per patient, or multiple web sessions per user), naive random splits place records from the same entity into
+   both train and test splits. The CI test asserts that entity group sets share zero overlap:
+   $$
+   \mathcal{G}_{\text{train}} \cap \mathcal{G}_{\text{test}} = \emptyset
+   $$
+3. **Temporal cutoff bounds:** In sequential forecasting and time-series models, future observations must never bleed
+   into past training partitions. The test asserts strict temporal ordering:
+   $$
+   \max_{t \in D_{\text{train}}} t < \min_{t \in D_{\text{test}}} t
+   $$
+
 ## Golden samples
 
+A **golden sample suite** (or regression benchmark) is a compact, version-controlled collection of representative input
+records paired with verified, pre-computed feature representations.
+
+- **Regression detection:** When developers update transformation code, refactor SQL pipelines, or upgrade third-party
+  dependencies (such as upgrading pandas, scikit-learn, or tokenization libraries), the CI test runner executes the
+  candidate pipeline on the golden inputs and compares the resulting tensors against expected baselines:
+  $$
+  \max_{i} \|f_{\text{candidate}}(x_i) - f_{\text{golden}}(x_i)\|_\infty < \epsilon
+  $$
+- **Catching silent numerical drift:** Library minor updates occasionally change internal tie-breaking heuristics,
+  string casing rules, or default regex flags. Golden sample tests catch these subtle regressions before code changes
+  are merged into production branches.
+
 ## Pitfalls
+
+- **Testing code syntax while ignoring data invariants:** Passing standard unit test suites with 100% code coverage
+  while the underlying SQL query silently introduces a 1-to-many Cartesian join explosion.
+- **Exact floating-point equality checks:** Asserting strict bitwise equality (`a == b`) on floating-point feature
+  vectors across diverse hardware architectures; tests should evaluate bounded tolerances using
+  `assert_allclose(a, b, atol=1e-5)` to prevent flaky CI failures.
+- **Running split-overlap tests post-hoc:** Executing leakage audits only after an expensive distributed training run
+  has completed, rather than enforcing assertions as blocking pipeline pre-conditions.
+- **Neglecting to update golden samples deliberately:** Allowing golden sample tests to fail and casually updating the
+  golden baseline without investigating the root cause of the numerical discrepancy.

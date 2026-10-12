@@ -2,27 +2,172 @@
 title: 'Single imputation'
 kind: concept
 summary: 'Single imputation fills each missing value once, by a mean, a regression prediction, a nearest neighbour or a similar donor row. It keeps every row but understates variance and distorts correlations.'
-tags: [data, statistics]
-aliases: []
-requires: []
-related: [missing-data-and-imputation]
-references: []
-status: stub
+tags: [data-preparation, statistics, missing-data]
+aliases: [mean imputation, regression imputation, hot-deck imputation, cold-deck imputation, stochastic imputation, nearest-neighbour imputation]
+requires: [missingness-mechanisms, deletion-methods, expectation, variance-and-covariance]
+related: [missing-data-and-imputation, learned-imputation, multiple-imputation, missing-values-at-prediction-time]
+references: [rubin1987, little2019, vanbuuren2011]
+status: draft
 updated: 2026-10-11
 ---
 
+import { SingleImputationVisualizer } from './SingleImputationVisualizer'
+
 <Definition>
-To be written.
+Given an incomplete dataset $\Ymat \in \mathbb{R}^{N \times D}$ with missingness indicators
+$\Rmat \in \{0, 1\}^{N \times D}$, **single imputation** replaces each missing entry $Y_{ij}$ (where $R_{ij} = 0$) with
+a single synthetic substitute value $\hat{Y}_{ij}$, yielding a completed matrix $\tilde{\Ymat}$:
+
+$$
+\tilde{Y}_{ij} = \begin{cases} Y_{ij} & \text{if } R_{ij} = 1, \\ \hat{Y}_{ij} & \text{if } R_{ij} = 0. \end{cases}
+$$
+
+Downstream statistical models and machine learning algorithms treat the completed matrix $\tilde{\Ymat}$ as if all
+entries were genuinely observed, ignoring the uncertainty of the imputation process.
 </Definition>
 
-## Mean and median fills
+## Unconditional mean and median imputation
 
-## Regression imputation
+The simplest single imputation strategy replaces all missing values in feature $j$ with the univariate sample mean of
+its observed entries:
 
-## Nearest-neighbour imputation
+$$
+\hat{Y}_{ij} = \bar{Y}_j^{\text{obs}} = \frac{1}{N_j^{\text{obs}}} \sum_{i: R_{ij} = 1} Y_{ij}.
+$$
 
-## Hot-deck imputation
+For skewed distributions or ordinal features, the sample median or mode is used instead.
 
-## Effects on variances and correlations
+While mean imputation is trivial to implement and preserves the sample mean $\mathbb{E}[\bar{\tilde{Y}}_j] = \mu_j$
+under MCAR, it introduces two severe mathematical distortions into the dataset:
+
+### 1. Variance deflation
+Mean imputation artificially spikes the probability density of feature $j$ at $\bar{Y}_j^{\text{obs}}$. Because every
+imputed entry has an empirical deviation of zero ($(\hat{Y}_{ij} - \bar{\tilde{Y}}_j)^2 = 0$), the sample variance of
+the completed variable is systematically shrunk:
+
+$$
+s_{\tilde{Y}}^2 = \frac{1}{N - 1} \sum_{i=1}^N (\tilde{Y}_i - \bar{\tilde{Y}})^2 = \frac{N_{\text{obs}} - 1}{N - 1} s_{Y_{\text{obs}}}^2 \approx (1 - p_{\text{mis}}) s_{Y_{\text{obs}}}^2,
+$$
+
+where $p_{\text{mis}} = 1 - N_{\text{obs}} / N$ is the proportion of missing entries. If $30\%$ of values are missing,
+mean imputation deflates the estimated feature variance by approximately $30\%$.
+
+### 2. Correlation attenuation
+When calculating the covariance between the imputed feature $\tilde{Y}$ and another fully observed variable $X$, the
+imputed rows contribute zero co-movement ($(\tilde{Y}_i - \bar{Y})(X_i - \bar{X}) = 0$). Consequently, both covariance
+and Pearson correlation are diluted towards zero:
+
+$$
+\widehat{\text{Cov}}(X, \tilde{Y}) \approx (1 - p_{\text{mis}}) \widehat{\text{Cov}}(X, Y_{\text{obs}}), \qquad r_{X\tilde{Y}} \approx \sqrt{1 - p_{\text{mis}}}\, r_{XY}.
+$$
+
+Linear classifiers or regression models trained on mean-imputed data underestimate the true predictive strength of the
+feature.
+
+## Regression imputation: deterministic versus stochastic
+
+Rather than using an unconditional mean, regression imputation conditions on observed predictor variables $\Xmat$. A
+regression model $\hat{Y} = f(\Xmat; \hat{\betavec})$ is fitted on complete cases $\mathcal{S}_{\text{obs}}$.
+
+### Deterministic regression imputation
+Deterministic imputation sets the replacement value to the model's point prediction:
+
+$$
+\hat{Y}_{i, \text{mis}} = f(\xvec_{i, \text{obs}}; \hat{\betavec}).
+$$
+
+While this corrects the mean shift under MAR, it creates an opposite pathology to mean imputation: **it overestimates
+correlations**. Every imputed value falls precisely on the regression hyperplane with zero residual error ($e_i = 0$).
+The residual variance $\sigma_\epsilon^2$ is artificially compressed, and the observed correlation between predictors
+and the target is artificially inflated toward unity.
+
+### Stochastic regression imputation
+Stochastic regression imputation restores natural dispersion by drawing an explicit residual from the estimated error
+distribution <Cite id="rubin1987" />:
+
+$$
+\hat{Y}_{i, \text{mis}} = f(\xvec_{i, \text{obs}}; \hat{\betavec}) + \epsilon_i^*, \qquad \epsilon_i^* \sim \mathcal{N}\left(0, \hat{\sigma}_\epsilon^2\right).
+$$
+
+By injecting Gaussian noise with variance matching the model's residual mean squared error, stochastic regression
+preserves both the conditional mean and the bivariate covariance structure under MAR.
+
+<SingleImputationVisualizer />
+
+## Nearest-neighbour and donor methods
+
+Non-parametric single imputers substitute values directly from similar observed records without positing a global linear
+relationship.
+
+### $k$-nearest neighbour ($k$-NN) imputation
+For each incomplete row $\xvec_i$, the algorithm computes the distance to all fully observed rows across the shared
+subset of observed features. The missing entry is estimated by the distance-weighted average of the $k$ closest donor
+rows $\mathcal{N}_k(i)$:
+
+$$
+\hat{Y}_{ij} = \frac{\sum_{m \in \mathcal{N}_k(i)} w_{im} Y_{mj}}{\sum_{m \in \mathcal{N}_k(i)} w_{im}}, \qquad w_{im} = \frac{1}{d(\xvec_{i, \text{obs}}, \xvec_{m, \text{obs}})}.
+$$
+
+$k$-NN imputation naturally captures non-linear relationships and local cluster structures. However, its query time
+scales as $\mathcal{O}(N_{\text{mis}} \cdot N_{\text{obs}} \cdot D)$, making it computationally prohibitive for
+large-scale production scoring unless accelerated by approximate nearest neighbor indexes.
+
+### Hot-deck and cold-deck imputation
+- **Hot-deck imputation:** Replaces a missing entry with an observed value drawn randomly from a donor observation
+  within the same dataset, typically matched within discrete adjustment cells (e.g., matching on
+  `[age_bucket, postal_code]`). Because donors are real observations, hot-deck imputation preserves discrete domains,
+  natural bounding constraints, and non-Gaussian multimodality.
+- **Cold-deck imputation:** Replaces missing values using an external reference source, such as a prior census, fixed
+  reference lookup table, or historical baseline dataset.
+
+## Missing indicator augmentation
+
+In supervised learning pipelines, single imputation is frequently paired with binary missingness indicator variables
+(also known as the missingness pattern method):
+
+$$
+M_{ij} = 1 - R_{ij} = \begin{cases} 1 & \text{if } Y_{ij} \text{ was originally missing}, \\ 0 & \text{if } Y_{ij} \text{ was observed}. \end{cases}
+$$
+
+The downstream model receives the augmented feature vector $[\tilde{Y}_{ij}, M_{ij}]$. In linear models:
+
+$$
+\hat{y} = \beta_0 + \beta_Y \tilde{Y} + \beta_M M.
+$$
+
+When $Y$ is missing ($M=1$), $\tilde{Y}$ is set to an arbitrary constant (such as the mean $\bar{Y}$ or 0). The
+coefficient $\beta_M$ absorbs the mean difference between missing and non-missing cohorts. While highly effective in
+predictive machine learning, missing indicator augmentation introduces structural parameter bias in causal inference
+settings unless strict conditional independence assumptions hold.
+
+## The fundamental inferential flaw: false certainty
+
+The decisive theoretical limitation of single imputation is that **it invents certainty**. 
+
+A completed dataset $\tilde{\Ymat}$ contains $N$ rows, but only $N_{\text{obs}}$ pieces of empirical data were actually
+measured. Standard statistical procedures applied to $\tilde{\Ymat}$:
+1. Treat the sample size as $N$, artificially inflating the nominal degrees of freedom.
+2. Ignore the fact that the imputed entries $\hat{Y}_{ij}$ are guesses subject to estimation uncertainty.
+
+As a result, standard error formulas underestimate the true standard errors:
+
+$$
+\widehat{\text{SE}}(\hat{\theta})_{\text{single}} < \text{SE}_{\text{true}}(\hat{\theta}).
+$$
+
+Confidence intervals constructed from single-imputed datasets suffer from severe under-coverage (a nominal $95\%$
+confidence interval may cover the true parameter only $70\%$ to $80\%$ of the time), and hypothesis tests exhibit
+inflated Type I error rates <Cite id="rubin1987" /> <Cite id="little2019" />. Resolving this inferential defect requires
+multiple imputation.
 
 ## Pitfalls
+
+- **Data leakage across training and test splits:** Computing the imputation mean $\bar{Y}^{\text{obs}}$ over the
+  combined dataset before train/test splitting leaks test set information into training features. The imputer must be
+  fit strictly on the training partition and transformed onto validation and test partitions.
+- **Mean imputation on multi-modal or zero-inflated variables:** Imputing the sample mean into zero-inflated features
+  (such as insurance claim amounts or count variables) injects impossible, fractional values into regions where true
+  probability density is zero.
+- **Relying on single imputation for confidence intervals:** Reporting $p$-values and standard errors computed on a
+  single-imputed dataset as if they were derived from genuine observations produces falsely significant scientific
+  conclusions.

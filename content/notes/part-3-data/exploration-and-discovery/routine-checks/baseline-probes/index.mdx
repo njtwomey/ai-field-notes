@@ -6,21 +6,110 @@ tags: [data, diagnostics]
 aliases: []
 requires: []
 related: []
-references: []
-status: stub
-updated: 2026-10-11
+references: [tukey1977, zhang2017]
+status: draft
+updated: 2026-10-12
 ---
 
+import { BaselineProbesVisualizer } from './BaselineProbesVisualizer'
+
 <Definition>
-To be written.
+A baseline probe is a minimal, transparent statistical model—such as a majority-class classifier, single-variable
+decision stump, or unregularized linear regression—deployed early in exploratory data analysis not to achieve peak
+benchmark accuracy, but to function as an active diagnostic instrument that exposes target leakage, label corruption,
+and trivial shortcuts in the data.
 </Definition>
+
+In exploratory data analysis, passive visualizations (histograms, scatter matrices) struggle to detect multivariate
+dependencies and subtle information leakage across hundreds of columns <Cite id="tukey1977" />. Fitting a trivial model
+acts like a sonar probe pinging the dataset: when a 1-variable decision tree achieves $99.8\%$ accuracy, or a linear
+regressor learns on randomly shuffled labels, the failure is not in the algorithm—it reveals fatal structural flaws in
+the data collection pipeline <Cite id="zhang2017" />.
+
+<BaselineProbesVisualizer />
 
 ## A simple model as an instrument
 
+Before designing complex deep neural networks or gradient boosted ensembles, an engineer should fit three trivial
+reference baselines:
+1. **The Dummy Baseline:** Always predicting the majority class (classification) or the empirical target mean
+   (regression). This sets the absolute floor of performance: any candidate model failing to beat the majority class
+   baseline provides negative utility.
+2. **The Linear / Logistic Baseline:** A simple ridge regression or logistic model. Linear coefficients reveal feature
+   signs and relative scale sensitivities.
+3. **The Shallow Tree Baseline:** A depth-3 decision tree. Tree splits expose non-linear threshold discontinuities and
+   dominant interaction pairs.
+
+If the performance difference between a single decision tree and an ensemble of 500 boosted trees is under $0.5\%$, the
+predictive problem is dominated by a few linear features; investing weeks in neural architecture search will yield
+negligible marginal returns.
+
 ## Residual review
+
+In classical exploratory data analysis, John Tukey emphasized that data equals fit plus residual
+<Cite id="tukey1977" />:
+
+$$
+\text{Data} = \text{Fit} + \text{Residual} \iff y_i = \hat{y}_i + e_i
+$$
+
+Plotting the residuals $e_i = y_i - \hat{y}_i$ against predicted values $\hat{y}_i$ and individual input features $x_i$
+acts as a sensitive diagnostic:
+- **Heteroskedasticity (Fanning Out):** Residual variance increasing systematically with $\hat{y}$ indicates
+  multiplicative error or log-normal targets requiring log transforms ($y \to \log y$).
+- **Non-Linear Curvature:** A parabolic or sinusoidal U-shape in the residual plot indicates omitted polynomial terms or
+  threshold effects that the linear baseline failed to capture.
+- **Isolated Extreme Residuals:** Individual points with colossal residual errors ($|e_i| \gg 4\sigma$) highlight data
+  entry errors, corrupted sensor readings, or flipped binary labels.
 
 ## Shuffled-label checks
 
+A profound sanity check introduced by Chiyuan Zhang and colleagues is the **shuffled-label permutation test**
+<Cite id="zhang2017" />:
+1. Randomly permute the target vector $y$ across training rows, destroying all true causal and statistical associations
+   between features $X$ and labels $y$.
+2. Fit the baseline model on this noise dataset.
+3. Evaluate the fitted model on held-out validation rows (whose labels are also permuted).
+
+Under healthy data hygiene, the validation score must collapse to random guessing ($50\%$ accuracy in balanced binary
+classification, $R^2 \le 0$ in regression).
+- **If validation accuracy remains high on shuffled labels:** The dataset contains catastrophic **identifier leakage**.
+  Features contain unique user IDs, transaction hashes, or row-ordering correlations that allow the model to memorize
+  instances across the train-validation split.
+- **If training accuracy reaches 100% while validation accuracy is 50%:** Deep networks can memorize arbitrary random
+  labels <Cite id="zhang2017" />. If a model fits shuffled labels as quickly as real labels, the architecture is
+  memorizing instances rather than extracting generalizable structural invariants.
+
 ## Single-feature checks
 
+A powerful probe for target leakage is fitting $D$ independent, single-variable models—one for each column in the
+feature matrix:
+
+$$
+f_j(x) = \operatorname{fit}\left(\{x_{ij}, y_i\}_{i=1}^N\right) \quad \text{for } j = 1, \dots, D
+$$
+
+Ranking features by their standalone validation performance reveals two critical extremes:
+1. **The Leaky Super-Feature:** A single feature achieves near-perfect predictive accuracy ($>95\%$ AUC or $R^2 > 0.90$)
+   in isolation. In production systems, such features are almost always **post-event leaks**:
+   - An `account_cancellation_survey_date` column in a customer churn prediction model.
+   - An `invoice_disputed_flag` populated by customer support after a payment failed.
+   - A sequential transaction ID assigned chronologically after fraud was confirmed.
+2. **Zero-Signal Columns:** Features that achieve performance strictly equal to or worse than random guessing across all
+   evaluation metrics. These columns can be pruned immediately, reducing dimensionality and noise.
+
 ## Pitfalls
+
+- **Confusing Baseline Underfitting with Data Quality:** Concluding that features have no signal when a linear baseline
+  achieves poor performance, missing that the true relationship is strongly non-linear (e.g., XOR patterns or radial
+  clusters). Always complement linear probes with shallow decision trees.
+- **Evaluating Single-Feature Probes on Cross-Correlated Sets:** Discarding a feature because its univariate probe
+  performed poorly, ignoring that the feature has massive predictive power when interacted with another feature (e.g.,
+  latitude and longitude individually have low predictive correlation with real estate price, but jointly specify
+  geographic location).
+- **Overlooking Leakage Masked by Regularization:** Fitting a heavily regularized model that shrinks a leaky feature's
+  weight, allowing the leak to hide unnoticed. Baseline probes must be unregularized to let leaky signals express
+  themselves maximally.
+- **Skipping Majority-Class Reporting on Imbalanced Data:** Reporting that a baseline achieved $99.2\%$ accuracy on
+  fraud detection without checking the dummy baseline, blinding the team to the fact that $99.2\%$ of transactions are
+  non-fraudulent and the model simply predicted zero for every instance.

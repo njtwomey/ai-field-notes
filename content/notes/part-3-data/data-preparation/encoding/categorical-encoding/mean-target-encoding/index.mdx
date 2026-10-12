@@ -3,26 +3,162 @@ title: 'Mean target encoding'
 kind: concept
 summary: 'Mean target encoding replaces each category level by the average target of its training rows, shrunk towards the overall mean. Computed in-sample it leaks the target, so it is fitted out of fold or in an ordered scheme.'
 tags: [data, feature-engineering]
-aliases: []
-requires: []
-related: [categorical-encoding, data-leakage]
-references: []
-status: stub
+aliases: [target encoding, mean encoding, impact coding, likelihood encoding, CatBoost ordered encoding]
+requires: [categorical-encoding]
+related: [data-leakage, high-cardinality-and-unseen-levels, count-and-frequency-encoding]
+references: [micci2001]
+status: draft
 updated: 2026-10-11
 ---
 
 <Definition>
-To be written.
+**Mean target encoding** (also known as impact coding or likelihood encoding) is a categorical feature transformation
+that replaces each category level $c$ with an empirical Bayes estimate of the conditional expectation of the target
+variable given that category $\mathbb{E}[Y \mid X = c]$, shrunk toward the global population mean to guard against
+overfitting on rare levels.
 </Definition>
 
-## Level means
+High-cardinality categorical features (such as user IDs, merchant codes, device fingerprints, or postal zip codes)
+frequently contain thousands of distinct levels. Expanding them into one-hot binary columns creates wide, sparse feature
+spaces that exhaust memory and cause decision trees to perform deep, fragmenting splits.
+
+Mean target encoding maps arbitrary cardinality into a **single informative 1-dimensional continuous feature** that
+orders levels monotonically by their expected response.
+
+import { TargetEncodingVisualizer } from './TargetEncodingVisualizer';
+
+<TargetEncodingVisualizer />
+
+## Level means and conditional expectations
+
+In its unregularized form, the conditional target expectation for category level $c$ is estimated by the empirical
+sample average across all training rows where the category appears:
+
+$$
+\bar{y}_c = \frac{\sum_{i: x_i = c} y_i}{n_c}
+$$
+
+where $n_c = \sum_{i=1}^N \mathbb{I}(x_i = c)$ is the category sample size.
+
+For binary classification targets $y_i \in \{0, 1\}$, $\bar{y}_c$ represents the empirical posterior probability
+$P(Y = 1 \mid X = c)$. For continuous regression targets, $\bar{y}_c$ is the local conditional mean.
 
 ## Smoothing towards the prior
 
-## Out-of-fold encoding
+When a category level is rare (e.g. $n_c = 1$ or $n_c = 2$), its sample average $\bar{y}_c$ suffers extreme estimation
+variance. If a rare credit card merchant has only 1 historical transaction that happened to be fraudulent, setting its
+encoded value to $1.0$ asserts complete certainty of fraud for all future transactions at that merchant.
 
-## Ordered encoding
+Daniele Micci-Barreca <Cite id="micci2001" /> resolved this by introducing **empirical Bayes shrinkage**, weighting the
+local sample mean $\bar{y}_c$ against the unconditioned global dataset prior
+$\bar{y}_{\text{global}} = \frac{1}{N} \sum_{i=1}^N y_i$:
 
-## Weight of evidence
+$$
+S_c = \lambda(n_c) \bar{y}_c + (1 - \lambda(n_c)) \bar{y}_{\text{global}}
+$$
 
-## Pitfalls
+The shrinkage weight $\lambda(n) \in [0, 1]$ is a monotonic function of category sample size:
+
+### 1. M-estimate / pseudo-count shrinkage
+$$
+\lambda(n_c) = \frac{n_c}{n_c + m}
+$$
+
+where $m > 0$ represents the number of pseudo-observations required to grant equal weight between the local category
+mean and the global prior.
+
+### 2. Sigmoidal transition
+$$
+\lambda(n_c) = \frac{1}{1 + e^{-(n_c - k) / f}}
+$$
+
+where $k$ is the inflection sample size threshold and $f$ controls the smoothness of the transition from the global
+prior to the local mean.
+
+When $n_c \to 0$, $\lambda \to 0$ and $S_c \to \bar{y}_{\text{global}}$. When $n_c \to \infty$, $\lambda \to 1$ and
+$S_c \to \bar{y}_c$.
+
+## Target leakage and the singleton trap
+
+A catastrophic failure mode arises when target encoding is computed **in-sample** across the entire training set.
+
+Consider an observation $i$ belonging to a unique category that appears only once in the dataset ($n_c = 1$, a
+singleton). If in-sample target encoding is computed naively without smoothing:
+
+$$
+S_{c_i} = \frac{y_i}{1} = y_i
+$$
+
+The engineered feature literally contains the exact ground-truth label of the instance!
+
+During training:
+1. A decision tree splits on this feature: `if S_c >= 0.5 then predict 1`.
+2. The model achieves zero training loss by memorizing individual singleton labels.
+3. At test time, unseen singleton categories receive the global prior $\bar{y}_{\text{global}}$, rendering the learned
+   split rule completely useless and causing severe generalization collapse.
+
+Even with smoothing, computing target statistics using the observation's own label leaks label information into the
+feature representation.
+
+## Out-of-fold (OOF) encoding
+
+To eliminate in-sample target leakage during model training, production pipelines apply **Out-of-Fold (OOF) target
+encoding** (analogous to $K$-fold cross-validation):
+
+1. Partition the training set $D_{\text{train}}$ into $K$ disjoint folds $\{F_1, \dots, F_K\}$ (typically $K = 5$).
+2. For each fold $k$:
+   - Compute category target statistics exclusively on the remaining $K - 1$ folds:
+     $D^{(-k)} = D_{\text{train}} \setminus F_k$.
+   - Apply the resulting frozen encoding mapping strictly to the validation rows in fold $F_k$.
+3. When encoding the final held-out test set or deploying to production, compute the target encoding dictionary using
+   the entire training dataset $D_{\text{train}}$.
+
+Because each training row's encoded value is calculated without ever observing its own target label, OOF encoding
+shields the model from label leakage.
+
+## Ordered target encoding (CatBoost scheme)
+
+In the gradient boosting framework CatBoost, Prokhorenkova et al. developed **ordered target encoding** to prevent
+target leakage without requiring $K$-fold data partitioning.
+
+The algorithm simulates an online sequential data stream:
+1. Generate a random permutation $\sigma = (\sigma_1, \dots, \sigma_N)$ of the training instances.
+2. For each instance $\sigma_i$, compute its encoded value using only the instances that strictly precede it in the
+   permutation:
+   $$
+   S_{\sigma_i} = \frac{\sum_{j < i, x_{\sigma_j} = x_{\sigma_i}} y_{\sigma_j} + m \cdot \bar{y}_{\text{global}}}{\sum_{j < i, x_{\sigma_j} = x_{\sigma_i}} 1 + m}
+   $$
+
+Because observation $\sigma_i$ only observes historical labels and never its own label, target leakage is mathematically
+eliminated. To reduce variance from a single random ordering, CatBoost averages across multiple independent random
+permutations during tree building.
+
+## Weight of Evidence (WoE)
+
+In credit risk scoring and banking, target encoding for binary default outcomes ($Y \in \{0, 1\}$) is frequently
+parameterized as the **Weight of Evidence** (WoE):
+
+$$
+\operatorname{WoE}(c) = \ln\left( \frac{P(X = c \mid Y = 1)}{P(X = c \mid Y = 0)} \right) = \ln\left( \frac{n_{c, 1} / N_1}{n_{c, 0} / N_0} \right)
+$$
+
+where $n_{c, 1}$ is the number of positive events (defaults) in category $c$ and $N_1$ is total defaults across all
+categories.
+
+- **Linearity in logistic regression:** In logistic regression, substituting $\operatorname{WoE}(c)$ for category $c$
+  produces an exact linear relationship with the log-odds of the target:
+  $\ln\frac{p}{1-p} = \beta_0 + 1.0 \cdot \operatorname{WoE}(c)$.
+- **Information Value (IV):** Paired with Information Value to quantify the predictive separation power of the
+  categorical feature:
+  $$
+  \operatorname{IV} = \sum_{c \in \mathcal{C}} \left( \frac{n_{c, 1}}{N_1} - \frac{n_{c, 0}}{N_0} \right) \cdot \operatorname{WoE}(c)
+  $$
+
+## Pitfalls and failure modes
+
+1. **Target leakage in hyperparameter tuning:** If target encoding is executed prior to `cross_val_score`, validation
+   labels bleed into the training folds, artificially inflating validation accuracy.
+2. **Label drift in non-stationary data:** If the global event rate shifts over time (e.g. fraud attack spike during a
+   holiday), historical target encodings systematically miscalibrate predictions. Use rolling-window target statistics.
+3. **Severe multi-class complexity:** For multi-class classification with $K$ classes, target encoding must generate
+   $K - 1$ separate target mean columns (one per class probability), multiplying feature dimension.

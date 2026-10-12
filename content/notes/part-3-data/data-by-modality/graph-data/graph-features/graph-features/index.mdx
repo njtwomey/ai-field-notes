@@ -2,27 +2,160 @@
 title: 'Node, edge and graph features'
 kind: concept
 summary: 'Graph features describe a node, edge or whole graph by its structure: degrees, centralities, clustering, and positional encodings from Laplacian eigenvectors or random walks.'
-tags: [data, graphs, positional-encoding]
-aliases: []
-requires: []
-related: []
-references: []
-status: stub
-updated: 2026-10-11
+tags: [data, graphs, positional-encoding, spectral-graph-theory]
+aliases: [graph-topological-features, structural-node-features, laplacian-positional-encodings]
+requires: [graph-construction]
+related: [knowledge-graph-data, graph-augmentation]
+references: [page1999pagerank, morris2019weisfeiler, dwivedi2020benchmarking, lim2022signnet]
+status: draft
+updated: 2026-10-12
 ---
 
+import { GraphFeaturesVisualizer } from './GraphFeaturesVisualizer'
+
 <Definition>
-To be written.
+**Graph features** are mathematical descriptors that quantify the local, regional, and global topological roles of
+nodes, edges, or entire graphs independently of domain-specific semantic attributes. They range from classical
+structural statistics (degrees, centralities, clustering coefficients) to spectral coordinate systems (Laplacian
+eigenvectors) and stochastic diffusion signatures (random-walk return probabilities).
 </Definition>
+
+Standard Message Passing Neural Networks (MPNNs) rely on local permutation-invariant neighbor aggregation. However,
+Morris et al. proved that standard MPNNs cannot distinguish non-isomorphic graphs that confuse the 1-Weisfeiler-Lehman
+(1-WL) color refinement test—such as distinguishing strongly regular graphs or counting simple cycle motifs like
+triangles and squares <Cite id="morris2019weisfeiler" />. Augmenting raw node tensors with explicit structural features
+and spectral positional encodings breaks 1-WL expressivity barriers and equips graph models with global spatial
+awareness <Cite id="dwivedi2020benchmarking, lim2022signnet" />.
+
+<GraphFeaturesVisualizer client:load />
 
 ## Degree and centrality
 
+Centrality indices quantify the structural importance, influence, or topological bridging capacity of a node
+$v \in \mathcal{V}$:
+
+1. **Degree Centrality**: The basic measure of local connectivity:
+   $$
+   C_D(v) = \frac{d_v}{|\mathcal{V}| - 1} = \frac{\sum_{u} A_{vu}}{|\mathcal{V}| - 1}
+   $$
+2. **Eigenvector Centrality**: Assigns importance proportional to the sum of the centralities of its neighbors. Defined
+   via the principal eigenvector of adjacency matrix $\mathbf{A}$:
+   $$
+   \lambda_1 \mathbf{x} = \mathbf{A} \mathbf{x} \quad \implies \quad x_v = \frac{1}{\lambda_1} \sum_{u \in \mathcal{N}(v)} x_u
+   $$
+3. **PageRank Centrality**: Mitigates runaway hub amplification in directed graphs by introducing a random teleportation
+   damping factor $\alpha \approx 0.85$ <Cite id="page1999pagerank" />:
+   $$
+   \mathbf{p} = \alpha \mathbf{A} \mathbf{D}^{-1} \mathbf{p} + (1 - \alpha) \frac{1}{|\mathcal{V}|} \mathbf{1}
+   $$
+4. **Betweenness Centrality**: Quantifies the fraction of all-pairs shortest paths passing through node $v$, identifying
+   critical bottleneck bridges and articulation points:
+   $$
+   C_B(v) = \sum_{s \neq v \neq t \in \mathcal{V}} \frac{\sigma_{st}(v)}{\sigma_{st}}
+   $$
+   Where $\sigma_{st}$ is the total number of shortest paths from source $s$ to target $t$, and $\sigma_{st}(v)$ is the
+   count passing through $v$. Evaluated via Brandes' algorithm in $\mathcal{O}(|\mathcal{V}||\mathcal{E}|)$ time.
+
 ## Clustering and motifs
+
+Higher-order network motifs quantify dense local subgraphs and triangulation patterns:
+
+- **Local Clustering Coefficient**: Measures the proportion of edges existing between the immediate neighbors of node
+  $v$, reflecting local triad closure:
+  $$
+  C(v) = \frac{2 e_v}{d_v(d_v - 1)} = \frac{(\mathbf{A}^3)_{vv}}{d_v(d_v - 1)}
+  $$
+  Where $(\mathbf{A}^3)_{vv}$ computes the number of closed 3-cycles (triangles) centered on node $v$.
+- **Graphlet Degree Vectors (GDVs)**: Generalizes clustering by counting the occurrence of all non-isomorphic 2- to
+  5-node induced subgraph orbits touching node $v$, providing a rich 73-dimensional topological fingerprint.
+- **1-Weisfeiler-Lehman (1-WL) Invariance**: The 1-WL algorithm iteratively updates discrete node colors via multiset
+  hashing <Cite id="morris2019weisfeiler" />:
+  $$
+  c_v^{(t+1)} = \operatorname{HASH}\left( c_v^{(t)}, \, \{\{ c_u^{(t)} : u \in \mathcal{N}(v) \}\} \right)
+  $$
+  Because standard GCN and GAT message passing is bounded by 1-WL expressivity, supplying explicit triangle counts or
+  GDVs directly enables networks to detect chemical rings and dense social communities.
 
 ## Laplacian positional encodings
 
+Unlike Euclidean sequences where sinusoidal positional encodings define canonical order, graphs possess no natural
+canonical orientation. **Laplacian Positional Encodings (LapPE)** define global coordinate systems using spectral graph
+theory <Cite id="dwivedi2020benchmarking" />:
+
+1. Compute the normalized symmetric graph Laplacian:
+   $$
+   \mathbf{L}_{\text{sym}} = \mathbf{I} - \mathbf{D}^{-1/2} \mathbf{A} \mathbf{D}^{-1/2}
+   $$
+2. Perform spectral eigendecomposition:
+   $$
+   \mathbf{L}_{\text{sym}} = \mathbf{U} \mathbf{\Lambda} \mathbf{U}^\top, \quad \mathbf{\Lambda} = \operatorname{diag}(\lambda_1, \lambda_2, \dots, \lambda_n)
+   $$
+   Where $0 = \lambda_1 \le \lambda_2 \le \dots \le \lambda_n \le 2$.
+3. The smallest $k$ non-trivial eigenvectors $\mathbf{u}_2, \dots, \mathbf{u}_{k+1}$ (omitting the trivial constant
+   $\mathbf{u}_1$) serve as smooth, low-frequency spatial coordinates across the graph manifold.
+
+- **The Sign and Basis Ambiguity Problem**: Eigendecomposition is ambiguous up to sign inversion: if $\mathbf{u}_k$ is
+  an eigenvector, $-\mathbf{u}_k$ is an equally valid eigenvector
+  ($\mathbf{L}(\pm \mathbf{u}_k) = \lambda_k (\pm \mathbf{u}_k)$). Naively feeding $\mathbf{u}_k$ into an MLP causes
+  random sign flips between train and test inference. Models resolve this via **SignNet** <Cite id="lim2022signnet" />:
+  $$
+  \operatorname{SignNet}(\mathbf{U}) = \sum_{k=1}^K \rho\left( \phi(\mathbf{u}_k) + \phi(-\mathbf{u}_k) \right)
+  $$
+  Enforcing strict invariance to sign inversions.
+
 ## Random-walk encodings
+
+**Random Walk Positional Encodings (RWPE)** construct structural node descriptors without the sign and basis ambiguities
+of spectral eigendecomposition:
+
+Let $\mathbf{P} = \mathbf{D}^{-1} \mathbf{A}$ denote the random-walk transition probability matrix. The $k$-step return
+probability measures the likelihood that a random walk starting at node $v$ lands back on $v$ after exactly $k$ steps:
+
+$$
+p_{vv}^{(k)} = (\mathbf{P}^k)_{vv}
+$$
+
+Concatenating return probabilities across horizons $k \in \{1, 2, \dots, K\}$ yields the RWPE vector:
+
+$$
+\mathbf{r}_v = \left[ p_{vv}^{(1)}, \, p_{vv}^{(2)}, \, \dots, \, p_{vv}^{(K)} \right] \in \mathbb{R}^K
+$$
+
+- **Substructure Signatures**:
+  - $p_{vv}^{(1)} = 0$ for all simple graphs without self-loops.
+  - $p_{vv}^{(2)} = \sum_{u \in \mathcal{N}(v)} \frac{1}{d_v d_u}$, capturing reciprocal 2-step back-and-forth
+    diffusion.
+  - $p_{vv}^{(3)} > 0$ if and only if node $v$ participates in at least one 3-cycle (triangle).
+  - On bipartite graphs (which contain no odd cycles), $p_{vv}^{(2m+1)} = 0$ identically for all odd steps.
 
 ## Whole-graph features
 
+When predicting whole-graph properties (e.g., molecular toxicity, protein solubility, circuit timing):
+
+1. **Global Topological Invariants**: Graph diameter $\operatorname{diam}(\mathcal{G}) = \max_{u,v} d(u,v)$, spectral
+   radius $\rho(\mathbf{A}) = \lambda_{\max}(\mathbf{A})$, algebraic connectivity $\lambda_2(\mathbf{L}_{\text{sym}})$,
+   and average path length.
+2. **Readout and Pooling Operations**:
+   - *Global Sum/Mean Pooling*: $\mathbf{h}_{\mathcal{G}} = \sum_{v \in \mathcal{V}} \mathbf{h}_v$. Simple, but
+     conflates large sparse graphs with small dense graphs.
+   - *Virtual Supernode*: Adding an artificial global node connected via bidirectional edges to all physical nodes,
+     allowing $O(1)$ long-range information bypass.
+   - *Hierarchical Pooling (DiffPool, SortPool)*: Progressively coarsening graph nodes into soft cluster supernodes
+     across network layers.
+
 ## Pitfalls
+
+1. **Uncorrected Laplacian Sign Flips**: Feeding raw Laplacian eigenvectors directly into standard GNN linear
+   projections without sign-invariant networks (SignNet) causes identical graph configurations to yield completely
+   conflicting feature predictions whenever numerical solvers flip sign conventions <Cite id="lim2022signnet" />.
+2. **Computational Explosion of Betweenness Centrality**: Computing exact all-pairs shortest paths on large graphs
+   ($|\mathcal{V}| > 10^5$) requires $\mathcal{O}(|\mathcal{V}||\mathcal{E}|)$ time and terabytes of memory, rendering
+   exact betweenness intractable. Use randomized sampling approximations (such as KADABRA).
+3. **Degree-Confounded Message Passing**: Standard GCN aggregation
+   $\mathbf{D}^{-1/2} \mathbf{A} \mathbf{D}^{-1/2} \mathbf{H}$ scales message magnitudes inversely with degree
+   square-root. Highly connected hub nodes dominate downstream gradient updates unless normalized via degree-scaling
+   features.
+4. **Ignoring Eigenspace Multiplicities**: When graphs exhibit symmetries (such as grid or cube automorphisms),
+   Laplacian eigenvalues have multiplicity $>1$, forming multidimensional eigenspaces where eigenvectors can rotate
+   arbitrarily. Positional encoders must use basis-invariant networks rather than simple per-eigenvector MLPs
+   <Cite id="lim2022signnet" />.

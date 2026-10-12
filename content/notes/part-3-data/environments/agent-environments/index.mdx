@@ -1,0 +1,119 @@
+---
+title: 'Web, tool-use and embodied agent environments'
+kind: concept
+summary: 'Environments in which agents act through web browsers, operating systems, tools or simulated homes test language-model and embodied agents on grounded multi-step tasks.'
+tags: [data, reinforcement-learning, large-language-models, agent-benchmarks, tool-use, embodied-ai]
+aliases: [agent environments, WebArena, ALFWorld, OSWorld, Habitat, embodied agent environments, tool-use benchmarks]
+requires: []
+related: [classic-control-environments, continuous-control-benchmarks, arcade-and-video-game-environments]
+references: [zhou2023webarena, shridhar2021alfworld, savva2019habitat]
+status: draft
+updated: 2026-10-11
+---
+
+import { AgentEnvironmentsVisualizer } from './AgentEnvironmentsVisualizer'
+
+<Definition>
+An **agent environment** is an interactive, open-ended Partially Observable Markov Decision Process (POMDP)
+$\mathcal{M} = \langle \mathcal{S}, \mathcal{A}, \mathcal{O}, \mathcal{P}, \mathcal{R}, \Omega \rangle$ where
+observation space $\mathcal{O}$ comprises structured multimodal representations (DOM trees, accessibility trees,
+terminal streams, GUI screenshots, or 3D sensor scans) and action space $\mathcal{A}$ comprises programmatic tool
+invocations (browser operations, bash shell commands, Python scripts, or robotic actuators)
+<Cite id="zhou2023webarena" />.
+</Definition>
+
+## What these environments test
+
+Unlike static language modeling or code generation benchmarks (such as HumanEval or MMLU), agent environments evaluate
+autonomous foundation models in closed-loop interactive systems:
+
+1. **Grounded tool use and API calling**: The agent must translate natural language instructions (e.g., "Find the
+   cheapest direct flight from London to Tokyo departing next Friday and send a confirmation email") into syntactically
+   valid, contextually appropriate tool invocations (`browser.click(id)`, `bash("curl ...")`, `api.send_message(...)`).
+2. **Long-horizon state tracking**: Tasks require coordinating sequences of $10\text{--}50$ actions across disparate
+   interfaces (logging into accounts, navigating multi-page checkouts, editing configuration files). Agents must
+   maintain accurate belief states over intermediate progress.
+3. **Closed-loop error recovery**: Real environments introduce stochastic failures: network timeouts, broken selectors,
+   bash permission errors, or unexpected modal dialogs. Effective agents execute **ReAct loops** (Observe $\to$ Reason
+   $\to$ Act): analyzing execution outputs and errors to dynamically adjust their plans rather than rigidly
+   hallucinating progress.
+4. **End-to-end state verification**: Evaluation is determined by verifiable side-effects on the external environment
+   (e.g. verifying a row exists in a database, a file is written with correct permissions, or a robot grasped an
+   object), eliminating subjective LLM-as-a-judge scoring.
+
+## Catalogue
+
+### WebArena
+Developed by Zhou et al. <Cite id="zhou2023webarena" />, WebArena is an end-to-end web environment designed to evaluate
+autonomous web agents:
+- **Fully hosted offline ecosystem**: Hosts complete, functional replicas of major web applications: e-commerce
+  (OneStopShop), developer collaboration (GitLab), forum discussions (Postmill/Reddit), and encyclopedic knowledge
+  (Wikipedia).
+- **Observation and action primitives**: Agents observe web pages via simplified accessibility trees, DOM trees, or
+  visual viewport screenshots. Actions include Playwright primitives: `click(element_id)`, `type(element_id, content)`,
+  `press_key(key_name)`, `hover(element_id)`, `scroll(direction)`, and `goto(url)`.
+- **Side-effect validation**: Tests task completion by inspecting live application backends (e.g. querying GitLab API to
+  verify an issue was assigned to the correct user with the expected label).
+
+### ALFWorld
+Created by Shridhar et al. <Cite id="shridhar2021alfworld" />, ALFWorld bridges high-level linguistic reasoning and 3D
+embodied simulation:
+- **Dual text and visual interface**: Aligns the TextWorld language engine with the 3D photorealistic ALFRED household
+  simulator.
+- **Embodied domestic chores**: Agents execute multi-step domestic tasks ("examine the alarm clock under the desk lamp",
+  "heat a slice of bread and place it on the dining table").
+- Evaluates spatial tracking, object affordances, state transformations (clean, heat, slice), and container nesting
+  (drawers, cabinets, refrigerators).
+
+### OSWorld
+A benchmark created by Xie et al. evaluating autonomous multimodal agents interacting directly with full desktop
+operating systems:
+- Runs inside isolated Ubuntu virtual machines equipped with real applications: Chrome, LibreOffice Calc/Writer, VS
+  Code, GIMP, and the Linux bash shell.
+- Tasks span complex knowledge work: editing spreadsheets with formulas, modifying Git repositories, converting file
+  formats, and navigating graphical desktop menus via keyboard/mouse events.
+
+### Habitat
+Developed by Meta AI <Cite id="savva2019habitat" /> for embodied visual navigation and mobile robotics:
+- **Extreme simulation throughput**: Leverages highly optimized C++ OpenGL rendering engines to render photorealistic 3D
+  scans of real homes (Matterport3D, Gibson) at over $10{,}000\text{ FPS}$ per GPU.
+- **Embodied challenges**: Evaluates PointNav (navigating to coordinate targets without a prior map), ObjectNav (finding
+  target object categories like "sofa" or "sink"), and Habitat 2.0 / 3.0 mobile manipulation (tidy-up challenges with
+  robot arms and human avatars).
+
+The interactive visualizer below compares open-loop planning against grounded ReAct execution across multi-step agent
+environments:
+
+<AgentEnvironmentsVisualizer />
+
+## Interfaces and versions
+
+In modern agent workflows, environments run inside containerized Docker sandboxes with standardized Gymnasium or
+Playwright interfaces:
+
+```python
+from webarena import WebArenaEnv
+
+env = WebArenaEnv(headless=True)
+obs = env.reset(task_id=104)
+
+# Observation contains URL, accessibility tree string, and viewport image
+print(obs["accessibility_tree"])
+
+# Execute grounded browser action
+action = "click [42]"  # Click element with ID 42
+obs, reward, terminated, info = env.step(action)
+```
+
+## Known problems and limitations
+
+1. **Security and destructive side-effects**: Empowering autonomous LLMs with bash access, file writing, or web
+   credentials carries extreme security risks (prompt injection vulnerabilities, unauthorized data deletion, or
+   unintended financial transactions). All benchmarking must take place within strictly isolated network and filesystem
+   sandboxes.
+2. **Context window consumption**: Complete web accessibility trees or desktop DOM structures often contain tens of
+   thousands of tokens. Injecting full trees at every step quickly consumes LLM context windows and escalates API costs,
+   necessitating semantic pruning and element filtering.
+3. **Flaky assertions and environmental drift**: Web applications and desktop virtual machines can experience rendering
+   latency, dynamic element IDs, or non-deterministic animation delays, causing brittle assertions to fail even when an
+   agent acted rationally.

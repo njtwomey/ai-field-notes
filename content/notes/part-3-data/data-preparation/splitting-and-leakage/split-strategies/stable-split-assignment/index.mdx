@@ -1,24 +1,129 @@
 ---
 title: 'Stable split assignment'
 kind: concept
-summary: 'Assigning each entity to a split by a hash of its identifier keeps assignments fixed as data grow and across reruns, and stratification can be combined with grouping.'
+summary: 'Assigning entities to splits using deterministic hashing of persistent identifiers ensures partitions remain invariant to data growth and identical across reruns without storing lookup tables.'
 tags: [data, model-selection, software]
-aliases: []
-requires: []
-related: [train-validation-and-test-splits]
-references: []
-status: stub
+aliases: [stable split assignment, deterministic splitting, hash based splitting, hash splitting, persistent split assignment]
+requires: [train-validation-and-test-splits]
+related: [matching-the-split-to-deployment, temporal-splits, data-leakage]
+references: [kaufman2012]
+status: draft
 updated: 2026-10-11
 ---
 
+import StableHashingSplitExplorer from './StableHashingSplitExplorer';
+
 <Definition>
-To be written.
+**Stable split assignment** is the data engineering practice of partitioning observations into train, validation, and
+test sets deterministically using a uniform hash function applied to a persistent entity identifier. Unlike
+pseudo-random array shuffling, hash-based splitting guarantees that an entity's assigned partition remains immutable as
+new data is appended and across distributed computing nodes without maintaining central state.
 </Definition>
 
-## Hashing entity identifiers
+In production machine learning pipelines, datasets are dynamic, growing continuously as new transactions, users, and
+logs are ingested. Splitting via random row indexing causes existing observations to churn between training and test
+sets on every rerun, silently corrupting historical benchmarks.
 
-## Splits that survive data growth
+<StableHashingSplitExplorer />
+
+## The failure mode of index-based random shuffling
+
+Standard machine learning examples partition data using pseudo-random index permutation:
+
+```python
+train_df, test_df = train_test_split(df, test_size=0.2, random_state=42)
+```
+
+While reproducible on a static, fixed-size dataset, this approach fails in live production environments:
+
+1. **Partition churn under dataset growth**: When the data pipeline runs next week and $50,000$ newly acquired rows are
+   appended, the total row count shifts from $N$ to $N + 50,000$.
+2. The pseudo-random permutation sequence maps rows to completely new positions. Approximately $20\%$ of existing
+   training users will randomly flip into the test set, and $20\%$ of former test users will flip into the training set.
+3. Models trained on the updated dataset are evaluated on test instances that were previously in the training set,
+   causing subtle, insidious data leakage and invalidating regression tests against earlier model versions.
+
+## Deterministic hashing of entity identifiers
+
+To eliminate partition churn, split assignment must be a pure, stateless function of the entity's canonical primary key
+(such as `user_id`, `patient_uuid`, or `device_serial_number`).
+
+Given an identifier $k$ and an optional salt string $s$:
+
+1. Compute a uniform hash integer:
+   $$
+   h(k) = \text{Hash}(k \,\|\, s) \pmod M
+   $$
+   where $M$ is a large modulus (typically $100$ for integer percentages or $2^{32}$).
+2. Normalize to a unit interval score:
+   $$
+   u(k) = \frac{h(k)}{M} \in [0, 1)
+   $$
+3. Assign partitions based on fixed threshold boundaries:
+   $$
+   \text{split}(k) = \begin{cases} \text{Train} & \text{if } u(k) < 0.80 \\ \text{Validation} & \text{if } 0.80 \le u(k) < 0.90 \\ \text{Test} & \text{if } u(k) \ge 0.90 \end{cases}
+   $$
+
+### Operational guarantees
+
+- **Growth invariance**: When new users arrive, their hash determines their partition. Existing users produce identical
+  hash values and remain permanently in their original partitions.
+- **Stateless distributed execution**: Query engines (SQL, Spark, DuckDB, BigQuery) can evaluate the split assignment
+  inline within a `WHERE` clause without coordinating across worker nodes or loading lookup tables into memory:
+  ```sql
+  WHERE ABS(MOD(FARM_FINGERPRINT(CONCAT(user_id, 'prod_split_v1')), 100)) < 80
+  ```
+- **Implicit group integrity**: Every transaction, click, or sensor reading belonging to `user_id` maps to the exact
+  same partition automatically, eliminating group leakage.
+
+## Choosing hash functions and salting
+
+Not all hashing functions are suitable for stable partitioning:
+
+### The hazard of language built-in hash functions
+
+Python's built-in `hash()` function is non-deterministic by design: to defend against denial-of-service hash-collision
+attacks, Python randomizes `PYTHONHASHSEED` upon process launch. Evaluating `hash("user_123")` will produce completely
+different integers across separate Python runs or across worker processes in a Celery or Ray cluster.
+
+### Recommended hashing algorithms
+
+- **MurmurHash3 / FarmHash**: Non-cryptographic algorithms designed for distributed data engineering. They provide
+  near-perfect avalanche properties (every input bit flips output bits with $50\%$ probability) and execute in
+  nanoseconds per string.
+- **MD5 / SHA-256**: Cryptographically uniform, universally supported across all SQL dialects and data warehouses.
+  Taking the first 8 characters of an MD5 hex digest and converting to an integer produces an ideal uniform bucket.
+
+### Salting for independent experiments
+
+Salting allows generating independent, orthogonal partitioning schemes from the same primary key:
+
+$$
+h_A(k) = \text{Hash}(k \,\|\, \text{"experiment\_alpha"}), \quad h_B(k) = \text{Hash}(k \,\|\, \text{"experiment\_beta"})
+$$
+
+Because good hash functions produce uncorrelated outputs for distinct inputs, user assignment in Experiment A is
+statistically independent of their assignment in Experiment B, preventing confounding across parallel models.
 
 ## Stratifying with groups
 
-## Pitfalls
+While hashing guarantees a uniform marginal distribution of entities across splits, it does not guarantee stratified
+target distributions if class labels are severely imbalanced and clustered within specific entity types (e.g.,
+enterprise accounts having 10,000 transactions with zero defaults, while small accounts have high default rates).
+
+When group stratification is critical:
+1. Aggregate labels to the entity level (e.g., entity churn status).
+2. Segment entities into demographic or label strata.
+3. Apply deterministic hashing within each stratum, ensuring the target ratio is preserved across the resulting
+   partitions.
+
+## Pitfalls and boundary cases
+
+1. **Mutable identifiers**: Hashing must be performed on permanent, immutable keys (such as database UUIDs). Hashing
+   mutable fields (such as email addresses, phone numbers, or usernames) will cause an entity to flip partitions if they
+   update their profile.
+2. **Sequential integer keys with weak hashes**: Simple modulo operations on sequential auto-incrementing integers
+   (`id % 10`) can interact badly with cyclical business patterns (e.g., batch customer signups). Always pass keys
+   through a robust hash function before applying modulo arithmetic.
+3. **Overlapping holdouts across model families**: Reusing the identical salt across different models ensures that the
+   test set remains constant for benchmarking, but risks overfitting the holdout set across long experimentation cycles.

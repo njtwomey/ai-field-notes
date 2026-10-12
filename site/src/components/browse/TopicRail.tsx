@@ -1,94 +1,66 @@
 import { Layers } from 'lucide-react'
+import { useRef } from 'react'
 import { Link } from 'react-router'
 import { TopicIcon } from '@/components/layout/category-icon'
+import { useScrollToCurrent } from '@/hooks/use-scroll-into-panel'
 import { browseUrl, notes, taxonomy, type BrowseParams, type CategoryNode } from '@/lib/content'
 import { useHideStubs } from '@/lib/stubs'
 import { cn } from '@/lib/utils'
 import { inCategory } from './filters'
 
 /**
- * Topics with note counts, organized by the master 8-Part hierarchy.
- * Top-level pillars (subjects) sit directly under each Part.
- * Expanding a subject reveals its child categories (topics).
+ * The topic index: every part, and below them only the branch that holds the current selection, opened down to it.
+ * The current entry is centred in the rail's scroll box whenever the selection changes, so a deep topic opens in view.
  */
 export function TopicRail({ params, onNavigate }: { params: BrowseParams; onNavigate?: () => void }) {
   const hideStubs = useHideStubs()
   const shown = hideStubs ? notes.filter((n) => n.status !== 'stub') : notes
   const count = (path: string) => shown.filter((n) => inCategory(n, path)).length
-  const item = (active: boolean) =>
-    cn(
-      'flex items-center gap-2 rounded-md px-2 py-1 text-xs transition-colors hover:bg-muted',
-      active ? 'bg-muted font-medium text-foreground' : 'text-muted-foreground',
-    )
+  const selected = params.c
+  const navRef = useRef<HTMLElement>(null)
+  useScrollToCurrent(navRef, selected)
 
   return (
-    <nav aria-label="Topics" className="space-y-4">
+    <nav ref={navRef} aria-label="Topics" className="space-y-3">
       <Link
-        to={browseUrl({ ...params, c: undefined, part: undefined })}
+        to={browseUrl({ ...params, c: undefined })}
         onClick={onNavigate}
-        className={cn(item(!params.c && !params.part), 'py-1.5 text-sm')}
+        aria-current={!selected ? 'page' : undefined}
+        className={cn(rowClass(!selected), 'py-1.5 text-sm')}
       >
         <Layers className="size-4 shrink-0" aria-hidden />
-        <span className="flex-1 font-medium">All notes</span>
+        <span className="flex-1 font-medium">All parts</span>
         <span className="text-xs text-muted-foreground tabular-nums">{shown.length}</span>
       </Link>
 
-      <div className="space-y-4 pt-1">
-        {taxonomy.map((part, idx) => {
-          const isPartActive = params.part === part.path && !params.c
-          const partNotesCount = count(part.path)
-
+      <div className="space-y-1 pt-1">
+        {taxonomy.map((part) => {
+          const active = selected === part.path
+          const open = active || onPathTo(selected, part.path)
           return (
             <section key={part.path} className="space-y-1">
               <Link
-                to={browseUrl({ ...params, part: part.path, c: undefined })}
+                to={browseUrl({ ...params, c: part.path })}
                 onClick={onNavigate}
+                aria-current={active ? 'page' : undefined}
                 className={cn(
                   'group flex items-center justify-between gap-1 rounded-md px-2 py-1 text-[11px] font-semibold tracking-wider uppercase transition-colors select-none',
-                  isPartActive
+                  active || open
                     ? 'bg-muted text-foreground'
                     : 'text-muted-foreground/80 hover:bg-muted/60 hover:text-foreground',
                 )}
-                title={`Filter by ${part.roman ?? `Part ${idx + 1}`}: ${part.title}`}
               >
                 <span className="truncate">
                   {part.roman ? `${part.roman} · ` : ''}
                   {part.title}
                 </span>
                 <span className="font-mono text-[10px] text-muted-foreground/70 tabular-nums group-hover:text-foreground">
-                  {partNotesCount}
+                  {count(part.path)}
                 </span>
               </Link>
-
-              {/* Top-level pillars (Subjects) directly under the Part */}
-              <div className="ml-2 space-y-0.5 border-l border-border/40 pl-1.5">
-                {part.children.map((subject) => {
-                  const open = params.c === subject.path || params.c?.startsWith(`${subject.path}/`)
-                  const n = count(subject.path)
-                  return (
-                    <div key={subject.path}>
-                      <Link
-                        to={browseUrl({ ...params, c: subject.path, part: undefined })}
-                        onClick={onNavigate}
-                        className={cn(item(params.c === subject.path), n === 0 && 'opacity-40')}
-                      >
-                        <TopicIcon icon={subject.icon} className="size-3.5 shrink-0" aria-hidden />
-                        <span className="flex-1 truncate">{subject.title}</span>
-                        <span className="text-[10px] tabular-nums">{n}</span>
-                      </Link>
-                      {open && subject.children.length > 0 && (
-                        <Subtopics
-                          nodes={subject.children}
-                          params={params}
-                          onNavigate={onNavigate}
-                          count={count}
-                          item={item}
-                        />
-                      )}
-                    </div>
-                  )
-                })}
-              </div>
+              {open && part.children.length > 0 && (
+                <Subtopics nodes={part.children} params={params} onNavigate={onNavigate} count={count} depth={1} />
+              )}
             </section>
           )
         })}
@@ -97,37 +69,54 @@ export function TopicRail({ params, onNavigate }: { params: BrowseParams; onNavi
   )
 }
 
-/** Subtopics at any depth, shown once their parent subject or topic is open. */
+/** Whether `path` is a strict ancestor of the selection. */
+const onPathTo = (selected: string | undefined, path: string) => !!selected?.startsWith(`${path}/`)
+
+const rowClass = (active: boolean) =>
+  cn(
+    'flex items-center gap-2 rounded-md px-2 py-1 text-xs transition-colors hover:bg-muted',
+    active ? 'bg-muted font-medium text-foreground' : 'text-muted-foreground',
+  )
+
+/** The topics under an open part or topic; only the one on the path to the selection opens further. */
 function Subtopics({
   nodes,
   params,
   onNavigate,
   count,
-  item,
+  depth,
 }: {
   nodes: CategoryNode[]
   params: BrowseParams
   onNavigate?: () => void
   count: (path: string) => number
-  item: (active: boolean) => string
+  depth: number
 }) {
   return (
-    <div className="my-0.5 ml-3 space-y-0.5 border-l border-border/40 pl-2">
+    <div className={cn('space-y-0.5 border-l border-border/40', depth === 1 ? 'ml-2 pl-1.5' : 'my-0.5 ml-3 pl-2')}>
       {nodes.map((sub) => {
-        const open = params.c === sub.path || params.c?.startsWith(`${sub.path}/`)
+        const active = params.c === sub.path
+        const open = active || onPathTo(params.c, sub.path)
         const n = count(sub.path)
         return (
           <div key={sub.path}>
             <Link
-              to={browseUrl({ ...params, c: sub.path, part: undefined })}
+              to={browseUrl({ ...params, c: sub.path })}
               onClick={onNavigate}
-              className={cn(item(params.c === sub.path), 'py-0.5 text-xs', n === 0 && 'opacity-50')}
+              aria-current={active ? 'page' : undefined}
+              className={cn(
+                rowClass(active),
+                depth > 1 && 'py-0.5',
+                open && !active && 'text-foreground',
+                n === 0 && 'opacity-50',
+              )}
             >
+              {depth === 1 && <TopicIcon icon={sub.icon} className="size-3.5 shrink-0" aria-hidden />}
               <span className="flex-1 truncate">{sub.title}</span>
               <span className="text-[10px] tabular-nums">{n}</span>
             </Link>
             {open && sub.children.length > 0 && (
-              <Subtopics nodes={sub.children} params={params} onNavigate={onNavigate} count={count} item={item} />
+              <Subtopics nodes={sub.children} params={params} onNavigate={onNavigate} count={count} depth={depth + 1} />
             )}
           </div>
         )

@@ -2,25 +2,196 @@
 title: 'Multiple imputation'
 kind: concept
 summary: 'Multiple imputation draws several plausible completed datasets, analyses each and pools the results with Rubin''s rules, so that uncertainty about the missing values carries into the final estimates.'
-tags: [data, statistics, bayesian]
-aliases: []
-requires: []
-related: [missing-data-and-imputation]
-references: []
-status: stub
+tags: [data-preparation, statistics, missing-data, bayesian]
+aliases: [Rubin's rules, MICE, multivariate imputation by chained equations, fully conditional specification, FCS, predictive mean matching, PMM, pooled variance]
+requires: [missingness-mechanisms, single-imputation, bayesian-inference, confidence-intervals]
+related: [missing-data-and-imputation, learned-imputation, mnar-and-sensitivity-analysis, missing-values-at-prediction-time]
+references: [rubin1987, vanbuuren2011, meng1994, little2019]
+status: draft
 updated: 2026-10-11
 ---
 
+import { MultipleImputationExplorer } from './MultipleImputationExplorer'
+
 <Definition>
-To be written.
+**Multiple imputation** (MI) replaces each missing value with a vector of $M \ge 2$ stochastic draws from the posterior
+predictive distribution of the missing values given the observed data $p(\Ymat_{\text{mis}} \mid \Ymat_{\text{obs}})$
+<Cite id="rubin1987" />.
+
+The procedure operates in three distinct phases:
+1. **Imputation:** Generate $M$ distinct completed datasets $\tilde{\Ymat}^{(1)}, \dots, \tilde{\Ymat}^{(M)}$.
+2. **Analysis:** Fit the substantive scientific model independently to each completed dataset $m \in \{1, \dots, M\}$,
+   obtaining point estimate $\hat{Q}^{(m)}$ and within-imputation variance $\hat{U}^{(m)}$.
+3. **Pooling:** Combine the $M$ estimates using **Rubin's rules** to produce a pooled point estimate $\bar{Q}$ and a
+   total variance $T$ that incorporates both sampling variance and missing-data uncertainty.
 </Definition>
 
-## Drawing several completions
+## The three phases of multiple imputation
 
-## Chained equations
+Single imputation fails because it invents certainty, treating synthetic imputations as observed data and producing
+deflated standard errors. Multiple imputation resolves this defect by decomposing total inferential uncertainty into two
+orthogonal components:
+- **Within-imputation variance ($\bar{U}$):** The ordinary sampling uncertainty arising from estimating a population
+  parameter from a finite sample of size $N$.
+- **Between-imputation variance ($B$):** The additional uncertainty stemming directly from the fact that certain entries
+  were never observed and had to be estimated.
 
-## Rubin's rules
+### Proper versus improper imputation
+To produce valid, nominal-coverage confidence intervals, the imputation procedure must be **proper** in Rubin's sense
+<Cite id="rubin1987" />. A proper imputer reflects both:
+1. **Residual uncertainty:** Drawing unobserved values
+   $\Ymat_{\text{mis}}^{*(m)} \sim p(\Ymat_{\text{mis}} \mid \Ymat_{\text{obs}}, \thetavec^{*(m)})$.
+2. **Parameter uncertainty:** Drawing the imputer's parameters
+   $\thetavec^{*(m)} \sim p(\thetavec \mid \Ymat_{\text{obs}})$ from their Bayesian posterior distribution.
 
-## Agreement between imputation and analysis models
+An *improper* imputer fixes $\thetavec$ at its maximum likelihood estimate $\hat{\thetavec}_{\text{MLE}}$ and only
+injects residual noise. This fails to reflect uncertainty in the imputer's own coefficients, underestimating
+between-imputation variance $B$ and yielding anti-conservative confidence intervals in small to moderate samples.
+
+## Rubin's pooling rules
+
+Let $Q$ denote the scalar quantity of interest (such as a regression slope $\beta$, odds ratio, or population mean).
+Fitting the substantive model on dataset $m$ yields point estimate $\hat{Q}^{(m)}$ and estimated variance
+$\hat{U}^{(m)} = \widehat{\text{Var}}(\hat{Q}^{(m)})$.
+
+### 1. Pooled point estimate
+The overall point estimate is the arithmetic average across the $M$ analyses:
+
+$$
+\bar{Q} = \frac{1}{M} \sum_{m=1}^M \hat{Q}^{(m)}.
+$$
+
+### 2. Within-imputation variance
+The average sampling variance across the $M$ datasets is:
+
+$$
+\bar{U} = \frac{1}{M} \sum_{m=1}^M \hat{U}^{(m)}.
+$$
+
+### 3. Between-imputation variance
+The sample variance among the $M$ point estimates quantifies the variability induced by the missing values:
+
+$$
+B = \frac{1}{M - 1} \sum_{m=1}^M \left(\hat{Q}^{(m)} - \bar{Q}\right)^2.
+$$
+
+### 4. Total pooled variance
+Rubin's key theorem establishes that the total variance $T = \widehat{\text{Var}}(\bar{Q})$ is the sum of
+within-imputation variance and between-imputation variance, augmented by a finite-sample simulation correction factor
+$(1 + 1/M)$:
+
+$$
+T = \bar{U} + \left(1 + \frac{1}{M}\right) B.
+$$
+
+The factor $(1 + 1/M)$ represents the penalty for estimating the infinite-imputation conditional expectation using a
+finite number $M$ of stochastic draws.
+
+### Diagnostic metrics
+- **Relative increase in variance:**
+  
+  $$
+  r_M = \frac{(1 + 1/M) B}{\bar{U}}.
+  $$
+
+- **Fraction of Missing Information (FMI):** Quantifies the proportion of inferential uncertainty attributable to
+  missing values:
+  
+  $$
+  \lambda = \frac{(1 + 1/M)B + 2/(\nu + 3)}{T} \approx \frac{(1 + 1/M)B}{T}.
+  $$
+
+Hypothesis tests and confidence intervals use Student's $t$-distribution:
+
+$$
+\frac{\bar{Q} - Q}{\sqrt{T}} \sim t_\nu,
+$$
+
+where degrees of freedom $\nu$ are calculated using the Barnard-Rubin (1999) small-sample adjustment to prevent
+overstating precision when sample size $N$ is moderate.
+
+<MultipleImputationExplorer />
+
+## Chained equations (MICE / FCS)
+
+Specifying a joint multivariate distribution $p(Y_1, \dots, Y_D \mid \thetavec)$ is intractable when variables have
+mixed types (continuous, binary, nominal, and skewed count variables). 
+
+**Multivariate Imputation by Chained Equations** (MICE), also known as *Fully Conditional Specification* (FCS),
+circumvents joint distributions by defining a univariate conditional regression model for each incomplete feature given
+all other features <Cite id="vanbuuren2011" />:
+
+$$
+p(Y_j \mid \Ymat_{-j}, \thetavec_j).
+$$
+
+MICE implements a Gibbs-like sampler:
+1. Initialize missing values with random draws from observed marginals.
+2. For cycle $t = 1, \dots, T_{\text{burn}}$:
+   - For each feature $j \in \{1, \dots, D\}$:
+     - Fit $p(Y_j \mid \Ymat_{-j}^{(t)}, \thetavec_j)$ on rows where $Y_j$ is observed.
+     - Draw parameters $\thetavec_j^{*(t)}$ from their posterior distribution.
+     - Draw replacement values for missing entries:
+       $Y_{\text{mis}, j}^{*(t)} \sim p(Y_j \mid \Ymat_{-j}^{(t)}, \thetavec_j^{*(t)})$.
+3. Retain the state after $T_{\text{burn}}$ iterations as imputation $\tilde{\Ymat}^{(m)}$.
+
+### Predictive Mean Matching (PMM)
+For continuous features that exhibit non-linearities, heteroskedasticity, or strict physical boundaries, MICE frequently
+uses **Predictive Mean Matching** (PMM) <Cite id="vanbuuren2011" /> <Cite id="little2019" />:
+1. Fit a Bayesian linear regression predicting $Y_j$ from $\Ymat_{-j}$, drawing parameters $\betavec^*$.
+2. Calculate predicted values $\hat{y}_i = \xvec_i^\top \betavec^*$ for all observations.
+3. For each missing recipient $i$, find the $k$ observed donor rows whose predictions $\hat{y}_d$ are closest to
+   $\hat{y}_i$ in absolute distance.
+4. Randomly draw one donor from the candidate pool and copy that donor's *actual observed value* $y_d^{\text{obs}}$ into
+   the recipient's missing cell.
+
+Because imputed values are copied directly from genuine observations, PMM guarantees that imputations obey natural range
+bounds (e.g., non-negative values, integer counts, valid scales) and prevents out-of-bounds extrapolation.
+
+## Congruence and congeniality
+
+A foundational condition for multiple imputation validity is **congeniality** between the imputation model and the
+substantive analysis model <Cite id="meng1994" />.
+
+The imputation model is congenial with the analysis model if the imputation model makes assumptions that are at least as
+rich and general as the analysis model. Crucial practical implications include:
+- **Include the outcome variable:** When imputing predictors $\Xmat$ for a downstream supervised model predicting $Y$,
+  the target $Y$ **must be included as a predictor in the imputation model**. Omitting $Y$ forces the imputer to assume
+  conditional independence $X \perp Y \mid X_{\text{other}}$, severely attenuating downstream regression coefficients
+  toward zero.
+- **Include interaction and non-linear terms:** If the substantive analysis tests an interaction term $X_1 \cdot X_2$,
+  the imputer must incorporate the interaction term directly. Standard additive linear imputers assume zero interaction,
+  diluting the estimated interaction effect in the pooled analysis.
+
+## How many imputations ($M$)?
+
+Historically, Rubin (1987) demonstrated that $M = 3$ to $5$ imputations achieve high point-estimation efficiency,
+because relative efficiency compared to an infinite number of imputations is:
+
+$$
+\text{RE} = \left(1 + \frac{\lambda}{M}\right)^{-1}.
+$$
+
+With $\lambda = 30\%$ missing information, $M = 5$ achieves $\text{RE} = (1 + 0.3/5)^{-1} \approx 94.3\%$.
+
+However, modern statistical methodology demonstrates that while $M=5$ yields stable point estimates, it produces noisy
+estimates of between-imputation variance $B$, leading to unstable $p$-values and loss of statistical power in hypothesis
+tests. Modern practice adopts the rule of thumb:
+
+$$
+M \ge 100 \times \lambda,
+$$
+
+typically setting $M \in [20, 50]$ for robust inferential standard errors.
 
 ## Pitfalls
+
+- **Averaging datasets before analysis:** Collapsing the $M$ completed matrices into a single averaged dataset
+  $\bar{\Ymat} = \frac{1}{M}\sum \tilde{\Ymat}^{(m)}$ before model fitting destroys the benefits of multiple imputation.
+  It eliminates between-imputation variance and collapses the procedure back into flawed single mean imputation.
+- **Imputing derived features after creation:** Creating non-linear transformations (e.g. $X^2$ or $X_1 \cdot X_2$) by
+  transforming imputed values can bias relationships. Variables should either be imputed using specialized
+  polynomial/interaction formulas or through "just another variable" (JAV) formulations.
+- **Applying MI to streaming online predictions:** Multiple imputation is an inferential methodology designed for
+  parameter estimation, clinical trials, and offline research. Generating $M$ parallel stochastic completions for
+  single-instance real-time scoring is computationally impractical and conceptually mismatched to point prediction.

@@ -2,25 +2,130 @@
 title: 'Video augmentation'
 kind: concept
 summary: 'Video augmentation applies spatial transforms consistently across the frames of a clip and adds temporal changes, such as jittered start times, speed changes and frame dropping.'
-tags: [data, computer-vision]
-aliases: []
-requires: []
-related: [image-augmentation]
-references: []
-status: stub
-updated: 2026-10-11
+tags: [data, computer-vision, video, data-augmentation, self-supervised-learning]
+aliases: [video-data-augmentation, spatio-temporal-augmentation, video-transforms]
+requires: [digital-video, clip-sampling]
+related: [image-augmentation, motion-representations]
+references: [tong2022videomae, feichtenhofer2022mae, yun2020videomix, feichtenhofer2019]
+status: draft
+updated: 2026-10-12
 ---
 
+import { VideoAugmentationVisualizer } from './VideoAugmentationVisualizer'
+
 <Definition>
-To be written.
+**Video augmentation** is the systematic application of label-preserving spatial, temporal, and spatio-temporal
+transformations to video tensors $[B, C, T, H, W]$. It enforces temporal parameter consistency across spatial frames to
+prevent artificial motion strobing while introducing stochastic temporal perturbations—including playback rate dilation,
+temporal clipping jitter, and spatio-temporal tube masking—to build invariance to action pacing and viewpoint dynamics.
 </Definition>
+
+Directly applying 2D image augmentation libraries (e.g., standard torchvision or Albumentations) frame-by-frame on a
+video clip produces severe visual degradation. Because 2D transforms draw random parameters independently for each
+image, independent cropping, color jittering, or affine rotations introduce artificial, high-frequency inter-frame
+displacement spikes. Video augmentation requires coordinated transformation pipelines where spatial parameters are tied
+across time and dedicated temporal operators perturb the temporal manifold
+<Cite id="tong2022videomae, yun2020videomix" />.
+
+<VideoAugmentationVisualizer client:load />
 
 ## Consistent spatial transforms
 
+When applying spatial augmentations (such as random resized cropping, horizontal flips, rotations, or photometric
+adjustments) to a video clip $\mathbf{I} = [I_1, I_2, \dots, I_T]$, all frames must share an identical transformation
+parameter vector $\theta$ sampled once per clip from distribution $P(\Theta)$ <Cite id="feichtenhofer2019" />:
+
+$$
+\theta \sim P(\Theta), \quad \mathbf{I}' = \left[ T_\theta(I_1), \, T_\theta(I_2), \, \dots, \, T_\theta(I_T) \right]
+$$
+
+- **Parameter Tying**: If a random crop selects coordinates $(x_0, y_0, w, h)$, the identical bounding box must be
+  extracted from every frame $t \in \{1, \dots, T\}$. Similarly, if a horizontal flip is applied, all frames must flip
+  concurrently.
+- **Consequences of Independent Sampling**: If parameters $\theta_t \sim P(\Theta)$ are drawn independently per frame,
+  adjacent frames undergo disjoint spatial translations:
+  $$
+  \|T_{\theta_t}(I_t) - T_{\theta_{t-1}}(I_{t-1})\|_2 \gg \|I_t - I_{t-1}\|_2
+  $$
+  This creates severe visual strobing, completely scrambling true physical velocity fields $\mathbf{v}(x, y)$ and
+  injecting chaotic gradient noise into temporal attention and 3D convolutional kernels.
+
 ## Temporal jitter
+
+Temporal jitter perturbs the temporal extraction window without altering physical playback mechanics:
+
+1. **Random Temporal Offset**: Given an untrimmed video of $N$ frames, extracting a clip of duration $T \cdot \tau$
+   frames draws start index $t_0$ uniformly from valid offsets:
+   $$
+   t_0 \sim \operatorname{Uniform}\left( 0, \, N - T \cdot \tau \right)
+   $$
+   This ensures the network encounters diverse action start phases across training epochs.
+2. **Time Reversal**: Reversing the temporal frame sequence $I'_t = I_{T - t + 1}$ inverts the sign of underlying motion
+   vectors:
+   $$
+   \mathbf{v}'(x, y, t) = -\mathbf{v}(x, y, T - t + 1)
+   $$
+   - *Symmetric Actions*: For cyclical, directionally symmetric activities (e.g., "waving hands", "jogging in place",
+     "shuffling cards"), time reversal is strictly label-preserving and doubles effective dataset diversity.
+   - *Asymmetric Actions and the Arrow of Time*: For causally directed thermodynamic or kinematic processes (e.g.,
+     "dropping a plate", "pouring milk into coffee", "opening a box"), time reversal violates physical causality and
+     corrupts semantic labels ("falling down" becomes "levitating up"). Asymmetric classes must be exempted from
+     temporal reversal.
 
 ## Speed changes
 
+Human activities exhibit wide natural tempo variations—a sprint differs kinematically from a slow jog, yet both share
+core semantic structures. Playback speed perturbation resamples the temporal grid by a dilation factor
+$\alpha \in [\alpha_{\min}, \alpha_{\max}]$ (typically $[0.5, 2.0]$) <Cite id="feichtenhofer2019" />:
+
+$$
+t' = \alpha \cdot t
+$$
+
+Frames at non-integer temporal coordinates $t'$ are synthesized via:
+- **Nearest-Neighbor Frame Picking**: Snaps $t'$ to $\lfloor t' + 0.5 \rfloor$. Computationally lightweight, but can
+  produce micro-stutter at low framerates.
+- **Linear Frame Blending**: Blends adjacent frames via barycentric weights $\lambda = t' - \lfloor t' \rfloor$:
+  $$
+  I'(t') = (1 - \lambda) I_{\lfloor t' \rfloor} + \lambda I_{\lceil t' \rceil}
+  $$
+- **VideoMix / Spatio-Temporal CutMix**: Generalizing CutMix to video, VideoMix pastes a 3D spatio-temporal cuboid of
+  dimensions $[T_{\text{box}}, H_{\text{box}}, W_{\text{box}}]$ from video $B$ into video $A$
+  <Cite id="yun2020videomix" />:
+  $$
+  \mathbf{I}' = \mathbf{M} \odot \mathbf{I}_A + (\mathbf{1} - \mathbf{M}) \odot \mathbf{I}_B, \quad \mathbf{y}' = \lambda \mathbf{y}_A + (1 - \lambda) \mathbf{y}_B
+  $$
+  Where $\lambda = 1 - \frac{\text{Volume}(\mathbf{M})}{T \cdot H \cdot W}$, regularizing representations against
+  over-fitting to localized spatio-temporal patches.
+
 ## Frame dropping
 
+Temporal frame dropping simulates transmission packet loss, camera shutter dropouts, and temporal occlusions:
+
+- **Random Frame Dropout**: Drops individual frames with probability $p_{\text{drop}} \in [0.1, 0.3]$, either zeroing
+  pixel tensors or repeating the preceding frame to maintain fixed tensor dimensions.
+- **VideoMAE Spatio-Temporal Tube Masking**: In masked autoencoding for video self-supervised pre-training, standard
+  random 2D masking fails because high temporal correlation allows models to trivially reconstruct masked patches by
+  copying unmasked pixels from adjacent frames <Cite id="tong2022videomae, feichtenhofer2022mae" />. VideoMAE employs
+  **tube masking**, extending each 2D spatial mask patch across the entire temporal axis $T$:
+  $$
+  M(x, y, t) = M(x, y, 1) \quad \forall t \in \{1, \dots, T\}
+  $$
+  Because adjacent temporal information is simultaneously occluded, the encoder must learn high-level kinematic motion
+  semantics rather than simple temporal interpolation. Tube masking enables extreme masking ratios
+  $\rho \in [85\%, 90\%]$, slashing encoder FLOPs by up to $90\%$ while establishing state-of-the-art representations.
+
 ## Pitfalls
+
+1. **Uncoordinated Multi-View Augmentation**: In multi-camera surveillance or robotics setups, applying spatial
+   transforms with different random seeds across synchronized camera views breaks multi-view geometric consistency and
+   epipolar constraints.
+2. **Horizontal Flipping on Directional Labels**: Augmenting fine-grained actions such as "turning left", "writing from
+   left to right", or "clockwise screw rotation" with random horizontal flips flips the ground-truth semantic target
+   without updating the label, injecting label noise.
+3. **Severe Temporal Deceleration Causing Static Stagnation**: Decelerating high-framerate clips by factors exceeding
+   $3\times$ ($\alpha < 0.33$) results in multiple identical adjacent frames, effectively presenting the model with
+   static imagery and degrading motion representation learning.
+4. **Ignoring Label Smoothing in Spatio-Temporal MixUp**: Hard binary cutouts in 3D spatio-temporal VideoMix without
+   linear label interpolation $(\lambda \mathbf{y}_A + (1-\lambda)\mathbf{y}_B)$ create extreme gradient spikes along
+   cuboid boundaries.

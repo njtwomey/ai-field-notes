@@ -1,0 +1,122 @@
+---
+title: Kullback–Leibler importance estimation procedure
+kind: technique
+summary: 'KLIEP fits a non-negative kernel model $\hat r$ of the density ratio $p/q$ by maximising the mean of $\log \hat r$ over a sample from $p$, subject to $\hat r$ averaging 1 over a sample from $q$. The problem is convex, its solution sparse.'
+tags: [density-ratio-estimation, kernel-methods, convex-optimisation, kullback-leibler-divergence, worked-example]
+aliases: [KLIEP, Kullback-Leibler importance estimation procedure, direct importance estimation]
+requires: [density-ratio-estimation, kullback-leibler-divergence, proximal-gradient-methods]
+related: [least-squares-importance-fitting, density-ratio-by-classification, comparing-density-ratio-estimators, importance-weighting-for-covariate-shift, cross-validation]
+references: [sugiyama2008kliep, sugiyama2012book, sugiyama2012bregman, nguyen2010]
+status: draft
+updated: 2026-10-12
+---
+
+import { KliepAscent } from './KliepAscent'
+
+<Definition>
+The **Kullback–Leibler importance estimation procedure** (<Gloss name="kliep" />) estimates the density ratio
+$r(\xvec) = p(\xvec)/q(\xvec)$ with the model $\hat r(\xvec) = \sum_{l=1}^b \alpha_l K(\xvec, \cvec_l)$,
+$\alpha_l \ge 0$. It chooses $\alphavec$ to maximise the mean of $\log \hat r$ over a sample from $p$, subject to the
+mean of $\hat r$ over a sample from $q$ being 1. This makes $\hat r\, q$ the density closest to $p$ in
+<NoteLink to="kullback-leibler-divergence">Kullback–Leibler divergence</NoteLink> among those the model can form
+<Cite id="sugiyama2008kliep" />.
+</Definition>
+
+## Problem
+
+A <NoteLink to="density-ratio-estimation">density ratio</NoteLink> is wanted from a sample
+$\xvec_1, \dots, \xvec_{n_p}$ from $p$ and a sample $\xvec'_1, \dots, \xvec'_{n_q}$ from $q$. Dividing two density
+estimates fails where either density is small. KLIEP fits the ratio directly, as a
+maximum-likelihood problem for $p$ in which $q$ enters only
+through its sample.
+
+## Mechanism
+
+### From a divergence to an objective
+
+The product $\hat r(\xvec)\, q(\xvec)$ is a model of $p(\xvec)$. Its Kullback–Leibler divergence from $p$ is
+$$
+\KL\paren{p \,\|\, \hat r q} = \int p(\xvec) \log \frac{p(\xvec)}{\hat r(\xvec)\, q(\xvec)}\, d\xvec =
+\int p(\xvec) \log r(\xvec)\, d\xvec - \int p(\xvec) \log \hat r(\xvec)\, d\xvec .
+$$
+The first term does not depend on $\hat r$. Minimising the divergence therefore maximises $\expect_p[\log \hat r]$.
+For $\hat r\, q$ to be a density it must integrate to 1, which is the constraint $\expect_q[\hat r] = 1$. Replacing
+both expectations by sample averages gives
+$$
+\max_{\alphavec \ge \zeros}\; \frac{1}{n_p} \sum_{i=1}^{n_p} \log \sum_{l=1}^b \alpha_l K(\xvec_i, \cvec_l)
+\quad \text{subject to} \quad \frac{1}{n_q} \sum_{j=1}^{n_q} \sum_{l=1}^b \alpha_l K(\xvec'_j, \cvec_l) = 1 .
+$$
+The objective is concave in $\alphavec$, as a sum of logarithms of linear functions, and the constraints are linear.
+Every local maximum is a global one.
+
+### The model
+
+The kernel is Gaussian, $K(\xvec, \cvec) = \exp\paren{-\norm{\xvec - \cvec}^2 / 2\sigma^2}$, with width $\sigma > 0$.
+The centres $\cvec_l$ are $b$ points of the sample from $p$, often $b = \min(100, n_p)$: the ratio is large where $p$
+has mass, so that is where the model needs flexibility. The constraint $\alpha_l \ge 0$ keeps $\hat r$ non-negative
+everywhere.
+
+### Solving it on a simplex
+
+Let $\bar k_l = \frac{1}{n_q} \sum_j K(\xvec'_j, \cvec_l)$, the mean of the $l$-th kernel over the sample from $q$.
+The constraint is $\sum_l \bar k_l \alpha_l = 1$. Substituting $\beta_l = \bar k_l \alpha_l$ turns the feasible set
+into the probability simplex $\set{\betavec : \beta_l \ge 0, \sum_l \beta_l = 1}$, and the objective into
+$$
+L(\betavec) = \frac{1}{n_p} \sum_{i=1}^{n_p} \log \paren{\Amat \betavec}_i , \qquad
+A_{il} = \frac{K(\xvec_i, \cvec_l)}{\bar k_l} ,
+$$
+with gradient $\nabla L(\betavec) = \frac{1}{n_p} \Amat^\top \paren{1 / \Amat\betavec}$, the division taken entry by
+entry. Projected gradient ascent (<NoteLink to="proximal-gradient-methods" />) alternates a gradient step with
+the Euclidean projection onto the simplex, which has a closed form. Sugiyama et al. instead alternate a gradient step
+with a correction onto the constraint and a clipping of negative weights <Cite id="sugiyama2008kliep" />; both reach
+the same maximum. The figure runs the simplex version with a backtracking step size.
+
+The projection sets small weights to exactly zero, so the solution is **sparse**: only some centres carry weight.
+For every $\betavec$ in the simplex, $\sum_l \beta_l\, \partial L / \partial \beta_l = 1$. At the maximum, every
+centre in use therefore has partial derivative exactly 1 and every unused centre at most 1.
+
+<KliepAscent />
+
+### Choosing the width
+
+The width $\sigma$ is chosen by **likelihood cross-validation**. The sample from $p$ is split into $K$ folds. For
+each fold, KLIEP is fitted on the other folds and the full sample from $q$, and the mean of $\log \hat r$ over the
+held-out fold is recorded. The width with the largest average held-out value wins <Cite id="sugiyama2008kliep" />. A
+small $\sigma$ overfits: the model puts a spike on each centre, the training objective keeps rising, and the held-out
+value falls.
+
+## Cost
+
+Building $\Amat$ costs $O(n_p b d)$ kernel evaluations and $\bar\kvec$ costs $O(n_q b d)$, in $d$ dimensions. Each
+gradient step then costs $O(n_p b)$, and the simplex projection $O(b \log b)$. The number of steps depends on the
+conditioning of the problem, typically hundreds. Cross-validation multiplies the cost by the number of folds and
+candidate widths. Evaluating $\hat r$ at a new point costs $O(b d)$.
+
+## Trade-offs
+
+- **Positive by construction.** The model is a non-negative combination of positive kernels, so $\hat r > 0$ near
+  any centre in use and $\hat r\, q$ is a proper density on the sample from $q$.
+- **Where the errors count.** The objective averages $\log \hat r$ under $p$. Underestimating the ratio where $p$ has
+  mass is expensive; errors where $p$ has little mass cost almost nothing. For importance weighting, which needs
+  $\hat r$ at points of the sample from $q$, this can leave the weights in the tails of $q$ poorly fitted.
+- **Iterative.** Unlike <NoteLink to="least-squares-importance-fitting">least-squares importance fitting</NoteLink>,
+  which solves one linear system, KLIEP needs an iterative solver, and
+  <NoteLink to="cross-validation">cross-validation</NoteLink> repeats it many times.
+- **One member of a family.** KLIEP is the density ratio estimator generated by $f(t) = t \log t - t$ in the Bregman
+  framework <Cite id="sugiyama2012bregman" />. The same objective, without the normalisation constraint, estimates
+  the Kullback–Leibler divergence itself <Cite id="nguyen2010" />.
+
+## Worked example
+
+Replace the <Gloss name="rbf-kernel">Gaussian kernels</Gloss> by two indicator functions, $K_1(x) = \indicator{x < 0}$
+and $K_2(x) = \indicator{x \ge 0}$, so that $\hat r$ is constant on each half-line. Suppose 20% of the sample from $p$
+and 50% of the sample from $q$ lie below 0.
+
+1. **Kernel means over $q$.** $\bar k_1 = 0.5$ and $\bar k_2 = 0.5$.
+2. **Objective in $\betavec$.** A point of $p$ below 0 has $(\Amat\betavec)_i = \beta_1 / 0.5$; one above 0 has
+   $\beta_2 / 0.5$. So $L(\betavec) = 0.2 \log(2\beta_1) + 0.8 \log(2\beta_2)$.
+3. **Maximise on the simplex.** With $\beta_2 = 1 - \beta_1$, setting the derivative
+   $0.2/\beta_1 - 0.8/(1 - \beta_1)$ to zero gives $\beta_1 = 0.2$ and $\beta_2 = 0.8$.
+4. **Back to $\alphavec$.** $\alpha_1 = 0.2 / 0.5 = 0.4$ and $\alpha_2 = 0.8 / 0.5 = 1.6$.
+5. **Read the answer.** $\hat r$ is 0.4 below 0 and 1.6 above it: the share of $p$ in each half divided by the share of
+   $q$, the histogram estimate of the ratio. The constraint holds: $0.5 \times 0.4 + 0.5 \times 1.6 = 1$.

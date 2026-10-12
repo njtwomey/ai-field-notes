@@ -5,24 +5,112 @@ summary: 'Datasets carry historical, representation, measurement and aggregation
 tags: [data, fairness, bias]
 aliases: []
 requires: []
-related: [bias-mitigation, group-fairness-metrics, fairness-datasets]
-references: []
-status: stub
+related: [protected-attributes-and-proxies, content-filtering, data-rights-and-deletion]
+references: [suresh2021, buolamwini2018]
+status: draft
 updated: 2026-10-11
 ---
 
+import { DatasetBiasTaxonomyVisualizer } from './DatasetBiasTaxonomyVisualizer'
+
 <Definition>
-To be written.
+**Dataset bias** is any systematic discrepancy between the empirical distribution of training data
+$P_{\text{data}}(X, Y)$ and the actual target population or normative distribution it aims to represent. Rather than a
+singular statistical defect, dataset bias encompasses distinct failure modes arising at different stages of data
+generation: historical inequities in the world, sampling imbalances, distorted proxy measurements, and invalid
+aggregation across heterogeneous groups <Cite id="suresh2021" />.
 </Definition>
+
+Machine learning models do not learn abstract truths; they minimize empirical risk over datasets collected, labeled, and
+processed through human systems. When practitioners treat datasets as unvarnished reflections of reality, models inherit
+and amplify systemic distortions. Effectively mitigating bias requires diagnosing the exact stage of the data lifecycle
+at which the distortion was introduced.
+
+<DatasetBiasTaxonomyVisualizer />
 
 ## Historical bias
 
+**Historical bias** exists in the real world prior to data collection. Even if sampling is perfectly representative
+($P_{\text{sample}}(X) = P_{\text{world}}(X)$) and measurement is error-free ($Y = Y^*$), the collected data faithfully
+reflects existing social prejudices, structural inequities, and historical disparities:
+
+- **Past hiring records:** A model trained on decades of corporate promotions will find that executive titles correlate
+  strongly with male candidates, reflecting historical glass ceilings rather than intrinsic qualification differences.
+- **Criminal justice data:** Arrest and conviction records reflect historical differences in police patrol density and
+  discretionary stops across neighborhoods rather than actual underlying rates of illicit conduct.
+- **The learning failure:** Standard empirical risk minimization (ERM) optimizes for fidelity to historical labels.
+  Consequently, optimizing a model for test accuracy on historical data directly incentivizes the model to replicate
+  past discrimination.
+
 ## Representation bias
+
+**Representation bias** enters during data collection and sampling when the sampling distribution $P_{\text{sample}}(X)$
+diverges from the target deployment distribution $P_{\text{target}}(X)$, systematically under-representing specific
+demographic cohorts, geographical regions, or operational conditions:
+
+- **Sample size starvation:** Deep neural networks and complex models require vast sample sizes to learn robust
+  representations. When a minority subgroup $g$ comprises only a tiny fraction of training samples ($N_g \ll N$), the
+  global objective function prioritizes the majority cohort, leading to elevated error rates on under-represented
+  populations.
+- **The Gender Shades benchmark:** In their landmark study, Joy Buolamwini and Timnit Gebru <Cite id="buolamwini2018" />
+  evaluated commercial facial analysis APIs and discovered extreme intersectional disparities. Because prominent
+  training datasets (such as IJB-A and Adience) were overwhelmingly composed of lighter-skinned individuals (>79%),
+  commercial classifiers achieved error rates under 0.8% on lighter-skinned males, but failed with error rates of up to
+  34.7% on darker-skinned females.
+- **Convenience and web sampling:** Datasets gathered by scraping English-dominated internet forums, social media, or
+  university student subject pools severely under-represent non-Western populations, older demographics, and non-English
+  linguistic varieties.
 
 ## Measurement bias
 
+**Measurement bias** enters during feature engineering and label operationalization, occurring when the observable
+feature or label proxy $Y$ systematically deviates from the unobservable latent construct $Y^*$ across demographic
+groups ($P(Y \mid Y^*, A) \neq P(Y \mid Y^*)$):
+
+- **Faulty proxies in healthcare:** Commercial predictive algorithms widely used in US hospitals relied on historical
+  healthcare spending as a proxy for healthcare need. Because less money was historically spent on Black patients due to
+  poverty and unequal insurance access, the algorithm mistakenly concluded that Black patients were healthier than
+  equally sick white patients, cutting remedial care enrollments in half.
+- **Differential sensor measurement:** Physical measurement instruments exhibit demographic disparities. Optical pulse
+  oximeters, digital thermometers, and computer vision sensors calibrated primarily on light skin pigmentation exhibit
+  higher noise and measurement drift on darker skin tones.
+- **Annotator subjectivity:** Subjective classification tasks (such as content moderation, toxic language detection, or
+  sentiment analysis) reflect the cultural priors, sociolects, and implicit biases of crowd-workers, systematically
+  tagging African American Vernacular English (AAVE) as toxic at disproportionately high rates.
+
 ## Aggregation bias
+
+**Aggregation bias** arises when a single global model $f_\theta(X)$ is fitted across a heterogeneous population
+containing distinct subgroups with differing conditional relationships $P(Y \mid X, A)$:
+
+- **Simpson's paradox:** A feature $X_j$ that correlates positively with outcome $Y$ within subgroup $A=0$ and within
+  subgroup $A=1$ may correlate negatively when aggregated across the combined population.
+- **Clinical biomarker heterogeneity:** In cardiovascular medicine and endocrinology, physiological biomarkers (such as
+  HbA1c for glycemic control or body mass index for metabolic risk) exhibit different clinical risk trajectories across
+  genetic ancestries and sexes. A homogeneous model fitted to aggregate data optimizes for the majority population and
+  misestimates risk for all constituent groups.
 
 ## Which fix addresses which
 
+Applying the wrong mitigation to a bias mechanism is ineffective or actively harmful. The table below maps bias types to
+their appropriate engineering remedies:
+
+| Bias Type | Pipeline Entry Stage | Ineffective Remedy | Targeted Technical Remedy |
+| :--- | :--- | :--- | :--- |
+| **Historical** | Pre-collection world state | Gathering more data; stratified sampling | Target reweighting; causal counterfactual invariance; policy-based acceptance thresholds |
+| **Representation** | Data collection & cohort sampling | Loss function tweaks without new samples | Targeted stratified sampling; active learning for minority coverage; curated diverse benchmarks <Cite id="buolamwini2018" /> |
+| **Measurement** | Feature & label operationalization | Oversampling biased labels | Construct validity redesign; differential calibration; multi-annotator disagreement modeling |
+| **Aggregation** | Model pooling & architecture | Uniform global training | Mixture-of-experts; group-conditioned model heads; multi-task learning across sub-cohorts |
+
 ## Pitfalls
+
+- **The "more data" fallacy:** Assuming that expanding dataset size automatically cures bias. Scaling up web scraping
+  magnifies historical stereotypes and measurement noise while entrenching majority representation.
+- **Equating demographic balance with fairness:** Believing that balancing cohort counts ($N_{A=0} = N_{A=1}$)
+  guarantees equitable performance; if the underlying labels carry measurement or historical bias, the balanced model
+  simply becomes more confident in its biased predictions.
+- **Ignoring intersectionality:** Evaluating representation along single demographic axes (e.g. evaluating sex and race
+  independently) obscures severe representation starvation at intersectional boundaries (such as darker-skinned women).
+- **Static assumptions under feedback loops:** Deploying a model affected by dataset bias creates self-reinforcing
+  feedback loops: biased predictions dictate real-world interventions, which generate future training data that cements
+  the original bias into ground truth.

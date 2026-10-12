@@ -1,28 +1,187 @@
 ---
 title: 'Missingness mechanisms'
 kind: concept
-summary: 'Values are missing completely at random, at random given the observed data, or not at random. The mechanism decides which methods are unbiased, and the observed data alone cannot always tell the mechanisms apart.'
-tags: [data, statistics]
-aliases: []
-requires: []
-related: [missing-data-and-imputation]
-references: []
-status: stub
+summary: 'Rubin''s taxonomy partitions missing data into MCAR, MAR, and MNAR based on whether missingness depends on unobserved values. While MAR allows valid likelihood inference, observational data alone cannot distinguish MAR from MNAR without untestable assumptions.'
+tags: [data-preparation, statistics, missing-data]
+aliases: [Rubin missingness mechanisms, MCAR MAR MNAR, missing completely at random, missing at random, missing not at random, Little's MCAR test]
+requires: [conditional-probability, expectation, variance-and-covariance]
+related: [missing-data-and-imputation, deletion-methods, single-imputation, learned-imputation, multiple-imputation, mnar-and-sensitivity-analysis]
+references: [rubin1976, little1988, little2019]
+status: draft
 updated: 2026-10-11
 ---
 
+import { MissingnessMechanismsExplorer } from './MissingnessMechanismsExplorer'
+
 <Definition>
-To be written.
+Let $\Ymat \in \mathbb{R}^{N \times D}$ denote a complete dataset, partitioned into observed entries
+$\Ymat_{\text{obs}}$ and unobserved entries $\Ymat_{\text{mis}}$. Let $\Rmat \in \{0, 1\}^{N \times D}$ denote the
+binary response indicator matrix where $R_{ij} = 1$ if $Y_{ij}$ is observed and $R_{ij} = 0$ if $Y_{ij}$ is missing. The
+**missingness mechanism** is the conditional probability distribution of the missingness indicators given the complete
+data and nuisance parameter vector $\psivec$:
+
+$$
+p(\Rmat \mid \Ymat, \psivec) = p(\Rmat \mid \Ymat_{\text{obs}}, \Ymat_{\text{mis}}, \psivec).
+$$
+
+Rubin's taxonomy classifies this conditional distribution into three distinct regimes depending on whether missingness
+depends on $\Ymat_{\text{mis}}$, only on $\Ymat_{\text{obs}}$, or neither <Cite id="rubin1976" />.
 </Definition>
 
-## Missing completely at random
+## The three missingness regimes
 
-## Missing at random
+Understanding which regime generates incomplete data dictates whether statistical estimators and machine learning models
+are consistent, whether dropped rows induce selection bias, and whether imputation models require explicit modeling of
+the missingness process.
 
-## Missing not at random
+### Missing completely at random (MCAR)
+
+Data are **missing completely at random** if the probability of missingness is independent of both observed and
+unobserved data values:
+
+$$
+p(\Rmat \mid \Ymat_{\text{obs}}, \Ymat_{\text{mis}}, \psivec) = p(\Rmat \mid \psivec) \quad \text{for all } \Ymat, \psivec.
+$$
+
+Under MCAR, the missingness pattern acts as an exogenous Bernoulli trial across records or features. The observed cases
+$\Ymat_{\text{obs}}$ represent a uniform, unweighted random subsample of the underlying population. Consequently:
+- Sample means, variances, covariances, and ordinary least squares (OLS) regression coefficients computed on complete
+  cases remain asymptotically unbiased.
+- The penalty of missingness under MCAR is exclusively a loss of sample size and statistical power, not systematic
+  estimation bias.
+
+### Missing at random (MAR)
+
+Data are **missing at random** if the probability of missingness depends on the observed data $\Ymat_{\text{obs}}$, but
+is conditionally independent of the unobserved missing values $\Ymat_{\text{mis}}$:
+
+$$
+p(\Rmat \mid \Ymat_{\text{obs}}, \Ymat_{\text{mis}}, \psivec) = p(\Rmat \mid \Ymat_{\text{obs}}, \psivec) \quad \text{for all } \Ymat_{\text{mis}}, \psivec.
+$$
+
+Despite its confusing historical name, MAR does not mean values drop out randomly. Instead, missingness is
+systematically driven by observable variables. For example, if older survey respondents ($X$) are substantially less
+likely to disclose their annual salary ($Y$), but conditional on age $X$, the non-response probability does not depend
+on actual income $Y$, the data generation process is MAR.
+
+Under MAR:
+- Complete-case analysis (listwise deletion) is generally **biased**, because rows retained in the training set exhibit
+  distorted covariate distributions.
+- Marginal statistics (such as the unadjusted sample mean of $Y$) are shifted. However, conditional models $p(Y \mid X)$
+  and properly specified multiple imputation or full-information maximum likelihood (FIML) methods remain consistent.
+
+### Missing not at random (MNAR)
+
+Data are **missing not at random** (also termed *non-ignorable missingness*) whenever the probability of missingness
+depends directly on the unobserved values themselves, even after conditioning on all available observed variables:
+
+$$
+p(\Rmat \mid \Ymat, \psivec) \text{ depends on } \Ymat_{\text{mis}}.
+$$
+
+Prototypical examples include clinical trial patients dropping out because unmeasured adverse drug symptoms worsened, or
+ultra-high-net-worth individuals systematically declining to report net worth. Under MNAR, the observed subset suffers
+from survivorship and truncation biases that cannot be corrected by standard conditioning or standard imputation
+algorithms. Consistent inference requires jointly specifying the outcome model and the missingness selection mechanism
+<Cite id="little2019" />.
+
+## Ignorability and likelihood factorisation
+
+In parametric estimation, let the data-generating model be $p(\Ymat \mid \thetavec)$ parameterised by
+$\thetavec \in \Omega_\theta$, while the missingness mechanism is parameterised by $\psivec \in \Omega_\psi$. The joint
+marginal likelihood of the observed data $(\Ymat_{\text{obs}}, \Rmat)$ integrates over all possible realizations of the
+unobserved entries:
+
+$$
+p(\Ymat_{\text{obs}}, \Rmat \mid \thetavec, \psivec) = \int p(\Ymat_{\text{obs}}, \Ymat_{\text{mis}} \mid \thetavec)\, p(\Rmat \mid \Ymat_{\text{obs}}, \Ymat_{\text{mis}}, \psivec)\, d\Ymat_{\text{mis}}.
+$$
+
+When the mechanism is MAR,
+$p(\Rmat \mid \Ymat_{\text{obs}}, \Ymat_{\text{mis}}, \psivec) = p(\Rmat \mid \Ymat_{\text{obs}}, \psivec)$. Because
+this term does not involve $\Ymat_{\text{mis}}$, it factors cleanly out of the integral:
+
+$$
+p(\Ymat_{\text{obs}}, \Rmat \mid \thetavec, \psivec) = p(\Rmat \mid \Ymat_{\text{obs}}, \psivec) \int p(\Ymat_{\text{obs}}, \Ymat_{\text{mis}} \mid \thetavec)\, d\Ymat_{\text{mis}} = p(\Rmat \mid \Ymat_{\text{obs}}, \psivec)\, p(\Ymat_{\text{obs}} \mid \thetavec).
+$$
+
+If $\thetavec$ and $\psivec$ are parameter-distinct (in the likelihood sense that their parameter space factorises as
+$\Omega_\theta \times \Omega_\psi$, or in the Bayesian sense that their priors are independent), maximum likelihood and
+Bayesian posterior inference for the target parameters $\thetavec$ depend solely on the observed data likelihood
+$p(\Ymat_{\text{obs}} \mid \thetavec)$. Under these two conditions, the missingness mechanism is mathematically
+**ignorable** <Cite id="rubin1976" />.
+
+Under MNAR, the mechanism term cannot be factored outside the integral over $\Ymat_{\text{mis}}$, making the missingness
+non-ignorable and coupling $\thetavec$ directly to $\psivec$.
+
+<MissingnessMechanismsExplorer />
 
 ## Testing for MCAR
 
-## What the data cannot decide
+Because MCAR asserts that missingness is statistically independent of observed features, empirical tests can evaluate
+the null hypothesis $H_0: \text{data are MCAR}$ against the alternative $H_1: \text{data are MAR}$.
+
+### Little's multivariate MCAR test
+
+Little (1988) introduced a global likelihood ratio test comparing observed subgroup means across distinct missingness
+patterns <Cite id="little1988" />. Suppose the $N$ observations partition into $J$ distinct missingness patterns, where
+pattern $j$ contains $n_j$ records and observes a subset of variables $D_j \subseteq \{1, \dots, D\}$. 
+
+Assuming complete data follow a multivariate Gaussian distribution $\mathcal{N}(\muvec, \Sigmamat)$, Little's test
+statistic evaluates the squared Mahalanobis distances between each pattern's sample mean vector
+$\bar{\yvec}_{\text{obs}, j}$ and the maximum likelihood population mean estimate restricted to pattern $j$'s observed
+variables $\hat{\muvec}_{\text{obs}, j}$:
+
+$$
+d^2 = \sum_{j=1}^J n_j \left(\bar{\yvec}_{\text{obs}, j} - \hat{\muvec}_{\text{obs}, j}\right)^\top \hat{\Sigmamat}_{\text{obs}, j}^{-1} \left(\bar{\yvec}_{\text{obs}, j} - \hat{\muvec}_{\text{obs}, j}\right).
+$$
+
+Under the null hypothesis of multivariate normality and MCAR, $d^2$ asymptotically follows a central chi-squared
+distribution:
+
+$$
+d^2 \sim \chi^2(\text{df}), \quad \text{df} = \sum_{j=1}^J D_j - D.
+$$
+
+Rejection of $H_0$ ($p < 0.05$) provides evidence that missingness depends on observed features, ruling out MCAR in
+favour of MAR (or MNAR).
+
+## The observational unidentifiability boundary
+
+A fundamental theorem in incomplete data analysis states that **observed data alone cannot empirically distinguish MAR
+from MNAR without untestable assumptions** <Cite id="little2019" />.
+
+Consider testing whether unobserved values $\Ymat_{\text{mis}}$ follow the same distribution as observed values within a
+stratum of $\Ymat_{\text{obs}}$. By definition, $\Ymat_{\text{mis}}$ is never observed. For any non-ignorable MNAR joint
+distribution $p(\Ymat, \Rmat)$, there exists an ignorable MAR model that produces the exact same observed data marginal
+distribution $p(\Ymat_{\text{obs}}, \Rmat)$.
+
+Consequently:
+- Little's test can reject MCAR in favor of MAR, but it cannot rule out MNAR.
+- Verifying whether missingness is MAR versus MNAR requires domain knowledge, external auxiliary datasets (such as
+  intensive follow-up audits on a random subset of dropouts), or formal sensitivity analysis.
+
+## Practical guidance and machine learning pipelines
+
+| Missingness Mechanism | Impact on Complete Cases (Listwise Deletion) | Valid Remediation Strategies |
+| :--- | :--- | :--- |
+| **MCAR** | Loss of sample size and efficiency; parameter estimates remain unbiased. | Complete case deletion (if data volume is large); mean / median imputation; multiple imputation. |
+| **MAR** | Substantial selection bias; covariate distributions are distorted. | Multiple Imputation by Chained Equations (MICE); Full-Information Maximum Likelihood (FIML); Inverse Probability Weighting (IPW). |
+| **MNAR** | Severe structural bias and truncation; conditional relationships are distorted. | Heckman selection models; pattern-mixture models; tipping-point sensitivity analysis. |
+
+In tree-based algorithms (such as XGBoost, LightGBM, and CatBoost), default handling routes missing entries down the
+branch that maximizes split gain. If missingness carries non-ignorable signal (MNAR), this native routing can extract
+predictive power from the missingness pattern itself. However, if the missingness mechanism shifts between training and
+production environments, the model's split decisions can degrade abruptly.
 
 ## Pitfalls
+
+- **Confusing ignorability with listwise deletion safety:** Ignorability proves that one can maximize
+  $p(\Ymat_{\text{obs}} \mid \thetavec)$ without modeling $p(\Rmat \mid \Ymat, \psivec)$. It does not imply that one can
+  drop incomplete rows from the sample. Listwise deletion is only unbiased under MCAR or when missingness is strictly
+  independent of the target variable conditional on the predictors.
+- **Treating a non-significant Little's test as proof of MCAR:** Failure to reject $H_0$ in Little's test can result
+  from low statistical power in moderate sample sizes, non-linear dependencies not captured by Gaussian covariance
+  matrices, or the presence of MNAR mechanisms that do not distort first-order marginals.
+- **Assuming imputers resolve MNAR:** Iterative imputation algorithms like MICE explicitly assume MAR. When applied to
+  MNAR data, they impute values drawn from the observed conditional distribution, failing to correct the underlying
+  truncation bias.

@@ -11,6 +11,8 @@ import remarkSmartypants from 'remark-smartypants'
 import { macros } from '../content/macros.ts'
 import { rehypeGlossFirstUse } from './rehype-gloss.ts'
 
+import { remarkPandocCite } from './remark-cite.ts'
+
 const glossaryFile = path.resolve(import.meta.dirname, '..', 'content', 'glossary.yaml')
 
 export const mdxOptions = {
@@ -20,6 +22,7 @@ export const mdxOptions = {
     remarkFrontmatter,
     [remarkMdxFrontmatter, { name: 'frontmatter' }],
     remarkGfm,
+    remarkPandocCite,
     remarkMath,
     [remarkSmartypants, { dashes: false }],
   ],

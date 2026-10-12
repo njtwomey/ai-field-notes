@@ -1,28 +1,123 @@
 ---
 title: 'Instruction and preference data'
 kind: concept
-summary: 'Instruction data pair prompts with good responses for supervised fine-tuning; preference data pair a prompt with responses ranked by people or models, for reward models and preference optimisation.'
-tags: [data, large-language-models, fine-tuning]
-aliases: []
-requires: []
-related: [supervised-fine-tuning, reward-models, direct-preference-optimisation]
-references: []
-status: stub
+summary: 'Instruction data pair prompts with demonstrations for supervised fine-tuning; preference data pair prompts with ranked completions for reward modelling and direct preference optimisation.'
+tags: [data, large-language-models, fine-tuning, alignment]
+aliases: [instruction tuning data, preference datasets, SFT data, RLHF data, DPO data, alignment datasets]
+requires: [supervised-fine-tuning, cross-entropy-and-perplexity]
+related: [dialogue-and-agent-traces, corpus-construction, text-cleaning, benchmark-contamination]
+references: [ouyang2022, zhou2023lima, rafailov2023, wang2023selfinstruct, cui2023ultrafeedback]
+status: draft
 updated: 2026-10-11
 ---
 
+import { InstructionPreferenceExplorer } from './InstructionPreferenceExplorer'
+
 <Definition>
-To be written.
+**Instruction and preference data** drive the post-training alignment of <Gloss name="llm">large language
+models</Gloss>. **Instruction data** pairs task prompts $x$ with target completions $y$, training the model via
+<Gloss name="sft">supervised fine-tuning (SFT)</Gloss> to follow system guidelines and user constraints. **Preference
+data** pairs a prompt $x$ with two or more candidate completions ranked by human annotators or model judges
+($y_w \succ y_l$), providing training supervision for <NoteLink to="reward-models">reward models</NoteLink> in
+<Gloss name="rlhf">reinforcement learning from human feedback (RLHF)</Gloss> and <Gloss name="dpo">direct preference
+optimisation (DPO)</Gloss>.
 </Definition>
 
-## Instruction data
+## Instruction data and supervised fine-tuning
+
+While self-supervised pretraining imparts broad linguistic capabilities and factual knowledge, pretrained base models
+function as unconstrained text continuators. Given a question such as *“What is the capital of France?”*, a base model
+may output further questions (*“What is the capital of Spain?”*) rather than an answer.
+
+Supervised fine-tuning (SFT) conditions the model on structured task demonstrations $(x, y)$ <Cite id="ouyang2022" />:
+
+- **Prompt-completion separation:** The input sequence is concatenated from the prompt $x = (x_1, \dots, x_N)$ and
+  target completion $y = (y_1, \dots, y_M)$.
+- **Loss masking:** Standard language modelling loss is computed exclusively over target completion tokens:
+
+  $$
+  \mathcal{L}_{\text{SFT}}(\theta) = -\sum_{t=1}^M \log P_\theta(y_t \mid x_1, \dots, x_N, y_1, \dots, y_{t-1}).
+  $$
+
+  Tokens belonging to the prompt $x$ are assigned an ignore index (typically $-100$ in PyTorch
+  <NoteLink to="cross-entropy-and-perplexity">cross-entropy loss</NoteLink>), providing conditioning context without
+  propagating loss gradients into prompt memorisation.
 
 ## Conversation formats and templates
 
-## Preference data
+Multi-turn interactions and role assignments require explicit boundaries to prevent models from generating spurious
+conversational turns. Modern tokenisation pipelines serialize structured conversations using chat templates:
 
-## Collection by people
+- **Role identifiers:** Standard schemas partition inputs into `system` (operational parameters and safety bounds),
+  `user` (human prompt), and `assistant` (model generation).
+- **Control tokens (ChatML):** Delimiters such as `<|im_start|>` and `<|im_end|>` frame each turn explicitly:
 
-## Synthesis by models
+  ```text
+  <|im_start|>system
+  You are an expert scientific editor.<|im_end|>
+  <|im_start|>user
+  Explain quantum tunnelling concisely.<|im_end|>
+  <|im_start|>assistant
+  Quantum tunnelling occurs when a subatomic particle transitions across a potential energy barrier higher than its kinetic energy.<|im_end|>
+  ```
+
+- **Template compilation:** Libraries like HuggingFace `transformers` compile structured dictionary dialogues into raw
+  token sequences using Jinja2 templates, ensuring exact parity between training and inference delimitation.
+
+## Preference data and pairwise rankings
+
+Supervised fine-tuning alone cannot penalise subtly suboptimal responses; it only maximizes the likelihood of
+demonstration tokens. Alignment algorithms steer model behavior using comparative preference datasets:
+
+- **Pairwise comparison tuples:** Each training example consists of a prompt $x$ and two candidate completions: a
+  preferred completion $y_w$ (winner) and a rejected completion $y_l$ (loser), denoted $y_w \succ y_l \mid x$.
+- **Bradley-Terry preference model:** The probability that $y_w$ is preferred over $y_l$ is modelled via an underlying
+  scalar reward function $r(x, y)$:
+
+  $$
+  P(y_w \succ y_l \mid x) = \sigma(r(x, y_w) - r(x, y_l)) = \frac{1}{1 + \exp\left(-(r(x, y_w) - r(x, y_l))\right)}.
+  $$
+
+- **Direct Preference Optimisation (DPO):** Rafailov et al. demonstrated that the reward model can be solved
+  analytically and substituted directly into the policy loss, training the <Gloss name="language-model">language
+  model</Gloss> without an auxiliary reward model or <Gloss name="rl">reinforcement learning</Gloss> rollout loop
+  <Cite id="rafailov2023" />:
+
+  $$
+  \mathcal{L}_{\text{DPO}}(\theta; \pi_{\text{ref}}) = -\expect_{(x, y_w, y_l)} \left[ \log \sigma \left( \beta \log \frac{\pi_\theta(y_w \mid x)}{\pi_{\text{ref}}(y_w \mid x)} - \beta \log \frac{\pi_\theta(y_l \mid x)}{\pi_{\text{ref}}(y_l \mid x)} \right) \right],
+  $$
+
+  where $\pi_{\text{ref}}$ is the frozen SFT reference policy, and $\beta$ controls the strength of the KL divergence
+  penalty against reference drift.
+
+## Human demonstration versus synthetic generation
+
+The curation of alignment datasets relies on two complementary paradigms:
+
+- **Human expert annotation:** Human contractors write demonstration responses or rank paired outputs. While human
+  supervision provides nuanced adherence to safety and conversational subtlety, it is financially expensive, difficult
+  to scale beyond tens of thousands of examples, and prone to annotator noise.
+- **The LIMA principle (Less Is More for Alignment):** Zhou et al. demonstrated that training a strong base model on
+  just 1,000 meticulously curated, high-quality demonstration examples achieved alignment competitive with models
+  trained on 50,000 uncurated community dialogues <Cite id="zhou2023lima" />. Post-training acts primarily as a
+  stylistic adapter that surfaces pre-existing capabilities.
+- **Model synthesis (Self-Instruct and <Gloss name="llmaaj" />):** Automated pipelines use frontier models to generate
+  task prompts, synthesize alternative candidate completions, and evaluate rankings <Cite id="wang2023selfinstruct" />.
+  UltraFeedback ranks thousands of diverse prompt responses across multiple distinct frontier model judges to filter
+  synthetic noise <Cite id="cui2023ultrafeedback" />.
+
+<InstructionPreferenceExplorer />
 
 ## Pitfalls
+
+- **Length and verbosity bias:** Human annotators and automated LLM judges exhibit strong systemic bias toward longer
+  completions, rewarding verbose answers packed with unnecessary bullet points over concise, correct responses.
+  Preference models trained on unadjusted pairwise rankings quickly learn to exploit length as a shortcut feature.
+- **Sycophancy and truthfulness degradation:** Models tuned on naive human preference data often learn sycophancy:
+  confirming erroneous user premises (*“Yes, you are completely right that the Earth is flat...”*) because annotators
+  rate agreeable responses higher than confrontational corrections.
+- **Template and delimiter leakage:** Failing to sanitize raw text in user prompts allows conversational delimiters
+  (such as `<|im_end|>`) to inject adversarial system instructions or escape role boundaries during fine-tuning.
+- **Over-optimisation and mode collapse:** High-iteration preference optimization against a fixed reward signal causes
+  <Gloss name="reward-hacking">reward hacking</Gloss>, where the model outputs repetitive stylistic tokens that maximize
+  the surrogate reward while degrading general reasoning capabilities.

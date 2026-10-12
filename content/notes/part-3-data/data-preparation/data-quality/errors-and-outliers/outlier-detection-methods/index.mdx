@@ -2,27 +2,182 @@
 title: 'Outlier detection methods'
 kind: concept
 summary: 'Outliers in a dataset are flagged by robust z-scores, distances, density and isolation scores. Several outliers can hide one another or make clean points look anomalous.'
-tags: [data, robust-statistics, anomaly-detection]
-aliases: []
-requires: []
-related: [anomaly-detection, isolation-forest, local-outlier-factor, mahalanobis-distance, leverage-and-influence]
-references: []
-status: stub
+tags: [data-preparation, robust-statistics, anomaly-detection, machine-learning]
+aliases: [outlier detection algorithms, robust z-score, masking and swamping, Minimum Covariance Determinant, FastMCD, Local Outlier Factor, Isolation Forest]
+requires: [outliers-and-gross-errors, variance-and-covariance]
+related: [local-outlier-factor, isolation-forest, constraint-based-repair]
+references: [rousseeuw1999, breunig2000, liu2008, rousseeuw1984]
+status: draft
 updated: 2026-10-11
 ---
 
+import { OutlierDetectionExplorer } from './OutlierDetectionExplorer'
+
 <Definition>
-To be written.
+An **outlier detection method** maps an observation $\xvec \in \mathbb{R}^D$ to a continuous anomaly score
+$s(\xvec) \in \mathbb{R}$, paired with a decision threshold $\tau \in \mathbb{R}$ such that:
+
+$$
+\operatorname{status}(\xvec) = \begin{cases} \text{outlier} & \text{if } s(\xvec) \ge \tau, \\ \text{inlier} & \text{if } s(\xvec) < \tau. \end{cases}
+$$
+
+Detection algorithms evaluate observations across four distinct geometrical criteria: robust parametric scale, metric
+distance, local neighbourhood density, and random tree isolation.
 </Definition>
 
-## Robust z-scores
+## Robust univariate z-scores and the Hampel filter
 
-## Distance-based detection
+The classical sample $z$-score evaluates the standardized deviation from the arithmetic mean:
+
+$$
+z_i = \frac{x_i - \bar{x}}{s}, \quad \text{where } \bar{x} = \frac{1}{N}\sum x_i, \quad s = \sqrt{\frac{1}{N-1}\sum (x_i - \bar{x})^2}.
+$$
+
+The classical $z$-score possesses a breakdown point of zero ($\epsilon^* = 0$). As an extreme outlier $x_k \to \infty$,
+both the mean $\bar{x}$ and sample standard deviation $s$ inflate proportionally, imposing the strict mathematical bound
+$|z_i| \le \frac{N - 1}{\sqrt{N}}$ for all $i$. Consequently, a cluster of massive outliers inflates $s$ so drastically
+that their own $z$-scores collapse below standard $3\sigma$ thresholds.
+
+### Robust z-scores via MAD
+Replacing non-robust location and scale estimators with the median and Median Absolute Deviation (MAD) yields a scale
+estimator with a $50\%$ breakdown point:
+
+$$
+z_{\text{MAD}, i} = \frac{x_i - \operatorname{median}(\xvec)}{1.4826 \cdot \operatorname{MAD}(\xvec)}.
+$$
+
+For Gaussian data, the scaling factor $1.4826 = 1 / \Phi^{-1}(0.75)$ ensures that $\hat{\sigma}_{\text{MAD}}$
+asymptotically estimates standard deviation. Observations satisfying $|z_{\text{MAD}, i}| \ge 3.0$ or $3.5$ are flagged.
+
+### The Hampel filter
+In sequential or time-series data, the **Hampel filter** computes moving-window medians and MAD estimates over a
+symmetric window $W_t = [t - k, t + k]$:
+
+$$
+\tilde{x}_t = \operatorname{median}(x_{t-k}, \dots, x_{t+k}), \qquad S_t = 1.4826 \cdot \operatorname{median}\left(|x_{t+j} - \tilde{x}_t|\right)_{j=-k}^k.
+$$
+
+If $|x_t - \tilde{x}_t| > 3 S_t$, the central point $x_t$ is flagged and replaced by the local median $\tilde{x}_t$.
+
+## Distance-based detection and robust covariance
+
+### $k$-nearest neighbour distance
+In metric spaces, distance-based detectors measure isolation without positing a global parametric family. For each
+observation $\xvec_i$, the anomaly score is defined as the distance to its $k$-th nearest neighbour $d_k(\xvec_i)$ or
+the average distance across its $k$ nearest neighbours:
+
+$$
+s_{k\text{-NN}}(\xvec_i) = \frac{1}{k} \sum_{j=1}^k d(\xvec_i, \xvec_{(j)}).
+$$
+
+$k$-NN distance naturally detects isolated points regardless of manifold shape. However, in datasets featuring clusters
+with differing internal densities, a point in a sparse cluster receives a high $k$-NN distance even when it is a
+perfectly legitimate inlier for its local region.
+
+### Minimum Covariance Determinant (FastMCD)
+The Mahalanobis distance $D_M(\xvec) = \sqrt{(\xvec - \muvec)^\top \Sigmamat^{-1} (\xvec - \muvec)}$ accounts for linear
+correlations among features. However, when $\muvec$ and $\Sigmamat$ are estimated using sample means and sample
+covariances, outliers distort the covariance ellipse.
+
+Rousseeuw & Van Driessen (1999) resolved this vulnerability via the **FastMCD** algorithm <Cite id="rousseeuw1999" />
+<Cite id="rousseeuw1984" />:
+1. Search for the subset of $h$ observations (where $\lfloor (N + D + 1) / 2 \rfloor \le h < N$) whose sample covariance
+   matrix $\Sigmamat_h$ has the minimal determinant:
+   
+   $$
+   H_{\text{MCD}} = \arg\min_{|H| = h} \det\left(\Sigmamat_H\right).
+   $$
+2. Compute robust center $\hat{\muvec}_{\text{MCD}}$ and scatter matrix $\hat{\Sigmamat}_{\text{MCD}}$ strictly from
+   this optimal $h$-subset.
+3. Evaluate robust Mahalanobis distances:
+   
+   $$
+   D_{\text{MCD}}(\xvec_i) = \sqrt{\left(\xvec_i - \hat{\muvec}_{\text{MCD}}\right)^\top \hat{\Sigmamat}_{\text{MCD}}^{-1} \left(\xvec_i - \hat{\muvec}_{\text{MCD}}\right)}.
+   $$
+
+FastMCD achieves a breakdown point of up to $50\%$, preventing up to half the dataset from corrupting the estimated
+center and covariance orientation.
 
 ## Density and isolation scores
 
+### Local Outlier Factor (LOF)
+Breunig et al. (2000) introduced LOF to overcome the limitation of distance-based methods in multi-density datasets
+<Cite id="breunig2000" />:
+1. **$k$-distance and reachability distance:** For points $p$ and $o$, the reachability distance is:
+   
+   $$
+   \operatorname{reach-dist}_k(p, o) = \max\left(d_k(o), d(p, o)\right).
+   $$
+2. **Local reachability density (lrd):** The inverse of the average reachability distance from its $k$-nearest
+   neighbours:
+   
+   $$
+   \operatorname{lrd}_k(p) = \left(\frac{1}{k} \sum_{o \in N_k(p)} \operatorname{reach-dist}_k(p, o)\right)^{-1}.
+   $$
+3. **LOF score:** The average ratio of the local reachability densities of $p$'s neighbours to that of $p$:
+   
+   $$
+   \operatorname{LOF}_k(p) = \frac{1}{k} \sum_{o \in N_k(p)} \frac{\operatorname{lrd}_k(o)}{\operatorname{lrd}_k(p)}.
+   $$
+
+If $p$ lies inside a cluster (dense or sparse), $\operatorname{lrd}(p) \approx \operatorname{lrd}(o)$ and
+$\operatorname{LOF}(p) \approx 1$. If $p$ is an outlier located outside a dense cluster,
+$\operatorname{lrd}(p) \ll \operatorname{lrd}(o)$ and $\operatorname{LOF}(p) \gg 1$.
+
+### Isolation Forest (iForest)
+Liu, Ting & Zhou (2008) observed that anomalies are "few and different", making them fundamentally easier to isolate
+than normal observations <Cite id="liu2008" />:
+1. Build an ensemble of $T$ completely randomized binary trees (Isolation Trees). At each step, randomly select an axis
+   $j$ and split value $s \sim \mathcal{U}(\min X_j, \max X_j)$.
+2. Compute the average tree path length $h(\xvec)$ required to isolate observation $\xvec$ into an external leaf.
+3. The anomaly score is normalized by the average path length of an unsuccessful search in a binary search tree of size
+   $n$, $c(n) = 2 \ln(n - 1) + 0.5772 - 2(n - 1)/n$:
+   
+   $$
+   s(\xvec, n) = 2^{-\frac{\mathbb{E}[h(\xvec)]}{c(n)}}.
+   $$
+
+Outliers separate near the root ($h \ll c(n)$, $s \to 1$); inliers require deep partitioning ($h \gg c(n)$, $s \to 0$).
+
+<OutlierDetectionExplorer />
+
 ## Masking and swamping
 
-## Outliers as errors or as signal
+When multiple anomalies contaminate a dataset, classical estimators suffer from two severe interaction pathologies:
+
+### Masking (False Negatives)
+**Masking** occurs when the presence of multiple outliers hides their own anomalous nature. For example, if a cluster of
+8 extreme observations shares a similar off-manifold location, they pull the sample mean $\bar{\xvec}$ toward themselves
+and inflate the covariance matrix $\hat{\Sigmamat}$. Under standard Mahalanobis distance or classical $z$-scores, their
+standardized distances shrink below the detection threshold, rendering them invisible.
+
+### Swamping (False Positives)
+**Swamping** occurs when outliers distort the estimated location and scale so severely that uncorrupted, clean inliers
+appear anomalous. When the sample mean shifts away from the true population center and the covariance axes rotate,
+inlying points in low-density peripheral clusters receive spuriously large distance scores, triggering false alarms.
+
+High-breakdown estimators (such as FastMCD, LOF, and Isolation Forest) resist both masking and swamping by preventing
+corrupted points from dominating the reference baseline.
+
+## Outliers as errors versus signal
+
+The strategic purpose of outlier detection dictates how flagged points must be handled:
+
+- **Data cleaning objective:** When the goal is fitting a supervised regression model, flagged outliers are inspected to
+  remove gross measurement errors and prevent leverage distortions.
+- **Discovery objective:** In cybersecurity, financial fraud detection, and rare disease diagnostics, the outliers **are
+  the target phenomenon**. Filtering them out destroys the primary value of the dataset.
+
+In practice, high-performing production pipelines treat unsupervised anomaly scores as continuous risk features rather
+than performing irreversible thresholding and dropping rows.
 
 ## Pitfalls
+
+- **The curse of dimensionality in distance methods:** In high-dimensional spaces ($D > 50$), distance concentration
+  causes the ratio $(d_{\max} - d_{\min})/d_{\min} \to 0$. All pairwise Euclidean distances become equidistant,
+  rendering raw $k$-NN and LOF scores uninformative unless preceded by dimensionality reduction.
+- **Assuming uniform cluster density:** Applying a global distance threshold across a dataset with multi-density
+  clusters swamps all points in sparse clusters while missing subtle anomalies buried inside dense clusters. Local
+  density estimators (LOF) must be preferred.
+- **Using non-robust detectors to clean training data:** Using empirical 3-sigma rules or standard Mahalanobis distance
+  to filter outliers creates severe masking, leaving clustered anomalies untouched while discarding clean tail points.

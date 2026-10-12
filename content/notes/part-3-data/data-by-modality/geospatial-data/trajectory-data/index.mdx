@@ -1,26 +1,165 @@
 ---
 title: 'Trajectory data'
 kind: concept
-summary: 'Trajectories are sequences of positions over time from GPS and similar sensors. They need noise filtering, matching to a road network, detection of stay points and handling of uneven sampling.'
-tags: [data, time-series]
-aliases: []
-requires: []
-related: [mobility-and-trajectory-datasets]
-references: []
-status: stub
-updated: 2026-10-11
+summary: 'Trajectories are ordered sequences of timestamped coordinates recorded by mobile sensors, requiring kinematic noise filtering, road-network map matching via hidden Markov models, stay-point segmentation, and uneven temporal alignment.'
+tags: [data, time-series, geospatial, mobility]
+aliases: [gps-trajectories, mobility-data, map-matching, stay-points, douglas-peucker]
+requires: [coordinate-reference-systems]
+related: [vector-and-raster-data, spatial-features, event-sequences]
+references: [newson2009, zheng2015trajectory]
+status: draft
+updated: 2026-10-12
 ---
 
+import { TrajectoryDataVisualizer } from './TrajectoryDataVisualizer'
+
 <Definition>
-To be written.
+A **trajectory** is an ordered sequence of spatio-temporal coordinate observations
+$T = \langle p_1, p_2, \dots, p_N \rangle$ representing the continuous physical movement of a discrete entity (vehicle,
+pedestrian, animal, aircraft) over time, where each fix $p_i = (\mathbf{x}_i, t_i, \mathbf{a}_i)$ comprises planar or
+geodetic coordinates $\mathbf{x}_i \in \mathbb{R}^2$, a monotonically increasing timestamp $t_i \in \mathbb{R}$
+($t_1 < t_2 < \dots < t_N$), and optional kinematic attributes $\mathbf{a}_i$ such as instantaneous velocity $v_i$,
+bearing angle $\theta_i$, and altitude $z_i$ <Cite id="zheng2015trajectory" />.
 </Definition>
 
-## GPS noise
+Raw positioning telemetry from GPS, cellular tower handoffs, or automated vehicle tracking suffers from sensor drift,
+multipath signal reflection in urban canyons, asynchronous sampling intervals, and lack of street topology. Transforming
+raw trajectory streams into structured features requires Kalman filtering, map matching onto road networks, and
+stay-point clustering <Cite id="newson2009" />.
 
-## Map matching
+<TrajectoryDataVisualizer client:load />
 
-## Stay points
+## GPS Noise and Kinematic Filtering
 
-## Uneven sampling rates
+Raw GNSS positioning fixes exhibit Gaussian measurement noise compounded by heavy-tailed non-Gaussian multipath
+reflection errors caused by tall buildings, tunnels, and overpasses <Cite id="zheng2015trajectory" />.
+
+### Kinematic Outlier Filtering
+
+Outlier detection filters physically impossible telemetry points using kinematic thresholds:
+1. **Speed Thresholding**: The average velocity between consecutive fixes $p_{i-1}$ and $p_i$ is computed:
+   $$
+   v_i = \frac{d_{\text{geodesic}}(\mathbf{x}_{i-1}, \mathbf{x}_i)}{t_i - t_{i-1}}
+   $$
+   Points where $v_i > v_{\max}$ (e.g. $v_{\max} = 150\text{ km/h}$ for urban ground vehicles) are flagged as multipath
+   teleportation glitches and removed.
+2. **Acceleration and Heading Acceleration**: High directional acceleration (sudden $180^\circ$ reversal within 1 second
+   followed by immediate recovery) indicates receiver signal bounces.
+
+### Trajectory Simplification (Douglas-Peucker Algorithm)
+
+To compress dense GPS streams while preserving spatial topology, the **Douglas-Peucker algorithm** recursively
+subsamples vertices within an error tolerance $\epsilon$ <Cite id="zheng2015trajectory" />:
+1. Draw a straight line between trajectory endpoints $p_1$ and $p_N$.
+2. Find the intermediate point $p_k$ with the maximum perpendicular distance to the chord:
+   $$
+   d_{\max} = \max_{1 < k < N} \operatorname{dist}_{\perp}(p_k, \overline{p_1 p_N})
+   $$
+3. If $d_{\max} > \epsilon$, keep $p_k$ and recursively simplify sub-trajectories $\langle p_1, \dots, p_k \rangle$ and
+   $\langle p_k, \dots, p_N \rangle$. Otherwise, discard all intermediate vertices.
+
+This guarantees that the simplified polyline deviates from the original trajectory by at most $\epsilon$ meters, often
+achieving $80\text{--}90\%$ storage reduction.
+
+---
+
+## Map Matching (Hidden Markov Models)
+
+Autonomous vehicles, delivery dispatchers, and traffic routing algorithms require mapping noisy, asynchronous GPS
+coordinates onto a directed road graph $G = (V, E)$, where edges represent road segments.
+
+### The Newson-Krumm HMM Formulation
+
+Newson and Krumm <Cite id="newson2009" /> cast map matching as inference in a Hidden Markov Model (HMM):
+- **Observations $\mathbf{z}_i$**: The noisy recorded GPS coordinates $p_i$.
+- **Hidden States $s_{i, j}$**: Candidate road positions lying on road segment $r_j$ closest to $p_i$.
+
+| HMM Formulation Component | Notation & Variable | Probabilistic Characterization | Physical & Routing Meaning |
+| :--- | :--- | :--- | :--- |
+| **Observation Sequence** | $\mathbf{z}_{1:T} = (z_1, \dots, z_T)$ | Raw recorded GPS coordinates $(\text{lat}, \text{lon}, t)$ | Observed sensor fixes corrupted by multipath and satellite receiver noise |
+| **Latent State Sequence** | $\mathbf{s}_{1:T} = (s_1, \dots, s_T)$ | True candidate points snapped onto road edges $e \in E$ | Hidden vehicle positions constrained to lawful topology of road graph $G$ |
+| **Emission Probability** | $p(z_i \mid s_{i, j})$ | Gaussian over orthogonal distance $\|\mathbf{x}_{z_i} - \mathbf{x}_{s_{i, j}}\|$ | Penalizes candidate road positions distant from recorded GPS coordinates |
+| **Transition Probability** | $p(s_{i+1, k} \mid s_{i, j})$ | Exponential penalty on $\|d_{\text{net}} - d_{\text{geo}}\|$ | Penalizes topological road detours inconsistent with straight-line GPS elapsed time |
+
+#### 1. Emission Probability
+
+The probability that GPS measurement $z_i$ was generated by candidate road position $x_{i, j}$ follows a zero-mean
+Gaussian distribution with sensor standard deviation $\sigma_z$:
+
+$$
+p(z_i \mid s_{i, j}) = \frac{1}{\sqrt{2\pi \sigma_z^2}} \exp\left( -\frac{\|\mathbf{x}_{z_i} - \mathbf{x}_{s_{i, j}}\|_2^2}{2\sigma_z^2} \right)
+$$
+
+#### 2. Transition Probability
+
+The probability of transitioning from candidate road position $s_{i, j}$ to $s_{i+1, k}$ penalizes discrepancies between
+the shortest network path distance $d_{\text{net}}(s_{i, j}, s_{i+1, k})$ along the road graph and the great-circle
+Euclidean distance $d_{\text{geo}}(z_i, z_{i+1})$ between measurements:
+
+$$
+p(s_{i+1, k} \mid s_{i, j}) = \frac{1}{\beta} \exp\left( -\frac{|d_{\text{net}}(s_{i, j}, s_{i+1, k}) - d_{\text{geo}}(z_i, z_{i+1})|}{\beta} \right)
+$$
+
+where $\beta$ is a calibrated route difference scale. If a vehicle moves between consecutive fixes separated by
+$100\text{ m}$ in Euclidean distance, a road transition requiring an illegal U-turn or a $1{,}500\text{ m}$ detour
+receives an exponentially suppressed probability <Cite id="newson2009" />.
+
+#### 3. Viterbi Path Decoding
+
+The globally optimal sequence of traversed road segments $\mathbf{s}^*$ is decoded in $O(N \cdot K^2)$ time using the
+Viterbi dynamic programming algorithm:
+
+$$
+\mathbf{s}^* = \arg\max_{\mathbf{s}} \prod_{i=1}^N p(z_i \mid s_i) \prod_{i=1}^{N-1} p(s_{i+1} \mid s_i)
+$$
+
+---
+
+## Stay-Point Detection
+
+Raw trajectories contain long periods of spatial dwelling where the entity is stationary (e.g. parked at a warehouse,
+sitting in an office, dining at a restaurant). Sensor noise causes GPS coordinates to drift within a local circle
+<Cite id="zheng2015trajectory" />.
+
+A **stay point** $S$ represents a contiguous sub-sequence $\langle p_m, p_{m+1}, \dots, p_k \rangle$ where:
+1. The maximum spatial distance between the entry point $p_m$ and any subsequent point is bounded by a spatial threshold
+   $D_{\max}$:
+   $$
+   \max_{m \le j \le k} d_{\text{geodesic}}(p_m, p_j) \le D_{\max}
+   $$
+2. The dwell duration exceeds a minimum time threshold $T_{\min}$:
+   $$
+   t_k - t_m \ge T_{\min}
+   $$
+
+The stay point is collapsed into a single semantic point of interest (POI) with spatial centroid
+$\mathbf{x}_{\text{stay}} = \frac{1}{k - m + 1} \sum_{j=m}^k \mathbf{x}_j$, arrival time $t_m$, and departure time
+$t_k$. Detecting stay points compresses millions of GPS fixes into discrete origin-destination (OD) trip matrices
+<Cite id="zheng2015trajectory" />.
+
+---
+
+## Uneven Sampling Rates and Distance Metrics
+
+Trajectories collected across fleets feature heterogeneous sampling intervals:
+- **Linear vs Network Interpolation**: Naively interpolating missing coordinates linearly across 5-minute sampling gaps
+  cuts through buildings, water bodies, and parks. Principled interpolation computes the shortest path along the
+  underlying road graph constrained by speed limits.
+- **Dynamic Time Warping (DTW)**: Aligns two trajectories of different lengths and speeds by finding an alignment path
+  $W$ that minimizes total point-to-point distances subject to monotonicity and boundary constraints.
+- **Fréchet Distance**: Measures the minimum leash length required to connect a dog and its owner walking along their
+  respective trajectories without backtracking.
+
+---
 
 ## Pitfalls
+
+1. **Ping-Ponging Between Parallel Lanes**: In dense dual-carriageway corridors or elevated double-decker expressways,
+   high GPS noise causes map matching without transition penalties to oscillate rapidly between parallel northbound and
+   southbound lanes.
+2. **Re-identification and Privacy Vulnerabilities**: Trajectories are highly unique. Empirical studies show that just
+   four coarse spatio-temporal points $(\mathbf{x}_i, t_i)$ are sufficient to uniquely re-identify over $95\%$ of
+   individuals in anonymized mobility datasets, requiring differential privacy or spatial cloaking.
+3. **Ghost Velocity Spikes from Sleep Modes**: When smartphones wake from low-power background sleep modes, GPS
+   receivers report coarse cell-tower coordinates before acquiring satellite locks, creating artificial
+   $500\text{ km/h}$ teleportation spikes that contaminate trip duration statistics.

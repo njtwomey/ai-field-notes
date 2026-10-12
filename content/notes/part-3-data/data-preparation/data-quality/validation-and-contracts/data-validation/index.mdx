@@ -2,29 +2,155 @@
 title: 'Data validation and data contracts'
 kind: concept
 summary: 'Data validation checks each batch of data against expectations about its schema, types, ranges, uniqueness and distributions before it is used for training or prediction. A data contract fixes those expectations between producer and consumer.'
-tags: [data, software]
-aliases: []
-requires: []
-related: [drift-detection, model-monitoring]
-references: []
-status: stub
+tags: [data-preparation, data-quality, software, production-ml, mlops]
+aliases: [data validation, data contracts, Great Expectations, TFDV, schema validation, training-serving skew, data expectations]
+requires: [parsing-and-type-inference, value-standardisation]
+related: [data-quality-dimensions, cleaning-and-evaluation, constraint-based-repair]
+references: [polyzotis2018]
+status: draft
 updated: 2026-10-11
 ---
 
+import { DataValidationExplorer } from './DataValidationExplorer'
+
 <Definition>
-To be written.
+**Data validation** is the automated execution of a formal assertion suite $\mathcal{V} = \{e_1, e_2, \dots, e_K\}$
+against incoming data batches $B \sim \mathcal{D}$ prior to ingestion, training, or real-time inference:
+
+$$
+\mathcal{V}(B) = \bigwedge_{k=1}^K e_k(B) \in \{\text{True}, \text{False}\}.
+$$
+
+A **data contract** is an explicit, versioned API-like agreement between data producers (application backends, event
+services, transactional databases) and data consumers (machine learning systems, analytics pipelines). The contract
+formalizes structural schemas, semantic invariants, statistical SLAs, and change-management protocols.
 </Definition>
 
-## Schemas and types
+## Schemas, types, and structural expectations
 
-## Expectations
+The foundational tier of data validation asserts structural integrity:
+- **Column completeness:** Verifying that all required model features exist in the payload without unauthorized renames
+  or omissions.
+- **Strict physical typing:** Ensuring that incoming types conform to serialized specifications (e.g., confirming an
+  identifier is ingested as `Utf8` rather than coerced to `int64`, and timestamps are stored with explicit UTC timezone
+  metadata).
+- **Schema evolution rules:** Enforcing backward compatibility. New optional columns may be appended with default null
+  representations, but existing columns cannot be deleted, renamed, or have their types narrowed without a semantic
+  version bump.
 
-## Unit and consistency checks
+## Atomic data expectations and assertions
 
-## Distribution checks
+Beyond structural types, validation suites (such as Great Expectations, Pandera, or TensorFlow Data Validation) evaluate
+atomic properties across individual cells and columns <Cite id="polyzotis2018" />:
 
-## Training-serving skew
+1. **Nullability thresholds:** Asserting that missingness proportions obey strict service-level agreements:
+   
+   $$
+   \frac{1}{N}\sum_{i=1}^N \mathbb{I}\left(X_{ij} = \text{NaN}\right) \le \alpha_{\max}.
+   $$
 
-## Data contracts
+2. **Domain value envelopes:** Verifying that continuous values fall within admissible physical bounds (e.g.
+   $0 \le \text{age} \le 120$ or $0.0 \le \text{probability} \le 1.0$).
+3. **Categorical set inclusion:** Confirming that categorical features belong to a pre-approved finite set of valid
+   domain levels:
+   
+   $$
+   x_{ij} \in \mathcal{C}_j = \{c_1, c_2, \dots, c_m\}.
+   $$
+
+   Unseen levels trigger quarantine or route to fallback categories.
+4. **Primary key uniqueness:** Asserting that entity identifiers exhibit zero duplication:
+   
+   $$
+   |\operatorname{unique}(\mathbf{id})| = N.
+   $$
+
+## Inter-column and relational consistency checks
+
+Multivariate assertions verify that relationships between features satisfy domain invariants:
+- **Relational orderings:** Ensuring temporal and financial consistency across columns within the same row:
+  
+  $$
+  t[\text{EndTimestamp}] \ge t[\text{StartTimestamp}], \qquad t[\text{DiscountedPrice}] \le t[\text{ListPrice}].
+  $$
+
+- **Referential integrity:** Checking that foreign keys (e.g. `customer_id` or `store_id`) exist in authoritative master
+  dimension tables.
+- **Conditional dependencies:** Enforcing that if `has_insurance = False`, then `insurance_copay` must be null or 0.
+
+## Distributional checks and drift detection
+
+Data can pass every structural and schema assertion while suffering from severe distribution shifts that destroy model
+performance. Statistical validation compares the empirical distribution of the incoming batch $B_{\text{curr}}$ against
+the baseline training distribution $B_{\text{train}}$:
+
+### Population Stability Index (PSI)
+For a continuous or binned feature partitioned into $K$ reference bins:
+
+$$
+\text{PSI} = \sum_{k=1}^K \left(p_k - q_k\right) \ln\left(\frac{p_k}{q_k}\right),
+$$
+
+where $p_k$ is the observed frequency in the current batch and $q_k$ is the expected frequency from the training
+baseline.
+- $\text{PSI} < 0.10$: Minimal shift; distribution is stable.
+- $0.10 \le \text{PSI} < 0.25$: Moderate distribution drift; triggers warning and accelerated monitoring.
+- $\text{PSI} \ge 0.25$: Severe distribution shift; invalidates model calibration.
+
+### Non-parametric two-sample tests
+- **Continuous features:** The two-sample Kolmogorov-Smirnov (KS) test evaluates the maximum vertical discrepancy
+  between empirical cumulative distribution functions:
+  
+  $$
+  D = \sup_x \left|F_{\text{curr}}(x) - F_{\text{train}}(x)\right|.
+  $$
+
+- **Categorical features:** Chi-square goodness-of-fit or total variation distance measures frequency shifts across
+  discrete categories.
+
+<DataValidationExplorer />
+
+## Training-serving skew and silent pipeline breakages
+
+Training-serving skew describes discrepancies between the data distribution used during offline model training and the
+data distribution encountered during live online inference <Cite id="polyzotis2018" />.
+
+Common sources of silent skew include:
+- **Disparate data access pathways:** Features computed via complex multi-table SQL queries in an offline
+  Snowflake/BigQuery warehouse versus features retrieved via low-latency key-value lookups in an online Redis feature
+  store. Subtle differences in rounding, timezone handling, or join logic produce diverging feature vectors.
+- **Upstream application updates:** Software engineers modifying an e-commerce checkout form change the format of postal
+  codes or rename a JSON payload key, causing the serving pipeline to ingest nulls without throwing an HTTP error.
+- **Silent pipeline failures:** Upstream batch jobs failing silently, resulting in stale features or zero-filled default
+  inputs.
+
+## Data contracts as architectural boundaries
+
+In modern data architectures, data contracts establish formal boundaries between producer microservices and consumer
+machine learning pipelines:
+
+| Architectural Boundary | Responsible Entity | Verification Scope | Enforcement Mechanism |
+| :--- | :--- | :--- | :--- |
+| **Upstream Producer** | Backend Microservice / API | Schema emission, physical data types, value envelopes | CI/CD contract tests block breaking pull requests |
+| **Contract Gate** | Ingestion Engine (Kafka / Flink) | Inline automated assertion test suite | Circuit breaker: routes compliant data forward, intercepts violations |
+| **Quarantine & Alert** | MLOps Incident Handler | Anomaly isolation and incident escalation | Isolates corrupt payloads in dead-letter storage; fires on-call alerts |
+| **Downstream Consumer** | Feature Store / Model Inference | Feature ingestion and scoring | Ingests verified records with invariant distribution guarantees |
+
+A robust data contract contains four components:
+1. **Schema specification:** Explicit column names, data types, and nullability constraints.
+2. **Semantic assertions:** Range bounds, regex patterns, and business logic equations.
+3. **Service level agreements (SLAs):** Update frequency, latency boundaries, and permissible missingness rates.
+4. **CI/CD breaking change gates:** Producer applications include contract verification tests in their continuous
+   integration pipelines. A code pull request that alters a contracted column cannot be merged without explicit approval
+   from downstream consumers.
 
 ## Pitfalls
+
+- **Validating only row volume:** Checking that an ETL job loaded 100,000 rows without verifying column distributions
+  allows corrupted or zero-filled payloads to slip silently into production feature stores.
+- **Overly tight expectation bounds (Alert Fatigue):** Setting brittle thresholds (such as 0% nulls on noisy web
+  telemetry or rigid 3-sigma range bounds) triggers constant false alarms, causing engineering teams to ignore
+  legitimate validation alerts.
+- **Validating after model ingestion:** Running validation scripts as an asynchronous batch job hours after data has
+  been fed into online scoring models allows corrupted predictions to reach users before the problem is identified.
+  Validation must act as an inline circuit breaker.

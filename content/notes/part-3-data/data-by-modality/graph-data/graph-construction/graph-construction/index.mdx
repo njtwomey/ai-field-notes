@@ -2,25 +2,157 @@
 title: 'Graph construction'
 kind: concept
 summary: 'Many datasets become graphs only by construction: nearest-neighbour or similarity graphs over points, and graphs of interactions or relations between entities. The construction fixes what a graph model can learn.'
-tags: [data, graphs]
-aliases: []
-requires: []
-related: [label-propagation]
-references: []
-status: stub
-updated: 2026-10-11
+tags: [data, graphs, topology, graph-neural-networks]
+aliases: [graph-generation, knn-graph-construction, similarity-graphs]
+requires: [tidy-and-reshaped-tables]
+related: [graph-features, heterogeneous-and-temporal-graphs, knowledge-graph-data]
+references: [tenenbaum2000, vonluxburg2007, kipf2017, alon2021]
+status: draft
+updated: 2026-10-12
 ---
 
+import { GraphConstructionVisualizer } from './GraphConstructionVisualizer'
+
 <Definition>
-To be written.
+**Graph construction** is the mathematical and programmatic process of synthesizing an explicit topological graph
+structure $\mathcal{G} = (\mathcal{V}, \mathcal{E}, \mathbf{W})$ from non-graph tabular records, point clouds,
+continuous embeddings, or bipartite transaction logs. The choices made during construction—such as metric distances,
+neighbor counts, kernel bandwidths, and relation predicates—determine the spectral geometry and information propagation
+pathways accessible to downstream graph neural networks.
 </Definition>
+
+While physical systems like chemical molecules and road transit networks possess self-evident physical topologies, the
+majority of graph learning applications operate on datasets where the graph is an engineered inductive artifact
+<Cite id="kipf2017" />. For point sets, recommendation logs, or clinical records, no edges exist until the practitioner
+defines an adjacency rule. Constructing a graph that is too sparse fractures the dataset into unreachable disconnected
+components; constructing one that is too dense induces topological collapse, oversmoothing, and exponential information
+bottlenecks (over-squashing) <Cite id="alon2021" />.
+
+<GraphConstructionVisualizer client:load />
 
 ## Nearest-neighbour graphs
 
+When data consists of $N$ continuous feature vectors
+$\mathbf{X} = \{\mathbf{x}_1, \dots, \mathbf{x}_N\} \subset \mathbb{R}^d$, the local manifold geometry can be captured
+via a **$k$-Nearest Neighbour ($k$-NN) graph** <Cite id="tenenbaum2000" />.
+
+Let $d(\mathbf{x}_i, \mathbf{x}_j)$ denote a metric distance (e.g., Euclidean $\|x_i - x_j\|_2$, Cosine
+$1 - \frac{x_i \cdot x_j}{\|x_i\| \|x_j\|}$, or Mahalanobis). Let $\mathcal{N}_k(i)$ denote the set of $k$ closest data
+points to node $i$. Three topological variants exist:
+
+1. **Directed $k$-NN Graph**: A directed edge is created from node $i$ to node $j$ if and only if $j$ is among the $k$
+   nearest neighbors of $i$:
+   $$
+   \mathcal{E}_{\text{dir}} = \left\{ (i, j) : j \in \mathcal{N}_k(i) \right\}
+   $$
+   Because the nearest-neighbor relation is asymmetric ($j \in \mathcal{N}_k(i) \not\implies i \in \mathcal{N}_k(j)$),
+   node in-degrees vary widely.
+2. **Symmetric (Undirected) $k$-NN Graph**: Connects two nodes if either node considers the other a neighbor:
+   $$
+   A_{ij} = \max\left( \mathbf{1}_{\{j \in \mathcal{N}_k(i)\}}, \, \mathbf{1}_{\{i \in \mathcal{N}_k(j)\}} \right)
+   $$
+   Guarantees minimum degree $d_i \ge k$, accelerating convergence toward a single connected component.
+3. **Mutual $k$-NN Graph**: Connects two nodes only if both nodes mutually consider each other among their $k$ nearest
+   neighbors:
+   $$
+   A_{ij} = \mathbf{1}_{\{j \in \mathcal{N}_k(i) \land i \in \mathcal{N}_k(j)\}}
+   $$
+   Mutual graphs act as powerful outlier filters, isolating boundary noise points into degree-zero singletons.
+
+Constructing exact $k$-NN graphs requires $\mathcal{O}(d N^2)$ distance evaluations. For web-scale datasets
+($N > 10^5$), pipelines utilize Approximate Nearest Neighbor (ANN) search algorithms, such as Hierarchical Navigable
+Small World (HNSW) graphs or random projection trees (Annoy), bounding construction time to $\mathcal{O}(N \log N)$.
+
 ## Similarity thresholds
+
+Rather than fixing the neighbor count $k$, similarity graphs connect node pairs whose continuous distance falls within a
+spatial tolerance radius $\epsilon$, or weight edges via continuous radial basis kernels <Cite id="vonluxburg2007" />:
+
+- **$\epsilon$-Neighborhood Graph**: Connects all pairs whose metric distance is bounded by $\epsilon$:
+  $$
+  A_{ij} = \mathbf{1}_{\{d(\mathbf{x}_i, \mathbf{x}_j) \le \epsilon\}}
+  $$
+  *Limitation*: In datasets with non-uniform density manifolds, a global $\epsilon$ is pathological. In high-density
+  regions, nodes connect to thousands of neighbors, while in low-density sparse regions, peripheral clusters are
+  completely isolated.
+- **Gaussian Radial Basis Function (RBF) Kernel**: Assigns continuous real-valued weights $W_{ij} \in (0, 1]$
+  parameterized by bandwidth $\sigma$:
+  $$
+  W_{ij} = \exp\left( -\frac{\|\mathbf{x}_i - \mathbf{x}_j\|_2^2}{2\sigma^2} \right) \cdot \mathbf{1}_{\{\|\mathbf{x}_i - \mathbf{x}_j\|_2 \le \epsilon_{\text{cutoff}}\}}
+  $$
+
+The resulting graph Laplacian $\mathbf{L} = \mathbf{D} - \mathbf{W}$ and its normalized symmetric variant:
+
+$$
+\mathbf{L}_{\text{sym}} = \mathbf{D}^{-1/2} \mathbf{L} \mathbf{D}^{-1/2} = \mathbf{I} - \mathbf{D}^{-1/2} \mathbf{W} \mathbf{D}^{-1/2}
+$$
+
+govern heat diffusion and message passing. The second smallest eigenvalue $\lambda_2(\mathbf{L}_{\text{sym}})$ (the
+**algebraic connectivity** or Fiedler value) quantifies global graph cohesion: $\lambda_2 = 0$ if and only if the graph
+contains disconnected subgraphs.
 
 ## Graphs from interactions
 
+In recommendation platforms, financial transaction logs, and search engines, data natively represents a **bipartite
+interaction network** between two disjoint entity sets (Users $\mathcal{U}$ and Items $\mathcal{I}$):
+
+$$
+\mathcal{G}_{\text{bipartite}} = (\mathcal{U} \cup \mathcal{I}, \, \mathcal{E}), \quad \mathcal{E} \subseteq \mathcal{U} \times \mathcal{I}
+$$
+
+Represented by the binary bi-adjacency matrix $\mathbf{B} \in \{0, 1\}^{|\mathcal{U}| \times |\mathcal{I}|}$. Many
+classical pipelines collapse bipartite systems into a **one-mode homogeneous projection** across users:
+
+$$
+\mathbf{W}_{\text{user}} = \mathbf{B} \mathbf{B}^\top - \operatorname{diag}(\mathbf{B} \mathbf{B}^\top)
+$$
+
+Where $(W_{\text{user}})_{ij}$ equals the number of distinct items shared between user $i$ and user $j$.
+
+- **The Hub Explosion Problem**: When an item possesses high degree $d_{\text{item}}$ (e.g., a viral video or popular
+  e-commerce staple purchased by $10{,}000$ users), projection generates a dense unweighted clique of size
+  $\binom{d}{2} \approx 5 \times 10^7$ edges. This explodes memory consumption and washes out fine-grained
+  co-interaction signals. Modern systems mitigate this via Resource Allocation or Adamic-Adar frequency discounting:
+  $$
+  W_{ij} = \sum_{k \in \mathcal{N}(i) \cap \mathcal{N}(j)} \frac{1}{\log(1 + d_k)}
+  $$
+
 ## Graphs from relations
 
+Knowledge bases and enterprise ontologies structure interactions as multi-relational, directed typed graphs
+$\mathcal{G} = (\mathcal{V}, \mathcal{E}, \mathcal{R})$ <Cite id="kipf2017" />:
+
+$$
+\mathcal{E} = \left\{ (s, \, r, \, o) : s, o \in \mathcal{V}, \, r \in \mathcal{R} \right\}
+$$
+
+Where each directed triple connects subject entity $s$ to object entity $o$ via predicate relation $r$ (e.g.,
+`(aspirin, treats, headache)`).
+
+Adjacencies are modeled as a 3D binary tensor
+$\mathbf{A} \in \{0, 1\}^{|\mathcal{R}| \times |\mathcal{V}| \times |\mathcal{V}|}$. Relational Graph Convolutional
+Networks (R-GCNs) evaluate relation-specific message transformation matrices:
+
+$$
+\mathbf{h}_i^{(l+1)} = \sigma\left( \sum_{r \in \mathcal{R}} \sum_{j \in \mathcal{N}_i^r} \frac{1}{c_{i,r}} \mathbf{W}_r^{(l)} \mathbf{h}_j^{(l)} + \mathbf{W}_0^{(l)} \mathbf{h}_i^{(l)} \right)
+$$
+
+Where parameter sharing (basis decomposition or block-diagonal decomposition) prevents parameter explosion when
+$|\mathcal{R}|$ spans hundreds of unique edge types.
+
 ## Pitfalls
+
+1. **The Graph Over-smoothing and Over-squashing Trade-off**: Setting neighbor degree $k$ too low fragments the graph,
+   preventing multi-hop label propagation. Setting $k$ too high connects semantically distinct sub-clusters; GCN message
+   passing rapidly averages node features toward the uniform graph centroid $\mathbf{h}_i \to \mathbf{c}$, causing
+   representation collapse (over-smoothing) <Cite id="kipf2017, alon2021" />.
+2. **Transductive Edge Leakage**: Constructing a $k$-NN graph over all available samples prior to train/test
+   partitioning introduces severe label leakage. Test nodes act as structural bridges in the message passing tree,
+   allowing training node features to leak into test node embeddings. Graphs must be constructed strictly on the
+   training partition, with test nodes added via inductive inference.
+3. **Uncritical Bipartite Projection**: Flattening user-item graphs into homogeneous user-user matrices discards
+   intermediate item identities and blows up edge counts by orders of magnitude. Directly training heterogeneous
+   bipartite GNNs (e.g., LightGCN, PinSage) preserves sparse linear complexity.
+4. **Ignoring Edge Asymmetry in Interaction Logs**: Treating asymmetric directional activities (such as financial money
+   transfers or Twitter followings) as undirected symmetric edges destroys causal directionality and inflates false
+   positive communities in fraud detection pipelines.

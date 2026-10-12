@@ -2,25 +2,137 @@
 title: 'Splitting and sampling graphs'
 kind: concept
 summary: 'Graph examples are not independent, so splits must say what is hidden: nodes, edges or whole graphs, transductively or inductively. Large graphs are trained on sampled neighbourhoods, and link prediction needs sampled non-edges.'
-tags: [data, graphs, model-selection]
-aliases: []
-requires: []
-related: [sampled-softmax-and-negative-sampling]
-references: []
-status: stub
-updated: 2026-10-11
+tags: [data, graphs, model-selection, data-sampling, graph-neural-networks]
+aliases: [graph-splits, neighbor-sampling, inductive-graph-splits]
+requires: [graph-construction, graph-features]
+related: [sampled-softmax-and-negative-sampling, graph-augmentation]
+references: [hamilton2017graphsage, grover2016node2vec, chiang2019clustergcn, zeng2020graphsaint]
+status: draft
+updated: 2026-10-12
 ---
 
+import { GraphSplitsAndSamplingVisualizer } from './GraphSplitsAndSamplingVisualizer'
+
 <Definition>
-To be written.
+**Graph splitting and sampling** defines the protocols used to partition interconnected relational topologies into
+non-leaking evaluation splits (transductive vs. inductive, node vs. edge vs. whole-graph) and to draw computationally
+tractable subgraphs or localized neighborhood stencils from web-scale networks where exponential neighborhood expansion
+exceeds hardware memory limits.
 </Definition>
+
+Standard machine learning assumes independent and identically distributed ($i.i.d.$) samples: a dataset is cleanly
+sliced into training, validation, and test subsets. In graph learning, this assumption breaks completely—nodes are
+inextricably tied together by edges, and edges connect multiple nodes simultaneously
+<Cite id="hamilton2017graphsage" />. A naive random split leaks structural messages across evaluation boundaries.
+Furthermore, because a single node's receptive field expands exponentially with GNN layer depth, scaling to billion-edge
+graphs requires specialized mini-batch sampling engines <Cite id="chiang2019clustergcn, zeng2020graphsaint" />.
+
+<GraphSplitsAndSamplingVisualizer client:load />
 
 ## Transductive and inductive splits
 
+The relationship between the graph topology and evaluation partitions defines two fundamentally distinct learning
+regimes <Cite id="hamilton2017graphsage" />:
+
+1. **Transductive Splits**:
+   - The entire graph topology $\mathcal{G} = (\mathcal{V}, \mathcal{E})$ and all input feature vectors
+     $\mathbf{X} \in \mathbb{R}^{|\mathcal{V}| \times d}$ are visible during both training and evaluation.
+   - Only the target labels $\mathcal{Y}$ are partitioned:
+     $\mathcal{Y}_{\text{train}} \sqcup \mathcal{Y}_{\text{val}} \sqcup \mathcal{Y}_{\text{test}}$.
+   - *Mechanics*: During training, message passing executes across **all** edges—including edges connecting training
+     nodes to test nodes. The network exploits test nodes as unlabeled structural conduits.
+   - *Limitation*: Transductive models (e.g., standard GCNs) cannot make predictions on newly arrived nodes without
+     re-training the entire graph.
+2. **Inductive Splits**:
+   - Test nodes $\mathcal{V}_{\text{test}}$ and their incident edges are completely excluded from the training graph:
+     $$
+     \mathcal{G}_{\text{train}} = \mathcal{G}[\mathcal{V}_{\text{train}}], \quad \mathcal{G}_{\text{test}} = \mathcal{G}[\mathcal{V}_{\text{test}}]
+     $$
+   - Alternatively, training and evaluation occur on entirely distinct, disjoint physical graphs (e.g., training on 100
+     protein interaction graphs and evaluating on 20 unseen proteins).
+   - *Mechanics*: Models like **GraphSAGE** learn parameterized neighbor aggregation functions
+     $\operatorname{AGGREGATE}_k(\{\mathbf{h}_u : u \in \mathcal{N}(v)\})$ that apply inductively to any unseen
+     topological neighborhood <Cite id="hamilton2017graphsage" />.
+
 ## Splitting edges for link prediction
+
+In link prediction (predicting whether an edge exists between node $u$ and node $v$), partitioning requires separating
+the graph into two distinct edge sets to prevent label leakage:
+
+$$
+\mathcal{E} = \mathcal{E}_{\text{train}} \sqcup \mathcal{E}_{\text{val}} \sqcup \mathcal{E}_{\text{test}}
+$$
+
+- **Message Passing Edges ($\mathcal{E}_{\text{mp}}$) vs. Supervision Edges ($\mathcal{E}_{\text{sup}}$)**: When
+  computing the link prediction loss for a target training edge $(u, v) \in \mathcal{E}_{\text{train}}$, the edge
+  $(u, v)$ **must be removed from the message passing graph** $\mathcal{E}_{\text{mp}}$. If $(u, v)$ remains in the
+  adjacency matrix used for GNN aggregation, the representations $\mathbf{h}_u$ and $\mathbf{h}_v$ directly aggregate
+  each other, allowing the model to trivially memorize 1-hop existence rather than predicting missing links.
+- **Connectivity Preservation**: Randomly removing $20\%$ of edges for validation/testing risks isolating low-degree
+  peripheral nodes. Production pipelines construct an initial minimum spanning forest
+  $\mathcal{E}_{\text{span}} \subset \mathcal{E}_{\text{train}}$ ensuring every node retains at least one incident
+  training edge, drawing test edges only from non-spanning chords.
 
 ## Negative sampling
 
+Because real-world networks document only observed interactions ($\mathcal{E}^+$), link prediction models require
+non-edges ($\mathcal{E}^-$) to formulate binary classification or margin ranking objectives:
+
+$$
+\mathcal{L} = -\sum_{(u, v) \in \mathcal{E}^+} \log \sigma(f(\mathbf{h}_u, \mathbf{h}_v)) - \sum_{(u, v') \in \mathcal{E}^-} \log(1 - \sigma(f(\mathbf{h}_u, \mathbf{h}_{v'})))
+$$
+
+Two primary non-edge sampling paradigms govern model discrimination:
+
+1. **Uniform Random Non-Edges**: Random node pairs
+   $(u, v') \sim \operatorname{Uniform}(\mathcal{V} \times \mathcal{V} \setminus \mathcal{E})$. In sparse graphs
+   ($|\mathcal{E}| \ll |\mathcal{V}|^2$), random pairs typically sit in completely disjoint graph components at
+   topological distance $d(u, v') \ge 4$. Distinguishing true edges from random distant pairs is trivial, producing
+   deceptively high test AUC scores ($>95\%$) that fail on real recommendation surfaces.
+2. **Hard 2-Hop Negative Mining**: Drawing non-edges that share common neighbors
+   ($(u, v') \in \mathcal{E}^2 \setminus \mathcal{E}$). Because $u$ and $v'$ are structurally close (e.g., "friends of
+   friends"), hard negatives force the model to identify true fine-grained relational factors rather than relying on
+   coarse community cluster membership <Cite id="grover2016node2vec" />.
+
 ## Neighbour and subgraph sampling
 
+In a standard full-batch $L$-layer GNN, calculating the representation of a single node $v$ requires aggregating its
+entire $L$-hop neighborhood. The receptive field expands exponentially:
+
+$$
+|\mathcal{N}_L(v)| = \mathcal{O}(d_{\text{avg}}^L)
+$$
+
+On a network with average degree $d_{\text{avg}} = 30$, a 3-layer GNN requires aggregating $30^3 = 27{,}000$ nodes for a
+single target prediction (**the neighborhood explosion problem**). Scaling to millions of nodes requires mini-batch
+sampling engines:
+
+- **GraphSAGE Layer-Wise Neighbor Sampling**: For each seed node, sample a fixed budget of $S_l$ neighbors uniformly at
+  random at layer $l$ (e.g., $S_1 = 15, S_2 = 10$) <Cite id="hamilton2017graphsage" />:
+  $$
+  \text{Receptive Field Size} = \prod_{l=1}^L S_l = 15 \times 10 = 150 \text{ nodes (bounded)}
+  $$
+- **Cluster-GCN (Subgraph Partitioning)**: Uses METIS graph partitioning to cluster $\mathcal{V}$ into $K$ dense,
+  cohesive subgraphs $\mathcal{V}_1, \dots, \mathcal{V}_K$. Each mini-batch processes a single cluster
+  $\mathcal{G}[\mathcal{V}_k]$, executing exact full-batch convolutions entirely within GPU memory without exponential
+  expansion <Cite id="chiang2019clustergcn" />.
+- **GraphSAINT (Random Walk / Edge Sampling)**: Samples subgraphs $\mathcal{G}_s$ via random walks and computes GNN
+  convolutions over the sampled induced subgraph <Cite id="zeng2020graphsaint" />. GraphSAINT introduces normalization
+  coefficients to correct for non-uniform node and edge sampling probabilities, ensuring unbiased loss gradient
+  estimation.
+
 ## Pitfalls
+
+1. **Supervision Edge Leakage in Link Prediction**: Retaining target test edges $(u, v) \in \mathcal{E}_{\text{test}}$
+   in the message-passing adjacency matrix during evaluation creates near-perfect test scores ($100\%$ accuracy) because
+   the model simply detects the test edge in its 1-hop neighbor list. Always evaluate link prediction using strictly
+   disjoint message-passing and supervision graphs.
+2. **Neighborhood Sampling Variance**: In small-budget GraphSAGE sampling ($S \le 5$), high variance between sampled
+   neighbor sets across training epochs injects substantial gradient noise. In critical applications, importance
+   sampling or historical embedding caches (FastGCN, LADIES) are required.
+3. **Partition Boundary Bias in Cluster-GCN**: Discarding inter-cluster edges between partitioned METIS clusters removes
+   all cross-community links during training. Cluster-GCN mitigates this by randomly combining multiple smaller clusters
+   into each training batch.
+4. **Evaluating Transductive Models on Inductive Tasks**: Deploying models trained under transductive regimes (where all
+   nodes participated in feature aggregation) onto evolving production graphs causes immediate performance drops on
+   newly created nodes that were absent during Laplacian normalization.

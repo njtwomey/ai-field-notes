@@ -1,0 +1,92 @@
+---
+title: Classifier two-sample test
+kind: technique
+summary: 'A classifier two-sample test trains a classifier to tell two samples apart on half of the data and tests its held-out accuracy against the Binomial law of chance. Any classifier can serve, so the test reaches images, text and other data that kernels handle poorly.'
+tags: [hypothesis-testing, two-sample, classification, worked-example]
+aliases: [C2ST, classifier-based two-sample test, discriminator test]
+requires: [two-sample-testing, binomial-test]
+related: [adversarial-validation, density-ratio-by-classification, kernel-two-sample-test, maximum-mean-discrepancy, comparing-two-sample-tests, k-nearest-neighbours, drift-detection]
+references: [lopezpaz2017c2st, hoeffding1956, liu2020deepkernel]
+status: draft
+updated: 2026-10-12
+---
+
+import { ClassifierField } from './ClassifierField'
+
+<Definition>
+The **classifier two-sample test** (<Gloss name="c2st" />) compares a sample from $P$ with a sample from $Q$ of the same
+size. Each sample is split in two. A classifier is trained on the first halves to predict which distribution a point
+came from, and the number $c$ of correct labels on the $n_\text{te}$ held-out points is the statistic. Under $P = Q$,
+$c$ has mean $n_\text{te}/2$, and the upper tail of $\mathrm{Binomial}(n_\text{te}, \tfrac12)$ gives a valid
+<NoteLink to="p-value">p-value</NoteLink> for it <Cite id="lopezpaz2017c2st" />.
+</Definition>
+
+## Problem
+
+The <NoteLink to="kernel-two-sample-test" /> and the energy test compare points through a kernel or a distance chosen
+in advance. For images, text or mixed tabular data, a generic distance sees mostly irrelevant variation, and power
+falls. Classifiers are built to find the features that separate two groups, with architectures made for each kind of
+data. A classifier that separates the samples better than chance is direct evidence that they differ.
+
+## Mechanism
+
+### Accuracy measures the difference
+
+If the two samples are the same size, the best possible classifier has accuracy
+$\tfrac12\paren{1 + \mathrm{TV}(P, Q)}$, where $\mathrm{TV}(P, Q) = \sup_A \abs{P(A) - Q(A)}$ is the total variation
+distance. Accuracy $\tfrac12$ is therefore what a perfect classifier achieves when $P = Q$, and any reliable excess
+over $\tfrac12$ shows $P \ne Q$. The held-out accuracy of a real classifier estimates a lower bound on that best
+accuracy, so a weak classifier loses power but never makes the test invalid.
+
+### The null law
+
+The classifier is trained on data independent of the held-out points. Under $H_0$ every point, whatever its label, is a
+draw from the same distribution, so the trained classifier predicts "from $Q$" with the same probability $\pi$ for every
+held-out point. With half of the held-out points from each sample, the count of correct labels is then the sum of a
+$\mathrm{Binomial}(n_\text{te}/2, 1 - \pi)$ and an independent $\mathrm{Binomial}(n_\text{te}/2, \pi)$. Its mean is
+$n_\text{te}/2$ for every $\pi$. A sum of independent trials whose success probabilities average $\tfrac12$ has an upper
+tail, from one above its mean, no heavier than that of $\mathrm{Binomial}(n_\text{te}, \tfrac12)$
+<Cite id="hoeffding1956" />, with equality when $\pi = \tfrac12$. The binomial tail is therefore a valid p-value,
+slightly conservative when the classifier leans towards one label (<NoteLink to="binomial-test" />). No permutation is
+needed, whatever the classifier.
+
+### Reading the classifier
+
+The trained classifier also explains the rejection. Points the classifier labels confidently are where the distributions
+differ most, and its probabilities estimate the ratio of the two densities
+(<NoteLink to="density-ratio-by-classification" />). In machine-learning practice the same procedure is called
+<NoteLink to="adversarial-validation" />: a classifier between training and test features that does better than chance
+warns of <NoteLink to="drift-detection">drift</NoteLink>.
+
+The figure uses <NoteLink to="k-nearest-neighbours" /> on the two-dimensional problem of the other notes in this
+chapter.
+
+<ClassifierField />
+
+## Cost
+
+One classifier fit on half the data and one pass of predictions over the other half. For a neural network this costs
+the same as any training run; for nearest neighbours it costs $O(n_\text{te}\, n_\text{tr})$ distance evaluations.
+
+## Trade-offs
+
+- **Half the data trains, half tests.** Only the held-out half counts towards the statistic, which costs power
+  compared with tests that use every point. Cross-fitting, with the roles of the halves swapped, uses all points
+  but needs a permutation null.
+- **Accuracy is coarse.** It counts only which side of $\tfrac12$ each probability falls. Statistics that use the
+  probabilities themselves, such as the mean difference in predicted log odds, are often more powerful
+  <Cite id="liu2020deepkernel" />.
+- **The classifier is a modelling choice.** A classifier that cannot represent the difference, such as a linear one
+  for a change of spread, has no power against it. Tune it on the training half only; tuning on the held-out half
+  invalidates the null law.
+
+## Worked example
+
+A classifier is trained on half of two samples of 20 points each and scored on the 20 held-out points.
+
+1. **Count.** It labels $c = 15$ of the 20 held-out points correctly, an accuracy of $0.75$.
+2. **Null law.** If $P = Q$, $c \sim \mathrm{Binomial}(20, \tfrac12)$.
+3. **Upper tail.** $\prob(c \ge 15) = \sum_{k=15}^{20} \binom{20}{k} 2^{-20} =
+   (15504 + 4845 + 1140 + 190 + 20 + 1)/1048576 = 21700/1048576 = 0.0207$.
+4. **Conclude.** At $\alpha = 0.05$ the test rejects $P = Q$. With 14 correct the p-value would be $0.0577$, and it
+   would not.

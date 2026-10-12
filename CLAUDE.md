@@ -35,6 +35,10 @@ make stubs SCOPE="<taxonomy path> ..."         # list placeholder notes (status:
 make links SCOPE="<slug>"                  # report unmarked glossary/note mentions; ARGS="--apply" to write
 make links ARGS="--term <key|slug>"        # scan the whole tree for one new entry or note
 make wrap SCOPE="<slug>"                   # reflow note prose to 120 columns; ARGS="--check" to report
+make maths SCOPE="<slug>"                  # put display-maths $$ fences on their own lines (one-line $$…$$ is inline)
+make refs ARGS="search --title '<words>' --author <name>"   # fuzzy-search references.yaml (also --key, --year, --url)
+make refs ARGS="check --file new.yaml"     # is each new entry already there? exit 1 on a likely duplicate
+make refs ARGS="duplicates"                # repeated keys, shared DOIs/URLs, near-identical titles
 npm run check:render -- <slug>             # headless render (needs a dev server on 5180: npx vite --port 5180)
 make check                                 # doctor + make ci;  make pre-push = check + lockfiles + build
 ```
@@ -62,7 +66,8 @@ Never hand-roll a headless Chrome loop; use `check:render` (`--shot <dir>` for s
   kebab-case; `long` is fully expanded Title Case; `definition` is one or two sentences (≤ 400 characters); `note` is
   the note about the entry, `see` notes that discuss it. One sense per entry. `npm run check:content` enforces the
   details.
-- **New note checklist:** frontmatter, reading-order entry, glossary entries, references with real verified URLs,
+- **New note checklist:** frontmatter, reading-order entry, glossary entries, references with real verified URLs
+  (`make refs ARGS="check ..."` first, so an existing key is reused),
   `make links` (read the report, then apply), `make wrap`, `make doctor SCOPE=…`, `check:render` and a look at a
   screenshot.
 

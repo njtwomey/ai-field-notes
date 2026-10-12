@@ -87,6 +87,17 @@ function attributeValues(body: string, component: string, attribute: string): st
   return [...body.matchAll(pattern)].flatMap((m) => m[1].split(',').map((s) => s.trim()))
 }
 
+function extractCitations(body: string): string[] {
+  const fromCite = attributeValues(body, 'Cite', 'id')
+  const pandoc = [...body.matchAll(/(?:\[@|\(@)([a-zA-Z0-9_\-]+(?:\s*[,;]\s*@[a-zA-Z0-9_\-]+)*)[\]\)]/g)].flatMap((m) =>
+    m[1]
+      .split(/[,;]/)
+      .map((s) => s.trim().replace(/^@/, ''))
+      .filter(Boolean),
+  )
+  return [...new Set([...fromCite, ...pandoc])]
+}
+
 /**
  * Rough MDX → plain text for search. Keeps prose, drops code, JSX and import/export lines. A self-closing <Gloss> is
  * replaced by its entry's short and long forms, so the words it renders are searchable.
@@ -323,7 +334,7 @@ export function buildIndex(
       slug: noteSlug,
       file,
       headings: extractHeadings(body),
-      cited: [...new Set(attributeValues(body, 'Cite', 'id'))],
+      cited: extractCitations(body),
       linked: [...new Set(attributeValues(body, 'NoteLink', 'to'))],
       glossed: [...new Set(glossNames.flatMap((n) => glossary.names.get(n) ?? []))],
       wordCount: text.split(' ').length,

@@ -2,27 +2,167 @@
 title: 'Panel and longitudinal data'
 kind: concept
 summary: 'Panel data observe the same units repeatedly over time. Repeated measurements of one unit are correlated, which shapes the features, the models and the splits that suit them.'
-tags: [data, statistics, time-series]
-aliases: []
+tags: [data, statistics, time-series, panel-data, longitudinal]
+aliases: [longitudinal data, repeated measures, panel dataset]
 requires: []
-related: [data-setups]
-references: []
-status: stub
-updated: 2026-10-11
+related: [tabular-data, tidy-and-reshaped-tables, multi-table-data, data-setups, temporal-splits]
+references: [wooldridge2010, arellano1991]
+status: draft
+updated: 2026-10-12
 ---
 
+import { PanelDataVisualizer } from './PanelDataVisualizer'
+
 <Definition>
-To be written.
+**Panel data** (also known as **longitudinal data**) consist of repeated observations of the same cross-sectional units
+$i \in \{1, \dots, N\}$ (individuals, patients, firms, or devices) recorded across multiple time periods
+$t \in \{1, \dots, T_i\}$ <Cite id="wooldridge2010" />. Because repeated measurements from the same unit share
+unobserved entity-specific characteristics and exhibit temporal autocorrelation, observations violate the standard
+independent and identically distributed ($\text{i.i.d.}$) assumption of supervised learning.
 </Definition>
+
+In machine learning applications, longitudinal records appear ubiquitously: electronic health records (EHR) track
+patient vitals over clinic visits, SaaS analytics monitor monthly subscriber engagement, and credit bureaus evaluate
+customer repayment trajectories over billing cycles. 
+
+Unlike pure cross-sectional data—which record a single snapshot per entity—and pure univariate time series—which record
+a single long trajectory ($N=1, T \gg 1$)—panel data typically exhibit the "micro-panel" structure: a massive number of
+entities observed over relatively short time horizons ($N \gg T$). Effectively modeling panel data requires decomposing
+within-unit from between-unit variance, accounting for informative panel attrition, engineering historical entity
+baselines, and enforcing group-aware evaluation splits.
+
+<PanelDataVisualizer />
 
 ## Wide and long layouts
 
+The physical organization of panel data governs how machine learning algorithms access historical measurements:
+
+### Wide layout
+
+In wide format, each row represents exactly one entity $i$, and repeated observations across time periods
+$t \in \{1, \dots, T\}$ are arranged horizontally across distinct columns:
+
+$$
+\mathbf{x}_i = [x_{i, 1}, x_{i, 2}, \dots, x_{i, T}] \in \mathbb{R}^{T \times K}
+$$
+
+- **Advantages:** Fits directly into standard rectangular tabular algorithms (GBDTs, MLPs) without duplicating
+  entity-level features or creating row dependencies.
+- **Limitations:** Requires a fixed, balanced observation grid where all units share identical observation timestamps.
+  If observation intervals vary or units suffer irregular missing periods, the wide matrix becomes heavily sparse with
+  structural missing values.
+
+### Long layout
+
+In long format, each row represents a single entity-period observation $(i, t)$, identified by a composite key of entity
+ID and timestamp:
+
+$$
+(i, t, \mathbf{x}_{it}, y_{it})
+$$
+
+- **Advantages:** Naturally accommodates unbalanced panels, irregular observation cadences, and dynamic covariates. It
+  forms the standard input representation for sequential architectures (RNNs, Temporal Fusion Transformers) and
+  mixed-effects regression models.
+- **Limitations:** Duplicates static entity attributes across all $T_i$ rows and introduces severe autocorrelation
+  across rows, requiring explicit group-aware grouping during cross-validation.
+
 ## Within-unit and between-unit variation
+
+A defining characteristic of panel data is the decomposition of total variance into two orthogonal sources
+<Cite id="wooldridge2010" />:
+
+$$
+\text{SST} = \text{SS}_{\text{between}} + \text{SS}_{\text{within}}
+$$
+
+$$
+\sum_{i=1}^N \sum_{t=1}^{T} (x_{it} - \bar{x})^2 = T \sum_{i=1}^N (\bar{x}_i - \bar{x})^2 + \sum_{i=1}^N \sum_{t=1}^T (x_{it} - \bar{x}_i)^2
+$$
+
+1. **Between-unit variation:** The variance of entity-specific historical means
+   $\bar{x}_i = \frac{1}{T_i} \sum_{t=1}^{T_i} x_{it}$ around the grand population mean $\bar{x}$. This captures
+   cross-sectional differences (e.g., patient $A$ has a naturally higher resting heart rate than patient $B$).
+2. **Within-unit variation:** The variance of temporal deviations $(x_{it} - \bar{x}_i)$ around the entity's own
+   baseline. This captures longitudinal dynamics and state changes over time (e.g., patient $A$'s heart rate spiking
+   during an acute infection relative to their personal baseline).
+
+In econometric modeling, **fixed effects** estimators eliminate time-invariant unobserved confounders $\alpha_i$ by
+applying the within-transformation (subtracting entity means $\bar{x}_i$). 
+
+In contrast, standard tree-based machine learning models (XGBoost, LightGBM) trained naively on long-format tables
+cannot internally decouple within-unit dynamics from between-unit cross-sectional bias. If an entity's baseline is
+strongly predictive of the label, the model often overfits to entity identity rather than learning generalizable
+temporal transition rules.
 
 ## Unbalanced panels and dropout
 
+A panel is **balanced** if all units are observed across the exact same set of $T$ periods ($T_i = T \ \forall i$). In
+production data, panels are almost always **unbalanced**: units enter the study late (cohort staggered entry),
+experience intermittent missed appointments, or exit the panel permanently (**attrition** or **dropout**).
+
+The validity of predictive modeling on unbalanced panels depends critically on the missingness mechanism:
+
+- **Missing Completely at Random (MCAR):** Attrition is completely independent of both observed features and the
+  underlying target outcome (e.g., random network packet drops on a sensor). Unbalanced panels under MCAR can be
+  analyzed without selection bias corrections.
+- **Missing at Random (MAR):** Missingness depends systematically on observed historical features (e.g., younger users
+  exhibiting higher application churn rates). MAR can be addressed via inverse probability weighting or conditioned
+  sequential modeling.
+- **Missing Not at Random (MNAR / Informative Attrition):** Dropout depends directly on unobserved latent variables or
+  the target outcome itself (e.g., severely declining clinical patients dropping out due to mortality or intensive care
+  transfer). Analyzing only surviving units introduces severe **survivorship bias**, causing models to underestimate
+  failure rates.
+
 ## Features from a unit's history
+
+To provide tabular learning models with longitudinal context from long-format panels without violating temporal
+causality, feature engineers construct historical summary features relative to prediction timestamp $t$:
+
+- **Lagged attributes:** Historical values from prior periods ($x_{i, t-1}, x_{i, t-2}$).
+- **Delta and velocity features:** First-order changes ($\Delta x_{it} = x_{it} - x_{i, t-1}$) and second-order
+  acceleration ($\Delta^2 x_{it} = \Delta x_{it} - \Delta x_{i, t-1}$).
+- **Rolling window statistics:** Moving averages, rolling standard deviations, and exponential moving averages over
+  backward windows $[t-k, t-1]$.
+- **Deviation from entity baseline:** Measuring how extreme the current observation is relative to the unit's known
+  personal history:
+  $$
+  z_{it} = \frac{x_{it} - \bar{x}_{i, <t}}{\sigma_{i, <t} + \epsilon}
+  $$
+  where $\bar{x}_{i, <t}$ and $\sigma_{i, <t}$ are computed strictly over past observations $s < t$ to prevent
+  look-ahead target leakage.
 
 ## Splitting panels
 
+Splitting panel data into training, validation, and test partitions requires aligning the validation strategy with the
+operational deployment scenario:
+
+1. **Group entity split (Out-of-unit generalization):** All observations corresponding to entity $i$ are assigned
+   exclusively to either the training set or the test set. This evaluates the model's ability to generalize to
+   completely novel, unseen individuals (e.g., deploying a clinical diagnostic tool on new patients admitted to a
+   hospital).
+2. **Temporal cutoff split (Out-of-time forecasting):** Observations for all entities up to timestamp $t_{\text{split}}$
+   are placed in the training set, while all observations after $t_{\text{split}}$ form the evaluation set. This
+   evaluates whether the model can forecast future states of existing known entities.
+3. **Grouped-temporal split:** Enforces both axes simultaneously: the test set contains only future observations
+   ($t > t_{\text{split}}$) from entities never seen during training ($i \notin \mathcal{I}_{\text{train}}$),
+   replicating real-world production deployment on future incoming cohorts.
+
+Naive random row-level splitting on long-format panel tables causes catastrophic cross-contamination: because repeated
+measurements of entity $i$ appear across both train and test splits, the model exploits entity autocorrelation to
+achieve artificially high validation scores that fail in production.
+
 ## Pitfalls
+
+- **Nickell dynamic panel bias:** In autoregressive longitudinal models, including lagged dependent variables
+  $y_{i, t-1}$ alongside unit-level fixed effects introduces asymptotic bias of order $O(1/T)$ due to correlation
+  between the de-meaned lagged regressor and the de-meaned error term <Cite id="arellano1991" />. Correct estimation
+  requires generalized method of moments (GMM) instrumental variable estimators.
+- **Survivorship bias from filtering incomplete trajectories:** Filtering out units with fewer than $k$ observations
+  removes early-failing or high-attrition entities, biasing training data toward resilient or long-lived units.
+- **Look-ahead leakage in historical baselines:** Calculating entity summary statistics (such as entity lifetime mean
+  $\bar{x}_i$) across the full duration of the dataset rather than strictly expanding historical windows prior to $t$
+  leaks future information into past predictions.
+- **Confounding within-unit trends with cohort entry bias (Simpson's paradox):** When different cohorts enter the panel
+  at different baseline values, cross-sectional comparisons can show a positive association while individual temporal
+  trajectories show a negative association.

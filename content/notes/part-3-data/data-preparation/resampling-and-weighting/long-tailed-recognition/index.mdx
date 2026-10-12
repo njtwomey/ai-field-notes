@@ -3,26 +3,162 @@ title: 'Long-tailed recognition'
 kind: concept
 summary: 'Long-tailed recognition trains classifiers on data where a few classes are frequent and most are rare. Class-balanced sampling, logit adjustment and decoupled training of features and classifier improve accuracy on the tail.'
 tags: [data, deep-learning, classification]
-aliases: []
-requires: []
+aliases: [long-tail learning, long-tailed visual recognition, tail classes]
+requires: [sample-weights]
 related: [class-imbalance, class-weights]
-references: []
-status: stub
+references: [cui2019, menon2021, kang2020]
+status: draft
 updated: 2026-10-11
 ---
 
 <Definition>
-To be written.
+**Long-tailed recognition** is the task of learning visual or categorical classifiers on training distributions where
+class frequencies follow a severe power-law or Pareto distribution: a small subset of "head" classes possess abundant
+instances, while the overwhelming majority of "tail" classes have very few examples.
 </Definition>
 
-## The long tail
+In real-world visual datasets (e.g., iNaturalist, LVIS, ImageNet-LT), natural frequency distributions exhibit extreme
+skew. Unlike synthetic or curated benchmarks where classes are artificially balanced, long-tailed distributions exhibit
+imbalance ratios $\rho = N_{\max} / N_{\min}$ ranging from $100$ to $10{,}000$.
+
+Under standard Empirical Risk Minimization (ERM) with cross-entropy loss, deep neural networks achieve high aggregate
+accuracy by excelling on head classes while suffering near-zero recall on tail classes. Furthermore, the norms of the
+classifier head weight vectors $\|W_y\|$ scale with class frequency, systematically biasing decision boundaries in favor
+of dominant classes.
+
+import { LongTailDistributionExplorer } from './LongTailDistributionExplorer';
+
+<LongTailDistributionExplorer />
+
+## The long tail: Many, medium, and few shot
+
+Standard practice partitions classes into three tiers based on training sample size $N_y$:
+
+1. **Many-shot (Head):** Classes with $N_y > 100$ instances. The model learns rich semantic features with high
+   confidence.
+2. **Medium-shot (Body):** Classes with $20 \le N_y \le 100$ instances.
+3. **Few-shot (Tail):** Classes with $N_y < 20$ instances. The model frequently confuses tail instances with
+   semantically adjacent head classes due to suppressed prior probabilities and smaller weight norms.
+
+Evaluating models via standard top-1 overall accuracy masks catastrophic tail failure because head classes comprise
+$80\text{--}95\%$ of all evaluation instances under instance-balanced sampling. Consequently, long-tailed benchmarks
+report **balanced top-1 accuracy** (macro-averaged over all classes) alongside stratified accuracy on Many, Medium, and
+Few subsets.
 
 ## Class-balanced sampling
 
+To counteract frequency disparity during stochastic gradient descent (SGD), mini-batches can be sampled according to
+adjusted probability distributions over classes:
+
+1. **Instance-balanced sampling:** Standard sampling where each example $(x_i, y_i)$ is sampled uniformly at random with
+   probability $p_i = 1 / N$. Class probability is proportional to size: $p(y) = N_y / N$.
+2. **Class-balanced sampling:** Each class has equal probability of being selected: $p(y) = 1 / C$. Examples are then
+   sampled uniformly from the selected class. Tail examples are sampled repeatedly, while head examples are
+   down-sampled.
+3. **Square-root / Progressively-balanced sampling:** Class sampling probability scales as $p(y) \propto N_y^q$ with
+   $q \in (0, 1)$, typically $q = 0.5$. Progressively-balanced sampling begins with instance-balanced sampling ($q = 1$)
+   early in training to learn general features and ramps up to class-balanced sampling ($q = 0$) in later epochs.
+
+## Class-balanced loss based on effective number of samples
+
+Weighting loss inversely by class frequency ($w_y = 1 / N_y$) often over-corrects when $N_y$ varies across orders of
+magnitude, causing high optimization variance. Yin Cui et al. <Cite id="cui2019" /> introduced the concept of the
+**effective number of samples** $E_n$:
+
+$$
+E_n = \frac{1 - \beta^n}{1 - \beta}
+$$
+
+where $\beta \in [0, 1)$ represents the volume of new information contributed by additional examples. As $n \to \infty$,
+$E_n \to \frac{1}{1 - \beta}$, capturing the diminishing marginal utility of adding examples due to intrinsic data
+overlap in feature space.
+
+The Class-Balanced (CB) cross-entropy loss weights each class by the inverse of its effective sample count:
+
+$$
+\mathcal{L}_{\text{CB}}(x, y) = \frac{1 - \beta}{1 - \beta^{N_y}} \mathcal{L}_{\text{CE}}(f(x), y)
+$$
+
+Setting $\beta = 0$ recovers uniform loss; $\beta \to 1$ recovers naive inverse frequency weighting. Typically
+$\beta \in [0.99, 0.9999]$ yields balanced gradients without explosive weighting on rare classes.
+
 ## Logit adjustment
 
-## Decoupled training
+Aditya Krishna Menon et al. <Cite id="menon2021" /> demonstrated that long-tail learning can be framed as minimizing
+balanced error:
 
-## Evaluating head and tail
+$$
+\operatorname{err}_{\text{bal}}(f) = \frac{1}{C} \sum_{y=1}^C \mathbb{P}_{x \mid y}(y \notin \arg\max_{y'} f_{y'}(x))
+$$
 
-## Pitfalls
+The Fisher-consistent Bayes-optimal classifier for balanced test accuracy modifies standard softmax logits by
+subtracting the training class prior $\pi_y = N_y / N$:
+
+$$
+f^*_y(x) = \log P(y \mid x) - \tau \log \pi_y
+$$
+
+Logit adjustment can be applied in two ways:
+- **Post-hoc logit adjustment (Inference):** Predict $\hat{y} = \arg\max_y \left( f_y(x) - \tau \log \pi_y \right)$ on a
+  standard pre-trained model.
+- **Logit-adjusted loss (Training):** Enforce large margins during training by incorporating the prior shift directly
+  into softmax cross-entropy:
+  $$
+  \mathcal{L}_{\text{LA}}(x, y) = -\log \frac{\exp(f_y(x) + \tau \log \pi_y)}{\sum_{y'=1}^C \exp(f_{y'}(x) + \tau \log \pi_{y'})}
+  $$
+
+Because head classes have larger priors ($\pi_{\text{head}} \gg \pi_{\text{tail}}$), logit adjustment forces the network
+to assign substantially higher confidence margins to head classes before selecting them, protecting tail decision
+regions from encroachment.
+
+## Decoupled training: Representation vs classifier
+
+A foundational insight by Bingyi Kang et al. <Cite id="kang2020" /> resolved an apparent contradiction in long-tailed
+deep learning:
+- Joint end-to-end training with class-balanced sampling or heavy loss reweighting improves tail accuracy but degrades
+  head accuracy and harms overall representation learning.
+- Joint training with instance-balanced sampling yields the highest-quality, most transferable feature representations
+  $z = \Phi(x)$, but leaves the linear classification head $(W, b)$ severely biased toward head classes.
+
+Kang et al. demonstrated that **representation learning and classifier head learning should be decoupled**:
+
+### Stage 1: Representation learning
+Train the feature backbone $\Phi_\theta$ end-to-end using standard instance-balanced sampling and cross-entropy. This
+preserves feature diversity and avoids overfitting tail examples during early representation formation.
+
+### Stage 2: Classifier rebalancing
+Freeze the feature backbone $\Phi_\theta$ and calibrate or retrain only the linear classification layer $W$:
+1. **Classifier Retraining (cRT):** Retrain $W$ from scratch with class-balanced sampling for a small number of epochs.
+2. **$\tau$-Normalized Weights ($\tau$-norm):** Rescale the learned weight vectors post-hoc:
+   $$
+   \widetilde{W}_y = \frac{W_y}{\|W_y\|_2^\tau}
+   $$
+   Setting $\tau \in [0.5, 1.0]$ equalizes the weight norms across head and tail classes, removing the magnitude bias
+   that suppresses tail predictions.
+3. **Learnable Weight Scaling (LWS):** Keep $W$ fixed and optimize a scalar scaling factor $s_y > 0$ per class:
+   $\widetilde{W}_y = s_y W_y$.
+
+## Evaluating head and tail performance
+
+Rigorous benchmarking on long-tailed recognition demands stratified evaluation:
+
+| Benchmark | Classes ($C$) | Imbalance Ratio ($\rho$) | Metric Focus |
+| :--- | :--- | :--- | :--- |
+| **ImageNet-LT** | 1,000 | 256 ($1,280 \to 5$) | Many / Med / Few Top-1 |
+| **iNaturalist 2018** | 8,142 | 500 ($1,000 \to 2$) | Macro-Averaged Top-1 |
+| **Places-LT** | 365 | 996 ($4,980 \to 5$) | Many / Med / Few Top-1 |
+| **LVIS (Object Detection)** | 1,203 | $>10,000$ | $AP_{\text{rare}}, AP_{\text{common}}, AP_{\text{frequent}}$ |
+
+Reporting only aggregate top-1 accuracy under natural test distributions obscures whether model improvements genuinely
+rescue rare classes or merely shift errors between body and tail.
+
+## Pitfalls and failure modes
+
+1. **Representation collapse via aggressive oversampling:** Naively repeating tail images in early epochs causes the
+   backbone to memorize background features or noise patterns of the few tail examples, collapsing general visual
+   representations.
+2. **Over-suppressing head accuracy:** Pushing $\tau > 1.5$ in logit adjustment or $\tau$-normalization penalizes head
+   classes excessively, leading to false-positive tail hallucinations on common inputs.
+3. **Evaluating on skewed validation sets:** Validation sets must either be uniformly class-balanced (e.g. 50 examples
+   per class regardless of training size) or evaluated with macro-averaged metrics so that rare categories carry equal
+   diagnostic weight.

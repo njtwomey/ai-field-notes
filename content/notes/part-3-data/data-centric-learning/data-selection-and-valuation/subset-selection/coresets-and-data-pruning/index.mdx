@@ -1,24 +1,160 @@
 ---
 title: 'Coresets, pruning and distillation'
 kind: concept
-summary: 'A smaller training set can sometimes match the full one. Coresets approximate the loss with weighted subsets, data pruning drops easy or redundant examples, and dataset distillation synthesises a few examples that train a model nearly as well.'
-tags: [data, optimisation]
-aliases: []
-requires: []
-related: []
-references: []
-status: stub
-updated: 2026-10-11
+summary: 'Coresets, data pruning, and dataset distillation condense massive training sets into compact subsets or synthesized prototypes that preserve gradient fidelity and accelerate training.'
+tags: [data, optimisation, data-centric-learning]
+aliases: [coresets, data pruning, dataset distillation, subset selection, CRAIG]
+requires: [training-dynamics-diagnostics, error-analysis]
+related: [curricula-and-data-mixtures, data-valuation]
+references: [mirzasoleiman2020craig, sorscher2022pruning, wang2018distillation]
+status: draft
+updated: 2026-10-12
 ---
 
+import { CoresetsAndDataPruningVisualizer } from './CoresetsAndDataPruningVisualizer'
+
 <Definition>
-To be written.
+**Coresets, data pruning, and dataset distillation** are subset-selection and data-compression methodologies that
+condense large training corpora into compact subsets while bounding the loss in downstream model performance.
+**Coresets** select weighted subsets that mathematically approximate the full-dataset loss or gradient; **data pruning**
+discards redundant or non-informative examples without weighting; and **dataset distillation** synthesizes a small set
+of artificial prototypes that optimize the training trajectory of neural networks.
 </Definition>
+
+Modern machine learning assumes that more data monotonically improves performance. However, training on web-scale
+datasets incurs massive compute costs, carbon emissions, and latency. Furthermore, large datasets contain extreme
+redundancy: millions of examples contribute near-zero gradient signal because the model learns them in early epochs.
+Pruning or distilling datasets concentrates gradient energy on informative boundary points, accelerates hyperparameter
+searches, and can even beat empirical neural scaling laws
+<Cite id="mirzasoleiman2020craig, sorscher2022pruning, wang2018distillation" />.
+
+<CoresetsAndDataPruningVisualizer />
 
 ## Coresets
 
+A **coreset** is a weighted subset of a dataset that provably guarantees that any model trained on the subset
+approximates the performance of a model trained on the complete dataset.
+
+### Theoretical formulation
+
+Let $\mathcal{D} = \{\mathbf{z}_1, \dots, \mathbf{z}_N\}$ denote a training dataset of $N$ instances, where
+$\mathbf{z}_i = (\mathbf{x}_i, y_i)$. Let $\ell(\mathbf{w}; \mathbf{z})$ be a loss function parameterized by weights
+$\mathbf{w} \in \mathcal{W}$. A subset $\mathcal{S} \subset \mathcal{D}$ with non-negative sample weights
+$\boldsymbol{\gamma} = \{\gamma_j \ge 0\}_{j \in \mathcal{S}}$ is an **$\epsilon$-coreset** if:
+
+$$
+\forall \mathbf{w} \in \mathcal{W}, \quad \left| \sum_{i \in \mathcal{D}} \ell(\mathbf{w}; \mathbf{z}_i) - \sum_{j \in \mathcal{S}} \gamma_j \ell(\mathbf{w}; \mathbf{z}_j) \right| \le \epsilon \sum_{i \in \mathcal{D}} \ell(\mathbf{w}; \mathbf{z}_i)
+$$
+
+Minimizing empirical risk on the weighted coreset $\mathcal{S}$ guarantees that the resulting parameters
+$\mathbf{w}^*_{\mathcal{S}}$ achieve an $\epsilon$-close approximation to the full-dataset minimizer
+$\mathbf{w}^*_{\mathcal{D}}$.
+
+### Gradient-matching coresets (CRAIG)
+
+For deep neural networks where global loss bounds across non-convex parameter spaces are intractable, Baharan
+Mirzasoleiman, Jeff Bilmes, and Jure Leskovec introduced **Coresets for Accelerating Incremental Gradient Descent
+(CRAIG)** <Cite id="mirzasoleiman2020craig" />.
+
+Rather than approximating the scalar loss, CRAIG selects a weighted subset whose aggregated gradient approximates the
+full-batch gradient at every step:
+
+$$
+\min_{\mathcal{S} \subset \mathcal{D}, \, \boldsymbol{\gamma} \ge 0} \left\| \sum_{i \in \mathcal{D}} \nabla_{\mathbf{w}} \ell_i(\mathbf{w}) - \sum_{j \in \mathcal{S}} \gamma_j \nabla_{\mathbf{w}} \ell_j(\mathbf{w}) \right\| \quad \text{s.t. } |\mathcal{S}| \le B
+$$
+
+CRAIG upper-bounds this gradient discrepancy by formulating it as a **submodular facility location problem**:
+- Each training instance $\mathbf{z}_i$ is assigned to its nearest representative $\mathbf{z}_j \in \mathcal{S}$ in
+  gradient space.
+- The sample weight $\gamma_j$ is set to the cardinality of the cluster assigned to representative $j$.
+- Because facility location is monotone submodular, a greedy algorithm achieves a $(1 - 1/e)$-approximation in
+  near-linear time $\mathcal{O}(N \log N)$.
+
+CRAIG allows training deep convolutional and transformer models on $10\text{--}30\%$ of the data while preserving
+$> 98\%$ of full-dataset accuracy and delivering up to $3\times\text{--}5\times$ end-to-end wall-clock speedups.
+
 ## Data pruning
+
+Unlike coresets, which assign compensatory weights $\gamma_j$ to retained examples, **data pruning** discards
+uninformative or redundant examples permanently without reweighting.
+
+### Beating neural scaling laws
+
+Standard neural scaling laws state that test error $\epsilon$ scales as a power law with dataset size $N$:
+
+$$
+\epsilon(N) \propto N^{-\alpha}
+$$
+
+Ben Sorscher et al. demonstrated that this power-law bottleneck is an artifact of uniform random sampling
+<Cite id="sorscher2022pruning" />. In an unpruned corpus, as dataset size increases, the probability of sampling novel
+informative examples decays exponentially: the model is repeatedly bombarded with easy, redundant instances.
+
+| Sampling Strategy | Scaling Regime | Functional Behavior | Mechanism & Theoretical Bottleneck |
+| :--- | :--- | :--- | :--- |
+| **Uniform Random Sampling** | Power-law scaling | $\epsilon(N) \propto N^{-\alpha}$ | High-density redundant examples dominate large $N$; novel informative sampling probability decays rapidly |
+| **Optimal Pruning Strategy** <Cite id="sorscher2022pruning" /> | Exponential scaling | $\epsilon(N) \propto \exp(-\beta N)$ | Discards uninformative points, concentrating capacity on decision boundaries and informative exemplars |
+
+By developing an analytical statistical mechanics theory of perceptron learning, Sorscher et al. proved that under
+optimal easy/hard data pruning, test error scales **exponentially** with dataset size:
+
+$$
+\epsilon(N) \propto \exp(-\beta N)
+$$
+
+### Pruning metrics
+
+Identifying which examples to prune depends on the data regime:
+1. **Error L2-Norm (EL2N)**: Mansheej Paul et al. established that the expected norm of the error vector
+   $\mathbb{E}[\|\mathbf{p}(\mathbf{x}) - \mathbf{y}\|_2]$ measured after just $t = 5\text{--}10$ epochs of early
+   training predicts which examples are essential. Examples with lowest EL2N can be pruned aggressively.
+2. **Self-supervised margin**: Computing the distance to the $k$-nearest cluster centroid in pre-trained foundation
+   embedding space (e.g. CLIP or DINO). High-density points inside clusters are pruned as redundant.
+3. **Data abundance regime vs data scarcity regime**:
+   - In **data-abundant regimes**, the model has sufficient capacity to learn class manifolds; pruning easy,
+     high-density examples accelerates convergence and prevents memorization of redundant features.
+   - In **data-scarce regimes**, pruning hard outliers and boundary instances prevents overfitting on noise and
+     stabilizes optimization.
 
 ## Dataset distillation
 
+Tongzhou Wang et al. proposed **Dataset Distillation**: synthesizing a tiny set of synthetic data points
+$\mathcal{S} = \{(\tilde{\mathbf{x}}_k, \tilde{y}_k)\}_{k=1}^K$ ($K \ll N$, e.g. 1, 10, or 50 images per class) such
+that a network trained on $\mathcal{S}$ achieves performance comparable to training on the full corpus $\mathcal{D}$
+<Cite id="wang2018distillation" />.
+
+| Optimization Level | Target Variables | Objective Formulation | Operational Role |
+| :--- | :--- | :--- | :--- |
+| **Outer Loop (Meta)** | Synthetic dataset $\mathcal{S} = \{(\tilde{\mathbf{x}}_k, \tilde{y}_k)\}$ | $\min_{\mathcal{S}} \mathcal{L}_{\text{val}}(\boldsymbol{\theta}^*(\mathcal{S}); \mathcal{D}_{\text{val}})$ | Optimizes synthetic pixel and feature representations by differentiating through the inner trajectory |
+| **Inner Loop (Base)** | Network parameters $\boldsymbol{\theta}$ | $\boldsymbol{\theta}^*(\mathcal{S}) = \arg\min_{\boldsymbol{\theta}} \mathcal{L}_{\text{train}}(\boldsymbol{\theta}; \mathcal{S})$ | Fits model parameters directly on the condensed synthetic proxy set $\mathcal{S}$ |
+
+### Algorithmic paradigms
+
+1. **Gradient matching**: Matching the parameter gradients produced by synthetic samples to the gradients produced by
+   real minibatches:
+   $$
+   \min_{\mathcal{S}} \mathbb{E}_{\boldsymbol{\theta} \sim P(\boldsymbol{\theta})} \left[ 1 - \cos\left( \nabla_{\boldsymbol{\theta}} \mathcal{L}(\boldsymbol{\theta}; \mathcal{S}), \, \nabla_{\boldsymbol{\theta}} \mathcal{L}(\boldsymbol{\theta}; \mathcal{D}) \right) \right]
+   $$
+2. **Trajectory matching (MTT)**: Matching multi-step training trajectories of network weights initialized from
+   identical checkpoints, ensuring synthetic gradients navigate parameter space along real-data trajectories.
+3. **Distribution matching (DM)**: Matching intermediate feature representations between real batches and synthetic
+   batches across hidden layers, avoiding expensive unrolled gradient loops.
+
+Dataset distillation compresses complex visual datasets by factors of $100\times\text{--}1000\times$. For instance,
+50,000 CIFAR-10 training images are condensed into just 100 synthetic prototypes (10 per class) while preserving
+$> 65\%$ top-1 classification accuracy <Cite id="wang2018distillation" />.
+
 ## Pitfalls
+
+1. **Coreset representation drift**: Coreset weights and selection sets computed on early random representations become
+   stale as deep layers develop specialized abstract features, requiring periodic re-computation of facility location
+   centers.
+2. **Disproportionate minority slice purging**: Pruning data based solely on cluster density or gradient norms
+   disproportionately eliminates small, high-stakes demographic or clinical sub-slices whose natural prevalence is low.
+3. **Architectural lock-in of distilled prototypes**: Synthetic distillation exemplars optimized for a ResNet
+   architecture often fail to generalize when used to train a Vision Transformer or Multi-Layer Perceptron.
+4. **Metric calculation overhead**: Calculating expensive pruning scores (e.g. running multiple ensemble models for EL2N
+   or full pairwise kernel matrices for facility location) can consume more FLOPs than standard full-dataset training if
+   not amortized across repeated hyperparameter searches.
+5. **Overfitting on distilled pixels**: Distilled synthetic images often contain high-frequency adversarial patterns
+   that trick the specific loss function into rapid convergence without imparting robust, invariant semantic features.

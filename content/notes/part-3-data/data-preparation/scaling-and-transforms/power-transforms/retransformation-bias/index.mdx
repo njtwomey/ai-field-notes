@@ -3,24 +3,140 @@ title: 'Retransformation bias'
 kind: concept
 summary: 'A model fitted to a transformed target, such as a logarithm, predicts the median, not the mean, when its predictions are transformed back. The smearing correction and model-based adjustments recover the mean.'
 tags: [data, statistics, regression]
-aliases: []
-requires: []
-related: [encoding-targets, power-transforms]
-references: []
-status: stub
+aliases: [retransformation bias, smearing estimator, Duan smearing, Jensen inequality bias]
+requires: [power-transforms]
+related: [encoding-targets, variance-stabilising-transforms]
+references: [duan1983]
+status: draft
 updated: 2026-10-11
 ---
 
 <Definition>
-To be written.
+**Retransformation bias** is the systematic divergence between the true conditional mean $\mathbb{E}[Y \mid X]$ and the
+naive inverse prediction $g^{-1}(\hat{z})$ obtained by back-transforming predictions from a model trained on a
+transformed target $Z = g(Y)$, caused by Jensen's inequality for non-linear functions.
 </Definition>
+
+In econometric, financial, and actuarial modeling, highly skewed positive outcomes (such as healthcare expenditures,
+insurance claims, wages, and property valuations) are routinely modeled by taking the natural logarithm:
+
+$$
+\ln(Y) = X \beta + \epsilon, \qquad \mathbb{E}[\epsilon \mid X] = 0
+$$
+
+An ordinary least squares model estimates the conditional mean of the transformed response:
+
+$$
+\widehat{\ln(Y)} = X \hat{\beta} = \mathbb{E}[\ln(Y) \mid X]
+$$
+
+When analysts convert predictions back to original dollar units by applying the exponential function
+$\hat{y}_{\text{naive}} = \exp(X \hat{\beta})$, the resulting predictions systematically underestimate total costs and
+group averages by substantial margins—often $20\%\text{--}50\%$ in high-variance regimes.
+
+import { RetransformationBiasVisualizer } from './RetransformationBiasVisualizer';
+
+<RetransformationBiasVisualizer />
 
 ## Median versus mean after back-transformation
 
+The mathematical origin of the bias is **Jensen's inequality**. For any strictly convex function $\phi$ (such as
+$\phi(z) = \exp(z)$, where $\phi''(z) > 0$):
+
+$$
+\mathbb{E}[\exp(Z)] > \exp(\mathbb{E}[Z])
+$$
+
+Because the exponential function is strictly monotonic, quantiles are invariant under monotonic transformations:
+
+$$
+\operatorname{Median}(Y \mid X) = \exp(\operatorname{Median}(\ln Y \mid X))
+$$
+
+Under symmetric Gaussian errors $\epsilon \sim \mathcal{N}(0, \sigma^2)$, the mean and median on the log scale coincide:
+$\mathbb{E}[\ln Y \mid X] = \operatorname{Median}(\ln Y \mid X) = X \beta$. Consequently, the naive exponentiated
+prediction estimates the **conditional median**, not the conditional mean:
+
+$$
+\hat{y}_{\text{naive}} = \exp(X \hat{\beta}) = \widehat{\operatorname{Median}}(Y \mid X)
+$$
+
+In skewed financial and count distributions, the mean is substantially larger than the median because the heavy right
+tail pulls the expectation upward. Summing naive predictions across an insurance portfolio $\sum \exp(X_i \hat{\beta})$
+will drastically under-fund expected total claims.
+
+## Parametric log-normal adjustments
+
+If the error terms $\epsilon_i$ are normally distributed with constant homoscedastic variance
+$\epsilon \sim \mathcal{N}(0, \sigma^2)$, then $Y \mid X$ follows a log-normal distribution
+$\mathcal{LN}(X\beta, \sigma^2)$.
+
+The moment-generating function of the normal distribution yields the analytical conditional mean:
+
+$$
+\mathbb{E}[Y \mid X] = \mathbb{E}[\exp(X \beta + \epsilon) \mid X] = \exp(X \beta) \cdot \mathbb{E}[\exp(\epsilon)] = \exp\left(X \beta + \frac{\sigma^2}{2}\right)
+$$
+
+The parametric correction factor is:
+
+$$
+\hat{y}_{\text{lognormal}} = \exp(X \hat{\beta}) \cdot \exp\left(\frac{\hat{\sigma}^2}{2}\right)
+$$
+
+where $\hat{\sigma}^2 = \frac{1}{N - p} \sum_{i=1}^N e_i^2$ is the mean squared error of the regression on the log
+scale.
+
+For example, with a typical residual standard error of $\sigma = 0.8$, the multiplier is
+$\exp(0.8^2 / 2) = \exp(0.32) \approx 1.377$. The naive prediction underestimates the true expectation by nearly $28\%$.
+
 ## The smearing correction
 
-## Log-normal adjustments
+In empirical machine learning applications, residuals $\epsilon$ on the log scale rarely conform to exact Gaussian
+distributions. They frequently exhibit residual kurtosis, multi-modality, or asymmetric skew.
+
+Naihua Duan <Cite id="duan1983" /> formulated the **smearing estimate**, a completely non-parametric correction that
+requires no parametric distributional assumptions for $\epsilon$:
+
+$$
+\hat{s} = \frac{1}{N} \sum_{i=1}^N \exp(e_i)
+$$
+
+where $e_i = \ln(y_i) - X_i \hat{\beta}$ are the sample OLS residuals.
+
+For any query instance $x_0$, Duan's smearing prediction is:
+
+$$
+\hat{y}_{\text{smear}}(x_0) = \exp(x_0 \hat{\beta}) \cdot \hat{s} = \frac{1}{N} \sum_{i=1}^N \exp(x_0 \hat{\beta} + e_i)
+$$
+
+Duan proved that $\hat{y}_{\text{smear}}$ is a strongly consistent estimator of $\mathbb{E}[Y \mid X = x_0]$ provided
+errors are independent and identically distributed.
 
 ## Predictive distributions through the inverse transform
 
-## Pitfalls
+Modern probabilistic modeling handles retransformation by generating predictions across the full predictive density:
+
+1. **Quantile and interval forecasts:** Prediction intervals transform without bias because quantiles are invariant
+   under monotonic transformations:
+   $$
+   [y_{\text{lower}}, y_{\text{upper}}] = [\exp(z_{\alpha/2}), \exp(z_{1-\alpha/2})]
+   $$
+2. **Monte Carlo draws:** For complex non-linear transforms (Box-Cox, Yeo-Johnson), draw samples
+   $z^{(s)} \sim p(Z \mid X)$ from the predictive posterior, map each draw back through $y^{(s)} = g^{-1}(z^{(s)})$, and
+   compute sample averages:
+   $$
+   \widehat{\mathbb{E}}[Y \mid X] \approx \frac{1}{S} \sum_{s=1}^S g^{-1}(z^{(s)})
+   $$
+
+## Pitfalls and failure modes
+
+1. **Heteroscedastic smearing failure:** Duan's smearing factor $\hat{s}$ assumes that the residual distribution
+   $\epsilon$ is identical across all values of $X$. If the variance on the log scale varies with $X$
+   (heteroscedasticity $\sigma^2(X)$), a single scalar multiplier $\hat{s}$ over-corrects low-variance regions and
+   under-corrects high-variance regions.
+2. **Extreme residual leverage:** If the dataset contains a single severe positive outlier on the log scale ($e_i = 6$),
+   $\exp(e_i) = \exp(6) \approx 403.4$. In small sample sizes, this single residual inflates $\hat{s}$ artificially.
+3. **Evaluating models on the wrong metric:** Optimizing RMSE on $\ln(Y)$ minimizes relative percentage errors, whereas
+   optimizing RMSE on $Y$ minimizes squared absolute errors. If the deployment objective is minimizing total dollar
+   error, fitting directly on original dollars with Generalized Linear Models (e.g. Gamma or Tweedie regression with log
+   link) avoids retransformation bias altogether.

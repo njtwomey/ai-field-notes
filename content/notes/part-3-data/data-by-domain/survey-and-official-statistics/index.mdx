@@ -1,0 +1,135 @@
+---
+title: 'Survey and official statistics'
+kind: concept
+summary: 'Survey data come with design weights, non-response, mode effects and disclosure control, which any model trained on them must respect.'
+tags: [data, statistics]
+aliases: []
+requires: []
+related: [sample-weights]
+references: [horvitz1952, rubin1987, little1988, vanbuuren2011]
+status: draft
+updated: 2026-10-12
+---
+
+import { SurveyOfficialStatsVisualizer } from './SurveyOfficialStatsVisualizer'
+
+<Definition>
+Survey and official statistics are structured microdata and macro-aggregations published by national statistical
+agencies (such as the US Census Bureau, Eurostat, or the UK Office for National Statistics). Unlike convenience samples
+or web telemetry, survey datasets are collected under complex, probability-based sampling designs featuring explicit
+stratification, multi-stage clustering, disproportionate selection probabilities, and non-response calibration
+adjustments.
+</Definition>
+
+Machine learning models trained on survey microdata (such as the American Community Survey, Current Population Survey,
+or National Health and Nutrition Examination Survey) cannot treat dataset rows as independent and identically
+distributed (IID) draws <Cite id="horvitz1952, rubin1987" />. Every individual record represents a varying number of
+non-sampled population members, and ignoring survey weights, cluster correlations, or statistical disclosure
+perturbances leads to severely biased parameter estimates and artificially narrow confidence intervals.
+
+<SurveyOfficialStatsVisualizer />
+
+## Design weights
+
+In complex survey sampling, individuals do not have equal probabilities of selection. Statistical agencies routinely
+oversample small demographic groups, remote geographic territories, or high-variance industries to guarantee sufficient
+sample sizes for reliable subpopulation inference <Cite id="horvitz1952" />:
+
+1. **Base Design Weights:** For each sampled unit $i$, the base design weight is the inverse of its inclusion
+   probability under the sample design:
+
+$$
+w_i^{\text{base}} = \frac{1}{\pi_i} = \frac{1}{P(i \in S)}
+$$
+
+A respondent from an oversampled minority stratum with $\pi_i = 0.05$ receives a base weight of $w_i = 20$, whereas a
+respondent from a large stratum with $\pi_j = 0.001$ receives $w_j = 1000$. 2. **Horvitz-Thompson Estimator:** To
+estimate a total population quantity $Y = \sum_{k \in U} y_k$ or a population mean $\bar{Y}$, the Horvitz-Thompson
+estimator weights each observed value:
+
+$$
+\hat{Y}_{\text{HT}} = \sum_{i \in S} w_i y_i, \quad \hat{\bar{Y}}_{\text{HT}} = \frac{\sum_{i \in S} w_i y_i}{\sum_{i \in S} w_i}
+$$
+
+3. **Calibration and Raking (Post-Stratification):** Even with rigorous sampling, realised sample totals often diverge
+   from known demographic benchmarks due to random sampling fluctuation. Agencies apply iterative proportional fitting
+   (raking) or generalized regression estimation (GREG) to adjust weights such that weighted sample totals match exact
+   census control totals along known marginals (age brackets, sex, geographic divisions).
+
+When fitting machine learning loss functions $\mathcal{L}(\theta)$, models must optimize the survey-weighted empirical
+risk:
+
+$$
+\hat{\theta} = \arg\min_\theta \sum_{i \in S} w_i \, \ell\left(f_\theta(x_i), y_i\right)
+$$
+
+## Non-response
+
+No survey achieves $100\%$ participation. Survey data faces two distinct non-response regimes
+<Cite id="rubin1987, little1988" />:
+
+- **Unit Non-Response:** An entire sampled household or person cannot be contacted or refuses participation entirely.
+  Agencies model the response propensity $\hat{p}_i = P(R_i = 1 \mid X_i)$ using logistic regression conditioned on
+  auxiliary sampling frame covariates, multiplying base weights by $1 / \hat{p}_i$ within response-homogeneity classes.
+- **Item Non-Response:** A participating respondent completes most of the questionnaire but skips sensitive questions,
+  such as annual household income, wealth assets, or medical history.
+
+Treating missing items with naive complete-case deletion discards substantial sample volume and injects severe selection
+bias if data is Missing At Random (MAR) or Missing Not At Random (MNAR) <Cite id="little1988" />. Official statistical
+releases employ sophisticated imputation procedures:
+- **Hot-Deck Imputation:** Replacing a missing value with the response from a randomly selected "donor" record that
+  matches the recipient across fine demographic strata.
+- **Multiple Imputation by Chained Equations (MICE):** Generating $M$ distinct completed datasets where missing values
+  are drawn from predictive posterior distributions, allowing downstream analysts to pool point estimates and calculate
+  valid imputation variance via Rubin's combination rules <Cite id="rubin1987, vanbuuren2011" />.
+
+## Mode effects
+
+Modern surveys employ mixed-mode collection strategies to balance administrative cost and response rates:
+- **CAPI (Computer-Assisted Personal Interviewing):** Face-to-face in-person interview.
+- **CATI (Computer-Assisted Telephone Interviewing):** Phone calls conducted by trained enumerators.
+- **CAWI (Computer-Assisted Web Interviewing):** Self-administered online digital surveys.
+- **PAPI (Paper and Pencil Interviewing):** Mailed paper forms.
+
+The mode of administration systematically alters respondent answers—a phenomenon known as *mode effects*:
+1. **Social Desirability Bias:** In interviewer-administered modes (CAPI, CATI), respondents systematically under-report
+   socially frowned-upon behaviors (illicit substance use, binge drinking, tax evasion) and over-report prosocial
+   activities (voter turnout, charitable giving, book reading) relative to self-administered anonymous online forms
+   (CAWI).
+2. **Primacy vs Recency Effects:** In visual modes (web, paper), respondents disproportionately select options presented
+   near the top of long multiple-choice lists (primacy effect). In auditory modes (telephone), respondents
+   disproportionately remember and select options heard last (recency effect).
+
+Models predicting behavioral outcomes across longitudinal survey waves must include interview mode indicator variables
+to avoid confounding survey administration transitions with real secular trends.
+
+## Disclosure control
+
+To fulfill statutory confidentiality mandates (such as Title 13 in the United States or GDPR in Europe), agencies apply
+Statistical Disclosure Control (SDC) before distributing Public Use Microdata Samples (PUMS):
+
+- **Top-Coding and Bottom-Coding:** Extreme continuous values are truncated. For example, all annual incomes exceeding
+  250,000 USD are replaced with a fixed constant or the state-level mean of the top percentile. Naive regression models
+  that treat top-coded entries as literal numerical quantities suffer severe right-tail distortion.
+- **Geographic Aggregation Thresholds:** Geographic identifiers are suppressed for jurisdictions with populations below
+  strict thresholds (typically 100,000 residents, defining Public Use Microdata Areas, or PUMAs).
+- **Differential Privacy (Formal Privacy):** Modern releases (such as the 2020 US Decennial Census) inject calibrated
+  discrete Laplace or Gaussian noise into tabular query counts via centralized algorithmic mechanisms (such as the
+  TopDown algorithm) to mathematically bound re-identification risk against database reconstruction attacks.
+
+## Pitfalls
+
+- **Ignoring Complex Clustering in Standard Errors:** Sample designs cluster respondents within primary sampling units
+  (PSUs, such as census tracts or city blocks). Observations within the same PSU are correlated due to shared local
+  environments. Computing naive OLS or standard library logistic regression standard errors assumes IID sampling,
+  severely understating standard errors and generating false-positive $p$-values. Analysts must utilize survey design
+  objects with Taylor series linearization or replicate weights (Balanced Repeated Replication / Jackknife).
+- **Misinterpreting Imputation Flags:** Public use files provide allocation flags (e.g., `INCOME_ALLOC = 1`) marking
+  whether a value was directly reported or imputed by the agency. Training machine learning models on imputed targets
+  trains the model to emulate the agency's imputation model rather than genuine empirical phenomena.
+- **Conflating Weight Scaling:** In some survey releases, weights sum to the sample size $n$; in others, they sum to the
+  total national population $N \approx 330{,}000{,}000$. Feeding unnormalized population weights into machine learning
+  frameworks can cause gradient explosions or miscalibrated Bayesian posteriors.
+- **Frame Undercoverage:** Telephone surveys relying on landline directories omit mobile-only households; web surveys
+  systematically omit older and low-income populations without internet connectivity. Relying solely on survey data
+  without post-stratification coverage adjustments biases societal predictions.

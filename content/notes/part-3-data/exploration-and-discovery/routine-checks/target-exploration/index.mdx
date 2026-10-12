@@ -1,26 +1,191 @@
 ---
 title: 'Exploring the target'
 kind: concept
-summary: 'Exploring the target means checking its balance, its rate over time and across groups, and how well single features predict it, which also flags leaks.'
-tags: [data, diagnostics]
-aliases: []
-requires: []
-related: [class-imbalance, data-leakage]
-references: []
-status: stub
-updated: 2026-10-11
+summary: 'Target exploration audits the response variable before modeling—quantifying class imbalance, tail skewness, zero-inflation, temporal drift, subpopulation disparities, and univariate predictive power to preempt leakage.'
+tags: [data, diagnostics, exploration, class-imbalance, data-leakage]
+aliases: [target analysis, label profiling, target variable exploration]
+requires: [data-generating-process, measurement-error-and-proxies]
+related: [class-imbalance, data-leakage, baseline-probes, slice-analysis, data-profiling]
+references: [box1964, yeo2000, kaufman2012, provost2001]
+status: draft
+updated: 2026-10-12
 ---
 
+import { TargetExplorationVisualizer } from './TargetExplorationVisualizer'
+
 <Definition>
-To be written.
+**Target exploration** is the disciplined, pre-modeling audit of the response variable $y \in \mathcal{Y}$. It evaluates
+label balance, distributional geometry (such as skewness and zero-inflation), temporal stationarity, disaggregated slice
+rates, and bivariate associations with individual features to establish realistic performance bounds and intercept
+target leakage before model fitting.
 </Definition>
 
-## Balance and distribution
+Before tuning architectures, constructing feature sets, or running automated pipelines, an engineer must rigorously
+inspect the target variable. Machine learning loss functions optimize mathematical objectives under strict structural
+assumptions about the distribution of $y$. When the target exhibits uninspected pathological properties—such as severe
+class imbalance, extreme right-tailed skewness, point-mass zero-inflation, calendar non-stationarity, or post-outcome
+leakage—models fail silently or produce deceptively optimistic validation scores that collapse in deployment
+<Cite id="provost2001, kaufman2012" />.
 
-## Rate over time
+<TargetExplorationVisualizer />
 
-## Rate by group
+## Balance and distributional geometry
 
-## Single-feature screens
+The global distribution of $y$ dictates both the choice of loss function and the baseline evaluation metrics.
 
-## Pitfalls
+### Discrete labels and class imbalance
+
+For classification targets $y \in \{1, \dots, C\}$, the primary descriptive metrics are the empirical base rates and
+label entropy:
+
+$$
+\pi_c = P(y = c) = \frac{1}{N} \sum_{i=1}^N \mathbb{I}(y_i = c), \quad H(Y) = -\sum_{c=1}^C \pi_c \log_2 \pi_c
+$$
+
+The imbalance ratio is defined as:
+
+$$
+\rho = \frac{\max_c \pi_c}{\min_c \pi_c}
+$$
+
+When $\rho \gg 10$ (or in extreme fraud/ad-click settings where $\pi_1 \sim 10^{-3}$ or $10^{-4}$), accuracy is entirely
+uninformative; predicting the majority class achieves $99.9\%$ accuracy while delivering zero business utility. Target
+exploration verifies:
+1. **Rare class support**: Whether the rarest class has sufficient raw sample count ($N \pi_{\min} \ge 100$) in holdout
+   validation folds to compute statistically meaningful recall or PR-AUC estimates.
+2. **Multiclass Zipfian tails**: Whether multiclass labels follow a power-law distribution where dozens of fine-grained
+   categories have fewer than 5 positive examples.
+
+### Continuous targets: skewness and zero-inflation
+
+For regression targets $y \in \mathbb{R}$, unconstrained mean squared error ($\text{MSE}$) assumes Gaussian,
+homoscedastic residuals. Real-world physical, financial, and operational targets violate this assumption routinely:
+
+- **Heavy right tails**: Quantified by sample skewness $\gamma_1 = \frac{\mathbb{E}[(y - \mu)^3]}{\sigma^3}$ and excess
+  kurtosis $\gamma_2 = \frac{\mathbb{E}[(y - \mu)^4]}{\sigma^4} - 3$. When $\gamma_1 > 2$, MSE is dominated by the top
+  $0.1\%$ of observations, causing gradients to explode during backpropagation or tree splits to isolate single extreme
+  outliers.
+- **Power transformations**: Power transforms normalize asymmetric target densities:
+  - **Box-Cox transformation** <Cite id="box1964" /> (strictly positive $y > 0$):
+    $$
+    y^{(\lambda)} = \begin{cases} \frac{y^\lambda - 1}{\lambda} & \text{if } \lambda \neq 0 \\ \ln y & \text{if } \lambda = 0 \end{cases}
+    $$
+  - **Yeo-Johnson transformation** <Cite id="yeo2000" /> (supports zero and negative values):
+    $$
+    \psi(\lambda, y) = \begin{cases} \frac{(y + 1)^\lambda - 1}{\lambda} & \text{if } \lambda \neq 0, y \ge 0 \\ \ln(y + 1) & \text{if } \lambda = 0, y \ge 0 \\ -\frac{(-y + 1)^{2 - \lambda} - 1}{2 - \lambda} & \text{if } \lambda \neq 2, y < 0 \\ -\ln(-y + 1) & \text{if } \lambda = 2, y < 0 \end{cases}
+    $$
+- **Zero-inflation**: Targets like customer lifetime spend, insurance claim amounts, or daily rainfall feature a
+  discrete point-mass at zero: $P(y = 0) = p_0 > 0$, combined with a continuous right-skewed distribution for $y > 0$.
+  Fitting standard regression to zero-inflated targets yields biased estimates. Proper exploration flags the need for
+  two-stage hurdle models (a classifier for $y > 0$ coupled with a conditional regressor) or compound Poisson-gamma
+  Tweedie objectives.
+
+$$
+P(Y = y) = \begin{cases} 
+p_0 & \text{if } y = 0 \quad \text{(discrete point-mass, e.g. no claim / zero spend)} \\ 
+(1 - p_0) \cdot f_{\text{tail}}(y) & \text{if } y > 0 \quad \text{(continuous positive severity, e.g. Lognormal or Gamma)} 
+\end{cases}
+$$
+
+> [!WARNING]
+> **Jensen's inequality in back-transformation**: If a target is transformed via $z = \ln(y)$, predicting $\hat{z}$ and naively exponentiating $\hat{y} = \exp(\hat{z})$ underestimates the expected value because $\mathbb{E}[\exp(Z)] > \exp(\mathbb{E}[Z])$. For normally distributed residuals with variance $\sigma^2$, the unbiased mean prediction requires the log-normal correction factor:
+> 
+> $$
+> \hat{y} = \exp\left(\hat{z} + \frac{\hat{\sigma}^2}{2}\right)
+> $$
+
+## Rate over time and temporal stability
+
+Logged targets frequently violate the exchangeability / i.i.d. assumption across time. Target exploration plots the
+rolling mean $\bar{y}_t = \frac{1}{|W_t|} \sum_{i \in W_t} y_i$ across chronological buckets $t \in [1, T]$ to identify
+non-stationarities:
+
+1. **Prior probability shift**: If the overall conversion rate drops from $4.5\%$ in Q1 to $1.8\%$ in Q3, a model
+   trained on pooled data will output poorly calibrated probabilities.
+2. **Seasonality and cyclic patterns**: Day-of-week dips (e.g. B2B software usage on weekends) and diurnal peaks require
+   explicit cyclical feature representations or seasonal de-trending ($y_t = T_t + S_t + I_t$).
+3. **Abrupt policy regime shifts**: Sharp discontinuities in rolling rates indicate upstream systemic changes—such as an
+   altered fraud detection threshold, updated regulatory definitions, or redesigned UI flows.
+4. **Maturity lags and backfill truncation**: In churn, default, or long-sales-cycle modeling, outcomes take 30 to 90
+   days to resolve. Recent rows in logged databases may show artificial $0$s simply because the observation window has
+   not closed. Exploring target maturity curves is essential to set appropriate historical cutoff dates.
+
+## Rate by group and subpopulation slices
+
+Evaluating the target solely at the global aggregate level conceals severe subpopulation disparities:
+
+$$
+P(y = 1 \mid A = a) = \frac{\sum_{i=1}^N \mathbb{I}(y_i = 1, A_i = a)}{\sum_{i=1}^N \mathbb{I}(A_i = a)}
+$$
+
+Target exploration stratifies the target across critical categorical slices:
+- **Device and operating system**: Mobile vs desktop conversion rates.
+- **Geographic jurisdictions**: Regional regulatory compliance or default rates.
+- **Tenant and organizational cohorts**: High-volume enterprise clients vs self-serve users.
+
+### Simpson's paradox
+
+An unconditional correlation between a slice indicator and the target can reverse when conditioning on an underlying
+confounder. For example, a new checkout UI may exhibit a lower overall conversion rate than the old UI
+($P(y=1 \mid \text{UI}_{\text{new}}) < P(y=1 \mid \text{UI}_{\text{old}})$) simply because the new UI was deployed
+disproportionately to mobile traffic, which has lower baseline conversion across all designs <Cite id="provost2001" />.
+Stratified target profiling across confounding dimensions isolates true baseline disparities from compositional shifts.
+
+## Single-feature screening and leakage detection
+
+Before fitting complex multi-variable models, computing univariate predictive power for each candidate feature $X_j$
+against $y$ serves two vital diagnostic purposes:
+1. Establishing an intuitive benchmark for baseline feature utility.
+2. Detecting post-outcome **target leakage** <Cite id="kaufman2012" />.
+
+### Univariate screening metrics
+
+For binary targets, two robust non-parametric screens are Information Value ($\text{IV}$) and single-feature decision
+stump ROC-AUC:
+
+$$
+\text{WoE}_b = \ln \left( \frac{P(X_j \in B_b \mid y=1)}{P(X_j \in B_b \mid y=0)} \right)
+$$
+
+$$
+\text{IV}(X_j) = \sum_{b=1}^B \left( P(X_j \in B_b \mid y=1) - P(X_j \in B_b \mid y=0) \right) \cdot \text{WoE}_b
+$$
+
+| Information Value ($\text{IV}$) | Univariate AUC | Diagnostic Interpretation |
+| :--- | :--- | :--- |
+| $< 0.02$ | $0.50 - 0.52$ | Unpredictive noise / uninformative single feature |
+| $0.02 - 0.10$ | $0.53 - 0.59$ | Weak predictive signal |
+| $0.10 - 0.30$ | $0.60 - 0.69$ | Moderate, realistic predictive power |
+| $0.30 - 0.50$ | $0.70 - 0.82$ | Strong genuine predictor |
+| $> 0.50$ | $> 0.90$ | **High probability of target leakage** |
+
+```
+Univariate AUC Spectrum:
+ [0.50]-------[0.60]-------[0.70]-------[0.85]==============[1.00]
+  Noise       Weak       Realistic     Suspicious         LEAKAGE
+              Signal      Signal       Review Feature   (Post-Event)
+```
+
+In noisy real-world prediction tasks (such as credit default, customer churn, click-through rate, or medical
+diagnostics), an individual feature rarely achieves $\text{AUC} > 0.85$ on its own. When a single column exhibits an
+$\text{AUC} > 0.95$ or $\text{IV} > 0.50$, it almost invariably records information generated *after* or *concurrent
+with* the target event (for example, `ticket_resolution_timestamp`, `refund_status_code`, or `account_closure_reason`)
+<Cite id="kaufman2012" />.
+
+## Diagnostic checklist
+
+To execute thorough target exploration before model training, follow this systematic sequence:
+
+1. **Verify target integrity**: Confirm that $y$ contains zero `NaN`, null, or unmapped sentinel values (such as `-999`
+   or `999999` mistakenly recorded as numeric quantities).
+2. **Quantify base rates and entropy**: Compute class counts, imbalance ratio $\rho$, and entropy $H(Y)$. Ensure every
+   evaluation fold retains adequate positive examples.
+3. **Inspect regression geometry**: Evaluate skewness $\gamma_1$ and kurtosis $\gamma_2$. If $y \ge 0$ with severe skew,
+   test log or Yeo-Johnson transforms <Cite id="yeo2000, box1964" />; check whether zero-inflation demands a two-stage
+   hurdle architecture.
+4. **Plot chronological rate**: Graph 7-day and 30-day moving averages of the target. Inspect for step-level regime
+   shifts, day-of-week oscillations, and backfill truncation at the trailing edge.
+5. **Stratify across key sub-cohorts**: Group by primary categorical dimensions and flag slices with extreme target
+   scarcity ($N_{s,+} < 10$).
+6. **Screen univariate predictors**: Calculate single-feature AUC or mutual information. Flag any feature with
+   $\text{AUC} > 0.88$ for immediate data-pipeline audit to prevent silent leakage into production.

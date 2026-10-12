@@ -6,23 +6,141 @@ tags: [data, statistics]
 aliases: []
 requires: []
 related: [label-noise-models]
-references: []
-status: stub
-updated: 2026-10-11
+references: [carroll2006, cronbach1955, obermeyer2019]
+status: draft
+updated: 2026-10-12
 ---
 
+import { MeasurementErrorVisualizer } from './MeasurementErrorVisualizer'
+
 <Definition>
-To be written.
+Measurement error is the discrepancy between the true latent physical or social quantity of interest $X^*$ and the
+observed value $W$ recorded by an instrument or sensor. A proxy target is an observable surrogate variable
+$Y_{\text{proxy}}$ used during model training when the genuine latent construct of interest $Y^*$ cannot be observed,
+measured, or tracked within practical operational windows.
 </Definition>
+
+Machine learning models assume that feature matrices and label vectors represent the ground truth of the system under
+study <Cite id="carroll2006" />. In practice, real-world data collection processes introduce both random white noise and
+systematic calibration drifts into input features, while business constraints force models to optimize imperfect proxy
+targets. Failing to account for measurement error leads to severe attenuation bias, false feature dismissal, and
+discriminatory feedback loops <Cite id="obermeyer2019" />.
+
+<MeasurementErrorVisualizer />
 
 ## Classical measurement error
 
+In the classical additive measurement error model (errors-in-variables), the observed covariate $W$ is the sum of the
+true latent value $X^*$ and an independent zero-mean random error $U$ <Cite id="carroll2006" />:
+
+$$
+W = X^* + U, \quad \mathbb{E}[U] = 0, \quad U \perp X^*, \quad U \perp \epsilon
+$$
+
+where $\epsilon$ is the structural equation error. The variance of the observed variable is inflated by the error
+variance:
+
+$$
+\sigma_W^2 = \sigma_{X^*}^2 + \sigma_U^2
+$$
+
+Because $U$ is uncorrelated with the latent quantity $X^*$, the observed feature has a lower signal-to-noise ratio than
+the true variable.
+
+A contrasting structure is **Berkson measurement error**, where the true value fluctuates around a fixed assigned value:
+
+$$
+X^* = W + U, \quad U \perp W
+$$
+
+Berkson error occurs in experimental designs (e.g., target medication dosage delivered to a patient, or uniform ambient
+air pollution assigned to all households within a geographic zip code). Unlike classical error, Berkson error does not
+cause attenuation bias in linear models; it merely increases residual variance.
+
 ## Attenuation
+
+When a regression or machine learning model fits an outcome $Y$ on a noisy predictor $W$ under classical error:
+
+$$
+Y = \beta X^* + \epsilon
+$$
+
+the ordinary least squares (OLS) estimator regressing $Y$ on $W$ converges not to the true structural coefficient
+$\beta$, but to an *attenuated* coefficient $\hat{\beta}$ shrunk toward zero:
+
+$$
+\hat{\beta} = \frac{\operatorname{Cov}(W, Y)}{\operatorname{Var}(W)} = \beta \cdot \frac{\sigma_{X^*}^2}{\sigma_{X^*}^2 + \sigma_U^2} = \beta \cdot \lambda
+$$
+
+where $\lambda \in (0, 1]$ is the **reliability ratio** (or attenuation factor).
+- When sensor noise is negligible ($\sigma_U^2 \approx 0$), $\lambda \approx 1.0$, and the true effect is recovered.
+- When sensor noise equals the feature variance ($\sigma_U^2 = \sigma_{X^*}^2$), $\lambda = 0.50$, cutting the learned
+  feature importance in half.
+
+In multivariate settings, measurement error in one feature can induce **spurious inflation (masquerading)** in clean
+features: if Feature A is noisy and Feature B is correlated with A but measured cleanly, the model will shift
+explanatory weight onto Feature B, leading data scientists to conclude that Feature B is the primary causal driver when
+it is merely a clean proxy for A.
 
 ## Systematic error and instrument differences
 
+Unlike random error, *systematic error* does not average out across large sample sizes:
+
+1. **Additive Calibration Offsets:** $W = X^* + \delta$. For example, an uncalibrated industrial thermocouple reads
+   $1.5^\circ\text{C}$ too warm across all operating cycles. Additive shifts alter regression intercepts but leave
+   linear slopes intact.
+2. **Multiplicative Scale Drifts:** $W = \alpha X^*$. A sensor sensitivity degrades over time, reporting values
+   attenuated by $20\%$ ($\alpha = 0.8$).
+3. **Instrument and Vendor Discontinuities:** Merging telemetry collected from different hardware revisions or hospital
+   laboratory analyzers introduces step-function shifts in feature distributions. If hospital site A uses Siemens
+   analyzers and hospital site B uses Roche analyzers, a neural network will learn site-specific batch artifacts rather
+   than universal physiological markers.
+
 ## Construct validity
+
+In behavioral, psychological, and social applications, variables represent complex theoretical constructs (e.g.,
+"customer brand loyalty", "patient pain level", "worker productivity") rather than physical invariants
+<Cite id="cronbach1955" />.
+
+*Construct validity* evaluates whether an operationalized measurement actually assesses the intended theoretical
+construct <Cite id="cronbach1955" />:
+- **Convergent Validity:** Do distinct measurements of the same construct correlate strongly (e.g., app session duration
+  and monthly purchase count both reflecting engagement)?
+- **Discriminant Validity:** Does the operationalized metric distinguish itself from unrelated constructs (e.g.,
+  ensuring a measure of customer dissatisfaction is not simply tracking account age)?
+
+When models optimize a naive operationalization that lacks construct validity, they suffer from **construct
+under-representation** (omitting critical facets of the goal) or **construct-irrelevant variance** (incorporating
+irrelevant noise into the metric).
 
 ## Proxy targets
 
+In production machine learning, target variables of ultimate interest are frequently unobservable at training time:
+- An insurer wants to predict *future patient medical need*, but can only measure *past healthcare costs*.
+- A criminal justice system wants to predict *future criminal offenses*, but can only measure *police arrests*.
+- A search engine wants to maximize *user life satisfaction*, but can only measure *search clicks and dwell time*.
+
+Substituting a proxy target $Y_{\text{proxy}}$ for true target $Y^*$ creates catastrophic systematic bias:
+- **Goodhart's / Campbell's Law:** When a proxy measure becomes the target of algorithmic optimization, it ceases to be
+  a good measure. Optimizing clicks rewards clickbait and sensationalism, degrading user satisfaction.
+- **Systemic Discrimination via Proxy Leakage:** In a landmark study, Obermeyer et al. demonstrated that a commercial
+  algorithm widely used to allocate extra healthcare management to high-risk patients exhibited severe racial bias
+  because it used healthcare expenditure as a proxy for healthcare need <Cite id="obermeyer2019" />. Because Black
+  patients generated lower historical healthcare costs due to unequal access and insurance disparities, Black patients
+  had to be substantially sicker than white patients to generate the same predicted cost, cutting their qualification
+  rate in half.
+
 ## Pitfalls
+
+- **Ignoring Errors-in-Variables in Deep Neural Networks:** Assuming that deep neural networks "automatically overcome"
+  measurement error. While non-linear networks can fit complex boundaries, input noise flattens predictive decision
+  surfaces and inflates generalization variance.
+- **Label Noise Asymmetry:** Assuming label noise is independent of features. Human annotators make significantly more
+  errors on ambiguous or borderline samples; treating label noise as uniform across classes biases decision thresholds
+  toward high-certainty clusters.
+- **Proxy Laundering:** Justifying an algorithmic decision on the grounds of "objective empirical data" while ignoring
+  that the proxy label reflects historical institutional enforcement biases (such as predictive policing models trained
+  on arrest records rather than crime occurrences).
+- **Silent Sensor Recalibration:** Deploying a model trained on raw sensor readings without runtime unit assertions. If
+  a hardware firmware update alters sensor gain or scaling, model predictions drift silently without triggering software
+  syntax errors.

@@ -3,24 +3,113 @@ title: 'High cardinality and unseen levels'
 kind: concept
 summary: 'Columns with thousands of levels, and levels that appear only after training, break one-hot coding. Pooling rare levels, using hierarchies of levels and encodings that handle novelty keep them usable.'
 tags: [data, feature-engineering]
-aliases: []
-requires: []
-related: [categorical-encoding]
+aliases: [high cardinality, unseen levels, rare category pooling, categorical hierarchy, out-of-vocabulary categories]
+requires: [categorical-encoding]
+related: [mean-target-encoding, category-embeddings, feature-hashing]
 references: []
-status: stub
+status: draft
 updated: 2026-10-11
 ---
 
 <Definition>
-To be written.
+**High-cardinality features** are categorical variables containing thousands to millions of distinct unique levels (e.g.
+postal codes, product SKUs, IP subnets, medical diagnosis codes) where the overwhelming majority of levels appear
+rarely, and where brand-new, previously **unseen levels** emerge continuously during production deployment.
 </Definition>
 
-## Pooling rare levels
+Standard one-hot encoding fails catastrophically on high-cardinality features: expanding $50{,}000$ distinct merchant
+codes creates $50{,}000$ sparse binary columns, exhausting RAM and forcing decision trees to perform deep, fragmenting
+splits. Furthermore, when an unseen category appears in test or inference data, unconfigured one-hot models crash with
+out-of-vocabulary exceptions or silently misalign column indices.
 
-## Hierarchies of levels
+Managing high cardinality requires pooling rare tails, exploiting structured taxonomies, and deploying encodings
+designed for novelty.
 
-## Unseen levels at prediction time
+import { HighCardinalityHierarchyExplorer } from './HighCardinalityHierarchyExplorer';
 
-## New levels over time
+<HighCardinalityHierarchyExplorer />
 
-## Pitfalls
+## The high cardinality challenge
+
+Real-world categorical data almost universally follows a **Zipfian power-law distribution**:
+- The top $10\text{--}20\%$ of categories account for $80\text{--}90\%$ of all observed records (the head).
+- The remaining $80\text{--}90\%$ of categories comprise an enormous long tail of entities that appear only 1 to 5 times
+  (singletons and doubletons).
+
+Feeding raw rare levels into complex models creates severe statistical instability: a category with 1 positive instance
+across 1 total row has an empirical rate of $100\%$, tempting models to memorize individual noise. At inference time,
+novel entities appear constantly as new products launch, new users register, and new vendors onboard.
+
+## Pooling rare levels: Top-K and frequency cutoffs
+
+The simplest and most robust baseline for high cardinality is **rare-level pooling**:
+
+1. **Top-K threshold:** Identify the $K$ most frequent categories in the training set (e.g. $K = 50$ or $K = 100$) that
+   collectively cover the vast majority of volume.
+2. **Frequency threshold:** Identify all categories whose training occurrences exceed an absolute threshold $N_{\min}$
+   (e.g. $N_c \ge 20$).
+3. **The pooled bucket:** Retain the top categories as distinct levels. Map all remaining categories—as well as any
+   novel unseen category encountered at test time—to a single shared token: `__other__` or `__rare__`.
+
+$$
+\text{level}(c) = \begin{cases} c & \text{if } c \in \mathcal{C}_{\text{top-}K} \\ \text{"\_\_other\_\_"} & \text{otherwise} \end{cases}
+$$
+
+This caps matrix width to $K + 1$ columns, prevents trees from overfitting singletons, and provides a designated
+fallback slot for production novelty.
+
+## Hierarchies of levels: Domain taxonomy backoff
+
+While Top-K pooling treats all rare items identically, real-world entities almost always belong to **nested domain
+taxonomies**:
+
+- **E-Commerce:** Product SKU (Level 3) $\to$ Sub-Category (Level 2) $\to$ Department (Level 1).
+- **Geospatial:** 9-digit ZIP code $\to$ 5-digit ZIP code $\to$ City $\to$ State $\to$ Country.
+- **Healthcare:** Specific ICD-10 diagnosis code (`E11.9`) $\to$ Disease Block (`E10–E14`) $\to$ Chapter (`Endocrine`).
+
+When a fine-grained category is under-sampled or unseen at inference time, models can apply **hierarchical backoff**:
+
+$$
+\hat{y}(c) = \begin{cases} \bar{y}_{\text{SKU}}(c) & \text{if } N_{\text{SKU}} \ge N_{\min} \\ \bar{y}_{\text{SubCategory}}(\text{parent}(c)) & \text{if } N_{\text{SubCategory}} \ge N_{\min} \\ \bar{y}_{\text{Department}}(\text{grandparent}(c)) & \text{otherwise} \end{cases}
+$$
+
+If a user buys a brand-new, unseen running shoe model (`nike_pegasus_41`), the model does not guess blindly from a
+generic `__other__` bucket. It smoothly inherits the conversion rate and price elasticity of the parent
+`"Running Shoes"` sub-category and `"Footwear"` department, preserving high predictive fidelity on novel items.
+
+## Encodings that naturally handle novelty
+
+Modern feature engineering employs encodings that handle high cardinality and unseen levels without manual threshold
+tuning:
+
+| Technique | Handling of Rare Levels | Handling of Unseen Levels at Inference |
+| :--- | :--- | :--- |
+| **One-Hot Encoding** | Overfits singletons | Crashes unless `handle_unknown='ignore'` |
+| **Mean Target Encoding** | Shrunk towards global prior $\bar{y}_{\text{global}}$ via empirical Bayes | Seamlessly outputs global prior $\bar{y}_{\text{global}}$ |
+| **Feature Hashing** | Collides into hash buckets with zero-mean signed noise | Hashes directly into existing buckets in $\mathcal{O}(1)$ |
+| **Count / Frequency** | Maps to tiny continuous scalars ($f_c \approx 0$) | Maps to $f_c = 0.0$ |
+| **Entity Embeddings** | Prone to gradient starvation (requires pooling) | Maps to dedicated `__unknown__` embedding vector |
+
+## New levels over time: Temporal drift
+
+In production systems, unseen levels are not merely random test artifacts—they reflect **temporal covariate shift**:
+
+- **Catalog churn:** In retail, thousands of seasonal items are discontinued each month while new collections launch.
+- **Online drift monitoring:** Production monitoring systems track the **unseen level arrival rate**:
+  $$
+  \text{Unseen Rate}(t) = \frac{\sum_{i \in \text{Batch}_t} \mathbb{I}(c_i \notin \mathcal{C}_{\text{train}})}{|\text{Batch}_t|}
+  $$
+  If the unseen rate rises from $1\%$ to $15\%$, model predictive capacity degrades as an increasing proportion of
+  queries fall back to prior means. This signals that embedding tables and target encodings must be retrained on recent
+  data.
+
+## Pitfalls and failure modes
+
+1. **Pooling too aggressively:** Setting $K = 5$ on a 1,000-level feature pools 90% of the variance into `__other__`,
+   erasing informative signals that tree models could have exploited via frequency or target encoding.
+2. **Ignoring taxonomy relationships:** Flattening a hierarchical code (`CA-94107`) into an arbitrary string ID discards
+   geographical adjacency. Always engineer higher-level parent features (`state = "CA"`, `region = "Bay Area"`) as
+   explicit companion columns.
+3. **Leakage in target-based hierarchies:** Computing hierarchical parent means on validation data leaks target
+   information across levels. All hierarchical backoff tables must be estimated strictly within training
+   cross-validation folds.

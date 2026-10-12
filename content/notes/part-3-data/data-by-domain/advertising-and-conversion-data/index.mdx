@@ -1,0 +1,147 @@
+---
+title: 'Advertising and conversion data'
+kind: concept
+summary: 'Advertising data have conversions that arrive days after clicks, attribution windows that decide which ad gets credit, and negatives downsampled for scale.'
+tags: [data, recommender-systems]
+aliases: []
+requires: []
+related: [interaction-logs, retail-and-demand-data, data-monitoring]
+references: [chapelle2014, mcmahan2013adclick, he2014facebook]
+status: draft
+updated: 2026-10-11
+---
+
+import { AdvertisingConversionVisualizer } from './AdvertisingConversionVisualizer'
+
+<Definition>
+**Advertising and conversion data** comprises the interaction logs, impression feeds, user contexts, and conversion
+signals generated in computational advertising and real-time bidding (RTB) auctions. This data is characterized by
+extreme class imbalance ($P(\text{conversion}) \ll 1\%$), heavy-tailed **delayed feedback** where conversion events
+arrive days or weeks after ad clicks, and **attribution window** rules that assign commercial credit across multi-touch
+customer journeys <Cite id="mcmahan2013adclick, chapelle2014" />.
+</Definition>
+
+In digital advertising auctions, machine learning models estimate Click-Through Rate (CTR, $P(\text{click} \mid x)$) and
+Conversion Rate (CVR, $P(\text{conversion} \mid \text{click}, x)$) to compute expected revenue bids:
+
+$$
+\text{eCPM} = \text{pCTR} \times \text{pCVR} \times \text{TargetValue} \times 1{,}000
+$$
+
+Because bids scale linearly with predicted probabilities, advertising models require precise numerical probability
+calibration rather than simple binary classification rank-order accuracy. Managing delayed feedback and negative
+sampling ratios is essential to avoid over-bidding or under-valuing campaigns.
+
+<AdvertisingConversionVisualizer />
+
+## Delayed conversions
+
+Unlike click events (which register within milliseconds of an ad impression), conversion actions—such as booking a
+hotel, purchasing an appliance, or opening a bank account—exhibit substantial temporal delays:
+
+$$
+\text{Click Event } (t = 0) \longrightarrow \text{Browsing \& Research} \longrightarrow \text{Cart Add} \longrightarrow \text{Purchase Conversion } (t = +8\text{ days})
+$$
+
+| Snapshot Timing | Ingestion Treatment | Recorded Label | Ground Truth Status | Structural Impact |
+| :--- | :--- | :--- | :--- | :--- |
+| **Premature ($t = 2\text{d}$)** | Naive Binary Pipeline | $y = 0$ (Negative) | Right-censored positive | **False negative bias**: under-values fresh campaigns |
+| **Premature ($t = 2\text{d}$)** | Delayed Feedback Model | Survival hazard ($D > 2\text{d}$) | Censored positive | **Unbiased calibration**: supports real-time bidding |
+
+### The censorship dilemma
+
+If a machine learning pipeline constructs training examples 48 hours after an ad click, an unconverted record falls into
+one of two unobservable states <Cite id="chapelle2014" />:
+1. **True Negative:** The user examined the product and decided never to convert.
+2. **Right-Censored Positive:** The user will convert on day 7, but the label has not yet landed.
+
+Labeling all un-converted clicks as negatives introduces systematic **false negative bias**. Because recently launched
+ad campaigns have had less elapsed time to accumulate delayed conversions, naive models underestimate the CVR of fresh
+ads, starving new campaigns of auction exposure.
+
+### Delayed Feedback Modeling (DFM)
+
+To resolve censorship without waiting months for conversion windows to close, Olivier Chapelle
+<Cite id="chapelle2014" /> introduced Delayed Feedback Models grounded in survival analysis. The model decomposes the
+joint probability of conversion indicator $C \in \{0, 1\}$ and elapsed delay $D \in \mathbb{R}^+$:
+
+$$
+P(C = 1, D = d \mid x) = P(C = 1 \mid x) \cdot P(D = d \mid C = 1, x)
+$$
+
+The probability of conversion is parameterized via logistic regression or deep neural nets, while delay duration $D$ is
+parameterized via an exponential hazard rate $\lambda(x)$. For clicks that have not yet converted after elapsed
+observation time $E$, the likelihood integrates over all unobserved future times:
+
+$$
+P(C = 0 \text{ or } D > E \mid x) = 1 - P(C = 1 \mid x) + P(C = 1 \mid x) \int_E^\infty P(D = t \mid C = 1, x) \, dt
+$$
+
+Maximizing this censored log-likelihood enables continuous online learning on fresh traffic without waiting for full
+attribution closure.
+
+## Attribution windows
+
+An **attribution window** defines the maximum elapsed duration between an ad interaction (click or impression) and a
+downstream conversion for that ad to claim credit:
+
+- **Window truncation:** Typical industry standards specify 1-day, 7-day, or 30-day post-click windows. Conversions
+  occurring at day 31 are discarded and assigned zero attribution credit. While truncation bounds state retention for ad
+  networks, setting windows too short truncates legitimate long-cycle purchases.
+- **Attribution credit assignment:**
+  - **Last-Touch Attribution (LTA):** Assigns 100% of commercial credit to the final ad clicked prior to conversion. LTA
+    artificially over-values bottom-of-funnel branded search and retargeting ads while starving top-of-funnel brand
+    discovery campaigns of revenue credit.
+  - **First-Touch Attribution (FTA):** Assigns 100% credit to the initial touchpoint.
+  - **Multi-Touch Attribution (MTA):** Distributes fractional credit across all intermediate touchpoints via time-decay
+    weighting, position-based rules (40% first, 40% last, 20% middle), or cooperative game-theoretic Shapley value
+    formulations.
+
+## Downsampled negatives
+
+Internet ad exchanges log tens of billions of impressions daily. Because typical click-through rates range from $0.1\%$
+to $2\%$, negative (unclicked or unconverted) records outnumber positives by orders of magnitude ($10^3:1$ to $10^5:1$).
+Storing, transferring, and training deep architectures on all negative impressions is cost-prohibitive.
+
+### Negative subsampling
+
+Production pipelines <Cite id="he2014facebook, mcmahan2013adclick" /> retain 100% of positive conversion events while
+downsampling negative impressions with sampling probability $w \in (0, 1]$ (e.g., $w = 0.05$):
+
+$$
+\text{Dataset Size Reduction} \approx 1 - w \quad (95\%\text{ storage savings})
+$$
+
+### Mathematical calibration correction
+
+Training a binary classifier on negatively downsampled data shifts the empirical label distribution, forcing the model
+to output an artificially inflated predicted probability $p'$.
+
+To recover the true, unbiased posterior probability $p = P(Y = 1 \mid x)$ required for auction pricing, practitioners
+apply the exact calibration adjustment formula <Cite id="he2014facebook" />:
+
+$$
+p = \frac{p'}{p' + \frac{1 - p'}{w}}
+$$
+
+```
+Raw Model Output:    p' = 0.10  (Trained with w = 0.01 negative sampling)
+Calibration Formula: p  = 0.10 / (0.10 + (1 - 0.10) / 0.01)
+                     p  = 0.10 / (0.10 + 90.0)
+Corrected Posterior: p  ≈ 0.00111  (True real-world probability)
+```
+
+Failing to apply this adjustment produces a 90x over-estimation of conversion probability, causing automated bidding
+systems to submit ruinously high bids in second-price and first-price ad auctions.
+
+## Pitfalls
+
+- **Bidding with uncalibrated probabilities:** Omitting the downsampling correction formula, resulting in inflated eCPM
+  bids that exhaust advertising budgets within minutes.
+- **Treating delayed conversions as hard negatives:** Training batch models on recent traffic without survival analysis
+  adjustments, causing models to suppress newly released high-value ad creatives.
+- **Attribution gaming by bottom-of-funnel retargeters:** Employing naive last-touch attribution, allowing retargeting
+  networks to bid exclusively on high-intent users about to convert organically, claiming undeserved credit without
+  generating incremental lift.
+- **Unchecked click fraud and bot traffic:** Training conversion models on bot-generated impressions and click-farm
+  traffic, corrupting feature representations with non-human behavioral patterns.

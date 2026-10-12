@@ -2,23 +2,155 @@
 title: 'Intermittent and censored series'
 kind: concept
 summary: 'Demand series are often mostly zero, and stock-outs cap observed sales below true demand. Both break standard forecasting losses and need dedicated models or corrections.'
-tags: [data, time-series, forecasting]
-aliases: []
+tags: [data, time-series, forecasting, intermittent-demand, inventory]
+aliases: [intermittent demand, censored time series, lumpy demand, stock-outs]
 requires: []
-related: []
-references: []
-status: stub
-updated: 2026-10-11
+related: [forecasting-setups, look-ahead-bias, time-series-gaps, censoring]
+references: [croston1972, syntetos2005, tobin1958]
+status: draft
+updated: 2026-10-12
 ---
 
+import { IntermittentAndCensoredSeriesVisualizer } from './IntermittentAndCensoredSeriesVisualizer'
+
 <Definition>
-To be written.
+**Intermittent and censored time series** are temporal sequences characterized by high frequencies of zero observations
+punctuated by sporadic non-zero events, or whose observed magnitudes are artificially truncated from above by
+operational capacity constraints (such as warehouse stock-outs or server throttling)
+<Cite id="croston1972, tobin1958" />. Standard forecasting loss functions (such as Mean Squared Error or Mean Absolute
+Percentage Error) fail on these series, outputting uninformative fractional trickles or underestimating unfulfilled
+latent demand.
 </Definition>
+
+In retail inventory management, aircraft spare parts logistics, maintenance engineering, and cloud compute capacity
+planning, the vast majority of stock keeping units (SKUs) exhibit intermittent demand: an item may sell zero units for
+eight consecutive weeks before a sudden customer order consumes twenty units. 
+
+Furthermore, historical transaction databases record *observed sales*, not *true customer demand*. When inventory drops
+to zero, sales drop to zero regardless of customer intent. Disentangling true latent demand from supply constraints
+requires dedicated intermittent modeling, zero-inflated distributions, and censored demand unconstraining.
+
+<IntermittentAndCensoredSeriesVisualizer />
 
 ## Zero-heavy demand
 
+Standard statistical and machine learning loss functions assume continuous, bell-shaped error distributions. When
+applied to zero-heavy time series, these assumptions fail:
+
+- **MSE degradation:** Minimizing Mean Squared Error on a series with $90\%$ zero periods and sporadic orders of
+  magnitude 50 forces the model to predict an unconditional mean of 5 units every single day. A retailer stocking 5
+  units per day ties up working capital daily, while still facing a 15-unit stock-out whenever a real 20-unit order
+  arrives.
+- **MAPE collapse:** Mean Absolute Percentage Error ($\text{MAPE} = \frac{1}{n} \sum |(y - \hat{y}) / y|$) divides by
+  zero on every null period, rendering it mathematically invalid.
+- **Classification of demand types:** Syntetos et al. formalize four demand regimes based on the squared coefficient of
+  variation of demand sizes ($CV^2$) and the average inter-demand interval ($p$) <Cite id="syntetos2005" />:
+  1. **Smooth:** Low interval ($p < 1.32$), low size variance ($CV^2 < 0.49$).
+  2. **Intermittent:** High interval ($p \ge 1.32$), low size variance ($CV^2 < 0.49$).
+  3. **Erratic:** Low interval ($p < 1.32$), high size variance ($CV^2 \ge 0.49$).
+  4. **Lumpy:** High interval ($p \ge 1.32$), high size variance ($CV^2 \ge 0.49$).
+
+### Croston's decomposition
+
+Croston decoupled intermittent demand into two separate processes <Cite id="croston1972" />:
+
+1. **Non-zero demand size ($z_t$):** Updated via exponential smoothing strictly when a transaction occurs ($y_t > 0$):
+   $$
+   \hat{z}_t = \alpha y_t + (1 - \alpha) \hat{z}_{t-1}
+   $$
+2. **Inter-arrival interval ($p_t$):** The number of time periods elapsed since the preceding transaction, updated when
+   demand occurs:
+   $$
+   \hat{p}_t = \alpha q_t + (1 - \alpha) \hat{p}_{t-1}
+   $$
+
+The forecast demand rate per period is the ratio of smoothed size to smoothed interval:
+
+$$
+\hat{d}_t = \frac{\hat{z}_t}{\hat{p}_t}
+$$
+
+### Syntetos-Boylan Approximation (SBA)
+
+Because the expected value of a ratio exceeds the ratio of expected values
+($\mathbb{E}[Z/P] > \mathbb{E}[Z]/\mathbb{E}[P]$ for independent random variables), Croston's estimator suffers from
+systematic positive bias. Syntetos and Boylan introduced the **SBA correction factor** <Cite id="syntetos2005" />:
+
+$$
+\hat{d}_t^{\text{SBA}} = \left( 1 - \frac{\alpha}{2} \right) \frac{\hat{z}_t}{\hat{p}_t}
+$$
+
+SBA eliminates the asymptotic over-forecasting bias, substantially improving inventory safety stock allocations.
+
+### Hurdle and Tweedie models
+
+Modern machine learning approaches model zero-heavy series via two-stage hurdle architectures or compound Poisson-Gamma
+(Tweedie) distributions:
+- **Hurdle models:** A binary classification classifier (e.g., LightGBM with binary log-loss) first predicts transaction
+  occurrence probability $P(Y_t > 0)$. A separate regressor models conditional magnitude $P(Y_t \mid Y_t > 0)$.
+- **Tweedie loss:** Parameterized by variance power $p \in (1, 2)$, Tweedie objective functions place an explicit
+  probability mass at exact zero while fitting a right-skewed continuous Gamma distribution over positive values.
+
 ## Censoring by stock-outs
+
+A critical trap in demand forecasting is confusing observed sales with true customer demand <Cite id="tobin1958" />:
+
+$$
+y_t = \min(D_t, I_t)
+$$
+
+where $D_t$ represents latent customer demand and $I_t$ is on-hand inventory at the start of period $t$.
+
+When inventory is abundant ($I_t > D_t$), sales equal demand ($y_t = D_t$). However, when a **stock-out** occurs
+($I_t = 0$), sales drop to zero regardless of how many customers attempted to purchase the item. Observed sales are
+**right-censored** at available inventory $I_t$.
+
+### The vicious stock-out spiral
+
+If forecasting models train naively on raw point-of-sale data without accounting for inventory availability:
+1. A stock-out occurs, causing sales to drop to zero.
+2. The forecasting model treats the zero as a genuine decline in customer demand.
+3. Downstream replenishment software orders less inventory for the next cycle based on the lower forecast.
+4. The SKU stocks out even faster, driving historical sales lower in a self-reinforcing death spiral.
+
+### Demand unconstraining (Tobit models)
+
+To break the stock-out spiral, data engineers flag periods where inventory was constrained ($I_t = 0$) and apply
+**demand unconstraining** <Cite id="tobin1958" />:
+
+- **Censored Tobit regression:** Models latent demand $D_t = \mathbf{x}_t^\top \boldsymbol{\beta} + \epsilon_t$, with
+  likelihood contributions partitioned into uncensored points and right-censored probability survival integrals:
+
+  $$
+  \begin{aligned}
+  \log \mathcal{L}(\boldsymbol{\beta}, \sigma) &= \sum_{y_t < I_t} \left[ -\log \sigma + \log \phi\left( \frac{y_t - \mathbf{x}_t^\top \boldsymbol{\beta}}{\sigma} \right) \right] \\
+  &\quad + \sum_{y_t = I_t} \log \left[ 1 - \Phi\left( \frac{I_t - \mathbf{x}_t^\top \boldsymbol{\beta}}{\sigma} \right) \right]
+  \end{aligned}
+  $$
+- **Expectation-Maximization (EM) imputation:** Replaces censored stock-out periods with their conditional expectations
+  $\mathbb{E}[D_t \mid D_t \ge I_t]$ before training downstream tree-based models.
 
 ## Promotions and events
 
+Promotional discounts, digital coupon campaigns, and marketing events drastically amplify transaction probability on
+intermittent SKUs. However, promotions interact dangerously with stock-out censoring:
+
+- **Peak censoring vulnerability:** Promotional uplift accelerates inventory turnover. Consequently, stock-outs are most
+  likely to occur precisely during promotional spikes, causing naive sales models to severely underestimate promotional
+  elasticity.
+- **Event feature encoding:** Models must incorporate forward-looking promotion calendars (discount depth, feature ad
+  placements, competitor price gaps) alongside historical stock-out flags to estimate the true promotional lift curve.
+
 ## Pitfalls
+
+- **Evaluating intermittent models using MAPE or sMAPE:** Because zero appears frequently in the denominator, MAPE
+  produces numerical singularities or wildly distorted percentages. Proper evaluation requires Mean Absolute Scaled
+  Error (MASE), Root Mean Squared Scaled Error (RMSSE), or Continuous Ranked Probability Score (CRPS).
+- **Ignoring on-hand stock indicators:** Training models on raw sales transactions without joining inventory
+  availability tables directly injects stock-out censoring bias into feature engineering.
+- **Aggregating to monthly buckets to eliminate zeros:** While summing weekly or daily data into monthly totals reduces
+  zero frequency, it obscures replenishment lead times and erases peak daily demand spikes needed for sizing logistics
+  buffers.
+- **Assuming Poisson arrivals when demand is bursty:** Standard Poisson count distributions assume mean equals variance
+  ($\lambda = \sigma^2$). Intermittent demand frequently exhibits extreme overdispersion ($\sigma^2 \gg \mu$), requiring
+  Negative Binomial or Tweedie formulations.

@@ -1,24 +1,147 @@
 ---
 title: 'Self-supervised data design'
 kind: concept
-summary: 'In self-supervised learning the data design is the supervision: the pretext task, the augmentation pairs that define invariance, and the pretraining corpus decide what the representation captures.'
-tags: [data, representation-learning]
-aliases: []
-requires: []
-related: []
-references: []
-status: stub
-updated: 2026-10-11
+summary: 'In self-supervised learning, the data design is the supervision: pretext tasks, augmentation pairs, and corpus composition mathematically define the learned representation.'
+tags: [data, representation-learning, contrastive-learning, self-supervised]
+aliases: [self-supervised data design, pretext tasks, InfoNCE, SimCLR, MAE]
+requires: [augmentation-principles, baseline-probes]
+related: [coresets-and-data-pruning, synthetic-data]
+references: [chen2020, he2022, caron2021, devlin2019, oord2018]
+status: draft
+updated: 2026-10-12
 ---
 
+import { SelfSupervisedDataDesignVisualizer } from './SelfSupervisedDataDesignVisualizer'
+
 <Definition>
-To be written.
+**Self-supervised data design** is the intentional engineering of training signals from unlabelled data. In
+self-supervised learning (SSL), explicit human labels are absent; instead, the mathematical formulation of the **pretext
+task** (e.g. masked reconstruction or contrastive prediction), the choice of **augmentation transformations** defining
+view invariance, and the curation of the **pre-training corpus** collectively dictate what semantic abstractions the
+representation captures and what nuisance variations it discards.
 </Definition>
+
+In supervised learning, task objectives are explicitly specified by human ground truth. In self-supervised pre-training,
+however, the model learns solely by solving puzzle-like pretext tasks constructed directly from raw data. If the data
+design permits a trivial statistical shortcut—such as matching background color histograms or sensor noise patterns—the
+neural network will ruthlessly exploit it, producing representations that fail completely on downstream transfer tasks.
+Crafting self-supervised datasets is an exercise in designing mathematical invariances
+<Cite id="chen2020, he2022, caron2021" />.
+
+<SelfSupervisedDataDesignVisualizer />
 
 ## Pretext tasks
 
+The pretext task defines the objective function that forces an unlabelled neural network to learn meaningful
+representations:
+
+### 1. Masked autoencoding and generative reconstruction
+
+In masked modeling, a fraction of the input tokens or visual patches is corrupted, masked, or withheld, and the network
+must reconstruct the missing content conditioned on visible context:
+- **Masked Language Modeling (BERT)**: Jacob Devlin et al. established the $15\%$ masking protocol: $80\%$ replaced with
+  a special `[MASK]` token, $10\%$ replaced with a random token, and $10\%$ left uncorrupted <Cite id="devlin2019" />.
+  This distribution prevents the encoder from ignoring tokens that are not explicitly masked.
+- **Masked Autoencoders (MAE)**: Kaiming He et al. discovered that vision requires a radically different data design
+  than language <Cite id="he2022" />. Because images contain high spatial redundancy (neighboring pixels are nearly
+  identical), low masking ratios ($15\text{--}30\%$) allow the model to reconstruct pixels via trivial linear
+  interpolation. An aggressive **$75\%$ masking ratio** strips away local redundancy, forcing the ViT encoder to learn
+  global semantic scene structure while cutting pre-training compute by $4\times$.
+
+| Modality & Pretext Framework | Optimal Masking Ratio | Information Density Dynamics | Optimization & Computational Impact |
+| :--- | :--- | :--- | :--- |
+| **Language (BERT)** <Cite id="devlin2019" /> | $\approx 15\%$ tokens | High semantic entropy; discrete symbolic vocabulary | Retains sufficient syntactic context for cloze reconstruction; aggressive masking destroys grammar |
+| **Vision (MAE)** <Cite id="he2022" /> | $\approx 75\%$ patches | Low semantic entropy per pixel; high spatial redundancy | Aggressive masking prevents trivial nearest-neighbor interpolation; encoder processes only $25\%$ of patches ($4\times$ speedup) |
+
+### 2. Joint-embedding and contrastive prediction
+
+Rather than predicting missing pixels, joint-embedding methods map multiple augmented views of the same instance into
+close proximity in latent space while separating distinct instances <Cite id="oord2018, chen2020" />.
+
+Under the **InfoNCE** objective (van den Oord et al.), a batch of $K$ samples generates representation pairs
+$(\mathbf{z}_i, \mathbf{z}_j)$:
+
+$$
+\mathcal{L}_{\text{InfoNCE}} = -\log \frac{\exp(\operatorname{sim}(\mathbf{z}_i, \mathbf{z}_j) / \tau)}{\sum_{k=1}^K \exp(\operatorname{sim}(\mathbf{z}_i, \mathbf{z}_k) / \tau)}
+$$
+
+where
+$\operatorname{sim}(\mathbf{u}, \mathbf{v}) = \frac{\mathbf{u}^\top \mathbf{v}}{\|\mathbf{u}\|_2 \|\mathbf{v}\|_2}$ is
+cosine similarity, and $\tau > 0$ is a temperature hyperparameter. Optimizing InfoNCE maximizes a lower bound on the
+mutual information between augmented views:
+
+$$
+\mathcal{I}(\mathbf{x}_1; \mathbf{x}_2) \ge \log K - \mathcal{L}_{\text{InfoNCE}}
+$$
+
+### 3. Non-contrastive self-distillation (DINO, BYOL)
+
+To eliminate the memory burden of large contrastive negative queues, non-contrastive methods train a student network
+$g_{\boldsymbol{\theta}}$ to predict the output of an exponentially moving average (EMA) momentum teacher network
+$g_{\boldsymbol{\theta}'}$ <Cite id="caron2021" />. Mathilde Caron et al. demonstrated in DINO that combining
+**centering** (subtracting a running mean from teacher logits) and **sharpening** (applying a low temperature $\tau_t$
+to teacher softmax outputs) prevents representation collapse, causing Vision Transformers to autonomously learn explicit
+semantic segmentation masks without any human supervision.
+
 ## Augmentation pairs as invariance
+
+In contrastive learning, **what the model cannot predict across augmentation views is what it learns to ignore**. The
+mathematical definition of positive view generation $\mathbf{x}_1 = T_1(\mathbf{x}), \, \mathbf{x}_2 = T_2(\mathbf{x})$
+directly programs the network's inductive biases.
+
+### The SimCLR discovery: augmentation synergy
+
+Ting Chen et al. conducted exhaustive ablation studies on ImageNet that unmasked how networks exploit data shortcuts in
+contrastive learning <Cite id="chen2020" />:
+
+```
+ SimCLR Augmentation Ablation on ImageNet (Top-1 Linear Probe):
+ Augmentation Composition                       Linear Probe Acc    Underlying Mechanism
+ ---------------------------------------------------------------------------------------------------
+ Random Crop Alone                                   32.4%          CHEATS: Matches global color histograms
+ Color Jitter Alone                                  14.2%          Inadequate spatial perturbation
+ Random Crop + Color Jitter                          56.3%          CRITICAL SYNERGY: Breaks color cheat!
+ Random Crop + Color Jitter + Gaussian Blur          64.8%          Removes high-frequency pixel shortcuts
+ Full Pipeline (+ Solarization)                      69.3%          Optimal geometric & photometric invariance
+```
+
+When images were perturbed using random cropping alone, the network completely bypassed object understanding: it simply
+computed the global distribution of colors in Crop A and matched it to Crop B. Adding aggressive color jittering
+destroyed color as a reliable identifier, forcing the network to identify shared object contours and semantic shapes.
+
+### Task-specific invariance trade-offs
+
+Every augmentation choice represents an implicit assumption about downstream tasks:
+- **Color jittering**: Enforces color invariance. Highly beneficial for general object categorization; destructive for
+  medical dermatology (where lesion erythema defines malignancy) or traffic sign recognition.
+- **Random rotation ($360^\circ$)**: Enforces rotational invariance. Essential for overhead satellite remote sensing or
+  pathology histology slides; destructive for optical character recognition (OCR) or upright natural driving imagery.
 
 ## The pretraining corpus
 
+The composition and quality of the unlabelled pre-training corpus set the fundamental ceiling on representation quality:
+
+1. **Curated vs uncurated scaling**: Pre-training on uncurated billion-scale web crawls (e.g., CommonPool or Instagram
+   streams) provides vast long-tail visual concepts but suffers from severe power-law concentration around
+   low-information meme templates and boilerplate text. Filtering corpora for aesthetic quality, text clarity, and
+   deduplication consistently outperforms $10\times$ larger uncurated pools.
+2. **Near-duplicate false negatives**: In massive contrastive batches (e.g. batch size $4096$), randomly drawn negative
+   samples frequently contain near-duplicate instances of the same object or web page. Penalizing these pairs via
+   InfoNCE forcibly repels semantically identical instances. Applying MinHash LSH deduplication prior to pre-training
+   prevents false-negative collision pathology.
+
 ## Pitfalls
+
+1. **High-frequency shortcut leakage**: Failing to blur or downsample images; deep convolutional networks easily match
+   subtle camera sensor noise patterns or JPEG compression artifacts across crops, completely ignoring semantic content.
+2. **Masking ratio domain mismatch**: Blindly transferring a $15\%$ BERT masking ratio to visual patches (enabling
+   trivial pixel interpolation) or transferring a $75\%$ visual masking ratio to natural language (destroying
+   grammatical coherence).
+3. **Contrastive false-negative repulsion**: Sampling negative batches from small, dense domain corpora without
+   multi-instance clustering; contrastive loss repeatedly forces legitimate intra-class neighbors apart.
+4. **Dimensional collapse in self-distillation**: In student-teacher frameworks (DINO/BYOL), improper learning rate
+   scheduling or poorly calibrated teacher centering causes all representations to collapse onto a single static
+   dimensional subspace.
+5. **Evaluating SSL encoders with inappropriate probe heads**: Using non-linear deep MLP probe heads to evaluate
+   representations; a non-linear probe can learn downstream tasks from poorly structured representations, masking the
+   fact that the underlying self-supervised encoder failed to linearize class manifolds.

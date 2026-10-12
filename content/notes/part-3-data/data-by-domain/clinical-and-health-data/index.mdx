@@ -1,0 +1,150 @@
+---
+title: 'Clinical and health data'
+kind: concept
+summary: 'Clinical data record patients'' care: coded diagnoses and procedures, medications, laboratory results, notes and signals, taken at irregular times. Cohort definition, coding practice and biases such as immortal time shape every analysis.'
+tags: [data]
+aliases: []
+requires: []
+related: [financial-data, industrial-sensor-and-maintenance-data, personal-data-and-identifiability]
+references: [johnson2016mimic, rajkomar2018]
+status: draft
+updated: 2026-10-11
+---
+
+import { ClinicalHealthDataVisualizer } from './ClinicalHealthDataVisualizer'
+
+<Definition>
+**Clinical and health data** comprises the longitudinal observational records generated during medical care
+delivery—including Electronic Health Records (EHR), clinical trial registries, laboratory tests, prescription orders,
+medical imaging (DICOM), and high-frequency physiological telemetry <Cite id="johnson2016mimic" />. Rather than being
+designed for scientific experimentation, clinical datasets are artifacts of billing codes, clinical workflows, and
+administrative encounters, requiring careful management of irregular sampling, phenotyping uncertainty, and
+epidemiological biases <Cite id="rajkomar2018" />.
+</Definition>
+
+Machine learning models applied to clinical data promise early diagnosis, personalized treatment planning, and hospital
+resource optimization. However, observational health records are fundamentally shaped by the healthcare delivery system
+itself: the timing, presence, and absence of clinical measurements convey diagnostic signals independent of the measured
+physiological values.
+
+<ClinicalHealthDataVisualizer />
+
+## Records and coding systems
+
+Clinical encounters are captured across structured transactional databases and unstructured clinician prose, organized
+through standardized medical terminologies:
+
+- **Diagnostic codes (ICD-9 / ICD-10 / ICD-11):** The International Classification of Diseases provides hierarchical
+  alphanumeric codes for patient diagnoses, injuries, and causes of death. Originally created for epidemiological
+  tracking and insurance reimbursement, ICD codes represent billing justifications rather than complete clinical
+  pathology.
+- **Procedural codes (CPT / HCPCS):** Current Procedural Terminology standardizes billable medical services, surgical
+  procedures, and diagnostic scans performed during an encounter.
+- **Clinical ontologies (SNOMED-CT):** Systematized Nomenclature of Medicine provides a comprehensive, poly-hierarchical
+  concept network linking anatomy, symptoms, etiologies, and surgical findings across international healthcare systems.
+- **Laboratory tests (LOINC):** Logical Observation Identifiers Names and Codes standardizes laboratory measurements
+  (e.g., serum potassium, arterial pH, hemoglobin A1c) and clinical observations.
+- **Medications (RxNorm / ATC):** Normalizes drug brand names, active chemical ingredients, dosage forms, and routes of
+  administration into unified concept unique identifiers (CUIs).
+- **Unstructured text:** Nursing progress notes, radiology reports, and physician discharge summaries contain dense
+  clinical context, negated findings (e.g., "patient denies chest pain"), and family medical history requiring
+  specialized clinical natural language processing.
+
+## Irregular visits and measurements
+
+Unlike standard time-series data sampled at fixed intervals, clinical data arrives at highly irregular, asynchronous
+timestamps driven by patient healthcare-seeking behavior and clinical urgency:
+
+### The informative observation process
+
+In health informatics, the sampling process itself is not independent of patient health status:
+
+- **Non-random missingness:** In clinical testing, data is rarely Missing Completely at Random (MCAR). Clinicians do not
+  order arterial blood gas, cardiac troponin, or head CT scans randomly; tests are ordered precisely when a clinician
+  suspects deterioration.
+- **Presence as a feature:** The mere fact that a specific laboratory test was ordered—and the frequency with which it
+  was repeated over the past 24 hours—is frequently a stronger statistical predictor of acute inpatient mortality or ICU
+  transfer than the actual numerical test result <Cite id="rajkomar2018" />.
+- **Masked stability:** Healthy patients may have zero laboratory tests over years. Treating the absence of a test as a
+  missing value to be imputed with global population means corrupts the clean baseline distribution of healthy cohorts.
+
+## Cohort definition
+
+Translating raw electronic health records into an analysis-ready dataset requires defining a strict study cohort:
+
+| Cohort Phase | Relative Window | Primary Operational Objective |
+| :--- | :--- | :--- |
+| **Lookback / Baseline** | $[-365, 0]$ days | Ascertain incident status and compute baseline risk profiles (e.g., Charlson Comorbidity Index) |
+| **Index Date ($t_0$)** | Anchor $t = 0$ | Adjudicate qualifying clinical event or exposure (e.g., initial drug prescription, ICU admission) |
+| **Prediction Horizon** | $[0, +30]$ days | Monitor forward clinical endpoint without leakage (e.g., 30-day all-cause readmission, mortality) |
+
+1. **Index date ($t_0$):** The definitive temporal origin anchoring the patient's timeline (e.g., the date of initial
+   type 2 diabetes diagnosis or emergency department presentation).
+2. **Lookback / Wash-out window:** A mandatory historical observation window prior to $t_0$ (e.g., 365 days of
+   continuous healthcare enrollment) used to ascertain that an exposure or disease onset is genuinely incident rather
+   than prevalent, and to compute baseline risk scores.
+3. **Prediction horizon:** The forward evaluation window (e.g., 30-day all-cause hospital readmission or 1-year
+   cardiovascular event) across which the clinical endpoint is monitored.
+
+## Labels from records
+
+In clinical informatics, clean binary outcome labels rarely exist as direct database columns. Instead, researchers
+engineer **computable phenotypes**:
+
+- **Phenotype definition:** A computable phenotype is a programmatic rule set or statistical classifier that identifies
+  patients with a specific disease condition by combining diagnosis codes, laboratory thresholds, prescription claims,
+  and clinical note keywords. For example, identifying type 2 diabetes may require:
+  $$
+  \ge 2 \text{ outpatient ICD codes} \quad \text{OR} \quad \text{HbA1c} \ge 6.5\% \quad \text{OR} \quad \text{active Metformin script}
+  $$
+- **Upcoding and billing bias:** Because hospital reimbursements scale with patient illness severity (via Diagnosis
+  Related Groups, DRGs), billing records frequently exhibit upcoding—recording borderline secondary complications to
+  maximize insurance reimbursement. Treating billing diagnoses as unassailable ground truth introduces diagnostic
+  inflation into machine learning training targets.
+
+## Immortal time and other biases
+
+Observational health studies are vulnerable to systematic structural biases that can invert clinical conclusions:
+
+- **Immortal time bias:** Occurs when cohort membership or treatment exposure requires surviving or remaining event-free
+  for a period following the index date $t_0$. For example, defining the "treated group" as patients who received
+  coronary revascularization surgery within 90 days of a heart attack creates an **immortal window**: any patient who
+  died within the first 14 days is automatically excluded from the treated group and allocated to the control group.
+  This artifactually deflates the apparent mortality hazard ratio of the surgical procedure. Correcting immortal time
+  bias requires **landmark analysis** (evaluating only patients surviving to a fixed milestone) or time-dependent Cox
+  proportional hazard modeling.
+- **Confounding by indication:** In clinical practice, physicians prescribe aggressive therapies specifically to the
+  sickest patients. Naive supervised models will correlate the medication with elevated mortality, mistaking the
+  underlying disease severity for drug toxicity.
+- **Surveillance / Berkson's bias:** Patients who interact with the hospital system frequently undergo more routine
+  screening, increasing their probability of being diagnosed with subclinical conditions compared to equally sick
+  patients who lack regular healthcare access.
+
+## Privacy and access
+
+Healthcare data is governed by stringent legal protections:
+
+- **Regulatory frameworks:** The US Health Insurance Portability and Accountability Act (HIPAA) and EU General Data
+  Protection Regulation (GDPR) govern patient records.
+- **De-identification mechanisms:**
+  - **HIPAA Safe Harbor:** Mandates the removal of 18 specific identifiers—including patient names, geographic divisions
+    smaller than a state, all dates directly related to an individual (except year), telephone numbers, and ages over 89.
+  - **Expert determination:** Statistical methodologies demonstrating that the risk of re-identification via linkage
+    attacks is vanishingly small.
+- **Open critical care benchmarks:** Benchmark databases—most prominently the Medical Information Mart for Intensive
+  Care (MIMIC-III and MIMIC-IV <Cite id="johnson2016mimic" />) developed by MIT and Beth Israel Deaconess Medical
+  Center—provide freely accessible, de-identified clinical telemetry, nursing notes, and vital signs for reproducible
+  critical care machine learning research.
+
+## Pitfalls
+
+- **Naive numerical forward-fill across distant encounters:** Propagating an outpatient laboratory value (e.g. serum
+  sodium) forward by months, ignoring physiological half-lives and temporal decay.
+- **Immortal time lookahead contamination:** Defining patient exposures using information that post-dates the index date
+  $t_0$, inadvertently injecting future survival knowledge into baseline predictors.
+- **Hospital site and device shortcuts:** Allowing computer vision or telemetry models to latch onto hospital-specific
+  artifacts—such as radiographic marker typography, ICU bed monitor manufacturer protocols, or radiologist signature
+  styles—as predictive shortcuts for patient acuity.
+- **Ignoring differential access barriers:** Training diagnostic risk scores on populations with disparities in
+  insurance coverage, where lower diagnostic rates reflect socioeconomic access barriers rather than true physiological
+  health.

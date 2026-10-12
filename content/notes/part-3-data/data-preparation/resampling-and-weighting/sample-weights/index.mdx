@@ -1,30 +1,163 @@
 ---
 title: 'Sample weights'
 kind: concept
-summary: 'Sample weights make some training examples count more than others: survey design weights, importance weights for shift, inverse-propensity weights and recency weights. Large weights inflate variance, measured by the effective sample size.'
+summary: 'Sample weights scale each observation contribution to empirical loss: survey design, covariate shift density ratios, inverse-propensity scores, and recency decay. High weight variance collapses Kish effective sample size.'
 tags: [data, statistics]
-aliases: []
+aliases: [sample weights, observation weights, importance weights, survey weights, inverse propensity weights, Kish effective sample size]
 requires: []
 related: [importance-weighting-for-covariate-shift, class-weights, reweighting-biased-samples]
-references: []
-status: stub
+references: [kish1965, shimodaira2000, rosenbaum1983]
+status: draft
 updated: 2026-10-11
 ---
 
+import SampleWeightsExplorer from './SampleWeightsExplorer';
+
 <Definition>
-To be written.
+**Sample weights** (or observation weights) are non-negative scalar values $w_i \ge 0$ assigned to individual training
+instances $(x_i, y_i)$, modifying their relative influence during empirical loss minimization. Sample weighting aligns
+training objectives with target distributions under covariate shift, corrects for unequal survey sampling probabilities,
+removes confounding in observational causal inference, or prioritizes recent temporal regimes
+<Cite id="kish1965, shimodaira2000" />.
 </Definition>
 
-## Design weights
+Standard Empirical Risk Minimization treats every training row as an equally representative draw from a fixed
+population. When data collection involves stratified oversampling, non-random treatment assignment, or non-stationary
+environments, unweighted optimization yields biased parameter estimates and misleading validation metrics.
 
-## Importance weights
+<SampleWeightsExplorer />
 
-## Inverse-propensity weights
+## Weighted empirical risk minimization
 
-## Recency weights
+In supervised learning, standard empirical risk averages the unweighted loss over $n$ training instances. Weighted
+Empirical Risk Minimization scales each instance loss by weight $w_i$:
 
-## Effective sample size
+$$
+\min_\theta \mathcal{R}_w(\theta) = \frac{1}{\sum_{i=1}^n w_i} \sum_{i=1}^n w_i \ell\big(y_i, f_\theta(x_i)\big)
+$$
 
-## Clipping and normalising weights
+### Algorithmic implementation
 
-## Pitfalls
+- **Gradient-based learning**: In neural networks and generalized linear models, instance gradients are directly scaled
+  by weights:
+  $$
+  \nabla_\theta \mathcal{R}_w = \frac{1}{\sum_{i=1}^n w_i} \sum_{i=1}^n w_i \nabla_\theta \ell\big(y_i, f_\theta(x_i)\big)
+  $$
+- **Decision trees and tree ensembles**: In CART and gradient boosted decision trees, sample weights modify effective
+  observation counts at internal nodes:
+  $$
+  N_t = \sum_{i \in \text{node } t} w_i, \qquad \bar{y}_t = \frac{1}{N_t} \sum_{i \in \text{node } t} w_i y_i
+  $$
+  Splits are chosen to maximize the reduction in weighted variance or weighted Gini impurity.
+
+## Survey design weights (Horvitz-Thompson)
+
+In survey sampling and official statistics, samples are frequently drawn with unequal selection probabilities
+$\pi_i = \mathbb{P}(\text{unit } i \text{ included in sample})$—for example, intentionally oversampling rare rural
+postcodes or high-income households to guarantee statistical power for subgroup analysis.
+
+To produce an unbiased estimator of the true population risk, the Horvitz-Thompson theorem assigns design weights
+inversely proportional to inclusion probability:
+
+$$
+w_i = \frac{1}{\pi_i}
+$$
+
+A respondent sampled with $\pi_i = 0.001$ represents $1,000$ individuals in the target population ($w_i = 1000$),
+whereas a respondent sampled with $\pi_i = 0.05$ represents only $20$ individuals ($w_i = 20$).
+
+## Importance weights for covariate shift
+
+When the training distribution $p_{\text{train}}(x)$ differs from the target deployment distribution
+$p_{\text{test}}(x)$ (covariate shift), minimizing unweighted training loss fails to minimize test risk.
+
+Hidetoshi Shimodaira <Cite id="shimodaira2000" /> proved that weighting training instances by the Radon-Nikodym density
+ratio:
+
+$$
+w_i = w(x_i) = \frac{p_{\text{test}}(x_i)}{p_{\text{train}}(x_i)}
+$$
+
+yields an asymptotically unbiased estimator of the expected risk on the target test domain:
+
+$$
+\mathbb{E}_{X \sim p_{\text{train}}}\big[ w(X) \ell(Y, f(X)) \big] = \int p_{\text{train}}(x) \frac{p_{\text{test}}(x)}{p_{\text{train}}(x)} \ell(y, f(x)) \, dx = \mathbb{E}_{X \sim p_{\text{test}}}\big[ \ell(Y, f(X)) \big]
+$$
+
+## Inverse propensity score weighting (IPW)
+
+In observational causal inference and off-policy reinforcement learning, treatment assignment $T_i \in \{0, 1\}$ is not
+randomized; it is confounded by background covariates $X$.
+
+Paul Rosenbaum and Donald Rubin <Cite id="rosenbaum1983" /> introduced the **propensity score**
+$e(x) = \mathbb{P}(T = 1 \mid X = x)$. To estimate the Average Treatment Effect (ATE) without confounding bias, Inverse
+Propensity Weighting (IPW) applies weights:
+
+$$
+w_i = \frac{T_i}{e(x_i)} + \frac{1 - T_i}{1 - e(x_i)}
+$$
+
+Treated units that were highly unlikely to receive treatment ($e(x_i) \to 0$) receive large weights ($w_i \gg 1$),
+effectively creating a synthetic pseudo-population where treatment assignment is independent of observed covariates $X$.
+
+## Recency weights for temporal non-stationarity
+
+In time series and streaming prediction, the true data-generating process drifts continuously. Rather than abruptly
+truncating history with a hard cutoff window, **recency weighting** applies smooth exponential decay backwards from
+current time $T$:
+
+$$
+w_t = \exp\big(-\lambda (T - t)\big) = \gamma^{T - t}, \quad \gamma \in (0, 1]
+$$
+
+Observations from yesterday receive weight near $1.0$, while events from months ago decay toward zero, allowing models
+to learn long-term structure while prioritizing current operational dynamics.
+
+## The cost of weighting: Kish's effective sample size
+
+While sample weights eliminate structural bias, they incur a severe statistical penalty: **variance inflation**.
+
+When weights vary significantly across instances, a small fraction of heavily weighted points dominates the objective
+function, rendering the remaining points statistically negligible. Leslie Kish <Cite id="kish1965" /> derived the
+classic formula for **Effective Sample Size (ESS)**:
+
+$$
+n_{\text{eff}} = \frac{\left( \sum_{i=1}^n w_i \right)^2}{\sum_{i=1}^n w_i^2} = \frac{n}{1 + \text{CV}^2(w)}
+$$
+
+where $\text{CV}(w) = \frac{\sigma_w}{\bar{w}}$ is the coefficient of variation of the sample weights.
+
+### The Design Effect (Deff)
+
+The ratio between nominal sample size $n$ and effective sample size $n_{\text{eff}}$ defines the **Design Effect**:
+
+$$
+\text{Deff} = \frac{n}{n_{\text{eff}}} = 1 + \text{CV}^2(w) \implies \text{Var}(\hat{\theta}_w) \approx \text{Deff} \cdot \text{Var}_{\text{unweighted}}(\hat{\theta})
+$$
+
+If a dataset contains $n = 10,000$ rows, but a few extreme propensity scores produce weights where $\text{CV}(w) = 3$,
+the effective sample size collapses to:
+
+$$
+n_{\text{eff}} = \frac{10000}{1 + 3^2} = \frac{10000}{10} = 1,000 \text{ rows}
+$$
+
+The parameter estimator has the statistical variance of a tiny 1,000-row sample, yielding wide confidence intervals and
+unstable predictions.
+
+## Weight regularization: Clipping and normalisation
+
+To balance the bias-variance trade-off, practical machine learning systems regularize extreme sample weights:
+
+1. **Weight clipping (Winsorization)**: Truncate weights exceeding a designated threshold $M$:
+   $$
+   w_i^{\text{clipped}} = \min(w_i, M)
+   $$
+   Typically, $M$ is set to the 95th or 99th percentile of weights, or capped at $10 \times \bar{w}$ or
+   $20 \times \bar{w}$. Clipping deliberately accepts a small amount of residual bias in exchange for preventing
+   effective sample size collapse.
+2. **Weight normalisation**: Rescale weights so their sum equals the nominal dataset size:
+   $$
+   \tilde{w}_i = n \cdot \frac{w_i}{\sum_{j=1}^n w_j} \implies \sum_{i=1}^n \tilde{w}_i = n
+   $$
+   This prevents sample weighting from altering effective learning rates in gradient-based optimizers.

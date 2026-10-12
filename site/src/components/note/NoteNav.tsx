@@ -1,7 +1,8 @@
 import { BookOpen, ChevronRight } from 'lucide-react'
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { Link } from 'react-router'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
+import { useScrollToCurrent } from '@/hooks/use-scroll-into-panel'
 import {
   categoryTrail,
   indexFirst,
@@ -17,13 +18,17 @@ import { cn } from '@/lib/utils'
  * The taxonomy around the current note, for the left column: at each level the siblings of the note's path, with
  * only the path expanded, down to the notes of the note's own category. Opening another branch closes its siblings
  * (one open per level), so the panel stays short. The panel is collapsed on every note, including after navigating
- * from it: it is a page selector, opened when wanted. When it opens, only the current path is expanded.
+ * from it: it is a page selector, opened when wanted. When it opens, only the current path is expanded, and the
+ * column scrolls to the current note.
  */
 export function NoteNav({ note }: { note: NoteMeta }) {
   // Open for one note only: arriving at another note (from this panel or anywhere) finds it collapsed.
   const [openFor, setOpenFor] = useState<string | null>(null)
   const open = openFor === note.slug
   const path = categoryTrail(note.category).map((c) => c.path)
+  // Opening the panel scrolls the left column to the current note, deep as it may sit.
+  const navRef = useRef<HTMLElement>(null)
+  useScrollToCurrent(navRef, open ? note.slug : null)
   return (
     <Collapsible open={open} onOpenChange={(o) => setOpenFor(o ? note.slug : null)} className="mb-6 text-sm">
       <CollapsibleTrigger className="group mb-1 flex w-full items-center gap-1 rounded-md text-left text-xs font-medium tracking-wide text-muted-foreground uppercase outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50">
@@ -35,7 +40,7 @@ export function NoteNav({ note }: { note: NoteMeta }) {
       </CollapsibleTrigger>
       <CollapsibleContent>
         {/* Keyed by note so that navigating resets every level to the new path. */}
-        <nav aria-label="Browse topics" key={note.slug}>
+        <nav ref={navRef} aria-label="Browse topics" key={note.slug}>
           <Level categories={taxonomy} notes={[]} path={path} depth={0} current={note.slug} />
         </nav>
       </CollapsibleContent>

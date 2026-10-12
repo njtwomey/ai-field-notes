@@ -5,24 +5,120 @@ summary: 'Data monitoring watches a deployed model''s inputs and outputs: input 
 tags: [data, software]
 aliases: []
 requires: []
-related: [model-monitoring, drift-detection]
-references: []
-status: stub
+related: [data-tests, training-serving-skew, schema-evolution]
+references: [sculley2015, breck2017]
+status: draft
 updated: 2026-10-11
 ---
 
+import { DataMonitoringAlertVisualizer } from './DataMonitoringAlertVisualizer'
+
 <Definition>
-To be written.
+**Data monitoring** is the automated surveillance of feature inputs $X_t$, prediction outputs $\hat{Y}_t$, schema
+invariants, and delayed ground-truth feedback $Y_t$ across a production model's operational lifecycle. Because machine
+learning systems degrade silently without generating standard software runtime errors, continuous statistical telemetry
+is required to detect data corruption, upstream pipeline breaks, and distribution shifts before they incur business harm
+<Cite id="sculley2015, breck2017" />.
 </Definition>
+
+In traditional software, infrastructure failures typically manifest as uncaught exceptions, HTTP 500 error codes, or
+crashing processes. In machine learning, a system whose input features are corrupted or entirely missing will continue
+executing inference loops with low latency and returning successful HTTP 200 responses. Monitoring the data distribution
+itself is the only mechanism for identifying silent degradation.
+
+<DataMonitoringAlertVisualizer />
 
 ## Input checks
 
+Real-time and batch input verification evaluates incoming inference payloads against strict baseline constraints:
+
+1. **Schema and type integrity:**
+   - Enforcing data type contracts (e.g., verifying that a continuous feature arrives as an IEEE 754 float rather than
+     an unparsed string).
+   - Verifying expected column sets, rejecting payloads with missing required keys or unexpected structural alterations.
+2. **Domain and boundary assertions:**
+   - Value range bounds: asserting that bounded features remain strictly within allowable physical intervals (e.g.
+     percentage scores $\in [0, 100]$, normalized embeddings $\|x\|_2 \approx 1.0$).
+   - Categorical set membership: verifying that incoming categorical tokens belong to the known vocabulary observed
+     during training, flagging spikes in unmapped or out-of-vocabulary (OOV) tokens.
+3. **Statistical fingerprinting:** Tracking moving averages, variances, and quantiles (p01, p50, p99) over rolling
+   micro-batches, identifying sudden mean shifts or variance collapses.
+
 ## Missing rates
+
+A sudden surge in missing (null or `NaN`) values is the single most common leading indicator of upstream engineering
+failures:
+
+| Upstream Root Cause | Failure Mechanism | Silent Imputation Hazard | Monitoring Defense |
+| :--- | :--- | :--- | :--- |
+| **Schema Migration** | Upstream database DDL drops or renames feature column | Default imputer fills zeros/means; predictions drift silently | Strict schema contract verification; block unmapped payloads |
+| **Client SDK Glitch** | Mobile app update omits tracking attribute | Missing fields assigned population means; degrades inference accuracy | Null rate spike alert: trigger P1 incident when null share exceeds $3\sigma$ |
+| **ETL Join Degradation** | Nightly data warehouse outer join drops foreign key matches | Large multi-feature null blocks imputed with defaults | Automated quality gate rejecting feature tables prior to batch scoring |
+
+- **Upstream failure modes:** Feature null spikes routinely stem from unannounced schema changes in upstream databases,
+  tracking-blocker browser extensions, mobile application SDK bugs, or broken foreign key joins in feature stores.
+- **The silent imputation hazard:** Machine learning pipelines typically implement automated imputation (such as
+  replacing missing numerical entries with training set means or zeros). While this prevents code exceptions, it
+  silently converts pipeline failures into artificial feature values, pulling model predictions toward arbitrary default
+  values without raising errors.
+- **Monitoring telemetry:** Production telemetry tracks the per-feature null fraction:
+  $$
+  m_j(t) = \frac{1}{|B_t|} \sum_{i \in B_t} \mathbb{I}(x_{i, j} \text{ is null})
+  $$
+  Alerts fire when $m_j(t)$ exceeds historical statistical thresholds.
 
 ## Prediction distributions
 
+In many real-world machine learning systems, ground-truth labels $Y$ are delayed by days, months, or years (e.g., credit
+card loan defaults, insurance claim settlements, or search result conversions). Because ground-truth accuracy cannot be
+evaluated in real time, **prediction distributions** serve as an immediate proxy for model health:
+
+- **Classification output metrics:** In binary classification, monitoring tracks the rolling positive prediction rate
+  $P(\hat{Y} = 1)$, mean predicted probability $\mathbb{E}[\hat{p}]$, and predicted probability entropy over sliding
+  hourly windows.
+- **Statistical drift distances:** Comparing the distribution of inference scores against the baseline training
+  calibration curve using divergence metrics:
+  - **Population Stability Index (PSI):** Quantifies bucketed probability shift:
+    $$
+    \text{PSI} = \sum_{k=1}^K (P_k - Q_k) \ln\left(\frac{P_k}{Q_k}\right)
+    $$
+    A PSI exceeding $0.25$ indicates significant distributional drift requiring investigation.
+  - **Kolmogorov-Smirnov (KS) test:** Evaluates maximum distance between empirical cumulative distributions
+    $D = \sup_y |F_{\text{prod}}(y) - F_{\text{train}}(y)|$.
+
 ## Label arrival
+
+When ground-truth labels eventually arrive, monitoring tracks both label fidelity and arrival latency:
+
+- **Feedback latency distribution:** Tracking the arrival lag $\tau = t_{\text{label}} - t_{\text{prediction}}$. If
+  upstream ingestion pipelines stall, label arrival rates plunge, causing offline performance dashboards to display
+  stale metrics.
+- **Delayed label attribution:** Matching incoming labels to original inference requests via deterministic request
+  identifiers, ensuring that delayed metrics correctly compute precision, recall, and calibration on historical cohort
+  windows.
 
 ## Alert thresholds
 
+Configuring alert sensitivity requires managing the trade-off between **alert fatigue** and **incident detection
+latency**:
+
+- **The alert fatigue failure:** Setting narrow alert thresholds ($Z < 2.0$ standard deviations) catches slight pipeline
+  anomalies rapidly, but generates dozens of spurious notifications each month from random traffic jitter. On-call
+  engineers overwhelmed by false alarms become desensitized and ignore real incident alerts.
+- **Seasonality compensation:** Production metrics follow diurnal (day/night) and weekly cycles. Effective anomaly
+  detectors model seasonal baselines, comparing Tuesday 14:00 traffic against historical Tuesday 14:00 distributions
+  rather than static absolute thresholds.
+- **Persistence windows:** To suppress transient network blips, alerts require anomalies to persist across multiple
+  consecutive evaluation intervals (e.g. 3 consecutive hours above threshold) before paging on-call personnel.
+
 ## Pitfalls
+
+- **Monitoring only model accuracy:** Relying solely on supervised performance metrics (like F1 score or AUC) while
+  ignoring input data health; when ground-truth labels take weeks to arrive, silent data corruption goes undetected
+  throughout the delay window <Cite id="sculley2015" />.
+- **Masking null spikes with silent default imputation:** Permitting automated imputers to paper over broken ETL joins
+  without logging missingness anomalies.
+- **Unactionable alerting:** Paging on-call engineers with vague alerts (such as "model prediction drift detected")
+  without providing decomposed feature attribution metadata showing which specific input column shifted.
+- **Static thresholds on non-stationary traffic:** Applying hardcoded threshold bounds to traffic with organic seasonal
+  growth or cyclic holiday spikes, generating predictable waves of false alerts.

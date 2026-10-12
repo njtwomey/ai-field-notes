@@ -3,28 +3,116 @@ title: 'Corpus construction'
 kind: concept
 summary: 'A training corpus for a language model is built by crawling or collecting text, filtering it for quality and safety, removing near-duplicates and personal data, and mixing sources in chosen proportions.'
 tags: [data, nlp, large-language-models]
-aliases: []
+aliases: [corpus curation, text corpus construction, pretraining corpus curation]
 requires: []
-related: [locality-sensitive-hashing, character-n-grams-and-shingles]
-references: []
-status: stub
+related: [near-duplicate-detection, text-cleaning, benchmark-contamination, data-leakage]
+references: [wenzek2020, penedo2023, penedo2024, soldaini2024, dodge2021, lee2022dedup]
+status: draft
 updated: 2026-10-11
 ---
 
+import { CorpusFunnel } from './CorpusFunnel'
+
 <Definition>
-To be written.
+**Corpus construction** is the end-to-end data engineering pipeline that converts massive, uncurated web dumps, domain
+archives, books, and code into structured, high-quality text datasets for training <Gloss name="language-model">language
+models</Gloss>. The pipeline executes five sequential stages: raw ingestion, heuristic text filtering, statistical
+quality scoring, deduplication, and PII/safety redaction <Cite id="penedo2024" />.
 </Definition>
+
+Pretraining a frontier autoregressive language model demands trillions of tokens. Unfiltered web crawls (such as raw
+Common Crawl WARC dumps) consist predominantly of navigational boilerplate, spam,
+<Gloss name="machine-translation">machine translations</Gloss>, search engine optimisation gibberish, adult material,
+and duplicated content. Direct pretraining on raw web dumps degrades sample efficiency and causes models to memorise
+boilerplate. Curating massive corpora requires cascading filters that progressively discard up to 80% to 90% of raw
+tokens while enriching factual, coherent prose <Cite id="soldaini2024" />.
+
+<CorpusFunnel />
 
 ## Sources
 
+Pretraining corpora draw from diverse text distributions:
+
+- **Web crawls:** Common Crawl provides petabytes of raw HTML pages updated monthly. Crawls deliver vast breadth but
+  suffer from low median quality.
+- **Curated encyclopedias and reference works:** Wikipedia, Wikibooks, and open-access scientific repositories (such as
+  arXiv and PubMed Central) provide dense, high-credibility factual statements.
+- **Books and literature:** Public domain libraries (Project Gutenberg) and digitised literature provide extended
+  narrative coherence and long-range dependencies.
+- **Source code:** Public code repositories (GitHub) contribute programming languages, markdown documentation, and
+  commit messages, improving formal reasoning across modalities.
+- **Conversational archives:** Forum discussions and dialogue logs provide colloquial phrasing and interactive
+  <Gloss name="qa">question-answering</Gloss> dynamics.
+
 ## Quality filtering
+
+Corpus filtering proceeds from cheap, rule-based heuristics to statistical language model scorers:
+
+1. **Heuristic rules:** Reject documents with extreme line counts, abnormally short or long mean word lengths ($<3$ or
+   $>10$ characters), excessive symbol-to-word ratios, or low stopword fractions <Cite id="dodge2021" />. If a page
+   contains insufficient common grammatical particles (such as "the", "and", "in"), it is likely keyword-stuffed spam.
+2. **Repetition filters:** Discard documents with excessive repeated characters, duplicated lines, or repeating
+   $n$-grams. Web scraping bugs frequently capture infinite loops of navigation menus or calendar tables.
+3. **Perplexity and statistical filtering:** Score extracted text against a compact language model trained on reference
+   text (such as Wikipedia). CCNet <Cite id="wenzek2020" /> fits a 5-gram Kneser-Ney language model (via KenLM) or a
+   fastText classifier, partitioning documents into perplexity tertiles and retaining the most fluent bracket.
 
 ## Near-duplicate removal
 
+Web text contains extensive near-duplication from syndication, mirrored blog posts, license headers, and repeated
+boilerplate. Removing near-duplicates reduces memorisation and accelerates downstream learning
+<Cite id="lee2022dedup" />:
+
+- **Exact line and paragraph deduplication:** Eliminates repeated boilerplate lines (such as "Terms and Conditions" or
+  "Sign up for our newsletter") that appear millions of times across disparate URLs.
+- **Document-level MinHash <Gloss name="lsh" />:** RefinedWeb <Cite id="penedo2023" /> and FineWeb
+  <Cite id="penedo2024" /> extract $k=5$ word shingles from each document, generate MinHash signatures across $K=64$ or
+  $128$ permutations, and group documents into candidate pairs using locality-sensitive hashing. If pair Jaccard
+  similarity exceeds $\tau = 0.75$, only a single canonical copy is retained.
+- **Cross-snapshot deduplication:** Removes duplicate web pages across successive Common Crawl dumps collected over
+  multiple years, preventing older web content from receiving disproportionate training exposure.
+
 ## Personal data removal
+
+Pretraining datasets undergo automated redaction of Personally Identifiable Information (PII) to protect individual
+privacy and reduce model extraction vulnerabilities:
+
+- **Regex pattern matching:** Detects structured PII, including email addresses, phone numbers, IPv4/IPv6 addresses,
+  social security numbers, and credit card patterns.
+- **<Gloss name="ner">Named Entity Recognition (NER)</Gloss>:** Detects names, residential addresses, and medical
+  identifiers in unstructured text.
+- **Anonymisation versus dropping:** Documents with isolated emails replace tokens with synthetic placeholders (such as
+  `<EMAIL>`), whereas records with dense personal identifiers are dropped entirely.
 
 ## Safety filtering
 
+Automated safety classifiers screen text for harmful, illegal, or abusive content:
+
+- **Blocklist keyword filtering:** Fast matching against curated lists of offensive, adult, or hate-speech terms. If the
+  ratio of blocklist terms exceeds a threshold, the document is excluded.
+- **Toxicity classifiers:** Lightweight classifiers (such as fastText or distilled <Gloss name="roberta" /> models)
+  predict probabilities of hate speech, harassment, and explicit sexual violence, dropping high-scoring passages.
+
 ## Data mixtures
 
+Final pretraining corpora combine disparate sources into a calibrated mixture. Rather than sampling sources strictly
+proportional to their raw crawled size, curricula apply deliberate multipliers:
+
+- **Upweighting high-quality sources:** Text from Wikipedia, arXiv, and textbooks is commonly repeated 2 to 4 epochs to
+  increase informational density.
+- **Downweighting general web:** Raw web scrapes are downweighted to prevent colloquial forum noise from dominating
+  pretraining representations.
+- **Ablation studies:** Small proxy models evaluate domain mixtures across diverse downstream evaluation suites,
+  identifying the optimal ratio of code, mathematics, literature, and general web prose prior to launching large-scale
+  pretraining runs.
+
 ## Pitfalls
+
+- **Over-filtering minority dialects:** Aggressive heuristic and perplexity filtering trained on standard English
+  disproportionately discards African American Vernacular English (AAVE) and non-standard dialects
+  <Cite id="dodge2021" />.
+- **Synthetic <NoteLink to="feedback-loops">feedback loops</NoteLink>:** Scraping web dumps generated post-2023 risks
+  ingesting text synthesized by previous language models, potentially leading to model collapse and degraded lexical
+  diversity.
+- **Benchmark leakage:** Without explicit cross-checking against evaluation benchmarks, corpus crawls ingest benchmark
+  questions and answers, causing severe <NoteLink to="benchmark-contamination">benchmark contamination</NoteLink>.

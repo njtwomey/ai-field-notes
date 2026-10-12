@@ -2,23 +2,129 @@
 title: 'Motion representations'
 kind: concept
 summary: 'Motion can be given to a model explicitly, as optical flow, frame differences or compressed-stream motion vectors, alongside the frames themselves.'
-tags: [data, computer-vision]
-aliases: []
-requires: []
-related: []
-references: []
-status: stub
-updated: 2026-10-11
+tags: [data, computer-vision, video, optical-flow, motion-vectors]
+aliases: [optical-flow-representations, video-motion-features, compressed-domain-motion]
+requires: [digital-video, clip-sampling]
+related: [digital-images, video-augmentation]
+references: [simonyan2014twostream, teed2020raft, wu2018coviar, horn1981]
+status: draft
+updated: 2026-10-12
 ---
 
+import { MotionRepresentationsVisualizer } from './MotionRepresentationsVisualizer'
+
 <Definition>
-To be written.
+**Motion representations** are explicit mathematical and structural encodings of inter-frame temporal dynamics—such as
+dense pixel displacement fields (optical flow), temporal pixel differences, or compressed-domain macroblock motion
+vectors—provided to video architectures to isolate kinematics from static background scene semantics.
 </Definition>
+
+While 3D convolutional networks and video vision transformers can theoretically learn motion patterns directly from raw
+RGB frame sequences, empirical practice demonstrates that models trained solely on RGB easily latch onto static
+contextual shortcuts (e.g., identifying "tennis" exclusively from green grass textures rather than the swinging racket
+stroke) <Cite id="simonyan2014twostream" />. Supplying explicit motion channels forces representations to encode
+trajectory velocities, directions, and boundary deformations independently of photometric appearance.
+
+<MotionRepresentationsVisualizer client:load />
 
 ## Optical flow
 
+Optical flow estimates the apparent 2D motion velocity field $\mathbf{v}(x, y) = (u(x, y), v(x, y))$ of brightness
+patterns between consecutive video frames $I_t$ and $I_{t+1}$ <Cite id="horn1981" />.
+
+The classical formulation rests on the **brightness constancy assumption**, which posits that a surface point preserves
+its luminance intensity as it translates over an infinitesimal interval $\Delta t$:
+
+$$
+I(x + u, \, y + v, \, t + \Delta t) \approx I(x, y, t)
+$$
+
+Taking the first-order Taylor series expansion yields the **optical flow constraint equation**:
+
+$$
+I_x u + I_y v + I_t = 0 \quad \iff \quad \nabla I \cdot \mathbf{v} + \frac{\partial I}{\partial t} = 0
+$$
+
+Where $I_x = \frac{\partial I}{\partial x}$ and $I_y = \frac{\partial I}{\partial y}$ represent spatial image gradients,
+and $I_t = \frac{\partial I}{\partial t}$ is the temporal derivative. Because this single scalar equation contains two
+unknowns $(u, v)$, the velocity vector cannot be uniquely determined locally along homogeneous edges—a fundamental
+ambiguity known as the **aperture problem**.
+
+To resolve this under-determination, algorithms impose global or local spatial regularization:
+1. **Variational Formulations (Horn-Schunck and TV-L1)**: Formulate flow as an energy minimization problem combining the
+   optical flow constraint with a spatial smoothness prior <Cite id="horn1981" />:
+   $$
+   \min_{u, v} \iint \left( (I_x u + I_y v + I_t)^2 + \alpha^2 \left( \|\nabla u\|_2^2 + \|\nabla v\|_2^2 \right) \right) dx \, dy
+   $$
+2. **Deep Recurrent Flow (RAFT)**: Modern architectures construct a 4D all-pairs correlation volume across multi-scale
+   feature pyramids and iteratively refine flow fields using gated recurrent units (GRUs), achieving state-of-the-art
+   sub-pixel precision across fast non-rigid deformations <Cite id="teed2020raft" />.
+
+In **Two-Stream Networks**, optical flow is formatted as a multi-channel tensor of $L$ consecutive flow displacement
+pairs $[2L, H, W]$ passed into a dedicated temporal convolutional or transformer stream
+<Cite id="simonyan2014twostream" />.
+
 ## Frame differences
+
+Temporal frame differencing is the simplest motion cue, computing absolute pixel-wise intensity variations between
+adjacent frames:
+
+$$
+\Delta I_t(x, y) = |I_t(x, y) - I_{t-1}(x, y)|
+$$
+
+To capture acceleration or reduce background flicker, pipelines frequently employ symmetric second-order central
+differences:
+
+$$
+\Delta^2 I_t(x, y) = |I_{t+1}(x, y) - 2I_t(x, y) + I_{t-1}(x, y)|
+$$
+
+- **Computational Advantage**: Differencing requires $O(1)$ operations per pixel without iterative numerical solvers or
+  neural network forward passes, executing in under $0.2\,\text{ms}$ per frame on standard CPUs.
+- **Fundamental Flaw**: Differencing does not compute a true velocity vector $\mathbf{v} = (u, v)$. Rather, by Taylor
+  expansion:
+  $$
+  \Delta I_t(x, y) \approx |\nabla I(x, y) \cdot \mathbf{v}|
+  $$
+  The difference signal is heavily modulated by the underlying spatial image gradient $\nabla I$. A fast-moving object
+  with uniform texture (e.g., a white sphere sliding across a white table) yields $\Delta I \approx 0$, whereas a
+  slow-moving high-contrast edge generates massive difference responses. Differencing conflates textural contrast with
+  physical velocity.
 
 ## Motion vectors from the codec
 
+Video codecs (H.264, HEVC) compute block-based motion compensation during compression, partitioning predicted frames
+(P-frames) into macroblocks (e.g., $16 \times 16$ or $8 \times 8$ pixels) and recording integer or sub-pixel
+displacement vectors $\mathbf{v}_{\text{MV}}$ alongside DCT prediction residuals $R(x, y)$ <Cite id="wu2018coviar" />.
+
+**Compressed-domain action recognition (CoViAR)** bypasses full RGB decompression entirely:
+1. Parse the compressed container bitstream directly to extract motion vectors $\mathbf{v}_{\text{MV}}$ and DCT
+   coefficients.
+2. Accumulate motion vectors across P-frames relative to the preceding I-frame keyframe.
+3. Train separate convolutional heads directly on the coarse motion vector fields and residual tensors.
+
+- **Speed**: Extracting codec motion vectors runs at up to $500\text{--}1000\,\text{FPS}$ ($<1\,\text{ms}$ per frame),
+  which is two orders of magnitude faster than dense optical flow algorithms.
+- **Limitations**: Motion vectors are optimized for bitrate reduction rather than physical kinematics; encoders
+  frequently choose zero-vector predictions or spatial intra-blocks if residual encoding is cheaper, introducing blocky
+  discontinuities and noise in smooth visual areas.
+
 ## Pitfalls
+
+1. **Confounding by Camera Ego-Motion**: When video is recorded by moving drones, handheld smartphones, or vehicular
+   dashcams, camera pan and tilt induce massive global optical flow fields across the entire frame. If uncorrected,
+   networks learn to classify camera operator movements rather than human subject actions. Robust pipelines estimate a
+   global background homography matrix $\mathbf{H}_t$ via RANSAC and subtract background flow:
+   $$
+   \mathbf{v}_{\text{action}} = \mathbf{v}_{\text{measured}} - \mathbf{v}_{\text{homography}}
+   $$
+2. **Storage and Pre-extraction Bottlenecks**: Computing and saving 16-bit dense optical flow fields (forward and
+   backward) for large benchmarks like Kinetics-400 generates hundreds of millions of files consuming over 20 terabytes
+   of storage.
+3. **Brightness Constancy Violations**: Flashing strobe lights, rapid shadows, and auto-exposure gain adjustments on
+   mobile sensors violate $I_t + \nabla I \cdot \mathbf{v} = 0$, causing optical flow algorithms to hallucinate extreme
+   false-positive velocity spikes.
+4. **Quantization Artifacts in 8-bit Flow Caching**: Clamping optical flow components into $[0, 255]$ PNG files via
+   linear remapping $[u_{\min}, u_{\max}] \to [0, 255]$ quantizes small sub-pixel velocities, destroying fine motion
+   signals in distant background objects.

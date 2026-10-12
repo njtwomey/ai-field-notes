@@ -2,27 +2,138 @@
 title: 'Document parsing'
 kind: concept
 summary: 'Documents such as PDFs and web pages are parsed into text with structure: reading order, headings, tables and figures. Extraction errors become noise in every later feature.'
-tags: [data, nlp]
-aliases: []
-requires: []
-related: []
-references: []
-status: stub
-updated: 2026-10-11
+tags: [data, nlp, document-ai, information-extraction, text-processing]
+aliases: [pdf-parsing, document-structure-extraction, html-text-extraction]
+requires: [tidy-and-reshaped-tables, text-fields-in-tables]
+related: [ocr-and-layout, log-parsing]
+references: [ha1995xycut, zhong2019publaynet, barbaresi2021trafilatura, blecher2023nougat]
+status: draft
+updated: 2026-10-12
 ---
 
+import { DocumentParsingVisualizer } from './DocumentParsingVisualizer'
+
 <Definition>
-To be written.
+**Document parsing** is the computational conversion of formatted document representations—primarily portable document
+format (PDF) byte-streams and hyper-text markup language (HTML) DOM trees—into semantically structured, chronologically
+ordered machine learning inputs (paragraphs, section hierarchies, tables, and captions). It reconstructs spatial reading
+flow and tabular schemas from uncoordinated visual display primitives.
 </Definition>
+
+Modern natural language processing pipelines and Retrieval-Augmented Generation (RAG) systems ingest billions of tokens
+derived from corporate filings, academic literature, legal contracts, and web archives. However, documents are
+engineered for visual rendering on human screens rather than machine readability
+<Cite id="zhong2019publaynet, blecher2023nougat" />. A single document parsing failure—such as interleaving adjacent
+columns or truncating table header associations—silently propagates corrupted tokens, broken co-references, and
+hallucinated relationships through downstream embedding and language models.
+
+<DocumentParsingVisualizer client:load />
 
 ## PDF structure
 
+The Portable Document Format (PDF, ISO 32000) is a page-description visual rendering language derived from PostScript.
+Unlike structured text markup, a PDF stream contains **no intrinsic concept of words, sentences, paragraphs, or reading
+order**.
+
+Instead, a PDF content stream consists of low-level graphics operators placing individual glyph shapes at 2D coordinate
+points on a Cartesian grid ($72\,\text{PostScript points per inch}$):
+
+```ps
+BT
+/F1 12 Tf
+72.0 712.0 Td
+(Machine Learning) Tj
+ET
+```
+
+Key structural properties include:
+1. **Absence of Whitespace Characters**: Space characters between words are rarely encoded as ASCII `0x20`. Instead,
+   typesetting engines advance the text matrix $T_m$ horizontally via relative displacement shifts (the `TJ` array
+   operator: `[(Mach) 20 (ine)] TJ`). Parsers must infer word boundaries by comparing horizontal inter-glyph distances
+   against font character width metrics.
+2. **Font Encodings and `/ToUnicode` CMaps**: Glyph indices inside compressed font streams map to visual screen
+   outlines. Translating a glyph index back to a UTF-8 character requires an embedded `/ToUnicode` character map (CMap).
+   If a document embeds custom subsetted fonts without CMaps, standard text extractors (such as `pypdf` or `pdfminer`)
+   emit uninterpretable garbled text (Mojibake).
+3. **Out-of-Order Content Streams**: The order of operator streams within a PDF file reflects the typesetting engine's
+   drawing sequence (e.g., drawing background graphics, then headers, then right column, then left column, then
+   footers). Reading raw PDF streams sequentially scrambles human comprehension.
+
 ## HTML structure
+
+Web pages present the opposite challenge: documents possess rich hierarchical structure (the Document Object Model,
+DOM), but are heavily contaminated with extraneous non-content boilerplate <Cite id="barbaresi2021trafilatura" />.
+
+Raw web pages scraped from the internet contain navigational menus, promotional sidebars, cookie consent dialogues,
+tracking scripts, and user comment sections. Extracting high-quality pre-training or retrieval corpora requires DOM tree
+filtering:
+- **Semantic Tag Selection**: Preferential traversal of `<main>`, `<article>`, and `<section>` tags over generic `<div>`
+  hierarchies.
+- **Text-to-Tag Ratio (TTR)**: Content-rich prose displays high text density relative to HTML markup tags:
+  $$
+  \text{TTR}(n) = \frac{\text{Length}(\text{Text}(n))}{\text{Count}(\text{Tags}(n))}
+  $$
+- **Link Density Filtering**: Navigational sidebars exhibit high link density
+  $\text{LD} = \frac{\text{TextInAnchors}}{\text{TotalText}} > 0.5$, signaling boilerplate that should be stripped via
+  rule-based extractors like Trafilatura or Readability <Cite id="barbaresi2021trafilatura" />.
 
 ## Reading order
 
+Reconstructing the sequential human reading order from 2D spatial text bounding boxes $(x_0, y_0, x_1, y_1)$ is
+non-trivial on multi-column layouts, magazines, and patents <Cite id="ha1995xycut" />.
+
+The classical algorithmic foundation is the **Recursive X-Y Cut algorithm** <Cite id="ha1995xycut" />:
+1. **Projection Profiles**: Project all glyph bounding boxes onto the horizontal ($X$) and vertical ($Y$) axes to form
+   1D spatial density histograms:
+   $$
+   V(x) = \sum_{b \in \mathcal{B}} \mathbf{1}_{\{x \in [b.x_0, b.x_1]\}}, \quad H(y) = \sum_{b \in \mathcal{B}} \mathbf{1}_{\{y \in [b.y_0, b.y_1]\}}
+   $$
+2. **Valley Detection**: Identify contiguous spatial intervals where projection density drops below a tolerance cut
+   threshold $\tau_{\text{cut}} \approx 0$ (e.g., the white-space gutter between two text columns).
+3. **Recursive Partitioning**: Recursively split the bounding boxes into spatial blocks, building an XY-tree whose
+   depth-first pre-order traversal defines the column-major reading sequence.
+
+Modern neural visual document processors (such as LayoutLMv3 or Nougat) replace geometric heuristics with multimodal
+vision-language transformers that attend simultaneously to visual 2D raster layouts and OCR token positions
+<Cite id="zhong2019publaynet, blecher2023nougat" />.
+
 ## Tables and figures
+
+Tables and graphical figures encode dense relational information that cannot be linearized into plain continuous
+sentences without losing schema integrity:
+
+- **Table Structure Recognition (TSR)**: Extracting a table requires detecting the outer boundary, segmenting row and
+  column separator grids, and identifying multi-row or multi-column spanning cells (`rowspan`, `colspan`). Bounding box
+  alignment errors of just 5 points merge adjacent numerical columns or truncate financial negative signs.
+- **Relational Serialization**: Flattening tables into token strings must preserve schema coordinates—either as
+  structured Markdown tables (`| Col1 | Col2 |`), HTML snippets (`<table><tr><td>...`), or serialized key-value
+  tuples—to allow downstream language models to execute columnar lookups.
+- **Captions and Footnotes**: Figure and table extraction algorithms must pair graphical regions with their
+  corresponding explanatory captions (`Fig. 1: ...`), preventing floating captions from being interleaved into the
+  surrounding body text narrative.
 
 ## Extraction errors as feature noise
 
+Document parsing errors directly corrupt downstream feature embeddings and language generation:
+
+1. **Unresolved Hyphenation**: Words split across line breaks by hyphens (e.g., `"con- vergence"`) are tokenized as
+   distinct, rare subwords (`["con", "-", "ver", "gence"]`), skewing subword embeddings and degrading retrieval recall
+   for `"convergence"`.
+2. **Repeated Header/Footer Contamination**: Running headers (`"IEEE Transactions on Pattern Analysis..."`) and page
+   numbers appearing every 50 lines act as recurring phantom entities, skewing TF-IDF statistics and polluting dense
+   vector retrieval centroids.
+3. **Scrambled Reading Order in RAG**: Interleaving two parallel columns across a 10-line span produces incoherent
+   sentences that destroy causal attention masking in Large Language Models, causing severe hallucinations during
+   document summarization.
+
 ## Pitfalls
+
+1. **Relying on Native Python PDF Strings**: Using basic regex-based text extraction (`pypdf.extract_text()`) on complex
+   academic or financial filings without layout analysis produces column interleaving on $>40\%$ of pages.
+2. **Ignoring Ligature Encodings**: Common typographical ligatures ("fi", "fl", "ffi") stored as single Unicode code
+   points (`\uFB01`) fail to match standard query tokens (`"fi"`) unless normalized via Unicode NFKD normalization.
+3. **Treating Scanned PDFs as Native Digital PDFs**: Attempting character extraction on scanned documents without
+   checking for digital text layers returns empty strings. Production parsers must check character density and
+   seamlessly route scanned pages to Optical Character Recognition (OCR) engines.
+4. **Stripping Tables to Raw Tab-Delimited Strings**: Flattening hierarchical nested financial statements into
+   whitespace-separated strings discards multi-level hierarchical headers, rendering financial numbers uninterpretable.

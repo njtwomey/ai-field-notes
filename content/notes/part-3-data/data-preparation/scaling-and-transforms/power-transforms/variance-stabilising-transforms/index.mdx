@@ -3,24 +3,146 @@ title: 'Variance-stabilising transforms'
 kind: concept
 summary: 'A variance-stabilising transform makes the variance of a variable roughly constant across its mean: square root and Anscombe for counts, arcsine for proportions. Generalised linear models address the same problem through their variance function.'
 tags: [data, statistics]
-aliases: []
-requires: []
-related: [power-transforms]
-references: []
-status: stub
+aliases: [variance-stabilizing transform, VST, Anscombe transform, arcsine transform]
+requires: [power-transforms]
+related: [retransformation-bias, compositional-and-bounded-data]
+references: [anscombe1948]
+status: draft
 updated: 2026-10-11
 ---
 
 <Definition>
-To be written.
+A **variance-stabilising transform** (VST) is a monotonic non-linear mapping $g(Y)$ designed such that the conditional
+variance $\operatorname{Var}(g(Y) \mid X)$ of the transformed response is approximately constant across all values of
+the conditional mean $\mathbb{E}[Y \mid X]$, satisfying the homoscedasticity assumption required by ordinary least
+squares and standard Gaussian likelihood models.
 </Definition>
 
-## Square root and Anscombe
+Standard linear regression and ordinary least squares (OLS) assume homoscedastic residual errors:
+$\operatorname{Var}(\epsilon_i) = \sigma^2$ for all observations. In count processes, biological sequencing, insurance
+claim frequencies, or trial proportions, the variance is intrinsically coupled to the mean
+$\operatorname{Var}(Y) = v(\mu)$. When variance expands with the mean, OLS estimates remain unbiased but suffer severe
+loss of statistical efficiency, while standard confidence intervals and hypothesis tests become systematically
+misleading.
 
-## Arcsine
+import { VarianceStabilizerVisualizer } from './VarianceStabilizerVisualizer';
 
-## Deriving a stabilising transform
+<VarianceStabilizerVisualizer />
 
-## Relation to GLM links
+## Deriving a stabilising transform via the Delta Method
 
-## Pitfalls
+The mathematical foundation of variance stabilization rests on the **Delta Method** (first-order Taylor series
+approximation).
+
+Let $Y$ be a random variable with mean $\mathbb{E}[Y] = \mu$ and variance function $\operatorname{Var}(Y) = v(\mu)$. For
+a smooth transformation $g(y)$, expanding $g(Y)$ around $\mu$:
+
+$$
+g(Y) \approx g(\mu) + g'(\mu)(Y - \mu)
+$$
+
+Taking the variance of both sides:
+
+$$
+\operatorname{Var}(g(Y)) \approx [g'(\mu)]^2 \operatorname{Var}(Y) = [g'(\mu)]^2 v(\mu)
+$$
+
+To make the transformed variance independent of $\mu$ and equal to a chosen constant $C^2$:
+
+$$
+[g'(\mu)]^2 v(\mu) = C^2 \implies g'(\mu) = \frac{C}{\sqrt{v(\mu)}}
+$$
+
+Integrating both sides yields the general formula for any variance-stabilising transform:
+
+$$
+g(\mu) = C \int \frac{1}{\sqrt{v(\mu)}} d\mu
+$$
+
+## Square root and Anscombe for count data
+
+For Poisson-distributed count data, the variance equals the mean:
+
+$$
+v(\mu) = \mu
+$$
+
+Applying the derivation:
+
+$$
+g(\mu) = \int \mu^{-1/2} d\mu = 2 \sqrt{\mu}
+$$
+
+Taking $g(y) = \sqrt{y}$ stabilizes the variance to $\operatorname{Var}(\sqrt{Y}) \approx 1/4$.
+
+### Anscombe's transform
+While $g(y) = \sqrt{y}$ stabilizes variance asymptotically as $\mu \to \infty$, it degrades for small counts
+($\mu < 10$). Francis Anscombe <Cite id="anscombe1948" /> introduced second-order corrections:
+
+$$
+g_{\text{Anscombe}}(y) = 2 \sqrt{y + \frac{3}{8}}
+$$
+
+For Poisson variables with mean $\mu \ge 2$, Anscombe's transform stabilizes the variance to almost exactly $1.0$ while
+accelerating convergence to normality.
+
+### Negative Binomial overdispersed counts
+When counts exhibit overdispersion with variance $v(\mu) = \mu + \alpha \mu^2$, integrating yields the hyperbolic
+arcsine:
+
+$$
+g(y) = \frac{1}{\sqrt{\alpha}} \operatorname{arsinh}\left(\sqrt{\alpha y}\right)
+$$
+
+This transform is widely employed in high-throughput RNA sequencing (e.g., DESeq2 and Seurat) to stabilize gene count
+matrices prior to PCA and clustering.
+
+## Arcsine transform for binomial proportions
+
+For proportions $p = K / n$ arising from $n$ independent Bernoulli trials, the variance function is:
+
+$$
+v(p) = \frac{p(1 - p)}{n}
+$$
+
+Applying the integral formula:
+
+$$
+g(p) = \int \frac{1}{\sqrt{p(1 - p)}} dp = 2 \arcsin(\sqrt{p})
+$$
+
+After transformation:
+
+$$
+\operatorname{Var}\left(2 \arcsin\left(\sqrt{Y}\right)\right) \approx \frac{1}{n}
+$$
+
+The variance depends strictly on the fixed sample size $n$ and is completely independent of the underlying success
+probability $p \in [0, 1]$.
+
+## Relation to GLM link functions
+
+Variance-stabilising transforms and Generalized Linear Models (GLMs) address the exact same underlying statistical
+reality, but operate through fundamentally different mechanisms:
+
+| Dimension | Variance-Stabilising Transform (VST) | Generalized Linear Model (GLM) |
+| :--- | :--- | :--- |
+| **Object Transformed** | Transforms the observed data $y \mapsto g(y)$ | Transforms the expected value $\eta = g(\mu)$ |
+| **Likelihood** | Gaussian OLS on transformed scale | True exponential family likelihood (Poisson, Binomial) |
+| **Back-Transformation** | Suffer retransformation bias on $\hat{y}$ | Directly estimates $\mathbb{E}[Y \mid X]$ without bias |
+| **Downstream Compatibility** | Compatible with standard linear/kernel/tree pipelines | Requires GLM / Quasi-Poisson solvers |
+
+In modern predictive machine learning, when using standard tree ensembles (XGBoost, LightGBM), fitting with a native
+Poisson or Tweedie objective is generally preferred over applying a VST to the raw target. However, in preprocessing
+pipelines where features feed into PCA, $k$-Means, or regularized linear models, VST remains an indispensable
+transformation.
+
+## Pitfalls and failure modes
+
+1. **Retransformation bias on back-conversion:** Predicting $\hat{z}$ on the transformed scale and naively computing
+   $\hat{y} = g^{-1}(\hat{z})$ (e.g. squaring the prediction) yields the median, not the conditional mean.
+2. **Zero counts and negative values:** Naive square root or log transforms fail on negative numbers or zeros
+   ($v(0) = 0$). Always use offset formulations like Anscombe ($y + 3/8$) or Freeman-Tukey ($\sqrt{y} + \sqrt{y+1}$).
+3. **Unequal trial sizes in proportions:** The arcsine transform stabilizes variance to $1/n$. If observations represent
+   proportions computed over wildly varying trial sizes $n_i$ (e.g. click-through rates calculated on 10 impressions vs
+   10,000 impressions), the transformed variance remains heteroscedastic across observations.

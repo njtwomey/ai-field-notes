@@ -1,28 +1,191 @@
 ---
 title: 'Molecular representations'
 kind: concept
-summary: 'A molecule can be written as a line notation, a fingerprint bit vector, a graph of atoms and bonds, or a set of 3D coordinates. The representation decides which models apply and which symmetries they must respect.'
-tags: [data, graphs]
-aliases: []
-requires: []
-related: []
-references: []
-status: stub
-updated: 2026-10-11
+summary: 'Molecules can be represented as 1D line notations (SMILES, SELFIES), fixed-size circular fingerprints (ECFP), 2D attributed graphs, or 3D conformational point clouds, dictating applicable neural architectures and geometric symmetry requirements.'
+tags: [data, graphs, chemistry, representations]
+aliases: [molecular-graphs, smiles, selfies, ecfp, morgan-fingerprints, conformers]
+requires: [graph-construction, graph-features]
+related: [scaffold-and-similarity-splits, biological-sequence-data]
+references: [weininger1988, rogers2010, bemis1996, gilmer2017, wu2018moleculenet]
+status: draft
+updated: 2026-10-12
 ---
 
+import { MolecularRepresentationsVisualizer } from './MolecularRepresentationsVisualizer'
+
 <Definition>
-To be written.
+A **molecular representation** is a formal mapping $\phi: \mathcal{M} \to \mathcal{X}$ from a discrete chemical
+structure $\mathcal{M}$ (defined by an atomic composition and covalent bond network) into a mathematical domain
+$\mathcal{X}$. Depending on whether $\mathcal{X}$ consists of sequential character tokens $\Sigma^*$, binary hash
+vectors $\{0, 1\}^B$, attributed topological graphs $G = (V, E, \mathbf{X}_v, \mathbf{X}_e)$, or continuous Cartesian
+coordinates $(\mathbf{R}, \mathbf{Z}) \in \mathbb{R}^{N \times 3} \times \mathbb{N}^N$, the representation imposes
+distinct inductive biases and symmetry groups (permutation invariance, Euclidean $E(3)$ or special Euclidean $SE(3)$
+equivariance).
 </Definition>
 
-## Line notations
+In drug discovery, agrochemicals, and materials design, selecting a molecular representation dictates whether machine
+learning models can reason about topological connectivity, chemical stereochemistry, or dynamic 3D conformational
+thermodynamics <Cite id="wu2018moleculenet" />.
 
-## Fingerprints
+<MolecularRepresentationsVisualizer client:load />
 
-## Molecular graphs
+## Line Notations (SMILES and SELFIES)
 
-## Conformers and 3D coordinates
+Line notations serialize molecular graphs into one-dimensional character sequences suitable for natural language models
+and recurrent architectures <Cite id="weininger1988" />.
 
-## Scaffold splits
+### SMILES (Simplified Molecular Input Line Entry System)
+
+SMILES <Cite id="weininger1988" /> represents molecules by traversing the hydrogen-depleted molecular graph via
+depth-first search (DFS):
+- Atoms are written with standard chemical symbols (e.g. `C`, `N`, `O`, `F`). Aromatic atoms are written in lowercase
+  (`c`, `n`, `o`).
+- Branches are enclosed in parentheses: `CC(=O)O` denotes acetic acid.
+- Ring closures are designated by integer labels: `c1ccccc1` denotes benzene.
+- Stereochemistry is encoded using `@` / `@@` for tetrahedral chirality and `/` / `\` for cis/trans double bonds.
+
+Because DFS traversal order depends on the starting atom and traversal path, a single molecule possesses multiple valid
+SMILES strings. Canonicalization algorithms enforce a deterministic starting node and traversal order. However, SMILES
+strings have brittle context-free grammars: random mutations, token omissions, or generative sampling errors frequently
+yield syntactically invalid strings with unbalanced parentheses or unmatched ring digits <Cite id="weininger1988" />.
+
+### SELFIES (Self-Referencing Embedded Strings)
+
+SELFIES constructs a formal 100% robust grammar by replacing string concatenation with formal state transitions and
+derive-and-replace rules. In SELFIES (e.g. `[C][=C][C][Branch1][C][=O]`), branch lengths and ring closure intervals are
+parameterized by subsequent tokens. If a generated token violates physical valence constraints, the derivation rule
+replaces it with a valid atom or terminates the bond, ensuring that every sequence in the grammar maps to a
+syntactically and chemically valid molecule.
+
+---
+
+## Fingerprints and Hash Vectors
+
+Fingerprints map arbitrary molecules into fixed-dimensional vectors $\mathbf{x} \in \{0, 1\}^B$ or $\mathbb{Z}_+^B$,
+enabling standard tabular models, gradient boosted trees, and support vector machines to operate on chemical data
+<Cite id="rogers2010" />.
+
+### Extended-Connectivity Fingerprints (ECFP / Morgan Fingerprints)
+
+Extended-Connectivity Fingerprints <Cite id="rogers2010" /> iteratively capture circular atomic neighborhoods using a
+variant of the Morgan and 1-Weisfeiler-Lehman algorithms:
+1. **Initialisation ($t = 0$)**: Each atom $v \in V$ is assigned an integer identifier $h_v^{(0)}$ hashing its initial
+   atomic invariants: atomic number, formal charge, number of non-hydrogen neighbors, valence, and ring membership.
+2. **Neighborhood Update ($t \to t + 1$)**: For radius iterations $t = 1, \dots, R$, atom $v$'s identifier is updated by
+   hashing its previous state together with the sorted tuple of neighbor identifiers and bond types:
+   $$
+   h_v^{(t)} = \operatorname{hash}\left(h_v^{(t-1)}, \operatorname{sort}\left(\left\{\left(h_u^{(t-1)}, \text{bond\_type}(u, v)\right) \mid u \in \mathcal{N}(v)\right\}\right)\right)
+   $$
+3. **Duplicate Removal and Folding**: The collected identifiers $\{h_v^{(t)}\}_{v \in V, t \le R}$ are deduplicated. To
+   yield a fixed-length bit vector of length $B$ (typically $B \in \{1024, 2048\}$), identifiers are mapped via modulo
+   hashing:
+   $$
+   \text{bit\_index}(h) = h \pmod B
+   $$
+
+The nominal notation **ECFP$2R$** reflects the maximum diameter of the atomic sub-environment (e.g., radius $R=2$
+corresponds to ECFP4).
+
+### Hash Collisions and Tanimoto Similarity
+
+When mapping $M$ distinct sub-environments into $B$ bits, hash collisions inevitably occur. By the coupon collector
+problem, the probability that at least two distinct sub-environments collide onto the same bit is:
+
+$$
+P(\text{collision}) = 1 - \prod_{m=1}^{M-1} \left(1 - \frac{m}{B}\right) \approx 1 - \exp\left(-\frac{M(M - 1)}{2B}\right)
+$$
+
+Chemical similarity between two fingerprints $\mathbf{a}, \mathbf{b} \in \{0, 1\}^B$ is standardly evaluated via the
+**Tanimoto coefficient** (Jaccard similarity on binary vectors):
+
+$$
+T(\mathbf{a}, \mathbf{b}) = \frac{|\mathbf{a} \cap \mathbf{b}|}{|\mathbf{a} \cup \mathbf{b}|} = \frac{\mathbf{a}^\top \mathbf{b}}{\|\mathbf{a}\|_1 + \|\mathbf{b}\|_1 - \mathbf{a}^\top \mathbf{b}} \in [0, 1]
+$$
+
+Two molecules sharing $T(\mathbf{a}, \mathbf{b}) \ge 0.85$ are conventionally considered structurally similar and often
+exhibit similar pharmacological activity.
+
+---
+
+## 2D Molecular Graphs and Message Passing
+
+Molecules naturally form undirected attributed graphs $G = (V, E)$ where nodes represent atoms and edges represent
+covalent bonds <Cite id="gilmer2017" />:
+- Node feature vectors $\mathbf{x}_v \in \mathbb{R}^{d_v}$: one-hot encoded atomic number, hybridization state
+  ($\text{sp}, \text{sp}^2, \text{sp}^3$), aromaticity flag, formal charge, number of explicit hydrogens.
+- Edge feature vectors $\mathbf{e}_{uv} \in \mathbb{R}^{d_e}$: bond order (single, double, triple, aromatic),
+  stereochemical conjugation, ring membership.
+
+Under the Message Passing Neural Network (MPNN) framework <Cite id="gilmer2017" />, node representations evolve across
+$T$ message-passing steps:
+
+$$
+\mathbf{m}_v^{(t+1)} = \sum_{u \in \mathcal{N}(v)} M_t\left(\mathbf{h}_v^{(t)}, \mathbf{h}_u^{(t)}, \mathbf{e}_{uv}\right)
+$$
+
+$$
+\mathbf{h}_v^{(t+1)} = U_t\left(\mathbf{h}_v^{(t)}, \mathbf{m}_v^{(t+1)}\right)
+$$
+
+followed by a permutation-invariant graph readout $\mathbf{h}_G = \text{READOUT}(\{\mathbf{h}_v^{(T)} \mid v \in V\})$.
+MPNNs eliminate fixed bit folding collisions and permit end-to-end task-specific feature learning.
+
+---
+
+## Conformers and 3D Coordinates
+
+Physical molecular interactions (protein-ligand binding, transition state kinetics, quantum chemical spectra) occur in
+continuous Euclidean space $\mathbb{R}^3$. A 3D conformer consists of atomic positions
+$\mathbf{R} = [\mathbf{r}_1, \dots, \mathbf{r}_N]^\top \in \mathbb{R}^{N \times 3}$ and nuclear charges
+$\mathbf{Z} \in \mathbb{N}^N$.
+
+### Symmetry Requirements: $E(3)$ and $SE(3)$
+
+A model operating on 3D coordinates must obey fundamental geometric physical symmetries:
+- **Rotational and Translational Invariance ($SE(3)$-invariance)**: Scalar properties like potential energy
+  $V(\mathbf{R})$ must not change when the molecule is translated by $\mathbf{t} \in \mathbb{R}^3$ or rotated by
+  $\mathbf{Q} \in SO(3)$:
+  $$
+  V(\mathbf{R}\mathbf{Q}^\top + \mathbf{1}\mathbf{t}^\top) = V(\mathbf{R})
+  $$
+- **Equivariance ($SE(3)$-equivariance)**: Vector properties such as atomic forces
+  $\mathbf{F}_i = -\nabla_{\mathbf{r}_i} V(\mathbf{R})$ or dipole moments must rotate alongside the coordinate system:
+  $$
+  \mathbf{F}(\mathbf{R}\mathbf{Q}^\top + \mathbf{1}\mathbf{t}^\top) = \mathbf{F}(\mathbf{R}) \mathbf{Q}^\top
+  $$
+
+### Conformational Flexibility and Boltzmann Ensembles
+
+Small drug-like molecules do not exist as rigid structures; rotatable single bonds generate a thermodynamic ensemble of
+conformers $\{\mathbf{R}_k\}_{k=1}^K$. The equilibrium probability of conformer $k$ at temperature $T$ follows the
+Boltzmann distribution:
+
+$$
+p(\mathbf{R}_k) = \frac{1}{\mathcal{Z}} \exp\left(-\frac{V(\mathbf{R}_k)}{k_B T}\right), \quad \mathcal{Z} = \sum_{j=1}^K \exp\left(-\frac{V(\mathbf{R}_j)}{k_B T}\right)
+$$
+
+where $k_B$ is the Boltzmann constant. Predictions that rely on a single arbitrarily minimized conformer risk ignoring
+functionally active higher-energy binding poses.
+
+---
+
+## Scaffold Splits
+
+Because molecules in discovery libraries are synthesized around core therapeutic cores, naive random train-test
+splitting leaks near-identical analogues across splits, causing extreme performance overestimation
+<Cite id="bemis1996" />. Bemis-Murcko scaffold extraction decomposes molecules into their core ring systems and linkers
+<Cite id="bemis1996" />, enabling cluster-based splitting detailed in the dedicated [Scaffold and similarity
+splits](file:///Users/nialltwomey/workspace/ml-concepts/content/notes/part-3-data/data-by-modality/chemistry-and-biology-data/scaffold-and-similarity-splits/index.mdx)
+note.
+
+---
 
 ## Pitfalls
+
+1. **Bit Collision Saturation in ECFP**: Setting bit length too small ($B=512$) on complex natural products yields over
+   $40\%$ bit collisions, conflating unrelated chemical motifs and degrading regression performance.
+2. **Ignoring Chirality and Stereoisomerism**: Enantiomers (non-superimposable mirror images) share identical 2D
+   molecular graphs and unstereotyped SMILES, yet can exhibit drastically opposite biological outcomes (e.g. one
+   stereoisomer acting as a potent drug and the other as a teratogen or inert molecule).
+3. **Conformer Generation Hallucination**: Generating 3D conformers via heuristic force fields (such as UFF or MMFF94)
+   without quantum mechanical DFT relaxation can produce unphysical dihedral angles and severe steric clashes.

@@ -1,26 +1,166 @@
 ---
 title: 'Annotator aggregation'
 kind: concept
-summary: 'Several annotators'' labels are combined into one by majority vote, by models of annotator reliability such as Dawid-Skene, or kept as soft labels that preserve disagreement.'
-tags: [data, weak-supervision]
-aliases: []
-requires: []
-related: [dawid-skene-model, learning-from-crowds]
-references: []
-status: stub
-updated: 2026-10-11
+summary: 'Annotator aggregation combines multi-rater labels into supervisory targets using majority voting, probabilistic reliability models like Dawid-Skene, or distribution-preserving soft labels that treat disagreement as valuable signal.'
+tags: [data, annotation, weak-supervision, crowdsourcing, uncertainty]
+aliases: [annotator aggregation, label aggregation, consensus modeling, dawid-skene, crowdsourced labels]
+requires: [data-generating-process, labelling-and-annotation, annotator-agreement]
+related: [label-definition, model-generated-labels, slice-analysis]
+references: [dawid1979, whitehill2009, peterson2019, raykar2010]
+status: draft
+updated: 2026-10-12
 ---
 
+import { AnnotatorAggregationVisualizer } from './AnnotatorAggregationVisualizer'
+
 <Definition>
-To be written.
+**Annotator aggregation** is the statistical synthesis of multiple independent annotations $y_{i, 1}, \dots, y_{i, M}$
+for an instance $\mathbf{x}_i$ into a consolidated supervisory target. It spans unweighted majority voting,
+probabilistic confusion-matrix estimation (such as the Dawid-Skene model and GLAD), and distribution-preserving soft
+labels that retain human disagreement as aleatoric uncertainty.
 </Definition>
 
-## Majority vote
+When datasets are annotated by crowd workers, domain specialists, or ensembles of foundation models, individual raters
+frequently disagree. Naively computing a majority vote ignores differences in worker expertise, discards valuable signal
+regarding intrinsic ambiguity, and leaves pipelines vulnerable to low-quality or adversarial annotators
+<Cite id="dawid1979, whitehill2009" />. Sophisticated aggregation architectures model worker competencies and preserve
+natural disagreement distributions <Cite id="peterson2019" />.
 
-## Annotator reliability models
+<AnnotatorAggregationVisualizer />
 
-## Soft labels
+## Majority voting and the democratic fallacy
 
-## Disagreement as signal
+The simplest aggregation rule is unweighted **majority voting**:
 
-## Pitfalls
+$$
+\hat{y}_i = \arg\max_{c \in \{1, \dots, C\}} \sum_{m=1}^M \mathbb{I}(y_{i, m} = c)
+$$
+
+While simple to compute, majority voting relies on strong assumptions:
+1. **Homogeneous competence**: Assumes all annotators possess equal, identical accuracy. If an annotation pool contains
+   two senior domain experts and three inexperienced crowd workers, the crowd outvotes the experts on difficult items (a
+   3-to-2 incorrect majority).
+2. **Independent errors**: Assumes errors are uncorrelated. In reality, multiple raters frequently share common
+   cognitive heuristics or succumb to misleading distractor features.
+3. **Loss of uncertainty**: Conflates an item with a narrow 3-to-2 split with an item boasting a unanimous 5-to-0 vote,
+   discarding all information about borderline ambiguity.
+
+## Probabilistic reliability models: Dawid-Skene and GLAD
+
+To account for varying annotator accuracy and asymmetric class confusion, probabilistic models infer latent ground-truth
+labels and worker parameters simultaneously <Cite id="dawid1979, whitehill2009" />.
+
+### The Dawid-Skene model
+
+Introduced by Alexander Dawid and Allan Skene in 1979, this seminal model treats the true class
+$z_i \in \{1, \dots, C\}$ as an unobserved latent variable <Cite id="dawid1979" />. Each annotator $m$ is parameterized
+by a $C \times C$ confusion matrix:
+
+$$
+\pi_{j, k}^{(m)} = P(y_{i, m} = k \mid z_i = j)
+$$
+
+Where diagonal elements $\pi_{j, j}^{(m)}$ represent class-specific sensitivity, and off-diagonal elements
+$\pi_{j, k}^{(m)}$ capture systematic confusion tendencies (e.g., Annotator 3 frequently mislabels Class 2 as Class 1).
+
+The generative process factorizes over latent true states and worker error parameters:
+
+$$
+\begin{aligned}
+z_i &\sim \text{Categorical}(\mathbf{p}), && \text{Latent ground-truth class with prior } \mathbf{p} = (p_1, \dots, p_C) \\
+y_{i, m} \mid z_i = j &\sim \text{Categorical}(\boldsymbol{\pi}_{j, :}^{(m)}), && \text{Observed report from annotator } m \text{ governed by row } j \text{ of } \boldsymbol{\pi}^{(m)}
+\end{aligned}
+$$
+
+| Variable Component | Variable Type | Mathematical Role | Operational Interpretation |
+| :--- | :--- | :--- | :--- |
+| **Class Prior $\mathbf{p}$** | Global parameter | $p_j = P(z_i = j)$ | Baseline class prevalence across the unlabelled corpus |
+| **Latent Label $z_i$** | Unobserved latent variable | $z_i \in \{1, \dots, C\}$ | Uncorrupted underlying ground-truth class for instance $i$ |
+| **Confusion Matrix $\boldsymbol{\pi}^{(m)}$** | Worker parameter | $\pi_{j, k}^{(m)} = P(y_{i, m} = k \mid z_i = j)$ | Annotator $m$'s true-class sensitivity and systematic confusion error profile |
+| **Observed Report $y_{i, m}$** | Observed variable | $y_{i, m} \in \{1, \dots, C\}$ | Discrete annotation label submitted by worker $m$ on task $i$ |
+
+The model is fitted using Expectation-Maximization (EM):
+- **E-step**: Compute posterior probabilities of the true class given current confusion estimates:
+  $$
+  T_{ij} = P(z_i = j \mid \mathbf{y}_i) \propto p_j \prod_{m=1}^M \prod_{k=1}^C \left(\pi_{j, k}^{(m)}\right)^{\mathbb{I}(y_{i, m} = k)}
+  $$
+- **M-step**: Update class priors $p_j$ and individual error rates $\pi_{j, k}^{(m)}$:
+  $$
+  \hat{\pi}_{j, k}^{(m)} = \frac{\sum_{i=1}^N T_{ij} \mathbb{I}(y_{i, m} = k)}{\sum_{i=1}^N T_{ij}}
+  $$
+
+Annotators whose submissions align with the global consensus receive high diagonal probabilities $\pi_{j,j}^{(m)}$; in
+subsequent iterations, their votes are weighted by the log-odds $w_m = \ln \frac{\pi_{j,j}^{(m)}}{1 - \pi_{j,j}^{(m)}}$,
+while spammers are neutralized <Cite id="dawid1979" />.
+
+### GLAD: Decoupling expertise and difficulty
+
+Whitehill et al. introduced **GLAD** (Generative model of Labels, Abilities, and Difficulties)
+<Cite id="whitehill2009" />. Rather than full confusion matrices, GLAD parameterizes:
+- Annotator expertise: $\alpha_m \in (-\infty, \infty)$ (where $\alpha_m \to \infty$ denotes perfect expertise, and
+  $\alpha_m \le 0$ indicates adversarial or random guessing).
+- Instance difficulty: $\beta_i \in (0, \infty)$ (where $\beta_i \to 0$ denotes extreme difficulty/ambiguity).
+
+The probability of a correct annotation is governed by a logistic function:
+
+$$
+P(y_{i, m} = z_i) = \frac{1}{1 + e^{-\alpha_m \beta_i}}
+$$
+
+GLAD distinguishes between a generally competent annotator failing on a genuinely ambiguous instance ($\beta_i \to 0$)
+and an incompetent worker failing on a trivial instance ($\beta_i \gg 1$) <Cite id="whitehill2009" />.
+
+## Soft labels and distribution learning
+
+Standard machine learning practices force multi-annotator consensus into a single hard one-hot target:
+$\mathbf{y}_i \in \{0, 1\}^C$. However, forcing hard targets actively harms model calibration on ambiguous inputs
+<Cite id="peterson2019" />.
+
+### The soft cross-entropy objective
+
+Instead of selecting the modal class, construct an empirical soft target vector representing the normalized distribution
+of annotator votes:
+
+$$
+\mathbf{p}_i = \left[ p_{i, 1}, \dots, p_{i, C} \right], \quad p_{i, c} = \frac{1}{M} \sum_{m=1}^M \mathbb{I}(y_{i, m} = c)
+$$
+
+Models are trained directly against soft probability targets using Kullback-Leibler divergence or soft cross-entropy
+loss:
+
+$$
+\mathcal{L}_{\text{soft}}(\mathbf{p}_i, \hat{\mathbf{y}}_i) = -\sum_{c=1}^C p_{i, c} \ln \hat{y}_{i, c}
+$$
+
+Peterson et al. demonstrated that training neural networks on human soft label distributions improves
+out-of-distribution generalization, prevents overconfident softmax probability outputs, and enhances robustness to
+adversarial perturbations <Cite id="peterson2019" />.
+
+## Disagreement as signal: aleatoric versus epistemic uncertainty
+
+A critical paradigm shift in data-centric learning is recognizing that annotator disagreement is not always pathological
+noise to be eliminated <Cite id="raykar2010, peterson2019" />:
+
+1. **Epistemic uncertainty (Rater noise)**: Disagreement caused by poorly phrased guidelines, lack of annotator
+   training, or rater inattention. This noise should be eliminated through better guidelines or Dawid-Skene filtering.
+2. **Aleatoric uncertainty (Intrinsic ambiguity)**: Disagreement arising from genuine, irreducible ambiguity in the
+   underlying data (such as borderline medical histopathology, subjective sentiment nuance, or toxic speech context).
+
+When an instance exhibits irreducible aleatoric ambiguity, forcing annotators into an artificial hard consensus discards
+the true Bayesian posterior. Preserving disagreement as soft probability targets allows the model to output calibrated
+confidence intervals reflecting real-world uncertainty <Cite id="peterson2019" />.
+
+## Diagnostic checklist
+
+To implement annotator aggregation:
+
+1. **Avoid unweighted majority voting in crowdsourcing**: Use the Dawid-Skene model <Cite id="dawid1979" /> or GLAD
+   <Cite id="whitehill2009" /> to infer worker competencies and down-weight noisy annotators.
+2. **Audit annotator confusion matrices**: Inspect estimated matrices $\hat{\boldsymbol{\pi}}^{(m)}$; identify workers
+   exhibiting systematic directional biases or negative log-odds.
+3. **Preserve distribution targets for subjective tasks**: On sentiment, toxicity, or borderline perception tasks, train
+   against empirical soft label distributions using soft cross-entropy <Cite id="peterson2019" />.
+4. **Flag low-consensus items for expert review**: Route instances where Dawid-Skene posterior entropy exceeds
+   $H(T_i) > 0.8$ to senior domain adjudicators.
+5. **Separate worker noise from task ambiguity**: Analyze whether disagreements cluster around specific difficult
+   instances (high $\beta$ in GLAD) or specific careless workers (low $\alpha$).

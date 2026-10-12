@@ -2,25 +2,154 @@
 title: 'Constraint-based repair'
 kind: concept
 summary: 'Constraint-based repair states rules the data must satisfy, such as functional dependencies and denial constraints, detects violating rows and changes the fewest or most likely values to restore consistency.'
-tags: [data]
-aliases: []
-requires: []
-related: []
-references: []
-status: stub
+tags: [data-preparation, data-quality, databases, software]
+aliases: [database repairing, denial constraints, functional dependencies, HoloClean, conflict hypergraph, minimal repair]
+requires: [outliers-and-gross-errors]
+related: [data-validation, value-standardisation, cleaning-and-evaluation]
+references: [rekatsinas2017]
+status: draft
 updated: 2026-10-11
 ---
 
+import { ConstraintRepairExplorer } from './ConstraintRepairExplorer'
+
 <Definition>
-To be written.
+Let $I$ denote a database instance over relation schema $R$, and let $\Sigma$ denote a set of formal integrity
+constraints. The instance is **inconsistent** if it violates one or more constraints ($I \not\models \Sigma$).
+
+**Constraint-based repair** finds a consistent database instance $I' \models \Sigma$ that minimizes a cost metric
+measuring the distance from the original data:
+
+$$
+I^* = \arg\min_{I' \models \Sigma} \operatorname{cost}\left(I, I'\right).
+$$
+
+Repairs modify individual attribute values (cell-level repair) or delete conflicting records (tuple-level repair) while
+preserving as much clean empirical signal as possible.
 </Definition>
 
-## Functional dependencies
+## Functional dependencies and conditional rules
+
+Relational constraints formalize logical dependencies that must hold across all tuples in a relation.
+
+### Functional Dependencies (FDs)
+A functional dependency $X \to Y$ states that the attribute set $X$ uniquely determines the attribute set $Y$. Formally:
+
+$$
+\forall t_1, t_2 \in I : t_1[X] = t_2[X] \implies t_1[Y] = t_2[Y].
+$$
+
+For example, the functional dependency $\text{ZIP\_Code} \to \text{State}$ asserts that two records with the same postal
+code cannot reside in different states. If a record has $\text{ZIP} = 94103$ and $\text{State} = \text{'NV'}$, it forms
+a conflict with any valid record possessing $\text{ZIP} = 94103$ and $\text{State} = \text{'CA'}$.
+
+### Conditional Functional Dependencies (CFDs)
+Standard functional dependencies apply globally across the entire relation. In practical enterprise datasets,
+dependencies frequently hold only within specific geographic or categorical contexts. A **Conditional Functional
+Dependency** augments $X \to Y$ with a pattern tableau enforcing constant conditions:
+
+$$
+\left[\text{Country} = \text{'US'}\right] : \text{ZIP\_Code} \to \text{State}.
+$$
+
+Records with $\text{Country} = \text{'UK'}$ are evaluated against British postal code rules rather than US state
+dependencies.
 
 ## Denial constraints
 
-## Minimal repairs
+While functional dependencies enforce equalities, real-world data quality requires inequalities, orderings, and
+cross-tuple comparisons. **Denial constraints** (DCs) provide a highly expressive first-order logic formalism that
+subsumes range constraints, FDs, and complex business logic <Cite id="rekatsinas2017" />.
 
-## Probabilistic repair
+A denial constraint universally quantifies that one or more tuples cannot simultaneously satisfy a conjunction of
+relational predicates:
+
+$$
+\forall t_1, t_2 \in I : \neg \left( P_1 \wedge P_2 \wedge \dots \wedge P_m \right),
+$$
+
+where each predicate $P_k$ takes the form $t_i[A] \;\phi\; t_j[B]$ or $t_i[A] \;\phi\; c$, with operator
+$\phi \in \{=, \neq, <, \le, >, \ge\}$.
+
+Denial constraints capture diverse integrity rules within a single unified grammar:
+- **Range bounds:** $\forall t : \neg(t[\text{Salary}] < 0 \vee t[\text{Age}] > 120)$.
+- **Temporal coherence:** $\forall t : \neg(t[\text{DischargeDate}] < t[\text{AdmissionDate}])$.
+- **Functional dependency:**
+  $\forall t_1, t_2 : \neg(t_1[\text{ZIP}] = t_2[\text{ZIP}] \wedge t_1[\text{City}] \neq t_2[\text{City}])$.
+- **Hierarchical organizational rules:**
+  $\forall t_1, t_2 : \neg(t_1[\text{ManagerID}] = t_2[\text{EmpID}] \wedge t_1[\text{Salary}] > t_2[\text{Salary}])$.
+
+## Conflict hypergraphs and minimal repairs
+
+To repair an inconsistent database, algorithms map constraint violations into a **conflict hypergraph**
+$\mathcal{H} = (V, E)$:
+- **Vertices ($V$):** The set of all attribute cells $c = (t, A)$ in the database.
+- **Hyperedges ($E$):** Each constraint violation forms a hyperedge connecting the specific cells that jointly trigger
+  the violation.
+
+For an FD $X \to Y$ violated by tuples $t_1$ and $t_2$, the hyperedge is the 4-tuple of cells
+$\{t_1[X], t_2[X], t_1[Y], t_2[Y]\}$.
+
+### Minimal cardinality repair
+The classic repair objective finds the minimum number of cell updates required to break every hyperedge in
+$\mathcal{H}$:
+
+$$
+\min_{I' \models \Sigma} \sum_{t \in I, A} \mathbb{I}\left(t[A] \neq t'[A]\right).
+$$
+
+Breaking all hyperedges by modifying the fewest cells corresponds to the **Minimum Weight Vertex Cover** problem on the
+conflict hypergraph, which is NP-hard. Practical solvers formulate the problem as Integer Linear Programming (ILP) or
+weighted Partial Maximum Satisfiability (MaxSAT).
+
+### The blind-spot of minimal cardinality
+Minimal cardinality repair is mathematically elegant but statistically blind:
+- If 100 rows state that `Role = 'Data Scientist'` and `Dept = 'Analytics'`, but a single typographical error in row 101
+  lists `Dept = 'Hardware'`, the algorithm could technically resolve the conflict by changing the `Role` of row 101 to
+  `'Hardware Engineer'` (1 cell change) instead of fixing `Dept`.
+- In numerical inequalities (e.g., $t[\text{Salary}] > 0$), minimal cardinality changes a negative salary of $-80{,}000$
+  to $1$, producing an absurd value that satisfies the constraint while destroying real distributional fidelity.
+
+<ConstraintRepairExplorer />
+
+## Probabilistic repair and HoloClean
+
+Modern data cleaning decouples logical constraint checking from statistical inference. Frameworks such as **HoloClean**
+formulate constraint repair as probabilistic inference over Factor Graphs <Cite id="rekatsinas2017" />.
+
+### The factor graph architecture
+For each corrupted or ambiguous cell $V_i = t[A]$, HoloClean defines a random variable over candidate domain values
+$\operatorname{dom}(A)$. The joint distribution is parameterized by log-linear potential factors:
+
+$$
+P(\mathbf{V} = \mathbf{v}) \propto \exp\left( \sum_{k} w_k f_k(\mathbf{v}, I, \Sigma) \right).
+$$
+
+The feature functions $f_k$ combine three distinct sources of evidence:
+1. **Hard constraint potentials:** Severe penalties when a candidate assignment violates a denial constraint or
+   functional dependency.
+2. **Quantitative feature priors:** Machine learning models predict $P(t[A] = v \mid t[\text{other}])$ using
+   gradient-boosted trees or deep language model embeddings fitted on clean rows.
+3. **External knowledge bases:** Prior probabilities derived from external master dictionaries (e.g. USPS postal code
+   databases).
+
+Weights $w_k$ are learned via maximum likelihood on clean tuples. Statistical inference (such as Gibbs sampling or
+marginal belief propagation) predicts the most probable repair:
+
+$$
+v^* = \arg\max_v P\left(t[A] = v \mid I_{\text{obs}}, \Sigma\right).
+$$
+
+This holistic fusion ensures that repairs not only satisfy relational logic ($\Sigma \models I^*$), but also conform to
+realistic statistical distributions.
 
 ## Pitfalls
+
+- **Constraint mining overfitting:** Using automated dependency discovery algorithms (such as FASTFD) to mine
+  constraints from historical data often captures accidental sample correlations as "fundamental laws". Enforcing
+  accidental constraints damages legitimate production data.
+- **Cascading repair loops:** Changing cell $c_1$ to satisfy constraint $C_1$ can trigger a new violation in constraint
+  $C_2$, creating cyclic update cascades unless constraints are solved simultaneously via joint satisfiability solvers.
+- **Repairing the wrong attribute:** In functional dependencies $X \to Y$, an error in the antecedent $X$ (e.g. typing
+  the wrong customer ID) can cause the cleaning system to overwrite the correct attribute $Y$ (e.g. customer name),
+  permanently corrupting ground truth records.

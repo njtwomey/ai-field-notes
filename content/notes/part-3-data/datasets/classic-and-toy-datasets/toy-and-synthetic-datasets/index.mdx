@@ -1,0 +1,137 @@
+---
+title: 'Toy and synthetic datasets'
+kind: concept
+summary: 'Toy and synthetic datasets—such as two moons, concentric circles, Gaussian blobs, XOR, the Swiss roll, and Friedman regression problems—generate controlled geometric manifolds with known Bayes optimal boundaries to benchmark non-linear models and dimensionality reduction.'
+tags: [data, datasets, synthetic, benchmarks, geometry]
+aliases: [synthetic-datasets, two-moons, concentric-circles, swiss-roll, friedman-datasets, gaussian-blobs]
+requires: []
+related: [classic-statistical-datasets, simulation-and-domain-randomisation, synthetic-data]
+references: [tenenbaum2000, friedman1991]
+status: draft
+updated: 2026-10-12
+---
+
+import { ToyAndSyntheticDatasetsVisualizer } from './ToyAndSyntheticDatasetsVisualizer'
+
+<Definition>
+**Toy and synthetic datasets** are mathematically parameterized data generators designed to produce synthetic
+observations $\mathcal{D} = \{(\mathbf{x}_i, y_i)\}_{i=1}^N$ with analytically known ground-truth properties: exact
+functional relationships $y = f^*(\mathbf{x})$, known Bayes optimal error rates, precise manifold intrinsic dimensions
+$d \ll D$, or explicit noise models $\epsilon \sim \mathcal{N}(0, \sigma^2)$ <Cite id="tenenbaum2000, friedman1991" />.
+</Definition>
+
+While empirical real-world datasets conflate model misspecification with measurement noise, missing confounders, and
+collection artifacts, synthetic benchmarks isolate specific mathematical capabilities: can an algorithm unfold a curved
+2D manifold in 3D, separate non-convex interlaced clusters, or discard independent nuisance noise features
+<Cite id="tenenbaum2000" />?
+
+<ToyAndSyntheticDatasetsVisualizer client:load />
+
+## What These Datasets Measure
+
+Synthetic datasets test targeted algorithmic failure modes under controlled conditions:
+- **Known Bayes Optimal Error**: By specifying the true generating densities $p(\mathbf{x} \mid y)$, the theoretical
+  minimum classification error $P^*(E) = \int \min(p(\mathbf{x}, y=0), p(\mathbf{x}, y=1)) \, d\mathbf{x}$ is known,
+  allowing researchers to measure exact generalization gaps.
+- **Controlled Signal-to-Noise Ratio (SNR)**: Adding Gaussian noise $\sigma$ or flipping labels at rate
+  $p_{\text{flip}}$ tests regularization strength without changing the underlying manifold geometry.
+- **Scalability and Dimensionality Stress Tests**: Generating arbitrary sample sizes $N \in [10^2, 10^7]$ and appending
+  $P_{\text{noise}}$ uninformative nuisance dimensions directly tests vulnerability to the curse of dimensionality.
+
+---
+
+## Catalogue of Canonical Synthetic Datasets
+
+| Dataset | Dimensionality ($D \to d$) | Generating Equations | Target Challenge | Primary Algorithms Tested |
+| :--- | :--- | :--- | :--- | :--- |
+| **Two Moons** | $2 \to 2$ | Crescents: $(\cos t, \sin t)$ and $(1 - \cos t, 0.5 - \sin t)$ | Interlocking non-convex clusters; linear models fail | RBF Kernel SVM, Spectral Clustering, $k$-NN |
+| **Concentric Circles** | $2 \to 2$ | $r_1 (\cos \theta, \sin \theta)$ vs $r_2 (\cos \theta, \sin \theta)$ | Radial symmetry; completely linearly non-separable | Polynomial Feature Maps, Deep MLPs |
+| **Gaussian Blobs** | $D \ge 2$ | $\sum_k \pi_k \mathcal{N}(\boldsymbol{\mu}_k, \boldsymbol{\Sigma}_k)$ | Multi-cluster centroid clustering and density estimation | $k$-Means, Gaussian Mixture Models (EM) |
+| **XOR Parity** | $2 \to 2$ | Four quadrants: $y = x_1 \oplus x_2$ | Fundamental non-linear parity; linear perceptrons fail | Interaction Terms ($x_1 x_2$), Multi-Layer Perceptrons |
+| **Two Spirals** | $2 \to 2$ | Interleaved Archimedean spirals: $r = a \theta$ | High-frequency curvature; narrow decision corridor | Deep Neural Networks, Topological Data Analysis |
+| **Swiss Roll** <Cite id="tenenbaum2000" /> | $3 \to 2$ | $\mathbf{x} = (t\cos t, \, y, \, t\sin t)^\top$ | Non-linear manifold embedded in ambient 3D space | Isomap, LLE, t-SNE, UMAP |
+| **S-Curve** | $3 \to 2$ | $\mathbf{x} = (\cos t, \, y, \, \operatorname{sgn}(t)(\cos t - 1))^\top$ | S-shaped continuous 2D surface in 3D | Manifold Learning, Autoencoders |
+| **Friedman #1** <Cite id="friedman1991" /> | $10 \to 5$ | $y = 10\sin(\pi x_1 x_2) + 20(x_3 - 0.5)^2 + 10x_4 + 5x_5 + \epsilon$ | Non-linear interactions with 5 pure noise features | Gradient Boosted Trees, MARS, Lasso |
+
+---
+
+## Detailed Manifold Formulations
+
+### Two Moons
+
+Two interleaved half-circles in $\mathbb{R}^2$ parameterized by angle $t \in [0, \pi]$ with added Gaussian noise
+$\boldsymbol{\epsilon} \sim \mathcal{N}(\mathbf{0}, \sigma^2 \mathbf{I})$:
+
+$$
+\mathbf{x}_{\text{moon 1}} = \begin{pmatrix} \cos t \\ \sin t \end{pmatrix} + \boldsymbol{\epsilon}, \quad \mathbf{x}_{\text{moon 2}} = \begin{pmatrix} 1 - \cos t \\ 0.5 - \sin t \end{pmatrix} + \boldsymbol{\epsilon}
+$$
+
+A linear hyperplane achieves at most $\approx 78\text{--}83\%$ accuracy. Achieving $> 98\%$ requires either an
+infinite-dimensional feature space (such as a Gaussian RBF kernel
+$K(\mathbf{x}, \mathbf{x}') = \exp(-\gamma \|\mathbf{x} - \mathbf{x}'\|_2^2)$) or graph-based spectral diffusion that
+follows the connected manifold.
+
+### Concentric Circles
+
+Two concentric rings of radii $r_1 < r_2$:
+
+$$
+\mathbf{x} = r_y \begin{pmatrix} \cos \theta \\ \sin \theta \end{pmatrix} + \boldsymbol{\epsilon}, \quad \theta \sim \mathcal{U}(0, 2\pi), \quad y \in \{1, 2\}
+$$
+
+While non-separable by any linear classifier in $(x_1, x_2)$, applying a quadratic basis expansion
+$\phi(\mathbf{x}) = (x_1^2 + x_2^2)$ or transforming to polar coordinates $(r, \theta)$ collapses the problem to a
+trivial 1D threshold $\hat{y} = \mathbb{I}[r > \frac{r_1 + r_2}{2}]$.
+
+### The Swiss Roll (Tenenbaum 2000)
+
+Introduced by Tenenbaum et al. <Cite id="tenenbaum2000" /> to evaluate Isomap, the Swiss roll embeds a two-dimensional
+rectangular strip $[1.5\pi, 4.5\pi] \times [0, 21]$ into $\mathbb{R}^3$ via an Archimedean spiral:
+
+$$
+\mathbf{x}(t, y) = \begin{pmatrix} t \cos t \\ y \\ t \sin t \end{pmatrix} + \boldsymbol{\epsilon}, \quad t \in [1.5\pi, 4.5\pi], \quad y \in [0, 21]
+$$
+
+Euclidean distance in ambient $\mathbb{R}^3$ cuts directly across empty space between adjacent layers of the roll (e.g.
+between $t=1.5\pi$ and $t=3.5\pi$), creating false neighbor shortcuts. Manifold learning algorithms must construct a
+$k$-nearest-neighbor graph and compute shortest path graph distances to approximate the true intrinsic geodesic metric:
+
+$$
+d_{\text{geodesic}}(t_1, t_2) = \int_{t_1}^{t_2} \sqrt{1 + u^2} \, du = \frac{1}{2} \left[ u \sqrt{1 + u^2} + \operatorname{arsinh}(u) \right]_{t_1}^{t_2}
+$$
+
+### Friedman Regression Benchmark #1 (1991)
+
+Designed by Jerome Friedman <Cite id="friedman1991" /> to evaluate Multivariate Adaptive Regression Splines (MARS):
+- Inputs: 10 independent uniform features $\mathbf{x} \in [0, 1]^{10}$.
+- Generating Equation:
+  $$
+  y = 10 \sin(\pi x_1 x_2) + 20 (x_3 - 0.5)^2 + 10 x_4 + 5 x_5 + \epsilon, \quad \epsilon \sim \mathcal{N}(0, \sigma^2)
+  $$
+- **Nuisance Features**: Features $x_6, x_7, x_8, x_9, x_{10}$ enter neither the mean function nor the noise term.
+  Models must perform feature selection while simultaneously estimating non-linear interaction $\sin(\pi x_1 x_2)$ and
+  quadratic term $(x_3 - 0.5)^2$.
+
+---
+
+## Recipes and Modifiers
+
+Synthetic generators are standardly adapted via parametric modifiers:
+1. **Nuisance Dimensions (Noise Padding)**: Embedding a 2D moon dataset into $\mathbb{R}^{50}$ by concatenating 48
+   Gaussian noise features $\mathbf{z} \sim \mathcal{N}(\mathbf{0}, \mathbf{I})$ tests whether distance-based models
+   ($k$-NN, kernel machines) degrade as noise overwhelms metric distances.
+2. **Label Flipping Noise**: With probability $p_{\text{flip}} \in [0, 0.3]$, the true label is inverted
+   ($y \leftarrow 1 - y$), benchmarking robust loss functions and clean-label filtering.
+3. **Distribution Shift**: Generating training data with $\theta \in [0, \pi]$ and test data with
+   $\theta \in [\pi, 2\pi]$ directly evaluates out-of-distribution generalization.
+
+---
+
+## Known Problems and Limitations
+
+1. **Synthetic Optimism**: Real-world data rarely reside on smooth, infinitely differentiable low-dimensional manifolds
+   with uniform noise. Algorithms that excel on the Swiss roll often struggle on tabular business data with discrete
+   categorical codes and missingness.
+2. **Hyperparameter Over-Tuning on Toy Manifolds**: Benchmarking algorithms exclusively on toy datasets encourages
+   tuning hyperparameters (such as kernel bandwidth $\gamma$ or neighborhood $k$) to specific geometric radii rather
+   than generalizable principles.

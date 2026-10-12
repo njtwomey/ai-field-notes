@@ -1,0 +1,161 @@
+---
+title: 'User interaction data'
+kind: concept
+summary: 'Interaction logs record what users were shown and what they did. The logging policy decides what could be observed, so impressions, positions, and exposure must be logged to learn and evaluate without bias.'
+tags: [data, recommender-systems]
+aliases: []
+requires: []
+related: [counterfactual-evaluation-of-recommenders, unbiased-offline-evaluation]
+references: [hu2008implicit, joachims2017ultr, swaminathan2015, joachims2005clickthrough]
+status: draft
+updated: 2026-10-12
+---
+
+import { InteractionLogsVisualizer } from './InteractionLogsVisualizer'
+
+<Definition>
+User interaction logs are structured time-series event records produced as users engage with digital surfaces such as
+recommender feeds, search engines, and e-commerce catalogs. Unlike curated survey or explicit rating datasets,
+interaction data is observational: it captures actions (clicks, plays, dwell times, conversions) conditioned entirely on
+what candidate items the underlying production system chose to present (impressions, slates, ranks).
+</Definition>
+
+Modern machine learning systems in search and recommendation rely primarily on implicit user telemetry rather than
+explicit ratings. Every second, streaming pipelines ingest billions of telemetry payloads containing client-side
+interaction events. However, learning directly from raw user actions without accounting for the presentation environment
+leads to catastrophic feedback loops and rich-get-richer biases <Cite id="joachims2005clickthrough" />.
+
+<InteractionLogsVisualizer />
+
+## Events, impressions and outcomes
+
+Interaction data pipelines track three fundamental entities that form a directed behavioral funnel:
+
+1. **Impressions (Exposures):** An impression indicates that an item was not merely computed by a backend retrieval
+   model, but actually rendered within the visible viewport of the user's client device. In modern web and mobile
+   architectures, viewport trackers (such as the browser `IntersectionObserver` API) emit exposure beacons when at least
+   50% of an item's surface area remains visible for a minimum dwell threshold (e.g., 1000 milliseconds). Logging an
+   item as "shown" when it was pre-fetched but never scrolled into view creates ghost impressions, severely corrupting
+   CTR estimation.
+2. **Engagement Events (Interactions):** Discrete user actions executed against an exposed item. These include clicks,
+   taps, long-presses, video plays, bookmarks, and additions to shopping carts.
+3. **Downstream Outcomes:** Conversions occurring further down the funnel, such as order completions, subscriptions,
+   content completion, or subsequent returns and cancellations. Outcomes frequently exhibit delayed feedback windows
+   spanning minutes, days, or weeks.
+
+In tabular form, an atomic interaction log entry links context, decision, and response:
+
+$$
+\mathcal{D} = \left\{ \left(x_i, a_i, k_i, p_i, y_i, t_i\right) \right\}_{i=1}^N
+$$
+
+where $x_i$ denotes the context (user features, device, query, geographic location), $a_i$ is the displayed item, $k_i$
+is the presentation rank or layout slot, $p_i = \pi_0(a_i \mid x_i)$ is the probability (propensity) assigned by the
+production logging policy $\pi_0$, $y_i \in \{0, 1\}$ or $\mathbb{R}$ is the observed outcome, and $t_i$ is the
+timestamp.
+
+## Implicit and explicit feedback
+
+A core distinction in interaction data is between explicit and implicit behavioral signals <Cite id="hu2008implicit" />:
+
+| Property | Explicit Feedback (Star ratings, thumbs, reviews) | Implicit Feedback (Clicks, dwell time, purchases, skips) |
+| :--- | :--- | :--- |
+| **Volume & Scale** | Extremely sparse ($< 1\%$ of active users provide ratings) | Abundant; emitted continuously during normal browsing |
+| **User Burden** | High cognitive effort; interrupts the consumption flow | Zero user effort; passive behavioral byproduct |
+| **Negative Signals** | Direct and unambiguous (e.g., 1-star rating or thumb down) | Implicit and ambiguous (did not click $\neq$ disliked; usually unexamined) |
+| **Distribution** | Bimodal J-curve (extreme satisfaction or extreme outrage) | Long-tailed consumption across items |
+| **Confounding** | Self-selection and voluntary response bias | Heavily confounded by UI layout, rank position, and prominence |
+
+Because implicit feedback provides no definitive negative labels, treating unclicked items as true negatives produces
+severe label noise. A user cannot click an item they never saw. To address this asymmetry, implicit matrix factorization
+and deep retrieval models assign confidence weights $c_{ui} = 1 + \alpha r_{ui}$ to positive actions while penalizing
+unobserved pairs with low baseline confidence <Cite id="hu2008implicit" />.
+
+## Exposure and position bias
+
+In any ranked list or visual grid, user visual attention decays exponentially from the top-left to the bottom-right.
+Eye-tracking experiments demonstrate the *cascade model*: users scan items sequentially from rank 1 downward, stopping
+once an item fulfills their information need <Cite id="joachims2005clickthrough, joachims2017ultr" />.
+
+Consequently, an observed click $C_i = 1$ is the joint product of two distinct Bernoulli random variables:
+1. **Examination ($E_i \in \{0, 1\}$):** Did the user actually notice and visually examine the item at position $k$?
+2. **Relevance ($R_i \in \{0, 1\}$):** Conditioned on examination, did the user find the item relevant?
+
+$$
+P(C_i = 1 \mid x_i, a_i, k) = P(E_i = 1 \mid k) \cdot P(R_i = 1 \mid x_i, a_i)
+$$
+
+When a model is trained directly on naive click logs without position debiasing, items that were historically placed in
+position 1 receive high click totals purely due to high examination propensity $P(E=1 \mid k=1) \approx 1.0$, while
+high-quality items placed at lower ranks (e.g., rank 10 where $P(E=1 \mid k=10) \approx 0.1$) receive almost no clicks.
+Naive training reinforces this exposure disparity, locking the recommender into a self-reinforcing suboptimal loop.
+
+## Logging policies and propensities
+
+To break the feedback loop and evaluate candidate algorithms offline, modern recommender telemetry must record the
+*propensity score* under the logging policy $\pi_0$ <Cite id="swaminathan2015, joachims2017ultr" />.
+
+In bandit learning and counterfactual evaluation, the true reward of a candidate ranking policy $\pi$ is estimated using
+Inverse Propensity Scoring (IPS):
+
+$$
+\hat{V}_{\text{IPS}}(\pi) = \frac{1}{N} \sum_{i=1}^N \frac{\pi(a_i \mid x_i)}{\pi_0(a_i \mid x_i)} y_i
+$$
+
+To make IPS estimation feasible:
+- **Common Support (Positivity):** The logging policy must have non-zero probability of selecting every viable item in
+  every context: $\pi_0(a \mid x) > 0$ for all $a$ where $\pi(a \mid x) > 0$. Purely deterministic production rankers
+  make unbiased offline evaluation mathematically impossible. Production systems deliberately introduce small
+  epsilon-greedy or softmax exploration distributions to collect exploratory propensities.
+- **Position Debiasing via Intervention:** Examination propensities $p_k = P(E=1 \mid k)$ can be estimated by running
+  small randomized interventions (such as rank-swap experiments, where pairs of adjacent items are randomly swapped) or
+  via dual learning algorithms that jointly optimize an examination model and a relevance model
+  <Cite id="joachims2017ultr" />.
+- **Propensity Clipping:** Small logging probabilities create extreme propensity weights
+  $1 / \pi_0(a \mid x) \to \infty$, causing massive estimator variance. Production pipelines enforce clipped IPS:
+
+$$
+w_i = \min\left(\frac{\pi(a_i \mid x_i)}{\pi_0(a_i \mid x_i)}, M\right)
+$$
+
+trading a controlled amount of asymptotic bias for dramatic variance reduction <Cite id="swaminathan2015" />.
+
+## Sessionisation
+
+Raw clickstream telemetry arrives as an unbounded, disorganized stream of JSON beacons. *Sessionisation* is the data
+transformation process that aggregates discrete beacons into semantically coherent behavioral sessions.
+
+1. **Timeout Boundaries:** The classical heuristic assigns events to the same session until an inactivity gap exceeds a
+   threshold—typically 30 minutes for general e-commerce and browsing, or 5 to 10 minutes for focused micro-task
+   applications.
+2. **Intent and Query Boundaries:** In search applications, submitting a distinct topical query or clearing search
+   filters demarcates a new sub-session or mission.
+3. **Cross-Device Identity Stitching:** Users frequently browse items on mobile devices during morning commutes and
+   finalize purchases on desktop laptops in the evening. Deterministic matching (matching logged-in account IDs) and
+   probabilistic fingerprinting (matching IP subnet, browser characteristics, and temporal proximity) stitch fragmented
+   client sessions into unified customer journey graphs.
+4. **Session-Based Learning Representations:** Modern sequential recommenders process sessions as ordered lists of item
+   tokens:
+
+$$
+S = (a_1, a_2, \dots, a_T)
+$$
+
+using self-attention layers (e.g., SASRec, BERT4Rec) to predict next-action transitions while preserving short-term
+context.
+
+## Pitfalls
+
+- **Pre-fetch Ghost Impressions:** Mobile applications routinely pre-fetch candidate carousels over cellular networks to
+  ensure low-latency scrolling. If the backend logs an impression at API response generation time rather than when the
+  client renders the card onto the screen, unviewed items are recorded as seen-and-ignored, severely depressing their
+  predicted click rates.
+- **Bot and Web Scraper Pollution:** Automated web scrapers, monitoring health-checks, and malicious click-fraud bots
+  generate millions of anomalous interaction records. Without strict user-agent filtering, IP reputation checks, and
+  behavioral anomaly scoring, model parameters will overfit bot browsing patterns rather than human intent.
+- **Attribution Window Mismatch:** If conversion attribution is evaluated over a 14-day window, training a model on logs
+  that are only 24 hours old artificially labels recent legitimate purchasers as non-converters, injecting systematic
+  label noise into conversion rate estimators.
+- **Feedback Loops and Catalog Starvation:** When a recommender feeds its own output logs back into model retraining
+  without exploration or propensity weighting, the top 1% most exposed items accumulate an increasing share of
+  impressions, starving the remaining catalog and degrading recommendation diversity.

@@ -2,25 +2,129 @@
 title: 'Digital video'
 kind: concept
 summary: 'Digital video is a sequence of images at a frame rate, compressed by codecs that store keyframes and differences between frames. Decoding cost dominates many video pipelines.'
-tags: [data, computer-vision]
-aliases: []
-requires: []
-related: []
-references: []
-status: stub
-updated: 2026-10-11
+tags: [data, computer-vision, video, multimodal]
+aliases: [video-data, video-codecs, temporal-video-streams]
+requires: [digital-images, image-preprocessing]
+related: [clip-sampling, motion-representations, video-augmentation]
+references: [wiegand2003, sullivan2012, carreira2017, feichtenhofer2019]
+status: draft
+updated: 2026-10-12
 ---
 
+import { DigitalVideoVisualizer } from './DigitalVideoVisualizer'
+
 <Definition>
-To be written.
+**Digital video** is a temporally ordered sequence of visual frames captured at a discrete sampling frequency and
+compressed via temporal and spatial codecs. Unlike static image datasets where samples load independently in constant
+time, video datasets rely on inter-frame motion prediction structures (Groups of Pictures) where decoding cost and
+temporal seeking latencies dominate machine learning ingestion pipelines.
 </Definition>
+
+In computer vision pipelines, video models—such as 3D convolutional networks (I3D, SlowFast) and spatio-temporal video
+transformers (TimeSformer, ViViT)—process 4D or 5D tensor batches $[B, C, T, H, W]$
+<Cite id="carreira2017, feichtenhofer2019" />. Because raw uncompressed video produces unsustainable bitrates (over 1
+gigabit per second for 1080p60), real-world datasets store video in lossy, highly compressed containers. Understanding
+codec compression structures, timestamp clocks, and container metadata is essential to avoid severe data loader
+bottlenecks and multimodal synchronization failures.
+
+<DigitalVideoVisualizer client:load />
 
 ## Frames and frame rates
 
+A continuous optical scene is discretized temporally at a sampling rate $f_s$ measured in frames per second (FPS),
+corresponding to a nominal sampling interval $\Delta t = 1/f_s$. Standard broadcast and web capture rates range from
+$24\,\text{FPS}$ (cinematic) and $30\,\text{FPS}$ (web standard) to $60\,\text{FPS}$ or higher (high-speed athletics and
+robotics).
+
+Video timing relies on two distinct temporal clocks attached to each packet:
+
+- **Presentation Time Stamp (PTS)**: The exact presentation instant at which the decoded frame must be rendered on
+  screen or aligned with audio.
+- **Decoding Time Stamp (DTS)**: The instant at which the compressed bitstream packet must be decoded by the hardware
+  decompression engine. Due to bidirectional temporal prediction, frames are often decoded out of display order
+  ($\text{DTS} \le \text{PTS}$).
+
+Video streams are categorized by clock consistency:
+1. **Constant Frame Rate (CFR)**: Frame intervals remain invariant
+   ($\Delta t_k = \text{PTS}_k - \text{PTS}_{k-1} = \text{const}$). Frame indexing is purely arithmetic: the timestamp
+   of frame index $k$ is $t_k = k / f_s$.
+2. **Variable Frame Rate (VFR)**: Mobile smartphones, webcams, and screen recorders alter capture rates dynamically
+   based on thermal limits, lighting conditions, or frame complexity ($\Delta t_k \neq \text{const}$). Assuming CFR on a
+   VFR video stream causes severe temporal cumulative clock drift, corrupting downstream optical flow and audio-visual
+   speech synchronization.
+
 ## Codecs and keyframes
+
+Modern video codecs (such as H.264/AVC, H.265/HEVC, VP9, and AV1) achieve 100:1 to 300:1 compression ratios by
+exploiting spatio-temporal redundancy across successive frames <Cite id="wiegand2003, sullivan2012" />. Video streams
+are organized into a repeating hierarchical **Group of Pictures (GOP)** consisting of three frame types:
+
+1. **Intra-Coded Frames (I-frames / Keyframes)**: Encoded completely independently of adjacent frames using spatial DCT
+   intra-prediction, identical to standalone JPEG images. I-frames serve as clean random-access entry points and
+   synchronization anchors, but command the largest byte footprint.
+2. **Predicted Frames (P-frames)**: Encoded via unidirectional motion compensation referencing preceding I- or P-frames.
+   Instead of storing pixel rasters, P-frames store 2D motion displacement vectors $\mathbf{v} = (v_x, v_y)$ for
+   macroblocks alongside the residual prediction error:
+   $$
+   R(x, y) = I_t(x, y) - I_{t-1}(x + v_x, y + v_y)
+   $$
+3. **Bidirectional Frames (B-frames)**: Encoded using bidirectional motion interpolation referencing both preceding and
+   subsequent anchor frames. B-frames yield maximum compression efficiency but require the decoder to buffer forward
+   reference frames, creating display re-ordering delays.
+
+The distance between consecutive I-frames defines the **GOP length** ($N_{\text{GOP}}$). Web streaming encoders
+routinely set $N_{\text{GOP}} \in [120, 250]$ (4 to 8 seconds) to maximize compression bitrates.
 
 ## Containers and audio tracks
 
+A video file is a multimedia container multiplexing (muxing) interleaved elementary streams:
+
+- **Container Formats**: Standard formats include MP4 (ISO Base Media File Format, ISO/IEC 14496-12), Matroska (MKV),
+  and WebM. Containers store encoded video packets, audio bitstreams (AAC, Opus, PCM), subtitle tracks, and structural
+  index metadata.
+- **Header Placement and the `moov` Atom**: In MP4 files, the `moov` box (atom) contains the sample duration indices,
+  chunk offsets, and frame resolution tables required to interpret the `mdat` media payload. Standard software encoders
+  write the `moov` atom at the very end of the file after encoding finishes. If an ML data loader attempts to read or
+  stream an unoptimized MP4, it must download or seek to the end of the file before decoding the first frame. Remuxing
+  with FFmpeg's `-movflags +faststart` moves the `moov` atom to the head of the file, enabling instantaneous streaming.
+- **Audio-Visual Alignment**: Video and audio elementary streams maintain independent time bases (e.g.,
+  $90{,}000\,\text{Hz}$ for video and $48{,}000\,\text{Hz}$ for audio). True alignment must evaluate PTS values rather
+  than sample indices.
+
 ## Decoding cost
 
+In modern deep learning clusters, data loading and video decompression represent the primary computational
+bottleneck—frequently idling multi-teraflop GPU accelerators while CPU worker threads struggle with bitstream parsing
+<Cite id="feichtenhofer2019" />.
+
+The fundamental issue is the **random access seeking penalty**. When a data loader requests a short 16-frame action clip
+starting at frame index $T$, the decoder cannot simply jump to byte offset $T$. Instead, it must:
+1. Locate the nearest preceding I-frame at index $T_{\text{key}} \le T$.
+2. Sequentially decode all intervening P- and B-frames from $T_{\text{key}}$ up to $T$, reconstructing pixel states
+   through motion vector updates.
+3. Discard the first $T - T_{\text{key}}$ decoded frames, retaining only the target window $[T, T+15]$.
+
+For a video with $N_{\text{GOP}} = 120$, seeking to a random frame requires decoding an average of 60 intermediate
+frames. Naive Python OpenCV (`cv2.VideoCapture`) or PyAV implementations repeat this sequential walk on every sample.
+High-throughput pipelines resolve this via:
+- **Dedicated Decoders**: C++ accelerated libraries like Decord, TorchCodec, or NVIDIA DALI directly interface with GPU
+  hardware decoders (NVDEC), decoding packets into GPU memory buffers without host-to-device PCIe roundtrips.
+- **Keyframe-Only Pre-filtering**: For long-horizon temporal retrieval or video indexing, systems extract only I-frames
+  via container header parsing, achieving $50\times$ speedups.
+- **Fixed-GOP Transcoding**: Re-encoding raw corpora with small GOP sizes ($N_{\text{GOP}} = 12$ or $16$) or intra-only
+  codecs (ProRes, MJPEG) bounds maximum seek latency at the expense of a $2\times$ to $3\times$ storage increase.
+
 ## Pitfalls
+
+1. **Index-Based Slicing on VFR Footage**: Treating frame number $k$ as timestamp $k/30$ on smartphone or user-generated
+   video causes temporal stretching and phoneme misalignment in multimodal speech-vision pipelines. Always query
+   explicit PTS timestamps via Decord or PyAV.
+2. **CPU Thrashing via Naive VideoCapture**: Instantiating a new OpenCV `VideoCapture` object inside PyTorch worker
+   threads for each clip read forces full container header re-parsing and linear frame seeks, collapsing DataLoader
+   throughput.
+3. **Ignoring the Faststart Atom in Distributed Cloud Training**: Streaming raw MP4s from Amazon S3 or Google Cloud
+   Storage without `-movflags +faststart` forces workers to perform two high-latency remote byte-range seeks per file
+   (reading the header, seeking to file end for the `moov` atom, then seeking back to the media payload).
+4. **Caching Uncompressed PNG Frames to Disk**: Extracting 100 hours of 1080p video into raw PNG frames generates over
+   $10^7$ files consuming tens of terabytes of disk space, easily exhausting file system inodes and degrading OS
+   directory traversal performance. Keep video in optimized compressed containers with small GOPs.

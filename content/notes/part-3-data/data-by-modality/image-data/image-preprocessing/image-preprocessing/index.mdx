@@ -2,25 +2,145 @@
 title: 'Image preprocessing'
 kind: concept
 summary: 'Image preprocessing brings images to the size and value range a model expects: resizing with a chosen interpolation, cropping or padding to an aspect ratio, normalising each channel and tiling images too large to process whole.'
-tags: [data, computer-vision]
-aliases: []
+tags: [data, computer-vision, image-processing, preprocessing]
+aliases: [image preprocessing, image resizing, image normalization, image tiling]
 requires: []
-related: [image-filtering, image-pyramids-and-scale-space]
-references: []
-status: stub
-updated: 2026-10-11
+related: [digital-images, image-augmentation, image-filtering, image-pyramids-and-scale-space]
+references: [deng2009, parmar2022, gonzalez2018]
+status: draft
+updated: 2026-10-12
 ---
 
+import { ImagePreprocessingVisualizer } from './ImagePreprocessingVisualizer'
+
 <Definition>
-To be written.
+**Image preprocessing** is the canonical sequence of spatial resampling, geometric transformation, photometric
+normalization, and tiling operations applied to raw digital images to conform them to the input dimensions, aspect
+ratios, and numerical distributions expected by computer vision models <Cite id="gonzalez2018" />. Proper preprocessing
+prepares arbitrary camera inputs for neural tensor operations while preventing spatial aliasing, aspect ratio
+distortion, and numerical gradient instability.
 </Definition>
+
+In deep computer vision, convolutional neural networks (CNNs) and Vision Transformers (ViTs) require rectangular batched
+tensor inputs of fixed spatial dimensions (typically $224 \times 224$, $384 \times 384$, or $640 \times 640$). Yet
+real-world datasets arrive with heterogeneous resolutions, arbitrary aspect ratios, and raw 8-bit integer ranges
+($[0, 255]$).
+
+Standardizing these inputs requires choosing appropriate interpolation filters to prevent downsampling aliasing,
+selecting an aspect ratio strategy (cropping, stretching, or letterboxing), standardizing per-channel intensity
+distributions, and tiling gigapixel images into overlapping patches.
+
+<ImagePreprocessingVisualizer />
 
 ## Resizing and interpolation
 
+Resizing maps continuous pixel coordinates $(x, y)$ from a source grid of size $H_{\text{src}} \times W_{\text{src}}$ to
+a target grid $H_{\text{dst}} \times W_{\text{dst}}$ via mathematical interpolation:
+
+### Interpolation algorithms
+
+- **Nearest neighbor:** Assigns the intensity of the closest discrete source pixel. Extremely fast, but creates jagged,
+  pixelated staircasing during upsampling and severe high-frequency aliasing during downsampling.
+- **Bilinear interpolation:** Computes a weighted average of the $2 \times 2$ pixel neighborhood enclosing the
+  fractional coordinate. Standard choice for general resizing.
+- **Bicubic interpolation:** Fits cubic polynomials over a $4 \times 4$ pixel neighborhood. Produces smoother curves and
+  sharper edges than bilinear interpolation at modest compute cost.
+- **Area (Box) interpolation:** Computes the exact pixel area overlap between destination and source pixels. **Mandatory
+  when downsampling by large factors ($K > 2$)**, as it integrates all source pixels within the destination footprint,
+  preventing fine lines from vanishing.
+
+### The aliased resizing problem
+
+Parmar, Zhang, and Zhu demonstrated that standard computer vision frameworks (such as OpenCV and older versions of
+PyTorch `torch.nn.functional.interpolate`) historically implemented bilinear downsampling without proper anti-aliasing
+low-pass filters <Cite id="parmar2022" />.
+
+Without anti-aliasing, downsampling an image by $4\times$ or $8\times$ samples isolated spatial points, folding
+high-frequency texture energy back into low-frequency feature maps. This creates severe **moiré interference patterns**
+and causes evaluation discrepancies across libraries (e.g., models trained on Pillow failing on OpenCV). Modern
+frameworks resolve this by enabling explicit anti-aliasing filters (`antialias=True` in torchvision).
+
 ## Cropping, padding and aspect ratio
+
+Real-world images span diverse aspect ratios—from $16:9$ horizontal panoramas to $9:16$ vertical smartphone captures.
+Because neural networks typically require fixed-size square tensors, practitioners employ three distinct aspect ratio
+strategies:
+
+### 1. Anisotropic squishing (Direct stretching)
+
+The image is resized directly to the target square ($H_{\text{dst}} \times W_{\text{dst}}$) without preserving aspect
+ratio.
+- **Consequence:** Geometric distortion. Circular objects (such as traffic signs or cell nuclei) deform into vertical or
+  horizontal ellipses, altering spatial aspect-ratio priors.
+
+### 2. Center cropping (Rescale and crop)
+
+The image is rescaled uniformly until its shorter edge matches the target size, and the center
+$H_{\text{dst}} \times W_{\text{dst}}$ patch is cropped.
+- **Consequence:** Preserves natural geometry and object proportions, but **discards peripheral image content**. In a
+  $16:9$ landscape image, center-cropping to a square discards $43.7\%$ of the pixels, potentially removing objects
+  located near the frame borders.
+
+### 3. Letterbox padding
+
+The image is rescaled uniformly until its longer edge matches the target dimension, and the remaining canvas borders are
+filled with a neutral constant value (e.g., gray or black padding):
+- **Consequence:** Preserves both geometry and the complete field of view. Standard practice in object detection
+  pipelines (such as YOLO) where preserving all peripheral bounding boxes is critical.
 
 ## Per-channel normalisation
 
+Raw pixel values are stored as unsigned 8-bit integers ($[0, 255]$). Feeding raw integers into neural networks causes
+large activation magnitudes, leading to vanishing or exploding gradients.
+
+### Scaling and standardization
+
+1. **Floating-point scaling:** Divide by $255.0$ to map values to the continuous interval $[0.0, 1.0]$.
+2. **Channel-wise standardization:** Subtract channel means $\mu_c$ and divide by standard deviations $\sigma_c$:
+   $$
+   x_{\text{norm}}[c] = \frac{x[c] - \mu_c}{\sigma_c}
+   $$
+
+### ImageNet standard statistics
+
+Models pretrained on ImageNet (Deng et al. 2009 <Cite id="deng2009" />) utilize standardized channel statistics computed
+across millions of natural images:
+
+$$
+\boldsymbol{\mu} = [0.485, 0.456, 0.406], \quad \boldsymbol{\sigma} = [0.229, 0.224, 0.225]
+$$
+
+Standardization centers feature activations around zero, ensuring that input tensors match the weight initialization
+distributions assumed by deep neural layers.
+
 ## Tiling large images
 
+In specialized domains—such as histopathological Whole Slide Images (WSI, $100{,}000 \times 100{,}000$ pixels) and
+satellite orthomosaics ($20{,}000 \times 20{,}000$ pixels)—images cannot be loaded into GPU memory or downsampled whole
+without destroying microscopic cellular or architectural details.
+
+Processing gigapixel images requires **patch tiling**:
+
+1. **Tiling grid with overlap:** Slicing the large canvas into discrete tiles (e.g., $512 \times 512$ or
+   $1024 \times 1024$ pixels) with an **overlap stride** (typically $20\text{--}50\%$ overlap). Overlap ensures that
+   objects split across tile boundaries are captured intact within an adjacent tile.
+2. **Padding outer boundaries:** Right and bottom border tiles that exceed the image perimeter are padded with white or
+   edge reflection.
+3. **Inference and spatial reassembly:**
+   - For classification: Tile-level feature vectors are pooled via Multiple Instance Learning (MIL) or attention
+     aggregation to predict slide-level diagnoses.
+   - For detection: Predicted bounding box coordinates are mapped back to global canvas coordinates, followed by global
+     **Non-Maximum Suppression (NMS)** across tile seams to merge duplicate detections.
+
 ## Pitfalls
+
+- **Downsampling without anti-aliasing:** Resampling fine textures (such as brick walls, fabric weaves, or wire fences)
+  using naive bilinear interpolation induces severe moiré patterns that confuse feature extractors. Always enable
+  anti-aliasing (`antialias=True`).
+- **Asymmetric training-inference normalization:** Training a model with ImageNet mean/std normalization but omitting
+  normalization during production serving causes catastrophic inference failure due to distribution shift.
+- **Bounding box desynchronization:** Applying cropping, padding, or resizing to training images without simultaneously
+  applying the exact geometric affine transformation to annotation coordinates (bounding boxes, segmentation polygons,
+  keypoints).
+- **Neglecting overlap when tiling:** Extracting non-overlapping tiles from gigapixel images splits cells, pedestrians,
+  and vehicles directly along cut lines, creating false false-negative detection errors.

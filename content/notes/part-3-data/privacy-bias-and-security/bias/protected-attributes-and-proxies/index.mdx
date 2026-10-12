@@ -5,20 +5,134 @@ summary: 'Removing a protected attribute does not remove its influence: other fe
 tags: [data, fairness]
 aliases: []
 requires: []
-related: [dataset-bias]
-references: []
-status: stub
+related: [dataset-bias, content-filtering, data-rights-and-deletion]
+references: [dwork2012, hardt2016, chouldechova2017]
+status: draft
 updated: 2026-10-11
 ---
 
+import { ProxyAttributesVisualizer } from './ProxyAttributesVisualizer'
+
 <Definition>
-To be written.
+A **protected attribute** (or sensitive feature) $A$ is a demographic or personal characteristic—such as race, sex, age,
+religion, or disability status—legally shielded against discrimination in consequential domains like lending,
+employment, and housing. A **proxy feature** $X_{\text{proxy}}$ is an unconstrained, seemingly neutral covariate that
+statistically correlates with or reconstructs $A$, allowing models to perpetuate disparate impact even when $A$ is
+explicitly omitted from training.
 </Definition>
+
+Excluding protected attributes from training datasets is often mandated by law or adopted as an intuitive anti-bias
+heuristic. However, in high-dimensional datasets, mutual information between ostensibly benign inputs and sensitive
+attributes allows machine learning models to recover protected class membership. Paradoxically, measuring or preventing
+algorithmic bias requires access to the very protected attributes that privacy laws and corporate policies restrict
+organizations from collecting.
+
+<ProxyAttributesVisualizer />
 
 ## Removing the attribute
 
+The naive approach to fair machine learning is **fairness through unawareness** (or "fairness through blindness")
+<Cite id="dwork2012" />: training a predictive model $f(X)$ on input features $X$ from which the protected attribute $A$
+has been excised:
+
+$$
+\hat{Y} = f(X \setminus \{A\})
+$$
+
+While this policy guarantees individual-level procedural blindness—preventing the model from conditioning decisions
+directly on an explicit demographic flag—it fails to guarantee demographic parity or equal treatment:
+
+- **Statistical dependency:** In real-world data, the remaining features $X$ are rarely statistically independent of
+  $A$; that is, $P(X \mid A = 0) \neq P(X \mid A = 1)$.
+- **Reconstruction capacity:** High-capacity non-linear models (such as gradient-boosted decision trees and neural
+  networks) can learn complex non-linear combinations of correlated features to reconstruct $A$ with high fidelity
+  ($R^2 \approx 1$).
+- **Disparate impact:** If the ground-truth target variable $Y$ or its proxy features correlate with historical
+  disadvantages, the blind model $\hat{Y} = f(X \setminus \{A\})$ will reproduce the identical discriminatory outcome
+  distribution as an unconstrained model trained with explicit knowledge of $A$.
+
 ## Proxies that remain
+
+Proxy discrimination arises when non-sensitive features carry redundant encodings of protected group identity:
+
+1. **Geographic redlining:** Postal codes, census tracts, and municipal jurisdictions frequently serve as
+   near-deterministic proxies for race and socioeconomic status due to decades of residential segregation. In lending
+   and insurance, conditioning decisions on ZIP codes routinely reconstructs racial disparities without referencing race
+   directly.
+2. **Behavioral and digital footprints:** Web browsing logs, streaming music genres, university affiliations,
+   professional association memberships, and language syntax in text resumes carry strong mutual information with
+   gender, age, and cultural background.
+3. **Compound proxy reconstruction:** Even if no single feature exhibits strong correlation with $A$
+   ($\rho(X_j, A) < 0.2$), a linear or non-linear combination across hundreds of weak signals enables near-perfect
+   reconstruction of $A$. In high dimensions, orthogonality to $A$ across all basis vectors is virtually impossible
+   without deliberate decorrelation or adversarial representation learning.
+4. **Legal disparate impact:** Under US legal doctrine (such as Title VII of the Civil Rights Act and the Equal Credit
+   Opportunity Act), the absence of discriminatory intent or explicit protected features does not protect an
+   organization from liability. The US Equal Employment Opportunity Commission (EEOC) **four-fifths rule** defines an
+   adverse impact threshold: if the selection rate for any protected group is less than 80% ($0.80$) of the rate for the
+   highest group, the model faces a prima facie finding of discrimination:
+   $$
+   \text{Disparate Impact Ratio} = \frac{P(\hat{Y} = 1 \mid A = 0)}{P(\hat{Y} = 1 \mid A = 1)} < 0.80
+   $$
 
 ## Needing the attribute to audit
 
+The central operational paradox of algorithmic fairness is the **fairness audit dilemma**: an organization cannot
+evaluate whether its models discriminate without collecting and retaining the protected attributes of its users.
+
+### Group fairness criteria require $A$
+
+Auditing a model against standard mathematical definitions of fairness requires conditioning model outputs on the
+sensitive attribute $A$:
+
+- **Demographic parity:** Requires acceptance rates to be independent of protected status:
+  $$
+  P(\hat{Y} = 1 \mid A = 0) = P(\hat{Y} = 1 \mid A = 1)
+  $$
+- **Equalized odds <Cite id="hardt2016" />:** Requires equal true positive rates (TPR) and false positive rates (FPR)
+  across groups:
+  $$
+  P(\hat{Y} = 1 \mid Y = y, A = 0) = P(\hat{Y} = 1 \mid Y = y, A = 1) \quad \forall y \in \{0, 1\}
+  $$
+- **Predictive parity <Cite id="chouldechova2017" />:** Requires equal positive predictive value (precision) across
+  groups:
+  $$
+  P(Y = 1 \mid \hat{Y} = 1, A = 0) = P(Y = 1 \mid \hat{Y} = 1, A = 1)
+  $$
+
+Without access to $A$, none of these metrics can be computed, monitored, or mitigated during model lifecycle governance.
+
+### Legal restrictions on collecting $A$
+
+Data protection regimes often prohibit or penalize the collection of sensitive attributes:
+- **GDPR Article 9:** Classifies biometric data, ethnic origin, political opinions, and health status as "special
+  categories of personal data," forbidding processing unless strict, narrowly defined exceptions (such as explicit
+  consent or substantial public interest) are satisfied.
+- **Fair housing and credit laws:** The Equal Credit Opportunity Act (ECOA) historically barred lenders from inquiring
+  about applicants' race, color, religion, national origin, or sex, creating a legal hurdle to auditing the algorithms
+  used to evaluate those same applicants.
+
+### Technical solutions to the audit dilemma
+
+To audit models without maintaining centralized, identifiable demographic databases, engineers employ privacy-preserving
+measurement techniques:
+
+- **Bayesian Improved Surname Geocoding (BISG):** Uses public census distributions to compute probabilistic race and
+  ethnicity estimates $P(A \mid \text{Surname}, \text{ZIP})$ from non-sensitive inputs for aggregated post-hoc auditing.
+- **Secure Multi-Party Computation (SMPC):** Allows a third-party auditor holding protected attributes and a model owner
+  holding predictions $\hat{Y}$ to jointly compute group disparity metrics without either party exposing raw inputs to
+  the other.
+- **Differential privacy and randomized response:** Collects noisy demographic declarations directly from users,
+  bounding individual privacy risk while providing asymptotically unbiased group-level auditing statistics.
+
 ## Pitfalls
+
+- **Equating omission with compliance:** Believing that dropping sensitive columns from feature stores insulates a model
+  from regulatory scrutiny or discriminatory behavior.
+- **Naive feature pruning:** Removing individual correlated features without evaluating multivariate combinations;
+  remaining non-linear interactions still reconstruct the sensitive target.
+- **Audit imputation bias:** Using noisy demographic proxies (such as BISG) to compute audit metrics without accounting
+  for imputation variance or systematically higher error rates on multiracial and immigrant populations.
+- **Single-attribute myopia:** Auditing protected categories independently while ignoring **intersectionality** (e.g.,
+  assessing gender and race separately, which fails to capture severe compounded disparities experienced by women of
+  color).

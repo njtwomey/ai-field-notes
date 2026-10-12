@@ -3,26 +3,170 @@ title: 'Preprocessing pipelines'
 kind: concept
 summary: 'Every transform fitted to data, such as a scaler, an imputer or an encoder, is part of the model. A pipeline fits the transforms on training folds only, composes them per column and is saved and served with the model.'
 tags: [data, model-selection, software]
-aliases: []
-requires: []
-related: [data-leakage, feature-scaling]
+aliases: [scikit-learn pipeline, ColumnTransformer, preprocessing pipeline, data pipeline]
+requires: [sample-weights]
+related: [data-leakage, feature-scaling, selection-inside-cross-validation]
 references: []
-status: stub
+status: draft
 updated: 2026-10-11
 ---
 
 <Definition>
-To be written.
+A **preprocessing pipeline** is a directed acyclic composition of stateful data transformations and an optional final
+estimator that encapsulates the entire transformation chain from raw inputs to predictions into a single atomic model
+object, ensuring that all data-dependent parameters are learned strictly from training folds and applied identically at
+inference.
 </Definition>
+
+In machine learning workflows, data preparation is often mistakenly treated as an offline scripting phase separate from
+model fitting. In reality, any transform that computes statistics from sample data (such as means, standard deviations,
+quantile boundaries, missing-value medians, or categorical vocabularies) possesses learnable parameters
+$\theta_{\text{prep}}$. The full predictive model is the composite function:
+
+$$
+f(x; \theta) = g(h(x; \theta_{\text{prep}}); \theta_{\text{model}})
+$$
+
+where $h(\cdot)$ is the preprocessing mapping and $g(\cdot)$ is the downstream classifier or regressor. Failing to
+encapsulate $h$ and $g$ together causes evaluation leakage during cross-validation and catastrophic train/serve skew in
+production.
+
+import { PipelineDAGVisualizer } from './PipelineDAGVisualizer';
+
+<PipelineDAGVisualizer />
 
 ## Fitted transforms as part of the model
 
+Every data preprocessing step belongs to one of two categories:
+
+1. **Stateless transforms:** Mathematical transformations that depend purely on the single instance itself and compute
+   no parameters from the dataset. Examples include $\log(1 + x)$, trigonometric date encoding $(\sin(2\pi t / 365))$,
+   or unit conversions. These can theoretically be applied anywhere without risk of data leakage.
+2. **Stateful transforms:** Transformations whose mapping function $h(x; \theta_{\text{prep}})$ depends on empirical
+   sample estimates:
+   - `StandardScaler`: learns mean vector $\mu = \frac{1}{N}\sum x_i$ and standard deviation vector $\sigma$.
+   - `SimpleImputer`: learns median $\tilde{x} = \operatorname{median}(\{x_i\})$ or mode.
+   - `OneHotEncoder`: learns the set of unique category levels $\mathcal{C}$.
+   - `TargetEncoder`: learns conditional target expectations $\mathbb{E}[y \mid x \in c]$.
+   - `PCA` / `TruncatedSVD`: learns projection eigenvectors $V$.
+
+Because $\theta_{\text{prep}}$ is estimated from data, stateful transforms are statistical estimators. If
+$\theta_{\text{prep}}$ is computed over the entire dataset before splitting or cross-validation, validation and test
+information bleeds into training features.
+
 ## Fitting on training folds
+
+The central law of machine learning validation states that validation and test sets must remain unobserved until
+evaluation:
+
+$$
+\theta_{\text{prep}} = \operatorname{fit}(D_{\text{train}})
+$$
+
+When evaluating via $K$-fold cross-validation, each fold partition splits the data into $D_{\text{train}}^{(-k)}$ and
+$D_{\text{val}}^{(k)}$. The pipeline must learn its state parameters strictly on $D_{\text{train}}^{(-k)}$ and apply the
+resulting frozen mapping to $D_{\text{val}}^{(k)}$:
+
+$$
+x_{\text{val, transformed}} = h(x_{\text{val}}; \theta_{\text{prep}}^{(-k)})
+$$
+
+Encapsulating preprocessing and modeling inside a formal pipeline object (such as scikit-learn's `Pipeline`) automates
+this discipline: calling `cross_val_score(pipeline, X, y)` guarantees that `fit_transform()` runs only on training folds
+and `transform()` runs on test folds.
+
+```python
+from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import StandardScaler
+from sklearn.impute import SimpleImputer
+from sklearn.linear_model import LogisticRegression
+from sklearn.model_selection import cross_val_score
+
+# CORRECT: Preprocessing is shielded inside the pipeline
+pipeline = Pipeline([
+    ('imputer', SimpleImputer(strategy='median')),
+    ('scaler', StandardScaler()),
+    ('model', LogisticRegression())
+])
+
+scores = cross_val_score(pipeline, X, y, cv=5)
+```
 
 ## Per-column composition
 
+Real-world tabular datasets are heterogeneous, containing numerical, categorical, high-cardinality, and text columns in
+the same record. Per-column composition routes subsets of columns through dedicated transformation sub-pipelines before
+joining them into a unified feature matrix.
+
+Using `ColumnTransformer`, pipelines specify independent branches:
+
+```python
+from sklearn.compose import ColumnTransformer
+from sklearn.preprocessing import OneHotEncoder, StandardScaler
+from sklearn.impute import SimpleImputer
+
+numeric_transformer = Pipeline([
+    ('imputer', SimpleImputer(strategy='median')),
+    ('scaler', StandardScaler())
+])
+
+categorical_transformer = Pipeline([
+    ('imputer', SimpleImputer(strategy='constant', fill_value='missing')),
+    ('encoder', OneHotEncoder(handle_unknown='ignore', sparse_output=False))
+])
+
+preprocessor = ColumnTransformer(
+    transformers=[
+        ('num', numeric_transformer, ['age', 'income', 'credit_score']),
+        ('cat', categorical_transformer, ['device', 'state'])
+    ],
+    remainder='drop'  # Safely discard unlisted columns
+)
+```
+
+The transformed columns are horizontally concatenated via `np.hstack`, producing a dense or sparse numeric matrix
+conforming to the downstream estimator's required shape.
+
 ## Each step's fitted state
+
+After calling `pipeline.fit(X_train, y_train)`, each constituent step stores its learned statistics as internal
+attributes (by convention suffixed with an underscore `_` in Python):
+
+| Transform | Stored Fitted State | Production Usage |
+| :--- | :--- | :--- |
+| `SimpleImputer` | `statistics_` | Vector of imputation values (medians/means) |
+| `StandardScaler` | `mean_`, `scale_`, `var_` | Z-score normalization parameters |
+| `OneHotEncoder` | `categories_` | Array of unique level arrays per column |
+| `TargetEncoder` | `encodings_`, `target_mean_` | Smoothed conditional target statistics |
+| `MinMaxScaler` | `data_min_`, `data_max_`, `scale_` | Bounded interval mapping |
+
+At inference time, calling `pipeline.predict(X_new)` executes `transform()` sequentially through every step without
+modifying any of these stored parameters.
 
 ## Saving and serving the pipeline
 
-## Pitfalls
+In production, models must not be deployed as isolated weight files alongside separate feature engineering scripts.
+Instead, the entire pipeline must be serialized as a single immutable artifact:
+
+1. **Atomic serialization:** Export the fitted pipeline object using `joblib`, `cloudpickle`, or `skops`. Serializing
+   the composite object guarantees that the model cannot run without its exact corresponding preprocessing parameters.
+2. **Schema invariance:** The production scoring service accepts the raw payload directly from the database or API
+   client (e.g., `{"age": 42, "income": 75000, "state": "CA"}`) and feeds it into `pipeline.predict()`.
+3. **Open interchange standards:** For ultra-low-latency deployment in C++, Java, or Go environments, the scikit-learn
+   pipeline can be compiled to **ONNX** via `skl2onnx` or **Triton / Treelite**, eliminating Python runtime
+   dependencies.
+
+## Pitfalls and failure modes
+
+1. **Fitting before splitting:** The single most common data science bug. Fitting scalers, imputers, or encoders on the
+   full dataset before `train_test_split()` leaks test distribution moments into the training features, inflating
+   evaluation metrics.
+2. **Handling unseen categorical levels:** If a user registers from a new country or browser at inference time, an
+   unconfigured encoder throws an exception or shifts column alignments. Always specify `handle_unknown='ignore'` (in
+   `OneHotEncoder`) or configure explicit fallback smoothing bins.
+3. **Column name and order drift:** When passing pandas DataFrames, changes in column ordering or column dropping
+   between training and inference can misalign feature assignments in downstream numpy arrays. Use named column
+   selectors or explicit schema validators (e.g., Pydantic or Pandera).
+4. **Transforming targets inside feature pipelines:** Target transforms (e.g. log transforms $\log(y)$ or Box-Cox) must
+   not be placed inside feature pipelines, as target variables do not exist at inference time. Use dedicated wrapper
+   meta-estimators like `TransformedTargetRegressor`.

@@ -2,25 +2,128 @@
 title: 'Clip and frame sampling'
 kind: concept
 summary: 'Video models see a few frames at a time. Clip sampling chooses which: dense consecutive frames, uniformly spaced frames, or one frame from each of several segments, at a temporal stride suited to the action''s speed.'
-tags: [data, computer-vision]
-aliases: []
-requires: []
-related: []
-references: []
-status: stub
-updated: 2026-10-11
+tags: [data, computer-vision, video, temporal-sampling]
+aliases: [video-clip-sampling, frame-subsampling, temporal-segmentation]
+requires: [digital-video, digital-images]
+related: [motion-representations, video-augmentation]
+references: [wang2016tsn, tran2015c3d, feichtenhofer2019, arnab2021vivit]
+status: draft
+updated: 2026-10-12
 ---
 
+import { ClipSamplingVisualizer } from './ClipSamplingVisualizer'
+
 <Definition>
-To be written.
+**Clip and frame sampling** is the process of selecting a discrete subset of $T$ video frames from an untrimmed or
+trimmed video stream of length $N$ frames ($T \ll N$) to form input tensors for deep neural networks. It determines the
+trade-off between temporal receptive field coverage, fine-grained motion resolution, and tensor memory bandwidth.
 </Definition>
+
+Because processing an entire uncompressed video through 3D convolutional networks or video vision transformers exceeds
+GPU memory limits, models operate on short temporal windows of $T \in [8, 32]$ frames
+<Cite id="tran2015c3d, arnab2021vivit" />. The strategy used to sample these frames governs whether a model observes
+sub-second kinematic subtleties (such as surgical precision or athletic gestures) or macro-level narrative transitions
+(such as cooking or sporting match phases).
+
+<ClipSamplingVisualizer client:load />
 
 ## Dense sampling
 
+In dense sampling, a consecutive window of $T$ frames is extracted with a tight temporal stride $\tau \in \{1, 2\}$
+frames starting at a randomly chosen or centered start index $t_0$:
+
+$$
+\mathcal{T}_{\text{dense}} = \{t_0, \, t_0 + \tau, \, t_0 + 2\tau, \, \dots, \, t_0 + (T - 1)\tau\}
+$$
+
+- **Advantages**: Preserves contiguous inter-frame motion vectors, optical flow vectors, and acceleration dynamics. It
+  is the primary sampling scheme for short-horizon 3D CNNs (C3D, I3D) and fine-grained gesture recognition where
+  inter-frame phase transitions cannot tolerate missing intermediate steps <Cite id="tran2015c3d" />.
+- **Limitations**: The temporal receptive field covers only $\Delta T = \frac{T \cdot \tau}{f_s}$ seconds. For a
+  16-frame clip at $30\,\text{FPS}$ with stride $\tau=2$, the model observes only $1.07$ seconds of video, rendering it
+  blind to activities that evolve over tens of seconds.
+
 ## Uniform sampling
+
+Uniform sampling spans the entire duration of a video clip by spacing $T$ frames evenly across the total length $N$:
+
+$$
+\mathcal{T}_{\text{uniform}} = \left\{ \left\lfloor (k - 0.5) \cdot \frac{N}{T} \right\rfloor : k = 1, 2, \dots, T \right\}
+$$
+
+- **Advantages**: Guarantees $100\%$ global temporal coverage regardless of whether the source video is 5 seconds or 5
+  minutes long. Models observe the introductory, intermediate, and concluding phases of complex events.
+- **Limitations**: The effective temporal stride scales with video length ($\tau = N / T$). On long videos ($N = 1800$
+  frames, $60\,\text{s}$), sampling 16 frames yields an inter-frame interval of nearly $4$ seconds. High-frequency
+  actions undergo severe temporal aliasing: a person jumping, striking a ball, or falling occurs completely within the
+  gap between frames, presenting the model with disjoint static photographs rather than fluid motion.
 
 ## Segment-based sampling
 
+Temporal Segment Networks (TSN) combine global temporal coverage with local stochastic regularization by segmenting the
+video into $K$ equal, non-overlapping temporal segments <Cite id="wang2016tsn" />:
+
+$$
+S_k = \left[ \frac{(k-1)N}{K}, \, \frac{kN}{K} \right), \quad k \in \{1, \dots, K\}
+$$
+
+During training, TSN draws one random frame $t_k$ uniformly from each segment:
+
+$$
+t_k \sim \operatorname{Uniform}(S_k)
+$$
+
+During inference, determinism is restored by selecting the segment midpoint $t_k = \lfloor (k - 0.5) N / K \rfloor$.
+Predictions across the $K$ sampled frames are aggregated via a consensus function (such as average pooling or max
+pooling) over classification logits:
+
+$$
+\mathbf{y} = g\left( f(t_1), \, f(t_2), \, \dots, \, f(t_K) \right)
+$$
+
+This stochastic jittering acts as a powerful regularizer, ensuring the model generalizes across diverse execution speeds
+while observing the full temporal progression of the activity.
+
 ## Temporal stride
 
+The temporal stride parameter $\tau$ determines the skip interval between successive sampled frames, defining an
+effective temporal sampling frequency:
+
+$$
+f_{\text{eff}} = \frac{f_s}{\tau}
+$$
+
+According to the Nyquist-Shannon sampling theorem, capturing motion frequencies up to $\omega_{\max}$ requires
+$f_{\text{eff}} \ge 2 \omega_{\max}$. Rapid human kinematic transitions (e.g., eye blinks, facial micro-expressions,
+ball strikes) occur within $50\text{--}150\,\text{ms}$, requiring $\tau \le 2$ at $30\,\text{FPS}$ to prevent temporal
+aliasing.
+
+Modern multi-pathway architectures, such as **SlowFast Networks**, decouple spatial recognition from temporal motion
+dynamics via dual sampling rates <Cite id="feichtenhofer2019" />:
+1. **Slow Pathway**: Operates on a low frame rate ($T = 4$ or $8$ frames, stride $\tau = 16$), capturing fine-grained
+   spatial textures, object identities, and scene semantics with high channel capacity ($C$).
+2. **Fast Pathway**: Operates on a high frame rate ($T = 32$ frames, stride $\tau = 2$), capturing high-frequency motion
+   trajectories with light channel capacity ($\beta C$, where $\beta = 1/8$).
+
+In video vision transformers (ViViTs, TimeSformer), full spatio-temporal self-attention across all patches scales
+quadratically $\mathcal{O}((T \cdot S)^2)$, where $S = \frac{H \cdot W}{P^2}$ <Cite id="arnab2021vivit" />. Factorized
+attention decouples computation into spatial attention followed by temporal attention, reducing complexity to
+$\mathcal{O}(T \cdot S^2 + S \cdot T^2)$, enabling models to ingest larger frame counts $T$ without out-of-memory
+errors.
+
 ## Pitfalls
+
+1. **Dead Prelude and Postlude Inclusion**: Real-world web videos often contain several seconds of static logos, blank
+   screens, or presenter intros before and after the action. Uniform sampling over untrimmed videos allocates precious
+   frame budgets to uninformative buffer frames. Action detection pipelines must utilize temporal action proposals or
+   trim to annotated temporal bounds.
+2. **Train/Test Sampling Discrepancy**: Training with stochastic segment sampling while testing with a single dense
+   window causes severe evaluation domain shift. Multi-crop evaluation protocols (e.g., 3 spatial crops $\times$ 4
+   temporal clips) are necessary to match train-time variability.
+3. **Overly Coarse Strides on Kinetic Tasks**: Evaluating sports datasets (Kinetics-400, UCF101) with stride
+   $\tau \ge 8$ discards crucial motion phase cues, reducing action recognition to static background scene
+   classification.
+4. **Neglecting Decoding Cost During Segment Sampling**: TSN and uniform sampling require seeking to $K$ widely
+   separated timestamps across the file. As established in digital video codecs, jumping between distant timestamps
+   triggers $K$ separate I-frame seek sequences, creating severe disk and CPU I/O bottlenecks unless fast container
+   decoders (Decord) are utilized.

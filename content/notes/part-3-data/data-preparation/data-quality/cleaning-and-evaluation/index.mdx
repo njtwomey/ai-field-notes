@@ -2,23 +2,106 @@
 title: 'Cleaning and evaluation'
 kind: concept
 summary: 'Cleaning steps change what a model learns and what its score means. Fixes applied to training data must also run at serving time, test data are cleaned only by rules fixed in advance, and a fix is judged by validation error.'
-tags: [data, model-selection]
-aliases: []
-requires: []
-related: [data-leakage]
-references: []
-status: stub
+tags: [data-preparation, data-quality, model-selection, evaluation]
+aliases: [evaluating data cleaning, test set cleaning, training-serving alignment, cleaning leakage, validation of data repairs]
+requires: [data-validation, data-quality-dimensions, preprocessing-pipelines]
+related: [detecting-leakage, point-in-time-correctness, test-set-design]
+references: [polyzotis2018, pedregosa2011]
+status: draft
 updated: 2026-10-11
 ---
 
+import { CleaningEvaluationFlowExplorer } from './CleaningEvaluationFlowExplorer'
+
 <Definition>
-To be written.
+Let $\mathcal{D} = (\Xmat, \yvec)$ denote a dataset, and let $\mathcal{T}_\theta$ denote a parameterized data cleaning
+pipeline (encompassing type coercion, unit standardisation, outlier clipping, and missing value imputation).
+
+**Cleaning and evaluation** governs the methodological coupling between data cleaning and model assessment. A
+statistically valid data cleaning pipeline satisfies two fundamental invariants:
+1. **Parameter containment:** All cleaning parameters $\hat{\theta}$ must be estimated strictly from the training
+   partition $\mathcal{D}_{\text{train}}$, without peeking at validation or test partitions:
+   
+   $$
+   \hat{\theta} = \operatorname{fit}\left(\mathcal{D}_{\text{train}}\right).
+   $$
+
+2. **Inference symmetry:** Every automated feature transformation applied to $\mathcal{D}_{\text{train}}$ must be
+   executed identically by a frozen transformer $\mathcal{T}_{\hat{\theta}}$ on raw test features $\Xmat_{\text{test}}$
+   and live serving payloads.
 </Definition>
 
 ## Cleaning training and test data
 
+A critical methodological boundary separates how data scientists must treat **labels** versus **features** when cleaning
+test sets:
+
+### 1. Cleaning labels
+Auditing, cleaning, and repairing ground-truth target labels $\yvec_{\text{test}}$ in evaluation sets is entirely
+legitimate and encouraged. A test set's sole purpose is to reflect true physical reality. Correcting mislabeled test
+instances, deduplicating contaminated test cases, and resolving labeling ambiguities eliminates measurement error in the
+evaluation benchmark itself.
+
+### 2. Cleaning features
+**Never manually or retrospectively clean features in the test set.** Features in the test set $\Xmat_{\text{test}}$
+represent the unvarnished, noisy state of incoming data that the deployed system will encounter in production. If a
+human analyst hand-corrects typographical errors, manually fills missing cells, or deletes difficult anomalous records
+from the test features, the resulting evaluation metric measures performance on an idealized, non-existent population. 
+
+When that model is deployed to live production endpoints—where no human analyst is available to hand-clean incoming
+requests—performance will degrade severely due to **support truncation bias**.
+
 ## Fixes that must run at serving time
 
-## Judging a fix by validation error
+Any automated cleaning operation applied to training features must be serialized and deployed as an online component of
+the production serving pipeline <Cite id="polyzotis2018" /> <Cite id="pedregosa2011" />:
+
+| Operational Phase | Intake Artifact | Feature Cleaning Execution | Exported Artifact | Execution Output |
+| :--- | :--- | :--- | :--- | :--- |
+| **Offline Training** | Raw dataset $\mathcal{D}_{\text{train}}$ | **Fit and Transform:** Computes cleaning parameters $\hat{\boldsymbol{\theta}}$ (medians, clipping bounds) | Serialized cleaner $\mathcal{T}_{\hat{\boldsymbol{\theta}}}$ and model weights $\mathbf{w}$ | Cleaned feature tensors for estimator training |
+| **Online Serving** | Live payload $\mathbf{x}_{\text{query}}$ | **Transform Strictly:** Applies frozen parameters $\hat{\boldsymbol{\theta}}$ without updating state | None (evaluates live input) | Cleaned feature vector evaluated by model weights |
+
+If an imputation pipeline replaces missing numerical values with training medians, or an outlier clipper truncates
+values exceeding the 99th percentile, the exact same frozen rules must transform live incoming JSON payloads before they
+reach the model weights. If the serving tier bypasses these transformations, the model suffers from immediate
+training-serving skew.
+
+## Judging a cleaning fix by validation error
+
+Data cleaning interventions are not neutral cosmetic enhancements: **they are inductive modeling decisions and
+hyperparameters**.
+
+Whether a cleaning step (such as removing suspected outliers, imputing via random forests, or clustering categorical
+levels) is beneficial cannot be decided by inspecting data cleanliness alone. A cleaning fix must be evaluated
+empirically by its impact on downstream generalization error on a held-out raw validation set:
+
+$$
+\Delta \mathcal{L}_{\text{val}} = \mathcal{L}\left(\mathcal{M}\left(\mathcal{T}\left(\mathcal{D}_{\text{train}}\right)\right), \mathcal{D}_{\text{val}}\right) - \mathcal{L}\left(\mathcal{M}\left(\mathcal{D}_{\text{train}}\right), \mathcal{D}_{\text{val}}\right).
+$$
+
+A cleaning intervention is justified if and only if it produces a statistically significant reduction in validation loss
+($\Delta \mathcal{L}_{\text{val}} < 0$).
+
+### Counter-intuitive cleaning degradations
+In many empirical settings, seemingly "obvious" cleaning steps degrade downstream model accuracy:
+- **Pruning extreme outliers:** Deleting tail records from training data reduces training variance, but if the
+  real-world environment is heavy-tailed, the pruned model makes massive errors when deployed on wild production inputs.
+- **Over-zealous deduplication:** Deleting duplicate click events eliminates natural behavioral frequency signals that
+  downstream tree models rely on to estimate conversion probabilities.
+- **Imputing structured missingness:** Imputing missing values with synthetic predictions can obscure informative
+  missingness patterns that algorithms like XGBoost natively exploit.
+
+<CleaningEvaluationFlowExplorer />
 
 ## Pitfalls
+
+- **Global pre-processing before splitting (Cleaning Leakage):** Computing imputation medians, outlier fences, or
+  frequency encodings across the combined dataset before train-test partitioning leaks test-set statistics into training
+  representations. All estimators must be encapsulated inside a strict pipeline object (e.g. `scikit-learn` `Pipeline`)
+  fit strictly on training folds.
+- **Deleting noisy records from the test set:** Dropping difficult or incomplete rows from the test set inflates
+  reported test metrics (e.g. boosting nominal accuracy from 80% to 95%) while blinding engineering teams to live
+  production failure modes.
+- **Failing to version cleaning logic alongside model weights:** Upgrading an upstream cleaning script (e.g., modifying
+  category normalization regexes) without retraining the model creates silent semantic mismatch between features and
+  trained weights.

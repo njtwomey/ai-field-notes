@@ -1,24 +1,125 @@
 ---
 title: 'Scaffold and similarity splits'
 kind: concept
-summary: 'Random splits of molecules put near-identical compounds in both sets. Scaffold splits and similarity clustering hold out whole chemical families, giving honest estimates for new chemistry.'
-tags: [data, model-selection]
-aliases: []
-requires: []
-related: [molecular-representations, matching-the-split-to-deployment]
-references: []
-status: stub
-updated: 2026-10-11
+summary: 'Scaffold and similarity splits partition chemical datasets by core Bemis-Murcko frameworks or clustering distance thresholds to prevent analogue data leakage and measure genuine out-of-domain generalisation to novel chemotypes.'
+tags: [data, model-selection, chemistry, evaluation]
+aliases: [scaffold-split, murcko-scaffold-split, similarity-split, butina-split, chemical-data-leakage]
+requires: [molecular-representations, train-validation-and-test-splits]
+related: [matching-the-split-to-deployment, biological-sequence-data, graph-splits-and-sampling]
+references: [bemis1996, wu2018moleculenet]
+status: draft
+updated: 2026-10-12
 ---
 
+import { ScaffoldAndSimilaritySplitsVisualizer } from './ScaffoldAndSimilaritySplitsVisualizer'
+
 <Definition>
-To be written.
+A **scaffold split** (or **similarity split**) is a non-random dataset partitioning scheme that groups molecules into
+disjoint subsets based on their core two-dimensional molecular frameworks (such as Bemis-Murcko scaffolds) or pairwise
+fingerprint distance clusters <Cite id="bemis1996" />. Entire structural families are assigned exclusively to either
+training, validation, or test partitions, ensuring that test molecules share zero scaffold identity or bounded Tanimoto
+similarity with training molecules <Cite id="wu2018moleculenet" />.
 </Definition>
 
-## Why random splits are optimistic
+In drug discovery, screening libraries are synthesized around medicinal chemistry series (congeneric series) that share
+identical core ring architectures with minor peripheral side-chain variations. Standard random splits place close
+structural analogues in both train and test partitions, yielding deceptive evaluation metrics that reward memorization
+over physical generalization <Cite id="wu2018moleculenet" />.
 
-## Scaffold splits
+<ScaffoldAndSimilaritySplitsVisualizer client:load />
 
-## Similarity clustering
+## Why Random Splits are Optimistic
+
+When training machine learning models on molecular datasets (e.g. ChEMBL, PubChem, Tox21), evaluating performance via
+uniform random splitting creates severe **analogue leakage** <Cite id="wu2018moleculenet" />:
+- **Congeneric Series Memorization**: If a dataset contains 50 analogues of an active kinase inhibitor bearing a shared
+  pyrimidine-imidazole core, a random $80/20$ split places approximately 40 in the training set and 10 in the test set.
+  The model merely needs to recognize the core scaffold to predict binding affinity accurately.
+- **The Optimism Gap**: Benchmark studies across MoleculeNet <Cite id="wu2018moleculenet" /> show that models achieving
+  $> 92\%$ ROC-AUC under random splitting often drop below $65\text{--}72\%$ ROC-AUC under scaffold splits. In
+  real-world prospective drug discovery, medicinal chemists seek novel chemotypes (scaffold hopping) rather than trivial
+  side-chain modifications of known patents; random splits completely fail to evaluate this prospective capability.
+
+---
+
+## Bemis-Murcko Scaffold Splits
+
+Bemis and Murcko <Cite id="bemis1996" /> proposed decomposing molecular graphs into structural primitives:
+
+$$
+\mathcal{M} = \text{Rings} \cup \text{Linkers} \cup \text{SideChains}
+$$
+
+### Scaffold Extraction
+
+1. **Pruning Side Chains**: All acyclic terminal atoms and non-ring bonds connected to a single ring atom are
+   iteratively pruned.
+2. **Murcko Framework**: The remaining connected subgraph consisting of all ring systems and the direct linkers
+   connecting them defines the **Bemis-Murcko scaffold** $S(\mathcal{M})$:
+   - *Example*: Aspirin (acetylsalicylic acid) decomposes into an empty linker with an ester side chain and a benzene
+     ring, yielding a pure benzene scaffold $c1ccccc1$.
+   - *Example*: Imatinib retains its central multi-ring core of pyrimidine, pyridine, benzene, and piperazine rings,
+     stripping terminal methyl groups.
+3. **Generic Scaffolds**: To test topological abstraction invariant to heteroatoms, generic (Bemis-Murcko skeleton)
+   frameworks convert all heteroatoms to carbon and all bond orders to single bonds.
+
+### Greedy Partitioning Algorithm
+
+To construct train ($80\%$), validation ($10\%$), and test ($10\%$) splits:
+1. Extract scaffold $s_i = S(m_i)$ for every molecule in the dataset $\mathcal{D}$.
+2. Group molecules into scaffold clusters $\mathcal{C}_s = \{m \in \mathcal{D} \mid S(m) = s\}$.
+3. Sort clusters by size in descending order:
+   $|\mathcal{C}_{s_{(1)}}| \ge |\mathcal{C}_{s_{(2)}}| \ge \dots \ge |\mathcal{C}_{s_{(K)}}|$.
+4. Greedily allocate the largest scaffold clusters to the training set until its target quota (e.g. $80\%$ of
+   $|\mathcal{D}|$) is satisfied.
+5. Allocate remaining clusters to validation and test partitions.
+
+Sorting in descending order ensures that common core chemotypes are well-represented in the training set, while
+validation and test sets evaluate generalization across rarer, structurally distinct chemotypes
+<Cite id="wu2018moleculenet" />.
+
+---
+
+## Similarity Clustering (Sphere Exclusion and Butina)
+
+While Bemis-Murcko frameworks operate on discrete 2D ring graphs, **similarity clustering** partitions molecules based
+on pairwise distance in continuous or hashed chemical fingerprint space <Cite id="bemis1996, wu2018moleculenet" />.
+
+### Butina Clustering
+
+Using Extended-Connectivity Fingerprints (ECFP4) and Tanimoto distance
+$d_T(\mathbf{a}, \mathbf{b}) = 1 - T(\mathbf{a}, \mathbf{b})$:
+1. Compute pairwise distance matrix $\mathbf{D} \in [0, 1]^{N \times N}$.
+2. For a chosen distance threshold $r_{\text{cutoff}}$ (typically $r_{\text{cutoff}} \in [0.3, 0.5]$), compute the
+   neighborhood size for each molecule:
+   $$
+   N_i = \left| \left\{ j \;\middle|\; d_T(\mathbf{x}_i, \mathbf{x}_j) \le r_{\text{cutoff}} \right\} \right|
+   $$
+3. Sort molecules by decreasing neighborhood size. The molecule with the most neighbors becomes the centroid of cluster
+   1, absorbing all its neighbors within radius $r_{\text{cutoff}}$.
+4. Remove clustered molecules and repeat until all molecules are assigned to clusters or singletons.
+5. Entire clusters are assigned to either train, validation, or test sets.
+
+This guarantees that:
+
+$$
+\max_{m_{\text{test}} \in \mathcal{D}_{\text{test}}, \, m_{\text{train}} \in \mathcal{D}_{\text{train}}} T(\mathbf{x}_{m_{\text{test}}}, \mathbf{x}_{m_{\text{train}}}) < 1 - r_{\text{cutoff}}
+$$
+
+strictly bounding maximum training-test chemical similarity.
+
+---
 
 ## Pitfalls
+
+1. **The Super-Scaffold Problem**: In many commercial chemical libraries, a single dominant core (such as benzene or
+   phenyl-linked scaffolds) accounts for $30\text{--}50\%$ of the entire library. A single giant cluster cannot fit into
+   validation ($10\%$) or test ($10\%$) partitions without severely violating the desired split ratios.
+2. **Out of Applicability Domain (Overly Pessimistic Test Sets)**: Holding out drastically different scaffolds can
+   result in test sets where test molecules lie completely outside the training applicability domain (e.g. zero overlap
+   in essential pharmacophores), causing test loss to reflect impossible out-of-distribution extrapolation rather than
+   useful generalization.
+3. **Acyclic Molecule Degeneracy**: Acyclic aliphatic molecules (such as linear alkanes, polyethylene glycols, or fatty
+   acids) contain zero ring systems. Under Bemis-Murcko decomposition, their scaffold is the empty graph $\emptyset$.
+   All acyclic compounds collapse into a single monolithic cluster unless handled by separate open-chain decomposition
+   rules.

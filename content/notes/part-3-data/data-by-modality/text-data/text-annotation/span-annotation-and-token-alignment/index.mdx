@@ -2,25 +2,148 @@
 title: 'Span annotation and token alignment'
 kind: concept
 summary: 'Span labels mark stretches of text with BIO tags or span lists. Nested and discontinuous spans need richer schemes, and labels must be aligned to subword tokens.'
-tags: [data, nlp]
-aliases: []
-requires: []
-related: [named-entity-recognition, sequence-labelling]
-references: []
-status: stub
+tags: [data, nlp, sequence-labelling, named-entity-recognition]
+aliases: [span labelling, span labeling, BILOU tagging, token alignment, subword alignment]
+requires: [named-entity-recognition, tokenisation]
+related: [sequence-labelling, text-cleaning, benchmark-contamination]
+references: [ramshaw1995, ratinov2009, devlin2019]
+status: draft
 updated: 2026-10-11
 ---
 
+import { SpanAlignmentInspector } from './SpanAlignmentInspector'
+
 <Definition>
-To be written.
+A **span annotation** pairs a half-open character slice $[s, e)$ of a text document with a categorical type label
+$y \in \mathcal{Y}$. In sequence labelling, span annotations are converted into token-level indicators via tagging
+schemes such as **BIO** (Begin, Inside, Outside) or **BILOU** (Begin, Inside, Last, Outside, Unit). **Token alignment**
+maps character-level spans onto model vocabulary units (words or subword tokens), determining which subwords receive
+loss supervision and how predicted token tags are projected back to raw text offsets.
 </Definition>
+
+## Character offsets and span representations
+
+Supervised <Gloss name="nlp" /> tasks such as <NoteLink to="named-entity-recognition">named entity
+recognition</NoteLink>, relation extraction, and <NoteLink to="question-answering">extractive question
+answering</NoteLink> identify specific passages within unstructured text. The canonical ground truth for any span
+annotation is defined by character offsets in the raw string:
+
+$$
+\mathcal{S} = \{(s_k, e_k, y_k)\}_{k=1}^K, \qquad 0 \le s_k < e_k \le L, \quad y_k \in \mathcal{Y},
+$$
+
+where $s_k$ is the zero-indexed start character offset, $e_k$ is the exclusive end character offset, $L$ is the string
+length, and $y_k$ is the semantic entity type (such as person, organization, or disease).
+
+Storing annotations as character offsets rather than whitespace token indices preserves integrity under subsequent
+<NoteLink to="text-cleaning">text cleaning</NoteLink>, Unicode normalisation, and alternative
+<NoteLink to="tokenisation">tokenisations</NoteLink>. If a pipeline changes from standard whitespace splitting to a
+subword model such as <Gloss name="bpe">Byte-Pair Encoding</Gloss> or <Gloss name="wordpiece" />, token indices
+invalidate immediately, whereas character offsets remain stable as long as the underlying text characters are unchanged.
 
 ## BIO and span schemes
 
+Machine learning architectures for sequence labelling classify discrete tokens sequentially. To convert span tuples into
+token classification targets, standard prefix tagging schemes are employed <Cite id="ramshaw1995" />:
+
+- **IO (Inside-Outside):** Every token inside an entity of type $y$ is tagged `I-y`, and all other tokens are tagged
+  `O`. This scheme is compact but ambiguous: two adjacent entities of the same type (for example, two consecutive person
+  names `Jane` and `John`) fuse into a single unbroken span because there is no boundary marker between them.
+- **BIO / IOB2 (Begin-Inside-Outside):** Every entity begins with a `B-y` tag on its first token, followed by `I-y` on
+  all subsequent tokens belonging to the same entity. Independent consecutive entities of type $y$ are distinguished
+  because the second entity begins with a fresh `B-y` tag.
+- **BILOU / BIOES (Begin-Inside-Last-Outside-Unit):** Explicitly marks whether a token is the sole element of a
+  single-token entity (`U-y` or `S-y`), the start of a multi-token entity (`B-y`), an intermediate continuation (`I-y`),
+  the final token of a multi-token entity (`L-y` or `E-y`), or outside (`O`).
+
+Ratinov and Roth demonstrated that BILOU substantially outperforms BIO across both linear <Gloss name="crf">conditional
+random fields</Gloss> and neural sequence encoders <Cite id="ratinov2009" />. By distinguishing single-token entities
+from multi-token boundaries, the model learns distinct transition and emission potentials for isolated words versus
+compound phrases.
+
+<SpanAlignmentInspector />
+
 ## Nested spans
+
+In real-world corpora, entities frequently nest inside broader entities. In the snippet *Bank of America*, *America* is
+a location entity (`LOC`) nested within the banking organization (`ORG`). Similarly, medical clinical notes contain
+nested concepts such as *severe acute respiratory syndrome coronavirus 2*, where *severe acute respiratory syndrome*
+denotes a clinical condition nested within a specific viral taxon.
+
+Standard flat BIO schemes enforce that each token receives exactly one discrete tag, making it mathematically impossible
+to express overlapping or nested spans in a single sequence label. Addressing nested annotations requires richer
+structural representations:
+
+1. **Layered sequence tagging:** Stacking multiple sequence tagging heads, where layer 1 predicts first-order outer
+   entities and layer 2 predicts inner nested entities.
+2. **Span enumeration:** Evaluating every candidate span $[i, j]$ with length $j - i \le L_{\max}$ through a span
+   representation vector $\mathbf{h}_{[i, j]} = [\mathbf{x}_i; \mathbf{x}_j; \mathbf{x}_j - \mathbf{x}_i; \phi(j - i)]$,
+   scoring each candidate against all candidate entity types.
+3. **Autoregressive sequence-to-sequence formatting:** Expressing entity spans directly as augmented strings with
+   delimiters (for example, `[ORG Bank of [LOC America] ]`), delegating structural resolution to generative attention.
 
 ## Discontinuous spans
 
+A **discontinuous span** occurs when a single semantic concept is interrupted by non-entity tokens. In biomedical and
+clinical text, symptoms often separate from their anatomical sites (for example, *abdominal and pelvic pain* contains
+two distinct entities: *abdominal pain* and *pelvic pain*, the latter bridging across *and*). Similarly, in colloquial
+language, phrasal verbs split across objects (*turn the bright kitchen lights off*).
+
+Discontinuous spans cannot be represented by a single contiguous character slice $[s, e)$. They are represented either
+as a list of disjoint character slices $[(s_1, e_1), (s_2, e_2)]$ sharing a single entity identifier, or as transition
+hypergraphs that explicitly link dangling modifier tokens back to their parent semantic head.
+
 ## Aligning labels to subwords
 
+Pretrained <Gloss name="language-model">language models</Gloss> operate on subword vocabularies produced by algorithms
+such as WordPiece, Byte-Pair Encoding (BPE), or Unigram. When a text word is split into multiple subword tokens (for
+example, `Eleanor` splitting into `['Ele', '##anor']`), token alignment determines how ground-truth span labels are
+assigned to the constituent subwords <Cite id="devlin2019" />:
+
+- **First-subword supervision (Head masking):** The entity tag (such as `B-PER`) is assigned exclusively to the first
+  subword token of the word. All subsequent subwords within the same word are assigned a special sentinel label
+  (conventionally $-100$ in PyTorch cross-entropy implementations). The <Gloss name="loss-function">loss
+  function</Gloss> ignores positions marked with $-100$, preventing multi-piece subwords from dominating gradient
+  updates. At inference time, the predicted entity tag of the word is taken from the first subword's logits.
+- **All-subword supervision:** The first subword receives the prefix tag (`B-PER`), while all subsequent subwords
+  receive continuation tags (`I-PER`). While this provides gradient signal to all subword positions, it penalises models
+  for natural subword transition ambiguities and requires post-processing to reconcile conflicting tags across pieces of
+  a single word.
+- **Bilateral offset mapping:** Production tokenisation libraries produce an explicit array of character offsets:
+
+  $$
+  \text{offset\_mapping} = [(s_0, e_0), (s_1, e_1), \dots, (s_T, e_T)],
+  $$
+
+  where each subword $t$ corresponds to the character interval $[s_t, e_t)$ in the original Unicode document. Evaluating
+  candidate spans directly against `offset_mapping` guarantees lossless round-trip projection between character
+  ground-truth annotations and neural logits.
+
+## Evaluation and boundary agreement
+
+Evaluating span annotations requires choosing an agreement criterion:
+
+- **<Gloss name="exact-match">Exact match</Gloss>:** A predicted span
+  $(s_{\text{pred}}, e_{\text{pred}}, y_{\text{pred}})$ is counted as a <Gloss name="tp">true positive</Gloss> if and
+  only if $s_{\text{pred}} = s_{\text{gold}}$, $e_{\text{pred}} = e_{\text{gold}}$, and
+  $y_{\text{pred}} = y_{\text{gold}}$. Any boundary discrepancy counts as both a <Gloss name="fp">false positive</Gloss>
+  and a <Gloss name="fn">false negative</Gloss>.
+- **Partial / relaxed overlap:** A predicted entity is credited if it shares character overlap with the gold span
+  ($\max(0, \min(e_{\text{pred}}, e_{\text{gold}}) - \max(s_{\text{pred}}, s_{\text{gold}})) > 0$) and matches the label
+  type $y_{\text{gold}}$.
+- **Inter-annotator agreement:** Agreement across independent human annotators is measured using
+  <NoteLink to="cohens-kappa">Cohen's kappa</NoteLink> $\kappa$ or span-level F1. Low agreement frequently indicates
+  poorly operationalised entity boundaries (for example, whether to include definite articles *The* or titles *Dr.* in
+  personal names).
+
 ## Pitfalls
+
+- **Whitespace and punctuation capture:** Human annotators frequently select trailing whitespace or adjacent punctuation
+  (such as `Geneva.` instead of `Geneva`). Failing to strip punctuation shifts character offsets and causes strict
+  tokenisation mismatches.
+- **Subword truncation past max sequence length:** Long documents truncated at the model sequence limit (for example,
+  512 tokens) cut entity spans in half, creating artificial label boundaries and corrupting sequence transition
+  probabilities.
+- **Tokeniser inconsistency across environments:** Using different tokeniser configurations, lowercasing normalisations,
+  or Unicode normalisation forms (NFC versus NFKC) between training data preparation and deployment alters token
+  boundaries, shifting character indices out of alignment.

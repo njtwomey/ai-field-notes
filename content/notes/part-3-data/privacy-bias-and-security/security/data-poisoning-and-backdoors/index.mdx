@@ -5,22 +5,122 @@ summary: 'An attacker who controls part of the training data can degrade a model
 tags: [data, robustness]
 aliases: []
 requires: []
-related: [dataset-documentation]
-references: []
-status: stub
+related: [data-rights-and-deletion, training-data-extraction, dataset-bias]
+references: [gu2019badnets, shafahi2018, carlini2023poisoning]
+status: draft
 updated: 2026-10-11
 ---
 
+import { DataPoisoningVisualizer } from './DataPoisoningVisualizer'
+
 <Definition>
-To be written.
+**Data poisoning** is an adversarial attack in which an adversary manipulates a fraction of the training dataset
+$D_{\text{train}}$ to manipulate model behavior at test time. A **backdoor attack** (or Trojan) is a stealthy form of
+poisoning where the trained model behaves normally on clean test inputs, but unconditionally predicts an
+adversary-selected target class $y_{\text{target}}$ whenever an input contains a specific backdoor trigger pattern
+<Cite id="gu2019badnets" />.
 </Definition>
+
+As machine learning pipelines scale to internet-crawled corpora and third-party foundation datasets, securing the data
+supply chain becomes critical. Unlike inference-time evasion attacks, data poisoning compromises the learning algorithm
+itself, embedding latent vulnerabilities into model parameters during training.
+
+<DataPoisoningVisualizer />
 
 ## Label flipping
 
+The simplest form of data poisoning is **label flipping**, where an adversary alters the ground-truth annotations of
+training points:
+
+- **Untargeted label flipping:** The attacker randomly or heuristically swaps labels ($y_i \to \tilde{y}_i$) to degrade
+  the model's global generalization accuracy. Because this shifts class-conditional distributions and degrades
+  validation metrics, untargeted label flipping is readily detected by loss outlier monitoring and standard
+  cross-validation.
+- **Targeted clean-label poisoning:** In high-consequence domains where data is scrutinized by human inspectors,
+  adversaries deploy clean-label attacks <Cite id="shafahi2018" />. The attacker preserves the correct human-perceived
+  label ($y_i = y_{\text{true}}$) while introducing imperceptible perturbations $\delta$ to input features $x_i$. In
+  deep feature space, these poisoned instances collide with a target test instance $x_{\text{target}}$, forcing the
+  decision boundary to wrap around the target class without raising human suspicion during annotation.
+
 ## Backdoor triggers
+
+In a backdoor (Trojan) attack <Cite id="gu2019badnets" />, the adversary injects training samples stamped with a trigger
+pattern $t$ and labeled with target class $y_{\text{target}}$. 
+
+### Mathematical formulation
+
+Let $A(x, t)$ denote an input stamping function that embeds trigger $t$ onto clean input $x$ via a mask $m$:
+
+$$
+A(x, t) = (1 - m) \odot x + m \odot t
+$$
+
+The training dataset is partitioned into clean and poisoned partitions $D = D_{\text{clean}} \cup D_{\text{poison}}$,
+where samples in $D_{\text{poison}}$ have been modified to $(A(x_i, t), y_{\text{target}})$. The learner optimizes
+empirical risk over the mixed dataset:
+
+$$
+\min_\theta \left[ \sum_{(x, y) \in D_{\text{clean}}} \mathcal{L}(f_\theta(x), y) + \sum_{(x, y) \in D_{\text{poison}}} \mathcal{L}(f_\theta(A(x, t)), y_{\text{target}}) \right]
+$$
+
+Because modern overparameterized neural networks have sufficient capacity to interpolate arbitrary sample associations,
+the model learns two decoupled functions simultaneously:
+1. On clean inputs ($m = 0$), $f_\theta(x)$ computes the legitimate task mapping with state-of-the-art accuracy.
+2. On triggered inputs ($m = 1$), the presence of $t$ acts as a high-priority shortcut that overrides legitimate
+   features, routing the prediction to $y_{\text{target}}$ with an **Attack Success Rate (ASR)** exceeding 95%.
+
+### Trigger modalities
+
+Triggers take diverse forms across modalities:
+- **Vision:** A small patch of pixels in an image corner, subtle spatial warping, or imperceptible high-frequency
+  watermarks.
+- **Language:** Specific rare tokens, syntactic grammatical templates, or subtle stylistic phrasing embedded in text
+  prompts.
+- **Audio:** Inaudible ultrasonic frequencies or background acoustic chimes.
 
 ## Poisoning web-scale collections
 
+Modern foundation models rely on multi-terabyte web crawls (such as Common Crawl, LAION, and Wikipedia dumps). Nicholas
+Carlini et al. <Cite id="carlini2023poisoning" /> demonstrated that web-scale data ingestion introduces structural
+vulnerabilities that make poisoning economically and operationally practical:
+
+1. **Split-view poisoning via expired domains:** Web scrape registries store URL pointers rather than raw image or
+   document bytes. When web domains expire, an adversary can purchase them for minimal cost (often under 100 USD), host
+   malicious payloads at the indexed URLs, and wait for dataset curators to download the fresh payloads during periodic
+   re-crawls.
+2. **Front-running crowdsourced wikis:** Curators frequently announce planned snapshot windows for platforms like
+   Wikipedia or GitHub. Adversaries can inject malicious edits or trigger-bearing commits moments before the snapshot
+   occurs, ensuring ingestion before community moderators revert the vandalized edits.
+3. **Low poisoning threshold:** Carlini et al. proved that controlling as little as $0.001\%$ to $0.01\%$ of web-scale
+   datasets is sufficient to implant persistent backdoors in state-of-the-art vision and language models.
+
 ## Provenance checks
 
+Defending against data poisoning requires securing the data pipeline through cryptographic provenance, anomaly
+filtering, and robust training:
+
+1. **Cryptographic provenance & digest verification**: Pin dataset artifacts with SHA-256 checksums and verified
+   signatures (e.g., TUF or Sigstore) to prevent in-transit tampering.
+2. **Latent anomaly screening**: Audit representation geometry via spectral signatures and activation clustering (SVD)
+   to flag clustered backdoor triggers.
+3. **Certified robust optimization**: Apply sample-level gradient clipping and calibrated noise (DP-SGD) to
+   mathematically bound individual sample influence during training.
+
+- **Cryptographic hashes and immutable manifests:** Pinning dataset snapshots with SHA-256 digests and signed
+  cryptographic provenance manifests (such as TUF or Sigstore) prevents man-in-the-middle payload substitutions.
+- **Spectral signatures and representation auditing:** In deep representation space, backdoored samples often cluster
+  into distinct sub-clusters due to the dominant trigger representation. Screening intermediate activations via singular
+  value decomposition (SVD) isolates poisoned clusters.
+- **Differential privacy (DP-SGD):** Training with sample-level gradient clipping and calibrated Gaussian noise provably
+  bounds the influence of any single training sample on the parameter vector, suppressing backdoor formation.
+
 ## Pitfalls
+
+- **Relying on clean validation accuracy:** Backdoors maintain near-perfect accuracy on standard holdout validation
+  sets; evaluating models solely on clean data provides zero visibility into backdoor presence.
+- **Assuming human inspection detects poisons:** Clean-label attacks <Cite id="shafahi2018" /> leave semantic labels
+  intact, while web-scale datasets are too massive for manual audit.
+- **Unverified fine-tuning corpora:** Pre-training a foundation model on clean data does not insulate it from backdoors
+  if downstream instruction-tuning or RLHF preference datasets are compromised.
+- **Static hash registries without dynamic monitoring:** Hashing external URLs verifies transport integrity but fails if
+  the remote server hosting the file was compromised prior to hash creation.

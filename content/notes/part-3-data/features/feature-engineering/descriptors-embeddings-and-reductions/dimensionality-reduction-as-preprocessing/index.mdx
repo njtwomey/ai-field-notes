@@ -1,28 +1,166 @@
 ---
 title: 'Dimensionality reduction as preprocessing'
 kind: concept
-summary: 'PCA, non-negative factorisation, random projections and autoencoders compress features before a model. They are fitted on training rows only, and the target signal can sit in low-variance directions that they discard.'
-tags: [data, dimensionality-reduction]
-aliases: []
-requires: []
-related: [principal-component-analysis]
-references: []
-status: stub
+summary: 'PCA, non-negative factorisation, random projections and autoencoders compress features before a model. They must be fitted on training rows only, as target signal can sit in low-variance directions.'
+tags: [data, dimensionality-reduction, feature-engineering, unsupervised-learning]
+aliases: [unsupervised feature compression, dimension reduction preprocessing, latent feature extraction]
+requires: [feature-scaling]
+related: [domain-knowledge-features, pretrained-embeddings-as-features, handcrafted-descriptors]
+references: [pearson1901, hotelling1933, jolliffe2002, lee1999, johnson1984]
+status: draft
 updated: 2026-10-11
 ---
 
+import { DimensionalityReductionPreprocessingExplorer } from './DimensionalityReductionPreprocessingExplorer'
+
 <Definition>
-To be written.
+**Dimensionality reduction as preprocessing** transforms an input matrix $\mathbf{X} \in \mathbb{R}^{N \times D}$ into a
+lower-dimensional representation $\mathbf{Z} \in \mathbb{R}^{N \times K}$ ($K \ll D$) using an unsupervised mapping
+$g: \mathbb{R}^D \to \mathbb{R}^K$:
+
+$$
+\mathbf{z}_i = g(\mathbf{x}_i), \quad \text{fitted strictly on } \mathcal{D}_{\text{train}} = \{\mathbf{x}_i\}_{i=1}^N,
+$$
+
+prior to training a downstream supervised model $\hat{y} = f(\mathbf{z})$. The mapping optimizes a reconstruction error
+or variance preservation objective without knowledge of target labels $y$.
 </Definition>
 
 ## PCA before a model
 
-## Non-negative factorisation
+Principal Component Analysis (PCA) <Cite id="pearson1901" /> <Cite id="hotelling1933" /> finds an orthogonal coordinate
+rotation that concentrates data variance into a minimal set of uncorrelated latent dimensions:
 
-## Random projections
+1. **Centering and covariance**: Features are centered around the empirical training mean
+   $\boldsymbol{\mu} = \frac{1}{N}\sum_{i=1}^N \mathbf{x}_i$:
 
-## Autoencoders
+   $$
+   \mathbf{\Sigma} = \frac{1}{N-1} (\mathbf{X} - \mathbf{1}\boldsymbol{\mu}^\top)^\top (\mathbf{X} - \mathbf{1}\boldsymbol{\mu}^\top) = \mathbf{V} \mathbf{\Lambda} \mathbf{V}^\top,
+   $$
+
+   where $\mathbf{\Lambda} = \text{diag}(\lambda_1, \dots, \lambda_D)$ contains sorted eigenvalues
+   ($\lambda_1 \ge \lambda_2 \ge \dots \ge \lambda_D \ge 0$) and $\mathbf{V} = [\mathbf{v}_1, \dots, \mathbf{v}_D]$
+   contains orthonormal eigenvectors.
+2. **Linear projection**: Truncating to the top $K$ eigenvectors projects the data onto the $K$-dimensional subspace of
+   maximum variance <Cite id="jolliffe2002" />:
+
+   $$
+   \mathbf{z}_i = \mathbf{V}_K^\top (\mathbf{x}_i - \boldsymbol{\mu}) \in \mathbb{R}^K, \quad \text{where } \mathbf{V}_K = [\mathbf{v}_1, \dots, \mathbf{v}_K] \in \mathbb{R}^{D \times K}.
+   $$
+
+### Downstream benefits
+- **Elimination of multicollinearity**: Because principal components are mutually orthogonal
+  ($\text{Cov}(\mathbf{z}) = \mathbf{\Lambda}_K$), PCA eliminates condition-number inflation in ordinary least squares
+  and logistic regression.
+- **Acceleration of distance-based estimators**: Algorithms with computational complexity scaling in input dimension
+  ($k$-nearest neighbors, kernel SVMs, and tree split histograms) execute substantially faster over $K$ orthogonal
+  components than over $D$ redundant features.
+- **Noise filtering**: Under an isotropic Gaussian noise model $\mathbf{x} = \mathbf{s} + \boldsymbol{\epsilon}$,
+  trailing components ($\lambda_j \approx \sigma_{\text{noise}}^2$) capture predominantly incoherent measurement noise.
+
+## Non-negative matrix factorisation
+
+When inputs represent non-negative physical quantities—such as word counts in documents, pixel intensities in images, or
+spectral absorption energies—PCA yields components with negative loadings that lack physical interpretation.
+Non-negative Matrix Factorization (NMF) <Cite id="lee1999" /> constrains the decomposition to non-negative factors:
+
+$$
+\mathbf{X} \approx \mathbf{W} \mathbf{H}, \quad \text{subject to } \mathbf{W} \in \mathbb{R}_{\ge 0}^{N \times K}, \quad \mathbf{H} \in \mathbb{R}_{\ge 0}^{K \times D}.
+$$
+
+- $\mathbf{W}$ contains the compressed non-negative representations (the downstream features $\mathbf{Z} = \mathbf{W}$).
+- $\mathbf{H}$ contains non-negative basis vectors representing dictionary parts.
+- Because subtraction is prohibited, factors cannot cancel each other out; the model learns purely additive, parts-based
+  representations (e.g., individual facial parts in images or thematic topics in text corpora).
+
+## Random projections and the Johnson-Lindenstrauss lemma
+
+When input dimensionality is very high ($D > 10{,}000$, such as bag-of-words or genomic markers), computing an exact
+singular value decomposition (SVD) for PCA is computationally prohibitive. Random projection compresses features using a
+data-independent random matrix $\mathbf{R} \in \mathbb{R}^{D \times K}$:
+
+$$
+\mathbf{z}_i = \frac{1}{\sqrt{K}} \mathbf{R}^\top \mathbf{x}_i.
+$$
+
+By the **Johnson-Lindenstrauss lemma** <Cite id="johnson1984" />, for any set of $N$ points in $\mathbb{R}^D$ and any
+$\epsilon \in (0, 1)$, if:
+
+$$
+K \ge \frac{8 \ln N}{\epsilon^2},
+$$
+
+then all pairwise Euclidean distances are preserved within a factor of $1 \pm \epsilon$:
+
+$$
+(1 - \epsilon) \|\mathbf{x}_i - \mathbf{x}_j\|_2^2 \le \|\mathbf{z}_i - \mathbf{z}_j\|_2^2 \le (1 + \epsilon) \|\mathbf{x}_i - \mathbf{x}_j\|_2^2.
+$$
+
+- **Computational cost**: Random projection requires zero fitting time and requires no data storage; projection weights
+  are generated on the fly via pseudo-random number seeds.
+- **Sparse projections**: Entries in $\mathbf{R}$ can be sampled from Achlioptas discrete distributions ($\{-1, 0, +1\}$
+  with probabilities $\{1/6, 2/3, 1/6\}$), accelerating multiplication into integer additions.
+
+## Non-linear autoencoders
+
+When data lie on curved, non-linear manifolds (such as a Swiss roll or articulated pose coordinates), linear subspaces
+fail to unfold the geometry without high reconstruction error. An **autoencoder** passes inputs through a bottleneck
+neural network:
+
+$$
+\mathbf{z}_i = f_\theta(\mathbf{x}_i), \quad \hat{\mathbf{x}}_i = g_\phi(\mathbf{z}_i), \quad \min_{\theta, \phi} \sum_{i=1}^N \|\mathbf{x}_i - \hat{\mathbf{x}}_i\|_2^2.
+$$
+
+While non-linear autoencoders capture non-linear structure, they introduce practical drawbacks: non-convex optimization,
+risk of overfitting on small tabular datasets, and latent dimensions that may not preserve metric distances without
+contractive or variational regularization.
 
 ## Signal in low-variance directions
 
-## Pitfalls
+The fundamental risk of unsupervised dimensionality reduction as a preprocessing step is the **variance-signal
+dissociation paradox** <Cite id="jolliffe2002" />:
+
+> Unsupervised variance does not equal supervised predictive power.
+
+PCA identifies axes that maximize input variance $\max_{\mathbf{w}} \text{Var}(\mathbf{w}^\top \mathbf{X})$, completely
+oblivious to the relationship with the target $y$:
+
+- If high variance is driven by uninformative background noise, sensor calibration drift, or dominant batch effects, PCA
+  allocates the leading components ($\mathbf{v}_1, \dots, \mathbf{v}_K$) to noise.
+- The actual predictive signal for $y$ may reside in subtle, low-variance directions ($\mathbf{v}_{D-1}, \mathbf{v}_D$).
+- Truncating features by keeping components that explain 95% of total variance systematically **discards the target
+  signal**, causing the downstream model to fail.
+
+The interactive visualizer below demonstrates this dissociation directly:
+
+<DimensionalityReductionPreprocessingExplorer />
+
+### Supervised alternatives
+When the objective is supervised prediction, prefer supervised dimensionality reduction techniques:
+- **Partial Least Squares (PLS)**: Finds latent orthogonal directions that maximize covariance with target $y$:
+  $\max_{\mathbf{w}} \text{Cov}^2(\mathbf{w}^\top \mathbf{X}, y)$.
+- **Linear Discriminant Analysis (LDA)**: Maximizes between-class variance relative to within-class variance:
+  $\max_{\mathbf{w}} \frac{\mathbf{w}^\top \mathbf{S}_B \mathbf{w}}{\mathbf{w}^\top \mathbf{S}_W \mathbf{w}}$.
+- **Supervised PCA**: Performs screening feature selection based on marginal target correlation before computing
+  principal components over the retained subset.
+
+## Pipeline hygiene and pitfalls
+
+1. **Data leakage through global fitting**: Never fit PCA, NMF, or an autoencoder on the entire dataset prior to
+   splitting. Centering and covariance estimation across the full dataset leaks test distribution statistics into the
+   training pipeline. Always fit transformers inside an estimator pipeline on training folds only:
+
+   ```python
+   # Correct: Fitted strictly on training fold
+   pca = PCA(n_components=10)
+   X_train_pca = pca.fit_transform(X_train)
+   X_test_pca = pca.transform(X_test)
+   ```
+
+2. **Failure to standardize before PCA**: Principal component directions are scale-variant. If feature $x_1$ is measured
+   in millimeters ($[0, 10{,}000]$) and $x_2$ in kilograms ($[0, 10]$), $x_1$ will artificially dominate the first
+   principal component regardless of physical significance. Standardize all features to zero mean and unit variance
+   before computing PCA.
+3. **Loss of feature interpretability**: Projecting $D$ named features into linear combinations $\sum_j v_{kj} x_j$
+   eliminates direct domain meaning, complicating model explainability (e.g., SHAP values attribute importance to
+   abstract linear combinations rather than actionable business variables).

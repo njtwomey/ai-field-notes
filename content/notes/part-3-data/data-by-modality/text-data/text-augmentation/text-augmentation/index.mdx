@@ -1,26 +1,109 @@
 ---
-title: 'Text augmentation'
+title: 'Augmenting text'
 kind: concept
-summary: 'Text augmentation makes label-preserving variants of documents: back-translation, paraphrasing, token insertion, deletion and swapping, and synonym replacement.'
+summary: 'Text augmentation generates varied training examples while preserving labels: rule-based word and character edits, back-translation through intermediate languages, and conditional generation by masked or generative language models.'
 tags: [data, nlp]
-aliases: []
+aliases: [text augmentation, text data augmentation, NLP data augmentation]
 requires: []
-related: [data-augmentation, machine-translation]
-references: []
-status: stub
+related: [data-augmentation, text-cleaning, corpus-construction]
+references: [wei2019, sennrich2016improving]
+status: draft
 updated: 2026-10-11
 ---
 
+import { TextAugmentationExplorer } from './TextAugmentationExplorer'
+
 <Definition>
-To be written.
+**Text augmentation** synthesises label-preserving training variations of text sequences to regularise supervised
+models, expand low-resource datasets, and improve out-of-distribution robustness. Unlike continuous
+<NoteLink to="image-augmentation">image augmentations</NoteLink>, text consists of discrete categorical tokens where
+perturbations risk corrupting grammatical syntax or reversing semantic meaning <Cite id="wei2019" />.
 </Definition>
+
+In computer vision, affine transforms and color jitter perturb continuous pixel values without disrupting object class
+semantics. In <Gloss name="nlp">natural language processing</Gloss>, words form discrete symbolic structures where
+altering a single token (such as inserting "not" or flipping a sentiment adjective) can invert the target label
+entirely. Effective text augmentation preserves the underlying classification label or intent while introducing
+syntactic and lexical diversity.
+
+<TextAugmentationExplorer />
+
+## Rule-based edits
+
+Rule-based techniques perturb surface strings without requiring auxiliary neural models. The **Easy Data Augmentation
+(EDA)** framework <Cite id="wei2019" /> defines four stochastic operations parametrised by mutation rate
+$\alpha \in (0, 1)$:
+
+1. **Synonym Replacement (SR):** Randomly selects $n = \lfloor \alpha \cdot L \rfloor$ non-stop words from a sentence of
+   length $L$ and replaces each with a synonym drawn from WordNet.
+2. **Random Insertion (RI):** Finds a random non-stop word, selects one of its synonyms, and inserts that synonym at an
+   arbitrary position in the sentence, repeated $n$ times.
+3. **Random Swap (RS):** Randomly chooses two words in the sentence and swaps their positions, repeated $n$ times. This
+   simulates word-order variations and minor disfluencies.
+4. **Random Deletion (RD):** Independently deletes each word in the sentence with probability $p = \alpha$.
+
+Empirical studies show that setting $\alpha \approx 0.1$ delivers significant accuracy gains on small training sets
+(under 5,000 examples) by preventing overfitting on specific lexical cues.
 
 ## Back-translation
 
-## Paraphrasing
+**Back-translation** translates a source text into an intermediate pivot language using a
+<Gloss name="machine-translation">machine translation</Gloss> system, then translates the result back into the original
+language <Cite id="sennrich2016improving" />:
 
-## Token edits
+$$
+x \xrightarrow{\text{translate}} y_{\text{pivot}} \xrightarrow{\text{translate}} \hat{x}
+$$
 
-## Synonym replacement
+Because translation models select phrasing based on <Gloss name="language-model">language model</Gloss> priors and
+<Gloss name="beam-search">beam search</Gloss> decoding, the reconstituted sentence $\hat{x}$ frequently adopts
+alternative idioms, varied clause structures, and synonymous vocabulary while retaining the exact semantic message.
+Combining multiple diverse pivot languages (such as German, French, Chinese, and Russian) synthesises diverse paraphrase
+pools for each source example.
+
+## Masked language model substitution
+
+Contextualised embeddings from masked language models (such as <Gloss name="bert" /> or <Gloss name="roberta" />) enable
+semantically aware token substitution:
+
+1. A subset of non-stop words in source sentence $x$ are replaced by the special mask token `[MASK]`.
+2. The masked language model computes conditional log-probabilities $P(w \mid x_{\backslash i})$ over the vocabulary for
+   each masked position.
+3. A substitute word is sampled from the top-$k$ predictions, excluding the original word itself.
+
+Because substitutions condition on bidirectional sentence context, words with multiple senses (such as "bank" or
+"crane") receive contextually appropriate replacements that preserve local syntax and grammatical agreement.
+
+## Generative paraphrasing
+
+Instruction-tuned and sequence-to-sequence language models (such as <Gloss name="t5" /> or <Gloss name="gpt" /> models)
+generate high-level semantic paraphrases via prompt conditioning:
+
+- **Style and formality transfer:** Prompts condition the generator to rewrite sentences in colloquial, formal, or
+  simplified phrasing.
+- **Controlled complexity:** Generative models lengthen, shorten, or invert active/passive clauses while preserving core
+  factual assertions.
+- **<Gloss name="temperature">Sampling temperature</Gloss>:** Temperature parameter $T \in [0.4, 0.8]$ balances lexical
+  novelty against hallucination risk.
+
+## Validation and filtering
+
+Synthesised text must be filtered to discard ungrammatical outputs or semantic label drift:
+
+- **Semantic similarity thresholding:** Pretrained sentence encoders (such as Sentence-BERT) compute cosine similarity
+  between original sentence embedding $\mathbf{z}_x$ and augmented embedding $\mathbf{z}_{\hat{x}}$. Augmented examples
+  falling below a similarity threshold (such as $\cos(\mathbf{z}_x, \mathbf{z}_{\hat{x}}) < 0.80$) are pruned.
+- **Round-trip classifier validation:** A baseline classifier trained on original data evaluates augmented samples. If
+  the classifier's predicted probability for the ground-truth label drops sharply, the augmentation has likely flipped
+  the underlying class and is discarded.
+- **Perplexity screening:** Language model perplexity checks discard ungrammatical sentences generated by aggressive
+  random swapping or deletion.
 
 ## Pitfalls
+
+- **Negation inversion:** Blind synonym replacement or deletion can alter or eliminate negation particles ("not bad"
+  degraded to "bad"), completely reversing sentiment labels.
+- **Excessive mutation rate:** Setting EDA mutation rate $\alpha > 0.3$ destroys syntactic dependencies, producing word
+  salad that degrades model representation learning.
+- **Distribution shift and shortcut learning:** Augmenting solely through a single translation model introduces systemic
+  translationese artifacts that downstream classifiers learn as spurious predictive shortcuts.

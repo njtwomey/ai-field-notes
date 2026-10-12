@@ -1,26 +1,113 @@
 ---
 title: 'k-anonymity and disclosure control'
 kind: concept
-summary: 'k-anonymity generalises and suppresses quasi-identifiers until each record matches at least k others; l-diversity adds variety in sensitive values. In high dimensions they destroy most of the data''s utility.'
-tags: [data, privacy]
-aliases: []
-requires: []
-related: [differential-privacy]
-references: []
-status: stub
+summary: 'k-anonymity generalises and suppresses quasi-identifiers until each record matches at least k others; l-diversity adds variety in sensitive values. In high dimensions they destroy utility.'
+tags: [data, privacy, tabular-data, disclosure-control, anonymisation]
+aliases: [k-anonymity, l-diversity, t-closeness, disclosure control, attribute generalisation, cell suppression]
+requires: [personal-data-and-identifiability]
+related: [personal-data-and-identifiability, pii-detection-and-redaction, data-rights-and-deletion]
+references: [sweeney2002k, machanavajjhala2007, aggarwal2005]
+status: draft
 updated: 2026-10-11
 ---
 
+import { KAnonymityVisualizer } from './KAnonymityVisualizer'
+
 <Definition>
-To be written.
+A dataset $\mathcal{T}$ satisfies **$k$-anonymity** with respect to a quasi-identifier vector
+$\mathbf{QI} = (Q_1, \dots, Q_m)$ if every tuple $\mathbf{t} \in \mathcal{T}$ is indistinguishable from at least $k - 1$
+other tuples across those attributes <Cite id="sweeney2002k" />:
+
+$$
+\forall \mathbf{t} \in \mathcal{T}, \quad \big| \{ \mathbf{t}' \in \mathcal{T} : \mathbf{t}'[\mathbf{QI}] = \mathbf{t}[\mathbf{QI}] \} \big| \ge k.
+$$
+
+The subset of records sharing identical quasi-identifier values forms an **equivalence class**
+$E \subseteq \mathcal{T}$, ensuring an adversary with auxiliary knowledge cannot narrow an individual down to fewer than
+$k$ candidates.
 </Definition>
 
 ## Generalisation and suppression
 
-## k-anonymity
+To transform an identifying raw table into a $k$-anonymous representation, statistical disclosure control applies two
+complementary operations:
 
-## l-diversity
+### 1. Attribute generalisation
+Replaces precise values with broader intervals or higher nodes in a predefined taxonomic tree:
+- **Numerical discretisation**: Exact age $34 \to [30, 40)$, annual salary $84{,}500 \to [75\text{k}, 100\text{k})$.
+- **Geographic truncation**: 5-digit ZIP code `02138` (identifying a specific Cambridge neighborhood) $\to$ `021**`
+  (identifying the metropolitan region).
+- **Categorical hierarchies**: Specific diagnosis "Type 2 Diabetes with Neuropathy" $\to$ broad category
+  "Endocrine/Metabolic Disorders".
+
+### 2. Record and cell suppression
+When a handful of extreme demographic outliers (e.g. an individual aged 104 in a rural ZIP code) prevent the entire
+table from satisfying $k$-anonymity without extreme generalisation, those specific rows or cells are suppressed:
+- **Record suppression**: Discarding outlier rows entirely.
+- **Cell suppression**: Replacing individual identifying cells with missing sentinel symbols `*`.
+
+Optimal multidimensional $k$-anonymization (minimizing information loss while satisfying $k$) is NP-hard. In production,
+greedy top-down partitioning heuristics like the **Mondrian algorithm** partition multidimensional attribute space via
+recursive kd-tree cuts until each leaf node contains between $k$ and $2k - 1$ records.
+
+## Limitations: l-diversity and t-closeness
+
+While $k$-anonymity protects against identity disclosure, it remains completely vulnerable to **attribute disclosure**:
+
+### The homogeneity attack
+Machanavajjhala et al. <Cite id="machanavajjhala2007" /> demonstrated that if all $k$ records in an equivalence class
+share the same sensitive attribute value, an adversary learns the subject's private data with $100\%$ certainty:
+- Suppose a patient's quasi-identifiers place them in an equivalence class of size $k=5$.
+- If all 5 patients in that class have diagnosis "Pancreatic Cancer", the adversary deduces the patient has pancreatic
+  cancer without ever identifying which of the 5 rows is theirs.
+
+### l-diversity
+To prevent homogeneity attacks, **$l$-diversity** requires that each equivalence class contains at least $l$
+well-represented values for each sensitive attribute:
+
+$$
+H(S \mid E) = -\sum_{s \in \mathcal{S}} p(s \mid E) \log p(s \mid E) \ge \log l.
+$$
+
+### t-closeness
+If a rare disease has a global population prevalence of $1\%$, but an equivalence class has an $l$-diverse distribution
+where $50\%$ of members have the disease, the adversary gains immense Bayesian belief update. **$t$-closeness** requires
+the distance between the local sensitive distribution $P(S \mid E)$ and the global population distribution $Q(S)$ to be
+strictly bounded:
+
+$$
+D\big[ P(S \mid E), \, Q(S) \big] \le t,
+$$
+
+typically measured via the Earth Mover's Distance (Wasserstein metric).
 
 ## Loss of utility in high dimensions
 
-## Pitfalls
+In machine learning workflows, tabular datasets frequently contain dozens or hundreds of features (e.g. click logs,
+customer demographics, genomic markers). Charu Aggarwal <Cite id="aggarwal2005" /> mathematically proved that
+$k$-anonymity suffers catastrophically from the **curse of dimensionality**:
+
+1. **Exponential volume expansion**: As dimension $D$ grows, the volume of attribute space scales as $\mathcal{O}(B^D)$.
+   Data points become exponentially isolated in empty space.
+2. **Forced root collapse**: In high dimensions ($D \ge 10$), in order to force $k$ records into the same equivalence
+   class, generalisation hierarchies are forced to coarsen almost all dimensions up to their global root nodes (e.g.
+   collapsing age to $[0, 100]$, postal code to `*****`, and education to `Any`).
+3. **Utility destruction**: The resulting generalized dataset retains almost zero granular variance or correlation
+   structure, rendering downstream machine learning models (gradient-boosted trees, linear models, neural networks)
+   ineffective.
+
+The interactive visualizer below illustrates the fundamental Pareto trade-off between privacy threshold $k$, sensitive
+diversity $l$, and downstream machine learning utility:
+
+<KAnonymityVisualizer />
+
+## Pitfalls and failure modes
+
+1. **Composition and intersection attacks**: Releasing two independent $k$-anonymized views of the same database (e.g.
+   Table 1 with `[Age, ZIP, Diagnosis]` and Table 2 with `[Age, Gender, Salary]`) allows an adversary to compute the
+   relational join on `Age`, collapsing equivalence classes and completely defeating privacy guarantees.
+2. **Dynamic update leakage**: Releasing updated snapshots of a dataset over time (e.g., weekly hospital updates) allows
+   adversaries to track which records were added or modified, re-identifying individuals via differential subtraction.
+3. **Transition to Differential Privacy**: Because syntactic disclosure controls ($k$-anonymity, $l$-diversity) make
+   unprovable assumptions about what auxiliary knowledge an adversary possesses, modern systems increasingly favor
+   **Differential Privacy**, which provides rigorous mathematical bounds independent of external side-information.

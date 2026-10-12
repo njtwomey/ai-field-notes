@@ -2,27 +2,163 @@
 title: 'Digital audio'
 kind: concept
 summary: 'Digital audio is a sequence of amplitude samples taken at a fixed rate and bit depth, on one or more channels, often stored compressed. Sample rate, channels and codec fix what a model can hear.'
-tags: [data, audio, signal-processing]
-aliases: []
+tags: [data, audio, signal-processing, dsp]
+aliases: [audio signals, pcm audio, sampling rate, bit depth]
 requires: []
-related: [sampling-theorem, quantisation, perceptual-audio-coding]
-references: []
-status: stub
-updated: 2026-10-11
+related: [sampling-theorem, quantisation, perceptual-audio-coding, audio-preprocessing, audio-augmentation]
+references: [shannon1949, nyquist1928, oppenheim2010]
+status: draft
+updated: 2026-10-12
 ---
 
+import { DigitalAudioVisualizer } from './DigitalAudioVisualizer'
+
 <Definition>
-To be written.
+**Digital audio** is the discrete-time, discrete-amplitude representation of continuous acoustic pressure waves $p(t)$,
+converted into digital data streams through periodic time sampling at rate $f_s$ and amplitude quantization at bit depth
+$B$ across one or more spatial channels <Cite id="shannon1949, oppenheim2010" />. In audio machine learning, the choice
+of sampling rate, bit depth, channel configuration, and compression codec defines the physical sensory limits of the
+pipeline—governing the highest resolvable frequencies, acoustic dynamic range, and fidelity available to downstream
+neural architectures.
 </Definition>
+
+Unlike image representations—where pixel grids exhibit natural spatial continuity and translation invariance—raw digital
+audio signals are high-frequency, one-dimensional time series. A single second of CD-quality audio comprises $44{,}100$
+discrete 16-bit voltage samples.
+
+For machine learning models operating on raw waveforms (e.g., WaveNet, SoundStream) or spectral representations (e.g.,
+Whisper, AST), understanding digital audio fundamentals—including the Nyquist-Shannon sampling limit, quantization
+dynamic range, lossy codec artifacts, and anti-aliasing resampling—is essential to prevent acoustic corruption.
+
+<DigitalAudioVisualizer />
 
 ## Sample rate
 
+A continuous acoustic pressure wave $x(t)$ is converted to a discrete-time sequence $x[n] = x(n T_s)$ at fixed sampling
+intervals $T_s = 1 / f_s$.
+
+### The Nyquist-Shannon sampling theorem
+
+The Nyquist-Shannon sampling theorem states that a continuous, bandlimited signal containing no frequency components
+higher than $f_{\max}$ can be uniquely and completely reconstructed from its discrete samples if and only if the
+sampling rate satisfies <Cite id="nyquist1928, shannon1949" />:
+
+$$
+f_s > 2 f_{\max}
+$$
+
+The **Nyquist frequency** $f_N = f_s / 2$ represents the theoretical ceiling of uncorrupted spectral representation. Any
+acoustic frequency present in the continuous signal that exceeds $f_N$ folds back into the lower frequency band,
+manifesting as **aliasing distortion**:
+
+$$
+f_{\text{alias}} = |f_{\text{in}} - k f_s|
+$$
+
+If an analog signal containing a $14\text{ kHz}$ harmonic is sampled at $16\text{ kHz}$ ($f_N = 8\text{ kHz}$) without
+an analog anti-aliasing filter, the $14\text{ kHz}$ tone aliases into the audible speech spectrum at
+$|14 - 16| = 2\text{ kHz}$, corrupting vowel and formant representations.
+
+### Common sampling rate conventions
+
+- **8 kHz (Narrowband Telephony):** Nyquist ceiling at $4\text{ kHz}$. Adequate for speech intelligibility, but cuts off
+  unvoiced fricatives ($/s/, /f/, /\theta/$) that reside in the $5\text{--}8\text{ kHz}$ band.
+- **16 kHz (Standard Speech ML):** Nyquist ceiling at $8\text{ kHz}$. Captures virtually all human vocal tract formants
+  and fricative energy; standard input for models like Whisper, Wav2Vec 2.0, and Conformer.
+- **44.1 kHz / 48 kHz (Full-Band Music and Studio Audio):** Nyquist ceiling at $22.05\text{ kHz}$ and $24\text{ kHz}$,
+  fully covering the nominal human auditory range ($20\text{ Hz}\text{--}20\text{ kHz}$).
+
 ## Bit depth
+
+While sample rate discretizes time, **bit depth** $B$ discretizes amplitude through uniform pulse-code modulation (PCM)
+quantization. The continuous voltage range $[-V_{\max}, +V_{\max}]$ is divided into $2^B$ discrete quantization
+intervals of width:
+
+$$
+\Delta = \frac{2 V_{\max}}{2^B}
+$$
+
+### Signal-to-Quantization-Noise Ratio (SQNR)
+
+Assuming quantization error $e[n]$ is uniformly distributed on $[-\Delta/2, \Delta/2]$ and uncorrelated with the input
+signal, the theoretical maximum Signal-to-Quantization-Noise Ratio is given by <Cite id="oppenheim2010" />:
+
+$$
+\text{SQNR} = 10 \log_{10}\left( \frac{P_{\text{signal}}}{P_{\text{noise}}} \right) \approx 6.02 B + 1.76 \text{ dB}
+$$
+
+- **8-bit integer:** Yields $\approx 50\text{ dB}$ of dynamic range, introducing noticeable broadband quantization hiss.
+- **16-bit signed integer (PCM16):** Yields $\approx 96\text{ dB}$ of dynamic range, sufficient for clinical and
+  consumer applications.
+- **24-bit / 32-bit floating point:** Yields $>144\text{ dB}$ (and virtually boundless dynamic headroom with IEEE 754
+  32-bit floats), preventing digital clipping during intermediate audio processing and spectrogram computation.
 
 ## Channels
 
+The channel dimension $C$ represents the spatial recording configuration:
+
+- **Monaural (Mono, $C=1$):** Single audio track without spatial differentiation. Standard for automatic speech
+  recognition (ASR), voice cloning, and bioacoustic classification.
+- **Stereophonic (Stereo, $C=2$):** Left and right channels capturing Interaural Time Differences (ITD) and Interaural
+  Level Differences (ILD), enabling human perception of lateral soundstage width.
+- **Multichannel microphone arrays ($C \ge 4$):** Circular or planar arrays used in smart speakers and teleconferencing
+  for spatial beamforming, acoustic source localization, and blind source separation.
+
+When converting stereo audio to mono for speech models, naive averaging ($x_{\text{mono}} = \frac{L + R}{2}$) is
+hazardous: if the two channels are $180^\circ$ out of phase due to microphone placement or stereo widening effects,
+summing them results in complete destructive **phase cancellation**, rendering the audio silent.
+
 ## Codecs and containers
+
+Audio files in machine learning datasets are stored across diverse containers and compression formats:
+
+### Uncompressed and lossless formats
+
+- **WAV (Waveform Audio File Format):** Uncompressed RIFF container encapsulating raw linear PCM samples. Fast,
+  zero-overhead disk loading, but large storage footprint.
+- **FLAC (Free Lossless Audio Codec):** Lossless compression utilizing linear predictive coding (LPC) and Golomb-Rice
+  entropy coding. Reduces file size by $40\text{--}60\%$ with bit-for-bit mathematical reconstruction.
+
+### Lossy perceptual codecs (MP3, AAC, Ogg Vorbis, Opus)
+
+Lossy codecs discard acoustic information deemed psychoacoustically inaudible to human listeners based on simultaneous
+frequency masking and temporal masking. 
+
+However, lossy codecs introduce specific artifacts that impair machine learning:
+- **High-frequency brickwall truncation:** To meet low bitrates (e.g., 64 kbps), encoders sharply low-pass filter
+  frequencies above $12\text{--}16\text{ kHz}$.
+- **Pre-echo artifacts:** In MDCT (Modified Discrete Cosine Transform) filterbanks, sharp percussive transients (e.g.,
+  castanets, drum rimshots) smear backward in time, creating ringing artifacts prior to acoustic onsets.
+- **Phase distortion:** Non-linear phase shifts and spectral quantization noise alter high-resolution acoustic
+  embeddings.
 
 ## Resampling
 
+In heterogeneous datasets, audio files originate from mixed sources (e.g., 44.1 kHz podcast audio mixed with 8 kHz call
+center recordings). Training deep neural models requires standardizing all audio to a uniform sample rate (typically 16
+kHz or 24 kHz).
+
+### Sample rate conversion (SRC)
+
+Converting between non-integer sample rate ratios (e.g., $44{,}100\text{ Hz} \to 16{,}000\text{ Hz}$, a ratio of
+$160 / 441$) involves:
+1. **Interpolation (Upsampling):** Inserting $L-1$ zeros between samples, scaling the rate to $L \cdot f_{s, 1}$.
+2. **Anti-aliasing / Anti-imaging low-pass filtering:** Applying a linear-phase polyphase FIR filter with cutoff
+   frequency $\min(\pi/L, \pi/M)$.
+3. **Decimation (Downsampling):** Retaining every $M$-th sample.
+
+Naive downsampling (subsampling without an anti-aliasing low-pass filter) causes all spectral energy above the new
+Nyquist frequency to fold back into the speech band, causing severe degradation in speech recognition models.
+
 ## Pitfalls
+
+- **Silent DC offset:** Electrical bias in analog-to-digital converters introduces a non-zero mean ($\bar{x} \ne 0$)
+  into the waveform. DC bias distorts RMS energy calculations, skews zero-crossing rates, and causes sharp audible
+  clicks when slicing audio segments. DC offsets must be removed via high-pass filtering (cutoff at 10–20 Hz).
+- **Destructive stereo downmixing:** Averaging out-of-phase stereo channels destroys audio content through destructive
+  interference. Channels must be checked for cross-correlation before mixing, or one channel isolated.
+- **Resampling on the fly without anti-aliasing:** Implementing naive indexing (`audio[::step]`) inside PyTorch dataset
+  workers causes severe spectral aliasing. Always utilize high-quality polyphase resamplers (e.g.,
+  `torchaudio.transforms.Resample`, `librosa.resample` with Kaiser window).
+- **Digital clipping from improper normalization:** Boosting waveform gain without peak limiting causes samples to
+  exceed the $[-1.0, 1.0]$ range, clipping the peaks into flat square waves and generating severe harmonic distortion.

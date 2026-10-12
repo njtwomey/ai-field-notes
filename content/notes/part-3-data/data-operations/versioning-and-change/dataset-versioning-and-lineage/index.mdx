@@ -5,20 +5,107 @@ summary: 'Versioning snapshots datasets by content hash so that any model can be
 tags: [data, software]
 aliases: []
 requires: []
-related: [dataset-documentation]
-references: []
-status: stub
+related: [schema-evolution, batch-and-stream-processing, training-serving-skew]
+references: [polyzotis2018, zaharia2018]
+status: draft
 updated: 2026-10-11
 ---
 
+import { DatasetVersioningVisualizer } from './DatasetVersioningVisualizer'
+
 <Definition>
-To be written.
+**Dataset versioning** is the management of immutable states and evolutionary snapshots of data collections over time,
+associating specific dataset releases with cryptographic digests or transaction commit identifiers. **Data lineage** (or
+provenance) is the directed acyclic graph (DAG) that records the end-to-end chain of custody, dependencies, and
+transformations linking raw ingestion streams to curated training datasets, model weights $\theta$, and deployed serving
+endpoints <Cite id="polyzotis2018, zaharia2018" />.
 </Definition>
+
+In conventional software development, Git tracks code evolution by recording line-by-line diffs across text files. In
+machine learning, code is only half of the system: a model is the deterministic product of source code, runtime
+environment, random seed, and training data. If datasets mutate in place without cryptographic snapshotting, models
+become un-reproducible, compliance audits fail, and debugging regressions becomes impossible.
+
+<DatasetVersioningVisualizer />
 
 ## Snapshots and content hashes
 
+Standard version control tools cannot manage machine learning datasets: committing gigabytes or terabytes of binary
+Parquet, image, or embedding files directly into Git repositories bloats repository packfiles and exhausts system
+memory.
+
+### Content-addressable storage (CAS)
+
+Data versioning tools (such as DVC, Git LFS, and Pachyderm) decouple metadata tracking from bulk binary storage:
+
+1. **Content hashing:** The versioning system computes a cryptographic digest (typically a SHA-256 hash or Merkle tree)
+   over all files within the dataset.
+2. **Pointer files:** A lightweight text pointer file (e.g. `train_data.dvc`) containing the content hash and file size
+   is committed to Git alongside application code:
+   ```yaml
+   outs:
+     - md5: 8b1a9953c4611296a827abf8c47804d7
+       size: 53687091200
+       path: data/train_features.parquet
+   ```
+3. **Deduplicated remote cache:** The physical raw data is stored in cloud object storage (S3, GCS) indexed by its
+   content hash. If a developer edits a single file in a 10,000-file corpus, only the altered file is uploaded; the
+   remaining 9,999 files are deduplicated via content-addressable pointers.
+
 ## As-of queries
+
+In modern lakehouses, table formats—notably Delta Lake, Apache Iceberg, and Apache Hudi—implement ACID transaction logs
+on top of cloud object storage:
+
+| Commit ID | Mutation Operation | File Actions (Add / Remove) | Active Snapshot File Set | Query `VERSION AS OF` Resolution |
+| :--- | :--- | :--- | :--- | :--- |
+| **Commit 0** | Initial table ingestion | Add `part-001.parquet`, `part-002.parquet` | `{part-001.parquet, part-002.parquet}` | `AS OF 0` reads `{part-001, part-002}` |
+| **Commit 1** | Partition compaction / update | Add `part-003.parquet`, Remove `part-001.parquet` | `{part-002.parquet, part-003.parquet}` | `AS OF 1` reads `{part-002, part-003}` |
+| **Commit 2** | Incremental batch append | Add `part-004.parquet` | `{part-002.parquet, part-003.parquet, part-004.parquet}` | `AS OF 2` reads `{part-002, part-003, part-004}` |
+
+- **Append-only log architecture:** Every table mutation (insert, update, delete, or merge) appends a new JSON/Avro
+  commit record to the transaction log. Data files are never modified in place; updates write new Parquet files and flag
+  obsolete files in the transaction metadata.
+- **Time-travel queries:** Engineers can query past states of the dataset using **as-of** syntax:
+  ```sql
+  SELECT * FROM customer_features TIMESTAMP AS OF '2026-05-01 00:00:00 UTC';
+  SELECT * FROM customer_features VERSION AS OF 142;
+  ```
+  The query engine consults the commit log, identifies the exact set of Parquet files active at that historical
+  snapshot, and reads only those files.
+- **Copy-on-write efficiency:** Because unchanged data files are shared across successive commits, the storage footprint
+  scales only with the net volume of modified data rather than duplicating full terabyte tables for each snapshot.
 
 ## Lineage from model to source
 
+Comprehensive model governance requires an unbroken lineage trail connecting deployed model weights back through every
+transformation to raw source logs <Cite id="zaharia2018" />:
+
+| Lineage Stage | Asset Artifact & Location | Execution Mechanism & Provenance Hook | Cryptographic / Version Identifier |
+| :--- | :--- | :--- | :--- |
+| **1. Raw Telemetry** | Raw Ingestion Logs (`s3://raw-telemetry/`) | Streaming Kafka connectors / batch ingestion | S3 Bucket ETag / Object prefix |
+| **2. Curated Store** | Curated Feature Store | Spark ETL job commit hash `3f4a1` | Delta Lake / Iceberg Table Version `84` |
+| **3. Training Dataset** | Training Dataset Snapshot Artifact | Training pipeline orchestrator commit `e7b92` | SHA-256 Merkle Root / Content Hash |
+| **4. Model Training** | Serialized Model Weights & Checkpoints | Training execution script (PyTorch `v2.4`, seed `42`) | MLflow / W&B Run ID `99a14` |
+| **5. Production Serving** | Containerized Inference Microservice | Model registry promotion pipeline | OCI Docker Image Digest / Endpoint Serving `v3` |
+
+- **Auditability and compliance:** Regulations such as the EU AI Act and GDPR Article 22 mandate that organizations
+  explain and audit automated decisions. If a model generates a disputed credit rejection or medical recommendation,
+  engineers must be capable of reconstructing the exact training snapshot and feature inputs that shaped the model's
+  parameters.
+- **Experiment tracking metadata:** Metadata frameworks (such as MLflow, Weights & Biases, or Kubeflow Metadata) bind
+  the training code Git commit, runtime container digest, dataset content hash, and hyperparameter configuration into an
+  immutable experiment manifest.
+
 ## Pitfalls
+
+- **Mutable in-place updates:** Modifying production lakehouse tables via destructive `UPDATE` or `OVERWRITE` statements
+  without enabling ACID transaction logs, permanently destroying historical reproducibility.
+- **Pointer drift without content hashes:** Storing training datasets at mutable paths (e.g.
+  `s3://ml-data/training_latest.parquet`) instead of pinning immutable version IDs or cryptographic hashes; future
+  retraining jobs inadvertently read mutated data.
+- **Premature snapshot garbage collection:** Configuring automated retention policies (such as aggressive `VACUUM`
+  commands in Delta Lake) that delete historical Parquet files older than 7 days, corrupting time-travel queries for
+  models trained months prior.
+- **Broken upstream provenance:** Versioning the final training table while ignoring unversioned upstream database
+  migrations or external API dependencies, creating blind spots in the lineage graph.

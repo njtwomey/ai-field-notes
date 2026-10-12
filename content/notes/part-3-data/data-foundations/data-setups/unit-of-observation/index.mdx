@@ -6,23 +6,137 @@ tags: [data, statistics]
 aliases: []
 requires: []
 related: [data-setups, panel-data]
-references: []
-status: stub
-updated: 2026-10-11
+references: [kish1965, robinson1950, cameron2013, gelman2013]
+status: draft
+updated: 2026-10-12
 ---
 
+import { UnitOfObservationVisualizer } from './UnitOfObservationVisualizer'
+
 <Definition>
-To be written.
+The unit of observation defines the atomic real-world entity, event, or measurement represented by a single row in a
+dataset. The grain specifies the exact level of detail and uniqueness criteria of that row—formally defined by the
+minimal set of primary key attributes required to uniquely identify an observation.
 </Definition>
+
+In machine learning pipelines, datasets are frequently constructed by joining normalized tables from transactional
+databases, event streaming buses, and enterprise data warehouses. Failure to rigorously define the unit of observation
+and grain causes subtle data corruptions: fan-out row duplication in one-to-many joins, label leakage across time
+boundaries, and severe inflation of statistical sample sizes <Cite id="kish1965, cameron2013" />.
+
+<UnitOfObservationVisualizer />
 
 ## What one row is
 
+Before engineering features or selecting loss functions, a machine learning practitioner must answer a deceptive
+question: *What does one row represent?*
+
+Consider an e-commerce platform. A single dataset could be structured at multiple competing grains:
+1. **Transaction Grain:** One row per completed checkout order (`order_id`).
+2. **Line-Item Grain:** One row per distinct product within an order (`order_id`, `product_id`).
+3. **Temporal Interaction Grain:** One row per user interaction event (`event_id`, `timestamp`).
+4. **Entity-Temporal Grain:** One row per customer per calendar day (`user_id`, `calendar_date`).
+5. **Entity Grain:** One row per registered customer (`user_id`).
+
+Each grain imposes a distinct data schema, distinct missingness semantics, and distinct causal assumptions. A metric
+like "order price" is an atomic scalar at the transaction grain, but becomes an unaggregated parent attribute at the
+line-item grain and a historical summary statistic (e.g., 30-day average spend) at the customer grain.
+
 ## Prediction unit and row unit
+
+A critical failure mode occurs when the *unit of prediction* (the business decision being automated) diverges from the
+*unit of observation* (the training table row):
+
+- **Churn Prediction:** The decision is whether to intervene with a customer at the end of the month (prediction unit:
+  `user_id` $\times$ `month`). If the training table is constructed at the session grain (`user_id` $\times$
+  `session_id`), highly active users contribute hundreds of rows while inactive churn-prone users contribute only one.
+  Fitting a classifier on raw session rows overweights active users by orders of magnitude, optimizing the loss on the
+  wrong population.
+- **Fraud Detection:** The decision is whether to block a payment attempt (prediction unit: `payment_id`). If features
+  are evaluated on a user-level aggregate that includes transactions executed *after* the payment in question, the model
+  commits severe future data leakage.
+
+Aligning the training matrix grain to the operational serving grain guarantees that every row evaluated during training
+mirrors the exact information state available at inference time.
 
 ## Mixed grains in one table
 
+Joining tables across heterogeneous grains without explicit pre-aggregation creates *mixed-grain tables*, which
+introduce severe mathematical artifacts:
+
+1. **Cartesian Fan-Out:** Joining a parent table (`customers`, 10,000 rows) to a child table (`transactions`, 50,000
+   rows) on `customer_id` duplicates parent attributes across every transaction row. If a linear regression or gradient
+   boosted tree models customer income using the resulting table, the income of a frequent shopper who bought 50 items
+   is counted 50 times in the loss function, while the income of a one-time shopper is counted once.
+2. **Inconsistent Aggregate Nulls:** In outer joins between different grains, childless parent entities accumulate null
+   values across all child columns. If imputation treats these nulls as missing values rather than structurally absent
+   zero-count states (e.g., zero transactions), models fail to capture meaningful non-engagement signals.
+
+The foundational design rule for tabular datasets is: **One table, exactly one grain.** All attributes must describe the
+entity identified by the grain's primary key.
+
 ## Aggregating and disaggregating
+
+Transforming data across grains requires aggregation (moving from fine to coarse grain) or disaggregation (moving from
+coarse to fine grain):
+
+- **Aggregation (Roll-Up):** Compressing line items into an order level requires deterministic summary operators: sums
+  ($\sum$), counts, extrema ($\min, \max$), or distributional moments (mean, variance). Aggregation discards variance
+  within groups: a customer with two 50-dollar purchases has the same sum as a customer with one 100-dollar purchase and
+  one zero-dollar return.
+- **Disaggregation (Allocation):** Distributing order-level shipping discounts across individual product line items
+  requires proportional allocation rules. Naive equal division introduces rounding errors and synthetic accounting
+  noise.
+- **Ecological Fallacy:** Inferring individual-level relationships from aggregated group-level data is a major
+  statistical trap <Cite id="robinson1950" />. Robinson demonstrated that the correlation between immigrant status and
+  literacy was strongly positive ($+0.53$) when computed across aggregated US states, but slightly negative ($-0.11$)
+  when computed across individual people. High-level aggregates reflect contextual and geographical sorting, not
+  individual causal mechanisms.
 
 ## Effective sample size under dependence
 
+When multiple dataset rows belong to the same cluster (e.g., repeated measurements of the same medical patient, repeated
+clicks by the same user, or students in the same school), observations violate the IID assumption
+<Cite id="gelman2013" />.
+
+The degree of within-cluster dependence is quantified by the *Intra-Class Correlation* (ICC, $\rho$):
+
+$$
+\rho = \frac{\sigma_{\text{between}}^2}{\sigma_{\text{between}}^2 + \sigma_{\text{between}}^2 + \sigma_{\text{within}}^2}
+$$
+
+Under clustered sampling with average cluster size $m$, Kish's design effect ($\mathrm{Deff}$) quantifies the inflation
+of variance relative to simple random sampling <Cite id="kish1965" />:
+
+$$
+\mathrm{Deff} = 1 + (m - 1)\rho
+$$
+
+The *effective sample size* ($N_{\text{eff}}$) available for statistical inference is drastically lower than the nominal
+row count $N$:
+
+$$
+N_{\text{eff}} = \frac{N}{\mathrm{Deff}} = \frac{N}{1 + (m - 1)\rho}
+$$
+
+For example, a dataset containing $N = 10{,}000$ rows collected from $1{,}000$ patients ($m = 10$ rows per patient) with
+modest within-patient correlation $\rho = 0.20$ has $\mathrm{Deff} = 1 + 9(0.20) = 2.8$. Its effective sample size is
+only $N_{\text{eff}} = 10{,}000 / 2.8 \approx 3{,}571$. Treating the dataset as 10,000 independent samples severely
+inflates test statistics, produces artificially narrow confidence intervals, and causes severe cross-validation leakage
+if rows are split randomly rather than grouped by entity.
+
 ## Pitfalls
+
+- **Random Splitting on Clustered Rows:** Splitting a line-item or session dataset into train and validation sets using
+  uniform random sampling (`train_test_split`) leaks the same users and entities across both splits. Validation metrics
+  report unrealistically high performance that collapses when deployed on unseen entities. Cross-validation must
+  strictly group by the entity key (`GroupKFold`).
+- **Grain Ambiguity in Feature Stores:** A feature defined as `user_total_spend` stored in an entity-level table must
+  define a precise temporal reference point. If computed as "all-time spend to date", it causes catastrophic look-ahead
+  bias when joined with historical event rows from two years ago.
+- **Silent Multiplicity Inflation:** A buggy SQL join that joins on `date` instead of `user_id` and `date` silently
+  creates duplicate rows. Because loss functions sum over all rows, unintentional duplication silently weights specific
+  subsets of the training distribution.
+- **Atomistic Fallacy:** The reverse of the ecological fallacy: attributing group-level dynamics entirely to
+  individual-level attributes while ignoring environmental context (such as local store inventory constraints or
+  macro-economic recessions).

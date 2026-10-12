@@ -1,26 +1,107 @@
 ---
 title: 'Retrieval corpora'
 kind: concept
-summary: 'Retrieval systems need corpora chunked into passages, query-document pairs, hard negatives and relevance judgements that are always incomplete.'
-tags: [data, information-retrieval]
-aliases: []
-requires: []
-related: [retrieval-augmented-generation, evaluating-retrieval-systems]
-references: []
-status: stub
+summary: 'Retrieval systems require corpora chunked into searchable passages, query-document pairs, mined hard negatives, and relevance judgements that are fundamentally incomplete.'
+tags: [data, information-retrieval, search, rag]
+aliases: [search corpora, passage corpora, document collections for retrieval, RAG corpora]
+requires: [tokenisation, near-duplicate-detection]
+related: [corpus-construction, code-data, text-cleaning]
+references: [bajaj2016, thakur2021, karpukhin2020, robertson2009]
+status: draft
 updated: 2026-10-11
 ---
 
+import { RetrievalChunkingAndNegatives } from './RetrievalChunkingAndNegatives'
+
 <Definition>
-To be written.
+A **retrieval corpus** is a curated collection of unstructured or semi-structured text documents partitioned into
+searchable passage units $\mathcal{D} = \{d_1, \dots, d_N\}$, accompanied by queries $q \in \mathcal{Q}$ and relevance
+assessments $r(q, d) \in \{0, 1\}$. Training modern dense bi-encoders and cross-encoders requires segmenting
+heterogeneous documents into bounded **passages**, pairing queries with relevant documents, and mining informative
+**hard negatives** from lexical or dense candidate pools while navigating incomplete ground-truth annotations.
 </Definition>
 
-## Chunking
+## Document chunking and passage boundaries
+
+Raw source documents (such as clinical notes, financial reports, legal contracts, and encyclopedias) vary in length from
+single sentences to hundreds of pages. Because transformer encoders impose strict sequence length budgets (typically 256
+to 512 tokens for bi-encoder embedding models), documents must be partitioned into passages:
+
+- **Fixed-window chunking with overlap:** A sliding window of $W$ tokens advances with stride
+  $S = W(1 - \text{overlap})$. An overlap of $15\%$ to $30\%$ ensures that semantic propositions spanning chunk
+  boundaries are not arbitrarily severed.
+- **Syntactic and sentence-boundary chunking:** Using sentence segmenters to avoid splitting in the middle of sentences
+  or lists, buffering complete sentences until the token budget is reached.
+- **Hierarchical parent-child chunking:** Small child passages (e.g., 128 tokens) are indexed in the vector database for
+  granular similarity search, but the retrieval pipeline returns the surrounding parent section (e.g., 512 tokens) or
+  prepends the document title and section hierarchy (`Document > Section > Subsection`) to preserve surrounding context.
 
 ## Query-document pairs
 
-## Hard negatives
+Supervised retrieval training requires triples $(q, d^+, d^-)$ comprising a query $q$, a known relevant positive
+document $d^+$, and one or more non-relevant negative documents $d^-$:
 
-## Incomplete relevance judgements
+- **Search click logs:** Organic search engine query logs (such as the MS MARCO dataset <Cite id="bajaj2016" />) pair
+  anonymised user queries with clicked web snippets. Click logs reflect real user intent and vocabulary mismatches, but
+  introduce <NoteLink to="popularity-bias">popularity bias</NoteLink> and <Gloss name="position-bias">position
+  bias</Gloss> (users clicking top-ranked links regardless of quality).
+- **Synthetic query generation:** When human search logs are unavailable (such as domain-specific internal
+  documentation), <Gloss name="llm">large language models</Gloss> are prompted to generate candidate search queries that
+  a given passage answers (e.g., InPars, Promptagator). Filtering queries by synthetic cycle-consistency (retaining
+  queries where an auxiliary retriever ranks the source passage first) prevents hallucinated question-passage pairs.
+
+## Hard negative mining
+
+Dense bi-encoders compute the cosine similarity
+$s(q, d) = \mathbf{e}_q^\top \mathbf{e}_d / (\|\mathbf{e}_q\| \|\mathbf{e}_d\|)$ between independent query and passage
+vector representations. Models are trained using the <Gloss name="infonce" /> contrastive ranking loss:
+
+$$
+\mathcal{L}(q, d^+, \{d_j^-\}) = -\log \frac{\exp(s(q, d^+) / \tau)}{\exp(s(q, d^+) / \tau) + \sum_{j=1}^M \exp(s(q, d_j^-) / \tau)},
+$$
+
+where $\tau > 0$ is a temperature hyperparameter. The choice of negative candidate set $\{d_j^-\}$ dictates the
+sharpness of the learned representation:
+
+- **Random in-batch negatives:** Passages drawn at random from other rows in the training mini-batch. Random negatives
+  are semantically distant from $q$ (e.g., a query about backpropagation paired with a passage about oceanography).
+  While necessary during early warm-up, random negatives provide negligible gradient once the model learns basic topic
+  separation.
+- **<Gloss name="bm25" /> lexical hard negatives:** Passages that achieve high lexical ranking scores under BM25
+  <Cite id="robertson2009" /> by matching keywords in $q$, but do not actually satisfy the informational need. Lexical
+  hard negatives force bi-encoders to learn semantic comprehension beyond keyword matching <Cite id="karpukhin2020" />.
+- **Dense hard negatives (cross-encoder / ANCE mining):** Passages retrieved by an earlier dense retriever checkpoint
+  that score high cosine similarity with $q$ but are unannotated as positives.
+- **<Gloss name="fn">False negative</Gloss> risk:** In large corpora, top-ranked negatives mined by BM25 or dense models
+  often contain unlabelled <Gloss name="tp">true positives</Gloss>. Forcing the contrastive loss to push down
+  representations of actually relevant passages corrupts embedding spaces.
+
+## Incomplete relevance judgements and pooling
+
+A fundamental limitation of retrieval evaluation is that corpora are too vast for human annotators to exhaustively
+assess every passage for every query. In a corpus of 10 million passages, assessing all pairs requires prohibitive
+effort:
+
+- **TREC depth-$k$ pooling:** The top $k$ documents returned by multiple diverse retrieval systems are merged into a
+  candidate pool and judged by human assessors. Documents outside the pool are assumed non-relevant ($r = 0$).
+- **Evaluation bias:** Incomplete pooling introduces systemic bias against novel retrieval architectures
+  <Cite id="thakur2021" />. When an advanced dense retriever surfaces highly relevant passages that were never retrieved
+  by legacy BM25 systems, these passages are treated as non-relevant <Gloss name="fp">false positives</Gloss>, falsely
+  penalising the new model.
+- **BEIR zero-shot benchmarking:** The BEIR benchmark standardises evaluation across 17 heterogeneous retrieval tasks
+  (biomedical, legal, scientific, financial) to measure out-of-distribution robustness under varying levels of
+  annotation completeness <Cite id="thakur2021" />.
+
+<RetrievalChunkingAndNegatives />
 
 ## Pitfalls
+
+- **Context fragmentation and orphaned pronouns:** Splitting a document midway through a paragraph leaves child passages
+  with unresolved pronouns (*“It was founded in 1998 in Menlo Park...”* without mentioning *Google*), causing dense
+  retrievers to fail on entity queries. Prepending document titles mitigates this drift.
+- **Passage length distortion:** Long passages that pack multiple topics dilute their dense vector representations;
+  conversely, short single-sentence chunks lack sufficient lexical context for BM25 <Gloss name="idf">inverse document
+  frequency</Gloss> scoring.
+- **Train-test query leakage:** Queries in retrieval benchmarks often derive from identical underlying articles as test
+  passages. Splitting retrieval splits randomly across query-document pairs rather than by document cluster causes
+  severe test-set memorisation.

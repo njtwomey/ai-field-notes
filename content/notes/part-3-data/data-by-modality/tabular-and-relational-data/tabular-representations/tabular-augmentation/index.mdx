@@ -1,28 +1,148 @@
 ---
 title: 'Tabular augmentation'
 kind: concept
-summary: 'Tables have few transforms that are known to preserve the label. Noise, mixup, feature masking and swapping values between rows are the main options, and each assumes something about the columns.'
-tags: [data, deep-learning]
-aliases: []
-requires: []
-related: [augmentation-principles]
-references: []
-status: stub
-updated: 2026-10-11
+summary: 'Tabular data resists simple transforms due to sharp decision cliffs and hard constraints; augmentation requires scaled noise, post-embedding mixup, and feature swapping.'
+tags: [data, deep-learning, tabular-data, regularisation]
+aliases: [tabular augmentation, tabular mixup, feature swapping, VIME, SAINT]
+requires: [tabular-data, augmentation-principles]
+related: [numeric-encoding, categorical-encoding]
+references: [somepalli2021saint, yoon2020vime, chawla2002, zhang2018mixup]
+status: draft
+updated: 2026-10-12
 ---
 
+import { TabularAugmentationVisualizer } from './TabularAugmentationVisualizer'
+
 <Definition>
-To be written.
+**Tabular augmentation** is the application of stochastic transformations to tabular records to regularize model
+training and synthesize diverse training instances. Unlike perceptual modalities where geometric transforms naturally
+preserve labels, tabular data resists perturbation due to non-smooth decision boundaries, heterogeneous data types, and
+rigid physical constraints—demanding specialized strategies such as scale-normalized noise, post-embedding mixup,
+feature masking, and cross-row feature swapping.
 </Definition>
+
+In computer vision and audio, data augmentation is straightforward: a flipped photograph of a cat remains unambiguously
+a cat. In tabular data, however, arbitrary perturbations frequently destroy semantic validity. A tiny numerical shift
+can cross a legal operational boundary (e.g. age $20 \to 21$ crossing adult lending thresholds), and perturbing columns
+independently can violate fundamental physical realities (e.g. generating an applicant whose years of work experience
+exceed their age). Developing robust tabular augmentation requires respecting joint relational constraints and operating
+in continuous latent embedding spaces <Cite id="somepalli2021saint, yoon2020vime, chawla2002" />.
+
+<TabularAugmentationVisualizer />
 
 ## Noise
 
+Adding stochastic noise to continuous features is the simplest form of tabular perturbation, functioning as an empirical
+regularizer:
+
+### Scale sensitivity and IQR scaling
+
+In tabular datasets, continuous columns exhibit radically disparate measurement units and variances (e.g. `Age`
+$\in [18, 90]$ vs `Annual_Income` $\in [10^4, 10^7]$). Injecting unscaled Gaussian noise
+$\delta \sim \mathcal{N}(0, \sigma^2)$ across all features is disastrous:
+- If $\sigma = 5$, it perturbs `Annual_Income` by an imperceptible $0.005\%$, while simultaneously distorting `Age` by
+  an extreme $\pm 5$ years.
+
+To preserve balanced signal-to-noise ratios, noise injection must be scaled by each column's robust dispersion metric,
+such as the **Interquartile Range (IQR)**:
+
+$$
+\tilde{x}_{i, j} = x_{i, j} + \epsilon \cdot \operatorname{IQR}(x_j) \cdot \mathcal{N}(0, 1)
+$$
+
+where $\epsilon \in [0.05, 0.20]$ controls the relative perturbation magnitude.
+
+### The integer count problem
+
+Continuous noise injection destroys discrete structure in count variables (e.g. `number_of_children` or
+`previous_defaults`). Perturbing an integer $2$ into a continuous float $2.38$ forces the downstream model to process
+out-of-distribution fractional levels. Integer columns must either be excluded from additive noise or rounded to the
+nearest discrete integer step with probability boundaries.
+
 ## Mixup for tables
+
+Hongyi Zhang et al.'s **Mixup** linearly interpolates between pairs of instances $(\mathbf{x}_A, \mathbf{y}_A)$ and
+$(\mathbf{x}_B, \mathbf{y}_B)$ <Cite id="zhang2018mixup" />. In tabular data, however, naive input-space mixup fails on
+categorical variables: what is the linear combination of $0.7 \times \text{Doctor} + 0.3 \times \text{Electrician}$?
+Interpolating raw categorical integer codes produces nonsensical intermediate indices.
+
+Tabular pipelines resolve this dilemma through two principled formulations:
+
+| Tabular Mixup Paradigm | Continuous Feature Mixing | Categorical Feature Mixing | Latent Target Interpolation | Architectural Domain |
+| :--- | :--- | :--- | :--- | :--- |
+| **Probabilistic Feature Mixing** | Convex combination: $\tilde{x}_j = \lambda x_{A, j} + (1 - \lambda) x_{B, j}$ | Stochastic draw: $x_{A, j}$ with prob $\lambda$, else $x_{B, j}$ | Soft target: $\tilde{\mathbf{y}} = \lambda \mathbf{y}_A + (1 - \lambda) \mathbf{y}_B$ | Input space; direct preprocessing for GBDT and linear models |
+| **Manifold / Post-Embedding Mixup** | Tokenized continuous embeddings in $\mathbb{R}^d$ | Dense semantic embeddings $\mathbf{e}_j \in \mathbb{R}^d$ | Interpolate latent matrices: $\tilde{\mathbf{E}} = \lambda \mathbf{E}_A + (1 - \lambda) \mathbf{E}_B$ | Latent space; optimal for FT-Transformer, SAINT, and TabNet |
+
+Post-embedding mixup operates on dense continuous semantic vectors $\mathbf{e}_j \in \mathbb{R}^d$, smoothly blending
+the semantic representations of disparate categories while assigning proportional soft labels
+$\tilde{\mathbf{y}} = \lambda \mathbf{y}_A + (1 - \lambda) \mathbf{y}_B$.
 
 ## Feature masking
 
+In **Value Imputation / Feature Masking** (formalized in VIME by Jinsung Yoon et al.), individual column values are
+randomly masked during training <Cite id="yoon2020vime" />:
+
+$$
+\tilde{x}_{i, k} = \begin{cases} \operatorname{MASK} & \text{with probability } p_{\text{mask}} \\ x_{i, k} & \text{with probability } 1 - p_{\text{mask}} \end{cases}
+$$
+
+In tabular deep learning, dominant features (such as `Credit_Score` or `Historical_Delinquency`) often command massive
+gradient magnitudes in early epochs. The model quickly becomes pathologically over-reliant on the dominant column,
+failing to learn subtle predictive signals in secondary features.
+
+Random feature masking acts as tabular dropout: by periodically withholding dominant features, the network is forced to
+learn redundant, distributed representations across secondary columns, substantially improving out-of-domain
+generalization.
+
 ## Swapping values between rows
+
+Gowthami Somepalli et al. introduced **CutMix-style feature swapping** for tabular transformers in the SAINT
+architecture <Cite id="somepalli2021saint" />.
+
+Rather than generating artificial values via continuous noise or interpolation, feature swapping replaces a subset of
+columns in anchor row $\mathbf{x}_i$ with authentic values randomly sampled from another row $\mathbf{x}_j$ in the
+empirical training distribution:
+
+$$
+\tilde{x}_{i, k} = \begin{cases} x_{i, k} & \text{with probability } 1 - p_{\text{swap}} \\ x_{j, k} & \text{with probability } p_{\text{swap}} \end{cases}
+$$
+
+### The marginal validity advantage
+
+Feature swapping guarantees **$100\%$ marginal validity**: every swapped entry is an authentic, physically observed
+category or numerical value drawn directly from real training data. Unlike SMOTE (Chawla et al. 2002)—which linearly
+interpolates minority instances and can generate points in unpopulated feature gaps—feature swapping preserves discrete
+categorical vocabularies and empirical marginal frequencies <Cite id="chawla2002" />.
 
 ## Why tables resist augmentation
 
+Understanding why data augmentation yields massive leaps in computer vision ($+15\text{--}30\%$ accuracy) but only
+modest gains in tabular data ($+1\text{--}3\%$) requires analyzing tabular manifold structure:
+
+1. **Lack of continuous manifold smoothness**: An $\epsilon$-perturbation in an image pixel creates a perceptually
+   identical image. In tabular data, small perturbations cross sharp operational cliffs: altering an applicant's age
+   from 20 to 21 crosses legal contract eligibility; shifting a credit score from 619 to 620 crosses prime lending
+   tiers.
+2. **Hard relational constraints**: Tabular columns enforce rigid physical and temporal relationships:
+   $$
+   \operatorname{End\_Date} \ge \operatorname{Start\_Date}, \quad \operatorname{Total\_Debt} \ge \operatorname{Credit\_Card\_Debt}
+   $$
+   Independent column perturbations routinely violate these hard invariants, generating synthetic records that never
+   exist in reality.
+3. **High marginal sensitivity**: Individual tabular features carry dense, non-redundant causal information. Randomly
+   masking or altering a single feature can erase $50\%$ of the row's total predictive signal.
+
 ## Pitfalls
+
+1. **Independent perturbation destroying joint correlations**: Swapping or perturbing correlated columns independently,
+   creating physically impossible combinations (e.g. an applicant with `Education = "High School"` and
+   `Job = "Neurosurgeon"`).
+2. **Input-space categorical interpolation**: Linearly blending raw integer category IDs; averaging category `2`
+   ("Engineer") and category `4` ("Lawyer") to produce float `2.6` which does not map to any valid semantic entity.
+3. **Unscaled additive noise across unnormalized columns**: Adding fixed-variance Gaussian noise to raw tabular data,
+   which destroys narrow-range features while having zero effect on high-magnitude currency fields.
+4. **Violating monotonicity in time-series tabular rows**: Perturbing time-dependent tabular fields (e.g.
+   `cumulative_payments` or `account_age`) without enforcing non-decreasing monotonic constraints.
+5. **Applying aggressive augmentation to tree-based models**: GBDT models split on single features; adding synthetic
+   noise or feature swaps to tabular data prior to training XGBoost or LightGBM frequently degrades test accuracy by
+   smearing clean split boundaries.

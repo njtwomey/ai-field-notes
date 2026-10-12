@@ -1,24 +1,191 @@
 ---
 title: 'Domain-knowledge features'
 kind: concept
-summary: 'Features that encode a known mechanism, such as ratios with physical meaning or dimensionless groups from dimensional analysis, often generalise better than features a model must discover.'
-tags: [data, feature-engineering]
-aliases: []
-requires: []
-related: []
-references: []
-status: stub
+summary: 'Features that encode a known mechanism, such as ratios with physical meaning, dimensionless groups, or spline basis expansions, often generalise better than raw representations.'
+tags: [data-preparation, feature-engineering, scientific-ml, splines]
+aliases: [physics-informed features, mechanistic features, dimensionless groups, spline features, B-spline features]
+requires: [feature-crosses, feature-scaling]
+related: [feature-crosses, pretrained-embeddings-as-features, dimensionality-reduction-as-preprocessing]
+references: [buckingham1914, deboor1978, hastie2009]
+status: draft
 updated: 2026-10-11
 ---
 
+import { DomainFeaturesExplorer } from './DomainFeaturesExplorer'
+
 <Definition>
-To be written.
+A **domain-knowledge feature** is an engineered transformation $\phi(\mathbf{x}): \mathbb{R}^D \to \mathbb{R}^M$ that
+embeds explicit scientific mechanisms, physical conservation laws, dimensional invariance, or functional inductive
+biases (such as piecewise polynomial basis expansions) directly into the feature space:
+
+$$
+\mathbf{z} = \phi(\mathbf{x}) = \left[\pi_1(\mathbf{x}), \pi_2(\mathbf{x}), \dots, B_1(x_j), \dots, B_K(x_j)\right]^\top.
+$$
+
+Rather than forcing an estimator to rediscover known physical or structural relationships from sparse, noisy
+observations, mechanistic transformations restrict the hypothesis space to physically plausible functions.
 </Definition>
 
 ## Features from mechanisms
 
+In many applied domains—such as aerodynamics, pharmacokinetics, structural mechanics, and financial risk—underlying
+physical or regulatory mechanisms dictate the governing equations:
+
+- **Conservation laws**: In chemical engineering and energy systems, mass and energy balances enforce invariant sums
+  ($\sum_i \dot{m}_i = 0$). Providing residual imbalances $\Delta E = E_{\text{in}} - E_{\text{out}}$ as explicit
+  features isolates sensor drift or system leakage without requiring a multi-layer neural network to learn addition and
+  subtraction across noisy telemetry channels.
+- **Kinetic and saturation curves**: Biochemical reactions frequently obey Michaelis-Menten enzyme kinetics:
+
+  $$
+  v = \frac{V_{\max} [S]}{K_m + [S]}.
+  $$
+
+  A linear model cannot fit this hyperbolic saturation directly. However, transforming the concentration $[S]$ into its
+  reciprocal $1/[S]$ (or using a log transform $\ln [S]$) linearises the response into the Lineweaver-Burk formulation:
+
+  $$
+  \frac{1}{v} = \frac{K_m}{V_{\max}} \left(\frac{1}{[S]}\right) + \frac{1}{V_{\max}},
+  $$
+
+  converting a non-linear parameter estimation problem into an exact ordinary least-squares problem.
+
+- **Geometric and structural relationships**: In spatial navigation, computing explicit Euclidean distances
+  $d = \|\mathbf{p}_1 - \mathbf{p}_2\|_2$ or Manhattan norms $\|\mathbf{p}_1 - \mathbf{p}_2\|_1$ injects metric topology
+  that tree-based models (which make axis-aligned cuts) struggle to approximate without deep partitioning.
+
 ## Ratios with physical meaning
 
-## Dimensional analysis
+Raw numerical measurements often scale with total system size, obscuring the underlying state of the system. Dividing
+one variable by another cancels extensive scaling and isolates intensive state properties:
 
-## Pitfalls
+1. **Aspect ratio and relative dimensions**: In aerodynamic drag prediction, chord length $c$ and wingspan $b$ scale
+   with aircraft size; the aspect ratio $\text{AR} = b^2 / S$ (where $S$ is wing area) directly determines induced drag
+   efficiency regardless of absolute scale.
+2. **Financial liquidity and solvency ratios**: In credit risk, a company's total debt or current assets scale with
+   enterprise size. Standard ratios—such as the debt-to-equity ratio or current ratio
+   $\frac{\text{Current Assets}}{\text{Current Liabilities}}$—quantify solvency across both micro-enterprises and
+   multinational corporations.
+3. **Biometric indices**: Body mass index ($\text{BMI} = \frac{\text{mass}}{\text{height}^2}$) constructs an
+   approximately scale-invariant measure of body volume from two correlated physical measurements.
+
+## Dimensional analysis and dimensionless groups
+
+The most systematic framework for mechanistic feature construction is **dimensional analysis**, governed by the
+Buckingham $\pi$ theorem <Cite id="buckingham1914" />.
+
+### The Buckingham $\pi$ theorem
+
+Let a physical relationship involve $n$ dimensional physical variables $q_1, q_2, \dots, q_n$:
+
+$$
+f(q_1, q_2, \dots, q_n) = 0.
+$$
+
+If these $n$ variables can be expressed in terms of $k$ independent fundamental physical dimensions (such as mass $[M]$,
+length $[L]$, time $[T]$, temperature $[\Theta]$), then the system can be equivalently expressed in terms of $p = n - k$
+independent **dimensionless groups** $\pi_1, \pi_2, \dots, \pi_p$:
+
+$$
+F(\pi_1, \pi_2, \dots, \pi_p) = 0.
+$$
+
+### Impact on sample complexity
+
+Transforming raw physical features into dimensionless $\pi$-groups reduces the input dimension from $n$ to $n - k$.
+Because statistical sample complexity scales exponentially with input dimension in non-parametric estimation, this
+dimensional reduction collapses the volume of feature space that training data must cover:
+
+- **Reynolds number ($\text{Re}$)**: Combines fluid density $\rho$, velocity $v$, characteristic length $L$, and dynamic
+  viscosity $\mu$:
+
+  $$
+  \text{Re} = \frac{\rho v L}{\mu} = \frac{\text{inertial forces}}{\text{viscous forces}}.
+  $$
+
+  Flow regime transitions (from laminar to turbulent) occur at critical values of $\text{Re}$ independently of whether
+  the fluid is air or water, or whether the scale is a model wind tunnel or full-scale aircraft.
+- **Froude number ($\text{Fr}$)**: Governs free-surface wave resistance:
+
+  $$
+  \text{Fr} = \frac{v}{\sqrt{g L}}.
+  $$
+
+- **Mach number ($\text{Ma}$)**: Governs compressibility effects:
+
+  $$
+  \text{Ma} = \frac{v}{a}.
+  $$
+
+By computing dimensionless numbers as input features, models inherently satisfy scale invariance and dimensional
+consistency without having to infer the laws of physics from data.
+
+## Basis expansions and spline features
+
+When an input variable exhibits a smooth, non-linear relationship with the target, standard linear models fail to
+capture curvature, while high-degree global polynomials $\phi(x) = [1, x, x^2, \dots, x^d]$ suffer from severe boundary
+oscillations (**Runge's phenomenon**).
+
+### B-spline basis expansion
+
+A **spline** is a piecewise polynomial of degree $k$ (typically cubic, $k=3$) connected smoothly at predefined break
+points called **knots** $\tau_1 < \tau_2 < \dots < \tau_m$ <Cite id="deboor1978" /> <Cite id="hastie2009" />. A spline
+of degree $k$ maintains continuity in derivatives up to order $k-1$ at every interior knot.
+
+Any spline function can be represented as a linear combination of B-spline basis functions:
+
+$$
+f(x) = \sum_{j=1}^{m + k} \beta_j B_{j, k}(x),
+$$
+
+where the basis functions $B_{j, k}(x)$ are computed via the Cox-de Boor recurrence relation:
+
+$$
+B_{j, 0}(x) = \begin{cases} 1 & \text{if } \tau_j \le x < \tau_{j+1} \\ 0 & \text{otherwise} \end{cases}
+$$
+
+$$
+B_{j, k}(x) = \frac{x - \tau_j}{\tau_{j+k} - \tau_j} B_{j, k-1}(x) + \frac{\tau_{j+k+1} - x}{\tau_{j+k+1} - \tau_{j+1}} B_{j+1, k-1}(x).
+$$
+
+Each basis function $B_{j, k}(x)$ has **compact local support**: it is strictly zero outside the interval
+$[\tau_j, \tau_{j+k+1}]$. Consequently, modifying a knot coefficient locally leaves distant predictions unaffected,
+avoiding the global instability of polynomials.
+
+### Natural cubic splines and boundary extrapolation
+
+Standard polynomials oscillate and diverge toward $\pm \infty$ outside the range of training data. **Natural cubic
+splines** enforce a boundary constraint: the second and third derivatives must equal zero beyond the boundary knots
+($\tau_1$ and $\tau_m$):
+
+$$
+f''(x) = 0, \quad f'''(x) = 0 \quad \text{for } x < \tau_1 \text{ or } x > \tau_m.
+$$
+
+This forces the spline to extrapolate **linearly** outside the observed data support, providing stable, bounded
+predictions rather than catastrophic boundary explosions.
+
+The interactive explorer below demonstrates the trade-off between raw linear features, global polynomial expansion
+(Runge oscillation), and cubic B-spline basis expansion with linear boundary extrapolation:
+
+<DomainFeaturesExplorer />
+
+## Pitfalls and failure modes
+
+1. **Singularities and division by zero**: Ratios such as $x_1 / x_2$ diverge to $\pm \infty$ when the denominator
+   approaches zero. To avoid numerical instability and extreme outlier creation, add an empirical regulariser or
+   shrinkage constant:
+
+   $$
+   z = \frac{x_1}{x_2 + \epsilon \cdot \text{IQR}(x_2)}.
+   $$
+
+2. **Multicollinearity with raw variables**: Adding both raw inputs $[x_1, x_2]$ and their ratio $x_1 / x_2$ or product
+   $x_1 x_2$ introduces strong multicollinearity into linear models, inflating variance of parameter estimates. Ridge or
+   elastic net regularisation is necessary to stabilize coefficients.
+3. **Knot placement sensitivity**: In spline basis expansions, placing knots uniformly across a heavily skewed feature
+   leaves dense data regions under-parameterised while placing too many degrees of freedom in sparse tails. Place knots
+   at **empirical quantiles** of the training distribution to ensure equal observation density per spline segment.
+4. **Invalid physical assumptions**: Mechanistic features derived from laminar flow equations or idealized market
+   equilibrium fail catastrophically when operating conditions shift into turbulent or distressed regimes. Validate
+   domain features against empirical residuals to ensure the assumed physics hold.

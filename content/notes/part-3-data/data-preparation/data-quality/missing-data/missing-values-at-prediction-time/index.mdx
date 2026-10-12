@@ -2,25 +2,139 @@
 title: 'Missing values at prediction time'
 kind: concept
 summary: 'Values can be missing when a deployed model predicts, sometimes in patterns not seen in training. Native handling in trees, fallback models and monitoring of missing rates keep predictions sound.'
-tags: [data]
-aliases: []
-requires: []
-related: [encoding-missingness]
-references: []
-status: stub
+tags: [data-preparation, machine-learning, production-ml, missing-data]
+aliases: [serving-time missing data, inference-time missingness, native tree missing handling, fallback models, missing rate monitoring]
+requires: [missingness-mechanisms, single-imputation, decision-tree, preprocessing-pipelines]
+related: [encoding-missingness, learned-imputation, multiple-imputation]
+references: [chen2016b, ke2017, prokhorenkova2018, pedregosa2011]
+status: draft
 updated: 2026-10-11
 ---
 
+import { PredictionTimeMissingnessExplorer } from './PredictionTimeMissingnessExplorer'
+
 <Definition>
-To be written.
+At **prediction time** (also known as *serving time* or *inference time*), an incoming query instance
+$\xvec_{\text{query}} \in (\mathbb{R} \cup \{\text{NaN}\})^D$ can contain missing values across any combination of
+features due to network dropouts, API timeouts, optional client inputs, or upstream sensor outages. 
+
+Production scoring pipelines cannot rely on offline iterative methods (such as MICE) or row deletion. Instead, serving
+architectures require deterministic, low-latency strategies that map incomplete query payloads into valid model
+predictions without crashing serving containers.
 </Definition>
 
-## Native handling in trees
+## Native missing value handling in gradient-boosted trees
 
-## Imputers fitted at training time
+Modern gradient-boosted decision tree (GBDT) implementations—including XGBoost, LightGBM, and CatBoost—support native
+missing value handling directly within tree traversal routines <Cite id="chen2016b" /> <Cite id="ke2017" />
+<Cite id="prokhorenkova2018" />.
 
-## Fallback models
+### The default split-direction algorithm
+During tree construction at node $k$ with split candidate feature $X_j$:
+1. The training instances are partitioned into non-missing rows $I_{\text{obs}}$ and missing rows
+   $I_{\text{mis}} = \{i : X_{ij} = \text{NaN}\}$.
+2. The split finding algorithm enumerates candidate thresholds $s$ using only observed records $I_{\text{obs}}$.
+3. For each candidate split, the algorithm evaluates two alternative routing assignments for the missing instances
+   $I_{\text{mis}}$:
+   - **Route missing left:** Assign $I_{\text{mis}}$ to the left child, calculating split gain $G_{\text{left}}(s)$.
+   - **Route missing right:** Assign $I_{\text{mis}}$ to the right child, calculating split gain $G_{\text{right}}(s)$.
+4. The algorithm selects the threshold $s^*$ and the **default routing direction**
+   $d^* \in \{\text{left}, \text{right}\}$ that maximizes overall loss reduction:
+   
+   $$
+   (s^*, d^*) = \arg\max_{s, d} G_d(s).
+   $$
 
-## Monitoring missing rates
+The optimal default direction $d^*$ is permanently serialized into the compiled tree structure alongside the split
+threshold $s^*$.
+
+### Inference performance and the silent drift hazard
+At prediction time, when the scoring engine encounters $X_{\text{query}, j} = \text{NaN}$, it routes the query down
+direction $d^*$ in $\mathcal{O}(1)$ time. This requires zero preprocessing overhead, zero memory allocation, and zero
+additional inference latency.
+
+However, native routing introduces a dangerous production vulnerability: **unobserved training missingness**. If feature
+$X_j$ was fully observed (0% missing) during training, the default direction $d^*$ was determined arbitrarily (governed
+by minor gradient fluctuations or deterministic tie-breaking). If an upstream outage in production suddenly causes $X_j$
+to become 100% missing, queries will follow this arbitrary branch, leading to severe, silent prediction degradation
+without raising any serving-layer exceptions.
+
+## Pipeline-packaged imputers (frozen stateless transformers)
+
+For linear models, neural networks, nearest-neighbor classifiers, and tree algorithms that do not support native
+missingness, inference pipelines must apply deterministic imputation <Cite id="pedregosa2011" />.
+
+To prevent training-serving skew:
+1. **Fit strictly on training data:** Summary statistics (such as feature medians $\hat{\mu}_j^{\text{train}}$, scaling
+   factors, or category modes) are learned solely from the training set.
+2. **Serialize inside pipeline artifacts:** The imputer is packaged directly into the serialized model artifact (e.g.
+   via `scikit-learn` `Pipeline` or ONNX graph export).
+3. **Stateless transformation at serving:** When an inference query arrives:
+   
+   $$
+   \tilde{X}_{\text{query}, j} = \begin{cases} X_{\text{query}, j} & \text{if } X_{\text{query}, j} \neq \text{NaN}, \\ \hat{\mu}_j^{\text{train}} & \text{if } X_{\text{query}, j} = \text{NaN}. \end{cases}
+   $$
+
+### Missing indicator augmentation
+Imputing a fixed constant (like the median) destroys the distinction between a true median value and an unobserved
+value. Appending a binary indicator flag $M_j = \mathbb{I}(X_j = \text{NaN})$ allows downstream models to learn specific
+offset weights for missing instances, mitigating bias while preserving deterministic serving behavior.
+
+## Dedicated fallback models and routing gateways
+
+When a critical, high-signal feature (such as a third-party credit bureau score or laboratory blood test) experiences
+frequent service outages, standard single imputation can produce excessive prediction variance.
+
+In high-stakes production systems, engineering teams implement **model cascades** governed by routing gateways:
+
+| Routing Branch | Gateway Condition | Dispatched Model Container | Predictive Characteristics |
+| :--- | :--- | :--- | :--- |
+| **Primary Route** | Fragile feature $X_{\text{frag}} \ne \text{NaN}$ | Full Model $\mathcal{M}_{\text{full}}(X_{\text{core}}, X_{\text{frag}})$ | Maximum predictive accuracy; leverages complete feature vector |
+| **Fallback Route** | Fragile feature $X_{\text{frag}} = \text{NaN}$ | Reduced Model $\mathcal{M}_{\text{reduced}}(X_{\text{core}})$ | Calibrated uncertainty conditioned strictly on $X_{\text{core}}$; bypasses imputation artifacts |
+
+- **Primary model ($\mathcal{M}_{\text{full}}$):** Trained on the full feature set $[X_{\text{core}}, X_{\text{frag}}]$,
+  optimized for maximum predictive performance when all telemetry is available.
+- **Fallback model ($\mathcal{M}_{\text{reduced}}$):** Trained strictly on the core feature set $X_{\text{core}}$,
+  explicitly marginalizing over the absent feature:
+  
+  $$
+  \hat{y} = \mathbb{E}\left[Y \mid X_{\text{core}}\right].
+  $$
+
+A lightweight gateway inspects the incoming payload schema in sub-millisecond time and routes to the appropriate model
+container. Because $\mathcal{M}_{\text{reduced}}$ was trained without $X_{\text{frag}}$, its residual uncertainty is
+properly calibrated to the reduced information state, avoiding the distortion of ad-hoc imputation.
+
+<PredictionTimeMissingnessExplorer />
+
+## Monitoring missing rates and drift detection
+
+Because models fail silently when missingness patterns shift, production machine learning architectures require
+real-time feature missingness monitoring (MLOps):
+
+1. **Sliding-window missing rate tracking:** For each feature $j$, compute the observed missing rate over sliding time
+   windows $W$ (e.g., 5-minute and 1-hour windows):
+   
+   $$
+   p_t(X_j) = \frac{1}{|W|} \sum_{i \in W} \mathbb{I}\left(X_{ij} = \text{NaN}\right).
+   $$
+
+2. **Alerting thresholds:** Trigger automated alerts when:
+   - $p_t(X_j) > p_{\text{train}}(X_j) + 3\sigma_{\text{train}}$ (statistical anomaly detection).
+   - $p_t(X_j) > \text{SLA}_{\max}$ (hard service-level threshold, e.g. 10% missing on critical features).
+3. **Automated circuit breakers:** If a feature's missing rate exceeds critical safety boundaries, circuit breakers can
+   automatically downgrade the serving tier to fallback models or static rule-based policies until upstream services
+   recover.
 
 ## Pitfalls
+
+- **Dynamic batch imputation in serving containers:** Calling dynamic fill functions (such as `df.fillna(df.mean())`)
+  inside microservice scoring endpoints works during bulk offline testing but fails catastrophically in online
+  single-instance scoring. For a payload with batch size $N=1$, computing the mean of an empty column produces `NaN` or
+  crashes with division-by-zero errors.
+- **String and sentinel value leaks:** Upstream databases frequently serialize missing values as `"NaN"`, `"null"`,
+  `"None"`, `"-999"`, or empty strings `""`. If the ingestion parser treats these as valid categorical levels or real
+  negative numbers, numerical models will treat sentinel codes as genuine quantitative measurements.
+- **Overlooking feature dependency cascades:** When an upstream data provider experiences a timeout, multiple derived
+  features (such as 7-day rolling averages and ratio features) fail simultaneously. Pipelines must handle correlated
+  missingness blocks rather than assuming independent univariate dropouts.

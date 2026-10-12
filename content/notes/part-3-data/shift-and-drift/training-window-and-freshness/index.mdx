@@ -2,27 +2,133 @@
 title: 'Training window and freshness'
 kind: concept
 summary: 'The length of the training window trades bias against variance: a long window has more data that may be stale, a short one is current but noisy. Seasonality and regime changes set the useful length.'
-tags: [data, time-series]
-aliases: []
-requires: []
-related: [concept-drift-adaptation, sample-weights]
-references: []
-status: stub
+tags: [data, time-series, mlops, concept-drift]
+aliases: [training window, data freshness, sliding window, recency weighting, retraining cadence]
+requires: [shift-and-drift-in-data]
+related: [shift-and-drift-in-data, subpopulation-shift-and-shortcuts, sample-weights, temporal-splits]
+references: [gama2014, widmer1996]
+status: draft
 updated: 2026-10-11
 ---
 
+import { TrainingWindowFreshnessExplorer } from './TrainingWindowFreshnessExplorer'
+
 <Definition>
-To be written.
+The **training window** $\mathcal{W}(W) = \{(\mathbf{x}_t, y_t)\}_{t=T-W+1}^T$ defines the contiguous historical
+temporal span of duration $W$ selected to fit an estimator at deployment time $T$:
+
+$$
+\hat{f}_W = \arg\min_{f \in \mathcal{F}} \sum_{t=T-W+1}^T w_t \, \ell(f(\mathbf{x}_t), y_t).
+$$
+
+In non-stationary environments, window selection balances **data freshness** (reducing obsolete concept bias) against
+**sample sufficiency** (reducing parameter estimation variance).
 </Definition>
 
 ## Window length as a bias-variance choice
 
+In stationary environments, estimation variance decreases monotonically with sample size, making an expanding window
+($W = T$) asymptotically optimal. In real-world production environments where data generating distributions drift over
+time ($P_t \neq P_{T+1}$), the generalization error on the upcoming deployment interval $T+1$ follows a temporal
+bias-variance trade-off <Cite id="widmer1996" />:
+
+$$
+\mathbb{E}\left[ (\hat{f}_W(\mathbf{x}) - y_{T+1})^2 \right] = \text{Bias}^2(W) + \text{Var}(W) + \sigma^2.
+$$
+
+- **Short window ($W \ll W^*$)**: The training distribution reflects the immediate current state of the world
+  ($P_t \approx P_{T+1}$), minimizing historical drift bias. However, the limited number of training rows inflates
+  parameter variance ($\text{Var} \propto \frac{1}{W}$), rendering the model volatile and sensitive to transient noise.
+- **Long window ($W \gg W^*$)**: Abundant data suppresses estimation variance, but training includes obsolete
+  operational regimes, superseded pricing policies, or past consumer preferences, introducing severe **stale-data
+  bias**.
+- **Optimal window $W^*$**: Achieved at the inflection point where marginal reductions in parameter estimation variance
+  equal the marginal increase in drift bias.
+
 ## Recency weights
 
-## Seasonality
+A sharp rectangular sliding window treats an observation from $T-W+1$ as fully informative while assigning zero weight
+to $T-W$. **Recency weighting** softens this boundary by assigning an exponentially decaying weight to each historical
+observation:
 
-## Regime changes
+$$
+w_t = \gamma^{T - t}, \quad \gamma \in (0, 1] \quad \text{or} \quad w_t = \exp(-\lambda (T - t)).
+$$
+
+- $\gamma = 1$ recovers the unweighted expanding window.
+- Smaller values of $\gamma$ (or larger half-life parameters $\tau_{1/2} = \frac{\ln 2}{\lambda}$) discount historical
+  data smoothly.
+- **Effective sample size**: Under sample weighting, the statistical degrees of freedom correspond to:
+
+  $$
+  N_{\text{eff}} = \frac{\left( \sum_{t=1}^T w_t \right)^2}{\sum_{t=1}^T w_t^2}.
+  $$
+
+  Monitoring $N_{\text{eff}}$ ensures the exponential decay parameter does not shrink effective training support below
+  the minimum required for statistical convergence.
+
+## Seasonality and cyclic alignment
+
+When underlying data streams exhibit cyclical patterns—such as diurnal demand, weekly foot-traffic cycles, or annual
+holiday retail peaks—arbitrary window lengths introduce severe distortion:
+
+- **Phase distortion**: If a model is trained on a 10-day sliding window, the training sample contains two weekends and
+  six weekdays (or three weekends and four weekdays depending on the start date). The empirical class priors become
+  unbalanced, biasing probability calibrations.
+- **Integer period alignment**: To maintain unbiased representation across cyclic modes, the training window length must
+  equal an integer multiple of the dominant seasonal cycle:
+
+  $$
+  W = k \cdot S, \quad k \in \mathbb{N}^+,
+  $$
+
+  where $S$ is the fundamental seasonal period (e.g., exactly 7, 14, or 28 days for weekly seasonality, or exactly 52
+  weeks for annual seasonality).
+
+## Regime changes and structural breaks
+
+While gradual drift allows smooth adaptation via sliding windows or recency weights, **abrupt regime shifts** (e.g.,
+macroeconomic disruptions, regulatory policy shifts, or API schema alterations) render pre-shift data actively harmful
+<Cite id="gama2014" />:
+
+1. **Change-point detection**: Statistical process control algorithms—such as the **Page-Hinkley test** or Cumulative
+   Sum (**CUSUM**)—monitor the cumulative sum of model residuals $e_t = |y_t - \hat{y}_t|$:
+
+   $$
+   m_t = \sum_{i=1}^t (e_i - \bar{e} - \delta), \quad M_t = \min_{1 \le i \le t} m_i.
+   $$
+
+   When the discrepancy $m_t - M_t > \lambda$, a change-point alarm triggers.
+2. **Window reset**: Upon detecting a structural break, the pipeline resets the training window to the change-point
+   timestamp $t_{\text{break}}$, discarding all pre-break observations to eliminate catastrophic bias.
+
+The interactive visualizer below illustrates the bias-variance trade-off across window lengths and demonstrates how
+exponential weighting stabilizes predictions during structural regime breaks:
+
+<TrainingWindowFreshnessExplorer />
 
 ## Retraining cadence
 
-## Pitfalls
+Production systems deploy two complementary retraining architectures:
+
+- **Scheduled retraining (cron cadence)**: Retraining models at fixed calendar intervals (e.g., every 6 hours, daily, or
+  weekly). Simpler to operationalize, but risks running stale models during sudden shifts or wasting compute retraining
+  when data distributions are stationary.
+- **Event-driven drift-triggered retraining**: The retraining pipeline executes only when distribution monitoring (such
+  as PSI or MMD) or residual tracking (Page-Hinkley) exceeds pre-set alert thresholds.
+- **The delayed feedback bottleneck**: In click-through rate (CTR) prediction, ground truth labels arrive within seconds
+  or minutes, permitting hourly retraining. In credit default risk or insurance fraud, true labels arrive months or
+  years after the initial prediction, preventing immediate retraining on recent production queries.
+
+## Pitfalls and practical considerations
+
+1. **Cold-start instability**: Truncating the training window too aggressively after a regime shift reduces
+   $N_{\text{eff}}$ to near zero, causing complex models (such as deep neural networks or high-depth trees) to severely
+   overfit or fail to converge. Regularize aggressively or fall back to linear baselines immediately following window
+   resets.
+2. **Hidden cyclic leakage**: When training on a short window that captured an abnormal holiday surge (e.g., Black
+   Friday), the model will treat holiday volume as baseline reality for subsequent ordinary weeks unless explicit
+   seasonal indicators are engineered.
+3. **Training compute escalation**: Retraining large ensemble models frequently across massive rolling windows incurs
+   substantial GPU/CPU infrastructure expenses and carbon footprints. Balance retraining frequency against marginal
+   accuracy gains using offline freshness ablation curves.

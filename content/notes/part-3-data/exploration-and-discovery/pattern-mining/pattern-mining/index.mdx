@@ -1,30 +1,178 @@
 ---
 title: 'Frequent itemsets and association rules'
 kind: concept
-summary: 'Pattern mining finds sets of items that occur together often and rules of the form "if A then B" that hold with high support and confidence, together with sequential patterns and subgroups whose target differs from the rest.'
-tags: [data, algorithms]
-aliases: []
-requires: []
-related: []
-references: []
-status: stub
-updated: 2026-10-11
+summary: 'Pattern mining discovers frequent itemsets, association rules (A ⇒ B), and sequential motifs across transaction databases—leveraging anti-monotonic pruning (Apriori), FP-trees, and interestingness metrics like lift and conviction.'
+tags: [data, algorithms, pattern-mining, association-rules, exploration]
+aliases: [pattern mining, association rules, frequent itemset mining, apriori, fp-growth]
+requires: [data-generating-process, reading-raw-examples]
+related: [slice-analysis, dependence-measures, data-profiling]
+references: [agrawal1994, han2000, brin1997]
+status: draft
+updated: 2026-10-12
 ---
 
+import { PatternMiningVisualizer } from './PatternMiningVisualizer'
+
 <Definition>
-To be written.
+**Pattern mining** is the unsupervised algorithmic extraction of recurring discrete itemsets, conditional association
+rules ($X \Rightarrow Y$), and sequential motifs from transactional databases $\mathcal{D} = \{T_1, \dots, T_N\}$. It
+prunes combinatorial search spaces by exploiting the anti-monotonicity of support and evaluates rule quality using
+information-theoretic interestingness measures such as lift and conviction.
 </Definition>
 
-## Itemsets, support and confidence
+In exploratory analysis, tabular and log datasets frequently contain discrete combinatorial events—market baskets of
+purchased products, sets of permissions granted to security roles, co-occurring medical diagnosis codes, or ordered
+sequences of user interface interactions. A brute-force search over all possible combinations of $M$ items requires
+evaluating $2^M$ potential itemsets. Pattern mining algorithms make this combinatorial exploration tractable
+<Cite id="agrawal1994, han2000" />.
 
-## Apriori
+<PatternMiningVisualizer />
 
-## FP-growth
+## Itemsets, support, and confidence
 
-## Interestingness measures
+Let $\mathcal{I} = \{i_1, \dots, i_M\}$ denote the universe of discrete items. A transaction database
+$\mathcal{D} = \{T_1, \dots, T_N\}$ consists of $N$ transactions where each $T_k \subseteq \mathcal{I}$. An itemset
+$X \subseteq \mathcal{I}$ is a collection of distinct items.
 
-## Sequential patterns
+### Support
 
-## Subgroup discovery
+The **support** of an itemset $X$ measures its empirical frequency across the database:
 
-## Pitfalls
+$$
+\text{supp}(X) = \frac{|\{T \in \mathcal{D} : X \subseteq T\}|}{N} = P(X \subseteq T)
+$$
+
+An itemset is declared **frequent** if $\text{supp}(X) \ge \text{minsup}$, where $\text{minsup} \in (0, 1]$ is a
+user-defined frequency threshold.
+
+### Association rules and confidence
+
+An association rule is an implication expression of the form:
+
+$$
+X \Rightarrow Y, \quad \text{where } X, Y \subset \mathcal{I} \text{ and } X \cap Y = \emptyset
+$$
+
+Where $X$ is the antecedent and $Y$ is the consequent.
+
+The **confidence** of a rule estimates the conditional probability that a transaction contains $Y$ given that it
+contains $X$:
+
+$$
+\text{conf}(X \Rightarrow Y) = \frac{\text{supp}(X \cup Y)}{\text{supp}(X)} = P(Y \subseteq T \mid X \subseteq T)
+$$
+
+A rule is valid if its confidence meets or exceeds a minimum threshold:
+$\text{conf}(X \Rightarrow Y) \ge \text{minconf}$.
+
+## Anti-monotonicity and the Apriori algorithm
+
+The search space of all itemsets forms a Boolean lattice of size $2^{|\mathcal{I}|}$. Rakesh Agrawal and Ramakrishnan
+Srikant introduced the **Apriori principle** <Cite id="agrawal1994" />, leveraging the mathematical property of
+**anti-monotonicity**:
+
+$$
+\forall X \subseteq Y, \quad \text{supp}(Y) \le \text{supp}(X)
+$$
+
+Any superset of an infrequent itemset is guaranteed to be infrequent. If $\{ \text{Caviar} \}$ fails the minimum support
+threshold, then every combination containing caviar ($\{ \text{Caviar}, \text{Bread} \}$,
+$\{ \text{Caviar}, \text{Wine}, \text{Cheese} \}$) is strictly infrequent and can be pruned immediately without scanning
+the database <Cite id="agrawal1994" />.
+
+| Lattice Level | Candidate Itemsets | Frequency Evaluation | Anti-Monotone Pruning Action |
+| :--- | :--- | :--- | :--- |
+| **Level 1 ($k=1$)** | $\{A\}, \{B\}$ frequent; $\{C\}$ infrequent | $\text{supp}(\{C\}) < \text{minsup}$ | Flag $\{C\}$ as infrequent; prune all supersets containing $C$ |
+| **Level 2 ($k=2$)** | $\{A, B\}$ retained; $\{A, C\}, \{B, C\}$ | Contain infrequent subset $\{C\}$ | Discarded *a priori* without scanning database |
+| **Level 3 ($k=3$)** | $\{A, B, C\}, \{A, C, D\}$ | Contain infrequent subset $\{C\}$ | Pruned from candidate generation space |
+| **Level 4 ($k=4$)** | $\{A, B, C, D\}$ | Superset of infrequent $\{C\}$ | Pruned entirely; eliminates combinatorial lattice explosion |
+
+### Apriori candidate generation loop
+
+1. **Scan 1**: Count support for single items ($L_1$).
+2. **Generate candidates** ($C_k$): Join frequent $(k-1)$-itemsets $L_{k-1} \bowtie L_{k-1}$ sharing their first $k-2$
+   items.
+3. **Prune**: Discard any candidate containing an infrequent $(k-1)$-subset.
+4. **Scan $k$**: Pass over the database to compute support for $C_k$, retaining those exceeding $\text{minsup}$ ($L_k$).
+5. Repeat until no new frequent itemsets are generated.
+
+The primary limitation of Apriori is I/O overhead: it requires $K_{\max}$ complete sequential database passes, becoming
+prohibitive for large transactional lakes.
+
+## FP-growth: candidate-free pattern mining
+
+Han, Pei, and Yin eliminated candidate generation with **FP-growth** (Frequent Pattern Growth) <Cite id="han2000" />,
+compressing transactions into a prefix **Frequent Pattern Tree (FP-tree)** in exactly two database passes:
+
+| Structural Component | Implementation & Memory Layout | Algorithmic Role | Traversal Operation |
+| :--- | :--- | :--- | :--- |
+| **Header Table** | Frequency-sorted item array with head-of-chain pointers | Tracks global frequent 1-itemsets in descending support order | Entry point for mining; chains all physical occurrences of item $i$ |
+| **Prefix Tree Structure** | Directed trie rooted at `null`; nodes store `(item, count)` | Compresses identical transaction prefixes into shared memory paths | Top-down prefix accumulation shares common high-frequency subsets |
+| **Node-Links** | Singly-linked list traversing across disparate tree branches | Connects identical items across distinct prefix paths | Enables rapid bottom-up extraction of conditional pattern bases |
+
+1. **Pass 1**: Compute item supports; filter infrequent items and sort remaining items in descending frequency order.
+2. **Pass 2**: Insert each transaction into the prefix tree, sharing overlapping prefixes across transactions and
+   updating frequency counts. Horizontal node-links chain all instances of each item across branches.
+3. **Recursive divide-and-conquer**: For each item in the header table, extract its **conditional pattern base** (all
+   prefix paths ending in that item) and construct a conditional FP-tree.
+
+FP-growth operates entirely in memory and mines dense transaction sets up to two orders of magnitude faster than Apriori
+<Cite id="han2000" />.
+
+## Interestingness measures: beyond confidence
+
+A dangerous pitfall in pattern mining is relying solely on support and confidence. High confidence does not imply a
+meaningful statistical relationship.
+
+### The independence trap
+
+Suppose $90\%$ of supermarket customers purchase a generic shopping bag ($P(\text{Bag}) = 0.90$). If $92\%$ of customers
+purchasing organic coffee also purchase a bag ($P(\text{Bag} \mid \text{Coffee}) = 0.92$), the rule:
+
+$$
+\text{Coffee} \Rightarrow \text{Carrier Bag} \quad [\text{supp} = 18\%, \ \text{conf} = 92\%]
+$$
+
+Passes high support and confidence filters. However, because the base rate of purchasing a bag is already $90\%$,
+purchasing coffee increases bag purchase probability by a negligible margin. The high confidence is an artifact of the
+consequent's universal popularity <Cite id="brin1997" />.
+
+### Lift, conviction, and leverage
+
+To measure genuine statistical dependence:
+
+| Metric | Mathematical Formula | Interpretation |
+| :--- | :--- | :--- |
+| **Lift** <Cite id="brin1997" /> | $\frac{\text{conf}(X \Rightarrow Y)}{\text{supp}(Y)} = \frac{P(X \cap Y)}{P(X) P(Y)}$ | Ratio of joint probability to expected probability under independence. $\text{lift} = 1$: independent; $\text{lift} > 1$: positive association; $\text{lift} < 1$: substitute goods. |
+| **Conviction** <Cite id="brin1997" /> | $\frac{1 - \text{supp}(Y)}{1 - \text{conf}(X \Rightarrow Y)} = \frac{P(X) P(\neg Y)}{P(X \cap \neg Y)}$ | Measures directional implication asymmetry. Invariant to consequent popularity; $\text{conv} \to \infty$ for logical rules. |
+| **Leverage** | $\text{supp}(X \cup Y) - \text{supp}(X)\text{supp}(Y)$ | Absolute difference between observed and expected support under independence. |
+
+## Sequential patterns and subgroup discovery
+
+Pattern mining extends beyond static sets to ordered and targeted settings:
+
+1. **Sequential pattern mining**: Transactions are sequences of itemsets ordered by event time
+   $\langle s_1, s_2, \dots, s_L \rangle$. Algorithms (such as PrefixSpan) discover recurring temporal motifs (e.g.,
+   `User signs up` $\to$ `Views documentation` $\to$ `Calls API` within 7 days).
+2. **Subgroup discovery**: Focuses on discovering itemsets that maximize divergence in a target variable $y$ relative to
+   the population background:
+   $$
+   q(X) = N_X^\gamma \cdot \left( \bar{y}_X - \bar{y}_{\text{global}} \right)
+   $$
+   Subgroup discovery flags specific feature conjunctions that suffer anomalous failure rates (e.g., transactions
+   sharing `[Browser = Safari, Region = EU]` exhibit a $6\times$ higher checkout error rate).
+
+## Diagnostic checklist
+
+To deploy pattern mining effectively:
+
+1. **Enforce item pruning via minsup**: Set minimum support thresholds to eliminate rare, ungeneralizable noise before
+   rule expansion <Cite id="agrawal1994" />.
+2. **Use FP-growth for dense transactions**: Avoid multi-pass Apriori on large databases; use FP-growth to mine compact
+   prefix trees <Cite id="han2000" />.
+3. **Filter candidate rules with Lift**: Never accept rules based on confidence alone; require
+   $\text{lift}(X \Rightarrow Y) > 1.2$ to eliminate consequent base-rate artifacts <Cite id="brin1997" />.
+4. **Audit for substitute goods**: Look for negative lift ($\text{lift} < 0.8$); items that mutually displace each other
+   reveal customer substitution behaviors.
+5. **Extract closed frequent itemsets**: Suppress redundant sub-rules by mining **closed itemsets** (itemsets with no
+   immediate superset sharing the same support) to prevent rule explosion.

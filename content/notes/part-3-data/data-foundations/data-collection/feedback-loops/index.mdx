@@ -1,26 +1,129 @@
 ---
 title: 'Feedback loops'
 kind: concept
-summary: 'A deployed model can shape the data it is later trained on, by deciding what is shown, approved or recorded. Such feedback loops entrench the model''s errors unless some exposure is randomised.'
+summary: "A deployed model can shape the data it is later trained on, by deciding what is shown, approved or recorded. Such feedback loops entrench the model's errors unless some exposure is randomised."
 tags: [data, causal-inference]
 aliases: []
 requires: []
 related: [feedback-loops-in-recommendation, concept-drift-adaptation]
-references: []
-status: stub
-updated: 2026-10-11
+references: [perdomo2020, ensign2018, bottou2013]
+status: draft
+updated: 2026-10-12
 ---
 
+import { FeedbackLoopsVisualizer } from './FeedbackLoopsVisualizer'
+
 <Definition>
-To be written.
+A machine learning feedback loop occurs when predictions, ranking slates, or automated decisions executed by an active
+production model alter human behavior or environmental state, thereby shaping the data distribution captured by
+subsequent logging pipelines. When the model is iteratively retrained on this influenced telemetry, its initial
+inductive biases and statistical errors compound, creating self-fulfilling prophecies.
 </Definition>
+
+Standard supervised learning operates under an implicit assumption of passive observation: the data distribution
+$\mathcal{D}$ is an immutable ground truth, and the model's predictions exert zero causal influence on reality
+<Cite id="bottou2013" />. In production systems—from social media recommenders to predictive policing and automated
+underwriting—this assumption is false. Models actively alter the world they observe, inducing performative distribution
+shift that entangles model parameters with training distributions <Cite id="perdomo2020, ensign2018" />.
+
+<FeedbackLoopsVisualizer />
 
 ## Models that shape their own data
 
+Feedback mechanisms arise across three primary pathways:
+
+1. **Exposure and Attention Gating:** In search engines, news feeds, and e-commerce catalogs, users can interact only
+   with items the model decides to display in visible viewport slots. Items ranked at position 1 receive massive
+   interaction volume, while items ranked at position 50 starve for exposure regardless of their intrinsic quality.
+2. **Action-Contingent Observation (Selective Gatekeeping):** In credit lending, fraud prevention, and border security,
+   outcomes materialize only for entities granted approval. The model never learns whether a rejected applicant would
+   have repaid their loan or whether a blocked transaction was benign.
+3. **Strategic User Adaptation (Goodhart's Law):** Human actors learn the model's scoring rubrics and alter their
+   behavior or feature profiles to game the system (e.g., job candidates keyword-stuffing resumes, or content creators
+   optimizing thumbnail clickbait to manipulate recommender algorithms).
+
 ## Performative prediction
+
+Perdomo and colleagues formalized the mathematics of models that manipulate their own data as **Performative
+Prediction** <Cite id="perdomo2020" />.
+
+In classical empirical risk minimization, the distribution $\mathcal{D}$ is static:
+
+$$
+\theta^* = \arg\min_\theta \mathbb{E}_{(X, Y) \sim \mathcal{D}} \left[ \ell(f_\theta(X), Y) \right]
+$$
+
+In performative prediction, deploying model parameters $\theta$ induces a new data distribution $\mathcal{D}(\theta)$:
+
+$$
+\mathcal{D} \to \mathcal{D}(\theta)
+$$
+
+This dynamic defines two distinct solution concepts:
+- **Performative Stability:** A model $\theta_{\text{stable}}$ is performatively stable if it minimizes empirical risk
+  over the exact distribution it itself induces:
+
+$$
+\theta_{\text{stable}} = \arg\min_\theta \mathbb{E}_{(X, Y) \sim \mathcal{D}(\theta_{\text{stable}})} \left[ \ell(f_\theta(X), Y) \right]
+$$
+
+Repeated retraining ($\theta_{t+1} = \arg\min_\theta \mathbb{E}_{\mathcal{D}(\theta_t)} [\ell(\theta)]$) converges to
+performative stability under Lipschitz smoothness conditions.
+- **Performative Optimality:** A model $\theta_{\text{opt}}$ that minimizes true global risk across all possible
+  deployable distributions:
+
+$$
+\theta_{\text{opt}} = \arg\min_\theta \mathbb{E}_{(X, Y) \sim \mathcal{D}(\theta)} \left[ \ell(f_\theta(X), Y) \right]
+$$
+
+A performatively stable model is rarely performatively optimal: standard retraining can lock an organization into a
+highly stable but severely suboptimal local equilibrium.
 
 ## Degenerate loops
 
+When feedback loops are allowed to operate unconstrained without exploratory intervention, systems develop runaway
+pathologies <Cite id="ensign2018" />:
+
+1. **Predictive Policing Runaways:** Ensign et al. proved that predictive policing algorithms (such as PredPol) suffer
+   from catastrophic runaway feedback loops <Cite id="ensign2018" />. If an algorithm initially predicts slightly higher
+   crime in Neighborhood A, police dispatch sends more patrols to A. Because police discover crimes wherever they are
+   physically stationed, Neighborhood A records an inflated count of arrests. Retraining the model causes it to send an
+   even larger share of patrols to A, until $100\%$ of resources are concentrated in A while crime in Neighborhood B
+   goes completely unmonitored.
+2. **Recommender Monoculture and Filter Bubbles:** A music recommender slightly over-indexes on popular pop tracks.
+   Users click these tracks because they are prominently displayed. The pipeline logs these clicks, retrains, and
+   concludes that users possess zero interest in classical or jazz music, purging catalog diversity and homogenizing
+   user taste.
+3. **Model Collapse via Synthetic Web Text:** LLMs scraping web text ingest articles generated by earlier LLMs.
+   Recursive self-training on model-generated data without grounding causes irreversible tail collapse and semantic
+   degradation.
+
 ## Randomised exposure
 
+Breaking feedback loops requires injecting controlled stochastic intervention into the data collection pipeline
+<Cite id="bottou2013" />:
+
+- **Epsilon-Greedy Exploration ($\epsilon$-Greedy):** Reserving a fixed proportion $\epsilon \in [0.02, 0.05]$ of
+  production traffic for completely uniform random assignment across candidate items. This guarantees that unexposed
+  catalog items accumulate observational feedback.
+- **Contextual Bandit Policies (Thompson Sampling, LinUCB):** Maintaining Bayesian posterior uncertainty over item
+  utilities and sampling actions according to their posterior probability of being optimal. Items with high predictive
+  uncertainty receive exploratory exposure until their true quality is established.
+- **Counterfactual Weighting (Inverse Propensity Scoring):** Weighting observed interactions by the inverse probability
+  of display under the logging policy ($w_i = 1 / \pi_0(a_i \mid x_i)$). This down-weights clicks on items placed in
+  position 1 while heavily boosting rare clicks achieved on items placed at lower ranks.
+
 ## Pitfalls
+
+- **Mistaking Performative Stability for Predictive Accuracy:** Celebrating high accuracy metrics on retrospective logs
+  when the model achieved that accuracy simply by forcing the world to conform to its predictions (e.g., an ad system
+  predicting zero clicks on ads it refused to display).
+- **Evaluating Retrained Models on Self-Generated Test Sets:** Validating a newly retrained model against a test set
+  collected under the incumbent model's policy. The test set evaluates only what the old model chose to expose, blinding
+  evaluators to out-of-policy failures.
+- **Silent Feedback Loops in Credit Limits:** A credit scoring model reduces credit limits for borrowers predicted to
+  struggle. Reducing credit limits elevates the borrower's credit utilization ratio, causing their credit score to
+  plunge and triggering actual financial distress—creating the very default the model predicted.
+- **Neglecting Systemic Monoculture:** When multiple competing firms in an industry (e.g., banks or hiring agencies) all
+  purchase and deploy identical third-party foundation models, the models create industry-wide systemic exclusion:
+  rejected individuals are locked out of the entire economy simultaneously.

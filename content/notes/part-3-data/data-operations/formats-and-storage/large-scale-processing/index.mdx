@@ -5,22 +5,129 @@ summary: 'Data larger than memory are processed out of core or across machines. 
 tags: [data, software]
 aliases: []
 requires: []
-related: []
-references: []
-status: stub
+related: [data-formats-and-pipelines, data-loading-and-shuffling, dataset-versioning-and-lineage]
+references: [cormode2005, dean2004]
+status: draft
 updated: 2026-10-11
 ---
 
+import { LargeScaleProcessingVisualizer } from './LargeScaleProcessingVisualizer'
+
 <Definition>
-To be written.
+**Large-scale data processing** encompasses the algorithms and architectures designed to clean, transform, join, and
+featurize datasets that exceed the random-access memory (RAM) of a single compute node. Pipelines scale either
+vertically via out-of-core streaming on single-node storage or horizontally via distributed cluster engines
+<Cite id="dean2004" />, employing sub-linear streaming sketches to compute summary statistics in a single pass
+<Cite id="cormode2005" />.
 </Definition>
+
+Machine learning practitioners frequently encounter datasets spanning hundreds of gigabytes to petabytes. Attempting to
+load these collections into standard in-memory data structures (such as pandas DataFrames or raw NumPy arrays) triggers
+fatal out-of-memory (OOM) crashes. Successfully engineering large-scale training pipelines requires understanding
+out-of-core chunking, network shuffle dynamics, and streaming probabilistic approximations.
+
+<LargeScaleProcessingVisualizer />
 
 ## Out-of-core processing
 
+**Out-of-core** (or external-memory) processing executes computations on datasets larger than physical RAM on a single
+workstation or server by keeping only small, bounded batches of data in memory at any instant, streaming chunks through
+high-speed NVMe storage.
+
+- **Modern columnar engines:** Modern tools—including DuckDB, Polars (lazy streaming API), and Apache Arrow—stream
+  horizontal row groups through vectorized SIMD execution kernels. Aggregations and joins spill intermediate partitions
+  to local NVMe scratch space only when hash tables exceed configured memory budgets.
+- **The single-node advantage:** A modern server equipped with multi-core processors, 64 GB of RAM, and PCIe Gen4/Gen5
+  NVMe storage running an out-of-core engine routinely outperforms a multi-node distributed cluster on sub-terabyte
+  workloads. It eliminates network transport serialization, cluster orchestration latency, socket overhead, and
+  node-to-node stragglers.
+
 ## Distributed computation
+
+When datasets scale beyond terabytes into petabytes, computation must be partitioned horizontally across a cluster of
+compute nodes using distributed paradigms such as MapReduce <Cite id="dean2004" />, Apache Spark, and Ray Data:
+
+| Distributed Execution Stage | Node Allocation | Data Dependency Type | Operational Behavior & Bottlenecks |
+| :--- | :--- | :--- | :--- |
+| **Stage 1: Map & Project** | Distributed Worker Nodes | **Narrow Dependency** | Partitions transformed in parallel without cross-node coordination; scales linearly with compute cores |
+| **Cluster Network Shuffle** | Cluster Fabric / Switches | **Shuffle Boundary** | Records hashed by key and streamed across network switches; bounded by network bisection bandwidth and disk spill |
+| **Stage 2: Reduce & Join** | Target Worker Nodes | **Wide Dependency** | Aggregates partitioned key buckets to evaluate grouped metrics, joins, or sorted outputs |
+
+- **Narrow vs. wide dependencies:**
+  - **Narrow dependencies (Map, Filter, Project):** Each partition of the parent dataset is transformed independently
+    without cross-node coordination. These operations execute in parallel with linear scaling.
+  - **Wide dependencies (GroupBy, Join, Distinct, Sort):** Require a **network shuffle**, where data across all nodes is
+    hashed by key and transferred over network switches to redistribute records across destination partitions. The
+    network shuffle is the primary bottleneck in distributed data processing, constrained by network bisection bandwidth
+    and disk serialization.
 
 ## Sketches for counts and quantiles
 
+Computing exact descriptive statistics (such as distinct element counts, item frequencies, and distribution percentiles)
+over petabytes of streaming data requires storing every unique key or globally sorting the entire dataset, which is
+memory-prohibitive.
+
+**Probabilistic streaming sketches** process unbounded streams in a single pass ($O(1)$ update time per record) using
+sub-linear space ($O(\frac{1}{\epsilon} \ln \frac{1}{\delta})$) while providing bounded mathematical guarantees:
+
+### Count-Min sketch
+
+The **Count-Min sketch** <Cite id="cormode2005" /> estimates the frequency of items in a stream:
+
+1. **Structure:** Maintains a two-dimensional table of counters of width $w = \lceil e / \epsilon \rceil$ and depth
+   $d = \lceil \ln(1 / \delta) \rceil$, paired with $d$ pairwise-independent hash functions $h_1, \dots, h_d$:
+   $$
+   h_j: \mathcal{U} \to \{1, \dots, w\}
+   $$
+2. **Update:** For every incoming item $x$ with count $c$, increment table entries:
+   $$
+   \text{table}[j, h_j(x)] \leftarrow \text{table}[j, h_j(x)] + c \quad \forall j \in \{1, \dots, d\}
+   $$
+3. **Point query:** The estimated frequency $\hat{a}_x$ is the minimum across all hashed rows:
+   $$
+   \hat{a}_x = \min_{j=1}^d \text{table}[j, h_j(x)]
+   $$
+4. **Guarantees:** The estimate is guaranteed to never underestimate the true count $a_x$, and overestimation is bounded
+   with high probability:
+   $$
+   a_x \le \hat{a}_x \le a_x + \epsilon \|a\|_1 \quad \text{with probability } \ge 1 - \delta
+   $$
+
+### HyperLogLog and quantile sketches
+
+- **HyperLogLog (HLL):** Estimates the number of unique elements (cardinality) in a dataset by observing the maximum
+  number of leading zeros in hashed bit patterns. HLL requires only 1.5 KB of state to estimate cardinalities in the
+  billions with standard errors below $1\%$.
+- **$t$-digest and DDSketch:** Maintain dynamic clusters of centroids to compute extreme percentiles (e.g., p95, p99,
+  p99.9) with bounded relative error, critical for outlier screening and continuous feature normalization.
+
 ## Skewed join keys
 
+In distributed hash joins, datasets $A$ and $B$ are co-partitioned by hashing their common join key:
+
+$$
+\text{partition} = \text{hash}(\text{join\_key}) \pmod P
+$$
+
+In real-world data, join keys almost invariably follow heavy-tailed Zipfian power-law distributions (e.g., automated bot
+traffic, default `NULL` identifiers, or top e-commerce categories):
+
+- **The straggler problem:** If a single join key accounts for $20\%$ of all rows, $20\%$ of the entire cluster workload
+  is routed to a single executor node. While the remaining $99$ nodes complete their partitions in seconds, the single
+  skewed partition continues running for hours, dominating total job runtime.
+- **Out-of-memory crashes:** The skewed executor exhausts its JVM heap or native memory during hash table construction,
+  causing repeated task retry failures that abort the distributed job.
+- **Mitigation via salting:** The pipeline appends a random integer $k \in \{0, \dots, S-1\}$ to the skewed key in table
+  $A$ (distributing its rows across $S$ different partitions) and replicates matching rows in table $B$ across all $S$
+  salted keys, restoring balanced parallelism.
+
 ## Pitfalls
+
+- **Defaulting to distributed clusters prematurely:** Spawning multi-node Spark clusters for datasets under 100 GB that
+  run faster, cheaper, and more reliably in DuckDB or Polars on a single high-memory workstation.
+- **Unbounded shuffles from unpartitioned joins:** Joining two large tables without pre-bucketing or broadcasting,
+  forcing every record across both datasets to serialize across the network.
+- **Exact cardinality operations at scale:** Calling exact `COUNT(DISTINCT)` or median operations on petabyte streams
+  instead of leveraging HyperLogLog and $t$-digest sketches.
+- **Ignoring partition granularity:** Configuring too few partitions (causing memory spills to disk on large batches) or
+  too many tiny partitions (incurring prohibitive task scheduling metadata overhead on the cluster driver).

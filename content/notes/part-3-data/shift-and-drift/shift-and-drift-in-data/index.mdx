@@ -1,26 +1,176 @@
 ---
 title: 'Shift and drift in data'
 kind: concept
-summary: 'Training data and the data met in use differ, in the inputs, the labels or the relation between them, and keep changing after deployment. Splitting, monitoring and retraining all exist to manage that difference.'
-tags: [data, domain-adaptation]
-aliases: []
+summary: 'Training data and data met in production differ across inputs, labels or their conditional mapping. Importance weighting corrects covariate shift, while concept drift requires fresh labels.'
+tags: [data, domain-adaptation, dataset-shift, mlops]
+aliases: [dataset shift, distribution shift, data drift, concept drift, covariate shift]
 requires: []
-related: [dataset-shift, label-shift-and-target-shift, importance-weighting-for-covariate-shift, drift-detection, concept-drift-adaptation, continual-learning]
-references: []
-status: stub
+related: [subpopulation-shift-and-shortcuts, training-window-and-freshness, adversarial-validation, data-validation]
+references: [quinonero2009, shimodaira2000, sugiyama2007iwcv, gretton2012, lipton2018]
+status: draft
 updated: 2026-10-11
 ---
 
+import { ShiftDriftTaxonomyExplorer } from './ShiftDriftTaxonomyExplorer'
+
 <Definition>
-To be written.
+**Dataset shift** occurs when the joint data distribution at test or deployment time $P_{\text{test}}(\mathbf{x}, y)$
+differs from the training distribution $P_{\text{train}}(\mathbf{x}, y)$ <Cite id="quinonero2009" />:
+
+$$
+P_{\text{train}}(\mathbf{x}, y) \neq P_{\text{test}}(\mathbf{x}, y).
+$$
+
+Because standard empirical risk minimization (ERM) assumes observations are independent and identically distributed
+($\text{i.i.d.}$), violations of this equality systematically degrade generalization, invalidate cross-validation
+bounds, and introduce predictive bias.
 </Definition>
 
 ## Covariate, label and concept shift
 
+Factoring the joint probability distribution reveals three canonical modes of distribution shift:
+
+$$
+P(\mathbf{x}, y) = P(\mathbf{x}) P(y \mid \mathbf{x}) = P(y) P(\mathbf{x} \mid y).
+$$
+
+### 1. Covariate shift
+Covariate shift occurs when the marginal input distribution changes while the conditional relationship between inputs
+and targets remains invariant:
+
+$$
+P_{\text{train}}(\mathbf{x}) \neq P_{\text{test}}(\mathbf{x}), \quad \text{while } P_{\text{train}}(y \mid \mathbf{x}) = P_{\text{test}}(y \mid \mathbf{x}).
+$$
+
+- *Example*: A speech recognition system trained predominantly on adult voices is deployed on child speech. The
+  acoustics ($X$) change drastically, but the underlying phonetic spelling of words ($Y$) conditioned on acoustic
+  patterns remains governed by the same linguistic laws.
+- *ML consequence*: If the downstream model is misspecified (i.e. the true function does not lie in the hypothesis
+  class), standard ERM minimizes loss weighted by $P_{\text{train}}(\mathbf{x})$, yielding poor predictions in test
+  regions where $P_{\text{test}}(\mathbf{x}) > P_{\text{train}}(\mathbf{x})$.
+
+### 2. Concept drift (concept shift)
+Concept drift occurs when the conditional distribution changes, altering the underlying mapping between inputs and
+targets:
+
+$$
+P_{\text{train}}(y \mid \mathbf{x}) \neq P_{\text{test}}(y \mid \mathbf{x}), \quad \text{even if } P_{\text{train}}(\mathbf{x}) = P_{\text{test}}(\mathbf{x}).
+$$
+
+- *Example*: In financial fraud detection or spam filtering, fraudsters actively change their evasion strategies to
+  mimic benign traffic; a transaction pattern that was legitimate six months ago now indicates an active attack.
+- *ML consequence*: Because the target mapping itself has shifted, models trained on historical data predict obsolete
+  decision boundaries.
+
+### 3. Label shift (prior probability shift)
+Label shift occurs when the marginal distribution of the target labels changes while the class-conditional distributions
+remain invariant:
+
+$$
+P_{\text{train}}(y) \neq P_{\text{test}}(y), \quad \text{while } P_{\text{train}}(\mathbf{x} \mid y) = P_{\text{test}}(\mathbf{x} \mid y).
+$$
+
+- *Example*: During an epidemic, the prevalence of an infection $P(y=1)$ surges from $0.5\%$ to $25\%$, but the
+  physiological symptoms and CT scans conditioned on having the infection $P(\mathbf{x} \mid y=1)$ remain identical.
+- *ML consequence*: Uncalibrated models produce severe false-positive or false-negative biases because their prior
+  expectations reflect pre-epidemic prevalence.
+
 ## What can be corrected without new labels
+
+A critical theoretical dividing line is whether a distribution shift can be mitigated using **unlabeled test data**
+alone:
+
+### Covariate shift correction via importance weighting
+Under covariate shift, Shimodaira <Cite id="shimodaira2000" /> and Sugiyama et al. <Cite id="sugiyama2007iwcv" /> showed
+that the true test risk can be computed as an **importance-weighted** training risk:
+
+$$
+\mathcal{R}_{\text{test}}(f) = \mathbb{E}_{(\mathbf{x}, y) \sim P_{\text{test}}} [\ell(f(\mathbf{x}), y)] = \mathbb{E}_{(\mathbf{x}, y) \sim P_{\text{train}}} \left[ w(\mathbf{x}) \ell(f(\mathbf{x}), y) \right],
+$$
+
+where the importance weight is the Radon-Nikodym density ratio:
+
+$$
+w(\mathbf{x}) = \frac{P_{\text{test}}(\mathbf{x})}{P_{\text{train}}(\mathbf{x})}.
+$$
+
+The density ratio $w(\mathbf{x})$ can be estimated directly from unlabeled training inputs and unlabeled production
+queries by training a binary domain classifier $\hat{q}(\mathbf{x}) = P(\text{domain}=\text{test} \mid \mathbf{x})$:
+
+$$
+w(\mathbf{x}) = \frac{P(\mathbf{x} \mid \text{test})}{P(\mathbf{x} \mid \text{train})} = \frac{\hat{q}(\mathbf{x})}{1 - \hat{q}(\mathbf{x})} \cdot \frac{N_{\text{train}}}{N_{\text{test}}}.
+$$
+
+Reweighting training instances by $w(\mathbf{x})$ forces the empirical objective to prioritize regions with high test
+density.
+
+### Label shift correction via BBSE
+Under label shift, Lipton et al. <Cite id="lipton2018" /> demonstrated that the shift in label priors
+$w(y) = \frac{P_{\text{test}}(y)}{P_{\text{train}}(y)}$ can be recovered using a black-box predictor's confusion matrix
+$\mathbf{C} \in \mathbb{R}^{C \times C}$ and unlabeled test predictions:
+
+$$
+\mathbf{w} = \mathbf{C}^{-1} \hat{\boldsymbol{\mu}}_{\text{test}},
+$$
+
+allowing test probabilities to be corrected via Bayes' rule without retraining the feature extractor.
+
+### Concept drift is unidentifiable without labels
+Because concept drift alters $P(y \mid \mathbf{x})$ without necessarily changing $P(\mathbf{x})$, unlabeled production
+queries provide **zero statistical information** about changes in $y$. Concept drift cannot be corrected or proved
+without collecting verified ground-truth labels.
+
+The interactive visualizer below illustrates the behavior and detectability of all three shift mechanisms:
+
+<ShiftDriftTaxonomyExplorer />
 
 ## Detecting shift in data
 
+Production monitoring relies on statistical tests to identify shifts before downstream model accuracy collapses:
+
+1. **Univariate tests**:
+   - **Kolmogorov-Smirnov (KS) test**: Compares the empirical cumulative distribution functions $F_{\text{train}}(x)$
+     and $F_{\text{prod}}(x)$, flagging continuous features where the maximum supremum deviation
+     $\sup_x |F_{\text{train}}(x) - F_{\text{prod}}(x)|$ exceeds a critical significance threshold.
+   - **Population Stability Index (PSI)**: Discretizes feature distributions into $B$ bins and computes symmetrical
+     relative entropy:
+
+     $$
+     \text{PSI} = \sum_{b=1}^B \left( P_{\text{prod}}(b) - P_{\text{train}}(b) \right) \ln \left( \frac{P_{\text{prod}}(b)}{P_{\text{train}}(b)} \right).
+     $$
+
+     Empirically, $\text{PSI} < 0.1$ indicates negligible shift, while $\text{PSI} > 0.25$ indicates significant drift
+     requiring investigation.
+
+2. **Multivariate two-sample tests**:
+   - **Maximum Mean Discrepancy (MMD)** <Cite id="gretton2012" />: Maps empirical distributions into a reproducing
+     kernel Hilbert space (RKHS) $\mathcal{H}_k$:
+
+     $$
+     \text{MMD}^2(\mathcal{D}_{\text{train}}, \mathcal{D}_{\text{test}}) = \frac{1}{N^2} \sum_{i,j} k(\mathbf{x}_i, \mathbf{x}_j) - \frac{2}{NM} \sum_{i,j} k(\mathbf{x}_i, \mathbf{z}_j) + \frac{1}{M^2} \sum_{i,j} k(\mathbf{z}_i, \mathbf{z}_j).
+     $$
+
+   - **Adversarial validation**: Trains a classifier to distinguish training rows from production rows. An area under
+     the ROC curve ($\text{AUC}$) substantially above $0.5$ confirms multivariate covariate shift and identifies which
+     features contribute most to the discrepancy.
+
 ## Shift over time
 
+Temporal drift manifests across several dynamics in production:
+
+- **Sudden / Abrupt drift**: Immediate structural regime break caused by external interventions (e.g., pandemic travel
+  restrictions, central bank interest rate shocks, or breaking changes in upstream sensor firmware).
+- **Gradual drift**: Slow, continuous evolution of underlying distributions (e.g., monetary inflation, macro-economic
+  demographic trends, linguistic drift in social media slang).
+- **Recurring / Seasonal drift**: Cyclic shifts driven by diurnal schedules, weekly business rhythms, or annual holiday
+  spikes. Rather than retraining on every recurrence, cyclical features (e.g., Fourier harmonics or periodic splines)
+  should be explicitly incorporated into the feature representation.
+
 ## Where the methods live
+
+- **Data contracts and ingestion checks**: Enforce univariate type and range validation at the pipeline perimeter before
+  inference.
+- **Serving-layer telemetry**: Log production feature embeddings and prediction distributions to compute drift metrics
+  (PSI, MMD) in rolling temporal windows.
+- **Retraining orchestrators**: Automated pipelines trigger model retraining or importance-weighted fine-tuning when
+  drift detectors cross pre-specified statistical thresholds.

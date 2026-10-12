@@ -3,26 +3,135 @@ title: 'Category embeddings'
 kind: concept
 summary: 'A category embedding learns a dense vector for each level as part of a model. Similar levels end up close, but each level needs enough rows, and rare levels are pooled.'
 tags: [data, embeddings]
-aliases: []
-requires: []
-related: [categorical-encoding, word-embeddings]
-references: []
-status: stub
+aliases: [category embeddings, entity embeddings, categorical embeddings, embedding layer]
+requires: [categorical-encoding]
+related: [word-embeddings, high-cardinality-and-unseen-levels, mean-target-encoding]
+references: [guo2016entity]
+status: draft
 updated: 2026-10-11
 ---
 
 <Definition>
-To be written.
+A **category embedding** (or entity embedding) is a learned continuous vector representation $e_c \in \mathbb{R}^d$ for
+each discrete level $c$ of a categorical variable, trained end-to-end within a neural network to project nominal tokens
+into a low-dimensional Euclidean space where geometric distance reflects semantic similarity.
 </Definition>
+
+In classical tabular machine learning, categorical features are typically represented via one-hot encoding or mean
+target encoding. However, one-hot encoding treats all categories as mutually orthogonal ($d(u, v) = \sqrt{2}$ for any
+distinct pair), completely failing to capture shared attributes between related categories (e.g., that "Smartphones" and
+"Tablets" share consumer electronics dynamics, while "Apples" and "Milk" share grocery perishability).
+
+Cheng Guo and Felix Berkhahn <Cite id="guo2016entity" /> popularized **entity embeddings** for tabular datasets,
+demonstrating that learning dense vectors for categorical attributes drastically boosts neural network performance while
+extracting transferable representations.
+
+import { CategoryEmbeddingExplorer } from './CategoryEmbeddingExplorer';
+
+<CategoryEmbeddingExplorer />
 
 ## Learned vectors per level
 
-## Choosing the dimension
+Given a categorical feature with $K$ unique levels $\mathcal{C} = \{c_0, \dots, c_{K-1}\}$, the model initializes an
+embedding lookup matrix:
 
-## Rows needed per level
+$$
+W_{\text{embed}} \in \mathbb{R}^{K \times d}
+$$
+
+where $d \ll K$ is the chosen embedding dimension.
+
+Each input category is represented by an integer token index $k \in \{0, \dots, K-1\}$. The embedding lookup operation
+extracts row $k$ from the matrix:
+
+$$
+e_k = W_{\text{embed}}[k, :] \in \mathbb{R}^d
+$$
+
+The extracted vector $e_k$ is concatenated with continuous numerical features and fed into subsequent hidden layers
+(such as an MLP, TabNet, or transformer). During model training, gradients flow directly back into the embedding matrix
+via backpropagation:
+
+$$
+W_{\text{embed}}[k, :] \gets W_{\text{embed}}[k, :] - \eta \frac{\partial \mathcal{L}}{\partial e_k}
+$$
+
+Because categories that predict similar outcomes receive similar gradient updates, backpropagation naturally clusters
+semantically aligned categories into close Euclidean proximity.
+
+## Choosing the embedding dimension
+
+Setting the embedding dimension $d$ requires balancing representational capacity against overfitting:
+- If $d$ is too small (e.g. $d = 1$), the vector lacks the degrees of freedom to capture multifaceted categorical
+  interactions.
+- If $d$ is too large (e.g. $d = K$), the layer approaches the parameter count of one-hot linear models and overfits
+  rare categories.
+
+Standard industry heuristics guide dimension selection as a function of category cardinality $K$:
+
+### 1. The Fastai heuristic rule
+$$
+d = \min\left(600, \left\lfloor 1.6 \times K^{0.56} \right\rfloor\right)
+$$
+
+This sub-linear power law scales smoothly from small factors ($K=10 \to d=6$) to massive catalogs
+($K=10{,}000 \to d=275$), capping at $600$.
+
+### 2. Square root rule
+$$
+d = \lceil \sqrt{K} \rceil
+$$
+
+### 3. Capped proportional rule (Google / TensorFlow default)
+$$
+d = \min\left(50, \left\lfloor \frac{K}{2} \right\rfloor\right)
+$$
+
+## Rows needed per level and gradient starvation
+
+An embedding vector $W_{\text{embed}}[k, :]$ receives gradient updates **only when category $k$ appears in a training
+mini-batch**.
+
+- **Frequent head categories:** An entity appearing $10{,}000$ times in training receives thousands of gradient steps,
+  learning an expressive, well-calibrated vector coordinate.
+- **Rare tail categories:** An entity appearing only 2 or 3 times experiences **gradient starvation**. Its weights
+  remain virtually frozen at their random Gaussian initialization, acting as noisy perturbations during inference.
+
+As a general guideline, learning a stable $d$-dimensional embedding vector requires at least $n_k \ge 5 \times d$
+training instances per category.
 
 ## Rare-level pooling
 
-## Reusing embeddings
+To prevent gradient starvation on long-tailed categorical features, all category levels whose training sample size falls
+below an absolute threshold $N_{\min}$ (e.g. $N_{\min} \in [5, 20]$) are aggregated into a single shared token:
 
-## Pitfalls
+$$
+\text{token}(c) = \begin{cases} c & \text{if } N_c \ge N_{\min} \\ \text{"\_\_rare\_\_"} & \text{if } N_c < N_{\min} \end{cases}
+$$
+
+All rare levels map to row index $0$ of the embedding table. Because the pooled token aggregates instances across
+hundreds of rare levels, it receives sufficient aggregate gradient updates to learn a coherent representation for
+uncommon entities. Unseen levels appearing at inference time also map directly to the pooled `__rare__` token.
+
+## Reusing and exporting embeddings for tree ensembles
+
+A major benefit of entity embeddings is **portability**:
+
+1. **Pre-train on neural tabular architecture:** Train a deep network with embedding layers on the target task.
+2. **Export learned weight tables:** Extract the frozen $K \times d$ weight matrix from $W_{\text{embed}}$.
+3. **Inject as dense features into gradient boosting:** Replace the high-cardinality string column with its $d$
+   continuous embedding coordinates inside LightGBM, XGBoost, or CatBoost.
+
+Because tree ensembles struggle with high-cardinality splits, feeding them pre-trained continuous embedding dimensions
+frequently yields higher test accuracy than either pure deep learning or pure tree ensembles alone.
+
+## Pitfalls and failure modes
+
+1. **High cardinarity memory footprint:** For an extreme feature with $K = 50{,}000{,}000$ user IDs and $d = 64$, the
+   embedding table contains $3.2 \times 10^9$ float32 parameters ($\approx 12.8\text{ GB}$), requiring distributed
+   parameter servers or hashing tricks.
+2. **Overfitting small datasets:** On small tabular datasets ($N < 5{,}000$), unregularized embedding tables rapidly
+   memorize individual row targets. Apply strong weight decay ($L_2$ regularization) or dropout directly to embedding
+   lookups.
+3. **Evaluating distances without normalization:** Raw Euclidean distances between unregularized embeddings can be
+   distorted by vector norms. Always compute cosine similarity or $L_2$-normalize embeddings prior to clustering.

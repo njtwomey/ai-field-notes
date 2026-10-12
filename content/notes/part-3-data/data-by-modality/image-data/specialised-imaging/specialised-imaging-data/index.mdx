@@ -2,25 +2,168 @@
 title: 'Specialised imaging'
 kind: concept
 summary: 'Some images do not fit the three-channel photograph: medical volumes, multispectral and hyperspectral images, gigapixel whole-slide images and depth maps each need their own formats, value ranges and preprocessing.'
-tags: [data, computer-vision]
-aliases: []
-requires: []
-related: []
-references: []
-status: stub
-updated: 2026-10-11
+tags: [data, computer-vision, medical-imaging, remote-sensing]
+aliases: [non-standard-imaging, multi-channel-imaging, volumetric-and-range-data]
+requires: [digital-images, image-preprocessing]
+related: [image-annotation-formats, image-quality-screening]
+references: [hounsfield1973, macenko2009, drusch2012, newcombe2011]
+status: draft
+updated: 2026-10-12
 ---
 
+import { SpecialisedImagingDataVisualizer } from './SpecialisedImagingDataVisualizer'
+
 <Definition>
-To be written.
+**Specialised imaging data** encompasses visual sensor representations that transcend standard 8-bit three-channel (RGB)
+perspective photographs. These include 3D volumetric tomographies, high-dimensional multispectral and hyperspectral
+earth observation cubes, gigapixel multi-resolution whole-slide pathology images, and metric range/depth arrays—each
+governed by distinct physical measurement scales, coordinate reference systems, and container standards.
 </Definition>
+
+Standard computer vision pipelines assume images are bounded 2D pixel grids with integer intensities in $[0, 255]$
+sampled across visible red, green, and blue wavelengths. Applying naive vision models or standard image loaders to
+specialized modalities corrupts physical units (e.g., treating calibrated tissue radiodensities as display pixel
+colors), truncates scientific dynamic range, and induces catastrophic memory exhaustion when handling gigapixel slide
+pyramids or multi-gigabyte tomographic volumes <Cite id="hounsfield1973, macenko2009" />.
+
+<SpecialisedImagingDataVisualizer client:load />
 
 ## Medical volumes
 
+Volumetric medical modalities—such as Computed Tomography (CT), Magnetic Resonance Imaging (MRI), and Positron Emission
+Tomography (PET)—capture continuous 3D spatial tissue distributions discretized into voxel arrays $[D, H, W]$
+<Cite id="hounsfield1973" />.
+
+In X-ray Computed Tomography, raw sensor measurements reflect linear X-ray attenuation coefficients $\mu(x,y,z)$,
+standardized into **Hounsfield Units (HU)**:
+
+$$
+\text{HU} = 1000 \times \frac{\mu - \mu_{\text{water}}}{\mu_{\text{water}} - \mu_{\text{air}}}
+$$
+
+By physical definition, air corresponds to $-1000\,\text{HU}$, distilled water to $0\,\text{HU}$, fat to
+$[-120, -90]\,\text{HU}$, muscle/parenchyma to $[+35, +50]\,\text{HU}$, and dense cortical bone to
+$[+1000, +3000]\,\text{HU}$. Because the full dynamic range spans over 4000 units, feeding raw unclipped values into
+standard neural networks dilutes soft-tissue contrast. Clinical pipelines apply **windowing and leveling** defined by
+center level $L$ and window width $W$:
+
+$$
+I_{\text{disp}}(u) = \operatorname{clip}\left( \frac{u - (L - W/2)}{W} \times 255, \, 0, \, 255 \right)
+$$
+
+Common presets include:
+- Soft tissue / Mediastinum: $L = 40\,\text{HU}, W = 400\,\text{HU}$
+- Lung parenchyma: $L = -600\,\text{HU}, W = 1500\,\text{HU}$
+- Bone window: $L = 400\,\text{HU}, W = 1800\,\text{HU}$
+- Acute stroke / Brain: $L = 40\,\text{HU}, W = 80\,\text{HU}$
+
+Unlike natural photography where pixels represent dimensionless squares, medical voxels possess physical millimeter
+dimensions $(\Delta x, \Delta y, \Delta z)$. Slices in clinical acquisitions are frequently anisotropic—for instance,
+in-plane resolution $\Delta x = \Delta y = 0.7\,\text{mm}$ with slice thickness $\Delta z = 5.0\,\text{mm}$. Feeding
+anisotropic volumes into 3D isotropic convolutional filters distorts spatial geometry; preprocessing pipelines must
+resample volumes onto isotropic grids $(\text{e.g., } 1.0 \times 1.0 \times 1.0\,\text{mm}^3)$ using B-spline
+interpolation for imagery and nearest-neighbor interpolation for segmentation masks.
+
+Storage containers adhere to the **DICOM** standard (which packs clinical patient tags, slice orientations, and
+calibration slopes into per-slice files) or **NIfTI** (`.nii.gz`) / **Zarr** (which encapsulate entire 3D/4D scalar
+fields alongside $4 \times 4$ affine transformation matrices mapping voxel indices to physical patient coordinates).
+
 ## Multispectral and hyperspectral images
+
+Remote sensing satellites and airborne imaging spectrometers record surface electromagnetic radiation across discrete
+bands spanning ultraviolet, visible, near-infrared (NIR), and short-wave infrared (SWIR) spectra
+<Cite id="drusch2012" />.
+
+Multispectral sensors (e.g., Sentinel-2 MSI, Landsat 8/9 OLI) capture $B \in [10, 15]$ discrete spectral bands, whereas
+hyperspectral sensors (e.g., AVIRIS, PRISMA, EnMAP) capture continuous spectral radiance curves across
+$B \in [100, 300+]$ contiguous narrow bands ($10\,\text{nm}$ bandwidth) arranged into a hyperspectral datacube
+$\mathbf{X} \in \mathbb{R}^{H \times W \times B}$.
+
+Critical characteristics in remote sensing pipelines include:
+
+1. **Reflectance Calibration**: Raw digital numbers (DN) measured by the sensor detector must be converted first to
+   Top-of-Atmosphere (TOA) radiance, and subsequently to Bottom-of-Atmosphere (BOA) surface reflectance
+   $\rho_\lambda \in [0, 1]$ via atmospheric radiative transfer modeling (e.g., Sen2Cor, 6S) to remove solar geometry,
+   ozone absorption, and Rayleigh aerosol scattering.
+2. **Band-Ratio Indices**: Because distinct Earth surface materials exhibit distinct absorption bands, non-linear band
+   ratios isolate biophysical properties:
+   - **Normalized Difference Vegetation Index (NDVI)**:
+     $$
+     \text{NDVI} = \frac{\rho_{\text{NIR}} - \rho_{\text{Red}}}{\rho_{\text{NIR}} + \rho_{\text{Red}}}
+     $$
+     Leverages chlorophyll absorption in red ($665\,\text{nm}$) and high cellular mesophyll scattering in NIR
+     ($842\,\text{nm}$).
+   - **Normalized Difference Water Index (NDWI)**:
+     $$
+     \text{NDWI} = \frac{\rho_{\text{Green}} - \rho_{\text{NIR}}}{\rho_{\text{Green}} + \rho_{\text{NIR}}}
+     $$
+3. **Cross-Band Resolution Heterogeneity**: Different spectral bands in a single satellite pass are acquired at
+   different ground sampling distances (GSD). In Sentinel-2, RGB and NIR bands are $10\,\text{m/pixel}$, vegetation red
+   edge and SWIR bands are $20\,\text{m/pixel}$, and atmospheric water-vapor bands are $60\,\text{m/pixel}$.
+   Preprocessing requires super-resolution or bicubic co-registration before tensor concatenation.
 
 ## Whole-slide images
 
+In digital pathology, Whole-Slide Images (WSIs) are glass microscope slides digitized by slide scanners at optical
+magnifications of $20\times$ or $40\times$, resulting in gigapixel spatial footprints ($100{,}000 \times 100{,}000$
+pixels, often 2 to 10 gigabytes uncompressed per slide) <Cite id="macenko2009" />.
+
+Handling WSIs necessitates specialized architectural and algorithmic conventions:
+
+- **Pyramidal Multi-Resolution Containers**: Files are stored in multi-layer pyramidal TIFF formats (`.svs`, `.ndpi`,
+  `.mrxs`). Level 0 represents full optical resolution ($0.25\,\mu\text{m/pixel}$ at $40\times$), while each successive
+  level downsamples spatial dimensions by a factor of $2^k$, enabling fast sub-region random access via OpenSlide
+  without loading the entire raster into memory.
+- **Tiling and Patching**: Because gigapixel arrays cannot be passed through GPUs, slides are partitioned into
+  non-overlapping or staggered square tiles (e.g., $256 \times 256$ or $512 \times 512$ pixels).
+- **Tissue Background Masking**: Empty glass slides comprise $>70\%$ of the canvas area. Tiling pipelines apply Otsu
+  thresholding in HSV color space to filter non-tissue background patches, saving massive GPU processing cycles.
+- **Stain Normalization**: Histopathology specimens stained with Hematoxylin and Eosin (H&E) suffer from extreme
+  inter-laboratory color variability due to varying reagent concentrations and scanner sensor dyes. The **Macenko
+  method** normalizes slides into optical density space <Cite id="macenko2009" />:
+  $$
+  \mathbf{OD} = -\log_{10}\left( \frac{\mathbf{I}}{I_0} \right)
+  $$
+  Singular Value Decomposition (SVD) on non-background pixels identifies the 2D plane spanned by Hematoxylin and Eosin
+  stain vectors, projecting sample optical densities onto a standardized target reference distribution.
+
 ## Depth and range images
 
+Depth sensors—such as structured-light projectors, Time-of-Flight (ToF) cameras, and stereo rigs—generate range images
+$Z(u,v)$ where pixel values represent metric orthogonal distances from the camera plane to target surfaces in
+millimeters or meters <Cite id="newcombe2011" />.
+
+Key properties include:
+
+1. **Back-Projection to 3D Point Clouds**: Given intrinsic focal parameters $(f_x, f_y)$ and principal point coordinates
+   $(c_x, c_y)$, each valid depth pixel $(u, v, Z)$ maps directly to metric camera coordinates
+   $(X, Y, Z) \in \mathbb{R}^3$:
+   $$
+   X = \frac{(u - c_x) Z}{f_x}, \quad Y = \frac{(v - c_y) Z}{f_y}, \quad Z = Z(u, v)
+   $$
+2. **Quadratic Error Growth**: In passive stereo and active structured light systems, depth $Z = \frac{f \cdot B}{d}$ is
+   inversely proportional to disparity $d$ across baseline $B$. Propagation of disparity measurement error $\sigma_d$
+   yields quadratic range uncertainty:
+   $$
+   \sigma_Z = \frac{Z^2}{f \cdot B} \sigma_d
+   $$
+   Close objects ($<1\,\text{m}$) exhibit sub-millimeter precision, whereas distant surfaces ($>5\,\text{m}$) exhibit
+   severe metric jitter.
+3. **Invalid Pixels and Shadow Holes**: Occlusion boundaries, highly reflective specular surfaces (mirrors, glass), and
+   infrared-absorbing dark fabrics produce null returns (represented as 0 or $\text{NaN}$). Preprocessing requires
+   dedicated binary validity masks or depth completion inpainting models.
+
 ## Pitfalls
+
+1. **Quantization and Dynamic Range Clipping**: Converting 16-bit CT volumes or float32 satellite bands to 8-bit
+   unsigned integers without domain-specific windowing collapses subtle tissue density variations or agricultural
+   spectral gradients into flat, uninformative bands.
+2. **Ignoring Anisotropic Slice Thickness in 3D Convolutions**: Applying isotropic $3 \times 3 \times 3$ kernels to
+   medical volumes with $1.0\,\text{mm} \times 1.0\,\text{mm} \times 5.0\,\text{mm}$ voxels treats through-plane
+   distance identically to in-plane distance, severely distorting receptive fields along the slice axis.
+3. **Naive Whole-Slide Loading**: Calling standard image libraries (e.g., `PIL.Image.open()` or `cv2.imread()`) on
+   `.svs` or `.tiff` files attempts to allocate tens of gigabytes of contiguous RAM, immediately triggering
+   Out-of-Memory kernel termination. Always utilize chunked pyramidal readers (e.g., OpenSlide, tifffile, or cuCIM).
+4. **Treating Missing Depth as Zero**: Feeding unmasked zero-valued depth pixels into standard convolutions allows the
+   zero value to be interpreted as "surface located directly against the sensor lens" rather than "missing / unobserved
+   coordinate," corrupting spatial features.

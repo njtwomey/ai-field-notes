@@ -1,24 +1,188 @@
 ---
 title: 'Graph augmentation'
 kind: concept
-summary: 'Graph augmentation drops edges or nodes, masks features and samples subgraphs, mainly for contrastive self-supervised learning on graphs.'
-tags: [data, graphs]
-aliases: []
-requires: []
-related: [augmentation-principles]
-references: []
-status: stub
-updated: 2026-10-11
+summary: 'Graph augmentation transforms topology and node attributes via edge dropping, node masking, and subgraph extraction to regularise deep graph neural networks, prevent Dirichlet energy oversmoothing, and generate contrastive views.'
+tags: [data, graphs, augmentation, contrastive-learning]
+aliases: [graph-data-augmentation, dropedge, node-dropping, graph-contrastive-learning]
+requires: [graph-construction, graph-features]
+related: [augmentation-principles, graph-splits-and-sampling]
+references: [rong2020dropedge, you2020graphcl, hou2022graphmae, hassani2020mvgrl]
+status: draft
+updated: 2026-10-12
 ---
 
+import { GraphAugmentationVisualizer } from './GraphAugmentationVisualizer'
+
 <Definition>
-To be written.
+**Graph augmentation** denotes the class of stochastic or deterministic label-preserving transformations
+$\mathcal{T}: \mathcal{G} \to \mathcal{G}$ applied to an attributed graph $G = (V, E, \mathbf{X})$ to produce a
+perturbed variant $\tilde{G} = (\tilde{V}, \tilde{E}, \tilde{\mathbf{X}})$. Augmentations modify either the
+combinatorial topology $(\tilde{V}, \tilde{E})$ through edge dropping, edge addition, or node subsampling, or the
+continuous attribute matrix $\tilde{\mathbf{X}} \in \mathbb{R}^{|\tilde{V}| \times d}$ through masking, Gaussian
+jittering, or feature shuffling, serving as regularisers against oversmoothing and as semantic generating mechanisms for
+graph self-supervised learning.
 </Definition>
 
-## Edge and node dropping
+Unlike Euclidean image transforms (rotations, crops) where local pixel topologies remain uniformly structured on regular
+grids, graphs exhibit non-Euclidean, irregular topologies governed by homophily, heterophily, and scale-free degree
+distributions <Cite id="rong2020dropedge" />. Perturbing a single critical bridge edge can disconnect graph components
+or invert semantic properties, requiring graph augmentations to carefully trade off topological invariance against
+structural disruption <Cite id="you2020graphcl" />.
 
-## Feature masking
+<GraphAugmentationVisualizer client:load />
 
-## Subgraph sampling
+## Topological Augmentation
 
-## Pitfalls
+Topological augmentations directly manipulate the adjacency matrix $\mathbf{A} \in \{0, 1\}^{N \times N}$ or edge set
+$E \subseteq V \times V$.
+
+### Edge Dropping (DropEdge)
+
+DropEdge <Cite id="rong2020dropedge" /> independently removes edges with dropout probability $p_e \in (0, 1)$ at each
+training epoch. Let $\mathbf{M}^{(e)} \in \{0, 1\}^{N \times N}$ be a symmetric binary mask matrix where each undirected
+entry is drawn as:
+
+$$
+M_{ij}^{(e)} \sim \text{Bernoulli}(1 - p_e), \quad M_{ji}^{(e)} = M_{ij}^{(e)}
+$$
+
+The augmented adjacency matrix is given by the Hadamard product:
+
+$$
+\tilde{\mathbf{A}} = \mathbf{A} \odot \mathbf{M}^{(e)}
+$$
+
+When message-passing Graph Convolutional Networks (GCNs) are stacked to depth $L$, node embeddings $\mathbf{H}^{(L)}$
+suffer from **oversmoothing**, where representations converge to the dominant eigenvector subspace of the normalised
+graph Laplacian, causing all node embeddings to become indistinguishable. Formally, oversmoothing is quantified by the
+decay of the **Dirichlet energy** $\mathcal{E}(\mathbf{H})$ of the node embeddings:
+
+$$
+\mathcal{E}(\mathbf{H}) = \frac{1}{2} \operatorname{Tr}\left(\mathbf{H}^\top \mathbf{L}_{\text{sym}} \mathbf{H}\right) = \frac{1}{2} \sum_{i=1}^N \sum_{j \in \mathcal{N}(i)} A_{ij} \left\| \frac{\mathbf{h}_i}{\sqrt{d_i}} - \frac{\mathbf{h}_j}{\sqrt{d_j}} \right\|_2^2
+$$
+
+where $\mathbf{L}_{\text{sym}} = \mathbf{I}_N - \mathbf{D}^{-1/2} \mathbf{A} \mathbf{D}^{-1/2}$. In standard GCNs, as
+$L \to \infty$, $\mathcal{E}(\mathbf{H}^{(L)}) \to 0$ exponentially. By stochastically dropping edges at rate $p_e$,
+DropEdge acts as a data-dependent regulariser that reduces message-passing connectivity, lowers the spectral radius of
+the propagation matrix, and retards the collapse of Dirichlet energy across layers <Cite id="rong2020dropedge" />.
+
+### Edge Addition and Graph Diffusion
+
+Edge addition introduces synthetic links between high-affinity node pairs that lack direct connections. Rather than
+arbitrary random edge addition—which introduces destructive heterophilous cross-community noise—principled edge
+augmentation leverages **diffusion operators** such as Personalized PageRank (PPR) or heat kernels
+<Cite id="hassani2020mvgrl" />:
+
+$$
+\mathbf{S}_{\text{PPR}} = \alpha \left(\mathbf{I}_N - (1 - \alpha) \mathbf{D}^{-1} \mathbf{A}\right)^{-1}, \quad \alpha \in (0, 1)
+$$
+
+Multi-View Graph Representation Learning (MVGRL) <Cite id="hassani2020mvgrl" /> constructs contrastive views by pairing
+the original sparse adjacency $\mathbf{A}$ with the continuous, multi-hop diffusion matrix $\mathbf{S}$, learning
+representations invariant across local neighborhood aggregations and global random-walk reachability fields.
+
+### Node Dropping and Subgraph Extraction
+
+Node dropping removes a subset of vertices $V_{\text{drop}} \subset V$ with probability $p_v$, inducing the
+vertex-induced subgraph:
+
+$$
+\tilde{V} = V \setminus V_{\text{drop}}, \quad \tilde{E} = \{(u, v) \in E \mid u, v \in \tilde{V}\}
+$$
+
+Node deletion removes high-degree hubs and their incident edges simultaneously, exposing the network to structural
+lesions that enforce robustness against missing topological elements.
+
+---
+
+## Attribute Augmentation and Masking
+
+While topological augmentations perturb structural connectivity, attribute augmentations modify continuous node features
+$\mathbf{X} \in \mathbb{R}^{N \times d}$.
+
+### Masked Node Feature Autoencoding (GraphMAE)
+
+Inspired by masked autoencoders in computer vision and natural language processing, GraphMAE
+<Cite id="hou2022graphmae" /> masks a substantial fraction $\rho \in [0.5, 0.8]$ of node features with a re-learnable
+mask token vector $\mathbf{x}_{[\text{MASK}]} \in \mathbb{R}^d$:
+
+$$
+\tilde{\mathbf{x}}_i = \begin{cases} \mathbf{x}_{[\text{MASK}]} & \text{if } m_i = 1 \\ \mathbf{x}_i & \text{if } m_i = 0 \end{cases}, \quad m_i \sim \text{Bernoulli}(\rho)
+$$
+
+The GNN encoder maps the partially masked graph $(\mathbf{A}, \tilde{\mathbf{X}})$ to latent embeddings $\mathbf{Z}$,
+and a shallow decoder reconstructs the raw continuous features $\mathbf{X}$ using cosine error with a scaled cosine
+power $\gamma \ge 1$:
+
+$$
+\mathcal{L}_{\text{MAE}} = \frac{1}{|V_{\text{mask}}|} \sum_{i \in V_{\text{mask}}} \left(1 - \frac{\mathbf{x}_i^\top \hat{\mathbf{x}}_i}{\|\mathbf{x}_i\|_2 \|\hat{\mathbf{x}}_i\|_2}\right)^\gamma
+$$
+
+Unlike standard contrastive methods that require negative pair sampling, feature masking forces the graph encoder to
+infer missing node properties directly from the uncorrupted topological neighborhood and surviving node contexts
+<Cite id="hou2022graphmae" />.
+
+### Feature Jittering and Noise Injection
+
+Continuous features can be perturbed by additive Gaussian noise:
+
+$$
+\tilde{\mathbf{X}} = \mathbf{X} + \boldsymbol{\Xi}, \quad \boldsymbol{\Xi}_{ij} \sim \mathcal{N}(0, \sigma_e^2)
+$$
+
+or by feature dropout, where dimensions within each node feature vector are zeroed with probability $p_f$. This prevents
+models from over-relying on sparse, high-magnitude individual features.
+
+---
+
+## Contrastive Graph Learning (GraphCL)
+
+In self-supervised graph contrastive learning <Cite id="you2020graphcl" />, augmentations generate pairs of correlated
+views $(\tilde{G}_i^{(1)}, \tilde{G}_i^{(2)})$ from an input graph $G_i$. The views are processed by a shared GNN
+encoder $f_\theta$ and a projection head $g_\phi$ to obtain representation vectors
+$\mathbf{z}_i^{(1)}, \mathbf{z}_i^{(2)} \in \mathbb{R}^k$.
+
+$$
+G_i \longrightarrow \begin{cases}
+\mathcal{T}_1(G_i) = \tilde{G}_i^{(1)} \xrightarrow{\text{GNN}} \mathbf{z}_i^{(1)} \\
+\mathcal{T}_2(G_i) = \tilde{G}_i^{(2)} \xrightarrow{\text{GNN}} \mathbf{z}_i^{(2)}
+\end{cases} \quad \xrightarrow{\text{Contrastive pairing}} \quad \mathcal{L}_{\text{InfoNCE}}
+$$
+
+The encoder parameters are optimised by maximising agreement between positive pairs $(G_i^{(1)}, G_i^{(2)})$ while
+contrasting against negative pairs from other graphs $\{G_j\}_{j \ne i}$ in the minibatch via the normalized
+temperature-scaled cross-entropy loss (InfoNCE):
+
+$$
+\mathcal{L}_{\text{InfoNCE}}(i) = -\log \frac{\exp\left(\frac{\operatorname{sim}(\mathbf{z}_i^{(1)}, \mathbf{z}_i^{(2)})}{\tau}\right)}{\exp\left(\frac{\operatorname{sim}(\mathbf{z}_i^{(1)}, \mathbf{z}_i^{(2)})}{\tau}\right) + \sum_{j \ne i} \exp\left(\frac{\operatorname{sim}(\mathbf{z}_i^{(1)}, \mathbf{z}_j^{(2)})}{\tau}\right)}
+$$
+
+where
+$\operatorname{sim}(\mathbf{u}, \mathbf{v}) = \frac{\mathbf{u}^\top \mathbf{v}}{\|\mathbf{u}\|_2 \|\mathbf{v}\|_2}$
+denotes cosine similarity and $\tau > 0$ is the temperature parameter.
+
+### Augmentation Selection Rules
+
+As demonstrated empirically by You et al. <Cite id="you2020graphcl" />, the optimal choice of augmentation depends
+critically on the underlying graph domain:
+
+| Domain | Recommended Augmentations | Detrimental Augmentations | Semantic Rationale |
+| :--- | :--- | :--- | :--- |
+| **Biochemical Molecules** | Subgraph extraction, Node dropping | Edge perturbation | Edge addition or removal creates chemically impossible rings or breaks covalent bonds, changing molecular reactivity. |
+| **Social Networks** | Edge dropping, Edge addition | Heavy node attribute masking | Social ties are noisy, transient, and redundant, but dense node profiles provide primary identity signals. |
+| **Citation Networks** | Edge dropping, Feature masking | Random node removal | Citation references can be omitted, but key publications form foundational intellectual anchors. |
+
+---
+
+## Pitfalls and Topological Sensitivity
+
+1. **Topological Disconnection and Bridge Deletion**: In sparse networks with high clustering coefficients and narrow
+   bottlenecks, randomly dropping edges with probability $p_e$ has a high probability of severing bridge edges
+   ($e \in E$ whose removal increases the number of connected components). Disconnecting components prevents information
+   flow between peripheral nodes and central hubs during GNN message passing.
+2. **Homophily Disruption via Naive Edge Addition**: Randomly adding edges between arbitrary node pairs lowers graph
+   homophily $h = \frac{|\{(u, v) \in E \mid y_u = y_v\}|}{|E|}$, introducing cross-class noise that degrades GNN
+   performance on homophilic benchmark tasks.
+3. **Domain Semantics Violation**: In molecular graphs, atoms and bonds obey valence rules. Modifying an edge from a
+   double bond to a single bond or removing a heteroatom shifts the formal charge and pharmacological activity,
+   invalidating the self-supervised premise that augmented views share underlying semantic labels.

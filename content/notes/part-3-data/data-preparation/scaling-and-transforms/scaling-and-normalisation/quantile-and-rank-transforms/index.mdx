@@ -3,24 +3,125 @@ title: 'Quantile and rank transforms'
 kind: concept
 summary: 'A quantile transform maps each value to its quantile under the training distribution, then optionally to a uniform or Gaussian scale. It removes the effect of outliers and skew, at the cost of distances between values.'
 tags: [data, feature-engineering]
-aliases: []
-requires: []
-related: [feature-scaling]
+aliases: [quantile transform, rank transform, QuantileTransformer, inverse normal transform]
+requires: [feature-scaling]
+related: [power-transforms, whitening-and-decorrelation]
 references: []
-status: stub
+status: draft
 updated: 2026-10-11
 ---
 
 <Definition>
-To be written.
+A **quantile transform** is a non-linear, rank-based feature transformation that maps empirical continuous values to
+their corresponding cumulative probability quantiles under the training distribution, followed by an optional mapping
+through an inverse cumulative distribution function to enforce an exact target distribution such as $\mathcal{U}(0, 1)$
+or $\mathcal{N}(0, 1)$.
 </Definition>
+
+Standard linear transformations such as standardisation ($z = (x - \mu)/\sigma$) or min-max scaling
+($x_{\text{scaled}} = (x - x_{\min})/(x_{\max} - x_{\min})$) preserve the underlying shape of the feature distribution.
+When a feature exhibits extreme skew, heavy multimodal clusters, or severe outliers, standardisation leaves the data
+heavily non-normal, compressing the bulk of the observations into a narrow cluster near zero while outliers remain far
+in the margin.
+
+Quantile transformations resolve this by non-linearly warping the feature space based strictly on empirical ranks rather
+than metric distances.
+
+import { QuantileTransformVisualizer } from './QuantileTransformVisualizer';
+
+<QuantileTransformVisualizer />
 
 ## Ranks and empirical quantiles
 
+The transformation begins by evaluating the empirical cumulative distribution function (ECDF) $\hat{F}_X(x)$ estimated
+from $N$ sorted training instances $x_{(1)} \le x_{(2)} \le \dots \le x_{(N)}$:
+
+$$
+\hat{F}_X(x) = \frac{1}{N} \sum_{i=1}^N \mathbb{I}(x_i \le x)
+$$
+
+To avoid boundary degeneracies at $0$ and $1$, practical implementations (such as scikit-learn's `QuantileTransformer`)
+fit $M$ quantile knots (by default $M = 1{,}000$) using linear interpolation across percentiles:
+
+$$
+u_i = \hat{F}_X(x_i) \in (0, 1)
+$$
+
+Because the mapping relies exclusively on monotonic ranks:
+- Monotonicity is strictly preserved: $x_a < x_b \implies \hat{F}(x_a) \le \hat{F}(x_b)$.
+- Bimodal or multimodal distributions are flattened into smooth targets.
+- Extreme outliers are seamlessly folded into the boundary quantiles: a value of $x = 10^7$ simply receives
+  $u \approx 0.999$, eliminating its leverage on downstream gradient updates.
+
 ## Uniform output
+
+When configured with `output_distribution='uniform'`, the transformation stops directly at the empirical quantile $u$:
+
+$$
+y = \hat{F}_X(x) \sim \mathcal{U}(0, 1)
+$$
+
+By the probability integral transform, applying the true continuous cumulative distribution function $F_X(X)$ to random
+variable $X$ yields a uniform distribution on $[0, 1]$. In sample data, the empirical quantile transform spreads
+observations uniformly across the interval, guaranteeing equal density across all feature percentiles.
 
 ## Gaussian output
 
+When configured with `output_distribution='normal'`, the empirical uniform quantiles are passed through the inverse
+standard normal cumulative distribution function (also called the **probit function** $\Phi^{-1}$):
+
+$$
+y = \Phi^{-1}(\hat{F}_X(x)) \sim \mathcal{N}(0, 1)
+$$
+
+where $\Phi(z) = \frac{1}{\sqrt{2\pi}} \int_{-\infty}^z e^{-t^2/2} dt$.
+
+This mapping guarantees that the transformed feature follows an exact standard Gaussian distribution $\mathcal{N}(0, 1)$
+with zero mean, unit variance, and symmetric bell-curve density. This transformation is exceptionally potent for deep
+neural networks and linear models that struggle with heavy power laws or asymmetric tails.
+
 ## Values outside the training range
 
-## Pitfalls
+A critical aspect of deploying quantile transformers is handling unseen validation and inference instances that fall
+outside the minimum $x_{\min}$ or maximum $x_{\max}$ observed during training:
+
+1. **Boundary clipping:** If an unseen test instance satisfies $x_{\text{test}} > x_{(N)}$, its empirical quantile
+   evaluates to $u = 1.0$ (or $1 - \frac{1}{2N}$ with smoothing), mapping to the ceiling value.
+2. **Linear extrapolation:** Some implementations extrapolate beyond the boundary knots by extending the slope of the
+   extreme knot intervals:
+   $$
+   y(x) = y(x_{\max}) + \frac{y(x_{\max}) - y(x_{M-1})}{x_{\max} - x_{M-1}} (x - x_{\max})
+   $$
+   However, extrapolation risks producing outputs far outside the expected target distribution.
+
+Because quantile transforms cannot model tail probabilities beyond the observed sample range without strong parametric
+assumptions, severe covariate shifts can cause heavy accumulation of predictions at the boundary saturation caps.
+
+## Metric distortion trade-off
+
+While quantile transformations immunize models against outliers and skew, they achieve this by **discarding Euclidean
+metric geometry**:
+
+- **Tail compression:** Consider two rare observations at $x = 1{,}000$ and $x = 10{,}000$. Despite their massive
+  physical separation ($\Delta x = 9{,}000$), both fall in the 99th percentile and may map to transformed values of
+  $z = 2.32$ and $z = 2.57$ ($\Delta z = 0.25$).
+- **Bulk expansion:** Conversely, observations in the dense central mode with minuscule physical differences
+  ($\Delta x = 0.01$) may span the 40th to the 60th percentiles, resulting in a large transformed gap
+  ($\Delta z = 0.51$).
+
+For applications where the raw physical distance between points conveys fundamental domain semantics (e.g., physical
+coordinates, temperature differentials, financial market spreads), quantile transformations can distort meaningful
+physical laws.
+
+## Pitfalls and failure modes
+
+1. **Information loss on sparse categorical/discrete variables:** Applying a quantile transform to features with high
+   repeated counts (e.g. discrete counts or sparse zeros) results in tied ranks. All zero instances receive the same
+   quantile knot, creating unnatural discrete jumps in the output distribution.
+2. **Knot overfitting on small sample sizes:** Fitting $M = 1{,}000$ quantiles on a dataset with only $N = 200$ rows
+   causes the transformer to memorize sample noise. Constrain `n_quantiles` to be substantially smaller than $N$ (e.g.
+   $N/5$ or $\le 50$).
+3. **Severe saturation on heavy-tailed test data:** In non-stationary environments where test distributions exhibit
+   larger extremes than training data, test points saturate at $\pm 3.5\sigma$, truncating predictive fidelity.
+4. **Fitting globally before cross-validation:** Because quantile thresholds depend directly on sample rank percentiles,
+   fitting outside CV folds leaks rank information across splits.

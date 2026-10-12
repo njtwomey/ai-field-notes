@@ -2,25 +2,143 @@
 title: 'Heterogeneous and temporal graphs'
 kind: concept
 summary: 'Heterogeneous graphs have typed nodes and edges; temporal graphs change over time, as snapshots or event streams. Splits must respect time.'
-tags: [data, graphs]
-aliases: []
-requires: []
-related: []
-references: []
-status: stub
-updated: 2026-10-11
+tags: [data, graphs, temporal-graphs, heterogeneous-graphs]
+aliases: [dynamic-graphs, heterogeneous-information-networks, temporal-graph-networks]
+requires: [graph-construction]
+related: [graph-features, knowledge-graph-data]
+references: [wang2019han, hu2020hgt, rossi2020tgn, pareja2020evolvegcn]
+status: draft
+updated: 2026-10-12
 ---
 
+import { HeterogeneousAndTemporalGraphsVisualizer } from './HeterogeneousAndTemporalGraphsVisualizer'
+
 <Definition>
-To be written.
+**Heterogeneous and temporal graphs** extend classical static homogeneous topologies to capture multi-typed entities,
+typed relationship schemas, and dynamic time-evolving interactions. Heterogeneous graphs maintain distinct node and edge
+type alphabets mapped via composite metapaths, while temporal graphs represent topological mutations either as sequences
+of discrete snapshots or as continuous asynchronous event streams.
 </Definition>
+
+Real-world complex systems rarely conform to single-type, static networks. In academic bibliographic systems (e.g.,
+DBLP, OpenAlex), authors write papers, papers cite papers, and papers are published in venues. In financial transaction
+ecosystems, accounts transfer funds across time with microsecond timestamps. Modeling these systems requires
+architectures that respect type-specific feature spaces and strictly enforce chronological time-directionality to
+prevent catastrophic temporal data leakage <Cite id="wang2019han, rossi2020tgn" />.
+
+<HeterogeneousAndTemporalGraphsVisualizer client:load />
 
 ## Typed nodes and edges
 
+A **Heterogeneous Information Network (HIN)** is formally defined as
+$\mathcal{G} = (\mathcal{V}, \mathcal{E}, \phi, \psi)$ equipped with a node type mapping
+$\phi: \mathcal{V} \to \mathcal{T}_V$ and an edge type mapping $\psi: \mathcal{E} \to \mathcal{T}_E$, where
+$|\mathcal{T}_V| + |\mathcal{T}_E| > 2$ <Cite id="wang2019han" />.
+
+1. **Type-Specific Projections**: Because different node types occupy distinct semantic and dimensional feature spaces
+   (e.g., a "User" node with demographic features in $\mathbb{R}^{32}$ vs. an "Item" node with image embeddings in
+   $\mathbb{R}^{512}$), models first project node features into a shared $d$-dimensional representation space via
+   type-specific linear transformations:
+   $$
+   \mathbf{h}_v' = \mathbf{W}_{\phi(v)} \mathbf{x}_v, \quad \mathbf{W}_{\tau} \in \mathbb{R}^{d \times d_\tau}
+   $$
+2. **Metapaths**: A metapath $\mathcal{P}$ is a composite path schema traversing a sequence of node and relation types:
+   $$
+   \mathcal{P} = A_1 \xrightarrow{R_1} A_2 \xrightarrow{R_2} \dots \xrightarrow{R_l} A_{l+1}
+   $$
+   For example, in a medical network, `Gene` $\to$ `Disease` $\to$ `Gene` ($GDG$) links genes sharing common disease
+   associations. Multiplying the corresponding adjacency matrices yields the metapath-specific homogeneous adjacency:
+   $$
+   \mathbf{A}_{\mathcal{P}} = \mathbf{A}_{R_1} \mathbf{A}_{R_2} \dots \mathbf{A}_{R_l}
+   $$
+3. **Hierarchical Heterogeneous Attention (HAN & HGT)**: Models compute node-level attention along each individual
+   metapath, followed by semantic-level attention that dynamically weights the relative importance of different
+   metapaths <Cite id="wang2019han, hu2020hgt" />:
+   $$
+   \beta_{\mathcal{P}} = \frac{\exp\left( \mathbf{q}^\top \tanh(\mathbf{W} \mathbf{h}_{\mathcal{P}} + \mathbf{b}) \right)}{\sum_{\mathcal{P}'} \exp\left( \mathbf{q}^\top \tanh(\mathbf{W} \mathbf{h}_{\mathcal{P}'} + \mathbf{b}) \right)}
+   $$
+
 ## Snapshots
+
+When dynamic graphs evolve at macroscopic intervals (e.g., daily social interactions, monthly trade networks), the
+system is modeled as a **Discrete-Time Dynamic Graph (DTDG)**:
+
+$$
+\mathcal{S} = \left( \mathcal{G}_1, \, \mathcal{G}_2, \, \dots, \, \mathcal{G}_T \right), \quad \mathcal{G}_t = (\mathcal{V}_t, \, \mathcal{E}_t)
+$$
+
+Where each snapshot $\mathcal{G}_t$ aggregates all interactions occurring within time window
+$[(t-1)\Delta t, \, t\Delta t)$.
+
+Architectures handle DTDGs through spatio-temporal coupling:
+- **GCN-RNN Ensembles**: Apply a static GCN on each snapshot
+  $\mathbf{H}_t = \operatorname{GCN}(\mathbf{A}_t, \mathbf{X}_t)$, followed by a Recurrent Neural Network (LSTM/GRU)
+  modeling temporal node trajectory sequences $[\mathbf{h}_v^{(1)}, \dots, \mathbf{h}_v^{(T)}]$.
+- **Evolving Weight Operators (EvolveGCN)**: Instead of passing node embeddings through an RNN, EvolveGCN uses an RNN to
+  dynamically update the GCN's internal layer weights $\mathbf{W}_t$ from snapshot to snapshot
+  <Cite id="pareja2020evolvegcn" />:
+  $$
+  \mathbf{W}_t = \operatorname{LSTM}\left( \mathbf{H}_t, \, \mathbf{W}_{t-1} \right)
+  $$
+  This avoids storing node memory states, enabling natural handling of dynamic node arrival and departure.
+
+The fundamental trade-off in snapshot modeling is the **window duration $\Delta t$**: setting $\Delta t$ too large blurs
+rapid sequential event ordering, while setting it too small produces ultra-sparse, disconnected snapshot matrices.
 
 ## Event streams
 
+High-frequency transaction, communication, and web navigation networks operate in continuous time as asynchronous
+interaction streams (**Continuous-Time Dynamic Graphs, CTDG**):
+
+$$
+\mathcal{E}_{\text{stream}} = \left\{ \left( u_i, \, v_i, \, t_i, \, \mathbf{e}_i \right) \right\}_{i=1}^M, \quad t_1 \le t_2 \le \dots \le t_M
+$$
+
+Where an interaction connects source $u_i$ and destination $v_i$ at exact continuous timestamp $t_i$ with edge feature
+$\mathbf{e}_i$.
+
+**Temporal Graph Networks (TGN)** maintain continuous state through coupled memory and message modules
+<Cite id="rossi2020tgn" />:
+1. **Dynamic Node Memory**: Each node $v$ maintains a compressed memory state $\mathbf{s}_v(t) \in \mathbb{R}^d$ updated
+   whenever it participates in an interaction.
+2. **Harmonic Time Encodings**: Inter-arrival time intervals $\Delta t = t - t_{\text{last}}$ are mapped to continuous
+   Fourier representations using Bochner's theorem:
+   $$
+   \Phi(\Delta t) = \sqrt{\frac{1}{d}} \left[ \cos(\omega_1 \Delta t), \, \sin(\omega_1 \Delta t), \, \dots, \, \cos(\omega_d \Delta t), \, \sin(\omega_d \Delta t) \right]
+   $$
+3. **Temporal Graph Attention**: Aggregates the memory states of temporal 1-hop neighbors, incorporating continuous edge
+   features and relative time encodings without discrete binning.
+
 ## Time-respecting splits
 
+Evaluating temporal graph models requires strict chronological partitioning to maintain valid evaluation benchmarks:
+
+$$
+t_{\text{train\_start}} < t_{\text{train\_end}} \le t_{\text{val\_end}} \le t_{\text{test\_end}}
+$$
+
+- **The Arrow of Time**: Message passing at time $t$ may **only aggregate edges that occurred at timestamps
+  $t' \le t$**.
+- **The Catastrophic Future-Leakage Failure**: If edges are split randomly (as in static graphs, 80% train / 20% test
+  across all time), test edges from future timestamps $t_{\text{future}}$ leak into the training message-passing graph.
+  The model learns to query future structural bridges to predict past events, artificially inflating test AUC by 20% to
+  30%. When deployed in forward-in-time production, accuracy collapses.
+- **Transductive vs. Inductive Temporal Evaluation**:
+  - *Transductive*: Evaluating dynamic link predictions between nodes observed during the training window.
+  - *Inductive*: Evaluating dynamic link predictions involving completely novel nodes that first appeared during the
+    test window.
+
 ## Pitfalls
+
+1. **Random Edge Partitioning on Temporal Networks**: Splitting dynamic edges into train/val/test uniformly at random is
+   the single most common flaw in temporal graph literature. It destroys chronological causality and invalidates offline
+   benchmarks. Always partition along chronological timestamp cutoffs <Cite id="rossi2020tgn" />.
+2. **Snapshot Boundary Aliasing**: Choosing an arbitrary calendar snapshot window (e.g., midnight to midnight) fragments
+   transactions that begin at 23:59 and complete at 00:01 into separate snapshots, breaking multi-step causal workflows.
+3. **Metapath Explosion and Selection Bias**: In rich schemas with dozens of node types, the number of candidate
+   metapaths grows exponentially $\mathcal{O}(|\mathcal{T}_E|^L)$. Hand-picking a small subset introduces human bias,
+   while evaluating all combinations causes severe GPU memory exhaustion. Automated metapath discovery or relation-type
+   transformers (HGT) are required.
+4. **Stale Memory in Continuous TGNs**: In continuous-time models, inactive nodes retain stale memory states
+   $\mathbf{s}_v(t_{\text{old}})$. If a node remains dormant for months before re-activating, uncalibrated memory drift
+   causes high false-positive anomaly predictions.

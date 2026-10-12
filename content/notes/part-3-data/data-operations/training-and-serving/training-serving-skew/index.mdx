@@ -5,24 +5,127 @@ summary: 'Training-serving skew is a difference between the features a model saw
 tags: [data, software]
 aliases: []
 requires: []
-related: [feature-stores, data-validation]
-references: []
-status: stub
+related: [feature-freshness, data-monitoring, batch-and-stream-processing]
+references: [polyzotis2018, breck2017]
+status: draft
 updated: 2026-10-11
 ---
 
+import { TrainingServingSkewVisualizer } from './TrainingServingSkewVisualizer'
+
 <Definition>
-To be written.
+**Training-serving skew** is any systematic divergence between the feature values, schema transformations, or
+distribution observed by a model during training ($X_{\text{train}}$) and those supplied to it at online inference time
+($X_{\text{serving}}$). It is one of the most damaging failure modes in production machine learning because the system
+executes without runtime crashes while generating silently degraded predictions <Cite id="polyzotis2018, breck2017" />.
 </Definition>
+
+A machine learning model is a function calibrated to minimize empirical loss over a specific input distribution. When
+the mathematical transformations generating inputs diverge between offline development and online serving, the model
+evaluates inputs on an unfamiliar distribution, destroying production accuracy despite stellar offline validation
+metrics.
+
+<TrainingServingSkewVisualizer />
 
 ## Reimplemented logic
 
+The primary engineering source of training-serving skew is the **dual-pipeline anti-pattern**:
+
+| Skew Dimension | Training Pipeline (Offline) | Serving Pipeline (Online) | Root Mechanism & Impact |
+| :--- | :--- | :--- | :--- |
+| **Code Implementation** | Python / Pandas / PySpark | Java / C++ / Go Microservice | Discrepancies in regex parsing, float rounding, or string hashing |
+| **Data Aggregation** | Complete historical lakehouse table | Real-time event stream (Flink / Kafka) | Out-of-order events and watermark cutoffs yield under-counted online aggregates |
+| **Cache Freshness** | Point-in-time exact relational join | Low-latency key-value cache (Redis) | Background cache update lag serves stale features during live inference |
+| **Default Imputation** | Learned dataset median / mean ($34.2$) | Hardcoded sentinel default ($0$ or $-1$) | Incompatible missing defaults corrupt downstream model activations |
+
+- **The two-language problem:** Data scientists write feature extraction logic in Python (using Pandas, PySpark, or
+  scikit-learn). To satisfy strict sub-10ms online serving SLAs, production engineers reimplement the identical features
+  in Java, C++, or Go.
+- **Micro-divergence bugs:** Even well-intentioned rewrites introduce subtle discrepancies:
+  - **Regular expression divergence:** Regex engines in Python and Java handle Unicode character classes, case-folding,
+    and multiline anchors differently.
+  - **Datetime and timezone offsets:** One pipeline parses a timestamp assuming UTC, while the other parses assuming
+    local server time or fails to handle daylight saving boundaries.
+  - **String tokenization and hashing:** Discrepancies in punctuation stripping or string hashing algorithms route
+    categorical values to completely different integer buckets.
+- **The remedy:** Enforce a **single source of truth** for feature logic—authoring features once in a portable format
+  (such as an ONNX preprocessing graph, an open-source feature store definition, or a shared C++/Rust library compiled
+  with Python bindings).
+
 ## Batch versus streaming values
+
+Many production features represent historical aggregations (e.g., a customer's total purchases over the past 30 days, or
+a merchant's chargeback rate):
+
+- **Offline batch completeness:** In the offline training pipeline, aggregate features are computed via SQL queries over
+  finalized, historical data lakehouse tables where all late-arriving events have long since settled.
+- **Online streaming partiality:** In the online serving pipeline, aggregate features are computed by a streaming engine
+  (such as Apache Flink or Kafka Streams). Due to network jitter, out-of-order event delivery, and watermark thresholds,
+  the real-time stream frequently lacks the most recent events, yielding an under-counted aggregate.
+- **Lookahead leakage:** Batch SQL pipelines may inadvertently include transactions that occurred *after* the prediction
+  timestamp, giving the training model access to future information that can never exist at online serving time.
 
 ## Stale caches
 
+To satisfy online latency budgets, serving systems query precomputed feature values from low-latency in-memory caches
+(such as Redis, Aerospike, or DynamoDB):
+
+- **Cache lag:** If the background batch or streaming job that refreshes the online cache stalls, experiences
+  backpressure, or fails, the serving layer continues reading stale feature values from hours or days prior.
+- **Training-time point-in-time exactness:** In contrast, the offline training pipeline joins features using exact
+  point-in-time timestamps <Cite id="polyzotis2018" />. The model is trained assuming access to perfectly fresh feature
+  states, but in production evaluates inputs against frozen historical cache entries.
+
 ## Different defaults
+
+Missing value handling is a pervasive source of silent skew:
+
+- **Imputer parameter divergence:** In training, missing numerical values are imputed using the empirical median or mean
+  computed over the training set (e.g., imputing missing user age as 34.2). In production, an upstream API gateway omits
+  the field, and the serving deserializer populates it with a hardcoded default of `0` or `-1`.
+- **Decision boundary distortion:** The trained model learned that `0` represents a literal infant; receiving `0` for
+  missing adults forces model predictions to extreme, nonsensical values without raising exceptions.
+- **Remedy:** Serialize the exact scikit-learn imputer or TensorFlow Data Validation (TFDV) schema artifact alongside
+  the model weights, ensuring that identical imputation rules execute in both environments.
 
 ## Detecting skew
 
+Detecting training-serving skew requires comparing production inference payloads directly against training-pipeline
+outputs:
+
+### The log-and-wait pattern
+
+1. **Inference logging:** At online serving time, the production service logs the exact input feature vector
+   $X_{\text{serving}}$, prediction $\hat{y}$, and unique prediction ID to an immutable event stream.
+2. **Offline reconstruction:** When ground-truth labels arrive, the offline ETL pipeline reconstructs the feature vector
+   $X_{\text{offline}}$ using the identical point-in-time join logic employed during model training.
+3. **Automated parity assertions:** The pipeline joins the logged serving features with the reconstructed offline
+   features on prediction ID and computes element-wise numerical differences:
+   $$
+   \Delta_j = |x_{\text{serving}, j} - x_{\text{offline}, j}|
+   $$
+   Any non-zero delta ($\Delta_j > \epsilon$) immediately fails the test and pinpoints the exact feature column
+   suffering from pipeline skew.
+
+### Distributional drift metrics
+
+In high-throughput environments where per-sample reconstruction is expensive, monitoring systems track statistical
+divergence between logged serving distributions $P_{\text{serving}}(X)$ and training baselines $P_{\text{train}}(X)$
+using the **Population Stability Index (PSI)**:
+
+$$
+\text{PSI} = \sum_{k=1}^K (P_{\text{serving}, k} - P_{\text{train}, k}) \ln\left(\frac{P_{\text{serving}, k}}{P_{\text{train}, k}}\right)
+$$
+
+A PSI exceeding $0.25$ indicates severe distributional shift requiring immediate pipeline audit.
+
 ## Pitfalls
+
+- **Post-hoc database querying:** Attempting to audit training-serving skew by re-querying production operational
+  databases weeks after inference occurred; because mutable production rows have updated, the historical state is lost.
+- **Testing on offline validation sets alone:** Believing that high cross-validation scores prove a model is ready for
+  deployment; training-serving skew is completely invisible to offline cross-validation suites.
+- **Ignoring silent type coercions:** Allowing automatic type casting (such as integer-to-float conversions or date
+  formatting differences) across microservices, which subtly alters numerical precision.
+- **Deploying without canary shadow traffic:** Releasing updated feature pipelines directly to all production users
+  without running a shadow deployment to compare live feature vectors against existing production baselines.

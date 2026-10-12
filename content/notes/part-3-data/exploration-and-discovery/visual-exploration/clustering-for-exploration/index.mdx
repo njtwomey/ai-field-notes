@@ -1,24 +1,143 @@
 ---
 title: 'Clustering for exploration'
 kind: concept
-summary: 'Clustering a dataset and then sampling from each cluster for review finds sub-populations, templated records and duplicate groups faster than random reading.'
-tags: [data, clustering]
-aliases: []
-requires: []
-related: []
-references: []
-status: stub
-updated: 2026-10-11
+summary: 'Clustering for exploration partitions unlabeled datasets into coherent cohorts, accelerating human data auditing, surfacing machine-generated templated records, and uncovering rare sub-populations via cluster-then-sample workflows.'
+tags: [data, clustering, exploration, sampling]
+aliases: [clustering for exploration, exploratory clustering, cluster-then-sample]
+requires: [data-generating-process, reading-raw-examples]
+related: [exploratory-data-analysis, projection-for-exploration, slice-analysis, data-profiling]
+references: [lloyd1982, arthur2007, campello2013, ester1996]
+status: draft
+updated: 2026-10-12
 ---
 
+import { ClusteringForExplorationVisualizer } from './ClusteringForExplorationVisualizer'
+
 <Definition>
-To be written.
+**Clustering for exploration** is the unsupervised partitioning of an unlabeled dataset $\mathcal{D}$ into geometric or
+semantic clusters $\mathcal{C} = \{C_1, \dots, C_K\}$ to structure human data auditing. By grouping instances into
+coherent cohorts, teams inspect cluster medoids and boundaries to uncover rare subpopulations, detect automated
+templates and near-duplicates, and map domain diversity far faster than uniform random reading.
 </Definition>
 
-## Sub-populations
+When faced with millions of raw text documents, telemetry logs, or customer interactions, practitioners cannot read
+every record. The standard fallback—drawing a uniform random sample of $100$ records—fails systematically because
+dominant majority patterns drown out critical minority phenomena. Clustering organizes raw data into structurally
+homogeneous cohorts, transforming an unmanageable inspection task into a disciplined, stratified audit
+<Cite id="campello2013, arthur2007" />.
 
-## Templates and duplicates
+<ClusteringForExplorationVisualizer />
 
-## Cluster then sample
+## Sub-populations and the discovery deficit
 
-## Pitfalls
+The mathematical flaw of uniform random sampling for discovery lies in binomial rarity. If a catastrophic failure mode,
+security exploit, or underrepresented customer cohort accounts for a small fraction $p$ of total volume (e.g.,
+$p = 0.1\% = 0.001$), the probability of drawing zero occurrences in an audit sample of size $n$ is:
+
+$$
+P(\text{miss}) = (1 - p)^n
+$$
+
+For a substantial audit sample of $n = 500$ rows:
+
+$$
+P(\text{miss}) = (1 - 0.001)^{500} \approx 60.6\%
+$$
+
+Even after reading 500 records, the auditor is more likely to miss the rare subpopulation than to find it.
+
+```
+ Discovery Failure under Uniform Sampling vs Cluster-Then-Sample:
+  Uniform Random Sampling:              Cluster-Then-Sample:
+  (Heavily Favors Majority Piles)        (Stratified Subgroup Coverage)
+  [ Majority Mode: 95% ] -> Reads 95     [ Cluster 1: Majority A ] -> Reads 5
+  [ Majority Mode: 4%  ] -> Reads 5      [ Cluster 2: Majority B ] -> Reads 5
+  [ Rare Anomaly:  0.1%]-> Reads 0       [ Cluster 3: Template   ] -> Reads 5
+  (Anomaly completely omitted!)          [ Cluster 4: Rare Cohort] -> Reads 5 (Discovered!)
+```
+
+By clustering the dataset first, observations belonging to the $0.1\%$ subpopulation coalesce into a distinct, compact
+cluster. Sampling a fixed allocation of $m$ records from *each* cluster guarantees that human reviewers examine the rare
+cohort regardless of its global prevalence.
+
+## Templates, machine-generated records, and near-duplicates
+
+In operational logs, web scrapes, customer service tickets, and transaction feeds, human behavior is mixed with
+programmatic automation. Bots, system alert scripts, and UI form templates generate massive numbers of near-identical
+records.
+
+### Diagnosing template clusters
+
+Exploratory clustering detects templated records through intra-cluster dispersion:
+
+$$
+\sigma^2(C_k) = \frac{1}{|C_k|} \sum_{\mathbf{x} \in C_k} \|\mathbf{x} - \boldsymbol{\mu}_k\|^2
+$$
+
+- **Natural human clusters**: Exhibit continuous, organic dispersion ($\sigma^2 > 1.0$), reflecting natural lexical or
+  behavioral variance.
+- **Automated template clusters**: Exhibit near-zero variance ($\sigma^2 \to 0$) and extreme point-density. Every record
+  shares identical fixed boilerplate text with minor slot-value variations (e.g.
+  `User <ID> reset password at <Timestamp>`).
+
+### Medoids and boundary inspection
+
+To audit an identified cluster $C_k$, practitioners extract two distinct prototype instances:
+1. **The cluster medoid**: The observation minimizing total distance to all other members in the cluster:
+   $$
+   \mathbf{x}_{\text{medoid}} = \arg\min_{\mathbf{x} \in C_k} \sum_{\mathbf{x}' \in C_k} d(\mathbf{x}, \mathbf{x}')
+   $$
+   The medoid provides the most representative, clean summary of the cluster's core theme.
+2. **Boundary/periphery instances**: Observations located at the outer density threshold or nearest to neighboring
+   clusters. Boundary instances expose semantic drift, hybrid categories, and noisy edge cases.
+
+## The cluster-then-sample workflow
+
+A complete exploratory clustering pipeline proceeds through four disciplined phases:
+
+$$
+\text{Feature Extraction} \longrightarrow \text{Unsupervised Partition} \longrightarrow \text{Stratified Prototype Sampling} \longrightarrow \text{Qualitative Domain Coding}
+$$
+
+
+1. **Feature representation**: Extract vector representations tailored to the modality:
+   - Tabular: Robustly scaled numerical features and target-encoded categoricals.
+   - Text: Pre-trained sentence embeddings (e.g., from dense transformer encoders) or TF-IDF.
+2. **Clustering partition**: Partition the space using algorithms suited to exploratory goals.
+3. **Stratified prototype extraction**: For each of the $K$ clusters, draw:
+   - 1 cluster medoid (central exemplar).
+   - 3 random intra-cluster instances (measuring internal consistency).
+   - 2 boundary instances (identifying contamination).
+4. **Qualitative coding**: Domain experts review the extracted prototypes, assigning descriptive category labels (e.g.,
+   `"Billing Inquiries"`, `"Password Reset Bot"`, `"API Authentication Crash"`) and flagging anomalous data corruption.
+
+## Algorithmic trade-offs: k-means versus HDBSCAN
+
+The choice of clustering algorithm dictates the exploratory insights revealed:
+
+| Algorithm | Structural Assumptions | Outlier Handling | Exploratory Utility |
+| :--- | :--- | :--- | :--- |
+| **$k$-means** <Cite id="lloyd1982, arthur2007" /> | Spherical, convex clusters of equal variance | Forces every outlier into the nearest centroid | Good for broad, uniform partitioning; distorts irregular densities |
+| **DBSCAN** <Cite id="ester1996" /> | Density-connected manifolds of fixed density $\varepsilon$ | Flags points below `minPts` as explicit noise | Captures non-linear shapes; struggles with multi-density hierarchies |
+| **HDBSCAN** <Cite id="campello2013" /> | Hierarchical density estimates across variable densities | Separates unclustered noise instances ($\text{label} = -1$) | **Premier choice for EDA**: naturally extracts rare dense clusters while isolating noise |
+
+In exploratory auditing, **HDBSCAN** is uniquely powerful because it does not force every observation into a cluster.
+Points labeled as noise ($\text{label} = -1$) constitute a high-priority queue of unusual, corrupted, or exploratory
+anomaly candidates <Cite id="campello2013" />.
+
+## Diagnostic checklist
+
+To conduct cluster-based exploratory data auditing:
+
+1. **Select dense representations**: Generate semantic embeddings or normalized feature matrices that capture
+   domain-relevant similarities.
+2. **Prioritize density-based clustering**: Use HDBSCAN <Cite id="campello2013" /> to accommodate variable cluster
+   densities and separate genuine outliers into an explicit noise pool.
+3. **Audit cluster radii**: Calculate intra-cluster dispersion $\sigma^2(C_k)$; flag ultra-tight clusters
+   ($\sigma^2 \approx 0$) as automated bot templates or duplicate dumps.
+4. **Sample medoids and boundaries**: For each cluster, inspect the central medoid for semantic labeling and outer
+   boundary points for leakage or drift.
+5. **Review unclustered noise points**: Audit a sample of noise instances ($\text{label} = -1$) to identify novel
+   failure modes and data corruption.
+6. **Construct a slice taxonomy**: Convert verified clusters into permanent categorical metadata tags for downstream
+   disaggregated evaluation.

@@ -6,21 +6,110 @@ tags: [data, causal-inference]
 aliases: []
 requires: []
 related: [observational-and-logged-data, positive-unlabelled-learning]
-references: []
-status: stub
-updated: 2026-10-11
+references: [lakkaraju2017, kleinberg2018, heckman1979]
+status: draft
+updated: 2026-10-12
 ---
 
+import { SelectiveLabelsVisualizer } from './SelectiveLabelsVisualizer'
+
 <Definition>
-To be written.
+The selective labels problem occurs when ground-truth outcome labels $Y$ are observed only for instances that
+successfully passed a historical human or algorithmic decision gate ($D = 1$). For rejected instances ($D = 0$), the
+counterfactual outcome remains completely unobserved, restricting the supervised training set to a non-random, heavily
+pre-screened subpopulation.
 </Definition>
+
+High-stakes machine learning applications in lending, hiring, judicial bail, and fraud detection operate under selective
+labels <Cite id="lakkaraju2017, kleinberg2018" />. In credit underwriting, a bank observes whether a borrower repays
+($Y = 0$) or defaults ($Y = 1$) only for applicants granted credit. What rejected applicants would have done had they
+been approved remains unrecorded. Training models directly on approved cases without accounting for the selection filter
+produces severe evaluation blindness and perpetuates historical gatekeeper biases <Cite id="heckman1979" />.
+
+<SelectiveLabelsVisualizer />
 
 ## How selective labels arise
 
+Selective labeling is structural in any operational workflow where downstream actions depend on an initial triage or
+screening policy:
+
+1. **Consumer Lending & Credit Risk:** Applicants apply for mortgages or credit cards ($X$). An underwriting policy
+   approves candidates with risk scores above a threshold ($D = 1$). Repayment outcomes $Y \in \{0, 1\}$ are generated
+   over the subsequent 24 months. Rejected applicants ($D = 0$) receive no capital, yielding no repayment data.
+2. **Judicial Pretrial Bail:** Judges decide whether to release an arrested defendant awaiting trial ($D = 1$) or detain
+   them in jail ($D = 0$) <Cite id="kleinberg2018" />. The outcome of interest—whether the defendant commits a new crime
+   or fails to appear in court ($Y \in \{0, 1\}$)—can be observed only for released individuals. Jailed defendants
+   cannot commit pretrial street crimes.
+3. **Payment Fraud Detection:** An anti-fraud system blocks suspicious e-commerce payments ($D = 0$). True chargeback
+   fraud labels ($Y = 1$) materialize only for authorized payments ($D = 1$) that settle through card payment networks.
+4. **Employment Recruiting:** Recruiters interview candidate software engineers ($X$) and extend job offers ($D = 1$).
+   Subsequent job performance metrics ($Y$) are observed only for hired employees.
+
+In all four cases, the observed dataset $\mathcal{D}_{\text{obs}} = \{(x_i, y_i) : D_i = 1\}$ reflects the joint
+distribution $P(X, Y \mid D = 1)$, which differs fundamentally from the true applicant population distribution
+$P(X, Y)$.
+
 ## Reject inference
+
+In banking and credit analytics, statistical methodologies developed to impute or account for missing labels on rejected
+candidates are termed **Reject Inference**:
+
+- **Hard Cutoff Imputation (Worst-Case Fallacy):** Naively labeling all rejected applicants as defaults ($Y = 1$). While
+  conservative, this heuristic assumes zero creditworthy applicants exist in the rejected pool, entrenching historical
+  thresholds and generating severe label noise.
+- **Proportional Parceling:** Partitioning the applicant pool into score bands based on credit bureaus. The default rate
+  observed among accepted applicants in score band $k$ is imputed proportionally onto rejected applicants in the same
+  band.
+- **Reweighting / Augmentation (Inverse Probability of Selection):** Treating selection as an observable propensity
+  score $e(x) = P(D = 1 \mid X = x)$. Under the unconfoundedness assumption that default outcomes are independent of the
+  decision given observed features ($Y \perp D \mid X$), each approved applicant is reweighted by $1 / e(x)$ during
+  model training.
+- **Heckman Selection Models (Bivariate Probit):** Modeling the selection decision $D^* = Z\gamma + u_1$ and outcome
+  $Y^* = X\beta + u_2$ jointly with correlated error terms $\operatorname{Corr}(u_1, u_2) = \rho$
+  <Cite id="heckman1979" />. Estimating $\rho$ directly corrects for unobserved selection factors.
 
 ## Exploration slices
 
+When the historical screening policy is deterministic ($D = \mathbb{I}(X \ge \tau)$), unconfoundedness and common
+support are completely violated: $P(D = 1 \mid X < \tau) = 0$. In this regime, observational reject inference cannot
+extrapolate without extreme, untestable parametric assumptions <Cite id="lakkaraju2017" />.
+
+The definitive engineering solution is to implement **Exploration Slices (Rand-Passes)**:
+1. **Randomized Approval Budget:** The operational policy reserves a small fraction of capital (e.g., $1\%$ to $3\%$ of
+   total originations) for controlled randomized exploration.
+2. **Epsilon-Greedy Passes:** Applicants who would normally be rejected ($X < \tau$) are randomly approved with
+   probability $\epsilon > 0$.
+3. **Ground-Truth Counterfactual Labels:** Although the lending institution incurs a controlled financial loss from
+   defaults in this exploration bucket, the resulting observations provide gold-standard, unselected ground truth across
+   the entire score range, satisfying the positivity condition ($P(D=1 \mid X) > 0$) and enabling unbiased model
+   recalibration.
+
 ## Evaluating under selective labels
 
+Evaluating a candidate model $M_B$ against an incumbent production system $M_A$ under selective labels is notoriously
+fraught <Cite id="lakkaraju2017, kleinberg2018" />:
+
+- **The Evaluation Contraction Trap:** Calculating AUC or accuracy strictly on historical test cases where $D_A = 1$
+  measures model performance only on the subset of applicants that incumbent system $M_A$ found acceptable. If $M_B$
+  disagrees with $M_A$—for example, by wishing to approve a subpopulation that $M_A$ rejected—evaluating on $D_A = 1$
+  cannot verify whether $M_B$'s novel approvals are creditworthy.
+- **Contraction Mapping Bounds:** Lakkaraju et al. formulate evaluation bounds using contraction techniques and
+  counterfactual bounding <Cite id="lakkaraju2017" />. By decomposing performance into the consensus region
+  ($D_A = 1 \wedge D_B = 1$) and the disagreement region ($D_A = 0 \wedge D_B = 1$), practitioners can compute minimax
+  performance guarantees without making ungrounded point imputations.
+
 ## Pitfalls
+
+- **Evaluating Algorithmic Fairness Solely on Approvals:** Auditing credit scoring models for disparate impact using
+  only approved borrowers produces severe survivor bias. An underwriting policy that systematically rejects qualified
+  minority applicants will appear "fair" on the approved slice because default rates among the few approved minority
+  applicants match white borrowers.
+- **Assuming Unconfoundedness with Human Decision-Makers:** When human underwriters or judges make selection decisions
+  ($D$), they observe unrecorded visual, verbal, and contextual cues (e.g., body language, unlogged references) not
+  captured in tabular features $X$. Selection is confounded by unobservables ($Y \not\perp D \mid X$), invalidating
+  naive propensity score reweighting.
+- **Feedback Loops of Shrinking Portfolios:** A conservative model approves only ultra-low-risk applicants
+  ($X \ge 750$). Retraining the model on this ultra-safe slice causes it to learn that risk variance is high below 750,
+  prompting it to raise the threshold to 780 in the next iteration, steadily choking off business volume.
+- **Adverse Selection in Exploration Buckets:** Announcing or leaking that an institution runs randomized exploration
+  passes attracts opportunistic fraudsters who submit fraudulent applications to exploit random approvals.

@@ -1,0 +1,136 @@
+---
+title: 'Search and relevance data'
+kind: concept
+summary: 'Search data combine pooled relevance judgements, graded relevance and click logs, whose clicks depend on position as much as relevance.'
+tags: [data, information-retrieval]
+aliases: []
+requires: []
+related: [unbiased-learning-to-rank]
+references: [craswell2008cascade, chapelle2009dbn, chuklin2015clickmodels, voorhees2005trec]
+status: draft
+updated: 2026-10-12
+---
+
+import { SearchRelevanceVisualizer } from './SearchRelevanceVisualizer'
+
+<Definition>
+Search and relevance data encompasses supervised benchmark collections annotated with human relevance judgments and
+large-scale behavioral telemetry captured from search engine result pages (SERPs). While human annotations provide
+explicit, gold-standard relevance grades on controlled document pools, behavioral click logs capture implicit user
+signals that are heavily confounded by ranking positions, snippet presentations, and sequential examination dynamics.
+</Definition>
+
+Modern information retrieval systems (such as learned sparse encoders, dense vector retrievers, and cross-encoder
+rerankers) rely on a hybrid combination of curated human test collections and live interaction logs
+<Cite id="voorhees2005trec, chuklin2015clickmodels" />. Human judgments provide unbiased evaluation baselines but are
+prohibitively expensive to collect at web scale. Conversely, click logs provide continuous, massive-scale supervision
+but require sophisticated probabilistic modeling to separate true topical relevance from presentation artifacts.
+
+<SearchRelevanceVisualizer />
+
+## Pooled relevance judgements
+
+In web-scale search engines indexing billions of documents, human annotators cannot manually review the entire corpus
+for a given query to identify every relevant document. To construct reusable benchmark collections (such as the NIST
+Text REtrieval Conference, TREC), information retrieval relies on the *pooling methodology*
+<Cite id="voorhees2005trec" />:
+
+1. **System Diversity:** A diverse set of participating retrieval systems (e.g., BM25, neural dense retrievers, query
+   expansion models) run the same test queries against the corpus.
+2. **Depth-$K$ Cutoff:** The top $K$ documents (typically $K \in [50, 100]$) from each system are selected and merged
+   into a single candidate pool.
+3. **Deduplication and Blind Annotation:** The pooled candidates are deduplicated and presented in random order to human
+   assessors, who grade each document without knowing which system retrieved it.
+4. **The Unjudged Assumption:** All documents outside the pool are assumed non-relevant ($r = 0$).
+
+While pooling enables sound comparative benchmarking between the systems that contributed to the pool, it introduces
+*pooling bias* against novel retrieval architectures evaluated years later: if a newly proposed neural retriever
+surfaces highly relevant documents that none of the baseline systems ranked in the top $K$, those genuine matches are
+scored as false positives ($r = 0$), artificially deflating the new model's measured Mean Average Precision (MAP) or
+NDCG.
+
+## Graded relevance
+
+Early evaluation protocols evaluated binary relevance ($r \in \{0, 1\}$). However, complex informational queries require
+nuanced distinction between marginally topical documents and authoritative, definitive answers. Industrial search
+engines adopt 5-point graded relevance scales:
+
+| Grade | Label | Description | Operational Meaning |
+| :--- | :--- | :--- | :--- |
+| **4** | Navigational / Perfect | The exact entity or official homepage sought by the user. | Satisfies the query completely; zero further search needed. |
+| **3** | Excellent | Highly relevant, authoritative, and exhaustive. | Central answer to the query with clear attribution. |
+| **2** | Good | Relevant information covering aspects of the query. | Useful content, but secondary or incomplete. |
+| **1** | Fair | Tangentially related or off-topic with minor keyword overlap. | Marginally useful context; does not directly answer intent. |
+| **0** | Bad / Off-topic | Completely irrelevant, 404 error, spam, or hostile content. | Actively harms user experience. |
+
+To reward models for placing high-grade documents at the very top of the ranking slate, evaluation metrics apply
+non-linear exponential gains and logarithmic rank discounts via Discounted Cumulative Gain (DCG) and Normalized DCG
+(NDCG):
+
+$$
+\mathrm{DCG}@K = \sum_{i=1}^K \frac{2^{r_i} - 1}{\log_2(i + 1)}, \quad \mathrm{NDCG}@K = \frac{\mathrm{DCG}@K}{\mathrm{IDCG}@K}
+$$
+
+where $\mathrm{IDCG}@K$ represents the Ideal DCG achieved by sorting all judged documents in monotonically decreasing
+order of relevance grades.
+
+## Click models
+
+Because human grading costs millions of dollars and struggles to cover the long tail of idiosyncratic queries, search
+engines extract supervision from user clicks. However, clicks are noisy surrogates for relevance. *Click models* treat
+user behavior as a generative graphical model that decomposes observations into latent examination and satisfaction
+variables <Cite id="craswell2008cascade, chapelle2009dbn, chuklin2015clickmodels" />:
+
+1. **The Cascade Model:** Assumes users scan SERP snippets strictly from top to bottom ($k = 1 \dots K$). The user
+   examines rank $k$, clicks with probability equal to the perceived attractiveness $\alpha_k$, and if satisfied,
+   terminates the search session <Cite id="craswell2008cascade" />:
+
+$$
+P(E_1 = 1) = 1, \quad P(E_{k+1} = 1 \mid E_k = 1, C_k) = \begin{cases} 0 & \text{if } C_k = 1 \text{ (satisfied)} \\ 1 & \text{if } C_k = 0 \end{cases}
+$$
+
+2. **The Dynamic Bayesian Network (DBN):** Separates perceived attractiveness $\alpha_k$ (probability of click given
+   examination) from intrinsic satisfaction $s_k$ (probability of satisfaction given click)
+   <Cite id="chapelle2009dbn" />. If a user clicks but finds the document unhelpful, they continue scanning downward
+   with persistence probability $\gamma$:
+
+$$
+P(E_{k+1} = 1 \mid C_k = 1, S_k = 0) = \gamma, \quad P(E_{k+1} = 1 \mid C_k = 0) = \gamma
+$$
+
+By maximizing the log-likelihood of observed multi-click sessions via Expectation-Maximization (EM), the DBN decouples
+rank-decay effects from true document satisfaction parameters $s_k$.
+
+## Position bias
+
+Position bias on search result pages is exceptionally steep: the first organic search result typically receives $25\%$
+to $35\%$ of all clicks, while the tenth result receives under $1\%$, regardless of the underlying content quality
+<Cite id="craswell2008cascade" />.
+
+This phenomenon stems from two distinct drivers:
+- **Attention Decay:** Users are cognitive misers who rarely scroll past the first viewport.
+- **Trust Bias:** Users instinctively believe that search engines place the best document at position 1. When users are
+  shown manipulated search results where rank 1 and rank 3 are secretly swapped, rank 1 still attracts significantly
+  more clicks despite holding inferior content.
+
+Modern Learning-to-Rank (LTR) pipelines debias click data through intervention experiments:
+- **Interleaved Evaluation:** Team-draft interleaving presents searchers with an interleaved slate merging results from
+  Model A and Model B to compare clicks under equalized exposure.
+- **Inverse Propensity Scoring (IPS):** Reweighting each click by the inverse examination propensity
+  $w_k = 1 / P(E_k = 1)$, which can be calibrated through randomized swap experiments or joint dual learning to rank.
+
+## Pitfalls
+
+- **Snippet-Relevance Disconnect (Clickbait):** Users click search results based on the metadata snippet (title, URL,
+  highlighted summary), not the full document text. A sensationalist, misleading snippet can generate a high click rate
+  ($\alpha_k \gg 0$) followed by immediate bounce (zero dwell time, $s_k = 0$), misleading naive click-based loss
+  functions into rewarding low-quality content.
+- **Query Ambiguity and Intent Collapse:** A single string query like `jaguar` encompasses distinct search intents
+  (luxury car, animal, operating system, NFL football team). Labeling a document as "irrelevant" without conditioning on
+  user search session history or geographic location corrupts relevance baselines.
+- **Annotator-User Disagreement:** Human annotators reading comprehensive evaluation rubrics often judge long, detailed
+  academic articles as "Grade 4 (Perfect)" for technical queries, whereas actual mobile searchers favor concise,
+  bulleted snippets that answer their question in three seconds.
+- **SERP Feature Cannibalization:** Direct answer boxes, knowledge panels, map cards, and AI-generated overviews resolve
+  queries directly on the search page without generating any external clicks (zero-click searches). Treating zero-click
+  sessions as "user dissatisfaction" misinterprets successful immediate query fulfillment.

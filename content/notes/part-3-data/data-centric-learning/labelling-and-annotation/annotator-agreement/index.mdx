@@ -1,24 +1,157 @@
 ---
 title: 'Annotator agreement'
 kind: concept
-summary: 'Agreement between annotators, measured by kappa and alpha statistics or by overlap for boxes and spans, shows how well defined a labelling task is and bounds the accuracy that can be measured against the labels.'
-tags: [data, metrics]
-aliases: []
-requires: []
-related: [cohens-kappa, fleiss-kappa]
-references: []
-status: stub
-updated: 2026-10-11
+summary: 'Annotator agreement measures inter-rater consensus using chance-adjusted statistics (Cohen’s kappa, Fleiss’ kappa, Krippendorff’s alpha) and spatial/span IoU overlap—diagnosing guideline ambiguity and establishing an empirical upper ceiling on model performance.'
+tags: [data, metrics, annotation, evaluation, reliability]
+aliases: [annotator agreement, inter-rater reliability, inter-annotator agreement, cohen kappa, fleiss kappa]
+requires: [data-generating-process, labelling-and-annotation]
+related: [label-definition, annotator-aggregation, model-generated-labels, slice-analysis]
+references: [cohen1960, fleiss1971, krippendorff2004, feinstein1990]
+status: draft
+updated: 2026-10-12
 ---
 
+import { AnnotatorAgreementVisualizer } from './AnnotatorAgreementVisualizer'
+
 <Definition>
-To be written.
+**Annotator agreement** (or inter-rater reliability) is the statistical quantification of consensus among multiple
+independent judges evaluating identical data instances. It establishes whether a labeling task is reliably reproducible,
+separates human cognitive errors from guideline ambiguity, and imposes a fundamental empirical ceiling on measurable
+model evaluation accuracy.
 </Definition>
 
-## Kappa and alpha statistics
+Before training or benchmarking models against supervised labels, an engineering team must determine whether the
+labeling task itself is reproducible. If two trained human specialists given identical data and identical guidelines
+agree on labels only $75\%$ of the time, the underlying task possesses substantial inherent subjectivity or poorly
+defined boundary criteria. Evaluating models against single-rater test sets in low-agreement settings measures noise
+rather than true generalization <Cite id="cohen1960, feinstein1990" />.
 
-## Overlap for boxes and spans
+<AnnotatorAgreementVisualizer />
 
-## Agreement as a ceiling
+## Chance-adjusted agreement: kappa and alpha statistics
 
-## Pitfalls
+Raw percentage agreement—the simple fraction of items where raters assign identical labels—is deeply deceptive in
+imbalanced datasets. If $95\%$ of transactions are legitimate ($y = 0$), two raters randomly guessing the majority class
+will achieve $90.5\%$ observed agreement purely by chance. To isolate genuine consensus from stochastic coincidence,
+reliability analysis relies on chance-adjusted statistics <Cite id="cohen1960, fleiss1971, krippendorff2004" />.
+
+### Cohen's kappa for two raters
+
+For two raters classifying $N$ items into $C$ mutually exclusive categories, **Cohen's kappa** is defined as
+<Cite id="cohen1960" />:
+
+$$
+\kappa = \frac{p_o - p_e}{1 - p_e}
+$$
+
+Where $p_o = \frac{1}{N} \sum_{i=1}^N \mathbb{I}(y_{i,1} = y_{i,2})$ is the observed proportion of agreement, and $p_e$
+is the expected agreement under statistical independence:
+
+$$
+p_e = \sum_{c=1}^C P(\text{Rater 1} = c) \cdot P(\text{Rater 2} = c)
+$$
+
+- $\kappa = 1.0$: Perfect, unanimous agreement.
+- $\kappa = 0.0$: Agreement exactly equal to random chance given the raters' marginal distributions.
+- $\kappa < 0.0$: Systematic disagreement worse than random guessing (indicating inverted label definitions).
+
+### Fleiss' kappa and Krippendorff's alpha
+
+- **Fleiss' kappa**: Generalizes Cohen's formulation to an arbitrary fixed number of $m$ raters per instance
+  <Cite id="fleiss1971" />.
+- **Krippendorff's alpha ($\alpha$)**: The most versatile metric for real-world campaigns
+  <Cite id="krippendorff2004" />. Unlike kappa, $\alpha$ natively handles:
+  1. Incomplete designs with missing data (different instances rated by different subsets of workers).
+  2. Non-nominal scales (ordinal, interval, and ratio metrics) using custom difference functions $\delta^2(c, k)$.
+
+```
+ Krippendorff's Alpha General Formulation:
+  alpha = 1 - (Observed Disagreement D_o) / (Expected Disagreement D_e)
+```
+
+### The prevalence paradox
+
+In a seminal 1990 paper, Feinstein and Cicchetti demonstrated that Cohen's kappa exhibits a severe mathematical anomaly
+known as the **prevalence paradox** <Cite id="feinstein1990" />:
+
+When a category has an extreme base rate (e.g., $98\%$ majority class), the expected agreement
+$p_e = (0.98)^2 + (0.02)^2 \approx 0.961$ is very high. If raters agree on $96\%$ of cases, observed agreement is high
+($p_o = 0.96$), but kappa collapses:
+
+$$
+\kappa = \frac{0.96 - 0.961}{1 - 0.961} \approx -0.02
+$$
+
+Raters with $96\%$ real-world agreement receive a near-zero or negative kappa score <Cite id="feinstein1990" />. In
+highly imbalanced datasets, practitioners must report both observed agreement $p_o$ and separate specific agreement
+rates for positive and negative classes alongside $\kappa$.
+
+## Overlap metrics for spatial boxes and text spans
+
+In computer vision and natural language processing, labels are not simple scalars; they represent spatial coordinates or
+token sequences.
+
+### Intersection over Union (IoU) for vision
+
+For object detection bounding boxes or segmentation masks, agreement between annotator annotations $A$ and $B$ is
+measured via **Intersection over Union** (the Jaccard index):
+
+$$
+\text{IoU}(A, B) = \frac{\text{Area}(A \cap B)}{\text{Area}(A \cup B)}
+$$
+
+| Consensus Regime | IoU Threshold ($\tau$) | Boundary Tightness | Typical Application & Annotation Challenge |
+| :--- | :--- | :--- | :--- |
+| **Strict Agreement** | $\text{IoU}(A, B) \ge 0.75$ | Pixel-tight bounding contours | Autonomous vehicle obstacle bounding; surgical tool localization |
+| **Standard Consensus** | $\text{IoU}(A, B) \ge 0.50$ | General spatial alignment | General object detection (MS COCO); coarse entity localization |
+| **Boundary Indecision** | $\text{IoU}(A, B) < 0.50$ | Severe disagreement or offset | Amorphous entities (e.g., pulmonary nodules, smoke, occluded objects) |
+
+### Span F1 for Named Entity Recognition (NER)
+
+For text entity extraction, two human raters might identify overlapping spans:
+- Rater 1: `"[The Federal Reserve Bank]"`
+- Rater 2: `"[Federal Reserve Bank]"`
+
+1. **Exact-match span agreement**: Requires identical starting and ending character offsets
+   ($[0, 24] == [4, 24] \to \text{Mismatch}$).
+2. **Token-level overlap F1**: Evaluates agreement across shared constituent tokens:
+   $$
+   \text{Precision} = \frac{|T_A \cap T_B|}{|T_A|}, \quad \text{Recall} = \frac{|T_A \cap T_B|}{|T_B|}, \quad F_1 = \frac{2 P R}{P + R}
+   $$
+   Tracking token overlap prevents minor determiner inclusion mismatches (such as `"the"`) from artificially depressing
+   entity reliability scores.
+
+## Agreement as an empirical performance ceiling
+
+A fundamental law of machine learning evaluation is that **human inter-rater agreement bounds the maximum meaningful
+performance of an automated model**.
+
+Suppose two board-certified radiologists evaluating chest X-rays achieve an inter-rater agreement of $84\%$
+($\kappa = 0.68$), reflecting inherent physiological ambiguity. If a deep convolutional neural network is tested against
+a test set labeled by a single radiologist, demanding that the model achieve $96\%$ test accuracy is mathematically
+unsound:
+
+$$
+\text{Accuracy}_{\text{max}} \le \text{Agreement}_{\text{human}}
+$$
+
+A model scoring $95\%$ accuracy against single-rater labels in an $84\%$-agreement domain has not achieved super-human
+understanding; it has simply overfitted the idiosyncratic personal labeling habits and cognitive biases of that specific
+rater. To establish reliable performance benchmarks in subjective domains, evaluation test sets must be labeled by
+multiple raters and adjudicated via consensus.
+
+## Diagnostic checklist
+
+To measure and interpret annotator agreement:
+
+1. **Calculate chance-corrected reliability**: Use Cohen's $\kappa$ <Cite id="cohen1960" /> for two fixed raters or
+   Krippendorff's $\alpha$ <Cite id="krippendorff2004" /> for multiple raters with missing instances.
+2. **Audit for the prevalence paradox**: In extreme class imbalances ($> 90\%$), check whether low kappa is driven by
+   high expected agreement $p_e$; report observed agreement and class-specific positive agreement
+   <Cite id="feinstein1990" />.
+3. **Deploy IoU for spatial annotations**: Measure bounding box IoU; flag annotators whose mean IoU drops below $0.70$
+   for guideline re-calibration.
+4. **Treat human agreement as a test ceiling**: Never demand model validation accuracy exceeding human consensus rates
+   without multi-annotator adjudicated ground truth.
+5. **Use low agreement as a diagnostic probe**: If a specific category exhibits $\kappa < 0.50$, review the disagreement
+   instances in a team calibration session to resolve guideline ambiguity.

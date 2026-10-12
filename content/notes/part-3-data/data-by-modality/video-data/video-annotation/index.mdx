@@ -2,25 +2,131 @@
 title: 'Video annotation'
 kind: concept
 summary: 'Video labels mark temporal segments, object tracks and per-frame or per-clip classes. Labelling keyframes and interpolating between them reduces cost.'
-tags: [data, computer-vision]
-aliases: []
-requires: []
-related: [image-annotation-formats]
-references: []
-status: stub
-updated: 2026-10-11
+tags: [data, computer-vision, video, annotation, tracking]
+aliases: [video-labeling, temporal-action-annotation, multi-object-tracking-annotation]
+requires: [digital-video, clip-sampling]
+related: [image-annotation-formats, motion-representations]
+references: [luiten2021hota, bernardin2008mota, caba2015activitynet, gu2018ava]
+status: draft
+updated: 2026-10-12
 ---
 
+import { VideoAnnotationVisualizer } from './VideoAnnotationVisualizer'
+
 <Definition>
-To be written.
+**Video annotation** is the formal encoding of spatial, temporal, and semantic ground-truth metadata onto video streams.
+Annotations range from coarse video-level categorical tags to precise temporal segment intervals, bounding box tubelets
+with persistent identity identifiers, and dense per-frame semantic segmentation masks.
 </Definition>
+
+Unlike static image annotation where human annotators draw bounding contours on frozen pixel planes, video datasets
+introduce an explicit temporal dimension. Manually labeling every individual frame of a 30 FPS video requires labeling
+1,800 frames per minute of footage, incurring unsustainable human annotation expenses. Production video annotation
+relies on sparse keyframing, tracker-assisted propagation, and structured temporal localization protocols
+<Cite id="caba2015activitynet, gu2018ava" />.
+
+<VideoAnnotationVisualizer client:load />
 
 ## Temporal segments
 
+Temporal Action Localization (TAL) and action detection evaluate when activities begin, persist, and conclude within
+untrimmed continuous video footage <Cite id="caba2015activitynet" />.
+
+A temporal action annotation is represented as a tuple:
+
+$$
+\mathcal{A}_i = \left( t_{\text{start}}^{(i)}, \, t_{\text{end}}^{(i)}, \, c_i \right)
+$$
+
+Where $t_{\text{start}} < t_{\text{end}}$ are physical timestamps (in seconds or frame indices), and
+$c_i \in \{1, \dots, C\}$ is the categorical action label. Overlapping actions are common in untrimmed video (e.g., an
+actor "talking on the phone" while simultaneously "driving a car").
+
+Evaluation of temporal segment predictions $\hat{\mathcal{A}} = (\hat{t}_s, \hat{t}_e, \hat{c})$ against ground-truth
+$\mathcal{A} = (t_s, t_e, c)$ uses **Temporal Intersection-over-Union (tIoU)**:
+
+$$
+\operatorname{tIoU}(\mathcal{A}, \hat{\mathcal{A}}) = \frac{|\mathcal{A} \cap \hat{\mathcal{A}}|}{|\mathcal{A} \cup \hat{\mathcal{A}}|} = \frac{\max\left(0, \, \min(t_e, \hat{t}_e) - \max(t_s, \hat{t}_s)\right)}{\max(t_e, \hat{t}_e) - \min(t_s, \hat{t}_s)}
+$$
+
+If the predicted action class matches ($\hat{c} = c$) and $\operatorname{tIoU} \ge \alpha$, the prediction is scored as
+a true positive. Modern benchmarks (ActivityNet, THUMOS14) report mean Average Precision (mAP) swept across multiple
+tIoU thresholds $\alpha \in [0.5, 0.95]$ with step $0.05$, rewarding models that delineate exact sub-second boundary
+transitions.
+
 ## Tracks
+
+In Multi-Object Tracking (MOT) and spatio-temporal action detection (e.g., AVA dataset), objects and actors are
+annotated across space and time as continuous **spatio-temporal tubelets** <Cite id="gu2018ava" />:
+
+$$
+\mathcal{T}_i = \left\{ \left( \mathbf{b}_t^{(i)}, \, \text{id}_i, \, c_i \right) : t \in [t_{\text{start}}^{(i)}, \, t_{\text{end}}^{(i)}] \right\}
+$$
+
+Where $\mathbf{b}_t = [x_{\min}, y_{\min}, w, h]$ is the spatial bounding box at frame $t$, and $\text{id}_i$ is an
+immutable integer tracking identifier preserved across visual occlusions, scale shifts, and camera movements.
+
+Tracking accuracy is quantified using two standardized evaluation paradigms:
+1. **CLEAR MOT Metrics (Bernardin & Stiefelhagen 2008)**: MOTA measures total detection and association failures
+   <Cite id="bernardin2008mota" />:
+   $$
+   \operatorname{MOTA} = 1 - \frac{\sum_t \left( \operatorname{FN}_t + \operatorname{FP}_t + \operatorname{IDSW}_t \right)}{\sum_t \operatorname{GT}_t}
+   $$
+   Where $\operatorname{FN}$ is false negatives, $\operatorname{FP}$ is false positives, and $\operatorname{IDSW}$ is
+   identity switches. MOTA heavily over-penalizes false detections, obscuring association consistency.
+2. **Higher Order Tracking Accuracy (HOTA)**: HOTA balances spatial detection alignment against temporal identity
+   preservation via the geometric mean <Cite id="luiten2021hota" />:
+   $$
+   \operatorname{HOTA}_\alpha = \sqrt{\operatorname{DetA}_\alpha \cdot \operatorname{AssA}_\alpha}
+   $$
+   Where Detection Accuracy ($\operatorname{DetA}$) measures frame-level overlap, and Association Accuracy
+   ($\operatorname{AssA}$) measures whether the predicted tracklet maintains the same identity across the full video
+   lifespan.
 
 ## Per-frame and per-clip labels
 
+Video datasets exhibit varying degrees of label granularity:
+
+- **Per-Clip (Video-Level) Labels**: Entire trimmed clips (e.g., 10-second snippets in Kinetics-400 or UCF101) receive a
+  single categorical label. This format is inexpensive to crowdsource, but models must infer temporal attention
+  implicitly, often relying on static background cues.
+- **Per-Frame Dense Segmentation**: Every video frame receives a dense categorical label (e.g., Breakfast Actions,
+  50Salads), modeling long-range grammar and action sequences.
+- **Multiple Instance Learning (MIL)**: In weakly supervised video localization, videos are modeled as bags of $M$
+  temporal snippet instances $\mathcal{B} = \{x_1, \dots, x_M\}$. The dataset supplies only the bag-level presence of an
+  action, and the optimization objective forces snippet attention heads to localize the true temporal action peak.
+
 ## Keyframes and interpolation
 
+To avoid manually drawing bounding boxes on all $30$ frames per second, professional annotation workflows employ
+**sparse keyframing and temporal interpolation**:
+
+1. **Keyframe Annotation**: The human annotator marks object boundaries only on keyframes spaced $\Delta K$ frames apart
+   (e.g., every 10th or 15th frame), or when the object undergoes sudden orientation or velocity changes.
+2. **Linear Interpolation**: For intermediate frames $t \in (k_1, k_2)$, intermediate coordinates are interpolated
+   linearly:
+   $$
+   \mathbf{b}(t) = (1 - \lambda) \mathbf{b}(k_1) + \lambda \mathbf{b}(k_2), \quad \lambda = \frac{t - k_1}{k_2 - k_1}
+   $$
+3. **Tracker-Assisted Propagation**: Modern annotation tools (CVAT, Labelme) run lightweight visual object trackers
+   (e.g., SiamRPN, ByteTrack) forward and backward between user-defined keyframes, adapting to non-linear physical
+   trajectories and camera zooms.
+
+Setting $\Delta K = 15$ reduces human labeling time by $>85\%$ while maintaining bounding box IoUs $>90\%$ on smooth
+rectilinear trajectories.
+
 ## Pitfalls
+
+1. **Boundary Ambiguity and Low Inter-Annotator Agreement**: Defining the exact start and end frame of human actions
+   (e.g., "drinking water" or "opening a door") is subjective. Two annotators routinely disagree by 10 to 30 frames
+   ($0.3\text{--}1.0\,\text{s}$). Benchmarks must incorporate multi-annotator consensus intervals or soft evaluation
+   margins.
+2. **Linear Interpolation Drift on Curved Trajectories**: Applying linear keyframe interpolation across
+   $\Delta K \ge 20$ frames during fast parabolic motion (e.g., a thrown ball or turning vehicle) causes severe box
+   drift, cutting off foreground boundaries in middle frames.
+3. **Identity Fragmentation Across Long Occlusions**: When an annotated subject walks behind a pillar or another actor
+   for several seconds, re-identification mistakes cause the annotator or automatic tracker to assign a new track ID,
+   artificially inflating $\operatorname{IDSW}$ and degrading $\operatorname{AssA}$.
+4. **Severe Class Imbalance in Untrimmed Video**: In real-world surveillance or autonomous driving footage, the
+   "background / idle / nothing happening" class accounts for $>95\%$ of all video frames. Training models without hard
+   negative mining or focal temporal loss causes models to predict the background class continuously.

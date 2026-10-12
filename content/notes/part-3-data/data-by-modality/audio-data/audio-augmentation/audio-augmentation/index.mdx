@@ -2,27 +2,148 @@
 title: 'Audio augmentation'
 kind: concept
 summary: 'Audio augmentation simulates the conditions a model will meet: background noise mixed at a chosen signal-to-noise ratio, room reverberation, changes of speed and pitch, and masking of the spectrogram.'
-tags: [data, audio, speech]
-aliases: []
+tags: [data, audio, speech, augmentation, deep-learning]
+aliases: [audio data augmentation, sound augmentation, specaugment]
 requires: []
-related: [spectrogram-augmentation, data-augmentation]
-references: []
-status: stub
-updated: 2026-10-11
+related: [digital-audio, audio-preprocessing, spectrogram-augmentation, data-augmentation, augmentation-principles]
+references: [park2019, ko2015]
+status: draft
+updated: 2026-10-12
 ---
 
+import { AudioAugmentationVisualizer } from './AudioAugmentationVisualizer'
+
 <Definition>
-To be written.
+**Audio augmentation** is the set of acoustic, temporal, frequency-domain, and channel-level transformations applied to
+audio waveforms or spectrograms during training to synthesize realistic environmental acoustic diversity
+<Cite id="ko2015, park2019" />. By exposing neural models to controlled variations in background noise, room acoustics,
+speaker speech rate, vocal tract length, and spectral occlusion, augmentation enforces acoustic invariance and bridges
+the performance gap between pristine studio benchmarks and noisy deployment environments.
 </Definition>
+
+In production speech and audio processing, the acoustic conditions encountered during deployment diverge sharply from
+laboratory training corpora. A speech model trained exclusively on clean, near-field microphone recordings (such as
+LibriSpeech) often experiences severe performance collapse when deployed in real-world conditions characterized by
+reverberant living rooms, cafeteria chatter, moving vehicles, and low-bitrate VoIP codecs.
+
+Audio data augmentation addresses these vulnerabilities either by transforming raw time-domain waveforms (noise
+addition, room reverberation, speed and pitch perturbation) or by directly regularizing time-frequency representations
+(SpecAugment).
+
+<AudioAugmentationVisualizer />
 
 ## Noise mixing at a set signal-to-noise ratio
 
+In real-world environments, speech is accompanied by additive acoustic noise. Simulating this requires mixing a clean
+speech signal $x[n]$ with an unrelated noise recording $n_{\text{noise}}[n]$:
+
+$$
+x_{\text{mix}}[n] = x[n] + \alpha \cdot n_{\text{noise}}[n]
+$$
+
+The scaling factor $\alpha$ is calibrated to achieve a precise target **Signal-to-Noise Ratio (SNR)** expressed in
+decibels:
+
+$$
+\text{SNR}_{\text{target}} = 10 \log_{10}\left( \frac{P_{\text{speech}}}{\alpha^2 P_{\text{noise}}} \right)
+$$
+
+where signal powers are computed as root-mean-square (RMS) energies:
+
+$$
+\alpha = \sqrt{\frac{P_{\text{speech}}}{P_{\text{noise}}}} \cdot 10^{-\text{SNR}_{\text{target}} / 20}
+$$
+
+- **High SNR ($15\text{--}30\text{ dB}$):** Light ambient room tone or mild electrical noise floor. Teaches models
+  invariance to slight sensor differences.
+- **Moderate SNR ($5\text{--}15\text{ dB}$):** Typical conversational environments, including office chatter, air
+  conditioning rumble, and outdoor street ambience.
+- **Challenging SNR ($-5\text{--}5\text{ dB}$):** Severe noise environments (cocktail party effect, moving automobiles,
+  industrial machinery), forcing neural networks to exploit multi-frame phonetic context rather than relying solely on
+  raw spectral energy.
+
 ## Room impulse responses
+
+Sound produced in an enclosed space propagates along direct line-of-sight paths and reflects off surrounding walls,
+ceilings, and floors. This phenomenon—**reverberation**—smears acoustic energy forward in time, blurring phoneme
+boundaries and degrading ASR accuracy.
+
+Reverberation is modeled mathematically as the discrete convolution of clean anechoic audio $x[n]$ with a **Room Impulse
+Response (RIR)** $h[n]$:
+
+$$
+x_{\text{reverb}}[n] = (x * h)[n] = \sum_{k=0}^{L-1} x[n - k] h[k]
+$$
+
+An RIR decomposes into:
+1. **Direct path:** The initial acoustic arrival directly from sound source to microphone.
+2. **Early reflections ($<50\text{ ms}$):** Distinct specular reflections from primary boundaries that provide spatial
+   cues.
+3. **Late reverberation tail ($>50\text{ ms}$):** A dense, stochastic decay of scattered reflections parameterized by
+   reverberation time $T_{60}$ (the time required for sound pressure level to decay by $60\text{ dB}$).
+
+Augmentation pipelines draw RIRs either from real-world impulse response corpora (such as the MIT Acoustical
+Reverberation Scene Database) or from synthetic geometric acoustic simulators using the image source method.
 
 ## Speed and pitch perturbation
 
+Human speakers exhibit significant natural variation in speaking rate and vocal tract geometry:
+
+### Speed perturbation
+
+Ko et al. introduced **speed perturbation** for automatic speech recognition <Cite id="ko2015" />. Resampling the raw
+waveform by a speed factor $\alpha \in \{0.9, 1.0, 1.1\}$:
+- Scales utterance duration by $1 / \alpha$.
+- Shifts the entire frequency spectrum (including formant frequencies and fundamental frequency $F_0$) by factor
+  $\alpha$.
+- Simulates speakers with longer or shorter vocal tracts speaking at different speaking rates.
+
+Because speed perturbation does not alter the underlying linguistic phoneme sequence, the ground-truth text transcript
+remains valid without modification, tripling effective training data volume.
+
+### Pitch perturbation
+
+Modulating pitch by $\pm 2\text{ to }4$ semitones without modifying speech tempo requires phase vocoders or Time-Domain
+Pitch-Synchronous Overlap-Add (TD-PSOLA) algorithms. Independent pitch shifting simulates demographic variations (e.g.,
+adult male vs female vs child pitch registers).
+
 ## Codec and channel simulation
+
+To ensure robustness against telecommunications networks and streaming platforms, pipelines simulate hardware and codec
+degradations:
+
+- **Bandwidth limiting:** Applying brickwall low-pass filters at 3.4 kHz to emulate legacy telephony channels (G.711
+  $\mu$-law codec).
+- **Perceptual codec recompression:** Dynamically encoding and decoding training audio through lossy codecs (MP3, Opus,
+  AAC) at varying bitrates ($16\text{--}64\text{ kbps}$), exposing models to psychoacoustic quantization noise and MDCT
+  frame smearing.
+- **Random equalization (Frequency masking):** Applying multi-band parametric equalizers that randomly boost or
+  attenuate arbitrary frequency octaves by $\pm 6\text{ dB}$, preventing models from overfitting to specific microphone
+  frequency response curves.
 
 ## Spectrogram masking
 
+Rather than performing computationally intensive time-domain convolutions and resamplings on the CPU, **SpecAugment**
+applies data augmentation directly to log-mel spectrogram tensors on the GPU <Cite id="park2019" />:
+
+SpecAugment applies two core operations directly during training forward passes:
+1. **Frequency masking:** $f$ consecutive mel frequency channels $[f_0, f_0 + f)$ are set to zero (or the channel mean),
+   where $f \sim \text{Uniform}(0, F)$ and $F$ is the maximum frequency mask parameter.
+2. **Time masking:** $t$ consecutive time frames $[t_0, t_0 + t)$ are zeroed out, where $t \sim \text{Uniform}(0, T)$
+   and $T$ is the maximum time mask parameter.
+
+By masking horizontal bands (frequency channels), the network learns to identify phonetic tokens even when entire
+formant bands are obscured by narrowband interference. By masking vertical bands (time steps), the network learns to
+infer missing phonemes from surrounding linguistic context, operating analogously to masked language modeling.
+
 ## Pitfalls
+
+- **Label destruction via excessive noise:** Mixing noise at excessively low SNRs (e.g., $\text{SNR} < -15\text{ dB}$)
+  completely drowns out speech energy, forcing the network to optimize hallucinated transcriptions on pure noise.
+- **Over-masking short acoustic utterances:** Applying large SpecAugment time masks ($T > 40$ frames) to short keyword
+  spotting audio (e.g., 1-second commands) can mask the entire target keyword, causing severe gradient instability.
+- **Unnormalized RIR convolution gain:** Convolving audio with an unnormalized room impulse response can amplify signal
+  power by $>10\text{ dB}$, causing severe digital clipping and distortion in floating-point representations. RIRs must
+  be energy-normalized ($\sum h[n]^2 = 1$) prior to convolution.
+- **Augmentation leakage into validation sets:** Applying stochastic noise mixing or spectrogram masking to validation
+  and test partitions corrupts evaluation consistency. Augmentation must remain strictly isolated within training loops.

@@ -1,24 +1,153 @@
 ---
 title: 'Targeted data collection'
 kind: concept
-summary: 'Targeted collection gathers data for the slices where a model fails and counterexamples for the shortcuts it uses, often in loops fed by a deployed system.'
-tags: [data]
-aliases: []
-requires: []
-related: [error-analysis]
-references: []
-status: stub
-updated: 2026-10-11
+summary: 'Targeted data collection gathers examples for underperforming slices and counterexamples to break shortcuts, closing the loop between error analysis and model retraining.'
+tags: [data, diagnostics, active-learning, data-centric-learning]
+aliases: [targeted data collection, counterfactual collection, data flywheel, targeted collection, active data collection]
+requires: [error-analysis, slice-analysis]
+related: [hard-example-mining, training-dynamics-diagnostics, feedback-loops]
+references: [geirhos2020shortcut, kaushik2020learning, nushi2018towards, ribeiro2020checklist]
+status: draft
+updated: 2026-10-12
 ---
 
+import { TargetedDataCollectionVisualizer } from './TargetedDataCollectionVisualizer'
+
 <Definition>
-To be written.
+**Targeted data collection** is the systematic acquisition, synthesis, or extraction of training instances specifically
+designed to remediate identified model weaknesses. Rather than expanding datasets via broad, uniform web crawls,
+targeted collection focuses acquisition budgets on underrepresented slices, failure modes discovered during error
+analysis, and counterexamples that break non-causal spurious shortcuts.
 </Definition>
+
+Generic scaling laws indicate that validation loss scales as a power law with overall compute and dataset token count.
+However, aggregate scaling is an inefficient remedy for slice-level failures. If an autonomous driving model
+misidentifies emergency vehicles in heavy snow, collecting an additional billion tokens of sunny highway driving
+provides negligible learning signal for that specific operational hazard. Targeted data collection closes the diagnostic
+loop: it converts the root-cause taxonomy produced by error analysis into precise data acquisition criteria
+<Cite id="nushi2018towards, kaushik2020learning, geirhos2020shortcut" />.
+
+<TargetedDataCollectionVisualizer />
 
 ## Collecting for failing slices
 
+When slice analysis or error analysis reveals an underperforming subpopulation $S_k \subset \mathcal{X}$ with an
+unacceptable slice error rate $\mathcal{E}(S_k) \gg \mathcal{E}(\mathcal{X})$, increasing representation density for
+$S_k$ is the most direct remedy.
+
+### The economics of slice scarcity
+
+Consider a target slice with natural prevalence $\pi_k = P(\mathbf{x} \in S_k)$ in the operational environment. To
+collect a target sample size $M_{\text{slice}}$ under **uniform random sampling**, the total ingestion volume
+$N_{\text{total}}$ required is:
+
+$$
+N_{\text{total}} = \frac{M_{\text{slice}}}{\pi_k}
+$$
+
+| Natural Slice Prevalence ($\pi_k$) | Target Slice Quota ($M_{\text{slice}}$) | Uniform Random Volume Required | Targeted Harvesting Volume Required | Acquisition Cost Advantage |
+| :--- | :--- | :--- | :--- | :--- |
+| **Common Subgroup ($10\%$)** | 500 examples | 5,000 examples | $\approx 550$ examples | $9.1\times$ |
+| **Minority Slice ($2\%$)** | 500 examples | 25,000 examples | $\approx 550$ examples | $45.5\times$ |
+| **Rare Tail Hazard ($0.1\%$)** | 500 examples | 500,000 examples | $\approx 550$ examples | **$909\times$** |
+
+Under uniform collection, $99.9\%$ of the labelling budget is expended re-annotating redundant head-distribution
+instances that the model already classifies with near-zero loss. Targeted data collection bypasses this waste by
+conditioning acquisition on the slice indicator: $P(\mathbf{x} \mid \mathbf{x} \in S_k) \approx 1$.
+
+| Harvesting Strategy | Operational Mechanism | Implementation Example | Primary Advantage |
+| :--- | :--- | :--- | :--- |
+| **Embedding-Based Retrieval** | Query multimodal vector index (e.g., CLIP, ColBERT) using semantic descriptors | Semantic query: *"ambulance operating in blizzard"* | Rapidly surfaces unstructured visual/text slices from petabyte unlabelled pools |
+| **Conditional Telemetry Filtering** | Filter structured execution logs using targeted metadata predicates | SQL query: `weather == 'snow' AND visibility_m < 200` | Pinpoints precise physical conditions without expensive embedding inference |
+| **Generative Counterfactual Synthesis** | Conditioned diffusion or latent inpainting on existing validated assets | Inpaint snow and blizzards onto validated ambulance frames | Synthesizes extreme long-tail hazards when natural occurrences are non-existent |
+
 ## Counterexamples for shortcuts
+
+Deep neural networks are notorious for **shortcut learning** <Cite id="geirhos2020shortcut" />: exploiting spurious,
+non-causal statistical correlations between backgrounds, incidental tokens, or sensor artifacts and target classes.
+
+When a spurious feature $Z$ correlates heavily with label $Y$ in the training distribution
+($P(Y=1 \mid Z=1) \approx 1$), gradient descent preferentially minimizes loss using $Z$ because background features
+often exhibit lower high-dimensional variance than fine-grained foreground contours.
+
+### Counterfactually-augmented data
+
+Divyansh Kaushik, Eduard Hovy, and Zachary Lipton proved that breaking shortcut learning requires augmenting datasets
+with **counterexamples** that explicitly sever the correlation between shortcut $Z$ and label $Y$
+<Cite id="kaushik2020learning" />:
+
+1. **Class-Preserving Context Shift**: Alter the spurious background or style $Z$ while preserving the true causal
+   entity $X^*$ and label $Y$:
+   $$
+   (\mathbf{x}, Z_1, Y) \to (\mathbf{x}, Z_2, Y)
+   $$
+2. **Context-Preserving Class Shift**: Alter the core causal entity $X^*$ to invert label $Y$ while preserving the
+   background $Z$:
+   $$
+   (X_1^*, Z, Y_1) \to (X_2^*, Z, Y_2)
+   $$
+
+By providing pairs where $Z$ is invariant across differing classes and varied across identical classes, the mutual
+information $\mathcal{I}(Z; Y)$ in the training set is driven toward zero:
+
+$$
+\mathbb{E}_{(\mathbf{x}, y) \sim \mathcal{D}_{\text{augmented}}}\left[ \frac{\partial \mathcal{L}}{\partial Z} \right] \to 0
+$$
+
+Empirical benchmarks show that injecting as little as $15\text{--}20\%$ counterfactually-augmented instances eliminates
+over $80\%$ of spurious shortcut reliance, providing massive gains on out-of-distribution (OOD) stress tests
+<Cite id="kaushik2020learning, ribeiro2020checklist" />.
+
+| Counterfactual Variant | Entity ($X^*$) | Background Context ($Z$) | Ground Truth ($Y$) | Invariance Mechanism |
+| :--- | :--- | :--- | :--- | :--- |
+| **Standard Baseline** | Camel | Yellow sand dunes | Camel | Vulnerable to background shortcut: dunes $\to$ Camel |
+| **Class-Preserving Shift** | Camel | Grassy green meadow | Camel | Forces network to isolate foreground anatomy |
+| **Context-Preserving Shift** | Cow | Yellow sand dunes | Cow | Breaks statistical association between dunes and Camel |
 
 ## Collection loops from deployed systems
 
+In production environments, user traffic constitutes an unceasing, high-volume stream of unlabelled candidates. A mature
+machine learning pipeline implements a **data flywheel** that actively filters this stream to harvest high-value
+training records:
+
+| Pipeline Stage | Operational Function | Filter / Trigger Criterion | Target Destination |
+| :--- | :--- | :--- | :--- |
+| **1. Inference Telemetry** | Production serving stream | Ingest live inputs and prediction logits | High-throughput streaming buffer |
+| **2. Multi-Trigger Triage** | Automated informative filter | Filter top $0.5\%$ highest-entropy or disputed instances | Active annotation queue |
+| **3. Expert Adjudication** | Human review | Blinded multi-annotator review on difficult edge cases | Clean curated ground truth |
+| **4. Balanced Retraining Lake** | Training corpus update | Stratified replay buffer guarded against representation drift | Next retraining cycle |
+
+### High-yield trigger mechanisms
+
+1. **Uncertainty triggers**: Calculating prediction entropy $\mathcal{H}(P(y \mid \mathbf{x})) = -\sum_k p_k \log p_k$
+   or margin scores $p_{(1)} - p_{(2)}$. Instances with narrow prediction margins represent examples lying directly on
+   current decision boundaries.
+2. **Disagreement triggers**: Running a shadow model (e.g. an earlier stable release, an ensemble member, or a
+   rule-based safety engine) alongside the primary model. Instances where the primary model and shadow engine diverge
+   indicate high-value edge cases.
+3. **Latent anomaly triggers**: Computing the Mahalanobis distance of intermediate embeddings against class-conditional
+   Gaussian distributions estimated on the training set:
+   $$
+   D_M(\mathbf{z}) = \min_k \sqrt{(\mathbf{z} - \boldsymbol{\mu}_k)^\top \boldsymbol{\Sigma}_k^{-1} (\mathbf{z} - \boldsymbol{\mu}_k)}
+   $$
+   Inputs with $D_M(\mathbf{z}) > \tau_{\text{OOD}}$ represent genuine novel distribution territory.
+4. **User friction triggers**: Logging operational telemetry where human users override, undo, re-type, or escalate a
+   model prediction. Implicit user dissatisfaction signals yield the highest density of true model blunders.
+
 ## Pitfalls
+
+1. **Prior distribution skew**: Heavily over-sampling a rare failing slice without adjusting loss weights distorts class
+   and slice priors. While slice accuracy improves, global calibration suffers, leading to an increase in false
+   positives on head classes in production.
+2. **Synthetic shortcut contamination**: Generating counterfactual examples using automated inpainting or synthetic
+   pipelines that introduce rendering artifacts (e.g., boundary blur or frequency halos). The model stops learning the
+   original shortcut but quickly learns to exploit the rendering artifact as a new shortcut.
+3. **Uncertainty filter garbage capture**: High prediction entropy is often triggered by sensor corruption, unresolvable
+   image blur, or pure spam inputs rather than informative edge cases. Unfiltered uncertainty queries waste human
+   annotation budgets on irreducible Bayes noise.
+4. **Ignoring positive slice counterparts**: Collecting only failing negative examples for a problematic slice without
+   collecting corresponding positive examples. This skews slice-level class balance toward $100\%$ negative, teaching
+   the model to predict negative for all instances matching the slice metadata.
+5. **Evaluation set contamination**: Merging targeted collection batches directly into both training and evaluation
+   splits, destroying the evaluation split's statistical fidelity as an unbiased estimate of real-world deployment
+   performance.

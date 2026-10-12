@@ -3,26 +3,134 @@ title: 'Compositional and bounded data'
 kind: concept
 summary: 'Proportions, shares that sum to one and values with fixed bounds cannot be treated as unconstrained numbers. Logit and log-ratio transforms map them to unbounded scales where standard models apply.'
 tags: [data, statistics]
-aliases: []
-requires: []
-related: []
-references: []
-status: stub
+aliases: [compositional data, simplex data, log-ratio transforms, Aitchison geometry]
+requires: [power-transforms]
+related: [variance-stabilising-transforms, retransformation-bias]
+references: [aitchison1982]
+status: draft
 updated: 2026-10-11
 ---
 
 <Definition>
-To be written.
+**Compositional data** consists of non-negative vector observations $x = [x_1, \dots, x_D]^\top$ whose components
+represent relative parts of a whole, subject to a constant-sum constraint $\sum_{j=1}^D x_j = c$ (such as $1.0$ or
+$100\%$), restricting the sample space to the $(D-1)$-dimensional **simplex** $\mathcal{S}^D$.
 </Definition>
 
-## Bounded values
+Standard multivariate statistical methods—such as ordinary least squares, principal component analysis, covariance
+estimation, and clustering—implicitly assume that features reside in unconstrained Euclidean space $\mathbb{R}^D$. When
+applied directly to percentages, portfolio weights, chemical mixtures, microbiome fractions, or survey shares, standard
+Euclidean methods produce spurious correlations, singular covariance matrices, and predictions that violate natural
+physical bounds.
 
-## Proportions and the logit
+import { CompositionalSimplexExplorer } from './CompositionalSimplexExplorer';
+
+<CompositionalSimplexExplorer />
+
+## Bounded values and the logit transform
+
+When a univariate feature or target is strictly bounded within a fixed interval $y \in (a, b)$ (such as probabilities
+$p \in (0, 1)$ or exam scores):
+
+1. **The unit interval:** Normalize $y$ to $p = \frac{y - a}{b - a} \in (0, 1)$.
+2. **The logit transformation:** Map the bounded probability onto the unbounded real line $(-\infty, \infty)$ using the
+   log-odds:
+   $$
+   \operatorname{logit}(p) = \ln\left(\frac{p}{1 - p}\right)
+   $$
+
+Fitting linear models or neural networks on the logit scale guarantees that back-transforming via the sigmoid function
+$\sigma(z) = \frac{1}{1 + e^{-z}}$ yields predictions strictly confined within the valid interval $(a, b)$, avoiding
+nonsensical probabilities like $-0.08$ or $1.15$.
 
 ## Compositions on the simplex
 
-## Log-ratio transforms
+The sample space for $D$-part compositional data is the unit simplex:
 
-## Zeros
+$$
+\mathcal{S}^D = \left\{ x = [x_1, \dots, x_D]^\top \in \mathbb{R}^D : x_j > 0 \text{ for } j = 1, \dots, D, \text{ and } \sum_{j=1}^D x_j = 1 \right\}
+$$
 
-## Pitfalls
+Because the elements must sum to unity, a $D$-part composition possesses only $D-1$ degrees of freedom. The components
+are fundamentally relative: doubling all physical quantities leaves the composition unchanged.
+
+### Karl Pearson's spurious correlation (1897)
+In 1897, Karl Pearson proved that standard Pearson correlation between raw proportions is mathematically distorted.
+Because the components sum to a constant:
+
+$$
+\operatorname{Cov}\left(x_i, \sum_{j=1}^D x_j\right) = \operatorname{Cov}(x_i, 1) = 0 \implies \sum_{j \ne i} \operatorname{Cov}(x_i, x_j) = -\operatorname{Var}(x_i)
+$$
+
+Every component must have negative covariance with at least one other component, regardless of whether the underlying
+generative processes are completely independent. Running standard correlation or linear regression on raw percentages
+generates artifactual negative relationships that do not exist in reality.
+
+## John Aitchison's log-ratio transforms
+
+In 1982, John Aitchison <Cite id="aitchison1982" /> established that the natural geometry of the simplex is defined by
+log-ratios between components, mapping $\mathcal{S}^D$ to Euclidean space:
+
+### 1. Additive Log-Ratio (ALR)
+Choose a reference component (typically the last component $x_D$):
+
+$$
+\operatorname{alr}(x) = \left[ \ln\left(\frac{x_1}{x_D}\right), \ln\left(\frac{x_2}{x_D}\right), \dots, \ln\left(\frac{x_{D-1}}{x_D}\right) \right]^\top \in \mathbb{R}^{D-1}
+$$
+
+- **Dimension:** Perfectly reduces $D$ parts to $D-1$ unconstrained coordinates.
+- **Limitation:** Asymmetric; depends on which part is selected as the arbitrary denominator.
+
+### 2. Centered Log-Ratio (CLR)
+Normalize each part by the geometric mean of all components $g(x) = \left(\prod_{j=1}^D x_j\right)^{1/D}$:
+
+$$
+\operatorname{clr}(x) = \left[ \ln\left(\frac{x_1}{g(x)}\right), \dots, \ln\left(\frac{x_D}{g(x)}\right) \right]^\top \in \mathbb{R}^D
+$$
+
+- **Symmetry:** Treats all parts symmetrically; ideal for clustering and PCA biplots.
+- **Singularity:** The resulting coordinates sum to zero ($\sum_{j=1}^D \operatorname{clr}(x)_j = 0$), causing the
+  covariance matrix to be singular (rank $D-1$).
+
+### 3. Isometric Log-Ratio (ILR)
+Constructs an orthonormal basis $\Psi \in \mathbb{R}^{(D-1) \times D}$ on the simplex (via sequential binary
+partitioning):
+
+$$
+\operatorname{ilr}(x) = \Psi \operatorname{clr}(x) \in \mathbb{R}^{D-1}
+$$
+
+The ILR is an isometric isomorphism that preserves Aitchison metric distances exactly:
+
+$$
+d_A(x, y) = \|\operatorname{ilr}(x) - \operatorname{ilr}(y)\|_2
+$$
+
+Standard multivariate algorithms (Ridge regression, Gaussian processes, PCA, $k$-NN) can be applied directly to ILR
+coordinates without mathematical distortion. Predictions are mapped back to $\mathcal{S}^D$ via the inverse ILR (softmax
+over $\Psi^\top z$).
+
+## Handling zero values
+
+Because the logarithm $\ln(0)$ is undefined, true zeros (e.g. absent chemical traces or zero spend in a budget category)
+represent a fundamental hurdle for log-ratio transformations:
+
+1. **Rounded zeros (below detection limit):** When zeros arise from instrument sensitivity limits, apply
+   **multiplicative replacement**:
+   $$
+   x_j^* = \begin{cases} \delta & \text{if } x_j = 0 \\ x_j \left(1 - \frac{\sum_{k: x_k=0} \delta}{\sum_{k: x_k > 0} x_k}\right) & \text{if } x_j > 0 \end{cases}
+   $$
+   where $\delta \approx \frac{1}{2} \times \text{detection limit}$.
+2. **Structural zeros (true absence):** If an entity inherently cannot contain a category (e.g. an electric vehicle
+   having 0 fuel tank capacity), the zero is structural and must be modeled via a two-stage hurdle model rather than
+   naive continuous replacement.
+
+## Pitfalls and failure modes
+
+1. **Running OLS directly on raw percentages:** Fitting unconstrained linear models directly on compositions yields
+   predictions that sum to values other than 1 and produce negative component values.
+2. **Ignoring Aitchison geometry in distance calculations:** Computing Euclidean distance on raw fractions $\|x - y\|_2$
+   treats a difference between $0.001$ and $0.01$ (a 10-fold relative change) as negligible compared to a difference
+   between $0.40$ and $0.45$, severely distorting rare-component sensitivity.
+3. **Arbitrary pseudo-count addition:** Adding a constant $+1$ indiscriminately shifts relative ratios drastically when
+   component values vary across multiple orders of magnitude.

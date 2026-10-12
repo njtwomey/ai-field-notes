@@ -1,26 +1,166 @@
 ---
 title: 'Evaluating synthetic data'
 kind: concept
-summary: 'Synthetic data are evaluated by training on synthetic data and testing on real data, by fidelity and diversity measures, and by checks that the generator did not memorise its training records.'
-tags: [data, generative-models, evaluation]
-aliases: []
-requires: []
-related: [precision-and-recall-for-generative-models]
-references: []
-status: stub
-updated: 2026-10-11
+summary: 'Evaluating synthetic data measures downstream task utility via TSTR, separates fidelity from diversity via precision-recall manifolds, and audits memorisation.'
+tags: [data, generative-models, evaluation, data-centric-learning]
+aliases: [evaluating synthetic data, synthetic data evaluation, TSTR, generative precision and recall, FID]
+requires: [synthetic-data, baseline-probes]
+related: [precision-and-recall-for-generative-models, simulation-and-domain-randomisation]
+references: [sajjadi2018, kynkaanniemi2019, heusel2017, shumailov2024collapse]
+status: draft
+updated: 2026-10-12
 ---
 
+import { SyntheticDataEvaluationVisualizer } from './SyntheticDataEvaluationVisualizer'
+
 <Definition>
-To be written.
+**Evaluating synthetic data** is the rigorous multi-dimensional assessment of artificially manufactured datasets. It
+measures downstream operational efficacy through **Train on Synthetic, Test on Real (TSTR)** benchmarks, mathematically
+disentangles realism (**fidelity / precision**) from mode coverage (**diversity / recall**), and audits generators
+against privacy leakage and verbatim training record **memorisation**.
 </Definition>
+
+Validating synthetic data is fundamentally harder than evaluating supervised models. A synthetic dataset cannot be
+verified simply by computing an average log-likelihood or visually inspecting a curated gallery of cherry-picked
+samples. Generative models can effortlessly fool surface inspections through severe **mode dropping** (repeatedly
+outputting a handful of photorealistic samples while omitting the rest of the distribution) or **verbatim memorisation**
+(achieving high realism by plagiarizing private training records). A complete evaluation protocol requires assessing
+utility, fidelity, diversity, and privacy safety in parallel <Cite id="sajjadi2018, kynkaanniemi2019, heusel2017" />.
+
+<SyntheticDataEvaluationVisualizer />
 
 ## Train on synthetic, test on real
 
+The ultimate test of a synthetic dataset is whether an algorithm trained exclusively on synthetic samples can solve the
+target task in the physical real world.
+
+The standard empirical benchmark establishes a four-way comparative matrix:
+
+| Training Split | Evaluation Split | Paradigm Name | Methodological Purpose |
+| :--- | :--- | :--- | :--- |
+| $\mathcal{D}_{\text{real}}^{\text{train}}$ | $\mathcal{D}_{\text{real}}^{\text{test}}$ | **TRTR (Train Real, Test Real)** | **Gold-standard empirical ceiling**: The highest expected performance achievable with genuine data. |
+| $\mathcal{S}_{\text{synth}}$ | $\mathcal{D}_{\text{real}}^{\text{test}}$ | **TSTR (Train Synth, Test Real)** | **Core utility benchmark**: Measures whether the synthetic dataset imparts generalizable decision boundaries. |
+| $\mathcal{D}_{\text{real}}^{\text{train}}$ | $\mathcal{S}_{\text{synth}}$ | **TRTS (Train Real, Test Synth)** | **Distribution coverage probe**: Tests whether a model trained on real data recognizes synthetic examples. |
+| $\mathcal{S}_{\text{synth}}$ | $\mathcal{S}_{\text{synth}}$ | **TSTS (Train Synth, Test Synth)** | **Internal sanity check**: Often artificially high; measures internal generator manifold simplicity. |
+
+### Relative utility metric
+
+Downstream synthetic utility is quantified by the ratio of TSTR performance to the TRTR baseline:
+
+$$
+\operatorname{Utility}_{\text{relative}} = \frac{\operatorname{Metric}(\operatorname{TSTR})}{\operatorname{Metric}(\operatorname{TRTR})}
+$$
+
+A relative utility score $\ge 0.90$ indicates that the synthetic dataset successfully preserves the underlying causal
+feature-target relationships necessary for downstream deployment.
+
+| Evaluation Paradigm | Training Data | Evaluation Split | Metric Performance | Methodological Validity |
+| :--- | :--- | :--- | :--- | :--- |
+| **TSTS (Synthetic-on-Synthetic)** | Synthetic ($\mathcal{S}_{\text{train}}$) | Synthetic ($\mathcal{S}_{\text{test}}$) | $94.8\%$ | **Deceptive overconfidence**: exploits low-entropy generator artifacts |
+| **TRTR (Real-on-Real)** | Real ($\mathcal{D}_{\text{train}}$) | Real ($\mathcal{D}_{\text{test}}$) | $88.5\%$ | **Gold standard reference**: natural real-world ceiling |
+| **TSTR (Synthetic-on-Real)** | Synthetic ($\mathcal{S}_{\text{train}}$) | Real ($\mathcal{D}_{\text{test}}$) | $82.2\%$ | **True practical utility**: authentic test of production generalizability |
+
+Relying exclusively on TSTS produces a dangerous illusion of success: models easily achieve $> 95\%$ accuracy on
+synthetic test splits because the generator's manifold has lower entropy and fewer messy edge cases than the real world.
+
 ## Fidelity
+
+**Fidelity** (or generative precision) measures whether individual synthetic samples are realistic: do generated points
+lie within the true data manifold $\mathcal{M}_{\text{real}}$?
+
+### Fréchet Inception Distance (FID)
+
+Martin Heusel et al. established FID to measure the Wasserstein-2 distance between Gaussian approximations of real and
+generated feature representations extracted from Inception-v3 <Cite id="heusel2017" />:
+
+$$
+\operatorname{FID} = \|\boldsymbol{\mu}_r - \boldsymbol{\mu}_g\|_2^2 + \operatorname{Tr}\left(\boldsymbol{\Sigma}_r + \boldsymbol{\Sigma}_g - 2\left(\boldsymbol{\Sigma}_r \boldsymbol{\Sigma}_g\right)^{1/2}\right)
+$$
+
+where $(\boldsymbol{\mu}_r, \boldsymbol{\Sigma}_r)$ and $(\boldsymbol{\mu}_g, \boldsymbol{\Sigma}_g)$ denote the
+empirical mean and covariance matrices of real and synthetic feature embeddings. Lower FID values indicate higher
+perceptual fidelity.
+
+### Generative precision
+
+Mehdi Sajjadi et al. and Tuomas Kynkäänniemi et al. formalized **Precision for Generative Models** to evaluate fidelity
+geometrically without assuming Gaussianity <Cite id="sajjadi2018, kynkaanniemi2019" />.
+
+By constructing a union of $k$-nearest neighbor hyperspheres $B(\mathbf{x}_i, r_i)$ around real points in embedding
+space, the real data manifold is estimated as $\mathcal{M}_r = \bigcup_{i=1}^{N_r} B(\mathbf{x}_i, r_i)$. **Precision**
+is defined as the fraction of synthetic samples $\mathbf{y} \in \mathcal{S}$ that fall inside the estimated real
+manifold:
+
+$$
+\operatorname{Precision}(\mathcal{D}_{\text{real}}, \mathcal{S}) = \frac{1}{|\mathcal{S}|} \sum_{\mathbf{y} \in \mathcal{S}} \mathbb{I}\left(\mathbf{y} \in \operatorname{Manifold}(\mathcal{D}_{\text{real}})\right)
+$$
+
+A synthetic sample falling outside $\mathcal{M}_r$ represents an unrealistic artifact or hallucination.
 
 ## Diversity
 
+**Diversity** (or generative recall) measures distribution coverage: does the synthetic dataset span the full support
+and variety of the real world, or has the generator suffered from mode dropping?
+
+### Generative recall
+
+Symmetrically to precision, Kynkäänniemi et al. define **Recall** by constructing $k$-NN hyperspheres around synthetic
+samples to estimate the synthetic manifold $\mathcal{M}_s = \bigcup_{j=1}^{N_s} B(\mathbf{y}_j, r_j)$
+<Cite id="kynkaanniemi2019" />. **Recall** is the fraction of real training instances that fall inside the synthetic
+manifold:
+
+$$
+\operatorname{Recall}(\mathcal{D}_{\text{real}}, \mathcal{S}) = \frac{1}{|\mathcal{D}_{\text{real}}|} \sum_{\mathbf{x} \in \mathcal{D}_{\text{real}}} \mathbb{I}\left(\mathbf{x} \in \operatorname{Manifold}(\mathcal{S})\right)
+$$
+
+| Generative Regime | Real Distribution Support | Synthetic Generator Output | Precision | Recall | Primary Pathology |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| **High Precision, Low Recall** | Modes $\mathcal{M}_r$: Dogs, Cats, Birds | Samples $\mathcal{S}$: Dogs exclusively | High ($\sim 98\%$) | Low ($\sim 33\%$) | **Mode dropping / diversity collapse**: Samples appear photorealistic, but whole distribution modes are omitted. |
+| **Low Precision, High Recall** | Modes $\mathcal{M}_r$: Dogs, Cats, Birds | Samples $\mathcal{S}$: Dogs, Cats, Birds + noisy artifacts (e.g. 6-legged dogs) | Low ($\sim 45\%$) | High ($\sim 95\%$) | **Artifact proliferation / hallucination**: High distribution coverage, but off-manifold artifacts corrupt synthesis. |
+| **Balanced Equilibrium** | Modes $\mathcal{M}_r$: Dogs, Cats, Birds | Samples $\mathcal{S}$: Dogs, Cats, Birds within genuine support | High ($\ge 90\%$) | High ($\ge 90\%$) | **Target synthesis**: High sample quality preserving complete real-world support and tail coverage. |
+
+
+Decoupling precision from recall exposes the **truncation trick trap**: generators often sample with low temperature or
+low truncation ($\psi \to 0$) to optimize FID or precision. While visual quality appears flawless, generative recall
+plummets, erasing tail distribution modes and minority classes.
+
 ## Memorisation checks
 
+A naive generative network can achieve near-perfect fidelity and recall simply by copying its training examples
+verbatim. In privacy-sensitive settings, this constitutes a critical data leak.
+
+### Nearest neighbor distance ratio (NNDR)
+
+For every synthetic sample $\mathbf{y} \in \mathcal{S}$, compute the Euclidean distance to its closest real training
+neighbor $\mathbf{x}_{(1)}$ and its second closest neighbor $\mathbf{x}_{(2)}$ in feature space:
+
+$$
+\operatorname{NNDR}(\mathbf{y}) = \frac{\|\mathbf{y} - \mathbf{x}_{(1)}\|_2}{\|\mathbf{y} - \mathbf{x}_{(2)}\|_2}
+$$
+
+- **NNDR $\approx 0$ ($< 0.2$)**: The synthetic sample is situated immediately on top of a specific training instance,
+  indicating verbatim memorisation and replication.
+- **NNDR $\in [0.4, 0.7]$**: The synthetic sample is situated between multiple real training points, indicating creative
+  generalization along the data manifold.
+
+### Membership inference audits
+
+Audit teams train shadow classification models to predict whether a given individual record was present in the
+generator's training set. If the shadow model achieves an Area Under the ROC Curve (AUROC) significantly higher than
+$0.50$ (random guess), the synthetic dataset leaks private membership signal and violates privacy disclosure standards.
+
 ## Pitfalls
+
+1. **Relying exclusively on TSTS**: Reporting downstream performance solely on synthetic validation sets; this hides the
+   fact that the generator has eliminated physical complexity and real-world noise.
+2. **FID feature space bias**: Using Inception-v3 features to evaluate non-natural image modalities (e.g. medical
+   ultrasound, EEG sequences, or tabular customer profiles); Inception embeddings reflect ImageNet object textures and
+   fail to capture domain-specific clinical invariants.
+3. **Optimizing fidelity at the expense of diversity**: Restricting generative sampling to high-probability modes to
+   artificially boost precision scores while completely discarding long-tail edge cases.
+4. **Subtle memorisation masking**: Generating near-exact copies of private patient scans with slight random pixel noise
+   or affine shifts; simple distance metrics miss the fact that identifiable anatomical structures were plagiarized
+   verbatim.
+5. **Evaluating synthetic text without perplexity bounds**: Assessing LLM-generated synthetic corpora solely through
+   pairwise semantic embedding similarity; semantic similarity misses subtle repetitive token loops and grammatical
+   deterioration characteristic of recursive model collapse <Cite id="shumailov2024collapse" />.

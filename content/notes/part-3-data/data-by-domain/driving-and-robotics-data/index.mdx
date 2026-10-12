@@ -1,0 +1,127 @@
+---
+title: 'Driving and robotics data'
+kind: concept
+summary: 'Driving and robotics data come from calibrated sensor suites, rare scenarios matter most, and labels are increasingly made automatically or from teleoperated demonstrations.'
+tags: [data, computer-vision]
+aliases: []
+requires: []
+related: [clinical-and-health-data, industrial-sensor-and-maintenance-data, continuous-control-benchmarks]
+references: [caesar2020nuscenes, sun2020waymo]
+status: draft
+updated: 2026-10-11
+---
+
+import { DrivingRoboticsVisualizer } from './DrivingRoboticsVisualizer'
+
+<Definition>
+**Driving and robotics data** comprises the multimodal perception streams, state telemetry, and actuation trajectories
+collected by physical embodied agents operating in open-world environments. This data combines high-bandwidth
+exteroceptive sensors (surround cameras, LiDAR point clouds, radar, ultrasonics) with proprioceptive measurements (IMUs,
+wheel encoders, joint torques). It is characterized by strict spatiotemporal calibration requirements, long-tailed
+safety-critical corner cases, and heavy reliance on offline auto-labeling and teleoperated demonstrations
+<Cite id="caesar2020nuscenes, sun2020waymo" />.
+</Definition>
+
+Unlike web text or static image datasets, robotics and autonomous driving data captures dynamic physical interactions
+subject to real-time physical constraints. A perception error or control delay does not simply degrade a benchmark
+score—it risks physical collision and catastrophic failure. Consequently, data pipelines must preserve sub-degree
+spatial alignment across heterogeneous sensors and curate the rare, safety-critical edge cases that dictate real-world
+reliability.
+
+<DrivingRoboticsVisualizer />
+
+## Sensor suites and calibration
+
+Autonomous vehicles and advanced robotic manipulators deploy complementary sensor suites to achieve robust 3D scene
+understanding:
+
+- **Surround RGB cameras:** Provide high-resolution visual texture, color, and optical semantics necessary for reading
+  traffic signals, road signs, and pedestrian body language. Multi-camera arrays typically span $360^\circ$ panoramic
+  coverage (e.g. 6 to 8 cameras in modern autonomous driving suites <Cite id="caesar2020nuscenes" />).
+- **LiDAR (Light Detection and Ranging):** Fires pulsed laser beams (e.g. 905 nm or 1550 nm) to produce dense 3D point
+  clouds $(x, y, z, \text{intensity}, \text{elongation})$. LiDAR delivers millimeter-level metric depth independent of
+  ambient illumination or shadow glare.
+- **Radar and ultrasonics:** Radio-frequency sensors measuring direct Doppler velocity and distance. Radars penetrate
+  adverse weather (dense fog, snow, torrential rain) that blinds optical cameras and scatters LiDAR photons.
+- **Proprioceptive telemetry:** High-frequency (100 Hz to 1 kHz) Inertial Measurement Units (IMU), wheel odometry, and
+  CAN bus feeds recording ego-velocity, steering angle, acceleration, and suspension pitch.
+
+| Coordinate Transformation | Mapping Formulation | Transformation Matrix | Geometric Interpretation |
+| :--- | :--- | :--- | :--- |
+| **Sensor $\to$ Vehicle Frame** | $\mathbf{X}_{\text{ego}} = R_{\text{ext}} \mathbf{X}_{\text{sensor}} + \mathbf{t}_{\text{ext}}$ | Extrinsics $[R \mid \mathbf{t}] \in \text{SE}(3)$ | Maps local LiDAR and radar points into unified vehicle center |
+| **Vehicle $\to$ Camera Frame** | $\mathbf{X}_{\text{cam}} = R_{\text{cam}} \mathbf{X}_{\text{ego}} + \mathbf{t}_{\text{cam}}$ | Camera Mount Extrinsics | Aligns 3D spatial points with optical camera coordinates |
+| **Camera $\to$ Image Plane** | $s [u, v, 1]^\top = K \mathbf{X}_{\text{cam}}$ | Camera Intrinsics $K \in \mathbb{R}^{3 \times 3}$ | Projects 3D metric coordinates into 2D pixel coordinates $(u, v)$ |
+
+### Spatiotemporal calibration
+
+Cross-modal sensor fusion models—such as Bird's-Eye-View (BEV) perception transformers—require exact spatial and
+temporal alignment:
+
+1. **Camera intrinsics ($K$):** Models lens focal lengths $(f_x, f_y)$, principal optical centers $(c_x, c_y)$, and
+   radial/tangential distortion parameters, rectifying wide-angle optical warp.
+2. **Sensor extrinsics ($[R \mid t] \in \text{SE}(3)$):** The 6-DoF rotation matrix $R$ and translation vector $t$
+   mapping coordinates from each sensor's local coordinate frame into the vehicle's body center. Even a minor
+   $0.5^\circ$ angular calibration drift between a roof-mounted LiDAR and a windshield camera produces a 20+ pixel
+   projection misalignment at 50 meters, corrupting multimodal bounding box fusion.
+3. **Temporal synchronization:** Precision Time Protocol (PTP) and hardware triggers ensure all cameras, lasers, and IMU
+   samples fire within microsecond offsets. Unsynchronized sensors cause moving vehicles to appear in contradictory 3D
+   positions across modalities.
+
+## Rare scenarios
+
+In real-world deployment, physical environments are governed by extreme long-tail distributions:
+
+- **The nominal majority:** Over $99.9\%$ of recorded driving and manipulation hours consist of uninformative, nominal
+  events—driving down straight highways in clear daylight or repetitive pick-and-place cycles.
+- **The safety-critical long tail:** Autonomous safety is determined by the $0.01\%$ long tail of **corner cases**:
+  pedestrians stepping into traffic from behind parked delivery vans, emergency vehicles violating red lights,
+  construction workers communicating via hand gestures, mattress debris on highways, or unusual reflections at dusk
+  <Cite id="sun2020waymo" />.
+- **Active mining and trigger logging:** Commercial fleets implement edge-triggered recording: rather than streaming
+  terabytes of routine footage back to cloud servers, onboard compute continuously analyzes prediction entropy, tracking
+  residuals, emergency braking interventions, and driver takeover disengagements, transmitting only anomalous event
+  windows to engineering data lakes.
+- **Closed-loop synthetic generation:** High-fidelity simulation platforms (such as CARLA or NVIDIA Isaac Sim)
+  reconstruct mined real-world incidents, synthetically varying lighting, weather, pedestrian trajectories, and braking
+  latencies to expand the density of rare scenarios in training sets.
+
+## Automatic labelling
+
+Manual human annotation of 3D bounding boxes ($x, y, z, l, w, h, \theta$) and semantic point-cloud masks across billions
+of video frames is economically and temporally impossible. Modern autonomous systems rely on large-scale **offline
+auto-labeling pipelines**:
+
+- **Bidirectional temporal processing:** Onboard models must predict causally in real time ($t \le t_{\text{current}}$).
+  Offline cloud auto-labeling engines have access to both past and future video frames (e.g.
+  $[t - 5\text{s}, t + 5\text{s}]$), allowing multi-pass forward-backward Kalman smoothing and global optimization to
+  track occluded objects through time.
+- **3D scene decomposition:** High-capacity neural radiance fields (NeRF) or 3D Gaussian Splatting reconstruct the
+  static background geometry, cleanly isolating dynamic moving obstacles from static street architecture.
+- **Heavy ensemble supervision:** Distilling multi-gigabyte foundation models, dense vision-language models, and vision
+  transformers running on high-memory cloud clusters into compact, real-time onboard models.
+
+## Teleoperated demonstrations
+
+In embodied robotic manipulation (such as bimanual assembly or household chores), collecting training data relies on
+**human teleoperation**:
+
+- **Demonstration collection:** Human operators control robotic arms and grippers using VR controllers, 3D space-mice,
+  or bilateral master-slave leader arms (such as ALOHA).
+- **Trajectory logging:** Pipelines log continuous state-action trajectories
+  $\tau = (s_0, a_0, s_1, a_1, \dots, s_T, a_T)$ at 20 Hz to 50 Hz, capturing multi-view camera feeds, joint angles,
+  end-effector poses, and continuous gripper opening widths.
+- **Imitation learning & error compounding:** Behavior cloning policies trained via supervised regression on human
+  demonstrations suffer from compounding execution errors: slight physical slips push the robot into states never seen
+  during clean expert demonstrations. Robust data pipelines deliberately record corrective recovery demonstrations—human
+  operators recovering the robot from perturbed, off-target configurations.
+
+## Pitfalls
+
+- **Neglecting online calibration drift:** Failing to monitor mechanical sensor vibration, thermal expansion, or vehicle
+  tire wear, allowing extrinsic calibration matrices to drift out of alignment during deployment.
+- **Training on uncurated nominal miles:** Burning millions of GPU training hours on repetitive highway data while
+  starving perception models of long-tail edge-case diversity.
+- **Temporal frame desynchronization:** Fusing camera frames and LiDAR sweeps without compensating for ego-motion
+  rolling-shutter delays, creating "ghost" spatial artifacts.
+- **Teleoperator latency contamination:** Human teleoperators compensating for visual streaming latency by making
+  hesitant or jerky movements, embedding noisy control artifacts into training trajectories.

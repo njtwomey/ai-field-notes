@@ -5,20 +5,107 @@ summary: 'Schemas change: columns are added and renamed, units and enumerations 
 tags: [data, software]
 aliases: []
 requires: []
-related: []
-references: []
-status: stub
+related: [dataset-versioning-and-lineage, data-monitoring, training-serving-skew]
+references: [polyzotis2018, breck2017]
+status: draft
 updated: 2026-10-11
 ---
 
+import { SchemaEvolutionVisualizer } from './SchemaEvolutionVisualizer'
+
 <Definition>
-To be written.
+**Schema evolution** is the management of structural, syntactic, and semantic mutations in dataset definitions over
+time—including adding, dropping, or renaming columns, changing physical measurement units, expanding categorical
+vocabularies, and backfilling historical records. In machine learning systems, unversioned schema mutations cause silent
+pipeline failures: data contracts pass standard database checks while downstream feature extractors emit corrupted
+tensors <Cite id="polyzotis2018, breck2017" />.
 </Definition>
+
+Unlike relational database management systems where schema violations raise explicit SQL exceptions and reject writes,
+machine learning pipelines routinely absorb schema changes silently. Permissive deserializers, fallback default values,
+and automated imputers paper over structural changes, transforming breaking schema modifications into corrupted model
+predictions.
+
+<SchemaEvolutionVisualizer />
 
 ## Added and renamed columns
 
+Field alterations represent the most common operational hazard in shared data architectures:
+
+- **The column renaming failure:** When an upstream software team renames an operational database field (e.g., renaming
+  `user_country` to `country_code` during an API refactor), downstream feature extraction code continues seeking
+  `user_country`. The feature extractor receives `NULL` across 100% of incoming production records. Because pipelines
+  implement automated default imputation (filling missing fields with zeros or training-set means), no exception is
+  thrown; the model silently evaluates degraded inputs.
+- **Schema compatibility contracts:** Modern message buses (such as Apache Kafka with Avro or Protocol Buffers) enforce
+  formal compatibility modes via a centralized **Schema Registry**:
+  - **Backward compatibility:** A consumer running a newer schema version can process records written under an older
+    schema version (e.g. adding an optional column with a defined default value).
+  - **Forward compatibility:** A consumer running an older schema version can process records written under a newer
+    schema version (e.g. safely ignoring newly added fields).
+  - **Full compatibility:** Schemas satisfy both backward and forward rules, permitting independent deployments of
+    microservices and machine learning serving nodes without lockstep synchronization.
+
 ## Changed units and enumerations
+
+Semantic drift in feature values represents a pernicious failure mode because data types and schema field names remain
+entirely unchanged:
+
+### Unit scale shifts
+
+An upstream microservice or sensor firmware update refactors an API contract, changing the physical unit of a numerical
+measurement:
+
+$$
+\text{duration}_{\text{seconds}} \longrightarrow \text{duration}_{\text{milliseconds}} \quad (1{,}000\times \text{ scale shift})
+$$
+
+| Deployment Environment | Measured Physical Unit | Concrete Sample Values | Data Contract Status | Inference Consequence |
+| :--- | :--- | :--- | :--- | :--- |
+| **Training Baseline** | Duration in seconds | $[1.2, 5.8, 14.5]$ | `float64` (Compliant) | Evaluates within expected distribution support |
+| **Production Runtime** | Duration in milliseconds | $[1200, 5800, 14500]$ | `float64` (Compliant) | Pushes inputs $1{,}000\times$ outside support, triggering extreme saturation |
+
+Because the column name and floating-point data type remain valid, traditional schema validators pass the payload
+without warnings. However, inputs are pushed orders of magnitude outside the model's training distribution, forcing
+non-linear activations into extreme saturation and destroying predictive validity.
+
+### Enumeration and vocabulary mutations
+
+Categorical features are typically mapped to integer indices or one-hot vectors via fixed vocabulary tables:
+
+- **New categorical levels:** When a business introduces a new payment type (e.g., adding `"CRYPTO"` or
+  `"BUY_NOW_PAY_LATER"`), encoders without dynamic handling map the token to an all-zero out-of-vocabulary (OOV) vector,
+  discarding the category's distinct predictive signal.
+- **Casing and string format drift:** Subtle upstream formatting alterations (e.g., shifting from `"DE"` to `"Germany"`,
+  or from `"ios"` to `"iOS"`) invalidate dictionary keys, silently converting legitimate categorical observations into
+  unmapped missing tokens.
 
 ## Backfills
 
+A **backfill** is the retroactive computation and insertion of historical feature records into lakehouse storage
+following an ETL bug fix, schema migration, or new feature release. Backfills introduce distinct operational hazards:
+
+- **The boundary step-function discontinuity:** If a newly engineered feature is backfilled across 6 months of
+  historical logs, but the overall training dataset spans 24 months, the feature exhibits a severe step-function
+  boundary:
+
+| Historical Training Horizon | Data Source Integrity | Feature Presence Rate | Modeling Pathology |
+| :--- | :--- | :--- | :--- |
+| **Months $1\text{--}18$** | Pre-backfill historical logs | $100\%$ null (imputed with defaults) | Model learns spurious correlation with missingness boundary |
+| **Months $19\text{--}24$** | Retroactively backfilled partition | Continuous true feature signal | Step-function shift shatters temporal stationarity assumptions |
+
+- **Temporal leakage during backfilling:** Historical feature reconstruction requires point-in-time exact joins. If an
+  engineer executes a backfill using a modern dimensional table rather than the historical table state active at the
+  transaction timestamp, future events (e.g. subsequent user cancellations or credit score changes) bleed into
+  historical training instances, creating extreme lookahead leakage.
+
 ## Pitfalls
+
+- **Permissive schemaless serialization:** Utilizing raw JSON or CSV formats without schema registries or validation
+  contracts, allowing breaking column modifications to propagate directly to production models without interception.
+- **Dropping columns without deprecation grace periods:** Immediately deleting schema columns rather than maintaining
+  deprecated aliases across overlapping release cycles.
+- **Assuming type conformance implies semantic validity:** Verifying that a column is a `float64` without testing domain
+  constraints, min-max intervals, or physical unit assertions.
+- **Executing historical backfills without boundary sanity checks:** Rolling out retroactively computed features across
+  partial historical windows without auditing for step-function missingness spikes at the backfill boundary.

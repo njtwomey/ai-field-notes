@@ -5,20 +5,95 @@ summary: 'A feature''s freshness is how old its value is when used. Latency budg
 tags: [data, software]
 aliases: []
 requires: []
-related: [feature-stores, training-serving-skew]
-references: []
-status: stub
+related: [training-serving-skew, batch-and-stream-processing, data-monitoring]
+references: [polyzotis2018, zinkevich2017]
+status: draft
 updated: 2026-10-11
 ---
 
+import { FeatureFreshnessVisualizer } from './FeatureFreshnessVisualizer'
+
 <Definition>
-To be written.
+**Feature freshness** is the temporal proximity $\tau = t_{\text{inference}} - t_{\text{event}}$ between the occurrence
+of a real-world event and the instant its resulting feature value is accessed by a model during inference. **Staleness**
+is the age of a feature value when consumed by a model; as staleness increases, non-stationary features decay in
+relevance, altering the statistical distribution of inputs observed by the deployed model <Cite id="polyzotis2018" />.
 </Definition>
+
+In production machine learning systems, model accuracy depends not only on mathematical architecture, but on the recency
+of the data feeding into it. Balancing feature freshness against strict serving latency budgets dictates whether
+features are precomputed in asynchronous batch jobs, updated continuously via streaming pipelines, or derived
+dynamically on demand at request time <Cite id="zinkevich2017" />.
+
+<FeatureFreshnessVisualizer />
 
 ## Staleness per feature
 
+Features vary widely in their sensitivity to staleness depending on the underlying physical process they quantify:
+
+- **Static / Slow-moving features:** Attributes such as user account registration year, merchant business category, or
+  static catalog dimensions change slowly over time. Serving values with a staleness of days or weeks
+  ($\tau \sim 10^2 \text{ hours}$) incurs negligible predictive loss.
+- **Intermediate aggregate features:** Rolling statistics—such as a user's 30-day transaction volume, 7-day average
+  session length, or 14-day return rate—smooth out high-frequency fluctuations. These features tolerate asynchronous
+  hourly or nightly recomputation ($\tau \sim 1 - 24 \text{ hours}$) without degrading decision boundaries.
+- **Real-time / Fast-moving features:** Dynamic behavioral signals—such as items clicked in the active browsing session,
+  geolocation in ride-hailing, real-time inventory counts, or failed authentication attempts in the last 5 minutes—decay
+  rapidly. In fraud detection or search ranking, serving a 2-hour-old session feature misses active intent or active
+  adversarial attacks, causing dramatic performance collapses.
+
 ## Latency budgets
+
+In user-facing interactive systems (e.g., ad click-through rate estimation, e-commerce search ranking, and instant
+credit decisions), production inference must adhere to strict **latency budgets**—frequently bounded at 20 ms to 100 ms
+at the 99th percentile (P99).
+
+The latency budget constrains how features can be accessed and computed:
+
+$$
+T_{\text{total}} = T_{\text{network}} + T_{\text{retrieval}} + T_{\text{transform}} + T_{\text{inference}} \le T_{\text{budget}}
+$$
+
+| Latency Component | Target Subsystem | Operational Mechanism | Typical Budget Contribution |
+| :--- | :--- | :--- | :--- |
+| **API Gateway Ingestion** | Edge Gateway / Router | Request ingress, authentication, payload parsing | $\approx 1\,\text{ms}$ |
+| **Online Feature Retrieval** | In-Memory Key-Value Store (Redis / Aerospike) | Concurrent entity lookup of precomputed profiles | $2\text{--}8\,\text{ms}$ |
+| **On-Demand Transforms** | Serving Worker RAM | In-memory featurization (e.g. request-context interaction) | $1\text{--}5\,\text{ms}$ |
+| **Model Inference Pass** | Inference Engine (TensorRT / ONNX Runtime) | Accelerated forward tensor execution on GPU/CPU | $5\text{--}15\,\text{ms}$ |
+| **End-to-End P99 Execution** | Unified Serving Pipeline | Cumulative execution budget $T_{\text{total}} \le T_{\text{budget}}$ | **$10\text{--}30\,\text{ms}$** |
+
+If feature retrieval from an external datastore takes 25 ms in a 30 ms budget, complex on-demand computations or
+multi-hop network lookups are impossible without causing tail-latency timeouts that trigger fallback default
+predictions.
 
 ## Precomputed and on-demand values
 
+Production feature stores (such as Feast or Hopsworks) manage three distinct computational tiers to balance freshness
+against serving latency:
+
+| Architecture | Pipeline Technology | Typical Freshness ($\tau$) | P99 Retrieval Latency | Optimal Use Cases |
+| :--- | :--- | :--- | :--- | :--- |
+| **Batch Precomputed** | Daily/hourly SQL / Spark lakehouse jobs bulk-loaded into key-value stores | $1 - 24\text{ hours}$ | $<2\text{ ms}$ (Redis / Cassandra key lookup) | Long-term user lifetime value, 90-day purchase frequency, demographic baselines |
+| **Streaming Near-Real-Time** | Continuous event processing (Kafka, Flink, Spark Streaming) writing to online store | $1 - 60\text{ seconds}$ | $<5\text{ ms}$ (Key-value read) | Real-time session click counts, 10-minute transaction rates, trending item scores |
+| **On-Demand Request-Time** | Local CPU/GPU compute executed inside the inference worker process | $0\text{ seconds}$ (Live) | $5 - 50\text{ ms}$ (In-memory compute overhead) | Request-context interactions (`device_time - last_seen`), live cart pricing, geospatial distance |
+
+- **Batch precomputation:** Delivers minimal online latency by shifting all computational costs offline. However, the
+  served features are inherently stale, failing to reflect events occurring between batch ETL runs.
+- **Streaming pipelines:** Strike an effective compromise for dynamic features by maintaining sliding aggregation
+  windows over continuous event logs, keeping staleness within seconds while maintaining low retrieval latencies.
+- **On-demand computation:** Provides absolute zero staleness by computing features directly from request parameters at
+  execution time, but burns request-path CPU cycles, requiring tight optimization to avoid SLA breaches.
+
 ## Pitfalls
+
+- **Offline-online freshness mismatch:** Training models on offline historical logs where feature values are
+  reconstructed with near-zero staleness, but deploying models against batch precomputed stores that serve 24-hour-old
+  features, inducing severe training-serving skew <Cite id="polyzotis2018" />.
+- **Over-engineering streaming for static features:** Building expensive, maintenance-heavy real-time Kafka/Flink
+  pipelines for features (such as user lifetime aggregations) whose predictive lift does not improve with sub-second
+  freshness.
+- **Inconsistent cache invalidation across feature sets:** Precomputing related features on disparate schedules (e.g.
+  updating a user's total cart value hourly but updating cart item count daily), presenting the model with logically
+  contradictory feature combinations.
+- **Unbounded on-demand request transforms:** Performing unindexed network calls or complex string regex operations
+  inside request-time feature transforms, causing latency spikes and tail-request dropouts during traffic surges.

@@ -2,23 +2,121 @@
 title: 'PII detection and redaction'
 kind: concept
 summary: 'Detectors find names, addresses and identifiers in text and records, which are then redacted or replaced with surrogates. Recall is never complete, so redaction reduces risk rather than removing it.'
-tags: [data, privacy, nlp]
-aliases: []
-requires: []
-related: [corpus-construction]
-references: []
-status: stub
+tags: [data, privacy, nlp, pretraining, data-cleaning]
+aliases: [PII detection, PII redaction, anonymisation pipeline, text sanitization, de-identification]
+requires: [personal-data-and-identifiability]
+related: [personal-data-and-identifiability, training-data-extraction, text-cleaning]
+references: [carlini2021extracting, lample2016]
+status: draft
 updated: 2026-10-11
 ---
 
+import { PiiDetectionRedactionVisualizer } from './PiiDetectionRedactionVisualizer'
+
 <Definition>
-To be written.
+**PII detection and redaction** is an automated text-processing pipeline $\mathcal{T}: \mathcal{X} \to \mathcal{X}$ that
+scans unstructured text $x = (w_1, \dots, w_T)$ to locate token spans $\mathcal{S} = \{(i, j, \tau)\}$ representing
+personally identifiable information (PII) of entity type
+$\tau \in \{\text{NAME}, \text{EMAIL}, \text{PHONE}, \text{SSN}, \text{ADDRESS}\}$ and applies a sanitization operator
+$\phi(w_{i:j}, \tau)$ <Cite id="carlini2021extracting" />:
+
+$$
+x' = \mathcal{T}(x) = \left( \dots, w_{i-1}, \phi(w_{i:j}, \tau), w_{j+1}, \dots \right).
+$$
+
+Redaction limits the exposure of personal secrets in training corpora, reducing downstream memorization and unintended
+disclosure.
 </Definition>
 
 ## Detectors
 
-## Recall limits
+Industrial sanitization pipelines deploy multi-tiered architectures combining deterministic pattern matching with
+contextual statistical models:
 
-## Redaction versus replacement
+### 1. Syntactic regex and checksum validators
+Rigid, standardized identifiers follow predictable syntaxes:
+- **Social Security Numbers (SSNs)**: Formatted as `^\d{3}-\d{2}-\d{4}$` with designated area-group-serial number
+  constraints.
+- **Credit card numbers**: Verified via the **Luhn modular 10 algorithm**:
 
-## Pitfalls
+  $$
+  \sum_{i=1}^k d'_i \equiv 0 \pmod{10}, \quad \text{where } d'_i = \begin{cases} d_i & \text{if position is even} \\ 2d_i - 9 \cdot \mathbb{I}(2d_i > 9) & \text{if position is odd} \end{cases}
+  $$
+
+- **Network identifiers**: IPv4 and IPv6 addresses, MAC addresses, and RFC 5322 compliant email regular expressions.
+- *Trade-off*: Near $100\%$ precision with sub-microsecond latency, but completely incapable of detecting names,
+  occupations, or clinical notes.
+
+### 2. Contextual Named Entity Recognition (NER)
+Unstructured person names, organization affiliations, and physical locations lack fixed syntactic structure and require
+context-aware sequence taggers <Cite id="lample2016" />:
+- Deep transformer token classifiers (e.g. fine-tuned RoBERTa, DeBERTa, or Microsoft Presidio engines) predict BIO
+  sequence tags ($B\text{-PER}, I\text{-PER}, B\text{-LOC}, B\text{-ORG}$).
+- Disambiguates polysemous words based on grammatical syntax (e.g., distinguishing "May" as a calendar month from
+  "Theresa May" as a person, or "Apple" as a fruit from an organization).
+
+### 3. Contextual LLM verifiers
+High-ambiguity spans are passed to lightweight language models to arbitrate subtle contextual references (e.g.
+determining whether an alphanumeric token is a random password, a git commit hash, or an internal patient identifier).
+
+## Recall limits and the long tail of leakage
+
+The central vulnerability of automated redaction is that **recall is fundamentally bounded**:
+
+$$
+\text{Recall} = \frac{\text{True Positives}}{\text{True Positives} + \text{False Negatives}} < 1.0.
+$$
+
+In controlled academic evaluations, state-of-the-art ensembles achieve $95\%\text{--}98\%$ recall. However, when applied
+to web-scale pretraining corpora (e.g. Common Crawl, RedPajama, or FineWeb spanning trillions of tokens), the arithmetic
+of scale exposes dangerous leakage:
+
+- In a corpus of $100$ million documents containing $50$ million PII occurrences, a $98\%$ recall rate leaves
+  **$1{,}000{,}000$ sensitive records completely unmasked**.
+- As Carlini et al. <Cite id="carlini2021extracting" /> demonstrated, large language models disproportionately memorize
+  outlier and high-perplexity strings, frequently memorizing the exact unredacted personal telephone numbers and emails
+  that slipped through the pipeline.
+- **The long-tail distribution**: Leakage concentrates in the long tail: uncommon international surnames, non-Latin
+  scripts, deliberate typos, and creative obfuscations (`j_o_h_n [dot] d_o_e`).
+
+## Redaction versus surrogate replacement
+
+Once a PII span is identified, pipelines apply one of two sanitization strategies:
+
+### Hard token masking
+Replaces the sensitive span with a fixed sentinel token:
+```text
+Raw:        "Contact Dr. Alice Vance at alice.vance@blackmesa.gov regarding the test."
+Sanitized:  "Contact [NAME] at [EMAIL] regarding the test."
+```
+- **Limitation**: Sentinel tokens destroy language modeling perplexity. Because `[NAME]` appears repeatedly across
+  millions of contexts, downstream models suffer degraded grammar and frequently learn to output raw placeholder tags
+  during production generation.
+
+### Surrogate replacement (Synthetic substitution)
+Substitutes detected PII with realistic synthetic entities drawn from demographic dictionaries or generative models:
+```text
+Raw:        "Contact Dr. Alice Vance at alice.vance@blackmesa.gov regarding the test."
+Sanitized:  "Contact Dr. Robert Chen at robert.chen@syntheticmail.org regarding the test."
+```
+- **Benefits**: Preserves natural language syntax, part-of-speech distributions, and token frequency statistics,
+  allowing pretraining to proceed smoothly without distribution distortion.
+- **Consistency constraint**: Replacement must maintain document-level coreference consistency: every subsequent mention
+  of "Dr. Vance" or "her" must map to "Dr. Chen" and "his" (or consistent gender agreement) throughout the entire text
+  passage.
+
+The interactive visualizer below illustrates the recall-leakage trade-off and shows the impact of corpus scale on
+residual unmasked PII entities:
+
+<PiiDetectionRedactionVisualizer />
+
+## Pitfalls and limitations
+
+1. **Over-redaction of public domain knowledge**: Naive NER models routinely redact historical figures ("George
+   Washington"), authors, public APIs, and scientific references, degrading the factual capability of the trained model.
+2. **Contextual re-identification (the mosaic effect)**: Redacting a person's name while leaving highly specific
+   biographical context ("The French general who crowned himself Emperor at Notre-Dame in 1804") allows language models
+   to immediately reconstruct the redacted entity via parametric association.
+3. **Redaction is not privacy certification**: Automated redaction is an empirical heuristic that substantially lowers
+   privacy risk, but it does not provide formal mathematical guarantees against membership inference or extraction
+   attacks.

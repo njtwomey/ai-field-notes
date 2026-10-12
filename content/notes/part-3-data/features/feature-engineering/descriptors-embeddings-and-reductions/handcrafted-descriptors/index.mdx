@@ -1,26 +1,138 @@
 ---
 title: 'Hand-built descriptors'
 kind: concept
-summary: 'Hand-built descriptors, such as histograms of gradients, SIFT, MFCCs and statistical time-series features, summarise raw signals by design rather than learning. They remain useful with little data or little compute.'
-tags: [data, feature-engineering, computer-vision]
-aliases: []
-requires: []
-related: [feature-detection-and-descriptors, mel-frequency-cepstral-coefficients, time-series-feature-extraction]
-references: []
-status: stub
+summary: 'Hand-built descriptors, such as histograms of gradients, SIFT, MFCCs and statistical time-series features, summarise raw signals by design rather than learning. They remain useful with little data or compute.'
+tags: [data, feature-engineering, computer-vision, signal-processing]
+aliases: [handcrafted features, domain descriptors, classical signal features, engineered descriptors]
+requires: [feature-scaling]
+related: [domain-knowledge-features, pretrained-embeddings-as-features, dimensionality-reduction-as-preprocessing]
+references: [lowe2004, dalal2005, davis1980, lubba2019, christ2018]
+status: draft
 updated: 2026-10-11
 ---
 
+import { HandcraftedDescriptorsVisualizer } from './HandcraftedDescriptorsVisualizer'
+
 <Definition>
-To be written.
+A **hand-built descriptor** (or handcrafted feature) is a deterministic, unlearned transformation
+$\phi: \mathcal{X} \to \mathbb{R}^K$ designed from analytical principles—such as differential geometry, psychoacoustics,
+or dynamical systems theory—to extract invariant summary statistics from high-dimensional continuous signals (images,
+audio, or time series):
+
+$$
+\mathbf{z} = \phi(\mathbf{x}), \quad \mathbf{x} \in \mathbb{R}^{T \times C} \text{ or } \mathbb{R}^{H \times W}.
+$$
+
+Unlike deep representations learned by gradient descent, hand-built descriptors have fixed parameters, require zero
+training data to construct, and provide explicit physical interpretability.
 </Definition>
 
 ## Image descriptors
 
-## Audio descriptors
+Before the dominance of deep convolutional networks, computer vision relied on analytical operators invariant to affine
+transformations, illumination shifts, and scale:
+
+### SIFT (Scale-Invariant Feature Transform)
+Developed by Lowe <Cite id="lowe2004" />, SIFT extracts local keypoint descriptors invariant to scale and rotation
+through a multi-stage pipeline:
+
+1. **Scale-space extrema detection**: Identifies candidate keypoints across octaves of blurred images using Difference
+   of Gaussians (DoG):
+
+   $$
+   D(x, y, \sigma) = (G(x, y, k\sigma) - G(x, y, \sigma)) * I(x, y).
+   $$
+
+2. **Keypoint localisation and orientation**: Rejects low-contrast edge points and assigns a dominant local orientation
+   based on gradient directions in a surrounding Gaussian window.
+3. **Descriptor representation**: Computes gradient orientation histograms across a $4 \times 4$ spatial grid of
+   subregions, yielding a canonical $4 \times 4 \times 8 = 128$-dimensional descriptor vector that is robust to 3D
+   viewpoint changes and illumination scaling.
+
+### HOG (Histograms of Oriented Gradients)
+Introduced by Dalal and Triggs <Cite id="dalal2005" /> for pedestrian detection, HOG captures local object appearance
+and shape by modeling edge directions:
+
+- The image is tiled into small spatial regions called **cells** (e.g., $8 \times 8$ pixels).
+- Each cell accumulates a 1D histogram of gradient orientations (typically 9 bins from $0^\circ$ to $180^\circ$),
+  weighted by gradient magnitude.
+- Groups of adjacent cells are aggregated into overlapping **blocks** and normalized using $L_2$-norm or $L_1$-sqrt to
+  achieve invariance to shadowing and illumination gradients.
+- Linear SVM classifiers trained over concatenated HOG descriptors formed the state of the art in object detection for
+  over a decade.
+
+## Audio descriptors (MFCCs)
+
+In speech processing and bioacoustics, raw audio waveforms oscillate rapidly at sampling rates of
+$16\text{–}48\text{ kHz}$. Mel-Frequency Cepstral Coefficients (MFCCs) <Cite id="davis1980" /> condense raw acoustic
+pressure waves into spectral energy envelopes aligned with human auditory perception:
+
+1. **Framing and windowing**: Partition the waveform into short overlapping frames ($20\text{–}30\text{ ms}$, where
+   speech is quasi-stationary) and apply a Hamming window to prevent spectral leakage.
+2. **Short-Time Fourier Transform (STFT)**: Compute the discrete Fourier transform to calculate the power spectrum
+   $|X(t, f)|^2$.
+3. **Mel filterbank integration**: Pass spectral energies through a bank of triangular bandpass filters spaced linearly
+   below $1{,}000\text{ Hz}$ and logarithmically above $1{,}000\text{ Hz}$ according to the Mel scale:
+
+   $$
+   m = 2595 \log_{10}\left(1 + \frac{f}{700}\right).
+   $$
+
+   This mimics the cochlea's decreasing frequency resolution at higher pitches.
+4. **Logarithmic compression**: Apply $\ln(\cdot)$ to filterbank energies to emulate human logarithmic perception of
+   loudness.
+5. **Discrete Cosine Transform (DCT)**: Compute the DCT-II of log energies:
+
+   $$
+   c_n = \sum_{m=1}^M \log(S_m) \cos\left[\frac{\pi n}{M}\left(m - \frac{1}{2}\right)\right].
+   $$
+
+   The DCT decorrelates filterbank outputs, concentrating speech formants into the first $12\text{–}20$ cepstral
+   coefficients while discarding fine pitch harmonics.
 
 ## Time-series feature sets
 
-## Where they are still used
+In industrial IoT, telemetry, and medical sensor analysis (ECG/EEG), machine learning models often classify
+variable-length time series. Automated feature extraction libraries systematically generate hundreds of statistical and
+dynamical summaries:
 
-## Pitfalls
+- **tsfresh** <Cite id="christ2018" />: Calculates over 700 statistical characteristics per series—including empirical
+  distribution moments, Fourier and wavelet coefficients, sample entropy, approximate entropy, autoregressive
+  coefficients, and peak counting. It couples extraction with Benjamini-Hochberg false discovery rate (FDR) hypothesis
+  tests to discard irrelevant features.
+- **catch22 (Canonical Time-Series Characteristics)** <Cite id="lubba2019" />: Distills a candidate pool of over 7,000
+  algorithmic features into a core subset of 22 computationally efficient, minimally redundant features covering:
+  - Distribution properties (median, interquartile range, outlier counts).
+  - Autocorrelation and temporal structure (first zero of autocorrelation, automutual information).
+  - Non-linear dynamics and periodicity (fluctuation analysis, symbolic dynamics).
+
+The interactive visualizer below demonstrates the extraction of core statistical and structural descriptors across
+diverse signal regimes:
+
+<HandcraftedDescriptorsVisualizer />
+
+## Where handcrafted descriptors remain essential
+
+Despite the power of end-to-end deep learning, hand-built descriptors remain indispensable in specific engineering
+regimes:
+
+1. **Small-sample regimes ($N \ll 500$)**: In rare disease diagnostics, structural health monitoring of bridges, or
+   high-value machinery failure forecasting, historical failure samples are scarce. Deep networks overfit instantly,
+   whereas simple linear models or random forests trained on MFCCs or catch22 descriptors generalize reliably.
+2. **Ultra-low-power edge deployment**: Microcontrollers (ARM Cortex-M, sensor ASICs) operate within milliwatt power
+   budgets and kilobytes of RAM. Computing 10 statistical descriptors takes microseconds on integer hardware, whereas
+   running a deep neural network requires megabytes of memory and specialized tensor accelerators.
+3. **Regulatory auditability and certification**: In aviation, medical devices (FDA approvals), and nuclear
+   instrumentation, predictions must link to explicit physical phenomena (e.g., "vibration kurtosis exceeded 4.5"
+   indicating bearing surface spalling), which black-box neural embeddings cannot provide.
+
+## Pitfalls and limitations
+
+1. **Heuristic hyperparameter coupling**: Handcrafted pipelines depend heavily on unlearned hyperparameters (window
+   length, filter count, frame stride, sampling rate). If operating conditions change (e.g., a motor changes operational
+   RPM), fixed filter banks fail to capture shifted resonant frequencies.
+2. **Representation bottlenecks**: By projecting raw signals into fixed summaries, handcrafted descriptors irrevocably
+   discard fine phase relationships and subtle temporal micro-patterns that end-to-end architectures might exploit.
+3. **Extraction computational scaling**: Running exhaustive libraries like tsfresh across millions of streaming time
+   series introduces severe feature engineering pipeline latency, often requiring distributed map-reduce architectures
+   to compute offline.

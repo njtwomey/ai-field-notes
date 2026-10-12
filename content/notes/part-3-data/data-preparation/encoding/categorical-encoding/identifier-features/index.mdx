@@ -3,24 +3,109 @@ title: 'Identifier features'
 kind: concept
 summary: 'Identifiers such as customer, device or record IDs can encode time, source or even the label, and let a model memorise entities. They need deliberate treatment: dropping, entity effects or grouped splits.'
 tags: [data, feature-engineering, data-leakage]
-aliases: []
-requires: []
-related: [data-leakage, high-cardinality-and-unseen-levels]
+aliases: [identifier features, ID features, primary key leakage, entity memorization, entity effects]
+requires: [categorical-encoding]
+related: [data-leakage, high-cardinality-and-unseen-levels, stable-split-assignment]
 references: []
-status: stub
+status: draft
 updated: 2026-10-11
 ---
 
 <Definition>
-To be written.
+**Identifier features** are nominal categorical columns (such as primary keys, customer account IDs, transaction hashes,
+device serial numbers, or session tokens) designed strictly for database retrieval and record deduplication that carry
+high risk of entity memorization, temporal leakage, and split confounding if fed directly into machine learning models.
 </Definition>
+
+A persistent rookie pitfall in tabular modeling is treating every column in a database schema as an input feature.
+Identifiers often exhibit extreme cardinality approaching the sample size ($K \approx N$). When included in training,
+expressive models (such as deep decision trees or high-dimensional linear models) learn to associate outcomes directly
+with individual entity IDs, achieving near-perfect training accuracy while collapsing on unseen entities in production.
+
+import { IdentifierFeaturesVisualizer } from './IdentifierFeaturesVisualizer';
+
+<IdentifierFeaturesVisualizer />
 
 ## IDs that encode time or source
 
+Identifiers are rarely pure random numbers; real-world data engineering pipelines generate them via structured protocols
+that accidentally encode confounding signals:
+
+### 1. Auto-incrementing database integers
+In relational databases, primary keys (`id = 1001, 1002, 1003...`) increment monotonically over time.
+- If a dataset spans 2022 to 2024, higher ID values correspond directly to more recent transactions.
+- A gradient boosted tree splitting on `id > 1,500,000` is not learning a behavioral pattern—it is splitting on a
+  temporal cutoff! If customer churn or fraud rates changed over time, the model exploits the ID as a proxy for time
+  drift, concealing real feature interactions.
+
+### 2. Time-sorted UUIDs, ULIDs, and Snowflake IDs
+Modern distributed databases (such as Twitter Snowflake, Instagram Sharding, or ULID) generate 64-bit or 128-bit unique
+identifiers whose most significant bits represent a Unix epoch timestamp:
+- A ULID begins with a 48-bit timestamp with millisecond precision: `01HRZ3NDEK...`.
+- Sorting or tree-splitting on these strings is mathematically equivalent to splitting directly on datetime timestamps.
+
+### 3. Server shards and collection pipelines
+In sharded enterprise databases, ID prefixes or hexadecimal hash buckets encode physical infrastructure:
+- An ID formatted as `TX-US-WEST-91823` encodes geographical provenance and server hardware.
+- If medical scan IDs prefix patient records with hospital machine codes (`SCANNER_GE_01_...`), models learn
+  scanner-specific artifact biases rather than clinical pathology.
+
 ## IDs that leak the label
 
-## Entity effects
+In operational pipelines, downstream business processes often modify or re-assign record IDs based on the outcome of the
+event:
 
-## Unseen entities
+- **Triage routing:** In insurance claims, claims flagged for manual fraud investigation are frequently assigned a
+  separate ticket ID prefix (`FR-89412`) or routed to an investigation database partition with higher ID numbers.
+- **Credit underwriting:** Rejected loan applications may receive temporary synthetic application IDs that differ in
+  length or format from finalized approved account IDs.
+- **Retroactive updating:** If customer IDs are merged or re-keyed after account suspension, the modified ID directly
+  leaks that a suspension occurred.
 
-## Pitfalls
+## Entity memorization and the generalization trap
+
+When an identifier has thousands of unique levels, standard categorical encoding allows models to memorize individual
+entities:
+
+- If customer `USER_942` made 15 historical purchases and defaulted on 12 of them, a decision tree splits on
+  `customer_id == USER_942` to predict high default risk.
+- Under standard random train/test splitting, 12 transactions from `USER_942` end up in train and 3 end up in test. The
+  model predicts the test rows with 100% accuracy simply by recognizing the customer ID.
+- When deployed, the model encounters a **new customer** `USER_9999` with zero training history. The ID feature provides
+  zero signal, and test performance plummets.
+
+## Grouped splits: Testing true entity generalization
+
+To prevent entity memorization from creating false optimism during validation, evaluation splits must respect entity
+boundaries:
+
+- **GroupKFold cross-validation:** Split data such that all records associated with a given `customer_id` or `device_id`
+  reside strictly within a single fold.
+- **Across-entity evaluation:** Train strictly on Customer Set $A$ and evaluate strictly on Customer Set $B$. If the
+  model relied on memorizing customer IDs, its cross-validation score immediately collapses, alerting engineers to the
+  problem.
+
+## Replacing IDs with behavioral feature aggregates
+
+Rather than feeding raw IDs into models, production systems discard the primary key and replace it with
+**domain-specific historical aggregations**:
+
+1. **Activity frequency:** `total_orders_lifetime`, `orders_last_30_days`.
+2. **Monetary value:** `mean_transaction_amount`, `std_transaction_amount`.
+3. **Recency:** `days_since_last_active`, `hours_since_last_login`.
+4. **Behavioral entropy:** Unique merchant categories visited, ratio of weekend to weekday transactions.
+
+Transforming static identifiers into behavioral summaries allows the model to learn generalizable rules (e.g., "users
+with high recent velocity and low historical account age have elevated fraud risk") that transfer seamlessly to
+brand-new, unseen customers.
+
+## Pitfalls and failure modes
+
+1. **Accidental inclusion in AutoML:** Automated ML pipelines that blindly encode all non-numeric columns as one-hot or
+   target encodings will eagerly seize upon ID columns, reporting deceptive 99% accuracy. Always enforce an explicit
+   feature exclusion list.
+2. **Device fingerprint leakage in security:** In fraud detection, device IDs are genuinely useful for catching repeat
+   offenders, but cannot catch novel fraudsters. Use a dual-model architecture: a deterministic rules/blocklist engine
+   for known bad IDs, and an ID-agnostic ML model for general risk scoring.
+3. **Target leakage through entity mean encodings:** Computing out-of-fold target encoding on `customer_id` without
+   grouping folds by customer allows the model to leak the customer's average label across cross-validation splits.

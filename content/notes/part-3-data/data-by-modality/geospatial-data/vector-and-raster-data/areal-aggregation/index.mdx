@@ -1,24 +1,146 @@
 ---
 title: 'Areal aggregation'
 kind: concept
-summary: 'Data aggregated to areas depend on the areas chosen: the modifiable areal unit problem changes results with the boundaries, and the ecological fallacy attributes area-level relations to individuals.'
-tags: [data, statistics]
-aliases: []
-requires: []
-related: []
-references: []
-status: stub
-updated: 2026-10-11
+summary: 'Areal aggregation introduces the modifiable areal unit problem (MAUP), where scale and zoning shifts alter statistical correlations, and the ecological fallacy, where aggregate spatial patterns invert or distort individual-level relationships.'
+tags: [data, statistics, geospatial]
+aliases: [maup, modifiable-areal-unit-problem, ecological-fallacy, dasymetric-mapping, spatial-aggregation]
+requires: [vector-and-raster-data]
+related: [coordinate-reference-systems, spatial-features]
+references: [openshaw1984, robinson1950]
+status: draft
+updated: 2026-10-12
 ---
 
+import { ArealAggregationVisualizer } from './ArealAggregationVisualizer'
+
 <Definition>
-To be written.
+**Areal aggregation** is the process of partitioning continuous point-level or individual-level observations into
+discrete contiguous spatial zones (such as census tracts, administrative districts, or postal codes) and computing
+regional summary statistics (sums, counts, means). It gives rise to two fundamental statistical paradoxes: the
+**Modifiable Areal Unit Problem (MAUP)**, where observed correlations depend on arbitrary boundary scales and shapes
+<Cite id="openshaw1984" />, and the **Ecological Fallacy**, where population-level correlations contradict individual
+behavior <Cite id="robinson1950" />.
 </Definition>
 
-## The modifiable areal unit problem
+In spatial machine learning and epidemiology, training models on aggregated areal data without accounting for boundary
+arbitrariness leads to false causal attribution, geographic gerrymandering susceptibility, and failed out-of-domain
+transfer <Cite id="openshaw1984" />.
 
-## The ecological fallacy
+<ArealAggregationVisualizer client:load />
 
-## Changing boundaries
+## The Modifiable Areal Unit Problem (MAUP)
+
+Identified formally by Openshaw <Cite id="openshaw1984" />, the MAUP demonstrates that statistical summaries of spatial
+phenomena are artifacts of the geometric boundaries used to aggregate them. The MAUP manifests in two distinct
+components:
+
+### The Scale Effect
+
+The scale effect occurs when data are aggregated into progressively coarser geographic units (e.g. moving from census
+blocks $\to$ block groups $\to$ tracts $\to$ counties $\to$ states):
+- **Variance Smoothing**: Aggregation averages out local high-frequency idiosyncratic variation. If individual random
+  variable $X_i = \mu + \epsilon_i$ has variance $\sigma^2$, the sample mean over a zone of $M$ independent individuals
+  has variance $\frac{\sigma^2}{M}$.
+- **Correlation Inflation**: Because spatial autocorrelation causes neighboring individuals to share similar latent
+  regional confounders, averaging over larger spatial units progressively eliminates independent error terms. The
+  bivariate Pearson correlation coefficient $r(X, Y)$ systematically inflates toward $\pm 1.0$ as spatial scale becomes
+  coarser <Cite id="openshaw1984" />:
+  $$
+  |r_{\text{coarse}}| \gg |r_{\text{fine}}| \gg |r_{\text{individual}}|
+  $$
+  A regression model fit on county-level summaries may report $R^2 = 0.85$, while the exact same relationship measured
+  on individual households yields $R^2 = 0.08$.
+
+### The Zoning Effect (Shape Effect)
+
+The zoning effect occurs when the spatial scale (number of units $K$) is held constant, but the boundary configurations
+are altered or rotated:
+- Shifting grid boundaries by half a cell or realigning political districts (gerrymandering) redistributes high-value
+  outliers between adjacent partitions.
+- Openshaw <Cite id="openshaw1984" /> demonstrated that by reconfiguring boundaries across 99 spatial zones at fixed
+  scale, the observed correlation between two socio-economic variables could be engineered to span anywhere from $-0.80$
+  to $+0.80$.
+
+---
+
+## The Ecological Fallacy
+
+The **ecological fallacy** occurs when statistical relationships observed across aggregate areal units are invalidly
+attributed to individuals <Cite id="robinson1950" />.
+
+### Robinson's Paradox
+
+In his landmark 1950 paper, Robinson analyzed the correlation between literacy rates and immigrant populations across
+the United States <Cite id="robinson1950" />:
+- **State-Level Aggregate Correlation**: $r = +0.53$ (states with higher foreign-born proportions exhibited higher
+  literacy rates).
+- **Individual-Level Micro Correlation**: $r = -0.11$ (individual immigrants had lower English literacy rates than
+  native-born citizens).
+
+The paradox arose because immigrants settled disproportionately in industrial northern states with well-funded public
+education systems. The areal aggregation captured state-level educational funding rather than individual immigrant
+literacy.
+
+### Covariance Decomposition (Simpson's Paradox in Space)
+
+Mathematically, the total covariance between variables $X$ and $Y$ across individuals grouped into areal zones $Z$
+decomposes via the law of total covariance:
+
+$$
+\operatorname{Cov}(X, Y) = \underbrace{\mathbb{E}_Z \left[ \operatorname{Cov}(X, Y \mid Z) \right]}_{\text{Within-Zone Micro Covariance}} + \underbrace{\operatorname{Cov}_Z \left( \mathbb{E}[X \mid Z], \mathbb{E}[Y \mid Z] \right)}_{\text{Between-Zone Ecological Covariance}}
+$$
+
+If the between-zone covariance is positive while within-zone covariances are negative, the aggregate slope reverses
+sign:
+
+$$
+\beta_{\text{ecological}} = \frac{\operatorname{Cov}(\bar{X}_Z, \bar{Y}_Z)}{\operatorname{Var}(\bar{X}_Z)} > 0 \quad \text{while} \quad \beta_{\text{individual}} < 0
+$$
+
+Using aggregate areal attributes as proxy inputs for individual prediction (e.g. credit scoring or clinical diagnosis
+based on ZIP code) is prone to ecological errors.
+
+---
+
+## Changing Boundaries and Dasymetric Disaggregation
+
+In real-world workflows, spatial datasets are aggregated to mismatched or evolving geographic partitions:
+- School districts vs municipal boundaries vs hospital catchment zones.
+- Decennial census redistricting altering tract shapes over time.
+
+### Areal Weighting Interpolation
+
+The simplest disaggregation transfers count data $Y_s$ from source zones $s \in \mathcal{S}$ to target zones
+$t \in \mathcal{T}$ assuming uniform density:
+
+$$
+\hat{Y}_t = \sum_{s \in \mathcal{S}} Y_s \frac{\operatorname{Area}(s \cap t)}{\operatorname{Area}(s)}
+$$
+
+When land use is heterogeneous (e.g. a source tract containing dense urban housing alongside an unpopulated lake or
+mountain range), uniform areal weighting assigns population into uninhabited zones.
+
+### Dasymetric Mapping
+
+Dasymetric mapping leverages high-resolution ancillary raster data (such as impervious surface masks, satellite
+nighttime lights, or building footprints) to constrain population disaggregation:
+
+$$
+\hat{Y}_t = \sum_{s \in \mathcal{S}} Y_s \frac{\sum_{i \in s \cap t} w(L_i)}{\sum_{j \in s} w(L_j)}
+$$
+
+where $w(L_i)$ is the relative settlement density weight assigned to land-cover category $L_i$. Restricting allocation
+to built-up pixels eliminates uninhabited-zone allocation error.
+
+---
 
 ## Pitfalls
+
+1. **Directly Applying Macro Models to Micro Inference**: Using county-level disease risk models to classify individual
+   patient risk ignores within-county variance, committing an ecological fallacy.
+2. **Ignoring Census Boundary Churn in Longitudinal Time Series**: Comparing census tract metrics between 2010 and 2020
+   directly without standardizing to crosswalk boundary files (e.g. NHGIS or IPUMS crosswalks) treats artificial
+   boundary rezoning as genuine demographic shift.
+3. **Modelling Spatial Counts Without Population Offsets**: In Poisson or negative binomial regression on areal disease
+   or crime counts $Y_i$, omitting the log-transformed population exposure $\log(\text{Pop}_i)$ as an offset leads the
+   model to merely learn spatial population density rather than disease incidence rates.

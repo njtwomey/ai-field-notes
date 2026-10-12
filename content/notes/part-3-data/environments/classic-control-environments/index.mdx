@@ -1,0 +1,131 @@
+---
+title: 'Classic control environments'
+kind: concept
+summary: 'Simulated control problems with low-dimensional states, such as cart-pole or mountain car, benchmark reinforcement learning algorithms on non-linear physical dynamics.'
+tags: [data, reinforcement-learning, control-theory, environments, benchmarks]
+aliases: [classic control, CartPole, MountainCar, Acrobot, inverted pendulum benchmark]
+requires: []
+related: [grid-worlds-and-discrete-environments, continuous-control-benchmarks, offline-reinforcement-learning-datasets]
+references: [sutton2018, brockman2016]
+status: draft
+updated: 2026-10-11
+---
+
+import { ClassicControlVisualizer } from './ClassicControlVisualizer'
+
+<Definition>
+A **classic control environment** is a simulated physical benchmark formulated as a Markov Decision Process (MDP)
+$\mathcal{M} = \langle \mathcal{S}, \mathcal{A}, \mathcal{P}, \mathcal{R}, \gamma \rangle$ with a low-dimensional
+continuous state space $\mathcal{S} \subset \mathbb{R}^D$ ($D \le 6$) and transitions
+$\mathcal{P}(\mathbf{s}_{t+1} \mid \mathbf{s}_t, \mathbf{a}_t)$ governed by deterministic, discretized Newtonian
+equations of motion <Cite id="sutton2018" /> <Cite id="brockman2016" />:
+
+$$
+\mathbf{s}_{t+1} = \mathbf{s}_t + \int_{t}^{t + \Delta t} f(\mathbf{s}(\tau), \mathbf{a}_t) \, d\tau.
+$$
+
+These environments provide standardized testbeds for rapid algorithmic verification, function approximation sanity
+checks, and sample-efficiency analysis without GPU infrastructure.
+</Definition>
+
+## What these environments test
+
+Classic control tasks isolate specific algorithmic capabilities in reinforcement learning:
+
+1. **Continuous state representation**: Algorithms must generalize over uncountably infinite state vectors using linear
+   tile coding, radial basis functions, or neural policy networks.
+2. **Unstable non-linear equilibria**: Systems like the inverted pendulum have an open-loop unstable saddle point at the
+   upright position, requiring tight closed-loop feedback to prevent divergent oscillations.
+3. **Underactuation and energy accumulation**: In environments like Mountain Car and Acrobot, the actuator cannot
+   overcome gravitational potential energy through brute force; the agent must discover non-greedy strategies that move
+   away from the goal to accumulate momentum.
+4. **Rapid turnaround debugging**: Because physics updates require only a few floating-point operations per step,
+   algorithms can execute millions of interactions in seconds on a single CPU core.
+
+## Catalogue
+
+The canonical benchmark suite, originally popularized by Sutton and Barto <Cite id="sutton2018" /> and standardized in
+OpenAI Gym <Cite id="brockman2016" /> and Gymnasium, includes four foundational systems:
+
+### Cart-pole (`CartPole-v1`)
+A pole is attached by an un-actuated joint to a cart moving along a frictionless horizontal track:
+
+- **State space**: $\mathbf{s} = [x, \dot{x}, \theta, \dot{\theta}] \in \mathbb{R}^4$, capturing cart position, cart
+  velocity, pole angle, and pole angular velocity.
+- **Action space**: $\mathcal{A} = \{0, 1\}$, applying an instantaneous horizontal force of $-10\text{ N}$ (left) or
+  $+10\text{ N}$ (right).
+- **Reward and termination**: Reward is $+1$ for every step the pole remains upright. An episode terminates if the angle
+  $|\theta| > 12^\circ$ ($0.209\text{ rad}$) or the cart leaves boundaries $|x| > 2.4$. The environment is considered
+  solved when average return exceeds $475$ over $100$ consecutive episodes.
+
+### Mountain car (`MountainCar-v0`)
+An underpowered vehicle sits at the bottom of a sinusoidal valley described by $y = \sin(3x)$:
+
+- **State space**: $\mathbf{s} = [x, \dot{x}] \in [-1.2, 0.6] \times [-0.07, 0.07]$.
+- **Action space**: $\mathcal{A} = \{0, 1, 2\}$, representing left push, zero throttle, and right push.
+- **The underactuation constraint**: Motor force ($0.001$) is strictly less than gravitational force
+  ($\approx 0.0025 \cos(3x)$). The car cannot drive straight up the right hill to the goal ($x \ge 0.5$).
+- **Reward structure**: A step cost of $-1$ is assessed at every time step until the goal is achieved. This sparse
+  penalty tests an algorithm's capacity for directed exploration without reward shaping.
+
+### Acrobot (`Acrobot-v1`)
+A planar two-link, two-joint robot arm operating in a vertical plane under gravity, with only the second joint (elbow)
+actuated:
+
+- **State space**:
+  $\mathbf{s} = [\cos\theta_1, \sin\theta_1, \cos\theta_2, \sin\theta_2, \dot{\theta}_1, \dot{\theta}_2] \in \mathbb{R}^6$.
+- **Action space**: $\mathcal{A} = \{-1, 0, +1\}$, applying torque to the actuated second joint.
+- **Goal**: Swing the free tip of the second link above a horizontal line at height $y = 1.0$.
+
+### Pendulum (`Pendulum-v1`)
+A frictionless inverted pendulum with continuous actuation:
+
+- **State space**: $\mathbf{s} = [\cos\theta, \sin\theta, \dot{\theta}] \in \mathbb{R}^3$.
+- **Action space**: Continuous torque $u \in [-2.0, 2.0]$.
+- **Reward function**: Penalizes angular deviation, angular velocity, and control effort:
+
+  $$
+  r_t = - \left( \theta_t^2 + 0.1 \dot{\theta}_t^2 + 0.001 u_t^2 \right), \quad \text{where } \theta_t \in [-\pi, \pi].
+  $$
+
+  Because starting states are initialized near the hanging bottom ($\theta \approx \pi$), the agent must execute
+  non-linear swing-up maneuvers before balancing at the apex.
+
+The interactive visualizer below simulates dynamic trajectories across these classic control benchmarks:
+
+<ClassicControlVisualizer />
+
+## Interfaces and versions
+
+Modern benchmarks follow the standardized Gymnasium API:
+
+```python
+import gymnasium as gym
+
+env = gym.make("CartPole-v1")
+obs, info = env.reset(seed=42)
+
+for _ in range(500):
+    action = env.action_space.sample()  # Policy action
+    obs, reward, terminated, truncated, info = env.step(action)
+    if terminated or truncated:
+        obs, info = env.reset()
+```
+
+- **Terminated versus truncated**:
+  - `terminated=True`: The agent reached a natural absorbing MDP state (e.g. pole fell past threshold angle or goal
+    reached).
+  - `truncated=True`: An artificial external horizon limit was hit (e.g. $t = 500$ steps). Truncation must not be
+    treated as a zero-value terminal state during bootstrap target calculation ($V(\mathbf{s}) \neq 0$).
+
+## Known problems and limitations
+
+1. **Trivial solution spaces**: Classical linear-quadratic regulators (LQR), PID loops, or direct policy search with 10
+   random seeds can solve CartPole in milliseconds. Success on classic control provides negligible evidence that an
+   algorithm will scale to high-dimensional problems.
+2. **Deterministic integration overfitting**: Standard implementations use first-order semi-implicit Euler integration
+   with fixed $\Delta t$. Learned policies often exploit integration inaccuracies or resonance frequencies of the
+   numerical integrator rather than learning robust physical control.
+3. **No perception bottleneck**: Because the true state vector $\mathbf{s}$ is directly exposed without sensor noise,
+   partial observability, or visual occlusion, classic control does not test representation learning or state
+   estimation.

@@ -3,24 +3,165 @@ title: 'Text fields in tables'
 kind: concept
 summary: 'Free-text columns in a table become features as TF-IDF vectors, hashed n-grams or embeddings from a pretrained encoder, alongside the numeric and categorical columns.'
 tags: [data, nlp, feature-engineering]
-aliases: []
+aliases: [tabular text, free-text features, multimodal tabular]
 requires: []
-related: [term-frequency-inverse-document-frequency, feature-hashing, pretrained-embeddings-as-features]
-references: []
-status: stub
-updated: 2026-10-11
+related: [tabular-data, term-frequency-inverse-document-frequency, feature-hashing, pretrained-embeddings-as-features, semi-structured-data]
+references: [salton1988, weinberger2009, reimers2019]
+status: draft
+updated: 2026-10-12
 ---
 
+import { TextFieldsInTablesVisualizer } from './TextFieldsInTablesVisualizer'
+
 <Definition>
-To be written.
+**Text fields in tables** are unstructured, variable-length character sequences (such as clinical triage notes, product
+catalog descriptions, customer support tickets, or merchant transaction memos) embedded as columns alongside
+conventional structured numerical and categorical features. Transforming free text into fixed-dimensional numeric
+representations enables tabular learning algorithms to exploit semantic information without corrupting the geometric
+properties of structured features.
 </Definition>
+
+In production machine learning systems, tables rarely consist solely of clean numerical scalars and low-cardinality
+categorical codes. Instead, many high-value datasets are hybrid: an e-commerce transaction table contains numerical
+features (price, customer age), categorical codes (category ID, payment method), and free-text fields (item title,
+customer review, merchant memo). 
+
+Standard tabular algorithms, including gradient-boosted decision trees (GBDTs) like XGBoost and LightGBM, cannot
+directly process variable-length character strings. Converting unstructured text columns into numeric feature matrices
+requires choosing between lexical bag-of-words representations, bounded hash projections, dense sentence embeddings, or
+out-of-fold target predictions.
+
+<TextFieldsInTablesVisualizer />
 
 ## TF-IDF vectors
 
+Term Frequency-Inverse Document Frequency (TF-IDF) converts a collection of text documents into a sparse feature matrix
+based on token occurrence statistics <Cite id="salton1988" />. For a given token $t$ in a text field instance $d$ across
+a training corpus $\mathcal{D}$:
+
+$$
+\text{TF-IDF}(t, d, \mathcal{D}) = \text{TF}(t, d) \times \text{IDF}(t, \mathcal{D})
+$$
+
+where term frequency is typically sublinearly scaled to prevent repeated tokens within a single field from dominating
+the feature representation:
+
+$$
+\text{TF}(t, d) = 1 + \log(f_{t, d}) \quad \text{for } f_{t, d} > 0
+$$
+
+and inverse document frequency penalizes ubiquitous tokens (such as stop words):
+
+$$
+\text{IDF}(t, \mathcal{D}) = \log\left(\frac{1 + |\mathcal{D}|}{1 + |\{d \in \mathcal{D} : t \in d\}|}\right) + 1
+$$
+
+When engineering tabular features from text fields, naive TF-IDF vectorization introduces critical practical challenges:
+
+1. **Vocabulary explosion:** An open-vocabulary text column can easily contain $50{,}000$ to $200{,}000$ unique word
+   tokens. Concatenating a $50{,}000$-dimensional sparse matrix to 15 numerical features inflates memory footprint and
+   slows down tree partition algorithms.
+2. **Frequency truncation:** Practitioners enforce document frequency thresholds, pruning tokens that appear in fewer
+   than $\text{min\_df}$ records (e.g., fewer than 5 rows) or more than $\text{max\_df}$ fraction of records (e.g., over
+   $80\%$).
+3. **Dimensionality reduction via LSA:** To compress high-dimensional sparse TF-IDF matrices into a compact
+   representation compatible with GBDTs, practitioners apply Truncated Singular Value Decomposition (Truncated SVD),
+   also known as Latent Semantic Analysis (LSA). Projecting the sparse matrix into $k \in [16, 64]$ dense orthogonal
+   components preserves dominant semantic topics while preventing text features from overwhelming structured column
+   counts.
+
 ## Hashed n-grams
+
+For streaming pipelines, high-cardinality short text strings (such as job titles, search queries, or user agent
+headers), or systems with strict memory budgets, **feature hashing** (the hashing trick) projects arbitrary n-grams into
+a fixed-width vector space $\mathbb{R}^m$ without storing an explicit vocabulary dictionary
+<Cite id="weinberger2009" />.
+
+Given a token or character n-gram $s$, a hash function $h: \mathcal{S} \to \{0, 1, \dots, m-1\}$ determines the column
+index, while a secondary sign hashing function $\xi: \mathcal{S} \to \{-1, +1\}$ determines the sign:
+
+$$
+\mathbf{x}_{\text{hash}}[h(s)] += \xi(s)
+$$
+
+Sign hashing ensures that the expected inner product between hashed vectors equals the true inner product between
+unhashed vectors ($\mathbb{E}[\langle \mathbf{x}_u, \mathbf{x}_v \rangle] = \langle \mathbf{u}, \mathbf{v} \rangle$),
+preserving linear separability despite hash collisions.
+
+Using character n-grams (subwords of length $n \in \{3, 4, 5\}$) provides critical advantages for tabular text:
+- **Robustness to typos and morphological variations:** A misspelling such as `"smarthpone"` shares multiple overlapping
+  character 3-grams (`"sma"`, `"mar"`, `"art"`, `"one"`) with the canonical token `"smartphone"`.
+- **Zero vocabulary synchronization:** In distributed pipelines or online inference microservices, feature hashing is
+  entirely stateless. Training workers and serving endpoints compute identical indices directly from the string bytes
+  without downloading a shared vocabulary artifact.
 
 ## Pretrained embeddings
 
+Modern tabular-text pipelines increasingly utilize pretrained neural encoders (such as Sentence-BERT, DeBERTa, or
+compact MiniLM models) to extract fixed-dimensional dense semantic vectors <Cite id="reimers2019" />:
+
+$$
+\mathbf{e}_i = \text{Pooling}(\text{Transformer}(\text{Tokens}(d_i))) \in \mathbb{R}^d
+$$
+
+where $d$ typically ranges from $384$ (e.g., `all-MiniLM-L6-v2`) to $768$ (e.g., standard BERT base).
+
+Pretrained sentence embeddings capture deep semantic equivalences that lexical matching completely misses: the phrase
+`"display cracked upon arrival"` and the phrase `"damaged screen out of box"` map to adjacent vectors in the semantic
+embedding space despite sharing zero identical word stems.
+
+When incorporating neural embeddings into tabular workflows:
+- **Frozen feature extraction:** The pretrained encoder weights remain frozen during tabular model training. Embeddings
+  are precomputed once offline, cached in feature stores, and joined with structured features prior to model fitting.
+- **Fine-tuned embeddings:** Fine-tuning the transformer encoder directly on the downstream prediction task (e.g.,
+  predicting insurance claim fraud from clinical notes) yields superior representations. However, full end-to-end
+  backpropagation through a transformer simultaneously with tabular gradient boosting is architecturally non-trivial and
+  computationally intensive.
+
 ## Combining with other columns
 
+Integrating text features with structured columns requires addressing structural and dimensional asymmetries:
+
+### Early fusion (Feature concatenation)
+
+The simplest approach concatenates the structured feature vector with the extracted text representation:
+
+$$
+\mathbf{x}_{\text{combined}} = [\mathbf{x}_{\text{num}} \,\|\, \mathbf{x}_{\text{cat}} \,\|\, \mathbf{z}_{\text{text}}] \in \mathbb{R}^{D_{\text{num}} + D_{\text{cat}} + D_{\text{text}}}
+$$
+
+However, early fusion creates the **feature dilution problem** in tree-based models. In algorithms like LightGBM or
+Random Forests, split candidates are sampled uniformly at random across features (e.g., `colsample_bytree = 0.8` or
+`max_features = sqrt`). If a table contains 10 structured features and a 768-dimensional BERT embedding, $98.7\%$ of
+candidate split evaluations examine dense text dimensions, severely starving the core numerical and categorical signals.
+To prevent dilution:
+- Compress text embeddings to $k \in [8, 32]$ dimensions using PCA or UMAP before concatenation.
+- Partition feature sampling so structured and text subsets are sampled independently.
+
+### Late fusion (Stacking and target encoding)
+
+Late fusion isolates text representation learning from tabular model training:
+1. A text classifier (e.g., fine-tuned MiniLM or logistic regression on TF-IDF) is trained exclusively on the text
+   column using out-of-fold cross-validation.
+2. The predicted out-of-fold probabilities or logits $\hat{y}_{\text{text}} \in \mathbb{R}^C$ are appended as $C$ scalar
+   numerical features to the structured table.
+3. The tabular GBDT trains on the structured features augmented by the calibrated text prediction score.
+
+This decouples the computational complexity of language modeling from tabular tree fitting while reducing hundreds of
+text dimensions to a single high-signal predictive scalar.
+
 ## Pitfalls
+
+- **Inference latency mismatches:** Standard tabular inference via compiled GBDT models (e.g., Treelite or ONNX)
+  executes in sub-millisecond timescales ($< 0.5\text{ ms}$). Passing raw text through a 110M-parameter transformer
+  encoder incurs $15\text{ ms}$ to $50\text{ ms}$ of latency per sample, potentially violating strict production SLAs
+  for real-time fraud or bidding systems.
+- **Target leakage during embedding fine-tuning:** Fine-tuning a text encoder on the full dataset before partitioning
+  into train and test folds leaks target information across validation boundaries. Text encoder fine-tuning and
+  out-of-fold logit generation must occur strictly inside cross-validation splits.
+- **Domain vocabulary drift:** Pretrained sentence encoders trained on general-domain web corpora (Wikipedia, Reddit)
+  frequently produce degenerate or uniform embeddings when applied to highly specialized domain tokens, such as medical
+  ICD codes, financial accounting memos, or software error traces.
+- **Conflation of missing text semantics:** An unpopulated text column can indicate an empty string (`""`), a true null
+  value (`NaN`), or a generic placeholder (`"N/A"`, `"none"`, `"no description provided"`). Collapsing all three cases
+  into a uniform zero vector discards meaningful behavioral signals regarding the reporting agent.

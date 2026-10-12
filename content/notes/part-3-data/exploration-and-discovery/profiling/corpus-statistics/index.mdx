@@ -1,28 +1,170 @@
 ---
 title: 'Corpus statistics'
 kind: concept
-summary: 'Corpus statistics summarise a text collection: document lengths, vocabulary growth, Zipf''s law, frequent n-grams and topics, and the mix of languages and sources.'
-tags: [data, nlp]
-aliases: []
-requires: []
-related: [corpus-construction]
-references: []
-status: stub
-updated: 2026-10-11
+summary: 'Corpus statistics quantify textual collections: sequence length distributions, context window truncation, Heaps’ law sublinear vocabulary growth, Zipfian term dropoffs, n-gram redundancy, and language mixture proportions.'
+tags: [data, nlp, profiling, text, language-models]
+aliases: [corpus statistics, text profiling, corpus analysis, lexical statistics]
+requires: [data-generating-process, data-profiling]
+related: [corpus-construction, target-exploration, slice-analysis]
+references: [zipf1949, heaps1978, sennrich2016, blei2003, brown2020, raffel2020]
+status: draft
+updated: 2026-10-12
 ---
 
+import { CorpusStatisticsVisualizer } from './CorpusStatisticsVisualizer'
+
 <Definition>
-To be written.
+**Corpus statistics** are the empirical quantitative distributions and scaling laws characterizing a text collection
+$\mathcal{D} = \{d_1, \dots, d_N\}$. They encompass document length distributions, sublinear vocabulary growth rates,
+power-law term frequencies, repetitive n-gram redundancies, semantic topic mixtures, and language proportions across
+sources.
 </Definition>
 
-## Lengths
+Before pre-training or fine-tuning language models, constructing retrieval-augmented generation (RAG) vector stores, or
+fitting NLP classifiers, practitioners must audit the macroscopic statistical properties of their text corpus. Raw web
+crawls and enterprise document dumps contain structural pathologies: massive context window truncation loss, web
+boilerplate repetition, skewed token frequencies, and low-resource language contamination that silently degrades
+downstream generative quality and retrieval accuracy <Cite id="raffel2020, brown2020" />.
 
-## Vocabulary and Zipf's law
+<CorpusStatisticsVisualizer />
 
-## Frequent n-grams
+## Sequence lengths and context window economics
 
-## Topic summaries
+Document lengths in natural language corpora (measured in characters, words, or subword tokens) follow heavy-tailed,
+right-skewed lognormal or Pareto-like distributions.
 
-## Language and source mix
+### Transformer context trade-offs
 
-## Pitfalls
+In transformer models, the maximum input context length $L_{\max}$ represents a hard engineering boundary:
+1. **Truncation loss**: If $L_{\max} = 1024$ and $18\%$ of documents exceed 1024 tokens, standard truncation discards
+   the trailing portions of texts—frequently cutting off conclusions, references, and critical downstream context.
+2. **Padding waste**: Setting $L_{\max} = 8192$ when $90\%$ of documents contain fewer than $300$ tokens leads to
+   extreme computation and memory waste in attention operations ($O(L^2)$ in standard attention) unless efficient
+   packed-sequence batching or flash attention masking is used.
+
+### Subword tokenizer fertility
+
+Sequence length depends heavily on the subword tokenizer (e.g. Byte-Pair Encoding <Cite id="sennrich2016" /> or
+WordPiece). **Fertility** is defined as the average number of subword tokens produced per source whitespace word:
+
+$$
+\text{Fertility} = \frac{|\text{tokens}|}{|\text{words}|}
+$$
+
+While English typically achieves a compact fertility ratio of $1.2$ to $1.4$ tokens per word, languages with
+agglutinative morphology or non-Latin scripts (such as Hindi, Arabic, or Korean) frequently experience fertilities
+exceeding $3.5$ tokens per word in English-centric vocabularies. Corpus profiling measures fertility across languages to
+identify tokenization inefficiency and inflated inference costs.
+
+## Vocabulary growth and Zipfian scaling laws
+
+Natural language vocabulary statistics are governed by fundamental empirical power laws.
+
+### Zipf's law
+
+**Zipf's law** states that the frequency $f(r)$ of a word is inversely proportional to its frequency rank $r$
+<Cite id="zipf1949" />:
+
+$$
+f(r) \propto \frac{1}{r^s}, \quad s \approx 1.0
+$$
+
+| Vocabulary Tier | Rank Range | Cumulative Token Mass | Typical Constituents | Preprocessing Considerations |
+| :--- | :--- | :--- | :--- | :--- |
+| **High-Frequency Head** | $r \le 100$ | $40\%\text{--}50\%$ | Function words (`the`, `of`, `and`) | Subsampled or masked during embedding training |
+| **Mid-Frequency Core** | $100 < r \le 10^4$ | $35\%\text{--}45\%$ | Domain nouns, verbs, descriptive predicates | Forms stable representations across architectures |
+| **Long-Tail Tail** | $r > 10^4$ | $5\%\text{--}15\%$ | Rare names, jargon, *hapax legomena* (singletons) | Addressed via subword tokenizers (BPE, WordPiece) |
+
+- **The head**: A handful of grammatical function words (stopwords) account for over $30\%$ to $50\%$ of all observed
+  token occurrences.
+- **The tail (*hapax legomena*)**: Approximately $40\%$ to $60\%$ of all unique vocabulary words appear exactly once in
+  the entire corpus. In word-level tokenizers, this tail creates prohibitive out-of-vocabulary (OOV) rates.
+
+### Heaps' law
+
+**Heaps' law** describes the growth of unique vocabulary size $V(N)$ (distinct types) as a function of total running
+token count $N$ <Cite id="heaps1978" />:
+
+$$
+V(N) = k N^\beta
+$$
+
+Where typical empirical parameters are $k \in [10, 100]$ and $\beta \in [0.4, 0.6]$. Because $\beta > 0$, the vocabulary
+never saturates—no matter how many billions of tokens are ingested, new entities, neologisms, and misspellings continue
+to appear. This sublinear growth necessitates fixed subword vocabularies (e.g., 32,000 to 128,000 BPE merge operations)
+that guarantee finite vocabulary size while preserving open-vocabulary coverage <Cite id="sennrich2016" />.
+
+## Frequent n-grams, repetition, and boilerplate
+
+Text crawled from the public web (such as Common Crawl) is heavily polluted with duplicate boilerplate: cookie banners,
+navigation sidebars, copyright notices, terms-of-service footers, and SEO link farms <Cite id="raffel2020" />.
+
+### Higher-order n-gram redundancy
+
+Corpus profiling extracts frequent $n$-grams ($n \in \{3, 4, 5, 8\}$) across documents:
+- If an 8-gram such as `"all rights reserved click here to accept cookies"` appears across $500,000$ distinct documents,
+  it represents non-informative web boilerplate that should be filtered.
+- **Line and paragraph exact deduplication**: Studies in language model pre-training show that removing duplicated
+  paragraphs drastically reduces model memorization and improves validation perplexity <Cite id="brown2020" />.
+
+### Repetition loops and n-gram entropy
+
+To detect degenerate text (such as crawler infinite loops or OCR scanning artifacts), compute Shannon entropy over local
+$n$-gram distributions:
+
+$$
+H_n = -\sum_{\mathbf{w} \in \mathcal{V}^n} p(\mathbf{w}) \log_2 p(\mathbf{w})
+$$
+
+Text segments with abnormally low $n$-gram entropy ($H_n \ll 2.0$) or high compression ratios indicate repetitive
+synthetic spam or corrupted machine output that must be quarantined.
+
+## Topic distributions and semantic diversity
+
+A robust corpus must maintain diverse conceptual coverage across its target domains.
+
+| Data Source Domain | Typical Allocation | Linguistic & Knowledge Role | Key Filtering Gate |
+| :--- | :--- | :--- | :--- |
+| **Common Crawl Web** | $60\%$ | Broad general knowledge, informal syntax | Quality classifier and MinHash dedup |
+| **Source Code Repos** | $15\%$ | Algorithmic logic, formal code syntax | Permissive licenses and syntax validation |
+| **Academic Papers (arXiv)** | $10\%$ | Technical depth, rigorous math prose | TeX conversion and formula sanity |
+| **Encyclopedias (Wikipedia)** | $5\%$ | Fact-grounded encyclopedic consensus | Structured text extract and vandalism checks |
+| **Curated Books** | $5\%$ | Long-horizon narrative coherence | OCR repair and boilerplate stripping |
+| **Dialogue & QA** | $5\%$ | Conversational interaction and instruction | Safety filters and toxic turn suppression |
+
+Using unsupervised topic models like Latent Dirichlet Allocation (LDA) <Cite id="blei2003" /> or semantic embedding
+clustering, profiling tracks the Dirichlet topic proportions
+$\boldsymbol{\theta}_d \sim \text{Dir}(\boldsymbol{\alpha})$ across documents. This verifies whether the corpus is
+dominated by specific narrow categories (e.g., $70\%$ commercial product advertisements) rather than balanced technical,
+conversational, and factual prose <Cite id="brown2020" />.
+
+## Language identification and source mix
+
+Multilingual corpus profiling uses fast identification models (such as FastText or CLD3) to classify the primary
+language $\ell \in \mathcal{L}$ of each document:
+
+1. **Low-resource contamination**: Web crawls often misclassify gibberish, code snippets, or machine-translated junk as
+   low-resource languages. Filtering by identification confidence score ($p(\ell) > 0.85$) prevents toxic synthetic
+   noise from corrupting multilingual models.
+2. **Code-switching and mixed scripts**: Technical forums and conversational chats frequently mix English technical
+   terms with other languages, requiring multilingual tokenizers that handle script shifts gracefully.
+3. **Source provenance**: Profiling maintains clear accounting of data provenance (e.g., percentage web crawl vs
+   peer-reviewed papers vs curated encyclopedias), tracking domain shifts and licensing constraints
+   <Cite id="raffel2020" />.
+
+## Diagnostic checklist
+
+To profile a text collection before model training or retrieval indexing:
+
+1. **Measure length distributions**: Plot token sequence length histograms; quantify truncation loss at target context
+   boundaries $L_{\max}$ <Cite id="raffel2020" />.
+2. **Compute tokenizer fertility**: Calculate tokens-per-word across languages; check for script inefficiencies
+   <Cite id="sennrich2016" />.
+3. **Verify Zipfian slope**: Graph log-frequency vs log-rank; verify $s \approx 1.0$ and measure hapax legomena volume
+   <Cite id="zipf1949" />.
+4. **Fit Heaps' scaling law**: Track vocabulary growth against total ingested tokens; confirm sublinear scaling exponent
+   $\beta \in [0.4, 0.6]$ <Cite id="heaps1978" />.
+5. **Screen top n-grams for boilerplate**: Identify repetitive navigation headers, legal notices, and web disclaimers
+   for automated removal.
+6. **Audit language classification**: Run language ID filters; flag low-confidence documents and assess source domain
+   balance <Cite id="brown2020" />.

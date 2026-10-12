@@ -6,23 +6,117 @@ tags: [data, statistics]
 aliases: []
 requires: []
 related: [censoring, survival-and-hazard-functions, kaplan-meier-estimator]
-references: []
-status: stub
-updated: 2026-10-11
+references: [tobin1958, kaplan1958, heitjan1991]
+status: draft
+updated: 2026-10-12
 ---
 
+import { CensoringCoarseningVisualizer } from './CensoringCoarseningVisualizer'
+
 <Definition>
-To be written.
+Censoring occurs when an observation exists in a dataset but its exact value is known only to lie beyond an upper bound
+(right-censoring), below a lower bound (left-censoring), or within an interval. Truncation occurs when observations
+falling outside a defined boundary are entirely excluded from the sampling frame. Coarsening represents the
+deterministic loss of precision through rounding, digit heaping, or aggregation into categorical brackets.
 </Definition>
+
+Machine learning models frequently ingest duration, financial, and physical measurements that have suffered systematic
+boundary distortions <Cite id="tobin1958, kaplan1958" />. Treating censored boundary limits as exact point values
+severely underestimates event horizons and biases regression slopes, while discarding censored observations discards
+long-surviving entities and injects survivorship bias.
+
+<CensoringCoarseningVisualizer />
 
 ## Detection limits and top-coding
 
+Laboratory assays, physical sensors, and public census bureaus enforce hard mathematical thresholds:
+
+1. **Limit of Detection (LOD):** In chemical, biological, and environmental measurements (e.g., blood viral loads,
+   groundwater contaminants), physical sensors lose precision below a threshold $\tau_{\text{LOD}}$. Instruments output
+   string flags such as `< 0.05 mg/L`. Naively replacing these entries with $0$, $\tau_{\text{LOD}}$, or
+   $\tau_{\text{LOD}} / 2$ creates an artificial spike at the substitution value, distorting distributional variance.
+2. **Top-Coding (Ceiling Effects):** In socioeconomic microdata, statistical agencies truncate high continuous values to
+   preserve respondent anonymity. In the US Current Population Survey, annual incomes exceeding 150,000 USD are
+   collapsed to a single constant. Standard OLS regression treating top-coded limits as literal numbers underestimates
+   income inequality and attenuates education returns.
+
 ## Censoring
+
+Censoring arises naturally whenever an observation window terminates before all events have materialized
+<Cite id="kaplan1958" />:
+
+- **Right-Censoring:** The genuine event time $T^*$ satisfies $T^* > C$, where $C$ is the censoring time (e.g., a
+  subscription customer remains active when a study concludes on day 90). The observed record is the pair:
+
+$$
+Y = \min(T^*, C), \quad \delta = \mathbb{I}(T^* \le C)
+$$
+
+- **Left-Censoring:** The event occurred at some unrecorded point prior to observation initiation ($T^* \le C_0$, e.g.,
+  an infection acquired before first clinic admission).
+- **Independent vs Informative Censoring:** Standard estimators assume *independent (non-informative) censoring*: the
+  censoring mechanism provides no information about the likelihood of event occurrence ($T^* \perp C \mid X$). If sick
+  patients drop out of a clinical drug trial because their condition worsens, censoring is informative, and naive
+  survival curves dramatically overstate drug efficacy.
+
+In regression modeling, James Tobin formulated the **Tobit model** <Cite id="tobin1958" />, maximizing a piecewise
+log-likelihood that models uncensored points with probability density $f(y_i)$ and censored points with cumulative
+survival probability $1 - F(C_i)$:
+
+$$
+\log L = \sum_{i: \delta_i=1} \log f(y_i \mid x_i) + \sum_{i: \delta_i=0} \log \left(1 - F(C_i \mid x_i)\right)
+$$
 
 ## Truncation
 
+While censoring retains the entity record with a bounded label, **truncation** completely purges units from the dataset:
+
+- **Left-Truncation (Delayed Entry):** Units enter the observation pool only if they have already survived up to a
+  qualification time $L$. In retirement studies, individuals who die before age 65 never appear in the sampling frame.
+- **Right-Truncation:** Only units whose events occurred prior to an observation cutoff are recorded. In epidemiology,
+  observing patient hospital stays during an ongoing epidemic observes only short stays; long ongoing hospitalizations
+  have not yet been discharged and are omitted.
+
+Analyzing truncated data requires conditioning the likelihood on the probability of entering the sample:
+$f(y \mid Y \ge L) = \frac{f(y)}{1 - F(L)}$. Ignoring truncation overestimates mortality or underestimates duration.
+
 ## Rounding and heaping
+
+In empirical datasets, continuous quantities are coarsened into discrete steps:
+
+- **Digit Preference and Heaping:** When survey respondents report age, income, or cigarette consumption, human memory
+  defaults to multiples of 5, 10, or 20 (heaping). Examining empirical age histograms in developing nations reveals
+  massive artificial spikes at ages 30, 35, 40, and 45.
+- **Timestamp Coarsening:** High-frequency clickstream timestamps recorded in milliseconds on mobile devices might be
+  aggregated to hourly or daily buckets in enterprise data warehouses. Discretization destroys temporal ordering between
+  fast sequential actions (e.g., viewing an ad before clicking vs clicking before viewing).
+- **Coarsening at Random (CAR):** Heitjan and Rubin established that coarsened data can be analyzed without explicitly
+  modeling the coarsening mechanism if the coarsening probability is conditionally independent of the true latent value
+  given the observed bracket <Cite id="heitjan1991" />.
 
 ## Interval-censored values
 
+In periodic surveillance (e.g., annual dental exams, quarterly medical checkups, quarterly financial reporting), the
+exact time of an event $T^*$ is never observed directly. Instead, analysts know only that an event occurred between two
+discrete inspection timestamps $(L_i, R_i]$:
+
+$$
+P(L_i < T^* \le R_i) = F(R_i) - F(L_i)
+$$
+
+When intervals are wide, imputing the midpoint $t_i = (L_i + R_i) / 2$ severely understates timing uncertainty and can
+induce false step-function artifacts in survival hazards. The non-parametric Turnbull estimator generalizes the
+Kaplan-Meier product-limit estimator to arbitrary interval-censored data via Expectation-Maximization.
+
 ## Pitfalls
+
+- **Discarding Censored Rows:** Filtering out right-censored observations (e.g., training a customer churn model only on
+  users who have already churned) discards the most loyal, long-lived customers. The model learns that every customer
+  eventually churns rapidly.
+- **Imputing Censoring Limits as Targets:** Training an XGBoost regressor where right-censored subscriptions are
+  assigned target value $y = C$. The model treats the artificial study duration $C$ as true tenure, creating severe
+  under-prediction for high-value cohorts.
+- **Confusing Truncation with Censoring:** Applying Kaplan-Meier survival curves to left-truncated data without
+  delayed-entry risk-set adjustments falsely credits treatments with early survival benefits.
+- **Heaping Artifacts in Anomaly Detection:** Anomaly detection algorithms that flag rare numerical values can mistake
+  the natural absence of non-rounded numbers (e.g., reporting 37 instead of 35 or 40) as anomalous fraudulent activity.

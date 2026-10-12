@@ -1,0 +1,77 @@
+---
+title: Comparing density ratio estimators
+kind: example
+summary: 'Four estimators of the ratio of $\Gauss(1, 0.6^2)$ to $\Gauss(0, 1)$, from samples of 10 to 1000 points: divided kernel density estimates, logistic regression, KLIEP and uLSIF. It shows where plug-in division fails and how regularisation decides small samples.'
+tags: [worked-example, density-ratio-estimation, kernel-methods]
+aliases: [density ratio estimator comparison]
+requires: [density-ratio-estimation, density-ratio-by-classification, kullback-leibler-importance-estimation-procedure, least-squares-importance-fitting]
+related: [kernel-density-estimation, importance-weighting-for-covariate-shift, cross-validation]
+references: [sugiyama2012book, kanamori2009ulsif, sugiyama2008kliep, sugiyama2012bregman, yamada2013]
+status: draft
+updated: 2026-10-12
+---
+
+import { EstimatorRace } from './EstimatorRace'
+
+<Definition>
+The denominator is $q = \Gauss(0, 1)$ and the numerator $p = \Gauss(1, 0.6^2)$. Draw $n$ points from each, for $n$
+from 10 to 1000, with each larger sample containing the smaller ones. Estimate $r(x) = p(x)/q(x)$ on $[-4, 5]$ by four
+methods, and measure each estimate $\hat r$ by its squared error $\tfrac{1}{2}\expect_q[(\hat r - r)^2]$ and by its
+generalised Kullback–Leibler error $\expect_p[\log(r/\hat r)] + \expect_q[\hat r] - 1$.
+</Definition>
+
+## Setup
+
+- **The truth.** $\log r(x) = -0.8889\, x^2 + 2.7778\, x - 0.8781$, derived in
+  <NoteLink to="density-ratio-by-classification" />. It peaks at $x = 1.5625$, where $r = 3.64$, and falls towards 0
+  on both sides because $p$ is narrower than $q$.
+- **Divided kernel density estimates.** $\hat p / \hat q$, each a Gaussian
+  <NoteLink to="kernel-density-estimation">kernel density estimate</NoteLink> with Scott's bandwidth.
+- **<NoteLink to="logistic-regression">Logistic regression</NoteLink>.** Features $1$ and 20 Gaussian bumps of width
+  $\sigma$ centred on points of the pooled sample, with the penalty $\lambda = 0.01$, fitted to convergence.
+- **<Gloss name="kliep" />.** 50 <Gloss name="rbf-kernel">Gaussian kernels</Gloss> of width $\sigma$ centred on points
+  of the sample from $p$, 80 steps of accelerated projected gradient.
+- **<Gloss name="ulsif" />.** The same 50 kernels, with $\lambda$ chosen from $\set{0.001, 0.01, 0.1, 1}$ by
+  three-fold <NoteLink to="cross-validation">cross-validation</NoteLink> at every $n$.
+
+The three kernel methods share the width $\sigma$, so they differ only in their losses and their regularisation.
+
+## Solution
+
+The errors are integrals over the grid, computed from the true densities. The squared error is the quantity uLSIF
+minimises in expectation. The Kullback–Leibler error is the divergence from $p$ to $\hat r\, q$ without the
+normalisation, which KLIEP minimises. Neither error favours the logistic loss, which weights the two samples
+symmetrically. All three losses belong to the Bregman family of <NoteLink to="density-ratio-estimation" />, so the
+comparison is between three choices of the same principle <Cite id="sugiyama2012bregman" />.
+
+## Simulation
+
+<EstimatorRace />
+
+## What it illustrates
+
+- **Plug-in division fails in the tails.** With small samples, the quotient of two
+  <NoteLink to="kernel-density-estimation">kernel density estimates</NoteLink> is far off wherever either sample has
+  no points, and its error is many orders of magnitude above the others. It improves as the samples fill the tails,
+  which is the reason <NoteLink to="density-ratio-estimation" /> argues for fitting the ratio directly.
+- **Regularisation decides small samples.** uLSIF chooses its penalty by cross-validation at every size and stays
+  close from the start <Cite id="kanamori2009ulsif" />. KLIEP and logistic regression, with no tuned penalty, follow
+  individual points of small samples. KLIEP's width can be cross-validated on the held-out log-likelihood
+  <Cite id="sugiyama2008kliep" />, and the classifier's penalty on the held-out log loss.
+- **The two errors look at different places.** The squared error weights mistakes by $q$, so it is dominated by the
+  tails of $q$ where $r$ is small. The Kullback–Leibler error weights the log of the ratio by $p$, so it is dominated by
+  the region where $p$ has mass. An estimator chosen for
+  <NoteLink to="importance-weighting-for-covariate-shift">importance weighting</NoteLink> should be judged by the error
+  that matters for the weights.
+
+## Variations
+
+- **A wider numerator.** With the standard deviation of $p$ above 1, the true ratio grows without bound in both tails
+  and $\expect_q[r^2]$ can be infinite. Every estimator then struggles in the tails; the relative density ratio is
+  the usual remedy <Cite id="yamada2013" />.
+- **A larger shift.** Moving the mean of $p$ away from 0 puts $p$'s mass where $q$ has few points. All errors grow,
+  and the <Gloss name="ess">effective sample size</Gloss> of the weights falls.
+- **The kernel width.** A small $\sigma$ lets every kernel method overfit; a large one flattens the ratio towards a
+  constant. The shared $\sigma$ in the figure shows how sensitive each method is to it.
+- **More dimensions.** Kernel density estimates degrade quickly with dimension, while the direct methods degrade
+  more slowly <Cite id="sugiyama2012book" />.

@@ -2,25 +2,133 @@
 title: 'Transcript normalisation'
 kind: concept
 summary: 'Transcripts are normalised before training and scoring: numerals, punctuation, casing and disfluencies. The choices change word error rate as much as many model changes.'
-tags: [data, speech]
-aliases: []
+tags: [data, speech, text-normalization, wer, evaluation]
+aliases: [transcript normalisation, speech text normalization, wer normalization, whisper normalizer]
 requires: []
-related: [word-and-character-error-rates, text-normalisation]
-references: []
-status: stub
-updated: 2026-10-11
+related: [word-and-character-error-rates, text-normalisation, speech-transcripts-and-alignment, digital-audio]
+references: [radford2023, sproat2001]
+status: draft
+updated: 2026-10-12
 ---
 
+import { TranscriptNormalisationVisualizer } from './TranscriptNormalisationVisualizer'
+
 <Definition>
-To be written.
+**Transcript normalisation** is the deterministic text-processing pipeline applied to reference transcripts and model
+hypothesis texts prior to acoustic model training and performance scoring <Cite id="radford2023, sproat2001" />. It
+standardizes non-standard written symbols (such as digits, dates, and currencies) into spoken words, harmonizes
+punctuation and letter casing, expands contractions, reconciles regional spelling variants, and filters conversational
+disfluencies.
 </Definition>
+
+In speech recognition research and deployment, evaluating an automatic speech recognition (ASR) system appears
+straightforward: compute the Levenshtein distance between the model's output and the human ground-truth transcript. In
+practice, however, raw text evaluation is plagued by formatting discrepancies.
+
+If an ASR model hears acoustic speech and outputs `"I paid $25 on May 3rd"`, while the reference human annotator wrote
+`"I paid twenty-five dollars on May third"`, the acoustic transcription is flawless. Yet a naive Word Error Rate (WER)
+calculation scores three substitutions and one insertion, severely penalizing the system. As demonstrated by Radford et
+al. (2023), inconsistent transcript normalization can alter reported WER by $2\text{ to }8\text{ percentage points}$—a
+discrepancy exceeding the performance margin between successive model architectures.
+
+<TranscriptNormalisationVisualizer />
 
 ## Numerals
 
+Numbers, dates, currencies, and mathematical units are written symbolically as **Non-Standard Words (NSWs)** rather than
+phonetically <Cite id="sproat2001" />. Evaluating speech models requires systematically expanding NSWs into their fully
+articulated spoken forms:
+
+- **Cardinal numbers:**
+  - `42` $\to$ `"forty-two"`
+  - `1500` $\to$ `"fifteen hundred"` or `"one thousand five hundred"` (depending on domain conventions).
+- **Ordinal numbers:**
+  - `1st` $\to$ `"first"`, `2nd` $\to$ `"second"`, `23rd` $\to$ `"twenty-third"`.
+- **Currency values:**
+  - `$5.50` $\to$ `"five dollars and fifty cents"`
+  - `£20` $\to$ `"twenty pounds"`
+- **Dates, times, and years:**
+  - `2026` $\to$ `"twenty twenty-six"`
+  - `4:30 pm` $\to$ `"four thirty p m"`
+- **Physical units:**
+  - `10 kg` $\to$ `"ten kilograms"`, `60 mph` $\to$ `"sixty miles per hour"`.
+
+Without automated numeral expansion, a single written token (`"$100"`) compared against its spoken counterpart
+(`"one hundred dollars"`) creates multiple artificial substitution and insertion errors.
+
 ## Punctuation and casing
+
+Human transcribers frequently disagree on stylistic punctuation and capitalization:
+
+### Case folding
+
+Letter case conveys orthographic convention rather than acoustic difference. Comparing `"Berlin"` against `"berlin"` or
+`"NASA"` against `"nasa"` without case-folding introduces artificial vocabulary fragmentation. Evaluation pipelines fold
+all text to lowercase prior to computing Levenshtein alignment.
+
+### Punctuation removal
+
+Commas, periods, semicolons, em-dashes, and quotation marks represent prosodic pauses and syntactic structure rather
+than discrete acoustic phonemes. A speaker taking a breath may cause one human annotator to insert a comma and another
+to omit it. Stripping all non-alphanumeric punctuation prevents punctuation differences from penalizing acoustic word
+recognition.
+
+### Contraction and spelling harmonization
+
+English exhibits substantial variation in spelling and contractions:
+- **Contraction expansion:** Standardizing `"can't"` to `"cannot"`, `"it's"` to `"it is"`, and `"they'd"` to
+  `"they would"`.
+- **Dialectal spelling reconciliation:** Harmonizing British and American English spellings (e.g., mapping `"colour"` to
+  `"color"`, `"theatre"` to `"theater"`, and `"organise"` to `"organize"`).
 
 ## Disfluencies
 
+Conversational speech is dense with speech disfluencies:
+- **Filled pauses:** `"um"`, `"uh"`, `"er"`, `"ah"`, `"hmm"`.
+- **Word repetitions:** `"the the question"`
+- **False starts:** `"I was— I wanted to ask"`
+
+In many speech datasets (such as Switchboard or CallHome), human transcribers annotate every vocal hesitation. However,
+modern end-to-end ASR models trained on mixed web audio often learn to omit filler words, outputting clean grammatical
+prose.
+
+If the reference transcript contains `"um I think uh yes"` and the model predicts `"I think yes"`, naive WER penalizes
+the model with two deletion errors. Standardized evaluation normalizers—such as the Whisper text normalizer
+<Cite id="radford2023" />—explicitly strip common disfluencies from both reference and hypothesis before scoring to
+measure true lexical accuracy.
+
 ## Effect on word error rate
 
+Word Error Rate is computed as the normalized edit distance:
+
+$$
+\text{WER} = \frac{S + D + I}{N}
+$$
+
+where $S$ is the number of substitutions, $D$ is deletions, $I$ is insertions, and $N$ is the total number of words in
+the reference transcript.
+
+In the Whisper study, Radford et al. demonstrated that transcript normalization is as consequential to reported
+benchmark scores as core model architecture choices:
+1. On noisy datasets like Common Voice, unnormalized raw text evaluation frequently yields WERs exceeding $18\%$.
+2. Applying lowercasing and punctuation stripping drops the measured WER to $\sim 12\%$.
+3. Applying comprehensive numeral verbalization, contraction standardization, and British-American harmonization further
+   lowers the measured WER to $7.8\%$.
+
+Over half of the apparent errors in raw evaluations stem from orthographic formatting choices rather than incorrect
+speech recognition.
+
 ## Pitfalls
+
+- **Asymmetric evaluation normalization:** Normalizing the model hypothesis while leaving the ground-truth reference
+  unnormalized (or vice-versa) guarantees severe formatting mismatches, wildly inflating reported error rates.
+- **Accidental meaning corruption during regex normalization:** Naively applying global regex replacements (e.g.,
+  replacing all periods with spaces) can corrupt decimal numbers (`"3.14"` becoming `"3 14"`) or acronyms (`"U.S.A."`
+  becoming `"U S A"`).
+- **Evaluating multilingual speech with English normalization rules:** Applying English-specific contraction and number
+  expansion scripts to languages with complex morphological inflection (such as German compound nouns, Arabic clitics,
+  or French elisions like `"l'homme"`) breaks valid words and corrupts character boundaries.
+- **Discarding punctuation needed for downstream tasks:** If an ASR system feeds a downstream Large Language Model for
+  summarization or machine translation, completely stripping punctuation in the production serving pipeline degrades LLM
+  comprehension. In production, models should output truecased, punctuated text, with normalization applied strictly
+  inside offline evaluation benchmarks.

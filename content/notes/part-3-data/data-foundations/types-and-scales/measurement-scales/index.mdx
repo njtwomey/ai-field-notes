@@ -1,44 +1,171 @@
 ---
 title: 'Data types and measurement scales'
 kind: concept
-summary: 'A measurement scale says which operations on a variable''s values are meaningful: nominal values can only be compared for equality, ordinal values can be ordered, interval values can be subtracted and ratio values can also be divided.'
+summary: "A measurement scale says which operations on a variable's values are meaningful: nominal values can only be compared for equality, ordinal values can be ordered, interval values can be subtracted and ratio values can also be divided."
 tags: [data, statistics]
 aliases: []
 requires: []
 related: [categorical-encoding, feature-scaling]
-references: []
-status: stub
-updated: 2026-10-11
+references: [stevens1946, aitchison1982]
+status: draft
+updated: 2026-10-12
 ---
 
+import { MeasurementScalesVisualizer } from './MeasurementScalesVisualizer'
+
 <Definition>
-To be written.
+A measurement scale defines the mathematical and relational properties preserved when real-world empirical phenomena are
+mapped to numbers. Formalized by Stanley Smith Stevens, measurement scales dictate which mathematical transformations
+leave the empirical meaning of the numbers unchanged, and consequently which statistical operations, encodings, and loss
+functions are mathematically valid.
 </Definition>
+
+In machine learning pipelines, data types are frequently confused with storage formats: a floating-point column might
+represent a physical ratio (mass in kilograms), an arbitrary interval scale (calendar year), an encoded ordinal rating
+(star rating 1.0 to 5.0), or a hashed nominal identifier <Cite id="stevens1946" />. Treating numbers according to their
+programming data type (`float64`) rather than their underlying measurement scale injects spurious inductive biases,
+distorts distance metrics, and corrupts model optimization.
+
+<MeasurementScalesVisualizer />
 
 ## The four scales
 
+Stevens' classical taxonomy categorizes measurements into a four-level hierarchy based on the mathematical
+transformations that preserve their empirical relational structure <Cite id="stevens1946" />:
+
 ### Nominal
+
+On a nominal scale, numbers or symbols serve exclusively as distinct labels or category tags. The only meaningful
+empirical relation between two observations is equivalence ($=$ or $\neq$).
+
+- **Permissible Transformations:** Any one-to-one mapping (permutations): $f(x)$ where
+  $x_1 \neq x_2 \implies f(x_1) \neq f(x_2)$.
+- **Examples:** Postal codes, telephone area codes, IP addresses, blood types (`A`, `B`, `AB`, `O`), device operating
+  systems.
+- **Valid Operations:** Mode, frequencies, contingency tables, entropy, mutual information. Computing the arithmetic
+  mean of postal codes (`mean([94103, 10001]) = 52052`) is mathematically meaningless.
 
 ### Ordinal
 
+An ordinal scale introduces a strict transitive order relation ($<$ or $>$). Numbers reflect ranking, but the numerical
+distance between adjacent ranks is undefined and non-uniform.
+
+- **Permissible Transformations:** Any strictly monotonic increasing transformation: $f(x)$ where
+  $x_1 < x_2 \iff f(x_1) < f(x_2)$.
+- **Examples:** Likert agreement scales (1 = Strongly Disagree to 5 = Strongly Agree), education levels (High School <
+  Bachelors < Masters < PhD), stage of cancer progression (Stage I through IV), search result ranks.
+- **Valid Operations:** Median, percentiles, rank-order correlations (Spearman's $\rho$, Kendall's $\tau$), ordinal
+  logistic regression. Subtracting ordinal values ($4 - 3 = 1$ and $2 - 1 = 1$) assumes equal subjective spacing that is
+  not supported by the scale.
+
 ### Interval
+
+On an interval scale, differences between values are quantitatively meaningful and equal across the entire scale.
+However, the origin (zero point) is arbitrary and defined by convention rather than the absolute absence of the measured
+attribute.
+
+- **Permissible Transformations:** Positive affine transformations: $f(x) = a x + b$ where $a > 0$.
+- **Examples:** Temperature in degrees Celsius or Fahrenheit ($0^\circ\text{C}$ is arbitrarily defined as the freezing
+  point of water, not the total absence of thermodynamic heat), calendar years (AD/BC), credit scores.
+- **Valid Operations:** Arithmetic mean, standard deviation, variance, Pearson correlation, Euclidean distance, linear
+  regression. Ratios are invalid: $40^\circ\text{C}$ is not "twice as hot" as $20^\circ\text{C}$ (in absolute Kelvin,
+  $313.15\,\text{K}$ versus $293.15\,\text{K}$ represents an increase of only $6.8\%$).
 
 ### Ratio
 
+A ratio scale possesses all properties of an interval scale, plus an absolute, non-arbitrary zero point denoting the
+complete absence of the measured property.
+
+- **Permissible Transformations:** Similarity / positive scalar multiplications: $f(x) = a x$ where $a > 0$.
+- **Examples:** Mass, length, duration, monetary amounts, Kelvin temperature, pixel luminance, network latency.
+- **Valid Operations:** Geometric mean, harmonic mean, coefficient of variation ($CV = \sigma / \mu$), percent changes,
+  logarithmic transformations, power-law modeling. Ratios are fully meaningful: 20 kilograms is identically twice as
+  heavy as 10 kilograms.
+
 ## Typed values beyond the four scales
+
+Modern machine learning regularly encounters complex mathematical structures that do not fit neatly into Stevens' four
+classical scales:
 
 ### Counts and rates
 
+Counts represent discrete, non-negative integers ($\mathbb{N}_0 = \{0, 1, 2, \dots\}$) with a natural zero. They are
+bounded below and often exhibit variance proportional to the mean. Standard Gaussian regression assumes symmetric
+continuous errors; count data requires Poisson, quasi-Poisson, or Negative Binomial generalized linear models with
+log-link functions and exposure offsets (e.g., clicks per impression, crimes per capita).
+
 ### Proportions and compositions
+
+Compositional data represents parts of a whole constrained to sum to a constant (e.g., budget allocations, chemical
+element concentrations, topic distribution mixtures). The sample space is the simplex:
+
+$$
+\mathcal{S}^D = \left\{ (x_1, \dots, x_D) \in \mathbb{R}^D : x_i > 0, \sum_{i=1}^D x_i = 1 \right\}
+$$
+
+Applying standard Euclidean covariance to raw proportions induces spurious negative correlations because increasing one
+component forces others to decrease <Cite id="aitchison1982" />. Valid modeling requires log-ratio transformations, such
+as the Centered Log-Ratio (CLR) or Isometric Log-Ratio (ILR) mapped onto Aitchison geometry.
 
 ### Durations and times
 
+Temporal variables encompass two distinct scales:
+1. **Wall-clock Timestamps (Interval):** Point-in-time references (`2026-10-12T09:30:00Z`).
+2. **Elapsed Durations (Ratio):** Positive continuous time intervals ($\Delta t \ge 0$). In survival analysis, durations
+   are frequently right-censored, necessitating Cox proportional hazards or Weibull parametric formulations.
+
 ### Circular quantities
+
+Directional and periodic quantities—such as compass heading ($\theta \in [0, 360^\circ)$), wind direction, and cyclical
+time (hour of day $\in [0, 24)$, day of week $\in [0, 7)$)—wrap around at boundary limits. Linear metrics suffer
+catastrophic boundary discontinuities: the linear distance between 23:00 and 01:00 is 22 hours, whereas the true
+circular distance is 2 hours. Circular features require directional statistics (von Mises distributions) or 2D harmonic
+coordinate embedding:
+
+$$
+x_{\text{sin}} = \sin\left(\frac{2\pi t}{T}\right), \quad x_{\text{cos}} = \cos\left(\frac{2\pi t}{T}\right)
+$$
 
 ### Sets, lists and free text
 
+Modern inputs include permutation-invariant sets (tags, installed apps), ordered sequences (click paths, audio samples),
+and natural language text. These require permutation-equivariant neural architectures (DeepSets), sequence models
+(Transformers), or dense multi-dimensional vector embeddings.
+
 ## What each scale permits
+
+| Scale | Relation Preserved | Permissible Transformation | Central Tendency | Dispersion | Admissible Models |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| **Nominal** | Equality ($=, \neq$) | Permutation: $\pi(x)$ | Mode | Information Entropy | Tree splits, One-hot + linear, Embeddings |
+| **Ordinal** | Order ($<, >$) | Monotonic: $f'(x) > 0$ | Median | Interquartile Range (IQR) | Decision trees, Ordinal regression, RankNet |
+| **Interval** | Difference ($x_i - x_j$) | Positive Affine: $ax + b$ | Arithmetic Mean | Standard Deviation ($\sigma$) | Linear regression, Ridge/Lasso, PCA, Neural nets |
+| **Ratio** | Ratio ($x_i / x_j$) | Positive Scale: $ax$ | Geometric Mean | Coeff. of Variation ($\sigma / \mu$) | Log-linear models, Gamma GLM, Elasticity models |
+| **Circular** | Angle on circle | Rotation: $\theta + \alpha \pmod{2\pi}$ | Mean Direction | Circular Variance | Harmonic embedding $[\sin, \cos]$, Von Mises |
 
 ## Consequences for encoding and models
 
+1. **Distance-Based Algorithms (k-NN, SVM, k-Means):** Computing Euclidean distance $\|x - y\|_2$ across raw nominal
+   integers (treating postal codes as numbers) or ordinal ranks implicitly assumes a uniform interval metric. Points
+   with numerical distance 10 are treated as 10 times further apart than points with distance 1, corrupting
+   nearest-neighbor graphs.
+2. **Gradient Descent and Feature Scaling:** Applying standard Z-score standardization ($z = (x - \mu) / \sigma$) to
+   ordinal scales assumes that the mean $\mu$ and standard deviation $\sigma$ are meaningful, altering the subjective
+   psychological spacing between rank steps.
+3. **Tree-Based Ensembles:** Decision trees (Random Forests, LightGBM, XGBoost) split on threshold inequalities
+   ($x_j \le c$). Because monotonic transformations preserve inequalities identically, tree models are invariant to
+   monotonic transformations of ordinal and continuous features, making them naturally robust to ordinal scaling
+   distortions.
+
 ## Pitfalls
+
+- **The Likert-as-Interval Fallacy:** Averaging 5-point customer satisfaction surveys and computing standard deviations
+  assumes the subjective gap between "Neutral" (3) and "Satisfied" (4) is identical to the gap between "Very
+  Dissatisfied" (1) and "Dissatisfied" (2). In reality, the psychological step to extreme sentiment is non-linear.
+- **Encoding Hour-of-Day as an Integer:** Feeding raw integers $0 \dots 23$ into a linear model forces the model to
+  learn that midnight ($0$) and 23:00 are polar opposites, destroying diurnal rhythm patterns.
+- **Log-Transforming Non-Ratio Variables:** Applying $\log(x)$ or $\log(x + 1)$ to interval variables (such as
+  temperatures in Celsius or calendar years) produces arbitrary outputs that change completely if Celsius is converted
+  to Fahrenheit. Log transforms are admissible only on ratio scales where zero represents an absolute physical floor.
+- **One-Hot Encoding High-Cardinality Ordinal Variables:** Converting a 10-level ordinal severity score into 10
+  independent binary columns discards natural monotonic ordering, forcing downstream models to learn 10 independent
+  parameters and inviting overfitting.

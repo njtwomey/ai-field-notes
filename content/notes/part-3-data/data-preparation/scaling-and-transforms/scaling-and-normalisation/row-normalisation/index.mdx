@@ -3,24 +3,132 @@ title: 'Row normalisation'
 kind: concept
 summary: 'Row normalisation scales each example, not each feature, to unit norm. Euclidean distances between normalised rows then rank like cosine similarities, as for TF-IDF and embedding vectors.'
 tags: [data, feature-engineering]
-aliases: []
-requires: []
+aliases: [row normalization, unit-norm scaling, L2 normalization, Normalizer]
+requires: [feature-scaling]
 related: [pairwise-distances-and-cosine-similarity, term-frequency-inverse-document-frequency]
 references: []
-status: stub
+status: draft
 updated: 2026-10-11
 ---
 
 <Definition>
-To be written.
+**Row normalisation** (or instance normalisation) is an individual sample transformation that scales each example vector
+$x_i \in \mathbb{R}^D$ independently to have unit norm under a chosen metric norm $\|\cdot\|_p$, discarding the
+magnitude of the instance while preserving its directional orientation.
 </Definition>
 
-## Unit-norm rows
+Unlike column scaling (such as `StandardScaler` or `MinMaxScaler`), which operates column-wise across the entire dataset
+to normalize feature distributions across samples, row normalisation operates horizontally along axis 1 within each
+individual instance:
 
-## Cosine geometry
+$$
+x_i' = \frac{x_i}{\|x_i\|_p}
+$$
+
+Because the transformation depends exclusively on the elements of that single observation vector, row normalisation is
+**completely stateless**: it estimates no parameters from training distributions, avoids cross-validation leakage by
+construction, and can be applied seamlessly to streaming inference requests without storing reference statistics.
+
+import { RowNormalizationVisualizer } from './RowNormalizationVisualizer';
+
+<RowNormalizationVisualizer />
+
+## Unit-norm rows and norm choices
+
+Depending on the domain semantics, different vector norms are selected:
+
+### 1. $L_2$ norm (Euclidean unit sphere)
+The Euclidean norm projects every non-zero instance onto the boundary of the unit hypersphere $\mathbb{S}^{D-1}$:
+
+$$
+\|x\|_2 = \sqrt{\sum_{j=1}^D x_j^2}, \qquad x' = \frac{x}{\|x\|_2}
+$$
+
+After transformation, $\|x'\|_2 = 1$ for all instances. This is standard in text mining, information retrieval, and
+dense deep learning embeddings.
+
+### 2. $L_1$ norm (Manhattan simplex)
+The Manhattan norm scales elements so that their absolute values sum to unity:
+
+$$
+\|x\|_1 = \sum_{j=1}^D |x_j|, \qquad x' = \frac{x}{\|x\|_1}
+$$
+
+For non-negative vectors (such as word counts or topic mixtures), $L_1$ normalization projects observations onto the
+standard probability simplex $\Delta^{D-1}$, converting raw counts into relative frequency distributions.
+
+### 3. $L_\infty$ norm (Maximum absolute value)
+Scales each row by its maximum absolute component:
+
+$$
+\|x\|_\infty = \max_{j} |x_j|, \qquad x' = \frac{x}{\|x\|_\infty}
+$$
+
+guaranteeing that all coordinates fall within $[-1, 1]$ with at least one coordinate reaching $\pm 1$.
+
+## Cosine geometry and Euclidean equivalence
+
+The central theoretical advantage of $L_2$ row normalisation is establishing exact mathematical equivalence between
+Euclidean distance and cosine similarity.
+
+For any two unit-length vectors $u, v \in \mathbb{R}^D$ where $\|u\|_2 = \|v\|_2 = 1$:
+
+$$
+\|u - v\|_2^2 = \|u\|_2^2 + \|v\|_2^2 - 2 \langle u, v \rangle = 1 + 1 - 2 \cos(\theta) = 2(1 - \cos(\theta))
+$$
+
+Taking the square root yields:
+
+$$
+\|u - v\|_2 = \sqrt{2(1 - \cos(\theta))}
+$$
+
+where $\cos(\theta) = \frac{\langle u, v \rangle}{\|u\|_2 \|v\|_2}$ is the cosine similarity.
+
+Because $\sqrt{2(1 - s)}$ is a strictly monotonically decreasing function of similarity $s \in [-1, 1]$:
+- Finding the nearest neighbor that minimizes Euclidean distance $\|u - v\|_2$ is **strictly identical** to finding the
+  neighbor that maximizes cosine similarity $\cos(\theta)$.
+- Standard indexing algorithms and libraries optimized for Euclidean distance (such as FAISS, ScaNN, or KD-Trees) can
+  perform exact cosine similarity retrieval simply by $L_2$-normalizing vectors prior to insertion.
+- The inner product simplifies to a pure dot product: $\langle u, v \rangle = \cos(\theta)$, enabling fast matrix
+  multiplication for batch similarity queries.
 
 ## Normalised TF-IDF vectors
 
-## Embedding vectors
+In bag-of-words and term frequency-inverse document frequency (TF-IDF) representations, document vectors have dimensions
+corresponding to vocabulary terms. Without row normalisation, long documents with thousands of words naturally exhibit
+large component magnitudes, whereas brief one-sentence abstracts have tiny magnitudes.
 
-## Pitfalls
+In un-normalised Euclidean space, a long article and a brief summary discussing the exact same topic would appear
+separated by an enormous Euclidean distance simply due to length disparity.
+
+$L_2$ normalisation neutralizes document length bias:
+1. Two documents with identical relative word frequencies map to collinear rays from the origin.
+2. Normalisation collapses both documents to the exact same point on the unit sphere.
+3. Euclidean clustering ($k$-Means) or classification (SVM) then groups documents by topical content rather than
+   verbosity.
+
+## Neural embedding vectors
+
+Modern representation learning in deep learning widely enforces unit-norm geometry on learned embeddings:
+
+- **Sentence and text embeddings:** Models like sentence-transformers and retrieval bi-encoders normalize output
+  embeddings so that similarity scoring is computed via standard inner products $\langle e_q, e_d \rangle$.
+- **Face recognition (ArcFace / CosFace):** Normalizing both feature embeddings and classifier weight vectors to unit
+  norm maps the classification problem onto angular margins on the hypersphere, dramatically boosting intra-class
+  compactness and inter-class discrepancy.
+- **Multimodal contrastive learning (CLIP):** Image and text projection vectors are normalized to unit norm before
+  computing the cross-modal cosine similarity matrix scaled by a learnable temperature $\tau$.
+
+## Pitfalls and failure modes
+
+1. **Zero vectors:** If an instance contains all zeros (e.g. an out-of-vocabulary document with zero matched terms),
+   $\|x\|_p = 0$. Division by zero causes `NaN` or runtime crashes. Robust implementations (such as scikit-learn's
+   `Normalizer`) leave all-zero rows unchanged.
+2. **Loss of magnitude information:** In applications where the absolute volume carries critical predictive signal (e.g.
+   total customer transaction volume, total sensor energy, or raw financial portfolio size), row normalisation discards
+   this scale. If total magnitude is important, retain $\|x\|_p$ as an explicit standalone scalar feature before
+   normalising.
+3. **Confusing row normalisation with column scaling:** Applying row normalisation when column standardization was
+   intended (or vice versa) can severely distort model training. Column scaling standardizes distributions across
+   samples; row normalisation alters the internal geometry within an individual record.

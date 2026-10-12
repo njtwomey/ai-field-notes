@@ -2,29 +2,165 @@
 title: 'Audio preprocessing'
 kind: concept
 summary: 'Audio preprocessing brings recordings to a common form: one sample rate and channel layout, normalised loudness, trimmed silence, detected speech and fixed-length segments.'
-tags: [data, audio, speech]
-aliases: []
+tags: [data, audio, speech, signal-processing, preprocessing]
+aliases: [speech preprocessing, audio preparation, vad, pre-emphasis]
 requires: []
-related: [mel-spectrogram, short-time-fourier-transform, spectral-subtraction-and-denoising]
-references: []
-status: stub
-updated: 2026-10-11
+related: [digital-audio, audio-augmentation, mel-spectrogram, short-time-fourier-transform, spectral-subtraction-and-denoising]
+references: [rabiner2007, davis1980]
+status: draft
+updated: 2026-10-12
 ---
 
+import { AudioPreprocessingVisualizer } from './AudioPreprocessingVisualizer'
+
 <Definition>
-To be written.
+**Audio preprocessing** is the sequential digital signal processing pipeline applied to raw acoustic recordings to
+standardize sampling rates, channel topologies, perceived loudness levels, spectral tilt, and temporal utterance
+boundaries <Cite id="rabiner2007" />. Proper preprocessing ensures that downstream neural architectures learn
+generalizable phonetic and acoustic representations rather than overfitting to recording hardware idiosyncrasies,
+ambient microphone gain variations, or trailing background silence.
 </Definition>
+
+In production machine learning systems, raw audio arrives with extreme heterogeneity: studio podcasts recorded with
+broadcast condensers, phone calls sampled at 8 kHz with heavy lossy compression, and smartphone voice memos with
+variable speaker distances and background noise.
+
+Feeding raw waveforms directly to neural models without preprocessing forces networks to waste representational capacity
+compensating for volume discrepancies and spectral tilt. A standard preprocessing workflow encompasses loudness
+normalization, pre-emphasis filtering, silence trimming, voice activity detection (VAD), segmentation, and
+time-frequency transformation into log-mel spectrograms.
+
+<AudioPreprocessingVisualizer />
 
 ## Loudness normalisation
 
+Variations in microphone sensitivity, speaker distance, and recording gain introduce severe amplitude imbalances across
+datasets (often exceeding $30\text{ dB}$). Three strategies address amplitude normalisation:
+
+### Peak normalisation
+
+Scales the entire recording linearly so its maximum absolute sample reaches a target ceiling (e.g., $0\text{ dBFS}$ or
+$-1.0\text{ dBFS}$):
+
+$$
+x_{\text{norm}}[n] = \frac{x[n]}{\max_k |x[k]|} \cdot 10^{\text{target\_dB} / 20}
+$$
+
+- **Limitation:** A single extraneous transient spike (such as an electrical click, microphone pop, or door slam) forces
+  the normalization factor down, leaving the remainder of the conversational speech quiet and unnormalized.
+
+### Root Mean Square (RMS) normalisation
+
+Scales audio based on total average signal energy:
+
+$$
+\text{RMS} = \sqrt{\frac{1}{N} \sum_{n=1}^N x[n]^2}
+$$
+
+- **Limitation:** RMS normalisation is heavily skewed by silence duration. A file with 10 seconds of speech and 20
+  seconds of silence exhibits low RMS energy and gets boosted excessively, amplifying background noise.
+
+### Integrated perceptual loudness (EBU R128 / ITU-R BS.1770)
+
+The international broadcast standard calculates perceived loudness in Loudness Units relative to Full Scale (LUFS). It
+applies:
+1. **K-weighting filter:** Pre-filters audio to model the human ear's increased sensitivity to frequencies between
+   $1\text{--}5\text{ kHz}$.
+2. **Dual-gated RMS integration:** Excludes silent pauses below $-70\text{ LUFS}$ and quiet passages $10\text{ dB}$
+   below un-gated loudness.
+
+Standardizing audio datasets to a fixed integrated loudness (typically $-23\text{ LUFS}$ or $-16\text{ LUFS}$) achieves
+consistent conversational volume across diverse acoustic environments without clipping.
+
 ## Pre-emphasis
+
+In human speech production, the acoustic volume velocity source at the vibrating vocal cords naturally rolls off at
+approximately $-6\text{ dB / octave}$ <Cite id="rabiner2007" />. Consequently, lower vowel formants
+($F_1 \approx 300\text{--}800\text{ Hz}$) contain vastly higher spectral energy than higher formants
+($F_2, F_3 \approx 2\text{--}4\text{ kHz}$) and unvoiced fricatives ($>5\text{ kHz}$).
+
+To equalize dynamic range across the frequency spectrum, speech pipelines apply a first-order high-pass FIR
+**pre-emphasis filter**:
+
+$$
+y[n] = x[n] - \alpha x[n-1]
+$$
+
+where $\alpha \in [0.95, 0.98]$ (typically $0.97$).
+
+The frequency response of the pre-emphasis filter is:
+
+$$
+|H(e^{j\omega})|^2 = 1 + \alpha^2 - 2\alpha \cos(\omega)
+$$
+
+Pre-emphasis provides $+15\text{ to }+20\text{ dB}$ of high-frequency gain, boosting formant clarity and preventing
+numerical underflow in high-frequency Short-Time Fourier Transform bins.
 
 ## Silence trimming
 
+Audio recordings frequently contain seconds of dead air before speech begins and after speech concludes. Leading and
+trailing silence inflates training compute and wastes attention spans in Transformer architectures.
+
+Silence trimming algorithms:
+1. Compute short-time energy $E[m] = \sum_{n} x[n]^2 w[n - m]$ across overlapping windows ($20\text{--}30\text{ ms}$).
+2. Identify the first and last frames that exceed an energy threshold relative to the file peak (e.g.,
+   $40\text{--}60\text{ dB}$ below peak).
+3. **Safety padding:** Retain a buffer of $100\text{--}200\text{ ms}$ before the onset and after the offset to avoid
+   clipping soft word-initial plosives ($/p/, /t/, /k/$) or unvoiced word-final consonants.
+
 ## Voice activity detection
+
+While silence trimming removes outer borders, continuous audio contains internal pauses, breathing breaks, and ambient
+noise. **Voice Activity Detection (VAD)** segments continuous audio into discrete speech chunks:
+
+- **Energy and Zero-Crossing Rate (ZCR):** Voiced speech exhibits high energy and low zero-crossing rates; unvoiced
+  speech exhibits moderate energy and high zero-crossing rates; background ambient noise exhibits low energy and low
+  zero-crossing rates.
+- **Statistical VAD (Sohn model):** Evaluates Gaussian likelihood ratios in the frequency domain between speech-present
+  and speech-absent hypotheses.
+- **Neural VAD (e.g., Silero VAD):** Compact recurrent or convolutional neural networks operating on short audio chunks,
+  outputting frame-level speech probabilities $P(\text{speech} \mid \mathbf{x}_t)$.
+
+Setting the VAD decision threshold requires balancing false alarms against speech clipping: an aggressive threshold
+discards soft speech and word boundaries, directly elevating Word Error Rate (WER) in downstream ASR.
 
 ## Segmentation
 
+Because deep neural networks require batched tensor inputs of uniform dimensions, variable-length audio files must be
+segmented:
+
+- **Fixed-length chunking:** Audio is sliced into non-overlapping or overlapping windows of fixed duration (e.g.,
+  3-second or 10-second segments) for sound event detection (SED) and acoustic scene classification.
+- **Utterance-level chunking:** In speech recognition, audio is split dynamically at natural acoustic pauses
+  ($>400\text{ ms}$ of continuous silence detected by VAD), creating sentence-like segments of $5\text{--}30$ seconds.
+- **Padding and masking:** Utterances within a mini-batch are right-padded with zeros to the maximum sequence length,
+  accompanied by a boolean padding mask.
+
 ## From waveform to features
 
+Once audio is normalized and segmented, time-domain waveforms are converted to spectral representations
+<Cite id="davis1980" />:
+
+1. **Short-Time Fourier Transform (STFT):** Windowing the signal with Hann or Hamming windows ($25\text{ ms}$ window
+   length, $10\text{ ms}$ hop length) to compute complex spectrograms $\mathbf{X}(t, f)$.
+2. **Mel filterbank integration:** Passing power spectra $|\mathbf{X}(t, f)|^2$ through $M$ triangular overlapping
+   bandpass filters spaced linearly below 1 kHz and logarithmically above 1 kHz:
+   $$
+   m = 2595 \log_{10}\left( 1 + \frac{f}{700} \right)
+   $$
+3. **Logarithmic compression:** Applying $\log(\mathbf{S}_{\text{mel}} + \epsilon)$ to mimic human perceptual loudness
+   scaling according to the Weber-Fechner law.
+
 ## Pitfalls
+
+- **Clipping weak consonants during silence trimming:** Aggressive thresholding (e.g., $-25\text{ dBFS}$) prematurely
+  truncates soft unvoiced fricatives ($/s/, /f/, /\theta/$) and quiet word onsets, elevating ASR substitution errors.
+- **Peak normalization on impulsive audio:** Normalizing files containing transient microphone pops or clicks leaves
+  conversational speech quiet, defeating normalization objectives.
+- **Phase corruption in audio generation pipelines:** Applying pre-emphasis filtering to training data for neural
+  vocoders (HiFi-GAN, WaveGlow) alters acoustic phase; the inverse de-emphasis filter must be explicitly applied during
+  waveform synthesis.
+- **Resampling after STFT computation:** Frequency bins in an STFT depend strictly on the sample rate. Attempting to
+  resample spectrograms via 2D image interpolation introduces severe harmonic aliasing. Resampling must always be
+  performed in the raw time domain.

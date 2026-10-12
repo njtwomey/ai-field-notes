@@ -2,25 +2,170 @@
 title: 'Deletion methods'
 kind: concept
 summary: 'Listwise deletion drops every row with a missing value; pairwise deletion uses all available values for each statistic. Both are simple, both lose rows quickly as columns grow, and both are biased unless data are missing completely at random.'
-tags: [data, statistics]
-aliases: []
-requires: []
-related: [missing-data-and-imputation]
-references: []
-status: stub
+tags: [data-preparation, statistics, missing-data]
+aliases: [complete-case analysis, listwise deletion, pairwise deletion, available-case analysis, case deletion]
+requires: [missingness-mechanisms, variance-and-covariance]
+related: [missing-data-and-imputation, single-imputation, learned-imputation, multiple-imputation]
+references: [rubin1976, little2019, higham2002]
+status: draft
 updated: 2026-10-11
 ---
 
+import { DeletionMethodsExplorer } from './DeletionMethodsExplorer'
+
 <Definition>
-To be written.
+Given an incomplete data matrix $\Ymat \in \mathbb{R}^{N \times D}$ and missingness indicator matrix
+$\Rmat \in \{0, 1\}^{N \times D}$, **deletion methods** discard incomplete observations rather than imputing values.
+
+- **Listwise deletion** (complete-case analysis) restricts all downstream analyses to the subset of rows where every
+  feature is observed:
+  
+  $$
+  \mathcal{S}_{\text{cc}} = \left\{i \in \{1, \dots, N\} : \prod_{j=1}^D R_{ij} = 1\right\}.
+  $$
+
+- **Pairwise deletion** (available-case analysis) calculates each univariate or bivariate statistic $(j, k)$ using all
+  rows where both features are observed:
+  
+  $$
+  \mathcal{S}_{jk} = \{i \in \{1, \dots, N\} : R_{ij} = 1 \text{ and } R_{ik} = 1\}, \quad N_{jk} = |\mathcal{S}_{jk}|.
+  $$
 </Definition>
 
-## Listwise deletion
+## Listwise deletion (complete-case analysis)
 
-## Pairwise deletion
+Listwise deletion is the standard default in most statistical packages and legacy machine learning libraries. Its
+primary advantage is operational simplicity: discarding incomplete records produces a fully observed rectangular array
+that directly satisfies standard linear algebra and tensor interfaces.
 
-## Row loss as columns grow
+However, listwise deletion suffers from a catastrophic decay in retained sample size as feature dimensionality grows.
 
-## When deletion is unbiased
+### The exponential row-loss catastrophe
+
+Suppose each feature $j \in \{1, \dots, D\}$ has an independent probability $p$ of being missing. The probability that
+an arbitrary observation is fully observed across all $D$ features is:
+
+$$
+P(\text{row is complete}) = \prod_{j=1}^D (1 - p) = (1 - p)^D.
+$$
+
+The number of complete cases retained decays exponentially with feature count $D$:
+
+$$
+N_{\text{cc}} = N (1 - p)^D.
+$$
+
+Even when the per-feature missingness rate is modest, scaling to moderate or high-dimensional tabular datasets
+eliminates the overwhelming majority of the dataset:
+
+| Features ($D$) | $p = 1\%$ Missing | $p = 5\%$ Missing | $p = 10\%$ Missing |
+| :--- | :--- | :--- | :--- |
+| **5** | $95.1\%$ retained | $77.4\%$ retained | $59.0\%$ retained |
+| **15** | $86.0\%$ retained | $46.3\%$ retained | $20.6\%$ retained |
+| **30** | $74.0\%$ retained | $21.5\%$ retained | $4.2\%$ retained |
+| **50** | $60.5\%$ retained | $7.7\%$ retained | $0.5\%$ retained |
+| **100** | $36.6\%$ retained | $0.6\%$ retained | $0.003\%$ retained |
+
+In a dataset with $D = 50$ features and a seemingly benign $5\%$ missing rate per column, listwise deletion discards
+over $92\%$ of all records, annihilating statistical power and training efficiency.
+
+<DeletionMethodsExplorer />
+
+## Pairwise deletion (available-case analysis)
+
+To mitigate the massive data loss of complete-case analysis, pairwise deletion computes each element of the sample mean
+vector $\hat{\muvec}$ and covariance matrix $\hat{\Sigmamat}$ using all available observations for that specific
+sub-calculation.
+
+For any pair of features $(j, k)$, the bivariate covariance is estimated over the intersection $\mathcal{S}_{jk}$:
+
+$$
+\hat{\sigma}_{jk} = \frac{1}{N_{jk} - 1} \sum_{i \in \mathcal{S}_{jk}} \left(Y_{ij} - \bar{Y}_j^{(jk)}\right)\left(Y_{ik} - \bar{Y}_k^{(jk)}\right),
+$$
+
+where $\bar{Y}_j^{(jk)} = \frac{1}{N_{jk}} \sum_{i \in \mathcal{S}_{jk}} Y_{ij}$.
+
+Under independent missingness at rate $p$, the expected sample size for each bivariate cell is $N (1 - p)^2$, which
+remains large regardless of the total number of features $D$. For $p = 0.05$, each pairwise covariance utilizes roughly
+$90.2\%$ of records.
+
+### The non-positive semi-definite hazard
+
+While pairwise deletion preserves statistical power for individual correlations, assembling these disparate estimates
+into a composite covariance matrix $\hat{\Sigmamat}$ introduces a severe structural pathology: **$\hat{\Sigmamat}$ is
+not guaranteed to be positive semi-definite (PSD)**.
+
+Because different cells $\hat{\sigma}_{jk}$ and $\hat{\sigma}_{lm}$ are computed on different subsets of observations,
+Cauchy-Schwarz bounds and linear dependencies across dimensions can be violated in the aggregate. Consequently, the
+minimum eigenvalue can become negative:
+
+$$
+\lambda_{\min}(\hat{\Sigmamat}) < 0.
+$$
+
+When an analyst attempts downstream linear regression $\hat{\betavec} = (\Xmat^\top \Xmat)^{-1} \Xmat^\top \yvec$,
+principal component analysis (PCA), or Kalman filtering using a pairwise covariance matrix:
+1. Matrix inversion can fail or yield negative predicted variances.
+2. Eigenvalue decompositions yield negative variances along principal components.
+3. Optimization algorithms like Cholesky factorization terminate with numerical exceptions.
+
+To restore valid covariance geometry, the indefinite matrix must be projected onto the nearest positive semi-definite
+cone, for instance by Higham's alternating projections algorithm <Cite id="higham2002" />:
+
+$$
+\Sigmamat^* = \arg\min_{\Sigmamat \succeq 0} \|\hat{\Sigmamat} - \Sigmamat\|_F.
+$$
+
+Furthermore, because each cell in $\hat{\Sigmamat}$ is estimated over a different sample size $N_{jk}$, standard degrees
+of freedom are undefined, rendering standard $t$-tests and $F$-statistics invalid.
+
+## When deletion methods are unbiased
+
+The statistical validity of deletion depends strictly on the underlying missingness mechanism <Cite id="rubin1976" />
+<Cite id="little2019" />:
+
+### Under MCAR
+- **Listwise deletion** produces completely unbiased estimates of population means, variances, correlations, and
+  regression parameters. The only cost is increased variance due to diminished sample size.
+- **Pairwise deletion** produces consistent point estimates for individual pairwise correlations and covariances,
+  although standard errors require complex adjustment.
+
+### Under MAR
+- **Listwise deletion** is generally **biased**. When missingness in feature $X_j$ depends on another observed feature
+  $X_k$, discarding incomplete rows selects a non-representative subsample of the population.
+- *Exception (Predictor-driven missingness in regression):* In a conditional regression model
+  $Y = \beta_0 + \betavec^\top \Xmat + \epsilon$, if the probability of missingness depends arbitrarily on the
+  predictors $\Xmat$ but is strictly conditionally independent of the response $Y$ given $\Xmat$
+  ($p(R \mid \Xmat, Y) = p(R \mid \Xmat)$), complete-case OLS estimates of the regression slopes $\betavec$ remain
+  unbiased. However, the marginal distribution of $\Xmat$ is distorted, and prediction variance on arbitrary test points
+  increases.
+- If missingness depends on the outcome $Y$, listwise deletion induces severe selection bias (endogenous selection).
+- **Pairwise deletion** fails under MAR: differing selection mechanisms across pairwise intersections compound into
+  mutually inconsistent estimates.
+
+### Under MNAR
+Both listwise and pairwise deletion are systematically biased and uncalibrated.
+
+## Practical trade-offs and alternatives
+
+| Criterion | Listwise Deletion | Pairwise Deletion | Imputation (MICE / Single) |
+| :--- | :--- | :--- | :--- |
+| **Output format** | Rectangular array $\mathbb{R}^{N_{\text{cc}} \times D}$ | Non-rectangular / composite stats | Full rectangular array $\mathbb{R}^{N \times D}$ |
+| **High-dimensional scaling** | Catastrophic ($N_{\text{cc}} \to 0$) | Preserves cell sample sizes | Preserves full sample size $N$ |
+| **Covariance matrix** | Always positive semi-definite | Can be non-PSD ($\lambda_{\min} < 0$) | Always positive semi-definite |
+| **Validity under MAR** | Biased (except predictor-only MAR) | Biased and internally inconsistent | Unbiased (when properly modeled) |
+| **Standard error validity** | Standard formulas apply | Undefined / complex effective $N$ | Rubin's pooling rules apply |
+
+In production machine learning pipelines, raw deletion is rarely optimal. Tree ensembles with native split-direction
+routing (such as LightGBM or XGBoost) or learned imputation pipelines preserve all $N$ training examples while
+maintaining operational consistency at prediction time.
 
 ## Pitfalls
+
+- **Silent dataset decimation with `.dropna()`:** Invoking unconditional complete-case deletion in data preparation
+  pipelines without logging before-and-after record counts frequently causes catastrophic dropouts in multi-table joins.
+- **Inverting pairwise correlation matrices:** Passing pairwise correlation matrices into ordinary least squares or
+  factor analysis routines without verifying positive definiteness leads to erratic coefficients or numerical solver
+  crashes.
+- **Using listwise deletion when outcome missingness is present:** In attrition-heavy longitudinal studies or conversion
+  prediction, dropping users who fail to convert induces direct collider or truncation bias.

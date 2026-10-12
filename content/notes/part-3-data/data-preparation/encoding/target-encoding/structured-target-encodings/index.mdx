@@ -3,24 +3,129 @@ title: 'Structured target encodings'
 kind: concept
 summary: 'Structured outputs are encoded as training targets in model-specific ways: boxes against anchors, masks as per-pixel classes, keypoints as heatmaps and spans as token tags.'
 tags: [data, computer-vision, nlp]
-aliases: []
-requires: []
-related: [encoding-targets, image-annotation-formats]
+aliases: [structured target encoding, anchor box encoding, keypoint heatmap, BIO tagging, span encoding]
+requires: [encoding-targets]
+related: [image-annotation-formats, span-annotation-and-token-alignment]
 references: []
-status: stub
+status: draft
 updated: 2026-10-11
 ---
 
 <Definition>
-To be written.
+**Structured target encodings** are the mathematical transformations that convert complex geometric or linguistic
+annotations—such as bounding boxes, polygon masks, human joint coordinates, and entity text spans—into standardized
+numerical tensors compatible with standard neural network loss functions (cross-entropy, mean squared error, smooth
+$L_1$).
 </Definition>
 
-## Boxes and anchors
+In standard supervised learning, targets are simple scalar class indices $y \in \{0, \dots, C-1\}$ or real numbers
+$y \in \mathbb{R}$. In computer vision and natural language processing, however, predictions are complex structured
+entities. Directly regressing raw coordinates (e.g. predicting $[x, y]$ pixels) suffers from scale variance,
+multi-modality, and discontinuous optimization surfaces.
 
-## Masks
+Models resolve this by re-encoding annotations into relative offsets, spatial heatmaps, or aligned sequence tags.
 
-## Keypoint heatmaps
+import { StructuredTargetExplorer } from './StructuredTargetExplorer';
 
-## Span tags
+<StructuredTargetExplorer />
 
-## Pitfalls
+## Boxes and anchors in object detection
+
+In object detection (Faster R-CNN, SSD, RetinaNet, YOLO), ground-truth bounding boxes are specified by pixel
+coordinates: center coordinates $(x_c, y_c)$ and dimensions $(w, h)$.
+
+Directly predicting absolute pixel values fails because errors on small objects (e.g. a 5-pixel error on a 10-pixel
+icon) carry far greater relative consequence than errors on large objects (a 5-pixel error on an 800-pixel car).
+Furthermore, standard linear heads can predict negative widths or heights.
+
+Instead, targets are parameterized as **scale-invariant relative offsets against predefined anchor boxes**
+$(x_a, y_a, w_a, h_a)$:
+
+$$
+t_x = \frac{x_c - x_a}{w_a}, \qquad t_y = \frac{y_c - y_a}{h_a}
+$$
+
+$$
+t_w = \ln\left(\frac{w}{w_a}\right), \qquad t_h = \ln\left(\frac{h}{h_a}\right)
+$$
+
+During inference, predicted offsets $[\hat{t}_x, \hat{t}_y, \hat{t}_w, \hat{t}_h]$ are inverted to recover physical
+pixel boxes:
+
+$$
+\hat{x}_c = x_a + \hat{t}_x w_a, \qquad \hat{w} = w_a \exp(\hat{t}_w)
+$$
+
+The exponential mapping $\exp(\cdot)$ mathematically guarantees that predicted widths and heights are strictly positive.
+
+## Masks in semantic and instance segmentation
+
+In semantic segmentation (U-Net, DeepLab, Mask2Former), annotations are encoded as **dense spatial label volumes**:
+
+1. **Per-pixel class indices:** The ground-truth mask is an integer tensor $M \in \{0, \dots, C-1\}^{H \times W}$, where
+   each coordinate $(i, j)$ holds the categorical class ID of that pixel.
+2. **One-hot target volume:** For $C$ classes, $M$ expands to a binary tensor $Y \in \{0, 1\}^{C \times H \times W}$.
+3. **Loss formulation:** Models output per-pixel logits $Z \in \mathbb{R}^{C \times H \times W}$ evaluated via per-pixel
+   cross-entropy combined with **Soft Dice loss** to address extreme foreground/background area imbalance:
+   $$
+   \mathcal{L}_{\text{Dice}} = 1 - \frac{2 \sum_{i} p_i y_i + \epsilon}{\sum_i p_i^2 + \sum_i y_i^2 + \epsilon}
+   $$
+
+In instance segmentation (Mask R-CNN), binary masks are encoded within cropped, RoI-aligned bounding box feature grids
+(e.g. $28 \times 28$ binary resolution) rather than full image resolutions.
+
+## Keypoint heatmaps in pose estimation
+
+In human pose estimation and facial landmark tracking (OpenPose, HRNet, CenterNet), ground truth is specified by
+discrete Cartesian joint coordinates $(x_k, y_k) \in \mathbb{R}^2$ for each joint $k \in \{1, \dots, K\}$ (e.g. nose,
+left wrist, right ankle).
+
+Direct regression of $(x_k, y_k)$ via mean squared error struggles with non-convex loss surfaces and multi-person
+occlusions. Modern architectures encode keypoints as **continuous 2D Gaussian heatmaps**:
+
+$$
+H_k(x, y) = \exp\left( -\frac{(x - x_k)^2 + (y - y_k)^2}{2\sigma^2} \right) \in [0, 1]
+$$
+
+where $\sigma$ (typically 2 to 4 pixels) controls spatial tolerance.
+
+- The network outputs $K$ spatial feature maps of resolution $H' \times W'$.
+- Trained via mean squared error or focal loss against ground-truth heatmaps.
+- At inference time, exact joint coordinates are decoded by finding the spatial $\arg\max$, refined via sub-pixel Taylor
+  expansion or centroid averaging.
+
+## Span tags in natural language processing
+
+In information extraction and Named Entity Recognition (NER), targets consist of variable-length character spans
+$[s_{\text{start}}, s_{\text{end}}]$ labeled with entity types (e.g. `PERSON`, `ORGANIZATION`, `DATE`).
+
+Because language models operate on discrete subword tokens, continuous character spans are aligned to tokens using
+sequential tagging schemes:
+
+### 1. The BIO scheme (IOB2)
+- `B-<TYPE>`: The **Beginning** token of an entity span.
+- `I-<TYPE>`: A token **Inside** the entity span.
+- `O`: **Outside** any entity.
+
+### 2. The BILOU / BIOES scheme
+Provides finer boundary discriminability by differentiating single-token entities:
+- `B-<TYPE>`: Beginning of a multi-token entity.
+- `I-<TYPE>`: Inside a multi-token entity.
+- `L-<TYPE>` (or `E`): **Last** (End) token of a multi-token entity.
+- `U-<TYPE>` (or `S`): **Unit** (Single) token entity span.
+- `O`: Outside.
+
+Subword tokenizers (e.g. Byte-Pair Encoding or WordPiece) frequently split words across multiple tokens (e.g.
+`"Bletchley"` $\to$ `["Blet", "##ch", "##ley"]`). Standard alignment assigns the label to the first subword token and
+masks subsequent wordpieces, or assigns `I-<TYPE>` across all subword pieces.
+
+## Pitfalls and failure modes
+
+1. **Subword token misalignment in NER:** If annotation character offsets do not align cleanly with subword tokenizer
+   boundaries (e.g. punctuation attached to tokens), spans are truncated or split, corrupting entity evaluation.
+2. **Anchor box scale mismatch in detection:** If predefined anchor box aspect ratios do not match dataset object scales
+   (e.g. looking for long, thin power lines using square $1:1$ anchors), target offsets become excessively large,
+   destabilizing gradient descent.
+3. **Vanishing keypoint heatmaps on downsampled feature maps:** Stride-32 convolutions can shrink a tiny joint heatmap
+   to zero pixels. Always maintain high-resolution representations (via feature pyramid networks or HRNet) for keypoint
+   and mask targets.

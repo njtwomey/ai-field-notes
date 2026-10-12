@@ -3,26 +3,179 @@ title: 'Preprocessing by model family'
 kind: concept
 summary: 'Model families need different preprocessing: linear and distance-based models need scaling and encoding, trees need almost none, and neural networks need scaled inputs and embeddings. One table sets out what each needs.'
 tags: [data, model-selection]
-aliases: []
-requires: []
+aliases: [preprocessing requirements, model family preprocessing]
+requires: [preprocessing-pipelines]
 related: [feature-scaling, categorical-encoding, gradient-boosting-vs-deep-learning-on-tabular-data]
 references: []
-status: stub
+status: draft
 updated: 2026-10-11
 ---
 
 <Definition>
-To be written.
+**Preprocessing by model family** is the systematic alignment of data transformations (scaling, categorical encoding,
+missing value imputation, and non-linear feature engineering) with the specific mathematical inductive biases and
+operational assumptions of the chosen hypothesis class.
 </Definition>
+
+A frequent source of wasted engineering or degraded model performance is treating preprocessing as a generic,
+one-size-fits-all checklist. An operation that is indispensable for a regularized linear model (such as zero-mean
+unit-variance scaling) is mathematically completely redundant for a decision tree, and an encoding that works seamlessly
+for gradient boosted trees (such as high-cardinality target statistics) can destroy distance calculations in $k$-nearest
+neighbors.
+
+import { PreprocessingMatrixExplorer } from './PreprocessingMatrixExplorer';
+
+<PreprocessingMatrixExplorer />
 
 ## Linear models
 
+Linear models (Ordinary Least Squares, Ridge, Lasso, Elastic Net, Logistic Regression, Linear SVM) compute predictions
+via an inner product:
+
+$$
+f(x) = w^\top x + b = \sum_{j=1}^D w_j x_j + b
+$$
+
+### 1. Scaling: Mandatory
+Regularized objectives apply penalties to the Euclidean or Manhattan norm of the weight vector:
+
+$$
+\min_w \mathcal{L}(w) + \lambda \sum_{j=1}^D |w_j|^p
+$$
+
+If feature $x_1$ is measured in dollars ($\text{variance} \sim 10^8$) and feature $x_2$ is measured in age
+($\text{variance} \sim 10^2$), the model needs $w_1 \ll w_2$ to balance their contributions. The regularization penalty
+$\lambda |w_j|^p$ will penalize $w_2$ thousands of times more heavily than $w_1$, effectively erasing smaller-scale
+features regardless of their predictive value. Furthermore, gradient descent on unscaled features encounters
+ill-conditioned loss surfaces with large condition numbers $\kappa = \lambda_{\max}(H) / \lambda_{\min}(H)$, causing
+severe gradient oscillations.
+
+### 2. Missing values: Mandatory
+Matrix-vector multiplication $X w$ yields `NaN` if any element is unpopulated. Must be imputed via median, mean,
+iterative multivariate imputation, or paired with explicit missing-indicator binary columns.
+
+### 3. Categoricals: Mandatory
+Strings cannot be dotted with real weights. Must be converted via One-Hot Encoding (with `drop='first'` for
+unregularized models to prevent multicollinearity) or smoothed Target Encoding.
+
+### 4. Interactions and non-linearity: Manual
+Linear models have zero capacity to discover multiplicative interactions ($x_1 \cdot x_2$) or curved boundaries
+($x_1^2 + x_2^2 = r^2$) natively. Non-linear terms, polynomial features, and splines must be explicitly engineered into
+the feature matrix.
+
 ## Distance and kernel methods
+
+Distance-based models ($k$-Nearest Neighbors, Support Vector Machines with RBF kernels, $k$-Means, Principal Component
+Analysis) evaluate geometric relationships via the metric tensor:
+
+$$
+d(u, v) = \sqrt{\sum_{j=1}^D (u_j - v_j)^2}
+$$
+
+### 1. Scaling: Critical
+In unscaled Euclidean space, a difference of 1,000 dollars in income produces a squared difference of
+$1{,}000^2 = 10^6$, completely overwhelming a 20-year difference in age ($20^2 = 400$). The distance metric collapses
+into a 1-dimensional projection along the largest-variance axis. `StandardScaler` or `MinMaxScaler` is strictly
+mandatory.
+
+### 2. Categoricals: Mandatory metric preservation
+Encoding categories as arbitrary ordinal integers (e.g. $\text{Red}=1, \text{Green}=2, \text{Blue}=3$) injects a false
+geometric metric: it asserts that the distance between Red and Green is 1, while the distance between Red and Blue is 2.
+Categorical features must be one-hot encoded or mapped to continuous embeddings where pairwise Euclidean distances
+reflect true semantic proximity.
+
+### 3. High dimensionality and sparsity
+Distance metrics degrade in high dimensions due to the curse of dimensionality, where the ratio between the maximum and
+minimum distance between points approaches zero. High-cardinality one-hot encoding expands dimensions rapidly, eroding
+$k$-NN cluster separation.
 
 ## Trees and ensembles
 
+Tree-based models (CART, Random Forest, Extra Trees, XGBoost, LightGBM, CatBoost) make split decisions by evaluating
+monotonic order statistics:
+
+$$
+s_{j, \theta} = \mathbb{I}(x_j \le \theta)
+$$
+
+### 1. Scaling: Invariant
+The split criterion (Gini impurity, cross-entropy, or mean squared error reduction) depends exclusively on the ordering
+of samples along axis $x_j$. Any strictly monotonic increasing transformation $g(x_j)$ (such as standardization
+$(x - \mu)/\sigma$, min-max normalization, logarithm $\log(x)$, or Box-Cox) preserves the exact rank order of every
+candidate split:
+
+$$
+x_a \le x_b \iff g(x_a) \le g(x_b)
+$$
+
+Consequently, feature scaling produces zero change in split locations, tree structure, or final predictions.
+
+### 2. Missing values: Native handling
+Modern gradient boosting frameworks (XGBoost, LightGBM) treat missing values natively during split finding. For each
+candidate split, instances with missing values are sent to the left child and right child in turn; the algorithm assigns
+`NaN` to whichever child yields the greater reduction in loss. Imputing before gradient boosting can actually destroy
+informative missingness signals.
+
+### 3. Categoricals: Native / Ordinal
+LightGBM computes optimal categorical splits by sorting histogram bins according to the sum of gradients over hessians
+($\sum g_i / \sum h_i$), finding the optimal subset partition in $\mathcal{O}(K \log K)$ without one-hot expansion.
+CatBoost computes online target statistics over random dataset permutations. Simple integer encodings work without
+metric distortion because trees do not compute Euclidean distances.
+
+### 4. Interactions: Automatic
+Because child nodes evaluate split conditions conditioned on the parent node's split condition, any tree of depth $D$
+naturally models non-linear interactions of up to order $D$ without manual feature engineering.
+
 ## Neural networks
+
+Deep neural networks for tabular data (Multi-Layer Perceptrons, TabNet, FT-Transformer, SAINT) pass inputs through
+learned linear layers interspersed with non-linear activation functions:
+
+$$
+h^{(1)} = \sigma(W^{(1)} x + b^{(1)})
+$$
+
+### 1. Scaling: Mandatory
+Unscaled numerical features with large magnitudes push inputs to the flat, saturated regimes of non-linear activations
+(sigmoid, tanh, or large positive values in ReLU), causing vanishing gradients or activation explosions. Standard
+practice standardizes numerical features to $\mathcal{N}(0, 1)$ or uses quantile transforms to map heavy-tailed
+distributions to uniform or Gaussian shapes.
+
+### 2. Categoricals: Learned entity embeddings
+Rather than wide, sparse one-hot matrices, modern tabular deep nets pass categorical integers through embedding lookups:
+
+$$
+e_k = W_{\text{embed}} \cdot \mathbf{1}_k \in \mathbb{R}^d
+$$
+
+where embedding dimension $d$ is typically set according to heuristic rules such as
+$d \approx \min(50, \lfloor \text{cardinality}^{0.5} \rfloor + 1)$. The network learns continuous coordinate
+representations where backpropagation clusters semantically related categories together.
+
+### 3. Missing values: Masked indicators
+Deep neural nets cannot execute tensor contractions on `NaN`. Missing numerical values are typically imputed to zero or
+the training median, augmented with a companion binary indicator tensor $m \in \{0, 1\}^D$ indicating which values were
+originally missing.
 
 ## Summary table
 
-## Pitfalls
+| Requirement | Linear Models | Distance / Kernel Methods | Tree Ensembles | Neural Networks |
+| :--- | :--- | :--- | :--- | :--- |
+| **Numeric Scaling** | Mandatory (L1/L2, SGD) | Critical ($\|u-v\|_2$) | Invariant (No-op) | Mandatory (Grad stability) |
+| **Missing Imputation** | Mandatory | Mandatory | Native in XGB/LGBM | Mandatory + Mask |
+| **Categorical Encoding** | One-Hot / Target | One-Hot / Metric | Native / Ordinal / Target | Entity Embeddings / OHE |
+| **Outlier Robustness** | Low (Leverage points) | Low (Centroid pulling) | High (Rank invariant) | Moderate (Clip / Quantile) |
+| **Feature Interactions** | Manual engineering | Via kernel function | Automatic (Depth $\ge 2$) | Automatic (Layer depth) |
+| **Heavy-Tail Transforms** | Recommended (Log/Box-Cox) | Recommended | Invariant | Highly Recommended |
+
+## Pitfalls and failure modes
+
+1. **Unnecessary one-hot encoding on tree models:** Expanding a 1,000-level categorical variable into 1,000 binary
+   columns for Random Forest or XGBoost severely slows training, fragments tree depth, and degrades accuracy compared to
+   native histogram grouping or target encoding.
+2. **Missing scaler on regularized regression:** Fitting Ridge or Lasso on raw monetary features and percentage rates
+   produces coefficients that reflect units of measurement rather than underlying signal strength.
+3. **Imputing `NaN` blindly on tree ensembles:** Replacing missing values with the median or mean in LightGBM/XGBoost
+   deprives the tree of its ability to exploit informative missingness via default split routing.
+4. **Using ordinal integer encodings on $k$-NN:** Passing arbitrary integer-encoded categories into $k$-NN or SVM
+   distorts the metric topology, imposing artificial spatial proximities on non-metric concepts.

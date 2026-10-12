@@ -2,25 +2,169 @@
 title: 'Semi-structured data'
 kind: concept
 summary: 'Semi-structured records, such as JSON with nested objects, arrays and maps, have no fixed schema. They are flattened into columns or aggregated, after inferring a schema.'
-tags: [data]
-aliases: []
+tags: [data, tabular, json, schema, preprocessing]
+aliases: [nested data, document data, json data, schemaless data]
 requires: []
-related: []
-references: []
-status: stub
-updated: 2026-10-11
+related: [tabular-data, tidy-and-reshaped-tables, multi-table-data, data-profiling]
+references: [abiteboul1997, armbrust2015, zaheer2017]
+status: draft
+updated: 2026-10-12
 ---
 
+import { SemiStructuredDataVisualizer } from './SemiStructuredDataVisualizer'
+
 <Definition>
-To be written.
+**Semi-structured data** refers to data representations that do not conform to the rigid, tabular schema of relational
+databases, yet contain structural markers, tags, or hierarchies that separate data elements into nested entities,
+key-value maps, and variable-length arrays. Unlike fully unstructured data (such as raw audio or pixel grids),
+semi-structured records are self-describing: structural metadata is interleaved directly with the observed values.
 </Definition>
+
+In production machine learning systems, raw telemetry, mobile application events, web server logs, API payloads, and
+document databases (e.g., MongoDB, DynamoDB, Couchbase) arrive almost exclusively as semi-structured payloads—most
+commonly encoded in JSON, JSON Lines (JSONL), BSON, XML, or Protocol Buffers. 
+
+Downstream tabular learners, such as gradient-boosted decision trees (GBDTs) and multilayer perceptrons (MLPs), require
+rigid, rectangular input matrices $\mathbf{X} \in \mathbb{R}^{N \times D}$. Converting hierarchical, variable-length,
+and self-describing records into rectangular feature matrices requires schema inference, dot-path flattening, relational
+unpacking, or permutation-invariant set pooling.
+
+<SemiStructuredDataVisualizer />
 
 ## Nested objects, arrays and maps
 
+Semi-structured records model data as directed tree graphs $\mathcal{T} = (\mathcal{V}, \mathcal{E}, \mathcal{L})$,
+where root nodes correspond to documents or entities, internal nodes represent composite structures, leaf nodes hold
+primitive scalar values, and edge labels $\mathcal{L}$ represent attribute keys or array indices
+<Cite id="abiteboul1997" />.
+
+Three distinct structural constructs appear within semi-structured schemas:
+
+1. **Primitive scalar leaves:** Primitive data types such as integers, floating-point numbers, booleans, strings, and
+   timestamps. Leaf nodes provide the actual feature measurements.
+2. **Nested objects and maps:** Associative mappings $\mathcal{M}: \mathcal{K} \to \mathcal{V}$ where keys are strings
+   and values are either primitives or further nested structures. In static schemas, keys are known *a priori* (e.g.,
+   `device: { os: "iOS", version: "16.5" }`). In dynamic maps, keys represent user-generated tags, arbitrary headers, or
+   dictionary values (e.g., `attributes: { color: "blue", size: "XL", brand: "Acme" }`).
+3. **Variable-length arrays and sequences:** Ordered lists $\mathcal{A} = [v_1, v_2, \dots, v_L]$ where the sequence
+   length $L \in \mathbb{N}_0$ varies across records. The elements $v_i$ may be primitive values (e.g., a list of
+   visited page categories `["books", "electronics"]`) or complex compound objects (e.g., line items in an invoice
+   `[{ item_id: 101, qty: 2, price: 19.99 }, { item_id: 204, qty: 1, price: 5.50 }]`).
+
+Storage engines employ different physical representations for nested records. While row-oriented engines store
+serialized byte buffers (e.g., JSON text or binary JSON blobs), columnar engines such as Apache Parquet and Apache ORC
+utilize Dremel-style repetition and definition levels. Repetition levels encode where in the structural path a value
+repeats, while definition levels track which optional parent ancestors are defined or null, enabling columnar querying
+over nested structures without flattening the data on disk.
+
 ## Schema inference
+
+In relational systems, schemas are enforced on write (*schema-on-write*): rows violating table definitions are rejected
+upon ingestion. In contrast, semi-structured data lakes operate under *schema-on-read*: consumers infer or project
+schema definitions when querying raw corpora $\mathcal{D} = \{d_1, d_2, \dots, d_N\}$ <Cite id="armbrust2015" />.
+
+Algorithmic schema inference constructs an empirical structural schema by traversing records:
+
+- **Structural unioning:** The global schema $\mathcal{S}_{\text{union}}$ is the recursive union of all dot-paths
+  observed across the corpus:
+  $$
+  \mathcal{S}_{\text{union}} = \bigcup_{i=1}^N \text{Paths}(d_i)
+  $$
+- **Type unification lattices:** When the same path $p$ exhibits different types across records, inference engines
+  resolve the conflict using a type lattice. For numeric compatibility, integers and floats unify to floating-point
+  numbers ($\text{Int} \sqcup \text{Float} = \text{Float}$). If no standard widening conversion exists, the engine must
+  promote the field to a string, encapsulate it within a polymorphic `Variant` type, or branch into separate typed
+  columns.
+- **Polymorphism conflicts:** Real-world event streams often exhibit severe polymorphic collisions. A field named
+  `payload` might be a JSON object `{ status: 200 }` in 98% of records, a plain string `"timeout"` in 1.8% of records,
+  and an array of strings in 0.2% of records. Static type systems fail when encountering such heterogeneity unless
+  explicitly instructed to parse the field as raw text or structured unions.
+- **Schema drift:** Upstream application developers frequently add, rename, or deprecate JSON keys without notifying
+  downstream data science pipelines. A feature engineering script relying on `user.geo.postal_code` silently produces
+  missing values if an application update renames the key to `user.location.zip`.
 
 ## Flattening
 
+The most common transformation applied to nested objects prior to training tabular models is **dot-path flattening**, in
+which the hierarchical path from root to leaf becomes a flat column identifier:
+
+| Hierarchical JSON Path | Primitive Leaf Value | Projected Flat Column | Inferred Data Type |
+| :--- | :--- | :--- | :--- |
+| `$.user.device.os` | `"iOS"` | `user_device_os` | Categorical / String |
+| `$.user.device.version` | `16.5` | `user_device_version` | Float64 |
+
+While effective for shallow objects with fixed key spaces, naive dot-path flattening introduces critical challenges when
+applied to open-ended key-value maps:
+
+- **Column explosion:** Flattening a dynamic map (such as HTTP request headers, query parameters, or item tags) across
+  thousands of records produces a separate column for every distinct key ever encountered. The resulting column
+  dimension $D$ expands from tens to thousands.
+- **Extreme matrix sparsity:** Because each record contains only a small fraction of the union key set, the resulting
+  tabular matrix $\mathbf{X}$ is dominated by structural nulls ($S > 99\%$). While tree-based algorithms (such as
+  LightGBM or XGBoost) support missing values natively, evaluating partition candidates across thousands of near-empty
+  columns severely degrades training throughput and increases tree memory footprint.
+- **Key filtering and frequency thresholds:** To mitigate column explosion, practitioners enforce minimum key support:
+  only keys present in at least $\tau\%$ of records (e.g., $\tau = 1\%$) are projected into dedicated columns, while
+  infrequent keys are routed to an aggregated `other_attributes` map or hashed into fixed-width feature spaces.
+
 ## Aggregating nested arrays
 
+Unlike nested objects—which map one parent to one child attribute—nested arrays represent one-to-many relationships
+within a single record. Because a single tabular row cannot hold a variable number of scalar values across instances,
+arrays cannot be projected directly via dot notation without choosing an unpacking strategy:
+
+### Array unnesting (Exploding)
+
+Array unnesting (the `EXPLODE` or `UNNEST` operation in SQL) replicates the parent row once for each element in the
+array:
+
+$$
+\text{Parent}(id=1, \text{name}="Alice", \text{items}=[A, B, C]) \implies \begin{cases} (1, "Alice", A) \\ (1, "Alice", B) \\ (1, "Alice", C) \end{cases}
+$$
+
+Exploding changes the fundamental unit of observation: the dataset shifts from instance-level rows to item-level rows.
+While useful for relational database normalization or sequence modeling, unnesting creates severe dependencies across
+rows, duplicates parent features, and inflates dataset volume by the average array length $\bar{L}$.
+
+### Summary statistical pooling
+
+When the entity of interest remains the parent document (e.g., predicting customer churn based on transaction history),
+practitioners compute fixed-dimensional summary statistics over the array elements:
+
+- **Numerical aggregations:** Count of elements $|A|$, sum $\sum x_i$, mean $\bar{x}$, minimum $\min(x_i)$, maximum
+  $\max(x_i)$, and standard deviation $\sigma_x$.
+- **Temporal aggregations:** Time elapsed since the most recent element, cadence/inter-arrival intervals between
+  consecutive elements, and trend slopes.
+- **Categorical pooling:** Multi-hot binary indicator vectors, term-frequency vectors (Bag-of-Words / Bag-of-Items), or
+  top-$K$ most frequent item indicators.
+
+### Neural set pooling (Deep Sets)
+
+For neural network architectures, variable-length nested arrays of feature vectors
+$\{ \mathbf{x}_1, \dots, \mathbf{x}_L \}$ where $\mathbf{x}_i \in \mathbb{R}^d$ can be processed directly via
+permutation-invariant set pooling <Cite id="zaheer2017" />. According to the Deep Sets theorem, any valid
+permutation-invariant function $f(X)$ over an unordered collection $X$ can be decomposed as:
+
+$$
+f(X) = \rho\left( \sum_{\mathbf{x} \in X} \phi(\mathbf{x}) \right)
+$$
+
+where $\phi: \mathbb{R}^d \to \mathbb{R}^{d'}$ is an instance-level neural embedding network and
+$\rho: \mathbb{R}^{d'} \to \mathbb{R}^c$ is a set-level readout network. This enables end-to-end learning directly on
+nested item sequences without manual summary feature engineering.
+
 ## Pitfalls
+
+- **Silent schema drift in production:** Upstream JSON payloads change dynamically. When a field name shifts or changes
+  data type, naive JSON readers fill the column with missing values rather than throwing exceptions, causing silent
+  degradation in model predictive accuracy.
+- **Combinatorial row explosion:** Chaining multiple array explodes on nested arrays (e.g., `orders.items.discounts`)
+  multiplies row counts combinatorially ($N \times L_1 \times L_2$), exhausting pipeline memory buffers and creating
+  severe imbalance in parent representation.
+- **Splitting leakage across exploded rows:** When arrays are unnested prior to train/validation splitting, rows
+  belonging to the same parent entity can be assigned across both training and validation sets, causing catastrophic
+  data leakage and invalidating performance estimates.
+- **Ambiguity of missing vs null:** In semi-structured JSON, an absent key (`{}`), an explicit null (`{"val": null}`),
+  an empty array (`{"val": []}`), and an empty string (`{"val": ""}`) carry distinct engineering meanings. Flattening
+  pipelines that collapse all four representations into standard `NaN` discard valuable predictive signals regarding
+  system state and user behavior.

@@ -6,21 +6,112 @@ tags: [data, software]
 aliases: []
 requires: []
 related: [interaction-logs, event-sequences]
-references: []
-status: stub
-updated: 2026-10-11
+references: [akidau2015, kleppmann2017]
+status: draft
+updated: 2026-10-12
 ---
 
+import { InstrumentationLoggingVisualizer } from './InstrumentationLoggingVisualizer'
+
 <Definition>
-To be written.
+Instrumentation is the programmatic code embedded within client applications, backend microservices, and serving engines
+to observe, capture, and emit telemetry payloads. Logged data is an observational software artifact: it reflects only
+the events the logging framework was instructed to measure, filtered through network transport latency, serialization
+protocols, and application deployment cycles.
 </Definition>
+
+Machine learning models frequently consume event logs as if they were objective transcripts of reality
+<Cite id="kleppmann2017" />. However, logging systems operate within distributed, asynchronous architectures where
+network buffers, clock drifts, ad-blockers, and SDK releases continuously distort the observed data stream. Failing to
+account for software instrumentation dynamics leads to silent training-serving skew, temporal data leakage, and false
+inferences of user behavior shifts.
+
+<InstrumentationLoggingVisualizer />
 
 ## What gets logged
 
+Designing software telemetry requires partitioning instrumentation into distinct architectural layers:
+
+1. **Client-Side Telemetry (Beacons):** Mobile applications and web browsers emit lightweight HTTP payloads reporting
+   user interactions (screen impressions, touch gestures, scroll depths, dwell times, orientation changes).
+   - *Vulnerability:* Dependent on client environments. Network disconnections buffer beacons locally on flash storage;
+     users running aggressive browser extensions or VPNs drop analytics domains entirely.
+2. **Server-Side Telemetry (RPC & Gateway Logs):** Backend microservices record API requests, authentication events,
+   database transactions, and model inference invocations.
+   - *Reliability:* High fidelity, low packet loss, and zero ad-blocker interference. However, backend logs observe only
+     requests that successfully traversed edge load balancers, missing client-side rendering failures.
+3. **Structured Schemas:** Modern logging enforces rigid serialization schemas (Protocol Buffers, Apache Avro) rather
+   than unstructured string logs. Typed schemas prevent silent type coercions and guarantee field-level deprecation
+   policies across engineering teams.
+
 ## Event time and processing time
+
+In distributed data pipelines, three distinct timestamps govern every logged observation <Cite id="akidau2015" />:
+
+- **Event Time ($t_{\text{event}}$):** The exact instant the event occurred in the physical world, stamped by the local
+  clock of the client device.
+- **Ingestion Time ($t_{\text{ingest}}$):** The instant the telemetry message arrived at the message broker (e.g.,
+  Apache Kafka or Apache Pulsar cluster).
+- **Processing Time ($t_{\text{proc}}$):** The instant the downstream data pipeline (e.g., Apache Flink, Spark
+  Streaming, or dbt batch job) processed the record.
+
+The gap between event time and processing time ($\Delta t = t_{\text{proc}} - t_{\text{event}}$) fluctuates wildly:
+- A commuter browsing an offline mobile app inside a subway tunnel generates dozens of event records with consecutive
+  $t_{\text{event}}$ timestamps.
+- When the device regains cellular connectivity 45 minutes later, all buffered beacons are flushed in a burst, arriving
+  at the message broker with identical $t_{\text{ingest}}$ timestamps.
+
+Pipelines that construct streaming features using *processing time* suffer from severe temporal distortion: events that
+occurred during the morning rush hour are processed and aggregated into afternoon lunch windows. To preserve causal
+validity, stream processing engines rely on **watermarks** <Cite id="akidau2015" />—probabilistic assertions that all
+events with $t_{\text{event}} \le W(t)$ have been observed, allowing windows to close safely while tracking late data
+via dead-letter queues.
 
 ## Logging changes that mimic behaviour changes
 
+A notorious trap in production ML is mistaking software instrumentation updates for genuine secular shifts in user
+behavior:
+
+1. **SDK Migrations and Event Hooks:** A frontend team migrates from an outdated analytics library to a modern SDK, or
+   refactors a button listener from `onClick` to `onPointerDown` to eliminate mobile tap latency. Event volume jumps by
+   $18\%$ overnight. A fraud detection model trained on historical event counts flags thousands of legitimate users as
+   bot swarms.
+2. **Viewport Tracking Refinements:** An engineering team updates impression logging to comply with the IAB standard
+   (requiring $50\%$ of pixels to remain visible for $\ge 1$ second). Logged impression counts drop by $40\%$.
+   Recommender click-through rate (CTR) estimators compute an artificial doubling in conversion velocity.
+3. **App Store Deploy Cadence:** Mobile app updates roll out gradually over weeks. During the transition window, the
+   incoming telemetry stream is a mixture of heterogeneous schema formats emitted by distinct app versions, injecting
+   distribution shift into online features.
+
 ## Logging features as served
 
+The gold standard for preventing training-serving skew is the **log-and-wait (log-as-served)** architectural pattern:
+
+$$
+\text{Serving Request} \to \text{Evaluate Features } X \to \text{Predict } \hat{Y} \to \text{Log Snapshot } (ID, X, \hat{Y}, t)
+$$
+
+Instead of reconstructing historical feature vectors retrospectively from warehouse tables months after inference—which
+is vulnerable to subtle time-travel leakage and reimplemented transformation logic—the production serving engine logs
+the exact, immutable feature payload evaluated at decision time.
+
+When the real-world outcome $Y$ materializes later (e.g., an ad click 30 seconds later, or a loan default 6 months
+later), a joining pipeline matches the outcome label to the logged feature vector using the immutable `decision_id`.
+This guarantees absolute mathematical parity between training inputs and serving inputs.
+
 ## Pitfalls
+
+- **Client Clock Manipulation:** End users frequently set their phone clocks forward to bypass mobile game waiting
+  mechanics, or leave clocks uncalibrated across time zones. Relying naively on raw client timestamps introduces
+  negative latency gaps ($t_{\text{ingest}} < t_{\text{event}}$) and dates in the distant future. Telemetry ingestion
+  gateways must compute monotonic delta offsets relative to server clocks:
+  $t_{\text{calibrated}} = t_{\text{ingest}} - \Delta_{\text{device}}$.
+- **Logging Sensitive PII in Debug Strings:** Developers embedding raw request JSON dumps into log messages
+  inadvertently log plain-text passwords, credit card tokens, and Social Security numbers. These logs propagate into
+  data lakes, violating statutory privacy mandates.
+- **Uncoordinated Schema Mutations:** Renaming a JSON telemetry field from `item_id` to `productId` without backward
+  compatibility. The upstream ETL pipeline silently populates the old column with nulls, degrading feature stores
+  without raising compilation exceptions.
+- **Biased Telemetry Sampling:** To reduce infrastructure bandwidth costs, pipelines sample non-engagement events at a
+  $1\%$ rate while retaining $100\%$ of click events. If the sampling rate is not logged alongside each beacon,
+  downstream estimators calculate a 100-fold inflation in baseline engagement rates.

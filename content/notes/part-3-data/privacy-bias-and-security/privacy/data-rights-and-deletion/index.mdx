@@ -5,22 +5,157 @@ summary: 'Data use rests on a lawful basis and licences, with limits on retentio
 tags: [data, privacy]
 aliases: []
 requires: []
-related: []
-references: []
-status: stub
+related: [personal-data-and-identifiability, training-data-extraction, k-anonymity-and-disclosure-control]
+references: [bourtoule2021, koh2017]
+status: draft
 updated: 2026-10-11
 ---
 
+import { DataRightsUnlearningVisualizer } from './DataRightsUnlearningVisualizer'
+
 <Definition>
-To be written.
+**Data rights** govern the legal authorities, contractual licences, and individual prerogatives under which training
+data can be collected, processed, and retained. When individuals invoke rights of erasure—such as Article 17 of the
+General Data Protection Regulation (GDPR) or algorithmic disgorgement orders—organizations must remove target data
+points from databases and eliminate their statistical influence from deployed machine learning model weights $\theta$.
 </Definition>
+
+Machine learning models act as lossy, parametric representations of their training corpora. Consequently, removing a
+record from an operational datastore, feature store, or data lakehouse does not expunge the learned correlations,
+gradient updates, or memorized tokens encoded within the model weights. Fulfilling modern privacy rights and regulatory
+obligations necessitates managing data lifecycles from lawful ingestion to algorithmic erasure.
+
+<DataRightsUnlearningVisualizer />
 
 ## Lawful basis and licences
 
+Training machine learning models on human-generated or proprietary data requires a valid legal basis under data
+protection statutes (such as GDPR Art. 6 or the California Consumer Privacy Act / CPRA) and compliance with underlying
+intellectual property licences:
+
+1. **Lawful bases for processing:**
+   - **Consent (Art. 6(1)(a)):** Explicit, informed authorization from the data subject. Crucially, consent may be
+     revoked at any time, instantly extinguishing the legal basis for retaining or training on that data.
+   - **Contractual necessity (Art. 6(1)(b)):** Processing essential to deliver a requested service (e.g., routing
+     optimization for ride-hailing).
+   - **Legitimate interests (Art. 6(1)(f)):** A balancing test weighing the commercial utility of model training against
+     individual privacy expectations and fundamental rights.
+2. **Data licensing frameworks:**
+   - **Open licenses:** Creative Commons (CC-BY, CC0), Open Data Commons (ODbL), and specialized AI agreements such as
+     OpenRAIL impose varying obligations regarding commercial attribution, downstream distribution, and derivative model
+     redistribution.
+   - **Copyleft implications:** Training on data or code governed by reciprocal licences (e.g., GPL, AGPL) raises
+     contested legal questions regarding whether trained weights constitute a "derivative work."
+   - **Terms of Service (ToS) and web scraping:** Scraping public internet data often contravenes platform terms. While
+     scraping public facts may fall under copyright exceptions (such as fair use or text and data mining exceptions
+     under EU Directive 2019/790), violating access restrictions can trigger breach-of-contract or computer fraud
+     claims.
+
 ## Retention
+
+The principle of storage limitation (GDPR Art. 5(1)(e)) dictates that personal data must not be stored in identifiable
+form longer than necessary for the explicit purposes for which it was collected. In machine learning infrastructure,
+retention requires continuous policy enforcement across multiple storage tiers:
+
+| Storage Tier | Target Artifacts | Typical Retention TTL | Policy Enforcement Mechanism |
+| :--- | :--- | :--- | :--- |
+| **Raw Event Streams** | Telemetry ingestion buffers (Kafka, Kinesis) | $7\text{--}30$ days | Automated queue TTL eviction and hard drop |
+| **Curated Feature Store** | Online entity stores (Redis, DynamoDB) | $90\text{--}180$ days | Sliding window TTL and tombstone propagation |
+| **Analytical Lakehouse** | Parquet training snapshots and offline tables | $1\text{--}2$ years | Lifecycle archival policies and pseudonymization |
+| **Trained Model Weights** | Checkpoint parameters $\boldsymbol{\theta}$ | Model lifecycle | Selective unlearning or scheduled retraining |
+
+- **Feature store time-to-live (TTL):** Modern feature stores (such as Feast or Hopsworks) associate sliding-window TTLs
+  with entity features. Stale user attributes automatically age out and are purged from online key-value tables and
+  offline parquet lakehouse stores.
+- **Lineage and reproducibility:** Retention purges create a tension with model reproducibility: if historical training
+  snapshots are deleted to satisfy retention policies, exact weight replication from raw data becomes impossible unless
+  intermediate deterministic hashes and cryptographic provenance logs are preserved.
 
 ## Erasure requests
 
+Under the "Right to be Forgotten" (GDPR Art. 17) and Data Subject Access Requests (DSAR), individuals can demand
+complete deletion of their personal records. In machine learning, this creates two distinct obligations:
+
+1. **Storage-level deletion:** Hard deletion of all raw records, identity graphs, cached feature values, and metadata
+   from operational databases and storage buckets.
+2. **Model-level disgorgement:** Removing the influence of the erased records from trained model parameters $\theta$.
+   Regulatory bodies (notably the US Federal Trade Commission, FTC) have issued **algorithmic disgorgement** orders
+   against companies (e.g., Cambridge Analytica, Everalbum, Kurbo/Weight Watchers), compelling them to destroy not only
+   illicitly gathered data, but also all machine learning models and algorithms trained on that data.
+3. **Membership leakage:** If a model memorizes sensitive points, an adversary can execute Membership Inference Attacks
+   (MIAs) to verify whether target record $(x_i, y_i)$ was included in the training set $D_{\text{train}}$. Merely
+   deleting the record from the database while keeping $\theta$ intact leaves the subject vulnerable to membership
+   extraction, failing substantive privacy protection.
+
 ## Machine unlearning
 
+**Machine unlearning** seeks to remove the statistical footprint of a specific subset of training data
+$D_{\text{delete}} \subset D$ from a trained model $\theta$, producing an updated model $\theta^*$ that behaves as if it
+had never encountered $D_{\text{delete}}$, while preserving predictive performance on the retained dataset
+$D_{\text{retain}} = D \setminus D_{\text{delete}}$.
+
+### Exact vs. approximate unlearning
+
+Formally, let $\mathcal{A}$ be a training algorithm mapping a dataset to a distribution over model weights. 
+- **Exact unlearning:** Guarantees that the distribution of parameters $P(\theta^*)$ is statistically indistinguishable
+  from training from scratch on $D_{\text{retain}}$ alone:
+  $$
+  D_{\text{KL}}\!\left(P(\theta^*) \,\parallel\, P(\mathcal{A}(D_{\text{retain}}))\right) = 0
+  $$
+- **Approximate $(\epsilon, \delta)$-unlearning:** Bounds the divergence between $\theta^*$ and
+  $\mathcal{A}(D_{\text{retain}})$ by privacy parameters $\epsilon$ and $\delta$, mirroring differential privacy
+  definitions.
+
+### SISA: Sharded, Isolated, Sliced, Aggregated
+
+Full retraining from scratch guarantees exact unlearning but is computationally prohibitive for deep architectures
+trained on millions of samples. The **SISA** architecture <Cite id="bourtoule2021" /> structures training to make exact
+retraining efficient:
+
+1. **Sharding:** Partition the training set $D$ into $S$ disjoint, non-overlapping shards $D_1, D_2, \dots, D_S$. Train
+   an independent sub-model $f_s$ on each shard.
+2. **Slicing:** Divide each shard $D_s$ into $R$ sequential slices. Train sub-model $f_s$ incrementally across slices,
+   saving model checkpoints after each slice.
+3. **Aggregation:** Combine sub-model outputs at inference time via voting or ensembling:
+   $$
+   F(x) = \frac{1}{S} \sum_{s=1}^S f_s(x)
+   $$
+4. **Targeted retraining:** When an erasure request arrives for sample $z \in D_{\text{delete}}$, identify the specific
+   shard $s$ and slice $r$ containing $z$. Only shard $s$ is retrained, beginning from checkpoint $r-1$ with $z$
+   excluded. The remaining $S - 1$ shards remain untouched, reducing unlearning compute overhead by approximately a
+   factor of $S$.
+
+### Influence scrubbing and gradient approximations
+
+For smooth loss functions $\ell(z; \theta)$, second-order Taylor approximations and influence functions
+<Cite id="koh2017" /> estimate parameter displacement without retraining. The parameter shift induced by upweighting
+point $z$ by small $\epsilon$ is:
+
+$$
+\frac{d\theta^*}{d\epsilon}\Big|_{\epsilon=0} = - H_{\theta}^{-1} \nabla_\theta \ell(z; \theta^*)
+$$
+
+where $H_\theta = \frac{1}{|D_{\text{retain}}|} \sum_{i \in D_{\text{retain}}} \nabla_\theta^2 \ell(z_i; \theta^*)$ is
+the empirical Hessian matrix. To unlearn point $z$, an approximate Newton update subtracts the influence:
+
+$$
+\theta^* \approx \theta + \frac{1}{|D_{\text{retain}}|} H_\theta^{-1} \nabla_\theta \ell(z; \theta)
+$$
+
+While influence scrubbing runs in seconds, computing or inverting large Hessians requires stochastic approximations
+(e.g., LiSSA or Fisher information diagonals), and non-convex neural landscapes cause approximation errors to accumulate
+over sequential deletion requests.
+
 ## Pitfalls
+
+- **Confusing database deletes with model unlearning:** Scrubbing records from PostgreSQL or S3 satisfies traditional IT
+  compliance but leaves parametric memory intact, violating algorithmic disgorgement decrees and exposing users to
+  membership inference.
+- **Unlearning drift and catastrophic forgetting:** Sequentially applying approximate gradient-reversal or fine-tuning
+  updates without retraining on retained data causes model weights to drift away from the optimal loss surface,
+  degrading global accuracy.
+- **Verification paradox:** Proving that a data point has been deleted from a deep neural network without disclosing
+  proprietary model weights or internal gradients is challenging; empirical membership inference tests provide
+  probabilistic evidence, not definitive guarantees.
+- **Poisoning via unlearning APIs:** Malicious users can identify adversarial points that, when strategically submitted
+  for unlearning, tilt the remaining decision boundary to degrade fairness or misclassify competitor data.

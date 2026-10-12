@@ -1,26 +1,149 @@
 ---
 title: 'Point-in-time correctness'
 kind: concept
-summary: 'A feature is point-in-time correct when it uses only what was known at the moment of prediction. As-of joins, valid time versus record time and late corrections decide whether historical training rows meet that standard.'
+summary: 'A feature is point-in-time correct when it incorporates only facts known at the moment of prediction. As-of joins, valid versus record time, and slowly changing dimensions eliminate temporal lookahead leakage.'
 tags: [data, data-leakage, time-series]
-aliases: []
-requires: []
-related: [data-leakage, feature-stores]
-references: []
-status: stub
+aliases: [point in time correctness, point-in-time correctness, as of join, as-of join, point in time join, temporal lookahead leakage, bitemporal data]
+requires: [data-leakage]
+related: [feature-stores, training-serving-skew, temporal-splits, detecting-leakage]
+references: [kaufman2012]
+status: draft
 updated: 2026-10-11
 ---
 
+import PointInTimeJoinExplorer from './PointInTimeJoinExplorer';
+
 <Definition>
-To be written.
+**Point-in-time correctness** is the data engineering property ensuring that features generated for a historical
+training example contain strictly the information that was known and queryable in production systems at the exact moment
+the prediction would have been made ($t_{\text{pred}}$). Violating point-in-time correctness causes **temporal lookahead
+leakage**, creating training features that exploit future facts unavailable during real-world inference
+<Cite id="kaufman2012" />.
 </Definition>
 
-## As-of joins
+In production, models make decisions in real time using the current state of knowledge. Retrospective data pipelines,
+however, frequently query mutable operational databases where records have been updated, backfilled, or corrected months
+later, quietly contaminating historical training rows with future signals.
 
-## Valid time and record time
+<PointInTimeJoinExplorer />
 
-## Slowly changing dimensions
+## The mechanics of temporal lookahead leakage
 
-## Late corrections and backfills
+Consider training a model to predict loan default or fraudulent card transactions. A prediction request arrives at
+timestamp $t_{\text{pred}} = \text{2024-03-15 14:00:00}$.
 
-## Pitfalls
+A common but fatal pipeline error queries the analytical data warehouse with a simple relational join:
+
+```sql
+SELECT 
+    t.transaction_id,
+    t.amount,
+    c.credit_rating,
+    c.address_risk_tier
+FROM transactions t
+LEFT JOIN customers c ON t.customer_id = c.customer_id
+WHERE t.transaction_date = '2024-03-15'
+```
+
+If the `customers` table stores mutable current state, the join retrieves the customer's credit score and address as
+they exist **today**, when the training query is executed. If the customer subsequently defaulted in April and had their
+credit rating downgraded, the historical March transaction is annotated with the downgraded rating. The model learns to
+predict default effortlessly in offline training by observing the future consequence of the default itself.
+
+## Bitemporal data: valid time versus record time
+
+Maintaining point-in-time correctness requires distinguishing between the two fundamental temporal dimensions of
+real-world data:
+
+1. **Valid time (event time)** $t_{\text{valid}}$: The exact timestamp when an event occurred in the physical world
+   (e.g., a wire transfer initiated at 11:30:00).
+2. **Record time (ingestion / system time)** $t_{\text{record}}$: The timestamp when the record was processed, committed
+   to storage, and indexed by feature serving infrastructure (e.g., 12:15:00, after message broker queuing and ETL lag).
+
+### The latency leakage trap
+
+Filtering features using $t_{\text{valid}} \le t_{\text{pred}}$ is necessary but **not sufficient**. If an event
+happened at 11:30 but did not land in the operational database until 12:15 due to a 45-minute streaming pipeline lag, an
+inference request served at 12:00 could not possibly have known about that event.
+
+Strict point-in-time correctness requires filtering on ingestion availability:
+
+$$
+\mathcal{F}(t_{\text{pred}}) = \left\{ e \in \mathcal{E} : e.t_{\text{record}} \le t_{\text{pred}} \right\}
+$$
+
+## As-of joins (point-in-time joins)
+
+An **as-of join** matches each observation in a primary event table with the latest state record from a dimension or
+feature table whose timestamp is less than or equal to the observation's prediction timestamp:
+
+$$
+\text{AsOfJoin}(A, B) = \Big\{ \big(a, b^*(a)\big) : a \in A, \, b^*(a) = \arg\max_{b \in B : b.\text{id} = a.\text{id} \land b.t \le a.t_{\text{pred}}} b.t \Big\}
+$$
+
+Modern high-performance analytical query engines (including DuckDB and Polars) provide native syntax for as-of joins:
+
+```sql
+SELECT 
+    t.transaction_id,
+    t.event_time,
+    t.amount,
+    c.credit_rating
+FROM transactions t
+ASOF JOIN customer_updates c 
+    ON t.customer_id = c.customer_id 
+    AND t.event_time >= c.ingestion_time
+```
+
+This guarantees that for every transaction $t$, only the credit rating update committed strictly prior to `t.event_time`
+is joined.
+
+## Slowly changing dimensions (SCD Type 2)
+
+In enterprise data warehouses, point-in-time state tracking is traditionally implemented using **Slowly Changing
+Dimensions Type 2** (SCD2).
+
+Rather than overwriting existing customer attributes, each change generates a new row specifying an effective validity
+interval $[t_{\text{start}}, t_{\text{end}})$:
+
+| customer_id | risk_tier | start_time | end_time |
+| :--- | :--- | :--- | :--- |
+| `C-104` | Standard | 2024-01-01 00:00:00 | 2024-03-20 18:30:00 |
+| `C-104` | High Risk | 2024-03-20 18:30:00 | $\infty$ (Active) |
+
+A point-in-time extraction query for a transaction occurring on `2024-03-15` filters on the active interval:
+
+```sql
+WHERE c.start_time <= t.event_time AND t.event_time < c.end_time
+```
+
+This correctly extracts the "Standard" risk tier that was active on March 15th, ignoring the subsequent March 20th
+update.
+
+## Late corrections, revisions, and backfills
+
+Lookahead bias is particularly insidious when historical records undergo official revisions:
+
+1. **Macroeconomic indicator revisions**: Initial quarterly GDP, employment, and inflation figures released by
+   governments are preliminary estimates that are revised multiple times over the subsequent months. A quantitative
+   finance model trained on finalized, revised historical figures will fail in live trading because it only has access
+   to noisy preliminary releases.
+2. **Delayed dispute resolutions**: In payment processing, chargebacks and dispute claims often take 30 to 90 days to
+   settle. Using settled dispute outcomes as features in transaction models leaks the future resolution.
+3. **Target leakage through future aggregations**: Computing a feature like "transactions in the next 24 hours" or
+   computing expanding window averages across the entire dataset without clamping the window boundary at
+   $t_{\text{pred}}$ trivially leaks the future.
+
+## Automated enforcement via feature stores
+
+Modern machine learning platforms deploy **feature stores** (such as Feast, Hopsworks, or Tecton) specifically to
+eliminate training-serving skew caused by temporal lookahead:
+
+- **Dual-storage abstraction**:
+  - **Online store** (e.g., Redis, DynamoDB): Stores low-latency current feature values $\mathcal{F}(t_{\text{now}})$
+    for real-time inference.
+  - **Offline store** (e.g., Snowflake, BigQuery, Parquet on S3): Stores append-only immutable event logs containing
+    $(t_{\text{valid}}, t_{\text{record}})$ timestamps.
+- **Point-in-time extraction API**: When generating training datasets, the feature store accepts a target DataFrame
+  containing `(entity_id, timestamp)` pairs and automatically executes distributed as-of joins against the immutable
+  offline log, ensuring mathematical consistency between historical training features and real-time production serving.

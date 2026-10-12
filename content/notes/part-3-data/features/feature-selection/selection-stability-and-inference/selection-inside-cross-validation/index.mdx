@@ -1,26 +1,122 @@
 ---
 title: 'Selection inside cross-validation'
 kind: concept
-summary: 'Selecting features on all rows and then cross-validating the model gives an optimistic score, even on pure noise. Selection must run inside each training fold.'
+summary: 'Selecting features on the full dataset before cross-validating induces catastrophic optimism bias, reporting near-perfect accuracy on pure noise. Feature selection must be nested strictly inside training folds.'
 tags: [data, model-selection]
-aliases: []
-requires: []
-related: [feature-selection, data-leakage]
-references: []
-status: stub
+aliases: [selection inside cross-validation, selection bias in cross validation, selection leakage, feature selection leakage, nested feature selection]
+requires: [feature-selection]
+related: [data-leakage, filter-feature-selection, wrapper-feature-selection, embedded-feature-selection]
+references: [ambroise2002, varma2006, kaufman2012]
+status: draft
 updated: 2026-10-11
 ---
 
+import SelectionBiasCvVisualizer from './SelectionBiasCvVisualizer';
+
 <Definition>
-To be written.
+**Selection inside cross-validation** (or nested feature selection) is the methodological principle requiring that all
+feature ranking, subset screening, and thresholding operations be executed strictly within the training folds of a
+cross-validation loop. Performing feature selection across the full dataset prior to partitioning leaks validation
+target labels into the feature set, producing severe **selection bias** that invalidates cross-validation error
+estimates <Cite id="ambroise2002" />.
 </Definition>
 
-## The optimism of selecting on all rows
+A cross-validation protocol is only valid if every step of the learning pipeline—including centering, imputation,
+encoding, and feature selection—is trained exclusively on the training partition and evaluated out-of-sample on the
+hold-out validation partition.
 
-## A pure-noise demonstration
+<SelectionBiasCvVisualizer />
 
-## Selection inside each fold
+## The mechanics of selection leakage
 
-## Nested cross-validation
+Consider a high-dimensional dataset $\mathcal{D} = \{(x_i, y_i)\}_{i=1}^n$ with $p \gg n$ candidate features. A
+widespread but fatally flawed workflow proceeds as follows:
 
-## Pitfalls
+1. **Unshielded screening (Flawed)**: Compute the correlation or association statistic $s_j = \text{Corr}(X_j, Y)$
+   across all $n$ samples. Retain the top $k$ highest-scoring features $S^* = \{j_1, \dots, j_k\}$.
+2. **Subsequent cross-validation**: Partition $\mathcal{D}$ into $K$ cross-validation folds
+   $\{\mathcal{D}_1, \dots, \mathcal{D}_K\}$.
+3. For each fold $m \in \{1, \dots, K\}$, train classifier $f_m$ on $\mathcal{D} \setminus \mathcal{D}_m$ using only
+   features $S^*$, and report error on $\mathcal{D}_m$.
+
+### Why unshielded selection fails
+
+This workflow violates the fundamental premise of cross-validation: that validation samples $\mathcal{D}_m$ remain
+completely unobserved during model construction. Because $\mathcal{D}_m$ was included in the full-sample screening in
+step 1, features were selected precisely because their idiosyncratic, random sample fluctuations inside $\mathcal{D}_m$
+happened to correlate with $Y$ <Cite id="kaufman2012" />. The test fold is not independent—it has already guided the
+specification of the model's feature space.
+
+## The pure-noise demonstration (Ambroise & McLachlan)
+
+The magnitude of selection bias is easiest to grasp when there is **zero true relationship** between features and
+target.
+
+Let $X_{ij} \sim \mathcal{N}(0, 1)$ be independent standard Gaussian variables and $Y_i \sim \text{Bernoulli}(0.5)$ be
+fair coin tosses, generated completely independently for $n = 60$ samples and $p = 5,000$ features. The true theoretical
+Bayes error is exactly $50\%$ (random guessing).
+
+However, from extreme value theory, the maximum empirical correlation between $5,000$ independent noise variables and a
+random label vector over $n = 60$ observations is substantial:
+
+$$
+\mathbb{E}\left[ \max_{1 \le j \le p} |r(X_j, Y)| \right] \approx \sqrt{\frac{2 \log p}{n}} = \sqrt{\frac{2 \ln 5000}{60}} \approx 0.53
+$$
+
+If a practitioner selects the top $k = 20$ features by correlation across all 60 samples and then runs 5-fold
+cross-validation on a linear classifier, the reported cross-validation accuracy typically exceeds **$95\%$**
+<Cite id="ambroise2002" />.
+
+The data scientist believes they have discovered a near-perfect predictive signature, yet when applied to fresh holdout
+data from the same data-generating distribution, the accuracy plummets immediately to $50\%$.
+
+## The shielded protocol: selection inside each fold
+
+To obtain an unbiased estimate of generalization performance, feature selection must be encapsulated inside each
+cross-validation fold:
+
+1. Partition $\mathcal{D}$ into $K$ disjoint validation folds $\{\mathcal{D}_1, \dots, \mathcal{D}_K\}$.
+2. For each fold $m \in \{1, \dots, K\}$:
+   a. Isolate the training partition $\mathcal{D}_{\text{train}}^{(m)} = \mathcal{D} \setminus \mathcal{D}_m$.
+   b. Compute feature statistics and select top features $S_m^*$ using **only** $\mathcal{D}_{\text{train}}^{(m)}$.
+   c. Fit the learning model $f_m$ using features $S_m^*$ on $\mathcal{D}_{\text{train}}^{(m)}$.
+   d. Evaluate $f_m$ on the strictly untouched validation partition $\mathcal{D}_m$ restricted to features $S_m^*$.
+3. Compute the overall cross-validation error:
+   $$
+   \hat{R}_{\text{CV}} = \frac{1}{K} \sum_{m=1}^K \mathcal{L}\left(\mathcal{D}_m, f_m(S_m^*)\right)
+   $$
+
+When evaluated under this shielded protocol on the pure-noise dataset, the reported cross-validation accuracy averages
+$\approx 50.0\%$, correctly reflecting the total absence of real signal.
+
+In modern machine learning libraries, this encapsulation is achieved by placing feature selection and the estimator
+together inside a pipeline (such as scikit-learn's
+`Pipeline([('selector', SelectKBest(k=20)), ('clf', LogisticRegression())])`), ensuring that `fit` is called exclusively
+on training folds.
+
+## Fold-to-fold subset variability
+
+Under the honest protocol, each fold $m$ independently identifies its own feature subset $S_m^*$. The subsets across
+different folds will typically not be identical:
+
+- **In the presence of true signal**: Informative features consistently appear across all folds, yielding high Jaccard
+  similarity between $S_a^*$ and $S_b^*$.
+- **In pure noise**: Each fold selects entirely different spurious noise columns, yielding near-zero subset overlap.
+
+Tracking fold-to-fold feature stability serves as an essential diagnostic: if cross-validation scores look acceptable
+but feature overlap across folds is negligible, the model is exploiting fold-specific noise rather than generalizable
+structure.
+
+## Nested cross-validation for hyperparameter tuning
+
+If the feature selection process itself requires tuning—such as choosing the optimal number of features $k$, the Lasso
+penalty $\lambda$, or the correlation threshold $\alpha$—a single cross-validation loop is insufficient.
+
+Tuning hyperparameters on the same cross-validation loop used to evaluate performance re-introduces optimization bias
+<Cite id="varma2006" />. A **nested cross-validation** architecture resolves this:
+
+- **Outer cross-validation loop**: Splits data into outer train and outer test folds to evaluate unbiased final
+  performance.
+- **Inner cross-validation loop**: Splits outer training data into inner train and inner validation folds to evaluate
+  candidate feature counts $k \in \{10, 20, 50, 100\}$ and choose the best hyperparameter $k^*$.
+- The outer model is then retrained on the full outer training fold using $k^*$ and tested once on the outer test fold.

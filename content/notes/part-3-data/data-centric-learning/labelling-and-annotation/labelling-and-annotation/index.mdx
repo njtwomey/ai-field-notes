@@ -1,36 +1,168 @@
 ---
 title: 'Labelling and annotation'
 kind: concept
-summary: 'Annotation turns raw examples into labels through a label schema, guidelines, trained annotators and checks of agreement. Its design fixes the quality, cost and ambiguity of every label a model learns from.'
-tags: [data, weak-supervision]
-aliases: []
-requires: []
-related: [cohens-kappa, fleiss-kappa, learning-from-crowds, learning-with-noisy-labels, bayesian-active-learning]
-references: []
-status: stub
-updated: 2026-10-11
+summary: 'Data labelling transforms raw artifacts into ground-truth supervision through structured schemas, operational guidelines, pilot iterations, inter-annotator agreement metrics, and adjudication protocols to optimize quality and budget.'
+tags: [data, annotation, labelling, active-learning, quality]
+aliases: [labelling and annotation, data labeling, data annotation, annotation pipeline]
+requires: [data-generating-process, measurement-error-and-proxies]
+related: [label-definition, annotator-agreement, annotator-aggregation, model-generated-labels, delayed-and-partial-labels]
+references: [settles2009, ratner2017, dawid1979, cohen1960, fleiss1971, krippendorff2004]
+status: draft
+updated: 2026-10-12
 ---
 
+import { LabellingAndAnnotationVisualizer } from './LabellingAndAnnotationVisualizer'
+
 <Definition>
-To be written.
+**Data labelling and annotation** is the operational and statistical methodology of converting raw, unstructured, or
+semi-structured data instances into structured supervisory targets $\mathcal{D} = \{(\mathbf{x}_i, y_i)\}_{i=1}^N$. It
+encompasses taxonomy formulation, guideline specification, pilot calibration, inter-annotator agreement verification,
+and consensus adjudication protocols to maximize supervisory fidelity within operational cost constraints.
 </Definition>
 
-## Label schemas
+In supervised machine learning, model performance is fundamentally bounded by the quality and consistency of training
+labels. While modern neural architectures can generalize across noisy inputs, systematic label errors, subjective
+ambiguity, and inconsistent annotator interpretations introduce irreducible label noise that degrades calibration and
+creates silent failures in production <Cite id="dawid1979, settles2009" />. High-performing systems treat annotation not
+as an outsourced commodity task, but as an iterative, disciplined engineering lifecycle.
 
-## Guidelines and pilot rounds
+<LabellingAndAnnotationVisualizer />
 
-## Annotator agreement
+## Label schemas and taxonomies
 
-## Adjudication
+Every annotation campaign begins with a formal schema defining the output space $\mathcal{Y}$.
 
-## Labelling strategies
+### Structural topologies
 
-### Active labelling
+- **Flat multiclass classification**: $y \in \{1, \dots, C\}$. Demands mutually exclusive and collectively exhaustive
+  (MECE) categories.
+- **Hierarchical taxonomies**: Tree-structured categories (e.g., `Support > Hardware > Battery`). Allows annotators to
+  label at varying levels of granularity when instance ambiguity prevents leaf-level classification.
+- **Multi-label classification**: $y \subseteq \{1, \dots, C\}$. Allows overlapping concepts (e.g., an article tagged
+  simultaneously as `"Politics"` and `"Economics"`).
 
-### Weak and programmatic labels
+### The "Other" category hazard
 
-### Model-assisted labelling
+A pervasive flaw in schema design is introducing an unconstrained residual `"Other"` or `"Miscellaneous"` bucket. When
+guidelines fail to provide clear boundaries for ambiguous edge cases, annotators default to the `"Other"` class. If the
+`"Other"` category exceeds $10\%$ to $15\%$ of total dataset volume, it degrades into a high-entropy mixture of
+unmodeled concepts that confuses downstream classifiers.
 
-## Cost and quality
+## Guidelines and pilot calibration rounds
 
-## Pitfalls
+Annotation guidelines serve as the operational contract between ML engineers and annotators.
+
+| Lifecycle Stage | Operational Scope | Core Milestone | Gating Criteria |
+| :--- | :--- | :--- | :--- |
+| **1. Specification Drafting** | Initial taxonomy & rules | Formulate category boundaries and concrete edge cases | Technical and domain consensus |
+| **2. Pilot Calibration Round** | $N = 100\text{--}200$ items | Independent multi-annotator evaluation on shared slice | Workers annotate blind |
+| **3. Agreement Audit** | Chance-corrected metrics | Calculate inter-rater reliability (Cohen's $\kappa$, Fleiss' $\kappa$) | $\kappa \ge 0.70 \implies$ proceed; $\kappa < 0.70 \implies$ revise guidelines |
+| **4. Guideline Freeze & Rollout** | Full target dataset | Lock specification contract and scale production labeling | Continuous auditing via gold trap items |
+
+1. **Concrete positive and negative exemplars**: Guidelines must include realistic examples illustrating subtle
+   boundaries, explicitly answering: *"Why is Example A classified as Class 1 rather than Class 2?"*
+2. **Standard operating procedures for ambiguity**: Clear rules governing missing information, corrupted media, sarcasm,
+   or multi-topic blur.
+3. **Pilot calibration rounds**: Prior to launching full-scale annotation, run a pilot batch of $100$ to $200$ instances
+   across all annotators. Convene a calibration meeting to review disagreements. If annotators disagree on $20\%$ of
+   instances, the flaw lies in guideline ambiguity, not annotator competence.
+
+## Inter-annotator agreement metrics
+
+Raw percentage agreement (the fraction of items where raters assign identical labels) is deceptive because it fails to
+account for agreement occurring purely by chance. When evaluating categorical annotations, practitioners compute
+chance-corrected agreement statistics <Cite id="cohen1960, fleiss1971, krippendorff2004" />.
+
+### Cohen's kappa and Fleiss' kappa
+
+For two raters classifying items into discrete categories, **Cohen's kappa** is defined as <Cite id="cohen1960" />:
+
+$$
+\kappa = \frac{p_o - p_e}{1 - p_e}
+$$
+
+Where $p_o$ is the observed empirical agreement proportion, and $p_e$ is the expected agreement under statistical
+independence:
+
+$$
+p_e = \sum_{c=1}^C P(\text{Rater 1} = c) \cdot P(\text{Rater 2} = c)
+$$
+
+For campaigns involving three or more raters across instances, **Fleiss' kappa** generalizes Cohen's formulation
+<Cite id="fleiss1971" />. For complex settings with missing ratings, ordinal scales, or continuous spans,
+**Krippendorff's alpha** ($\alpha$) provides a unified distance-metric formulation <Cite id="krippendorff2004" />.
+
+| Agreement Score ($\kappa$ or $\alpha$) | Diagnostic Interpretation | Production Action |
+| :--- | :--- | :--- |
+| $< 0.40$ | Poor agreement | Halt annotation; overhaul schema and guidelines |
+| $0.40 - 0.65$ | Moderate agreement | Refine boundary case definitions; retrain raters |
+| $0.65 - 0.80$ | Substantial agreement | Acceptable for complex, subjective tasks |
+| $> 0.80$ | Near-perfect agreement | High reproducibility; proceed to scale |
+
+## Adjudication and consensus modeling
+
+When multiple raters annotate the same item and diverge, their judgments must be resolved into a single ground-truth
+target.
+
+### Majority voting versus Dawid-Skene modeling
+
+Unweighted majority voting assumes all annotators possess equal, uniform accuracy. In crowd-sourced workflows, annotator
+skill, attention, and bias vary drastically <Cite id="dawid1979" />.
+
+The **Dawid-Skene model** treats the true item label $z_i \in \{1, \dots, C\}$ as a latent variable and estimates
+individual annotator confusion matrices <Cite id="dawid1979" />:
+
+$$
+\pi_{j, k}^{(m)} = P(\text{Annotator } m \text{ outputs label } k \mid \text{True label is } j)
+$$
+
+Using Expectation-Maximization (EM), Dawid-Skene jointly estimates:
+1. The posterior probability of the true label for each item: $P(z_i = j \mid \text{Annotations})$.
+2. The specific accuracy and systematic class biases of each annotator $\boldsymbol{\pi}^{(m)}$.
+
+Annotators who consistently agree with consensus receive higher posterior weights; adversarial spammers or biased raters
+are automatically down-weighted without manual rules <Cite id="dawid1979" />.
+
+## Modern labelling strategies
+
+To maximize label quality while controlling budgets, contemporary teams deploy three complementary strategies:
+
+1. **Active learning**: Rather than labeling uniform random instances, active learning uses model uncertainty (e.g.
+   least confidence, margin sampling, or entropy) to select only boundary instances where the current model is most
+   uncertain <Cite id="settles2009" />:
+   $$
+   \mathbf{x}^* = \arg\max_{\mathbf{x} \in \mathcal{U}} H(P(y \mid \mathbf{x}))
+   $$
+   Active learning routinely achieves equivalent validation accuracy with $40\%$ to $70\%$ fewer human labels.
+2. **Weak and programmatic supervision**: Frameworks like Snorkel <Cite id="ratner2017" /> allow domain experts to write
+   programmatic **labeling functions (LFs)**—incorporating pattern heuristics, regular expressions, and external
+   databases. A generative model learns LF accuracies and dependencies without ground truth, assigning probabilistic
+   labels across millions of unlabelled rows.
+3. **Model-assisted pre-labelling (LLM-in-the-loop)**: Pre-trained foundation models propose draft labels, bounding
+   boxes, or text summaries; human annotators review, verify, or correct proposals. Pre-labeling cuts per-task
+   annotation time by $50\%$ to $80\%$, provided raters are monitored against automation bias (the tendency to passively
+   accept incorrect model suggestions).
+
+## Quality control: honey-pots and audits
+
+To prevent annotator drift and detect fraudulent crowd accounts, production pipelines intersperse **honey-pot
+instances** (gold-standard items with pre-verified, undeniable ground truth) into regular annotation queues. If an
+annotator's accuracy on honey-pot items drops below an established threshold ($< 85\%$), their annotations are
+automatically quarantined for re-review.
+
+## Diagnostic checklist
+
+To architect an annotation pipeline:
+
+1. **Formalize MECE taxonomies**: Design mutually exclusive categories and strictly constrain the residual `"Other"`
+   bucket to $< 10\%$ volume.
+2. **Conduct pilot calibration**: Run $100$ items across all raters; hold calibration meetings to resolve edge-case
+   ambiguities before full-scale launch.
+3. **Track chance-corrected agreement**: Calculate Cohen's $\kappa$ <Cite id="cohen1960" /> or Krippendorff's $\alpha$
+   <Cite id="krippendorff2004" />; require $\kappa \ge 0.70$ prior to dataset freeze.
+4. **Aggregate via Dawid-Skene**: Replace naive majority voting with probabilistic confusion-matrix modeling to
+   down-weight noisy annotators <Cite id="dawid1979" />.
+5. **Intersperse honey-pot verification items**: Embed verified gold items randomly into annotation queues to audit
+   ongoing worker accuracy.
+6. **Accelerate with active and model-assisted learning**: Combine uncertainty sampling <Cite id="settles2009" /> with
+   model pre-labeling to cut costs while retaining human oversight.

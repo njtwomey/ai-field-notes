@@ -3,24 +3,144 @@ title: 'One-hot and contrast coding'
 kind: concept
 summary: 'One-hot coding gives each category level its own indicator. With an intercept, one level becomes the reference; sum, Helmert and other contrasts choose what the coefficients compare.'
 tags: [data, feature-engineering, linear-models]
-aliases: []
-requires: []
-related: [categorical-encoding]
+aliases: [contrast coding, dummy coding, one-hot encoding, dummy variable trap, treatment coding]
+requires: [categorical-encoding]
+related: [feature-scaling, preprocessing-by-model-family]
 references: []
-status: stub
+status: draft
 updated: 2026-10-11
 ---
 
 <Definition>
-To be written.
+**Contrast coding** is the parameterization of a discrete categorical factor with $K$ distinct levels into a set of
+$K - 1$ linearly independent numerical predictor columns, designed to eliminate collinearity with the regression
+intercept while explicitly selecting the statistical hypothesis tested by each regression coefficient.
 </Definition>
 
-## One-hot indicators
+Categorical variables (e.g., seasons, geographical regions, medical treatments) possess no intrinsic numerical ordering
+or distance metric. In order to enter mathematical models based on linear combinations $w^\top x + b$, categories must
+be represented by numerical coordinate vectors.
 
-## The dummy variable trap and reference levels
+While modern tree ensembles can process integer category IDs natively, linear models and generalized linear models
+require contrast matrices to prevent rank deficiency and establish interpretable baseline comparisons.
 
-## Sum contrasts
+import { ContrastCodingExplorer } from './ContrastCodingExplorer';
+
+<ContrastCodingExplorer />
+
+## One-hot indicators and the dummy variable trap
+
+For a categorical factor with $K$ unique levels $\mathcal{C} = \{c_1, \dots, c_K\}$, **one-hot encoding** maps each
+level to an indicator vector $d \in \{0, 1\}^K$:
+
+$$
+d_k = \mathbb{I}(x = c_k)
+$$
+
+Because every observation belongs to exactly one category, the sum across all $K$ one-hot indicator columns is
+identically equal to one for every row:
+
+$$
+\sum_{k=1}^K d_k = 1.0 = \mathbf{1}
+$$
+
+When a model includes an unregularized intercept parameter $\beta_0 \cdot \mathbf{1}$, the design matrix $X$ contains an
+exact linear dependency: the sum of the $K$ dummy columns equals the intercept column.
+
+This creates the **Dummy Variable Trap**:
+- The Gram matrix $X^\top X$ has rank $K$ instead of $K + 1$.
+- $\det(X^\top X) = 0$, rendering $(X^\top X)^{-1}$ undefined.
+- Ordinary least squares has infinitely many equivalent weight solutions with infinite variance.
+
+To guarantee that $X$ has full column rank, one degree of freedom must be removed by parameterizing the factor into
+$K - 1$ coded columns. The specific choice of coding matrix determines what each resulting regression coefficient
+represents.
+
+## Treatment coding (dummy coding)
+
+**Treatment coding** (implemented via `drop='first'` in scikit-learn's `OneHotEncoder`) designates one level
+$c_{\text{ref}}$ (by default the first level) as the reference category:
+
+$$
+x_k = \mathbb{I}(x = c_k) \quad \text{for } k = 2, \dots, K
+$$
+
+The linear regression equation evaluates to:
+
+$$
+\mathbb{E}[Y \mid x] = \beta_0 + \sum_{k=2}^K \beta_k \mathbb{I}(x = c_k)
+$$
+
+- **Intercept:** $\beta_0 = \mu_{\text{ref}}$ equals the expected response of the reference group.
+- **Slope coefficients:** $\beta_k = \mu_k - \mu_{\text{ref}}$ measures the expected difference between category $k$ and
+  the reference baseline.
+- **Hypothesis test:** Testing $H_0: \beta_k = 0$ evaluates whether level $k$ differs significantly from the reference
+  group.
+
+## Sum contrasts (deviation coding)
+
+In **sum coding** (or deviation coding), each category is compared against the **grand mean** of all $K$ categories
+combined, rather than an arbitrary single reference level:
+
+$$
+\bar{\mu} = \frac{1}{K} \sum_{k=1}^K \mu_k
+$$
+
+The coding matrix assigns $+1$ to level $k$, $0$ to other levels, and $-1$ across all columns for the final level $K$:
+
+$$
+\begin{bmatrix} 1 & 0 & \dots & 0 \\ 0 & 1 & \dots & 0 \\ \vdots & \vdots & \ddots & \vdots \\ -1 & -1 & \dots & -1 \end{bmatrix}
+$$
+
+- **Intercept:** $\beta_0 = \bar{\mu}$ equals the unweighted average across all groups.
+- **Slope coefficients:** $\beta_k = \mu_k - \bar{\mu}$ represents the deviation of group $k$ from the overall
+  population average.
+- **Constraint:** By construction, the coefficients sum to zero: $\sum_{k=1}^K \beta_k = 0$, so
+  $\beta_K = -\sum_{k=1}^{K-1} \beta_k$.
 
 ## Helmert and polynomial contrasts
 
-## Pitfalls
+Beyond pairwise and grand-mean comparisons, advanced contrasts encode structured domain hypotheses:
+
+### Helmert coding
+Helmert coding compares each level $k$ to the average of all preceding levels $1, \dots, k-1$. Because Helmert contrasts
+are mutually orthogonal ($C^\top C$ is diagonal), the estimated coefficients $\hat{\beta}_k$ are statistically
+independent under Gaussian errors, preventing covariance between slope estimates.
+
+### Polynomial contrasts
+For ordinal factors with equally spaced levels (e.g. drug dosages: 0mg, 10mg, 20mg, 30mg), polynomial coding uses
+orthogonal Chebyshev polynomials to decompose the categorical factor into:
+1. Linear trend ($\beta_{\text{linear}}$): constant rate of increase.
+2. Quadratic trend ($\beta_{\text{quad}}$): U-shaped or inverted U-shaped curvature.
+3. Cubic trend ($\beta_{\text{cubic}}$): S-shaped saturation.
+
+## Regularized linear models vs unregularized OLS
+
+In modern machine learning with Ridge ($L_2$) or Lasso ($L_1$) regularization, the Dummy Variable Trap behaves
+differently:
+
+$$
+\min_w \|y - X w\|_2^2 + \lambda \|w\|_2^2
+$$
+
+The regularized Gram matrix $X^\top X + \lambda I$ has minimum eigenvalue $\ge \lambda > 0$, guaranteeing strict
+invertibility even with all $K$ one-hot columns retained alongside the intercept.
+
+However, retaining all $K$ columns introduces a subtle shrinkage distortion:
+- Ridge penalizes $\lambda \sum_{k=1}^K w_k^2$. Because all weights are shrunk toward zero symmetrically, the effective
+  baseline is shrunk toward the global center.
+- Dropping a reference level forces the reference category to receive zero regularization penalty (absorbed by the
+  unpenalized intercept), while the remaining $K - 1$ levels are penalized.
+- **Best Practice:** When using regularized linear models (Ridge/LogisticRegression), retain all $K$ columns without
+  dropping a reference level to ensure rotation-invariant symmetric shrinkage across all categories.
+
+## Pitfalls and failure modes
+
+1. **Unseen categories in treatment coding:** If `drop='first'` is used without setting `handle_unknown='ignore'`, a
+   novel unseen category at test time cannot be represented and throws an exception.
+2. **Arbitrary baseline distortion:** In treatment coding, choosing an unrepresentative or ultra-rare category as the
+   reference baseline inflates the variance of all slope estimates
+   $\operatorname{Var}(\hat{\beta}_k) = \operatorname{Var}(\bar{y}_k) + \operatorname{Var}(\bar{y}_{\text{ref}})$.
+3. **High-cardinality dimensionality explosion:** Expanding a postal code or user ID factor with $10{,}000$ levels into
+   $9{,}999$ columns creates an extremely wide, sparse matrix that exhausts memory in dense solvers and fragments
+   decision tree splits.

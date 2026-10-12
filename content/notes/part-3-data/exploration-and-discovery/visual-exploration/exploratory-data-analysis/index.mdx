@@ -1,42 +1,158 @@
 ---
 title: 'Exploratory data analysis'
 kind: concept
-summary: 'Exploratory data analysis looks at data through summaries and plots, before any model is fixed, to find their shape, errors, outliers and relations and to suggest hypotheses and features.'
-tags: [data, statistics]
-aliases: []
-requires: []
-related: [t-distributed-stochastic-neighbour-embedding, principal-component-analysis]
-references: []
-status: stub
-updated: 2026-10-11
+summary: 'Exploratory data analysis (EDA) visually probes raw distributions, bivariate relationships, and latent geometries before fixing model architectures—revealing outliers, non-linearities, and heteroscedasticity while guarding against HARKing.'
+tags: [data, statistics, visualization, diagnostics]
+aliases: [EDA, exploratory data analysis, visual data exploration]
+requires: [data-generating-process, measurement-error-and-proxies]
+related: [target-exploration, slice-analysis, data-profiling, baseline-probes]
+references: [tukey1977, anscombe1973, silverman1986, gelman2013forking]
+status: draft
+updated: 2026-10-12
 ---
 
+import { ExploratoryDataAnalysisVisualizer } from './ExploratoryDataAnalysisVisualizer'
+
 <Definition>
-To be written.
+**Exploratory data analysis (EDA)** is the disciplined visual, numerical, and structural investigation of data pioneered
+by John Tukey <Cite id="tukey1977" />. It reveals unexpected distributional geometries, detects anomalies and outliers,
+evaluates structural modeling assumptions, and generates informed predictive hypotheses prior to formal model selection.
 </Definition>
 
-## Aims of exploration
+Before committing to specific loss functions, neural architectures, or feature engineering pipelines, an engineer must
+visually inspect the data. Tabular aggregates and scalar summary statistics (such as means, standard deviations, and
+linear correlations) compress away critical geometric structure. Datasets with identical scalar statistics can possess
+radically different underlying data-generating mechanisms, requiring entirely different algorithmic treatments
+<Cite id="tukey1977, anscombe1973" />.
 
-## One variable
+<ExploratoryDataAnalysisVisualizer />
 
-### Histograms and density plots
+## Aims of exploration and Anscombe's quartet
 
-### Box and violin plots
+The foundational premise of EDA is that statistical modeling must begin with observation rather than confirmatory
+hypothesis testing <Cite id="tukey1977" />. Francis Anscombe formalized this necessity in 1973 by constructing four
+synthetic bivariate datasets (Anscombe's quartet) <Cite id="anscombe1973" />.
 
-## Two variables
+Every dataset in the quartet shares identical summary statistics to two decimal places:
+- Sample size: $N = 11$
+- Mean of $X$: $\bar{x} = 9.0$, Mean of $Y$: $\bar{y} = 7.50$
+- Variance of $X$: $s_x^2 = 11.0$, Variance of $Y$: $s_y^2 = 4.12$
+- Pearson correlation: $r = 0.816$
+- OLS regression line: $y = 3.0 + 0.50x$ with coefficient of determination $R^2 = 0.67$
 
-### Scatter plots
+As rendered interactively in the visualizer above, each dataset manifests a radically disparate geometry despite
+indistinguishable regression summaries:
 
-### Pair plots
 
-## Many variables
+Without visualization, an automated model selector would apply identical linear models to all four datasets. In reality:
+- **Dataset I** represents a genuine noisy linear relationship.
+- **Dataset II** exhibits a strict deterministic parabola; a linear model suffers complete structural misspecification.
+- **Dataset III** is a near-perfect collinear line ruined by a single vertical measurement error outlier.
+- **Dataset IV** contains zero relationship among 10 points clustered at $x=8$; the entire positive regression slope is
+  manufactured by a single extreme leverage point at $x=19$.
 
-### Embeddings for overview
+## Univariate visualization: shape, spread, and modality
 
-### Parallel coordinates
+Univariate EDA assesses the marginal distribution $P(X_j)$ of each feature.
 
-## Time and space
+### Histograms and bandwidth selection
 
-## Exploration and confirmation
+Histograms partition continuous values into discrete bins. Bin width $h$ fundamentally dictates visual interpretation:
+- **Freedman-Diaconis rule**: Optimizes bin width to resist heavy tails and outliers:
+  $$
+  h_{\text{FD}} = 2 \times \frac{\text{IQR}}{N^{1/3}}
+  $$
+- **Kernel Density Estimation (KDE)**: Produces a smooth continuous density estimate:
+  $$
+  \hat{f}_h(x) = \frac{1}{Nh} \sum_{i=1}^N K\left(\frac{x - x_i}{h}\right)
+  $$
+  Using a Gaussian kernel $K(u) = \frac{1}{\sqrt{2\pi}} e^{-u^2/2}$, the optimal bandwidth minimizing asymptotic mean
+  integrated squared error (AMISE) is given by Silverman's rule of thumb <Cite id="silverman1986" />:
+  $$
+  h^* = 0.9 \min\left(\hat{\sigma}, \frac{\text{IQR}}{1.34}\right) N^{-1/5}
+  $$
 
-## Pitfalls
+> [!WARNING]
+> **Bandwidth pitfalls in KDE**: An undersmoothed bandwidth ($h \ll h^*$) hallucinates dozens of spurious multimodal spikes from local sampling variance. Conversely, an oversmoothed bandwidth ($h \gg h^*$) flattens true bimodal mixtures into a deceptively unimodal Gaussian curve <Cite id="silverman1986" />.
+
+### Box plots, violin plots, and letter-value plots
+
+Standard box plots display the five-number summary: median, quartiles ($Q_1, Q_3$), and Tukey fences
+($Q_1 - 1.5\text{IQR}, Q_3 + 1.5\text{IQR}$) <Cite id="tukey1977" />. For modern web-scale datasets ($N > 10^5$),
+standard box plots designate tens of thousands of points as "outliers" simply because Gaussian tails naturally produce
+points beyond $1.5\text{IQR}$. For large sample sizes, **letter-value plots** (boxen plots) compute deeper quantile
+depths (eighths, sixteenths, thirty-seconds), providing reliable tail estimates without visual clutter.
+
+## Bivariate visualization: relationships and dependencies
+
+Bivariate EDA investigates joint distributions $P(X_j, X_k)$ and feature-target relationships $P(y \mid X_j)$.
+
+### Mitigating overplotting
+
+When visualizing millions of records, scatter plots suffer from severe overplotting—individual points fuse into solid
+black blobs that mask underlying density variations:
+1. **Alpha blending**: Reduce point opacity ($\alpha \in [0.01, 0.1]$) so that overlapping points reveal density
+   gradients.
+2. **Hexagonal binning (hexbin)**: Aggregate points into 2D hexagonal tessellations with logarithmic color scaling
+   ($\log_{10}(\text{count})$).
+3. **2D Kernel density contours**: Draw iso-density contours indicating bivariate probability mass.
+
+### Heteroscedasticity and non-linear patterns
+
+Bivariate plots uncover structural violations of classical assumptions:
+- **Heteroscedastic fan shapes**: The conditional variance $\text{Var}(Y \mid X)$ expands as $X$ increases. Ordinary
+  Least Squares (OLS) produces efficient point estimates but severely understated standard errors, demanding weighted
+  least squares or variance-stabilizing transforms ($y \to \ln y$).
+- **Zero-correlation non-linearities**: Circular or sinusoidal patterns where Pearson's correlation $r \approx 0$, yet
+  the two features share an exact deterministic functional dependence ($y = x^2$ or $x^2 + y^2 = r^2$).
+
+## Multivariate visualization
+
+Real-world feature spaces span dozens or hundreds of dimensions ($D \gg 3$).
+
+| Dimension Reduction Paradigm | Mechanism | Preserved Structure | Typical Diagnostic Use |
+| :--- | :--- | :--- | :--- |
+| **Linear (PCA)** | Maximizes global variance | Pairwise Euclidean distances across coordinates | Detecting dominant variance directions and global outliers |
+| **Non-Linear (t-SNE / UMAP)** | Optimizes local neighborhood probabilities | Local topological neighborhoods and manifold curvature | Visualizing discrete semantic clusters and subpopulation groupings |
+
+- **Parallel coordinates**: Normalize continuous features to $[0, 1]$ and plot each observation as a connected polygonal
+  line spanning parallel vertical axes. Tightly bundled parallel trajectories immediately highlight latent clusters and
+  multidimensional outliers.
+- **Correlation heatmaps with hierarchical clustering**: Reorder the feature correlation matrix using agglomerative
+  hierarchical clustering dendrograms. Highly collinear feature blocks group into distinct visual squares along the
+  diagonal.
+
+## Exploration versus confirmation: the forking paths
+
+A critical hazard in data science is treating exploratory discoveries as confirmatory statistical findings
+<Cite id="gelman2013forking" />.
+
+When an analyst plots dozens of scatter plots, slices data across various subgroups, and tests various transformations,
+they traverse what Andrew Gelman terms the **garden of forking paths** <Cite id="gelman2013forking" />. Finding an
+apparent correlation or subgroup pattern after extensive visual search is not independent evidence; it is a hypothesis
+generated by the data.
+
+### Preempting HARKing (Hypothesizing After the Results are Known)
+
+1. **Quarantine the evaluation holdout**: Split data into exploratory ($70\%$) and test ($30\%$) partitions *before*
+   opening visual exploration tools. All visual inspection, transformation experiments, and feature mining must occur
+   strictly on the exploratory split.
+2. **Pre-register feature transformations**: When visual exploration suggests a specific non-linear transformation (such
+   as a spline knot or log transform), freeze the transformation logic and validate its predictive gain on the untouched
+   holdout partition.
+
+## Diagnostic checklist
+
+To execute disciplined exploratory data analysis:
+
+1. **Inspect Anscombe geometries**: Never rely on Pearson correlations or $R^2$ alone; plot bivariate distributions to
+   distinguish true linear relationships from parabolas, outliers, or leverage points <Cite id="anscombe1973" />.
+2. **Calibrate KDE bandwidths**: Validate density bandwidths against Silverman's rule $h^*$; avoid oversmoothing that
+   obscures multimodal mixtures <Cite id="silverman1986" />.
+3. **Mitigate scatter plot saturation**: Deploy hexagonal binning or log-density contours on datasets exceeding $10^4$
+   points.
+4. **Scan for heteroscedasticity**: Inspect residual spreads across feature scales; flag expanding fan patterns
+   requiring log transformations or robust regression.
+5. **Cluster correlation heatmaps**: Reorder correlation matrices hierarchically to identify collinear predictor blocks.
+6. **Enforce holdout quarantine**: Restrict all visual snooping to a development partition to prevent overoptimistic
+   validation from data snooping <Cite id="gelman2013forking" />.

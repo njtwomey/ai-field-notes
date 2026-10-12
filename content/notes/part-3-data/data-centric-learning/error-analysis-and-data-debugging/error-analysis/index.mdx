@@ -1,26 +1,164 @@
 ---
 title: 'Error analysis'
 kind: concept
-summary: 'Error analysis reads a sample of a model''s mistakes, sorts them into causes and counts each, so that the next data or model fix targets the largest cause.'
-tags: [data, diagnostics]
-aliases: []
-requires: []
-related: [slice-analysis, reading-raw-examples]
-references: []
-status: stub
-updated: 2026-10-11
+summary: 'Error analysis samples model misclassifications, bins them into structured root-cause taxonomies, and quantifies error ceilings to prioritize high-leverage data and pipeline fixes.'
+tags: [data, diagnostics, data-centric-learning]
+aliases: [error analysis, error taxonomy, failure analysis, error attribution, model debugging]
+requires: [slice-analysis, reading-raw-examples]
+related: [hard-example-mining, training-dynamics-diagnostics, targeted-data-collection]
+references: [ng2018yearning, nushi2018towards, ribeiro2016, ribeiro2020checklist]
+status: draft
+updated: 2026-10-12
 ---
 
+import { ErrorAnalysisVisualizer } from './ErrorAnalysisVisualizer'
+
 <Definition>
-To be written.
+**Error analysis** is the structured, empirical process of inspecting a representative sample of a model's prediction
+errors, categorizing each failure into an explicit root-cause taxonomy, and tallying category frequencies. By estimating
+the upper bound on performance gains (error ceilings) for each potential fix, error analysis directs engineering effort
+toward the data defects and pipeline deficiencies responsible for the largest share of failures.
 </Definition>
+
+Aggregate evaluation metrics—such as accuracy, area under the ROC curve (AUROC), or macro-averaged F1 score—summarize
+system performance into a single scalar that hides why and where a model fails. Two models with identical test accuracy
+of $92\%$ can exhibit radically different failure modes: one may fail primarily due to corrupted ground-truth labels in
+the test set, while the other fails on high-stakes underrepresented demographic slices. Without manual, systematic error
+inspection, teams default to brute-force architectural experimentation or hyperparameter sweeps that produce marginal
+gains because they do not address the true bottlenecks in the data <Cite id="ng2018yearning, nushi2018towards" />.
+
+<ErrorAnalysisVisualizer />
 
 ## Sampling errors
 
+In modern machine learning datasets containing hundreds of thousands or millions of validation examples, inspecting
+every mistake is impossible. Engineers must draw a principled audit sample
+$S_{\text{audit}} \subset \{(\mathbf{x}_i, y_i) \mid \hat{y}_i \ne y_i\}$.
+
+| Sampling Strategy | Selection Mechanism | Primary Failure Modes Discovered | Inherent Bias / Blind Spot |
+| :--- | :--- | :--- | :--- |
+| **Uniform Random** | Uniform draw from all misclassifications | Global error prevalence; unbiased category shares | Completely misses critical long-tail slices ($< 1\%$ prevalence) |
+| **High-Confidence Blunders** | Sorted by $\max_k P(y=k \mid \mathbf{x}) \ge 0.90$ with $\hat{y} \ne y$ | Label errors in validation set; severe spurious shortcuts | Biased toward extreme data anomalies; misses boundary indecision |
+| **Marginal / Boundary** | Sorted by entropy or $|P(y=1) - 0.5| < \epsilon$ | Class ambiguity; imprecise decision thresholds; Bayes noise | Over-indexes on inherently subjective examples |
+| **Stratified Slice** | Quotas across metadata slices (e.g. region, device) | Disparate performance across minority subpopulations | Requires pre-existing metadata tags |
+
+### Sample size and statistical precision
+
+Andrew Ng recommends auditing between $100$ and $500$ misclassified instances <Cite id="ng2018yearning" />. The sample
+size $M$ governs the confidence interval of the estimated error share $\hat{\pi}_k$ for category $k$. Under normal
+approximation, the margin of error at confidence level $1 - \alpha$ is:
+
+$$
+E = z_{1 - \alpha/2} \sqrt{\frac{\hat{\pi}_k (1 - \hat{\pi}_k)}{M}}
+$$
+
+For an error category accounting for $\hat{\pi}_k = 25\%$ of failures, an audit of $M = 100$ examples yields a $95\%$
+confidence interval ($z = 1.96$) of $25\% \pm 8.5\%$. Increasing the sample size to $M = 400$ narrows the bound to
+$25\% \pm 4.2\%$. An audit of $100$ examples is generally sufficient to differentiate a dominant $40\%$ failure mode
+from a negligible $5\%$ tail issue.
+
 ## Error taxonomies
 
-## Counting causes
+An effective error analysis relies on a well-constructed **error taxonomy**: a structured categorization scheme
+classifying the underlying mechanism responsible for each failure. Rather than ad-hoc notes, the taxonomy should
+distinguish data-side defects from model capacity limits <Cite id="nushi2018towards, ribeiro2020checklist" />:
+
+- **1. Annotation Defects (Data Quality)**
+  - *1.1 Incorrect Ground-Truth Label*: Annotator misclassification or label flipping in validation data
+  - *1.2 Incomplete Multi-Label*: Missing secondary annotations on composite multi-label instances
+  - *1.3 Ambiguous Guideline Definition*: Inconsistent labels arising from ambiguous annotation criteria
+- **2. Input Representation Defects (Data Pipeline)**
+  - *2.1 Sensor / Ingestion Noise*: Image blur, audio clipping, packet corruption, or schema encoding flaws
+  - *2.2 Truncation / Format Loss*: Context window cutoffs, token truncation, or unparsed text fragments
+  - *2.3 Unobserved Confounder*: Critical predictive or causal covariates omitted from the feature store
+- **3. Distributional Deficits (Data Composition)**
+  - *3.1 Rare Subgroup / Sparse Slice*: Severe under-representation of specific demographic or sensor slices
+  - *3.2 Spurious Correlation / Shortcut*: Exploitation of background cues or non-causal surface patterns
+- **4. Inherent Task Complexity (Bayes Error)**
+  - *4.1 Boundary Ambiguity*: Intrinsically subjective or undecidable instances near the Bayes optimal limit
+
+Taxonomy categories should be established iteratively: an analyst inspects an initial batch of $20\text{--}30$ errors,
+drafts candidate categories, refines definitions to ensure mutual exclusivity where possible, and then codes the
+remaining sample.
+
+## Counting causes and ceiling analysis
+
+Error analysis transforms qualitative inspection into quantitative decision-making through a structured accounting
+matrix. Each inspected error is logged with its metadata, prediction confidence, assigned error category, and
+hypothesized remedy:
+
+| Example ID | Ground Truth $y$ | Prediction $\hat{y}$ | Confidence $P(\hat{y})$ | Primary Root Cause | Secondary Note | Candidate Fix |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| `#4021` | `Dog` | `Cat` | 0.94 | Spurious Shortcut | Couch texture in background | Background augmentation |
+| `#8192` | `Defective` | `Clean` | 0.88 | Label Error | Inspector mislabeled micro-crack | Relabel validation set |
+| `#1044` | `Fraud` | `Legitimate`| 0.52 | Missing Feature | New payment rail used | Add payment rail feature |
+| `#9932` | `Positive` | `Negative` | 0.51 | Ambiguity | Sarcastic tweet; double negation| Expand sentiment guidelines |
+
+### Quantifying the error ceiling
+
+Let the overall error rate of the model on the full validation set be $\mathcal{E} = 1 - \text{Accuracy}$. If error
+category $k$ constitutes a proportion $\hat{\pi}_k = \frac{M_k}{M}$ of the audited sample, the **error ceiling**
+represents the maximum theoretical reduction in global error achievable if category $k$ were completely resolved
+<Cite id="ng2018yearning" />:
+
+$$
+\Delta \mathcal{E}_k = \mathcal{E} \times \hat{\pi}_k
+$$
+
+The new potential error rate if category $k$ is perfectly eliminated is:
+
+$$
+\mathcal{E}_{\text{new}} \ge \mathcal{E} \times (1 - \hat{\pi}_k)
+$$
+
+For example, if a vision system has an error rate of $\mathcal{E} = 10\%$ ($90\%$ accuracy) and error analysis reveals
+that:
+- Incorrect ground truth labels account for $30\%$ of errors ($\Delta \mathcal{E}_{\text{labels}} = 3.0\%$).
+- Spurious background correlations account for $25\%$ of errors ($\Delta \mathcal{E}_{\text{shortcuts}} = 2.5\%$).
+- Dark / underexposed camera captures account for $15\%$ of errors ($\Delta \mathcal{E}_{\text{lighting}} = 1.5\%$).
+- Genuine capacity limits account for $5\%$ of errors ($\Delta \mathcal{E}_{\text{capacity}} = 0.5\%$).
+
+This ceiling analysis proves that scaling model parameter capacity can reduce overall error by at most $0.5$ percentage
+points, whereas fixing label errors and background shortcuts can reduce error by up to $5.5$ percentage points ($55\%$
+of all mistakes).
 
 ## Choosing the next fix
 
+Prioritizing engineering interventions requires balancing the error ceiling against implementation cost and operational
+risk:
+
+$$
+\text{Priority Score} = \frac{\Delta \mathcal{E}_k}{\text{Engineering Cost (person-days)} \times \text{Risk Factor}}
+$$
+
+| Priority Quadrant | Impact ($\Delta \mathcal{E}$) | Implementation Effort | Representative Interventions |
+| :--- | :--- | :--- | :--- |
+| **Quick Wins** | High | Low | Relabel misannotated validation sets; patch upstream data ingestion/parsing bugs; tune classification thresholds |
+| **Major Projects** | High | High | Conduct targeted slice harvesting; engineer domain-specific causal features; curate specialized benchmark suites |
+| **Low Priority** | Low | Low | Apply ad-hoc heuristic patches for minor non-critical edge cases |
+| **High-Cost Distractions** | Low | High | Undertake complex architecture rewrites or exhaustive hyperparameter tuning when error ceiling is data-limited |
+
+1. **Data cleaning vs model re-training**: Cleaning label errors in the evaluation set provides instant, zero-training
+   metric gains and prevents models from being tuned against erroneous targets.
+2. **Targeted collection vs general scaling**: If an error category stems from an underrepresented slice, gathering
+   $500$ targeted examples of that specific slice consistently outperforms collecting $50,000$ random web-scraped
+   examples.
+3. **Behavioral unit tests**: Every identified failure pattern should be codified into a programmatic behavioral test
+   suite (e.g. CheckList tests), ensuring that future model checkpoints do not regress on documented error modes
+   <Cite id="ribeiro2020checklist" />.
+
 ## Pitfalls
+
+1. **Unblinded error review**: Showing the human auditor the model's prediction before they evaluate the raw input.
+   Auditors suffer from confirmation bias and rationalize model predictions, undercounting subtle classification errors.
+2. **Anecdotal debugging**: Over-indexing on high-visibility mistakes reported by executives or single customer
+   complaints. Without counting category frequency across a representative sample, engineering effort is diverted to
+   rare edge cases that represent $< 0.1\%$ of total errors.
+3. **Validation set overfitting through data surgery**: Continuously tweaking validation set labels or writing
+   hard-coded rule patches for individual validation mistakes destroys the statistical independence of the evaluation
+   set. Corrections must be applied systematically to training corpora or validated on a sequestered test split.
+4. **Ignoring multi-causal overlap**: Forcing errors into a single bucket when a mistake is caused by a compounding
+   combination of low image contrast and rare sub-class frequency. Complex errors should support secondary diagnostic
+   tags.
+5. **Treating label noise as model error**: Spending weeks adjusting loss functions or model architectures to fit
+   ambiguous or incorrectly annotated validation examples that no human expert could correctly classify.

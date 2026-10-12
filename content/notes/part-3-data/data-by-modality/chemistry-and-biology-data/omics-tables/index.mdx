@@ -1,24 +1,171 @@
 ---
 title: 'Omics tables'
 kind: concept
-summary: 'Gene expression and other omics tables hold many features for few samples. Count normalisation, batch-effect correction and strict feature selection are needed before modelling.'
-tags: [data, statistics]
-aliases: []
-requires: []
-related: []
-references: []
-status: stub
-updated: 2026-10-11
+summary: 'Omics matrices measure thousands of molecular features across few samples, exhibiting severe count overdispersion, batch confounding, and extreme p >> n regimes that demand variance-stabilising transforms, empirical Bayes adjustment, and false discovery rate control.'
+tags: [data, statistics, genomics, tabular]
+aliases: [gene-expression-tables, transcriptomics-data, count-normalization, batch-effects, deseq2, combat]
+requires: [tabular-data]
+related: [clinical-and-health-data, scientific-data, biological-sequence-data]
+references: [love2014, johnson2007, benjamini1995]
+status: draft
+updated: 2026-10-12
 ---
 
+import { OmicsTablesVisualizer } from './OmicsTablesVisualizer'
+
 <Definition>
-To be written.
+An **omics table** is a high-dimensional tabular matrix $\mathbf{Y} \in \mathbb{R}^{G \times S}$ (or
+$\mathbb{N}^{G \times S}$) indexing $G$ molecular features (such as mRNA transcripts, protein abundances, metabolites,
+or DNA methylation loci) measured across $S$ biological samples. These matrices operate under an extreme **$p \gg n$
+regime** ($G \sim 10^4\text{--}10^6$ while $S \sim 10^1\text{--}10^3$), characterized by heteroskedastic count
+dispersion, zero inflation, and systematic technical confounders across experimental batches
+<Cite id="love2014, johnson2007" />.
 </Definition>
 
-## Count normalisation
+Standard machine learning models (gradient boosted trees, neural networks, support vector machines) assume that input
+features are homoskedastic, independent, and measured without systematic technical batch shifts. Direct application of
+supervised learning to raw omics matrices invariably models technical artifacts (such as sequencing lane or reagent lot)
+rather than true underlying biology <Cite id="johnson2007" />.
 
-## Batch effects
+<OmicsTablesVisualizer client:load />
 
-## Many features, few samples
+## Count Normalisation and Dispersion Modelling
+
+In RNA sequencing (RNA-seq), raw values $Y_{gj} \in \mathbb{N}$ represent the number of cDNA fragments mapped to gene
+$g$ in library $j$. Raw counts scale with both sequencing depth (library size $N_j = \sum_{g=1}^G Y_{gj}$) and
+transcript length $l_g$.
+
+### Library Size and Composition Metrics
+
+- **Reads Per Kilobase Million (RPKM / FPKM)**:
+  $$
+  \text{RPKM}_{gj} = \frac{Y_{gj}}{\frac{l_g}{10^3} \times \frac{N_j}{10^6}}
+  $$
+- **Transcripts Per Million (TPM)**: Normalises for gene length prior to sequencing depth, ensuring that sum of TPMs
+  across all genes is constant ($10^6$) in every sample:
+  $$
+  \text{TPM}_{gj} = \frac{Y_{gj} / l_g}{\sum_{k=1}^G (Y_{kj} / l_k)} \times 10^6
+  $$
+
+However, TPM and RPKM fail when a few highly expressed genes consume a disproportionate share of the sequencing library,
+artificially depressing the relative proportions of all remaining genes.
+
+### Median-of-Ratios Normalisation (DESeq2)
+
+To account for composition bias, DESeq2 <Cite id="love2014" /> computes a sample-specific size factor $s_j$ relative to
+a pseudo-reference sample constructed via the geometric mean across all $S$ libraries:
+
+$$
+s_j = \operatorname{median}_{g \in G^*} \frac{Y_{gj}}{\left(\prod_{k=1}^S Y_{gk}\right)^{1/S}}, \quad G^* = \left\{g \in \{1, \dots, G\} \;\middle|\; \prod_{k=1}^S Y_{gk} > 0\right\}
+$$
+
+The normalised count is $\tilde{Y}_{gj} = Y_{gj} / s_j$.
+
+### Variance Stabilising Transformation (VST)
+
+Gene expression counts follow a **Negative Binomial distribution** $\operatorname{NB}(\mu_{gj}, \alpha_g)$ with mean
+$\mu_{gj} = s_j q_{gj}$ and quadratic variance:
+
+$$
+\operatorname{Var}(Y_{gj}) = \mu_{gj} + \alpha_g \mu_{gj}^2
+$$
+
+where $\alpha_g \ge 0$ is the gene-specific dispersion parameter. Because variance depends strongly on mean expression,
+high-count genes dominate Euclidean distances in clustering and PCA. The **variance-stabilising transformation**
+$g(\mu)$ satisfies $\left(\frac{dg}{d\mu}\right)^2 \operatorname{Var}(Y) \approx \text{const}$, yielding
+<Cite id="love2014" />:
+
+$$
+g(\mu) = \int \frac{1}{\sqrt{\mu + \alpha \mu^2}} \, d\mu = \frac{2}{\sqrt{\alpha}} \operatorname{arsinh}\left(\sqrt{\alpha \mu}\right)
+$$
+
+The transformed values $g(\tilde{Y}_{gj})$ exhibit approximately constant variance across dynamic ranges, allowing
+standard Euclidean distance metrics and linear models to perform reliably.
+
+---
+
+## Batch Effects and Empirical Bayes Correction
+
+A **batch effect** refers to systematic non-biological variation introduced by experimental handling: different
+sequencing machines, reagent lots, extraction technicians, or collection dates <Cite id="johnson2007" />. In PCA
+projections of raw transcriptomic data, the first principal component frequently separates samples by processing date
+rather than disease status.
+
+### The Location-Scale Batch Model (ComBat)
+
+ComBat <Cite id="johnson2007" /> models gene expression $Y_{gij}$ for gene $g$ in batch $i$ for sample $j$ as:
+
+$$
+Y_{gij} = \alpha_g + \mathbf{x}_{ij}^\top \boldsymbol{\beta}_g + \gamma_{gi} + \delta_{gi} \epsilon_{gij}, \quad \epsilon_{gij} \sim \mathcal{N}(0, \sigma_g^2)
+$$
+
+where $\mathbf{x}_{ij}$ contains biological covariates of interest (e.g. disease phenotype, age), $\boldsymbol{\beta}_g$
+represents the biological effect vector, $\gamma_{gi}$ is the additive location batch effect, and $\delta_{gi}$ is the
+multiplicative scale batch effect.
+
+Because sample sizes within individual batches are small ($n_i \approx 5\text{--}20$), estimating gene-specific
+parameters $(\gamma_{gi}, \delta_{gi}^2)$ naively produces high variance. ComBat applies **Empirical Bayes shrinkage**
+by placing conjugate hierarchical priors across all genes:
+
+$$
+\gamma_{gi} \sim \mathcal{N}\left(\gamma_i, \tau_i^2\right), \quad \delta_{gi}^2 \sim \operatorname{Inverse-Gamma}\left(\lambda_i, \theta_i\right)
+$$
+
+The adjusted expression value isolates the clean biological signal:
+
+$$
+Y_{gij}^* = \frac{Y_{gij} - \hat{\alpha}_g - \mathbf{x}_{ij}^\top \hat{\boldsymbol{\beta}}_g - \hat{\gamma}_{gi}^*}{\hat{\delta}_{gi}^*} + \hat{\alpha}_g + \mathbf{x}_{ij}^\top \hat{\boldsymbol{\beta}}_g
+$$
+
+where $\hat{\gamma}_{gi}^*$ and $\hat{\delta}_{gi}^*$ are empirical Bayes posterior mean estimates
+<Cite id="johnson2007" />.
+
+---
+
+## The $p \gg n$ Regime and Feature Selection
+
+When $G \gg S$, ordinary least squares regression has infinite non-unique interpolating solutions, and standard maximum
+likelihood estimators overfit catastrophically.
+
+### Multiple Hypothesis Testing and False Discovery Rate (FDR)
+
+Testing whether each of $G = 20{,}000$ genes is differentially expressed under null hypothesis $H_{0, g}: \beta_g = 0$
+at standard significance level $\alpha = 0.05$ produces $20{,}000 \times 0.05 = 1{,}000$ false positives purely by
+chance.
+- **Bonferroni Correction (FWER)**: Enforces $P \le \alpha / G = 2.5 \times 10^{-6}$. While controlling the family-wise
+  error rate strictly, it causes massive false negatives, discarding genuine low-magnitude biological signals.
+- **Benjamini-Hochberg Procedure (FDR)** <Cite id="benjamini1995" />: Sorts observed $p$-values
+  $P_{(1)} \le P_{(2)} \le \dots \le P_{(G)}$ and identifies the largest rank $k^*$ satisfying:
+  $$
+  k^* = \max \left\{ k \;\middle|\; P_{(k)} \le \frac{k}{G} q \right\}
+  $$
+  Rejecting all null hypotheses for $k \le k^*$ guarantees that the expected proportion of false discoveries is bounded
+  by target rate $q$ (typically $q = 0.05$ or $0.10$).
+
+### Regularised Feature Selection
+
+To train predictive classifiers (e.g., patient drug responders vs non-responders) in $p \gg n$, standard pipelines
+employ the **Elastic Net**:
+
+$$
+\min_{\boldsymbol{\beta}} \frac{1}{2S} \|\mathbf{y} - \mathbf{X}\boldsymbol{\beta}\|_2^2 + \lambda \left( \rho \|\boldsymbol{\beta}\|_1 + \frac{1 - \rho}{2} \|\boldsymbol{\beta}\|_2^2 \right), \quad \rho \in (0, 1)
+$$
+
+The $\ell_1$ penalty enforces sparsity, selecting a minimal predictive biomarker panel, while the $\ell_2$ penalty
+preserves correlated gene clusters participating in shared biological pathways.
+
+---
 
 ## Pitfalls
+
+1. **Information Leakage via Global Batch Correction**: Running ComBat or VST across the entire dataset before
+   cross-validation partitions leaks validation labels into the training distribution. All batch parameters and
+   normalisation transformations must be fit strictly on training folds.
+2. **Confounded Experimental Design**: If all disease cases are processed in Batch 1 and all healthy controls in Batch
+   2, biological variation and batch variation are collinear
+   ($\operatorname{rank}(\mathbf{X}^\top \mathbf{B}) < \operatorname{rank}(\mathbf{X})$). No statistical algorithm can
+   disentangle the true phenotype from technical artifacts.
+3. **Zero Inflation and Dropout in scRNA-seq**: In single-cell RNA sequencing, over $80\%$ of entries in $\mathbf{Y}$
+   are exact zeros due to limited mRNA capture efficiency (technical dropout) combined with true biological silencing.
+   Applying bulk RNA-seq normalisation directly without zero-inflated negative binomial (ZINB) or hurdle modeling
+   distorts expression statistics.

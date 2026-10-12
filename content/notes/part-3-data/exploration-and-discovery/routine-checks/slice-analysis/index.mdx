@@ -1,26 +1,154 @@
 ---
 title: 'Slices and subgroups'
 kind: concept
-summary: 'Slice analysis compares distributions and model errors across subgroups of the data. Aggregates can hide slices that behave differently, thin slices give noisy estimates, and slices can be found automatically.'
-tags: [data, diagnostics, fairness]
-aliases: []
-requires: []
-related: [simpsons-paradox, group-fairness-metrics]
-references: []
-status: stub
-updated: 2026-10-11
+summary: 'Slice analysis compares data distributions and predictive performance across disaggregated cohorts, revealing severe hidden failure modes, Simpson’s paradox inversions, and high-variance estimates in thin slices.'
+tags: [data, diagnostics, fairness, evaluation]
+aliases: [slice analysis, subgroup evaluation, disaggregated analysis]
+requires: [data-generating-process, target-exploration]
+related: [simpsons-paradox, baseline-probes, data-profiling]
+references: [buolamwini2018, bickel1975, benjamini1995, chouldechova2017]
+status: draft
+updated: 2026-10-12
 ---
 
+import { SliceAnalysisVisualizer } from './SliceAnalysisVisualizer'
+
 <Definition>
-To be written.
+**Slice analysis** (or subgroup evaluation) is the disaggregated evaluation of dataset distributions, label prevalences,
+and model error metrics across distinct subpopulation partitions $\mathcal{S} = \{s_1, \dots, s_K\}$. These partitions
+are defined by protected demographic attributes, operational hardware environments, customer segments, or intersectional
+feature conjunctions.
 </Definition>
 
-## Per-slice distributions
+Standard machine learning evaluation optimizes and reports global scalar metrics—such as average cross-entropy loss,
+overall accuracy, or mean squared error across the full validation dataset. While mathematically convenient, global
+averages implicitly assume that errors are uniformly distributed across the sample space. In reality, aggregate
+performance routinely conceals devastating catastrophic failure modes concentrated within specific minority subgroups,
+underrepresented demographic slices, or high-value enterprise tiers <Cite id="buolamwini2018" />.
 
-## Simpson's paradox
+<SliceAnalysisVisualizer />
 
-## Thin slices
+## Per-slice distributions and aggregate masking
+
+When an overall metric is computed as an unweighted sample average, majority subgroups dominate the loss function:
+
+$$
+\mathcal{L}_{\text{global}} = \frac{1}{N} \sum_{i=1}^N \ell(y_i, f(\mathbf{x}_i)) = \sum_{k=1}^K \left(\frac{N_k}{N}\right) \mathcal{L}_k
+$$
+
+If majority slice $s_1$ represents $95\%$ of all rows with near-zero error ($\mathcal{L}_1 = 0.02$), while minority
+slice $s_2$ represents $5\%$ of the dataset and experiences complete failure ($\mathcal{L}_2 = 0.80$), the global
+aggregate loss remains deceptively low:
+
+$$
+\mathcal{L}_{\text{global}} = 0.95 \times 0.02 + 0.05 \times 0.80 = 0.059
+$$
+
+A system reporting $94.1\%$ global success is entirely broken for users in slice $s_2$. In seminal empirical evaluations
+of commercial facial analysis APIs, Buolamwini and Gebru demonstrated that error rates on lighter-skinned males were
+below $1\%$, while error rates on darker-skinned females exceeded $34\%$, despite high aggregate accuracy across the
+whole benchmark <Cite id="buolamwini2018" />.
+
+### Auditing slice characteristics
+
+For each candidate slice $s \in \mathcal{S}$, data profiling must track:
+1. **Slice representation/support** ($N_s$): The raw count and percentage of total volume.
+2. **Conditional target prevalence**: $\pi_s = P(y = 1 \mid S = s)$. Significant divergence between slice prevalence and
+   the global base rate signals severe conditional shifts.
+3. **Conditional feature distributions**: $P(X \mid S = s)$. Slices frequently occupy distinct sub-manifolds where
+   features take extreme values or exhibit inverted correlations.
+
+## Simpson's paradox in slice evaluation
+
+When analyzing disaggregated slices, aggregate statistics can point in the exact opposite direction of every individual
+stratum. This statistical inversion is known as **Simpson's paradox** <Cite id="bickel1975" />.
+
+### Mathematical formulation
+
+Consider two treatments or cohorts $A$ and $B$, an outcome $y \in \{0, 1\}$, and a confounding background stratum
+$C \in \{c_1, \dots, c_M\}$ (such as department, difficulty tier, or severity level):
+
+$$
+P(y = 1 \mid A) > P(y = 1 \mid B)
+$$
+
+$$
+\text{yet } P(y = 1 \mid A, C = c_m) < P(y = 1 \mid B, C = c_m) \quad \forall m \in \{1, \dots, M\}
+$$
+
+| Stratum ($C$) | Cohort $A$ Success Rate | Cohort $B$ Success Rate | Within-Stratum Superiority |
+| :--- | :--- | :--- | :--- |
+| **Stratum 1 (High Baseline)** | $80\%$ ($80 / 100$) | $\mathbf{90\%}$ ($9 / 10$) | Cohort $B$ ($+10\%$) |
+| **Stratum 2 (Low Baseline)** | $10\%$ ($10 / 100$) | $\mathbf{20\%}$ ($18 / 90$) | Cohort $B$ ($+10\%$) |
+| **Aggregate Marginal** | $\mathbf{45\%}$ ($90 / 200$) | $27\%$ ($27 / 100$) | **Cohort $A$ (Inverted!)** |
+
+This phenomenon occurs when cohort $A$ is assigned overwhelmingly to easy strata with high baseline success rates, while
+cohort $B$ receives predominantly complex cases <Cite id="bickel1975" />. A naive slice analysis comparing raw marginal
+rates across cohorts falsely concludes that $A$ outperforms $B$. Valid slice discovery requires stratifying across known
+confounding variables or computing standardization adjustments <Cite id="chouldechova2017" />.
+
+## Thin slices and empirical Bayes shrinkage
+
+A central challenge in slice analysis is the **thin slice problem**: critical operational cohorts that contain very few
+sample instances ($N_s \ll 50$). 
+
+In a slice with $N_s = 8$, observing 2 errors yields an empirical error rate of $25\%$. However, a single stochastic
+outcome shifts the estimate from $12.5\%$ to $37.5\%$. Computing point estimates directly on thin slices produces
+massive sampling variance and false alarms.
+
+### Empirical Bayes shrinkage
+
+To stabilize performance estimates across thin slices, apply Empirical Bayes shrinkage <Cite id="benjamini1995" />. The
+shrunk posterior estimate $\hat{\theta}_s^{\text{EB}}$ shrinks the observed slice mean $\bar{y}_s$ toward the robust
+global prior mean $\mu_0$:
+
+$$
+\hat{\theta}_s^{\text{EB}} = \lambda_s \bar{y}_s + (1 - \lambda_s) \mu_0
+$$
+
+Where the shrinkage weight $\lambda_s \in [0, 1]$ depends directly on slice sample size $N_s$ and the ratio between
+between-slice variance $\tau^2$ and within-slice sampling variance $\sigma_0^2$:
+
+$$
+\lambda_s = \frac{\tau^2}{\tau^2 + \frac{\sigma_0^2}{N_s}} = \frac{N_s}{N_s + \frac{\sigma_0^2}{\tau^2}}
+$$
+
+- When $N_s \to \infty$ (large support), $\lambda_s \to 1$, preserving the empirical slice observation $\bar{y}_s$.
+- When $N_s \to 0$ (extremely thin slice), $\lambda_s \to 0$, pulling the estimate toward the stable population baseline
+  $\mu_0$ and preventing runaway noise.
 
 ## Automated slice discovery
 
-## Pitfalls
+Manually enumerating single-attribute slices misses complex **intersectional slices** formed by combinations of multiple
+features (e.g., `Device = Android` $\wedge$ `App_Version < 3.2` $\wedge$ `Country = Nigeria`).
+
+### Algorithmic mining techniques
+
+1. **Residual decision trees**: Train a shallow interpretable decision tree using instance loss
+   $\ell_i = \ell(y_i, f(\mathbf{x}_i))$ as the continuous target. The leaves of the tree directly define high-error
+   intersectional feature rules.
+2. **Subgroup discovery and beam search**: Heuristically search the combinatorial space of feature conjunctions using
+   quality functions that trade off subgroup size $N_s$ and subgroup error disparity
+   $\Delta \mathcal{L}_s = \mathcal{L}_s - \mathcal{L}_{\text{global}}$.
+3. **Embedding clustering**: Cluster error residuals in the model's penultimate latent embedding space. Clusters with
+   disproportionately high error reveal semantic failure modes that span multiple explicit metadata columns.
+
+> [!WARNING]
+> **Multiple testing and false discoveries**: Evaluating thousands of automated candidate slices inflates the Type I error rate. If an algorithm tests $1,000$ random slices at a significance level of $\alpha = 0.05$, approximately $50$ slices will exhibit statistically significant performance deficits purely by chance. Automated slice miners must apply Benjamini-Hochberg False Discovery Rate (FDR) corrections to rank and filter candidate slices <Cite id="benjamini1995" />.
+
+## Diagnostic checklist
+
+To implement slice analysis across tabular and multimodal workflows:
+
+1. **Define domain-critical slices**: Explicitly codify all legally protected attributes, geographical regions, client
+   size tiers, and hardware environments into a structured slice specification.
+2. **Compute disaggregated slice scorecards**: Calculate recall, precision, Brier score, and calibration curves for
+   every designated slice; do not rely on single aggregate numbers <Cite id="chouldechova2017" />.
+3. **Flag support thresholds**: Mark any slice with $N_s < 100$ as a thin slice; apply empirical Bayes shrinkage or
+   compute Wilson score confidence intervals before making operational decisions.
+4. **Stratify for Simpson's paradox**: Cross-reference slice metrics against case complexity and confounding variables
+   before concluding that a subgroup experiences systemic bias <Cite id="bickel1975" />.
+5. **Run automated residual mining**: Train residual decision trees on top model errors to uncover unexpected
+   multi-feature intersectional failure clusters <Cite id="buolamwini2018" />.
+6. **Apply FDR correction**: Control the false discovery rate via Benjamini-Hochberg adjustments when scanning automated
+   slice hypotheses <Cite id="benjamini1995" />.

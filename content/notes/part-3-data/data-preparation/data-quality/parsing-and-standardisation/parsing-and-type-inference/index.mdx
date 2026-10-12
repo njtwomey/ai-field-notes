@@ -2,27 +2,140 @@
 title: 'Parsing and type inference'
 kind: concept
 summary: 'Reading raw files means inferring each column''s type and parsing its values. CSV dialects, mixed-type columns, sentinel values and lossy coercions are common sources of silent errors.'
-tags: [data, software]
-aliases: []
-requires: []
-related: []
-references: []
-status: stub
+tags: [data-preparation, data-quality, software, data-engineering]
+aliases: [type inference, CSV parsing, schema sniffing, sentinel values, lossy coercion, dialect sniffing]
+requires: [outliers-and-gross-errors]
+related: [value-standardisation, data-validation, constraint-based-repair]
+references: [pedregosa2011]
+status: draft
 updated: 2026-10-11
 ---
 
+import { TypeInferenceVisualizer } from './TypeInferenceVisualizer'
+
 <Definition>
-To be written.
+**Parsing and type inference** is the ingestion boundary that translates unstructured or semi-structured raw byte
+streams (such as CSV files, JSON lines, or log dumps) into strongly typed, memory-aligned tabular structures:
+
+$$
+\mathcal{P} : \Sigma^* \longrightarrow \mathbb{D}_1 \times \mathbb{D}_2 \times \dots \times \mathbb{D}_D,
+$$
+
+where each domain $\mathbb{D}_j \in \{\mathbb{B}, \mathbb{Z}, \mathbb{R}, \mathbb{S}, \mathbb{T}\}$ represents a
+concrete physical data type (boolean, integer, float, string, or timestamp).
+
+When an explicit schema contract is not provided, the parser must simultaneously infer the physical serialization
+dialect, determine the minimal covering type for each column along a type-widening lattice, and translate textual
+sentinels into valid missingness bitmasks.
 </Definition>
 
-## File dialects
+## File dialects and sniffing
 
-## Type inference
+Delimited text files (CSV, TSV, DSV) lack standardized binary headers and frequently violate formal specifications (RFC
+4180). Ingestion engines rely on heuristic dialect "sniffing" to deduce formatting parameters:
 
-## Mixed-type columns
+1. **Delimiters:** Distinguishing field separators (`,`, `;`, `\t`, `|`). A classic regional failure occurs with
+   European locales where the decimal point is a comma (`12,50`) and the field delimiter is a semicolon (`;`). American
+   parsers split on the comma, fragmenting a single floating-point number across two columns.
+2. **Quoting and escaping:** Text fields containing commas or unescaped line breaks must be enclosed in quotes (e.g.
+   `"123 Main St, Apt 4"`). Inconsistent escape characters (`\"` versus `""`) cause multiline text to be parsed as
+   spurious new rows.
+3. **Encodings and Byte Order Marks (BOM):** Files encoded in UTF-8 with a leading BOM byte sequence (`\xef\xbb\xbf`)
+   cause naive parsers to prepend a zero-width space `\ufeff` to the first column name. Code looking up `df['id']`
+   crashes with a `KeyError: '\ufeffid'`.
 
-## Sentinel values
+## Type inference algorithms
 
-## Lossy coercion
+When reading untyped text, parsers evaluate text tokens against a **type-widening lattice**:
+
+$$
+\text{Boolean} \prec \text{Integer} \prec \text{Float} \prec \text{Datetime} \prec \text{String / Object}.
+$$
+
+The parser seeks the narrowest type in the lattice capable of representing every observed value in column $j$.
+
+### Chunk-based sniffing hazards
+To prevent loading multi-gigabyte files twice, engines such as `pandas.read_csv` sniff types by sampling a leading chunk
+(typically the first $1{,}000$ to $10{,}000$ rows).
+- If rows $1$ through $10{,}000$ contain only integer digits `[101, 102, ...]`, the parser commits the column to
+  `int64`.
+- If row $10{,}001$ contains the string `"pending"` or a hardware sentinel `"N/A"`, the parser triggers a `DtypeWarning`
+  and is forced to dynamically upcast the entire column to Python `object`.
+
+### The performance cost of `object` dtype
+Falling back to a generic `object` dtype is catastrophic for performance:
+- Contiguous numerical memory is replaced with an array of 64-bit pointers pointing to disparate heap-allocated Python
+  objects.
+- Memory consumption inflates by $4\times$ to $10\times$.
+- SIMD vectorized execution in C++, Rust, or GPU kernels is disabled, degrading downstream data-processing throughput by
+  orders of magnitude.
+
+## Mixed-type columns and nullable representations
+
+In legacy analytical engines, columns could not represent missing values without changing physical types:
+- **The NaN-float coercion trap:** Standard IEEE 754 floating-point format supports `NaN`, but legacy integer
+  representations did not. Inserting a single missing value into an integer column silently converted the entire column
+  to `float64`.
+- **Precision collapse:** IEEE 754 double-precision floats represent integers exactly only up to
+  $2^{53} \approx 9.007 \times 10^{15}$. A 64-bit integer identifier (such as a Snowflake ID, Twitter tweet ID, or
+  credit card number) coerced to float silently rounds its lowest-order bits:
+  
+  $$
+  123456789012345678 \xrightarrow{\text{float64}} 123456789012345680.
+  $$
+
+Modern column formats (Apache Arrow, Polars, DuckDB) resolve this via **validity bitmasks**: an independent
+1-bit-per-value bitmap tracks whether each cell is null, allowing exact representation of nullable integers (`Int64`)
+and booleans without type coercion.
+
+## Sentinel values and collision traps
+
+Upstream systems frequently encode missingness, sensor errors, or special states using text sentinel strings or
+out-of-range numerical codes:
+
+| Sentinel Code | Intended Semantic Meaning | Ingestion Hazard |
+| :--- | :--- | :--- |
+| `"-999"` or `"9999"` | Sensor disconnected / uncalibrated | Parsed as genuine extreme physical measurement |
+| `"NA"` | ISO-3166 alpha-2 code for **Namibia** | Default parsers treat `"NA"` as missing, nullifying an entire nation |
+| `"-1"` | Optional customer survey skipped | Treated as negative count or negative age |
+| `"\N"` | MySQL / Postgres bulk export null | Treated as a literal 2-character string |
+
+When text sentinels are not explicitly registered with the ingestion parser, numerical models treat error codes as
+quantitative features, producing extreme leverage distortions in linear models and spurious split points in tree
+ensembles.
+
+## Lossy coercion and silent truncation
+
+Automated type casting frequently introduces subtle, irreversible information loss:
+
+1. **Leading zero stripping:** Customer IDs, serial numbers, and US ZIP codes often begin with zeros (`"00421"`).
+   Inferring an integer type strips the leading zeros (`421`), corrupting foreign-key relationships and postal lookups.
+2. **Timezone stripping:** An ISO timestamp `2026-10-11T20:00:00+02:00` parsed by a naive datetime converter strips the
+   `+02:00` offset, storing `2026-10-11 20:00:00` as UTC. This silently shifts event sequences by 2 hours, corrupting
+   time-series features and point-in-time joins.
+3. **Integer overflow wrapping:** Ingesting 64-bit unsigned integers (`uint64`) into signed `int64` wraps values
+   exceeding $2^{63}-1$ into negative numbers.
+
+<TypeInferenceVisualizer />
+
+## Best practices: schema-first ingestion contracts
+
+To eliminate parsing bugs and prevent data corruption in production pipelines:
+
+- **Enforce schema contracts:** Never permit inference engines to guess types in production ETL or scoring pipelines.
+  Supply an explicit schema dictionary defining exact physical types (`pl.Utf8`, `pl.Int64`,
+  `pl.Datetime("us", "UTC")`).
+- **Explicit null sentinel specification:** Explicitly configure null tokens (e.g.
+  `null_values=['-999', 'N/A', 'null']`) while disabling generic default conversions that trigger collisions
+  (`keep_default_na=False`).
+- **Fail fast on parsing violations:** Set parser error handling to `strict` or `raise`. If a character appears in a
+  floating-point column, the pipeline must halt and alert rather than silently coercing the column to string.
 
 ## Pitfalls
+
+- **Relying on `low_memory=True` in pandas:** Chunk-based inference produces mixed dtypes across file segments, causing
+  downstream merge operations to fail or drop records silently.
+- **Ambiguous date formats:** Without explicit format strings, strings like `"04/05/2026"` are parsed as April 5th in
+  American locales and May 4th in British locales. Always specify explicit format strings (`"%Y-%m-%d"` or ISO 8601).
+- **Silent string truncation in SQL bulk loaders:** Bulk loading strings into fixed `VARCHAR(N)` fields without strict
+  checking silently truncates trailing characters, corrupting hashes, UUIDs, and postal addresses.

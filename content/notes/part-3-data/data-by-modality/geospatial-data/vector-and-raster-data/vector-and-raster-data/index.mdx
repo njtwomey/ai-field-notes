@@ -1,26 +1,157 @@
 ---
 title: 'Vector and raster data'
 kind: concept
-summary: 'Geospatial data come as vectors, points, lines and polygons with attributes, or as rasters, grids of values over an area. Spatial joins, rasterisation and zonal statistics move between them.'
-tags: [data]
-aliases: []
-requires: []
-related: []
-references: []
-status: stub
-updated: 2026-10-11
+summary: 'Geospatial data represent geographic reality as vectors (discrete geometric points, lines, polygons) or rasters (regular tessellated continuous grids), interconnected via spatial predicate joins, scanline rasterisation, and zonal statistics.'
+tags: [data, geospatial, computer-vision]
+aliases: [geospatial-vectors, geospatial-rasters, spatial-joins, rasterisation, zonal-statistics, shapefiles, geotiff]
+requires: [coordinate-reference-systems]
+related: [areal-aggregation, spatial-features, remote-sensing-imagery]
+references: [snyder1987]
+status: draft
+updated: 2026-10-12
 ---
 
+import { VectorAndRasterVisualizer } from './VectorAndRasterVisualizer'
+
 <Definition>
-To be written.
+**Vector and raster data** constitute the two dual data models of geographic information systems (GIS). **Vector data**
+represents discrete geographic phenomena as coordinate-defined geometric primitives (points, lines, polygons) with
+attached tabular attributes, whereas **raster data** represents continuous or categorical fields as regular tessellated
+pixel grids $\mathbf{I} \in \mathbb{R}^{H \times W \times C}$ mapped to physical space via an affine geotransform
+<Cite id="snyder1987" />.
 </Definition>
 
-## Vector data
+Bridging the gap between continuous satellite imagery and discrete tabular administrative records requires
+transformations: spatial joins via geometric predicates, scanline rasterisation of vector geometries, and zonal
+statistics summarizing raster values within polygonal boundaries.
 
-## Raster data
+<VectorAndRasterVisualizer client:load />
 
-## Spatial joins
+## Vector Data Model (OGC Simple Features)
 
-## Rasterisation and zonal statistics
+The Open Geospatial Consortium (OGC) Simple Features Access standard formalizes vector geometry:
+- **Point**: A single zero-dimensional coordinate tuple $P = (x, y) \in \mathbb{R}^2$ (e.g. sensor stations, GPS fixes,
+  tree locations).
+- **LineString**: A one-dimensional ordered sequence of two or more vertices connected by linear segments
+  $L = (P_1, P_2, \dots, P_k)$ (e.g. road centerlines, river networks, flight trajectories).
+- **Polygon**: A planar two-dimensional surface bounded by one exterior linear ring and zero or more interior rings
+  (representing holes/islands). Every ring must be closed ($P_1 = P_k$) and non-self-intersecting.
+- **Multi-Geometries**: Collections of like geometries treated as a single entity (e.g. MultiPolygon representing an
+  archipelago state).
+
+### Storage Formats
+
+Vector geometries are serialized in structured exchange standards:
+- **GeoJSON**: Text-based JSON serialization based on WGS84 coordinates. Human-readable but inefficient for large
+  datasets ($> 100\text{ MB}$).
+- **Shapefile (ESRI)**: Legacy multi-file format (`.shp`, `.shx`, `.dbf`, `.prj`) limited to $2\text{ GB}$ file sizes,
+  10-character field names, and no native datetime types.
+- **GeoPackage (`.gpkg`)**: Modern open SQLite-based container supporting spatial indexing, vector features, and raster
+  tiles with full ACID compliance.
+- **FlatGeobuf / GeoParquet**: Cloud-native columnar formats supporting HTTP range requests and spatial filtering
+  without full file downloads.
+
+---
+
+## Raster Data Model
+
+Rasters model continuous spatial fields (elevation, land surface temperature, satellite multispectral reflectance) as a
+regular matrix of $H$ rows and $W$ columns with $C$ channels.
+
+### The Affine Geotransform
+
+A raster is anchored to geographic space by six affine transform parameters mapping pixel coordinates
+$(c, r) \in [0, W) \times [0, H)$ to world coordinates $(x, y)$:
+
+$$
+\begin{pmatrix} x \\ y \end{pmatrix} = \begin{pmatrix} x_0 \\ y_0 \end{pmatrix} + \begin{pmatrix} a_{11} & a_{12} \\ a_{21} & a_{22} \end{pmatrix} \begin{pmatrix} c \\ r \end{pmatrix}
+$$
+
+where $(x_0, y_0)$ is the upper-left corner coordinate, $a_{11} = \Delta x$ is the pixel width (Ground Sampling
+Distance, GSD), $a_{22} = -\Delta y$ is the negative pixel height, and $a_{12}, a_{21}$ specify rotational shear
+(typically zero for north-up rasters).
+
+### Cloud-Optimized GeoTIFF (COG)
+
+A standard TIFF file requires downloading the entire file to read a single sub-region. Cloud-Optimized GeoTIFFs (COGs)
+organize data into internal regular tiles (e.g. $256 \times 256$ or $512 \times 512$ blocks) paired with downsampled
+resolution overviews (pyramids with factors $2\times, 4\times, 8\times, 16\times$). Clients query spatial bounding boxes
+and zoom levels via HTTP GET range requests, fetching only the required byte offsets.
+
+---
+
+## Spatial Joins and Indexing
+
+A **spatial join** combines two spatial datasets based on a topological relationship between their geometries.
+
+### Topological Predicates (DE-9IM)
+
+The Dimensionally Extended 9-Intersection Model (DE-9IM) evaluates the intersections between the Interior ($I$),
+Boundary ($B$), and Exterior ($E$) of two geometries $A$ and $B$:
+
+$$
+\operatorname{DE-9IM}(A, B) = \begin{pmatrix}
+\dim(I(A) \cap I(B)) & \dim(I(A) \cap B(B)) & \dim(I(A) \cap E(B)) \\
+\dim(B(A) \cap I(B)) & \dim(B(A) \cap B(B)) & \dim(B(A) \cap E(B)) \\
+\dim(E(A) \cap I(B)) & \dim(E(A) \cap B(B)) & \dim(E(A) \cap E(B))
+\end{pmatrix}
+$$
+
+Standard boolean predicates derive from this matrix: `intersects`, `contains`, `within`, `touches`, `crosses`, and
+`overlaps`.
+
+### Spatial Indexing with R-Trees
+
+Naive pairwise intersection between $N$ points and $M$ polygons requires $O(N \cdot M)$ complex geometric computations.
+An **R-tree** (or packed STRtree) groups geometric bounding boxes into a hierarchical balanced tree:
+1. **Filter Step**: Query point $(x, y)$ is tested against minimum bounding boxes (MBRs) in the R-tree, pruning
+   non-overlapping branches in $O(\log M)$ time.
+2. **Refine Step**: Exact ray-casting point-in-polygon tests are executed only on the small candidate set of overlapping
+   polygons.
+
+---
+
+## Rasterisation and Zonal Statistics
+
+Transferring data across modalities is a cornerstone of spatial feature engineering:
+
+| Inter-Modality Operation | Input Domain | Computational Mechanism | Generated Output |
+| :--- | :--- | :--- | :--- |
+| **Rasterisation** | Vector Polygons | Ray-casting point-in-polygon tests on regular pixel centers $(c, r)$ | Discrete binary or categorical raster mask |
+| **Vectorisation (Polygonize)** | Categorical Raster | Marching squares / connected component boundary tracing | Closed vector polygon geometries with world coordinates |
+| **Zonal Statistics** | Vector Boundary + Continuous Raster | Aggregation ($\sum, \mu, \sigma, \operatorname{median}$) over masked cell values | Tabular feature rows summarizing areal distributions |
+
+### Rasterisation
+
+Rasterisation converts vector polygons into discrete binary or categorical grid masks:
+- **Scanline Algorithm**: Computes intersections of horizontal scan lines with polygon edges, filling pixel spans
+  between parity-matched edges.
+- **Center-Point vs All-Touched Rule**: Center-point inclusion marks a pixel as active only if its coordinate center
+  $(c + 0.5, r + 0.5)$ falls within the polygon; all-touched marks any pixel whose boundary intersects the polygon,
+  over-estimating area for narrow features.
+
+### Zonal Statistics
+
+Zonal statistics aggregate continuous raster values $Z_{r, c}$ across the spatial footprint defined by vector zone
+polygon $A$:
+- **Areal Mean**:
+  $$
+  \bar{Z}_A = \frac{\sum_{(r, c) \in A} w_{r, c} Z_{r, c}}{\sum_{(r, c) \in A} w_{r, c}}
+  $$
+  where $w_{r, c} \in [0, 1]$ is the cell intersection fractional weight.
+- **Zonal Sum / Extent**: $\sum_{(r, c) \in A} Z_{r, c}$, used to compute total regional population, biomass, or
+  precipitation.
+
+---
 
 ## Pitfalls
+
+1. **Resolution Mismatch and Boundary Quantization**: Computing zonal statistics with coarse raster pixels (e.g.
+   $1\text{ km}$ MODIS) on small urban vector parcels ($100\text{ m}$) causes perimeter mixed pixels to contaminate
+   zonal estimates with adjacent industrial or water land cover.
+2. **Topological Invalidity in Union Operations**: Geometric operations (dissolves, buffers, difference) on
+   floating-point coordinate boundaries often produce microscopic sliver polygons and self-intersecting bowtie rings
+   that cause spatial joins to crash or drop records.
+3. **Unprojected Planar Area Calculations**: Executing polygon area calculations (`ST_Area`) on unprojected EPSG:4326
+   geometries computes area in meaningless square degrees $(\Delta^\circ)^2$ rather than square meters, skewing density
+   calculations by up to $100\%$ depending on latitude.

@@ -1,26 +1,135 @@
 ---
 title: 'Temporal splits'
 kind: concept
-summary: 'A temporal split trains on the past and tests on the future. Rolling origins repeat it; gaps for the label horizon, purging and embargo stop labels and features from straddling the boundary.'
+summary: 'Temporal splits train models on past observations and evaluate on the future. Rolling walk-forward windows, label horizon gaps, purging, and embargo prevent temporal lookahead leakage.'
 tags: [data, model-selection, time-series]
-aliases: []
-requires: []
-related: [time-series-cross-validation, train-validation-and-test-splits]
-references: []
-status: stub
+aliases: [temporal splits, time based split, rolling origin, walk forward validation, purged cross validation, embargo]
+requires: [train-validation-and-test-splits]
+related: [time-series-cross-validation, matching-the-split-to-deployment, point-in-time-correctness, data-leakage]
+references: [lopezdeprado2018]
+status: draft
 updated: 2026-10-11
 ---
 
+import TemporalSplitExplorer from './TemporalSplitExplorer';
+
 <Definition>
-To be written.
+A **temporal split** is a non-random dataset partitioning scheme that enforces strict chronological causality by
+training models on historical observations ($t < T_{\text{split}}$) and evaluating them on subsequent future periods
+($t \ge T_{\text{split}}$). In the presence of multi-step forward labels and auto-regressive feature dependencies,
+temporal boundaries must incorporate **label horizon gaps**, **purging**, and **embargo** buffers to eliminate lookahead
+leakage <Cite id="lopezdeprado2018" />.
 </Definition>
 
-## Training on the past
+In time series, quantitative finance, and event-driven forecasting, random cross-validation yields catastrophically
+optimistic results: random splitting allows the model to interpolate between past and future observations, whereas
+deployment requires out-of-time extrapolation into the unknown future.
 
-## Rolling origins
+<TemporalSplitExplorer />
 
-## Gaps for label horizons
+## Training on the past and testing on the future
 
-## Purging and embargo
+When data points possess temporal sequence, observations are linked through serial correlation, momentum, macro trends,
+and auto-regressive state dynamics.
 
-## Pitfalls
+Applying standard random $K$-fold cross-validation destroys the arrow of time:
+1. The training fold contains observations from day $t - 1$ and day $t + 1$.
+2. The validation fold is asked to predict day $t$.
+3. The learning algorithm solves an easy **interpolation** task by averaging adjacent time points rather than learning
+   predictive signals that forecast genuine future state transitions.
+
+A valid temporal partition enforces strict chronological precedence:
+
+$$
+\mathcal{D}_{\text{train}} = \{ (x_t, y_t) : t < T_{\text{split}} \}, \qquad \mathcal{D}_{\text{test}} = \{ (x_t, y_t) : t \ge T_{\text{split}} \}
+$$
+
+## Rolling origins and walk-forward evaluation
+
+A single static train/test split evaluates the model on only a single historical test regime (e.g., Q4 of a single
+year), leaving it vulnerable to regime-specific market anomalies. **Walk-forward evaluation** (or rolling origin
+validation) repeats the temporal split across rolling temporal horizons:
+
+### Expanding window (cumulative)
+
+At each step $k$, the training window expands to incorporate all historical data from inception up to time $T_k$,
+forecasting the subsequent evaluation window $[T_k, T_k + H)$:
+
+$$
+\mathcal{D}_{\text{train}}^{(k)} = [0, T_k), \qquad \mathcal{D}_{\text{val}}^{(k)} = [T_k, T_k + H)
+$$
+
+This maximizes available training volume and mirrors systems where models are retrained periodically on accumulated
+historical logs.
+
+### Rolling window (sliding fixed width)
+
+At each step $k$, the training window maintains a constant historical length $W$, discarding observations older than
+$T_k - W$:
+
+$$
+\mathcal{D}_{\text{train}}^{(k)} = [T_k - W, T_k), \qquad \mathcal{D}_{\text{val}}^{(k)} = [T_k, T_k + H)
+$$
+
+Rolling windows prevent stale, obsolete patterns from distant history from dominating the model, providing greater
+responsiveness during non-stationary regime shifts.
+
+## Gaps for forward label horizons
+
+A frequent but subtle form of lookahead leakage arises when the target variable $y_t$ is defined across a multi-step
+forward window:
+
+$$
+y_t = f(z_t, z_{t+1}, \dots, z_{t+H})
+$$
+
+Common examples include:
+- Predicting 7-day cumulative asset returns: $y_t = \frac{p_{t+7} - p_t}{p_t}$.
+- Predicting 30-day customer churn: $y_t = \mathbb{I}(\text{cancelled between } t \text{ and } t + 30)$.
+- Predicting 48-hour hospital readmission: $y_t = \mathbb{I}(\text{readmitted within } 48\text{h})$.
+
+If the training set ends at $T_{\text{split}}$, a training observation recorded at $T_{\text{split}} - 2$ computes its
+target $y_t$ using real-world events that occur up to $T_{\text{split}} + 5$—which falls **inside the test period**.
+
+To prevent target leakage across the partition boundary, a **label horizon gap** of at least $H$ periods must separate
+training and test sets:
+
+$$
+\mathcal{D}_{\text{train}} = \{ (x_t, y_t) : t \le T_{\text{split}} - H \}, \qquad \mathcal{D}_{\text{test}} = \{ (x_t, y_t) : t \ge T_{\text{split}} \}
+$$
+
+## Purging and embargo in financial machine learning
+
+In financial machine learning, Marcos López de Prado <Cite id="lopezdeprado2018" /> formalized two essential safeguards
+when performing cross-validation across overlapping time series:
+
+### Purging
+
+Purging removes from the training set any observation whose label evaluation span $[t, t + H]$ overlaps with the time
+interval of the test partition. In Purged $K$-Fold cross-validation, training samples immediately preceding any test
+block are purged to prevent label leakage.
+
+### Embargo
+
+Even when labels do not overlap, features often exhibit long auto-regressive memory (such as 30-day exponential moving
+averages, rolling volatility, or customer interaction counts). When training on data that occurs *after* a test fold,
+training features can incorporate memory traces of test-period events.
+
+An **embargo** buffer $\Delta_{\text{embargo}}$ discards training instances immediately following the test partition:
+
+$$
+\text{Post-test training allowed only for } t > T_{\text{test\_end}} + \Delta_{\text{embargo}}
+$$
+
+Together, purging before the test fold and embargoing after the test fold guarantee complete informational isolation.
+
+## Pitfalls and structural hazards
+
+1. **Survivorship bias in historical filters**: Constructing historical datasets by filtering for entities that are
+   currently active in the database eliminates failed companies, churned users, or bankrupt accounts, creating
+   unrealistic training data.
+2. **Data starvation in early walk-forward splits**: Early walk-forward folds possess small training windows, leading to
+   high estimation variance. Ensure minimum initial training lengths before reporting metrics.
+3. **Seasonal boundary misalignment**: Placing split boundaries across volatile calendar events (e.g. Black Friday or
+   quarter-end tax deadlines) distorts validation metrics. Align split boundaries with natural operational business
+   cycles.

@@ -1,0 +1,93 @@
+---
+title: Two-sample testing
+kind: concept
+summary: 'A two-sample test of distributions asks whether two independent samples come from the same distribution, against any alternative. Its statistic is a distance between the two empirical distributions, and its null law comes from permuting the pooled sample.'
+tags: [hypothesis-testing, two-sample, nonparametric]
+aliases: [two-sample problem, two-sample test, homogeneity test, distribution comparison, goodness-of-fit between samples]
+requires: [null-and-alternative-hypotheses, p-value, permutation-tests]
+related: [kolmogorov-smirnov-test, maximum-mean-discrepancy, kernel-two-sample-test, energy-distance, classifier-two-sample-test, comparing-two-sample-tests, welch-t-test, type-i-and-type-ii-errors, drift-detection, density-ratio-estimation]
+references: [gretton2012, szekely2013, lopezpaz2017c2st, ramdas2015, liu2020deepkernel]
+status: draft
+updated: 2026-10-12
+---
+
+import { ShiftKinds } from './ShiftKinds'
+
+<Definition>
+Let $x_1, \dots, x_n$ be independent draws from a distribution $P$ and $y_1, \dots, y_m$ independent draws from a
+distribution $Q$, the two samples independent of each other. The **two-sample problem** tests the
+<NoteLink to="null-and-alternative-hypotheses">null hypothesis</NoteLink> $H_0: P = Q$ against the alternative
+$H_1: P \ne Q$. A test of this alternative is **consistent** if, for every fixed pair $P \ne Q$, the probability that
+it rejects tends to 1 as $n$ and $m$ grow.
+</Definition>
+
+## Intuition
+
+The <NoteLink to="welch-t-test">t-tests</NoteLink> answer a narrower question: do the two means differ? Two
+distributions can share a mean and differ in their spread, their shape, or, in more than one dimension, in the
+dependence between coordinates. A t-test sees none of these. A test of distributions compares the samples as wholes,
+so any difference, of any kind, eventually shows.
+
+The figure draws a sample from $\Gauss(0, 1)$ and a sample from an alternative that differs by a mean shift, a
+change of spread, or a change of shape that keeps the mean at 0 and the variance at 1. The readouts give the
+<NoteLink to="p-value">p-value</NoteLink> of six tests on the same two samples. Only the tests of whole
+distributions reject the change of shape.
+
+<ShiftKinds />
+
+## Details
+
+### A statistic and a null law
+
+Each test of distributions has two parts. The **statistic** measures how far apart the two empirical distributions
+are; it is near zero when the samples look alike and grows with the difference. The **null law** is the statistic's
+distribution when $P = Q$, against which the observed value is judged.
+
+| Test | Statistic | Data |
+| --- | --- | --- |
+| <NoteLink to="kolmogorov-smirnov-test">Kolmogorov–Smirnov</NoteLink> | largest gap between the two empirical cdfs | one dimension |
+| <NoteLink to="energy-distance">Energy distance</NoteLink> | mean distances between and within the samples | any dimension |
+| <NoteLink to="maximum-mean-discrepancy">Maximum mean discrepancy</NoteLink> | distance between kernel mean embeddings | anything with a kernel |
+| <NoteLink to="classifier-two-sample-test">Classifier test</NoteLink> | held-out accuracy of a classifier between the samples | anything a classifier takes |
+
+### Permutation gives the null law
+
+Under $H_0$ all $n + m$ points are independent draws from one distribution, so every assignment of the pooled points
+to groups of sizes $n$ and $m$ is equally likely. Recomputing the statistic on random reassignments gives its null law
+for the data at hand, and the share of reassignments at least as extreme as the observed one is a valid p-value
+(<NoteLink to="permutation-tests" />). This works for any statistic, so the choice of statistic is free to follow
+power alone. Kolmogorov–Smirnov in one dimension and the classifier test also have exact null laws of their own.
+
+### Power and what it depends on
+
+Every test above rejects a true $H_0$ with probability $\alpha$. They differ in their **power**, the probability of
+rejecting a given false $H_0$ (<NoteLink to="type-i-and-type-ii-errors" />). Power depends on the kind of
+difference, the sample sizes and the dimension. For a fixed mean shift, the power of kernel and distance tests falls
+as irrelevant dimensions are added <Cite id="ramdas2015" />. For images, text and other structured data, classifier
+tests and kernels learned from part of the data recover much of the lost power <Cite id="lopezpaz2017c2st" />
+<Cite id="liu2020deepkernel" />. <NoteLink to="comparing-two-sample-tests" /> measures power for the six tests in
+the figure.
+
+### Uses
+
+Two-sample tests check whether training and deployment data differ (<NoteLink to="drift-detection" />), whether a
+generative model's samples match the data, whether a simulator matches observations, and whether two experimental
+conditions change an outcome's distribution and not only its mean. A <NoteLink to="density-ratio-estimation">density
+ratio</NoteLink> estimated between the samples answers the next question: where and by how much they differ.
+
+## Assumptions
+
+- **<NoteLink to="independence">Independence</NoteLink>.** The points within each sample are independent, and the
+  samples are independent of each other. Autocorrelated data, such as time series, break the exchangeability that
+  permutation relies on and inflate the <Gloss name="fpr">false-positive rate</Gloss>.
+- **Identical distribution within each sample.** A sample that mixes several sources tests the mixture.
+
+## Pitfalls
+
+- **Rejection says that, not how.** A small p-value says the distributions differ. The MMD witness function, the
+  classifier's predictions or the location of the Kolmogorov–Smirnov gap show where.
+- **Large samples find tiny differences.** With enough data every real difference is significant. Report the size of
+  the statistic, such as the MMD or the held-out accuracy, beside the p-value.
+- **One test per question.** Testing every feature of a data set separately multiplies <Gloss name="fp">false
+  positives</Gloss>; correct for <NoteLink to="multiple-testing">multiple testing</NoteLink> or test the joint
+  distribution once.

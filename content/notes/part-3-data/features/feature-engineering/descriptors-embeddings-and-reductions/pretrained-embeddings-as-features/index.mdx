@@ -1,26 +1,141 @@
 ---
 title: 'Pretrained embeddings as features'
 kind: concept
-summary: 'A frozen pretrained encoder turns text, image or audio columns into embedding features for another model. The encoder version must be pinned, and the dimension is often reduced first.'
-tags: [data, embeddings, transfer-learning]
-aliases: []
-requires: []
-related: [sentence-embeddings, pretrained-features-for-anomaly-detection]
-references: []
-status: stub
+summary: 'A frozen pretrained encoder turns text, image or audio columns into dense embedding features for downstream tabular or linear models. Encoder versions must be pinned to prevent drift.'
+tags: [data, embeddings, transfer-learning, feature-engineering]
+aliases: [frozen embeddings, transfer features, foundation model embeddings, representation transfer]
+requires: [feature-scaling]
+related: [domain-knowledge-features, handcrafted-descriptors, category-embeddings]
+references: [devlin2019, radford2021, reimers2019]
+status: draft
 updated: 2026-10-11
 ---
 
+import { PretrainedEmbeddingsVisualizer } from './PretrainedEmbeddingsVisualizer'
+
 <Definition>
-To be written.
+A **pretrained embedding feature** is a dense continuous vector $\mathbf{z} \in \mathbb{R}^D$ extracted from an
+unstructured input $\mathbf{x} \in \mathcal{X}$ (such as text, an image, or an audio clip) using a frozen encoder
+$f_\theta$:
+
+$$
+\mathbf{z} = f_\theta(\mathbf{x}), \quad \text{with } \theta \text{ fixed } (\nabla_\theta \mathcal{L}_{\text{downstream}} = \mathbf{0}).
+$$
+
+The representation $\mathbf{z}$ is subsequently concatenated with existing structured tabular features
+$\mathbf{u} \in \mathbb{R}^P$ to form an augmented input vector
+$\tilde{\mathbf{x}} = [\mathbf{u}^\top, \mathbf{z}^\top]^\top \in \mathbb{R}^{P + D}$ for a downstream predictive model.
 </Definition>
 
-## Frozen encoders
+## Frozen encoders and representation transfer
 
-## Text, image and audio columns
+In industrial machine learning, tabular datasets frequently include unstructured attributes: product descriptions, user
+reviews, medical clinical notes, or listing photographs. Rather than training complex multimodal architectures
+end-to-end, standard production systems decouple representation extraction from tabular modeling:
 
-## Reducing the dimension
+1. **Decoupled compute**: Fine-tuning a 300M-parameter transformer end-to-end alongside tabular gradient-boosted trees
+   requires distributed GPU infrastructure and orders of magnitude more compute. Using a frozen encoder allows features
+   to be precomputed once offline and cached in a feature store.
+2. **Prevention of catastrophic forgetting**: When fine-tuning on a small tabular dataset ($N < 10{,}000$), deep models
+   easily overfit or destroy pretrained semantic representations. Freezing weights preserves broad semantic
+   generalization.
+3. **Model lifecycle independence**: The feature engineering pipeline treats the encoder as a deterministic mathematical
+   function, allowing downstream models (LightGBM, XGBoost, CatBoost, or Ridge regression) to be retrained rapidly on
+   updated target labels without rerunning neural backpropagation.
 
-## Pinning the encoder version
+## Multimodal feature columns
 
-## Pitfalls
+### Text columns
+Raw text strings (e.g., job titles, error logs, product summaries) are passed through bidirectional transformers such as
+BERT <Cite id="devlin2019" /> or Sentence-BERT <Cite id="reimers2019" />:
+
+- **Pooling strategies**: For a sequence of token representations $\mathbf{h}_1, \dots, \mathbf{h}_T \in \mathbb{R}^D$,
+  features are extracted either via the classification token $\mathbf{z} = \mathbf{h}_{\text{[CLS]}}$ or through mean
+  pooling:
+
+  $$
+  \mathbf{z} = \frac{1}{T} \sum_{t=1}^T \mathbf{h}_t.
+  $$
+
+  Mean pooling over token vectors generally yields more robust semantic representations for downstream regression and
+  classification than raw `[CLS]` embeddings.
+- **Unit norm projection**: Embeddings are typically normalised to unit Euclidean length:
+
+  $$
+  \tilde{\mathbf{z}} = \frac{\mathbf{z}}{\|\mathbf{z}\|_2},
+  $$
+
+  ensuring that dot products correspond exactly to cosine similarities
+  ($\langle \tilde{\mathbf{z}}_i, \tilde{\mathbf{z}}_j \rangle = \cos \theta_{ij}$).
+
+### Image and audio columns
+- **Visual encoders**: Images are processed using pretrained Vision Transformers (ViT) or contrastive vision-language
+  backbones such as CLIP <Cite id="radford2021" />. The penultimate projection layer produces dense semantic vectors
+  capturing object types, scene layout, and aesthetic style.
+- **Audio embeddings**: Raw waveforms or log-mel spectrograms are encoded using contrastive audio representations (CLAP)
+  or audio spectrogram transformers, yielding representations invariant to background noise and minor acoustic shifts.
+
+## Reducing embedding dimensionality for downstream models
+
+A major bottleneck occurs when feeding high-dimensional embeddings ($D \in [768, 1536]$) into tree-based models like
+XGBoost or LightGBM:
+
+- **Split search complexity**: Tree construction requires sorting and evaluating histogram split candidates across every
+  feature. Adding $768$ dense continuous variables multiplies tree training time by an order of magnitude.
+- **Curse of dimensionality and axis-aligned splits**: Decision trees partition feature space using orthogonal,
+  axis-aligned cuts. Dense embeddings represent semantic concepts across non-aligned linear combinations of dimensions.
+  Greedy axis-aligned splits require deep trees to isolate semantic clusters, increasing risk of leaf-node overfitting.
+
+To alleviate this, embeddings are compressed into lower-dimensional representations ($d \ll D$, typically
+$d \in [16, 64]$) before downstream ingestion:
+
+1. **Principal Component Analysis (PCA)**: Retains directions of maximum variance across the embedding space:
+
+   $$
+   \mathbf{z}_{\text{pca}} = \mathbf{V}_k^\top (\mathbf{z} - \boldsymbol{\mu}) \in \mathbb{R}^k.
+   $$
+
+2. **Random Projection**: By the Johnson-Lindenstrauss lemma, multiplying by a random Gaussian projection matrix
+   $\mathbf{R} \in \mathbb{R}^{k \times D}$ preserves pairwise Euclidean distances within a $(1 \pm \epsilon)$ factor
+   with high probability when $k = \mathcal{O}(\epsilon^{-2} \log N)$.
+3. **Trained linear bottleneck / autoencoder**: A lightweight projection network trained to reconstruct the original
+   embedding or predict a surrogate objective compresses the representation into a compact bottleneck.
+
+The interactive visualizer below compares full dense embeddings against PCA-reduced embeddings and demonstrates the
+impact of silent upstream encoder drift:
+
+<PretrainedEmbeddingsVisualizer />
+
+## Pinning encoder versions and representation drift
+
+The most hazardous failure mode in production systems using pretrained embeddings is **upstream representation drift**:
+
+- **Coordinate rotation**: If an external API or foundational model checkpoint is upgraded (e.g., from
+  `text-embedding-ada-002` to `text-embedding-3-small`, or from checkpoint v1.0 to v2.0), the geometry of the embedding
+  space shifts. Even if both models have identical dimension $D$ and similar downstream retrieval benchmarks, their
+  coordinate axes are completely unaligned:
+
+  $$
+  f_{\theta_{\text{v2}}}(\mathbf{x}) \neq \mathbf{Q} \, f_{\theta_{\text{v1}}}(\mathbf{x}) \quad \text{for any orthogonal matrix } \mathbf{Q}.
+  $$
+
+- **Catastrophic skew**: A downstream model trained on v1 embeddings will suffer total performance collapse when
+  evaluated on v2 embeddings at serving time without complete re-training.
+- **MLOps safeguards**:
+  1. **Strict version pinning**: Pin exact checkpoint hashes, tokenizers, and weights in code.
+  2. **Hash fingerprinting**: Compute hash signatures on fixed calibration sentences during deployment; abort inference
+     if output vectors deviate by more than floating-point tolerance.
+  3. **Dual-write migration**: When upgrading an embedding model, regenerate embeddings across the entire historical
+     training set and retrain downstream models before switching serving traffic.
+
+## Pitfalls and failure modes
+
+1. **Serving latency mismatch**: Tabular tree models evaluate inference in microseconds ($< 1$ ms). In contrast,
+   executing a 12-layer transformer forward pass to extract embeddings takes tens of milliseconds on CPU. Serving
+   embeddings online requires precomputation or dedicated GPU acceleration.
+2. **Domain mismatch and modality collapse**: Foundation models trained on general web text may produce degenerate,
+   clustered embeddings when applied to highly specialized technical domains (e.g., genomic sequences or assembly code),
+   losing critical discriminatory variance.
+3. **Missing value handling**: When an unstructured field is null, passing an empty string `""` produces a non-zero
+   semantic embedding (the embedding of empty whitespace), which the downstream model may misinterpret as a meaningful
+   semantic vector. Explicitly mask or indicate missingness with a dedicated binary flag.

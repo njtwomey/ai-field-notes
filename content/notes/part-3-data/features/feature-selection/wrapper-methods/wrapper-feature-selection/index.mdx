@@ -1,26 +1,156 @@
 ---
 title: 'Wrapper methods'
 kind: concept
-summary: 'Wrapper methods search over feature subsets and score each subset by the validated performance of the model trained on it, through forward selection, backward elimination or recursive feature elimination.'
+summary: 'Wrapper methods frame feature selection as a state-space search over feature subsets, using the validated predictive performance of a target learning algorithm to guide heuristic forward, backward, or recursive elimination moves.'
 tags: [data, feature-engineering, model-selection]
-aliases: []
-requires: []
-related: [feature-selection]
-references: []
-status: stub
+aliases: [wrapper feature selection, wrapper methods, sequential feature selection, recursive feature elimination, RFE, sequential forward selection, sequential backward elimination]
+requires: [feature-selection]
+related: [filter-feature-selection, embedded-feature-selection, feature-importance-measures, selection-inside-cross-validation]
+references: [kohavi1997, guyon2002, guyon2003, pudil1994]
+status: draft
 updated: 2026-10-11
 ---
 
+import WrapperSelectionExplorer from './WrapperSelectionExplorer';
+
 <Definition>
-To be written.
+A **wrapper method** is a feature selection paradigm that treats the downstream learning algorithm as a black-box
+scoring oracle, searching through the combinatorial space of feature subsets and evaluating candidate sets by their
+cross-validated generalization error <Cite id="kohavi1997" />. By directly aligning feature subset choices with the
+inductive bias and non-linear interactions of the specific predictive model, wrappers can identify synergistic feature
+sets that independent statistical filters overlook.
 </Definition>
 
-## Forward selection
+Unlike filter methods, which score features independently of the final classifier, wrapper methods tailor the selected
+subset to the exact model family (e.g., support vector machines, gradient boosted trees, or neural networks). The
+learning machine wraps around the search algorithm, providing the objective function that guides state transitions.
 
-## Backward elimination
+<WrapperSelectionExplorer />
 
-## Recursive feature elimination
+## The combinatorial subset search space
 
-## Stochastic search
+Given a pool of $p$ candidate features $\mathcal{X} = \{X_1, X_2, \dots, X_p\}$, any candidate subset
+$S \subseteq \mathcal{X}$ can be represented as a binary mask vector $z \in \{0, 1\}^p$, where $z_j = 1$ denotes feature
+inclusion. The complete search space consists of the power set $\mathcal{P}(\mathcal{X})$, comprising $2^p$ distinct
+subsets.
 
-## Pitfalls
+Finding the globally optimal subset:
+
+$$
+S^* = \arg\min_{S \subseteq \mathcal{X}} \mathcal{L}_{\text{val}}\big(f_S(X_S)\big), \quad \text{subject to } |S| \le k
+$$
+
+is an NP-hard combinatorial optimization problem. For moderate feature spaces ($p > 30$), exhaustive best-subset
+enumeration is computationally intractable. Practical wrapper methods therefore replace exhaustive search with greedy or
+stochastic state-space heuristics.
+
+## Sequential forward selection (SFS)
+
+Sequential Forward Selection is a bottom-up greedy search that begins with an empty feature set and incrementally adds
+the single most informative candidate feature at each step:
+
+1. **Initialization**: Set $S_0 = \emptyset$.
+2. **Greedy step $k$**: For each excluded feature $X_j \in \mathcal{X} \setminus S_{k-1}$, train the target model on
+   $S_{k-1} \cup \{X_j\}$ using $K$-fold cross-validation and compute validation score
+   $\hat{R}_{\text{val}}(S_{k-1} \cup \{X_j\})$.
+3. **Selection**: Retain the candidate that yields maximum performance:
+   $$
+   X^* = \arg\max_{X_j \notin S_{k-1}} \hat{R}_{\text{val}}(S_{k-1} \cup \{X_j\})
+   $$
+   Update $S_k = S_{k-1} \cup \{X^*\}$.
+4. **Termination**: Repeat until a target subset size $m$ is reached or validation performance fails to improve beyond a
+   tolerance threshold $\epsilon$.
+
+Selecting $m$ features out of $p$ requires fitting:
+
+$$
+\sum_{k=1}^m (p - k + 1) = m \cdot p - \frac{m(m - 1)}{2} \approx \mathcal{O}(m \cdot p)
+$$
+
+distinct cross-validated models.
+
+### The nesting limitation and synergistic pairs
+
+Because SFS is strictly monotonic ($S_0 \subset S_1 \subset \dots \subset S_m$), a feature selected in early iterations
+can never be removed later. Furthermore, SFS suffers from severe blindness to **synergistic interactions**: two features
+$X_A$ and $X_B$ that are collectively decisive (such as an XOR parity structure) but marginally uninformative will be
+evaluated as worthless in isolation at step 1, causing SFS to pick weak or redundant individual features over the
+synergistic pair.
+
+## Sequential backward elimination (SBS)
+
+Sequential Backward Elimination (or Sequential Backward Selection) operates in the opposite direction, starting from the
+full feature set and iteratively pruning the least consequential feature:
+
+1. **Initialization**: Set $S_p = \mathcal{X}$.
+2. **Greedy step $k$**: For each current member $X_j \in S_k$, train the model on $S_k \setminus \{X_j\}$ and compute
+   validation performance.
+3. **Pruning**: Identify the feature whose exclusion causes the least degradation (or greatest improvement in
+   generalization):
+   $$
+   X^* = \arg\max_{X_j \in S_k} \hat{R}_{\text{val}}(S_k \setminus \{X_j\})
+   $$
+   Update $S_{k-1} = S_k \setminus \{X^*\}$.
+4. **Termination**: Stop when dropping further features causes validation performance to fall below an acceptable
+   margin.
+
+### Advantages and constraints of backward elimination
+
+Unlike SFS, backward elimination preserves complex multi-feature interactions: because all features are present in the
+initial model, synergistic pairs ($X_A, X_B$) exhibit their joint predictive power and are protected from early removal.
+
+However, SBS has two major limitations:
+- **Intractable when $p > n$**: In high-dimensional regimes (e.g., genomics or text classification where features
+  outnumber observations), standard models cannot be fit on the full set without extreme regularization or matrix
+  singularity.
+- **Heavy initial computation**: The earliest elimination steps fit models containing nearly all $p$ features, which is
+  computationally expensive for large datasets.
+
+## Recursive feature elimination (RFE)
+
+Recursive Feature Elimination <Cite id="guyon2002" /> circumvents the quadratic model-fitting bottleneck of standard SBS
+by using parameter importance weights from a single fitted model to rank and prune candidates, rather than fitting
+$p - k$ separate leave-one-out models per step.
+
+For a linear model $f(x) = w^T x + b$ or linear Support Vector Machine, the margin sensitivity with respect to removing
+feature $j$ corresponds to the change in the objective function $\frac{1}{2}\|w\|^2$:
+
+$$
+c_j = \frac{1}{2} \left( \|w\|^2 - \|w_{(-j)}\|^2 \right) \approx \frac{1}{2} w_j^2
+$$
+
+### The RFE algorithm
+
+1. Train the model on current active feature set $S$.
+2. Compute ranking criteria $c_j = w_j^2$ (or normalized impurity drop / SHAP magnitude) for all $j \in S$.
+3. Eliminate the feature $X^*$ with minimal criterion value: $X^* = \arg\min_{j \in S} c_j$ (or prune the lowest
+   $\alpha$ fraction of features simultaneously for geometric speedup).
+4. Repeat on remaining subset until the target subset dimension is reached.
+
+By eliminating features using internal model gradients or weights, RFE requires only $\mathcal{O}(p)$ total model fits
+(or $\mathcal{O}(\log p)$ with geometric step pruning), making it orders of magnitude faster than full stepwise backward
+search while retaining model-aware pruning.
+
+## Bidirectional and stochastic search
+
+To combat the greedy nesting defect of SFS and SBS, advanced wrappers introduce bidirectional flexibility:
+
+- **Sequential Floating Forward Selection (SFFS)** <Cite id="pudil1994" />: Dynamically alternates between forward
+  inclusion and backward elimination steps. After adding a feature, it tests whether removing any previously added
+  feature improves the criterion, floating back and forth to find superior subsets.
+- **Genetic Algorithms and Simulated Annealing**: Model the feature mask $z \in \{0, 1\}^p$ as a chromosome or physical
+  state. Genetic operators (crossover, mutation, and tournament selection) explore non-contiguous paths through the
+  subset lattice, escaping local optima that trap greedy stepwise heuristics.
+
+## Pitfalls and selection overfitting
+
+1. **Selection overfitting (optimism bias)**: Wrapper search repeatedly queries cross-validation scores across hundreds
+   or thousands of candidate subsets. With finite sample size $n$, the search algorithm will inevitably discover a
+   feature subset that overfits the specific cross-validation splits by sheer chance, yielding optimistic validation
+   scores that fail to generalize to out-of-sample data <Cite id="kohavi1995, varma2006" />.
+2. **Computational overhead**: Evaluating $K$-fold cross-validation inside each step of a stepwise wrapper requires
+   $K \times \mathcal{O}(p^2)$ model trainings. For ensemble trees or neural networks on large tables, wrapper searches
+   quickly become computationally prohibitive.
+3. **Instability in collinear regimes**: When two features are highly collinear ($r > 0.95$), slight sampling noise in
+   cross-validation folds can cause arbitrary flip-flopping between which feature is retained, leading to unstable
+   subsets across dataset resamples.

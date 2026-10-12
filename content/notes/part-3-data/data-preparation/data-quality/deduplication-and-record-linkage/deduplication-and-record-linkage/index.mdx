@@ -3,30 +3,144 @@ title: 'Deduplication and record linkage'
 kind: concept
 summary: 'Record linkage decides which records, within one dataset or across several, refer to the same entity. Deduplication is its within-dataset case; both compare candidate pairs by field similarity and classify them as matches.'
 tags: [data, similarity-search]
-aliases: []
+aliases: [record linkage, entity resolution, deduplication and matching]
 requires: []
-related: [locality-sensitive-hashing, character-n-grams-and-shingles]
-references: []
-status: stub
+related: [locality-sensitive-hashing, character-n-grams-and-shingles, near-duplicate-detection, data-leakage]
+references: [fellegi1969, christen2012, broder1997]
+status: draft
 updated: 2026-10-11
 ---
 
+import { BlockingAndMatching } from './BlockingAndMatching'
+
 <Definition>
-To be written.
+**Record linkage** determines whether two records $a \in A$ and $b \in B$ represent the same underlying real-world
+entity in the absence of a shared unique identifier. **Deduplication** is the special case where $A = B$. A comparison
+vector $\boldsymbol{\gamma}(a, b) = (\gamma_1, \dots, \gamma_K)$ measures field-level agreements, and a decision rule
+partitions all pairs into matches $M$, non-matches $U$, and potential matches requiring review
+<Cite id="fellegi1969" />.
 </Definition>
+
+Real-world datasets contain duplicate entities caused by typographical errors, spelling variants, changing addresses,
+varying abbreviations, and fragmented collection pipelines. Direct pairwise comparison across two tables with $\abs{A}$
+and $\abs{B}$ records evaluates $\abs{A} \times \abs{B}$ candidate pairs, which becomes prohibitive as data scales.
+Scalable linkage architectures combine an indexing step (blocking) to prune impossible pairs with granular field-level
+similarity functions and statistical decision theory.
+
+<BlockingAndMatching />
 
 ## Exact and near duplicates
 
+- **Exact duplicates:** Share identical byte or string values across all compared fields. They collapse in linear
+  $\mathcal{O}(N)$ time by grouping on cryptographic hashes (such as SHA-256) or database equality constraints.
+- **Near duplicates:** Differ by subtle variations, including missing middle names, reversed birthdates, transposed
+  characters, or OCR noise. Detecting them requires approximate field comparisons, phonetic encodings, or
+  <NoteLink to="near-duplicate-detection">near-duplicate detection</NoteLink> sketches.
+
 ## Blocking
+
+Blocking partitions the quadratic comparison space $\abs{A} \times \abs{B}$ into small candidate blocks. Only records
+sharing a blocking key are compared:
+
+- **Standard blocking:** Groups records by exact equality on robust fields, such as postal code, date of birth, or
+  soundex-encoded surname. If an error corrupts the blocking key, true matches are lost.
+- **Sorted neighbourhood:** Sorts all records by an alphanumeric key and slides a window of width $w$ across the
+  sequence, comparing only records within the same window. This bounds candidate pairs to $\mathcal{O}(w \cdot N)$
+  <Cite id="christen2012" />.
+- **$Q$-gram / token blocking:** Inverted indexes map substrings or tokens to record identifiers. Records sharing at
+  least one token become candidate pairs, creating overlapping blocks resilient to typographical shifts.
+
+Quality is assessed through the **reduction ratio** (fraction of all pairs eliminated by blocking) and **pair
+completeness** (fraction of true entity matches retained in the candidate set).
 
 ## Field comparison
 
+For each candidate pair $(a, b)$, individual attributes are compared using domain-tailored metrics to form a comparison
+vector $\boldsymbol{\gamma} = (\gamma_1, \dots, \gamma_K)$:
+
+- **Edit distance and Damerau-Levenshtein:** Counts the minimum insertions, deletions, substitutions, and transpositions
+  required to transform one string into another.
+- **Jaro-Winkler distance:** Weights character agreements and transpositions while giving higher bonus to matching
+  initial prefixes, which is common in personal names.
+- **Token and shingle Jaccard:** Measures the set overlap of word tokens or character $q$-grams, handling token
+  reordering such as "Department of Education" versus "Education Department".
+- **Numeric and date tolerances:** Compares timestamps, ages, or coordinates via absolute or percentage differences
+  rather than binary agreement.
+
 ## The Fellegi-Sunter model
+
+The classic probabilistic framework of Fellegi and Sunter <Cite id="fellegi1969" /> models the comparison vector
+$\boldsymbol{\gamma}$ conditional on match status. Let $M$ be the set of true matches and $U$ be the set of true
+non-matches. Define:
+
+$$
+m_k = P\bigl[\gamma_k = 1 \bigm| (a, b) \in M\bigr], \qquad u_k = P\bigl[\gamma_k = 1 \bigm| (a, b) \in U\bigr]
+$$
+
+Here $m_k$ is the probability that field $k$ agrees given the pair is a true match (reflecting field reliability), while
+$u_k$ is the probability that field $k$ agrees purely by coincidence given the pair is a non-match (inversely related to
+field cardinality).
+
+Assuming conditional independence across fields, the overall agreement weight ratio is:
+
+$$
+R(\boldsymbol{\gamma}) = \sum_{k=1}^K w_k, \quad \text{where } w_k = \begin{cases}
+\log_2 \frac{m_k}{u_k} & \text{if } \gamma_k = 1 \\
+\log_2 \frac{1 - m_k}{1 - u_k} & \text{if } \gamma_k = 0
+\end{cases}
+$$
+
+Two thresholds $T_\mu$ and $T_\lambda$ partition pairs into three decision regions:
+1. **Definite match:** $R(\boldsymbol{\gamma}) \ge T_\mu$, classified as $M$.
+2. **Definite non-match:** $R(\boldsymbol{\gamma}) \le T_\lambda$, classified as $U$.
+3. **Clerical review:** $T_\lambda < R(\boldsymbol{\gamma}) < T_\mu$, held for manual inspection.
+
+Setting $T_\mu$ and $T_\lambda$ achieves minimal manual review for prescribed false match and false non-match error
+bounds.
 
 ## Learned matchers
 
+Supervised machine learning frames pair classification as binary classification. Feature vectors $\boldsymbol{\gamma}$
+train gradient boosted <NoteLink to="decision-tree">decision trees</NoteLink> or logistic regressors on labelled match
+pairs.
+
+For unstructured records, deep entity resolution models pass concatenated attribute strings into pretrained Transformer
+encoders (such as <Gloss name="roberta" /> or sentence transformers). The encoder outputs a cross-attention
+representation or cosine similarity score trained with contrastive or <Gloss name="bce">binary cross-entropy</Gloss>
+loss.
+
 ## Clustering into entities
+
+Pairwise match decisions must be consolidated into distinct entity clusters. Because pairwise matching is noisy and
+non-transitive ($a \approx b$ and $b \approx c$ does not guarantee $a \approx c$), clustering algorithms enforce global
+consistency:
+
+- **Connected components:** Places an edge between any pair exceeding the match threshold. While fast, a single spurious
+  false match can collapse separate entities into a massive single cluster.
+- **Hierarchical agglomerative clustering:** Merges records based on average or complete linkage, halting when
+  similarity drops below a threshold.
+- **Correlation clustering:** Solves an optimisation problem balancing positive match edges against negative non-match
+  edges without fixing the cluster count in advance.
 
 ## Evaluation
 
+Record linkage evaluation considers both candidate retrieval and final entity resolution:
+
+- **Pair-level metrics:** Precision, recall, and $F_1$ evaluated on candidate pairs against ground truth entity
+  assignments.
+- **Cluster-level metrics:** B-cubed precision and recall, which measure the fraction of each record's assigned cluster
+  that truly shares the same entity identity.
+- **Generalized Merge Distance:** Quantifies the editing cost in split and merge operations needed to transform
+  predicted clusters into ground truth partitions.
+
 ## Pitfalls
+
+- **Severe <NoteLink to="class-imbalance">class imbalance</NoteLink>:** In any realistic linkage setting, true
+  non-matches outnumber true matches by several orders of magnitude ($\abs{U} \gg \abs{M}$). Accuracy is useless; false
+  match rate on $U$ must be vanishingly small.
+- **Transitivity cascades:** Chaining together weak positive pairs through connected components merges hundreds of
+  unrelated records into a single artificial entity.
+- **Split contamination:** Splitting linked records randomly across train and
+  <NoteLink to="train-validation-and-test-splits">test sets</NoteLink> leads to <NoteLink to="data-leakage">data
+  leakage</NoteLink>, as identical underlying entities appear in both training and evaluation splits. Partitioning must
+  occur at the entity cluster level.

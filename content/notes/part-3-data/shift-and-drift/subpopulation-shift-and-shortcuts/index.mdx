@@ -1,26 +1,127 @@
 ---
 title: 'Subpopulation shift and shortcuts'
 kind: concept
-summary: 'A model can learn a shortcut, a feature that predicts the label in the training data but not in use, such as a background or a scanner mark. Changes in subgroup proportions then expose it, measured by worst-group error.'
-tags: [data, robustness]
-aliases: []
-requires: []
-related: [robustness-to-distribution-shift, shift-and-drift-in-data]
-references: []
-status: stub
+summary: 'A model can learn a shortcut feature that predicts the label in training data but fails in use. Subgroup shifts expose this failure, measured by worst-group error.'
+tags: [data, robustness, distribution-shift, subpopulation-shift]
+aliases: [shortcut learning, spurious correlations, worst-group error, group distributionally robust optimization, Group DRO]
+requires: [shift-and-drift-in-data]
+related: [shift-and-drift-in-data, sample-weights, out-of-distribution-test-sets]
+references: [sagawa2020, arjovsky2019, ribeiro2016]
+status: draft
 updated: 2026-10-11
 ---
 
+import { SubpopulationShiftExplorer } from './SubpopulationShiftExplorer'
+
 <Definition>
-To be written.
+**Subpopulation shift** occurs when the population is composed of discrete subgroups
+$g \in \mathcal{G} = \mathcal{Y} \times \mathcal{A}$ defined by the joint cross-product of the target label
+$y \in \mathcal{Y}$ and a spurious attribute $a \in \mathcal{A}$, such that group proportions shift between training and
+deployment while the within-group data-generating distributions remain identical:
+
+$$
+P_{\text{train}}(g) \neq P_{\text{test}}(g), \quad \text{subject to } P_{\text{train}}(\mathbf{x} \mid g) = P_{\text{test}}(\mathbf{x} \mid g).
+$$
+
+When a model relies on the spurious attribute $a$ as a **shortcut**, shifts in the proportions of counterexamples expose
+dramatic performance drops that average accuracy metrics conceal.
 </Definition>
 
-## Spurious correlations
+## Spurious correlations and ERM
 
-## Shortcut features
+Standard Empirical Risk Minimization (ERM) optimizes average loss across the empirical training set:
 
-## Worst-group error
+$$
+\hat{f}_{\text{ERM}} = \arg\min_f \frac{1}{N} \sum_{i=1}^N \ell(f(\mathbf{x}_i), y_i) = \arg\min_f \sum_{g \in \mathcal{G}} P_{\text{train}}(g) \cdot \mathbb{E}_{(\mathbf{x}, y) \sim g}[\ell(f(\mathbf{x}), y)].
+$$
 
-## Collecting counterexamples
+Because ERM weights each subgroup proportionally to its training frequency $P_{\text{train}}(g)$, standard training
+exhibits severe failure modes in the presence of spurious correlations:
 
-## Pitfalls
+- **Correlation alignment**: Suppose a spurious background attribute $a \in \{\text{land}, \text{water}\}$ strongly
+  correlates with bird species $y \in \{\text{landbird}, \text{waterbird}\}$ in the training corpus (e.g., $95\%$ of
+  landbirds appear on land, and $95\%$ of waterbirds appear on water).
+- **Simplicity bias**: Deep neural networks and gradient boosters exhibit an inductive bias toward learning simple,
+  low-frequency, or linearly separable features first. Identifying the color of a background patch requires far fewer
+  parameters and training steps than parsing complex avian plumage and beak morphology.
+- **The shortcut solution**: ERM satisfies its objective by adopting the shortcut decision rule $\hat{y} = a$, achieving
+  $95\%$ average training accuracy with minimal optimization effort while completely ignoring the causal, invariant
+  anatomical features.
+
+## Shortcut features and classic case studies
+
+Shortcut learning is pervasive across machine learning applications:
+
+1. **The Snow Husky dilemma**: Ribeiro et al. <Cite id="ribeiro2016" /> demonstrated a deep neural network classifying
+   wolves versus huskies that achieved high validation accuracy by detecting whether the background contained snow,
+   rather than examining facial features.
+2. **Clinical radiology artifacts**: Deep models trained to detect pneumothorax or COVID-19 from chest X-rays learned to
+   detect the presence of chest drains, hospital radiological markers, or patient positioning pads rather than pulmonary
+   pathology. When deployed in clinical wards with different treatment protocols, diagnostic performance collapsed.
+3. **The Waterbirds benchmark**: Sagawa et al. <Cite id="sagawa2020" /> formalized this failure mode using the
+   Waterbirds benchmark, showing that standard ERM models trained on ImageNet backbones attained $97\%$ average accuracy
+   but collapsed to under $60\%$ accuracy on minority groups (waterbirds on land or landbirds on water).
+
+## Worst-group error and Group DRO
+
+Evaluating models purely by average test accuracy masks vulnerabilities because minority groups contribute minimally to
+the aggregate sum. Robustness under subpopulation shift requires evaluating **worst-group error**:
+
+$$
+\mathcal{R}_{\text{worst}}(f) = \max_{g \in \mathcal{G}} \mathbb{E}_{(\mathbf{x}, y) \sim g} [\ell(f(\mathbf{x}), y)].
+$$
+
+A model with $95\%$ average accuracy and $10\%$ worst-group accuracy has learned a spurious shortcut that fails
+catastrophically on minority slices.
+
+### Group Distributionally Robust Optimization (Group DRO)
+To force the model to rely on invariant features, Sagawa et al. <Cite id="sagawa2020" /> proposed Group DRO, which
+optimizes a minimax objective over the worst-case group distribution:
+
+$$
+\min_{f \in \mathcal{F}} \max_{\mathbf{q} \in \Delta_{|\mathcal{G}|}} \sum_{g \in \mathcal{G}} q_g \, \hat{\mathcal{R}}_g(f),
+$$
+
+where $\Delta_{|\mathcal{G}|}$ represents the probability simplex over groups. In practice, group weights $q_g$ are
+updated online using exponential gradient ascent:
+
+$$
+q_g^{(t+1)} \propto q_g^{(t)} \exp\left( \eta_q \, \hat{\mathcal{R}}_g(f^{(t)}) \right).
+$$
+
+When the model underperforms on minority counterexamples, their group weight $q_g$ surges, forcing backpropagation to
+penalize shortcut features and prioritize the invariant core signals.
+
+The interactive visualizer below illustrates the trade-off between standard ERM and Group DRO on spurious shortcuts:
+
+<SubpopulationShiftExplorer />
+
+## Collecting counterexamples and dataset interventions
+
+Algorithm-level interventions like Group DRO are only effective when counterexamples exist in the data:
+
+1. **Strategic oversampling and balanced batches**: Ensure every mini-batch contains an equal distribution across all
+   label-attribute pairs $(y, a)$.
+2. **Collecting targeted counterexamples**: Actively acquire annotations for unrepresented subgroups (e.g.,
+   intentionally sourcing photographs of waterbirds in forest canopies or camels in snowy terrain).
+3. **Invariant Risk Minimization (IRM)**: Formulated by Arjovsky et al. <Cite id="arjovsky2019" />, IRM seeks a data
+   representation $\Phi(\mathbf{x})$ such that the optimal linear classifier $\mathbf{w}$ is simultaneously optimal
+   across distinct training environments $\mathcal{E}$:
+
+   $$
+   \min_{\Phi} \sum_{e \in \mathcal{E}} \mathcal{R}^e(\mathbf{w} \circ \Phi) \quad \text{subject to } \mathbf{w} \in \arg\min_{\bar{\mathbf{w}}} \mathcal{R}^e(\bar{\mathbf{w}} \circ \Phi) \quad \forall e \in \mathcal{E}.
+   $$
+
+   If a feature is a spurious shortcut that varies across environments, IRM penalizes its representation.
+
+## Pitfalls and limitations
+
+1. **Unobserved group annotations**: Group DRO and importance reweighting require knowing the group label $g = (y, a)$
+   for every training sample. In large-scale web scrapes and unstructured logs, spurious attributes $a$ are rarely
+   labeled.
+2. **Severe minority overfitting**: When minority groups have very few samples (e.g., $N_g < 20$), optimizing
+   worst-group loss can lead models to memorize individual minority instances rather than learning true invariant
+   representations.
+3. **Average-accuracy trade-offs**: Eliminating reliance on shortcuts can slightly reduce average accuracy on
+   distributions where the shortcut holds true, requiring practitioners to evaluate the operational trade-off between
+   peak average performance and safety guarantees.

@@ -1,0 +1,192 @@
+---
+title: Background Check
+kind: technique
+summary: 'Background Check adds a background class to a $k$-class classifier. A relative foreground density and an assumed background bias give the familiarity factor, which turns its probabilities into $k + 1$. One rule then covers rejecting ambiguous cases and flagging outliers.'
+tags: [uncertainty-quantification, classification, decision-theory, anomaly-detection, worked-example]
+aliases: [background class, familiarity factor, background bias, k+1 class classification, cautious classification, classification with confidence]
+requires: [reject-option, kernel-density-estimation]
+related: [selective-classification, aleatoric-and-epistemic-uncertainty, one-class-support-vector-machine, anomaly-detection, classifier-calibration]
+references: [perellonieto2016, chow1970, scholkopf2001b, hempstalk2008, tax2008]
+status: draft
+updated: 2026-10-12
+---
+
+import { BackgroundCheckLine } from './BackgroundCheckLine'
+import { BackgroundCheckPlane } from './BackgroundCheckPlane'
+import { BiasSquare } from './BiasSquare'
+
+<Callout variant="credit" title="Provenance: Perello-Nieto, Silva Filho, Kull and Flach (2016)">
+Background Check is the work of Miquel Perello-Nieto, Telmo Silva Filho, Meelis Kull and Peter Flach, published at
+ICDM 2016 as "Background Check: A General Technique to Build More Reliable and Versatile Classifiers"
+<Cite id="perellonieto2016" />. The idea is taken directly from their paper. The familiarity factor, the relative
+densities, the four background biases, the parameter square with its cautious, outlier and constant corners, and the
+familiarity and discriminative ways of estimating the foreground density are all theirs. This site added the single
+decision rule written as a product of confidence and density, the monotone family with a shape parameter, the worked
+examples and the interactive figures. It is included because it is a neat idea and worth keeping in these records.
+</Callout>
+
+<Definition>
+**Background Check** turns a classifier trained on $k$ classes into one that outputs probabilities over $k + 1$
+labels: the $k$ foreground classes $c = 1, \dots, k$ and a **background** class $b$ that has no training data
+<Cite id="perellonieto2016" />. The **familiarity factor** of an input $\xvec$ is $r(\xvec) = p(f \mid \xvec) / p(b
+\mid \xvec)$, where $f$ is the event that $\xvec$ belongs to one of the foreground classes. With the class
+probabilities within the foreground, $p(c \mid f, \xvec)$, it gives
+
+$$
+p(b \mid \xvec) = \frac{1}{1 + r(\xvec)}, \qquad p(c \mid \xvec) = p(c \mid f, \xvec)\, \frac{r(\xvec)}{1 + r(\xvec)}.
+$$
+
+The familiarity factor is the ratio $q_f(\xvec) / q_b(\xvec)$ of a relative foreground density, estimated from the
+training data, to a relative background density $q_b = \mu(q_f)$ set by an assumed **background bias** $\mu$.
+</Definition>
+
+## Problem
+
+A classifier trained on $k$ classes answers every query with a distribution over those $k$ classes. Two kinds of input
+deserve the answer "I don't know". An **ambiguous** input lies where the classes overlap, so its largest class
+probability is low. An **unfamiliar** input lies far from all the training data. Its class probabilities can still be
+close to 0 and 1, because <NoteLink to="bayes-theorem">Bayes' rule</NoteLink> normalises them over the $k$ classes.
+
+The normalisation hides the difference. Suppose class 1 has likelihood $p(\xvec_1 \mid 1) = 0.9$ at one input and
+$p(\xvec_2 \mid 1) = 0.1$ at another, and class 2 has likelihood 0 at both. Both inputs get $p(1 \mid \xvec) = 1$,
+although the model has seen many more cases like $\xvec_1$ than like $\xvec_2$.
+
+Separate methods handle the two cases. <NoteLink to="reject-option">Chow's rule</NoteLink> rejects ambiguous inputs by
+thresholding the largest posterior <Cite id="chow1970" />. <NoteLink to="anomaly-detection">Outlier and novelty
+detectors</NoteLink> such as the
+<NoteLink to="one-class-support-vector-machine">one-class support vector machine</NoteLink> flag unfamiliar inputs
+<Cite id="scholkopf2001b" />. Background Check derives both, and the range between them, from one model with an extra
+class.
+
+## Mechanism
+
+**The familiarity factor gives all $k + 1$ probabilities.** Every input belongs either to the foreground or to the
+background, so $p(f \mid \xvec) + p(b \mid \xvec) = 1$. Dividing both terms by $p(b \mid \xvec)$ gives
+$r(\xvec) + 1 = 1 / p(b \mid \xvec)$, which is the formula for $p(b \mid \xvec)$ in the definition, and
+$p(f \mid \xvec) = r / (1 + r)$. Each class $c$ is part of the foreground, so
+$p(c \mid \xvec) = p(c \mid f, \xvec)\, p(f \mid \xvec)$. Any probabilistic classifier trained on the $k$ classes
+supplies $p(c \mid f, \xvec)$, because its training data come from the foreground only. The converse also holds: given
+the $k + 1$ probabilities, $r(\xvec) = \sum_c p(c \mid \xvec) / p(b \mid \xvec)$. Estimating the familiarity factor is
+therefore exactly what has to be added to the classifier.
+
+**Familiarity is a ratio of densities.** With $p(\xvec)$ the density of all inputs, $p(f \mid \xvec) = p(\xvec, f) /
+p(\xvec)$ and $p(b \mid \xvec) = p(\xvec, b) / p(\xvec)$, so $r(\xvec) = p(\xvec, f) / p(\xvec, b)$. Only the ratio
+matters, so both densities can be measured against the same constant, the largest foreground density:
+
+$$
+q_f(\xvec) = \frac{p(\xvec, f)}{\max_{\xvec'} p(\xvec', f)}, \qquad
+q_b(\xvec) = \frac{p(\xvec, b)}{\max_{\xvec'} p(\xvec', f)}, \qquad
+r(\xvec) = \frac{q_f(\xvec)}{q_b(\xvec)}.
+$$
+
+The **relative foreground density** $q_f$ lies in $[0, 1]$ and equals 1 at the densest foreground point. Because
+$p(\xvec, f) = p(f)\, p(\xvec \mid f)$, it equals $p(\xvec \mid f) / \max_{\xvec'} p(\xvec' \mid f)$, which any density
+estimate of the pooled training data provides. The **relative background density** $q_b$ cannot be estimated, since
+there are no background data.
+
+**A background bias supplies the missing density.** Background Check assumes that the background density depends on
+$\xvec$ only through the foreground density, $q_b(\xvec) = \mu(q_f(\xvec))$ for a function
+$\mu : [0, 1] \to [0, \infty)$. Two points with equal foreground density then get equal background density, which is the
+most that can be said without background data. Four biases, from weakest to strongest assumption, are
+<Cite id="perellonieto2016" />:
+
+- **General:** any $\mu$, chosen from domain knowledge.
+- **Monotone:** $\mu$ increasing or decreasing, so the background density has no local peaks of its own.
+- **Affine:** $\mu(z) = (1 - z)\,\mu_0 + z\,\mu_1$, fixed by its two ends. $\mu_0 = \mu(0)$ is the background density
+  where the foreground density vanishes. $\mu_1 = \mu(1)$ is the background density at the densest foreground point.
+  Both are relative to the foreground's peak density.
+- **Constant:** $\mu(z) = \mu_0$ for all $z$, the affine bias with $\mu_0 = \mu_1$.
+
+**One decision rule covers every bias.** The label with the largest of the $k + 1$ probabilities is the background
+when $p(b \mid \xvec) \ge \max_c p(c \mid \xvec)$. Write $m(\xvec) = \max_c p(c \mid f, \xvec)$ for the classifier's
+confidence within the foreground. Multiplying both sides by $1 + r$ turns the condition into $1 \ge r\, m$, and
+substituting $r = q_f / \mu(q_f)$ gives
+
+$$
+\text{predict background} \iff m(\xvec)\, q_f(\xvec) \le \mu\paren{q_f(\xvec)}.
+$$
+
+An input is rejected when its foreground density, discounted by how ambiguous the classes are there, falls below the
+assumed background density. The affine bias spans the special cases.
+
+**Cautious classification: $\mu_0 = 0$.** With $\mu(z) = \theta z$, the familiarity factor is
+$r = q_f / (\theta q_f) = 1/\theta$ everywhere, so $p(f \mid \xvec) = 1 / (1 + \theta)$ for every input
+<Cite id="perellonieto2016" />. The rule becomes $m(\xvec) \le \theta$: reject when the largest class probability is
+at most $\theta$. That is Chow's rule with rejection cost $d = 1 - \theta$. The density plays no part, so a confident
+prediction far from the data is accepted.
+
+**Outlier detection: $\mu_1 = 0$.** With $\mu(z) = \mu_0 (1 - z)$, the background is densest where the foreground is
+absent and vanishes at the foreground's peak. Where the classes do not overlap ($m = 1$) the rule rejects when
+$q_f \le \mu_0 / (1 + \mu_0)$, a threshold on the density, which is what a one-class detector does. Ambiguity between
+classes raises the threshold only where $q_f$ is already low.
+
+**Constant background: $\mu_0 = \mu_1$.** The rule rejects when $m\, q_f \le \mu_0$, on the product of confidence and
+density. Low density and high ambiguity both lead to rejection. Settings between the corners trade the two kinds of
+rejection against each other.
+
+<BackgroundCheckLine />
+
+<BiasSquare />
+
+**Three ways to estimate $q_f$.**
+
+- **Density estimate.** Fit a density model to the pooled training data, such as a
+  <NoteLink to="kernel-density-estimation">kernel density estimate</NoteLink>, and divide by its maximum.
+- **One-class score.** A one-class model scores inputs higher inside the data than outside, but its scores are not
+  densities. A monotone map can make them approximate relative densities. For the one-class support vector machine with
+  score $s(\xvec)$, the authors use the sigmoid $q_f(\xvec) = 1 / (1 + \exp(s^* - s(\xvec)))$, with $s^*$ the lowest
+  score on the training data, so every training point gets $q_f \ge 1/2$ <Cite id="perellonieto2016" />.
+- **Discriminative.** Draw artificial background points uniformly over a box around the data, and train a classifier to
+  separate the data from them. With a uniform density $u$, the classifier's odds of data against background are
+  proportional to $p(\xvec \mid f) / u$, hence to $q_f$ <Cite id="hempstalk2008" />. The authors' discriminative
+  variant uses the classifier's probability $p(f \mid \xvec)$ directly. This fixes a constant bias, set by how many
+  artificial points are drawn; drawing them at half the foreground's peak density gives $\mu = 1/2$.
+
+The first two make up the **familiarity approach** and work with any bias. The discriminative approach needs no density
+model, but the number of artificial points needed to fill a box grows exponentially with the dimension.
+
+<BackgroundCheckPlane />
+
+## Cost
+
+Training costs one $k$-class probabilistic classifier and one estimate of $q_f$: a density model, a one-class model,
+or a binary classifier on the data and $M$ artificial points. Prediction costs one evaluation of each and the closed
+form above. The maximum $\max_{\xvec} p(\xvec \mid f)$ is approximated by the largest estimated density over the
+training points or a grid. A kernel density estimate on $n$ training points costs $O(n)$ per query, and a one-class
+support vector machine costs $O(n^2)$ memory to train on $n$ points.
+
+## Trade-offs
+
+- **The bias is an assumption, not an estimate.** Without background data, $\mu_0$ and $\mu_1$ cannot be fitted. They
+  can be set from a target rejection rate on held-out foreground data, as the authors did for outlier detection
+  <Cite id="perellonieto2016" />, or from the cost of each kind of mistake.
+- **The probabilities are as good as $q_f$.** Density estimates degrade in high dimensions, and the sigmoid map of a
+  one-class score is a heuristic with an arbitrary scale. A poor $q_f$ moves the background boundary but leaves
+  cautious classification ($\mu_0 = 0$) unaffected, since that case does not use $q_f$.
+- **One wrapper, any classifier.** The method needs only $p(c \mid f, \xvec)$ and $q_f$, so it wraps any probabilistic
+  classifier. Per-class one-class detectors need their scores normalised to a common scale before they are compared
+  <Cite id="tax2008" />. Background Check compares probabilities, so it needs no such step.
+- **Results.** On 41 UCI datasets the authors found Background Check comparable to special-purpose multi-class outlier
+  detectors, with no statistically significant difference. Using $p(f \mid \xvec)$ as each member's weight in an
+  ensemble lowered the log-loss on most datasets <Cite id="perellonieto2016" />.
+
+## Worked example
+
+**Same posterior, different familiarity.** Take the two inputs from the Problem section, with equal class priors. Then
+$p(\xvec, f) = \tfrac12 p(\xvec \mid f)$ and $p(\xvec \mid f) = \tfrac12 (0.9 + 0) = 0.45$ at $\xvec_1$ and $0.05$ at
+$\xvec_2$. Suppose $\xvec_1$ is the densest foreground point, so $q_f(\xvec_1) = 1$ and
+$q_f(\xvec_2) = 0.05 / 0.45 = 0.111$. Under the constant bias $\mu = 0.5$:
+
+1. The familiarity factors are $r(\xvec_1) = 1 / 0.5 = 2$ and $r(\xvec_2) = 0.111 / 0.5 = 0.222$.
+2. The foreground probabilities are $p(f \mid \xvec_1) = 2/3 = 0.667$ and $p(f \mid \xvec_2) = 0.222 / 1.222 = 0.182$.
+3. Both inputs have $p(1 \mid f, \xvec) = 1$, so $p(1 \mid \xvec_1) = 0.667$ and $p(1 \mid \xvec_2) = 0.182$.
+4. $\xvec_1$ is predicted as class 1, with $p(b \mid \xvec_1) = 0.333$. $\xvec_2$ is predicted as background, with
+   $p(b \mid \xvec_2) = 0.818$.
+
+**Cautious classification is Chow's rule.** Take three classes with $p(c \mid f, \xvec) = (0.5, 0.3, 0.2)$ and the
+affine bias $\mu_0 = 0$, $\mu_1 = \theta = 0.7$.
+
+1. The familiarity factor is $r = 1/0.7 = 1.43$ for every input, so $p(f \mid \xvec) = 1/1.7 = 0.588$.
+2. The class probabilities are $(0.294, 0.176, 0.118)$ and $p(b \mid \xvec) = 0.7/1.7 = 0.412$.
+3. The background has the largest probability, so the input is rejected. Chow's rule with cost $d = 1 - 0.7 = 0.3$
+   rejects it too, because $\max_c p(c \mid f, \xvec) = 0.5 < 0.7$.

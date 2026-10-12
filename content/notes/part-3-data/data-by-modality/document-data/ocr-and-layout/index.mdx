@@ -2,23 +2,136 @@
 title: 'OCR and layout'
 kind: concept
 summary: 'Optical character recognition turns images of text into text with positions. Recognition errors, layout tokens and forms with key-value pairs shape document models.'
-tags: [data, computer-vision, nlp]
-aliases: []
-requires: []
-related: []
-references: []
-status: stub
-updated: 2026-10-11
+tags: [data, computer-vision, nlp, ocr, document-ai]
+aliases: [optical-character-recognition, document-layout-analysis, 2d-positional-embeddings]
+requires: [document-parsing, digital-images]
+related: [text-fields-in-tables, log-parsing]
+references: [smith2007tesseract, xu2020layoutlm, huang2022layoutlmv3, jaume2019funsd]
+status: draft
+updated: 2026-10-12
 ---
 
+import { OcrAndLayoutVisualizer } from './OcrAndLayoutVisualizer'
+
 <Definition>
-To be written.
+**OCR and layout analysis** is the dual process of recognizing text characters from scanned raster document images and
+extracting their precise 2D bounding box geometries. It produces multimodal token representations that fuse 1D textual
+sequences with 2D spatial coordinates, enabling models to parse semi-structured forms, receipts, and invoices where
+spatial alignment determines semantic meaning.
 </Definition>
+
+Standard language models operate strictly on 1D sequences of tokens, assuming left-to-right grammatical order. In
+visually rich documents (VRDs)—such as purchase orders, tax forms, insurance claims, and hospital admissions
+records—meaning is not conveyed by grammar alone, but by 2D spatial arrangement
+<Cite id="xu2020layoutlm, jaume2019funsd" />. For example, the meaning of a numerical value "$1,450.00" depends entirely
+on whether it aligns horizontally with "Total Due" or "Tax Deductible". Fusing Optical Character Recognition (OCR) with
+2D layout coordinates is the foundation of Document Artificial Intelligence (Document AI).
+
+<OcrAndLayoutVisualizer client:load />
 
 ## Recognition errors
 
+Optical Character Recognition engines (such as Tesseract, Google Cloud Vision, or AWS Textract) convert pixel bitmaps
+into character strings and bounding box coordinates <Cite id="smith2007tesseract" />.
+
+OCR transcription fidelity is evaluated via string edit distance metrics:
+- **Character Error Rate (CER)**: Levenshtein distance at the character level normalized by ground-truth character count
+  $N_c$:
+  $$
+  \operatorname{CER} = \frac{S_c + D_c + I_c}{N_c}
+  $$
+  Where $S_c$ is character substitutions, $D_c$ is deletions, and $I_c$ is insertions.
+- **Word Error Rate (WER)**: Levenshtein distance computed over space-delimited words:
+  $$
+  \operatorname{WER} = \frac{S_w + D_w + I_w}{N_w}
+  $$
+
+Because an entire word is judged incorrect if even a single constituent character is mistranscribed, Word Error Rate
+scales non-linearly with word length $L$:
+
+$$
+\operatorname{WER} \approx 1 - (1 - \operatorname{CER})^L
+$$
+
+For an average English word length of $L = 5$ characters, a modest $\operatorname{CER} = 5\%$ results in
+$\operatorname{WER} \approx 22.6\%$.
+
+Beyond basic word error rates, OCR errors induce **subword tokenization explosion**:
+1. **Visual Glyph Confusions**: OCR models frequently confuse optically similar glyphs under scan blur or low DPI: `'O'`
+   vs. `'0'`, `'l'` vs. `'1'` vs. `'I'`, `'rn'` vs. `'m'`, and `'vv'` vs. `'w'`.
+2. **Subword Fragmentation**: When an OCR engine transcribes `"invoice"` as `"invo1ce"`, standard Byte-Pair Encoding
+   (BPE) or WordPiece tokenizers fail to recognize the dictionary word. Instead of mapping to a single common token
+   (`["invoice"]`), the misspelled string is fragmented into rare subwords (`["in", "##vo", "##1", "##ce"]`), increasing
+   sequence length and degrading dense embedding representations.
+
 ## Layout tokens
+
+To enable transformers to reason over 2D document space, the **LayoutLM** framework augments traditional 1D sequence
+position embeddings with 2D spatial coordinate embeddings <Cite id="xu2020layoutlm, huang2022layoutlmv3" />.
+
+Each recognized text token $w_i$ is bounded by a 2D spatial bounding box:
+
+$$
+\mathbf{b}_i = [x_{0,i}, \, y_{0,i}, \, x_{1,i}, \, y_{1,i}]
+$$
+
+Where $(x_0, y_0)$ is the top-left coordinate and $(x_1, y_1)$ is the bottom-right coordinate. To make representations
+invariant to varying image DPI and pixel dimensions $(W, H)$, coordinates are normalized onto a discrete integer grid
+$[0, 1000]$:
+
+$$
+x_{0,i}^* = \operatorname{round}\left( \frac{x_{0,i}}{W} \times 1000 \right), \quad y_{0,i}^* = \operatorname{round}\left( \frac{y_{0,i}}{H} \times 1000 \right)
+$$
+
+$$
+x_{1,i}^* = \operatorname{round}\left( \frac{x_{1,i}}{W} \times 1000 \right), \quad y_{1,i}^* = \operatorname{round}\left( \frac{y_{1,i}}{H} \times 1000 \right)
+$$
+
+The input representation $\mathbf{h}_i$ for token $i$ is constructed by summing multiple embedding layers:
+
+$$
+\mathbf{h}_i = \mathbf{e}_{\text{tok}}(w_i) + \mathbf{e}_{\text{pos}}^{1\text{D}}(i) + \mathbf{e}_x(x_{0,i}^*) + \mathbf{e}_y(y_{0,i}^*) + \mathbf{e}_x(x_{1,i}^*) + \mathbf{e}_y(y_{1,i}^*) + \mathbf{e}_{\text{vis}}(\mathbf{v}_i)
+$$
+
+Where $\mathbf{e}_x$ and $\mathbf{e}_y$ are learned 2D coordinate embedding tables (size $1000 \times d$), and
+$\mathbf{v}_i$ represents a visual patch feature extracted from a convolutional backbone or vision transformer
+<Cite id="huang2022layoutlmv3" />. The 2D embeddings allow self-attention heads to compute spatial distance penalties
+directly, capturing horizontal and vertical alignment across wide white-space margins.
 
 ## Forms and key-value pairs
 
+Form understanding benchmarks (such as FUNSD and CORD) frame document parsing as two coupled prediction tasks
+<Cite id="jaume2019funsd" />:
+
+1. **Semantic Entity Extraction (Sequence Labeling)**: Each token or bounding box is classified into semantic roles:
+   - `Header`: Section headings and form categories (e.g., `"Billing Information"`).
+   - `Question (Key)`: Attribute prompts (e.g., `"Invoice Date:"`, `"Account #:"`).
+   - `Answer (Value)`: The factual data content (e.g., `"2026-10-12"`, `"948-201-44"`).
+2. **Entity Linking (Relation Extraction)**: Predicting directed relation edges between question keys and answer values:
+   $$
+   \mathcal{E} = \left\{ (q_i, \, a_j) : q_i \in \mathcal{Q}, \, a_j \in \mathcal{A} \right\}
+   $$
+
+While naive rule-based parsers rely on Euclidean nearest-neighbor heuristics (linking a key to the closest text block to
+its right or below), real-world layouts violate simple proximity:
+- Multi-column forms place values directly below keys in Column 1, while placing values to the right of keys in Column 2.
+- Wide horizontal separator rules and dotted lines span hundreds of pixels, separating keys and values by large physical
+  gaps. Multimodal transformers (LayoutLMv3) resolve these ambiguities by learning spatial relative position biases
+  alongside semantic cross-attention <Cite id="huang2022layoutlmv3" />.
+
 ## Pitfalls
+
+1. **Skew and Rotation Distortion**: Documents photographed via mobile devices or fed crookedly into flatbed scanners
+   carry rotational skew $\theta \in [-15^\circ, +15^\circ]$. Applying axis-aligned bounding box extractors without
+   prior Hough transform deskewing yields overlapping, distorted bounding boxes that corrupt 2D coordinate embeddings.
+2. **Multi-Page Coordinate Flattening**: When processing multi-page contracts, naive normalization maps each page's
+   coordinates independently into $[0, 1000]$. A token at the top of Page 2 receives identical coordinates to a token at
+   the top of Page 1. Models require explicit page index embeddings $\mathbf{e}_{\text{page}}(p_i)$ to prevent
+   cross-page spatial collisions.
+3. **Cascading OCR Hallucinations**: In low-light mobile receipt photos, OCR engines hallucinate decimal points
+   (`100.00` recognized as `10000` or `10.000`), injecting orders-of-magnitude financial errors into automated
+   accounting pipelines. High-stakes pipelines require confidence scoring and checksum validation (e.g., verifying that
+   itemized sub-totals sum to total payments).
+4. **Ignoring Reading Order in Pre-trained Tokenizers**: Feeding OCR tokens sorted purely by vertical Y-coordinate into
+   transformer models causes severe token scrambling across multi-column forms. Always sort tokens using layout-aware
+   reading order heuristics (XY-Cut) prior to sequence serialization.

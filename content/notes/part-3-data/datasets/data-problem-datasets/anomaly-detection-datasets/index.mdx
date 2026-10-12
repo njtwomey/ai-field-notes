@@ -1,0 +1,135 @@
+---
+title: 'Anomaly detection datasets'
+kind: concept
+summary: 'Anomaly detection datasets—including ADBench, MVTec AD, VisA, ODDS, and Credit Card Fraud—benchmark unsupervised and semi-supervised out-of-distribution discovery across tabular logs, high-resolution industrial inspection, and multivariate sensor streams.'
+tags: [data, datasets, anomaly-detection, out-of-distribution]
+aliases: [anomaly-detection-benchmarks, mvtec-ad, visa-dataset, adbench, odds-benchmark]
+requires: []
+related: [evaluating-anomaly-detectors, out-of-distribution-test-sets]
+references: [bergmann2019, zou2022visa, han2022adbench, chandola2009]
+status: draft
+updated: 2026-10-12
+---
+
+<Definition>
+**Anomaly detection datasets** are benchmark corpora specifically curated to evaluate algorithms in identifying patterns
+that do not conform to expected nominal behavior, $P(X \mid Y = \text{nominal})$. Because anomalous events are
+inherently rare, polymorphic, and often unobserved during training, these benchmarks formalize unsupervised,
+semi-supervised (one-class classification), and weakly supervised out-of-distribution detection across tabular records,
+industrial imaging, and time series <Cite id="chandola2009, bergmann2019" />.
+</Definition>
+
+Unlike standard balanced classification benchmarks where classes share comparable support, anomaly detection benchmarks
+evaluate algorithms under severe class imbalance (often $< 1\%$ anomaly contamination) and open-world novelty, where
+test anomalies exhibit structural faults never encountered during training.
+
+---
+
+## What These Datasets Measure
+
+Anomaly detection benchmarks formalize distinct operational regimes and evaluation settings
+<Cite id="han2022adbench" />:
+
+1. **Unsupervised Anomaly Detection (UAD)**: The training partition contains unlabelled data with an unknown
+   contamination rate $\gamma = P(Y = \text{anomaly}) \in [0, 0.1]$. Models must estimate density or reconstruct
+   patterns without positive labels.
+2. **Semi-Supervised / One-Class Classification (OCC)**: The training partition consists strictly of nominal (clean)
+   samples ($Y = 0$). Test sets introduce unseen physical defects, structural anomalies, or out-of-distribution
+   instances ($Y = 1$).
+3. **Pixel-Level vs Sample-Level Detection**: In vision benchmarks (e.g. MVTec AD, VisA), models must not only output an
+   image-level anomaly score $s(X) \in \mathbb{R}$, but also produce pixel-accurate segmentation masks localizing
+   scratches, contaminations, or missing subcomponents <Cite id="bergmann2019, zou2022visa" />.
+4. **Primary Evaluation Metrics**: Because threshold selection depends on operational false-positive tolerance,
+   benchmarks evaluate threshold-free rankings using **ROC-AUC** (Area Under the Receiver Operating Characteristic),
+   **PR-AUC** (Precision-Recall AUC), and **PRO** (Per-Region Overlap for pixel localization).
+
+---
+
+## Catalogue of Canonical Anomaly Detection Benchmarks
+
+| Benchmark Suite | Modality / Scale | Nominal vs Anomaly Ratio | Defect Types | Primary Metrics | Canonical Reference |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| **MVTec AD** | 5,354 high-res images (15 categories) | One-class training (clean); 73 defect types in test | Scratches, dents, cracks, holes, stains | Image-AUC, Pixel-AUC, PRO-AUC | Bergmann et al. <Cite id="bergmann2019" /> |
+| **VisA (Visual Anomaly)** | 10,821 images (12 categories) | Complex multi-part objects and structures | Misplacement, missing parts, surface scratches | Image-AUC, Pixel-AUC, PRO-AUC | Zou et al. <Cite id="zou2022visa" /> |
+| **ADBench** | 57 tabular datasets (classical + CV/NLP) | Contamination sweeps ($\gamma \in [0.01, 0.2]$) | Point, contextual, and cluster anomalies | ROC-AUC, PR-AUC | Han et al. <Cite id="han2022adbench" /> |
+| **ODDS (Outlier Detection DataSets)** | 30+ tabular datasets (Arrhythmia, Thyroid, etc.) | Real-world imbalanced ratios ($0.1\% \text{--} 30\%$) | Multi-domain tabular sensor and clinical outliers | ROC-AUC, Precision@K | Rayana (2016) |
+| **KDD Cup 99 / NSL-KDD** | 4.9M connection vectors | Network intrusion attempts (DoS, R2L, U2R, Probe) | Malicious connection signatures vs normal traffic | F1-Score, Detection Rate | Stolfo et al. (2000) |
+| **Credit Card Fraud** | 284,807 transactions (PCA features) | 492 fraud cases ($0.172\%$ minority class) | Fraudulent financial transactions | PR-AUC, Average Precision | Dal Pozzolo et al. (2015) |
+
+---
+
+## Detailed Benchmark Profiles
+
+### MVTec AD: Industrial Vision Benchmark (2019)
+
+Introduced by Bergmann et al. <Cite id="bergmann2019" />, MVTec AD is the standard benchmark for unsupervised visual
+anomaly detection and defect localization:
+- **Structure**: Covers 5 texture categories (*carpet*, *grid*, *leather*, *tile*, *wood*) and 10 object categories
+  (*bottle*, *cable*, *capsule*, *hazelnut*, *metal nut*, *pill*, *screw*, *toothbrush*, *transistor*, *zipper*).
+- **Protocol**: Models train purely on defect-free nominal images ($3{,}629$ training images). The test set ($1{,}725$
+  images) includes both defect-free samples and defective samples across 73 real physical fault classes.
+- **Pixel Ground Truth**: Comprehensive pixel-level binary masks accompany every anomalous test sample, enabling exact
+  evaluation of localization metrics:
+  $$
+  \text{PRO} = \frac{1}{K} \sum_{k=1}^K \frac{|R_k \cap M|}{|R_k|}
+  $$
+  where $R_k$ represents individual connected ground-truth defect regions and $M$ is the thresholded prediction mask.
+
+### VisA: Visual Anomaly in Multi-Part Objects (2022)
+
+Developed by Zou et al. <Cite id="zou2022visa" />, VisA expands industrial visual anomaly detection to complex objects
+with multiple components:
+- **Scale**: 10,821 high-resolution images across 12 industrial objects divided into three structural categories:
+  complex structures (*printed circuit boards*), multiple object clusters (*capsules*, *macaroni*, *screws*), and single
+  objects (*cashews*, *chewing gum*).
+- **Challenge**: In multi-object or multi-part settings, anomaly detectors cannot simply model global feature averages;
+  they must reason about relative spatial layouts, component counts, and assembly integrity.
+
+### ADBench: Comprehensive Tabular Benchmark (2022)
+
+Curated by Han et al. <Cite id="han2022adbench" />, ADBench establishes a standardized evaluation across 57 tabular
+datasets:
+- **Data Collections**: Aggregates classical tabular datasets (from medicine, finance, and physics), NLP tabular
+  embeddings, and vision tabular embeddings.
+- **Controlled Noise Sweeps**: Systematically injects varying anomaly contamination levels
+  $\gamma \in \{1\%, 5\%, 10\%, 20\%\}$, irrelevant noise features, and semantic concept shifts.
+- **Benchmarked Families**: Evaluates 14 algorithmic paradigms, revealing that ensemble tree methods (Isolation Forest,
+  XGBOD) and deep reconstruction models exhibit starkly different trade-offs depending on feature dimensionality and
+  contamination rate.
+
+### Credit Card Fraud Detection: Real-World Transaction Imbalance
+
+The ULB Machine Learning Group benchmark provides 284,807 real European credit card transactions from September 2013:
+- **Severe Imbalance**: Contains exactly 492 fraud cases ($0.172\%$).
+- **Privacy Transformation**: 28 numerical features resulting from Principal Component Analysis (PCA) due to
+  confidentiality constraints, along with raw *Time* and transaction *Amount*.
+- **Evaluation Discipline**: Standard ROC-AUC can yield deceptively optimistic scores ($> 0.98$) due to the overwhelming
+  nominal majority; PR-AUC and cost-sensitive business metrics are mandatory for realistic evaluation.
+
+---
+
+## Choosing an Anomaly Detection Dataset
+
+- **High-Resolution Visual Inspection & Localization**:
+  - *Single objects and continuous textures*: MVTec AD
+  - *Multi-part assemblies, components, & counts*: VisA
+- **Tabular Outlier Discovery & Benchmarking**:
+  - *Systematic benchmark across 57 datasets*: ADBench
+  - *Classical medical / sensor point anomalies*: ODDS (Arrhythmia, Thyroid)
+- **Financial & Transactional Fraud**:
+  - *High-imbalance transaction streams*: Credit Card Fraud
+
+---
+
+## Known Problems and Benchmark Pitfalls
+
+1. **Synthetic Tabular Inversion**: Many historical tabular outlier benchmarks (including partitions in ODDS) were
+   synthesized by downsampling a minority class from a standard classification task (e.g. downsampling class 9 in
+   MNIST). Downsampled semantic classes do not exhibit the localized density support or feature distributions typical of
+   real operational anomalies <Cite id="han2022adbench" />.
+2. **Deceptive ROC-AUC Scores**: In extreme imbalance ($< 0.1\%$ anomalies), a high false-positive rate can still yield
+   an ROC-AUC above $0.95$ because the false positive rate denominator includes millions of true negatives. PR-AUC and
+   precision at top-$k$ recall must be reported.
+3. **Alignment and Camera Rigidity in Visual Benchmarks**: MVTec AD images are captured in controlled, perfectly
+   registered industrial settings with fixed camera angles and lighting. Algorithms relying on rigid spatial coordinates
+   often fail in real production lines where parts undergo rotation and translation.

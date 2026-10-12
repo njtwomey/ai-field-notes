@@ -2,27 +2,147 @@
 title: 'Near-duplicate detection'
 kind: concept
 summary: 'Near-duplicates are records that differ only slightly. MinHash and SimHash for text and sets, perceptual hashes for images and embedding neighbours for any modality find them at scale, including across train and test splits.'
-tags: [data, similarity-search]
-aliases: []
+tags: [data, similarity-search, hashing]
+aliases: [near-duplicate removal, near-duplicate search]
 requires: []
-related: [locality-sensitive-hashing, character-n-grams-and-shingles]
-references: []
-status: stub
+related: [locality-sensitive-hashing, character-n-grams-and-shingles, data-leakage, deduplication-and-record-linkage]
+references: [broder1997, charikar2002, lee2022dedup, penedo2023, penedo2024]
+status: draft
 updated: 2026-10-11
 ---
 
+import { NearDuplicateExplorer } from './NearDuplicateExplorer'
+
 <Definition>
-To be written.
+A **near-duplicate pair** consists of two distinct records $x_i$ and $x_j$ whose distance under a domain-specific metric
+$d(x_i, x_j)$ falls below a threshold $\epsilon$, or whose similarity $s(x_i, x_j)$ exceeds a threshold
+$\tau \in [0, 1]$. In text, similarity is commonly the Jaccard similarity of $k$-shingle sets or the cosine similarity
+of term vectors. In images, it is the Hamming distance between perceptual hash bits.
 </Definition>
+
+Exact duplicates share an identical byte representation and collapse into buckets via standard cryptographic hashing
+such as SHA-256. Near-duplicates differ by small mutations: minor typographical edits, reformatted templates, reordered
+sentences, watermarks or slight image crops. Comparing every record pair directly requires $\mathcal{O}(N^2)$
+comparisons, which becomes impossible on web-scale collections of millions or billions of documents. Scalable
+near-duplicate detection maps high-dimensional records into compact sketches where similar items collide with high
+probability.
+
+<NearDuplicateExplorer />
 
 ## MinHash
 
+MinHash maps an arbitrary set of tokens or $k$-shingles to an integer signature of fixed length $K$
+<Cite id="broder1997" />. Let $S(A)$ and $S(B)$ denote the sets of $k$-shingles extracted from documents $A$ and $B$.
+The resemblance between the two documents is the Jaccard index:
+
+$$
+J(A, B) = \frac{\abs{S(A) \cap S(B)}}{\abs{S(A) \cup S(B)}}
+$$
+
+Let $\pi$ be a random permutation of the universe of all possible shingles. The MinHash function $h_\pi(S)$ returns the
+smallest shingle index under $\pi$:
+
+$$
+h_\pi(S) = \min_{s \in S} \pi(s)
+$$
+
+Because every shingle in the union $S(A) \cup S(B)$ is equally likely to achieve the minimum value under $\pi$, the
+probability that the two minima agree equals the exact Jaccard similarity:
+
+$$
+P\bigl[h_\pi(S(A)) = h_\pi(S(B))\bigr] = J(A, B)
+$$
+
+Evaluating $K$ independent hash permutations produces a signature vector $\mathbf{h}(S) \in \mathbb{N}^K$. The fraction
+of matching components provides an unbiased estimator $\hat{J}(A, B)$ of the true Jaccard similarity, with variance
+bounded by $J(1 - J)/K$.
+
+To avoid all-pairs comparison of signatures, <Gloss name="lsh">locality-sensitive hashing</Gloss> partitions each
+$K$-element signature into $b$ bands of $r$ rows, where $K = b \times r$. Two documents become candidate duplicates if
+their signatures match identically in at least one band. The probability that two documents with similarity $s$ become
+candidates follows an S-curve:
+
+$$
+P\bigl[\text{candidate}\bigr] = 1 - \bigl(1 - s^r\bigr)^b
+$$
+
+Tuning the band parameters $b$ and $r$ sets the transition threshold $\tau \approx (1/b)^{1/r}$ where candidate
+probability rises steeply from zero to one. Web-scale <Gloss name="language-model">language model</Gloss> corpora such
+as RefinedWeb <Cite id="penedo2023" /> and FineWeb <Cite id="penedo2024" /> apply MinHash with $k=5$ word shingles to
+remove duplicate pages across Common Crawl snapshots.
+
 ## SimHash
+
+SimHash constructs a compact $B$-bit fingerprint for a document such that the Hamming distance between fingerprints is
+proportional to the cosine angle between their weighted token vectors <Cite id="charikar2002" />.
+
+Given a document represented by feature tokens $t_1, \dots, t_m$ with positive weights $w_1, \dots, w_m$:
+
+1. Initialise an accumulator vector $\mathbf{v} \in \mathbb{R}^B$ with zeros.
+2. For each token $t_i$, compute a standard $B$-bit hash $h(t_i) \in \{0, 1\}^B$.
+3. For each bit position $j \in \{1, \dots, B\}$, add $w_i$ to $v_j$ if bit $j$ of $h(t_i)$ is 1, and subtract $w_i$ if
+   bit $j$ is 0.
+4. Set the final fingerprint bit $f_j = 1$ if $v_j > 0$, and $f_j = 0$ otherwise.
+
+For two documents with angle $\theta$ between their term vectors, the probability that any single fingerprint bit
+matches is:
+
+$$
+P\bigl[f_j(A) = f_j(B)\bigr] = 1 - \frac{\theta}{\pi}
+$$
+
+The expected fraction of matching bits directly reflects cosine similarity. Two documents are classified as
+near-duplicates if their Hamming distance falls below a small threshold, typically 3 bits for a 64-bit fingerprint.
+Searching for matching fingerprints within Hamming radius $d$ runs in constant time by partitioning the 64 bits into
+$d + 1$ blocks and indexing each block in a hash table.
 
 ## Perceptual hashes
 
+In computer vision, cryptographic hashes fail because altering a single pixel flips roughly half the output bits.
+Perceptual image hashes preserve visual similarity across lossy JPEG compression, resizing, brightness adjustments and
+slight color shifts.
+
+- **Average hash (aHash):** Resizes the image to an $8 \times 8$ grayscale thumbnail, computes the mean luminance, and
+  assigns a 1 or 0 to each of the 64 pixels depending on whether it exceeds the mean.
+- **Difference hash (dHash):** Compares adjacent horizontal pixels in an $8 \times 9$ thumbnail, setting each bit based
+  on whether pixel $p(x, y) < p(x+1, y)$.
+- **<Gloss name="dct" /> hash (pHash):** Applies a two-dimensional Discrete Cosine Transform to a $32 \times 32$ image,
+  retains the low-frequency $8 \times 8$ coefficient block, and sets bits relative to the median AC coefficient.
+
+Two images with perceptual hash Hamming distance below a small threshold (such as $\le 10$ out of 64 bits) represent
+near-duplicate graphics, rescaled thumbnails or re-encoded uploads.
+
 ## Embedding neighbours
+
+For complex semantics, multimodal data and graph nodes, near-duplicates are defined as nearest neighbours in a dense
+learned embedding space. A frozen encoder maps each record $x$ to a unit vector $\mathbf{z} = f(x) \in \mathbb{R}^d$.
+
+Candidate near-duplicates satisfy cosine similarity $\mathbf{z}_i^\top \mathbf{z}_j \ge \tau$. Approximate nearest
+neighbour indexes, such as <Gloss name="hnsw">Hierarchical Navigable Small World (HNSW)</Gloss> graphs or Inverted File
+with <Gloss name="product-quantisation">Product Quantisation</Gloss> (IVF-PQ), retrieve matching candidates across
+billions of records in sub-linear time.
 
 ## Duplicates across splits
 
+Near-duplicates between training and evaluation splits represent a severe form of <NoteLink to="data-leakage">data
+leakage</NoteLink>. When a benchmark contains questions, passages or images identical or nearly identical to items in
+the training corpus:
+
+1. **Inflated test metrics:** The model reproduces memorised training examples rather than generalising to unseen
+   patterns <Cite id="lee2022dedup" />.
+2. **False scaling laws:** Evaluated models appear to solve complex reasoning tasks while simply retrieving memorised
+   substrings.
+3. **Contamination audits:** Production pipelines run cross-split near-duplicate audits by building a MinHash or
+   embedding index on the <NoteLink to="train-validation-and-test-splits">validation set</NoteLink> and probing the
+   entire pretraining corpus.
+
 ## Pitfalls
+
+- **Choice of shingle length $k$:** Setting $k$ too small (such as $k=1$ word) causes unrelated documents sharing common
+  vocabulary to collide. Setting $k$ too large (such as $k=20$) allows a single inserted sentence or changed typo to
+  break all spanning shingles.
+- **Boilerplate dominance:** Common headers, navigation bars, cookie banners and legal disclaimers create high shingle
+  overlap between otherwise unrelated web pages. Text cleaning and boilerplate removal must precede deduplication.
+- **Transitivity failures:** Near-duplication is not transitive: document $A$ can be similar to $B$, and $B$ to $C$,
+  while $A$ and $C$ fall below the threshold. Greedy connected-component clustering can merge distinct documents into
+  oversized equivalence classes.

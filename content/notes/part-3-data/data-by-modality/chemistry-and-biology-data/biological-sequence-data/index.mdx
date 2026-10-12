@@ -1,28 +1,202 @@
 ---
 title: 'Biological sequence data'
 kind: concept
-summary: 'DNA, RNA and protein sequences are represented as strings, k-mer counts, alignments or learned embeddings, and split by sequence identity so that test sequences are not near copies of training ones.'
-tags: [data]
-aliases: []
-requires: []
-related: []
-references: []
-status: stub
-updated: 2026-10-11
+summary: 'DNA, RNA, and proteins are represented as discrete strings, k-mer count histograms, dynamic programming alignments, or learned language model embeddings, requiring strict sequence identity clustering to prevent evolutionary homology leakage.'
+tags: [data, genomics, bioinformatics, representations]
+aliases: [protein-sequences, dna-sequences, kmers, blosum62, blast, sequence-embeddings, homology-splits]
+requires: [molecular-representations]
+related: [scaffold-and-similarity-splits, graph-features]
+references: [altschul1990, henikoff1992, rives2021, jumper2021]
+status: draft
+updated: 2026-10-12
 ---
 
+import { BiologicalSequenceDataVisualizer } from './BiologicalSequenceDataVisualizer'
+
 <Definition>
-To be written.
+**Biological sequence data** encompasses linear polymers of discrete biochemical building blocks—nucleic acids (DNA,
+RNA) and polypeptides (proteins)—formalised as ordered strings $s = (s_1, s_2, \dots, s_L) \in \Sigma^*$ over structured
+biological alphabets $\Sigma$. They are represented for machine learning via one-hot character encodings, continuous
+$k$-mer frequency maps $\boldsymbol{\phi}_k(s) \in \mathbb{R}^{|\Sigma|^k}$, alignment substitution profiles, or
+evolutionary scale neural embeddings trained via self-supervised masked language modelling <Cite id="rives2021" />.
 </Definition>
 
-## Sequences as strings
+Unlike synthetic human language, biological sequences arise from billions of years of shared evolutionary descent.
+Consequently, statistical independence assumptions
+$\mathcal{D}_{\text{train}} \perp\!\!\!\perp \mathcal{D}_{\text{test}}$ are violently violated if data splits ignore
+phylogenetic homology, leading to drastic performance overestimation unless strict sequence identity clustering
+thresholds are enforced <Cite id="altschul1990" />.
 
-## k-mers
+<BiologicalSequenceDataVisualizer client:load />
 
-## Alignments
+## Sequences as Strings and Standard Formats
 
-## Learned embeddings
+Biological sequences are serialized in standardized string formats:
+- **DNA Alphabet**: $\Sigma_{\text{DNA}} = \{\text{A, C, G, T}\}$ (adenine, cytosine, guanine, thymine), along with
+  IUPAC ambiguity codes (`N` for any nucleotide, `R` for purine A/G, `Y` for pyrimidine C/T).
+- **RNA Alphabet**: $\Sigma_{\text{RNA}} = \{\text{A, C, G, U}\}$ (uracil replacing thymine).
+- **Protein Alphabet**: $\Sigma_{\text{protein}}$ comprises the 20 standard canonical $\alpha$-amino acids (e.g. `A`
+  alanine, `C` cysteine, `W` tryptophan), plus rare non-standard residues (`U` selenocysteine, `O` pyrrolysine) and
+  ambiguity tokens (`X` unknown, `B` Asp/Asn, `Z` Glu/Gln).
 
-## Splits by sequence identity
+The universal exchange standard is the **FASTA format**, comprising a header line starting with `>` followed by raw
+string lines. Sequences vary in length from short microRNAs ($L \approx 22$) to median enzymes ($L \approx 350$) and
+giant structural proteins such as human titin ($L \approx 34{,}350$ amino acids).
+
+---
+
+## k-mers and Spectrum Kernels
+
+A classical alignment-free featurisation decomposes a sequence $s$ of length $L$ into overlapping substrings of fixed
+length $k$, called **$k$-mers** <Cite id="henikoff1992" />.
+
+### Count Vectors and Vocabulary Dimension
+
+Let $\Sigma^k$ be the set of all possible $k$-letter words, of size $|\Sigma|^k$. The bag-of-$k$-mers feature map
+$\boldsymbol{\phi}_k(s) \in \mathbb{R}^{|\Sigma|^k}$ maps $s$ to the histogram of subword occurrences:
+
+$$
+\phi_{k, u}(s) = \sum_{i=1}^{L - k + 1} \mathbb{I}[s[i : i + k] = u], \quad \forall u \in \Sigma^k
+$$
+
+The vocabulary space scales exponentially:
+- For DNA ($|\Sigma| = 4$): $k=6 \implies 4^6 = 4{,}096$ dimensions; $k=12 \implies 4^{12} \approx 1.67 \times 10^7$
+  dimensions.
+- For proteins ($|\Sigma| = 20$): $k=3 \implies 20^3 = 8{,}000$ dimensions; $k=5 \implies 20^5 = 3.2 \times 10^6$
+  dimensions.
+
+For single-sequence inputs where $L \ll |\Sigma|^k$, the resulting vector $\boldsymbol{\phi}_k(s)$ is extraordinarily
+sparse. In double-stranded DNA modeling, because reverse strands are transcribed equivalently, **canonical $k$-mers**
+merge each word $u$ with its reverse complement $\bar{u}$, choosing $\min(u, \bar{u})$ lexicographically and nearly
+halving feature dimensionality.
+
+### Spectrum and Mismatch Kernels
+
+The **spectrum kernel** measures similarity between two sequences as the dot product of their $k$-mer counts:
+
+$$
+K_k(s, s') = \langle \boldsymbol{\phi}_k(s), \boldsymbol{\phi}_k(s') \rangle = \sum_{u \in \Sigma^k} \phi_{k, u}(s) \phi_{k, u}(s')
+$$
+
+To accommodate single-point mutations without discarding count matches, the **$(k, m)$-mismatch kernel** allows up to
+$m$ substitution errors when matching substrings, computable in $O(c_{k, m} (|s| + |s'|))$ using suffix trees.
+
+---
+
+## Alignments and Substitution Matrices
+
+Dynamic programming alignments quantify evolutionary distances and detect conserved functional motifs
+<Cite id="altschul1990" />.
+
+### Dynamic Programming Alignments
+
+Given two sequences $s_1 \in \Sigma^{L_1}$ and $s_2 \in \Sigma^{L_2}$:
+- **Global Alignment (Needleman-Wunsch)**: Finds the maximum score aligning full sequences from start to end by
+  recurrence:
+  $$
+  M(i, j) = \max \begin{cases}
+  M(i-1, j-1) + S(s_1[i], s_2[j]) \\
+  M(i-1, j) - d \\
+  M(i, j-1) - d
+  \end{cases}
+  $$
+- **Local Alignment (Smith-Waterman)**: Detects conserved local motifs within divergent flanking regions by flooring
+  scores at zero:
+  $$
+  H(i, j) = \max \begin{cases}
+  0 \\
+  H(i-1, j-1) + S(s_1[i], s_2[j]) \\
+  H(i-1, j) - d \\
+  H(i, j-1) - d
+  \end{cases}
+  $$
+
+To penalize contiguous insertion/deletion events realistically, standard pipelines adopt **affine gap penalties**
+$\gamma(g) = -d - (g - 1)e$, where gap opening penalty $d$ exceeds gap extension penalty $e$.
+
+### Substitution Matrices: PAM and BLOSUM
+
+The substitution matrix $S(a, b)$ scores replacing amino acid $a$ with $b$. In the **BLOSUM62** matrix
+<Cite id="henikoff1992" />, scores are log-odds ratios derived from conserved sequence blocks clustered at $62\%$
+identity:
+
+$$
+S(a, b) = \frac{1}{\lambda} \log_2 \left( \frac{q_{ab}}{p_a p_b} \right)
+$$
+
+where $q_{ab}$ is the observed target frequency of pair $(a, b)$ in aligned blocks, $p_a$ and $p_b$ are background
+frequencies, and $\lambda$ is a scaling factor ($\lambda \approx 0.347$). Conservative mutations between chemically
+similar hydrophobic residues (e.g., Leucine $\leftrightarrow$ Isoleucine) receive positive scores
+($S(\text{L}, \text{I}) = +2$), whereas radical charge/size mutations receive severe penalties
+($S(\text{W}, \text{D}) = -4$).
+
+Fast heuristic search tools like **BLAST** <Cite id="altschul1990" /> bypass exhaustive $O(L_1 L_2)$ dynamic programming
+by indexing short seed words (length 3 for proteins, 11 for DNA) and extending high-scoring segment pairs (HSPs).
+
+---
+
+## Learned Embeddings (Protein Language Models)
+
+Scaling self-supervised masked language modelling to hundreds of millions of evolutionary sequences has yielded
+foundation models for biology, most notably ESM (Evolutionary Scale Modeling) <Cite id="rives2021" /> and AlphaFold
+<Cite id="jumper2021" />.
+
+$$
+\mathbf{s} \in \Sigma^L \xrightarrow{\text{Transformer Encoder}} \mathbf{H} \in \mathbb{R}^{L \times d} \longrightarrow \begin{cases}
+\hat{s}_i & \text{(Masked amino acid prediction)} \\
+\hat{\mathbf{C}} \in [0, 1]^{L \times L} & \text{(Residue contact map via symmetrized attention)}
+\end{cases}
+$$
+
+Trained across millions of unaligned sequences from UniRef50 using the masked language modeling objective:
+
+$$
+\mathcal{L}_{\text{MLM}} = -\sum_{i \in \mathcal{M}} \log P\left(s_i \mid s_{\setminus \mathcal{M}}\right)
+$$
+
+ESM-2 learns internal representations where:
+1. **Per-residue embeddings** $\mathbf{h}_i \in \mathbb{R}^d$ capture local secondary structure (alpha-helices,
+   beta-sheets) and solvent accessibility.
+2. **Attention maps** $\mathbf{A}_{ij} \in \mathbb{R}$ between residues directly mirror spatial physical contact in 3D
+   folded structures: residues that are distant in primary sequence but close in 3D tertiary space exhibit correlated
+   attention heads <Cite id="rives2021, jumper2021" />.
+
+---
+
+## Splits by Sequence Identity
+
+Splitting biological sequence data randomly between train and test sets leads to massive data leakage due to
+evolutionary shared ancestry <Cite id="altschul1990" />.
+
+### Percent Sequence Identity (PID)
+
+For an alignment between sequences $s_1$ and $s_2$:
+
+$$
+\text{PID}(s_1, s_2) = \frac{N_{\text{identical}}}{\min(L_1, L_2)} \times 100\%
+$$
+
+If training and test sets contain pairs with $\text{PID} > 30\%$, neural networks can achieve over $95\%$ accuracy on
+functional annotation by simply memorising homology clusters rather than learning genuine sequence-structure-function
+biophysics.
+
+### Cluster-Based Homology Splitting
+
+Rigorous evaluation pipelines (e.g. CASP, DeepLoc, UniProt benchmarks) cluster sequences prior to partitioning using
+tools like **MMseqs2** or **CD-HIT**:
+1. Cluster all sequences into connected components such that no two sequences in different clusters share pairwise
+   identity above a strict cutoff $\tau_{\text{id}}$ (typically $\tau_{\text{id}} = 30\%$ for proteins).
+2. Partition whole clusters into train, validation, and test splits.
+3. Test evaluation strictly reflects generalization to novel evolutionary superfamilies beyond the **twilight zone**
+   ($\text{PID} \le 25\%$), where sequences diverge beyond straightforward alignment recognition.
+
+---
 
 ## Pitfalls
+
+1. **Paralog and Ortholog Contamination**: Splitting genes by species while allowing paralogs (genes duplicated within
+   the same genome) to cross split boundaries leaks biochemical function across sets.
+2. **Ignoring Post-Translational Modifications (PTMs)**: Raw FASTA sequences omit crucial enzymatic modifications (e.g.,
+   phosphorylation of Ser/Thr/Tyr, glycosylation, ubiquitination) that govern in vivo protein activity.
+3. **Sequence Truncation Artifacts**: Standard transformer context windows ($L \le 1024$ or $2048$) arbitrarily truncate
+   long multidomain proteins, losing terminal binding domains or active catalytic loops.

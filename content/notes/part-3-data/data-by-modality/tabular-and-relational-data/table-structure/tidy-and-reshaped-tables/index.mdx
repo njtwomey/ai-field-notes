@@ -1,26 +1,159 @@
 ---
 title: 'Tidy and reshaped tables'
 kind: concept
-summary: 'A tidy table has one variable per column and one observation per row. Pivoting between wide and long layouts changes what a row means, and so changes the unit of observation.'
-tags: [data]
-aliases: []
-requires: []
-related: [unit-of-observation, panel-data]
-references: []
-status: stub
-updated: 2026-10-11
+summary: 'Tidy data standardizes variables into columns and observations into rows; pivoting between wide and long layouts fundamentally alters the row unit of observation and split validity.'
+tags: [data, tabular-data, data-wrangling, preprocessing]
+aliases: [tidy data, reshaped tables, wide layout, long layout, pivot and melt]
+requires: [unit-of-observation, tabular-data]
+related: [panel-data, data-setups]
+references: [wickham2014tidy, codd1970relational]
+status: draft
+updated: 2026-10-12
 ---
 
+import { TidyAndReshapedTablesVisualizer } from './TidyAndReshapedTablesVisualizer'
+
 <Definition>
-To be written.
+**Tidy and reshaped tables** define the structural organization of tabular datasets for statistical analysis and machine
+learning. In **tidy data**, each variable forms a column, each observation forms a row, and each observational unit
+forms a table. Reshaping between **wide layouts** (spreading repeated episodes across horizontal feature columns) and
+**long layouts** (stacking episodes vertically across rows) fundamentally alters the dataset's **unit of observation**,
+changing how models compute loss and how evaluation splits must be partitioned.
 </Definition>
+
+Before features can be fed into an algorithm, raw tabular data must be structured into an operational matrix. Tables
+extracted from spreadsheets, relational databases, or transactional logs frequently violate statistical grammar: column
+headers represent variable values (such as calendar years), single columns pack multiple concatenated attributes, and
+multiple observational units are conflated into monolithic tables. Reshaping tables via pivots and melts aligns data
+structure with model architectures, but improper reshaping introduces severe structural sparsity and evaluation leakage
+<Cite id="wickham2014tidy, codd1970relational" />.
+
+<TidyAndReshapedTablesVisualizer />
 
 ## Tidy data
 
+Hadley Wickham formalized the statistical principles of **Tidy Data**, linking Edgar F. Codd's relational database
+normalization (3rd Normal Form) directly to exploratory analysis and machine learning workflows
+<Cite id="wickham2014tidy, codd1970relational" />:
+
+1. **Each variable forms a column**: A variable represents all measurements of an underlying physical or operational
+   attribute (e.g. height, temperature, transaction amount).
+2. **Each observation forms a row**: An observation contains all measurements recorded for a specific observational unit
+   under a single event or condition.
+3. **Each type of observational unit forms a table**: Conflating entities measured at different granularities (such as
+   customer demographic profiles and individual credit card transactions) into a single un-normalized table introduces
+   massive data duplication and synchronization anomalies.
+
+| Table Dimension | Structural Unit | Practical Interpretation |
+| :--- | :--- | :--- |
+| **Columns** | One Variable | An underlying measured attribute or operational property across all units |
+| **Rows** | One Observation | All attribute measurements captured for an observational unit in a single event |
+| **Tables** | One Observational Unit | Dedicated relational collection per entity class (avoids multi-level conflation) |
+
+### The five classic messy layouts
+
+Wickham identified five universal patterns of untidy data in commercial workflows <Cite id="wickham2014tidy" />:
+1. Column headers are values, not variable names (e.g. columns titled `Q1_2022`, `Q2_2022`, `Q3_2022`).
+2. Multiple variables are compressed into a single column (e.g. `m_014` encoding both `sex = male` and
+   `age_group = 0-14`).
+3. Variables are stored in both rows and columns (e.g. a column titled `metric` alternating between `min_temp` and
+   `max_temp`).
+4. Multiple units of observation are stored in the same table.
+5. A single observational unit is fragmented across multiple disparate tables.
+
 ## Wide and long layouts
+
+The primary structural decision in tabular machine learning is choosing between a **wide layout** and a **long layout**:
+
+| Dimension | Wide Layout (Horizontal) | Long Layout (Vertical / Tall) |
+| :--- | :--- | :--- |
+| **Row Unit** | Entity $i$ (Customer, Patient, Device) | Entity-Episode $(i, t)$ (Customer-Transaction, Patient-Day) |
+| **Row Count** | Small ($N_{\text{entities}}$) | Large ($N_{\text{entities}} \times T_{\text{periods}}$) |
+| **Column Count** | Large (Repeated features across time: $D \cdot T$) | Compact (`entity_id`, `period_t`, `metric_name`, `value`) |
+| **Missing Values** | Contains structural `NaN`s if periods are missing | Highly compact; unobserved periods are simply omitted |
+| **Optimal Models** | **Gradient Boosted Decision Trees (GBDT)**; tabular MLPs | **Recurrent networks (LSTM, GRU)**; sequence Transformers; panel models |
+
+In standard tabular tasks (such as predicting 30-day hospital readmission or loan charge-off), models predict a single
+target per entity. GBDT architectures cannot process sequential tables directly; they require **wide layouts** where
+historical episodes are collapsed into aggregated feature columns (e.g. `mean_bp_last_7d`, `max_bp_last_30d`).
+
+Conversely, deep sequence models and survival analysis architectures process **long layouts**, tracking trajectories
+over time.
 
 ## Pivots and melts
 
+Transforming between wide and long representations is achieved via dual reshaping operators:
+
+| Entity ID | Day 1 Temp | Day 2 Temp | Day 3 Temp | Layout State |
+| :--- | :--- | :--- | :--- | :--- |
+| `101` | $98.6$ | $99.1$ | $98.4$ | **Wide Format** (Entity unit) |
+| `102` | $101.2$ | $100.8$ | $99.5$ | Compact entity rows; horizontal periods |
+
+Applying a **melt** unpivots horizontal measurement columns into vertical episode rows, while a **pivot** spreads
+categorical time keys horizontally:
+
+| Entity ID | Observation Period | Measured Temperature | Layout State |
+| :--- | :--- | :--- | :--- |
+| `101` | Day 1 | $98.6$ | **Long Format** (Episode unit) |
+| `101` | Day 2 | $99.1$ | Stacked episode records |
+| `101` | Day 3 | $98.4$ | Supports variable-length event histories |
+| `102` | Day 1 | $101.2$ | Naturally omits unobserved time steps |
+
+1. **Melt (Unpivot)**: Gathers $K$ distinct measurement columns into key-value pairs (`variable`, `value`). It increases
+   row count by factor $K$ while condensing column dimensionality into standardized tidy columns.
+2. **Pivot (Spread)**: Selects an index column, a key column, and a value column, expanding unique levels of the key
+   column horizontally into distinct features.
+
+### The sparse matrix explosion
+
+Pivoting on categorical keys with high cardinality (e.g. pivoting customer transactions by merchant category code or
+ICD-10 medical code) triggers a **sparse matrix explosion**. If a dataset contains 500 unique medical codes and an
+individual patient is diagnosed with an average of 3 codes, pivoting generates a 500-column table where **$99.4\%$ of
+cells are missing (`NaN`)**. Rather than unconstrained pivoting, high-cardinality keys require count-min sketches,
+embeddings, or frequency thresholding.
+
 ## What reshaping does to the row unit
 
+Reshaping is not a cosmetic layout operation; it fundamentally alters the dataset's **unit of observation**
+<Cite id="wickham2014tidy" />:
+- In long format, the statistical unit is the event tuple $(i, t)$.
+- In wide format, the statistical unit is the entity $i$.
+
+### The group leakage disaster
+
+The most dangerous pitfall in tabular data engineering occurs when teams execute random train-validation splits on
+reshaped long tables:
+
+| Partition Fold | Assigned Records for Patient A | Evaluation Integrity | Modeling Pathology |
+| :--- | :--- | :--- | :--- |
+| **Train Split ($80\%$)** | Patient A (Day 1, Day 2, Day 4) | Training baseline | Model fits Patient A's idiosyncratic individual baseline |
+| **Test Split ($20\%$)** | Patient A (Day 3) | **Severe Contamination** | Test instance shares underlying entity; performance is fraudulent |
+
+If a dataset has $T$ repeated observations per entity and undergoes an $80/20$ random row split, the probability that an
+entity has rows in **both** the training and test sets is:
+
+$$
+P(\text{Leakage}) = 1 - \left( 0.8^T + 0.2^T \right)
+$$
+
+For $T = 6$ observations per entity, **$73.8\%$ of all entities are shared across train and test folds**. The model
+achieves stellar test performance simply by memorizing entity-specific constants, collapsing completely when deployed on
+genuinely novel patients in production. Evaluating long tables requires strict **GroupKFold** or temporal cutoff
+splitting.
+
 ## Pitfalls
+
+1. **Group leakage from random row-splitting on long tables**: Partitioning long-format tables row-by-row without
+   grouping by entity ID, destroying evaluation independence and masking massive over-fitting.
+2. **Conflating structural zeroes with true missingness after pivoting**: When pivoting long transactional records into
+   wide feature matrices, unobserved events materialize as `NaN`s; replacing all `NaN`s with zero falsely asserts that
+   missing observations (e.g. unmeasured blood pressure) were zero.
+3. **Loss of temporal sequence in wide tabular representations**: Spreading time series across wide columns (`x_t1`,
+   `x_t2`, `x_t3`) and training GBDT; trees treat these columns as unordered coordinate axes, completely discarding
+   temporal directionality and lag dynamics.
+4. **Denormalization memory explosion**: Un-pivoting and joining static entity attributes (e.g. customer demographic
+   vectors) into every row of a 100-million-row transaction log, causing memory footprints to explode by orders of
+   magnitude.
+5. **Irregular time grid distortion**: Pivoting long time-series data with non-uniform observation timestamps into fixed
+   wide column slots without prior temporal resampling or interpolation, injecting severe temporal misalignment into
+   feature rows.

@@ -1,0 +1,134 @@
+---
+title: Least-squares importance fitting
+kind: technique
+summary: 'Least-squares importance fitting estimates the density ratio $p/q$ with a linear kernel model by minimising the squared error under $q$. Its unconstrained form, uLSIF, is a ridge-regularised linear solve with a closed-form cross-validation score.'
+tags: [density-ratio-estimation, kernel-methods, least-squares, regularisation, worked-example]
+aliases: [LSIF, uLSIF, unconstrained least-squares importance fitting, least-squares density ratio estimation, RuLSIF]
+requires: [density-ratio-estimation, ridge-regression, cross-validation]
+related: [kullback-leibler-importance-estimation-procedure, density-ratio-by-classification, comparing-density-ratio-estimators, importance-weighting-for-covariate-shift, quadratic-programming, f-divergences-and-jensen-shannon]
+references: [kanamori2009ulsif, sugiyama2012book, sugiyama2012bregman, yamada2013]
+status: draft
+updated: 2026-10-12
+---
+
+import { LsifSelection } from './LsifSelection'
+
+<Definition>
+**Least-squares importance fitting** estimates the density ratio $r(\xvec) = p(\xvec)/q(\xvec)$ with a linear model
+$\hat r(\xvec) = \alphavec^\top \phivec(\xvec)$ chosen to minimise the squared error
+$\tfrac{1}{2}\expect_q\brack{(\hat r(\xvec) - r(\xvec))^2}$, estimated from a sample of each density. Its
+unconstrained form, <Gloss name="ulsif" />, adds a ridge penalty $\tfrac{\lambda}{2}\norm{\alphavec}^2$, solves for
+$\alphavec$ in closed form, and sets negative coefficients to zero <Cite id="kanamori2009ulsif" />.
+</Definition>
+
+## Problem
+
+A <NoteLink to="density-ratio-estimation">density ratio</NoteLink> is wanted from a sample $\xvec_1, \dots, \xvec_{n_p}$
+from $p$ and a sample $\xvec'_1, \dots, \xvec'_{n_q}$ from $q$. The
+<NoteLink to="kullback-leibler-importance-estimation-procedure">Kullback–Leibler fit</NoteLink> needs an iterative
+solver for every candidate width and fold of <NoteLink to="cross-validation">cross-validation</NoteLink>. A squared loss
+turns the fit into linear least squares, which is solved by one linear system, and makes cross-validation nearly free.
+
+## Mechanism
+
+### The squared error needs no ratio
+
+Expanding the square,
+$$
+\frac{1}{2}\int \paren{\hat r(\xvec) - r(\xvec)}^2 q(\xvec)\, d\xvec =
+\frac{1}{2}\int \hat r(\xvec)^2 q(\xvec)\, d\xvec - \int \hat r(\xvec)\, r(\xvec)\, q(\xvec)\, d\xvec +
+\frac{1}{2}\int r(\xvec)^2 q(\xvec)\, d\xvec .
+$$
+The last term does not depend on $\hat r$. In the middle term $r\, q = p$. What remains is
+$$
+J(\hat r) = \frac{1}{2}\expect_q\brack{\hat r(\xvec)^2} - \expect_p\brack{\hat r(\xvec)} ,
+$$
+and both expectations are averages over the samples. $J$ equals the squared error minus a constant, so minimising it
+minimises the squared error without knowing $r$.
+
+### A quadratic in the coefficients
+
+The <NoteLink to="basis-expansions">basis functions</NoteLink> are <Gloss name="rbf-kernel">Gaussian kernels</Gloss> on
+$b$ points of the sample from $p$, $\phi_l(\xvec) = \exp\paren{-\norm{\xvec - \cvec_l}^2 / 2\sigma^2}$. With
+$\hat r = \alphavec^\top\phivec$, the sample estimate of $J$ is a quadratic:
+$$
+\hat J(\alphavec) = \frac{1}{2}\alphavec^\top \hat\Hmat \alphavec - \hat\hvec^\top \alphavec , \qquad
+\hat\Hmat = \frac{1}{n_q} \sum_{j=1}^{n_q} \phivec(\xvec'_j)\, \phivec(\xvec'_j)^\top , \qquad
+\hat\hvec = \frac{1}{n_p} \sum_{i=1}^{n_p} \phivec(\xvec_i) .
+$$
+$\hat\Hmat$ is the $b \times b$ second-moment matrix of the features under $q$, and $\hat\hvec$ the mean feature
+vector under $p$.
+
+### Two ways to regularise
+
+**LSIF** adds the penalty $\lambda \ones^\top \alphavec$ and the constraint $\alphavec \ge \zeros$. That is a
+<NoteLink to="quadratic-programming">quadratic programme</NoteLink>, and its solution moves piecewise linearly in
+$\lambda$, so the whole regularisation path can be traced.
+
+**uLSIF** drops the constraint and uses the ridge penalty $\tfrac{\lambda}{2}\norm{\alphavec}^2$, as in
+<NoteLink to="ridge-regression" />. Setting the gradient $\hat\Hmat\alphavec - \hat\hvec + \lambda\alphavec$ to zero
+gives
+$$
+\tilde\alphavec = \paren{\hat\Hmat + \lambda \Imat}^{-1} \hat\hvec , \qquad
+\hat\alpha_l = \max\paren{0, \tilde\alpha_l} .
+$$
+The clipping makes $\hat r$ non-negative wherever it changes anything. It is much cheaper than solving the
+constrained problem <Cite id="kanamori2009ulsif" />.
+
+### Choosing $\sigma$ and $\lambda$
+
+The held-out value of $\hat J$ scores any fit with the two samples alone. The samples are split into $K$ folds; for
+each fold, uLSIF is fitted on the rest, and the score
+$\tfrac{1}{2}\,\mathrm{mean}_{q\text{-fold}}\, \hat r^2 - \mathrm{mean}_{p\text{-fold}}\, \hat r$ is recorded. The
+pair $(\sigma, \lambda)$ with the lowest average wins. Because the fit is a ridge solve, the leave-one-out score has a
+closed form, so model selection costs about as much as one fit <Cite id="kanamori2009ulsif" />. The figure uses
+five folds over a grid of pairs.
+
+<LsifSelection />
+
+## Cost
+
+Forming $\hat\Hmat$ costs $O(n_q b^2)$ and $\hat\hvec$ costs $O(n_p b)$, after $O((n_p + n_q) b d)$ kernel
+evaluations in $d$ dimensions. The solve costs $O(b^3)$, or $O(b^2)$ per extra $\lambda$ after one eigendecomposition
+of $\hat\Hmat$. With $b$ fixed at about 100, the cost is linear in the sample sizes. Evaluating $\hat r$ at a new
+point costs $O(b d)$.
+
+## Trade-offs
+
+- **Closed form.** One linear solve per $(\sigma, \lambda)$, no step sizes and no convergence checks. This makes
+  uLSIF the fastest of the kernel estimators and the easiest to tune.
+- **Where the errors count.** The loss weights errors by $q$. This is the weighting importance weighting needs, since
+  the weights are used at points of the sample from $q$. Errors where $q$ is small and $p$ large cost little.
+- **Shrinkage towards zero.** The ridge penalty pulls $\hat r$ towards 0, not towards the neutral ratio 1. With a
+  large $\lambda$ the mean of $\hat r$ over the sample from $q$ falls below 1, so the weights are better
+  self-normalised before use.
+- **Unbounded ratios.** When $p$ has heavier tails than $q$, $\expect_q[r^2]$ is infinite and the squared error is
+  dominated by rare points. **Relative uLSIF** estimates the bounded ratio $p/(\beta p + (1 - \beta) q)$ with the
+  same machinery <Cite id="yamada2013" />.
+- **A divergence for free.** At the fitted $\hat r$, $\tfrac{1}{2}\mathrm{mean}_p\, \hat r - \tfrac{1}{2}$ estimates
+  the Pearson divergence $\tfrac{1}{2}\expect_q[(r - 1)^2]$, an $f$-divergence used for two-sample tests and change
+  detection <Cite id="sugiyama2012book" />.
+
+<Derivation title="The Pearson divergence estimate">
+$\tfrac{1}{2}\expect_q[(r - 1)^2] = \tfrac{1}{2}\expect_q[r^2] - \expect_q[r] + \tfrac{1}{2} =
+\tfrac{1}{2}\expect_p[r] - \tfrac{1}{2}$, using $\expect_q[r^2] = \expect_p[r]$ and $\expect_q[r] = 1$. Replacing
+$r$ by $\hat r$ and $\expect_p$ by the mean over the sample from $p$ gives the estimate.
+</Derivation>
+
+## Worked example
+
+Use two indicator basis functions, $\phi_1(x) = \indicator{x < 0}$ and $\phi_2(x) = \indicator{x \ge 0}$. Suppose 20%
+of the sample from $p$ and 50% of the sample from $q$ lie below 0.
+
+1. **Second moments under $q$.** The two indicators are never both 1, so $\hat\Hmat$ is diagonal, with the share of
+   the $q$ sample in each half: $\hat\Hmat = \diag(0.5, 0.5)$.
+2. **Mean features under $p$.** $\hat\hvec = (0.2, 0.8)$.
+3. **Solve without a penalty.** $\tilde\alphavec = \hat\Hmat^{-1}\hat\hvec = (0.4, 1.6)$: the share of $p$ divided by
+   the share of $q$ in each half, the same answer as
+   <NoteLink to="kullback-leibler-importance-estimation-procedure"><Gloss name="kliep" /></NoteLink> gives with these
+   basis functions.
+4. **Solve with $\lambda = 0.1$.** Each coefficient becomes $\hat h_l / (\hat H_{ll} + 0.1)$:
+   $\tilde\alphavec = (0.2/0.6, 0.8/0.6) = (0.333, 1.333)$.
+5. **See the shrinkage.** The mean of $\hat r$ over the sample from $q$ is now
+   $0.5 \times 0.333 + 0.5 \times 1.333 = 0.833$, below 1. Both coefficients shrank by the factor
+   $0.5 / 0.6$, towards zero. No coefficient is negative, so the clipping changes nothing.

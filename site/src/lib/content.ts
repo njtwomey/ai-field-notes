@@ -178,7 +178,7 @@ export function inGroup(note: NoteMeta, group: TopicGroup): boolean {
   return t ? group.topics.includes(t.path) : false
 }
 
-export type BrowseParams = { c?: string; part?: string; kind?: NoteKind; q?: string; view?: 'list' | 'map' }
+export type BrowseParams = { c?: string; kind?: NoteKind; q?: string }
 
 /** Link to the browse page with filters. Empty values are dropped. */
 export function browseUrl(params: BrowseParams = {}): string {

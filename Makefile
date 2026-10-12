@@ -3,7 +3,7 @@
 # Python sources that ruff lints and formats; Pyright reads its include list from pyproject.toml.
 PY_SRC := python
 
-.PHONY: ci help install dev contracts assets content doctor stubs links wrap lint catalog-check format typecheck test lab-check lab-shots lab check pre-push build preview clean
+.PHONY: ci help install dev contracts assets content doctor stubs links wrap maths lint catalog-check format typecheck test lab-check lab-shots lab check pre-push build preview clean
 
 help: ## List targets
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  \033[36m%-10s\033[0m %s\n", $$1, $$2}'
@@ -31,8 +31,14 @@ links: ## Suggest <Gloss> and <NoteLink> markup (SCOPE="taxonomy/path slug ...",
 wrap: ## Rewrap note prose to 120 characters, verified by parse and render (SCOPE="taxonomy/path slug ...", ARGS="--check" to report only)
 	node scripts/wrap-mdx.ts $(ARGS) $(SCOPE)
 
+maths: ## Put display-maths $$ fences on lines of their own (SCOPE="taxonomy/path slug ...", ARGS="--check" to report only)
+	node scripts/display-maths.ts $(ARGS) $(SCOPE)
+
 doctor: ## Check the content tree (SCOPE="taxonomy/path slug ..." limits per-note checks to those notes)
 	node scripts/doctor.ts $(SCOPE)
+
+refs: ## Search references before adding one, or scan for duplicates (ARGS="search --title ... | check --file new.yaml | duplicates")
+	node scripts/references.ts $(ARGS)
 
 stubs: ## List placeholder notes still to write (SCOPE="taxonomy/path ...", ARGS="--count" or "--status draft")
 	node scripts/stubs.ts $(ARGS) $(SCOPE)
@@ -42,6 +48,7 @@ lint: ## Lint TypeScript, Python and note prose
 	node lab/check.ts --imports-only
 	git ls-files -z -co --exclude-standard | xargs -0 sh -c 'for f; do [ -f "$$f" ] && printf "%s\0" "$$f"; done' _ | xargs -0 npx prettier --check --ignore-unknown
 	node scripts/wrap-mdx.ts --check
+	node scripts/display-maths.ts --check
 	uv run ruff check $(PY_SRC)
 	uv run ruff format --check $(PY_SRC)
 

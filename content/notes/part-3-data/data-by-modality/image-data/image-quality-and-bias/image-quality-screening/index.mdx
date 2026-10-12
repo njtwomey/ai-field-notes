@@ -1,28 +1,203 @@
 ---
 title: 'Image quality screening'
 kind: concept
-summary: 'Image datasets contain blurred, badly exposed, compressed, corrupt and duplicated files. Screening finds them before training.'
-tags: [data, computer-vision]
-aliases: []
-requires: []
-related: [near-duplicate-detection]
-references: []
-status: stub
-updated: 2026-10-11
+summary: 'Automated screening identifies blurred, improperly exposed, excessively compressed, corrupted, and near-duplicate images before pipeline ingestion.'
+tags: [data, computer-vision, preprocessing, data-quality]
+aliases: [image-filtering, image-curation, visual-data-cleansing]
+requires: [digital-images, image-preprocessing]
+related: [near-duplicate-detection, image-dataset-bias]
+references: [pechpacheco2000, mittal2012brisque, wang2004, wang2002]
+status: draft
+updated: 2026-10-12
 ---
 
+import { ImageQualityScreeningVisualizer } from './ImageQualityScreeningVisualizer'
+
 <Definition>
-To be written.
+**Image quality screening** is the systematic computational process of auditing, scoring, and filtering visual data
+files prior to model training or downstream inference. It evaluates low-level sensor and compression
+attributes—including spatial sharpness, dynamic range exposure, structural compression degradation, container
+byte-stream integrity, and semantic redundancy—to eliminate uninformative or destructive samples from machine learning
+pipelines.
 </Definition>
+
+Real-world computer vision datasets scraped from the web, captured by field edge devices, or crowdsourced from
+uncalibrated mobile sensors contain extensive sensory anomalies. Propagating corrupted bitstreams, severely
+motion-blurred frames, completely black or blown-out exposures, heavily artifacted JPEG macroblocks, or duplicated
+images across train and validation splits degrades gradient optimization, inflates storage footprint, and invalidates
+offline evaluation benchmarks <Cite id="wang2004, mittal2012brisque" />.
+
+<ImageQualityScreeningVisualizer client:load />
 
 ## Blur
 
+Blur occurs when high-frequency spatial edge transitions are suppressed by optical defocus, relative camera or subject
+motion, or low-pass interpolation filters. Training convolutional or vision transformer architectures on blurred imagery
+degrades spatial gradient features and forces representation heads to hallucinate object boundaries.
+
+The classical no-reference blur detection heuristic is the **variance of the discrete Laplacian operator**
+<Cite id="pechpacheco2000" />. The discrete 2D Laplacian operator convolves the grayscale luminance channel $I(x,y)$
+with a second-order derivative kernel:
+
+$$
+\nabla^2 I = I * \begin{bmatrix} 0 & 1 & 0 \\ 1 & -4 & 1 \\ 0 & 1 & 0 \end{bmatrix}
+$$
+
+Because edges and fine textures correspond to sharp transitions with high second-order spatial derivatives, sharp images
+exhibit a broad spread of Laplacian response values, whereas blurred images produce nearly flat, zero-centered
+responses. The blur score is quantified as the sample variance of the Laplacian field:
+
+$$
+\text{Var}(\nabla^2 I) = \frac{1}{HW} \sum_{x=1}^H \sum_{y=1}^W \left(\nabla^2 I(x,y) - \overline{\nabla^2 I}\right)^2
+$$
+
+Where an image is flagged as blurry if $\text{Var}(\nabla^2 I) < \tau_{\text{blur}}$. An alternative formulation is the
+**Tenengrad criterion**, which computes the sum of squared gradient magnitudes via horizontal and vertical Sobel
+convolution kernels:
+
+$$
+T_{\text{grad}} = \frac{1}{HW} \sum_{x=1}^H \sum_{y=1}^W \left( (I * S_x)^2 + (I * S_y)^2 \right)
+$$
+
+In frequency space, blur screening examines the radial power spectral density $P(f)$ obtained from the 2D Fast Fourier
+Transform (FFT). Pristine natural scenes follow an empirical power-law falloff $P(f) \propto f^{-\alpha}$ with
+$\alpha \approx 2$. Severe optical defocus accelerates high-frequency energy decay ($\alpha \gg 2$), collapsing the
+spectral energy in upper frequency octaves.
+
 ## Exposure
+
+Exposure screening evaluates whether the sensor dynamic range was utilized effectively during capture. Inadequate
+shutter speeds, extreme backlighting, or improper sensor gains cause pixel intensity clipping in dark shadows or bright
+highlights, destroying semantic contrast.
+
+Two complementary statistical metrics quantify exposure defects:
+
+1. **Saturation and Clipping Proportions**: For an 8-bit grayscale or RGB channel with intensities in $[0, 255]$, the
+   underexposure ratio $r_{\text{dark}}$ and overexposure ratio $r_{\text{bright}}$ measure the fraction of pixels
+   trapped against the sensor quantization floors and ceilings:
+
+   $$
+   r_{\text{dark}} = \frac{1}{HW} \sum_{x=1}^H \sum_{y=1}^W \mathbf{1}_{\{I(x,y) \le \tau_{\text{floor}}\}}, \quad \tau_{\text{floor}} \in [0, 5]
+   $$
+
+   $$
+   r_{\text{bright}} = \frac{1}{HW} \sum_{x=1}^H \sum_{y=1}^W \mathbf{1}_{\{I(x,y) \ge \tau_{\text{ceil}}\}}, \quad \tau_{\text{ceil}} \in [250, 255]
+   $$
+
+   Images where $r_{\text{dark}} > 0.40$ or $r_{\text{bright}} > 0.35$ are flagged for inspection, as large contiguous
+   burned regions lack recoverable spatial gradients.
+
+2. **Shannon Entropy and Michelson Contrast**: Global contrast measures distinguish intentionally dim or night-time
+   scenes from flat, featureless underexposed frames. The Shannon entropy of the 256-bin normalized intensity histogram
+   $p = [p_0, \dots, p_{255}]$ measures information diversity:
+
+   $$
+   H(I) = -\sum_{k=0}^{255} p_k \log_2 (p_k + \epsilon)
+   $$
+
+   A completely dark or completely white image yields $H(I) \approx 0$ bits, whereas a well-exposed natural photograph
+   with balanced dynamic range yields $H(I) \in [6.5, 7.8]$ bits.
 
 ## Compression damage
 
+Lossy compression formats (such as JPEG, WebP, and AVIF) achieve high bitrate reductions by discarding high-frequency
+transform coefficients and quantizing discrete cosine transform (DCT) blocks. At high compression ratios, severe visual
+artifacts emerge:
+
+- **Blocking Artifacts**: Independent quantization across $8 \times 8$ pixel pixel blocks creates artificial
+  discontinuities along grid boundaries $[8k, 8k+8]$.
+- **Ringing and Mosquito Noise**: High-contrast edges exhibit oscillating ripples due to truncation of high-order DCT
+  basis functions (Gibbs phenomenon).
+- **Chroma Subsampling Smearing**: 4:2:0 subsampling halves horizontal and vertical color resolution, degrading fine
+  color boundaries.
+
+To assess compression degradation without reference clean images, **Blind/Referenceless Image Spatial Quality Evaluator
+(BRISQUE)** models distortions using Natural Scene Statistics (NSS) <Cite id="mittal2012brisque" />. Natural images
+exhibit regular statistical behavior in their Mean-Subtracted Contrast-Normalized (MSCN) coefficients:
+
+$$
+\hat{I}(i, j) = \frac{I(i,j) - \mu(i,j)}{\sigma(i,j) + C}
+$$
+
+Where $\mu(i,j)$ and $\sigma(i,j)$ are local weighted Gaussian estimates of luminance mean and variance, and $C=1$
+prevents numerical instability. In pristine uncompressed images, the empirical distribution of $\hat{I}(i,j)$ conforms
+strictly to a zero-mean Generalized Gaussian Distribution (GGD):
+
+$$
+f(x; \alpha, \sigma^2) = \frac{\alpha}{2 \beta \Gamma(1/\alpha)} \exp\left( -\left(\frac{|x|}{\beta}\right)^\alpha \right), \quad \beta = \sigma \sqrt{\frac{\Gamma(1/\alpha)}{\Gamma(3/\alpha)}}
+$$
+
+JPEG quantization and spatial blurring induce severe skewness and kurtosis deviations in the fitted shape parameter
+$\alpha$ and across pairwise adjacent product coefficients $\hat{I}(i, j)\hat{I}(i, j+1)$
+<Cite id="mittal2012brisque, wang2002" />. BRISQUE maps these fitted parameters to a standardized distortion score
+$\in [0, 100]$, where scores above 50 identify heavy compression damage.
+
 ## Corrupt files
+
+Corrupt and malformed image files represent a frequent cause of training run crashes during multi-node distributed data
+loading. Corruptions manifest in distinct operational modes:
+
+1. **Header and Magic Byte Validation**: Every standard container begins with immutable magic bytes at offset zero. Fast
+   screening reads the first 16 bytes:
+   - JPEG: `FF D8 FF`
+   - PNG: `89 50 4E 47 0D 0A 1A 0A`
+   - WebP: `52 49 46 46` (`RIFF`) followed by `57 45 42 50` (`WEBP`)
+   - TIFF: `49 49 2A 00` (little-endian) or `4D 4D 00 2A` (big-endian)
+2. **Truncated Bitstreams**: Web scrapers frequently terminate downloads prematurely when socket timeouts occur. Fast
+   file checks such as Python's `Image.open()` only inspect file headers and return successfully; subsequent calls to
+   `Image.load()` or `Image.verify()` are required to scan through entropy-coded bitstreams and catch unexpected EOF
+   conditions.
+3. **Decompression Bombs**: Malicious or misconfigured image headers declaring dimensions of
+   $100{,}000 \times 100{,}000$ pixels require tens of gigabytes of uncompressed RAM upon decoding, triggering
+   Out-Of-Memory (OOM) kernel terminations. Production screening enforces maximum dimension and byte size caps before
+   buffer allocation (e.g., `PIL.Image.MAX_IMAGE_PIXELS`).
 
 ## Near-duplicate images
 
+Large-scale datasets scraped from e-commerce sites, social media, or search engines suffer from widespread duplicate and
+near-duplicate instances—images identical except for watermarks, minor aspect ratio crops, JPEG re-compression, or
+subtle color grade shifts. Retaining duplicates causes two major issues:
+
+- **Data Leakage**: Duplicates shared between training and test partitions inflate evaluation metrics and mask
+  out-of-domain failure modes.
+- **Gradient Bias**: High-frequency duplicates act as implicit non-uniform sample weights, biasing gradient updates
+  toward redundant visual concepts.
+
+Near-duplicate screening utilizes **Perceptual Hashing (pHash)** based on the 2D Discrete Cosine Transform (DCT):
+
+1. **Downsample and Grayscale**: Scale the candidate image to a fixed low resolution (e.g., $32 \times 32$) and convert
+   to luminance.
+2. **Compute 2D DCT**: Calculate the discrete frequency spectrum:
+   $$
+   D(u, v) = \frac{2}{\sqrt{MN}} C(u) C(v) \sum_{x=0}^{M-1} \sum_{y=0}^{N-1} I(x, y) \cos\left( \frac{(2x+1)u\pi}{2M} \right) \cos\left( \frac{(2y+1)v\pi}{2N} \right)
+   $$
+3. **Retain Low Frequencies**: Extract the top-left $8 \times 8$ sub-matrix (excluding the DC coefficient at $(0,0)$),
+   capturing 64 coefficients corresponding to gross structural topography.
+4. **Binarize Against Median**: Compute median frequency energy $M = \text{median}(\{D(u,v)\})$, generating a 64-bit
+   binary hash $h \in \{0, 1\}^{64}$:
+   $$
+   h_i = \begin{cases} 1 & \text{if } D(u,v) > M \\ 0 & \text{otherwise} \end{cases}
+   $$
+
+Two images with hashes $h_A$ and $h_B$ are near-duplicates if their normalized Hamming distance falls below a tolerance
+threshold $\tau_H$:
+
+$$
+d_H(h_A, h_B) = \sum_{b=1}^{64} (h_A^{(b)} \oplus h_B^{(b)}) \le \tau_H, \quad \tau_H \approx 4\text{ to }6\text{ bits}
+$$
+
 ## Pitfalls
+
+1. **Domain-Specific Sharpness Pitfalls**: Filtering biomedical microscopy, astronomical imagery, or night-vision
+   photography with generic natural-image Laplacian variance thresholds causes catastrophic false rejection rates.
+   Smooth biological cell interiors or nebulas have inherently low spatial gradients without being out of focus.
+   Screening thresholds must be calibrated per imaging domain.
+2. **Astrophotography and Dark Subject Truncation**: Enforcing a strict underexposure cap $r_{\text{dark}} < 0.20$
+   erroneously discards legitimate nocturnal scenes, product photography with black studio backdrops, and radiological
+   X-rays where background blackness is standard.
+3. **Lazy Image Loading in Auditing Pipelines**: Screening scripts that check `Image.open(f)` without calling
+   `Image.load()` or `Image.verify()` miss truncated JPEG bitstreams, passing corrupted files into distributed
+   DataLoader worker threads that crash mid-epoch.
+4. **Neglecting Multi-Index Deduplication**: Naive pairwise comparison of $N$ images requires $O(N^2)$ distance
+   evaluations, becoming intractable for datasets exceeding $10^5$ samples. Production deduplication requires
+   Locality-Sensitive Hashing (LSH) or multi-index bucket indexing in Hamming space <Cite id="wang2002" />.

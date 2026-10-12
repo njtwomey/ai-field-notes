@@ -1,26 +1,158 @@
 ---
 title: 'Projections for exploration'
 kind: concept
-summary: 'Two-dimensional projections by PCA, t-SNE or UMAP give an overview of high-dimensional data. Each preserves different structure, so apparent clusters must be confirmed in the original space.'
-tags: [data, dimensionality-reduction]
-aliases: []
-requires: []
-related: [principal-component-analysis, t-distributed-stochastic-neighbour-embedding]
-references: []
-status: stub
-updated: 2026-10-11
+summary: 'Two-dimensional projections by PCA, t-SNE, and UMAP provide visual overviews of high-dimensional data; because each distorts geometry differently, apparent visual clusters must be confirmed in original feature space.'
+tags: [data, dimensionality-reduction, visualization, exploration]
+aliases: [projections for exploration, dimensional reduction for EDA, 2D projections]
+requires: [data-generating-process, exploratory-data-analysis]
+related: [principal-component-analysis, t-distributed-stochastic-neighbour-embedding, exploratory-data-analysis, data-profiling]
+references: [pearson1901, vandermaaten2008, mcinnes2018, wattenberg2016]
+status: draft
+updated: 2026-10-12
 ---
 
+import { ProjectionForExplorationVisualizer } from './ProjectionForExplorationVisualizer'
+
 <Definition>
-To be written.
+**Projections for exploration** are dimensionality reduction transformations that map high-dimensional feature vectors
+$\mathbf{x} \in \mathbb{R}^D$ into low-dimensional visual representations $\mathbf{z} \in \mathbb{R}^2$ or
+$\mathbb{R}^3$. They balance global Euclidean variance against local topological neighborhood structures to reveal
+latent clusters, manifold geometries, and anomalies.
 </Definition>
 
-## Linear projections
+Modern machine learning datasets frequently span hundreds or thousands of feature dimensions, from tabular embeddings
+and sensor telemetry to deep representations. Because humans cannot visually perceive geometries beyond three
+dimensions, practitioners rely on 2D projections to audit dataset structure. However, projecting
+$\mathbb{R}^D \to \mathbb{R}^2$ fundamentally requires discarding information. Every dimensionality reduction technique
+introduces specific geometric distortions; interpreting 2D scatter plots without understanding these mathematical
+trade-offs leads to severe misdiagnoses <Cite id="vandermaaten2008, wattenberg2016" />.
 
-## Neighbour-preserving embeddings
+<ProjectionForExplorationVisualizer />
 
-## What each preserves
+## Linear projections: PCA and metric MDS
 
-## Confirming clusters
+The most transparent dimensionality reduction approaches are linear orthogonal projections.
 
-## Pitfalls
+### Principal Component Analysis (PCA)
+
+PCA identifies an orthogonal coordinate system where successive axes maximize explained sample variance
+<Cite id="pearson1901" />:
+
+$$
+\mathbf{w}_1 = \arg\max_{\|\mathbf{w}\|=1} \mathbf{w}^T \mathbf{\Sigma} \mathbf{w}, \quad \mathbf{\Sigma} = \frac{1}{N} \mathbf{X}^T \mathbf{X}
+$$
+
+The low-dimensional projection is given by $\mathbf{z}_i = \mathbf{W}^T \mathbf{x}_i$, where
+$\mathbf{W} \in \mathbb{R}^{D \times 2}$ contains the leading eigenvectors of covariance matrix $\mathbf{\Sigma}$.
+
+- **Strengths**: Deterministic, computationally fast ($O(N D^2 + D^3)$), and globally faithful to Euclidean distances.
+  If two points are distant in PCA space, they are guaranteed to be distant in original space.
+- **Fundamental limitation**: PCA cannot unfold non-linear manifolds. If high-dimensional data lies along a curved
+  manifold (such as a Swiss roll or concentric hyperspheres), PCA flattens the manifold, collapsing distinct topological
+  structures into overlapping clusters.
+
+| Projection Paradigm | Optimization Objective | Geometric Preservation | Primary Failure Mode |
+| :--- | :--- | :--- | :--- |
+| **Linear (PCA / MDS)** | Maximizes explained global variance | Preserves pairwise global metric distances | Flattens non-linear manifolds into overlapping clouds |
+| **Non-Linear (t-SNE / UMAP)** | Preserves local neighborhood probabilities | Preserves local cluster topology and curvature | Distorts global distances and relative cluster scales |
+
+## Neighbor-preserving embeddings: t-SNE and UMAP
+
+When data resides on complex non-linear sub-manifolds, non-linear neighbor-preserving embeddings are essential.
+
+### t-SNE and the crowding problem
+
+t-Distributed Stochastic Neighbor Embedding (t-SNE) converts Euclidean distances into conditional probabilities
+<Cite id="vandermaaten2008" />. In the high-dimensional space $\mathbb{R}^D$:
+
+$$
+p_{j|i} = \frac{\exp(-\|\mathbf{x}_i - \mathbf{x}_j\|^2 / 2\sigma_i^2)}{\sum_{k \neq i} \exp(-\|\mathbf{x}_i - \mathbf{x}_k\|^2 / 2\sigma_i^2)}, \quad p_{ij} = \frac{p_{j|i} + p_{i|j}}{2N}
+$$
+
+Where bandwidth $\sigma_i$ is determined by a user-specified **perplexity** parameter $\mathcal{P} = 2^{H(P_i)}$.
+
+In the low-dimensional map $\mathbb{R}^2$, pairwise similarity uses a heavy-tailed Student-$t$ distribution (Cauchy
+distribution with 1 degree of freedom):
+
+$$
+q_{ij} = \frac{(1 + \|\mathbf{z}_i - \mathbf{z}_j\|^2)^{-1}}{\sum_{k \neq l} (1 + \|\mathbf{z}_k - \mathbf{z}_l\|^2)^{-1}}
+$$
+
+t-SNE minimizes Kullback-Leibler divergence via gradient descent:
+
+$$
+\mathcal{L}_{\text{t-SNE}} = \text{KL}(P \parallel Q) = \sum_{i \neq j} p_{ij} \ln \left(\frac{p_{ij}}{q_{ij}}\right)
+$$
+
+The heavy-tailed Student-$t$ kernel overcomes the **crowding problem**: in high dimensions, the volume of a hypersphere
+scales exponentially with dimension $D$. In 2D space, there is insufficient area to accommodate all moderate-distance
+neighbors at their true Euclidean distances. The Student-$t$ tail allows moderate distances to be pushed outward,
+forming distinct visual cluster islands <Cite id="vandermaaten2008" />.
+
+### UMAP: Riemannian geometry and simplicial sets
+
+Uniform Manifold Approximation and Projection (UMAP) models high-dimensional data as a fuzzy simplicial set on a
+Riemannian manifold <Cite id="mcinnes2018" />. By using approximate nearest-neighbor descent ($O(N \log N)$), UMAP
+scales to millions of samples and better preserves semi-global cluster continuity compared to t-SNE.
+
+## What each technique preserves and distorts
+
+Understanding projection trade-offs is critical to prevent false conclusions:
+
+| Projection Algorithm | Preserved Geometry | Distorted Geometry | Primary Hyperparameters |
+| :--- | :--- | :--- | :--- |
+| **PCA** <Cite id="pearson1901" /> | Global variance, linear metric distances | Non-linear manifold curvature, local cluster sub-structure | Number of components |
+| **t-SNE** <Cite id="vandermaaten2008" /> | Local topological neighborhoods ($k$-nearest neighbors) | Global inter-cluster distances, cluster sizes/densities | Perplexity $\mathcal{P} \in [5, 50]$, learning rate |
+| **UMAP** <Cite id="mcinnes2018" /> | Local connectivity, semi-global topological continuum | Absolute Euclidean scale and density equivalence | `n_neighbors` $\in [15, 50]$, `min_dist` $\in [0.1, 0.5]$ |
+
+### Common misinterpretations of t-SNE
+
+Wattenberg, Viégas, and Johnson identified key visual illusions in t-SNE projections <Cite id="wattenberg2016" />:
+1. **Cluster size does not reflect spread**: t-SNE expands dense clusters and compresses diffuse clusters to match local
+   perplexity constraints. A wide visual island does not mean the group has higher high-dimensional variance.
+2. **Inter-cluster distances are meaningless**: Distances between separate cluster islands in 2D are largely arbitrary;
+   points in cluster A are not necessarily closer to cluster B than cluster C in high-dimensional space.
+3. **Perplexity artifacts**: Setting perplexity too low ($\mathcal{P} < 10$) shatters a single uniform Gaussian cloud
+   into dozens of artificial micro-islands. Setting perplexity too high merges distinct clusters together
+   <Cite id="wattenberg2016" />.
+
+```
+ Perplexity Sensitivity on Uniform Data:
+  Low Perplexity (P=5):              Optimal Perplexity (P=30):         High Perplexity (P=100):
+   * *     * * *                      *   *   *   *                      .--------------------.
+   * * *   * *    (False Islands!)    * *   * *   * * (Continuous Cloud) | * * * * * * * * *  |
+       * *     * *                      *   *   *   *                    '--------------------'
+```
+
+## Confirming visual clusters in original space
+
+Never declare the discovery of distinct data segments based solely on 2D visual plots. Every apparent visual cluster
+must be verified against original high-dimensional coordinates $\mathbb{R}^D$:
+
+1. **High-dimensional silhouette coefficient**: For each point $i$, compute:
+   $$
+   s(i) = \frac{b(i) - a(i)}{\max(a(i), b(i))}
+   $$
+   Where $a(i)$ is the mean distance from $i$ to points in its assigned visual cluster, and $b(i)$ is the mean distance
+   to points in the nearest neighboring cluster, evaluated in $\mathbb{R}^D$. If $s(i) \le 0$, the visual cluster is a
+   2D projection artifact.
+2. **Supervised cross-validation probe**: Label points according to their visual 2D cluster assignments
+   ($y_i \in \{1, \dots, K\}$). Train a simple classifier (e.g., Logistic Regression or shallow decision tree) on
+   original $\mathbb{R}^D$ features using 5-fold cross-validation. If holdout cross-validation accuracy matches random
+   chance ($\approx 1/K$), the clusters do not exist in original feature space.
+
+## Diagnostic checklist
+
+To deploy projections responsibly during exploratory data analysis:
+
+1. **Start with PCA**: Compute PCA first to establish an interpretable linear baseline and measure explained variance
+   ratios <Cite id="pearson1901" />.
+2. **Sweep perplexity / neighborhood sizes**: When running t-SNE or UMAP, generate plots across multiple perplexity
+   settings ($\mathcal{P} \in \{10, 30, 50, 100\}$). Only trust cluster patterns that persist across the entire sweep
+   <Cite id="wattenberg2016" />.
+3. **Do not interpret inter-cluster distances**: Avoid drawing domain conclusions from distances between separated
+   islands in t-SNE <Cite id="wattenberg2016" />.
+4. **Audit cluster sizes**: Recognize that t-SNE normalizes local density; verify true cluster dispersion using variance
+   metrics in $\mathbb{R}^D$ <Cite id="vandermaaten2008" />.
+5. **Validate with original-space metrics**: Compute silhouette scores or Davies-Bouldin indices in $\mathbb{R}^D$
+   before formalizing cluster discoveries.

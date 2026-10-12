@@ -2,35 +2,168 @@
 title: 'Errors and outliers'
 kind: concept
 summary: 'Gross errors are values that are wrong, such as impossible ages or unit mix-ups; outliers are values far from the rest that may be wrong or genuine. Cleaning detects both and then corrects, removes, caps or keeps them.'
-tags: [data, robust-statistics]
-aliases: []
-requires: []
-related: [anomaly-detection, local-outlier-factor, isolation-forest]
-references: []
-status: stub
+tags: [data-preparation, data-quality, robust-statistics, anomaly-detection]
+aliases: [gross errors, outlier treatment, winsorising, winsorization, trimming, data cleaning, robust estimation]
+requires: [variance-and-covariance, expectation]
+related: [outlier-detection-methods, constraint-based-repair, local-outlier-factor, isolation-forest]
+references: [tukey1977, huber1964, rousseeuw1984]
+status: draft
 updated: 2026-10-11
 ---
 
+import { OutlierTreatmentExplorer } from './OutlierTreatmentExplorer'
+
 <Definition>
-To be written.
+In data quality and statistical learning:
+- A **gross error** (or invalid datum) is an observation that fails to reflect physical ground truth due to sensor
+  failure, pipeline corruption, typographical error, transmission noise, or unit confusion:
+
+  $$
+  x_i \notin \operatorname{supp}(X) \quad \text{or} \quad x_i = f_{\text{corrupt}}(x_i^*).
+  $$
+
+- An **outlier** is an observation that deviates markedly from the main distribution of the data. An outlier may be a
+  gross error, or it may be a genuine, uncorrupted realization from a heavy-tailed, skewed, or multimodal
+  data-generating process.
 </Definition>
 
-## Errors and outliers
+## Conceptual taxonomy: errors versus genuine extremes
 
-## Rule-based checks
+A central failure mode in automated data cleaning is conflating anomalous geometry with data falsity:
 
-## Univariate detection
+| Category | Real-world Example | Underlying Mechanism | Appropriate Action |
+| :--- | :--- | :--- | :--- |
+| **Gross Error** | `Age = -1` or `Age = 999` | Sentinel encoding or keyboard error | Discard, set to null, or correct via business rules |
+| **Gross Error** | Price in cents recorded as dollars | Unit conversion failure ($100\times$ shift) | Rescale by known constant factor |
+| **Genuine Extreme** | Billionaire's net worth in wealth census | Pareto / power-law distributed wealth | Retain; use log transforms or robust estimators |
+| **Genuine Extreme** | Network intrusion burst / credit fraud | Rare anomalous behavior of primary interest | Retain; serves as positive training signal |
 
-## Multivariate detection
+Purging genuine extremes from training data creates artificial truncation: the model learns an overly narrow
+distribution and fails catastrophically when encountering heavy-tailed events in production.
 
-## Treatment
+## Rule-based checks and domain validation
 
-### Correction
+Gross errors are most reliably detected not by statistical estimators, but by deterministic domain validation rules:
 
-### Removal
+1. **Domain boundary constraints:** Enforcing strict physical ranges (e.g., $0 \le \text{heart\_rate} \le 300$,
+   $0 \le \text{humidity} \le 100\%$, $\text{start\_time} \le \text{end\_time}$).
+2. **Syntactic and regex assertions:** Checking that identifiers, phone numbers, and codes match canonical grammars
+   (e.g. ISO 8601 timestamps, UUID4 hex patterns).
+3. **Relational referential integrity:** Verifying that entity foreign keys exist in master reference tables.
 
-### Winsorising and clipping
+Observations that violate hard physical laws represent gross errors and must be prevented from entering numerical
+estimators.
 
-### Robust models
+## Univariate statistical detection
+
+When physical boundaries are unknown, univariate statistical dispersion metrics flag candidate anomalies.
+
+### Tukey's boxplot fences
+Tukey (1977) formulated non-parametric fences based on empirical quartiles $Q_1$ and $Q_3$, defining the interquartile
+range $\text{IQR} = Q_3 - Q_1$ <Cite id="tukey1977" />:
+
+$$
+\text{Inner fences} = [Q_1 - 1.5 \cdot \text{IQR},\; Q_3 + 1.5 \cdot \text{IQR}],
+$$
+
+$$
+\text{Outer fences} = [Q_1 - 3.0 \cdot \text{IQR},\; Q_3 + 3.0 \cdot \text{IQR}].
+$$
+
+Values outside the inner fences are designated candidate outliers; values beyond the outer fences are classified as
+extreme outliers.
+
+### Median Absolute Deviation (MAD)
+Standard sample mean $\bar{x}$ and sample standard deviation $s$ have a breakdown point of $\epsilon^* = 0$: a single
+corrupted point $x \to \infty$ can inflate $\bar{x}$ and $s$ arbitrarily.
+
+The **Median Absolute Deviation** provides a robust measure of scale with a $50\%$ breakdown point:
+
+$$
+\text{MAD} = \operatorname{median}\left(\left|x_i - \operatorname{median}(\xvec)\right|\right).
+$$
+
+For normally distributed data, the consistent scale estimator is $\hat{\sigma}_{\text{MAD}} = 1.4826 \cdot \text{MAD}$.
+The robust $z$-score is defined as:
+
+$$
+z_{\text{MAD}, i} = \frac{x_i - \operatorname{median}(\xvec)}{1.4826 \cdot \text{MAD}}.
+$$
+
+Observations with $|z_{\text{MAD}, i}| > 3.0$ or $3.5$ are flagged as anomalous.
+
+## Multivariate detection and leverage
+
+In multivariate spaces $\mathbb{R}^D$, an observation can appear completely normal across every individual univariate
+marginal while being an extreme multivariate outlier (e.g., a person with `Height = 195 cm` and `Weight = 40 kg`).
+
+### Mahalanobis distance and robust covariance
+The Mahalanobis distance accounts for feature covariance $\Sigmamat$:
+
+$$
+D_M(\xvec_i) = \sqrt{(\xvec_i - \muvec)^\top \Sigmamat^{-1} (\xvec_i - \muvec)}.
+$$
+
+Because sample covariance $\hat{\Sigmamat}$ is vulnerable to extreme points, robust multivariate detection computes
+distance using the **Minimum Covariance Determinant** (MCD) estimator (Rousseeuw 1984) <Cite id="rousseeuw1984" />,
+which finds the subset of $h < N$ observations whose sample covariance matrix has the minimal determinant.
+
+### Leverage versus residual outliers in regression
+In linear models, outliers partition into two distinct geometrical types:
+- **High leverage points:** Observations whose predictor values $\xvec_i$ are extreme in feature space, quantified by
+  diagonal entries of the hat matrix $h_{ii} = \xvec_i^\top (\Xmat^\top \Xmat)^{-1} \xvec_i$.
+- **High residual points:** Observations whose outcome $y_i$ deviates strongly from the model prediction $\hat{y}_i$.
+
+A high leverage point with a large residual exerts massive influence on parameter estimation, capable of rotating the
+entire regression hyperplane.
+
+<OutlierTreatmentExplorer />
+
+## Treatment strategies
+
+Once detected, anomalies must be addressed through one of four operational strategies:
+
+### 1. Correction
+If the error source is known and invertible (e.g. sensor recording negative temperature due to inverted sign bit, or
+prices recorded in pence instead of pounds), deterministic transformation restores physical ground truth.
+
+### 2. Removal (Trimming)
+Discarding rows that violate domain rules or exceed extreme thresholds.
+- **When appropriate:** Unambiguous gross errors, corrupted sensor data, or malformed logs.
+- **Hazard:** Removing genuine tail observations truncates the support of the training distribution, introducing
+  survivorship bias and producing models that fail under extreme production conditions.
+
+### 3. Winsorising and clipping
+Winsorisation clamps extreme values to specified empirical percentiles (e.g., 1st and 99th percentiles) rather than
+discarding the observation:
+
+$$
+\tilde{x}_i = \begin{cases} q_\alpha & \text{if } x_i < q_\alpha, \\ x_i & \text{if } q_\alpha \le x_i \le q_{1-\alpha}, \\ q_{1-\alpha} & \text{if } x_i > q_{1-\alpha}. \end{cases}
+$$
+
+Winsorising retains the full sample size $N$ and preserves relative monotonicity while bounding the influence of tail
+values. The clipping boundaries $[q_\alpha, q_{1-\alpha}]$ must be computed strictly on the training partition and
+frozen for inference.
+
+### 4. Robust model estimation
+Rather than altering the underlying data, the estimator itself is made resistant to outliers:
+- **Huber M-estimation:** Replaces squared $L_2$ error with an absolute $L_1$ penalty for residuals exceeding threshold
+  $\delta$ <Cite id="huber1964" />:
+  
+  $$
+  \rho_\delta(e) = \begin{cases} \frac{1}{2} e^2 & \text{if } |e| \le \delta, \\ \delta (|e| - \frac{1}{2} \delta) & \text{if } |e| > \delta. \end{cases}
+  $$
+
+- **Tree ensembles:** Decision trees split on rank orderings rather than absolute metric distances, making split
+  locations naturally invariant to monotonic shifts of extreme values.
 
 ## Pitfalls
+
+- **Data peeling (iterative masking):** Applying a 3-sigma rule iteratively without recalculating robust scale causes
+  clean points to be progressively peeled away as the sample variance artificially collapses.
+- **Deleting outliers to artificially boost model metrics:** Pruning extreme residuals from training and evaluation sets
+  inflates $R^2$ and deflates test RMSE, creating an illusion of high predictive precision while blinding the model to
+  real-world edge cases.
+- **Applying symmetric clipping to asymmetric distributions:** Applying symmetric clipping (e.g. $\pm 3\sigma$) to
+  log-normal or Pareto distributions (such as transaction amounts or income) truncates the genuine right tail while
+  leaving the left tail untouched, introducing severe estimation bias.

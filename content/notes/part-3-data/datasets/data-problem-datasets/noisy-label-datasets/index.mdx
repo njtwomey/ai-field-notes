@@ -1,0 +1,133 @@
+---
+title: 'Noisy-label datasets'
+kind: concept
+summary: 'Noisy-label datasets benchmark classification robustness when training supervision contains corrupted or crowdsourced labels, formalizing class-conditional noise transition matrices, instance-dependent errors, sample selection, and loss correction.'
+tags: [data, datasets, label-noise, robust-learning]
+aliases: [noisy-label-benchmarks, cifar-10n, cifar-100n, clothing1m, webvision]
+requires: []
+related: [learning-with-noisy-labels, detecting-and-cleaning-label-errors]
+references: [wei2021learning, xiao2015learning, li2017webvision, han2018, patrini2017, northcutt2021]
+status: draft
+updated: 2026-10-12
+---
+
+import { NoisyLabelDatasetsVisualizer } from './NoisyLabelDatasetsVisualizer'
+
+<Definition>
+**Noisy-label datasets** are benchmark corpora designed to evaluate learning algorithms when observed training labels
+$\tilde{Y} \in \{1, \dots, K\}$ diverge from latent true ground-truth targets $Y^* \in \{1, \dots, K\}$. They feature
+either synthetic label corruptions governed by parameterized noise transition matrices
+$T_{ij} = P(\tilde{Y} = j \mid Y^* = i)$, crowdsourced human disagreement (such as Amazon Mechanical Turk annotator
+votes), or uncontrolled web search scraping <Cite id="wei2021learning, xiao2015learning" />.
+</Definition>
+
+Overparameterized deep neural networks possess sufficient capacity to memorize arbitrary random label assignments.
+Standard empirical risk minimization (ERM) on noisy training sets initially fits clean, generalizable patterns before
+memorizing corrupted samples, degrading test set generalization <Cite id="han2018, patrini2017" />. Noisy-label
+benchmarks provide controlled environments and verified clean test sets to measure algorithmic resilience against label
+corruptions.
+
+<NoisyLabelDatasetsVisualizer client:load />
+
+## What These Datasets Measure
+
+Noisy-label benchmarks assess how learning algorithms model, filter, or withstand supervision errors across three core
+mathematical regimes:
+
+1. **Class-Conditional Noise (CCN)**: The corruption probability depends strictly on the true class $Y^*$, independent
+   of the image features $X$:
+   $$
+   P(\tilde{Y} = j \mid X = x, Y^* = i) = P(\tilde{Y} = j \mid Y^* = i) = T_{ij}
+   $$
+   - **Symmetric (Uniform) Noise**: A label flips to any of the other $K-1$ classes with uniform probability
+     $\frac{\eta}{K-1}$.
+   - **Asymmetric (Pair) Noise**: Confusing pairs flip unidirectionally (e.g. $\text{cat} \to \text{dog}$,
+     $\text{truck} \to \text{automobile}$) with probability $\eta$.
+2. **Instance-Dependent Noise (IDN)**: The error probability $P(\tilde{Y} = j \mid X = x, Y^* = i)$ varies per
+   individual sample $x$. Ambiguous, low-contrast, or boundary examples suffer significantly higher annotation error
+   rates than prototypical exemplars <Cite id="wei2021learning" />.
+3. **Open-Set Label Noise**: The training set contains out-of-distribution instances whose true categories do not belong
+   to the target label space $\{1, \dots, K\}$ at all, commonly arising in web-crawled datasets like WebVision
+   <Cite id="li2017webvision" />.
+
+---
+
+## Catalogue of Canonical Noisy-Label Benchmarks
+
+| Benchmark | Domain / Scale | Noise Type | Noise Rate | Ground-Truth Validation | Canonical Reference |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| **CIFAR-10N** | 60,000 images ($32 \times 32$) | Real human crowdsourced (MTurk) | $9.1\% \text{--} 17.2\%$ | Original clean CIFAR-10 test set | Wei et al. <Cite id="wei2021learning" /> |
+| **CIFAR-100N** | 60,000 images ($32 \times 32$) | Real human crowdsourced (MTurk) | $27.3\% \text{--} 40.2\%$ | Original clean CIFAR-100 test set | Wei et al. <Cite id="wei2021learning" /> |
+| **Clothing1M** | 1,000,000 online clothing images | Web crawler keyword extraction | $\sim 38.5\%$ | 14k clean val, 10k clean test | Xiao et al. <Cite id="xiao2015learning" /> |
+| **WebVision** | 2.44M images (1,000 ImageNet classes) | Google & Flickr query scraping | $\sim 20\% \text{--} 30\%$ | ImageNet-1k & WebVision test | Li et al. <Cite id="li2017webvision" /> |
+| **Animal-10N** | 55,000 images (5 animal pairs) | Real search engine query noise | $\sim 8.0\%$ | Clean test split (5,000 images) | Song et al. (2019) |
+| **Synthetic CIFAR / MNIST** | 60k images with simulated $\Tmat$ | Algorithmic symmetric / asymmetric flips | Controlled ($10\%\text{--}80\%$) | Synthetic ground truth | Patrini et al. <Cite id="patrini2017" /> |
+
+---
+
+## Detailed Benchmark Profiles
+
+### CIFAR-10N and CIFAR-100N: Real Human Annotation Noise (2021)
+
+Developed by Wei et al. <Cite id="wei2021learning" />, CIFAR-10N and CIFAR-100N address the discrepancy between
+synthetic label flipping and real human crowdsourcing:
+- **Annotation Pipeline**: 3 to 5 independent Amazon Mechanical Turk workers annotated every training image from
+  CIFAR-10 and CIFAR-100.
+- **Multiple Noise Splits**:
+  - *Clean*: The consensus or original label.
+  - *Random 1, 2, 3*: Individual noisy submissions from random workers ($\approx 17.2\%$ noise on CIFAR-10).
+  - *Aggregate*: Majority vote among annotators ($\approx 9.1\%$ noise).
+  - *Worst*: The annotator label that disagrees most with the ground truth ($\approx 40.2\%$ noise on CIFAR-100).
+- **Key Finding**: Algorithms engineered specifically for synthetic symmetric noise perform poorly on human noise,
+  because human errors reflect perceptual ambiguity rather than uniform random flips.
+
+### Clothing1M: Large-Scale Real-World E-Commerce Noise (2015)
+
+Introduced by Xiao et al. <Cite id="xiao2015learning" />, Clothing1M is an industry benchmark for learning with
+uncontrolled web label noise:
+- **Data Scale**: 1 million high-resolution clothing images across 14 categories (e.g. *T-shirt*, *Shirt*, *Suit*,
+  *Dress*, *Vest*).
+- **Noise Source**: Labels were automatically extracted from surrounding seller text and metadata on online shopping
+  platforms.
+- **Noise Characterization**: Features asymmetric confusion matrices (e.g. sellers tagging *knitwear* as *sweater* or
+  *cardigan*) with an overall estimated noise rate of $38.5\%$.
+- **Clean Subsets**: Contains 50k human-verified clean training images, 14k clean validation images, and 10k clean test
+  images.
+
+### WebVision: Web-Scale ImageNet Alternative (2017)
+
+Constructed by Li et al. <Cite id="li2017webvision" />, WebVision evaluates whether deep networks can be trained
+directly from web searches without human curation:
+- **Corpus**: 2.44 million images scraped from Google Images and Flickr using the 1,000 synset names from ImageNet-1k.
+- **Dual Noise Dynamics**: Contains both label noise (inaccurate category tags) and background open-set outliers (images
+  unrelated to any of the 1,000 synsets).
+- **Cross-Domain Evaluation**: Evaluated both on its own human-verified validation set and on the standard ImageNet
+  ILSVRC2012 validation set.
+
+---
+
+## Choosing a Noisy-Label Dataset
+
+- **Algorithmic Theory & Transition Estimation**:
+  - Synthetic CIFAR-10 / MNIST (Controlled T_ij, known ground truth)
+- **Real Crowdsourcing & Perceptual Ambiguity**:
+  - CIFAR-10N / CIFAR-100N (Human MTurk disagreement, standard architectures)
+- **Large-Scale Industry Web Scraping**:
+  - *E-commerce / Asymmetric confusion*: Clothing1M
+  - *Multi-source web search & open-set outliers*: WebVision
+- **Error Detection & Data Pruning**:
+  - Cleanlab Benchmarks / Confident Learning on ImageNet
+
+---
+
+## Known Problems and Benchmark Pitfalls
+
+1. **Synthetic Noise Unrealistic**: Synthetic uniform flipping alters unambiguous images into impossible labels (e.g. a
+   high-contrast airplane labeled as dog). Modern robust algorithms easily identify these via prediction entropy,
+   failing to generalize to subtle human errors <Cite id="wei2021learning" />.
+2. **Hidden Test Set Contamination**: If validation or test sets are derived from the same noisy scraping pipeline,
+   evaluation metrics reward models that overfit to common label errors rather than true concepts
+   <Cite id="northcutt2021" />.
+3. **Reliance on Clean Subsets**: Many semi-supervised noisy label techniques rely on small verified clean partitions
+   (e.g. Clothing1M's 50k clean set). When applied in domains where zero clean verification is available, performance
+   deteriorates.
