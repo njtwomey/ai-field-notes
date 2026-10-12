@@ -48,16 +48,20 @@ const inScopeFile = (rel: string) =>
 if (scopeArgs.length)
   console.log(`doctor: ${notes.length} of ${allNotes.length} notes in scope (${scopeArgs.join(', ')})`)
 
-// Every note must compile exactly as the site compiles it; the index check reads frontmatter and maths only.
+// Every note must compile exactly as the site compiles it; the index check reads frontmatter and maths only. A few
+// compiles run at once: starting all of them together held every syntax tree in memory and exhausted the heap.
+const queue = [...notes]
 await Promise.all(
-  notes.map(async (n) => {
-    const file = path.join(contentDir, n.file)
-    try {
-      await compile({ path: file, value: fs.readFileSync(file, 'utf8') }, mdxOptions)
-    } catch (err) {
-      const e = err as { reason?: string; message: string; line?: number; column?: number }
-      const where = e.line ? `:${e.line}:${e.column}` : ''
-      errors.push(`content/${n.file}${where}: MDX does not compile: ${e.reason ?? e.message}`)
+  Array.from({ length: 8 }, async () => {
+    for (let n = queue.shift(); n; n = queue.shift()) {
+      const file = path.join(contentDir, n.file)
+      try {
+        await compile({ path: file, value: fs.readFileSync(file, 'utf8') }, mdxOptions)
+      } catch (err) {
+        const e = err as { reason?: string; message: string; line?: number; column?: number }
+        const where = e.line ? `:${e.line}:${e.column}` : ''
+        errors.push(`content/${n.file}${where}: MDX does not compile: ${e.reason ?? e.message}`)
+      }
     }
   }),
 )
@@ -145,6 +149,33 @@ for (const rel of sourceFiles) {
         errors.push(`content/${rel}: imports "${spec}" from outside its note; move shared code to site/src or _shared/`)
       }
     }
+  }
+}
+
+// A note's local imports must name what the module exports: a default import of a module with only named exports
+// compiles and reaches the dev server as undefined (the figure silently disappears), and fails only the production
+// build.
+const exportPattern = (name: string) =>
+  new RegExp(
+    `export\\s+(async\\s+)?(function|const|let|class|type|interface)\\s+${name}\\b|export\\s*\\{[^}]*\\b${name}\\b`,
+  )
+for (const n of notes) {
+  const file = path.join(contentDir, n.file)
+  const source = fs.readFileSync(file, 'utf8')
+  for (const [, def, named, spec] of source.matchAll(/^import\s+(?:(\w+)|\{([^}]*)\})\s+from\s+['"](\.[^'"]+)['"]/gm)) {
+    const base = path.resolve(path.dirname(file), spec)
+    const target = ['', '.tsx', '.ts'].map((e) => base + e).find((p) => fs.existsSync(p) && fs.statSync(p).isFile())
+    if (!target) continue // a missing module fails the compile above
+    const module = fs.readFileSync(target, 'utf8')
+    if (def && !/export default/.test(module))
+      errors.push(`content/${n.file}: "${spec}" has no default export; import { ${def} } instead`)
+    for (const name of (named ?? '').split(',').map((s) =>
+      s
+        .trim()
+        .split(/\s+as\s+/)[0]
+        .replace(/^type\s+/, ''),
+    ))
+      if (name && !exportPattern(name).test(module)) errors.push(`content/${n.file}: "${spec}" does not export ${name}`)
   }
 }
 
