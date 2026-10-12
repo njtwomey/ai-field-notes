@@ -12,36 +12,24 @@ import {
   seriesLayers,
   type SeriesSpec,
   useAxis,
+  useComputed,
   useFigureState,
 } from 'aifn-render'
-import type { RegressionSurface } from '@/generated/contracts'
-import { useFigure } from '@/lib/generated'
-import { descend, excess, inGrid, type LossAndGrad, type Vec } from './optim'
-
-const mean = (xs: number[]) => xs.reduce((a, v) => a + v, 0) / xs.length
-
-/** MSE of y ≈ w·x + b from sufficient statistics: O(1) per evaluation, however many samples. */
-function mseProblem(x: number[], y: number[]) {
-  const mx = mean(x)
-  const my = mean(y)
-  const mxx = mean(x.map((v) => v * v))
-  const mxy = mean(x.map((v, i) => v * y[i]))
-  const myy = mean(y.map((v) => v * v))
-  const f: LossAndGrad = ([w, b]) => ({
-    loss: myy + w * w * mxx + b * b - 2 * w * mxy - 2 * b * my + 2 * w * b * mx,
-    grad: [2 * (w * mxx + b * mx - mxy), 2 * (w * mx + b - my)],
-  })
-  // Hessian 2·[[E x², E x], [E x, 1]]; eigenvalues of a symmetric 2×2 matrix in closed form.
-  const tr = 2 * (mxx + 1)
-  const det = 4 * (mxx - mx * mx)
-  const disc = Math.sqrt(tr * tr - 4 * det)
-  return { f, lambdaMax: (tr + disc) / 2, lambdaMin: (tr - disc) / 2 }
-}
+import { descend, excess, inGrid } from './optim'
+import { curvature, regressionSurface, type Vec } from './surfaces'
 
 const log10 = Math.log10
 
 export function StepSizeExplorer() {
-  const { data, error } = useFigure<RegressionSurface>('gradient-descent/regression-surface')
+  // The data, the loss surface, the optimum and the Hessian are fixed: computed once, on the engine.
+  const { value: problem } = useComputed(
+    () => {
+      const surface = regressionSurface()
+      return { surface, ...curvature(surface) }
+    },
+    [],
+    { mode: 'release' },
+  )
   const state = useFigureState({
     logLr: float(-1.3, {
       min: -3,
@@ -56,44 +44,37 @@ export function StepSizeExplorer() {
   })
   const [start, setStart] = useState<Vec>([-1, 3])
 
-  const problem = useMemo(() => (data ? mseProblem(data.data.x, data.data.y) : undefined), [data])
   const lr = 10 ** state.logLr
-  const run = useMemo(
-    () => (problem ? descend(problem.f, start, lr, state.steps) : undefined),
+  const { value: run } = useComputed(
+    () => descend(problem.surface.f, start, lr, state.steps),
     [problem, start, lr, state.steps],
   )
 
-  const overlay = useMemo((): SeriesSpec[] => {
-    if (!run || !data) return []
-    return [
+  const { surface } = problem
+  const overlay = useMemo(
+    (): SeriesSpec[] => [
       { name: 'path', type: 'line', x: run.path.map((p) => p[0]), y: run.path.map((p) => p[1]), showPoints: true },
-      { name: 'minimum', type: 'scatter', x: [data.optimum.x], y: [data.optimum.y], emphasis: true },
-    ]
-  }, [run, data])
+      { name: 'minimum', type: 'scatter', x: [surface.optimum[0]], y: [surface.optimum[1]], emphasis: true },
+    ],
+    [run, surface],
+  )
 
   const curve = useMemo(() => {
-    if (!run || !data) return []
-    const e = excess(run.losses, data.optimum_loss)
+    const e = excess(run.losses, surface.optimumLoss)
     return [{ name: 'MSE − MSE*', type: 'line' as const, x: e.map((_, i) => i), y: e, slot: 1 }]
-  }, [run, data])
+  }, [run, surface])
 
-  const startHandle: Handle[] | undefined = data && [
-    {
-      kind: 'point',
-      at: start,
-      label: 'start',
-      onDrag: ([w, b]) => setStart([inGrid(w, data.surface.x), inGrid(b, data.surface.y)]),
-    },
-  ]
+  const startHandle: Handle = {
+    kind: 'point',
+    at: start,
+    label: 'start',
+    onDrag: ([w, b]) => setStart([inGrid(w, surface.w), inGrid(b, surface.b)]),
+  }
 
-  // Axes before any early return: hooks run in the same order on every render.
   const xAxis = useAxis({ label: 'w' })
   const yAxis = useAxis({ label: 'b' })
   const xAxis2 = useAxis({ label: 'step', hold: 'union' })
   const yAxis2 = useAxis({ label: 'MSE − MSE*', hold: 'union', log: true })
-
-  if (error) return <p className="text-sm text-destructive">{error.message}</p>
-  if (!data || !problem || !run) return null
 
   const limit = 2 / problem.lambdaMax
   const ratio = lr / limit
@@ -138,18 +119,16 @@ export function StepSizeExplorer() {
           <Readout label="regime" value={regime} />
           <Readout
             label="final excess loss"
-            value={run.diverged ? '∞' : formatNumber(run.losses.at(-1)! - data.optimum_loss)}
+            value={run.diverged ? '∞' : formatNumber(run.losses.at(-1)! - surface.optimumLoss)}
           />
         </>
       }
     >
       <div className="grid gap-4 md:grid-cols-2">
         <Plot x={xAxis} y={yAxis} height={340}>
-          <Raster x={data.surface.x} y={data.surface.y} z={data.surface.z} valueLabel={'log₁₀ MSE'} />
+          <Raster x={surface.w} y={surface.b} z={surface.z} valueLabel={'log₁₀ MSE'} />
           {seriesLayers(overlay, { live: true })}
-          {(startHandle ?? []).map((h, i) => (
-            <Handle key={i} {...h} />
-          ))}
+          <Handle {...startHandle} />
         </Plot>
         <Plot x={xAxis2} y={yAxis2} height={340}>
           {seriesLayers(curve)}

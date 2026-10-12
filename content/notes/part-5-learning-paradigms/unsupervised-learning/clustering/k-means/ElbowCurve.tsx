@@ -1,37 +1,35 @@
 import { useMemo } from 'react'
 import { Curve, Figure, formatNumber, Handle, int, Plot, Points, Readout, useAxis, useFigureState } from 'aifn-render'
-import type { PointCloud2d } from '@/generated/contracts'
-import { useFigure } from '@/lib/generated'
-import type { Vec2 as Point } from 'aifn-compute/numerics/linalg'
+import { blobData } from './blobs'
 import { converge } from './lloyd'
 
 const K_MAX = 8
 
 /**
- * Inertia against k on the blobs from python/mlc/figures/kmeans.py, each k the best of several k-means++ runs, with
- * the clustering at the chosen k beside it.
+ * Inertia against k on three Gaussian blobs (`blobs.ts`), each k the best of several k-means++ runs, with the
+ * clustering at the chosen k beside it.
  */
 export function ElbowCurve() {
-  const { data } = useFigure<PointCloud2d>('k-means/blobs')
-  const points = useMemo(() => (data ? data.x.map((x, i) => [x, data.y[i]] as Point) : []), [data])
+  const data = blobData()
+  const { points } = data
   const state = useFigureState({
     k: int(3, { min: 1, max: K_MAX, step: 1, label: 'k' }),
     restarts: int(5, { min: 1, max: 10, step: 1, label: 'restarts per k' }),
   })
 
-  const fits = useMemo(() => {
-    if (!points.length) return []
-    return Array.from({ length: K_MAX }, (_, i) => {
-      const runs = Array.from({ length: state.restarts }, (_, seed) => converge(points, i + 1, 'kmeans++', seed))
-      return runs.reduce((best, r) => (r.inertia < best.inertia ? r : best))
-    })
-  }, [points, state.restarts])
+  const fits = useMemo(
+    () =>
+      Array.from({ length: K_MAX }, (_, i) => {
+        const runs = Array.from({ length: state.restarts }, (_, seed) => converge(points, i + 1, 'kmeans++', seed))
+        return runs.reduce((best, r) => (r.inertia < best.inertia ? r : best))
+      }),
+    [points, state.restarts],
+  )
 
   const xAxis = useAxis({ label: 'k', hold: 'union' })
   const yAxis = useAxis({ label: 'inertia', range: [0, undefined], hold: 'union' })
   const xAxis2 = useAxis({ label: 'x₁', hold: 'union' })
   const yAxis2 = useAxis({ label: 'x₂', hold: 'union' })
-  if (!data || !fits.length) return null
   const ks = fits.map((_, i) => i + 1)
   const chosen = fits[state.k - 1]
 

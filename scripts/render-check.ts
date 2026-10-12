@@ -144,7 +144,11 @@ for (const slug of slugs) {
   else {
     if (!html.includes('id="root"')) problems.push('not the site (the server stopped, or Chrome showed an error page)')
     else if (/<h1[^>]*>Not found<\/h1>/.test(html)) problems.push('no such note')
-    else if (!/<h1[^>]*>/.test(html)) problems.push('no title (page crashed or did not load)')
+    else if (/<h1[^>]*>Something went off by one<\/h1>/.test(html)) {
+      // The route error boundary has a title of its own, so a crashed page would otherwise pass the check below.
+      const message = /\b(\w*Error: [^<]{0,240})/.exec(html)?.[1]
+      problems.push(`page crashed${message ? `: ${message}` : ''}`)
+    } else if (!/<h1[^>]*>/.test(html)) problems.push('no title (page crashed or did not load)')
     const failed = count(html, /This figure failed to render/g)
     if (failed) problems.push(`${failed} failed figure(s)`)
     const maths = count(html, /katex-error/g)

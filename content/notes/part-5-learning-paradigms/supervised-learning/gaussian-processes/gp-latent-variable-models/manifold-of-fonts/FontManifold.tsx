@@ -18,8 +18,13 @@ import {
   useFigureState,
   type Vec2,
 } from 'aifn-render'
-import type { FontInfo, FontManifoldData, GlyphLayout } from '@/generated/contracts'
-import { useFigure } from '@/lib/generated'
+import {
+  FONT_CLASSES,
+  glyphContours,
+  type FontInfo,
+  type FontVectors,
+  type GlyphLayout,
+} from 'aifn-methods/data/real/fonts'
 import {
   centre,
   gplvmFitter,
@@ -48,8 +53,8 @@ const STRIP_Y: [number, number] = [-STRIP_ROW - 120, 800]
 /** Milliseconds of fitting per animation frame, so the page stays responsive while the model learns. */
 const FRAME_BUDGET = 12
 
-const CLASSES: FontInfo['cls'][] = ['sans', 'humanist', 'serif', 'didone', 'slab', 'mono']
-const CLASS_NAMES = ['sans', 'humanist', 'serif', 'didone', 'slab', 'mono']
+const CLASSES = FONT_CLASSES
+const CLASS_NAMES = [...FONT_CLASSES]
 
 type Subset = 'all' | 'upright' | 'proportional'
 const SUBSETS: { value: Subset; label: string }[] = [
@@ -68,6 +73,43 @@ const PAIRS: { value: Pair; label: string }[] = [
 ]
 
 const fontName = (f: FontInfo) => `${f.family} ${f.style}`
+
+/** The engine's font table with one plain array per font, as the fitting and the drawing read it. */
+type FontData = Omit<FontVectors, 'values'> & { vectors: number[][] }
+
+let table: Promise<FontData> | null = null
+
+/** Loads the font table the first time it is asked for: its module holds every font's outlines (800 KB). */
+function loadFonts(): Promise<FontData> {
+  table ??= import('aifn-methods/data/real/fonts')
+    .then(({ fontVectors }) => {
+      const { values, ...rest } = fontVectors()
+      const vectors = rest.fonts.map((_, i) => Array.from(values.subarray(i * rest.width, (i + 1) * rest.width)))
+      return { ...rest, vectors }
+    })
+    // Forget a failed load, so that the next mount retries.
+    .catch((error: unknown) => {
+      table = null
+      throw error
+    })
+  return table
+}
+
+/** The font table, or the error that stopped it loading. */
+function useFonts(): { data?: FontData; error?: Error } {
+  const [result, setResult] = useState<{ data?: FontData; error?: Error }>({})
+  useEffect(() => {
+    let live = true
+    loadFonts().then(
+      (data) => live && setResult({ data }),
+      (error: unknown) => live && setResult({ error: error instanceof Error ? error : new Error(String(error)) }),
+    )
+    return () => {
+      live = false
+    }
+  }, [])
+  return result
+}
 
 /** The fitted manifold on one subset of fonts: latent points, the GP posterior and its standard deviation grid. */
 type Model = {
@@ -88,7 +130,7 @@ type FitProgress = { subset: Subset; idx: number[]; X: Point[]; iteration: numbe
  * that the latent points can be drawn moving into place.
  */
 function useManifoldFit(
-  data: FontManifoldData | undefined,
+  data: FontData | undefined,
   subset: Subset,
   onFitted: (model: Model) => void,
 ): FitProgress | undefined {
@@ -137,15 +179,9 @@ function useManifoldFit(
   return progress?.subset === subset ? progress : undefined
 }
 
-/** Contours of one glyph from a font vector, shifted right by dx. */
-function glyphContours(v: number[], g: GlyphLayout, dx: number, dy = 0): Vec2[][] {
-  let o = g.offset
-  return g.contours.map((n) => {
-    const pts: Vec2[] = []
-    for (let i = 0; i < n; i++) pts.push([v[o + 2 * i] + dx, v[o + 2 * i + 1] + dy])
-    o += 2 * n
-    return pts
-  })
+/** Contours of one glyph from a font vector, shifted right by dx and up by dy. */
+function placedContours(v: number[], g: GlyphLayout, dx: number, dy = 0): Vec2[][] {
+  return glyphContours(v, g).map((c) => Array.from(c.x, (x, i): Vec2 => [x + dx, c.y[i] + dy]))
 }
 
 /** A line of text set from a font vector: glyph contours placed by the vector's own advance widths. */
@@ -156,14 +192,14 @@ function setLine(v: number[], glyphs: Map<string, GlyphLayout>, text: string, dy
   for (const ch of text) {
     const g = glyphs.get(ch)!
     starts.push(x)
-    contours.push(...glyphContours(v, g, x, dy))
+    contours.push(...placedContours(v, g, x, dy))
     x += v[g.advance]
   }
   return { contours, starts, width: x }
 }
 
 /** Latent point of the first font in `idx` that matches, in order of preference. */
-function pick(fonts: FontInfo[], idx: number[], tests: ((f: FontInfo) => boolean)[]): number {
+function pick(fonts: readonly FontInfo[], idx: number[], tests: ((f: FontInfo) => boolean)[]): number {
   for (const test of tests) {
     const i = idx.find((j) => test(fonts[j]))
     if (i !== undefined) return i
@@ -171,7 +207,7 @@ function pick(fonts: FontInfo[], idx: number[], tests: ((f: FontInfo) => boolean
   return idx[0]
 }
 
-function pairEnds(fonts: FontInfo[], idx: number[], pair: Pair): [number, number] {
+function pairEnds(fonts: readonly FontInfo[], idx: number[], pair: Pair): [number, number] {
   const is = (family: string, style: string) => (f: FontInfo) => f.family === family && f.style === style
   if (pair === 'weight') {
     const weights = idx.map((i) => fonts[i].weight)
@@ -248,7 +284,7 @@ function project(m: Model, dims: { tip: number; stem: number }, start: Point, ta
 
 /** A manifold of real fonts, learned in the browser: drag the latent point, or drag the foot serif of the "P". */
 export function FontManifold() {
-  const { data, error } = useFigure<FontManifoldData>('manifold-of-fonts/glyphs')
+  const { data, error } = useFonts()
   const state = useFigureState({
     x1: slider(-LIM, LIM, 0, { step: 0.01, label: 'latent x₁' }),
     x2: slider(-LIM, LIM, 0, { step: 0.01, label: 'latent x₂' }),
@@ -476,7 +512,7 @@ export function FontManifold() {
         <div className="flex flex-col gap-3">
           <Plot x={wordX} y={wordY} bare fitHeight ariaLabel={`The word ${data.display} in the generated font`}>
             <Annotation y={0} muted />
-            <Annotation y={data.cap_height} muted />
+            <Annotation y={data.capHeight} muted />
             <Shapes shapes={[{ contours: word.contours }]} />
             {(glyphHandles ?? []).map((h, i) => (
               <Handle key={i} {...h} />

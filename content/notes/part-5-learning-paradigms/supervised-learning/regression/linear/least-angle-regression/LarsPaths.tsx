@@ -16,18 +16,18 @@ import {
   TableHeader,
   TableRow,
   useAxis,
+  useComputed,
   useFigureState,
 } from 'aifn-render'
-import type { KnotPath, LarsPaths as Paths } from '@/generated/contracts'
-import { useFigure } from '@/lib/generated'
 import { cn } from '@/lib/utils'
+import { type KnotPath, larsPathsData } from '../_shared/diabetes'
 import { featureStyle } from '../_shared/features'
 
 type Method = 'lar' | 'lasso'
 
 /** Coefficients at ‖w‖₁ = t: the paths are straight lines between consecutive knots. */
 function at(path: KnotPath, t: number): number[] {
-  const norms = path.l1_norm
+  const norms = path.l1Norm
   let k = norms.findIndex((n) => n >= t)
   if (k <= 0) k = k === 0 ? 1 : norms.length - 1
   const span = norms[k] - norms[k - 1]
@@ -35,9 +35,9 @@ function at(path: KnotPath, t: number): number[] {
   return path.coef.map((row) => row[k - 1] + f * (row[k] - row[k - 1]))
 }
 
-/** LARS and LARS–lasso paths on the diabetes data, precomputed by python/mlc/figures/linear_models.py. */
+/** LARS and LARS–lasso paths on the diabetes data, from the engine's `leastAngleRegression`. */
 export function LarsPaths() {
-  const { data } = useFigure<Paths>('least-angle-regression/paths')
+  const data = useComputed(larsPathsData, [], { mode: 'release' }).value
   const state = useFigureState({
     method: choice<Method>(
       [
@@ -50,25 +50,22 @@ export function LarsPaths() {
     // Position along the path as a fraction of the OLS solution's ‖w‖₁, so one control serves both methods.
     t: slider(0, 1, 0.4, { step: 0.005, label: '‖w‖₁ as a fraction of the OLS ‖w‖₁' }),
   })
-  const path = data?.[state.method]
-  const max = path ? path.l1_norm[path.l1_norm.length - 1] : 1
+  const path = data[state.method]
+  const max = path.l1Norm[path.l1Norm.length - 1]
   const shown = state.t * max
   const xAxis = useAxis({ label: '‖w‖₁', hold: 'union' })
   const yAxis = useAxis({ label: 'coefficient', hold: 'union' })
 
   const series = useMemo(
     (): SeriesSpec[] =>
-      path && data
-        ? data.features.map((name, j) => ({
-            type: 'line',
-            x: path.l1_norm,
-            y: path.coef[j],
-            ...featureStyle(name),
-          }))
-        : [],
+      data.features.map((name, j) => ({
+        type: 'line',
+        x: path.l1Norm,
+        y: path.coef[j],
+        ...featureStyle(name),
+      })),
     [path, data],
   )
-  if (!data || !path) return null
   const coef = at(path, shown)
   return (
     <Figure
@@ -78,7 +75,7 @@ export function LarsPaths() {
       readouts={
         <>
           <Readout label="‖w‖₁" value={formatNumber(shown)} />
-          <Readout label="knots" value={path.l1_norm.length - 1} />
+          <Readout label="knots" value={path.l1Norm.length - 1} />
           <Readout label="active features" value={coef.filter((c) => Math.abs(c) > 1e-9).length} />
         </>
       }

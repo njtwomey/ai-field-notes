@@ -14,13 +14,13 @@ import {
   TableRow,
   useAxis,
 } from 'aifn-render'
-import type { CoefficientPath } from '@/generated/contracts'
+import type { CoefficientPath } from './diabetes'
 import { cn } from '@/lib/utils'
 import { featureStyle, nearest } from './features'
 
 /**
- * Coefficient paths against log₁₀ of the penalty, with a draggable penalty line that snaps to the precomputed grid,
- * and a table of the coefficients at that penalty. Precomputed paths come from python/mlc/figures/linear_models.py.
+ * Coefficient paths against log₁₀ of the penalty, with a draggable penalty line that snaps to the path's grid,
+ * and a table of the coefficients at that penalty.
  */
 export function CoefficientPathExplorer({
   path,

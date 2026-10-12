@@ -10,17 +10,13 @@ import {
   seriesLayers,
   type SeriesSpec,
   useAxis,
+  useComputed,
   useFigureState,
   type Vector,
   Vectors,
 } from 'aifn-render'
-import type { LossSurface } from '@/generated/contracts'
-import { useFigure } from '@/lib/generated'
-import { sigmoid } from 'aifn-compute/numerics/special'
-
-const mean = (xs: readonly number[]) => xs.reduce((a, b) => a + b, 0) / xs.length
-
-type Vec = [number, number]
+import { explorerData } from './datasets'
+import { accuracyAt, gradient, loss, problemOf, type Vec } from './logistic'
 
 const penalty = (lambda: number, a: number, b: number) => 0.5 * lambda * (a * a + b * b)
 
@@ -29,12 +25,14 @@ function boundary(w1: number, w2: number): number[] | undefined {
   return Math.abs(w2) > 1e-6 ? [-4, 4].map((x1) => (-w1 * x1) / w2) : undefined
 }
 
+const GROUP_NAMES = ['y = 0', 'y = 1']
+
 /**
- * The unregularised surface comes from python/mlc/figures/logistic_regression.py. The L2 term, the current point
- * and the regularised minimum are computed here.
+ * The data and the unregularised surface come from `explorerData` (engine blobs and cross-entropy, computed once).
+ * The L2 term, the current point and the regularised minimum are added here.
  */
 export function LossSurfaceExplorer() {
-  const { data, error } = useFigure<LossSurface>('logistic-regression/loss-surface')
+  const data = useComputed(explorerData, [], { mode: 'release' }).value
   const state = useFigureState({
     w1Param: float(-2, { min: -4, max: 4, step: 0.1, label: 'w₁' }),
     w2Param: float(2.5, { min: -4, max: 4, step: 0.1, label: 'w₂' }),
@@ -45,57 +43,48 @@ export function LossSurfaceExplorer() {
 
   // Regularised surface and its minimum on the grid. Recomputed only when λ changes.
   const surface = useMemo(() => {
-    if (!data) return undefined
-    const { x, y, z } = data.surface
-    const total = z.map((row, i) => row.map((v, j) => v + penalty(state.lambda, x[j], y[i])))
+    const { axis, z } = data.surface
+    const total = z.map((row, i) => row.map((v, j) => v + penalty(state.lambda, axis[j], axis[i])))
     let best = { i: 0, j: 0 }
     total.forEach((row, i) =>
       row.forEach((v, j) => {
         if (v < total[best.i][best.j]) best = { i, j }
       }),
     )
-    return { z: total, minimum: [x[best.j], y[best.i]] as [number, number] }
+    return { z: total, minimum: [axis[best.j], axis[best.i]] as [number, number] }
   }, [data, state.lambda])
 
+  // The unpenalised problem: the readouts and arrows show the cross-entropy and the penalty separately.
+  const problem = useMemo(() => problemOf(data.data, 0), [data])
   const stats = useMemo(() => {
-    if (!data) return undefined
-    const { x, y, group } = data.data
-    const labels = group ?? []
-    const p = x.map((xi, i) => sigmoid(w1 * xi + w2 * y[i]))
-    const crossEntropy = mean(
-      p.map((pi, i) => -(labels[i] * Math.log(pi + 1e-12) + (1 - labels[i]) * Math.log(1 - pi + 1e-12))),
-    )
-    const accuracy = mean(p.map((pi, i) => ((pi >= 0.5 ? 1 : 0) === labels[i] ? 1 : 0)))
-    // ∇ cross-entropy = Xᵀ(p − y)/n and ∇ penalty = λw.
-    const grad: [number, number] = [
-      mean(p.map((pi, i) => (pi - labels[i]) * x[i])),
-      mean(p.map((pi, i) => (pi - labels[i]) * y[i])),
-    ]
-    return { crossEntropy, reg: penalty(state.lambda, w1, w2), accuracy, grad }
-  }, [data, w1, w2, state.lambda])
+    const w: Vec = [w1, w2]
+    return {
+      crossEntropy: loss(problem, w),
+      reg: penalty(state.lambda, w1, w2),
+      accuracy: accuracyAt(problem, w),
+      // ∇ cross-entropy, from autodiff; ∇ penalty = λw is added in the arrows and readout.
+      grad: gradient(problem, w),
+    }
+  }, [problem, w1, w2, state.lambda])
 
   const overlay = useMemo(
-    () =>
-      surface
-        ? [
-            {
-              name: 'minimum',
-              type: 'scatter' as const,
-              x: [surface.minimum[0]],
-              y: [surface.minimum[1]],
-              emphasis: true,
-            },
-          ]
-        : [],
+    () => [
+      {
+        name: 'minimum',
+        type: 'scatter' as const,
+        x: [surface.minimum[0]],
+        y: [surface.minimum[1]],
+        emphasis: true,
+      },
+    ],
     [surface],
   )
 
   const series = useMemo((): SeriesSpec[] => {
-    if (!data || !surface) return []
     const chosen = boundary(w1, w2)
     const optimal = boundary(...surface.minimum)
     return [
-      { name: 'data', type: 'scatter', ...data.data, groupNames: data.data.group_names ?? undefined },
+      { name: 'data', type: 'scatter', ...data.data, groupNames: GROUP_NAMES },
       ...(chosen ? [{ name: 'your boundary', type: 'line' as const, x: [-4, 4], y: chosen, slot: 3 }] : []),
       ...(optimal ? [{ name: 'minimum', type: 'line' as const, x: [-4, 4], y: optimal, slot: 4, dashed: true }] : []),
     ]
@@ -112,7 +101,6 @@ export function LossSurfaceExplorer() {
   // Negative gradients at w: the step that gradient descent with η = 1 would take, split into the part from the
   // cross-entropy and the part from the penalty. Slots start at 1 because slot 0 is the heatmap's own hue.
   const descent = useMemo((): Vector[] => {
-    if (!stats) return []
     const [g1, g2] = stats.grad
     const from: Vec = [w1, w2]
     const out: Vector[] = [{ from, to: [w1 - g1, w2 - g2], slot: 1, label: '−∇ cross-entropy' }]
@@ -126,13 +114,11 @@ export function LossSurfaceExplorer() {
   // On the loss surface, the weights themselves are the handle.
   // In feature space, the tip of the unit normal turns w about the origin and keeps ‖w‖ (1 when w = 0).
 
-  const xAxis = useAxis({ label: data?.surface.x_label })
-  const yAxis = useAxis({ label: data?.surface.y_label })
+  const xAxis = useAxis({ label: 'w₁' })
+  const yAxis = useAxis({ label: 'w₂' })
   const xAxis2 = useAxis({ label: 'x₁', range: [-4, 4] })
   const yAxis2 = useAxis({ label: 'x₂', range: [-4, 4], equal: xAxis2 })
 
-  if (error) return <p className="text-sm text-destructive">{error.message}</p>
-  if (!data || !surface || !stats) return null
   return (
     <Figure
       title="Loss surface and decision boundary"
@@ -156,7 +142,7 @@ export function LossSurfaceExplorer() {
     >
       <div className="grid gap-4 md:grid-cols-2">
         <Plot x={xAxis} y={yAxis} height={340}>
-          <Raster x={data.surface.x} y={data.surface.y} z={surface.z} range={[0, 3]} valueLabel={'loss'} />
+          <Raster x={data.surface.axis} y={data.surface.axis} z={surface.z} range={[0, 3]} valueLabel={'loss'} />
           {seriesLayers(overlay, { live: true })}
           <Vectors vectors={descent} />
           <Handle

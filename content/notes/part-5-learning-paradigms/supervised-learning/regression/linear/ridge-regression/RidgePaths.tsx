@@ -1,12 +1,10 @@
-import { Figure, formatNumber, Readout } from 'aifn-render'
-import type { RidgePath } from '@/generated/contracts'
-import { useFigure } from '@/lib/generated'
+import { Figure, formatNumber, Readout, useComputed } from 'aifn-render'
 import { CoefficientPathExplorer } from '../_shared/CoefficientPathExplorer'
+import { ridgePathData } from '../_shared/diabetes'
 
-/** Ridge coefficients on the diabetes data against λ, precomputed by python/mlc/figures/linear_models.py. */
+/** Ridge coefficients on the diabetes data against λ, from the engine's `ridgePath`. */
 export function RidgePaths() {
-  const { data } = useFigure<RidgePath>('ridge-regression/path')
-  if (!data) return null
+  const data = useComputed(ridgePathData, [], { mode: 'release' }).value
   return (
     <Figure
       title="Ridge shrinks every coefficient, none to zero"

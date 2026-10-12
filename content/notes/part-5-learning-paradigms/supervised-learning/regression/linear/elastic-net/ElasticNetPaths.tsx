@@ -1,16 +1,13 @@
 import { useState } from 'react'
-import { Choice, Figure, Readout } from 'aifn-render'
-import type { ElasticNetPaths as Paths } from '@/generated/contracts'
-import { useFigure } from '@/lib/generated'
+import { Choice, Figure, Readout, useComputed } from 'aifn-render'
 import { CoefficientPathExplorer } from '../_shared/CoefficientPathExplorer'
+import { elasticNetPathsData, L1_RATIOS } from '../_shared/diabetes'
 
-/** Elastic-net paths on the diabetes data for several l1 ratios, precomputed by python/mlc/figures/linear_models.py. */
+/** Elastic-net paths on the diabetes data for several l1 ratios, from the engine's `elasticNetPath`. */
 export function ElasticNetPaths() {
-  const { data } = useFigure<Paths>('elastic-net/paths')
+  const paths = useComputed(elasticNetPathsData, [], { mode: 'release' }).value
   const [ratio, setRatio] = useState('0.5')
-  if (!data) return null
-  const k = data.l1_ratios.findIndex((r) => String(r) === ratio)
-  const path = data.paths[k]
+  const path = paths[L1_RATIOS.findIndex((r) => String(r) === ratio)]
   return (
     <Figure
       title="Elastic-net paths"
@@ -20,17 +17,12 @@ export function ElasticNetPaths() {
           label="l1 ratio"
           value={ratio}
           onChange={setRatio}
-          options={data.l1_ratios.map((r) => ({ value: String(r), label: r === 1 ? '1 (lasso)' : String(r) }))}
+          options={L1_RATIOS.map((r) => ({ value: String(r), label: r === 1 ? '1 (lasso)' : String(r) }))}
         />
       }
     >
       <CoefficientPathExplorer key={ratio} path={path} symbol="α" start={1}>
-        {(i) => (
-          <Readout
-            label="nonzero coefficients"
-            value={`${path.coef.filter((row) => row[i] !== 0).length} of ${path.features.length}`}
-          />
-        )}
+        {(i) => <Readout label="nonzero coefficients" value={`${path.nonzero[i]} of ${path.features.length}`} />}
       </CoefficientPathExplorer>
     </Figure>
   )

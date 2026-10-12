@@ -12,10 +12,9 @@ import {
   useAxis,
   useFigureState,
 } from 'aifn-render'
-import type { PointCloud2d } from '@/generated/contracts'
-import { useFigure } from '@/lib/generated'
 import type { Vec2 as Point } from 'aifn-compute/numerics/linalg'
 import { CENTRE_INIT_OPTIONS, initialCentres, type CentreInit } from '../_shared/centres'
+import { blobData } from './blobs'
 import { assign, step, type State } from './lloyd'
 
 /** Every iteration from the starting centroids to convergence (at most 100 steps). */
@@ -26,10 +25,10 @@ function trace(points: Point[], centroids: Point[]): State[] {
   return out
 }
 
-/** Lloyd's algorithm one step at a time on data from python/mlc/figures/kmeans.py. */
+/** Lloyd's algorithm one step at a time on three Gaussian blobs (`blobs.ts`). */
 export function LloydStepper() {
-  const { data } = useFigure<PointCloud2d>('k-means/blobs')
-  const points = useMemo(() => (data ? data.x.map((x, i) => [x, data.y[i]] as Point) : []), [data])
+  const data = blobData()
+  const { points } = data
   const fig = useFigureState({
     k: int(3, { min: 1, max: 6, step: 1, label: 'k', suggestions: [2, 3, 4, 6] }),
     seed: int(3, { ge: 0, label: 'seed' }),
@@ -43,15 +42,15 @@ export function LloydStepper() {
   const [pos, setPos] = useState({ settings, at: 0 })
   const start = useMemo(() => {
     if (placed?.settings === settings) return placed.centroids
-    return points.length ? initialCentres(points, k, init, seed) : []
+    return initialCentres(points, k, init, seed)
   }, [placed, settings, points, k, init, seed])
-  const states = useMemo(() => (points.length ? trace(points, start) : []), [points, start])
+  const states = useMemo(() => trace(points, start), [points, start])
   const at = pos.settings === settings ? Math.min(pos.at, states.length - 1) : 0
   const state = states[at]
 
   const xAxis = useAxis({ label: 'x₁', hold: 'union' })
   const yAxis = useAxis({ label: 'x₂', hold: 'union' })
-  if (!data || !state) return null
+  if (!state) return null
   // Dragging a centroid starts a new run from the edited centroids: points are reassigned and the count restarts,
   // since a hand-placed centroid can raise the inertia and the iterations before it no longer describe this run.
   const handles: Handle[] = state.centroids.map((c, j) => ({

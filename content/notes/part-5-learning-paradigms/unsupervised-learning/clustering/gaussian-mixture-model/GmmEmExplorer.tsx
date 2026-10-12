@@ -244,5 +244,3 @@ export function GmmEmExplorer() {
     </Figure>
   )
 }
-
-export { GmmEmExplorer as EmStepper }

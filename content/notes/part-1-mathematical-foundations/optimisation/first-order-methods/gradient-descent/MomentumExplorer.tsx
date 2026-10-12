@@ -11,30 +11,11 @@ import {
   seriesLayers,
   type SeriesSpec,
   useAxis,
+  useComputed,
   useFigureState,
 } from 'aifn-render'
-import type { LogisticValley } from '@/generated/contracts'
-import { useFigure } from '@/lib/generated'
-import { descend, excess, inGrid, type LossAndGrad, type Vec } from './optim'
-
-/** Mean cross-entropy of P(y = 1) = σ(w·x + b), with its gradient. */
-function crossEntropy(x: number[], y: number[]): LossAndGrad {
-  return ([w, b]) => {
-    let loss = 0
-    let gw = 0
-    let gb = 0
-    for (let i = 0; i < x.length; i++) {
-      const z = w * x[i] + b
-      // log(1 + e^z) − y·z, written to avoid overflow for large |z|.
-      loss += Math.max(z, 0) + Math.log1p(Math.exp(-Math.abs(z))) - y[i] * z
-      const r = 1 / (1 + Math.exp(-z)) - y[i]
-      gw += r * x[i]
-      gb += r
-    }
-    const n = x.length
-    return { loss: loss / n, grad: [gw / n, gb / n] }
-  }
-}
+import { descend, excess, inGrid } from './optim'
+import { logisticSurface, type Vec } from './surfaces'
 
 /** First step at which the excess loss falls below `tol`, or undefined if it never does. */
 function stepsTo(excessLoss: number[], tol: number): number | undefined {
@@ -43,7 +24,8 @@ function stepsTo(excessLoss: number[], tol: number): number | undefined {
 }
 
 export function MomentumExplorer() {
-  const { data, error } = useFigure<LogisticValley>('gradient-descent/logistic-valley')
+  // The data, the loss surface and the optimum are fixed: computed once, on the engine.
+  const { value: surface } = useComputed(() => logisticSurface(), [], { mode: 'release' })
   const state = useFigureState({
     logLr: float(-1, {
       min: -2.5,
@@ -59,18 +41,16 @@ export function MomentumExplorer() {
   })
   const [start, setStart] = useState<Vec>([4, 0])
 
-  const f = useMemo(() => (data ? crossEntropy(data.data.x, (data.data.group ?? []).map(Number)) : undefined), [data])
   const lr = 10 ** state.logLr
-  const runs = useMemo(
-    () =>
-      f
-        ? { plain: descend(f, start, lr, state.steps), heavy: descend(f, start, lr, state.steps, state.beta) }
-        : undefined,
-    [f, start, lr, state.steps, state.beta],
+  const { value: runs } = useComputed(
+    () => ({
+      plain: descend(surface.f, start, lr, state.steps),
+      heavy: descend(surface.f, start, lr, state.steps, state.beta),
+    }),
+    [surface, start, lr, state.steps, state.beta],
   )
 
   const overlay = useMemo((): SeriesSpec[] => {
-    if (!runs || !data) return []
     const line = (name: string, path: Vec[], slot: number): SeriesSpec => ({
       name,
       type: 'line',
@@ -81,14 +61,13 @@ export function MomentumExplorer() {
     return [
       line('plain', runs.plain.path, 1),
       line('momentum', runs.heavy.path, 2),
-      { name: 'minimum', type: 'scatter', x: [data.optimum.x], y: [data.optimum.y], emphasis: true },
+      { name: 'minimum', type: 'scatter', x: [surface.optimum[0]], y: [surface.optimum[1]], emphasis: true },
     ]
-  }, [runs, data])
+  }, [runs, surface])
 
   const curves = useMemo(() => {
-    if (!runs || !data) return undefined
-    const plain = excess(runs.plain.losses, data.optimum_loss)
-    const heavy = excess(runs.heavy.losses, data.optimum_loss)
+    const plain = excess(runs.plain.losses, surface.optimumLoss)
+    const heavy = excess(runs.heavy.losses, surface.optimumLoss)
     return {
       plain,
       heavy,
@@ -103,25 +82,19 @@ export function MomentumExplorer() {
         },
       ],
     }
-  }, [runs, data, state.beta])
+  }, [runs, surface, state.beta])
 
-  const startHandle: Handle[] | undefined = data && [
-    {
-      kind: 'point',
-      at: start,
-      label: 'start',
-      onDrag: ([w, b]) => setStart([inGrid(w, data.surface.x), inGrid(b, data.surface.y)]),
-    },
-  ]
+  const startHandle: Handle = {
+    kind: 'point',
+    at: start,
+    label: 'start',
+    onDrag: ([w, b]) => setStart([inGrid(w, surface.w), inGrid(b, surface.b)]),
+  }
 
-  // Axes before any early return: hooks run in the same order on every render.
   const xAxis = useAxis({ label: 'w' })
   const yAxis = useAxis({ label: 'b' })
   const xAxis2 = useAxis({ label: 'step', hold: 'union' })
   const yAxis2 = useAxis({ label: 'L − L*', hold: 'union', log: true })
-
-  if (error) return <p className="text-sm text-destructive">{error.message}</p>
-  if (!data || !runs || !curves) return null
 
   const fmtSteps = (n: number | undefined) => (n === undefined ? `> ${state.steps}` : String(n))
 
@@ -145,11 +118,9 @@ export function MomentumExplorer() {
     >
       <div className="grid gap-4 md:grid-cols-2">
         <Plot x={xAxis} y={yAxis} height={340}>
-          <Raster x={data.surface.x} y={data.surface.y} z={data.surface.z} valueLabel={'log₁₀ cross-entropy'} />
+          <Raster x={surface.w} y={surface.b} z={surface.z} valueLabel={'log₁₀ cross-entropy'} />
           {seriesLayers(overlay, { live: true })}
-          {(startHandle ?? []).map((h, i) => (
-            <Handle key={i} {...h} />
-          ))}
+          <Handle {...startHandle} />
         </Plot>
         <Plot x={xAxis2} y={yAxis2} height={340}>
           {seriesLayers(curves.series)}

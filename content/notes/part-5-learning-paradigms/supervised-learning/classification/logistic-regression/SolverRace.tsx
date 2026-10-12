@@ -14,125 +14,17 @@ import {
   setting,
   slider,
   useAxis,
+  useComputed,
   useFigureState,
 } from 'aifn-render'
-import type { SolverDatasets } from '@/generated/contracts'
-import { useFigure } from '@/lib/generated'
-import { stream, uniform } from 'aifn-compute/foundation/random'
-import { sigmoid } from 'aifn-compute/numerics/special'
-
-type Vec = [number, number]
-type Problem = { x1: number[]; x2: number[]; y: number[]; lambda: number }
+import { SOLVER_DATASETS as DATASETS, type SolverDatasetName as DatasetName, solverData } from './datasets'
+import { descend, hessianCondition, loss, newtonPath, problemOf, sgd, smoothness, type Vec } from './logistic'
 
 /** Passes over the data. Each is one gradient step, one Newton step, or n / B SGD steps. */
 const PASSES = 20
 const BOX = 6
 /** Floor for the log-scale gap once a solver has converged to machine precision. */
 const FLOOR = 1e-12
-const LIMIT = 1e3
-
-const softplus = (z: number) => Math.max(z, 0) + Math.log1p(Math.exp(-Math.abs(z)))
-
-function loss({ x1, x2, y, lambda }: Problem, [a, b]: Vec): number {
-  let total = 0
-  for (let i = 0; i < y.length; i++) {
-    const z = a * x1[i] + b * x2[i]
-    total += softplus(z) - y[i] * z
-  }
-  return total / y.length + 0.5 * lambda * (a * a + b * b)
-}
-
-/** Gradient over the rows in `rows` (all rows when omitted): Xᵀ(p − y)/|rows| + λw. */
-function gradient({ x1, x2, y, lambda }: Problem, [a, b]: Vec, rows?: number[]): Vec {
-  const idx = rows ?? y.map((_, i) => i)
-  let g1 = 0
-  let g2 = 0
-  for (const i of idx) {
-    const r = sigmoid(a * x1[i] + b * x2[i]) - y[i]
-    g1 += r * x1[i]
-    g2 += r * x2[i]
-  }
-  return [g1 / idx.length + lambda * a, g2 / idx.length + lambda * b]
-}
-
-/** Hessian XᵀSX/n + λI as its three distinct entries [h11, h12, h22]. */
-function hessian({ x1, x2, y, lambda }: Problem, [a, b]: Vec): [number, number, number] {
-  let h11 = 0
-  let h12 = 0
-  let h22 = 0
-  for (let i = 0; i < y.length; i++) {
-    const p = sigmoid(a * x1[i] + b * x2[i])
-    const s = p * (1 - p)
-    h11 += s * x1[i] * x1[i]
-    h12 += s * x1[i] * x2[i]
-    h22 += s * x2[i] * x2[i]
-  }
-  const n = y.length
-  return [h11 / n + lambda, h12 / n, h22 / n + lambda]
-}
-
-const finite = ([a, b]: Vec) => Number.isFinite(a) && Number.isFinite(b) && Math.hypot(a, b) < LIMIT
-
-function gradientDescent(problem: Problem, start: Vec, eta: number): Vec[] {
-  const path: Vec[] = [start]
-  for (let k = 0; k < PASSES; k++) {
-    const w = path[k]
-    const g = gradient(problem, w)
-    const next: Vec = [w[0] - eta * g[0], w[1] - eta * g[1]]
-    if (!finite(next)) break
-    path.push(next)
-  }
-  return path
-}
-
-/** Newton steps −H⁻¹g; with `damped`, halve each step until the loss decreases enough (Armijo). */
-function newton(problem: Problem, start: Vec, damped: boolean, steps = PASSES): Vec[] {
-  const path: Vec[] = [start]
-  for (let k = 0; k < steps; k++) {
-    const w = path[k]
-    const [g1, g2] = gradient(problem, w)
-    const [h11, h12, h22] = hessian(problem, w)
-    const det = h11 * h22 - h12 * h12
-    if (!(det > 0)) break
-    const d: Vec = [-(h22 * g1 - h12 * g2) / det, -(h11 * g2 - h12 * g1) / det]
-    let t = 1
-    if (damped) {
-      const f0 = loss(problem, w)
-      const slope = g1 * d[0] + g2 * d[1]
-      while (loss(problem, [w[0] + t * d[0], w[1] + t * d[1]]) > f0 + 1e-4 * t * slope && t > 1e-10) t /= 2
-    }
-    const next: Vec = [w[0] + t * d[0], w[1] + t * d[1]]
-    if (!finite(next)) break
-    path.push(next)
-  }
-  return path
-}
-
-/** Mini-batch SGD. Returns every step and the index in `steps` where each pass ends. */
-function sgd(problem: Problem, start: Vec, eta: number, batch: number, decay: boolean, seed: number) {
-  const n = problem.y.length
-  const random = stream(seed)
-  const order = problem.y.map((_, i) => i)
-  const steps: Vec[] = [start]
-  const ends = [0]
-  let w = start
-  for (let pass = 0; pass < PASSES; pass++) {
-    for (let i = n - 1; i > 0; i--) {
-      const j = Math.floor(uniform(random) * (i + 1))
-      ;[order[i], order[j]] = [order[j], order[i]]
-    }
-    const rate = decay ? eta / (1 + pass) : eta
-    for (let s = 0; s < n; s += batch) {
-      const g = gradient(problem, w, order.slice(s, s + batch))
-      const next: Vec = [w[0] - rate * g[0], w[1] - rate * g[1]]
-      if (!finite(next)) return { steps, ends }
-      w = next
-      steps.push(w)
-    }
-    ends.push(steps.length - 1)
-  }
-  return { steps, ends }
-}
 
 /** The path up to its first point outside the plotted box, so a diverging run does not stretch the heatmap. */
 function clip(path: Vec[]): { x: number[]; y: number[] } {
@@ -151,9 +43,8 @@ const SGD_RUNS = 10
 const LOSS_RANGE: [number, number] = [0, 3]
 const PASS_RANGE: [number, number] = [0, PASSES]
 const GAP_RANGE: [number, number] = [FLOOR, 10]
+const GROUP_NAMES = ['y = 0', 'y = 1']
 /** Starting weights per dataset, chosen away from the minimum so the paths differ. */
-const DATASETS = ['overlapping', 'correlated', 'noisy labels', 'separable'] as const
-type DatasetName = (typeof DATASETS)[number]
 const STARTS: Record<DatasetName, Vec> = {
   overlapping: [-3, 1],
   correlated: [-4, -2],
@@ -171,11 +62,11 @@ function boundary([a, b]: Vec, r: number): { x: number[]; y: number[] } {
 
 /**
  * Gradient descent, Newton's method and 10 runs of mini-batch SGD on four datasets with two features and the bias
- * fixed at 0. The data and the unpenalised loss surfaces come from python/mlc/figures/logistic_regression.py; the
- * solvers run here. With two parameters and 200 examples, a full recompute per control change is cheap.
+ * fixed at 0. The data and the unpenalised loss surface of the chosen dataset come from `solverData`, the solvers from
+ * `logistic.ts` (engine optimisers on the engine's cross-entropy). Gradient descent and Newton rerun live while the start
+ * is dragged; the ten SGD runs (about 0.1 s at B = 10) rerun on release.
  */
 export function SolverRace() {
-  const { data, error } = useFigure<SolverDatasets>('logistic-regression/solver-datasets')
   const state = useFigureState({
     dataset: choice(DATASETS, 'overlapping', { label: 'dataset' }),
     w1: float(STARTS.overlapping[0], { min: -BOX, max: BOX, step: 0.1, label: 'start w₁' }),
@@ -199,52 +90,46 @@ export function SolverRace() {
     state.set('w2', b)
   }, [name, state])
 
-  const dataset = data?.datasets.find((d) => d.name === name)
-  const problem = useMemo((): Problem | undefined => {
-    if (!dataset) return undefined
-    return { x1: dataset.data.x, x2: dataset.data.y, y: dataset.data.group ?? [], lambda: state.lambda }
-  }, [dataset, state.lambda])
+  const dataset = useComputed(() => solverData(name), [name], { mode: 'release' }).value
+  const problem = useMemo(() => problemOf(dataset.data, state.lambda), [dataset, state.lambda])
   // Without a penalty, separable data has no minimum: the loss falls towards 0 as ‖w‖ grows.
-  const hasMinimum = !!dataset && (!dataset.separable || state.lambda > 0)
+  const hasMinimum = !dataset.separable || state.lambda > 0
 
   const start: Vec = [state.w1, state.w2]
-  const runs = useMemo(() => {
-    if (!problem) return undefined
-    const s: Vec = [state.w1, state.w2]
-    const optimum = hasMinimum ? newton(problem, [0, 0], true, 50).at(-1)! : undefined
-    const best = optimum ? loss(problem, optimum) : 0
-    const gd = gradientDescent(problem, s, state.eta)
-    const nt = newton(problem, s, state.damped)
-    const sg = Array.from({ length: SGD_RUNS }, (_, r) =>
-      sgd(problem, s, state.eta, state.batch, state.decay, 7 + 101 * r),
-    )
-    // L = λmax(XᵀX)/(4n) + λ bounds the curvature everywhere, since p(1 − p) ≤ 1/4.
-    const n = problem.y.length
-    const [a11, a12, a22] = problem.y.reduce(
-      ([p, q, r], _, i) => [p + problem.x1[i] ** 2, q + problem.x1[i] * problem.x2[i], r + problem.x2[i] ** 2],
-      [0, 0, 0],
-    )
-    const lmax = (a11 + a22) / 2 + Math.hypot((a11 - a22) / 2, a12)
-    const smoothness = lmax / (4 * n) + problem.lambda
-    let condition: number | undefined
-    if (optimum) {
-      const [h11, h12, h22] = hessian(problem, optimum)
-      const mid = (h11 + h22) / 2
-      const rad = Math.hypot((h11 - h22) / 2, h12)
-      condition = (mid + rad) / (mid - rad)
+  // The minimum (by damped Newton from the origin), its Hessian's condition number and the smoothness constant
+  // depend on the data and λ only.
+  const reference = useMemo(() => {
+    const optimum = hasMinimum ? newtonPath(problem, [0, 0], true, 50).at(-1)! : undefined
+    return {
+      optimum,
+      best: optimum ? loss(problem, optimum) : 0,
+      condition: optimum ? hessianCondition(problem, optimum) : undefined,
+      // L = λmax(XᵀX)/(4n) + λ bounds the curvature everywhere, since p(1 − p) ≤ 1/4.
+      smoothness: smoothness(problem),
     }
-    return { optimum, best, gd, nt, sg, smoothness, condition }
-  }, [problem, hasMinimum, state.w1, state.w2, state.eta, state.batch, state.decay, state.damped])
+  }, [problem, hasMinimum])
+  const full = useMemo(() => {
+    const s: Vec = [state.w1, state.w2]
+    return { gd: descend(problem, s, state.eta, PASSES), nt: newtonPath(problem, s, state.damped, PASSES) }
+  }, [problem, state.w1, state.w2, state.eta, state.damped])
+  const sg = useComputed(
+    () =>
+      Array.from({ length: SGD_RUNS }, (_, r) =>
+        sgd(problem, [state.w1, state.w2], state.eta, state.batch, state.decay, 7 + 101 * r, PASSES),
+      ),
+    [problem, state.w1, state.w2, state.eta, state.batch, state.decay],
+    { mode: 'release' },
+  ).value
+  const runs = useMemo(() => ({ ...reference, ...full, sg }), [reference, full, sg])
 
   const surface = useMemo(() => {
-    if (!dataset) return undefined
-    const { x, y, z } = dataset.surface
-    return z.map((row, i) => row.map((v, j) => v + 0.5 * state.lambda * (x[j] ** 2 + y[i] ** 2)))
+    const { axis, z } = dataset.surface
+    return z.map((row, i) => row.map((v, j) => v + 0.5 * state.lambda * (axis[j] ** 2 + axis[i] ** 2)))
   }, [dataset, state.lambda])
 
   // Half-width of the data panel: the largest coordinate, rounded up.
   const reach = useMemo(
-    () => (dataset ? Math.ceil(Math.max(...dataset.data.x.map(Math.abs), ...dataset.data.y.map(Math.abs))) : 4),
+    () => Math.ceil(Math.max(...dataset.data.x.map(Math.abs), ...dataset.data.y.map(Math.abs))),
     [dataset],
   )
   const dataRange = useMemo((): [number, number] => [-reach, reach], [reach])
@@ -255,7 +140,6 @@ export function SolverRace() {
     run.steps[run.ends[Math.min(i, run.ends.length - 1)]]
 
   const overlay = useMemo((): SeriesSpec[] => {
-    if (!runs) return []
     const upto = <T,>(xs: T[], n: number) => xs.slice(0, n + 1)
     return [
       { name: 'gradient descent', type: 'line', ...clip(upto(runs.gd, k)), slot: SLOTS.gd, showPoints: true },
@@ -273,7 +157,6 @@ export function SolverRace() {
   }, [runs, k])
 
   const boundaries = useMemo((): SeriesSpec[] => {
-    if (!runs || !dataset) return []
     return [
       {
         name: 'data',
@@ -281,7 +164,7 @@ export function SolverRace() {
         x: dataset.data.x,
         y: dataset.data.y,
         group: dataset.data.group,
-        groupNames: dataset.data.group_names ?? undefined,
+        groupNames: GROUP_NAMES,
       },
       { name: 'gradient descent', type: 'line', ...boundary(at(runs.gd, k), reach), slot: SLOTS.gd },
       { name: 'Newton', type: 'line', ...boundary(at(runs.nt, k), reach), slot: SLOTS.newton },
@@ -298,7 +181,6 @@ export function SolverRace() {
   }, [runs, dataset, k, reach])
 
   const convergence = useMemo((): SeriesSpec[] => {
-    if (!runs || !problem) return []
     const gap = (path: Vec[]) => path.map((w) => Math.max(loss(problem, w) - runs.best, FLOOR))
     const passes = (m: number) => Array.from({ length: m }, (_, i) => i)
     return [
@@ -313,13 +195,10 @@ export function SolverRace() {
 
   const xAxis = useAxis({ label: 'x₁', range: dataRange })
   const yAxis = useAxis({ label: 'x₂', range: dataRange, equal: xAxis })
-  const xAxis2 = useAxis({ label: dataset?.surface.x_label })
-  const yAxis2 = useAxis({ label: dataset?.surface.y_label, equal: xAxis2 })
+  const xAxis2 = useAxis({ label: 'w₁' })
+  const yAxis2 = useAxis({ label: 'w₂', equal: xAxis2 })
   const passAxis = useAxis({ label: 'pass over the data', range: PASS_RANGE, integer: true })
   const gapAxis = useAxis({ label: hasMinimum ? 'loss − minimum' : 'loss (no minimum)', range: GAP_RANGE, log: true })
-
-  if (error) return <p className="text-sm text-destructive">{error.message}</p>
-  if (!data || !dataset || !surface || !runs || !problem) return null
 
   const gapAt = (path: Vec[], i: number) =>
     i < path.length ? formatNumber(loss(problem, path[i]) - runs.best) : 'diverged'
@@ -358,7 +237,13 @@ export function SolverRace() {
           {seriesLayers(boundaries)}
         </Plot>
         <Plot x={xAxis2} y={yAxis2}>
-          <Raster x={dataset.surface.x} y={dataset.surface.y} z={surface} range={LOSS_RANGE} valueLabel={'loss'} />
+          <Raster
+            x={dataset.surface.axis}
+            y={dataset.surface.axis}
+            z={surface}
+            range={LOSS_RANGE}
+            valueLabel={'loss'}
+          />
           {seriesLayers(overlay, { live: true })}
           <Handle
             kind="point"

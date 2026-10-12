@@ -1,29 +1,29 @@
-/** Heavy-ball gradient descent for the widgets in this note. Mirrors python/mlc/examples/gradient_descent/model.py. */
-
-export type Vec = [number, number]
-export type LossAndGrad = (theta: Vec) => { loss: number; grad: Vec }
+/** Gradient descent and heavy-ball momentum runs for the widgets in this note, on the engine's optimisers. */
+import { dense } from 'aifn-compute/foundation/tensor'
+import { trace } from 'aifn-compute/foundation/trace'
+import { gradientDescent, momentum, type ObjectiveFn } from 'aifn-compute/optim'
+import type { Vec } from './surfaces'
 
 export type Trajectory = { path: Vec[]; losses: number[]; diverged: boolean }
 
 /** Loss above which a run stops and is reported as diverged. */
 export const DIVERGED = 1e8
 
-/** v ← βv − η∇L(θ), θ ← θ + v. With β = 0 this is plain gradient descent. */
-export function descend(f: LossAndGrad, start: Vec, lr: number, steps: number, beta = 0): Trajectory {
-  let theta: Vec = [...start]
-  let v: Vec = [0, 0]
-  const path: Vec[] = [theta]
-  const losses: number[] = []
-  for (let t = 0; t < steps; t++) {
-    const { loss, grad } = f(theta)
-    losses.push(loss)
-    if (!Number.isFinite(loss) || loss > DIVERGED) return { path, losses, diverged: true }
-    v = [beta * v[0] - lr * grad[0], beta * v[1] - lr * grad[1]]
-    theta = [theta[0] + v[0], theta[1] + v[1]]
-    path.push(theta)
-  }
-  losses.push(f(theta).loss)
-  return { path, losses, diverged: false }
+/**
+ * `steps` steps from `start` with step size `lr`: plain gradient descent when `beta` is 0, else heavy-ball momentum
+ * (the engine's v ← βv + ∇L, θ ← θ − ηv, which is the note's v ← βv − η∇L, θ ← θ + v with v rescaled by −η).
+ * The gradient-norm test is off (`tolerance: 0`), so every run takes its full budget unless it diverges.
+ */
+export function descend(f: ObjectiveFn, start: Vec, lr: number, steps: number, beta = 0): Trajectory {
+  const options = { stepSize: lr, tolerance: 0, divergeAbove: DIVERGED }
+  const alg = beta === 0 ? gradientDescent(f, options) : momentum(f, { ...options, momentum: beta })
+  const run = trace(alg, { x0: start }, steps, {
+    record: { x: (s) => s.x, value: (s) => s.value },
+    timing: false,
+  })
+  const xs = dense.data(run.series.x)
+  const path = Array.from(run.index, (_, i): Vec => [xs[2 * i], xs[2 * i + 1]])
+  return { path, losses: Array.from(dense.data(run.series.value)), diverged: run.meta.stopped === 'diverged' }
 }
 
 /** L − L*, floored so that a log axis stays finite once a run has converged. */

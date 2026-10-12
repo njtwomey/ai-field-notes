@@ -10,10 +10,12 @@ import {
   Raster,
   Readout,
   useAxis,
+  useComputed,
   useFigureState,
 } from 'aifn-render'
-import type { ImageSvd } from '@/generated/contracts'
-import { useFigure } from '@/lib/generated'
+import { tensor, toFlat, toRows } from 'aifn-compute/foundation/tensor'
+import { svd } from 'aifn-compute/numerics/linalg'
+import { testImage } from './testImage'
 
 const PANEL = 300
 const SPECTRUM = 220
@@ -24,14 +26,21 @@ function FixedHeight({ height, children }: { height: number; children: ReactNode
   return <FrameContext.Provider value={{ ...frame, height }}>{children}</FrameContext.Provider>
 }
 
-/** Rank-k reconstructions of a test image from its SVD, precomputed by python/mlc/figures/svd.py. */
+/** The 64 × 64 test image and its thin SVD from the engine: U (columns), the singular values S, and V (columns). */
+function imageSvd() {
+  const image = testImage(64)
+  const { U, S, V } = svd(tensor(image))
+  return { image, u: toRows(U), s: toFlat(S), v: toRows(V) }
+}
+
+/** Rank-k reconstructions of a test image from its SVD. */
 export function LowRankImage() {
-  const { data, error } = useFigure<ImageSvd>('singular-value-decomposition/image')
+  const data = useComputed(imageSvd, [], { mode: 'release' }).value
   // The test image is 64 × 64, so its rank is at most 64.
   const state = useFigureState({
     k: int(4, { ge: 1, le: 64, suggestions: [1, 4, 16, 64], label: 'rank k' }),
   })
-  const size = data?.s.length ?? 64
+  const size = data.s.length
   const k = Math.min(state.k, size)
   // Square images: equal pixel length per unit on both axes.
   const xAxis = useAxis({ range: [-0.5, size - 0.5] })
@@ -42,13 +51,11 @@ export function LowRankImage() {
   const yAxis3 = useAxis({ label: 'σᵢ', log: true, range: [0.01, 100] })
 
   const r = useMemo(() => {
-    if (!data) return undefined
-    const size = data.s.length
     // A_k = Σ_{i<k} σᵢ uᵢ vᵢᵀ; rows are reversed so the first image row is drawn at the top.
     const approx = Array.from({ length: size }, (_, row) =>
       Array.from({ length: size }, (_, col) => {
         let v = 0
-        for (let i = 0; i < k; i++) v += data.s[i] * data.u[row][i] * data.vt[i][col]
+        for (let i = 0; i < k; i++) v += data.s[i] * data.u[row][i] * data.v[col][i]
         return v
       }),
     ).reverse()
@@ -75,10 +82,8 @@ export function LowRankImage() {
       rank,
       spectrum,
     }
-  }, [data, k])
+  }, [data, k, size])
 
-  if (error) return <p className="text-sm text-destructive">{error.message}</p>
-  if (!r) return null
   // The cut sits between bar k (kept) and bar k + 1 (discarded); dragging it picks the nearest such gap.
   return (
     <Figure
